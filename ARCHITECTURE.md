@@ -46,11 +46,12 @@ ReShade profile selection opens an optional non-modal gallery and immediately
 leaves the terminal at the authoritative numbered chooser. The terminal
 chooser remains usable when WinForms is behind another window, closed,
 unavailable, or fails to open. Numbered selection updates the gallery when it
-is available; `U` is the only path toward deployment, while `B` and invalid
-input remain non-mutating. The gallery changes the displayed deterministic,
-TPM-owned comparison approximation when the user changes profile, but does not
-run the game or execute ReShade shaders and does not deploy files. Actual
-in-game results may vary.
+is available; the gallery has no profile-selection control and only follows
+the terminal's selected profile. `U` is the only path toward deployment, while
+`B` and invalid input remain non-mutating. The gallery changes the displayed
+deterministic, TPM-owned comparison approximation when the terminal selection
+changes, but does not run the game or execute ReShade shaders and does not
+deploy files. Actual in-game results may vary.
 The reference is the bundled `PreviewAssets\ReShadePreviews\TPM-preview-landscape.png`
 asset, validated by System.Drawing decoding, fixed dimensions, identity
 `TPM-LANDSCAPE-V1`, version `3`, and SHA-256
@@ -63,15 +64,15 @@ Deployment remains behind the existing explicit confirmation. The reference
 identity, renderer version, and effect hashes are part of the cache key so
 stale artifacts regenerate.
 The gallery keeps a stable internal `SelectedProfileId` separate from the
-`ViewMode` (`Before`, `After`, `Split`, or `Slider`). ComboBox entries are
-display-only objects carrying a validated profile ID; event handlers never
-infer view state from a selected item or read an optional `Mode` property.
-Initialization keeps preview events disabled until controls and state are
-complete. Every gallery event is closure-bound, guarded, and fail-closed:
-renderer or state errors are logged with their stage, the optional gallery is
-closed, and the terminal-only chooser remains authoritative. Gallery events,
-preview refresh, and all comparison controls are visual-only; deployment is
-still unreachable until terminal `U` plus the existing explicit confirmation.
+`ViewMode` (`Before`, `After`, `Split`, or `Slider`). Profile IDs and canonical
+technique names come from validated profile definitions; the preview surface
+does not expose raw objects, cache paths, or a second chooser. Initialization
+keeps preview events disabled until controls and state are complete. Every
+gallery event is closure-bound, guarded, and fail-closed: renderer or state
+errors are logged with their stage, the optional gallery is closed, and the
+terminal-only chooser remains authoritative. Gallery events, preview refresh,
+and all comparison controls are visual-only; deployment is still unreachable
+until terminal `U` plus the existing explicit confirmation.
 
 **Shared game mutation path boundary (RC8).** ReShade, dgVoodoo2, GPU-fix,
 and BepInEx call `Test-TpmGameMutationPath` before inspection and immediately
@@ -325,7 +326,6 @@ Before deployment, the selected set is summarized by read-only preflight buckets
 ready, protected, missing executable, and unsafe or malformed. Protected installs
 remain unchanged unless the operator explicitly selects `Adopt` and confirms the
 ownership change; successful adoptions are counted separately in the result.
-
 **Protected ownership and all-games accounting (TPM-RESHADE-001).** ReShade
 files without verified TPM ownership remain unchanged by default. The explicit
 `Adopt` action passes `AllowUserOwnedOverwrite` only after the user-facing
@@ -335,8 +335,14 @@ rollback make backup failure a hard stop, and ownership metadata is committed
 only after successful promotion. Apply preflight reports ready, protected,
 missing, unsafe, and failed/preflight-blocked buckets. The final apply result
 uses `Get-TpmReShadeApplyAccounting` to expose non-overlapping terminal
-outcomes whose total must equal the selected-game count; a failed invariant
-stops the result rather than presenting an incomplete summary.
+outcomes whose total must equal the selected-game count; unsafe paths,
+malformed profiles, malformed ownership metadata, and mutation-boundary
+changes are included in the unsafe bucket with details and a direct
+repair/review-then-rerun action. A failed invariant stops the result rather
+than presenting an incomplete summary. ReShade setup also reads native
+TeknoParrot CRT, SSAA, shader, scanline, and post-process settings without
+writing them; when enabled settings are detected, the result warns that the
+selected ReShade effect may stack with them.
 
 Before replacing any target file, deployment requires a matching TPM-managed ownership entry. Existing files without that ownership evidence return `COLLISION` / `USER_OWNED_CONTENT_PRESERVED` and remain byte-for-byte untouched. Previous TPM-managed files not part of the new profile are retained rather than deleted, so switching to `Original` or a smaller effect set is non-destructive and may require manual review of old files.
 

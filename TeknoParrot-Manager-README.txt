@@ -289,23 +289,20 @@
       [3] Classic Arcade CRT
       [4] Vivid Arcade
       [5] Enhanced Arcade
-    Choose: [1-5] Preview profile  [U] Use selected profile  [R] Reopen preview
+    Choose: [1-5] Select profile  [U] Use selected profile  [R] Reopen preview
             [B] Back  [D] Details
+    The terminal is the only profile selector. Numbered selection updates the
+    optional preview; the gallery has no second profile-selection control.
     The terminal remains usable if the gallery is behind another window,
-    closed, unavailable, or fails. Numbered selection updates the gallery when
-    available. U is the only path toward deployment; B cancels without
-    changes and D returns after showing details. The gallery is a safe
-    approximation based on the bundled TPM-owned landscape reference image
-    from PreviewAssets\ReShadePreviews\TPM-preview-landscape.png. It does not
-    run the game or execute ReShade shaders. TPM validates and hashes this
-    image before rendering. Before is the untouched baseline, After is a TPM
-    approximation of the selected profile, Split places baseline left and the
-    approximation right, and the slider moves that boundary from all processed
-    to all baseline. Actual in-game results may vary. The terminal remains
-    authoritative if the preview cannot open. Multi-monitor suitability is
-    read-only and advisory, uses caller-supplied evidence, treats duplicate
-    target IDs as ambiguous, and does not separately label EXTENDED
-    arrangements or acquire Windows display topology itself.
+    closed, unavailable, or fails. U is the only path toward deployment; B
+    cancels without changes and D returns after showing details. The gallery
+    is a safe approximation based on the bundled TPM-owned landscape reference
+    image from PreviewAssets\ReShadePreviews\TPM-preview-landscape.png. It
+    does not run the game or execute ReShade shaders. Before is the untouched
+    baseline, After is a TPM approximation of the selected profile, Split
+    places baseline left and the approximation right, and the slider moves
+    that boundary from all processed to all baseline. Actual in-game results
+    may vary.
 
     DLL, generated preset, and approved effect files are staged and promoted
     together. Before replacing a destination, TPM requires a matching
@@ -313,9 +310,18 @@
     files cause a collision and remain untouched. Earlier TPM-managed files
     are retained when changing profiles rather than being silently deleted.
     Before deployment TPM reports ready, protected, missing-executable, and
-    unsafe/malformed preflight counts. Protected existing files stay unchanged
-    unless you explicitly choose Adopt and confirm; adopted installations are
-    counted separately from ordinary installs.
+    unsafe/malformed preflight counts. The final result states changed and
+    unchanged games, includes direct details for unsafe or malformed paths
+    and ownership metadata, and tells you to repair or review the listed issue
+    before rerunning ReShade setup with Select. Protected existing files stay
+    unchanged unless you explicitly choose Adopt and confirm; adopted
+    installations are counted separately from ordinary installs. Native
+    TeknoParrot CRT, SSAA, shader, scanline, and post-process settings are
+    read but preserved; enabled settings trigger a warning about possible
+    display-effect stacking. Onboarding pauses for review before dgVoodoo2.
+    Multi-monitor suitability is read-only and advisory, uses caller-supplied
+    evidence, treats duplicate target IDs as ambiguous, and does not separately
+    label EXTENDED arrangements or acquire Windows display topology itself.
 
 
   - dgVoodoo2 legacy compatibility. Fixes older arcade games that crash or

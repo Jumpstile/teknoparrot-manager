@@ -114,14 +114,20 @@ user can search another game folder. [C] returns to AutoSync with an explicit
 whitelist of broken profile codes, so recovery cannot broaden into an
 all-games extraction. Manual repair requires an explicit executable selection
 and never guesses. Unattended Health Check stops after the report.
+Health Check re-copy is scoped by DAT profile code, including supplementary
+sources, and no-candidate repair offers the configured-source re-copy action
+with saved-path evidence.
 All destructive profile workflows now stop before mutation if a profile backup
 folder cannot be created or any profile copy fails; interactive and unattended
 runs have no incomplete-backup override.
-ReShade setup now synchronizes gallery choices back into the terminal chooser,
-preflights selected games by ready/protected/missing/unsafe bucket, and reports
-explicit protected-install adoption separately. Health Check re-copy is scoped by
-DAT profile code, including supplementary sources, and no-candidate repair offers
-the configured-source re-copy action with saved-path evidence.
+ReShade setup now makes the numbered terminal chooser the sole profile
+authority; the optional gallery follows that state and has no ignored profile
+selector. Result output states what changed and did not change, reconciles
+unsafe and malformed paths/ownership metadata into final all-games accounting,
+and gives direct repair/review-then-rerun actions. Native TeknoParrot CRT,
+SSAA, shader, scanline, and post-process settings are preserved and reported
+when they may stack with the selected ReShade effect. Onboarding pauses for
+result review before continuing to dgVoodoo2.
 Thumbnail downloads now use one compact progress row, identify exact online-pack
 misses without calling them unsupported, and suppress PowerShell web progress
 overlays. The support manifest explains how to refresh stale Action Required data.

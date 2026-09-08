@@ -334,6 +334,8 @@
     Choose how your game should look.
     The optional preview window is non-modal; the terminal chooser remains
     active even if the window is behind, closed, unavailable, or fails.
+    The terminal is the only profile selector. The gallery follows its
+    numbered selection and has no second profile-selection control.
     Nothing will be changed until you choose U and then confirm.
   The terminal always shows:
     [1] Original
@@ -341,19 +343,24 @@
     [3] Classic Arcade CRT
     [4] Vivid Arcade
     [5] Enhanced Arcade
-    Choose: [1-5] Preview profile  [U] Use selected profile  [R] Reopen preview
+    Choose: [1-5] Select profile  [U] Use selected profile  [R] Reopen preview
             [B] Back  [D] Details
-  Numbered selection updates the optional preview. U is the only path toward
-  deployment; B cancels without changes and D returns after showing details.
-  A terminal-only selection remains available when the preview cannot open.
+  U is the only path toward deployment; B cancels without changes and D
+  returns after showing details. A terminal-only selection remains available
+  when the preview cannot open.
     The optional gallery uses a safe approximation based on the bundled and
     validated PreviewAssets\ReShadePreviews\TPM-preview-landscape.png
     reference image. It does not run the game or execute ReShade shaders.
     Before is the untouched baseline, After is a TPM approximation of the
     selected profile, and Split/slider compare that approximation with the
     baseline. Actual in-game results may vary. Its identity and hash are
-    recorded in the preview cache. No profile selection changes files until U
-    and the existing confirmation.
+    recorded in the preview cache.
+  The result states what changed and what did not change. Unsafe or malformed
+  paths and ownership metadata are listed with the direct next action to
+  repair or review the issue, then rerun ReShade setup with Select. Native
+  TeknoParrot CRT, SSAA, shader, scanline, and post-process settings are
+  preserved; enabled settings trigger a stacking warning. Onboarding pauses
+  before continuing to dgVoodoo2.
 
 
   If you downloaded TeknoParrot Manager as a ZIP release, the ReShade DLLs

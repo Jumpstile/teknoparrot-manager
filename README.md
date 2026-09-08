@@ -504,11 +504,14 @@ closed, unavailable, or fails to open:
 [5] Enhanced Arcade
 
 Current selection: none -- choose 1-5 first
-Choose: [1-5] Preview profile  [U] Use selected profile  [R] Reopen preview  [B] Back  [D] Details
+Choose: [1-5] Select profile  [U] Use selected profile  [R] Reopen preview  [B] Back  [D] Details
 ```
 
-The chooser and the gallery show the friendly description first, followed by
-the approved shader filename and technique name:
+The terminal chooser is the only profile selector. Numbered selection changes
+the selected profile and the optional gallery follows that state; the gallery
+has no second profile-selection control. The chooser and gallery show the
+friendly description first, followed by the approved shader filename and
+technique name:
 
 ```text
 [1] Original
@@ -534,9 +537,8 @@ internal cache paths or implying that live-fetched runtime files are bundled.
 
 `U` is the only path toward deployment. `B` cancels without changes, `D`
 shows descriptions, and `R` reopens the optional gallery without taking
-terminal input away from the user.
-
-The gallery uses a safe deterministic comparison based on the bundled
+terminal input away from the user. The gallery uses a safe deterministic
+comparison based on the bundled
 `PreviewAssets\ReShadePreviews\TPM-preview-landscape.png` reference image.
 It does not run the game or execute ReShade shaders. TPM validates the image
 before use and records its identity, version, and SHA-256 in preview cache
@@ -548,14 +550,23 @@ Choosing a profile does not write files; deployment remains behind the
 explicit confirmation. If rendering or display is unavailable, typed
 selection remains available.
 
-After deployment, the result separates newly installed, updated, protected
-unchanged, missing saved paths, unsupported architecture, and errors. Missing
-saved paths include the game name; use the main-menu path-repair tool and run
-ReShade setup again.
+After deployment, the result states what changed and what did not change. It
+separates newly installed or updated TPM-managed files, adopted replacements,
+protected unchanged files, missing saved paths, unsafe or malformed paths or
+ownership metadata, unsupported architecture, and errors. Unsafe or malformed
+games include direct details and the next action: repair or review the listed
+issue, then rerun ReShade setup with `Select`. Missing saved paths include the
+game name; use the main-menu path-repair tool and run ReShade setup again.
 Before deployment, TPM reports ready, protected, missing-executable, and
 unsafe/malformed preflight counts. Protected existing files remain unchanged
 unless you explicitly choose `Adopt` and confirm; adopted installations are
 counted separately from ordinary installs.
+
+TPM reads native TeknoParrot CRT, SSAA, shader, scanline, and post-process
+settings without changing them. If enabled settings are detected, the result
+warns that the selected ReShade effect may stack with the native display
+effect. The result pauses before the optional dgVoodoo2 step so these outcomes
+can be reviewed.
 Profile and effect catalog metadata is advisory until measured evidence exists. No profile is marked recommended or `VALIDATED_SINGLE` without that evidence; pinned hashes establish catalog integrity, not performance validation. Multi-monitor suitability is read-only and advisory, uses caller-supplied evidence, treats duplicate target IDs as ambiguous, and does not separately label `EXTENDED` arrangements or acquire Windows display topology itself.
 
 **Remembered profiles, favorites, and restore:** TPM stores per-game profile

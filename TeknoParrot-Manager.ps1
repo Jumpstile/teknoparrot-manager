@@ -4714,6 +4714,26 @@ function Get-TpmReShadeProfileTechniqueDisplay {
     if ($rows.Count -eq 0) { return '(none; no ReShade techniques)' }
     return ($rows -join '; ')
 }
+function Get-TpmReShadeNativeShaderWarnings {
+    param([Parameter(Mandatory)][System.Xml.XmlDocument]$Document)
+    $detected = New-Object System.Collections.Generic.List[object]
+    foreach ($field in @($Document.SelectNodes('/GameProfile/ConfigValues/FieldInformation'))) {
+        $name = (([string]$field.CategoryName).Trim() + ' / ' + ([string]$field.FieldName).Trim()).Trim(' ', '/')
+        $valueNode = $field.SelectSingleNode('FieldValue')
+        $value = if ($valueNode) { ([string]$valueNode.InnerText).Trim() } else { '' }
+        if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($value)) { continue }
+        if ($name -notmatch '(?i)(?:\bCRT\b|SSAA|shader|scanline|post[\s-]*process|anti[\s-]*alias)') { continue }
+        if ($value -match '^(?i:0|false|off|none|disabled|no)$') { continue }
+        [void]$detected.Add([pscustomobject]@{ Field = $name; Value = $value })
+    }
+    return [pscustomobject]@{
+        Detected = ($detected.Count -gt 0)
+        Fields = @($detected.ToArray())
+        Warning = if ($detected.Count -gt 0) {
+            'TeknoParrot-native CRT/SSAA/shader settings were detected. TPM preserves them; applying a ReShade profile may stack another display effect.'
+        } else { $null }
+    }
+}
 
 
 function Get-TpmReShadeProfile {
@@ -5559,9 +5579,7 @@ function Invoke-TpmReShadeGalleryRefreshSafe {
 
 function New-TpmReShadeGalleryEventHandlers {
     param(
-        [Parameter(Mandatory)]$State,
-        [Parameter(Mandatory)]$Combo,
-        [object]$Form
+        [Parameter(Mandatory)]$State
     )
     $refreshSafe = ${function:Invoke-TpmReShadeGalleryRefreshSafe}
     $previewFailure = ${function:Set-TpmReShadeGalleryPreviewFailed}
@@ -5590,8 +5608,6 @@ function New-TpmReShadeGalleryEventHandlers {
             if (-not $valueProperty) { throw 'Gallery slider event sender has no Value property.' }
             $State['ViewMode'] = 'Slider'
             $position = [Math]::Max(0, [Math]::Min(100, [int]$valueProperty.Value))
-            # Update the paint state synchronously. A timer-deferred update can
-            # miss the WinForms message-pump repaint in packaged PowerShell.
             $State['SliderPosition'] = $position
             $State['PendingSliderPosition'] = $null
             if ($State['Picture']) { $State['Picture'].Invalidate() }
@@ -5615,36 +5631,6 @@ function New-TpmReShadeGalleryEventHandlers {
             [void](& $previewFailure -State $State -Stage 'slider-keyboard-handler' -ErrorRecord $_)
         }
     }.GetNewClosure()
-    $comboHandler = {
-        param($senderArg, $eventArgsArg)
-        try {
-            if (-not [bool]$State['Initialized'] -or -not [bool]$State['PreviewEnabled'] -or [bool]$State['Closed']) { return }
-            $profileId = Get-TpmReShadeGalleryProfileId -Item $Combo.SelectedItem
-            if ([string]::IsNullOrWhiteSpace($profileId)) { throw 'Gallery dropdown item has no stable ProfileId.' }
-            $State['SelectedProfileId'] = $profileId
-            [void](& $refreshSafe -State $State -Refresh $State['Refresh'] -Stage 'profile-selection')
-        } catch {
-            [void](& $previewFailure -State $State -Stage 'profile-selection-handler' -ErrorRecord $_)
-        }
-    }.GetNewClosure()
-    $chooseHandler = {
-        param($senderArg, $eventArgsArg)
-        try {
-            if (-not [bool]$State['Initialized'] -or [string]::IsNullOrWhiteSpace([string]$State['SelectedProfileId'])) { return }
-            $Form.Close()
-        } catch {
-            [void](& $previewFailure -State $State -Stage 'choose-handler' -ErrorRecord $_)
-        }
-    }.GetNewClosure()
-    $cancelHandler = {
-        param($senderArg, $eventArgsArg)
-        try {
-            $State['SelectedProfileId'] = $null
-            $Form.Close()
-        } catch {
-            [void](& $previewFailure -State $State -Stage 'cancel-handler' -ErrorRecord $_)
-        }
-    }.GetNewClosure()
     $formClosedHandler = {
         param($senderArg, $eventArgsArg)
         try { $State['Closed'] = $true } catch {}
@@ -5652,9 +5638,6 @@ function New-TpmReShadeGalleryEventHandlers {
     return [pscustomobject]@{
         View = $viewHandler
         Slider = $sliderHandler
-        Combo = $comboHandler
-        Choose = $chooseHandler
-        Cancel = $cancelHandler
         KeyUp = $sliderKeyUpHandler
         Closed = $formClosedHandler
     }
@@ -5668,7 +5651,6 @@ function Show-TpmReShadeProfileGalleryWindow {
         Add-Type -AssemblyName System.Drawing -ErrorAction Stop
         $knownProfiles = @(Get-TpmReShadeProfiles)
         $canonicalProfiles = @()
-        $displayItems = @()
         $seenProfileIds = @{}
         foreach ($candidate in @($Profiles)) {
             $candidateId = Get-TpmReShadeGalleryProfileId -Item $candidate
@@ -5677,33 +5659,23 @@ function Show-TpmReShadeProfileGalleryWindow {
             if (-not $canonicalProfile) { continue }
             $seenProfileIds[$candidateId] = $true
             $canonicalProfiles += $canonicalProfile
-            $displayItems += [pscustomobject]@{
-                ProfileId = [string]$canonicalProfile.ProfileId
-                FriendlyName = [string]$canonicalProfile.FriendlyName
-                Description = [string]$canonicalProfile.Description
-            }
         }
-        if ($displayItems.Count -eq 0) {
+        if ($canonicalProfiles.Count -eq 0) {
             Write-Log 'ReShade gallery preview failed at stage ''profile-normalization'': no valid ProfileId items.'
             return [pscustomobject]@{ Available=$false; SelectedProfile=$null; Closed=$true; Reason='PREVIEW_GALLERY_INVALID_PROFILES' }
         }
         $previewCache = New-TpmReShadePreviewRenderCache -Width 960 -Height 540
         $form = New-Object Windows.Forms.Form
-        $form.Text = 'TeknoParrot ReShade Profile Gallery'
+        $form.Text = 'TeknoParrot ReShade Profile Preview'
         $form.Width = 1040
         $form.Height = 760
-        $combo = New-Object Windows.Forms.ComboBox
-        $combo.Dock = 'Top'
-        $combo.DropDownStyle = 'DropDownList'
-        $combo.DisplayMember = 'FriendlyName'
-        foreach ($displayItem in @($displayItems)) { [void]$combo.Items.Add($displayItem) }
         $instructionLabel = New-Object Windows.Forms.Label
         $instructionLabel.Dock = 'Top'
         $instructionLabel.AutoSize = $false
-        $instructionLabel.Height = 52
+        $instructionLabel.Height = 58
         $instructionLabel.Padding = New-Object Windows.Forms.Padding(6, 4, 6, 4)
         $instructionLabel.TextAlign = 'TopLeft'
-        $instructionLabel.Text = "Choose a ReShade look`r`nStep 1: Pick a look in this preview window. Step 2: Return to TeknoParrot Manager and press U to use it."
+        $instructionLabel.Text = "ReShade preview only`r`nThe terminal chooser is authoritative. Select 1-5 in TeknoParrot Manager; this preview follows that selection. Close this window when finished."
         $instructionLabel.ForeColor = [System.Drawing.Color]::DarkBlue
         $instructionLabel.BackColor = [System.Drawing.Color]::AliceBlue
         $instructionLabel.BorderStyle = 'FixedSingle'
@@ -5718,21 +5690,13 @@ function Show-TpmReShadeProfileGalleryWindow {
         $descriptionLabel.TextAlign = 'TopLeft'
         $descriptionLabel.AutoEllipsis = $true
         $descriptionLabel.Text = ''
-        $choose = New-Object Windows.Forms.Button
-        $choose.Text = 'Use selected profile'
-        $choose.Dock = 'Bottom'
-        $choose.Height = 42
-        $cancel = New-Object Windows.Forms.Button
-        $cancel.Text = 'Cancel'
-        $cancel.Dock = 'Bottom'
-        $cancel.Height = 32
         $state = [hashtable]::Synchronized(@{
             SelectedProfileId = $null
             ViewMode = 'Split'
             SliderPosition = 50
             PendingSliderPosition = $null
             Profiles = @($canonicalProfiles)
-            ProfileIds = @($displayItems | ForEach-Object ProfileId)
+            ProfileIds = @($canonicalProfiles | ForEach-Object ProfileId)
             Profile = $null
             Closed = $false
             Initialized = $false
@@ -5743,7 +5707,6 @@ function Show-TpmReShadeProfileGalleryWindow {
             PaintHandler = $null
             Refresh = $null
             Form = $form
-            Combo = $combo
             Picture = $picture
             DescriptionLabel = $descriptionLabel
             Slider = $null
@@ -5756,11 +5719,10 @@ function Show-TpmReShadeProfileGalleryWindow {
             $image = $null
             try {
                 if (-not [bool]$state['Initialized'] -or -not [bool]$state['PreviewEnabled'] -or [bool]$state['Closed']) { return $false }
-                $selectedItem = $combo.SelectedItem
-                $profileId = Get-TpmReShadeGalleryProfileId -Item $selectedItem
-                if ([string]::IsNullOrWhiteSpace($profileId)) { throw 'Selected gallery item has no stable ProfileId.' }
+                $profileId = [string]$state['SelectedProfileId']
+                if ([string]::IsNullOrWhiteSpace($profileId)) { throw 'Terminal chooser has no selected ProfileId.' }
                 $canonicalProfile = @($state['Profiles'] | Where-Object { $_.ProfileId -eq $profileId })[0]
-                if (-not $canonicalProfile) { throw ("Selected gallery ProfileId '{0}' is not available." -f $profileId) }
+                if (-not $canonicalProfile) { throw ("Terminal-selected ProfileId '{0}' is not available." -f $profileId) }
                 $descriptionLabel.Text = "Preview approximation using a bundled image. TPM does not run the game or execute ReShade shaders during preview. Actual in-game results may vary.`r`n{0}`r`nTechniques TPM will install/apply: {1}" -f $canonicalProfile.Description, (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $canonicalProfile)
                 $viewMode = [string]$state['ViewMode']
                 if ($viewMode -notin @('Before', 'After', 'Split', 'Slider')) { throw ("Unsupported gallery view mode '{0}'." -f $viewMode) }
@@ -5772,7 +5734,6 @@ function Show-TpmReShadeProfileGalleryWindow {
                     $picture.Image = $null
                     if ($oldImage) { $oldImage.Dispose() }
                     $picture.Invalidate()
-                    $state['SelectedProfileId'] = $profileId
                     return $true
                 }
                 $image = New-TpmReShadePreviewBitmapFromCache -Cache $state['PreviewCache'] -ProfileDefinition $canonicalProfile -Mode $viewMode -SliderPosition $sliderPosition
@@ -5781,7 +5742,6 @@ function Show-TpmReShadeProfileGalleryWindow {
                 $picture.Image = $image
                 $image = $null
                 if ($oldImage) { $oldImage.Dispose() }
-                $state['SelectedProfileId'] = $profileId
                 return $true
             } catch {
                 if ($image) { try { $image.Dispose() } catch {} }
@@ -5789,20 +5749,14 @@ function Show-TpmReShadeProfileGalleryWindow {
             }
         }.GetNewClosure()
         $state['Refresh'] = $refresh
-        $handlers = New-TpmReShadeGalleryEventHandlers -State $state -Combo $combo -Form $form
+        $handlers = New-TpmReShadeGalleryEventHandlers -State $state
         $viewHandler = $handlers.View
         $sliderHandler = $handlers.Slider
         $sliderKeyUpHandler = $handlers.KeyUp
-        $comboHandler = $handlers.Combo
-        $chooseHandler = $handlers.Choose
-        $cancelHandler = $handlers.Cancel
         $formClosedHandler = $handlers.Closed
         $state['ViewHandler'] = $viewHandler
         $state['SliderHandler'] = $sliderHandler
         $state['SliderKeyUpHandler'] = $sliderKeyUpHandler
-        $state['ComboHandler'] = $comboHandler
-        $state['ChooseHandler'] = $chooseHandler
-        $state['CancelHandler'] = $cancelHandler
         $state['FormClosedHandler'] = $formClosedHandler
         $toolbar = New-Object Windows.Forms.FlowLayoutPanel
         $toolbar.Dock = 'Top'
@@ -5816,29 +5770,15 @@ function Show-TpmReShadeProfileGalleryWindow {
             [void]$toolbar.Controls.Add($viewButton)
         }
         $state['ViewButtons'] = @($toolbar.Controls | Where-Object { $_ -is [Windows.Forms.Button] })
-        $combo.Add_SelectedIndexChanged($comboHandler)
-        $choose.Add_Click($chooseHandler)
-        $cancel.Add_Click($cancelHandler)
         $form.Add_FormClosed($formClosedHandler)
         $form.Controls.Add($picture)
-        $form.Controls.Add($cancel)
-        $form.Controls.Add($choose)
         $form.Controls.Add($toolbar)
-        $form.Controls.Add($combo)
         $form.Controls.Add($descriptionLabel)
         $form.Controls.Add($instructionLabel)
-        $defaultIndex = -1
-        for ($i = 0; $i -lt $combo.Items.Count; $i++) {
-            if ([string]$combo.Items[$i].ProfileId -eq $DefaultProfileId) { $defaultIndex = $i; break }
-        }
-        if ($defaultIndex -lt 0) {
-            $defaultIndex = 0
-            for ($i = 0; $i -lt $combo.Items.Count; $i++) {
-                if ([string]$combo.Items[$i].ProfileId -eq 'Original') { $defaultIndex = $i; break }
-            }
-        }
-        $combo.SelectedIndex = $defaultIndex
-        $state['SelectedProfileId'] = [string]$combo.Items[$defaultIndex].ProfileId
+        $defaultProfile = @($canonicalProfiles | Where-Object { [string]$_.ProfileId -eq $DefaultProfileId })[0]
+        if (-not $defaultProfile) { $defaultProfile = @($canonicalProfiles | Where-Object { [string]$_.ProfileId -eq 'Original' })[0] }
+        if (-not $defaultProfile) { $defaultProfile = $canonicalProfiles[0] }
+        $state['SelectedProfileId'] = [string]$defaultProfile.ProfileId
         $state['Initialized'] = $true
         if (-not (Invoke-TpmReShadeGalleryRefreshSafe -State $state -Refresh $refresh -Stage 'initial-preview')) {
             Close-TpmReShadeProfileGallerySession -Session $state
@@ -6083,6 +6023,7 @@ function Test-TpmReShadeDeploymentVerified {
 function Get-TpmReShadeResultActionModel {
     param([Parameter(Mandatory)]$Result)
     $protected = [int]$Result.Protected -gt 0
+    $unsafe = $Result.PSObject.Properties['Unsafe'] -and [int]$Result.Unsafe -gt 0
     $missing = ([int]$Result.MissingPath -gt 0 -or [int]$Result.MissingDevice -gt 0)
     if ($protected) {
         $actions = New-Object System.Collections.Generic.List[string]
@@ -6090,6 +6031,9 @@ function Get-TpmReShadeResultActionModel {
         if ($missing) { [void]$actions.Add('M') }
         [void]$actions.Add('D'); [void]$actions.Add('B')
         return [pscustomobject]@{ Primary = 'ReShade'; Actions = $actions.ToArray(); ActionModes = @{ A = 'Adopt'; S = 'Select' } }
+    }
+    if ($unsafe) {
+        return [pscustomobject]@{ Primary = 'Unsafe'; Actions = @('S','D','B'); ActionModes = @{ S = 'Select' } }
     }
     if ($missing) {
         return [pscustomobject]@{ Primary = 'HealthCheck'; Actions = @('M','D','B'); ActionModes = @{ M = 'HealthCheck' } }
@@ -7180,21 +7124,12 @@ function Sync-TpmReShadeGallerySelection {
     )
     if (-not $Session) { return $false }
     try {
-        $state = $Session
-        if (-not [bool]$state['Initialized'] -or [bool]$state['Closed'] -or -not [bool]$state['PreviewEnabled']) { return $false }
-        $combo = $state['Combo']
-        if (-not $combo) { return $false }
-        $targetIndex = -1
-        for ($i = 0; $i -lt $combo.Items.Count; $i++) {
-            if ((Get-TpmReShadeGalleryProfileId -Item $combo.Items[$i]) -eq $ProfileId) {
-                $targetIndex = $i
-                break
-            }
-        }
-        if ($targetIndex -lt 0) { throw ("Gallery profile '{0}' is not present." -f $ProfileId) }
-        $state['SelectedProfileId'] = $ProfileId
-        if ([int]$combo.SelectedIndex -ne $targetIndex) { $combo.SelectedIndex = $targetIndex }
-        [Windows.Forms.Application]::DoEvents()
+        if (-not [bool]$Session['Initialized'] -or [bool]$Session['Closed'] -or -not [bool]$Session['PreviewEnabled']) { return $false }
+        $canonicalProfile = @($Session['Profiles'] | Where-Object { [string]$_.ProfileId -eq $ProfileId })[0]
+        if (-not $canonicalProfile) { throw ("Gallery profile '{0}' is not present." -f $ProfileId) }
+        $Session['SelectedProfileId'] = [string]$canonicalProfile.ProfileId
+        if (-not (Invoke-TpmReShadeGalleryRefreshSafe -State $Session -Refresh $Session['Refresh'] -Stage 'terminal-profile-sync')) { return $false }
+        try { [Windows.Forms.Application]::DoEvents() } catch {}
         return $true
     } catch {
         [void](Set-TpmReShadeGalleryPreviewFailed -State $Session -Stage 'terminal-profile-sync' -ErrorRecord $_)
@@ -7202,36 +7137,6 @@ function Sync-TpmReShadeGallerySelection {
     }
 }
 
-# Reads the current selection from the non-modal gallery without making the
-# gallery authoritative. The terminal chooser remains the commit gate, but a
-# profile chosen in the preview must be visible when the user presses U.
-function Get-TpmReShadePreviewSelection {
-    param(
-        [object]$Session,
-        [Parameter(Mandatory)][object[]]$Profiles
-    )
-    if (-not $Session) { return $null }
-    try {
-        if (-not [bool]$Session['Initialized'] -or [bool]$Session['Closed'] -or -not [bool]$Session['PreviewEnabled']) { return $null }
-        $profileId = [string]$Session['SelectedProfileId']
-        if ([string]::IsNullOrWhiteSpace($profileId)) { return $null }
-        return @($Profiles | Where-Object { [string]$_.ProfileId -eq $profileId })[0]
-    } catch {
-        Write-Log ("ReShade profile chooser: gallery selection could not be read -- {0}" -f $_.Exception.Message)
-        return $null
-    }
-}
-
-function Update-TpmReShadeSelectionFromPreview {
-    param(
-        [AllowNull()][object]$Session,
-        [Parameter(Mandatory)][object[]]$Profiles,
-        [AllowNull()][object]$CurrentSelection
-    )
-    $previewSelection = Get-TpmReShadePreviewSelection -Session $Session -Profiles $Profiles
-    if ($previewSelection) { return $previewSelection }
-    return $CurrentSelection
-}
 
 
 function Read-TpmReShadeTerminalProfile {
@@ -7246,11 +7151,11 @@ function Read-TpmReShadeTerminalProfile {
     while ($true) {
         if ($PreviewSession) {
             try { [Windows.Forms.Application]::DoEvents() } catch {}
-            $selected = Update-TpmReShadeSelectionFromPreview -Session $PreviewSession -Profiles $Profiles -CurrentSelection $selected
         }
         Write-Host ''
         Write-Host '  Choose how your game should look.' -ForegroundColor Cyan
         Write-Host '  Preview uses a bundled image to approximate each TPM-approved profile. Actual in-game results may vary.' -ForegroundColor DarkCyan
+        if ($PreviewSession) { Write-Host '  The preview follows this terminal selection; the terminal chooser is authoritative.' -ForegroundColor DarkCyan }
         for ($profileIndex = 0; $profileIndex -lt $orderedIds.Count; $profileIndex++) {
             $id = $orderedIds[$profileIndex]
             $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
@@ -7331,7 +7236,6 @@ function Read-TpmReShadeTerminalProfile {
             continue
         }
         Write-Host '  Invalid choice. Use 1-5, U, N, R, B, or D.' -ForegroundColor Yellow
-
     }
 }
 function Update-TpmReShadeTutorialProgressText {
@@ -7664,6 +7568,25 @@ function Invoke-ReShadeSetup {
         Write-Log "ReShade setup: cancelled -- no games selected."
         return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_GAMES_SELECTED' }
     }
+    $nativeShaderWarnings = New-Object System.Collections.Generic.List[object]
+    foreach ($nativeProfile in $selectedGames) {
+        try {
+            $nativeDoc = Read-Xml $nativeProfile.FullName
+            $nativeWarning = Get-TpmReShadeNativeShaderWarnings -Document $nativeDoc
+            if ($nativeWarning.Detected) {
+                [void]$nativeShaderWarnings.Add([pscustomobject]@{ Game = $nativeProfile.BaseName; Fields = @($nativeWarning.Fields); Warning = $nativeWarning.Warning })
+            }
+        } catch {
+            Write-Log ("ReShade: native shader setting scan unavailable for {0} -- {1}" -f $nativeProfile.BaseName, $_.Exception.Message)
+        }
+    }
+    if ($nativeShaderWarnings.Count -gt 0) {
+        Write-Host '  Native TeknoParrot display/shader settings detected:' -ForegroundColor Yellow
+        foreach ($nativeWarning in $nativeShaderWarnings) {
+            Write-Host ("    {0}: {1}" -f $nativeWarning.Game, (($nativeWarning.Fields | ForEach-Object { '{0}={1}' -f $_.Field, $_.Value }) -join '; ')) -ForegroundColor Yellow
+        }
+        Write-Host '  TPM preserves those native settings. A ReShade CRT/shader profile may stack another display effect.' -ForegroundColor Yellow
+    }
     $preflightSummary = Get-TpmReShadeApplyPreflight -SelectedGames $selectedGames -ProfileDefinition $selectedProfile -SourceDll $SourceDll -SourceDll32 $SourceDll32
     Write-Host ("  ReShade preflight: {0} ready, {1} protected, {2} missing executable, {3} unsafe or malformed, {4} failed/preflight blocked." -f $preflightSummary.Ready, $preflightSummary.Protected, $preflightSummary.MissingPath, $preflightSummary.Unsafe, $preflightSummary.Failed) -ForegroundColor DarkCyan
     if ($preflightSummary.Protected -gt 0) {
@@ -7676,11 +7599,10 @@ function Invoke-ReShadeSetup {
         }
     }
     $bulkApply = $false
-    $deployed = 0; $installed = 0; $updated = 0; $reapplied = 0; $changedProfile = 0; $keptProfile = 0; $skipped = 0; $missingPath = 0; $missingDevice = 0; $unsupported = 0; $protected = 0; $adopted = 0; $errors = 0; $presetOverrides = 0; $tutorialProgressFixed = 0
+    $deployed = 0; $installed = 0; $updated = 0; $reapplied = 0; $changedProfile = 0; $keptProfile = 0; $skipped = 0; $missingPath = 0; $missingDevice = 0; $unsupported = 0; $protected = 0; $adopted = 0; $unsafe = 0; $errors = 0; $presetOverrides = 0; $tutorialProgressFixed = 0
     $rememberedSelections = @{}
     $keepSelections = @{}
     $restoreSelections = @{}
-    $allRegisteredGames = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' })
     if ($selectedGames.Count -gt 1) {
         do {
             Write-Host ("  Apply {0} to all {1} selected games?" -f $selectedProfile.FriendlyName, $selectedGames.Count) -ForegroundColor Cyan
@@ -7749,11 +7671,12 @@ function Invoke-ReShadeSetup {
         }
     }
 
-    # Deploy only after the explicit profile confirmation above.
+# Deploy only after the explicit profile confirmation above.
     Write-Host ""
     Write-Host ("  Installing ReShade into {0} game folder(s)..." -f $selectedGames.Count) -ForegroundColor Cyan
-    $deployed = 0; $installed = 0; $updated = 0; $reapplied = 0; $changedProfile = 0; $keptProfile = 0; $skipped = 0; $missingPath = 0; $missingDevice = 0; $unsupported = 0; $protected = 0; $adopted = 0; $errors = 0; $presetOverrides = 0
+    $deployed = 0; $installed = 0; $updated = 0; $reapplied = 0; $changedProfile = 0; $keptProfile = 0; $skipped = 0; $missingPath = 0; $missingDevice = 0; $unsupported = 0; $protected = 0; $adopted = 0; $unsafe = 0; $errors = 0; $presetOverrides = 0; $tutorialProgressFixed = 0
     $protectedDetails = New-Object System.Collections.Generic.List[string]
+    $unsafeDetails = New-Object System.Collections.Generic.List[string]
     $pathReasonCounts = @{}
     $preflightValid = 0
     $preflightReasonCounts = @{}
@@ -7782,10 +7705,10 @@ function Invoke-ReShadeSetup {
     foreach ($pf in $selectedGames) {
         try {
             $doc = Read-Xml $pf.FullName
-            if (-not $doc.GameProfile) { $skipped++; Write-Host ("    {0}: game profile is invalid -- skipped" -f $pf.BaseName) -ForegroundColor Yellow; continue }
+            if (-not $doc.GameProfile) { $skipped++; $unsafe++; [void]$unsafeDetails.Add(('{0}: malformed GameProfile XML.' -f $pf.BaseName)); Write-Host ("    {0}: game profile is invalid -- unsafe/malformed, unchanged" -f $pf.BaseName) -ForegroundColor Yellow; continue }
 
             $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
-            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; Write-Host ("    {0}: saved game path was empty -- skipped" -f $pf.BaseName) -ForegroundColor DarkGray; continue }
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; $missingPath++; if (-not $pathReasonCounts.ContainsKey('GAME_PATH_MISSING')) { $pathReasonCounts['GAME_PATH_MISSING'] = 0 }; $pathReasonCounts['GAME_PATH_MISSING']++; Write-Host ("    {0}: saved game path was empty -- skipped" -f $pf.BaseName) -ForegroundColor DarkGray; continue }
 
             $gamePath = $gpNode.InnerText.Trim()
             $pathCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
@@ -7800,7 +7723,9 @@ function Invoke-ReShadeSetup {
                     $missingPath++
                     Write-Host ("    {0}: saved game executable was not found -- skipped" -f $pf.BaseName) -ForegroundColor DarkGray
                 } else {
-                    Write-Host ("    {0}: path safety check failed ({1}) -- skipped before ReShade transaction" -f $pf.BaseName, $pathCheck.Reason) -ForegroundColor Yellow
+                    $unsafe++
+                    [void]$unsafeDetails.Add(('{0}: {1}' -f $pf.BaseName, [string]$pathCheck.Reason))
+                    Write-Host ("    {0}: path safety check failed ({1}) -- unsafe/malformed, unchanged" -f $pf.BaseName, $pathCheck.Reason) -ForegroundColor Yellow
                 }
                 $skipped++
                 Write-Log ("ReShade: skipped {0} before transaction; path reason={1}; detail={2}" -f $pf.BaseName, $reasonCode, $pathCheck.Reason)
@@ -7820,7 +7745,9 @@ function Invoke-ReShadeSetup {
             $profileTargetInfo = Get-ReShadeTargetInfo -Doc $doc -GamePath $gamePath -ExeDir $exeDir
             if (-not $profileTargetInfo -or [string]::IsNullOrWhiteSpace($profileTargetInfo.TargetDir) -or [string]::IsNullOrWhiteSpace($profileTargetInfo.DllName)) {
                 $skipped++
-                Write-Host ("    {0}: ReShade target could not be resolved safely -- skipped" -f $pf.BaseName) -ForegroundColor Yellow
+                $unsafe++
+                [void]$unsafeDetails.Add(('{0}: ReShade target could not be resolved safely.' -f $pf.BaseName))
+                Write-Host ("    {0}: ReShade target could not be resolved safely -- unsafe/malformed, unchanged" -f $pf.BaseName) -ForegroundColor Yellow
                 Write-Log ("ReShade: {0} classified MalformedNeedsReview; target resolution failed." -f $pf.BaseName)
                 continue
             }
@@ -7830,7 +7757,9 @@ function Invoke-ReShadeSetup {
                 try { $existingOwnership = Read-TpmReShadeOwnershipManifest -Path $ownershipPath }
                 catch {
                     $skipped++
-                    Write-Host ("    {0}: malformed ReShade ownership metadata -- skipped before mutation" -f $pf.BaseName) -ForegroundColor Yellow
+                    $unsafe++
+                    [void]$unsafeDetails.Add(('{0}: malformed ReShade ownership metadata.' -f $pf.BaseName))
+                    Write-Host ("    {0}: malformed ReShade ownership metadata -- unsafe/malformed, unchanged" -f $pf.BaseName) -ForegroundColor Yellow
                     Write-Log ("ReShade: {0} classified MalformedNeedsReview; ownership metadata was not trusted." -f $pf.BaseName)
                     continue
                 }
@@ -7842,7 +7771,9 @@ function Invoke-ReShadeSetup {
             $ownershipClassification = Get-TpmReShadeOwnershipClassification -HookPath $profileHookPath -TargetRoot $profileTargetInfo.TargetDir -ProfileDefinition $profileForGame -CurrentRuntimeSHA256 $currentRuntimeHash -CurrentRuntimeVersion $runtimeVersion -Manifest $existingOwnership
             if ($ownershipClassification.Status -eq 'MalformedNeedsReview') {
                 $skipped++
-                Write-Host ("    {0}: {1} -- skipped" -f $pf.BaseName, $ownershipClassification.Detail) -ForegroundColor Yellow
+                $unsafe++
+                [void]$unsafeDetails.Add(('{0}: {1}' -f $pf.BaseName, $ownershipClassification.Detail))
+                Write-Host ("    {0}: {1} -- unsafe/malformed, unchanged" -f $pf.BaseName, $ownershipClassification.Detail) -ForegroundColor Yellow
                 continue
             }
             if (($ownershipClassification.Status -eq 'UnknownUserOwnedConflict' -or $ownershipClassification.Status -eq 'BundledPreinstalledProtected') -and $Action -ne 'Adopt') {
@@ -7873,13 +7804,19 @@ function Invoke-ReShadeSetup {
             if (-not $boundaryCheck.Valid) {
                 $skipped++
                 if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
-                if ($boundaryCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
+                elseif ($boundaryCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
+                else { $unsafe++; [void]$unsafeDetails.Add(('{0}: {1}' -f $pf.BaseName, [string]$boundaryCheck.Reason)) }
+                if (-not $pathReasonCounts.ContainsKey([string]$boundaryCheck.ReasonCode)) { $pathReasonCounts[[string]$boundaryCheck.ReasonCode] = 0 }
+                $pathReasonCounts[[string]$boundaryCheck.ReasonCode]++
                 Write-Host ("    {0}: mutation-boundary path check failed ({1}) -- unchanged" -f $pf.BaseName, $boundaryCheck.Reason) -ForegroundColor Yellow
                 Write-Log ("ReShade: skipped {0} at mutation boundary; path reason={1}; detail={2}" -f $pf.BaseName, $boundaryCheck.ReasonCode, $boundaryCheck.Reason)
                 continue
             }
             if ([string]$boundaryCheck.ResolvedPath -ine [string]$gamePath) {
-                Write-Host ("    FAILED {0}: game path changed before mutation -- unchanged" -f $pf.BaseName) -ForegroundColor Red
+                $skipped++
+                $unsafe++
+                [void]$unsafeDetails.Add(('{0}: game path changed before mutation.' -f $pf.BaseName))
+                Write-Host ("    UNSAFE {0}: game path changed before mutation -- unchanged" -f $pf.BaseName) -ForegroundColor Yellow
                 Write-Log "ReShade: mutation-boundary path changed for $($pf.BaseName)"
                 continue
             }
@@ -7925,15 +7862,11 @@ function Invoke-ReShadeSetup {
             }
         }
     }
-$unsafeAccounting = 0
-foreach ($reasonKey in @($pathReasonCounts.Keys)) {
-    if ($reasonKey -notin @('DEVICE_UNAVAILABLE', 'GAME_PATH_MISSING')) { $unsafeAccounting += [int]$pathReasonCounts[$reasonKey] }
-}
-$skippedForAccounting = $skipped - $missingPath - $missingDevice - $unsafeAccounting
-$accounting = Get-TpmReShadeApplyAccounting -Selected $selectedGames.Count -Deployed $deployed -Adopted $adopted -Protected $protected -MissingPath $missingPath -MissingDevice $missingDevice -Unsafe $unsafeAccounting -Failed $errors -SkippedCancelled $skippedForAccounting
-Write-Host ("  Accounting: {0} selected = {1} changed TPM-managed + {2} adopted/replaced + {3} protected unchanged + {4} missing path + {5} unsafe + {6} failed + {7} skipped/cancelled." -f $accounting.Selected, $accounting.ChangedTpmManaged, $accounting.AdoptedReplaced, $accounting.ProtectedUnchanged, $accounting.MissingPath, $accounting.UnsafeOwnershipPath, $accounting.Failed, $accounting.SkippedCancelled) -ForegroundColor DarkCyan
-if (-not $accounting.Complete) { throw 'ReShade accounting invariant failed: terminal outcomes did not equal selected games.' }
-Write-Log ("ReShade accounting: Selected={0} ChangedTpmManaged={1} AdoptedReplaced={2} ProtectedUnchanged={3} MissingPath={4} UnsafeOwnershipPath={5} Failed={6} SkippedCancelled={7}" -f $accounting.Selected, $accounting.ChangedTpmManaged, $accounting.AdoptedReplaced, $accounting.ProtectedUnchanged, $accounting.MissingPath, $accounting.UnsafeOwnershipPath, $accounting.Failed, $accounting.SkippedCancelled)
+    $skippedForAccounting = [Math]::Max(0, $skipped - $missingPath - $missingDevice - $unsafe)
+    $accounting = Get-TpmReShadeApplyAccounting -Selected $selectedGames.Count -Deployed $deployed -Adopted $adopted -Protected $protected -MissingPath $missingPath -MissingDevice $missingDevice -Unsafe $unsafe -Failed $errors -SkippedCancelled $skippedForAccounting
+    Write-Host ("  Accounting: {0} selected = {1} changed TPM-managed + {2} adopted/replaced + {3} protected unchanged + {4} missing path + {5} unsafe + {6} failed + {7} skipped/cancelled." -f $accounting.Selected, $accounting.ChangedTpmManaged, $accounting.AdoptedReplaced, $accounting.ProtectedUnchanged, $accounting.MissingPath, $accounting.UnsafeOwnershipPath, $accounting.Failed, $accounting.SkippedCancelled) -ForegroundColor DarkCyan
+    if (-not $accounting.Complete) { throw 'ReShade accounting invariant failed: terminal outcomes did not equal selected games.' }
+    Write-Log ("ReShade accounting: Selected={0} ChangedTpmManaged={1} AdoptedReplaced={2} ProtectedUnchanged={3} MissingPath={4} UnsafeOwnershipPath={5} Failed={6} SkippedCancelled={7}" -f $accounting.Selected, $accounting.ChangedTpmManaged, $accounting.AdoptedReplaced, $accounting.ProtectedUnchanged, $accounting.MissingPath, $accounting.UnsafeOwnershipPath, $accounting.Failed, $accounting.SkippedCancelled)
 
     Write-Host ("  Installed new : {0} game(s)" -f $installed) -ForegroundColor Green
     Write-Host ("  Updated       : {0} game(s)" -f $updated) -ForegroundColor Green
@@ -7948,6 +7881,11 @@ Write-Log ("ReShade accounting: Selected={0} ChangedTpmManaged={1} AdoptedReplac
     if ($missingPath -gt 0) {
         Write-Host ("  Skipped missing executable : {0} game(s)" -f $missingPath) -ForegroundColor Yellow
         Write-Host "  Repair saved game paths, then run ReShade setup again." -ForegroundColor Yellow
+    }
+    if ($unsafe -gt 0) {
+        Write-Host ("  Unsafe/malformed ownership or path : {0} game(s) -- unchanged" -f $unsafe) -ForegroundColor Yellow
+        foreach ($unsafeDetail in $unsafeDetails) { Write-Host ("    {0}" -f $unsafeDetail) -ForegroundColor Yellow }
+        Write-Host "  Review the listed ownership/path issue, then run ReShade setup again. TPM did not guess or overwrite it." -ForegroundColor Yellow
     }
     if ($unsupported -gt 0) { Write-Host ("  Skipped unsupported or missing 32-bit : {0} game(s)" -f $unsupported) -ForegroundColor DarkGray }
     if ($protected -gt 0) { Write-Host ("  Protected: {0} game(s) already had ReShade files, so TeknoParrot Manager left them unchanged." -f $protected) -ForegroundColor Yellow }
@@ -7966,6 +7904,12 @@ Write-Log ("ReShade accounting: Selected={0} ChangedTpmManaged={1} AdoptedReplac
         Installed = $installed
         Updated = $updated
         Reapplied = $reapplied
+        Unsafe = $unsafe
+        UnsafeDetails = $unsafeDetails.ToArray()
+        Accounting = $accounting
+        NativeShaderWarnings = $nativeShaderWarnings.ToArray()
+        SelectedProfileId = [string]$selectedProfile.ProfileId
+        SelectedProfileTechniques = if ($selectedProfile.PSObject.Properties['TechniqueOrder']) { Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $selectedProfile } else { '' }
         ChangedProfile = $changedProfile
         KeptPrevious = $keptProfile
         Adopted = $adopted
@@ -23755,12 +23699,14 @@ $mode = $null
             Write-Host ("    Protected existing      : {0} game(s)" -f $(if ($reShadeResult) { $reShadeResult.Protected } else { 0 })) -ForegroundColor $(if ($reShadeResult -and $reShadeResult.Protected -gt 0) { 'Yellow' } else { 'DarkGray' })
             Write-Host ("    Missing paths           : {0} game(s)" -f $(if ($reShadeResult) { $reShadeResult.MissingPath + $reShadeResult.MissingDevice } else { 0 })) -ForegroundColor $(if ($reShadeResult -and ($reShadeResult.MissingPath -gt 0 -or $reShadeResult.MissingDevice -gt 0)) { 'Yellow' } else { 'DarkGray' })
             Write-Host ("    Failed                 : {0} game(s)" -f $(if ($reShadeResult) { $reShadeResult.Errors } else { 0 })) -ForegroundColor $(if ($reShadeResult -and $reShadeResult.Errors -gt 0) { 'Red' } else { 'DarkGray' })
+            Write-Host ("    Unsafe/malformed        : {0} game(s)" -f $(if ($reShadeResult) { $reShadeResult.Unsafe } else { 0 })) -ForegroundColor $(if ($reShadeResult -and $reShadeResult.Unsafe -gt 0) { 'Yellow' } else { 'DarkGray' })
             Write-Host '    What TPM changed       : verified ReShade deployments only.' -ForegroundColor DarkGray
-            Write-Host '    What TPM did not change: protected, unknown, malformed, or unavailable game folders.' -ForegroundColor DarkGray
-            Write-Host '    What next              : choose a ReShade action below.' -ForegroundColor DarkGray
+            Write-Host '    What TPM did not change: protected, unsafe/malformed, unknown, or unavailable game folders.' -ForegroundColor DarkGray
+            Write-Host '    What next              : review Details, repair the listed issue, then rerun ReShade setup.' -ForegroundColor DarkGray
             [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-incomplete' -Message $partialSummary -DataSafety 'TPM did not claim success for every selected game; skipped and failed games were left unchanged.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
             $reShadeActionModel = Get-TpmReShadeResultActionModel -Result $reShadeResult
             $reShadeProtectedIssue = $reShadeActionModel.Primary -eq 'ReShade'
+            $reShadeUnsafeIssue = $reShadeActionModel.Primary -eq 'Unsafe'
             $reShadePathIssue = $reShadeResult -and ($reShadeResult.MissingPath -gt 0 -or $reShadeResult.MissingDevice -gt 0)
             if ($reShadeProtectedIssue) {
                 $reShadeChoices = @('A', 'S', 'D', 'B')
@@ -23782,9 +23728,24 @@ $mode = $null
                     elseif ($reShadeChoice -eq 'S') { $pendingApplyMode = 'ReShadeSetup'; $pendingApplyForce = $false; $pendingReShadeAction = 'Select' }
                     elseif ($reShadeChoice -eq 'D') {
                         foreach ($detail in @($reShadeResult.ProtectedDetails)) { Write-Host ("    {0}" -f $detail) -ForegroundColor Yellow }
+                        foreach ($detail in @($reShadeResult.UnsafeDetails)) { Write-Host ("    Unsafe/malformed: {0}" -f $detail) -ForegroundColor Yellow }
                         if ($reShadeResult.ProtectedDetails.Count -eq 0) { Write-Host '    No additional classification detail was recorded.' -ForegroundColor DarkGray }
                     }
                 } while ($reShadeChoice -in @('M', 'D'))
+            } elseif ($reShadeUnsafeIssue) {
+                $reShadeChoices = @('S', 'D', 'B')
+                do {
+                    Write-Host '  [S] Rerun ReShade setup after reviewing/selecting affected games' -ForegroundColor White
+                    Write-Host '  [D] Details and direct next action' -ForegroundColor White
+                    Write-Host '  [B] Back to main menu' -ForegroundColor White
+                    $reShadeChoice = Read-TpmChoice -Prompt '  Choose S, D, or B' -Choices $reShadeChoices -Default 'B'
+                    if ($reShadeChoice -eq 'S') { $pendingApplyMode = 'ReShadeSetup'; $pendingApplyForce = $false; $pendingReShadeAction = 'Select' }
+                    elseif ($reShadeChoice -eq 'D') {
+                        foreach ($detail in @($reShadeResult.UnsafeDetails)) { Write-Host ("    {0}" -f $detail) -ForegroundColor Yellow }
+                        Write-Host '    Next: repair or review the listed ownership/path issue, then rerun ReShade setup with Select.' -ForegroundColor Cyan
+                        Write-Host ("    Selected profile techniques: {0}" -f $reShadeResult.SelectedProfileTechniques) -ForegroundColor DarkCyan
+                    }
+                } while ($reShadeChoice -eq 'D')
             } elseif ($reShadePathIssue) {
                 $reShadeChoices = @('M', 'D', 'B')
                 do {
@@ -25411,7 +25372,7 @@ if ($doReShade -eq "Y") {
         Write-Host " ReShade Visual Enhancements Setup" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         $rsSetupDone = $true
-        Invoke-ReShadeSetup -UserProfilesDir $userProfilesDir `
+        $normalReShadeResult = Invoke-ReShadeSetup -UserProfilesDir $userProfilesDir `
                             -SourceDll $rsSourceDll `
                             -SourceDll32 $rsSourceDll32 `
                             -ConfigPath $configPath `
@@ -25421,6 +25382,19 @@ if ($doReShade -eq "Y") {
                             -GamesInstallFolder $gamesInstallFolder `
                             -RetroBat $retroBat `
                             -HsDataPath $hsDataPath
+        Write-Host ""
+        Write-Host "  ReShade result -- review before continuing to dgVoodoo2:" -ForegroundColor Cyan
+        if ($normalReShadeResult) {
+            Write-Host ("    Changed: {0} game(s); Protected: {1}; Unsafe/malformed: {2}; Missing: {3}; Failed: {4}" -f $normalReShadeResult.Deployed, $normalReShadeResult.Protected, $normalReShadeResult.Unsafe, ($normalReShadeResult.MissingPath + $normalReShadeResult.MissingDevice), $normalReShadeResult.Errors) -ForegroundColor DarkCyan
+            Write-Host '    What TPM changed: verified ReShade deployments only.' -ForegroundColor DarkGray
+            Write-Host '    What TPM did not change: protected, unsafe/malformed, missing, or failed game folders.' -ForegroundColor DarkGray
+            foreach ($detail in @($normalReShadeResult.ProtectedDetails)) { Write-Host ("    Protected: {0}" -f $detail) -ForegroundColor Yellow }
+            foreach ($detail in @($normalReShadeResult.UnsafeDetails)) { Write-Host ("    Unsafe/malformed: {0}" -f $detail) -ForegroundColor Yellow }
+            if ($normalReShadeResult.PSObject.Properties['NativeShaderWarnings'] -and @($normalReShadeResult.NativeShaderWarnings).Count -gt 0) { Write-Host '    Native TeknoParrot shader/display settings were preserved; stacking may occur.' -ForegroundColor Yellow }
+        } else {
+            Write-Host '    ReShade setup was cancelled or did not return a result; no verified deployment was claimed.' -ForegroundColor Yellow
+        }
+        [void](Read-HostSafe '  Press Enter to review the ReShade result before dgVoodoo2')
     }
 }
 # =============================================================================
