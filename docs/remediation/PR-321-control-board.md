@@ -34,8 +34,8 @@ Re-audit statuses are fail-closed and cannot advance to owner-runtime-only until
 | 10 | ReShade selector visibility | Selector instructions remain visible | SOURCE FIXED; OWNER RUNTIME NEEDED | ReShade | Selector UI | Selector contracts | UI smoke | Owner runtime | ReShade follow-up |
 | 11 | Protected ReShade ownership | Adopt/replace safely | SOURCE FIXED; OWNER RUNTIME NEEDED | ReShade | Get-TpmReShadeOwnershipClassification; Install-TpmReShadeProfileDeployment; Invoke-ReShadeSetup | ReShade protected-adoption tests | Explicit adopt/replace smoke | Owner runtime | TPM-RESHADE-001 |
 | 12 | ReShade accounting | All games and outcomes counted | SOURCE FIXED; OWNER RUNTIME NEEDED | ReShade | Get-TpmReShadeApplyPreflight; Get-TpmReShadeApplyAccounting; Invoke-ReShadeSetup | ReShade accounting tests | All-games packaged smoke | Owner runtime | TPM-RESHADE-001 |
-| 13 | Crosshair browser does not close | Browser closes safely | SOURCE CLAIM INVALID / RE-AUDIT REQUIRED | Crosshair | Export-CrosshairPreview | Crosshair contracts | Browser smoke | Source remediation | Crosshair follow-up |
-| 14 | Crosshair focus does not return | Focus returns to terminal | SOURCE CLAIM INVALID / RE-AUDIT REQUIRED | Crosshair | Export-CrosshairPreview/focus fallback | Crosshair contracts | Focus smoke | Source remediation | Crosshair follow-up |
+| 13 | Crosshair browser completion | Browser completes safely after P2 | SOURCE FIXED; OWNER RUNTIME NEEDED | Crosshair | Export-CrosshairPreview | Crosshair completion contracts | Browser smoke | Owner runtime | Crosshair follow-up |
+| 14 | Crosshair focus return | Focus returns to terminal when available | SOURCE FIXED; OWNER RUNTIME NEEDED | Crosshair | Export-CrosshairPreview/focus fallback | Crosshair focus contracts | Focus smoke | Owner runtime | Crosshair follow-up |
 | 15 | Crosshair prompt placement | P1/P2 rows are usable | SOURCE FIXED; OWNER RUNTIME NEEDED | Crosshair | Crosshair setup/input | Crosshair contracts | Constrained console smoke | Owner runtime | Crosshair follow-up |
 | 16 | PostgreSQL repair loop | Backup/retry/reset is bounded | SOURCE FIXED; OWNER RUNTIME NEEDED | PostgreSQL | PostgreSQL recovery; categorized resume reasons and reachable password repair | Recovery tests; focused RC8 UX tests | Repair smoke | Rebuild then owner runtime | Slice 1 |
 | 17 | Affected-games repair scope | Only affected games are repaired | SOURCE FIXED; OWNER RUNTIME NEEDED | Repair/scoping | Repair-GamePaths | Repair matrix | One/multiple/zero smoke | Owner runtime | Repair follow-up |
@@ -102,9 +102,9 @@ This section supersedes the prior blanket `SOURCE FIXED; OWNER RUNTIME NEEDED` c
 | 10 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Selector contract remains source/test supported | No | Yes |
 | 11 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | ReShade ownership behavior requires renewed source review before package trust | Yes | Yes |
 | 12 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | ReShade accounting claim was accepted before package smoke | Yes | Yes |
-| 13 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM INVALID / RE-AUDIT REQUIRED | Generated crosshair HTML has no `window.close()` implementation | Yes | Yes |
-| 14 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM INVALID / RE-AUDIT REQUIRED | Focus fallback claim was coupled to the invalid close implementation | Yes | Yes |
-| 15 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Prompt-row source claim lacks trustworthy package evidence | Re-audit first | Yes |
+| 13 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Completed non-interactive browser state after valid P2; explicit return/close guidance; no further click mutation | No | Yes |
+| 14 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Best-effort console focus return with logged fallback; terminal remains usable | No | Yes |
+| 15 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Workflow-aware P1/P2, confirmation, first-run, and cursor-hide prompts with typed fallback | No | Yes |
 | 16 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Password recovery/elevation resume failed owner smoke; beginner-safe reason unproven | Yes | Yes |
 | 17 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Scoped repair implementation was not proven by owner smoke | Yes | Yes |
 | 18 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Health Check/BBHWorld repair remained an owner failure | Yes | Yes |
@@ -123,7 +123,7 @@ This section supersedes the prior blanket `SOURCE FIXED; OWNER RUNTIME NEEDED` c
 | 31 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Wording source claim lacks owner/package proof | Re-audit first | Yes |
 | 32 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Global claim depended on the invalid accepted count | Re-audit first | Yes |
 
-False prior source-fixed claims explicitly identified: IDs 2, 13, and 14. IDs 11, 12, 16-19, 21-22, and 29 require source remediation; remaining rows require renewed source/package audit before owner-only classification.
+Historical false source-fixed claims included IDs 2, 13, and 14. The current crosshair slice supersedes the prior ID 13/14 disposition with source-fixed completed-state/focus behavior; IDs 11, 12, 16-19, 21-22, and 29 still require source remediation, and remaining rows require renewed source/package audit before owner-only classification.
 
 Changelog decision queued for the next authorized source slice: `Known RC8 owner-smoke blockers identified. Release remains blocked pending re-audit, source remediation, package rebuild, and owner-runtime retest.`
 
@@ -152,4 +152,19 @@ web transport fallback is shown as `web fallback` instead of raw
 count/total, keep HTTP 404 no-icon results separate from other failures, and
 list transient failure profile codes for retry. Thumbnail setup remains an
 optional prompt after repair. Focused tests pass; package rebuild and owner
+runtime proof remain outstanding.
+
+## Crosshair close, focus, and prompt slice -- working-tree evidence
+
+The crosshair findings were re-audited independently:
+
+| ID | Current source disposition | Evidence |
+|---:|---|---|
+| 13 | SOURCE FIXED; OWNER RUNTIME NEEDED | After valid P2 selection, generated HTML reports completion, becomes non-interactive, and tells the user to return to TPM and close the tab. |
+| 14 | SOURCE FIXED; OWNER RUNTIME NEEDED | Console focus is attempted after bridge polling; failure is logged without blocking typed fallback or terminal confirmation. |
+| 15 | SOURCE FIXED; OWNER RUNTIME NEEDED | P1/P2, confirmation, first-run, and cursor-hide prompts use the workflow-aware renderer when a CrosshairSetup context is available; standalone typed fallback remains direct and bounded. |
+
+Crosshair file deployment remains after terminal confirmation, and cancellation
+returns without deployment. Focused crosshair tests and full validation are
+required before this slice can be called ready. Package rebuild and owner
 runtime proof remain outstanding.

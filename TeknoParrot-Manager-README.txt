@@ -1141,6 +1141,9 @@
        generated and opened in your default browser. All 321 included designs
        are listed. Click a design to select P1 when the short-lived localhost
        bridge is available; it accepts only the session token and index 0-320.
+       After P2 is selected, the browser enters a completed state and tells you
+       to return to TPM to confirm; you can close the tab. If Windows cannot
+       restore focus automatically, continue at the TPM console prompt.
 
     3. Choose the Player 1 and Player 2 indices. If the bridge times out or
        is unavailable, type the numeric indices in the console. The two can be

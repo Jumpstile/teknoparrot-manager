@@ -37,8 +37,10 @@ changes remain behind the verified backup boundary.
 Crosshair browser selection is deliberately consumed from the main PowerShell
 runspace. `HttpListener` completion is polled and finalized with
 `EndGetContext`; PowerShell scriptblocks are never used as I/O-thread callbacks.
-Listener shutdown is guaranteed, and typed numeric selection remains the
-fallback when preview or browser startup fails.
+After valid P2 selection, the generated page enters a completed non-interactive
+state with explicit return-to-TPM/close guidance. Listener shutdown is guaranteed;
+focus return is attempted and logged when unavailable, while typed numeric
+selection remains the fallback when preview or browser startup fails.
 
 ReShade profile selection opens an optional non-modal gallery and immediately
 leaves the terminal at the authoritative numbered chooser. The terminal
@@ -828,9 +830,14 @@ means no ZIP work; it does not claim that saved GamePath values were repaired.
 **Crosshair gallery selection.** The HTML gallery contains all discovered valid
 crosshairs. A short-lived localhost bridge bound only to `127.0.0.1` accepts a
 per-session token and an integer index from 0 through 320; incidental or invalid
-requests do not consume the listener. If the bridge times out or is unavailable,
-selection continues through the typed numeric P1/P2 fallback. Deployment has a
-separate explicit confirmation before any crosshair files or state are written.
+requests do not consume the listener. After P2 is accepted, the page reports
+`Selections complete. Return to TeknoParrot Manager to confirm. You can close
+this tab.` and ignores further clicks. Focus return is attempted where Windows
+allows it; the terminal prompt uses the workflow renderer when available and
+the direct `Read-HostSafe` renderer in the normal completion flow, while
+selection continues through typed numeric P1/P2 fallback if the bridge times
+out or is unavailable. Deployment has a separate explicit confirmation before
+any crosshair files or state are written.
 
 **Crosshair last-used state.** `TeknoParrot-Manager-crosshairs.json` (gitignored, like
 `config.json`) remembers last-used P1/P2 crosshair filenames (not indices -- indices shift

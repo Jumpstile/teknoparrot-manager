@@ -1066,6 +1066,11 @@ Describe "Read-TpmYesNo validation" {
         Read-TpmYesNo -Prompt 'Continue? (Y/N)' | Should -Be 'Y'
         Should -Invoke Read-Host -Times 2 -Exactly
     }
+    It "uses the workflow input renderer when a context is supplied" {
+        Mock Read-TpmWorkflowInput { 'Y' }
+        Read-TpmYesNo -Prompt 'Continue? (Y/N)' -WorkflowContext ([pscustomobject]@{ Closed = $false }) | Should -Be 'Y'
+        Should -Invoke Read-TpmWorkflowInput -Times 1 -Exactly
+    }
 }
 Describe "Read-TpmChoice validation" {
     It "rejects an invalid answer, normalizes case, and accepts the next allowed choice" {
@@ -7024,8 +7029,10 @@ Describe "Invoke-CrosshairSetup P1/P2 prompts use the safe input path (issue #13
         $script:crosshairSource | Should -Not -BeNullOrEmpty
     }
 
-    It "the P1 and P2 index prompts both go through Read-HostSafe" {
-        (@([regex]::Matches($script:crosshairSource, 'Read-HostSafe \$promptText')).Count) | Should -Be 2
+    It "routes P1 and P2 index prompts through workflow-aware input with typed fallback" {
+        $script:crosshairSource | Should -Match '\$readCrosshairPrompt'
+        (@([regex]::Matches($script:crosshairSource, 'Read-TpmWorkflowInput -Context \$WorkflowContext')).Count) | Should -Be 1
+        $script:crosshairSource | Should -Match 'return Read-HostSafe \$Prompt'
     }
 
     It "no bare Read-Host call in this function has .Trim() or .ToUpper() chained directly onto it" {
@@ -12153,6 +12160,30 @@ Describe "ReShade trusted profile restore" {
         $script:ProductionSource | Should -Match 'Apply these crosshairs\? \(Y/N, default Y\)'
         $script:ProductionSource | Should -Match '\$crosshairConfirm'
         $script:ProductionSource | Should -Match 'Read-HostSafe'
+        $script:ProductionSource | Should -Match 'Read-TpmWorkflowInput -Context \$WorkflowContext'
+    }
+    It "leaves the browser in a completed non-interactive state after P2" {
+        $script:ProductionSource | Should -Match 'Selections complete\. Return to TeknoParrot Manager to confirm\. You can close this tab\.'
+        $script:ProductionSource | Should -Match 'if\(p1!==null&&p2!==null\)return'
+        $script:ProductionSource | Should -Match 'document\.body\.classList\.add\(''complete''\)'
+    }
+
+    It "reports focus fallback and keeps deployment behind terminal confirmation" {
+        $script:ProductionSource | Should -Match '\$focusReturned = Focus-TpmConsoleBestEffort'
+        $script:ProductionSource | Should -Match 'console focus return was unavailable'
+        $script:ProductionSource | Should -Match '-WorkflowContext \$WorkflowContext'
+        $confirmAt = $script:ProductionSource.IndexOf('$crosshairConfirm')
+        $copyAt = $script:ProductionSource.IndexOf('Copy-Item -LiteralPath $valid[$p1Idx]')
+        $confirmAt | Should -BeGreaterOrEqual 0
+        $copyAt | Should -BeGreaterThan $confirmAt
+    }
+    It "writes a completed browser state into the generated preview" {
+        $preview = Join-Path $TestDrive 'CrosshairPreview.html'
+        Export-CrosshairPreview -CrosshairPaths @('C:\Crosshairs\000.png', 'C:\Crosshairs\001.png') -OutPath $preview -BridgeUrl 'http://127.0.0.1:18000/' -BridgeToken 'test-token'
+        $html = Get-Content -LiteralPath $preview -Raw
+        $html | Should -Match 'Selections complete\. Return to TeknoParrot Manager to confirm\. You can close this tab\.'
+        $html | Should -Match 'if\(p1!==null&&p2!==null\)return'
+        $html | Should -Match 'complete \.cell'
     }
 
     It "rejects invalid browser selection tokens and indexes" {

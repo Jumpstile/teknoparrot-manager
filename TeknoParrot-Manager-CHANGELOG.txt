@@ -44,6 +44,14 @@
   and list transient download/check failures separately from profiles with no
   upstream icon. Thumbnail setup remains an optional step after repair. RC8 remains
   a candidate and is not published.
+
+  RC8 candidate crosshair reporting correction: after valid P2 selection, the
+  browser preview enters a completed non-interactive state and tells the user
+  to return to TPM and close the tab. Console focus is attempted with a logged
+  fallback when Windows cannot restore it. Crosshair P1/P2 and follow-up prompts
+  use the workflow-aware renderer when available, while typed fallback remains
+  available. Deployment remains behind terminal confirmation. RC8 remains a
+  candidate and is not published.
   Known RC8 owner-smoke blockers identified. Release remains blocked pending
   re-audit, source remediation, package rebuild, and owner-runtime retest.
   ReShade preview comparison now has a real 0-100 in-memory slider; its

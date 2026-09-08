@@ -1852,10 +1852,16 @@ function Read-HostSafe {
     return $trimmed
 }
 function Read-TpmYesNo {
-    param([Parameter(Mandatory)][string]$Prompt, [string]$Default = '')
+    param([Parameter(Mandatory)][string]$Prompt, [string]$Default = '', [object]$WorkflowContext = $null)
     if ($Default -and $Default.ToUpperInvariant() -notin @('Y', 'N')) { throw "Invalid yes/no default '$Default'." }
     do {
-        $answer = (Read-HostSafe $Prompt -Default $Default).Trim().ToUpperInvariant()
+        $raw = if ($WorkflowContext) {
+            Read-TpmWorkflowInput -Context $WorkflowContext -Prompt $Prompt
+        } else {
+            Read-HostSafe $Prompt -Default $Default
+        }
+        if ($WorkflowContext -and $raw -eq '' -and $null -ne $Default) { $raw = $Default }
+        $answer = ([string]$raw).Trim().ToUpperInvariant()
         if ($answer -notin @('Y', 'N')) {
             Write-Host '  Please choose Y or N.' -ForegroundColor Yellow
         }
@@ -4050,7 +4056,7 @@ function Export-CrosshairPreview {
     [void]$sb.Append('h1{color:#4af;margin-bottom:4px}p{color:#888;margin-top:0;margin-bottom:16px}')
     [void]$sb.Append('.grid{display:flex;flex-wrap:wrap;gap:8px}')
     [void]$sb.Append('.cell{background:#222;border:1px solid #333;padding:6px;text-align:center;width:84px;cursor:pointer}')
-    [void]$sb.Append('.cell:hover{border-color:#4af;background:#1a2a3a}.cell.p1{border:3px solid #ffd43b;background:#3a3218}')
+    [void]$sb.Append('.cell:hover{border-color:#4af;background:#1a2a3a}.cell.p1{border:3px solid #ffd43b;background:#3a3218}.complete .cell{cursor:default;opacity:.8}')
     [void]$sb.Append('.cell.p2{border:3px solid #5fdb8a;background:#183a28}')
     [void]$sb.Append('.cell img{width:64px;height:64px;image-rendering:pixelated;display:block;margin:0 auto 4px}')
     [void]$sb.Append('.num{color:#4af;font-size:12px}.name{color:#888;font-size:10px;word-break:break-all}')
@@ -4058,7 +4064,7 @@ function Export-CrosshairPreview {
     $bridgeUrlHtml = [System.Net.WebUtility]::HtmlEncode($BridgeUrl)
     $bridgeTokenHtml = [System.Net.WebUtility]::HtmlEncode($BridgeToken)
     if ($BridgeUrl -and $BridgeToken) {
-        [void]$sb.Append("<script>const bridge='$bridgeUrlHtml',token='$bridgeTokenHtml';let p1=null,p2=null;function choose(i,cell){fetch(bridge+'?token='+encodeURIComponent(token)+'&index='+i).then(function(r){if(!r.ok)throw new Error('selection bridge rejected the click');return r.text();}).then(function(){const n=String(i).padStart(3,'0');if(p1===null){p1=i;cell.classList.add('p1');document.getElementById('status').textContent='P1 selected: '+n+'. Now choose P2.';}else if(p2===null){p2=i;cell.classList.add('p2');document.getElementById('status').textContent='P1: '+String(p1).padStart(3,'0')+' / P2: '+n+' selected. Return to TeknoParrot Manager to confirm.';}else{document.getElementById('status').textContent='P1: '+String(p1).padStart(3,'0')+' / P2: '+String(p2).padStart(3,'0')+' selected. Return to TeknoParrot Manager to confirm.';}document.title='Crosshair selection '+n;}).catch(function(e){document.getElementById('status').textContent='Selection failed: '+e.message;});}</script>")
+        [void]$sb.Append("<script>const bridge='$bridgeUrlHtml',token='$bridgeTokenHtml';let p1=null,p2=null;function choose(i,cell){if(p1!==null&&p2!==null)return;fetch(bridge+'?token='+encodeURIComponent(token)+'&index='+i).then(function(r){if(!r.ok)throw new Error('selection bridge rejected the click');return r.text();}).then(function(){const n=String(i).padStart(3,'0');if(p1===null){p1=i;cell.classList.add('p1');document.getElementById('status').textContent='P1 selected: '+n+'. Now choose P2.';}else{p2=i;cell.classList.add('p2');document.body.classList.add('complete');document.getElementById('status').textContent='P1: '+String(p1).padStart(3,'0')+' / P2: '+n+' selected. Selections complete. Return to TeknoParrot Manager to confirm. You can close this tab.';}document.title='Crosshair selection '+n;}).catch(function(e){document.getElementById('status').textContent='Selection failed: '+e.message;});}</script>")
     }
     $instructionText = if ($BridgeUrl -and $BridgeToken) { '<p id="status">Ready: click one crosshair for Player 1.</p><p>Then click another crosshair for Player 2. The status above confirms each selection. Return to TeknoParrot Manager when both are selected. Typed numeric fallback remains available.</p>' } else { '<p>Type the number shown under the crosshair in TeknoParrot Manager.</p>' }
     [void]$sb.Append($instructionText)
@@ -9831,11 +9837,10 @@ public static class TpmConsoleNativeMethods {
 '@ -ErrorAction Stop
         }
         $process = Get-Process -Id $PID -ErrorAction Stop
-        if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
-            [void][TpmConsoleNativeMethods]::SetForegroundWindow($process.MainWindowHandle)
-        }
+        if ($process.MainWindowHandle -eq [IntPtr]::Zero) { return $false }
+        return [bool][TpmConsoleNativeMethods]::SetForegroundWindow($process.MainWindowHandle)
     } catch {
-        # Browser focus recovery is best effort; selection remains in the bridge.
+        return $false
     }
 }
 
@@ -9844,8 +9849,15 @@ public static class TpmConsoleNativeMethods {
 # hides the hardware cursor by setting HideCursor/DisableCursor=1 in every
 # lightgun UserProfile (backs up profiles first).
 function Invoke-CrosshairSetup {
-    param([string]$UserProfilesDir, [string]$GamesInstallFolder, [string]$TpRoot)
+    param([string]$UserProfilesDir, [string]$GamesInstallFolder, [string]$TpRoot, [object]$WorkflowContext = $null)
 
+    $readCrosshairPrompt = {
+        param([string]$Prompt)
+        if ($WorkflowContext) {
+            return Read-TpmWorkflowInput -Context $WorkflowContext -Prompt $Prompt
+        }
+        return Read-HostSafe $Prompt
+    }
     $crosshairsDir = Join-Path $PSScriptRoot "Crosshairs"
     $previewPath   = Join-Path $PSScriptRoot "TeknoParrot-Crosshairs-Preview.html"
 
@@ -9932,7 +9944,10 @@ function Invoke-CrosshairSetup {
             if ($browserChoices.Count -gt 1) { $browserP2Idx = [int]$browserChoices[1] }
         } catch { Write-Log "Crosshairs: browser selection read failed -- $_"; Stop-CrosshairSelectionBridge -Session $bridgeSession }
     }
-    if ($bridgeSession) { Focus-TpmConsoleBestEffort }
+    if ($bridgeSession) {
+        $focusReturned = Focus-TpmConsoleBestEffort
+        if (-not $focusReturned) { Write-Log 'Crosshairs: browser selection completed; console focus return was unavailable.' }
+    }
 
     # Pick P1
     $p1Idx = $browserP1Idx
@@ -9940,7 +9955,7 @@ function Invoke-CrosshairSetup {
         $promptText = if ($null -ne $lastP1Idx) {
             "  P1 crosshair index (0-{0}, Enter for last used: {1} {2})" -f ($valid.Count - 1), $lastP1Idx, [System.IO.Path]::GetFileNameWithoutExtension($valid[$lastP1Idx])
         } else { "  P1 crosshair index (0-{0})" -f ($valid.Count - 1) }
-        $raw = (Read-HostSafe $promptText)
+        $raw = (& $readCrosshairPrompt $promptText)
         if ($raw -eq '' -and $null -ne $lastP1Idx) { $p1Idx = $lastP1Idx }
         elseif ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $valid.Count) { $p1Idx = [int]$raw }
         else { Write-Host ("  Enter a number between 0 and {0}." -f ($valid.Count - 1)) -ForegroundColor Yellow }
@@ -9951,7 +9966,7 @@ function Invoke-CrosshairSetup {
         $promptText = if ($null -ne $lastP2Idx) {
             "  P2 crosshair index (0-{0}, or same as P1, Enter for last used: {1} {2})" -f ($valid.Count - 1), $lastP2Idx, [System.IO.Path]::GetFileNameWithoutExtension($valid[$lastP2Idx])
         } else { "  P2 crosshair index (0-{0}, or same as P1)" -f ($valid.Count - 1) }
-        $raw = (Read-HostSafe $promptText)
+        $raw = (& $readCrosshairPrompt $promptText)
         if ($raw -eq '' -and $null -ne $lastP2Idx) { $p2Idx = $lastP2Idx }
         elseif ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $valid.Count) { $p2Idx = [int]$raw }
         else { Write-Host ("  Enter a number between 0 and {0}." -f ($valid.Count - 1)) -ForegroundColor Yellow }
@@ -9961,7 +9976,7 @@ function Invoke-CrosshairSetup {
     $p2Name = [System.IO.Path]::GetFileNameWithoutExtension($valid[$p2Idx])
     Write-Host ""
     Write-Host "  P1: $p1Name    P2: $p2Name" -ForegroundColor Green
-    $crosshairConfirm = Read-TpmYesNo -Prompt "  Apply these crosshairs? (Y/N, default Y)" -Default 'Y'
+    $crosshairConfirm = Read-TpmYesNo -Prompt "  Apply these crosshairs? (Y/N, default Y)" -Default 'Y' -WorkflowContext $WorkflowContext
     if ($crosshairConfirm -ne 'Y') {
         Write-Host "  Crosshair setup cancelled. No files were changed." -ForegroundColor Yellow
         Write-Log "Crosshairs: cancelled before deployment."
@@ -10033,7 +10048,7 @@ function Invoke-CrosshairSetup {
                             Write-Host "  PCSX2 Crosshair Setup Required" -ForegroundColor Cyan
                             Write-Host ("    TPM found pcsx2x6 installed but not yet initialized for TeknoParrot ({0})." -f $prereqState.Reason) -ForegroundColor DarkGray
                             Write-Host "    TPM can trigger the emulator's own first-run initialization, then install the crosshair assets and verify the result." -ForegroundColor DarkGray
-                            $firstRunAnswer = Read-TpmYesNo -Prompt "  Configure Automatically? (Y/N)"
+                            $firstRunAnswer = Read-TpmYesNo -Prompt "  Configure Automatically? (Y/N)" -WorkflowContext $WorkflowContext
                             if ($firstRunAnswer -eq "Y") {
                                 if (-not (Wait-TpmForProcessClose -ProcessNames @('pcsx2-qtx64') -FriendlyName 'PCSX2')) {
                                     Write-Host "    Crosshair setup cancelled without changes. The selected crosshairs were not deployed." -ForegroundColor Yellow
@@ -10144,7 +10159,7 @@ function Invoke-CrosshairSetup {
     if ($errors  -gt 0) { Write-Host ("  Errors   : {0}" -f $errors) -ForegroundColor Red }
     Write-Log ("Crosshairs: done. Deployed={0} Skipped={1} Errors={2}" -f $deployed, $skipped, $errors)
 
-    $hideCursor = Read-TpmYesNo -Prompt "  Also hide the Windows cursor for all lightgun games? (Y/N)"
+    $hideCursor = Read-TpmYesNo -Prompt "  Also hide the Windows cursor for all lightgun games? (Y/N)" -WorkflowContext $WorkflowContext
     if ($hideCursor -eq "Y") {
         Write-Host ""
         Invoke-CursorHideSetup -UserProfilesDir $UserProfilesDir
@@ -23528,7 +23543,8 @@ $mode = $null
         [void](Start-TpmWorkflowStep -Context $crosshairStatus -StepId 'apply' -Activity 'Installing crosshair files')
         $crosshairResult = Invoke-CrosshairSetup -UserProfilesDir $userProfilesDir `
                               -GamesInstallFolder $gamesInstallFolder `
-                              -TpRoot $tpRoot
+                              -TpRoot $tpRoot `
+                              -WorkflowContext $crosshairStatus
         if ($crosshairResult -and $crosshairResult.Succeeded) {
             [void](Complete-TpmWorkflowStep -Context $crosshairStatus -Outcome Fixed -Summary 'Crosshair setup finished')
             [void](Complete-TpmWorkflowStatus -Context $crosshairStatus -Summary 'Crosshair setup finished')
@@ -25328,7 +25344,8 @@ if ($doCrosshairs -eq "Y") {
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
     Invoke-CrosshairSetup -UserProfilesDir $userProfilesDir `
                           -GamesInstallFolder $gamesInstallFolder `
-                          -TpRoot $tpRoot
+                          -TpRoot $tpRoot `
+                          -WorkflowContext $null
 }
 
 # =============================================================================

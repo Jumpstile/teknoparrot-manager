@@ -474,6 +474,9 @@ Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun g
 1. An HTML preview grid opens in your browser showing all 321 included designs.
    Click a design to select P1 when the short-lived local bridge is available.
    The bridge accepts only a per-session token and an index from 0 through 320.
+   After P2 is selected, the browser reports that selections are complete and
+   tells you to return to TPM to confirm; you can close the tab. If Windows
+   cannot return focus automatically, use the visible TPM console prompt.
 2. Choose the P1 and P2 indices (they can be the same). If the browser bridge
    times out or is unavailable, typed numeric selection remains available.
 3. Confirm the choices before the script copies images to registered games.

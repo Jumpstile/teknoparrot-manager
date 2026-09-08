@@ -102,6 +102,17 @@ download/check failures, whose profile codes are listed for retry. Focused
 progress, repair, and thumbnail tests pass. Package rebuild and owner-runtime
 proof are still required.
 
+### Crosshair close, focus, and prompt slice -- working-tree status
+
+IDs 13, 14, and 15 were re-audited separately. ID 13 is source-fixed with a
+completed non-interactive browser state after P2; ID 14 is source-fixed with
+best-effort console focus and an explicit logged fallback; ID 15 is source-fixed
+with workflow-aware P1/P2, confirmation, first-run, and cursor-hide prompts when
+the CrosshairSetup workflow context exists. Standalone typed input remains the
+fallback. Deployment remains behind terminal confirmation, and cancellation
+does not deploy files. Focused crosshair coverage, package rebuild, and
+owner-runtime proof remain outstanding.
+
 ## Prompt/gate/back-routing consistency audit
 The Progress.Core inventory and classifications are recorded in
 `docs/remediation/slices/PR-321-current-slice.md` under "Source inventory".
@@ -228,7 +239,7 @@ The prior owner-report table incorrectly treated every row as `SOURCE FIXED; OWN
 
 Corrections supported by new evidence:
 
-- IDs 13 and 14 (Crosshair browser close/focus) are `SOURCE CLAIM INVALID / RE-AUDIT REQUIRED`: generated HTML has no `window.close()` implementation, so the prior source-fixed claim was false.
+- IDs 13 and 14 (Crosshair browser close/focus) were `SOURCE CLAIM INVALID / RE-AUDIT REQUIRED` at that earlier audit point because the generated HTML had no `window.close()` implementation; the current crosshair slice re-audits the accepted contract, which permits a completed non-interactive state with explicit close guidance instead of requiring `window.close()`.
 - ID 2 (duplicate `ErrorAction`) is `SOURCE REMEDIATION REQUIRED`: direct search of `TeknoParrotManager-Support-20260908-023904.zip` found the exact error repeatedly in startup update, Eggman DAT, ProfileSet GitHub, thumbnails, Eggman game-data, and PostgreSQL-resume runs.
 - ID 29 (Action Required freshness/scoping) is split: stale labeling is working in the current manifest; ambient FamilyGuy/BepInEx/plugin diagnostics are not clearly labeled as untested/current-run evidence and require source remediation.
 - ID 16 (PostgreSQL recovery) remains source remediation required until thrown messages and caller display are verified as beginner-safe categorized reasons; raw exception text is not accepted as sufficient evidence.
@@ -236,7 +247,7 @@ Corrections supported by new evidence:
 
 The previous "32 owner-runtime-only" count is unreliable. The candidate package/source gate is not trustworthy for release acceptance. Re-audit and source remediation must precede package rebuild and owner-runtime retest.
 
-The re-audit itself made no source changes. The subsequent bounded slice changed only PostgreSQL recovery reason classification and the web-wrapper parameter name, with focused source tests; no package, release, certification, push, or ARCADE/#323 action was performed. The changelog now carries the required blocked wording.
+That statement describes the prior bounded slice only. The subsequent crosshair slice separately re-audited IDs 13, 14, and 15, corrected the browser to a completed non-interactive state after P2, added best-effort focus reporting, routed workflow prompts with typed fallback, and retained no package, release, certification, push, or ARCADE/#323 action.
 ## Corrected owner-ID status table
 
 | ID | Workflow | Prior status | Corrected status | Evidence | Source remediation | Owner retest | Live record |
@@ -253,9 +264,9 @@ The re-audit itself made no source changes. The subsequent bounded slice changed
 | 10 | ReShade selector | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Selector contract remains source-supported | No | Yes | 5578628627 |
 | 11 | ReShade protected ownership | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Ownership claim requires source re-audit before trust | Yes | Yes | 5578628627 |
 | 12 | ReShade accounting/result | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Accounting accepted before failed package smoke | Yes | Yes | 5578628627 |
-| 13 | Crosshair close | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM INVALID / RE-AUDIT REQUIRED | Export-CrosshairPreview HTML has no window.close() | Yes | Yes | 5578597851; 5578637913 |
-| 14 | Crosshair focus | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM INVALID / RE-AUDIT REQUIRED | Focus claim coupled to invalid browser lifecycle claim | Yes | Yes | 5578597851; 5578637913 |
-| 15 | Crosshair prompt row | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Separate Invoke-CrosshairSetup/Read-TpmWorkflowInput path | Yes, audit first | Yes | 5578637913 |
+| 13 | Crosshair close | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Export-CrosshairPreview now enters a completed non-interactive state after P2 and gives explicit return/close guidance | No | Yes | 5585999038 |
+| 14 | Crosshair focus | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Best-effort SetForegroundWindow return is logged when unavailable; terminal workflow remains usable | No | Yes | 5585999038 |
+| 15 | Crosshair prompt row | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Workflow-aware P1/P2, confirmation, first-run, and cursor-hide prompts with typed fallback | No | Yes | 5585999038 |
 | 16 | PostgreSQL recovery | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Categorized resume reasons and reachable P path; focused tests pass | No | Yes | 5578669949 |
 | 17 | Health Check scope | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | BBHWorld/affected-game scope not proven | Yes | Yes | 5578628627 |
 | 18 | Health Check no-candidate | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Owner failure remains unresolved | Yes | Yes | 5578628627 |

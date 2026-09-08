@@ -283,6 +283,9 @@
   When you run mode 4:
     1. A preview page opens in your browser showing all 321 available designs.
        Click a design to select P1 through the short-lived localhost bridge.
+       After P2 is selected, the browser shows that selections are complete and
+       tells you to return to TPM to confirm; you can close the tab. If focus
+       does not return automatically, use the TPM console prompt.
     2. If click selection times out or is unavailable, type the numeric
        indices for Player 1 and Player 2. Press Enter to reuse last choices.
        Confirm the choices before files are changed.
