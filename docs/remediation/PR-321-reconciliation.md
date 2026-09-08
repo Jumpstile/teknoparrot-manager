@@ -2,17 +2,19 @@
 
 - Repository root: `C:\REPOS\tpm-rc8-certified-a700d093`
 - Branch: `fix/rc8-release-blockers`
-- HEAD: `7cd77108759084679f33eb27f98b6bfaaa58ff4d`
-- Report generated UTC: TPM-RESHADE-001 source contract and focused implementation complete; final validation follows the slice gate.
+- HEAD: `97047640f3ebf850418181717ae3e6b5379343e1`
+- Report generated UTC: RC8 candidate package built and validated from source commit `97047640f3ebf850418181717ae3e6b5379343e1`.
 - Source/test last-edit UTC: not captured in this working report.
 - Candidate/package identity: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`
-- Candidate SHA-256: `8E0343AE85F63F06280CE4E5AE737C0D68E05629A446C22B61AD79C732F40303`
-- Source SHA: `7cd77108759084679f33eb27f98b6bfaaa58ff4d` (working-tree source/test/doc changes remain uncommitted)
+- Candidate byte size: `8,077,772`
+- Candidate SHA-256: `78983F4B664DFC2E00E7E73CDA37F256EB83113256026E077F851D9589FFBD8F`
+- Source SHA: `97047640f3ebf850418181717ae3e6b5379343e1` (candidate package source identity)
+- Candidate validator: `Valid = True`
 - Remediation scope: TPM-only PR #321 ReShade ownership/accounting slice `TPM-RESHADE-001`, prior controls/progress/prompt source evidence, owner-smoke reconciliation, and permanent procedure enforcement
 
 ## Provenance
 
-- Git status: dirty; source, tests, governance, and gate files are uncommitted.
+- Git status: dirty only because this package-evidence report was updated after the clean source checkpoint; no production source or test files changed.
 - The canonical control board is `docs/remediation/PR-321-control-board.md`; the current organization slice is `docs/remediation/slices/PR-321-current-slice.md`.
 - No monitor-pipeline files changed.
 - No runtime, state, log, ZIP, or package artifact was created by this report.
@@ -112,7 +114,7 @@ This report retains the prior prompt audit table below for cross-slice traceabil
 - IDs 11 and 12 are `SOURCE FIXED; OWNER RUNTIME NEEDED`; IDs 3, 17-22, 26, 30, and 32 remain `SOURCE FIXED; OWNER RUNTIME NEEDED`.
 - `TPM-RESHADE-001` protects unknown/custom ReShade files by default, gates adopt/replace behind explicit action and backup, reports preflight buckets, and enforces exact final accounting.
 - `TPM-CONTROLS-001` separates saved configuration, inferred readiness, and observed physical binding; propagation reports zero verified physical bindings because TPM does not test device input.
-- PR #321 remains blocked. Candidate ZIP is stale, the permanent procedure gate must fail closed, owner-runtime evidence is outstanding, and no package or owner smoke is authorized.
+- PR #321 remains blocked. Owner-runtime evidence is outstanding; the candidate package identity is recorded above, and no release or owner smoke is authorized.
 
 ## Affected-games repair-flow scoping audit
 
@@ -148,7 +150,7 @@ required one/multiple/zero/no-candidate functional coverage is not complete.
 | Progress.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Progress.Core*' -Output Detailed` | 2 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Prompt.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Prompt.Core*' -Output Detailed` | 4 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 parse errors; 27 registry entries; affected source/report text ASCII clean; 0 PSScriptAnalyzer findings; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
-| Permanent procedure gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: unresolved `NOT FIXED`; owner-runtime evidence outstanding; candidate package stale | not captured | not captured | pwsh |
+| Permanent procedure gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: owner-runtime evidence outstanding; candidate package identity recorded and validated | not captured | not captured | pwsh |
 Pester 5.7.1 was not confirmed in this environment. These results are not
 certification-compatible evidence. Main and support suites passed, static
 checks passed, and the permanent procedure gate failed closed. The report
