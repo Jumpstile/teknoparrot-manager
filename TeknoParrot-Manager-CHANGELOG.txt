@@ -13,6 +13,13 @@
   RC8 is being prepared for independent review and guarded certification.
   Final Version 1.0 remains unpublished.
 
+  TPM-owned runtime files now use
+  <TeknoParrotRoot>\TeknoParrotManager\ with separated logs, reports, state,
+  cache, manifests, backups, temporary files, assets, and support packages.
+  Startup migration moves only allowlisted legacy TPM clutter, writes a report,
+  blocks ambiguous destinations, and leaves TeknoParrot-owned files untouched.
+  Package layout remains unchanged for shipped scripts, tools, and contracts.
+
   Additional RC8 candidate fixes: duplicate display identities remain
   ambiguous instead of selecting the first matching monitor; the read-only
   display/ReShade guard traverses reachable local helpers; curated ReShade

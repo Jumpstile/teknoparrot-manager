@@ -383,6 +383,128 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 # =============================================================================
 
 $logPath               = Join-Path $PSScriptRoot "TeknoParrot-Manager.log"
+
+$script:TpmOwnedLayout = $null
+
+function Get-TpmOwnedLayout {
+    param([Parameter(Mandatory)][string]$TeknoParrotRoot)
+    $root = [System.IO.Path]::GetFullPath((Join-Path $TeknoParrotRoot 'TeknoParrotManager')).TrimEnd('\','/')
+    return [pscustomobject][ordered]@{
+        Root = $root
+        Logs = Join-Path $root 'Logs'
+        Reports = Join-Path $root 'Reports'
+        SupportPackages = Join-Path $root 'SupportPackages'
+        State = Join-Path $root 'State'
+        Cache = Join-Path $root 'Cache'
+        Manifests = Join-Path $root 'Manifests'
+        Backups = Join-Path $root 'Backups'
+        Temp = Join-Path $root 'Temp'
+        Assets = Join-Path $root 'Assets'
+        ConfigPath = Join-Path $root 'State\TeknoParrot-Manager.config.json'
+        LogPath = Join-Path $root 'Logs\TeknoParrot-Manager.log'
+        ActionItemsPath = Join-Path $root 'Reports\TeknoParrot-Manager-ActionItems.txt'
+    }
+}
+
+function Initialize-TpmOwnedLayout {
+    param([Parameter(Mandatory)]$Layout)
+    foreach ($path in @($Layout.Root,$Layout.Logs,$Layout.Reports,$Layout.SupportPackages,
+            $Layout.State,$Layout.Cache,$Layout.Manifests,$Layout.Backups,$Layout.Temp,$Layout.Assets)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Container)) {
+            [void][System.IO.Directory]::CreateDirectory($path)
+        }
+        if (-not (Test-TpmNoReparsePath -Path $path)) {
+            throw "TPM-owned path is reparse-backed or inaccessible: $path"
+        }
+    }
+    return $Layout
+}
+
+function Get-TpmLegacyOwnedItems {
+    param([Parameter(Mandatory)][string]$ScriptRoot)
+    $names = @(
+        'TeknoParrot-Manager.config.json','TeknoParrot-Manager.log',
+        'TeknoParrot-Manager-controls.txt','TeknoParrot-Manager-ActionItems.txt',
+        'TeknoParrot-Manager-HealthCheck.txt','TeknoParrot-Manager-Readiness.txt',
+        'TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt',
+        'TPM-Validation-Report.md','TPM-Validation-Report.json',
+        'TPM-Certification-Scorecard.md','TPM-Certification-Scorecard.json',
+        'TPM-Certification-Final-Outcome.md','TPM-Certification-Final-Outcome.json',
+        'TPM-Certification-Manifest.md','TPM-Certification-Manifest.json',
+        'TeknoParrot-Manager.overrides.json','LaunchBoxBackups',
+        'PostgresBackups','PostgresRecoveryBackups','SupportPackages','ReShade',
+        'ReShadePresets','ReShadePreviewCache','CustomThumbnails','FFBPlugin',
+        'BepInExCache'
+    )
+    foreach ($name in $names) {
+        $path = Join-Path $ScriptRoot $name
+        if (Test-Path -LiteralPath $path) {
+            [pscustomobject]@{ Name = $name; Path = $path; IsDirectory = (Test-Path -LiteralPath $path -PathType Container) }
+        }
+    }
+}
+
+function Invoke-TpmOwnedMigration {
+    param(
+        [Parameter(Mandatory)][string]$ScriptRoot,
+        [Parameter(Mandatory)]$Layout,
+        [switch]$Unattended
+    )
+    $items = @(Get-TpmLegacyOwnedItems -ScriptRoot $ScriptRoot)
+    if ($items.Count -eq 0) { return [pscustomobject]@{ Status='NothingToMove'; ReportPath=$null; Moved=@(); Ambiguous=@() } }
+    $destinations = @()
+    foreach ($item in $items) {
+        if ($item.Name -eq 'SupportPackages') {
+            foreach ($child in @(Get-ChildItem -LiteralPath $item.Path -Force -ErrorAction Stop)) {
+                $destinations += [pscustomobject]@{ Item=[pscustomobject]@{ Name=$child.Name; Path=$child.FullName; IsDirectory=$child.PSIsContainer }; Destination=(Join-Path ([string]$Layout.SupportPackages) $child.Name) }
+            }
+            continue
+        }
+        $bucket = 'Assets'
+        if ($item.Name -eq 'TeknoParrot-Manager.config.json') { $bucket = 'State' }
+        elseif ($item.Name -eq 'TeknoParrot-Manager.log') { $bucket = 'Logs' }
+        elseif (-not $item.IsDirectory) { $bucket = 'Reports' }
+        elseif ($item.Name -in @('LaunchBoxBackups','PostgresBackups','PostgresRecoveryBackups')) { $bucket = 'Backups' }
+        elseif ($item.Name -in @('ReShadePreviewCache','FFBPlugin','BepInExCache')) { $bucket = 'Cache' }
+        $destinations += [pscustomobject]@{ Item=$item; Destination=(Join-Path ([string]$Layout.$bucket) $item.Name) }
+    }
+    $ambiguous = @()
+    foreach ($entry in $destinations) {
+        if (Test-Path -LiteralPath $entry.Destination) {
+            $occupied = if ($entry.Item.IsDirectory) { @(Get-ChildItem -LiteralPath $entry.Destination -Force -ErrorAction SilentlyContinue).Count -gt 0 } else { $true }
+            if ($occupied) { $ambiguous += $entry }
+        }
+    }
+    $reportPath = Join-Path $Layout.Reports ('TPM-migration-{0}.md' -f (Get-Date).ToString('yyyyMMdd-HHmmss'))
+    $lines = @('# TPM-owned state migration','',('Source root: `{0}`' -f $ScriptRoot),('Destination root: `{0}`' -f $Layout.Root),'','## Planned moves')
+    foreach ($entry in $destinations) { $lines += ('- `{0}` -> `{1}`' -f $entry.Item.Path,$entry.Destination) }
+    if ($ambiguous.Count -gt 0) {
+        $lines += ''; $lines += '## Ambiguous destinations'
+        foreach ($entry in $ambiguous) { $lines += ('- Destination already exists: `{0}`' -f $entry.Destination) }
+        Set-Content -LiteralPath $reportPath -Value (($lines -join [Environment]::NewLine) + [Environment]::NewLine) -Encoding UTF8
+        return [pscustomobject]@{ Status='Ambiguous'; ReportPath=$reportPath; Moved=@(); Ambiguous=$ambiguous }
+    }
+    if (-not $Unattended) {
+        Write-Host ''; Write-Host 'TPM found known TPM-owned files outside TeknoParrotManager.' -ForegroundColor Yellow
+        foreach ($entry in $destinations) { Write-Host ("  Move: {0} -> {1}" -f $entry.Item.Name,$entry.Destination) -ForegroundColor DarkGray }
+        Write-Host ("  Details report: {0}" -f $reportPath) -ForegroundColor DarkGray
+        if ((Read-TpmChoice -Prompt 'Apply these moves? (Y/N)' -Choices @('Y','N') -Default 'N') -ne 'Y') {
+            $lines += ''; $lines += 'Migration was reviewed but not applied.'
+            Set-Content -LiteralPath $reportPath -Value (($lines -join [Environment]::NewLine) + [Environment]::NewLine) -Encoding UTF8
+            return [pscustomobject]@{ Status='Declined'; ReportPath=$reportPath; Moved=@(); Ambiguous=@() }
+        }
+    }
+    $moved = @()
+    foreach ($entry in $destinations) {
+        if (-not (Test-TpmNoReparsePath -Path $entry.Item.Path)) { throw "Legacy TPM-owned path is unsafe: $($entry.Item.Path)" }
+        [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($entry.Destination))
+        Move-Item -LiteralPath $entry.Item.Path -Destination $entry.Destination -ErrorAction Stop
+        $moved += $entry
+    }
+    $lines += ''; $lines += 'Migration applied successfully.'
+    Set-Content -LiteralPath $reportPath -Value (($lines -join [Environment]::NewLine) + [Environment]::NewLine) -Encoding UTF8
+    return [pscustomobject]@{ Status='Moved'; ReportPath=$reportPath; Moved=$moved; Ambiguous=@() }
+}
 $script:TpmSessionRunId = $null
 $script:LatestTpmWorkflowResult = $null
 $script:logWarnShown   = $false   # full warning shown at most once to avoid repeated noise
@@ -1572,19 +1694,17 @@ if ($trueFailureRecords.Count -eq 0) {
 $lines.Add('') | Out-Null
 if ($pathLimitedRecords.Count -gt 0) {
     $lines.Add('What TPM could not collect:') | Out-Null
-    $lines.Add(('- Plugin inventory for {0} game(s) whose saved paths or folders could not be inspected safely.' -f $pathLimitedRecords.Count)) | Out-Null
     foreach ($record in $pathLimitedRecords) {
-        $lines.Add(('- Not collected: {0}' -f (Redact-TpmSupportText -Text ([string]$record.Source)).Text)) | Out-Null
+        $recordSource = (Redact-TpmSupportText -Text ([string]$record.Source)).Text
+        $detail = if ($record.Detail) { ' -- ' + (Redact-TpmSupportText -Text ([string]$record.Detail)).Text } else { '' }
+        $lines.Add(('- {0}{1}' -f $recordSource, $detail)) | Out-Null
     }
-    $lines.Add('Why: Windows could not safely find or inspect those saved game folders.') | Out-Null
 }
 $lines.Add('') | Out-Null
 $lines.Add('What TPM did not change:') | Out-Null
 $lines.Add('- No game files, executables, DLL payloads, profiles, credentials, or emulator files were included or modified by support collection.') | Out-Null
 $lines.Add('- Missing optional diagnostics are not collection failures; they were left unchanged.') | Out-Null
 $lines.Add('What to do next:') | Out-Null
-$lines.Add('- Review the failure details above, resolve the reported file or access problem, then run the affected TPM workflow again.') | Out-Null
-$lines.Add('- If no collection failure is listed, send this ZIP with the TPM log and describe the workflow and game that failed.') | Out-Null
 $lines.Add('') | Out-Null
 $lines.Add('A missing game usually means no matching safe diagnostic file was present; it does not mean TPM ignored that game.') | Out-Null
 $lines.Add('This ZIP may still be useful for support when only partial evidence was collected.') | Out-Null
@@ -1691,8 +1811,10 @@ function New-TpmSupportPackage {
         $stage = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-support-stage-' + [guid]::NewGuid().ToString('N'))
         [void](New-Item -ItemType Directory -Path (Join-Path $stage 'diagnostics'), (Join-Path $stage 'metadata') -Force)
         if (-not (Test-TpmNoReparsePath -Path $stage)) { throw 'Support package staging folder is unsafe.' }
-        $actionItemsPath = Join-Path $ScriptRoot 'TeknoParrot-Manager-ActionItems.txt'
-        $managerLogPath = Join-Path $ScriptRoot 'TeknoParrot-Manager.log'
+        $actionItemsPath = Join-Path $ScriptRoot 'Reports\TeknoParrot-Manager-ActionItems.txt'
+        if (-not (Test-Path -LiteralPath $actionItemsPath -PathType Leaf)) { $actionItemsPath = Join-Path $ScriptRoot 'TeknoParrot-Manager-ActionItems.txt' }
+        $managerLogPath = Join-Path $ScriptRoot 'Logs\TeknoParrot-Manager.log'
+        if (-not (Test-Path -LiteralPath $managerLogPath -PathType Leaf)) { $managerLogPath = Join-Path $ScriptRoot 'TeknoParrot-Manager.log' }
         $actionItemsEvidenceClass = 'Current'
         if ((Test-Path -LiteralPath $actionItemsPath -PathType Leaf) -and (Test-Path -LiteralPath $managerLogPath -PathType Leaf) -and ((Get-Item -LiteralPath $actionItemsPath).LastWriteTimeUtc -lt (Get-Item -LiteralPath $managerLogPath).LastWriteTimeUtc)) {
             $actionItemsEvidenceClass = 'Stale'
@@ -1702,9 +1824,13 @@ function New-TpmSupportPackage {
         foreach ($name in $tpmNames) {
             $index++
             $evidenceClass = if ($name -eq 'TeknoParrot-Manager-ActionItems.txt') { $actionItemsEvidenceClass } else { 'Current' }
-            Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $ScriptRoot $name) -AllowedRoot $ScriptRoot -SourceLabel ('TPM:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName (Get-TpmSupportDiagnosticName -Prefix ('tpm-{0:D2}-' -f $index) -Value (Get-TpmSupportSafeName $name)) -EvidenceClass $evidenceClass
+            $preferredPath = if ($name -eq 'TeknoParrot-Manager.log') { Join-Path $ScriptRoot ('Logs\' + $name) } else { Join-Path $ScriptRoot ('Reports\' + $name) }
+            $sourcePath = if (Test-Path -LiteralPath $preferredPath -PathType Leaf) { $preferredPath } else { Join-Path $ScriptRoot $name }
+            Copy-TpmSupportTextFile -Records $records -SourcePath $sourcePath -AllowedRoot $ScriptRoot -SourceLabel ('TPM:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName (Get-TpmSupportDiagnosticName -Prefix ('tpm-{0:D2}-' -f $index) -Value (Get-TpmSupportSafeName $name)) -EvidenceClass $evidenceClass
         }
-        Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $ScriptRoot 'TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt') -AllowedRoot $ScriptRoot -SourceLabel 'TeknoParrotUI:Troubleshooting intake' -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName 'tpui-troubleshooting.txt' -EvidenceClass Ambient
+        $troubleshootingPath = Join-Path $ScriptRoot 'Reports\TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt'
+        if (-not (Test-Path -LiteralPath $troubleshootingPath -PathType Leaf)) { $troubleshootingPath = Join-Path $ScriptRoot 'TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt' }
+        Copy-TpmSupportTextFile -Records $records -SourcePath $troubleshootingPath -AllowedRoot $ScriptRoot -SourceLabel 'TeknoParrotUI:Troubleshooting intake' -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName 'tpui-troubleshooting.txt' -EvidenceClass Ambient
         Complete-TpmWorkflowStep -Context $status -Summary 'TPM diagnostics checked' -NextStep 'TeknoParrot diagnostics'
         Start-TpmWorkflowStep -Context $status -StepId 'tekno' -Activity 'Checking allowlisted TeknoParrot logs'
         if ([string]::IsNullOrWhiteSpace($TeknoParrotRoot)) {
@@ -1800,8 +1926,7 @@ function New-TpmSupportPackage {
         }
         $workflowEvidencePath = Join-Path $stage 'metadata\workflow-result.json'
         [System.IO.File]::WriteAllText($workflowEvidencePath, ($workflowEvidence | ConvertTo-Json -Depth 6) + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
-        Add-TpmSupportRecord -Records $records -Source 'TPM:workflow result' -Status Collected -Destination 'metadata\workflow-result.json' -Detail 'RunId-linked latest workflow and support workflow state.'
-        $manifest = Get-TpmSupportManifestText -Records $records -Errors $errors -GameCodes @($gameCodes) -AffectedGameSummary $AffectedGameSummary -RunId $runId -LatestWorkflowResult $latestWorkflowResult -SupportWorkflowResult $supportWorkflowResult -ActionItemsPath (Join-Path $ScriptRoot 'TeknoParrot-Manager-ActionItems.txt') -ManagerLogPath (Join-Path $ScriptRoot 'TeknoParrot-Manager.log')
+        $manifest = Get-TpmSupportManifestText -Records $records -Errors $errors -GameCodes @($gameCodes) -AffectedGameSummary $AffectedGameSummary -RunId $runId -LatestWorkflowResult $latestWorkflowResult -SupportWorkflowResult $supportWorkflowResult -ActionItemsPath $actionItemsPath -ManagerLogPath $managerLogPath
         [System.IO.File]::WriteAllText((Join-Path $stage 'MANIFEST.txt'), $manifest, (New-Object System.Text.UTF8Encoding($false)))
         $readme = @(
             'TPM Support Package'
@@ -5484,7 +5609,7 @@ function New-TpmReShadePreviewArtifact {
         $catalog=@(Get-TpmReShadeEffectCatalog);$hashes=@()
         foreach($id in @($ProfileDefinition.Effects)){$effect=@($catalog|Where-Object EffectId -eq $id)[0];if(-not $effect){return [pscustomobject]@{Available=$false;Reason='UNAPPROVED_EFFECT';Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}};$hashes+=@($effect.SHA256)}
         $key=Get-TpmReShadePreviewCacheKey -SubjectId ($ProfileDefinition.ProfileId+'|'+$Mode+'|'+$SliderPosition) -ShaderSha256 $hashes -IntensityId $IntensityId -PresetVersion ([string]$ProfileDefinition.SchemaVersion) -ReferenceVersion $reference.Version -ReferenceSha256 $reference.Hash -RendererVersion '3'
-        $sourceRoot=if($PreviewRoot){[IO.Path]::GetFullPath($PreviewRoot)}else{[IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShadePreviewCache'))}
+        $sourceRoot=if($PreviewRoot){[IO.Path]::GetFullPath($PreviewRoot)}elseif($script:TpmOwnedLayout){[IO.Path]::GetFullPath((Join-Path $script:TpmOwnedLayout.Cache 'ReShadePreviewCache'))}else{[IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShadePreviewCache'))}
         $root=if($CacheRoot){[IO.Path]::GetFullPath($CacheRoot)}else{[IO.Path]::GetFullPath((Join-Path $sourceRoot 'Cache'))}
         $previewRootFull=$sourceRoot
         if(-not $root.StartsWith($previewRootFull.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)){return [pscustomobject]@{Available=$false;Reason='CACHE_ROOT_UNSAFE';Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}}
@@ -7139,7 +7264,7 @@ function Invoke-ReShadeUpdateIfAvailable {
     if ($choice -ne 'Y') { Write-Log ("ReShade update declined: installed={0}; available={1}" -f $InstalledVersion, $latest); return [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 } }
     $url = Get-ReShadeSetupDownloadUrl -Version $latest
     if (-not $url) { Write-Host '  ReShade update could not be started safely; keeping the installed version.' -ForegroundColor Yellow; return [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 } }
-    $cacheDir = Join-Path $PSScriptRoot 'ReShade'
+    $cacheDir = if($script:TpmOwnedLayout){Join-Path $script:TpmOwnedLayout.Assets 'ReShade'}else{Join-Path $PSScriptRoot 'ReShade'}
     $setupPath = Join-Path $cacheDir ("ReShade_Setup_{0}.exe" -f $latest)
     try {
         [void][IO.Directory]::CreateDirectory($cacheDir)
@@ -7541,7 +7666,7 @@ function Invoke-ReShadeSetup {
         return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'SOURCE_DLL_UNAVAILABLE' }
     }
     # Initialize one validated cache before any game processing.
-    $reShadeCacheRoot = Join-Path $PSScriptRoot 'ReShade'
+    $reShadeCacheRoot = if($script:TpmOwnedLayout){Join-Path $script:TpmOwnedLayout.Assets 'ReShade'}else{Join-Path $PSScriptRoot 'ReShade'}
     try {
         if ([string]::IsNullOrWhiteSpace($reShadeCacheRoot)) { throw 'The ReShade cache path resolved to an empty string.' }
         [void][IO.Directory]::CreateDirectory($reShadeCacheRoot)
@@ -7656,7 +7781,7 @@ function Invoke-ReShadeSetup {
     # over the global choice above for that one game. Same convention as
     # CustomThumbnails\<ProfileCode>.png (Invoke-ThumbnailDownload) -- file
     # name is the profile code, validated against registered profiles, with
-    $reShadePresetsDir = Join-Path $PSScriptRoot "ReShadePresets"
+    $reShadePresetsDir = if($script:TpmOwnedLayout){Join-Path $script:TpmOwnedLayout.Assets 'ReShadePresets'}else{Join-Path $PSScriptRoot "ReShadePresets"}
     if (Test-Path -LiteralPath $reShadePresetsDir) {
         $presetFiles = @(Get-ChildItem -LiteralPath $reShadePresetsDir -Filter "*.ini" -File -ErrorAction SilentlyContinue)
         if ($presetFiles.Count -gt 0) {
@@ -8113,7 +8238,7 @@ function Invoke-DgVoodoo2Setup {
     # wins over the global dgVoodoo.conf in $SourceDir for that one game.
     # Same convention as ReShadePresets\<ProfileCode>.ini (Invoke-ReShadeSetup)
     # and CustomThumbnails\<ProfileCode>.png (Invoke-ThumbnailDownload).
-    $dgVoodoo2PresetsDir = Join-Path $PSScriptRoot "dgVoodoo2Presets"
+    $dgVoodoo2PresetsDir = if($script:TpmOwnedLayout){Join-Path $script:TpmOwnedLayout.Assets 'dgVoodoo2Presets'}else{Join-Path $PSScriptRoot "dgVoodoo2Presets"}
     if (Test-Path -LiteralPath $dgVoodoo2PresetsDir) {
         $confFiles = @(Get-ChildItem -LiteralPath $dgVoodoo2PresetsDir -Filter "*.conf" -File -ErrorAction SilentlyContinue)
         if ($confFiles.Count -gt 0) {
@@ -19563,7 +19688,7 @@ function Invoke-ThumbnailDownload {
 
     if ($profiles.Count -eq 0) {
         Write-Host "  No registered profiles found." -ForegroundColor DarkGray
-        if (Test-Path -LiteralPath (Join-Path $PSScriptRoot "CustomThumbnails")) {
+        if (Test-Path -LiteralPath (if($script:TpmOwnedLayout){Join-Path $script:TpmOwnedLayout.Assets 'CustomThumbnails'}else{Join-Path $PSScriptRoot "CustomThumbnails"})) {
             Write-Host "  (Custom thumbnails in CustomThumbnails\ will be processed once games are registered.)" -ForegroundColor DarkGray
         }
         Write-Log "Thumbnails: no registered profiles -- custom copy and download skipped."
@@ -19577,7 +19702,7 @@ function Invoke-ThumbnailDownload {
 
     # Copy custom thumbnails from Scripts\CustomThumbnails\ into the Icons folder.
     # Each file is validated against the registered profile codes first.
-    $customThumbDir = Join-Path $PSScriptRoot "CustomThumbnails"
+    $customThumbDir = if($script:TpmOwnedLayout){Join-Path $script:TpmOwnedLayout.Assets 'CustomThumbnails'}else{Join-Path $PSScriptRoot "CustomThumbnails"}
     if (Test-Path -LiteralPath $customThumbDir) {
         $customFiles = @(Get-ChildItem -LiteralPath $customThumbDir -Filter "*.png" -File -ErrorAction SilentlyContinue)
         if ($customFiles.Count -gt 0) {
@@ -20389,7 +20514,6 @@ function Get-OnboardingHandoffSummaryLines {
     # Every non-Complete wizard state carries the same caveat: TPM cannot
     # prove TeknoParrot's own setup wizard is done, so it must not imply
     # that it is. Only 'Complete' -- FirstTimeSetupComplete read as true --
-    # omits it.
     $wizardCaveat = ' -- TeknoParrot may still ask you to complete its setup wizard'
     $wizardText = switch ($WizardState.State) {
         'Complete'   { 'TeknoParrot first-run setup: Complete' }
@@ -20497,6 +20621,12 @@ Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }
 # =============================================================================
 
 $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
+if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+    foreach ($candidateRoot in @(Find-TeknoParrotRoot)) {
+        $candidateConfig = Join-Path $candidateRoot 'TeknoParrotManager\State\TeknoParrot-Manager.config.json'
+        if (Test-Path -LiteralPath $candidateConfig -PathType Leaf) { $configPath = $candidateConfig; break }
+    }
+}
 $isPostgresRecoveryResume = -not [string]::IsNullOrWhiteSpace($PostgresRecoveryResumeToken)
 $tpRoot             = $null
 $mode               = $null   # "AutoSync", "RegisterOnly", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", "GpuFixSetup", "FFBSetup", "BepInExUpdate", "Restore", or "HealthCheck"
@@ -21007,6 +21137,25 @@ if (-not (Test-Path -LiteralPath $tpExe)) {
     Write-Host ""; Write-Host "ERROR: TeknoParrotUi.exe not found in: $tpRoot" -ForegroundColor Red
     Write-Host "Make sure the path points to the TeknoParrot root folder." -ForegroundColor Yellow
     Write-Log "ERROR: TeknoParrotUi.exe not found."; exit 1
+}
+
+$script:TpmOwnedLayout = Initialize-TpmOwnedLayout -Layout (Get-TpmOwnedLayout -TeknoParrotRoot $tpRoot)
+$migration = Invoke-TpmOwnedMigration -ScriptRoot $PSScriptRoot -Layout $script:TpmOwnedLayout -Unattended:$Unattended
+if ($migration.Status -eq 'Ambiguous') {
+    Write-Host ("  Migration is blocked until the ambiguous destination is reviewed. Details: {0}" -f $migration.ReportPath) -ForegroundColor Yellow
+} elseif ($migration.Status -eq 'Moved') {
+    Write-Host ("  TPM-owned files moved into: {0}" -f $script:TpmOwnedLayout.Root) -ForegroundColor Green
+    Write-Host ("  Migration report: {0}" -f $migration.ReportPath) -ForegroundColor DarkGray
+}
+$logPath = $script:TpmOwnedLayout.LogPath
+$configPath = $script:TpmOwnedLayout.ConfigPath
+if ($rsSourceDll -and -not (Test-Path -LiteralPath $rsSourceDll -PathType Leaf)) {
+    $candidate = Join-Path $script:TpmOwnedLayout.Assets ('ReShade\' + [System.IO.Path]::GetFileName($rsSourceDll))
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $rsSourceDll = $candidate }
+}
+if ($rsSourceDll32 -and -not (Test-Path -LiteralPath $rsSourceDll32 -PathType Leaf)) {
+    $candidate = Join-Path $script:TpmOwnedLayout.Assets ('ReShade\' + [System.IO.Path]::GetFileName($rsSourceDll32))
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $rsSourceDll32 = $candidate }
 }
 
 $gameProfilesDir = Join-Path $tpRoot "GameProfiles"
@@ -22396,6 +22545,7 @@ try {
 Set-ConsoleMaximizedIfSupported
 function Invoke-TpmFfbSetupMode {
     param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$TpRoot, [string]$ScriptRoot = $PSScriptRoot, [scriptblock]$EventSink = $null)
+    if ([string]::IsNullOrWhiteSpace($ScriptRoot)) { $ScriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path } }
     Write-Host ""
     Write-Host "  Force feedback makes a wheel or stick push back / rumble to match" -ForegroundColor Cyan
     Write-Host "  what's happening on screen (e.g. road vibration, recoil, collisions)." -ForegroundColor Cyan
@@ -22454,7 +22604,8 @@ function Invoke-TpmFfbSetupMode {
     $plugin = $null
     if ($choice -eq 'Y') {
         [void](Start-TpmWorkflowStep -Context $status -StepId 'plugin' -Activity 'Downloading and applying the optional plugin')
-        $plugin = Invoke-FFBPluginSetup -UserProfilesDir $UserProfilesDir -CacheDir (Join-Path $ScriptRoot 'FFBPlugin') -NativeEnabledCodes $nativeCodes -TpRoot $TpRoot
+        $ffbCacheRoot = if ($script:TpmOwnedLayout) { Join-Path $script:TpmOwnedLayout.Cache 'FFBPlugin' } else { Join-Path $ScriptRoot 'FFBPlugin' }
+        $plugin = Invoke-FFBPluginSetup -UserProfilesDir $UserProfilesDir -CacheDir $ffbCacheRoot -NativeEnabledCodes $nativeCodes -TpRoot $TpRoot
         if (-not ($plugin -and $plugin.Succeeded)) {
             [void](Set-TpmWorkflowFailure -Context $status -FailureId 'ffb-plugin-failed' -Message 'The optional force-feedback plugin was not completed.' -DataSafety 'TPM did not claim a complete third-party plugin deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
             [void](Read-HostSafe 'Press Enter to acknowledge the force-feedback result')
@@ -22555,7 +22706,7 @@ $mode = $null
         continue
     }
     if ($modeChoice -eq 'L') {
-        $logResult = Open-TpmLogsAndReports -ScriptRoot $PSScriptRoot
+        $logResult = Open-TpmLogsAndReports -ScriptRoot $script:TpmOwnedLayout.Logs
         if ($logResult.Succeeded) {
             Write-Host ("  Log folder opened: {0}" -f $logResult.Path) -ForegroundColor Green
         } else {
@@ -23421,7 +23572,7 @@ $mode = $null
         Write-Host "  3) Return to the main menu"
         $supportChoice = Read-TpmChoice -Prompt "  Choose 1-3" -Choices @('1', '2', '3')
         if ($supportChoice -eq '2') {
-            $openResult = Open-TpmLogsAndReports -ScriptRoot $PSScriptRoot
+            $openResult = Open-TpmLogsAndReports -ScriptRoot $script:TpmOwnedLayout.Logs
             if ($openResult.Succeeded) {
                 Write-Host ("  Opened: {0}" -f $openResult.Path) -ForegroundColor Green
             } else {
@@ -23432,7 +23583,7 @@ $mode = $null
             continue
         }
         if ($supportChoice -eq '1') {
-            $supportResult = New-TpmSupportPackage -ScriptRoot $PSScriptRoot -TeknoParrotRoot $tpRoot -UserProfilesDir $userProfilesDir -ApprovedGamesRoot $gamesInstallFolder
+            $supportResult = New-TpmSupportPackage -ScriptRoot $script:TpmOwnedLayout.Root -TeknoParrotRoot $tpRoot -UserProfilesDir $userProfilesDir -ApprovedGamesRoot $gamesInstallFolder
             Write-Host ""
             if ($supportResult.Succeeded) {
                 Write-Host "  What failed:" -ForegroundColor Yellow
@@ -24155,7 +24306,7 @@ $mode = $null
     }
 
     if ($mode -eq "FFBSetup") {
-        $ffbModeResult = Invoke-TpmFfbSetupMode -UserProfilesDir $userProfilesDir -TpRoot $tpRoot -ScriptRoot $PSScriptRoot
+        $ffbModeResult = Invoke-TpmFfbSetupMode -UserProfilesDir $userProfilesDir -TpRoot $tpRoot -ScriptRoot $script:TpmOwnedLayout.Root
         $ffbHasPathIssue = ($ffbModeResult -and ($ffbModeResult.MissingPath -gt 0 -or $ffbModeResult.MissingDevice -gt 0))
         if ($ffbHasPathIssue) {
             Write-Host ""

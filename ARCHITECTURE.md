@@ -15,6 +15,23 @@ Current release state: v1.0 RC7 is the current published release; RC8 is the
 candidate being prepared and is not published; v1.0 RC6 is the previous
 published release (historical); final Version 1.0 remains unpublished.
 
+## TPM-owned runtime layout and migration (RC8 candidate)
+
+TPM-generated runtime state is rooted at
+`<TeknoParrotRoot>\TeknoParrotManager\`, with separate `Logs`, `Reports`,
+`SupportPackages`, `State`, `Cache`, `Manifests`, `Backups`, `Temp`, and
+`Assets` directories. TeknoParrot-owned `UserProfiles`, `GameProfiles`, game
+folders, and required emulator configuration remain in their existing
+locations. Shipped program files under the repository root (`scripts`,
+`tools`, and `contracts`) remain package-layout files, not runtime state.
+
+The startup migration recognizes only an explicit allowlist of known TPM-owned
+files and directories from the old script-root layout. It presents every
+planned move, writes a migration report, refuses destination collisions as
+ambiguous, and never moves TeknoParrot-owned paths. Unattended mode does not
+apply ambiguous migrations. Existing backup trees move under `Backups` without
+replacement. Support collection and log opening use the new runtime roots.
+
 ---
 ## RC8 runtime recovery and visual selection
 ## Beginner-friendly default UX (RC8 release gate)

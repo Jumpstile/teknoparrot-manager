@@ -5731,7 +5731,7 @@ Describe "RC8 PostgreSQL and support UX" {
         $failedSection[0] | Should -Match 'TPM:required report'
         $failedSection[0] | Should -Not -Match 'Game:Other:plugin inventory'
         $text | Should -Match 'What TPM could not collect:'
-        $text | Should -Match 'Not collected: Game:Other:plugin inventory'
+        $text | Should -Match 'CollectionFailed.*Game:Other:plugin inventory'
         $text | Should -Match 'What TPM did not change:'
         $text | Should -Match 'No game files, executables, DLL payloads, profiles, credentials, or emulator files'
         $script:ProductionSource | Should -Match 'Redact-TpmSupportText -Text \(\[string\]\$record\.Source\)'
@@ -9377,7 +9377,7 @@ Describe "RC8 main-menu command routing and visibility" {
     It "routes help and log before numeric workflow dispatch" {
         $script:ProductionSource | Should -Match '(?s)if \(\$modeChoice -eq ''H''\).*Show-MainMenuHelp'
         $script:ProductionSource | Should -Match '(?s)if \(\$modeChoice -eq ''L''\).*Open-TpmLogsAndReports'
-        $script:ProductionSource | Should -Match 'Open-TpmLogsAndReports -ScriptRoot \$PSScriptRoot'
+        $script:ProductionSource | Should -Match 'Open-TpmLogsAndReports -ScriptRoot \$script:TpmOwnedLayout\.Logs'
         $script:ProductionSource | Should -Not -Match "Run in PREVIEW mode first\?.*\(Y/N"
     }
     It "does not advertise unattended mode in the normal footer" {
@@ -13247,7 +13247,7 @@ Describe "Action Required report output" {
 Describe "Post-0909174 remediation result UX contracts" {
     It "initializes ReShade cache before game processing and reports one fail-closed cause" {
         $source = $script:ProductionSource
-        $source | Should -Match '\$reShadeCacheRoot = Join-Path \$PSScriptRoot ''ReShade'''
+        $source | Should -Match '\$reShadeCacheRoot = if\(\$script:TpmOwnedLayout\)'
         $source | Should -Match 'CACHE_UNAVAILABLE'
         $source | Should -Match 'blocked once before game processing'
         $source | Should -Not -Match 'Cannot bind argument to parameter'
@@ -13902,4 +13902,43 @@ Describe "ReShade protected adoption and accounting" {
         $source | Should -Match 'NativeShaderWarnings'
     }
 }
+}
+
+Describe 'TPM-owned layout and legacy migration' {
+    It 'moves only known TPM-owned items and preserves TeknoParrot-owned folders' {
+        $root = Join-Path $TestDrive 'migration'
+        $scriptRoot = Join-Path $root 'program'
+        $tpRoot = Join-Path $root 'TeknoParrot'
+        New-Item -ItemType Directory -Path $scriptRoot,$tpRoot,(Join-Path $tpRoot 'GameProfiles') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $scriptRoot 'TeknoParrot-Manager.log') -Value 'log' -Encoding utf8
+        New-Item -ItemType Directory -Path (Join-Path $scriptRoot 'SupportPackages') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $scriptRoot 'SupportPackages\old.zip') -Value 'package' -Encoding utf8
+        $layout = Initialize-TpmOwnedLayout -Layout (Get-TpmOwnedLayout -TeknoParrotRoot $tpRoot)
+
+        $result = Invoke-TpmOwnedMigration -ScriptRoot $scriptRoot -Layout $layout -Unattended
+
+        $result.Status | Should -Be 'Moved'
+        Test-Path -LiteralPath (Join-Path $layout.Logs 'TeknoParrot-Manager.log') -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $layout.SupportPackages 'old.zip') -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $tpRoot 'GameProfiles') -PathType Container | Should -BeTrue
+        Test-Path -LiteralPath $result.ReportPath -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $scriptRoot 'TeknoParrot-Manager.log') -PathType Leaf | Should -BeFalse
+    }
+
+    It 'blocks ambiguous destinations without moving the legacy source' {
+        $root = Join-Path $TestDrive 'ambiguous'
+        $scriptRoot = Join-Path $root 'program'
+        $tpRoot = Join-Path $root 'TeknoParrot'
+        New-Item -ItemType Directory -Path $scriptRoot,$tpRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $scriptRoot 'TeknoParrot-Manager.log') -Value 'legacy' -Encoding utf8
+        $layout = Initialize-TpmOwnedLayout -Layout (Get-TpmOwnedLayout -TeknoParrotRoot $tpRoot)
+        Set-Content -LiteralPath (Join-Path $layout.Logs 'TeknoParrot-Manager.log') -Value 'new' -Encoding utf8
+
+        $result = Invoke-TpmOwnedMigration -ScriptRoot $scriptRoot -Layout $layout -Unattended
+
+        $result.Status | Should -Be 'Ambiguous'
+        Get-Content -LiteralPath (Join-Path $scriptRoot 'TeknoParrot-Manager.log') -Raw | Should -Match 'legacy'
+        Get-Content -LiteralPath (Join-Path $layout.Logs 'TeknoParrot-Manager.log') -Raw | Should -Match 'new'
+        Test-Path -LiteralPath $result.ReportPath -PathType Leaf | Should -BeTrue
+    }
 }
