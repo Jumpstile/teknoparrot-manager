@@ -48,10 +48,10 @@
 | 23 | LaunchBox Back gate | SOURCE FIXED; OWNER RUNTIME NEEDED | Optional-chain routing | LaunchBox Back coverage | Packaged B smoke |
 | 24 | LaunchBox prompt wording | SOURCE FIXED; OWNER RUNTIME NEEDED | LaunchBox `P/A/F/B`, detected-root, and platform prompts | `Prompt.Core fixed choice routes`; `Read-TpmChoice validation` | Guided packaged prompt smoke |
 | 25 | HyperSpin direct prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | `Export-HyperSpinJson` missing-ID `G/S` choice | `Prompt.Core fixed choice routes`; source parse | Normal completion smoke |
-| 26 | Invalid optional Y/N input | SOURCE FIXED; OWNER RUNTIME NEEDED | Centralized finite-choice routes plus documented stateful picker boundaries | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Invalid-input matrix |
+| 26 | Invalid optional Y/N input | SOURCE FIXED; OWNER RUNTIME NEEDED | Centralized finite-choice routes plus documented stateful/exact-token/secure/path boundaries | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Invalid-input matrix |
 | 27 | Support final prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | Support `1-3` and package `O/B` routes | `Prompt.Core fixed choice routes`; SupportPackage.Tests | Packaged support prompt |
-| 28 | Fatal workflow surfacing | SOURCE FIXED; OWNER RUNTIME NEEDED | Get-TpmSupportManifestText | SupportPackage.Tests: `records Action Required freshness in the packaged manifest` | Fresh fatal-log package |
-| 29 | Action Required freshness | SOURCE FIXED; OWNER RUNTIME NEEDED | New-TpmSupportPackage | SupportPackage.Tests: `records Action Required freshness in the packaged manifest` | Multiple-report package |
+| 28 | Fatal support workflow surfacing | SOURCE FIXED; OWNER RUNTIME NEEDED | Get-TpmSupportManifestText | SupportPackage.Tests: `records Action Required freshness in the packaged manifest` | Fresh fatal-log package |
+| 29 | Action Required freshness/scoping | NOT FIXED | New-TpmSupportPackage; EvidenceClass manifest records | SupportPackage.Tests; support evidence source review | Complete troubleshooting intake and rebuilt support package |
 | 30 | Controls truthfulness | SOURCE FIXED; OWNER RUNTIME NEEDED | `Write-ControlPropagationResults`; control-readiness engine | `Write-ControlPropagationResults` focused tests; existing controls tests | Zero-bound packaged runtime result |
 | 31 | dgVoodoo2 wording | SOURCE FIXED; OWNER RUNTIME NEEDED | dgVoodoo2 result wording | No dedicated wording test | Owner wording review |
 | 32 | Global consistency rule | SOURCE FIXED; OWNER RUNTIME NEEDED | `TPM-PROMPT-001` finite-choice inventory and documented stateful/exact-token/secure/path/renderer-aware boundaries | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Packaged consistency smoke |
@@ -210,3 +210,65 @@ null/back/cancel, preview synchronization, universal progress, GPU and
 thumbnail progress, crosshair close/focus/row placement, PostgreSQL retry,
 LaunchBox/HyperSpin gates, affected-games repair scoping, support-package
 freshness/fatal evidence, and controls truthfulness.
+## Live re-audit correction -- 2026-09-08
+
+The prior owner-report table incorrectly treated every row as `SOURCE FIXED; OWNER RUNTIME NEEDED`. That blanket status is withdrawn. The canonical corrected 32-row table is now in `docs/remediation/PR-321-control-board.md` under the same heading.
+
+Corrections supported by new evidence:
+
+- IDs 13 and 14 (Crosshair browser close/focus) are `SOURCE CLAIM INVALID / RE-AUDIT REQUIRED`: generated HTML has no `window.close()` implementation, so the prior source-fixed claim was false.
+- ID 2 (duplicate `ErrorAction`) is `SOURCE REMEDIATION REQUIRED`: direct search of `TeknoParrotManager-Support-20260908-023904.zip` found the exact error repeatedly in startup update, Eggman DAT, ProfileSet GitHub, thumbnails, Eggman game-data, and PostgreSQL-resume runs.
+- ID 29 (Action Required freshness/scoping) is split: stale labeling is working in the current manifest; ambient FamilyGuy/BepInEx/plugin diagnostics are not clearly labeled as untested/current-run evidence and require source remediation.
+- ID 16 (PostgreSQL recovery) remains source remediation required until thrown messages and caller display are verified as beginner-safe categorized reasons; raw exception text is not accepted as sufficient evidence.
+- IDs 11-12, 17-19, 21-22, and 29 require source remediation. Rows not explicitly marked source remediation require renewed source/package audit before owner-runtime-only classification.
+
+The previous "32 owner-runtime-only" count is unreliable. The candidate package/source gate is not trustworthy for release acceptance. Re-audit and source remediation must precede package rebuild and owner-runtime retest.
+
+The re-audit itself made no source changes. The subsequent bounded slice changed only PostgreSQL recovery reason classification and the web-wrapper parameter name, with focused source tests; no package, release, certification, push, or ARCADE/#323 action was performed. The changelog now carries the required blocked wording.
+## Corrected owner-ID status table
+
+| ID | Workflow | Prior status | Corrected status | Evidence | Source remediation | Owner retest | Live record |
+|---:|---|---|---|---|---|---|---|
+| 1 | Startup/ReShade | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | No contrary source evidence | No | Yes | 5578628627 |
+| 2 | Web/Eggman GitHub | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Wrapper now uses RequestErrorAction; prior log defect was confirmed and remediated in source | No | Yes | 5578636706; 5578669949 |
+| 3 | Universal progress | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Candidate owner evidence invalidated blanket source claim | Yes, audit first | Yes | 5578628627 |
+| 4 | AutoSync progress | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | No trusted packaged scan proof | Yes, audit first | Yes | 5578628627 |
+| 5 | GPU UX | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Source contracts exist; package gate unreliable | Yes, audit first | Yes | 5578628627 |
+| 6 | Thumbnail progress | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Support log shows failed thumbnail requests and wrapper defect | Yes | Yes | 5578636706 |
+| 7 | Thumbnail accounting | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | No complete current-run no-icon proof | Yes, audit first | Yes | 5578628627 |
+| 8 | Thumbnail fallback | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | 404/fallback path hit duplicate ErrorAction before slice | Yes | Yes | 5578636706 |
+| 9 | ReShade preview sync | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Source/test evidence not contradicted | No | Yes | 5578628627 |
+| 10 | ReShade selector | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Selector contract remains source-supported | No | Yes | 5578628627 |
+| 11 | ReShade protected ownership | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Ownership claim requires source re-audit before trust | Yes | Yes | 5578628627 |
+| 12 | ReShade accounting/result | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Accounting accepted before failed package smoke | Yes | Yes | 5578628627 |
+| 13 | Crosshair close | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM INVALID / RE-AUDIT REQUIRED | Export-CrosshairPreview HTML has no window.close() | Yes | Yes | 5578597851; 5578637913 |
+| 14 | Crosshair focus | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM INVALID / RE-AUDIT REQUIRED | Focus claim coupled to invalid browser lifecycle claim | Yes | Yes | 5578597851; 5578637913 |
+| 15 | Crosshair prompt row | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Separate Invoke-CrosshairSetup/Read-TpmWorkflowInput path | Yes, audit first | Yes | 5578637913 |
+| 16 | PostgreSQL recovery | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Categorized resume reasons and reachable P path; focused tests pass | No | Yes | 5578669949 |
+| 17 | Health Check scope | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | BBHWorld/affected-game scope not proven | Yes | Yes | 5578628627 |
+| 18 | Health Check no-candidate | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Owner failure remains unresolved | Yes | Yes | 5578628627 |
+| 19 | Health Check recopy | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Scoped source recopy not proven | Yes | Yes | 5578628627 |
+| 20 | Health Check Back | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Source route exists; package proof unreliable | Yes, audit first | Yes | 5578628627 |
+| 21 | Repair result clarity | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Repair accounting not trustworthy | Yes | Yes | 5578628627 |
+| 22 | Post-thumbnail repair | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Affected-only handoff not proven | Yes | Yes | 5578628627 |
+| 23 | LaunchBox Back | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Packaged Back proof absent | Yes, audit first | Yes | 5578628627 |
+| 24 | LaunchBox prompts | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Prompt source tests exist; package gate unreliable | Yes, audit first | Yes | 5578628627 |
+| 25 | HyperSpin missing ID | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Provisional source pass only | Yes, audit first | Yes | 5578628627 |
+| 26 | Optional Y/N | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Central contract requires renewed all-row audit | Yes, audit first | Yes | 5578628627 |
+| 27 | Support prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Packaged prompt proof absent | Yes, audit first | Yes | 5578628627 |
+| 28 | Fatal support evidence | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Manifest/focused source coverage exists | No | Yes | 5578628627 |
+| 29 | Support freshness/scoping | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Stale label works; ambient evidence scope is incomplete | Yes | Yes | 5578628627 |
+| 30 | Controls truthfulness | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Focused tests exist; owner proof pending | Yes, audit first | Yes | 5578628627 |
+| 31 | dgVoodoo2 wording | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | No dedicated wording proof | Yes, audit first | Yes | 5578628627 |
+| 32 | Global consistency | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Prior blanket count withdrawn | Yes, audit first | Yes | 5578628627 |
+
+Product requirements retained for subsequent slices:
+
+- Collect allowlisted TeknoParrot logs and TeknoParrotUI Troubleshooting output, preserving exact shader/display fields and current/ambient/stale classification.
+- Preserve affected-game profile evidence snapshots without copying raw unrelated UserProfiles.
+- Organize TPM-owned state under `<TeknoParrotRoot>\TeknoParrotManager` with safe migration and conflict preservation.
+- Use real deployed ReShade shader/effect names in friendly names or Details.
+- Read and preserve TeknoParrot-native CRT/SSAA/display settings; never mutate them in ReShade setup.
+- Harden the existing mode-8 FFBPlugin path; do not add a parallel implementation.
+
+First remediation slice completed at source/test level: PostgreSQL recovery reason classification plus duplicate-ErrorAction web-wrapper remediation. No package or runtime proof claimed.

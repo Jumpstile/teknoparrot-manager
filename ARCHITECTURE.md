@@ -87,6 +87,12 @@ is the mutation cutoff. If it succeeds but service restart or new-password
 authentication cannot be verified, recovery returns `PasswordChangeCommitted`
 and a blocked result with evidence; it never says the old password remains
 authoritative and never saves the unverified replacement credential.
+When a protected database backup fails because the saved password is rejected, the
+recovery screen exposes a reachable masked password validation action (`P`) and
+keeps raw client diagnostics behind Details. A protected UAC resume suppresses
+unrelated startup, DAT, and GitHub prompts; it consumes only the durable recovery
+envelope and reports a concrete validation reason when that envelope or its
+selection plan cannot be trusted.
 
 
 ## Startup: network-path detection and hard timeout (v0.99.23)

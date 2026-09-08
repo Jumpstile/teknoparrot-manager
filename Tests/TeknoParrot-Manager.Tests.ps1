@@ -5636,10 +5636,18 @@ Describe "RC8 PostgreSQL and support UX" {
         $script:ProductionSource | Should -Match '\[D\] Show details'
         $script:ProductionSource | Should -Match '\[O\] Open logs/support guidance'
         $script:ProductionSource | Should -Match '\[B\] Back to main menu'
-        $script:ProductionSource | Should -Not -Match '\[R\] Repair PostgreSQL automatically'
-        $script:ProductionSource | Should -Not -Match '\[F\].*\[X\].*\[R\].*\[D\].*\[O\].*\[S\].*\[B\]'
-        $script:ProductionSource | Should -Not -Match 'Write-Host ".*\[F\].*\[X\].*Skip'
+        $script:ProductionSource | Should -Match '\[P\] Enter and test a postgres password'
+        $script:ProductionSource | Should -Match '\$backupChoices = if \(\$authFailure\)'
+        $script:ProductionSource | Should -Not -Match 'Read-TpmChoice -Prompt .*Choices @\(''R'', ''I'', ''D'', ''O'', ''B''\)'
         $script:ProductionSource | Should -Match 'FailureDetails'
+        $script:ProductionSource | Should -Match 'protected PostgreSQL setup\. Reason \[.*\]:'
+        $script:ProductionSource | Should -Match 'RESUME_EXPIRED|PACKAGE_MISMATCH|SELECTION_PLAN_INVALID'
+        $script:ProductionSource | Should -Match '\$eggmanDatZip -and -not \$Unattended -and -not \$isPostgresRecoveryResume'
+    }
+    It "uses one unambiguous request-action parameter for the web wrapper" {
+        $script:ProductionSource | Should -Match '\[System\.Management\.Automation\.ActionPreference\]\$RequestErrorAction'
+        $script:ProductionSource | Should -Match 'ErrorAction = \$RequestErrorAction'
+        $script:ProductionSource | Should -Not -Match 'Invoke-TpmWebRequestSilently[^\r\n]*-ErrorAction'
     }
     It "diagnoses the service, client tools, version, and failed database without changing state" {
         $script:PostgresBinDir = Join-Path $TestDrive 'postgres-bin'

@@ -1232,7 +1232,8 @@ function Add-TpmSupportRecord {
         [Parameter(Mandatory)][ValidateSet('Collected','NotPresent','IntentionallyExcluded','RejectedUnsafeContent','CollectionFailed')][string]$Status,
         [string]$Destination = '',
         [string]$Detail = '',
-        [int]$Redactions = 0
+        [int]$Redactions = 0,
+        [ValidateSet('Current','Ambient','Stale')][string]$EvidenceClass = 'Current'
     )
     $safeDetail = (Redact-TpmSupportText -Text $Detail).Text
     [void]$Records.Add([pscustomobject]@{
@@ -1241,8 +1242,10 @@ function Add-TpmSupportRecord {
         Destination = $Destination
         Detail = $safeDetail
         Redactions = $Redactions
+        EvidenceClass = $EvidenceClass
     })
 }
+
 
 function Copy-TpmSupportTextFile {
     param(
@@ -1252,10 +1255,11 @@ function Copy-TpmSupportTextFile {
         [Parameter(Mandatory)][string]$SourceLabel,
         [Parameter(Mandatory)][string]$StageDirectory,
         [Parameter(Mandatory)][string]$DestinationName,
-        [int64]$MaximumBytes = 5242880
+        [int64]$MaximumBytes = 5242880,
+        [ValidateSet('Current','Ambient','Stale')][string]$EvidenceClass = 'Current'
     )
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
-        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status NotPresent -Detail 'Expected diagnostic file was not present.'
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status NotPresent -Detail 'Expected diagnostic file was not present.' -EvidenceClass $EvidenceClass
         return
     }
     $opened = $null
@@ -1275,7 +1279,7 @@ function Copy-TpmSupportTextFile {
         }
         $content = Test-TpmSupportTextContent -Bytes $bytes
         if (-not $content.Safe) {
-            Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status RejectedUnsafeContent -Detail ('Diagnostic content rejected: ' + $content.Reason)
+            Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status RejectedUnsafeContent -Detail ('Diagnostic content rejected: ' + $content.Reason) -EvidenceClass $EvidenceClass
             return
         }
         $redacted = Redact-TpmSupportText -Text $content.Text
@@ -1290,13 +1294,12 @@ function Copy-TpmSupportTextFile {
         }
         $destination = Join-Path $StageDirectory $candidate
         [System.IO.File]::WriteAllText($destination, $redacted.Text, (New-Object System.Text.UTF8Encoding($false)))
-        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status Collected -Destination $candidate -Detail ('Allowlisted text diagnostic collected as ' + $content.Encoding + '.') -Redactions $redacted.RedactionCount
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status Collected -Destination $candidate -Detail ('Allowlisted text diagnostic collected as ' + $content.Encoding + '.') -Redactions $redacted.RedactionCount -EvidenceClass $EvidenceClass
     } catch {
         $status = if ($_.Exception.Message -match 'exceeded the safe size limit') { 'IntentionallyExcluded' } elseif ($_.Exception.Message -match 'identity|reparse|escaped|root') { 'RejectedUnsafeContent' } else { 'CollectionFailed' }
-        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status $status -Detail 'The allowlisted diagnostic could not be read or redacted safely.'
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status $status -Detail 'The allowlisted diagnostic could not be read or redacted safely.' -EvidenceClass $EvidenceClass
     }
 }
-
 
 function Get-TpmSupportPluginInventory {
     param(
@@ -1306,7 +1309,7 @@ function Get-TpmSupportPluginInventory {
         [Parameter(Mandatory)][string]$StageDirectory
     )
     if (-not (Test-TpmNoReparsePath -Path $GameRoot)) {
-        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status RejectedUnsafeContent -Detail 'Game path safety changed before plugin inspection.'
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status RejectedUnsafeContent -Detail 'Game path safety changed before plugin inspection.' -EvidenceClass Ambient
         return
     }
     $pluginRoots = New-Object System.Collections.Generic.List[string]
@@ -1321,11 +1324,11 @@ function Get-TpmSupportPluginInventory {
             }
         }
     } catch {
-        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status CollectionFailed -Detail 'Plugin directories could not be inspected safely.'
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status CollectionFailed -Detail 'Plugin directories could not be inspected safely.' -EvidenceClass Ambient
         return
     }
     if ($pluginRoots.Count -eq 0) {
-        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status NotPresent -Detail 'No allowlisted plugin directory was present.'
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status NotPresent -Detail 'No allowlisted plugin directory was present.' -EvidenceClass Ambient
         return
     }
     $rows = New-Object System.Collections.Generic.List[string]
@@ -1390,13 +1393,13 @@ function Get-TpmSupportPluginInventory {
         }
     }
     if ($fileCount -eq 0) {
-        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status NotPresent -Detail 'Allowlisted plugin directories contained no safe regular files.'
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status NotPresent -Detail 'Allowlisted plugin directories contained no safe regular files.' -EvidenceClass Ambient
         return
     }
     $destinationName = 'metadata\inventory-' + (Get-TpmSupportSafeName $GameCode) + '.tsv'
     $destination = Join-Path $StageDirectory $destinationName
     [System.IO.File]::WriteAllText($destination, ($rows -join "`r`n") + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
-    Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status Collected -Destination $destinationName -Detail ('Metadata only; ' + $fileCount + ' safe file entries. DLL payloads were not copied.')
+    Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status Collected -Destination $destinationName -Detail ('Metadata only; ' + $fileCount + ' safe file entries. DLL payloads were not copied.') -EvidenceClass Ambient
 }
 
 function Get-TpmSupportManifestText {
@@ -1487,13 +1490,15 @@ $lines.Add('This ZIP may still be useful for support when only partial evidence 
     $lines.Add('- Allowlisted TeknoParrot root logs, including ParrotPatcher_Log.txt') | Out-Null
     $lines.Add('- Allowlisted text logs in safely identified registered game folders') | Out-Null
     $lines.Add('- Metadata-only inventories of allowlisted BepInEx and Unity plugin folders') | Out-Null
+    $lines.Add('TeknoParrotUI troubleshooting evidence: open the hamburger/menu, choose Troubleshooting, then choose Copy info to clipboard or Save info to text file.') | Out-Null
     $lines.Add('') | Out-Null
     $lines.Add('Collected evidence:') | Out-Null
     foreach ($record in @($Records | Where-Object Status -ne 'NotPresent')) {
         $recordSource = (Redact-TpmSupportText -Text ([string]$record.Source)).Text
         $detail = if ($record.Detail) { ' -- ' + (Redact-TpmSupportText -Text ([string]$record.Detail)).Text } else { '' }
         $destination = if ($record.Destination) { ' -> ' + (Redact-TpmSupportText -Text ([string]$record.Destination)).Text } else { '' }
-        $lines.Add(('[{0}] {1}{2}{3}' -f $record.Status, $recordSource, $destination, $detail)) | Out-Null
+        $evidenceClass = if ($record.EvidenceClass) { '/' + $record.EvidenceClass } else { '' }
+        $lines.Add(('[{0}{1}] {2}{3}{4}' -f $record.Status, $evidenceClass, $recordSource, $destination, $detail)) | Out-Null
     }
     $lines.Add('') | Out-Null
     $notPresent = @($Records | Where-Object Status -eq 'NotPresent')
@@ -1529,7 +1534,6 @@ $lines.Add('This ZIP may still be useful for support when only partial evidence 
     }
     return ($lines -join "`r`n") + "`r`n"
 }
-
 function New-TpmSupportPackage {
     param(
         [Parameter(Mandatory)][string]$ScriptRoot,
@@ -4399,12 +4403,12 @@ function Invoke-TpmWebRequestSilently {
         [int]$TimeoutSec = 0,
         [hashtable]$Headers = $null,
         [string]$OutFile = '',
-        [System.Management.Automation.ActionPreference]$ErrorAction = 'Stop'
+        [System.Management.Automation.ActionPreference]$RequestErrorAction = 'Stop'
     )
     $requestParameters = @{
         Uri = $Uri
         UseBasicParsing = $UseBasicParsing
-        ErrorAction = $ErrorAction
+        ErrorAction = $RequestErrorAction
     }
     if ($TimeoutSec -gt 0) { $requestParameters.TimeoutSec = $TimeoutSec }
     if ($Headers) { $requestParameters.Headers = $Headers }
@@ -4422,7 +4426,7 @@ function Invoke-TpmWebRequestSilently {
 # Returns e.g. "6.7.3", or $null if the site cannot be reached.
 function Get-ReShadeLatestVersion {
     try {
-        $resp = Invoke-TpmWebRequestSilently -Uri "https://reshade.me" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+        $resp = Invoke-TpmWebRequestSilently -Uri "https://reshade.me" -UseBasicParsing -TimeoutSec 10 -RequestErrorAction Stop
         if ($resp.Content -match 'ReShade_Setup_(\d+\.\d+\.\d+(?:\.\d+)?)') { return $Matches[1] }
     } catch {}
     return $null
@@ -5937,7 +5941,7 @@ function Acquire-TpmReShadeApprovedEffect {
         if (Test-TpmReShadeApprovedEffectFile -FileSpec $spec -Path $cachePath) { $source = $cachePath }
         else {
             try {
-                Invoke-TpmWebRequestSilently -Uri $spec.Url -UseBasicParsing -OutFile $stagePath -ErrorAction Stop
+                Invoke-TpmWebRequestSilently -Uri $spec.Url -UseBasicParsing -OutFile $stagePath -RequestErrorAction Stop
                 if (-not (Test-TpmReShadeApprovedEffectFile -FileSpec $spec -Path $stagePath)) { throw "Hash mismatch for $($spec.RelativePath)." }
                 Copy-Item -LiteralPath $stagePath -Destination $cachePath -Force -ErrorAction Stop
                 $source = $stagePath
@@ -10949,7 +10953,7 @@ function Invoke-TpmDownloadHttpClient {
 function Invoke-TpmDownloadWebRequest {
     param([string]$DownloadUrl, [string]$TempPath, [string]$Label = 'download')
     Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes 0 -TotalBytes 0 -Elapsed ([TimeSpan]::Zero)
-    Invoke-TpmWebRequestSilently -Uri $DownloadUrl -OutFile $TempPath -UseBasicParsing -ErrorAction Stop
+    Invoke-TpmWebRequestSilently -Uri $DownloadUrl -OutFile $TempPath -UseBasicParsing -RequestErrorAction Stop
     $bytes = (Get-Item -LiteralPath $TempPath -ErrorAction Stop).Length
     Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes $bytes -TotalBytes $bytes -Elapsed ([TimeSpan]::Zero) -Complete
 }
@@ -12083,14 +12087,39 @@ function Read-PostgresRecoveryState {
             SelectionPlanHash       = [string]$payload.SelectionPlanHash
         }
     } catch {
-        Write-Log ("Postgres recovery state validation failed -- {0}" -f $_.Exception.Message)
+        $validationReason = [string]$_.Exception.Message
+        $reasonCode = 'VALIDATION_FAILED'
+        $reasonText = 'The protected resume record could not be validated.'
+        if ($validationReason -match 'already consumed') {
+            $reasonCode = 'RESUME_STATE_CONSUMED'
+            $reasonText = 'The protected resume record was already used or is no longer available.'
+        } elseif ($validationReason -match 'lifetime|expired') {
+            $reasonCode = 'RESUME_EXPIRED'
+            $reasonText = 'The protected resume record expired before TPM could continue.'
+        } elseif ($validationReason -match 'selection') {
+            $reasonCode = 'SELECTION_PLAN_INVALID'
+            $reasonText = 'The protected PostgreSQL game selection could not be validated.'
+        } elseif ($validationReason -match 'different TPM installation|source or configuration changed') {
+            $reasonCode = 'PACKAGE_MISMATCH'
+            $reasonText = 'The protected resume record belongs to a different TPM source or configuration.'
+        } elseif ($validationReason -match 'Windows identity|parent identity') {
+            $reasonCode = 'IDENTITY_MISMATCH'
+            $reasonText = 'The protected resume record belongs to a different Windows process or user identity.'
+        } elseif ($validationReason -match 'password') {
+            $reasonCode = 'PASSWORD_STATE_INVALID'
+            $reasonText = 'The protected PostgreSQL password state could not be validated.'
+        } elseif ($validationReason -match 'state path|state file|envelope|metadata') {
+            $reasonCode = 'RESUME_STATE_INVALID'
+            $reasonText = 'The protected resume record is missing or invalid.'
+        }
+        Write-Log ("Postgres recovery state validation failed -- Code={0}; Detail={1}" -f $reasonCode, $validationReason)
         try {
             if ($usedPath -and (Test-Path -LiteralPath $usedPath -PathType Leaf)) { Remove-Item -LiteralPath $usedPath -Force -ErrorAction Stop }
             if ($claimPath -and (Test-Path -LiteralPath $claimPath -PathType Leaf) -and -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
                 [System.IO.File]::Move($claimPath, $fullPath)
             }
         } catch { Write-Log 'Postgres recovery state validation cleanup failed; encrypted evidence was retained.' }
-        throw 'TPM could not safely resume the protected PostgreSQL setup.'
+        throw ('TPM could not safely resume the protected PostgreSQL setup. Reason [{0}]: {1}' -f $reasonCode, $reasonText)
     } finally {
         $passwordPlain = $null
         [GC]::Collect()
@@ -20689,7 +20718,7 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
         Write-Host "  An extra version-info file (supplementary dat) can be added later if" -ForegroundColor DarkCyan
         Write-Host "  any games end up with an uncertain match -- TPM will recommend it then." -ForegroundColor DarkCyan
     }
-} elseif ($eggmanDatZip -and -not $Unattended) {
+} elseif ($eggmanDatZip -and -not $Unattended -and -not $isPostgresRecoveryResume) {
     # A dat ZIP is already configured -- offer a lightweight check for a
     # newer release instead of silently reusing the same file forever.
     # Direct .dat file mode ($datFilePath) has no GitHub release counterpart
@@ -22849,12 +22878,19 @@ $mode = $null
                     Write-Host ("    {0}" -f $pair) -ForegroundColor Yellow
                 }
                 Write-Host "  What TPM can do next" -ForegroundColor Cyan
+                if ($authFailure) {
+                    Write-Host "  PostgreSQL password did not work." -ForegroundColor Yellow
+                    Write-Host "  TPM could not make a safety backup because PostgreSQL rejected the saved postgres password." -ForegroundColor Yellow
+                    Write-Host "  Your games and databases were not changed." -ForegroundColor Green
+                    Write-Host "  [P] Enter and test a postgres password"
+                }
                 Write-Host "  [R] Diagnose and retry the protected backup"
                 Write-Host "  [I] Reinitialize PostgreSQL data for these games"
                 Write-Host "  [D] Show details"
                 Write-Host "  [O] Open logs/support guidance"
                 Write-Host "  [B] Back to main menu"
-                $backupChoice = Read-TpmChoice -Prompt "  Choice, default R" -Choices @('R', 'I', 'D', 'O', 'B') -Default 'R'
+                $backupChoices = if ($authFailure) { @('P', 'R', 'I', 'D', 'O', 'B') } else { @('R', 'I', 'D', 'O', 'B') }
+                $backupChoice = Read-TpmChoice -Prompt "  Choice, default R" -Choices $backupChoices -Default 'R'
                 [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
                 if ($recoveryEvidenceUnavailable -and $backupChoice -notin @('I','D','O','B')) {
                     Write-Host '  Reinitialize, repair, and password changes are blocked until verified recovery evidence exists.' -ForegroundColor Red
@@ -22871,7 +22907,7 @@ $mode = $null
                     }
                     continue
                 }
-                if ($authFailure -and $backupChoice -eq 'F') {
+                if ($authFailure -and $backupChoice -eq 'P') {
                     [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Waiting for password entry.' -UserAction 'Type the current PostgreSQL password')
                     $candidatePassword = Read-ConfirmedPostgresPassword 'the working PostgreSQL password'
                     [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
