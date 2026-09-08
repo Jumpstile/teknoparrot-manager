@@ -107,6 +107,19 @@ named profile accounting for retry.
 Package rebuild, owner-runtime proof, and release authorization remain
 outstanding.
 
+### Slice C -- ReShade ownership and accounting
+
+Owner IDs 11 and 12 received a bounded source re-audit. The default Select
+action protects unknown/user-owned and bundled ReShade files; explicit confirmed
+Adopt/replace is the only overwrite path and remains inside the transactional
+backup/rollback boundary. ReShade result actions keep protected conflicts ahead
+of optional Health Check routing. All-games accounting now includes an explicit
+`KeptPrevious` terminal outcome for TPM-managed profiles the operator elects to
+leave unchanged, so the accounting total must still equal the selected count.
+
+Focused ReShade coverage and the full main suite pass. Package rebuild,
+owner-runtime proof, and release authorization remain outstanding.
+
 ### Crosshair close, focus, and prompt slice -- working-tree status
 
 IDs 13, 14, and 15 were re-audited separately. ID 13 is source-fixed with a
@@ -176,7 +189,7 @@ required one/multiple/zero/no-candidate functional coverage is not complete.
 | Slice A focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*Invoke-TpmDownload*','*Thumbnail*','*RC8 PostgreSQL and support UX*') -CI -Output Normal` | 54 passed, 0 failed, 0 skipped, 975 not run | not captured | not captured | Pester 5.7.1 |
 | SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -Output Normal` | 36 passed, 0 failed, 0 skipped at prior checkpoint; not rerun in this slice | not captured | not captured | Pester 6.1.0 |
 | Controls focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Write-ControlPropagationResults*' -Output Detailed` | 3 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
-| ReShade focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*ReShade*' -Output Normal` | 186 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| ReShade focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*ReShade*','*protected adoption and accounting*','*ReShade result action priority*') -CI -Output Normal` | 192 passed, 0 failed, 0 skipped, 837 not run | not captured | not captured | Pester 5.7.1 |
 | Progress.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Progress.Core*' -Output Detailed` | 2 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Prompt.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Prompt.Core*' -Output Detailed` | 4 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 production parse errors; 0 test parse errors; 0 PSScriptAnalyzer findings; production ASCII 0; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
@@ -241,6 +254,9 @@ owner-runtime smoke, release, certification, commit, or push was performed.
 | TeknoParrot-Manager.ps1 | `Invoke-TpmDownload` definitive-404 preservation across transport fallback | owner report IDs 2, 6, 8, PR #321 Slice A | Production parse, PSScriptAnalyzer, focused download/thumbnail tests |
 | Tests/TeknoParrot-Manager.Tests.ps1 | Regression for 404 followed by unknown fallback failure | owner report IDs 6, 8, PR #321 Slice A | Slice A focused suite: 54 passed |
 | ARCHITECTURE.md; TeknoParrot-Manager-CHANGELOG.txt; docs/remediation/PR-321-control-board.md; docs/remediation/PR-321-reconciliation.md | Slice A contract and evidence update | owner report IDs 2, 6, 8, PR #321 Slice A | Changed-section review |
+| TeknoParrot-Manager.ps1 | ReShade all-games accounting with `KeptPrevious` terminal outcome | owner report ID 12, PR #321 Slice C | Production parse, focused ReShade tests, full main suite |
+| Tests/TeknoParrot-Manager.Tests.ps1 | ReShade protected adoption, result priority, backup/rollback, and exact accounting contracts | owner report IDs 11-12, PR #321 Slice C | ReShade focused suite: 192 passed |
+| ARCHITECTURE.md; TeknoParrot-Manager-CHANGELOG.txt; docs/remediation/PR-321-control-board.md; docs/remediation/PR-321-reconciliation.md | Slice C ownership/accounting contract and evidence update | owner report IDs 11-12, PR #321 Slice C | Changed-section review |
 | Tests/SupportPackage.Tests.ps1 | FFB evidence allowlist and support-package collection | TPM-FFB-001, TPM-EVIDENCE-001, PR #321 | 40 support-package tests |
 
 ## Permanent procedure compliance

@@ -74,10 +74,10 @@ canonical release-decision statuses are in the corrected table below.
 
 ## Current blockers
 
- - Canonical source-remediation blockers: IDs 3, 11, 12, 16-19, 21, 22, and 29.
+ - Canonical source-remediation blockers: IDs 3, 16-19, 21, 22, and 29.
  - Canonical source re-audit blockers: IDs 4, 5, 7, 20, 23-27, and 30-32.
- - Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1, 2, 6, 8, 9, 10, 13-15, and 28.
-- The earlier `NOT FIXED` prose for IDs 11, 12, and 29 is retained only as historical evidence; it is superseded by the corrected table below.
+ - Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1, 2, 6, 8-15, and 28.
+ - IDs 11 and 12 are source-fixed by the Slice C ReShade ownership/accounting re-audit; package rebuild and owner-runtime proof remain outstanding.
 - Test blockers: no focused source-test blocker remains for audited paths, but unresolved design work and owner-runtime routes remain.
 - Package/runtime blockers: candidate ZIP is stale; no owner smoke is authorized.
 - Owner-design blockers: ReShade ownership/accounting and remaining stateful prompt-picker boundaries need explicit future contracts.
@@ -108,8 +108,8 @@ remains stale and is not a release gate.
 | 8 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Definitive 404 is preserved across fallback; Slice A regression test passes | No | Yes |
 | 9 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | No contrary source evidence found | No | Yes |
 | 10 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Selector contract remains source/test supported | No | Yes |
-| 11 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | ReShade ownership behavior requires renewed source review before package trust | Yes | Yes |
-| 12 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | ReShade accounting claim was accepted before package smoke | Yes | Yes |
+| 11 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | ReShade ownership re-audit confirms protected unknown/bundled content stays unchanged by default; explicit confirmed Adopt passes overwrite only through the transactional deployment path; Slice C tests pass | No | Yes |
+| 12 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | ReShade accounting now includes explicitly kept previous TPM-managed profiles as a terminal `KeptPrevious` outcome; accounting invariant remains exact; Slice C tests pass | No | Yes |
 | 13 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Completed non-interactive browser state after valid P2; explicit return/close guidance; no further click mutation | No | Yes |
 | 14 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Best-effort console focus return with logged fallback; terminal remains usable | No | Yes |
 | 15 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Workflow-aware P1/P2, confirmation, first-run, and cursor-hide prompts with typed fallback | No | Yes |
@@ -173,6 +173,20 @@ missing upstream icon into a transient failure. Non-404 transport, validation,
 and integrity failures remain retry/failure outcomes. Focused source tests and
 the full validation gates pass. Package rebuild and owner-runtime proof remain
 outstanding.
+
+## Slice C -- ReShade ownership and accounting
+
+Owner IDs 11 and 12 received a bounded ReShade source re-audit. Protected
+unknown/user-owned and bundled content remains unchanged under the default
+Select action. Explicit confirmed Adopt/replace remains the only path that
+passes `AllowUserOwnedOverwrite`, and the existing transactional deployment
+backs up target files before promotion and preserves rollback evidence when
+backup or rollback cleanup fails. The final all-games accounting now counts
+explicitly kept previous TPM-managed profiles as `KeptPrevious`, preventing a
+bulk profile decision from producing an unaccounted selected game. ReShade
+result actions continue to prioritize protected conflicts over optional
+Health Check routing. Focused ReShade tests and the full main suite pass.
+Package rebuild and owner-runtime proof remain outstanding.
 
 ## Crosshair close, focus, and prompt slice -- working-tree evidence
 

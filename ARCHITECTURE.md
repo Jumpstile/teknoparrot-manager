@@ -352,11 +352,13 @@ rollback make backup failure a hard stop, and ownership metadata is committed
 only after successful promotion. Apply preflight reports ready, protected,
 missing, unsafe, and failed/preflight-blocked buckets. The final apply result
 uses `Get-TpmReShadeApplyAccounting` to expose non-overlapping terminal
-outcomes whose total must equal the selected-game count; unsafe paths,
+outcomes whose total must equal the selected-game count. This includes games
+explicitly kept on their previous TPM-managed profile; they are counted as
+`KeptPrevious`, not silently omitted from the accounting. Unsafe paths,
 malformed profiles, malformed ownership metadata, and mutation-boundary
 changes are included in the unsafe bucket with details and a direct
-repair/review-then-rerun action. A failed invariant stops the result rather
-than presenting an incomplete summary. ReShade setup also reads native
+repair/review-then-rerun action. A failed invariant stops the result
+rather than presenting an incomplete summary. ReShade setup also reads native
 TeknoParrot CRT, SSAA, shader, scanline, and post-process settings without
 writing them; when enabled settings are detected, the result warns that the
 selected ReShade effect may stack with them.

@@ -14220,6 +14220,11 @@ Describe "ReShade protected adoption and accounting" {
         $mismatch = Get-TpmReShadeApplyAccounting -Selected 2 -Deployed 1 -Protected 1 -SkippedCancelled 1
         $mismatch.Total | Should -Be 3
         $mismatch.Complete | Should -BeFalse
+        $kept = Get-TpmReShadeApplyAccounting -Selected 2 -Deployed 1 -KeptPrevious 1
+        $kept.ChangedTpmManaged | Should -Be 1
+        $kept.KeptPrevious | Should -Be 1
+        $kept.Total | Should -Be 2
+        $kept.Complete | Should -BeTrue
     }
 
     It "reports preflight failed and protected categories explicitly" {

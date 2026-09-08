@@ -30,6 +30,12 @@
   unsafe, and failed game states remain distinct; zero-deployment runs are not
   reported as success; every selected game is included exactly once in final
   accounting; and the FFB evidence report is included in support packages.
+  Slice C ReShade remediation now keeps explicit protected ownership
+  decisions separate from TPM-managed updates. Adopt/replace remains an
+  explicit confirmed action with transactional backup and rollback boundaries.
+  ReShade all-games accounting now includes games whose previous TPM-managed
+  profile was explicitly kept, so every selected game is counted exactly once.
+
 
   Additional RC8 candidate fixes: duplicate display identities remain
   ambiguous instead of selecting the first matching monitor; the read-only

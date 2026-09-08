@@ -7620,6 +7620,7 @@ function Get-TpmReShadeApplyAccounting {
         [int]$MissingDevice = 0,
         [int]$Unsafe = 0,
         [int]$Failed = 0,
+        [int]$KeptPrevious = 0,
         [int]$SkippedCancelled = 0
     )
     $adoptedCount = [Math]::Max(0, $Adopted)
@@ -7628,13 +7629,15 @@ function Get-TpmReShadeApplyAccounting {
     $unsafeCount = [Math]::Max(0, $Unsafe)
     $failedCount = [Math]::Max(0, $Failed)
     $protectedCount = [Math]::Max(0, $Protected)
-    $skippedCount = $SkippedCancelled
-    $total = $changedCount + $adoptedCount + $protectedCount + $missingCount + $unsafeCount + $failedCount + $skippedCount
+    $keptCount = [Math]::Max(0, $KeptPrevious)
+    $skippedCount = [Math]::Max(0, $SkippedCancelled)
+    $total = $changedCount + $adoptedCount + $protectedCount + $missingCount + $unsafeCount + $failedCount + $keptCount + $skippedCount
     return [pscustomobject]@{
         Selected = $Selected
         ChangedTpmManaged = $changedCount
         AdoptedReplaced = $adoptedCount
         ProtectedUnchanged = $protectedCount
+        KeptPrevious = $keptCount
         MissingPath = $missingCount
         UnsafeOwnershipPath = $unsafeCount
         Failed = $failedCount
@@ -8107,10 +8110,11 @@ function Invoke-ReShadeSetup {
         }
     }
     $skippedForAccounting = [Math]::Max(0, $skipped - $missingPath - $missingDevice - $unsafe)
-    $accounting = Get-TpmReShadeApplyAccounting -Selected $selectedGames.Count -Deployed $deployed -Adopted $adopted -Protected $protected -MissingPath $missingPath -MissingDevice $missingDevice -Unsafe $unsafe -Failed $errors -SkippedCancelled $skippedForAccounting
-    Write-Host ("  Accounting: {0} selected = {1} changed TPM-managed + {2} adopted/replaced + {3} protected unchanged + {4} missing path + {5} unsafe + {6} failed + {7} skipped/cancelled." -f $accounting.Selected, $accounting.ChangedTpmManaged, $accounting.AdoptedReplaced, $accounting.ProtectedUnchanged, $accounting.MissingPath, $accounting.UnsafeOwnershipPath, $accounting.Failed, $accounting.SkippedCancelled) -ForegroundColor DarkCyan
+    $accounting = Get-TpmReShadeApplyAccounting -Selected $selectedGames.Count -Deployed $deployed -Adopted $adopted -Protected $protected -MissingPath $missingPath -MissingDevice $missingDevice -Unsafe $unsafe -Failed $errors -KeptPrevious $keptProfile -SkippedCancelled $skippedForAccounting
+    Write-Host ("  Accounting: {0} selected = {1} changed TPM-managed + {2} adopted/replaced + {3} protected unchanged + {4} kept previous + {5} missing path + {6} unsafe + {7} failed + {8} skipped/cancelled." -f $accounting.Selected, $accounting.ChangedTpmManaged, $accounting.AdoptedReplaced, $accounting.ProtectedUnchanged, $accounting.KeptPrevious, $accounting.MissingPath, $accounting.UnsafeOwnershipPath, $accounting.Failed, $accounting.SkippedCancelled) -ForegroundColor DarkCyan
     if (-not $accounting.Complete) { throw 'ReShade accounting invariant failed: terminal outcomes did not equal selected games.' }
-    Write-Log ("ReShade accounting: Selected={0} ChangedTpmManaged={1} AdoptedReplaced={2} ProtectedUnchanged={3} MissingPath={4} UnsafeOwnershipPath={5} Failed={6} SkippedCancelled={7}" -f $accounting.Selected, $accounting.ChangedTpmManaged, $accounting.AdoptedReplaced, $accounting.ProtectedUnchanged, $accounting.MissingPath, $accounting.UnsafeOwnershipPath, $accounting.Failed, $accounting.SkippedCancelled)
+    Write-Log ("ReShade accounting: Selected={0} ChangedTpmManaged={1} AdoptedReplaced={2} ProtectedUnchanged={3} KeptPrevious={4} MissingPath={5} UnsafeOwnershipPath={6} Failed={7} SkippedCancelled={8}" -f $accounting.Selected, $accounting.ChangedTpmManaged, $accounting.AdoptedReplaced, $accounting.ProtectedUnchanged, $accounting.KeptPrevious, $accounting.MissingPath, $accounting.UnsafeOwnershipPath, $accounting.Failed, $accounting.SkippedCancelled)
+
 
     Write-Host ("  Installed new : {0} game(s)" -f $installed) -ForegroundColor Green
     Write-Host ("  Updated       : {0} game(s)" -f $updated) -ForegroundColor Green
