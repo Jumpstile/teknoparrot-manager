@@ -36,6 +36,14 @@
   GamePath repair, thumbnail prompts follow repair results, and Raw Thrills
   path-length guidance now tells users to shorten parent folders and update the
   saved GamePath. RC8 remains a candidate and is not published.
+
+  RC8 candidate progress/thumbnail correction: compact status now uses fractional
+  elapsed seconds, reports the actual game-file scan during Library Health repair,
+  and keeps one elapsed timer across scanning and profile checks. Thumbnail checks
+  show the current profile and count/total, hide the raw web-request fallback name,
+  and list transient download/check failures separately from profiles with no
+  upstream icon. Thumbnail setup remains an optional step after repair. RC8 remains
+  a candidate and is not published.
   Known RC8 owner-smoke blockers identified. Release remains blocked pending
   re-audit, source remediation, package rebuild, and owner-runtime retest.
   ReShade preview comparison now has a real 0-100 in-memory slider; its

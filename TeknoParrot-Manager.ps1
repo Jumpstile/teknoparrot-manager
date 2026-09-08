@@ -3436,24 +3436,29 @@ function Resolve-BestFuzzyMatch {
 # .dll files are included because some Konami arcade games (DDR, Steel Chronicle,
 # Silent Scope, etc.) specify a game-specific DLL as their ExecutableName.
 function Get-GameFiles {
-    param([string]$folder)
+    param([string]$folder, [scriptblock]$ProgressScript = $null)
     $exts       = @('.exe', '.elf', '.iso', '.gcm', '.gcz', '.bin', '.e4', '.zip', '.xbe', '.dll')
     $normalized = $folder -replace '/', '\'
     $baseDepth  = $normalized.TrimEnd('\').Split('\').Count
-    return @(Get-ChildItem -LiteralPath $folder -Recurse -File -ErrorAction SilentlyContinue |
-                 Where-Object {
-                     $ext = $_.Extension.ToLower()
-                     if ($exts -contains $ext) { return $true }
-                     if ($ext -eq '') {
-                         # Extension-less Linux binaries: allow up to 6 levels below the
-                         # games root. Some Lindbergh titles place executables 5-6 levels
-                         # deep inside their filesystem image. System files (X11 layouts,
-                         # shared libraries, etc.) live 7-10 levels deep and are excluded.
-                         $normFull = $_.FullName -replace '/', '\'
-                         return ($normFull.Split('\').Count - $baseDepth) -le 6
-                     }
-                     return $false
-                 })
+    $files      = New-Object System.Collections.Generic.List[object]
+    $seen       = 0
+    Get-ChildItem -LiteralPath $folder -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+        $file = $_
+        $seen++
+        if ($ProgressScript) { & $ProgressScript $file $seen }
+        $ext = $file.Extension.ToLower()
+        $include = $exts -contains $ext
+        if (-not $include -and $ext -eq '') {
+            # Extension-less Linux binaries: allow up to 6 levels below the
+            # games root. Some Lindbergh titles place executables 5-6 levels
+            # deep inside their filesystem image. System files (X11 layouts,
+            # shared libraries, etc.) live 7-10 levels deep and are excluded.
+            $normFull = $file.FullName -replace '/', '\'
+            $include = ($normFull.Split('\').Count - $baseDepth) -le 6
+        }
+        if ($include) { [void]$files.Add($file) }
+    }
+    return $files.ToArray()
 }
 
 # Parses a number/range string (e.g. "1,3,5-7") into a sorted list of integers
@@ -10239,16 +10244,16 @@ function Invoke-CursorHideSetup {
 # deeply-nested internal paths. Includes a zip-slip guard.
 function Get-TpmCompactProgressText {
     param([ValidateSet('Scanning','Extracting','Repairing','Checking')][string]$Phase = 'Extracting', [string]$Label, [int]$Current, [int]$Total, [datetime]$StartedAt = (Get-Date), [int]$Width = 79)
-    $elapsed = [Math]::Max(0, [int]((Get-Date) - $StartedAt).TotalSeconds)
+    $elapsed = [Math]::Max(0, [Math]::Round(((Get-Date) - $StartedAt).TotalSeconds, 1))
     $text = if ($Total -gt 0) {
         $percent = [Math]::Min(100, [int](($Current / $Total) * 100))
-        '  {0} {1} -- {2}/{3} ({4}%)  elapsed {5}s' -f $Phase, $Label, $Current, $Total, $percent, $elapsed
+        '  {0} {1} -- {2}/{3} ({4}%)  elapsed {5:0.0}s' -f $Phase, $Label, $Current, $Total, $percent, $elapsed
     } else {
-        '  {0} {1} -- {2}  elapsed {3}s' -f $Phase, $Label, $Current, $elapsed
+        '  {0} {1} -- {2}  elapsed {3:0.0}s' -f $Phase, $Label, $Current, $elapsed
     }
     $limit = [Math]::Max(1, $Width)
     if ($text.Length -gt $limit) {
-        $suffix = '  elapsed {0}s' -f $elapsed
+        $suffix = '  elapsed {0:0.0}s' -f $elapsed
         $keep = [Math]::Max(1, $limit - $suffix.Length - 3)
         return (($text.Substring(0, $keep) + '...' + $suffix).Substring(0, $limit))
     }
@@ -10952,10 +10957,15 @@ function Invoke-TpmDownloadHttpClient {
 
 function Invoke-TpmDownloadWebRequest {
     param([string]$DownloadUrl, [string]$TempPath, [string]$Label = 'download')
-    Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes 0 -TotalBytes 0 -Elapsed ([TimeSpan]::Zero)
-    Invoke-TpmWebRequestSilently -Uri $DownloadUrl -OutFile $TempPath -UseBasicParsing -RequestErrorAction Stop
-    $bytes = (Get-Item -LiteralPath $TempPath -ErrorAction Stop).Length
-    Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes $bytes -TotalBytes $bytes -Elapsed ([TimeSpan]::Zero) -Complete
+    $progressWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes 0 -TotalBytes 0 -Elapsed $progressWatch.Elapsed
+        Invoke-TpmWebRequestSilently -Uri $DownloadUrl -OutFile $TempPath -UseBasicParsing -RequestErrorAction Stop
+        $bytes = (Get-Item -LiteralPath $TempPath -ErrorAction Stop).Length
+        Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes $bytes -TotalBytes $bytes -Elapsed $progressWatch.Elapsed -Complete
+    } finally {
+        $progressWatch.Stop()
+    }
 }
 
 function Test-TpmDownloadBitsAvailable {
@@ -11055,7 +11065,7 @@ function Write-TpmDownloadProgress {
         return
     }
 
-    $activity = "Downloading $Label"
+    $displayMethod = if ($Method -eq 'Invoke-WebRequest') { 'web fallback' } else { $Method }
     if ($Complete) {
         Write-TpmCompactExtractionProgress -Phase Checking -Label ("Downloading {0}" -f $Label) -Current 0 -Total 0 -StartedAt (Get-Date) -Complete
         return
@@ -11065,7 +11075,6 @@ function Write-TpmDownloadProgress {
     $seconds = [Math]::Max($Elapsed.TotalSeconds, 0.001)
     $mbps = [Math]::Round(($DownloadedBytes / 1MB) / $seconds, 2)
     if ($TotalBytes -gt 0) {
-        $totalMb = [Math]::Round($TotalBytes / 1MB, 1)
         $percent = [Math]::Min(100, [Math]::Max(0, [Math]::Round(($DownloadedBytes / $TotalBytes) * 100, 0)))
         $etaText = ''
         if ($DownloadedBytes -gt 0 -and $mbps -gt 0) {
@@ -11076,10 +11085,10 @@ function Write-TpmDownloadProgress {
         }
         $progressCurrent = [int][Math]::Min([int]::MaxValue, [Math]::Round($DownloadedBytes / 1MB))
         $progressTotal = [int][Math]::Min([int]::MaxValue, [Math]::Round($TotalBytes / 1MB))
-        Write-TpmCompactExtractionProgress -Phase Checking -Label ("{0} via {1}" -f $Label, $Method) -Current $progressCurrent -Total $progressTotal -StartedAt ((Get-Date).Subtract($Elapsed))
+        Write-TpmCompactExtractionProgress -Phase Checking -Label ("{0} via {1}" -f $Label, $displayMethod) -Current $progressCurrent -Total $progressTotal -StartedAt ((Get-Date).Subtract($Elapsed))
     } else {
         $progressCurrent = [int][Math]::Min([int]::MaxValue, [Math]::Round($DownloadedBytes / 1MB))
-        Write-TpmCompactExtractionProgress -Phase Checking -Label ("{0} via {1}" -f $Label, $Method) -Current $progressCurrent -Total 0 -StartedAt ((Get-Date).Subtract($Elapsed))
+        Write-TpmCompactExtractionProgress -Phase Checking -Label ("{0} via {1}" -f $Label, $displayMethod) -Current $progressCurrent -Total 0 -StartedAt ((Get-Date).Subtract($Elapsed))
     }
 }
 
@@ -11092,7 +11101,8 @@ function Write-TpmDownloadMetrics {
     $message = "${Label}: download method=$Method size=${mb}MB elapsed=$([Math]::Round($Elapsed.TotalSeconds, 1))s speed=${mbps}MB/s"
     Write-Log $message
     if (-not $Quiet) {
-        Write-Host ("  Downloaded with {0}: {1} MB in {2:n1}s ({3} MB/s)" -f $Method, $mb, $Elapsed.TotalSeconds, $mbps) -ForegroundColor DarkGray
+        $displayMethod = if ($Method -eq 'Invoke-WebRequest') { 'web fallback' } else { $Method }
+        Write-Host ("  Downloaded with {0}: {1} MB in {2:n1}s ({3} MB/s)" -f $displayMethod, $mb, $Elapsed.TotalSeconds, $mbps) -ForegroundColor DarkGray
     }
 }
 
@@ -16240,11 +16250,17 @@ function Repair-GamePaths {
     # Uses Get-GameFiles so .xbe, .dll, ELF, disc images, and extension-less
     # binaries are all included alongside Windows EXE files.
     $exeMap = @{}
-    foreach ($file in (Get-GameFiles $installFolder)) {
+    $repairStarted = Get-Date
+    $scanProgress = {
+        param($file, $current)
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label $file.Name -Current $current -Total 0 -StartedAt $repairStarted
+    }
+    foreach ($file in (Get-GameFiles $installFolder -ProgressScript $scanProgress)) {
         $k = $file.Name.ToLower()
         if (-not $exeMap.ContainsKey($k)) { $exeMap[$k] = New-Object System.Collections.ArrayList }
         [void]$exeMap[$k].Add($file.FullName)
     }
+    Write-TpmCompactExtractionProgress -Phase Scanning -Label 'game files' -Current 0 -Total 0 -StartedAt $repairStarted -Complete
 
     $reports = New-Object System.Collections.ArrayList
     $files = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue)
@@ -16255,7 +16271,7 @@ function Repair-GamePaths {
     $repairIndex = 0
     foreach ($f in $files) {
         $repairIndex++
-        Write-TpmCompactExtractionProgress -Phase Repairing -Label $f.BaseName -Current $repairIndex -Total $files.Count
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label $f.BaseName -Current $repairIndex -Total $files.Count -StartedAt $repairStarted
         try {
             $doc = Read-Xml $f.FullName
         } catch {
@@ -16409,7 +16425,7 @@ function Repair-GamePaths {
             })
         }
     }
-    Write-TpmCompactExtractionProgress -Phase Repairing -Label 'game paths' -Current $repairIndex -Total $files.Count -Complete
+    Write-TpmCompactExtractionProgress -Phase Repairing -Label 'game paths' -Current $repairIndex -Total $files.Count -StartedAt $repairStarted -Complete
     # Review round 2 (Luna Max): "return $reports" lets the output stream
     # enumerate the ArrayList -- with exactly one report, that unwraps to
     # the single pscustomobject itself rather than a one-element collection.
@@ -19545,14 +19561,16 @@ function Invoke-ThumbnailDownload {
     $i        = 0
     $total    = $missing.Count
     $missingNoIcon = New-Object System.Collections.Generic.List[string]
+    $failedCodes = New-Object System.Collections.Generic.List[string]
     $thumbnailStarted = Get-Date
     foreach ($code in $missing) {
         $i++
         $destPath = Join-Path $iconsDir ($code + ".png")
         $url      = $baseUrl + [Uri]::EscapeDataString($code + ".png")
-        Write-TpmCompactExtractionProgress -Phase Checking -Label 'Thumbnails' -Current $i -Total $total -StartedAt $thumbnailStarted
+        $thumbnailLabel = "Thumbnail {0} [{1}/{2}]" -f $code, $i, $total
+        Write-TpmCompactExtractionProgress -Phase Checking -Label $thumbnailLabel -Current $i -Total $total -StartedAt $thumbnailStarted
         $statusCode = 0
-        if (Invoke-TpmDownload -DownloadUrl $url -DestinationPath $destPath -Label 'Thumbnails' -Quiet -LastStatusCode ([ref]$statusCode)) {
+        if (Invoke-TpmDownload -DownloadUrl $url -DestinationPath $destPath -Label $thumbnailLabel -Quiet -LastStatusCode ([ref]$statusCode)) {
             Write-Log "Thumbnails: downloaded $code"
             $fetched++
         } elseif ($statusCode -eq 404) {
@@ -19560,6 +19578,7 @@ function Invoke-ThumbnailDownload {
             Write-Log "Thumbnails: not in repo $code"
             $notAvail++
         } else {
+            [void]$failedCodes.Add($code)
             Write-Log "Thumbnails: FAILED $code"
             $failed++
         }
@@ -19567,9 +19586,10 @@ function Invoke-ThumbnailDownload {
     Write-TpmCompactExtractionProgress -Phase Checking -Label 'Thumbnails' -Current $total -Total $total -StartedAt $thumbnailStarted -Complete
 
     $failSuffix = if ($failed -gt 0) { ", $failed failed" } else { "" }
+    $summaryColor = if ($failed -gt 0) { 'Yellow' } else { 'Green' }
     Write-Host ("  Thumbnails: {0} downloaded, {1} already had one, {2} have no icon in the online pack{3}." -f `
-        $fetched, $alreadyCount, $notAvail, $failSuffix) -ForegroundColor Green
-    Write-Log ("Thumbnails: fetched=$fetched alreadyPresent=$alreadyCount notAvail=$notAvail failed=$failed")
+        $fetched, $alreadyCount, $notAvail, $failSuffix) -ForegroundColor $summaryColor
+    Write-Log "Thumbnails: fetched=$fetched alreadyPresent=$alreadyCount notAvail=$notAvail failed=$failed"
 
     if ($notAvail -gt 0) {
         Write-Host ("  No icon in online pack: {0}." -f ($missingNoIcon -join ', ')) -ForegroundColor Yellow
@@ -19581,7 +19601,8 @@ function Invoke-ThumbnailDownload {
         Write-Log "Thumbnails: all $total missing icon(s) were 404 -- likely no upstream icon for these specific games, not a download failure."
     }
     if ($failed -gt 0) {
-        Write-Host "  Some thumbnail downloads failed; rerun thumbnail setup to retry them." -ForegroundColor Yellow
+        Write-Host ("  Thumbnail download/check failures: {0}." -f ($failedCodes -join ', ')) -ForegroundColor Red
+        Write-Host "  These are separate from games with no online icon; rerun thumbnail setup to retry them." -ForegroundColor Yellow
     }
 }
 

@@ -90,6 +90,18 @@
 | BepInEx package/download/deploy | Invoke-BepInExUpdateCheck | Compact preflight, version-check, and deployment progress added | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing BepInEx tests; owner smoke |
 | Crosshair/HyperSpin bounded asset writes | Crosshair and HyperSpin setup/export | Small bounded writes; no long-running progress surface needed | JUSTIFIED NO PROGRESS SURFACE | Existing crosshair/HyperSpin tests |
 
+### Progress and thumbnail reporting slice -- working-tree status
+
+The current uncommitted source slice corrects the remaining user-visible
+progress details without changing the release gate: repair file enumeration
+reports while it is happening, one elapsed timer covers scanning and profile
+checks, compact elapsed values retain fractional seconds, and the emergency
+web transport is presented as `web fallback`. Thumbnail rows identify each
+profile and count/total; HTTP 404 no-icon results remain distinct from transient
+download/check failures, whose profile codes are listed for retry. Focused
+progress, repair, and thumbnail tests pass. Package rebuild and owner-runtime
+proof are still required.
+
 ## Prompt/gate/back-routing consistency audit
 The Progress.Core inventory and classifications are recorded in
 `docs/remediation/slices/PR-321-current-slice.md` under "Source inventory".

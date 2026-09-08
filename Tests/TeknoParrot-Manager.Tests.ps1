@@ -2770,7 +2770,7 @@ Describe "Expand-ZipFileSafe" {
     It "truncates compact progress to constrained width and shows elapsed heartbeat" {
         $text = Get-TpmCompactProgressText -Label ('Game-' + ('x' * 200)) -Current 3 -Total 0 -StartedAt (Get-Date).AddSeconds(-2) -Width 40
         $text.Length | Should -Be 40
-        $text | Should -Match 'elapsed [1-9]\d*s'
+        $text | Should -Match 'elapsed [1-9]\d*\.\d+s'
     }
     It "returns the bounded row from the actual writer" {
         $output = Write-TpmCompactExtractionProgress -Phase Scanning -Label ('Game-' + ('x' * 200)) -Current 1 -Total 2 -StartedAt (Get-Date).AddSeconds(-1) -Width 30 -ReturnText
@@ -4912,6 +4912,7 @@ Describe "Invoke-AutoSync extracted-folder regression guards" {
         Mock Save-XmlMaybe {}
         $result = Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{} -DryRun:$false
         Should -Invoke Write-TpmCompactExtractionProgress -ParameterFilter { $Phase -eq 'Repairing' -and $Label -eq 'Game' }
+        Should -Invoke Write-TpmCompactExtractionProgress -ParameterFilter { $Phase -eq 'Scanning' -and $Current -ge 1 -and $Total -eq 0 }
         @($result).Count | Should -Be 1
     }
 
@@ -7118,6 +7119,15 @@ Describe "Invoke-ThumbnailDownload 404-vs-failure distinction" {
         # must increment $failed, not $notAvail.
         $script:thumbSource | Should -Match '\$statusCode\s+-eq\s+404[\s\S]*?\}\s*else\s*\{[\s\S]*?\$failed\+\+'
     }
+    It "labels each thumbnail with its profile code and count" {
+        $script:thumbSource | Should -Match 'Thumbnail \{0\} \[\{1\}/\{2\}\]'
+    }
+
+    It "names transient thumbnail failures separately from missing online icons" {
+        $script:thumbSource | Should -Match '\$failedCodes\.Add\(\$code\)'
+        $script:thumbSource | Should -Match 'Thumbnail download/check failures'
+        $script:thumbSource | Should -Match 'separate from games with no online icon'
+    }
 }
 
 Describe "Write-TpmDownloadProgress" {
@@ -7139,6 +7149,12 @@ Describe "Write-TpmDownloadProgress" {
         Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter {
             $Phase -eq 'Checking' -and $Current -eq 5 -and $Total -eq 0 -and $Label -like '*HttpClient*'
         }
+    }
+    It "uses a user-facing fallback label instead of exposing the raw web request method" {
+        $progressSource = ${function:Write-TpmDownloadProgress}.ToString()
+        $progressSource | Should -Match "web fallback"
+        $progressSource | Should -Match '\$displayMethod'
+        $progressSource | Should -Not -Match '\$Label\s*=\s*"\{0\} via \{1\}".*?\$Method'
     }
 }
 

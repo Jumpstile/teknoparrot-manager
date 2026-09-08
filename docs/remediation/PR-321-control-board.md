@@ -140,3 +140,16 @@ prompts follow the completed repair result. Raw Thrills path-length guidance
 now tells the user to shorten parent folders and update the saved GamePath.
 Focused Library Health tests cover the new outcomes and save-verification
 failure. Package rebuild and owner runtime proof remain outstanding.
+
+## Progress and thumbnail reporting slice -- working-tree evidence
+
+The next bounded source slice keeps the release blocked while correcting the
+user-visible progress contract. Library Health repair now reports the actual
+game-file enumeration with an unknown total, then continues profile checks with
+one stable elapsed timer. Compact rows use fractional elapsed seconds, and the
+web transport fallback is shown as `web fallback` instead of raw
+`Invoke-WebRequest` wording. Thumbnail checks identify the current profile and
+count/total, keep HTTP 404 no-icon results separate from other failures, and
+list transient failure profile codes for retry. Thumbnail setup remains an
+optional prompt after repair. Focused tests pass; package rebuild and owner
+runtime proof remain outstanding.

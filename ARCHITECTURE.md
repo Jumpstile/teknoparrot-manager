@@ -805,9 +805,11 @@ control state. Third-party FFB plugin coverage is NOT included -- checking it
 needs a live fetch of `AutoSetup.cmd`, which would break the no-live-fetch
 inspection contract. The result object carries the named broken/empty profiles
 and coverage lists to the guided action screen. Automatic repair first runs a
-dry-run candidate search limited to the broken profile codes, displays compact
-progress plus redacted before/after GamePath evidence, and asks for explicit
-review before saving. Only the reviewed set is reapplied, with a complete
+dry-run candidate search limited to the broken profile codes, reports compact
+progress while enumerating the actual game files and then while checking profiles
+with one stable elapsed timer, and displays redacted before/after GamePath evidence,
+then asks for explicit review before saving.
+Only the reviewed set is reapplied, with a complete
 `UserProfiles\FullBackup\HealthCheck_*` backup before confirmed writes. Every
 applied profile is read back and revalidated at the saved path before it is
 reported as `FIXED`; failed saves or verification remain `STILL BROKEN`.
@@ -918,6 +920,13 @@ Progress is rendered through the shared compact console row
 speed, and ETA; unknown totals show downloaded MB and speed without inventing a
 percentage. Completion always emits a final compact-row update, logs the method,
 file size, elapsed time, and average MB/s, and still writes the SHA256 download audit.
+
+Compact rows use fractional elapsed seconds so short operations do not repeat
+`elapsed 0s`; the normal UI names the emergency transport `web fallback` rather
+than exposing the raw PowerShell cmdlet. Thumbnail checks include the current
+profile code and count/total. A missing upstream icon (HTTP 404) remains separate
+from transient download/check failures, and failed profile codes are listed for
+retry.
 
 Current main-script call sites using the helper:
 
