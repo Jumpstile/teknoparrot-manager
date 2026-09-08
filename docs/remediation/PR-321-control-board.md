@@ -6,11 +6,12 @@ Status: blocked. This board is the source of truth for TPM remediation state.
 
 - Root: `C:\REPOS\tpm-rc8-certified-a700d093`
 - Branch: `fix/rc8-release-blockers`
-- HEAD: `7cd77108759084679f33eb27f98b6bfaaa58ff4d`
-- Worktree: dirty; Progress.Core source inventory and tests are uncommitted.
+- HEAD: `aa37474409b75752aaa9d729c0ee23cd52e4cd14`
+- Worktree at the accepted source checkpoint: clean; the current reconciliation slice changes governance documents only.
 - Candidate ZIP: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`.
-- Candidate freshness: stale relative to uncommitted source changes; package rebuild is not authorized.
-- Permanent procedure gate: expected fail until unresolved owner findings, stale candidate identity, and owner-runtime evidence are resolved.
+- Candidate freshness: stale relative to accepted HEAD; the prior ZIP must not be reused for owner smoke. Package rebuild is not authorized.
+- Accepted FFB mode-8 checkpoint: commit `aa37474409b75752aaa9d729c0ee23cd52e4cd14`; focused FFB 40/40, SupportPackage 40/40, and full main Pester 1028/1028.
+- Permanent procedure gate: expected fail until unresolved source/owner findings, stale candidate identity, and owner-runtime evidence are resolved.
 
 ## Status rules
 
@@ -18,7 +19,9 @@ Allowed statuses are: `NOT FIXED`, `SOURCE FIXED; OWNER RUNTIME NEEDED`, `FIXED 
 
 Re-audit statuses are fail-closed and cannot advance to owner-runtime-only until source evidence, focused tests, rebuilt package identity, and runtime proof exist.
 
-## Owner report table
+## Owner report table (historical pre-re-audit snapshot)
+The status values in this retained snapshot are historical evidence. The
+canonical release-decision statuses are in the corrected table below.
 
 | ID | Owner-visible failure | Expected behavior | Current status | Owning subsystem | Source/functions | Tests | Runtime proof needed | Next action | Slice assignment |
 |---:|---|---|---|---|---|---|---|---|---|
@@ -71,7 +74,10 @@ Re-audit statuses are fail-closed and cannot advance to owner-runtime-only until
 
 ## Current blockers
 
-- Source blockers: IDs 11 and 12 remain NOT FIXED; IDs 3, 17-22, 26, 30, and 32 have source evidence.
+- Canonical source-remediation blockers: IDs 2, 3, 6, 8, 11, 12, 16-19, 21, 22, and 29.
+- Canonical source re-audit blockers: IDs 4, 5, 7, 20, 23-27, and 30-32.
+- Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1, 9, 10, 13-15, and 28.
+- The earlier `NOT FIXED` prose for IDs 11, 12, and 29 is retained only as historical evidence; it is superseded by the corrected table below.
 - Test blockers: no focused source-test blocker remains for audited paths, but unresolved design work and owner-runtime routes remain.
 - Package/runtime blockers: candidate ZIP is stale; no owner smoke is authorized.
 - Owner-design blockers: ReShade ownership/accounting and remaining stateful prompt-picker boundaries need explicit future contracts.
@@ -84,9 +90,11 @@ Re-audit statuses are fail-closed and cannot advance to owner-runtime-only until
 ## Control-board rule
 
 A remediation change is not complete until its owner IDs, slice contract, behavior contract, focused tests, runtime proof requirement, and hunk classification are recorded here and in the remediation report.
-## Live re-audit correction -- 2026-09-08
+## Canonical release-decision status -- live re-audit correction -- 2026-09-08
 
-This section supersedes the prior blanket `SOURCE FIXED; OWNER RUNTIME NEEDED` classification. Crosshair source evidence was false, and direct support-pack evidence confirmed duplicate `ErrorAction` failures. The candidate ZIP remains stale and is not a release gate.
+This section is the canonical release-decision source. It supersedes the
+historical owner mapping and prior blocker prose above. The candidate ZIP
+remains stale and is not a release gate.
 
 | ID | Previous status | Corrected status | Evidence | Source remediation | Owner retest |
 |---:|---|---|---|---|---|

@@ -2,24 +2,27 @@
 
 - Repository root: `C:\REPOS\tpm-rc8-certified-a700d093`
 - Branch: `fix/rc8-release-blockers`
-- HEAD: `081f7d652d7b19c25605e75225797e2562ba3de5` (current uncommitted worktree)
-- Report generated UTC: `2026-09-08T21:13:47`; FFB validation is recorded in the dated slice below.
+- HEAD: `aa37474409b75752aaa9d729c0ee23cd52e4cd14` (accepted committed FFB checkpoint)
+- Report generated UTC: governance reconciliation after the accepted FFB commit; current status is recorded below.
 - Prior candidate/package identity: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`
 - Prior candidate byte size: `8,077,772`
 - Prior candidate SHA-256: `78983F4B664DFC2E00E7E73CDA37F256EB83113256026E077F851D9589FFBD8F`
 - Prior source SHA: `97047640f3ebf850418181717ae3e6b5379343e1` (prior candidate package source identity)
 - Prior candidate validator: `Valid = True`
-- Current package state: no new package generated; package, release, certification, and owner-runtime actions were prohibited.
-- Remediation scope: TPM-only PR #321 historical remediation evidence plus the current FFBPlugin mode-8 hardening slice
+- Current source state: accepted FFB checkpoint is clean; this slice changes governance documents only.
+- Current package state: no new package generated; the prior ZIP is stale and must not be reused for owner smoke.
+- Remediation scope: TPM-only PR #321 historical remediation evidence, accepted FFBPlugin mode-8 checkpoint, and governance reconciliation
 
 ## Provenance
 
-- Git status: the prior package-evidence checkpoint was dirty only because this report was updated after its clean source checkpoint; the current worktree also contains the uncommitted FFB hardening slice recorded below.
+- Git status at the accepted source checkpoint: clean. The current slice is limited to this control-board/reconciliation update; no production source change is included.
 - The canonical control board is `docs/remediation/PR-321-control-board.md`; the current organization slice is `docs/remediation/slices/PR-321-current-slice.md`.
 - No monitor-pipeline files changed.
 - No runtime, state, log, ZIP, or package artifact was created by this report.
 
 ## Owner report mapping table
+This retained mapping is the historical pre-reaudit snapshot. The canonical
+release-decision table appears below and supersedes this snapshot.
 
 | ID | Owner report | Status | Files/functions | Exact test names | Runtime proof still needed |
 |---:|---|---|---|---|---|
@@ -183,7 +186,7 @@ pass is claimed.
 
 ## FFB mode-8 hardening round -- 2026-09-08
 
-This uncommitted TPM-only slice hardens the existing third-party FFBPlugin
+This committed TPM-only slice hardens the existing third-party FFBPlugin
 path. The mutable upstream branch is resolved once to a validated full
 commit SHA; the support table and both DLL downloads use that same SHA. DLL
 acquisition is staged all-or-nothing, existing custom cache files are
@@ -197,7 +200,7 @@ zero-deployment outcomes without mutating game profiles.
 | FFB focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*FFB*' -CI -Output Normal` | 40 passed, 0 failed, 0 skipped | 2026-09-08T20:58:37 | 2026-09-08T20:58:47 | Pester 5.7.1 |
 | SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -CI -Output Normal` | 40 passed, 0 failed, 0 skipped | 2026-09-08T20:58:55 | 2026-09-08T20:59:13 | Pester 5.7.1 |
 | Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -Output Normal` | 1028 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
-| Permanent procedure gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Failed closed on owner-runtime evidence and row 29 `NOT FIXED`; a rerun produced the same two expected blockers | not captured | not captured | pwsh |
+| Permanent procedure gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Failed closed on unresolved source/owner blockers and owner-runtime evidence; no completion claim | not captured | not captured | pwsh |
 
 Pester 5.7.1 was verified with `Get-Module Pester -ListAvailable`. Parse
 checks returned zero errors, PSScriptAnalyzer returned zero Error/Warning
@@ -246,15 +249,17 @@ owner-runtime smoke, release, certification, commit, or push was performed.
 - Progress.Core source inventory is complete for inspected production paths; ID 3 is SOURCE FIXED; OWNER RUNTIME NEEDED pending packaged operation proof.
 - Affected-games repair remains SOURCE FIXED; OWNER RUNTIME NEEDED.
 - Support fatal/newest/stale evidence and the support `O/B` route are source/test covered; owner-runtime proof is outstanding.
-- The supplied ZIP is stale relative to current uncommitted source changes.
+- The supplied ZIP is stale relative to accepted commit `aa37474409b75752aaa9d729c0ee23cd52e4cd14` and must not be reused for owner smoke.
 - This report intentionally records failed acceptance conditions rather than claiming completion.
-- FFB mode-8 source identity, acquisition, deployment, evidence, ownership, rollback, and accounting invariants are separately recorded in the dated slice section above.
+- FFB mode-8 source identity, acquisition, deployment, evidence, ownership, rollback, and accounting invariants are accepted at commit `aa37474409b75752aaa9d729c0ee23cd52e4cd14`.
 
 ## Non-actions
 
-No commit, push, package, wiki, release, certification, or ARCADE/#323 action
-was performed. No monitor-pipeline work was mixed into PR #321. No generated
-runtime artifact remains in the worktree.
+No package, push, wiki, release, certification, or ARCADE/#323 action was
+performed. The accepted FFB source/test checkpoint is committed as
+`aa37474409b75752aaa9d729c0ee23cd52e4cd14`; this governance reconciliation
+slice remains uncommitted. No monitor-pipeline work was mixed into PR #321.
+No generated runtime artifact remains in the worktree.
 
 ## Runtime owner-smoke checklist
 
@@ -278,7 +283,10 @@ Corrections supported by new evidence:
 The previous "32 owner-runtime-only" count is unreliable. The candidate package/source gate is not trustworthy for release acceptance. Re-audit and source remediation must precede package rebuild and owner-runtime retest.
 
 That statement describes the prior bounded slice only. The subsequent crosshair slice separately re-audited IDs 13, 14, and 15, corrected the browser to a completed non-interactive state after P2, added best-effort focus reporting, routed workflow prompts with typed fallback, and retained no package, release, certification, push, or ARCADE/#323 action.
-## Corrected owner-ID status table
+## Canonical owner-ID status table -- release decisions
+This table is the sole release-decision status source for owner IDs. The
+historical mapping above and earlier `NOT FIXED` prose are retained for audit
+traceability but do not override these corrected classifications.
 
 | ID | Workflow | Prior status | Corrected status | Evidence | Source remediation | Owner retest | Live record |
 |---:|---|---|---|---|---|---|---|
