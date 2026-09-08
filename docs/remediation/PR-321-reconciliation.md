@@ -2,19 +2,19 @@
 
 - Repository root: `C:\REPOS\tpm-rc8-certified-a700d093`
 - Branch: `fix/rc8-release-blockers`
-- HEAD: `97047640f3ebf850418181717ae3e6b5379343e1`
-- Report generated UTC: RC8 candidate package built and validated from source commit `97047640f3ebf850418181717ae3e6b5379343e1`.
-- Source/test last-edit UTC: not captured in this working report.
-- Candidate/package identity: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`
-- Candidate byte size: `8,077,772`
-- Candidate SHA-256: `78983F4B664DFC2E00E7E73CDA37F256EB83113256026E077F851D9589FFBD8F`
-- Source SHA: `97047640f3ebf850418181717ae3e6b5379343e1` (candidate package source identity)
-- Candidate validator: `Valid = True`
-- Remediation scope: TPM-only PR #321 ReShade ownership/accounting slice `TPM-RESHADE-001`, prior controls/progress/prompt source evidence, owner-smoke reconciliation, and permanent procedure enforcement
+- HEAD: `081f7d652d7b19c25605e75225797e2562ba3de5` (current uncommitted worktree)
+- Report generated UTC: `2026-09-08T21:13:47`; FFB validation is recorded in the dated slice below.
+- Prior candidate/package identity: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`
+- Prior candidate byte size: `8,077,772`
+- Prior candidate SHA-256: `78983F4B664DFC2E00E7E73CDA37F256EB83113256026E077F851D9589FFBD8F`
+- Prior source SHA: `97047640f3ebf850418181717ae3e6b5379343e1` (prior candidate package source identity)
+- Prior candidate validator: `Valid = True`
+- Current package state: no new package generated; package, release, certification, and owner-runtime actions were prohibited.
+- Remediation scope: TPM-only PR #321 historical remediation evidence plus the current FFBPlugin mode-8 hardening slice
 
 ## Provenance
 
-- Git status: dirty only because this package-evidence report was updated after the clean source checkpoint; no production source or test files changed.
+- Git status: the prior package-evidence checkpoint was dirty only because this report was updated after its clean source checkpoint; the current worktree also contains the uncommitted FFB hardening slice recorded below.
 - The canonical control board is `docs/remediation/PR-321-control-board.md`; the current organization slice is `docs/remediation/slices/PR-321-current-slice.md`.
 - No monitor-pipeline files changed.
 - No runtime, state, log, ZIP, or package artifact was created by this report.
@@ -166,6 +166,7 @@ required one/multiple/zero/no-candidate functional coverage is not complete.
 
 ## Tests with exact counts and timestamps
 | Gate/test | Exact command | Count/result | Started UTC | Finished UTC | Engine/version |
+|---|---|---|---|---|---|
 | Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -Output Normal` | 999 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
 | SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -Output Normal` | 36 passed, 0 failed, 0 skipped at prior checkpoint; not rerun in this slice | not captured | not captured | Pester 6.1.0 |
 | Controls focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Write-ControlPropagationResults*' -Output Detailed` | 3 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
@@ -179,6 +180,31 @@ certification-compatible evidence. Main and support suites passed, static
 checks passed, and the permanent procedure gate failed closed. The report
 edit itself makes a fresh validation timestamp necessary; no combined-gate
 pass is claimed.
+
+## FFB mode-8 hardening round -- 2026-09-08
+
+This uncommitted TPM-only slice hardens the existing third-party FFBPlugin
+path. The mutable upstream branch is resolved once to a validated full
+commit SHA; the support table and both DLL downloads use that same SHA. DLL
+acquisition is staged all-or-nothing, existing custom cache files are
+preserved, and SHA256/provenance evidence is written atomically. Deployment,
+ownership metadata, native-overlap cleanup, and final evidence persistence
+roll back on failure. The setup result reports exact accounting and records
+zero-deployment outcomes without mutating game profiles.
+
+| FFB validation | Exact command | Count/result | Started UTC | Finished UTC | Engine/version |
+|---|---|---|---|---|---|
+| FFB focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*FFB*' -CI -Output Normal` | 40 passed, 0 failed, 0 skipped | 2026-09-08T20:58:37 | 2026-09-08T20:58:47 | Pester 5.7.1 |
+| SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -CI -Output Normal` | 40 passed, 0 failed, 0 skipped | 2026-09-08T20:58:55 | 2026-09-08T20:59:13 | Pester 5.7.1 |
+| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -Output Normal` | 1028 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
+| Permanent procedure gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Failed closed on owner-runtime evidence and row 29 `NOT FIXED`; a rerun produced the same two expected blockers | not captured | not captured | pwsh |
+
+Pester 5.7.1 was verified with `Get-Module Pester -ListAvailable`. Parse
+checks returned zero errors, PSScriptAnalyzer returned zero Error/Warning
+findings, the production script contained zero non-ASCII bytes, `git
+diff --check` passed, and no generated result file remained. The existing
+changelog contains 40 non-ASCII bytes outside this FFB slice. No package,
+owner-runtime smoke, release, certification, commit, or push was performed.
 
 ## Static gates
 
@@ -209,6 +235,9 @@ pass is claimed.
 | ARCHITECTURE.md | Progress.Core compact/workflow/waiting contract | TPM-PROGRESS-001, TPM-TRACE-001, PR #321 | Changed-section review |
 | docs/remediation/slices/PR-321-current-slice.md; docs/remediation/PR-321-control-board.md | ReShade ownership/accounting contract, prompt inventory, boundaries, statuses, and slice assignment | TPM-RESHADE-001, TPM-TRACE-001, TPM-OWNER-001, owner report IDs 11-12, PR #321 | Artifact review and focused source tests |
 | README.md; QUICKSTART.md; TeknoParrot-Manager-README.txt; TeknoParrot-Manager-QuickStart.txt | Corrected LaunchBox/HyperSpin prompt instructions | TPM-PROMPT-001, owner report IDs 24-25, PR #321 | Documentation review against current routes |
+| TeknoParrot-Manager.ps1 | FFB source resolution, support-table parsing, staged DLL acquisition, transactional deployment, ownership rollback, and evidence persistence | TPM-FFB-001, TPM-TRACE-001, PR #321 | Production parse, analyzer, focused FFB tests |
+| Tests/TeknoParrot-Manager.Tests.ps1 | FFB source, URL, cache, hash, collision, ownership, evidence, rollback, accounting, and support contracts | TPM-FFB-001, TPM-TRACE-001, PR #321 | 40 focused FFB tests; 1028 full-suite tests |
+| Tests/SupportPackage.Tests.ps1 | FFB evidence allowlist and support-package collection | TPM-FFB-001, TPM-EVIDENCE-001, PR #321 | 40 support-package tests |
 
 ## Permanent procedure compliance
 
@@ -219,6 +248,7 @@ pass is claimed.
 - Support fatal/newest/stale evidence and the support `O/B` route are source/test covered; owner-runtime proof is outstanding.
 - The supplied ZIP is stale relative to current uncommitted source changes.
 - This report intentionally records failed acceptance conditions rather than claiming completion.
+- FFB mode-8 source identity, acquisition, deployment, evidence, ownership, rollback, and accounting invariants are separately recorded in the dated slice section above.
 
 ## Non-actions
 

@@ -1819,7 +1819,7 @@ function New-TpmSupportPackage {
         if ((Test-Path -LiteralPath $actionItemsPath -PathType Leaf) -and (Test-Path -LiteralPath $managerLogPath -PathType Leaf) -and ((Get-Item -LiteralPath $actionItemsPath).LastWriteTimeUtc -lt (Get-Item -LiteralPath $managerLogPath).LastWriteTimeUtc)) {
             $actionItemsEvidenceClass = 'Stale'
         }
-        $tpmNames = @('TeknoParrot-Manager.log','TeknoParrot-Manager-controls.txt','TeknoParrot-Manager-ActionItems.txt','TeknoParrot-Manager-HealthCheck.txt','TeknoParrot-Manager-Readiness.txt','TPM-Validation-Report.md','TPM-Validation-Report.json','TPM-Certification-Scorecard.md','TPM-Certification-Scorecard.json','TPM-Certification-Final-Outcome.md','TPM-Certification-Final-Outcome.json','TPM-Certification-Manifest.md','TPM-Certification-Manifest.json')
+        $tpmNames = @('TeknoParrot-Manager.log','TeknoParrot-Manager-controls.txt','TeknoParrot-Manager-ActionItems.txt','TeknoParrot-Manager-HealthCheck.txt','TeknoParrot-Manager-Readiness.txt','TPM-Validation-Report.md','TPM-Validation-Report.json','TPM-Certification-Scorecard.md','TPM-Certification-Scorecard.json','TPM-Certification-Final-Outcome.md','TPM-Certification-Final-Outcome.json','TPM-Certification-Manifest.md','TPM-Certification-Manifest.json','TPM-FFB-Plugin-Evidence.json')
         $index = 0
         foreach ($name in $tpmNames) {
             $index++
@@ -13097,9 +13097,9 @@ function Invoke-PostgresGameSetup {
 # specific game expects to load (d3d9.dll, d3d11.dll, opengl32.dll,
 # xinput1_3.dll, or winmm.dll). The per-game destination filename is a
 # fixed lookup tied to specific titles, not auto-detected from the exe --
-# so unlike ReShade it cannot be guessed at runtime; it is fetched live
-# from the upstream AutoSetup.cmd build script instead of hardcoded here,
-# so this automatically tracks whatever the fork currently supports.
+# so unlike ReShade it cannot be guessed at runtime; it is read from the
+# pinned revision's AutoSetup.cmd rather than a mutable branch URL, and remains
+# intentionally live rather than hardcoded here.
 
 # Fetches and parses the upstream AutoSetup.cmd to build a folder-name ->
 # destination-DLL-filename map. The file has a very regular shape:
@@ -13111,9 +13111,44 @@ function Invoke-PostgresGameSetup {
 # Returns an empty hashtable (not a hardcoded fallback list) if the fetch
 # fails after retries -- there is nothing meaningful to fall back to since
 # the table only exists upstream.
+function Test-FFBPluginRevision {
+    param([string]$Revision)
+    return (-not [string]::IsNullOrWhiteSpace($Revision) -and $Revision -match '^[0-9a-fA-F]{40}$')
+}
+
+function Get-FFBPluginSourceRevision {
+    try {
+        $uri = 'https://api.github.com/repos/mightymikem/FFBArcadePlugin/commits/master'
+        $resp = Invoke-TpmWebRequestSilently -Uri $uri -UseBasicParsing -TimeoutSec 20 -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
+        $payload = [string]$resp.Content | ConvertFrom-Json
+        $shaProperty = $payload.PSObject.Properties['sha']
+        if (-not $shaProperty -or $null -eq $shaProperty.Value -or $shaProperty.Value -is [System.Array]) {
+            throw 'FFBPlugin source response did not contain exactly one SHA.'
+        }
+        $sha = [string]$shaProperty.Value
+        if (-not (Test-FFBPluginRevision -Revision $sha)) {
+            throw 'FFBPlugin source revision was not a full commit SHA.'
+        }
+        return [pscustomobject]@{
+            Revision = $sha.ToUpperInvariant()
+            Repository = 'mightymikem/FFBArcadePlugin'
+            ManifestUrl = $uri
+            Trust = 'SourcePinnedAuditHash'
+        }
+    } catch {
+        Write-Log "FFBPlugin: source revision lookup failed -- $_"
+        return $null
+    }
+}
+
 function Get-FFBPluginGameMap {
+    param([Parameter(Mandatory)][string]$SourceRevision)
     $map = @{}
-    $uri = 'https://raw.githubusercontent.com/mightymikem/FFBArcadePlugin/master/AutoSetup.cmd'
+    if (-not (Test-FFBPluginRevision -Revision $SourceRevision)) {
+        Write-Log 'FFBPlugin: refused support-table fetch because the source revision was not pinned.'
+        return $map
+    }
+    $uri = "https://raw.githubusercontent.com/mightymikem/FFBArcadePlugin/$SourceRevision/AutoSetup.cmd"
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
             $resp = Invoke-TpmWebRequestSilently -Uri $uri -UseBasicParsing -TimeoutSec 20 `
@@ -13125,9 +13160,9 @@ function Get-FFBPluginGameMap {
                 if ($folderName -and $destDll) { $map[$folderName] = $destDll }
             }
             if ($map.Count -gt 0) {
-                Write-Log "FFBPlugin: $($map.Count) game(s) in the live AutoSetup.cmd table."
+                Write-Log "FFBPlugin: $($map.Count) game(s) in the pinned AutoSetup.cmd table."
             } else {
-                Write-Log "FFBPlugin: 0 entries parsed from AutoSetup.cmd -- format may have changed."
+                Write-Log "FFBPlugin: 0 entries parsed from pinned AutoSetup.cmd -- format may have changed."
             }
             return $map
         } catch {
@@ -13140,34 +13175,96 @@ function Get-FFBPluginGameMap {
             # extracting a status code embedded only in the message text.
             $status = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
             if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
-                Write-Log "FFBPlugin: AutoSetup.cmd fetch failed -- $_"
-                return $map
+                Write-Log "FFBPlugin: pinned AutoSetup.cmd fetch failed -- $_"
+                return @{}
             }
             Write-Log "FFBPlugin: attempt $attempt failed, retrying in 5s -- $_"
             Start-Sleep -Seconds 5
         }
     }
-    return $map
+    return @{}
 }
 
-# Downloads MAME32.dll / MAME64.dll directly from the repo root (plain
-# files, not inside the release ZIP -- no extraction step needed).
-# Returns $true if at least one architecture's DLL was downloaded.
+
+
+# Downloads MAME32.dll / MAME64.dll directly from the pinned repository
+# revision (plain files, not inside the release ZIP -- no extraction step).
+# Returns a structured all-or-nothing result with staged paths and SHA-256
+# evidence; an existing custom cache is never used as an unverified fallback.
 function Invoke-FFBPluginDownload {
-    param([string]$destDir)
-    [void][System.IO.Directory]::CreateDirectory($destDir)
-    $got = $false
-    foreach ($dllName in @('MAME32.dll', 'MAME64.dll')) {
-        $uri      = "https://raw.githubusercontent.com/mightymikem/FFBArcadePlugin/master/$dllName"
-        $destPath = Join-Path $destDir $dllName
-        if (Invoke-TpmDownload -DownloadUrl $uri -DestinationPath $destPath -Label 'FFBPlugin') {
-            $got = $true
-            Write-Log "FFBPlugin: downloaded $dllName"
-        } else {
-            Write-Log "FFBPlugin: $dllName download failed."
+    param([string]$destDir, [string]$SourceRevision)
+    $script:FFBDownloadPaths = @{}
+    $script:FFBDownloadEvidence = @()
+    if (-not (Test-FFBPluginRevision -Revision $SourceRevision)) {
+        Write-Log 'FFBPlugin: refused download because the source revision was not pinned.'
+        return [pscustomobject]@{
+            Succeeded = $false; Files = @{}; Evidence = @(); ResiduePaths = @()
+            Reason = 'SOURCE_REVISION_UNAVAILABLE'
         }
     }
-    return $got
+    $sourceRevision = $SourceRevision.ToUpperInvariant()
+    $stagedPaths = New-Object System.Collections.Generic.List[string]
+    $filePaths = [ordered]@{}
+    $evidence = New-Object System.Collections.Generic.List[object]
+    $residuePaths = New-Object System.Collections.Generic.List[string]
+    try {
+        [void][System.IO.Directory]::CreateDirectory($destDir)
+        if (-not (Test-TpmNoReparsePath -Path $destDir)) {
+            throw "FFBPlugin: cache staging directory is missing or reparse-backed."
+        }
+        foreach ($dllName in @('MAME32.dll', 'MAME64.dll')) {
+            $uri = "https://raw.githubusercontent.com/mightymikem/FFBArcadePlugin/$sourceRevision/$dllName"
+            $tempPath = Join-Path $destDir ('TPM-FFB-source-{0}-{1}' -f ([guid]::NewGuid().ToString('N')), $dllName)
+            [void]$stagedPaths.Add($tempPath)
+            if (-not (Invoke-TpmDownload -DownloadUrl $uri -DestinationPath $tempPath -Label 'FFBPlugin' -Version $sourceRevision)) {
+                throw "FFBPlugin: $dllName download failed."
+            }
+            if (-not (Test-Path -LiteralPath $tempPath -PathType Leaf)) {
+                throw "FFBPlugin: $dllName download did not produce a staged file."
+            }
+            $hash = (Get-FileHash -LiteralPath $tempPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            $filePaths[$dllName] = $tempPath
+            [void]$evidence.Add([pscustomobject]@{
+                FileName = $dllName
+                SourceUrl = $uri
+                SourceRevision = $sourceRevision
+                Sha256 = $hash
+                Trust = 'SourcePinnedAuditHash'
+                DownloadPath = $tempPath
+            })
+            Write-Log "FFBPlugin: downloaded pinned $dllName revision $sourceRevision SHA256 $hash"
+        }
+        $script:FFBDownloadPaths = $filePaths
+        $script:FFBDownloadEvidence = $evidence.ToArray()
+        return [pscustomobject]@{
+            Succeeded = $true
+            Files = $filePaths
+            Evidence = $evidence.ToArray()
+            ResiduePaths = @()
+            Reason = $null
+        }
+    } catch {
+        Write-Log "FFBPlugin: pinned source acquisition failed -- $_"
+        foreach ($path in @($stagedPaths)) {
+            try {
+                if (Test-Path -LiteralPath $path -PathType Leaf) {
+                    Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+                }
+            } catch {
+                [void]$residuePaths.Add($path)
+                Write-Log "FFBPlugin: staged source cleanup failed -- $path -- $_"
+            }
+        }
+        $script:FFBDownloadPaths = @{}
+        $script:FFBDownloadEvidence = @()
+        return [pscustomobject]@{
+            Succeeded = $false
+            Files = @{}
+            Evidence = @()
+            ResiduePaths = $residuePaths.ToArray()
+            Reason = 'DLL_ACQUISITION_FAILED'
+        }
+    }
 }
 
 # Deploys FFB plugin DLLs to registered games matched against the live
@@ -13201,10 +13298,129 @@ function Write-FFBPluginOwnership {
     [System.IO.File]::WriteAllText($temp, ($payload | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding $false))
     Move-Item -LiteralPath $temp -Destination $path -Force -ErrorAction Stop
 }
+function Get-FFBPluginOwnershipSnapshot {
+    param([Parameter(Mandatory)][string]$CacheDir)
+    $path = Get-FFBPluginOwnershipPath -CacheDir $CacheDir
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        return [pscustomobject]@{
+            Path = $path
+            Exists = $true
+            Bytes = [System.IO.File]::ReadAllBytes($path)
+        }
+    }
+    return [pscustomobject]@{ Path = $path; Exists = $false; Bytes = $null }
+}
+
+function Restore-FFBPluginOwnershipSnapshot {
+    param(
+        [Parameter(Mandatory)][string]$CacheDir,
+        [Parameter(Mandatory)][object]$Snapshot
+    )
+    $path = Get-FFBPluginOwnershipPath -CacheDir $CacheDir
+    $temp = $path + '.rollback.tmp'
+    if ($Snapshot.Exists) {
+        [System.IO.File]::WriteAllBytes($temp, [byte[]]$Snapshot.Bytes)
+        Move-Item -LiteralPath $temp -Destination $path -Force -ErrorAction Stop
+    } elseif (Test-Path -LiteralPath $path -PathType Leaf) {
+        Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+    }
+}
+
+function Write-FFBPluginEvidence {
+    param(
+        [Parameter(Mandatory)][string]$EvidencePath,
+        [Parameter(Mandatory)][object]$Evidence
+    )
+    $evidenceDir = [System.IO.Path]::GetDirectoryName($EvidencePath)
+    if ([string]::IsNullOrWhiteSpace($evidenceDir)) { throw 'FFB evidence path has no parent directory.' }
+    [void][System.IO.Directory]::CreateDirectory($evidenceDir)
+    $evidenceTemp = $EvidencePath + '.tmp'
+    try {
+        [System.IO.File]::WriteAllText($evidenceTemp, ($Evidence | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $evidenceTemp -Destination $EvidencePath -Force -ErrorAction Stop
+    } catch {
+        try { if (Test-Path -LiteralPath $evidenceTemp -PathType Leaf) { Remove-Item -LiteralPath $evidenceTemp -Force -ErrorAction Stop } } catch {}
+        throw
+    }
+}
+
+function Restore-FFBPluginDeploymentTransaction {
+    param(
+        [object[]]$Entries = @(),
+        [object[]]$RemovedItems = @(),
+        [Parameter(Mandatory)][string]$CacheDir,
+        [Parameter(Mandatory)][object]$OwnershipSnapshot,
+        [string]$UserProfilesDir = '',
+        [string]$OverlapBackupPath = ''
+    )
+    $errors = New-Object System.Collections.Generic.List[string]
+    $restored = 0
+    foreach ($entry in @($Entries | Sort-Object -Property CreatedUtc -Descending)) {
+        $destination = [string]$entry.Destination
+        try {
+            if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) { continue }
+            $currentHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash
+            if ($currentHash -ine [string]$entry.DeployedSha256) {
+                throw "deployed hook changed before rollback: $destination"
+            }
+            Remove-Item -LiteralPath $destination -Force -ErrorAction Stop
+            if (Test-Path -LiteralPath $destination -PathType Leaf) {
+                throw "deployed hook remained after rollback: $destination"
+            }
+            $restored++
+        } catch {
+            [void]$errors.Add([string]$_.Exception.Message)
+        }
+    }
+    foreach ($item in @($RemovedItems)) {
+        $destination = [string]$item.Destination
+        try {
+            if (Test-Path -LiteralPath $destination -PathType Leaf) {
+                throw "native-cleanup destination was recreated before rollback: $destination"
+            }
+            $backup = [string]$item.Backup
+            if (-not (Test-Path -LiteralPath $backup -PathType Leaf)) {
+                throw "native-cleanup backup is unavailable: $backup"
+            }
+            Copy-Item -LiteralPath $backup -Destination $destination -Force -ErrorAction Stop
+            $restoredHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash
+            if ($restoredHash -ine [string]$item.Hash) { throw "native-cleanup restore hash mismatch: $destination" }
+            $restored++
+        } catch {
+            [void]$errors.Add([string]$_.Exception.Message)
+        }
+    }
+    try {
+        Restore-FFBPluginOwnershipSnapshot -CacheDir $CacheDir -Snapshot $OwnershipSnapshot
+    } catch {
+        [void]$errors.Add("ownership manifest rollback failed: $($_.Exception.Message)")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($OverlapBackupPath)) {
+        try {
+            if (-not (Test-Path -LiteralPath $OverlapBackupPath -PathType Container)) {
+                throw "overlap backup is unavailable: $OverlapBackupPath"
+            }
+            if ([string]::IsNullOrWhiteSpace($UserProfilesDir)) {
+                throw 'overlap rollback has no UserProfiles directory.'
+            }
+            Get-ChildItem -LiteralPath $OverlapBackupPath -Force -ErrorAction Stop |
+                Copy-Item -Destination $UserProfilesDir -Recurse -Force -ErrorAction Stop
+        } catch {
+            [void]$errors.Add("native overlap rollback failed: $($_.Exception.Message)")
+        }
+    }
+    return [pscustomobject]@{
+        Succeeded = ($errors.Count -eq 0)
+        Restored = $restored
+        Errors = $errors.ToArray()
+    }
+}
+
 
 function Remove-FFBPluginOwnedDeployment {
     param([Parameter(Mandatory)][string]$CacheDir, [Parameter(Mandatory)][string]$ProfileCode)
     $entries = @(Read-FFBPluginOwnership -CacheDir $CacheDir)
+    $script:FFBOwnedRemovalRecords = @()
     $remaining = New-Object System.Collections.Generic.List[object]
     $removedItems = New-Object System.Collections.ArrayList
     $removed = $false
@@ -13251,6 +13467,7 @@ function Remove-FFBPluginOwnedDeployment {
             throw 'FFBPlugin ownership manifest update failed; deletion was rolled back.'
         }
     }
+    $script:FFBOwnedRemovalRecords = $removedItems.ToArray()
     return $removed
 }
 
@@ -13259,55 +13476,129 @@ function Invoke-FFBPluginSetup {
         [string]$UserProfilesDir,
         [string]$CacheDir,
         [string[]]$NativeEnabledCodes = @(),
-        [string]$TpRoot = ''
+        [string]$TpRoot = '',
+        [string]$EvidencePath = ''
     )
 
-    # A caller passing an explicit $null overrides the default above (PowerShell
-    # does not apply a parameter default when $null is passed deliberately) --
-    # guard here too, since HashSet's constructor throws on a null collection.
     if ($null -eq $NativeEnabledCodes) { $NativeEnabledCodes = @() }
     $nativeEnabledSet = [System.Collections.Generic.HashSet[string]]::new(
         [string[]]$NativeEnabledCodes, [System.StringComparer]::OrdinalIgnoreCase)
+    $ownershipSnapshot = Get-FFBPluginOwnershipSnapshot -CacheDir $CacheDir
     $ownershipEntries = @(Read-FFBPluginOwnership -CacheDir $CacheDir)
+    $nativeRemovedThisRun = New-Object System.Collections.Generic.List[object]
+    $deployedThisRun = New-Object System.Collections.Generic.List[object]
+    $nativeSwitch = $null
 
     Write-Host ""
-    Write-Host "  Fetching the current supported-games list..." -ForegroundColor DarkGray
-    $gameMap = Get-FFBPluginGameMap
-    if ($gameMap.Count -eq 0) {
-        Write-Host "  Could not reach GitHub to fetch the FFB plugin game list -- try again later." -ForegroundColor Red
-        Write-Log "FFBPlugin setup: aborted -- game map fetch failed."
-        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @(); Reason = 'GAME_MAP_FAILED' }
+    $source = Get-FFBPluginSourceRevision
+    if (-not $source -or -not (Test-FFBPluginRevision -Revision $source.Revision)) {
+        Write-Host "  Could not verify the FFB plugin source revision -- no files were changed." -ForegroundColor Red
+        return [pscustomobject]@{
+            Succeeded = $false; Deployed = 0; Errors = 1
+            MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
+            Accounted = 0; Eligible = 0; AccountingComplete = $true
+            Reason = 'SOURCE_REVISION_UNAVAILABLE'
+        }
     }
-    Write-Host ("  {0} game(s) in the upstream table." -f $gameMap.Count) -ForegroundColor DarkGray
-
-    Write-Host "  Downloading the FFB plugin DLLs..." -ForegroundColor DarkGray
-    if (-not (Invoke-FFBPluginDownload -destDir $CacheDir)) {
-        Write-Host "  Could not download the FFB plugin DLLs -- try again later." -ForegroundColor Red
-        Write-Log "FFBPlugin setup: aborted -- DLL download failed."
-        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @(); Reason = 'DLL_DOWNLOAD_FAILED' }
+    Write-Host "  Fetching the pinned supported-games list..." -ForegroundColor DarkGray
+    $gameMap = Get-FFBPluginGameMap -SourceRevision $source.Revision
+    if (-not $gameMap -or $gameMap.Count -eq 0) {
+        Write-Host "  Could not reach GitHub to fetch the pinned FFB plugin game list -- try again later." -ForegroundColor Red
+        Write-Log "FFBPlugin setup: aborted -- pinned game map fetch failed."
+        return [pscustomobject]@{
+            Succeeded = $false; Deployed = 0; Errors = 1
+            MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
+            Accounted = 0; Eligible = 0; AccountingComplete = $true
+            SourceRevision = $source.Revision; SourceTrust = $source.Trust
+            Reason = 'GAME_MAP_FAILED'
+        }
     }
-    $srcDll32 = Join-Path $CacheDir "MAME32.dll"
-    $srcDll64 = Join-Path $CacheDir "MAME64.dll"
+    Write-Host ("  {0} game(s) in the pinned upstream table." -f $gameMap.Count) -ForegroundColor DarkGray
 
     $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
                   Where-Object { $_.Directory.Name -ne "FullBackup" })
     if ($profiles.Count -eq 0) {
         Write-Host "  No registered games found." -ForegroundColor Yellow
         Write-Log "FFBPlugin setup: aborted -- no registered profiles."
-        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @(); Reason = 'NO_REGISTERED_PROFILES' }
+        return [pscustomobject]@{
+            Succeeded = $false; Deployed = 0; Errors = 0
+            MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
+            Accounted = 0; Eligible = 0; AccountingComplete = $true
+            SourceRevision = $source.Revision; SourceTrust = $source.Trust
+            Reason = 'NO_REGISTERED_PROFILES'
+        }
     }
 
-    # Pre-normalise the FFB table once for fuzzy matching.
+    Write-Host "  Downloading the pinned FFB plugin DLLs..." -ForegroundColor DarkGray
+    $download = Invoke-FFBPluginDownload -destDir $CacheDir -SourceRevision $source.Revision
+    if (-not $download -or -not [bool]$download.Succeeded) {
+        Write-Host "  Could not download and hash both verified FFB plugin DLLs -- try again later." -ForegroundColor Red
+        Write-Log "FFBPlugin setup: aborted -- pinned DLL acquisition failed."
+        return [pscustomobject]@{
+            Succeeded = $false; Deployed = 0; Errors = 1
+            MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
+            Accounted = 0; Eligible = 0; AccountingComplete = $true
+            SourceRevision = $source.Revision; SourceTrust = $source.Trust
+            SourceEvidence = @($download.Evidence)
+            AcquisitionResidue = @($download.ResiduePaths)
+            Reason = if ($download.Reason) { $download.Reason } else { 'DLL_ACQUISITION_FAILED' }
+        }
+    }
+    $srcDll32 = [string]$download.Files['MAME32.dll']
+    $srcDll64 = [string]$download.Files['MAME64.dll']
+    if ([string]::IsNullOrWhiteSpace($srcDll32) -or [string]::IsNullOrWhiteSpace($srcDll64) -or
+        -not (Test-Path -LiteralPath $srcDll32 -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $srcDll64 -PathType Leaf)) {
+        Write-Host "  Verified FFB plugin staging is incomplete -- no files were changed." -ForegroundColor Red
+        Write-Log "FFBPlugin setup: aborted -- staged DLL set was incomplete."
+        return [pscustomobject]@{
+            Succeeded = $false; Deployed = 0; Errors = 1
+            MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
+            Accounted = 0; Eligible = 0; AccountingComplete = $true
+            SourceRevision = $source.Revision; SourceTrust = $source.Trust
+            SourceEvidence = @($download.Evidence)
+            Reason = 'DLL_ACQUISITION_FAILED'
+        }
+    }
+
+    $preflightEvidenceWritten = $false
+    if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) {
+        try {
+            Write-FFBPluginEvidence -EvidencePath $EvidencePath -Evidence ([ordered]@{
+                SchemaVersion = 1
+                Phase = 'Preflight'
+                CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+                SourceRepository = $source.Repository
+                SourceManifestUrl = $source.ManifestUrl
+                SourceRevision = $source.Revision
+                SourceTrust = $source.Trust
+                SourceFiles = @($download.Evidence)
+                SelectedGames = @($profiles | ForEach-Object { $_.BaseName })
+                OwnershipManifest = Get-FFBPluginOwnershipPath -CacheDir $CacheDir
+                Result = $null
+            })
+            $preflightEvidenceWritten = $true
+        } catch {
+            Write-Host "  Could not create the FFB evidence report -- no files were changed." -ForegroundColor Red
+            Write-Log "FFBPlugin setup: aborted -- evidence preflight failed -- $_"
+            return [pscustomobject]@{
+                Succeeded = $false; Deployed = 0; Errors = 1
+                MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
+                Accounted = 0; Eligible = 0; AccountingComplete = $true
+                SourceRevision = $source.Revision; SourceTrust = $source.Trust
+                SourceEvidence = @($download.Evidence)
+                EvidencePath = $EvidencePath
+                Reason = 'EVIDENCE_PREFLIGHT_FAILED'
+            }
+        }
+    }
+
     $normFfbList = @(foreach ($name in $gameMap.Keys) {
         [pscustomobject]@{ Name = $name; Norm = (Get-NormalizedGameKey $name); Dest = $gameMap[$name] }
     })
-
     Write-Host ""
-    Write-Host ("  Matching {0} registered game(s) against the FFB table..." -f $profiles.Count) -ForegroundColor Cyan
+    Write-Host ("  Matching {0} registered game(s) against the pinned FFB table..." -f $profiles.Count) -ForegroundColor Cyan
 
-    # First pass: resolve a candidate match for every profile (regardless of
-    # native status) so overlaps -- games covered by BOTH mechanisms -- can be
-    # surfaced and decided on once, rather than silently defaulting to native.
     $candidates = @()
     $missingPathGames = New-Object System.Collections.Generic.List[string]
     $missingDeviceGames = New-Object System.Collections.Generic.List[string]
@@ -13337,14 +13628,12 @@ function Invoke-FFBPluginSetup {
             $exeDir = [string]$pathCheck.GameDirectory
             $folderName = Split-Path -Path $exeDir -Leaf
             $normFolder = Get-NormalizedGameKey $folderName
-
             $best = $null; $bestScore = 0.0
             foreach ($cand in $normFfbList) {
                 $score = Get-DiceSimilarity $normFolder $cand.Norm
                 if ($score -gt $bestScore) { $bestScore = $score; $best = $cand }
             }
             if ($null -eq $best -or $bestScore -lt $FuzzyAutoThreshold) { continue }
-
             $candidates += [pscustomobject]@{
                 Profile = $pf; GamePath = $gamePath; ExeDir = $exeDir
                 Match = $best; Score = $bestScore
@@ -13356,9 +13645,6 @@ function Invoke-FFBPluginSetup {
         }
     }
 
-    # Overlaps: profiles with a confident third-party match that are ALSO
-    # already covered by native FFB Blaster. Ask once, covering all of them,
-    # instead of silently preferring native or prompting per game.
     $overlaps = @($candidates | Where-Object { $nativeEnabledSet.Contains($_.Profile.BaseName) })
     $useNativeForOverlaps = $true
     if ($overlaps.Count -gt 0) {
@@ -13375,79 +13661,139 @@ function Invoke-FFBPluginSetup {
             if (-not $nativeSwitch.Succeeded) {
                 Write-Host ("  ERROR: Could not switch overlapping profiles to the third-party plugin -- {0}" -f $nativeSwitch.Reason) -ForegroundColor Red
                 Write-Log "FFBPlugin: blocked because native overlap switch failed -- $($nativeSwitch.Reason)"
-                return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; MissingPath = $missingPathGames.Count; MissingDevice = $missingDeviceGames.Count; MissingPathGames = $missingPathGames.ToArray(); MissingDeviceGames = $missingDeviceGames.ToArray(); PathReasonCounts = $pathReasonCounts; Reason = 'NATIVE_OVERLAP_SWITCH_FAILED' }
+                return [pscustomobject]@{
+                    Succeeded = $false; Deployed = 0; Errors = 1
+                    MissingPath = $missingPathGames.Count; MissingDevice = $missingDeviceGames.Count
+                    MissingPathGames = $missingPathGames.ToArray(); MissingDeviceGames = $missingDeviceGames.ToArray()
+                    PathReasonCounts = $pathReasonCounts; Accounted = 0; Eligible = $candidates.Count
+                    AccountingComplete = $false; SourceRevision = $source.Revision; SourceTrust = $source.Trust
+                    SourceEvidence = @($download.Evidence); EvidencePath = $EvidencePath
+                    Reason = 'NATIVE_OVERLAP_SWITCH_FAILED'
+                }
             }
         }
-
     }
-    # Two distinct reasons get tracked separately, not combined into one
-    # "no match" bucket: $skippedNoMatch is a game the live AutoSetup.cmd
-    # table doesn't know about at all (nothing this script can do); a game
-    # the table DOES match but whose 32-bit/64-bit MAME DLL isn't present
-    # locally is a different, user-fixable situation (go get that DLL) and
-    # gets its own $skippedDllMissing counter instead -- conflating the two
-    # under one label would make "no match" misleadingly look like every
-    # one of those games is simply unsupported.
+
     $deployed = 0; $skippedNative = 0; $skippedCollision = 0
-    $skippedNoMatch = 0; $skippedDllMissing = 0; $skippedMissingPath = $missingPathGames.Count; $skippedMissingDevice = $missingDeviceGames.Count; $errors = $matchErrors
+    $skippedNoMatch = 0; $skippedDllMissing = 0
+    $skippedMissingPath = $missingPathGames.Count
+    $skippedMissingDevice = $missingDeviceGames.Count
+    $errors = $matchErrors
     $invalidPathCount = $skippedMissingPath + $skippedMissingDevice
-    $noMatchCount = [Math]::Max(0, $profiles.Count - $candidates.Count - $matchErrors - $invalidPathCount)
-    $skippedNoMatch += $noMatchCount
+    $skippedNoMatch = [Math]::Max(0, $profiles.Count - $candidates.Count - $matchErrors - $invalidPathCount)
 
     foreach ($c in $candidates) {
         $pf = $c.Profile
+        $destinationCreated = $false
+        $deployedHash = ''
         try {
             if ($nativeEnabledSet.Contains($pf.BaseName) -and $useNativeForOverlaps) {
                 [void](Remove-FFBPluginOwnedDeployment -CacheDir $CacheDir -ProfileCode $pf.BaseName)
+                foreach ($removedItem in @($script:FFBOwnedRemovalRecords)) {
+                    [void]$nativeRemovedThisRun.Add($removedItem)
+                }
                 $skippedNative++
                 continue
             }
 
-            $exeDir   = $c.ExeDir
-            $destDll  = $c.Match.Dest
+            $latestPathCheck = Test-TpmGameMutationPath -GamePath $c.GamePath -RequireLeaf
+            if (-not $latestPathCheck.Valid) {
+                $reasonCode = [string]$latestPathCheck.ReasonCode
+                if (-not $pathReasonCounts.ContainsKey($reasonCode)) { $pathReasonCounts[$reasonCode] = 0 }
+                $pathReasonCounts[$reasonCode]++
+                if ($reasonCode -eq 'DEVICE_UNAVAILABLE') {
+                    [void]$missingDeviceGames.Add($pf.BaseName)
+                    $skippedMissingDevice++
+                } else {
+                    [void]$missingPathGames.Add($pf.BaseName)
+                    $skippedMissingPath++
+                }
+                continue
+            }
+
+            $exeDir = [string]$latestPathCheck.GameDirectory
+            $destDll = [string]$c.Match.Dest
             $destPath = Join-Path $exeDir $destDll
-            # Security: $destDll comes from the live AutoSetup.cmd fetched from
-            # GitHub (untrusted input) -- verify the resolved path still lands
-            # inside the game's own folder before writing anything. A crafted
-            # rename line (e.g. "..\..\evil.dll") would otherwise escape the
-            # intended destination folder.
-            if (-not (Test-PathInside $destPath $exeDir)) {
-                Write-Host ("    SKIP  {0}: destination filename '{1}' is unsafe -- not deploying." -f $pf.BaseName, $destDll) -ForegroundColor Red
-                Write-Log "FFBPlugin: SECURITY -- skipped $($pf.BaseName), destDll '$destDll' resolves outside $exeDir"
+            if (-not (Test-PathInside $destPath $exeDir) -or -not (Test-TpmNoReparsePath -Path $exeDir)) {
+                Write-Host ("    SKIP  {0}: destination '{1}' is unsafe -- not deploying." -f $pf.BaseName, $destDll) -ForegroundColor Red
+                Write-Log "FFBPlugin: SECURITY -- skipped $($pf.BaseName), unsafe destination $destPath"
                 $errors++
                 continue
             }
-            if (Test-Path -LiteralPath $destPath) {
+            if (Test-Path -LiteralPath $destPath -PathType Leaf) {
                 Write-Host ("    SKIP  {0}: {1} already exists (ReShade or another hook) -- not overwritten." -f $pf.BaseName, $destDll) -ForegroundColor Yellow
                 Write-Log "FFBPlugin: skipped $($pf.BaseName) -- $destDll already occupied at $destPath"
                 $skippedCollision++
                 continue
             }
 
-            $arch   = Get-ExeArchitecture -ExePath $c.GamePath
-            $srcDll = if ($arch -eq 'x86') { $srcDll32 } else { $srcDll64 }
-            if (-not (Test-Path -LiteralPath $srcDll)) {
-                Write-Host ("    SKIP  {0}: {1}-bit DLL not available." -f $pf.BaseName, $(if ($arch -eq 'x86') {'32'} else {'64'})) -ForegroundColor Yellow
-                $skippedDllMissing++; continue
+            $arch = Get-ExeArchitecture -ExePath $c.GamePath
+            $dllName = if ($arch -eq 'x86') { 'MAME32.dll' } else { 'MAME64.dll' }
+            $srcDll = [string]$download.Files[$dllName]
+            if ([string]::IsNullOrWhiteSpace($srcDll) -or -not (Test-Path -LiteralPath $srcDll -PathType Leaf)) {
+                Write-Host ("    SKIP  {0}: {1}-bit verified DLL is not available." -f $pf.BaseName, $(if ($arch -eq 'x86') {'32'} else {'64'})) -ForegroundColor Yellow
+                $skippedDllMissing++
+                continue
+            }
+            $sourceHash = (Get-FileHash -LiteralPath $srcDll -Algorithm SHA256 -ErrorAction Stop).Hash
+            $sourceEvidence = @($download.Evidence | Where-Object { $_.FileName -eq $dllName }) | Select-Object -First 1
+            if (-not $sourceEvidence -or $sourceHash -ine [string]$sourceEvidence.Sha256) {
+                throw "FFBPlugin: staged $dllName hash no longer matches acquisition evidence."
             }
 
+            $entryOwnershipSnapshot = Get-FFBPluginOwnershipSnapshot -CacheDir $CacheDir
+            $destinationCreated = $true
             Copy-Item -LiteralPath $srcDll -Destination $destPath -ErrorAction Stop
-            $sourceHash = (Get-FileHash -LiteralPath $srcDll -Algorithm SHA256 -ErrorAction Stop).Hash
             $deployedHash = (Get-FileHash -LiteralPath $destPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            if ($deployedHash -ine $sourceHash) {
+                throw "FFBPlugin: deployed $destDll hash did not match its verified source."
+            }
+            $priorOwnership = @($ownershipEntries)
             $ownershipEntries = @($ownershipEntries | Where-Object { $_.Destination -ine $destPath })
-            $ownershipEntries += [pscustomobject]@{
+            $entry = [pscustomobject]@{
                 ProfileCode = $pf.BaseName
                 GameRoot = $exeDir
                 Destination = $destPath
                 SourceSha256 = $sourceHash
                 DeployedSha256 = $deployedHash
+                SourceRevision = $source.Revision
+                SourceTrust = $source.Trust
                 CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
             }
-            Write-FFBPluginOwnership -CacheDir $CacheDir -Entries $ownershipEntries
+            $ownershipEntries += $entry
+            try {
+                Write-FFBPluginOwnership -CacheDir $CacheDir -Entries $ownershipEntries
+            } catch {
+                try {
+                    if (Test-Path -LiteralPath $destPath -PathType Leaf) {
+                        Remove-Item -LiteralPath $destPath -Force -ErrorAction Stop
+                    }
+                    if (Test-Path -LiteralPath $destPath -PathType Leaf) { throw 'new hook remained after ownership rollback' }
+                    Restore-FFBPluginOwnershipSnapshot -CacheDir $CacheDir -Snapshot $entryOwnershipSnapshot
+                } catch {
+                    Write-Log "FFBPlugin: ownership failure rollback incomplete -- $_"
+                }
+                $ownershipEntries = $priorOwnership
+                throw
+            }
+            $destinationCreated = $false
+            [void]$deployedThisRun.Add($entry)
             Write-Host ("    OK    {0}  [{1}]  (matched '{2}', {3})" -f $pf.BaseName, $destDll, $c.Match.Name, [Math]::Round($c.Score,2)) -ForegroundColor Green
             Write-Log "FFBPlugin: deployed $destDll to $exeDir (matched '$($c.Match.Name)', score $([Math]::Round($c.Score,2)))"
             $deployed++
         } catch {
+            if ($destinationCreated -and (Test-Path -LiteralPath $destPath -PathType Leaf)) {
+                try {
+                    $currentDestinationHash = (Get-FileHash -LiteralPath $destPath -Algorithm SHA256 -ErrorAction Stop).Hash
+                    if ([string]::IsNullOrWhiteSpace($deployedHash) -or $currentDestinationHash -ieq $deployedHash) {
+                        Remove-Item -LiteralPath $destPath -Force -ErrorAction Stop
+                    } else {
+                        Write-Log "FFBPlugin: preserved changed destination after deployment failure -- $destPath"
+                    }
+                } catch {
+                    Write-Log "FFBPlugin: deployment failure cleanup failed -- $destPath -- $_"
+                }
+            }
             Write-Host ("    ERROR {0} -- {1}" -f $pf.BaseName, $_) -ForegroundColor Red
             Write-Log "FFBPlugin: error on $($pf.BaseName) -- $_"
             $errors++
@@ -13456,18 +13802,10 @@ function Invoke-FFBPluginSetup {
 
     Write-Host ""
     Write-Host ("  Deployed           : {0} game(s)" -f $deployed) -ForegroundColor Green
-    if ($skippedNative -gt 0) {
-        Write-Host ("  Skipped (native)   : {0}  (FFB Blaster already covers these -- preferred over the plugin)" -f $skippedNative) -ForegroundColor DarkGray
-    }
-    if ($skippedCollision -gt 0) {
-        Write-Host ("  Skipped (collision): {0}  (a hook DLL already exists -- not overwritten)" -f $skippedCollision) -ForegroundColor Yellow
-    }
-    if ($skippedNoMatch -gt 0) {
-        Write-Host ("  Skipped (no match) : {0}  (not in the plugin's supported-games list)" -f $skippedNoMatch) -ForegroundColor DarkGray
-    }
-    if ($skippedDllMissing -gt 0) {
-        Write-Host ("  Skipped (no DLL)   : {0}  (matched, but the 32-bit or 64-bit plugin DLL isn't downloaded)" -f $skippedDllMissing) -ForegroundColor Yellow
-    }
+    if ($skippedNative -gt 0) { Write-Host ("  Skipped (native)   : {0}  (FFB Blaster already covers these -- preferred over the plugin)" -f $skippedNative) -ForegroundColor DarkGray }
+    if ($skippedCollision -gt 0) { Write-Host ("  Skipped (collision): {0}  (a hook DLL already exists -- not overwritten)" -f $skippedCollision) -ForegroundColor Yellow }
+    if ($skippedNoMatch -gt 0) { Write-Host ("  Skipped (no match) : {0}  (not in the plugin's supported-games list)" -f $skippedNoMatch) -ForegroundColor DarkGray }
+    if ($skippedDllMissing -gt 0) { Write-Host ("  Skipped (no DLL)   : {0}  (matched, but the verified plugin DLL is unavailable)" -f $skippedDllMissing) -ForegroundColor Yellow }
     if ($skippedMissingPath -gt 0) {
         Write-Host ("  Skipped (saved path): {0} game(s)  -- repair paths in 10) Library Health Check first" -f $skippedMissingPath) -ForegroundColor Yellow
         Write-Host ("    Affected games: {0}" -f ($missingPathGames -join ', ')) -ForegroundColor DarkGray
@@ -13476,15 +13814,60 @@ function Invoke-FFBPluginSetup {
         Write-Host ("  Skipped (device unavailable): {0} game(s)  -- reconnect the drive and retry" -f $skippedMissingDevice) -ForegroundColor Yellow
         Write-Host ("    Affected games: {0}" -f ($missingDeviceGames -join ', ')) -ForegroundColor DarkGray
     }
-    if ($errors -gt 0) {
-        Write-Host ("  Errors             : {0}  -- see TeknoParrot-Manager.log for details" -f $errors) -ForegroundColor Red
+    if ($errors -gt 0) { Write-Host ("  Errors             : {0}  -- see TeknoParrot-Manager.log for details" -f $errors) -ForegroundColor Red }
+
+    $accounted = $skippedNative + $skippedCollision + $skippedNoMatch + $skippedDllMissing + $skippedMissingPath + $skippedMissingDevice + $errors + $deployed
+    $accountingComplete = ($accounted -eq $profiles.Count)
+    $succeeded = ($deployed -gt 0 -and $errors -eq 0 -and $accountingComplete)
+    $reason = if (-not $accountingComplete) { 'ACCOUNTING_INCOMPLETE' } elseif ($deployed -eq 0) { 'ZERO_DEPLOYMENT' } elseif ($errors) { 'DEPLOYMENT_ERRORS' } else { $null }
+    $rollback = $null
+    if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) {
+        $evidence = [ordered]@{
+            SchemaVersion = 1
+            Phase = 'Final'
+            CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            SourceRepository = $source.Repository
+            SourceManifestUrl = $source.ManifestUrl
+            SourceRevision = $source.Revision
+            SourceTrust = $source.Trust
+            SourceFiles = @($download.Evidence)
+            SelectedGames = @($profiles | ForEach-Object { $_.BaseName })
+            OwnershipManifest = Get-FFBPluginOwnershipPath -CacheDir $CacheDir
+            Result = [ordered]@{
+                Deployed = $deployed; SkippedNative = $skippedNative; SkippedCollision = $skippedCollision
+                SkippedNoMatch = $skippedNoMatch; SkippedDllMissing = $skippedDllMissing
+                SkippedMissingPath = $skippedMissingPath; SkippedMissingDevice = $skippedMissingDevice
+                Errors = $errors; Accounted = $accounted; Selected = $profiles.Count
+            }
+        }
+        try {
+            Write-FFBPluginEvidence -EvidencePath $EvidencePath -Evidence $evidence
+        } catch {
+            $attemptedDeployed = $deployed
+            $rollback = Restore-FFBPluginDeploymentTransaction `
+                -Entries $deployedThisRun.ToArray() `
+                -RemovedItems $nativeRemovedThisRun.ToArray() `
+                -CacheDir $CacheDir `
+                -OwnershipSnapshot $ownershipSnapshot `
+                -UserProfilesDir $UserProfilesDir `
+                -OverlapBackupPath $(if ($nativeSwitch) { [string]$nativeSwitch.BackupPath } else { '' })
+            $errors += $attemptedDeployed
+            $deployed = 0
+            $accounted = $skippedNative + $skippedCollision + $skippedNoMatch + $skippedDllMissing + $skippedMissingPath + $skippedMissingDevice + $errors
+            $accountingComplete = ($accounted -eq $profiles.Count)
+            $succeeded = $false
+            $reason = if ($rollback.Succeeded) { 'EVIDENCE_WRITE_FAILED' } else { 'EVIDENCE_WRITE_ROLLBACK_FAILED' }
+            Write-Log "FFBPlugin: final evidence write failed -- $($_.Exception.Message); rollbackSucceeded=$($rollback.Succeeded)"
+        }
     }
+
+    Write-Host ("  Accounted          : {0}/{1}" -f $accounted, $profiles.Count) -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  TPM records its own deployed hook files so a later native choice can remove only verified ownership." -ForegroundColor DarkCyan
     Write-Host "  TPM does not remove an unowned FFB hook automatically." -ForegroundColor DarkCyan
-    Write-Log ("FFBPlugin setup: deployed={0} skippedNative={1} skippedCollision={2} skippedNoMatch={3} skippedDllMissing={4} skippedMissingPath={5} skippedMissingDevice={6} errors={7}" -f $deployed, $skippedNative, $skippedCollision, $skippedNoMatch, $skippedDllMissing, $skippedMissingPath, $skippedMissingDevice, $errors)
+    Write-Log ("FFBPlugin setup: deployed={0} skippedNative={1} skippedCollision={2} skippedNoMatch={3} skippedDllMissing={4} skippedMissingPath={5} skippedMissingDevice={6} errors={7} accounted={8}/{9} sourceRevision={10}" -f $deployed, $skippedNative, $skippedCollision, $skippedNoMatch, $skippedDllMissing, $skippedMissingPath, $skippedMissingDevice, $errors, $accounted, $profiles.Count, $source.Revision)
     return [pscustomobject]@{
-        Succeeded = ($errors -eq 0)
+        Succeeded = $succeeded
         Deployed = $deployed
         Errors = $errors
         MissingPath = $skippedMissingPath
@@ -13496,8 +13879,19 @@ function Invoke-FFBPluginSetup {
         SkippedDllMissing = $skippedDllMissing
         SkippedNative = $skippedNative
         SkippedCollision = $skippedCollision
-        Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } else { $null }
+        Accounted = $accounted
+        Eligible = $candidates.Count
+        AccountingComplete = $accountingComplete
+        SourceRevision = $source.Revision
+        SourceTrust = $source.Trust
+        SourceEvidence = @($download.Evidence)
+        EvidencePath = $EvidencePath
+        PreflightEvidenceWritten = $preflightEvidenceWritten
+        RollbackSucceeded = if ($rollback) { [bool]$rollback.Succeeded } else { $null }
+        RollbackErrors = if ($rollback) { @($rollback.Errors) } else { @() }
+        Reason = $reason
     }
+
 }
 
 # GameProfiles at runtime -- never hardcoded. Shared (read-only) between
@@ -22605,7 +22999,8 @@ function Invoke-TpmFfbSetupMode {
     if ($choice -eq 'Y') {
         [void](Start-TpmWorkflowStep -Context $status -StepId 'plugin' -Activity 'Downloading and applying the optional plugin')
         $ffbCacheRoot = if ($script:TpmOwnedLayout) { Join-Path $script:TpmOwnedLayout.Cache 'FFBPlugin' } else { Join-Path $ScriptRoot 'FFBPlugin' }
-        $plugin = Invoke-FFBPluginSetup -UserProfilesDir $UserProfilesDir -CacheDir $ffbCacheRoot -NativeEnabledCodes $nativeCodes -TpRoot $TpRoot
+        $evidencePath = if ($script:TpmOwnedLayout) { Join-Path $script:TpmOwnedLayout.Reports 'TPM-FFB-Plugin-Evidence.json' } else { '' }
+        $plugin = Invoke-FFBPluginSetup -UserProfilesDir $UserProfilesDir -CacheDir $ffbCacheRoot -NativeEnabledCodes $nativeCodes -TpRoot $TpRoot -EvidencePath $evidencePath
         if (-not ($plugin -and $plugin.Succeeded)) {
             [void](Set-TpmWorkflowFailure -Context $status -FailureId 'ffb-plugin-failed' -Message 'The optional force-feedback plugin was not completed.' -DataSafety 'TPM did not claim a complete third-party plugin deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
             [void](Read-HostSafe 'Press Enter to acknowledge the force-feedback result')

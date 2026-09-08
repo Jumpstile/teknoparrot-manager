@@ -492,8 +492,13 @@ cannot be hidden by later plugin success.
 
 ### Third-party plugin (mightymikem/FFBArcadePlugin)
 
-Per-game destination-DLL table fetched live from the repo's `AutoSetup.cmd` every run --
-never hardcoded or bundled. Source DLLs (`MAME32.dll`/`MAME64.dll`) also fetched live.
+The per-game destination-DLL table is fetched from the repository at a resolved
+full commit SHA, not from a mutable branch path. Source DLL downloads use the
+same pinned revision and are written to TPM-owned unique staging names under
+the cache; an existing/custom cache file is never silently overwritten or
+treated as trusted. Each downloaded source receives an audit SHA-256 and
+source-revision record. Missing revision, download, or evidence validation
+blocks the plugin path.
 
 Overlap handling: roughly half the third-party table also has a native FFB Blaster field.
 `Invoke-FFBPluginSetup` resolves all overlapping games first, then asks ONE batched
@@ -524,6 +529,32 @@ unchanged hook to a verified game backup before deletion; if the ownership manif
 cannot be atomically rewritten, the deletion is restored from that backup and the
 operation fails closed. If restoration itself fails, the backup path remains recovery
 evidence and no clean completion is reported.
+Zero-deployment runs are not reported as success. Every selected profile is
+accounted for exactly once across deployed, native, collision/protected,
+unsupported, missing-DLL, missing-path, unavailable-device, and error states.
+Successful installs write ownership metadata only after the destination hash
+and manifest commit succeed; a manifest failure removes the newly copied hook.
+`TPM-FFB-Plugin-Evidence.json` records source revision, source hashes, selected
+games, ownership manifest, backup-related result context, and final counters.
+
+**FFB specification/system invariant inventory.** The resolver is the only
+mutable-input boundary: one call per setup run must yield exactly one
+40-character commit SHA. The support table and both DLL URLs must contain that
+same SHA; branch, tag, latest-release, and other mutable artifact URLs are
+rejected. Acquisition is all-or-nothing: both architectures are downloaded to
+TPM-owned unique staging paths, hashed, and retained as provenance before any
+game hook is copied. Existing cache files are never used as an unverified
+fallback.
+
+The mutation transaction has three protected boundaries: path containment and
+non-reparse checks immediately before each copy, ownership metadata written
+after the deployed hash is verified, and evidence persisted before success is
+reported. Ownership-write failure removes the new hook. Final evidence failure
+restores every hook created in the run, the ownership manifest snapshot, and
+any native-overlap profile backup. Zero deployment and incomplete accounting
+are failures; every selected profile is counted exactly once. The invariant
+coverage is in `Tests/TeknoParrot-Manager.Tests.ps1`, and FFB evidence is an
+allowlisted support-package input covered by `Tests/SupportPackage.Tests.ps1`.
 
 ### Eggman dat source
 

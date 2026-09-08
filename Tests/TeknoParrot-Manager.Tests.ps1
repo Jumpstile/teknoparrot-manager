@@ -10794,6 +10794,36 @@ Describe "TeknoParrot-Manager.ps1 -Unattended real child-process fixture (issue 
 }
 
 Describe "Issue #300 shared workflow status state machine" {
+    BeforeAll {
+        function New-FFBDownloadFixtureResult {
+            param([string]$destDir, [string]$SourceRevision)
+            $files = [ordered]@{}
+            $evidence = @()
+            [void][System.IO.Directory]::CreateDirectory($destDir)
+            foreach ($dllName in @('MAME32.dll', 'MAME64.dll')) {
+                $path = Join-Path $destDir ('TPM-FFB-test-{0}-{1}' -f $SourceRevision.Substring(0,8), $dllName)
+                [System.IO.File]::WriteAllBytes($path, [byte[]](1,2,3,4))
+                $files[$dllName] = $path
+                $evidence += [pscustomobject]@{
+                    FileName = $dllName
+                    SourceUrl = "https://raw.githubusercontent.com/fixture/FFBArcadePlugin/$SourceRevision/$dllName"
+                    SourceRevision = $SourceRevision
+                    Sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+                    Trust = 'SourcePinnedAuditHash'
+                    DownloadPath = $path
+                }
+            }
+            return [pscustomobject]@{
+                Succeeded = $true; Files = $files; Evidence = $evidence
+                ResiduePaths = @(); Reason = $null
+            }
+        }
+    }
+    BeforeEach {
+        Mock Get-FFBPluginSourceRevision {
+            [pscustomobject]@{ Revision = ('a' * 40); Repository = 'fixture/FFBArcadePlugin'; ManifestUrl = 'https://api.github.com/repos/fixture/FFBArcadePlugin/commits/master'; Trust = 'SourcePinnedAuditHash' }
+        }
+    }
     AfterEach {
         if ($script:ActiveTpmWorkflowStatus) {
             $active = $script:ActiveTpmWorkflowStatus
@@ -11073,7 +11103,10 @@ Describe "Issue #300 shared workflow status state machine" {
         [System.IO.File]::WriteAllText((Join-Path $tpRoot 'GameProfiles\Canonical.xml'), $profileXml, $encoding)
         [System.IO.File]::WriteAllBytes((Join-Path $cacheDir 'MAME64.dll'), [System.Text.Encoding]::ASCII.GetBytes('plugin'))
         Mock Get-FFBPluginGameMap { [ordered]@{ OverlapGame = 'd3d9.dll' } }
-        Mock Invoke-FFBPluginDownload { $true }
+        Mock Invoke-FFBPluginDownload {
+            param([string]$destDir, [string]$SourceRevision)
+            New-FFBDownloadFixtureResult -destDir $destDir -SourceRevision $SourceRevision
+        }
         Mock Get-ExeArchitecture { 'x64' }
         Mock Read-HostSafe { 'N' }
         $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir -TpRoot $tpRoot -NativeEnabledCodes @('Overlap')
@@ -11111,14 +11144,17 @@ Describe "Issue #300 shared workflow status state machine" {
         [System.IO.File]::WriteAllText((Join-Path $tpRoot 'GameProfiles\Canonical.xml'), $profileXml, $encoding)
         [System.IO.File]::WriteAllBytes((Join-Path $cacheDir 'MAME64.dll'), [System.Text.Encoding]::ASCII.GetBytes('plugin'))
         Mock Get-FFBPluginGameMap { [ordered]@{ OverlapGame = 'd3d9.dll' } }
-        Mock Invoke-FFBPluginDownload { $true }
+        Mock Invoke-FFBPluginDownload {
+            param([string]$destDir, [string]$SourceRevision)
+            New-FFBDownloadFixtureResult -destDir $destDir -SourceRevision $SourceRevision
+        }
         Mock Get-ExeArchitecture { 'x64' }
         $script:ffbOverlapAnswers = [System.Collections.Generic.Queue[string]]::new()
         [void]$script:ffbOverlapAnswers.Enqueue('Q')
         [void]$script:ffbOverlapAnswers.Enqueue('Y')
         Mock Read-HostSafe { $script:ffbOverlapAnswers.Dequeue() }
         $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir -TpRoot $tpRoot -NativeEnabledCodes @('Overlap')
-        $result.Succeeded | Should -BeTrue
+        $result.Succeeded | Should -BeFalse
         $result.Deployed | Should -Be 0
         $field = (Read-Xml (Join-Path $userProfiles 'Overlap.xml')).SelectSingleNode('/GameProfile/ConfigValues/FieldInformation/FieldValue')
         $field.InnerText | Should -Be '1'
@@ -11141,13 +11177,18 @@ Describe "Issue #300 shared workflow status state machine" {
         [System.IO.File]::WriteAllText($unmatchedExe, 'unmatched')
         [System.IO.File]::WriteAllText((Join-Path $userProfiles 'UnmatchedFfbGame.xml'), '<GameProfile><EmulationProfile>UnmatchedFfbGame</EmulationProfile><GamePath>{0}</GamePath></GameProfile>' -f $unmatchedExe)
         Mock Get-FFBPluginGameMap { [ordered]@{ MissingFfbGame = 'd3d9.dll' } }
-        Mock Invoke-FFBPluginDownload { $true }
+        Mock Invoke-FFBPluginDownload {
+            param([string]$destDir, [string]$SourceRevision)
+            New-FFBDownloadFixtureResult -destDir $destDir -SourceRevision $SourceRevision
+        }
         $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir
-        $result.Succeeded | Should -BeTrue
+        $result.Succeeded | Should -BeFalse
         $result.MissingPath | Should -Be 1
         @($result.MissingPathGames) | Should -Contain 'MissingFfbGame'
         $result.Deployed | Should -Be 0
         $result.Errors | Should -Be 0
+        $result.Accounted | Should -Be 2
+        $result.AccountingComplete | Should -BeTrue
         $result.SkippedNoMatch | Should -Be 1
         $result.MissingDevice | Should -Be 0
     }
@@ -11157,10 +11198,13 @@ Describe "Issue #300 shared workflow status state machine" {
         New-Item -ItemType Directory -Path $userProfiles, $cacheDir -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $userProfiles 'DeviceFfbGame.xml') -Value '<GameProfile><EmulationProfile>DeviceFfbGame</EmulationProfile><GamePath>Z:\missing\DeviceFfbGame.exe</GamePath></GameProfile>'
         Mock Get-FFBPluginGameMap { [ordered]@{ DeviceFfbGame = 'd3d9.dll' } }
-        Mock Invoke-FFBPluginDownload { $true }
+        Mock Invoke-FFBPluginDownload {
+            param([string]$destDir, [string]$SourceRevision)
+            New-FFBDownloadFixtureResult -destDir $destDir -SourceRevision $SourceRevision
+        }
         Mock Test-TpmGameMutationPath { [pscustomobject]@{ Valid = $false; ReasonCode = 'DEVICE_UNAVAILABLE'; Reason = 'A device which does not exist was specified.' } }
         $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir
-        $result.Succeeded | Should -BeTrue
+        $result.Succeeded | Should -BeFalse
         $result.MissingPath | Should -Be 0
         $result.MissingDevice | Should -Be 1
         @($result.MissingDeviceGames) | Should -Contain 'DeviceFfbGame'
@@ -11193,8 +11237,307 @@ Describe "Issue #300 shared workflow status state machine" {
         $source | Should -Match "\$pendingApplyMode = 'HealthCheck'"
         $source | Should -Match "Choose H or B"
     }
+    It "refuses mutable FFB source downloads without a pinned commit" {
+        $cache = Join-Path $TestDrive 'ffb-unpinned'
+        New-Item -ItemType Directory -Path $cache -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $cache 'MAME64.dll') -Value 'existing'
+        Mock Invoke-TpmDownload { throw 'mutable artifact download must not run' }
+        $result = Invoke-FFBPluginDownload -destDir $cache -SourceRevision 'master'
+        Should -Invoke Invoke-TpmDownload -Times 0 -Exactly
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'SOURCE_REVISION_UNAVAILABLE'
+        (Get-Content -LiteralPath (Join-Path $cache 'MAME64.dll') -Raw) | Should -Be "existing`r`n"
+        @(Get-ChildItem -LiteralPath $cache -Filter 'TPM-FFB-source-*' -Force).Count | Should -Be 0
+    }
+    It "keeps existing custom cache files while staging pinned sources separately" {
+        $cache = Join-Path $TestDrive 'ffb-custom-cache'
+        New-Item -ItemType Directory -Path $cache -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $cache 'MAME64.dll') -Value 'custom'
+        Mock Invoke-TpmDownload {
+            param([string]$DownloadUrl, [string]$DestinationPath, [string]$ExpectedBytes, [string]$Label, [string]$Version)
+            Set-Content -LiteralPath $DestinationPath -Value 'fresh'
+            $true
+        }
+        $result = Invoke-FFBPluginDownload -destDir $cache -SourceRevision ('b' * 40)
+        $result.Succeeded | Should -BeTrue
+        @($result.Files.Keys) | Should -HaveCount 2
+        @($result.Evidence | Where-Object { $_.Sha256 -notmatch '^[0-9A-F]{64}$' }) | Should -HaveCount 0
+        (Get-Content -LiteralPath (Join-Path $cache 'MAME64.dll') -Raw) | Should -Be "custom`r`n"
+        @(Get-ChildItem -LiteralPath $cache -Filter 'TPM-FFB-source-*' -Force).Count | Should -Be 2
+        @($script:FFBDownloadEvidence).Count | Should -Be 2
+    }
 }
 
+Describe 'FFB pinned source and transaction invariants' {
+    BeforeAll {
+        function New-FFBTransactionFixture {
+            param([string]$Root)
+            $profiles = Join-Path $Root 'UserProfiles'
+            $gameRoot = Join-Path $Root 'FixtureGame'
+            $cache = Join-Path $Root 'FFBPlugin'
+            New-Item -ItemType Directory -Path $profiles, $gameRoot, $cache -Force | Out-Null
+            $exe = Join-Path $gameRoot 'FixtureGame.exe'
+            [System.IO.File]::WriteAllBytes($exe, [byte[]](0x4d,0x5a,1,2,3,4))
+            $profile = '<GameProfile><EmulationProfile>FixtureGame</EmulationProfile><GamePath>{0}</GamePath></GameProfile>' -f $exe
+            [System.IO.File]::WriteAllText((Join-Path $profiles 'FixtureGame.xml'), $profile, (New-Object System.Text.UTF8Encoding($false)))
+            return [pscustomobject]@{ Root=$Root; Profiles=$profiles; GameRoot=$gameRoot; Cache=$cache; Exe=$exe }
+        }
+
+        function New-FFBStructuredDownloadResult {
+            param([string]$DestDir, [string]$Revision)
+            $files = [ordered]@{}
+            $evidence = New-Object System.Collections.Generic.List[object]
+            [void][System.IO.Directory]::CreateDirectory($DestDir)
+            foreach ($dllName in @('MAME32.dll', 'MAME64.dll')) {
+                $path = Join-Path $DestDir ('TPM-FFB-transaction-{0}-{1}' -f $Revision.Substring(0,8), $dllName)
+                [System.IO.File]::WriteAllBytes($path, [byte[]](9,8,7,6))
+                $files[$dllName] = $path
+                [void]$evidence.Add([pscustomobject]@{
+                    FileName=$dllName
+                    SourceUrl="https://raw.githubusercontent.com/mightymikem/FFBArcadePlugin/$Revision/$dllName"
+                    SourceRevision=$Revision
+                    Sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+                    Trust='SourcePinnedAuditHash'
+                    DownloadPath=$path
+                })
+            }
+            return [pscustomobject]@{
+                Succeeded=$true; Files=$files; Evidence=$evidence.ToArray()
+                ResiduePaths=@(); Reason=$null
+            }
+        }
+
+        function Mock-FFBTransactionDependencies {
+            param([string]$Revision)
+            Mock Get-FFBPluginSourceRevision {
+                [pscustomobject]@{
+                    Revision=$Revision
+                    Repository='mightymikem/FFBArcadePlugin'
+                    ManifestUrl='https://api.github.com/repos/mightymikem/FFBArcadePlugin/commits/master'
+                    Trust='SourcePinnedAuditHash'
+                }
+            }
+            Mock Get-FFBPluginGameMap { [ordered]@{ FixtureGame='d3d9.dll' } }
+            Mock Invoke-FFBPluginDownload {
+                param([string]$destDir, [string]$SourceRevision)
+                New-FFBStructuredDownloadResult -DestDir $destDir -Revision $SourceRevision
+            }
+            Mock Get-ExeArchitecture { 'x64' }
+        }
+    }
+
+    It 'resolves one full source SHA from the mutable branch endpoint' {
+        $revision = ('c' * 40)
+        $script:ffbResolverUris = @()
+        Mock Invoke-TpmWebRequestSilently {
+            param([string]$Uri)
+            $script:ffbResolverUris += $Uri
+            [pscustomobject]@{ Content = '{"sha":"' + $revision + '"}' }
+        }
+        $source = Get-FFBPluginSourceRevision
+        $source.Revision | Should -Be $revision.ToUpperInvariant()
+        $source.Trust | Should -Be 'SourcePinnedAuditHash'
+        @($script:ffbResolverUris) | Should -HaveCount 1
+        $script:ffbResolverUris[0] | Should -Match '/commits/master$'
+    }
+
+    It 'uses the exact resolved SHA for support-table and DLL artifact URLs' {
+        $revision = ('d' * 40)
+        $script:ffbTableUris = @()
+        Mock Invoke-TpmWebRequestSilently {
+            param([string]$Uri)
+            $script:ffbTableUris += $Uri
+            [pscustomobject]@{ Content = "cd FixtureGame`r`nrename dinput8.dll d3d9.dll`r`ncd.." }
+        }
+        $map = Get-FFBPluginGameMap -SourceRevision $revision
+        $map['FixtureGame'] | Should -Be 'd3d9.dll'
+        @($script:ffbTableUris | Where-Object { $_ -notmatch [regex]::Escape($revision) }) | Should -HaveCount 0
+        $script:ffbDllUris = @()
+        $script:ffbDllPaths = @()
+        Mock Invoke-TpmDownload {
+            param([string]$DownloadUrl, [string]$DestinationPath, [string]$ExpectedBytes, [string]$Label, [string]$Version)
+            $script:ffbDllUris += $DownloadUrl
+            [System.IO.File]::WriteAllBytes($DestinationPath, [byte[]](1,2,3))
+            $true
+        }
+        $result = Invoke-FFBPluginDownload -destDir (Join-Path $TestDrive 'ffb-url-pinning') -SourceRevision $revision
+        $result.Succeeded | Should -BeTrue
+        @($script:ffbDllUris) | Should -HaveCount 2
+        @($script:ffbDllUris | Where-Object { $_ -notmatch [regex]::Escape($revision) -or $_ -match '/master/' }) | Should -HaveCount 0
+    }
+
+    It 'fails before mutation when the resolver cannot return a valid revision' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-resolver-failure')
+        Mock Get-FFBPluginSourceRevision { $null }
+        Mock Get-FFBPluginGameMap { throw 'map should not be fetched' }
+        Mock Invoke-FFBPluginDownload { throw 'DLLs should not be fetched' }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'SOURCE_REVISION_UNAVAILABLE'
+        Should -Invoke Get-FFBPluginGameMap -Times 0 -Exactly
+        Should -Invoke Invoke-FFBPluginDownload -Times 0 -Exactly
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+    }
+
+    It 'fails before mutation when the resolver response is malformed' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-malformed-resolver')
+        Mock Invoke-TpmWebRequestSilently {
+            [pscustomobject]@{ Content = '{"sha":"not-a-full-commit"}' }
+        }
+        Mock Get-FFBPluginGameMap { throw 'map should not be fetched' }
+        Mock Invoke-FFBPluginDownload { throw 'DLLs should not be fetched' }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'SOURCE_REVISION_UNAVAILABLE'
+        Should -Invoke Get-FFBPluginGameMap -Times 0 -Exactly
+        Should -Invoke Invoke-FFBPluginDownload -Times 0 -Exactly
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+    }
+    It 'fails before mutation when the pinned support table is unavailable' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-table-failure')
+        $revision = ('a' * 40)
+        Mock Get-FFBPluginSourceRevision {
+            [pscustomobject]@{ Revision=$revision; Repository='mightymikem/FFBArcadePlugin'; ManifestUrl='https://api.github.com/repos/mightymikem/FFBArcadePlugin/commits/master'; Trust='SourcePinnedAuditHash' }
+        }
+        Mock Get-FFBPluginGameMap { @{} }
+        Mock Invoke-FFBPluginDownload { throw 'DLLs should not be fetched after table failure' }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'GAME_MAP_FAILED'
+        Should -Invoke Invoke-FFBPluginDownload -Times 0 -Exactly
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+    }
+
+    It 'fails before mutation when DLL acquisition does not produce a verified set' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-dll-failure')
+        $revision = ('b' * 40)
+        Mock Get-FFBPluginSourceRevision {
+            [pscustomobject]@{ Revision=$revision; Repository='mightymikem/FFBArcadePlugin'; ManifestUrl='https://api.github.com/repos/mightymikem/FFBArcadePlugin/commits/master'; Trust='SourcePinnedAuditHash' }
+        }
+        Mock Get-FFBPluginGameMap { [ordered]@{ FixtureGame='d3d9.dll' } }
+        Mock Invoke-FFBPluginDownload {
+            [pscustomobject]@{ Succeeded=$false; Files=@{}; Evidence=@(); ResiduePaths=@(); Reason='DLL_ACQUISITION_FAILED' }
+        }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'DLL_ACQUISITION_FAILED'
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+    }
+
+    It 'rejects a staged DLL whose hash no longer matches acquisition evidence' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-hash-mismatch')
+        $revision = ('3' * 40)
+        Mock-FFBTransactionDependencies -Revision $revision
+        $download = New-FFBStructuredDownloadResult -DestDir $fixture.Cache -Revision $revision
+        $download.Evidence[1].Sha256 = ('0' * 64)
+        Mock Invoke-FFBPluginDownload { $download }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        $result.Succeeded | Should -BeFalse
+        $result.Errors | Should -Be 1
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+    }
+
+
+    It 'preserves a custom cache and records hashes for both staged DLLs' {
+        $cache = Join-Path $TestDrive 'ffb-cache-preservation'
+        New-Item -ItemType Directory -Path $cache -Force | Out-Null
+        $custom = Join-Path $cache 'MAME64.dll'
+        [System.IO.File]::WriteAllText($custom, 'custom-cache', (New-Object System.Text.UTF8Encoding($false)))
+        $revision = ('e' * 40)
+        Mock Invoke-TpmDownload {
+            param([string]$DownloadUrl, [string]$DestinationPath, [string]$ExpectedBytes, [string]$Label, [string]$Version)
+            [System.IO.File]::WriteAllBytes($DestinationPath, [byte[]](5,4,3,2,1))
+            $true
+        }
+        $result = Invoke-FFBPluginDownload -destDir $cache -SourceRevision $revision
+        $result.Succeeded | Should -BeTrue
+        [System.IO.File]::ReadAllText($custom) | Should -Be 'custom-cache'
+        @($result.Files.Keys) | Should -HaveCount 2
+        @($result.Evidence | Where-Object { $_.SourceRevision -ne $revision.ToUpperInvariant() }) | Should -HaveCount 0
+        @($result.Evidence | Where-Object { $_.Sha256 -notmatch '^[0-9A-F]{64}$' }) | Should -HaveCount 0
+        @($result.Evidence | Where-Object { -not (Test-Path -LiteralPath $_.DownloadPath -PathType Leaf) }) | Should -HaveCount 0
+    }
+
+    It 'preserves an existing collision and reports zero deployment with complete accounting' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-collision')
+        $destination = Join-Path $fixture.GameRoot 'd3d9.dll'
+        [System.IO.File]::WriteAllText($destination, 'pre-existing-hook', (New-Object System.Text.UTF8Encoding($false)))
+        $revision = ('f' * 40)
+        Mock-FFBTransactionDependencies -Revision $revision
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        Should -Invoke Get-FFBPluginSourceRevision -Times 1 -Exactly
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'ZERO_DEPLOYMENT'
+        $result.Deployed | Should -Be 0
+        $result.SkippedCollision | Should -Be 1
+        $result.Accounted | Should -Be 1
+        $result.AccountingComplete | Should -BeTrue
+        [System.IO.File]::ReadAllText($destination) | Should -Be 'pre-existing-hook'
+    }
+
+    It 'rolls back a hook when ownership persistence fails' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-ownership-rollback')
+        $revision = ('1' * 40)
+        Mock-FFBTransactionDependencies -Revision $revision
+        Mock Write-FFBPluginOwnership { throw 'ownership persistence failure' }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        $result.Succeeded | Should -BeFalse
+        $result.Deployed | Should -Be 0
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+        (Test-Path -LiteralPath (Join-Path $fixture.Cache 'TPM-FFB-Plugin-Ownership.json') -PathType Leaf) | Should -BeFalse
+    }
+
+    It 'rolls back deployed hooks when final evidence persistence fails' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-evidence-rollback')
+        $revision = ('2' * 40)
+        Mock-FFBTransactionDependencies -Revision $revision
+        $script:ffbEvidenceWriteCount = 0
+        Mock Write-FFBPluginEvidence {
+            $script:ffbEvidenceWriteCount++
+            if ($script:ffbEvidenceWriteCount -gt 1) { throw 'final evidence persistence failure' }
+        }
+        $evidencePath = Join-Path $fixture.Root 'Reports\TPM-FFB-Plugin-Evidence.json'
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache -EvidencePath $evidencePath
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'EVIDENCE_WRITE_FAILED'
+        $result.RollbackSucceeded | Should -BeTrue
+        $result.Deployed | Should -Be 0
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+        (Test-Path -LiteralPath (Join-Path $fixture.Cache 'TPM-FFB-Plugin-Ownership.json') -PathType Leaf) | Should -BeFalse
+        $script:ffbEvidenceWriteCount | Should -Be 2
+    }
+    It 'restores a native-owned hook removed before evidence failure' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-native-evidence-rollback')
+        $revision = ('4' * 40)
+        $destination = Join-Path $fixture.GameRoot 'd3d9.dll'
+        [System.IO.File]::WriteAllText($destination, 'native-owned-hook', (New-Object System.Text.UTF8Encoding($false)))
+        $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
+        $ownershipPath = Join-Path $fixture.Cache 'TPM-FFB-Plugin-Ownership.json'
+        $ownershipText = (@{
+            SchemaVersion = 1
+            Entries = @([pscustomobject]@{
+                ProfileCode='FixtureGame'; GameRoot=$fixture.GameRoot; Destination=$destination
+                DeployedSha256=$hash; SourceSha256=$hash; SourceRevision=$revision; SourceTrust='SourcePinnedAuditHash'
+            })
+        } | ConvertTo-Json -Depth 5)
+        [System.IO.File]::WriteAllText($ownershipPath, $ownershipText, (New-Object System.Text.UTF8Encoding($false)))
+        Mock-FFBTransactionDependencies -Revision $revision
+        Mock Read-HostSafe { 'Y' }
+        $script:ffbEvidenceWriteCount = 0
+        Mock Write-FFBPluginEvidence {
+            $script:ffbEvidenceWriteCount++
+            if ($script:ffbEvidenceWriteCount -gt 1) { throw 'final evidence persistence failure' }
+        }
+        $evidencePath = Join-Path $fixture.Root 'Reports\TPM-FFB-Plugin-Evidence.json'
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache -NativeEnabledCodes @('FixtureGame') -EvidencePath $evidencePath
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'EVIDENCE_WRITE_FAILED'
+        $result.RollbackSucceeded | Should -BeTrue
+        [System.IO.File]::ReadAllText($destination) | Should -Be 'native-owned-hook'
+        (Get-Content -LiteralPath $ownershipPath -Raw) | Should -Be $ownershipText
+    }
+
+}
 Describe "Issue #300 workflow ownership and transition guards" {
     It "rejects unknown workflow steps without emitting an event" {
         $events = New-Object System.Collections.Generic.List[object]

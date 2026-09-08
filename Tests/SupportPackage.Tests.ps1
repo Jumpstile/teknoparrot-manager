@@ -78,6 +78,19 @@ Describe 'New-TpmSupportPackage' {
         $entries | Should -Contain 'MANIFEST.txt'
         @($entries | Where-Object { ($_ -replace '\\','/') -like 'diagnostics/tpm-*' }).Count | Should -BeGreaterThan 0
     }
+    It 'packages FFB provenance evidence with the support diagnostics' {
+        $f = New-SupportFixture
+        $evidencePath = Join-Path $f.Script 'Reports\TPM-FFB-Plugin-Evidence.json'
+        Write-SupportText $evidencePath '{"SourceRevision":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","SourceFiles":[{"FileName":"MAME64.dll","Sha256":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}],"SelectedGames":["FixtureGame"]}'
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $entry = @((Get-SupportZipEntries $r.PackagePath) | Where-Object { $_ -like '*TPM-FFB-Plugin-Evidence*' })
+        $entry | Should -HaveCount 1
+        $text = Get-SupportZipText $r.PackagePath $entry[0]
+        $text | Should -Match 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+        $text | Should -Match 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
+        $text | Should -Match 'FixtureGame'
+    }
     It 'records Action Required freshness in the packaged manifest' {
         $f = New-SupportFixture
         $actionPath = Join-Path $f.Script 'TeknoParrot-Manager-ActionItems.txt'

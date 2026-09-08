@@ -19,6 +19,17 @@
   Startup migration moves only allowlisted legacy TPM clutter, writes a report,
   blocks ambiguous destinations, and leaves TeknoParrot-owned files untouched.
   Package layout remains unchanged for shipped scripts, tools, and contracts.
+  Mode-8 FFBPlugin hardening now resolves the upstream repository exactly once
+  per run to one validated full commit SHA before reading the support table or
+  downloading DLLs. Both artifacts use that same SHA; mutable artifact URLs
+  are rejected. Downloads are all-or-nothing, use TPM-owned unique cache
+  staging names, record source revision and SHA-256 evidence, and never
+  overwrite existing/custom cache files. Evidence is written at preflight and
+  completion; a final evidence failure rolls back hooks, ownership metadata,
+  and native-overlap changes. Protected/collision, unsupported, missing,
+  unsafe, and failed game states remain distinct; zero-deployment runs are not
+  reported as success; every selected game is included exactly once in final
+  accounting; and the FFB evidence report is included in support packages.
 
   Additional RC8 candidate fixes: duplicate display identities remain
   ambiguous instead of selecting the first matching monitor; the read-only
