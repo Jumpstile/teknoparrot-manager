@@ -126,3 +126,17 @@ This section supersedes the prior blanket `SOURCE FIXED; OWNER RUNTIME NEEDED` c
 False prior source-fixed claims explicitly identified: IDs 2, 13, and 14. IDs 11, 12, 16-19, 21-22, and 29 require source remediation; remaining rows require renewed source/package audit before owner-only classification.
 
 Changelog decision queued for the next authorized source slice: `Known RC8 owner-smoke blockers identified. Release remains blocked pending re-audit, source remediation, package rebuild, and owner-runtime retest.`
+
+## Library Health repair slice -- working-tree evidence
+
+The bounded Library Health repair slice addresses the source-remediation portion
+of IDs 17-22 without changing their owner-runtime requirement or the blocked
+release state. `Repair-GamePaths` now returns explicit `CANDIDATE`, `FIXED`, and
+`STILL BROKEN` outcomes; a saved profile is read back and revalidated before it
+can be reported as fixed. Health Check search progress is limited to the
+affected profile codes, candidate and before/after GamePath evidence is
+redacted for display, already-registered output is summarized, and thumbnail
+prompts follow the completed repair result. Raw Thrills path-length guidance
+now tells the user to shorten parent folders and update the saved GamePath.
+Focused Library Health tests cover the new outcomes and save-verification
+failure. Package rebuild and owner runtime proof remain outstanding.

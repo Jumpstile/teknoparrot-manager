@@ -272,3 +272,17 @@ Product requirements retained for subsequent slices:
 - Harden the existing mode-8 FFBPlugin path; do not add a parallel implementation.
 
 First remediation slice completed at source/test level: PostgreSQL recovery reason classification plus duplicate-ErrorAction web-wrapper remediation. No package or runtime proof claimed.
+
+## Library Health repair slice -- working-tree update
+
+This uncommitted TPM-only slice addresses the source-remediation details for
+IDs 17-22 while retaining `SOURCE FIXED; OWNER RUNTIME NEEDED` as the target
+status after a fresh package/runtime audit. The repair path now emits explicit
+`CANDIDATE`, `FIXED`, and `STILL BROKEN` outcomes, verifies saved GamePath
+values by reading profiles back, keeps Health Check search and AutoSync
+re-copy scoped to affected profiles, redacts before/after path evidence, and
+places thumbnail prompts after the repair result. Registration already-set
+profiles are summarized, and Raw Thrills path warnings now explain parent
+folder shortening and saved-GamePath update steps. Focused Library Health
+tests passed for the source working tree. No package, owner smoke, release, or
+certification evidence was produced by this slice.

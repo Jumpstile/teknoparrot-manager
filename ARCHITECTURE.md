@@ -805,18 +805,23 @@ control state. Third-party FFB plugin coverage is NOT included -- checking it
 needs a live fetch of `AutoSetup.cmd`, which would break the no-live-fetch
 inspection contract. The result object carries the named broken/empty profiles
 and coverage lists to the guided action screen. Automatic repair first runs a
-dry-run candidate search, displays exact candidate paths, and asks for explicit
+dry-run candidate search limited to the broken profile codes, displays compact
+progress plus redacted before/after GamePath evidence, and asks for explicit
 review before saving. Only the reviewed set is reapplied, with a complete
-`UserProfiles\FullBackup\HealthCheck_*` backup before confirmed writes. The
-configured games folder is the default search root; `[S]` accepts another folder
-only after `Test-TpmRepairSearchRoot` canonicalizes an existing, non-reparse
-folder and rejects overlap with the TeknoParrot root, TPM program folder, or either
-ZIP source. `[C]` re-enters AutoSync with an explicit whitelist of the broken profile
-codes, so the normal preview/fresh-apply pipeline cannot broaden the recovery into
-an all-games extraction. Manual repair requires an explicit executable selection,
-validates the configured games-root and reparse boundaries, and follows the same
-backup gate. PostgreSQL and optional setup entries are direct next actions, but no
-mutating workflow starts until the user selects one.
+`UserProfiles\FullBackup\HealthCheck_*` backup before confirmed writes. Every
+applied profile is read back and revalidated at the saved path before it is
+reported as `FIXED`; failed saves or verification remain `STILL BROKEN`.
+The configured games folder is the default search root; `[S]` accepts another
+folder only after `Test-TpmRepairSearchRoot` canonicalizes an existing,
+non-reparse folder and rejects overlap with the TeknoParrot root, TPM program
+folder, or either ZIP source. `[C]` re-enters AutoSync with an explicit
+whitelist of the broken profile codes, so the normal preview/fresh-apply
+pipeline cannot broaden the recovery into an all-games extraction. Manual
+repair requires an explicit executable selection, validates the configured
+games-root and reparse boundaries, and follows the same backup gate. PostgreSQL
+and optional setup entries are direct next actions, but no mutating workflow
+starts until the user selects one. AutoSync's extraction status explicitly
+means no ZIP work; it does not claim that saved GamePath values were repaired.
 
 **Crosshair gallery selection.** The HTML gallery contains all discovered valid
 crosshairs. A short-lived localhost bridge bound only to `127.0.0.1` accepts a

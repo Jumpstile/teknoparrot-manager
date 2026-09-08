@@ -13149,8 +13149,10 @@ Describe "Action Required report output" {
         $action = [System.IO.File]::ReadAllText($actionPath)
         $action | Should -Match 'FIX THESE GAME PATHS IN TEKNOPARROTUI'
         $action | Should -Match 'pcsx2x6\.exe'
-        $action | Should -Match 'folder paths are too long'
         $action | Should -Match 'PCSX2X6 FIRMWARE NOT INSTALLED'
+        $action | Should -Match 'folder paths are too long'
+        $action | Should -Match 'shorten parent folders'
+        $action | Should -Match 'saved GamePath'
         $action | Should -Match 'CONTROLS NOT READY : Controls Racer'
         $action | Should -Match 'TeknoParrot Manager only checked the contract-declared path'
         $action | Should -Not -Match 'TPM only checked the contract-declared path'
@@ -13272,7 +13274,7 @@ Describe "Library Health Check guided repair UX contracts" {
         $source | Should -Match '\[M\] Let me pick the correct executable or folder manually'
         $source | Should -Match '\[S\] Search another game folder'
         $source | Should -Match '\[C\] Re-copy/re-extract only these affected games from the configured source'
-        $source | Should -Match 'Saved-path evidence for the affected games'
+        $source | Should -Match 'Affected profile evidence:'
         $source | Should -Match 'Searched folder:'
         $source | Should -Match 'if \(\$searchAgainChoice -eq ''B''\)'
         $source | Should -Match 'HealthCheck: user selected Back after no automatic repair candidates'
@@ -13394,6 +13396,9 @@ Describe "Library Health Check guided repair UX contracts" {
         $reports = @(Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex $profileIndex -DryRun:$false)
         @($reports).Count | Should -Be 1
         $reports[0].Status | Should -Be 'fixed'
+        $reports[0].Outcome | Should -Be 'FIXED'
+        $reports[0].Verified | Should -BeTrue
+        $reports[0].PreviousPath | Should -Be 'C:\missing\healthgame.exe'
         (Read-Xml -Path (Join-Path $profiles 'HEALTHGAME.xml')).GameProfile.GamePath | Should -Be ([System.IO.Path]::GetFullPath($gameExe))
     }
     It "returns a candidate during dry-run without changing the profile" {
@@ -13409,6 +13414,8 @@ Describe "Library Health Check guided repair UX contracts" {
         [System.IO.File]::WriteAllText($profilePath, $original)
         $reports = @(Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{ 'healthgame.exe' = @('HEALTHGAME') } -DryRun:$true)
         $reports[0].Status | Should -Be 'candidate'
+        $reports[0].Outcome | Should -Be 'CANDIDATE'
+        $reports[0].PreviousPath | Should -Be 'C:\missing\healthgame.exe'
         $reports[0].CandidatePaths | Should -Contain ([System.IO.Path]::GetFullPath($gameExe))
         [System.IO.File]::ReadAllText($profilePath) | Should -Be $original
     }
@@ -13465,7 +13472,9 @@ Describe "Library Health Check guided repair UX contracts" {
         $reports = @(Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{ 'healthgame.exe' = @('HEALTHGAME'); 'extra.exe' = @('EXTRAGAME') } -DryRun:$false -ReviewedCandidates $reviewedCandidates)
         $reportItems = $reports[0]
         ($reportItems | Where-Object { $_.Code -eq 'HEALTHGAME' }).Status | Should -Be 'fixed'
+        ($reportItems | Where-Object { $_.Code -eq 'HEALTHGAME' }).Outcome | Should -Be 'FIXED'
         ($reportItems | Where-Object { $_.Code -eq 'EXTRAGAME' }).Status | Should -Be 'not-reviewed'
+        ($reportItems | Where-Object { $_.Code -eq 'EXTRAGAME' }).Outcome | Should -Be 'STILL BROKEN'
         (Read-Xml (Join-Path $profiles 'HEALTHGAME.xml')).GameProfile.GamePath | Should -Be ([System.IO.Path]::GetFullPath($healthExe))
         [System.IO.File]::ReadAllText((Join-Path $profiles 'EXTRAGAME.xml')) | Should -Be $extraOriginal
     }
@@ -13475,6 +13484,38 @@ Describe "Library Health Check guided repair UX contracts" {
         $source | Should -Match '-DryRun:\$true'
         $source | Should -Match '-ReviewedCandidates \$repairCandidates'
         $source | Should -Match 'Candidate paths found'
+        $source | Should -Match 'FIXED:'
+        $source | Should -Match 'STILL BROKEN:'
+        $source | Should -Match 'Scoped repair: searching only'
+        $source | Should -Match 'GamePath before:'
+        $source | Should -Match 'GamePath after'
+        $source | Should -Match 'Already extracted \(no ZIP work; GamePath repair is separate\)'
+        $source | Should -Match 'Already registered:.*profile\(s\)'
+        $repairResultIndex = $source.IndexOf('Game path repair result is complete', [StringComparison]::Ordinal)
+        $thumbnailPromptIndex = $source.IndexOf('Download thumbnails for registered games missing an icon?', [StringComparison]::Ordinal)
+        $repairResultIndex | Should -BeGreaterOrEqual 0
+        $thumbnailPromptIndex | Should -BeGreaterThan $repairResultIndex
+    }
+    It "redacts user-profile path components in repair evidence" {
+        (ConvertTo-TpmDisplayPath 'C:\Users\PrivateUser\Games\BBHHome\game.exe') | Should -Be 'C:\Users\<user>\Games\BBHHome\game.exe'
+    }
+    It "does not claim a fixed path when the profile save cannot be verified" {
+        $root = Join-Path $TestDrive 'health-save-verification'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $gameExe = Join-Path $games 'HealthGame\healthgame.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($gameExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($gameExe, 'game')
+        $profilePath = Join-Path $profiles 'HEALTHGAME.xml'
+        $original = '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText($profilePath, $original)
+        Mock Save-XmlMaybe {}
+        $reports = @(Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{ 'healthgame.exe' = @('HEALTHGAME') } -DryRun:$false)
+        $reports[0].Status | Should -Be 'still-broken'
+        $reports[0].Outcome | Should -Be 'STILL BROKEN'
+        $reports[0].Verified | Should -BeFalse
+        [System.IO.File]::ReadAllText($profilePath) | Should -Be $original
     }
     It "reports an unresolved automatic candidate without changing its profile" {
         $root = Join-Path $TestDrive 'health-automatic-unresolved'

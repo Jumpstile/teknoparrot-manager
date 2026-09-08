@@ -10462,7 +10462,7 @@ $syncedNames = New-Object System.Collections.Generic.List[string]
             $needsSync = $true; $reason = "incomplete previous extraction"
         }
 
-        if (-not $needsSync) { Write-Host "  Up to date : $rawName" -ForegroundColor DarkGray; $upToDate++; continue }
+        if (-not $needsSync) { Write-Host "  Already extracted (no ZIP work; GamePath repair is separate): $rawName" -ForegroundColor DarkGray; $upToDate++; continue }
 
         if ($DryRun) {
             Write-Host "  Would extract ($reason) : $rawName" -ForegroundColor Yellow
@@ -16179,6 +16179,52 @@ function Invoke-ManualRegistrationChoices {
     }
 }
 
+function ConvertTo-TpmDisplayPath {
+    param([AllowEmptyString()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '<empty>' }
+    $safePath = [string]$Path
+    $userRoot = [Environment]::GetFolderPath('UserProfile')
+    if (-not [string]::IsNullOrWhiteSpace($userRoot)) {
+        $userRoot = $userRoot.TrimEnd('\')
+        if ($safePath.StartsWith($userRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+            return '<user>' + $safePath.Substring($userRoot.Length)
+        }
+    }
+    if ($safePath -imatch '^([A-Z]:\\Users\\)[^\\]+(\\.*)?$') {
+        return $matches[1] + '<user>' + $matches[2]
+    }
+    return $safePath
+}
+
+function Write-LibraryHealthRepairResults {
+    param([object[]]$Reports = @())
+
+    $fixed = @($Reports | Where-Object { $_.Status -eq 'fixed' })
+    $candidates = @($Reports | Where-Object { $_.Status -eq 'candidate' })
+    $stillBroken = @($Reports | Where-Object { $_.Status -ne 'fixed' -and $_.Status -ne 'candidate' })
+    foreach ($report in @($fixed + $candidates + $stillBroken)) {
+        $before = ConvertTo-TpmDisplayPath $report.PreviousPath
+        $after = if ($report.NewPath) { ConvertTo-TpmDisplayPath $report.NewPath } else { '<not saved>' }
+        if ($report.Status -eq 'fixed') {
+            Write-Host ("  FIXED: {0}" -f $report.Code) -ForegroundColor Green
+            Write-Host ("    GamePath before: {0}" -f $before) -ForegroundColor DarkGray
+            Write-Host ("    GamePath after : {0}" -f $after) -ForegroundColor DarkGray
+        } elseif ($report.Status -eq 'candidate') {
+            Write-Host ("  CANDIDATE: {0}" -f $report.Code) -ForegroundColor Cyan
+            Write-Host ("    GamePath before: {0}" -f $before) -ForegroundColor DarkGray
+            Write-Host ("    GamePath after : {0}" -f $after) -ForegroundColor DarkGray
+        } else {
+            $reason = if ($report.Reason) { [string]$report.Reason } else { [string]$report.Status }
+            Write-Host ("  STILL BROKEN: {0} ({1})" -f $report.Code, $reason) -ForegroundColor Yellow
+            Write-Host ("    GamePath before: {0}" -f $before) -ForegroundColor DarkGray
+            Write-Host ("    GamePath after : {0}" -f $after) -ForegroundColor DarkGray
+        }
+    }
+    return [pscustomobject]@{ Fixed = $fixed.Count; Candidates = $candidates.Count; StillBroken = $stillBroken.Count }
+}
+
+
 # Checks every UserProfile's GamePath and re-points broken ones (empty path or
 # missing file). Locates the game's executable by name in the install folder.
 # An exe name is only used to auto-fix a path when it belongs to exactly ONE
@@ -16210,8 +16256,23 @@ function Repair-GamePaths {
     foreach ($f in $files) {
         $repairIndex++
         Write-TpmCompactExtractionProgress -Phase Repairing -Label $f.BaseName -Current $repairIndex -Total $files.Count
-        try { $doc = Read-Xml $f.FullName } catch { Write-Log "Repair-GamePaths: could not parse $($f.Name) -- $_"; continue }
-        if ($null -eq $doc.GameProfile) { continue }
+        try {
+            $doc = Read-Xml $f.FullName
+        } catch {
+            Write-Log "Repair-GamePaths: could not parse $($f.Name) -- $_"
+            [void]$reports.Add([pscustomobject]@{
+                Code = $f.BaseName; Status = 'parse-failed'; Outcome = 'STILL BROKEN'
+                PreviousPath = '<could not read profile>'; Reason = 'profile could not be read'
+            })
+            continue
+        }
+        if ($null -eq $doc.GameProfile) {
+            [void]$reports.Add([pscustomobject]@{
+                Code = $f.BaseName; Status = 'malformed-profile'; Outcome = 'STILL BROKEN'
+                PreviousPath = '<missing GameProfile>'; Reason = 'profile has no GameProfile element'
+            })
+            continue
+        }
 
         $gpNode  = $doc.GameProfile.SelectSingleNode("GamePath")
         $curPath = if ($gpNode) { $gpNode.InnerText } else { "" }
@@ -16223,7 +16284,10 @@ function Repair-GamePaths {
         }
 
         if ([string]::IsNullOrWhiteSpace($exeName)) {
-            [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "no-exe-name" })
+            [void]$reports.Add([pscustomobject]@{
+                Code = $f.BaseName; Status = "no-exe-name"; Outcome = 'STILL BROKEN'
+                PreviousPath = $curPath; Reason = 'profile has no executable name'
+            })
             continue
         }
         # If this exe name maps to more than one profile in the library it is
@@ -16235,13 +16299,19 @@ function Repair-GamePaths {
         } | Measure-Object -Maximum).Maximum
         if (-not $profileCount) { $profileCount = 0 }
         if ($profileCount -gt 1) {
-            [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "ambiguous"; Exe = $exeName })
+            [void]$reports.Add([pscustomobject]@{
+                Code = $f.BaseName; Status = "ambiguous"; Outcome = 'STILL BROKEN'
+                Exe = $exeName; PreviousPath = $curPath; Reason = 'executable name maps to multiple profiles'
+            })
             continue
         }
 
         $reviewed = @($ReviewedCandidates | Where-Object { [string]$_.Code -ieq $f.BaseName })[0]
         if ($ReviewedCandidates.Count -gt 0 -and -not $reviewed) {
-            [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = 'not-reviewed'; Exe = $exeName })
+            [void]$reports.Add([pscustomobject]@{
+                Code = $f.BaseName; Status = 'not-reviewed'; Outcome = 'STILL BROKEN'
+                Exe = $exeName; PreviousPath = $curPath; Reason = 'candidate was not explicitly reviewed'
+            })
             continue
         }
         $key = $null
@@ -16255,11 +16325,17 @@ function Repair-GamePaths {
                 if ($exeMap.ContainsKey($ak)) { $key = $ak; break }
             }
             if ($null -eq $key) {
-                [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "not-found"; Exe = $exeName })
+                [void]$reports.Add([pscustomobject]@{
+                    Code = $f.BaseName; Status = "not-found"; Outcome = 'STILL BROKEN'
+                    Exe = $exeName; PreviousPath = $curPath; Reason = 'matching executable was not found'
+                })
                 continue
             }
             if ($exeMap[$key].Count -gt 1) {
-                [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "ambiguous"; Exe = $exeName })
+                [void]$reports.Add([pscustomobject]@{
+                    Code = $f.BaseName; Status = "ambiguous"; Outcome = 'STILL BROKEN'
+                    Exe = $exeName; PreviousPath = $curPath; Reason = 'multiple matching executables were found'
+                })
                 continue
             }
             $newPath = [string]$exeMap[$key][0]
@@ -16270,8 +16346,10 @@ function Repair-GamePaths {
             -not (Test-TpmNoReparsePath -Path $newPath) -or
             [string]$repairPathCheck.ResolvedPath -ine [string]$newPath) {
             $repairReason = if ($repairPathCheck.Reason) { $repairPathCheck.Reason } else { 'candidate is outside the configured games root or uses an unsafe reparse path' }
-            Write-Log "Repair-GamePaths: rejected $($f.BaseName) at mutation boundary -- $repairReason"
-            [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "path-unsafe"; Exe = $exeName; Reason = $repairReason })
+            [void]$reports.Add([pscustomobject]@{
+                Code = $f.BaseName; Status = "path-unsafe"; Outcome = 'STILL BROKEN'
+                Exe = $exeName; PreviousPath = $curPath; Reason = $repairReason
+            })
             continue
         }
         $newPath = [string]$repairPathCheck.ResolvedPath
@@ -16279,7 +16357,9 @@ function Repair-GamePaths {
             [void]$reports.Add([pscustomobject]@{
                 Code = $f.BaseName
                 Status = 'candidate'
+                Outcome = 'CANDIDATE'
                 Exe = $exeName
+                PreviousPath = $curPath
                 CandidatePaths = @($newPath)
                 NewPath = $newPath
             })
@@ -16294,11 +16374,39 @@ function Repair-GamePaths {
             $gpNode.InnerText = $newPath
             [void](Set-SecondaryExecutablePath $doc $newPath)
             Save-XmlMaybe $doc $f.FullName $DryRun
-            [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "fixed"; NewPath = $newPath })
-            Write-Log "Repair: fixed $($f.BaseName) -> $newPath"
+
+            $verifiedDoc = Read-Xml $f.FullName
+            $verifiedNode = $verifiedDoc.GameProfile.SelectSingleNode("GamePath")
+            $verifiedPath = if ($verifiedNode) { [string]$verifiedNode.InnerText } else { '' }
+            $verifiedCheck = if ($verifiedPath) {
+                Test-TpmGameMutationPath -GamePath $verifiedPath -RequireLeaf
+            } else {
+                $null
+            }
+            if ($verifiedPath -eq $newPath -and $verifiedCheck -and $verifiedCheck.Valid -and
+                [string]$verifiedCheck.ResolvedPath -ieq $newPath) {
+                [void]$reports.Add([pscustomobject]@{
+                    Code = $f.BaseName; Status = "fixed"; Outcome = 'FIXED'
+                    Exe = $exeName; PreviousPath = $curPath; NewPath = $newPath; Verified = $true
+                })
+                Write-Log "Repair: fixed and verified $($f.BaseName) -> $newPath"
+            } else {
+                $verifyReason = if (-not $verifiedPath) { 'saved profile has an empty GamePath' }
+                    elseif ($verifiedPath -ine $newPath) { 'saved profile GamePath did not match the reviewed candidate' }
+                    elseif ($verifiedCheck -and $verifiedCheck.Reason) { [string]$verifiedCheck.Reason }
+                    else { 'saved GamePath could not be revalidated' }
+                [void]$reports.Add([pscustomobject]@{
+                    Code = $f.BaseName; Status = "still-broken"; Outcome = 'STILL BROKEN'
+                    Exe = $exeName; PreviousPath = $curPath; NewPath = $verifiedPath; Reason = $verifyReason; Verified = $false
+                })
+                Write-Log "Repair: save verification failed for $($f.BaseName) -- $verifyReason"
+            }
         } catch {
-            Write-Log "Repair: FAILED to save $($f.Name) -- $_"
-            [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "save-failed" })
+            Write-Log "Repair-GamePaths: FAILED to save or verify $($f.Name) -- $_"
+            [void]$reports.Add([pscustomobject]@{
+                Code = $f.BaseName; Status = "save-failed"; Outcome = 'STILL BROKEN'
+                Exe = $exeName; PreviousPath = $curPath; NewPath = $newPath; Reason = 'profile save or verification failed'; Verified = $false
+            })
         }
     }
     Write-TpmCompactExtractionProgress -Phase Repairing -Label 'game paths' -Current $repairIndex -Total $files.Count -Complete
@@ -22491,22 +22599,24 @@ $mode = $null
                 $repairConfirm = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
                 if ($repairConfirm -eq 'Y') {
                     try {
+                        Write-Host ("  Scoped repair: searching only {0} affected profile(s)." -f @($healthResult.Broken).Count) -ForegroundColor Cyan
                         $repairIndex = Build-ProfileIndex -gameProfilesDir $gameProfilesDir
                         $repairReports = @(Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$true -OnlyGames ([string[]]@($healthResult.Broken)))
                         $repairCandidates = @($repairReports | Where-Object { $_.Status -eq 'candidate' })
                         if ($repairCandidates.Count -gt 0) {
                             Write-Host '  Candidate paths found (no profile changes made):' -ForegroundColor Cyan
                             foreach ($candidate in $repairCandidates) {
-                                Write-Host ("    {0} -> {1}" -f $candidate.Code, $candidate.NewPath) -ForegroundColor White
+                                Write-Host ("    {0}  before: {1}" -f $candidate.Code, (ConvertTo-TpmDisplayPath $candidate.PreviousPath)) -ForegroundColor DarkGray
+                                Write-Host ("          after : {0}" -f (ConvertTo-TpmDisplayPath $candidate.NewPath)) -ForegroundColor White
                             }
-                            Write-Host '  [Y] Apply these reviewed candidates' -ForegroundColor White
+                            Write-Host '  [Y] Apply only these reviewed candidates' -ForegroundColor White
                             Write-Host '  [N] Leave them unchanged' -ForegroundColor White
                             $applyChoice = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
                             if ($applyChoice -eq 'Y') {
                                 $healthBackup = New-LibraryHealthProfileBackup -UserProfilesDir $userProfilesDir
                                 $repairReports = @(Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$false -ReviewedCandidates $repairCandidates -OnlyGames ([string[]]@($healthResult.Broken)))
-                                $repairFixed = @($repairReports | Where-Object { $_.Status -eq 'fixed' })
-                                Write-Host ("  Applied {0} repaired path(s)." -f $repairFixed.Count) -ForegroundColor Green
+                                $repairSummary = Write-LibraryHealthRepairResults -Reports $repairReports
+                                Write-Host ("  Repair result: {0} FIXED, {1} STILL BROKEN." -f $repairSummary.Fixed, $repairSummary.StillBroken) -ForegroundColor (if ($repairSummary.StillBroken -gt 0) { 'Yellow' } else { 'Green' })
                                 Write-Host ("  Safety backup: {0}" -f $healthBackup.Path) -ForegroundColor DarkGray
                             } else {
                                 Write-Host '  Candidates were reviewed but not applied. Nothing was changed.' -ForegroundColor DarkGray
@@ -22514,22 +22624,20 @@ $mode = $null
                             $repairSearchAgain = $false
                         } else {
                             Write-Host '  No safe automatic candidates were found in this folder. Nothing was changed.' -ForegroundColor Yellow
-                            Write-Host ("  Searched folder: {0}" -f $searchRoot) -ForegroundColor DarkGray
-                            Write-Host '  Saved-path evidence for the affected games:' -ForegroundColor Cyan
+                            Write-Host ("  Searched folder: {0}" -f (ConvertTo-TpmDisplayPath $searchRoot)) -ForegroundColor DarkGray
+                            Write-Host '  Affected profile evidence:' -ForegroundColor Cyan
+                            Write-LibraryHealthRepairResults -Reports $repairReports | Out-Null
                             foreach ($brokenCode in @($healthResult.Broken)) {
                                 $brokenProfilePath = Join-Path $userProfilesDir ($brokenCode + '.xml')
                                 $savedExecutable = ''
-                                $savedPath = ''
                                 try {
                                     $brokenDoc = Read-Xml -Path $brokenProfilePath
-                                    $savedPathNode = $brokenDoc.GameProfile.SelectSingleNode('GamePath')
                                     $savedExeNode = $brokenDoc.GameProfile.SelectSingleNode('ExecutableName')
-                                    if ($savedPathNode) { $savedPath = [string]$savedPathNode.InnerText }
                                     if ($savedExeNode) { $savedExecutable = [string]$savedExeNode.InnerText }
                                 } catch {
-                                    $savedPath = '<could not read profile>'
+                                    $savedExecutable = '<could not read profile>'
                                 }
-                                Write-Host ("    {0}: expected executable {1}; saved path {2}" -f $brokenCode, $(if ($savedExecutable) { $savedExecutable } else { '<not recorded>' }), $(if ($savedPath) { $savedPath } else { '<empty>' })) -ForegroundColor DarkGray
+                                Write-Host ("    {0}: expected executable {1}" -f $brokenCode, $(if ($savedExecutable) { $savedExecutable } else { '<not recorded>' })) -ForegroundColor DarkGray
                             }
                             $reCopySources = @($zipSource, $zipSourceSupplementary | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) })
                             if ($reCopySources.Count -gt 0) {
@@ -24623,8 +24731,8 @@ foreach ($r in $result.Registered) {
     }
     Write-Host "               $($r.GamePath)" -ForegroundColor DarkGray
 }
-foreach ($a in $result.Already) {
-    Write-Host "  Already set : $a  (UserProfile exists, left unchanged)" -ForegroundColor DarkGray
+if ($result.Already.Count -gt 0) {
+    Write-Host ("  Already registered: {0} profile(s) -- existing UserProfiles were left unchanged." -f $result.Already.Count) -ForegroundColor DarkGray
 }
 
 # Collect unique game folders that need manual registration, keeping the most
@@ -24742,8 +24850,42 @@ if ($registrationFolders.Count -gt 0 -and -not $dryRunActive) {
     Write-Log "AutoSync: maintenance scope = all games."
 }
 
+
 # =============================================================================
-# SECTION 8b -- Download game thumbnails (optional)
+# SECTION 9  -- Game repair: fix broken GamePaths
+# =============================================================================
+
+Write-Host ""
+if ($Unattended) {
+    Write-Host "  [Unattended] Running repair." -ForegroundColor DarkCyan
+    Write-Log "Unattended: repair = Y."
+    $doRepair = "Y"
+} else {
+    $doRepair = Read-TpmYesNo -Prompt "Check for and repair broken game paths now? (Y/N)"
+}
+$nf   = @(); $amb2 = @()   # initialise so the final summary can reference them safely
+if ($doRepair.Trim().ToUpper() -eq "Y") {
+    Write-Host ""
+    Write-Host "Repairing game paths..." -ForegroundColor Cyan
+    $repair = @(Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex -DryRun $dryRunActive)
+    $fixed = @($repair | Where-Object { $_.Status -eq "fixed" })
+    $nf    = @($repair | Where-Object { $_.Status -eq "not-found" })
+    $amb2  = @($repair | Where-Object { $_.Status -in @("ambiguous", "path-unsafe", "not-reviewed", "still-broken") })
+    $noex  = @($repair | Where-Object { $_.Status -eq "no-exe-name" })
+    $sf    = @($repair | Where-Object { $_.Status -in @("save-failed", "parse-failed", "malformed-profile") })
+    if ($repair.Count -eq 0) {
+        Write-Host "  All game paths are valid. Nothing to repair." -ForegroundColor Green
+    } else {
+        $repairSummary = Write-LibraryHealthRepairResults -Reports $repair
+        Write-Host ("  Repair result: {0} FIXED, {1} STILL BROKEN, {2} CANDIDATE." -f $repairSummary.Fixed, $repairSummary.StillBroken, $repairSummary.Candidates) -ForegroundColor (if ($repairSummary.StillBroken -gt 0) { 'Yellow' } else { 'Green' })
+    }
+    Write-Log "Repair: fixed=$($fixed.Count) notfound=$($nf.Count) manualreg=$($amb2.Count) noexe=$($noex.Count) savefail=$($sf.Count)"
+}
+Write-Host "  Game path repair result is complete; optional thumbnails are next." -ForegroundColor DarkCyan
+
+
+# =============================================================================
+# SECTION 9b -- Download game thumbnails (optional)
 # =============================================================================
 
 Write-Host ""
@@ -24771,49 +24913,6 @@ if ($doThumb -eq "Y") {
     Write-Host ""
     Invoke-ThumbnailDownload -userProfilesDir $userProfilesDir -tpRoot $tpRoot
 }
-
-# =============================================================================
-# SECTION 9  -- Game repair: fix broken GamePaths
-# =============================================================================
-
-Write-Host ""
-if ($Unattended) {
-    Write-Host "  [Unattended] Running repair." -ForegroundColor DarkCyan
-    Write-Log "Unattended: repair = Y."
-    $doRepair = "Y"
-} else {
-    $doRepair = Read-TpmYesNo -Prompt "Check for and repair broken game paths now? (Y/N)"
-}
-$nf   = @(); $amb2 = @()   # initialise so the final summary can reference them safely
-if ($doRepair.Trim().ToUpper() -eq "Y") {
-    Write-Host ""
-    Write-Host "Repairing game paths..." -ForegroundColor Cyan
-    $repair = Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex -DryRun $dryRunActive
-    $fixed = @($repair | Where-Object { $_.Status -eq "fixed" })
-    $nf    = @($repair | Where-Object { $_.Status -eq "not-found" })
-    $amb2  = @($repair | Where-Object { $_.Status -eq "ambiguous" })
-    $noex  = @($repair | Where-Object { $_.Status -eq "no-exe-name" })
-    $sf    = @($repair | Where-Object { $_.Status -eq "save-failed" })
-    if ($fixed.Count -eq 0 -and $nf.Count -eq 0 -and $amb2.Count -eq 0 -and $sf.Count -eq 0) {
-        Write-Host "  All game paths are valid. Nothing to repair." -ForegroundColor Green
-    } else {
-        foreach ($r in $fixed) {
-            Write-Host "  Fixed : $($r.Code)" -ForegroundColor Green
-            Write-Host "          $($r.NewPath)" -ForegroundColor DarkGray
-        }
-        foreach ($r in $sf) {
-            Write-Host "  Save failed : $($r.Code)  (see TeknoParrot-Manager.log)" -ForegroundColor Red
-        }
-        if ($nf.Count -gt 0) {
-            Write-Host ("  {0} game(s) not yet extracted -- extract first, then re-run Repair." -f $nf.Count) -ForegroundColor DarkCyan
-        }
-        if ($amb2.Count -gt 0) {
-            Write-Host ("  {0} profile(s) could not be auto-fixed -- see ACTION REQUIRED at the end of this run." -f $amb2.Count) -ForegroundColor Yellow
-        }
-    }
-    Write-Log "Repair: fixed=$($fixed.Count) notfound=$($nf.Count) manualreg=$($amb2.Count) noexe=$($noex.Count) savefail=$($sf.Count)"
-}
-
 # =============================================================================
 # SECTION 10 -- Control propagation
 # =============================================================================
@@ -25519,8 +25618,8 @@ function New-TpmActionRequiredReportText {
         [void]$builder.AppendLine("These games may fail to launch because their folder paths are too long.")
         [void]$builder.AppendLine("TeknoParrot Manager cannot safely rename folders and update profiles automatically here.")
         [void]$builder.AppendLine("Manual safe repair: back up each UserProfile XML, close TeknoParrotUI,")
-        [void]$builder.AppendLine("move/rename the folder near a drive root, update the profile in TeknoParrotUI,")
-        [void]$builder.AppendLine("then re-run Repair and test the game.")
+        [void]$builder.AppendLine("rename the game folder to the suggested short name and shorten parent folders if needed,")
+        [void]$builder.AppendLine("update the saved GamePath in TeknoParrotUI, then re-run Repair and test the game.")
         foreach ($w in ($pathTooLong | Sort-Object Code)) {
             [void]$builder.AppendLine("")
             [void]$builder.AppendLine("  Game        : $($w.Code)")
@@ -25831,9 +25930,9 @@ if ($hasAnyAction) {
         Write-Host ""
         Write-Host "  MANUAL SAFE REPAIR:" -ForegroundColor DarkCyan
         Write-Host "    1. Back up the affected UserProfile XML before changing anything." -ForegroundColor DarkCyan
-        Write-Host "    2. Close TeknoParrotUI, then rename/move the folder to the recommended name." -ForegroundColor DarkCyan
-        Write-Host "    3. Use a location near a drive root, such as D:\TPGames\<name>." -ForegroundColor DarkCyan
-        Write-Host "    4. Point the profile to the renamed folder in TeknoParrotUI." -ForegroundColor DarkCyan
+        Write-Host "    2. Close TeknoParrotUI, then rename the game folder to the suggested short name." -ForegroundColor DarkCyan
+        Write-Host "    3. Shorten parent folders too if needed, such as D:\TPGames\<name>." -ForegroundColor DarkCyan
+        Write-Host "    4. Update the saved GamePath in TeknoParrotUI." -ForegroundColor DarkCyan
         Write-Host "    5. Re-run Repair and test the game." -ForegroundColor DarkCyan
         Write-Host ""
         foreach ($w in ($compatWarnings.PathTooLong | Sort-Object Code)) {

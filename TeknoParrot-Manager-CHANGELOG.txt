@@ -28,6 +28,14 @@
   One-game AutoSync now pauses before optional library maintenance and offers
   New game only, all games, or Back; New game only is safe default. Related-only
   scoping is deferred rather than presented as an unimplemented choice.
+  Library Health Check repair now searches only affected profiles, shows compact
+  candidate progress, and reports explicit CANDIDATE, FIXED, or STILL BROKEN
+  outcomes. Saved GamePath values are read back and revalidated after writes;
+  repair evidence redacts user-profile path components. Registration summarizes
+  already-registered profiles, AutoSync distinguishes extraction status from
+  GamePath repair, thumbnail prompts follow repair results, and Raw Thrills
+  path-length guidance now tells users to shorten parent folders and update the
+  saved GamePath. RC8 remains a candidate and is not published.
   Known RC8 owner-smoke blockers identified. Release remains blocked pending
   re-audit, source remediation, package rebuild, and owner-runtime retest.
   ReShade preview comparison now has a real 0-100 in-memory slider; its
