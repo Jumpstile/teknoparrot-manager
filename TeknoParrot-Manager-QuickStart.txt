@@ -156,19 +156,26 @@
                              when asking for help.
        15) Exit            -- quit the script.
 
-    If you need help, choose 14) Create Support Package. TPM collects safe
-    TPM/TeknoParrot/game logs, metadata, and per-file ReShade ownership/removal
-    scan and transaction details, removes common private information from text,
-    and saves one ZIP under SupportPackages\ beside this script.
-    Executable/archive masquerades, binary control bytes, and invalid text
-    are rejected and recorded. Send that ZIP when asking for help. It never
-    includes game files, ROMs, executables, arbitrary DLLs, firmware, profiles,
-    credentials, passwords, tokens, or recovery-state files. Missing optional
-    diagnostics are reported and a failed or cleanup-incomplete package is
-    never reported as successful.
-    The package output begins with "What failed" and "What TPM did not
-    change". Detailed allowlisted collection failures are preserved; routine
-    missing optional diagnostics remain summarized.
+   If you need help, choose 14) Create Support Package. First, in TeknoParrotUI
+   choose Troubleshooting -> Save information to a text file and save it beside
+   this script as TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt. TPM
+   accepts only that exact allowlisted intake filename. TPM then collects safe
+   TPM/TeknoParrot/game logs, redacted affected-game profile snapshots,
+   metadata, and per-file ReShade ownership/removal scan and transaction
+   details, removes common private information from text, and saves one ZIP
+   under SupportPackages\ beside this script.
+   Evidence is labeled Current (captured by this run), Ambient (supplied or
+   discovered without current-run provenance), or Stale (older than the latest
+   TPM run). Executable/archive masquerades, binary control bytes, and invalid
+   text are rejected and recorded. Send that ZIP when asking for help. It never
+   includes game files, ROMs, executables, arbitrary DLLs, firmware, profiles,
+   credentials, passwords, tokens, or recovery-state files. Missing optional
+   diagnostics are reported and a failed or cleanup-incomplete package is
+   never reported as successful.
+   The package output begins with "What failed" and "What TPM did not
+   change". Detailed allowlisted collection failures are preserved; routine
+   missing optional diagnostics remain summarized.
+
 
 
      The menu automatically shortens its descriptions, or shows labels only

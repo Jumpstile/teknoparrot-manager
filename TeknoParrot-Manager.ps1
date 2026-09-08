@@ -1300,6 +1300,104 @@ function Copy-TpmSupportTextFile {
         Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status $status -Detail 'The allowlisted diagnostic could not be read or redacted safely.' -EvidenceClass $EvidenceClass
     }
 }
+function Get-TpmSupportProfileSnapshotText {
+    param(
+        [Parameter(Mandatory)][System.Xml.XmlDocument]$Document,
+        [Parameter(Mandatory)][string]$GameCode,
+        [Parameter(Mandatory)][string]$ProfileName
+    )
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('TPM redacted affected-game profile snapshot v1') | Out-Null
+    $lines.Add('Profile code: ' + (Redact-TpmSupportText -Text $GameCode).Text) | Out-Null
+    $lines.Add('Profile file: ' + (Redact-TpmSupportText -Text $ProfileName).Text) | Out-Null
+    $lines.Add('This is a structured snapshot for path repair, ReShade, controls, PostgreSQL, LaunchBox, and registration review.') | Out-Null
+    $lines.Add('The original UserProfile XML was not copied.') | Out-Null
+    $lines.Add('') | Out-Null
+    $lines.Add('Registration and path fields:') | Out-Null
+    foreach ($field in @(
+        'GameName','GamePath','GamePath2','ExecutableName','ExecutableName2',
+        'EmulationProfile','EmulatorType','GameProfileRevision','GameVersion',
+        'Is64Bit','HasTwoExecutables','LaunchSecondExecutableFirst','RequiresBepInEx'
+    )) {
+        $node = $Document.SelectSingleNode('/GameProfile/' + $field)
+        if ($node) {
+            $value = (Redact-TpmSupportText -Text ([string]$node.InnerText)).Text
+            $lines.Add(('  {0} = {1}' -f $field, $value)) | Out-Null
+        }
+    }
+    $lines.Add('') | Out-Null
+    $lines.Add('Controls and native feature fields:') | Out-Null
+    $fieldNodes = @($Document.SelectNodes('/GameProfile/ConfigValues/FieldInformation'))
+    if ($fieldNodes.Count -eq 0) {
+        $lines.Add('  (none supplied)') | Out-Null
+    } else {
+        foreach ($fieldNode in $fieldNodes) {
+            $categoryNode = $fieldNode.SelectSingleNode('CategoryName')
+            $nameNode = $fieldNode.SelectSingleNode('FieldName')
+            $typeNode = $fieldNode.SelectSingleNode('FieldType')
+            $valueNode = $fieldNode.SelectSingleNode('FieldValue')
+            $category = if ($categoryNode) { [string]$categoryNode.InnerText } else { '' }
+            $name = if ($nameNode) { [string]$nameNode.InnerText } else { '' }
+            $type = if ($typeNode) { [string]$typeNode.InnerText } else { '' }
+            $value = if ($valueNode) { [string]$valueNode.InnerText } else { '' }
+            $sensitiveName = ($category + ' ' + $name) -match '(?i)pass(word)?|secret|token|credential|api.?key|connection.?string'
+            $safeValue = if ($sensitiveName) { '<redacted-field>' } else { (Redact-TpmSupportText -Text $value).Text }
+            $lines.Add(('  Category={0}; Field={1}; Type={2}; Value={3}' -f
+                (Redact-TpmSupportText -Text $category).Text,
+                (Redact-TpmSupportText -Text $name).Text,
+                (Redact-TpmSupportText -Text $type).Text,
+                $safeValue)) | Out-Null
+        }
+    }
+    $lines.Add('') | Out-Null
+    $lines.Add('Bound control labels and mappings:') | Out-Null
+    $buttonNodes = @($Document.SelectNodes('/GameProfile/JoystickButtons'))
+    if ($buttonNodes.Count -eq 0) {
+        $lines.Add('  (none supplied)') | Out-Null
+    } else {
+        foreach ($buttonNode in $buttonNodes) {
+            $buttonNameNode = $buttonNode.SelectSingleNode('ButtonName')
+            $mappingNode = $buttonNode.SelectSingleNode('InputMapping')
+            $analogNode = $buttonNode.SelectSingleNode('AnalogType')
+            $buttonName = if ($buttonNameNode) { [string]$buttonNameNode.InnerText } else { '' }
+            $mapping = if ($mappingNode) { [string]$mappingNode.InnerText } else { '' }
+            $analog = if ($analogNode) { [string]$analogNode.InnerText } else { '' }
+            $lines.Add(('  Button={0}; Mapping={1}; AnalogType={2}' -f
+                (Redact-TpmSupportText -Text $buttonName).Text,
+                (Redact-TpmSupportText -Text $mapping).Text,
+                (Redact-TpmSupportText -Text $analog).Text)) | Out-Null
+        }
+    }
+    return ($lines -join "`r`n") + "`r`n"
+}
+
+
+function Write-TpmSupportProfileSnapshot {
+    param(
+        [Parameter(Mandatory)]$Records,
+        [Parameter(Mandatory)][System.Xml.XmlDocument]$Document,
+        [Parameter(Mandatory)][string]$GameCode,
+        [Parameter(Mandatory)][string]$ProfileName,
+        [Parameter(Mandatory)][string]$StageDirectory
+    )
+    try {
+        $baseName = 'profile-' + (Get-TpmSupportSafeName $GameCode)
+        $candidate = $baseName + '.txt'
+        $suffix = 1
+        while (Test-Path -LiteralPath (Join-Path $StageDirectory $candidate) -PathType Leaf) {
+            $suffix++
+            $candidate = '{0}-{1:D2}.txt' -f $baseName, $suffix
+        }
+        $destination = Join-Path $StageDirectory $candidate
+        $snapshot = Get-TpmSupportProfileSnapshotText -Document $Document -GameCode $GameCode -ProfileName $ProfileName
+        [System.IO.File]::WriteAllText($destination, $snapshot, (New-Object System.Text.UTF8Encoding($false)))
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':redacted profile snapshot') -Status Collected -Destination ('metadata\' + $candidate) -Detail 'Structured affected-game fields collected; the original UserProfile XML was not copied.' -EvidenceClass Current
+    } catch {
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':redacted profile snapshot') -Status CollectionFailed -Detail 'The structured affected-game profile snapshot could not be written safely.' -EvidenceClass Current
+    }
+}
+
+
 
 function Get-TpmSupportPluginInventory {
     param(
@@ -1423,19 +1521,24 @@ function Get-TpmSupportManifestText {
     $supportWorkflow = if ($SupportWorkflowResult) { $SupportWorkflowResult } else { $null }
     $lines.Add('Latest workflow result: ' + $(if ($latestWorkflow) { '{0} / {1} / {2}' -f $latestWorkflow.WorkflowKey, $latestWorkflow.State, $latestWorkflow.WorkflowId } else { 'unavailable' })) | Out-Null
     $lines.Add('Support workflow result: ' + $(if ($supportWorkflow) { '{0} / {1} / {2}' -f $supportWorkflow.WorkflowKey, $supportWorkflow.State, $supportWorkflow.WorkflowId } else { 'unavailable' })) | Out-Null
-$actionItemsStamp = $null
-$managerLogStamp = $null
-if ($ActionItemsPath -and (Test-Path -LiteralPath $ActionItemsPath -PathType Leaf)) { $actionItemsStamp = (Get-Item -LiteralPath $ActionItemsPath).LastWriteTimeUtc }
-if ($ManagerLogPath -and (Test-Path -LiteralPath $ManagerLogPath -PathType Leaf)) { $managerLogStamp = (Get-Item -LiteralPath $ManagerLogPath).LastWriteTimeUtc }
-$lines.Add('Latest TPM log timestamp UTC: ' + $(if ($managerLogStamp) { $managerLogStamp.ToString('o') } else { 'unavailable' })) | Out-Null
-$lines.Add('Action Required timestamp UTC: ' + $(if ($actionItemsStamp) { $actionItemsStamp.ToString('o') } else { 'unavailable' })) | Out-Null
-$actionItemsStale = $false
-if ($actionItemsStamp -and $managerLogStamp -and $actionItemsStamp -lt $managerLogStamp) { $actionItemsStale = $true }
-$lines.Add('Action Required evidence status: ' + $(if ($actionItemsStale) { 'stale' } elseif ($actionItemsStamp) { 'current' } else { 'not present' })) | Out-Null
-if ($actionItemsStale) {
-    $lines.Add('WARNING: Action Required report is older than the latest TPM run and may not match this support package.') | Out-Null
-    $lines.Add('Action Required remediation: rerun the affected workflow, let TPM finish its report, then create a new support package.') | Out-Null
-}
+    $actionItemsStamp = $null
+    $managerLogStamp = $null
+    if ($ActionItemsPath -and (Test-Path -LiteralPath $ActionItemsPath -PathType Leaf)) { $actionItemsStamp = (Get-Item -LiteralPath $ActionItemsPath).LastWriteTimeUtc }
+    if ($ManagerLogPath -and (Test-Path -LiteralPath $ManagerLogPath -PathType Leaf)) { $managerLogStamp = (Get-Item -LiteralPath $ManagerLogPath).LastWriteTimeUtc }
+    $lines.Add('Latest TPM log timestamp UTC: ' + $(if ($managerLogStamp) { $managerLogStamp.ToString('o') } else { 'unavailable' })) | Out-Null
+    $lines.Add('Action Required timestamp UTC: ' + $(if ($actionItemsStamp) { $actionItemsStamp.ToString('o') } else { 'unavailable' })) | Out-Null
+    $actionItemsStale = $false
+    if ($actionItemsStamp -and $managerLogStamp -and $actionItemsStamp -lt $managerLogStamp) { $actionItemsStale = $true }
+    $lines.Add('Action Required evidence status: ' + $(if ($actionItemsStale) { 'stale' } elseif ($actionItemsStamp) { 'current' } else { 'not present' })) | Out-Null
+    if ($actionItemsStale) {
+        $lines.Add('WARNING: Action Required report is older than the latest TPM run and may not match this support package.') | Out-Null
+        $lines.Add('Action Required remediation: rerun the affected workflow, let TPM finish its report, then create a new support package.') | Out-Null
+    }
+    $currentEvidenceCount = @($Records | Where-Object EvidenceClass -eq 'Current').Count
+    $staleEvidenceCount = @($Records | Where-Object EvidenceClass -eq 'Stale').Count
+    $ambientEvidenceCount = @($Records | Where-Object EvidenceClass -eq 'Ambient').Count
+    $lines.Add('Evidence classes: Current = captured or generated by this TPM run; Stale = older than the latest TPM run; Ambient = supplied or discovered without current-run provenance.') | Out-Null
+    $lines.Add(('Evidence class counts: Current={0}; Stale={1}; Ambient={2}' -f $currentEvidenceCount, $staleEvidenceCount, $ambientEvidenceCount)) | Out-Null
 $lines.Add('TPM version: ' + (Get-ManagerDisplayVersion)) | Out-Null
 $lines.Add('PowerShell: ' + $PSVersionTable.PSVersion.ToString()) | Out-Null
 $lines.Add('OS: Windows ' + [Environment]::OSVersion.Version.ToString()) | Out-Null
@@ -1490,10 +1593,15 @@ $lines.Add('This ZIP may still be useful for support when only partial evidence 
     $lines.Add('- Allowlisted TeknoParrot root logs, including ParrotPatcher_Log.txt') | Out-Null
     $lines.Add('- Allowlisted text logs in safely identified registered game folders') | Out-Null
     $lines.Add('- Metadata-only inventories of allowlisted BepInEx and Unity plugin folders') | Out-Null
-    $lines.Add('TeknoParrotUI troubleshooting evidence: open the hamburger/menu, choose Troubleshooting, then choose Copy info to clipboard or Save info to text file.') | Out-Null
+    $lines.Add('TeknoParrotUI troubleshooting intake: choose Troubleshooting -> Save information to a text file, then save it beside the TPM script as TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt.') | Out-Null
     $lines.Add('') | Out-Null
     $lines.Add('Collected evidence:') | Out-Null
-    foreach ($record in @($Records | Where-Object Status -ne 'NotPresent')) {
+    $recordEvidenceOrder = @{ Current = 0; Stale = 1; Ambient = 2 }
+    $manifestRecords = @($Records | Where-Object Status -ne 'NotPresent' | Sort-Object @{ Expression = {
+        $key = [string]$_.EvidenceClass
+        if ($recordEvidenceOrder.ContainsKey($key)) { $recordEvidenceOrder[$key] } else { 99 }
+    } }, @{ Expression = { [string]$_.Source } })
+    foreach ($record in $manifestRecords) {
         $recordSource = (Redact-TpmSupportText -Text ([string]$record.Source)).Text
         $detail = if ($record.Detail) { ' -- ' + (Redact-TpmSupportText -Text ([string]$record.Detail)).Text } else { '' }
         $destination = if ($record.Destination) { ' -> ' + (Redact-TpmSupportText -Text ([string]$record.Destination)).Text } else { '' }
@@ -1583,32 +1691,40 @@ function New-TpmSupportPackage {
         $stage = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-support-stage-' + [guid]::NewGuid().ToString('N'))
         [void](New-Item -ItemType Directory -Path (Join-Path $stage 'diagnostics'), (Join-Path $stage 'metadata') -Force)
         if (-not (Test-TpmNoReparsePath -Path $stage)) { throw 'Support package staging folder is unsafe.' }
+        $actionItemsPath = Join-Path $ScriptRoot 'TeknoParrot-Manager-ActionItems.txt'
+        $managerLogPath = Join-Path $ScriptRoot 'TeknoParrot-Manager.log'
+        $actionItemsEvidenceClass = 'Current'
+        if ((Test-Path -LiteralPath $actionItemsPath -PathType Leaf) -and (Test-Path -LiteralPath $managerLogPath -PathType Leaf) -and ((Get-Item -LiteralPath $actionItemsPath).LastWriteTimeUtc -lt (Get-Item -LiteralPath $managerLogPath).LastWriteTimeUtc)) {
+            $actionItemsEvidenceClass = 'Stale'
+        }
         $tpmNames = @('TeknoParrot-Manager.log','TeknoParrot-Manager-controls.txt','TeknoParrot-Manager-ActionItems.txt','TeknoParrot-Manager-HealthCheck.txt','TeknoParrot-Manager-Readiness.txt','TPM-Validation-Report.md','TPM-Validation-Report.json','TPM-Certification-Scorecard.md','TPM-Certification-Scorecard.json','TPM-Certification-Final-Outcome.md','TPM-Certification-Final-Outcome.json','TPM-Certification-Manifest.md','TPM-Certification-Manifest.json')
         $index = 0
         foreach ($name in $tpmNames) {
             $index++
-            Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $ScriptRoot $name) -AllowedRoot $ScriptRoot -SourceLabel ('TPM:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName (Get-TpmSupportDiagnosticName -Prefix ('tpm-{0:D2}-' -f $index) -Value (Get-TpmSupportSafeName $name))
+            $evidenceClass = if ($name -eq 'TeknoParrot-Manager-ActionItems.txt') { $actionItemsEvidenceClass } else { 'Current' }
+            Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $ScriptRoot $name) -AllowedRoot $ScriptRoot -SourceLabel ('TPM:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName (Get-TpmSupportDiagnosticName -Prefix ('tpm-{0:D2}-' -f $index) -Value (Get-TpmSupportSafeName $name)) -EvidenceClass $evidenceClass
         }
+        Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $ScriptRoot 'TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt') -AllowedRoot $ScriptRoot -SourceLabel 'TeknoParrotUI:Troubleshooting intake' -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName 'tpui-troubleshooting.txt' -EvidenceClass Ambient
         Complete-TpmWorkflowStep -Context $status -Summary 'TPM diagnostics checked' -NextStep 'TeknoParrot diagnostics'
         Start-TpmWorkflowStep -Context $status -StepId 'tekno' -Activity 'Checking allowlisted TeknoParrot logs'
         if ([string]::IsNullOrWhiteSpace($TeknoParrotRoot)) {
-            Add-TpmSupportRecord -Records $records -Source 'TeknoParrot root' -Status NotPresent -Detail 'No TeknoParrot root was available to inspect.'
+            Add-TpmSupportRecord -Records $records -Source 'TeknoParrot root' -Status NotPresent -Detail 'No TeknoParrot root was available to inspect.' -EvidenceClass Ambient
         } elseif (-not (Test-TpmNoReparsePath -Path $TeknoParrotRoot)) {
-            Add-TpmSupportRecord -Records $records -Source 'TeknoParrot root' -Status IntentionallyExcluded -Detail 'TeknoParrot root is reparse-backed or inaccessible.'
+            Add-TpmSupportRecord -Records $records -Source 'TeknoParrot root' -Status IntentionallyExcluded -Detail 'TeknoParrot root is reparse-backed or inaccessible.' -EvidenceClass Ambient
         } else {
             $tpNames = @('ParrotPatcher_Log.txt','TeknoParrotUI.log','TeknoParrotUI_Log.txt','TeknoParrot.log','Logs\TeknoParrotUI.log','Logs\TeknoParrot.log','logs\TeknoParrotUI.log','logs\TeknoParrot.log','TeknoParrotUI\Logs\TeknoParrotUI.log')
             $index = 0
             foreach ($name in $tpNames) {
                 $index++
-                Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $TeknoParrotRoot $name) -AllowedRoot $TeknoParrotRoot -SourceLabel ('TeknoParrot:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName (Get-TpmSupportDiagnosticName -Prefix ('tekno-{0:D2}-' -f $index) -Value (Get-TpmSupportSafeName $name))
+                Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $TeknoParrotRoot $name) -AllowedRoot $TeknoParrotRoot -SourceLabel ('TeknoParrot:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName (Get-TpmSupportDiagnosticName -Prefix ('tekno-{0:D2}-' -f $index) -Value (Get-TpmSupportSafeName $name)) -EvidenceClass Ambient
             }
         }
         Complete-TpmWorkflowStep -Context $status -Summary 'TeknoParrot diagnostics checked' -NextStep 'Game-specific diagnostics'
         Start-TpmWorkflowStep -Context $status -StepId 'game' -Activity 'Checking safely identified registered game folders'
         if ([string]::IsNullOrWhiteSpace($UserProfilesDir) -or -not (Test-Path -LiteralPath $UserProfilesDir -PathType Container)) {
-            Add-TpmSupportRecord -Records $records -Source 'Registered game diagnostics' -Status NotPresent -Detail 'Registered UserProfiles folder was not available.'
+            Add-TpmSupportRecord -Records $records -Source 'Registered game diagnostics' -Status NotPresent -Detail 'Registered UserProfiles folder was not available.' -EvidenceClass Ambient
         } elseif (-not (Test-TpmNoReparsePath -Path $UserProfilesDir)) {
-            Add-TpmSupportRecord -Records $records -Source 'Registered game diagnostics' -Status IntentionallyExcluded -Detail 'UserProfiles folder is reparse-backed or inaccessible.'
+            Add-TpmSupportRecord -Records $records -Source 'Registered game diagnostics' -Status IntentionallyExcluded -Detail 'UserProfiles folder is reparse-backed or inaccessible.' -EvidenceClass Ambient
         } else {
             $profileFiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Select-Object -First 200)
             foreach ($profileFile in $profileFiles) {
@@ -1639,8 +1755,9 @@ function New-TpmSupportPackage {
                         continue
                     }
                     [void]$gameCodes.Add($code)
+                    Write-TpmSupportProfileSnapshot -Records $records -Document $doc -GameCode $code -ProfileName $profileFile.Name -StageDirectory (Join-Path $stage 'metadata')
                     foreach ($relative in @('BepInEx\LogOutput.log','BepInEx\preloader.log','BepInEx\LogOutput.txt','Player.log','player.log','output_log.txt','error.log','crash.log')) {
-                        Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $gameRoot $relative) -AllowedRoot $gameRoot -SourceLabel ('Game:' + $code + ':' + $relative) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName ('game-' + $code + '-' + (Get-TpmSupportSafeName $relative))
+                        Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $gameRoot $relative) -AllowedRoot $gameRoot -SourceLabel ('Game:' + $code + ':' + $relative) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName ('game-' + $code + '-' + (Get-TpmSupportSafeName $relative)) -EvidenceClass Ambient
                     }
                     Get-TpmSupportPluginInventory -GameRoot $gameRoot -GameCode $code -Records $records -StageDirectory $stage
                 } catch {
@@ -1690,12 +1807,14 @@ function New-TpmSupportPackage {
             'TPM Support Package'
             ''
             'diagnostics\'
-            'Contains actual allowlisted log and report files TPM safely found.'
-            'Only games with a matching safe diagnostic file appear here.'
-            'For example, Family Guy Bowling appears when its BepInEx log is available.'
+            'Contains actual allowlisted TPM, TeknoParrot, TeknoParrotUI intake, and game text diagnostics safely found.'
+            'Current evidence was captured or generated by this TPM run. Ambient evidence was supplied or discovered without current-run provenance.'
+            'A stale Action Required report is labeled Stale when it predates the latest TPM log; rerun the affected workflow before sending the package.'
+            'The TeknoParrotUI intake file must be saved beside the TPM script as TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt.'
             ''
             'metadata\'
-            'Contains file inventories only. These inventories help support identify installed plugins.'
+            'Contains redacted affected-game profile snapshots and metadata-only plugin inventories.'
+            'Snapshots retain path, registration, controls, ReShade, PostgreSQL, and LaunchBox review fields without copying UserProfile XML.'
             'Plugin DLL payloads and game files are not copied into this package.'
             ''
             'No ROMs, game executables, arbitrary DLLs, passwords, API keys, or unrelated personal files are included.'
@@ -23292,8 +23411,10 @@ $mode = $null
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " Create Support Package" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
-        Write-Host "  TPM will collect safe logs, reports, and ReShade ownership/removal details."
+        Write-Host "  TPM will collect allowlisted current-run evidence plus labeled ambient diagnostics."
         Write-Host "  It will not include game files, credentials, or arbitrary folders." -ForegroundColor DarkCyan
+        Write-Host "  TeknoParrotUI intake: Troubleshooting -> Save information to a text file." -ForegroundColor DarkCyan
+        Write-Host "  Save as TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt beside this script." -ForegroundColor DarkCyan
         Write-Host ""
         Write-Host "  1) Create Support Package"
         Write-Host "  2) Open TPM Logs and Reports"

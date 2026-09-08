@@ -718,13 +718,20 @@
        details.
 
   14) Create Support Package
-       Collects safe TPM, TeknoParrot, and game diagnostics into one ZIP,
-       including per-file ReShade ownership/removal scan and transaction
-       details when available. Text is checked for binary/archive content and
-       common private information before inclusion; unsafe content is recorded
-       as rejected. The ZIP is saved under SupportPackages\ beside this
-       script. Send this file when asking for help. Open TPM Logs and Reports
-       is available from the same support menu. A promotion or
+       Collects safe TPM, TeknoParrot, TeknoParrotUI, and affected-game
+       diagnostics into one ZIP, including redacted profile snapshots,
+       metadata-only plugin inventories, and per-file ReShade ownership/removal
+       scan and transaction details when available. Before step 1, choose
+       Troubleshooting -> Save information to a text file in TeknoParrotUI and
+       save it beside this script as
+       TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt. TPM accepts only
+       that exact allowlisted intake filename. Evidence is labeled Current,
+       Ambient, or Stale; an old Action Required report is marked Stale until
+       the affected workflow is rerun. Text is checked for binary/archive
+       content and common private information before inclusion; unsafe content
+       is recorded as rejected. The ZIP is saved under SupportPackages\ beside
+       this script. Send this file when asking for help. Open TPM Logs and
+       Reports is available from the same support menu. A promotion or
        staging-cleanup problem is reported as partial/action required, never
        clean success.
 

@@ -66,6 +66,15 @@
   main runspace and preserves typed fallback. ReShade all-games chooser state
   is initialized before iteration, and profile selection now opens a single
   switchable visual gallery before deployment confirmation.
+  RC8 support evidence now has an explicit TeknoParrotUI intake path:
+  choose Troubleshooting -> Save information to a text file and save it beside
+  the script as TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt. Support
+  manifests label Current, Stale, and Ambient evidence and order those classes
+  explicitly; Action Required reports older than the latest TPM log are marked
+  Stale. Affected-game support uses redacted structured profile snapshots for
+  path repair, ReShade, controls, PostgreSQL, LaunchBox, and registration
+  review without copying UserProfile XML. RC8 remains a candidate and is not
+  published.
   Console startup sizing now grows BufferSize before WindowSize, catches
   unsupported hosts once, and leaves the constrained responsive menu usable
   without repeating resize errors on redraw; invalid menu choices persist

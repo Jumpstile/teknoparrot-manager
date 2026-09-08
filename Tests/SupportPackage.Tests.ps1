@@ -574,4 +574,65 @@ Describe 'New-TpmSupportPackage' {
         $collected.Destination | Should -Contain 'first_-02.txt'
         $collected.Destination | ForEach-Object { $_ | Should -Not -Match '(^|[\\/])\.\.([\\/]|$)' }
     }
+    It 'collects redacted affected-game profile snapshots with diagnostic fields' {
+        $f = New-SupportFixture
+        $game = Add-SupportGame $f
+        $profile = '<GameProfile>' +
+            '<GameName>TMNT</GameName>' +
+            '<GamePath>' + (Join-Path $game 'TMNT.exe') + '</GamePath>' +
+            '<EmulationProfile>RawThrills</EmulationProfile>' +
+            '<ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldType>String</FieldType><FieldValue>GameDB01</FieldValue></FieldInformation>' +
+            '<FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldType>String</FieldType><FieldValue>do-not-share</FieldValue></FieldInformation></ConfigValues>' +
+            '<JoystickButtons><ButtonName>Start</ButtonName><InputMapping>JOY1_BUTTON1</InputMapping><AnalogType>Digital</AnalogType></JoystickButtons>' +
+            '</GameProfile>'
+        Write-SupportText (Join-Path $f.Profiles 'TMNT.xml') $profile
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $snapshot = Get-SupportZipText $r.PackagePath 'metadata/profile-TMNT.txt'
+        $snapshot | Should -Match 'GameName = TMNT'
+        $snapshot | Should -Match 'GameDB01'
+        $snapshot | Should -Match 'Button=Start; Mapping=JOY1_BUTTON1'
+        $snapshot | Should -Match 'Value=<redacted-field>'
+        $snapshot | Should -Not -Match 'do-not-share|<GameProfile>'
+        ($r.Records | Where-Object Source -eq 'Game:TMNT:redacted profile snapshot').EvidenceClass | Should -Be 'Current'
+    }
+
+    It 'labels current, stale, and ambient evidence in manifest order' {
+        $f = New-SupportFixture
+        Add-SupportGame $f | Out-Null
+        $actionPath = Join-Path $f.Script 'TeknoParrot-Manager-ActionItems.txt'
+        $logPath = Join-Path $f.Script 'TeknoParrot-Manager.log'
+        Write-SupportText $actionPath 'older action'
+        Write-SupportText $logPath 'current manager run'
+        Write-SupportText (Join-Path $f.Tp 'TeknoParrotUI.log') 'ambient TPUI diagnostic'
+        $now = [DateTime]::UtcNow
+        [IO.File]::SetLastWriteTimeUtc($actionPath, $now.AddMinutes(-10))
+        [IO.File]::SetLastWriteTimeUtc($logPath, $now)
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -TeknoParrotRoot $f.Tp -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        ($r.Records | Where-Object Source -eq 'TPM:TeknoParrot-Manager-ActionItems.txt').EvidenceClass | Should -Be 'Stale'
+        ($r.Records | Where-Object Source -eq 'TeknoParrot:TeknoParrotUI.log').EvidenceClass | Should -Be 'Ambient'
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'Evidence classes: Current'
+        $currentIndex = $manifest.IndexOf('[Collected/Current]')
+        $staleIndex = $manifest.IndexOf('[Collected/Stale]')
+        $ambientIndex = $manifest.IndexOf('[Collected/Ambient]')
+        $currentIndex | Should -BeGreaterOrEqual 0
+        $staleIndex | Should -BeGreaterThan $currentIndex
+        $ambientIndex | Should -BeGreaterThan $staleIndex
+    }
+
+    It 'collects the exact TeknoParrotUI troubleshooting intake file safely' {
+        $f = New-SupportFixture
+        $intakeName = 'TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt'
+        Write-SupportText (Join-Path $f.Script $intakeName) 'TPUI diagnostic password=secret'
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $intake = Get-SupportZipText $r.PackagePath 'diagnostics/tpui-troubleshooting.txt'
+        $intake | Should -Match 'password=<redacted>'
+        $intake | Should -Not -Match 'secret'
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'TeknoParrotUI:Troubleshooting intake'
+        (Get-SupportZipText $r.PackagePath 'README.txt') | Should -Match $intakeName
+    }
 }
