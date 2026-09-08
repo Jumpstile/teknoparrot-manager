@@ -93,17 +93,19 @@ release-decision table appears below and supersedes this snapshot.
 | BepInEx package/download/deploy | Invoke-BepInExUpdateCheck | Compact preflight, version-check, and deployment progress added | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing BepInEx tests; owner smoke |
 | Crosshair/HyperSpin bounded asset writes | Crosshair and HyperSpin setup/export | Small bounded writes; no long-running progress surface needed | JUSTIFIED NO PROGRESS SURFACE | Existing crosshair/HyperSpin tests |
 
-### Progress and thumbnail reporting slice -- working-tree status
+### Slice A -- web/download and thumbnail correctness
 
-The current uncommitted source slice corrects the remaining user-visible
-progress details without changing the release gate: repair file enumeration
-reports while it is happening, one elapsed timer covers scanning and profile
-checks, compact elapsed values retain fractional seconds, and the emergency
-web transport is presented as `web fallback`. Thumbnail rows identify each
-profile and count/total; HTTP 404 no-icon results remain distinct from transient
-download/check failures, whose profile codes are listed for retry. Focused
-progress, repair, and thumbnail tests pass. Package rebuild and owner-runtime
-proof are still required.
+Owner IDs 2, 6, and 8 received a bounded source remediation. The web wrapper
+continues to expose one typed request-action parameter. The shared downloader
+now preserves a definitive HTTP 404 across transport fallback attempts, so
+thumbnail setup retains the no-upstream-icon classification even if a later
+fallback encounters an unrelated unknown network error. Non-404 transport,
+validation, and integrity failures remain retry/failure outcomes. Thumbnail
+progress remains compact and profile-labelled, and transient failures retain
+named profile accounting for retry.
+
+Package rebuild, owner-runtime proof, and release authorization remain
+outstanding.
 
 ### Crosshair close, focus, and prompt slice -- working-tree status
 
@@ -170,19 +172,15 @@ required one/multiple/zero/no-candidate functional coverage is not complete.
 ## Tests with exact counts and timestamps
 | Gate/test | Exact command | Count/result | Started UTC | Finished UTC | Engine/version |
 |---|---|---|---|---|---|
-| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -Output Normal` | 999 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal` | 1029 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
+| Slice A focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*Invoke-TpmDownload*','*Thumbnail*','*RC8 PostgreSQL and support UX*') -CI -Output Normal` | 54 passed, 0 failed, 0 skipped, 975 not run | not captured | not captured | Pester 5.7.1 |
 | SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -Output Normal` | 36 passed, 0 failed, 0 skipped at prior checkpoint; not rerun in this slice | not captured | not captured | Pester 6.1.0 |
 | Controls focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Write-ControlPropagationResults*' -Output Detailed` | 3 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
 | ReShade focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*ReShade*' -Output Normal` | 186 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
 | Progress.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Progress.Core*' -Output Detailed` | 2 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Prompt.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Prompt.Core*' -Output Detailed` | 4 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
-| Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 parse errors; 27 registry entries; affected source/report text ASCII clean; 0 PSScriptAnalyzer findings; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
-| Permanent procedure gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: owner-runtime evidence outstanding; candidate package identity recorded and validated | not captured | not captured | pwsh |
-Pester 5.7.1 was not confirmed in this environment. These results are not
-certification-compatible evidence. Main and support suites passed, static
-checks passed, and the permanent procedure gate failed closed. The report
-edit itself makes a fresh validation timestamp necessary; no combined-gate
-pass is claimed.
+| Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 production parse errors; 0 test parse errors; 0 PSScriptAnalyzer findings; production ASCII 0; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
+| Permanent procedure gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: unresolved source/owner blockers and owner-runtime evidence remain | not captured | not captured | pwsh |
 
 ## FFB mode-8 hardening round -- 2026-09-08
 
@@ -232,14 +230,17 @@ owner-runtime smoke, release, certification, commit, or push was performed.
 | scripts/Run-TpmQualityGate.ps1 | Combined quality wrapper | TPM-AUTH-001, TPM-EVIDENCE-001 | Parse and analyzer |
 | .github/pull_request_template.md | PR checklist | TPM-AUTH-001, TPM-TRACE-001 | File review |
 | TeknoParrot-Manager.ps1 | Prompt.Core helper and finite-choice routes | TPM-PROMPT-001, owner report IDs 24-27/32, PR #321 | Production parse, focused prompt tests; owner runtime outstanding |
-| Tests/TeknoParrot-Manager.Tests.ps1 | Progress.Core source inventory and bounded-wait contracts | TPM-PROGRESS-001, owner report ID 3, progress portion of ID 32, PR #321 | Focused progress tests; full suite pending |
-| Tests/TeknoParrot-Manager.Tests.ps1 | `Read-TpmChoice` behavior, Prompt.Core route contracts, and specialized-boundary inventory | TPM-PROMPT-001, owner report IDs 26/32, PR #321 | Focused prompt tests and full suite: 996 passed; owner runtime outstanding |
+| Tests/TeknoParrot-Manager.Tests.ps1 | Progress.Core source inventory and bounded-wait contracts | TPM-PROGRESS-001, owner report ID 3, progress portion of ID 32, PR #321 | Focused progress tests; full suite: 1029 passed |
+| Tests/TeknoParrot-Manager.Tests.ps1 | `Read-TpmChoice` behavior, Prompt.Core route contracts, and specialized-boundary inventory | TPM-PROMPT-001, owner report IDs 26/32, PR #321 | Focused prompt tests and full suite: 1029 passed; owner runtime outstanding |
 | ARCHITECTURE.md | Prompt.Core finite-choice invariant and boundaries | TPM-PROMPT-001, TPM-TRACE-001, PR #321 | Changed-section review |
 | ARCHITECTURE.md | Progress.Core compact/workflow/waiting contract | TPM-PROGRESS-001, TPM-TRACE-001, PR #321 | Changed-section review |
 | docs/remediation/slices/PR-321-current-slice.md; docs/remediation/PR-321-control-board.md | ReShade ownership/accounting contract, prompt inventory, boundaries, statuses, and slice assignment | TPM-RESHADE-001, TPM-TRACE-001, TPM-OWNER-001, owner report IDs 11-12, PR #321 | Artifact review and focused source tests |
 | README.md; QUICKSTART.md; TeknoParrot-Manager-README.txt; TeknoParrot-Manager-QuickStart.txt | Corrected LaunchBox/HyperSpin prompt instructions | TPM-PROMPT-001, owner report IDs 24-25, PR #321 | Documentation review against current routes |
 | TeknoParrot-Manager.ps1 | FFB source resolution, support-table parsing, staged DLL acquisition, transactional deployment, ownership rollback, and evidence persistence | TPM-FFB-001, TPM-TRACE-001, PR #321 | Production parse, analyzer, focused FFB tests |
 | Tests/TeknoParrot-Manager.Tests.ps1 | FFB source, URL, cache, hash, collision, ownership, evidence, rollback, accounting, and support contracts | TPM-FFB-001, TPM-TRACE-001, PR #321 | 40 focused FFB tests; 1028 full-suite tests |
+| TeknoParrot-Manager.ps1 | `Invoke-TpmDownload` definitive-404 preservation across transport fallback | owner report IDs 2, 6, 8, PR #321 Slice A | Production parse, PSScriptAnalyzer, focused download/thumbnail tests |
+| Tests/TeknoParrot-Manager.Tests.ps1 | Regression for 404 followed by unknown fallback failure | owner report IDs 6, 8, PR #321 Slice A | Slice A focused suite: 54 passed |
+| ARCHITECTURE.md; TeknoParrot-Manager-CHANGELOG.txt; docs/remediation/PR-321-control-board.md; docs/remediation/PR-321-reconciliation.md | Slice A contract and evidence update | owner report IDs 2, 6, 8, PR #321 Slice A | Changed-section review |
 | Tests/SupportPackage.Tests.ps1 | FFB evidence allowlist and support-package collection | TPM-FFB-001, TPM-EVIDENCE-001, PR #321 | 40 support-package tests |
 
 ## Permanent procedure compliance

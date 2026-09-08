@@ -11393,6 +11393,7 @@ function Invoke-TpmDownload {
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $methodUsed = $null
     $detectedStatusCode = 0
+    $definitiveStatusCode = 0
     try {
         $bitsSucceeded = $false
         if (Test-TpmDownloadBitsAvailable) {
@@ -11415,6 +11416,7 @@ function Invoke-TpmDownload {
                     break
                 } catch {
                     $detectedStatusCode = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
+                    if ($detectedStatusCode -eq 404) { $definitiveStatusCode = 404 }
                     try { if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) } } catch {}
                     if ($attempt -ge 3 -or ($detectedStatusCode -ge 400 -and $detectedStatusCode -lt 500)) {
                         Write-Log "${Label}: HttpClient download failed (${_}), trying Invoke-WebRequest."
@@ -11432,6 +11434,7 @@ function Invoke-TpmDownload {
                         break
                     } catch {
                         $detectedStatusCode = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
+                        if ($detectedStatusCode -eq 404) { $definitiveStatusCode = 404 }
                         try { if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) } } catch {}
                         if ($attempt -ge 3 -or ($detectedStatusCode -ge 400 -and $detectedStatusCode -lt 500)) { throw }
                         Write-Log "${Label}: download attempt $attempt failed -- retrying"
@@ -11464,7 +11467,9 @@ function Invoke-TpmDownload {
         if (-not $Quiet) { Write-Host ("  Download failed: {0}" -f $_) -ForegroundColor Red }
         Write-Log "${Label}: download failed -- $_"
         try { if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) } } catch {}
-        if ($LastStatusCode) { $LastStatusCode.Value = $detectedStatusCode }
+        if ($LastStatusCode) {
+            $LastStatusCode.Value = if ($definitiveStatusCode -ne 0) { $definitiveStatusCode } else { $detectedStatusCode }
+        }
         return $false
     } finally {
         # Every transport tier updates the shared compact progress row. This

@@ -74,9 +74,9 @@ canonical release-decision statuses are in the corrected table below.
 
 ## Current blockers
 
-- Canonical source-remediation blockers: IDs 2, 3, 6, 8, 11, 12, 16-19, 21, 22, and 29.
-- Canonical source re-audit blockers: IDs 4, 5, 7, 20, 23-27, and 30-32.
-- Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1, 9, 10, 13-15, and 28.
+ - Canonical source-remediation blockers: IDs 3, 11, 12, 16-19, 21, 22, and 29.
+ - Canonical source re-audit blockers: IDs 4, 5, 7, 20, 23-27, and 30-32.
+ - Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1, 2, 6, 8, 9, 10, 13-15, and 28.
 - The earlier `NOT FIXED` prose for IDs 11, 12, and 29 is retained only as historical evidence; it is superseded by the corrected table below.
 - Test blockers: no focused source-test blocker remains for audited paths, but unresolved design work and owner-runtime routes remain.
 - Package/runtime blockers: candidate ZIP is stale; no owner smoke is authorized.
@@ -99,13 +99,13 @@ remains stale and is not a release gate.
 | ID | Previous status | Corrected status | Evidence | Source remediation | Owner retest |
 |---:|---|---|---|---|---|
 | 1 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Source/test claim not contradicted by the re-audit | No | Yes, rebuilt package |
-| 2 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Support ZIP log repeats duplicate `ErrorAction` in startup/update paths | Yes | Yes |
+| 2 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Full source audit found only the wrapper's splatted Invoke-WebRequest call; all callers use the typed RequestErrorAction contract; Slice A source test passes | No | Yes, rebuilt package |
 | 3 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Owner smoke exposed long-running/progress failure surface; package proof is invalid | Yes | Yes |
 | 4 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Existing source claim lacks trustworthy package evidence | Re-audit first | Yes |
 | 5 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Existing source claim lacks trustworthy package evidence | Re-audit first | Yes |
-| 6 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Thumbnail failures and duplicate `ErrorAction` are present in support log | Yes | Yes |
+| 6 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Thumbnail progress and named failure reporting are source/test covered; Slice A focused tests pass | No | Yes |
 | 7 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | No complete current-run no-icon proof | Re-audit first | Yes |
-| 8 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Thumbnail fallback path hit duplicate `ErrorAction` in support log | Yes | Yes |
+| 8 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Definitive 404 is preserved across fallback; Slice A regression test passes | No | Yes |
 | 9 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | No contrary source evidence found | No | Yes |
 | 10 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Selector contract remains source/test supported | No | Yes |
 | 11 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | ReShade ownership behavior requires renewed source review before package trust | Yes | Yes |
@@ -161,6 +161,18 @@ count/total, keep HTTP 404 no-icon results separate from other failures, and
 list transient failure profile codes for retry. Thumbnail setup remains an
 optional prompt after repair. Focused tests pass; package rebuild and owner
 runtime proof remain outstanding.
+
+## Slice A -- web/download and thumbnail correctness
+
+Owner IDs 2, 6, and 8 were the bounded source-remediation rows for this
+slice. The shared web wrapper uses one typed request-action parameter, and
+thumbnail work uses the shared compact progress row with profile/count labels
+and named failure accounting. The downloader now retains a definitive HTTP
+404 across transport fallback, so a later unknown fallback error cannot turn a
+missing upstream icon into a transient failure. Non-404 transport, validation,
+and integrity failures remain retry/failure outcomes. Focused source tests and
+the full validation gates pass. Package rebuild and owner-runtime proof remain
+outstanding.
 
 ## Crosshair close, focus, and prompt slice -- working-tree evidence
 

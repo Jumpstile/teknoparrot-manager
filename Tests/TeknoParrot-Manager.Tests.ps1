@@ -6770,6 +6770,20 @@ Describe "Invoke-TpmDownload method selection and partial-file cleanup" {
         $result | Should -BeFalse
         $statusCode | Should -Be 404
     }
+    It "preserves a definitive thumbnail 404 when a later fallback tier has an unknown failure" {
+        Mock Test-TpmDownloadBitsAvailable { $false }
+        Mock Invoke-TpmDownloadHttpClient { throw "Response status code does not indicate success: 404 (Not Found)." }
+        Mock Invoke-TpmDownloadWebRequest { throw "DNS resolution failed" }
+        $savePath = Join-Path $TestDrive "status-code-404-fallback-error.png"
+        $statusCode = 0
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/missing.png" -DestinationPath $savePath -Label 'Thumbnails' -LastStatusCode ([ref]$statusCode)
+
+        $result | Should -BeFalse
+        $statusCode | Should -Be 404
+        Should -Invoke Invoke-TpmDownloadHttpClient -Times 1
+        Should -Invoke Invoke-TpmDownloadWebRequest -Times 3
+    }
 
     It "reports status code 0 via -LastStatusCode when the failure is not HTTP-status-related" {
         Mock Test-TpmDownloadBitsAvailable { $false }

@@ -989,6 +989,13 @@ profile code and count/total. A missing upstream icon (HTTP 404) remains separat
 from transient download/check failures, and failed profile codes are listed for
 retry.
 
+The shared downloader preserves a definitive HTTP 404 across transport
+fallbacks. A later unknown transport failure cannot overwrite the fact that
+the requested artifact was absent, so thumbnail callers continue to classify
+that profile as "no upstream icon" rather than as a transient retry failure.
+Only a definitive 404 is retained for this distinction; DNS, timeout, 5xx,
+validation, and other non-404 failures remain transient/failure outcomes.
+
 Current main-script call sites using the helper:
 
 - ReShade installer download (`Invoke-ReShadeSetup`)

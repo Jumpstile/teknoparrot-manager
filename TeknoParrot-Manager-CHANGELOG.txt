@@ -63,6 +63,13 @@
   upstream icon. Thumbnail setup remains an optional step after repair. RC8 remains
   a candidate and is not published.
 
+  Slice A download correction: the shared downloader now preserves a
+  definitive HTTP 404 across emergency transport fallback attempts, so
+  thumbnail setup continues to report a profile as having no upstream icon
+  instead of misclassifying it as a transient failure when a later fallback
+  encounters an unrelated network error. RC8 remains a candidate and is not
+  published.
+
   RC8 candidate crosshair reporting correction: after valid P2 selection, the
   browser preview enters a completed non-interactive state and tells the user
   to return to TPM and close the tab. Console focus is attempted with a logged
