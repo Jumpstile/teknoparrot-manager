@@ -36,7 +36,11 @@
   accounting remain failures. Normal results distinguish installed, native,
   unsupported, preserved, and failed outcomes and use full game names when
   available; technical identifiers remain in logs and evidence.
-
+  Migration previews now identify the managed destination root, group planned
+  moves by category, explain the opt-in Y/N behavior, and list excluded game,
+  ROM-source, installation, frontend, and unrelated files. Declining applies
+  no moves and continues safely. Eggman DAT updates now use the latest release
+  filename for the saved active path and configuration.
 
 
   TPM-owned runtime files now use

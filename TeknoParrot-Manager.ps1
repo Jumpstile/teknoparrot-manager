@@ -456,7 +456,7 @@ function Invoke-TpmOwnedMigration {
     foreach ($item in $items) {
         if ($item.Name -eq 'SupportPackages') {
             foreach ($child in @(Get-ChildItem -LiteralPath $item.Path -Force -ErrorAction Stop)) {
-                $destinations += [pscustomobject]@{ Item=[pscustomobject]@{ Name=$child.Name; Path=$child.FullName; IsDirectory=$child.PSIsContainer }; Destination=(Join-Path ([string]$Layout.SupportPackages) $child.Name) }
+                $destinations += [pscustomobject]@{ Item=[pscustomobject]@{ Name=$child.Name; Path=$child.FullName; IsDirectory=$child.PSIsContainer }; Bucket='SupportPackages'; Destination=(Join-Path ([string]$Layout.SupportPackages) $child.Name) }
             }
             continue
         }
@@ -466,7 +466,7 @@ function Invoke-TpmOwnedMigration {
         elseif (-not $item.IsDirectory) { $bucket = 'Reports' }
         elseif ($item.Name -in @('LaunchBoxBackups','PostgresBackups','PostgresRecoveryBackups')) { $bucket = 'Backups' }
         elseif ($item.Name -in @('ReShadePreviewCache','FFBPlugin','BepInExCache')) { $bucket = 'Cache' }
-        $destinations += [pscustomobject]@{ Item=$item; Destination=(Join-Path ([string]$Layout.$bucket) $item.Name) }
+        $destinations += [pscustomobject]@{ Item=$item; Bucket=$bucket; Destination=(Join-Path ([string]$Layout.$bucket) $item.Name) }
     }
     $ambiguous = @()
     foreach ($entry in $destinations) {
@@ -476,8 +476,23 @@ function Invoke-TpmOwnedMigration {
         }
     }
     $reportPath = Join-Path $Layout.Reports ('TPM-migration-{0}.md' -f (Get-Date).ToString('yyyyMMdd-HHmmss'))
-    $lines = @('# TPM-owned state migration','',('Source root: `{0}`' -f $ScriptRoot),('Destination root: `{0}`' -f $Layout.Root),'','## Planned moves')
-    foreach ($entry in $destinations) { $lines += ('- `{0}` -> `{1}`' -f $entry.Item.Path,$entry.Destination) }
+    $lines = @(
+        '# TeknoParrot Manager state migration'
+        ''
+        ('Source root: `{0}`' -f $ScriptRoot)
+        ('Destination root: `{0}`' -f $Layout.Root)
+        ''
+        'Only TeknoParrot Manager-owned state is listed below.'
+        'Games, ROM ZIP source folders, TeknoParrot installation files, LaunchBox data, HyperSpin data, and unrelated user files are not moved.'
+        ''
+        '## Planned moves by category'
+    )
+    foreach ($bucketName in @('State','Logs','Reports','Backups','SupportPackages','Assets','Cache')) {
+        $bucketEntries = @($destinations | Where-Object Bucket -eq $bucketName)
+        if ($bucketEntries.Count -eq 0) { continue }
+        $lines += ''; $lines += ('### {0}' -f $bucketName)
+        foreach ($entry in $bucketEntries) { $lines += ('- `{0}` -> `{1}`' -f $entry.Item.Path,$entry.Destination) }
+    }
     if ($ambiguous.Count -gt 0) {
         $lines += ''; $lines += '## Ambiguous destinations'
         foreach ($entry in $ambiguous) { $lines += ('- Destination already exists: `{0}`' -f $entry.Destination) }
@@ -485,9 +500,18 @@ function Invoke-TpmOwnedMigration {
         return [pscustomobject]@{ Status='Ambiguous'; ReportPath=$reportPath; Moved=@(); Ambiguous=$ambiguous }
     }
     if (-not $Unattended) {
-        Write-Host ''; Write-Host 'TPM found known TPM-owned files outside TeknoParrotManager.' -ForegroundColor Yellow
-        foreach ($entry in $destinations) { Write-Host ("  Move: {0} -> {1}" -f $entry.Item.Name,$entry.Destination) -ForegroundColor DarkGray }
-        Write-Host ("  Details report: {0}" -f $reportPath) -ForegroundColor DarkGray
+        Write-Host ''; Write-Host 'TeknoParrot Manager found its own state files outside the managed data folders.' -ForegroundColor Yellow
+        Write-Host ("  Destination root: {0}" -f $Layout.Root) -ForegroundColor Cyan
+        Write-Host '  These direct moves affect only the categories listed below:' -ForegroundColor DarkCyan
+        foreach ($bucketName in @('State','Logs','Reports','Backups','SupportPackages','Assets','Cache')) {
+            $bucketEntries = @($destinations | Where-Object Bucket -eq $bucketName)
+            if ($bucketEntries.Count -eq 0) { continue }
+            Write-Host ("  {0}:" -f $bucketName) -ForegroundColor Cyan
+            foreach ($entry in $bucketEntries) { Write-Host ("    {0} -> {1}" -f $entry.Item.Name,$entry.Destination) -ForegroundColor DarkGray }
+        }
+        Write-Host '  Not moved: games, ROM ZIP sources, TeknoParrot installation files, LaunchBox data, HyperSpin data, and unrelated user files.' -ForegroundColor DarkCyan
+        Write-Host '  Y applies these direct moves. N applies nothing; you can continue normally or return to the menu.' -ForegroundColor Yellow
+        Write-Host ("  Optional details report: {0}" -f $reportPath) -ForegroundColor DarkGray
         if ((Read-TpmChoice -Prompt 'Apply these moves? (Y/N)' -Choices @('Y','N') -Default 'N') -ne 'Y') {
             $lines += ''; $lines += 'Migration was reviewed but not applied.'
             Set-Content -LiteralPath $reportPath -Value (($lines -join [Environment]::NewLine) + [Environment]::NewLine) -Encoding UTF8
@@ -21644,16 +21668,17 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
                         Read-TpmYesNo -Prompt "  Download and switch to the latest release? (Y/N)"
                     }
                     if ($doUpdate -eq 'Y') {
-                        $preferredUpdatePath = $eggmanDatZip
+                        $preferredUpdatePath = Join-Path ([System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($eggmanDatZip))) ([System.IO.Path]::GetFileName($rel.FileName))
                         if ($updateDestination.Status -eq 'FallbackSelected') {
                             $preferredUpdatePath = Join-Path $updateDestination.DestinationFolder ([System.IO.Path]::GetFileName($rel.FileName))
                         }
                         $savedPath = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $preferredUpdatePath -ProgramDirectory $PSScriptRoot
                         if ($savedPath) {
-                            $eggmanDatZip = $savedPath
+                            $eggmanDatZip = [System.IO.Path]::GetFullPath($savedPath)
+                            $datFilePath = ''
                             $eggmanDatActionThisRun = 'Updated'
-                            Write-Host "  Updated: $savedPath" -ForegroundColor Green
-                            Write-Log "EggmanDat: updated to $savedPath"
+                            Write-Host ("  Updated: {0}" -f $eggmanDatZip) -ForegroundColor Green
+                            Write-Log "EggmanDat: updated to $eggmanDatZip"
                             [void](Save-Config)
                         } else {
                             Write-Host "  Download failed -- keeping your current dat file." -ForegroundColor Yellow

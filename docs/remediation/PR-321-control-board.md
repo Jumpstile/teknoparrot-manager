@@ -57,6 +57,7 @@ canonical release-decision statuses are in the corrected table below.
 | 30 | Controls truthfulness | Zero-bound results never imply verified readiness | SOURCE FIXED; OWNER RUNTIME NEEDED | Controls truthfulness | Write-ControlPropagationResults; control-readiness engine | Controls truthfulness focused tests; existing controls tests | Zero-bound packaged runtime result | Owner runtime | TPM-CONTROLS-001 |
 | 31 | dgVoodoo2 wording | Results explain deployment state | SOURCE FIXED; OWNER RUNTIME NEEDED | Progress/status | dgVoodoo2 result wording | Existing tests | Owner wording review | Owner runtime | Progress slice |
 | 32 | Global consistency rule | Every enumerated prompt uses the central contract or has a documented design boundary | SOURCE FIXED; OWNER RUNTIME NEEDED | Prompts/navigation | TPM-PROMPT-001 inventory; finite-choice routes centralized; stateful, exact-token, secure, path, and renderer-aware boundaries documented | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Packaged consistency smoke | Owner runtime | Prompt.Core |
+| 34 | Migration explanation and Eggman DAT update path | Migration previews explain destination/categories/exclusions and decline safely; DAT latest/current/updated paths stay consistent and config follows the active file | SOURCE FIXED; OWNER RUNTIME NEEDED | Migration/DAT | Invoke-TpmOwnedMigration; Eggman DAT update orchestration | Migration and DAT source contracts | Packaged migration decline/confirm and DAT update smoke | Owner runtime | Slice 6 |
 | 33 | FFB membership/prompt and optional-plugin completion | One membership decision, native/no-match zero-deployment outcomes complete, actual errors fail, beginner-safe result wording | SOURCE FIXED; OWNER RUNTIME NEEDED | Force feedback | Invoke-FFBBlasterSetup; Invoke-FFBPluginSetup; Invoke-TpmFfbSetupMode | FFB focused tests; accounting invariants | Packaged mode-8 smoke with native-preferred, no-match, deployment-error paths | Owner runtime | Slice 5 |
 
 ## Subsystem grouping
@@ -64,6 +65,7 @@ canonical release-decision statuses are in the corrected table below.
 - Progress/status: 2-8, 31; ID 3 has source evidence and remains owner-runtime needed.
 - Prompts/navigation: 26, 32.
 - Repair/scoping: 16-23.
+- Migration/DAT: 34.
 - ReShade: 1, 9-12.
 - Force feedback: 33.
 - Crosshair: 13-15.

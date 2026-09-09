@@ -598,9 +598,18 @@ allowlisted support-package input covered by `Tests/SupportPackage.Tests.ps1`.
 
 ### Eggman dat source
 
-Migrated from `Eggmansworld/Datfiles` (archived, fixed "teknoparrot" tag) to
+Migrate from `Eggmansworld/Datfiles` (archived, fixed "teknoparrot" tag) to
 `Eggmansworld/TeknoParrot` (date-based tags per release). `Get-EggmanDatRelease` queries
 `.../releases/latest` instead of a fixed tag.
+
+### Migration and DAT path clarity
+
+Legacy migration remains opt-in and confirmation-based. The preview names the
+managed destination root, groups only manager-owned state by category, and
+explicitly excludes games, ROM sources, installation files, frontend data, and
+unrelated files. Declining applies no moves and returns normally. Eggman DAT
+updates derive the new filename from the latest release and update the active
+configuration path only after the download returns its canonical saved path.
 
 ### Eggman recognition-data ownership (issue #252)
 

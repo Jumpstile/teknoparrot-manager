@@ -14398,6 +14398,21 @@ Describe 'TPM-owned layout and legacy migration' {
         Get-Content -LiteralPath (Join-Path $layout.Logs 'TeknoParrot-Manager.log') -Raw | Should -Match 'new'
         Test-Path -LiteralPath $result.ReportPath -PathType Leaf | Should -BeTrue
     }
+    It 'explains migration categories, destination, exclusions, and safe decline' {
+        $script:ProductionSource | Should -Match 'Destination root:'
+        foreach ($category in @('State','Logs','Reports','Backups','SupportPackages','Assets','Cache')) {
+            $script:ProductionSource | Should -Match ([regex]::Escape($category))
+        }
+        $script:ProductionSource | Should -Match 'Not moved: games, ROM ZIP sources, TeknoParrot installation files, LaunchBox data, HyperSpin data'
+        $script:ProductionSource | Should -Match 'Y applies these direct moves\. N applies nothing'
+        $script:ProductionSource | Should -Match "Status='Declined'"
+    }
+    It 'uses the latest DAT release filename for the active updated path' {
+        $script:ProductionSource | Should -Match '\$preferredUpdatePath = Join-Path .*GetFileName\(\$rel\.FileName\)'
+        $script:ProductionSource | Should -Match '\$eggmanDatZip = \[System\.IO\.Path\]::GetFullPath\(\$savedPath\)'
+        $script:ProductionSource | Should -Match '\$datFilePath = '''
+        $script:ProductionSource | Should -Match 'Write-Host \("  Updated: \{0\}" -f \$eggmanDatZip\)'
+    }
     It 'uses one membership decision prompt and clear FFB completion rules' {
         $script:ProductionSource | Should -Match 'Do you have an active, paid TeknoParrot membership\?"'
         $script:ProductionSource | Should -Match '\$hasSub = Read-TpmYesNo -Prompt "  Choose Y or N"'
