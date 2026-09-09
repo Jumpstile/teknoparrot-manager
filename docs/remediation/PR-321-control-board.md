@@ -74,10 +74,10 @@ canonical release-decision statuses are in the corrected table below.
 
 ## Current blockers
 
-- Canonical source-remediation blockers: ID 3.
+- Canonical source-remediation blockers: none in the completed Desktop source slices.
 - Canonical source re-audit blockers: IDs 4, 5, 7, 20, 23-27, and 30-32.
-- Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1, 2, 6, 8-22, 28, and 29.
-- ID 29 is source-fixed by the Slice F support-evidence scoping re-audit; package rebuild and owner-runtime proof remain outstanding.
+- Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1-3, 6, and 8-22, 28, and 29.
+- ID 3 is source-fixed by the Slice B universal progress/status inventory and focused source-contract tests; packaged operation-matrix and owner-runtime proof remain outstanding.
 - Test blockers: no focused source-test blocker remains for audited paths, but unresolved design work and owner-runtime routes remain.
 - Package/runtime blockers: candidate ZIP is stale; no owner smoke is authorized.
 - Owner-design blockers: ReShade ownership/accounting and remaining stateful prompt-picker boundaries need explicit future contracts.

@@ -2027,6 +2027,15 @@ and `Wait-TpmForProcessClose` use bounded deadlines and actionable messages. Sma
 bounded writes and renderer-aware selection remain documented no-progress surfaces.
 The production script must not use PowerShell `Write-Progress`.
 
+The Slice B inventory covers AutoSync scan/extraction, registration/import,
+Library Health search and repair, GPU Fix, thumbnail and shared downloads,
+DAT/profile-set/game-data acquisition, startup update checks, and the
+optional ReShade, dgVoodoo2, BepInEx, FFB, PostgreSQL, and support-package
+flows. Each path is classified as compact progress, structured workflow
+status, bounded waiting, or a justified renderer-aware/no-progress surface;
+there is no universal-progress exception for an unclassified long-running
+operation.
+
 ## Prompt.Core finite-choice contract (TPM-PROMPT-001)
 
 `Read-TpmYesNo` owns ordinary Y/N decisions. `Read-TpmChoice` owns finite

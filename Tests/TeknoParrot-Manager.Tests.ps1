@@ -2802,7 +2802,36 @@ Describe "PR #321 Progress.Core source inventory" {
         $source | Should -Match 'Write-TpmCompactExtractionProgress -Phase Scanning'
         $source | Should -Match 'Write-TpmCompactExtractionProgress -Phase Repairing'
         $source | Should -Match 'Write-TpmDownloadProgress'
+        foreach ($pathMarker in @(
+            'function Select-GamesInteractive',
+            'function Invoke-AutoSync',
+            'function Register-Games',
+            'function Repair-GamePaths',
+            'function Invoke-ThumbnailDownload',
+            'function Get-TeknoParrotProfileSet',
+            'function Invoke-EggmanDatDownload',
+            'function Invoke-CheckForUpdates'
+        )) {
+            $source | Should -Match ([regex]::Escape($pathMarker))
+        }
     }
+
+    It "keeps bounded waits and renderer-aware surfaces explicit" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'function Ensure-TeknoParrotProfilesReady'
+        $source | Should -Match 'function Wait-TpmForProcessClose'
+        $source | Should -Match 'function Get-TpmWorkflowConsoleCapability'
+        $source | Should -Match 'NoRender'
+        $source | Should -Match 'InputRedirected'
+        $source | Should -Match 'OutputRedirected'
+    }
+
+    It "does not reintroduce PowerShell progress or unbounded external waits" {
+        $source = $script:ProductionSource
+        $source | Should -Not -Match '\bWrite-Progress\b'
+        $source | Should -Not -Match 'while\s*\(\s*\$true\s*\)\s*\{[\s\S]{0,600}Start-Sleep'
+    }
+
 
     It "classifies external waits as bounded waiting rather than fake percentage progress" {
         $source = $script:ProductionSource

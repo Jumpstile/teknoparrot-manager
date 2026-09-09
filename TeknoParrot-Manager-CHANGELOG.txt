@@ -48,6 +48,11 @@
   provenance in manifests. Action Required freshness remains tied to the latest
   TPM log; game-local BepInEx and plugin evidence is ambient metadata only,
   and plugin payloads are excluded.
+  Slice B Universal progress/status remediation now records a script-wide
+  long-running-path inventory. Compact progress, structured workflow status,
+  bounded waits, redirected/noninteractive behavior, and justified no-progress
+  surfaces are covered by focused source-contract tests; no unclassified
+  long-running path remains in the inspected source.
 
 
 

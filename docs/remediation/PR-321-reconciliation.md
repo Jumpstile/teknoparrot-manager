@@ -93,6 +93,17 @@ release-decision table appears below and supersedes this snapshot.
 | BepInEx package/download/deploy | Invoke-BepInExUpdateCheck | Compact preflight, version-check, and deployment progress added | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing BepInEx tests; owner smoke |
 | Crosshair/HyperSpin bounded asset writes | Crosshair and HyperSpin setup/export | Small bounded writes; no long-running progress surface needed | JUSTIFIED NO PROGRESS SURFACE | Existing crosshair/HyperSpin tests |
 
+### Slice B -- universal progress/status contract
+
+Owner ID 3 received a bounded source remediation. The script-wide inventory
+covers compact progress, structured workflow status, bounded waits,
+redirected/noninteractive behavior, and justified no-progress surfaces across
+the inspected long-running paths. Focused source-contract tests cover the
+inventory markers, renderer-aware behavior, absence of PowerShell
+`Write-Progress`, and the 120-second/30-second external wait deadlines.
+Package rebuild, owner-runtime proof, and release authorization remain
+outstanding.
+
 ### Slice A -- web/download and thumbnail correctness
 
 Owner IDs 2, 6, and 8 received a bounded source remediation. The web wrapper
