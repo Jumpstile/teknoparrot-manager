@@ -29,6 +29,13 @@
   after valid P2 selection, reports when close or console focus is unavailable,
   and keeps confirmation input on the active prompt line. Deployment semantics
   remain unchanged.
+  Mode-8 FFB setup now asks the membership decision once with explicit choices.
+  Complete zero-deployment results are valid when native FFB Blaster is
+  preferred or no supported optional-plugin target exists; actual errors,
+  missing paths, unavailable devices, unavailable plugin files, and incomplete
+  accounting remain failures. Normal results distinguish installed, native,
+  unsupported, preserved, and failed outcomes and use full game names when
+  available; technical identifiers remain in logs and evidence.
 
 
 
@@ -46,9 +53,11 @@
   overwrite existing/custom cache files. Evidence is written at preflight and
   completion; a final evidence failure rolls back hooks, ownership metadata,
   and native-overlap changes. Protected/collision, unsupported, missing,
-  unsafe, and failed game states remain distinct; zero-deployment runs are not
-  reported as success; every selected game is included exactly once in final
-  accounting; and the FFB evidence report is included in support packages.
+  Protected/collision, unsupported, missing, unsafe, and failed game states
+  remain distinct; zero-deployment runs are complete when all selected games
+  are validly accounted for without blocking skips or errors; every selected
+  game is included exactly once in final accounting; and the FFB evidence report
+  is included in support packages.
   Slice C ReShade remediation now keeps explicit protected ownership
   decisions separate from TPM-managed updates. Adopt/replace remains an
   explicit confirmed action with transactional backup and rollback boundaries.

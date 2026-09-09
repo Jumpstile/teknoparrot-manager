@@ -6,19 +6,12 @@ Status: blocked. This board is the source of truth for TPM remediation state.
 
 - Root: `C:\REPOS\tpm-rc8-certified-a700d093`
 - Branch: `fix/rc8-release-blockers`
-- HEAD: `66d896d98fb248ccef2350fbf55243e4ac803960` before Slice 1 edits.
-- This working-tree Slice 1 is source remediation only; no commit or package
+- HEAD: `da2d0f29017dbb9801f254f77d9006fa1d8f2328` before Slice 5 edits.
+- This working-tree Slice 5 is source remediation only; no commit or package
   identity is authorized yet.
-- Candidate ZIP remains stale relative to the source under remediation and must
-  not be reused for owner smoke.
-- Slice 1 scope: BepInEx canonical containment, inspection classification,
-  rollback failure handling, retry guidance, and bounded prompt/full-name UX.
-- Permanent procedure gate remains expected to fail until this source slice,
-  package rebuild, and owner-runtime evidence are complete.
-- Slice 3 ReShade source changes are also uncommitted: preview remains
-  terminal-authoritative and view-only; normal setup now explains the five
-  beginner-safe profiles, full game labels, bulk changeability, and outcome
-  accounting. Package rebuild and owner-runtime proof remain outstanding.
+- Slice 5 scope: FFB membership prompt clarity, optional-plugin completion
+  semantics, normal-path wording, and full-game-name output. Package rebuild
+  and owner-runtime proof remain outstanding.
 
 ## Status rules
 
@@ -64,6 +57,7 @@ canonical release-decision statuses are in the corrected table below.
 | 30 | Controls truthfulness | Zero-bound results never imply verified readiness | SOURCE FIXED; OWNER RUNTIME NEEDED | Controls truthfulness | Write-ControlPropagationResults; control-readiness engine | Controls truthfulness focused tests; existing controls tests | Zero-bound packaged runtime result | Owner runtime | TPM-CONTROLS-001 |
 | 31 | dgVoodoo2 wording | Results explain deployment state | SOURCE FIXED; OWNER RUNTIME NEEDED | Progress/status | dgVoodoo2 result wording | Existing tests | Owner wording review | Owner runtime | Progress slice |
 | 32 | Global consistency rule | Every enumerated prompt uses the central contract or has a documented design boundary | SOURCE FIXED; OWNER RUNTIME NEEDED | Prompts/navigation | TPM-PROMPT-001 inventory; finite-choice routes centralized; stateful, exact-token, secure, path, and renderer-aware boundaries documented | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Packaged consistency smoke | Owner runtime | Prompt.Core |
+| 33 | FFB membership/prompt and optional-plugin completion | One membership decision, native/no-match zero-deployment outcomes complete, actual errors fail, beginner-safe result wording | SOURCE FIXED; OWNER RUNTIME NEEDED | Force feedback | Invoke-FFBBlasterSetup; Invoke-FFBPluginSetup; Invoke-TpmFfbSetupMode | FFB focused tests; accounting invariants | Packaged mode-8 smoke with native-preferred, no-match, deployment-error paths | Owner runtime | Slice 5 |
 
 ## Subsystem grouping
 
@@ -71,6 +65,7 @@ canonical release-decision statuses are in the corrected table below.
 - Prompts/navigation: 26, 32.
 - Repair/scoping: 16-23.
 - ReShade: 1, 9-12.
+- Force feedback: 33.
 - Crosshair: 13-15.
 - PostgreSQL: 16.
 - Frontend exports: 23-25.

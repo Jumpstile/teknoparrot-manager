@@ -555,17 +555,16 @@ target filename, that game is skipped with a warning, never overwritten.
 Per the plugin's README: true FFB on FFB-capable wheels (Thrustmaster/PWM2M2-style),
 rumble on Xbox/XInput-style controllers.
 
-**Skip counters.** `$skippedNoMatch` and `$skippedDllMissing` are separate, and
-saved-path omissions are classified by the shared `Test-TpmGameMutationPath`
-boundary. A missing leaf is `$skippedMissingPath`; an unavailable drive/device is
-`$skippedMissingDevice`; other unsafe or unresolved path results remain safe path
-skips with their reason code. A game the `AutoSetup.cmd` table does not know about is
-`$skippedNoMatch`; a game the table matches but whose MAME DLL is not locally present
-is `$skippedDllMissing` (user-fixable). Each category has its own summary line and
-log/result field, and invalid saved paths are excluded from the no-match count. FFB
-mode returns affected game names and offers a direct Health Check handoff whenever
-path omissions occur, including a mixed plugin-error result; unsupported/no-match
-games remain distinct from true deployment errors. Ownership cleanup copies the
+**Outcome semantics.** Every selected profile is counted exactly once. A
+zero-deployment run is successful when accounting is complete, no actual
+errors occurred, and every profile was either kept on native FFB Blaster,
+unsupported by the optional plugin, or safely skipped because an existing
+file was preserved. Missing paths, unavailable devices, unavailable verified
+DLLs, incomplete accounting, and deployment errors remain failures. Result
+codes distinguish deployed, native-preferred, no-supported-target, blocked-skip,
+and deployment-error outcomes. Normal output uses full game names when present;
+profile codes remain in logs and evidence.
+Unsupported/no-match games remain distinct from true deployment errors. Ownership cleanup copies the
 unchanged hook to a verified game backup before deletion; if the ownership manifest
 cannot be atomically rewritten, the deletion is restored from that backup and the
 operation fails closed. If restoration itself fails, the backup path remains recovery

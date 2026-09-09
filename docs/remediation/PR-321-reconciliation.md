@@ -261,6 +261,20 @@ Package rebuild and owner-runtime proof remain outstanding.
 | Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 production parse errors; 0 test parse errors; 0 PSScriptAnalyzer findings; production ASCII 0; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
 | Permanent procedure gate | `.\scripts\Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: owner report contains unresolved NOT FIXED items and owner-runtime evidence remains outstanding | not captured | not captured | pwsh |
 
+## FFB completion and prompt remediation -- Slice 5
+
+The FFB membership gate now presents one decision question with explicit
+choices. Optional-plugin results distinguish installed files, native-preferred
+skips, unsupported/no-match skips, preserved existing files, and actual
+failures. Complete accounting with zero deployment is successful when native
+FFB Blaster is preferred or no supported plugin target exists; download,
+deployment, missing-path, unavailable-device, unavailable-file, incomplete
+accounting, and evidence errors remain failures. Normal output uses full game
+names where available and beginner-safe wording; profile codes and technical
+ownership/source details remain in logs and evidence. The pinned SHA,
+same-revision support table/DLL acquisition, atomic evidence, exact-once
+accounting, and unowned-file preservation contracts remain unchanged.
+
 ## FFB mode-8 hardening round -- 2026-09-08
 
 This committed TPM-only slice hardens the existing third-party FFBPlugin

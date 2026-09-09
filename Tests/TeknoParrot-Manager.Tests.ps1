@@ -11237,8 +11237,8 @@ Describe "Issue #300 shared workflow status state machine" {
         [void]$script:ffbOverlapAnswers.Enqueue('Y')
         Mock Read-HostSafe { $script:ffbOverlapAnswers.Dequeue() }
         $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir -TpRoot $tpRoot -NativeEnabledCodes @('Overlap')
-        $result.Succeeded | Should -BeFalse
-        $result.Deployed | Should -Be 0
+        $result.Succeeded | Should -BeTrue
+        $result.Reason | Should -Be 'NATIVE_PREFERRED'
         $field = (Read-Xml (Join-Path $userProfiles 'Overlap.xml')).SelectSingleNode('/GameProfile/ConfigValues/FieldInformation/FieldValue')
         $field.InnerText | Should -Be '1'
         (Test-Path -LiteralPath (Join-Path $gameDir 'd3d9.dll') -PathType Leaf) | Should -BeFalse
@@ -11549,8 +11549,8 @@ Describe 'FFB pinned source and transaction invariants' {
         Mock-FFBTransactionDependencies -Revision $revision
         $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
         Should -Invoke Get-FFBPluginSourceRevision -Times 1 -Exactly
-        $result.Succeeded | Should -BeFalse
-        $result.Reason | Should -Be 'ZERO_DEPLOYMENT'
+        $result.Succeeded | Should -BeTrue
+        $result.Reason | Should -Be 'NO_PLUGIN_CHANGES_NEEDED'
         $result.Deployed | Should -Be 0
         $result.SkippedCollision | Should -Be 1
         $result.Accounted | Should -Be 1
@@ -14397,5 +14397,15 @@ Describe 'TPM-owned layout and legacy migration' {
         Get-Content -LiteralPath (Join-Path $scriptRoot 'TeknoParrot-Manager.log') -Raw | Should -Match 'legacy'
         Get-Content -LiteralPath (Join-Path $layout.Logs 'TeknoParrot-Manager.log') -Raw | Should -Match 'new'
         Test-Path -LiteralPath $result.ReportPath -PathType Leaf | Should -BeTrue
+    }
+    It 'uses one membership decision prompt and clear FFB completion rules' {
+        $script:ProductionSource | Should -Match 'Do you have an active, paid TeknoParrot membership\?"'
+        $script:ProductionSource | Should -Match '\$hasSub = Read-TpmYesNo -Prompt "  Choose Y or N"'
+        $script:ProductionSource | Should -Not -Match 'Read-TpmYesNo -Prompt "  Do you have an active, paid TeknoParrot membership'
+        $script:ProductionSource | Should -Match '\$succeeded = \(\$errors -eq 0 -and \$blockingSkips -eq 0 -and \$accountingComplete\)'
+        $script:ProductionSource | Should -Match "NO_SUPPORTED_PLUGIN_TARGET"
+        $script:ProductionSource | Should -Match "NATIVE_PREFERRED"
+        $script:ProductionSource | Should -Match 'TeknoParrot Manager only removes optional plugin files'
+        $script:ProductionSource | Should -Not -Match 'Write-Host "  TPM records its own deployed hook files'
     }
 }

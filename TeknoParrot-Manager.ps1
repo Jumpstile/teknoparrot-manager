@@ -13569,11 +13569,11 @@ function Invoke-FFBPluginSetup {
             Reason = 'SOURCE_REVISION_UNAVAILABLE'
         }
     }
-    Write-Host "  Fetching the pinned supported-games list..." -ForegroundColor DarkGray
+    Write-Host "  Fetching the supported-games list..." -ForegroundColor DarkGray
     $gameMap = Get-FFBPluginGameMap -SourceRevision $source.Revision
     if (-not $gameMap -or $gameMap.Count -eq 0) {
-        Write-Host "  Could not reach GitHub to fetch the pinned FFB plugin game list -- try again later." -ForegroundColor Red
-        Write-Log "FFBPlugin setup: aborted -- pinned game map fetch failed."
+        Write-Host "  Could not reach GitHub to fetch the supported FFB plugin game list -- try again later." -ForegroundColor Red
+        Write-Log "FFBPlugin setup: aborted -- supported game map fetch failed."
         return [pscustomobject]@{
             Succeeded = $false; Deployed = 0; Errors = 1
             MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
@@ -13582,7 +13582,7 @@ function Invoke-FFBPluginSetup {
             Reason = 'GAME_MAP_FAILED'
         }
     }
-    Write-Host ("  {0} game(s) in the pinned upstream table." -f $gameMap.Count) -ForegroundColor DarkGray
+    Write-Host ("  {0} game(s) in the supported-games list." -f $gameMap.Count) -ForegroundColor DarkGray
 
     $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
                   Where-Object { $_.Directory.Name -ne "FullBackup" })
@@ -13598,11 +13598,11 @@ function Invoke-FFBPluginSetup {
         }
     }
 
-    Write-Host "  Downloading the pinned FFB plugin DLLs..." -ForegroundColor DarkGray
+    Write-Host "  Downloading the verified FFB plugin files..." -ForegroundColor DarkGray
     $download = Invoke-FFBPluginDownload -destDir $CacheDir -SourceRevision $source.Revision
     if (-not $download -or -not [bool]$download.Succeeded) {
         Write-Host "  Could not download and hash both verified FFB plugin DLLs -- try again later." -ForegroundColor Red
-        Write-Log "FFBPlugin setup: aborted -- pinned DLL acquisition failed."
+        Write-Log "FFBPlugin setup: aborted -- verified plugin file acquisition failed."
         return [pscustomobject]@{
             Succeeded = $false; Deployed = 0; Errors = 1
             MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
@@ -13666,7 +13666,7 @@ function Invoke-FFBPluginSetup {
         [pscustomobject]@{ Name = $name; Norm = (Get-NormalizedGameKey $name); Dest = $gameMap[$name] }
     })
     Write-Host ""
-    Write-Host ("  Matching {0} registered game(s) against the pinned FFB table..." -f $profiles.Count) -ForegroundColor Cyan
+    Write-Host ("  Matching {0} registered game(s) against the supported-games list..." -f $profiles.Count) -ForegroundColor Cyan
 
     $candidates = @()
     $missingPathGames = New-Object System.Collections.Generic.List[string]
@@ -13718,17 +13718,24 @@ function Invoke-FFBPluginSetup {
     $useNativeForOverlaps = $true
     if ($overlaps.Count -gt 0) {
         Write-Host ""
-        Write-Host ("  {0} game(s) are covered by BOTH FFB Blaster and the third-party plugin:" -f $overlaps.Count) -ForegroundColor Cyan
-        foreach ($ov in $overlaps) { Write-Host ("    - {0}" -f $ov.Profile.BaseName) -ForegroundColor DarkGray }
-        Write-Host "  [Y] Use native FFB Blaster (recommended)" -ForegroundColor White
-        Write-Host "  [N] Use the third-party plugin" -ForegroundColor White
+        Write-Host ("  {0} game(s) are covered by both available force-feedback options:" -f $overlaps.Count) -ForegroundColor Cyan
+        foreach ($ov in $overlaps) {
+            $overlapName = $ov.Profile.BaseName
+            try {
+                $overlapDoc = Read-Xml $ov.Profile.FullName
+                if ($overlapDoc.GameProfile.GameName) { $overlapName = ([string]$overlapDoc.GameProfile.GameName).Trim() }
+            } catch {}
+            Write-Host ("    - {0}" -f $overlapName) -ForegroundColor DarkGray
+        }
+        Write-Host "  [Y] Keep native FFB Blaster (recommended)" -ForegroundColor White
+        Write-Host "  [N] Use the optional plugin instead" -ForegroundColor White
         $ans = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'Y'
         $useNativeForOverlaps = ($ans -ne "N")
         if (-not $useNativeForOverlaps) {
             Write-Host "  Disabling native FFB Blaster on the overlapping profiles before plugin deployment..." -ForegroundColor Yellow
             $nativeSwitch = Disable-FFBBlasterForOverlap -UserProfilesDir $UserProfilesDir -TpRoot $TpRoot -ProfileCodes @($overlaps | ForEach-Object { $_.Profile.BaseName })
             if (-not $nativeSwitch.Succeeded) {
-                Write-Host ("  ERROR: Could not switch overlapping profiles to the third-party plugin -- {0}" -f $nativeSwitch.Reason) -ForegroundColor Red
+                Write-Host ("  ERROR: Could not switch overlapping profiles to the optional plugin -- {0}" -f $nativeSwitch.Reason) -ForegroundColor Red
                 Write-Log "FFBPlugin: blocked because native overlap switch failed -- $($nativeSwitch.Reason)"
                 return [pscustomobject]@{
                     Succeeded = $false; Deployed = 0; Errors = 1
@@ -13753,6 +13760,11 @@ function Invoke-FFBPluginSetup {
 
     foreach ($c in $candidates) {
         $pf = $c.Profile
+        $gameLabel = $pf.BaseName
+        try {
+            $labelDoc = Read-Xml $pf.FullName
+            if ($labelDoc.GameProfile.GameName) { $gameLabel = ([string]$labelDoc.GameProfile.GameName).Trim() }
+        } catch {}
         $destinationCreated = $false
         $deployedHash = ''
         try {
@@ -13784,13 +13796,13 @@ function Invoke-FFBPluginSetup {
             $destDll = [string]$c.Match.Dest
             $destPath = Join-Path $exeDir $destDll
             if (-not (Test-PathInside $destPath $exeDir) -or -not (Test-TpmNoReparsePath -Path $exeDir)) {
-                Write-Host ("    SKIP  {0}: destination '{1}' is unsafe -- not deploying." -f $pf.BaseName, $destDll) -ForegroundColor Red
+                Write-Host ("    SKIP  {0}: the destination file is unsafe -- not deploying." -f $gameLabel) -ForegroundColor Red
                 Write-Log "FFBPlugin: SECURITY -- skipped $($pf.BaseName), unsafe destination $destPath"
                 $errors++
                 continue
             }
             if (Test-Path -LiteralPath $destPath -PathType Leaf) {
-                Write-Host ("    SKIP  {0}: {1} already exists (ReShade or another hook) -- not overwritten." -f $pf.BaseName, $destDll) -ForegroundColor Yellow
+                Write-Host ("    SKIP  {0}: an existing file was found, so it was not overwritten." -f $gameLabel) -ForegroundColor Yellow
                 Write-Log "FFBPlugin: skipped $($pf.BaseName) -- $destDll already occupied at $destPath"
                 $skippedCollision++
                 continue
@@ -13800,7 +13812,7 @@ function Invoke-FFBPluginSetup {
             $dllName = if ($arch -eq 'x86') { 'MAME32.dll' } else { 'MAME64.dll' }
             $srcDll = [string]$download.Files[$dllName]
             if ([string]::IsNullOrWhiteSpace($srcDll) -or -not (Test-Path -LiteralPath $srcDll -PathType Leaf)) {
-                Write-Host ("    SKIP  {0}: {1}-bit verified DLL is not available." -f $pf.BaseName, $(if ($arch -eq 'x86') {'32'} else {'64'})) -ForegroundColor Yellow
+                Write-Host ("    SKIP  {0}: the verified {1}-bit plugin file is unavailable." -f $gameLabel, $(if ($arch -eq 'x86') {'32'} else {'64'})) -ForegroundColor Yellow
                 $skippedDllMissing++
                 continue
             }
@@ -13847,7 +13859,7 @@ function Invoke-FFBPluginSetup {
             }
             $destinationCreated = $false
             [void]$deployedThisRun.Add($entry)
-            Write-Host ("    OK    {0}  [{1}]  (matched '{2}', {3})" -f $pf.BaseName, $destDll, $c.Match.Name, [Math]::Round($c.Score,2)) -ForegroundColor Green
+            Write-Host ("    OK    {0}  (optional plugin installed)" -f $gameLabel) -ForegroundColor Green
             Write-Log "FFBPlugin: deployed $destDll to $exeDir (matched '$($c.Match.Name)', score $([Math]::Round($c.Score,2)))"
             $deployed++
         } catch {
@@ -13863,18 +13875,18 @@ function Invoke-FFBPluginSetup {
                     Write-Log "FFBPlugin: deployment failure cleanup failed -- $destPath -- $_"
                 }
             }
-            Write-Host ("    ERROR {0} -- {1}" -f $pf.BaseName, $_) -ForegroundColor Red
+            Write-Host ("    ERROR {0} -- {1}" -f $gameLabel, $_) -ForegroundColor Red
             Write-Log "FFBPlugin: error on $($pf.BaseName) -- $_"
             $errors++
         }
     }
 
     Write-Host ""
-    Write-Host ("  Deployed           : {0} game(s)" -f $deployed) -ForegroundColor Green
-    if ($skippedNative -gt 0) { Write-Host ("  Skipped (native)   : {0}  (FFB Blaster already covers these -- preferred over the plugin)" -f $skippedNative) -ForegroundColor DarkGray }
-    if ($skippedCollision -gt 0) { Write-Host ("  Skipped (collision): {0}  (a hook DLL already exists -- not overwritten)" -f $skippedCollision) -ForegroundColor Yellow }
-    if ($skippedNoMatch -gt 0) { Write-Host ("  Skipped (no match) : {0}  (not in the plugin's supported-games list)" -f $skippedNoMatch) -ForegroundColor DarkGray }
-    if ($skippedDllMissing -gt 0) { Write-Host ("  Skipped (no DLL)   : {0}  (matched, but the verified plugin DLL is unavailable)" -f $skippedDllMissing) -ForegroundColor Yellow }
+    Write-Host ("  Installed           : {0} game(s)" -f $deployed) -ForegroundColor Green
+    if ($skippedNative -gt 0) { Write-Host ("  Kept native FFB     : {0}  (native FFB Blaster is preferred)" -f $skippedNative) -ForegroundColor DarkGray }
+    if ($skippedCollision -gt 0) { Write-Host ("  Skipped (file exists): {0}  (the existing file was not overwritten)" -f $skippedCollision) -ForegroundColor Yellow }
+    if ($skippedNoMatch -gt 0) { Write-Host ("  Skipped (not supported): {0}  (the optional plugin does not support these games)" -f $skippedNoMatch) -ForegroundColor DarkGray }
+    if ($skippedDllMissing -gt 0) { Write-Host ("  Skipped (plugin file unavailable): {0}" -f $skippedDllMissing) -ForegroundColor Yellow }
     if ($skippedMissingPath -gt 0) {
         Write-Host ("  Skipped (saved path): {0} game(s)  -- repair paths in 10) Library Health Check first" -f $skippedMissingPath) -ForegroundColor Yellow
         Write-Host ("    Affected games: {0}" -f ($missingPathGames -join ', ')) -ForegroundColor DarkGray
@@ -13887,8 +13899,9 @@ function Invoke-FFBPluginSetup {
 
     $accounted = $skippedNative + $skippedCollision + $skippedNoMatch + $skippedDllMissing + $skippedMissingPath + $skippedMissingDevice + $errors + $deployed
     $accountingComplete = ($accounted -eq $profiles.Count)
-    $succeeded = ($deployed -gt 0 -and $errors -eq 0 -and $accountingComplete)
-    $reason = if (-not $accountingComplete) { 'ACCOUNTING_INCOMPLETE' } elseif ($deployed -eq 0) { 'ZERO_DEPLOYMENT' } elseif ($errors) { 'DEPLOYMENT_ERRORS' } else { $null }
+    $blockingSkips = $skippedDllMissing + $skippedMissingPath + $skippedMissingDevice
+    $succeeded = ($errors -eq 0 -and $blockingSkips -eq 0 -and $accountingComplete)
+    $reason = if (-not $accountingComplete) { 'ACCOUNTING_INCOMPLETE' } elseif ($errors -gt 0) { 'DEPLOYMENT_ERRORS' } elseif ($blockingSkips -gt 0) { 'BLOCKED_SKIPS' } elseif ($deployed -gt 0) { 'DEPLOYED' } elseif ($skippedNative -gt 0 -and $skippedNoMatch -eq 0) { 'NATIVE_PREFERRED' } elseif ($skippedNoMatch -gt 0 -and $skippedNative -eq 0) { 'NO_SUPPORTED_PLUGIN_TARGET' } else { 'NO_PLUGIN_CHANGES_NEEDED' }
     $rollback = $null
     if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) {
         $evidence = [ordered]@{
@@ -13922,8 +13935,6 @@ function Invoke-FFBPluginSetup {
                 -OverlapBackupPath $(if ($nativeSwitch) { [string]$nativeSwitch.BackupPath } else { '' })
             $errors += $attemptedDeployed
             $deployed = 0
-            $accounted = $skippedNative + $skippedCollision + $skippedNoMatch + $skippedDllMissing + $skippedMissingPath + $skippedMissingDevice + $errors
-            $accountingComplete = ($accounted -eq $profiles.Count)
             $succeeded = $false
             $reason = if ($rollback.Succeeded) { 'EVIDENCE_WRITE_FAILED' } else { 'EVIDENCE_WRITE_ROLLBACK_FAILED' }
             Write-Log "FFBPlugin: final evidence write failed -- $($_.Exception.Message); rollbackSucceeded=$($rollback.Succeeded)"
@@ -13932,10 +13943,11 @@ function Invoke-FFBPluginSetup {
 
     Write-Host ("  Accounted          : {0}/{1}" -f $accounted, $profiles.Count) -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  TPM records its own deployed hook files so a later native choice can remove only verified ownership." -ForegroundColor DarkCyan
-    Write-Host "  TPM does not remove an unowned FFB hook automatically." -ForegroundColor DarkCyan
+    Write-Host "  TeknoParrot Manager only removes optional plugin files that it recorded as its own." -ForegroundColor DarkCyan
+    Write-Log 'FFBPlugin setup: technical ownership rule -- unowned FFB files are never removed automatically.'
     Write-Log ("FFBPlugin setup: deployed={0} skippedNative={1} skippedCollision={2} skippedNoMatch={3} skippedDllMissing={4} skippedMissingPath={5} skippedMissingDevice={6} errors={7} accounted={8}/{9} sourceRevision={10}" -f $deployed, $skippedNative, $skippedCollision, $skippedNoMatch, $skippedDllMissing, $skippedMissingPath, $skippedMissingDevice, $errors, $accounted, $profiles.Count, $source.Revision)
     return [pscustomobject]@{
+        Reason = $reason
         Succeeded = $succeeded
         Deployed = $deployed
         Errors = $errors
@@ -13958,7 +13970,6 @@ function Invoke-FFBPluginSetup {
         PreflightEvidenceWritten = $preflightEvidenceWritten
         RollbackSucceeded = if ($rollback) { [bool]$rollback.Succeeded } else { $null }
         RollbackErrors = if ($rollback) { @($rollback.Errors) } else { @() }
-        Reason = $reason
     }
 
 }
@@ -14305,10 +14316,10 @@ function Invoke-FFBBlasterSetup {
     Write-Host "  It is included with any paid TeknoParrot membership" -ForegroundColor Cyan
     Write-Host "  (teknoparrot.com/en/Home/Subscription)." -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  Do you have an active, paid TeknoParrot membership? (Y/N)" -ForegroundColor Yellow
-    Write-Host "  If you answer N, FFB Blaster will NOT be set up -- it does not work" -ForegroundColor Yellow
-    Write-Host "  without one, and there is no point enabling a field that has no effect." -ForegroundColor Yellow
-    $hasSub = Read-TpmYesNo -Prompt "  Do you have an active, paid TeknoParrot membership? (Y/N)"
+    Write-Host "  Do you have an active, paid TeknoParrot membership?" -ForegroundColor Yellow
+    Write-Host "  [Y] Yes -- enable native FFB Blaster" -ForegroundColor White
+    Write-Host "  [N] No -- skip native FFB Blaster" -ForegroundColor White
+    $hasSub = Read-TpmYesNo -Prompt "  Choose Y or N" -Default 'N'
     if ($hasSub -ne "Y") {
         Write-Host "  Skipped -- no membership." -ForegroundColor DarkGray
         Write-Log "FFBBlaster setup: skipped -- user has no TeknoParrot membership."
@@ -23097,7 +23108,7 @@ function Invoke-TpmFfbSetupMode {
         @{ Id = 'inspect'; Label = 'Check available force-feedback options' }
         @{ Id = 'native'; Label = 'Apply the approved native option' }
         @{ Id = 'plugin'; Label = 'Download and apply the optional plugin' }
-        @{ Id = 'verify'; Label = 'Verify ownership and results' }
+        @{ Id = 'verify'; Label = 'Verify force-feedback results' }
     )
     [void](Start-TpmWorkflowStatus -Context $status)
     [void](Start-TpmWorkflowStep -Context $status -StepId 'inspect' -Activity 'Checking force-feedback options')
@@ -23112,7 +23123,7 @@ function Invoke-TpmFfbSetupMode {
         } else {
             'The native force-feedback setup did not complete successfully.'
         }
-        [void](Set-TpmWorkflowFailure -Context $status -FailureId 'ffb-native-failed' -Message $nativeFailureMessage -DataSafety 'TPM did not claim a complete native force-feedback setup or proceed to the optional plugin.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+        [void](Set-TpmWorkflowFailure -Context $status -FailureId 'ffb-native-failed' -Message $nativeFailureMessage -DataSafety 'TeknoParrot Manager did not claim a complete native force-feedback setup or proceed to the optional plugin.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
         [void](Read-HostSafe 'Press Enter to acknowledge the force-feedback result')
         [void](Acknowledge-TpmWorkflowFailure -Context $status -FailureId 'ffb-native-failed')
         [void](Stop-TpmWorkflowStatus -Context $status -Reason 'Force-feedback setup stopped')
@@ -23129,7 +23140,7 @@ function Invoke-TpmFfbSetupMode {
         }
     }
     [void](Complete-TpmWorkflowStep -Context $status -Summary 'Native force feedback step finished' -NextStep 'Choose whether to add the optional plugin')
-    [void](Set-TpmWorkflowWaiting -Context $status -Message 'TPM can add the optional third-party force-feedback plugin.' -UserAction 'Answer Y or N')
+    [void](Set-TpmWorkflowWaiting -Context $status -Message 'TeknoParrot Manager can add the optional third-party force-feedback plugin.' -UserAction 'Answer Y or N')
     Write-Host '  [Y] Set up the free third-party FFB plugin' -ForegroundColor White
     Write-Host '  [N] Skip the optional plugin' -ForegroundColor White
     $choice = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
@@ -23141,7 +23152,7 @@ function Invoke-TpmFfbSetupMode {
         $evidencePath = if ($script:TpmOwnedLayout) { Join-Path $script:TpmOwnedLayout.Reports 'TPM-FFB-Plugin-Evidence.json' } else { '' }
         $plugin = Invoke-FFBPluginSetup -UserProfilesDir $UserProfilesDir -CacheDir $ffbCacheRoot -NativeEnabledCodes $nativeCodes -TpRoot $TpRoot -EvidencePath $evidencePath
         if (-not ($plugin -and $plugin.Succeeded)) {
-            [void](Set-TpmWorkflowFailure -Context $status -FailureId 'ffb-plugin-failed' -Message 'The optional force-feedback plugin was not completed.' -DataSafety 'TPM did not claim a complete third-party plugin deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            [void](Set-TpmWorkflowFailure -Context $status -FailureId 'ffb-plugin-failed' -Message 'The optional force-feedback plugin could not complete safely.' -DataSafety 'TeknoParrot Manager reported an error or incomplete accounting while handling the optional plugin.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
             [void](Read-HostSafe 'Press Enter to acknowledge the force-feedback result')
             [void](Acknowledge-TpmWorkflowFailure -Context $status -FailureId 'ffb-plugin-failed')
             [void](Stop-TpmWorkflowStatus -Context $status -Reason 'Force-feedback setup stopped')
@@ -23157,7 +23168,7 @@ function Invoke-TpmFfbSetupMode {
                 PathReasonCounts = if ($plugin) { $plugin.PathReasonCounts } else { @{} }
             }
         }
-        [void](Complete-TpmWorkflowStep -Context $status -Outcome Fixed -Summary 'Optional plugin step finished' -NextStep 'Verify force-feedback ownership')
+        [void](Complete-TpmWorkflowStep -Context $status -Outcome Fixed -Summary 'Optional plugin result recorded' -NextStep 'Verify force-feedback results')
     } else {
         [void](Start-TpmWorkflowStep -Context $status -StepId 'plugin' -Activity 'Optional plugin skipped by user choice')
         [void](Complete-TpmWorkflowStep -Context $status -Outcome Skipped -Summary 'Optional plugin skipped')
