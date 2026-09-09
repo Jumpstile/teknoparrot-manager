@@ -16837,7 +16837,9 @@ function Write-LibraryHealthRepairResults {
             Write-Host ("    GamePath after : {0}" -f $after) -ForegroundColor DarkGray
         }
     }
-    return [pscustomobject]@{ Fixed = $fixed.Count; Candidates = $candidates.Count; StillBroken = $stillBroken.Count }
+    $total = $fixed.Count + $candidates.Count + $stillBroken.Count
+    Write-Host ("  Repair accounting: {0} reviewed = {1} fixed + {2} candidates + {3} still broken." -f $total, $fixed.Count, $candidates.Count, $stillBroken.Count) -ForegroundColor DarkCyan
+    return [pscustomobject]@{ Total = $total; Fixed = $fixed.Count; Candidates = $candidates.Count; StillBroken = $stillBroken.Count; Complete = ($total -eq @($Reports).Count) }
 }
 
 

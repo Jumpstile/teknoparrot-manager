@@ -35,6 +35,12 @@
   explicit confirmed action with transactional backup and rollback boundaries.
   ReShade all-games accounting now includes games whose previous TPM-managed
   profile was explicitly kept, so every selected game is counted exactly once.
+  Slice E Library Health remediation now keeps candidate search, reviewed
+  writes, and optional source recopy limited to the affected profile codes.
+  Repair results report exact fixed/candidate/still-broken accounting;
+  saved-path read-back remains required before FIXED is reported, and the
+  post-repair thumbnail prompt remains after the repair result.
+
 
 
   Additional RC8 candidate fixes: duplicate display identities remain

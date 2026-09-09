@@ -871,17 +871,20 @@ Only the reviewed set is reapplied, with a complete
 `UserProfiles\FullBackup\HealthCheck_*` backup before confirmed writes. Every
 applied profile is read back and revalidated at the saved path before it is
 reported as `FIXED`; failed saves or verification remain `STILL BROKEN`.
-The configured games folder is the default search root; `[S]` accepts another
-folder only after `Test-TpmRepairSearchRoot` canonicalizes an existing,
-non-reparse folder and rejects overlap with the TeknoParrot root, TPM program
-folder, or either ZIP source. `[C]` re-enters AutoSync with an explicit
-whitelist of the broken profile codes, so the normal preview/fresh-apply
-pipeline cannot broaden the recovery into an all-games extraction. Manual
-repair requires an explicit executable selection, validates the configured
-games-root and reparse boundaries, and follows the same backup gate. PostgreSQL
-and optional setup entries are direct next actions, but no mutating workflow
-starts until the user selects one. AutoSync's extraction status explicitly
-means no ZIP work; it does not claim that saved GamePath values were repaired.
+`Write-LibraryHealthRepairResults` also emits exact reviewed-game accounting:
+each report is classified once as fixed, candidate, or still broken, and the
+returned total must equal the report count. The configured games folder is the
+default search root; `[S]` accepts another folder only after
+`Test-TpmRepairSearchRoot` canonicalizes an existing, non-reparse folder and
+rejects overlap with the TeknoParrot root, TPM program folder, or either ZIP
+source. `[C]` re-enters AutoSync with an explicit whitelist of the broken
+profile codes, so the normal preview/fresh-apply pipeline cannot broaden the
+recovery into an all-games extraction. Manual repair requires an explicit
+executable selection, validates the configured games-root and reparse
+boundaries, and follows the same backup gate. PostgreSQL and optional setup
+entries are direct next actions, but no mutating workflow starts until the user
+selects one. AutoSync's extraction status explicitly means no ZIP work; it
+does not claim that saved GamePath values were repaired.
 
 **Crosshair gallery selection.** The HTML gallery contains all discovered valid
 crosshairs. A short-lived localhost bridge bound only to `127.0.0.1` accepts a

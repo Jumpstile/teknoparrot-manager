@@ -74,10 +74,10 @@ canonical release-decision statuses are in the corrected table below.
 
 ## Current blockers
 
- - Canonical source-remediation blockers: IDs 3, 16-19, 21, 22, and 29.
+ - Canonical source-remediation blockers: IDs 3, 16, and 29.
  - Canonical source re-audit blockers: IDs 4, 5, 7, 20, 23-27, and 30-32.
- - Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1, 2, 6, 8-15, and 28.
- - IDs 11 and 12 are source-fixed by the Slice C ReShade ownership/accounting re-audit; package rebuild and owner-runtime proof remain outstanding.
+ - Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1, 2, 6, 8-15, 17-22, and 28.
+ - IDs 17-22 are source-fixed by the Slice E Library Health repair-scope re-audit; package rebuild and owner-runtime proof remain outstanding.
 - Test blockers: no focused source-test blocker remains for audited paths, but unresolved design work and owner-runtime routes remain.
 - Package/runtime blockers: candidate ZIP is stale; no owner smoke is authorized.
 - Owner-design blockers: ReShade ownership/accounting and remaining stateful prompt-picker boundaries need explicit future contracts.
@@ -114,12 +114,12 @@ remains stale and is not a release gate.
 | 14 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Best-effort console focus return with logged fallback; terminal remains usable | No | Yes |
 | 15 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Workflow-aware P1/P2, confirmation, first-run, and cursor-hide prompts with typed fallback | No | Yes |
 | 16 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Password recovery/elevation resume failed owner smoke; beginner-safe reason unproven | Yes | Yes |
-| 17 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Scoped repair implementation was not proven by owner smoke | Yes | Yes |
-| 18 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Health Check/BBHWorld repair remained an owner failure | Yes | Yes |
-| 19 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Source recopy behavior was not proven in affected-game flow | Yes | Yes |
+| 17 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Repair candidate search and apply calls are limited to the affected broken profile codes; focused one/multiple/zero-scope tests pass | No | Yes |
+| 18 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | No-candidate reporting includes searched-folder and affected-profile evidence plus Back; focused tests pass | No | Yes |
+| 19 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Optional source recopy hands only affected profile codes to AutoSync; no broad extraction escape found | No | Yes |
 | 20 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Back routing has source tests but no trusted package proof | Re-audit first | Yes |
-| 21 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Repair result/accounting was not trustworthy in owner smoke | Yes | Yes |
-| 22 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Post-thumbnail repair scope was not proven | Yes | Yes |
+| 21 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Repair results classify every report once and require saved-path read-back before FIXED; focused accounting tests pass | No | Yes |
+| 22 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Post-repair result completes before the optional thumbnail prompt; scoped source handoff remains affected-only | No | Yes |
 | 23 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | No new source contradiction; package gate is stale | Re-audit first | Yes |
 | 24 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Prompt source evidence exists; packaged behavior unproven | Re-audit first | Yes |
 | 25 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Normal completion source evidence lacks trusted package proof | Re-audit first | Yes |
@@ -187,6 +187,21 @@ bulk profile decision from producing an unaccounted selected game. ReShade
 result actions continue to prioritize protected conflicts over optional
 Health Check routing. Focused ReShade tests and the full main suite pass.
 Package rebuild and owner-runtime proof remain outstanding.
+
+## Slice E -- Library Health repair scope
+
+Owner IDs 17, 18, 19, 21, and 22 received a bounded Library Health
+source re-audit. Candidate search and reviewed apply remain limited to the
+affected broken profile codes. One, multiple, zero, and no-candidate cases
+retain explicit outcomes; no-candidate output includes searched-folder and
+affected-profile evidence with Back routing. Repair writes require a complete
+profile backup and saved-path read-back before `FIXED` is reported. Repair
+results now expose exact fixed/candidate/still-broken accounting. Optional
+source recopy re-enters AutoSync with `OnlyProfileCodes` restricted to the
+affected set, preventing a broad extraction escape. The repair result is
+completed before the optional thumbnail prompt. Focused Library Health tests
+and the full main suite pass. Package rebuild and owner-runtime proof remain
+outstanding.
 
 ## Crosshair close, focus, and prompt slice -- working-tree evidence
 

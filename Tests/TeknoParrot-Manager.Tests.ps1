@@ -13902,6 +13902,16 @@ Describe "Library Health Check guided repair UX contracts" {
         $thumbnailPromptIndex = $source.IndexOf('Download thumbnails for registered games missing an icon?', [StringComparison]::Ordinal)
         $repairResultIndex | Should -BeGreaterOrEqual 0
         $thumbnailPromptIndex | Should -BeGreaterThan $repairResultIndex
+        $summary = Write-LibraryHealthRepairResults -Reports @(
+            [pscustomobject]@{ Status = 'fixed'; Code = 'FIXED' }
+            [pscustomobject]@{ Status = 'candidate'; Code = 'CANDIDATE' }
+            [pscustomobject]@{ Status = 'still-broken'; Code = 'BROKEN' }
+        )
+        $summary.Total | Should -Be 3
+        $summary.Fixed | Should -Be 1
+        $summary.Candidates | Should -Be 1
+        $summary.StillBroken | Should -Be 1
+        $summary.Complete | Should -BeTrue
     }
     It "redacts user-profile path components in repair evidence" {
         (ConvertTo-TpmDisplayPath 'C:\Users\PrivateUser\Games\BBHHome\game.exe') | Should -Be 'C:\Users\<user>\Games\BBHHome\game.exe'

@@ -152,10 +152,11 @@ This report retains the prior prompt audit table below for cross-slice traceabil
 | HyperSpin direct prompts | Missing-emulator-ID flow | `G/S` uses `Read-TpmChoice`; no emulator ID is synthesized | Normal completion runtime proof remains absent | `Prompt.Core fixed choice routes` |
 | Support package prompts | Support main and package-open completion | `1-3` and `O/B` use `Read-TpmChoice`; `O` still opens the folder | Packaged support runtime proof remains absent | `Prompt.Core fixed choice routes`; SupportPackage.Tests |
 
-- IDs 11 and 12 are `SOURCE FIXED; OWNER RUNTIME NEEDED`; IDs 3, 17-22, 26, 30, and 32 remain `SOURCE FIXED; OWNER RUNTIME NEEDED`.
-- `TPM-RESHADE-001` protects unknown/custom ReShade files by default, gates adopt/replace behind explicit action and backup, reports preflight buckets, and enforces exact final accounting.
-- `TPM-CONTROLS-001` separates saved configuration, inferred readiness, and observed physical binding; propagation reports zero verified physical bindings because TPM does not test device input.
-- PR #321 remains blocked. Owner-runtime evidence is outstanding; the candidate package identity is recorded above, and no release or owner smoke is authorized.
+ - IDs 11 and 12 are `SOURCE FIXED; OWNER RUNTIME NEEDED`; IDs 17-19 and 21-22 are now also `SOURCE FIXED; OWNER RUNTIME NEEDED`; IDs 3, 16, and 29 remain source-remediation blockers.
+ - `TPM-RESHADE-001` protects unknown/custom ReShade files by default, gates adopt/replace behind explicit action and backup, reports preflight buckets, and enforces exact final accounting.
+ - `TPM-LIBRARY-HEALTH-001` limits repair and optional recopy to affected profile codes, requires saved-path read-back, and classifies every repair report exactly once.
+ - `TPM-CONTROLS-001` separates saved configuration, inferred readiness, and observed physical binding; propagation reports zero verified physical bindings because TPM does not test device input.
+ - PR #321 remains blocked. Owner-runtime evidence is outstanding; the candidate package identity is recorded above, and no release or owner smoke is authorized.
 
 ## Affected-games repair-flow scoping audit
 
@@ -171,8 +172,22 @@ This report retains the prior prompt audit table below for cross-slice traceabil
 - HyperSpin: no scoped-repair runtime proof.
 - Controls propagation: no scoped-repair runtime proof.
 
-Status: SOURCE FIXED; OWNER RUNTIME NEEDED for the generic source path. The
-required one/multiple/zero/no-candidate functional coverage is not complete.
+- Status: SOURCE FIXED for the Slice E repair-flow cases; OWNER RUNTIME NEEDED for packaged and owner-runtime proof. One/multiple/zero/no-candidate coverage is present in source and focused tests.
+### Slice E -- Library Health repair scope
+
+Owner IDs 17, 18, 19, 21, and 22 received a bounded source re-audit.
+Candidate search and reviewed apply remain limited to the affected broken
+profile codes. One, multiple, zero, and no-candidate paths retain explicit
+outcomes and Back routing. Repair writes require a complete profile backup and
+saved-path read-back before `FIXED` is reported. Repair result accounting now
+classifies every report once as fixed, candidate, or still broken. Optional
+source recopy re-enters AutoSync with `OnlyProfileCodes` restricted to the
+affected set, and the repair result completes before the optional thumbnail
+prompt.
+
+Package rebuild, owner-runtime proof, and release authorization remain
+outstanding.
+
 
 ## Support package/fatal surfacing audit
 
@@ -192,8 +207,9 @@ required one/multiple/zero/no-candidate functional coverage is not complete.
 | ReShade focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*ReShade*','*protected adoption and accounting*','*ReShade result action priority*') -CI -Output Normal` | 192 passed, 0 failed, 0 skipped, 837 not run | not captured | not captured | Pester 5.7.1 |
 | Progress.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Progress.Core*' -Output Detailed` | 2 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Prompt.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Prompt.Core*' -Output Detailed` | 4 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
+| Slice E focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*Library Health*','*Repair-GamePaths*','*repair*','*scoped*','*affected*') -CI -Output Normal` | 33 passed, 0 failed, 0 skipped, 996 not run | not captured | not captured | Pester 5.7.1 |
 | Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 production parse errors; 0 test parse errors; 0 PSScriptAnalyzer findings; production ASCII 0; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
-| Permanent procedure gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: unresolved source/owner blockers and owner-runtime evidence remain | not captured | not captured | pwsh |
+| Permanent procedure gate | `.\scripts\Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: owner report contains unresolved NOT FIXED items and owner-runtime evidence remains outstanding | not captured | not captured | pwsh |
 
 ## FFB mode-8 hardening round -- 2026-09-08
 
