@@ -17,6 +17,15 @@
   validation and the reachable local role reset choice; reset verification
   remains mandatory, and normal recovery output keeps raw client diagnostics
   in Details/logs.
+  RC8 ReShade remediation keeps the preview view-only and
+  terminal-authoritative, guards paint events when preview state or assets are
+  unavailable, and explains the five beginner-safe profile set. Apply-all
+  output reports the safely changeable and unchanged counts; result summaries
+  distinguish changed, protected, adopted/replaced, unsafe/malformed skipped,
+  and actual failure outcomes. Normal trust warnings use beginner-safe
+  wording while technical signature details remain in logs and support
+  evidence.
+
 
 
   TPM-owned runtime files now use

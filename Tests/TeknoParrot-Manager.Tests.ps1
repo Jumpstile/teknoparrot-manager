@@ -11852,7 +11852,7 @@ Describe "RC8 menu and ReShade regressions" {
         $source = $script:ProductionSource
         $invokeStart = $source.IndexOf('function Invoke-ReShadeSetup')
         $signatureCheck = $source.IndexOf('Test-ReShadeDllSignature -Path $dllCheck.Path', $invokeStart)
-        $reviewWarning = $source.IndexOf('TPM will not claim installer trust', $signatureCheck)
+        $reviewWarning = $source.IndexOf('signature could not be verified by Windows', $signatureCheck)
         $deployment = $source.IndexOf('Installing ReShade into', $signatureCheck)
         $signatureCheck | Should -BeGreaterThan $invokeStart
         $reviewWarning | Should -BeGreaterThan $signatureCheck
@@ -12512,7 +12512,7 @@ Describe "ReShade TutorialProgress mitigation" {
     }
     It "reports a bounded startup overlay rather than promising full quiet startup" {
         $source = $script:ProductionSource
-        $source | Should -Match 'TPM marks the ReShade first-run tutorial as completed for TPM-managed installs\. ReShade may still show a brief normal startup/loading overlay\.'
+        $source | Should -Match 'TeknoParrot Manager marks the ReShade first-run tutorial as completed for manager-managed installs\. ReShade may still show a brief normal startup/loading overlay\.'
         $source | Should -Not -Match 'full quiet startup|full banner suppression|NoUpdate|NoNews|NoTutorial|splash-disable'
         $source | Should -Match 'TUTORIAL_PROGRESS_FAILED'
     }
@@ -12661,7 +12661,7 @@ Describe "ReShade trusted profile restore" {
     It "keeps ReShade preview and deployment confirmation wording explicit" {
         $source = $script:ProductionSource
         $source | Should -Match 'Choose how your game should look'
-        $source | Should -Match 'Use the preview window to compare the options'
+        $source | Should -Match 'Use the preview window to compare the five beginner-safe RC8 profiles'
         $source | Should -Match 'Nothing will be changed until you confirm'
         $source | Should -Match 'saved game executable was not found -- skipped'
         $source | Should -Match 'protected existing ReShade files -- unchanged'
@@ -14309,8 +14309,8 @@ Describe "ReShade protected adoption and accounting" {
     It "reports preflight failed and protected categories explicitly" {
         $source = $script:ProductionSource
         $source | Should -Match 'failed/preflight blocked'
-        $source | Should -Match 'TPM found ReShade files it did not create'
-        $source | Should -Match 'TPM will back them up first'
+        $source | Should -Match 'TeknoParrot Manager found ReShade files it did not create'
+        $source | Should -Match 'TeknoParrot Manager will back them up first'
     }
     It "detects native CRT and SSAA settings without changing the XML" {
         $doc = New-Object System.Xml.XmlDocument

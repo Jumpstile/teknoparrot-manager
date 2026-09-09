@@ -5535,6 +5535,7 @@ function New-TpmReShadePreviewPaintHandler {
     return {
         param($senderArg, $eventArgsArg)
         try {
+            if (-not $State -or -not $Picture -or -not $eventArgsArg -or -not $eventArgsArg.Graphics) { return }
             $getState = {
                 param([string]$Name)
                 if ($State -is [hashtable]) { return $State[$Name] }
@@ -7381,6 +7382,16 @@ function Sync-TpmReShadeGallerySelection {
     }
 }
 
+function Get-TpmReShadeGameLabel {
+    param([Parameter(Mandatory)][string]$ProfilePath, [string]$Fallback = '')
+    try {
+        $doc = Read-Xml $ProfilePath
+        $name = if ($doc.GameProfile -and $doc.GameProfile.GameName) { ([string]$doc.GameProfile.GameName).Trim() } else { '' }
+        if (-not [string]::IsNullOrWhiteSpace($name)) { return $name }
+    } catch {}
+    if (-not [string]::IsNullOrWhiteSpace($Fallback)) { return $Fallback }
+    return [IO.Path]::GetFileNameWithoutExtension($ProfilePath)
+}
 
 
 function Read-TpmReShadeTerminalProfile {
@@ -7397,9 +7408,8 @@ function Read-TpmReShadeTerminalProfile {
             try { [Windows.Forms.Application]::DoEvents() } catch {}
         }
         Write-Host ''
-        Write-Host '  Choose how your game should look.' -ForegroundColor Cyan
-        Write-Host '  Preview uses a bundled image to approximate each TPM-approved profile. Actual in-game results may vary.' -ForegroundColor DarkCyan
-        if ($PreviewSession) { Write-Host '  The preview follows this terminal selection; the terminal chooser is authoritative.' -ForegroundColor DarkCyan }
+        Write-Host '  Preview uses a bundled image only; the terminal chooser is authoritative and view-only.' -ForegroundColor DarkCyan
+        Write-Host '  Choose a profile number in the terminal. The preview follows it and never selects a profile.' -ForegroundColor DarkCyan
         for ($profileIndex = 0; $profileIndex -lt $orderedIds.Count; $profileIndex++) {
             $id = $orderedIds[$profileIndex]
             $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
@@ -7408,8 +7418,7 @@ function Read-TpmReShadeTerminalProfile {
             Write-Host ('  [{0}] {1} {2}' -f ($profileIndex + 1), $marker, $profileEntry.FriendlyName) -ForegroundColor $(if ($marker -eq '*') { 'Yellow' } else { 'White' })
             Write-Host ('      {0}' -f $profileEntry.Description) -ForegroundColor DarkGray
         }
-        Write-Host ''
-        Write-Host ('  Current selection: {0}' -f $(if ($selected) { $selected.FriendlyName } else { 'none -- choose 1-5 first' })) -ForegroundColor Yellow
+        Write-Host ('  Current selection: {0}' -f $(if ($selected) { $selected.FriendlyName } else { 'none -- choose a profile number in the terminal' })) -ForegroundColor Yellow
         Write-Host '  Choose: [1-5] Select profile  [U] Use selected profile  [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back  [D] Details' -ForegroundColor White
         $choice = (Read-TpmReShadeTerminalInput -Prompt '  Choice' -PumpPreviewMessages ([bool]$PreviewSession)).Trim().ToUpperInvariant()
         if ($choice -match '^[1-5]$') {
@@ -7424,9 +7433,9 @@ function Read-TpmReShadeTerminalProfile {
             continue
         }
         if ($choice -eq 'D') {
-            Write-Host '  TPM shows a safe preview approximation using a bundled image.' -ForegroundColor DarkCyan
+            Write-Host '  TeknoParrot Manager shows a safe preview approximation using a bundled image.' -ForegroundColor DarkCyan
             Write-Host '  It does not run the game or execute ReShade shaders during preview.' -ForegroundColor DarkCyan
-            Write-Host '  The listed techniques are the approved ReShade techniques TPM will install if you confirm.' -ForegroundColor DarkCyan
+            Write-Host '  RC8 includes five beginner-safe profiles; additional profile codes are not part of this release.' -ForegroundColor DarkCyan
             Write-Host '  Actual in-game results may vary.' -ForegroundColor DarkCyan
             foreach ($id in $orderedIds) {
                 $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
@@ -7527,7 +7536,8 @@ function Get-TpmReShadeApplyPreflight {
     $missingPath = 0
     $unsafe = 0
     foreach ($pf in $SelectedGames) {
-        $record = [ordered]@{ Game = $pf.BaseName; Status = 'Unsafe'; Detail = '' }
+        $gameLabel = Get-TpmReShadeGameLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
+        $record = [ordered]@{ Game = $gameLabel; Status = 'Unsafe'; Detail = '' }
         try {
             $doc = Read-Xml $pf.FullName
             $pathNode = if ($doc.GameProfile) { $doc.GameProfile.SelectSingleNode('GamePath') } else { $null }
@@ -7710,9 +7720,10 @@ function Invoke-ReShadeSetup {
         try { $sha256 = (Get-FileHash -LiteralPath $dllCheck.Path -Algorithm SHA256).Hash } catch {}
         Write-Log ("ReShade ({0}): signature={1} signer='{2}' sha256={3}" -f $dllCheck.Label, $sigResult.Status, $sigResult.Signer, $sha256)
         if ($sigResult.Status -eq 'Valid') {
-            Write-Host ("  ReShade ($($dllCheck.Label)) Authenticode signature is valid. TPM can use this supplied DLL.") -ForegroundColor DarkGray
+            Write-Host ("  ReShade ($($dllCheck.Label)) Authenticode signature is valid. TeknoParrot Manager can use this supplied DLL.") -ForegroundColor DarkGray
         } else {
-            Write-Host ("  ReShade ($($dllCheck.Label)) Authenticode status: {0} ({1}). This is separate from source and SHA-256 checks; TPM will not claim installer trust, but can continue with this user-supplied DLL." -f $sigResult.Status, (Get-SignatureStatusText -Status $sigResult.Status)) -ForegroundColor Yellow
+            Write-Host ("  ReShade ($($dllCheck.Label)) signature could not be verified by Windows. This does not automatically mean the file is broken; TeknoParrot Manager can continue with this user-supplied DLL." ) -ForegroundColor Yellow
+            Write-Host "  Technical signature status and SHA-256 details are available in the log and Details/support evidence." -ForegroundColor DarkGray
             Write-Host "  The SHA-256 is recorded in the log. Stop and replace the DLL if its source or hash is not trusted." -ForegroundColor Yellow
         }
     }
@@ -7732,10 +7743,8 @@ function Invoke-ReShadeSetup {
         }
     }
 
-
-    Write-Host "  Choose how your game should look." -ForegroundColor Cyan
-    Write-Host "  Use the preview window to compare the options." -ForegroundColor Cyan
-    Write-Host "  Nothing will be changed until you confirm." -ForegroundColor DarkCyan
+    Write-Host "  Choose how your game should look. Use the preview window to compare the five beginner-safe RC8 profiles." -ForegroundColor Cyan
+    Write-Host "  The preview is view-only; select the profile in the terminal. Nothing will be changed until you confirm." -ForegroundColor DarkCyan
     Write-Host "  Preview gallery (bundled landscape; compare Original/After or Split; choose profiles in the terminal)" -ForegroundColor DarkCyan
     $favoriteState = Read-TpmReShadeState
     $favoriteProfiles = @()
@@ -7839,10 +7848,10 @@ function Invoke-ReShadeSetup {
     if ($preflightSummary.Protected -gt 0) {
         Write-Host '  Protected installs remain unchanged unless the separate, explicit Adopt action is used.' -ForegroundColor Yellow
         if ($Action -eq 'Adopt') {
-            Write-Host '  TPM found ReShade files it did not create.' -ForegroundColor Yellow
-            Write-Host '  TPM protected them so it would not overwrite a custom setup.' -ForegroundColor Yellow
-            Write-Host '  You may replace them with TPM-managed ReShade because you chose Adopt/replace.' -ForegroundColor Yellow
-            Write-Host '  TPM will back them up first; backup failure blocks replacement.' -ForegroundColor Yellow
+            Write-Host '  TeknoParrot Manager found ReShade files it did not create.' -ForegroundColor Yellow
+            Write-Host '  TeknoParrot Manager protected them so it would not overwrite a custom setup.' -ForegroundColor Yellow
+            Write-Host '  You may replace them with TeknoParrot Manager-managed ReShade because you chose Adopt/replace.' -ForegroundColor Yellow
+            Write-Host '  TeknoParrot Manager will back them up first; backup failure blocks replacement.' -ForegroundColor Yellow
         }
     }
     $bulkApply = $false
@@ -7852,7 +7861,8 @@ function Invoke-ReShadeSetup {
     $restoreSelections = @{}
     if ($selectedGames.Count -gt 1) {
         do {
-            Write-Host ("  Apply {0} to all {1} selected games?" -f $selectedProfile.FriendlyName, $selectedGames.Count) -ForegroundColor Cyan
+            Write-Host ("  {0} selected games: {1} can safely change now; {2} will remain unchanged because they are protected, missing, unsafe, or malformed." -f $selectedGames.Count, $preflightSummary.Ready, ($selectedGames.Count - $preflightSummary.Ready)) -ForegroundColor Cyan
+            Write-Host ("  Apply {0} to the {1} games that can safely change now?" -f $selectedProfile.FriendlyName, $preflightSummary.Ready) -ForegroundColor Cyan
             Write-Host '  [Y] Yes, apply to all'
             Write-Host '  [S] Select games one by one'
             Write-Host '  [B] Back'
@@ -7952,10 +7962,11 @@ function Invoke-ReShadeSetup {
     foreach ($pf in $selectedGames) {
         try {
             $doc = Read-Xml $pf.FullName
-            if (-not $doc.GameProfile) { $skipped++; $unsafe++; [void]$unsafeDetails.Add(('{0}: malformed GameProfile XML.' -f $pf.BaseName)); Write-Host ("    {0}: game profile is invalid -- unsafe/malformed, unchanged" -f $pf.BaseName) -ForegroundColor Yellow; continue }
+            $gameLabel = Get-TpmReShadeGameLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
+            if (-not $doc.GameProfile) { $skipped++; $unsafe++; [void]$unsafeDetails.Add(('{0}: malformed GameProfile XML.' -f $gameLabel)); Write-Host ("    {0}: game profile is invalid -- unsafe/malformed, unchanged" -f $gameLabel) -ForegroundColor Yellow; continue }
 
             $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
-            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; $missingPath++; if (-not $pathReasonCounts.ContainsKey('GAME_PATH_MISSING')) { $pathReasonCounts['GAME_PATH_MISSING'] = 0 }; $pathReasonCounts['GAME_PATH_MISSING']++; Write-Host ("    {0}: saved game path was empty -- skipped" -f $pf.BaseName) -ForegroundColor DarkGray; continue }
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; $missingPath++; if (-not $pathReasonCounts.ContainsKey('GAME_PATH_MISSING')) { $pathReasonCounts['GAME_PATH_MISSING'] = 0 }; $pathReasonCounts['GAME_PATH_MISSING']++; Write-Host ("    {0}: saved game path was empty -- skipped" -f $gameLabel) -ForegroundColor DarkGray; continue }
 
             $gamePath = $gpNode.InnerText.Trim()
             $pathCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
@@ -8111,7 +8122,10 @@ function Invoke-ReShadeSetup {
     }
     $skippedForAccounting = [Math]::Max(0, $skipped - $missingPath - $missingDevice - $unsafe)
     $accounting = Get-TpmReShadeApplyAccounting -Selected $selectedGames.Count -Deployed $deployed -Adopted $adopted -Protected $protected -MissingPath $missingPath -MissingDevice $missingDevice -Unsafe $unsafe -Failed $errors -KeptPrevious $keptProfile -SkippedCancelled $skippedForAccounting
-    Write-Host ("  Accounting: {0} selected = {1} changed TPM-managed + {2} adopted/replaced + {3} protected unchanged + {4} kept previous + {5} missing path + {6} unsafe + {7} failed + {8} skipped/cancelled." -f $accounting.Selected, $accounting.ChangedTpmManaged, $accounting.AdoptedReplaced, $accounting.ProtectedUnchanged, $accounting.KeptPrevious, $accounting.MissingPath, $accounting.UnsafeOwnershipPath, $accounting.Failed, $accounting.SkippedCancelled) -ForegroundColor DarkCyan
+    $changedTotal = $accounting.ChangedTpmManaged + $accounting.AdoptedReplaced
+    $notChangedTotal = $accounting.ProtectedUnchanged + $accounting.KeptPrevious + $accounting.MissingPath + $accounting.UnsafeOwnershipPath + $accounting.SkippedCancelled
+    Write-Host ("  Result: {0} changed; {1} not changed; {2} actual failures." -f $changedTotal, $notChangedTotal, $accounting.Failed) -ForegroundColor Cyan
+    Write-Host ("  Detail: {0} unsafe/malformed skipped; {1} protected unchanged; {2} adopted/replaced; {3} missing path/device." -f $accounting.UnsafeOwnershipPath, $accounting.ProtectedUnchanged, $accounting.AdoptedReplaced, $accounting.MissingPath) -ForegroundColor DarkCyan
     if (-not $accounting.Complete) { throw 'ReShade accounting invariant failed: terminal outcomes did not equal selected games.' }
     Write-Log ("ReShade accounting: Selected={0} ChangedTpmManaged={1} AdoptedReplaced={2} ProtectedUnchanged={3} KeptPrevious={4} MissingPath={5} UnsafeOwnershipPath={6} Failed={7} SkippedCancelled={8}" -f $accounting.Selected, $accounting.ChangedTpmManaged, $accounting.AdoptedReplaced, $accounting.ProtectedUnchanged, $accounting.KeptPrevious, $accounting.MissingPath, $accounting.UnsafeOwnershipPath, $accounting.Failed, $accounting.SkippedCancelled)
 
@@ -8133,12 +8147,12 @@ function Invoke-ReShadeSetup {
     if ($unsafe -gt 0) {
         Write-Host ("  Unsafe/malformed ownership or path : {0} game(s) -- unchanged" -f $unsafe) -ForegroundColor Yellow
         foreach ($unsafeDetail in $unsafeDetails) { Write-Host ("    {0}" -f $unsafeDetail) -ForegroundColor Yellow }
-        Write-Host "  Review the listed ownership/path issue, then run ReShade setup again. TPM did not guess or overwrite it." -ForegroundColor Yellow
+        Write-Host "  Review the listed ownership/path issue, then run ReShade setup again. TeknoParrot Manager did not guess or overwrite it." -ForegroundColor Yellow
+        Write-Host "  Next safe action: repair the saved path or ownership metadata, use explicit Adopt only for protected installs, skip the game, or open Details/support for the exact path." -ForegroundColor Yellow
     }
     if ($unsupported -gt 0) { Write-Host ("  Skipped unsupported or missing 32-bit : {0} game(s)" -f $unsupported) -ForegroundColor DarkGray }
     if ($protected -gt 0) { Write-Host ("  Protected: {0} game(s) already had ReShade files, so TeknoParrot Manager left them unchanged." -f $protected) -ForegroundColor Yellow }
-    if ($adopted -gt 0) { Write-Host ("  Adopted protected install : {0} game(s) -- existing files were replaced only through the explicit Adopt action." -f $adopted) -ForegroundColor Cyan }
-    if ($tutorialProgressFixed -gt 0) { Write-Host "  TPM marks the ReShade first-run tutorial as completed for TPM-managed installs. ReShade may still show a brief normal startup/loading overlay." -ForegroundColor DarkGray }
+    if ($tutorialProgressFixed -gt 0) { Write-Host "  TeknoParrot Manager marks the ReShade first-run tutorial as completed for manager-managed installs. ReShade may still show a brief normal startup/loading overlay." -ForegroundColor DarkGray }
     if ($errors -gt 0) { Write-Host ("  Errors        : {0}  -- see TeknoParrot-Manager.log for details" -f $errors) -ForegroundColor Red }
     Write-Host ""
     Write-Host "  To turn effects on/off: launch a game and press the  Home  key." -ForegroundColor Cyan

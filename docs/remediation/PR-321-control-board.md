@@ -15,6 +15,10 @@ Status: blocked. This board is the source of truth for TPM remediation state.
   rollback failure handling, retry guidance, and bounded prompt/full-name UX.
 - Permanent procedure gate remains expected to fail until this source slice,
   package rebuild, and owner-runtime evidence are complete.
+- Slice 3 ReShade source changes are also uncommitted: preview remains
+  terminal-authoritative and view-only; normal setup now explains the five
+  beginner-safe profiles, full game labels, bulk changeability, and outcome
+  accounting. Package rebuild and owner-runtime proof remain outstanding.
 
 ## Status rules
 

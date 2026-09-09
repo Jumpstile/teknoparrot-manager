@@ -129,6 +129,12 @@ leave unchanged, so the accounting total must still equal the selected count.
 
 Focused ReShade coverage and the full main suite pass. Package rebuild,
 owner-runtime proof, and release authorization remain outstanding.
+Slice 3 also makes the preview contract explicit: the gallery is view-only and
+the terminal remains the sole chooser. Normal output names the five RC8
+beginner-safe profiles, uses full GameName values when available, reports
+changeable versus unchanged bulk scope, and gives changed/not-changed/failure
+accounting. Unsafe or malformed ownership remains fail-closed with repair,
+explicit protected Adopt, skip, and Details/support guidance.
 
 ### Crosshair close, focus, and prompt slice -- working-tree status
 
@@ -378,8 +384,8 @@ traceability but do not override these corrected classifications.
 | 8 | Thumbnail fallback | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | 404/fallback path hit duplicate ErrorAction before slice | Yes | Yes | 5578636706 |
 | 9 | ReShade preview sync | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Source/test evidence not contradicted | No | Yes | 5578628627 |
 | 10 | ReShade selector | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Selector contract remains source-supported | No | Yes | 5578628627 |
-| 11 | ReShade protected ownership | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Ownership claim requires source re-audit before trust | Yes | Yes | 5578628627 |
-| 12 | ReShade accounting/result | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Accounting accepted before failed package smoke | Yes | Yes | 5578628627 |
+| 11 | ReShade protected ownership | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Slice 3 source re-audit and protected/unsafe action remediation passed focused/full source tests | No | Yes | 5578628627 |
+| 12 | ReShade accounting/result | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Slice 3 apply-all wording, accounting separation, and terminal invariant passed focused/full source tests | No | Yes | 5578628627 |
 | 13 | Crosshair close | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Export-CrosshairPreview now enters a completed non-interactive state after P2 and gives explicit return/close guidance | No | Yes | 5585999038 |
 | 14 | Crosshair focus | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Best-effort SetForegroundWindow return is logged when unavailable; terminal workflow remains usable | No | Yes | 5585999038 |
 | 15 | Crosshair prompt row | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Workflow-aware P1/P2, confirmation, first-run, and cursor-hide prompts with typed fallback | No | Yes | 5585999038 |

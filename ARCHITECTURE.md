@@ -90,6 +90,12 @@ errors are logged with their stage, the optional gallery is closed, and the
 terminal-only chooser remains authoritative. Gallery events, preview refresh,
 and all comparison controls are visual-only; deployment is still unreachable
 until terminal `U` plus the existing explicit confirmation.
+The normal ReShade setup path describes the gallery as view-only and keeps the
+terminal chooser authoritative. RC8 exposes five beginner-safe profiles:
+Original, Clean & Sharp, Classic Arcade CRT, Vivid Arcade, and Enhanced Arcade.
+The setup summary leads with changed, not-changed, and actual-failure totals;
+unsafe or malformed ownership/path entries remain unchanged and direct the user
+to repair, explicit Adopt for protected content, skip, or Details/support.
 
 **Shared game mutation path boundary (RC8).** ReShade, dgVoodoo2, GPU-fix,
 and BepInEx call `Test-TpmGameMutationPath` before inspection and immediately
