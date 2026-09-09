@@ -12598,6 +12598,22 @@ Describe "ReShade trusted profile restore" {
         $script:ProductionSource | Should -Match 'if\(p1!==null&&p2!==null\)return'
         $script:ProductionSource | Should -Match 'document\.body\.classList\.add\(''complete''\)'
     }
+    It "closes an owned preview and reports unavailable close or focus plainly" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Start-Process -FilePath \$previewPath -PassThru'
+        $source | Should -Match '\$previewProcess\.HasExited'
+        $source | Should -Match '\$previewProcess\.CloseMainWindow\(\)'
+        $source | Should -Match 'Crosshair preview could not be closed automatically'
+        $source | Should -Match 'could not restore console focus'
+    }
+    It "keeps Crosshair confirmation input on the prompt line" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'function Read-TpmCrosshairYesNo'
+        $source | Should -Match 'Clear-TpmWorkflowFooter -Context \$WorkflowContext'
+        $source | Should -Match 'Read-HostSafe \$Prompt'
+        $source | Should -Match 'TeknoParrot Manager found pcsx2x6'
+        $source | Should -Not -Match 'TPM found pcsx2x6'
+    }
 
     It "reports focus fallback and keeps deployment behind terminal confirmation" {
         $script:ProductionSource | Should -Match '\$focusReturned = Focus-TpmConsoleBestEffort'

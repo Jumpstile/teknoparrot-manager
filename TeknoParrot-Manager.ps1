@@ -10055,6 +10055,25 @@ public static class TpmConsoleNativeMethods {
 # deploy selected images to all registered lightgun game folders. Optionally
 # hides the hardware cursor by setting HideCursor/DisableCursor=1 in every
 # lightgun UserProfile (backs up profiles first).
+function Read-TpmCrosshairYesNo {
+    param([Parameter(Mandatory)][string]$Prompt, [string]$Default = 'Y', [object]$WorkflowContext = $null)
+    do {
+        if ($WorkflowContext) {
+            Set-TpmWorkflowWaiting -Context $WorkflowContext -Message $Prompt -UserAction $Prompt
+            Clear-TpmWorkflowFooter -Context $WorkflowContext
+            $raw = Read-HostSafe $Prompt
+            Clear-TpmWorkflowFooter -Context $WorkflowContext
+            Resume-TpmWorkflowStatus -Context $WorkflowContext
+        } else {
+            $raw = Read-HostSafe $Prompt -Default $Default
+        }
+        if ($WorkflowContext -and $raw -eq '') { $raw = $Default }
+        $answer = ([string]$raw).Trim().ToUpperInvariant()
+        if ($answer -notin @('Y', 'N')) { Write-Host '  Please choose Y or N.' -ForegroundColor Yellow }
+    } while ($answer -notin @('Y', 'N'))
+    return $answer
+}
+
 function Invoke-CrosshairSetup {
     param([string]$UserProfilesDir, [string]$GamesInstallFolder, [string]$TpRoot, [object]$WorkflowContext = $null)
 
@@ -10099,6 +10118,8 @@ function Invoke-CrosshairSetup {
 
     Write-Host ("  Found {0} valid crosshair(s). Generating preview..." -f $valid.Count) -ForegroundColor Cyan
     $bridgeSession = $null
+    $previewProcess = $null
+    $browserCloseState = 'NotStarted'
     try {
         $bridgeSession = Start-CrosshairSelectionBridge -TimeoutSeconds 45 -Count $valid.Count
         Export-CrosshairPreview -CrosshairPaths $valid.ToArray() -OutPath $previewPath -BridgeUrl $bridgeSession.Url -BridgeToken $bridgeSession.Token
@@ -10112,7 +10133,7 @@ function Invoke-CrosshairSetup {
     Write-Host "  Preview: $previewPath" -ForegroundColor Cyan
     if (Test-Path -LiteralPath $previewPath -PathType Leaf) {
         try {
-            Start-Process -FilePath $previewPath -ErrorAction Stop | Out-Null
+            $previewProcess = Start-Process -FilePath $previewPath -PassThru -ErrorAction Stop
         } catch {
             if ($bridgeSession) {
                 Stop-CrosshairSelectionBridge -Session $bridgeSession
@@ -10152,8 +10173,33 @@ function Invoke-CrosshairSetup {
         } catch { Write-Log "Crosshairs: browser selection read failed -- $_"; Stop-CrosshairSelectionBridge -Session $bridgeSession }
     }
     if ($bridgeSession) {
+        if ($previewProcess) {
+            try {
+                if ($previewProcess.HasExited) {
+                    $browserCloseState = 'Unavailable'
+                    Write-Log 'Crosshairs: preview launcher exited before its window could be closed.'
+                } elseif ($previewProcess.CloseMainWindow()) {
+                    $browserCloseState = 'Closed'
+                    Write-Host "  Crosshair preview closed after both selections." -ForegroundColor DarkCyan
+                } else {
+                    $browserCloseState = 'Unavailable'
+                }
+            } catch {
+                $browserCloseState = 'Unavailable'
+                Write-Log "Crosshairs: preview close failed -- $_"
+            }
+        }
+        if ($browserCloseState -eq 'Unavailable') {
+            Write-Host "  Crosshair preview could not be closed automatically. Close the browser window, then continue here." -ForegroundColor Yellow
+            Write-Log 'Crosshairs: browser selection completed; preview close was unavailable.'
+        }
         $focusReturned = Focus-TpmConsoleBestEffort
-        if (-not $focusReturned) { Write-Log 'Crosshairs: browser selection completed; console focus return was unavailable.' }
+        if ($focusReturned) {
+            Write-Host "  TeknoParrot Manager console focus restored." -ForegroundColor DarkCyan
+        } else {
+            Write-Host "  TeknoParrot Manager could not restore console focus. Select this console window to continue." -ForegroundColor Yellow
+            Write-Log 'Crosshairs: browser selection completed; console focus return was unavailable.'
+        }
     }
 
     # Pick P1
@@ -10167,7 +10213,6 @@ function Invoke-CrosshairSetup {
         elseif ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $valid.Count) { $p1Idx = [int]$raw }
         else { Write-Host ("  Enter a number between 0 and {0}." -f ($valid.Count - 1)) -ForegroundColor Yellow }
     }
-    # Pick P2
     $p2Idx = $browserP2Idx
     while ($null -eq $p2Idx) {
         $promptText = if ($null -ne $lastP2Idx) {
@@ -10183,7 +10228,7 @@ function Invoke-CrosshairSetup {
     $p2Name = [System.IO.Path]::GetFileNameWithoutExtension($valid[$p2Idx])
     Write-Host ""
     Write-Host "  P1: $p1Name    P2: $p2Name" -ForegroundColor Green
-    $crosshairConfirm = Read-TpmYesNo -Prompt "  Apply these crosshairs? (Y/N, default Y)" -Default 'Y' -WorkflowContext $WorkflowContext
+    $crosshairConfirm = Read-TpmCrosshairYesNo -Prompt "  Apply these crosshairs? (Y/N, default Y)" -Default 'Y' -WorkflowContext $WorkflowContext
     if ($crosshairConfirm -ne 'Y') {
         Write-Host "  Crosshair setup cancelled. No files were changed." -ForegroundColor Yellow
         Write-Log "Crosshairs: cancelled before deployment."
@@ -10209,8 +10254,7 @@ function Invoke-CrosshairSetup {
 
     # Locate pcsx2x6 folder -- shared resolver, see Resolve-Pcsx2Directory.
     $pcsx2Dir = Resolve-Pcsx2Directory -TeknoParrotRoot $TpRoot
-
-    # Deploy
+# Deploy
     Write-Host ""
     Write-Host "  Deploying to lightgun games..." -ForegroundColor Cyan
     $deployed = 0; $skipped = 0; $errors = 0; $elfDeployed = $false; $pcsx2Deployed = $false
@@ -10222,6 +10266,7 @@ function Invoke-CrosshairSetup {
         try {
             $doc     = Read-Xml $pf.FullName
             if ($null -eq $doc.GameProfile) { continue }
+            $gameLabel = if ($doc.GameProfile.GameName) { ([string]$doc.GameProfile.GameName).Trim() } else { $pf.BaseName }
             $gunNode = $doc.GameProfile.SelectSingleNode("GunGame")
             if (-not $gunNode -or $gunNode.InnerText -ne "true") { continue }
 
@@ -10253,8 +10298,8 @@ function Invoke-CrosshairSetup {
                         if ($prereqState.State -eq 'StockUninitialized') {
                             Write-Host ""
                             Write-Host "  PCSX2 Crosshair Setup Required" -ForegroundColor Cyan
-                            Write-Host ("    TPM found pcsx2x6 installed but not yet initialized for TeknoParrot ({0})." -f $prereqState.Reason) -ForegroundColor DarkGray
-                            Write-Host "    TPM can trigger the emulator's own first-run initialization, then install the crosshair assets and verify the result." -ForegroundColor DarkGray
+                            Write-Host ("    TeknoParrot Manager found pcsx2x6 installed but not yet initialized for TeknoParrot ({0})." -f $prereqState.Reason) -ForegroundColor DarkGray
+                            Write-Host "    TeknoParrot Manager can trigger the emulator's own first-run initialization, then install the crosshair assets and verify the result." -ForegroundColor DarkGray
                             $firstRunAnswer = Read-TpmYesNo -Prompt "  Configure Automatically? (Y/N)" -WorkflowContext $WorkflowContext
                             if ($firstRunAnswer -eq "Y") {
                                 if (-not (Wait-TpmForProcessClose -ProcessNames @('pcsx2-qtx64') -FriendlyName 'PCSX2')) {
@@ -10350,8 +10395,8 @@ function Invoke-CrosshairSetup {
 
             Copy-Item -LiteralPath $valid[$p1Idx] -Destination (Join-Path $exeDir "P1.png") -Force -ErrorAction Stop
             Copy-Item -LiteralPath $valid[$p2Idx] -Destination (Join-Path $exeDir "P2.png") -Force -ErrorAction Stop
-            Write-Host ("    {0} -> {1}" -f $pf.BaseName, $exeDir) -ForegroundColor Green
-            Write-Log "Crosshairs: deployed $($pf.BaseName) -> $exeDir"
+            Write-Host ("    {0} -> {1}" -f $gameLabel, $exeDir) -ForegroundColor Green
+            Write-Log "Crosshairs: deployed $gameLabel -> $exeDir"
             $deployed++
         } catch {
             Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
@@ -24259,7 +24304,7 @@ $mode = $null
             Write-Host "Crosshair setup finished and was verified." -ForegroundColor Green
             Write-Log "Crosshair setup complete."
         } else {
-            [void](Set-TpmWorkflowFailure -Context $crosshairStatus -FailureId 'crosshair-incomplete' -Message 'Crosshair setup was not completed.' -DataSafety 'TPM did not claim a complete crosshair deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            [void](Set-TpmWorkflowFailure -Context $crosshairStatus -FailureId 'crosshair-incomplete' -Message 'Crosshair setup was not completed.' -DataSafety 'TeknoParrot Manager did not claim a complete crosshair deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
             Write-Host ""
             Write-Host "Crosshair setup was not completed. The message above is the authoritative result." -ForegroundColor Yellow
             [void](Read-HostSafe '  Press Enter to acknowledge the crosshair result')

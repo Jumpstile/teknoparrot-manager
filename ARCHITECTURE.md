@@ -55,9 +55,11 @@ Crosshair browser selection is deliberately consumed from the main PowerShell
 runspace. `HttpListener` completion is polled and finalized with
 `EndGetContext`; PowerShell scriptblocks are never used as I/O-thread callbacks.
 After valid P2 selection, the generated page enters a completed non-interactive
-state with explicit return-to-TPM/close guidance. Listener shutdown is guaranteed;
-focus return is attempted and logged when unavailable, while typed numeric
-selection remains the fallback when preview or browser startup fails.
+state with explicit return-to-TeknoParrot Manager/close guidance. When the
+preview process exposes a closeable window, TeknoParrot Manager closes it;
+otherwise the user receives an explicit close instruction. Listener shutdown is
+guaranteed, focus return is attempted with a plain-language fallback, and typed
+numeric selection remains available when preview or browser startup fails.
 
 ReShade profile selection opens an optional non-modal gallery and immediately
 leaves the terminal at the authoritative numbered chooser. The terminal

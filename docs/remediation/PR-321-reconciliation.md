@@ -138,14 +138,14 @@ explicit protected Adopt, skip, and Details/support guidance.
 
 ### Crosshair close, focus, and prompt slice -- working-tree status
 
-IDs 13, 14, and 15 were re-audited separately. ID 13 is source-fixed with a
-completed non-interactive browser state after P2; ID 14 is source-fixed with
-best-effort console focus and an explicit logged fallback; ID 15 is source-fixed
-with workflow-aware P1/P2, confirmation, first-run, and cursor-hide prompts when
-the CrosshairSetup workflow context exists. Standalone typed input remains the
-fallback. Deployment remains behind terminal confirmation, and cancellation
-does not deploy files. Focused crosshair coverage, package rebuild, and
-owner-runtime proof remain outstanding.
+IDs 13, 14, and 15 were re-audited separately. The generated browser page
+enters a completed non-interactive state after P2; the manager now attempts to
+close the process it opened and gives explicit close guidance when that is not
+available. Console focus return is attempted with a plain-language fallback.
+The Crosshair confirmation uses a workflow-aware prompt helper that clears the
+status footer before and after input so Y/N remains on the active prompt line.
+P1/P2 deployment semantics remain unchanged. Focused Crosshair coverage,
+package rebuild, and owner-runtime proof remain outstanding.
 
 ## Prompt/gate/back-routing consistency audit
 The Progress.Core inventory and classifications are recorded in

@@ -25,6 +25,10 @@
   and actual failure outcomes. Normal trust warnings use beginner-safe
   wording while technical signature details remain in logs and support
   evidence.
+  Crosshair browser selection now attempts to close the manager-owned preview
+  after valid P2 selection, reports when close or console focus is unavailable,
+  and keeps confirmation input on the active prompt line. Deployment semantics
+  remain unchanged.
 
 
 
