@@ -208,7 +208,11 @@ password and database mutations behind verified recovery evidence, and does
 not claim completion after backup, reset, restart, or profile-save failures.
 Focused tests cover password mismatch, backup failure, service-unavailable,
 missing-database, corruption, reinitialize confirmation/cancel, retry/back,
-and no-mutation boundaries.
+and no-mutation boundaries. The follow-up remediation keeps PACKAGE_MISMATCH
+and IDENTITY_MISMATCH as hard-stop conditions, does not construct retry state
+from mismatched payload data, exposes both masked password validation and the
+reachable local role reset choice, and keeps raw client diagnostics in
+Details/logs.
 
 Package rebuild and owner-runtime proof remain outstanding.
 ### Slice F -- Support evidence scoping

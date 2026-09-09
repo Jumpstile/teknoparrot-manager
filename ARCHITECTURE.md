@@ -121,12 +121,15 @@ is the mutation cutoff. If it succeeds but service restart or new-password
 authentication cannot be verified, recovery returns `PasswordChangeCommitted`
 and a blocked result with evidence; it never says the old password remains
 authoritative and never saves the unverified replacement credential.
-When a protected database backup fails because the saved password is rejected, the
-recovery screen exposes a reachable masked password validation action (`P`) and
-keeps raw client diagnostics behind Details. A protected UAC resume suppresses
-unrelated startup, DAT, and GitHub prompts; it consumes only the durable recovery
-envelope and reports a concrete validation reason when that envelope or its
-selection plan cannot be trusted.
+When a protected backup fails because the saved password is rejected, the
+recovery screen exposes reachable masked actions for password validation (`P`)
+and local role reset (`X`); the reset action is not merely displayed but is
+included in the accepted choice set. Raw client diagnostics remain behind
+Details and logs. PACKAGE_MISMATCH and IDENTITY_MISMATCH remain hard-stop
+conditions; no retry state is built from an unvalidated handoff payload.
+A protected UAC resume suppresses unrelated startup, DAT, and GitHub prompts;
+ it consumes only the durable recovery envelope and reports a concrete
+ validation reason when that envelope or its selection plan cannot be trusted.
 
 Slice D re-audit coverage treats corruption as a distinct database failure
 category alongside password, service, missing-database, tool, permission, and

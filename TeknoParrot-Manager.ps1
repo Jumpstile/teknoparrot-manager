@@ -12342,7 +12342,7 @@ function Read-PostgresRecoveryState {
                 [System.IO.File]::Move($claimPath, $fullPath)
             }
         } catch { Write-Log 'Postgres recovery state validation cleanup failed; encrypted evidence was retained.' }
-        throw ('TPM could not safely resume the protected PostgreSQL setup. Reason [{0}]: {1}' -f $reasonCode, $reasonText)
+        throw ('TeknoParrot Manager could not safely resume the protected PostgreSQL setup. Reason [{0}]: {1}' -f $reasonCode, $reasonText)
     } finally {
         $passwordPlain = $null
         [GC]::Collect()
@@ -12370,15 +12370,15 @@ function Exit-PostgresRecoveryResume {
     }
     Write-Host ''
     Write-Host ('  ' + $Message) -ForegroundColor Red
-    Write-Host '  TPM did not report the PostgreSQL setup as complete. No further profile changes were made.' -ForegroundColor Yellow
+    Write-Host '  TeknoParrot Manager did not report the PostgreSQL setup as complete. No further profile changes were made.' -ForegroundColor Yellow
     if ($retryPath) {
-        Write-Host '  TPM preserved a protected retry. Choose PostgreSQL setup again to continue safely.' -ForegroundColor Yellow
+        Write-Host '  TeknoParrot Manager preserved a protected retry. Choose PostgreSQL setup again to continue safely.' -ForegroundColor Yellow
         Write-Log 'Postgres recovery resume: stopped before completion; a fresh protected retry state was issued.'
     } else {
-        Write-Host '  TPM could not preserve a safe retry state. Nothing else was changed.' -ForegroundColor Yellow
+        Write-Host '  TeknoParrot Manager could not preserve a safe retry state. Nothing else was changed.' -ForegroundColor Yellow
         Write-Log 'Postgres recovery resume: stopped before completion; no retry state was retained.'
     }
-    [void](Read-HostSafe '  Press Enter to close TPM')
+    [void](Read-HostSafe '  Press Enter to close this window')
     if ($script:PostgresRecoveryStatus -and $script:PostgresRecoveryStatus.Failure) {
         try {
             [void](Acknowledge-TpmWorkflowFailure -Context $script:PostgresRecoveryStatus -FailureId 'postgres-resume-failure')
@@ -23456,13 +23456,13 @@ $mode = $null
             try {
                 $postgresResumeState = Read-PostgresRecoveryState -StatePath $PostgresRecoveryResumeToken -ExpectedConfigPath $configPath -ExpectedScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -ExpectedTpRoot $tpRoot -ExpectedUserProfilesDir (Join-Path $tpRoot 'UserProfiles')
             } catch {
-                Exit-PostgresRecoveryResume -Message 'TPM could not safely continue the protected PostgreSQL setup.'
+                Exit-PostgresRecoveryResume -Message 'TeknoParrot Manager could not safely continue the protected PostgreSQL setup.'
             }
             $script:PostgresRecoveryResumeState = $postgresResumeState
             if (-not (Test-RunningAsAdministrator)) {
-                Exit-PostgresRecoveryResume -Message 'Windows did not give TPM the permission needed to continue the protected PostgreSQL setup.'
+                Exit-PostgresRecoveryResume -Message 'Windows did not give TeknoParrot Manager the permission needed to continue the protected PostgreSQL setup.'
             }
-            Write-Host '  TPM is continuing the PostgreSQL setup automatically.' -ForegroundColor Cyan
+            Write-Host '  TeknoParrot Manager is continuing the PostgreSQL setup automatically.' -ForegroundColor Cyan
         }
         Write-Host "  Scanning registered games for Postgres requirements..." -ForegroundColor DarkGray
         $pgProfiles = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
@@ -23510,7 +23510,7 @@ $mode = $null
             if ($isPostgresRecoveryResume) {
                 [void](Remove-PostgresRecoveryState -Path $postgresResumeState.Path -ClaimPath $postgresResumeState.ClaimPath)
                 Write-Host '  The automatic PostgreSQL setup is complete.' -ForegroundColor Green
-                [void](Read-HostSafe '  Press Enter to close TPM')
+                [void](Read-HostSafe '  Press Enter to close this window')
                 exit 0
             }
             [void](Read-Host "  Press Enter to return to menu")
@@ -23716,13 +23716,14 @@ $mode = $null
                     Write-Host "  TPM could not make a safety backup because PostgreSQL rejected the saved postgres password." -ForegroundColor Yellow
                     Write-Host "  Your games and databases were not changed." -ForegroundColor Green
                     Write-Host "  [P] Enter and test a postgres password"
+                    Write-Host "  [X] Reset the local postgres password"
                 }
                 Write-Host "  [R] Diagnose and retry the protected backup"
                 Write-Host "  [I] Reinitialize PostgreSQL data for these games"
                 Write-Host "  [D] Show details"
                 Write-Host "  [O] Open logs/support guidance"
                 Write-Host "  [B] Back to main menu"
-                $backupChoices = if ($authFailure) { @('P', 'R', 'I', 'D', 'O', 'B') } else { @('R', 'I', 'D', 'O', 'B') }
+                $backupChoices = if ($authFailure) { @('P', 'X', 'R', 'I', 'D', 'O', 'B') } else { @('R', 'I', 'D', 'O', 'B') }
                 $backupChoice = Read-TpmChoice -Prompt "  Choice, default R" -Choices $backupChoices -Default 'R'
                 [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
                 if ($recoveryEvidenceUnavailable -and $backupChoice -notin @('I','D','O','B')) {
@@ -23890,7 +23891,7 @@ $mode = $null
                     $returnToMainMenu = $true
                     break
                 }
-                Write-Host "  Invalid choice. Choose R, I, D, O, or B." -ForegroundColor Yellow
+                Write-Host "  Invalid choice. Choose P, X, R, I, D, O, or B." -ForegroundColor Yellow
             }
             if ($returnToMainMenu) {
                 Write-Log 'Postgres setup: user selected Back; no backup retry or profile mutation was attempted.'
