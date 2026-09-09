@@ -6,12 +6,15 @@ Status: blocked. This board is the source of truth for TPM remediation state.
 
 - Root: `C:\REPOS\tpm-rc8-certified-a700d093`
 - Branch: `fix/rc8-release-blockers`
-- HEAD: `aa37474409b75752aaa9d729c0ee23cd52e4cd14`
-- Worktree at the accepted source checkpoint: clean; the current reconciliation slice changes governance documents only.
-- Candidate ZIP: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`.
-- Candidate freshness: stale relative to accepted HEAD; the prior ZIP must not be reused for owner smoke. Package rebuild is not authorized.
-- Accepted FFB mode-8 checkpoint: commit `aa37474409b75752aaa9d729c0ee23cd52e4cd14`; focused FFB 40/40, SupportPackage 40/40, and full main Pester 1028/1028.
-- Permanent procedure gate: expected fail until unresolved source/owner findings, stale candidate identity, and owner-runtime evidence are resolved.
+- HEAD: `66d896d98fb248ccef2350fbf55243e4ac803960` before Slice 1 edits.
+- This working-tree Slice 1 is source remediation only; no commit or package
+  identity is authorized yet.
+- Candidate ZIP remains stale relative to the source under remediation and must
+  not be reused for owner smoke.
+- Slice 1 scope: BepInEx canonical containment, inspection classification,
+  rollback failure handling, retry guidance, and bounded prompt/full-name UX.
+- Permanent procedure gate remains expected to fail until this source slice,
+  package rebuild, and owner-runtime evidence are complete.
 
 ## Status rules
 
@@ -217,3 +220,30 @@ Crosshair file deployment remains after terminal confirmation, and cancellation
 returns without deployment. Focused crosshair tests and full validation are
 required before this slice can be called ready. Package rebuild and owner
 runtime proof remain outstanding.
+
+## Owner-Smoke Remediation Slice 1 -- BepInEx safety and rollback
+
+Status: SOURCE REMEDIATION IN PROGRESS; OWNER RUNTIME BLOCKED
+
+Scope:
+
+- Canonical containment accepts valid child destinations such as
+  `GameRoot\BepInEx\core\0Harmony.dll`.
+- Genuine escapes, reparse/junction hazards, and unsafe roots remain blocked.
+- Generic inspection failures now receive concrete reason categories and
+  beginner-safe next actions; technical details remain in logs/evidence.
+- Rollback failure is terminal, preserves backup/staging evidence, and does
+  not recommend blind retry as the default action.
+- BepInEx prompts visibly list `[B] Back`; normal output uses full profile
+  names when available and `TeknoParrot Manager` in touched paths.
+
+Evidence distinction:
+
+- `ElevatorAction` remains log-only evidence because
+  `metadata\profile-ElevatorAction.txt` was absent from the support ZIP.
+- The broader “inspection failed” pattern across roughly 20 games remains a
+  separate classification/reproduction target, not an ElevatorAction-only
+  conclusion.
+
+Owner retest required after commit and package rebuild. No owner smoke is
+authorized from this working tree.

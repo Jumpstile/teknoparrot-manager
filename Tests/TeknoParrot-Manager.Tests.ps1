@@ -6326,6 +6326,31 @@ Describe "BepInEx authorized-root and transaction guards" {
         Mock Write-Host {}
     }
 
+    It "accepts an existing BepInEx child path under the canonical game root" {
+        $root = Join-Path $TestDrive 'ChildPathGame'
+        New-Item -ItemType Directory -Path (Join-Path $root 'BepInEx\core') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root 'BepInEx\core\0Harmony.dll') -Value 'dll'
+
+        Test-BepInExNoReparsePath -Root $root -Path (Join-Path $root 'BepInEx\core\0Harmony.dll') | Should -BeTrue
+        Test-PathInside -child (Join-Path $root 'BepInEx\core\0Harmony.dll') -parent $root | Should -BeTrue
+    }
+
+    It "classifies inspection failures without exposing generic failure-only output" {
+        $classification = Get-BepInExInspectionFailure -ErrorRecord ([System.Exception]::new('unsupported architecture'))
+
+        $classification.Code | Should -Be 'UNSUPPORTED_ARCHITECTURE'
+        $classification.Summary | Should -Match 'architecture'
+        $classification.NextAction | Should -Not -BeNullOrEmpty
+        $classification.Technical | Should -Match 'unsupported architecture'
+    }
+
+    It "uses the full game name and visibly offers Back in the update prompt source" {
+        $script:ProductionSource | Should -Match 'Get-BepInExGameLabel'
+        $script:ProductionSource | Should -Match '\[B\] Back'
+        $script:ProductionSource | Should -Match 'TeknoParrot Manager could not safely update BepInEx'
+        $script:ProductionSource | Should -Not -Match 'Write-Host .*TPM could not safely update BepInEx'
+    }
+
     It "blocks an outside game root before release query, prompt, or download" {
         $approved = Join-Path $TestDrive 'ApprovedGames'
         $outside = Join-Path $TestDrive 'OutsideGame'
@@ -6352,7 +6377,7 @@ Describe "BepInEx authorized-root and transaction guards" {
         ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'could not safely update BepInEx'
         ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'move or correct it'
         ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'did not download or change anything'
-        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'choose the BepInEx update again'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Fix the path, then run BepInEx setup again'
         ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Not -Match '(?i)reparse|junction|symlink'
     }
 
@@ -14001,7 +14026,7 @@ Describe "BepInEx runtime hold UX contracts" {
     }
     It "keeps BepInEx acknowledgement and Health Check routing explicit" {
         $source = $script:ProductionSource
-        $source | Should -Match '\$bepChoices = @\(''R'', ''D'', ''O'', ''B''\)'
+        $source | Should -Match '\$bepChoices = if \(\$bepRollbackIssue\)'
         $source | Should -Match '\$bepPromptChoices = \$bepChoices -join'
         $source | Should -Match "\$bepChoices \+= 'H'"
         $source | Should -Match 'repair-reset'
@@ -14201,7 +14226,7 @@ Describe "Focused RC8 remediation contracts" {
     }
     It "keeps BepInEx result choices centralized and only offers Health Check for path issues" {
         $source = $script:ProductionSource
-        $source | Should -Match '\$bepChoices = @\(''R'', ''D'', ''O'', ''B''\)'
+        $source | Should -Match '\$bepChoices = if \(\$bepRollbackIssue\)'
         $source | Should -Match '\$bepChoice = Read-TpmChoice'
         $source | Should -Match '\} while \(\$bepChoice -in @\(''R'', ''D'', ''O''\)\)'
         $source | Should -Match '\$bepPathIssue = \$bepResult -and \(\$bepResult\.MissingPath -gt 0 -or \$bepResult\.MissingDevice -gt 0\)'

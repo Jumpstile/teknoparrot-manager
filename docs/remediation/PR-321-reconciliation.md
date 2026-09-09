@@ -2,23 +2,22 @@
 
 - Repository root: `C:\REPOS\tpm-rc8-certified-a700d093`
 - Branch: `fix/rc8-release-blockers`
-- HEAD: `aa37474409b75752aaa9d729c0ee23cd52e4cd14` (accepted committed FFB checkpoint)
-- Report generated UTC: governance reconciliation after the accepted FFB commit; current status is recorded below.
-- Prior candidate/package identity: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`
-- Prior candidate byte size: `8,077,772`
-- Prior candidate SHA-256: `78983F4B664DFC2E00E7E73CDA37F256EB83113256026E077F851D9589FFBD8F`
-- Prior source SHA: `97047640f3ebf850418181717ae3e6b5379343e1` (prior candidate package source identity)
-- Prior candidate validator: `Valid = True`
-- Current source state: accepted FFB checkpoint is clean; this slice changes governance documents only.
-- Current package state: no new package generated; the prior ZIP is stale and must not be reused for owner smoke.
-- Remediation scope: TPM-only PR #321 historical remediation evidence, accepted FFBPlugin mode-8 checkpoint, and governance reconciliation
+- HEAD before this working-tree slice: `66d896d98fb248ccef2350fbf55243e4ac803960`
+- Report generated for Desktop OMP source-remediation Slice 1.
+- Candidate ZIP: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`
+- Candidate SHA-256: `98F9C028AFAC7CDDC72D314C5D8DB1A9DBFA6D09BE1B2FA94A84A902AD8A1F22`
+- Candidate remains runtime-blocked; no package rebuild or owner smoke is authorized.
+- Scope: BepInEx containment, inspection classification, rollback failure, retry
+  guidance, prompt visibility, and touched BepInEx naming.
+- Current status: source remediation in progress; release remains blocked.
 
 ## Provenance
 
-- Git status at the accepted source checkpoint: clean. The current slice is limited to this control-board/reconciliation update; no production source change is included.
-- The canonical control board is `docs/remediation/PR-321-control-board.md`; the current organization slice is `docs/remediation/slices/PR-321-current-slice.md`.
+- The working tree contains the bounded BepInEx source, test, architecture,
+  changelog, and PR #321 evidence updates for this slice.
+- The canonical control board is `docs/remediation/PR-321-control-board.md`.
 - No monitor-pipeline files changed.
-- No runtime, state, log, ZIP, or package artifact was created by this report.
+- No runtime, state, log, ZIP, or package artifact was created by this work.
 
 ## Owner report mapping table
 This retained mapping is the historical pre-reaudit snapshot. The canonical
@@ -323,16 +322,17 @@ owner-runtime smoke, release, certification, commit, or push was performed.
 - Progress.Core source inventory is complete for inspected production paths; ID 3 is SOURCE FIXED; OWNER RUNTIME NEEDED pending packaged operation proof.
 - Affected-games repair remains SOURCE FIXED; OWNER RUNTIME NEEDED.
 - Support fatal/newest/stale evidence and the support `O/B` route are source/test covered; owner-runtime proof is outstanding.
-- The supplied ZIP is stale relative to accepted commit `aa37474409b75752aaa9d729c0ee23cd52e4cd14` and must not be reused for owner smoke.
+- The earlier accepted FFB checkpoint at `aa37474409b75752aaa9d729c0ee23cd52e4cd14` is historical evidence only; this working-tree slice starts from `66d896d98fb248ccef2350fbf55243e4ac803960` and remains uncommitted.
 - This report intentionally records failed acceptance conditions rather than claiming completion.
-- FFB mode-8 source identity, acquisition, deployment, evidence, ownership, rollback, and accounting invariants are accepted at commit `aa37474409b75752aaa9d729c0ee23cd52e4cd14`.
+- FFB mode-8 source identity, acquisition, deployment, evidence, ownership, rollback, and accounting remain outside this BepInEx slice and were not modified here.
 
 ## Non-actions
 
 No package, push, wiki, release, certification, or ARCADE/#323 action was
-performed. The accepted FFB source/test checkpoint is committed as
-`aa37474409b75752aaa9d729c0ee23cd52e4cd14`; this governance reconciliation
-slice remains uncommitted. No monitor-pipeline work was mixed into PR #321.
+performed. The earlier accepted FFB source/test checkpoint is historical
+evidence only; this governance reconciliation slice and the BepInEx
+source/test changes remain uncommitted. No monitor-pipeline work was mixed
+into PR #321.
 No generated runtime artifact remains in the worktree.
 
 ## Runtime owner-smoke checklist
@@ -421,3 +421,30 @@ profiles are summarized, and Raw Thrills path warnings now explain parent
 folder shortening and saved-GamePath update steps. Focused Library Health
 tests passed for the source working tree. No package, owner smoke, release, or
 certification evidence was produced by this slice.
+
+## Desktop OMP Slice 1 -- BepInEx safety and rollback
+
+| Area | Source disposition | Evidence/acceptance |
+|---|---|---|
+| Canonical containment | Remediated in working tree | Valid child destination uses canonical containment; genuine escapes remain blocked |
+| Broad inspection failures | Remediated in working tree | Concrete reason codes and beginner-safe summaries are recorded per game |
+| Rollback failure | Remediated in working tree | Failure is terminal; backup/staging evidence remains available |
+| Retry guidance | Remediated in working tree | Manual inspection is the default after uncertain state; blind retry is not recommended |
+| Prompt/name UX | Remediated in working tree | `[B] Back` is visible; full GameName is used when available; touched normal output says TeknoParrot Manager |
+| Owner runtime | BLOCKED | Requires a rebuilt package and a later authorized owner smoke |
+
+`ElevatorAction` remains log-only evidence because its support profile snapshot
+was absent. The broad “inspection failed” pattern remains tracked separately
+from that single unsafe-root classification.
+
+### Slice 1 system-invariant inventory
+
+| ID | Invariant | Verification |
+|---|---|---|
+| BEP-01 | A destination equal to or contained by the canonical game root is accepted. | `Test-PathInside`; focused child-path test |
+| BEP-02 | A destination outside the canonical root or behind a reparse/junction hazard is rejected before mutation. | Root/reparse focused tests and preflight guard |
+| BEP-03 | Every inspection failure has a stable reason key and preserved technical detail. | `Get-BepInExInspectionFailure`; focused classification test |
+| BEP-04 | Not-installed/not-applicable/unsupported outcomes are not emitted as generic inspection failures. | Inspection-loop branches and focused classification assertions |
+| BEP-05 | Rollback failure is terminal and preserves recovery evidence. | Existing transactional rollback tests plus BepInEx rollback tests |
+| BEP-06 | An uncertain rollback state does not default to blind retry. | Failure record `NextAction` and prompt contract |
+| BEP-07 | Every accepted finite BepInEx action visibly includes Back. | Production-source prompt contract and focused source test |

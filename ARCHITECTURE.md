@@ -102,6 +102,20 @@ Mutation exceptions are mapped to the same `DEVICE_UNAVAILABLE` and
 `GAME_PATH_MISSING` reason codes before workflow counters are updated, so an
 unavailable device cannot be reported as a generic deployment error.
 
+**BepInEx safety and rollback contract (RC8 Slice 1).** BepInEx validates
+the canonical game root before release discovery, inspection, backup, staging,
+and promotion. A destination parent is valid when it is equal to or contained
+by the canonical game root; missing child directories may be created only
+after that containment check. Existing path components, reparse points, and
+genuine escapes remain fail-closed. Inspection outcomes distinguish
+not-installed, not-applicable, unsupported architecture, and concrete
+inspection failures; technical exception text remains in Details/log/support
+evidence. A promotion or repair-reset rollback failure is terminal: backup and
+staging evidence are preserved, the batch may stop after repeated same-cause
+failures, and the default next action is manual inspection rather than blind
+retry. Normal BepInEx output uses the profile's full GameName when available;
+profile codes remain available in technical records.
+
 **PostgreSQL committed-state recovery (RC8).** The single-user `ALTER ROLE`
 is the mutation cutoff. If it succeeds but service restart or new-password
 authentication cannot be verified, recovery returns `PasswordChangeCommitted`

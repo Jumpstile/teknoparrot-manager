@@ -53,6 +53,13 @@
   bounded waits, redirected/noninteractive behavior, and justified no-progress
   surfaces are covered by focused source-contract tests; no unclassified
   long-running path remains in the inspected source.
+  Slice 1 BepInEx safety remediation now accepts valid canonical child
+  destinations, keeps genuine containment and reparse hazards fail-closed,
+  classifies inspection failures with beginner-safe summaries, and preserves
+  rollback evidence when restoration cannot be verified. BepInEx failure
+  prompts visibly offer Back and do not make blind retry the default recovery
+  action. This is a source-remediation candidate change; RC8 remains
+  unpublished and owner-runtime proof is still required.
 
 
 
