@@ -247,7 +247,7 @@ Package rebuild and owner-runtime proof remain outstanding.
 ## Tests with exact counts and timestamps
 | Gate/test | Exact command | Count/result | Started UTC | Finished UTC | Engine/version |
 |---|---|---|---|---|---|
-| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal` | 1040 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
+| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal` | 1041 passed, 0 failed, 0 skipped (fresh post-Slice 7 rerun) | 2026-09-09T16:09:50-04:00 | 2026-09-09T16:15:42-04:00 | Pester 5.7.1 |
 | Slice A focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*Invoke-TpmDownload*','*Thumbnail*','*RC8 PostgreSQL and support UX*') -CI -Output Normal` | 54 passed, 0 failed, 0 skipped, 975 not run | not captured | not captured | Pester 5.7.1 |
 | SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -CI -Output Normal` | 41 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
 | Controls focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Write-ControlPropagationResults*' -Output Detailed` | 3 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
@@ -261,6 +261,7 @@ Package rebuild and owner-runtime proof remain outstanding.
 | Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 production parse errors; 0 test parse errors; 0 PSScriptAnalyzer findings; production ASCII 0; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
 | Permanent procedure gate | `.\scripts\Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: owner report contains unresolved NOT FIXED items and owner-runtime evidence remains outstanding | not captured | not captured | pwsh |
 | Slice 6 focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal -FullName '*migration*','*DAT*','*Eggman*'` | 192 passed, 0 failed, 0 skipped, 848 not run | not captured | not captured | Pester 5.7.1 |
+| Slice 7 focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal -FullName '*product wording*','*migration*','*latest DAT*'` | 6 passed, 0 failed, 0 skipped, 1035 not run | not captured | not captured | Pester 5.7.1 |
 
 ## Migration and Eggman DAT remediation -- Slice 6
 
@@ -270,6 +271,15 @@ what is excluded, states that Y applies direct moves and N applies none, and
 identifies the details report as optional evidence. Eggman DAT updates now
 derive the destination filename from the latest release and update the active
 configuration only from the canonical path returned by the successful download.
+
+## Cross-cutting user-facing cleanup -- Slice 7
+
+Normal-path prompts and status messages now spell out TeknoParrot Manager.
+Registered-game selection uses the profile GameName when available and keeps
+profile codes for internal lookup and technical evidence. Compact progress
+continues through the bounded single-row renderer; raw technical diagnostics
+remain in logs or Details output. Owner-runtime proof is still outstanding.
+
 
 ## FFB completion and prompt remediation -- Slice 5
 

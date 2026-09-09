@@ -3053,7 +3053,7 @@ function Read-TpmStagingFolder {
         if ($check.Valid) { return $check.CanonicalPath }
 
         Write-Host ("  That staging folder cannot be used: {0}." -f $check.Reason) -ForegroundColor Red
-        Write-Host '  Choose a folder outside TeknoParrot, TPM, and every ZIP source folder.' -ForegroundColor Yellow
+        Write-Host '  Choose a folder outside TeknoParrot, TeknoParrot Manager, and every ZIP source folder.' -ForegroundColor Yellow
         Write-Log ("Staging folder rejected: {0} ({1})" -f $raw, $check.Reason)
     }
 }
@@ -3395,14 +3395,14 @@ function Ensure-TeknoParrotProfilesReady {
     $profilesDir = Join-Path $TeknoParrotRoot 'GameProfiles'
     while (@(Get-ChildItem -LiteralPath $profilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue).Count -eq 0) {
         Write-Host ''
-        Write-Host '  TPM needs TeknoParrot to finish its first setup so it can recognize your games.' -ForegroundColor Yellow
-        Write-Host '  TPM will open TeknoParrot now. It will not edit TeknoParrot settings or controls.' -ForegroundColor DarkGray
+        Write-Host '  TeknoParrot Manager needs TeknoParrot to finish its first setup so it can recognize your games.' -ForegroundColor Yellow
+        Write-Host '  TeknoParrot Manager will open TeknoParrot now. It will not edit TeknoParrot settings or controls.' -ForegroundColor DarkGray
         $running = Get-Process -Name 'TeknoParrotUi' -ErrorAction SilentlyContinue
         if (-not $running) {
             try {
                 [void](Start-Process -FilePath $TeknoParrotExe -WorkingDirectory $TeknoParrotRoot -PassThru -ErrorAction Stop)
             } catch {
-                Write-Host '  TPM could not open TeknoParrot automatically.' -ForegroundColor Red
+                Write-Host '  TeknoParrot Manager could not open TeknoParrot automatically.' -ForegroundColor Red
                 Write-Log 'TeknoParrot profiles: automatic launch failed.'
                 return $false
             }
@@ -3411,13 +3411,13 @@ function Ensure-TeknoParrotProfilesReady {
         $deadline = (Get-Date).ToUniversalTime().AddSeconds(120)
         while ((Get-Date).ToUniversalTime() -lt $deadline) {
             if (@(Get-ChildItem -LiteralPath $profilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue).Count -gt 0) {
-                Write-Host '  TeknoParrot profiles are ready. TPM is continuing.' -ForegroundColor Green
+                Write-Host '  TeknoParrot profiles are ready. TeknoParrot Manager is continuing.' -ForegroundColor Green
                 return $true
             }
             Start-Sleep -Milliseconds 500
         }
         Write-Host '  TeknoParrot has not finished its first setup yet.' -ForegroundColor Yellow
-        Write-Host '  Finish the setup window, then press Enter and TPM will check again.' -ForegroundColor Yellow
+        Write-Host '  Finish the setup window, then press Enter and TeknoParrot Manager will check again.' -ForegroundColor Yellow
         if ((Read-HostSafe '  Press Enter to check again, or N to stop').ToUpper() -eq 'N') { return $false }
     }
     return $true
@@ -3428,8 +3428,8 @@ function Wait-TpmForProcessClose {
     while ($true) {
         $running = @(foreach ($name in $ProcessNames) { Get-Process -Name $name -ErrorAction SilentlyContinue })
         if ($running.Count -eq 0) { return $true }
-        Write-Host ("  {0} is still open. TPM needs it closed before it can safely continue." -f $FriendlyName) -ForegroundColor Yellow
-        Write-Host '  Save any work in that window. TPM will not force-close it because unsaved work could be lost.' -ForegroundColor DarkGray
+        Write-Host ("  {0} is still open. TeknoParrot Manager needs it closed before it can safely continue." -f $FriendlyName) -ForegroundColor Yellow
+        Write-Host '  Save any work in that window. TeknoParrot Manager will not force-close it because unsaved work could be lost.' -ForegroundColor DarkGray
         if ((Read-HostSafe '  Close it, then press Enter to check again, or N to cancel').ToUpper() -eq 'N') { return $false }
         $deadline = (Get-Date).ToUniversalTime().AddSeconds(30)
         while ((Get-Date).ToUniversalTime() -lt $deadline) {
@@ -3437,7 +3437,7 @@ function Wait-TpmForProcessClose {
             if ($running.Count -eq 0) { return $true }
             Start-Sleep -Milliseconds 250
         }
-        Write-Host ("  TPM still sees {0}. It will keep your selected operation ready while you finish closing it." -f $FriendlyName) -ForegroundColor Yellow
+        Write-Host ("  TeknoParrot Manager still sees {0}. It will keep your selected operation ready while you finish closing it." -f $FriendlyName) -ForegroundColor Yellow
     }
 }
 
@@ -4492,7 +4492,7 @@ function Select-RegisteredGamesInteractive {
             ($page + 1), $pages, ($start + 1), ($end + 1), $profiles.Count) -ForegroundColor Cyan
         for ($i = $start; $i -le $end; $i++) {
             $mark = if ($selected -contains $profiles[$i]) { '*' } else { ' ' }
-            Write-Host ("    {0,3}) {1} {2}" -f ($i + 1), $mark, $profiles[$i].BaseName)
+            Write-Host ("    {0,3}) {1} {2}" -f ($i + 1), $mark, (Get-TpmGameDisplayLabel -ProfilePath $profiles[$i].FullName -Fallback $profiles[$i].BaseName))
         }
         Write-Host ""
         Write-Host "    Enter number(s) to toggle (e.g. 1,3,5-7) | N=next | P=prev | A=all | D=done" -ForegroundColor DarkCyan
@@ -4530,7 +4530,7 @@ function Select-DgVoodoo2GamesInteractive {
         Write-Host ("  Advanced dgVoodoo2 selection -- page {0}/{1}" -f ($page + 1), $pages) -ForegroundColor Cyan
         for ($i = $start; $i -le $end; $i++) {
             $mark = if ($selected -contains $profiles[$i]) { '*' } else { ' ' }
-            Write-Host ("    {0,3}) {1} {2}" -f ($i + 1), $mark, $profiles[$i].BaseName)
+            Write-Host ("    {0,3}) {1} {2}" -f ($i + 1), $mark, (Get-TpmGameDisplayLabel -ProfilePath $profiles[$i].FullName -Fallback $profiles[$i].BaseName))
         }
         Write-Host "  Enter number(s) to toggle | N=next | P=previous | D=done | B=back" -ForegroundColor DarkCyan
         $inp = (Read-HostSafe "  >").ToUpper()
@@ -6843,7 +6843,7 @@ function Invoke-TpmReShadeRemoval {
         }
     }
     Write-Host ''
-    $confirm = (Read-HostSafe '  Type REMOVE to back up and remove verified TPM-owned files, or press Enter to cancel').Trim().ToUpperInvariant()
+    $confirm = (Read-HostSafe '  Type REMOVE to back up and remove verified TeknoParrot Manager-owned files, or press Enter to cancel').Trim().ToUpperInvariant()
     if ($confirm -ne 'REMOVE') {
         Write-Host '  ReShade removal cancelled. No files were changed.' -ForegroundColor Yellow
         Write-Log 'ReShade removal: confirmation declined; no files changed.'
@@ -7406,6 +7406,16 @@ function Sync-TpmReShadeGallerySelection {
     }
 }
 
+function Get-TpmGameDisplayLabel {
+    param([Parameter(Mandatory)][string]$ProfilePath, [Parameter(Mandatory)][string]$Fallback)
+    try {
+        $doc = Read-Xml $ProfilePath
+        $name = if ($doc.GameProfile -and $doc.GameProfile.GameName) { ([string]$doc.GameProfile.GameName).Trim() } else { '' }
+        if (-not [string]::IsNullOrWhiteSpace($name)) { return $name }
+    } catch {}
+    return $Fallback
+}
+
 function Get-TpmReShadeGameLabel {
     param([Parameter(Mandatory)][string]$ProfilePath, [string]$Fallback = '')
     try {
@@ -7485,12 +7495,12 @@ function Read-TpmReShadeTerminalProfile {
                     [void][Windows.Forms.Application]::DoEvents()
                     Write-Host ("  Preview window reopened. Your selected profile is still {0}." -f $(if ($selected) { $selected.FriendlyName } else { 'not selected' })) -ForegroundColor DarkCyan
                 } catch {
-                    Write-Host ("  TPM could not reopen the preview because: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+                    Write-Host ("  TeknoParrot Manager could not reopen the preview because: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
                     Write-Host '  You can still continue from the terminal.' -ForegroundColor Yellow
                     Write-Log ("ReShade profile chooser: preview reopen failed -- {0}" -f $_.Exception.Message)
                 }
             } else {
-                Write-Host '  TPM could not reopen the preview because: no preview session was created.' -ForegroundColor Yellow
+                Write-Host '  TeknoParrot Manager could not reopen the preview because: no preview session was created.' -ForegroundColor Yellow
                 Write-Host '  You can still continue from the terminal.' -ForegroundColor Yellow
                 Write-Log 'ReShade profile chooser: preview reopen requested without a session.'
             }
@@ -7865,7 +7875,7 @@ function Invoke-ReShadeSetup {
         foreach ($nativeWarning in $nativeShaderWarnings) {
             Write-Host ("    {0}: {1}" -f $nativeWarning.Game, (($nativeWarning.Fields | ForEach-Object { '{0}={1}' -f $_.Field, $_.Value }) -join '; ')) -ForegroundColor Yellow
         }
-        Write-Host '  TPM preserves those native settings. A ReShade CRT/shader profile may stack another display effect.' -ForegroundColor Yellow
+        Write-Host '  TeknoParrot Manager preserves those native settings. A ReShade CRT/shader profile may stack another display effect.' -ForegroundColor Yellow
     }
     $preflightSummary = Get-TpmReShadeApplyPreflight -SelectedGames $selectedGames -ProfileDefinition $selectedProfile -SourceDll $SourceDll -SourceDll32 $SourceDll32
     Write-Host ("  ReShade preflight: {0} ready, {1} protected, {2} missing executable, {3} unsafe or malformed, {4} failed/preflight blocked." -f $preflightSummary.Ready, $preflightSummary.Protected, $preflightSummary.MissingPath, $preflightSummary.Unsafe, $preflightSummary.Failed) -ForegroundColor DarkCyan
@@ -7906,18 +7916,18 @@ function Invoke-ReShadeSetup {
             }
         }
         if ($conflicts.Count -gt 0) {
-            Write-Host ("  Previously TPM-managed: {0} game(s) use a different profile." -f $conflicts.Count) -ForegroundColor Yellow
+            Write-Host ("  Previously TeknoParrot Manager-managed: {0} game(s) use a different profile." -f $conflicts.Count) -ForegroundColor Yellow
             foreach ($conflict in $conflicts) {
-                Write-Host ("    {0}: Previously TPM-managed: {1}; Selected now: {2}" -f $conflict.Game.BaseName, $conflict.Previous.Profile.FriendlyName, $selectedProfile.FriendlyName) -ForegroundColor DarkCyan
+                Write-Host ("    {0}: Previously TeknoParrot Manager-managed: {1}; Selected now: {2}" -f $conflict.Game.BaseName, $conflict.Previous.Profile.FriendlyName, $selectedProfile.FriendlyName) -ForegroundColor DarkCyan
             }
             do {
-                Write-Host '  [A] Change these TPM-managed games to the selected profile'
+                Write-Host '  [A] Change these TeknoParrot Manager-managed games to the selected profile'
                 Write-Host '  [K] Keep their current profiles'
                 Write-Host '  [S] Select games manually'
                 Write-Host '  [D] Details'
                 Write-Host '  [B] Back'
                 $conflictChoice = Read-TpmChoice -Prompt '  Choice, default A' -Choices @('A', 'K', 'S', 'B', 'D') -Default 'A'
-                if ($conflictChoice -eq 'D') { Write-Host '  A changes only TPM-owned profiles; K leaves those game folders untouched.' -ForegroundColor DarkGray }
+                if ($conflictChoice -eq 'D') { Write-Host '  A changes only TeknoParrot Manager-owned profiles; K leaves those game folders untouched.' -ForegroundColor DarkGray }
             } while ($conflictChoice -eq 'D')
             if ($conflictChoice -eq 'B') { return }
             if ($conflictChoice -eq 'S') { $bulkApply = $false }
@@ -8066,7 +8076,7 @@ function Invoke-ReShadeSetup {
             }
             if ($keepSelections.ContainsKey($pf.BaseName)) {
                 $keptProfile++
-                Write-Host ("    {0}: kept previous TPM-managed profile {1} -- unchanged" -f $pf.BaseName, $keepSelections[$pf.BaseName].Profile.FriendlyName) -ForegroundColor Cyan
+                Write-Host ("    {0}: kept previous TeknoParrot Manager-managed profile {1} -- unchanged" -f $pf.BaseName, $keepSelections[$pf.BaseName].Profile.FriendlyName) -ForegroundColor Cyan
                 Write-Log ("ReShade: kept previous TPM-managed profile for {0}: {1}" -f $pf.BaseName, $keepSelections[$pf.BaseName].Profile.ProfileId)
                 continue
             }
@@ -8156,8 +8166,8 @@ function Invoke-ReShadeSetup {
 
     Write-Host ("  Installed new : {0} game(s)" -f $installed) -ForegroundColor Green
     Write-Host ("  Updated       : {0} game(s)" -f $updated) -ForegroundColor Green
-    Write-Host ("  Changed TPM profile : {0} game(s) -> {1}" -f $changedProfile, $selectedProfile.FriendlyName) -ForegroundColor Cyan
-    Write-Host ("  Kept previous TPM profile : {0} game(s)" -f $keptProfile) -ForegroundColor Cyan
+    Write-Host ("  Changed TeknoParrot Manager profile : {0} game(s) -> {1}" -f $changedProfile, $selectedProfile.FriendlyName) -ForegroundColor Cyan
+    Write-Host ("  Kept previous TeknoParrot Manager profile : {0} game(s)" -f $keptProfile) -ForegroundColor Cyan
     Write-Host ("  Reapplied     : {0} game(s)" -f $reapplied) -ForegroundColor Cyan
     if ($presetOverrides -gt 0) { Write-Host ("  Per-game presets applied : {0}" -f $presetOverrides) -ForegroundColor Cyan }
     if ($missingDevice -gt 0) {
@@ -9615,7 +9625,7 @@ function Invoke-GpuFixSetup {
     if ($missingDevice -gt 0) { Write-Host ("  Unavailable devices: {0} profile(s) left unchanged" -f $missingDevice) -ForegroundColor Yellow }
     if ($missingPath -gt 0) { Write-Host ("  Missing executables: {0} profile(s) left unchanged" -f $missingPath) -ForegroundColor Yellow }
     if ($errors -gt 0) { Write-Host ("  Errors   : {0} -- see log for details" -f $errors) -ForegroundColor Red }
-    Write-Host "  Note: GPU Fix changes saved compatibility fields only; TPM does not verify game launch or display output." -ForegroundColor DarkGray
+    Write-Host "  Note: GPU Fix changes saved compatibility fields only; TeknoParrot Manager does not verify game launch or display output." -ForegroundColor DarkGray
     Write-Log ("GPU Fix: complete. Vendor={0} Updated={1} Unchanged={2} Skipped={3} MissingDevice={4} MissingPath={5} Errors={6}" -f `
         $gpuVendor, $updated, $unchanged, $skipped, $missingDevice, $missingPath, $errors)
     return [pscustomobject]@{ Succeeded = ($errors -eq 0 -and $skipped -eq 0); GpuName = $gpuName; GpuVendor = $gpuVendor; Updated = $updated; Unchanged = $unchanged; Skipped = $skipped; MissingDevice = $missingDevice; MissingPath = $missingPath; Errors = $errors; SkipDetails = $skipDetails.ToArray() }
@@ -11822,7 +11832,7 @@ function Resolve-EggmanDatUpdateDestination {
         try { $tpRootCanonical = [System.IO.Path]::GetFullPath($tpRoot).TrimEnd('\','/') } catch {}
     }
     if ($tpRootCanonical -and (Test-PathInside $current.CanonicalPath $tpRootCanonical)) {
-        Write-Host '  Current DAT is under the TeknoParrot root, which TPM will not write to.' -ForegroundColor Yellow
+        Write-Host '  Current DAT is under the TeknoParrot root, which TeknoParrot Manager will not write to.' -ForegroundColor Yellow
         $candidates = @(Get-EggmanDatDestinationCandidates -ProgramDirectory $ProgramDirectory)
         if ($candidates.Count -gt 0) {
             $candidate = $candidates[0]
@@ -11856,7 +11866,7 @@ function Resolve-EggmanDatUpdateDestination {
     }
 
     Write-Host '  The configured Eggman DAT destination is not safe to write.' -ForegroundColor Yellow
-    Write-Host ("  Action: choose a canonical, non-reparse folder outside TeknoParrot and staging; TPM will not write until it passes validation. ({0})" -f $current.Reason) -ForegroundColor Yellow
+    Write-Host ("  Action: choose a canonical, non-reparse folder outside TeknoParrot and staging; TeknoParrot Manager will not write until it passes validation. ({0})" -f $current.Reason) -ForegroundColor Yellow
     return [pscustomobject]@{
         Status = 'Invalid'
         DestinationPath = $null
@@ -11926,7 +11936,7 @@ function Invoke-EggmanDatDownloadInteractive {
             } catch {}
         }
         if ($isUnderTeknoParrot) {
-            Write-Host '  Current DAT is under the TeknoParrot root, which TPM will not write to.' -ForegroundColor Yellow
+            Write-Host '  Current DAT is under the TeknoParrot root, which TeknoParrot Manager will not write to.' -ForegroundColor Yellow
             $candidates = @(Get-EggmanDatDestinationCandidates -ProgramDirectory $ProgramDirectory)
             if ($candidates.Count -gt 0) {
                 $candidate = $candidates[0]
@@ -11947,7 +11957,7 @@ function Invoke-EggmanDatDownloadInteractive {
             }
         } else {
             Write-Log "EggmanDat: SECURITY -- default destination failed role validation: $defaultSavePath ($($defaultDestination.Reason))"
-            Write-Host '  TPM could not select a safe Eggman data location for this setup.' -ForegroundColor Yellow
+            Write-Host '  TeknoParrot Manager could not select a safe Eggman data location for this setup.' -ForegroundColor Yellow
             if (-not $AllowBrowse) { return $null }
             $defaultSavePath = $null
         }
@@ -12081,13 +12091,13 @@ function Write-PostgresAdministratorGuidance {
         [string]$Operation = 'Recovery'
     )
     if ($Operation -eq 'Install') {
-        Write-Host '  TPM needs Windows permission to install the small local database used by these games.' -ForegroundColor Yellow
+        Write-Host '  TeknoParrot Manager needs Windows permission to install the small local database used by these games.' -ForegroundColor Yellow
     } else {
-        Write-Host '  TPM needs Windows permission to repair the saved PostgreSQL password.' -ForegroundColor Yellow
+        Write-Host '  TeknoParrot Manager needs Windows permission to repair the saved PostgreSQL password.' -ForegroundColor Yellow
     }
-    Write-Host '  Windows will ask you to approve this. TPM will continue the same setup automatically.' -ForegroundColor Yellow
-    Write-Host '  You do not need to close TPM or choose PostgreSQL setup again.' -ForegroundColor Yellow
-    Write-Host '  Existing PostgreSQL data and profiles are protected; TPM backs up before changing anything.' -ForegroundColor Yellow
+    Write-Host '  Windows will ask you to approve this. TeknoParrot Manager will continue the same setup automatically.' -ForegroundColor Yellow
+    Write-Host '  You do not need to close TeknoParrot Manager or choose PostgreSQL setup again.' -ForegroundColor Yellow
+    Write-Host '  Existing PostgreSQL data and profiles are protected; TeknoParrot Manager backs up before changing anything.' -ForegroundColor Yellow
 }
 
 function Get-PostgresRecoveryStateDirectory {
@@ -12504,7 +12514,7 @@ function Start-PostgresRecoveryAsAdministrator {
         if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf)) { throw 'PowerShell host was not found.' }
         $argumentString = & $makeArguments $statePath
     } catch {
-        Write-Host '  TPM could not prepare the automatic repair. No changes were made.' -ForegroundColor Red
+        Write-Host '  TeknoParrot Manager could not prepare the automatic repair. No changes were made.' -ForegroundColor Red
         Write-Log 'Postgres recovery: protected UAC handoff could not be prepared.'
         [void](Remove-PostgresRecoveryState -Path $statePath)
         return $false
@@ -12514,22 +12524,22 @@ function Start-PostgresRecoveryAsAdministrator {
     }
 
     while ($true) {
-        Write-Host '  TPM will ask Windows for permission, then continue this setup automatically.' -ForegroundColor Cyan
+        Write-Host '  TeknoParrot Manager will ask Windows for permission, then continue this setup automatically.' -ForegroundColor Cyan
         $childExit = $null
         try {
             $child = Start-Process -FilePath $hostPath -ArgumentList $argumentString -Verb RunAs -Wait -PassThru -ErrorAction Stop
             $childExit = [int]$child.ExitCode
             if ($childExit -eq 0) {
                 if (-not (Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))) {
-                    Write-Host '  PostgreSQL setup finished, but TPM could not clean its one-time recovery record.' -ForegroundColor Red
+                    Write-Host '  PostgreSQL setup finished, but TeknoParrot Manager could not clean its one-time recovery record.' -ForegroundColor Red
                     Write-Log 'Postgres recovery: child succeeded but consumed-state cleanup was not verified.'
                     return $false
                 }
                 return $true
             }
-            Write-Host '  Windows allowed TPM to continue, but PostgreSQL setup did not finish.' -ForegroundColor Red
+            Write-Host '  Windows allowed TeknoParrot Manager to continue, but PostgreSQL setup did not finish.' -ForegroundColor Red
         } catch {
-            Write-Host '  Windows did not give TPM permission to continue.' -ForegroundColor Yellow
+            Write-Host '  Windows did not give TeknoParrot Manager permission to continue.' -ForegroundColor Yellow
             Write-Log 'Postgres recovery: UAC approval was unavailable or was declined.'
         }
         $nextState = Find-PostgresRecoveryRetryState -PreviousStatePath $statePath `
@@ -12539,11 +12549,11 @@ function Start-PostgresRecoveryAsAdministrator {
             $statePath = $nextState
             $attemptId++
             $argumentString = & $makeArguments $statePath
-            Write-Host '  TPM prepared a fresh protected retry. Your password was not requested again.' -ForegroundColor Yellow
+            Write-Host '  TeknoParrot Manager prepared a fresh protected retry. Your password was not requested again.' -ForegroundColor Yellow
         } elseif (Test-Path -LiteralPath $statePath -PathType Leaf) {
             Write-Host '  Nothing was changed by the failed automatic repair. The protected repair information is still available.' -ForegroundColor Yellow
         } else {
-            Write-Host '  TPM consumed the failed attempt and could not prepare a safe retry. Nothing else was changed.' -ForegroundColor Yellow
+            Write-Host '  TeknoParrot Manager consumed the failed attempt and could not prepare a safe retry. Nothing else was changed.' -ForegroundColor Yellow
         }
         $retry = Read-TpmYesNo -Prompt '  Try again? (Y/N)'
         if ($retry -ne 'Y') {
@@ -12551,7 +12561,7 @@ function Start-PostgresRecoveryAsAdministrator {
             return $false
         }
         if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) {
-            Write-Host '  TPM cannot retry this consumed attempt safely. Start PostgreSQL setup again to create a new protected request.' -ForegroundColor Red
+            Write-Host '  TeknoParrot Manager cannot retry this consumed attempt safely. Start PostgreSQL setup again to create a new protected request.' -ForegroundColor Red
             [void](Read-HostSafe '  Press Enter to continue')
             return $false
         }
@@ -12643,7 +12653,7 @@ function Invoke-PostgresSelectedPasswordRecovery {
         [object]$StatusContext = $null
     )
     if ($StatusContext) { [void](Start-TpmWorkflowStep -Context $StatusContext -StepId 'backup' -Activity 'Making a verified safety backup') }
-    Write-Host "  TPM is creating a verified recovery backup before resetting the PostgreSQL role password..." -ForegroundColor Cyan
+    Write-Host "  TeknoParrot Manager is creating a verified recovery backup before resetting the PostgreSQL role password..." -ForegroundColor Cyan
     $backup = New-PostgresRecoveryBackup -UserProfilesDir $UserProfilesDir
     if (-not $backup.Verified) {
         return [pscustomobject]@{ Succeeded = $false; Backup = $backup; Reason = 'RECOVERY_BACKUP_UNVERIFIED' }
@@ -12840,8 +12850,8 @@ function Install-Postgres83 {
     param([ref]$OutSuperPasswordPlain)
 
     if (-not (Test-RunningAsAdministrator)) {
-        Write-Host "  TPM needs Windows permission before it can install PostgreSQL." -ForegroundColor Red
-        Write-Host "  No changes were made. TPM will request that permission from its normal setup flow." -ForegroundColor Yellow
+        Write-Host "  TeknoParrot Manager needs Windows permission before it can install PostgreSQL." -ForegroundColor Red
+        Write-Host "  No changes were made. TeknoParrot Manager will request that permission from its normal setup flow." -ForegroundColor Yellow
         Write-Log "Postgres install: aborted -- not running as Administrator."
         return $false
     }
@@ -13527,7 +13537,7 @@ function Remove-FFBPluginOwnedDeployment {
         }
         $currentHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash
         if ($currentHash -ine [string]$entry.DeployedSha256) {
-            Write-Host ("    Kept {0}: the hook file changed after TPM installed it." -f $destination) -ForegroundColor Yellow
+            Write-Host ("    Kept {0}: the hook file changed after TeknoParrot Manager installed it." -f $destination) -ForegroundColor Yellow
             Write-Log "FFBPlugin ownership: refused removal of changed file $destination"
             [void]$remaining.Add($entry); continue
         }
@@ -15526,7 +15536,7 @@ function Invoke-BepInExUpdateCheck {
                     })
                     if (Test-BepInExRollbackBatchStop -FailureRecords $failureRecords.ToArray()) {
                         $batchStopped = $true
-                        Write-Host '  Several games failed for the same safety reason, so TPM stopped the batch.' -ForegroundColor Yellow
+                        Write-Host '  Several games failed for the same safety reason, so TeknoParrot Manager stopped the batch.' -ForegroundColor Yellow
                     }
                     Write-Host ("    ERROR {0} -- transaction rollback failed; backup/evidence preserved at {1}" -f $o.Label, $backupPath) -ForegroundColor Red
                     Write-Log "BepInEx: rollback failed for $($o.Code); backup=$backupPath; detail=$failureMessage"
@@ -15882,13 +15892,13 @@ function Invoke-ManagerUpdateInstall {
         $readOnlyCleared = [bool](Assert-ManagerUpdateTargetWritable -Path $ScriptPath)
     } catch {
         Write-Host ""
-        Write-Host "  TPM could not prepare the update because the script file could not be changed safely." -ForegroundColor Red
+        Write-Host "  TeknoParrot Manager could not prepare the update because the script file could not be changed safely." -ForegroundColor Red
         Write-Host "  No backup or download was attempted." -ForegroundColor Yellow
         Write-Log "CheckForUpdates: writable-target preparation failed."
         return $false
     }
     if ($readOnlyCleared) {
-        Write-Host '  TPM temporarily cleared the file protection for this approved update and will restore it after this attempt.' -ForegroundColor DarkGray
+        Write-Host '  TeknoParrot Manager temporarily cleared the file protection for this approved update and will restore it after this attempt.' -ForegroundColor DarkGray
     }
 
     $downloadedZipPath = $null
@@ -15958,7 +15968,7 @@ function Invoke-ManagerUpdateInstall {
             try {
                 Set-ItemProperty -LiteralPath $ScriptPath -Name IsReadOnly -Value $true -ErrorAction Stop
             } catch {
-                Write-Host '  WARNING: TPM could not restore the original read-only protection on the manager script.' -ForegroundColor Red
+                Write-Host '  WARNING: TeknoParrot Manager could not restore the original read-only protection on the manager script.' -ForegroundColor Red
                 Write-Log 'CheckForUpdates: read-only attribute restoration failed.'
             }
         }
@@ -17277,14 +17287,14 @@ function Invoke-LibraryHealthManualPathRepair {
             $exeAlternatives = @(Get-ExeAlternatives $exeName)
             $expectedDisplay = ($exeAlternatives -join ' or ')
             if ([string]::IsNullOrWhiteSpace($exeName)) {
-                Write-Host ("  {0}: no executable name is recorded, so TPM will not guess." -f $code) -ForegroundColor Yellow
+                Write-Host ("  {0}: no executable name is recorded, so TeknoParrot Manager will not guess." -f $code) -ForegroundColor Yellow
                 [void]$errors.Add($code)
                 continue
             }
 
             Write-Host ""
             Write-Host ("  Select the correct executable for {0} (expected: {1})." -f $code, $expectedDisplay) -ForegroundColor Cyan
-            Write-Host "  Browse to the file inside the correct game folder. TPM will not guess." -ForegroundColor DarkGray
+            Write-Host "  Browse to the file inside the correct game folder. TeknoParrot Manager will not guess." -ForegroundColor DarkGray
             $selected = Read-PathWithBrowse -Prompt ("  Executable for {0}; press Enter to leave unchanged" -f $code) `
                 -Mode File -FileFilter 'All files (*.*)|*.*' -InitialDirectory $GamesInstallFolder
             if ([string]::IsNullOrWhiteSpace($selected)) {
@@ -17306,7 +17316,7 @@ function Invoke-LibraryHealthManualPathRepair {
                 -not (Test-PathInside -child $pathCheck.ResolvedPath -parent $GamesInstallFolder) -or
                 -not (Test-TpmNoReparsePath -Path $pathCheck.ResolvedPath)) {
                 $reason = if ($pathCheck.Reason) { $pathCheck.Reason } else { 'the selected path is outside the configured games root or uses an unsafe reparse path' }
-                Write-Host ("  {0}: TPM rejected this path ({1}); left unchanged." -f $code, $reason) -ForegroundColor Yellow
+                Write-Host ("  {0}: TeknoParrot Manager rejected this path ({1}); left unchanged." -f $code, $reason) -ForegroundColor Yellow
                 [void]$errors.Add($code)
                 continue
             }
@@ -17328,7 +17338,7 @@ function Invoke-LibraryHealthManualPathRepair {
         return [pscustomobject]@{ Updated = 0; Skipped = @($skipped); Errors = @($errors); BackupPath = $null }
     }
     Write-Host ""
-    Write-Host "TPM will save only the explicitly selected paths after making a safety backup." -ForegroundColor Yellow
+    Write-Host "TeknoParrot Manager will save only the explicitly selected paths after making a safety backup." -ForegroundColor Yellow
     $confirm = Read-TpmYesNo -Prompt '  Save these path repairs? (Y/N)' -Default 'N'
     if ($confirm -ne 'Y') {
         foreach ($plan in $plans) { [void]$skipped.Add($plan.Code) }
@@ -17417,7 +17427,7 @@ function Invoke-LibraryHealthCheck {
 
     Write-Host ""
     Write-Host "  Library Health Check is read-only." -ForegroundColor Cyan
-    Write-Host "  TPM checked your setup and did not change anything." -ForegroundColor Cyan
+    Write-Host "  TeknoParrot Manager checked your setup and did not change anything." -ForegroundColor Cyan
     Write-Host ""
     Write-Host ("  Registered profiles : {0}" -f $profiles.Count) -ForegroundColor Cyan
     Write-Host ("  Valid GamePath      : {0}" -f $valid.Count) -ForegroundColor Green
@@ -17436,7 +17446,7 @@ function Invoke-LibraryHealthCheck {
         Write-Host "  Empty GamePath      : 0" -ForegroundColor Green
     }
     if ($broken.Count -gt 0 -or $empty.Count -gt 0) {
-        Write-Host "  TPM only reported these paths. It did not repair or save anything during this check." -ForegroundColor DarkGray
+        Write-Host "  TeknoParrot Manager only reported these paths. It did not repair or save anything during this check." -ForegroundColor DarkGray
     }
 
     # -- Optional-setup coverage: GPU fix + FFB Blaster -------------------------
@@ -17513,7 +17523,7 @@ function Invoke-LibraryHealthCheck {
             Write-Host ("  GPU Fix is not needed for the detected {0} GPU." -f $detected.Vendor) -ForegroundColor Green
         }
     } else {
-        Write-Host "  GPU Fix could not be assessed because TPM could not detect the GPU vendor." -ForegroundColor DarkGray
+        Write-Host "  GPU Fix could not be assessed because TeknoParrot Manager could not detect the GPU vendor." -ForegroundColor DarkGray
     }
     if ($ffbBlasterNeeded.Count -gt 0) {
         Write-Host ("  Force Feedback profile support is still needed for {0} game(s)." -f $ffbBlasterNeeded.Count) -ForegroundColor Yellow
@@ -17534,7 +17544,7 @@ function Invoke-LibraryHealthCheck {
     if ($postgresNeeded.Count -gt 0) {
         Write-Host ("  PostgreSQL needs setup for {0} game(s)." -f $postgresNeeded.Count) -ForegroundColor Yellow
         Write-Host ("    {0}" -f ($postgresNeeded -join ', ')) -ForegroundColor DarkGray
-        Write-Host "  These games need a local database to keep scores or settings. TPM will make a safety backup before setup." -ForegroundColor DarkGray
+        Write-Host "  These games need a local database to keep scores or settings. TeknoParrot Manager will make a safety backup before setup." -ForegroundColor DarkGray
     } elseif ($postgresConfigured -gt 0) {
         Write-Host "  PostgreSQL is configured for all detected database games." -ForegroundColor Green
     }
@@ -17616,7 +17626,7 @@ function Show-LibraryHealthNextActions {
 
     do {
         Write-Host ""
-        Write-Host "What TPM can do next:" -ForegroundColor Cyan
+        Write-Host "What TeknoParrot Manager can do next:" -ForegroundColor Cyan
         if (@($Result.Empty).Count -gt 0) {
             Write-Host ("  {0} profile(s) have no saved path yet. Manual folder selection is available through Register." -f @($Result.Empty).Count) -ForegroundColor Yellow
         } else {
@@ -17624,7 +17634,7 @@ function Show-LibraryHealthNextActions {
         }
         if (@($Result.PostgresNeeded).Count -gt 0) {
             Write-Host ("  PostgreSQL is needed for {0} game(s): {1}" -f @($Result.PostgresNeeded).Count, (@($Result.PostgresNeeded) -join ', ')) -ForegroundColor Yellow
-            Write-Host "  TPM will make a safety backup before changing PostgreSQL or these game profiles." -ForegroundColor DarkGray
+            Write-Host "  TeknoParrot Manager will make a safety backup before changing PostgreSQL or these game profiles." -ForegroundColor DarkGray
             Write-Host "  [P] Set up PostgreSQL for these games" -ForegroundColor White
         }
         Write-Host ""
@@ -18804,7 +18814,7 @@ function Write-ControlPropagationResults {
     Write-Host (" Games skipped: {0}" -f $skippedCount) -ForegroundColor DarkGray
     Write-Host (" Games failed: {0}" -f $failedCount) -ForegroundColor Red
     Write-Host (" Settings/API corrected only: {0}" -f $apiFixedCount) -ForegroundColor DarkCyan
-    Write-Host " Verified physical bindings: 0 (TPM does not launch games or test device input)." -ForegroundColor DarkGray
+    Write-Host " Verified physical bindings: 0 (TeknoParrot Manager does not launch games or test device input)." -ForegroundColor DarkGray
     Write-Host " Note: these counts describe saved settings, not a verified physical device binding. Test each game in TeknoParrotUI." -ForegroundColor DarkGray
     return [pscustomobject]@{ BoundCount = $boundCount; ControlsCopiedCount = $copiedCount; SettingsOnlyCount = $settingsOnlyCount; ApiFixedCount = $apiFixedCount; ManualCount = $manualCount; SkippedCount = $skippedCount; FailedCount = $failedCount; VerifiedPhysicalBindingsCount = 0; NoArchetypeItems = $noArchetype }
 }
@@ -18997,7 +19007,7 @@ function Invoke-RestoreBackup {
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable deleteErrs
     if ($deleteErrs.Count -gt 0) {
         Write-Host ("  ERROR: {0} file(s) could not be removed. The restore was not completed." -f $deleteErrs.Count) -ForegroundColor Red
-        Write-Host "  TPM will keep the selected backup and attempt to restore the previous live profiles." -ForegroundColor Yellow
+        Write-Host "  TeknoParrot Manager will keep the selected backup and attempt to restore the previous live profiles." -ForegroundColor Yellow
         Write-Log "Restore: FAILED -- $($deleteErrs.Count) file(s) could not be removed."
         try {
             Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne 'FullBackup' } | Remove-Item -Recurse -Force -ErrorAction Stop
@@ -19023,7 +19033,7 @@ function Invoke-RestoreBackup {
 
     if ($errCount -gt 0) {
         Write-Host ("  ERROR: {0} file(s) could not be restored. The restore was not completed." -f $errCount) -ForegroundColor Red
-        Write-Host '  TPM will attempt to restore the previous live profiles from its rollback snapshot.' -ForegroundColor Yellow
+        Write-Host '  TeknoParrot Manager will attempt to restore the previous live profiles from its rollback snapshot.' -ForegroundColor Yellow
         Write-Log "Restore: failed with $errCount error(s) from $($selected.Name)"
         try {
             Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne 'FullBackup' } | Remove-Item -Recurse -Force -ErrorAction Stop
@@ -19993,13 +20003,13 @@ function Export-HyperSpinJson {
         $missingIdChoice = Read-TpmChoice -Prompt '  Choice (G/S)' -Choices @('G', 'S') -Default 'S'
         if ($missingIdChoice -eq 'G') {
             Write-Host "  HyperSpin 2 integration is handled by the TeknoParrot Manager HyperSpin 2 plugin." -ForegroundColor Yellow
-            Write-Host "  The plugin is still in beta and is not bundled with this RC8 package or downloadable by TPM yet." -ForegroundColor Yellow
-            Write-Host "  TPM will not write HyperSpin game associations without a valid emulator ID." -ForegroundColor Yellow
+            Write-Host "  The plugin is still in beta and is not bundled with this RC8 package or downloadable by TeknoParrot Manager yet." -ForegroundColor Yellow
+            Write-Host "  TeknoParrot Manager will not write HyperSpin game associations without a valid emulator ID." -ForegroundColor Yellow
             Write-Host "  Intended integration layer: the HyperSpin 2 plugin." -ForegroundColor DarkGray
             Write-Host "  Manual install: copy the TeknoParrot Manager plugin folder into <HyperSpinRoot>\plugins\TeknoParrot Manager" -ForegroundColor DarkGray
             Write-Host "  Example: E:\HyperSpin\plugins\TeknoParrot Manager" -ForegroundColor DarkGray
             Write-Host "  Automatic plugin download/install will be considered after the plugin has a published release artifact." -ForegroundColor DarkGray
-            Write-Host "  TPM did not modify HyperSpin files." -ForegroundColor DarkGray
+            Write-Host "  TeknoParrot Manager did not modify HyperSpin files." -ForegroundColor DarkGray
             Write-Log "HyperSpin export: skipped because emulator id is missing; operator chose guided plugin setup."
             return 0
         }
@@ -21248,16 +21258,16 @@ if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended -and -not $i
     Write-Host "   Welcome to TeknoParrot Manager" -ForegroundColor Cyan
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  TPM organizes, extracts, registers, and exports arcade games for" -ForegroundColor DarkCyan
+    Write-Host "  TeknoParrot Manager organizes, extracts, registers, and exports arcade games for" -ForegroundColor DarkCyan
     Write-Host "  TeknoParrot. It does not provide game files -- you must own or" -ForegroundColor DarkCyan
     Write-Host "  otherwise have lawful rights to any ROM/game data you use." -ForegroundColor DarkCyan
     Write-Host ""
-    Write-Host "  TPM does not install or configure TeknoParrot itself, and it cannot" -ForegroundColor DarkCyan
+    Write-Host "  TeknoParrot Manager does not install or configure TeknoParrot itself, and it cannot" -ForegroundColor DarkCyan
     Write-Host "  guarantee that any individual game will boot or run fullscreen." -ForegroundColor DarkCyan
     Write-Host "  If a game crashes or launches windowed once it starts, that is" -ForegroundColor DarkCyan
     Write-Host "  usually a TeknoParrot, game, or runtime setting to fix in" -ForegroundColor DarkCyan
-    Write-Host "  TeknoParrotUI or the game itself -- not something TPM changed," -ForegroundColor DarkCyan
-    Write-Host "  unless TPM touched a related file (TPM always tells you when it does)." -ForegroundColor DarkCyan
+    Write-Host "  TeknoParrotUI or the game itself -- not something TeknoParrot Manager changed," -ForegroundColor DarkCyan
+    Write-Host "  unless TeknoParrot Manager touched a related file (TeknoParrot Manager always tells you when it does)." -ForegroundColor DarkCyan
     Write-Host ""
     [void](Read-Host "  Press Enter to continue")
 }
@@ -21450,17 +21460,17 @@ if (-not $gamesInstallFolder) {
     }
     Write-Host ""
     Write-Host "  Game installation folder (staging folder)" -ForegroundColor Cyan
-    Write-Host "  This is where TPM extracts and installs games. Your original ZIPs stay where they are." -ForegroundColor DarkCyan
-    Write-Host "  TPM will create the accepted folder if it does not exist yet." -ForegroundColor DarkCyan
+    Write-Host "  This is where TeknoParrot Manager extracts and installs games. Your original ZIPs stay where they are." -ForegroundColor DarkCyan
+    Write-Host "  TeknoParrot Manager will create the accepted folder if it does not exist yet." -ForegroundColor DarkCyan
     $recommendedStagingFolder = Get-TpmSafeStagingFolderDefault `
         -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
         -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
     if ($recommendedStagingFolder) {
-        Write-Host ("  TPM recommends: {0}" -f $recommendedStagingFolder) -ForegroundColor Cyan
+        Write-Host ("  TeknoParrot Manager recommends: {0}" -f $recommendedStagingFolder) -ForegroundColor Cyan
         Write-Host "  Press Enter to use this location, or B to choose another." -ForegroundColor DarkCyan
     } else {
-        Write-Host "  TPM could not derive a safe default from this installation path." -ForegroundColor Yellow
-        Write-Host "  Type a folder or B to browse; it must be outside TeknoParrot, TPM, and your ZIP folders." -ForegroundColor DarkCyan
+        Write-Host "  TeknoParrot Manager could not derive a safe default from this installation path." -ForegroundColor Yellow
+        Write-Host "  Type a folder or B to browse; it must be outside TeknoParrot, TeknoParrot Manager, and your ZIP folders." -ForegroundColor DarkCyan
     }
     $gamesInstallFolder = Read-TpmStagingFolder -RecommendedPath $recommendedStagingFolder `
         -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
@@ -21518,7 +21528,7 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
             Write-Host "  Checking Eggman's Repository for the latest dat release..." -ForegroundColor Cyan
             $rel = Get-EggmanDatRelease
         } else {
-            Write-Host "  TPM could not validate its default Eggman data folder before the download." -ForegroundColor Yellow
+            Write-Host "  TeknoParrot Manager could not validate its default Eggman data folder before the download." -ForegroundColor Yellow
             Write-Host "  Action: choose B and select a canonical, non-reparse ZIP or dat file outside protected roots." -ForegroundColor Yellow
             Write-Log "EggmanDat: first-run download skipped before release query because the default destination was unsafe: $($firstRunDestination.Reason)"
             $rel = $null
@@ -21621,7 +21631,7 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     # recommendation to set this up afterward -- see the post-run summary.
     if ($eggmanDatZip -or $datFilePath) {
         Write-Host "  An extra version-info file (supplementary dat) can be added later if" -ForegroundColor DarkCyan
-        Write-Host "  any games end up with an uncertain match -- TPM will recommend it then." -ForegroundColor DarkCyan
+        Write-Host "  any games end up with an uncertain match -- TeknoParrot Manager will recommend it then." -ForegroundColor DarkCyan
     }
 } elseif ($eggmanDatZip -and -not $Unattended -and -not $isPostgresRecoveryResume) {
     # A dat ZIP is already configured -- offer a lightweight check for a
@@ -21713,7 +21723,7 @@ $migration = Invoke-TpmOwnedMigration -ScriptRoot $PSScriptRoot -Layout $script:
 if ($migration.Status -eq 'Ambiguous') {
     Write-Host ("  Migration is blocked until the ambiguous destination is reviewed. Details: {0}" -f $migration.ReportPath) -ForegroundColor Yellow
 } elseif ($migration.Status -eq 'Moved') {
-    Write-Host ("  TPM-owned files moved into: {0}" -f $script:TpmOwnedLayout.Root) -ForegroundColor Green
+    Write-Host ("  TeknoParrot Manager-owned files moved into: {0}" -f $script:TpmOwnedLayout.Root) -ForegroundColor Green
     Write-Host ("  Migration report: {0}" -f $migration.ReportPath) -ForegroundColor DarkGray
 }
 $logPath = $script:TpmOwnedLayout.LogPath
@@ -21731,9 +21741,9 @@ $gameProfilesDir = Join-Path $tpRoot "GameProfiles"
 if ((-not $Unattended -or ($pendingApplyMode -and $pendingApplyMode -ne 'HealthCheck')) -and
     -not (Ensure-TeknoParrotProfilesReady -TeknoParrotRoot $tpRoot -TeknoParrotExe $tpExe)) {
     Write-Host ''
-    Write-Host '  TPM stopped before game registration because TeknoParrot profiles are not ready.' -ForegroundColor Red
+    Write-Host '  TeknoParrot Manager stopped before game registration because TeknoParrot profiles are not ready.' -ForegroundColor Red
     Write-Log 'ERROR: TeknoParrot profiles were not ready after the guided first-run check.'
-    [void](Read-HostSafe '  Press Enter to close TPM')
+    [void](Read-HostSafe '  Press Enter to close TeknoParrot Manager')
     exit 1
 }
 
@@ -23413,7 +23423,7 @@ $mode = $null
             $repairSearchAgain = $false
             $repairReCopyRequested = $false
             do {
-                Write-Host ("  TPM will search {0} for matching executables." -f $searchRoot) -ForegroundColor Cyan
+                Write-Host ("  TeknoParrot Manager will search {0} for matching executables." -f $searchRoot) -ForegroundColor Cyan
                 Write-Host '  [Y] Search for repair candidates' -ForegroundColor White
                 Write-Host '  [N] Cancel' -ForegroundColor White
                 $repairConfirm = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
@@ -23641,7 +23651,7 @@ $mode = $null
                 $serviceBeforeRecovery = Get-Service -Name $script:PostgresServiceName -ErrorAction Stop
                 $postgresServiceWasRunning = ([string]$serviceBeforeRecovery.Status -ne 'Stopped')
             } catch {
-                Write-Host '  TPM could not verify PostgreSQL service state. No changes were made.' -ForegroundColor Red
+                Write-Host '  TeknoParrot Manager could not verify PostgreSQL service state. No changes were made.' -ForegroundColor Red
                 Write-Log 'Postgres setup: service state could not be verified before the transaction.'
                 if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify the PostgreSQL service state before continuing.' }
                 [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-state' -Message 'PostgreSQL service state could not be verified.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-service-state') -Acknowledge)
@@ -23683,9 +23693,9 @@ $mode = $null
                     if (-not $superPwPlain) {
                         Write-Host "  PostgreSQL needs attention: the saved PostgreSQL password cannot be used." -ForegroundColor Yellow
                         Write-Host "  TeknoParrot Manager could not log in to PostgreSQL as postgres. The saved PostgreSQL password is wrong, missing, or no longer works." -ForegroundColor Yellow
-                        Write-Host "  TPM can repair it automatically. TPM will make and verify a safety backup first." -ForegroundColor Yellow
+                        Write-Host "  TeknoParrot Manager can repair it automatically. TeknoParrot Manager will make and verify a safety backup first." -ForegroundColor Yellow
                         Write-Host "  [F] Try another postgres password"
-                        Write-Host "  Existing PostgreSQL data is preserved; after repair TPM verifies the password works." -ForegroundColor DarkGray
+                        Write-Host "  Existing PostgreSQL data is preserved; after repair TeknoParrot Manager verifies the password works." -ForegroundColor DarkGray
                         $repairNow = Read-TpmYesNo -Prompt '  Repair the PostgreSQL password now? (Y/N)'
                         if ($repairNow -ne 'Y') {
                             Write-Host '  Nothing was changed. The PostgreSQL setup was not completed.' -ForegroundColor Yellow
@@ -23694,8 +23704,8 @@ $mode = $null
                             [void](Read-HostSafe '  Press Enter to return to menu')
                             continue
                         }
-                        Write-Host '  Choose a new PostgreSQL password for TPM to use.' -ForegroundColor Cyan
-                        Write-Host '  The password must not be blank. TPM does not add an extra complexity rule; enter it twice to confirm.' -ForegroundColor DarkGray
+                        Write-Host '  Choose a new PostgreSQL password for TeknoParrot Manager to use.' -ForegroundColor Cyan
+                        Write-Host '  The password must not be blank. TeknoParrot Manager does not add an extra complexity rule; enter it twice to confirm.' -ForegroundColor DarkGray
                         Write-Host '  The password is masked and will not be displayed, logged, or placed in command-line arguments.' -ForegroundColor DarkGray
                         $typedPwPlain = Read-ConfirmedPostgresPassword 'the new PostgreSQL database password'
                         if (Test-PostgresPassword -SuperPasswordPlain $typedPwPlain) {
@@ -23732,7 +23742,7 @@ $mode = $null
                                 Write-Host '  PostgreSQL repair did not finish. Nothing was reported as complete.' -ForegroundColor Red
                                 if ($recovery.Reason) { Write-Host ("  What happened: {0}" -f $recovery.Reason) -ForegroundColor Yellow }
                                 if ($recovery.Backup.Path) { Write-Host ("  Verified backup evidence: {0}" -f $recovery.Backup.Path) -ForegroundColor Yellow }
-                                Write-Host '  TPM can try the same approved repair again without asking for the password again.' -ForegroundColor Yellow
+                                Write-Host '  TeknoParrot Manager can try the same approved repair again without asking for the password again.' -ForegroundColor Yellow
                                 Write-Log 'Postgres setup: direct recovery failed; user acknowledgement and retry offered.'
                                 [void](Set-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-direct-recovery' -Message 'PostgreSQL repair did not finish.' -DataSafety 'The verified backup remains available; TPM did not report setup complete.' -RecoveryActions @(@{ Id = 'Retry'; Label = 'Try the repair again' }; @{ Id = 'Stop'; Label = 'Stop safely' }))
                                 [void](Read-HostSafe '  Press Enter to acknowledge the repair result')
@@ -23805,10 +23815,10 @@ $mode = $null
                 foreach ($pair in @(Get-PostgresDiagnosisAffectedPairs -Diagnoses $pgBackup.FailureDiagnoses)) {
                     Write-Host ("    {0}" -f $pair) -ForegroundColor Yellow
                 }
-                Write-Host "  What TPM can do next" -ForegroundColor Cyan
+                Write-Host "  What TeknoParrot Manager can do next" -ForegroundColor Cyan
                 if ($authFailure) {
                     Write-Host "  PostgreSQL password did not work." -ForegroundColor Yellow
-                    Write-Host "  TPM could not make a safety backup because PostgreSQL rejected the saved postgres password." -ForegroundColor Yellow
+                    Write-Host "  TeknoParrot Manager could not make a safety backup because PostgreSQL rejected the saved postgres password." -ForegroundColor Yellow
                     Write-Host "  Your games and databases were not changed." -ForegroundColor Green
                     Write-Host "  [P] Enter and test a postgres password"
                     Write-Host "  [X] Reset the local postgres password"
@@ -23845,13 +23855,13 @@ $mode = $null
                             $superPwPlain = $candidatePassword
                             $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $candidatePassword
                             if (-not (Save-Config)) {
-                                Write-Host "  PostgreSQL login succeeded, but TPM could not save the new credential. No database or game-profile changes were made." -ForegroundColor Red
+                                Write-Host "  PostgreSQL login succeeded, but TeknoParrot Manager could not save the new credential. No database or game-profile changes were made." -ForegroundColor Red
                                 Write-Log 'Postgres setup: validated replacement password could not be saved.'
                                 continue
                             }
                             $validatedPasswordForBackup = $true
                             Write-Host "  PostgreSQL password validated and saved securely." -ForegroundColor Green
-                            Write-Host "  TPM will now retry the protected backup automatically." -ForegroundColor Cyan
+                            Write-Host "  TeknoParrot Manager will now retry the protected backup automatically." -ForegroundColor Cyan
                             Write-Log 'Postgres setup: replacement password validated and saved without logging the password.'
                             $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
                         } else {
@@ -23863,7 +23873,7 @@ $mode = $null
                 }
                 if ($authFailure -and $backupChoice -eq 'X') {
                     Write-Host "  Resetting the PostgreSQL password will change the password for the local postgres database user." -ForegroundColor Yellow
-                    Write-Host "  TPM will save the new password securely and use it for the affected games." -ForegroundColor Yellow
+                    Write-Host "  TeknoParrot Manager will save the new password securely and use it for the affected games." -ForegroundColor Yellow
                     $resetConfirm = Read-TpmChoice -Prompt '  Do you want TPM to reset the local postgres password now? (Y/B)' -Choices @('Y', 'B') -Default 'B'
                     if ($resetConfirm -ne 'Y') {
                         Write-Host "  Password reset cancelled. Nothing was changed." -ForegroundColor DarkGray
@@ -23906,23 +23916,23 @@ $mode = $null
                         $newPassword = $null
                         $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain
                         if (-not (Save-Config)) {
-                            Write-Host "  PostgreSQL password changed, but TPM could not save the new credential." -ForegroundColor Red
+                            Write-Host "  PostgreSQL password changed, but TeknoParrot Manager could not save the new credential." -ForegroundColor Red
                             Write-Host "  No database or game-profile changes were made." -ForegroundColor Yellow
                             Write-Log 'Postgres setup: password reset succeeded but encrypted credential save failed.'
                             continue
                         }
                         $validatedPasswordForBackup = $true
                         Write-Host "  PostgreSQL password changed successfully." -ForegroundColor Green
-                        Write-Host "  TPM saved the new password securely." -ForegroundColor Green
-                        Write-Host "  TPM will now retry the protected backup automatically." -ForegroundColor Cyan
+                        Write-Host "  TeknoParrot Manager saved the new password securely." -ForegroundColor Green
+                        Write-Host "  TeknoParrot Manager will now retry the protected backup automatically." -ForegroundColor Cyan
                         Write-Log 'Postgres setup: password reset succeeded and credential was saved without logging the password.'
                         $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
                     } elseif ($resetResult.PasswordChangeCommitted) {
-                        Write-Host "  TPM could not verify the PostgreSQL password reset." -ForegroundColor Red
+                        Write-Host "  TeknoParrot Manager could not verify the PostgreSQL password reset." -ForegroundColor Red
                         Write-Host "  No database or game-profile changes were made. The PostgreSQL password may have changed; review details before retrying." -ForegroundColor Yellow
                         Write-Log 'Postgres setup: password reset was committed but verification failed; database and profile changes were not made.'
                     } else {
-                        Write-Host "  TPM could not reset the PostgreSQL password." -ForegroundColor Red
+                        Write-Host "  TeknoParrot Manager could not reset the PostgreSQL password." -ForegroundColor Red
                         Write-Host "  Nothing was changed." -ForegroundColor Yellow
                     }
                     $newPassword = $null
@@ -23936,7 +23946,7 @@ $mode = $null
                 if ($backupChoice -eq 'O') {
                     $logPath = Join-Path $PSScriptRoot 'TeknoParrot-Manager.log'
                     $supportRoot = Join-Path $PSScriptRoot 'SupportPackages'
-                    Write-Host ("  TPM log: {0}" -f $logPath) -ForegroundColor Cyan
+                    Write-Host ("  TeknoParrot Manager log: {0}" -f $logPath) -ForegroundColor Cyan
                     Write-Host ("  Support package folder: {0}" -f $supportRoot) -ForegroundColor Cyan
                     Write-Host "  This recovery action did not create or open a support ZIP." -ForegroundColor DarkGray
                     foreach ($group in @(@($pgBackup.FailureDiagnoses) | Group-Object -Property Category | Sort-Object Name)) {
@@ -24036,7 +24046,7 @@ $mode = $null
                 continue
             }
             if ([int]$pgResults.Errors -gt 0) {
-                Write-Host ("  PostgreSQL setup reported {0} error(s); TPM will not claim recovery is complete." -f $pgResults.Errors) -ForegroundColor Red
+                Write-Host ("  PostgreSQL setup reported {0} error(s); TeknoParrot Manager will not claim recovery is complete." -f $pgResults.Errors) -ForegroundColor Red
                 Write-Log 'Postgres setup: errors were reported; completion was not claimed.'
                 if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify a clean PostgreSQL setup result.' }
                 [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-profile-errors' -Message 'PostgreSQL game setup reported errors.' -DataSafety 'TPM did not claim recovery complete.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-profile-errors') -Acknowledge)
@@ -24064,7 +24074,7 @@ $mode = $null
             [GC]::Collect()
         }
         if ($postgresServiceRestoreFailed) {
-            Write-Host '  PostgreSQL setup did not finish safely because TPM could not restore the original service state.' -ForegroundColor Red
+            Write-Host '  PostgreSQL setup did not finish safely because TeknoParrot Manager could not restore the original service state.' -ForegroundColor Red
             Write-Log 'Postgres setup: original service state restoration failed; completion was not claimed.'
             if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not restore the original PostgreSQL service state.' }
             [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-restore' -Message 'The original PostgreSQL service state could not be restored.' -DataSafety 'TPM did not claim PostgreSQL setup complete.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-service-restore') -Acknowledge)
@@ -24076,9 +24086,9 @@ $mode = $null
             }
             if ($postgresResumeState.Operation -eq 'Recovery') {
                 Write-Host '  PostgreSQL is fixed.' -ForegroundColor Green
-                Write-Host '  TPM reset and verified the password successfully.' -ForegroundColor Green
+                Write-Host '  TeknoParrot Manager reset and verified the password successfully.' -ForegroundColor Green
             } else {
-                Write-Host '  PostgreSQL setup is complete. TPM continued the repair automatically.' -ForegroundColor Green
+                Write-Host '  PostgreSQL setup is complete. TeknoParrot Manager continued the repair automatically.' -ForegroundColor Green
             }
             [void](Read-HostSafe '  Press Enter to continue')
             exit 0
@@ -24133,13 +24143,13 @@ $mode = $null
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " Create Support Package" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
-        Write-Host "  TPM will collect allowlisted current-run evidence plus labeled ambient diagnostics."
+        Write-Host "  TeknoParrot Manager will collect allowlisted current-run evidence plus labeled ambient diagnostics."
         Write-Host "  It will not include game files, credentials, or arbitrary folders." -ForegroundColor DarkCyan
         Write-Host "  TeknoParrotUI intake: Troubleshooting -> Save information to a text file." -ForegroundColor DarkCyan
         Write-Host "  Save as TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt beside this script." -ForegroundColor DarkCyan
         Write-Host ""
         Write-Host "  1) Create Support Package"
-        Write-Host "  2) Open TPM Logs and Reports"
+        Write-Host "  2) Open TeknoParrot Manager Logs and Reports"
         Write-Host "  3) Return to the main menu"
         $supportChoice = Read-TpmChoice -Prompt "  Choose 1-3" -Choices @('1', '2', '3')
         if ($supportChoice -eq '2') {
@@ -24147,7 +24157,7 @@ $mode = $null
             if ($openResult.Succeeded) {
                 Write-Host ("  Opened: {0}" -f $openResult.Path) -ForegroundColor Green
             } else {
-                Write-Host ("  TPM logs and reports could not be opened: {0}" -f $openResult.Error) -ForegroundColor Yellow
+                Write-Host ("  TeknoParrot Manager logs and reports could not be opened: {0}" -f $openResult.Error) -ForegroundColor Yellow
                 Write-Host ("  Folder: {0}" -f $openResult.Path) -ForegroundColor DarkGray
             }
             [void](Read-HostSafe '  Press Enter to return to the menu')
@@ -24170,8 +24180,8 @@ $mode = $null
                 }
                 Write-Host "  What to do next:" -ForegroundColor Cyan
                 Write-Host "    Review the failure details above, resolve the reported file or access problem, then run the affected workflow again." -ForegroundColor DarkCyan
-                Write-Host "    If no collection failure is listed, send this ZIP with the TPM log and describe the workflow and game that failed." -ForegroundColor DarkCyan
-                Write-Host "  What TPM did not change:" -ForegroundColor Cyan
+                Write-Host "    If no collection failure is listed, send this ZIP with the TeknoParrot Manager log and describe the workflow and game that failed." -ForegroundColor DarkCyan
+                Write-Host "  What TeknoParrot Manager did not change:" -ForegroundColor Cyan
                 Write-Host "    No game files, profiles, credentials, or emulator files were changed by support collection." -ForegroundColor DarkCyan
                 Write-Host ""
                 Write-Host "  Support package created." -ForegroundColor Green
@@ -24195,7 +24205,7 @@ $mode = $null
                     Write-Host "  Do not send it until the cleanup warning is resolved." -ForegroundColor Yellow
                 } else {
                     Write-Host "  Support package was not created." -ForegroundColor Red
-                    Write-Host "  No success was reported. Check the TPM log for details." -ForegroundColor Yellow
+                    Write-Host "  No success was reported. Check the TeknoParrot Manager log for details." -ForegroundColor Yellow
                 }
                 foreach ($errorText in @($supportResult.Errors)) { Write-Host ("  Reason: {0}" -f $errorText) -ForegroundColor DarkGray }
             }
@@ -24361,7 +24371,7 @@ $mode = $null
         Write-Host ''
         if (-not $reShadeActionPending) {
             Write-Host '  S) Set up ReShade visual enhancements' -ForegroundColor White
-            Write-Host '  R) Remove verified TPM-managed ReShade files' -ForegroundColor White
+            Write-Host '  R) Remove verified TeknoParrot Manager-managed ReShade files' -ForegroundColor White
             $reShadeAction = Read-TpmChoice -Prompt '  Action (S/R, default S)' -Choices @('S', 'R') -Default 'S'
             if ($reShadeAction -eq 'S') { $reShadeAction = 'Select' }
         }
@@ -24403,7 +24413,7 @@ $mode = $null
                     Write-Host "  Checking reshade.me for the latest version..." -ForegroundColor Cyan
                     $rsLatestVer = Get-ReShadeLatestVersion
                     if (-not $rsLatestVer) {
-                        Write-Host "  TPM could not reach reshade.me. Choose R to retry automatically, B for the advanced existing-file fallback, or N to cancel." -ForegroundColor Red
+                        Write-Host "  TeknoParrot Manager could not reach reshade.me. Choose R to retry automatically, B for the advanced existing-file fallback, or N to cancel." -ForegroundColor Red
                         Write-Log "ReShade auto-download: aborted -- could not determine latest version."
                     } else {
                         $rsSetupUrl = Get-ReShadeSetupDownloadUrl -Version $rsLatestVer
@@ -24543,8 +24553,8 @@ $mode = $null
             Write-Host ("    Missing paths           : {0} game(s)" -f $(if ($reShadeResult) { $reShadeResult.MissingPath + $reShadeResult.MissingDevice } else { 0 })) -ForegroundColor $(if ($reShadeResult -and ($reShadeResult.MissingPath -gt 0 -or $reShadeResult.MissingDevice -gt 0)) { 'Yellow' } else { 'DarkGray' })
             Write-Host ("    Failed                 : {0} game(s)" -f $(if ($reShadeResult) { $reShadeResult.Errors } else { 0 })) -ForegroundColor $(if ($reShadeResult -and $reShadeResult.Errors -gt 0) { 'Red' } else { 'DarkGray' })
             Write-Host ("    Unsafe/malformed        : {0} game(s)" -f $(if ($reShadeResult) { $reShadeResult.Unsafe } else { 0 })) -ForegroundColor $(if ($reShadeResult -and $reShadeResult.Unsafe -gt 0) { 'Yellow' } else { 'DarkGray' })
-            Write-Host '    What TPM changed       : verified ReShade deployments only.' -ForegroundColor DarkGray
-            Write-Host '    What TPM did not change: protected, unsafe/malformed, unknown, or unavailable game folders.' -ForegroundColor DarkGray
+            Write-Host '    What TeknoParrot Manager changed       : verified ReShade deployments only.' -ForegroundColor DarkGray
+            Write-Host '    What TeknoParrot Manager did not change: protected, unsafe/malformed, unknown, or unavailable game folders.' -ForegroundColor DarkGray
             Write-Host '    What next              : review Details, repair the listed issue, then rerun ReShade setup.' -ForegroundColor DarkGray
             [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-incomplete' -Message $partialSummary -DataSafety 'TPM did not claim success for every selected game; skipped and failed games were left unchanged.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
             $reShadeActionModel = Get-TpmReShadeResultActionModel -Result $reShadeResult
@@ -24555,7 +24565,7 @@ $mode = $null
                 $reShadeChoices = @('A', 'S', 'D', 'B')
                 if ($reShadePathIssue) { $reShadeChoices = @('A', 'S', 'M', 'D', 'B') }
                 do {
-                    Write-Host '  [A] Adopt/replace existing ReShade installs with TPM-managed ReShade' -ForegroundColor White
+                    Write-Host '  [A] Adopt/replace existing ReShade installs with TeknoParrot Manager-managed ReShade' -ForegroundColor White
                     Write-Host '  [S] Select games individually' -ForegroundColor White
                     if ($reShadePathIssue) { Write-Host '  [M] Show missing-path games' -ForegroundColor White }
                     Write-Host '  [D] Details' -ForegroundColor White
@@ -24644,7 +24654,7 @@ $mode = $null
                     Write-Host "  Checking the official GitHub release for the latest dgVoodoo2..." -ForegroundColor Cyan
                     $dgRel = Get-DgVoodoo2LatestRelease
                     if (-not $dgRel) {
-                        Write-Host "  TPM could not reach the official dgVoodoo2 release. Choose R to retry automatically, B for the advanced existing-folder fallback, or N to cancel." -ForegroundColor Red
+                        Write-Host "  TeknoParrot Manager could not reach the official dgVoodoo2 release. Choose R to retry automatically, B for the advanced existing-folder fallback, or N to cancel." -ForegroundColor Red
                         Write-Log "dgVoodoo2 auto-download: aborted -- release query failed."
                     } else {
                         Write-Host ("  Found: {0}  ({1} MB)" -f $dgRel.FileName, ([Math]::Round($dgRel.SizeBytes / 1MB, 1))) -ForegroundColor Cyan
@@ -24745,7 +24755,7 @@ $mode = $null
         Write-Host ""
         Write-Host "dgVoodoo2 setup finished." -ForegroundColor Green
         Write-Host ""
-        Write-Host "What TPM did:" -ForegroundColor Cyan
+        Write-Host "What TeknoParrot Manager did:" -ForegroundColor Cyan
         $dgDeploymentDetails = @($dgResult.DeploymentDetails)
         if ($dgDeploymentDetails.Count -gt 0) {
             foreach ($detail in $dgDeploymentDetails) {
@@ -24762,13 +24772,13 @@ $mode = $null
             Write-Host "  Skipped missing-path games: none." -ForegroundColor DarkGray
         }
         Write-Host ""
-        Write-Host "Why TPM did it:" -ForegroundColor Cyan
+        Write-Host "Why TeknoParrot Manager did it:" -ForegroundColor Cyan
         Write-Host "  Older DirectX/Glide games may not display correctly on modern Windows." -ForegroundColor DarkGray
         Write-Host "  dgVoodoo2 helps translate those older graphics calls for modern Windows." -ForegroundColor DarkGray
         Write-Host ""
-        Write-Host "What TPM did not change:" -ForegroundColor Cyan
+        Write-Host "What TeknoParrot Manager did not change:" -ForegroundColor Cyan
         Write-Host "  Existing dgVoodoo2 DLL files were not removed or replaced, including unowned or changed files." -ForegroundColor DarkGray
-        Write-Host "  TPM only added missing compatibility DLLs. Skipped missing-path games were not changed." -ForegroundColor DarkGray
+        Write-Host "  TeknoParrot Manager only added missing compatibility DLLs. Skipped missing-path games were not changed." -ForegroundColor DarkGray
         Write-Host ""
         Write-Host "What to do next:" -ForegroundColor Cyan
         Write-Host "  Try launching the game." -ForegroundColor DarkGray
@@ -25131,7 +25141,7 @@ $mode = $null
             Write-Host ""; Write-Host "ERROR: The staging folder is not safe to use." -ForegroundColor Red
             Write-Host ("    Staging folder : {0}" -f $gamesInstallFolder) -ForegroundColor Yellow
             Write-Host ("    Reason         : {0}" -f $earlyStagingCandidate.Reason) -ForegroundColor Yellow
-            Write-Host "Choose a folder outside TeknoParrot, TPM, and every ZIP source folder." -ForegroundColor Yellow
+            Write-Host "Choose a folder outside TeknoParrot, TeknoParrot Manager, and every ZIP source folder." -ForegroundColor Yellow
             if ($Unattended) {
                 Write-Log ("ERROR: unsafe staging folder -- {0}" -f $earlyStagingCandidate.Reason)
                 [void](Read-Host "  Press Enter to return to menu"); continue
@@ -25139,7 +25149,7 @@ $mode = $null
             $recoveryDefault = Get-TpmSafeStagingFolderDefault `
                 -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
                 -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
-            if ($recoveryDefault) { Write-Host ("  TPM recommends: {0}" -f $recoveryDefault) -ForegroundColor Cyan }
+            if ($recoveryDefault) { Write-Host ("  TeknoParrot Manager recommends: {0}" -f $recoveryDefault) -ForegroundColor Cyan }
             $gamesInstallFolder = Read-TpmStagingFolder -RecommendedPath $recoveryDefault `
                 -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
                 -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
@@ -25198,7 +25208,7 @@ $mode = $null
                     $recoveryDefault = Get-TpmSafeStagingFolderDefault `
                         -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
                         -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
-                    if ($recoveryDefault) { Write-Host ("  TPM recommends: {0}" -f $recoveryDefault) -ForegroundColor Cyan }
+                    if ($recoveryDefault) { Write-Host ("  TeknoParrot Manager recommends: {0}" -f $recoveryDefault) -ForegroundColor Cyan }
                     $gamesInstallFolder = Read-TpmStagingFolder -RecommendedPath $recoveryDefault `
                         -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
                         -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
@@ -25225,7 +25235,7 @@ $mode = $null
                     $recoveryDefault = Get-TpmSafeStagingFolderDefault `
                         -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
                         -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
-                    if ($recoveryDefault) { Write-Host ("  TPM recommends: {0}" -f $recoveryDefault) -ForegroundColor Cyan }
+                    if ($recoveryDefault) { Write-Host ("  TeknoParrot Manager recommends: {0}" -f $recoveryDefault) -ForegroundColor Cyan }
                     $gamesInstallFolder = Read-TpmStagingFolder -RecommendedPath $recoveryDefault `
                         -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
                         -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
@@ -25255,7 +25265,7 @@ $mode = $null
                 Write-Host ""; Write-Host "ERROR: The staging folder is not safe to use." -ForegroundColor Red
                 Write-Host ("    Staging folder : {0}" -f $gamesInstallFolder) -ForegroundColor Yellow
                 Write-Host ("    Reason         : {0}" -f $stagingCandidate.Reason) -ForegroundColor Yellow
-                Write-Host "Choose a folder outside TeknoParrot, TPM, and every ZIP source folder." -ForegroundColor Yellow
+                Write-Host "Choose a folder outside TeknoParrot, TeknoParrot Manager, and every ZIP source folder." -ForegroundColor Yellow
                 if ($Unattended) {
                     Write-Log ("ERROR: unsafe staging folder -- {0}" -f $stagingCandidate.Reason)
                     [void](Read-Host "  Press Enter to return to menu"); continue 2
@@ -25267,7 +25277,7 @@ $mode = $null
                     $recoveryDefault = Get-TpmSafeStagingFolderDefault `
                         -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
                         -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
-                    if ($recoveryDefault) { Write-Host ("  TPM recommends: {0}" -f $recoveryDefault) -ForegroundColor Cyan }
+                    if ($recoveryDefault) { Write-Host ("  TeknoParrot Manager recommends: {0}" -f $recoveryDefault) -ForegroundColor Cyan }
                     $gamesInstallFolder = Read-TpmStagingFolder -RecommendedPath $recoveryDefault `
                         -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
                         -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
@@ -25969,7 +25979,7 @@ if ($dryRunActive) {
     do {
         $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'F', 'B') -Default 'P'
         if ($lbChoice -eq 'P') {
-            Write-Host "  Preview: TPM would add or update registered games; no LaunchBox changes were made." -ForegroundColor DarkCyan
+            Write-Host "  Preview: TeknoParrot Manager would add or update registered games; no LaunchBox changes were made." -ForegroundColor DarkCyan
             Write-Host "  Choose A to continue, F for a manual reference file, or B to skip." -ForegroundColor DarkGray
         }
     } while ($lbChoice -eq 'P')
@@ -26235,8 +26245,8 @@ if ($doReShade -eq "Y") {
         Write-Host "  ReShade result -- review before continuing to dgVoodoo2:" -ForegroundColor Cyan
         if ($normalReShadeResult) {
             Write-Host ("    Changed: {0} game(s); Protected: {1}; Unsafe/malformed: {2}; Missing: {3}; Failed: {4}" -f $normalReShadeResult.Deployed, $normalReShadeResult.Protected, $normalReShadeResult.Unsafe, ($normalReShadeResult.MissingPath + $normalReShadeResult.MissingDevice), $normalReShadeResult.Errors) -ForegroundColor DarkCyan
-            Write-Host '    What TPM changed: verified ReShade deployments only.' -ForegroundColor DarkGray
-            Write-Host '    What TPM did not change: protected, unsafe/malformed, missing, or failed game folders.' -ForegroundColor DarkGray
+            Write-Host '    What TeknoParrot Manager changed: verified ReShade deployments only.' -ForegroundColor DarkGray
+            Write-Host '    What TeknoParrot Manager did not change: protected, unsafe/malformed, missing, or failed game folders.' -ForegroundColor DarkGray
             foreach ($detail in @($normalReShadeResult.ProtectedDetails)) { Write-Host ("    Protected: {0}" -f $detail) -ForegroundColor Yellow }
             foreach ($detail in @($normalReShadeResult.UnsafeDetails)) { Write-Host ("    Unsafe/malformed: {0}" -f $detail) -ForegroundColor Yellow }
             if ($normalReShadeResult.PSObject.Properties['NativeShaderWarnings'] -and @($normalReShadeResult.NativeShaderWarnings).Count -gt 0) { Write-Host '    Native TeknoParrot shader/display settings were preserved; stacking may occur.' -ForegroundColor Yellow }
@@ -26962,7 +26972,7 @@ if ($rsSetupDone) {
     Write-Host "   - Press the  Home  key to open the effects overlay."
     Write-Host "   - Tick the effects you want and adjust with the sliders."
     Write-Host "   - Settings save automatically -- you only need to do this once per game."
-    Write-Host "   - TPM does not remove unowned ReShade hooks automatically; review any"
+    Write-Host "   - TeknoParrot Manager does not remove unowned ReShade hooks automatically; review any"
     Write-Host "     removal in the advanced troubleshooting path."
 }
 if ($dgSetupDone) {
@@ -26985,7 +26995,7 @@ Write-Host ""
         Write-Host "  No changes have been made." -ForegroundColor DarkCyan
         Write-Host ""
         Write-Host "  Would you like to perform the operation for real?" -ForegroundColor Cyan
-        Write-Host "  TPM will perform a fresh scan before making any changes, to ensure" -ForegroundColor DarkCyan
+        Write-Host "  TeknoParrot Manager will perform a fresh scan before making any changes, to ensure" -ForegroundColor DarkCyan
         Write-Host "  nothing has changed since the preview." -ForegroundColor DarkCyan
         Write-Host ""
         Write-Host "  [Y] Apply changes" -ForegroundColor Cyan

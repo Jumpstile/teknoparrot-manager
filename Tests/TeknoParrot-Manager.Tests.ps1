@@ -281,7 +281,7 @@ Describe "Write-Log" {
 Describe "Issue #217 AutoSync first-run guidance" {
     It "explains the staging folder role before path selection" {
         $script:ProductionSource | Should -Match "Game installation folder \(staging folder\)"
-        $script:ProductionSource | Should -Match "This is where TPM extracts and installs games"
+        $script:ProductionSource | Should -Match "This is where TeknoParrot Manager extracts and installs games"
         $script:ProductionSource | Should -Match "Your original ZIPs stay where they are"
         $script:ProductionSource | Should -Match "Press Enter to use this location, or B to choose another"
     }
@@ -470,7 +470,7 @@ Describe "Beginner-clarity RC wording (optional-download explanations, first-run
         $script:ProductionSource | Should -Match ([regex]::Escape("(TeknoParrot Manager can download Eggman's TeknoParrot DAT file, to be used for game recognition and to help recognize"))
         $script:ProductionSource | Should -Match ([regex]::Escape("renamed or oddly named games. These are not the games themselves -- TeknoParrot Manager never downloads any game data)"))
         $script:ProductionSource | Should -Match ([regex]::Escape("D) Download (default)"))
-        $script:ProductionSource | Should -Not -Match "highly recommended|Game-recognition index file|TPM will normally store|Without one, a few games"
+        $script:ProductionSource | Should -Not -Match "highly recommended|Game-recognition index file|TeknoParrot Manager will normally store|Without one, a few games"
         $script:ProductionSource | Should -Not -Match "Download the latest from Eggman's Repository"
     }
     It "defers the supplementary-dat follow-up out of the initial wizard, with a note rather than a blocking Y/N" {
@@ -479,7 +479,7 @@ Describe "Beginner-clarity RC wording (optional-download explanations, first-run
         # the actual offer only appears afterward as a targeted, context-
         # aware post-run recommendation (see the next Describe block).
         $script:ProductionSource | Should -Match ([regex]::Escape("extra version-info file (supplementary dat)"))
-        $script:ProductionSource | Should -Match ([regex]::Escape("TPM will recommend it then"))
+        $script:ProductionSource | Should -Match ([regex]::Escape("TeknoParrot Manager will recommend it then"))
     }
     It "clarifies thumbnail download is box art only, not game data" {
         $script:ProductionSource | Should -Match "This downloads small box-art icons only, never the games themselves"
@@ -5958,7 +5958,7 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
 
         ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Windows will ask you to approve this'
         ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'continue the same setup automatically'
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'do not need to close TPM'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'do not need to close TeknoParrot Manager'
         ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'backs up before changing anything'
     }
 
@@ -6047,7 +6047,7 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
     }
 
     It "keeps UAC denial retryable without claiming recovery" {
-        $script:ProductionSource | Should -Match 'Windows did not give TPM permission to continue'
+        $script:ProductionSource | Should -Match 'Windows did not give TeknoParrot Manager permission to continue'
         $script:ProductionSource | Should -Match 'Nothing was changed by the failed automatic repair'
         $script:ProductionSource | Should -Match "Read-TpmYesNo -Prompt '  Try again\? \(Y/N\)'"
         $script:ProductionSource | Should -Match 'protected repair information is still available'
@@ -9243,7 +9243,7 @@ Describe "Path-concept non-conflation guard (Part 2 item 9)" {
     # "deployed location" concept is introduced.
     It "never renames the staging/preparation folder to the bare unqualified phrase 'game folder'" {
         # The staging-folder prompt block's own descriptive text (around
-        # 'This is where TPM extracts your ZIPs and installs games.')
+        # 'This is where TeknoParrot Manager extracts your ZIPs and installs games.')
         # must not use the exact rejected phrase.
         $script:ProductionSource | Should -Not -Match 'Path to your game folder'
     }
@@ -9251,7 +9251,7 @@ Describe "Path-concept non-conflation guard (Part 2 item 9)" {
         $script:ProductionSource | Should -Not -Match '(?i)deployed location'
     }
     It "the staging folder prompt still pairs the plain phrase with the technical term on first mention" {
-        $script:ProductionSource | Should -Match ([regex]::Escape("This is where TPM extracts and installs games. Your original ZIPs stay where they are."))
+        $script:ProductionSource | Should -Match ([regex]::Escape("This is where TeknoParrot Manager extracts and installs games. Your original ZIPs stay where they are."))
     }
 }
 
@@ -9580,11 +9580,11 @@ Describe "HyperSpin emulator identity gate" {
         $guidance | Should -Match 'TeknoParrot Manager HyperSpin 2 plugin'
         $guidance | Should -Match '(?i)beta'
         $guidance | Should -Match '(?i)not bundled'
-        $guidance | Should -Match '(?i)downloadable by TPM yet'
+        $guidance | Should -Match '(?i)downloadable by TeknoParrot Manager yet'
         $guidance | Should -Match 'Automatic plugin download/install will be considered after the plugin has a published release artifact'
         $guidance | Should -Match '<HyperSpinRoot>\\plugins\\TeknoParrot Manager'
         $guidance | Should -Match 'E:\\HyperSpin\\plugins\\TeknoParrot Manager'
-        $guidance | Should -Match 'TPM did not modify HyperSpin files'
+        $guidance | Should -Match 'TeknoParrot Manager did not modify HyperSpin files'
         $script:ProductionSource | Should -Match '\[G\] Show HyperSpin 2 plugin setup guidance'
         $script:ProductionSource | Should -Match '\[S\] Skip HyperSpin integration'
         $script:ProductionSource | Should -Not -Match '\[A\] Add anyway|Add anyway|allowLegacyXmlFallback'
@@ -12071,7 +12071,7 @@ Describe "ReShade removal safety and workflow" {
         $source = $script:ProductionSource
         $source | Should -Match 'Action \(S/R, default S\)'
         $source | Should -Match 'Invoke-TpmReShadeRemoval -UserProfilesDir \$userProfilesDir'
-        $source | Should -Match 'Type REMOVE to back up and remove verified TPM-owned files'
+        $source | Should -Match 'Type REMOVE to back up and remove verified TeknoParrot Manager-owned files'
         $source | Should -Match 'Remove-TpmReShadeOwnedDeployment'
         $source | Should -Match 'REMOVE \{0\}: \{1\} \[\{2\}\]'
         $source | Should -Match 'Removed effects from'
@@ -13715,9 +13715,9 @@ Describe "Post-0909174 remediation result UX contracts" {
     }
     It "classifies bulk profile conflicts instead of prompting per game" {
         $source = $script:ProductionSource
-        $source | Should -Match 'Previously TPM-managed'
+        $source | Should -Match 'Previously TeknoParrot Manager-managed'
         $source | Should -Match 'Selected now:'
-        $source | Should -Match '\[A\] Change these TPM-managed games'
+        $source | Should -Match '\[A\] Change these TeknoParrot Manager-managed games'
         $source | Should -Match '\[K\] Keep their current profiles'
         $source | Should -Match 'ChangedProfile'
         $source | Should -Match 'KeptPrevious'
@@ -13727,12 +13727,12 @@ Describe "dgVoodoo2 beginner result screen contracts" {
     It "answers what changed, why, what was preserved, and what to do next" {
         $source = $script:ProductionSource
         $source | Should -Match 'dgVoodoo2 setup finished\.'
-        $source | Should -Match 'What TPM did:'
+        $source | Should -Match 'What TeknoParrot Manager did:'
         $source | Should -Match 'detected legacy API'
-        $source | Should -Match 'Why TPM did it:'
+        $source | Should -Match 'Why TeknoParrot Manager did it:'
         $source | Should -Match 'older DirectX/Glide games'
         $source | Should -Match 'translate those older graphics calls'
-        $source | Should -Match 'What TPM did not change:'
+        $source | Should -Match 'What TeknoParrot Manager did not change:'
         $source | Should -Match 'unowned or changed files'
         $source | Should -Match 'skipped missing-path games'
         $source | Should -Match 'What to do next:'
@@ -13757,7 +13757,7 @@ Describe "Library Health Check guided repair UX contracts" {
         $actionsStart = $source.IndexOf('function Show-LibraryHealthNextActions', $healthStart, [StringComparison]::Ordinal)
         $health = $source.Substring($healthStart, $actionsStart - $healthStart)
         $health | Should -Match 'Library Health Check is read-only'
-        $health | Should -Match 'TPM checked your setup and did not change anything'
+        $health | Should -Match 'TeknoParrot Manager checked your setup and did not change anything'
         $health | Should -Not -Match '(?m)^\s*(Save-Xml|Save-XmlMaybe|Copy-Item|Remove-Item|Install-\w+|Invoke-\w+Setup)\b'
     }
     It "offers broken-path, PostgreSQL, and optional setup actions in plain language" {
@@ -13773,7 +13773,7 @@ Describe "Library Health Check guided repair UX contracts" {
         $source | Should -Match '\[D\] Details'
         $source | Should -Match '\[B\] Back to main menu'
         $source | Should -Match 'known game folders'
-        $source | Should -Match 'TPM will not guess'
+        $source | Should -Match 'TeknoParrot Manager will not guess'
         $source | Should -Match '\[P\] Set up PostgreSQL for these games'
         $source | Should -Match 'safety backup before changing PostgreSQL'
         foreach ($label in @('\[5\] ReShade', '\[6\] dgVoodoo2', '\[7\] GPU Fix', '\[8\] Force Feedback', '\[9\] BepInEx')) {
@@ -14413,6 +14413,13 @@ Describe 'TPM-owned layout and legacy migration' {
         $script:ProductionSource | Should -Match '\$datFilePath = '''
         $script:ProductionSource | Should -Match 'Write-Host \("  Updated: \{0\}" -f \$eggmanDatZip\)'
     }
+    It 'uses product wording and full profile names in normal UI output' {
+        $script:ProductionSource | Should -Not -Match 'Write-Host[^\r\n]*\bTPM\b'
+        $script:ProductionSource | Should -Match 'function Get-TpmGameDisplayLabel'
+        $script:ProductionSource | Should -Match 'Get-TpmGameDisplayLabel -ProfilePath'
+        $script:ProductionSource | Should -Match 'Write-TpmCompactExtractionProgress'
+    }
+
     It 'uses one membership decision prompt and clear FFB completion rules' {
         $script:ProductionSource | Should -Match 'Do you have an active, paid TeknoParrot membership\?"'
         $script:ProductionSource | Should -Match '\$hasSub = Read-TpmYesNo -Prompt "  Choose Y or N"'

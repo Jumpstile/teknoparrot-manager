@@ -36,6 +36,10 @@
   accounting remain failures. Normal results distinguish installed, native,
   unsupported, preserved, and failed outcomes and use full game names when
   available; technical identifiers remain in logs and evidence.
+  RC8 Slice 7 cross-cutting UI cleanup spells out TeknoParrot Manager in
+  normal prompts and status messages, shows full registered game names when
+  available, keeps profile codes in technical evidence, and preserves compact
+  single-row progress output instead of repeated extraction-style lines.
   Migration previews now identify the managed destination root, group planned
   moves by category, explain the opt-in Y/N behavior, and list excluded game,
   ROM-source, installation, frontend, and unrelated files. Declining applies

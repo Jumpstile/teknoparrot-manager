@@ -611,6 +611,14 @@ unrelated files. Declining applies no moves and returns normally. Eggman DAT
 updates derive the new filename from the latest release and update the active
 configuration path only after the download returns its canonical saved path.
 
+### Cross-cutting user-facing cleanup (RC8 Slice 7)
+
+Normal prompts and status messages spell out TeknoParrot Manager rather than
+the internal TPM abbreviation. Registered-game selection displays the profile's
+full GameName when available while retaining the profile code for logs, Details,
+support evidence, and internal lookup. Compact progress remains the single-row
+normal-path renderer; technical diagnostics stay in logs or Details output.
+
 ### Eggman recognition-data ownership (issue #252)
 
 The Eggman/RomVault ZIP is TPM recognition data: an index TPM reads to resolve
