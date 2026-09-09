@@ -54,7 +54,7 @@ release-decision table appears below and supersedes this snapshot.
 | 26 | Invalid optional Y/N input | SOURCE FIXED; OWNER RUNTIME NEEDED | Centralized finite-choice routes plus documented stateful/exact-token/secure/path boundaries | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Invalid-input matrix |
 | 27 | Support final prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | Support `1-3` and package `O/B` routes | `Prompt.Core fixed choice routes`; SupportPackage.Tests | Packaged support prompt |
 | 28 | Fatal support workflow surfacing | SOURCE FIXED; OWNER RUNTIME NEEDED | Get-TpmSupportManifestText | SupportPackage.Tests: `records Action Required freshness in the packaged manifest` | Fresh fatal-log package |
-| 29 | Action Required freshness/scoping | NOT FIXED | New-TpmSupportPackage; EvidenceClass manifest records | SupportPackage.Tests; support evidence source review | Complete troubleshooting intake and rebuilt support package |
+| 29 | Action Required freshness/scoping | SOURCE FIXED; OWNER RUNTIME NEEDED | New-TpmSupportPackage; EvidenceClass manifest records | SupportPackage.Tests; current/stale/ambient and plugin-inventory coverage | Complete troubleshooting intake and rebuilt support package |
 | 30 | Controls truthfulness | SOURCE FIXED; OWNER RUNTIME NEEDED | `Write-ControlPropagationResults`; control-readiness engine | `Write-ControlPropagationResults` focused tests; existing controls tests | Zero-bound packaged runtime result |
 | 31 | dgVoodoo2 wording | SOURCE FIXED; OWNER RUNTIME NEEDED | dgVoodoo2 result wording | No dedicated wording test | Owner wording review |
 | 32 | Global consistency rule | SOURCE FIXED; OWNER RUNTIME NEEDED | `TPM-PROMPT-001` finite-choice inventory and documented stateful/exact-token/secure/path/renderer-aware boundaries | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Packaged consistency smoke |
@@ -201,6 +201,18 @@ missing-database, corruption, reinitialize confirmation/cancel, retry/back,
 and no-mutation boundaries.
 
 Package rebuild and owner-runtime proof remain outstanding.
+### Slice F -- Support evidence scoping
+
+Owner ID 29 received a bounded support-evidence re-audit. Action Required
+freshness is compared with the latest TPM log and labeled stale when older.
+Current-run records remain distinct from Ambient evidence supplied or
+discovered without current-workflow provenance. Game-local BepInEx logs and
+metadata-only plugin inventories, including FamilyGuy-style findings, remain
+Ambient; plugin payloads are not copied. Allowlist, redaction, manifest, and
+ZIP-entry invariants remain covered by SupportPackage.Tests.
+
+Package rebuild and owner-runtime proof remain outstanding.
+
 
 
 
@@ -217,13 +229,15 @@ Package rebuild and owner-runtime proof remain outstanding.
 |---|---|---|---|---|---|
 | Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal` | 1030 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
 | Slice A focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*Invoke-TpmDownload*','*Thumbnail*','*RC8 PostgreSQL and support UX*') -CI -Output Normal` | 54 passed, 0 failed, 0 skipped, 975 not run | not captured | not captured | Pester 5.7.1 |
-| SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -Output Normal` | 36 passed, 0 failed, 0 skipped at prior checkpoint; not rerun in this slice | not captured | not captured | Pester 6.1.0 |
+| SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -CI -Output Normal` | 41 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
 | Controls focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Write-ControlPropagationResults*' -Output Detailed` | 3 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
 | ReShade focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*ReShade*','*protected adoption and accounting*','*ReShade result action priority*') -CI -Output Normal` | 192 passed, 0 failed, 0 skipped, 837 not run | not captured | not captured | Pester 5.7.1 |
 | Progress.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Progress.Core*' -Output Detailed` | 2 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Prompt.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Prompt.Core*' -Output Detailed` | 4 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Slice D focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*RC8 PostgreSQL*','*Postgres guided recovery*','*New-PostgresPgPassFile*') -CI -Output Normal` | 44 passed, 0 failed, 0 skipped, 986 not run | not captured | not captured | Pester 5.7.1 |
 | Slice E focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*Library Health*','*Repair-GamePaths*','*repair*','*scoped*','*affected*') -CI -Output Normal` | 33 passed, 0 failed, 0 skipped, 996 not run | prior Slice E checkpoint | prior Slice E checkpoint | Pester 5.7.1 |
+| Slice F focused Pester | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -FullNameFilter @('*freshness*','*ambient*','*BepInEx*','*plugin*','*manifest*','*ZIP*','*allowlist*','*redact*') -CI -Output Normal` | 16 passed, 0 failed, 0 skipped, 25 not run | not captured | not captured | Pester 5.7.1 |
+| SupportPackage full Pester | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -CI -Output Normal` | 41 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
 | Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 production parse errors; 0 test parse errors; 0 PSScriptAnalyzer findings; production ASCII 0; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
 | Permanent procedure gate | `.\scripts\Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: owner report contains unresolved NOT FIXED items and owner-runtime evidence remains outstanding | not captured | not captured | pwsh |
 
@@ -325,9 +339,9 @@ Corrections supported by new evidence:
 
 - IDs 13 and 14 (Crosshair browser close/focus) were `SOURCE CLAIM INVALID / RE-AUDIT REQUIRED` at that earlier audit point because the generated HTML had no `window.close()` implementation; the current crosshair slice re-audits the accepted contract, which permits a completed non-interactive state with explicit close guidance instead of requiring `window.close()`.
 - ID 2 (duplicate `ErrorAction`) is `SOURCE REMEDIATION REQUIRED`: direct search of `TeknoParrotManager-Support-20260908-023904.zip` found the exact error repeatedly in startup update, Eggman DAT, ProfileSet GitHub, thumbnails, Eggman game-data, and PostgreSQL-resume runs.
-- ID 29 (Action Required freshness/scoping) is split: stale labeling is working in the current manifest; ambient FamilyGuy/BepInEx/plugin diagnostics are not clearly labeled as untested/current-run evidence and require source remediation.
+- ID 29 (Action Required freshness/scoping) is SOURCE FIXED; OWNER RUNTIME NEEDED. Stale Action Required labeling is tied to the latest TPM log; ambient BepInEx/plugin diagnostics are explicitly labeled as untested/current-workflow-independent evidence and remain metadata-only.
 - ID 16 (PostgreSQL recovery) is SOURCE FIXED; OWNER RUNTIME NEEDED. Recovery now classifies password, service, missing-database, corruption, tool, permission, and connection failures, keeps retry/back paths explicit, and preserves no-mutation guarantees before a verified safety decision.
-- IDs 11-12, 17-19, 21-22, and 29 require source remediation. Rows not explicitly marked source remediation require renewed source/package audit before owner-runtime-only classification.
+- ID 3 remains source-remediation required. Rows not explicitly marked source remediation require renewed source/package audit before owner-runtime-only classification.
 
 The previous "32 owner-runtime-only" count is unreliable. The candidate package/source gate is not trustworthy for release acceptance. Re-audit and source remediation must precede package rebuild and owner-runtime retest.
 

@@ -634,6 +634,19 @@ Describe 'New-TpmSupportPackage' {
         $staleIndex | Should -BeGreaterThan $currentIndex
         $ambientIndex | Should -BeGreaterThan $staleIndex
     }
+    It 'marks game-local plugin evidence as ambient metadata and preserves current-run separation' {
+        $f = New-SupportFixture
+        $game = Add-SupportGame $f
+        New-Item -ItemType Directory -Path (Join-Path $game 'BepInEx\plugins') -Force | Out-Null
+        [System.IO.File]::WriteAllBytes((Join-Path $game 'BepInEx\plugins\GamePlugin.dll'), [byte[]](1,2,3))
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        ($r.Records | Where-Object Source -eq 'Game:TMNT:plugin inventory').EvidenceClass | Should -Be 'Ambient'
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'Ambient = supplied or discovered without current-run provenance'
+        $manifest | Should -Match 'Game:TMNT:plugin inventory'
+        $manifest | Should -Not -Match 'GamePlugin\.dll'
+    }
 
     It 'collects the exact TeknoParrotUI troubleshooting intake file safely' {
         $f = New-SupportFixture

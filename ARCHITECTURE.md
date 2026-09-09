@@ -120,6 +120,14 @@ connection failures. The caller keeps retry and Back/stop actions explicit and
 does not report recovery complete after an unverified backup, reset, restart,
 or profile-save operation.
 
+**Support evidence provenance (RC8).** Support manifests classify evidence as
+Current, Stale, or Ambient. Action Required is stale when older than the latest
+TPM log. TeknoParrotUI intake, game-local BepInEx/plugin diagnostics, and
+metadata-only plugin inventories remain Ambient because they are supplied or
+discovered without current-workflow provenance. Ambient inventories contain
+metadata only; plugin payloads are never copied. Game-local plugin findings
+therefore cannot be presented as current-run health evidence.
+
 
 ## Startup: network-path detection and hard timeout (v0.99.23)
 

@@ -53,7 +53,7 @@ canonical release-decision statuses are in the corrected table below.
 | 26 | Invalid optional Y/N input | Invalid values reprompt consistently | SOURCE FIXED; OWNER RUNTIME NEEDED | Prompts/navigation | Read-TpmChoice/Read-TpmYesNo migration; stateful picker boundaries documented | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Invalid-input matrix | Owner runtime | Prompt.Core |
 | 27 | Support final prompt | Support choices validate and preserve Back/open-folder behavior | SOURCE FIXED; OWNER RUNTIME NEEDED | Prompts/navigation | Support `1-3` and package `O/B` routes | `Prompt.Core fixed choice routes`; SupportPackage.Tests | Packaged support prompt | Owner runtime | Prompt.Core |
 | 28 | Support fatal workflow surfacing | Fatal evidence surfaces | SOURCE FIXED; OWNER RUNTIME NEEDED | Support package | Support manifest | SupportPackage.Tests | Fatal-log smoke | Owner runtime | Support follow-up |
-| 29 | Action Required freshness mismatch | Newest evidence is labeled and ambient diagnostics are scoped | SOURCE REMEDIATION REQUIRED | Support package | Support package freshness, EvidenceClass manifest records | SupportPackage.Tests; support evidence source review | Rebuilt support package and owner review | Complete troubleshooting intake | Support follow-up |
+| 29 | Action Required freshness mismatch | Newest evidence is labeled and ambient diagnostics are scoped | SOURCE FIXED; OWNER RUNTIME NEEDED | Support package | Support package freshness, EvidenceClass manifest records | SupportPackage.Tests; support evidence source review | Rebuilt support package and owner review | Complete troubleshooting intake | Support follow-up |
 | 30 | Controls truthfulness | Zero-bound results never imply verified readiness | SOURCE FIXED; OWNER RUNTIME NEEDED | Controls truthfulness | Write-ControlPropagationResults; control-readiness engine | Controls truthfulness focused tests; existing controls tests | Zero-bound packaged runtime result | Owner runtime | TPM-CONTROLS-001 |
 | 31 | dgVoodoo2 wording | Results explain deployment state | SOURCE FIXED; OWNER RUNTIME NEEDED | Progress/status | dgVoodoo2 result wording | Existing tests | Owner wording review | Owner runtime | Progress slice |
 | 32 | Global consistency rule | Every enumerated prompt uses the central contract or has a documented design boundary | SOURCE FIXED; OWNER RUNTIME NEEDED | Prompts/navigation | TPM-PROMPT-001 inventory; finite-choice routes centralized; stateful, exact-token, secure, path, and renderer-aware boundaries documented | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Packaged consistency smoke | Owner runtime | Prompt.Core |
@@ -74,10 +74,10 @@ canonical release-decision statuses are in the corrected table below.
 
 ## Current blockers
 
-- Canonical source-remediation blockers: IDs 3 and 29.
+- Canonical source-remediation blockers: ID 3.
 - Canonical source re-audit blockers: IDs 4, 5, 7, 20, 23-27, and 30-32.
-- Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1, 2, 6, 8-22, and 28.
-- ID 16 is source-fixed by the Slice D PostgreSQL recovery re-audit; package rebuild and owner-runtime proof remain outstanding.
+- Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1, 2, 6, 8-22, 28, and 29.
+- ID 29 is source-fixed by the Slice F support-evidence scoping re-audit; package rebuild and owner-runtime proof remain outstanding.
 - Test blockers: no focused source-test blocker remains for audited paths, but unresolved design work and owner-runtime routes remain.
 - Package/runtime blockers: candidate ZIP is stale; no owner smoke is authorized.
 - Owner-design blockers: ReShade ownership/accounting and remaining stateful prompt-picker boundaries need explicit future contracts.
@@ -131,7 +131,7 @@ remains stale and is not a release gate.
 | 31 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Wording source claim lacks owner/package proof | Re-audit first | Yes |
 | 32 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Global claim depended on the invalid accepted count | Re-audit first | Yes |
 
-- Historical false source-fixed claims included IDs 2, 13, and 14. The current crosshair slice supersedes the prior ID 13/14 disposition with source-fixed completed-state/focus behavior; ID 16 is now source-fixed by the Slice D PostgreSQL recovery re-audit, IDs 11 and 12 remain source-fixed with owner-runtime evidence outstanding, ID 3 remains a source-remediation blocker, and ID 29 remains a source-remediation blocker.
+- Historical false source-fixed claims included IDs 2, 13, and 14. The current crosshair slice supersedes the prior ID 13/14 disposition with source-fixed completed-state/focus behavior; IDs 16 and 29 are now source-fixed by the PostgreSQL and support-evidence re-audits, IDs 11 and 12 remain source-fixed with owner-runtime evidence outstanding, ID 3 remains the source-remediation blocker, and remaining rows require renewed source/package audit before owner-only classification.
 
 Changelog decision queued for the next authorized source slice: `Known RC8 owner-smoke blockers identified. Release remains blocked pending re-audit, source remediation, package rebuild, and owner-runtime retest.`
 
