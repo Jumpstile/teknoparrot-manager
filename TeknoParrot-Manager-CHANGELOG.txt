@@ -40,6 +40,10 @@
   Repair results report exact fixed/candidate/still-broken accounting;
   saved-path read-back remains required before FIXED is reported, and the
   post-repair thumbnail prompt remains after the repair result.
+  Slice D PostgreSQL recovery remediation now classifies password, service,
+  missing-database, corruption, tool, permission, and connection failures.
+  Retry and Back/stop paths remain explicit, and recovery never reports
+  completion before verified backup, reset, restart, and profile-save outcomes.
 
 
 

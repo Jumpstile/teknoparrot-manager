@@ -5682,6 +5682,19 @@ Describe "RC8 PostgreSQL and support UX" {
         @($result.Checks | Where-Object { $_.Name -like 'Backup failure:*' }).Count | Should -Be 1
         Should -Invoke Get-Service -Times 1
     }
+    It "categorizes password, service, missing-database, and corruption failures with safe next actions" {
+        $cases = @(
+            @{ Detail = 'password authentication failed for user postgres'; Category = 'PasswordAuthenticationFailed'; Next = 'Enter a working postgres password' }
+            @{ Detail = 'PostgreSQL service is not running'; Category = 'ServiceNotRunning'; Next = 'Start the PostgreSQL service' }
+            @{ Detail = 'database GameDB01 does not exist'; Category = 'DatabaseMissing'; Next = 'Verify the game database name' }
+            @{ Detail = 'database corruption detected in GameDB01'; Category = 'DatabaseCorrupt'; Next = 'Restore the affected database' }
+        )
+        foreach ($case in $cases) {
+            $diagnosis = Get-PostgresFailureDiagnosis -GameLabel 'Game A' -DbName 'GameDB01' -Detail $case.Detail
+            $diagnosis.Category | Should -Be $case.Category
+            $diagnosis.NextAction | Should -Match ([regex]::Escape($case.Next))
+        }
+    }
     It "provides concrete PostgreSQL retry and stop action metadata" {
         $actions = @(Get-PostgresRecoveryActions -FailureId 'postgres-profile-recovery')
         @($actions).Count | Should -Be 2

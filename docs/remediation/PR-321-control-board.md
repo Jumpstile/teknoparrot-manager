@@ -74,10 +74,10 @@ canonical release-decision statuses are in the corrected table below.
 
 ## Current blockers
 
- - Canonical source-remediation blockers: IDs 3, 16, and 29.
- - Canonical source re-audit blockers: IDs 4, 5, 7, 20, 23-27, and 30-32.
- - Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1, 2, 6, 8-15, 17-22, and 28.
- - IDs 17-22 are source-fixed by the Slice E Library Health repair-scope re-audit; package rebuild and owner-runtime proof remain outstanding.
+- Canonical source-remediation blockers: IDs 3 and 29.
+- Canonical source re-audit blockers: IDs 4, 5, 7, 20, 23-27, and 30-32.
+- Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1, 2, 6, 8-22, and 28.
+- ID 16 is source-fixed by the Slice D PostgreSQL recovery re-audit; package rebuild and owner-runtime proof remain outstanding.
 - Test blockers: no focused source-test blocker remains for audited paths, but unresolved design work and owner-runtime routes remain.
 - Package/runtime blockers: candidate ZIP is stale; no owner smoke is authorized.
 - Owner-design blockers: ReShade ownership/accounting and remaining stateful prompt-picker boundaries need explicit future contracts.
@@ -131,7 +131,7 @@ remains stale and is not a release gate.
 | 31 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Wording source claim lacks owner/package proof | Re-audit first | Yes |
 | 32 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Global claim depended on the invalid accepted count | Re-audit first | Yes |
 
-Historical false source-fixed claims included IDs 2, 13, and 14. The current crosshair slice supersedes the prior ID 13/14 disposition with source-fixed completed-state/focus behavior; IDs 11, 12, 16-19, 21-22, and 29 still require source remediation, and remaining rows require renewed source/package audit before owner-only classification.
+- Historical false source-fixed claims included IDs 2, 13, and 14. The current crosshair slice supersedes the prior ID 13/14 disposition with source-fixed completed-state/focus behavior; ID 16 is now source-fixed by the Slice D PostgreSQL recovery re-audit, IDs 11 and 12 remain source-fixed with owner-runtime evidence outstanding, ID 3 remains a source-remediation blocker, and ID 29 remains a source-remediation blocker.
 
 Changelog decision queued for the next authorized source slice: `Known RC8 owner-smoke blockers identified. Release remains blocked pending re-audit, source remediation, package rebuild, and owner-runtime retest.`
 

@@ -114,6 +114,12 @@ unrelated startup, DAT, and GitHub prompts; it consumes only the durable recover
 envelope and reports a concrete validation reason when that envelope or its
 selection plan cannot be trusted.
 
+Slice D re-audit coverage treats corruption as a distinct database failure
+category alongside password, service, missing-database, tool, permission, and
+connection failures. The caller keeps retry and Back/stop actions explicit and
+does not report recovery complete after an unverified backup, reset, restart,
+or profile-save operation.
+
 
 ## Startup: network-path detection and hard timeout (v0.99.23)
 

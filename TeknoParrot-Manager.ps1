@@ -8988,14 +8988,15 @@ function Get-PostgresBackupRepairDiagnosis {
 function Get-PostgresFailureDiagnosis {
     param([string]$GameLabel, [string]$DbName, [string]$Detail, [int]$ExitCode = 1)
     $text = [string]$Detail
-    $category = 'UnknownQueryFailure'; $next = 'Review the PostgreSQL log details, then retry after correcting the reported condition.'
-    if ($text -match '(?i)(illegal|unknown|unrecognized)\s+option\s+(-{1,2}\s*w|-w)|option.*-{1,2}\s*w') { $category = 'CommandCompatibility'; $next = 'The installed PostgreSQL 8.3 tools reject TPM''s password-suppression flag. Retry with the corrected PostgreSQL command compatibility path.' }
-    elseif ($text -match 'not found|could not be verified|not recognized|cannot find path') { $category = 'ToolUnavailable'; $next = 'Install or repair the PostgreSQL client tools, then retry.' }
-    elseif ($text -match 'service|not running|stopped') { $category = 'ServiceNotRunning'; $next = 'Start the PostgreSQL service with administrator rights, then retry.' }
-    elseif ($text -match 'permission|access denied|administrator|elevation') { $category = 'PermissionOrElevation'; $next = 'Run TeknoParrot Manager as administrator or grant the PostgreSQL account access, then retry.' }
-    elseif ($text -match 'does not exist|database .* missing') { $category = 'DatabaseMissing'; $next = 'Verify the game database name and restore the database before retrying.' }
-    elseif ($text -match 'authentication failed|password') { $category = 'PasswordAuthenticationFailed'; $next = 'Enter a working postgres password, validate it with SELECT 1, save it securely, then retry.' }
-    elseif ($text -match 'connect|connection|refused|server') { $category = 'CannotConnect'; $next = 'Verify the PostgreSQL service, host, port, and credentials, then retry.' }
+$category = 'UnknownQueryFailure'; $next = 'Review the PostgreSQL log details, then retry after correcting the reported condition.'
+if ($text -match '(?i)(illegal|unknown|unrecognized)\s+option\s+(-{1,2}\s*w|-w)|option.*-{1,2}\s*w') { $category = 'CommandCompatibility'; $next = 'The installed PostgreSQL 8.3 tools reject TPM''s password-suppression flag. Retry with the corrected PostgreSQL command compatibility path.' }
+elseif ($text -match '(?i)corrupt|corruption|malformed|inconsistent|invalid database') { $category = 'DatabaseCorrupt'; $next = 'Restore the affected database from a verified backup, then retry PostgreSQL setup.' }
+elseif ($text -match 'not found|could not be verified|not recognized|cannot find path') { $category = 'ToolUnavailable'; $next = 'Install or repair the PostgreSQL client tools, then retry.' }
+elseif ($text -match 'service|not running|stopped') { $category = 'ServiceNotRunning'; $next = 'Start the PostgreSQL service with administrator rights, then retry.' }
+elseif ($text -match 'permission|access denied|administrator|elevation') { $category = 'PermissionOrElevation'; $next = 'Run TeknoParrot Manager as administrator or grant the PostgreSQL account access, then retry.' }
+elseif ($text -match 'does not exist|database .* missing') { $category = 'DatabaseMissing'; $next = 'Verify the game database name and restore the database before retrying.' }
+elseif ($text -match 'authentication failed|password') { $category = 'PasswordAuthenticationFailed'; $next = 'Enter a working postgres password, validate it with SELECT 1, save it securely, then retry.' }
+elseif ($text -match 'connect|connection|refused|server') { $category = 'CannotConnect'; $next = 'Verify the PostgreSQL service, host, port, and credentials, then retry.' }
     return [pscustomobject]@{ GameLabel=$GameLabel; Database=$DbName; Category=$category; Detail=$text; NextAction=$next; ExitCode=$ExitCode }
 }
 function Get-PostgresDiagnosisAffectedPairs {
