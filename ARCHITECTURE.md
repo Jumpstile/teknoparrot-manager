@@ -50,6 +50,10 @@ The PostgreSQL setup path classifies client diagnostics before presenting
 recovery. Password authentication failures receive a distinct masked-password
 validation path; rejected credentials are not saved or logged, and profile
 changes remain behind the verified backup boundary.
+The manual password-recovery path reads back and revalidates the encrypted
+credential before retrying protected database backup. Normal recovery output uses
+readable game labels and compact diagnosis statuses; raw client details remain in
+logs and Details output.
 
 Crosshair browser selection is deliberately consumed from the main PowerShell
 runspace. `HttpListener` completion is polled and finalized with

@@ -5663,6 +5663,17 @@ Describe "Skylinekiller executable workflow regressions" {
     }
 }
 Describe "RC8 PostgreSQL and support UX" {
+    It "reads back the saved password before protected backup retry" {
+        $script:ProductionSource | Should -Match 'Get-PostgresValidatedSavedPassword'
+        $script:ProductionSource | Should -Match '\$readBackPassword'
+        $script:ProductionSource | Should -Match 'read-after-write verification'
+    }
+    It "keeps normal diagnosis output compact while retaining technical evidence" {
+        $script:ProductionSource | Should -Match 'Write-Host \("    \{0\}: \{1\}" -f \$check.Name, \$check.Status\)'
+        $script:ProductionSource | Should -Match 'Postgres read-only diagnosis detail:'
+        $script:ProductionSource | Should -Match 'Get-PostgresDiagnosisAffectedLabels'
+        $script:ProductionSource | Should -Not -Match 'Write-Host \("    \{0\}: \{1\} -- \{2\}" -f \$check.Name, \$check.Status, \$check.Detail\)'
+    }
     It "reports database backup failures with affected entries and clean recovery choices" {
         $script:ProductionSource | Should -Match 'PostgreSQL setup stopped because the database backup did not complete'
         $script:ProductionSource | Should -Match 'Nothing was changed'

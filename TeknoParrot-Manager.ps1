@@ -9056,6 +9056,10 @@ function Get-PostgresDiagnosisAffectedPairs {
         elseif ($game) { $game } else { $database }
     } | Where-Object { $_ } | Sort-Object -Unique)
 }
+function Get-PostgresDiagnosisAffectedLabels {
+    param([object[]]$Diagnoses)
+    return @($Diagnoses | ForEach-Object { [string]$_.GameLabel } | Where-Object { $_ } | Sort-Object -Unique)
+}
 function ConvertTo-PostgresReinitializePlanJson {
     param([Parameter(Mandatory)][object[]]$Plans)
     $ordered = @($Plans | ForEach-Object {
@@ -9249,6 +9253,21 @@ function Test-PostgresPassword {
         Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile
         Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure
     }
+}
+
+function Get-PostgresValidatedSavedPassword {
+    if ([string]::IsNullOrWhiteSpace($postgresSuperPasswordEncrypted)) { return $null }
+    try {
+        $secure = ConvertTo-SecureString -String $postgresSuperPasswordEncrypted
+        $saved = ConvertFrom-SecureStringPlain $secure
+        if (Test-PostgresPassword -SuperPasswordPlain $saved) { return $saved }
+    } catch {
+        Write-Log 'Postgres setup: saved replacement password could not be read back and verified.'
+    } finally {
+        $saved = $null
+        $secure = $null
+    }
+    return $null
 }
 
 function ConvertTo-PostgresSqlPasswordLiteral {
@@ -23811,9 +23830,9 @@ $mode = $null
                 }
                 Write-Host "  What happened"
                 Write-Host "  Your games were not changed"
-                Write-Host "  Affected games and databases:" -ForegroundColor Yellow
-                foreach ($pair in @(Get-PostgresDiagnosisAffectedPairs -Diagnoses $pgBackup.FailureDiagnoses)) {
-                    Write-Host ("    {0}" -f $pair) -ForegroundColor Yellow
+                Write-Host "  Affected games:" -ForegroundColor Yellow
+                foreach ($label in @(Get-PostgresDiagnosisAffectedLabels -Diagnoses $pgBackup.FailureDiagnoses)) {
+                    Write-Host ("    {0}" -f $label) -ForegroundColor Yellow
                 }
                 Write-Host "  What TeknoParrot Manager can do next" -ForegroundColor Cyan
                 if ($authFailure) {
@@ -23852,17 +23871,25 @@ $mode = $null
                     [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
                     try {
                         if (Test-PostgresPassword -SuperPasswordPlain $candidatePassword) {
-                            $superPwPlain = $candidatePassword
                             $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $candidatePassword
                             if (-not (Save-Config)) {
                                 Write-Host "  PostgreSQL login succeeded, but TeknoParrot Manager could not save the new credential. No database or game-profile changes were made." -ForegroundColor Red
                                 Write-Log 'Postgres setup: validated replacement password could not be saved.'
                                 continue
                             }
+                            $readBackPassword = Get-PostgresValidatedSavedPassword
+                            if (-not $readBackPassword) {
+                                Write-Host "  PostgreSQL login succeeded, but the saved credential could not be read back and verified." -ForegroundColor Red
+                                Write-Host "  No database or game-profile changes were made." -ForegroundColor Yellow
+                                Write-Log 'Postgres setup: validated replacement password failed read-after-write verification.'
+                                continue
+                            }
+                            $superPwPlain = $readBackPassword
+                            $readBackPassword = $null
                             $validatedPasswordForBackup = $true
                             Write-Host "  PostgreSQL password validated and saved securely." -ForegroundColor Green
                             Write-Host "  TeknoParrot Manager will now retry the protected backup automatically." -ForegroundColor Cyan
-                            Write-Log 'Postgres setup: replacement password validated and saved without logging the password.'
+                            Write-Log 'Postgres setup: replacement password validated, read back, and saved without logging the password.'
                             $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
                         } else {
                             Write-Host "  PostgreSQL rejected that password. Nothing was saved." -ForegroundColor Red
@@ -23874,7 +23901,7 @@ $mode = $null
                 if ($authFailure -and $backupChoice -eq 'X') {
                     Write-Host "  Resetting the PostgreSQL password will change the password for the local postgres database user." -ForegroundColor Yellow
                     Write-Host "  TeknoParrot Manager will save the new password securely and use it for the affected games." -ForegroundColor Yellow
-                    $resetConfirm = Read-TpmChoice -Prompt '  Do you want TPM to reset the local postgres password now? (Y/B)' -Choices @('Y', 'B') -Default 'B'
+                    $resetConfirm = Read-TpmChoice -Prompt '  Do you want TeknoParrot Manager to reset the local PostgreSQL password now? (Y/B)' -Choices @('Y', 'B') -Default 'B'
                     if ($resetConfirm -ne 'Y') {
                         Write-Host "  Password reset cancelled. Nothing was changed." -ForegroundColor DarkGray
                         continue
@@ -23981,9 +24008,12 @@ $mode = $null
                     $diagnosisReport = Get-PostgresBackupRepairDiagnosis -BackupResult $pgBackup
                     Write-Host ("  Read-only PostgreSQL diagnosis: {0}" -f $diagnosisReport.Summary) -ForegroundColor Yellow
                     foreach ($check in @($diagnosisReport.Checks)) {
-                        Write-Host ("    {0}: {1} -- {2}" -f $check.Name, $check.Status, $check.Detail) -ForegroundColor DarkGray
+                        Write-Host ("    {0}: {1}" -f $check.Name, $check.Status) -ForegroundColor DarkGray
                     }
                     Write-Log ("Postgres read-only diagnosis before retry: {0}" -f $diagnosisReport.Summary)
+                    foreach ($check in @($diagnosisReport.Checks)) {
+                        Write-Log ("Postgres read-only diagnosis detail: {0}={1}; {2}" -f $check.Name, $check.Status, $check.Detail)
+                    }
                     $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
                     continue
                 }

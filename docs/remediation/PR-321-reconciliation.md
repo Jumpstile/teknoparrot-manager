@@ -218,7 +218,10 @@ and no-mutation boundaries. The follow-up remediation keeps PACKAGE_MISMATCH
 and IDENTITY_MISMATCH as hard-stop conditions, does not construct retry state
 from mismatched payload data, exposes both masked password validation and the
 reachable local role reset choice, and keeps raw client diagnostics in
-Details/logs.
+Details/logs. Manual password recovery now reads back and revalidates the
+saved credential before protected-backup retry; normal affected-game output uses
+readable labels and the diagnosis screen omits raw client detail while retaining
+it in logs.
 
 Package rebuild and owner-runtime proof remain outstanding.
 ### Slice F -- Support evidence scoping

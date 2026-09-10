@@ -249,3 +249,7 @@ Evidence distinction:
 
 Owner retest required after commit and package rebuild. No owner smoke is
 authorized from this working tree.
+
+## Slice 8 -- PostgreSQL recovery data safety
+
+The Slice 8 source pass reads back and revalidates manually saved PostgreSQL credentials before protected-backup retry. Normal recovery output uses readable game names and compact diagnosis statuses; technical database/profile identifiers and raw client details remain in Details/log evidence. Package rebuild and owner-runtime proof remain outstanding.

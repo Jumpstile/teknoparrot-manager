@@ -15,8 +15,10 @@
   RC8 PostgreSQL recovery remediation keeps PACKAGE_MISMATCH and
   IDENTITY_MISMATCH fail-closed. Saved-password failures expose both masked
   validation and the reachable local role reset choice; reset verification
-  remains mandatory, and normal recovery output keeps raw client diagnostics
-  in Details/logs.
+  remains mandatory. Manual password recovery reads back the saved credential
+  before retrying protected backup; normal recovery output uses readable game
+  labels and compact diagnosis statuses, while raw client diagnostics remain in
+  Details/logs.
   RC8 ReShade remediation keeps the preview view-only and
   terminal-authoritative, guards paint events when preview state or assets are
   unavailable, and explains the five beginner-safe profile set. Apply-all
