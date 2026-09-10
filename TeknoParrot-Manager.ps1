@@ -7416,6 +7416,19 @@ function Get-TpmGameDisplayLabel {
     return $Fallback
 }
 
+function Get-PostgresProfileDisplayMetadata {
+    param([Parameter(Mandatory)][string]$ProfilePath)
+    $profileKey = [System.IO.Path]::GetFileNameWithoutExtension($ProfilePath)
+    $displayName = Get-TpmGameDisplayLabel -ProfilePath $ProfilePath -Fallback ' '
+    $hasAuthoritativeTitle = -not [string]::IsNullOrWhiteSpace($displayName)
+    if (-not $hasAuthoritativeTitle) { $displayName = 'Unknown game title -- see Details' }
+    return [pscustomobject]@{
+        DisplayName = $displayName
+        ProfileKey = $profileKey
+        HasAuthoritativeTitle = $hasAuthoritativeTitle
+    }
+}
+
 function Get-TpmReShadeGameLabel {
     param([Parameter(Mandatory)][string]$ProfilePath, [string]$Fallback = '')
     try {
@@ -8920,69 +8933,89 @@ function Test-PostgresInstalled {
 # backup attempt.
 function Get-PostgresBackupRepairDiagnosis {
     param([Parameter(Mandatory)][object]$BackupResult)
-    $checks = New-Object System.Collections.Generic.List[object]
+    $technicalChecks = New-Object System.Collections.Generic.List[object]
+    $normalChecks = New-Object System.Collections.Generic.List[object]
     $service = $null
     try {
         $service = Get-Service -Name $script:PostgresServiceName -ErrorAction Stop
-        [void]$checks.Add([pscustomobject]@{
+        $serviceCheck = [pscustomobject]@{
             Name = 'PostgreSQL service'
             Status = 'Present'
             Detail = ('{0} ({1})' -f $script:PostgresServiceName, [string]$service.Status)
-        })
+        }
     } catch {
-        [void]$checks.Add([pscustomobject]@{
+        $serviceCheck = [pscustomobject]@{
             Name = 'PostgreSQL service'
             Status = 'Missing'
             Detail = ('Could not verify service {0}.' -f $script:PostgresServiceName)
-        })
+        }
     }
+    [void]$technicalChecks.Add($serviceCheck)
+    [void]$normalChecks.Add([pscustomobject]@{
+        Name = 'PostgreSQL service'
+        Status = $serviceCheck.Status
+    })
 
     $toolPaths = @(
         (Join-Path $script:PostgresBinDir 'psql.exe'),
         (Join-Path $script:PostgresBinDir 'pg_dump.exe')
     )
+    $toolStates = New-Object System.Collections.Generic.List[object]
     foreach ($toolPath in $toolPaths) {
         $toolName = [System.IO.Path]::GetFileName($toolPath)
-        if (Test-Path -LiteralPath $toolPath -PathType Leaf) {
-            [void]$checks.Add([pscustomobject]@{
+        $toolCheck = if (Test-Path -LiteralPath $toolPath -PathType Leaf) {
+            [pscustomobject]@{
                 Name = $toolName
                 Status = 'Present'
                 Detail = $toolPath
-            })
+            }
         } else {
-            [void]$checks.Add([pscustomobject]@{
+            [pscustomobject]@{
                 Name = $toolName
                 Status = 'Missing'
                 Detail = $toolPath
-            })
+            }
         }
+        [void]$technicalChecks.Add($toolCheck)
+        [void]$toolStates.Add($toolCheck)
     }
+    $missingTools = @($toolStates | Where-Object { $_.Status -ne 'Present' }).Count
+    [void]$normalChecks.Add([pscustomobject]@{
+        Name = 'PostgreSQL client tools'
+        Status = if ($missingTools -eq 0) { 'Present' } else { 'Missing' }
+    })
 
     $pgDumpPath = Join-Path $script:PostgresBinDir 'pg_dump.exe'
+    $versionCheck = $null
     if (Test-Path -LiteralPath $pgDumpPath -PathType Leaf) {
         try {
             $versionText = (& $pgDumpPath '--version' 2>&1 | Out-String).Trim()
             $versionExitCode = $LASTEXITCODE
             if ($versionExitCode -eq 0 -and $versionText) {
-                [void]$checks.Add([pscustomobject]@{
+                $versionCheck = [pscustomobject]@{
                     Name = 'pg_dump version'
                     Status = 'Reported'
                     Detail = $versionText
-                })
+                }
             } else {
-                [void]$checks.Add([pscustomobject]@{
+                $versionCheck = [pscustomobject]@{
                     Name = 'pg_dump version'
                     Status = 'Failed'
                     Detail = 'pg_dump did not report a version.'
-                })
+                }
             }
         } catch {
-            [void]$checks.Add([pscustomobject]@{
+            $versionCheck = [pscustomobject]@{
                 Name = 'pg_dump version'
                 Status = 'Failed'
                 Detail = 'pg_dump could not be executed for a version check.'
-            })
+            }
         }
+        [void]$technicalChecks.Add($versionCheck)
+        [void]$normalChecks.Add([pscustomobject]@{
+            Name = 'PostgreSQL client version'
+            Status = $versionCheck.Status
+        })
     }
 
     foreach ($diagnosis in @($BackupResult.FailureDiagnoses)) {
@@ -8993,20 +9026,60 @@ function Get-PostgresBackupRepairDiagnosis {
         } else {
             [string]$diagnosis.Database
         }
-        [void]$checks.Add([pscustomobject]@{
-            Name = ('Backup failure: {0}' -f $pair)
+        $profileKey = [string]$diagnosis.ProfileKey
+        $technicalName = if ($profileKey) {
+            'Backup failure: {0} (ProfileKey: {1})' -f $pair, $profileKey
+        } else {
+            'Backup failure: {0}' -f $pair
+        }
+        [void]$technicalChecks.Add([pscustomobject]@{
+            Name = $technicalName
             Status = [string]$diagnosis.Category
             Detail = [string]$diagnosis.Detail
+            ProfileKey = $profileKey
+            Database = [string]$diagnosis.Database
         })
     }
+    $detailCount = 0
     foreach ($detail in @($BackupResult.FailureDetails)) {
         if ($detail) {
-            [void]$checks.Add([pscustomobject]@{
+            $detailCount++
+            [void]$technicalChecks.Add([pscustomobject]@{
                 Name = 'Backup detail'
                 Status = 'Reported'
                 Detail = [string]$detail
             })
         }
+    }
+
+    $categoryLabels = @{
+        PasswordAuthenticationFailed = 'Password authentication'
+        ServiceNotRunning = 'PostgreSQL service'
+        DatabaseMissing = 'Missing PostgreSQL database'
+        DatabaseCorrupt = 'PostgreSQL database integrity'
+        ToolUnavailable = 'PostgreSQL client tools'
+        PermissionOrElevation = 'PostgreSQL permissions'
+        CannotConnect = 'PostgreSQL connection'
+        CommandCompatibility = 'PostgreSQL command compatibility'
+        UnknownQueryFailure = 'PostgreSQL backup issue'
+    }
+    foreach ($group in @($BackupResult.FailureDiagnoses | Group-Object -Property Category | Sort-Object Name)) {
+        $normalName = if ($categoryLabels.ContainsKey([string]$group.Name)) {
+            [string]$categoryLabels[[string]$group.Name]
+        } else {
+            'PostgreSQL backup issue'
+        }
+        $status = if ($group.Count -eq 1) { 'Reported' } else { 'Reported for {0} games' -f $group.Count }
+        [void]$normalChecks.Add([pscustomobject]@{
+            Name = $normalName
+            Status = $status
+        })
+    }
+    if ($detailCount -gt 0) {
+        [void]$normalChecks.Add([pscustomobject]@{
+            Name = 'Additional backup details'
+            Status = '{0} technical detail(s) available in Details' -f $detailCount
+        })
     }
 
     $serviceRunning = ($null -ne $service -and [string]$service.Status -ne 'Stopped')
@@ -9016,7 +9089,7 @@ function Get-PostgresBackupRepairDiagnosis {
     } elseif (-not $serviceRunning) {
         'PostgreSQL service is not running.'
     } elseif (-not $pgDumpPresent) {
-        'pg_dump.exe could not be verified.'
+        'PostgreSQL client tools could not be verified.'
     } elseif (@($BackupResult.FailureDiagnoses).Count -gt 0) {
         'The protected backup still has reported database failures.'
     } else {
@@ -9024,7 +9097,9 @@ function Get-PostgresBackupRepairDiagnosis {
     }
     return [pscustomobject]@{
         Summary = $summary
-        Checks = @($checks.ToArray())
+        Checks = @($technicalChecks.ToArray())
+        TechnicalChecks = @($technicalChecks.ToArray())
+        NormalChecks = @($normalChecks.ToArray())
         ReadOnly = $true
     }
 }
@@ -9034,7 +9109,7 @@ function Get-PostgresBackupRepairDiagnosis {
 # query failure into "database absent". Creation is allowed only when
 # Verified is true and Exists is false.
 function Get-PostgresFailureDiagnosis {
-    param([string]$GameLabel, [string]$DbName, [string]$Detail, [int]$ExitCode = 1)
+    param([string]$GameLabel, [string]$DbName, [string]$Detail, [int]$ExitCode = 1, [string]$ProfileKey = '')
     $text = [string]$Detail
 $category = 'UnknownQueryFailure'; $next = 'Review the PostgreSQL log details, then retry after correcting the reported condition.'
 if ($text -match '(?i)(illegal|unknown|unrecognized)\s+option\s+(-{1,2}\s*w|-w)|option.*-{1,2}\s*w') { $category = 'CommandCompatibility'; $next = 'The installed PostgreSQL 8.3 tools reject TPM''s password-suppression flag. Retry with the corrected PostgreSQL command compatibility path.' }
@@ -9045,7 +9120,7 @@ elseif ($text -match 'permission|access denied|administrator|elevation') { $cate
 elseif ($text -match 'does not exist|database .* missing') { $category = 'DatabaseMissing'; $next = 'Verify the game database name and restore the database before retrying.' }
 elseif ($text -match 'authentication failed|password') { $category = 'PasswordAuthenticationFailed'; $next = 'Enter a working postgres password, validate it with SELECT 1, save it securely, then retry.' }
 elseif ($text -match 'connect|connection|refused|server') { $category = 'CannotConnect'; $next = 'Verify the PostgreSQL service, host, port, and credentials, then retry.' }
-    return [pscustomobject]@{ GameLabel=$GameLabel; Database=$DbName; Category=$category; Detail=$text; NextAction=$next; ExitCode=$ExitCode }
+    return [pscustomobject]@{ GameLabel=$GameLabel; ProfileKey=$ProfileKey; Database=$DbName; Category=$category; Detail=$text; NextAction=$next; ExitCode=$ExitCode }
 }
 function Get-PostgresDiagnosisAffectedPairs {
     param([object[]]$Diagnoses)
@@ -9102,12 +9177,13 @@ function Get-PostgresReinitializePlansFromProfiles {
         $db = [string](Get-PostgresFieldValue $doc 'DbName')
         if ([string]::IsNullOrWhiteSpace($db) -or -not (Test-SafePostgresDbName $db)) { continue }
         if ($OnlyDatabases.Count -gt 0 -and $OnlyDatabases -notcontains $db) { continue }
-        $label = if ($doc.GameProfile.GameName) { ([string]$doc.GameProfile.GameName).Trim() } else { $pf.BaseName }
+        $metadata = Get-PostgresProfileDisplayMetadata -ProfilePath $pf.FullName
+        $label = $metadata.DisplayName
         $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
         $gamePath = if ($gamePathNode) { [string]$gamePathNode.InnerText } else { '' }
         $backupFile = if ($gamePath -and (Test-Path -LiteralPath $gamePath -PathType Leaf)) { Get-PostgresBackupFile -GameFolder ([System.IO.Path]::GetDirectoryName($gamePath)) } else { '' }
         $encoding = if ($db -eq 'GameDB06') { 'UTF8' } else { 'SQL_ASCII' }
-        [void]$plans.Add([pscustomobject]@{ GameLabel = $label; ProfileName = $pf.BaseName; Database = $db; BackupFile = $backupFile; Encoding = $encoding })
+        [void]$plans.Add([pscustomobject]@{ GameLabel = $label; ProfileName = $metadata.ProfileKey; Database = $db; BackupFile = $backupFile; Encoding = $encoding })
     }
     return @($plans | Sort-Object GameLabel, ProfileName, Database -Unique)
 }
@@ -9408,37 +9484,89 @@ function Restore-PostgresProfileBackups {
     return $true
 }
 
+function Get-PostgresResetFailureGuidance {
+    param(
+        [ValidateSet('RecoveryEvidence','ExecutableOrDataDirectory','DataPathSafety','ServiceLookup','ServiceStop','PostmasterPid','AlterRole','ServiceRestart','PasswordValidation','ServiceRestore','ResetInvocation')]
+        [string]$FailureStage,
+        [switch]$PasswordChangeCommitted
+    )
+    switch ($FailureStage) {
+        'RecoveryEvidence' { return 'TPM could not verify its safety backup. No PostgreSQL changes were attempted. Choose Details or Back.' }
+        'ExecutableOrDataDirectory' { return 'TPM could not verify the local PostgreSQL installation. Repair PostgreSQL, then retry.' }
+        'DataPathSafety' { return 'TPM could not safely verify the local PostgreSQL data location. No changes were made.' }
+        'ServiceLookup' { return 'TPM could not verify the local PostgreSQL service. Check the installation, then retry.' }
+        'ServiceStop' { return 'TPM could not stop PostgreSQL safely. No password change was attempted.' }
+        'PostmasterPid' { return 'PostgreSQL still appeared to be running. Close other PostgreSQL tools, then retry.' }
+        'AlterRole' { return 'TPM could not change the PostgreSQL password. No completed reset was reported.' }
+        'ServiceRestart' {
+            if ($PasswordChangeCommitted) { return 'The PostgreSQL password may have changed, but TPM could not restart and verify PostgreSQL. Review Details before retrying.' }
+            return 'TPM could not restart PostgreSQL after the password reset. Review Details before retrying.'
+        }
+        'PasswordValidation' { return 'PostgreSQL restarted, but the new password could not be verified. Review Details before retrying.' }
+        'ServiceRestore' { return 'TPM could not restore PostgreSQL to its original service state. Ask for manual help before retrying.' }
+        'ResetInvocation' { return 'TPM could not start the PostgreSQL password repair. No database or game-profile changes were made.' }
+        default { return 'TPM could not complete the PostgreSQL password reset. No database or game-profile changes were made.' }
+    }
+}
+
 function Reset-PostgresPasswordAutomatically {
     param([Parameter(Mandatory)][string]$NewPassword, [Parameter(Mandatory)]$RecoveryBackup)
-    $result = [ordered]@{ Attempted = $false; Succeeded = $false; RecoveryBlocked = $true; PasswordChangeCommitted = $false; BackupPath = $RecoveryBackup.Path; Reason = '' }
-    if (-not $RecoveryBackup.Verified) { $result.Reason = 'Verified recovery evidence is unavailable.'; return [pscustomobject]$result }
+    $result = [ordered]@{
+        Attempted = $false
+        Succeeded = $false
+        RecoveryBlocked = $true
+        PasswordChangeCommitted = $false
+        BackupPath = $RecoveryBackup.Path
+        FailureStage = ''
+        Reason = ''
+    }
+    if (-not $RecoveryBackup.Verified) {
+        $result.FailureStage = 'RecoveryEvidence'
+        $result.Reason = 'Verified recovery evidence is unavailable.'
+        return [pscustomobject]$result
+    }
+    $result.FailureStage = 'ExecutableOrDataDirectory'
     $postgresExe = Join-Path $script:PostgresBinDir 'postgres.exe'
     $dataDir = Join-Path $script:PostgresInstallDir 'data'
     if (-not (Test-Path -LiteralPath $postgresExe -PathType Leaf) -or -not (Test-Path -LiteralPath $dataDir -PathType Container)) {
         $result.Reason = 'The PostgreSQL executable or data directory could not be verified.'
         return [pscustomobject]$result
     }
-    if ($dataDir -match '[\r\n"]') { $result.Reason = 'The PostgreSQL data path is not safe for the native recovery command.'; return [pscustomobject]$result }
+    $result.FailureStage = 'DataPathSafety'
+    if ($dataDir -match '[\r\n"]') {
+        $result.Reason = 'The PostgreSQL data path is not safe for the native recovery command.'
+        return [pscustomobject]$result
+    }
+    $result.FailureStage = 'ServiceLookup'
     $service = Get-Service -Name $script:PostgresServiceName -ErrorAction SilentlyContinue
-    if ($null -eq $service) { $result.Reason = 'The PostgreSQL service could not be verified.'; return [pscustomobject]$result }
+    if ($null -eq $service) {
+        $result.Reason = 'The PostgreSQL service could not be verified.'
+        return [pscustomobject]$result
+    }
     $wasRunning = ([string]$service.Status -ne 'Stopped')
     try {
         $result.Attempted = $true
+        $result.FailureStage = 'ServiceStop'
         if ($wasRunning) {
             Stop-Service -Name $script:PostgresServiceName -Force -ErrorAction Stop
             Wait-PostgresServiceState -DesiredStatus 'Stopped' | Out-Null
         }
+        $result.FailureStage = 'PostmasterPid'
         if (Test-Path -LiteralPath (Join-Path $dataDir 'postmaster.pid') -PathType Leaf) { throw 'A live PostgreSQL postmaster is still present.' }
+        $result.FailureStage = 'AlterRole'
         $literal = ConvertTo-PostgresSqlPasswordLiteral -Password $NewPassword
         $sql = 'ALTER ROLE postgres WITH PASSWORD ' + $literal + ';' + [Environment]::NewLine + [Environment]::NewLine
         $processResult = Invoke-PostgresNativeProcessWithInput -FilePath $postgresExe -Arguments ('--single -D "' + $dataDir + '" -j postgres') -InputText $sql -Secrets @($NewPassword)
         if ($processResult.ExitCode -ne 0) { throw "Automatic PostgreSQL password reset failed with exit code $($processResult.ExitCode)." }
         $result.PasswordChangeCommitted = $true
+        $result.FailureStage = 'ServiceRestart'
         Start-Service -Name $script:PostgresServiceName -ErrorAction Stop
         Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null
+        $result.FailureStage = 'PasswordValidation'
         if (-not (Test-PostgresPassword -SuperPasswordPlain $NewPassword)) { throw 'The reset completed but the approved password did not authenticate.' }
         $result.Succeeded = $true
         $result.RecoveryBlocked = $false
+        $result.FailureStage = ''
         $result.Reason = 'Automatic PostgreSQL password reset and authentication verification completed.'
     } catch {
         if ($result.PasswordChangeCommitted) {
@@ -9449,11 +9577,16 @@ function Reset-PostgresPasswordAutomatically {
             Write-Log "Postgres recovery: reset failed before password change; no recovery-complete result was reported. Evidence=$($RecoveryBackup.Path)"
         }
         Write-Log "Postgres recovery: blocked; no recovery-complete result was reported. Evidence=$($RecoveryBackup.Path)"
+        $failureStage = [string]$result.FailureStage
         try {
             $current = Get-Service -Name $script:PostgresServiceName -ErrorAction SilentlyContinue
             if ($current -and $wasRunning -and [string]$current.Status -eq 'Stopped') { Start-Service -Name $script:PostgresServiceName -ErrorAction Stop; Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null }
             if ($current -and -not $wasRunning -and [string]$current.Status -eq 'Running') { Stop-Service -Name $script:PostgresServiceName -Force -ErrorAction Stop; Wait-PostgresServiceState -DesiredStatus 'Stopped' | Out-Null }
-        } catch { Write-Log 'Postgres recovery: original service state could not be restored.' }
+            $result.FailureStage = $failureStage
+        } catch {
+            $result.FailureStage = 'ServiceRestore'
+            Write-Log 'Postgres recovery: original service state could not be restored.'
+        }
     }
     return [pscustomobject]$result
 }
@@ -12675,19 +12808,20 @@ function Invoke-PostgresSelectedPasswordRecovery {
     Write-Host "  TeknoParrot Manager is creating a verified recovery backup before resetting the PostgreSQL role password..." -ForegroundColor Cyan
     $backup = New-PostgresRecoveryBackup -UserProfilesDir $UserProfilesDir
     if (-not $backup.Verified) {
-        return [pscustomobject]@{ Succeeded = $false; Backup = $backup; Reason = 'RECOVERY_BACKUP_UNVERIFIED' }
+        return [pscustomobject]@{ Succeeded = $false; Backup = $backup; FailureStage = 'RecoveryEvidence'; Reason = 'RECOVERY_BACKUP_UNVERIFIED' }
     }
     if ($StatusContext) { [void](Complete-TpmWorkflowStep -Context $StatusContext -Outcome Succeeded -Summary 'Verified safety backup complete' -NextStep 'Repair and verify the database password') }
     if ($StatusContext) { [void](Start-TpmWorkflowStep -Context $StatusContext -StepId 'reset' -Activity 'Repairing the PostgreSQL password') }
     $reset = Reset-PostgresPasswordAutomatically -NewPassword $PasswordPlain -RecoveryBackup $backup
     if (-not $reset.Succeeded) {
-        return [pscustomobject]@{ Succeeded = $false; Backup = $backup; Reason = 'PASSWORD_RESET_FAILED' }
+        return [pscustomobject]@{ Succeeded = $false; Backup = $backup; FailureStage = [string]$reset.FailureStage; Reason = [string]$reset.Reason; Reset = $reset }
     }
+    if ($StatusContext) { [void](Start-TpmWorkflowStep -Context $StatusContext -StepId 'password-validation' -Activity 'Verifying the repaired PostgreSQL password') }
     if (-not (Test-PostgresPassword -SuperPasswordPlain $PasswordPlain)) {
-        return [pscustomobject]@{ Succeeded = $false; Backup = $backup; Reason = 'PASSWORD_VERIFICATION_FAILED' }
+        return [pscustomobject]@{ Succeeded = $false; Backup = $backup; FailureStage = 'PasswordValidation'; Reason = 'The repaired PostgreSQL password could not be verified.'; Reset = $reset }
     }
     if ($StatusContext) { [void](Complete-TpmWorkflowStep -Context $StatusContext -Outcome Fixed -Summary 'Password repaired and verified' -NextStep 'Save the repaired settings') }
-    return [pscustomobject]@{ Succeeded = $true; Backup = $backup; Reason = $null }
+    return [pscustomobject]@{ Succeeded = $true; Backup = $backup; FailureStage = ''; Reason = $null; Reset = $reset }
 }
 
 # Cross-checks PostgreSQL's own installation registry record -- written by
@@ -19341,15 +19475,15 @@ function Backup-PostgresDatabases {
     }
     if (-not (Test-PostgresInstalled)) { return [pscustomobject]$result }
     $names = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
-    $databaseGameLabels = @{}
+    $databaseGameMetadata = @{}
     try {
         $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
         foreach ($pf in $profiles) {
             $dbName = ''
-            $gameLabel = $pf.BaseName
+            $profileMetadata = Get-PostgresProfileDisplayMetadata -ProfilePath $pf.FullName
+            $gameLabel = $profileMetadata.DisplayName
             try {
                 $doc = Read-Xml $pf.FullName
-                if ($doc.GameProfile -and $doc.GameProfile.GameName) { $gameLabel = ([string]$doc.GameProfile.GameName).Trim() }
                 if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc)) { continue }
                 $dbName = Get-PostgresFieldValue $doc 'DbName'
                 if ([string]::IsNullOrWhiteSpace($dbName) -or -not (Test-SafePostgresDbName $dbName)) {
@@ -19357,12 +19491,12 @@ function Backup-PostgresDatabases {
                     [void]$failureDetails.Add(('{0}: missing or unsafe database name.' -f $gameLabel))
                     continue
                 }
-                $databaseGameLabels[$dbName] = $gameLabel
+                $databaseGameMetadata[$dbName] = $profileMetadata
                 $state = Get-PostgresDatabaseState -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain
                 if ($state.Exists) { [void]$names.Add($dbName) }
             } catch {
                 $detail = [string]$_.Exception.Message
-                $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $gameLabel -DbName $dbName -Detail $detail
+                $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $gameLabel -ProfileKey $profileMetadata.ProfileKey -DbName $dbName -Detail $detail
                 [void]$failureDiagnoses.Add($diagnosis)
                 [void]$failedDatabases.Add(('{0} / {1}' -f $gameLabel, $dbName))
                 [void]$failureDetails.Add(('{0} / {1}: {2} ({3}) Next action: {4}' -f $gameLabel, $dbName, $detail, $diagnosis.Category, $diagnosis.NextAction))
@@ -19389,9 +19523,17 @@ function Backup-PostgresDatabases {
     if (-not (Test-Path -LiteralPath $pgDumpExe -PathType Leaf)) {
         $result.Succeeded = $false
         foreach ($dbName in @($names | Sort-Object)) {
-            $label = if ($databaseGameLabels.ContainsKey($dbName)) { $databaseGameLabels[$dbName] } else { $dbName }
+            $metadata = if ($databaseGameMetadata.ContainsKey($dbName)) {
+                $databaseGameMetadata[$dbName]
+            } else {
+                [pscustomobject]@{
+                    DisplayName = 'Unknown game title -- see Details'
+                    ProfileKey = ''
+                }
+            }
+            $label = [string]$metadata.DisplayName
             $detail = 'pg_dump.exe was not found at {0}.' -f $pgDumpExe
-            $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $label -DbName $dbName -Detail $detail
+            $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $label -ProfileKey ([string]$metadata.ProfileKey) -DbName $dbName -Detail $detail
             [void]$failureDiagnoses.Add($diagnosis)
             [void]$failedDatabases.Add(('{0} / {1}' -f $label, $dbName))
             [void]$failureDetails.Add(('{0}: {1}' -f $dbName, $detail))
@@ -19408,9 +19550,17 @@ function Backup-PostgresDatabases {
                 $exitCode = $LASTEXITCODE
                 if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $destFile -PathType Leaf) -or (Get-Item -LiteralPath $destFile).Length -eq 0) {
                     $result.Succeeded = $false
-                    $label = if ($databaseGameLabels.ContainsKey($dbName)) { $databaseGameLabels[$dbName] } else { $dbName }
+                    $metadata = if ($databaseGameMetadata.ContainsKey($dbName)) {
+                        $databaseGameMetadata[$dbName]
+                    } else {
+                        [pscustomobject]@{
+                            DisplayName = 'Unknown game title -- see Details'
+                            ProfileKey = ''
+                        }
+                    }
+                    $label = [string]$metadata.DisplayName
                     $detail = if ($dumpOutput) { ConvertTo-PostgresRedactedText -Text $dumpOutput -Secrets @($SuperPasswordPlain) } else { 'pg_dump returned no diagnostic text.' }
-                    $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $label -DbName $dbName -Detail $detail -ExitCode $exitCode
+                    $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $label -ProfileKey ([string]$metadata.ProfileKey) -DbName $dbName -Detail $detail -ExitCode $exitCode
                     [void]$failureDiagnoses.Add($diagnosis)
                     [void]$failedDatabases.Add(('{0} / {1}' -f $label, $dbName))
                     [void]$failureDetails.Add(('{0}: pg_dump exit code {1}. {2} ({3}) Next action: {4}' -f $dbName, $exitCode, $detail, $diagnosis.Category, $diagnosis.NextAction))
@@ -23866,8 +24016,9 @@ $mode = $null
                     continue
                 }
                 if ($authFailure -and $backupChoice -eq 'P') {
-                    [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Waiting for password entry.' -UserAction 'Type the current PostgreSQL password')
+                    [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'postgres-password' -Activity 'Checking the PostgreSQL password')
                     $candidatePassword = Read-ConfirmedPostgresPassword 'the working PostgreSQL password'
+                    [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Succeeded -Summary 'PostgreSQL password checked' -NextStep 'Retry the protected backup')
                     [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
                     try {
                         if (Test-PostgresPassword -SuperPasswordPlain $candidatePassword) {
@@ -23907,12 +24058,12 @@ $mode = $null
                         continue
                     }
                     do {
-                        [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Waiting for password entry.' -UserAction 'Type the new PostgreSQL password twice')
+                        [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'postgres-password' -Activity 'Checking the new PostgreSQL password')
                         $resetAttempt = Read-PostgresPasswordAttempt 'the new postgres password'
                         [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
                         if ($resetAttempt.Reason -eq 'PASSWORD_MISMATCH') {
                             Write-Host '  Those two passwords did not match. Nothing changed.' -ForegroundColor Yellow
-                            [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Password was not changed.' -UserAction 'Choose T to retry or B to return to recovery options')
+                            [void](Update-TpmWorkflowActivity -Context $postgresStatus -Activity 'Password was not changed')
                             $mismatchChoice = Read-TpmChoice -Prompt '  [T] Try typing the new password again  [B] Back to PostgreSQL recovery options' -Choices @('T', 'B') -Default 'T'
                             [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
                             if ($mismatchChoice -eq 'B') {
@@ -23927,13 +24078,14 @@ $mode = $null
                     $newPassword = [string]$resetAttempt.Password
                     $resetResult = $null
                     try {
+                        [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'postgres-reset' -Activity 'Resetting the PostgreSQL password')
                         if (-not $recoveryBackup -or -not $recoveryBackup.Verified) {
-                            $resetResult = [pscustomobject]@{ Succeeded = $false; PasswordChangeCommitted = $false; Reason = 'Verified recovery evidence is unavailable.' }
+                            $resetResult = [pscustomobject]@{ Succeeded = $false; PasswordChangeCommitted = $false; FailureStage = 'RecoveryEvidence'; Reason = 'Verified recovery evidence is unavailable.' }
                         } else {
                             $resetResult = Reset-PostgresPasswordAutomatically -NewPassword $newPassword -RecoveryBackup $recoveryBackup
                         }
                     } catch {
-                        $resetResult = [pscustomobject]@{ Succeeded = $false; PasswordChangeCommitted = $false; Reason = $_.Exception.Message }
+                        $resetResult = [pscustomobject]@{ Succeeded = $false; PasswordChangeCommitted = $false; FailureStage = 'ResetInvocation'; Reason = $_.Exception.Message }
                         Write-Log 'Postgres setup: password reset invocation failed without logging the password.'
                     } finally {
                         $resetAttempt.Password = $null
@@ -23955,12 +24107,15 @@ $mode = $null
                         Write-Log 'Postgres setup: password reset succeeded and credential was saved without logging the password.'
                         $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
                     } elseif ($resetResult.PasswordChangeCommitted) {
-                        Write-Host "  TeknoParrot Manager could not verify the PostgreSQL password reset." -ForegroundColor Red
-                        Write-Host "  No database or game-profile changes were made. The PostgreSQL password may have changed; review details before retrying." -ForegroundColor Yellow
+                        $resetGuidance = Get-PostgresResetFailureGuidance -FailureStage ([string]$resetResult.FailureStage) -PasswordChangeCommitted
+                        Write-Host ("  {0}" -f $resetGuidance) -ForegroundColor Red
+                        Write-Host "  No database or game-profile changes were made. Review Details before retrying." -ForegroundColor Yellow
                         Write-Log 'Postgres setup: password reset was committed but verification failed; database and profile changes were not made.'
                     } else {
-                        Write-Host "  TeknoParrot Manager could not reset the PostgreSQL password." -ForegroundColor Red
-                        Write-Host "  Nothing was changed." -ForegroundColor Yellow
+                        $resetGuidance = Get-PostgresResetFailureGuidance -FailureStage ([string]$resetResult.FailureStage)
+                        Write-Host ("  {0}" -f $resetGuidance) -ForegroundColor Red
+                        Write-Host "  No database or game-profile changes were made." -ForegroundColor Yellow
+                        Write-Log 'Postgres setup: password reset failed before the password change was committed.'
                     }
                     $newPassword = $null
                     continue
@@ -23981,6 +24136,10 @@ $mode = $null
                         Write-Host ("  Diagnosis: {0}" -f $group.Name) -ForegroundColor Yellow
                         Write-Host ("  Affected databases: {0}" -f ($affected -join ', ')) -ForegroundColor Yellow
                     }
+                    foreach ($diagnosis in @($pgBackup.FailureDiagnoses)) {
+                        $safeDetail = ConvertTo-PostgresRedactedText -Text ([string]$diagnosis.Detail) -Secrets @($superPwPlain)
+                        Write-Log ("Postgres support diagnosis: ProfileKey={0}; Database={1}; Category={2}; Detail={3}" -f [string]$diagnosis.ProfileKey, [string]$diagnosis.Database, [string]$diagnosis.Category, $safeDetail)
+                    }
                     Write-Log ("Postgres support guidance shown. LogPath={0}; SupportPackageRoot={1}" -f $logPath, $supportRoot)
                     continue
                 }
@@ -23994,7 +24153,12 @@ $mode = $null
                             $affected = @(Get-PostgresDiagnosisAffectedPairs -Diagnoses $group.Group)
                             Write-Host ("    Cause: {0}" -f $group.Name) -ForegroundColor Yellow
                             Write-Host "    Affected databases:" -ForegroundColor Yellow
-                            foreach ($entry in $affected) { Write-Host ("      - {0}" -f $entry) -ForegroundColor DarkGray
+                            foreach ($entry in $affected) { Write-Host ("      - {0}" -f $entry) -ForegroundColor DarkGray }
+                            foreach ($diagnosis in @($group.Group)) {
+                                Write-Host ("      Profile key: {0}" -f [string]$diagnosis.ProfileKey) -ForegroundColor DarkGray
+                                Write-Host ("      Database: {0}" -f [string]$diagnosis.Database) -ForegroundColor DarkGray
+                                $safeDetail = ConvertTo-PostgresRedactedText -Text ([string]$diagnosis.Detail) -Secrets @($superPwPlain)
+                                Write-Host ("      Detail: {0}" -f $safeDetail) -ForegroundColor DarkGray
                             }
                             Write-Host ("    Next action: {0}" -f $first.NextAction) -ForegroundColor DarkGray
                         }
@@ -24007,11 +24171,11 @@ $mode = $null
                 if ($backupChoice -eq 'R') {
                     $diagnosisReport = Get-PostgresBackupRepairDiagnosis -BackupResult $pgBackup
                     Write-Host ("  Read-only PostgreSQL diagnosis: {0}" -f $diagnosisReport.Summary) -ForegroundColor Yellow
-                    foreach ($check in @($diagnosisReport.Checks)) {
+                    foreach ($check in @($diagnosisReport.NormalChecks)) {
                         Write-Host ("    {0}: {1}" -f $check.Name, $check.Status) -ForegroundColor DarkGray
                     }
                     Write-Log ("Postgres read-only diagnosis before retry: {0}" -f $diagnosisReport.Summary)
-                    foreach ($check in @($diagnosisReport.Checks)) {
+                    foreach ($check in @($diagnosisReport.TechnicalChecks)) {
                         Write-Log ("Postgres read-only diagnosis detail: {0}={1}; {2}" -f $check.Name, $check.Status, $check.Detail)
                     }
                     $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain

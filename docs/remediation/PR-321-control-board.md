@@ -252,4 +252,17 @@ authorized from this working tree.
 
 ## Slice 8 -- PostgreSQL recovery data safety
 
-The Slice 8 source pass reads back and revalidates manually saved PostgreSQL credentials before protected-backup retry. Normal recovery output uses readable game names and compact diagnosis statuses; technical database/profile identifiers and raw client details remain in Details/log evidence. Package rebuild and owner-runtime proof remain outstanding.
+Slice 8B source implementation resolves normal PostgreSQL recovery names from
+authoritative `/GameProfile/GameName` metadata and uses
+`Unknown game title -- see Details` when the title is absent. Normal
+read-only diagnosis now contains only grouped beginner-safe statuses and one
+collapsed technical-detail summary; profile keys, database names, and raw
+client details remain in Details, logs, and support evidence. Automatic reset
+results expose a specific `FailureStage`, and password validation/reset
+activities update workflow status instead of leaving the database-backup
+activity active.
+
+Focused Slice 8B behavioral tests cover readable and unknown titles, normal
+diagnosis exclusions, technical evidence retention, reset stages, reset
+guidance, workflow activities, and password/reset separation from
+reinitialize. Package rebuild and owner-runtime proof remain outstanding.

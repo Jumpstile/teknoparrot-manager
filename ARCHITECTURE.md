@@ -139,9 +139,23 @@ and local role reset (`X`); the reset action is not merely displayed but is
 included in the accepted choice set. Raw client diagnostics remain behind
 Details and logs. PACKAGE_MISMATCH and IDENTITY_MISMATCH remain hard-stop
 conditions; no retry state is built from an unvalidated handoff payload.
+
+**PostgreSQL Slice 8B display and failure contract.** Registered PostgreSQL
+profiles use the authoritative `/GameProfile/GameName` value through the
+shared profile-title resolver. A missing or blank title is displayed as
+`Unknown game title -- see Details`; profile keys and database names are
+technical evidence only and are never CamelCase-spaced or hard-coded into
+normal recovery output. Read-only diagnosis separates beginner-safe
+`NormalChecks` from technical `TechnicalChecks`: normal output groups failure
+categories and collapses repeated detail rows, while Details, logs, and
+support guidance retain the profile key, database, category, and redacted raw
+detail. Automatic password reset results carry a `FailureStage` for every
+verification boundary, and password-entry/reset activities replace the stale
+database-backup status while those actions are running.
+
 A protected UAC resume suppresses unrelated startup, DAT, and GitHub prompts;
- it consumes only the durable recovery envelope and reports a concrete
- validation reason when that envelope or its selection plan cannot be trusted.
+it consumes only the durable recovery envelope and reports a concrete
+validation reason when that envelope or its selection plan cannot be trusted.
 
 Slice D re-audit coverage treats corruption as a distinct database failure
 category alongside password, service, missing-database, tool, permission, and

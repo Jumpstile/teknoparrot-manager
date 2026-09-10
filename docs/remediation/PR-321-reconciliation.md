@@ -206,24 +206,26 @@ Package rebuild, owner-runtime proof, and release authorization remain
 outstanding.
 ### Slice D -- PostgreSQL recovery
 
-Owner ID 16 received a bounded PostgreSQL recovery re-audit. Failure
-diagnoses now distinguish password authentication, service state, missing
-database, corruption, tool availability, permission/elevation, and connection
-conditions. Recovery presents explicit retry and stop/back actions, keeps
-password and database mutations behind verified recovery evidence, and does
-not claim completion after backup, reset, restart, or profile-save failures.
-Focused tests cover password mismatch, backup failure, service-unavailable,
-missing-database, corruption, reinitialize confirmation/cancel, retry/back,
-and no-mutation boundaries. The follow-up remediation keeps PACKAGE_MISMATCH
-and IDENTITY_MISMATCH as hard-stop conditions, does not construct retry state
-from mismatched payload data, exposes both masked password validation and the
-reachable local role reset choice, and keeps raw client diagnostics in
-Details/logs. Manual password recovery now reads back and revalidates the
-saved credential before protected-backup retry; normal affected-game output uses
-readable labels and the diagnosis screen omits raw client detail while retaining
-it in logs.
+Owner ID 16 received the Slice 8B source implementation after owner evidence
+showed that the prior readable-name and diagnosis contracts were incomplete.
+Registered PostgreSQL profiles now resolve normal names from authoritative
+`/GameProfile/GameName` metadata and use `Unknown game title -- see Details`
+when that value is absent. Profile keys and database names remain technical
+evidence only; normal read-only diagnosis groups safe categories, removes
+identifier-bearing check names, and collapses repeated `Backup detail:
+Reported` rows. Details, logs, and support guidance retain the profile key,
+database, category, and redacted raw detail.
 
-Package rebuild and owner-runtime proof remain outstanding.
+Automatic reset results now expose a specific `FailureStage`, preserve that
+stage through the recovery wrapper, render beginner-safe stage guidance, and
+update workflow status during password validation and reset. The password
+validation (`P`) and local reset (`X`) branches remain separate from
+reinitialize (`I`).
+
+Focused Slice 8B tests cover authoritative and missing-title fixtures, normal
+diagnosis exclusions, technical evidence retention, reset stages and guidance,
+workflow activities, and password/reset routing. Package rebuild and
+owner-runtime proof remain outstanding.
 ### Slice F -- Support evidence scoping
 
 Owner ID 29 received a bounded support-evidence re-audit. Action Required
@@ -250,7 +252,7 @@ Package rebuild and owner-runtime proof remain outstanding.
 ## Tests with exact counts and timestamps
 | Gate/test | Exact command | Count/result | Started UTC | Finished UTC | Engine/version |
 |---|---|---|---|---|---|
-| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal` | 1041 passed, 0 failed, 0 skipped (fresh post-Slice 7 rerun) | 2026-09-09T16:09:50-04:00 | 2026-09-09T16:15:42-04:00 | Pester 5.7.1 |
+| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal` | 1052 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
 | Slice A focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*Invoke-TpmDownload*','*Thumbnail*','*RC8 PostgreSQL and support UX*') -CI -Output Normal` | 54 passed, 0 failed, 0 skipped, 975 not run | not captured | not captured | Pester 5.7.1 |
 | SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -CI -Output Normal` | 41 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
 | Controls focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Write-ControlPropagationResults*' -Output Detailed` | 3 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
@@ -258,10 +260,11 @@ Package rebuild and owner-runtime proof remain outstanding.
 | Progress.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Progress.Core*' -Output Detailed` | 2 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Prompt.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Prompt.Core*' -Output Detailed` | 4 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Slice D focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*RC8 PostgreSQL*','*Postgres guided recovery*','*New-PostgresPgPassFile*') -CI -Output Normal` | 44 passed, 0 failed, 0 skipped, 986 not run | not captured | not captured | Pester 5.7.1 |
+| Slice 8B focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*PostgreSQL Slice 8B*','*Postgres guided recovery*','*RC8 PostgreSQL*','*PostgreSQL recovery runtime hold*','*PostgreSQL grouped diagnosis*') -CI -Output Normal` | 54 passed, 0 failed, 0 skipped, 998 not run | not captured | not captured | Pester 5.7.1 |
 | Slice E focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*Library Health*','*Repair-GamePaths*','*repair*','*scoped*','*affected*') -CI -Output Normal` | 33 passed, 0 failed, 0 skipped, 996 not run | prior Slice E checkpoint | prior Slice E checkpoint | Pester 5.7.1 |
 | Slice F focused Pester | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -FullNameFilter @('*freshness*','*ambient*','*BepInEx*','*plugin*','*manifest*','*ZIP*','*allowlist*','*redact*') -CI -Output Normal` | 16 passed, 0 failed, 0 skipped, 25 not run | not captured | not captured | Pester 5.7.1 |
 | SupportPackage full Pester | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -CI -Output Normal` | 41 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
-| Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 production parse errors; 0 test parse errors; 0 PSScriptAnalyzer findings; production ASCII 0; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
+| Governance/source parse, ASCII, registry, PSScriptAnalyzer, InjectionHunter, diff | Final static-check commands; individual start/finish timestamps not captured | 0 production parse errors; 0 PSScriptAnalyzer findings; production ASCII 0; InjectionHunter 42 findings, 0 unresolved, tool 1.0.0; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer / InjectionHunter |
 | Permanent procedure gate | `.\scripts\Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: owner report contains unresolved NOT FIXED items and owner-runtime evidence remains outstanding | not captured | not captured | pwsh |
 | Slice 6 focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal -FullName '*migration*','*DAT*','*Eggman*'` | 192 passed, 0 failed, 0 skipped, 848 not run | not captured | not captured | Pester 5.7.1 |
 | Slice 7 focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal -FullName '*product wording*','*migration*','*latest DAT*'` | 6 passed, 0 failed, 0 skipped, 1035 not run | not captured | not captured | Pester 5.7.1 |
@@ -325,12 +328,12 @@ owner-runtime smoke, release, certification, commit, or push was performed.
 
 ## Static gates
 
-- Parse: passed for production and all three gate/debug scripts; 0 errors.
-- ASCII: 0 non-ASCII bytes across production, tests, report, gate/debug scripts, and registry.
-- PSScriptAnalyzer: production plus all three gate/debug scripts returned 0 findings.
+- Parse: passed for production; 0 errors.
+- ASCII: 0 non-ASCII bytes in production.
+- PSScriptAnalyzer: production returned 0 Error/Warning findings.
 - `git diff --check`: passed.
+- InjectionHunter 1.0.0: 42 findings, 0 unresolved after disposition matching.
 - GPU-specific source scan found 0 `Write-Progress` calls and 2 per-profile `Write-TpmCompactExtractionProgress` calls in `Invoke-GpuFixSetup`; the remaining proof is packaged runtime behavior.
-- InjectionHunter unavailable in this environment; no InjectionHunter result claimed.
 
 ## Hunk classification
 
@@ -342,7 +345,7 @@ owner-runtime smoke, release, certification, commit, or push was performed.
 | quality/permanent-procedures.json | Registry | All TPM procedure IDs | JSON parse |
 | docs/governance/permanent-procedures.md | Registry documentation | All TPM procedure IDs | Readability review |
 | docs/templates/remediation-gate-report.md | Mandatory report schema | TPM-TRACE-001, TPM-OWNER-003 | Required-section review |
-| scripts/Test-TpmPermanentProcedures.ps1 | Fail-closed report/source gate | All registry IDs | Parse, analyzer, expected-fail run |
+| scripts/Test-TpmPermanentProcedures.ps1 | Fail-closed report/source gate, including InjectionHunter result evidence | All registry IDs | Parse, analyzer, expected-fail run |
 | scripts/Run-TpmQualityGate.ps1 | Combined quality wrapper | TPM-AUTH-001, TPM-EVIDENCE-001 | Parse and analyzer |
 | .github/pull_request_template.md | PR checklist | TPM-AUTH-001, TPM-TRACE-001 | File review |
 | TeknoParrot-Manager.ps1 | Prompt.Core helper and finite-choice routes | TPM-PROMPT-001, owner report IDs 24-27/32, PR #321 | Production parse, focused prompt tests; owner runtime outstanding |
@@ -361,6 +364,8 @@ owner-runtime smoke, release, certification, commit, or push was performed.
 | Tests/TeknoParrot-Manager.Tests.ps1 | ReShade protected adoption, result priority, backup/rollback, and exact accounting contracts | owner report IDs 11-12, PR #321 Slice C | ReShade focused suite: 192 passed |
 | ARCHITECTURE.md; TeknoParrot-Manager-CHANGELOG.txt; docs/remediation/PR-321-control-board.md; docs/remediation/PR-321-reconciliation.md | Slice C ownership/accounting contract and evidence update | owner report IDs 11-12, PR #321 Slice C | Changed-section review |
 | Tests/SupportPackage.Tests.ps1 | FFB evidence allowlist and support-package collection | TPM-FFB-001, TPM-EVIDENCE-001, PR #321 | 40 support-package tests |
+| scripts/InjectionHunterDispositions.psd1 | Added dispositions for two pre-existing fixed-input false positives surfaced by the Slice 8B gate run | InjectionHunter evidence gate | 42 findings, 0 unresolved |
+| TeknoParrot-Manager.ps1; Tests/TeknoParrot-Manager.Tests.ps1; ARCHITECTURE.md; TeknoParrot-Manager-CHANGELOG.txt; docs/remediation/PR-321-control-board.md; docs/remediation/PR-321-reconciliation.md | PostgreSQL Slice 8B display, diagnosis, reset-stage, status, and routing contract | owner ID 16, PR #321 Slice 8B | 54 focused tests; 1052 full main tests; owner runtime outstanding |
 
 ## Permanent procedure compliance
 

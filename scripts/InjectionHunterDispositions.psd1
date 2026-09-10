@@ -349,5 +349,21 @@
             Disposition = 'FalsePositive'
             Reasoning   = 'The assembly name is a fixed framework literal used for the optional TPM-owned preview gallery. No external or attacker-controlled value reaches Add-Type.'
         }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 469
+            Extent      = "`$Layout.`$bucket"
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The bucket value is selected only from fixed internal category literals (Assets, State, Logs, Reports, Backups, Cache), and Layout is TPM-owned migration state. No untrusted input selects a property.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 6258
+            Extent      = "[string]`$Manifest.EffectId -replace '^ReShadeProfile\.', ''"
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement are fixed literals; the variable is only the searched value. No attacker-controlled pattern or replacement is evaluated.'
+        }
     )
 }

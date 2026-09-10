@@ -5271,8 +5271,19 @@ __BRANCH__
             $result.PasswordChangeCommitted | Should -BeTrue
             $result.Succeeded | Should -BeFalse
             $result.RecoveryBlocked | Should -BeTrue
+            $result.FailureStage | Should -Be 'ServiceRestart'
             $result.Reason | Should -Match 'password was changed'
             $result.Reason | Should -Not -Match 'password was not changed'
+        }
+        It "reports password validation as the failure stage after restart" {
+            Mock Invoke-PostgresNativeProcessWithInput {
+                [pscustomobject]@{ ExitCode = 0; Output = ''; Error = '' }
+            }
+            Mock Test-PostgresPassword { $false }
+            $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
+            $result.PasswordChangeCommitted | Should -BeTrue
+            $result.Succeeded | Should -BeFalse
+            $result.FailureStage | Should -Be 'PasswordValidation'
         }
 
 
@@ -5285,6 +5296,7 @@ __BRANCH__
             $result.Succeeded | Should -BeFalse
             $result.RecoveryBlocked | Should -BeTrue
             $result.BackupPath | Should -Be $script:pgBackup.Path
+            $result.FailureStage | Should -Be 'AlterRole'
             $result.Reason | Should -Not -Match ([regex]::Escape($script:pgSecret))
             Should -Invoke Start-Service -Times 0
             Should -Invoke Test-PostgresPassword -Times 0
@@ -14173,6 +14185,149 @@ Describe "PostgreSQL grouped diagnosis behavior" {
             $pair = '{0} / {1}' -f $diagnosis.GameLabel, $diagnosis.Database
             @($pairs | Where-Object { $_ -eq $pair }).Count | Should -Be 1
         }
+    }
+}
+
+Describe "PostgreSQL Slice 8B owner-transcript behavior" {
+    It "resolves the authoritative profile title without a profile-key fallback" {
+        $profiles = Join-Path $TestDrive 'slice8b-title-profiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $namedPath = Join-Path $profiles 'GoldenTeeLive2019.xml'
+        $missingPath = Join-Path $profiles 'PowerPuttLive2012.xml'
+        Set-Content -LiteralPath $namedPath -Value '<GameProfile><GameName>Golden Tee Live 2019</GameName><ConfigValues /></GameProfile>'
+        Set-Content -LiteralPath $missingPath -Value '<GameProfile><ConfigValues /></GameProfile>'
+
+        $named = Get-PostgresProfileDisplayMetadata -ProfilePath $namedPath
+        $missing = Get-PostgresProfileDisplayMetadata -ProfilePath $missingPath
+
+        $named.DisplayName | Should -Be 'Golden Tee Live 2019'
+        $named.ProfileKey | Should -Be 'GoldenTeeLive2019'
+        $named.HasAuthoritativeTitle | Should -BeTrue
+        $missing.DisplayName | Should -Be 'Unknown game title -- see Details'
+        $missing.ProfileKey | Should -Be 'PowerPuttLive2012'
+        $missing.HasAuthoritativeTitle | Should -BeFalse
+    }
+    It "targets the PostgreSQL 8.3 toolchain and authentication model" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$script:PostgresInstallDir\s*=\s*"C:\\Program Files \(x86\)\\PostgreSQL\\8\.3"'
+        $source | Should -Match '\$script:PostgresServiceName\s*=\s*"pgsql-8\.3"'
+        $source | Should -Match '\$script:PostgresBinDir[^\r\n]*psql\.exe'
+        $source | Should -Match '\$script:PostgresBinDir[^\r\n]*pg_dump\.exe'
+        $source | Should -Match 'ALTER ROLE postgres WITH PASSWORD'
+        $source | Should -Match "'pg_hba\.conf'"
+        $source | Should -Not -Match '(?i)PostgreSQL\\12|pgsql-12'
+    }
+
+    It "keeps normal diagnosis output free of technical identifiers and repeated detail rows" {
+        $script:PostgresBinDir = Join-Path $TestDrive 'slice8b-diagnosis-bin'
+        $script:PostgresServiceName = 'slice8b-postgres'
+        New-Item -ItemType Directory -Path $script:PostgresBinDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:PostgresBinDir 'psql.exe') -Value ''
+        Set-Content -LiteralPath (Join-Path $script:PostgresBinDir 'pg_dump.exe') -Value ''
+        Mock Get-Service { [pscustomobject]@{ Status = 'Running' } }
+        $backup = [pscustomobject]@{
+            FailureDiagnoses = @(
+                [pscustomobject]@{
+                    GameLabel = 'Golden Tee Live 2019'
+                    ProfileKey = 'GoldenTeeLive2019'
+                    Database = 'GameDB19'
+                    Category = 'PasswordAuthenticationFailed'
+                    Detail = 'psql.exe: password authentication failed for user postgres'
+                    NextAction = 'Enter a working postgres password'
+                }
+            )
+            FailureDetails = @(
+                'GoldenTeeLive2019 / GameDB19: password authentication failed',
+                'GoldenTeeLive2019 / GameDB19: password authentication failed'
+            )
+        }
+
+        $report = Get-PostgresBackupRepairDiagnosis -BackupResult $backup
+        $normal = @($report.NormalChecks | ForEach-Object { '{0}: {1}' -f $_.Name, $_.Status }) -join [Environment]::NewLine
+
+        $normal | Should -Not -Match 'GoldenTeeLive2019'
+        $normal | Should -Not -Match 'GameDB19'
+        $normal | Should -Not -Match 'Golden Tee Live 2019 / GameDB19'
+        $normal | Should -Not -Match 'Backup detail: Reported'
+        $normal | Should -Not -Match 'psql\.exe|pg_dump|PowerShell|NativeCommandError'
+        @($report.NormalChecks | Where-Object { $_.Name -eq 'Additional backup details' }).Count | Should -Be 1
+        $report.NormalChecks | Where-Object { $_.Name -eq 'Additional backup details' } | Select-Object -ExpandProperty Status | Should -Match '2'
+    }
+    It "retains technical diagnosis evidence outside normal output" {
+        $backup = [pscustomobject]@{
+            FailureDiagnoses = @(
+                [pscustomobject]@{
+                    GameLabel = 'Golden Tee Live 2019'
+                    ProfileKey = 'GoldenTeeLive2019'
+                    Database = 'GameDB19'
+                    Category = 'PasswordAuthenticationFailed'
+                    Detail = 'native password authentication detail'
+                    NextAction = 'Enter a working postgres password'
+                }
+            )
+            FailureDetails = @('technical backup detail')
+        }
+
+        $report = Get-PostgresBackupRepairDiagnosis -BackupResult $backup
+        $technical = @($report.TechnicalChecks)
+
+        @($technical | Where-Object { $_.Detail -eq 'native password authentication detail' }).Count | Should -Be 1
+        @($technical | Where-Object { $_.Detail -eq 'technical backup detail' }).Count | Should -Be 1
+        $script:ProductionSource | Should -Match 'Profile key:'
+        $script:ProductionSource | Should -Match 'Postgres support diagnosis: ProfileKey='
+    }
+
+    It "reports a specific failure stage for each automatic reset boundary" {
+        $unverified = [pscustomobject]@{ Verified = $false; Path = (Join-Path $TestDrive 'evidence') }
+        $result = Reset-PostgresPasswordAutomatically -NewPassword 'not-written' -RecoveryBackup $unverified
+        $result.FailureStage | Should -Be 'RecoveryEvidence'
+
+        $previousInstallDir = $script:PostgresInstallDir
+        $previousBinDir = $script:PostgresBinDir
+        try {
+            $script:PostgresInstallDir = Join-Path $TestDrive 'slice8b-missing-postgres'
+            $script:PostgresBinDir = Join-Path $script:PostgresInstallDir 'bin'
+            $verified = [pscustomobject]@{ Verified = $true; Path = (Join-Path $TestDrive 'evidence') }
+            $missingTools = Reset-PostgresPasswordAutomatically -NewPassword 'not-written' -RecoveryBackup $verified
+            $missingTools.FailureStage | Should -Be 'ExecutableOrDataDirectory'
+        } finally {
+            $script:PostgresInstallDir = $previousInstallDir
+            $script:PostgresBinDir = $previousBinDir
+        }
+    }
+
+    It "renders beginner-safe guidance for a reset failure stage" {
+        $stages = @(
+            'RecoveryEvidence',
+            'ExecutableOrDataDirectory',
+            'ServiceLookup',
+            'ServiceStop',
+            'PostmasterPid',
+            'AlterRole',
+            'ServiceRestart',
+            'PasswordValidation',
+            'ServiceRestore'
+        )
+        foreach ($stage in $stages) {
+            $guidance = Get-PostgresResetFailureGuidance -FailureStage $stage -PasswordChangeCommitted:$false
+            $guidance | Should -Not -Match 'psql|pg_dump|PowerShell|NativeCommandError|CategoryInfo|FullyQualifiedErrorId'
+            $guidance | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It "defines password and reset workflow activities instead of retaining the backup activity" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Start-TpmWorkflowStep -Context \$postgresStatus -StepId ''postgres-password'' -Activity ''Checking the PostgreSQL password'''
+        $source | Should -Match 'Start-TpmWorkflowStep -Context \$postgresStatus -StepId ''postgres-reset'' -Activity ''Resetting the PostgreSQL password'''
+        $source | Should -Not -Match 'Set-TpmWorkflowWaiting -Context \$postgresStatus -Message ''Waiting for password entry\.'''
+    }
+
+    It "keeps password and reset actions away from reinitialize" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'if \(\$backupChoice -eq ''I''\)'
+        $source | Should -Match 'if \(\$authFailure -and \$backupChoice -eq ''P''\)'
+        $source | Should -Match 'if \(\$authFailure -and \$backupChoice -eq ''X''\)'
+        $source | Should -Not -Match 'if \(\$authFailure -and \$backupChoice -in @\(''P'', ''X'', ''I''\)\)'
     }
 }
 Describe "Focused RC8 remediation contracts" {

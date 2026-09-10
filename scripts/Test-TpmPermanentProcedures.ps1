@@ -107,7 +107,7 @@ if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
     }
     $nonActions = $report.Substring($report.IndexOf('## Non-actions'))
     foreach ($action in @('commit','push','package','wiki','release','certification','ARCADE')) { if ($nonActions.IndexOf($action, [StringComparison]::OrdinalIgnoreCase) -lt 0) { Fail "Non-actions section omits: $action" } }
-    if ($report -notmatch 'InjectionHunter unavailable in this environment; no InjectionHunter result claimed\.') { Fail 'InjectionHunter evidence wording is missing.' }
+    if ($report -notmatch '(?i)InjectionHunter (unavailable in this environment; no InjectionHunter result claimed\.|[0-9]+ findings, 0 unresolved)') { Fail 'InjectionHunter evidence wording is missing.' }
     if ($ChangedAtUtc -ne [datetime]::MinValue) {
         $testsSection = $report.Substring($report.IndexOf('## Tests with exact counts and timestamps'))
         $times = [regex]::Matches($testsSection, '\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}')
