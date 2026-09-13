@@ -619,6 +619,218 @@ function Get-TpmWorkflowConsoleCapability {
     }
 }
 
+
+# =============================================================================
+# TRANSACTION OUTCOME MODEL
+# =============================================================================
+
+function Get-TpmTransactionOutcomeNames {
+    return @('FAILED_BEFORE_MUTATION','SUCCEEDED','NO_OP','PARTIAL_APPLIED','ROLLED_BACK_VERIFIED','ACTION_REQUIRED','CLEANUP_RESIDUE')
+}
+
+function Get-TpmTransactionProductStateNames {
+    return @('UNCHANGED','INTENDED','PARTIAL_KNOWN','UNKNOWN')
+}
+
+function Get-TpmTransactionField {
+    param($Object, [string]$Name, [object]$Default = $null)
+    if ($null -eq $Object) { return $Default }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $Default }
+    return $property.Value
+}
+
+function Get-TpmTransactionItemKey {
+    param([Parameter(Mandatory)]$Item)
+    if ($Item -is [string]) {
+        if ([string]::IsNullOrWhiteSpace($Item)) { throw 'Transaction item identifiers cannot be blank.' }
+        return [string]$Item
+    }
+    foreach ($name in @('ItemId','Id','DisplayName')) {
+        $value = Get-TpmTransactionField -Object $Item -Name $name
+        if ($null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) { return [string]$value }
+    }
+    throw 'Transaction item records require ItemId, Id, or DisplayName.'
+}
+
+function Get-TpmTransactionItemKeys {
+    param([object[]]$Items = @())
+    return @($Items | ForEach-Object { Get-TpmTransactionItemKey -Item $_ })
+}
+
+function Test-TpmTransactionUserSafeSummary {
+    param([Parameter(Mandatory)][string]$Summary)
+    if ([string]::IsNullOrWhiteSpace($Summary)) { return $false }
+    if ($Summary -match '(?i)(?:[A-Za-z]:[\\/]|\\\\)') { return $false }
+    if ($Summary -match '(?i)\b(?:password|credential|secret|token)\b') { return $false }
+    if ($Summary -match '(?i)\b[0-9a-f]{64}\b') { return $false }
+    if ($Summary -match '(?i)(?:^|\s)(?:powershell|pwsh|cmd(?:\.exe)?|copy-item|move-item|dropdb|pg_restore|pg_dump|invoke-[a-z0-9-]+)\b') { return $false }
+    if ($Summary -match '(?i)(?:CategoryInfo|FullyQualifiedErrorId|StackTrace|System\.[A-Za-z]|at\s+[A-Za-z0-9_.]+\()') { return $false }
+    return $true
+}
+
+function Assert-TpmTransactionItemSets {
+    param([Parameter(Mandatory)]$Mutation)
+    $changed = @(Get-TpmTransactionField -Object $Mutation -Name 'ChangedItems' -Default @())
+    $affected = @(Get-TpmTransactionField -Object $Mutation -Name 'AffectedItems' -Default $changed)
+    $changedKeys = @(Get-TpmTransactionItemKeys -Items $changed)
+    $affectedKeys = @(Get-TpmTransactionItemKeys -Items $affected)
+    if ((@($changedKeys) -join "`0") -ne (@($affectedKeys) -join "`0")) { throw 'Transaction ChangedItems and AffectedItems must identify the same items.' }
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($set in @('CompletedItems','FailedItems','UnattemptedItems','SkippedItems','UnknownItems')) {
+        $local = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($item in @(Get-TpmTransactionField -Object $Mutation -Name $set -Default @())) {
+            $key = Get-TpmTransactionItemKey -Item $item
+            if (-not $local.Add($key)) { throw ("Transaction {0} contains duplicate item '{1}'." -f $set,$key) }
+            if (-not $seen.Add($key)) { throw ("Transaction terminal item sets overlap at '{0}'." -f $key) }
+        }
+    }
+    return $true
+}
+
+function Assert-TpmTransactionResult {
+    param([Parameter(Mandatory)]$Result)
+    if (@($Result.PSTypeNames) -notcontains 'TPM.TransactionResult.v1') { throw 'Invalid TPM transaction result type.' }
+    if ([int](Get-TpmTransactionField -Object $Result -Name 'SchemaVersion' -Default 0) -ne 1) { throw 'Unsupported TPM transaction result schema version.' }
+    $outcome = [string](Get-TpmTransactionField -Object $Result -Name 'Outcome')
+    if ((Get-TpmTransactionOutcomeNames) -notcontains $outcome) { throw ("Invalid TPM transaction outcome: {0}" -f $outcome) }
+    $productState = [string](Get-TpmTransactionField -Object $Result -Name 'ProductState')
+    if ((Get-TpmTransactionProductStateNames) -notcontains $productState) { throw ("Invalid TPM transaction product state: {0}" -f $productState) }
+    if (-not (Test-TpmTransactionUserSafeSummary -Summary ([string](Get-TpmTransactionField -Object $Result -Name 'Summary')))) { throw 'Transaction Summary contains technical or sensitive detail.' }
+    $mutation = Get-TpmTransactionField -Object $Result -Name 'Mutation'
+    $final = Get-TpmTransactionField -Object $Result -Name 'FinalVerification'
+    $backup = Get-TpmTransactionField -Object $Result -Name 'Backup'
+    $rollback = Get-TpmTransactionField -Object $Result -Name 'Rollback'
+    $cleanup = Get-TpmTransactionField -Object $Result -Name 'Cleanup'
+    if ($null -eq $mutation -or $null -eq $final -or $null -eq $backup -or $null -eq $rollback -or $null -eq $cleanup) { throw 'Transaction evidence sections are required.' }
+    [void](Assert-TpmTransactionItemSets -Mutation $mutation)
+    $changed = @(Get-TpmTransactionField -Object $mutation -Name 'ChangedItems' -Default @())
+    $affected = @(Get-TpmTransactionField -Object $mutation -Name 'AffectedItems' -Default @())
+    $sets = @('CompletedItems','FailedItems','UnattemptedItems','SkippedItems','UnknownItems')
+    foreach ($set in $sets) {
+        $countName = $set -replace 'Items','ItemCount'
+        $actual = [int](Get-TpmTransactionField -Object $mutation -Name $countName -Default 0)
+        $expected = @(Get-TpmTransactionField -Object $mutation -Name $set -Default @()).Count
+        if ($actual -ne $expected) { throw ("Transaction {0} does not match its item list ({1} != {2})." -f $countName,$actual,$expected) }
+    }
+    foreach ($pair in @(@('MutatedItemCount',$changed.Count),@('AffectedItemCount',$affected.Count))) {
+        if ([int](Get-TpmTransactionField -Object $mutation -Name $pair[0] -Default 0) -ne [int]$pair[1]) { throw ("Transaction {0} does not match its item list." -f $pair[0]) }
+    }
+    if ([int](Get-TpmTransactionField -Object $mutation -Name 'SelectedItemCount' -Default 0) -ne @($Result.Items).Count) { throw 'Transaction SelectedItemCount does not match Items.' }
+    $residuePresent = [bool](Get-TpmTransactionField -Object $cleanup -Name 'ResiduePresent')
+    $residuePaths = @(Get-TpmTransactionField -Object $cleanup -Name 'ResiduePaths' -Default @())
+    if ($residuePresent -and $residuePaths.Count -eq 0) { throw 'Cleanup residue requires a preserved residue path.' }
+    if (-not $residuePresent -and $residuePaths.Count -gt 0) { throw 'Cleanup residue paths require ResiduePresent=true.' }
+    $underlying = [string](Get-TpmTransactionField -Object $Result -Name 'UnderlyingOutcome')
+    if ([string]::IsNullOrWhiteSpace($underlying)) { $underlying = $null }
+    if ($outcome -eq 'CLEANUP_RESIDUE') {
+        if ($null -eq $underlying -or (Get-TpmTransactionOutcomeNames) -notcontains $underlying -or $underlying -eq 'CLEANUP_RESIDUE') { throw 'CLEANUP_RESIDUE requires a valid UnderlyingOutcome.' }
+        if ($productState -eq 'UNKNOWN' -or -not $residuePresent -or [bool](Get-TpmTransactionField -Object $cleanup -Name 'Completed')) { throw 'CLEANUP_RESIDUE requires verified product state and incomplete cleanup.' }
+        if (-not [bool](Get-TpmTransactionField -Object $final -Name 'Attempted') -or -not [bool](Get-TpmTransactionField -Object $final -Name 'Passed')) { throw 'CLEANUP_RESIDUE requires verified product state.' }
+    } elseif ($null -ne $underlying) { throw 'UnderlyingOutcome is only valid for CLEANUP_RESIDUE.' }
+    switch ($outcome) {
+        'FAILED_BEFORE_MUTATION' {
+            if ([bool](Get-TpmTransactionField -Object $mutation -Name 'Started') -or $changed.Count -gt 0 -or $affected.Count -gt 0 -or $productState -ne 'UNCHANGED') { throw 'FAILED_BEFORE_MUTATION requires no mutation and unchanged product state.' }
+        }
+        'SUCCEEDED' {
+            if (-not [bool](Get-TpmTransactionField -Object $mutation -Name 'Started') -or $changed.Count -eq 0 -or $productState -ne 'INTENDED') { throw 'SUCCEEDED requires an intended changed state.' }
+            if (-not [bool](Get-TpmTransactionField -Object $final -Name 'Attempted') -or -not [bool](Get-TpmTransactionField -Object $final -Name 'Passed')) { throw 'SUCCEEDED requires passed final verification.' }
+            if ([bool](Get-TpmTransactionField -Object $backup -Name 'Required') -and -not [bool](Get-TpmTransactionField -Object $backup -Name 'Verified')) { throw 'SUCCEEDED requires verified required backup evidence.' }
+            if ($residuePresent -or -not [bool](Get-TpmTransactionField -Object $cleanup -Name 'Completed')) { throw 'SUCCEEDED requires completed cleanup without residue.' }
+        }
+        'NO_OP' {
+            if ([bool](Get-TpmTransactionField -Object $mutation -Name 'Started') -or $changed.Count -gt 0 -or $productState -ne 'UNCHANGED') { throw 'NO_OP requires no mutation and unchanged product state.' }
+            if (-not [bool](Get-TpmTransactionField -Object $final -Name 'Attempted') -or -not [bool](Get-TpmTransactionField -Object $final -Name 'Passed') -or @(Get-TpmTransactionField -Object $final -Name 'Checks' -Default @()).Count -eq 0) { throw 'NO_OP requires current-state proof.' }
+            if ([bool](Get-TpmTransactionField -Object $backup -Name 'Attempted') -or [bool](Get-TpmTransactionField -Object $backup -Name 'Created')) { throw 'NO_OP cannot mutate backup state.' }
+        }
+        'PARTIAL_APPLIED' {
+            if (-not [bool](Get-TpmTransactionField -Object $mutation -Name 'Started') -or $changed.Count -eq 0 -or $productState -ne 'PARTIAL_KNOWN') { throw 'PARTIAL_APPLIED requires a known partial state.' }
+            if ((@(Get-TpmTransactionField -Object $mutation -Name 'FailedItems' -Default @()).Count + @(Get-TpmTransactionField -Object $mutation -Name 'UnattemptedItems' -Default @()).Count + @(Get-TpmTransactionField -Object $mutation -Name 'SkippedItems' -Default @()).Count) -eq 0) { throw 'PARTIAL_APPLIED requires incomplete item sets.' }
+            if (@(Get-TpmTransactionField -Object $mutation -Name 'UnknownItems' -Default @()).Count -gt 0) { throw 'PARTIAL_APPLIED cannot contain unknown final-state items.' }
+            if (-not [bool](Get-TpmTransactionField -Object $final -Name 'Attempted') -or -not [bool](Get-TpmTransactionField -Object $final -Name 'Passed')) { throw 'PARTIAL_APPLIED requires final-state verification.' }
+        }
+        'ROLLED_BACK_VERIFIED' {
+            if (-not [bool](Get-TpmTransactionField -Object $mutation -Name 'Started') -or $changed.Count -eq 0 -or $productState -ne 'UNCHANGED') { throw 'ROLLED_BACK_VERIFIED requires changed items and unchanged product state.' }
+            if (-not [bool](Get-TpmTransactionField -Object $rollback -Name 'Attempted') -or -not [bool](Get-TpmTransactionField -Object $rollback -Name 'Completed') -or -not [bool](Get-TpmTransactionField -Object $rollback -Name 'Verified')) { throw 'ROLLED_BACK_VERIFIED requires per-item rollback proof.' }
+            if ($residuePresent -or -not [bool](Get-TpmTransactionField -Object $cleanup -Name 'Completed')) { throw 'ROLLED_BACK_VERIFIED requires completed cleanup without residue.' }
+        }
+        'ACTION_REQUIRED' {
+            if ($productState -eq 'UNKNOWN' -and [bool](Get-TpmTransactionField -Object $final -Name 'Passed')) { throw 'ACTION_REQUIRED cannot claim passed verification for unknown product state.' }
+        }
+    }
+    return $true
+}
+
+function Test-TpmTransactionResult {
+    param([Parameter(Mandatory)]$Result)
+    try { [void](Assert-TpmTransactionResult -Result $Result); return $true } catch { return $false }
+}
+
+function New-TpmTransactionResult {
+    param(
+        [Parameter(Mandatory)][string]$WorkflowKey,
+        [Parameter(Mandatory)][string]$OperationKey,
+        [Parameter(Mandatory)][string]$Outcome,
+        [Parameter(Mandatory)][string]$Summary,
+        [string]$TransactionId = $null,
+        [string]$ProductState = 'UNKNOWN',
+        [string]$UnderlyingOutcome = $null,
+        [object[]]$Items = @(),
+        [object]$Mutation = $null,
+        [object]$PreState = $null,
+        [object]$Backup = $null,
+        [object]$FinalVerification = $null,
+        [object]$Rollback = $null,
+        [object]$Cleanup = $null,
+        [string]$ReasonCode = $null,
+        [object]$TechnicalDetails = $null,
+        [string[]]$Errors = @(),
+        [string[]]$Warnings = @(),
+        [object[]]$RecoveryActions = @()
+    )
+    if ([string]::IsNullOrWhiteSpace($TransactionId)) { $TransactionId = [guid]::NewGuid().ToString('N') }
+    if ([string]::IsNullOrWhiteSpace($UnderlyingOutcome)) { $UnderlyingOutcome = $null }
+    $changed = @(Get-TpmTransactionField -Object $Mutation -Name 'ChangedItems' -Default @())
+    $affected = @(Get-TpmTransactionField -Object $Mutation -Name 'AffectedItems' -Default $changed)
+    $completed = @(Get-TpmTransactionField -Object $Mutation -Name 'CompletedItems' -Default @())
+    $failed = @(Get-TpmTransactionField -Object $Mutation -Name 'FailedItems' -Default @())
+    $unattempted = @(Get-TpmTransactionField -Object $Mutation -Name 'UnattemptedItems' -Default @())
+    $skipped = @(Get-TpmTransactionField -Object $Mutation -Name 'SkippedItems' -Default @())
+    $unknown = @(Get-TpmTransactionField -Object $Mutation -Name 'UnknownItems' -Default @())
+    $mutationObject = [pscustomobject]@{
+        Started=[bool](Get-TpmTransactionField -Object $Mutation -Name 'Started'); Completed=[bool](Get-TpmTransactionField -Object $Mutation -Name 'Completed')
+        SelectedItemCount=[int](Get-TpmTransactionField -Object $Mutation -Name 'SelectedItemCount' -Default @($Items).Count); AttemptedItemCount=[int](Get-TpmTransactionField -Object $Mutation -Name 'AttemptedItemCount' -Default 0)
+        MutatedItemCount=[int](Get-TpmTransactionField -Object $Mutation -Name 'MutatedItemCount' -Default $changed.Count); AffectedItemCount=[int](Get-TpmTransactionField -Object $Mutation -Name 'AffectedItemCount' -Default $affected.Count)
+        CompletedItemCount=[int](Get-TpmTransactionField -Object $Mutation -Name 'CompletedItemCount' -Default $completed.Count); FailedItemCount=[int](Get-TpmTransactionField -Object $Mutation -Name 'FailedItemCount' -Default $failed.Count)
+        UnattemptedItemCount=[int](Get-TpmTransactionField -Object $Mutation -Name 'UnattemptedItemCount' -Default $unattempted.Count); SkippedItemCount=[int](Get-TpmTransactionField -Object $Mutation -Name 'SkippedItemCount' -Default $skipped.Count); UnknownItemCount=[int](Get-TpmTransactionField -Object $Mutation -Name 'UnknownItemCount' -Default $unknown.Count)
+        ChangedItems=$changed; AffectedItems=$affected; CompletedItems=$completed; FailedItems=$failed; UnattemptedItems=$unattempted; SkippedItems=$skipped; UnknownItems=$unknown; FailureStage=Get-TpmTransactionField -Object $Mutation -Name 'FailureStage'
+    }
+    $preStateObject = [pscustomobject]@{ Captured=[bool](Get-TpmTransactionField -Object $PreState -Name 'Captured'); CaptureMethod=Get-TpmTransactionField -Object $PreState -Name 'CaptureMethod'; CapturedUtc=Get-TpmTransactionField -Object $PreState -Name 'CapturedUtc'; Items=@(Get-TpmTransactionField -Object $PreState -Name 'Items' -Default @()); EvidenceRoot=Get-TpmTransactionField -Object $PreState -Name 'EvidenceRoot'; CaptureError=Get-TpmTransactionField -Object $PreState -Name 'CaptureError' }
+    $backupObject = [pscustomobject]@{ Required=[bool](Get-TpmTransactionField -Object $Backup -Name 'Required'); Attempted=[bool](Get-TpmTransactionField -Object $Backup -Name 'Attempted'); Created=[bool](Get-TpmTransactionField -Object $Backup -Name 'Created'); Verified=[bool](Get-TpmTransactionField -Object $Backup -Name 'Verified'); RootPath=Get-TpmTransactionField -Object $Backup -Name 'RootPath'; Items=@(Get-TpmTransactionField -Object $Backup -Name 'Items' -Default @()); FailureStage=Get-TpmTransactionField -Object $Backup -Name 'FailureStage'; FailureCode=Get-TpmTransactionField -Object $Backup -Name 'FailureCode' }
+    $finalObject = [pscustomobject]@{ Attempted=[bool](Get-TpmTransactionField -Object $FinalVerification -Name 'Attempted'); Passed=[bool](Get-TpmTransactionField -Object $FinalVerification -Name 'Passed'); VerifiedUtc=Get-TpmTransactionField -Object $FinalVerification -Name 'VerifiedUtc'; Checks=@(Get-TpmTransactionField -Object $FinalVerification -Name 'Checks' -Default @()); FailedItems=@(Get-TpmTransactionField -Object $FinalVerification -Name 'FailedItems' -Default @()); UnknownItems=@(Get-TpmTransactionField -Object $FinalVerification -Name 'UnknownItems' -Default @()) }
+    $rollbackObject = [pscustomobject]@{ Attempted=[bool](Get-TpmTransactionField -Object $Rollback -Name 'Attempted'); Completed=[bool](Get-TpmTransactionField -Object $Rollback -Name 'Completed'); Verified=[bool](Get-TpmTransactionField -Object $Rollback -Name 'Verified'); VerifiedUtc=Get-TpmTransactionField -Object $Rollback -Name 'VerifiedUtc'; Items=@(Get-TpmTransactionField -Object $Rollback -Name 'Items' -Default @()); EvidenceRoot=Get-TpmTransactionField -Object $Rollback -Name 'EvidenceRoot'; FailedItems=@(Get-TpmTransactionField -Object $Rollback -Name 'FailedItems' -Default @()); Errors=@(Get-TpmTransactionField -Object $Rollback -Name 'Errors' -Default @()) }
+    $cleanupObject = [pscustomobject]@{ Attempted=[bool](Get-TpmTransactionField -Object $Cleanup -Name 'Attempted'); Completed=[bool](Get-TpmTransactionField -Object $Cleanup -Name 'Completed'); ResiduePresent=[bool](Get-TpmTransactionField -Object $Cleanup -Name 'ResiduePresent'); ResiduePaths=@(Get-TpmTransactionField -Object $Cleanup -Name 'ResiduePaths' -Default @()); ResidueItems=@(Get-TpmTransactionField -Object $Cleanup -Name 'ResidueItems' -Default @()); Error=Get-TpmTransactionField -Object $Cleanup -Name 'Error' }
+    $result = [pscustomobject]@{ PSTypeName='TPM.TransactionResult.v1'; SchemaVersion=1; TransactionId=$TransactionId; WorkflowKey=$WorkflowKey; OperationKey=$OperationKey; StartedUtc=(Get-Date).ToUniversalTime().ToString('o'); CompletedUtc=(Get-Date).ToUniversalTime().ToString('o'); Outcome=$Outcome; UnderlyingOutcome=$UnderlyingOutcome; ProductState=$ProductState; ReasonCode=$ReasonCode; Summary=$Summary; Mutation=$mutationObject; Items=@($Items); PreState=$preStateObject; Backup=$backupObject; FinalVerification=$finalObject; Rollback=$rollbackObject; Cleanup=$cleanupObject; TechnicalDetails=$TechnicalDetails; Errors=@($Errors); Warnings=@($Warnings); RecoveryActions=@($RecoveryActions) }
+    [void](Assert-TpmTransactionResult -Result $result)
+    return $result
+}
+
+function New-TpmTransactionPhaseReceipt {
+    param([Parameter(Mandatory)][string]$Phase, [bool]$MutationStarted=$false, [bool]$Completed=$false, [object[]]$PromotedItems=@(), [object[]]$MovedAsideItems=@(), [bool]$RollbackAttempted=$false, [bool]$RollbackVerified=$false, [object[]]$EvidencePaths=@(), [string]$CleanupState='NOT_ATTEMPTED', [string]$PhaseError=$null)
+    return [pscustomobject]@{ PSTypeName='TPM.TransactionPhaseReceipt.v1'; SchemaVersion=1; ReceiptId=[guid]::NewGuid().ToString('N'); Phase=$Phase; MutationStarted=$MutationStarted; Completed=$Completed; PromotedItems=@($PromotedItems); MovedAsideItems=@($MovedAsideItems); RollbackAttempted=$RollbackAttempted; RollbackVerified=$RollbackVerified; EvidencePaths=@($EvidencePaths); CleanupState=$CleanupState; Error=$PhaseError }
+}
+
+function ConvertTo-TpmWorkflowTransactionMetadata {
+    param([Parameter(Mandatory)]$TransactionResult)
+    [void](Assert-TpmTransactionResult -Result $TransactionResult)
+    $outcome = [string]$TransactionResult.Outcome
+    $productState = [string]$TransactionResult.ProductState
+    $dataSafety = switch ($productState) { 'UNCHANGED' { 'Unchanged' } 'INTENDED' { 'Intended' } 'PARTIAL_KNOWN' { 'Partial' } default { 'Unknown' } }
+    if ($outcome -eq 'ROLLED_BACK_VERIFIED') { $dataSafety = 'Restored' }
+    if ($outcome -eq 'CLEANUP_RESIDUE') { $dataSafety = "$dataSafety with cleanup residue" }
+    return [pscustomobject]@{ PSTypeName='TPM.WorkflowTransactionMetadata.v1'; SchemaVersion=1; TransactionResultId=$TransactionResult.TransactionId; TransactionOutcome=$outcome; ProductState=$productState; PresentationOutcome=if ($outcome -eq 'SUCCEEDED') { 'Succeeded' } elseif ($outcome -eq 'NO_OP') { 'Skipped' } else { $null }; RequiresAttention=($outcome -notin @('SUCCEEDED','NO_OP')); DataSafety=$dataSafety; SelectedItemCount=[int]$TransactionResult.Mutation.SelectedItemCount; AffectedItemCount=[int]$TransactionResult.Mutation.AffectedItemCount; FailedItemCount=[int]$TransactionResult.Mutation.FailedItemCount; EvidenceAvailable=[bool](@($TransactionResult.PreState.EvidenceRoot,$TransactionResult.Backup.RootPath,$TransactionResult.Rollback.EvidenceRoot,$TransactionResult.Cleanup.ResiduePaths) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count; CleanupResiduePresent=[bool]$TransactionResult.Cleanup.ResiduePresent }
+}
+
 function New-TpmWorkflowStatusContext {
     param(
         [Parameter(Mandatory)][string]$WorkflowKey,
