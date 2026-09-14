@@ -500,3 +500,22 @@ from that single unsafe-root classification.
 | BEP-05 | Rollback failure is terminal and preserves recovery evidence. | Existing transactional rollback tests plus BepInEx rollback tests |
 | BEP-06 | An uncertain rollback state does not default to blind retry. | Failure record `NextAction` and prompt contract |
 | BEP-07 | Every accepted finite BepInEx action visibly includes Back. | Production-source prompt contract and focused source test |
+
+## Desktop OMP S1 -- PostgreSQL 8.3 database restore transaction
+
+- Slice contract: `TPM-S1-DB-RESTORE-001`.
+- Owner mapping: report ID 16; scope is limited to PostgreSQL 8.3 restore
+  transactions and the coupled database/profile setup boundary.
+- Source hunks: `TeknoParrot-Manager.ps1` PostgreSQL restore, reset, setup,
+  transaction-result, and normal restore presentation functions;
+  `Tests/TeknoParrot-Manager.Tests.ps1` deterministic fake command harness,
+  filesystem fixtures, and S1 contracts; `ARCHITECTURE.md` design reference.
+- Explicit non-actions: no PostgreSQL 12 proof, non-PostgreSQL workflow
+  migration, package, push, owner smoke, Arcade, wiki, merge, tag, publish,
+  certification, or release authorization.
+- Runtime proof: not authorized in this slice; owner smoke remains paused.
+- Desktop OMP verification: canonical Pester 5.7.1 main suite passed
+  `1121/1121`; focused S1 suites passed `18/18` transaction core,
+  `12/12` file promotion, `18/18` directory replacement, `9/9` backup gate,
+  and `12/12` PostgreSQL restore. Parser, analyzer, ASCII, and diff checks
+  passed. No PostgreSQL 12 proof or owner-runtime proof was performed.

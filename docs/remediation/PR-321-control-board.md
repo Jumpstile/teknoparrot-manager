@@ -266,3 +266,25 @@ Focused Slice 8B behavioral tests cover readable and unknown titles, normal
 diagnosis exclusions, technical evidence retention, reset stages, reset
 guidance, workflow activities, and password/reset separation from
 reinitialize. Package rebuild and owner-runtime proof remain outstanding.
+
+## Desktop OMP S1 -- PostgreSQL 8.3 database restore transaction
+
+Status: SOURCE REMEDIATION IMPLEMENTED; OWNER SMOKE PAUSED
+
+| Owner ID | Scope | Source ownership | Focused evidence | Runtime/release disposition |
+|---:|---|---|---|---|
+| 16 | PostgreSQL restore transaction and coupled profile/database rollback | `TeknoParrot-Manager.ps1`; `Tests/TeknoParrot-Manager.Tests.ps1` | S1-DB-RESTORE deterministic fake PostgreSQL 8.3 harness and transaction-core contracts | No PostgreSQL 12 proof; no package, push, owner smoke, Arcade, wiki, merge, tag, publish, certification, or release action |
+
+The S1 contract is `docs/remediation/slices/TPM-S1-DB-RESTORE-001.md`.
+The source boundary includes tool-version gating, closed selected-backup
+preflight, verified current-database dumps, deterministic receipts/order,
+stop-on-first-failure mutation, verified rollback, final verification,
+`TPM.TransactionResult.v1`, and beginner-safe normal restore output. Owner
+smoke remains paused pending ChatGPT review and later explicit authorization.
+- Final Desktop OMP evidence: PowerShell parser `ParseErrors=0`;
+  PSScriptAnalyzer Error/Warning `Findings=0`; ASCII check `NonAscii=0`;
+  `git diff --check` clean apart from Git's LF-to-CRLF warnings; canonical
+  Pester 5.7.1 main suite `1121 passed, 0 failed`; focused S1 suites:
+  `S1-TX-CORE 18`, `S1-FILE-PROMOTION 12`,
+  `S1-DIRECTORY-REPLACEMENT 18`, `S1-BACKUP-GATE 9`,
+  `S1-DB-RESTORE 12`, all passed.

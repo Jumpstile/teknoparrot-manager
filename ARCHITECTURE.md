@@ -163,6 +163,45 @@ connection failures. The caller keeps retry and Back/stop actions explicit and
 does not report recovery complete after an unverified backup, reset, restart,
 or profile-save operation.
 
+**PostgreSQL 8.3 database restore transaction (S1).** The ordinary database
+restore menu and the guided single-database reinitialize path share one
+transaction engine. It accepts only the PostgreSQL 8.3 client set
+`psql.exe`, `pg_dump.exe`, `dropdb.exe`, `createdb.exe`, and `pg_restore.exe`;
+each executable must exist and report PostgreSQL 8.3 before a restore starts.
+The selected backup folder is preflighted as a closed set: database names are
+safe, files are direct children of the selected folder, files are non-empty,
+SHA-256 identities remain stable, and `pg_restore --list` succeeds for every
+archive. The PostgreSQL service, credentials, and every target database state
+are verified before mutation.
+
+Before the first destructive drop, every existing target database is dumped
+to the locked transaction evidence root and the dump is checked for
+readability, non-zero size, hash identity, and archive readability. Missing
+targets are recorded as verified-absent pre-state and need no current dump.
+Targets are then rechecked immediately before the mutation boundary. Database
+items are sorted deterministically, each receipt records command exits,
+pre-state, changed state, final verification, and rollback status, and the
+engine stops starting new restores after the first failure.
+
+If any database changes, the engine rolls back every changed database in
+reverse deterministic order from its verified pre-state dump (or verifies
+absence for a previously absent target). Rollback is itself checked through
+database-state queries; an unverified rollback is `ACTION_REQUIRED` with
+`UNKNOWN` product state and preserved evidence. Clean completion is
+`SUCCEEDED`/`INTENDED`; a pre-mutation rejection is
+`FAILED_BEFORE_MUTATION`/`UNCHANGED`; verified rollback is
+`ROLLED_BACK_VERIFIED`/`UNCHANGED`; cleanup failure is
+`CLEANUP_RESIDUE` with the verified underlying outcome. The result is always
+`TPM.TransactionResult.v1`, and normal output contains no paths, commands,
+passwords, or hashes.
+
+The older-profile setup path applies the same coupling rule at its narrower
+boundary: databases created for profiles are tracked as changed until the
+corresponding profile writes complete. A profile write or database creation
+failure removes every database created by that pass and restores verified
+profile backups before reporting rollback; any unverified part maps to
+`ACTION_REQUIRED` rather than completion.
+
 **Support evidence provenance (RC8).** Support manifests classify evidence as
 Current, Stale, or Ambient. Action Required is stale when older than the latest
 TPM log. TeknoParrotUI intake, game-local BepInEx/plugin diagnostics, and

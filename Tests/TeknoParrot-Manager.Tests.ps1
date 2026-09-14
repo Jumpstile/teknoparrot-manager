@@ -15305,3 +15305,293 @@ Describe "S1-BACKUP-GATE verified UserProfiles backup" {
         $source | Should -Match '\$crosshairSucceeded = \(\$transactionResult\.Outcome -in @\(''SUCCEEDED'',''NO_OP''\)'
     }
 }
+
+Describe 'S1-DB-RESTORE PostgreSQL 8.3 transaction' -Tag 'S1-DB-RESTORE' {
+    BeforeAll {
+        function New-S1DbRestoreFixture {
+            param([string]$Name, [string[]]$Databases = @('GameDB02', 'GameDB01'))
+            $root = Join-Path $TestDrive ('s1-db-restore-' + $Name)
+            $backupRoot = Join-Path $root 'selected'
+            $bin = Join-Path $root 'bin'
+            $evidence = Join-Path $root 'evidence'
+            New-Item -ItemType Directory -Path $backupRoot, $bin, $evidence -Force | Out-Null
+            foreach ($tool in @(Get-Postgres83RestoreToolNames)) {
+                New-Item -ItemType File -Path (Join-Path $bin $tool) -Force | Out-Null
+            }
+            foreach ($db in $Databases) {
+                [System.IO.File]::WriteAllText((Join-Path $backupRoot ($db + '.backup')), ('snapshot-' + $db), (New-Object System.Text.UTF8Encoding($false)))
+            }
+            $state = [ordered]@{
+                Exists = @{}
+                Calls = New-Object System.Collections.Generic.List[object]
+                ToolVersion = '8.3.23'
+                FailList = $false
+                FailDump = $false
+                RestoreFailures = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+                UsedRestoreFailures = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+                DropCounts = @{}
+                FailRollbackDrop = $false
+                FailRollbackRestore = $false
+            }
+            foreach ($db in $Databases) { $state.Exists[$db] = $true }
+            return [pscustomobject]@{
+                Root = $root
+                BackupRoot = $backupRoot
+                Bin = $bin
+                Evidence = $evidence
+                Files = @(Get-ChildItem -LiteralPath $backupRoot -Filter '*.backup' -File | Sort-Object Name)
+                State = [pscustomobject]$state
+            }
+        }
+
+        function Get-S1DbFakeArgument {
+            param([string[]]$Arguments, [string]$Name)
+            for ($i = 0; $i -lt $Arguments.Count - 1; $i++) {
+                if ($Arguments[$i] -ceq $Name) { return [string]$Arguments[$i + 1] }
+            }
+            return ''
+        }
+
+        function New-S1DbFakeCommandResult {
+            param([string]$ToolName, [string[]]$Arguments, [int]$ExitCode, [string]$Output = '')
+            return [pscustomobject]@{
+                Tool = $ToolName
+                Executable = Join-Path $script:PostgresBinDir $ToolName
+                Arguments = @($Arguments)
+                ExitCode = $ExitCode
+                Succeeded = ($ExitCode -eq 0)
+                Output = $Output
+            }
+        }
+
+        function Invoke-S1DbFakeCommand {
+            param([string]$ToolName, [string[]]$Arguments, [string]$SuperPasswordPlain)
+            $state = $script:S1DbFakeState
+            $db = Get-S1DbFakeArgument -Arguments $Arguments -Name '-d'
+            if ([string]::IsNullOrWhiteSpace($db)) { $db = [string]$Arguments[-1] }
+            $outputPath = Get-S1DbFakeArgument -Arguments $Arguments -Name '-f'
+            [void]$state.Calls.Add([pscustomobject]@{ Tool = $ToolName; Database = $db; Arguments = @($Arguments); OutputPath = $outputPath; Mutation = ($Arguments -notcontains '--version' -and -not ($ToolName -ceq 'pg_restore.exe' -and $Arguments -contains '--list')) })
+            if ($Arguments -contains '--version') {
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0 -Output ("{0} (PostgreSQL) {1}" -f $ToolName,$state.ToolVersion)
+            }
+            if ($ToolName -eq 'pg_restore.exe' -and $Arguments -contains '--list') {
+                if ($state.FailList) { return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 9 -Output 'archive list failed' }
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
+            }
+            if ($ToolName -eq 'pg_dump.exe') {
+                if ($state.FailDump) { return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 7 -Output 'dump failed' }
+                [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($outputPath))
+                [System.IO.File]::WriteAllText($outputPath, ('current-' + $db), (New-Object System.Text.UTF8Encoding($false)))
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
+            }
+            if ($ToolName -eq 'dropdb.exe') {
+                $count = if ($state.DropCounts.ContainsKey($db)) { [int]$state.DropCounts[$db] + 1 } else { 1 }
+                $state.DropCounts[$db] = $count
+                if ($state.FailRollbackDrop -and $count -gt 1) {
+                    return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 8 -Output 'rollback drop failed'
+                }
+                $state.Exists[$db] = $false
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
+            }
+            if ($ToolName -eq 'createdb.exe') {
+                $state.Exists[$db] = $true
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
+            }
+            if ($ToolName -eq 'psql.exe') {
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
+            }
+            if ($ToolName -eq 'pg_restore.exe') {
+                if ($state.FailRollbackRestore -and [string]$Arguments[-1] -like '*current.backup') {
+                    return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 6 -Output 'rollback restore failed'
+                }
+                if ($state.RestoreFailures.Contains($db) -and $state.UsedRestoreFailures.Add($db)) {
+                    return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 5 -Output 'restore failed'
+                }
+                $state.Exists[$db] = $true
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
+            }
+            return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 3 -Output 'unexpected fake tool'
+        }
+
+        function Install-S1DbRestoreMocks {
+            param([Parameter(Mandatory)]$Fixture)
+            $script:S1DbFakeState = $Fixture.State
+            $script:PostgresBinDir = $Fixture.Bin
+            $script:PostgresServiceName = 'pgsql-8.3'
+            Mock Get-Service { [pscustomobject]@{ Status = 'Running' } }
+            Mock Test-PostgresPassword { $true }
+            Mock Lock-PostgresRecoveryDirectory {}
+            Mock Invoke-Postgres83RestoreCommand {
+                param([string]$ToolName, [string[]]$Arguments, [string]$SuperPasswordPlain)
+                Invoke-S1DbFakeCommand -ToolName $ToolName -Arguments $Arguments -SuperPasswordPlain $SuperPasswordPlain
+            }
+            Mock Get-PostgresDatabaseState {
+                param([string]$DbName, [string]$SuperPasswordPlain)
+                $exists = $false
+                if ($script:S1DbFakeState.Exists.ContainsKey($DbName)) { $exists = [bool]$script:S1DbFakeState.Exists[$DbName] }
+                [pscustomobject]@{ Exists = $exists; Verified = $true }
+            }
+        }
+    }
+
+    It 'rejects an unsafe database name before any PostgreSQL mutation' {
+        $f = New-S1DbRestoreFixture -Name 'unsafe' -Databases @('bad-name')
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation }).Count | Should -Be 0
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'rejects a missing PostgreSQL 8.3 client before mutation' {
+        $f = New-S1DbRestoreFixture -Name 'missing-tool' -Databases @('GameDB01')
+        Remove-Item -LiteralPath (Join-Path $f.Bin 'pg_restore.exe') -Force
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -eq 'dropdb.exe' }).Count | Should -Be 0
+        @($result.TechnicalDetails.ToolChecks | Where-Object { $_.Name -eq 'pg_restore.exe' -and -not $_.Verified }).Count | Should -Be 1
+    }
+
+    It 'rejects a PostgreSQL 12 client set instead of silently mixing versions' {
+        $f = New-S1DbRestoreFixture -Name 'wrong-version' -Databases @('GameDB01')
+        $f.State.ToolVersion = '12.4'
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        @($result.TechnicalDetails.ToolChecks | Where-Object { -not $_.Verified }).Count | Should -Be 5
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -eq 'dropdb.exe' }).Count | Should -Be 0
+    }
+
+    It 'stops before mutation when credential verification fails' {
+        $f = New-S1DbRestoreFixture -Name 'bad-password' -Databases @('GameDB01')
+        Install-S1DbRestoreMocks -Fixture $f
+        Mock Test-PostgresPassword { $false }
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'wrong-password'
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -in @('dropdb.exe','createdb.exe','pg_dump.exe') }).Count | Should -Be 0
+    }
+
+    It 'requires verified current-database dumps before the first drop' {
+        $f = New-S1DbRestoreFixture -Name 'dump-failure' -Databases @('GameDB01')
+        $f.State.FailDump = $true
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        $result.Backup.Attempted | Should -BeTrue
+        $result.Backup.Verified | Should -BeFalse
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -eq 'dropdb.exe' }).Count | Should -Be 0
+    }
+
+    It 'preflights archive readability and stops when pg_restore list fails' {
+        $f = New-S1DbRestoreFixture -Name 'archive-failure' -Databases @('GameDB01')
+        $f.State.FailList = $true
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -in @('dropdb.exe','createdb.exe','pg_dump.exe') }).Count | Should -Be 0
+    }
+
+    It 'restores selected databases in deterministic order and verifies success' {
+        $f = New-S1DbRestoreFixture -Name 'success'
+        $f.State.Exists['GameDB02'] = $false
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'SUCCEEDED'
+        $result.ProductState | Should -Be 'INTENDED'
+        $result.Backup.Verified | Should -BeTrue
+        $result.FinalVerification.Passed | Should -BeTrue
+        @($result.DatabaseReceipts | ForEach-Object { $_.Database }) | Should -Be @('GameDB01','GameDB02')
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -eq 'createdb.exe' } | ForEach-Object { $_.Database }) | Should -Be @('GameDB01','GameDB02')
+        $script:S1DbFakeState.Exists['GameDB01'] | Should -BeTrue
+        $script:S1DbFakeState.Exists['GameDB02'] | Should -BeTrue
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'rolls back a failed restore after drop and verifies the original database' {
+        $f = New-S1DbRestoreFixture -Name 'rollback'
+        [void]$f.State.RestoreFailures.Add('GameDB01')
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        $result.Rollback.Verified | Should -BeTrue
+        @($result.Rollback.Items) | Should -Contain 'GameDB01'
+        $script:S1DbFakeState.Exists['GameDB01'] | Should -BeTrue
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'stops new database mutations after the first failure and rolls back prior changes' {
+        $f = New-S1DbRestoreFixture -Name 'stop-on-failure' -Databases @('GameDB03','GameDB01','GameDB02')
+        [void]$f.State.RestoreFailures.Add('GameDB02')
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        @($result.Mutation.UnattemptedItems) | Should -Contain 'GameDB03'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -eq 'createdb.exe' } | ForEach-Object { $_.Database }) | Should -Not -Contain 'GameDB03'
+        foreach ($db in @('GameDB01','GameDB02','GameDB03')) { $script:S1DbFakeState.Exists[$db] | Should -BeTrue }
+    }
+
+    It 'reports ACTION_REQUIRED and preserves evidence when rollback cannot be verified' {
+        $f = New-S1DbRestoreFixture -Name 'rollback-unknown' -Databases @('GameDB01')
+        [void]$f.State.RestoreFailures.Add('GameDB01')
+        $f.State.FailRollbackDrop = $true
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'ACTION_REQUIRED'
+        $result.ProductState | Should -Be 'UNKNOWN'
+        $result.Rollback.Verified | Should -BeFalse
+        $result.Cleanup.ResiduePresent | Should -BeTrue
+        Test-Path -LiteralPath $result.Cleanup.ResiduePaths[0] -PathType Container | Should -BeTrue
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'maps cleanup residue separately after a verified successful restore' {
+        $f = New-S1DbRestoreFixture -Name 'cleanup-residue' -Databases @('GameDB01')
+        Install-S1DbRestoreMocks -Fixture $f
+        Mock Remove-Item {
+            param([string]$LiteralPath)
+            if ($LiteralPath -like '*\Restore-*') { throw 'forced evidence cleanup failure' }
+            [System.IO.Directory]::Delete($LiteralPath, $true)
+        }
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'CLEANUP_RESIDUE'
+        $result.UnderlyingOutcome | Should -Be 'SUCCEEDED'
+        $result.FinalVerification.Passed | Should -BeTrue
+        Test-Path -LiteralPath $result.Cleanup.ResiduePaths[0] -PathType Container | Should -BeTrue
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+        [System.IO.Directory]::Delete($result.Cleanup.ResiduePaths[0], $true)
+    }
+
+    It 'rolls back setup-created databases when a coupled profile write fails' {
+        $f = New-S1DbRestoreFixture -Name 'profile-coupling' -Databases @('GameDB01')
+        $f.State.Exists['GameDB01'] = $false
+        $gameRoot = Join-Path $f.Root 'Game'
+        $backupDir = Join-Path $gameRoot 'pg_backup'
+        New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+        $gameExe = Join-Path $gameRoot 'game.exe'
+        New-Item -ItemType File -Path $gameExe -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $backupDir '0001.backup') -Value 'bundled' -NoNewline
+        $profilePath = Join-Path $f.Root 'GameProfile.xml'
+        $profileXml = '<GameProfile><GameName>Profile Coupling</GameName><GamePath>' + $gameExe + '</GamePath><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Path</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Address</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Port</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>User</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Automatically create Database</FieldName><FieldValue>0</FieldValue></FieldInformation></ConfigValues></GameProfile>'
+        Set-Content -LiteralPath $profilePath -Value $profileXml
+        $profiles = Join-Path $f.Root 'UserProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        Move-Item -LiteralPath $profilePath -Destination (Join-Path $profiles 'GameProfile.xml')
+        Install-S1DbRestoreMocks -Fixture $f
+        Mock Save-Xml { throw 'forced profile write failure' }
+        Mock Restore-PostgresProfileBackups { $true }
+        Mock Write-Log {}
+        $recovery = [pscustomobject]@{ Path = $f.Evidence; Verified = $true; ProfileBackups = @() }
+        $result = Invoke-PostgresGameSetup -UserProfilesDir $profiles -SuperPasswordPlain 'fixture-password' -RecoveryBackup $recovery
+        $result.RecoveryBlocked | Should -BeTrue
+        $result.DatabaseRollbackVerified | Should -BeTrue
+        $result.ProfileRollbackVerified | Should -BeTrue
+        Should -Invoke Restore-PostgresProfileBackups -Times 1 -Exactly
+        $result.TransactionResult.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $result.TransactionResult.ProductState | Should -Be 'UNCHANGED'
+        $script:S1DbFakeState.Exists['GameDB01'] | Should -BeFalse
+        { Assert-TpmTransactionResult -Result $result.TransactionResult } | Should -Not -Throw
+    }
+}
