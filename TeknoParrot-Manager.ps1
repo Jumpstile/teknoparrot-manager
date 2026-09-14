@@ -635,6 +635,9 @@ function Get-TpmTransactionProductStateNames {
 function Get-TpmTransactionField {
     param($Object, [string]$Name, [object]$Default = $null)
     if ($null -eq $Object) { return $Default }
+    if ($Object -is [System.Collections.IDictionary] -and $Object.Contains($Name)) {
+        return $Object[$Name]
+    }
     $property = $Object.PSObject.Properties[$Name]
     if ($null -eq $property) { return $Default }
     return $property.Value
@@ -3633,6 +3636,611 @@ function Invoke-TpmTransactionalPromote {
     }
     return $true
 }
+function ConvertTo-TpmAutoSyncLongPath {
+    param([Parameter(Mandatory)][string]$Path)
+    $full = [string]$Path
+    if ([string]::IsNullOrWhiteSpace($full)) { throw 'AutoSync long path cannot be blank.' }
+    if ($full.StartsWith('\\?\', [System.StringComparison]::OrdinalIgnoreCase)) { return $full }
+    if (-not [System.IO.Path]::IsPathRooted($full)) { $full = [System.IO.Path]::GetFullPath($full) }
+    if ($full -match '^\\\\') { return ('\\?\UNC\' + $full.Substring(2)) }
+    return ('\\?\' + $full)
+}
+
+function Get-TpmAutoSyncSha256 {
+    param([Parameter(Mandatory)][string]$Path)
+    $stream = $null
+    $sha = $null
+    try {
+        $share = [System.IO.FileShare]::Read -bor [System.IO.FileShare]::Delete
+        $stream = New-Object System.IO.FileStream(
+            (ConvertTo-TpmAutoSyncLongPath $Path),
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            $share,
+            65536,
+            [System.IO.FileOptions]::SequentialScan)
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        return ((-join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') })).ToUpperInvariant())
+    } finally {
+        if ($sha) { $sha.Dispose() }
+        if ($stream) { $stream.Dispose() }
+    }
+}
+
+function Get-TpmAutoSyncTextSha256 {
+    param([Parameter(Mandatory)][string]$Text)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+    $sha = $null
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        return ((-join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') })).ToUpperInvariant())
+    } finally {
+        if ($sha) { $sha.Dispose() }
+        [Array]::Clear($bytes, 0, $bytes.Length)
+    }
+}
+
+function Get-TpmAutoSyncSourceIdentity {
+    param([Parameter(Mandatory)][string]$Path)
+    $canonical = [System.IO.Path]::GetFullPath($Path)
+    try {
+        $item = Get-Item -LiteralPath $canonical -Force -ErrorAction Stop
+        if ($item.PSIsContainer) { throw "AutoSync source is a directory, not a ZIP file: $canonical" }
+        return [pscustomobject]@{
+            Path = $canonical
+            Exists = $true
+            Readable = $true
+            Length = [int64]$item.Length
+            LastWriteTimeUtc = $item.LastWriteTimeUtc
+            Error = $null
+        }
+    } catch {
+        return [pscustomobject]@{
+            Path = $canonical
+            Exists = $false
+            Readable = $false
+            Length = $null
+            LastWriteTimeUtc = $null
+            Error = $_.Exception.Message
+        }
+    }
+}
+
+function Test-TpmAutoSyncSourceIdentityMatch {
+    param(
+        [Parameter(Mandatory)]$Expected,
+        [Parameter(Mandatory)]$Actual
+    )
+    if (-not $Expected.Readable -or -not $Actual.Readable) { return $false }
+    if (-not $Expected.Exists -or -not $Actual.Exists) { return $false }
+    return ([int64]$Expected.Length -eq [int64]$Actual.Length -and
+            $Expected.LastWriteTimeUtc -eq $Actual.LastWriteTimeUtc)
+}
+
+function Get-TpmDirectoryManifest {
+    param([Parameter(Mandatory)][string]$Path)
+    $canonical = [System.IO.Path]::GetFullPath($Path)
+    $result = [ordered]@{
+        Path = $canonical
+        Exists = $false
+        IsDirectory = $false
+        Readable = $true
+        Items = @()
+        ManifestHash = $null
+        Error = $null
+    }
+
+    $rootItem = $null
+    try {
+        $rootItem = Get-Item -LiteralPath $canonical -Force -ErrorAction Stop
+    } catch {
+        $missing = ($_.Exception -is [System.Management.Automation.ItemNotFoundException]) -or
+                   ($_.Exception -is [System.IO.FileNotFoundException]) -or
+                   ($_.Exception -is [System.IO.DirectoryNotFoundException])
+        if ($missing) {
+            $result.ManifestHash = Get-TpmAutoSyncTextSha256 -Text "TPM.AutoSync.DirectoryManifest.v1`nExists=0"
+            return [pscustomobject]$result
+        }
+        $result.Readable = $false
+        $result.Error = $_.Exception.Message
+        return [pscustomobject]$result
+    }
+
+    $result.Exists = $true
+    $result.IsDirectory = [bool]$rootItem.PSIsContainer
+    if (-not $result.IsDirectory) {
+        try {
+            $result.ManifestHash = Get-TpmAutoSyncSha256 -Path $canonical
+        } catch {
+            $result.Readable = $false
+            $result.Error = $_.Exception.Message
+        }
+        return [pscustomobject]$result
+    }
+
+    try {
+        if (-not (Test-TpmNoReparsePath -Path $canonical)) {
+            throw "Directory manifest path contains a reparse point: $canonical"
+        }
+        $records = New-Object System.Collections.Generic.List[object]
+        $pending = New-Object System.Collections.Generic.List[object]
+        $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        [void]$pending.Add([pscustomobject]@{ FullPath = $canonical; RelativePath = '' })
+
+        while ($pending.Count -gt 0) {
+            $cursor = $pending[0]
+            $pending.RemoveAt(0)
+            $cursorLong = ConvertTo-TpmAutoSyncLongPath -Path $cursor.FullPath
+            $cursorInfo = New-Object System.IO.DirectoryInfo($cursorLong)
+            foreach ($child in $cursorInfo.EnumerateFileSystemInfos()) {
+                if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "Directory manifest refused a reparse entry: $($child.FullName)"
+                }
+                $name = [string]$child.Name
+                if ([string]::IsNullOrWhiteSpace($name)) { continue }
+                $relative = if ([string]::IsNullOrWhiteSpace($cursor.RelativePath)) {
+                    $name
+                } else {
+                    $cursor.RelativePath + '\' + $name
+                }
+                if (-not $seen.Add($relative)) {
+                    throw "Directory manifest found duplicate relative path: $relative"
+                }
+                $childPath = [System.IO.Path]::Combine($cursor.FullPath, $name)
+                $isDirectory = (($child.Attributes -band [System.IO.FileAttributes]::Directory) -ne 0)
+                if ($isDirectory) {
+                    [void]$records.Add([ordered]@{
+                        RelativePath = $relative
+                        IsDirectory = $true
+                        Length = $null
+                        Sha256 = $null
+                    })
+                    [void]$pending.Add([pscustomobject]@{
+                        FullPath = $childPath
+                        RelativePath = $relative
+                    })
+                } else {
+                    [void]$records.Add([ordered]@{
+                        RelativePath = $relative
+                        IsDirectory = $false
+                        Length = [int64]$child.Length
+                        Sha256 = Get-TpmAutoSyncSha256 -Path $childPath
+                    })
+                }
+            }
+        }
+
+        $ordered = @($records | Sort-Object @{ Expression = { ([string]$_.RelativePath).ToLowerInvariant() } }, RelativePath)
+        $manifestLines = @('TPM.AutoSync.DirectoryManifest.v1', 'Exists=1', 'IsDirectory=1')
+        $manifestLines += @($ordered | ForEach-Object { ($_ | ConvertTo-Json -Compress -Depth 3) })
+        $result.Items = $ordered
+        $result.ManifestHash = Get-TpmAutoSyncTextSha256 -Text ($manifestLines -join "`n")
+    } catch {
+        $result.Readable = $false
+        $result.Error = $_.Exception.Message
+    }
+    return [pscustomobject]$result
+}
+
+function Test-TpmDirectoryManifestMatch {
+    param(
+        [Parameter(Mandatory)]$Expected,
+        [Parameter(Mandatory)]$Actual
+    )
+    if (-not $Expected.Readable -or -not $Actual.Readable) { return $false }
+    if ([bool]$Expected.Exists -ne [bool]$Actual.Exists) { return $false }
+    if (-not $Expected.Exists) { return $true }
+    if ([bool]$Expected.IsDirectory -ne [bool]$Actual.IsDirectory) { return $false }
+    if (-not $Expected.IsDirectory) {
+        return ([string]$Expected.ManifestHash -ieq [string]$Actual.ManifestHash)
+    }
+    $expectedItems = @{}
+    foreach ($item in @($Expected.Items)) {
+        $key = ([string]$item.RelativePath).ToLowerInvariant()
+        if ($expectedItems.ContainsKey($key)) { return $false }
+        $expectedItems[$key] = $item
+    }
+    $actualItems = @{}
+    foreach ($item in @($Actual.Items)) {
+        $key = ([string]$item.RelativePath).ToLowerInvariant()
+        if ($actualItems.ContainsKey($key)) { return $false }
+        $actualItems[$key] = $item
+    }
+    if ($expectedItems.Count -ne $actualItems.Count) { return $false }
+    foreach ($key in $expectedItems.Keys) {
+        if (-not $actualItems.ContainsKey($key)) { return $false }
+        $left = $expectedItems[$key]
+        $right = $actualItems[$key]
+        if ([bool]$left.IsDirectory -ne [bool]$right.IsDirectory) { return $false }
+        if (-not $left.IsDirectory) {
+            if ([int64]$left.Length -ne [int64]$right.Length) { return $false }
+            if ([string]$left.Sha256 -ine [string]$right.Sha256) { return $false }
+        }
+    }
+    return $true
+}
+
+function Get-TpmAutoSyncZipInventory {
+    param([Parameter(Mandatory)][string]$ZipPath)
+    $archive = $null
+    try {
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+        $recordsByKey = @{}
+        foreach ($entry in $archive.Entries) {
+            $relative = $entry.FullName.Replace('/', '\').TrimStart('\')
+            if ([string]::IsNullOrWhiteSpace($relative)) { continue }
+            if ($relative -match '(^|\\)\.\.($|\\)' -or
+                $relative -match '(^|\\)\.($|\\)' -or
+                [System.IO.Path]::IsPathRooted($relative)) {
+                throw "ZIP entry escapes destination folder: $($entry.FullName)"
+            }
+            $isDirectory = ($entry.Name -eq '' -or $relative.EndsWith('\'))
+            $relative = $relative.TrimEnd('\')
+            if ([string]::IsNullOrWhiteSpace($relative)) { continue }
+            $key = $relative.ToLowerInvariant()
+            if ($recordsByKey.ContainsKey($key)) {
+                throw "ZIP contains duplicate relative path: $relative"
+            }
+            $entryHash = $null
+            if (-not $isDirectory) {
+                $entryStream = $null
+                $entrySha = $null
+                try {
+                    $entryStream = $entry.Open()
+                    $entrySha = [System.Security.Cryptography.SHA256]::Create()
+                    $entryHash = ((-join ($entrySha.ComputeHash($entryStream) | ForEach-Object { $_.ToString('x2') })).ToUpperInvariant())
+                } finally {
+                    if ($entrySha) { $entrySha.Dispose() }
+                    if ($entryStream) { $entryStream.Dispose() }
+                }
+            }
+            $recordsByKey[$key] = [ordered]@{
+                RelativePath = $relative
+                IsDirectory = $isDirectory
+                Length = if ($isDirectory) { $null } else { [int64]$entry.Length }
+                Sha256 = $entryHash
+            }
+        }
+
+        foreach ($record in @($recordsByKey.Values | Where-Object { -not $_.IsDirectory })) {
+            $parts = ([string]$record.RelativePath) -split '\\'
+            for ($i = 1; $i -lt $parts.Count; $i++) {
+                $parent = ($parts[0..($i - 1)] -join '\')
+                $key = $parent.ToLowerInvariant()
+                if ($recordsByKey.ContainsKey($key)) {
+                    if (-not $recordsByKey[$key].IsDirectory) {
+                        throw "ZIP file/directory collision at relative path: $parent"
+                    }
+                } else {
+                    $recordsByKey[$key] = [ordered]@{
+                        RelativePath = $parent
+                        IsDirectory = $true
+                        Length = $null
+                        Sha256 = $null
+                    }
+                }
+            }
+        }
+        $ordered = @($recordsByKey.Values | Sort-Object @{ Expression = { ([string]$_.RelativePath).ToLowerInvariant() } }, RelativePath)
+        $totalBytes = [int64]0
+        foreach ($record in $ordered) {
+            if (-not [bool](Get-TpmTransactionField -Object $record -Name 'IsDirectory')) {
+                $totalBytes += [int64](Get-TpmTransactionField -Object $record -Name 'Length' -Default 0)
+            }
+        }
+        return [pscustomobject]@{
+            Path = [System.IO.Path]::GetFullPath($ZipPath)
+            Entries = $ordered
+            FileCount = @($ordered | Where-Object { -not [bool](Get-TpmTransactionField -Object $_ -Name 'IsDirectory') }).Count
+            TotalBytes = $totalBytes
+        }
+    } finally {
+        if ($archive) { $archive.Dispose() }
+    }
+}
+
+function Test-TpmDirectoryAgainstZipInventory {
+    param(
+        [Parameter(Mandatory)]$Manifest,
+        [Parameter(Mandatory)]$Inventory
+    )
+    if (-not $Manifest.Readable -or -not $Manifest.Exists -or -not $Manifest.IsDirectory) { return $false }
+    $expected = @{}
+    foreach ($entry in @($Inventory.Entries)) {
+        $expected[([string]$entry.RelativePath).ToLowerInvariant()] = $entry
+    }
+    $actual = @{}
+    foreach ($entry in @($Manifest.Items)) {
+        $actual[([string]$entry.RelativePath).ToLowerInvariant()] = $entry
+    }
+    if ($expected.Count -ne $actual.Count) { return $false }
+    foreach ($key in $expected.Keys) {
+        if (-not $actual.ContainsKey($key)) { return $false }
+        $left = $expected[$key]
+        $right = $actual[$key]
+        if ([bool]$left.IsDirectory -ne [bool]$right.IsDirectory) { return $false }
+        if (-not $left.IsDirectory -and
+            ([int64]$left.Length -ne [int64]$right.Length -or
+             [string]$left.Sha256 -ine [string]$right.Sha256)) { return $false }
+    }
+    return $true
+}
+
+function New-TpmAutoSyncTransactionRoot {
+    param([Parameter(Mandatory)][string]$InstallFolder)
+    $root = [System.IO.Path]::GetFullPath($InstallFolder).TrimEnd([char[]]"\/")
+    $parent = [System.IO.Path]::GetDirectoryName($root)
+    if ([string]::IsNullOrWhiteSpace($parent)) { $parent = $root }
+    if (-not (Test-TpmNoReparsePath -Path $parent)) {
+        throw "AutoSync transaction parent failed the path safety check: $parent"
+    }
+    $transaction = Join-Path $parent ('.tpm-autosync-' + [guid]::NewGuid().ToString('N'))
+    if (Test-Path -LiteralPath $transaction) {
+        throw "AutoSync transaction root already exists: $transaction"
+    }
+    [void][System.IO.Directory]::CreateDirectory($transaction)
+    if (-not (Test-TpmNoReparsePath -Path $transaction)) {
+        throw "AutoSync transaction root failed the path safety check: $transaction"
+    }
+    return $transaction
+}
+function Invoke-TpmAutoSyncMovePath {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination
+    )
+    $sourceFull = [System.IO.Path]::GetFullPath($Source)
+    $destinationFull = [System.IO.Path]::GetFullPath($Destination)
+    $sourceLong = ConvertTo-TpmAutoSyncLongPath -Path $sourceFull
+    $destinationLong = ConvertTo-TpmAutoSyncLongPath -Path $destinationFull
+    if ([System.IO.Directory]::Exists($destinationLong) -or [System.IO.File]::Exists($destinationLong)) {
+        throw "AutoSync move destination already exists: $destinationFull"
+    }
+    if (-not [System.IO.Directory]::Exists($sourceLong)) {
+        throw "AutoSync move source directory is unavailable: $sourceFull"
+    }
+    [System.IO.Directory]::Move($sourceLong, $destinationLong)
+    if (-not [System.IO.Directory]::Exists($destinationLong)) {
+        throw "AutoSync move did not produce its destination: $destinationFull"
+    }
+    if ([System.IO.Directory]::Exists($sourceLong) -or [System.IO.File]::Exists($sourceLong)) {
+        throw "AutoSync move left its source in place: $sourceFull"
+    }
+}
+
+function Invoke-TpmAutoSyncRemovePath {
+    param([Parameter(Mandatory)][string]$Path)
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $manifest = Get-TpmDirectoryManifest -Path $full
+    if (-not $manifest.Exists) {
+        if (-not $manifest.Readable) {
+            throw "AutoSync could not inspect the path before removal: $full"
+        }
+        return
+    }
+    if (-not $manifest.Readable -or -not (Test-TpmNoReparsePath -Path $full)) {
+        throw "AutoSync refused to remove an unsafe or reparse-backed path: $full"
+    }
+    $long = ConvertTo-TpmAutoSyncLongPath -Path $full
+    if ($manifest.IsDirectory) {
+        [System.IO.Directory]::Delete($long, $true)
+    } else {
+        [System.IO.File]::Delete($long)
+    }
+    if ([System.IO.Directory]::Exists($long) -or [System.IO.File]::Exists($long)) {
+        throw "AutoSync removal could not verify that the owned path is absent: $full"
+    }
+}
+
+function New-TpmAutoSyncLiveSentinel {
+    param([Parameter(Mandatory)][string]$Path)
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open(
+            (ConvertTo-TpmAutoSyncLongPath -Path $Path),
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None)
+    } finally {
+        if ($stream) { $stream.Dispose() }
+    }
+}
+
+function Invoke-TpmAutoSyncStateCommit {
+    param(
+        [Parameter(Mandatory)][string]$StatePath,
+        [Parameter(Mandatory)][string]$CandidatePath,
+        [Parameter(Mandatory)]$ExpectedPreState,
+        [Parameter(Mandatory)][string]$BackupPath
+    )
+    $stateFull = [System.IO.Path]::GetFullPath($StatePath)
+    $candidateFull = [System.IO.Path]::GetFullPath($CandidatePath)
+    $candidateState = Get-TpmFileState -Path $candidateFull
+    if (-not $candidateState.Readable -or -not $candidateState.Exists -or $candidateState.IsDirectory) {
+        throw "AutoSync state candidate is not a readable file: $candidateFull"
+    }
+    $current = Get-TpmFileState -Path $stateFull
+    if (-not (Test-TpmFileStateMatch -Expected $ExpectedPreState -Actual $current -IgnoreMetadata)) {
+        throw "AutoSync sync state changed before commit: $stateFull"
+    }
+    $parent = [System.IO.Path]::GetDirectoryName($stateFull)
+    if (-not (Test-TpmNoReparsePath -Path $parent)) {
+        throw "AutoSync sync-state parent failed the path safety check: $parent"
+    }
+    if ($ExpectedPreState.Exists) {
+        [System.IO.File]::Replace($candidateFull, $stateFull, [System.IO.Path]::GetFullPath($BackupPath), $true)
+        $backupState = Get-TpmFileState -Path $BackupPath
+        if (-not (Test-TpmFileStateMatch -Expected $ExpectedPreState -Actual $backupState -IgnoreMetadata)) {
+            throw "AutoSync sync-state backup verification failed: $BackupPath"
+        }
+    } else {
+        [System.IO.File]::Move($candidateFull, $stateFull)
+    }
+    $after = Get-TpmFileState -Path $stateFull
+    if (-not (Test-TpmFileStateMatch -Expected $candidateState -Actual $after -IgnoreMetadata)) {
+        throw "AutoSync sync-state readback verification failed: $stateFull"
+    }
+    return [pscustomobject]@{
+        Path = $stateFull
+        State = $after
+        Candidate = $candidateState
+        BackupPath = if ($ExpectedPreState.Exists) { [System.IO.Path]::GetFullPath($BackupPath) } else { $null }
+    }
+}
+
+function Restore-TpmAutoSyncState {
+    param(
+        [Parameter(Mandatory)][string]$StatePath,
+        [Parameter(Mandatory)]$ExpectedPreState,
+        [string]$BackupPath = '',
+        [string]$ExpectedCurrentHash = ''
+    )
+    $current = Get-TpmFileState -Path $StatePath
+    if (-not $current.Readable) {
+        throw "AutoSync sync-state could not be read before rollback: $StatePath"
+    }
+    if ($ExpectedCurrentHash -and (-not $current.Exists -or $current.Sha256 -ine $ExpectedCurrentHash)) {
+        throw "AutoSync sync-state changed before rollback: $StatePath"
+    }
+    if ($ExpectedPreState.Exists) {
+        if ([string]::IsNullOrWhiteSpace($BackupPath) -or -not (Test-Path -LiteralPath $BackupPath -PathType Leaf)) {
+            throw "AutoSync sync-state rollback backup is unavailable: $BackupPath"
+        }
+        if (Test-Path -LiteralPath $StatePath) { Invoke-TpmAutoSyncRemovePath -Path $StatePath }
+        Copy-Item -LiteralPath $BackupPath -Destination $StatePath -Force -ErrorAction Stop
+    } elseif (Test-Path -LiteralPath $StatePath) {
+        Invoke-TpmAutoSyncRemovePath -Path $StatePath
+    }
+    $restored = Get-TpmFileState -Path $StatePath
+    if (-not (Test-TpmFileStateMatch -Expected $ExpectedPreState -Actual $restored -IgnoreMetadata)) {
+        throw "AutoSync sync-state rollback verification failed: $StatePath"
+    }
+}
+
+function New-TpmAutoSyncDirectoryResult {
+    param(
+        [Parameter(Mandatory)][string]$Outcome,
+        [Parameter(Mandatory)][string]$ProductState,
+        [Parameter(Mandatory)][string]$Summary,
+        [Parameter(Mandatory)][string]$RawName,
+        [bool]$MutationStarted = $false,
+        [bool]$MutationCompleted = $false,
+        [object[]]$ChangedItems = @(),
+        [object[]]$CompletedItems = @(),
+        [object[]]$FailedItems = @(),
+        [object[]]$UnattemptedItems = @(),
+        [object[]]$SkippedItems = @(),
+        [object[]]$UnknownItems = @(),
+        [object[]]$PreStateItems = @(),
+        [bool]$PreStateCaptured = $false,
+        [string]$PreStateEvidenceRoot = $null,
+        [bool]$BackupRequired = $false,
+        [bool]$BackupAttempted = $false,
+        [bool]$BackupCreated = $false,
+        [bool]$BackupVerified = $false,
+        [string]$BackupRootPath = $null,
+        [object[]]$BackupItems = @(),
+        [bool]$FinalAttempted = $false,
+        [bool]$FinalPassed = $false,
+        [object[]]$FinalChecks = @(),
+        [object[]]$FinalFailedItems = @(),
+        [object[]]$FinalUnknownItems = @(),
+        [bool]$RollbackAttempted = $false,
+        [bool]$RollbackCompleted = $false,
+        [bool]$RollbackVerified = $false,
+        [object[]]$RollbackItems = @(),
+        [string]$RollbackEvidenceRoot = $null,
+        [object[]]$RollbackFailedItems = @(),
+        [object[]]$RollbackErrors = @(),
+        [bool]$CleanupAttempted = $false,
+        [bool]$CleanupCompleted = $true,
+        [bool]$ResiduePresent = $false,
+        [string[]]$ResiduePaths = @(),
+        [object[]]$ResidueItems = @(),
+        [string]$CleanupError = $null,
+        [string]$UnderlyingOutcome = $null,
+        [string]$ReasonCode = $null,
+        [object]$TechnicalDetails = $null,
+        [string[]]$Errors = @(),
+        [string[]]$Warnings = @(),
+        [object[]]$RecoveryActions = @()
+    )
+    $items = @($RawName)
+    $mutation = [pscustomobject]@{
+        Started = $MutationStarted
+        Completed = $MutationCompleted
+        SelectedItemCount = 1
+        AttemptedItemCount = @($CompletedItems).Count + @($FailedItems).Count + @($SkippedItems).Count
+        MutatedItemCount = @($ChangedItems).Count
+        AffectedItemCount = @($ChangedItems).Count
+        CompletedItemCount = @($CompletedItems).Count
+        FailedItemCount = @($FailedItems).Count
+        UnattemptedItemCount = @($UnattemptedItems).Count
+        SkippedItemCount = @($SkippedItems).Count
+        UnknownItemCount = @($UnknownItems).Count
+        ChangedItems = @($ChangedItems)
+        AffectedItems = @($ChangedItems)
+        CompletedItems = @($CompletedItems)
+        FailedItems = @($FailedItems)
+        UnattemptedItems = @($UnattemptedItems)
+        SkippedItems = @($SkippedItems)
+        UnknownItems = @($UnknownItems)
+        FailureStage = $null
+    }
+    $preState = [pscustomobject]@{
+        Captured = $PreStateCaptured
+        CaptureMethod = 'DirectoryManifestAndHash'
+        CapturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        Items = @($PreStateItems)
+        EvidenceRoot = $PreStateEvidenceRoot
+        CaptureError = $null
+    }
+    $backup = [pscustomobject]@{
+        Required = $BackupRequired
+        Attempted = $BackupAttempted
+        Created = $BackupCreated
+        Verified = $BackupVerified
+        RootPath = $BackupRootPath
+        Items = @($BackupItems)
+        FailureStage = $null
+        FailureCode = $null
+    }
+    $final = [pscustomobject]@{
+        Attempted = $FinalAttempted
+        Passed = $FinalPassed
+        VerifiedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        Checks = @($FinalChecks)
+        FailedItems = @($FinalFailedItems)
+        UnknownItems = @($FinalUnknownItems)
+    }
+    $rollback = [pscustomobject]@{
+        Attempted = $RollbackAttempted
+        Completed = $RollbackCompleted
+        Verified = $RollbackVerified
+        VerifiedUtc = if ($RollbackVerified) { (Get-Date).ToUniversalTime().ToString('o') } else { $null }
+        Items = @($RollbackItems)
+        EvidenceRoot = $RollbackEvidenceRoot
+        FailedItems = @($RollbackFailedItems)
+        Errors = @($RollbackErrors)
+    }
+    $cleanup = [pscustomobject]@{
+        Attempted = $CleanupAttempted
+        Completed = $CleanupCompleted
+        ResiduePresent = $ResiduePresent
+        ResiduePaths = @($ResiduePaths)
+        ResidueItems = @($ResidueItems)
+        Error = $CleanupError
+    }
+    $cleanRecoveryActions = @($RecoveryActions | Where-Object { $null -ne $_ })
+    return (New-TpmTransactionResult `
+        -WorkflowKey 'AutoSync' -OperationKey $RawName -TransactionId ([string](Get-TpmTransactionField -Object $TechnicalDetails -Name 'TransactionId')) -Outcome $Outcome `
+        -UnderlyingOutcome $UnderlyingOutcome -ProductState $ProductState `
+        -Summary $Summary -Items $items -Mutation $mutation `
+        -PreState $preState -Backup $backup -FinalVerification $final `
+        -Rollback $rollback -Cleanup $cleanup -ReasonCode $ReasonCode `
+        -TechnicalDetails $TechnicalDetails -Errors $Errors -Warnings $Warnings `
+        -RecoveryActions $cleanRecoveryActions)
+}
 # Returns a stable, hash-backed description of one file path. A missing leaf
 # is distinguishable from an unreadable path so callers never treat an access
 # failure as an absent file during a transaction.
@@ -3641,7 +4249,7 @@ function Get-TpmFileState {
     $canonical = $null
     try {
         $canonical = [System.IO.Path]::GetFullPath($Path)
-        $item = Get-Item -LiteralPath $canonical -Force -ErrorAction SilentlyContinue
+        $item = Get-Item -LiteralPath $canonical -Force -ErrorAction Stop
         if ($null -eq $item) {
             return [pscustomobject]@{
                 Path=$canonical; Exists=$false; Readable=$true; IsDirectory=$false
@@ -3664,6 +4272,15 @@ function Get-TpmFileState {
             Error=$null
         }
     } catch {
+        $missing = ($_.Exception -is [System.Management.Automation.ItemNotFoundException]) -or
+                   ($_.Exception -is [System.IO.FileNotFoundException]) -or
+                   ($_.Exception -is [System.IO.DirectoryNotFoundException])
+        if ($missing) {
+            return [pscustomobject]@{
+                Path=$canonical; Exists=$false; Readable=$true; IsDirectory=$false
+                Length=$null; Sha256=$null; LastWriteTimeUtc=$null; Attributes=$null; Error=$null
+            }
+        }
         return [pscustomobject]@{
             Path=$canonical
             Exists=$null
@@ -11937,6 +12554,851 @@ function Write-TpmCompactExtractionProgress {
     if ($ReturnText) { return $text }
 }
 
+function Invoke-TpmAutoSyncDirectoryTransaction {
+    param(
+        [Parameter(Mandatory)][string]$ZipPath,
+        [Parameter(Mandatory)][string]$InstallFolder,
+        [Parameter(Mandatory)][string]$TargetDir,
+        [Parameter(Mandatory)][string]$RawName,
+        [Parameter(Mandatory)][string]$SyncStatePath,
+        [Parameter(Mandatory)][hashtable]$SyncState,
+        [object]$StoredState = $null,
+        [string]$LegacySentinelPath = ''
+    )
+
+    $transactionId = [guid]::NewGuid().ToString('N')
+    $targetFull = $null
+    $installFull = $null
+    $stateFull = $null
+    $sentinelFull = $null
+    $txRoot = $null
+    $rollbackRoot = $null
+    $stageDir = $null
+    $candidatePath = $null
+    $oldTarget = $null
+    $stateBackupPath = $null
+    $sourceBefore = $null
+    $targetPre = $null
+    $statePre = $null
+    $sentinelPre = $null
+    $legacySentinelPre = $null
+    $stageManifest = $null
+    $candidateFileState = $null
+    $stateCommitResult = $null
+    $stateCommitAttempted = $false
+    $sentinelCreated = $false
+    $targetMovedAside = $false
+    $targetPromoted = $false
+    $promotionAttempted = $false
+    $stateChanged = $false
+    $filesystemChanged = $false
+    $registrationEligible = $false
+    $mutationStarted = $false
+    $mutationCompleted = $false
+    $preStateCaptured = $false
+    $backupRequired = $false
+    $backupAttempted = $false
+    $backupCreated = $false
+    $backupVerified = $false
+    $finalAttempted = $false
+    $finalPassed = $false
+    $rollbackAttempted = $false
+    $rollbackCompleted = $false
+    $rollbackVerified = $false
+    $cleanupAttempted = $false
+    $cleanupCompleted = $true
+    $residuePresent = $false
+    $requestedOutcome = 'FAILED_BEFORE_MUTATION'
+    $requestedState = 'UNCHANGED'
+    $requestedSummary = 'Nothing was changed because TPM could not prepare a safe replacement.'
+    $requestedReason = 'PREFLIGHT_FAILED'
+    $underlyingOutcome = $null
+    $technical = [ordered]@{
+        TransactionId = $transactionId
+        WorkflowKey = 'AutoSync'
+        OperationKey = $RawName
+        Stage = 'Preflight'
+        SourcePath = $ZipPath
+        TargetPath = $TargetDir
+        SyncStatePath = $SyncStatePath
+        StagingPath = $null
+        RollbackPath = $null
+        Error = $null
+        RollbackError = @()
+        CleanupError = $null
+    }
+    $preStateItems = New-Object System.Collections.Generic.List[object]
+    $backupItems = New-Object System.Collections.Generic.List[object]
+    $changedItems = New-Object System.Collections.Generic.List[string]
+    $completedItems = New-Object System.Collections.Generic.List[string]
+    $failedItems = New-Object System.Collections.Generic.List[string]
+    $unattemptedItems = New-Object System.Collections.Generic.List[string]
+    $skippedItems = New-Object System.Collections.Generic.List[string]
+    $unknownItems = New-Object System.Collections.Generic.List[string]
+    $finalChecks = New-Object System.Collections.Generic.List[string]
+    $finalFailedItems = New-Object System.Collections.Generic.List[string]
+    $finalUnknownItems = New-Object System.Collections.Generic.List[string]
+    $rollbackItems = New-Object System.Collections.Generic.List[string]
+    $rollbackFailedItems = New-Object System.Collections.Generic.List[string]
+    $rollbackErrors = New-Object System.Collections.Generic.List[string]
+    $residuePaths = New-Object System.Collections.Generic.List[string]
+    $errors = New-Object System.Collections.Generic.List[string]
+    $warnings = New-Object System.Collections.Generic.List[string]
+
+    $returnResult = {
+        $result = New-TpmAutoSyncDirectoryResult `
+            -Outcome $requestedOutcome -ProductState $requestedState `
+            -Summary $requestedSummary -RawName $RawName `
+            -MutationStarted $mutationStarted -MutationCompleted $mutationCompleted `
+            -ChangedItems $changedItems.ToArray() -CompletedItems $completedItems.ToArray() `
+            -FailedItems $failedItems.ToArray() -UnattemptedItems $unattemptedItems.ToArray() `
+            -SkippedItems $skippedItems.ToArray() -UnknownItems $unknownItems.ToArray() `
+            -PreStateItems $preStateItems.ToArray() -PreStateCaptured $preStateCaptured `
+            -PreStateEvidenceRoot $txRoot -BackupRequired $backupRequired `
+            -BackupAttempted $backupAttempted -BackupCreated $backupCreated `
+            -BackupVerified $backupVerified -BackupRootPath $rollbackRoot `
+            -BackupItems $backupItems.ToArray() -FinalAttempted $finalAttempted `
+            -FinalPassed $finalPassed -FinalChecks $finalChecks.ToArray() `
+            -FinalFailedItems $finalFailedItems.ToArray() `
+            -FinalUnknownItems $finalUnknownItems.ToArray() `
+            -RollbackAttempted $rollbackAttempted -RollbackCompleted $rollbackCompleted `
+            -RollbackVerified $rollbackVerified -RollbackItems $rollbackItems.ToArray() `
+            -RollbackEvidenceRoot $rollbackRoot -RollbackFailedItems $rollbackFailedItems.ToArray() `
+            -RollbackErrors $rollbackErrors.ToArray() -CleanupAttempted $cleanupAttempted `
+            -CleanupCompleted $cleanupCompleted -ResiduePresent $residuePresent `
+            -ResiduePaths $residuePaths.ToArray() -CleanupError $technical.CleanupError `
+            -UnderlyingOutcome $underlyingOutcome -ReasonCode $requestedReason `
+            -TechnicalDetails $technical -Errors $errors.ToArray() `
+            -Warnings $warnings.ToArray() `
+            -RecoveryActions $(if ($requestedOutcome -eq 'ACTION_REQUIRED') {
+                @(@{ Id = 'Review'; Label = 'Open Details and review the preserved transaction evidence.' })
+            } else { @() })
+        [pscustomobject]@{
+            TransactionResult = $result
+            FilesystemChanged = $filesystemChanged
+            StateChanged = $stateChanged
+            RegistrationEligible = $registrationEligible
+            TargetPath = $targetFull
+            LocalPath = $targetFull
+        }
+    }
+
+    try {
+        $targetFull = [System.IO.Path]::GetFullPath($TargetDir)
+        $installFull = [System.IO.Path]::GetFullPath($InstallFolder).TrimEnd([char[]]"\/")
+        $stateFull = [System.IO.Path]::GetFullPath($SyncStatePath)
+        $targetLeaf = [System.IO.Path]::GetFileName($targetFull.TrimEnd([char[]]"\/"))
+        $targetParent = [System.IO.Path]::GetDirectoryName($targetFull)
+        $sentinelFull = Join-Path $targetParent ($targetLeaf + '.extracting')
+        $technical.TargetPath = $targetFull
+        $technical.SyncStatePath = $stateFull
+
+        if ($targetFull.TrimEnd([char[]]"\/") -ieq $installFull) {
+            throw "AutoSync target cannot be the TeknoParrot install folder: $installFull"
+        }
+        if ([string]::IsNullOrWhiteSpace($targetLeaf)) {
+            throw "AutoSync target folder name is empty: $targetFull"
+        }
+        if (-not (Test-PathInside -child $targetFull -parent $installFull)) {
+            throw "AutoSync target escaped the install folder: $targetFull"
+        }
+        if (Test-PathInside -child $stateFull -parent $targetFull) {
+            throw "AutoSync sync state cannot be inside the game target: $stateFull"
+        }
+        if (-not (Test-TpmNoReparsePath -Path $installFull)) {
+            throw "AutoSync install folder failed the path safety check: $installFull"
+        }
+        if (-not (Test-TpmNoReparsePath -Path $targetParent)) {
+            throw "AutoSync target parent failed the path safety check: $targetParent"
+        }
+
+        $sourceBefore = Get-TpmAutoSyncSourceIdentity -Path $ZipPath
+        if (-not $sourceBefore.Readable -or -not $sourceBefore.Exists) {
+            throw "AutoSync source ZIP is unavailable: $ZipPath"
+        }
+        $inventory = Get-TpmAutoSyncZipInventory -ZipPath $ZipPath
+        $targetPre = Get-TpmDirectoryManifest -Path $targetFull
+        $statePre = Get-TpmFileState -Path $stateFull
+        $sentinelPre = Get-TpmFileState -Path $sentinelFull
+        if (-not [string]::IsNullOrWhiteSpace($LegacySentinelPath) -and
+            [System.IO.Path]::GetFullPath($LegacySentinelPath) -ine $sentinelFull) {
+            $legacySentinelPre = Get-TpmFileState -Path $LegacySentinelPath
+        } else {
+            $legacySentinelPre = [pscustomobject]@{
+                Path = $sentinelFull
+                Exists = $false
+                Readable = $true
+                IsDirectory = $false
+                Length = $null
+                Sha256 = $null
+                LastWriteTimeUtc = $null
+                Attributes = $null
+                Error = $null
+            }
+        }
+        if (-not $targetPre.Readable -or -not $statePre.Readable -or
+            -not $sentinelPre.Readable -or -not $legacySentinelPre.Readable) {
+            throw 'AutoSync could not capture a readable directory, sentinel, or sync-state pre-state.'
+        }
+        if ($targetPre.Exists -and -not $targetPre.IsDirectory) {
+            throw "AutoSync target is a file, not a directory: $targetFull"
+        }
+        if ($statePre.Exists -and $statePre.IsDirectory) {
+            throw "AutoSync sync state is a directory, not a file: $stateFull"
+        }
+        $preStateItems.Add([pscustomobject]@{
+            ItemId = $RawName
+            Path = $targetFull
+            Exists = $targetPre.Exists
+            IsDirectory = $targetPre.IsDirectory
+            Length = $null
+            Sha256 = $targetPre.ManifestHash
+        })
+        $preStateItems.Add([pscustomobject]@{
+            ItemId = 'metadata:syncstate'
+            Path = $stateFull
+            Exists = $statePre.Exists
+            IsDirectory = $statePre.IsDirectory
+            Length = $statePre.Length
+            Sha256 = $statePre.Sha256
+        })
+        $preStateItems.Add([pscustomobject]@{
+            ItemId = 'metadata:sentinel'
+            Path = $sentinelFull
+            Exists = $sentinelPre.Exists
+            IsDirectory = $sentinelPre.IsDirectory
+            Length = $sentinelPre.Length
+            Sha256 = $sentinelPre.Sha256
+        })
+        if ($legacySentinelPre.Path -ine $sentinelPre.Path) {
+            $preStateItems.Add([pscustomobject]@{
+                ItemId = 'metadata:legacy-sentinel'
+                Path = $legacySentinelPre.Path
+                Exists = $legacySentinelPre.Exists
+                IsDirectory = $legacySentinelPre.IsDirectory
+                Length = $legacySentinelPre.Length
+                Sha256 = $legacySentinelPre.Sha256
+            })
+        }
+        $preStateCaptured = $true
+
+        if ($sentinelPre.Exists -or $legacySentinelPre.Exists) {
+            $requestedOutcome = 'ACTION_REQUIRED'
+            $requestedState = 'UNKNOWN'
+            $requestedSummary = 'TPM found an incomplete previous game operation and needs your attention. Open Details before retrying.'
+            $requestedReason = 'STALE_EXTRACTION_MARKER'
+            $unknownItems.Add($RawName)
+            if ($sentinelPre.Exists) { $residuePaths.Add($sentinelFull) }
+            if ($legacySentinelPre.Exists) { $residuePaths.Add($legacySentinelPre.Path) }
+            $residuePresent = $true
+            $technical.Stage = 'Preflight'
+            return (& $returnResult)
+        }
+
+        $storedPath = [string](Get-TpmTransactionField -Object $StoredState -Name 'LocalPath')
+        $storedHash = [string](Get-TpmTransactionField -Object $StoredState -Name 'LocalManifestHash')
+        $sourceModStr = $sourceBefore.LastWriteTimeUtc.ToString('o')
+        $storedSourceMatches = $false
+        if ($null -ne $StoredState) {
+            $storedSourceMatches = ([int64](Get-TpmTransactionField -Object $StoredState -Name 'NasSize' -Default -1) -eq $sourceBefore.Length) -and
+                ([string](Get-TpmTransactionField -Object $StoredState -Name 'NasLastModified') -eq $sourceModStr)
+        }
+        $storedPathMatches = $false
+        if (-not [string]::IsNullOrWhiteSpace($storedPath)) {
+            try { $storedPathMatches = ([System.IO.Path]::GetFullPath($storedPath) -ieq $targetFull) } catch { $storedPathMatches = $false }
+        }
+        $targetMatchesZip = Test-TpmDirectoryAgainstZipInventory -Manifest $targetPre -Inventory $inventory
+        $stateMatchesTarget = $storedSourceMatches -and $storedPathMatches -and
+            -not [string]::IsNullOrWhiteSpace($storedHash) -and
+            ($storedHash -ieq [string]$targetPre.ManifestHash) -and
+            ([string](Get-TpmTransactionField -Object $StoredState -Name 'State') -in @('', 'Complete'))
+
+        if ($targetMatchesZip -and $stateMatchesTarget) {
+            $requestedOutcome = 'NO_OP'
+            $requestedState = 'UNCHANGED'
+            $requestedSummary = 'Nothing changed; the existing game folder was already verified.'
+            $requestedReason = 'NO_CHANGES_NEEDED'
+            $skippedItems.Add($RawName)
+            $finalAttempted = $true
+            $finalPassed = $true
+            $finalChecks.Add('Existing directory manifest matches the ZIP inventory.')
+            $finalChecks.Add('Existing sync-state entry matches the verified local manifest.')
+            return (& $returnResult)
+        }
+
+        $candidateState = @{}
+        foreach ($key in $SyncState.Keys) { $candidateState[$key] = $SyncState[$key] }
+        $newEntry = [ordered]@{
+            NasSize = [int64]$sourceBefore.Length
+            NasLastModified = $sourceModStr
+            LocalPath = $targetFull
+            LocalManifestHash = if ($targetMatchesZip) { [string]$targetPre.ManifestHash } else { $null }
+            State = 'Complete'
+            SyncedAt = (Get-Date).ToUniversalTime().ToString('o')
+            TransactionId = $transactionId
+        }
+
+        if ($targetMatchesZip) {
+            $technical.Stage = 'StateCommit'
+            $txRoot = New-TpmAutoSyncTransactionRoot -InstallFolder $installFull
+            $rollbackRoot = Join-Path $txRoot 'rollback'
+            $candidatePath = Join-Path $txRoot 'syncstate.candidate.json'
+            $stateBackupPath = Join-Path $rollbackRoot 'syncstate.backup.json'
+            [void][System.IO.Directory]::CreateDirectory($rollbackRoot)
+            $candidateState[$RawName] = $newEntry
+            $candidateJson = $candidateState | ConvertTo-Json -Depth 5
+            [System.IO.File]::WriteAllText($candidatePath, $candidateJson, (New-Object System.Text.UTF8Encoding $false))
+            $candidateFileState = Get-TpmFileState -Path $candidatePath
+            if (-not $candidateFileState.Readable -or -not $candidateFileState.Exists) {
+                throw 'AutoSync sync-state candidate could not be verified after writing.'
+            }
+            $null = Get-Content -LiteralPath $candidatePath -Raw -ErrorAction Stop | ConvertFrom-Json
+            $technical.Stage = 'MutationBoundary'
+            $stateOnlyTargetPre = Get-TpmDirectoryManifest -Path $targetFull
+            $stateOnlyStatePre = Get-TpmFileState -Path $stateFull
+            $stateOnlySourcePre = Get-TpmAutoSyncSourceIdentity -Path $ZipPath
+            $stateOnlySentinelPre = Get-TpmFileState -Path $sentinelFull
+            $stateOnlyLegacySentinelPre = $stateOnlySentinelPre
+            if ($legacySentinelPre.Path -ine $sentinelPre.Path) {
+                $stateOnlyLegacySentinelPre = Get-TpmFileState -Path $legacySentinelPre.Path
+            }
+            if (-not (Test-TpmDirectoryManifestMatch -Expected $targetPre -Actual $stateOnlyTargetPre) -or
+                -not (Test-TpmFileStateMatch -Expected $statePre -Actual $stateOnlyStatePre -IgnoreMetadata) -or
+                -not (Test-TpmAutoSyncSourceIdentityMatch -Expected $sourceBefore -Actual $stateOnlySourcePre) -or
+                $stateOnlySentinelPre.Exists -or $stateOnlyLegacySentinelPre.Exists) {
+                throw 'AutoSync pre-state changed before the sync-state mutation boundary.'
+            }
+            New-TpmAutoSyncLiveSentinel -Path $sentinelFull
+            $sentinelCreated = $true
+            $stateCommitAttempted = $true
+            if ($statePre.Exists) {
+                $backupRequired = $true
+                $backupAttempted = $true
+            }
+            $stateCommitResult = Invoke-TpmAutoSyncStateCommit `
+                -StatePath $stateFull -CandidatePath $candidatePath `
+                -ExpectedPreState $statePre -BackupPath $stateBackupPath
+            if ($statePre.Exists) {
+                $backupCreated = $true
+                $backupVerified = $true
+                $backupItems.Add([pscustomobject]@{
+                    ItemId = 'metadata:syncstate'
+                    Path = $stateFull
+                    BackupPath = $stateCommitResult.BackupPath
+                    Sha256 = $statePre.Sha256
+                })
+            }
+            $stateAfterObject = Get-Content -LiteralPath $stateFull -Raw -ErrorAction Stop | ConvertFrom-Json
+            $stateAfterEntry = $stateAfterObject.PSObject.Properties[$RawName]
+            if ($null -eq $stateAfterEntry -or
+                [string]$stateAfterEntry.Value.LocalManifestHash -ine [string]$targetPre.ManifestHash -or
+                [string]$stateAfterEntry.Value.LocalPath -ine $targetFull) {
+                throw 'AutoSync sync-state selected entry failed final verification.'
+            }
+            $targetAfterState = Get-TpmDirectoryManifest -Path $targetFull
+            if (-not (Test-TpmDirectoryManifestMatch -Expected $targetPre -Actual $targetAfterState) -or
+                -not (Test-TpmDirectoryAgainstZipInventory -Manifest $targetAfterState -Inventory $inventory)) {
+                throw 'AutoSync existing directory changed during state commit.'
+            }
+            $sentinelAfterState = Get-TpmFileState -Path $sentinelFull
+            $legacySentinelAfterState = $legacySentinelPre
+            if ($legacySentinelPre.Path -ine $sentinelPre.Path) {
+                $legacySentinelAfterState = Get-TpmFileState -Path $legacySentinelPre.Path
+            }
+            if (-not $sentinelAfterState.Readable -or -not $sentinelAfterState.Exists -or
+                -not $legacySentinelAfterState.Readable -or $legacySentinelAfterState.Exists) {
+                throw 'AutoSync extraction sentinel state changed during sync-state commit.'
+            }
+            $finalChecks.Add('Live extraction sentinel remained present through sync-state readback.')
+            $SyncState[$RawName] = $newEntry
+            $stateChanged = $true
+            $mutationStarted = $true
+            $changedItems.Add('syncstate:' + $RawName)
+            $completedItems.Add('syncstate:' + $RawName)
+            $finalAttempted = $true
+            $finalPassed = $true
+            $finalChecks.Add('Existing directory manifest matches the ZIP inventory.')
+            $finalChecks.Add('Sync-state candidate was committed and read back successfully.')
+            $mutationCompleted = $true
+            $requestedOutcome = 'SUCCEEDED'
+            $requestedState = 'INTENDED'
+            $requestedSummary = 'The existing game folder was verified and its synchronization record was repaired.'
+            $requestedReason = 'STATE_REPAIRED'
+            $cleanupAttempted = $true
+            try {
+                Invoke-TpmAutoSyncRemovePath -Path $sentinelFull
+                $sentinelCreated = $false
+            } catch {
+                $cleanupCompleted = $false
+                $residuePresent = $true
+                $technical.CleanupError = $_.Exception.Message
+                $technical.Stage = 'Cleanup'
+                $residuePaths.Add($sentinelFull)
+                $residuePaths.Add($txRoot)
+                $underlyingOutcome = 'SUCCEEDED'
+                $requestedOutcome = 'CLEANUP_RESIDUE'
+                $requestedSummary = 'The files are in a verified state, but TPM could not finish cleanup. Review Details before retrying.'
+                $requestedReason = 'CLEANUP_RESIDUE'
+            }
+            if (-not $residuePresent) {
+                $postCleanupTarget = Get-TpmDirectoryManifest -Path $targetFull
+                $postCleanupState = Get-TpmFileState -Path $stateFull
+                $postCleanupSentinel = Get-TpmFileState -Path $sentinelFull
+                $postCleanupLegacySentinel = $legacySentinelPre
+                if ($legacySentinelPre.Path -ine $sentinelPre.Path) {
+                    $postCleanupLegacySentinel = Get-TpmFileState -Path $legacySentinelPre.Path
+                }
+                if (-not (Test-TpmDirectoryManifestMatch -Expected $targetPre -Actual $postCleanupTarget) -or
+                    -not (Test-TpmDirectoryAgainstZipInventory -Manifest $postCleanupTarget -Inventory $inventory) -or
+                    -not (Test-TpmFileStateMatch -Expected $stateCommitResult.State -Actual $postCleanupState -IgnoreMetadata) -or
+                    -not $postCleanupSentinel.Readable -or $postCleanupSentinel.Exists -or
+                    -not $postCleanupLegacySentinel.Readable -or $postCleanupLegacySentinel.Exists) {
+                    throw 'AutoSync state-only transaction failed post-cleanup verification.'
+                }
+            }
+            if (-not $residuePresent) {
+                try {
+                    Invoke-TpmAutoSyncRemovePath -Path $txRoot
+                } catch {
+                    $cleanupCompleted = $false
+                    $residuePresent = $true
+                    $technical.CleanupError = $_.Exception.Message
+                    $technical.Stage = 'Cleanup'
+                    $residuePaths.Add($txRoot)
+                    $underlyingOutcome = 'SUCCEEDED'
+                    $requestedOutcome = 'CLEANUP_RESIDUE'
+                    $requestedSummary = 'The files are in a verified state, but TPM could not finish cleanup. Review Details before retrying.'
+                    $requestedReason = 'CLEANUP_RESIDUE'
+                }
+            }
+            return (& $returnResult)
+        }
+
+        $technical.Stage = 'Staging'
+        $txRoot = New-TpmAutoSyncTransactionRoot -InstallFolder $installFull
+        $rollbackRoot = Join-Path $txRoot 'rollback'
+        $stageDir = Join-Path $txRoot 'payload'
+        $candidatePath = Join-Path $txRoot 'syncstate.candidate.json'
+        $stateBackupPath = Join-Path $rollbackRoot 'syncstate.backup.json'
+        $oldTarget = Join-Path $rollbackRoot 'old-target'
+        $technical.StagingPath = $stageDir
+        $technical.RollbackPath = $rollbackRoot
+        [void][System.IO.Directory]::CreateDirectory($rollbackRoot)
+        [void][System.IO.Directory]::CreateDirectory($stageDir)
+        if (-not (Test-TpmNoReparsePath -Path $stageDir) -or
+            -not (Test-TpmNoReparsePath -Path $rollbackRoot)) {
+            throw 'AutoSync transaction directories failed the path safety check.'
+        }
+        try {
+            $driveRoot = [System.IO.Path]::GetPathRoot($txRoot)
+            $drive = New-Object System.IO.DriveInfo($driveRoot)
+            if ([int64]$drive.AvailableFreeSpace -lt [int64]$inventory.TotalBytes) {
+                throw 'INSUFFICIENT_STAGING_SPACE'
+            }
+        } catch {
+            if ($_.Exception.Message -eq 'INSUFFICIENT_STAGING_SPACE') { throw }
+            throw 'STAGING_SPACE_UNAVAILABLE'
+        }
+        Expand-ZipFileSafe -ZipPath $ZipPath -DestDir $stageDir -GameName $RawName
+        $stageManifest = Get-TpmDirectoryManifest -Path $stageDir
+        if (-not (Test-TpmDirectoryAgainstZipInventory -Manifest $stageManifest -Inventory $inventory)) {
+            throw 'AutoSync staged directory did not match the complete ZIP inventory.'
+        }
+        $sourceAfterStage = Get-TpmAutoSyncSourceIdentity -Path $ZipPath
+        if (-not (Test-TpmAutoSyncSourceIdentityMatch -Expected $sourceBefore -Actual $sourceAfterStage)) {
+            throw 'AutoSync source ZIP changed while it was being staged.'
+        }
+        $newEntry.LocalManifestHash = $stageManifest.ManifestHash
+        $candidateState[$RawName] = $newEntry
+        $candidateJson = $candidateState | ConvertTo-Json -Depth 5
+        [System.IO.File]::WriteAllText($candidatePath, $candidateJson, (New-Object System.Text.UTF8Encoding $false))
+        $candidateFileState = Get-TpmFileState -Path $candidatePath
+        if (-not $candidateFileState.Readable -or -not $candidateFileState.Exists) {
+            throw 'AutoSync sync-state candidate could not be verified after writing.'
+        }
+        $null = Get-Content -LiteralPath $candidatePath -Raw -ErrorAction Stop | ConvertFrom-Json
+
+        $technical.Stage = 'MutationBoundary'
+        $currentTargetPre = Get-TpmDirectoryManifest -Path $targetFull
+        $currentStatePre = Get-TpmFileState -Path $stateFull
+        $currentSourcePre = Get-TpmAutoSyncSourceIdentity -Path $ZipPath
+        if (-not (Test-TpmDirectoryManifestMatch -Expected $targetPre -Actual $currentTargetPre) -or
+            -not (Test-TpmFileStateMatch -Expected $statePre -Actual $currentStatePre -IgnoreMetadata) -or
+            -not (Test-TpmAutoSyncSourceIdentityMatch -Expected $sourceBefore -Actual $currentSourcePre)) {
+            throw 'AutoSync pre-state changed before the live mutation boundary.'
+        }
+        New-TpmAutoSyncLiveSentinel -Path $sentinelFull
+        $sentinelCreated = $true
+
+        $technical.Stage = 'Promotion'
+        if ($targetPre.Exists) {
+            $backupRequired = $true
+            $backupAttempted = $true
+            Invoke-TpmAutoSyncMovePath -Source $targetFull -Destination $oldTarget
+            $targetMovedAside = $true
+            $mutationStarted = $true
+            $filesystemChanged = $true
+            $changedItems.Add($RawName)
+            $movedManifest = Get-TpmDirectoryManifest -Path $oldTarget
+            if (-not (Test-TpmDirectoryManifestMatch -Expected $targetPre -Actual $movedManifest)) {
+                throw 'AutoSync moved-aside directory failed rollback-backup verification.'
+            }
+            $backupCreated = $true
+            $backupVerified = $true
+            $backupItems.Add([pscustomobject]@{
+                ItemId = $RawName
+                Path = $targetFull
+                BackupPath = $oldTarget
+                ManifestHash = $targetPre.ManifestHash
+            })
+        }
+        if (Test-Path -LiteralPath $targetFull) {
+            throw 'AutoSync target still exists at the promotion boundary.'
+        }
+        $promotionAttempted = $true
+        try {
+            Invoke-TpmAutoSyncMovePath -Source $stageDir -Destination $targetFull
+            $targetPromoted = $true
+            $mutationStarted = $true
+            $filesystemChanged = $true
+            if (-not $changedItems.Contains($RawName)) { $changedItems.Add($RawName) }
+        } catch {
+            $promotionError = $_
+            if (Test-Path -LiteralPath $targetFull) {
+                $targetPromoted = $true
+                $mutationStarted = $true
+                $filesystemChanged = $true
+                if (-not $changedItems.Contains($RawName)) { $changedItems.Add($RawName) }
+            }
+            throw $promotionError
+        }
+        $targetAfterPromotion = Get-TpmDirectoryManifest -Path $targetFull
+        if (-not (Test-TpmDirectoryManifestMatch -Expected $stageManifest -Actual $targetAfterPromotion) -or
+            -not (Test-TpmDirectoryAgainstZipInventory -Manifest $targetAfterPromotion -Inventory $inventory)) {
+            throw 'AutoSync promoted directory failed final tree verification.'
+        }
+        $finalChecks.Add('Promoted directory matches the staged manifest and ZIP inventory.')
+
+        $technical.Stage = 'StateCommit'
+        $stateCommitAttempted = $true
+        if ($statePre.Exists) {
+            $backupRequired = $true
+            $backupAttempted = $true
+        }
+        $stateCommitResult = Invoke-TpmAutoSyncStateCommit `
+            -StatePath $stateFull -CandidatePath $candidatePath `
+            -ExpectedPreState $statePre -BackupPath $stateBackupPath
+        if ($statePre.Exists) {
+            $backupCreated = $true
+            $backupVerified = $true
+            $backupItems.Add([pscustomobject]@{
+                ItemId = 'metadata:syncstate'
+                Path = $stateFull
+                BackupPath = $stateCommitResult.BackupPath
+                Sha256 = $statePre.Sha256
+            })
+        }
+        $stateAfterObject = Get-Content -LiteralPath $stateFull -Raw -ErrorAction Stop | ConvertFrom-Json
+        $stateAfterEntry = $stateAfterObject.PSObject.Properties[$RawName]
+        if ($null -eq $stateAfterEntry -or
+            [string]$stateAfterEntry.Value.LocalManifestHash -ine [string]$stageManifest.ManifestHash -or
+            [string]$stateAfterEntry.Value.LocalPath -ine $targetFull) {
+            throw 'AutoSync sync-state selected entry failed final verification.'
+        }
+        $finalChecks.Add('Sync-state candidate was committed and read back successfully.')
+        $targetAfterState = Get-TpmDirectoryManifest -Path $targetFull
+        if (-not (Test-TpmDirectoryManifestMatch -Expected $stageManifest -Actual $targetAfterState) -or
+            -not (Test-TpmDirectoryAgainstZipInventory -Manifest $targetAfterState -Inventory $inventory)) {
+            throw 'AutoSync promoted directory changed during state commit.'
+        }
+        $finalChecks.Add('Promoted directory still matches after sync-state readback.')
+        if (-not (Test-Path -LiteralPath $sentinelFull)) {
+            throw 'AutoSync live sentinel disappeared before the transaction completed.'
+        }
+        $legacySentinelAfterState = $legacySentinelPre
+        if ($legacySentinelPre.Path -ine $sentinelPre.Path) {
+            $legacySentinelAfterState = Get-TpmFileState -Path $legacySentinelPre.Path
+        }
+        if (-not $legacySentinelAfterState.Readable -or $legacySentinelAfterState.Exists) {
+            throw 'AutoSync legacy extraction sentinel appeared before commit completion.'
+        }
+        $finalChecks.Add('No legacy extraction sentinel appeared during promotion.')
+        $SyncState[$RawName] = $newEntry
+        $stateChanged = $true
+        $mutationCompleted = $true
+        $finalAttempted = $true
+        $finalPassed = $true
+        $completedItems.Add($RawName)
+
+        $technical.Stage = 'Cleanup'
+        $cleanupAttempted = $true
+        try {
+            Invoke-TpmAutoSyncRemovePath -Path $sentinelFull
+            $sentinelCreated = $false
+        } catch {
+            $cleanupCompleted = $false
+            $residuePresent = $true
+            $technical.CleanupError = $_.Exception.Message
+            $residuePaths.Add($sentinelFull)
+            $residuePaths.Add($txRoot)
+        }
+        if (-not $residuePresent) {
+            $postCleanupTarget = Get-TpmDirectoryManifest -Path $targetFull
+            $postCleanupState = Get-TpmFileState -Path $stateFull
+            $postCleanupSentinel = Get-TpmFileState -Path $sentinelFull
+            $postCleanupLegacySentinel = $legacySentinelPre
+            if ($legacySentinelPre.Path -ine $sentinelPre.Path) {
+                $postCleanupLegacySentinel = Get-TpmFileState -Path $legacySentinelPre.Path
+            }
+            if (-not (Test-TpmDirectoryManifestMatch -Expected $stageManifest -Actual $postCleanupTarget) -or
+                -not (Test-TpmDirectoryAgainstZipInventory -Manifest $postCleanupTarget -Inventory $inventory) -or
+                -not (Test-TpmFileStateMatch -Expected $stateCommitResult.State -Actual $postCleanupState -IgnoreMetadata) -or
+                -not $postCleanupSentinel.Readable -or $postCleanupSentinel.Exists -or
+                -not $postCleanupLegacySentinel.Readable -or $postCleanupLegacySentinel.Exists) {
+                throw 'AutoSync transaction failed post-cleanup verification.'
+            }
+            $finalChecks.Add('Promoted directory and sync-state remained verified after sentinel cleanup.')
+        }
+        if (-not $residuePresent) {
+            try {
+                Invoke-TpmAutoSyncRemovePath -Path $txRoot
+            } catch {
+                $cleanupCompleted = $false
+                $residuePresent = $true
+                $technical.CleanupError = $_.Exception.Message
+                $residuePaths.Add($txRoot)
+            }
+        }
+        if ($residuePresent) {
+            $underlyingOutcome = 'SUCCEEDED'
+            $requestedOutcome = 'CLEANUP_RESIDUE'
+            $requestedState = 'INTENDED'
+            $requestedSummary = 'The files are in a verified state, but TPM could not finish cleanup. Review Details before retrying.'
+            $requestedReason = 'CLEANUP_RESIDUE'
+        } else {
+            $requestedOutcome = 'SUCCEEDED'
+            $requestedState = 'INTENDED'
+            $requestedSummary = 'Replacement completed and checked.'
+            $requestedReason = 'COMPLETED'
+        }
+        $registrationEligible = $true
+    } catch {
+        $technical.Error = $_.Exception.Message
+        $errors.Add($_.Exception.Message)
+        if ($_.Exception.Message -eq 'INSUFFICIENT_STAGING_SPACE') {
+            $requestedReason = 'INSUFFICIENT_STAGING_SPACE'
+        }
+        if ($_.Exception.Message -eq 'STAGING_SPACE_UNAVAILABLE') {
+            $requestedReason = 'STAGING_SPACE_UNAVAILABLE'
+        }
+        $stateChangedObserved = $false
+        if ($stateCommitAttempted) {
+            try {
+                $stateNow = Get-TpmFileState -Path $stateFull
+                $stateChangedObserved = -not (Test-TpmFileStateMatch -Expected $statePre -Actual $stateNow -IgnoreMetadata)
+            } catch {
+                $stateChangedObserved = $true
+                $rollbackErrors.Add('Sync-state state could not be read during rollback assessment.')
+            }
+        }
+        if ($stateChangedObserved -and -not $mutationStarted) {
+            $mutationStarted = $true
+            $stateChanged = $true
+            $changedItems.Add('syncstate:' + $RawName)
+        }
+
+        if ($mutationStarted -or $targetMovedAside -or $targetPromoted -or $stateChangedObserved) {
+            $rollbackAttempted = $true
+            $technical.Stage = 'Rollback'
+
+            if ($stateCommitAttempted -and $stateChangedObserved) {
+                try {
+                    Restore-TpmAutoSyncState -StatePath $stateFull -ExpectedPreState $statePre `
+                        -BackupPath $(if ($stateCommitResult) { $stateCommitResult.BackupPath } else { $stateBackupPath }) `
+                        -ExpectedCurrentHash $(if ($candidateFileState) { $candidateFileState.Sha256 } else { '' })
+                    $rollbackItems.Add('metadata:syncstate')
+                } catch {
+                    $rollbackErrors.Add('metadata:syncstate -- ' + $_.Exception.Message)
+                    $rollbackFailedItems.Add('metadata:syncstate')
+                }
+            }
+
+            try {
+                if ($targetMovedAside) {
+                    $currentTarget = Get-TpmDirectoryManifest -Path $targetFull
+                    if ($currentTarget.Exists) {
+                        if (-not (Test-TpmDirectoryManifestMatch -Expected $stageManifest -Actual $currentTarget)) {
+                            if (-not (Test-TpmDirectoryManifestMatch -Expected $targetPre -Actual $currentTarget)) {
+                                throw 'AutoSync rollback refused to remove an unexpected promoted directory.'
+                            }
+                        } else {
+                            Invoke-TpmAutoSyncRemovePath -Path $targetFull
+                        }
+                    }
+                    if (-not (Test-Path -LiteralPath $targetFull)) {
+                        Invoke-TpmAutoSyncMovePath -Source $oldTarget -Destination $targetFull
+                    }
+                    $restoredTarget = Get-TpmDirectoryManifest -Path $targetFull
+                    if (-not (Test-TpmDirectoryManifestMatch -Expected $targetPre -Actual $restoredTarget)) {
+                        throw 'AutoSync rollback target manifest did not match the captured pre-state.'
+                    }
+                    $rollbackItems.Add($RawName)
+                } elseif ($targetPromoted -or $promotionAttempted) {
+                    $currentTarget = Get-TpmDirectoryManifest -Path $targetFull
+                    if ($currentTarget.Exists) {
+                        if (-not (Test-TpmDirectoryManifestMatch -Expected $stageManifest -Actual $currentTarget)) {
+                            throw 'AutoSync rollback refused to remove an unexpected new directory.'
+                        }
+                        Invoke-TpmAutoSyncRemovePath -Path $targetFull
+                    }
+                    $restoredTarget = Get-TpmDirectoryManifest -Path $targetFull
+                    if (-not (Test-TpmDirectoryManifestMatch -Expected $targetPre -Actual $restoredTarget)) {
+                        throw 'AutoSync rollback did not restore target absence.'
+                    }
+                    $rollbackItems.Add($RawName)
+                }
+            } catch {
+                $rollbackErrors.Add($RawName + ' -- ' + $_.Exception.Message)
+                $rollbackFailedItems.Add($RawName)
+            }
+
+            if ($sentinelCreated) {
+                try {
+                    if (Test-Path -LiteralPath $sentinelFull) { Invoke-TpmAutoSyncRemovePath -Path $sentinelFull }
+                    if (Test-Path -LiteralPath $sentinelFull) { throw 'sentinel remained after rollback cleanup' }
+                    $sentinelCreated = $false
+                } catch {
+                    $rollbackErrors.Add('metadata:sentinel -- ' + $_.Exception.Message)
+                    $rollbackFailedItems.Add('metadata:sentinel')
+                }
+            }
+            try {
+                $rollbackTargetFinal = Get-TpmDirectoryManifest -Path $targetFull
+                $rollbackStateFinal = Get-TpmFileState -Path $stateFull
+                $rollbackSentinelFinal = Get-TpmFileState -Path $sentinelFull
+                $rollbackLegacySentinelFinal = $rollbackSentinelFinal
+                if ($legacySentinelPre.Path -ine $sentinelPre.Path) {
+                    $rollbackLegacySentinelFinal = Get-TpmFileState -Path $legacySentinelPre.Path
+                }
+                if (-not (Test-TpmFileStateMatch -Expected $sentinelPre -Actual $rollbackSentinelFinal -IgnoreMetadata) -or
+                    -not (Test-TpmFileStateMatch -Expected $legacySentinelPre -Actual $rollbackLegacySentinelFinal -IgnoreMetadata)) {
+                    throw 'AutoSync rollback left an extraction sentinel in place.'
+                }
+                if (-not (Test-TpmDirectoryManifestMatch -Expected $targetPre -Actual $rollbackTargetFinal) -or
+                    -not (Test-TpmFileStateMatch -Expected $statePre -Actual $rollbackStateFinal -IgnoreMetadata)) {
+                    throw 'AutoSync rollback final pre-state verification failed.'
+                }
+            } catch {
+                $rollbackErrors.Add('metadata:final -- ' + $_.Exception.Message)
+                $rollbackFailedItems.Add('metadata:final')
+            }
+
+            if ($rollbackErrors.Count -eq 0) {
+                $rollbackCompleted = $true
+                $rollbackVerified = $true
+                $finalAttempted = $true
+                $finalPassed = $true
+                $finalChecks.Add('Rollback restored the captured target and sync-state pre-state.')
+                $requestedOutcome = 'ROLLED_BACK_VERIFIED'
+                $requestedState = 'UNCHANGED'
+                $requestedSummary = 'The change did not finish. TPM restored the files to how they were before. Nothing new remains.'
+                $requestedReason = 'ROLLED_BACK'
+                $mutationCompleted = $false
+            } else {
+                $requestedOutcome = 'ACTION_REQUIRED'
+                $requestedState = 'UNKNOWN'
+                $requestedSummary = 'TPM stopped before it could verify the final state and needs your attention. Do not retry blindly. Open Details for the next safe step.'
+                $requestedReason = 'ROLLBACK_UNVERIFIED'
+                $finalAttempted = $true
+                $finalPassed = $false
+                foreach ($item in $rollbackFailedItems) { $finalUnknownItems.Add($item) }
+                $technical.RollbackError = $rollbackErrors.ToArray()
+                $residuePresent = $true
+                if ($txRoot) { $residuePaths.Add($txRoot) }
+            }
+        } else {
+            $sentinelCleanupFailed = $false
+            if ($sentinelCreated) {
+                try {
+                    Invoke-TpmAutoSyncRemovePath -Path $sentinelFull
+                    $sentinelCreated = $false
+                } catch {
+                    $sentinelCleanupFailed = $true
+                    $cleanupCompleted = $false
+                    $residuePresent = $true
+                    $technical.CleanupError = $_.Exception.Message
+                    $residuePaths.Add($sentinelFull)
+                }
+            }
+            $preStateStillMatches = $true
+            try {
+                $failureTargetState = Get-TpmDirectoryManifest -Path $targetFull
+                $failureSyncState = Get-TpmFileState -Path $stateFull
+                $failureSentinelState = Get-TpmFileState -Path $sentinelFull
+                $failureLegacySentinelState = $failureSentinelState
+                if ($legacySentinelPre.Path -ine $sentinelPre.Path) {
+                    $failureLegacySentinelState = Get-TpmFileState -Path $legacySentinelPre.Path
+                }
+                if (-not (Test-TpmFileStateMatch -Expected $sentinelPre -Actual $failureSentinelState -IgnoreMetadata) -or
+                    -not (Test-TpmFileStateMatch -Expected $legacySentinelPre -Actual $failureLegacySentinelState -IgnoreMetadata)) {
+                    $preStateStillMatches = $false
+                }
+                if (-not (Test-TpmDirectoryManifestMatch -Expected $targetPre -Actual $failureTargetState) -or
+                    -not (Test-TpmFileStateMatch -Expected $statePre -Actual $failureSyncState -IgnoreMetadata)) {
+                    $preStateStillMatches = $false
+                }
+            } catch {
+                $preStateStillMatches = $false
+            }
+            if ($preStateStillMatches -and -not $sentinelCleanupFailed) {
+                $requestedOutcome = 'FAILED_BEFORE_MUTATION'
+                $requestedState = 'UNCHANGED'
+                $requestedSummary = 'Extraction stopped before replacing the existing folder. Nothing was changed.'
+                if ($requestedReason -eq 'PREFLIGHT_FAILED') { $requestedReason = 'STAGING_FAILED' }
+                $failedItems.Add($RawName)
+            } else {
+                $requestedOutcome = 'ACTION_REQUIRED'
+                $requestedState = 'UNKNOWN'
+                $requestedSummary = 'TPM stopped before it could verify the final state and needs your attention. Do not retry blindly. Open Details for the next safe step.'
+                $requestedReason = if ($sentinelCleanupFailed) { 'SENTINEL_CLEANUP_FAILED' } else { 'PRESTATE_CHANGED' }
+                $unknownItems.Add($RawName)
+                $finalAttempted = $true
+                $finalPassed = $false
+                if (Test-Path -LiteralPath $targetFull) { $residuePaths.Add($targetFull) }
+                if (Test-Path -LiteralPath $stateFull) { $residuePaths.Add($stateFull) }
+                if (Test-Path -LiteralPath $sentinelFull) { $residuePaths.Add($sentinelFull) }
+                if ($legacySentinelPre.Path -ine $sentinelPre.Path -and (Test-Path -LiteralPath $legacySentinelPre.Path)) {
+                    $residuePaths.Add($legacySentinelPre.Path)
+                }
+                if ($txRoot) { $residuePaths.Add($txRoot) }
+                $residuePresent = ($residuePaths.Count -gt 0)
+            }
+        }
+    }
+
+    if ($txRoot -and -not $residuePresent -and
+        $requestedOutcome -notin @('CLEANUP_RESIDUE') -and
+        ($requestedOutcome -in @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED'))) {
+        $cleanupAttempted = $true
+        try {
+            Invoke-TpmAutoSyncRemovePath -Path $txRoot
+        } catch {
+            $cleanupCompleted = $false
+            $residuePresent = $true
+            $technical.CleanupError = $_.Exception.Message
+            $residuePaths.Add($txRoot)
+        }
+    }
+    if ($residuePresent -and $requestedOutcome -eq 'ROLLED_BACK_VERIFIED') {
+        $underlyingOutcome = 'ROLLED_BACK_VERIFIED'
+        $requestedOutcome = 'CLEANUP_RESIDUE'
+        $requestedState = 'UNCHANGED'
+        $requestedSummary = 'The files are in a verified state, but TPM could not finish cleanup. Review Details before retrying.'
+        $requestedReason = 'CLEANUP_RESIDUE'
+    }
+    return (& $returnResult)
+}
+
 function Expand-ZipFileSafe {
     param([string]$ZipPath, [string]$DestDir, [string]$GameName = '')
 
@@ -11992,7 +13454,9 @@ function Expand-ZipFileSafe {
                            [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
                 try   { $src.CopyTo($dst) }
                 finally { $dst.Dispose() }
-            } finally { $src.Dispose() }
+            } finally {
+                if ($src) { $src.Dispose() }
+            }
         }
     } finally {
         if ($archive) { $archive.Dispose() }
@@ -12000,9 +13464,9 @@ function Expand-ZipFileSafe {
     }
 }
 
-# Extracts NAS ZIPs to a local folder. Tracks state to skip unchanged games.
-# Never deletes local games. ZIP base names listed in $noSync are skipped.
-# If $onlySync is non-empty, only ZIPs whose base name is in the list are extracted.
+# Extracts NAS ZIPs through a verified directory transaction. Existing target
+# folders are preserved until staging and pre-state verification are complete.
+# ZIP base names listed in $noSync are skipped.
 function Invoke-AutoSync {
     param([string]$zipSource, [string]$installFolder, [string]$syncStatePath,
           $noSync = @(), $onlySync = @(), [string[]]$OnlyProfileCodes = @(), [bool]$retroBat = $false, [bool]$DryRun = $false,
@@ -12029,10 +13493,11 @@ function Invoke-AutoSync {
                 Write-Host "    $($sd.Path)  ($($sd.Count) ZIPs)" -ForegroundColor DarkCyan
             }
         }
-        return @{ Synced = 0; UpToDate = 0; Failed = 0; Skipped = 0; WouldSync = 0 }
+        return @{ Synced = 0; SyncedNames = @(); UpToDate = 0; Failed = 0; Skipped = 0; WouldSync = 0; TransactionResults = @() }
     }
 
-$syncedNames = New-Object System.Collections.Generic.List[string]
+    $syncedNames = New-Object System.Collections.Generic.List[string]
+    $transactionResults = New-Object System.Collections.Generic.List[object]
     $synced = 0; $upToDate = 0; $failed = 0; $skipped = 0; $wouldSync = 0
 
     if ($onlySync.Count -gt 0) {
@@ -12099,129 +13564,112 @@ $syncedNames = New-Object System.Collections.Generic.List[string]
         # conservative fuzzy metadata match. See issue #66.
         $matchedFolder = Resolve-ExtractedGameFolder -RawZipName $rawName -InstallFolder $installFolder -FolderMap $normalizedFolderMap -DatIndex $datIndex -UserProfilesDir $userProfilesDir
 
-        $needsSync = $false; $reason = ""
+        $needsSync = $false
+        $reason = ''
+        $targetDir = $extractDir
+        $storedPath = [string](Get-TpmTransactionField -Object $stored -Name 'LocalPath')
+        if (-not [string]::IsNullOrWhiteSpace($storedPath)) {
+            try {
+                $storedPathFull = [System.IO.Path]::GetFullPath($storedPath)
+                if (Test-PathInside $storedPathFull $installFolder) { $targetDir = $storedPathFull }
+            } catch {
+                Write-Log "AutoSync: ignoring unsafe stored path for '$rawName'."
+            }
+        } elseif ($matchedFolder) {
+            try {
+                $matchedFolderFull = [System.IO.Path]::GetFullPath($matchedFolder)
+                if (Test-PathInside $matchedFolderFull $installFolder) { $targetDir = $matchedFolderFull }
+            } catch {
+                Write-Log "AutoSync: ignoring unsafe resolver path for '$rawName'."
+            }
+        }
         if ($null -eq $stored) {
-            # Game not yet tracked. Only treat the folder as "already extracted"
-            # if the matched folder (exact or old-convention) has content --
-            # empty folders are failed extractions that should be retried.
             $hasContent = $matchedFolder -and (-not (Test-Path -LiteralPath $sentinel))
             if ($hasContent) {
-                $syncState[$rawName] = [ordered]@{
-                    NasSize = $zip.Length; NasLastModified = $nasModStr
-                    LocalPath = $matchedFolder; SyncedAt = (Get-Date).ToUniversalTime().ToString("o")
-                }
-                $label = if ($matchedFolder -ne $extractDir) { "  Already extracted  : $rawName`n    (old name: $(Split-Path $matchedFolder -Leaf))" } else { "  Already extracted  : $rawName" }
-                Write-Host $label -ForegroundColor DarkGray
-                $upToDate++; continue
-            }
-            $needsSync = $true; $reason = "new"
-        } elseif ([long]$stored.NasSize -ne $zip.Length -or $stored.NasLastModified -ne $nasModStr) {
-            $needsSync = $true; $reason = "changed on NAS"
-        } elseif (-not (($stored.LocalPath -and (Test-Path -LiteralPath $stored.LocalPath)) -or (Test-Path -LiteralPath $extractDir))) {
-            if ($matchedFolder -and (Test-Path -LiteralPath $matchedFolder)) {
-                # Folder was renamed since the last sync (e.g. a manual PATH
-                # TOO LONG short-name rename per ACTION REQUIRED, issue #13)
-                # -- found via the normalised map. Heal the stored path so
-                # future runs hit the Test-Path fast path above directly.
-                $stored.LocalPath = $matchedFolder
+                $needsSync = $true
+                $reason = 'verify existing folder'
             } else {
-                $needsSync = $true; $reason = "not extracted"
+                $needsSync = $true
+                $reason = 'new'
             }
-        } elseif (Test-Path -LiteralPath $sentinel) {
-            $needsSync = $true; $reason = "incomplete previous extraction"
+        } elseif ([long]$stored.NasSize -ne $zip.Length -or $stored.NasLastModified -ne $nasModStr) {
+            $needsSync = $true
+            $reason = 'changed on NAS'
+        } elseif (-not (Test-Path -LiteralPath $targetDir)) {
+            $needsSync = $true
+            $reason = 'not extracted'
+        } elseif ((Test-Path -LiteralPath $sentinel) -or
+                  (Test-Path -LiteralPath ($targetDir + '.extracting'))) {
+            $needsSync = $true
+            $reason = 'incomplete previous extraction'
         }
 
-        if (-not $needsSync) { Write-Host "  Already extracted (no ZIP work; GamePath repair is separate): $rawName" -ForegroundColor DarkGray; $upToDate++; continue }
-
         if ($DryRun) {
-            Write-Host "  Would extract ($reason) : $rawName" -ForegroundColor Yellow
-            Write-Log "AutoSync DryRun: would extract $rawName ($reason)"
-            $wouldSync++
+            if (-not $needsSync) {
+                Write-Host "  Already extracted (dry run; no ZIP work): $rawName" -ForegroundColor DarkGray
+                $upToDate++
+            } else {
+                Write-Host "  Would extract ($reason) : $rawName" -ForegroundColor Yellow
+                Write-Log "AutoSync DryRun: would extract $rawName ($reason)"
+                $wouldSync++
+            }
             continue
         }
 
-        Write-Host "  Extracting ($reason) : $rawName" -ForegroundColor Yellow
-        Write-Log "AutoSync: extracting $rawName ($reason)"
-
-        # The sentinel's entire lifecycle -- creation and guaranteed cleanup --
-        # is owned by this single try/finally. The finally block has one
-        # responsibility: remove the sentinel. It runs unconditionally on
-        # success, on any exception, on continue, and on Ctrl+C
-        # (PipelineStoppedException), because try/finally always executes its
-        # finally clause before control leaves the block, regardless of how.
-        try {
-            # Create sentinel before any file operations. An unremoved sentinel
-            # on the next run triggers a re-extraction, keeping state consistent.
-            # If creation itself fails, the outer catch handles it and the
-            # finally still runs (Remove-Item on a missing file is a no-op).
-            [System.IO.File]::WriteAllText($sentinel, '', (New-Object System.Text.UTF8Encoding $false))
-
-            # All extraction work is nested here so the sentinel's finally
-            # always fires after it completes, regardless of how it exits.
-            try {
-                # Clear any existing (stale or partial) game folder before
-                # extracting. Treat removal failures as fatal: a partial old
-                # folder combined with a fresh extraction produces a corrupt
-                # mixed-version game.
-                if (Test-Path -LiteralPath $extractDir) {
-                    $removeErrs = @()
-                    Remove-Item -LiteralPath $extractDir -Recurse -Force `
-                                -ErrorAction SilentlyContinue -ErrorVariable removeErrs
-                    if ($removeErrs.Count -gt 0) {
-                        Write-Host "    FAILED (could not clear existing folder -- files may be in use):" -ForegroundColor Red
-                        Write-Host "    $($removeErrs[0])" -ForegroundColor Red
-                        Write-Log "AutoSync: FAILED $rawName -- could not clear $extractDir : $($removeErrs[0])"
-                        # Remove the sync-state entry so next run re-attempts rather
-                        # than treating a corrupt/partial folder as up to date.
-                        [void]$syncState.Remove($rawName)
-                        $failed++
-                        continue   # outer finally fires before the loop advances
-                    }
+        Write-Host "  Verifying transaction ($reason) : $rawName" -ForegroundColor Yellow
+        Write-Log "AutoSync: transaction $rawName ($reason)"
+        $tx = Invoke-TpmAutoSyncDirectoryTransaction `
+            -ZipPath $zip.FullName -InstallFolder $installFolder -TargetDir $targetDir `
+            -RawName $rawName -SyncStatePath $syncStatePath -SyncState $syncState `
+            -StoredState $stored -LegacySentinelPath $sentinel
+        $txResult = $tx.TransactionResult
+        [void]$transactionResults.Add($txResult)
+        switch ($txResult.Outcome) {
+            'NO_OP' {
+                Write-Host "    Already extracted (no ZIP work; GamePath repair is separate): $rawName" -ForegroundColor DarkGray
+                $upToDate++
+            }
+            'SUCCEEDED' {
+                if ($tx.RegistrationEligible -and $tx.FilesystemChanged) {
+                    Write-Host "    -> $($tx.TargetPath)" -ForegroundColor Green
+                    $synced++
+                    $registrationName = [System.IO.Path]::GetFileName(([string]$tx.TargetPath).TrimEnd([char[]]"\/"))
+                    if ($registrationName) { [void]$syncedNames.Add($registrationName) }
+                } else {
+                    Write-Host "    Existing folder verified and state repaired." -ForegroundColor DarkGray
+                    $upToDate++
                 }
-                # Expand-ZipFileSafe uses \\?\ extended-length paths for every file
-                # write, bypassing MAX_PATH. The destination folder does not exist
-                # yet (cleared above); the function creates it during extraction.
-                Expand-ZipFileSafe -ZipPath $zip.FullName -DestDir $extractDir -GameName $rawName
-                $syncState[$rawName] = [ordered]@{
-                    NasSize = $zip.Length; NasLastModified = $nasModStr
-                    LocalPath = $extractDir; SyncedAt = (Get-Date).ToUniversalTime().ToString("o")
+            }
+            'CLEANUP_RESIDUE' {
+                if ($tx.RegistrationEligible -and $tx.FilesystemChanged -and
+                    [string]$txResult.UnderlyingOutcome -eq 'SUCCEEDED') {
+                    Write-Host "    -> $($tx.TargetPath) (cleanup residue preserved)" -ForegroundColor Yellow
+                    $synced++
+                    $registrationName = [System.IO.Path]::GetFileName(([string]$tx.TargetPath).TrimEnd([char[]]"\/"))
+                    if ($registrationName) { [void]$syncedNames.Add($registrationName) }
+                } else {
+                    Write-Host "    CLEANUP RESIDUE -- review Details." -ForegroundColor Red
+                    $failed++
                 }
-                Write-Host "    -> $extractDir" -ForegroundColor Green
-                Write-Log "AutoSync: completed $rawName -> $extractDir"
-                $synced++
-                [void]$syncedNames.Add($extractFolderName)
-            } catch {
-                Write-Host "    FAILED : $_" -ForegroundColor Red
-                Write-Log "AutoSync: FAILED $rawName -- $_"
-                # Remove the partial folder so the next run does not misclassify
-                # a half-extracted game as already complete (sentinel gone + some
-                # files present = indistinguishable from a successful extraction).
-                if (-not [string]::IsNullOrWhiteSpace($extractDir)) {
-                    Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-                }
+            }
+            default {
+                Write-Host "    FAILED -- $($txResult.Summary)" -ForegroundColor Red
                 $failed++
             }
-        } catch {
-            # Reached only when WriteAllText failed (sentinel could not be created).
-            Write-Host "    FAILED (could not create extraction sentinel): $_" -ForegroundColor Red
-            Write-Log "AutoSync: FAILED $rawName -- sentinel creation error: $_"
-            $failed++
-        } finally {
-            # Sole responsibility of this block: remove the sentinel file.
-            # Intentionally the only statement here so nothing can prevent it
-            # from running or delay it. Remove-Item with SilentlyContinue is
-            # safe even when the sentinel was never created.
-            Remove-Item -LiteralPath $sentinel -Force -ErrorAction SilentlyContinue
         }
     }
 
-    if (-not $DryRun) {
-        try { [System.IO.File]::WriteAllText($syncStatePath, ($syncState | ConvertTo-Json -Depth 3), (New-Object System.Text.UTF8Encoding $false)) }
-        catch { Write-Log "AutoSync: WARNING -- could not save sync state: $_" }
+    return @{
+        Synced = $synced
+        SyncedNames = $syncedNames.ToArray()
+        UpToDate = $upToDate
+        Failed = $failed
+        Skipped = $skipped
+        WouldSync = $wouldSync
+        TransactionResults = $transactionResults.ToArray()
     }
-
-    return @{ Synced = $synced; SyncedNames = @($syncedNames); UpToDate = $upToDate; Failed = $failed; Skipped = $skipped; WouldSync = $wouldSync }
 }
+
 
 # Builds a lookup of TeknoParrot profiles keyed by their executable name(s)
 # (lowercased). Each <ExecutableName> may contain multiple alternatives

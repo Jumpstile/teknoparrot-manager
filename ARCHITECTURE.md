@@ -252,6 +252,39 @@ promotion)") for the full rationale and the regression tests that force a
 failure during extraction and a separate failure during promotion for
 both extractors.
 
+## AutoSync directory replacement (S1)
+
+AutoSync treats one selected ZIP and its local game directory as one
+transaction. The ZIP is inventoried before mutation, including sanitized
+relative paths, file/directory shape, lengths, and SHA-256 bytes. The existing
+target manifest and sync-state file are captured before any live mutation.
+
+For a replacement, TPM creates a uniquely named transaction root beside the
+install folder. The complete archive is extracted into a payload directory on
+the same volume, then the staged manifest is compared with the ZIP inventory.
+The existing target is moved into the transaction rollback directory and the
+payload directory is renamed into the target path. Promotion therefore does
+not perform a second full tree copy. If staging, promotion, or verification
+fails, TPM removes only a verified staged tree and restores the moved-aside
+target and sync-state pre-state. An unexpected tree is never deleted during
+rollback; the transaction becomes `ACTION_REQUIRED` and preserves its
+evidence.
+
+The live `.extracting` sentinel is created only at the live mutation boundary.
+It remains present through directory promotion, target verification, atomic
+sync-state candidate replacement, and sync-state readback. Cleanup removes it
+only after all final checks pass. A pre-existing sentinel blocks `NO_OP` and is
+reported as preserved stale evidence rather than silently deleted.
+
+Sync-state writes use a transaction-local candidate and verified readback.
+Existing state is replaced atomically with `File.Replace`; a missing state file
+is atomically moved into place. A commit or readback failure is a transaction
+failure and invokes the same rollback path as a promotion failure. Results use
+the shared transaction outcomes: `NO_OP`, `SUCCEEDED`, `ROLLED_BACK_VERIFIED`,
+`ACTION_REQUIRED`, or `CLEANUP_RESIDUE`. AutoSync registration candidates are
+added only for verified filesystem replacements with `SUCCEEDED`, or
+`CLEANUP_RESIDUE` whose underlying outcome is `SUCCEEDED`.
+
 ## ReShade deployment (Mode 5)
 
 **Source DLLs.** Not bundled in the release ZIP (not redistributable -- reshade.me's

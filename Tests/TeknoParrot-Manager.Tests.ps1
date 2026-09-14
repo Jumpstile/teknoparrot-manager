@@ -4849,6 +4849,21 @@ Describe "AutoSync one-game registration behavior" {
 Describe "Invoke-AutoSync extracted-folder regression guards" {
     BeforeAll {
         $script:OriginalAutoSyncRawThrillsPathLimits = $script:RawThrillsPathLimits
+        function New-AutoSyncRegressionZip {
+            param([string]$ZipPath, [hashtable]$Entries)
+            if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
+            $fs = [System.IO.File]::Open($ZipPath, [System.IO.FileMode]::CreateNew)
+            try {
+                $archive = [System.IO.Compression.ZipArchive]::new($fs, [System.IO.Compression.ZipArchiveMode]::Create)
+                try {
+                    foreach ($name in $Entries.Keys) {
+                        $entry = $archive.CreateEntry($name)
+                        $writer = New-Object System.IO.StreamWriter($entry.Open())
+                        try { $writer.Write([string]$Entries[$name]) } finally { $writer.Dispose() }
+                    }
+                } finally { $archive.Dispose() }
+            } finally { $fs.Dispose() }
+        }
     }
 
     BeforeEach {
@@ -4865,11 +4880,11 @@ Describe "Invoke-AutoSync extracted-folder regression guards" {
     It "does not extract when issue #66 resolver finds an existing RetroBat short-name folder" {
         $zipName = "Aliens Armageddon (1.04)(2014-11-17)[Raw Thrills PC][TP]"
         $zipPath = Join-Path $script:autoSyncZipSource ($zipName + ".zip")
-        Set-Content -LiteralPath $zipPath -Value "placeholder zip bytes"
+        New-AutoSyncRegressionZip $zipPath @{ 'game.exe' = 'content' }
 
         $existing = Join-Path $script:autoSyncInstallRoot "ALIENS.teknoparrot"
         New-Item -ItemType Directory -Path $existing -Force | Out-Null
-        Set-Content -LiteralPath (Join-Path $existing "game.exe") -Value "content"
+        [IO.File]::WriteAllText((Join-Path $existing 'game.exe'), 'content', (New-Object System.Text.UTF8Encoding $false))
         $script:RawThrillsPathLimits = @{
             AliensArmageddon = @{ Limit = 96; Suggested = 'ALIENS' }
         }
@@ -4889,8 +4904,8 @@ Describe "Invoke-AutoSync extracted-folder regression guards" {
     It "filters scoped re-copy by DAT profile code instead of ZIP display name" {
         $zipA = 'Display Name A (2024)'
         $zipB = 'Display Name B (2024)'
-        Set-Content -LiteralPath (Join-Path $script:autoSyncZipSource ($zipA + '.zip')) -Value 'A' -NoNewline
-        Set-Content -LiteralPath (Join-Path $script:autoSyncZipSource ($zipB + '.zip')) -Value 'B' -NoNewline
+        New-AutoSyncRegressionZip (Join-Path $script:autoSyncZipSource ($zipA + '.zip')) @{ 'game.exe' = 'A' }
+        New-AutoSyncRegressionZip (Join-Path $script:autoSyncZipSource ($zipB + '.zip')) @{ 'game.exe' = 'B' }
         $datIndex = @{
             (Get-NormalizedGameKey $zipA) = [pscustomobject]@{ ProfileCode = 'TargetProfile'; Executable = 'game.exe' }
             (Get-NormalizedGameKey $zipB) = [pscustomobject]@{ ProfileCode = 'OtherProfile'; Executable = 'game.exe' }
@@ -4898,8 +4913,11 @@ Describe "Invoke-AutoSync extracted-folder regression guards" {
         Mock Resolve-ExtractedGameFolder { $null }
         $script:expandedZips = @()
         Mock Expand-ZipFileSafe {
-            param([string]$ZipPath)
+            param([string]$ZipPath,[string]$DestDir)
             $script:expandedZips += [IO.Path]::GetFileNameWithoutExtension($ZipPath)
+            New-Item -ItemType Directory -Path $DestDir -Force | Out-Null
+            $value = if ([IO.Path]::GetFileNameWithoutExtension($ZipPath) -eq $zipA) { 'A' } else { 'B' }
+            [IO.File]::WriteAllText((Join-Path $DestDir 'game.exe'), $value, (New-Object System.Text.UTF8Encoding $false))
         }
         $result = Invoke-AutoSync -zipSource $script:autoSyncZipSource -installFolder $script:autoSyncInstallRoot `
             -syncStatePath (Join-Path $TestDrive 'scoped-sync.json') -datIndex $datIndex -OnlyProfileCodes @('TargetProfile')
@@ -14875,6 +14893,345 @@ Describe 'S1-FILE-PROMOTION shared multi-root transaction' {
         [System.IO.File]::ReadAllText($dllDest) | Should -Be 'dll'
         [System.IO.File]::ReadAllText($oldConf) | Should -Be 'new-conf'
         $r.FinalVerification.Passed | Should -BeTrue
+    }
+}
+
+Describe 'S1-DIRECTORY-REPLACEMENT AutoSync transaction' {
+    BeforeAll {
+        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        function New-S1DirectoryZip {
+            param([string]$ZipPath, [hashtable]$Entries)
+            if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
+            $fs = [System.IO.File]::Open($ZipPath, [System.IO.FileMode]::CreateNew)
+            try {
+                $archive = [System.IO.Compression.ZipArchive]::new($fs, [System.IO.Compression.ZipArchiveMode]::Create)
+                try {
+                    foreach ($name in $Entries.Keys) {
+                        $entry = $archive.CreateEntry($name)
+                        $writer = New-Object System.IO.StreamWriter($entry.Open())
+                        try { $writer.Write([string]$Entries[$name]) } finally { $writer.Dispose() }
+                    }
+                } finally { $archive.Dispose() }
+            } finally { $fs.Dispose() }
+        }
+        function New-S1DirectoryFixture {
+            param([string]$Name)
+            $root = Join-Path $TestDrive $Name
+            $source = Join-Path $root 'ZipSource'
+            $install = Join-Path $root 'Games'
+            New-Item -ItemType Directory -Path $source,$install -Force | Out-Null
+            [pscustomobject]@{
+                Root = $root
+                Source = $source
+                Install = $install
+                Target = Join-Path $install 'Game'
+                Zip = Join-Path $source 'Game.zip'
+                State = Join-Path $root 'sync.json'
+            }
+        }
+        function Invoke-S1DirectoryTransaction {
+            param($Fixture, [hashtable]$State = @{}, [object]$Stored = $null)
+            Invoke-TpmAutoSyncDirectoryTransaction `
+                -ZipPath $Fixture.Zip -InstallFolder $Fixture.Install -TargetDir $Fixture.Target `
+                -RawName 'Game' -SyncStatePath $Fixture.State -SyncState $State -StoredState $Stored
+        }
+    }
+
+    Context 'direct helper primitive contracts' {
+        It 'captures exact directory and ZIP inventories and rejects traversal' {
+            $f = New-S1DirectoryFixture 'directory-helper-manifest'
+            New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'expected'; 'data\config.ini' = 'config' }
+            New-Item -ItemType Directory -Path (Join-Path $f.Target 'data') -Force | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $f.Target 'game.exe'), 'expected')
+            [System.IO.File]::WriteAllText((Join-Path $f.Target 'data\config.ini'), 'config')
+            $manifest = Get-TpmDirectoryManifest -Path $f.Target
+            $inventory = Get-TpmAutoSyncZipInventory -ZipPath $f.Zip
+            $manifest.Readable | Should -BeTrue
+            $inventory.FileCount | Should -Be 2
+            $inventory.TotalBytes | Should -Be ([int64]([System.Text.Encoding]::UTF8.GetByteCount('expected') + [System.Text.Encoding]::UTF8.GetByteCount('config')))
+            (Test-TpmDirectoryAgainstZipInventory -Manifest $manifest -Inventory $inventory) | Should -BeTrue
+            Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'tampered' -NoNewline
+            (Test-TpmDirectoryAgainstZipInventory -Manifest (Get-TpmDirectoryManifest -Path $f.Target) -Inventory $inventory) | Should -BeFalse
+            $badZip = Join-Path $f.Source 'bad.zip'
+            New-S1DirectoryZip $badZip @{ '../escape.txt' = 'bad' }
+            { Get-TpmAutoSyncZipInventory -ZipPath $badZip } | Should -Throw '*escapes destination folder*'
+        }
+
+        It 'moves directories and leaves failed moves untouched' {
+            $f = New-S1DirectoryFixture 'directory-helper-move'
+            $source = Join-Path $f.Root 'source'
+            $destination = Join-Path $f.Root 'destination'
+            New-Item -ItemType Directory -Path $source -Force | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $source 'game.exe'), 'payload')
+            Invoke-TpmAutoSyncMovePath -Source $source -Destination $destination
+            Test-Path -LiteralPath $source -PathType Container | Should -BeFalse
+            Test-Path -LiteralPath $destination -PathType Container | Should -BeTrue
+            [System.IO.File]::ReadAllText((Join-Path $destination 'game.exe')) | Should -Be 'payload'
+            $collisionSource = Join-Path $f.Root 'collision-source'
+            New-Item -ItemType Directory -Path $collisionSource -Force | Out-Null
+            { Invoke-TpmAutoSyncMovePath -Source $collisionSource -Destination $destination } | Should -Throw '*destination already exists*'
+            $missingDestination = Join-Path $f.Root 'missing-destination'
+            { Invoke-TpmAutoSyncMovePath -Source $source -Destination $missingDestination } | Should -Throw '*source directory is unavailable*'
+            $failedSource = Join-Path $f.Root 'failed-source'
+            $nestedDestination = Join-Path $f.Root 'missing-parent\destination'
+            New-Item -ItemType Directory -Path $failedSource -Force | Out-Null
+            { Invoke-TpmAutoSyncMovePath -Source $failedSource -Destination $nestedDestination } | Should -Throw
+            Test-Path -LiteralPath $failedSource -PathType Container | Should -BeTrue
+            Test-Path -LiteralPath $nestedDestination | Should -BeFalse
+        }
+
+        It 'removes files and directories only after manifest inspection' {
+            $f = New-S1DirectoryFixture 'directory-helper-remove'
+            $directory = Join-Path $f.Root 'remove-directory'
+            $file = Join-Path $f.Root 'remove-file.txt'
+            New-Item -ItemType Directory -Path (Join-Path $directory 'nested') -Force | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $directory 'nested\file.txt'), 'nested')
+            [System.IO.File]::WriteAllText($file, 'file')
+            Invoke-TpmAutoSyncRemovePath -Path $directory
+            Invoke-TpmAutoSyncRemovePath -Path $file
+            Test-Path -LiteralPath $directory | Should -BeFalse
+            Test-Path -LiteralPath $file | Should -BeFalse
+        }
+
+        It 'atomically commits state and preserves the previous bytes as backup' {
+            $f = New-S1DirectoryFixture 'directory-helper-state-commit'
+            $transaction = Join-Path $f.Root 'transaction'
+            $rollback = Join-Path $transaction 'rollback'
+            $candidate = Join-Path $transaction 'syncstate.candidate.json'
+            $backup = Join-Path $rollback 'syncstate.backup.json'
+            New-Item -ItemType Directory -Path $rollback -Force | Out-Null
+            [System.IO.File]::WriteAllText($f.State, '{"Version":1}')
+            [System.IO.File]::WriteAllText($candidate, '{"Version":2}')
+            $pre = Get-TpmFileState -Path $f.State
+            $commit = Invoke-TpmAutoSyncStateCommit -StatePath $f.State -CandidatePath $candidate -ExpectedPreState $pre -BackupPath $backup
+            [System.IO.File]::ReadAllText($f.State) | Should -Be '{"Version":2}'
+            [System.IO.File]::ReadAllText($backup) | Should -Be '{"Version":1}'
+            Test-Path -LiteralPath $candidate -PathType Leaf | Should -BeFalse
+            $commit.BackupPath | Should -Be ([System.IO.Path]::GetFullPath($backup))
+            (Test-TpmFileStateMatch -Expected $commit.Candidate -Actual (Get-TpmFileState -Path $f.State) -IgnoreMetadata) | Should -BeTrue
+        }
+
+        It 'rejects an invalid state candidate without mutating the live state' {
+            $f = New-S1DirectoryFixture 'directory-helper-state-candidate-failure'
+            $transaction = Join-Path $f.Root 'transaction'
+            $rollback = Join-Path $transaction 'rollback'
+            $candidate = Join-Path $transaction 'missing-candidate.json'
+            $backup = Join-Path $rollback 'syncstate.backup.json'
+            New-Item -ItemType Directory -Path $rollback -Force | Out-Null
+            [System.IO.File]::WriteAllText($f.State, '{"Version":1}')
+            $before = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($f.State))
+            $pre = Get-TpmFileState -Path $f.State
+            { Invoke-TpmAutoSyncStateCommit -StatePath $f.State -CandidatePath $candidate -ExpectedPreState $pre -BackupPath $backup } | Should -Throw '*candidate*'
+            [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($f.State)) | Should -Be $before
+            Test-Path -LiteralPath $backup | Should -BeFalse
+        }
+
+        It 'rejects a changed live state before committing a candidate' {
+            $f = New-S1DirectoryFixture 'directory-helper-state-precondition'
+            $transaction = Join-Path $f.Root 'transaction'
+            $rollback = Join-Path $transaction 'rollback'
+            $candidate = Join-Path $transaction 'syncstate.candidate.json'
+            $backup = Join-Path $rollback 'syncstate.backup.json'
+            New-Item -ItemType Directory -Path $rollback -Force | Out-Null
+            [System.IO.File]::WriteAllText($f.State, '{"Version":1}')
+            $pre = Get-TpmFileState -Path $f.State
+            [System.IO.File]::WriteAllText($candidate, '{"Version":2}')
+            [System.IO.File]::WriteAllText($f.State, '{"Version":external}')
+            { Invoke-TpmAutoSyncStateCommit -StatePath $f.State -CandidatePath $candidate -ExpectedPreState $pre -BackupPath $backup } | Should -Throw '*changed before commit*'
+            [System.IO.File]::ReadAllText($f.State) | Should -Be '{"Version":external}'
+            Test-Path -LiteralPath $candidate -PathType Leaf | Should -BeTrue
+            Test-Path -LiteralPath $backup | Should -BeFalse
+        }
+
+        It 'restores a verified prior state and refuses an unexpected current hash' {
+            $f = New-S1DirectoryFixture 'directory-helper-state-restore'
+            $backup = Join-Path $f.Root 'syncstate.backup.json'
+            [System.IO.File]::WriteAllText($f.State, '{"Version":1}')
+            $pre = Get-TpmFileState -Path $f.State
+            [System.IO.File]::Copy($f.State, $backup)
+            [System.IO.File]::WriteAllText($f.State, '{"Version":2}')
+            $current = Get-TpmFileState -Path $f.State
+            Restore-TpmAutoSyncState -StatePath $f.State -ExpectedPreState $pre -BackupPath $backup -ExpectedCurrentHash $current.Sha256
+            [System.IO.File]::ReadAllText($f.State) | Should -Be '{"Version":1}'
+            (Test-TpmFileStateMatch -Expected $pre -Actual (Get-TpmFileState -Path $f.State) -IgnoreMetadata) | Should -BeTrue
+            [System.IO.File]::WriteAllText($f.State, '{"Version":unexpected}')
+            { Restore-TpmAutoSyncState -StatePath $f.State -ExpectedPreState $pre -BackupPath $backup -ExpectedCurrentHash $current.Sha256 } | Should -Throw '*changed before rollback*'
+            [System.IO.File]::ReadAllText($f.State) | Should -Be '{"Version":unexpected}'
+        }
+
+        It 'removes a newly-created state when rollback pre-state was absent' {
+            $f = New-S1DirectoryFixture 'directory-helper-state-absent'
+            $pre = Get-TpmFileState -Path $f.State
+            [System.IO.File]::WriteAllText($f.State, '{"Version":1}')
+            $current = Get-TpmFileState -Path $f.State
+            Restore-TpmAutoSyncState -StatePath $f.State -ExpectedPreState $pre -ExpectedCurrentHash $current.Sha256
+            Test-Path -LiteralPath $f.State | Should -BeFalse
+        }
+    }
+
+    It 'replaces an existing directory only after staging and manifest verification' {
+        $f = New-S1DirectoryFixture 'directory-success'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'new'; 'data\config.ini' = 'new-config' }
+        New-Item -ItemType Directory -Path $f.Target -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'old' -NoNewline
+        Set-Content -LiteralPath (Join-Path $f.Target 'old.txt') -Value 'old-file' -NoNewline
+        $state = @{}
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f -State $state
+        $tx.TransactionResult.Outcome | Should -Be 'SUCCEEDED'
+        $tx.TransactionResult.ProductState | Should -Be 'INTENDED'
+        { Assert-TpmTransactionResult -Result $tx.TransactionResult } | Should -Not -Throw
+        [System.IO.File]::ReadAllText((Join-Path $f.Target 'game.exe')) | Should -Be 'new'
+        [System.IO.File]::ReadAllText((Join-Path $f.Target 'data\config.ini')) | Should -Be 'new-config'
+        Test-Path -LiteralPath (Join-Path $f.Target 'old.txt') | Should -BeFalse
+        Test-Path -LiteralPath ($f.Target + '.extracting') | Should -BeFalse
+        $state.Game.LocalManifestHash | Should -Not -BeNullOrEmpty
+        [string]((Get-Content -LiteralPath $f.State -Raw) | ConvertFrom-Json).Game.LocalPath | Should -Be ([System.IO.Path]::GetFullPath($f.Target))
+    }
+
+    It 'returns NO_OP without backup or state writes when directory and state match' {
+        $f = New-S1DirectoryFixture 'directory-noop'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'same'; 'data\config.ini' = 'same-config' }
+        $state = @{}
+        $first = Invoke-S1DirectoryTransaction -Fixture $f -State $state
+        $stateBytes = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($f.State))
+        $second = Invoke-S1DirectoryTransaction -Fixture $f -State $state -Stored $state.Game
+        $second.TransactionResult.Outcome | Should -Be 'NO_OP'
+        $second.TransactionResult.Backup.Attempted | Should -BeFalse
+        $second.TransactionResult.FinalVerification.Passed | Should -BeTrue
+        [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($f.State)) | Should -Be $stateBytes
+        { Assert-TpmTransactionResult -Result $second.TransactionResult } | Should -Not -Throw
+    }
+
+    It 'repairs missing state through a state-only transaction without replacing the directory' {
+        $f = New-S1DirectoryFixture 'directory-adoption'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'existing'; 'data\config.ini' = 'existing-config' }
+        New-Item -ItemType Directory -Path $f.Target -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'existing' -NoNewline
+        New-Item -ItemType Directory -Path (Join-Path $f.Target 'data') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'data\config.ini') -Value 'existing-config' -NoNewline
+        $before = Get-TpmDirSnapshot $f.Target
+        $state = @{}
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f -State $state
+        $tx.TransactionResult.Outcome | Should -Be 'SUCCEEDED'
+        $tx.FilesystemChanged | Should -BeFalse
+        $tx.StateChanged | Should -BeTrue
+        $tx.RegistrationEligible | Should -BeFalse
+        Assert-TpmDirSnapshotUnchanged $before (Get-TpmDirSnapshot $f.Target)
+        $state.Game.LocalManifestHash | Should -Not -BeNullOrEmpty
+        Test-Path -LiteralPath ($f.Target + '.extracting') | Should -BeFalse
+    }
+
+    It 'preserves the old directory when staging fails before the live boundary' {
+        $f = New-S1DirectoryFixture 'directory-stage-failure'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'new' }
+        New-Item -ItemType Directory -Path $f.Target -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'old' -NoNewline
+        $before = Get-TpmDirSnapshot $f.Target
+        Mock Expand-ZipFileSafe { throw 'forced staging failure' }
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f
+        $tx.TransactionResult.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        $tx.TransactionResult.Mutation.Started | Should -BeFalse
+        Assert-TpmDirSnapshotUnchanged $before (Get-TpmDirSnapshot $f.Target)
+        Test-Path -LiteralPath $f.State | Should -BeFalse
+        Test-Path -LiteralPath ($f.Target + '.extracting') | Should -BeFalse
+    }
+
+    It 'rolls back a moved-aside directory when promotion fails' {
+        $f = New-S1DirectoryFixture 'directory-promotion-failure'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'new' }
+        New-Item -ItemType Directory -Path $f.Target -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'old' -NoNewline
+        $before = Get-TpmDirSnapshot $f.Target
+        Mock Invoke-TpmAutoSyncMovePath {
+            param([string]$Source, [string]$Destination)
+            if ($Source -like '*\payload') { throw 'forced promotion failure' }
+            Move-Item -LiteralPath $Source -Destination $Destination -ErrorAction Stop
+        }
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f
+        $tx.TransactionResult.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $tx.TransactionResult.Rollback.Verified | Should -BeTrue
+        Assert-TpmDirSnapshotUnchanged $before (Get-TpmDirSnapshot $f.Target)
+        Test-Path -LiteralPath $f.State | Should -BeFalse
+        Test-Path -LiteralPath ($f.Target + '.extracting') | Should -BeFalse
+    }
+
+    It 'rolls back the directory when atomic sync-state commit fails' {
+        $f = New-S1DirectoryFixture 'directory-state-failure'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'new' }
+        New-Item -ItemType Directory -Path $f.Target -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'old' -NoNewline
+        [System.IO.File]::WriteAllText($f.State, '{"Other":{"Value":"old"}}')
+        $stateBytes = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($f.State))
+        $state = @{ Other = [pscustomobject]@{ Value = 'old' } }
+        Mock Invoke-TpmAutoSyncStateCommit { throw 'forced sync-state commit failure' }
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f -State $state
+        $tx.TransactionResult.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $tx.TransactionResult.Rollback.Verified | Should -BeTrue
+        [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($f.State)) | Should -Be $stateBytes
+        [System.IO.File]::ReadAllText((Join-Path $f.Target 'game.exe')) | Should -Be 'old'
+        Test-Path -LiteralPath ($f.Target + '.extracting') | Should -BeFalse
+    }
+
+    It 'blocks a stale live sentinel without deleting its evidence' {
+        $f = New-S1DirectoryFixture 'directory-stale-sentinel'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'new' }
+        New-Item -ItemType Directory -Path $f.Target -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'old' -NoNewline
+        Set-Content -LiteralPath ($f.Target + '.extracting') -Value 'stale' -NoNewline
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f
+        $tx.TransactionResult.Outcome | Should -Be 'ACTION_REQUIRED'
+        $tx.TransactionResult.ReasonCode | Should -Be 'STALE_EXTRACTION_MARKER'
+        Test-Path -LiteralPath ($f.Target + '.extracting') | Should -BeTrue
+        [System.IO.File]::ReadAllText((Join-Path $f.Target 'game.exe')) | Should -Be 'old'
+    }
+
+    It 'replaces a divergent directory instead of trusting matching source metadata' {
+        $f = New-S1DirectoryFixture 'directory-divergence'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'expected' }
+        $state = @{}
+        $first = Invoke-S1DirectoryTransaction -Fixture $f -State $state
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'tampered' -NoNewline
+        $second = Invoke-S1DirectoryTransaction -Fixture $f -State $state -Stored $state.Game
+        $second.TransactionResult.Outcome | Should -Be 'SUCCEEDED'
+        [System.IO.File]::ReadAllText((Join-Path $f.Target 'game.exe')) | Should -Be 'expected'
+        $second.FilesystemChanged | Should -BeTrue
+    }
+
+    It 'reports cleanup residue after a verified replacement without admitting a clean transaction' {
+        $f = New-S1DirectoryFixture 'directory-cleanup-residue'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'new' }
+        Mock Invoke-TpmAutoSyncRemovePath {
+            param([string]$Path)
+            if ($Path -like '*\.tpm-autosync-*') { throw 'forced transaction cleanup failure' }
+            if (Test-Path -LiteralPath $Path -PathType Container) {
+                [System.IO.Directory]::Delete($Path, $true)
+            } elseif (Test-Path -LiteralPath $Path) {
+                [System.IO.File]::Delete($Path)
+            }
+        }
+        $state = @{}
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f -State $state
+        $tx.TransactionResult.Outcome | Should -Be 'CLEANUP_RESIDUE'
+        $tx.TransactionResult.UnderlyingOutcome | Should -Be 'SUCCEEDED'
+        $tx.TransactionResult.FinalVerification.Passed | Should -BeTrue
+        $tx.RegistrationEligible | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $f.Target 'game.exe') | Should -BeTrue
+        Test-Path -LiteralPath $tx.TransactionResult.Cleanup.ResiduePaths[0] | Should -BeTrue
+        { Assert-TpmTransactionResult -Result $tx.TransactionResult } | Should -Not -Throw
+        Remove-Item -LiteralPath $tx.TransactionResult.Cleanup.ResiduePaths[0] -Recurse -Force
+    }
+
+    It 'aggregates only committed replacements as registration candidates' {
+        $f = New-S1DirectoryFixture 'directory-aggregation'
+        New-S1DirectoryZip (Join-Path $f.Source 'Good.zip') @{ 'game.exe' = 'good' }
+        Set-Content -LiteralPath (Join-Path $f.Source 'Bad.zip') -Value 'not a ZIP' -NoNewline
+        $result = Invoke-AutoSync -zipSource $f.Source -installFolder $f.Install -syncStatePath $f.State
+        $result.Synced | Should -Be 1
+        $result.Failed | Should -Be 1
+        $result.SyncedNames | Should -Be @('Good')
+        @($result.TransactionResults).Count | Should -Be 2
+        ($result.TransactionResults | Where-Object { $_.OperationKey -eq 'Bad' }).Outcome | Should -Not -Be 'SUCCEEDED'
     }
 }
 
