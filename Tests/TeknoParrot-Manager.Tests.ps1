@@ -11160,7 +11160,7 @@ Describe "Issue #300 shared workflow status state machine" {
         $userProfiles = Join-Path $TestDrive 'ffb-native-backup-failure'
         $tpRoot = Join-Path $TestDrive 'ffb-native-tp'
         New-Item -ItemType Directory -Path $userProfiles, $tpRoot -Force | Out-Null
-        Set-Content -LiteralPath (Join-Path $userProfiles 'Existing.xml') -Value '<GameProfile />'
+        Set-Content -LiteralPath (Join-Path $userProfiles 'Existing.xml') -Value '<GameProfile><EmulationProfile>Daytona3</EmulationProfile><ConfigValues><FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Enable</FieldName><FieldType>Bool</FieldType><FieldValue>0</FieldValue></FieldInformation></ConfigValues></GameProfile>'
         Mock Read-HostSafe { 'Y' }
         Mock Get-FFBBlasterFieldNames { @('FFB Blaster') }
         Mock Copy-Item { throw 'simulated profile backup copy failure' }
@@ -14417,13 +14417,20 @@ Describe "Focused RC8 remediation contracts" {
     }
     It "fails closed on incomplete profile backups before destructive writes" {
         $source = $script:ProductionSource
-        foreach ($functionName in @('Invoke-GpuFixSetup', 'Invoke-CursorHideSetup', 'Invoke-FFBBlasterSetup', 'New-PropagationBackup')) {
+        foreach ($functionName in @('Invoke-GpuFixSetup', 'New-PropagationBackup')) {
             $start = $source.IndexOf(("function {0}" -f $functionName), [StringComparison]::Ordinal)
             $next = $source.IndexOf('function ', $start + 1, [StringComparison]::Ordinal)
             $block = if ($next -gt $start) { $source.Substring($start, $next - $start) } else { $source.Substring($start) }
             $block | Should -Match 'Copy-Item -Destination \$backupPath -Recurse -Force -ErrorAction Stop'
             $block | Should -Match 'Get-ChildItem -LiteralPath \$UserProfilesDir -ErrorAction Stop'
             $block | Should -Not -Match 'Copy-Item -Destination \$backupPath -Recurse -Force -ErrorAction SilentlyContinue'
+        }
+        foreach ($functionName in @('Invoke-CursorHideSetup', 'Invoke-FFBBlasterSetup')) {
+            $start = $source.IndexOf(("function {0}" -f $functionName), [StringComparison]::Ordinal)
+            $next = $source.IndexOf('function ', $start + 1, [StringComparison]::Ordinal)
+            $block = if ($next -gt $start) { $source.Substring($start, $next - $start) } else { $source.Substring($start) }
+            $block | Should -Match 'New-TpmVerifiedUserProfilesBackup'
+            $block | Should -Match 'Outcome'
         }
         $autoStart = $source.IndexOf('Write-Log "Mode=$mode install=$gamesInstallFolder"', [StringComparison]::Ordinal)
         $autoEnd = $source.IndexOf('# SECTION 6 -- AutoSync: game selection and extraction', $autoStart, [StringComparison]::Ordinal)
@@ -14630,4 +14637,76 @@ Describe "S1-TX-CORE transaction outcome model" {
     It "does not let a phase receipt alone produce workflow success" { $p=New-TpmTransactionPhaseReceipt -Phase 'PROMOTION' -MutationStarted $true -Completed $true; { ConvertTo-TpmWorkflowTransactionMetadata -TransactionResult $p } | Should -Throw }
     It "keeps technical detail out of normal summaries" -TestCases @(@{Summary='Failure at C:\TPM\backup'},@{Summary='Updated SHA256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'},@{Summary='Run powershell -File repair.ps1'},@{Summary='Password authentication failed'},@{Summary='System.IO.IOException CategoryInfo: WriteError'}) { Test-TpmTransactionUserSafeSummary -Summary $Summary | Should -BeFalse; { New-S1Result -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary $Summary } | Should -Throw }
     It "carries transaction metadata separately from presentation outcome" { $m=New-S1Mutation -Selected 1; $e=New-S1Evidence -FinalAttempted $true -FinalPassed $true -Checks @('already matches'); $r=New-S1Result -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Items @('game-a') -Mutation $m -Evidence $e; $md=ConvertTo-TpmWorkflowTransactionMetadata $r; $md.TransactionOutcome | Should -Be 'NO_OP'; $md.PresentationOutcome | Should -Be 'Skipped'; $md.RequiresAttention | Should -BeFalse; $md.PSTypeNames | Should -Contain 'TPM.WorkflowTransactionMetadata.v1' }
+}
+
+
+Describe "S1-BACKUP-GATE verified UserProfiles backup" {
+    BeforeAll {
+        function New-BackupGateFixture {
+            param([string]$Root, [string]$Code='GameA', [string]$Value='0')
+            $profiles = Join-Path $Root 'UserProfiles'
+            $tp = Join-Path $Root 'TeknoParrot'
+            New-Item -ItemType Directory -Path $profiles,(Join-Path $tp 'GameProfiles') -Force | Out-Null
+            $xml = "<GameProfile><GameName>$Code</GameName><EmulationProfile>Daytona3</EmulationProfile><GunGame>true</GunGame><ConfigValues><FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Enable</FieldName><FieldType>Bool</FieldType><FieldValue>$Value</FieldValue></FieldInformation><FieldInformation><FieldName>HideCursor</FieldName><FieldType>Bool</FieldType><FieldValue>$Value</FieldValue></FieldInformation></ConfigValues></GameProfile>"
+            Set-Content -LiteralPath (Join-Path $profiles ($Code + '.xml')) -Value $xml -Encoding utf8
+            return [pscustomobject]@{ Profiles=$profiles; Tp=$tp; File=(Join-Path $profiles ($Code + '.xml')) }
+        }
+        function New-VerifiedBackupStub {
+            [pscustomobject]@{ Required=$true; Attempted=$true; Created=$true; Succeeded=$true; Verified=$true; Path='backup-evidence'; Manifest=@(); FailureStage=$null; Reason=$null; ResiduePaths=@() }
+        }
+    }
+    It 'copies and verifies complete UserProfiles content while excluding FullBackup' {
+        $root=Join-Path $TestDrive 'complete-backup'; $profiles=Join-Path $root 'UserProfiles'; New-Item -ItemType Directory -Path $profiles,(Join-Path $profiles 'FullBackup') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $profiles 'A.xml') -Value 'alpha' -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $profiles 'FullBackup\old.xml') -Value 'old' -Encoding utf8
+        $hidden=Join-Path $profiles 'hidden.dat'; Set-Content -LiteralPath $hidden -Value 'hidden' -Encoding utf8; (Get-Item -LiteralPath $hidden).Attributes='Hidden'
+        $result=New-TpmVerifiedUserProfilesBackup -UserProfilesDir $profiles -Label 'Test'
+        $result.Verified | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $result.Path 'A.xml') -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $result.Path 'hidden.dat') -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $result.Path 'FullBackup') -PathType Container | Should -BeFalse
+        (Get-Content -LiteralPath (Join-Path $result.Path 'A.xml') -Raw) | Should -Be (Get-Content -LiteralPath (Join-Path $profiles 'A.xml') -Raw)
+    }
+    It 'blocks FFB before Save-Xml when backup copy fails' {
+        $f=New-BackupGateFixture -Root (Join-Path $TestDrive 'ffb-copy-fail'); Mock Read-TpmYesNo { 'Y' }; Mock Get-FFBBlasterFieldNames { @('FFB Blaster') }; Mock Copy-Item { throw 'simulated copy failure' }; Mock Save-Xml { throw 'must not write' }
+        $r=Invoke-FFBBlasterSetup -UserProfilesDir $f.Profiles -TpRoot $f.Tp
+        $r.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'; $r.BackupSucceeded | Should -BeFalse; Should -Invoke Save-Xml -Times 0 -Exactly
+        [xml](Get-Content -LiteralPath $f.File -Raw) | Should -Not -BeNullOrEmpty
+    }
+    It 'returns NO_OP without backup when FFB profiles are already current' {
+        $f=New-BackupGateFixture -Root (Join-Path $TestDrive 'ffb-noop') -Value '1'; Mock Read-TpmYesNo { 'Y' }; Mock Get-FFBBlasterFieldNames { @('FFB Blaster') }; Mock New-TpmVerifiedUserProfilesBackup { throw 'NO_OP must not create backup' }; Mock Save-Xml { throw 'NO_OP must not write' }
+        $r=Invoke-FFBBlasterSetup -UserProfilesDir $f.Profiles -TpRoot $f.Tp
+        $r.Outcome | Should -Be 'NO_OP'; Should -Invoke New-TpmVerifiedUserProfilesBackup -Times 0 -Exactly; Should -Invoke Save-Xml -Times 0 -Exactly
+    }
+    It 'returns SUCCEEDED only after FFB save read-back verification' {
+        $f=New-BackupGateFixture -Root (Join-Path $TestDrive 'ffb-success'); Mock Read-TpmYesNo { 'Y' }; Mock Get-FFBBlasterFieldNames { @('FFB Blaster') }; Mock New-TpmVerifiedUserProfilesBackup { New-VerifiedBackupStub }
+        $r=Invoke-FFBBlasterSetup -UserProfilesDir $f.Profiles -TpRoot $f.Tp
+        $r.Outcome | Should -Be 'SUCCEEDED'; $r.ProductState | Should -Be 'INTENDED'; (Read-Xml $f.File).SelectSingleNode('//FieldInformation[CategoryName="FFB Blaster"]/FieldValue').InnerText | Should -Be '1'
+    }
+    It 'reports partial FFB save failure without claiming success' {
+        $root=Join-Path $TestDrive 'ffb-partial'; $a=New-BackupGateFixture -Root $root -Code 'GameA'; $b=New-BackupGateFixture -Root $root -Code 'GameB'; Mock Read-TpmYesNo { 'Y' }; Mock Get-FFBBlasterFieldNames { @('FFB Blaster') }; Mock New-TpmVerifiedUserProfilesBackup { New-VerifiedBackupStub }; $script:backupGateSaveCount=0; Mock Save-Xml { $script:backupGateSaveCount++; if($script:backupGateSaveCount -eq 2){throw 'simulated save failure'}; $doc.Save($path) }
+        $r=Invoke-FFBBlasterSetup -UserProfilesDir $a.Profiles -TpRoot $a.Tp
+        $r.Outcome | Should -Be 'PARTIAL_APPLIED'; $r.ProductState | Should -Be 'PARTIAL_KNOWN'; $r.Succeeded | Should -BeFalse; @($r.Mutation.FailedItems).Count | Should -Be 1
+    }
+    It 'blocks cursor XML writes when backup verification fails' {
+        $f=New-BackupGateFixture -Root (Join-Path $TestDrive 'cursor-backup-fail'); Mock New-TpmVerifiedUserProfilesBackup { [pscustomobject]@{ Required=$true; Attempted=$true; Created=$true; Succeeded=$false; Verified=$false; Path='backup'; Manifest=@(); FailureStage='BackupVerification'; Reason='mismatch'; ResiduePaths=@() } }; Mock Save-Xml { throw 'must not write' }
+        $r=Invoke-CursorHideSetup -UserProfilesDir $f.Profiles
+        $r.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'; $r.BackupSucceeded | Should -BeFalse; Should -Invoke Save-Xml -Times 0 -Exactly
+    }
+    It 'returns cursor NO_OP without backup when all eligible fields are current' {
+        $f=New-BackupGateFixture -Root (Join-Path $TestDrive 'cursor-noop') -Value '1'; Mock New-TpmVerifiedUserProfilesBackup { throw 'NO_OP must not create backup' }; Mock Save-Xml { throw 'NO_OP must not write' }
+        $r=Invoke-CursorHideSetup -UserProfilesDir $f.Profiles
+        $r.Outcome | Should -Be 'NO_OP'; Should -Invoke New-TpmVerifiedUserProfilesBackup -Times 0 -Exactly; Should -Invoke Save-Xml -Times 0 -Exactly
+    }
+    It 'returns cursor SUCCEEDED after read-back verification' {
+        $f=New-BackupGateFixture -Root (Join-Path $TestDrive 'cursor-success') -Value '0'; Mock New-TpmVerifiedUserProfilesBackup { New-VerifiedBackupStub }
+        $r=Invoke-CursorHideSetup -UserProfilesDir $f.Profiles
+        $r.Outcome | Should -Be 'SUCCEEDED'; $r.ProductState | Should -Be 'INTENDED'; (Read-Xml $f.File).SelectSingleNode('//FieldInformation[FieldName="HideCursor"]/FieldValue').InnerText | Should -Be '1'
+    }
+    It 'propagates cursor failure into the Crosshair parent result contract' {
+        $source=$script:ProductionSource
+        $source | Should -Match '\$cursorResult = Invoke-CursorHideSetup'
+        $source | Should -Match '\$cursorSucceeded = \(\$cursorResult.*Outcome.*SUCCEEDED.*NO_OP'
+        $source | Should -Match 'Succeeded = \(\$errors -eq 0 -and \$deployed -gt 0 -and \$cursorSucceeded\)'
+    }
 }

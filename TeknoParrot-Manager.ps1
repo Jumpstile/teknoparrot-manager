@@ -831,6 +831,100 @@ function ConvertTo-TpmWorkflowTransactionMetadata {
     return [pscustomobject]@{ PSTypeName='TPM.WorkflowTransactionMetadata.v1'; SchemaVersion=1; TransactionResultId=$TransactionResult.TransactionId; TransactionOutcome=$outcome; ProductState=$productState; PresentationOutcome=if ($outcome -eq 'SUCCEEDED') { 'Succeeded' } elseif ($outcome -eq 'NO_OP') { 'Skipped' } else { $null }; RequiresAttention=($outcome -notin @('SUCCEEDED','NO_OP')); DataSafety=$dataSafety; SelectedItemCount=[int]$TransactionResult.Mutation.SelectedItemCount; AffectedItemCount=[int]$TransactionResult.Mutation.AffectedItemCount; FailedItemCount=[int]$TransactionResult.Mutation.FailedItemCount; EvidenceAvailable=[bool](@($TransactionResult.PreState.EvidenceRoot,$TransactionResult.Backup.RootPath,$TransactionResult.Rollback.EvidenceRoot,$TransactionResult.Cleanup.ResiduePaths) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count; CleanupResiduePresent=[bool]$TransactionResult.Cleanup.ResiduePresent }
 }
 
+
+function Get-TpmUserProfilesBackupManifest {
+    param([Parameter(Mandatory)][string]$UserProfilesDir)
+    $root = [System.IO.Path]::GetFullPath($UserProfilesDir).TrimEnd('\','/')
+    $top = @(Get-ChildItem -LiteralPath $root -Force -ErrorAction Stop | Where-Object { $_.Name -ne 'FullBackup' } | Sort-Object FullName)
+    $records = New-Object System.Collections.Generic.List[object]
+    foreach ($item in $top) {
+        $all = @($item) + @(if ($item.PSIsContainer) { Get-ChildItem -LiteralPath $item.FullName -Force -Recurse -ErrorAction Stop })
+        foreach ($entry in @($all | Sort-Object FullName)) {
+            $relative = $entry.FullName.Substring($root.Length).TrimStart('\','/')
+            $hash = if (-not $entry.PSIsContainer) { (Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
+            [void]$records.Add([pscustomobject]@{ RelativePath=$relative; IsDirectory=[bool]$entry.PSIsContainer; Length=if($entry.PSIsContainer){$null}else{[int64]$entry.Length}; Sha256=$hash })
+        }
+    }
+    return $records.ToArray()
+}
+
+function New-TpmVerifiedUserProfilesBackup {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$Label)
+    $backupRoot = Join-Path $UserProfilesDir 'FullBackup'
+    $stamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd_HH-mm-ss_fff')
+    $backupPath = Join-Path $backupRoot ('{0}_{1}_{2}' -f $Label,$stamp,[guid]::NewGuid().ToString('N'))
+    $manifest = @()
+    try {
+        if (-not (Test-Path -LiteralPath $UserProfilesDir -PathType Container -ErrorAction Stop)) { throw 'UserProfiles directory is unavailable.' }
+        if (-not (Test-TpmNoReparsePath -Path $UserProfilesDir)) { throw 'UserProfiles directory failed the safety check.' }
+        [void][System.IO.Directory]::CreateDirectory($backupRoot)
+        [void][System.IO.Directory]::CreateDirectory($backupPath)
+        if (-not (Test-TpmNoReparsePath -Path $backupRoot) -or -not (Test-TpmNoReparsePath -Path $backupPath)) { throw 'Backup directory failed the safety check.' }
+        $manifest = @(Get-TpmUserProfilesBackupManifest -UserProfilesDir $UserProfilesDir)
+        foreach ($entry in @($manifest | Where-Object IsDirectory | Sort-Object RelativePath)) {
+            $destination = Join-Path $backupPath $entry.RelativePath
+            [void][System.IO.Directory]::CreateDirectory($destination)
+        }
+        foreach ($entry in @($manifest | Where-Object { -not $_.IsDirectory } | Sort-Object RelativePath)) {
+            $source = Join-Path $UserProfilesDir $entry.RelativePath
+            $destination = Join-Path $backupPath $entry.RelativePath
+            $parent = [System.IO.Path]::GetDirectoryName($destination)
+            if (-not (Test-Path -LiteralPath $parent -PathType Container -ErrorAction Stop)) {
+                [void][System.IO.Directory]::CreateDirectory($parent)
+            }
+            Copy-Item -LiteralPath $source -Destination $destination -Force -ErrorAction Stop
+        }
+        foreach ($entry in $manifest) {
+            $destination = Join-Path $backupPath $entry.RelativePath
+            $destinationItem = Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
+            if ($entry.IsDirectory) {
+                if (-not $destinationItem -or -not $destinationItem.PSIsContainer) { throw ("Backup directory is missing '{0}'." -f $entry.RelativePath) }
+            } else {
+                if (-not $destinationItem -or $destinationItem.PSIsContainer) { throw ("Backup file is missing '{0}'." -f $entry.RelativePath) }
+                $item = $destinationItem
+                $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash
+                if ([int64]$item.Length -ne [int64]$entry.Length -or $hash -ine [string]$entry.Sha256) { throw ("Backup verification failed for '{0}'." -f $entry.RelativePath) }
+            }
+        }
+        $after = @(Get-TpmUserProfilesBackupManifest -UserProfilesDir $UserProfilesDir)
+        if ((@($after | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.RelativePath,$_.IsDirectory,$_.Length,$_.Sha256 }) -join "`n") -ne (@($manifest | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.RelativePath,$_.IsDirectory,$_.Length,$_.Sha256 }) -join "`n")) { throw 'UserProfiles changed while the backup was being verified.' }
+        return [pscustomobject]@{ Required=$true; Attempted=$true; Created=$true; Succeeded=$true; Verified=$true; Path=$backupPath; Manifest=$manifest; FailureStage=$null; Reason=$null; ResiduePaths=@() }
+    } catch {
+        $residue = @()
+        if (Test-Path -LiteralPath $backupPath -PathType Container -ErrorAction SilentlyContinue) {
+            try { Remove-Item -LiteralPath $backupPath -Recurse -Force -ErrorAction Stop } catch { $residue = @($backupPath) }
+        }
+        return [pscustomobject]@{ Required=$true; Attempted=$true; Created=(Test-Path -LiteralPath $backupPath -PathType Container -ErrorAction SilentlyContinue); Succeeded=$false; Verified=$false; Path=$backupPath; Manifest=$manifest; FailureStage=if($manifest.Count -gt 0){'BackupVerification'}else{'BackupCreationOrCopy'}; Reason=$_.Exception.Message; ResiduePaths=$residue }
+    }
+}
+
+function New-TpmProfileTransactionResult {
+    param(
+        [Parameter(Mandatory)][string]$WorkflowKey, [Parameter(Mandatory)][string]$OperationKey,
+        [Parameter(Mandatory)][string]$Outcome, [Parameter(Mandatory)][string]$ProductState,
+        [Parameter(Mandatory)][string]$Summary, [object[]]$Items=@(), [object[]]$ChangedItems=@(),
+        [object[]]$CompletedItems=@(), [object[]]$FailedItems=@(), [object[]]$UnattemptedItems=@(), [object[]]$UnknownItems=@(),
+        [bool]$MutationStarted=$false, [object]$Backup=$null, [bool]$FinalAttempted=$true, [bool]$FinalPassed=$true,
+        [object[]]$FinalChecks=@(), [string]$ReasonCode=$null, [string]$UnderlyingOutcome=$null
+    )
+    $changed=@($ChangedItems); $affected=@($ChangedItems); $completed=@($CompletedItems); $failed=@($FailedItems); $unattempted=@($UnattemptedItems); $unknown=@($UnknownItems)
+    $backupInfo = if ($Backup) { $Backup } else { [pscustomobject]@{ Required=$false; Attempted=$false; Created=$false; Verified=$false; RootPath=$null; Items=@(); FailureStage=$null; FailureCode=$null } }
+    $cleanupResidue=@(Get-TpmTransactionField -Object $backupInfo -Name 'ResiduePaths' -Default @())
+    $cleanupComplete=($cleanupResidue.Count -eq 0)
+    $actualOutcome=$Outcome; $actualUnderlying=$UnderlyingOutcome
+    if ($cleanupResidue.Count -gt 0 -and $Outcome -ne 'CLEANUP_RESIDUE') { $actualOutcome='CLEANUP_RESIDUE'; $actualUnderlying=$Outcome }
+    $mutation=[pscustomobject]@{ Started=$MutationStarted; Completed=($actualOutcome -eq 'SUCCEEDED' -or $actualOutcome -eq 'NO_OP'); SelectedItemCount=@($Items).Count; AttemptedItemCount=($completed.Count+$failed.Count); MutatedItemCount=$changed.Count; AffectedItemCount=$affected.Count; CompletedItemCount=$completed.Count; FailedItemCount=$failed.Count; UnattemptedItemCount=$unattempted.Count; SkippedItemCount=0; UnknownItemCount=$unknown.Count; ChangedItems=$changed; AffectedItems=$affected; CompletedItems=$completed; FailedItems=$failed; UnattemptedItems=$unattempted; SkippedItems=@(); UnknownItems=$unknown; FailureStage=$null }
+    $backupEvidence=[pscustomobject]@{ Required=[bool](Get-TpmTransactionField -Object $backupInfo -Name 'Required' -Default $false); Attempted=[bool](Get-TpmTransactionField -Object $backupInfo -Name 'Attempted' -Default $false); Created=[bool](Get-TpmTransactionField -Object $backupInfo -Name 'Created' -Default ([bool]$Backup)); Verified=[bool](Get-TpmTransactionField -Object $backupInfo -Name 'Verified'); RootPath=Get-TpmTransactionField -Object $backupInfo -Name 'Path'; Items=@(Get-TpmTransactionField -Object $backupInfo -Name 'Manifest' -Default @()); FailureStage=Get-TpmTransactionField -Object $backupInfo -Name 'FailureStage'; FailureCode=Get-TpmTransactionField -Object $backupInfo -Name 'Reason' }
+    $final=[pscustomobject]@{ Attempted=$FinalAttempted; Passed=$FinalPassed; VerifiedUtc=(Get-Date).ToUniversalTime().ToString('o'); Checks=@($FinalChecks); FailedItems=$failed; UnknownItems=$unknown }
+    $cleanup=[pscustomobject]@{ Attempted=[bool]$Backup; Completed=$cleanupComplete; ResiduePresent=($cleanupResidue.Count -gt 0); ResiduePaths=$cleanupResidue; ResidueItems=@(); Error=Get-TpmTransactionField -Object $backupInfo -Name 'Reason' }
+    $result=New-TpmTransactionResult -WorkflowKey $WorkflowKey -OperationKey $OperationKey -Outcome $actualOutcome -UnderlyingOutcome $actualUnderlying -ProductState $ProductState -ReasonCode $ReasonCode -Summary $Summary -Items @($Items) -Mutation $mutation -PreState ([pscustomobject]@{ Captured=$MutationStarted; Items=@($Items); EvidenceRoot=Get-TpmTransactionField -Object $backupInfo -Name 'Path' }) -Backup $backupEvidence -FinalVerification $final -Rollback ([pscustomobject]@{ Attempted=$false; Completed=$false; Verified=$false; Items=@(); EvidenceRoot=$null; FailedItems=@(); Errors=@() }) -Cleanup $cleanup
+    $result | Add-Member -NotePropertyName Succeeded -NotePropertyValue ($actualOutcome -in @('SUCCEEDED','NO_OP')) -Force
+    $result | Add-Member -NotePropertyName BackupSucceeded -NotePropertyValue ([bool]$backupEvidence.Verified) -Force
+    $result | Add-Member -NotePropertyName EnabledCodes -NotePropertyValue @($Items) -Force
+    $result | Add-Member -NotePropertyName Reason -NotePropertyValue $ReasonCode -Force
+    return $result
+}
+
 function New-TpmWorkflowStatusContext {
     param(
         [Parameter(Mandatory)][string]$WorkflowKey,
@@ -10810,11 +10904,18 @@ function Invoke-CrosshairSetup {
     Write-Log ("Crosshairs: done. Deployed={0} Skipped={1} Errors={2}" -f $deployed, $skipped, $errors)
 
     $hideCursor = Read-TpmYesNo -Prompt "  Also hide the Windows cursor for all lightgun games? (Y/N)" -WorkflowContext $WorkflowContext
+    $cursorResult = $null
+    $cursorSucceeded = $true
     if ($hideCursor -eq "Y") {
         Write-Host ""
-        Invoke-CursorHideSetup -UserProfilesDir $UserProfilesDir
+        $cursorResult = Invoke-CursorHideSetup -UserProfilesDir $UserProfilesDir
+        $cursorSucceeded = ($cursorResult -and $cursorResult.PSObject.Properties['Outcome'] -and $cursorResult.Outcome -in @('SUCCEEDED','NO_OP'))
+        if (-not $cursorSucceeded) {
+            Write-Host "  Cursor hiding was not completed. Review Details before trying again." -ForegroundColor Yellow
+            Write-Log "Crosshairs: cursor-hide transaction did not complete; crosshair files may already have been deployed."
+        }
     }
-    return [pscustomobject]@{ Succeeded = ($errors -eq 0 -and $deployed -gt 0); Deployed = $deployed; Skipped = $skipped; Errors = $errors }
+    return [pscustomobject]@{ Succeeded = ($errors -eq 0 -and $deployed -gt 0 -and $cursorSucceeded); Deployed = $deployed; Skipped = $skipped; Errors = ($errors + $(if($cursorSucceeded){0}else{1})); CursorResult = $cursorResult }
 }
 
 # =============================================================================
@@ -10824,82 +10925,85 @@ function Invoke-CrosshairSetup {
 function Invoke-CursorHideSetup {
     param([string]$UserProfilesDir)
 
-    $cursorFields = @("HideCursor", "Hide Cursor", "DisableCursor")
-
-    $backupRoot = Join-Path $UserProfilesDir "FullBackup"
-    $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
-    $backupPath = Join-Path $backupRoot ("CursorHide_" + $timestamp)
-    try {
-        [void][System.IO.Directory]::CreateDirectory($backupRoot)
-        [void][System.IO.Directory]::CreateDirectory($backupPath)
-    } catch {
-        Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
-        Write-Log "CursorHide: backup failed -- $_"
-        return
-    }
-    try {
-        # Copy-Item receives FileInfo/DirectoryInfo objects from the pipeline
-        # (not path strings), so pipeline binding already bypasses wildcard
-        # expansion -- safe even with [, ], $ in game folder names. If this
-        # source is ever changed to raw path strings, add -LiteralPath there.
-        Get-ChildItem -LiteralPath $UserProfilesDir -ErrorAction Stop | Where-Object { $_.Name -ne "FullBackup" } |
-            Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction Stop
-    } catch {
-        Write-Host "  ERROR: UserProfiles backup failed: $_" -ForegroundColor Red
-        Write-Host "  The script will not continue without a complete backup." -ForegroundColor Red
-        Write-Log "CursorHide: backup FAILED -- profile copy did not complete -- $_"
-        return
-    }
-    Write-Host ("  Backup: {0}" -f $backupPath) -ForegroundColor DarkGray
-    Write-Log "CursorHide: backup at $backupPath"
-
-    $updated = 0; $alreadySet = 0; $noField = 0; $errors = 0
-
-    $xmlFiles = Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-                Where-Object { $_.Directory.Name -ne "FullBackup" }
-
-    foreach ($pf in $xmlFiles) {
+    $cursorFields = @('HideCursor','Hide Cursor','DisableCursor')
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object BaseName)
+    $eligible = New-Object System.Collections.Generic.List[string]
+    $plans = New-Object System.Collections.Generic.List[object]
+    $alreadySet = 0; $noField = 0
+    foreach ($pf in $profiles) {
         try {
             $doc = Read-Xml $pf.FullName
-            if ($null -eq $doc.GameProfile) { continue }
-            $gunNode = $doc.GameProfile.SelectSingleNode("GunGame")
-            if (-not $gunNode -or $gunNode.InnerText -ne "true") { continue }
-
-            $changed = $false
-            $wasSet  = $false
+            $gunNode = if ($doc.GameProfile) { $doc.GameProfile.SelectSingleNode('GunGame') } else { $null }
+            if (-not $gunNode -or $gunNode.InnerText -ne 'true') { continue }
+            $fields = @()
             foreach ($fieldName in $cursorFields) {
                 $fi = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral $fieldName)]")
-                if ($null -eq $fi) { continue }
-                $fv = $fi.SelectSingleNode("FieldValue")
-                if ($null -eq $fv) { continue }
-                if ($fv.InnerText -eq "1") { $wasSet = $true; continue }
-                $fv.InnerText = "1"
-                $changed = $true
+                if ($fi) { $fv=$fi.SelectSingleNode('FieldValue'); if ($fv) { $fields += [pscustomobject]@{ Name=$fieldName; Value=$fv.InnerText } } }
             }
-
-            if ($changed) {
-                Save-Xml $doc $pf.FullName
-                Write-Host ("    Updated : {0}" -f $pf.BaseName) -ForegroundColor Green
-                Write-Log "CursorHide: updated $($pf.BaseName)"
-                $updated++
-            } elseif ($wasSet) {
-                $alreadySet++
-            } else {
-                $noField++
-            }
-        } catch {
-            Write-Host ("    FAILED  {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
-            Write-Log "CursorHide: error on $($pf.BaseName) -- $_"
-            $errors++
-        }
+            if ($fields.Count -eq 0) { $noField++; continue }
+            [void]$eligible.Add($pf.BaseName)
+            if (@($fields | Where-Object Value -ne '1').Count -eq 0) { $alreadySet++; continue }
+            [void]$plans.Add([pscustomobject]@{ ProfileId=$pf.BaseName; ProfileFile=$pf; SourceHash=(Get-FileHash -LiteralPath $pf.FullName -Algorithm SHA256 -ErrorAction Stop).Hash })
+        } catch { Write-Log "CursorHide: planning failed for $($pf.BaseName) -- $_" }
+    }
+    if ($plans.Count -eq 0) {
+        Write-Host '  No cursor-hiding profile changes are needed. Nothing was changed.' -ForegroundColor DarkGray
+        Write-Log ("CursorHide setup: NO_OP. Eligible={0} AlreadySet={1} NoField={2}" -f $eligible.Count,$alreadySet,$noField)
+        return (New-TpmProfileTransactionResult -WorkflowKey 'CrosshairSetup' -OperationKey 'CursorHide' -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Summary 'All eligible cursor-hiding profiles are already current.' -Items $eligible.ToArray() -ReasonCode 'NO_ELIGIBLE_CHANGES' -FinalChecks @('All candidate lightgun profiles were scanned before mutation.'))
     }
 
-    Write-Host ""
-    Write-Host ("  Updated  : {0} lightgun game(s)" -f $updated) -ForegroundColor Green
-    if ($alreadySet -gt 0) { Write-Host ("  Already  : {0} (cursor already hidden)" -f $alreadySet) -ForegroundColor DarkGray }
-    if ($noField   -gt 0) { Write-Host ("  No field : {0} (profile has no cursor field)" -f $noField) -ForegroundColor DarkGray }
-    if ($errors    -gt 0) { Write-Host ("  Errors   : {0}" -f $errors) -ForegroundColor Red }
-    Write-Log ("CursorHide: done. Updated={0} AlreadySet={1} NoField={2} Errors={3}" -f $updated, $alreadySet, $noField, $errors)
+    $backup = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $UserProfilesDir -Label 'CursorHide'
+    if (-not $backup.Verified) {
+        Write-Host '  Cursor-hiding setup stopped before changing your profiles.' -ForegroundColor Red
+        Write-Host '  TeknoParrot Manager could not verify the safety backup.' -ForegroundColor Red
+        Write-Host '  Nothing was changed to cursor settings.' -ForegroundColor Green
+        Write-Log ("CursorHide: verified backup gate failed at {0} -- {1}" -f $backup.FailureStage,$backup.Reason)
+        return (New-TpmProfileTransactionResult -WorkflowKey 'CrosshairSetup' -OperationKey 'CursorHide' -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary 'Cursor-hiding setup stopped before changing your profiles because the safety backup could not be verified.' -Items @() -Backup $backup -ReasonCode 'PROFILE_BACKUP_FAILED' -FinalChecks @('No cursor XML write was attempted.'))
+    }
+
+    foreach ($plan in $plans) {
+        if ((Get-FileHash -LiteralPath $plan.ProfileFile.FullName -Algorithm SHA256 -ErrorAction Stop).Hash -ine [string]$plan.SourceHash) {
+            return (New-TpmProfileTransactionResult -WorkflowKey 'CrosshairSetup' -OperationKey 'CursorHide' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'Cursor-hiding setup needs attention because a profile changed before it could be updated.' -Items @($plans | ForEach-Object ProfileId) -Backup $backup -ReasonCode 'PROFILE_CHANGED_BEFORE_WRITE' -MutationStarted $false -FinalPassed $false -FinalChecks @('Source profile revalidation failed before the first XML write.'))
+        }
+        $current = Read-Xml $plan.ProfileFile.FullName
+        $gunNode = if ($current.GameProfile) { $current.GameProfile.SelectSingleNode('GunGame') } else { $null }
+        $needs = @($cursorFields | ForEach-Object { $fi=$current.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral $_)]"); if($fi){$fv=$fi.SelectSingleNode('FieldValue'); if($fv -and $fv.InnerText -ne '1'){$true}} })
+        if (-not $gunNode -or $gunNode.InnerText -ne 'true' -or $needs.Count -eq 0) { return (New-TpmProfileTransactionResult -WorkflowKey 'CrosshairSetup' -OperationKey 'CursorHide' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'Cursor-hiding setup needs attention because a profile changed before it could be updated.' -Items @($plans | ForEach-Object ProfileId) -Backup $backup -ReasonCode 'PROFILE_PLAN_CHANGED' -MutationStarted $false -FinalPassed $false -FinalChecks @('Source profile revalidation failed before the first XML write.')) }
+    }
+
+    $completed = New-Object System.Collections.Generic.List[string]
+    foreach ($plan in $plans) {
+        try {
+            $doc = Read-Xml $plan.ProfileFile.FullName
+            foreach ($fieldName in $cursorFields) {
+                $fi=$doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral $fieldName)]")
+                if ($fi) { $fv=$fi.SelectSingleNode('FieldValue'); if($fv){$fv.InnerText='1'} }
+            }
+            Save-Xml $doc $plan.ProfileFile.FullName
+            $verify=Read-Xml $plan.ProfileFile.FullName
+            $remaining=@($cursorFields | ForEach-Object { $fi=$verify.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral $_)]"); if($fi){$fv=$fi.SelectSingleNode('FieldValue'); if($fv -and $fv.InnerText -ne '1'){$true}} })
+            if($remaining.Count -gt 0){throw 'Cursor-hide read-back verification failed.'}
+            [void]$completed.Add($plan.ProfileId)
+            Write-Host ("    Updated : {0}" -f $plan.ProfileId) -ForegroundColor Green
+        } catch { Write-Host ("    FAILED  {0}: profile was not verified" -f $plan.ProfileId) -ForegroundColor Red; Write-Log "CursorHide: FAILED $($plan.ProfileId) -- $_" }
+    }
+    $failed = New-Object System.Collections.Generic.List[string]
+    $unknownFinal = New-Object System.Collections.Generic.List[string]
+    foreach ($plan in $plans) {
+        try {
+            $verify=Read-Xml $plan.ProfileFile.FullName
+            $remaining=@($cursorFields | ForEach-Object { $fi=$verify.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral $_)]"); if($fi){$fv=$fi.SelectSingleNode('FieldValue'); if($fv -and $fv.InnerText -ne '1'){$true}} })
+            if($remaining.Count -gt 0){[void]$failed.Add($plan.ProfileId)} elseif($completed -notcontains $plan.ProfileId){[void]$completed.Add($plan.ProfileId)}
+        } catch {[void]$unknownFinal.Add($plan.ProfileId)}
+    }
+    $allIds=@($plans | ForEach-Object ProfileId)
+    if($unknownFinal.Count -gt 0){$outcome='ACTION_REQUIRED';$state='UNKNOWN';$summary='Cursor-hiding setup needs attention because the final profile state could not be verified.';$passed=$false;$reason='PROFILE_FINAL_STATE_UNKNOWN'}
+    elseif($failed.Count -gt 0){$outcome='PARTIAL_APPLIED';$state='PARTIAL_KNOWN';$summary='Some cursor-hiding profiles were updated, but the operation did not finish.';$passed=$true;$reason='PROFILE_SAVE_PARTIAL'}
+    else{$outcome='SUCCEEDED';$state='INTENDED';$summary='Cursor-hiding profiles were updated and verified.';$passed=$true;$reason='PROFILE_UPDATES_VERIFIED'}
+    Write-Host ("  Updated  : {0} lightgun game(s)" -f $completed.Count) -ForegroundColor Green
+    if($failed.Count -gt 0){Write-Host ("  Failed   : {0} profile(s) -- review Details before retrying" -f $failed.Count) -ForegroundColor Red}
+    Write-Log ("CursorHide: done. Updated={0} AlreadySet={1} NoField={2} Failed={3}" -f $completed.Count,$alreadySet,$noField,$failed.Count)
+    return (New-TpmProfileTransactionResult -WorkflowKey 'CrosshairSetup' -OperationKey 'CursorHide' -Outcome $outcome -ProductState $state -Summary $summary -Items $eligible.ToArray() -ChangedItems $allIds -CompletedItems $completed.ToArray() -FailedItems $failed.ToArray() -UnknownItems $unknownFinal.ToArray() -MutationStarted $true -Backup $backup -FinalPassed $passed -ReasonCode $reason -FinalChecks @('Every intended cursor field was read back after its write.'))
 }
 
 # =============================================================================
@@ -14722,156 +14826,101 @@ function Invoke-FFBBlasterSetup {
     if ($hasSub -ne "Y") {
         Write-Host "  Skipped -- no membership." -ForegroundColor DarkGray
         Write-Log "FFBBlaster setup: skipped -- user has no TeknoParrot membership."
-        return ,@()   # comma forces real array semantics, not $null -- see
-                      # Invoke-FFBPluginSetup's -NativeEnabledCodes param
+        return (New-TpmProfileTransactionResult -WorkflowKey 'FFBSetup' -OperationKey 'FFBBlaster' -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Summary 'FFB Blaster setup skipped.' -ReasonCode 'NO_MEMBERSHIP')
     }
 
-    # Discover the field name dynamically -- never hardcoded, same pattern
-    # as Invoke-GpuFixSetup's $boolAmdFields discovery.
     Write-Host "  Scanning GameProfiles for FFB Blaster fields..." -ForegroundColor DarkGray
-    $gpDir     = Join-Path $TpRoot "GameProfiles"
+    $gpDir = Join-Path $TpRoot "GameProfiles"
     $ffbFields = Get-FFBBlasterFieldNames -GameProfilesDir $gpDir
-    if ($ffbFields.Count -eq 0) {
-        # Before giving up, check whether there ARE any FFB-Blaster-shaped
-        # fields in the GameProfiles at all, just not of type Bool. If so,
-        # this is a schema drift situation (upstream changed the FieldType),
-        # not simply "TeknoParrot does not support FFB Blaster here yet" --
-        # and the two cases deserve different user-facing messages.
-        $shapedNonBoolCount = 0
-        if (Test-Path -LiteralPath $gpDir) {
-            foreach ($gf in @(Get-ChildItem -LiteralPath $gpDir -Filter "*.xml" -ErrorAction SilentlyContinue)) {
-                try {
-                    $gdoc = Read-Xml $gf.FullName
-                    $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
-                    foreach ($n in $fnodes) {
-                        $cn = if ($n.CategoryName) { $n.CategoryName.Trim() } else { '' }
-                        $fn = if ($n.FieldName)     { $n.FieldName.Trim()     } else { '' }
-                        $ft = if ($n.FieldType)     { $n.FieldType.Trim()     } else { '' }
-                        if ($ft -ieq 'Bool') { continue }   # Already caught by Get-FFBBlasterFieldNames
-                        if (($cn -and $cn -imatch $script:FFBBlasterNamePattern) -or
-                            ($fn -and $fn -imatch $script:FFBBlasterNamePattern)) {
-                            $shapedNonBoolCount++
-                        }
-                    }
-                } catch { }
-            }
-        }
-        if ($shapedNonBoolCount -gt 0) {
-            Write-Host "  WARNING: FFB Blaster-shaped fields were found in GameProfiles, but" -ForegroundColor Yellow
-            Write-Host "  none have the expected Bool type -- this may indicate an upstream" -ForegroundColor Yellow
-            Write-Host ("  schema change ({0} field(s) affected). Skipped for manual review." -f $shapedNonBoolCount) -ForegroundColor Yellow
-            Write-Host "  Run Get-GameProfileSchemaDrift against a sample profile to confirm." -ForegroundColor DarkGray
-            Write-Log ("FFBBlaster setup: aborted -- {0} FFB-Blaster-shaped non-Bool field(s) detected (schema drift)." -f $shapedNonBoolCount)
-        } else {
-            Write-Host "  No FFB Blaster field found in any GameProfile -- this TeknoParrot" -ForegroundColor Yellow
-            Write-Host "  install may not support it yet." -ForegroundColor Yellow
-            Write-Log "FFBBlaster setup: aborted -- no FFB Blaster field discovered."
-        }
-        return ,@()
-    }
-    Write-Log ("FFBBlaster: discovered fields -- [{0}]" -f ($ffbFields -join ', '))
-
-    # Backup before writing -- this touches every matching UserProfile.
-    $backupRoot = Join-Path $UserProfilesDir "FullBackup"
-    $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
-    $backupPath = Join-Path $backupRoot ("FFBBlaster_" + $timestamp)
-    try {
-        [void][System.IO.Directory]::CreateDirectory($backupRoot)
-        [void][System.IO.Directory]::CreateDirectory($backupPath)
-    } catch {
-        Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
-        Write-Log "FFBBlaster: backup failed -- $_"
-        return [pscustomobject]@{ Succeeded = $false; BackupSucceeded = $false; EnabledCodes = @(); Errors = 1; Reason = 'PROFILE_BACKUP_FAILED' }
-    }
-    try {
-        Get-ChildItem -LiteralPath $UserProfilesDir -ErrorAction Stop | Where-Object { $_.Name -ne "FullBackup" } |
-            Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction Stop
-    } catch {
-        Write-Host "  ERROR: UserProfiles backup failed: $_" -ForegroundColor Red
-        Write-Host "  The script will not continue without a complete backup." -ForegroundColor Red
-        Write-Log "FFBBlaster: backup FAILED -- profile copy did not complete -- $_"
-        return [pscustomobject]@{ Succeeded = $false; BackupSucceeded = $false; EnabledCodes = @(); Errors = 1; Reason = 'PROFILE_BACKUP_FAILED' }
-    }
-    Write-Host ("  Backup: {0}" -f $backupPath) -ForegroundColor DarkGray
-    Write-Log "FFBBlaster: backup at $backupPath"
-
-    Write-Host ""
-    Write-Host "  Enabling FFB Blaster on registered profiles..." -ForegroundColor DarkGray
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Directory.Name -ne "FullBackup" })
-    $enabledCodes = New-Object System.Collections.Generic.List[string]
-    $updated = 0; $unchanged = 0; $unsupported = 0; $unknown = 0; $errors = 0
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object BaseName)
+    $supportedCodes = New-Object System.Collections.Generic.List[string]
+    $plans = New-Object System.Collections.Generic.List[object]
     $unknownNames = New-Object System.Collections.Generic.List[string]
-    $skippedPlatforms = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-
+    $unsupported = 0; $unknown = 0
     foreach ($pf in $profiles) {
         try {
-            $doc    = Read-Xml $pf.FullName
-            # Single structured capability+safety gate (issue #41). Only a
-            # 'Supported' outcome with WouldWrite/Changes ever causes a write;
-            # 'Unsupported' (no field, or an unsupported platform such as
-            # pcsx2x6) and 'Unknown' (drifted/unrecognized field shape) are
-            # both skipped without touching the profile.
+            $doc = Read-Xml $pf.FullName
             $support = Get-FFBBlasterSupport -Doc $doc -Categories $ffbFields
-            switch ($support.Status) {
-                'Unsupported' {
-                    $unsupported++
-                    if ($support.Platform -and ($script:FFBBlasterUnsupportedPlatforms -icontains $support.Platform)) {
-                        [void]$skippedPlatforms.Add($support.Platform)
-                    }
-                    Write-Log "FFBBlaster: $($pf.BaseName) :: unsupported -- $($support.Reason)"
-                    continue
-                }
-                'Unknown' {
-                    $unknown++
-                    [void]$unknownNames.Add($pf.BaseName)
-                    Write-Log "FFBBlaster: $($pf.BaseName) :: unknown -- $($support.Reason) (NOT written)"
-                    continue
-                }
-            }
-            # Supported from here on.
-            [void]$enabledCodes.Add($pf.BaseName)
+            if ($support.Status -eq 'Unsupported') { $unsupported++; continue }
+            if ($support.Status -eq 'Unknown') { $unknown++; [void]$unknownNames.Add($pf.BaseName); continue }
+            [void]$supportedCodes.Add($pf.BaseName)
             if ($support.WouldWrite) {
-                foreach ($c in $support.Changes) {
-                    $c.Node.InnerText = $c.NewValue
-                    Write-Log "FFBBlaster: $($pf.BaseName) :: $($c.FieldName) -> $($c.NewValue)"
-                }
-                Save-Xml $doc $pf.FullName
-                $updated++
-                Write-Host ("    {0}" -f $pf.BaseName) -ForegroundColor Green
-            } else {
-                $unchanged++
+                [void]$plans.Add([pscustomobject]@{ ProfileId=$pf.BaseName; ProfileFile=$pf; SourceHash=(Get-FileHash -LiteralPath $pf.FullName -Algorithm SHA256 -ErrorAction Stop).Hash })
             }
         } catch {
-            Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
-            Write-Log "FFBBlaster: FAILED $($pf.BaseName) -- $_"
-            $errors++
+            $unknown++; [void]$unknownNames.Add($pf.BaseName)
+            Write-Log "FFBBlaster: planning failed for $($pf.BaseName) -- $_"
+        }
+    }
+    if ($plans.Count -eq 0) {
+        $outcome = if ($unknown -gt 0) { 'ACTION_REQUIRED' } else { 'NO_OP' }
+        $state = if ($unknown -gt 0) { 'UNKNOWN' } else { 'UNCHANGED' }
+        $summary = if ($unknown -gt 0) { 'Some FFB Blaster profiles need review before setup can continue.' } elseif ($supportedCodes.Count -eq 0) { 'No FFB Blaster profiles need this setting.' } else { 'All eligible FFB Blaster profiles are already current.' }
+        if ($unknown -gt 0) { Write-Host ("  Unknown  : {0} profile(s) need manual review." -f $unknown) -ForegroundColor Yellow }
+        else { Write-Host "  No FFB Blaster profile changes are needed. Nothing was changed." -ForegroundColor DarkGray }
+        Write-Log ("FFBBlaster setup: {0}. Supported={1} Unsupported={2} Unknown={3}" -f $outcome,$supportedCodes.Count,$unsupported,$unknown)
+        return (New-TpmProfileTransactionResult -WorkflowKey 'FFBSetup' -OperationKey 'FFBBlaster' -Outcome $outcome -ProductState $state -Summary $summary -Items $supportedCodes.ToArray() -ReasonCode $(if($unknown -gt 0){'FFB_PROFILE_REVIEW_REQUIRED'}else{'NO_ELIGIBLE_CHANGES'}) -FinalChecks @('All candidate profiles were scanned before mutation.'))
+    }
+
+    $backup = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $UserProfilesDir -Label 'FFBBlaster'
+    if (-not $backup.Verified) {
+        Write-Host "  FFB Blaster setup stopped before changing your profiles." -ForegroundColor Red
+        Write-Host "  TeknoParrot Manager could not verify the safety backup." -ForegroundColor Red
+        Write-Host "  Nothing was changed." -ForegroundColor Green
+        Write-Log ("FFBBlaster: verified backup gate failed at {0} -- {1}" -f $backup.FailureStage,$backup.Reason)
+        return (New-TpmProfileTransactionResult -WorkflowKey 'FFBSetup' -OperationKey 'FFBBlaster' -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary 'FFB Blaster setup stopped before changing your profiles because the safety backup could not be verified.' -Items @() -Backup $backup -ReasonCode 'PROFILE_BACKUP_FAILED' -FinalChecks @('No XML write was attempted.'))
+    }
+
+    foreach ($plan in $plans) {
+        if ((Get-FileHash -LiteralPath $plan.ProfileFile.FullName -Algorithm SHA256 -ErrorAction Stop).Hash -ine [string]$plan.SourceHash) {
+            Write-Log "FFBBlaster: source profile changed before first write: $($plan.ProfileId)"
+            return (New-TpmProfileTransactionResult -WorkflowKey 'FFBSetup' -OperationKey 'FFBBlaster' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'FFB Blaster setup needs attention because a profile changed before it could be updated.' -Items @($plans | ForEach-Object ProfileId) -Backup $backup -MutationStarted $false -FinalPassed $false -ReasonCode 'PROFILE_CHANGED_BEFORE_WRITE' -FinalChecks @('Source profile revalidation failed before the first XML write.'))
+        }
+        $current = Read-Xml $plan.ProfileFile.FullName
+        $currentSupport = Get-FFBBlasterSupport -Doc $current -Categories $ffbFields
+        if ($currentSupport.Status -ne 'Supported' -or -not $currentSupport.WouldWrite) {
+            return (New-TpmProfileTransactionResult -WorkflowKey 'FFBSetup' -OperationKey 'FFBBlaster' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'FFB Blaster setup needs attention because a profile changed before it could be updated.' -Items @($plans | ForEach-Object ProfileId) -Backup $backup -MutationStarted $false -FinalPassed $false -ReasonCode 'PROFILE_PLAN_CHANGED' -FinalChecks @('Source profile revalidation failed before the first XML write.'))
         }
     }
 
-    $supportedTotal = $updated + $unchanged
-    Write-Host ""
-    Write-Host "  FFB Blaster support check:" -ForegroundColor Cyan
-    Write-Host ("    Supported profiles  : {0}" -f $supportedTotal) -ForegroundColor Green
-    Write-Host ("    Unsupported profiles: {0}" -f $unsupported) -ForegroundColor DarkGray
-    Write-Host ("    Unknown profiles    : {0}" -f $unknown) -ForegroundColor $(if ($unknown -gt 0) {'Yellow'} else {'DarkGray'})
-    Write-Host ""
-    Write-Host ("  Updated  : {0} profile(s)" -f $updated) -ForegroundColor Green
-    if ($unchanged -gt 0) { Write-Host ("  No change: {0} (already enabled)" -f $unchanged) -ForegroundColor DarkGray }
-    foreach ($plat in $skippedPlatforms) {
-        Write-Host ("  Skipped {0} profiles because FFB Blaster is not currently supported there." -f $plat) -ForegroundColor DarkGray
+    $completed = New-Object System.Collections.Generic.List[string]
+    $saveErrors = New-Object System.Collections.Generic.List[string]
+    foreach ($plan in $plans) {
+        try {
+            $doc = Read-Xml $plan.ProfileFile.FullName
+            $support = Get-FFBBlasterSupport -Doc $doc -Categories $ffbFields
+            foreach ($change in $support.Changes) { $change.Node.InnerText = $change.NewValue }
+            Save-Xml $doc $plan.ProfileFile.FullName
+            $verify = Get-FFBBlasterSupport -Doc (Read-Xml $plan.ProfileFile.FullName) -Categories $ffbFields
+            if ($verify.WouldWrite) { throw 'FFB Blaster read-back verification failed.' }
+            [void]$completed.Add($plan.ProfileId)
+            Write-Host ("    {0}" -f $plan.ProfileId) -ForegroundColor Green
+        } catch {
+            [void]$saveErrors.Add($plan.ProfileId)
+            Write-Host ("    FAILED {0}: profile was not verified" -f $plan.ProfileId) -ForegroundColor Red
+            Write-Log "FFBBlaster: FAILED $($plan.ProfileId) -- $_"
+        }
     }
-    if ($unknown -gt 0) {
-        Write-Host ("  Unknown  : {0} profile(s) had an unrecognized FFB Blaster field and were NOT changed -- review manually:" -f $unknown) -ForegroundColor Yellow
-        Write-Host ("    {0}" -f ($unknownNames -join ', ')) -ForegroundColor DarkGray
+    $failed = New-Object System.Collections.Generic.List[string]
+    $unknownFinal = New-Object System.Collections.Generic.List[string]
+    foreach ($plan in $plans) {
+        try {
+            $verify = Get-FFBBlasterSupport -Doc (Read-Xml $plan.ProfileFile.FullName) -Categories $ffbFields
+            if ($verify.WouldWrite) { [void]$failed.Add($plan.ProfileId) }
+            elseif ($completed -notcontains $plan.ProfileId) { [void]$completed.Add($plan.ProfileId) }
+        } catch { [void]$unknownFinal.Add($plan.ProfileId) }
     }
-    if ($errors -gt 0)    { Write-Host ("  Errors   : {0} -- see log for details" -f $errors) -ForegroundColor Red }
-    $nativeStatus = if ($errors -gt 0) { 'failed' } else { 'complete' }
-    Write-Log ("FFBBlaster setup: {0}. Supported={1} Updated={2} Unchanged={3} Unsupported={4} Unknown={5} Errors={6}" -f $nativeStatus, $supportedTotal, $updated, $unchanged, $unsupported, $unknown, $errors)
-    if ($errors -gt 0) {
-        return [pscustomobject]@{ Succeeded = $false; BackupSucceeded = $true; EnabledCodes = $enabledCodes.ToArray(); Errors = $errors; Reason = 'NATIVE_DEPLOYMENT_ERRORS' }
+    $allIds=@($plans | ForEach-Object ProfileId)
+    if ($unknownFinal.Count -gt 0) {
+        $outcome='ACTION_REQUIRED'; $state='UNKNOWN'; $summary='FFB Blaster setup needs attention because the final profile state could not be verified.'; $passed=$false; $reason='PROFILE_FINAL_STATE_UNKNOWN'
+    } elseif ($failed.Count -gt 0) {
+        $outcome='PARTIAL_APPLIED'; $state='PARTIAL_KNOWN'; $summary='Some FFB Blaster profiles were updated, but the operation did not finish.'; $passed=$true; $reason='PROFILE_SAVE_PARTIAL'
+    } else {
+        $outcome='SUCCEEDED'; $state='INTENDED'; $summary='FFB Blaster profiles were updated and verified.'; $passed=$true; $reason='PROFILE_UPDATES_VERIFIED'
     }
-    return @($enabledCodes)
+    Write-Host ("  Updated  : {0} profile(s)" -f $completed.Count) -ForegroundColor Green
+    if ($failed.Count -gt 0) { Write-Host ("  Failed   : {0} profile(s) -- review Details before retrying" -f $failed.Count) -ForegroundColor Red }
+    return (New-TpmProfileTransactionResult -WorkflowKey 'FFBSetup' -OperationKey 'FFBBlaster' -Outcome $outcome -ProductState $state -Summary $summary -Items $supportedCodes.ToArray() -ChangedItems $allIds -CompletedItems $completed.ToArray() -FailedItems $failed.ToArray() -UnknownItems $unknownFinal.ToArray() -MutationStarted $true -Backup $backup -FinalPassed $passed -ReasonCode $reason -FinalChecks @('Every intended profile was read back after its write.'))
 }
 
 # =============================================================================
