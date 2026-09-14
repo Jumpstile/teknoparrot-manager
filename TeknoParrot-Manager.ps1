@@ -3633,6 +3633,839 @@ function Invoke-TpmTransactionalPromote {
     }
     return $true
 }
+# Returns a stable, hash-backed description of one file path. A missing leaf
+# is distinguishable from an unreadable path so callers never treat an access
+# failure as an absent file during a transaction.
+function Get-TpmFileState {
+    param([Parameter(Mandatory)][string]$Path)
+    $canonical = $null
+    try {
+        $canonical = [System.IO.Path]::GetFullPath($Path)
+        $item = Get-Item -LiteralPath $canonical -Force -ErrorAction SilentlyContinue
+        if ($null -eq $item) {
+            return [pscustomobject]@{
+                Path=$canonical; Exists=$false; Readable=$true; IsDirectory=$false
+                Length=$null; Sha256=$null; LastWriteTimeUtc=$null; Attributes=$null; Error=$null
+            }
+        }
+        if ($item.PSIsContainer) {
+            return [pscustomobject]@{
+                Path=$canonical; Exists=$true; Readable=$true; IsDirectory=$true
+                Length=$null; Sha256=$null; LastWriteTimeUtc=$item.LastWriteTimeUtc
+                Attributes=[int]$item.Attributes; Error=$null
+            }
+        }
+        return [pscustomobject]@{
+            Path=$canonical; Exists=$true; Readable=$true; IsDirectory=$false
+            Length=[int64]$item.Length
+            Sha256=([string](Get-FileHash -LiteralPath $canonical -Algorithm SHA256 -ErrorAction Stop).Hash).ToUpperInvariant()
+            LastWriteTimeUtc=$item.LastWriteTimeUtc
+            Attributes=[int]$item.Attributes
+            Error=$null
+        }
+    } catch {
+        return [pscustomobject]@{
+            Path=$canonical
+            Exists=$null
+            Readable=$false
+            IsDirectory=$null
+            Length=$null
+            Sha256=$null
+            LastWriteTimeUtc=$null
+            Attributes=$null
+            Error=$_.Exception.Message
+        }
+    }
+}
+
+function Test-TpmFileStateMatch {
+    param(
+        [Parameter(Mandatory)]$Expected,
+        [Parameter(Mandatory)]$Actual,
+        [switch]$IgnoreMetadata
+    )
+    if (-not $Actual.Readable -or -not $Expected.Readable) { return $false }
+    if ([bool]$Expected.Exists -ne [bool]$Actual.Exists) { return $false }
+    if (-not $Expected.Exists) { return $true }
+    if ([bool]$Expected.IsDirectory -ne [bool]$Actual.IsDirectory) { return $false }
+    if (-not $Expected.IsDirectory) {
+        if ([int64]$Expected.Length -ne [int64]$Actual.Length) { return $false }
+        if ([string]$Expected.Sha256 -ine [string]$Actual.Sha256) { return $false }
+    }
+    if (-not $IgnoreMetadata) {
+        if ($null -ne $Expected.Attributes -and [int]$Expected.Attributes -ne [int]$Actual.Attributes) { return $false }
+        if ($null -ne $Expected.LastWriteTimeUtc -and $Expected.LastWriteTimeUtc -ne $Actual.LastWriteTimeUtc) { return $false }
+    }
+    return $true
+}
+
+function New-TpmFileBatchResult {
+    param(
+        [Parameter(Mandatory)][string]$WorkflowKey,
+        [Parameter(Mandatory)][string]$OperationKey,
+        [Parameter(Mandatory)][string]$Outcome,
+        [Parameter(Mandatory)][string]$ProductState,
+        [Parameter(Mandatory)][string]$Summary,
+        [object[]]$Items=@(),
+        [object[]]$ChangedItems=@(),
+        [object[]]$CompletedItems=@(),
+        [object[]]$FailedItems=@(),
+        [object[]]$UnattemptedItems=@(),
+        [object[]]$SkippedItems=@(),
+        [object[]]$UnknownItems=@(),
+        [bool]$MutationStarted=$false,
+        [bool]$MutationCompleted=$false,
+        [object[]]$PreStateItems=@(),
+        [bool]$PreStateCaptured=$false,
+        [string]$PreStateEvidenceRoot=$null,
+        [bool]$BackupRequired=$false,
+        [bool]$BackupAttempted=$false,
+        [bool]$BackupCreated=$false,
+        [bool]$BackupVerified=$false,
+        [string]$BackupRootPath=$null,
+        [object[]]$BackupItems=@(),
+        [string]$BackupFailureStage=$null,
+        [string]$BackupFailureCode=$null,
+        [bool]$FinalAttempted=$false,
+        [bool]$FinalPassed=$false,
+        [object[]]$FinalChecks=@(),
+        [object[]]$FinalFailedItems=@(),
+        [object[]]$FinalUnknownItems=@(),
+        [bool]$RollbackAttempted=$false,
+        [bool]$RollbackCompleted=$false,
+        [bool]$RollbackVerified=$false,
+        [object[]]$RollbackItems=@(),
+        [string]$RollbackEvidenceRoot=$null,
+        [object[]]$RollbackFailedItems=@(),
+        [object[]]$RollbackErrors=@(),
+        [bool]$CleanupAttempted=$false,
+        [bool]$CleanupCompleted=$true,
+        [bool]$ResiduePresent=$false,
+        [string[]]$ResiduePaths=@(),
+        [object[]]$ResidueItems=@(),
+        [string]$CleanupError=$null,
+        [string]$UnderlyingOutcome=$null,
+        [string]$ReasonCode=$null,
+        [object]$TechnicalDetails=$null,
+        [string[]]$Errors=@(),
+        [string[]]$Warnings=@(),
+        [object[]]$RecoveryActions=@()
+    )
+    $mutation = [pscustomobject]@{
+        Started=$MutationStarted
+        Completed=$MutationCompleted
+        SelectedItemCount=@($Items).Count
+        AttemptedItemCount=(@($CompletedItems).Count + @($FailedItems).Count + @($SkippedItems).Count)
+        MutatedItemCount=@($ChangedItems).Count
+        AffectedItemCount=@($ChangedItems).Count
+        CompletedItemCount=@($CompletedItems).Count
+        FailedItemCount=@($FailedItems).Count
+        UnattemptedItemCount=@($UnattemptedItems).Count
+        SkippedItemCount=@($SkippedItems).Count
+        UnknownItemCount=@($UnknownItems).Count
+        ChangedItems=@($ChangedItems)
+        AffectedItems=@($ChangedItems)
+        CompletedItems=@($CompletedItems)
+        FailedItems=@($FailedItems)
+        UnattemptedItems=@($UnattemptedItems)
+        SkippedItems=@($SkippedItems)
+        UnknownItems=@($UnknownItems)
+        FailureStage=$null
+    }
+    $preState = [pscustomobject]@{
+        Captured=$PreStateCaptured
+        CaptureMethod='HashAndShape'
+        CapturedUtc=(Get-Date).ToUniversalTime().ToString('o')
+        Items=@($PreStateItems)
+        EvidenceRoot=$PreStateEvidenceRoot
+        CaptureError=$null
+    }
+    $backup = [pscustomobject]@{
+        Required=$BackupRequired
+        Attempted=$BackupAttempted
+        Created=$BackupCreated
+        Verified=$BackupVerified
+        RootPath=$BackupRootPath
+        Items=@($BackupItems)
+        FailureStage=$BackupFailureStage
+        FailureCode=$BackupFailureCode
+    }
+    $final = [pscustomobject]@{
+        Attempted=$FinalAttempted
+        Passed=$FinalPassed
+        VerifiedUtc=(Get-Date).ToUniversalTime().ToString('o')
+        Checks=@($FinalChecks)
+        FailedItems=@($FinalFailedItems)
+        UnknownItems=@($FinalUnknownItems)
+    }
+    $rollback = [pscustomobject]@{
+        Attempted=$RollbackAttempted
+        Completed=$RollbackCompleted
+        Verified=$RollbackVerified
+        VerifiedUtc=if($RollbackVerified){(Get-Date).ToUniversalTime().ToString('o')}else{$null}
+        Items=@($RollbackItems)
+        EvidenceRoot=$RollbackEvidenceRoot
+        FailedItems=@($RollbackFailedItems)
+        Errors=@($RollbackErrors)
+    }
+    $cleanup = [pscustomobject]@{
+        Attempted=$CleanupAttempted
+        Completed=$CleanupCompleted
+        ResiduePresent=$ResiduePresent
+        ResiduePaths=@($ResiduePaths)
+        ResidueItems=@($ResidueItems)
+        Error=$CleanupError
+    }
+    return (New-TpmTransactionResult `
+        -WorkflowKey $WorkflowKey -OperationKey $OperationKey -Outcome $Outcome `
+        -UnderlyingOutcome $UnderlyingOutcome -ProductState $ProductState `
+        -Summary $Summary -Items @($Items) -Mutation $mutation `
+        -PreState $preState -Backup $backup -FinalVerification $final `
+        -Rollback $rollback -Cleanup $cleanup -ReasonCode $ReasonCode `
+        -TechnicalDetails $TechnicalDetails -Errors $Errors -Warnings $Warnings `
+        -RecoveryActions $RecoveryActions)
+}
+
+# Promotes a batch of direct file operations across one or more destination
+# roots. Source files are copied into controlled staging before any live
+# destination is touched. Existing targets are hash-captured and backed up
+# before replacement/removal. Metadata paths are included in the same
+# pre-state/rollback boundary when CommitAction is supplied.
+function Invoke-TpmTransactionalFileBatch {
+    param(
+        [Parameter(Mandatory)][string]$WorkflowKey,
+        [Parameter(Mandatory)][string]$OperationKey,
+        [object[]]$Operations=@(),
+        [string[]]$MetadataPaths=@(),
+        [string]$StagingDir='',
+        [scriptblock]$CommitAction=$null,
+        [scriptblock]$PostCommitVerification=$null,
+        [string]$Summary='The file operation did not complete.',
+        [string]$SuccessSummary='The selected files were installed and checked.',
+        [string]$NoOpSummary='Everything already matches. Nothing was changed.',
+        [string]$ReasonCode='FILE_TRANSACTION_FAILED'
+    )
+
+    $operations = @($Operations)
+    $items = @($operations | ForEach-Object { [string]$_.ItemId })
+    $records = New-Object System.Collections.Generic.List[object]
+    $metadataRecords = New-Object System.Collections.Generic.List[object]
+    $changedItems = New-Object System.Collections.Generic.List[string]
+    $completedItems = New-Object System.Collections.Generic.List[string]
+    $failedItems = New-Object System.Collections.Generic.List[string]
+    $unattemptedItems = New-Object System.Collections.Generic.List[string]
+    $skippedItems = New-Object System.Collections.Generic.List[string]
+    $unknownItems = New-Object System.Collections.Generic.List[string]
+    $finalChecks = New-Object System.Collections.Generic.List[string]
+    $finalFailedItems = New-Object System.Collections.Generic.List[string]
+    $finalUnknownItems = New-Object System.Collections.Generic.List[string]
+    $rollbackItems = New-Object System.Collections.Generic.List[string]
+    $rollbackFailedItems = New-Object System.Collections.Generic.List[string]
+    $rollbackErrors = New-Object System.Collections.Generic.List[string]
+    $preStateItems = New-Object System.Collections.Generic.List[object]
+    $backupItems = New-Object System.Collections.Generic.List[object]
+    $residuePaths = New-Object System.Collections.Generic.List[string]
+    $technical = [ordered]@{ TransactionId=$null; WorkflowKey=$WorkflowKey; OperationKey=$OperationKey; Stage='Preflight'; Error=$null; RollbackError=@(); CleanupError=$null }
+    $transactionRoot = $null
+    $rollbackRoot = $null
+    $createdDirectories = New-Object System.Collections.Generic.List[string]
+    $mutationStarted = $false
+    $mutationCompleted = $false
+    $backupAttempted = $false
+    $backupCreated = $false
+    $backupVerified = $false
+    $preStateCaptured = $false
+    $commitAttempted = $false
+    $finalAttempted = $false
+    $finalPassed = $false
+    $rollbackAttempted = $false
+    $rollbackCompleted = $false
+    $rollbackVerified = $false
+    $cleanupAttempted = $false
+    $cleanupCompleted = $true
+    $backupFailureStage = $null
+    $backupFailureCode = $null
+    $failure = $null
+    $requestedOutcome = 'FAILED_BEFORE_MUTATION'
+    $requestedState = 'UNCHANGED'
+    $requestedSummary = $Summary
+    $requestedReason = $ReasonCode
+
+    try {
+        $seenIds = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($op in $operations) {
+            $itemId = [string]$op.ItemId
+            if ([string]::IsNullOrWhiteSpace($itemId) -or -not $seenIds.Add($itemId)) {
+                throw 'File transaction operation identifiers must be unique and nonblank.'
+            }
+            $kind = ([string]$op.Operation).ToUpperInvariant()
+            if ($kind -notin @('ADD','REPLACE','REMOVE','PRESERVE')) {
+                throw ("Unsupported file transaction operation '{0}'." -f $op.Operation)
+            }
+            $destination = [string]$op.DestinationPath
+            if ([string]::IsNullOrWhiteSpace($destination)) { throw "File transaction operation '$itemId' has no destination." }
+            $canonicalDestination = [System.IO.Path]::GetFullPath($destination)
+            $destinationParent = [System.IO.Path]::GetDirectoryName($canonicalDestination)
+            if ([string]::IsNullOrWhiteSpace($destinationParent) -or -not (Test-TpmNoReparsePath -Path $destinationParent)) {
+                throw "File transaction destination failed the path safety check: $destination"
+            }
+            $rootPath = [string]$op.RootPath
+            if (-not [string]::IsNullOrWhiteSpace($rootPath) -and -not (Test-PathInside -child $canonicalDestination -parent $rootPath)) {
+                throw "File transaction destination escaped its declared root: $destination"
+            }
+            $pre = Get-TpmFileState -Path $canonicalDestination
+            if (-not $pre.Readable) { throw "File transaction could not read destination pre-state '$canonicalDestination': $($pre.Error)" }
+            if ($kind -eq 'ADD' -and $pre.Exists) { throw "File transaction ADD target already exists: $canonicalDestination" }
+            if ($kind -eq 'REMOVE' -and -not $pre.Exists) { throw "File transaction REMOVE target is absent: $canonicalDestination" }
+            if ($pre.Exists -and $pre.IsDirectory) { throw "File transaction target is a directory, not a file: $canonicalDestination" }
+            $source = [string]$op.SourcePath
+            $sourceState = $null
+            if ($kind -in @('ADD','REPLACE')) {
+                if ([string]::IsNullOrWhiteSpace($source)) { throw "File transaction operation '$itemId' has no source." }
+                $sourceState = Get-TpmFileState -Path $source
+                if (-not $sourceState.Readable -or -not $sourceState.Exists -or $sourceState.IsDirectory) {
+                    throw "File transaction source is unavailable or not a file: $source"
+                }
+                $expectedSourceHash = [string]$op.ExpectedSourceHash
+                if (-not [string]::IsNullOrWhiteSpace($expectedSourceHash) -and $sourceState.Sha256 -ine $expectedSourceHash) {
+                    throw "File transaction source hash changed before staging: $source"
+                }
+            }
+            if ($op.ExpectedDestinationHash -and $pre.Exists -and $pre.Sha256 -ine [string]$op.ExpectedDestinationHash) {
+                throw "File transaction destination hash no longer matches its plan: $canonicalDestination"
+            }
+            $record = [pscustomobject]@{
+                ItemId=$itemId; Operation=$kind; DestinationPath=$canonicalDestination
+                SourcePath=if($sourceState){$source}else{$null}; RootPath=$rootPath; PreState=$pre; SourceState=$sourceState
+                SourceHash=if($sourceState){$sourceState.Sha256}else{$null}
+                ExpectedFinalHash=if($op.ExpectedFinalHash){[string]$op.ExpectedFinalHash}elseif($sourceState){$sourceState.Sha256}else{$null}
+                StagePath=$null; BackupPath=$null; Changed=$false; BackupMade=$false
+            }
+            [void]$records.Add($record)
+            [void]$preStateItems.Add([pscustomobject]@{ ItemId=$itemId; Path=$canonicalDestination; Exists=$pre.Exists; IsDirectory=$pre.IsDirectory; Length=$pre.Length; Sha256=$pre.Sha256; LastWriteTimeUtc=$pre.LastWriteTimeUtc; Attributes=$pre.Attributes })
+        }
+        $metadataSeen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($metadataPath in @($MetadataPaths)) {
+            if ([string]::IsNullOrWhiteSpace($metadataPath)) { continue }
+            $canonicalMetadata = [System.IO.Path]::GetFullPath($metadataPath)
+            if (-not $metadataSeen.Add($canonicalMetadata)) { continue }
+            $metadataParent = [System.IO.Path]::GetDirectoryName($canonicalMetadata)
+            if ([string]::IsNullOrWhiteSpace($metadataParent) -or -not (Test-TpmNoReparsePath -Path $metadataParent)) {
+                throw "File transaction metadata path failed the path safety check: $canonicalMetadata"
+            }
+            $metadataPre = Get-TpmFileState -Path $canonicalMetadata
+            if (-not $metadataPre.Readable) { throw "File transaction could not read metadata pre-state '$canonicalMetadata': $($metadataPre.Error)" }
+            $metadataRecord = [pscustomobject]@{ Path=$canonicalMetadata; PreState=$metadataPre; BackupPath=$null; BackupMade=$false }
+            [void]$metadataRecords.Add($metadataRecord)
+            [void]$preStateItems.Add([pscustomobject]@{ ItemId=('metadata:' + [System.IO.Path]::GetFileName($canonicalMetadata)); Path=$canonicalMetadata; Exists=$metadataPre.Exists; IsDirectory=$metadataPre.IsDirectory; Length=$metadataPre.Length; Sha256=$metadataPre.Sha256; LastWriteTimeUtc=$metadataPre.LastWriteTimeUtc; Attributes=$metadataPre.Attributes })
+        }
+        $preStateCaptured = $true
+        $technical.TransactionId = [guid]::NewGuid().ToString('N')
+        $hasCommit = ($null -ne $CommitAction)
+        $plannedChanges = @($records | Where-Object {
+            $_.Operation -ne 'PRESERVE' -and
+            -not ($_.Operation -eq 'REPLACE' -and $_.PreState.Exists -and $_.ExpectedFinalHash -and $_.PreState.Sha256 -ieq $_.ExpectedFinalHash)
+        })
+        if ($plannedChanges.Count -eq 0 -and -not $hasCommit) {
+            foreach ($record in $records) {
+                [void]$skippedItems.Add($record.ItemId)
+                [void]$finalChecks.Add(("No change required for {0}." -f $record.ItemId))
+            }
+            foreach ($metadataRecord in $metadataRecords) {
+                [void]$finalChecks.Add(("Metadata unchanged: {0}." -f $metadataRecord.Path))
+            }
+            if ($finalChecks.Count -eq 0) { [void]$finalChecks.Add('No file changes were required.') }
+            $finalAttempted = $true
+            $finalPassed = $true
+            $requestedOutcome = 'NO_OP'
+            $requestedState = 'UNCHANGED'
+            $requestedSummary = $NoOpSummary
+            $requestedReason = 'NO_CHANGES_NEEDED'
+            return (New-TpmFileBatchResult -WorkflowKey $WorkflowKey -OperationKey $OperationKey -Outcome $requestedOutcome -ProductState $requestedState -Summary $requestedSummary -Items $items -SkippedItems $skippedItems.ToArray() -PreStateItems $preStateItems.ToArray() -PreStateCaptured $true -FinalAttempted $true -FinalPassed $true -FinalChecks $finalChecks.ToArray() -CleanupCompleted $true -ReasonCode $requestedReason -TechnicalDetails $technical)
+        }
+
+        $technical.Stage = 'Staging'
+        if ([string]::IsNullOrWhiteSpace($StagingDir)) {
+            $transactionRoot = New-TpmStagingDirectory -Label ($WorkflowKey + '-' + $OperationKey)
+        } else {
+            $stagingBase = [System.IO.Path]::GetFullPath($StagingDir)
+            if (-not (Test-TpmNoReparsePath -Path $stagingBase)) { throw "File transaction staging base failed the safety check: $stagingBase" }
+            [void][System.IO.Directory]::CreateDirectory($stagingBase)
+            $transactionRoot = Join-Path $stagingBase ('transaction-' + [guid]::NewGuid().ToString('N'))
+            [void][System.IO.Directory]::CreateDirectory($transactionRoot)
+        }
+        $createdStaging = $true
+        if (-not (Test-TpmNoReparsePath -Path $transactionRoot)) { throw "File transaction staging path failed the safety check: $transactionRoot" }
+        $payloadRoot = Join-Path $transactionRoot 'payload'
+
+        $rollbackRoot = Join-Path $transactionRoot '.tpm-file-rollback'
+        [void][System.IO.Directory]::CreateDirectory($payloadRoot)
+        [void][System.IO.Directory]::CreateDirectory($rollbackRoot)
+        foreach ($record in @($records | Where-Object { $_.Operation -in @('ADD','REPLACE') })) {
+            $stagePath = Join-Path $payloadRoot (($records.IndexOf($record)).ToString('0000') + '.payload')
+            Copy-Item -LiteralPath $record.SourcePath -Destination $stagePath -Force -ErrorAction Stop
+            $stagedState = Get-TpmFileState -Path $stagePath
+            if (-not $stagedState.Readable -or -not $stagedState.Exists -or $stagedState.Sha256 -ine $record.SourceHash) {
+                throw "File transaction staged source verification failed for '$($record.ItemId)'."
+            }
+            $record.StagePath = $stagePath
+        }
+
+        $technical.Stage = 'Backup'
+        $backupAttempted = $true
+        foreach ($record in @($records | Where-Object { $_.PreState.Exists })) {
+            $backupPath = Join-Path $rollbackRoot (($records.IndexOf($record)).ToString('0000') + '.backup')
+            Copy-Item -LiteralPath $record.DestinationPath -Destination $backupPath -Force -ErrorAction Stop
+            $backupState = Get-TpmFileState -Path $backupPath
+            if (-not $backupState.Readable -or -not (Test-TpmFileStateMatch -Expected $record.PreState -Actual $backupState)) {
+                $backupFailureStage = 'BackupVerification'
+                $backupFailureCode = 'BACKUP_HASH_MISMATCH'
+                throw "File transaction backup verification failed for '$($record.ItemId)'."
+            }
+            $record.BackupPath = $backupPath
+            $record.BackupMade = $true
+            [void]$backupItems.Add([pscustomobject]@{ ItemId=$record.ItemId; Path=$record.DestinationPath; BackupPath=$backupPath; Sha256=$record.PreState.Sha256 })
+        }
+        foreach ($metadataRecord in $metadataRecords | Where-Object { $_.PreState.Exists }) {
+            $metadataBackup = Join-Path $rollbackRoot ('metadata-' + $metadataRecords.IndexOf($metadataRecord).ToString('0000') + '.backup')
+            Copy-Item -LiteralPath $metadataRecord.Path -Destination $metadataBackup -Force -ErrorAction Stop
+            $metadataBackupState = Get-TpmFileState -Path $metadataBackup
+            if (-not $metadataBackupState.Readable -or -not (Test-TpmFileStateMatch -Expected $metadataRecord.PreState -Actual $metadataBackupState)) {
+                $backupFailureStage = 'BackupVerification'
+                $backupFailureCode = 'METADATA_BACKUP_HASH_MISMATCH'
+                throw "File transaction metadata backup verification failed for '$($metadataRecord.Path)'."
+            }
+            $metadataRecord.BackupPath = $metadataBackup
+            $metadataRecord.BackupMade = $true
+            [void]$backupItems.Add([pscustomobject]@{ ItemId=('metadata:' + [System.IO.Path]::GetFileName($metadataRecord.Path)); Path=$metadataRecord.Path; BackupPath=$metadataBackup; Sha256=$metadataRecord.PreState.Sha256 })
+        }
+        $backupCreated = $true
+        $backupVerified = $true
+
+        $technical.Stage = 'MutationBoundary'
+        foreach ($record in $records) {
+            $current = Get-TpmFileState -Path $record.DestinationPath
+            if (-not (Test-TpmFileStateMatch -Expected $record.PreState -Actual $current)) {
+                throw "File transaction destination changed before promotion: $($record.DestinationPath)"
+            }
+            if ($record.SourcePath) {
+                $sourceNow = Get-TpmFileState -Path $record.SourcePath
+                if (-not $sourceNow.Readable -or $sourceNow.Sha256 -ine $record.SourceHash) {
+                    throw "File transaction source changed before promotion: $($record.SourcePath)"
+                }
+            }
+        }
+        foreach ($metadataRecord in $metadataRecords) {
+            $metadataNow = Get-TpmFileState -Path $metadataRecord.Path
+            if (-not (Test-TpmFileStateMatch -Expected $metadataRecord.PreState -Actual $metadataNow)) {
+                throw "File transaction metadata changed before promotion: $($metadataRecord.Path)"
+            }
+        }
+
+        $technical.Stage = 'Promotion'
+        foreach ($record in $records) {
+            if ($record.Operation -eq 'PRESERVE') {
+                [void]$skippedItems.Add($record.ItemId)
+                continue
+            }
+            if ($record.Operation -eq 'REMOVE' -or ($record.Operation -eq 'REPLACE' -and $record.PreState.Exists)) {
+                try {
+                    Remove-Item -LiteralPath $record.DestinationPath -Force -ErrorAction Stop
+                } catch {
+                    $afterRemoveFailure = Get-TpmFileState -Path $record.DestinationPath
+                    if ($afterRemoveFailure.Readable -and -not $afterRemoveFailure.Exists) { $record.Changed=$true; $mutationStarted=$true; [void]$changedItems.Add($record.ItemId) }
+                    throw
+                }
+                $afterRemove = Get-TpmFileState -Path $record.DestinationPath
+                if (-not $afterRemove.Readable -or $afterRemove.Exists) { throw "File transaction could not remove the planned destination: $($record.DestinationPath)" }
+                $record.Changed=$true
+                $mutationStarted=$true
+                [void]$changedItems.Add($record.ItemId)
+            }
+            if ($record.Operation -in @('ADD','REPLACE')) {
+                try {
+                    $destinationParent = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($record.DestinationPath))
+                    $parentsToCreate = New-Object System.Collections.Generic.List[string]
+                    $parentCursor = $destinationParent
+                    while ($parentCursor -and -not (Test-Path -LiteralPath $parentCursor -PathType Container)) {
+                        [void]$parentsToCreate.Add($parentCursor)
+                        $nextParent = [System.IO.Path]::GetDirectoryName($parentCursor)
+                        if ($nextParent -eq $parentCursor) { break }
+                        $parentCursor = $nextParent
+                    }
+                    foreach ($newParent in $parentsToCreate) {
+                        if ($createdDirectories -notcontains $newParent) { [void]$createdDirectories.Add($newParent) }
+                    }
+                    [void][System.IO.Directory]::CreateDirectory($destinationParent)
+                    Move-Item -LiteralPath $record.StagePath -Destination $record.DestinationPath -Force -ErrorAction Stop
+                } catch {
+                    $afterPromotionFailure = Get-TpmFileState -Path $record.DestinationPath
+                    if ($afterPromotionFailure.Readable -and $afterPromotionFailure.Exists) {
+                        $record.Changed=$true
+                        $mutationStarted=$true
+                        if ($changedItems -notcontains $record.ItemId) { [void]$changedItems.Add($record.ItemId) }
+                    }
+                    throw
+                }
+                $afterPromotion = Get-TpmFileState -Path $record.DestinationPath
+                if (-not $afterPromotion.Readable -or -not $afterPromotion.Exists -or $afterPromotion.IsDirectory) { throw "File transaction promotion produced no readable destination: $($record.DestinationPath)" }
+                $record.Changed=$true
+                $mutationStarted=$true
+                if ($changedItems -notcontains $record.ItemId) { [void]$changedItems.Add($record.ItemId) }
+            }
+            [void]$completedItems.Add($record.ItemId)
+        }
+
+        if ($CommitAction) {
+            $technical.Stage = 'MetadataCommit'
+            $commitAttempted = $true
+            & $CommitAction
+        }
+
+        $technical.Stage = 'FinalVerification'
+        $finalAttempted = $true
+        foreach ($record in $records) {
+            $actual = Get-TpmFileState -Path $record.DestinationPath
+            $valid = $false
+            if ($record.Operation -eq 'PRESERVE') {
+                $valid = Test-TpmFileStateMatch -Expected $record.PreState -Actual $actual
+            } elseif ($record.Operation -eq 'REMOVE') {
+                $valid = $actual.Readable -and -not $actual.Exists
+            } else {
+                $valid = $actual.Readable -and $actual.Exists -and -not $actual.IsDirectory -and ($actual.Sha256 -ieq $record.ExpectedFinalHash)
+            }
+            if ($valid) { [void]$finalChecks.Add(("Verified {0}." -f $record.ItemId)) }
+            else { [void]$finalFailedItems.Add($record.ItemId); throw "File transaction final verification failed for '$($record.ItemId)'." }
+        }
+        foreach ($metadataRecord in $metadataRecords) {
+            if ($PostCommitVerification) { continue }
+            $metadataActual = Get-TpmFileState -Path $metadataRecord.Path
+            if (-not (Test-TpmFileStateMatch -Expected $metadataRecord.PreState -Actual $metadataActual)) {
+                [void]$finalFailedItems.Add('metadata:' + [System.IO.Path]::GetFileName($metadataRecord.Path))
+                throw "File transaction metadata changed without a verification callback: $($metadataRecord.Path)"
+            }
+            [void]$finalChecks.Add(("Verified unchanged metadata {0}." -f $metadataRecord.Path))
+        }
+        if ($PostCommitVerification) {
+            & $PostCommitVerification
+            [void]$finalChecks.Add('Metadata commit callback verification passed.')
+        }
+        $finalPassed = $true
+        $mutationCompleted = $true
+        $requestedOutcome = 'SUCCEEDED'
+        $requestedState = 'INTENDED'
+        $requestedSummary = $SuccessSummary
+        $requestedReason = 'COMPLETED'
+    } catch {
+        $failure = $_
+        $technical.Error = [string]$_.Exception.Message
+        if ($backupFailureStage) { $technical.Stage = $backupFailureStage }
+        if ($mutationStarted -or $commitAttempted) {
+            $rollbackAttempted = $true
+            $technical.Stage = 'Rollback'
+            foreach ($record in @($records | Where-Object { $_.Changed }) | Sort-Object { $records.IndexOf($_) } -Descending) {
+                try {
+                    $current = Get-TpmFileState -Path $record.DestinationPath
+                    if ($record.ExpectedFinalHash -and $current.Exists -and $current.Sha256 -ine $record.ExpectedFinalHash) {
+                        throw "destination changed before rollback: $($record.DestinationPath)"
+                    }
+                    if ($current.Exists) { Remove-Item -LiteralPath $record.DestinationPath -Force -ErrorAction Stop }
+                    if ($record.PreState.Exists) {
+                        if (-not $record.BackupMade -or -not (Test-Path -LiteralPath $record.BackupPath -PathType Leaf)) { throw "verified backup unavailable: $($record.DestinationPath)" }
+                        [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($record.DestinationPath))
+                        Copy-Item -LiteralPath $record.BackupPath -Destination $record.DestinationPath -Force -ErrorAction Stop
+                    }
+                    $restored = Get-TpmFileState -Path $record.DestinationPath
+                    if (-not (Test-TpmFileStateMatch -Expected $record.PreState -Actual $restored)) { throw "restored pre-state mismatch: $($record.DestinationPath)" }
+                    [void]$rollbackItems.Add($record.ItemId)
+                } catch {
+                    [void]$rollbackFailedItems.Add($record.ItemId)
+                    [void]$rollbackErrors.Add(("{0}: {1}" -f $record.ItemId,$_.Exception.Message))
+                }
+            }
+            if ($commitAttempted) {
+                foreach ($metadataRecord in $metadataRecords) {
+                    try {
+                        $currentMetadata = Get-TpmFileState -Path $metadataRecord.Path
+                        if ($currentMetadata.Exists) { Remove-Item -LiteralPath $metadataRecord.Path -Force -ErrorAction Stop }
+                        if ($metadataRecord.PreState.Exists) {
+                            if (-not $metadataRecord.BackupMade -or -not (Test-Path -LiteralPath $metadataRecord.BackupPath -PathType Leaf)) { throw "verified metadata backup unavailable: $($metadataRecord.Path)" }
+                            [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($metadataRecord.Path))
+                            Copy-Item -LiteralPath $metadataRecord.BackupPath -Destination $metadataRecord.Path -Force -ErrorAction Stop
+                        }
+                        $restoredMetadata = Get-TpmFileState -Path $metadataRecord.Path
+                        if (-not (Test-TpmFileStateMatch -Expected $metadataRecord.PreState -Actual $restoredMetadata)) { throw "restored metadata mismatch: $($metadataRecord.Path)" }
+                        [void]$rollbackItems.Add('metadata:' + [System.IO.Path]::GetFileName($metadataRecord.Path))
+                    } catch {
+                        [void]$rollbackFailedItems.Add('metadata:' + [System.IO.Path]::GetFileName($metadataRecord.Path))
+                        [void]$rollbackErrors.Add(("metadata:{0}: {1}" -f [System.IO.Path]::GetFileName($metadataRecord.Path),$_.Exception.Message))
+                    }
+                }
+            }
+            foreach ($createdDir in @($createdDirectories | Sort-Object Length -Descending)) {
+                try {
+                    if ((Test-Path -LiteralPath $createdDir -PathType Container) -and
+                        (@(Get-ChildItem -LiteralPath $createdDir -Force -ErrorAction SilentlyContinue).Count -eq 0)) {
+                        Remove-Item -LiteralPath $createdDir -Force -ErrorAction Stop
+                    }
+                } catch {
+                    [void]$rollbackFailedItems.Add('directory:' + $createdDir)
+                    [void]$rollbackErrors.Add(("directory:{0}: {1}" -f $createdDir,$_.Exception.Message))
+                }
+            }
+            $rollbackCompleted = ($rollbackErrors.Count -eq 0)
+            $rollbackVerified = $rollbackCompleted
+            if ($rollbackVerified) {
+                $requestedOutcome = 'ROLLED_BACK_VERIFIED'
+                $requestedState = 'UNCHANGED'
+                $requestedSummary = 'The change did not finish. TPM restored the files to how they were before. Nothing new remains.'
+                $requestedReason = 'ROLLED_BACK'
+                $finalAttempted = $true
+                $finalPassed = $true
+                [void]$finalChecks.Add('Rollback restored every changed file and metadata path to its captured pre-state.')
+            } else {
+                $requestedOutcome = 'ACTION_REQUIRED'
+                $requestedState = 'UNKNOWN'
+                $requestedSummary = 'TPM stopped before it could verify the final state and needs your attention. Do not retry blindly. Open Details for the next safe step.'
+                $requestedReason = 'ROLLBACK_UNVERIFIED'
+                $finalAttempted = $true
+                $finalPassed = $false
+                foreach ($item in $rollbackFailedItems) { [void]$finalUnknownItems.Add($item) }
+                $technical.RollbackError = $rollbackErrors.ToArray()
+            }
+        } elseif ($backupFailureStage -or -not $mutationStarted) {
+            $requestedOutcome = 'FAILED_BEFORE_MUTATION'
+            $requestedState = 'UNCHANGED'
+            $requestedSummary = 'Nothing was changed because TPM could not prepare and verify a recovery copy.'
+            $requestedReason = if($backupFailureCode){$backupFailureCode}else{'PREFLIGHT_FAILED'}
+            $finalAttempted = $false
+            $finalPassed = $false
+        }
+        foreach ($record in $records) {
+            if (-not $record.Changed -and $completedItems -notcontains $record.ItemId -and $skippedItems -notcontains $record.ItemId) {
+                if ($mutationStarted) { [void]$unattemptedItems.Add($record.ItemId) }
+            }
+        }
+        if ($mutationStarted -and $requestedOutcome -eq 'ROLLED_BACK_VERIFIED') {
+            $completedItems.Clear()
+            foreach ($record in $records | Where-Object Changed) { [void]$completedItems.Add($record.ItemId) }
+        }
+    }
+
+    if ($transactionRoot) {
+        $cleanupAttempted = $true
+        if ($requestedOutcome -eq 'ACTION_REQUIRED') {
+            $cleanupCompleted = $false
+            [void]$residuePaths.Add($transactionRoot)
+        } else {
+            try {
+                if (Test-Path -LiteralPath $transactionRoot) { Remove-Item -LiteralPath $transactionRoot -Recurse -Force -ErrorAction Stop }
+                $cleanupCompleted = $true
+            } catch {
+                $cleanupCompleted = $false
+                $technical.CleanupError = [string]$_.Exception.Message
+                [void]$residuePaths.Add($transactionRoot)
+            }
+        }
+    }
+
+    if ($residuePaths.Count -gt 0 -and $requestedOutcome -in @('SUCCEEDED','ROLLED_BACK_VERIFIED')) {
+        $underlying = $requestedOutcome
+        $requestedOutcome = 'CLEANUP_RESIDUE'
+        $requestedState = if($underlying -eq 'SUCCEEDED'){'INTENDED'}else{'UNCHANGED'}
+        $requestedSummary = 'The files are in a verified state, but TPM could not finish cleanup. Review Details before retrying.'
+        $requestedReason = 'CLEANUP_RESIDUE'
+    }
+    if ($requestedOutcome -eq 'SUCCEEDED') {
+        foreach ($record in $records | Where-Object { $_.Operation -eq 'PRESERVE' }) { [void]$skippedItems.Add($record.ItemId) }
+    }
+    $underlyingOutcome = if ($requestedOutcome -eq 'CLEANUP_RESIDUE') { if($requestedState -eq 'INTENDED'){'SUCCEEDED'}else{'ROLLED_BACK_VERIFIED'} } else { $null }
+    $technical.Stage = if($requestedOutcome -eq 'CLEANUP_RESIDUE'){'Cleanup'}elseif($requestedOutcome -eq 'SUCCEEDED'){'Complete'}elseif($requestedOutcome -eq 'ROLLED_BACK_VERIFIED'){'RollbackVerified'}else{$technical.Stage}
+    return (New-TpmFileBatchResult `
+        -WorkflowKey $WorkflowKey -OperationKey $OperationKey -Outcome $requestedOutcome `
+        -UnderlyingOutcome $underlyingOutcome -ProductState $requestedState `
+        -Summary $requestedSummary -Items $items -ChangedItems $changedItems.ToArray() `
+        -CompletedItems $completedItems.ToArray() -FailedItems $failedItems.ToArray() `
+        -UnattemptedItems $unattemptedItems.ToArray() -SkippedItems $skippedItems.ToArray() `
+        -UnknownItems $unknownItems.ToArray() -MutationStarted $mutationStarted `
+        -MutationCompleted $mutationCompleted -PreStateItems $preStateItems.ToArray() `
+        -PreStateCaptured $preStateCaptured -PreStateEvidenceRoot $transactionRoot `
+        -BackupRequired ($operations.Count -gt 0 -or $metadataRecords.Count -gt 0) `
+        -BackupAttempted $backupAttempted -BackupCreated $backupCreated -BackupVerified $backupVerified `
+        -BackupRootPath $rollbackRoot -BackupItems $backupItems.ToArray() `
+        -BackupFailureStage $backupFailureStage -BackupFailureCode $backupFailureCode `
+        -FinalAttempted $finalAttempted -FinalPassed $finalPassed -FinalChecks $finalChecks.ToArray() `
+        -FinalFailedItems $finalFailedItems.ToArray() -FinalUnknownItems $finalUnknownItems.ToArray() `
+        -RollbackAttempted $rollbackAttempted -RollbackCompleted $rollbackCompleted `
+        -RollbackVerified $rollbackVerified -RollbackItems $rollbackItems.ToArray() `
+        -RollbackEvidenceRoot $rollbackRoot -RollbackFailedItems $rollbackFailedItems.ToArray() `
+        -RollbackErrors $rollbackErrors.ToArray() -CleanupAttempted $cleanupAttempted `
+        -CleanupCompleted $cleanupCompleted -ResiduePresent ($residuePaths.Count -gt 0) `
+        -ResiduePaths $residuePaths.ToArray() -CleanupError $technical.CleanupError `
+        -ReasonCode $requestedReason -TechnicalDetails $technical `
+        -Errors $(if($failure){@([string]$failure.Exception.Message)}else{@()}) `
+        -RecoveryActions $(if($requestedOutcome -eq 'ACTION_REQUIRED'){@(@{Id='Review';Label='Open Details and review the preserved transaction evidence.'})}else{@()}))
+}
+function Invoke-TpmFfbPluginFileTransaction {
+    param(
+        [object[]]$Deployments=@(),
+        [object[]]$Removals=@(),
+        [Parameter(Mandatory)][string]$CacheDir,
+        [object[]]$OwnershipEntries=@()
+    )
+    $operations = New-Object System.Collections.Generic.List[object]
+    foreach ($item in @($Deployments)) {
+        [void]$operations.Add([pscustomobject]@{
+            ItemId=('FFB:' + [string]$item.ProfileCode + ':' + [string]$item.Destination)
+            Operation='ADD'
+            SourcePath=[string]$item.SourcePath
+            DestinationPath=[string]$item.Destination
+            RootPath=[string]$item.GameRoot
+            ExpectedSourceHash=[string]$item.SourceHash
+            ExpectedFinalHash=[string]$item.SourceHash
+        })
+    }
+    foreach ($item in @($Removals)) {
+        [void]$operations.Add([pscustomobject]@{
+            ItemId=('FFB-REMOVE:' + [string]$item.ProfileCode + ':' + [string]$item.Destination)
+            Operation='REMOVE'
+            SourcePath=$null
+            DestinationPath=[string]$item.Destination
+            RootPath=[string]$item.GameRoot
+            ExpectedDestinationHash=[string]$item.DeployedSha256
+        })
+    }
+    if ($operations.Count -eq 0) {
+        return (Invoke-TpmTransactionalFileBatch `
+            -WorkflowKey 'FFBPlugin' -OperationKey 'FileDeployment' -Operations @() `
+            -Summary 'The optional plugin did not complete.' `
+            -SuccessSummary 'The optional plugin files were installed and checked.' `
+            -NoOpSummary 'Everything already matches. Nothing was changed.' `
+            -ReasonCode 'NO_PLUGIN_CHANGES_NEEDED')
+    }
+    $ownershipPath = Get-FFBPluginOwnershipPath -CacheDir $CacheDir
+    $expectedEntries = @($OwnershipEntries)
+    $commit = {
+        Write-FFBPluginOwnership -CacheDir $CacheDir -Entries $expectedEntries
+    }
+    $verify = {
+        $actualEntries = @(Read-FFBPluginOwnership -CacheDir $CacheDir)
+        if ($actualEntries.Count -ne $expectedEntries.Count) {
+            throw 'FFB ownership manifest verification failed: entry count mismatch.'
+        }
+        foreach ($expected in $expectedEntries) {
+            $actual = @($actualEntries | Where-Object { [string]$_.Destination -ieq [string]$expected.Destination } | Select-Object -First 1)
+            if ($actual.Count -ne 1 -or [string]$actual[0].DeployedSha256 -ine [string]$expected.DeployedSha256) {
+                throw "FFB ownership manifest verification failed for '$($expected.Destination)'."
+            }
+        }
+    }
+    return (Invoke-TpmTransactionalFileBatch `
+        -WorkflowKey 'FFBPlugin' -OperationKey 'FileDeployment' `
+        -Operations $operations.ToArray() -MetadataPaths @($ownershipPath) `
+        -CommitAction $commit -PostCommitVerification $verify `
+        -Summary 'The optional plugin did not complete.' `
+        -SuccessSummary 'The optional plugin files were installed and checked.' `
+        -NoOpSummary 'Everything already matches. Nothing was changed.' `
+        -ReasonCode 'FFB_FILE_TRANSACTION_FAILED')
+}
+
+function Invoke-TpmCrosshairAssetTransaction {
+    param(
+        [Parameter(Mandatory)][string]$P1Source,
+        [Parameter(Mandatory)][string]$P2Source,
+        [Parameter(Mandatory)][object[]]$Targets,
+        [Parameter(Mandatory)][string]$StatePath,
+        [Parameter(Mandatory)][string]$P1Name,
+        [Parameter(Mandatory)][string]$P2Name
+    )
+    $p1State = Get-TpmFileState -Path $P1Source
+    $p2State = Get-TpmFileState -Path $P2Source
+    if (-not $p1State.Readable -or -not $p1State.Exists -or $p1State.IsDirectory -or
+        -not $p2State.Readable -or -not $p2State.Exists -or $p2State.IsDirectory) {
+        return (New-TpmFileBatchResult `
+            -WorkflowKey 'CrosshairSetup' -OperationKey 'P1P2' `
+            -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
+            -Summary 'Crosshair setup could not verify its source files.' `
+            -ReasonCode 'CROSSHAIR_SOURCE_UNAVAILABLE')
+    }
+    $operations = New-Object System.Collections.Generic.List[object]
+    $seenTargets = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($target in @($Targets)) {
+        $targetDir = [System.IO.Path]::GetFullPath([string]$target.TargetDir)
+        if (-not $seenTargets.Add($targetDir)) { continue }
+        foreach ($pair in @(
+            [pscustomobject]@{ Suffix='P1'; Source=$P1Source; SourceState=$p1State },
+            [pscustomobject]@{ Suffix='P2'; Source=$P2Source; SourceState=$p2State }
+        )) {
+            $destination = Join-Path $targetDir ($pair.Suffix + '.png')
+            $existing = Get-TpmFileState -Path $destination
+            if (-not $existing.Readable) {
+                return (New-TpmFileBatchResult `
+                    -WorkflowKey 'CrosshairSetup' -OperationKey 'P1P2' `
+                    -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
+                    -Summary 'Crosshair setup could not verify a destination.' `
+                    -ReasonCode 'CROSSHAIR_TARGET_UNAVAILABLE')
+            }
+            $kind = if ($existing.Exists -and -not $existing.IsDirectory -and $existing.Sha256 -ieq $pair.SourceState.Sha256) { 'PRESERVE' } else { 'REPLACE' }
+            [void]$operations.Add([pscustomobject]@{
+                ItemId=([string]$target.ItemId + ':' + $pair.Suffix)
+                Operation=$kind
+                SourcePath=$pair.Source
+                DestinationPath=$destination
+                RootPath=$targetDir
+                ExpectedSourceHash=$pair.SourceState.Sha256
+                ExpectedFinalHash=$pair.SourceState.Sha256
+            })
+        }
+    }
+    $stateSourceRoot = $null
+    try {
+        $currentStateMatches = $false
+        if (Test-Path -LiteralPath $StatePath -PathType Leaf) {
+            try {
+                $saved = Get-Content -LiteralPath $StatePath -Raw -ErrorAction Stop | ConvertFrom-Json
+                $currentStateMatches = ([string]$saved.P1 -eq $P1Name -and [string]$saved.P2 -eq $P2Name)
+            } catch { $currentStateMatches = $false }
+        }
+        if (-not $currentStateMatches) {
+            $stateSourceRoot = New-TpmStagingDirectory -Label 'CrosshairStateSource'
+            $stateSource = Join-Path $stateSourceRoot 'crosshair-state.json'
+            [System.IO.File]::WriteAllText($stateSource, ([ordered]@{ P1=$P1Name; P2=$P2Name } | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+            [void]$operations.Add([pscustomobject]@{
+                ItemId='Crosshair:LastSelection'
+                Operation='REPLACE'
+                SourcePath=$stateSource
+                DestinationPath=$StatePath
+                RootPath=[System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($StatePath))
+                ExpectedSourceHash=(Get-TpmFileState -Path $stateSource).Sha256
+            })
+        }
+        return (Invoke-TpmTransactionalFileBatch `
+            -WorkflowKey 'CrosshairSetup' -OperationKey 'P1P2' `
+            -Operations $operations.ToArray() `
+            -Summary 'Crosshair setup was not completed.' `
+            -SuccessSummary 'Crosshairs were installed and checked.' `
+            -NoOpSummary 'Everything already matches. Nothing was changed.' `
+            -ReasonCode 'CROSSHAIR_FILE_TRANSACTION_FAILED')
+    } finally {
+        if ($stateSourceRoot -and (Test-Path -LiteralPath $stateSourceRoot)) {
+            Remove-Item -LiteralPath $stateSourceRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Invoke-TpmDgVoodoo2FileTransaction {
+    param([Parameter(Mandatory)][object[]]$Operations)
+    return (Invoke-TpmTransactionalFileBatch `
+        -WorkflowKey 'DgVoodoo2Setup' -OperationKey 'DirectDeployment' `
+        -Operations $Operations `
+        -Summary 'dgVoodoo2 setup was not completed.' `
+        -SuccessSummary 'dgVoodoo2 files were installed and checked.' `
+        -NoOpSummary 'Everything already matches. Nothing was changed.' `
+        -ReasonCode 'DGV_FILE_TRANSACTION_FAILED')
+}
+
 # Logs a SHA256 audit trail for a binary downloaded from a third-party
 # source (GitHub Releases, a raw repo file, etc). None of the sources this
 # script pulls from publish checksums to verify against, and most of the
@@ -8604,6 +9437,27 @@ function Invoke-DgVoodoo2Setup {
         return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_SOURCE_FILES' }
     }
     Write-Host ("  Available DLLs : {0}" -f ($available -join ', ')) -ForegroundColor DarkGray
+    $sourceManifestHashes = @{}
+    foreach ($dllName in $available) {
+        $sourceState = Get-TpmFileState -Path (Join-Path $SourceDir $dllName)
+        if (-not $sourceState.Readable -or -not $sourceState.Exists -or $sourceState.IsDirectory) {
+            $sourceError = "dgVoodoo2 source manifest is incomplete for '$dllName'."
+            Write-Host ("  ERROR: {0} No files were changed." -f $sourceError) -ForegroundColor Red
+            Write-Log "dgVoodoo2 setup: aborted -- $sourceError"
+            $transactionResult = New-TpmFileBatchResult `
+                -WorkflowKey 'DgVoodoo2Setup' -OperationKey 'DirectDeployment' `
+                -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
+                -Summary 'dgVoodoo2 setup could not verify its complete source manifest.' `
+                -Items @($available) -ReasonCode 'SOURCE_MANIFEST_FAILED' `
+                -TechnicalDetails ([pscustomobject]@{ Stage='Preflight'; Error=$sourceError })
+            return [pscustomobject]@{
+                Succeeded=$false; Deployed=0; Skipped=0; MissingDevice=0; MissingPath=0; Errors=1
+                Reason='SOURCE_MANIFEST_FAILED'; DeploymentDetails=@(); SkipDetails=@()
+                TransactionResult=$transactionResult
+            }
+        }
+        $sourceManifestHashes[$dllName] = $sourceState.Sha256
+    }
 
     # Per-game config overrides: dgVoodoo2Presets\<ProfileCode>.conf always
     # wins over the global dgVoodoo.conf in $SourceDir for that one game.
@@ -8755,18 +9609,22 @@ function Invoke-DgVoodoo2Setup {
         return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_GAMES_SELECTED' }
     }
 
-    # Deploy DLLs to each selected game folder.
+# Build the complete direct-deployment plan before touching any game folder.
+# Existing DLLs are intentionally omitted from the mutation plan so the
+# transaction can preserve the historical "missing files only" behavior.
     Write-Host ""
-    Write-Host ("  Copying dgVoodoo2 compatibility files into {0} game folder(s)..." -f $targetProfiles.Count) -ForegroundColor Cyan
+    Write-Host ("  Preparing dgVoodoo2 compatibility files for {0} game folder(s)..." -f $targetProfiles.Count) -ForegroundColor Cyan
     $deployed = 0; $skipped = 0; $missingDevice = 0; $missingPath = 0; $errors = 0; $presetOverrides = 0
     $deploymentDetails = New-Object System.Collections.Generic.List[object]
+    $deploymentOperations = New-Object System.Collections.Generic.List[object]
+    $plannedProfiles = New-Object System.Collections.Generic.List[object]
     $hasConf  = Test-Path -LiteralPath (Join-Path $SourceDir "dgVoodoo.conf")
 
     foreach ($pf in $targetProfiles) {
         try {
             $doc = Read-Xml $pf.FullName
             if (-not $doc.GameProfile) { $skipped++; continue }
-            $gpNode   = $doc.GameProfile.SelectSingleNode("GamePath")
+            $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
             if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; continue }
             $gamePath = $gpNode.InnerText.Trim()
             $pathCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
@@ -8783,30 +9641,24 @@ function Invoke-DgVoodoo2Setup {
                 $skipped++
                 $skipReason = if ($pathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'TPM could not find the saved game executable.' }
                 $nextAction = if ($pathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 10) Library Health Check to repair saved game paths.' }
-                [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonCode = [string]$pathCheck.ReasonCode; Reason = $skipReason; SavedPath = $gamePath; NextAction = $nextAction; Technical = [string]$pathCheck.Reason })
-                Write-Log ("dgVoodoo2: skipped {0} before deployment; path reason={1}; detail={2}" -f $pf.BaseName, $pathCheck.ReasonCode, $pathCheck.Reason)
+                [void]$skipDetails.Add([pscustomobject]@{ Game=$pf.BaseName; ReasonCode=[string]$pathCheck.ReasonCode; Reason=$skipReason; SavedPath=$gamePath; NextAction=$nextAction; Technical=[string]$pathCheck.Reason })
+                Write-Log ("dgVoodoo2: skipped {0} before deployment; path reason={1}; detail={2}" -f $pf.BaseName,$pathCheck.ReasonCode,$pathCheck.Reason)
                 continue
             }
             $gamePath = [string]$pathCheck.ResolvedPath
             $exeDir = [string]$pathCheck.GameDirectory
-
-            # Determine which DLLs this game needs based on detected API.
-            $apis = if ($detectedMap.ContainsKey($pf.BaseName)) `
-                        { @($detectedMap[$pf.BaseName]) } `
-                    else `
-                        { @(Get-GameLegacyApi -ExePath $gamePath) }
-
+            $apis = if ($detectedMap.ContainsKey($pf.BaseName)) { @($detectedMap[$pf.BaseName]) } else { @(Get-GameLegacyApi -ExePath $gamePath) }
             $toDeploy = @()
             if ($apis.Count -eq 0) {
-                $toDeploy = $available   # manual pick with no detection: deploy all available
+                $toDeploy = $available
             } else {
-                if ($apis -contains 'D3D8')    { $toDeploy += @($available | Where-Object { $_ -in @('D3D8.dll',   'D3DImm.dll') }) }
-                if ($apis -contains 'DDraw')   { $toDeploy += @($available | Where-Object { $_ -in @('DDraw.dll',  'D3DImm.dll') }) }
-                if ($apis -contains 'Glide2x') { $toDeploy += @($available | Where-Object { $_ -eq  'Glide2x.dll'               }) }
-                if ($apis -contains 'Glide3x') { $toDeploy += @($available | Where-Object { $_ -eq  'Glide3x.dll'               }) }
+                if ($apis -contains 'D3D8')    { $toDeploy += @($available | Where-Object { $_ -in @('D3D8.dll','D3DImm.dll') }) }
+                if ($apis -contains 'DDraw')   { $toDeploy += @($available | Where-Object { $_ -in @('DDraw.dll','D3DImm.dll') }) }
+                if ($apis -contains 'Glide2x') { $toDeploy += @($available | Where-Object { $_ -eq 'Glide2x.dll' }) }
+                if ($apis -contains 'Glide3x') { $toDeploy += @($available | Where-Object { $_ -eq 'Glide3x.dll' }) }
                 $toDeploy = @($toDeploy | Select-Object -Unique)
                 if ($toDeploy.Count -eq 0) {
-                    Write-Host ("  WARN  {0}: detected [{1}] but none of those DLLs are in the source folder; deploying all available." -f $pf.BaseName, ($apis -join ', ')) -ForegroundColor Yellow
+                    Write-Host ("  WARN  {0}: detected [{1}] but none of those DLLs are in the source folder; deploying all available." -f $pf.BaseName,($apis -join ', ')) -ForegroundColor Yellow
                     Write-Log "dgVoodoo2: $($pf.BaseName) -- detected [$($apis -join ', ')] but no matching DLLs found; deploying all available."
                     $toDeploy = $available
                 }
@@ -8818,60 +9670,104 @@ function Invoke-DgVoodoo2Setup {
                 if ($boundaryCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
                 $boundaryReason = if ($boundaryCheck.Valid) { 'RESOLUTION_CHANGED' } else { $boundaryCheck.ReasonCode }
                 $boundaryNextAction = if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 10) Library Health Check to repair saved game paths.' }
-                [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonCode = [string]$boundaryReason; Reason = 'The game path changed or became unavailable before the safe write.'; SavedPath = $gamePath; NextAction = $boundaryNextAction; Technical = [string]$boundaryCheck.Reason })
-                Write-Host ("  SKIP  {0} -- mutation-boundary path check failed ({1}); unchanged." -f $pf.BaseName, $boundaryReason) -ForegroundColor Yellow
-                Write-Log ("dgVoodoo2: skipped {0} at mutation boundary; path reason={1}; detail={2}" -f $pf.BaseName, $boundaryReason, $boundaryCheck.Reason)
+                [void]$skipDetails.Add([pscustomobject]@{ Game=$pf.BaseName; ReasonCode=[string]$boundaryReason; Reason='The game path changed or became unavailable before the safe write.'; SavedPath=$gamePath; NextAction=$boundaryNextAction; Technical=[string]$boundaryCheck.Reason })
+                Write-Host ("  SKIP  {0} -- mutation-boundary path check failed ({1}); unchanged." -f $pf.BaseName,$boundaryReason) -ForegroundColor Yellow
+                Write-Log ("dgVoodoo2: skipped {0} at mutation boundary; path reason={1}; detail={2}" -f $pf.BaseName,$boundaryReason,$boundaryCheck.Reason)
                 continue
             }
             $gamePath = [string]$boundaryCheck.ResolvedPath
             $exeDir = [string]$boundaryCheck.GameDirectory
-
-
             foreach ($dllName in $toDeploy) {
+                $sourcePath = Join-Path $SourceDir $dllName
+                $sourceState = Get-TpmFileState -Path $sourcePath
+                if (-not $sourceState.Readable -or -not $sourceState.Exists -or $sourceState.IsDirectory) {
+                    throw "dgVoodoo2 source manifest is incomplete for '$dllName'."
+                }
                 $dstDll = Join-Path $exeDir $dllName
                 if (-not (Test-Path -LiteralPath $dstDll)) {
-                    Copy-Item -LiteralPath (Join-Path $SourceDir $dllName) -Destination $dstDll -ErrorAction Stop
+                    [void]$deploymentOperations.Add([pscustomobject]@{
+                        ItemId=('DgVoodoo2:' + $pf.BaseName + ':' + $dllName)
+                        Operation='ADD'
+                        SourcePath=$sourcePath
+                        DestinationPath=$dstDll
+                        RootPath=$exeDir
+                        ExpectedSourceHash=$sourceManifestHashes[$dllName]
+                        ExpectedFinalHash=$sourceManifestHashes[$dllName]
+                    })
                 }
             }
-            # Per-game config (dgVoodoo2Presets\<ProfileCode>.conf) always wins
-            # over the global dgVoodoo.conf for this one game, and -- unlike
-            # the global conf -- always overwrites: it's an explicit per-game
-            # action, so "never overwrite" would silently defeat it on any
-            # game that already has a conf deployed from a prior run.
             $perGameConf = Join-Path $dgVoodoo2PresetsDir ($pf.BaseName + ".conf")
-            $confNote    = ""
-            if (Test-Path -LiteralPath $perGameConf) {
+            $confNote = ''
+            if (Test-Path -LiteralPath $perGameConf -PathType Leaf) {
+                $confState = Get-TpmFileState -Path $perGameConf
+                if (-not $confState.Readable -or -not $confState.Exists -or $confState.IsDirectory) {
+                    throw "dgVoodoo2 per-game configuration is not a readable file: $perGameConf"
+                }
                 $dstConf = Join-Path $exeDir "dgVoodoo.conf"
-                Copy-Item -LiteralPath $perGameConf -Destination $dstConf -Force -ErrorAction Stop
+                [void]$deploymentOperations.Add([pscustomobject]@{
+                    ItemId=('DgVoodoo2:' + $pf.BaseName + ':dgVoodoo.conf')
+                    Operation='REPLACE'
+                    SourcePath=$perGameConf
+                    DestinationPath=$dstConf
+                    RootPath=$exeDir
+                    ExpectedSourceHash=$confState.Sha256
+                    ExpectedFinalHash=$confState.Sha256
+                })
                 $presetOverrides++
-                $confNote = "  (config: per-game)"
+                $confNote = '  (config: per-game)'
             }
-            $apiStr = if ($apis.Count -gt 0) { "  [{0}]" -f ($apis -join ', ') } else { "" }
-            Write-Host ("  OK    {0}{1}{2}" -f $pf.BaseName, $apiStr, $confNote) -ForegroundColor Green
-            Write-Log ("dgVoodoo2: deployed {0} to {1}{2}" -f ($toDeploy -join ', '), $exeDir, $confNote)
-            $deployed++
-            [void]$deploymentDetails.Add([pscustomobject]@{
-                Game = $pf.BaseName
-                LegacyApis = @($apis)
-                Files = @($toDeploy)
-                Destination = $exeDir
-                Config = if ($confNote) { 'per-game config' } elseif ($hasConf) { 'global config available; existing config preserved' } else { 'no config copied' }
+            [void]$plannedProfiles.Add([pscustomobject]@{
+                Game=$pf.BaseName
+                LegacyApis=@($apis)
+                Files=@($toDeploy)
+                Destination=$exeDir
+                Config=if($confNote){'per-game config'}elseif($hasConf){'global config available; existing config preserved'}else{'no config copied'}
+                ConfigApplied=[bool]$confNote
             })
         } catch {
             $failureCode = Get-TpmGameMutationFailureCode -ErrorRecord $_
             if ($failureCode -eq 'DEVICE_UNAVAILABLE' -or $failureCode -eq 'GAME_PATH_MISSING') {
                 $skipped++
                 $nextAction = if ($failureCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 10) Library Health Check to repair saved game paths.' }
-                [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonCode = $failureCode; Reason = if ($failureCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'The saved game executable could not be found.' }; SavedPath = $gamePath; NextAction = $nextAction; Technical = [string]$_.Exception.Message })
+                [void]$skipDetails.Add([pscustomobject]@{ Game=$pf.BaseName; ReasonCode=$failureCode; Reason=if($failureCode -eq 'DEVICE_UNAVAILABLE'){'The saved game drive or device is unavailable.'}else{'The saved game executable could not be found.'}; SavedPath=$gamePath; NextAction=$nextAction; Technical=[string]$_.Exception.Message })
                 if ($failureCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ } else { $missingPath++ }
-                Write-Host ("  SKIP  {0} -- mutation became unavailable ({1}); unchanged." -f $pf.BaseName, $failureCode) -ForegroundColor Yellow
-                Write-Log ("dgVoodoo2: skipped {0} after mutation failure; path reason={1}; detail={2}" -f $pf.BaseName, $failureCode, $_)
+                Write-Host ("  SKIP  {0} -- mutation became unavailable ({1}); unchanged." -f $pf.BaseName,$failureCode) -ForegroundColor Yellow
+                Write-Log ("dgVoodoo2: skipped {0} after preflight failure; path reason={1}; detail={2}" -f $pf.BaseName,$failureCode,$_)
             } else {
-                Write-Host ("  ERROR {0} -- {1}" -f $pf.BaseName, $_) -ForegroundColor Red
-                Write-Log "dgVoodoo2: error on $($pf.BaseName) -- $_"
+                Write-Host ("  ERROR {0} -- {1}" -f $pf.BaseName,$_) -ForegroundColor Red
+                Write-Log "dgVoodoo2: preflight error on $($pf.BaseName) -- $_"
                 $errors++
             }
         }
+    }
+
+    if ($errors -gt 0) {
+        $transactionResult = New-TpmFileBatchResult `
+            -WorkflowKey 'DgVoodoo2Setup' -OperationKey 'DirectDeployment' `
+            -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
+            -Summary 'dgVoodoo2 setup could not complete its deployment preflight.' `
+            -Items @($deploymentOperations | ForEach-Object { $_.ItemId }) `
+            -ReasonCode 'PREFLIGHT_FAILED' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='Preflight'; Error='One or more selected game deployments failed preflight.' })
+    } else {
+        $transactionResult = Invoke-TpmDgVoodoo2FileTransaction -Operations $deploymentOperations.ToArray()
+    }
+    if ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP')) {
+        foreach ($plan in $plannedProfiles) {
+            $apiStr = if (@($plan.LegacyApis).Count -gt 0) { "  [{0}]" -f (@($plan.LegacyApis) -join ', ') } else { '' }
+            $confText = if ($plan.ConfigApplied) { '  (config: per-game)' } else { '' }
+            Write-Host ("  OK    {0}{1}{2}" -f $plan.Game,$apiStr,$confText) -ForegroundColor Green
+            Write-Log ("dgVoodoo2: verified deployment plan for {0} at {1}{2}" -f $plan.Game,$plan.Destination,$confText)
+            [void]$deploymentDetails.Add([pscustomobject]@{
+                Game=$plan.Game; LegacyApis=@($plan.LegacyApis); Files=@($plan.Files)
+                Destination=$plan.Destination; Config=$plan.Config
+            })
+        }
+        $deployed = $plannedProfiles.Count
+    } else {
+        $errors++
+        Write-Host ("  ERROR: dgVoodoo2 file transaction did not complete ({0}). Review Details before retrying." -f $transactionResult.Outcome) -ForegroundColor Red
+        Write-Log ("dgVoodoo2: direct file transaction outcome={0} reason={1}" -f $transactionResult.Outcome,$transactionResult.ReasonCode)
     }
 
     Write-Host ""
@@ -8887,16 +9783,18 @@ function Invoke-DgVoodoo2Setup {
     Write-Host "  TeknoParrot Manager does not remove an unowned dgVoodoo2 hook automatically." -ForegroundColor DarkCyan
     Write-Host "  Existing or changed files need advanced troubleshooting review." -ForegroundColor DarkCyan
     Write-Log ("dgVoodoo2 setup: deployed={0} skipped={1} missingDevice={2} missingPath={3} errors={4} presetOverrides={5}" -f $deployed, $skipped, $missingDevice, $missingPath, $errors, $presetOverrides)
+    $legacySucceeded = ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP') -and $deployed -gt 0 -and $errors -eq 0 -and $skipped -eq 0 -and $missingDevice -eq 0 -and $missingPath -eq 0)
     return [pscustomobject]@{
-        Succeeded = ($deployed -gt 0 -and $errors -eq 0 -and $skipped -eq 0 -and $missingDevice -eq 0 -and $missingPath -eq 0)
+        Succeeded = $legacySucceeded
         Deployed = $deployed
         Skipped = $skipped
         MissingDevice = $missingDevice
         MissingPath = $missingPath
         Errors = $errors
-        Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } elseif ($deployed -eq 0) { 'NO_GAMES_DEPLOYED' } else { $null }
+        Reason = if ($errors) { if($transactionResult.Outcome -notin @('SUCCEEDED','NO_OP')){$transactionResult.ReasonCode}else{'DEPLOYMENT_ERRORS'} } elseif ($deployed -eq 0) { 'NO_GAMES_DEPLOYED' } else { $null }
         DeploymentDetails = $deploymentDetails.ToArray()
         SkipDetails = $skipDetails.ToArray()
+        TransactionResult = $transactionResult
     }
 }
 
@@ -10728,9 +11626,6 @@ function Invoke-CrosshairSetup {
     }
     Write-Log "Crosshairs: P1=$p1Name  P2=$p2Name"
 
-    try {
-        [System.IO.File]::WriteAllText($crosshairStatePath, ([ordered]@{ P1 = $p1Name; P2 = $p2Name } | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
-    } catch { Write-Log "Crosshairs: could not save last-used state -- $_" }
 
     # Locate ElfLdr2 folder -- search common names then any elf-named subfolder
     $elfDir = $null
@@ -10746,154 +11641,148 @@ function Invoke-CrosshairSetup {
 
     # Locate pcsx2x6 folder -- shared resolver, see Resolve-Pcsx2Directory.
     $pcsx2Dir = Resolve-Pcsx2Directory -TeknoParrotRoot $TpRoot
-# Deploy
+# Build one physical target plan for all lightgun profiles. Shared emulator
+# folders are represented once; the transaction performs the P1/P2 pair
+# atomically and commits last-selection state only after final verification.
     Write-Host ""
-    Write-Host "  Deploying to lightgun games..." -ForegroundColor Cyan
-    $deployed = 0; $skipped = 0; $errors = 0; $elfDeployed = $false; $pcsx2Deployed = $false
+    Write-Host "  Preparing crosshair deployment..." -ForegroundColor Cyan
+    $skipped = 0; $errors = 0; $deployed = 0
+    $targetPlans = New-Object System.Collections.Generic.List[object]
+    $logicalDeployments = New-Object System.Collections.Generic.List[string]
+    $elfPlanned = $false; $pcsx2Planned = $false; $pcsx2IniPath = $null; $pcsx2AssetDir = $null
 
     $xmlFiles = Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
                 Where-Object { $_.Directory.Name -ne "FullBackup" }
 
     foreach ($pf in $xmlFiles) {
         try {
-            $doc     = Read-Xml $pf.FullName
+            $doc = Read-Xml $pf.FullName
             if ($null -eq $doc.GameProfile) { continue }
             $gameLabel = if ($doc.GameProfile.GameName) { ([string]$doc.GameProfile.GameName).Trim() } else { $pf.BaseName }
             $gunNode = $doc.GameProfile.SelectSingleNode("GunGame")
             if (-not $gunNode -or $gunNode.InnerText -ne "true") { continue }
 
             $emuType = ""
-            $etNode  = $doc.GameProfile.SelectSingleNode("EmulatorType")
+            $etNode = $doc.GameProfile.SelectSingleNode("EmulatorType")
             if ($etNode) { $emuType = $etNode.InnerText.Trim() }
 
             if ($emuType -eq "ElfLdr2") {
-                # All ElfLdr2 lightgun games share one folder -- deploy once
-                if (-not $elfDeployed) {
-                    $dest = if ($elfDir) { $elfDir } else { $TpRoot }
-                    Copy-Item -LiteralPath $valid[$p1Idx] -Destination (Join-Path $dest "P1.png") -Force -ErrorAction Stop
-                    Copy-Item -LiteralPath $valid[$p2Idx] -Destination (Join-Path $dest "P2.png") -Force -ErrorAction Stop
-                    Write-Host ("    ElfLdr2 -> {0}" -f $dest) -ForegroundColor Green
-                    Write-Log "Crosshairs: deployed to ElfLdr2 folder $dest"
-                    $elfDeployed = $true
+                $dest = if ($elfDir) { $elfDir } else { $TpRoot }
+                if (-not $elfPlanned) {
+                    [void]$targetPlans.Add([pscustomobject]@{ ItemId='ElfLdr2'; TargetDir=$dest })
+                    $elfPlanned = $true
                 }
-                $deployed++; continue
+                [void]$logicalDeployments.Add($pf.BaseName)
+                continue
             }
 
             if ($emuType -eq "Pcsx2x6") {
-                # All Pcsx2x6 lightgun games share one emulator folder -- deploy once
-                # Also updates inis\PCSX2.ini with the cursor_path for each USB port.
-                if (-not $pcsx2Deployed) {
-                    if ($pcsx2Dir) {
-                        $pcsx2Deployed = $true
-                        $prereqState = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $pcsx2Dir
-
-                        if ($prereqState.State -eq 'StockUninitialized') {
-                            Write-Host ""
-                            Write-Host "  PCSX2 Crosshair Setup Required" -ForegroundColor Cyan
-                            Write-Host ("    TeknoParrot Manager found pcsx2x6 installed but not yet initialized for TeknoParrot ({0})." -f $prereqState.Reason) -ForegroundColor DarkGray
-                            Write-Host "    TeknoParrot Manager can trigger the emulator's own first-run initialization, then install the crosshair assets and verify the result." -ForegroundColor DarkGray
-                            $firstRunAnswer = Read-TpmYesNo -Prompt "  Configure Automatically? (Y/N)" -WorkflowContext $WorkflowContext
-                            if ($firstRunAnswer -eq "Y") {
-                                if (-not (Wait-TpmForProcessClose -ProcessNames @('pcsx2-qtx64') -FriendlyName 'PCSX2')) {
-                                    Write-Host "    Crosshair setup cancelled without changes. The selected crosshairs were not deployed." -ForegroundColor Yellow
-                                    Write-Log "Crosshairs: Pcsx2x6 first-run setup paused while process remained open"
-                                } else {
-                                    $firstRun = Invoke-Pcsx2FirstRunSetup -State $prereqState
-                                    if ($firstRun.Success) {
-                                        Write-Host "    First-run initialization succeeded." -ForegroundColor Green
-                                        $prereqState = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $pcsx2Dir
-                                    } else {
-                                        Write-Host ("    FAILED: {0}" -f $firstRun.Reason) -ForegroundColor Red
-                                        Write-Log "Crosshairs: Pcsx2x6 first-run setup failed -- $($firstRun.Reason)"
-                                    }
-                                }
-                            } else {
-                                Write-Host "    Skipped -- Pcsx2x6 crosshair setup needs an initialized PCSX2.ini to continue." -ForegroundColor Yellow
-                                Write-Log "Crosshairs: Pcsx2x6 first-run setup declined by user"
-                            }
-                        }
-
-                        if ($prereqState.State -eq 'StockUninitialized') {
-                            # Still not initialized (declined, process remained
-                            # open, or the trigger failed) -- do not place
-                            # assets or touch cursor_path against an install
-                            # PCSX2.ini that has never been validated.
-                            $skipped++; continue
-                        }
-
-                        # ECVF is fail-closed for every write-adjacent action:
-                        # an Unknown contract state is treated as NotInstalled
-                        # for deployment decisions, while the original state
-                        # remains available for reporting and diagnostics.
-                        $assetCopyState = if ($prereqState.State -eq 'Unknown') { 'NotInstalled' } else { $prereqState.State }
-                        if ($assetCopyState -eq 'NotInstalled') {
-                            Write-Host ("    SKIPPED: Pcsx2x6 prerequisite state is {0}; no crosshair assets or cursor_path handling performed." -f $prereqState.State) -ForegroundColor Yellow
-                            Write-Log ("Crosshairs: Pcsx2x6 deployment skipped -- prerequisite state {0} ({1})" -f $prereqState.State, $prereqState.Reason)
-                            $skipped++; continue
-                        }
-
-                        # Deploy under the contract-resolved DataRoot, not a
-                        # reconstructed default path. This preserves portable.txt
-                        # and any future resolver behavior in one ownership boundary.
-                        $dataRoot = $prereqState.DataRoot
-                        if ([string]::IsNullOrWhiteSpace($dataRoot)) {
-                            Write-Host ("    SKIPPED: Pcsx2x6 DataRoot could not be resolved for prerequisite state {0}; no crosshair assets or cursor_path handling performed." -f $prereqState.State) -ForegroundColor Yellow
-                            Write-Log ("Crosshairs: Pcsx2x6 deployment skipped -- DataRoot unavailable for prerequisite state {0}" -f $prereqState.State)
-                            $deployed++; continue
-                        }
-                        $crosshairSubDir = Join-Path $dataRoot "crosshairs"
-                        if (-not (Test-Path -LiteralPath $crosshairSubDir)) {
-                            [void](New-Item -ItemType Directory -Path $crosshairSubDir -Force -ErrorAction Stop)
-                        }
-                        $p1Dest = Join-Path $crosshairSubDir "P1.png"
-                        $p2Dest = Join-Path $crosshairSubDir "P2.png"
-                        Copy-Item -LiteralPath $valid[$p1Idx] -Destination $p1Dest -Force -ErrorAction Stop
-                        Copy-Item -LiteralPath $valid[$p2Idx] -Destination $p2Dest -Force -ErrorAction Stop
-                        # ECVF-correct ini path (contracts\pcsx2x6\evidence.md#ev-portable-root):
-                        # DataRoot\inis\PCSX2.ini, not a bare "$pcsx2Dir\inis\PCSX2.ini" --
-                        # the real ini lives under the resolved TeknoParrot data-root subfolder.
-                        $iniPath = $prereqState.IniPath
-                        if ($iniPath -and (Test-Path -LiteralPath $iniPath)) {
-                            $iniUpdated = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path $p1Dest -P2Path $p2Dest
-                            $iniStatus = if ($iniUpdated) { "PCSX2.ini updated" } else { "PNGs copied; PCSX2.ini cursor_path left untouched, see note above" }
-                            Write-Host ("    Pcsx2x6 -> {0}  ({1})" -f $pcsx2Dir, $iniStatus) -ForegroundColor Green
-                            # ECVF: cursor_path under [USB1]/[USB2] is emulator-owned,
-                            # WritePolicy=NeverWrite -- this reports the current
-                            # on-disk value for operator visibility, it never writes.
-                            $cursorReport = Get-Pcsx2CursorPathReport -IniPath $iniPath
-                            if ($cursorReport.Available) {
-                                $usb1Display = if ($cursorReport.USB1CursorPath) { $cursorReport.USB1CursorPath } else { "(not set)" }
-                                $usb2Display = if ($cursorReport.USB2CursorPath) { $cursorReport.USB2CursorPath } else { "(not set)" }
-                                Write-Host ("      cursor_path is emulator-managed: USB1={0}  USB2={1}  (PCSX2 clears this automatically when JVS mode is LIGHTGUN -- no action needed)" -f $usb1Display, $usb2Display) -ForegroundColor DarkGray
-                            }
-                        } else {
-                            Write-Host ("    Pcsx2x6 -> {0}  (PCSX2.ini not found; PNGs copied)" -f $pcsx2Dir) -ForegroundColor Green
-                            Write-Log "Crosshairs: Pcsx2x6 PCSX2.ini not found at $iniPath"
-                        }
-                        Write-Log "Crosshairs: deployed to Pcsx2x6 folder $pcsx2Dir"
-                    } else {
+                if (-not $pcsx2Planned) {
+                    if (-not $pcsx2Dir) {
                         Write-Host "    Pcsx2x6: emulator folder not found in TeknoParrot root -- skipped" -ForegroundColor Yellow
                         Write-Log "Crosshairs: Pcsx2x6 folder not found in $TpRoot"
+                        $skipped++
+                        continue
                     }
+                    $prereqState = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $pcsx2Dir
+                    if ($prereqState.State -eq 'StockUninitialized') {
+                        Write-Host ""
+                        Write-Host "  PCSX2 Crosshair Setup Required" -ForegroundColor Cyan
+                        Write-Host ("    TeknoParrot Manager found pcsx2x6 installed but not yet initialized for TeknoParrot ({0})." -f $prereqState.Reason) -ForegroundColor DarkGray
+                        Write-Host "    TeknoParrot Manager can trigger the emulator's own first-run initialization, then install the crosshair assets and verify the result." -ForegroundColor DarkGray
+                        $firstRunAnswer = Read-TpmYesNo -Prompt "  Configure Automatically? (Y/N)" -WorkflowContext $WorkflowContext
+                        if ($firstRunAnswer -eq "Y") {
+                            if (-not (Wait-TpmForProcessClose -ProcessNames @('pcsx2-qtx64') -FriendlyName 'PCSX2')) {
+                                Write-Host "    Crosshair setup cancelled without changes. The selected crosshairs were not deployed." -ForegroundColor Yellow
+                                Write-Log "Crosshairs: Pcsx2x6 first-run setup paused while process remained open"
+                            } else {
+                                $firstRun = Invoke-Pcsx2FirstRunSetup -State $prereqState
+                                if ($firstRun.Success) {
+                                    Write-Host "    First-run initialization succeeded." -ForegroundColor Green
+                                    $prereqState = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $pcsx2Dir
+                                } else {
+                                    Write-Host ("    FAILED: {0}" -f $firstRun.Reason) -ForegroundColor Red
+                                    Write-Log "Crosshairs: Pcsx2x6 first-run setup failed -- $($firstRun.Reason)"
+                                }
+                            }
+                        }
+                    }
+                    if ($prereqState.State -eq 'StockUninitialized') {
+                        $skipped++
+                        continue
+                    }
+                    $assetCopyState = if ($prereqState.State -eq 'Unknown') { 'NotInstalled' } else { $prereqState.State }
+                    if ($assetCopyState -eq 'NotInstalled') {
+                        Write-Host ("    SKIPPED: Pcsx2x6 prerequisite state is {0}; no crosshair assets or cursor_path handling performed." -f $prereqState.State) -ForegroundColor Yellow
+                        Write-Log ("Crosshairs: Pcsx2x6 deployment skipped -- prerequisite state {0} ({1})" -f $prereqState.State,$prereqState.Reason)
+                        $skipped++
+                        continue
+                    }
+                    $dataRoot = [string]$prereqState.DataRoot
+                    if ([string]::IsNullOrWhiteSpace($dataRoot)) {
+                        Write-Host ("    SKIPPED: Pcsx2x6 DataRoot could not be resolved for prerequisite state {0}; no crosshair assets or cursor_path handling performed." -f $prereqState.State) -ForegroundColor Yellow
+                        Write-Log ("Crosshairs: Pcsx2x6 deployment skipped -- DataRoot unavailable for prerequisite state {0}" -f $prereqState.State)
+                        $skipped++
+                        continue
+                    }
+                    $crosshairSubDir = Join-Path $dataRoot "crosshairs"
+                    [void]$targetPlans.Add([pscustomobject]@{ ItemId='Pcsx2x6'; TargetDir=$crosshairSubDir })
+                    $pcsx2AssetDir = $crosshairSubDir
+                    $pcsx2IniPath = $prereqState.IniPath
+                    $pcsx2Planned = $true
                 }
-                $deployed++; continue
+                [void]$logicalDeployments.Add($pf.BaseName)
+                continue
             }
 
-            # Standard game: copy to the game exe directory
             $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
             if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; continue }
-            $exeDir = [System.IO.Path]::GetDirectoryName($gpNode.InnerText.Trim())
-            if ([string]::IsNullOrWhiteSpace($exeDir) -or -not (Test-Path -LiteralPath $exeDir)) { $skipped++; continue }
-
-            Copy-Item -LiteralPath $valid[$p1Idx] -Destination (Join-Path $exeDir "P1.png") -Force -ErrorAction Stop
-            Copy-Item -LiteralPath $valid[$p2Idx] -Destination (Join-Path $exeDir "P2.png") -Force -ErrorAction Stop
-            Write-Host ("    {0} -> {1}" -f $gameLabel, $exeDir) -ForegroundColor Green
-            Write-Log "Crosshairs: deployed $gameLabel -> $exeDir"
-            $deployed++
+            $gamePath = $gpNode.InnerText.Trim()
+            $pathCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
+            if (-not $pathCheck.Valid) {
+                Write-Host ("    {0}: game path could not be safely verified -- skipped" -f $gameLabel) -ForegroundColor Yellow
+                Write-Log ("Crosshairs: skipped {0}; path reason={1}; detail={2}" -f $pf.BaseName,$pathCheck.ReasonCode,$pathCheck.Reason)
+                $skipped++
+                continue
+            }
+            [void]$targetPlans.Add([pscustomobject]@{ ItemId=$pf.BaseName; TargetDir=[string]$pathCheck.GameDirectory })
+            [void]$logicalDeployments.Add($pf.BaseName)
         } catch {
-            Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
-            Write-Log "Crosshairs: error on $($pf.BaseName) -- $_"
+            Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName,$_) -ForegroundColor Red
+            Write-Log "Crosshairs: preflight error on $($pf.BaseName) -- $_"
             $errors++
+        }
+    }
+
+    $transactionResult = Invoke-TpmCrosshairAssetTransaction `
+        -P1Source $valid[$p1Idx] -P2Source $valid[$p2Idx] `
+        -Targets $targetPlans.ToArray() -StatePath $crosshairStatePath `
+        -P1Name $p1Name -P2Name $p2Name
+    if ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP')) {
+        $deployed = $logicalDeployments.Count
+        foreach ($target in $targetPlans) {
+            Write-Host ("    {0} -> {1}" -f $target.ItemId,$target.TargetDir) -ForegroundColor Green
+            Write-Log ("Crosshairs: verified P1/P2 deployment to $($target.TargetDir)")
+        }
+    } else {
+        $errors++
+        Write-Host ("  Crosshair file transaction did not complete ({0}). Review Details before retrying." -f $transactionResult.Outcome) -ForegroundColor Yellow
+        Write-Log ("Crosshairs: P1/P2 transaction outcome={0} reason={1}" -f $transactionResult.Outcome,$transactionResult.ReasonCode)
+    }
+
+    # cursor_path remains an emulator-owned, separately-gated action. It is
+    # intentionally not part of the P1/P2 file transaction.
+    if ($pcsx2AssetDir -and $transactionResult.Outcome -in @('SUCCEEDED','NO_OP') -and $pcsx2IniPath -and (Test-Path -LiteralPath $pcsx2IniPath)) {
+        $p1Dest = Join-Path $pcsx2AssetDir "P1.png"
+        $p2Dest = Join-Path $pcsx2AssetDir "P2.png"
+        $iniUpdated = Set-Pcsx2CursorPaths -IniPath $pcsx2IniPath -P1Path $p1Dest -P2Path $p2Dest
+        $iniStatus = if ($iniUpdated) { "PCSX2.ini updated" } else { "PNGs copied; PCSX2.ini cursor_path left untouched, see note above" }
+        Write-Host ("    Pcsx2x6 -> {0}  ({1})" -f $pcsx2Dir,$iniStatus) -ForegroundColor Green
+        $cursorReport = Get-Pcsx2CursorPathReport -IniPath $pcsx2IniPath
+        if ($cursorReport.Available) {
+            $usb1Display = if ($cursorReport.USB1CursorPath) { $cursorReport.USB1CursorPath } else { "(not set)" }
+            $usb2Display = if ($cursorReport.USB2CursorPath) { $cursorReport.USB2CursorPath } else { "(not set)" }
+            Write-Host ("      cursor_path is emulator-managed: USB1={0}  USB2={1}  (PCSX2 clears this automatically when JVS mode is LIGHTGUN -- no action needed)" -f $usb1Display,$usb2Display) -ForegroundColor DarkGray
         }
     }
 
@@ -10915,10 +11804,16 @@ function Invoke-CrosshairSetup {
             Write-Log "Crosshairs: cursor-hide transaction did not complete; crosshair files may already have been deployed."
         }
     }
-    return [pscustomobject]@{ Succeeded = ($errors -eq 0 -and $deployed -gt 0 -and $cursorSucceeded); Deployed = $deployed; Skipped = $skipped; Errors = ($errors + $(if($cursorSucceeded){0}else{1})); CursorResult = $cursorResult }
+    $crosshairSucceeded = ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP') -and $errors -eq 0 -and $deployed -gt 0 -and $cursorSucceeded)
+    return [pscustomobject]@{
+        Succeeded=$crosshairSucceeded
+        Deployed=$deployed
+        Skipped=$skipped
+        Errors=($errors + $(if($cursorSucceeded){0}else{1}))
+        CursorResult=$cursorResult
+        TransactionResult=$transactionResult
+    }
 }
-
-# =============================================================================
 # Sets the cursor-hide field (HideCursor / "Hide Cursor" / DisableCursor) to 1
 # in every registered lightgun UserProfile. Backs up UserProfiles first since
 # it modifies XMLs. Skips profiles that have no cursor field or are already set.
@@ -13993,56 +14888,62 @@ function Remove-FFBPluginOwnedDeployment {
     param([Parameter(Mandatory)][string]$CacheDir, [Parameter(Mandatory)][string]$ProfileCode)
     $entries = @(Read-FFBPluginOwnership -CacheDir $CacheDir)
     $script:FFBOwnedRemovalRecords = @()
+    $script:FFBLastRemovalTransactionResult = $null
     $remaining = New-Object System.Collections.Generic.List[object]
-    $removedItems = New-Object System.Collections.ArrayList
-    $removed = $false
+    $removalItems = New-Object System.Collections.Generic.List[object]
     foreach ($entry in $entries) {
-        if ([string]$entry.ProfileCode -ne $ProfileCode) { [void]$remaining.Add($entry); continue }
-        $destination = [string]$entry.Destination
-        if (-not (Test-Path -LiteralPath $destination -PathType Leaf) -or
-            [string]::IsNullOrWhiteSpace([string]$entry.GameRoot) -or
-            -not (Test-PathInside -child $destination -parent ([string]$entry.GameRoot))) {
-            [void]$remaining.Add($entry); continue
+        if ([string]$entry.ProfileCode -ne $ProfileCode) {
+            [void]$remaining.Add($entry)
+            continue
         }
-        $currentHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash
-        if ($currentHash -ine [string]$entry.DeployedSha256) {
+        $destination = [string]$entry.Destination
+        $gameRoot = [string]$entry.GameRoot
+        if ([string]::IsNullOrWhiteSpace($gameRoot) -or
+            -not (Test-Path -LiteralPath $destination -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $gameRoot -PathType Container) -or
+            -not (Test-TpmNoReparsePath -Path $gameRoot) -or
+            -not (Test-PathInside -child $destination -parent $gameRoot)) {
+            [void]$remaining.Add($entry)
+            continue
+        }
+        $current = Get-TpmFileState -Path $destination
+        if (-not $current.Readable -or $current.Sha256 -ine [string]$entry.DeployedSha256) {
             Write-Host ("    Kept {0}: the hook file changed after TeknoParrot Manager installed it." -f $destination) -ForegroundColor Yellow
             Write-Log "FFBPlugin ownership: refused removal of changed file $destination"
-            [void]$remaining.Add($entry); continue
+            [void]$remaining.Add($entry)
+            continue
         }
-        $backupDir = Join-Path (Join-Path ([string]$entry.GameRoot) 'FullBackup') ('FFBPluginCleanup_' + (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss'))
+        $backupDir = Join-Path (Join-Path $gameRoot 'FullBackup') ('FFBPluginCleanup_' + (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss_fff') + '_' + [guid]::NewGuid().ToString('N'))
         [void][System.IO.Directory]::CreateDirectory($backupDir)
         $backupPath = Join-Path $backupDir ([System.IO.Path]::GetFileName($destination))
         Copy-Item -LiteralPath $destination -Destination $backupPath -Force -ErrorAction Stop
-        Remove-Item -LiteralPath $destination -Force -ErrorAction Stop
-        [void]$removedItems.Add([pscustomobject]@{ Destination = $destination; Backup = $backupPath; Hash = $entry.DeployedSha256 })
-        $removed = $true
-    }
-    if ($removed) {
-        try {
-            Write-FFBPluginOwnership -CacheDir $CacheDir -Entries $remaining.ToArray()
-        } catch {
-            $rollbackErrors = New-Object System.Collections.Generic.List[string]
-            foreach ($item in @($removedItems)) {
-                try {
-                    if (-not (Test-Path -LiteralPath $item.Destination -PathType Leaf)) {
-                        Copy-Item -LiteralPath $item.Backup -Destination $item.Destination -Force -ErrorAction Stop
-                    }
-                    if ((Get-FileHash -LiteralPath $item.Destination -Algorithm SHA256 -ErrorAction Stop).Hash -ine [string]$item.Hash) { throw 'restored hash mismatch' }
-                } catch { [void]$rollbackErrors.Add($item.Destination) }
-            }
-            if ($rollbackErrors.Count -gt 0) {
-                Write-Log ("FFBPlugin ownership: manifest write and deletion rollback failed; evidence remains in backup(s): {0}" -f ($rollbackErrors -join ', '))
-                throw 'FFBPlugin ownership manifest update failed and deletion rollback was incomplete.'
-            }
-            Write-Log 'FFBPlugin ownership: manifest write failed; deletion was rolled back from verified backup.'
-            throw 'FFBPlugin ownership manifest update failed; deletion was rolled back.'
+        $backupState = Get-TpmFileState -Path $backupPath
+        if (-not $backupState.Readable -or -not (Test-TpmFileStateMatch -Expected $current -Actual $backupState)) {
+            throw "FFBPlugin removal backup verification failed for '$destination'."
         }
+        [void]$removalItems.Add([pscustomobject]@{
+            ProfileCode=$entry.ProfileCode
+            GameRoot=$gameRoot
+            Destination=$destination
+            DeployedSha256=$entry.DeployedSha256
+            Backup=$backupPath
+            Hash=$entry.DeployedSha256
+        })
     }
-    $script:FFBOwnedRemovalRecords = $removedItems.ToArray()
-    return $removed
+    if ($removalItems.Count -eq 0) { return $false }
+    $result = Invoke-TpmFfbPluginFileTransaction `
+        -Removals $removalItems.ToArray() -CacheDir $CacheDir `
+        -OwnershipEntries $remaining.ToArray()
+    $script:FFBLastRemovalTransactionResult = $result
+    if ($result.Outcome -in @('SUCCEEDED','NO_OP')) {
+        $script:FFBOwnedRemovalRecords = $removalItems.ToArray()
+        return $true
+    }
+    if ($result.Outcome -eq 'ROLLED_BACK_VERIFIED') {
+        throw 'FFBPlugin ownership manifest update failed; deletion was rolled back.'
+    }
+    throw 'FFBPlugin ownership manifest update failed and deletion rollback was incomplete.'
 }
-
 function Invoke-FFBPluginSetup {
     param(
         [string]$UserProfilesDir,
@@ -14261,6 +15162,7 @@ function Invoke-FFBPluginSetup {
     $invalidPathCount = $skippedMissingPath + $skippedMissingDevice
     $skippedNoMatch = [Math]::Max(0, $profiles.Count - $candidates.Count - $matchErrors - $invalidPathCount)
 
+    $deploymentPlans = New-Object System.Collections.Generic.List[object]
     foreach ($c in $candidates) {
         $pf = $c.Profile
         $gameLabel = $pf.BaseName
@@ -14268,14 +15170,11 @@ function Invoke-FFBPluginSetup {
             $labelDoc = Read-Xml $pf.FullName
             if ($labelDoc.GameProfile.GameName) { $gameLabel = ([string]$labelDoc.GameProfile.GameName).Trim() }
         } catch {}
-        $destinationCreated = $false
-        $deployedHash = ''
         try {
             if ($nativeEnabledSet.Contains($pf.BaseName) -and $useNativeForOverlaps) {
                 [void](Remove-FFBPluginOwnedDeployment -CacheDir $CacheDir -ProfileCode $pf.BaseName)
-                foreach ($removedItem in @($script:FFBOwnedRemovalRecords)) {
-                    [void]$nativeRemovedThisRun.Add($removedItem)
-                }
+                foreach ($removedItem in @($script:FFBOwnedRemovalRecords)) { [void]$nativeRemovedThisRun.Add($removedItem) }
+                $ownershipEntries = @(Read-FFBPluginOwnership -CacheDir $CacheDir)
                 $skippedNative++
                 continue
             }
@@ -14315,7 +15214,7 @@ function Invoke-FFBPluginSetup {
             $dllName = if ($arch -eq 'x86') { 'MAME32.dll' } else { 'MAME64.dll' }
             $srcDll = [string]$download.Files[$dllName]
             if ([string]::IsNullOrWhiteSpace($srcDll) -or -not (Test-Path -LiteralPath $srcDll -PathType Leaf)) {
-                Write-Host ("    SKIP  {0}: the verified {1}-bit plugin file is unavailable." -f $gameLabel, $(if ($arch -eq 'x86') {'32'} else {'64'})) -ForegroundColor Yellow
+                Write-Host ("    SKIP  {0}: the verified {1}-bit plugin file is unavailable." -f $gameLabel,$(if($arch -eq 'x86'){'32'}else{'64'})) -ForegroundColor Yellow
                 $skippedDllMissing++
                 continue
             }
@@ -14324,63 +15223,61 @@ function Invoke-FFBPluginSetup {
             if (-not $sourceEvidence -or $sourceHash -ine [string]$sourceEvidence.Sha256) {
                 throw "FFBPlugin: staged $dllName hash no longer matches acquisition evidence."
             }
-
-            $entryOwnershipSnapshot = Get-FFBPluginOwnershipSnapshot -CacheDir $CacheDir
-            $destinationCreated = $true
-            Copy-Item -LiteralPath $srcDll -Destination $destPath -ErrorAction Stop
-            $deployedHash = (Get-FileHash -LiteralPath $destPath -Algorithm SHA256 -ErrorAction Stop).Hash
-            if ($deployedHash -ine $sourceHash) {
-                throw "FFBPlugin: deployed $destDll hash did not match its verified source."
-            }
-            $priorOwnership = @($ownershipEntries)
-            $ownershipEntries = @($ownershipEntries | Where-Object { $_.Destination -ine $destPath })
             $entry = [pscustomobject]@{
-                ProfileCode = $pf.BaseName
-                GameRoot = $exeDir
-                Destination = $destPath
-                SourceSha256 = $sourceHash
-                DeployedSha256 = $deployedHash
-                SourceRevision = $source.Revision
-                SourceTrust = $source.Trust
-                CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+                ProfileCode=$pf.BaseName
+                GameRoot=$exeDir
+                Destination=$destPath
+                SourcePath=$srcDll
+                SourceHash=$sourceHash
+                SourceSha256=$sourceHash
+                DeployedSha256=$sourceHash
+                SourceRevision=$source.Revision
+                SourceTrust=$source.Trust
+                GameLabel=$gameLabel
+                CreatedUtc=(Get-Date).ToUniversalTime().ToString('o')
             }
+            $ownershipEntries = @($ownershipEntries | Where-Object { $_.Destination -ine $destPath })
             $ownershipEntries += $entry
-            try {
-                Write-FFBPluginOwnership -CacheDir $CacheDir -Entries $ownershipEntries
-            } catch {
-                try {
-                    if (Test-Path -LiteralPath $destPath -PathType Leaf) {
-                        Remove-Item -LiteralPath $destPath -Force -ErrorAction Stop
-                    }
-                    if (Test-Path -LiteralPath $destPath -PathType Leaf) { throw 'new hook remained after ownership rollback' }
-                    Restore-FFBPluginOwnershipSnapshot -CacheDir $CacheDir -Snapshot $entryOwnershipSnapshot
-                } catch {
-                    Write-Log "FFBPlugin: ownership failure rollback incomplete -- $_"
-                }
-                $ownershipEntries = $priorOwnership
-                throw
-            }
-            $destinationCreated = $false
-            [void]$deployedThisRun.Add($entry)
-            Write-Host ("    OK    {0}  (optional plugin installed)" -f $gameLabel) -ForegroundColor Green
-            Write-Log "FFBPlugin: deployed $destDll to $exeDir (matched '$($c.Match.Name)', score $([Math]::Round($c.Score,2)))"
-            $deployed++
+            [void]$deploymentPlans.Add($entry)
         } catch {
-            if ($destinationCreated -and (Test-Path -LiteralPath $destPath -PathType Leaf)) {
-                try {
-                    $currentDestinationHash = (Get-FileHash -LiteralPath $destPath -Algorithm SHA256 -ErrorAction Stop).Hash
-                    if ([string]::IsNullOrWhiteSpace($deployedHash) -or $currentDestinationHash -ieq $deployedHash) {
-                        Remove-Item -LiteralPath $destPath -Force -ErrorAction Stop
-                    } else {
-                        Write-Log "FFBPlugin: preserved changed destination after deployment failure -- $destPath"
-                    }
-                } catch {
-                    Write-Log "FFBPlugin: deployment failure cleanup failed -- $destPath -- $_"
-                }
-            }
-            Write-Host ("    ERROR {0} -- {1}" -f $gameLabel, $_) -ForegroundColor Red
-            Write-Log "FFBPlugin: error on $($pf.BaseName) -- $_"
+            Write-Host ("    ERROR {0} -- {1}" -f $gameLabel,$_) -ForegroundColor Red
+            Write-Log "FFBPlugin: preflight error on $($pf.BaseName) -- $_"
             $errors++
+        }
+    }
+    if ($errors -gt 0) {
+        $transactionResult = New-TpmFileBatchResult `
+            -WorkflowKey 'FFBPlugin' -OperationKey 'FileDeployment' `
+            -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
+            -Summary 'The optional plugin could not complete its deployment preflight.' `
+            -Items @($deploymentPlans | ForEach-Object { 'FFB:' + $_.ProfileCode }) `
+            -ReasonCode 'PREFLIGHT_FAILED' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='Preflight'; Error='One or more selected plugin deployments failed preflight.' })
+    } else {
+        $transactionResult = Invoke-TpmFfbPluginFileTransaction `
+            -Deployments $deploymentPlans.ToArray() -CacheDir $CacheDir `
+            -OwnershipEntries $ownershipEntries
+    }
+    if ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP')) {
+        foreach ($plan in $deploymentPlans) {
+            [void]$deployedThisRun.Add($plan)
+            Write-Host ("    OK    {0}  (optional plugin installed)" -f $(if($plan.GameLabel){$plan.GameLabel}else{$plan.ProfileCode})) -ForegroundColor Green
+            Write-Log "FFBPlugin: verified deployment of $([System.IO.Path]::GetFileName($plan.Destination)) to $($plan.GameRoot)"
+            $deployed++
+        }
+    } else {
+        if ($transactionResult.Outcome -ne 'FAILED_BEFORE_MUTATION' -or $errors -eq 0) { $errors++ }
+        Write-Host ("  Optional plugin file transaction did not complete ({0}). Review Details before retrying." -f $transactionResult.Outcome) -ForegroundColor Yellow
+        Write-Log ("FFBPlugin: file transaction outcome={0} reason={1}" -f $transactionResult.Outcome,$transactionResult.ReasonCode)
+        if ($nativeSwitch -or $nativeRemovedThisRun.Count -gt 0) {
+            $nativeRestore = Restore-FFBPluginDeploymentTransaction `
+                -Entries @() -RemovedItems $nativeRemovedThisRun.ToArray() -CacheDir $CacheDir `
+                -OwnershipSnapshot $ownershipSnapshot -UserProfilesDir $UserProfilesDir `
+                -OverlapBackupPath $(if ($nativeSwitch) { [string]$nativeSwitch.BackupPath } else { '' })
+            if (-not $nativeRestore.Succeeded) {
+                $errors++
+                Write-Log ("FFBPlugin: native rollback after file transaction failure was incomplete -- {0}" -f ($nativeRestore.Errors -join ' ;; '))
+            }
         }
     }
 
@@ -14403,8 +15300,8 @@ function Invoke-FFBPluginSetup {
     $accounted = $skippedNative + $skippedCollision + $skippedNoMatch + $skippedDllMissing + $skippedMissingPath + $skippedMissingDevice + $errors + $deployed
     $accountingComplete = ($accounted -eq $profiles.Count)
     $blockingSkips = $skippedDllMissing + $skippedMissingPath + $skippedMissingDevice
-    $succeeded = ($errors -eq 0 -and $blockingSkips -eq 0 -and $accountingComplete)
-    $reason = if (-not $accountingComplete) { 'ACCOUNTING_INCOMPLETE' } elseif ($errors -gt 0) { 'DEPLOYMENT_ERRORS' } elseif ($blockingSkips -gt 0) { 'BLOCKED_SKIPS' } elseif ($deployed -gt 0) { 'DEPLOYED' } elseif ($skippedNative -gt 0 -and $skippedNoMatch -eq 0) { 'NATIVE_PREFERRED' } elseif ($skippedNoMatch -gt 0 -and $skippedNative -eq 0) { 'NO_SUPPORTED_PLUGIN_TARGET' } else { 'NO_PLUGIN_CHANGES_NEEDED' }
+    $succeeded = ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP') -and $errors -eq 0 -and $blockingSkips -eq 0 -and $accountingComplete)
+    $reason = if ($transactionResult.Outcome -notin @('SUCCEEDED','NO_OP')) { $transactionResult.ReasonCode } elseif (-not $accountingComplete) { 'ACCOUNTING_INCOMPLETE' } elseif ($errors -gt 0) { 'DEPLOYMENT_ERRORS' } elseif ($blockingSkips -gt 0) { 'BLOCKED_SKIPS' } elseif ($deployed -gt 0) { 'DEPLOYED' } elseif ($skippedNative -gt 0 -and $skippedNoMatch -eq 0) { 'NATIVE_PREFERRED' } elseif ($skippedNoMatch -gt 0 -and $skippedNative -eq 0) { 'NO_SUPPORTED_PLUGIN_TARGET' } else { 'NO_PLUGIN_CHANGES_NEEDED' }
     $rollback = $null
     if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) {
         $evidence = [ordered]@{
@@ -14473,6 +15370,7 @@ function Invoke-FFBPluginSetup {
         PreflightEvidenceWritten = $preflightEvidenceWritten
         RollbackSucceeded = if ($rollback) { [bool]$rollback.Succeeded } else { $null }
         RollbackErrors = if ($rollback) { @($rollback.Errors) } else { @() }
+        TransactionResult = $transactionResult
     }
 
 }

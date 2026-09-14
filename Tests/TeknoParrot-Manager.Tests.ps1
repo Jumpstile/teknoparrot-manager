@@ -12643,9 +12643,9 @@ Describe "ReShade trusted profile restore" {
         $script:ProductionSource | Should -Match 'console focus return was unavailable'
         $script:ProductionSource | Should -Match '-WorkflowContext \$WorkflowContext'
         $confirmAt = $script:ProductionSource.IndexOf('$crosshairConfirm')
-        $copyAt = $script:ProductionSource.IndexOf('Copy-Item -LiteralPath $valid[$p1Idx]')
-        $confirmAt | Should -BeGreaterOrEqual 0
-        $copyAt | Should -BeGreaterThan $confirmAt
+        $transactionAt = $script:ProductionSource.IndexOf('Invoke-TpmCrosshairAssetTransaction', $confirmAt)
+        $transactionAt | Should -BeGreaterThan $confirmAt
+        $script:ProductionSource | Should -Not -Match 'Copy-Item -LiteralPath \$valid\[\$p1Idx\]'
     }
     It "writes a completed browser state into the generated preview" {
         $preview = Join-Path $TestDrive 'CrosshairPreview.html'
@@ -14597,7 +14597,7 @@ Describe 'TPM-owned layout and legacy migration' {
         $script:ProductionSource | Should -Match 'Do you have an active, paid TeknoParrot membership\?"'
         $script:ProductionSource | Should -Match '\$hasSub = Read-TpmYesNo -Prompt "  Choose Y or N"'
         $script:ProductionSource | Should -Not -Match 'Read-TpmYesNo -Prompt "  Do you have an active, paid TeknoParrot membership'
-        $script:ProductionSource | Should -Match '\$succeeded = \(\$errors -eq 0 -and \$blockingSkips -eq 0 -and \$accountingComplete\)'
+        $script:ProductionSource | Should -Match '\$succeeded = \(\$transactionResult\.Outcome -in @\(''SUCCEEDED'',''NO_OP''\) -and \$errors -eq 0 -and \$blockingSkips -eq 0 -and \$accountingComplete\)'
         $script:ProductionSource | Should -Match "NO_SUPPORTED_PLUGIN_TARGET"
         $script:ProductionSource | Should -Match "NATIVE_PREFERRED"
         $script:ProductionSource | Should -Match 'TeknoParrot Manager only removes optional plugin files'
@@ -14639,6 +14639,244 @@ Describe "S1-TX-CORE transaction outcome model" {
     It "carries transaction metadata separately from presentation outcome" { $m=New-S1Mutation -Selected 1; $e=New-S1Evidence -FinalAttempted $true -FinalPassed $true -Checks @('already matches'); $r=New-S1Result -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Items @('game-a') -Mutation $m -Evidence $e; $md=ConvertTo-TpmWorkflowTransactionMetadata $r; $md.TransactionOutcome | Should -Be 'NO_OP'; $md.PresentationOutcome | Should -Be 'Skipped'; $md.RequiresAttention | Should -BeFalse; $md.PSTypeNames | Should -Contain 'TPM.WorkflowTransactionMetadata.v1' }
 }
 
+
+Describe 'S1-FILE-PROMOTION shared multi-root transaction' {
+    BeforeAll {
+        function New-S1FileOperation {
+            param([string]$Id,[string]$Operation,[string]$Source,[string]$Destination,[string]$Root,[string]$Hash='')
+            [pscustomobject]@{
+                ItemId=$Id
+                Operation=$Operation
+                SourcePath=$Source
+                DestinationPath=$Destination
+                RootPath=$Root
+                ExpectedSourceHash=$Hash
+                ExpectedFinalHash=$Hash
+            }
+        }
+        function New-S1FileFixture {
+            param([string]$Name)
+            $root=Join-Path $TestDrive $Name
+            $source=Join-Path $root 'source'
+            $gameA=Join-Path $root 'game-a'
+            $gameB=Join-Path $root 'game-b'
+            New-Item -ItemType Directory -Path $source,$gameA,$gameB -Force | Out-Null
+            [pscustomobject]@{ Root=$root; Source=$source; GameA=$gameA; GameB=$gameB }
+        }
+    }
+
+    It 'promotes new and replacement files across multiple roots and verifies final hashes' {
+        $f=New-S1FileFixture 'batch-success'
+        $a=Join-Path $f.Source 'a.bin'; $b=Join-Path $f.Source 'b.bin'
+        [System.IO.File]::WriteAllText($a,'new-a'); [System.IO.File]::WriteAllText($b,'new-b')
+        $old=Join-Path $f.GameB 'b.bin'; [System.IO.File]::WriteAllText($old,'old-b')
+        $ops=@(
+            (New-S1FileOperation 'game-a:a' 'ADD' $a (Join-Path $f.GameA 'a.bin') $f.GameA ((Get-FileHash $a -Algorithm SHA256).Hash)),
+            (New-S1FileOperation 'game-b:b' 'REPLACE' $b $old $f.GameB ((Get-FileHash $b -Algorithm SHA256).Hash))
+        )
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'Success' -Operations $ops
+        $r.Outcome | Should -Be 'SUCCEEDED'
+        $r.ProductState | Should -Be 'INTENDED'
+        [System.IO.File]::ReadAllText((Join-Path $f.GameA 'a.bin')) | Should -Be 'new-a'
+        [System.IO.File]::ReadAllText($old) | Should -Be 'new-b'
+        $r.FinalVerification.Passed | Should -BeTrue
+        $r.Backup.Verified | Should -BeTrue
+    }
+
+    It 'returns NO_OP without creating backup state when every target already matches' {
+        $f=New-S1FileFixture 'batch-noop'
+        $source=Join-Path $f.Source 'same.bin'; $target=Join-Path $f.GameA 'same.bin'
+        [System.IO.File]::WriteAllText($source,'same'); [System.IO.File]::WriteAllText($target,'same')
+        $hash=(Get-FileHash $source -Algorithm SHA256).Hash
+        $op=New-S1FileOperation 'same' 'REPLACE' $source $target $f.GameA $hash
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'NoOp' -Operations @($op)
+        $r.Outcome | Should -Be 'NO_OP'
+        $r.Backup.Attempted | Should -BeFalse
+        $r.FinalVerification.Passed | Should -BeTrue
+        [System.IO.File]::ReadAllText($target) | Should -Be 'same'
+    }
+
+    It 'rolls back every changed root when a later promotion fails' {
+        $f=New-S1FileFixture 'batch-late-failure'
+        $a=Join-Path $f.Source 'a.bin'; $b=Join-Path $f.Source 'b.bin'
+        [System.IO.File]::WriteAllText($a,'a'); [System.IO.File]::WriteAllText($b,'b')
+        $targetA=Join-Path $f.GameA 'a.bin'; $targetB=Join-Path $f.GameB 'b.bin'
+        $ops=@(
+            (New-S1FileOperation 'a' 'ADD' $a $targetA $f.GameA ((Get-FileHash $a -Algorithm SHA256).Hash)),
+            (New-S1FileOperation 'b' 'ADD' $b $targetB $f.GameB ((Get-FileHash $b -Algorithm SHA256).Hash))
+        )
+        Mock Move-Item {
+            param($LiteralPath,$Destination)
+            if ($LiteralPath -like '*0001.payload') { throw 'simulated second promotion failure' }
+            [System.IO.File]::Move($LiteralPath,$Destination)
+        }
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'LateFailure' -Operations $ops
+        $r.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $r.Rollback.Verified | Should -BeTrue
+        Test-Path -LiteralPath $targetA | Should -BeFalse
+        Test-Path -LiteralPath $targetB | Should -BeFalse
+    }
+    It 'removes newly-created destination parents when a later nested promotion fails' {
+        $f=New-S1FileFixture 'batch-nested-parent-rollback'
+        $a=Join-Path $f.Source 'nested-a.bin'; $b=Join-Path $f.Source 'nested-b.bin'
+        [System.IO.File]::WriteAllText($a,'nested-a'); [System.IO.File]::WriteAllText($b,'nested-b')
+        $parentA=Join-Path $f.GameA 'new-parent\deeper'
+        $parentB=Join-Path $f.GameB 'other-parent\deeper'
+        $targetA=Join-Path $parentA 'a.bin'; $targetB=Join-Path $parentB 'b.bin'
+        $ops=@(
+            (New-S1FileOperation 'nested-a' 'ADD' $a $targetA $f.GameA ((Get-FileHash $a -Algorithm SHA256).Hash)),
+            (New-S1FileOperation 'nested-b' 'ADD' $b $targetB $f.GameB ((Get-FileHash $b -Algorithm SHA256).Hash))
+        )
+        Mock Move-Item {
+            param($LiteralPath,$Destination)
+            if ($LiteralPath -like '*0001.payload') { throw 'simulated nested second promotion failure' }
+            [System.IO.File]::Move($LiteralPath,$Destination)
+        }
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'NestedParentRollback' -Operations $ops
+        $r.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $r.Rollback.Verified | Should -BeTrue
+        Test-Path -LiteralPath $targetA | Should -BeFalse
+        Test-Path -LiteralPath $targetB | Should -BeFalse
+        Test-Path -LiteralPath $parentA | Should -BeFalse
+        Test-Path -LiteralPath ([System.IO.Path]::GetDirectoryName($parentA)) | Should -BeFalse
+        Test-Path -LiteralPath $parentB | Should -BeFalse
+        Test-Path -LiteralPath ([System.IO.Path]::GetDirectoryName($parentB)) | Should -BeFalse
+    }
+
+    It 'detects a promotion that writes destination bytes before throwing and restores absence' {
+        $f=New-S1FileFixture 'batch-partial-copy'
+        $source=Join-Path $f.Source 'partial.bin'; $target=Join-Path $f.GameA 'partial.bin'
+        [System.IO.File]::WriteAllText($source,'partial')
+        $hash=(Get-FileHash $source -Algorithm SHA256).Hash
+        $op=New-S1FileOperation 'partial' 'ADD' $source $target $f.GameA $hash
+        Mock Move-Item {
+            param($LiteralPath,$Destination)
+            [System.IO.File]::Copy($LiteralPath,$Destination,$true)
+            throw 'simulated post-copy promotion failure'
+        }
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'PartialCopy' -Operations @($op)
+        $r.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        Test-Path -LiteralPath $target | Should -BeFalse
+    }
+
+    It 'rolls back files when the metadata commit fails' {
+        $f=New-S1FileFixture 'batch-metadata-failure'
+        $source=Join-Path $f.Source 'plugin.dll'; $target=Join-Path $f.GameA 'plugin.dll'
+        $metadata=Join-Path $f.Root 'ownership.json'
+        [System.IO.File]::WriteAllText($source,'plugin'); [System.IO.File]::WriteAllText($metadata,'old-manifest')
+        $hash=(Get-FileHash $source -Algorithm SHA256).Hash
+        $op=New-S1FileOperation 'plugin' 'ADD' $source $target $f.GameA $hash
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'MetadataFailure' -Operations @($op) -MetadataPaths @($metadata) -CommitAction { throw 'simulated metadata commit failure' }
+        $r.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        Test-Path -LiteralPath $target | Should -BeFalse
+        [System.IO.File]::ReadAllText($metadata) | Should -Be 'old-manifest'
+    }
+
+    It 'returns ACTION_REQUIRED and preserves transaction evidence when rollback fails' {
+        $f=New-S1FileFixture 'batch-rollback-failure'
+        $source=Join-Path $f.Source 'plugin.dll'; $target=Join-Path $f.GameA 'plugin.dll'
+        [System.IO.File]::WriteAllText($source,'plugin')
+        $hash=(Get-FileHash $source -Algorithm SHA256).Hash
+        $op=New-S1FileOperation 'plugin' 'ADD' $source $target $f.GameA $hash
+        Mock Move-Item {
+            param($LiteralPath,$Destination)
+            [System.IO.File]::Move($LiteralPath,$Destination)
+        }
+        Mock Remove-Item {
+            param($LiteralPath,$Recurse,$Force,$ErrorAction)
+            if ($LiteralPath -like '*plugin.dll') { throw 'simulated rollback removal failure' }
+            if (Test-Path -LiteralPath $LiteralPath -PathType Container) { [System.IO.Directory]::Delete($LiteralPath,[bool]$Recurse) } elseif (Test-Path -LiteralPath $LiteralPath) { [System.IO.File]::Delete($LiteralPath) }
+        }
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'RollbackFailure' -Operations @($op) -CommitAction { throw 'simulated commit failure' }
+        $r.Outcome | Should -Be 'ACTION_REQUIRED'
+        $r.ProductState | Should -Be 'UNKNOWN'
+        $r.Cleanup.ResiduePresent | Should -BeTrue
+        Test-Path -LiteralPath $target | Should -BeTrue
+    }
+
+    It 'reports cleanup residue separately after a verified success' {
+        $f=New-S1FileFixture 'batch-cleanup-residue'
+        $source=Join-Path $f.Source 'plugin.dll'; $target=Join-Path $f.GameA 'plugin.dll'
+        [System.IO.File]::WriteAllText($source,'plugin')
+        $hash=(Get-FileHash $source -Algorithm SHA256).Hash
+        $op=New-S1FileOperation 'plugin' 'ADD' $source $target $f.GameA $hash
+        Mock Remove-Item {
+            param($LiteralPath,$Recurse,$Force,$ErrorAction)
+            if ($LiteralPath -like '*S1Test-CleanupResidue*') { throw 'simulated cleanup failure' }
+            if (Test-Path -LiteralPath $LiteralPath -PathType Container) { [System.IO.Directory]::Delete($LiteralPath,[bool]$Recurse) } elseif (Test-Path -LiteralPath $LiteralPath) { [System.IO.File]::Delete($LiteralPath) }
+        }
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'CleanupResidue' -Operations @($op)
+        $r.Outcome | Should -Be 'CLEANUP_RESIDUE'
+        $r.UnderlyingOutcome | Should -Be 'SUCCEEDED'
+        $r.ProductState | Should -Be 'INTENDED'
+        $r.Cleanup.ResiduePresent | Should -BeTrue
+        [System.IO.File]::ReadAllText($target) | Should -Be 'plugin'
+    }
+    It 'routes FFB wrapper deployments through ownership commit and final verification' {
+        $f=New-S1FileFixture 'ffb-wrapper'
+        $source=Join-Path $f.Source 'MAME64.dll'; $target=Join-Path $f.GameA 'd3d9.dll'
+        [System.IO.File]::WriteAllText($source,'ffb')
+        $hash=(Get-FileHash $source -Algorithm SHA256).Hash
+        $entry=[pscustomobject]@{ ProfileCode='GameA'; GameRoot=$f.GameA; Destination=$target; SourcePath=$source; SourceHash=$hash; DeployedSha256=$hash }
+        $r=Invoke-TpmFfbPluginFileTransaction -Deployments @($entry) -CacheDir $f.Root -OwnershipEntries @($entry)
+        $r.Outcome | Should -Be 'SUCCEEDED'
+        (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash | Should -Be $hash
+        @(Read-FFBPluginOwnership -CacheDir $f.Root | Where-Object { $_.Destination -ieq $target }) | Should -HaveCount 1
+    }
+
+    It 'routes Crosshair P1/P2 and last-selection state as one deduplicated batch' {
+        $f=New-S1FileFixture 'crosshair-wrapper'
+        $p1=Join-Path $f.Source 'P1.png'; $p2=Join-Path $f.Source 'P2.png'; $state=Join-Path $f.Root 'last-selection.json'
+        [System.IO.File]::WriteAllText($p1,'p1'); [System.IO.File]::WriteAllText($p2,'p2')
+        $targets=@(
+            [pscustomobject]@{ ItemId='GameA'; TargetDir=$f.GameA },
+            [pscustomobject]@{ ItemId='SharedAlias'; TargetDir=$f.GameA },
+            [pscustomobject]@{ ItemId='GameB'; TargetDir=$f.GameB }
+        )
+        $r=Invoke-TpmCrosshairAssetTransaction -P1Source $p1 -P2Source $p2 -Targets $targets -StatePath $state -P1Name '001' -P2Name '002'
+        $r.Outcome | Should -Be 'SUCCEEDED'
+        @($r.Items) | Should -HaveCount 5
+        [System.IO.File]::ReadAllText((Join-Path $f.GameA 'P1.png')) | Should -Be 'p1'
+        [System.IO.File]::ReadAllText((Join-Path $f.GameB 'P2.png')) | Should -Be 'p2'
+        ((Get-Content -LiteralPath $state -Raw) | ConvertFrom-Json).P2 | Should -Be '002'
+    }
+
+    It 'rolls back Crosshair P1/P2 and state when the second promotion fails' {
+        $f=New-S1FileFixture 'crosshair-wrapper-rollback'
+        $p1=Join-Path $f.Source 'P1.png'; $p2=Join-Path $f.Source 'P2.png'; $state=Join-Path $f.Root 'last-selection.json'
+        [System.IO.File]::WriteAllText($p1,'p1'); [System.IO.File]::WriteAllText($p2,'p2')
+        Mock Move-Item {
+            param($LiteralPath,$Destination)
+            if ($LiteralPath -like '*0001.payload') { throw 'simulated P2 promotion failure' }
+            [System.IO.File]::Move($LiteralPath,$Destination)
+        }
+        $r=Invoke-TpmCrosshairAssetTransaction `
+            -P1Source $p1 -P2Source $p2 `
+            -Targets @([pscustomobject]@{ ItemId='GameA'; TargetDir=$f.GameA }) `
+            -StatePath $state -P1Name '001' -P2Name '002'
+        $r.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        Test-Path -LiteralPath (Join-Path $f.GameA 'P1.png') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $f.GameA 'P2.png') | Should -BeFalse
+        Test-Path -LiteralPath $state | Should -BeFalse
+    }
+
+    It 'routes dgVoodoo2 direct files through the same multi-root batch' {
+        $f=New-S1FileFixture 'dgv-wrapper'
+        $dll=Join-Path $f.Source 'D3D8.dll'; $conf=Join-Path $f.Source 'dgVoodoo.conf'
+        $oldConf=Join-Path $f.GameB 'dgVoodoo.conf'; $dllDest=Join-Path $f.GameA 'D3D8.dll'
+        [System.IO.File]::WriteAllText($dll,'dll'); [System.IO.File]::WriteAllText($conf,'new-conf'); [System.IO.File]::WriteAllText($oldConf,'old-conf')
+        $dllHash=(Get-FileHash $dll -Algorithm SHA256).Hash; $confHash=(Get-FileHash $conf -Algorithm SHA256).Hash
+        $ops=@(
+            (New-S1FileOperation 'GameA:D3D8' 'ADD' $dll $dllDest $f.GameA $dllHash),
+            (New-S1FileOperation 'GameB:config' 'REPLACE' $conf $oldConf $f.GameB $confHash)
+        )
+        $r=Invoke-TpmDgVoodoo2FileTransaction -Operations $ops
+        $r.Outcome | Should -Be 'SUCCEEDED'
+        [System.IO.File]::ReadAllText($dllDest) | Should -Be 'dll'
+        [System.IO.File]::ReadAllText($oldConf) | Should -Be 'new-conf'
+        $r.FinalVerification.Passed | Should -BeTrue
+    }
+}
 
 Describe "S1-BACKUP-GATE verified UserProfiles backup" {
     BeforeAll {
@@ -14707,6 +14945,6 @@ Describe "S1-BACKUP-GATE verified UserProfiles backup" {
         $source=$script:ProductionSource
         $source | Should -Match '\$cursorResult = Invoke-CursorHideSetup'
         $source | Should -Match '\$cursorSucceeded = \(\$cursorResult.*Outcome.*SUCCEEDED.*NO_OP'
-        $source | Should -Match 'Succeeded = \(\$errors -eq 0 -and \$deployed -gt 0 -and \$cursorSucceeded\)'
+        $source | Should -Match '\$crosshairSucceeded = \(\$transactionResult\.Outcome -in @\(''SUCCEEDED'',''NO_OP''\)'
     }
 }
