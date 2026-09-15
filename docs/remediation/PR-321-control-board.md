@@ -288,3 +288,29 @@ smoke remains paused pending ChatGPT review and later explicit authorization.
   `S1-TX-CORE 18`, `S1-FILE-PROMOTION 12`,
   `S1-DIRECTORY-REPLACEMENT 18`, `S1-BACKUP-GATE 9`,
   `S1-DB-RESTORE 12`, all passed.
+
+## Desktop OMP S1 -- legacy state transaction normalization
+
+Status: SOURCE REMEDIATION IMPLEMENTED; OWNER SMOKE PAUSED
+
+Slice contract: `TPM-S1-LEGACY-STATE-TRANSACTIONS-001`.
+The authorized scope normalizes legacy result shapes to
+`TPM.TransactionResult.v1` for GPU Fix, TPM-owned migration, UserProfiles
+restore, Register-Games, control propagation, Library Health automatic and
+manual repair, PCSX2 cursor-path updates, ReShade, BepInEx, PostgreSQL
+password recovery, and PostgreSQL reinitialize. The implementation preserves
+legacy detail properties for existing callers while making the v1 result the
+authoritative return value.
+
+The transaction validator now rejects false success, unverified rollback,
+unaccounted terminal items, and cleanup residue presented as ordinary success.
+Verified profile backups gate destructive profile workflows. Beginner-facing
+summaries remain free of paths, commands, hashes, database names, and
+credentials; technical evidence remains available through result detail
+properties and existing logs. LaunchBox export/restore, HyperSpin export,
+thumbnail acquisition, and optional artifact/download workflows were not
+changed.
+
+Source and focused tests are in progress for this working tree. No package
+rebuild, owner runtime, Arcade, wiki, push, merge, tag, publish,
+certification, or release-ready action is authorized by this slice.

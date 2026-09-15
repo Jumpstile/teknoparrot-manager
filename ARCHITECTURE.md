@@ -3103,3 +3103,30 @@ The canonical product evolution roadmap is maintained in [ROADMAP.md](ROADMAP.md
 ARCHITECTURE.md remains the implementation reference for current and completed
 features. ROADMAP.md is planning-only and does not authorize RC7 scope changes,
 product-code, test, issue, release-package, or updater work.
+
+## Legacy workflow transaction normalization (S1)
+
+Legacy workflows may retain their detailed result properties, but their
+authoritative return value is `TPM.TransactionResult.v1`. The shared
+`New-TpmTransactionResult` and `Assert-TpmTransactionResult` functions enforce
+stable workflow and operation keys, exact changed/affected item identity,
+disjoint terminal item sets, explicit product state, verified backup evidence,
+final verification, rollback evidence, and cleanup residue classification.
+
+Adapters use `ConvertTo-TpmLegacyTransactionResult` where the underlying
+workflow remains intentionally unchanged. Destructive profile workflows make a
+verified UserProfiles backup before invoking their legacy mutator and report
+`FAILED_BEFORE_MUTATION` when that evidence cannot be established. A committed
+PostgreSQL role change without final authentication proof is `ACTION_REQUIRED`;
+it is never reported as success. PCSX2 cursor-path writes are similarly
+contract-gated and return a typed no-op when the emulator ownership contract
+cannot be consulted.
+
+The normalized workflows are GPU Fix, TPM-owned state migration, UserProfiles
+restore, Register-Games, control propagation, Library Health automatic and
+manual repair, PCSX2 cursor-path updates, ReShade, BepInEx, PostgreSQL
+password recovery, and PostgreSQL reinitialize. Beginner-facing transaction
+summaries contain no paths, commands, hashes, database names, or credentials;
+technical evidence remains in result detail fields, logs, and support
+artifacts. LaunchBox, HyperSpin, thumbnail acquisition, and optional
+artifact/download workflows remain outside this S1 boundary.

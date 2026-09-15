@@ -519,3 +519,22 @@ from that single unsafe-root classification.
   `12/12` file promotion, `18/18` directory replacement, `9/9` backup gate,
   and `12/12` PostgreSQL restore. Parser, analyzer, ASCII, and diff checks
   passed. No PostgreSQL 12 proof or owner-runtime proof was performed.
+
+## Desktop OMP S1 -- legacy state transaction normalization
+
+- Slice contract: `TPM-S1-LEGACY-STATE-TRANSACTIONS-001`.
+- Authorized owner mapping: IDs 5, 11, 12, 16, 17, 18, 19, 20, 21, 22,
+  and 30, plus the explicitly authorized S1 legacy-result normalization
+  findings.
+- System invariant inventory: LST-01 through LST-10 in the slice contract.
+- Source boundary: legacy workflow adapters, verified profile-backup gates,
+  PostgreSQL recovery/reinitialize wrappers, PCSX2 cursor-path transaction,
+  migration transaction, and the shared v1 validator.
+- Tests: deterministic v1 outcome/item-set tests were added alongside the
+  existing source and S1 transaction suites. Full-suite and static-gate
+  results are recorded only after the current implementation run completes.
+- Deferred by explicit instruction: LaunchBox export/restore, HyperSpin
+  export, thumbnail acquisition, and optional artifact/download workflows.
+- No-action confirmations: no package, push, owner smoke, Arcade, wiki,
+  merge, tag, publish, certification, or release-ready disposition was
+  performed. Runtime proof remains unauthorized and owner smoke is paused.
