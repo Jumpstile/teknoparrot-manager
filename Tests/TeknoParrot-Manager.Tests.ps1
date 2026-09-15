@@ -14720,6 +14720,144 @@ Describe "S1-TX-CORE transaction outcome model" {
     It "keeps technical detail out of normal summaries" -TestCases @(@{Summary='Failure at C:\TPM\backup'},@{Summary='Updated SHA256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'},@{Summary='Run powershell -File repair.ps1'},@{Summary='Password authentication failed'},@{Summary='System.IO.IOException CategoryInfo: WriteError'}) { Test-TpmTransactionUserSafeSummary -Summary $Summary | Should -BeFalse; { New-S1Result -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary $Summary } | Should -Throw }
     It "carries transaction metadata separately from presentation outcome" { $m=New-S1Mutation -Selected 1; $e=New-S1Evidence -FinalAttempted $true -FinalPassed $true -Checks @('already matches'); $r=New-S1Result -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Items @('game-a') -Mutation $m -Evidence $e; $md=ConvertTo-TpmWorkflowTransactionMetadata $r; $md.TransactionOutcome | Should -Be 'NO_OP'; $md.PresentationOutcome | Should -Be 'Skipped'; $md.RequiresAttention | Should -BeFalse; $md.PSTypeNames | Should -Contain 'TPM.WorkflowTransactionMetadata.v1' }
 }
+Describe "S2-A transaction presentation contract" -Tag 'S2-A-PRESENTATION' {
+    BeforeAll {
+        function New-S2PresentationResult {
+            param([Parameter(Mandatory)][string]$Outcome)
+            $items=@('game-a','game-b','game-c')
+            $clean=[pscustomobject]@{ Attempted=$false; Completed=$true; ResiduePresent=$false; ResiduePaths=@(); ResidueItems=@(); Error=$null }
+            switch ($Outcome) {
+                'FAILED_BEFORE_MUTATION' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-failed' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNCHANGED' -Summary 'The fixture stopped before making changes.' -Items @('game-a') -Cleanup $clean)
+                }
+                'NO_OP' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-noop' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNCHANGED' -Summary 'The fixture found nothing to change.' -Items @('game-a') -Mutation ([pscustomobject]@{ SelectedItemCount=1; CompletedItemCount=0; FailedItemCount=0; UnattemptedItemCount=0; SkippedItemCount=0; UnknownItemCount=0; ChangedItems=@(); AffectedItems=@(); CompletedItems=@(); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Current state checked') }) -Cleanup $clean)
+                }
+                'SUCCEEDED' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-success' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'INTENDED' -Summary 'The fixture completed and was verified.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$true; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Final state checked') }) -Cleanup $clean)
+                }
+                'PARTIAL_APPLIED' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-partial' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'PARTIAL_KNOWN' -Summary 'Some fixture items changed and others did not.' -Items $items -Mutation ([pscustomobject]@{ Started=$true; Completed=$false; SelectedItemCount=3; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@('game-b'); UnattemptedItems=@('game-c'); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Final state checked') }) -Cleanup $clean)
+                }
+                'ROLLED_BACK_VERIFIED' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-rollback' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNCHANGED' -Summary 'The fixture was restored and verified.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$false; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Restored state checked') }) -Rollback ([pscustomobject]@{ Attempted=$true; Completed=$true; Verified=$true; Items=@('game-a'); EvidenceRoot='rollback-evidence'; FailedItems=@(); Errors=@() }) -Cleanup $clean)
+                }
+                'ACTION_REQUIRED' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-attention' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNKNOWN' -Summary 'The fixture needs attention because its final state could not be verified.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$false; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@(); FailedItems=@('game-a'); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$false; Checks=@('Final state was not verified') }) -Cleanup $clean)
+                }
+                'CLEANUP_RESIDUE' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-residue' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -UnderlyingOutcome 'SUCCEEDED' -ProductState 'INTENDED' -Summary 'The fixture completed and preserved cleanup evidence.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$true; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Final state checked') }) -Cleanup ([pscustomobject]@{ Attempted=$true; Completed=$false; ResiduePresent=$true; ResiduePaths=@('C:\TPM\staging'); ResidueItems=@('staging'); Error='cleanup fixture' }))
+                }
+                default { throw "Unsupported S2-A fixture outcome: $Outcome" }
+            }
+        }
+    }
+
+    It "projects all seven outcomes into the shared presentation type" {
+        $outcomes=@('SUCCEEDED','NO_OP','FAILED_BEFORE_MUTATION','PARTIAL_APPLIED','ROLLED_BACK_VERIFIED','ACTION_REQUIRED','CLEANUP_RESIDUE')
+        foreach ($outcome in $outcomes) {
+            $result=New-S2PresentationResult -Outcome $outcome
+            $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult $result
+            $presentation.PSTypeNames | Should -Contain 'TPM.TransactionPresentation.v1'
+            $presentation.Outcome | Should -Be $outcome
+            { Assert-TpmTransactionPresentation -Presentation $presentation -TransactionResult $result } | Should -Not -Throw
+        }
+    }
+
+    It "maps headline, next action, retry safety, attention, and data safety deterministically" -TestCases @(
+        @{ Outcome='SUCCEEDED'; Headline='Completed and verified.'; NextAction='No further action is required.'; RetrySafety='No retry is needed.'; RequiresAttention=$false; DataSafety='Intended' },
+        @{ Outcome='NO_OP'; Headline='Nothing needed changing.'; NextAction='No further action is required.'; RetrySafety='No retry is needed.'; RequiresAttention=$false; DataSafety='Unchanged' },
+        @{ Outcome='FAILED_BEFORE_MUTATION'; Headline='Stopped before making changes.'; NextAction='Fix the reported issue, then retry.'; RetrySafety='Retry is safe after the reported issue is fixed.'; RequiresAttention=$true; DataSafety='Unchanged' },
+        @{ Outcome='PARTIAL_APPLIED'; Headline='Some items changed; others did not.'; NextAction='Review Details, correct the remaining items, and then retry.'; RetrySafety='Do not retry blindly; review changed items first.'; RequiresAttention=$true; DataSafety='Partial' },
+        @{ Outcome='ROLLED_BACK_VERIFIED'; Headline='The change did not finish. Previous state was restored and verified.'; NextAction='Fix the reported issue, then retry.'; RetrySafety='Retry is safe after the reported issue is fixed.'; RequiresAttention=$true; DataSafety='Restored' },
+        @{ Outcome='ACTION_REQUIRED'; Headline='TPM may have changed something, but the final state could not be verified.'; NextAction='Do not retry blindly. Review Details and support evidence.'; RetrySafety='Do not retry blindly.'; RequiresAttention=$true; DataSafety='Unknown' },
+        @{ Outcome='CLEANUP_RESIDUE'; Headline='The result was verified, but temporary cleanup evidence remains.'; NextAction='Review Details and support evidence before removing the residue.'; RetrySafety='Do not retry blindly until the cleanup residue is reviewed.'; RequiresAttention=$true; DataSafety='Intended with cleanup residue' }
+    ) {
+        param($Outcome,$Headline,$NextAction,$RetrySafety,$RequiresAttention,$DataSafety)
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome $Outcome)
+        $presentation.Headline | Should -Be $Headline
+        $presentation.NextAction | Should -Be $NextAction
+        $presentation.RetrySafety | Should -Be $RetrySafety
+        $presentation.RequiresAttention | Should -Be $RequiresAttention
+        $presentation.DataSafety | Should -Be $DataSafety
+    }
+
+    It "does not treat compatibility booleans or legacy fields as presentation authority" {
+        $result=New-S2PresentationResult -Outcome 'ACTION_REQUIRED'
+        $result | Add-Member -NotePropertyName Succeeded -NotePropertyValue $true -Force
+        $result | Add-Member -NotePropertyName Installed -NotePropertyValue $true -Force
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult $result
+        $presentation.Outcome | Should -Be 'ACTION_REQUIRED'
+        $presentation.RequiresAttention | Should -BeTrue
+        $presentation.Headline | Should -Not -Match '(?i)completed|success'
+    }
+
+    It "keeps NO_OP distinct from mutation and ACTION_REQUIRED distinct from success" {
+        $noOp=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'NO_OP')
+        $noOp.ChangedItemCount | Should -Be 0
+        $noOp.WhatChanged | Should -Be 'Nothing was changed.'
+        $noOp.Headline | Should -Not -Match '(?i)completed and verified'
+        $attention=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'ACTION_REQUIRED')
+        $attention.RequiresAttention | Should -BeTrue
+        $attention.Headline | Should -Not -Match '(?i)completed|success'
+    }
+
+    It "states verified restoration for rollback and partial change for partial application" {
+        $rollback=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'ROLLED_BACK_VERIFIED')
+        $rollback.Headline | Should -Match 'Previous state was restored and verified'
+        $rollback.WhatChanged | Should -Match 'rolled back'
+        $partial=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'PARTIAL_APPLIED')
+        $partial.Headline | Should -Match 'Some items changed; others did not'
+        $partial.WhatChanged | Should -Match 'Only the completed items were changed'
+    }
+
+    It "keeps cleanup residue separate from ordinary success" {
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'CLEANUP_RESIDUE')
+        $presentation.Outcome | Should -Be 'CLEANUP_RESIDUE'
+        $presentation.UnderlyingOutcome | Should -Be 'SUCCEEDED'
+        $presentation.CleanupResiduePresent | Should -BeTrue
+        $presentation.RequiresAttention | Should -BeTrue
+        $presentation.Headline | Should -Not -Be 'Completed and verified.'
+    }
+
+    It "derives item counts and labels from v1 item sets" {
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'PARTIAL_APPLIED')
+        $presentation.SelectedItemCount | Should -Be 3
+        $presentation.ChangedItemCount | Should -Be 1
+        $presentation.CompletedItemCount | Should -Be 1
+        $presentation.FailedItemCount | Should -Be 1
+        $presentation.UnattemptedItemCount | Should -Be 1
+        @($presentation.SelectedItemLabels) | Should -Be @('game-a','game-b','game-c')
+        @($presentation.ChangedItemLabels) | Should -Be @('game-a')
+        @($presentation.FailedItemLabels) | Should -Be @('game-b')
+        @($presentation.UnattemptedItemLabels) | Should -Be @('game-c')
+        $presentation.DetailsSupportReferences.TransactionId | Should -Be 's2-a-partial'
+    }
+
+    It "redacts technical item identifiers and never embeds source technical details" {
+        $result=New-S2PresentationResult -Outcome 'CLEANUP_RESIDUE'
+        $result.TechnicalDetails=[pscustomobject]@{ Detail='password secret C:\TPM\private 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' }
+        $result.Items=@('C:\Games\GameA\game.exe')
+        $result.Mutation.SelectedItemCount=1
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult $result
+        @($presentation.SelectedItemLabels) | Should -Be @('Selected item')
+        ($presentation | ConvertTo-Json -Depth 8) | Should -Not -Match '(?i)password|credential|secret|C:\\TPM|0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+        $presentation.PSObject.Properties.Name | Should -Not -Contain 'TransactionResult'
+        $presentation.DetailsSupportReferences.PSObject.Properties.Name | Should -Not -Contain 'TechnicalDetails'
+    }
+
+    It "rejects unsafe presentation text and count/list mismatches" {
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'SUCCEEDED')
+        $presentation.NextAction='Run powershell -File C:\repair.ps1'
+        { Assert-TpmTransactionPresentation -Presentation $presentation } | Should -Throw
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'SUCCEEDED')
+        $presentation.ChangedItemCount=99
+        { Assert-TpmTransactionPresentation -Presentation $presentation } | Should -Throw
+        Test-TpmTransactionPresentationSafeText -Text 'password=secret' | Should -BeFalse
+        Test-TpmTransactionPresentationSafeText -Text 'sha 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' | Should -BeFalse
+        Test-TpmTransactionPresentationSafeText -Text 'System.IO.IOException at Invoke-Step()' | Should -BeFalse
+    }
+}
 
 
 Describe 'S1-FILE-PROMOTION shared multi-root transaction' {

@@ -338,3 +338,31 @@ Pester suite passed `1125/1125`. Parser `ParseErrors=0`, source ASCII
 `0` unresolved after disposition matching. Package rebuild, owner runtime,
 Arcade, wiki, push, merge, tag, publish, certification, and release-ready
 actions remain unauthorized.
+
+## Desktop OMP S2-A -- shared transaction presentation contract
+
+Status: SOURCE REMEDIATION IMPLEMENTED; OWNER SMOKE PAUSED
+
+Slice contract: `docs/remediation/slices/TPM-S2-RESULTS-PRESENTATION-001.md`.
+
+The authorized S2-A scope adds the deterministic
+`TPM.TransactionPresentation.v1` projection from validated
+`TPM.TransactionResult.v1`. It fixes the seven outcome meanings, beginner-safe
+headline/change/next-action/retry/data-safety wording, authoritative item-set
+counts, safe item labels, and Details/support references without embedding raw
+transaction evidence.
+
+`Assert-TpmTransactionPresentation` rejects invalid schema, outcome wording,
+identity, product state, underlying cleanup state, unsafe text, and
+count/label mismatches. Compatibility booleans, legacy counters, workflow
+status, and console text are not presentation authority. The source contract
+does not migrate workflow renderers, workflow-status events, or support-package
+serialization; those remain later S2 integration scope.
+
+Focused S2-A tests cover all seven outcomes, compatibility-field
+non-authority, NO_OP/ACTION_REQUIRED/CLEANUP_RESIDUE distinctions,
+verified-rollback and partial-change wording, item accounting, and technical
+redaction. Full validation evidence is recorded in the corresponding
+reconciliation section after execution. Owner smoke, package rebuild, Arcade,
+wiki, push, merge, tag, publish, certification, and release-ready actions
+remain unauthorized.

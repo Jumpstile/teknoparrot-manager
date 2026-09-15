@@ -574,3 +574,37 @@ from that single unsafe-root classification.
   because owner-runtime evidence remains outstanding and report validation
   freshness was not proven. This is expected while owner smoke is paused.
   Owner/runtime proof remains unauthorized and paused.
+
+## Desktop OMP S2-A -- shared transaction presentation contract
+
+- Slice contract: `TPM-S2-RESULTS-PRESENTATION-001`.
+- Scope: deterministic `TPM.TransactionPresentation.v1` projection from
+  validated `TPM.TransactionResult.v1`; fixed wording for all seven outcomes;
+  authoritative item-set counts and safe item labels; redacted
+  Details/support references; presentation text validation.
+- Source boundary: `TeknoParrot-Manager.ps1` presentation contract helpers;
+  `Tests/TeknoParrot-Manager.Tests.ps1` S2-A deterministic projection tests;
+  `ARCHITECTURE.md`; this report; and the PR #321 control board.
+- Explicit exclusions: workflow-wide renderer migration, workflow-status
+  event migration, support-package serialization migration, package rebuild,
+  owner smoke, Arcade, wiki, push, merge, tag, publish, certification, and
+  release authorization.
+- Runtime proof: not authorized; owner smoke remains paused.
+- Focused S2-A evidence: 15 passed, 0 failed, 0 skipped, 1125 not run.
+- S1 transaction regression evidence: 73 passed, 0 failed, 0 skipped,
+  1067 not run.
+- Support-package evidence: 41 passed, 0 failed, 0 skipped.
+- Full main Pester evidence: 1140 passed, 0 failed, 0 skipped.
+- Static evidence: Windows PowerShell parser `ParseErrors=0`, pwsh parser
+  `ParseErrors=0`, production ASCII `NonAscii=0`, PSScriptAnalyzer
+  Error/Warning `Findings=0`, and `git diff --check` passed.
+- InjectionHunter scope reconciliation: the earlier 30-finding direct scan covered
+  only `TeknoParrot-Manager.ps1`. The canonical
+  `Test-TPMProductionInjectionHunterV1` scan covers the fixed 19-file production
+  PowerShell inventory and reports 42 findings: 30 in the product script plus
+  12 across the other production files. All 42 matched the current disposition
+  registry using canonical occurrence-order reconciliation;
+  `Unresolved=0`, `StaleEntries=0`.
+- No-action confirmations: no package, push, owner smoke, Arcade, wiki,
+  merge, tag, publish, certification, or release-ready disposition is part of
+  S2-A.

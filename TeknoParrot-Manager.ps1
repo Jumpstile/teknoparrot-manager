@@ -811,6 +811,272 @@ function Test-TpmTransactionResult {
     param([Parameter(Mandatory)]$Result)
     try { [void](Assert-TpmTransactionResult -Result $Result); return $true } catch { return $false }
 }
+function Test-TpmTransactionPresentationSafeText {
+    param([Parameter(Mandatory)][string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $false }
+    if ($Text -match '(?i)(?:[A-Za-z]:[\\/]|\\\\)') { return $false }
+    if ($Text -match '(?i)\b(?:password|passwords|credential|credentials|secret|secrets|token|tokens|api key|apikey)\b') { return $false }
+    if ($Text -match '(?i)\b[0-9a-f]{64}\b') { return $false }
+    if ($Text -match '(?i)(?:^|\s)(?:powershell|pwsh|cmd(?:\.exe)?|copy-item|move-item|dropdb|pg_restore|pg_dump|invoke-[a-z0-9-]+)\b') { return $false }
+    if ($Text -match '(?i)(?:CategoryInfo|FullyQualifiedErrorId|StackTrace|System\.[A-Za-z]|at\s+[A-Za-z0-9_.]+\()') { return $false }
+    return $true
+}
+
+function Get-TpmTransactionPresentationItemLabel {
+    param([Parameter(Mandatory)]$Item)
+    $label = $null
+    if ($Item -is [string]) {
+        $label = [string]$Item
+    } else {
+        foreach ($name in @('DisplayName','GameName','Name','ItemId','Id')) {
+            $candidate = Get-TpmTransactionField -Object $Item -Name $name
+            if ($null -ne $candidate -and -not [string]::IsNullOrWhiteSpace([string]$candidate)) {
+                $label = [string]$candidate
+                break
+            }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($label)) { return 'Selected item' }
+    $label = $label.Trim()
+    if ($label -match '(?i)(?:[A-Za-z]:[\\/]|\\\\|[/\\])') { return 'Selected item' }
+    if (-not (Test-TpmTransactionPresentationSafeText -Text $label)) { return 'Selected item' }
+    if ($label.Length -gt 80) { return 'Selected item' }
+    return $label
+}
+
+function Get-TpmTransactionPresentationItemLabels {
+    param([object[]]$Items = @())
+    return @($Items | ForEach-Object {
+        if ($null -ne $_) { Get-TpmTransactionPresentationItemLabel -Item $_ }
+    })
+}
+
+function Get-TpmTransactionPresentationOutcomeDefinition {
+    param(
+        [Parameter(Mandatory)][string]$Outcome,
+        [string]$UnderlyingOutcome = $null
+    )
+    switch ($Outcome) {
+        'SUCCEEDED' {
+            return [pscustomobject]@{
+                Headline='Completed and verified.'
+                WhatChanged='The requested changes were applied and verified.'
+                WhatDidNotChange='No requested changes were left incomplete.'
+                NextAction='No further action is required.'
+                RequiresAttention=$false
+                RetrySafety='No retry is needed.'
+                DataSafety='Intended'
+            }
+        }
+        'NO_OP' {
+            return [pscustomobject]@{
+                Headline='Nothing needed changing.'
+                WhatChanged='Nothing was changed.'
+                WhatDidNotChange='The current state was checked and left unchanged.'
+                NextAction='No further action is required.'
+                RequiresAttention=$false
+                RetrySafety='No retry is needed.'
+                DataSafety='Unchanged'
+            }
+        }
+        'FAILED_BEFORE_MUTATION' {
+            return [pscustomobject]@{
+                Headline='Stopped before making changes.'
+                WhatChanged='Nothing was changed.'
+                WhatDidNotChange='The requested operation stopped before it began.'
+                NextAction='Fix the reported issue, then retry.'
+                RequiresAttention=$true
+                RetrySafety='Retry is safe after the reported issue is fixed.'
+                DataSafety='Unchanged'
+            }
+        }
+        'PARTIAL_APPLIED' {
+            return [pscustomobject]@{
+                Headline='Some items changed; others did not.'
+                WhatChanged='Only the completed items were changed.'
+                WhatDidNotChange='Failed, skipped, or unattempted items were not completed.'
+                NextAction='Review Details, correct the remaining items, and then retry.'
+                RequiresAttention=$true
+                RetrySafety='Do not retry blindly; review changed items first.'
+                DataSafety='Partial'
+            }
+        }
+        'ROLLED_BACK_VERIFIED' {
+            return [pscustomobject]@{
+                Headline='The change did not finish. Previous state was restored and verified.'
+                WhatChanged='Temporary changes were rolled back.'
+                WhatDidNotChange='The intended final change was not applied.'
+                NextAction='Fix the reported issue, then retry.'
+                RequiresAttention=$true
+                RetrySafety='Retry is safe after the reported issue is fixed.'
+                DataSafety='Restored'
+            }
+        }
+        'ACTION_REQUIRED' {
+            return [pscustomobject]@{
+                Headline='TPM may have changed something, but the final state could not be verified.'
+                WhatChanged='Some requested work may have changed.'
+                WhatDidNotChange='The final product state could not be confirmed.'
+                NextAction='Do not retry blindly. Review Details and support evidence.'
+                RequiresAttention=$true
+                RetrySafety='Do not retry blindly.'
+                DataSafety='Unknown'
+            }
+        }
+        'CLEANUP_RESIDUE' {
+            $residueSafety = switch ($UnderlyingOutcome) {
+                'SUCCEEDED' { 'Intended with cleanup residue' }
+                'ROLLED_BACK_VERIFIED' { 'Restored with cleanup residue' }
+                'PARTIAL_APPLIED' { 'Partial with cleanup residue' }
+                default { 'Unknown with cleanup residue' }
+            }
+            return [pscustomobject]@{
+                Headline='The result was verified, but temporary cleanup evidence remains.'
+                WhatChanged='The product result was verified according to the underlying transaction.'
+                WhatDidNotChange='Temporary cleanup did not finish.'
+                NextAction='Review Details and support evidence before removing the residue.'
+                RequiresAttention=$true
+                RetrySafety='Do not retry blindly until the cleanup residue is reviewed.'
+                DataSafety=$residueSafety
+            }
+        }
+        default { throw ("Invalid transaction presentation outcome: {0}" -f $Outcome) }
+    }
+}
+
+function Assert-TpmTransactionPresentation {
+    param(
+        [Parameter(Mandatory)]$Presentation,
+        [object]$TransactionResult = $null
+    )
+    if (@($Presentation.PSTypeNames) -notcontains 'TPM.TransactionPresentation.v1') { throw 'Invalid TPM transaction presentation type.' }
+    if ([int](Get-TpmTransactionField -Object $Presentation -Name 'SchemaVersion' -Default 0) -ne 1) { throw 'Unsupported TPM transaction presentation schema version.' }
+    $outcome = [string](Get-TpmTransactionField -Object $Presentation -Name 'Outcome')
+    if ((Get-TpmTransactionOutcomeNames) -notcontains $outcome) { throw ("Invalid transaction presentation outcome: {0}" -f $outcome) }
+    if ($null -ne $TransactionResult) {
+        [void](Assert-TpmTransactionResult -Result $TransactionResult)
+        if ([string]$Presentation.TransactionId -ne [string]$TransactionResult.TransactionId -or [string]$Presentation.WorkflowKey -ne [string]$TransactionResult.WorkflowKey -or [string]$Presentation.OperationKey -ne [string]$TransactionResult.OperationKey) { throw 'Transaction presentation identity does not match the transaction result.' }
+        if ([string]$Presentation.ProductState -ne [string]$TransactionResult.ProductState) { throw 'Transaction presentation ProductState does not match the transaction result.' }
+        if ($outcome -eq 'CLEANUP_RESIDUE' -and [string]$Presentation.UnderlyingOutcome -ne [string]$TransactionResult.UnderlyingOutcome) { throw 'Transaction presentation UnderlyingOutcome does not match the transaction result.' }
+        if ([int]$Presentation.SelectedItemCount -ne @($TransactionResult.Items).Count) { throw 'Transaction presentation SelectedItemCount does not match the transaction result.' }
+    }
+    foreach ($name in @('TransactionId','WorkflowKey','OperationKey','Headline','WhatChanged','WhatDidNotChange','NextAction','RetrySafety','DataSafety')) {
+        if ([string]::IsNullOrWhiteSpace([string](Get-TpmTransactionField -Object $Presentation -Name $name))) { throw ("Transaction presentation field '{0}' is required." -f $name) }
+    }
+    foreach ($name in @('Headline','WhatChanged','WhatDidNotChange','NextAction','RetrySafety','DataSafety')) {
+        if (-not (Test-TpmTransactionPresentationSafeText -Text ([string](Get-TpmTransactionField -Object $Presentation -Name $name)))) { throw ("Transaction presentation field '{0}' contains technical or sensitive detail." -f $name) }
+    }
+    if ((Get-TpmTransactionProductStateNames) -notcontains [string]$Presentation.ProductState) { throw ("Invalid transaction presentation product state: {0}" -f $Presentation.ProductState) }
+    $definition = Get-TpmTransactionPresentationOutcomeDefinition -Outcome $outcome -UnderlyingOutcome ([string](Get-TpmTransactionField -Object $Presentation -Name 'UnderlyingOutcome'))
+    foreach ($name in @('Headline','WhatChanged','WhatDidNotChange','NextAction','RetrySafety','DataSafety','RequiresAttention')) {
+        if ((Get-TpmTransactionField -Object $Presentation -Name $name) -ne (Get-TpmTransactionField -Object $definition -Name $name)) { throw ("Transaction presentation field '{0}' does not match its outcome." -f $name) }
+    }
+    $underlying = [string](Get-TpmTransactionField -Object $Presentation -Name 'UnderlyingOutcome')
+    if ([string]::IsNullOrWhiteSpace($underlying)) { $underlying = $null }
+    if ($outcome -eq 'CLEANUP_RESIDUE') {
+        if ($null -eq $underlying -or (Get-TpmTransactionOutcomeNames) -notcontains $underlying -or $underlying -eq 'CLEANUP_RESIDUE') { throw 'CLEANUP_RESIDUE requires a valid UnderlyingOutcome.' }
+    } elseif ($null -ne $underlying) { throw 'Transaction presentation UnderlyingOutcome is only valid for CLEANUP_RESIDUE.' }
+    foreach ($name in @('SelectedItemCount','ChangedItemCount','CompletedItemCount','FailedItemCount','UnattemptedItemCount','SkippedItemCount','UnknownItemCount')) {
+        if ([int](Get-TpmTransactionField -Object $Presentation -Name $name -Default -1) -lt 0) { throw ("Transaction presentation field '{0}' must be non-negative." -f $name) }
+    }
+    foreach ($pair in @(
+        @('SelectedItemCount','SelectedItemLabels'),
+        @('ChangedItemCount','ChangedItemLabels'),
+        @('CompletedItemCount','CompletedItemLabels'),
+        @('FailedItemCount','FailedItemLabels'),
+        @('UnattemptedItemCount','UnattemptedItemLabels'),
+        @('SkippedItemCount','SkippedItemLabels'),
+        @('UnknownItemCount','UnknownItemLabels')
+    )) {
+        if ([int](Get-TpmTransactionField -Object $Presentation -Name $pair[0]) -ne @(Get-TpmTransactionField -Object $Presentation -Name $pair[1] -Default @()).Count) { throw ("Transaction presentation {0} must be derived from authoritative item sets." -f $pair[0]) }
+    }
+    if ($null -ne $TransactionResult) {
+        $mutation = $TransactionResult.Mutation
+        foreach ($pair in @(
+            @('ChangedItemCount', @($mutation.ChangedItems).Count),
+            @('CompletedItemCount', @($mutation.CompletedItems).Count),
+            @('FailedItemCount', @($mutation.FailedItems).Count),
+            @('UnattemptedItemCount', @($mutation.UnattemptedItems).Count),
+            @('SkippedItemCount', @($mutation.SkippedItems).Count),
+            @('UnknownItemCount', @($mutation.UnknownItems).Count)
+        )) {
+            if ([int](Get-TpmTransactionField -Object $Presentation -Name $pair[0]) -ne [int]$pair[1]) { throw ("Transaction presentation {0} must be derived from authoritative item sets." -f $pair[0]) }
+        }
+        if ([bool]$Presentation.RollbackVerified -ne [bool]$TransactionResult.Rollback.Verified) { throw 'Transaction presentation RollbackVerified does not match the transaction result.' }
+        if ([bool]$Presentation.CleanupResiduePresent -ne [bool]$TransactionResult.Cleanup.ResiduePresent) { throw 'Transaction presentation CleanupResiduePresent does not match the transaction result.' }
+    }
+    foreach ($name in @('SelectedItemLabels','ChangedItemLabels','CompletedItemLabels','FailedItemLabels','UnattemptedItemLabels','SkippedItemLabels','UnknownItemLabels','RolledBackItemLabels','ResidueItemLabels')) {
+        $labels = @(Get-TpmTransactionField -Object $Presentation -Name $name -Default @())
+        foreach ($label in $labels) {
+            if (-not (Test-TpmTransactionPresentationSafeText -Text ([string]$label))) { throw ("Transaction presentation item label '{0}' is not beginner-safe." -f $name) }
+        }
+    }
+    $references = $Presentation.DetailsSupportReferences
+    if ($null -eq $references -or [string]$references.TransactionId -ne [string]$Presentation.TransactionId) { throw 'Transaction presentation DetailsSupportReferences are invalid.' }
+    return $true
+}
+
+function Test-TpmTransactionPresentation {
+    param([Parameter(Mandatory)]$Presentation)
+    try { [void](Assert-TpmTransactionPresentation -Presentation $Presentation); return $true } catch { return $false }
+}
+
+function ConvertTo-TpmTransactionPresentation {
+    param([Parameter(Mandatory)]$TransactionResult)
+    [void](Assert-TpmTransactionResult -Result $TransactionResult)
+    $outcome = [string]$TransactionResult.Outcome
+    $definition = Get-TpmTransactionPresentationOutcomeDefinition -Outcome $outcome -UnderlyingOutcome ([string]$TransactionResult.UnderlyingOutcome)
+    $mutation = $TransactionResult.Mutation
+    $evidencePaths = @($TransactionResult.PreState.EvidenceRoot,$TransactionResult.Backup.RootPath,$TransactionResult.Rollback.EvidenceRoot) + @($TransactionResult.Cleanup.ResiduePaths)
+    $evidenceAvailable = (@($evidencePaths | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0)
+    $presentation = [pscustomobject]@{
+        PSTypeName='TPM.TransactionPresentation.v1'
+        SchemaVersion=1
+        TransactionId=[string]$TransactionResult.TransactionId
+        WorkflowKey=[string]$TransactionResult.WorkflowKey
+        OperationKey=[string]$TransactionResult.OperationKey
+        Outcome=$outcome
+        UnderlyingOutcome=if ($outcome -eq 'CLEANUP_RESIDUE') { [string]$TransactionResult.UnderlyingOutcome } else { $null }
+        ProductState=[string]$TransactionResult.ProductState
+        Headline=$definition.Headline
+        WhatChanged=$definition.WhatChanged
+        WhatDidNotChange=$definition.WhatDidNotChange
+        NextAction=$definition.NextAction
+        RequiresAttention=[bool]$definition.RequiresAttention
+        RetrySafety=$definition.RetrySafety
+        DataSafety=$definition.DataSafety
+        SelectedItemCount=@($TransactionResult.Items).Count
+        ChangedItemCount=@($mutation.ChangedItems).Count
+        CompletedItemCount=@($mutation.CompletedItems).Count
+        FailedItemCount=@($mutation.FailedItems).Count
+        UnattemptedItemCount=@($mutation.UnattemptedItems).Count
+        SkippedItemCount=@($mutation.SkippedItems).Count
+        UnknownItemCount=@($mutation.UnknownItems).Count
+        RollbackVerified=[bool]$TransactionResult.Rollback.Verified
+        CleanupResiduePresent=[bool]$TransactionResult.Cleanup.ResiduePresent
+        SelectedItemLabels=Get-TpmTransactionPresentationItemLabels -Items @($TransactionResult.Items)
+        ChangedItemLabels=Get-TpmTransactionPresentationItemLabels -Items @($mutation.ChangedItems)
+        CompletedItemLabels=Get-TpmTransactionPresentationItemLabels -Items @($mutation.CompletedItems)
+        FailedItemLabels=Get-TpmTransactionPresentationItemLabels -Items @($mutation.FailedItems)
+        UnattemptedItemLabels=Get-TpmTransactionPresentationItemLabels -Items @($mutation.UnattemptedItems)
+        SkippedItemLabels=Get-TpmTransactionPresentationItemLabels -Items @($mutation.SkippedItems)
+        UnknownItemLabels=Get-TpmTransactionPresentationItemLabels -Items @($mutation.UnknownItems)
+        RolledBackItemLabels=Get-TpmTransactionPresentationItemLabels -Items @($TransactionResult.Rollback.Items)
+        ResidueItemLabels=Get-TpmTransactionPresentationItemLabels -Items @($TransactionResult.Cleanup.ResidueItems)
+        DetailsSupportReferences=[pscustomobject]@{
+            TransactionId=[string]$TransactionResult.TransactionId
+            EvidenceAvailable=$evidenceAvailable
+            TechnicalDetailsAvailable=($null -ne $TransactionResult.TechnicalDetails)
+            ErrorCount=@($TransactionResult.Errors).Count
+            WarningCount=@($TransactionResult.Warnings).Count
+            RecoveryActionCount=@($TransactionResult.RecoveryActions).Count
+            CleanupResiduePresent=[bool]$TransactionResult.Cleanup.ResiduePresent
+        }
+    }
+    [void](Assert-TpmTransactionPresentation -Presentation $presentation -TransactionResult $TransactionResult)
+    return $presentation
+}
+
 
 function New-TpmTransactionResult {
     param(

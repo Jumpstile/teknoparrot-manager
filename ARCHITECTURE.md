@@ -3153,3 +3153,47 @@ installed hash/version after replacement, restores the previous file on a
 verifiable failure, and reports cleanup residue separately. Startup and menu
 callers validate the v1 result and restart only for `SUCCEEDED`; all other
 outcomes continue without claiming that an update was installed.
+
+## Shared transaction presentation contract (S2-A)
+
+`ConvertTo-TpmTransactionPresentation` is the deterministic projection from
+the validated `TPM.TransactionResult.v1` authority to
+`TPM.TransactionPresentation.v1`. S2-A defines the presentation data contract
+only; workflow callers are not migrated to the shared renderer in this slice.
+
+The presentation preserves the transaction identity (`TransactionId`,
+`WorkflowKey`, and `OperationKey`), exact `Outcome`, optional
+`UnderlyingOutcome` for `CLEANUP_RESIDUE`, and `ProductState`. It adds fixed
+beginner-safe wording for `Headline`, `WhatChanged`, `WhatDidNotChange`,
+`NextAction`, `RequiresAttention`, `RetrySafety`, and `DataSafety`.
+
+All item counts and labels are derived from the validated v1 item sets.
+Compatibility booleans, legacy counters, workflow status text, and console
+text cannot influence the projection. Technical item identifiers that look
+like paths or unsafe diagnostic text become the generic `Selected item`
+label. The projection contains only redacted Details/support references; it
+does not embed the source transaction or its technical evidence.
+
+The seven outcome meanings are fixed:
+
+- `SUCCEEDED`: requested changes completed and were verified.
+- `NO_OP`: current state was checked and nothing changed.
+- `FAILED_BEFORE_MUTATION`: the operation stopped before changing product state.
+- `PARTIAL_APPLIED`: only the completed items changed.
+- `ROLLED_BACK_VERIFIED`: the previous state was restored and verified.
+- `ACTION_REQUIRED`: the final product state could not be verified; blind retry
+  is prohibited.
+- `CLEANUP_RESIDUE`: the underlying product result was verified, but temporary
+  cleanup evidence remains.
+
+`Assert-TpmTransactionPresentation` enforces schema identity, exact outcome
+wording, product-state identity, non-negative counts, label/count agreement,
+cleanup-underlying-outcome rules, and safe-text rules. Normal presentation
+fields reject passwords, credentials, hashes, raw commands, stack traces, and
+filesystem paths. Passwords and credentials remain prohibited from every
+normal, Details, log, report, and support surface; technical evidence remains
+owned by the existing redaction and provenance boundaries.
+
+S2-A deliberately does not change workflow status events, support-package
+serialization, package generation, or individual workflow renderers. Those
+are S2-B and later integration boundaries.
