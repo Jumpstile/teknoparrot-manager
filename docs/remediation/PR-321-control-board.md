@@ -314,3 +314,27 @@ changed.
 Source and focused tests are in progress for this working tree. No package
 rebuild, owner runtime, Arcade, wiki, push, merge, tag, publish,
 certification, or release-ready action is authorized by this slice.
+
+## Desktop OMP S1 -- setup and manager-update transaction normalization
+
+Status: SOURCE REMEDIATION IMPLEMENTED; OWNER SMOKE PAUSED
+
+Slice contract: `docs/remediation/slices/TPM-S1-SETUP-UPDATE-TRANSACTIONS-001.md`.
+The authorized boundary makes `Invoke-PostgresGameSetup`,
+`Invoke-ManagerUpdateInstall`, `Invoke-CheckForUpdates`, and
+`Invoke-StartupUpdateCheck` return authoritative `TPM.TransactionResult.v1`
+results. PostgreSQL setup now gates non-no-op mutation on verified recovery
+evidence and verifies profile/database state after writes. Manager update paths
+capture pre-state, verify backup and candidate content, verify final hash/version,
+and classify rollback and cleanup residue.
+
+Top-level callers validate the v1 result and restart only after `SUCCEEDED`.
+Legacy counters and detail properties remain compatibility fields; they are not
+the authoritative completion signal. Focused setup/update coverage passed
+`60/60`; required S1 transaction regression tags passed `16/16`. The full main
+Pester suite passed `1125/1125`. Parser `ParseErrors=0`, source ASCII
+`NonAscii=0`, PSScriptAnalyzer Error/Warning `Findings=0`, and
+`git diff --check` passed. InjectionHunter 1.0.0 reported `42` findings and
+`0` unresolved after disposition matching. Package rebuild, owner runtime,
+Arcade, wiki, push, merge, tag, publish, certification, and release-ready
+actions remain unauthorized.

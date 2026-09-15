@@ -531,10 +531,46 @@ from that single unsafe-root classification.
   PostgreSQL recovery/reinitialize wrappers, PCSX2 cursor-path transaction,
   migration transaction, and the shared v1 validator.
 - Tests: deterministic v1 outcome/item-set tests were added alongside the
-  existing source and S1 transaction suites. Full-suite and static-gate
-  results are recorded only after the current implementation run completes.
+  existing source and S1 transaction suites. Full main Pester passed
+  `1125/1125`; required S1 transaction regression tags passed `16/16`;
+  setup/update and PostgreSQL UX focused coverage passed `60/60`.
+- Static evidence: parser `ParseErrors=0`, source ASCII `NonAscii=0`,
+  PSScriptAnalyzer Error/Warning `Findings=0`, and `git diff --check` passed.
+  InjectionHunter 1.0.0 reported `42` findings and `0` unresolved after
+  disposition matching.
 - Deferred by explicit instruction: LaunchBox export/restore, HyperSpin
   export, thumbnail acquisition, and optional artifact/download workflows.
 - No-action confirmations: no package, push, owner smoke, Arcade, wiki,
   merge, tag, publish, certification, or release-ready disposition was
   performed. Runtime proof remains unauthorized and owner smoke is paused.
+
+## Desktop OMP S1 -- setup and manager-update transaction normalization
+
+- Slice contract: `TPM-S1-SETUP-UPDATE-TRANSACTIONS-001`.
+- Owner mapping: PR #321 owner rows 81 (startup/update flow) and 88
+  (PostgreSQL profile/database setup); no separate external owner report ID was
+  supplied for this implementation packet.
+- Source boundary: `Invoke-PostgresGameSetup`,
+  `Invoke-ManagerUpdateInstall`, `Invoke-CheckForUpdates`,
+  `Invoke-StartupUpdateCheck`, their top-level callers, and the shared v1
+  profile transaction wrapper.
+- Deterministic focused evidence: setup/update and PostgreSQL UX tests passed
+  `60/60`; required S1 transaction regression tags passed `16/16`.
+- Behavior evidence: every named setup/update terminal path returns
+  `TPM.TransactionResult.v1`; caller restart/completion decisions require a
+  validated `SUCCEEDED` result. Backup, pre-state, final verification,
+  rollback, cleanup, and terminal item accounting are retained in technical
+  result fields.
+- Explicit exclusions: no LaunchBox, HyperSpin, thumbnails, optional artifact
+  or download outer-contract migration, dgVoodoo2, FFB, PostgreSQL 12 proof,
+  package, push, owner smoke, Arcade, wiki, merge, tag, publish, certification,
+  or release-ready action.
+- Full-suite/static evidence: main Pester passed `1125/1125`; parser
+  `ParseErrors=0`; source ASCII `NonAscii=0`; PSScriptAnalyzer Error/Warning
+  `Findings=0`; and `git diff --check` passed. InjectionHunter 1.0.0 reported
+  `42` findings and `0` unresolved after disposition matching.
+- Permanent quality gate result: `Run-TpmQualityGate.ps1` ran the source,
+  main-suite, and support-package checks successfully, then held the packet
+  because owner-runtime evidence remains outstanding and report validation
+  freshness was not proven. This is expected while owner smoke is paused.
+  Owner/runtime proof remains unauthorized and paused.

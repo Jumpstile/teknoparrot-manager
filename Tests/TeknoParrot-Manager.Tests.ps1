@@ -5160,14 +5160,23 @@ function Invoke-PostgresGameSetup {
     param([string]$UserProfilesDir, [string]$SuperPasswordPlain, [object]$RecoveryBackup)
     [void]($script:SetupCalls++)
     $script:Configured = $script:FixtureProfileCount
-    return [pscustomobject]@{
-        Configured = $script:FixtureProfileCount
-        DbCreated = 0
-        AlreadyConfigured = 0
-        Errors = 0
-        RecoveryBlocked = $false
-        BackupPath = $RecoveryBackup.Path
-    }
+    $outcome = if ($script:FixtureProfileCount -gt 0) { 'SUCCEEDED' } else { 'NO_OP' }
+    $items = if ($script:FixtureProfileCount -gt 0) { @('profile:fixture') } else { @('postgres-setup') }
+    $changed = if ($script:FixtureProfileCount -gt 0) { @('profile:fixture') } else { @() }
+    $completed = if ($script:FixtureProfileCount -gt 0) { @('profile:fixture') } else { @() }
+    $result = New-TpmProfileTransactionResult -WorkflowKey 'PostgresSetup' -OperationKey 'ConfigureProfilesAndCreateMissingDatabases' `
+        -Outcome $outcome -ProductState $(if ($outcome -eq 'SUCCEEDED') { 'INTENDED' } else { 'UNCHANGED' }) `
+        -Summary 'Fixture PostgreSQL setup result.' -Items $items -ChangedItems $changed -CompletedItems $completed `
+        -MutationStarted:($outcome -eq 'SUCCEEDED') -MutationCompleted:$true -FinalChecks @('Fixture setup result was verified.')
+    foreach ($property in @(
+        @{ Name = 'Configured'; Value = $script:FixtureProfileCount }
+        @{ Name = 'DbCreated'; Value = 0 }
+        @{ Name = 'AlreadyConfigured'; Value = 0 }
+        @{ Name = 'Errors'; Value = 0 }
+        @{ Name = 'RecoveryBlocked'; Value = $false }
+        @{ Name = 'BackupPath'; Value = if ($RecoveryBackup) { $RecoveryBackup.Path } else { $null } }
+    )) { $result | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force }
+    return $result
 }
 
 $script:LoopCount = 0
@@ -5343,7 +5352,7 @@ __BRANCH__
             $script:pgSaved = New-Object System.Collections.Generic.List[string]
             Mock Write-Log {}
             Mock Get-PostgresDatabaseState { [pscustomobject]@{ Exists = $true; Verified = $true } }
-            Mock Save-Xml { param($Doc, [string]$Path) [void]$script:pgEvents.Add('save'); [void]$script:pgSaved.Add($Path) }
+            Mock Save-Xml { param($Doc, [string]$Path) [void]$script:pgEvents.Add('save'); [void]$script:pgSaved.Add($Path); $Doc.Save($Path) }
         }
 
         It "backs up before profile population, updates only stale profiles, and handles multiple profiles deterministically" {
@@ -5352,6 +5361,8 @@ __BRANCH__
             Set-Content -LiteralPath (Join-Path $script:pgProfiles 'B.xml') -Value ($xml.Replace('<FieldValue>old</FieldValue>', '<FieldValue>approved</FieldValue>'))
             Mock New-PostgresRecoveryBackup { [void]$script:pgEvents.Add('backup'); $script:pgRecovery }
             $result = Invoke-PostgresGameSetup -UserProfilesDir $script:pgProfiles -SuperPasswordPlain 'approved'
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -Be 'SUCCEEDED'
             $result.Configured | Should -Be 1
             $result.AlreadyConfigured | Should -Be 1
             $result.RecoveryBlocked | Should -BeFalse
@@ -5363,12 +5374,14 @@ __BRANCH__
         It "restores evidence and does not report completion after a partial profile save" {
             $xml = '<GameProfile><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Path</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Address</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Port</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>User</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldValue>old</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Automatically create Database</FieldName><FieldValue>1</FieldValue></FieldInformation></ConfigValues></GameProfile>'
             Set-Content -LiteralPath (Join-Path $script:pgProfiles 'A.xml') -Value $xml
-            Set-Content -LiteralPath (Join-Path $script:pgProfiles 'B.xml') -Value $xml
+            $result.RecoveryBlocked | Should -BeFalse
             $script:saveCount = 0; $script:restoreCount = 0
             Mock Save-Xml { $script:saveCount++; if ($script:saveCount -eq 2) { throw 'simulated profile write failure' } }
             Mock Restore-PostgresProfileBackups { $script:restoreCount++; $true }
             $result = Invoke-PostgresGameSetup -UserProfilesDir $script:pgProfiles -SuperPasswordPlain 'approved' -RecoveryBackup $script:pgRecovery
             $result.RecoveryBlocked | Should -BeTrue
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
             $result.Configured | Should -Be 1
             $script:restoreCount | Should -Be 1
             $result | Should -Not -BeNullOrEmpty
@@ -5384,6 +5397,8 @@ __BRANCH__
             $result = Invoke-PostgresGameSetup -UserProfilesDir $script:pgProfiles -SuperPasswordPlain 'approved'
             $result.Configured | Should -Be 6
             $result.AlreadyConfigured | Should -Be 0
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -Be 'SUCCEEDED'
             $result.RecoveryBlocked | Should -BeFalse
             @($script:pgEvents) | Should -Be @('backup', 'save', 'save', 'save', 'save', 'save', 'save')
             $script:pgSaved.Count | Should -Be 6
@@ -5447,6 +5462,8 @@ __BRANCH__
         Should -Invoke Save-Xml -Times 0
         Should -Invoke Get-PostgresDatabaseState -Times 0
         Should -Invoke New-PostgresDatabaseFromBackup -Times 0
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
     }
 }
 Describe "Shared game mutation path safety" {
@@ -8710,22 +8727,25 @@ Describe "Invoke-CheckForUpdates" {
         }
     }
 
-    It "reports already current and returns false without prompting when there is no newer release" {
+    It "returns a verified NO_OP without prompting when there is no newer release" {
         Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-CheckForUpdatesReleaseJson -TagName $ScriptVersion) } }
         Mock Read-Host { throw "Read-Host should not be called when already current" }
 
         $path = Join-Path $TestDrive 'current.ps1'
         Set-Content -LiteralPath $path -Value "`$ScriptVersion = `"$ScriptVersion`"" -Encoding ascii
 
-        Invoke-CheckForUpdates -ScriptPath $path | Should -BeFalse
-        $updateFlow = $script:ProductionSource.Substring($script:ProductionSource.IndexOf("if (`$updateInstalled)"))
+        $result = Invoke-CheckForUpdates -ScriptPath $path
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'NO_OP'
+        $updateFlow = $script:ProductionSource.Substring($script:ProductionSource.IndexOf("if (`$updateResult.Outcome -eq 'SUCCEEDED')"))
         $startApply = $updateFlow.IndexOf("Start-TpmWorkflowStep -Context `$updateStatus -StepId 'apply'")
         $skipApply = $updateFlow.IndexOf("Complete-TpmWorkflowStep -Context `$updateStatus -Outcome Skipped")
         $startApply | Should -BeGreaterThan -1
         $skipApply | Should -BeGreaterThan $startApply
+        $result.Succeeded | Should -BeTrue
     }
 
-    It "returns false and makes no changes when the user declines the update" {
+    It "returns a verified NO_OP and makes no changes when the user declines the update" {
         Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-CheckForUpdatesReleaseJson) } }
         Mock Read-Host { "N" }
 
@@ -8733,7 +8753,9 @@ Describe "Invoke-CheckForUpdates" {
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
         $originalContent = Get-Content -LiteralPath $path -Raw
 
-        Invoke-CheckForUpdates -ScriptPath $path | Should -BeFalse
+        $result = Invoke-CheckForUpdates -ScriptPath $path
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'NO_OP'
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
     }
 
@@ -8746,7 +8768,9 @@ Describe "Invoke-CheckForUpdates" {
         Mock New-ManagerUpdateBackup { Join-Path $root 'backup.ps1' }
         Mock Invoke-TpmDownload { $false }
         try {
-            Invoke-ManagerUpdateInstall -ScriptPath $path -Release ([pscustomobject]@{ AssetName = 'x.zip'; DownloadUrl = 'https://github.com/example/x.zip'; SizeBytes = 1; TagName = 'v0.99.99' }) | Should -BeFalse
+            $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release ([pscustomobject]@{ AssetName = 'x.zip'; DownloadUrl = 'https://github.com/example/x.zip'; SizeBytes = 1; TagName = 'v0.99.99' })
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
             (Get-Item -LiteralPath $path -Force).IsReadOnly | Should -BeTrue
         } finally {
             Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
@@ -8852,24 +8876,29 @@ Describe "Invoke-ManagerUpdateInstall" {
         }
     }
 
-    It "installs successfully and returns true" {
+    It "installs successfully and returns a verified SUCCEEDED result" {
         $zipBytes = New-StartupCheckFixtureZipBytes
         Mock Invoke-TpmDownload { param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version) [System.IO.File]::WriteAllBytes($DestinationPath, $zipBytes); return $true }.GetNewClosure()
 
         $path = Join-Path $TestDrive 'install-target.ps1'
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeTrue
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'SUCCEEDED'
+        $result.Installed | Should -BeTrue
         (Get-Content -LiteralPath $path -Raw) | Should -Match 'ScriptVersion = "0.99.99"'
     }
 
-    It "returns false and leaves the original untouched when the target is read-only" {
+    It "returns a verified failure and leaves the original untouched when the target is read-only" {
         $path = Join-Path $TestDrive 'readonly-install-target.ps1'
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
         Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $true
         try {
             Mock Invoke-TpmDownload { throw "download should not be called when the target is read-only" }
-            Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+            $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
             (Get-Content -LiteralPath $path -Raw) | Should -Be '$ScriptVersion = "0.0.1"'
         } finally {
             Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
@@ -8896,7 +8925,9 @@ Describe "Invoke-ManagerUpdateInstall" {
             return $true
         }
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
 
         $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
@@ -8918,7 +8949,9 @@ Describe "Invoke-ManagerUpdateInstall" {
             return $true
         }.GetNewClosure()
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
 
         $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
@@ -8939,7 +8972,9 @@ Describe "Invoke-ManagerUpdateInstall" {
             return $true
         }.GetNewClosure()
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
 
         $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
@@ -8976,7 +9011,9 @@ Describe "Invoke-ManagerUpdateInstall" {
             return $true
         }.GetNewClosure()
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
         (Get-Content -LiteralPath $path -Raw).StartsWith('PK') | Should -BeFalse
     }
@@ -8996,7 +9033,9 @@ Describe "Invoke-ManagerUpdateInstall" {
             return $true
         }.GetNewClosure()
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
 
         $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
@@ -9013,7 +9052,9 @@ Describe "Invoke-ManagerUpdateInstall" {
         Mock New-ManagerUpdateBackup { throw "Access to the path is denied (simulated backup failure)." }
         Mock Invoke-TpmDownload { throw "download should never be called when backup fails first." }
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
         Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
         Should -Invoke Invoke-TpmDownload -Times 0
@@ -9033,7 +9074,9 @@ Describe "Invoke-ManagerUpdateInstall" {
             return $true
         }.GetNewClosure()
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
 
         $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
@@ -9061,7 +9104,9 @@ Describe "Invoke-ManagerUpdateInstall" {
 
         $lockHandle = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
         try {
-            Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+            $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         } finally {
             $lockHandle.Dispose()
         }
@@ -9079,27 +9124,31 @@ Describe "Invoke-ManagerUpdateInstall" {
 }
 
 Describe "Invoke-StartupUpdateCheck" {
-    It "returns false and does not prompt when already current" {
+    It "returns a verified NO_OP and does not prompt when already current" {
         Mock Get-ManagerUpdateRelease { [pscustomobject]@{ TagName = "v$ScriptVersion"; Name = $null; Body = $null; AssetName = 'x'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.39/x' } }
         Mock Read-Host { throw "Read-Host should not be called when already current" }
 
         $path = Join-Path $TestDrive 'startup-current.ps1'
         Set-Content -LiteralPath $path -Value "`$ScriptVersion = `"$ScriptVersion`"" -Encoding ascii
 
-        Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+        $result = Invoke-StartupUpdateCheck -ScriptPath $path
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'NO_OP'
     }
 
-    It "returns false without prompting again when the release check fails (e.g. offline)" {
+    It "returns a verified failure without prompting again when the release check fails (e.g. offline)" {
         Mock Get-ManagerUpdateRelease { $null }
         Mock Read-Host { throw "Read-Host should not be called when the release check fails" }
 
         $path = Join-Path $TestDrive 'startup-offline.ps1'
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
 
-        Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+        $result = Invoke-StartupUpdateCheck -ScriptPath $path
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
     }
 
-    It "returns false and makes no changes when the user chooses N (remind me later)" {
+    It "returns a verified NO_OP and makes no changes when the user chooses N (remind me later)" {
         Mock Get-ManagerUpdateRelease {
             [pscustomobject]@{ TagName = 'v0.99.99'; Name = 'v0.99.99'; Body = 'Notes.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/x.zip' }
         }
@@ -9109,7 +9158,9 @@ Describe "Invoke-StartupUpdateCheck" {
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
         $originalContent = Get-Content -LiteralPath $path -Raw
 
-        Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+        $result = Invoke-StartupUpdateCheck -ScriptPath $path
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'NO_OP'
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
     }
 
@@ -9127,7 +9178,9 @@ Describe "Invoke-StartupUpdateCheck" {
         $path = Join-Path $TestDrive 'startup-view-notes.ps1'
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
 
-        Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+        $result = Invoke-StartupUpdateCheck -ScriptPath $path
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'NO_OP'
         Should -Invoke Read-Host -Times 2
     }
 
@@ -9145,7 +9198,9 @@ Describe "Invoke-StartupUpdateCheck" {
         Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $true
 
         try {
-            Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+            $result = Invoke-StartupUpdateCheck -ScriptPath $path
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
             Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeTrue
             (Get-Item -LiteralPath $path -Force).IsReadOnly | Should -BeTrue
         } finally {

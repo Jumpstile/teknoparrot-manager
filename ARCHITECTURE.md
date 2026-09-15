@@ -1906,12 +1906,12 @@ Key invariants, each verified empirically while building the standalone tool thi
   extraction were ever skipped or broken upstream), a file missing the `TeknoParrot
 Manager` marker, or one missing a `$ScriptVersion` assignment, before it ever replaces
   the live script.
-- **`Invoke-CheckForUpdates` never calls `exit`.** It returns `$true` only when a new
-  script was actually installed; the menu dispatch block (untestable inline code, same as
-  every other mode) is the only place that decides whether to `exit` (successful update --
-  the in-memory code is now stale and must not keep running) or `continue` back to the
-  menu (every other outcome: already current, declined, read-only, or failed). Putting
-  `exit` inside the function would also kill the Pester test process that calls it.
+- **`Invoke-CheckForUpdates` and `Invoke-StartupUpdateCheck` never call `exit`.**
+  Each returns `TPM.TransactionResult.v1`; the top-level dispatch decides whether
+  to exit only after validating `Outcome -eq 'SUCCEEDED'`. `NO_OP`, rollback,
+  cleanup, and failure outcomes continue without claiming that an update was
+  installed. Keeping exit in the dispatch also prevents Pester calls from
+  terminating the test process.
 - **URL validation is `System.Uri`-parsed, not `-like`/regex prefix matching** -- rejects
   userinfo tricks (`https://github.com@evil.example.com/...`) and lookalike hosts
   (`https://github.com.evil.example.com/...`) that a naive prefix check would miss.
@@ -3130,3 +3130,26 @@ summaries contain no paths, commands, hashes, database names, or credentials;
 technical evidence remains in result detail fields, logs, and support
 artifacts. LaunchBox, HyperSpin, thumbnail acquisition, and optional
 artifact/download workflows remain outside this S1 boundary.
+
+## Setup and self-update transaction boundary (S1)
+
+`Invoke-PostgresGameSetup`, `Invoke-ManagerUpdateInstall`,
+`Invoke-CheckForUpdates`, and `Invoke-StartupUpdateCheck` return
+`TPM.TransactionResult.v1` on every terminal path. The result is authoritative
+for the caller; legacy counters such as `Configured`, `DbCreated`, and
+`RecoveryBlocked` remain attached as compatibility detail only.
+
+PostgreSQL setup performs profile and database preflight before mutation,
+requires verified recovery evidence before changing a non-no-op plan, and
+verifies profile/database state after writes. Database creation failure or
+profile/final-verification failure reports verified rollback when available;
+otherwise it reports `ACTION_REQUIRED` with unknown affected items. Terminal
+item sets are disjoint, and no normal summary exposes paths, commands,
+database names, credentials, hashes, or raw exception text.
+
+The manager self-update captures the current script hash and read-only state,
+verifies the backup and candidate release before replacement, verifies the
+installed hash/version after replacement, restores the previous file on a
+verifiable failure, and reports cleanup residue separately. Startup and menu
+callers validate the v1 result and restart only for `SUCCEEDED`; all other
+outcomes continue without claiming that an update was installed.

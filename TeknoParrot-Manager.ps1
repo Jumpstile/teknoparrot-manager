@@ -955,8 +955,13 @@ function New-TpmProfileTransactionResult {
         [object]$Rollback=$null, [object]$Cleanup=$null, [string]$ReasonCode=$null, [string]$UnderlyingOutcome=$null,
         [object]$TechnicalDetails=$null, [string[]]$Errors=@(), [string[]]$Warnings=@(), [object[]]$RecoveryActions=@()
     )
-    $changed=@($ChangedItems); $affected=@($ChangedItems); $completed=@($CompletedItems); $failed=@($FailedItems)
-    $unattempted=@($UnattemptedItems); $skipped=@($SkippedItems); $unknown=@($UnknownItems)
+$changed=@($ChangedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) })
+$affected=@($ChangedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) })
+$completed=@($CompletedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) })
+$failed=@($FailedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) })
+$unattempted=@($UnattemptedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) })
+$skipped=@($SkippedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) })
+$unknown=@($UnknownItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) })
     $backupInfo = if ($Backup) { $Backup } else { [pscustomobject]@{ Required=$false; Attempted=$false; Created=$false; Verified=$false; RootPath=$null; Path=$null; Items=@(); FailureStage=$null; FailureCode=$null; Reason=$null; ResiduePaths=@() } }
     $rollbackInfo = if ($Rollback) { $Rollback } else { [pscustomobject]@{ Attempted=$false; Completed=$false; Verified=$false; Items=@(); EvidenceRoot=$null; FailedItems=@(); Errors=@() } }
     $cleanupInfo = if ($Cleanup) { $Cleanup } else { [pscustomobject]@{ Attempted=[bool]$Backup; Completed=$true; ResiduePresent=$false; ResiduePaths=@(); ResidueItems=@(); Error=$null } }
@@ -16102,78 +16107,259 @@ function Invoke-PostgresGameSetup {
         ProfileRollbackVerified = $false
         TransactionResult = $null
     }
+    $finish = {
+        param(
+            [string]$Outcome,
+            [string]$ProductState,
+            [string]$Summary,
+            [string[]]$Items = @(),
+            [string[]]$ChangedItems = @(),
+            [string[]]$CompletedItems = @(),
+            [string[]]$FailedItems = @(),
+            [string[]]$UnattemptedItems = @(),
+            [string[]]$SkippedItems = @(),
+            [string[]]$UnknownItems = @(),
+            [bool]$MutationStarted = $false,
+            [bool]$MutationCompleted = $false,
+            $Backup = $null,
+            $PreState = $null,
+            [bool]$FinalAttempted = $false,
+            [bool]$FinalPassed = $false,
+            [object[]]$FinalChecks = @(),
+            [object[]]$FinalFailedItems = @(),
+            $Rollback = $null,
+            $Cleanup = $null,
+            [string]$ReasonCode = $null,
+            $TechnicalDetails = $null,
+            [string[]]$Errors = @(),
+            [string[]]$Warnings = @(),
+            [object[]]$RecoveryActions = @()
+        )
+        $tx = New-TpmProfileTransactionResult `
+            -WorkflowKey 'PostgresSetup' `
+            -OperationKey 'ConfigureProfilesAndCreateMissingDatabases' `
+            -Outcome $Outcome `
+            -ProductState $ProductState `
+            -Summary $Summary `
+            -Items $Items `
+            -ChangedItems $ChangedItems `
+            -CompletedItems $CompletedItems `
+            -FailedItems $FailedItems `
+            -UnattemptedItems $UnattemptedItems `
+            -SkippedItems $SkippedItems `
+            -UnknownItems $UnknownItems `
+            -MutationStarted:$MutationStarted `
+            -MutationCompleted:$MutationCompleted `
+            -Backup $Backup `
+            -PreState $PreState `
+            -FinalAttempted:$FinalAttempted `
+            -FinalPassed:$FinalPassed `
+            -FinalChecks $FinalChecks `
+            -FinalFailedItems $FinalFailedItems `
+            -Rollback $Rollback `
+            -Cleanup $Cleanup `
+            -ReasonCode $ReasonCode `
+            -TechnicalDetails $TechnicalDetails `
+            -Errors $Errors `
+            -Warnings $Warnings `
+            -RecoveryActions $RecoveryActions
+        foreach ($property in @('Configured','DbCreated','AlreadyConfigured','Errors','RecoveryBlocked','BackupPath','DatabaseRollbackVerified','ProfileRollbackVerified')) {
+            $tx | Add-Member -NotePropertyName $property -NotePropertyValue $results[$property] -Force
+        }
+        $tx | Add-Member -NotePropertyName TransactionResult -NotePropertyValue $tx -Force
+        $results.TransactionResult = $tx
+        return $tx
+    }
+    $cleanupComplete = [pscustomobject]@{
+        Attempted = $true
+        Completed = $true
+        ResiduePresent = $false
+        ResiduePaths = @()
+        ResidueItems = @()
+        Error = $null
+    }
+    $preflightPlans = New-Object System.Collections.Generic.List[object]
+    $dbState = @{}
+    $preflightBlocked = $false
+    $preflightError = $null
+    try {
+        $relBinPath = $script:PostgresBinDir.TrimEnd('\') + '\'
+        $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop |
+            Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
+        foreach ($pf in $profiles) {
+            try {
+                $doc = Read-Xml $pf.FullName
+                if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc)) { continue }
+                $dbName = Get-PostgresFieldValue $doc 'DbName'
+                if ([string]::IsNullOrWhiteSpace($dbName) -or -not (Test-SafePostgresDbName $dbName)) { throw 'The profile has no safe PostgreSQL database name.' }
+                if ($null -eq (Get-PostgresFieldValue $doc 'Pass')) { throw 'The profile has no PostgreSQL Pass field.' }
+                $changed = $false
+                foreach ($field in @(@('Path', $relBinPath), @('Address', '127.0.0.1'), @('Port', '5432'), @('User', 'postgres'))) {
+                    if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc $field[0]))) {
+                        if (-not (Set-PostgresFieldValue $doc $field[0] $field[1])) { throw "The profile has no PostgreSQL $($field[0]) field." }
+                        $changed = $true
+                    }
+                }
+                if (-not [string]::Equals((Get-PostgresFieldValue $doc 'Pass'), $SuperPasswordPlain, [System.StringComparison]::Ordinal)) {
+                    if (-not (Set-PostgresFieldValue $doc 'Pass' $SuperPasswordPlain)) { throw 'The profile PostgreSQL Pass field could not be updated.' }
+                    $changed = $true
+                }
+                if ($dbState.ContainsKey($dbName)) { $state = $dbState[$dbName] }
+                else {
+                    $state = Get-PostgresDatabaseState -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain
+                    if (-not $state.Verified) { throw 'The database existence result was not verified.' }
+                    $dbState[$dbName] = $state
+                }
+                $autoCreate = (Get-PostgresFieldValue $doc 'Automatically create Database') -eq '1'
+                $backupFile = $null
+                $encoding = $null
+                if (-not $state.Exists -and -not $autoCreate) {
+                    $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
+                    $gamePath = if ($gamePathNode) { $gamePathNode.InnerText } else { '' }
+                    if ([string]::IsNullOrWhiteSpace($gamePath) -or -not (Test-Path -LiteralPath $gamePath -PathType Leaf)) { throw 'The profile needs database creation but its game executable is unavailable.' }
+                    $backupFile = Get-PostgresBackupFile -GameFolder ([System.IO.Path]::GetDirectoryName($gamePath))
+                    if (-not $backupFile) { throw 'The profile needs database creation but no bundled pg_backup file was found.' }
+                    $encoding = Get-PostgresRestoreEncoding -DbName $dbName
+                }
+                [void]$preflightPlans.Add([pscustomobject]@{
+                    Profile = $pf
+                    Document = $doc
+                    DbName = $dbName
+                    DbExists = [bool]$state.Exists
+                    AutoCreate = $autoCreate
+                    BackupFile = $backupFile
+                    Encoding = $encoding
+                    Changed = $changed
+                })
+            } catch {
+                $preflightBlocked = $true
+                $preflightError = $_.Exception.Message
+                $results.Errors++
+                Write-Log "Postgres: preflight blocked for $($pf.BaseName); no profile write was attempted."
+            }
+        }
+    } catch {
+        $preflightBlocked = $true
+        $preflightError = $_.Exception.Message
+        $results.Errors++
+        Write-Log 'Postgres: profile enumeration failed before mutation.'
+    }
+    if ($preflightBlocked) {
+        $results.RecoveryBlocked = $true
+        return (& $finish `
+            -Outcome 'FAILED_BEFORE_MUTATION' `
+            -ProductState 'UNCHANGED' `
+            -Summary 'PostgreSQL setup stopped before changing any databases or profiles.' `
+            -Items @() `
+            -MutationStarted:$false `
+            -MutationCompleted:$false `
+            -FinalAttempted:$false `
+            -FinalPassed:$false `
+            -ReasonCode 'POSTGRES_PREFLIGHT_FAILED' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='Preflight'; Error=$preflightError }) `
+            -Errors @($preflightError) `
+            -RecoveryActions @(@{ Id='Review'; Label='Review the PostgreSQL setup details, then retry.' }))
+    }
+    $profileItems = @($preflightPlans | ForEach-Object { 'profile:' + $_.Profile.BaseName })
+    $databaseItems = @($preflightPlans | Where-Object { -not $_.DbExists -and -not $_.AutoCreate } | ForEach-Object { 'database:' + $_.DbName } | Select-Object -Unique)
+    $items = @($profileItems + $databaseItems)
+    $changedProfileItems = @($preflightPlans | Where-Object Changed | ForEach-Object { 'profile:' + $_.Profile.BaseName })
+    $plannedDatabaseItems = @($databaseItems)
+    $skippedItems = @($items | Where-Object { $changedProfileItems -notcontains $_ -and $plannedDatabaseItems -notcontains $_ })
+    if ($RecoveryBackup -and -not $RecoveryBackup.Verified) {
+        $results.Errors++
+        $results.RecoveryBlocked = $true
+        $backupInfo = [pscustomobject]@{
+            Required = $true
+            Attempted = $true
+            Created = [bool]$RecoveryBackup
+            Verified = $false
+            RootPath = $RecoveryBackup.Path
+            Items = @()
+            FailureStage = 'RecoveryEvidence'
+            FailureCode = 'RECOVERY_EVIDENCE_REQUIRED'
+        }
+        return (& $finish `
+            -Outcome 'FAILED_BEFORE_MUTATION' `
+            -ProductState 'UNCHANGED' `
+            -Summary 'PostgreSQL setup stopped before changing any databases or profiles.' `
+            -Items $items `
+            -UnattemptedItems $items `
+            -Backup $backupInfo `
+            -MutationStarted:$false `
+            -MutationCompleted:$false `
+            -FinalAttempted:$false `
+            -FinalPassed:$false `
+            -ReasonCode 'RECOVERY_EVIDENCE_REQUIRED' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='RecoveryEvidence'; Error='Verified recovery evidence is unavailable.' }) `
+            -RecoveryActions @(@{ Id='Review'; Label='Review the protected recovery evidence, then retry.' }))
+    }
+    if ($changedProfileItems.Count -eq 0 -and $plannedDatabaseItems.Count -eq 0) {
+        $preState = [pscustomobject]@{
+            Captured = $true
+            CaptureMethod = 'Verified PostgreSQL profile and database preflight'
+            Items = $items
+            EvidenceRoot = $null
+            CaptureError = $null
+        }
+        return (& $finish `
+            -Outcome 'NO_OP' `
+            -ProductState 'UNCHANGED' `
+            -Summary 'PostgreSQL setup is already complete. Nothing needed changing.' `
+            -Items $items `
+            -SkippedItems $skippedItems `
+            -MutationStarted:$false `
+            -MutationCompleted:$false `
+            -PreState $preState `
+            -FinalAttempted:$true `
+            -FinalPassed:$true `
+            -FinalChecks @('All affected PostgreSQL profiles and databases were already in the intended state.') `
+            -ReasonCode 'POSTGRES_ALREADY_CONFIGURED' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='Preflight'; PlanCount=$preflightPlans.Count }))
+    }
     if (-not $RecoveryBackup) { $RecoveryBackup = New-PostgresRecoveryBackup -UserProfilesDir $UserProfilesDir }
     if ($RecoveryBackup) { $results.BackupPath = $RecoveryBackup.Path }
+    $backupInfo = [pscustomobject]@{
+        Required = $true
+        Attempted = $true
+        Created = [bool]$RecoveryBackup
+        Verified = [bool]($RecoveryBackup -and $RecoveryBackup.Verified)
+        RootPath = if ($RecoveryBackup) { $RecoveryBackup.Path } else { $null }
+        Items = @(
+            @($RecoveryBackup.ProfileBackups | ForEach-Object { $_.Source }),
+            @($RecoveryBackup.ConfigBackups | ForEach-Object { $_.Source })
+        )
+        FailureStage = if ($RecoveryBackup -and $RecoveryBackup.Verified) { $null } else { 'RecoveryEvidence' }
+        FailureCode = if ($RecoveryBackup -and $RecoveryBackup.Verified) { $null } else { 'RECOVERY_EVIDENCE_REQUIRED' }
+    }
     if (-not $RecoveryBackup -or -not $RecoveryBackup.Verified) {
         $results.Errors++
         $results.RecoveryBlocked = $true
         Write-Log 'Postgres: profile setup blocked because recovery evidence was not verified.'
-        return [pscustomobject]$results
-    }
-    $relBinPath = $script:PostgresBinDir.TrimEnd('\') + '\'
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
-    $plans = New-Object System.Collections.Generic.List[object]
-    $dbState = @{}
-    $preflightBlocked = $false
-    foreach ($pf in $profiles) {
-        try {
-            $doc = Read-Xml $pf.FullName
-            if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc)) { continue }
-            $dbName = Get-PostgresFieldValue $doc 'DbName'
-            if ([string]::IsNullOrWhiteSpace($dbName) -or -not (Test-SafePostgresDbName $dbName)) { throw 'The profile has no safe PostgreSQL database name.' }
-            if ($null -eq (Get-PostgresFieldValue $doc 'Pass')) { throw 'The profile has no PostgreSQL Pass field.' }
-            $changed = $false
-            foreach ($field in @(@('Path', $relBinPath), @('Address', '127.0.0.1'), @('Port', '5432'), @('User', 'postgres'))) {
-                if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc $field[0]))) {
-                    if (-not (Set-PostgresFieldValue $doc $field[0] $field[1])) { throw "The profile has no PostgreSQL $($field[0]) field." }
-                    $changed = $true
-                }
-            }
-            if (-not [string]::Equals((Get-PostgresFieldValue $doc 'Pass'), $SuperPasswordPlain, [System.StringComparison]::Ordinal)) {
-                if (-not (Set-PostgresFieldValue $doc 'Pass' $SuperPasswordPlain)) { throw 'The profile PostgreSQL Pass field could not be updated.' }
-                $changed = $true
-            }
-            if ($dbState.ContainsKey($dbName)) { $state = $dbState[$dbName] }
-            else {
-                $state = Get-PostgresDatabaseState -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain
-                if (-not $state.Verified) { throw 'The database existence result was not verified.' }
-                $dbState[$dbName] = $state
-            }
-            $autoCreate = (Get-PostgresFieldValue $doc 'Automatically create Database') -eq '1'
-            $backupFile = $null
-            $encoding = $null
-            if (-not $state.Exists -and -not $autoCreate) {
-                $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
-                $gamePath = if ($gamePathNode) { $gamePathNode.InnerText } else { '' }
-                if ([string]::IsNullOrWhiteSpace($gamePath) -or -not (Test-Path -LiteralPath $gamePath -PathType Leaf)) { throw 'The profile needs database creation but its game executable is unavailable.' }
-                $backupFile = Get-PostgresBackupFile -GameFolder ([System.IO.Path]::GetDirectoryName($gamePath))
-                if (-not $backupFile) { throw 'The profile needs database creation but no bundled pg_backup file was found.' }
-                $encoding = Get-PostgresRestoreEncoding -DbName $dbName
-            }
-            [void]$plans.Add([pscustomobject]@{
-                Profile = $pf
-                Document = $doc
-                DbName = $dbName
-                DbExists = [bool]$state.Exists
-                AutoCreate = $autoCreate
-                BackupFile = $backupFile
-                Encoding = $encoding
-                Changed = $changed
-            })
-        } catch {
-            $preflightBlocked = $true
-            $results.Errors++
-            Write-Log "Postgres: preflight blocked for $($pf.BaseName); no profile write was attempted."
-        }
-    }
-    if ($preflightBlocked) {
-        $results.RecoveryBlocked = $true
-        Write-Log 'Postgres: profile setup aborted because preflight was not fully verified.'
-        return [pscustomobject]$results
+        return (& $finish `
+            -Outcome 'FAILED_BEFORE_MUTATION' `
+            -ProductState 'UNCHANGED' `
+            -Summary 'PostgreSQL setup stopped before changing any databases or profiles.' `
+            -Items $items `
+            -UnattemptedItems $items `
+            -Backup $backupInfo `
+            -MutationStarted:$false `
+            -MutationCompleted:$false `
+            -FinalAttempted:$false `
+            -FinalPassed:$false `
+            -ReasonCode 'RECOVERY_EVIDENCE_REQUIRED' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='RecoveryEvidence'; Error='Verified recovery evidence is unavailable.' }) `
+            -RecoveryActions @(@{ Id='Review'; Label='Review the protected recovery evidence, then retry.' }))
     }
     $createdDatabases = New-Object System.Collections.Generic.List[object]
-    foreach ($plan in @($plans | Sort-Object { $_.Profile.Name })) {
+    $attemptedProfileItems = New-Object System.Collections.Generic.List[string]
+    $completedProfileItems = New-Object System.Collections.Generic.List[string]
+    $attemptedDatabaseItems = New-Object System.Collections.Generic.List[string]
+    $completedDatabaseItems = New-Object System.Collections.Generic.List[string]
+    foreach ($plan in @($preflightPlans | Sort-Object { $_.Profile.Name })) {
         if ($plan.DbExists -or $plan.AutoCreate) { continue }
+        $dbItem = 'database:' + $plan.DbName
+        [void]$attemptedDatabaseItems.Add($dbItem)
         try {
             if (-not (New-PostgresDatabaseFromBackup -DbName $plan.DbName -Encoding $plan.Encoding -BackupFile $plan.BackupFile -SuperPasswordPlain $SuperPasswordPlain)) {
                 throw 'The PostgreSQL database creation and restore did not complete.'
@@ -16183,6 +16369,7 @@ function Invoke-PostgresGameSetup {
             [void]$createdDatabases.Add([pscustomobject]@{ DbName = $plan.DbName; Encoding = $plan.Encoding; BackupFile = $plan.BackupFile })
             $plan.DbExists = $true
             $dbState[$plan.DbName] = [pscustomobject]@{ Exists = $true; Verified = $true }
+            [void]$completedDatabaseItems.Add($dbItem)
             $results.DbCreated++
         } catch {
             $results.Errors++
@@ -16191,28 +16378,110 @@ function Invoke-PostgresGameSetup {
             if ($failedDatabase.Count -eq 0) { [void]$createdDatabases.Add([pscustomobject]@{ DbName = $plan.DbName; Encoding = $plan.Encoding; BackupFile = $plan.BackupFile }) }
             $dbRollback = Restore-PostgresSetupCreatedDatabases -Databases $createdDatabases.ToArray() -SuperPasswordPlain $SuperPasswordPlain
             $results.DatabaseRollbackVerified = [bool]$dbRollback.Verified
-            $results.TransactionResult = New-PostgresSetupCouplingTransactionResult `
-                -ChangedItems @($createdDatabases | ForEach-Object { $_.DbName }) `
-                -FailedItems @($plan.DbName) -RollbackResult $dbRollback `
-                -BackupPath $RecoveryBackup.Path -Stage 'DatabaseCreation'
-            Write-Log ("Postgres: database creation failed for {0}; rollback-verified={1}." -f $plan.Profile.BaseName,$dbRollback.Verified)
-            return [pscustomobject]$results
+            $rollbackItems = @($dbRollback.RestoredItems)
+            $rollbackFailed = @($dbRollback.FailedItems)
+            $rollbackErrors = @($dbRollback.Errors)
+            $rollback = [pscustomobject]@{
+                Attempted = $true
+                Completed = [bool]$dbRollback.Verified
+                Verified = [bool]$dbRollback.Verified
+                VerifiedUtc = (Get-Date).ToUniversalTime().ToString('o')
+                Items = $rollbackItems
+                EvidenceRoot = $RecoveryBackup.Path
+                FailedItems = $rollbackFailed
+                Errors = $rollbackErrors
+            }
+            $outcome = if ($dbRollback.Verified) { 'ROLLED_BACK_VERIFIED' } else { 'ACTION_REQUIRED' }
+            $product = if ($dbRollback.Verified) { 'UNCHANGED' } else { 'UNKNOWN' }
+            $summary = if ($dbRollback.Verified) { 'PostgreSQL setup stopped and the previous verified state was restored.' } else { 'PostgreSQL setup needs attention because the previous database state could not be verified.' }
+            $attemptedItems = @($attemptedDatabaseItems.ToArray())
+            $rollbackUnknown = @($rollbackFailed)
+            $failedTerminal = @($dbItem | Where-Object { $rollbackUnknown -notcontains $_ })
+            $unattempted = @($databaseItems | Where-Object {
+                $attemptedItems -notcontains $_ -and
+                $rollbackUnknown -notcontains $_ -and
+                $skippedItems -notcontains $_
+            })
+            return (& $finish `
+                -Outcome $outcome `
+                -ProductState $product `
+                -Summary $summary `
+                -Items $items `
+                -ChangedItems $attemptedItems `
+                -CompletedItems @($completedDatabaseItems.ToArray() | Where-Object { $rollbackUnknown -notcontains $_ }) `
+                -FailedItems $failedTerminal `
+                -UnattemptedItems $unattempted `
+                -SkippedItems @($skippedItems | Where-Object { $rollbackUnknown -notcontains $_ }) `
+                -UnknownItems $rollbackUnknown `
+                -MutationStarted:$true `
+                -MutationCompleted:$false `
+                -Backup $backupInfo `
+                -PreState ([pscustomobject]@{ Captured=$true; CaptureMethod='Verified PostgreSQL recovery evidence and database preflight'; Items=$items; EvidenceRoot=$RecoveryBackup.Path; CaptureError=$null }) `
+                -FinalAttempted:$true `
+                -FinalPassed:([bool]$dbRollback.Verified) `
+                -FinalChecks $(if ($dbRollback.Verified) { @('Created databases were removed and verified absent.') } else { @() }) `
+                -FinalFailedItems $rollbackUnknown `
+                -Rollback $rollback `
+                -ReasonCode $(if ($dbRollback.Verified) { 'POSTGRES_DATABASE_ROLLBACK_VERIFIED' } else { 'POSTGRES_DATABASE_ROLLBACK_UNVERIFIED' }) `
+                -TechnicalDetails ([pscustomobject]@{ Stage='DatabaseCreation'; FailedDatabase=$plan.DbName; DatabaseRollback=$dbRollback }) `
+                -Errors $rollbackErrors `
+                -RecoveryActions $(if ($dbRollback.Verified) { @() } else { @(@{ Id='Review'; Label='Open Details and review the preserved recovery evidence.' }) }))
         }
     }
-    $changedProfileItems = New-Object System.Collections.Generic.List[string]
     try {
-        foreach ($plan in @($plans | Sort-Object { $_.Profile.Name })) {
+        foreach ($plan in @($preflightPlans | Sort-Object { $_.Profile.Name })) {
+            $profileItem = 'profile:' + $plan.Profile.BaseName
             if ($plan.Changed) {
-                [void]$changedProfileItems.Add($plan.Profile.BaseName)
+                [void]$attemptedProfileItems.Add($profileItem)
                 Save-Xml $plan.Document $plan.Profile.FullName
+                [void]$completedProfileItems.Add($profileItem)
                 $results.Configured++
             } else {
                 $results.AlreadyConfigured++
             }
         }
+        $finalChecks = New-Object System.Collections.Generic.List[string]
+        foreach ($plan in @($preflightPlans | Sort-Object { $_.Profile.Name })) {
+            $doc = Read-Xml $plan.Profile.FullName
+            foreach ($field in @(@('Path', $relBinPath), @('Address', '127.0.0.1'), @('Port', '5432'), @('User', 'postgres'))) {
+                $actualValue = [string](Get-PostgresFieldValue $doc $field[0])
+                $expectedValue = [string]$field[1]
+                if ($field[0] -eq 'Path') {
+                    $actualValue = $actualValue -replace '\\{2,}', '\'
+                    $expectedValue = $expectedValue -replace '\\{2,}', '\'
+                }
+                if (-not [string]::Equals($actualValue, $expectedValue, [System.StringComparison]::Ordinal)) { throw "PostgreSQL profile verification failed for $($plan.Profile.BaseName)." }
+            }
+            if (-not [string]::Equals([string](Get-PostgresFieldValue $doc 'Pass'), $SuperPasswordPlain, [System.StringComparison]::Ordinal)) { throw "PostgreSQL profile password verification failed for $($plan.Profile.BaseName)." }
+            if ($plan.DbExists -and -not $plan.AutoCreate) {
+                $finalDb = Get-PostgresDatabaseState -DbName $plan.DbName -SuperPasswordPlain $SuperPasswordPlain
+                if (-not $finalDb.Verified -or -not $finalDb.Exists) { throw "PostgreSQL database verification failed for $($plan.DbName)." }
+            }
+            [void]$finalChecks.Add(('Verified PostgreSQL profile and database state for {0}.' -f $plan.Profile.BaseName))
+        }
+        $changed = @($attemptedDatabaseItems.ToArray() + $attemptedProfileItems.ToArray())
+        $completed = @($completedDatabaseItems.ToArray() + $completedProfileItems.ToArray())
+        return (& $finish `
+            -Outcome 'SUCCEEDED' `
+            -ProductState 'INTENDED' `
+            -Summary 'PostgreSQL setup finished and the repaired profiles and databases were verified.' `
+            -Items $items `
+            -ChangedItems $changed `
+            -CompletedItems $completed `
+            -SkippedItems $skippedItems `
+            -MutationStarted:$true `
+            -MutationCompleted:$true `
+            -Backup $backupInfo `
+            -PreState ([pscustomobject]@{ Captured=$true; CaptureMethod='Verified PostgreSQL recovery evidence and database preflight'; Items=$items; EvidenceRoot=$RecoveryBackup.Path; CaptureError=$null }) `
+            -FinalAttempted:$true `
+            -FinalPassed:$true `
+            -FinalChecks $finalChecks.ToArray() `
+            -ReasonCode 'POSTGRES_SETUP_VERIFIED' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='FinalVerification'; Configured=$results.Configured; DbCreated=$results.DbCreated; AlreadyConfigured=$results.AlreadyConfigured }))
     } catch {
         $results.Errors++
         $results.RecoveryBlocked = $true
+        $profileFailureError = ConvertTo-PostgresRedactedText -Text ([string]$_.Exception.Message) -Secrets @($SuperPasswordPlain)
         $profileRollbackVerified = $true
         $profileRollbackError = $null
         try {
@@ -16227,21 +16496,63 @@ function Invoke-PostgresGameSetup {
         $results.ProfileRollbackVerified = [bool]$profileRollbackVerified
         $combinedRollback = [pscustomobject]@{
             Verified = ($profileRollbackVerified -and $dbRollback.Verified)
-            RestoredItems = @($dbRollback.RestoredItems + $(if ($profileRollbackVerified) { @($changedProfileItems.ToArray()) } else { @() }))
-            FailedItems = @($dbRollback.FailedItems + $(if (-not $profileRollbackVerified) { @($changedProfileItems.ToArray()) } else { @() }))
+            RestoredItems = @($dbRollback.RestoredItems + $(if ($profileRollbackVerified) { @($completedProfileItems.ToArray()) } else { @() }))
+            FailedItems = @($dbRollback.FailedItems + $(if (-not $profileRollbackVerified) { @($completedProfileItems.ToArray()) } else { @() }))
             Errors = @($dbRollback.Errors + $(if ($profileRollbackError) { @($profileRollbackError) } else { @() }))
         }
-        $changedItems = @($createdDatabases | ForEach-Object { $_.DbName }) + @($changedProfileItems.ToArray())
-        $results.TransactionResult = New-PostgresSetupCouplingTransactionResult `
-            -ChangedItems $changedItems -FailedItems @($changedProfileItems.ToArray()) `
-            -RollbackResult $combinedRollback -BackupPath $RecoveryBackup.Path -Stage 'ProfileWrite'
-        if ($combinedRollback.Verified) {
-            Write-Log 'Postgres: profile write failed; database and profile rollback completed and was verified.'
-        } else {
-            Write-Log ("Postgres: profile write failed; coupled rollback requires attention. Evidence remains at {0}." -f $RecoveryBackup.Path)
+        $changedItems = @($attemptedDatabaseItems.ToArray() + $attemptedProfileItems.ToArray())
+        $unknownItems = @($combinedRollback.FailedItems)
+        $completedItems = @($completedProfileItems.ToArray() + $completedDatabaseItems.ToArray() | Where-Object { $unknownItems -notcontains $_ })
+        $failedItems = @($attemptedDatabaseItems.ToArray() + $attemptedProfileItems.ToArray() | Where-Object {
+            $completedItems -notcontains $_ -and
+            $unknownItems -notcontains $_ -and
+            $skippedItems -notcontains $_
+        })
+        $unattemptedItems = @($items | Where-Object {
+            $changedItems -notcontains $_ -and
+            $unknownItems -notcontains $_ -and
+            $failedItems -notcontains $_ -and
+            $completedItems -notcontains $_ -and
+            $skippedItems -notcontains $_
+        })
+        $skippedTerminalItems = @($skippedItems | Where-Object { $unknownItems -notcontains $_ })
+        $rollback = [pscustomobject]@{
+            Attempted = $true
+            Completed = [bool]$combinedRollback.Verified
+            Verified = [bool]$combinedRollback.Verified
+            VerifiedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            Items = @($combinedRollback.RestoredItems)
+            EvidenceRoot = $RecoveryBackup.Path
+            FailedItems = @($combinedRollback.FailedItems)
+            Errors = @($combinedRollback.Errors)
         }
+        $outcome = if ($combinedRollback.Verified) { 'ROLLED_BACK_VERIFIED' } else { 'ACTION_REQUIRED' }
+        $product = if ($combinedRollback.Verified) { 'UNCHANGED' } else { 'UNKNOWN' }
+        $summary = if ($combinedRollback.Verified) { 'PostgreSQL setup stopped and the previous verified state was restored.' } else { 'PostgreSQL setup needs attention because the previous profile or database state could not be verified.' }
+        return (& $finish `
+            -Outcome $outcome `
+            -ProductState $product `
+            -Summary $summary `
+            -Items $items `
+            -ChangedItems $changedItems `
+            -CompletedItems $completedItems `
+            -FailedItems $failedItems `
+            -UnattemptedItems $unattemptedItems `
+            -SkippedItems $skippedTerminalItems `
+            -UnknownItems $unknownItems `
+            -MutationStarted:$true `
+            -MutationCompleted:$false `
+            -Backup $backupInfo `
+            -PreState ([pscustomobject]@{ Captured=$true; CaptureMethod='Verified PostgreSQL recovery evidence and database preflight'; Items=$items; EvidenceRoot=$RecoveryBackup.Path; CaptureError=$null }) `
+            -FinalAttempted:$true `
+            -FinalPassed:([bool]$combinedRollback.Verified) `
+            -FinalChecks $(if ($combinedRollback.Verified) { @('Coupled PostgreSQL profile and database rollback was verified.') } else { @() }) `
+            -FinalFailedItems @($combinedRollback.FailedItems) `
+            -Rollback $rollback `
+            -TechnicalDetails ([pscustomobject]@{ Stage='ProfileWriteOrFinalVerification'; Failure=$profileFailureError; DatabaseRollback=$dbRollback; ProfileRollbackVerified=$profileRollbackVerified }) `
+            -Errors @($combinedRollback.Errors) `
+            -RecoveryActions $(if ($combinedRollback.Verified) { @() } else { @(@{ Id='Review'; Label='Open Details and review the preserved recovery evidence.' }) }))
     }
-    return [pscustomobject]$results
 }
 # =============================================================================
 # FFB ARCADE PLUGIN  (force feedback / rumble for arcade racers and shooters)
@@ -18883,177 +19194,420 @@ function Test-ManagerUpdateExtractedScript {
     return $true
 }
 
-# Does the check, confirmation, and (if accepted) the actual update. Returns
-# $true only if a new script was installed -- callers must not keep running
-# after that (the in-memory code is now stale) and should exit rather than
-# continue the menu loop. Returns $false for every other outcome (already
-# current, declined, or failed), all of which are safe to fall through to
-# "press Enter to return to menu".
-# Shared backup/download/extract/validate/replace path used by both the menu
-# option and the startup checker, once each has already obtained its own
-# explicit confirmation (their prompts differ, so that step stays in each
-# caller). Never prompts itself. Returns $true only if a new script was
-# actually installed.
+function Get-ManagerUpdatePreState {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+            return [pscustomobject]@{
+                Captured = $false
+                CaptureMethod = 'Target script is unavailable.'
+                CapturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+                Items = @('manager-script')
+                EvidenceRoot = $null
+                CaptureError = 'Target script is unavailable.'
+                Path = $Path
+                Sha256 = $null
+                Length = 0
+                Version = $null
+                IsReadOnly = $false
+            }
+        }
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+        $content = [System.Text.Encoding]::UTF8.GetString($bytes)
+        $versionMatch = [regex]::Match($content, '\$ScriptVersion\s*=\s*"([^"]+)"')
+        return [pscustomobject]@{
+            Captured = $true
+            CaptureMethod = 'Read and hashed the current manager script before replacement.'
+            CapturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            Items = @('manager-script')
+            EvidenceRoot = $null
+            CaptureError = $null
+            Path = $Path
+            Sha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash
+            Length = [int64]$bytes.Length
+            Version = if ($versionMatch.Success) { $versionMatch.Groups[1].Value } else { $null }
+            IsReadOnly = [bool]$item.IsReadOnly
+        }
+    } catch {
+        return [pscustomobject]@{
+            Captured = $false
+            CaptureMethod = 'Manager script pre-state capture failed.'
+            CapturedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            Items = @('manager-script')
+            EvidenceRoot = $null
+            CaptureError = [string]$_.Exception.Message
+            Path = $Path
+            Sha256 = $null
+            Length = 0
+            Version = $null
+            IsReadOnly = $false
+        }
+    }
+}
+
+function New-TpmManagerUpdateTransactionResult {
+    param(
+        [Parameter(Mandatory)][string]$Outcome,
+        [Parameter(Mandatory)][string]$ProductState,
+        [Parameter(Mandatory)][string]$Summary,
+        [object]$PreState = $null,
+        [object]$Backup = $null,
+        [object]$Rollback = $null,
+        [object]$Cleanup = $null,
+        [bool]$MutationStarted = $false,
+        [bool]$MutationCompleted = $false,
+        [bool]$FinalAttempted = $false,
+        [bool]$FinalPassed = $false,
+        [object[]]$FinalChecks = @(),
+        [object[]]$FinalFailedItems = @(),
+        [string]$ReasonCode = $null,
+        [object]$TechnicalDetails = $null,
+        [string[]]$Errors = @(),
+        [string[]]$Warnings = @(),
+        [object[]]$RecoveryActions = @()
+    )
+    $tx = New-TpmProfileTransactionResult `
+        -WorkflowKey 'ManagerUpdate' `
+        -OperationKey 'CheckAndInstallRelease' `
+        -Outcome $Outcome `
+        -ProductState $ProductState `
+        -Summary $Summary `
+        -Items @('manager-script') `
+        -ChangedItems $(if ($MutationStarted) { @('manager-script') } else { @() }) `
+        -CompletedItems $(if ($Outcome -eq 'SUCCEEDED') { @('manager-script') } else { @() }) `
+        -FailedItems $(if ($Outcome -eq 'PARTIAL_APPLIED') { @('manager-script') } else { @() }) `
+        -UnknownItems $(if ($ProductState -eq 'UNKNOWN') { @('manager-script') } else { @() }) `
+        -SkippedItems $(if ($Outcome -eq 'NO_OP') { @('manager-script') } else { @() }) `
+        -MutationStarted:$MutationStarted `
+        -MutationCompleted:$MutationCompleted `
+        -Backup $Backup `
+        -PreState $PreState `
+        -FinalAttempted:$FinalAttempted `
+        -FinalPassed:$FinalPassed `
+        -FinalChecks $FinalChecks `
+        -FinalFailedItems $FinalFailedItems `
+        -Rollback $Rollback `
+        -Cleanup $Cleanup `
+        -ReasonCode $ReasonCode `
+        -TechnicalDetails $TechnicalDetails `
+        -Errors $Errors `
+        -Warnings $Warnings `
+        -RecoveryActions $RecoveryActions
+    $tx | Add-Member -NotePropertyName Installed -NotePropertyValue ($Outcome -eq 'SUCCEEDED') -Force
+    $tx | Add-Member -NotePropertyName UpdateInstalled -NotePropertyValue ($Outcome -eq 'SUCCEEDED') -Force
+    return $tx
+}
+
+# Performs the shared backup/download/extract/validate/replace transaction for
+# an already approved release. Returns TPM.TransactionResult.v1 for every
+# outcome; callers must restart only after validating Outcome SUCCEEDED because
+# the in-memory code is stale after a verified replacement.
+#
+# This function never prompts. Invoke-CheckForUpdates and
+# Invoke-StartupUpdateCheck own their distinct confirmation flows.
 function Invoke-ManagerUpdateInstall {
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][pscustomobject]$Release
     )
-    $readOnlyCleared = $false
-    try {
-        $readOnlyCleared = [bool](Assert-ManagerUpdateTargetWritable -Path $ScriptPath)
-    } catch {
-        Write-Host ""
-        Write-Host "  TeknoParrot Manager could not prepare the update because the script file could not be changed safely." -ForegroundColor Red
-        Write-Host "  No backup or download was attempted." -ForegroundColor Yellow
-        Write-Log "CheckForUpdates: writable-target preparation failed."
-        return $false
-    }
-    if ($readOnlyCleared) {
-        Write-Host '  TeknoParrot Manager temporarily cleared the file protection for this approved update and will restore it after this attempt.' -ForegroundColor DarkGray
-    }
-
+    $preState = Get-ManagerUpdatePreState -Path $ScriptPath
+    $backupPath = $null
     $downloadedZipPath = $null
     $extractedScriptPath = $null
-    $backupPath = $null
+    $candidateHash = $null
+    $readOnlyCleared = $false
+    $mutationStarted = $false
+    $mutationAttempted = $false
+    $outcome = 'FAILED_BEFORE_MUTATION'
+    $productState = 'UNCHANGED'
+    $reasonCode = 'UPDATE_PREPARATION_FAILED'
+    $summary = 'The update was not installed. Your current TeknoParrot Manager was not changed.'
+    $finalAttempted = $false
+    $finalPassed = $false
+    $finalChecks = @()
+    $finalFailedItems = @()
+    $errors = New-Object System.Collections.Generic.List[string]
+    $warnings = New-Object System.Collections.Generic.List[string]
+    $rollback = $null
+    $backupInfo = [pscustomobject]@{
+        Required = $true
+        Attempted = $false
+        Created = $false
+        Verified = $false
+        RootPath = $null
+        Items = @('manager-script')
+        FailureStage = 'Backup'
+        FailureCode = 'UPDATE_BACKUP_NOT_ATTEMPTED'
+    }
+    $cleanupResidue = New-Object System.Collections.Generic.List[string]
+    $cleanupErrors = New-Object System.Collections.Generic.List[string]
     try {
-        Write-Host ""
-        Write-Host "  Backing up current script..." -ForegroundColor DarkGray
+        if (-not $preState.Captured) { throw 'The current manager script could not be read and hashed before the update.' }
+        try {
+            $readOnlyCleared = [bool](Assert-ManagerUpdateTargetWritable -Path $ScriptPath)
+        } catch {
+            $reasonCode = 'UPDATE_TARGET_NOT_WRITABLE'
+            throw 'The manager script could not be prepared safely for the approved update.'
+        }
+        if ($readOnlyCleared) {
+            Write-Host '  TeknoParrot Manager temporarily cleared file protection for this approved update.' -ForegroundColor DarkGray
+        }
         $backupPath = New-ManagerUpdateBackup -Path $ScriptPath
-        Write-Host "  Backup created: $backupPath" -ForegroundColor Green
-        Write-Log "CheckForUpdates: backup created at $backupPath"
+        $backupInfo = [pscustomobject]@{
+            Required = $true
+            Attempted = $true
+            Created = [bool](Test-Path -LiteralPath $backupPath -PathType Leaf)
+            Verified = $false
+            RootPath = $backupPath
+            Items = @('manager-script')
+            FailureStage = 'BackupVerification'
+            FailureCode = 'UPDATE_BACKUP_HASH_MISMATCH'
+        }
+        if (-not $backupInfo.Created) { throw 'The manager script backup could not be verified.' }
+        $backupHash = (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($backupHash -ine [string]$preState.Sha256) { throw 'The manager script backup hash did not match the captured pre-state.' }
+        $backupInfo.Verified = $true
+        $backupInfo.FailureStage = $null
+        $backupInfo.FailureCode = $null
+        Write-Log "CheckForUpdates: verified manager-script backup at $backupPath"
 
-        Write-Host "  Downloading $($Release.AssetName)..." -ForegroundColor DarkGray
         $downloadedZipPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-update-" + [guid]::NewGuid().ToString('N') + '.zip')
         if (-not (Invoke-TpmDownload -DownloadUrl $Release.DownloadUrl -DestinationPath $downloadedZipPath -ExpectedBytes $Release.SizeBytes -Label 'CheckForUpdates' -Version $Release.TagName)) {
-            throw "Downloaded update asset is missing, empty, or incomplete: $downloadedZipPath"
+            $reasonCode = 'UPDATE_DOWNLOAD_FAILED'
+            throw 'The approved update package could not be downloaded and verified.'
         }
-
-        Write-Host "  Extracting and validating..." -ForegroundColor DarkGray
         $extractedScriptPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-update-extracted-" + [guid]::NewGuid().ToString('N') + '.ps1')
-        Expand-ManagerUpdateAsset -ZipPath $downloadedZipPath -EntryName "TeknoParrot-Manager.ps1" -DestinationPath $extractedScriptPath | Out-Null
+        Expand-ManagerUpdateAsset -ZipPath $downloadedZipPath -EntryName 'TeknoParrot-Manager.ps1' -DestinationPath $extractedScriptPath | Out-Null
         Test-ManagerUpdateExtractedScript -Path $extractedScriptPath | Out-Null
-
-        Write-Host "  Installing update..." -ForegroundColor DarkGray
-        # -ErrorAction Stop is required here, not optional: $ErrorActionPreference
-        # is never set anywhere in this script (defaults to 'Continue'), so a
-        # sharing-violation failure (e.g. AV briefly holding the file open) would
-        # otherwise print a red error and silently fall through as if the move had
-        # succeeded -- reporting "Update installed" and returning $true while the
-        # live script was never actually replaced. Confirmed empirically: this
-        # was a real, reproducible bug, not a theoretical one -- caught by a
-        # destructive-path test that locks the destination file during the move.
+        $candidateBytes = [System.IO.File]::ReadAllBytes($extractedScriptPath)
+        $candidateContent = [System.Text.Encoding]::UTF8.GetString($candidateBytes)
+        $candidateVersionMatch = [regex]::Match($candidateContent, '\$ScriptVersion\s*=\s*"([^"]+)"')
+        if (-not $candidateVersionMatch.Success) {
+            $reasonCode = 'UPDATE_VERSION_MISSING'
+            throw 'The approved update did not contain a readable version.'
+        }
+        $candidateVersion = $candidateVersionMatch.Groups[1].Value
+        if ((ConvertTo-ManagerComparableVersion -VersionText $candidateVersion) -ne (ConvertTo-ManagerComparableVersion -VersionText ([string]$Release.TagName))) {
+            $reasonCode = 'UPDATE_VERSION_MISMATCH'
+            throw 'The approved update version did not match the release being installed.'
+        }
+        $candidateHash = (Get-FileHash -LiteralPath $extractedScriptPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        $mutationAttempted = $true
         Move-Item -LiteralPath $extractedScriptPath -Destination $ScriptPath -Force -ErrorAction Stop
-        # Defense-in-depth, matching New-ManagerUpdateBackup's own post-copy
-        # verification pattern: confirm the replacement actually landed before
-        # declaring success, rather than trusting Move-Item's absence of an
-        # exception alone.
-        if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
-            throw "Update replacement did not complete: $ScriptPath not found after Move-Item."
-        }
+        $mutationStarted = $true
         $extractedScriptPath = $null
-
-        Write-Host ""
-        Write-Host "============================================" -ForegroundColor Cyan
-        Write-Host "  Update installed: $(ConvertTo-ManagerDisplayVersionFromTag -VersionText $Release.TagName)" -ForegroundColor Green
-        Write-Host "============================================" -ForegroundColor Cyan
-        Write-Log "CheckForUpdates: update to $($Release.TagName) installed successfully. Backup: $backupPath"
-        return $true
-    } catch {
-        Write-Host ""
-        Write-Host "  ERROR: update failed -- $_" -ForegroundColor Red
-        if ($backupPath) {
-            Write-Host "  Backup created: Yes ($backupPath)" -ForegroundColor Yellow
-        } else {
-            Write-Host "  Backup created: No" -ForegroundColor Yellow
+        $installedState = Get-ManagerUpdatePreState -Path $ScriptPath
+        if (-not $installedState.Captured -or $installedState.Sha256 -ine $candidateHash) {
+            $reasonCode = 'UPDATE_FINAL_HASH_MISMATCH'
+            throw 'The installed manager script did not match the validated update.'
         }
-        Write-Log "CheckForUpdates: update failed -- $_. Backup: $(if ($backupPath) { $backupPath } else { 'none' })"
-        return $false
+        if ((ConvertTo-ManagerComparableVersion -VersionText ([string]$installedState.Version)) -ne (ConvertTo-ManagerComparableVersion -VersionText ([string]$Release.TagName))) {
+            $reasonCode = 'UPDATE_FINAL_VERSION_MISMATCH'
+            throw 'The installed manager script version did not match the approved release.'
+        }
+        $finalAttempted = $true
+        $finalPassed = $true
+        $finalChecks = @('Installed manager script exists.', 'Installed manager script hash matches the validated update.', 'Installed manager script version matches the approved release.')
+        $outcome = 'SUCCEEDED'
+        $productState = 'INTENDED'
+        $reasonCode = 'UPDATE_INSTALLED_VERIFIED'
+        $summary = 'The update was installed and verified. Restart TeknoParrot Manager to use it.'
+        Write-Host '  Update installed and verified. Restart TeknoParrot Manager to use it.' -ForegroundColor Green
+        Write-Log "CheckForUpdates: verified update installation for $($Release.TagName)."
+    } catch {
+        $redactedError = [string]$_.Exception.Message
+        [void]$errors.Add($redactedError)
+        Write-Log "CheckForUpdates: update transaction stopped -- $redactedError. Backup: $(if ($backupPath) { $backupPath } else { 'none' })"
+        if ($mutationAttempted) {
+            $currentState = Get-ManagerUpdatePreState -Path $ScriptPath
+            if (-not $currentState.Captured -or $currentState.Sha256 -ne [string]$preState.Sha256) { $mutationStarted = $true }
+        }
+        if ($mutationStarted -and $backupInfo.Verified) {
+            try {
+                Copy-Item -LiteralPath $backupPath -Destination $ScriptPath -Force -ErrorAction Stop
+                if ($preState.IsReadOnly) { Set-ItemProperty -LiteralPath $ScriptPath -Name IsReadOnly -Value $true -ErrorAction Stop }
+                $restoredState = Get-ManagerUpdatePreState -Path $ScriptPath
+                if (-not $restoredState.Captured -or $restoredState.Sha256 -ne [string]$preState.Sha256 -or [bool]$restoredState.IsReadOnly -ne [bool]$preState.IsReadOnly) {
+                    throw 'The original manager script could not be verified after rollback.'
+                }
+                $rollback = [pscustomobject]@{
+                    Attempted = $true
+                    Completed = $true
+                    Verified = $true
+                    VerifiedUtc = (Get-Date).ToUniversalTime().ToString('o')
+                    Items = @('manager-script')
+                    EvidenceRoot = $backupPath
+                    FailedItems = @()
+                    Errors = @()
+                }
+                $outcome = 'ROLLED_BACK_VERIFIED'
+                $productState = 'UNCHANGED'
+                $reasonCode = 'UPDATE_ROLLBACK_VERIFIED'
+                $summary = 'The update was not installed. TPM restored the previous manager file.'
+                $finalAttempted = $true
+                $finalPassed = $true
+                $finalChecks = @('The original manager script hash and file-protection state were restored.')
+            } catch {
+                [void]$errors.Add([string]$_.Exception.Message)
+                $rollback = [pscustomobject]@{
+                    Attempted = $true
+                    Completed = $false
+                    Verified = $false
+                    VerifiedUtc = (Get-Date).ToUniversalTime().ToString('o')
+                    Items = @('manager-script')
+                    EvidenceRoot = $backupPath
+                    FailedItems = @('manager-script')
+                    Errors = @([string]$_.Exception.Message)
+                }
+                $outcome = 'ACTION_REQUIRED'
+                $productState = 'UNKNOWN'
+                $reasonCode = 'UPDATE_ROLLBACK_UNVERIFIED'
+                $summary = 'The update needs attention because TPM could not verify which manager file is active.'
+            }
+        } elseif ($mutationStarted) {
+            $outcome = 'ACTION_REQUIRED'
+            $productState = 'UNKNOWN'
+            $reasonCode = 'UPDATE_POST_MUTATION_UNVERIFIED'
+            $summary = 'The update needs attention because TPM could not verify which manager file is active.'
+        } else {
+            $outcome = 'FAILED_BEFORE_MUTATION'
+            $productState = 'UNCHANGED'
+            $summary = 'The update was not installed. Your current TeknoParrot Manager was not changed.'
+        }
     } finally {
         if ($downloadedZipPath -and (Test-Path -LiteralPath $downloadedZipPath -PathType Leaf)) {
-            Remove-Item -LiteralPath $downloadedZipPath -Force -ErrorAction SilentlyContinue
+            try { Remove-Item -LiteralPath $downloadedZipPath -Force -ErrorAction Stop } catch {
+                [void]$cleanupResidue.Add($downloadedZipPath)
+                [void]$cleanupErrors.Add([string]$_.Exception.Message)
+            }
         }
         if ($extractedScriptPath -and (Test-Path -LiteralPath $extractedScriptPath -PathType Leaf)) {
-            Remove-Item -LiteralPath $extractedScriptPath -Force -ErrorAction SilentlyContinue
+            try { Remove-Item -LiteralPath $extractedScriptPath -Force -ErrorAction Stop } catch {
+                [void]$cleanupResidue.Add($extractedScriptPath)
+                [void]$cleanupErrors.Add([string]$_.Exception.Message)
+            }
         }
         if ($readOnlyCleared -and (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
-            try {
-                Set-ItemProperty -LiteralPath $ScriptPath -Name IsReadOnly -Value $true -ErrorAction Stop
-            } catch {
-                Write-Host '  WARNING: TeknoParrot Manager could not restore the original read-only protection on the manager script.' -ForegroundColor Red
-                Write-Log 'CheckForUpdates: read-only attribute restoration failed.'
+            try { Set-ItemProperty -LiteralPath $ScriptPath -Name IsReadOnly -Value ([bool]$preState.IsReadOnly) -ErrorAction Stop } catch {
+                [void]$cleanupErrors.Add([string]$_.Exception.Message)
             }
         }
     }
+    $cleanup = [pscustomobject]@{
+        Attempted = $true
+        Completed = ($cleanupResidue.Count -eq 0 -and $cleanupErrors.Count -eq 0)
+        ResiduePresent = ($cleanupResidue.Count -gt 0)
+        ResiduePaths = $cleanupResidue.ToArray()
+        ResidueItems = $cleanupResidue.ToArray()
+        Error = if ($cleanupErrors.Count -gt 0) { $cleanupErrors -join '; ' } else { $null }
+    }
+    if ($cleanupResidue.Count -gt 0 -and $outcome -eq 'SUCCEEDED') {
+        $summary = 'The update was installed and verified, but temporary update evidence remains.'
+    } elseif ($cleanupErrors.Count -gt 0 -and $outcome -eq 'SUCCEEDED') {
+        $outcome = 'ACTION_REQUIRED'
+        $summary = 'The update was installed, but TPM could not complete all cleanup checks.'
+        [void]$warnings.Add('Manager update cleanup or file-protection restoration requires attention.')
+    }
+    $technical = [pscustomobject]@{
+        ReleaseTag = [string]$Release.TagName
+        AssetName = [string]$Release.AssetName
+        BackupPath = $backupPath
+        PreState = $preState
+        CandidateHash = $candidateHash
+        CleanupErrors = $cleanupErrors.ToArray()
+    }
+    return New-TpmManagerUpdateTransactionResult `
+        -Outcome $outcome `
+        -ProductState $productState `
+        -Summary $summary `
+        -PreState $preState `
+        -Backup $backupInfo `
+        -Rollback $rollback `
+        -Cleanup $cleanup `
+        -MutationStarted:$mutationStarted `
+        -MutationCompleted:($outcome -eq 'SUCCEEDED') `
+        -FinalAttempted:$finalAttempted `
+        -FinalPassed:$finalPassed `
+        -FinalChecks $finalChecks `
+        -FinalFailedItems $finalFailedItems `
+        -ReasonCode $reasonCode `
+        -TechnicalDetails $technical `
+        -Errors $errors.ToArray() `
+        -Warnings $warnings.ToArray()
 }
 
 # Compares $ScriptVersion against the latest GitHub release and, if a newer
-# one exists, prints it and (unless -SkipConfirmationMessage) explains what
-# updating will do before asking for explicit Y/N confirmation. Returns
-# $true only if a new script was actually installed -- see
-# Invoke-ManagerUpdateInstall's comment for why this never calls exit itself.
+# one exists, prints it and explains what updating will do before asking for
+# explicit Y/N confirmation. Returns TPM.TransactionResult.v1 for every
+# outcome; callers decide whether a restart is safe from the validated Outcome.
 function Invoke-CheckForUpdates {
     param([Parameter(Mandatory)][string]$ScriptPath)
-
+    $preState = Get-ManagerUpdatePreState -Path $ScriptPath
     Write-Host ""
     Write-Host "  Checking for updates..." -ForegroundColor DarkGray
     Write-Log "CheckForUpdates: checking current v$ScriptVersion against latest GitHub release."
-
     try {
         $localVersion = ConvertTo-ManagerComparableVersion -VersionText $ScriptVersion
     } catch {
-        Write-Host "  ERROR: could not parse the current version ($ScriptVersion) -- $_" -ForegroundColor Red
-        Write-Log "CheckForUpdates: could not parse current version -- $_"
-        return $false
+        return New-TpmManagerUpdateTransactionResult `
+            -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
+            -Summary 'The update check could not verify the current manager version. No update was installed.' `
+            -PreState $preState -ReasonCode 'UPDATE_CURRENT_VERSION_INVALID' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='CurrentVersion'; Error=[string]$_.Exception.Message })
     }
-
     $release = Get-ManagerUpdateRelease
     if (-not $release) {
-        Write-Host "  Could not reach GitHub to check for updates. Check your connection and try again." -ForegroundColor Yellow
-        Write-Log "CheckForUpdates: release check failed or found no usable asset."
-        return $false
+        Write-Host "  No verified update was available. Your current TeknoParrot Manager is unchanged." -ForegroundColor Yellow
+        return New-TpmManagerUpdateTransactionResult `
+            -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
+            -Summary 'No verified update was available. Your current TeknoParrot Manager is unchanged.' `
+            -PreState $preState -ReasonCode 'UPDATE_RELEASE_UNAVAILABLE' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='ReleaseQuery' })
     }
-
     try {
         $latestVersion = ConvertTo-ManagerComparableVersion -VersionText $release.TagName
     } catch {
-        Write-Host "  ERROR: could not parse the latest release version ($($release.TagName)) -- $_" -ForegroundColor Red
-        Write-Log "CheckForUpdates: could not parse latest release version -- $_"
-        return $false
+        return New-TpmManagerUpdateTransactionResult `
+            -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
+            -Summary 'The available update could not be verified. Your current TeknoParrot Manager is unchanged.' `
+            -PreState $preState -ReasonCode 'UPDATE_RELEASE_VERSION_INVALID' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='ReleaseVersion'; Error=[string]$_.Exception.Message })
     }
-
     $latestDisplay = ConvertTo-ManagerDisplayVersionFromTag -VersionText $release.TagName
-
     Write-Host ""
     Write-Host ("  Current version : {0}" -f (Get-ManagerDisplayVersion)) -ForegroundColor Cyan
     Write-Host ("  Latest version  : {0}" -f $latestDisplay) -ForegroundColor Cyan
-
     if ($latestVersion -le $localVersion) {
-        Write-Host ""
         Write-Host "  You're already running the latest version. No update needed." -ForegroundColor Green
-        Write-Log "CheckForUpdates: already current (v$ScriptVersion)."
-        return $false
+        return New-TpmManagerUpdateTransactionResult `
+            -Outcome 'NO_OP' -ProductState 'UNCHANGED' `
+            -Summary 'Your current TeknoParrot Manager is already up to date. Nothing needed changing.' `
+            -PreState $preState -FinalAttempted:$true -FinalPassed:$true `
+            -FinalChecks @('The current manager script was read and hashed before the update check.') `
+            -ReasonCode 'UPDATE_ALREADY_CURRENT' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='ReleaseComparison'; CurrentVersion=$ScriptVersion; LatestVersion=$release.TagName })
     }
-
     Write-Host ""
-    Write-Host "  An update is available: $(Get-ManagerDisplayVersion) -> $latestDisplay" -ForegroundColor Yellow
+    Write-Host ("  An update is available: $(Get-ManagerDisplayVersion) -> $latestDisplay") -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  Updating will:" -ForegroundColor Cyan
-    Write-Host "    1) Back up the current script to UpdateBackups\<timestamp>\"
-    Write-Host "    2) Download the update ($($release.AssetName))"
-    Write-Host "    3) Validate the downloaded script before installing it"
-    Write-Host "    4) Replace TeknoParrot-Manager.ps1 with the new version"
-    Write-Host "    5) Require you to restart TeknoParrot Manager afterward --"
-    Write-Host "       this session will exit rather than keep running the old code."
+    Write-Host "    1) Back up the current script"
+    Write-Host "    2) Download and validate the update"
+    Write-Host "    3) Replace and verify TeknoParrot-Manager.ps1"
+    Write-Host "    4) Require a restart afterward"
     Write-Host ""
-
     $ans = Read-TpmYesNo -Prompt "  Update to $latestDisplay now? (Y/N)"
     if ($ans -ne "Y") {
         Write-Host "  Skipped -- no changes made." -ForegroundColor DarkGray
-        Write-Log "CheckForUpdates: user declined the update to $($release.TagName)."
-        return $false
+        return New-TpmManagerUpdateTransactionResult `
+            -Outcome 'NO_OP' -ProductState 'UNCHANGED' `
+            -Summary 'No update was installed. Your current TeknoParrot Manager is unchanged.' `
+            -PreState $preState -FinalAttempted:$true -FinalPassed:$true `
+            -FinalChecks @('The current manager script remained unchanged after the declined update.') `
+            -ReasonCode 'UPDATE_DECLINED' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='Confirmation'; ReleaseTag=$release.TagName })
     }
-
     return Invoke-ManagerUpdateInstall -ScriptPath $ScriptPath -Release $release
 }
 
@@ -19071,34 +19625,44 @@ function Invoke-CheckForUpdates {
 # decides whether to exit after a successful install.
 function Invoke-StartupUpdateCheck {
     param([Parameter(Mandatory)][string]$ScriptPath)
-
+    $preState = Get-ManagerUpdatePreState -Path $ScriptPath
     try {
         $localVersion = ConvertTo-ManagerComparableVersion -VersionText $ScriptVersion
     } catch {
-        Write-Log "StartupUpdateCheck: could not parse current version -- $_"
-        return $false
+        return New-TpmManagerUpdateTransactionResult `
+            -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
+            -Summary 'The startup update check could not verify the current manager version. No update was installed.' `
+            -PreState $preState -ReasonCode 'UPDATE_CURRENT_VERSION_INVALID' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='StartupCurrentVersion'; Error=[string]$_.Exception.Message })
     }
-
     $release = Get-ManagerUpdateRelease -MaxAttempts 1 -TimeoutSec 5
     if (-not $release) {
-        Write-Log "StartupUpdateCheck: release check failed, found no usable asset, or GitHub was unreachable -- continuing to menu."
-        return $false
+        return New-TpmManagerUpdateTransactionResult `
+            -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
+            -Summary 'No verified update was available. Your current TeknoParrot Manager is unchanged.' `
+            -PreState $preState -ReasonCode 'UPDATE_RELEASE_UNAVAILABLE' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='StartupReleaseQuery' })
     }
-
     try {
         $latestVersion = ConvertTo-ManagerComparableVersion -VersionText $release.TagName
     } catch {
-        Write-Log "StartupUpdateCheck: could not parse latest release version -- $_"
-        return $false
+        return New-TpmManagerUpdateTransactionResult `
+            -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
+            -Summary 'The available update could not be verified. Your current TeknoParrot Manager is unchanged.' `
+            -PreState $preState -ReasonCode 'UPDATE_RELEASE_VERSION_INVALID' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='StartupReleaseVersion'; Error=[string]$_.Exception.Message })
     }
-
     if ($latestVersion -le $localVersion) {
         Write-Log "StartupUpdateCheck: already current (v$ScriptVersion)."
-        return $false
+        return New-TpmManagerUpdateTransactionResult `
+            -Outcome 'NO_OP' -ProductState 'UNCHANGED' `
+            -Summary 'Your current TeknoParrot Manager is already up to date. Nothing needed changing.' `
+            -PreState $preState -FinalAttempted:$true -FinalPassed:$true `
+            -FinalChecks @('The current manager script was read and hashed before the startup update check.') `
+            -ReasonCode 'UPDATE_ALREADY_CURRENT' `
+            -TechnicalDetails ([pscustomobject]@{ Stage='StartupReleaseComparison'; CurrentVersion=$ScriptVersion; LatestVersion=$release.TagName })
     }
-
     $latestDisplay = ConvertTo-ManagerDisplayVersionFromTag -VersionText $release.TagName
-
     Write-Host ""
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
     Write-Host " Update Available" -ForegroundColor Cyan
@@ -19106,52 +19670,52 @@ function Invoke-StartupUpdateCheck {
     Write-Host ("  Current version : {0}" -f (Get-ManagerDisplayVersion)) -ForegroundColor Cyan
     Write-Host ("  Latest version  : {0}" -f $latestDisplay) -ForegroundColor Cyan
     if ($release.Name) { Write-Host ("  Release         : {0}" -f $release.Name) -ForegroundColor Cyan }
-    $summary = Get-ManagerUpdateReleaseSummary -Body $release.Body
-    if ($summary) {
+    $releaseSummary = Get-ManagerUpdateReleaseSummary -Body $release.Body
+    if ($releaseSummary) {
         Write-Host ""
-        Write-Host "  $summary" -ForegroundColor DarkGray
+        Write-Host "  $releaseSummary" -ForegroundColor DarkGray
     }
     Write-Log "StartupUpdateCheck: update available (v$ScriptVersion -> $($release.TagName))."
-
     while ($true) {
         $ans = Read-TpmChoice -Prompt "  Update now, remind me later, or view release notes? (Y/N/V)" -Choices @('Y', 'N', 'V')
-
-        if ($ans -eq "V") {
+        if ($ans -eq 'V') {
             Write-Host ""
-            if ($release.Body) {
-                Write-Host $release.Body -ForegroundColor DarkGray
-            } else {
-                Write-Host "  No release notes were provided for this release." -ForegroundColor DarkGray
-            }
+            if ($release.Body) { Write-Host $release.Body -ForegroundColor DarkGray } else { Write-Host '  No release notes were provided for this release.' -ForegroundColor DarkGray }
             Write-Host ""
             continue
         }
-
-        if ($ans -eq "Y") {
+        if ($ans -eq 'Y') {
             Write-Host ""
-            Write-Host "  Updating will:" -ForegroundColor Cyan
-            Write-Host "    1) Back up the current script to UpdateBackups\<timestamp>\"
-            Write-Host "    2) Download the update ($($release.AssetName))"
-            Write-Host "    3) Validate the downloaded script before installing it"
-            Write-Host "    4) Replace TeknoParrot-Manager.ps1 with the new version"
-            Write-Host "    5) Require you to restart TeknoParrot Manager afterward --"
-            Write-Host "       this session will exit rather than keep running the old code."
+            Write-Host '  Updating will:' -ForegroundColor Cyan
+            Write-Host '    1) Back up the current script'
+            Write-Host '    2) Download and validate the update'
+            Write-Host '    3) Replace and verify TeknoParrot-Manager.ps1'
+            Write-Host '    4) Require a restart afterward'
             Write-Host ""
-            $confirm = Read-TpmYesNo -Prompt "  Proceed? (Y/N)"
-            if ($confirm -ne "Y") {
-                Write-Host "  Skipped -- no changes made." -ForegroundColor DarkGray
-                Write-Log "StartupUpdateCheck: user backed out of the update to $($release.TagName)."
-                return $false
+            $confirm = Read-TpmYesNo -Prompt '  Proceed? (Y/N)'
+            if ($confirm -ne 'Y') {
+                Write-Host '  Skipped -- no changes made.' -ForegroundColor DarkGray
+                return New-TpmManagerUpdateTransactionResult `
+                    -Outcome 'NO_OP' -ProductState 'UNCHANGED' `
+                    -Summary 'No update was installed. Your current TeknoParrot Manager is unchanged.' `
+                    -PreState $preState -FinalAttempted:$true -FinalPassed:$true `
+                    -FinalChecks @('The current manager script remained unchanged after the declined startup update.') `
+                    -ReasonCode 'UPDATE_DECLINED' `
+                    -TechnicalDetails ([pscustomobject]@{ Stage='StartupConfirmation'; ReleaseTag=$release.TagName })
             }
             return Invoke-ManagerUpdateInstall -ScriptPath $ScriptPath -Release $release
         }
-
-        if ($ans -eq "N") {
-            Write-Host "  Continuing -- you can check again any time from menu option 13." -ForegroundColor DarkGray
-            Write-Log "StartupUpdateCheck: user chose to be reminded later."
-            return $false
+        if ($ans -eq 'N') {
+            Write-Host '  Continuing -- you can check again any time from the menu.' -ForegroundColor DarkGray
+            return New-TpmManagerUpdateTransactionResult `
+                -Outcome 'NO_OP' -ProductState 'UNCHANGED' `
+                -Summary 'No update was installed. Your current TeknoParrot Manager is unchanged.' `
+                -PreState $preState -FinalAttempted:$true -FinalPassed:$true `
+                -FinalChecks @('The current manager script remained unchanged after the startup reminder choice.') `
+                -ReasonCode 'UPDATE_REMIND_LATER' `
+                -TechnicalDetails ([pscustomobject]@{ Stage='StartupChoice'; ReleaseTag=$release.TagName })
         }
-        Write-Host "  Invalid choice. Enter Y, N, or V." -ForegroundColor Yellow
+        Write-Host '  Invalid choice. Enter Y, N, or V.' -ForegroundColor Yellow
     }
 }
 
@@ -25461,13 +26025,18 @@ if (Test-Path -LiteralPath $configPath) {
 # stays from meaningfully delaying startup when GitHub is unreachable.
 if ($checkForUpdatesOnStartup -and -not $Unattended -and -not $isPostgresRecoveryResume) {
     $scriptSelfPathForStartupCheck = Join-Path $PSScriptRoot "TeknoParrot-Manager.ps1"
-    $startupUpdateInstalled = Invoke-StartupUpdateCheck -ScriptPath $scriptSelfPathForStartupCheck
-    if ($startupUpdateInstalled) {
+    $startupUpdateResult = Invoke-StartupUpdateCheck -ScriptPath $scriptSelfPathForStartupCheck
+    if (-not (Test-TpmTransactionResult -Result $startupUpdateResult)) {
+        Write-Log 'StartupUpdateCheck: update flow did not return a valid transaction result; continuing without restart.'
+    } elseif ($startupUpdateResult.Outcome -eq 'SUCCEEDED') {
         Write-Host ""
-        Write-Host "  Restart TeknoParrot Manager now to run the new version." -ForegroundColor Yellow
+        Write-Host "  Restart TeknoParrot Manager now to run the verified update." -ForegroundColor Yellow
         [void](Read-Host "  Press Enter to exit")
-        Write-Log "StartupUpdateCheck: exiting after successful update -- not continuing in this session."
+        Write-Log "StartupUpdateCheck: exiting after verified update -- not continuing in this session."
         exit 0
+    } elseif ($startupUpdateResult.Outcome -notin @('NO_OP','ROLLED_BACK_VERIFIED')) {
+        Write-Host ("  {0}" -f $startupUpdateResult.Summary) -ForegroundColor Yellow
+        Write-Log "StartupUpdateCheck: transaction outcome=$($startupUpdateResult.Outcome); reason=$($startupUpdateResult.ReasonCode)"
     }
 }
 
@@ -28143,6 +28712,20 @@ $mode = $null
             [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'profiles' -Activity 'Finishing game database setup')
             Write-Host "  Configuring games and creating only missing databases..." -ForegroundColor Cyan
             $pgResults = Invoke-PostgresGameSetup -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain -RecoveryBackup $recoveryBackup
+            if (-not (Test-TpmTransactionResult -Result $pgResults)) {
+                Write-Host '  PostgreSQL setup did not return a valid verified transaction result. No completion was claimed.' -ForegroundColor Red
+                Write-Log 'Postgres setup: invalid transaction result.'
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify the PostgreSQL setup transaction result.' }
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-transaction-result' -Message 'PostgreSQL setup returned an invalid transaction result.' -DataSafety 'TPM did not claim recovery complete.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-transaction-result') -Acknowledge)
+                continue
+            }
+            if ($pgResults.Outcome -notin @('SUCCEEDED','NO_OP')) {
+                Write-Host ("  PostgreSQL setup did not complete successfully: {0}" -f $pgResults.Summary) -ForegroundColor Red
+                Write-Log "Postgres setup: transaction outcome=$($pgResults.Outcome); reason=$($pgResults.ReasonCode)"
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not safely finish configuring the PostgreSQL game profiles.' }
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-transaction-failed' -Message $pgResults.Summary -DataSafety 'TPM did not claim recovery complete.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-transaction-failed') -Acknowledge)
+                continue
+            }
             if ($pgResults.RecoveryBlocked) {
                 Write-Host ("  Recovery BLOCKED. No recovery-complete result was reported. Evidence: {0}" -f $pgResults.BackupPath) -ForegroundColor Red
                 Write-Log 'Postgres setup: profile population was recovery-blocked.'
@@ -28217,25 +28800,32 @@ $mode = $null
         [void](Start-TpmWorkflowStep -Context $updateStatus -StepId 'query' -Activity 'Checking for a newer release')
         [void](Complete-TpmWorkflowStep -Context $updateStatus -Summary 'Release check finished' -NextStep 'Apply only after approval')
         $scriptSelfPath = Join-Path $PSScriptRoot "TeknoParrot-Manager.ps1"
-        $updateInstalled = Invoke-CheckForUpdates -ScriptPath $scriptSelfPath
-        if ($updateInstalled) {
+        $updateResult = Invoke-CheckForUpdates -ScriptPath $scriptSelfPath
+        if (-not (Test-TpmTransactionResult -Result $updateResult)) {
+            [void](Start-TpmWorkflowStep -Context $updateStatus -StepId 'apply' -Activity 'Handling the update result')
+            [void](Complete-TpmWorkflowStep -Context $updateStatus -Outcome Skipped -Summary 'The update check did not return a valid verified result')
+            [void](Complete-TpmWorkflowStatus -Context $updateStatus -Summary 'The update was not installed because its result could not be verified')
+            [void](Close-TpmWorkflowStatus -Context $updateStatus)
+            Write-Log 'CheckForUpdates: invalid transaction result; no restart.'
+        } elseif ($updateResult.Outcome -eq 'SUCCEEDED') {
             [void](Start-TpmWorkflowStep -Context $updateStatus -StepId 'apply' -Activity 'Applying the approved update')
-            [void](Complete-TpmWorkflowStep -Context $updateStatus -Outcome Fixed -Summary 'Update installed' -NextStep 'Restart TPM')
-            [void](Start-TpmWorkflowStep -Context $updateStatus -StepId 'verify' -Activity 'Update verified')
+            [void](Complete-TpmWorkflowStep -Context $updateStatus -Outcome Fixed -Summary 'Update installed and verified' -NextStep 'Restart TPM')
+            [void](Start-TpmWorkflowStep -Context $updateStatus -StepId 'verify' -Activity 'Verifying the installed update')
             [void](Complete-TpmWorkflowStep -Context $updateStatus -Summary 'Update verified')
-            [void](Complete-TpmWorkflowStatus -Context $updateStatus -Summary 'Update installed')
+            [void](Complete-TpmWorkflowStatus -Context $updateStatus -Summary 'Update installed and verified')
             [void](Close-TpmWorkflowStatus -Context $updateStatus)
         } else {
-            [void](Start-TpmWorkflowStep -Context $updateStatus -StepId 'apply' -Activity 'No update is needed')
-            [void](Complete-TpmWorkflowStep -Context $updateStatus -Outcome Skipped -Summary 'No update was installed')
-            [void](Complete-TpmWorkflowStatus -Context $updateStatus -Summary 'You already have the latest version')
+            [void](Start-TpmWorkflowStep -Context $updateStatus -StepId 'apply' -Activity 'Handling the update result')
+            $updateSummary = if ($updateResult.Summary) { [string]$updateResult.Summary } else { 'No update was installed.' }
+            [void](Complete-TpmWorkflowStep -Context $updateStatus -Outcome Skipped -Summary $updateSummary)
+            [void](Complete-TpmWorkflowStatus -Context $updateStatus -Summary $updateSummary)
             [void](Close-TpmWorkflowStatus -Context $updateStatus)
         }
-        if ($updateInstalled) {
+        if ($updateResult -and $updateResult.Outcome -eq 'SUCCEEDED') {
             Write-Host ""
-            Write-Host "  Restart TeknoParrot Manager now to run the new version." -ForegroundColor Yellow
+            Write-Host "  Restart TeknoParrot Manager now to run the verified update." -ForegroundColor Yellow
             [void](Read-Host "  Press Enter to exit")
-            Write-Log "CheckForUpdates: exiting after successful update -- not continuing in this session."
+            Write-Log "CheckForUpdates: exiting after verified update -- not continuing in this session."
             exit 0
         }
         Write-Log "CheckForUpdates: complete, no restart needed."
