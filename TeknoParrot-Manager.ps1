@@ -1076,6 +1076,193 @@ function ConvertTo-TpmTransactionPresentation {
     [void](Assert-TpmTransactionPresentation -Presentation $presentation -TransactionResult $TransactionResult)
     return $presentation
 }
+function Test-TpmTransactionDetailsSafeText {
+    param([AllowNull()][string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $false }
+    if ($Text -match '[\r\n]') { return $false }
+    if ($Text -match '(?i)(?:[A-Za-z]:[\\/]|\\\\)') { return $false }
+    if ($Text -match '(?i)\b(?:password|passwords|credential|credentials|secret|secrets|token|tokens|api key|apikey)\b') { return $false }
+    if ($Text -match '(?i)\b[0-9a-f]{64}\b') { return $false }
+    if ($Text -match '(?i)(?:^|\s)(?:powershell|pwsh|cmd(?:\.exe)?|copy-item|move-item|dropdb|pg_restore|pg_dump|invoke-[a-z0-9-]+)\b') { return $false }
+    if ($Text -match '(?i)(?:CategoryInfo|FullyQualifiedErrorId|StackTrace|System\.[A-Za-z]|at\s+[A-Za-z0-9_.]+\()') { return $false }
+    return $true
+}
+
+function Assert-TpmTransactionDetailsContext {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)][string]$TransactionId
+    )
+    if (@($Context.PSTypeNames) -notcontains 'TPM.TransactionDetailsContext.v1') { throw 'Invalid TPM transaction Details context type.' }
+    if ([int](Get-TpmTransactionField -Object $Context -Name 'SchemaVersion' -Default 0) -ne 1) { throw 'Unsupported TPM transaction Details context schema version.' }
+    if ([string]$Context.TransactionId -ne $TransactionId) { throw 'Transaction Details context identity does not match the presentation.' }
+    foreach ($reference in @(Get-TpmTransactionField -Object $Context -Name 'TechnicalReferences' -Default @())) {
+        if ($null -eq $reference -or -not $reference.PSObject.Properties['Label'] -or -not $reference.PSObject.Properties['Value'] -or -not $reference.PSObject.Properties['EvidenceClass'] -or -not $reference.PSObject.Properties['Redacted']) { throw 'Transaction technical references require label, value, evidence class, and redaction state.' }
+        if (-not [bool]$reference.Redacted) { throw 'Transaction technical references must be redacted before rendering.' }
+        if (@('Current','Stale','Ambient') -notcontains [string]$reference.EvidenceClass) { throw 'Transaction technical reference evidence class is invalid.' }
+        if (-not (Test-TpmTransactionDetailsSafeText -Text ([string]$reference.Label)) -or -not (Test-TpmTransactionDetailsSafeText -Text ([string]$reference.Value))) { throw 'Transaction technical reference contains unsafe detail.' }
+    }
+    foreach ($action in @(Get-TpmTransactionField -Object $Context -Name 'RecoveryActions' -Default @())) {
+        if ($null -eq $action -or -not $action.PSObject.Properties['Id'] -or -not $action.PSObject.Properties['Label']) { throw 'Transaction recovery actions require an ID and label.' }
+        if (-not (Test-TpmTransactionPresentationSafeText -Text ([string]$action.Id)) -or -not (Test-TpmTransactionPresentationSafeText -Text ([string]$action.Label))) { throw 'Transaction recovery action contains unsafe detail.' }
+    }
+    return $true
+}
+
+function ConvertTo-TpmTransactionDetailsContext {
+    param(
+        [Parameter(Mandatory)]$Presentation,
+        [object[]]$TechnicalReferences = @(),
+        [object[]]$RecoveryActions = @()
+    )
+    [void](Assert-TpmTransactionPresentation -Presentation $Presentation)
+    $references = @($TechnicalReferences | ForEach-Object {
+        if ($null -eq $_ -or -not $_.PSObject.Properties['Label'] -or -not $_.PSObject.Properties['Value'] -or -not $_.PSObject.Properties['EvidenceClass'] -or -not $_.PSObject.Properties['Redacted']) { throw 'Transaction technical references require label, value, evidence class, and redaction state.' }
+        [pscustomobject]@{
+            Label = [string]$_.Label
+            Value = [string]$_.Value
+            EvidenceClass = [string]$_.EvidenceClass
+            Redacted = [bool]$_.Redacted
+        }
+    })
+    $actions = @($RecoveryActions | ForEach-Object {
+        if ($null -eq $_ -or -not $_.PSObject.Properties['Id'] -or -not $_.PSObject.Properties['Label']) { throw 'Transaction recovery actions require an ID and label.' }
+        [pscustomobject]@{ Id = [string]$_.Id; Label = [string]$_.Label }
+    })
+    $context = [pscustomobject]@{
+        PSTypeName = 'TPM.TransactionDetailsContext.v1'
+        SchemaVersion = 1
+        TransactionId = [string]$Presentation.TransactionId
+        TechnicalReferences = $references
+        RecoveryActions = $actions
+    }
+    [void](Assert-TpmTransactionDetailsContext -Context $context -TransactionId ([string]$Presentation.TransactionId))
+    return $context
+}
+
+function Format-TpmTransactionPresentationRows {
+    param(
+        [Parameter(Mandatory)]$Presentation,
+        [int]$Width = 80
+    )
+    [void](Assert-TpmTransactionPresentation -Presentation $Presentation)
+    $width = [Math]::Max(24, $Width)
+    $clip = {
+        param([string]$Text)
+        $value = if ($null -eq $Text) { '' } else { [string]$Text }
+        if ($value.Length -le ($width - 1)) { return $value }
+        if ($width -le 28) { return $value.Substring(0, [Math]::Max(1, $width - 4)) + '...' }
+        return $value.Substring(0, $width - 4) + '...'
+    }
+    $rows = New-Object 'System.Collections.Generic.List[string]'
+    [void]$rows.Add((&$clip ([string]$Presentation.Headline)))
+    [void]$rows.Add((&$clip ('What changed: ' + [string]$Presentation.WhatChanged)))
+    [void]$rows.Add((&$clip ('What did not change: ' + [string]$Presentation.WhatDidNotChange)))
+    [void]$rows.Add((&$clip ('Next action: ' + [string]$Presentation.NextAction)))
+    [void]$rows.Add((&$clip ('Retry safety: ' + [string]$Presentation.RetrySafety)))
+    [void]$rows.Add((&$clip ('Data safety: ' + [string]$Presentation.DataSafety)))
+    if ([bool]$Presentation.RequiresAttention) { [void]$rows.Add((&$clip 'Attention: review the result before retrying.')) }
+    foreach ($set in @(
+        @('Selected', 'SelectedItemCount', 'SelectedItemLabels'),
+        @('Completed', 'CompletedItemCount', 'CompletedItemLabels'),
+        @('Changed', 'ChangedItemCount', 'ChangedItemLabels'),
+        @('Failed', 'FailedItemCount', 'FailedItemLabels'),
+        @('Skipped', 'SkippedItemCount', 'SkippedItemLabels'),
+        @('Unattempted', 'UnattemptedItemCount', 'UnattemptedItemLabels'),
+        @('Unknown', 'UnknownItemCount', 'UnknownItemLabels')
+    )) {
+        $count = [int](Get-TpmTransactionField -Object $Presentation -Name $set[1] -Default 0)
+        if ($count -eq 0) { continue }
+        $labels = @(Get-TpmTransactionField -Object $Presentation -Name $set[2] -Default @())
+        [void]$rows.Add((&$clip ('{0} items: {1}' -f $set[0], $count)))
+        [void]$rows.Add((&$clip ('  {0}' -f ($labels -join ', '))))
+    }
+    return @($rows)
+}
+
+function Format-TpmTransactionDetailsRows {
+    param(
+        [Parameter(Mandatory)]$Presentation,
+        [object]$DetailsContext = $null,
+        [int]$Width = 100
+    )
+    [void](Assert-TpmTransactionPresentation -Presentation $Presentation)
+    if ($null -ne $DetailsContext) { [void](Assert-TpmTransactionDetailsContext -Context $DetailsContext -TransactionId ([string]$Presentation.TransactionId)) }
+    $width = [Math]::Max(32, $Width)
+    $clip = {
+        param([string]$Text)
+        $value = if ($null -eq $Text) { '' } else { [string]$Text }
+        if ($value.Length -le ($width - 1)) { return $value }
+        return $value.Substring(0, [Math]::Max(1, $width - 4)) + '...'
+    }
+    $rows = New-Object 'System.Collections.Generic.List[string]'
+    [void]$rows.Add((&$clip 'Details'))
+    [void]$rows.Add((&$clip ('Transaction ID: ' + [string]$Presentation.TransactionId)))
+    [void]$rows.Add((&$clip ('Workflow: ' + [string]$Presentation.WorkflowKey)))
+    [void]$rows.Add((&$clip ('Operation: ' + [string]$Presentation.OperationKey)))
+    [void]$rows.Add((&$clip ('Outcome: ' + [string]$Presentation.Outcome)))
+    [void]$rows.Add((&$clip ('Product state: ' + [string]$Presentation.ProductState)))
+    if (-not [string]::IsNullOrWhiteSpace([string]$Presentation.UnderlyingOutcome)) { [void]$rows.Add((&$clip ('Underlying outcome: ' + [string]$Presentation.UnderlyingOutcome))) }
+    foreach ($set in @(
+        @('Selected', 'SelectedItemCount', 'SelectedItemLabels'),
+        @('Completed', 'CompletedItemCount', 'CompletedItemLabels'),
+        @('Changed', 'ChangedItemCount', 'ChangedItemLabels'),
+        @('Failed', 'FailedItemCount', 'FailedItemLabels'),
+        @('Skipped', 'SkippedItemCount', 'SkippedItemLabels'),
+        @('Unattempted', 'UnattemptedItemCount', 'UnattemptedItemLabels'),
+        @('Unknown', 'UnknownItemCount', 'UnknownItemLabels')
+    )) {
+        $count = [int](Get-TpmTransactionField -Object $Presentation -Name $set[1] -Default 0)
+        [void]$rows.Add((&$clip ('{0} items ({1}): {2}' -f $set[0], $count, ((@(Get-TpmTransactionField -Object $Presentation -Name $set[2] -Default @())) -join ', '))))
+    }
+    [void]$rows.Add((&$clip ('Rollback verified: ' + [bool]$Presentation.RollbackVerified)))
+    [void]$rows.Add((&$clip ('Cleanup residue present: ' + [bool]$Presentation.CleanupResiduePresent)))
+    [void]$rows.Add((&$clip ('Evidence available: ' + [bool]$Presentation.DetailsSupportReferences.EvidenceAvailable)))
+    [void]$rows.Add((&$clip ('Technical details available: ' + [bool]$Presentation.DetailsSupportReferences.TechnicalDetailsAvailable)))
+    $references = if ($null -ne $DetailsContext) { @(Get-TpmTransactionField -Object $DetailsContext -Name 'TechnicalReferences' -Default @()) } else { @() }
+    if ($references.Count -eq 0) {
+        [void]$rows.Add((&$clip 'Technical references: unavailable through the approved evidence boundary.'))
+    } else {
+        [void]$rows.Add((&$clip 'Technical references:'))
+        foreach ($reference in $references) { [void]$rows.Add((&$clip ('  {0}: {1} [{2}]' -f $reference.Label, $reference.Value, $reference.EvidenceClass))) }
+    }
+    $actions = if ($null -ne $DetailsContext) { @(Get-TpmTransactionField -Object $DetailsContext -Name 'RecoveryActions' -Default @()) } else { @() }
+    if ($actions.Count -eq 0) {
+        [void]$rows.Add((&$clip 'Recovery actions: none recorded.'))
+    } else {
+        [void]$rows.Add((&$clip 'Recovery actions:'))
+        foreach ($action in $actions) { [void]$rows.Add((&$clip ('  {0}: {1}' -f $action.Id, $action.Label))) }
+    }
+    return @($rows)
+}
+
+function Get-TpmTransactionPresentationStatusDisplay {
+    param([Parameter(Mandatory)]$Presentation)
+    [void](Assert-TpmTransactionPresentation -Presentation $Presentation)
+    switch ([string]$Presentation.Outcome) {
+        'SUCCEEDED' { return [pscustomobject]@{ Prefix = '[OK] '; State = 'Finished' } }
+        'NO_OP' { return [pscustomobject]@{ Prefix = ''; State = 'Unchanged' } }
+        'ROLLED_BACK_VERIFIED' { return [pscustomobject]@{ Prefix = ''; State = 'Restored' } }
+        'CLEANUP_RESIDUE' { return [pscustomobject]@{ Prefix = ''; State = 'Needs attention' } }
+        default { return [pscustomobject]@{ Prefix = ''; State = 'Needs attention' } }
+    }
+}
+
+function Set-TpmWorkflowTransactionPresentation {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$Presentation)
+    if ($Context.Closed) { throw 'Workflow is already closed.' }
+    [void](Assert-TpmTransactionPresentation -Presentation $Presentation)
+    $Context.TransactionPresentation = $Presentation
+    $Context.TransactionPresentationRequired = $true
+    return $Context
+}
+
+function Require-TpmWorkflowTransactionPresentation {
+    param([Parameter(Mandatory)]$Context)
+    if ($Context.Closed) { throw 'Workflow is already closed.' }
+    $Context.TransactionPresentationRequired = $true
+    return $Context
+}
 
 
 function New-TpmTransactionResult {
@@ -1368,6 +1555,8 @@ function New-TpmWorkflowStatusContext {
         UserAction       = 'Nothing needed from you'
         Completed        = @()
         Failure          = $null
+        TransactionPresentation = $null
+        TransactionPresentationRequired = $false
         FooterBounds     = $null
         FooterRows       = @()
         RendererMode     = $null
@@ -1397,6 +1586,8 @@ function Get-TpmWorkflowStatusSnapshot {
         UserAction       = $Context.UserAction
         Completed        = @($Context.Completed)
         Failure          = $Context.Failure
+        TransactionPresentation = $Context.TransactionPresentation
+        TransactionPresentationRequired = [bool]$Context.TransactionPresentationRequired
     }
 }
 function Publish-TpmWorkflowStatusEvent {
@@ -1442,6 +1633,28 @@ function Format-TpmWorkflowStatusRows {
         if ($width -le 28) { return $value.Substring(0, [Math]::Max(1, $width - 4)) + '...' }
         return $value.Substring(0, $width - 4) + '...'
     }
+    $presentation = $Snapshot.TransactionPresentation
+    $presentationRequired = [bool]$Snapshot.TransactionPresentationRequired
+    if ($null -ne $presentation) {
+        try { [void](Assert-TpmTransactionPresentation -Presentation $presentation) }
+        catch { $presentation = $null; $presentationRequired = $true }
+    }
+    $rows = [System.Collections.Generic.List[string]]::new()
+    if ($presentation) {
+        $display = Get-TpmTransactionPresentationStatusDisplay -Presentation $presentation
+        $statusLine = 'TeknoParrot Manager status  ' + $display.Prefix + [string]$presentation.Headline
+        $stepText = if ($Snapshot.ActiveStepNumber) { 'Step {0} of {1}' -f $Snapshot.ActiveStepNumber, $Snapshot.StepCount } else { 'Workflow' }
+        [void]$rows.Add((&$clip $statusLine))
+        [void]$rows.Add((&$clip ('{0} | {1} | {2}' -f $stepText, $display.State, $presentation.NextAction)))
+        [void]$rows.Add((&$clip ('Retry safety: {0} | Data safety: {1}' -f $presentation.RetrySafety, $presentation.DataSafety)))
+        return @($rows)
+    }
+    if ($presentationRequired) {
+        [void]$rows.Add((&$clip 'TeknoParrot Manager status  Result requires review; no verified transaction presentation is available.'))
+        [void]$rows.Add((&$clip 'Workflow | Needs attention | Review Details before continuing'))
+        [void]$rows.Add((&$clip 'No terminal transaction result was accepted; no success or completion claim is shown.'))
+        return @($rows)
+    }
     $recent = @($Snapshot.Completed | Select-Object -Last 2 | ForEach-Object { $_.Summary }) -join ' | '
     $current = if ($Snapshot.Failure) { 'Needs attention: ' + $Snapshot.Failure.Message }
                elseif ($Snapshot.Activity) { $Snapshot.Activity }
@@ -1455,7 +1668,6 @@ function Format-TpmWorkflowStatusRows {
     } else {
         $action = $Snapshot.UserAction
     }
-    $rows = [System.Collections.Generic.List[string]]::new()
     [void]$rows.Add((&$clip $statusLine))
     [void]$rows.Add((&$clip ('{0} | {1} | {2}' -f $stepText, $Snapshot.State, $action)))
     if ($Snapshot.Failure) {
@@ -9867,16 +10079,44 @@ function Get-TpmReShadeApplyAccounting {
 }
 
 
+function Format-TpmReShadeSummaryDetailRows {
+    param([Parameter(Mandatory)]$Result)
+    $rows = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($entry in @(
+        @('Protected item', 'ProtectedDetails'),
+        @('Unsafe/malformed item', 'UnsafeDetails')
+    )) {
+        foreach ($detail in @(Get-TpmTransactionField -Object $Result -Name $entry[1] -Default @())) {
+            $redacted = Redact-TpmSupportText -Text ([string]$detail)
+            if (Test-TpmTransactionPresentationSafeText -Text $redacted) {
+                [void]$rows.Add(('{0}: {1}' -f $entry[0], $redacted))
+            } else {
+                [void]$rows.Add(('{0}: review the per-item ownership or path detail in Details/support evidence.' -f $entry[0]))
+            }
+        }
+    }
+    foreach ($warning in @(Get-TpmTransactionField -Object $Result -Name 'NativeShaderWarnings' -Default @())) {
+        $game = Get-TpmTransactionPresentationItemLabel -Item ([pscustomobject]@{ Name = [string](Get-TpmTransactionField -Object $warning -Name 'Game' -Default 'Selected item') })
+        $warningText = [string](Get-TpmTransactionField -Object $warning -Name 'Warning' -Default 'Native settings were preserved; display effects may stack.')
+        $redactedWarning = Redact-TpmSupportText -Text $warningText
+        if (-not (Test-TpmTransactionPresentationSafeText -Text $redactedWarning)) {
+            $redactedWarning = 'Native settings were preserved; display effects may stack.'
+        }
+        [void]$rows.Add(('Native settings preserved for {0}: {1}' -f $game, $redactedWarning))
+    }
+    return @($rows)
+}
+
 function Invoke-ReShadeSetup {
     param(
         [ValidateSet('Select','Adopt')][string]$Action='Select',[string]$UserProfilesDir,[string]$SourceDll,[string]$SourceDll32,
         [string]$ConfigPath,[string]$TpRoot,[string]$Mode,[string]$ZipSource,[string]$GamesInstallFolder,[bool]$RetroBat,[string]$HsDataPath
     )
     $legacy=Invoke-ReShadeSetupLegacy -Action $Action -UserProfilesDir $UserProfilesDir -SourceDll $SourceDll -SourceDll32 $SourceDll32 -ConfigPath $ConfigPath -TpRoot $TpRoot -Mode $Mode -ZipSource $ZipSource -GamesInstallFolder $GamesInstallFolder -RetroBat $RetroBat -HsDataPath $HsDataPath
-    $items=@(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | ForEach-Object BaseName)
-    $changed=@($items | Select-Object -First ([int]$legacy.Deployed))
-    $skipped=@(1..([int]$legacy.Skipped) | ForEach-Object { 'ReShadeSkipped{0}' -f $_ })
-    $failed=@(1..([int]$legacy.Errors) | ForEach-Object { 'ReShadeFailure{0}' -f $_ })
+    $items=@(Get-TpmTransactionField -Object $legacy -Name 'SelectedItems' -Default @())
+    $changed=@(Get-TpmTransactionField -Object $legacy -Name 'ChangedItems' -Default @())
+    $skipped=@(Get-TpmTransactionField -Object $legacy -Name 'SkippedItems' -Default @())
+    $failed=@(Get-TpmTransactionField -Object $legacy -Name 'FailedItems' -Default @())
     $outcome=if($legacy.Deployed -gt 0 -and ($legacy.Errors -gt 0 -or $legacy.Skipped -gt 0 -or $legacy.Protected -gt 0)){'PARTIAL_APPLIED'}elseif($legacy.Deployed -gt 0){'SUCCEEDED'}else{'NO_OP'}
     return (ConvertTo-TpmLegacyTransactionResult -Legacy $legacy -WorkflowKey 'ReShade' -OperationKey 'DeployProfiles' -Items $items -ChangedItems $changed -CompletedItems $changed -FailedItems $failed -SkippedItems $skipped -Summary 'ReShade profiles were processed with a verified transaction result.' -ReasonCode $(if($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}else{'PROFILES_PROCESSED'}) -Outcome $outcome -ProductState $(if($outcome -eq 'PARTIAL_APPLIED'){'PARTIAL_KNOWN'}elseif($outcome -eq 'SUCCEEDED'){'INTENDED'}else{'UNCHANGED'}) -MutationStarted ($changed.Count -gt 0))
 }
@@ -10044,7 +10284,7 @@ function Invoke-ReShadeSetupLegacy {
     if ($selectedGames.Count -eq 0) {
         Write-Host "  No games selected. ReShade setup cancelled." -ForegroundColor Yellow
         Write-Log "ReShade setup: cancelled -- no games selected."
-        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_GAMES_SELECTED' }
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; SelectedItems = @(); ChangedItems = @(); SkippedItems = @(); FailedItems = @(); Reason = 'NO_GAMES_SELECTED' }
     }
     $nativeShaderWarnings = New-Object System.Collections.Generic.List[object]
     foreach ($nativeProfile in $selectedGames) {
@@ -10078,6 +10318,9 @@ function Invoke-ReShadeSetupLegacy {
     }
     $bulkApply = $false
     $deployed = 0; $installed = 0; $updated = 0; $reapplied = 0; $changedProfile = 0; $keptProfile = 0; $skipped = 0; $missingPath = 0; $missingDevice = 0; $unsupported = 0; $protected = 0; $adopted = 0; $unsafe = 0; $errors = 0; $presetOverrides = 0; $tutorialProgressFixed = 0
+    $changedGameIds = New-Object 'System.Collections.Generic.List[string]'
+    $skippedGameIds = New-Object 'System.Collections.Generic.List[string]'
+    $failedGameIds = New-Object 'System.Collections.Generic.List[string]'
     $rememberedSelections = @{}
     $keepSelections = @{}
     $restoreSelections = @{}
@@ -10185,10 +10428,10 @@ function Invoke-ReShadeSetupLegacy {
         try {
             $doc = Read-Xml $pf.FullName
             $gameLabel = Get-TpmReShadeGameLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
-            if (-not $doc.GameProfile) { $skipped++; $unsafe++; [void]$unsafeDetails.Add(('{0}: malformed GameProfile XML.' -f $gameLabel)); Write-Host ("    {0}: game profile is invalid -- unsafe/malformed, unchanged" -f $gameLabel) -ForegroundColor Yellow; continue }
+            if (-not $doc.GameProfile) { $skipped++; [void]$skippedGameIds.Add($pf.BaseName); $unsafe++; [void]$unsafeDetails.Add(('{0}: malformed GameProfile XML.' -f $gameLabel)); Write-Host ("    {0}: game profile is invalid -- unsafe/malformed, unchanged" -f $gameLabel) -ForegroundColor Yellow; continue }
 
             $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
-            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; $missingPath++; if (-not $pathReasonCounts.ContainsKey('GAME_PATH_MISSING')) { $pathReasonCounts['GAME_PATH_MISSING'] = 0 }; $pathReasonCounts['GAME_PATH_MISSING']++; Write-Host ("    {0}: saved game path was empty -- skipped" -f $gameLabel) -ForegroundColor DarkGray; continue }
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; [void]$skippedGameIds.Add($pf.BaseName); $missingPath++; if (-not $pathReasonCounts.ContainsKey('GAME_PATH_MISSING')) { $pathReasonCounts['GAME_PATH_MISSING'] = 0 }; $pathReasonCounts['GAME_PATH_MISSING']++; Write-Host ("    {0}: saved game path was empty -- skipped" -f $gameLabel) -ForegroundColor DarkGray; continue }
 
             $gamePath = $gpNode.InnerText.Trim()
             $pathCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
@@ -10207,7 +10450,7 @@ function Invoke-ReShadeSetupLegacy {
                     [void]$unsafeDetails.Add(('{0}: {1}' -f $pf.BaseName, [string]$pathCheck.Reason))
                     Write-Host ("    {0}: path safety check failed ({1}) -- unsafe/malformed, unchanged" -f $pf.BaseName, $pathCheck.Reason) -ForegroundColor Yellow
                 }
-                $skipped++
+                $skipped++; [void]$skippedGameIds.Add($pf.BaseName)
                 Write-Log ("ReShade: skipped {0} before transaction; path reason={1}; detail={2}" -f $pf.BaseName, $reasonCode, $pathCheck.Reason)
                 continue
             }
@@ -10224,7 +10467,7 @@ function Invoke-ReShadeSetupLegacy {
             }
             $profileTargetInfo = Get-ReShadeTargetInfo -Doc $doc -GamePath $gamePath -ExeDir $exeDir
             if (-not $profileTargetInfo -or [string]::IsNullOrWhiteSpace($profileTargetInfo.TargetDir) -or [string]::IsNullOrWhiteSpace($profileTargetInfo.DllName)) {
-                $skipped++
+                $skipped++; [void]$skippedGameIds.Add($pf.BaseName)
                 $unsafe++
                 [void]$unsafeDetails.Add(('{0}: ReShade target could not be resolved safely.' -f $pf.BaseName))
                 Write-Host ("    {0}: ReShade target could not be resolved safely -- unsafe/malformed, unchanged" -f $pf.BaseName) -ForegroundColor Yellow
@@ -10236,7 +10479,7 @@ function Invoke-ReShadeSetupLegacy {
             if (Test-Path -LiteralPath $ownershipPath -PathType Leaf) {
                 try { $existingOwnership = Read-TpmReShadeOwnershipManifest -Path $ownershipPath }
                 catch {
-                    $skipped++
+                    $skipped++; [void]$skippedGameIds.Add($pf.BaseName)
                     $unsafe++
                     [void]$unsafeDetails.Add(('{0}: malformed ReShade ownership metadata.' -f $pf.BaseName))
                     Write-Host ("    {0}: malformed ReShade ownership metadata -- unsafe/malformed, unchanged" -f $pf.BaseName) -ForegroundColor Yellow
@@ -10250,7 +10493,7 @@ function Invoke-ReShadeSetupLegacy {
             $currentRuntimeHash = if ($runtimeSource -and (Test-Path -LiteralPath $runtimeSource -PathType Leaf)) { (Get-FileHash -LiteralPath $runtimeSource -Algorithm SHA256 -ErrorAction SilentlyContinue).Hash } else { '' }
             $ownershipClassification = Get-TpmReShadeOwnershipClassification -HookPath $profileHookPath -TargetRoot $profileTargetInfo.TargetDir -ProfileDefinition $profileForGame -CurrentRuntimeSHA256 $currentRuntimeHash -CurrentRuntimeVersion $runtimeVersion -Manifest $existingOwnership
             if ($ownershipClassification.Status -eq 'MalformedNeedsReview') {
-                $skipped++
+                $skipped++; [void]$skippedGameIds.Add($pf.BaseName)
                 $unsafe++
                 [void]$unsafeDetails.Add(('{0}: {1}' -f $pf.BaseName, $ownershipClassification.Detail))
                 Write-Host ("    {0}: {1} -- unsafe/malformed, unchanged" -f $pf.BaseName, $ownershipClassification.Detail) -ForegroundColor Yellow
@@ -10276,13 +10519,14 @@ function Invoke-ReShadeSetupLegacy {
                 Write-Log "ReShade: reapplied $($restoreResult.ProfileId) for $($pf.BaseName) -- verified deployment result."
                 $reapplied++
                 $deployed++
+                [void]$changedGameIds.Add($pf.BaseName)
                 continue
             }
             $perGamePreset = Join-Path $reShadePresetsDir ($pf.BaseName + '.ini')
             $presetForGame = if ($canonicalForGame) { $null } else { $presetPath }
             $boundaryCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
             if (-not $boundaryCheck.Valid) {
-                $skipped++
+                $skipped++; [void]$skippedGameIds.Add($pf.BaseName)
                 if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
                 elseif ($boundaryCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
                 else { $unsafe++; [void]$unsafeDetails.Add(('{0}: {1}' -f $pf.BaseName, [string]$boundaryCheck.Reason)) }
@@ -10293,7 +10537,7 @@ function Invoke-ReShadeSetupLegacy {
                 continue
             }
             if ([string]$boundaryCheck.ResolvedPath -ine [string]$gamePath) {
-                $skipped++
+                $skipped++; [void]$skippedGameIds.Add($pf.BaseName)
                 $unsafe++
                 [void]$unsafeDetails.Add(('{0}: game path changed before mutation.' -f $pf.BaseName))
                 Write-Host ("    UNSAFE {0}: game path changed before mutation -- unchanged" -f $pf.BaseName) -ForegroundColor Yellow
@@ -10310,7 +10554,7 @@ function Invoke-ReShadeSetupLegacy {
             if (-not $profileDeployment.Succeeded) {
                 if ($profileDeployment.Reason -eq 'USER_OWNED_CONTENT_PRESERVED') { $protected++; [void]$protectedDetails.Add(('{0}: protected existing ReShade files' -f $pf.BaseName)); Write-Host ("    {0}: protected existing ReShade files -- unchanged" -f $pf.BaseName) -ForegroundColor Yellow; Write-Log "ReShade: protected existing user-owned files for $($pf.BaseName)"; continue }
                 if ($profileDeployment.Reason -eq 'TUTORIAL_PROGRESS_FAILED') { $errors++; Write-Host ("    {0}: ReShade first-run tutorial mitigation was not fixed -- {1}" -f $pf.BaseName, $profileDeployment.Error) -ForegroundColor Yellow; Write-Log ("ReShade: TutorialProgress mitigation failed for {0} -- {1}" -f $pf.BaseName, $profileDeployment.Error); continue }
-                if ($profileDeployment.State -in @('MISSING_32BIT_DLL','UNSUPPORTED_ARCHITECTURE')) { $unsupported++; $skipped++; continue }
+                if ($profileDeployment.State -in @('MISSING_32BIT_DLL','UNSUPPORTED_ARCHITECTURE')) { $unsupported++; $skipped++; [void]$skippedGameIds.Add($pf.BaseName); continue }
                 throw ("profile deployment rejected: {0}" -f $profileDeployment.Reason)
             }
             $tutorialProgressFixed++
@@ -10323,13 +10567,14 @@ function Invoke-ReShadeSetupLegacy {
                 $adopted++
             }
             $deployed++
+            [void]$changedGameIds.Add($pf.BaseName)
             if ($hadExistingProfile) { $updated++ } else { $installed++ }
             if (@($conflicts | Where-Object { $_.Game.BaseName -eq $pf.BaseName }).Count -gt 0 -and -not $keepSelections.ContainsKey($pf.BaseName)) { $changedProfile++ }
             try { Add-TpmReShadeProfileHistory -GameId $pf.BaseName -ProfileDefinition $profileForGame -StateRoot '' | Out-Null } catch { Write-Log "ReShade: history record failed for $($pf.BaseName) -- $_" }
         } catch {
             $failureCode = Get-TpmGameMutationFailureCode -ErrorRecord $_
             if ($failureCode -eq 'DEVICE_UNAVAILABLE' -or $failureCode -eq 'GAME_PATH_MISSING') {
-                $skipped++
+                $skipped++; [void]$skippedGameIds.Add($pf.BaseName)
                 if (-not $pathReasonCounts.ContainsKey($failureCode)) { $pathReasonCounts[$failureCode] = 0 }
                 $pathReasonCounts[$failureCode]++
                 if ($failureCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ } else { $missingPath++ }
@@ -10339,6 +10584,7 @@ function Invoke-ReShadeSetupLegacy {
                 Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
                 Write-Log "ReShade: FAILED $($pf.BaseName) -- $_"
                 $errors++
+                [void]$failedGameIds.Add($pf.BaseName)
             }
         }
     }
@@ -10385,6 +10631,10 @@ function Invoke-ReShadeSetupLegacy {
     return [pscustomobject]@{
         Succeeded = ($deployed -gt 0 -and $errors -eq 0 -and $skipped -eq 0 -and $missingPath -eq 0 -and $missingDevice -eq 0 -and $unsupported -eq 0 -and $protected -eq 0)
         Deployed = $deployed
+        SelectedItems = @($selectedGames | ForEach-Object BaseName)
+        ChangedItems = $changedGameIds.ToArray()
+        SkippedItems = $skippedGameIds.ToArray()
+        FailedItems = $failedGameIds.ToArray()
         Installed = $installed
         Updated = $updated
         Reapplied = $reapplied
@@ -15933,7 +16183,7 @@ function Invoke-PostgresSelectedPasswordRecovery {
         [Parameter(Mandatory)][string]$PasswordPlain,
         [object]$StatusContext = $null
     )
-    if ($StatusContext) { [void](Start-TpmWorkflowStep -Context $StatusContext -StepId 'backup' -Activity 'Making a verified safety backup') }
+    if ($StatusContext) { [void](Update-TpmWorkflowActivity -Context $StatusContext -Activity 'Making a verified safety backup') }
     Write-Host "  TeknoParrot Manager is creating a verified recovery backup before resetting the PostgreSQL role password..." -ForegroundColor Cyan
     $backup = New-PostgresRecoveryBackup -UserProfilesDir $UserProfilesDir
     if (-not $backup.Verified) {
@@ -15941,17 +16191,16 @@ function Invoke-PostgresSelectedPasswordRecovery {
         $result | Add-Member -NotePropertyName WrapperOperationKey -NotePropertyValue 'RecoverRolePassword' -Force
         return $result
     }
-    if ($StatusContext) { [void](Complete-TpmWorkflowStep -Context $StatusContext -Outcome Succeeded -Summary 'Verified safety backup complete' -NextStep 'Repair and verify the database password') }
-    if ($StatusContext) { [void](Start-TpmWorkflowStep -Context $StatusContext -StepId 'reset' -Activity 'Repairing the PostgreSQL password') }
+    if ($StatusContext) { [void](Update-TpmWorkflowActivity -Context $StatusContext -Activity 'Repairing the PostgreSQL password') }
     $reset = Reset-PostgresPasswordAutomatically -NewPassword $PasswordPlain -RecoveryBackup $backup
     $reset | Add-Member -NotePropertyName WrapperOperationKey -NotePropertyValue 'RecoverRolePassword' -Force
     if (-not $reset.PSObject.Properties['Backup']) { $reset | Add-Member -NotePropertyName Backup -NotePropertyValue $backup -Force }
     if ($reset.Outcome -eq 'SUCCEEDED') {
-        if ($StatusContext) { [void](Start-TpmWorkflowStep -Context $StatusContext -StepId 'password-validation' -Activity 'Verifying the repaired PostgreSQL password') }
+        if ($StatusContext) { [void](Update-TpmWorkflowActivity -Context $StatusContext -Activity 'Verifying the repaired PostgreSQL password') }
         if (-not (Test-PostgresPassword -SuperPasswordPlain $PasswordPlain)) {
             return (New-TpmProfileTransactionResult -WorkflowKey 'PostgresRecovery' -OperationKey 'RecoverRolePassword' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'PostgreSQL role change needs attention because final authentication could not be verified.' -Items @('postgres-role') -ChangedItems @('postgres-role') -FailedItems @('postgres-role') -MutationStarted $true -Backup $backup -FinalPassed $false -ReasonCode 'FINAL_AUTHENTICATION_UNVERIFIED' -FinalChecks @('The committed role change was not reported as complete without final authentication proof.'))
         }
-        if ($StatusContext) { [void](Complete-TpmWorkflowStep -Context $StatusContext -Outcome Fixed -Summary 'Password repaired and verified' -NextStep 'Save the repaired settings') }
+        if ($StatusContext) { [void](Update-TpmWorkflowActivity -Context $StatusContext -Activity 'Password repaired and verified') }
     }
     return $reset
 }
@@ -28762,10 +29011,13 @@ $mode = $null
                     continue
                 }
                 if ($authFailure -and $backupChoice -eq 'P') {
-                    [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'postgres-password' -Activity 'Checking the PostgreSQL password')
-                    $candidatePassword = Read-ConfirmedPostgresPassword 'the working PostgreSQL password'
-                    [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Succeeded -Summary 'PostgreSQL password checked' -NextStep 'Retry the protected backup')
-                    [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
+                    [void](Update-TpmWorkflowActivity -Context $postgresStatus -Activity 'Checking the PostgreSQL password')
+                    [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Enter and confirm the working PostgreSQL password.' -UserAction 'Enter the password twice')
+                    try {
+                        $candidatePassword = Read-ConfirmedPostgresPassword 'the working PostgreSQL password'
+                    } finally {
+                        [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
+                    }
                     try {
                         if (Test-PostgresPassword -SuperPasswordPlain $candidatePassword) {
                             $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $candidatePassword
@@ -28798,18 +29050,25 @@ $mode = $null
                 if ($authFailure -and $backupChoice -eq 'X') {
                     Write-Host "  Resetting the PostgreSQL password will change the password for the local postgres database user." -ForegroundColor Yellow
                     Write-Host "  TeknoParrot Manager will save the new password securely and use it for the affected games." -ForegroundColor Yellow
+                    [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Choose whether to reset the local PostgreSQL password.' -UserAction 'Choose Y to reset or B to go back')
                     $resetConfirm = Read-TpmChoice -Prompt '  Do you want TeknoParrot Manager to reset the local PostgreSQL password now? (Y/B)' -Choices @('Y', 'B') -Default 'B'
+                    [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
                     if ($resetConfirm -ne 'Y') {
                         Write-Host "  Password reset cancelled. Nothing was changed." -ForegroundColor DarkGray
                         continue
                     }
                     do {
-                        [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'postgres-password' -Activity 'Checking the new PostgreSQL password')
-                        $resetAttempt = Read-PostgresPasswordAttempt 'the new postgres password'
-                        [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
+                        [void](Update-TpmWorkflowActivity -Context $postgresStatus -Activity 'Checking the new PostgreSQL password')
+                        [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Enter and confirm the new PostgreSQL password.' -UserAction 'Enter the new password twice')
+                        try {
+                            $resetAttempt = Read-PostgresPasswordAttempt 'the new postgres password'
+                        } finally {
+                            [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
+                        }
                         if ($resetAttempt.Reason -eq 'PASSWORD_MISMATCH') {
                             Write-Host '  Those two passwords did not match. Nothing changed.' -ForegroundColor Yellow
                             [void](Update-TpmWorkflowActivity -Context $postgresStatus -Activity 'Password was not changed')
+                            [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Choose whether to try the new password again.' -UserAction 'Choose T to retry or B to go back')
                             $mismatchChoice = Read-TpmChoice -Prompt '  [T] Try typing the new password again  [B] Back to PostgreSQL recovery options' -Choices @('T', 'B') -Default 'T'
                             [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
                             if ($mismatchChoice -eq 'B') {
@@ -28824,7 +29083,7 @@ $mode = $null
                     $newPassword = [string]$resetAttempt.Password
                     $resetResult = $null
                     try {
-                        [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'postgres-reset' -Activity 'Resetting the PostgreSQL password')
+                        [void](Update-TpmWorkflowActivity -Context $postgresStatus -Activity 'Resetting the PostgreSQL password')
                         if (-not $recoveryBackup -or -not $recoveryBackup.Verified) {
                             $resetResult = New-TpmProfileTransactionResult -WorkflowKey 'PostgresRecovery' -OperationKey 'ResetRolePassword' -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary 'PostgreSQL recovery stopped before a role change because verified recovery evidence was unavailable.' -Items @('postgres-role') -FailedItems @('postgres-role') -ReasonCode 'RECOVERY_EVIDENCE_REQUIRED' -FinalChecks @('No role change was attempted.')
                         } else {
@@ -29121,44 +29380,15 @@ $mode = $null
                 Write-Host ("  TeknoParrot Manager logs and reports could not be opened: {0}" -f $openResult.Error) -ForegroundColor Yellow
                 Write-Host ("  Folder: {0}" -f $openResult.Path) -ForegroundColor DarkGray
             }
-            [void](Read-HostSafe '  Press Enter to return to the menu')
             continue
         }
         if ($supportChoice -eq '1') {
             $supportResult = New-TpmSupportPackage -ScriptRoot $script:TpmOwnedLayout.Root -TeknoParrotRoot $tpRoot -UserProfilesDir $userProfilesDir -ApprovedGamesRoot $gamesInstallFolder
             Write-Host ""
             if ($supportResult.Succeeded) {
-                Write-Host "  What failed:" -ForegroundColor Yellow
-                $failedRecords = @($supportResult.Records | Where-Object Status -eq 'CollectionFailed')
-                if ($failedRecords.Count -eq 0) {
-                    Write-Host "    Nothing in the allowlisted collection was reported as failed." -ForegroundColor DarkGray
-                } else {
-                    foreach ($record in $failedRecords) {
-                        $safeSource = (Redact-TpmSupportText -Text ([string]$record.Source)).Text
-                        $safeDetail = (Redact-TpmSupportText -Text ([string]$record.Detail)).Text
-                        Write-Host ("    {0} -- {1}" -f $safeSource, $safeDetail) -ForegroundColor Yellow
-                    }
-                }
-                Write-Host "  What to do next:" -ForegroundColor Cyan
-                Write-Host "    Review the failure details above, resolve the reported file or access problem, then run the affected workflow again." -ForegroundColor DarkCyan
-                Write-Host "    If no collection failure is listed, send this ZIP with the TeknoParrot Manager log and describe the workflow and game that failed." -ForegroundColor DarkCyan
-                Write-Host "  What TeknoParrot Manager did not change:" -ForegroundColor Cyan
-                Write-Host "    No game files, profiles, credentials, or emulator files were changed by support collection." -ForegroundColor DarkCyan
-                Write-Host ""
                 Write-Host "  Support package created." -ForegroundColor Green
-                Write-Host ("  Checked {0} safely identified games." -f $supportResult.Summary.GamesChecked)
-                Write-Host ("  Collected {0} diagnostic files and {1} plugin inventories." -f $supportResult.Summary.FilesCollected, $supportResult.Summary.PluginInventoriesCollected)
-                Write-Host ("  {0} optional diagnostics were not present; full detail is in the package manifest." -f $supportResult.Summary.OptionalDiagnosticsNotFound) -ForegroundColor DarkGray
-                Write-Host ("  Collection failures: {0}. Intentional exclusions: {1}." -f $supportResult.Summary.CollectionFailures, $supportResult.Summary.IntentionallyExcluded) -ForegroundColor DarkGray
                 Write-Host ("  Saved here: {0}" -f $supportResult.PackagePath) -ForegroundColor Green
-                Write-Host "  This is the file to send when asking for help." -ForegroundColor Cyan
-                Write-Host "  Next step:" -ForegroundColor Cyan
-                Write-Host "  [O] Open the support package folder" -ForegroundColor White
-                Write-Host "  [B] Back to main menu" -ForegroundColor White
-                $openPackage = Read-TpmChoice -Prompt '  Choice, default O' -Choices @('O', 'B') -Default 'O'
-                if ($openPackage -eq 'O') {
-                    try { Start-Process -FilePath 'explorer.exe' -ArgumentList @([System.IO.Path]::GetDirectoryName($supportResult.PackagePath)) -ErrorAction Stop | Out-Null } catch { Write-Host "  Windows could not open the package folder." -ForegroundColor Yellow }
-                }
+                Write-Host "  Send this ZIP to TeknoParrot support with the workflow and game that failed." -ForegroundColor Cyan
             } else {
                 if ($supportResult.PackagePath) {
                     Write-Host "  Support ZIP was created, but temporary cleanup needs attention." -ForegroundColor Yellow
@@ -29170,7 +29400,6 @@ $mode = $null
                 }
                 foreach ($errorText in @($supportResult.Errors)) { Write-Host ("  Reason: {0}" -f $errorText) -ForegroundColor DarkGray }
             }
-            [void](Read-HostSafe '  Press Enter to return to the menu')
         }
         continue
     }
@@ -31185,13 +31414,13 @@ if ($doReShade -eq "Y") {
         Write-Host ""
         Write-Host "  ReShade result -- review before continuing to dgVoodoo2:" -ForegroundColor Cyan
         if ($normalReShadeResult -and @($normalReShadeResult.PSTypeNames) -contains 'TPM.TransactionResult.v1') {
-            Write-Host ("    Transaction outcome: {0}" -f $normalReShadeResult.Outcome) -ForegroundColor DarkCyan
-            Write-Host ("    Changed: {0} game(s); Protected: {1}; Unsafe/malformed: {2}; Missing: {3}; Failed: {4}" -f $normalReShadeResult.Deployed, $normalReShadeResult.Protected, $normalReShadeResult.Unsafe, ($normalReShadeResult.MissingPath + $normalReShadeResult.MissingDevice), $normalReShadeResult.Errors) -ForegroundColor DarkCyan
-            Write-Host '    What TeknoParrot Manager changed: verified ReShade deployments only.' -ForegroundColor DarkGray
-            Write-Host '    What TeknoParrot Manager did not change: protected, unsafe/malformed, missing, or failed game folders.' -ForegroundColor DarkGray
-            foreach ($detail in @($normalReShadeResult.ProtectedDetails)) { Write-Host ("    Protected: {0}" -f $detail) -ForegroundColor Yellow }
-            foreach ($detail in @($normalReShadeResult.UnsafeDetails)) { Write-Host ("    Unsafe/malformed: {0}" -f $detail) -ForegroundColor Yellow }
-            if ($normalReShadeResult.PSObject.Properties['NativeShaderWarnings'] -and @($normalReShadeResult.NativeShaderWarnings).Count -gt 0) { Write-Host '    Native TeknoParrot shader/display settings were preserved; stacking may occur.' -ForegroundColor Yellow }
+            $normalReShadePresentation = ConvertTo-TpmTransactionPresentation -TransactionResult $normalReShadeResult
+            foreach ($row in @(Format-TpmTransactionPresentationRows -Presentation $normalReShadePresentation)) {
+                Write-Host ("    {0}" -f $row) -ForegroundColor $(if ($normalReShadePresentation.RequiresAttention) { 'Yellow' } else { 'DarkGray' })
+            }
+            foreach ($detailRow in @(Format-TpmReShadeSummaryDetailRows -Result $normalReShadeResult)) {
+                Write-Host ("    {0}" -f $detailRow) -ForegroundColor Yellow
+            }
         } else {
             Write-Host '    ReShade setup did not return an authoritative transaction result; no verified deployment was claimed.' -ForegroundColor Yellow
         }

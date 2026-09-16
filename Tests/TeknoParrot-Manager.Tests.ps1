@@ -1099,7 +1099,6 @@ Describe "Prompt.Core fixed choice routes" {
         $script:ProductionSource | Should -Match '\$lbChoice = Read-TpmChoice'
         $script:ProductionSource | Should -Match '\$platChoice = Read-TpmChoice'
         $script:ProductionSource | Should -Match '\$supportChoice = Read-TpmChoice'
-        $script:ProductionSource | Should -Match '\$openPackage = Read-TpmChoice'
         $script:ProductionSource | Should -Match '\$rootChoices = @\(''N''\)'
         $script:ProductionSource | Should -Match '\$pick = Read-TpmChoice'
         $script:ProductionSource | Should -Match '\[A\] Check all games'
@@ -1116,11 +1115,15 @@ Describe "Prompt.Core fixed choice routes" {
         $normalBlock | Should -Not -Match 'Export-HyperSpinJson'
     }
 
-    It "preserves the support package folder action after validating O or B" {
-        $supportChoiceIndex = $script:ProductionSource.IndexOf('$openPackage = Read-TpmChoice')
-        $openFolderIndex = $script:ProductionSource.IndexOf("Start-Process -FilePath 'explorer.exe'", $supportChoiceIndex)
-        $supportChoiceIndex | Should -BeGreaterOrEqual 0
-        $openFolderIndex | Should -BeGreaterThan $supportChoiceIndex
+    It "returns directly after the support package result without a second choice" {
+        $supportStart = $script:ProductionSource.IndexOf('if ($mode -eq "Support")', [StringComparison]::Ordinal)
+        $nextModeStart = $script:ProductionSource.IndexOf('if ($mode -eq "PropagateControls")', $supportStart, [StringComparison]::Ordinal)
+        $supportStart | Should -BeGreaterOrEqual 0
+        $nextModeStart | Should -BeGreaterThan $supportStart
+        $supportMode = $script:ProductionSource.Substring($supportStart, $nextModeStart - $supportStart)
+        $supportMode | Should -Not -Match '\$openPackage = Read-TpmChoice'
+        $supportMode | Should -Not -Match "Start-Process -FilePath 'explorer\.exe'"
+        $supportMode | Should -Not -Match 'Press Enter to return to the menu'
     }
 
     It "documents specialized stateful and non-enumerated prompt boundaries" {
@@ -5339,6 +5342,20 @@ __BRANCH__
             Should -Invoke New-PostgresRecoveryBackup -Times 1 -Exactly
             Should -Invoke Reset-PostgresPasswordAutomatically -Times 1 -Exactly
             Should -Invoke Test-PostgresPassword -Times 1 -Exactly
+        }
+
+        It "updates an existing PostgreSQL workflow step without opening a nested step" {
+            Mock New-PostgresRecoveryBackup { $script:pgBackup }
+            Mock Reset-PostgresPasswordAutomatically { [pscustomobject]@{ Outcome = 'SUCCEEDED'; Succeeded = $true } }
+            Mock Test-PostgresPassword { $true }
+            $context = New-TpmWorkflowStatusContext -WorkflowKey 'PostgresSetup' -Title 'PostgreSQL setup' -Steps @('database') -ConsoleFacts ([pscustomobject]@{ NoRender = $true })
+            [void](Start-TpmWorkflowStatus -Context $context)
+            [void](Start-TpmWorkflowStep -Context $context -StepId 'database' -Activity 'Backing up existing databases')
+            { Invoke-PostgresSelectedPasswordRecovery -UserProfilesDir (Join-Path $TestDrive 'profiles') -PasswordPlain $script:pgSecret -StatusContext $context } | Should -Not -Throw
+            $context.ActiveStepId | Should -Be 'database'
+            $context.Activity | Should -Be 'Password repaired and verified'
+            [void](Stop-TpmWorkflowStatus -Context $context -Reason 'test stop')
+            [void](Close-TpmWorkflowStatus -Context $context)
         }
     }
 
@@ -14395,11 +14412,13 @@ Describe "PostgreSQL Slice 8B owner-transcript behavior" {
         }
     }
 
-    It "defines password and reset workflow activities instead of retaining the backup activity" {
+    It "keeps password recovery activity inside the active workflow step" {
         $source = $script:ProductionSource
-        $source | Should -Match 'Start-TpmWorkflowStep -Context \$postgresStatus -StepId ''postgres-password'' -Activity ''Checking the PostgreSQL password'''
-        $source | Should -Match 'Start-TpmWorkflowStep -Context \$postgresStatus -StepId ''postgres-reset'' -Activity ''Resetting the PostgreSQL password'''
-        $source | Should -Not -Match 'Set-TpmWorkflowWaiting -Context \$postgresStatus -Message ''Waiting for password entry\.'''
+        $source | Should -Match 'Update-TpmWorkflowActivity -Context \$postgresStatus -Activity ''Checking the PostgreSQL password'''
+        $source | Should -Match 'Update-TpmWorkflowActivity -Context \$postgresStatus -Activity ''Resetting the PostgreSQL password'''
+        $source | Should -Match 'Set-TpmWorkflowWaiting -Context \$postgresStatus -Message ''Enter and confirm the new PostgreSQL password\.'''
+        $source | Should -Not -Match 'Start-TpmWorkflowStep -Context \$postgresStatus -StepId ''postgres-password'''
+        $source | Should -Not -Match 'Start-TpmWorkflowStep -Context \$postgresStatus -StepId ''postgres-reset'''
     }
 
     It "keeps password and reset actions away from reinitialize" {
@@ -14432,10 +14451,18 @@ Describe "Focused RC8 remediation contracts" {
         $source | Should -Match 'Open 10\) Library Health Check for missing paths'
         $source | Should -Match 'repair saved game paths'
     }
-    It "keeps support package next actions explicit and starts each mode cleanly" {
+    It "keeps the support manifest detailed but the success screen concise" {
         $source = $script:ProductionSource
         $source | Should -Match '\$lines\.Add\(''What to do next:''\)'
-        $source | Should -Match 'Write-Host "  What to do next:"'
+        $supportStart = $source.IndexOf('if ($mode -eq "Support")', [StringComparison]::Ordinal)
+        $nextModeStart = $source.IndexOf('if ($mode -eq "PropagateControls")', $supportStart, [StringComparison]::Ordinal)
+        $supportMode = $source.Substring($supportStart, $nextModeStart - $supportStart)
+        $supportMode | Should -Match 'Write-Host "  Support package created\."'
+        $supportMode | Should -Match 'Saved here:'
+        $supportMode | Should -Match 'Send this ZIP to TeknoParrot support'
+        $supportMode | Should -Not -Match 'Write-Host "  What failed:'
+        $supportMode | Should -Not -Match 'Choice, default O'
+        $supportMode | Should -Not -Match 'Press Enter to return to the menu'
         $source | Should -Match 'Clear-ConsoleForFreshRender'
     }
     It "validates Health Check search roots against canonical protected paths and reparse state" {
@@ -14859,6 +14886,232 @@ Describe "S2-A transaction presentation contract" -Tag 'S2-A-PRESENTATION' {
     }
 }
 
+
+Describe 'S2-B1 shared transaction renderers' -Tag 'S2-B1-RENDERERS' {
+    BeforeAll {
+        function New-S2B1PresentationResult {
+            param([Parameter(Mandatory)][string]$Outcome)
+            $items=@('game-a','game-b','game-c')
+            $clean=[pscustomobject]@{ Attempted=$false; Completed=$true; ResiduePresent=$false; ResiduePaths=@(); ResidueItems=@(); Error=$null }
+            switch ($Outcome) {
+                'FAILED_BEFORE_MUTATION' { return (New-TpmTransactionResult -TransactionId 's2-b1-failed' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNCHANGED' -Summary 'The fixture stopped before making changes.' -Items @('game-a') -Cleanup $clean) }
+                'NO_OP' { return (New-TpmTransactionResult -TransactionId 's2-b1-noop' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNCHANGED' -Summary 'The fixture found nothing to change.' -Items @('game-a') -Mutation ([pscustomobject]@{ SelectedItemCount=1; CompletedItemCount=0; FailedItemCount=0; UnattemptedItemCount=0; SkippedItemCount=0; UnknownItemCount=0; ChangedItems=@(); AffectedItems=@(); CompletedItems=@(); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Current state checked') }) -Cleanup $clean) }
+                'SUCCEEDED' { return (New-TpmTransactionResult -TransactionId 's2-b1-success' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'INTENDED' -Summary 'The fixture completed and was verified.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$true; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Final state checked') }) -Cleanup $clean) }
+                'PARTIAL_APPLIED' { return (New-TpmTransactionResult -TransactionId 's2-b1-partial' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'PARTIAL_KNOWN' -Summary 'Some fixture items changed and others did not.' -Items $items -Mutation ([pscustomobject]@{ Started=$true; Completed=$false; SelectedItemCount=3; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@('game-b'); UnattemptedItems=@('game-c'); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Final state checked') }) -Cleanup $clean) }
+                'ROLLED_BACK_VERIFIED' { return (New-TpmTransactionResult -TransactionId 's2-b1-rollback' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNCHANGED' -Summary 'The fixture was restored and verified.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$false; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Restored state checked') }) -Rollback ([pscustomobject]@{ Attempted=$true; Completed=$true; Verified=$true; Items=@('game-a'); EvidenceRoot='rollback-evidence'; FailedItems=@(); Errors=@() }) -Cleanup $clean) }
+                'ACTION_REQUIRED' { return (New-TpmTransactionResult -TransactionId 's2-b1-attention' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNKNOWN' -Summary 'The fixture needs attention because its final state could not be verified.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$false; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@(); FailedItems=@('game-a'); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$false; Checks=@('Final state was not verified') }) -Cleanup $clean) }
+                'CLEANUP_RESIDUE' { return (New-TpmTransactionResult -TransactionId 's2-b1-residue' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -UnderlyingOutcome 'SUCCEEDED' -ProductState 'INTENDED' -Summary 'The fixture completed and preserved cleanup evidence.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$true; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Final state checked') }) -Cleanup ([pscustomobject]@{ Attempted=$true; Completed=$false; ResiduePresent=$true; ResiduePaths=@('C:\TPM\staging'); ResidueItems=@('staging'); Error=$null })) }
+                default { throw "Unsupported S2-B1 fixture outcome: $Outcome" }
+            }
+        }
+    }
+    It 'renders every presentation outcome through the shared normal renderer' {
+        $outcomes=@('SUCCEEDED','NO_OP','FAILED_BEFORE_MUTATION','PARTIAL_APPLIED','ROLLED_BACK_VERIFIED','ACTION_REQUIRED','CLEANUP_RESIDUE')
+        foreach ($outcome in $outcomes) {
+            $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome $outcome)
+            $rows=@(Format-TpmTransactionPresentationRows -Presentation $presentation)
+            $rows.Count | Should -BeGreaterThan 5
+            ($rows -join "`n") | Should -Match ([regex]::Escape($presentation.Headline))
+            ($rows -join "`n") | Should -Match 'What changed:'
+            ($rows -join "`n") | Should -Match 'What did not change:'
+            ($rows -join "`n") | Should -Match 'Next action:'
+            ($rows -join "`n") | Should -Not -Match '(?i)password|credential|secret|powershell|System\.|StackTrace'
+        }
+    }
+
+    It 'keeps item counts and safe labels in a fixed normal-renderer order' {
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome 'PARTIAL_APPLIED')
+        $text=(Format-TpmTransactionPresentationRows -Presentation $presentation) -join "`n"
+        $text.IndexOf('Selected items: 3') | Should -BeLessThan $text.IndexOf('Changed items: 1')
+        $text.IndexOf('Changed items: 1') | Should -BeLessThan $text.IndexOf('Failed items: 1')
+        $text.IndexOf('Failed items: 1') | Should -BeLessThan $text.IndexOf('Unattempted items: 1')
+        $text | Should -Match 'game-a'
+        $text | Should -Match 'game-b'
+        $text | Should -Match 'game-c'
+    }
+
+    It 'does not turn non-success outcomes into success or skipped status text' {
+        foreach ($outcome in @('FAILED_BEFORE_MUTATION','PARTIAL_APPLIED','ROLLED_BACK_VERIFIED','ACTION_REQUIRED','CLEANUP_RESIDUE')) {
+            $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome $outcome)
+            $text=(Format-TpmTransactionPresentationRows -Presentation $presentation) -join "`n"
+            $text | Should -Not -Match '\[OK\]|\bFinished\b'
+        }
+        $noOp=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome 'NO_OP')
+        (Format-TpmTransactionPresentationRows -Presentation $noOp) -join "`n" | Should -Not -Match '^\s*Skipped\b'
+    }
+
+    It 'requires redacted safe technical references and recovery actions' {
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome 'ACTION_REQUIRED')
+        $safeReference=[pscustomobject]@{ Label='Support record'; Value='Current evidence is available'; EvidenceClass='Current'; Redacted=$true }
+        $safeAction=[pscustomobject]@{ Id='Review'; Label='Review Details and support evidence' }
+        $context=ConvertTo-TpmTransactionDetailsContext -Presentation $presentation -TechnicalReferences @($safeReference) -RecoveryActions @($safeAction)
+        { Assert-TpmTransactionDetailsContext -Context $context -TransactionId $presentation.TransactionId } | Should -Not -Throw
+        { ConvertTo-TpmTransactionDetailsContext -Presentation $presentation -TechnicalReferences @([pscustomobject]@{ Label='Raw'; Value='password=secret'; EvidenceClass='Current'; Redacted=$true }) } | Should -Throw
+        { ConvertTo-TpmTransactionDetailsContext -Presentation $presentation -TechnicalReferences @([pscustomobject]@{ Label='Raw'; Value='C:\private\trace.log'; EvidenceClass='Current'; Redacted=$true }) } | Should -Throw
+        { ConvertTo-TpmTransactionDetailsContext -Presentation $presentation -TechnicalReferences @([pscustomobject]@{ Label='Raw'; Value='leaked'; EvidenceClass='Current'; Redacted=$false }) } | Should -Throw
+    }
+
+    It 'renders Details from the presentation and approved context only' {
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome 'CLEANUP_RESIDUE')
+        $context=ConvertTo-TpmTransactionDetailsContext -Presentation $presentation `
+            -TechnicalReferences @([pscustomobject]@{ Label='Evidence record'; Value='Current evidence is available'; EvidenceClass='Current'; Redacted=$true }) `
+            -RecoveryActions @([pscustomobject]@{ Id='Review'; Label='Review Details and support evidence' })
+        $rows=@(Format-TpmTransactionDetailsRows -Presentation $presentation -DetailsContext $context)
+        $text=$rows -join "`n"
+        $text | Should -Match 'Transaction ID: s2-b1-residue'
+        $text | Should -Match 'Underlying outcome: SUCCEEDED'
+        $text | Should -Match 'Selected items \(1\)'
+        $text | Should -Match 'Unknown items \(0\)'
+        $text | Should -Match 'Cleanup residue present: True'
+        $text | Should -Match 'Evidence record: Current evidence is available \[Current\]'
+        $text | Should -Match 'Review: Review Details and support evidence'
+        $text | Should -Not -Match '(?i)password|credential|secret|C:\\TPM|System\.|StackTrace'
+        ($context | ConvertTo-Json -Depth 8) | Should -Not -Match 'TransactionResult|TechnicalDetails'
+        { Format-TpmTransactionDetailsRows -Presentation $presentation -DetailsContext ([pscustomobject]@{ PSTypeName='TPM.TransactionDetailsContext.v1'; SchemaVersion=1; TransactionId='other'; TechnicalReferences=@(); RecoveryActions=@() }) } | Should -Throw
+        (Format-TpmTransactionDetailsRows -Presentation $presentation) -join "`n" | Should -Match 'Technical references: unavailable'
+    }
+
+    It 'uses the attached presentation as the terminal status authority' {
+        foreach ($outcome in @('SUCCEEDED','NO_OP','FAILED_BEFORE_MUTATION','PARTIAL_APPLIED','ROLLED_BACK_VERIFIED','ACTION_REQUIRED','CLEANUP_RESIDUE')) {
+            $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome $outcome)
+            $context=New-TpmWorkflowStatusContext -WorkflowKey 'S2B1' -Title 'Renderer fixture' -Steps @('apply')
+            [void](Set-TpmWorkflowTransactionPresentation -Context $context -Presentation $presentation)
+            $context.State='Finished'
+            $snapshot=Get-TpmWorkflowStatusSnapshot -Context $context
+            $text=(Format-TpmWorkflowStatusRows -Snapshot $snapshot -Width 200) -join "`n"
+            if ($outcome -eq 'SUCCEEDED') {
+                $text | Should -Match '\[OK\].*Completed and verified'
+                $text | Should -Match 'Finished'
+            } else {
+                $text | Should -Not -Match '\[OK\]|(?i)Finished|Skipped'
+            }
+        }
+    }
+
+    It 'fails closed when a required terminal presentation is missing or invalid' {
+        $context=New-TpmWorkflowStatusContext -WorkflowKey 'S2B1' -Title 'Renderer fixture' -Steps @('apply')
+        [void](Require-TpmWorkflowTransactionPresentation -Context $context)
+        $context.State='Finished'
+        $text=(Format-TpmWorkflowStatusRows -Snapshot (Get-TpmWorkflowStatusSnapshot -Context $context)) -join "`n"
+        $text | Should -Match 'Result requires review'
+        $text | Should -Not -Match '\[OK\]|(?i)Finished|Skipped'
+        $context.TransactionPresentation=[pscustomobject]@{ Outcome='SUCCEEDED' }
+        $text=(Format-TpmWorkflowStatusRows -Snapshot (Get-TpmWorkflowStatusSnapshot -Context $context)) -join "`n"
+        $text | Should -Match 'Result requires review'
+        $text | Should -Not -Match '\[OK\]|(?i)Finished|Skipped'
+    }
+
+    It 'adapts the normal ReShade summary to the shared renderer without legacy counts' {
+        $start=$script:ProductionSource.IndexOf('Write-Host "  ReShade result -- review before continuing to dgVoodoo2:"')
+        $end=$script:ProductionSource.IndexOf("[void](Read-HostSafe '  Press Enter to review the ReShade result before dgVoodoo2')", $start)
+        $start | Should -BeGreaterOrEqual 0
+        $end | Should -BeGreaterThan $start
+        $summary=$script:ProductionSource.Substring($start, $end - $start)
+        $summary | Should -Match 'ConvertTo-TpmTransactionPresentation -TransactionResult \$normalReShadeResult'
+        $summary | Should -Match 'Format-TpmTransactionPresentationRows -Presentation \$normalReShadePresentation'
+        $summary | Should -Not -Match 'Transaction outcome:|ProtectedDetails|UnsafeDetails'
+        $summary | Should -Match 'Format-TpmReShadeSummaryDetailRows -Result \$normalReShadeResult'
+    }
+    It 'maps ReShade changed skipped and failed labels from the legacy result' {
+        $start=$script:ProductionSource.IndexOf('function Invoke-ReShadeSetup {')
+        $end=$script:ProductionSource.IndexOf('function Invoke-ReShadeSetupLegacy {', $start)
+        $wrapper=$script:ProductionSource.Substring($start, $end - $start)
+        $wrapper | Should -Match "Name 'ChangedItems'"
+        $wrapper | Should -Match "Name 'SkippedItems'"
+        $wrapper | Should -Match "Name 'FailedItems'"
+        $wrapper | Should -Not -Match 'ReShadeSkipped|ReShadeFailure|Select-Object -First'
+        $legacyStart=$script:ProductionSource.IndexOf('function Invoke-ReShadeSetupLegacy {')
+        $legacyEnd=$script:ProductionSource.IndexOf('function ', $legacyStart + 1)
+        $legacy=$script:ProductionSource.Substring($legacyStart, $legacyEnd - $legacyStart)
+        $legacy | Should -Match 'ChangedItems = \$changedGameIds\.ToArray\(\)'
+        $legacy | Should -Match 'SkippedItems = \$skippedGameIds\.ToArray\(\)'
+        $legacy | Should -Match 'FailedItems = \$failedGameIds\.ToArray\(\)'
+    }
+    It 'returns selected ReShade profile IDs with actual changed skipped and failed outcomes' {
+        $root=Join-Path $TestDrive 'ReShadeOutcomeMapping'
+        $profiles=Join-Path $root 'UserProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $gameRoot=Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $gameRoot -Force | Out-Null
+        foreach ($id in @('ChangedGame','SkippedGame','FailedGame')) {
+            $gamePath=Join-Path $gameRoot ($id + '.exe')
+            $xml="<GameProfile><GamePath>$gamePath</GamePath></GameProfile>"
+            [IO.File]::WriteAllText((Join-Path $profiles ($id + '.xml')), $xml, (New-Object Text.UTF8Encoding $false))
+        }
+        $profile=[pscustomobject]@{ ProfileId='Original'; FriendlyName='Original'; Description='Fixture'; TechniqueOrder=@() }
+        Mock Get-TpmReShadeProfiles { @($profile) }
+        Mock Show-TpmReShadeProfileGalleryWindow { [pscustomobject]@{ Available=$false; Session=$null; Reason='fixture' } }
+        $sourceDll=Join-Path $root 'ReShade64.dll'
+        [IO.File]::WriteAllBytes($sourceDll, [byte[]](0x4d,0x5a))
+        Mock Invoke-ReShadeUpdateIfAvailable { [pscustomobject]@{ Updated=$false; SourceDll=$SourceDll; SourceDll32=$SourceDll32 } }
+        Mock Test-ReShadeDllSignature { [pscustomobject]@{ Status='Unknown'; Signer='fixture' } }
+        Mock Read-TpmReShadeState { [pscustomobject]@{ Favorites=@() } }
+        $script:s2b1ProfilesPath=$profiles
+        Mock Select-RegisteredGamesInteractive { @(Get-ChildItem -LiteralPath $script:s2b1ProfilesPath -Filter '*.xml' -File | Sort-Object BaseName) }
+        Mock Read-TpmReShadeTerminalProfile { [pscustomobject]@{ Cancelled=$false; SelectedProfile=$profile; PreviewSession=$null } }
+        Mock Close-TpmReShadeProfileGallerySession {}
+        Mock Read-TpmChoice { 'Y' }
+        Mock Get-TpmReShadeChooserOptions { [pscustomobject]@{ Restore=[pscustomobject]@{ Found=$false; Valid=$false }; Remembered=[pscustomobject]@{ Found=$false; Valid=$false } } }
+        Mock Get-TpmReShadeApplyPreflight { [pscustomobject]@{ Ready=3; Protected=0; MissingPath=0; Unsafe=0; Failed=0 } }
+        Mock Get-TpmReShadeNativeShaderWarnings { [pscustomobject]@{ Detected=$false; Fields=@(); Warning=$null } }
+        Mock Get-ExeArchitecture { 'x64' }
+        Mock Get-TpmReShadeProfileOwnershipPath { param($GameId) Join-Path $root ($GameId + '.ownership.json') }
+        Mock Get-ReShadeTargetInfo { param($ExeDir) [pscustomobject]@{ TargetDir=$ExeDir; DllName='dxgi.dll' } }
+        Mock Get-TpmReShadeOwnershipClassification { [pscustomobject]@{ Status='ManagedTrusted'; Detail='trusted fixture'; ProfileId='Original' } }
+        Mock Test-TpmGameMutationPath {
+            param($GamePath)
+            if ($GamePath -match 'SkippedGame') {
+                [pscustomobject]@{ Valid=$false; ReasonCode='GAME_PATH_MISSING'; Reason='fixture skip'; ResolvedPath=$null; GameDirectory=$null }
+            } else {
+                [pscustomobject]@{ Valid=$true; ReasonCode=$null; Reason='valid'; ResolvedPath=$GamePath; GameDirectory=[IO.Path]::GetDirectoryName($GamePath) }
+            }
+        }
+        Mock Install-TpmReShadeProfileDeployment {
+            param($GamePath)
+            if ($GamePath -match 'FailedGame') { throw 'fixture deployment failure' }
+            [pscustomobject]@{ Succeeded=$true; State='INSTALLED'; TargetDir=[IO.Path]::GetDirectoryName($GamePath); DllName='dxgi.dll'; PresetApplied=$false; PresetSource=$null; ApiDetected=$true }
+        }
+        Mock Test-TpmReShadeDeploymentVerified { $true }
+        Mock Add-TpmReShadeProfileHistory {}
+        $result=Invoke-ReShadeSetupLegacy -UserProfilesDir $profiles -SourceDll $sourceDll -SourceDll32 '' -ConfigPath '' -TpRoot '' -Mode '' -ZipSource '' -GamesInstallFolder '' -RetroBat $false -HsDataPath ''
+        @($result.SelectedItems) | Should -Be @('ChangedGame','FailedGame','SkippedGame')
+        @($result.ChangedItems) | Should -Be @('ChangedGame')
+        @($result.SkippedItems) | Should -Be @('SkippedGame')
+        @($result.FailedItems) | Should -Be @('FailedGame')
+        @($result.ChangedItems) | Should -Not -Contain 'SkippedGame'
+        @($result.ChangedItems) | Should -Not -Contain 'FailedGame'
+    }
+    It 'uses the legacy selected set for ReShade transaction accounting' {
+        Mock Invoke-ReShadeSetupLegacy {
+            [pscustomobject]@{
+                Deployed=1; Errors=1; Skipped=1; Protected=0
+                SelectedItems=@('ChangedGame','SkippedGame','FailedGame')
+                ChangedItems=@('ChangedGame')
+                SkippedItems=@('SkippedGame')
+                FailedItems=@('FailedGame')
+            }
+        }
+        $result=Invoke-ReShadeSetup -UserProfilesDir $TestDrive -SourceDll '' -SourceDll32 '' -ConfigPath '' -TpRoot '' -Mode '' -ZipSource '' -GamesInstallFolder '' -RetroBat $false -HsDataPath ''
+        @($result.Items) | Should -Be @('ChangedGame','SkippedGame','FailedGame')
+        $result.Mutation.SelectedItemCount | Should -Be 3
+        $result.Mutation.AttemptedItemCount | Should -Be 2
+        @($result.Mutation.ChangedItems) | Should -Be @('ChangedGame')
+        @($result.Mutation.SkippedItems) | Should -Be @('SkippedGame')
+        @($result.Mutation.FailedItems) | Should -Be @('FailedGame')
+    }
+    It 'preserves ReShade protected, unsafe, and native-warning details through a redacted adapter' {
+        $result=[pscustomobject]@{
+            ProtectedDetails=@('GameA: protected C:\Games\GameA\dxgi.dll')
+            UnsafeDetails=@('GameB: password=secret')
+            NativeShaderWarnings=@([pscustomobject]@{ Game='GameC'; Warning='Native settings were preserved; display effects may stack.' })
+        }
+        $text=(Format-TpmReShadeSummaryDetailRows -Result $result) -join "`n"
+        $text | Should -Match 'Protected item:'
+        $text | Should -Match 'Unsafe/malformed item:'
+        $text | Should -Match 'Native settings preserved for GameC:'
+        $text | Should -Not -Match 'C:\\Games|password=secret'
+    }
+}
 
 Describe 'S1-FILE-PROMOTION shared multi-root transaction' {
     BeforeAll {

@@ -366,3 +366,30 @@ redaction. Full validation evidence is recorded in the corresponding
 reconciliation section after execution. Owner smoke, package rebuild, Arcade,
 wiki, push, merge, tag, publish, certification, and release-ready actions
 remain unauthorized.
+
+## Desktop OMP S2-B1 -- shared transaction renderers
+
+Status: SOURCE REMEDIATION IMPLEMENTED; OWNER SMOKE PAUSED
+
+Slice contract: `docs/remediation/slices/TPM-S2B1-RENDERERS-001.md`.
+
+The authorized S2-B1 scope adds pure shared normal and Details renderers over
+`TPM.TransactionPresentation.v1`, with a separate
+`TPM.TransactionDetailsContext.v1` redaction/provenance boundary. The narrow
+workflow status bridge accepts only a validated presentation as terminal
+transaction authority: only `SUCCEEDED` can display `[OK]` or `Finished`;
+`NO_OP`, rollback, partial, failure, action-required, and cleanup-residue
+states retain their distinct non-success wording. Required but missing or
+invalid terminal presentation fails closed. The normal ReShade onboarding
+summary now uses the shared normal renderer without migrating its acquisition,
+ownership, or details flow.
+
+Focused S2-B1 renderer tests pass `12/12` for all seven outcomes, item ordering,
+Details identity/redaction, status authority, fail-closed terminal behavior,
+the ReShade summary adapter/detail preservation, actual ReShade changed,
+skipped, and failed item-label mapping, and selected-set transaction accounting.
+Full main Pester passes `1152/1152`. Windows PowerShell and pwsh parser checks,
+PSScriptAnalyzer, ASCII, and `git diff --check` pass. No workflow-wide
+migration, support-package serialization change, package rebuild, owner smoke,
+Arcade, wiki, push, merge, tag, publish, certification, or release-ready action
+is authorized by this slice.

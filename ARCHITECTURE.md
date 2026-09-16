@@ -3197,3 +3197,39 @@ owned by the existing redaction and provenance boundaries.
 S2-A deliberately does not change workflow status events, support-package
 serialization, package generation, or individual workflow renderers. Those
 are S2-B and later integration boundaries.
+
+## Shared transaction renderers and status bridge (S2-B1)
+
+S2-B1 adds pure renderers over the validated `TPM.TransactionPresentation.v1`
+projection. `Format-TpmTransactionPresentationRows` is the normal summary
+renderer: it emits fixed headline, change, non-change, next-action, retry
+safety, data-safety, attention, and item-accounting rows. It does not read the
+source transaction, legacy counters, compatibility booleans, or raw technical
+details.
+
+`Format-TpmTransactionDetailsRows` is the Details renderer. It accepts the
+presentation plus an optional `TPM.TransactionDetailsContext.v1`. The context
+contains only identity-matched, redacted technical references with explicit
+evidence classes and safe recovery-action labels. Context construction and
+validation reject credentials, paths, hashes, commands, stack traces, and
+unredacted values. Missing context renders an unavailable-evidence statement;
+it never falls back to source transaction fields.
+
+`Set-TpmWorkflowTransactionPresentation` is the narrow status bridge. Once
+attached, the presentation outcome controls terminal status wording: only
+`SUCCEEDED` receives `[OK]` and `Finished`; `NO_OP` is `Unchanged`;
+`ROLLED_BACK_VERIFIED` is `Restored`; and every uncertain, partial, failed, or
+cleanup-residue result is attention-required without success or skipped
+language. `Require-TpmWorkflowTransactionPresentation` marks a terminal
+workflow fail-closed when no verified presentation is available. Invalid or
+missing required presentation output never falls back to generic completion
+claims.
+
+The normal ReShade onboarding summary is the first authorized renderer adapter.
+Its existing acquisition, ownership, and transaction logic remain unchanged;
+the legacy result now carries the selected profile IDs plus actual changed,
+skipped, and failed profile IDs into the shared normal renderer instead of a
+directory scan, filesystem-order labels, or synthetic placeholders. The final
+result summary also consumes a bounded redacted adapter for protected, unsafe,
+and native-warning detail rows. Details, support, package, runtime, and
+owner-smoke migration remain outside S2-B1.

@@ -608,3 +608,40 @@ from that single unsafe-root classification.
 - No-action confirmations: no package, push, owner smoke, Arcade, wiki,
   merge, tag, publish, certification, or release-ready disposition is part of
   S2-A.
+
+## Desktop OMP S2-B1 -- shared transaction renderers
+
+- Slice contract: `TPM-S2B1-RENDERERS-001`.
+- Scope: pure normal and Details renderers over the S2-A presentation,
+  redaction/provenance-bound Details context, narrow terminal workflow-status
+  bridge, and the authorized normal ReShade summary adapter.
+- Source boundary: `TeknoParrot-Manager.ps1` shared renderer and status-bridge
+  helpers plus the normal ReShade onboarding summary; no workflow-wide caller
+  migration or support-package serialization change.
+- Test boundary: `Tests/TeknoParrot-Manager.Tests.ps1` tag
+  `S2-B1-RENDERERS`, including all seven outcomes, item ordering, Details
+  identity and redaction, status fail-closed behavior, ReShade summary
+  adapter/detail preservation, actual changed/skipped/failed label mapping, and
+  selected-set transaction accounting.
+- Focused S2-B1 evidence: 12 passed, 0 failed, 0 skipped, 1140 not run.
+- Focused S2-A evidence after S2-B1 source integration: 15 passed, 0 failed,
+  0 skipped, 1133 not run.
+- Full main Pester evidence after all S2-B1 edits: 1152 passed, 0 failed,
+  0 skipped, 0 not run.
+- Static evidence: Windows PowerShell parser `ParseErrors=0`, pwsh parser
+  `ParseErrors=0`, production script ASCII `NonAscii=0`, PSScriptAnalyzer
+  Error/Warning `Findings=0`, and `git diff --check` passed.
+- InjectionHunter 1.0.0 canonical production inventory scan after the final
+  source change: 42 findings matched 42 registry entries with `Unmatched=0`;
+  no source finding was dismissed by label alone.
+- InjectionHunter disposition review: the 12 non-product findings were
+  individually traced to trusted repository AST re-parsing, fixed literal
+  regex/assembly inputs, fixed allowlist property names, or fixed interop
+  source. Their registry entries predate this slice; no disposition entry was
+  added for S2-B1.
+- Permanent procedure gate: source, main Pester, support Pester, parser,
+  analyzer, ASCII, diff, and InjectionHunter checks passed; the fail-closed
+  gate held the packet because owner-runtime evidence remains outstanding.
+- Runtime proof: not authorized; owner smoke remains paused.
+- Deferred actions: package rebuild, owner smoke, Arcade validation, wiki,
+  push, merge, tag, publish, certification, and release-ready decision.
