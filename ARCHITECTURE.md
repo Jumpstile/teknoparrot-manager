@@ -128,6 +128,19 @@ failures, and the default next action is manual inspection rather than blind
 retry. Normal BepInEx output uses the profile's full GameName when available;
 profile codes remain available in technical records.
 
+The functional transaction handoff selects the downloaded package from the
+architecture-keyed cache map and validates its nonblank, contained, existing,
+non-reparse path immediately before extraction. The canonical candidate game
+path and root are compared again before staging, backup, and promotion; TPM
+never substitutes another candidate's destination. The legacy compatibility
+result reports actual selected, changed, failed, and skipped profile IDs and
+preserves per-game FailureRecords as technical evidence. Protected/reparse and
+unavailable-path records remain unchanged safe skips rather than install
+errors. Normal output groups safe skips, uses full game names when present, and
+states separately when a verified package downloaded but a per-game install
+did not complete; raw paths and exception text stay in Details/log/support
+evidence.
+
 **PostgreSQL committed-state recovery (RC8).** The single-user `ALTER ROLE`
 is the mutation cutoff. If it succeeds but service restart or new-password
 authentication cannot be verified, recovery returns `PasswordChangeCommitted`
@@ -783,6 +796,13 @@ unavailable saved paths were reported; ordinary deployment, rollback, cleanup,
 and update-blocked failures retain their existing retry, Details, and support
 guidance instead of presenting a misleading path-repair action. This routing is
 conditional on the structured result, not on generic failure text.
+
+The BepInEx transaction adapter does not infer item identity from counters or
+from every XML profile. Its Items set is the actual selected profile set, and
+ChangedItems, FailedItems, and SkippedItems are populated only with real
+per-game records. These terminal sets remain disjoint so the shared transaction
+invariants can distinguish a clean update, a partial application, a safe
+unchanged skip, and a pre-mutation failure.
 
 ---
 
@@ -3233,3 +3253,43 @@ directory scan, filesystem-order labels, or synthetic placeholders. The final
 result summary also consumes a bounded redacted adapter for protected, unsafe,
 and native-warning detail rows. Details, support, package, runtime, and
 owner-smoke migration remain outside S2-B1.
+
+## Offline support-posture corpus and CHD taxonomy (RC8 remediation)
+
+`scripts\New-TpmSupportPostureCorpus.ps1` is an offline evidence tool. It
+reads explicitly supplied `GameProfiles`, optional `UserProfiles`, optional
+Eggman/RomVault DAT evidence, and fixture manifests. It writes only below an
+explicit output root. It never registers a game, repairs a path, edits a
+TeknoParrotUI-owned field, or adds `.chd` to the product discovery allowlist.
+
+The corpus universe is the pinned upstream profile set when one is supplied,
+overlaid by the installed profile with the same case-insensitive profile code.
+Installed and upstream XML hashes remain visible as source evidence; differing
+hashes set a source discrepancy and force manual review. `UserProfiles` are
+observation-only records and cannot expand the universe. DAT records are
+secondary recognition evidence and never override profile XML.
+
+Every profile receives exactly one posture classification:
+`AUTOMATED_SAFE`, `REVIEW_MANUAL`, `BLOCKED_UNSUPPORTED`, or `UNCLASSIFIED`.
+Safe classification requires an exact profile identity, an unambiguous launch
+candidate or explicitly identified CHD target, approved-root containment, no
+reparse-backed or protected path, no conflicting media candidate, and no write
+to a TeknoParrotUI-owned field. Ambiguous CHD relationships, missing media,
+missing launch targets, source discrepancies, and vendor-owned decisions remain
+manual review. Malformed XML, unsafe paths, missing expected directories, and
+media-layout conflicts fail closed as blocked. `UNCLASSIFIED` is a release-gate
+failure and is never silently converted to safe.
+
+The fixture taxonomy records CHD-only, mixed same-folder, content/media
+subfolder, nested one-level, nested multi-level, multiple-candidate, separate
+launcher, wrong-directory, missing-directory, required-but-absent,
+profile-rule-unknown, ordinary non-CHD, media-conflict, and unobservable
+layouts. Fixture annotations document observed evidence for layouts that cannot
+be inferred from a profile XML alone; they do not authorize product mutation.
+
+`manifest.json` carries snapshot identity, source identity, profile-file hashes,
+duplicate/malformed source records, and captured time. `support-posture.json`
+carries the normalized profile model, ownership fields, layout observations,
+classification totals, fixture coverage, DAT evidence, and release-gate
+booleans. `support-posture.md` is a beginner-readable matrix that omits raw
+filesystem paths. All generated text is deterministic BOM-less UTF-8.

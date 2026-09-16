@@ -645,3 +645,91 @@ from that single unsafe-root classification.
 - Runtime proof: not authorized; owner smoke remains paused.
 - Deferred actions: package rebuild, owner smoke, Arcade validation, wiki,
   push, merge, tag, publish, certification, and release-ready decision.
+
+## Desktop OMP -- BepInEx functional transaction audit
+
+- Slice contract: `TPM-BEPINEX-FUNCTIONAL-TRANSACTION-001`.
+- Authorized source boundary: `TeknoParrot-Manager.ps1` BepInEx package
+  handoff, candidate identity checks, legacy result accounting, and normal
+  output; focused BepInEx tests; `ARCHITECTURE.md`; this report; and the
+  control board.
+- Functional correction: the selected architecture now resolves to the
+  downloaded cache package through `$zipByArch`, with nonblank containment,
+  existing-file, and non-reparse validation immediately before extraction.
+- Identity correction: the canonical candidate game path/root is compared at
+  pre-staging, pre-backup, and pre-promotion boundaries; the current candidate
+  cannot inherit another candidate's destination.
+- Accounting correction: actual selected, changed, failed, and skipped profile
+  IDs are carried into `TPM.TransactionResult.v1`; synthetic counter names and
+  unrelated XML profiles are excluded; `FailureRecords` remain in technical
+  details.
+- Presentation correction: protected roots remain unchanged safe skips; grouped
+  output uses readable names where available; verified package download and
+  per-game install failure are distinct; raw paths and exception text remain
+  outside normal output.
+- Focused BepInEx evidence: 19 passed, 0 failed, 0 skipped.
+- S1 transaction-core evidence: 18 passed, 0 failed, 0 skipped.
+- S2-A presentation evidence: 15 passed, 0 failed, 0 skipped.
+- S2-B1 renderer evidence: 12 passed, 0 failed, 0 skipped.
+- Full main Pester: 1155 passed, 0 failed, 0 skipped. Support Pester: 41
+  passed, 0 failed, 0 skipped.
+- Windows PowerShell and pwsh parser checks passed; PSScriptAnalyzer findings:
+  0; production ASCII non-ASCII bytes: 0; `git diff --check` passed.
+- Disposition-backed canonical InjectionHunter check: `Executed=True`;
+  `FindingCount=42`; `UnresolvedFindingCount=0`; `ToolVersion=1.0.0`;
+  `StaleEntries` was not reported by the result object.
+- Permanent procedure gate executed after these checks and failed closed
+  without release authorization because owner-runtime evidence remains
+  outstanding and the supplied reconciliation report is newer than the source
+  timestamp used for its freshness check.
+- Runtime proof: not authorized; owner smoke remains paused.
+- Package rebuild, Arcade, wiki, push, merge, tag, publish, certification, and
+  release-ready actions remain excluded.
+
+## Desktop OMP -- Support posture corpus and CHD/layout implementation
+
+- Slice contract: `TPM-SUPPORT-POSTURE-001`.
+- Owner requirement: `SUPPORT-POSTURE-001`, including the skylinekiller
+  CHD/layout finding.
+- Implementation status: offline corpus snapshot, classification, CHD/layout
+  taxonomy, deterministic JSON/Markdown output, and focused fixtures/tests are
+  implemented. Product registration, repair discovery, `.chd` recognition, and
+  TeknoParrotUI-owned writes are unchanged.
+- Source: `scripts/New-TpmSupportPostureCorpus.ps1`.
+- Test: `Tests/SupportPostureCorpus.Tests.ps1` passed 9, failed 0, skipped 0.
+- Fixture evidence: 22 generated records; `AUTOMATED_SAFE=4`,
+  `REVIEW_MANUAL=13`, `BLOCKED_UNSUPPORTED=5`, `UNCLASSIFIED=0`; all 22
+  fixture expectations passed. All 15 required CHD/layout taxonomy classes
+  were observed.
+- Corpus schema: `manifest.json` records snapshot/source identity and raw XML
+  hashes; `support-posture.json` records normalized profile metadata,
+  ownership, layout observations, DAT evidence, fixture coverage,
+  classification totals, and release-gate booleans; `support-posture.md` is
+  the beginner-readable matrix without raw filesystem paths.
+- Source authority: installed GameProfiles are overlaid onto a pinned upstream
+  profile set by case-insensitive ProfileCode; UserProfiles are read-only
+  observations; Eggman/RomVault DATs are secondary evidence.
+- Local validation: Windows PowerShell 5.1 parse passed; pwsh parse passed;
+  PSScriptAnalyzer Error/Warning passed for the main script and new corpus
+  script with `PSScriptAnalyzerSettings.psd1`; changed PowerShell/test files
+  contain zero non-ASCII bytes; and `git diff --check` passed.
+- InjectionHunter 1.0.0 scanned the new corpus script: 1 finding,
+  `InjectionRisk.AddType` at line 419, disposition-backed as a fixed
+  `System.IO.Compression.FileSystem` literal with 0 unresolved findings.
+- Existing regression gates under Pester 5.7.1: `TeknoParrot-Manager.Tests.ps1`
+  passed 1155, failed 0, skipped 0; `SupportPackage.Tests.ps1` passed 41,
+  failed 0, skipped 0; focused support posture tests passed 9, failed 0,
+  skipped 0.
+- Generated-artifact review passed: the focused run created the expected
+  manifest, JSON, Markdown, raw-profile, UserProfiles-observation, DAT, and
+  fixture artifacts only under the explicit output root; no generated output
+  was added to the repository.
+- Permanent gate: `Run-TpmQualityGate.ps1` ran the source, main-suite, and
+  support-package checks, then failed closed because owner-runtime evidence
+  remains outstanding and the report is newer than the supplied source
+  `ChangedAtUtc`; no completion claim was made.
+- Remaining evidence: the actual owner-approved runtime CHD/layout smoke,
+  package identity, and release certification are not authorized in this
+  slice. Hosted CI and push are not authorized.
+- Current disposition: implementation evidence is complete for this slice;
+  release posture is `HOLD`.
