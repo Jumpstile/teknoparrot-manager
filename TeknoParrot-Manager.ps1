@@ -18702,6 +18702,19 @@ function Test-BepInExGameRootSafe {
     if (-not (Test-Path -LiteralPath $GameRoot -PathType Container -ErrorAction SilentlyContinue)) { return $false }
     return (Test-BepInExNoReparsePath -Root $ApprovedRoot -Path $GameRoot)
 }
+function Test-BepInExPackagePathSafe {
+    param(
+        [Parameter(Mandatory)][string]$PackagePath,
+        [Parameter(Mandatory)][string]$CacheRoot
+    )
+    if ([string]::IsNullOrWhiteSpace($PackagePath) -or
+        -not (Test-PathInside -child $PackagePath -parent $CacheRoot) -or
+        -not (Test-Path -LiteralPath $PackagePath -PathType Leaf -ErrorAction SilentlyContinue)) { return $false }
+    if (-not (Test-TpmNoReparsePath -Path $PackagePath)) { return $false }
+    try {
+        return ([int64](Get-Item -LiteralPath $PackagePath -Force -ErrorAction Stop).Length -gt 0)
+    } catch { return $false }
+}
 
 function Get-BepInExGameLabel {
     param(
@@ -18726,7 +18739,7 @@ function Write-BepInExUnsafeRootGuidance {
     $label = if ([string]::IsNullOrWhiteSpace($GameLabel)) { $GameCode } else { $GameLabel }
     Write-Host ("  TeknoParrot Manager could not safely update BepInEx for {0}." -f $label) -ForegroundColor Red
     Write-Host '  The game folder is not a normal folder inside your chosen Games folder.' -ForegroundColor Yellow
-    Write-Host ("  Check this game's path in TeknoParrot and move or correct it so it is inside: {0}" -f $ApprovedRoot) -ForegroundColor Yellow
+    Write-Host "  Check this game's path in TeknoParrot, then move or correct it inside the chosen Games folder." -ForegroundColor Yellow
     Write-Host '  TeknoParrot Manager did not download or change anything.' -ForegroundColor Yellow
     Write-Host '  Fix the path, then run BepInEx setup again. Choose Back to leave this setup unchanged.' -ForegroundColor Yellow
     Write-Log "BepInEx update check: blocked on unsafe game root for $GameCode. Technical reason: $Reason. Action required: verify the game is inside the approved non-reparse root."
@@ -19103,11 +19116,14 @@ function Test-BepInExRollbackBatchStop {
 function Invoke-BepInExUpdateCheck {
     param([string]$UserProfilesDir,[string]$CacheDir,[string]$ApprovedGamesRoot='')
     $legacy=Invoke-BepInExUpdateCheckLegacy -UserProfilesDir $UserProfilesDir -CacheDir $CacheDir -ApprovedGamesRoot $ApprovedGamesRoot
-    $items=@(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | ForEach-Object BaseName)
-    $changed=@($items | Select-Object -First ([int]$legacy.Updated))
-    $failed=@(1..([int]$legacy.Errors) | ForEach-Object { 'BepInExFailure{0}' -f $_ })
-    $skipped=@(1..([int]$legacy.MissingDevice + [int]$legacy.MissingPath + [int]$legacy.Protected) | ForEach-Object { 'BepInExSkipped{0}' -f $_ })
-    $outcome=if($legacy.Updated -gt 0 -and ($legacy.Errors -gt 0 -or $skipped.Count -gt 0 -or $legacy.UpdatedWithCleanupFailure -gt 0)){'PARTIAL_APPLIED'}elseif($legacy.Updated -gt 0){'SUCCEEDED'}else{'NO_OP'}
+    $items=@(Get-TpmTransactionField -Object $legacy -Name 'SelectedItems' -Default @())
+    $changed=@(Get-TpmTransactionField -Object $legacy -Name 'ChangedItems' -Default @())
+    $failed=@(Get-TpmTransactionField -Object $legacy -Name 'FailedItems' -Default @())
+    $skipped=@(Get-TpmTransactionField -Object $legacy -Name 'SkippedItems' -Default @())
+    $changed=@($changed | Where-Object { $_ -in $items } | Select-Object -Unique)
+    $failed=@($failed | Where-Object { $_ -in $items -and $_ -notin $changed -and $_ -notin $skipped } | Select-Object -Unique)
+    $skipped=@($skipped | Where-Object { $_ -in $items -and $_ -notin $changed -and $_ -notin $failed } | Select-Object -Unique)
+    $outcome=if($changed.Count -gt 0 -and ($failed.Count -gt 0 -or $skipped.Count -gt 0 -or $legacy.UpdatedWithCleanupFailure -gt 0)){'PARTIAL_APPLIED'}elseif($changed.Count -gt 0){'SUCCEEDED'}elseif($failed.Count -gt 0){'FAILED_BEFORE_MUTATION'}else{'NO_OP'}
     $tx=ConvertTo-TpmLegacyTransactionResult -Legacy $legacy -WorkflowKey 'BepInEx' -OperationKey 'InstallOrUpdate' -Items $items -ChangedItems $changed -CompletedItems $changed -FailedItems $failed -SkippedItems $skipped -Summary 'BepInEx updates were processed with a verified transaction result.' -ReasonCode $(if($outcome -eq 'NO_OP' -and $legacy.Reason){$legacy.Reason}elseif($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}else{'UPDATES_PROCESSED'}) -Outcome $outcome -ProductState $(if($outcome -eq 'PARTIAL_APPLIED'){'PARTIAL_KNOWN'}elseif($outcome -eq 'SUCCEEDED'){'INTENDED'}else{'UNCHANGED'}) -MutationStarted ($changed.Count -gt 0)
     $tx | Add-Member -NotePropertyName Errors -NotePropertyValue ([int]$legacy.Errors) -Force
     return $tx
@@ -19120,6 +19136,10 @@ function Invoke-BepInExUpdateCheckLegacy {
     if (-not (Test-Path -LiteralPath $ApprovedGamesRoot -PathType Container -ErrorAction SilentlyContinue)) { Write-Host '  The configured games root could not be verified -- no BepInEx changes made.' -ForegroundColor Red; Write-Log "BepInEx update check: blocked because approved root is unavailable: $ApprovedGamesRoot"; return }
     $candidates = New-Object System.Collections.Generic.List[object]
     $failureRecords = New-Object System.Collections.Generic.List[object]
+    $selectedItems = New-Object System.Collections.Generic.List[string]
+    $changedItems = New-Object System.Collections.Generic.List[string]
+    $failedItems = New-Object System.Collections.Generic.List[string]
+    $skippedItems = New-Object System.Collections.Generic.List[string]
     $safetyBlocked = $false
     $missingDevice = 0
     $missingPath = 0
@@ -19131,6 +19151,7 @@ function Invoke-BepInExUpdateCheckLegacy {
             if (-not $doc.GameProfile) { continue }
             $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
             if (-not $gamePathNode -or [string]::IsNullOrWhiteSpace($gamePathNode.InnerText)) { continue }
+            [void]$selectedItems.Add($pf.BaseName)
             $gamePath = $gamePathNode.InnerText.Trim()
             $pathCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
             if (-not $pathCheck.Valid) {
@@ -19139,8 +19160,8 @@ function Invoke-BepInExUpdateCheckLegacy {
                 $pathReasonCounts[$reasonCode]++
                 if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
                 if ($reasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
+                [void]$skippedItems.Add($pf.BaseName)
                 $label = Get-BepInExGameLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
-                Write-Host ("  SKIP {0} -- {1}" -f $label, $pathCheck.Reason) -ForegroundColor Yellow
                 [void]$failureRecords.Add([pscustomobject]@{
                     Game = $pf.BaseName
                     GameRoot = if ($pathCheck.GameDirectory) { [string]$pathCheck.GameDirectory } else { '<unresolved>' }
@@ -19162,6 +19183,7 @@ function Invoke-BepInExUpdateCheckLegacy {
                 $protected++
                 if (-not $pathReasonCounts.ContainsKey('PROTECTED_OR_REPARSE_ROOT')) { $pathReasonCounts['PROTECTED_OR_REPARSE_ROOT'] = 0 }
                 $pathReasonCounts['PROTECTED_OR_REPARSE_ROOT']++
+                [void]$skippedItems.Add($pf.BaseName)
                 Write-BepInExUnsafeRootGuidance -GameCode $pf.BaseName -GameLabel $label -ApprovedRoot $ApprovedGamesRoot
                 [void]$failureRecords.Add([pscustomobject]@{
                     Game = $pf.BaseName
@@ -19180,6 +19202,7 @@ function Invoke-BepInExUpdateCheckLegacy {
             [void]$candidates.Add([pscustomobject]@{ Code = $pf.BaseName; Label = $label; ExeDir = $exeDir; GamePath = $gamePath; ProfilePath = $pf.FullName })
         } catch {
             $safetyBlocked = $true
+            [void]$skippedItems.Add($pf.BaseName)
             $label = Get-BepInExGameLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
             Write-BepInExUnsafeRootGuidance -GameCode $pf.BaseName -GameLabel $label -ApprovedRoot $ApprovedGamesRoot -Reason 'the game root could not be verified'
             [void]$failureRecords.Add([pscustomobject]@{
@@ -19197,12 +19220,9 @@ function Invoke-BepInExUpdateCheckLegacy {
         }
     }
     Write-Host ("  Path preflight: {0} eligible game(s), {1} unavailable-device skip(s), {2} missing-path skip(s), {3} protected/reparse skip(s)." -f $candidates.Count, $missingDevice, $missingPath, $protected) -ForegroundColor DarkCyan
-    foreach ($reasonCode in ($pathReasonCounts.Keys | Sort-Object)) {
-        Write-Host ("    {0}: {1}" -f $reasonCode, $pathReasonCounts[$reasonCode]) -ForegroundColor DarkGray
-    }
     if ($candidates.Count -eq 0) {
         Write-Host '  No eligible BepInEx game folders remain. Nothing was changed.' -ForegroundColor Yellow
-        return [pscustomobject]@{ Succeeded = ($missingDevice -eq 0 -and $missingPath -eq 0 -and $protected -eq 0 -and -not $safetyBlocked); Updated = 0; Errors = 0; MissingDevice = $missingDevice; MissingPath = $missingPath; Protected = $protected; Reason = 'NO_ELIGIBLE_GAMES'; PathReasonCounts = $pathReasonCounts; FailureRecords = @($failureRecords.ToArray()); BatchStopped = $false }
+        return [pscustomobject]@{ Succeeded = ($missingDevice -eq 0 -and $missingPath -eq 0 -and $protected -eq 0 -and -not $safetyBlocked); Updated = 0; Errors = 0; MissingDevice = $missingDevice; MissingPath = $missingPath; Protected = $protected; Reason = 'NO_ELIGIBLE_GAMES'; PathReasonCounts = $pathReasonCounts; FailureRecords = @($failureRecords.ToArray()); SelectedItems = @($selectedItems.ToArray()); ChangedItems = @(); FailedItems = @($failedItems.ToArray()); SkippedItems = @($skippedItems.ToArray()); BatchStopped = $false }
     }
 
     Write-Host ''
@@ -19217,6 +19237,7 @@ function Invoke-BepInExUpdateCheckLegacy {
     foreach ($architecture in $requiredArchitectures) {
         $latestByArch[$architecture] = Get-BepInExLatestRelease -Architecture $architecture
         if (-not $latestByArch[$architecture]) {
+            [void]$failedItems.AddRange(@($selectedItems.ToArray()))
             Write-Host ("  TeknoParrot Manager could not reach GitHub for the stable {0} BepInEx release. Nothing was changed." -f $architecture) -ForegroundColor Red
             Write-Host '  Check the connection, then choose Back or run this setup again when the connection is available.' -ForegroundColor Yellow
             Write-Log "BepInEx update check: release query failed for $architecture."
@@ -19240,10 +19261,10 @@ function Invoke-BepInExUpdateCheckLegacy {
             if ($arch -notin @('x64','x86')) {
                 $classification = Get-BepInExInspectionFailure -ErrorRecord ([System.Exception]::new('unsupported architecture'))
                 $unsupportedArchitecture++
+                [void]$skippedItems.Add($candidate.Code)
                 if (-not $pathReasonCounts.ContainsKey($classification.Code)) { $pathReasonCounts[$classification.Code] = 0 }
                 $pathReasonCounts[$classification.Code]++
                 [void]$failureRecords.Add([pscustomobject]@{ Game=$candidate.Code; GameLabel=$candidate.Label; GameRoot=$candidate.ExeDir; Operation='inspection'; ReasonKey=$classification.Code; Exception=$classification.Technical; EvidencePreserved=$false; NextAction=$classification.NextAction })
-                Write-Host ("  SKIP {0} -- {1}" -f $candidate.Label, $classification.Summary) -ForegroundColor Yellow
                 Write-Log ("BepInEx update check: inspection skipped for {0}; reason={1}; detail={2}" -f $candidate.Code, $classification.Code, $classification.Technical)
                 continue
             }
@@ -19267,6 +19288,7 @@ function Invoke-BepInExUpdateCheckLegacy {
         } catch {
             $classification = Get-BepInExInspectionFailure -ErrorRecord $_
             $errors++
+            [void]$failedItems.Add($candidate.Code)
             if (-not $pathReasonCounts.ContainsKey($classification.Code)) { $pathReasonCounts[$classification.Code] = 0 }
             $pathReasonCounts[$classification.Code]++
             [void]$failureRecords.Add([pscustomobject]@{ Game=$candidate.Code; GameLabel=$candidate.Label; GameRoot=$candidate.ExeDir; Operation='inspection'; ReasonKey=$classification.Code; Exception=$classification.Technical; EvidencePreserved=$false; NextAction=$classification.NextAction })
@@ -19277,16 +19299,16 @@ function Invoke-BepInExUpdateCheckLegacy {
     }
     if ($outdated.Count -eq 0) {
         Write-Host ("  Up to date: {0} game(s)" -f $upToDate) -ForegroundColor Green
-        if ($unsupportedArchitecture -gt 0) { Write-Host ("  Unsupported architecture: {0} game(s) -- not treated as update failures" -f $unsupportedArchitecture) -ForegroundColor Yellow }
+        if ($unsupportedArchitecture -gt 0) { Write-Host ("  Unsupported architecture: {0} game(s) -- left unchanged" -f $unsupportedArchitecture) -ForegroundColor Yellow }
         if ($errors -gt 0) { Write-Host ("  Inspection issues: {0} -- see Details or the support log" -f $errors) -ForegroundColor Red }
-        return [pscustomobject]@{ Succeeded = ($errors -eq 0); Reason = if ($errors) { 'INSPECTION_FAILED' } else { $null }; FailureRecords = @($failureRecords.ToArray()); PathReasonCounts = $pathReasonCounts; UnsupportedArchitecture = $unsupportedArchitecture }
+        return [pscustomobject]@{ Succeeded = ($errors -eq 0); Reason = if ($errors) { 'INSPECTION_FAILED' } else { $null }; FailureRecords = @($failureRecords.ToArray()); PathReasonCounts = $pathReasonCounts; UnsupportedArchitecture = $unsupportedArchitecture; SelectedItems = @($selectedItems.ToArray()); ChangedItems = @(); FailedItems = @($failedItems.ToArray()); SkippedItems = @($skippedItems.ToArray()); BatchStopped = $false }
     }
     Write-Host ("  {0} game(s) need BepInEx installation or update:" -f $outdated.Count) -ForegroundColor Cyan
     foreach ($o in @($outdated | Sort-Object Label)) { Write-Host ("    - {0}: {1} -> {2} ({3})" -f $o.Label, $o.Installed, $o.Latest.Version, $o.Architecture) -ForegroundColor DarkGray }
     $repairChoice = Read-TpmChoice -Prompt ("  [Y] Install/update  [R] Repair-reset then install  [B] Back  [N] Cancel  -- {0} game(s)" -f $outdated.Count) -Choices @('Y', 'R', 'B', 'N') -Default 'B'
     if ($repairChoice -notin @('Y','R')) {
         Write-Log 'BepInEx update check: user selected Back or cancelled installation/update/reset.'
-        return [pscustomobject]@{ Succeeded = $false; Reason = 'DECLINED' }
+        return [pscustomobject]@{ Succeeded = $false; Reason = 'DECLINED'; SelectedItems = @($selectedItems.ToArray()); ChangedItems = @(); FailedItems = @(); SkippedItems = @($selectedItems.ToArray()); FailureRecords = @($failureRecords.ToArray()); BatchStopped = $false }
     }
     $repairReset = ($repairChoice -eq 'R')
     [void][System.IO.Directory]::CreateDirectory($CacheDir)
@@ -19297,13 +19319,15 @@ function Invoke-BepInExUpdateCheckLegacy {
         $zipPath = Join-Path $CacheDir $safeFileName
         if ([string]::IsNullOrWhiteSpace($safeFileName) -or -not (Test-PathInside $zipPath $CacheDir)) {
             Write-Log "BepInEx update check: blocked on unsafe $architecture release filename."
-            return [pscustomobject]@{ Succeeded = $false; Reason = 'UNSAFE_RELEASE_FILENAME' }
+            [void]$failedItems.AddRange(@($selectedItems.ToArray()))
+            return [pscustomobject]@{ Succeeded = $false; Reason = 'UNSAFE_RELEASE_FILENAME'; SelectedItems = @($selectedItems.ToArray()); ChangedItems = @(); FailedItems = @($failedItems.ToArray()); SkippedItems = @($skippedItems.ToArray()); FailureRecords = @($failureRecords.ToArray()); BatchStopped = $false }
         }
         if (-not (Invoke-TpmDownload -DownloadUrl $latest.DownloadUrl -DestinationPath $zipPath -ExpectedBytes $latest.SizeBytes -Label 'BepInEx' -Version $latest.Version -ExpectedSha256 $latest.ExpectedSha256)) {
             Write-Host ("  BepInEx {0}-bit download failed. Nothing was changed." -f ($(if ($architecture -eq 'x86') { '32' } else { '64' }))) -ForegroundColor Red
             Write-Host '  Choose this setup again to retry automatically, or cancel without changing the game.' -ForegroundColor Yellow
             Write-Log "BepInEx update check: download or digest verification failed for $architecture."
-            return [pscustomobject]@{ Succeeded = $false; Reason = 'DOWNLOAD_FAILED' }
+            [void]$failedItems.AddRange(@($selectedItems.ToArray()))
+            return [pscustomobject]@{ Succeeded = $false; Reason = 'DOWNLOAD_FAILED'; SelectedItems = @($selectedItems.ToArray()); ChangedItems = @(); FailedItems = @($failedItems.ToArray()); SkippedItems = @($skippedItems.ToArray()); FailureRecords = @($failureRecords.ToArray()); BatchStopped = $false }
         }
         $zipByArch[$architecture] = $zipPath
     }
@@ -19317,15 +19341,15 @@ function Invoke-BepInExUpdateCheckLegacy {
         $resetApplied = $false
         try {
             $boundaryCheck = Test-TpmGameMutationPath -GamePath $o.GamePath -RequireLeaf
-            if (-not $boundaryCheck.Valid) { throw ("BepInEx mutation-boundary path check failed ({0}): {1}" -f $boundaryCheck.ReasonCode, $boundaryCheck.Reason) }
-            $o.GamePath = [string]$boundaryCheck.ResolvedPath
-            $o.ExeDir = [string]$boundaryCheck.GameDirectory
+            if (-not $boundaryCheck.Valid -or [string]$boundaryCheck.ResolvedPath -ine [string]$o.GamePath -or [string]$boundaryCheck.GameDirectory -ine [string]$o.ExeDir) { throw 'BepInEx mutation-boundary path identity changed before staging.' }
             if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx final root safety check failed.' }
+            $zipPathForGame = [string]$zipByArch[[string]$o.Architecture]
+            if (-not (Test-BepInExPackagePathSafe -PackagePath $zipPathForGame -CacheRoot $CacheDir)) { throw 'BepInEx package path could not be safely resolved for this game architecture.' }
             $stagingDir = New-TpmStagingDirectory -Label 'BepInEx'
             Expand-ZipFileSafe -ZipPath $zipPathForGame -DestDir $stagingDir -GameName $o.Label
             $relativeFiles = @(Get-BepInExStagedFiles -StagingDir $stagingDir -DestDir $o.ExeDir)
             $boundaryCheck = Test-TpmGameMutationPath -GamePath $o.GamePath -RequireLeaf
-            if (-not $boundaryCheck.Valid -or [string]$boundaryCheck.ResolvedPath -ine [string]$o.GamePath) { throw 'BepInEx mutation-boundary path changed before backup.' }
+            if (-not $boundaryCheck.Valid -or [string]$boundaryCheck.ResolvedPath -ine [string]$o.GamePath -or [string]$boundaryCheck.GameDirectory -ine [string]$o.ExeDir) { throw 'BepInEx mutation-boundary path identity changed before backup.' }
             if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx root changed before backup.' }
             $backupPath = New-BepInExUpdateBackup -GameRoot $o.ExeDir
             if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx root failed after backup.' }
@@ -19333,10 +19357,13 @@ function Invoke-BepInExUpdateCheckLegacy {
                 $resetApplied = $true
                 Remove-BepInExFixedTree -GameRoot $o.ExeDir
             }
+            $boundaryCheck = Test-TpmGameMutationPath -GamePath $o.GamePath -RequireLeaf
+            if (-not $boundaryCheck.Valid -or [string]$boundaryCheck.ResolvedPath -ine [string]$o.GamePath -or [string]$boundaryCheck.GameDirectory -ine [string]$o.ExeDir) { throw 'BepInEx mutation-boundary path identity changed before promotion.' }
             $validation = { return ((Get-BepInExInstalledVersion -ExeDir $o.ExeDir) -eq $o.Latest.Version) }
             [void](Invoke-TpmTransactionalTreePromote -StagingDir $stagingDir -DestDir $o.ExeDir -RelativeFiles $relativeFiles -ValidationScript $validation)
             $promotionSucceeded = $true
             [void](Remove-BepInExStagingDirectory -StagingDir $stagingDir)
+            [void]$changedItems.Add($o.Code)
             Write-Host ("    OK    {0}  ({1} -> {2})" -f $o.Label, $o.Installed, $o.Latest.Version) -ForegroundColor Green
             Write-Log "BepInEx: updated $($o.Code) from $($o.Installed) to $($o.Latest.Version); backup=$backupPath"
             $updated++
@@ -19344,7 +19371,7 @@ function Invoke-BepInExUpdateCheckLegacy {
             if ($promotionSucceeded -and $_.Exception.Message -match '^TPM BEPINEX STAGING CLEANUP (FAILED|REFUSED)') {
                 $preserveStaging = $true
                 Write-Host ("    WARNING {0} -- update applied, but staging cleanup failed" -f $o.Label) -ForegroundColor Yellow
-                Write-Host ("            ACTION REQUIRED: inspect and remove residue at {0}" -f $stagingDir) -ForegroundColor Yellow
+                Write-Host '            ACTION REQUIRED: inspect the preserved staging evidence before retrying.' -ForegroundColor Yellow
                 Write-Log "BepInEx: update applied for $($o.Code), but staging cleanup failed; action required; residue=$stagingDir; backup=$backupPath"
                 $updatedWithCleanupFailure++
                 $cleanupErrors++
@@ -19354,10 +19381,11 @@ function Invoke-BepInExUpdateCheckLegacy {
                 $rollbackFailure = $rollbackFailure -or ($failureMessage -match 'ROLLBACK FAILED')
                 if ($resetApplied -and -not $promotionSucceeded -and $backupPath) {
                     try { Restore-BepInExUpdateBackup -GameRoot $o.ExeDir -BackupPath $backupPath }
-                    catch { $rollbackFailure = $true; $preserveStaging = $true; Write-Host ("    ERROR {0} -- repair reset rollback failed; backup remains at {1}" -f $o.Label, $backupPath) -ForegroundColor Red; Write-Log "BepInEx reset rollback failed for $($o.Code); backup=$backupPath" }
+                    catch { $rollbackFailure = $true; $preserveStaging = $true; Write-Host ("    ERROR {0} -- repair reset rollback could not be verified; preserved evidence requires manual inspection" -f $o.Label) -ForegroundColor Red; Write-Log "BepInEx reset rollback failed for $($o.Code); backup=$backupPath" }
                 }
                 if ($rollbackFailure) {
                     $preserveStaging = $true
+                    [void]$failedItems.Add($o.Code)
                     if (-not $pathReasonCounts.ContainsKey('ROLLBACK_FAILED')) { $pathReasonCounts['ROLLBACK_FAILED'] = 0 }
                     $pathReasonCounts['ROLLBACK_FAILED']++
                     $rollbackReasonKey = Get-BepInExRollbackReasonKey -Operation 'transaction rollback' -ExceptionType $_.Exception.GetType().FullName
@@ -19376,12 +19404,13 @@ function Invoke-BepInExUpdateCheckLegacy {
                         $batchStopped = $true
                         Write-Host '  Several games failed for the same safety reason, so TeknoParrot Manager stopped the batch.' -ForegroundColor Yellow
                     }
-                    Write-Host ("    ERROR {0} -- transaction rollback failed; backup/evidence preserved at {1}" -f $o.Label, $backupPath) -ForegroundColor Red
+                    Write-Host ("    ERROR {0} -- transaction rollback could not be verified; preserved evidence requires manual inspection" -f $o.Label) -ForegroundColor Red
                     Write-Log "BepInEx: rollback failed for $($o.Code); backup=$backupPath; detail=$failureMessage"
                     $updateErrors++
                 } elseif ($failureMessage -match 'CLEANUP FAILED') {
                     $cleanupFailure = $true
                     $preserveStaging = $true
+                    [void]$failedItems.Add($o.Code)
                     [void]$failureRecords.Add([pscustomobject]@{
                         Game = $o.Code
                         GameRoot = $o.ExeDir
@@ -19393,13 +19422,14 @@ function Invoke-BepInExUpdateCheckLegacy {
                         EvidencePreserved = $true
                         NextAction = 'Close TeknoParrot and remove the validated staging residue after confirming the game files are intact.'
                     })
-                    Write-Host ("    ERROR {0} -- update blocked because cleanup failed; inspect {1}" -f $o.Label, $stagingDir) -ForegroundColor Red
+                    Write-Host ("    ERROR {0} -- update applied, but cleanup was not completed; review Details before retrying" -f $o.Label) -ForegroundColor Red
                     $cleanupErrors++
                     Write-Log "BepInEx: cleanup failed for $($o.Code); residue=$stagingDir; detail=$failureMessage"
                 } elseif ($failureCode -eq 'DEVICE_UNAVAILABLE' -or $failureCode -eq 'GAME_PATH_MISSING') {
                     if (-not $pathReasonCounts.ContainsKey($failureCode)) { $pathReasonCounts[$failureCode] = 0 }
                     $pathReasonCounts[$failureCode]++
                     if ($failureCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ } else { $missingPath++ }
+                    [void]$skippedItems.Add($o.Code)
                     [void]$failureRecords.Add([pscustomobject]@{
                         Game = $o.Code
                         GameRoot = $o.ExeDir
@@ -19411,9 +19441,10 @@ function Invoke-BepInExUpdateCheckLegacy {
                         EvidencePreserved = $false
                         NextAction = 'Reconnect the game drive or repair the saved executable path, then run BepInEx setup again.'
                     })
-                    Write-Host ("    SKIP {0} -- game path became unavailable ({1}); no final update claimed" -f $o.Label, $failureCode) -ForegroundColor Yellow
+                    Write-Host ("    Unchanged {0} -- the game path became unavailable; nothing was changed" -f $o.Label) -ForegroundColor Yellow
                     Write-Log "BepInEx: mutation-boundary path failure for $($o.Code); reason=$failureCode; detail=$failureMessage"
                 } elseif ($failureMessage -match 'mutation-boundary|device|path') {
+                    [void]$skippedItems.Add($o.Code)
                     if (-not $pathReasonCounts.ContainsKey('MUTATION_BOUNDARY_FAILED')) { $pathReasonCounts['MUTATION_BOUNDARY_FAILED'] = 0 }
                     $pathReasonCounts['MUTATION_BOUNDARY_FAILED']++
                     [void]$failureRecords.Add([pscustomobject]@{
@@ -19427,9 +19458,10 @@ function Invoke-BepInExUpdateCheckLegacy {
                         EvidencePreserved = $false
                         NextAction = 'Verify the canonical game root and destination path, then run BepInEx setup again.'
                     })
-                    Write-Host ("    SKIP {0} -- game path changed or became unavailable; no final update claimed" -f $o.Label) -ForegroundColor Yellow
-                    Write-Log "BepInEx: mutation-boundary failure for $($o.Code); detail=$failureMessage"
+                    Write-Host ("    Unchanged {0} -- the game path changed or became unavailable; nothing was changed" -f $o.Label) -ForegroundColor Yellow
+                    Write-Log "BepInEx: mutation-boundary verification failed for $($o.Code); detail=$failureMessage"
                 } else {
+                    [void]$failedItems.Add($o.Code)
                     [void]$failureRecords.Add([pscustomobject]@{
                         Game = $o.Code
                         GameRoot = $o.ExeDir
@@ -19441,7 +19473,7 @@ function Invoke-BepInExUpdateCheckLegacy {
                         EvidencePreserved = [bool]$preserveStaging
                         NextAction = 'Close TeknoParrot, check the log and preserved evidence, then run BepInEx repair-reset again.'
                     })
-                    Write-Host ("    ERROR {0} -- update blocked: {1}" -f $o.Label, $failureMessage) -ForegroundColor Red
+                    Write-Host ("    ERROR {0} -- the verified BepInEx package was downloaded, but this game's installation was not completed" -f $o.Label) -ForegroundColor Red
                     Write-Log "BepInEx: update blocked for $($o.Code); detail=$failureMessage; evidence and backups were preserved where available."
                 }
                 if (-not $rollbackFailure -and -not $cleanupFailure -and $failureCode -ne 'DEVICE_UNAVAILABLE' -and $failureCode -ne 'GAME_PATH_MISSING') { $updateErrors++ }
@@ -19454,6 +19486,7 @@ function Invoke-BepInExUpdateCheckLegacy {
                 } catch {
                     $preserveStaging = $true
                     if (-not $cleanupFailureRecorded) {
+                        [void]$failedItems.Add($o.Code)
                         [void]$failureRecords.Add([pscustomobject]@{
                             Game = $o.Code
                             GameRoot = $o.ExeDir
@@ -19465,8 +19498,7 @@ function Invoke-BepInExUpdateCheckLegacy {
                             EvidencePreserved = $true
                             NextAction = 'Close TeknoParrot and remove the validated staging residue after confirming the game files are intact.'
                         })
-                        Write-Host ("    ACTION REQUIRED {0} -- staging cleanup failed" -f $o.Code) -ForegroundColor Yellow
-                        Write-Host ("                    Inspect and remove residue at {0}" -f $stagingDir) -ForegroundColor Yellow
+                        Write-Host ("    ACTION REQUIRED {0} -- staging cleanup failed; review Details before retrying" -f $o.Label) -ForegroundColor Yellow
                         Write-Log "BepInEx: staging cleanup failed for blocked update $($o.Code); action required; residue=$stagingDir"
                         $cleanupErrors++
                     }
@@ -19478,11 +19510,11 @@ function Invoke-BepInExUpdateCheckLegacy {
     if ($updatedWithCleanupFailure -gt 0) { Write-Host ("  Updated with cleanup failure: {0} -- ACTION REQUIRED" -f $updatedWithCleanupFailure) -ForegroundColor Yellow }
     if ($missingDevice -gt 0) { Write-Host ("  Skipped unavailable device: {0} game(s) -- nothing changed for these games" -f $missingDevice) -ForegroundColor Yellow }
     if ($missingPath -gt 0) { Write-Host ("  Skipped missing executable: {0} game(s)" -f $missingPath) -ForegroundColor Yellow }
-    if ($protected -gt 0) { Write-Host ("  Skipped protected/reparse root: {0} game(s)" -f $protected) -ForegroundColor Yellow }
+    if ($protected -gt 0) { Write-Host ("  Protected game roots left unchanged: {0} game(s)" -f $protected) -ForegroundColor Yellow }
     if ($updateErrors -gt 0) { Write-Host ("  Errors: {0} -- see log for details" -f $updateErrors) -ForegroundColor Red }
     if ($cleanupErrors -gt 0) { Write-Host ("  Cleanup failures: {0} -- see log for residue path(s)" -f $cleanupErrors) -ForegroundColor Yellow }
     Write-Log "BepInEx update check: updatedCleanly=$updated updatedWithCleanupFailure=$updatedWithCleanupFailure skippedMissingDevice=$missingDevice skippedMissingPath=$missingPath skippedProtected=$protected errors=$updateErrors cleanupFailures=$cleanupErrors"
-    return [pscustomobject]@{ Succeeded = ($updateErrors -eq 0 -and $cleanupErrors -eq 0 -and $updatedWithCleanupFailure -eq 0 -and $missingDevice -eq 0 -and $missingPath -eq 0 -and $protected -eq 0); Updated = $updated; MissingDevice = $missingDevice; MissingPath = $missingPath; Protected = $protected; Errors = $updateErrors + $cleanupErrors; PathReasonCounts = $pathReasonCounts; FailureRecords = @($failureRecords.ToArray()); BatchStopped = $batchStopped }
+    return [pscustomobject]@{ Succeeded = ($updateErrors -eq 0 -and $cleanupErrors -eq 0 -and $updatedWithCleanupFailure -eq 0 -and $missingDevice -eq 0 -and $missingPath -eq 0 -and $protected -eq 0); Updated = $updated; UpdatedWithCleanupFailure = $updatedWithCleanupFailure; MissingDevice = $missingDevice; MissingPath = $missingPath; Protected = $protected; Errors = $updateErrors + $cleanupErrors; PathReasonCounts = $pathReasonCounts; FailureRecords = @($failureRecords.ToArray()); SelectedItems = @($selectedItems.ToArray()); ChangedItems = @($changedItems.ToArray()); FailedItems = @($failedItems.ToArray()); SkippedItems = @($skippedItems.ToArray()); BatchStopped = $batchStopped }
 }
 # =============================================================================
 # CHECK FOR UPDATES -- manual, backup-first self-update for this script

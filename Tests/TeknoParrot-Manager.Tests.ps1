@@ -6566,14 +6566,18 @@ Describe "BepInEx authorized-root and transaction guards" {
             Mock Get-BepInExInstalledArch { 'x64' }
             Mock Get-BepInExInstallationHealth { [pscustomobject]@{ Installed = $true; Complete = $true; Version = '5.4.22'; Architecture = 'x64'; Reason = 'Complete' } }
             Mock Read-HostSafe { 'Y' }
-            Mock Invoke-TpmDownload { $true }
+            Mock Invoke-TpmDownload {
+                param([string]$DestinationPath)
+                Set-Content -LiteralPath $DestinationPath -Value 'verified package' -NoNewline
+                $true
+            }
             Mock New-TpmStagingDirectory {
                 New-Item -ItemType Directory -Path $script:bepStage -Force | Out-Null
                 return $script:bepStage
             }
-            Mock Expand-ZipFileSafe {}
+            Mock Expand-ZipFileSafe { $script:bepExpandedZipPath = [string]$ZipPath }
             Mock Get-BepInExStagedFiles { @('BepInEx\core.dll') }
-            Mock New-BepInExUpdateBackup { Join-Path $script:bepGame 'BepInEx_Backup_test' }
+            Mock New-BepInExUpdateBackup { $script:bepBackupRoot = [string]$GameRoot; Join-Path $script:bepGame 'BepInEx_Backup_test' }
             Mock Invoke-TpmTransactionalTreePromote { $true }
         }
 
@@ -6585,6 +6589,8 @@ Describe "BepInEx authorized-root and transaction guards" {
 
         It "counts a promoted update only after controlled staging cleanup succeeds" {
             Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+            $script:bepExpandedZipPath | Should -Be (Join-Path $script:bepCache 'BepInEx_win_x64_5.4.23.zip')
+            $script:bepBackupRoot | Should -Be $script:bepGame
 
             Test-Path -LiteralPath $script:bepStage | Should -BeFalse
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match '^  Updated cleanly: 1 game\(s\)$' } -Times 1 -Exactly
@@ -6600,7 +6606,8 @@ Describe "BepInEx authorized-root and transaction guards" {
             Test-Path -LiteralPath $script:bepStage -PathType Container | Should -BeTrue
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match '^  Updated cleanly: 0 game\(s\)$' } -Times 1 -Exactly
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match '^  Updated with cleanup failure: 1 -- ACTION REQUIRED$' } -Times 1 -Exactly
-            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match [regex]::Escape($script:bepStage) } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'preserved staging evidence before retrying' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match [regex]::Escape($script:bepStage) } -Times 0 -Exactly
             Should -Invoke Write-Log -ParameterFilter { [string]$msg -match 'update applied.*staging cleanup failed' -and [string]$msg -match [regex]::Escape($script:bepStage) } -Times 1 -Exactly
             Should -Invoke Write-Log -ParameterFilter { [string]$msg -eq 'BepInEx update check: updatedCleanly=0 updatedWithCleanupFailure=1 skippedMissingDevice=0 skippedMissingPath=0 skippedProtected=0 errors=0 cleanupFailures=1' } -Times 1 -Exactly
         }
@@ -6615,7 +6622,7 @@ Describe "BepInEx authorized-root and transaction guards" {
             $result.Errors | Should -Be 1
             $result.PathReasonCounts['ROLLBACK_FAILED'] | Should -Be 1
             Should -Invoke Restore-BepInExUpdateBackup -Times 1 -Exactly
-            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'transaction rollback failed' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'transaction rollback could not be verified' } -Times 1 -Exactly
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'update blocked:' } -Times 0 -Exactly
         }
         It "keeps transactional rollback failure ahead of device classification" {
@@ -6627,7 +6634,7 @@ Describe "BepInEx authorized-root and transaction guards" {
             $result.Errors | Should -Be 1
             $result.MissingDevice | Should -Be 0
             $result.PathReasonCounts['ROLLBACK_FAILED'] | Should -Be 1
-            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'transaction rollback failed' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'transaction rollback could not be verified' } -Times 1 -Exactly
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'update blocked:' } -Times 0 -Exactly
         }
         It "keeps cleanup failure ahead of device classification" {
@@ -6640,7 +6647,7 @@ Describe "BepInEx authorized-root and transaction guards" {
             $result.MissingDevice | Should -Be 0
             $result.MissingPath | Should -Be 0
             $result.PathReasonCounts['DEVICE_UNAVAILABLE'] | Should -Be $null
-            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'cleanup failed' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'cleanup was not completed' } -Times 1 -Exactly
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'game path became unavailable' } -Times 0 -Exactly
             Should -Invoke Write-Log -ParameterFilter { [string]$msg -match 'cleanupFailures=1' -and [string]$msg -match 'errors=0' } -Times 1 -Exactly
         }
@@ -6686,6 +6693,44 @@ Describe "BepInEx authorized-root and transaction guards" {
             $result.FailureRecords[0].Exception | Should -Match 'One'
             $result.FailureRecords[1].Exception | Should -Match 'Two'
         }
+        It "distinguishes a downloaded package from a failed per-game install" {
+            $script:bepOutput = @()
+            Mock Write-Host { $script:bepOutput += [string]$Object }
+            Mock Invoke-TpmTransactionalTreePromote { throw 'simulated install failure at C:\technical\destination' }
+
+            $result = Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+            $output = $script:bepOutput -join [Environment]::NewLine
+
+            $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+            $output | Should -Match 'verified BepInEx package was downloaded'
+            $output | Should -Not -Match '(?i)C:\\|System\\.|StackTrace|technical'
+            $output | Should -Not -Match 'update blocked:'
+        }
+    }
+    It "uses actual selected, changed, failed, and skipped game IDs in the transaction" {
+        Mock Invoke-BepInExUpdateCheckLegacy {
+            [pscustomobject]@{
+                Succeeded = $false
+                Updated = 1
+                UpdatedWithCleanupFailure = 0
+                Errors = 1
+                SelectedItems = @('SafeGame', 'BrokenGame', 'ProtectedGame')
+                ChangedItems = @('SafeGame')
+                FailedItems = @('BrokenGame')
+                SkippedItems = @('ProtectedGame')
+                FailureRecords = @([pscustomobject]@{ Game = 'BrokenGame'; ReasonKey = 'UPDATE_FAILED'; Exception = 'technical evidence' })
+            }
+        }
+
+        $result = Invoke-BepInExUpdateCheck -UserProfilesDir (Join-Path $TestDrive 'unrelated-profiles') -CacheDir (Join-Path $TestDrive 'unused-cache')
+
+        $result.Outcome | Should -Be 'PARTIAL_APPLIED'
+        @($result.Items) | Should -Be @('SafeGame', 'BrokenGame', 'ProtectedGame')
+        @($result.Mutation.ChangedItems) | Should -Be @('SafeGame')
+        @($result.Mutation.FailedItems) | Should -Be @('BrokenGame')
+        @($result.Mutation.SkippedItems) | Should -Be @('ProtectedGame')
+        $result.TechnicalDetails.FailureRecords[0].Game | Should -Be 'BrokenGame'
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
     }
 }
 Describe "Read-PathWithBrowse" {
