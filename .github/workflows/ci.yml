@@ -121,7 +121,7 @@ jobs:
             [ordered]@{ FileName = 'ic10_g24lc64.bin'; Path = 'cxbxr/TeknoParrot/EmuMediaBoard/Chihiro/ic10_g24lc64.bin' },
             [ordered]@{ FileName = 'pc20_g24lc64.bin'; Path = 'cxbxr/TeknoParrot/EmuMediaBoard/Chihiro/pc20_g24lc64.bin' },
             [ordered]@{ FileName = 'ic11_24lc024.bin'; Path = 'cxbxr/TeknoParrot/EmuMediaBoard/Chihiro/ic11_24lc024.bin' },
-            [ordered]@{ FileName = 'fpr21042_m29w160et.bin'; Path = 'cxbxr/TeknoParrot/EmuMediaBoard/Chihiro/fpr21042_m29w160et.bin' }
+            [ordered]@{ FileName = 'fpr21042_m29w160et.bin'; Path = 'cxbxr/TeknoParrot/EmuMediaBoard/fpr21042_m29w160et.bin' }
           )
           $audit = @($registry.BackendDerivationAudit)[0]
           if ([int]$audit.MatchedCount -ne 14) { throw "cxbxr audit count mismatch: expected 14, found $($audit.MatchedCount)" }
