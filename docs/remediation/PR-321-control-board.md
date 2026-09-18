@@ -478,3 +478,53 @@ representative CHD-only, same-folder, content-subfolder, nested, multiple-CHD,
 missing-CHD, and wrong-directory layouts remains required. No package, owner
 smoke, hosted CI, push, merge, tag, publish, certification, or release-ready
 action is authorized in this implementation slice.
+
+## Desktop OMP -- Catalog-wide game support contracts
+
+Status: IMPLEMENTATION COMPLETE; LOCAL FOCUSED VALIDATION COMPLETE; OWNER-RUNTIME EVIDENCE REQUIRED
+
+Slice contract: `docs/remediation/slices/TPM-GAME-SUPPORT-CONTRACTS-001.md`.
+
+Owner report: `TPM_GAME_SUPPORT_CONTRACTS_001`. The implementation is
+catalog-wide and uses the pinned `teknogods/TeknoParrotUI` commit
+`5880e019016c5c3a0576e97a6c2a7f14bf54e3d1`. The pinned universe contains 695
+GameProfiles XML files, 383 GameSetup XML files, and 693 Metadata JSON files.
+GameSetup and Metadata are case-insensitive auxiliary evidence and do not
+expand the profile universe.
+
+`GameSupportContractV1` 1.1.0 remains immutable and routes through its own
+validator. New generation emits static `GameSupportContractV1` 1.2.0 records
+and `GameSupportContractRegistryV1` 1.2.0. Static contracts do not contain
+runtime validation results or a top-level runtime automation flag. The separate
+`GameSupportAssessmentV1` 1.0.0 schema and authority bind an assessment to the
+immutable contract snapshot and keep presence, path, hash, privilege, launch,
+and controls observations separate.
+
+The source-only pinned run generated 695 contracts with
+`AUTOMATED_SAFE=0`, `REVIEW_MANUAL=695`, `BLOCKED_UNSUPPORTED=0`, and
+`UNCLASSIFIED=0`. Hummer and Hummer Extreme retain their pinned revisions,
+executable rules, profile/setup/metadata hashes, and manual posture; no crash
+cause, media relationship, or unverified fix is inferred.
+
+The backend derivation audit matched 14 cxbxr profiles:
+`CTHR`, `GBOS`, `HOTD3`, `OllieKing`, `or2`, `or2b`, `or2sp`, `SGC05`,
+`SGC06`, `vc3`, `WMMT1`, `WMMT1J`, `WMMT2`, and `WMMT2j`. Each matching
+contract declares exactly the four shared cxbxr BIOS paths:
+`ic10_g24lc64.bin`, `pc20_g24lc64.bin`, `ic11_24lc024.bin`, and
+`fpr21042_m29w160et.bin`. Non-cxbxr profiles do not receive these items.
+Controller input APIs, mappings, and backend transport are emitted only from
+source-backed parser evidence; no Fanatec support claim is emitted.
+
+Focused Pester 6.1.0 proof passed: the combined contract, assessment, and
+support-posture suites passed 32/32. The generated pinned registry was loaded
+and revalidated successfully, and the generated artifact scan found zero files
+outside the explicit output root.
+
+The core regression suites also passed: `TeknoParrot-Manager.Tests.ps1`
+passed 1155/1155 and `SupportPackage.Tests.ps1` passed 41/41. No production
+menu, installer, repair, registration, launch, or write-capable consumer was
+changed.
+
+Direct InjectionHunter, owner-runtime proof, package identity, hosted CI,
+Arcade, wiki, push, merge, tag, publish, certification, and release-ready
+actions remain outside this implementation slice and were not performed.

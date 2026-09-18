@@ -129,6 +129,22 @@ Describe 'TPM support posture corpus' {
         (Get-TpmSupportSha256 -Path (Join-Path $outputOne 'support-posture.md')) | Should -Be (Get-TpmSupportSha256 -Path (Join-Path $outputTwo 'support-posture.md'))
     }
 
+    It 'emits a validated contract registry aligned with the support posture snapshot' {
+        $registry = Get-Content -LiteralPath (Join-Path $outputOne 'game-support-contracts.json') -Raw | ConvertFrom-Json
+        $model = Get-Content -LiteralPath (Join-Path $outputOne 'support-posture.json') -Raw | ConvertFrom-Json
+        $registry.ContractCount | Should -Be $model.ProfileCount
+        $registry.SnapshotId | Should -Be $model.SnapshotId
+        @($registry.Contracts).Count | Should -Be $model.ProfileCount
+        @($registry.Contracts | Where-Object { $_.MediaRequirements -and $_.ChdRequirements -and $_.RequiredPatches -and $_.BepInExRequirements -and $_.DgVoodoo2Requirements -and $_.ReShadeCompatibility -and $_.CrosshairCompatibility -and $_.ForceFeedbackCompatibility -and $_.GpuLimitations -and $_.KnownRuntimeFixes }).Count | Should -Be $model.ProfileCount
+        @($registry.Contracts | Where-Object { $_.RequiredPatches.Status -eq 'NOT_DECLARED' -and $_.BepInExRequirements.Status -eq 'NOT_DECLARED' }).Count | Should -Be $model.ProfileCount
+        (Get-Content -LiteralPath (Join-Path $outputOne 'game-support-contract-validation.json') -Raw | ConvertFrom-Json).Valid | Should -BeTrue
+    }
+
+    It 'reproduces identical game contract artifacts from the same snapshot inputs' {
+        (Get-TpmSupportSha256 -Path (Join-Path $outputOne 'game-support-contracts.json')) | Should -Be (Get-TpmSupportSha256 -Path (Join-Path $outputTwo 'game-support-contracts.json'))
+        (Get-TpmSupportSha256 -Path (Join-Path $outputOne 'game-support-contract-validation.json')) | Should -Be (Get-TpmSupportSha256 -Path (Join-Path $outputTwo 'game-support-contract-validation.json'))
+    }
+
     It 'keeps UserProfiles as read-only observations and excludes them from the game universe' {
         $observations = Get-Content -LiteralPath (Join-Path $outputOne 'observations\userprofiles.json') -Raw | ConvertFrom-Json
         $ordinary = @($observations.Records | Where-Object ProfileCode -eq 'Ordinary')[0]
@@ -152,7 +168,7 @@ Describe 'TPM support posture corpus' {
         { Invoke-TpmSupportPostureCorpus -InstalledGameProfilesPath $installedProfiles -OutputRoot (Join-Path $installedProfiles 'generated') } | Should -Throw '*must not be inside*'
     }
     It 'keeps the generated artifact set inside the explicit output root' {
-        foreach ($relative in @('manifest.json', 'support-posture.json', 'support-posture.md', 'fixture-coverage.json', 'observations/userprofiles.json', 'dat/dat-summary.json')) {
+        foreach ($relative in @('manifest.json', 'support-posture.json', 'support-posture.md', 'fixture-coverage.json', 'game-support-contracts.json', 'game-support-contract-validation.json', 'observations/userprofiles.json', 'dat/dat-summary.json')) {
             Test-Path -LiteralPath (Join-Path $outputOne ($relative -replace '/', '\')) -PathType Leaf | Should -BeTrue
         }
         $files = @(Get-ChildItem -LiteralPath $outputOne -Recurse -File)

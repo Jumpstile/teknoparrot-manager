@@ -50,6 +50,13 @@
   ROM-source, installation, frontend, and unrelated files. Declining applies
   no moves and continues safely. Eggman DAT updates now use the latest release
   filename for the saved active path and configuration.
+  RC8 now defines a machine-readable per-game static support-contract registry
+  from the offline support-posture corpus. Immutable 1.1 contracts remain
+  loadable while new generation emits 1.2 contracts with typed prerequisites,
+  backend-derived cxbxr evidence, and source-backed controller mappings. The
+  separate 1.0 assessment schema records read-only runtime observations bound
+  to an immutable contract snapshot; static generation and assessment never
+  write GameProfiles, UserProfiles, game folders, or runtime installations.
 
 
   TPM-owned runtime files now use

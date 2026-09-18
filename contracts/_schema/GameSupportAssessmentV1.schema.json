@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Jumpstile/teknoparrot-manager/contracts/_schema/GameSupportAssessmentV1.schema.json",
+  "title": "GameSupportAssessmentV1",
+  "description": "Read-only machine/runtime observations bound to one immutable GameSupportContractV1 1.2.0 snapshot.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["AssessmentId", "SchemaVersion", "ContractId", "ContractSchemaVersion", "ContractSnapshotId", "EvaluatedAtUtc", "Evaluator", "Target", "SupportFiles", "Privilege", "Launch", "Controls", "Evidence"],
+  "properties": {
+    "AssessmentId": { "type": "string", "pattern": "^assessment-[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "SchemaVersion": { "const": "1.0.0" },
+    "ContractId": { "type": "string", "minLength": 1 },
+    "ContractSchemaVersion": { "const": "1.2.0" },
+    "ContractSnapshotId": { "type": "string", "minLength": 1 },
+    "EvaluatedAtUtc": { "type": "string", "minLength": 1 },
+    "Evaluator": { "type": "object", "additionalProperties": false, "required": ["Name", "Version"], "properties": { "Name": { "type": "string" }, "Version": { "type": "string" } } },
+    "Target": { "type": "object", "additionalProperties": false, "required": ["ProfileCode", "TargetIdentity"], "properties": { "ProfileCode": { "type": "string", "minLength": 1 }, "TargetIdentity": { "type": "string" } } },
+    "SupportFiles": { "$ref": "#/definitions/SupportFilesAssessment" },
+    "Privilege": { "$ref": "#/definitions/PrivilegeAssessment" },
+    "Launch": { "$ref": "#/definitions/LaunchAssessment" },
+    "Controls": { "$ref": "#/definitions/ControlsAssessment" },
+    "Evidence": { "type": "object", "additionalProperties": false, "required": ["Entries"], "properties": { "Entries": { "type": "array", "items": { "type": "object" } } } }
+  },
+  "definitions": {
+    "SupportFileAssessment": { "type": "object", "additionalProperties": false, "required": ["RequirementId", "RequirementStatus", "PresenceState", "PathState", "HashState", "ObservedRelativePath", "ObservedSha256", "ObservedSource", "EvidenceRefs"], "properties": { "RequirementId": { "type": "string", "minLength": 1 }, "RequirementStatus": { "enum": ["SATISFIED", "BLOCKED", "REVIEW", "NOT_EVALUATED"] }, "PresenceState": { "enum": ["PRESENT", "MISSING", "NOT_EVALUATED"] }, "PathState": { "enum": ["MATCHED", "MISMATCHED", "NOT_DECLARED", "NOT_EVALUATED"] }, "HashState": { "enum": ["VERIFIED", "MISMATCHED", "NOT_DECLARED", "NOT_EVALUATED"] }, "ObservedRelativePath": { "type": ["string", "null"] }, "ObservedSha256": { "type": ["string", "null"] }, "ObservedSource": { "type": ["string", "null"] }, "EvidenceRefs": { "type": "array", "items": { "type": "string" } } } },
+    "SupportFilesAssessment": { "type": "object", "additionalProperties": false, "required": ["Overall", "Items"], "properties": { "Overall": { "enum": ["SATISFIED", "READY", "BLOCKED", "REVIEW", "NOT_EVALUATED"] }, "Items": { "type": "array", "items": { "$ref": "#/definitions/SupportFileAssessment" } } } },
+    "PrivilegeAssessment": { "type": "object", "additionalProperties": false, "required": ["Status", "ObservedElevation", "UserOverrideUsed", "EvidenceRefs"], "properties": { "Status": { "enum": ["SATISFIED", "NOT_SATISFIED", "NOT_APPLICABLE", "NOT_EVALUATED"] }, "ObservedElevation": { "enum": ["ELEVATED", "NOT_ELEVATED", "UNKNOWN"] }, "UserOverrideUsed": { "type": "boolean" }, "EvidenceRefs": { "type": "array", "items": { "type": "string" } } } },
+    "LaunchAssessment": { "type": "object", "additionalProperties": false, "required": ["Readiness", "Observation", "EvidenceRefs"], "properties": { "Readiness": { "enum": ["READY", "BLOCKED", "REVIEW", "NOT_EVALUATED"] }, "Observation": { "enum": ["NOT_TESTED", "SUCCESS_OBSERVED", "FAILURE_OBSERVED"] }, "EvidenceRefs": { "type": "array", "items": { "type": "string" } } } },
+    "ControlResult": { "type": "object", "additionalProperties": false, "required": ["ControlId", "DeliveryState", "EvidenceRefs"], "properties": { "ControlId": { "type": "string" }, "DeliveryState": { "enum": ["DELIVERED", "NOT_DELIVERED", "NOT_TESTED", "NOT_EVALUATED"] }, "EvidenceRefs": { "type": "array", "items": { "type": "string" } } } },
+    "ControlsAssessment": { "type": "object", "additionalProperties": false, "required": ["Readiness", "Observation", "SelectedInputApi", "ObservedDevice", "ObservedBackend", "ControlResults", "EvidenceRefs"], "properties": { "Readiness": { "enum": ["VERIFIED", "NOT_VERIFIED", "BLOCKED", "NOT_EVALUATED"] }, "Observation": { "enum": ["NOT_TESTED", "INPUT_DELIVERED", "INPUT_NOT_DELIVERED", "NOT_EVALUATED"] }, "SelectedInputApi": { "type": ["string", "null"] }, "ObservedDevice": { "type": ["string", "null"] }, "ObservedBackend": { "type": ["string", "null"] }, "ControlResults": { "type": "array", "items": { "$ref": "#/definitions/ControlResult" } }, "EvidenceRefs": { "type": "array", "items": { "type": "string" } } } }
+  }
+}

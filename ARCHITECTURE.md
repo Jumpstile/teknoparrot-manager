@@ -3293,3 +3293,70 @@ carries the normalized profile model, ownership fields, layout observations,
 classification totals, fixture coverage, DAT evidence, and release-gate
 booleans. `support-posture.md` is a beginner-readable matrix that omits raw
 filesystem paths. All generated text is deterministic BOM-less UTF-8.
+
+## Catalog-wide machine-readable game support contracts (TPM_GAME_SUPPORT_CONTRACTS_001)
+
+`scripts\TPMGameSupport.Contracts.psm1` is the PowerShell 5.1 authority for
+static contract construction, schema validation, registry routing, lookup, and
+deterministic writing. `GameSupportContractV1` 1.1.0 remains immutable and is
+validated by the explicit 1.1 path. `GameSupportContractV1` 1.2.0 is the
+static-only contract used by new generation. The versioned reference schemas
+are `contracts/_schema/GameSupportContractV1.1.schema.json`,
+`contracts/_schema/GameSupportContractRegistryV1.1.schema.json`,
+`contracts/_schema/GameSupportContractV1.2.schema.json`, and
+`contracts/_schema/GameSupportContractRegistryV1.2.schema.json`. The existing
+unversioned 1.1 schema names remain compatibility references.
+
+The registry is generated from the normalized offline support-posture corpus by
+`scripts\New-TpmSupportPostureCorpus.ps1` or the standalone
+`scripts\New-TpmGameSupportContracts.ps1` wrapper. For pinned
+`teknogods/TeknoParrotUI` commit `5880e019016c5c3a0576e97a6c2a7f14bf54e3d1`,
+the expected universe is the 695 XML files under
+`TeknoParrotUi.Common/GameProfiles`. GameSetup and Metadata files are
+case-insensitive auxiliary evidence; they do not expand the profile universe.
+
+Each profile produces exactly one static contract containing identity, raw
+profile hash, launch rules, media/CHD declaration state, fix domains,
+user-owned content, TeknoParrotUI-owned settings, static prerequisites,
+release posture, classification reason, and evidence gaps. Static contracts
+contain no runtime validation result and no top-level runtime automation flag.
+Every contract has one final posture:
+`AUTOMATED_SAFE`, `REVIEW_MANUAL`, or `BLOCKED_UNSUPPORTED`. `UNCLASSIFIED`
+is an internal generation failure and makes the release gate fail.
+
+Support-file requirements are orthogonal to runtime assessment. Each item
+separately records presence, expected-path, hash, source, derivation, evidence
+references, verification rule, and granular automation permissions. The
+administrator and controller prerequisites use separate permission policies.
+`NOT_DECLARED` means unknown. It never means no fix, not applicable,
+unavailable, installed, verified, or successful, and it never enables
+automation. A declared fix requires evidence references and a verification
+rule. TeknoParrotUI metadata such as `WITH_FIX` remains evidence only unless
+an exact pinned mapping identifies the fix, installation method, and
+verification rule.
+
+The cxbxr prerequisite is backend-derived only when the pinned profile has
+`EmulatorType` equal to `cxbxr`. The exact shared checks produce four BIOS
+items: `ic10_g24lc64.bin`, `pc20_g24lc64.bin`, `ic11_24lc024.bin`, and
+`fpr21042_m29w160et.bin`. The registry records a deterministic derivation
+audit with matched profile codes; it does not infer these files from game
+names or from non-cxbxr profiles. Controller input APIs, mappings, and backend
+transport are emitted only when the posture parser has source-backed
+controller evidence.
+
+`scripts\TPMGameSupport.Assessments.psm1` and
+`contracts/_schema/GameSupportAssessmentV1.schema.json` define the separate
+1.0.0 assessment artifact. An assessment binds `ContractId`,
+`ContractSchemaVersion`, and immutable `ContractSnapshotId`; it writes only
+assessment output and never mutates the static contract. Presence, path, and
+hash states remain independent. Launch success does not imply controls
+verification. The assessment validator recomputes item and aggregate status
+from those states and rejects stale or mismatched contract bindings.
+
+The implementation slice is read-only. It emits
+`game-support-contracts.json`, `game-support-contract-validation.json`, and
+optional assessment JSON below the caller-owned output root. It does not wire
+the registry or assessment into installers, Guided Setup, Automatic Repair,
+ReShade, dgVoodoo2, BepInEx, FFB, FFBPlugin, Crosshair, game registration,
+launch, or TeknoParrotUI-owned writes. Future consumers must load and validate
+through the authority modules rather than parse JSON ad hoc.

@@ -733,3 +733,50 @@ from that single unsafe-root classification.
   slice. Hosted CI and push are not authorized.
 - Current disposition: implementation evidence is complete for this slice;
   release posture is `HOLD`.
+
+## Desktop OMP -- Catalog-wide game support contracts
+
+- Slice contract: `TPM-GAME-SUPPORT-CONTRACTS-001`.
+- Owner report: `TPM_GAME_SUPPORT_CONTRACTS_001`.
+- Pinned source: `teknogods/TeknoParrotUI` commit
+  `5880e019016c5c3a0576e97a6c2a7f14bf54e3d1`.
+- Catalog discovery: 695 GameProfiles XML files, 383 GameSetup XML files, and
+  693 Metadata JSON files. All 695 GameProfiles parsed in the pinned-corpus
+  generation run.
+- Registry implementation: immutable compatibility schemas and validators for
+  `GameSupportContractV1` 1.1.0, static `GameSupportContractV1` 1.2.0, and
+  `GameSupportContractRegistryV1` 1.2.0. The separate
+  `GameSupportAssessmentV1` 1.0.0 schema/authority binds machine/runtime
+  observations to an immutable 1.2.0 contract snapshot.
+- Static 1.2 contracts contain no runtime validation result or top-level
+  runtime automation flag. Support-file presence, expected path, and hash
+  states are orthogonal in assessments; successful launch does not verify
+  controls.
+- Pinned-corpus generation proof: 695 contracts, zero duplicate profile
+  codes, zero `UNCLASSIFIED`, every record has posture/reason/profile hash,
+  and registry closure eligible for the source-only snapshot.
+- Source-only posture totals: `AUTOMATED_SAFE=0`, `REVIEW_MANUAL=695`,
+  `BLOCKED_UNSUPPORTED=0`, `UNCLASSIFIED=0`. No runtime layout fixtures were
+  supplied for the pinned catalog run.
+- Hummer and Hummer Extreme retain pinned revisions 13 and 14, their exact
+  executable rules and profile/setup/metadata hashes, and manual posture.
+  No crash cause, media relationship, or unverified fix is declared.
+- Backend derivation audit matched 14 cxbxr profiles:
+  `CTHR`, `GBOS`, `HOTD3`, `OllieKing`, `or2`, `or2b`, `or2sp`, `SGC05`,
+  `SGC06`, `vc3`, `WMMT1`, `WMMT1J`, `WMMT2`, and `WMMT2j`. Each matching
+  record declares exactly `ic10_g24lc64.bin`, `pc20_g24lc64.bin`,
+  `ic11_24lc024.bin`, and `fpr21042_m29w160et.bin` at the pinned cxbxr
+  relative paths. Non-cxbxr records do not receive those items.
+- Focused Pester 6.1.0 proof: the combined contract, assessment, and
+  support-posture suites passed 32, failed 0, skipped 0.
+- Core regression proof: `TeknoParrot-Manager.Tests.ps1` passed 1155,
+  failed 0, skipped 0; `SupportPackage.Tests.ps1` passed 41, failed 0,
+  skipped 0.
+- Generated-artifact review passed: the pinned registry loaded and revalidated,
+  and every generated file remained below the explicit output root; no
+  generated artifact was added to the repository.
+- Installer, repair, deployment, registration, launch, and TeknoParrotUI-owned
+  write consumers are not wired to the registry or assessment.
+- Direct InjectionHunter, owner-runtime evidence, package identity, hosted CI,
+  Arcade, wiki, push, merge, tag, publish, certification, and release
+  authorization remain outside this slice and were not performed.
