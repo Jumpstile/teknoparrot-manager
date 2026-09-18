@@ -85,3 +85,38 @@ Status: IMPLEMENTATION COMPLETE; OWNER-RUNTIME EVIDENCE REQUIRED
   `NOT_EVALUATED` when owner evidence is absent, source identity changes,
   installed profile evidence conflicts with the pinned contract, or assessment
   binding is stale or mismatched.
+
+## External software schema 1.3 extension -- Desktop source/test slice
+
+- Owner report ID: `TPM_GAME_SUPPORT_CONTRACTS_001`; extension scope is limited to
+  additive schemas, provenance normalization, source validators/generators,
+  read-only assessment state, and permanent tests.
+- Contract/registry schema `1.3.0` and assessment schema `1.1.0` are additive.
+  Contract/registry `1.2.0` and assessment `1.0.0` remain immutable and are
+  dispatched separately; unsupported versions fail closed.
+- `Prerequisites.ExternalSoftware` is the only external-software domain.
+  Support-file items remain a separate typed domain. Each external item has an
+  item-level policy; no domain-level policy is introduced.
+- Showdown is the only pinned declaration: canonical profile code `Showdown`,
+  one required Rapture3D Game Edition audio-runtime item, vendor/version
+  identity as evidence only, no minimum version, unknown architecture, and
+  local-installer location only.
+- External software assessment generation is read-only and emits no runtime observations
+  without supplied machine evidence. The generated Showdown assessment remains
+  `NOT_EVALUATED` with null/unknown observed fields and no runtime evidence references.
+- No installer execution, download, redistribution, EULA acceptance, menu
+  integration, repair, launch, product behavior, owner-runtime proof, package
+  rebuild, or release operation is in this slice.
+- New source/test mappings: `contracts/_schema/GameSupportContractV1.3.schema.json`,
+  `contracts/_schema/GameSupportContractRegistryV1.3.schema.json`,
+  `contracts/_schema/GameSupportAssessmentV1.1.schema.json`,
+  `scripts/TPMGameSupport.Contracts.psm1`,
+  `scripts/TPMGameSupport.Assessments.psm1`,
+  `scripts/New-TpmGameSupportContracts.ps1`,
+  `scripts/New-TpmSupportPostureCorpus.ps1`,
+  `Tests/TPMGameSupport.Contracts.Tests.ps1`,
+  `Tests/TPMGameSupport.Assessments.Tests.ps1`, and
+  `Tests/SupportPostureCorpus.Tests.ps1`.
+- Stop condition: retain `REVIEW`, `NOT_EVALUATED`, or owner-runtime-needed
+  dispositions when independent installation evidence, source verification,
+  hash authority, or owner-approved runtime proof is absent.

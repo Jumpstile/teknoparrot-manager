@@ -39,7 +39,7 @@ BeforeAll {
             BeginnerAction = 'Select the game media in TeknoParrotUI.'
             Evidence = [pscustomobject]@{
                 SourceIds = @('installed-profile-fixture')
-                ProfileSha256 = 'abc123'
+                ProfileSha256 = ('a' * 64)
                 FixtureIds = @('fixture-1')
             }
         }
@@ -269,5 +269,111 @@ Describe 'TPM catalog-wide game support contracts' {
         $main = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'))
         $main | Should -Not -Match 'TPMGameSupport\.Contracts'
         $main | Should -Not -Match 'game-support-contracts\.json'
+    }
+}
+
+Describe 'TPM external software contract schema 1.3' {
+    BeforeAll {
+        $showdownProfile = New-TestGameSupportProfile -ProfileCode 'Showdown'
+        $showdownProfile.EmulationProfile = 'GRID'
+        $showdownProfile.EmulatorType = 'TeknoParrot'
+        $showdownProfile | Add-Member -NotePropertyName ProfileXmlSha256 -NotePropertyValue ('b' * 64)
+        $showdownProfile | Add-Member -NotePropertyName SetupEvidence -NotePropertyValue ([pscustomobject]@{ Available = $true; RelativePath = 'GameSetup' })
+        $showdown = New-TPMGameSupportContractV13 -Profile $showdownProfile -SnapshotId 'TPM-EXTERNAL-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z' -Repository 'fixture/repo' -Commit 'fixture-commit'
+    }
+
+    It 'emits the exact Showdown external software declaration' {
+        $showdown.SchemaVersion | Should -Be '1.3.0'
+        $showdown.ProfileCode | Should -Be 'Showdown'
+        $domain = $showdown.Prerequisites.ExternalSoftware
+        $domain.DeclarationState | Should -Be 'DECLARED'
+        @($domain.Items).Count | Should -Be 1
+        $item = $domain.Items[0]
+        $item.DependencyId | Should -Be 'dependency-rapture3d-game-edition'
+        $item.DisplayName | Should -Be 'Rapture3D Game Edition'
+        $item.DependencyType | Should -Be 'AUDIO_RUNTIME'
+        $item.RequirementState | Should -Be 'REQUIRED'
+        $item.VersionConstraint | Should -BeNullOrEmpty
+        $item.Architecture | Should -Be 'UNKNOWN'
+        $item.InstallerIdentity.FileName | Should -Be 'rapture3dgame_2.7.4_win.exe'
+        $item.InstallerIdentity.Vendor | Should -Be 'Blue Ripple Sound'
+        $item.InstallerIdentity.Version | Should -Be '2.7.4'
+        $item.InstallerIdentity.Sha256 | Should -BeNullOrEmpty
+        $showdown.Evidence.Entries.Kind | Should -Contain 'EGGMAN_REFERENCE'
+        $showdown.Evidence.Entries.Kind | Should -Contain 'VENDOR_REFERENCE'
+        $showdown.Evidence.Entries.Kind | Should -Contain 'TESTER_REPORT'
+        foreach ($entry in @($showdown.Evidence.Entries)) { $entry.PSObject.Properties.Name | Should -Not -Contain 'Provenance' }
+    }
+
+    It 'preserves the conservative ten-field external policy' {
+        $policy = $showdown.Prerequisites.ExternalSoftware.Items[0].AutomationPolicy
+        foreach ($name in @('MayDetectInstalled','MayVerifyVersion','MayVerifyArchitecture','MayVerifyHash','MayRunLocalInstaller','MayDownload','MayRedistribute','MayAcceptEulaAutomatically','MayUseUnverifiedSource')) { $policy.$name | Should -BeFalse }
+        $policy.MayLocateLocalInstaller | Should -BeTrue
+        @($policy.Keys).Count | Should -Be 10
+        $showdown.Prerequisites.ExternalSoftware.Items[0].VerificationRule | Should -Match '<GameRoot>\\Rapture3D audio installer\\rapture3dgame_2\.7\.4_win\.exe'
+        $showdown.Prerequisites.ExternalSoftware.Items[0].VerificationRule | Should -Match 'do not recurse'
+    }
+
+    It 'does not declare Rapture3D for another profile' {
+        $other = New-TPMGameSupportContractV13 -Profile (New-TestGameSupportProfile -ProfileCode 'ShowdownAlt') -SnapshotId 'TPM-EXTERNAL-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z' -Repository 'fixture/repo' -Commit 'fixture-commit'
+        $other.Prerequisites.ExternalSoftware.DeclarationState | Should -Be 'NOT_DECLARED'
+        @($other.Prerequisites.ExternalSoftware.Items).Count | Should -Be 0
+        (Test-TPMGameSupportContractV1 -Contract $other).Valid | Should -BeTrue
+    }
+
+    It 'rejects an external item placed in the support-files domain' {
+        $copy = ConvertFrom-Json ($showdown | ConvertTo-Json -Depth 40)
+        $copy.Prerequisites.SupportFiles.Items = @($showdown.Prerequisites.ExternalSoftware.Items[0])
+        $result = Test-TPMGameSupportContractV1 -Contract $copy
+        $result.Valid | Should -BeFalse
+    }
+
+    It 'rejects unknown external dependency types and malformed policy fields' {
+        $typeCopy = ConvertFrom-Json ($showdown | ConvertTo-Json -Depth 40)
+        $typeCopy.Prerequisites.ExternalSoftware.Items[0].DependencyType = 'UNSUPPORTED'
+        (Test-TPMGameSupportContractV1 -Contract $typeCopy).Valid | Should -BeFalse
+        $policyCopy = ConvertFrom-Json ($showdown | ConvertTo-Json -Depth 40)
+        $policyCopy.Prerequisites.ExternalSoftware.Items[0].AutomationPolicy.MayDownload = 'false'
+        (Test-TPMGameSupportContractV1 -Contract $policyCopy).Valid | Should -BeFalse
+    }
+    It 'keeps the immutable 1.2 constructor shape while 1.3 adds ExternalSoftware separately' {
+        $legacy = New-TPMGameSupportContractV1 -Profile $showdownProfile -SnapshotId 'TPM-EXTERNAL-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z' -Repository 'fixture/repo' -Commit 'fixture-commit'
+        $legacyAgain = New-TPMGameSupportContractV1 -Profile $showdownProfile -SnapshotId 'TPM-EXTERNAL-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z' -Repository 'fixture/repo' -Commit 'fixture-commit'
+        $modern = New-TPMGameSupportContractV13 -Profile $showdownProfile -SnapshotId 'TPM-EXTERNAL-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z' -Repository 'fixture/repo' -Commit 'fixture-commit'
+
+        ($legacy | ConvertTo-Json -Depth 40) | Should -Be ($legacyAgain | ConvertTo-Json -Depth 40)
+        $legacy.SchemaVersion | Should -Be '1.2.0'
+        @($legacy.Prerequisites.Keys) | Should -Be @('SupportFiles', 'Administrator', 'Controllers')
+        $modern.SchemaVersion | Should -Be '1.3.0'
+        @($modern.Prerequisites.Keys) | Should -Be @('SupportFiles', 'Administrator', 'Controllers', 'ExternalSoftware')
+        # 1.3 adds typed historical evidence and normalizes empty legacy hashes to null.
+        foreach ($key in @($legacy.Keys | Where-Object { $_ -ne 'SchemaVersion' -and $_ -ne 'Prerequisites' -and $_ -ne 'Evidence' })) {
+            ($legacy[$key] | ConvertTo-Json -Depth 40) | Should -Be ($modern[$key] | ConvertTo-Json -Depth 40)
+        }
+        foreach ($key in @('SupportFiles', 'Administrator', 'Controllers')) {
+            ($legacy.Prerequisites[$key] | ConvertTo-Json -Depth 40) | Should -Be ($modern.Prerequisites[$key] | ConvertTo-Json -Depth 40)
+        }
+        foreach ($legacyEntry in @($legacy.Evidence.Entries)) {
+            $modernEntry = @($modern.Evidence.Entries | Where-Object EvidenceId -ceq $legacyEntry.EvidenceId)[0]
+            $modernEntry | Should -Not -BeNullOrEmpty
+            if ([string]::IsNullOrWhiteSpace([string]$legacyEntry.Sha256)) {
+                $modernEntry.Sha256 | Should -BeNullOrEmpty
+            } else {
+                $modernEntry.Sha256 | Should -Be $legacyEntry.Sha256
+            }
+        }
+    }
+
+
+    It 'routes registry version 1.3 while retaining 1.2 and rejecting unsupported versions' {
+        $registry = New-TPMGameSupportContractRegistryV13 -Profiles @($showdownProfile) -SnapshotId 'TPM-EXTERNAL-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z' -Source ([ordered]@{ Repository = 'fixture/repo'; Commit = 'fixture-commit'; ProfileRoot = 'GameProfiles' }) -ExpectedProfileCount 1
+        $registry.SchemaVersion | Should -Be '1.3.0'
+        (Test-TPMGameSupportContractRegistryV1 -Registry $registry).Valid | Should -BeTrue
+        $unsupported = ConvertFrom-Json ($registry | ConvertTo-Json -Depth 40)
+        $unsupported.SchemaVersion = '9.9.9'
+        (Test-TPMGameSupportContractRegistryV1 -Registry $unsupported).Valid | Should -BeFalse
+        $legacy = New-TPMGameSupportContractRegistryV1 -Profiles @($showdownProfile) -SnapshotId 'TPM-EXTERNAL-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z'
+        $legacy.SchemaVersion | Should -Be '1.2.0'
+        (Test-TPMGameSupportContractRegistryV1 -Registry $legacy).Valid | Should -BeTrue
     }
 }

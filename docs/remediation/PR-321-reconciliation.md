@@ -780,3 +780,21 @@ from that single unsafe-root classification.
 - Direct InjectionHunter, owner-runtime evidence, package identity, hosted CI,
   Arcade, wiki, push, merge, tag, publish, certification, and release
   authorization remain outside this slice and were not performed.
+
+## External software schema 1.3 implementation handoff
+
+- Owner report: `TPM_GAME_SUPPORT_CONTRACTS_001`.
+- Slice contract: `TPM-GAME-SUPPORT-CONTRACTS-001`.
+- Implemented scope: additive Contract/Registry schema 1.3, Assessment schema
+  1.1, typed external-software evidence, conservative Showdown declaration,
+  read-only assessment state, version dispatch, and deterministic generation
+  coverage.
+- Permanent tests: `TPMGameSupport.Contracts.Tests.ps1`,
+  `TPMGameSupport.Assessments.Tests.ps1`, and
+  `SupportPostureCorpus.Tests.ps1`.
+- No product menu, installer, repair, launch, download, redistribution, EULA,
+  package, owner-runtime, Arcade, commit, push, merge, tag, publish,
+  certification, or release operation was performed by this handoff.
+- Disposition remains source/test implementation review only; runtime
+  promotion and release authorization remain blocked pending their separate
+  gates.

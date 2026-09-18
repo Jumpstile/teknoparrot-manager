@@ -63,11 +63,14 @@ jobs:
         run: |
           $schemaRelativePaths = @(
             'contracts\_schema\GameSupportAssessmentV1.schema.json',
+            'contracts\_schema\GameSupportAssessmentV1.1.schema.json',
             'contracts\_schema\GameSupportContractV1.1.schema.json',
             'contracts\_schema\GameSupportContractV1.2.schema.json',
+            'contracts\_schema\GameSupportContractV1.3.schema.json',
             'contracts\_schema\GameSupportContractV1.schema.json',
             'contracts\_schema\GameSupportContractRegistryV1.1.schema.json',
             'contracts\_schema\GameSupportContractRegistryV1.2.schema.json',
+            'contracts\_schema\GameSupportContractRegistryV1.3.schema.json',
             'contracts\_schema\GameSupportContractRegistryV1.schema.json'
           )
           foreach ($relativePath in $schemaRelativePaths) {
@@ -79,7 +82,7 @@ jobs:
           }
           Write-Host "GameSupport schema JSON validation passed: $($schemaRelativePaths.Count) files."
 
-      - name: Deterministic GameSupport 1.2 generation
+      - name: Deterministic GameSupport 1.3 generation
         shell: powershell
         env:
           TPM_UPSTREAM_SHA: 5880e019016c5c3a0576e97a6c2a7f14bf54e3d1
@@ -105,13 +108,13 @@ jobs:
           $profileCount = @(Get-ChildItem -LiteralPath $profileRoot -Filter '*.xml' -File).Count
           if ($profileCount -ne 695) { throw "Pinned GameProfiles count mismatch: expected 695, found $profileCount" }
           foreach ($outputRoot in @($outputOne, $outputTwo)) {
-            & $generator -UpstreamProfileRoot $profileRoot -UpstreamCommitSha $env:TPM_UPSTREAM_SHA -SnapshotId 'TPM-GAME-SUPPORT-CI-1_2' -CapturedAtUtc '2026-06-18T00:00:00Z' -OutputRoot $outputRoot | Out-Null
+            & $generator -UpstreamProfileRoot $profileRoot -UpstreamCommitSha $env:TPM_UPSTREAM_SHA -SnapshotId 'TPM-GAME-SUPPORT-CI-1_3' -CapturedAtUtc '2026-06-18T00:00:00Z' -OutputRoot $outputRoot | Out-Null
             if (-not (Test-Path -LiteralPath (Join-Path $outputRoot 'game-support-contracts.json') -PathType Leaf)) { throw "Contract registry was not generated below $outputRoot" }
             if (-not (Test-Path -LiteralPath (Join-Path $outputRoot 'game-support-contract-validation.json') -PathType Leaf)) { throw "Contract validation was not generated below $outputRoot" }
           }
           $registry = Get-Content -LiteralPath (Join-Path $outputOne 'game-support-contracts.json') -Raw | ConvertFrom-Json -ErrorAction Stop
           $validation = Get-Content -LiteralPath (Join-Path $outputOne 'game-support-contract-validation.json') -Raw | ConvertFrom-Json -ErrorAction Stop
-          if ($registry.SchemaVersion -cne '1.2.0') { throw "Unexpected registry schema version: $($registry.SchemaVersion)" }
+          if ($registry.SchemaVersion -cne '1.3.0') { throw "Unexpected registry schema version: $($registry.SchemaVersion)" }
           if ($registry.ContractCount -ne 695 -or @($registry.Contracts).Count -ne 695) { throw "Generated contract count mismatch: expected 695, found $($registry.ContractCount)" }
           if (-not $validation.Valid) { throw 'Generated registry validation failed.' }
           if (@($registry.Contracts | ForEach-Object ProfileCode | Sort-Object -Unique).Count -ne 695) { throw 'Duplicate profile identities detected.' }

@@ -1,7 +1,9 @@
 Set-StrictMode -Version 2.0
 
 $script:TpmGameSupportAssessmentSchemaVersionV1 = '1.0.0'
+$script:TpmGameSupportAssessmentSchemaVersionV11 = '1.1.0'
 $script:TpmGameSupportContractSchemaVersionV12 = '1.2.0'
+$script:TpmGameSupportContractSchemaVersionV13 = '1.3.0'
 $script:TpmGameSupportAssessmentRequirementStatuses = @('SATISFIED', 'BLOCKED', 'REVIEW', 'NOT_EVALUATED')
 
 function Get-TPMGameSupportAssessmentValue {
@@ -136,22 +138,160 @@ function Assert-TPMGameSupportAssessmentV1 {
 
 function Test-TPMGameSupportAssessmentV1 {
     param([Parameter(Mandatory = $true)]$Assessment, [Parameter(Mandatory = $true)]$Contract)
-    try { [void](Assert-TPMGameSupportAssessmentV1 -Assessment $Assessment -Contract $Contract); return [pscustomobject]@{ Valid = $true; Errors = @() } } catch { return [pscustomobject]@{ Valid = $false; Errors = @($_.Exception.Message) } }
+    try {
+        $version = [string]$Assessment.SchemaVersion
+        if ($version -eq $script:TpmGameSupportAssessmentSchemaVersionV11) { [void](Assert-TPMGameSupportAssessmentV11 -Assessment $Assessment -Contract $Contract) }
+        elseif ($version -eq $script:TpmGameSupportAssessmentSchemaVersionV1) { [void](Assert-TPMGameSupportAssessmentV1 -Assessment $Assessment -Contract $Contract) }
+        else { throw "GAME_SUPPORT_ASSESSMENT_SCHEMA_INVALID: unsupported SchemaVersion '$version'" }
+        return [pscustomobject]@{ Valid = $true; Errors = @() }
+    } catch { return [pscustomobject]@{ Valid = $false; Errors = @($_.Exception.Message) } }
 }
 
 function Get-TPMGameSupportAssessmentV1 {
     param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)]$Contract)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "GAME_SUPPORT_ASSESSMENT_MISSING: $Path" }
     $assessment = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($Path))
-    [void](Assert-TPMGameSupportAssessmentV1 -Assessment $assessment -Contract $Contract)
+    $validation = Test-TPMGameSupportAssessmentV1 -Assessment $assessment -Contract $Contract
+    if (-not $validation.Valid) { throw "GAME_SUPPORT_ASSESSMENT_INVALID: $($validation.Errors -join '; ')" }
     return $assessment
 }
 
 function Write-TPMGameSupportAssessmentV1 {
     param([Parameter(Mandatory = $true)]$Assessment, [Parameter(Mandatory = $true)]$Contract, [Parameter(Mandatory = $true)][string]$Path)
-    [void](Assert-TPMGameSupportAssessmentV1 -Assessment $Assessment -Contract $Contract)
+    $validation = Test-TPMGameSupportAssessmentV1 -Assessment $Assessment -Contract $Contract
+    if (-not $validation.Valid) { throw "GAME_SUPPORT_ASSESSMENT_INVALID: $($validation.Errors -join '; ')" }
     $parent = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($Path)); if ($parent -and -not (Test-Path -LiteralPath $parent -PathType Container)) { [void][System.IO.Directory]::CreateDirectory($parent) }
     [System.IO.File]::WriteAllText($Path, (($Assessment | ConvertTo-Json -Depth 30) + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 }
 
-Export-ModuleMember -Function New-TPMGameSupportAssessmentV1,Test-TPMGameSupportAssessmentV1,Get-TPMGameSupportAssessmentV1,Write-TPMGameSupportAssessmentV1,Assert-TPMGameSupportAssessmentV1
+function New-TPMGameSupportAssessmentExternalSoftwareItemV11 {
+    param([Parameter(Mandatory = $true)]$Requirement, [string[]]$EvidenceRefs = @())
+    $versionConstraint = Get-TPMGameSupportAssessmentValue $Requirement 'VersionConstraint' $null
+    $installer = Get-TPMGameSupportAssessmentValue $Requirement 'InstallerIdentity' ([ordered]@{})
+    return [ordered]@{
+        DependencyId = [string](Get-TPMGameSupportAssessmentValue $Requirement 'DependencyId' '')
+        RequirementStatus = 'NOT_EVALUATED'
+        InstalledState = 'NOT_EVALUATED'
+        VersionState = if ($null -eq $versionConstraint) { 'NOT_DECLARED' } else { 'NOT_EVALUATED' }
+        ArchitectureState = 'NOT_EVALUATED'
+        SourceState = 'NOT_EVALUATED'
+        HashState = if ($null -eq (Get-TPMGameSupportAssessmentValue $installer 'Sha256' $null)) { 'NOT_DECLARED' } else { 'NOT_EVALUATED' }
+        ObservedInstallPath = $null
+        ObservedVersion = $null
+        ObservedArchitecture = $null
+        ObservedSource = $null
+        ObservedSha256 = $null
+        EvidenceRefs = @($EvidenceRefs)
+    }
+}
+
+function New-TPMGameSupportAssessmentV11 {
+    param([Parameter(Mandatory = $true)]$Contract, [Parameter(Mandatory = $true)][string]$EvaluatedAtUtc, [string]$AssessmentId = '', [string]$EvaluatorName = 'TPM', [string]$EvaluatorVersion = '1.1.0', [string]$TargetIdentity = '')
+    if ([string](Get-TPMGameSupportAssessmentValue $Contract 'SchemaVersion' '') -ne $script:TpmGameSupportContractSchemaVersionV13) { throw 'GAME_SUPPORT_ASSESSMENT_BINDING_INVALID: assessment requires a 1.3.0 static contract.' }
+    $contractId = [string](Get-TPMGameSupportAssessmentValue $Contract 'ContractId' '')
+    $profileCode = [string](Get-TPMGameSupportAssessmentValue $Contract 'ProfileCode' '')
+    if ([string]::IsNullOrWhiteSpace($AssessmentId)) { $AssessmentId = 'assessment-' + ($contractId -replace '^game-', '') }
+    $support = Get-TPMGameSupportAssessmentValue (Get-TPMGameSupportAssessmentValue $Contract 'Prerequisites' ([ordered]@{})) 'SupportFiles' ([ordered]@{ Items = @() })
+    $supportItems = New-Object System.Collections.Generic.List[object]
+    foreach ($requirement in @(Get-TPMGameSupportAssessmentValue $support 'Items' @())) { [void]$supportItems.Add((New-TPMGameSupportAssessmentSupportItem -Requirement $requirement)) }
+    $external = Get-TPMGameSupportAssessmentValue (Get-TPMGameSupportAssessmentValue $Contract 'Prerequisites' ([ordered]@{})) 'ExternalSoftware' ([ordered]@{ DeclarationState = 'NOT_DECLARED'; Items = @() })
+    $externalItems = New-Object System.Collections.Generic.List[object]
+    foreach ($requirement in @(Get-TPMGameSupportAssessmentValue $external 'Items' @())) {
+        $item = New-TPMGameSupportAssessmentExternalSoftwareItemV11 -Requirement $requirement
+        $item.RequirementStatus = Get-TPMGameSupportExternalSoftwareItemStatusV11 -Item $item -Requirement $requirement
+        [void]$externalItems.Add($item)
+    }
+    $assessment = [ordered]@{
+        AssessmentId = $AssessmentId
+        SchemaVersion = $script:TpmGameSupportAssessmentSchemaVersionV11
+        ContractId = $contractId
+        ContractSchemaVersion = $script:TpmGameSupportContractSchemaVersionV13
+        ContractSnapshotId = [string](Get-TPMGameSupportAssessmentValue $Contract 'SnapshotId' '')
+        EvaluatedAtUtc = $EvaluatedAtUtc
+        Evaluator = [ordered]@{ Name = $EvaluatorName; Version = $EvaluatorVersion }
+        Target = [ordered]@{ ProfileCode = $profileCode; TargetIdentity = $TargetIdentity }
+        SupportFiles = [ordered]@{ Overall = if ($supportItems.Count -eq 0) { 'SATISFIED' } else { 'NOT_EVALUATED' }; Items = $supportItems.ToArray() }
+        ExternalSoftware = [ordered]@{ Overall = Get-TPMGameSupportExternalSoftwareOverallStatusV11 -Items $externalItems.ToArray(); Items = $externalItems.ToArray() }
+        Privilege = [ordered]@{ Status = 'NOT_EVALUATED'; ObservedElevation = 'UNKNOWN'; UserOverrideUsed = $false; EvidenceRefs = @() }
+        Launch = [ordered]@{ Readiness = 'NOT_EVALUATED'; Observation = 'NOT_TESTED'; EvidenceRefs = @() }
+        Controls = [ordered]@{ Readiness = 'NOT_EVALUATED'; Observation = 'NOT_EVALUATED'; SelectedInputApi = $null; ObservedDevice = $null; ObservedBackend = $null; ControlResults = @(); EvidenceRefs = @() }
+        Evidence = [ordered]@{ Entries = @() }
+    }
+    return $assessment
+}
+
+function Get-TPMGameSupportExternalSoftwareItemStatusV11 {
+    param([Parameter(Mandatory = $true)]$Item, [Parameter(Mandatory = $true)]$Requirement)
+    $required = [string](Get-TPMGameSupportAssessmentValue $Requirement 'RequirementState' 'REQUIRED')
+    $failure = if ($required -eq 'REQUIRED') { 'BLOCKED' } else { 'REVIEW' }
+    foreach ($name in @('InstalledState','VersionState','ArchitectureState','HashState')) {
+        if ([string](Get-TPMGameSupportAssessmentValue $Item $name '') -eq 'MISMATCHED' -or ($name -eq 'InstalledState' -and [string](Get-TPMGameSupportAssessmentValue $Item $name '') -eq 'ABSENT')) { return $failure }
+    }
+    if ([string](Get-TPMGameSupportAssessmentValue $Item 'SourceState' '') -eq 'UNVERIFIED') { return 'REVIEW' }
+    if ([string](Get-TPMGameSupportAssessmentValue $Item 'InstalledState' '') -eq 'PRESENT' -and [string](Get-TPMGameSupportAssessmentValue $Item 'VersionState' '') -in @('VERIFIED','NOT_DECLARED') -and [string](Get-TPMGameSupportAssessmentValue $Item 'ArchitectureState' '') -in @('VERIFIED','NOT_APPLICABLE') -and [string](Get-TPMGameSupportAssessmentValue $Item 'HashState' '') -in @('VERIFIED','NOT_DECLARED') -and [string](Get-TPMGameSupportAssessmentValue $Item 'SourceState' '') -in @('VERIFIED','NOT_DECLARED')) { return 'SATISFIED' }
+    if (@('UNKNOWN','NOT_EVALUATED') -contains [string](Get-TPMGameSupportAssessmentValue $Item 'InstalledState' '') -or @('UNKNOWN','NOT_EVALUATED') -contains [string](Get-TPMGameSupportAssessmentValue $Item 'VersionState' '') -or @('UNKNOWN','NOT_EVALUATED') -contains [string](Get-TPMGameSupportAssessmentValue $Item 'ArchitectureState' '') -or @('NOT_EVALUATED') -contains [string](Get-TPMGameSupportAssessmentValue $Item 'SourceState' '') -or @('NOT_EVALUATED') -contains [string](Get-TPMGameSupportAssessmentValue $Item 'HashState' '')) { return 'NOT_EVALUATED' }
+    return 'REVIEW'
+}
+
+function Get-TPMGameSupportExternalSoftwareOverallStatusV11 {
+    param([Parameter(Mandatory = $true)][object[]]$Items)
+    if (@($Items).Count -eq 0) { return 'NOT_EVALUATED' }
+    $statuses = @($Items | ForEach-Object RequirementStatus)
+    if ($statuses -contains 'BLOCKED') { return 'BLOCKED' }
+    if ($statuses -contains 'REVIEW') { return 'REVIEW' }
+    if ($statuses -contains 'NOT_EVALUATED') { return 'NOT_EVALUATED' }
+    return 'SATISFIED'
+}
+
+function Assert-TPMGameSupportAssessmentExternalSoftwareV11 {
+    param([Parameter(Mandatory = $true)]$ExternalSoftware, [Parameter(Mandatory = $true)]$Contract)
+    $d = Assert-TPMGameSupportAssessmentExactFields $ExternalSoftware 'ExternalSoftware' @('Overall','Items')
+    Assert-TPMGameSupportAssessmentEnum $d.Overall $script:TpmGameSupportAssessmentRequirementStatuses 'ExternalSoftware.Overall'
+    Assert-TPMGameSupportAssessmentArray $d.Items 'ExternalSoftware.Items'
+    $requirements = @((Get-TPMGameSupportAssessmentValue (Get-TPMGameSupportAssessmentValue $Contract 'Prerequisites' ([ordered]@{})) 'ExternalSoftware' ([ordered]@{ Items = @() })).Items)
+    $contractEvidence = Get-TPMGameSupportAssessmentValue (Get-TPMGameSupportAssessmentValue $Contract 'Evidence' ([ordered]@{})) 'Entries' @()
+    $knownEvidence = @($contractEvidence | ForEach-Object { [string](Get-TPMGameSupportAssessmentValue $_ 'EvidenceId' '') })
+    foreach ($item in @($d.Items)) {
+        $i = Assert-TPMGameSupportAssessmentExactFields $item 'ExternalSoftware.Item' @('DependencyId','RequirementStatus','InstalledState','VersionState','ArchitectureState','SourceState','HashState','ObservedInstallPath','ObservedVersion','ObservedArchitecture','ObservedSource','ObservedSha256','EvidenceRefs')
+        Assert-TPMGameSupportAssessmentString $i.DependencyId 'ExternalSoftware.Item.DependencyId'
+        Assert-TPMGameSupportAssessmentEnum $i.RequirementStatus $script:TpmGameSupportAssessmentRequirementStatuses 'ExternalSoftware.Item.RequirementStatus'
+        Assert-TPMGameSupportAssessmentEnum $i.InstalledState @('PRESENT','ABSENT','UNKNOWN','NOT_EVALUATED') 'ExternalSoftware.Item.InstalledState'
+        Assert-TPMGameSupportAssessmentEnum $i.VersionState @('VERIFIED','MISMATCHED','UNKNOWN','NOT_DECLARED','NOT_EVALUATED') 'ExternalSoftware.Item.VersionState'
+        Assert-TPMGameSupportAssessmentEnum $i.ArchitectureState @('VERIFIED','MISMATCHED','UNKNOWN','NOT_APPLICABLE','NOT_EVALUATED') 'ExternalSoftware.Item.ArchitectureState'
+        Assert-TPMGameSupportAssessmentEnum $i.SourceState @('VERIFIED','UNVERIFIED','NOT_DECLARED','NOT_EVALUATED') 'ExternalSoftware.Item.SourceState'
+        Assert-TPMGameSupportAssessmentEnum $i.HashState @('VERIFIED','MISMATCHED','NOT_DECLARED','NOT_EVALUATED') 'ExternalSoftware.Item.HashState'
+        Assert-TPMGameSupportAssessmentArray $i.EvidenceRefs 'ExternalSoftware.Item.EvidenceRefs'
+        foreach ($ref in @($i.EvidenceRefs)) { if ($knownEvidence -notcontains [string]$ref) { throw "GAME_SUPPORT_ASSESSMENT_SCHEMA_INVALID: unresolved external evidence reference '$ref'" } }
+        $requirement = @($requirements | Where-Object { [string](Get-TPMGameSupportAssessmentValue $_ 'DependencyId' '') -ceq [string]$i.DependencyId })[0]
+        if ($null -eq $requirement) { throw "GAME_SUPPORT_ASSESSMENT_SCHEMA_INVALID: unknown external dependency '$($i.DependencyId)'" }
+        $computed = Get-TPMGameSupportExternalSoftwareItemStatusV11 -Item $i -Requirement $requirement
+        if ([string]$i.RequirementStatus -cne $computed) { throw "GAME_SUPPORT_ASSESSMENT_SCHEMA_INVALID: ExternalSoftware.Item $($i.DependencyId) RequirementStatus must be $computed" }
+    }
+    $computedOverall = Get-TPMGameSupportExternalSoftwareOverallStatusV11 -Items @($d.Items)
+    if ([string]$d.Overall -cne $computedOverall) { throw "GAME_SUPPORT_ASSESSMENT_SCHEMA_INVALID: ExternalSoftware.Overall must be $computedOverall" }
+    return $d
+}
+
+function Assert-TPMGameSupportAssessmentV11 {
+    param([Parameter(Mandatory = $true)]$Assessment, [Parameter(Mandatory = $true)]$Contract)
+    $expected = @('AssessmentId','SchemaVersion','ContractId','ContractSchemaVersion','ContractSnapshotId','EvaluatedAtUtc','Evaluator','Target','SupportFiles','ExternalSoftware','Privilege','Launch','Controls','Evidence')
+    $d = Assert-TPMGameSupportAssessmentExactFields $Assessment 'GameSupportAssessmentV1.1' $expected
+    if ($d.SchemaVersion -cne $script:TpmGameSupportAssessmentSchemaVersionV11) { throw "GAME_SUPPORT_ASSESSMENT_SCHEMA_INVALID: unsupported SchemaVersion '$($d.SchemaVersion)'" }
+    if ($d.ContractSchemaVersion -cne $script:TpmGameSupportContractSchemaVersionV13) { throw "GAME_SUPPORT_ASSESSMENT_BINDING_INVALID: ContractSchemaVersion must be $($script:TpmGameSupportContractSchemaVersionV13)" }
+    if ([string](Get-TPMGameSupportAssessmentValue $Contract 'SchemaVersion' '') -cne $script:TpmGameSupportContractSchemaVersionV13) { throw 'GAME_SUPPORT_ASSESSMENT_BINDING_INVALID: supplied contract is not 1.3.0.' }
+    $baseAssessment = [ordered]@{}
+    $assessmentKeys = @(if ($d -is [System.Collections.IDictionary]) { $d.Keys } else { $d.PSObject.Properties.Name })
+    foreach ($key in $assessmentKeys) { if ($key -ne 'ExternalSoftware') { $baseAssessment[$key] = Get-TPMGameSupportAssessmentValue $d $key $null } }
+    $baseAssessment.SchemaVersion = $script:TpmGameSupportAssessmentSchemaVersionV1
+    $baseAssessment.ContractSchemaVersion = $script:TpmGameSupportContractSchemaVersionV12
+    $baseContract = [ordered]@{}
+    $contractKeys = @(if ($Contract -is [System.Collections.IDictionary]) { $Contract.Keys } else { $Contract.PSObject.Properties.Name })
+    foreach ($key in $contractKeys) { $baseContract[$key] = Get-TPMGameSupportAssessmentValue $Contract $key $null }
+    $baseContract.SchemaVersion = $script:TpmGameSupportContractSchemaVersionV12
+    $baseContract.Prerequisites = [ordered]@{ SupportFiles = $Contract.Prerequisites.SupportFiles; Administrator = $Contract.Prerequisites.Administrator; Controllers = $Contract.Prerequisites.Controllers }
+    [void](Assert-TPMGameSupportAssessmentV1 -Assessment $baseAssessment -Contract $baseContract)
+    [void](Assert-TPMGameSupportAssessmentExternalSoftwareV11 -ExternalSoftware $d.ExternalSoftware -Contract $Contract)
+    return $d
+}
+
+Export-ModuleMember -Function New-TPMGameSupportAssessmentV1,New-TPMGameSupportAssessmentV11,Test-TPMGameSupportAssessmentV1,Get-TPMGameSupportAssessmentV1,Write-TPMGameSupportAssessmentV1,Assert-TPMGameSupportAssessmentV1,Assert-TPMGameSupportAssessmentV11

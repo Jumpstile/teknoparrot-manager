@@ -952,7 +952,7 @@ function Invoke-TpmSupportPostureCorpus {
         Commit = if ($UpstreamCommitSha) { $UpstreamCommitSha } elseif ($UpstreamVersion) { $UpstreamVersion } else { 'LOCAL-SOURCE' }
         ProfileRoot = if ($UpstreamProfileRoot) { 'TeknoParrotUi.Common/GameProfiles' } else { 'GameProfiles' }
     }
-    $gameSupportContracts = New-TPMGameSupportContractRegistryV1 -Profiles ([object[]]$profiles.ToArray()) -SnapshotId $snapshotIdValue -CapturedAtUtc $captured -Source $contractSource -ExpectedProfileCount $expectedProfileCount
+    $gameSupportContracts = New-TPMGameSupportContractRegistryV13 -Profiles ([object[]]$profiles.ToArray()) -SnapshotId $snapshotIdValue -CapturedAtUtc $captured -Source $contractSource -ExpectedProfileCount $expectedProfileCount
     $gameSupportContractValidation = Test-TPMGameSupportContractRegistryV1 -Registry $gameSupportContracts
     if (-not $gameSupportContractValidation.Valid) { throw "Game support contract validation failed: $($gameSupportContractValidation.Errors -join '; ')" }
     $profileHashesComplete = @($profiles | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ProfileXmlSha256) }).Count -eq 0

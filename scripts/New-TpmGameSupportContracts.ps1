@@ -14,7 +14,7 @@ try {
     $source = if ($model.ContractSource) { $model.ContractSource } else { [ordered]@{ Repository = 'TPM-SUPPORT-POSTURE'; Commit = [string]$model.SnapshotId; ProfileRoot = 'GameProfiles' } }
     $expectedCount = $null
     if ($model.ExpectedProfileCount) { $expectedCount = [int]$model.ExpectedProfileCount }
-    $registry = New-TPMGameSupportContractRegistryV1 -Profiles @($model.Profiles) -SnapshotId ([string]$model.SnapshotId) -CapturedAtUtc ([string]$model.CapturedAtUtc) -Source $source -ExpectedProfileCount $expectedCount
+    $registry = New-TPMGameSupportContractRegistryV13 -Profiles @($model.Profiles) -SnapshotId ([string]$model.SnapshotId) -CapturedAtUtc ([string]$model.CapturedAtUtc) -Source $source -ExpectedProfileCount $expectedCount
     $validation = Test-TPMGameSupportContractRegistryV1 -Registry $registry
     if (-not $validation.Valid) { throw "Generated contract registry failed validation: $($validation.Errors -join '; ')" }
     Write-TPMGameSupportContractRegistryV1 -Registry $registry -Path $OutputPath

@@ -528,3 +528,24 @@ changed.
 Direct InjectionHunter, owner-runtime proof, package identity, hosted CI,
 Arcade, wiki, push, merge, tag, publish, certification, and release-ready
 actions remain outside this implementation slice and were not performed.
+
+## External software schema 1.3 source/test slice
+
+- Owner report ID: `TPM_GAME_SUPPORT_CONTRACTS_001`.
+- Slice contract: `TPM-GAME-SUPPORT-CONTRACTS-001`.
+- Scope: additive Contract/Registry 1.3 and Assessment 1.1 schemas,
+  provenance normalization, source validators/generators, and focused
+  permanent tests.
+- Source files: the three new schemas, `scripts/TPMGameSupport.Contracts.psm1`,
+  `scripts/TPMGameSupport.Assessments.psm1`,
+  `scripts/New-TpmGameSupportContracts.ps1`, and
+  `scripts/New-TpmSupportPostureCorpus.ps1`.
+- Test files: `Tests/TPMGameSupport.Contracts.Tests.ps1`,
+  `Tests/TPMGameSupport.Assessments.Tests.ps1`, and
+  `Tests/SupportPostureCorpus.Tests.ps1`.
+- Disposition: source/test implementation only; owner runtime evidence is not
+  applicable to this schema-only handoff and remains a required future gate
+  before any runtime or release consumption.
+- Forbidden: product menu/install/repair/launch integration, installer
+  execution, download, redistribution, EULA acceptance, package rebuild,
+  commit, push, merge, tag, publish, certification, or release authorization.

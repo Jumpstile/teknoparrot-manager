@@ -114,3 +114,98 @@ Describe 'GameSupportAssessmentV1' {
         ($contract | ConvertTo-Json -Depth 30) | Should -Be $before
     }
 }
+
+Describe 'GameSupportAssessmentV1.1 external software' {
+    BeforeAll {
+        $showdownProfile = ConvertFrom-Json ($profile | ConvertTo-Json -Depth 30)
+        $showdownProfile.ProfileCode = 'Showdown'
+        $showdownProfile.ProfileFileName = 'Showdown.xml'
+        $showdownProfile.GameTitle = 'Showdown'
+        $showdownProfile.EmulationProfile = 'GRID'
+        $showdownProfile.EmulatorType = 'TeknoParrot'
+        $showdownProfile | Add-Member -NotePropertyName SetupEvidence -NotePropertyValue ([pscustomobject]@{ Available = $true; RelativePath = 'GameSetup' })
+        $showdownContract = New-TPMGameSupportContractV13 -Profile $showdownProfile -SnapshotId 'ASSESSMENT-EXTERNAL-SNAPSHOT' -CapturedAtUtc '2026-01-01T00:00:00Z'
+        $showdownAssessment = New-TPMGameSupportAssessmentV11 -Contract $showdownContract -EvaluatedAtUtc '2026-01-02T00:00:00Z' -TargetIdentity 'showdown-fixture'
+    }
+
+    It 'emits an unevaluated Showdown assessment without fabricating runtime observations' {
+        $showdownAssessment.SchemaVersion | Should -Be '1.1.0'
+        $showdownAssessment.ContractSchemaVersion | Should -Be '1.3.0'
+        $showdownAssessment.ExternalSoftware.Overall | Should -Be 'NOT_EVALUATED'
+        $item = $showdownAssessment.ExternalSoftware.Items[0]
+        $item.RequirementStatus | Should -Be 'NOT_EVALUATED'
+        $item.InstalledState | Should -Be 'NOT_EVALUATED'
+        $item.VersionState | Should -Be 'NOT_DECLARED'
+        $item.ArchitectureState | Should -Be 'NOT_EVALUATED'
+        $item.SourceState | Should -Be 'NOT_EVALUATED'
+        $item.HashState | Should -Be 'NOT_DECLARED'
+        $item.ObservedInstallPath | Should -BeNullOrEmpty
+        $item.ObservedVersion | Should -BeNullOrEmpty
+        $item.ObservedArchitecture | Should -BeNullOrEmpty
+        $item.ObservedSource | Should -BeNullOrEmpty
+        $item.ObservedSha256 | Should -BeNullOrEmpty
+        @($item.EvidenceRefs).Count | Should -Be 0
+        (Test-TPMGameSupportAssessmentV1 -Assessment $showdownAssessment -Contract $showdownContract).Valid | Should -BeTrue
+    }
+
+    It 'blocks a required external dependency when absent' {
+        $copy = ConvertFrom-Json ($showdownAssessment | ConvertTo-Json -Depth 40)
+        $copy.ExternalSoftware.Items[0].InstalledState = 'ABSENT'
+        $copy.ExternalSoftware.Items[0].RequirementStatus = 'BLOCKED'
+        $copy.ExternalSoftware.Overall = 'BLOCKED'
+        (Test-TPMGameSupportAssessmentV1 -Assessment $copy -Contract $showdownContract).Valid | Should -BeTrue
+    }
+
+    It 'keeps a present but unverified dependency in review' {
+        $copy = ConvertFrom-Json ($showdownAssessment | ConvertTo-Json -Depth 40)
+        $copy.ExternalSoftware.Items[0].InstalledState = 'PRESENT'
+        $copy.ExternalSoftware.Items[0].SourceState = 'UNVERIFIED'
+        $copy.ExternalSoftware.Items[0].RequirementStatus = 'REVIEW'
+        $copy.ExternalSoftware.Overall = 'REVIEW'
+        (Test-TPMGameSupportAssessmentV1 -Assessment $copy -Contract $showdownContract).Valid | Should -BeTrue
+    }
+
+    It 'allows a fully verified dependency to become satisfied without a hash declaration' {
+        $copy = ConvertFrom-Json ($showdownAssessment | ConvertTo-Json -Depth 40)
+        $item = $copy.ExternalSoftware.Items[0]
+        $item.InstalledState = 'PRESENT'
+        $item.VersionState = 'NOT_DECLARED'
+        $item.ArchitectureState = 'NOT_APPLICABLE'
+        $item.SourceState = 'VERIFIED'
+        $item.HashState = 'NOT_DECLARED'
+        $item.RequirementStatus = 'SATISFIED'
+        $copy.ExternalSoftware.Overall = 'SATISFIED'
+        (Test-TPMGameSupportAssessmentV1 -Assessment $copy -Contract $showdownContract).Valid | Should -BeTrue
+    }
+
+    It 'blocks a required dependency with a mismatched version' {
+        $copy = ConvertFrom-Json ($showdownAssessment | ConvertTo-Json -Depth 40)
+        $copy.ExternalSoftware.Items[0].InstalledState = 'PRESENT'
+        $copy.ExternalSoftware.Items[0].VersionState = 'MISMATCHED'
+        $copy.ExternalSoftware.Items[0].RequirementStatus = 'BLOCKED'
+        $copy.ExternalSoftware.Overall = 'BLOCKED'
+        (Test-TPMGameSupportAssessmentV1 -Assessment $copy -Contract $showdownContract).Valid | Should -BeTrue
+    }
+
+    It 'rejects unsupported assessment versions and stale external bindings' {
+        $unsupported = ConvertFrom-Json ($showdownAssessment | ConvertTo-Json -Depth 40)
+        $unsupported.SchemaVersion = '9.9.9'
+        (Test-TPMGameSupportAssessmentV1 -Assessment $unsupported -Contract $showdownContract).Valid | Should -BeFalse
+        $stale = ConvertFrom-Json ($showdownAssessment | ConvertTo-Json -Depth 40)
+        $stale.ContractSnapshotId = 'STALE'
+        (Test-TPMGameSupportAssessmentV1 -Assessment $stale -Contract $showdownContract).Valid | Should -BeFalse
+    }
+    It 'fails closed for unsupported assessment and contract version combinations' {
+        $v11WithV12Contract = ConvertFrom-Json ($showdownAssessment | ConvertTo-Json -Depth 40)
+        $v11WithV12Contract.ContractSchemaVersion = '1.2.0'
+        (Test-TPMGameSupportAssessmentV1 -Assessment $v11WithV12Contract -Contract $contract).Valid | Should -BeFalse
+
+        $v10WithV13Contract = ConvertFrom-Json ($assessment | ConvertTo-Json -Depth 40)
+        (Test-TPMGameSupportAssessmentV1 -Assessment $v10WithV13Contract -Contract $showdownContract).Valid | Should -BeFalse
+    }
+
+    It 'keeps the immutable 1.0 assessment path valid' {
+        $assessment.ContractSchemaVersion | Should -Be '1.2.0'
+        (Test-TPMGameSupportAssessmentV1 -Assessment $assessment -Contract $contract).Valid | Should -BeTrue
+    }
+}

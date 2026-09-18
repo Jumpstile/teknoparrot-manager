@@ -132,6 +132,8 @@ Describe 'TPM support posture corpus' {
     It 'emits a validated contract registry aligned with the support posture snapshot' {
         $registry = Get-Content -LiteralPath (Join-Path $outputOne 'game-support-contracts.json') -Raw | ConvertFrom-Json
         $model = Get-Content -LiteralPath (Join-Path $outputOne 'support-posture.json') -Raw | ConvertFrom-Json
+        $registry.SchemaVersion | Should -Be '1.3.0'
+        @($registry.Contracts | Where-Object { $_.Prerequisites.ExternalSoftware.DeclarationState -eq 'NOT_DECLARED' -and @($_.Prerequisites.ExternalSoftware.Items).Count -eq 0 }).Count | Should -Be $model.ProfileCount
         $registry.ContractCount | Should -Be $model.ProfileCount
         $registry.SnapshotId | Should -Be $model.SnapshotId
         @($registry.Contracts).Count | Should -Be $model.ProfileCount
