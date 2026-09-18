@@ -58,6 +58,106 @@ jobs:
           }
           Write-Host "PSScriptAnalyzer passed: 0 findings."
 
+      - name: GameSupport schema JSON validation
+        shell: powershell
+        run: |
+          $schemaRelativePaths = @(
+            'contracts\_schema\GameSupportAssessmentV1.schema.json',
+            'contracts\_schema\GameSupportContractV1.1.schema.json',
+            'contracts\_schema\GameSupportContractV1.2.schema.json',
+            'contracts\_schema\GameSupportContractV1.schema.json',
+            'contracts\_schema\GameSupportContractRegistryV1.1.schema.json',
+            'contracts\_schema\GameSupportContractRegistryV1.2.schema.json',
+            'contracts\_schema\GameSupportContractRegistryV1.schema.json'
+          )
+          foreach ($relativePath in $schemaRelativePaths) {
+            $schemaPath = Join-Path $env:GITHUB_WORKSPACE $relativePath
+            if (-not (Test-Path -LiteralPath $schemaPath -PathType Leaf)) {
+              throw "Schema file is missing: $relativePath"
+            }
+            Get-Content -LiteralPath $schemaPath -Raw | ConvertFrom-Json -ErrorAction Stop | Out-Null
+          }
+          Write-Host "GameSupport schema JSON validation passed: $($schemaRelativePaths.Count) files."
+
+      - name: Deterministic GameSupport 1.2 generation
+        shell: powershell
+        env:
+          TPM_UPSTREAM_SHA: 5880e019016c5c3a0576e97a6c2a7f14bf54e3d1
+        run: |
+          $upstreamUrl = 'https://github.com/teknogods/TeknoParrotUI.git'
+          $upstreamRoot = Join-Path $env:RUNNER_TEMP 'tpm-pinned-teknoparrotui'
+          $profileRoot = Join-Path $upstreamRoot 'TeknoParrotUi.Common\GameProfiles'
+          $outputOne = Join-Path $env:RUNNER_TEMP 'tpm-game-support-ci-one'
+          $outputTwo = Join-Path $env:RUNNER_TEMP 'tpm-game-support-ci-two'
+          $generator = Join-Path $env:GITHUB_WORKSPACE 'scripts\New-TpmSupportPostureCorpus.ps1'
+          if (Test-Path -LiteralPath $upstreamRoot) { Remove-Item -LiteralPath $upstreamRoot -Recurse -Force }
+          if (Test-Path -LiteralPath $outputOne) { Remove-Item -LiteralPath $outputOne -Recurse -Force }
+          if (Test-Path -LiteralPath $outputTwo) { Remove-Item -LiteralPath $outputTwo -Recurse -Force }
+          git clone --no-checkout --filter=blob:none $upstreamUrl $upstreamRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned TeknoParrotUI clone failed.' }
+          git -C $upstreamRoot fetch --depth 1 origin $env:TPM_UPSTREAM_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned TeknoParrotUI commit fetch failed.' }
+          git -C $upstreamRoot checkout --detach $env:TPM_UPSTREAM_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned TeknoParrotUI checkout failed.' }
+          $resolvedSha = (git -C $upstreamRoot rev-parse HEAD).Trim()
+          if ($resolvedSha -cne $env:TPM_UPSTREAM_SHA) { throw "Pinned source mismatch: expected $env:TPM_UPSTREAM_SHA, resolved $resolvedSha" }
+          if (-not (Test-Path -LiteralPath $profileRoot -PathType Container)) { throw "Pinned GameProfiles root is missing: $profileRoot" }
+          $profileCount = @(Get-ChildItem -LiteralPath $profileRoot -Filter '*.xml' -File).Count
+          if ($profileCount -ne 695) { throw "Pinned GameProfiles count mismatch: expected 695, found $profileCount" }
+          foreach ($outputRoot in @($outputOne, $outputTwo)) {
+            & $generator -UpstreamProfileRoot $profileRoot -UpstreamCommitSha $env:TPM_UPSTREAM_SHA -SnapshotId 'TPM-GAME-SUPPORT-CI-1_2' -CapturedAtUtc '2026-06-18T00:00:00Z' -OutputRoot $outputRoot | Out-Null
+            if (-not (Test-Path -LiteralPath (Join-Path $outputRoot 'game-support-contracts.json') -PathType Leaf)) { throw "Contract registry was not generated below $outputRoot" }
+            if (-not (Test-Path -LiteralPath (Join-Path $outputRoot 'game-support-contract-validation.json') -PathType Leaf)) { throw "Contract validation was not generated below $outputRoot" }
+          }
+          $registry = Get-Content -LiteralPath (Join-Path $outputOne 'game-support-contracts.json') -Raw | ConvertFrom-Json -ErrorAction Stop
+          $validation = Get-Content -LiteralPath (Join-Path $outputOne 'game-support-contract-validation.json') -Raw | ConvertFrom-Json -ErrorAction Stop
+          if ($registry.SchemaVersion -cne '1.2.0') { throw "Unexpected registry schema version: $($registry.SchemaVersion)" }
+          if ($registry.ContractCount -ne 695 -or @($registry.Contracts).Count -ne 695) { throw "Generated contract count mismatch: expected 695, found $($registry.ContractCount)" }
+          if (-not $validation.Valid) { throw 'Generated registry validation failed.' }
+          if (@($registry.Contracts | ForEach-Object ProfileCode | Sort-Object -Unique).Count -ne 695) { throw 'Duplicate profile identities detected.' }
+          if (@($registry.Contracts | Where-Object ReleasePosture -eq 'UNCLASSIFIED').Count -ne 0) { throw 'UNCLASSIFIED contracts detected.' }
+          $expectedCxbxrProfiles = @('CTHR', 'GBOS', 'HOTD3', 'OllieKing', 'or2', 'or2b', 'or2sp', 'SGC05', 'SGC06', 'vc3', 'WMMT1', 'WMMT1J', 'WMMT2', 'WMMT2j')
+          $expectedCxbxrFiles = @(
+            [ordered]@{ FileName = 'ic10_g24lc64.bin'; Path = 'cxbxr/TeknoParrot/EmuMediaBoard/Chihiro/ic10_g24lc64.bin' },
+            [ordered]@{ FileName = 'pc20_g24lc64.bin'; Path = 'cxbxr/TeknoParrot/EmuMediaBoard/Chihiro/pc20_g24lc64.bin' },
+            [ordered]@{ FileName = 'ic11_24lc024.bin'; Path = 'cxbxr/TeknoParrot/EmuMediaBoard/Chihiro/ic11_24lc024.bin' },
+            [ordered]@{ FileName = 'fpr21042_m29w160et.bin'; Path = 'cxbxr/TeknoParrot/EmuMediaBoard/Chihiro/fpr21042_m29w160et.bin' }
+          )
+          $audit = @($registry.BackendDerivationAudit)[0]
+          if ([int]$audit.MatchedCount -ne 14) { throw "cxbxr audit count mismatch: expected 14, found $($audit.MatchedCount)" }
+          if ((@($audit.MatchedProfileCodes | Sort-Object) -join '|') -cne ($expectedCxbxrProfiles -join '|')) { throw 'cxbxr audit profile set mismatch.' }
+          $cxbxrContracts = @($registry.Contracts | Where-Object EmulatorType -ieq 'cxbxr')
+          if ($cxbxrContracts.Count -ne 14) { throw "cxbxr contract count mismatch: expected 14, found $($cxbxrContracts.Count)" }
+          foreach ($contract in $cxbxrContracts) {
+            $items = @($contract.Prerequisites.SupportFiles.Items)
+            if ($items.Count -ne 4) { throw "cxbxr prerequisite count mismatch for $($contract.ProfileCode)." }
+            $actualFiles = @($items | ForEach-Object FileName | Sort-Object)
+            $actualPaths = @($items | ForEach-Object ExpectedRelativePath | Sort-Object)
+            if (($actualFiles -join '|') -cne (($expectedCxbxrFiles | ForEach-Object FileName | Sort-Object) -join '|')) { throw "cxbxr file set mismatch for $($contract.ProfileCode)." }
+            if (($actualPaths -join '|') -cne (($expectedCxbxrFiles | ForEach-Object Path | Sort-Object) -join '|')) { throw "cxbxr path set mismatch for $($contract.ProfileCode)." }
+          }
+          function Get-ArtifactHashes {
+            param([string]$Root)
+            $rootFull = ([System.IO.Path]::GetFullPath($Root)).TrimEnd('\') + '\'
+            $hashes = [ordered]@{}
+            foreach ($file in @(Get-ChildItem -LiteralPath $Root -Recurse -File)) {
+              if (-not $file.FullName.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Generated artifact escaped output root: $($file.FullName)" }
+              $relative = $file.FullName.Substring($rootFull.Length).Replace('\', '/')
+              $hashes[$relative] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+            }
+            return $hashes
+          }
+          $hashesOne = Get-ArtifactHashes -Root $outputOne
+          $hashesTwo = Get-ArtifactHashes -Root $outputTwo
+          if ($hashesOne.Count -ne $hashesTwo.Count) { throw 'Deterministic generation file-count mismatch.' }
+          foreach ($path in $hashesOne.Keys) {
+            if (-not $hashesTwo.Contains($path) -or $hashesOne[$path] -cne $hashesTwo[$path]) { throw "Deterministic generation mismatch: $path" }
+          }
+          $checkoutArtifacts = @(Get-ChildItem -LiteralPath $env:GITHUB_WORKSPACE -Recurse -File -Force | Where-Object { $_.Name -in @('game-support-contracts.json', 'game-support-contract-validation.json', 'pester-results.xml') })
+          if ($checkoutArtifacts.Count -ne 0) { throw 'Generated CI artifacts contaminated the checkout.' }
+          Write-Host "Pinned source verified: $resolvedSha"
+          Write-Host "Deterministic GameSupport generation passed: 695 profiles, 695 contracts, 14 cxbxr profiles."
+
       - name: Install Pester
         shell: powershell
         run: Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0
@@ -69,7 +169,11 @@ jobs:
           $config = New-PesterConfiguration
           $config.Run.Path = @(
             "$PWD\Tests\TeknoParrot-Manager.Tests.ps1",
-            "$PWD\Tests\QualitySystem.Tests.ps1"
+            "$PWD\Tests\QualitySystem.Tests.ps1",
+            "$PWD\Tests\TPMGameSupport.Contracts.Tests.ps1",
+            "$PWD\Tests\TPMGameSupport.Assessments.Tests.ps1",
+            "$PWD\Tests\SupportPostureCorpus.Tests.ps1",
+            "$PWD\Tests\SupportPackage.Tests.ps1"
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
