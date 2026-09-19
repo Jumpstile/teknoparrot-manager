@@ -1,0 +1,50 @@
+TeknoParrot Manager / TeknoParrotUI troubleshooting
+
+Captured from the supplied support package and screen capture.
+
+Observed support-package flow:
+
+1. Choose Create Support Package.
+2. Choose Open TeknoParrot Manager Logs and Reports.
+3. Return to the main menu.
+
+Observed result:
+
+- The support ZIP was created successfully.
+- The success screen displayed a long internal explanation of failures,
+  missing optional diagnostics, exclusions, and collection counts.
+- The screen then offered an O/B choice and required another Enter after the
+  choice before returning to the main menu.
+- The requested user-facing result is shorter: confirm creation, show where
+  the ZIP was saved, say to send it with the affected workflow and game, and
+  return to the menu.
+
+Separate PostgreSQL recovery observation:
+
+- When the saved PostgreSQL password was rejected, choosing the reset path
+  caused the script to abort with: Unknown workflow step: postgres-password.
+- The password and reset prompts must remain inside the already active
+  PostgreSQL workflow step. They must not start undeclared nested workflow
+  steps or require a second acknowledgement after a submitted choice.
+
+Expected behavior:
+
+- Create Support Package reports only the result, saved path, and support
+  handoff instruction on the normal success screen.
+- A submitted B choice returns directly to the prior menu.
+- PostgreSQL password validation and reset continue through the existing
+  workflow status context without an unknown-step abort.
+- The detailed collection evidence remains in MANIFEST.txt and the log.
+
+Evidence:
+
+- Support package: TeknoParrotManager-Support-20260916-023133.zip
+- Support package SHA-256:
+  9C0AE394CF4CCA3B1782B40BA1CAF7C9B24B9E459376EEE039200AC7D256BB2B
+- Package manifest: 58 games considered, 4 diagnostic files, 62 plugin
+  inventories, 0 collection failures.
+
+Safety boundary:
+
+- This note contains no passwords, tokens, profile XML, game files, or
+  executable payloads.

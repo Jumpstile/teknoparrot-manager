@@ -1,0 +1,26 @@
+{
+    "RecordSchemaVersion":  "1.0.0",
+    "Repository":  "teknogods/TeknoParrotUI",
+    "Commit":  "dc998e374608abbda373bb3c236db5b26b5afca7",
+    "Tree":  "7266c43c829bfd2147247b2fae0167ec44116fc5",
+    "Role":  "Immutable semantic content proof; not official release provenance",
+    "CatalogPaths":  {
+                         "GameProfiles":  "TeknoParrotUi.Common/GameProfiles",
+                         "GameSetup":  "TeknoParrotUi.Common/GameSetup",
+                         "Metadata":  "TeknoParrotUi.Common/Metadata"
+                     },
+    "SemanticEquality":  {
+                             "GameProfilesCompared":  925,
+                             "GameSetupCompared":  383,
+                             "MetadataCompared":  923,
+                             "MismatchCount":  0
+                         },
+    "ApplicationCodeChangedInProofCommit":  [
+                                                "TeknoParrotUi.Common/GameProfile.cs",
+                                                "TeknoParrotUi.Common/JoystickMapping.cs",
+                                                "TeknoParrotUi/GameProfileLoader.cs",
+                                                "TeknoParrotUi/Helpers/JoystickControlDirectInput.cs",
+                                                "TeknoParrotUi/JoystickHelper.cs"
+                                            ],
+    "RuntimeScope":  "Recorded for later joystick/profile-loading/FFB compatibility work; not implemented in Slice 0."
+}

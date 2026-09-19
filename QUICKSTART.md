@@ -133,7 +133,8 @@ cursor-control output.
 ## Create Support Package
 
 If you need help, choose **Create Support Package**. TPM collects safe logs and
-reports for you, checks private information, and creates one ZIP in
+reports for you, including per-file ReShade ownership/removal scan and
+transaction details, checks private information, and creates one ZIP in
 `SupportPackages\` beside the script. Send that ZIP when asking for help.
 
 The package may include allowlisted TPM and TeknoParrot text logs, safe
@@ -207,6 +208,18 @@ Run mode 4 again any time to change designs. Add your own PNG files to the `Cros
 ## ReShade Visual Enhancements
 
 ReShade adds post-processing effects without modifying game data. TPM does not automatically remove unowned or changed hook files; use the advanced troubleshooting path for those files.
+
+To remove ReShade, choose `R` from mode 5. The filtered chooser contains only
+games with verified removable or protected findings. The preview enumerates
+each file that will be removed and each protected file that will be kept. TPM
+requires typing `REMOVE`; cancel/back performs no deletion. Only unchanged
+TPM-owned files inside the resolved ReShade target are eligible. Immediately
+before backup and deletion, TPM re-reads the profile, re-resolves the target,
+and rechecks canonical non-reparse leaf containment and the exact hash. A
+verified backup is created before deletion. Bundled, preinstalled, unowned,
+ambiguous, changed, malformed, and out-of-target files remain protected. The
+final report separates removed, already-clean, missing-path, protected, changed, malformed,
+rolled-back, and failed outcomes.
 
 **Popular effects:**
 
@@ -325,38 +338,39 @@ Mode 13 manually checks the latest GitHub release against the version you are ru
 
 ## LaunchBox Integration
 
-At the end of most runs:
+At the end of most normal interactive runs:
 
 ```
-Add your registered games to LaunchBox now? (Y/N)
+[P] Preview only  [A] Add/update now  [F] Manual import/reference file  [B] Back
 ```
 
-Answer Y to write directly into LaunchBox's own library — no import wizard needed. The script checks LaunchBox/BigBox are closed first, backs up the files it's about to change, and never duplicates a game already there. The first time you use it, choose how games should appear:
+`P` previews without changing LaunchBox, `A` writes directly into LaunchBox's
+own library after the close/backup checks, `F` creates the reference file
+without a LaunchBox write, and `B` skips the optional LaunchBox step. The first
+time you use direct integration, choose how games should appear:
 
 1. Mixed into your existing **Arcade** platform
 2. A separate **TeknoParrot** platform
 3. A platform with a **name you choose**
 4. **Both** Arcade and a dedicated platform at once
 
-Your choice is remembered for next time. New entries have no box art/metadata yet — use LaunchBox's own "Search"/re-scrape per game.
+Your choice is remembered for next time. New entries have no box art/metadata
+yet -- use LaunchBox's own "Search"/re-scrape per game.
 
-Prefer not to let the script touch LaunchBox directly? Answer N, then Y to the next prompt for the older `TeknoParrot-LaunchBox-Import.xml` manual-import file and wizard instructions instead.
+Prefer not to let the script touch LaunchBox directly? Choose `F` for the
+manual `TeknoParrot-LaunchBox-Import.xml` file and wizard instructions.
 
 ---
-
 ## HyperSpin 2 Export
 
-At the end of every run:
+At the end of RC8 runs the normal HyperSpin path is guidance-only:
+TPM does not start a HyperSpin export or write HyperSpin files. The message
+directs operators to the HyperSpin 2 plugin.
 
-```
-Export registered games to HyperSpin 2? (Y/N)
-```
-
-Answer Y to merge every registered game not already present into HyperSpin 2's TeknoParrot game list (default data folder: `C:\ProgramData\HyperSpin\data`). Your path is saved and reused on future runs.
-
-**Prerequisites:** TeknoParrot must be set up as an emulator in HyperSpin 2 first — the emulator title must contain "TeknoParrot" (spacing and capitalisation variations are fine). HyperSpin 2 must not be running when you answer Y.
-
-Games are added with title only. Use HyperSpin 2's Scrape feature for box art and metadata.
+There is no end-of-run HyperSpin export prompt in RC8. TPM does not
+synthesize an emulator ID or write game associations in the normal flow.
+Use HyperSpin 2's Scrape feature for box art and metadata after the plugin
+manages entries.
 
 ---
 
@@ -451,13 +465,21 @@ Answer Y to fetch ProfileCode.png for every registered game not already in <Tekn
 
 ## Library Health Check
 
-Mode 10 is a **read-only** status check — it never extracts, registers, repairs, propagates, or touches the network. Safe to run any time. Reports:
+Mode 10 is a **read-only** status check. It reports valid/broken/empty
+`GamePath` counts with affected profile codes, GPU fix / FFB Blaster /
+dgVoodoo2 / Postgres coverage, and informational ReShade / BepInEx counts.
+TPM explicitly says that it checked your setup and did not change anything.
 
-- Registered/broken/empty `GamePath` counts, with affected profile codes listed
-- GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage — which eligible games don't have each applied yet
-- ReShade / BepInEx install counts, informationally (these are cosmetic per-game choices, not flagged as something to fix)
+For broken saved paths, the result screen offers **R** automatic repair
+(known-folder search plus confirmation) and **M** manual repair (you select
+the exact executable; TPM never guesses). It creates a complete profile backup
+before a confirmed path repair. It also offers **P** PostgreSQL setup when
+needed and direct **5** ReShade, **6** dgVoodoo2, **7** GPU Fix, **8** Force
+Feedback, and **9** BepInEx actions. **D** shows technical details and **B**
+returns to the menu. No repair or setup starts until you choose an action.
 
-Third-party FFB plugin coverage isn't included here (checking it needs a live lookup) — use mode 8 for that instead.
+Third-party FFB plugin coverage isn't included here because checking it needs a
+live lookup; choose **8** for that instead.
 
 ---
 

@@ -281,7 +281,7 @@ Describe "Write-Log" {
 Describe "Issue #217 AutoSync first-run guidance" {
     It "explains the staging folder role before path selection" {
         $script:ProductionSource | Should -Match "Game installation folder \(staging folder\)"
-        $script:ProductionSource | Should -Match "This is where TPM extracts and installs games"
+        $script:ProductionSource | Should -Match "This is where TeknoParrot Manager extracts and installs games"
         $script:ProductionSource | Should -Match "Your original ZIPs stay where they are"
         $script:ProductionSource | Should -Match "Press Enter to use this location, or B to choose another"
     }
@@ -470,7 +470,7 @@ Describe "Beginner-clarity RC wording (optional-download explanations, first-run
         $script:ProductionSource | Should -Match ([regex]::Escape("(TeknoParrot Manager can download Eggman's TeknoParrot DAT file, to be used for game recognition and to help recognize"))
         $script:ProductionSource | Should -Match ([regex]::Escape("renamed or oddly named games. These are not the games themselves -- TeknoParrot Manager never downloads any game data)"))
         $script:ProductionSource | Should -Match ([regex]::Escape("D) Download (default)"))
-        $script:ProductionSource | Should -Not -Match "highly recommended|Game-recognition index file|TPM will normally store|Without one, a few games"
+        $script:ProductionSource | Should -Not -Match "highly recommended|Game-recognition index file|TeknoParrot Manager will normally store|Without one, a few games"
         $script:ProductionSource | Should -Not -Match "Download the latest from Eggman's Repository"
     }
     It "defers the supplementary-dat follow-up out of the initial wizard, with a note rather than a blocking Y/N" {
@@ -479,7 +479,7 @@ Describe "Beginner-clarity RC wording (optional-download explanations, first-run
         # the actual offer only appears afterward as a targeted, context-
         # aware post-run recommendation (see the next Describe block).
         $script:ProductionSource | Should -Match ([regex]::Escape("extra version-info file (supplementary dat)"))
-        $script:ProductionSource | Should -Match ([regex]::Escape("TPM will recommend it then"))
+        $script:ProductionSource | Should -Match ([regex]::Escape("TeknoParrot Manager will recommend it then"))
     }
     It "clarifies thumbnail download is box art only, not game data" {
         $script:ProductionSource | Should -Match "This downloads small box-art icons only, never the games themselves"
@@ -548,6 +548,32 @@ Describe "Test-PathInside" {
     }
     It "is case-insensitive" {
         Test-PathInside "c:\foo\bar\baz.txt" "C:\Foo\Bar" | Should -BeTrue
+    }
+}
+Describe "Test-TpmGameMutationPath" {
+    It "accepts an existing executable and returns one resolved target" {
+        $root = Join-Path $TestDrive 'game-path-valid'
+        [IO.Directory]::CreateDirectory($root) | Out-Null
+        $exe = Join-Path $root 'game.exe'
+        [IO.File]::WriteAllText($exe, 'fixture')
+        $result = Test-TpmGameMutationPath -GamePath $exe -RequireLeaf
+        $result.Valid | Should -BeTrue
+        $result.ReasonCode | Should -Be 'VALID'
+        $result.ResolvedPath | Should -Be ([IO.Path]::GetFullPath($exe))
+        $result.GameDirectory | Should -Be ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($exe)))
+    }
+    It "classifies a missing executable separately from an unavailable device" {
+        $root = Join-Path $TestDrive 'game-path-missing'
+        [IO.Directory]::CreateDirectory($root) | Out-Null
+        (Test-TpmGameMutationPath -GamePath (Join-Path $root 'missing.exe') -RequireLeaf).ReasonCode | Should -Be 'GAME_PATH_MISSING'
+        $missingDevice = $null
+        foreach ($letter in @('Z','Y','X','W','V')) {
+            if (-not (Test-Path -LiteralPath ($letter + ':\') -PathType Container)) { $missingDevice = $letter + ':\missing\game.exe'; break }
+        }
+        if ($missingDevice) {
+            $deviceResult = Test-TpmGameMutationPath -GamePath $missingDevice -RequireLeaf
+            $deviceResult.ReasonCode | Should -Be 'DEVICE_UNAVAILABLE'
+        }
     }
 }
 
@@ -936,6 +962,58 @@ Describe "Read-HostSafe / Exit-TpmProcess (issue #135: non-interactive input)" {
         { (Read-HostSafe -Prompt 'Continue?').ToUpper() } | Should -Not -Throw
     }
 }
+Describe "Format-TpmPrompt / shared one-letter prompt rendering" {
+    It "puts choices immediately before a single input prompt without a caller-supplied colon" {
+        Format-TpmPrompt -Prompt '  Choose Y or N:  ' | Should -Be 'Choose Y or N'
+    }
+
+    It "removes awkward punctuation while preserving beginner-friendly prompt text" {
+        Format-TpmPrompt -Prompt '  Choice.:  ' | Should -Be 'Choice'
+        Format-TpmPrompt -Prompt '  Choice  ' | Should -Be 'Choice'
+    }
+
+    It "passes the normalized prompt to Read-Host and keeps the default contract" {
+        $script:capturedPrompt = $null
+        Mock Read-Host { param($Prompt); $script:capturedPrompt = $Prompt; return '' }
+        Read-HostSafe -Prompt '  [Y] Apply  [N] Cancel:  ' -Default 'Y' | Should -Be 'Y'
+        $script:capturedPrompt | Should -Be '[Y] Apply  [N] Cancel'
+    }
+
+    It "keeps invalid-input redraws on the same normalized prompt path" {
+        $script:capturedPrompts = [System.Collections.Generic.List[string]]::new()
+        Mock Read-Host {
+            param($Prompt)
+            [void]$script:capturedPrompts.Add($Prompt)
+            if ($script:capturedPrompts.Count -eq 1) { return 'X' }
+            return 'Y'
+        }
+        $first = Read-HostSafe -Prompt '  [Y] Yes  [N] No:'
+        $second = Read-HostSafe -Prompt '  [Y] Yes  [N] No:'
+        $first | Should -Be 'X'
+        $second | Should -Be 'Y'
+        @($script:capturedPrompts) | Should -Be @('[Y] Yes  [N] No', '[Y] Yes  [N] No')
+    }
+    It "clears the active status footer before input without redrawing after the answer" {
+        $script:promptEvents = [System.Collections.Generic.List[string]]::new()
+        $script:ActiveTpmWorkflowStatus = [pscustomobject]@{ RendererMode = 'CursorFooter'; FooterBounds = $null }
+        Mock Clear-TpmWorkflowFooter { [void]$script:promptEvents.Add('clear') }
+        Mock Render-TpmWorkflowStatus { [void]$script:promptEvents.Add('render') }
+        Mock Read-Host {
+            param($Prompt)
+            [void]$script:promptEvents.Add('read')
+            $Prompt | Should -Be '[Y] Apply  [N] Cancel'
+            return 'Y'
+        }
+
+        try {
+            Read-HostSafe -Prompt '  [Y] Apply  [N] Cancel:' | Should -Be 'Y'
+            @($script:promptEvents) | Should -Be @('clear', 'read')
+        } finally {
+            $script:ActiveTpmWorkflowStatus = $null
+        }
+    }
+}
+
 
 Describe "Read-HostSafe -Default contract (onboarding flow restructuring)" {
     # Strict, explicitly-tested non-interactive-safety contract for the
@@ -978,7 +1056,88 @@ Describe "Read-HostSafe -Default contract (onboarding flow restructuring)" {
         Read-HostSafe -Prompt 'Continue?' | Should -Be ''
     }
 }
+Describe "Read-TpmYesNo validation" {
+    It "rejects an invalid answer and accepts the next explicit Y or N answer" {
+        $script:yesNoInputs = [System.Collections.Generic.Queue[string]]::new()
+        [void]$script:yesNoInputs.Enqueue('Q')
+        [void]$script:yesNoInputs.Enqueue('Y')
+        Mock Read-Host { $script:yesNoInputs.Dequeue() }
+        Mock Write-Host {}
+        Read-TpmYesNo -Prompt 'Continue? (Y/N)' | Should -Be 'Y'
+        Should -Invoke Read-Host -Times 2 -Exactly
+    }
+    It "uses the workflow input renderer when a context is supplied" {
+        Mock Read-TpmWorkflowInput { 'Y' }
+        Read-TpmYesNo -Prompt 'Continue? (Y/N)' -WorkflowContext ([pscustomobject]@{ Closed = $false }) | Should -Be 'Y'
+        Should -Invoke Read-TpmWorkflowInput -Times 1 -Exactly
+    }
+}
+Describe "Read-TpmChoice validation" {
+    It "rejects an invalid answer, normalizes case, and accepts the next allowed choice" {
+        $script:choiceInputs = [System.Collections.Generic.Queue[string]]::new()
+        [void]$script:choiceInputs.Enqueue('Q')
+        [void]$script:choiceInputs.Enqueue('b')
+        Mock Read-Host { $script:choiceInputs.Dequeue() }
+        Mock Write-Host {}
 
+        Read-TpmChoice -Prompt 'Choose A or B' -Choices @('a', 'B') | Should -Be 'B'
+
+        Should -Invoke Read-Host -Times 2 -Exactly
+        Should -Invoke Write-Host -Times 1 -Exactly
+    }
+
+    It "uses an allowed default for a blank answer" {
+        Mock Read-Host { return '' }
+        Read-TpmChoice -Prompt 'Choose A or B' -Choices @('A', 'B') -Default 'b' | Should -Be 'B'
+    }
+}
+
+
+Describe "Prompt.Core fixed choice routes" {
+    It "centralizes enumerated choices for HyperSpin, LaunchBox, Support, and detected roots" {
+        $script:ProductionSource | Should -Match '\$missingIdChoice = Read-TpmChoice'
+        $script:ProductionSource | Should -Match '\$lbChoice = Read-TpmChoice'
+        $script:ProductionSource | Should -Match '\$platChoice = Read-TpmChoice'
+        $script:ProductionSource | Should -Match '\$supportChoice = Read-TpmChoice'
+        $script:ProductionSource | Should -Match '\$rootChoices = @\(''N''\)'
+        $script:ProductionSource | Should -Match '\$pick = Read-TpmChoice'
+        $script:ProductionSource | Should -Match '\[A\] Check all games'
+        $script:ProductionSource | Should -Match '\[B\] Back'
+    }
+
+    It "keeps HyperSpin export out of normal completion and leaves plugin guidance" {
+        $normalStart = $script:ProductionSource.IndexOf('# HYPERSPIN 2 PLUGIN GUIDANCE')
+        $crosshairStart = $script:ProductionSource.IndexOf('# CROSSHAIR SETUP', $normalStart)
+        $normalStart | Should -BeGreaterOrEqual 0
+        $crosshairStart | Should -BeGreaterThan $normalStart
+        $normalBlock = $script:ProductionSource.Substring($normalStart, $crosshairStart - $normalStart)
+        $normalBlock | Should -Match 'guidance-only'
+        $normalBlock | Should -Not -Match 'Export-HyperSpinJson'
+    }
+
+    It "returns directly after the support package result without a second choice" {
+        $supportStart = $script:ProductionSource.IndexOf('if ($mode -eq "Support")', [StringComparison]::Ordinal)
+        $nextModeStart = $script:ProductionSource.IndexOf('if ($mode -eq "PropagateControls")', $supportStart, [StringComparison]::Ordinal)
+        $supportStart | Should -BeGreaterOrEqual 0
+        $nextModeStart | Should -BeGreaterThan $supportStart
+        $supportMode = $script:ProductionSource.Substring($supportStart, $nextModeStart - $supportStart)
+        $supportMode | Should -Not -Match '\$openPackage = Read-TpmChoice'
+        $supportMode | Should -Not -Match "Start-Process -FilePath 'explorer\.exe'"
+        $supportMode | Should -Not -Match 'Press Enter to return to the menu'
+    }
+
+    It "documents specialized stateful and non-enumerated prompt boundaries" {
+        $source = $script:ProductionSource
+        foreach ($functionName in @('Select-GamesInteractive', 'Select-GamesInteractiveCombined', 'Read-TpmReShadeTerminalProfile', 'Invoke-CrosshairSetup')) {
+            $start = $source.IndexOf(("function {0} " -f $functionName), [StringComparison]::Ordinal)
+            $start | Should -BeGreaterOrEqual 0
+        }
+        $source | Should -Match 'Read-TpmStagingFolder'
+        $source | Should -Match 'Read-Host.*-AsSecureString'
+        $source | Should -Match 'Type YES'
+        $source | Should -Match 'Type REMOVE'
+    }
+}
 Describe "Read-MainMenuChoiceResponsive redirected-input handling (issue #135)" {
     # Confirms the main menu prompt never enters the [Console]::KeyAvailable
     # polling loop when stdin is redirected (polling a keyboard that cannot
@@ -2598,6 +2757,96 @@ Describe "Expand-ZipFileSafe" {
         $dest = Join-Path $TestDrive "corrupt-out"
         { Expand-ZipFileSafe -ZipPath $zip -DestDir $dest } | Should -Throw
     }
+    It "uses compact TPM progress and preserves cleanup instead of a PowerShell progress panel" {
+        $source = $script:ProductionSource
+        $body = [regex]::Match($source, '(?s)function Expand-ZipFileSafe \{.*?\n\}').Value
+        $body | Should -Match 'Write-TpmCompactExtractionProgress'
+        $body | Should -Match '\$archive\.Dispose\(\)'
+        $body | Should -Not -Match 'Write-Progress'
+        $helper = [regex]::Match($source, '(?s)function Write-TpmCompactExtractionProgress \{.*?\n\}').Value
+        $helper | Should -Match '\[Console\]::Write'
+    }
+    It "renders bounded compact progress safely with redirected output" {
+        { Write-TpmCompactExtractionProgress -Label ('Game-' + ('x' * 120)) -Current 5 -Total 10 } | Should -Not -Throw
+        { Write-TpmCompactExtractionProgress -Label 'Game' -Current 5 -Total 0 -StartedAt (Get-Date).AddSeconds(-2) } | Should -Not -Throw
+        { Write-TpmCompactExtractionProgress -Label 'Game' -Current 5 -Total 10 -Complete } | Should -Not -Throw
+        $helper = [regex]::Match($script:ProductionSource, '(?s)function Get-TpmCompactProgressText \{.*?\n\}').Value
+        $script:ProductionSource | Should -Match 'IsOutputRedirected'
+        $helper | Should -Match 'PadRight'
+        $helper | Should -Match 'elapsed'
+    }
+    It "truncates compact progress to constrained width and shows elapsed heartbeat" {
+        $text = Get-TpmCompactProgressText -Label ('Game-' + ('x' * 200)) -Current 3 -Total 0 -StartedAt (Get-Date).AddSeconds(-2) -Width 40
+        $text.Length | Should -Be 40
+        $text | Should -Match 'elapsed [1-9]\d*\.\d+s'
+    }
+    It "returns the bounded row from the actual writer" {
+        $output = Write-TpmCompactExtractionProgress -Phase Scanning -Label ('Game-' + ('x' * 200)) -Current 1 -Total 2 -StartedAt (Get-Date).AddSeconds(-1) -Width 30 -ReturnText
+        $output.Length | Should -Be 30
+        $output | Should -Match 'elapsed'
+    }
+    It "executes compact progress cleanup when extraction fails" {
+        $zip = Join-Path $TestDrive "cleanup-failure.zip"
+        $dest = Join-Path $TestDrive "cleanup-failure-out"
+        New-TestZip $zip @{ "../escape.txt" = "evil" }
+        Mock Write-TpmCompactExtractionProgress {}
+        { Expand-ZipFileSafe -ZipPath $zip -DestDir $dest } | Should -Throw "*escapes destination folder*"
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
+    }
+}
+
+Describe "PR #321 Progress.Core source inventory" {
+    It "keeps long-running paths on compact progress or structured workflow status" {
+        $source = $script:ProductionSource
+        $source | Should -Not -Match '\bWrite-Progress\b'
+        foreach ($workflowKey in @('SupportPackage', 'FFBSetup', 'HealthCheck', 'PostgresSetup', 'ReShadeSetup', 'DgVoodoo2Setup', 'BepInEx')) {
+            $source | Should -Match ("WorkflowKey\s+'{0}'" -f [regex]::Escape($workflowKey))
+        }
+        $source | Should -Match 'Write-TpmCompactExtractionProgress -Phase Scanning'
+        $source | Should -Match 'Write-TpmCompactExtractionProgress -Phase Repairing'
+        $source | Should -Match 'Write-TpmDownloadProgress'
+        foreach ($pathMarker in @(
+            'function Select-GamesInteractive',
+            'function Invoke-AutoSync',
+            'function Register-Games',
+            'function Repair-GamePaths',
+            'function Invoke-ThumbnailDownload',
+            'function Get-TeknoParrotProfileSet',
+            'function Invoke-EggmanDatDownload',
+            'function Invoke-CheckForUpdates'
+        )) {
+            $source | Should -Match ([regex]::Escape($pathMarker))
+        }
+    }
+
+    It "keeps bounded waits and renderer-aware surfaces explicit" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'function Ensure-TeknoParrotProfilesReady'
+        $source | Should -Match 'function Wait-TpmForProcessClose'
+        $source | Should -Match 'function Get-TpmWorkflowConsoleCapability'
+        $source | Should -Match 'NoRender'
+        $source | Should -Match 'InputRedirected'
+        $source | Should -Match 'OutputRedirected'
+    }
+
+    It "does not reintroduce PowerShell progress or unbounded external waits" {
+        $source = $script:ProductionSource
+        $source | Should -Not -Match '\bWrite-Progress\b'
+        $source | Should -Not -Match 'while\s*\(\s*\$true\s*\)\s*\{[\s\S]{0,600}Start-Sleep'
+    }
+
+
+    It "classifies external waits as bounded waiting rather than fake percentage progress" {
+        $source = $script:ProductionSource
+        $profileWait = [regex]::Match($source, '(?s)function Ensure-TeknoParrotProfilesReady \{.*?\n\}').Value
+        $processWait = [regex]::Match($source, '(?s)function Wait-TpmForProcessClose \{.*?\n\}').Value
+        $profileWait | Should -Match 'AddSeconds\(120\)'
+        $profileWait | Should -Match 'needs TeknoParrot to finish its first setup'
+        $processWait | Should -Match 'AddSeconds\(30\)'
+        $processWait | Should -Match 'will not force-close'
+        $profileWait | Should -Not -Match 'Write-Progress'
+        $processWait | Should -Not -Match 'Write-Progress'
+    }
 }
 
 Describe "Test-DgVoodoo2UpToDate" {
@@ -2680,7 +2929,7 @@ Describe "Get-DgVoodoo2LatestRelease (URL allowlist + digest extraction)" {
         function Get-TpmHttpStatusCodeFromError { param($ErrorRecord) return 0 }
     }
     It "accepts a well-formed release with a safe github.com download URL and extracts the digest" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v2.87.3'
@@ -2700,7 +2949,7 @@ Describe "Get-DgVoodoo2LatestRelease (URL allowlist + digest extraction)" {
         $rel.ExpectedSha256 | Should -Be ('A' * 64)
     }
     It "never selects the dev or debug variant asset as the main ZIP" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v2.87.3'
@@ -2714,7 +2963,7 @@ Describe "Get-DgVoodoo2LatestRelease (URL allowlist + digest extraction)" {
         Get-DgVoodoo2LatestRelease | Should -BeNullOrEmpty
     }
     It "rejects a download URL on a host other than github.com" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v2.87.3'
@@ -2727,7 +2976,7 @@ Describe "Get-DgVoodoo2LatestRelease (URL allowlist + digest extraction)" {
         Get-DgVoodoo2LatestRelease | Should -BeNullOrEmpty
     }
     It "returns null (no ExpectedSha256) when the asset has no digest field, degrading gracefully" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v2.87.3'
@@ -4577,9 +4826,47 @@ Describe "Resolve-ExtractedGameFolder (issue #66 extraction prompt correctness)"
     }
 }
 
+Describe "AutoSync one-game registration behavior" {
+    It "scans and registers only the newly extracted folder" {
+        $root = Join-Path $TestDrive "one-game-registration"
+        $install = Join-Path $root "Games"
+        $profiles = Join-Path $root "Profiles"
+        New-Item -ItemType Directory -Path (Join-Path $install "Deathsmiles II"), (Join-Path $install "Unrelated"), $profiles -Force | Out-Null
+        $newExe = New-Item -ItemType File -Path (Join-Path $install "Deathsmiles II\game.exe") -Force
+        $oldExe = New-Item -ItemType File -Path (Join-Path $install "Unrelated\game.exe") -Force
+        $before = (Get-ChildItem -LiteralPath $install -Recurse -File | ForEach-Object FullName) -join "`n"
+        $script:scanRoots = @()
+        Mock Get-GameFiles { param($folder); $script:scanRoots += $folder; if ($folder -like '*Deathsmiles II') { @($newExe) } else { throw "Unexpected scan root: $folder" } }
+        Mock Write-Log {}
+        $result = Register-Games -userProfilesDir $profiles -installFolder $install -profileIndex @{} -gameProfilesDir $profiles -DryRun:$false -GameFolders @('Deathsmiles II')
+        $after = (Get-ChildItem -LiteralPath $install -Recurse -File | ForEach-Object FullName) -join "`n"
+        $before | Should -Be $after
+        $scanRoots.Count | Should -Be 1
+        $scanRoots[0] | Should -Not -Be ([System.IO.Path]::GetFullPath($install))
+        $scanRoots[0] | Should -Match 'Deathsmiles II$'
+        $result.Registered.Count | Should -Be 0
+        $result.Already.Count | Should -Be 0
+    }
+}
+
 Describe "Invoke-AutoSync extracted-folder regression guards" {
     BeforeAll {
         $script:OriginalAutoSyncRawThrillsPathLimits = $script:RawThrillsPathLimits
+        function New-AutoSyncRegressionZip {
+            param([string]$ZipPath, [hashtable]$Entries)
+            if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
+            $fs = [System.IO.File]::Open($ZipPath, [System.IO.FileMode]::CreateNew)
+            try {
+                $archive = [System.IO.Compression.ZipArchive]::new($fs, [System.IO.Compression.ZipArchiveMode]::Create)
+                try {
+                    foreach ($name in $Entries.Keys) {
+                        $entry = $archive.CreateEntry($name)
+                        $writer = New-Object System.IO.StreamWriter($entry.Open())
+                        try { $writer.Write([string]$Entries[$name]) } finally { $writer.Dispose() }
+                    }
+                } finally { $archive.Dispose() }
+            } finally { $fs.Dispose() }
+        }
     }
 
     BeforeEach {
@@ -4596,11 +4883,11 @@ Describe "Invoke-AutoSync extracted-folder regression guards" {
     It "does not extract when issue #66 resolver finds an existing RetroBat short-name folder" {
         $zipName = "Aliens Armageddon (1.04)(2014-11-17)[Raw Thrills PC][TP]"
         $zipPath = Join-Path $script:autoSyncZipSource ($zipName + ".zip")
-        Set-Content -LiteralPath $zipPath -Value "placeholder zip bytes"
+        New-AutoSyncRegressionZip $zipPath @{ 'game.exe' = 'content' }
 
         $existing = Join-Path $script:autoSyncInstallRoot "ALIENS.teknoparrot"
         New-Item -ItemType Directory -Path $existing -Force | Out-Null
-        Set-Content -LiteralPath (Join-Path $existing "game.exe") -Value "content"
+        [IO.File]::WriteAllText((Join-Path $existing 'game.exe'), 'content', (New-Object System.Text.UTF8Encoding $false))
         $script:RawThrillsPathLimits = @{
             AliensArmageddon = @{ Limit = 96; Suggested = 'ALIENS' }
         }
@@ -4613,11 +4900,77 @@ Describe "Invoke-AutoSync extracted-folder regression guards" {
         Mock Expand-ZipFileSafe { throw "AutoSync should not extract already-present games" }
 
         $result = Invoke-AutoSync -zipSource $script:autoSyncZipSource -installFolder $script:autoSyncInstallRoot -syncStatePath (Join-Path $TestDrive "sync.json") -retroBat $true -datIndex $datIndex
-
         $result.UpToDate | Should -Be 1
         $result.Synced | Should -Be 0
         Should -Invoke Expand-ZipFileSafe -Times 0
     }
+    It "filters scoped re-copy by DAT profile code instead of ZIP display name" {
+        $zipA = 'Display Name A (2024)'
+        $zipB = 'Display Name B (2024)'
+        New-AutoSyncRegressionZip (Join-Path $script:autoSyncZipSource ($zipA + '.zip')) @{ 'game.exe' = 'A' }
+        New-AutoSyncRegressionZip (Join-Path $script:autoSyncZipSource ($zipB + '.zip')) @{ 'game.exe' = 'B' }
+        $datIndex = @{
+            (Get-NormalizedGameKey $zipA) = [pscustomobject]@{ ProfileCode = 'TargetProfile'; Executable = 'game.exe' }
+            (Get-NormalizedGameKey $zipB) = [pscustomobject]@{ ProfileCode = 'OtherProfile'; Executable = 'game.exe' }
+        }
+        Mock Resolve-ExtractedGameFolder { $null }
+        $script:expandedZips = @()
+        Mock Expand-ZipFileSafe {
+            param([string]$ZipPath,[string]$DestDir)
+            $script:expandedZips += [IO.Path]::GetFileNameWithoutExtension($ZipPath)
+            New-Item -ItemType Directory -Path $DestDir -Force | Out-Null
+            $value = if ([IO.Path]::GetFileNameWithoutExtension($ZipPath) -eq $zipA) { 'A' } else { 'B' }
+            [IO.File]::WriteAllText((Join-Path $DestDir 'game.exe'), $value, (New-Object System.Text.UTF8Encoding $false))
+        }
+        $result = Invoke-AutoSync -zipSource $script:autoSyncZipSource -installFolder $script:autoSyncInstallRoot `
+            -syncStatePath (Join-Path $TestDrive 'scoped-sync.json') -datIndex $datIndex -OnlyProfileCodes @('TargetProfile')
+        $result.Synced | Should -Be 1
+        $script:expandedZips | Should -Be @($zipA)
+    }
+    It "returns Back without extraction or mutation" {
+        $zipName = 'Cancel Game'
+        $zipPath = Join-Path $script:autoSyncZipSource ($zipName + '.zip')
+        Set-Content -LiteralPath $zipPath -Value 'fixture' -NoNewline
+        Mock Resolve-ExtractedGameFolder { $null }
+        Mock Expand-ZipFileSafe { throw 'cancel must not extract' }
+        $script:pickerInputs = [System.Collections.Generic.Queue[string]]::new()
+        @('B') | ForEach-Object { [void]$script:pickerInputs.Enqueue($_) }
+        Mock Read-HostSafe { $script:pickerInputs.Dequeue() }
+        $result = Select-GamesInteractive -zipSource $script:autoSyncZipSource -installFolder $script:autoSyncInstallRoot -datIndex @{} -userProfilesDir ''
+        $result | Should -BeNullOrEmpty
+        Should -Invoke Expand-ZipFileSafe -Times 0
+    }
+
+    It "redraws queue rows without duplicating a selected game" {
+        $zipName = 'Queue Game'
+        $zipPath = Join-Path $script:autoSyncZipSource ($zipName + '.zip')
+        Set-Content -LiteralPath $zipPath -Value 'fixture' -NoNewline
+        Mock Resolve-ExtractedGameFolder { $null }
+        $script:pickerInputs = [System.Collections.Generic.Queue[string]]::new()
+        @('L','1','D') | ForEach-Object { [void]$script:pickerInputs.Enqueue($_) }
+        $script:pickerOutput = [System.Collections.Generic.List[string]]::new()
+        Mock Read-HostSafe { $script:pickerInputs.Dequeue() }
+        Mock Write-Host { param($Object); [void]$script:pickerOutput.Add([string]$Object) }
+        $result = Select-GamesInteractive -zipSource $script:autoSyncZipSource -installFolder $script:autoSyncInstallRoot -datIndex @{} -userProfilesDir ''
+        @($result).Count | Should -Be 1
+        $selected = [string]$result[0]
+        @($script:pickerOutput | Where-Object { $_ -match [regex]::Escape($selected) }).Count | Should -BeGreaterThan 0
+    }
+    It "emits compact repair progress for each profile" {
+        $root = Join-Path $TestDrive 'repair-progress'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $games 'game.exe') -Value 'fixture' -NoNewline
+        Set-Content -LiteralPath (Join-Path $profiles 'Game.xml') -Value '<GameProfile><GamePath>missing.exe</GamePath><ExecutableName>game.exe</ExecutableName></GameProfile>'
+        Mock Write-TpmCompactExtractionProgress {}
+        Mock Save-XmlMaybe {}
+        $result = (Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{} -DryRun:$false).Reports
+        Should -Invoke Write-TpmCompactExtractionProgress -ParameterFilter { $Phase -eq 'Repairing' -and $Label -eq 'Game' }
+        Should -Invoke Write-TpmCompactExtractionProgress -ParameterFilter { $Phase -eq 'Scanning' -and $Current -ge 1 -and $Total -eq 0 }
+        @($result).Count | Should -Be 1
+    }
+
 }
 
 Describe "New-PostgresPgPassFile / Remove-PostgresPgPassFile" {
@@ -4661,6 +5014,235 @@ Describe "New-PostgresPgPassFile / Remove-PostgresPgPassFile" {
 }
 
 Describe "Postgres guided recovery and profile transaction" {
+    BeforeAll {
+        function Invoke-TpmPostgresTopLevelFixture {
+            param(
+                [Parameter(Mandatory)][string]$Scenario,
+                [bool]$Installed,
+                [bool]$RecoverExistingData,
+                [bool]$BackupFails,
+                [int]$ProfileCount
+            )
+            $tokens = $null
+            $parseErrors = $null
+            $parsed = [System.Management.Automation.Language.Parser]::ParseInput($script:ProductionSource, [ref]$tokens, [ref]$parseErrors)
+            if ($parseErrors.Count -gt 0) { throw "Production source did not parse: $($parseErrors -join '; ')" }
+            $branchAst = @($parsed.FindAll({
+                $args[0] -is [System.Management.Automation.Language.IfStatementAst] -and
+                $args[0].Extent.Text.TrimStart() -match '^if \(\$mode -eq "PostgresSetup"\)'
+            }, $true))[0]
+            if (-not $branchAst) { throw 'The top-level PostgreSQL branch was not found.' }
+            $functionText = @($parsed.FindAll({
+                $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst]
+            }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n"
+            $fixtureRoot = Join-Path $TestDrive ('postgres-top-level-' + $Scenario + '-' + [guid]::NewGuid().ToString('N'))
+            $profilesRoot = Join-Path $fixtureRoot 'UserProfiles'
+            $oldScenario = $env:TPM_PG_FIXTURE_SCENARIO
+            $oldInstalled = $env:TPM_PG_FIXTURE_INSTALLED
+            $oldRecovery = $env:TPM_PG_FIXTURE_RECOVERY
+            $oldBackupFails = $env:TPM_PG_FIXTURE_BACKUP_FAILS
+            $oldProfileCount = $env:TPM_PG_FIXTURE_PROFILE_COUNT
+            try {
+                New-Item -ItemType Directory -Path $profilesRoot -Force | Out-Null
+                $profileXml = '<GameProfile><GameName>Top Level PostgreSQL Fixture</GameName><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation></ConfigValues></GameProfile>'
+                if ($ProfileCount -gt 0) {
+                    foreach ($index in 1..$ProfileCount) {
+                        [System.IO.File]::WriteAllText((Join-Path $profilesRoot ('Game{0}.xml' -f $index)), $profileXml, (New-Object System.Text.UTF8Encoding($false)))
+                    }
+                } else {
+                    [System.IO.File]::WriteAllText((Join-Path $profilesRoot 'NoPostgres.xml'), '<GameProfile><ConfigValues><FieldInformation><CategoryName>Controls</CategoryName><FieldName>InputApi</FieldName><FieldValue>RawInput</FieldValue></FieldInformation></ConfigValues></GameProfile>', (New-Object System.Text.UTF8Encoding($false)))
+                }
+                $env:TPM_PG_FIXTURE_SCENARIO = $Scenario
+                $env:TPM_PG_FIXTURE_INSTALLED = [string]$Installed
+                $env:TPM_PG_FIXTURE_RECOVERY = [string]$RecoverExistingData
+                $env:TPM_PG_FIXTURE_BACKUP_FAILS = [string]$BackupFails
+                $env:TPM_PG_FIXTURE_PROFILE_COUNT = [string]$ProfileCount
+                $harnessTemplate = @'
+$ErrorActionPreference = 'Stop'
+$script:FixtureRoot = [Environment]::GetEnvironmentVariable('TPM_PG_FIXTURE_ROOT')
+$script:Scenario = [Environment]::GetEnvironmentVariable('TPM_PG_FIXTURE_SCENARIO')
+$script:FakeInstalled = [bool]::Parse([Environment]::GetEnvironmentVariable('TPM_PG_FIXTURE_INSTALLED'))
+$script:RecoverExistingData = [bool]::Parse([Environment]::GetEnvironmentVariable('TPM_PG_FIXTURE_RECOVERY'))
+$script:BackupFails = [bool]::Parse([Environment]::GetEnvironmentVariable('TPM_PG_FIXTURE_BACKUP_FAILS'))
+$script:FixtureProfileCount = [int][Environment]::GetEnvironmentVariable('TPM_PG_FIXTURE_PROFILE_COUNT')
+$script:InstallCalls = 0
+$script:RecoveryCalls = 0
+$script:DatabaseBackupCalls = 0
+$script:SaveConfigCalls = 0
+$script:SetupCalls = 0
+$script:PasswordChecks = 0
+$script:Configured = 0
+$script:LoopCount = 0
+$script:ActiveTpmWorkflowStatus = $null
+$script:TpmWorkflowRendering = $false
+$script:PostgresRecoveryStatus = $null
+$script:PostgresRecoveryResumeState = $null
+$script:logPath = Join-Path $script:FixtureRoot 'fixture.log'
+$script:PostgresServiceName = 'pgsql-fixture'
+$script:PostgresBinDir = Join-Path $script:FixtureRoot 'bin'
+$script:PostgresInstallDir = $script:FixtureRoot
+$Unattended = $true
+$DryRun = $false
+$PostgresRecoveryResumeToken = ''
+$isPostgresRecoveryResume = $false
+$tpRoot = $script:FixtureRoot
+$userProfilesDir = Join-Path $script:FixtureRoot 'UserProfiles'
+$gamesInstallFolder = Join-Path $script:FixtureRoot 'Games'
+$configPath = Join-Path $script:FixtureRoot 'TeknoParrot-Manager.config.json'
+$zipSource = ''
+$zipSourceSupplementary = ''
+$postgresSuperPasswordEncrypted = if ($script:FakeInstalled -and -not $script:RecoverExistingData) { 'fixture-encrypted' } else { '' }
+
+__FUNCTIONS__
+
+function Write-Log { param([object]$msg) }
+function Test-RunningAsAdministrator { return $true }
+function Test-PostgresInstalled { return $script:FakeInstalled }
+function Get-Service {
+    [CmdletBinding()]
+    param([string]$Name)
+    return [pscustomobject]@{ Name = $Name; Status = 'Running' }
+}
+function Start-Service { param([string]$Name) }
+function Stop-Service { param([string]$Name, [switch]$Force) }
+function Wait-PostgresServiceState { param([string]$DesiredStatus) }
+function Read-HostSafe {
+    param([string]$Prompt, [string]$Default = $null)
+    if ($script:Scenario -eq 'ExistingDatabaseBackupFailure' -and $Prompt -like '*Choice*') { return 'B' }
+    if ($null -ne $Default) { return $Default }
+    return ''
+}
+function Read-Host { param([string]$Prompt) return '' }
+function Read-TpmYesNo { param([string]$Prompt, [string]$Default = '') return 'Y' }
+function Read-ConfirmedPostgresPassword { param([string]$Prompt) return 'fixture-password' }
+function ConvertTo-SecureString { param([string]$String) return 'fixture-secure' }
+function ConvertFrom-SecureStringPlain { param([object]$Secure) return 'fixture-password' }
+function Test-PostgresPassword {
+    param([string]$SuperPasswordPlain)
+    [void]($script:PasswordChecks++)
+    if ($script:RecoverExistingData -and $script:PasswordChecks -eq 1) { return $false }
+    return $true
+}
+function ConvertTo-PostgresEncryptedPassword { param([string]$PasswordPlain) return 'fixture-encrypted' }
+function Invoke-PostgresSelectedPasswordRecovery {
+    param([string]$UserProfilesDir, [string]$PasswordPlain, [object]$StatusContext)
+    [void]($script:RecoveryCalls++)
+    return [pscustomobject]@{
+        Outcome = 'SUCCEEDED'
+        Succeeded = $true
+        Reason = $null
+        Backup = [pscustomobject]@{ Path = (Join-Path $script:FixtureRoot 'recovery-evidence'); Verified = $true }
+    }
+}
+function Install-Postgres83 {
+    param([ref]$OutSuperPasswordPlain)
+    [void]($script:InstallCalls++)
+    $OutSuperPasswordPlain.Value = 'fixture-password'
+    return $true
+}
+function New-PostgresRecoveryBackup {
+    param([string]$UserProfilesDir)
+    return [pscustomobject]@{ Path = (Join-Path $script:FixtureRoot 'recovery-evidence'); Verified = $true; ProfileBackups = @() }
+}
+function Backup-PostgresDatabases {
+    param([string]$UserProfilesDir, [string]$SuperPasswordPlain)
+    [void]($script:DatabaseBackupCalls++)
+    if ($script:BackupFails) {
+        return [pscustomobject]@{
+            Succeeded = $false
+            Path = $null
+            FailedDatabases = @('GameDB01')
+            FailureDetails = @('fixture backup failure')
+            FailureDiagnoses = @([pscustomobject]@{ GameLabel = 'Game1'; Database = 'GameDB01'; Category = 'BackupFailed'; NextAction = 'Back' })
+        }
+    }
+    return [pscustomobject]@{ Succeeded = $true; Path = $null; FailedDatabases = @(); FailureDetails = @(); FailureDiagnoses = @() }
+}
+function Save-Config { [void]($script:SaveConfigCalls++); return $true }
+function Invoke-PostgresGameSetup {
+    param([string]$UserProfilesDir, [string]$SuperPasswordPlain, [object]$RecoveryBackup)
+    [void]($script:SetupCalls++)
+    $script:Configured = $script:FixtureProfileCount
+    $outcome = if ($script:FixtureProfileCount -gt 0) { 'SUCCEEDED' } else { 'NO_OP' }
+    $items = if ($script:FixtureProfileCount -gt 0) { @('profile:fixture') } else { @('postgres-setup') }
+    $changed = if ($script:FixtureProfileCount -gt 0) { @('profile:fixture') } else { @() }
+    $completed = if ($script:FixtureProfileCount -gt 0) { @('profile:fixture') } else { @() }
+    $result = New-TpmProfileTransactionResult -WorkflowKey 'PostgresSetup' -OperationKey 'ConfigureProfilesAndCreateMissingDatabases' `
+        -Outcome $outcome -ProductState $(if ($outcome -eq 'SUCCEEDED') { 'INTENDED' } else { 'UNCHANGED' }) `
+        -Summary 'Fixture PostgreSQL setup result.' -Items $items -ChangedItems $changed -CompletedItems $completed `
+        -MutationStarted:($outcome -eq 'SUCCEEDED') -MutationCompleted:$true -FinalChecks @('Fixture setup result was verified.')
+    foreach ($property in @(
+        @{ Name = 'Configured'; Value = $script:FixtureProfileCount }
+        @{ Name = 'DbCreated'; Value = 0 }
+        @{ Name = 'AlreadyConfigured'; Value = 0 }
+        @{ Name = 'Errors'; Value = 0 }
+        @{ Name = 'RecoveryBlocked'; Value = $false }
+        @{ Name = 'BackupPath'; Value = if ($RecoveryBackup) { $RecoveryBackup.Path } else { $null } }
+    )) { $result | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value -Force }
+    return $result
+}
+
+$script:LoopCount = 0
+while ($true) {
+    [void]($script:LoopCount++)
+    $mode = if ($script:LoopCount -eq 1) { 'PostgresSetup' } else { 'Exit' }
+__BRANCH__
+    if ($script:LoopCount -gt 1) { break }
+}
+[pscustomobject]@{
+    Scenario = $script:Scenario
+    LoopCount = $script:LoopCount
+    InstallCalls = $script:InstallCalls
+    RecoveryCalls = $script:RecoveryCalls
+    DatabaseBackupCalls = $script:DatabaseBackupCalls
+    SaveConfigCalls = $script:SaveConfigCalls
+    SetupCalls = $script:SetupCalls
+    Configured = $script:Configured
+} | ConvertTo-Json -Compress
+'@
+                $harness = $harnessTemplate.Replace('__FUNCTIONS__', $functionText).Replace('__BRANCH__', $branchAst.Extent.Text)
+                $harnessPath = Join-Path $fixtureRoot 'Run-PostgresTopLevelFixture.ps1'
+                [System.IO.File]::WriteAllText($harnessPath, $harness, (New-Object System.Text.UTF8Encoding($false)))
+                $env:TPM_PG_FIXTURE_ROOT = $fixtureRoot
+                $output = @(& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $harnessPath 2>&1)
+                $exitCode = $LASTEXITCODE
+                $jsonLine = @($output | ForEach-Object { [string]$_ } | Where-Object { $_ -match '^\{"Scenario"' } | Select-Object -Last 1)
+                if ($exitCode -ne 0 -or $jsonLine.Count -ne 1) {
+                    throw ("Top-level PostgreSQL fixture failed for {0} (exit={1}): {2}" -f $Scenario, $exitCode, ($output -join [Environment]::NewLine))
+                }
+                return ($jsonLine[0] | ConvertFrom-Json)
+            } finally {
+                $env:TPM_PG_FIXTURE_ROOT = $null
+                $env:TPM_PG_FIXTURE_SCENARIO = $oldScenario
+                $env:TPM_PG_FIXTURE_INSTALLED = $oldInstalled
+                $env:TPM_PG_FIXTURE_RECOVERY = $oldRecovery
+                $env:TPM_PG_FIXTURE_BACKUP_FAILS = $oldBackupFails
+                $env:TPM_PG_FIXTURE_PROFILE_COUNT = $oldProfileCount
+                if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue }
+            }
+        }
+    }
+
+    It "executes the real top-level PostgreSQL branch across the required runtime-equivalent matrix" -TestCases @(
+        @{ Scenario = 'AlreadyInstalledDataPreserved'; Installed = $true; Recover = $false; BackupFails = $false; Profiles = 6; Install = 0; Recovery = 0; DatabaseBackup = 1; SaveConfig = 1; Setup = 1; Configured = 6 }
+        @{ Scenario = 'NoPostgresNeeded'; Installed = $true; Recover = $false; BackupFails = $false; Profiles = 0; Install = 0; Recovery = 0; DatabaseBackup = 0; SaveConfig = 0; Setup = 0; Configured = 0 }
+        @{ Scenario = 'ExistingDataRecovery'; Installed = $true; Recover = $true; BackupFails = $false; Profiles = 6; Install = 0; Recovery = 1; DatabaseBackup = 1; SaveConfig = 1; Setup = 1; Configured = 6 }
+        @{ Scenario = 'ExistingDatabaseBackupFailure'; Installed = $true; Recover = $false; BackupFails = $true; Profiles = 6; Install = 0; Recovery = 0; DatabaseBackup = 1; SaveConfig = 0; Setup = 0; Configured = 0 }
+        @{ Scenario = 'FreshInstall'; Installed = $false; Recover = $false; BackupFails = $false; Profiles = 6; Install = 1; Recovery = 0; DatabaseBackup = 1; SaveConfig = 1; Setup = 1; Configured = 6 }
+        @{ Scenario = 'Postgres83Compatibility'; Installed = $false; Recover = $false; BackupFails = $false; Profiles = 1; Install = 1; Recovery = 0; DatabaseBackup = 1; SaveConfig = 1; Setup = 1; Configured = 1 }
+        @{ Scenario = 'TopLevelBranchReturns'; Installed = $true; Recover = $false; BackupFails = $false; Profiles = 2; Install = 0; Recovery = 0; DatabaseBackup = 1; SaveConfig = 1; Setup = 1; Configured = 2 }
+    ) {
+        param($Scenario, $Installed, $Recover, $BackupFails, $Profiles, $Install, $Recovery, $DatabaseBackup, $SaveConfig, $Setup, $Configured)
+        $result = Invoke-TpmPostgresTopLevelFixture -Scenario $Scenario -Installed $Installed -RecoverExistingData $Recover -BackupFails $BackupFails -ProfileCount $Profiles
+        $result.LoopCount | Should -Be 2
+        $result.InstallCalls | Should -Be $Install
+        $result.RecoveryCalls | Should -Be $Recovery
+        $result.DatabaseBackupCalls | Should -Be $DatabaseBackup
+        $result.SaveConfigCalls | Should -Be $SaveConfig
+        $result.SetupCalls | Should -Be $Setup
+        $result.Configured | Should -Be $Configured
+    }
+
     It "accepts a confirmed new password through SecureString input without echoing it" {
         $secure = ConvertTo-SecureString 'New-Password-For-Test' -AsPlainText -Force
         Mock Read-Host { $secure }
@@ -4711,6 +5293,30 @@ Describe "Postgres guided recovery and profile transaction" {
             Should -Invoke Invoke-PostgresNativeProcessWithInput -Times 1
             Should -Invoke Test-PostgresPassword -Times 1
         }
+        It "reports a committed but unverified reset when restart fails after ALTER" {
+            Mock Invoke-PostgresNativeProcessWithInput {
+                [pscustomobject]@{ ExitCode = 0; Output = ''; Error = '' }
+            }
+            Mock Start-Service { throw 'service restart failed' }
+            $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
+            $result.PasswordChangeCommitted | Should -BeTrue
+            $result.Succeeded | Should -BeFalse
+            $result.RecoveryBlocked | Should -BeTrue
+            $result.FailureStage | Should -Be 'ServiceRestart'
+            $result.Reason | Should -Match 'password was changed'
+            $result.Reason | Should -Not -Match 'password was not changed'
+        }
+        It "reports password validation as the failure stage after restart" {
+            Mock Invoke-PostgresNativeProcessWithInput {
+                [pscustomobject]@{ ExitCode = 0; Output = ''; Error = '' }
+            }
+            Mock Test-PostgresPassword { $false }
+            $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
+            $result.PasswordChangeCommitted | Should -BeTrue
+            $result.Succeeded | Should -BeFalse
+            $result.FailureStage | Should -Be 'PasswordValidation'
+        }
+
 
         It "leaves evidence and reports recovery blocked when the reset fails" {
             Mock Invoke-PostgresNativeProcessWithInput {
@@ -4721,9 +5327,35 @@ Describe "Postgres guided recovery and profile transaction" {
             $result.Succeeded | Should -BeFalse
             $result.RecoveryBlocked | Should -BeTrue
             $result.BackupPath | Should -Be $script:pgBackup.Path
+            $result.FailureStage | Should -Be 'AlterRole'
             $result.Reason | Should -Not -Match ([regex]::Escape($script:pgSecret))
             Should -Invoke Start-Service -Times 0
             Should -Invoke Test-PostgresPassword -Times 0
+        }
+        It "keeps verified backup, reset, and password verification in one recovery path" {
+            Mock New-PostgresRecoveryBackup { $script:pgBackup }
+            Mock Reset-PostgresPasswordAutomatically { [pscustomobject]@{ Outcome = 'SUCCEEDED'; Succeeded = $true } }
+            Mock Test-PostgresPassword { $true }
+            $result = Invoke-PostgresSelectedPasswordRecovery -UserProfilesDir (Join-Path $TestDrive 'profiles') -PasswordPlain $script:pgSecret
+            $result.Succeeded | Should -BeTrue
+            $result.Backup.Verified | Should -BeTrue
+            Should -Invoke New-PostgresRecoveryBackup -Times 1 -Exactly
+            Should -Invoke Reset-PostgresPasswordAutomatically -Times 1 -Exactly
+            Should -Invoke Test-PostgresPassword -Times 1 -Exactly
+        }
+
+        It "updates an existing PostgreSQL workflow step without opening a nested step" {
+            Mock New-PostgresRecoveryBackup { $script:pgBackup }
+            Mock Reset-PostgresPasswordAutomatically { [pscustomobject]@{ Outcome = 'SUCCEEDED'; Succeeded = $true } }
+            Mock Test-PostgresPassword { $true }
+            $context = New-TpmWorkflowStatusContext -WorkflowKey 'PostgresSetup' -Title 'PostgreSQL setup' -Steps @('database') -ConsoleFacts ([pscustomobject]@{ NoRender = $true })
+            [void](Start-TpmWorkflowStatus -Context $context)
+            [void](Start-TpmWorkflowStep -Context $context -StepId 'database' -Activity 'Backing up existing databases')
+            { Invoke-PostgresSelectedPasswordRecovery -UserProfilesDir (Join-Path $TestDrive 'profiles') -PasswordPlain $script:pgSecret -StatusContext $context } | Should -Not -Throw
+            $context.ActiveStepId | Should -Be 'database'
+            $context.Activity | Should -Be 'Password repaired and verified'
+            [void](Stop-TpmWorkflowStatus -Context $context -Reason 'test stop')
+            [void](Close-TpmWorkflowStatus -Context $context)
         }
     }
 
@@ -4737,7 +5369,7 @@ Describe "Postgres guided recovery and profile transaction" {
             $script:pgSaved = New-Object System.Collections.Generic.List[string]
             Mock Write-Log {}
             Mock Get-PostgresDatabaseState { [pscustomobject]@{ Exists = $true; Verified = $true } }
-            Mock Save-Xml { param($Doc, [string]$Path) [void]$script:pgEvents.Add('save'); [void]$script:pgSaved.Add($Path) }
+            Mock Save-Xml { param($Doc, [string]$Path) [void]$script:pgEvents.Add('save'); [void]$script:pgSaved.Add($Path); $Doc.Save($Path) }
         }
 
         It "backs up before profile population, updates only stale profiles, and handles multiple profiles deterministically" {
@@ -4746,6 +5378,8 @@ Describe "Postgres guided recovery and profile transaction" {
             Set-Content -LiteralPath (Join-Path $script:pgProfiles 'B.xml') -Value ($xml.Replace('<FieldValue>old</FieldValue>', '<FieldValue>approved</FieldValue>'))
             Mock New-PostgresRecoveryBackup { [void]$script:pgEvents.Add('backup'); $script:pgRecovery }
             $result = Invoke-PostgresGameSetup -UserProfilesDir $script:pgProfiles -SuperPasswordPlain 'approved'
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -Be 'SUCCEEDED'
             $result.Configured | Should -Be 1
             $result.AlreadyConfigured | Should -Be 1
             $result.RecoveryBlocked | Should -BeFalse
@@ -4757,15 +5391,34 @@ Describe "Postgres guided recovery and profile transaction" {
         It "restores evidence and does not report completion after a partial profile save" {
             $xml = '<GameProfile><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Path</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Address</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Port</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>User</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldValue>old</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Automatically create Database</FieldName><FieldValue>1</FieldValue></FieldInformation></ConfigValues></GameProfile>'
             Set-Content -LiteralPath (Join-Path $script:pgProfiles 'A.xml') -Value $xml
-            Set-Content -LiteralPath (Join-Path $script:pgProfiles 'B.xml') -Value $xml
+            $result.RecoveryBlocked | Should -BeFalse
             $script:saveCount = 0; $script:restoreCount = 0
             Mock Save-Xml { $script:saveCount++; if ($script:saveCount -eq 2) { throw 'simulated profile write failure' } }
             Mock Restore-PostgresProfileBackups { $script:restoreCount++; $true }
             $result = Invoke-PostgresGameSetup -UserProfilesDir $script:pgProfiles -SuperPasswordPlain 'approved' -RecoveryBackup $script:pgRecovery
             $result.RecoveryBlocked | Should -BeTrue
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
             $result.Configured | Should -Be 1
             $script:restoreCount | Should -Be 1
             $result | Should -Not -BeNullOrEmpty
+        }
+        It "preserves existing PostgreSQL data while configuring six registered games" {
+            $script:pgProfiles = Join-Path $script:pgProfiles 'six-games'
+            New-Item -ItemType Directory -Path $script:pgProfiles -Force | Out-Null
+            $xml = '<GameProfile><GameName>PostgreSQL Test Game</GameName><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Path</FieldName><FieldValue>C:\\PostgreSQL\\bin\\</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Address</FieldName><FieldValue>127.0.0.1</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Port</FieldName><FieldValue>5432</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>User</FieldName><FieldValue>postgres</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldValue>old</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Automatically create Database</FieldName><FieldValue>1</FieldValue></FieldInformation></ConfigValues></GameProfile>'
+            foreach ($name in @('GameA','GameB','GameC','GameD','GameE','GameF')) {
+                Set-Content -LiteralPath (Join-Path $script:pgProfiles ($name + '.xml')) -Value $xml
+            }
+            Mock New-PostgresRecoveryBackup { [void]$script:pgEvents.Add('backup'); $script:pgRecovery }
+            $result = Invoke-PostgresGameSetup -UserProfilesDir $script:pgProfiles -SuperPasswordPlain 'approved'
+            $result.Configured | Should -Be 6
+            $result.AlreadyConfigured | Should -Be 0
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -Be 'SUCCEEDED'
+            $result.RecoveryBlocked | Should -BeFalse
+            @($script:pgEvents) | Should -Be @('backup', 'save', 'save', 'save', 'save', 'save', 'save')
+            $script:pgSaved.Count | Should -Be 6
         }
     }
     It "returns array-shaped backup collections on success and catch paths" {
@@ -4794,6 +5447,19 @@ Describe "Postgres guided recovery and profile transaction" {
         $failure.ConfigBackups -is [array] | Should -BeTrue
         $failure.ProfileBackups -is [array] | Should -BeTrue
     }
+    It "converts malformed recovery-backup input into a verified false result" {
+        $profiles = Join-Path $TestDrive 'postgres-malformed-recovery-profiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $profiles 'Broken.xml') -Value '<GameProfile><ConfigValues>'
+        $script:PostgresInstallDir = Join-Path $TestDrive 'postgres-malformed-recovery'
+        Mock Lock-PostgresRecoveryDirectory { $global:LASTEXITCODE = 0 }
+        Mock Copy-PostgresRecoveryEvidenceFile { [pscustomobject]@{ Source = $Source; Backup = $Destination; Sha256 = 'hash' } }
+        Mock Write-Log {}
+        $result = New-PostgresRecoveryBackup -UserProfilesDir $profiles
+        $result.Verified | Should -BeFalse
+        $result.ConfigBackups -is [array] | Should -BeTrue
+        $result.ProfileBackups -is [array] | Should -BeTrue
+    }
 
     It "blocks every PostgreSQL mutation when recovery backup is unverified" {
         $profiles = Join-Path $TestDrive 'postgres-unverified-profiles'
@@ -4813,8 +5479,553 @@ Describe "Postgres guided recovery and profile transaction" {
         Should -Invoke Save-Xml -Times 0
         Should -Invoke Get-PostgresDatabaseState -Times 0
         Should -Invoke New-PostgresDatabaseFromBackup -Times 0
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
     }
 }
+Describe "Shared game mutation path safety" {
+    It "distinguishes a valid executable, a missing leaf, and an unavailable device" {
+        $gameRoot = Join-Path $TestDrive 'mutation-game'
+        New-Item -ItemType Directory -Path $gameRoot -Force | Out-Null
+        $gamePath = Join-Path $gameRoot 'game.exe'
+        New-Item -ItemType File -Path $gamePath -Force | Out-Null
+
+        $valid = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
+        $valid.Valid | Should -BeTrue
+        $valid.ReasonCode | Should -Be 'VALID'
+        $valid.ResolvedPath | Should -Be $valid.CanonicalPath
+
+        $missing = Test-TpmGameMutationPath -GamePath (Join-Path $gameRoot 'missing.exe') -RequireLeaf
+        $missing.Valid | Should -BeFalse
+        $missing.ReasonCode | Should -Be 'GAME_PATH_MISSING'
+
+        $usedRoots = @([IO.Directory]::GetLogicalDrives() | ForEach-Object { $_.Substring(0, 1).ToUpperInvariant() })
+        $availableLetter = @(68..90 | ForEach-Object { [string][char]$_ } | Where-Object { $usedRoots -notcontains $_ }) | Select-Object -First 1
+        if (-not $availableLetter) {
+            Set-ItResult -Skipped -Because 'No unused drive letter is available for the unavailable-device case.'
+            return
+        }
+        $unavailable = Test-TpmGameMutationPath -GamePath ("{0}:\TPM-unavailable\game.exe" -f $availableLetter) -RequireLeaf
+        $unavailable.Valid | Should -BeFalse
+        $unavailable.ReasonCode | Should -Be 'DEVICE_UNAVAILABLE'
+    }
+
+    It "uses the shared guard before every game mutation workflow" {
+        $script:ProductionSource | Should -Match 'Invoke-BepInExUpdateCheck[\s\S]*?Test-TpmGameMutationPath'
+        $script:ProductionSource | Should -Match 'Invoke-ReShadeSetup[\s\S]*?Test-TpmGameMutationPath'
+        $script:ProductionSource | Should -Match 'Invoke-DgVoodoo2Setup[\s\S]*?Test-TpmGameMutationPath'
+        $script:ProductionSource | Should -Match 'Invoke-GpuFixSetup[\s\S]*?Test-TpmGameMutationPath'
+    }
+}
+Describe "Skylinekiller missing-device regressions" {
+    It "records the external hold package and all four runtime finding areas" {
+        $inventoryPath = Join-Path $PSScriptRoot '..\docs\RC8-REMEDIATION-INVENTORY.md'
+        $inventory = [IO.File]::ReadAllText($inventoryPath)
+        $inventory | Should -Match 'External tester: Skylinekiller'
+        $inventory | Should -Match 'TeknoParrotManager-Support-20260902-161402\.zip'
+        $inventory | Should -Match '6a2fa446e09dc795748773ea542e75576715ced9b7803b750cfe71c90d8763ab'
+        $inventory | Should -Match 'Entries: 5'
+        $inventory | Should -Match 'ReShade: partial installation'
+        $inventory | Should -Match 'dgVoodoo2: BattleFantasia'
+        $inventory | Should -Match 'GPU Compatibility Fix: setup fatally aborted'
+        $inventory | Should -Match 'BepInEx: 15 games reported update blocked'
+    }
+
+    It "classifies supplied missing-device and missing-path exceptions" {
+        $deviceException = New-Object System.IO.IOException 'A device which does not exist was specified.'
+        $deviceRecord = New-Object System.Management.Automation.ErrorRecord($deviceException, 'SkylinekillerMissingDevice', 'ReadError', $null)
+        Get-TpmGameMutationFailureCode -ErrorRecord $deviceRecord | Should -Be 'DEVICE_UNAVAILABLE'
+        $pathException = New-Object System.IO.FileNotFoundException 'The system cannot find the path specified.'
+        $pathRecord = New-Object System.Management.Automation.ErrorRecord($pathException, 'SkylinekillerMissingPath', 'ReadError', $null)
+        Get-TpmGameMutationFailureCode -ErrorRecord $pathRecord | Should -Be 'GAME_PATH_MISSING'
+    }
+
+    It "routes ReShade, dgVoodoo2, GPU Fix, and BepInEx catches through classification" {
+        foreach ($workflow in @('Invoke-ReShadeSetupLegacy', 'Invoke-DgVoodoo2Setup', 'Invoke-GpuFixSetupLegacy', 'Invoke-BepInExUpdateCheckLegacy')) {
+            $start = $script:ProductionSource.IndexOf("function $workflow", [StringComparison]::Ordinal)
+            $start | Should -BeGreaterOrEqual 0
+            $end = $script:ProductionSource.IndexOf("function ", $start + 10, [StringComparison]::Ordinal)
+            if ($end -lt 0) { $end = $script:ProductionSource.Length }
+            $body = $script:ProductionSource.Substring($start, $end - $start)
+            $body | Should -Match 'Get-TpmGameMutationFailureCode'
+            $body | Should -Match 'DEVICE_UNAVAILABLE'
+            $body | Should -Match 'SKIP'
+        }
+    }
+}
+Describe "Skylinekiller executable workflow regressions" {
+    BeforeEach {
+        Mock Write-Log {}
+        Mock Write-Host {}
+    }
+
+    It "skips a ReShade missing-device deployment before calling the transaction" {
+        $profiles = Join-Path $TestDrive 'SkylineReShadeProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $gamePath = 'X:\Skylinekiller\CaladriusAC.exe'
+        $profilePath = Join-Path $profiles 'CaladriusAC.xml'
+        Set-Content -LiteralPath $profilePath -Value ("<GameProfile><GamePath>{0}</GamePath></GameProfile>" -f $gamePath)
+        $sourceDll = Join-Path $TestDrive 'ReShade64.dll'
+        Set-Content -LiteralPath $sourceDll -Value 'source'
+        $profile = [pscustomobject]@{ ProfileId = 'Original'; FriendlyName = 'Original'; Description = 'baseline'; BaseName = 'CaladriusAC' }
+        Mock Invoke-ReShadeUpdateIfAvailable { [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 } }
+        Mock Test-ReShadeDllSignature { [pscustomobject]@{ Status = 'Unknown'; Signer = $null } }
+        Mock Get-TpmReShadeProfileGallery { @() }
+        Mock Get-TpmReShadeProfiles { @($profile) }
+        Mock Get-TpmReShadeProfile { $profile }
+        Mock Read-TpmReShadeState { [pscustomobject]@{ Favorites = @() } }
+        Mock Show-TpmReShadeProfileGalleryWindow { [pscustomobject]@{ Available = $false; Session = $null; Reason = 'test' } }
+        Mock Close-TpmReShadeProfileGallerySession {}
+        Mock Read-TpmReShadeTerminalProfile { [pscustomobject]@{ Cancelled = $false; SelectedProfile = $profile } }
+        Mock Read-HostSafe { 'Y' }
+        Mock Select-RegisteredGamesInteractive { @(Get-Item -LiteralPath $profilePath) }
+        Mock Get-TpmReShadeChooserOptions { [pscustomobject]@{ Restore = [pscustomobject]@{ Found = $false; Valid = $false }; Remembered = [pscustomobject]@{ Found = $false; Valid = $false } } }
+        Mock Test-TpmGameMutationPath { [pscustomobject]@{ Valid = $false; ReasonCode = 'DEVICE_UNAVAILABLE'; Reason = 'A device which does not exist was specified.'; ResolvedPath = $null; GameDirectory = $null } }
+        Mock Install-TpmReShadeProfileDeployment { throw 'transaction must not run' }
+        $result = Invoke-ReShadeSetup -UserProfilesDir $profiles -SourceDll $sourceDll -SourceDll32 '' -ConfigPath '' -TpRoot '' -Mode '' -ZipSource '' -GamesInstallFolder '' -RetroBat $false -HsDataPath ''
+        $result.Succeeded | Should -BeFalse
+        $result.Deployed | Should -Be 0
+        $result.MissingDevice | Should -Be 1
+        Should -Invoke Install-TpmReShadeProfileDeployment -Times 0
+    }
+
+    It "protects an unknown user-owned hook in the real setup workflow" {
+        $profiles = Join-Path $TestDrive 'OwnershipReShadeProfiles'
+        $root = Join-Path $TestDrive 'OwnershipGame'
+        New-Item -ItemType Directory -Path $profiles, $root -Force | Out-Null
+        $gamePath = Join-Path $root 'Game.exe'
+        $hookPath = Join-Path $root 'dxgi.dll'
+        $profilePath = Join-Path $profiles 'Game.xml'
+        Set-Content -LiteralPath $gamePath -Value 'game'
+        Set-Content -LiteralPath $hookPath -Value 'user-owned'
+        Set-Content -LiteralPath $profilePath -Value ("<GameProfile><GamePath>{0}</GamePath></GameProfile>" -f $gamePath)
+        $sourceDll = Join-Path $TestDrive 'OwnershipReShade64.dll'
+        Set-Content -LiteralPath $sourceDll -Value 'source'
+        $profile = [pscustomobject]@{ ProfileId = 'Original'; FriendlyName = 'Original'; Description = 'baseline'; BaseName = 'Game' }
+        Mock Invoke-ReShadeUpdateIfAvailable { [pscustomobject]@{ Updated = $false; SourceDll = $sourceDll; SourceDll32 = '' } }
+        Mock Test-ReShadeDllSignature { [pscustomobject]@{ Status = 'Unknown'; Signer = $null } }
+        Mock Get-TpmReShadeProfiles { @($profile) }
+        Mock Get-TpmReShadeProfile { $profile }
+        Mock Read-TpmReShadeState { [pscustomobject]@{ Favorites = @() } }
+        Mock Show-TpmReShadeProfileGalleryWindow { [pscustomobject]@{ Available = $false; Session = $null; Reason = 'test' } }
+        Mock Close-TpmReShadeProfileGallerySession {}
+        Mock Read-TpmReShadeTerminalProfile { [pscustomobject]@{ Cancelled = $false; SelectedProfile = $profile } }
+        Mock Read-HostSafe { 'Y' }
+        Mock Select-RegisteredGamesInteractive { @(Get-Item -LiteralPath $profilePath) }
+        $script:unknownOwnershipPath = Join-Path $root 'ownership.json'
+        Mock Get-TpmReShadeProfileOwnershipPath { $script:unknownOwnershipPath }
+        Mock Get-ReShadeTargetInfo { [pscustomobject]@{ TargetDir = $root; DllName = 'dxgi.dll'; ApiDetected = $true } }
+        Mock Get-ExeArchitecture { 'x64' }
+        Mock Get-TpmReShadeOwnershipClassification { [pscustomobject]@{ Status = 'UnknownUserOwnedConflict'; Detail = 'A ReShade hook exists without verified TPM ownership.' } }
+        Mock Test-TpmGameMutationPath { [pscustomobject]@{ Valid = $true; ResolvedPath = $gamePath; GameDirectory = $root } }
+        Mock Install-TpmReShadeProfileDeployment { throw 'unknown user-owned content must not be replaced' }
+        $result = Invoke-ReShadeSetup -UserProfilesDir $profiles -SourceDll $sourceDll -SourceDll32 '' -ConfigPath '' -TpRoot '' -Mode '' -ZipSource '' -GamesInstallFolder '' -RetroBat $false -HsDataPath ''
+        $result.Protected | Should -Be 1
+        $result.ProtectedDetails | Should -Contain 'Game: A ReShade hook exists without verified TPM ownership.'
+        $result.Deployed | Should -Be 0
+        $result.Updated | Should -Be 0
+        Should -Invoke Install-TpmReShadeProfileDeployment -Times 0
+    }
+    It "reports protected, missing, and ready ReShade preflight buckets before mutation" {
+        $profiles = Join-Path $TestDrive 'ReShadePreflightProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        foreach ($name in @('ProtectedGame', 'MissingGame')) {
+            $path = Join-Path $TestDrive ($name + '\Game.exe')
+            New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($path)) -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $profiles ($name + '.xml')) -Value ("<GameProfile><GamePath>{0}</GamePath></GameProfile>" -f $path)
+        }
+        $sourceDll = Join-Path $TestDrive 'preflight-ReShade.dll'
+        Set-Content -LiteralPath $sourceDll -Value 'source'
+        Mock Get-TpmReShadeProfileOwnershipPath { Join-Path $TestDrive ($GameId + '.ownership.json') }
+        Mock Test-TpmGameMutationPath {
+            param([string]$GamePath)
+            if ($GamePath -like '*MissingGame*') {
+                return [pscustomobject]@{ Valid = $false; ReasonCode = 'GAME_PATH_MISSING'; Reason = 'saved executable is missing' }
+            }
+            return [pscustomobject]@{ Valid = $true; ResolvedPath = $GamePath; GameDirectory = [IO.Path]::GetDirectoryName($GamePath) }
+        }
+        Mock Get-ReShadeTargetInfo {
+            param($Doc, [string]$GamePath, [string]$ExeDir)
+            [pscustomobject]@{ TargetDir = $ExeDir; DllName = 'dxgi.dll' }
+        }
+        Mock Get-ExeArchitecture { 'x64' }
+        Mock Get-TpmReShadeOwnershipClassification {
+            param([string]$TargetRoot)
+            if ($TargetRoot -like '*ProtectedGame*') {
+                return [pscustomobject]@{ Status = 'UnknownUserOwnedConflict'; Detail = 'existing hook is protected' }
+            }
+            return [pscustomobject]@{ Status = 'ManagedByTpm'; Detail = 'no protected content detected' }
+        }
+        $result = Get-TpmReShadeApplyPreflight `
+            -SelectedGames @(Get-ChildItem -LiteralPath $profiles -Filter '*.xml' -File) `
+            -ProfileDefinition ([pscustomobject]@{ ProfileId = 'Original' }) `
+            -SourceDll $sourceDll -SourceDll32 ''
+        $result.Total | Should -Be 2
+        $result.Protected | Should -Be 1
+        $result.MissingPath | Should -Be 1
+        $result.Ready | Should -Be 0
+        @($result.Records | Where-Object Status -eq 'Protected').Count | Should -Be 1
+        @($result.Records | Where-Object Status -eq 'MissingPath').Count | Should -Be 1
+    }
+
+    It "classifies a BattleFantasia-style dgVoodoo2 scan failure without deployment" {
+        $profiles = Join-Path $TestDrive 'SkylineDgProfiles'
+        $source = Join-Path $TestDrive 'SkylineDgSource'
+        New-Item -ItemType Directory -Path $profiles, $source -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $source 'D3D8.dll') -Value 'dll'
+        $gamePath = 'X:\Skylinekiller\BattleFantasia.exe'
+        $profilePath = Join-Path $profiles 'BattleFantasia.xml'
+        Set-Content -LiteralPath $profilePath -Value ("<GameProfile><GamePath>{0}</GamePath></GameProfile>" -f $gamePath)
+        Mock Test-TpmGameMutationPath { [pscustomobject]@{ Valid = $false; ReasonCode = 'DEVICE_UNAVAILABLE'; Reason = 'A device which does not exist was specified.'; ResolvedPath = $null; GameDirectory = $null } }
+        Mock Get-GameLegacyApi { throw 'legacy scan must not run for an unavailable device' }
+        $result = Invoke-DgVoodoo2Setup -UserProfilesDir $profiles -SourceDir $source -TpRoot ''
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'NO_ELIGIBLE_GAMES'
+        $result.MissingDevice | Should -Be 1
+        $result.Skipped | Should -Be 1
+        Should -Invoke Get-GameLegacyApi -Times 0
+    }
+
+    It "turns a GPU missing-device IOException into a safe per-game skip" {
+        $profiles = Join-Path $TestDrive 'SkylineGpuProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $gamePath = Join-Path $TestDrive 'SkylineGpu\game.exe'
+        New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($gamePath)) -Force | Out-Null
+        Set-Content -LiteralPath $gamePath -Value 'game'
+        $profilePath = Join-Path $profiles 'GPUFail.xml'
+        Set-Content -LiteralPath $profilePath -Value ("<GameProfile><GamePath>{0}</GamePath><ConfigValues><FieldInformation><FieldName>UseNvidiaFix</FieldName><FieldValue>1</FieldValue></FieldInformation></ConfigValues></GameProfile>" -f $gamePath)
+        Mock Get-DetectedGpuVendor { [pscustomobject]@{ Vendor = 'NVIDIA'; Name = 'RTX3070' } }
+        Mock Get-GpuFixFieldNames { [pscustomobject]@{ GameProfilesFound = $true; BoolFields = @('UseNvidiaFix'); DropdownFields = @() } }
+        Mock Save-Xml { throw (New-Object System.IO.IOException 'A device which does not exist was specified.') }
+        $result = Invoke-GpuFixSetup -UserProfilesDir $profiles -TpRoot (Join-Path $TestDrive 'TeknoParrot')
+        $result.Succeeded | Should -BeFalse
+        $result.Skipped | Should -Be 1
+        $result.MissingDevice | Should -Be 1
+        $result.Errors | Should -Be 0
+        (Get-Content -LiteralPath $profilePath -Raw) | Should -Match ([regex]::Escape($gamePath))
+        Should -Invoke Save-Xml -Times 1
+    }
+
+    It "blocks BepInEx before release discovery for an unavailable device" {
+        $approved = Join-Path $TestDrive 'SkylineBepGames'
+        $profiles = Join-Path $TestDrive 'SkylineBepProfiles'
+        New-Item -ItemType Directory -Path $approved, $profiles -Force | Out-Null
+        $gamePath = 'X:\Skylinekiller\BepGame.exe'
+        Set-Content -LiteralPath (Join-Path $profiles 'BepGame.xml') -Value ("<GameProfile><GamePath>{0}</GamePath></GameProfile>" -f $gamePath)
+        Mock Test-TpmGameMutationPath { [pscustomobject]@{ Valid = $false; ReasonCode = 'DEVICE_UNAVAILABLE'; Reason = 'A device which does not exist was specified.' } }
+        Mock Get-BepInExLatestRelease { throw 'release discovery must not run' }
+        Mock Invoke-TpmDownload { throw 'download must not run' }
+        $result = Invoke-BepInExUpdateCheck -UserProfilesDir $profiles -CacheDir (Join-Path $TestDrive 'SkylineBepCache') -ApprovedGamesRoot $approved
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'NO_ELIGIBLE_GAMES'
+        $result.FailureRecords[0].Game | Should -Be 'BepGame'
+        $result.FailureRecords[0].GameRoot | Should -Be '<unresolved>'
+        $result.FailureRecords[0].ReasonKey | Should -Be 'DEVICE_UNAVAILABLE'
+        $result.FailureRecords[0].NextAction | Should -Match 'Reconnect'
+        $result.PathReasonCounts['DEVICE_UNAVAILABLE'] | Should -Be 1
+        Should -Invoke Get-BepInExLatestRelease -Times 0
+        Should -Invoke Invoke-TpmDownload -Times 0
+    }
+}
+Describe "RC8 PostgreSQL and support UX" {
+    It "reads back the saved password before protected backup retry" {
+        $script:ProductionSource | Should -Match 'Get-PostgresValidatedSavedPassword'
+        $script:ProductionSource | Should -Match '\$readBackPassword'
+        $script:ProductionSource | Should -Match 'read-after-write verification'
+    }
+    It "keeps normal diagnosis output compact while retaining technical evidence" {
+        $script:ProductionSource | Should -Match 'Write-Host \("    \{0\}: \{1\}" -f \$check.Name, \$check.Status\)'
+        $script:ProductionSource | Should -Match 'Postgres read-only diagnosis detail:'
+        $script:ProductionSource | Should -Match 'Get-PostgresDiagnosisAffectedLabels'
+        $script:ProductionSource | Should -Not -Match 'Write-Host \("    \{0\}: \{1\} -- \{2\}" -f \$check.Name, \$check.Status, \$check.Detail\)'
+    }
+    It "reports database backup failures with affected entries and clean recovery choices" {
+        $script:ProductionSource | Should -Match 'PostgreSQL setup stopped because the database backup did not complete'
+        $script:ProductionSource | Should -Match 'Nothing was changed'
+        $script:ProductionSource | Should -Match '\[R\] Diagnose and retry the protected backup'
+        $script:ProductionSource | Should -Match '\[I\] Reinitialize PostgreSQL data for these games'
+        $script:ProductionSource | Should -Match '\[D\] Show details'
+        $script:ProductionSource | Should -Match '\[O\] Open logs/support guidance'
+        $script:ProductionSource | Should -Match '\[B\] Back to main menu'
+        $script:ProductionSource | Should -Match '\[P\] Enter and test a postgres password'
+        $script:ProductionSource | Should -Match '\[X\] Reset the local postgres password'
+        $script:ProductionSource | Should -Match '\$backupChoices = if \(\$authFailure\) \{ @\(''P'', ''X'''
+        $script:ProductionSource | Should -Not -Match 'Read-TpmChoice -Prompt .*Choices @\(''R'', ''I'', ''D'', ''O'', ''B''\)'
+        $script:ProductionSource | Should -Match 'FailureDetails'
+        $script:ProductionSource | Should -Match 'protected PostgreSQL setup\. Reason \[.*\]:'
+        $script:ProductionSource | Should -Match 'RESUME_EXPIRED|PACKAGE_MISMATCH|SELECTION_PLAN_INVALID'
+        $script:ProductionSource | Should -Match '\$eggmanDatZip -and -not \$Unattended -and -not \$isPostgresRecoveryResume'
+        $script:ProductionSource | Should -Match 'Press Enter to close this window'
+    }
+    It "uses one unambiguous request-action parameter for the web wrapper" {
+        $script:ProductionSource | Should -Match '\[System\.Management\.Automation\.ActionPreference\]\$RequestErrorAction'
+        $script:ProductionSource | Should -Match 'ErrorAction = \$RequestErrorAction'
+        $script:ProductionSource | Should -Not -Match 'Invoke-TpmWebRequestSilently[^\r\n]*-ErrorAction'
+    }
+    It "diagnoses the service, client tools, version, and failed database without changing state" {
+        $script:PostgresBinDir = Join-Path $TestDrive 'postgres-bin'
+        $script:PostgresServiceName = 'pgsql-8.3'
+        $script:PostgresBinDir = Join-Path $TestDrive 'postgres-bin'
+        New-Item -ItemType Directory -Path $script:PostgresBinDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:PostgresBinDir 'psql.exe') -Value ''
+        Set-Content -LiteralPath (Join-Path $script:PostgresBinDir 'pg_dump.exe') -Value ''
+        Mock Get-Service { [pscustomobject]@{ Status = 'Running' } }
+        Mock Test-Path {
+            param([string]$LiteralPath, [string]$PathType)
+            return ($LiteralPath -like '*postgres-bin*')
+        }
+        $backup = [pscustomobject]@{
+            FailureDiagnoses = @([pscustomobject]@{
+                GameLabel = 'Game A'; Database = 'GameDB01'; Category = 'CannotConnect'
+                Detail = 'connection refused'; NextAction = 'Start PostgreSQL and retry'
+            })
+            FailureDetails = @('Game A / GameDB01: connection refused')
+        }
+        $result = Get-PostgresBackupRepairDiagnosis -BackupResult $backup
+        $result.ReadOnly | Should -BeTrue
+        $result.Summary | Should -Match 'reported database failures'
+        @($result.Checks | Where-Object { $_.Name -eq 'PostgreSQL service' }).Status | Should -Be 'Present'
+        @($result.Checks | Where-Object { $_.Name -eq 'pg_dump.exe' }).Status | Should -Be 'Present'
+        @($result.Checks | Where-Object { $_.Name -like 'Backup failure:*' }).Count | Should -Be 1
+        Should -Invoke Get-Service -Times 1
+    }
+    It "categorizes password, service, missing-database, and corruption failures with safe next actions" {
+        $cases = @(
+            @{ Detail = 'password authentication failed for user postgres'; Category = 'PasswordAuthenticationFailed'; Next = 'Enter a working postgres password' }
+            @{ Detail = 'PostgreSQL service is not running'; Category = 'ServiceNotRunning'; Next = 'Start the PostgreSQL service' }
+            @{ Detail = 'database GameDB01 does not exist'; Category = 'DatabaseMissing'; Next = 'Verify the game database name' }
+            @{ Detail = 'database corruption detected in GameDB01'; Category = 'DatabaseCorrupt'; Next = 'Restore the affected database' }
+        )
+        foreach ($case in $cases) {
+            $diagnosis = Get-PostgresFailureDiagnosis -GameLabel 'Game A' -DbName 'GameDB01' -Detail $case.Detail
+            $diagnosis.Category | Should -Be $case.Category
+            $diagnosis.NextAction | Should -Match ([regex]::Escape($case.Next))
+        }
+    }
+    It "provides concrete PostgreSQL retry and stop action metadata" {
+        $actions = @(Get-PostgresRecoveryActions -FailureId 'postgres-profile-recovery')
+        @($actions).Count | Should -Be 2
+        ($actions | Where-Object Id -eq 'Retry').Label | Should -Be 'Review the backup evidence, then retry PostgreSQL profile setup'
+        ($actions | Where-Object Id -eq 'Stop').Label | Should -Be 'Return to menu without claiming PostgreSQL setup complete'
+        $script:ProductionSource | Should -Match "Get-PostgresRecoveryActions -FailureId 'postgres-profile-recovery'"
+        $script:ProductionSource | Should -Match "Get-PostgresRecoveryActions -FailureId 'postgres-backup-unverified'"
+    }
+    It "returns friendly affected game names when database state cannot be verified" {
+        $profiles = Join-Path $TestDrive 'postgres-affected-labels'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $entries = @(
+            @{ File = 'GoldenTeeLive2019'; Game = 'Golden Tee Live 2019' }
+            @{ File = 'PowerPuttLive2012'; Game = 'Power Putt Live 2012' }
+            @{ File = 'PowerPuttLive2013'; Game = 'Power Putt Live 2013' }
+            @{ File = 'SilverStrikeBowlingLive'; Game = 'Silver Strike Bowling Live' }
+            @{ File = 'TargetTossProBags'; Game = 'Target Toss Pro Bags' }
+            @{ File = 'TargetTossProLawndarts'; Game = 'Target Toss Pro Lawn Darts' }
+        )
+        foreach ($entry in $entries) {
+            $xml = '<GameProfile><GameName>{0}</GameName><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>{1}</FieldValue></FieldInformation></ConfigValues></GameProfile>' -f $entry.Game, $entry.File
+            Set-Content -LiteralPath (Join-Path $profiles ($entry.File + '.xml')) -Value $xml
+        }
+        Mock Test-PostgresInstalled { $true }
+        Mock Get-PostgresDatabaseState { throw 'database state could not be verified' }
+        $result = Backup-PostgresDatabases -UserProfilesDir $profiles -SuperPasswordPlain 'secret'
+        $display = @($result.FailedDatabases) -join ', '
+        foreach ($entry in $entries) {
+            $display | Should -Match ([regex]::Escape(('{0} / {1}' -f $entry.Game, $entry.File)))
+        }
+        $result.Succeeded | Should -BeFalse
+    }
+    It "separates path-limited support omissions from true collection failures" {
+        $records = @(
+            [pscustomobject]@{ Status = 'Collected'; Source = 'TPM:log'; Destination = 'diagnostics\manager.log'; Detail = '' }
+            [pscustomobject]@{ Status = 'NotPresent'; Source = 'Game:Example:log'; Destination = ''; Detail = 'Expected diagnostic file was not present.' }
+            [pscustomobject]@{ Status = 'CollectionFailed'; Source = 'Game:Other:plugin inventory'; Destination = ''; Detail = 'Plugin directory could not be inspected safely.' }
+            [pscustomobject]@{ Status = 'CollectionFailed'; Source = 'TPM:required report'; Destination = ''; Detail = 'The required report could not be written.' }
+        )
+        $text = Get-TpmSupportManifestText -Records $records -Errors @() -GameCodes @('Example', 'Other') -AffectedGameSummary 'Example, Other'
+        $text | Should -Match 'Collected evidence:'
+        $text | Should -Match 'Optional diagnostics not found are summarized'
+        $text | Should -Match '\[NotPresent\] Registered-game diagnostics: 1 items'
+        $text | Should -Not -Match 'Verbose NotPresent detail:'
+        $text | Should -Match 'Collection failures: 1'
+        $failedSection = ($text -split 'What failed:', 2)[1] -split 'What TPM could not collect:', 2
+        $failedSection[0] | Should -Match 'TPM:required report'
+        $failedSection[0] | Should -Not -Match 'Game:Other:plugin inventory'
+        $text | Should -Match 'What TPM could not collect:'
+        $text | Should -Match 'CollectionFailed.*Game:Other:plugin inventory'
+        $text | Should -Match 'What TPM did not change:'
+        $text | Should -Match 'No game files, executables, DLL payloads, profiles, credentials, or emulator files'
+        $script:ProductionSource | Should -Match 'Redact-TpmSupportText -Text \(\[string\]\$record\.Source\)'
+        $script:ProductionSource | Should -Match 'Redact-TpmSupportText -Text \(\[string\]\$record\.Detail\)'
+        $script:ProductionSource | Should -Match 'absence is not a collection failure'
+    }
+    It "redacts secrets and profile paths from failure summaries" {
+        $records = @(
+            [pscustomobject]@{
+                Status = 'CollectionFailed'
+                Source = 'Game:SecretGame:C:\Users\EliSi\private.log'
+                Destination = ''
+                Detail = 'password=Console-Only-Secret-987'
+            }
+        )
+        $text = Get-TpmSupportManifestText -Records $records -Errors @() -GameCodes @('SecretGame') -AffectedGameSummary 'SecretGame'
+        $text | Should -Not -Match 'Console-Only-Secret-987'
+        $text | Should -Not -Match 'C:\\Users\\EliSi\\private\.log'
+        $text | Should -Match '(?i)<redacted>'
+    }
+    It "requires typed YES and verified selection before destructive reinitialize" {
+        $source = $script:ProductionSource
+        $source | Should -Match "Read-HostSafe '  Type YES in all caps to confirm. Anything else cancels.'"
+        $source | Should -Match 'Test-PostgresReinitializePlan'
+        $source | Should -Match 'SelectionPlanJson'
+        $source | Should -Match 'SelectionPlanHash'
+        $source | Should -Match 'Operation Reinitialize'
+        $source | Should -Match 'Invoke-PostgresReinitializePlan'
+        $source | Should -Match 'Invoke-PostgresReinitializeChoice -FailureDiagnoses'
+    }
+    It "keeps PostgreSQL reinitialize fail-closed and password-free in user-visible diagnostics" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Manual help is required'
+        $source | Should -Match 'rollback could not be verified'
+        $source | Should -Not -Match 'Write-Log.*PasswordPlain'
+        $source | Should -Not -Match 'Write-Host.*superPwPlain'
+    }
+    It "executes a validated reinitialize plan and targets only the selected database" {
+        $backupFile = Join-Path $TestDrive 'game.backup'
+        Set-Content -LiteralPath $backupFile -Value 'backup'
+        $plan = [pscustomobject]@{ GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = $backupFile; Encoding = 'UTF8' }
+        $json = ConvertTo-PostgresReinitializePlanJson -Plans @($plan)
+        $hash = Get-PostgresReinitializePlanHash -PlanJson $json
+        Mock Get-PostgresReinitializePlansFromProfiles { @($plan) }
+        Mock Reset-PostgresDatabaseFromBackup { [pscustomobject]@{ Outcome = 'SUCCEEDED'; Items = @('GameDbA'); Succeeded = $true; RestoredOriginal = $false; Reason = '' } }
+        $result = Invoke-PostgresReinitializePlan -PlanJson $json -PlanHash $hash -UserProfilesDir $TestDrive -SuperPasswordPlain 'secret' -RecoveryBackup ([pscustomobject]@{ Path = $TestDrive; Verified = $true })
+        $result.Outcome | Should -Be 'SUCCEEDED'
+        Should -Invoke Reset-PostgresDatabaseFromBackup -Times 1 -ParameterFilter { $DbName -eq 'GameDbA' -and $Confirmed }
+    }
+    It "rejects a changed current selection before invoking destructive reset" {
+        $backupFile = Join-Path $TestDrive 'game.backup'
+        Set-Content -LiteralPath $backupFile -Value 'backup'
+        $selected = [pscustomobject]@{ GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = $backupFile; Encoding = 'UTF8' }
+        $changed = [pscustomobject]@{ GameLabel = 'Game B'; ProfileName = 'GameB'; Database = 'GameDbB'; BackupFile = $backupFile; Encoding = 'UTF8' }
+        $json = ConvertTo-PostgresReinitializePlanJson -Plans @($selected)
+        $hash = Get-PostgresReinitializePlanHash -PlanJson $json
+        Mock Get-PostgresReinitializePlansFromProfiles { @($changed) }
+        Mock Reset-PostgresDatabaseFromBackup { throw 'must not be called' }
+        $result = Invoke-PostgresReinitializePlan -PlanJson $json -PlanHash $hash -UserProfilesDir $TestDrive -SuperPasswordPlain 'secret' -RecoveryBackup ([pscustomobject]@{ Path = $TestDrive; Verified = $true })
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        Should -Invoke Reset-PostgresDatabaseFromBackup -Times 0
+    }
+    It "rejects a tampered selection hash before profile lookup or reset" {
+        $json = ConvertTo-PostgresReinitializePlanJson -Plans @([pscustomobject]@{ GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = 'missing'; Encoding = 'UTF8' })
+        Mock Get-PostgresReinitializePlansFromProfiles {}
+        Mock Reset-PostgresDatabaseFromBackup {}
+        $result = Invoke-PostgresReinitializePlan -PlanJson $json -PlanHash ('0' * 64) -UserProfilesDir $TestDrive -SuperPasswordPlain 'secret' -RecoveryBackup ([pscustomobject]@{ Path = $TestDrive; Verified = $true })
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        Should -Invoke Get-PostgresReinitializePlansFromProfiles -Times 0
+        Should -Invoke Reset-PostgresDatabaseFromBackup -Times 0
+    }
+    It "blocks reinitialize before plan lookup and reset when recovery evidence is unverified" {
+        $plan = [pscustomobject]@{ GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = (Join-Path $TestDrive 'game.backup'); Encoding = 'UTF8' }
+        $json = ConvertTo-PostgresReinitializePlanJson -Plans @($plan)
+        $hash = Get-PostgresReinitializePlanHash -PlanJson $json
+        Mock Get-PostgresReinitializePlansFromProfiles {}
+        Mock Reset-PostgresDatabaseFromBackup {}
+        $result = Invoke-PostgresReinitializePlan -PlanJson $json -PlanHash $hash -UserProfilesDir $TestDrive -SuperPasswordPlain 'secret' -RecoveryBackup ([pscustomobject]@{ Path = $TestDrive; Verified = $false })
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        Should -Invoke Get-PostgresReinitializePlansFromProfiles -Times 0
+        Should -Invoke Reset-PostgresDatabaseFromBackup -Times 0
+    }
+    It "blocks reinitialize before plan lookup and reset when recovery backup is null" {
+        $plan = [pscustomobject]@{ GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = 'missing'; Encoding = 'UTF8' }
+        $json = ConvertTo-PostgresReinitializePlanJson -Plans @($plan)
+        $hash = Get-PostgresReinitializePlanHash -PlanJson $json
+        Mock Get-PostgresReinitializePlansFromProfiles {}
+        Mock Reset-PostgresDatabaseFromBackup {}
+        $result = Invoke-PostgresReinitializePlan -PlanJson $json -PlanHash $hash -UserProfilesDir $TestDrive -SuperPasswordPlain 'secret' -RecoveryBackup $null
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        Should -Invoke Get-PostgresReinitializePlansFromProfiles -Times 0
+        Should -Invoke Reset-PostgresDatabaseFromBackup -Times 0
+    }
+    It "executes the actual I cancellation path without confirmation or reset" {
+        $backupFile = Join-Path $TestDrive 'cancel.backup'
+        Set-Content -LiteralPath $backupFile -Value 'backup'
+        $plan = [pscustomobject]@{ GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = $backupFile; Encoding = 'UTF8' }
+        Mock Get-PostgresReinitializePlansFromProfiles { @($plan) }
+        Mock Read-HostSafe { 'NO' }
+        Mock Reset-PostgresDatabaseFromBackup { throw 'reset must not run' }
+        $result = Invoke-PostgresReinitializeChoice -FailureDiagnoses @([pscustomobject]@{ Database = 'GameDbA' }) `
+            -UserProfilesDir $TestDrive -ConfigPath (Join-Path $TestDrive 'config.json') `
+            -ScriptPath (Join-Path $TestDrive 'script.ps1') -TpRoot $TestDrive `
+            -SuperPasswordPlain 'secret' -RecoveryBackup ([pscustomobject]@{ Path = $TestDrive; Verified = $true })
+        $result.Outcome | Should -Be 'Cancelled'
+        Should -Invoke Read-HostSafe -Times 1
+        Should -Invoke Reset-PostgresDatabaseFromBackup -Times 0
+    }
+    It "executes the actual I missing-evidence path after YES and makes no reset call" {
+        $backupFile = Join-Path $TestDrive 'missing-evidence.backup'
+        Set-Content -LiteralPath $backupFile -Value 'backup'
+        $plan = [pscustomobject]@{ GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = $backupFile; Encoding = 'UTF8' }
+        Mock Get-PostgresReinitializePlansFromProfiles { @($plan) }
+        Mock Read-HostSafe { 'YES' }
+        Mock Test-RunningAsAdministrator { throw 'administrator check must not run' }
+        Mock Reset-PostgresDatabaseFromBackup { throw 'reset must not run' }
+        $result = Invoke-PostgresReinitializeChoice -FailureDiagnoses @([pscustomobject]@{ Database = 'GameDbA' }) `
+            -UserProfilesDir $TestDrive -ConfigPath (Join-Path $TestDrive 'config.json') `
+            -ScriptPath (Join-Path $TestDrive 'script.ps1') -TpRoot $TestDrive `
+            -SuperPasswordPlain 'secret' -RecoveryBackup $null
+        $result.Outcome | Should -Be 'Blocked'
+        Should -Invoke Read-HostSafe -Times 1
+        Should -Invoke Test-RunningAsAdministrator -Times 0
+        Should -Invoke Reset-PostgresDatabaseFromBackup -Times 0
+    }
+    It "executes the actual I path through a matching plan and resets only its selected database" {
+        $backupFile = Join-Path $TestDrive 'matching.backup'
+        Set-Content -LiteralPath $backupFile -Value 'backup'
+        $plan = [pscustomobject]@{ GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = $backupFile; Encoding = 'UTF8' }
+        Mock Get-PostgresReinitializePlansFromProfiles { @($plan) }
+        Mock Read-HostSafe { 'YES' }
+        Mock Test-RunningAsAdministrator { $true }
+        Mock Reset-PostgresDatabaseFromBackup { [pscustomobject]@{ Outcome = 'SUCCEEDED'; Succeeded = $true; RestoredOriginal = $false; Reason = '' } }
+        $result = Invoke-PostgresReinitializeChoice -FailureDiagnoses @([pscustomobject]@{ Database = 'GameDbA' }) `
+            -UserProfilesDir $TestDrive -ConfigPath (Join-Path $TestDrive 'config.json') `
+            -ScriptPath (Join-Path $TestDrive 'script.ps1') -TpRoot $TestDrive `
+            -SuperPasswordPlain 'secret' -RecoveryBackup ([pscustomobject]@{ Path = $TestDrive; Verified = $true })
+        $result.Outcome | Should -Be 'Completed'
+        Should -Invoke Reset-PostgresDatabaseFromBackup -Times 1 -ParameterFilter { $DbName -eq 'GameDbA' -and $Confirmed }
+    }
+    It "reports rollback verification failure as blocked manual-help state" {
+        $backupFile = Join-Path $TestDrive 'rollback.backup'
+        Set-Content -LiteralPath $backupFile -Value 'backup'
+        $plan = [pscustomobject]@{ GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = $backupFile; Encoding = 'UTF8' }
+        $json = ConvertTo-PostgresReinitializePlanJson -Plans @($plan)
+        $hash = Get-PostgresReinitializePlanHash -PlanJson $json
+        Mock Get-PostgresReinitializePlansFromProfiles { @($plan) }
+        Mock Reset-PostgresDatabaseFromBackup { [pscustomobject]@{ Succeeded = $false; RestoredOriginal = $false; Reason = 'destructive reset failed' } }
+        $result = Invoke-PostgresReinitializePlan -PlanJson $json -PlanHash $hash -UserProfilesDir $TestDrive `
+            -SuperPasswordPlain 'secret' -RecoveryBackup ([pscustomobject]@{ Path = $TestDrive; Verified = $true })
+        $result.Outcome | Should -Be 'ACTION_REQUIRED'
+        Should -Invoke Reset-PostgresDatabaseFromBackup -Times 1
+    }
+    It "redacts the PostgreSQL password from executable reinitialize failure output" {
+        $script:reinitializeMessages = @()
+        Mock Write-Host { $script:reinitializeMessages += [string]$Object }
+        Mock Write-Log {}
+        $backupFile = Join-Path $TestDrive 'redaction.backup'
+        Set-Content -LiteralPath $backupFile -Value 'backup'
+        $plan = [pscustomobject]@{ GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = $backupFile; Encoding = 'UTF8' }
+        Mock Get-PostgresReinitializePlansFromProfiles { @($plan) }
+        Mock Read-HostSafe { 'YES' }
+        Mock Test-RunningAsAdministrator { $true }
+        Mock Reset-PostgresDatabaseFromBackup { throw 'password=Console-Only-Secret-987' }
+        $result = Invoke-PostgresReinitializeChoice -FailureDiagnoses @([pscustomobject]@{ Database = 'GameDbA' }) `
+            -UserProfilesDir $TestDrive -ConfigPath (Join-Path $TestDrive 'config.json') `
+            -ScriptPath (Join-Path $TestDrive 'script.ps1') -TpRoot $TestDrive `
+            -SuperPasswordPlain 'Console-Only-Secret-987' -RecoveryBackup ([pscustomobject]@{ Path = $TestDrive; Verified = $true })
+        $result.Outcome | Should -Be 'Blocked'
+        ($script:reinitializeMessages -join [Environment]::NewLine) | Should -Not -Match 'Console-Only-Secret-987'
+        $result.Error | Should -Not -Match 'Console-Only-Secret-987'
+    }
+}
+
 
 Describe "Issue #292 PostgreSQL automatic elevation and resume" {
     BeforeEach {
@@ -4828,7 +6039,7 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
 
         ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Windows will ask you to approve this'
         ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'continue the same setup automatically'
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'do not need to close TPM'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'do not need to close TeknoParrot Manager'
         ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'backs up before changing anything'
     }
 
@@ -4892,7 +6103,7 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
         $profileSetup = $source.IndexOf('Invoke-PostgresGameSetup', $postgresMode)
         $postgresMode | Should -BeGreaterThan -1
         $save | Should -BeGreaterThan $verify
-        $dbBackup | Should -BeGreaterThan $save
+        $save | Should -BeGreaterThan $dbBackup
         $profileSetup | Should -BeGreaterThan $dbBackup
 
     }
@@ -4912,14 +6123,14 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
     It "keeps PostgreSQL running through the transaction and restores the original service state" {
         $script:ProductionSource | Should -Match 'function Restore-PostgresServiceState'
         $script:ProductionSource | Should -Match 'Restore-PostgresServiceState -WasRunning'
-        $script:ProductionSource | Should -Match 'Reset-PostgresPasswordAutomatically[\s\S]*?Test-PostgresPassword[\s\S]*?\$result\.Succeeded'
+        $script:ProductionSource | Should -Match 'Reset-PostgresPasswordAutomatically[\s\S]*?Test-PostgresPassword[\s\S]*?\$reset\.Outcome'
         $script:ProductionSource | Should -Not -Match 'if \(-not \$wasRunning\) \{\s*Stop-Service'
     }
 
     It "keeps UAC denial retryable without claiming recovery" {
-        $script:ProductionSource | Should -Match 'Windows did not give TPM permission to continue'
+        $script:ProductionSource | Should -Match 'Windows did not give TeknoParrot Manager permission to continue'
         $script:ProductionSource | Should -Match 'Nothing was changed by the failed automatic repair'
-        $script:ProductionSource | Should -Match "Read-HostSafe '  Try again\? \(Y/N\)'"
+        $script:ProductionSource | Should -Match "Read-TpmYesNo -Prompt '  Try again\? \(Y/N\)'"
         $script:ProductionSource | Should -Match 'protected repair information is still available'
     }
 
@@ -4944,7 +6155,7 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
                 $raw = Get-Content -LiteralPath $statePath -Raw
                 $raw | Should -Not -Match ([regex]::Escape($secret))
                 $saved = $raw | ConvertFrom-Json
-                $saved.SchemaVersion | Should -Be 3
+                $saved.SchemaVersion | Should -Be 4
                 $saved.CipherText | Should -Not -BeNullOrEmpty
                 $saved.Purpose | Should -Be 'TeknoParrotManager.PostgresRecovery'
                 $resume = Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir
@@ -4977,8 +6188,34 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
             ($script:uacArguments -join ' ') | Should -Match 'PostgresRecoveryResumeToken'
             ($script:uacArguments -join ' ') | Should -Match ([regex]::Escape($statePath))
         }
+        It "preserves the validated reinitialize selection through the UAC handoff" {
+            $secret = 'UAC-Reinitialize-Secret-321'
+            $selection = ConvertTo-PostgresReinitializePlanJson -Plans @([pscustomobject]@{
+                GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = 'backup'; Encoding = 'UTF8'
+            })
+            $hash = Get-PostgresReinitializePlanHash -PlanJson $selection
+            $script:testUacStatePath = Join-Path (Join-Path $TestDrive 'RecoveryState') '.tpm-postgres-recovery-ffffffffffffffffffffffffffffffff.json'
+            Mock New-PostgresRecoveryState {
+                param($ConfigPath, $ScriptPath, $TpRoot, $UserProfilesDir, $Operation, $PasswordPlain, $SelectionPlanJson, $SelectionPlanHash)
+                $script:uacOperation = $Operation
+                $script:uacSelection = $SelectionPlanJson
+                $script:uacSelectionHash = $SelectionPlanHash
+                $script:testUacStatePath
+            }
+            Mock Remove-PostgresRecoveryState { $true }
+            Mock Start-Process {
+                [pscustomobject]@{ ExitCode = 0 }
+            }
+            Start-PostgresRecoveryAsAdministrator -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath `
+                -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir `
+                -Operation Reinitialize -PasswordPlain $secret -SelectionPlanJson $selection -SelectionPlanHash $hash | Should -BeTrue
+            $script:uacOperation | Should -Be 'Reinitialize'
+            $script:uacSelection | Should -Be $selection
+            $script:uacSelectionHash | Should -Be $hash
+        }
+
         It "binds and consumes the authenticated resume challenge before side effects" {
-            $script:ProductionSource | Should -Match 'SchemaVersion\s*=\s*3'
+            $script:ProductionSource | Should -Match 'SchemaVersion\s*=\s*4'
             $script:ProductionSource | Should -Match 'ProtectedData\]::Protect'
             $script:ProductionSource | Should -Match 'File\]::Move\(\$fullPath, \$claimPath\)'
             $script:ProductionSource | Should -Match 'FileMode\]::CreateNew'
@@ -5095,6 +6332,74 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
                 [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
             }
         }
+        It "rejects schema4 reinitialize state without a selection plan before issuance" {
+            { New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath `
+                -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir `
+                -Operation Reinitialize -PasswordPlain 'Reinitialize-State-Secret' } |
+                Should -Throw '*requires a verified selection plan*'
+        }
+
+        It "rejects schema4 reinitialize state with a missing selection hash before issuance" {
+            $selection = ConvertTo-PostgresReinitializePlanJson -Plans @([pscustomobject]@{
+                GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = 'backup'; Encoding = 'UTF8'
+            })
+            { New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath `
+                -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir `
+                -Operation Reinitialize -PasswordPlain 'Reinitialize-State-Secret' `
+                -SelectionPlanJson $selection -SelectionPlanHash '' } |
+                Should -Throw '*requires a verified selection plan*'
+        }
+
+        It "rejects schema4 reinitialize state with a tampered selection hash before issuance" {
+            $selection = ConvertTo-PostgresReinitializePlanJson -Plans @([pscustomobject]@{
+                GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = 'backup'; Encoding = 'UTF8'
+            })
+            { New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath `
+                -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir `
+                -Operation Reinitialize -PasswordPlain 'Reinitialize-State-Secret' `
+                -SelectionPlanJson $selection -SelectionPlanHash ('0' * 64) } |
+                Should -Throw '*selection hash is invalid*'
+        }
+        It "rejects schema4 resume state with missing selection or invalid selection hash" {
+            $proc = Get-Process -Id $PID
+            $makeState = {
+                param([string]$SelectionPlanJson, [string]$SelectionPlanHash)
+                $id = [guid]::NewGuid().ToString('N')
+                $statePath = Join-Path (Join-Path $TestDrive 'RecoveryState') ('.tpm-postgres-recovery-{0}.json' -f $id)
+                $now = (Get-Date).ToUniversalTime()
+                $script:fakeResumePayload = [ordered]@{
+                    SchemaVersion = 4; Purpose = 'TeknoParrotManager.PostgresRecovery'; IssuanceId = $id; Operation = 'Reinitialize'; Nonce = ([guid]::NewGuid().ToString('N')); AttemptId = 1
+                    CreatedUtc = $now.AddMinutes(-1).ToString('o'); ExpiresUtc = $now.AddMinutes(4).ToString('o')
+                    ParentPid = [int]$PID; ParentStartTicks = [int64]$proc.StartTime.ToUniversalTime().Ticks; ParentProcessPath = [string]$proc.Path; ParentProcessSha256 = (Get-FileHash -LiteralPath $proc.Path -Algorithm SHA256).Hash
+                    OriginUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; MachineName = [Environment]::MachineName
+                    ScriptPath = [System.IO.Path]::GetFullPath($script:stateScriptPath); ScriptSha256 = (Get-FileHash -LiteralPath $script:stateScriptPath -Algorithm SHA256).Hash
+                    ConfigPath = [System.IO.Path]::GetFullPath($script:stateConfigPath); ConfigSha256 = (Get-FileHash -LiteralPath $script:stateConfigPath -Algorithm SHA256).Hash
+                    TpRoot = [System.IO.Path]::GetFullPath($script:stateTpRoot); UserProfilesDir = [System.IO.Path]::GetFullPath($script:stateUserProfilesDir)
+                    PasswordPlain = 'resume-secret'; PasswordOriginEncrypted = 'encrypted'; SelectionPlanJson = $SelectionPlanJson; SelectionPlanHash = $SelectionPlanHash
+                }
+                [void][IO.Directory]::CreateDirectory((Split-Path -Parent $statePath))
+                [IO.File]::WriteAllText($statePath, '{"SchemaVersion":4,"Purpose":"TeknoParrotManager.PostgresRecovery","CipherText":"fake"}', (New-Object Text.UTF8Encoding $false))
+                return $statePath
+            }
+            Mock Unprotect-PostgresRecoveryEnvelope { $script:fakeResumePayload | ConvertTo-Json -Depth 8 }
+            $missingPath = & $makeState '' ''
+            try {
+                { Read-PostgresRecoveryState -StatePath $missingPath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw '*could not safely resume*'
+                (Test-Path -LiteralPath $missingPath -PathType Leaf) | Should -BeTrue
+            } finally {
+                Remove-Item -LiteralPath $missingPath -Force -ErrorAction SilentlyContinue
+            }
+            $selection = ConvertTo-PostgresReinitializePlanJson -Plans @([pscustomobject]@{
+                GameLabel = 'Game A'; ProfileName = 'GameA'; Database = 'GameDbA'; BackupFile = 'backup'; Encoding = 'UTF8'
+            })
+            $invalidHashPath = & $makeState $selection ('0' * 64)
+            try {
+                { Read-PostgresRecoveryState -StatePath $invalidHashPath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw '*could not safely resume*'
+                (Test-Path -LiteralPath $invalidHashPath -PathType Leaf) | Should -BeTrue
+            } finally {
+                Remove-Item -LiteralPath $invalidHashPath -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 }
 
@@ -5102,6 +6407,31 @@ Describe "BepInEx authorized-root and transaction guards" {
     BeforeEach {
         Mock Write-Log {}
         Mock Write-Host {}
+    }
+
+    It "accepts an existing BepInEx child path under the canonical game root" {
+        $root = Join-Path $TestDrive 'ChildPathGame'
+        New-Item -ItemType Directory -Path (Join-Path $root 'BepInEx\core') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root 'BepInEx\core\0Harmony.dll') -Value 'dll'
+
+        Test-BepInExNoReparsePath -Root $root -Path (Join-Path $root 'BepInEx\core\0Harmony.dll') | Should -BeTrue
+        Test-PathInside -child (Join-Path $root 'BepInEx\core\0Harmony.dll') -parent $root | Should -BeTrue
+    }
+
+    It "classifies inspection failures without exposing generic failure-only output" {
+        $classification = Get-BepInExInspectionFailure -ErrorRecord ([System.Exception]::new('unsupported architecture'))
+
+        $classification.Code | Should -Be 'UNSUPPORTED_ARCHITECTURE'
+        $classification.Summary | Should -Match 'architecture'
+        $classification.NextAction | Should -Not -BeNullOrEmpty
+        $classification.Technical | Should -Match 'unsupported architecture'
+    }
+
+    It "uses the full game name and visibly offers Back in the update prompt source" {
+        $script:ProductionSource | Should -Match 'Get-BepInExGameLabel'
+        $script:ProductionSource | Should -Match '\[B\] Back'
+        $script:ProductionSource | Should -Match 'TeknoParrot Manager could not safely update BepInEx'
+        $script:ProductionSource | Should -Not -Match 'Write-Host .*TPM could not safely update BepInEx'
     }
 
     It "blocks an outside game root before release query, prompt, or download" {
@@ -5130,7 +6460,7 @@ Describe "BepInEx authorized-root and transaction guards" {
         ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'could not safely update BepInEx'
         ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'move or correct it'
         ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'did not download or change anything'
-        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'choose the BepInEx update again'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Fix the path, then run BepInEx setup again'
         ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Not -Match '(?i)reparse|junction|symlink'
     }
 
@@ -5236,14 +6566,18 @@ Describe "BepInEx authorized-root and transaction guards" {
             Mock Get-BepInExInstalledArch { 'x64' }
             Mock Get-BepInExInstallationHealth { [pscustomobject]@{ Installed = $true; Complete = $true; Version = '5.4.22'; Architecture = 'x64'; Reason = 'Complete' } }
             Mock Read-HostSafe { 'Y' }
-            Mock Invoke-TpmDownload { $true }
+            Mock Invoke-TpmDownload {
+                param([string]$DestinationPath)
+                Set-Content -LiteralPath $DestinationPath -Value 'verified package' -NoNewline
+                $true
+            }
             Mock New-TpmStagingDirectory {
                 New-Item -ItemType Directory -Path $script:bepStage -Force | Out-Null
                 return $script:bepStage
             }
-            Mock Expand-ZipFileSafe {}
+            Mock Expand-ZipFileSafe { $script:bepExpandedZipPath = [string]$ZipPath }
             Mock Get-BepInExStagedFiles { @('BepInEx\core.dll') }
-            Mock New-BepInExUpdateBackup { Join-Path $script:bepGame 'BepInEx_Backup_test' }
+            Mock New-BepInExUpdateBackup { $script:bepBackupRoot = [string]$GameRoot; Join-Path $script:bepGame 'BepInEx_Backup_test' }
             Mock Invoke-TpmTransactionalTreePromote { $true }
         }
 
@@ -5255,11 +6589,13 @@ Describe "BepInEx authorized-root and transaction guards" {
 
         It "counts a promoted update only after controlled staging cleanup succeeds" {
             Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+            $script:bepExpandedZipPath | Should -Be (Join-Path $script:bepCache 'BepInEx_win_x64_5.4.23.zip')
+            $script:bepBackupRoot | Should -Be $script:bepGame
 
             Test-Path -LiteralPath $script:bepStage | Should -BeFalse
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match '^  Updated cleanly: 1 game\(s\)$' } -Times 1 -Exactly
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'Updated with cleanup failure' } -Times 0 -Exactly
-            Should -Invoke Write-Log -ParameterFilter { [string]$msg -eq 'BepInEx update check: updatedCleanly=1 updatedWithCleanupFailure=0 errors=0 cleanupFailures=0' } -Times 1 -Exactly
+            Should -Invoke Write-Log -ParameterFilter { [string]$msg -eq 'BepInEx update check: updatedCleanly=1 updatedWithCleanupFailure=0 skippedMissingDevice=0 skippedMissingPath=0 skippedProtected=0 errors=0 cleanupFailures=0' } -Times 1 -Exactly
         }
 
         It "reports action required and excludes a promoted update from the clean count when staging cleanup fails" {
@@ -5270,10 +6606,131 @@ Describe "BepInEx authorized-root and transaction guards" {
             Test-Path -LiteralPath $script:bepStage -PathType Container | Should -BeTrue
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match '^  Updated cleanly: 0 game\(s\)$' } -Times 1 -Exactly
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match '^  Updated with cleanup failure: 1 -- ACTION REQUIRED$' } -Times 1 -Exactly
-            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match [regex]::Escape($script:bepStage) } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'preserved staging evidence before retrying' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match [regex]::Escape($script:bepStage) } -Times 0 -Exactly
             Should -Invoke Write-Log -ParameterFilter { [string]$msg -match 'update applied.*staging cleanup failed' -and [string]$msg -match [regex]::Escape($script:bepStage) } -Times 1 -Exactly
-            Should -Invoke Write-Log -ParameterFilter { [string]$msg -eq 'BepInEx update check: updatedCleanly=0 updatedWithCleanupFailure=1 errors=0 cleanupFailures=1' } -Times 1 -Exactly
+            Should -Invoke Write-Log -ParameterFilter { [string]$msg -eq 'BepInEx update check: updatedCleanly=0 updatedWithCleanupFailure=1 skippedMissingDevice=0 skippedMissingPath=0 skippedProtected=0 errors=0 cleanupFailures=1' } -Times 1 -Exactly
         }
+        It "keeps repair-reset rollback failure distinct from the original update failure" {
+            Mock Read-HostSafe { 'R' }
+            Mock Invoke-TpmTransactionalTreePromote { throw 'simulated promotion failure: A device which does not exist was specified.' }
+            Mock Restore-BepInExUpdateBackup { throw 'simulated rollback restore failure' }
+
+            $result = Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+
+            $result.Succeeded | Should -BeFalse
+            $result.Errors | Should -Be 1
+            $result.PathReasonCounts['ROLLBACK_FAILED'] | Should -Be 1
+            Should -Invoke Restore-BepInExUpdateBackup -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'transaction rollback could not be verified' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'update blocked:' } -Times 0 -Exactly
+        }
+        It "keeps transactional rollback failure ahead of device classification" {
+            Mock Invoke-TpmTransactionalTreePromote { throw 'ROLLBACK FAILED: A device which does not exist was specified.' }
+
+            $result = Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+
+            $result.Succeeded | Should -BeFalse
+            $result.Errors | Should -Be 1
+            $result.MissingDevice | Should -Be 0
+            $result.PathReasonCounts['ROLLBACK_FAILED'] | Should -Be 1
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'transaction rollback could not be verified' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'update blocked:' } -Times 0 -Exactly
+        }
+        It "keeps cleanup failure ahead of device classification" {
+            Mock Invoke-TpmTransactionalTreePromote { throw 'CLEANUP FAILED: staging path became unavailable on device' }
+
+            $result = Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+
+            $result.Succeeded | Should -BeFalse
+            $result.Errors | Should -Be 1
+            $result.MissingDevice | Should -Be 0
+            $result.MissingPath | Should -Be 0
+            $result.PathReasonCounts['DEVICE_UNAVAILABLE'] | Should -Be $null
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'cleanup was not completed' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'game path became unavailable' } -Times 0 -Exactly
+            Should -Invoke Write-Log -ParameterFilter { [string]$msg -match 'cleanupFailures=1' -and [string]$msg -match 'errors=0' } -Times 1 -Exactly
+        }
+        It "stops production candidate processing after the second same-cause rollback failure" {
+            $roots = @('One', 'Two', 'Three') | ForEach-Object { Join-Path $script:bepApproved $_ }
+            $codes = @('AAA', 'BBB', 'CCC')
+            for ($i = 0; $i -lt $roots.Count; $i++) {
+                New-Item -ItemType Directory -Path $roots[$i] -Force | Out-Null
+                $exe = Join-Path $roots[$i] 'game.exe'
+                New-Item -ItemType File -Path $exe -Force | Out-Null
+                $escaped = [System.Security.SecurityElement]::Escape($exe)
+                Set-Content -LiteralPath (Join-Path $script:bepProfiles ($codes[$i] + '.xml')) -Value ("<GameProfile><GamePath>$escaped</GamePath></GameProfile>")
+            }
+            $script:productionPromoteCalls = 0
+            $script:productionStageNumber = 0
+            Mock New-TpmStagingDirectory {
+                $script:productionStageNumber++
+                $path = Join-Path (Join-Path $env:TEMP 'TeknoParrotManagerStaging') ('BepInEx-production-' + $script:productionStageNumber)
+                New-Item -ItemType Directory -Path $path -Force | Out-Null
+                $path
+            }
+            Mock New-BepInExUpdateBackup {
+                Join-Path $GameRoot ('BepInEx_Backup_' + [System.IO.Path]::GetFileName($GameRoot))
+            }
+            Mock Restore-BepInExUpdateBackup {}
+            Mock Invoke-TpmTransactionalTreePromote {
+                $script:productionPromoteCalls++
+                if ($script:productionPromoteCalls -le 2) {
+                    throw [System.IO.IOException]::new("TPM TRANSACTION ROLLBACK FAILED for '$DestDir'; evidence remains at '$StagingDir'.")
+                }
+            }
+            Mock Read-HostSafe { 'R' }
+
+            $result = Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+
+            $script:productionPromoteCalls | Should -Be 2
+            $result.BatchStopped | Should -BeTrue
+            @($result.FailureRecords).Count | Should -Be 2
+            $result.FailureRecords[0].GameRoot | Should -Not -Be $result.FailureRecords[1].GameRoot
+            $result.FailureRecords[0].StagingPath | Should -Not -Be $result.FailureRecords[1].StagingPath
+            $result.FailureRecords[0].BackupPath | Should -Not -Be $result.FailureRecords[1].BackupPath
+            $result.FailureRecords[0].ReasonKey | Should -Be $result.FailureRecords[1].ReasonKey
+            $result.FailureRecords[0].Exception | Should -Match 'One'
+            $result.FailureRecords[1].Exception | Should -Match 'Two'
+        }
+        It "distinguishes a downloaded package from a failed per-game install" {
+            $script:bepOutput = @()
+            Mock Write-Host { $script:bepOutput += [string]$Object }
+            Mock Invoke-TpmTransactionalTreePromote { throw 'simulated install failure at C:\technical\destination' }
+
+            $result = Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+            $output = $script:bepOutput -join [Environment]::NewLine
+
+            $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+            $output | Should -Match 'verified BepInEx package was downloaded'
+            $output | Should -Not -Match '(?i)C:\\|System\\.|StackTrace|technical'
+            $output | Should -Not -Match 'update blocked:'
+        }
+    }
+    It "uses actual selected, changed, failed, and skipped game IDs in the transaction" {
+        Mock Invoke-BepInExUpdateCheckLegacy {
+            [pscustomobject]@{
+                Succeeded = $false
+                Updated = 1
+                UpdatedWithCleanupFailure = 0
+                Errors = 1
+                SelectedItems = @('SafeGame', 'BrokenGame', 'ProtectedGame')
+                ChangedItems = @('SafeGame')
+                FailedItems = @('BrokenGame')
+                SkippedItems = @('ProtectedGame')
+                FailureRecords = @([pscustomobject]@{ Game = 'BrokenGame'; ReasonKey = 'UPDATE_FAILED'; Exception = 'technical evidence' })
+            }
+        }
+
+        $result = Invoke-BepInExUpdateCheck -UserProfilesDir (Join-Path $TestDrive 'unrelated-profiles') -CacheDir (Join-Path $TestDrive 'unused-cache')
+
+        $result.Outcome | Should -Be 'PARTIAL_APPLIED'
+        @($result.Items) | Should -Be @('SafeGame', 'BrokenGame', 'ProtectedGame')
+        @($result.Mutation.ChangedItems) | Should -Be @('SafeGame')
+        @($result.Mutation.FailedItems) | Should -Be @('BrokenGame')
+        @($result.Mutation.SkippedItems) | Should -Be @('ProtectedGame')
+        $result.TechnicalDetails.FailureRecords[0].Game | Should -Be 'BrokenGame'
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
     }
 }
 Describe "Read-PathWithBrowse" {
@@ -5301,21 +6758,21 @@ Describe "Read-PathWithBrowse" {
 
 Describe "Get-ReShadeLatestVersion retry behavior" {
     BeforeAll {
-        Mock Invoke-WebRequest {}
+        Mock Invoke-TpmWebRequestSilently {}
     }
 
     It "makes only a single attempt and returns null on failure -- no retry, unlike Invoke-TpmDownload's HttpClient/Invoke-WebRequest tiers" {
-        Mock Invoke-WebRequest { throw "site unreachable" }
+        Mock Invoke-TpmWebRequestSilently { throw "site unreachable" }
         $result = Get-ReShadeLatestVersion
         $result | Should -BeNullOrEmpty
-        Should -Invoke Invoke-WebRequest -Times 1
+        Should -Invoke Invoke-TpmWebRequestSilently -Times 1
     }
     It "parses the version out of a successful response" {
-        Mock Invoke-WebRequest { [pscustomobject]@{ Content = "...ReShade_Setup_6.7.3.exe..." } }
+        Mock Invoke-TpmWebRequestSilently { [pscustomobject]@{ Content = "...ReShade_Setup_6.7.3.exe..." } }
         Get-ReShadeLatestVersion | Should -Be "6.7.3"
     }
     It "discovers ReShade 6.8.0 and builds the official plain installer URL" {
-        Mock Invoke-WebRequest { [pscustomobject]@{ Content = "ReShade_Setup_6.8.0.exe" } }
+        Mock Invoke-TpmWebRequestSilently { [pscustomobject]@{ Content = "ReShade_Setup_6.8.0.exe" } }
         Get-ReShadeLatestVersion | Should -Be '6.8.0'
         Get-ReShadeSetupDownloadUrl -Version '6.8.0' | Should -Be 'https://reshade.me/downloads/ReShade_Setup_6.8.0.exe'
     }
@@ -5508,6 +6965,20 @@ Describe "Invoke-TpmDownload method selection and partial-file cleanup" {
         $result | Should -BeFalse
         $statusCode | Should -Be 404
     }
+    It "preserves a definitive thumbnail 404 when a later fallback tier has an unknown failure" {
+        Mock Test-TpmDownloadBitsAvailable { $false }
+        Mock Invoke-TpmDownloadHttpClient { throw "Response status code does not indicate success: 404 (Not Found)." }
+        Mock Invoke-TpmDownloadWebRequest { throw "DNS resolution failed" }
+        $savePath = Join-Path $TestDrive "status-code-404-fallback-error.png"
+        $statusCode = 0
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/missing.png" -DestinationPath $savePath -Label 'Thumbnails' -LastStatusCode ([ref]$statusCode)
+
+        $result | Should -BeFalse
+        $statusCode | Should -Be 404
+        Should -Invoke Invoke-TpmDownloadHttpClient -Times 1
+        Should -Invoke Invoke-TpmDownloadWebRequest -Times 3
+    }
 
     It "reports status code 0 via -LastStatusCode when the failure is not HTTP-status-related" {
         Mock Test-TpmDownloadBitsAvailable { $false }
@@ -5551,33 +7022,31 @@ Describe "Invoke-TpmDownload method selection and partial-file cleanup" {
 Describe "Invoke-TpmDownload progress overlay cleanup (issue #132)" {
     # Regression coverage for the stale "Downloading Thumbnails" progress
     # overlay that persisted over the TPM menu after a thumbnail 404. Root
-    # cause: every download tier raises the Id 42 Write-Progress overlay as
-    # it starts, but only each tier's own success path cleared it -- every
-    # failure/exception exit left whatever was last written on screen
-    # permanently. The fix wraps Invoke-TpmDownload in a finally that always
-    # completes Id 42, regardless of how the function exits.
+    # cause: every download tier updates the shared compact progress row, but
+    # failure/exception exits previously left the last progress text on screen.
+    # The fix wraps Invoke-TpmDownload in a finally that always completes that row.
     BeforeAll {
         Mock Write-Log {}
         Mock Write-Host {}
         Mock Write-DownloadAudit {}
         Mock Write-TpmDownloadMetrics {}
         Mock Start-Sleep {}
-        Mock Write-Progress {}
+        Mock Write-TpmCompactExtractionProgress {}
     }
     BeforeEach {
         Mock Test-TpmDownloadBitsAvailable { $false }
     }
 
-    It "completes the Id 42 overlay after a successful download" {
+    It "completes the compact progress row after a successful download" {
         Mock Invoke-TpmDownloadHttpClient { Set-Content -LiteralPath $TempPath -Value "fake" -NoNewline }
         $savePath = Join-Path $TestDrive "progress-success.png"
 
         Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails' | Should -BeTrue
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
 
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
     }
 
-    It "completes the Id 42 overlay after a single definitive 404 (one thumbnail missing upstream)" {
+    It "completes the compact progress row after a single definitive 404 (one thumbnail missing upstream)" {
         Mock Invoke-TpmDownloadHttpClient { throw "Response status code does not indicate success: 404 (Not Found)." }
         Mock Invoke-TpmDownloadWebRequest { throw "Response status code does not indicate success: 404 (Not Found)." }
         $savePath = Join-Path $TestDrive "progress-404.png"
@@ -5587,27 +7056,27 @@ Describe "Invoke-TpmDownload progress overlay cleanup (issue #132)" {
 
         $result | Should -BeFalse
         $statusCode | Should -Be 404
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
     }
 
-    It "completes the Id 42 overlay after a non-404 failure (generic download error, all tiers exhausted)" {
+    It "completes the compact progress row after a non-404 failure (generic download error, all tiers exhausted)" {
         Mock Invoke-TpmDownloadHttpClient { throw "DNS resolution failed" }
         Mock Invoke-TpmDownloadWebRequest { throw "DNS resolution failed" }
         $savePath = Join-Path $TestDrive "progress-generic-fail.png"
 
         Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails' | Should -BeFalse
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
 
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
     }
 
-    It "completes the Id 42 overlay even when an unexpected exception is thrown after a successful transfer" {
+    It "completes the compact progress row even when an unexpected exception is thrown after a successful transfer" {
         Mock Invoke-TpmDownloadHttpClient { Set-Content -LiteralPath $TempPath -Value "fake" -NoNewline }
         Mock Write-DownloadAudit { throw "unexpected post-download failure" }
         $savePath = Join-Path $TestDrive "progress-exception.png"
 
         Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails' | Should -BeFalse
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
 
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
     }
 
     It "clears the overlay independently for each call in a mixed batch (404, then success, then generic failure)" {
@@ -5630,7 +7099,7 @@ Describe "Invoke-TpmDownload progress overlay cleanup (issue #132)" {
         $r1 | Should -BeFalse
         $r2 | Should -BeTrue
         $r3 | Should -BeFalse
-        Should -Invoke Write-Progress -Times 3 -ParameterFilter { $Id -eq 42 -and $Completed }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 3 -ParameterFilter { $Complete }
     }
 
     It "clears the overlay for every call across an all-404 batch (upstream has none of these icons)" {
@@ -5641,8 +7110,8 @@ Describe "Invoke-TpmDownload progress overlay cleanup (issue #132)" {
             $savePath = Join-Path $TestDrive "all-404-$_.png"
             Invoke-TpmDownload -DownloadUrl "https://example.com/missing-$_.png" -DestinationPath $savePath -Label 'Thumbnails' | Should -BeFalse
         }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 3 -ParameterFilter { $Complete }
 
-        Should -Invoke Write-Progress -Times 3 -ParameterFilter { $Id -eq 42 -and $Completed }
     }
 }
 
@@ -5653,14 +7122,14 @@ Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #
     # not special-cased anywhere in Invoke-TpmDownload -- they are ordinary
     # exceptions that must still be caught by the outer try/catch/finally,
     # never mis-reported as a 404 ("not in the online pack"), and must still
-    # clear the Id 42 progress overlay and remove the partial temp file.
+    # clear the compact progress row and remove the partial temp file.
     BeforeAll {
         Mock Write-Log {}
         Mock Write-Host {}
         Mock Write-DownloadAudit {}
         Mock Write-TpmDownloadMetrics {}
         Mock Start-Sleep {}
-        Mock Write-Progress {}
+        Mock Write-TpmCompactExtractionProgress {}
     }
     BeforeEach {
         Mock Test-TpmDownloadBitsAvailable { $false }
@@ -5680,7 +7149,7 @@ Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #
         $result | Should -BeFalse
         $statusCode | Should -Not -Be 404
         Test-Path -LiteralPath $savePath | Should -BeFalse
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
     }
 
     It "rejects an incomplete/malformed download that doesn't match the expected size, clears the overlay, and leaves no partial file behind" {
@@ -5695,7 +7164,7 @@ Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #
 
         $result | Should -BeFalse
         Test-Path -LiteralPath $savePath | Should -BeFalse
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
     }
 
     It "treats a cancelled transfer (OperationCanceledException) as a clean failure, not an unhandled crash" {
@@ -5707,7 +7176,7 @@ Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #
         $result = Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails'
 
         $result | Should -BeFalse
-        Should -Invoke Write-Progress -Times 2 -ParameterFilter { $Id -eq 42 -and $Completed }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 2 -ParameterFilter { $Complete }
     }
 
     It "clears the overlay for every call across a complete non-404 batch failure (e.g. upstream host unreachable)" {
@@ -5723,7 +7192,7 @@ Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #
         }
 
         $statusCodes | Should -Not -Contain 404
-        Should -Invoke Write-Progress -Times 3 -ParameterFilter { $Id -eq 42 -and $Completed }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 3 -ParameterFilter { $Complete }
     }
 }
 
@@ -5769,8 +7238,10 @@ Describe "Invoke-CrosshairSetup P1/P2 prompts use the safe input path (issue #13
         $script:crosshairSource | Should -Not -BeNullOrEmpty
     }
 
-    It "the P1 and P2 index prompts both go through Read-HostSafe" {
-        (@([regex]::Matches($script:crosshairSource, 'Read-HostSafe \$promptText')).Count) | Should -Be 2
+    It "routes P1 and P2 index prompts through workflow-aware input with typed fallback" {
+        $script:crosshairSource | Should -Match '\$readCrosshairPrompt'
+        (@([regex]::Matches($script:crosshairSource, 'Read-TpmWorkflowInput -Context \$WorkflowContext')).Count) | Should -Be 1
+        $script:crosshairSource | Should -Match 'return Read-HostSafe \$Prompt'
     }
 
     It "no bare Read-Host call in this function has .Trim() or .ToUpper() chained directly onto it" {
@@ -5864,27 +7335,42 @@ Describe "Invoke-ThumbnailDownload 404-vs-failure distinction" {
         # must increment $failed, not $notAvail.
         $script:thumbSource | Should -Match '\$statusCode\s+-eq\s+404[\s\S]*?\}\s*else\s*\{[\s\S]*?\$failed\+\+'
     }
+    It "labels each thumbnail with its profile code and count" {
+        $script:thumbSource | Should -Match 'Thumbnail \{0\} \[\{1\}/\{2\}\]'
+    }
+
+    It "names transient thumbnail failures separately from missing online icons" {
+        $script:thumbSource | Should -Match '\$failedCodes\.Add\(\$code\)'
+        $script:thumbSource | Should -Match 'Thumbnail download/check failures'
+        $script:thumbSource | Should -Match 'separate from games with no online icon'
+    }
 }
 
 Describe "Write-TpmDownloadProgress" {
     BeforeAll {
-        Mock Write-Progress {}
+        Mock Write-TpmCompactExtractionProgress {}
     }
 
-    It "shows percent complete when total size is known" {
+    It "reports a known total through the shared compact progress renderer" {
         Write-TpmDownloadProgress -Method 'HttpClient' -DownloadedBytes 5242880 -TotalBytes 10485760 -Elapsed ([TimeSpan]::FromSeconds(2))
 
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter {
-            $PercentComplete -eq 50 -and $Status -like '*5/10 MB*' -and $Status -like '*MB/s*' -and $Status -like '*ETA*'
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter {
+            $Phase -eq 'Checking' -and $Current -eq 5 -and $Total -eq 10 -and $Label -like '*HttpClient*'
         }
     }
 
-    It "uses an indeterminate status when total size is unknown" {
+    It "reports an unknown total through the shared compact progress renderer" {
         Write-TpmDownloadProgress -Method 'HttpClient' -DownloadedBytes 5242880 -TotalBytes 0 -Elapsed ([TimeSpan]::FromSeconds(2))
 
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter {
-            $Status -like '*5 MB downloaded*' -and -not $PSBoundParameters.ContainsKey('PercentComplete')
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter {
+            $Phase -eq 'Checking' -and $Current -eq 5 -and $Total -eq 0 -and $Label -like '*HttpClient*'
         }
+    }
+    It "uses a user-facing fallback label instead of exposing the raw web request method" {
+        $progressSource = ${function:Write-TpmDownloadProgress}.ToString()
+        $progressSource | Should -Match "web fallback"
+        $progressSource | Should -Match '\$displayMethod'
+        $progressSource | Should -Not -Match '\$Label\s*=\s*"\{0\} via \{1\}".*?\$Method'
     }
 }
 
@@ -6203,7 +7689,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
             $script:eggmanTransportTempPath = $TempPath
             Set-Content -LiteralPath $TempPath -Value '12345' -NoNewline
         }
-        Mock Write-Progress {}
+        Mock Write-TpmCompactExtractionProgress {}
         $relSize = 5
 
         $result = Invoke-EggmanDatDownload -downloadUrl 'https://example.com/eggman.zip' -savePath $destination -ExpectedBytes $relSize
@@ -6281,14 +7767,14 @@ Describe "Thumbnail download regression guards" {
 }
 
 Describe "Invoke-TpmDownload finally block always clears the progress overlay (issue #132)" {
-    It "the finally block completes Id 42 unconditionally, not only on the success path" {
+    It "the finally block invokes the shared compact renderer unconditionally, not only on the success path" {
         $fullSource = Get-Content -LiteralPath $scriptPath -Raw
         $start = $fullSource.IndexOf('function Invoke-TpmDownload {')
         $start | Should -BeGreaterThan -1
         $end = $fullSource.IndexOf("`nfunction ", $start + 10)
         $downloadFnSource = $fullSource.Substring($start, $end - $start)
 
-        $downloadFnSource | Should -Match '\}\s*finally\s*\{\s*[\s\S]*?Write-Progress\s+-Id\s+42\s+-Activity\s+"Downloading\s+\$Label"\s+-Completed'
+        $downloadFnSource | Should -Match '\}\s*finally\s*\{\s*[\s\S]*?Write-TpmCompactExtractionProgress[\s\S]*?-Complete'
     }
 }
 
@@ -6318,7 +7804,7 @@ Describe "Crosshair setup regression guards" {
 
         $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path "C:\Crosshairs\P1.png" -P2Path "C:\Crosshairs\P2.png"
 
-        $result | Should -Be $false
+        $result.Outcome | Should -Be 'NO_OP'
         (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent
         @(Get-ChildItem -LiteralPath $iniDir -Filter "PCSX2.ini.bak_*" -File).Count | Should -Be 0
     }
@@ -6446,7 +7932,7 @@ $binding
             Set-Content -LiteralPath (Join-Path $profiles 'DuplicateWheelTarget.xml') -Encoding UTF8
 
         $pool = Build-ArchetypePool $profiles 3
-        $reports = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 3 -DryRun:$false
+        $reports = (Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 3 -DryRun:$false).Reports
         [xml]$updated = Get-Content -LiteralPath (Join-Path $profiles 'DuplicateWheelTarget.xml') -Raw
         $targetSlots = @($updated.SelectNodes('/GameProfile/JoystickButtons/JoystickButtons'))
         $boundSlots = @($targetSlots | Where-Object { Test-ButtonIsBound $_ })
@@ -6550,7 +8036,7 @@ $optionsXml
 
         $pool = Build-ArchetypePool $profiles 5
         $canonicalArchetype = @{ button = 'StreetFighterIII3rdStrike' }
-        $reports = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false
+        $reports = (Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false).Reports
 
         [xml]$fghtjamAfter = Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw
         $apiField = $fghtjamAfter.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='Input API']")
@@ -6594,7 +8080,7 @@ $optionsXml
 
         $pool = Build-ArchetypePool $profiles 5
         $canonicalArchetype = @{ button = 'StreetFighterIII3rdStrike' }
-        $reports = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false
+        $reports = (Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false).Reports
 
         @($reports | Where-Object { $_.Code -eq 'BBCF' }).Count | Should -Be 0
     }
@@ -6645,31 +8131,41 @@ Describe "Write-ControlPropagationResults (issue #59: standalone Propagate Contr
         $result = Write-ControlPropagationResults -Reports $reports
 
         $result.BoundCount | Should -Be 3
+        $result.ControlsCopiedCount | Should -Be 1
+        $result.SettingsOnlyCount | Should -Be 0
         $result.NoArchetypeItems.Count | Should -Be 1
         $result.NoArchetypeItems[0].Code | Should -Be 'GameD'
+        $result.ApiFixedCount | Should -Be 2
+        $result.VerifiedPhysicalBindingsCount | Should -Be 0
     }
-
+    It "returns zero copied controls for settings-only results" {
+        $reports = @(
+            [pscustomobject]@{ Code = 'GameS'; Status = 'settings-only'; Bound = 0; ConfigCarried = @('Sensitivity'); Manual = @('Start') }
+        )
+        $result = Write-ControlPropagationResults -Reports $reports
+        $result.ControlsCopiedCount | Should -Be 0
+        $result.SettingsOnlyCount | Should -Be 1
+        $result.BoundCount | Should -Be 0
+    }
     It "returns zero updated and an empty no-archetype list for an all-skipped report set" {
         $reports = @(
             [pscustomobject]@{ Code = 'GameH'; Status = 'skipped-bound'; MismatchSlots = $null }
             [pscustomobject]@{ Code = 'GameI'; Status = 'skipped-override'; MismatchSlots = $null }
         )
-
         $result = Write-ControlPropagationResults -Reports $reports
-
         $result.BoundCount | Should -Be 0
         $result.NoArchetypeItems.Count | Should -Be 0
     }
+
 }
 
 Describe "New-PropagationBackup (P1 fix: standalone Propagate Controls must abort on incomplete backup)" {
     # Independent engineering review finding on PR #62: a backup-copy error in the standalone
     # Propagate Controls menu option only warned and allowed the caller to
     # continue -- including automatically in -Unattended mode -- so
-    # Invoke-ControlPropagation could run against an incomplete backup. This
-    # directly proves the gating condition every caller relies on: ErrorCount
-    # is greater than zero whenever any source file could not be copied, with
-    # no path that reports success/zero on a partial failure.
+    # Invoke-ControlPropagation could run against an incomplete backup. The
+    # helper now uses terminating copy errors, and the caller also retains its
+    # explicit failure-result gate: no path reports success after a partial copy.
     It "reports zero errors and the correct path when every file copies successfully" {
         $profiles = Join-Path $TestDrive ("propback-ok-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $profiles -Force | Out-Null
@@ -6681,34 +8177,21 @@ Describe "New-PropagationBackup (P1 fix: standalone Propagate Controls must abor
         Test-Path -LiteralPath (Join-Path $result.Path 'Game.xml') | Should -BeTrue
     }
 
-    It "signals an abort-worthy failure when a source file is locked and cannot be copied" {
-        # A sharing-violation on Copy-Item can surface either as a
-        # non-terminating error (caught into ErrorCount via -ErrorAction
-        # SilentlyContinue) or, depending on exactly how the underlying I/O
-        # call fails, as a terminating exception that -ErrorAction alone
-        # does not suppress. Both are safe: the real caller in the
-        # "PropagateControls" menu block wraps this call in try/catch AND
-        # checks ErrorCount, so either outcome correctly prevents
-        # Invoke-ControlPropagation from running. This test accepts either,
-        # since the point is proving no path silently reports success.
-        $profiles = Join-Path $TestDrive ("propback-locked-" + [guid]::NewGuid().ToString('N'))
+    It "throws when a profile copy fails" {
+        $profiles = Join-Path $TestDrive ("propback-copy-failure-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $profiles -Force | Out-Null
-        $lockedPath = Join-Path $profiles 'Locked.xml'
-        Set-Content -LiteralPath $lockedPath -Value '<GameProfile/>' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $profiles 'CopyFailure.xml') -Value '<GameProfile/>' -Encoding UTF8
+        Mock Copy-Item { throw 'simulated profile copy failure' }
 
-        $handle = [System.IO.File]::Open($lockedPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
-        try {
-            $threw = $false
-            $result = $null
-            try {
-                $result = New-PropagationBackup -UserProfilesDir $profiles
-            } catch {
-                $threw = $true
-            }
-            ($threw -or $result.ErrorCount -gt 0) | Should -BeTrue
-        } finally {
-            $handle.Dispose()
-        }
+        { New-PropagationBackup -UserProfilesDir $profiles } | Should -Throw '*Propagation profile backup failed*'
+    }
+
+    It "throws when profile enumeration fails" {
+        $profiles = Join-Path $TestDrive ("propback-enumeration-failure-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        Mock Get-ChildItem { throw 'simulated profile enumeration failure' }
+
+        { New-PropagationBackup -UserProfilesDir $profiles } | Should -Throw '*Propagation profile backup failed*'
     }
 }
 
@@ -7069,7 +8552,7 @@ Describe "ConvertTo-ManagerDisplayVersionFromTag" {
 
 Describe "Get-ManagerUpdateRelease" {
     It "returns the matching asset for a well-formed release" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v0.99.99'
@@ -7089,7 +8572,7 @@ Describe "Get-ManagerUpdateRelease" {
     }
 
     It "returns null when no asset matches the expected name pattern" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v0.99.99'
@@ -7101,7 +8584,7 @@ Describe "Get-ManagerUpdateRelease" {
     }
 
     It "returns null and does not retry when the matching asset URL is not a real GitHub release URL" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v0.99.99'
@@ -7110,14 +8593,14 @@ Describe "Get-ManagerUpdateRelease" {
             }
         }
         Get-ManagerUpdateRelease | Should -BeNullOrEmpty
-        Should -Invoke Invoke-WebRequest -Times 1
+        Should -Invoke Invoke-TpmWebRequestSilently -Times 1
     }
 
     It "retries on a transient (5xx-shaped) failure and gives up after 3 attempts" {
-        Mock Invoke-WebRequest { throw [System.Net.WebException]::new('transient') }
+        Mock Invoke-TpmWebRequestSilently { throw [System.Net.WebException]::new('transient') }
         Mock Start-Sleep {}
         Get-ManagerUpdateRelease | Should -BeNullOrEmpty
-        Should -Invoke Invoke-WebRequest -Times 3
+        Should -Invoke Invoke-TpmWebRequestSilently -Times 3
         Should -Invoke Start-Sleep -Times 2
     }
 }
@@ -7135,25 +8618,25 @@ Describe "Get-TeknoParrotProfileSet" {
         # instead of ".../git/trees/master?recursive=1". GitHub then 404s on
         # that malformed URL every single time -- this was not intermittent
         # or network-related. The fix braces the variable: "${branchEncoded}?...".
-        Mock Invoke-WebRequest -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
+        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
             [pscustomobject]@{ Content = (@{ default_branch = 'master' } | ConvertTo-Json) }
         }
-        Mock Invoke-WebRequest -ParameterFilter { $Uri -like '*/git/trees/*' } {
+        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -like '*/git/trees/*' } {
             [pscustomobject]@{ Content = (@{ tree = @(@{ type = 'blob'; path = 'TeknoParrotUi.Common/GameProfiles/Foo.xml' }) } | ConvertTo-Json -Depth 5) }
         }
 
         [void](Get-TeknoParrotProfileSet)
 
-        Should -Invoke Invoke-WebRequest -Times 1 -ParameterFilter {
+        Should -Invoke Invoke-TpmWebRequestSilently -Times 1 -ParameterFilter {
             $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
         }
     }
 
     It "returns the profile stems parsed from the tree response" {
-        Mock Invoke-WebRequest -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
+        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
             [pscustomobject]@{ Content = (@{ default_branch = 'master' } | ConvertTo-Json) }
         }
-        Mock Invoke-WebRequest -ParameterFilter { $Uri -like '*/git/trees/*' } {
+        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -like '*/git/trees/*' } {
             [pscustomobject]@{
                 Content = (@{
                     tree = @(
@@ -7171,10 +8654,10 @@ Describe "Get-TeknoParrotProfileSet" {
     }
 
     It "logs the HTTP status code when the tree request fails" {
-        Mock Invoke-WebRequest -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
+        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
             [pscustomobject]@{ Content = (@{ default_branch = 'master' } | ConvertTo-Json) }
         }
-        Mock Invoke-WebRequest -ParameterFilter { $Uri -like '*/git/trees/*' } {
+        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -like '*/git/trees/*' } {
             # Mirror the shape production code actually reads --
             # $_.Exception.Response.StatusCode -- rather than relying on a
             # specific exception type, since PowerShell 5.1 (the script's
@@ -7306,22 +8789,25 @@ Describe "Invoke-CheckForUpdates" {
         }
     }
 
-    It "reports already current and returns false without prompting when there is no newer release" {
+    It "returns a verified NO_OP without prompting when there is no newer release" {
         Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-CheckForUpdatesReleaseJson -TagName $ScriptVersion) } }
         Mock Read-Host { throw "Read-Host should not be called when already current" }
 
         $path = Join-Path $TestDrive 'current.ps1'
         Set-Content -LiteralPath $path -Value "`$ScriptVersion = `"$ScriptVersion`"" -Encoding ascii
 
-        Invoke-CheckForUpdates -ScriptPath $path | Should -BeFalse
-        $updateFlow = $script:ProductionSource.Substring($script:ProductionSource.IndexOf("if (`$updateInstalled)"))
+        $result = Invoke-CheckForUpdates -ScriptPath $path
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'NO_OP'
+        $updateFlow = $script:ProductionSource.Substring($script:ProductionSource.IndexOf("if (`$updateResult.Outcome -eq 'SUCCEEDED')"))
         $startApply = $updateFlow.IndexOf("Start-TpmWorkflowStep -Context `$updateStatus -StepId 'apply'")
         $skipApply = $updateFlow.IndexOf("Complete-TpmWorkflowStep -Context `$updateStatus -Outcome Skipped")
         $startApply | Should -BeGreaterThan -1
         $skipApply | Should -BeGreaterThan $startApply
+        $result.Succeeded | Should -BeTrue
     }
 
-    It "returns false and makes no changes when the user declines the update" {
+    It "returns a verified NO_OP and makes no changes when the user declines the update" {
         Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-CheckForUpdatesReleaseJson) } }
         Mock Read-Host { "N" }
 
@@ -7329,7 +8815,9 @@ Describe "Invoke-CheckForUpdates" {
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
         $originalContent = Get-Content -LiteralPath $path -Raw
 
-        Invoke-CheckForUpdates -ScriptPath $path | Should -BeFalse
+        $result = Invoke-CheckForUpdates -ScriptPath $path
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'NO_OP'
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
     }
 
@@ -7342,7 +8830,9 @@ Describe "Invoke-CheckForUpdates" {
         Mock New-ManagerUpdateBackup { Join-Path $root 'backup.ps1' }
         Mock Invoke-TpmDownload { $false }
         try {
-            Invoke-ManagerUpdateInstall -ScriptPath $path -Release ([pscustomobject]@{ AssetName = 'x.zip'; DownloadUrl = 'https://github.com/example/x.zip'; SizeBytes = 1; TagName = 'v0.99.99' }) | Should -BeFalse
+            $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release ([pscustomobject]@{ AssetName = 'x.zip'; DownloadUrl = 'https://github.com/example/x.zip'; SizeBytes = 1; TagName = 'v0.99.99' })
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
             (Get-Item -LiteralPath $path -Force).IsReadOnly | Should -BeTrue
         } finally {
             Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
@@ -7372,10 +8862,10 @@ Describe "Get-ManagerUpdateReleaseSummary" {
 
 Describe "Get-ManagerUpdateRelease -MaxAttempts" {
     It "makes exactly one request and does not sleep when MaxAttempts is 1" {
-        Mock Invoke-WebRequest { throw [System.Net.WebException]::new('transient') }
+        Mock Invoke-TpmWebRequestSilently { throw [System.Net.WebException]::new('transient') }
         Mock Start-Sleep {}
         Get-ManagerUpdateRelease -MaxAttempts 1 -TimeoutSec 5 | Should -BeNullOrEmpty
-        Should -Invoke Invoke-WebRequest -Times 1
+        Should -Invoke Invoke-TpmWebRequestSilently -Times 1
         Should -Invoke Start-Sleep -Times 0
     }
 }
@@ -7448,24 +8938,29 @@ Describe "Invoke-ManagerUpdateInstall" {
         }
     }
 
-    It "installs successfully and returns true" {
+    It "installs successfully and returns a verified SUCCEEDED result" {
         $zipBytes = New-StartupCheckFixtureZipBytes
         Mock Invoke-TpmDownload { param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version) [System.IO.File]::WriteAllBytes($DestinationPath, $zipBytes); return $true }.GetNewClosure()
 
         $path = Join-Path $TestDrive 'install-target.ps1'
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeTrue
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'SUCCEEDED'
+        $result.Installed | Should -BeTrue
         (Get-Content -LiteralPath $path -Raw) | Should -Match 'ScriptVersion = "0.99.99"'
     }
 
-    It "returns false and leaves the original untouched when the target is read-only" {
+    It "returns a verified failure and leaves the original untouched when the target is read-only" {
         $path = Join-Path $TestDrive 'readonly-install-target.ps1'
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
         Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $true
         try {
             Mock Invoke-TpmDownload { throw "download should not be called when the target is read-only" }
-            Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+            $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
             (Get-Content -LiteralPath $path -Raw) | Should -Be '$ScriptVersion = "0.0.1"'
         } finally {
             Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
@@ -7492,7 +8987,9 @@ Describe "Invoke-ManagerUpdateInstall" {
             return $true
         }
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
 
         $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
@@ -7514,7 +9011,9 @@ Describe "Invoke-ManagerUpdateInstall" {
             return $true
         }.GetNewClosure()
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
 
         $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
@@ -7535,7 +9034,9 @@ Describe "Invoke-ManagerUpdateInstall" {
             return $true
         }.GetNewClosure()
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
 
         $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
@@ -7572,7 +9073,9 @@ Describe "Invoke-ManagerUpdateInstall" {
             return $true
         }.GetNewClosure()
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
         (Get-Content -LiteralPath $path -Raw).StartsWith('PK') | Should -BeFalse
     }
@@ -7592,7 +9095,9 @@ Describe "Invoke-ManagerUpdateInstall" {
             return $true
         }.GetNewClosure()
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
 
         $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
@@ -7609,7 +9114,9 @@ Describe "Invoke-ManagerUpdateInstall" {
         Mock New-ManagerUpdateBackup { throw "Access to the path is denied (simulated backup failure)." }
         Mock Invoke-TpmDownload { throw "download should never be called when backup fails first." }
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
         Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
         Should -Invoke Invoke-TpmDownload -Times 0
@@ -7629,7 +9136,9 @@ Describe "Invoke-ManagerUpdateInstall" {
             return $true
         }.GetNewClosure()
 
-        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
 
         $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
@@ -7657,7 +9166,9 @@ Describe "Invoke-ManagerUpdateInstall" {
 
         $lockHandle = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
         try {
-            Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+            $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease)
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
         } finally {
             $lockHandle.Dispose()
         }
@@ -7675,27 +9186,31 @@ Describe "Invoke-ManagerUpdateInstall" {
 }
 
 Describe "Invoke-StartupUpdateCheck" {
-    It "returns false and does not prompt when already current" {
+    It "returns a verified NO_OP and does not prompt when already current" {
         Mock Get-ManagerUpdateRelease { [pscustomobject]@{ TagName = "v$ScriptVersion"; Name = $null; Body = $null; AssetName = 'x'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.39/x' } }
         Mock Read-Host { throw "Read-Host should not be called when already current" }
 
         $path = Join-Path $TestDrive 'startup-current.ps1'
         Set-Content -LiteralPath $path -Value "`$ScriptVersion = `"$ScriptVersion`"" -Encoding ascii
 
-        Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+        $result = Invoke-StartupUpdateCheck -ScriptPath $path
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'NO_OP'
     }
 
-    It "returns false without prompting again when the release check fails (e.g. offline)" {
+    It "returns a verified failure without prompting again when the release check fails (e.g. offline)" {
         Mock Get-ManagerUpdateRelease { $null }
         Mock Read-Host { throw "Read-Host should not be called when the release check fails" }
 
         $path = Join-Path $TestDrive 'startup-offline.ps1'
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
 
-        Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+        $result = Invoke-StartupUpdateCheck -ScriptPath $path
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
     }
 
-    It "returns false and makes no changes when the user chooses N (remind me later)" {
+    It "returns a verified NO_OP and makes no changes when the user chooses N (remind me later)" {
         Mock Get-ManagerUpdateRelease {
             [pscustomobject]@{ TagName = 'v0.99.99'; Name = 'v0.99.99'; Body = 'Notes.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/x.zip' }
         }
@@ -7705,7 +9220,9 @@ Describe "Invoke-StartupUpdateCheck" {
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
         $originalContent = Get-Content -LiteralPath $path -Raw
 
-        Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+        $result = Invoke-StartupUpdateCheck -ScriptPath $path
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'NO_OP'
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
     }
 
@@ -7723,7 +9240,9 @@ Describe "Invoke-StartupUpdateCheck" {
         $path = Join-Path $TestDrive 'startup-view-notes.ps1'
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
 
-        Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+        $result = Invoke-StartupUpdateCheck -ScriptPath $path
+        (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+        $result.Outcome | Should -Be 'NO_OP'
         Should -Invoke Read-Host -Times 2
     }
 
@@ -7741,7 +9260,9 @@ Describe "Invoke-StartupUpdateCheck" {
         Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $true
 
         try {
-            Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+            $result = Invoke-StartupUpdateCheck -ScriptPath $path
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            $result.Outcome | Should -BeIn @('FAILED_BEFORE_MUTATION','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')
             Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeTrue
             (Get-Item -LiteralPath $path -Force).IsReadOnly | Should -BeTrue
         } finally {
@@ -7861,10 +9382,10 @@ Describe "Onboarding pointer-text menu-label sync (Part 2 item 8: no hardcoded m
 }
 Describe "dgVoodoo2 no-candidate beginner flow" {
     It "reports no setup needed without exposing broad manual selection" {
-        $script:ProductionSource | Should -Match 'No dgVoodoo2 setup needed'
+        $script:ProductionSource | Should -Match 'No dgVoodoo2 setup is needed right now'
         $script:ProductionSource | Should -Match 'Choice, default Q'
         $script:ProductionSource | Should -Match '\[M\] Select specific games'
-        $script:ProductionSource | Should -Not -Match 'No dgVoodoo2 setup needed[\s\S]{0,1200}All \$\(\$profiles.Count\) registered game'
+        $script:ProductionSource | Should -Not -Match 'No dgVoodoo2 setup is needed right now[\s\S]{0,1200}All \$\(\$profiles.Count\) registered game'
     }
     It "keeps manual selection behind Details and does not use TPM status wording" {
         $script:ProductionSource | Should -Match '\[D\] Details  \[Q\] Back to menu'
@@ -7886,7 +9407,7 @@ Describe "Path-concept non-conflation guard (Part 2 item 9)" {
     # "deployed location" concept is introduced.
     It "never renames the staging/preparation folder to the bare unqualified phrase 'game folder'" {
         # The staging-folder prompt block's own descriptive text (around
-        # 'This is where TPM extracts your ZIPs and installs games.')
+        # 'This is where TeknoParrot Manager extracts your ZIPs and installs games.')
         # must not use the exact rejected phrase.
         $script:ProductionSource | Should -Not -Match 'Path to your game folder'
     }
@@ -7894,7 +9415,7 @@ Describe "Path-concept non-conflation guard (Part 2 item 9)" {
         $script:ProductionSource | Should -Not -Match '(?i)deployed location'
     }
     It "the staging folder prompt still pairs the plain phrase with the technical term on first mention" {
-        $script:ProductionSource | Should -Match ([regex]::Escape("This is where TPM extracts and installs games. Your original ZIPs stay where they are."))
+        $script:ProductionSource | Should -Match ([regex]::Escape("This is where TeknoParrot Manager extracts and installs games. Your original ZIPs stay where they are."))
     }
 }
 
@@ -7960,6 +9481,55 @@ Describe "Get-MainMenuRenderMetrics" {
         $metrics.HeightConstrained | Should -BeTrue
         $metrics.WidthConstrained | Should -BeTrue
         $metrics.ConstrainedBy | Should -Be 'width,height'
+    }
+}
+Describe "Console resize safety" {
+    It "sets the buffer before the window and suppresses repeated resize attempts" {
+        if (-not ('TpmResizeRawUi' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Management.Automation.Host;
+public sealed class TpmResizeRawUi {
+    private Size bufferSize;
+    private Size windowSize;
+    public Size MaxPhysicalWindowSize { get; set; }
+    public Size BufferSize {
+        get { return bufferSize; }
+        set { bufferSize = value; }
+    }
+    public Size WindowSize {
+        get { return windowSize; }
+        set {
+            if (value.Width > bufferSize.Width || value.Height > bufferSize.Height) {
+                throw new InvalidOperationException("Window cannot be wider than the screen buffer.");
+            }
+            windowSize = value;
+        }
+    }
+}
+'@
+        }
+        $rawUi = New-Object TpmResizeRawUi
+        $rawUi.MaxPhysicalWindowSize = [System.Management.Automation.Host.Size]::new(120, 40)
+        $rawUi.BufferSize = [System.Management.Automation.Host.Size]::new(80, 25)
+        $rawUi.WindowSize = [System.Management.Automation.Host.Size]::new(80, 25)
+        $script:TpmConsoleResizeAttempted = $false
+        try {
+            Set-ConsoleMaximizedIfSupported -RawUi $rawUi
+            $rawUi.BufferSize.Width | Should -BeGreaterOrEqual 120
+            $rawUi.BufferSize.Height | Should -BeGreaterOrEqual 40
+            $rawUi.WindowSize.Width | Should -Be 120
+            $rawUi.WindowSize.Height | Should -Be 40
+            $rawUi.WindowSize.Width | Should -BeLessOrEqual $rawUi.BufferSize.Width
+            $rawUi.WindowSize.Height | Should -BeLessOrEqual $rawUi.BufferSize.Height
+            $firstWindow = $rawUi.WindowSize
+            $rawUi.MaxPhysicalWindowSize = [System.Management.Automation.Host.Size]::new(160, 50)
+            Set-ConsoleMaximizedIfSupported -RawUi $rawUi
+            $rawUi.WindowSize.Width | Should -Be $firstWindow.Width
+            $rawUi.WindowSize.Height | Should -Be $firstWindow.Height
+        } finally {
+            $script:TpmConsoleResizeAttempted = $false
+        }
     }
 }
 
@@ -8039,6 +9609,212 @@ Describe "Format-MainMenuItemLines" {
     }
 }
 
+Describe "RC8 main-menu command routing and visibility" {
+    It "accepts only advertised hotkeys and exact numeric choices" {
+        (Resolve-MainMenuCommand -InputText 'L' -MaxNumber 15) | Should -Be 'L'
+        (Resolve-MainMenuCommand -InputText 'l' -MaxNumber 15) | Should -Be 'L'
+        (Resolve-MainMenuCommand -InputText 'H' -MaxNumber 15) | Should -Be 'H'
+        (Resolve-MainMenuCommand -InputText 'h' -MaxNumber 15) | Should -Be 'H'
+        (Resolve-MainMenuCommand -InputText 'Q' -MaxNumber 15) | Should -Be 'Q'
+        (Resolve-MainMenuCommand -InputText '1' -MaxNumber 15) | Should -Be '1'
+        (Resolve-MainMenuCommand -InputText '01' -MaxNumber 15) | Should -Be $null
+        (Resolve-MainMenuCommand -InputText 'N' -MaxNumber 15) | Should -Be $null
+        (Resolve-MainMenuCommand -InputText 'U' -MaxNumber 15) | Should -Be $null
+    }
+    It "routes help and log before numeric workflow dispatch" {
+        $script:ProductionSource | Should -Match '(?s)if \(\$modeChoice -eq ''H''\).*Show-MainMenuHelp'
+        $script:ProductionSource | Should -Match '(?s)if \(\$modeChoice -eq ''L''\).*Open-TpmLogsAndReports'
+        $script:ProductionSource | Should -Match 'Open-TpmLogsAndReports -ScriptRoot \$script:TpmOwnedLayout\.Logs'
+        $script:ProductionSource | Should -Not -Match "Run in PREVIEW mode first\?.*\(Y/N"
+    }
+    It "does not advertise unattended mode in the normal footer" {
+        $footer = Get-MainMenuFooterRows -Geometry (Get-MainMenuGeometry -Tier Compact -ViewportWidth 80 -ViewportHeight 25)
+        (($footer | ForEach-Object Text) -join "`n") | Should -Not -Match 'Unattended'
+    }
+    It "suppresses the prompt when the rendered body is incomplete" {
+        $screen = Render-MainMenuScreen -Tier Compact -Width 60 -Height 8
+        $screen.PromptAllowed | Should -BeFalse
+        $screen.MissingOptionNumbers.Count | Should -BeGreaterOrEqual 0
+    }
+    It "renders every constrained-width option and command footer before allowing the prompt" {
+        $screen = Render-MainMenuScreen -Tier Compact -Width 80 -Height 25
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+        foreach ($item in (Get-MainMenuItems)) {
+            $output | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
+        }
+        $output | Should -Match 'H\s*=\s*Help'
+        $output | Should -Match 'L\s*=\s*View Log'
+        $output | Should -Match 'Q\s*=\s*Quit'
+        $screen.PromptAllowed | Should -BeTrue
+        (Resolve-MainMenuCommand -InputText 'invalid' -MaxNumber 15) | Should -Be $null
+        (Resolve-MainMenuCommand -InputText 'H' -MaxNumber 15) | Should -Be 'H'
+        (Resolve-MainMenuCommand -InputText 'L' -MaxNumber 15) | Should -Be 'L'
+        (Resolve-MainMenuCommand -InputText 'Q' -MaxNumber 15) | Should -Be 'Q'
+    }
+    It "keeps an invalid-choice notice visible through the next constrained redraw" {
+        $notice = 'Invalid choice. Enter 1-15. Commands: H = Help, L = View Log, Q = Quit.'
+        $screen = Render-MainMenuScreen -Tier Compact -Width 80 -Height 25 -Notice $notice
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+        $output | Should -Match 'Invalid choice'
+        $output | Should -Match 'H = Help'
+        $output | Should -Match 'L = View Log'
+        $output | Should -Match 'Q = Quit'
+        $script:ProductionSource.Contains('-Notice $menuNotice -ReturnScreen') | Should -BeTrue
+        $script:ProductionSource.Contains('$menuNotice = "Invalid choice.') | Should -BeTrue
+    }
+    It "uses a dedicated help title and a safe return path" {
+        $help = Get-Command Show-MainMenuHelp
+        $help.Definition | Should -Match 'TeknoParrot Manager Help'
+        $help.Definition | Should -Match 'Press Enter to return'
+    }
+    It "uses explicit safe preview choices" {
+        $script:ProductionSource | Should -Match '\[P\] Preview only -- no changes'
+        $script:ProductionSource | Should -Match '\[R\] Run now -- may make changes'
+        $script:ProductionSource | Should -Match '\[B\] Back'
+        $script:ProductionSource | Should -Match "Choice, default P"
+    }
+    It "decides Preview or Back before AutoSync/Register writes or preflight probes" {
+        $source = $script:ProductionSource
+        $dispatch = $source.IndexOf('switch ($modeChoice)')
+        $preview = $source.IndexOf('[P] Preview only -- no changes')
+        $capture = $source.IndexOf('$zipPathsJustCaptured = $false', $dispatch)
+        $save = $source.IndexOf('Save-Config', $capture)
+        $benchmark = $source.IndexOf('Measure-PathWriteThroughput $gamesInstallFolder', $capture)
+        $create = $source.IndexOf('[System.IO.Directory]::CreateDirectory($gamesInstallFolder)', $capture)
+        $preview | Should -BeGreaterThan $dispatch
+        $preview | Should -BeLessThan $capture
+        $preview | Should -BeLessThan $save
+        $preview | Should -BeLessThan $benchmark
+        $preview | Should -BeLessThan $create
+        $source | Should -Match '\$previewChoice -eq ''B''\) \{ continue \}'
+    }
+    It "keeps the polished banner and first option at full-screen size" {
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 200 -Height 60
+        $output = ($screen.Rows | ForEach-Object Text) -join "`n"
+        $screen.Geometry.Layout | Should -Be 'UltraTwoColumn'
+        $output | Should -Match ([regex]::Escape((Get-ManagerVersionLine)))
+        $output.IndexOf('1) AutoSync') | Should -BeGreaterThan -1
+        $output.IndexOf('1) AutoSync') | Should -BeLessThan $output.IndexOf('6) dgVoodoo2 setup')
+        $screen.PromptAllowed | Should -BeTrue
+    }
+
+}
+
+Describe "HyperSpin emulator identity gate" {
+    It "defaults a missing emulator ID to Skip without creating or changing games data" {
+        $hsRoot = Join-Path $TestDrive 'HyperSpinMissingId'
+        [void](New-Item -ItemType Directory -Path $hsRoot -Force)
+        [System.IO.File]::WriteAllText(
+            (Join-Path $hsRoot 'emulators.json'),
+            '[{"title":"TeknoParrot"}]',
+            (New-Object System.Text.UTF8Encoding $false))
+        Mock Read-HostSafe {
+            param($Prompt, $Default)
+            return $Default
+        }
+        Mock Write-Log {}
+
+        $result = Export-HyperSpinJson -userProfilesDir $hsRoot -hsDataPath $hsRoot
+
+        $result | Should -Be 0
+        (Test-Path -LiteralPath (Join-Path $hsRoot 'games')) | Should -BeFalse
+        $script:ProductionSource | Should -Match "Read-TpmChoice -Prompt '  Choice \(G/S\)' -Choices @\('G', 'S'\) -Default 'S'"
+        $script:ProductionSource | Should -Not -Match '\[A\] Add anyway|allowLegacyXmlFallback'
+    }
+    It "uses guided-only missing-ID fix wording without mutating HyperSpin" {
+        $hsRoot = Join-Path $TestDrive 'HyperSpinGuidedMissingId'
+        [void](New-Item -ItemType Directory -Path $hsRoot -Force)
+        $emuPath = Join-Path $hsRoot 'emulators.json'
+        $emuJson = '[{"title":"TeknoParrot"}]'
+        [System.IO.File]::WriteAllText($emuPath, $emuJson, (New-Object System.Text.UTF8Encoding $false))
+        $script:hyperSpinGuidanceMessages = @()
+        Mock Read-HostSafe {
+            param($Prompt, $Default)
+            return 'G'
+        }
+        Mock Write-Host { $script:hyperSpinGuidanceMessages += [string]$Object }
+        Mock Write-Log {}
+
+        $result = Export-HyperSpinJson -userProfilesDir $hsRoot -hsDataPath $hsRoot
+
+        $result | Should -Be 0
+        [System.IO.File]::ReadAllText($emuPath) | Should -Be $emuJson
+        (Test-Path -LiteralPath (Join-Path $hsRoot 'games')) | Should -BeFalse
+        $guidance = $script:hyperSpinGuidanceMessages -join "`n"
+        $guidance | Should -Match 'TeknoParrot Manager HyperSpin 2 plugin'
+        $guidance | Should -Match '(?i)beta'
+        $guidance | Should -Match '(?i)not bundled'
+        $guidance | Should -Match '(?i)downloadable by TeknoParrot Manager yet'
+        $guidance | Should -Match 'Automatic plugin download/install will be considered after the plugin has a published release artifact'
+        $guidance | Should -Match '<HyperSpinRoot>\\plugins\\TeknoParrot Manager'
+        $guidance | Should -Match 'E:\\HyperSpin\\plugins\\TeknoParrot Manager'
+        $guidance | Should -Match 'TeknoParrot Manager did not modify HyperSpin files'
+        $script:ProductionSource | Should -Match '\[G\] Show HyperSpin 2 plugin setup guidance'
+        $script:ProductionSource | Should -Match '\[S\] Skip HyperSpin integration'
+        $script:ProductionSource | Should -Not -Match '\[A\] Add anyway|Add anyway|allowLegacyXmlFallback'
+    }
+    It "does not use an unrelated XML games file when a valid emulator ID has no GUID match" {
+        $hsRoot = Join-Path $TestDrive 'HyperSpinValidIdUnrelatedXml'
+        $profiles = Join-Path $hsRoot 'UserProfiles'
+        $games = Join-Path $hsRoot 'games'
+        [void](New-Item -ItemType Directory -Path $profiles,$games -Force)
+
+        [System.IO.File]::WriteAllText(
+            (Join-Path $hsRoot 'emulators.json'),
+            '[{"title":"TeknoParrot","id":"valid-guid"}]',
+            (New-Object System.Text.UTF8Encoding $false))
+
+        $unrelatedPath = Join-Path $games 'OtherSystem.json'
+        $unrelatedJson = '[{"gameSystemId":"other-guid","roms":[{"name":"other.xml"}]}]'
+        [System.IO.File]::WriteAllText($unrelatedPath, $unrelatedJson, (New-Object System.Text.UTF8Encoding $false))
+
+        $gamePath = Join-Path $hsRoot 'SampleGame.exe'
+        [System.IO.File]::WriteAllText($gamePath, '', (New-Object System.Text.UTF8Encoding $false))
+        $profileXml = '<GameProfile><GamePath>{0}</GamePath><Description>Sample Game</Description></GameProfile>' -f $gamePath
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'SampleGame.xml'), $profileXml, (New-Object System.Text.UTF8Encoding $false))
+
+        Mock Write-Log {}
+
+        $result = Export-HyperSpinJson -userProfilesDir $profiles -hsDataPath $hsRoot
+
+        $result | Should -Be 1
+        [System.IO.File]::ReadAllText($unrelatedPath) | Should -Be $unrelatedJson
+        (Test-Path -LiteralPath (Join-Path $games 'TeknoParrot.json')) | Should -BeTrue
+        @(Get-ChildItem -LiteralPath $games -Filter 'OtherSystem.json.bak_*' -File -ErrorAction SilentlyContinue).Count | Should -Be 0
+        $exportedJson = Get-Content -LiteralPath (Join-Path $games 'TeknoParrot.json') -Raw
+        $exportedJson | Should -Match '"gameSystemId"\s*:\s*"valid-guid"'
+    }
+    It "refuses a nonempty same-name games file with a mismatched emulator ID" {
+        $hsRoot = Join-Path $TestDrive 'HyperSpinNamedFileMismatch'
+        $profiles = Join-Path $hsRoot 'UserProfiles'
+        $games = Join-Path $hsRoot 'games'
+        [void](New-Item -ItemType Directory -Path $profiles,$games -Force)
+
+        [System.IO.File]::WriteAllText(
+            (Join-Path $hsRoot 'emulators.json'),
+            '[{"title":"TeknoParrot","id":"valid-guid"}]',
+            (New-Object System.Text.UTF8Encoding $false))
+
+        $namedPath = Join-Path $games 'TeknoParrot.json'
+        $namedJson = '[{"gameSystemId":"other-guid","roms":[{"name":"other.xml"}]}]'
+        [System.IO.File]::WriteAllText($namedPath, $namedJson, (New-Object System.Text.UTF8Encoding $false))
+
+        $gamePath = Join-Path $hsRoot 'SampleGame.exe'
+        [System.IO.File]::WriteAllText($gamePath, '', (New-Object System.Text.UTF8Encoding $false))
+        $profileXml = '<GameProfile><GamePath>{0}</GamePath><Description>Sample Game</Description></GameProfile>' -f $gamePath
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'SampleGame.xml'), $profileXml, (New-Object System.Text.UTF8Encoding $false))
+
+        Mock Write-Log {}
+
+        $result = Export-HyperSpinJson -userProfilesDir $profiles -hsDataPath $hsRoot
+
+        $result | Should -Be -1
+        [System.IO.File]::ReadAllText($namedPath) | Should -Be $namedJson
+        @(Get-ChildItem -LiteralPath $games -Filter 'TeknoParrot.json.bak_*' -File -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
+
+}
+
 Describe "Render-MainMenuScreen / Show-MainMenu" {
     It "renders the complete Professional menu into a deterministic buffer" {
         $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 80
@@ -8087,15 +9863,19 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         $output | Should -Not -Match ([regex]::Escape($item.ShortDesc))
         $output | Should -Match 'Enter number'
     }
-    It "Compact tier renders only labels and the 'Type ? for descriptions' hint, no ShortDesc/FullDesc text" {
+    It "Compact tier renders labels without advertising unsupported commands" {
         $screen = Render-MainMenuScreen -Tier 'Compact' -Width 80 -Height 80
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $output | Should -Match 'TeknoParrot Manager'
         $output | Should -Match 'Version 1.0 RC3'
         $output | Should -Not -Match '/_  __/'
-        $output | Should -Match 'Type \? for descriptions'
-        $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
-        $output | Should -Not -Match ([regex]::Escape($autoSync.ShortDesc))
+        $output | Should -Not -Match 'Type \? for descriptions'
+        $output | Should -Not -Match 'U\s*='
+        $output | Should -Match 'H\s*=\s*Help'
+        $output | Should -Match 'L\s*=\s*View Log'
+        $output | Should -Match 'Q\s*=\s*Quit'
+        $script:ProductionSource | Should -Not -Match 'Type \? for descriptions'
+        $script:ProductionSource | Should -Not -Match 'Compact.{0,80}\? for descriptions'
     }
     It "Professional default tier uses a complete framed two-column menu" {
         $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 30
@@ -8255,7 +10035,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         $mainScriptContent = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
 
         $mainScriptContent | Should -Match '\[Console\]::IsInputRedirected'
-        $mainScriptContent | Should -Match 'Read-Host \$Prompt'
+        $mainScriptContent | Should -Match 'Read-Host \$displayPrompt'
     }
 }
 
@@ -8295,19 +10075,15 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         $output | Should -Match 'Q=Quit'
     }
 
-    It "below the documented 60x10 minimum (60x8), the footer and option 15 (Exit) are still never dropped, even though an earlier option's line may not fit" {
-        # 60x8 is below the documented supported floor, so unlike the exact
-        # cases above, this does not require every option to be visible --
-        # only that the two guarantees which must NEVER break (the footer's
-        # Quit control, and Exit specifically) still hold, and that nothing
-        # crashes or silently renders a blank/broken screen.
+    It "blocks the prompt below the supported viewport height instead of showing a partial menu" {
         $screen = Render-MainMenuScreen -Tier (Get-ConsoleLayoutTier -Width 60 -Height 8 -RequiredFullLines 0) -Width 60 -Height 8
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
-        $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, 8 - 2))
-        $output | Should -Match '15\) Exit'
-        $output | Should -Match 'Enter number'
-        $output | Should -Match 'Q=Quit'
+        $screen.Rows.Count | Should -BeLessOrEqual 8
+        $screen.PromptAllowed | Should -BeFalse
+        $output | Should -Match 'Resize the PowerShell window'
+        $output | Should -Not -Match '15\) Exit'
+        $output | Should -Not -Match 'Enter number'
     }
 
     It "every flow-packed 'N) Label' token matches Get-MainMenuItems exactly (no drift between the emergency presentation and the real dispatch data)" {
@@ -8371,16 +10147,18 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         # Height-2) = 6 for height 8, 18 for height 20), so a cross-case
         # Height swap between those two would change which bound applies.
         $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, $Height - 2))
-        $output | Should -Match '15\) Exit'
-        $output | Should -Match 'Q=Quit'
-
-        # All four of these cases happen to be wide enough that the render
-        # pipeline shows every option even in its most space-constrained
-        # form (confirmed empirically, not assumed) -- verified per case
-        # rather than in a separate test, so this remains part of the same
-        # independently-reported, per-case proof.
-        foreach ($n in @((Get-MainMenuItems) | ForEach-Object { $_.Number })) {
-            $output | Should -Match ([regex]::Escape("$n)"))
+        if ($Height -lt 10) {
+            $screen.PromptAllowed | Should -BeFalse
+            $output | Should -Match 'Resize the PowerShell window'
+            $output | Should -Not -Match '15\) Exit'
+            $output | Should -Not -Match 'Enter number'
+        } else {
+            $screen.PromptAllowed | Should -BeTrue
+            $output | Should -Match '15\) Exit'
+            $output | Should -Match 'Q=Quit'
+            foreach ($n in @((Get-MainMenuItems) | ForEach-Object { $_.Number })) {
+                $output | Should -Match ([regex]::Escape("$n)"))
+            }
         }
     }
 
@@ -9263,6 +11041,36 @@ Describe "TeknoParrot-Manager.ps1 -Unattended real child-process fixture (issue 
 }
 
 Describe "Issue #300 shared workflow status state machine" {
+    BeforeAll {
+        function New-FFBDownloadFixtureResult {
+            param([string]$destDir, [string]$SourceRevision)
+            $files = [ordered]@{}
+            $evidence = @()
+            [void][System.IO.Directory]::CreateDirectory($destDir)
+            foreach ($dllName in @('MAME32.dll', 'MAME64.dll')) {
+                $path = Join-Path $destDir ('TPM-FFB-test-{0}-{1}' -f $SourceRevision.Substring(0,8), $dllName)
+                [System.IO.File]::WriteAllBytes($path, [byte[]](1,2,3,4))
+                $files[$dllName] = $path
+                $evidence += [pscustomobject]@{
+                    FileName = $dllName
+                    SourceUrl = "https://raw.githubusercontent.com/fixture/FFBArcadePlugin/$SourceRevision/$dllName"
+                    SourceRevision = $SourceRevision
+                    Sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+                    Trust = 'SourcePinnedAuditHash'
+                    DownloadPath = $path
+                }
+            }
+            return [pscustomobject]@{
+                Succeeded = $true; Files = $files; Evidence = $evidence
+                ResiduePaths = @(); Reason = $null
+            }
+        }
+    }
+    BeforeEach {
+        Mock Get-FFBPluginSourceRevision {
+            [pscustomobject]@{ Revision = ('a' * 40); Repository = 'fixture/FFBArcadePlugin'; ManifestUrl = 'https://api.github.com/repos/fixture/FFBArcadePlugin/commits/master'; Trust = 'SourcePinnedAuditHash' }
+        }
+    }
     AfterEach {
         if ($script:ActiveTpmWorkflowStatus) {
             $active = $script:ActiveTpmWorkflowStatus
@@ -9311,6 +11119,22 @@ Describe "Issue #300 shared workflow status state machine" {
         [void](Close-TpmWorkflowStatus -Context $ctx)
         $ctx.Lifecycle | Should -Be 'Closed'
     }
+    It "renders concrete failure recovery actions in the status footer" {
+        $snapshot = [pscustomobject]@{
+            Completed = @()
+            Failure = [pscustomobject]@{
+                Message = 'PostgreSQL profile setup was recovery-blocked.'
+                DataSafety = 'No profile changes were claimed.'
+                RecoveryActions = @(Get-PostgresRecoveryActions -FailureId 'postgres-profile-recovery')
+            }
+            Activity = $null
+            State = 'Needs attention'
+            ActiveStepNumber = 6
+            StepCount = 6
+        }
+        $rows = @(Format-TpmWorkflowStatusRows -Snapshot $snapshot -Width 200)
+        ($rows -join "`n") | Should -Match 'Recovery: Retry: Review the backup evidence, then retry PostgreSQL profile setup; Stop: Return to menu without claiming PostgreSQL setup complete'
+    }
 
     It "handles simulated resize shrink/grow, stale footer clearing, and narrow fallback" {
         $draws = New-Object System.Collections.Generic.List[object]
@@ -9355,7 +11179,7 @@ Describe "Issue #300 shared workflow status state machine" {
         $script:ProductionSource | Should -Match 'Read-HostSafe \$Prompt'
     }
 
-    It "clears and redraws its rectangle around prompt input without changing scrollback" {
+    It "clears the active footer before prompt input without redrawing status onto the answer line" {
         $clears = New-Object System.Collections.ArrayList
         $draws = New-Object System.Collections.ArrayList
         $adapter = @{
@@ -9369,10 +11193,11 @@ Describe "Issue #300 shared workflow status state machine" {
         $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'prompt-footer' -Title 'Prompt footer' -Steps @('one') -ConsoleFacts $facts
         [void](Start-TpmWorkflowStatus -Context $ctx)
         $initialClears = $clears.Count
+        $initialDraws = $draws.Count
         Mock Read-Host { 'answer' }
         (Read-HostSafe '  Prompt') | Should -Be 'answer'
         $clears.Count | Should -BeGreaterThan $initialClears
-        $draws.Count | Should -BeGreaterThan 1
+        $draws.Count | Should -Be $initialDraws
     }
 
     It "publishes append-only status without recursing through the host shim" {
@@ -9439,8 +11264,527 @@ Describe "Issue #300 shared workflow status state machine" {
         Write-TpmWorkflowConsoleLine -Context (New-TpmWorkflowStatusContext -WorkflowKey 'message' -Title 'Message' -Steps @('one')) -Message 'Warning: visible task message'
         $script:userMessages | Should -Contain 'Warning: visible task message'
     }
+    It "executes the production FFBSetup caller safely when the optional plugin is declined" {
+        $events = New-Object System.Collections.Generic.List[object]
+        Mock Invoke-FFBBlasterSetup { @('native-code') }
+        Mock Invoke-FFBPluginSetup { throw 'plugin must not be called' }
+        Mock Read-HostSafe { 'N' }
+        $result = Invoke-TpmFfbSetupMode -UserProfilesDir $TestDrive -TpRoot $TestDrive -ScriptRoot $TestDrive -EventSink { param($event) [void]$events.Add($event) }
+        $result.Completed | Should -BeTrue
+        $result.Context.Lifecycle | Should -Be 'Closed'
+        $result.NativeSucceeded | Should -BeTrue
+        @($events | Where-Object { $_.StepId -eq 'plugin' -and $_.Outcome -eq 'Skipped' }).Count | Should -Be 1
+        Should -Invoke Invoke-FFBPluginSetup -Times 0 -Exactly
+    }
+
+    It "blocks the optional plugin after a failed native FFB setup" {
+        $events = New-Object System.Collections.Generic.List[object]
+        Mock Invoke-FFBBlasterSetup {
+            [pscustomobject]@{
+                Succeeded = $false
+                BackupSucceeded = $false
+                EnabledCodes = @()
+                Errors = 1
+                Reason = 'PROFILE_BACKUP_FAILED'
+            }
+        }
+        Mock Invoke-FFBPluginSetup { throw 'plugin must not be called after native failure' }
+        Mock Read-HostSafe { '' }
+        $result = Invoke-TpmFfbSetupMode -UserProfilesDir $TestDrive -TpRoot $TestDrive -ScriptRoot $TestDrive -EventSink { param($event) [void]$events.Add($event) }
+        $result.Completed | Should -BeFalse
+        $result.NativeSucceeded | Should -BeFalse
+        $result.Context.Lifecycle | Should -Be 'Closed'
+        @($events | Where-Object { $_.EventKind -eq 'FailureRaised' -and $_.FailureId -eq 'ffb-native-failed' }).Count | Should -Be 1
+        Should -Invoke Invoke-FFBPluginSetup -Times 0 -Exactly
+    }
+    It "returns a failed native result when the FFB profile backup copy fails" {
+        $userProfiles = Join-Path $TestDrive 'ffb-native-backup-failure'
+        $tpRoot = Join-Path $TestDrive 'ffb-native-tp'
+        New-Item -ItemType Directory -Path $userProfiles, $tpRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $userProfiles 'Existing.xml') -Value '<GameProfile><EmulationProfile>Daytona3</EmulationProfile><ConfigValues><FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Enable</FieldName><FieldType>Bool</FieldType><FieldValue>0</FieldValue></FieldInformation></ConfigValues></GameProfile>'
+        Mock Read-HostSafe { 'Y' }
+        Mock Get-FFBBlasterFieldNames { @('FFB Blaster') }
+        Mock Copy-Item { throw 'simulated profile backup copy failure' }
+        $result = Invoke-FFBBlasterSetup -UserProfilesDir $userProfiles -TpRoot $tpRoot
+        $result.Succeeded | Should -BeFalse
+        $result.BackupSucceeded | Should -BeFalse
+        $result.Reason | Should -Be 'PROFILE_BACKUP_FAILED'
+        @($result.EnabledCodes).Count | Should -Be 0
+    }
+
+    It "passes TeknoParrot root to the plugin overlap switch" {
+        $script:capturedFfbTpRoot = $null
+        Mock Invoke-FFBBlasterSetup { @('native-code') }
+        Mock Invoke-FFBPluginSetup {
+            param([string]$UserProfilesDir, [string]$CacheDir, [string[]]$NativeEnabledCodes, [string]$TpRoot)
+            $script:capturedFfbTpRoot = $TpRoot
+            [pscustomobject]@{ Succeeded = $true }
+        }
+        Mock Read-HostSafe { 'Y' }
+        $result = Invoke-TpmFfbSetupMode -UserProfilesDir $TestDrive -TpRoot $TestDrive -ScriptRoot $TestDrive
+        $result.Completed | Should -BeTrue
+        $script:capturedFfbTpRoot | Should -Be $TestDrive
+        Should -Invoke Invoke-FFBPluginSetup -Times 1 -Exactly
+    }
+
+    It "switches native FFB off before deploying a selected plugin for an overlap" {
+        $root = Join-Path $TestDrive 'ffb-overlap'
+        $userProfiles = Join-Path $root 'UserProfiles'
+        $tpRoot = Join-Path $root 'TeknoParrot'
+        $gameDir = Join-Path $root 'OverlapGame'
+        $cacheDir = Join-Path $root 'FFBPlugin'
+        New-Item -ItemType Directory -Path $userProfiles, (Join-Path $tpRoot 'GameProfiles'), $gameDir, $cacheDir -Force | Out-Null
+        $gamePath = Join-Path $gameDir 'overlap.exe'
+        [System.IO.File]::WriteAllBytes($gamePath, [System.Text.Encoding]::ASCII.GetBytes('MZ-overlap'))
+        $profileXml = @"
+<GameProfile>
+  <EmulationProfile>Daytona3</EmulationProfile>
+  <GamePath>$gamePath</GamePath>
+  <ConfigValues>
+    <FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Enable</FieldName><FieldType>Bool</FieldType><FieldValue>1</FieldValue></FieldInformation>
+  </ConfigValues>
+</GameProfile>
+"@
+        $encoding = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText((Join-Path $userProfiles 'Overlap.xml'), $profileXml, $encoding)
+        [System.IO.File]::WriteAllText((Join-Path $tpRoot 'GameProfiles\Canonical.xml'), $profileXml, $encoding)
+        [System.IO.File]::WriteAllBytes((Join-Path $cacheDir 'MAME64.dll'), [System.Text.Encoding]::ASCII.GetBytes('plugin'))
+        Mock Get-FFBPluginGameMap { [ordered]@{ OverlapGame = 'd3d9.dll' } }
+        Mock Invoke-FFBPluginDownload {
+            param([string]$destDir, [string]$SourceRevision)
+            New-FFBDownloadFixtureResult -destDir $destDir -SourceRevision $SourceRevision
+        }
+        Mock Get-ExeArchitecture { 'x64' }
+        Mock Read-HostSafe { 'N' }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir -TpRoot $tpRoot -NativeEnabledCodes @('Overlap')
+        $result.Succeeded | Should -BeTrue
+        $field = (Read-Xml (Join-Path $userProfiles 'Overlap.xml')).SelectSingleNode('/GameProfile/ConfigValues/FieldInformation/FieldValue')
+        $field.InnerText | Should -Be '0'
+        $backupDirs = @(Get-ChildItem -LiteralPath (Join-Path $userProfiles 'FullBackup') -Directory -Filter 'FFBOverlapSwitch_*')
+        $backupDirs.Count | Should -Be 1
+        $backupField = (Read-Xml (Join-Path $backupDirs[0].FullName 'Overlap.xml')).SelectSingleNode('/GameProfile/ConfigValues/FieldInformation/FieldValue')
+        $backupField.InnerText | Should -Be '1'
+        (Get-FileHash -LiteralPath (Join-Path $userProfiles 'Overlap.xml') -Algorithm SHA256).Hash | Should -Not -Be (Get-FileHash -LiteralPath (Join-Path $backupDirs[0].FullName 'Overlap.xml') -Algorithm SHA256).Hash
+        (Test-Path -LiteralPath (Join-Path $gameDir 'd3d9.dll') -PathType Leaf) | Should -BeTrue
+        Should -Invoke Read-HostSafe -Times 1 -Exactly
+    }
+    It "rejects an invalid overlap owner response and accepts a safe follow-up" {
+        $root = Join-Path $TestDrive 'ffb-invalid-overlap'
+        $userProfiles = Join-Path $root 'UserProfiles'
+        $tpRoot = Join-Path $root 'TeknoParrot'
+        $gameDir = Join-Path $root 'OverlapGame'
+        $cacheDir = Join-Path $root 'FFBPlugin'
+        New-Item -ItemType Directory -Path $userProfiles, (Join-Path $tpRoot 'GameProfiles'), $gameDir, $cacheDir -Force | Out-Null
+        $gamePath = Join-Path $gameDir 'overlap.exe'
+        [System.IO.File]::WriteAllBytes($gamePath, [System.Text.Encoding]::ASCII.GetBytes('MZ-overlap'))
+        $profileXml = @"
+<GameProfile>
+  <EmulationProfile>Daytona3</EmulationProfile>
+  <GamePath>$gamePath</GamePath>
+  <ConfigValues>
+    <FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Enable</FieldName><FieldType>Bool</FieldType><FieldValue>1</FieldValue></FieldInformation>
+  </ConfigValues>
+</GameProfile>
+"@
+        $encoding = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText((Join-Path $userProfiles 'Overlap.xml'), $profileXml, $encoding)
+        [System.IO.File]::WriteAllText((Join-Path $tpRoot 'GameProfiles\Canonical.xml'), $profileXml, $encoding)
+        [System.IO.File]::WriteAllBytes((Join-Path $cacheDir 'MAME64.dll'), [System.Text.Encoding]::ASCII.GetBytes('plugin'))
+        Mock Get-FFBPluginGameMap { [ordered]@{ OverlapGame = 'd3d9.dll' } }
+        Mock Invoke-FFBPluginDownload {
+            param([string]$destDir, [string]$SourceRevision)
+            New-FFBDownloadFixtureResult -destDir $destDir -SourceRevision $SourceRevision
+        }
+        Mock Get-ExeArchitecture { 'x64' }
+        $script:ffbOverlapAnswers = [System.Collections.Generic.Queue[string]]::new()
+        [void]$script:ffbOverlapAnswers.Enqueue('Q')
+        [void]$script:ffbOverlapAnswers.Enqueue('Y')
+        Mock Read-HostSafe { $script:ffbOverlapAnswers.Dequeue() }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir -TpRoot $tpRoot -NativeEnabledCodes @('Overlap')
+        $result.Succeeded | Should -BeTrue
+        $result.Reason | Should -Be 'NATIVE_PREFERRED'
+        $field = (Read-Xml (Join-Path $userProfiles 'Overlap.xml')).SelectSingleNode('/GameProfile/ConfigValues/FieldInformation/FieldValue')
+        $field.InnerText | Should -Be '1'
+        (Test-Path -LiteralPath (Join-Path $gameDir 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+        Should -Invoke Read-HostSafe -Times 2 -Exactly
+    }
+    It "reports missing saved paths separately from unsupported FFB games" {
+        $userProfiles = Join-Path $TestDrive 'ffb-missing-path'
+        $cacheDir = Join-Path $TestDrive 'ffb-missing-cache'
+        New-Item -ItemType Directory -Path $userProfiles, $cacheDir -Force | Out-Null
+        $profileXml = @"
+<GameProfile>
+  <EmulationProfile>MissingFfbGame</EmulationProfile>
+  <GamePath>C:\missing\MissingFfbGame.exe</GamePath>
+</GameProfile>
+"@
+        [System.IO.File]::WriteAllText((Join-Path $userProfiles 'MissingFfbGame.xml'), $profileXml, (New-Object System.Text.UTF8Encoding $false))
+        $unmatchedExe = Join-Path $TestDrive 'UnmatchedFfbFolder\unmatched.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($unmatchedExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($unmatchedExe, 'unmatched')
+        [System.IO.File]::WriteAllText((Join-Path $userProfiles 'UnmatchedFfbGame.xml'), '<GameProfile><EmulationProfile>UnmatchedFfbGame</EmulationProfile><GamePath>{0}</GamePath></GameProfile>' -f $unmatchedExe)
+        Mock Get-FFBPluginGameMap { [ordered]@{ MissingFfbGame = 'd3d9.dll' } }
+        Mock Invoke-FFBPluginDownload {
+            param([string]$destDir, [string]$SourceRevision)
+            New-FFBDownloadFixtureResult -destDir $destDir -SourceRevision $SourceRevision
+        }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir
+        $result.Succeeded | Should -BeFalse
+        $result.MissingPath | Should -Be 1
+        @($result.MissingPathGames) | Should -Contain 'MissingFfbGame'
+        $result.Deployed | Should -Be 0
+        $result.Errors | Should -Be 0
+        $result.Accounted | Should -Be 2
+        $result.AccountingComplete | Should -BeTrue
+        $result.SkippedNoMatch | Should -Be 1
+        $result.MissingDevice | Should -Be 0
+    }
+    It "classifies an unavailable device separately from a missing saved path" {
+        $userProfiles = Join-Path $TestDrive 'ffb-device-unavailable'
+        $cacheDir = Join-Path $TestDrive 'ffb-device-cache'
+        New-Item -ItemType Directory -Path $userProfiles, $cacheDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $userProfiles 'DeviceFfbGame.xml') -Value '<GameProfile><EmulationProfile>DeviceFfbGame</EmulationProfile><GamePath>Z:\missing\DeviceFfbGame.exe</GamePath></GameProfile>'
+        Mock Get-FFBPluginGameMap { [ordered]@{ DeviceFfbGame = 'd3d9.dll' } }
+        Mock Invoke-FFBPluginDownload {
+            param([string]$destDir, [string]$SourceRevision)
+            New-FFBDownloadFixtureResult -destDir $destDir -SourceRevision $SourceRevision
+        }
+        Mock Test-TpmGameMutationPath { [pscustomobject]@{ Valid = $false; ReasonCode = 'DEVICE_UNAVAILABLE'; Reason = 'A device which does not exist was specified.' } }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir
+        $result.Succeeded | Should -BeFalse
+        $result.MissingPath | Should -Be 0
+        $result.MissingDevice | Should -Be 1
+        @($result.MissingDeviceGames) | Should -Contain 'DeviceFfbGame'
+        $result.PathReasonCounts['DEVICE_UNAVAILABLE'] | Should -Be 1
+    }
+    It "preserves path metadata when optional plugin deployment fails" {
+        $script:ffbAnswerIndex = 0
+        Mock Invoke-FFBBlasterSetup { @() }
+        Mock Invoke-FFBPluginSetup {
+            [pscustomobject]@{
+                Succeeded = $false
+                MissingPath = 1
+                MissingDevice = 1
+                MissingPathGames = @('MissingFfbGame')
+                MissingDeviceGames = @('DeviceFfbGame')
+                PathReasonCounts = @{ GAME_PATH_MISSING = 1; DEVICE_UNAVAILABLE = 1 }
+            }
+        }
+        Mock Read-HostSafe { @('Y', '')[$script:ffbAnswerIndex++] }
+        $result = Invoke-TpmFfbSetupMode -UserProfilesDir $TestDrive -TpRoot $TestDrive -ScriptRoot $TestDrive
+        $result.Completed | Should -BeFalse
+        $result.MissingPath | Should -Be 1
+        $result.MissingDevice | Should -Be 1
+        @($result.MissingPathGames) | Should -Contain 'MissingFfbGame'
+        @($result.MissingDeviceGames) | Should -Contain 'DeviceFfbGame'
+    }
+    It "routes FFB missing-path results to Health Check from the main dispatch" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$ffbModeResult\.MissingPath -gt 0'
+        $source | Should -Match "\$pendingApplyMode = 'HealthCheck'"
+        $source | Should -Match "Choose H or B"
+    }
+    It "refuses mutable FFB source downloads without a pinned commit" {
+        $cache = Join-Path $TestDrive 'ffb-unpinned'
+        New-Item -ItemType Directory -Path $cache -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $cache 'MAME64.dll') -Value 'existing'
+        Mock Invoke-TpmDownload { throw 'mutable artifact download must not run' }
+        $result = Invoke-FFBPluginDownload -destDir $cache -SourceRevision 'master'
+        Should -Invoke Invoke-TpmDownload -Times 0 -Exactly
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'SOURCE_REVISION_UNAVAILABLE'
+        (Get-Content -LiteralPath (Join-Path $cache 'MAME64.dll') -Raw) | Should -Be "existing`r`n"
+        @(Get-ChildItem -LiteralPath $cache -Filter 'TPM-FFB-source-*' -Force).Count | Should -Be 0
+    }
+    It "keeps existing custom cache files while staging pinned sources separately" {
+        $cache = Join-Path $TestDrive 'ffb-custom-cache'
+        New-Item -ItemType Directory -Path $cache -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $cache 'MAME64.dll') -Value 'custom'
+        Mock Invoke-TpmDownload {
+            param([string]$DownloadUrl, [string]$DestinationPath, [string]$ExpectedBytes, [string]$Label, [string]$Version)
+            Set-Content -LiteralPath $DestinationPath -Value 'fresh'
+            $true
+        }
+        $result = Invoke-FFBPluginDownload -destDir $cache -SourceRevision ('b' * 40)
+        $result.Succeeded | Should -BeTrue
+        @($result.Files.Keys) | Should -HaveCount 2
+        @($result.Evidence | Where-Object { $_.Sha256 -notmatch '^[0-9A-F]{64}$' }) | Should -HaveCount 0
+        (Get-Content -LiteralPath (Join-Path $cache 'MAME64.dll') -Raw) | Should -Be "custom`r`n"
+        @(Get-ChildItem -LiteralPath $cache -Filter 'TPM-FFB-source-*' -Force).Count | Should -Be 2
+        @($script:FFBDownloadEvidence).Count | Should -Be 2
+    }
 }
 
+Describe 'FFB pinned source and transaction invariants' {
+    BeforeAll {
+        function New-FFBTransactionFixture {
+            param([string]$Root)
+            $profiles = Join-Path $Root 'UserProfiles'
+            $gameRoot = Join-Path $Root 'FixtureGame'
+            $cache = Join-Path $Root 'FFBPlugin'
+            New-Item -ItemType Directory -Path $profiles, $gameRoot, $cache -Force | Out-Null
+            $exe = Join-Path $gameRoot 'FixtureGame.exe'
+            [System.IO.File]::WriteAllBytes($exe, [byte[]](0x4d,0x5a,1,2,3,4))
+            $profile = '<GameProfile><EmulationProfile>FixtureGame</EmulationProfile><GamePath>{0}</GamePath></GameProfile>' -f $exe
+            [System.IO.File]::WriteAllText((Join-Path $profiles 'FixtureGame.xml'), $profile, (New-Object System.Text.UTF8Encoding($false)))
+            return [pscustomobject]@{ Root=$Root; Profiles=$profiles; GameRoot=$gameRoot; Cache=$cache; Exe=$exe }
+        }
+
+        function New-FFBStructuredDownloadResult {
+            param([string]$DestDir, [string]$Revision)
+            $files = [ordered]@{}
+            $evidence = New-Object System.Collections.Generic.List[object]
+            [void][System.IO.Directory]::CreateDirectory($DestDir)
+            foreach ($dllName in @('MAME32.dll', 'MAME64.dll')) {
+                $path = Join-Path $DestDir ('TPM-FFB-transaction-{0}-{1}' -f $Revision.Substring(0,8), $dllName)
+                [System.IO.File]::WriteAllBytes($path, [byte[]](9,8,7,6))
+                $files[$dllName] = $path
+                [void]$evidence.Add([pscustomobject]@{
+                    FileName=$dllName
+                    SourceUrl="https://raw.githubusercontent.com/mightymikem/FFBArcadePlugin/$Revision/$dllName"
+                    SourceRevision=$Revision
+                    Sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+                    Trust='SourcePinnedAuditHash'
+                    DownloadPath=$path
+                })
+            }
+            return [pscustomobject]@{
+                Succeeded=$true; Files=$files; Evidence=$evidence.ToArray()
+                ResiduePaths=@(); Reason=$null
+            }
+        }
+
+        function Mock-FFBTransactionDependencies {
+            param([string]$Revision)
+            Mock Get-FFBPluginSourceRevision {
+                [pscustomobject]@{
+                    Revision=$Revision
+                    Repository='mightymikem/FFBArcadePlugin'
+                    ManifestUrl='https://api.github.com/repos/mightymikem/FFBArcadePlugin/commits/master'
+                    Trust='SourcePinnedAuditHash'
+                }
+            }
+            Mock Get-FFBPluginGameMap { [ordered]@{ FixtureGame='d3d9.dll' } }
+            Mock Invoke-FFBPluginDownload {
+                param([string]$destDir, [string]$SourceRevision)
+                New-FFBStructuredDownloadResult -DestDir $destDir -Revision $SourceRevision
+            }
+            Mock Get-ExeArchitecture { 'x64' }
+        }
+    }
+
+    It 'resolves one full source SHA from the mutable branch endpoint' {
+        $revision = ('c' * 40)
+        $script:ffbResolverUris = @()
+        Mock Invoke-TpmWebRequestSilently {
+            param([string]$Uri)
+            $script:ffbResolverUris += $Uri
+            [pscustomobject]@{ Content = '{"sha":"' + $revision + '"}' }
+        }
+        $source = Get-FFBPluginSourceRevision
+        $source.Revision | Should -Be $revision.ToUpperInvariant()
+        $source.Trust | Should -Be 'SourcePinnedAuditHash'
+        @($script:ffbResolverUris) | Should -HaveCount 1
+        $script:ffbResolverUris[0] | Should -Match '/commits/master$'
+    }
+
+    It 'uses the exact resolved SHA for support-table and DLL artifact URLs' {
+        $revision = ('d' * 40)
+        $script:ffbTableUris = @()
+        Mock Invoke-TpmWebRequestSilently {
+            param([string]$Uri)
+            $script:ffbTableUris += $Uri
+            [pscustomobject]@{ Content = "cd FixtureGame`r`nrename dinput8.dll d3d9.dll`r`ncd.." }
+        }
+        $map = Get-FFBPluginGameMap -SourceRevision $revision
+        $map['FixtureGame'] | Should -Be 'd3d9.dll'
+        @($script:ffbTableUris | Where-Object { $_ -notmatch [regex]::Escape($revision) }) | Should -HaveCount 0
+        $script:ffbDllUris = @()
+        $script:ffbDllPaths = @()
+        Mock Invoke-TpmDownload {
+            param([string]$DownloadUrl, [string]$DestinationPath, [string]$ExpectedBytes, [string]$Label, [string]$Version)
+            $script:ffbDllUris += $DownloadUrl
+            [System.IO.File]::WriteAllBytes($DestinationPath, [byte[]](1,2,3))
+            $true
+        }
+        $result = Invoke-FFBPluginDownload -destDir (Join-Path $TestDrive 'ffb-url-pinning') -SourceRevision $revision
+        $result.Succeeded | Should -BeTrue
+        @($script:ffbDllUris) | Should -HaveCount 2
+        @($script:ffbDllUris | Where-Object { $_ -notmatch [regex]::Escape($revision) -or $_ -match '/master/' }) | Should -HaveCount 0
+    }
+
+    It 'fails before mutation when the resolver cannot return a valid revision' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-resolver-failure')
+        Mock Get-FFBPluginSourceRevision { $null }
+        Mock Get-FFBPluginGameMap { throw 'map should not be fetched' }
+        Mock Invoke-FFBPluginDownload { throw 'DLLs should not be fetched' }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'SOURCE_REVISION_UNAVAILABLE'
+        Should -Invoke Get-FFBPluginGameMap -Times 0 -Exactly
+        Should -Invoke Invoke-FFBPluginDownload -Times 0 -Exactly
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+    }
+
+    It 'fails before mutation when the resolver response is malformed' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-malformed-resolver')
+        Mock Invoke-TpmWebRequestSilently {
+            [pscustomobject]@{ Content = '{"sha":"not-a-full-commit"}' }
+        }
+        Mock Get-FFBPluginGameMap { throw 'map should not be fetched' }
+        Mock Invoke-FFBPluginDownload { throw 'DLLs should not be fetched' }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'SOURCE_REVISION_UNAVAILABLE'
+        Should -Invoke Get-FFBPluginGameMap -Times 0 -Exactly
+        Should -Invoke Invoke-FFBPluginDownload -Times 0 -Exactly
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+    }
+    It 'fails before mutation when the pinned support table is unavailable' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-table-failure')
+        $revision = ('a' * 40)
+        Mock Get-FFBPluginSourceRevision {
+            [pscustomobject]@{ Revision=$revision; Repository='mightymikem/FFBArcadePlugin'; ManifestUrl='https://api.github.com/repos/mightymikem/FFBArcadePlugin/commits/master'; Trust='SourcePinnedAuditHash' }
+        }
+        Mock Get-FFBPluginGameMap { @{} }
+        Mock Invoke-FFBPluginDownload { throw 'DLLs should not be fetched after table failure' }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'GAME_MAP_FAILED'
+        Should -Invoke Invoke-FFBPluginDownload -Times 0 -Exactly
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+    }
+
+    It 'fails before mutation when DLL acquisition does not produce a verified set' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-dll-failure')
+        $revision = ('b' * 40)
+        Mock Get-FFBPluginSourceRevision {
+            [pscustomobject]@{ Revision=$revision; Repository='mightymikem/FFBArcadePlugin'; ManifestUrl='https://api.github.com/repos/mightymikem/FFBArcadePlugin/commits/master'; Trust='SourcePinnedAuditHash' }
+        }
+        Mock Get-FFBPluginGameMap { [ordered]@{ FixtureGame='d3d9.dll' } }
+        Mock Invoke-FFBPluginDownload {
+            [pscustomobject]@{ Succeeded=$false; Files=@{}; Evidence=@(); ResiduePaths=@(); Reason='DLL_ACQUISITION_FAILED' }
+        }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'DLL_ACQUISITION_FAILED'
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+    }
+
+    It 'rejects a staged DLL whose hash no longer matches acquisition evidence' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-hash-mismatch')
+        $revision = ('3' * 40)
+        Mock-FFBTransactionDependencies -Revision $revision
+        $download = New-FFBStructuredDownloadResult -DestDir $fixture.Cache -Revision $revision
+        $download.Evidence[1].Sha256 = ('0' * 64)
+        Mock Invoke-FFBPluginDownload { $download }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        $result.Succeeded | Should -BeFalse
+        $result.Errors | Should -Be 1
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+    }
+
+
+    It 'preserves a custom cache and records hashes for both staged DLLs' {
+        $cache = Join-Path $TestDrive 'ffb-cache-preservation'
+        New-Item -ItemType Directory -Path $cache -Force | Out-Null
+        $custom = Join-Path $cache 'MAME64.dll'
+        [System.IO.File]::WriteAllText($custom, 'custom-cache', (New-Object System.Text.UTF8Encoding($false)))
+        $revision = ('e' * 40)
+        Mock Invoke-TpmDownload {
+            param([string]$DownloadUrl, [string]$DestinationPath, [string]$ExpectedBytes, [string]$Label, [string]$Version)
+            [System.IO.File]::WriteAllBytes($DestinationPath, [byte[]](5,4,3,2,1))
+            $true
+        }
+        $result = Invoke-FFBPluginDownload -destDir $cache -SourceRevision $revision
+        $result.Succeeded | Should -BeTrue
+        [System.IO.File]::ReadAllText($custom) | Should -Be 'custom-cache'
+        @($result.Files.Keys) | Should -HaveCount 2
+        @($result.Evidence | Where-Object { $_.SourceRevision -ne $revision.ToUpperInvariant() }) | Should -HaveCount 0
+        @($result.Evidence | Where-Object { $_.Sha256 -notmatch '^[0-9A-F]{64}$' }) | Should -HaveCount 0
+        @($result.Evidence | Where-Object { -not (Test-Path -LiteralPath $_.DownloadPath -PathType Leaf) }) | Should -HaveCount 0
+    }
+
+    It 'preserves an existing collision and reports zero deployment with complete accounting' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-collision')
+        $destination = Join-Path $fixture.GameRoot 'd3d9.dll'
+        [System.IO.File]::WriteAllText($destination, 'pre-existing-hook', (New-Object System.Text.UTF8Encoding($false)))
+        $revision = ('f' * 40)
+        Mock-FFBTransactionDependencies -Revision $revision
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        Should -Invoke Get-FFBPluginSourceRevision -Times 1 -Exactly
+        $result.Succeeded | Should -BeTrue
+        $result.Reason | Should -Be 'NO_PLUGIN_CHANGES_NEEDED'
+        $result.Deployed | Should -Be 0
+        $result.SkippedCollision | Should -Be 1
+        $result.Accounted | Should -Be 1
+        $result.AccountingComplete | Should -BeTrue
+        [System.IO.File]::ReadAllText($destination) | Should -Be 'pre-existing-hook'
+    }
+
+    It 'rolls back a hook when ownership persistence fails' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-ownership-rollback')
+        $revision = ('1' * 40)
+        Mock-FFBTransactionDependencies -Revision $revision
+        Mock Write-FFBPluginOwnership { throw 'ownership persistence failure' }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
+        $result.Succeeded | Should -BeFalse
+        $result.Deployed | Should -Be 0
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+        (Test-Path -LiteralPath (Join-Path $fixture.Cache 'TPM-FFB-Plugin-Ownership.json') -PathType Leaf) | Should -BeFalse
+    }
+
+    It 'rolls back deployed hooks when final evidence persistence fails' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-evidence-rollback')
+        $revision = ('2' * 40)
+        Mock-FFBTransactionDependencies -Revision $revision
+        $script:ffbEvidenceWriteCount = 0
+        Mock Write-FFBPluginEvidence {
+            $script:ffbEvidenceWriteCount++
+            if ($script:ffbEvidenceWriteCount -gt 1) { throw 'final evidence persistence failure' }
+        }
+        $evidencePath = Join-Path $fixture.Root 'Reports\TPM-FFB-Plugin-Evidence.json'
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache -EvidencePath $evidencePath
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'EVIDENCE_WRITE_FAILED'
+        $result.RollbackSucceeded | Should -BeTrue
+        $result.Deployed | Should -Be 0
+        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+        (Test-Path -LiteralPath (Join-Path $fixture.Cache 'TPM-FFB-Plugin-Ownership.json') -PathType Leaf) | Should -BeFalse
+        $script:ffbEvidenceWriteCount | Should -Be 2
+    }
+    It 'restores a native-owned hook removed before evidence failure' {
+        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-native-evidence-rollback')
+        $revision = ('4' * 40)
+        $destination = Join-Path $fixture.GameRoot 'd3d9.dll'
+        [System.IO.File]::WriteAllText($destination, 'native-owned-hook', (New-Object System.Text.UTF8Encoding($false)))
+        $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
+        $ownershipPath = Join-Path $fixture.Cache 'TPM-FFB-Plugin-Ownership.json'
+        $ownershipText = (@{
+            SchemaVersion = 1
+            Entries = @([pscustomobject]@{
+                ProfileCode='FixtureGame'; GameRoot=$fixture.GameRoot; Destination=$destination
+                DeployedSha256=$hash; SourceSha256=$hash; SourceRevision=$revision; SourceTrust='SourcePinnedAuditHash'
+            })
+        } | ConvertTo-Json -Depth 5)
+        [System.IO.File]::WriteAllText($ownershipPath, $ownershipText, (New-Object System.Text.UTF8Encoding($false)))
+        Mock-FFBTransactionDependencies -Revision $revision
+        Mock Read-HostSafe { 'Y' }
+        $script:ffbEvidenceWriteCount = 0
+        Mock Write-FFBPluginEvidence {
+            $script:ffbEvidenceWriteCount++
+            if ($script:ffbEvidenceWriteCount -gt 1) { throw 'final evidence persistence failure' }
+        }
+        $evidencePath = Join-Path $fixture.Root 'Reports\TPM-FFB-Plugin-Evidence.json'
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache -NativeEnabledCodes @('FixtureGame') -EvidencePath $evidencePath
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'EVIDENCE_WRITE_FAILED'
+        $result.RollbackSucceeded | Should -BeTrue
+        [System.IO.File]::ReadAllText($destination) | Should -Be 'native-owned-hook'
+        (Get-Content -LiteralPath $ownershipPath -Raw) | Should -Be $ownershipText
+    }
+
+}
 Describe "Issue #300 workflow ownership and transition guards" {
     It "rejects unknown workflow steps without emitting an event" {
         $events = New-Object System.Collections.Generic.List[object]
@@ -9455,7 +11799,7 @@ Describe "Issue #300 workflow ownership and transition guards" {
     }
 
     It "routes reviewed PostgreSQL and optional-flow failures through lifecycle cleanup" {
-        foreach ($failureId in @('postgres-service-state','postgres-install-failed','postgres-backup-unverified','postgres-config-save','postgres-database-backup','postgres-profile-recovery','postgres-profile-errors','postgres-service-restore','reshade-file-missing','reshade-file-type','dgv-folder-missing')) {
+        foreach ($failureId in @('postgres-service-state','postgres-install-failed','postgres-backup-unverified','postgres-profile-recovery','postgres-profile-errors','postgres-service-restore','postgres-direct-recovery','reshade-file-missing','reshade-file-type','dgv-folder-missing')) {
             $script:ProductionSource | Should -Match ([regex]::Escape("Resolve-TpmWorkflowFailure -Context"))
             $script:ProductionSource | Should -Match ([regex]::Escape("-FailureId '$failureId'"))
         }
@@ -9552,14 +11896,388 @@ Describe "RC8 menu and ReShade regressions" {
 
     It "normal ReShade setup does not require a preset path" {
         $source = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
-        $source | Should -Match 'Visual profile'
+        $source | Should -Match 'Read-TpmReShadeTerminalProfile'
         $source | Should -Match 'Use the selected ReShade profile\?'
-        $source | Should -Match '\{0\} will be applied\. Choose Custom only if you already have your own ReShade \.ini preset\.'
-        $source | Should -Match '\[Y\] Yes, use \{0\}\s+\[C\] Custom preset\s+\[B\] Back'
+        $source | Should -Match '\{0\} will be applied\. Choose a custom ReShade \.ini preset only if you already have one\.'
+        $source | Should -Match '\[Y\] Yes, use \{0\}\s+\[S\] Custom preset\s+\[B\] Back'
         $source | Should -Not -Match 'Get it at\s+https://reshade\.me'
         $source | Should -Not -Match 'replace ReShade\\ReShade64\.dll'
     }
+    It "provides a visible terminal-only ReShade chooser with explicit selection and Back" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $script:chooserInputs = [System.Collections.Generic.Queue[string]]::new()
+        [void]$script:chooserInputs.Enqueue('2')
+        [void]$script:chooserInputs.Enqueue('U')
+        Mock Read-HostSafe { $script:chooserInputs.Dequeue() }
+        Mock Write-Host {}
+        Mock Write-Log {}
+        $selected = Read-TpmReShadeTerminalProfile -Profiles $profiles
+        $selected.Cancelled | Should -BeFalse
+        $selected.SelectedProfile.ProfileId | Should -Be 'CleanSharp'
+
+        $script:chooserInputs = [System.Collections.Generic.Queue[string]]::new()
+        [void]$script:chooserInputs.Enqueue('B')
+        $back = Read-TpmReShadeTerminalProfile -Profiles $profiles
+        $back.Cancelled | Should -BeTrue
+        $back.SelectedProfile | Should -BeNullOrEmpty
+    }
+    It "keeps terminal selection authoritative and syncs the preview state" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $session = [hashtable]::Synchronized(@{
+            Initialized = $true
+            Closed = $false
+            PreviewEnabled = $true
+            SelectedProfileId = 'Original'
+            Profiles = $profiles
+            Refresh = { return $true }.GetNewClosure()
+        })
+        Mock Write-Log {}
+        Mock Write-Host {}
+        $synced = Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'Vivid'
+        $synced | Should -BeTrue
+        $session.SelectedProfileId | Should -Be 'Vivid'
+        $script:ProductionSource | Should -Match 'The terminal chooser is authoritative'
+        $script:ProductionSource | Should -Not -Match 'Update-TpmReShadeSelectionFromPreview'
+        $sourceGallery = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
+        $sourceGallery | Should -Not -Match 'Use selected profile'
+    }
+    It "does not use a blocking modal gallery from the normal ReShade setup path" {
+        $source = $script:ProductionSource
+        $invokeStart = $source.IndexOf('function Invoke-ReShadeSetup')
+        $chooserIndex = $source.IndexOf('Read-TpmReShadeTerminalProfile -Profiles', $invokeStart)
+        $setupBeforeChooser = $source.Substring($invokeStart, $chooserIndex - $invokeStart)
+        $nonModalIndex = $source.IndexOf('Show-TpmReShadeProfileGalleryWindow -Profiles', $invokeStart)
+        $chooserIndex | Should -BeGreaterThan $invokeStart
+        $nonModalIndex | Should -BeGreaterThan $invokeStart
+        $setupBeforeChooser | Should -Not -Match 'ShowDialog\(\)'
+        $source.Substring($nonModalIndex, $chooserIndex - $nonModalIndex) | Should -Match '\-NonModal'
+        $source | Should -Match 'ReShade profile chooser: selected'
+        $script:ProductionSource | Should -Match 'function Read-TpmReShadeTerminalInput'
+        $script:ProductionSource | Should -Match 'Read-TpmReShadeTerminalInput -Prompt'
+        $script:ProductionSource | Should -Match 'Windows.Forms.Application\]::DoEvents'
+    }
+    It "returns Acquired for a valid Browse DLL and Skipped for an intentional Skip" {
+        $dllPath = Join-Path $TestDrive 'existing-reshade.dll'
+        [System.IO.File]::WriteAllText($dllPath, 'fixture')
+
+        $acquired = Resolve-ReShadeDllAcquisition -Choice 'B' -InputPath $dllPath
+        $acquired.State | Should -Be 'Acquired'
+        $acquired.Path | Should -Be $dllPath
+
+        $skipped = Resolve-ReShadeDllAcquisition -Choice 'N' -InputPath $null
+        $skipped.State | Should -Be 'Skipped'
+        $skipped.Path | Should -BeNullOrEmpty
+    }
+
+    It "returns Invalid for missing, non-leaf, and non-DLL Browse paths" {
+        $missing = Resolve-ReShadeDllAcquisition -Choice 'B' -InputPath (Join-Path $TestDrive 'missing.dll')
+        $missing.State | Should -Be 'Invalid'
+        $missing.Reason | Should -Be 'FileMissing'
+
+        $directory = Join-Path $TestDrive 'directory.dll'
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        $nonLeaf = Resolve-ReShadeDllAcquisition -Choice 'B' -InputPath $directory
+        $nonLeaf.State | Should -Be 'Invalid'
+        $nonLeaf.Reason | Should -Be 'FileMissing'
+
+        $textPath = Join-Path $TestDrive 'not-a-dll.txt'
+        [System.IO.File]::WriteAllText($textPath, 'fixture')
+        $wrongType = Resolve-ReShadeDllAcquisition -Choice 'B' -InputPath $textPath
+        $wrongType.State | Should -Be 'Invalid'
+        $wrongType.Reason | Should -Be 'FileType'
+    }
+
+
+    It "wires the ReShade acquisition result into the existing cancellation guard" {
+        $source = $script:ProductionSource
+        $acquisitionCall = $source.IndexOf('$rsAcquisition = Resolve-ReShadeDllAcquisition -Choice $rsGetChoice -InputPath $inp')
+        $acquisitionCall | Should -BeGreaterThan -1
+        $stateIndex = $source.IndexOf('$rsGotDll    = $true', $acquisitionCall)
+        $cancelIndex = $source.IndexOf("Write-Host '  ReShade setup cancelled. No unverified DLL was used.'", $acquisitionCall)
+        $stateIndex | Should -BeGreaterThan $acquisitionCall
+        $cancelIndex | Should -BeGreaterThan $stateIndex
+        $source.Substring($acquisitionCall, $cancelIndex - $acquisitionCall) | Should -Match '(?s)\$rsSourceDll\s*=\s*\$rsAcquisition\.Path\s*\r?\n\s*\$rsGotDll\s*=\s*\$true'
+        $source | Should -Match 'if \(\$rsAcquisition\.State -eq ''Acquired''\)'
+    }
+
+    It "keeps source-level validation and Skip handling supplemental to acquisition behavior tests" {
+        $source = $script:ProductionSource
+        $helperStart = $source.IndexOf('function Resolve-ReShadeDllAcquisition')
+        $helperEnd = $source.IndexOf('function Invoke-ReShadeSetup', $helperStart)
+        $helper = $source.Substring($helperStart, $helperEnd - $helperStart)
+        $helper | Should -Match 'Test-Path -LiteralPath \$InputPath -PathType Leaf'
+        $helper | Should -Match 'GetExtension\(\$InputPath\)\.ToLower\(\) -ne ''.dll'''
+        $helper | Should -Match "State  = 'Skipped'"
+        $source | Should -Match "FailureId 'reshade-file-missing'"
+        $source | Should -Match "FailureId 'reshade-file-type'"
+    }
+
+    It "keeps ReShade DLL signature inspection and disclosure before deployment" {
+        $source = $script:ProductionSource
+        $invokeStart = $source.IndexOf('function Invoke-ReShadeSetup')
+        $signatureCheck = $source.IndexOf('Test-ReShadeDllSignature -Path $dllCheck.Path', $invokeStart)
+        $reviewWarning = $source.IndexOf('signature could not be verified by Windows', $signatureCheck)
+        $deployment = $source.IndexOf('Installing ReShade into', $signatureCheck)
+        $signatureCheck | Should -BeGreaterThan $invokeStart
+        $reviewWarning | Should -BeGreaterThan $signatureCheck
+        $deployment | Should -BeGreaterThan $reviewWarning
+    }
+    It "preserves the requested ReShade profile when reopening the gallery" {
+        $source = $script:ProductionSource
+        $galleryStart = $source.IndexOf('function Show-TpmReShadeProfileGalleryWindow')
+        $selectedAssignment = $source.IndexOf('$state[''SelectedProfileId''] = [string]$defaultProfile.ProfileId', $galleryStart)
+        $galleryStart | Should -BeGreaterOrEqual 0
+        $selectedAssignment | Should -BeGreaterThan $galleryStart
+        $source.Substring($galleryStart, $selectedAssignment - $galleryStart) | Should -Match 'DefaultProfileId'
+        $source | Should -Match 'Show-TpmReShadeProfileGalleryWindow -Profiles \$Profiles -DefaultProfileId \$reopenId -Show -NonModal'
+        $galleryBody = [regex]::Match($source, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
+        $galleryBody | Should -Not -Match '\$combo\.SelectedIndex'
+        $galleryBody | Should -Not -Match 'Use selected profile'
+    }
 }
+Describe "ReShade removal safety and workflow" {
+    It "emits separate scan records for removable, protected, missing, malformed, changed, and clean games" {
+        $root = Join-Path $TestDrive 'reshade-removal-scan'
+        $profilesDir = Join-Path $root 'UserProfiles'
+        $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $makeProfile = {
+            param($name, $gamePath, $xml = $null)
+            if ($null -eq $xml) { $xml = '<GameProfile><GamePath>' + $gamePath + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>' }
+            [IO.File]::WriteAllText((Join-Path $profilesDir ($name + '.xml')), $xml)
+        }
+        $ownedDir = Join-Path $root 'owned'; [IO.Directory]::CreateDirectory($ownedDir) | Out-Null
+        $ownedGame = Join-Path $ownedDir 'game.exe'; [IO.File]::WriteAllText($ownedGame, 'game')
+        $ownedHook = Join-Path $ownedDir 'dxgi.dll'; [IO.File]::WriteAllText($ownedHook, 'owned')
+        & $makeProfile 'Owned' $ownedGame
+        $ownedHash = (Get-FileHash -LiteralPath $ownedHook -Algorithm SHA256).Hash
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$ownedHook; ExpectedSHA256=$ownedHash; ActualSHA256=$ownedHash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId Owned -StateRoot $stateRoot)
+        $bundleDir = Join-Path $root 'bundled'; [IO.Directory]::CreateDirectory($bundleDir) | Out-Null
+        $bundleGame = Join-Path $bundleDir 'game.exe'; $bundleHook = Join-Path $bundleDir 'dxgi.dll'; [IO.File]::WriteAllText($bundleGame, 'game'); [IO.File]::WriteAllText($bundleHook, 'preinstalled')
+        & $makeProfile 'Bundled' $bundleGame
+        $bundleHash = (Get-FileHash -LiteralPath $bundleHook -Algorithm SHA256).Hash
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$bundleHook; ExpectedSHA256=$bundleHash; ActualSHA256=$bundleHash; TPMManaged=$false; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId Bundled -StateRoot $stateRoot)
+        $changedDir = Join-Path $root 'changed'; [IO.Directory]::CreateDirectory($changedDir) | Out-Null
+        $changedGame = Join-Path $changedDir 'game.exe'; $changedHook = Join-Path $changedDir 'dxgi.dll'; [IO.File]::WriteAllText($changedGame, 'game'); [IO.File]::WriteAllText($changedHook, 'changed')
+        & $makeProfile 'Changed' $changedGame
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$changedHook; ExpectedSHA256=('0' * 64); ActualSHA256=('0' * 64); TPMManaged=$true; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId Changed -StateRoot $stateRoot)
+        $cleanDir = Join-Path $root 'clean'; [IO.Directory]::CreateDirectory($cleanDir) | Out-Null
+        $cleanGame = Join-Path $cleanDir 'game.exe'; [IO.File]::WriteAllText($cleanGame, 'game'); & $makeProfile 'Clean' $cleanGame
+        & $makeProfile 'Missing' (Join-Path $root 'missing.exe')
+        & $makeProfile 'Malformed' '' '<NotGameProfile />'
+        $outsideDir = Join-Path $root 'outside'; [IO.Directory]::CreateDirectory($outsideDir) | Out-Null
+        $outsideGame = Join-Path $outsideDir 'game.exe'; $outsideFile = Join-Path $root 'must-not-delete.txt'; [IO.File]::WriteAllText($outsideGame, 'game'); [IO.File]::WriteAllText($outsideFile, 'outside')
+        & $makeProfile 'Outside' $outsideGame
+        $outsideHash = (Get-FileHash -LiteralPath $outsideFile -Algorithm SHA256).Hash
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='outside.txt'; DestinationPath=$outsideFile; ExpectedSHA256=$outsideHash; ActualSHA256=$outsideHash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId Outside -StateRoot $stateRoot)
+        $unownedDir = Join-Path $root 'unowned'; [IO.Directory]::CreateDirectory($unownedDir) | Out-Null
+        $unownedGame = Join-Path $unownedDir 'game.exe'; $unownedHook = Join-Path $unownedDir 'dxgi.dll'; [IO.File]::WriteAllText($unownedGame, 'game'); [IO.File]::WriteAllText($unownedHook, 'unowned'); & $makeProfile 'Unowned' $unownedGame
+        $scan = Get-TpmReShadeRemovalScan -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        ($scan.Records | Where-Object GameId -eq 'Owned').Status | Should -Be 'Removable'
+        ($scan.Records | Where-Object GameId -eq 'Bundled').Status | Should -Be 'ProtectedBundled'
+        ($scan.Records | Where-Object GameId -eq 'Changed').Status | Should -Be 'Changed'
+        ($scan.Records | Where-Object GameId -eq 'Missing').Status | Should -Be 'MissingPath'
+        ($scan.Records | Where-Object GameId -eq 'Malformed').Status | Should -Be 'MalformedMetadata'
+        ($scan.Records | Where-Object GameId -eq 'Clean').Status | Should -Be 'AlreadyClean'
+        ($scan.Records | Where-Object GameId -eq 'Outside').Status | Should -Be 'ProtectedAmbiguous'
+        @($scan.Candidates | ForEach-Object GameId) | Should -Not -Contain 'Outside'
+        @($scan.Reviewable | ForEach-Object GameId) | Should -Contain 'Owned'
+        @($scan.Reviewable | ForEach-Object GameId) | Should -Contain 'Bundled'
+        ($scan.Records | Where-Object GameId -eq 'Unowned').Status | Should -Be 'ProtectedAmbiguous'
+        @((($scan.Records | Where-Object GameId -eq 'Unowned').ProtectedFiles | ForEach-Object DestinationPath)) | Should -Contain $unownedHook
+        @((($scan.Records | Where-Object GameId -eq 'Owned').RemovableFiles | ForEach-Object DestinationPath)) | Should -Contain $ownedHook
+        @($scan.Reviewable | ForEach-Object GameId) | Should -Not -Contain 'Clean'
+        @($scan.Reviewable | ForEach-Object GameId) | Should -Not -Contain 'Missing'
+        $script:summaryPrompt = 0
+        Mock Read-HostSafe { if ($script:summaryPrompt++ -eq 0) { 'A' } else { 'REMOVE' } }
+        $summary = Invoke-TpmReShadeRemoval -UserProfilesDir $profilesDir -StateRoot $stateRoot -BackupRoot (Join-Path $profilesDir 'FullBackup')
+        $summary.Removed | Should -Be 1
+        $summary.AlreadyClean | Should -Be 1
+        $summary.MissingPath | Should -Be 1
+        $summary.ProtectedBundled | Should -Be 1
+        $summary.ProtectedAmbiguous | Should -Be 2
+        $summary.Changed | Should -Be 1
+        $summary.MalformedMetadata | Should -Be 1
+        $summary.RolledBack | Should -Be 0
+        $summary.Failed | Should -Be 0
+        $summary.Results.Count | Should -Be 5
+        Test-Path -LiteralPath $bundleHook -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $unownedHook -PathType Leaf | Should -BeTrue
+    }
+    It "passes only filtered reviewable profiles through the existing chooser" {
+        $root = Join-Path $TestDrive 'reshade-filtered-chooser'
+        [IO.Directory]::CreateDirectory($root) | Out-Null
+        $fullBackup = Join-Path $root 'FullBackup'; [IO.Directory]::CreateDirectory($fullBackup) | Out-Null
+        foreach ($name in @('A','B','C')) { [IO.File]::WriteAllText((Join-Path $root ($name + '.xml')), '<GameProfile />') }
+        [IO.File]::WriteAllText((Join-Path $fullBackup 'Hidden.xml'), '<GameProfile />')
+        $filtered = @(Get-ChildItem -LiteralPath $root -Filter '*.xml' -File | Where-Object BaseName -in @('A','C'))
+        Mock Read-HostSafe { 'A' }
+        $selected = @(Select-RegisteredGamesInteractive -UserProfilesDir $root -Profiles $filtered)
+        @($selected | ForEach-Object BaseName) | Should -Be @('A','C')
+        $selected | Should -Not -Contain (Get-Item -LiteralPath (Join-Path $root 'B.xml'))
+        $selected | Should -Not -Contain (Get-Item -LiteralPath (Join-Path $fullBackup 'Hidden.xml'))
+    }
+    It "requires confirmation and removes only verified owned files with a backup" {
+        $root = Join-Path $TestDrive 'reshade-removal-flow'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $game = Join-Path $root 'game.exe'; $hook = Join-Path $root 'dxgi.dll'; [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, 'owned')
+        [IO.File]::WriteAllText((Join-Path $profilesDir 'Flow.xml'), '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>')
+        $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId Flow -StateRoot $stateRoot)
+        $scan = Get-TpmReShadeRemovalScan -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        $notConfirmed = Remove-TpmReShadeOwnedDeployment -ScanRecord $scan.Candidates[0] -UserProfilesDir $profilesDir -BackupRoot (Join-Path $profilesDir 'FullBackup') -StateRoot $stateRoot
+        $notConfirmed.Status | Should -Be 'ConfirmationRequired'; Test-Path -LiteralPath $hook -PathType Leaf | Should -BeTrue
+        $script:removePrompt = 0
+        Mock Read-HostSafe { if ($script:removePrompt++ -eq 0) { 'A' } else { 'REMOVE' } }
+        $result = Invoke-TpmReShadeRemoval -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        $result.Removed | Should -Be 1
+        Test-Path -LiteralPath $hook -PathType Leaf | Should -BeFalse
+        @((Get-ChildItem -LiteralPath (Join-Path $profilesDir 'FullBackup') -Recurse -File -ErrorAction SilentlyContinue)).Count | Should -BeGreaterThan 0
+        $result.Scan.Missing.Count | Should -Be 0
+    }
+    It "rejects a manifest destination moved outside target before backup" {
+        $root = Join-Path $TestDrive 'reshade-removal-moved-destination'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $game = Join-Path $root 'game.exe'; $hook = Join-Path $root 'dxgi.dll'; $outside = Join-Path $root 'outside.txt'
+        [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, 'owned'); [IO.File]::WriteAllText($outside, 'outside')
+        [IO.File]::WriteAllText((Join-Path $profilesDir 'Moved.xml'), '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>')
+        $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+        $ownership = Get-TpmReShadeProfileOwnershipPath -GameId Moved -StateRoot $stateRoot
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path $ownership
+        $scan = Get-TpmReShadeRemovalScan -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        $scan.Candidates[0].RemovableFiles[0].DestinationPath = $outside
+        $result = Remove-TpmReShadeOwnedDeployment -ScanRecord $scan.Candidates[0] -UserProfilesDir $profilesDir -BackupRoot (Join-Path $profilesDir 'FullBackup') -StateRoot $stateRoot -ConfirmRemoval
+        $result.Status | Should -Be 'RolledBack'
+        Test-Path -LiteralPath $hook -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $outside -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $ownership -PathType Leaf | Should -BeTrue
+    }
+    It "rejects changed profile metadata before backup" {
+        $root = Join-Path $TestDrive 'reshade-removal-profile-change'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $game = Join-Path $root 'game.exe'; $hook = Join-Path $root 'dxgi.dll'; [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, 'owned')
+        $profilePath = Join-Path $profilesDir 'ProfileChange.xml'
+        $defaultXml = '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>'
+        [IO.File]::WriteAllText($profilePath, $defaultXml)
+        $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId ProfileChange -StateRoot $stateRoot)
+        $scan = Get-TpmReShadeRemovalScan -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        [IO.File]::WriteAllText($profilePath, $defaultXml.Replace('<EmulatorType>Default</EmulatorType>','<EmulatorType>BudgieLoader</EmulatorType>'))
+        $result = Remove-TpmReShadeOwnedDeployment -ScanRecord $scan.Candidates[0] -UserProfilesDir $profilesDir -BackupRoot (Join-Path $profilesDir 'FullBackup') -StateRoot $stateRoot -ConfirmRemoval
+        $result.Status | Should -Be 'RolledBack'
+        $result.Detail | Should -Match 'EmulatorType changed'
+        Test-Path -LiteralPath $hook -PathType Leaf | Should -BeTrue
+    }
+    It "rechecks profile metadata immediately before deletion" {
+        $root = Join-Path $TestDrive 'reshade-removal-delete-recheck'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $game = Join-Path $root 'game.exe'; $hook = Join-Path $root 'dxgi.dll'; [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, 'owned')
+        $profilePath = Join-Path $profilesDir 'DeleteRecheck.xml'
+        $defaultXml = '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>'
+        [IO.File]::WriteAllText($profilePath, $defaultXml)
+        $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+        $ownership = Get-TpmReShadeProfileOwnershipPath -GameId DeleteRecheck -StateRoot $stateRoot
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path $ownership
+        $scan = Get-TpmReShadeRemovalScan -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        $script:reshadeMutation = $false
+        $script:reshadeMutationProfile = $profilePath
+        $script:reshadeMutationXml = $defaultXml.Replace('<EmulatorType>Default</EmulatorType>','<EmulatorType>BudgieLoader</EmulatorType>')
+        Mock Copy-Item {
+            param($LiteralPath, $Destination)
+            [IO.File]::Copy($LiteralPath, $Destination, $true)
+            if (-not $script:reshadeMutation -and [IO.Path]::GetFileName($Destination) -eq 'ownership.json') {
+                $script:reshadeMutation = $true
+                [IO.File]::WriteAllText($script:reshadeMutationProfile, $script:reshadeMutationXml)
+            }
+        }
+        $result = Remove-TpmReShadeOwnedDeployment -ScanRecord $scan.Candidates[0] -UserProfilesDir $profilesDir -BackupRoot (Join-Path $profilesDir 'FullBackup') -StateRoot $stateRoot -ConfirmRemoval
+        $result.Status | Should -Be 'RolledBack'
+        $result.Detail | Should -Match 'EmulatorType changed'
+        $script:reshadeMutation | Should -BeTrue
+        Test-Path -LiteralPath $hook -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $ownership -PathType Leaf | Should -BeTrue
+    }
+
+    It "cancel after the preview leaves files and ownership unchanged" {
+        $root = Join-Path $TestDrive 'reshade-removal-cancel'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $game = Join-Path $root 'game.exe'; $hook = Join-Path $root 'dxgi.dll'; [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, 'owned')
+        [IO.File]::WriteAllText((Join-Path $profilesDir 'Cancel.xml'), '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>')
+        $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+        $ownership = Get-TpmReShadeProfileOwnershipPath -GameId Cancel -StateRoot $stateRoot
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path $ownership
+        $script:cancelPrompt = 0
+        Mock Read-HostSafe { if ($script:cancelPrompt++ -eq 0) { 'A' } else { '' } }
+        $result = Invoke-TpmReShadeRemoval -UserProfilesDir $profilesDir -StateRoot $stateRoot -BackupRoot (Join-Path $profilesDir 'FullBackup')
+        $result.Cancelled | Should -BeTrue
+        Test-Path -LiteralPath $hook -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $ownership -PathType Leaf | Should -BeTrue
+    }
+    It "rolls back removed files and ownership when manifest commit fails" {
+        $root = Join-Path $TestDrive 'reshade-removal-rollback'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $game = Join-Path $root 'game.exe'; $hook = Join-Path $root 'dxgi.dll'; $keep = Join-Path $root 'user.ini'; [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, 'owned'); [IO.File]::WriteAllText($keep, 'keep')
+        [IO.File]::WriteAllText((Join-Path $profilesDir 'Rollback.xml'), '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>')
+        $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash; $keepHash = (Get-FileHash -LiteralPath $keep -Algorithm SHA256).Hash
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@(
+            [pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' },
+            [pscustomobject]@{ RelativeSource='user.ini'; DestinationPath=$keep; ExpectedSHA256=$keepHash; ActualSHA256=$keepHash; TPMManaged=$false; Kind='ReShadePreset' }
+        ) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId Rollback -StateRoot $stateRoot)
+        $scan = Get-TpmReShadeRemovalScan -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        Mock Save-TpmReShadeOwnershipManifest { throw 'simulated manifest commit failure' }
+        $result = Remove-TpmReShadeOwnedDeployment -ScanRecord $scan.Candidates[0] -UserProfilesDir $profilesDir -BackupRoot (Join-Path $profilesDir 'FullBackup') -StateRoot $stateRoot -ConfirmRemoval
+        $result.Status | Should -Be 'RolledBack'
+        Test-Path -LiteralPath $hook -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $keep -PathType Leaf | Should -BeTrue
+        (Read-TpmReShadeOwnershipManifest -Path (Get-TpmReShadeProfileOwnershipPath -GameId Rollback -StateRoot $stateRoot)).Files.Count | Should -Be 2
+    }
+    It "wires the ReShade mode action to the end-to-end removal path" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Action \(S/R, default S\)'
+        $source | Should -Match 'Invoke-TpmReShadeRemoval -UserProfilesDir \$userProfilesDir'
+        $source | Should -Match 'Type REMOVE to back up and remove verified TeknoParrot Manager-owned files'
+        $source | Should -Match 'Remove-TpmReShadeOwnedDeployment'
+        $source | Should -Match 'REMOVE \{0\}: \{1\} \[\{2\}\]'
+        $source | Should -Match 'Removed effects from'
+        $source | Should -Match 'Protected bundled/preinstalled'
+        $source | Should -Match 'Protected ambiguous/needs review'
+        $source | Should -Match 'Skipped missing path'
+        $source | Should -Match 'ReShade removal preview REMOVE'
+        $source | Should -Match 'ReShade removal preview KEEP protected'
+        $source | Should -Match 'ReShade removal preview KEEP changed'
+    }
+    It "supports multiple explicit filtered chooser selections" {
+        $root = Join-Path $TestDrive 'reshade-multiple-chooser'; [IO.Directory]::CreateDirectory($root) | Out-Null
+        foreach ($name in @('A','B','C')) { [IO.File]::WriteAllText((Join-Path $root ($name + '.xml')), '<GameProfile />') }
+        $filtered = @(Get-ChildItem -LiteralPath $root -Filter '*.xml' -File | Where-Object BaseName -in @('A','C'))
+        $script:chooserInput = New-Object 'System.Collections.Generic.Queue[string]'
+        foreach ($value in @('L','1','2','D')) { $script:chooserInput.Enqueue($value) }
+        Mock Read-HostSafe { $script:chooserInput.Dequeue() }
+        $selected = @(Select-RegisteredGamesInteractive -UserProfilesDir $root -Profiles $filtered)
+        @($selected | ForEach-Object BaseName) | Should -Be @('A','C')
+    }
+    It "removes all selected filtered games only after one confirmation" {
+        $root = Join-Path $TestDrive 'reshade-removal-all'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        foreach ($name in @('One','Two')) {
+            $gameDir = Join-Path $root $name; [IO.Directory]::CreateDirectory($gameDir) | Out-Null
+            $game = Join-Path $gameDir 'game.exe'; $hook = Join-Path $gameDir 'dxgi.dll'; [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, $name)
+            [IO.File]::WriteAllText((Join-Path $profilesDir ($name + '.xml')), '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>')
+            $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+            Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId $name -StateRoot $stateRoot)
+        }
+        $script:allRemovePrompt = 0
+        Mock Read-HostSafe { if ($script:allRemovePrompt++ -eq 0) { 'A' } else { 'REMOVE' } }
+        $result = Invoke-TpmReShadeRemoval -UserProfilesDir $profilesDir -StateRoot $stateRoot -BackupRoot (Join-Path $profilesDir 'FullBackup')
+        $result.Removed | Should -Be 2
+        $result.Results.Count | Should -Be 2
+        @($result.Results | Where-Object Status -eq 'Removed').Count | Should -Be 2
+        Test-Path -LiteralPath (Join-Path $root 'One\dxgi.dll') -PathType Leaf | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $root 'Two\dxgi.dll') -PathType Leaf | Should -BeFalse
+        $result.Failed | Should -Be 0
+    }
+}
+
 
 Describe "ReShade custom preset validation" {
     It "returns null for blank or whitespace input without probing the path" {
@@ -9597,6 +12315,53 @@ Describe "Approved ReShade profile catalog" {
         foreach($p in $profiles){(@($p.Effects)-join ',')|Should -Be (@($expected[$p.ProfileId])-join ',');(New-TpmReShadePresetContent -ProfileDefinition $p)|Should -Match '(?m)^Techniques='}
         (New-TpmReShadePresetContent -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'EnhancedArcade'))|Should -Match 'Techniques=LumaSharpen,Vibrance'
         (Get-TpmReShadeProfile -ProfileId 'Original').Effects.Count|Should -Be 0
+    }
+    It "derives visible technique labels from canonical profile and effect definitions" {
+        $catalog = @(Get-TpmReShadeEffectCatalog)
+        $displaySource = $script:ProductionSource
+        $displayStart = $displaySource.IndexOf('function Get-TpmReShadeProfileTechniqueDisplay')
+        $displayEnd = $displaySource.IndexOf('function Get-TpmReShadeProfile {', $displayStart)
+        $displayFunction = $displaySource.Substring($displayStart, $displayEnd - $displayStart)
+        $displayFunction | Should -Match 'Get-TpmReShadeEffectCatalog'
+        $displayFunction | Should -Match 'TechniqueOrder'
+        $displayFunction | Should -Match 'RelativeFiles'
+        $displayFunction | Should -Match 'TechniqueName'
+        $displayFunction | Should -Not -Match 'LumaSharpen\.fx|Vibrance\.fx|CRT_Lottes\.fx'
+        foreach ($profile in @(Get-TpmReShadeProfiles)) {
+            $expectedRows = @(
+                foreach ($techniqueName in @($profile.TechniqueOrder)) {
+                    $effectEntry = @($catalog | Where-Object { $_.TechniqueName -eq $techniqueName })[0]
+                    $shaderFiles = @($effectEntry.RelativeFiles | Where-Object { [IO.Path]::GetExtension($_) -ieq '.fx' } | ForEach-Object { [IO.Path]::GetFileName($_) })
+                    '{0} / {1}' -f ($shaderFiles -join ', '), $effectEntry.TechniqueName
+                }
+            )
+            $expectedText = if ($expectedRows.Count -eq 0) { '(none; no ReShade techniques)' } else { $expectedRows -join '; ' }
+            (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $profile) | Should -Be $expectedText
+        }
+    }
+    It "fails closed when a profile technique is absent from the approved catalog" {
+        $invalidProfile = [pscustomobject]@{ TechniqueOrder = @('UnapprovedTechnique') }
+        { Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $invalidProfile } | Should -Throw "*No approved ReShade effect catalog entry*"
+    }
+    It "uses canonical technique display metadata in terminal and terminal-authoritative preview surfaces" {
+        $source = $script:ProductionSource
+        foreach ($functionName in @('Read-TpmReShadeTerminalProfile', 'Show-TpmReShadeProfileGalleryWindow')) {
+            $functionStart = $source.IndexOf("function $functionName")
+            $functionEnd = $source.IndexOf("`nfunction ", $functionStart + $functionName.Length + 10)
+            if ($functionEnd -lt 0) { $functionEnd = $source.Length }
+            $functionSource = $source.Substring($functionStart, $functionEnd - $functionStart)
+            $functionSource | Should -Match 'Get-TpmReShadeProfileTechniqueDisplay'
+        }
+        $source | Should -Match 'Techniques:'
+        $source | Should -Match 'DescriptionLabel'
+        $gallerySource = [regex]::Match($source, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
+        $gallerySource | Should -Match 'The terminal chooser is authoritative'
+        $gallerySource | Should -Match '\$state\[''SelectedProfileId''\]'
+        $gallerySource | Should -Not -Match '\$form\.Controls\.Add\(\$combo\)'
+        $labelTextIndex = $gallerySource.IndexOf('$descriptionLabel.Text =')
+        $sliderBranchIndex = $gallerySource.IndexOf('if ($viewMode -eq ''Slider'')')
+        $labelTextIndex | Should -BeGreaterThan 0
+        $labelTextIndex | Should -BeLessThan $sliderBranchIndex
     }
     It "requires measured evidence before compatibility status or recommendation is asserted" {
         $profiles = @(Get-TpmReShadeProfiles)
@@ -9679,57 +12444,211 @@ Describe "Approved ReShade profile catalog" {
     }
 }
 Describe "ReShade profile previews" {
-    It "binds every canonical profile to its local synthetic preview" {
-        $expected=@{Original='TPM-preview-original.svg';CleanSharp='TPM-preview-clean.svg';Vivid='TPM-preview-vivid.svg';EnhancedArcade='TPM-preview-enhanced.svg';ClassicCrt='TPM-preview-crt.svg'}
-        $gallery=@(Get-TpmReShadeProfileGallery -PreviewRoot (Join-Path $PSScriptRoot '..\ReShade\Previews'));$gallery.Count|Should -Be 5
-        foreach($item in $gallery){$item.PreviewAvailable|Should -BeTrue;$item.Provenance|Should -Be 'TPM synthetic';([IO.Path]::GetFileName($item.PreviewPath))|Should -Be $expected[$item.ProfileId]}
+    BeforeAll {
+        $script:PreviewFixtureRoot = Join-Path $TestDrive 'landscape-preview'
+        [IO.Directory]::CreateDirectory($script:PreviewFixtureRoot) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-landscape.png') -Destination (Join-Path $script:PreviewFixtureRoot 'TPM-preview-landscape.png')
     }
-    It "fails closed for missing, invalid, traversal, and wrong binding without blocking profiles" {
-        $root=Join-Path $TestDrive 'previews';[IO.Directory]::CreateDirectory($root)|Out-Null
-        $p=Get-TpmReShadeProfile -ProfileId Original
-        (Get-TpmReShadePreviewInfo -ProfileDefinition $p -PreviewRoot $root).Available|Should -BeFalse
-        [IO.File]::WriteAllText((Join-Path $root 'TPM-preview-original.svg'),'bad')
-        (Get-TpmReShadePreviewInfo -ProfileDefinition $p -PreviewRoot $root).Reason|Should -Be 'PREVIEW_INVALID'
-        $p.PreviewAsset='..\escape.svg'
-        (Get-TpmReShadePreviewInfo -ProfileDefinition $p -PreviewRoot $root).Reason|Should -Be 'PREVIEW_BINDING_INVALID'
-        (Get-TpmReShadeProfile -ProfileId Original).ProfileId|Should -Be 'Original'
+    It "validates the bundled landscape identity, dimensions, and hash" {
+        $reference = Get-TpmReShadePreviewReference -PreviewRoot $script:PreviewFixtureRoot
+        $reference.Available | Should -BeTrue
+        $reference.Identity | Should -Be 'TPM-LANDSCAPE-V1'
+        $reference.Version | Should -Be '3'
+        $reference.Hash | Should -Be '7203032094bfd4d174cd3125ef55c87d7b35053fc4e274914b6ae1ac43f286d8'
+        $image = [Drawing.Image]::FromFile($reference.Path)
+        try {
+            $image.Width | Should -Be 1672
+            $image.Height | Should -Be 941
+        } finally {
+            $image.Dispose()
+        }
+    }
+    It "reports every canonical profile as available from the bundled landscape renderer" {
+        $gallery = @(Get-TpmReShadeProfileGallery -PreviewRoot $script:PreviewFixtureRoot)
+        $gallery.Count | Should -Be 5
+        foreach ($item in $gallery) {
+            $item.PreviewAvailable | Should -BeTrue
+            $item.PreviewPath | Should -Be (Join-Path $script:PreviewFixtureRoot 'TPM-preview-landscape.png')
+            $item.PreviewReason | Should -BeNullOrEmpty
+            $item.Provenance | Should -Be 'TPM bundled landscape'
+        }
+    }
+    It "fails closed for missing and invalid landscape assets without blocking profiles" {
+        $root = Join-Path $TestDrive 'previews'
+        [IO.Directory]::CreateDirectory($root) | Out-Null
+        $p = Get-TpmReShadeProfile -ProfileId Original
+        (Get-TpmReShadePreviewInfo -ProfileDefinition $p -PreviewRoot $root).Available | Should -BeFalse
+        [IO.File]::WriteAllText((Join-Path $root 'TPM-preview-landscape.png'), 'bad')
+        (Get-TpmReShadePreviewInfo -ProfileDefinition $p -PreviewRoot $root).Reason | Should -Be 'PREVIEW_LANDSCAPE_ASSET_UNREADABLE'
+        (Get-TpmReShadeProfile -ProfileId Original).ProfileId | Should -Be 'Original'
     }
 }
 Describe "ReShade preview renderer and cache" {
-    BeforeAll { Add-Type -AssemblyName System.Drawing }
+    BeforeAll {
+        Add-Type -AssemblyName System.Drawing
+        $script:PreviewFixtureRoot = Join-Path $TestDrive 'renderer-landscape'
+        [IO.Directory]::CreateDirectory($script:PreviewFixtureRoot) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-landscape.png') -Destination (Join-Path $script:PreviewFixtureRoot 'TPM-preview-landscape.png')
+        function Get-TpmPreviewPixelDiffCount {
+            param([Parameter(Mandatory)][Drawing.Bitmap]$Left, [Parameter(Mandatory)][Drawing.Bitmap]$Right)
+            $difference = [long]0
+            for ($y = 0; $y -lt $Left.Height; $y++) {
+                for ($x = 0; $x -lt $Left.Width; $x++) {
+                    if ($Left.GetPixel($x, $y).ToArgb() -ne $Right.GetPixel($x, $y).ToArgb()) { $difference++ }
+                }
+            }
+            return $difference
+        }
+        function Get-TpmPreviewRegionPixelDiffCount {
+            param(
+                [Parameter(Mandatory)][Drawing.Bitmap]$Left,
+                [Parameter(Mandatory)][Drawing.Bitmap]$Right,
+                [int]$XStart,
+                [int]$XEnd,
+                [int]$YStart,
+                [int]$YEnd
+            )
+            $difference = [long]0
+            for ($y = $YStart; $y -le $YEnd; $y++) {
+                for ($x = $XStart; $x -le $XEnd; $x++) {
+                    if ($Left.GetPixel($x, $y).ToArgb() -ne $Right.GetPixel($x, $y).ToArgb()) { $difference++ }
+                }
+            }
+            return $difference
+        }
+    }
     It "renders deterministic Before, After, and Split artifacts from one reference identity" {
         $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ReShade\Previews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
-        $p=Get-TpmReShadeProfile -ProfileId EnhancedArcade;$a=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Before -PreviewRoot $root -CacheRoot $cache;$b=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode After -PreviewRoot $root -CacheRoot $cache;$c=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache
-        foreach($x in @($a,$b,$c)){$x.Available|Should -BeTrue -Because ($x|ConvertTo-Json);$x.ReferenceIdentity|Should -Be 'TPM-SYNTHETIC-ARCADE-V1';Test-Path -LiteralPath $x.Path -PathType Leaf|Should -BeTrue}
-        $a.CacheKey|Should -Not -Be $b.CacheKey;$b.CacheKey|Should -Not -Be $c.CacheKey
-        (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache).Reused|Should -BeTrue
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-landscape.png') -Destination (Join-Path $root 'TPM-preview-landscape.png')
+        $p=Get-TpmReShadeProfile -ProfileId EnhancedArcade;$a=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Before -PreviewRoot $root -CacheRoot $cache;$b=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode After -PreviewRoot $root -CacheRoot $cache;$c=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache;$s0=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 0 -PreviewRoot $root -CacheRoot $cache;$s50=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $root -CacheRoot $cache;$s100=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 100 -PreviewRoot $root -CacheRoot $cache
+        foreach($x in @($a,$b,$c,$s0,$s50,$s100)){$x.Available|Should -BeTrue -Because ($x|ConvertTo-Json);$x.ReferenceIdentity|Should -Be 'TPM-LANDSCAPE-V1';Test-Path -LiteralPath $x.Path -PathType Leaf|Should -BeTrue}
+        $a.CacheKey|Should -Not -Be $b.CacheKey;$b.CacheKey|Should -Not -Be $c.CacheKey;$s0.CacheKey|Should -Not -Be $s50.CacheKey;$s50.CacheKey|Should -Not -Be $s100.CacheKey
+        (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $root -CacheRoot $cache).Reused|Should -BeTrue
     }
-    It "regenerates corrupt or stale cache and fails gracefully without the reference" {
+    It "renders the processed side by applying effects to the same reference bitmap" {
+        $source = $script:ProductionSource
+        $rendererStart = $source.IndexOf('function Get-TpmReShadePreviewProcessedBitmap')
+        $rendererEnd = $source.IndexOf('function Dispose-TpmReShadePreviewRenderCache', $rendererStart)
+        $renderer = $source.Substring($rendererStart, $rendererEnd - $rendererStart)
+        $renderer | Should -Match 'Get-TpmReShadePreviewProcessedBitmap -Cache \$Cache -ProfileDefinition'
+        $renderer | Should -Match '\$graphics\.DrawImageUnscaled\(\$Cache\.Reference, 0, 0\)'
+        $renderer | Should -Match 'Invoke-TpmReShadePreviewProfilePixels'
+        $renderer | Should -Not -Match 'drawAfter'
+        $reference = New-TpmReShadePreviewReferenceBitmap -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $processed = New-TpmReShadePreviewBitmap -ProfileDefinition (Get-TpmReShadeProfile -ProfileId EnhancedArcade) -Mode After -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        try {
+            (Get-TpmPreviewPixelDiffCount -Left $reference -Right $processed) | Should -BeGreaterThan 1000
+        } finally {
+            $reference.Dispose(); $processed.Dispose()
+        }
+    }
+    It "renders meaningful distinct outputs for every approved profile without changing the baseline" {
+        $baseline = New-TpmReShadePreviewBitmap -ProfileDefinition (Get-TpmReShadeProfile -ProfileId EnhancedArcade) -Mode Before -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $outputs = @{}
+        $stateRoot = Join-Path $TestDrive 'preview-renderer-state'
+        [IO.Directory]::CreateDirectory($stateRoot) | Out-Null
+        [IO.File]::WriteAllText((Join-Path $stateRoot 'sentinel.txt'), 'unchanged')
+        try {
+            foreach ($profile in @(Get-TpmReShadeProfiles)) {
+                $rendered = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode After -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+                $outputs[[string]$profile.ProfileId] = $rendered
+                $difference = Get-TpmPreviewPixelDiffCount -Left $baseline -Right $rendered
+                if ($profile.ProfileId -eq 'Original') {
+                    $difference | Should -Be 0
+                } else {
+                    $difference | Should -BeGreaterThan 1000
+                }
+            }
+            $ids = @($outputs.Keys)
+            for ($i = 0; $i -lt $ids.Count; $i++) {
+                for ($j = $i + 1; $j -lt $ids.Count; $j++) {
+                    (Get-TpmPreviewPixelDiffCount -Left $outputs[$ids[$i]] -Right $outputs[$ids[$j]]) | Should -BeGreaterThan 100
+                }
+            }
+            (Get-Content -LiteralPath (Join-Path $stateRoot 'sentinel.txt') -Raw) | Should -Be 'unchanged'
+            @(Get-ChildItem -LiteralPath $stateRoot -Recurse -File).Count | Should -Be 1
+        } finally {
+            foreach ($rendered in @($outputs.Values)) { if ($rendered) { $rendered.Dispose() } }
+            $baseline.Dispose()
+        }
+    }
+    It "keeps split and slider sides tied to baseline and processed pixels" {
+        $profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
+        $before = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Before -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $after = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode After -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $split = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Split -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $slider0 = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 0 -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $slider50 = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 50 -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $slider100 = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 100 -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        try {
+            (Get-TpmPreviewRegionPixelDiffCount -Left $split -Right $before -XStart 0 -XEnd 150 -YStart 60 -YEnd 179) | Should -Be 0
+            (Get-TpmPreviewRegionPixelDiffCount -Left $split -Right $after -XStart 170 -XEnd 319 -YStart 60 -YEnd 179) | Should -Be 0
+            (Get-TpmPreviewRegionPixelDiffCount -Left $slider0 -Right $after -XStart 0 -XEnd 319 -YStart 60 -YEnd 179) | Should -Be 0
+            (Get-TpmPreviewRegionPixelDiffCount -Left $slider100 -Right $before -XStart 0 -XEnd 319 -YStart 60 -YEnd 179) | Should -Be 0
+            (Get-TpmPreviewRegionPixelDiffCount -Left $slider50 -Right $before -XStart 0 -XEnd 150 -YStart 60 -YEnd 179) | Should -Be 0
+            (Get-TpmPreviewRegionPixelDiffCount -Left $slider50 -Right $after -XStart 170 -XEnd 319 -YStart 60 -YEnd 179) | Should -Be 0
+            $slider0.GetPixel(40, 100).ToArgb() | Should -Not -Be $slider100.GetPixel(40, 100).ToArgb()
+        } finally {
+            $before.Dispose(); $after.Dispose(); $split.Dispose(); $slider0.Dispose(); $slider50.Dispose(); $slider100.Dispose()
+        }
+    }
+    It "regenerates corrupt or stale cache without an external reference dependency" {
         $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ReShade\Previews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
         $p=Get-TpmReShadeProfile -ProfileId CleanSharp;$first=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache
         Set-Content -LiteralPath $first.Path -Value 'not an image';(New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache).Available|Should -BeTrue
         $manifest=Join-Path $cache ($first.CacheKey+'.json');$json=Get-Content -LiteralPath $manifest -Raw|ConvertFrom-Json;$json.CacheKey='stale';$json|ConvertTo-Json|Set-Content -LiteralPath $manifest
         (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache).Available|Should -BeTrue
-        Remove-Item -LiteralPath (Join-Path $root 'TPM-preview-original.svg') -Force;(New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache).Available|Should -BeFalse
+    }
+    It "renders from the bundled landscape reference" {
+        $p = Get-TpmReShadeProfile -ProfileId EnhancedArcade
+        $artifact = New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $script:PreviewFixtureRoot -CacheRoot (Join-Path $script:PreviewFixtureRoot 'Cache')
+        try {
+            $artifact.Available | Should -BeTrue -Because ($artifact | ConvertTo-Json)
+            $artifact.ReferenceIdentity | Should -Be 'TPM-LANDSCAPE-V1'
+        } finally {
+            if ($artifact.Path) { Remove-Item -LiteralPath $artifact.Path -Force -ErrorAction SilentlyContinue }
+            if ($artifact.Path) { Remove-Item -LiteralPath ([IO.Path]::ChangeExtension($artifact.Path, '.json')) -Force -ErrorAction SilentlyContinue }
+        }
     }
     It "keeps preview rendering outside preset, asset, game, and trust state" {
-        $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ReShade\Previews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
+        $root=Join-Path $TestDrive 'preview-state';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-landscape.png') -Destination (Join-Path $root 'TPM-preview-landscape.png')
         $p=Get-TpmReShadeProfile -ProfileId EnhancedArcade;$preset=(New-TpmReShadePresetContent -ProfileDefinition $p);$hashes=@(Get-TpmReShadeEffectCatalog|ForEach-Object{(@($_.SHA256)-join ',')});$game=Join-Path $TestDrive 'game';[IO.Directory]::CreateDirectory($game)|Out-Null;[IO.File]::WriteAllText((Join-Path $game 'keep.txt'),'keep')
         $null=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache
         (New-TpmReShadePresetContent -ProfileDefinition $p)|Should -Be $preset;(@(Get-TpmReShadeEffectCatalog|ForEach-Object{(@($_.SHA256)-join ',')}))|Should -Be $hashes;(Get-Content -LiteralPath (Join-Path $game 'keep.txt') -Raw)|Should -Be 'keep'
     }
     It "provides safe noninteractive window fallback and cache identity changes" {
         $p=Get-TpmReShadeProfile -ProfileId Vivid;(Show-TpmReShadePreviewWindow -ProfileDefinition $p).Reason|Should -Be 'PREVIEW_WINDOW_NOT_REQUESTED'
-        $base=Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r';(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('b') -ReferenceSha256 'r')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 's')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r' -RendererVersion '2')|Should -Not -Be $base
+        $base=Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r';(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('b') -ReferenceSha256 'r')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 's')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r' -RendererVersion '1')|Should -Not -Be $base
+    }
+    It "keeps slider interaction on cached paint and updates synchronously" {
+        $source = $script:ProductionSource
+        $paintStart = $source.IndexOf('function New-TpmReShadePreviewPaintHandler')
+        $paintEnd = $source.IndexOf('function New-TpmReShadePreviewArtifact', $paintStart)
+        $paint = $source.Substring($paintStart, $paintEnd - $paintStart)
+        $paint | Should -Match 'Get-TpmReShadePreviewProcessedBitmap'
+        $paint | Should -Not -Match '\$cache\.Processed\[\[string\]\$selectedProfile\.ProfileId\]'
+        $paint | Should -Not -Match 'New-TpmReShadePreviewBitmapFromCache'
+        $paint | Should -Not -Match '\.Image\s*='
+        $source | Should -Match 'slider-keyboard-handler'
+        $source | Should -Match 'Add_KeyUp'
+        $source | Should -Match 'Remove_KeyUp'
+        $source | Should -Match ([regex]::Escape("`$State['SliderPosition'] = `$position"))
+        $source | Should -Match ([regex]::Escape("`$State['PendingSliderPosition'] = `$null"))
+        $source | Should -Match '\$State\[''Picture''\]\.Invalidate\(\)'
+        $source | Should -Match 'Remove_Paint'
+    }
+    It "returns the replacement gallery session so the caller owns teardown after R" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'PreviewSession = \$PreviewSession'
+        $source | Should -Match '\$gallerySession = \$chooserResult\.PreviewSession'
+        $source | Should -Match 'Show-TpmReShadeProfileGalleryWindow -Profiles \$Profiles -DefaultProfileId \$reopenId -Show -NonModal'
     }
 }
 Describe "ReShade profile state features" {
     It "compares approved profiles without deployment and supports only reviewed default intensity" {
         $r=Compare-TpmReShadeProfiles -LeftProfileId Original -RightProfileId EnhancedArcade
-        $r.Valid|Should -BeTrue;$r.Deploys|Should -BeFalse;$r.ReferenceIdentity|Should -Be 'TPM-SYNTHETIC-ARCADE-V1'
+        $r.Valid|Should -BeTrue;$r.Deploys|Should -BeFalse;$r.ReferenceIdentity|Should -Be 'TPM-LANDSCAPE-V1'
         @((Get-TpmReShadeIntensityVariants -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Vivid))).Count|Should -Be 1
         { Resolve-TpmReShadeIntensityVariant -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Vivid) -VariantId Strong }|Should -Throw
         (Compare-TpmReShadeProfiles -LeftProfileId NotApproved -RightProfileId Original).Valid|Should -BeFalse
@@ -9743,8 +12662,32 @@ Describe "ReShade profile state features" {
         Add-TpmReShadeProfileHistory -GameId 'game-1' -ProfileDefinition $p -StateRoot $root;@(Get-TpmReShadeProfileHistory -GameId 'game-1' -StateRoot $root).Count|Should -Be 1
     }
 }
+Describe "ReShade TutorialProgress mitigation" {
+    It "creates the supported overlay completion setting from empty content" {
+        $content = Update-TpmReShadeTutorialProgressText -Content ''
+        $content | Should -Match '(?ms)^\[OVERLAY\]\s*$.*?^TutorialProgress=4\s*$'
+        $content | Should -Not -Match 'NoUpdate|NoNews|NoTutorial|splash-disable'
+    }
+    It "updates the existing overlay completion setting without changing unrelated sections" {
+        $content = Update-TpmReShadeTutorialProgressText -Content "[GENERAL]`r`nKey=Value`r`n[OVERLAY]`r`nTutorialProgress=0`r`n[INPUT]`r`nKeyOverlay=145`r`n"
+        $content | Should -Match '(?ms)^\[GENERAL\]\s*$.*?^Key=Value\s*$'
+        $content | Should -Match '(?ms)^\[OVERLAY\]\s*$.*?^TutorialProgress=4\s*$'
+        $content | Should -Match '(?ms)^\[INPUT\]\s*$.*?^KeyOverlay=145\s*$'
+    }
+    It "reports a bounded startup overlay rather than promising full quiet startup" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'TeknoParrot Manager marks the ReShade first-run tutorial as completed for manager-managed installs\. ReShade may still show a brief normal startup/loading overlay\.'
+        $source | Should -Not -Match 'full quiet startup|full banner suppression|NoUpdate|NoNews|NoTutorial|splash-disable'
+        $source | Should -Match 'TUTORIAL_PROGRESS_FAILED'
+    }
+}
 Describe "ReShade trusted profile restore" {
-    It "deploys the complete DLL, preset, and approved effect set through one trusted transaction" {
+    BeforeAll {
+        $script:TrustedPreviewRoot = Join-Path $TestDrive 'trusted-profile-landscape'
+        [IO.Directory]::CreateDirectory($script:TrustedPreviewRoot) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-landscape.png') -Destination (Join-Path $script:TrustedPreviewRoot 'TPM-preview-landscape.png')
+    }
+    It "writes and updates ReShade TutorialProgress=4 through one trusted transaction" {
         $root=Join-Path $TestDrive 'full-profile';$game=Join-Path $root 'game.exe';$dll=Join-Path $root 'ReShade64.dll';$stage=Join-Path $root 'effect-stage';$effect=Join-Path $stage 'LumaSharpen.fx';$ownership=Join-Path $root 'profile.json'
         [IO.Directory]::CreateDirectory($root)|Out-Null;[IO.Directory]::CreateDirectory($stage)|Out-Null
         [IO.File]::WriteAllBytes($game,[Text.Encoding]::ASCII.GetBytes('MZ-test-game'));[IO.File]::WriteAllBytes($dll,[Text.Encoding]::ASCII.GetBytes('MZ-test-reshade'));[IO.File]::WriteAllText($effect,'effect-bytes')
@@ -9752,13 +12695,21 @@ Describe "ReShade trusted profile restore" {
         Mock Install-TpmReShadeApprovedEffect { [pscustomobject]@{Succeeded=$true;State='PREPARED';StagingRoot=$stage;Files=@([pscustomobject]@{RelativePath='Shaders/SweetFX/LumaSharpen.fx';Path=$effect;SHA256=$effectHash})} }
         $result=Install-TpmReShadeProfileDeployment -ProfileDefinition $profile -GamePath $game -Doc ([xml]'<GameProfile><EmulatorType>Default</EmulatorType></GameProfile>') -SourceDll $dll -CacheRoot (Join-Path $root 'cache') -OwnershipPath $ownership -CanonicalPreset
         $result.Succeeded|Should -BeTrue;$result.PresetApplied|Should -BeTrue;$result.DllName|Should -Be 'dxgi.dll'
-        Test-Path -LiteralPath (Join-Path $root 'ReShade.ini')|Should -BeTrue;Test-Path -LiteralPath (Join-Path $root 'Shaders\SweetFX\LumaSharpen.fx')|Should -BeTrue
-        (Read-TpmReShadeOwnershipManifest -Path $ownership).Files.Count|Should -Be 3;Should -Invoke Install-TpmReShadeApprovedEffect -Times 1 -ParameterFilter { $PrepareOnly }
+        $iniPath=Join-Path $root 'ReShade.ini';Test-Path -LiteralPath $iniPath|Should -BeTrue;Test-Path -LiteralPath (Join-Path $root 'Shaders\SweetFX\LumaSharpen.fx')|Should -BeTrue
+        (Get-Content -LiteralPath $iniPath -Raw)|Should -Match '(?ms)^\[OVERLAY\]\s*$.*?^TutorialProgress=4\s*$'
+        (Read-TpmReShadeOwnershipManifest -Path $ownership).Files.Count|Should -Be 3
+        [IO.Directory]::CreateDirectory($stage)|Out-Null;[IO.File]::WriteAllText($effect,'effect-bytes')
+        [IO.File]::WriteAllText($iniPath, "[OVERLAY]`r`nTutorialProgress=0`r`n", (New-Object Text.UTF8Encoding $false))
+        $updated=Install-TpmReShadeProfileDeployment -ProfileDefinition $profile -GamePath $game -Doc ([xml]'<GameProfile><EmulatorType>Default</EmulatorType></GameProfile>') -SourceDll $dll -CacheRoot (Join-Path $root 'cache') -OwnershipPath $ownership -CanonicalPreset
+        $updated.Succeeded|Should -BeTrue -Because ($updated | ConvertTo-Json -Depth 5)
+        (Get-Content -LiteralPath $iniPath -Raw)|Should -Match '(?ms)^\[OVERLAY\]\s*$.*?^TutorialProgress=4\s*$'
+        Should -Invoke Install-TpmReShadeApprovedEffect -Times 2 -ParameterFilter { $PrepareOnly }
     }
     It "routes restore through the complete trusted profile deployment path and records history afterward" {
         $profile=Get-TpmReShadeProfile -ProfileId CleanSharp;$entry=[pscustomobject]@{ProfileId='CleanSharp';VariantId='Default';DefinitionVersion='2';EffectIds=@('SweetFX.LumaSharpen');EffectSha256=@(Get-TpmReShadeProfileEffectHashes -ProfileDefinition $profile);Applied=$true}
-        $root=Join-Path $TestDrive 'restore-route';$game=Join-Path $root 'game.exe';$dll=Join-Path $root 'ReShade64.dll';[IO.Directory]::CreateDirectory($root)|Out-Null;[IO.File]::WriteAllText($game,'game');[IO.File]::WriteAllText($dll,'dll')
-        $script:RestoreEvents=@();Mock Install-TpmReShadeProfileDeployment { $script:RestoreEvents+='deploy';[pscustomobject]@{Succeeded=$true;State='INSTALLED';TargetDir=$root;DllName='dxgi.dll';PresetApplied=$true} };Mock Add-TpmReShadeProfileHistory { $script:RestoreEvents+='history' }
+        $root=Join-Path $TestDrive 'restore-route';$game=Join-Path $root 'game.exe';$dll=Join-Path $root 'ReShade64.dll';$hook=Join-Path $root 'dxgi.dll';[IO.Directory]::CreateDirectory($root)|Out-Null;[IO.File]::WriteAllText($game,'game');[IO.File]::WriteAllText($dll,'dll');[IO.File]::WriteAllText($hook,'installed')
+        $hookHash=(Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+        $script:restoreRouteRoot=$root;$script:restoreRouteHook=$hook;$script:restoreRouteHookHash=$hookHash;$script:RestoreEvents=@();Mock Install-TpmReShadeProfileDeployment { $script:RestoreEvents+='deploy';[pscustomobject]@{Succeeded=$true;State='INSTALLED';TargetDir=$script:restoreRouteRoot;DllName='dxgi.dll';PresetApplied=$true;RuntimeVersion='6.8.0';RuntimeSHA256=$script:restoreRouteHookHash;Manifest=[pscustomobject]@{RuntimeVersion='6.8.0';RuntimeSHA256=$script:restoreRouteHookHash;Files=@([pscustomobject]@{DestinationPath=$script:restoreRouteHook;ExpectedSHA256=$script:restoreRouteHookHash;TPMManaged=$true;Kind='ReShadeDll'})}} };Mock Add-TpmReShadeProfileHistory { $script:RestoreEvents+='history' }
         $result=Restore-TpmReShadeProfile -HistoryEntry $entry -CacheRoot (Join-Path $root 'cache') -OwnershipRoot (Join-Path $root 'ownership') -GamePath $game -Doc ([xml]'<GameProfile/>') -SourceDll $dll -GameId restore-game -StateRoot (Join-Path $root 'state')
         $result.Succeeded|Should -BeTrue;($script:RestoreEvents -join ',')|Should -Be 'deploy,history';Should -Invoke Install-TpmReShadeProfileDeployment -Times 1
     }
@@ -9792,7 +12743,383 @@ Describe "ReShade trusted profile restore" {
         $root=Join-Path $TestDrive 'chooser-state';$profile=Get-TpmReShadeProfile -ProfileId CleanSharp;Set-TpmReShadeRememberedProfile -GameId chooser-game -ProfileDefinition $profile -StateRoot $root;Set-TpmReShadeFavorite -ProfileId CleanSharp -StateRoot $root;Add-TpmReShadeProfileHistory -GameId chooser-game -ProfileDefinition $profile -StateRoot $root
         $options=Get-TpmReShadeChooserOptions -GameId chooser-game -StateRoot $root
         $options.Remembered.Valid|Should -BeTrue;$options.Restore.Valid|Should -BeTrue;$options.Favorites.Count|Should -Be 1
-        $source=$script:ProductionSource;$source|Should -Match 'R\) Restore previous trusted profile';$source|Should -Match 'Restore .* for this game';$source|Should -Match 'Choose a favorite profile'
+        $source=$script:ProductionSource;$source|Should -Match 'R\) Reapply previous trusted profile';$source|Should -Match 'Reapply .* for this game';$source|Should -Not -Match 'Restore .* for this game';$source|Should -Match 'Show-TpmReShadeProfileGalleryWindow'
+    }
+    It "supports bounded browser click selection and keeps numeric fallback" {
+        $script:ProductionSource | Should -Match 'Start-CrosshairSelectionBridge'
+        $script:ProductionSource | Should -Match 'Test-CrosshairSelectionIndex'
+        $script:ProductionSource | Should -Match '127\.0\.0\.1'
+        $script:ProductionSource | Should -Match 'Typed numeric fallback remains available'
+        $script:ProductionSource | Should -Match 'Stop-CrosshairSelectionBridge -Session \$bridgeSession'
+        $script:ProductionSource | Should -Match 'browser preview launch failed'
+        $script:ProductionSource | Should -Match 'Apply these crosshairs\? \(Y/N, default Y\)'
+        $script:ProductionSource | Should -Match '\$crosshairConfirm'
+        $script:ProductionSource | Should -Match 'Read-HostSafe'
+        $script:ProductionSource | Should -Match 'Read-TpmWorkflowInput -Context \$WorkflowContext'
+    }
+    It "leaves the browser in a completed non-interactive state after P2" {
+        $script:ProductionSource | Should -Match 'Selections complete\. Return to TeknoParrot Manager to confirm\. You can close this tab\.'
+        $script:ProductionSource | Should -Match 'if\(p1!==null&&p2!==null\)return'
+        $script:ProductionSource | Should -Match 'document\.body\.classList\.add\(''complete''\)'
+    }
+    It "closes an owned preview and reports unavailable close or focus plainly" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Start-Process -FilePath \$previewPath -PassThru'
+        $source | Should -Match '\$previewProcess\.HasExited'
+        $source | Should -Match '\$previewProcess\.CloseMainWindow\(\)'
+        $source | Should -Match 'Crosshair preview could not be closed automatically'
+        $source | Should -Match 'could not restore console focus'
+    }
+    It "keeps Crosshair confirmation input on the prompt line" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'function Read-TpmCrosshairYesNo'
+        $source | Should -Match 'Clear-TpmWorkflowFooter -Context \$WorkflowContext'
+        $source | Should -Match 'Read-HostSafe \$Prompt'
+        $source | Should -Match 'TeknoParrot Manager found pcsx2x6'
+        $source | Should -Not -Match 'TPM found pcsx2x6'
+    }
+
+    It "reports focus fallback and keeps deployment behind terminal confirmation" {
+        $script:ProductionSource | Should -Match '\$focusReturned = Focus-TpmConsoleBestEffort'
+        $script:ProductionSource | Should -Match 'console focus return was unavailable'
+        $script:ProductionSource | Should -Match '-WorkflowContext \$WorkflowContext'
+        $confirmAt = $script:ProductionSource.IndexOf('$crosshairConfirm')
+        $transactionAt = $script:ProductionSource.IndexOf('Invoke-TpmCrosshairAssetTransaction', $confirmAt)
+        $transactionAt | Should -BeGreaterThan $confirmAt
+        $script:ProductionSource | Should -Not -Match 'Copy-Item -LiteralPath \$valid\[\$p1Idx\]'
+    }
+    It "writes a completed browser state into the generated preview" {
+        $preview = Join-Path $TestDrive 'CrosshairPreview.html'
+        Export-CrosshairPreview -CrosshairPaths @('C:\Crosshairs\000.png', 'C:\Crosshairs\001.png') -OutPath $preview -BridgeUrl 'http://127.0.0.1:18000/' -BridgeToken 'test-token'
+        $html = Get-Content -LiteralPath $preview -Raw
+        $html | Should -Match 'Selections complete\. Return to TeknoParrot Manager to confirm\. You can close this tab\.'
+        $html | Should -Match 'if\(p1!==null&&p2!==null\)return'
+        $html | Should -Match 'complete \.cell'
+    }
+
+    It "rejects invalid browser selection tokens and indexes" {
+        Test-CrosshairSelectionIndex -Token 'bad' -ExpectedToken 'good' -Value '1' | Should -BeNullOrEmpty
+        Test-CrosshairSelectionIndex -Token 'good' -ExpectedToken 'good' -Value '-1' | Should -BeNullOrEmpty
+        Test-CrosshairSelectionIndex -Token 'good' -ExpectedToken 'good' -Value '321' | Should -BeNullOrEmpty
+        Test-CrosshairSelectionIndex -Token 'good' -ExpectedToken 'good' -Value '320' | Should -Be 320
+    }
+    It "classifies PostgreSQL failure causes and preserves next actions" {
+        (Get-PostgresFailureDiagnosis -GameLabel 'GameA' -DbName 'db_a' -Detail 'connection refused').Category | Should -Be 'CannotConnect'
+        (Get-PostgresFailureDiagnosis -GameLabel 'GameB' -DbName 'db_b' -Detail 'psql.exe could not be verified').Category | Should -Be 'ToolUnavailable'
+        (Get-PostgresFailureDiagnosis -GameLabel 'GameC' -DbName 'db_c' -Detail 'database does not exist').Category | Should -Be 'DatabaseMissing'
+        $diagnosis = Get-PostgresFailureDiagnosis -GameLabel 'GameD' -DbName 'db_d' -Detail 'access denied'
+        $diagnosis.Category | Should -Be 'PermissionOrElevation'
+        $diagnosis.NextAction | Should -Not -BeNullOrEmpty
+        (Get-PostgresFailureDiagnosis -GameLabel 'GameE' -DbName 'db_e' -Detail 'psql.exe : FATAL: password authentication failed for user postgres').Category | Should -Be 'PasswordAuthenticationFailed'
+        (Get-PostgresFailureDiagnosis -GameLabel 'GameF' -DbName 'db_f' -Detail 'psql.exe: illegal option -- w').Category | Should -Be 'CommandCompatibility'
+        $source = $script:ProductionSource
+        $source | Should -Match 'could not log in to PostgreSQL as postgres'
+        $source | Should -Match '\[F\] Try another postgres password'
+        $source | Should -Match 'replacement password validation failed; nothing was saved'
+    }
+    It "does not pass the PostgreSQL 8.3-incompatible -w flag" {
+        $postgresSource = $script:ProductionSource.Substring($script:ProductionSource.IndexOf('function Get-PostgresDatabaseState'))
+        $postgresSource = $postgresSource.Substring(0, $postgresSource.IndexOf('# FFB ARCADE PLUGIN'))
+        $postgresSource | Should -Not -Match '(?m)^\s*&\s+\$\w+Exe[^\r\n]*\s-w(?:\s|$)'
+        $postgresSource | Should -Not -Match '(?m)^\s*\$queryOutput\s*=.*\s-w(?:\s|$)'
+    }
+    It "routes PostgreSQL Back directly to the outer menu without retrying" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$returnToMainMenu\s*=\s*\$true'
+        $source | Should -Match 'user selected Back; no backup retry or profile mutation was attempted'
+        $backupLoop = $source.Substring($source.IndexOf('$backupChoice ='))
+        $backupLoop.IndexOf('if ($returnToMainMenu)') | Should -BeLessThan $backupLoop.IndexOf('if ($isPostgresRecoveryResume -and')
+    }
+    It "captures PostgreSQL client diagnostics before blocking writes" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$queryOutput = \(& \$psqlExe .*2>&1 \| Out-String\)\.Trim\(\)'
+        $source | Should -Match '\$queryExitCode = \$LASTEXITCODE'
+        $source | Should -Match 'database existence query failed \(exit code \{0\}\)'
+        $source | Should -Match 'FailureDiagnoses = @\(\$failureDiagnoses\.ToArray\(\)\)'
+    }
+
+    It "keeps ReShade preview and deployment confirmation wording explicit" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Choose how your game should look'
+        $source | Should -Match 'Use the preview window to compare the five beginner-safe RC8 profiles'
+        $source | Should -Match 'Nothing will be changed until you confirm'
+        $source | Should -Match 'saved game executable was not found -- skipped'
+        $source | Should -Match 'protected existing ReShade files -- unchanged'
+        $source | Should -Match 'Installed new'
+        $source | Should -Match 'Updated'
+    }
+    It "routes ReShade selection through one visual gallery before confirmation" {
+        $script:ProductionSource | Should -Match 'Show-TpmReShadeProfileGalleryWindow'
+        $script:ProductionSource | Should -Match 'compare Original/After or Split'
+        $script:ProductionSource | Should -Match 'Use selected profile'
+        $script:ProductionSource | Should -Match 'Nothing will be changed until you confirm'
+        $script:ProductionSource | Should -Match 'choose profiles in the terminal'
+        $script:ProductionSource | Should -Not -Match 'preview opens after you choose an option'
+        $script:ProductionSource | Should -Not -Match 'Clean & Sharp  \(Recommended\)'
+        $invokeStart = $script:ProductionSource.IndexOf('function Invoke-ReShadeSetup')
+        $galleryIndex = $script:ProductionSource.IndexOf('Show-TpmReShadeProfileGalleryWindow', $invokeStart)
+        $confirmationIndex = $script:ProductionSource.IndexOf('$customPresetChoice', $galleryIndex)
+        $deploymentIndex = $script:ProductionSource.IndexOf('Install-TpmReShadeProfileDeployment -ProfileDefinition', $galleryIndex)
+        $galleryIndex | Should -BeGreaterThan $invokeStart
+        $confirmationIndex | Should -BeGreaterThan $galleryIndex
+        $deploymentIndex | Should -BeGreaterThan $confirmationIndex
+        $modeStart = $script:ProductionSource.IndexOf('if ($mode -eq "ReShadeSetup")')
+        $modeInvoke = $script:ProductionSource.IndexOf('$reShadeResult = Invoke-ReShadeSetup', $modeStart)
+        $modeSave = $script:ProductionSource.IndexOf('if (Save-Config)', $modeStart)
+        $modeSave | Should -BeGreaterThan $modeInvoke
+    }
+    It "renders one beginner-friendly terminal profile list and hides techniques behind Details" {
+        $terminalStart = $script:ProductionSource.IndexOf('function Read-TpmReShadeTerminalProfile')
+        $terminal = $script:ProductionSource.Substring($terminalStart)
+        $detailsIndex = $terminal.IndexOf("if (`$choice -eq 'D')")
+        $detailsIndex | Should -BeGreaterThan 0
+        $defaultList = $terminal.Substring(0, $detailsIndex)
+        (@([regex]::Matches($defaultList, "Write-Host \('  \[\{0\}")).Count) | Should -Be 1
+        $defaultList | Should -Not -Match "Techniques:"
+        $details = $terminal.Substring($detailsIndex, [Math]::Min(1200, $terminal.Length - $detailsIndex))
+        $details | Should -Match "Techniques:.*Get-TpmReShadeProfileTechniqueDisplay"
+    }
+    It "does not duplicate the terminal list in the setup preamble" {
+        $setupStart = $script:ProductionSource.IndexOf('function Invoke-ReShadeSetup')
+        $setupEnd = $script:ProductionSource.IndexOf('function ', $setupStart + 10)
+        $setup = $script:ProductionSource.Substring($setupStart, $setupEnd - $setupStart)
+        $setup | Should -Not -Match '\$gallery\).*foreach \(\$item in \$gallery\)'
+        $setup | Should -Not -Match 'Techniques:'
+    }
+
+    It "keeps confirmation choices adjacent with a matching default and preserves Back" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\[Y\] Yes, use .* \[S\] Custom preset  \[B\] Back'
+        $source | Should -Match 'Choice \(default Y\)'
+        $source | Should -Not -Match '\[Y\].*\[C\].*\[B\].*default Y'
+        $source | Should -Match "\$customPresetChoice -eq 'S'\)\s*\{\s*"
+        $source | Should -Not -Match '\[Y\].*\[S\].*\[B\].*default A'
+        $source | Should -Match "\$customPresetChoice -eq 'B'\)\s*\{\s*return"
+    }
+
+    It "keeps preview wording honest in the simplified setup screen" {
+        $script:ProductionSource | Should -Match 'Preview approximation using a bundled image'
+        $script:ProductionSource | Should -Match 'does not run the game or execute ReShade shaders during preview'
+        $script:ProductionSource | Should -Match 'Actual in-game results may vary'
+    }
+    It "keeps gallery identity and removes ignored profile-selection controls" {
+        $galleryBody = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
+        $galleryBody | Should -Match 'The terminal chooser is authoritative'
+        $galleryBody | Should -Not -Match 'DisplayMember = ''FriendlyName'''
+        $galleryBody | Should -Not -Match 'Use selected profile'
+        $profiles = @(Get-TpmReShadeProfiles)
+        $result = Show-TpmReShadeProfileGalleryWindow -Profiles $profiles
+        $result.Available | Should -BeFalse
+        $result.SelectedProfile | Should -BeNullOrEmpty
+        $galleryBody | Should -Match 'New-TpmReShadePreviewBitmap'
+        $galleryBody | Should -Not -Match 'New-TpmReShadePreviewArtifact'
+        $galleryBody | Should -Not -Match 'Install-TpmReShadeProfileDeployment'
+        $galleryBody | Should -Not -Match 'Save-Config'
+        $galleryBody | Should -Not -Match '\$form\.Controls\.Add\(\$combo\)'
+        $handlerBody = [regex]::Match($script:ProductionSource, '(?s)function New-TpmReShadeGalleryEventHandlers \{.*?function Show-TpmReShadeProfileGalleryWindow').Value
+        $handlerBody | Should -Match "\['ViewMode'\] = 'Slider'"
+        $handlerBody | Should -Match 'SliderPosition.{0,60}valueProperty.Value'
+        $handlerBody | Should -Not -Match 'comboHandler|profile-selection-handler'
+    }
+    It "uses stable ProfileId identity without reading a gallery item's Mode" {
+        $item = [pscustomobject]@{ ProfileId = 'CleanSharp'; FriendlyName = 'Clean & Sharp' }
+        { Get-TpmReShadeGalleryProfileId -Item $item } | Should -Not -Throw
+        (Get-TpmReShadeGalleryProfileId -Item $item) | Should -Be 'CleanSharp'
+        $galleryBody = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
+        $galleryBody | Should -Not -Match '\.Mode'
+        $galleryBody | Should -Match "SelectedProfileId"
+        $galleryBody | Should -Match "ViewMode = 'Split'"
+    }
+    It "suppresses gallery refresh events until initialization completes" {
+        $state = [hashtable]::Synchronized(@{ Initialized = $false; PreviewEnabled = $true; Closed = $false })
+        $refresh = { throw 'refresh must not run during initialization' }
+        $result = Invoke-TpmReShadeGalleryRefreshSafe -State $state -Refresh $refresh -Stage 'initialization-test'
+        $result | Should -BeFalse
+        $state['PreviewEnabled'] | Should -BeTrue
+    }
+    It "tolerates missing ProfileId and mismatched gallery item shapes" {
+        foreach ($item in @(
+            [pscustomobject]@{ FriendlyName = 'No identity' },
+            [pscustomobject]@{ Mode = 'After'; FriendlyName = 'Wrong shape' },
+            $null
+        )) {
+            { Get-TpmReShadeGalleryProfileId -Item $item } | Should -Not -Throw
+            Get-TpmReShadeGalleryProfileId -Item $item | Should -BeNullOrEmpty
+        }
+        $galleryBody = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
+        $galleryBody | Should -Match 'profile-normalization'
+        $galleryBody | Should -Match 'no valid ProfileId items'
+    }
+    It "fails closed and records the exact preview refresh stage" {
+        $state = [hashtable]::Synchronized(@{
+            Initialized = $true
+            PreviewEnabled = $true
+            Closed = $false
+            Form = $null
+        })
+        Mock Write-Log {}
+        $result = Invoke-TpmReShadeGalleryRefreshSafe -State $state -Refresh { throw 'forced gallery render failure' } -Stage 'slider-value-changed'
+        $result | Should -BeFalse
+        $state['PreviewEnabled'] | Should -BeFalse
+        $state['PreviewFailureStage'] | Should -Be 'slider-value-changed'
+        $state['PreviewFailureMessage'] | Should -Match 'forced gallery render failure'
+        Should -Invoke Write-Log -Times 1 -ParameterFilter { $msg -like "*slider-value-changed*forced gallery render failure*" }
+    }
+    It "guards every gallery view-mode handler and slider event" {
+        $handlerBody = [regex]::Match($script:ProductionSource, '(?s)function New-TpmReShadeGalleryEventHandlers \{.*?function Show-TpmReShadeProfileGalleryWindow').Value
+        $handlerBody | Should -Match 'viewHandler = \{'
+        $handlerBody | Should -Match 'sliderHandler = \{'
+        $handlerBody | Should -Not -Match 'comboHandler'
+        $handlerBody | Should -Match 'view-mode-handler'
+        $handlerBody | Should -Match 'slider-value-changed-handler'
+        foreach ($mode in @('Before', 'After', 'Split', 'Slider')) {
+            $handlerBody | Should -Match ([regex]::Escape("'" + $mode + "'"))
+        }
+    }
+    It "executes gallery callbacks safely for initialization and invalid view or slider events" {
+        $state = [hashtable]::Synchronized(@{
+            Initialized = $false
+            PreviewEnabled = $true
+            Closed = $false
+            ViewMode = 'Split'
+            SliderPosition = 50
+            SelectedProfileId = 'CleanSharp'
+            Refresh = { return $true }
+        })
+        $handlers = New-TpmReShadeGalleryEventHandlers -State $state
+        { & $handlers.View ([pscustomobject]@{ Tag = 'Before' }) $null } | Should -Not -Throw
+        $state['ViewMode'] | Should -Be 'Split'
+        { & $handlers.Slider ([pscustomobject]@{ Value = 75 }) $null } | Should -Not -Throw
+        $state['ViewMode'] | Should -Be 'Split'
+        $state['SliderPosition'] | Should -Be 50
+
+        $state['Initialized'] = $true
+        foreach ($mode in @('Before', 'After', 'Split')) {
+            { & $handlers.View ([pscustomobject]@{ Tag = $mode }) $null } | Should -Not -Throw
+            $state['ViewMode'] | Should -Be $mode
+        }
+        { & $handlers.Slider ([pscustomobject]@{ Value = 75 }) $null } | Should -Not -Throw
+        $state['ViewMode'] | Should -Be 'Slider'
+        $state['SliderPosition'] | Should -Be 75
+        $state['PendingSliderPosition'] | Should -BeNullOrEmpty
+        { & $handlers.Slider ([pscustomobject]@{ Value = -20 }) $null } | Should -Not -Throw
+        $state['SliderPosition'] | Should -Be 0
+        { & $handlers.Slider ([pscustomobject]@{ Value = 140 }) $null } | Should -Not -Throw
+        $state['SliderPosition'] | Should -Be 100
+
+        $state['PreviewEnabled'] = $true
+        $state['Closed'] = $false
+        { & $handlers.View ([pscustomobject]@{ Tag = 'Invalid' }) $null } | Should -Not -Throw
+        $state['PreviewEnabled'] | Should -BeFalse
+        $state['PreviewFailureStage'] | Should -Be 'view-mode-handler'
+
+        $state['PreviewEnabled'] = $true
+        $state['Closed'] = $false
+        { & $handlers.Slider ([pscustomobject]@{ }) $null } | Should -Not -Throw
+        $state['PreviewEnabled'] | Should -BeFalse
+        $state['PreviewFailureStage'] | Should -Be 'slider-value-changed-handler'
+    }
+    It "disposes the gallery picture image idempotently" {
+        $image = [pscustomobject]@{ DisposeCount = 0 }
+        Add-Member -InputObject $image -MemberType ScriptMethod -Name Dispose -Value {
+            $this.DisposeCount = [int]$this.DisposeCount + 1
+        }
+        $picture = [pscustomobject]@{ Image = $image }
+        $session = [hashtable]::Synchronized(@{ Form = $null; Picture = $picture; Closed = $false })
+        { Close-TpmReShadeProfileGallerySession -Session $session } | Should -Not -Throw
+        $image.DisposeCount | Should -Be 1
+        $picture.Image | Should -BeNullOrEmpty
+        $session['Closed'] | Should -BeTrue
+        { Close-TpmReShadeProfileGallerySession -Session $session } | Should -Not -Throw
+        $image.DisposeCount | Should -Be 1
+    }
+    It "keeps preview failure on the terminal-only path" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'PREVIEW_GALLERY_REFRESH_FAILED'
+        $source | Should -Match 'ReShade visual gallery unavailable; typed profile fallback remains active'
+        $source | Should -Match 'does not run the game or execute ReShade shaders during preview'
+        $source | Should -Match 'ReShade profile chooser: selected'
+    }
+    It "covers ReShade gallery fallback and empty-source failure" {
+        $script:ProductionSource | Should -Match 'ReShade visual gallery unavailable'
+        $script:ProductionSource | Should -Match 'typed profile fallback'
+        $script:ProductionSource | Should -Match 'SOURCE_DLL_UNAVAILABLE'
+    }
+    It "renders distinct left, middle, and right comparison slider positions" {
+        $profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
+        $left = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 0 -Width 960 -Height 540 -PreviewRoot $script:TrustedPreviewRoot
+        $middle = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 50 -Width 960 -Height 540 -PreviewRoot $script:TrustedPreviewRoot
+        $right = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 100 -Width 960 -Height 540 -PreviewRoot $script:TrustedPreviewRoot
+        try {
+            $left.GetPixel(200, 180).ToArgb() | Should -Not -Be $middle.GetPixel(200, 180).ToArgb()
+            $middle.GetPixel(800, 180).ToArgb() | Should -Not -Be $right.GetPixel(800, 180).ToArgb()
+            $left.GetPixel(800, 180).ToArgb() | Should -Be $middle.GetPixel(800, 180).ToArgb()
+            $middle.GetPixel(200, 180).ToArgb() | Should -Be $right.GetPixel(200, 180).ToArgb()
+        } finally {
+            $left.Dispose(); $middle.Dispose(); $right.Dispose()
+        }
+    }
+    It "honors non-default dimensions while applying the slider split" {
+        $profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
+        $left = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 0 -Width 640 -Height 360 -PreviewRoot $script:TrustedPreviewRoot
+        $middle = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 50 -Width 640 -Height 360 -PreviewRoot $script:TrustedPreviewRoot
+        $right = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 100 -Width 640 -Height 360 -PreviewRoot $script:TrustedPreviewRoot
+        try {
+            $left.Width | Should -Be 640
+            $left.Height | Should -Be 360
+            $left.GetPixel(100, 180).ToArgb() | Should -Not -Be $middle.GetPixel(100, 180).ToArgb()
+            $middle.GetPixel(520, 180).ToArgb() | Should -Not -Be $right.GetPixel(520, 180).ToArgb()
+            $left.GetPixel(520, 180).ToArgb() | Should -Be $middle.GetPixel(520, 180).ToArgb()
+            $middle.GetPixel(100, 180).ToArgb() | Should -Be $right.GetPixel(100, 180).ToArgb()
+        } finally {
+            $left.Dispose(); $middle.Dispose(); $right.Dispose()
+        }
+    }
+    It "threads slider state through preview updates and cache identity" {
+        $script:ProductionSource | Should -Match 'TrackBar'
+        $script:ProductionSource | Should -Match 'SliderPosition'
+        $script:ProductionSource | Should -Match 'ValueChanged'
+        $script:ProductionSource | Should -Match 'ComparisonSlider'
+    }
+    It "updates slider state in memory without replacing the preview image" {
+        $picture = [pscustomobject]@{ Image = $null; InvalidateCount = 0 }
+        Add-Member -InputObject $picture -MemberType ScriptMethod -Name Invalidate -Value {
+            $this.InvalidateCount = [int]$this.InvalidateCount + 1
+        }
+        $state = [pscustomobject]@{
+            Form = [pscustomobject]@{ IsDisposed = $false }
+            Picture = $picture
+            Profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
+            CacheRoot = $TestDrive
+            PreviewRoot = $script:TrustedPreviewRoot
+            PreviewCache = $null
+            SliderValue = 50
+            SliderPosition = 50
+            PendingSliderPosition = $null
+            Mode = 'Split'
+        }
+        $script:TpmReShadePreviewWindowState = $state
+        try {
+            $first = Update-TpmReShadePreviewWindow -Mode Slider -SliderPosition 25
+            $first.Available | Should -BeTrue
+            $first.InMemory | Should -BeTrue
+            $state.Mode | Should -Be 'Slider'
+            $state.SliderValue | Should -Be 25
+            $state.SliderPosition | Should -Be 25
+            $state.Picture.InvalidateCount | Should -Be 1
+            $state.Picture.Image | Should -BeNullOrEmpty
+        } finally {
+            $script:TpmReShadePreviewWindowState = $null
+        }
+    }
+    It "offers bulk choices for every multi-game selection including subsets" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$selectedGames\.Count -gt 1'
+        $source | Should -Match '\[Y\] Yes, apply to all'
+        $source | Should -Match '\[S\] Select games one by one'
+        $source | Should -Match '\[D\] Show details'
+        $source | Should -Match '\[B\] Back'
+        $source | Should -Match '\$bulkApply = \(\$bulkChoice -eq ''Y''\)'
     }
     It "rejects unsupported remembered variants and hides unsupported favorites" {
         $root=Join-Path $TestDrive 'chooser-unsupported';$profile=Get-TpmReShadeProfile -ProfileId CleanSharp
@@ -10014,6 +13341,62 @@ Describe "Approved ReShade asset inventory" {
     It "contains only approved upstream files and validates their presence" {
         @(Get-TpmReShadeAssetInventory) | Should -Be @('Shaders/SweetFX/LumaSharpen.fx','Shaders/SweetFX/Vibrance.fx','Shaders/CRT_Lottes.fx','Shaders/CRT_Lottes.fxh')
         Test-TpmReShadeAssetInventory -AssetRoot (Join-Path $PSScriptRoot '..\ReShade') | Should -BeFalse
+    }
+}
+
+Describe "ReShade ownership classification" {
+    It "distinguishes current, stale, changed-profile, unknown, bundled, malformed, and absent installs" {
+        $root = Join-Path $TestDrive 'ownership-classification'
+        [void][IO.Directory]::CreateDirectory($root)
+        $hook = Join-Path $root 'dxgi.dll'
+        [IO.File]::WriteAllText($hook, 'runtime')
+        $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+        $clean = Get-TpmReShadeProfile -ProfileId CleanSharp
+        $entry = [pscustomobject]@{ DestinationPath=$hook; ExpectedSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }
+        $currentManifest = [pscustomobject]@{ EffectId='ReShadeProfile.CleanSharp'; RuntimeVersion='6.8.0'; RuntimeSHA256=$hash; Files=@($entry) }
+        $current = Get-TpmReShadeOwnershipClassification -HookPath $hook -TargetRoot $root -ProfileDefinition $clean -CurrentRuntimeSHA256 $hash -CurrentRuntimeVersion '6.8.0' -Manifest $currentManifest
+        $current.Status | Should -Be 'TPMOwnedCurrent'
+        $staleManifest = [pscustomobject]@{ EffectId='ReShadeProfile.CleanSharp'; RuntimeVersion='6.7.3'; RuntimeSHA256=$hash; Files=@($entry) }
+        (Get-TpmReShadeOwnershipClassification -HookPath $hook -TargetRoot $root -ProfileDefinition $clean -CurrentRuntimeSHA256 ('f' * 64) -CurrentRuntimeVersion '6.8.0' -Manifest $staleManifest).Status | Should -Be 'TPMOwnedStaleOutdated'
+        (Get-TpmReShadeOwnershipClassification -HookPath $hook -TargetRoot $root -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Original) -CurrentRuntimeSHA256 $hash -CurrentRuntimeVersion '6.8.0' -Manifest $currentManifest).Status | Should -Be 'TPMOwnedChangedProfile'
+        (Get-TpmReShadeOwnershipClassification -HookPath $hook -TargetRoot $root -ProfileDefinition $clean).Status | Should -Be 'UnknownUserOwnedConflict'
+        $bundled = $entry | Select-Object *
+        $bundled.TPMManaged = $false
+        (Get-TpmReShadeOwnershipClassification -HookPath $hook -TargetRoot $root -ProfileDefinition $clean -Manifest ([pscustomobject]@{ EffectId='ReShadeProfile.CleanSharp'; Files=@($bundled) })).Status | Should -Be 'BundledPreinstalledProtected'
+        (Get-TpmReShadeOwnershipClassification -HookPath $hook -TargetRoot $root -ProfileDefinition $clean -Manifest ([pscustomobject]@{ EffectId='ReShadeProfile.CleanSharp'; Files=@() })).Status | Should -Be 'MalformedNeedsReview'
+        $missingHook = Join-Path $root 'missing.dll'
+        (Get-TpmReShadeOwnershipClassification -HookPath $missingHook -TargetRoot $root -ProfileDefinition $clean).Status | Should -Be 'NoReShadePresent'
+    }
+
+    It "accepts a deployment only when every committed file identity verifies" {
+        $root = Join-Path $TestDrive 'ownership-verification'
+        [void][IO.Directory]::CreateDirectory($root)
+        $path = Join-Path $root 'dxgi.dll'
+        [IO.File]::WriteAllText($path, 'verified')
+        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        $manifest = [pscustomobject]@{ RuntimeVersion='6.8.0'; RuntimeSHA256=$hash; Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }) }
+        (Test-TpmReShadeDeploymentVerified -DeploymentResult ([pscustomobject]@{ Succeeded=$true; Manifest=$manifest })) | Should -BeTrue
+        [IO.File]::WriteAllText($path, 'changed')
+        (Test-TpmReShadeDeploymentVerified -DeploymentResult ([pscustomobject]@{ Succeeded=$true; Manifest=$manifest })) | Should -BeFalse
+    }
+}
+
+Describe "ReShade result action priority" {
+    It "prioritizes ReShade actions when protected conflicts coexist with missing paths" {
+        $model = Get-TpmReShadeResultActionModel -Result ([pscustomobject]@{ Protected=1; MissingPath=1; MissingDevice=0 })
+        $model.Primary | Should -Be 'ReShade'
+        $model.Actions | Should -Be @('A','S','M','D','B')
+        $model.ActionModes.A | Should -Be 'Adopt'
+        $model.ActionModes.S | Should -Be 'Select'
+    }
+    It "uses Health Check only when missing paths are the main actionable issue" {
+        (Get-TpmReShadeResultActionModel -Result ([pscustomobject]@{ Protected=0; MissingPath=1; MissingDevice=0 })).Primary | Should -Be 'HealthCheck'
+        (Get-TpmReShadeResultActionModel -Result ([pscustomobject]@{ Protected=1; MissingPath=0; MissingDevice=0 })).Actions | Should -Be @('A','S','D','B')
+    }
+    It "returns a no-op acknowledgement for a clean result" {
+        $model = Get-TpmReShadeResultActionModel -Result ([pscustomobject]@{ Protected=0; MissingPath=0; MissingDevice=0 })
+        $model.Primary | Should -Be 'Acknowledge'
+        $model.Actions | Should -Be @('B')
     }
 }
 
@@ -10422,8 +13805,10 @@ Describe "Action Required report output" {
         $action = [System.IO.File]::ReadAllText($actionPath)
         $action | Should -Match 'FIX THESE GAME PATHS IN TEKNOPARROTUI'
         $action | Should -Match 'pcsx2x6\.exe'
-        $action | Should -Match 'folder paths are too long'
         $action | Should -Match 'PCSX2X6 FIRMWARE NOT INSTALLED'
+        $action | Should -Match 'folder paths are too long'
+        $action | Should -Match 'shorten parent folders'
+        $action | Should -Match 'saved GamePath'
         $action | Should -Match 'CONTROLS NOT READY : Controls Racer'
         $action | Should -Match 'TeknoParrot Manager only checked the contract-declared path'
         $action | Should -Not -Match 'TPM only checked the contract-declared path'
@@ -10462,5 +13847,2302 @@ Describe "Action Required report output" {
         Test-Path -LiteralPath $actionPath | Should -BeFalse
         ([System.IO.File]::ReadAllText($notesPath)) | Should -Match 'Technical note only'
         ([System.IO.File]::ReadAllText($notesPath)) | Should -Match 'TPM profile path'
+    }
+}
+
+Describe "Post-0909174 remediation result UX contracts" {
+    It "initializes ReShade cache before game processing and reports one fail-closed cause" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$reShadeCacheRoot = if\(\$script:TpmOwnedLayout\)'
+        $source | Should -Match 'CACHE_UNAVAILABLE'
+        $source | Should -Match 'blocked once before game processing'
+        $source | Should -Not -Match 'Cannot bind argument to parameter'
+    }
+    It "keeps GPU Fix results visible and exposes skip reasons and next actions" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'GPU Compatibility Fix complete'
+        $source | Should -Match 'Open 10\) Library Health Check for missing paths'
+        $source | Should -Match 'Reason:'
+        $source | Should -Match 'What to do:'
+        $source | Should -Match 'technical:'
+        $source | Should -Match '\$gpuChoices = @\(''D'', ''O'', ''R'', ''B''\)'
+        $source | Should -Match '\$gpuChoices = @\(''D'', ''O'', ''H'', ''R'', ''B''\)'
+        $source | Should -Match '\} while \(\$gpuResultChoice -in @\(''D'',\s*''O'',\s*''R''\)\)'
+    }
+    It "provides browser feedback and P1 highlighting before P2" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'P1 selected:'
+        $source | Should -Match 'Now choose P2'
+        $source | Should -Match 'classList.add\(''p1''\)'
+        $source | Should -Match 'choose\(\$i,this\)'
+        $source | Should -Match 'Typed numeric fallback remains available'
+    }
+    It "classifies bulk profile conflicts instead of prompting per game" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Previously TeknoParrot Manager-managed'
+        $source | Should -Match 'Selected now:'
+        $source | Should -Match '\[A\] Change these TeknoParrot Manager-managed games'
+        $source | Should -Match '\[K\] Keep their current profiles'
+        $source | Should -Match 'ChangedProfile'
+        $source | Should -Match 'KeptPrevious'
+    }
+}
+Describe "dgVoodoo2 beginner result screen contracts" {
+    It "answers what changed, why, what was preserved, and what to do next" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'dgVoodoo2 setup finished\.'
+        $source | Should -Match 'What TeknoParrot Manager did:'
+        $source | Should -Match 'detected legacy API'
+        $source | Should -Match 'Why TeknoParrot Manager did it:'
+        $source | Should -Match 'older DirectX/Glide games'
+        $source | Should -Match 'translate those older graphics calls'
+        $source | Should -Match 'What TeknoParrot Manager did not change:'
+        $source | Should -Match 'unowned or changed files'
+        $source | Should -Match 'skipped missing-path games'
+        $source | Should -Match 'What to do next:'
+        $source | Should -Match 'create a support package'
+    }
+    It "keeps technical details and support guidance behind explicit choices" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$dgResult\.DeploymentDetails'
+        $source | Should -Match '\$dgResult\.SkipDetails'
+        $source | Should -Match '\$dgPromptChoices'
+        $source | Should -Match 'Choose \{0\}'
+        $source | Should -Match 'Technical log:'
+        $source | Should -Match 'Support package folder:'
+    }
+}
+
+
+Describe "Library Health Check guided repair UX contracts" {
+    It "states that the health check is read-only before offering actions" {
+        $source = $script:ProductionSource
+        $healthStart = $source.IndexOf('function Invoke-LibraryHealthCheck', [StringComparison]::Ordinal)
+        $actionsStart = $source.IndexOf('function Show-LibraryHealthNextActions', $healthStart, [StringComparison]::Ordinal)
+        $health = $source.Substring($healthStart, $actionsStart - $healthStart)
+        $health | Should -Match 'Library Health Check is read-only'
+        $health | Should -Match 'TeknoParrot Manager checked your setup and did not change anything'
+        $health | Should -Not -Match '(?m)^\s*(Save-Xml|Save-XmlMaybe|Copy-Item|Remove-Item|Install-\w+|Invoke-\w+Setup)\b'
+    }
+    It "offers broken-path, PostgreSQL, and optional setup actions in plain language" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\[R\] Try automatic path repair'
+        $source | Should -Match '\[M\] Let me pick the correct executable or folder manually'
+        $source | Should -Match '\[S\] Search another game folder'
+        $source | Should -Match '\[C\] Re-copy/re-extract only these affected games from the configured source'
+        $source | Should -Match 'Affected profile evidence:'
+        $source | Should -Match 'Searched folder:'
+        $source | Should -Match 'if \(\$searchAgainChoice -eq ''B''\)'
+        $source | Should -Match 'HealthCheck: user selected Back after no automatic repair candidates'
+        $source | Should -Match '\[D\] Details'
+        $source | Should -Match '\[B\] Back to main menu'
+        $source | Should -Match 'known game folders'
+        $source | Should -Match 'TeknoParrot Manager will not guess'
+        $source | Should -Match '\[P\] Set up PostgreSQL for these games'
+        $source | Should -Match 'safety backup before changing PostgreSQL'
+        foreach ($label in @('\[5\] ReShade', '\[6\] dgVoodoo2', '\[7\] GPU Fix', '\[8\] Force Feedback', '\[9\] BepInEx')) {
+            $source | Should -Match $label
+        }
+        $source | Should -Match 'Force feedback plugin was not checked because network access is needed'
+    }
+    It "offers Health Check only for optional-workflow path skips" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$reShadePathIssue = \$reShadeResult -and \(\$reShadeResult\.MissingPath -gt 0 -or \$reShadeResult\.MissingDevice -gt 0\)'
+        $source | Should -Match '\$dgPathIssue = \$dgResult -and \(\$dgResult\.MissingPath -gt 0 -or \$dgResult\.MissingDevice -gt 0\)'
+        $source | Should -Match '\$bepResult\.MissingPath -gt 0 -or \$bepResult\.MissingDevice -gt 0'
+        $source | Should -Match '\$gpuHasPathIssue = \(\$gpuResult\.MissingPath -gt 0 -or \$gpuResult\.MissingDevice -gt 0\)'
+        $source | Should -Match "\$pendingApplyMode = 'HealthCheck'"
+    }
+    It "uses the same indented Choose layout for optional result menus" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$dgResultChoice = Read-TpmChoice'
+        $source | Should -Match '\$gpuResultChoice = Read-TpmChoice'
+        $source | Should -Match '\$bepChoice = Read-TpmChoice'
+    }
+    It "returns structured read-only findings without invoking mutation helpers" {
+        $root = Join-Path $TestDrive 'health-read-only'
+        $profiles = Join-Path $root 'UserProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $profilePath = Join-Path $profiles 'HEALTHGAME.xml'
+        $original = '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText($profilePath, $original)
+        $directoryPath = Join-Path $profiles 'directory-valued-gamepath'
+        New-Item -ItemType Directory -Path $directoryPath -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'HEALTHDIR.xml'), '<GameProfile><GamePath>{0}</GamePath><ExecutableName>healthdir.exe</ExecutableName></GameProfile>' -f $directoryPath)
+        Mock Get-DetectedGpuVendor { [pscustomobject]@{ Vendor = $null } }
+        Mock Get-GpuAndFfbFieldNames { [pscustomobject]@{ Gpu = [pscustomobject]@{ BoolFields=@(); DropdownFields=@() }; Ffb = [pscustomobject]@{} } }
+        Mock Get-FFBBlasterSupport { [pscustomobject]@{ Status = 'Unsupported'; WouldWrite = $false } }
+        Mock Test-GameNeedsPostgres { $false }
+        Mock Test-PostgresInstalled { $false }
+        Mock Get-GameLegacyApi { @() }
+        Mock Get-ReShadeTargetInfo { [pscustomobject]@{ TargetDir = $TestDrive; DllName = 'unused.dll' } }
+        Mock Get-BepInExInstalledVersion { $null }
+        Mock Save-Xml { throw 'health check must not save profiles' }
+        $result = Invoke-LibraryHealthCheck -UserProfilesDir $profiles -LogPath $script:logPath -TpRoot $root
+        $result.ReadOnly | Should -BeTrue
+        @($result.Broken) | Should -Contain 'HEALTHGAME'
+        @($result.Broken) | Should -Contain 'HEALTHDIR'
+        [System.IO.File]::ReadAllText($profilePath) | Should -Be $original
+        Should -Invoke Save-Xml -Times 0 -Exactly
+        Should -Invoke Get-GameLegacyApi -Times 0 -Exactly
+    }
+    It "does not offer a repair prompt until the read-only result exists" {
+        $source = $script:ProductionSource
+        $healthStart = $source.IndexOf('if ($mode -eq "HealthCheck")', [StringComparison]::Ordinal)
+        $postgresStart = $source.IndexOf('if ($mode -eq "PostgresSetup")', $healthStart, [StringComparison]::Ordinal)
+        $branch = $source.Substring($healthStart, $postgresStart - $healthStart)
+        $reportIndex = $branch.IndexOf('$healthResult = Invoke-LibraryHealthCheck', [StringComparison]::Ordinal)
+        $choiceIndex = $branch.IndexOf('$healthChoice = Show-LibraryHealthNextActions', [StringComparison]::Ordinal)
+        $repairIndex = $branch.IndexOf('Repair-GamePaths -userProfilesDir', [StringComparison]::Ordinal)
+        $reportIndex | Should -BeGreaterOrEqual 0
+        $choiceIndex | Should -BeGreaterThan $reportIndex
+        $repairIndex | Should -BeGreaterThan $choiceIndex
+        $branch | Should -Not -Match 'New-LibraryHealthProfileBackup'
+        $branch.IndexOf('if ($Unattended)', [StringComparison]::Ordinal) | Should -BeLessThan $choiceIndex
+    }
+    It "saves only an explicitly selected executable after confirmation and backup" {
+        $root = Join-Path $TestDrive 'health-manual-repair'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $gameExe = Join-Path $games 'HealthGame\healthgame.exe'
+        $secondaryExe = Join-Path $games 'HealthGame\healthgame2.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($gameExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($gameExe, 'game')
+        [System.IO.File]::WriteAllText($secondaryExe, 'secondary')
+        $profilePath = Join-Path $profiles 'HEALTHGAME.xml'
+        [System.IO.File]::WriteAllText($profilePath, '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName><HasTwoExecutables>true</HasTwoExecutables><ExecutableName2>healthgame2.exe</ExecutableName2></GameProfile>')
+        $script:healthManualSelected = $gameExe
+        Mock Read-PathWithBrowse { $script:healthManualSelected }
+        Mock Read-HostSafe { 'Y' }
+        $result = Invoke-LibraryHealthManualPathRepair -UserProfilesDir $profiles -GamesInstallFolder $games -BrokenGames @('HEALTHGAME')
+        $result.Updated | Should -Be 1
+        $result.BackupPath | Should -Match 'HealthCheck'
+        Test-Path -LiteralPath (Join-Path $result.BackupPath 'HEALTHGAME.xml') | Should -BeTrue
+        $savedDoc = Read-Xml -Path $profilePath
+        $savedDoc.GameProfile.GamePath | Should -Be ([System.IO.Path]::GetFullPath($gameExe))
+        $savedDoc.GameProfile.GamePath2 | Should -Be ([System.IO.Path]::GetFullPath($secondaryExe))
+        Should -Invoke Read-PathWithBrowse -Times 1 -Exactly
+    }
+    It "rejects a manually selected executable outside the configured games root" {
+        $root = Join-Path $TestDrive 'health-manual-boundary'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        $outside = Join-Path $root 'Outside\healthgame.exe'
+        New-Item -ItemType Directory -Path $profiles, $games, ([System.IO.Path]::GetDirectoryName($outside)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($outside, 'outside')
+        $profilePath = Join-Path $profiles 'HEALTHGAME.xml'
+        $original = '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText($profilePath, $original)
+        Mock Read-PathWithBrowse { $outside }
+        $result = Invoke-LibraryHealthManualPathRepair -UserProfilesDir $profiles -GamesInstallFolder $games -BrokenGames @('HEALTHGAME')
+        $result.Updated | Should -Be 0
+        $result.BackupPath | Should -BeNullOrEmpty
+        [System.IO.File]::ReadAllText($profilePath) | Should -Be $original
+    }
+    It "automatically repairs only a uniquely matched, revalidated game executable" {
+        $root = Join-Path $TestDrive 'health-automatic-repair'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $gameExe = Join-Path $games 'HealthGame\healthgame.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($gameExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($gameExe, 'game')
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'HEALTHGAME.xml'), '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>')
+        $profileIndex = @{ 'healthgame.exe' = @('HEALTHGAME') }
+        $reports = (Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex $profileIndex -DryRun:$false).Reports
+        @($reports).Count | Should -Be 1
+        $reports[0].Status | Should -Be 'fixed'
+        $reports[0].Outcome | Should -Be 'FIXED'
+        $reports[0].Verified | Should -BeTrue
+        $reports[0].PreviousPath | Should -Be 'C:\missing\healthgame.exe'
+        (Read-Xml -Path (Join-Path $profiles 'HEALTHGAME.xml')).GameProfile.GamePath | Should -Be ([System.IO.Path]::GetFullPath($gameExe))
+    }
+    It "returns a candidate during dry-run without changing the profile" {
+        $root = Join-Path $TestDrive 'health-dry-run-candidate'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $gameExe = Join-Path $games 'HealthGame\healthgame.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($gameExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($gameExe, 'game')
+        $profilePath = Join-Path $profiles 'HEALTHGAME.xml'
+        $original = '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText($profilePath, $original)
+        $reports = (Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{ 'healthgame.exe' = @('HEALTHGAME') } -DryRun:$true).Reports
+        $reports[0].Status | Should -Be 'candidate'
+        $reports[0].Outcome | Should -Be 'CANDIDATE'
+        $reports[0].PreviousPath | Should -Be 'C:\missing\healthgame.exe'
+        $reports[0].CandidatePaths | Should -Contain ([System.IO.Path]::GetFullPath($gameExe))
+        [System.IO.File]::ReadAllText($profilePath) | Should -Be $original
+    }
+    It "does not save a candidate outside the explicitly reviewed set" {
+        $root = Join-Path $TestDrive 'health-reviewed-set'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $gameExe = Join-Path $games 'HealthGame\healthgame.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($gameExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($gameExe, 'game')
+        $profilePath = Join-Path $profiles 'HEALTHGAME.xml'
+        $original = '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText($profilePath, $original)
+        $reports = (Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{ 'healthgame.exe' = @('HEALTHGAME') } -DryRun:$false -ReviewedCandidates @([pscustomobject]@{ Code = 'OTHERGAME'; NewPath = $gameExe })).Reports
+        $reports[0].Status | Should -Be 'not-reviewed'
+        [System.IO.File]::ReadAllText($profilePath) | Should -Be $original
+    }
+    It "repairs using a non-primary executable alternative from the profile" {
+        $root = Join-Path $TestDrive 'health-executable-alternative'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $gameExe = Join-Path $games 'AlternativeGame\secondary.bin'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($gameExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($gameExe, 'game')
+        $profilePath = Join-Path $profiles 'ALTERNATIVE.xml'
+        [System.IO.File]::WriteAllText($profilePath, '<GameProfile><GamePath>C:\missing\primary.exe</GamePath><ExecutableName>primary.exe;secondary.bin</ExecutableName></GameProfile>')
+        $profileIndex = @{ 'primary.exe' = @('ALTERNATIVE'); 'secondary.bin' = @('ALTERNATIVE') }
+        $reports = (Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex $profileIndex -DryRun:$true).Reports
+        $reports[0].Status | Should -Be 'candidate'
+        $reports[0].NewPath | Should -Be ([System.IO.Path]::GetFullPath($gameExe))
+        [System.IO.File]::ReadAllText($profilePath) | Should -Match 'primary\.exe;secondary\.bin'
+    }
+    It "does not apply a candidate that appears after the review scan" {
+        $root = Join-Path $TestDrive 'health-review-scan-boundary'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $healthExe = Join-Path $games 'HealthGame\healthgame.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($healthExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($healthExe, 'health')
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'HEALTHGAME.xml'), '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>')
+        $initialReports = (Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{ 'healthgame.exe' = @('HEALTHGAME') } -DryRun:$true).Reports
+        $reviewedCandidates = @($initialReports | Where-Object { $_.Status -eq 'candidate' } | ForEach-Object {
+            [pscustomobject]@{ Code = $_.Code; NewPath = $_.NewPath }
+        })
+        $reviewedCandidates.Count | Should -Be 1
+        $extraExe = Join-Path $games 'ExtraGame\extra.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($extraExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($extraExe, 'extra')
+        $extraOriginal = '<GameProfile><GamePath>C:\missing\extra.exe</GamePath><ExecutableName>extra.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'EXTRAGAME.xml'), $extraOriginal)
+        $reports = (Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{ 'healthgame.exe' = @('HEALTHGAME'); 'extra.exe' = @('EXTRAGAME') } -DryRun:$false -ReviewedCandidates $reviewedCandidates).Reports
+        $reportItems = $reports
+        ($reportItems | Where-Object { $_.Code -eq 'HEALTHGAME' }).Status | Should -Be 'fixed'
+        ($reportItems | Where-Object { $_.Code -eq 'HEALTHGAME' }).Outcome | Should -Be 'FIXED'
+        ($reportItems | Where-Object { $_.Code -eq 'EXTRAGAME' }).Status | Should -Be 'not-reviewed'
+        ($reportItems | Where-Object { $_.Code -eq 'EXTRAGAME' }).Outcome | Should -Be 'STILL BROKEN'
+        (Read-Xml (Join-Path $profiles 'HEALTHGAME.xml')).GameProfile.GamePath | Should -Be ([System.IO.Path]::GetFullPath($healthExe))
+        [System.IO.File]::ReadAllText((Join-Path $profiles 'EXTRAGAME.xml')) | Should -Be $extraOriginal
+    }
+    It "reports automatic repair outcomes instead of claiming completion blindly" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\(Repair-GamePaths'
+        $source | Should -Match '-DryRun:\$true'
+        $source | Should -Match '-ReviewedCandidates \$repairCandidates'
+        $source | Should -Match 'Candidate paths found'
+        $source | Should -Match 'FIXED:'
+        $source | Should -Match 'STILL BROKEN:'
+        $source | Should -Match 'Scoped repair: searching only'
+        $source | Should -Match 'GamePath before:'
+        $source | Should -Match 'GamePath after'
+        $source | Should -Match 'Already extracted \(no ZIP work; GamePath repair is separate\)'
+        $source | Should -Match 'Already registered:.*profile\(s\)'
+        $repairResultIndex = $source.IndexOf('Game path repair result is complete', [StringComparison]::Ordinal)
+        $thumbnailPromptIndex = $source.IndexOf('Download thumbnails for registered games missing an icon?', [StringComparison]::Ordinal)
+        $repairResultIndex | Should -BeGreaterOrEqual 0
+        $thumbnailPromptIndex | Should -BeGreaterThan $repairResultIndex
+        $summary = Write-LibraryHealthRepairResults -Reports @(
+            [pscustomobject]@{ Status = 'fixed'; Code = 'FIXED' }
+            [pscustomobject]@{ Status = 'candidate'; Code = 'CANDIDATE' }
+            [pscustomobject]@{ Status = 'still-broken'; Code = 'BROKEN' }
+        )
+        $summary.Total | Should -Be 3
+        $summary.Fixed | Should -Be 1
+        $summary.Candidates | Should -Be 1
+        $summary.StillBroken | Should -Be 1
+        $summary.Complete | Should -BeTrue
+    }
+    It "redacts user-profile path components in repair evidence" {
+        (ConvertTo-TpmDisplayPath 'C:\Users\PrivateUser\Games\BBHHome\game.exe') | Should -Be 'C:\Users\<user>\Games\BBHHome\game.exe'
+    }
+    It "does not claim a fixed path when the profile save cannot be verified" {
+        $root = Join-Path $TestDrive 'health-save-verification'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $gameExe = Join-Path $games 'HealthGame\healthgame.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($gameExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($gameExe, 'game')
+        $profilePath = Join-Path $profiles 'HEALTHGAME.xml'
+        $original = '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText($profilePath, $original)
+        Mock Save-XmlMaybe {}
+        $reports = (Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{ 'healthgame.exe' = @('HEALTHGAME') } -DryRun:$false).Reports
+        $reports[0].Status | Should -Be 'still-broken'
+        $reports[0].Outcome | Should -Be 'STILL BROKEN'
+        $reports[0].Verified | Should -BeFalse
+        [System.IO.File]::ReadAllText($profilePath) | Should -Be $original
+    }
+    It "reports an unresolved automatic candidate without changing its profile" {
+        $root = Join-Path $TestDrive 'health-automatic-unresolved'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $profilePath = Join-Path $profiles 'UNRESOLVED.xml'
+        $original = '<GameProfile><GamePath>C:\missing\unresolved.exe</GamePath><ExecutableName>unresolved.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText($profilePath, $original)
+        $profileIndex = @{ 'unresolved.exe' = @('UNRESOLVED') }
+        $reports = (Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex $profileIndex -DryRun:$false).Reports
+        $reports[0].Status | Should -Be 'not-found'
+        [System.IO.File]::ReadAllText($profilePath) | Should -Be $original
+    }
+}
+
+Describe "BepInEx runtime hold UX contracts" {
+    It "preserves rollback diagnostics and does not claim success" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'ROLLBACK FAILED'
+        $source | Should -Match 'evidence remains at'
+        $source | Should -Match 'PathReasonCounts'
+        $source | Should -Match 'Succeeded ='
+    }
+    It "keeps BepInEx acknowledgement and Health Check routing explicit" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$bepChoices = if \(\$bepRollbackIssue\)'
+        $source | Should -Match '\$bepPromptChoices = \$bepChoices -join'
+        $source | Should -Match "\$bepChoices \+= 'H'"
+        $source | Should -Match 'repair-reset'
+        $source | Should -Match 'PROTECTED_OR_REPARSE_ROOT'
+        $source | Should -Match 'GAME_PATH_MISSING'
+        $source | Should -Match "\$bepChoice -eq 'H'"
+        $source | Should -Match "pendingApplyMode = 'HealthCheck'"
+    }
+    It "dispatches BepInEx result choices instead of only displaying them" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$bepChoice = Read-TpmChoice'
+        $source | Should -Match "Invoke-BepInExUpdateCheck -UserProfilesDir"
+        $source | Should -Match "Technical log:"
+        $source | Should -Match "Support package folder:"
+    }
+    It "normalizes a null BepInEx rerun before rendering results" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'if \(\$null -eq \$bepResult -or @\(\$bepResult\.PSTypeNames\) -notcontains ''TPM\.TransactionResult\.v1''\)'
+        $source | Should -Match 'RERUN_NO_RESULT'
+        $source | Should -Match 'repair-reset could not complete\. No success was claimed'
+        $source | Should -Match '\$bepResult\.Updated'
+    }
+    It "renders structured BepInEx failure evidence and batch-stop state" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$failureRecords = New-Object'
+        $source | Should -Match 'GameRoot = \$o\.ExeDir'
+        $source | Should -Match 'StagingPath = \$stagingDir'
+        $source | Should -Match 'BackupPath = \$backupPath'
+        $source | Should -Match '\$batchStopped = \$true'
+        $source | Should -Match '\$bepResult\.FailureRecords'
+        $source | Should -Match 'ReasonKey = \$rollbackReasonKey'
+    }
+    It "uses stable rollback categories instead of path-bearing messages" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'ROLLBACK_FAILED\|\{0\}\|\{1\}'
+        $source | Should -Not -Match "\$rollbackReasonKey = .*failureMessage -replace"
+    }
+    It "stops on repeated rollback causes while preserving per-game evidence" {
+        $exceptionType = 'System.IO.IOException'
+        $reasonKey = Get-BepInExRollbackReasonKey -Operation 'transaction rollback' -ExceptionType $exceptionType
+        $records = @(
+            [pscustomobject]@{ Game = 'GameOne'; GameRoot = 'D:\Games\One'; StagingPath = 'C:\Temp\stage-one'; BackupPath = 'C:\Backup\one'; Operation = 'transaction rollback'; ReasonKey = $reasonKey; Exception = 'first exact failure'; EvidencePreserved = $true; NextAction = 'repair-reset' }
+            [pscustomobject]@{ Game = 'GameTwo'; GameRoot = 'E:\Games\Two'; StagingPath = 'C:\Temp\stage-two'; BackupPath = 'C:\Backup\two'; Operation = 'transaction rollback'; ReasonKey = $reasonKey; Exception = 'second exact failure'; EvidencePreserved = $true; NextAction = 'repair-reset' }
+        )
+        (Test-BepInExRollbackBatchStop -FailureRecords $records) | Should -BeTrue
+        $records[0].GameRoot | Should -Not -Be $records[1].GameRoot
+        $records[0].StagingPath | Should -Not -Be $records[1].StagingPath
+        $records[0].BackupPath | Should -Not -Be $records[1].BackupPath
+        $records[0].Exception | Should -Be 'first exact failure'
+        $records[1].Exception | Should -Be 'second exact failure'
+    }
+    It "logs resolved BepInEx destination roots and classifies parent resolution failures" {
+        $source = $script:ProductionSource
+        $source | Should -Match "destination resolution: game root"
+        $source | Should -Match "destination verification:.*resolved to"
+        $source | Should -Match "destination resolution/verification failed"
+        $source | Should -Not -Match 'destination parent is outside the game root'
+    }
+
+    It "renders every structured BepInEx failure detail field" {
+        $source = $script:ProductionSource
+        foreach ($field in @('Game', 'GameRoot', 'StagingPath', 'BackupPath', 'Operation', 'Exception', 'EvidencePreserved', 'NextAction')) {
+            $source | Should -Match ("failure\.$field")
+        }
+    }
+}
+Describe "BepInEx recovery success transition contracts" {
+    It "completes the workflow after a successful repair-reset rerun" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$bepRecovered = \$false'
+        $source | Should -Match '\$bepRecovered = \$true'
+        $source | Should -Match 'BepInEx repair-reset completed and was verified'
+        $source | Should -Match 'if \(\$bepRecovered\)'
+        $source | Should -Match 'Complete-TpmWorkflowStatus -Context \$bepStatus -Summary .BepInEx repair-reset finished.'
+    }
+}
+
+Describe "PostgreSQL recovery runtime hold contracts" {
+    It "keeps password mismatch inside the reset flow" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'PASSWORD_MISMATCH'
+        $source | Should -Match 'Try typing the new password again'
+        $source | Should -Match 'Back to PostgreSQL recovery options'
+        $source | Should -Match 'if \(-not \$resetAttempt\.Succeeded\)'
+    }
+    It "retries protected backup after validated password" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'password changed successfully'
+        $source | Should -Match 'retry the protected backup automatically'
+        $source | Should -Match 'Backup-PostgresDatabases -UserProfilesDir'
+    }
+    It "preserves readable game and database pairs in Details and support guidance" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$game = \[string\]\$_\.GameLabel'
+        $source | Should -Match '\$database = \[string\]\$_\.Database'
+        $source | Should -Match '\{0\} / \{1\}'
+        $source | Should -Match 'Affected databases:'
+        $source | Should -Not -Match 'affected: \{0\}.*\$group\.Name, \(\$affected -join'
+        $source | Should -Not -Match 'ForEach-Object \{ \$_.GameLabel \} \| Sort-Object -Unique'
+    }
+}
+Describe "PostgreSQL grouped diagnosis behavior" {
+    It "returns each game/database pair once" {
+        $diagnoses = @(
+            [pscustomobject]@{ GameLabel = 'GoldenTeeLive2019'; Database = 'GameDB19'; Category = 'PasswordAuthenticationFailed' }
+            [pscustomobject]@{ GameLabel = 'PowerPuttLive2012'; Database = 'GameDBPPL12'; Category = 'PasswordAuthenticationFailed' }
+            [pscustomobject]@{ GameLabel = 'PowerPuttLive2013'; Database = 'GameDBPPL13'; Category = 'PasswordAuthenticationFailed' }
+            [pscustomobject]@{ GameLabel = 'SilverStrikeBowlingLive'; Database = 'GameDBSSBL'; Category = 'PasswordAuthenticationFailed' }
+            [pscustomobject]@{ GameLabel = 'TargetTossProBags'; Database = 'GameDBBags'; Category = 'PasswordAuthenticationFailed' }
+            [pscustomobject]@{ GameLabel = 'TargetTossProLawndarts'; Database = 'GameDBLawndarts'; Category = 'PasswordAuthenticationFailed' }
+        )
+        $pairs = @(Get-PostgresDiagnosisAffectedPairs -Diagnoses $diagnoses)
+        $pairs.Count | Should -Be 6
+        foreach ($diagnosis in $diagnoses) {
+            $pair = '{0} / {1}' -f $diagnosis.GameLabel, $diagnosis.Database
+            @($pairs | Where-Object { $_ -eq $pair }).Count | Should -Be 1
+        }
+    }
+}
+
+Describe "PostgreSQL Slice 8B owner-transcript behavior" {
+    It "resolves the authoritative profile title without a profile-key fallback" {
+        $profiles = Join-Path $TestDrive 'slice8b-title-profiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $namedPath = Join-Path $profiles 'GoldenTeeLive2019.xml'
+        $missingPath = Join-Path $profiles 'PowerPuttLive2012.xml'
+        Set-Content -LiteralPath $namedPath -Value '<GameProfile><GameName>Golden Tee Live 2019</GameName><ConfigValues /></GameProfile>'
+        Set-Content -LiteralPath $missingPath -Value '<GameProfile><ConfigValues /></GameProfile>'
+
+        $named = Get-PostgresProfileDisplayMetadata -ProfilePath $namedPath
+        $missing = Get-PostgresProfileDisplayMetadata -ProfilePath $missingPath
+
+        $named.DisplayName | Should -Be 'Golden Tee Live 2019'
+        $named.ProfileKey | Should -Be 'GoldenTeeLive2019'
+        $named.HasAuthoritativeTitle | Should -BeTrue
+        $missing.DisplayName | Should -Be 'Unknown game title -- see Details'
+        $missing.ProfileKey | Should -Be 'PowerPuttLive2012'
+        $missing.HasAuthoritativeTitle | Should -BeFalse
+    }
+    It "targets the PostgreSQL 8.3 toolchain and authentication model" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$script:PostgresInstallDir\s*=\s*"C:\\Program Files \(x86\)\\PostgreSQL\\8\.3"'
+        $source | Should -Match '\$script:PostgresServiceName\s*=\s*"pgsql-8\.3"'
+        $source | Should -Match '\$script:PostgresBinDir[^\r\n]*psql\.exe'
+        $source | Should -Match '\$script:PostgresBinDir[^\r\n]*pg_dump\.exe'
+        $source | Should -Match 'ALTER ROLE postgres WITH PASSWORD'
+        $source | Should -Match "'pg_hba\.conf'"
+        $source | Should -Not -Match '(?i)PostgreSQL\\12|pgsql-12'
+    }
+
+    It "keeps normal diagnosis output free of technical identifiers and repeated detail rows" {
+        $script:PostgresBinDir = Join-Path $TestDrive 'slice8b-diagnosis-bin'
+        $script:PostgresServiceName = 'slice8b-postgres'
+        New-Item -ItemType Directory -Path $script:PostgresBinDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:PostgresBinDir 'psql.exe') -Value ''
+        Set-Content -LiteralPath (Join-Path $script:PostgresBinDir 'pg_dump.exe') -Value ''
+        Mock Get-Service { [pscustomobject]@{ Status = 'Running' } }
+        $backup = [pscustomobject]@{
+            FailureDiagnoses = @(
+                [pscustomobject]@{
+                    GameLabel = 'Golden Tee Live 2019'
+                    ProfileKey = 'GoldenTeeLive2019'
+                    Database = 'GameDB19'
+                    Category = 'PasswordAuthenticationFailed'
+                    Detail = 'psql.exe: password authentication failed for user postgres'
+                    NextAction = 'Enter a working postgres password'
+                }
+            )
+            FailureDetails = @(
+                'GoldenTeeLive2019 / GameDB19: password authentication failed',
+                'GoldenTeeLive2019 / GameDB19: password authentication failed'
+            )
+        }
+
+        $report = Get-PostgresBackupRepairDiagnosis -BackupResult $backup
+        $normal = @($report.NormalChecks | ForEach-Object { '{0}: {1}' -f $_.Name, $_.Status }) -join [Environment]::NewLine
+
+        $normal | Should -Not -Match 'GoldenTeeLive2019'
+        $normal | Should -Not -Match 'GameDB19'
+        $normal | Should -Not -Match 'Golden Tee Live 2019 / GameDB19'
+        $normal | Should -Not -Match 'Backup detail: Reported'
+        $normal | Should -Not -Match 'psql\.exe|pg_dump|PowerShell|NativeCommandError'
+        @($report.NormalChecks | Where-Object { $_.Name -eq 'Additional backup details' }).Count | Should -Be 1
+        $report.NormalChecks | Where-Object { $_.Name -eq 'Additional backup details' } | Select-Object -ExpandProperty Status | Should -Match '2'
+    }
+    It "retains technical diagnosis evidence outside normal output" {
+        $backup = [pscustomobject]@{
+            FailureDiagnoses = @(
+                [pscustomobject]@{
+                    GameLabel = 'Golden Tee Live 2019'
+                    ProfileKey = 'GoldenTeeLive2019'
+                    Database = 'GameDB19'
+                    Category = 'PasswordAuthenticationFailed'
+                    Detail = 'native password authentication detail'
+                    NextAction = 'Enter a working postgres password'
+                }
+            )
+            FailureDetails = @('technical backup detail')
+        }
+
+        $report = Get-PostgresBackupRepairDiagnosis -BackupResult $backup
+        $technical = @($report.TechnicalChecks)
+
+        @($technical | Where-Object { $_.Detail -eq 'native password authentication detail' }).Count | Should -Be 1
+        @($technical | Where-Object { $_.Detail -eq 'technical backup detail' }).Count | Should -Be 1
+        $script:ProductionSource | Should -Match 'Profile key:'
+        $script:ProductionSource | Should -Match 'Postgres support diagnosis: ProfileKey='
+    }
+
+    It "reports a specific failure stage for each automatic reset boundary" {
+        $unverified = [pscustomobject]@{ Verified = $false; Path = (Join-Path $TestDrive 'evidence') }
+        $result = Reset-PostgresPasswordAutomatically -NewPassword 'not-written' -RecoveryBackup $unverified
+        $result.FailureStage | Should -Be 'RecoveryEvidence'
+
+        $previousInstallDir = $script:PostgresInstallDir
+        $previousBinDir = $script:PostgresBinDir
+        try {
+            $script:PostgresInstallDir = Join-Path $TestDrive 'slice8b-missing-postgres'
+            $script:PostgresBinDir = Join-Path $script:PostgresInstallDir 'bin'
+            $verified = [pscustomobject]@{ Verified = $true; Path = (Join-Path $TestDrive 'evidence') }
+            $missingTools = Reset-PostgresPasswordAutomatically -NewPassword 'not-written' -RecoveryBackup $verified
+            $missingTools.FailureStage | Should -Be 'ExecutableOrDataDirectory'
+        } finally {
+            $script:PostgresInstallDir = $previousInstallDir
+            $script:PostgresBinDir = $previousBinDir
+        }
+    }
+
+    It "renders beginner-safe guidance for a reset failure stage" {
+        $stages = @(
+            'RecoveryEvidence',
+            'ExecutableOrDataDirectory',
+            'ServiceLookup',
+            'ServiceStop',
+            'PostmasterPid',
+            'AlterRole',
+            'ServiceRestart',
+            'PasswordValidation',
+            'ServiceRestore'
+        )
+        foreach ($stage in $stages) {
+            $guidance = Get-PostgresResetFailureGuidance -FailureStage $stage -PasswordChangeCommitted:$false
+            $guidance | Should -Not -Match 'psql|pg_dump|PowerShell|NativeCommandError|CategoryInfo|FullyQualifiedErrorId'
+            $guidance | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It "keeps password recovery activity inside the active workflow step" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Update-TpmWorkflowActivity -Context \$postgresStatus -Activity ''Checking the PostgreSQL password'''
+        $source | Should -Match 'Update-TpmWorkflowActivity -Context \$postgresStatus -Activity ''Resetting the PostgreSQL password'''
+        $source | Should -Match 'Set-TpmWorkflowWaiting -Context \$postgresStatus -Message ''Enter and confirm the new PostgreSQL password\.'''
+        $source | Should -Not -Match 'Start-TpmWorkflowStep -Context \$postgresStatus -StepId ''postgres-password'''
+        $source | Should -Not -Match 'Start-TpmWorkflowStep -Context \$postgresStatus -StepId ''postgres-reset'''
+    }
+
+    It "keeps password and reset actions away from reinitialize" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'if \(\$backupChoice -eq ''I''\)'
+        $source | Should -Match 'if \(\$authFailure -and \$backupChoice -eq ''P''\)'
+        $source | Should -Match 'if \(\$authFailure -and \$backupChoice -eq ''X''\)'
+        $source | Should -Not -Match 'if \(\$authFailure -and \$backupChoice -in @\(''P'', ''X'', ''I''\)\)'
+    }
+}
+Describe "Focused RC8 remediation contracts" {
+    It "accepts a normal nested BepInEx path inside an approved root" {
+        $root = Join-Path $TestDrive 'bep-approved-root'
+        $nested = Join-Path $root 'GameA\BepInEx\core'
+        [IO.Directory]::CreateDirectory($nested) | Out-Null
+        (Test-BepInExNoReparsePath -Root ($root + '\') -Path ($nested + '\')) | Should -BeTrue
+        (Test-BepInExGameRootSafe -GameRoot (Join-Path $root 'GameA') -ApprovedRoot ($root + '\')) | Should -BeTrue
+    }
+    It "uses one explicit PostgreSQL credential context for validation and dumps" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'psqlExe -U postgres -h 127\.0\.0\.1 -p 5432 -d postgres -tAc'
+        $source | Should -Match 'pgDumpExe -U postgres -h 127\.0\.0\.1 -p 5432 -d \$dbName -F c'
+        $source | Should -Not -Match 'psqlExe -U postgres -h 127\.0\.0\.1 -p 5432 -d postgres -w'
+        $source | Should -Not -Match 'pgDumpExe -U postgres -h 127\.0\.0\.1 -p 5432 -d \$dbName -w'
+    }
+    It "routes GPU path skips to Health Check and explains the next action" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$gpuHasPathIssue = \(\$gpuResult\.MissingPath -gt 0 -or \$gpuResult\.MissingDevice -gt 0\)'
+        $source | Should -Match "\$pendingApplyMode = 'HealthCheck'"
+        $source | Should -Match 'Open 10\) Library Health Check for missing paths'
+        $source | Should -Match 'repair saved game paths'
+    }
+    It "keeps the support manifest detailed but the success screen concise" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$lines\.Add\(''What to do next:''\)'
+        $supportStart = $source.IndexOf('if ($mode -eq "Support")', [StringComparison]::Ordinal)
+        $nextModeStart = $source.IndexOf('if ($mode -eq "PropagateControls")', $supportStart, [StringComparison]::Ordinal)
+        $supportMode = $source.Substring($supportStart, $nextModeStart - $supportStart)
+        $supportMode | Should -Match 'Write-Host "  Support package created\."'
+        $supportMode | Should -Match 'Saved here:'
+        $supportMode | Should -Match 'Send this ZIP to TeknoParrot support'
+        $supportMode | Should -Not -Match 'Write-Host "  What failed:'
+        $supportMode | Should -Not -Match 'Choice, default O'
+        $supportMode | Should -Not -Match 'Press Enter to return to the menu'
+        $source | Should -Match 'Clear-ConsoleForFreshRender'
+    }
+    It "validates Health Check search roots against canonical protected paths and reparse state" {
+        $root = Join-Path $TestDrive 'health-search-root'
+        $tp = Join-Path $root 'TeknoParrot'
+        $program = Join-Path $root 'Tpm'
+        $mainZip = Join-Path $root 'MainZips'
+        $suppZip = Join-Path $root 'SuppZips'
+        $safe = Join-Path $root 'RepairSearch'
+        New-Item -ItemType Directory -Path $tp, $program, $mainZip, $suppZip, $safe -Force | Out-Null
+        $valid = Test-TpmRepairSearchRoot -Candidate $safe -TeknoParrotRoot $tp -ProgramDirectory $program -ZipSource $mainZip -ZipSourceSupplementary $suppZip
+        $valid.Valid | Should -BeTrue
+        $valid.CanonicalPath | Should -Be ([System.IO.Path]::GetFullPath($safe))
+        $overlap = Test-TpmRepairSearchRoot -Candidate $tp -TeknoParrotRoot $tp -ProgramDirectory $program -ZipSource $mainZip -ZipSourceSupplementary $suppZip
+        $overlap.Valid | Should -BeFalse
+        $overlap.Reason | Should -Match 'TeknoParrot'
+        Mock Test-TpmNoReparsePath { $false }
+        $reparse = Test-TpmRepairSearchRoot -Candidate $safe -TeknoParrotRoot $tp -ProgramDirectory $program -ZipSource $mainZip -ZipSourceSupplementary $suppZip
+        $reparse.Valid | Should -BeFalse
+        $reparse.Reason | Should -Match 'reparse'
+    }
+    It "does not turn an affected combined selection into an all-games sentinel" {
+        $main = Join-Path $TestDrive 'health-picker-main'
+        $supp = Join-Path $TestDrive 'health-picker-supp'
+        $install = Join-Path $TestDrive 'health-picker-install'
+        New-Item -ItemType Directory -Path $main, $supp, (Join-Path $install 'AffectedGame') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $main 'AffectedGame.zip') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $install 'AffectedGame\game.exe') -Force | Out-Null
+        $selection = Select-GamesInteractiveCombined -zipSourceMain $main -zipSourceSupp $supp -installFolder $install -AllowedNames @('AffectedGame')
+        $selection.Main | Should -BeNullOrEmpty
+        $selection.Supp | Should -BeNullOrEmpty
+    }
+    It "keeps Health Check AutoSync re-entry limited to the broken profile codes" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$pendingAutoSyncGames = \$null'
+        $source | Should -Match '\$autoSyncTargetGames = if \(\$pendingApplyMode -eq ''AutoSync'' -and \$pendingAutoSyncGames\)'
+        $source | Should -Match '\$onlySyncList = @\(\)'
+        $source | Should -Match 'Health Check repair scope: affected profile codes only'
+        $source | Should -Match '-OnlyProfileCodes \(\[string\[\]\]\$autoSyncTargetGames\)'
+        $source | Should -Match '\$scopedHealthRepair'
+        $source | Should -Match 'if \(\$null -ne \$autoSyncTargetGames -and @\(\$autoSyncTargetGames\)\.Count -gt 0\)'
+    }
+    It "initializes the automatic Health Check search root before validating R and S choices" {
+        $source = $script:ProductionSource
+        $healthStart = $source.IndexOf('if ($mode -eq "HealthCheck")', [StringComparison]::Ordinal)
+        $postgresStart = $source.IndexOf('if ($mode -eq "PostgresSetup")', $healthStart, [StringComparison]::Ordinal)
+        $branch = $source.Substring($healthStart, $postgresStart - $healthStart)
+        $rootIndex = $branch.IndexOf('$searchRoot = $gamesInstallFolder', [StringComparison]::Ordinal)
+        $choiceIndex = $branch.IndexOf('$healthChoice -in @(''R'', ''S'')', [StringComparison]::Ordinal)
+        $rootIndex | Should -BeGreaterOrEqual 0
+        $rootIndex | Should -BeLessThan $choiceIndex
+    }
+    It "keeps BepInEx result choices centralized and only offers Health Check for path issues" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$bepChoices = if \(\$bepRollbackIssue\)'
+        $source | Should -Match '\$bepChoice = Read-TpmChoice'
+        $source | Should -Match '\} while \(\$bepChoice -in @\(''R'', ''D'', ''O''\)\)'
+        $source | Should -Match '\$bepPathIssue = \$bepResult -and \(\$bepResult\.MissingPath -gt 0 -or \$bepResult\.MissingDevice -gt 0\)'
+    }
+    It "fails closed on incomplete profile backups before destructive writes" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'function Invoke-GpuFixSetupLegacy'
+        $source | Should -Match 'New-TpmVerifiedUserProfilesBackup -UserProfilesDir \$UserProfilesDir -Label ''GpuFix'''
+        $start = $source.IndexOf('function New-PropagationBackup', [StringComparison]::Ordinal)
+        $next = $source.IndexOf('function ', $start + 1, [StringComparison]::Ordinal)
+        $block = if ($next -gt $start) { $source.Substring($start, $next - $start) } else { $source.Substring($start) }
+        $block | Should -Match 'Copy-Item -Destination \$backupPath -Recurse -Force -ErrorAction Stop'
+        $block | Should -Match 'Get-ChildItem -LiteralPath \$UserProfilesDir -ErrorAction Stop'
+        $block | Should -Not -Match 'Copy-Item -Destination \$backupPath -Recurse -Force -ErrorAction SilentlyContinue'
+        foreach ($functionName in @('Invoke-CursorHideSetup', 'Invoke-FFBBlasterSetup')) {
+            $start = $source.IndexOf(("function {0}" -f $functionName), [StringComparison]::Ordinal)
+            $next = $source.IndexOf('function ', $start + 1, [StringComparison]::Ordinal)
+            $block = if ($next -gt $start) { $source.Substring($start, $next - $start) } else { $source.Substring($start) }
+            $block | Should -Match 'New-TpmVerifiedUserProfilesBackup'
+            $block | Should -Match 'Outcome'
+        }
+        $autoStart = $source.IndexOf('Write-Log "Mode=$mode install=$gamesInstallFolder"', [StringComparison]::Ordinal)
+        $autoEnd = $source.IndexOf('# SECTION 6 -- AutoSync: game selection and extraction', $autoStart, [StringComparison]::Ordinal)
+        $autoBackupBlock = $source.Substring($autoStart, $autoEnd - $autoStart)
+        $autoBackupBlock | Should -Match 'Copy-Item -Destination \$backupPath -Recurse -Force -ErrorAction Stop'
+        $autoBackupBlock | Should -Not -Match 'Continue anyway|incomplete backup -- continuing'
+    }
+    It "supports Back and guarded Done behavior in both AutoSync pickers" {
+        $source = $script:ProductionSource
+        foreach ($functionName in @('Select-GamesInteractive', 'Select-GamesInteractiveCombined')) {
+            $start = $source.IndexOf(("function {0} " -f $functionName), [StringComparison]::Ordinal)
+            $next = $source.IndexOf('function ', $start + 1, [StringComparison]::Ordinal)
+            $picker = if ($next -gt $start) { $source.Substring($start, $next - $start) } else { $source.Substring($start) }
+            $picker | Should -Match 'B\) Back / cancel AutoSync selection'
+            $picker | Should -Match 'No games are queued'
+            $picker | Should -Match 'I did not understand'
+        }
+    }
+    It "requires the TPM remediation and prompt-slice artifacts" {
+        foreach ($relativePath in @(
+            'docs\governance\tpm-development-operating-model.md',
+            'docs\governance\tpm-contract-types.md',
+            'docs\architecture\tpm-subsystem-ownership-map.md',
+            'docs\architecture\tpm-subsystem-extraction-roadmap.md',
+            'docs\remediation\PR-321-control-board.md',
+            'docs\remediation\slices\README.md',
+            'docs\remediation\slices\PR-321-current-slice.md',
+            'docs\templates\tpm-slice-contract.md'
+        )) {
+            Test-Path -LiteralPath (Join-Path (Join-Path $PSScriptRoot '..') $relativePath) -PathType Leaf | Should -BeTrue
+        }
+        $gate = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\scripts\Test-TpmPermanentProcedures.ps1') -Raw
+        $gate | Should -Match 'PR-321-control-board.md'
+        $gate | Should -Match 'PR-321-current-slice.md'
+        $gate | Should -Match 'Slice ID'
+    }
+Describe "ReShade protected adoption and accounting" {
+    It "keeps protected installs unchanged by default and makes accounting exact" {
+        $source = $script:ProductionSource
+        $deploymentCall = [regex]::Match($source, '(?s)Install-TpmReShadeProfileDeployment .*?AllowUserOwnedOverwrite:\(\$Action -eq ''Adopt''\)').Value
+        $deploymentCall | Should -Not -BeNullOrEmpty
+        $deploymentCall | Should -Match 'AllowUserOwnedOverwrite'
+        $deploymentCall | Should -Match "Action -eq 'Adopt'"
+        $source | Should -Match 'backup failure blocks replacement'
+        $result = Get-TpmReShadeApplyAccounting -Selected 7 -Deployed 2 -Adopted 1 -Protected 1 -MissingPath 1 -MissingDevice 1 -Unsafe 1 -Failed 1
+        $result.ChangedTpmManaged | Should -Be 1
+        $result.AdoptedReplaced | Should -Be 1
+        $result.ProtectedUnchanged | Should -Be 1
+        $result.MissingPath | Should -Be 2
+        $result.UnsafeOwnershipPath | Should -Be 1
+        $result.Failed | Should -Be 1
+        $result.SkippedCancelled | Should -Be 0
+        $result.Total | Should -Be 7
+        $result.Complete | Should -BeTrue
+        $mismatch = Get-TpmReShadeApplyAccounting -Selected 2 -Deployed 1 -Protected 1 -SkippedCancelled 1
+        $mismatch.Total | Should -Be 3
+        $mismatch.Complete | Should -BeFalse
+        $kept = Get-TpmReShadeApplyAccounting -Selected 2 -Deployed 1 -KeptPrevious 1
+        $kept.ChangedTpmManaged | Should -Be 1
+        $kept.KeptPrevious | Should -Be 1
+        $kept.Total | Should -Be 2
+        $kept.Complete | Should -BeTrue
+    }
+
+    It "reports preflight failed and protected categories explicitly" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'failed/preflight blocked'
+        $source | Should -Match 'TeknoParrot Manager found ReShade files it did not create'
+        $source | Should -Match 'TeknoParrot Manager will back them up first'
+    }
+    It "detects native CRT and SSAA settings without changing the XML" {
+        $doc = New-Object System.Xml.XmlDocument
+        $doc.LoadXml('<GameProfile><ConfigValues><FieldInformation><CategoryName>Video</CategoryName><FieldName>CRT Shader</FieldName><FieldValue>1</FieldValue></FieldInformation><FieldInformation><CategoryName>Video</CategoryName><FieldName>SSAA</FieldName><FieldValue>0</FieldValue></FieldInformation></ConfigValues></GameProfile>')
+        $before = $doc.OuterXml
+        $warning = Get-TpmReShadeNativeShaderWarnings -Document $doc
+        $warning.Detected | Should -BeTrue
+        $warning.Fields.Count | Should -Be 1
+        $warning.Warning | Should -Match 'preserves'
+        $doc.OuterXml | Should -Be $before
+    }
+
+    It "routes unsafe ownership directly to ReShade details and Select" {
+        $model = Get-TpmReShadeResultActionModel -Result ([pscustomobject]@{ Protected = 0; Unsafe = 1; MissingPath = 0; MissingDevice = 0 })
+        $model.Primary | Should -Be 'Unsafe'
+        $model.Actions | Should -Be @('S', 'D', 'B')
+        $model.ActionModes.S | Should -Be 'Select'
+        $model.Actions | Should -Not -Contain 'M'
+    }
+
+    It "keeps ReShade normal output textual and pauses before dgVoodoo2" {
+        $source = $script:ProductionSource
+        $invokeStart = $source.IndexOf('function Invoke-ReShadeSetup')
+        $invokeEnd = $source.IndexOf('function ', $invokeStart + 10)
+        $invokeBody = $source.Substring($invokeStart, $invokeEnd - $invokeStart)
+        $invokeBody | Should -Not -Match 'Format-Table|Format-List|Write-Output'
+        $source | Should -Match 'ReShade result -- review before continuing to dgVoodoo2'
+        $source | Should -Match 'Press Enter to review the ReShade result before dgVoodoo2'
+        $source | Should -Match 'SelectedProfileTechniques'
+        $source | Should -Match 'NativeShaderWarnings'
+    }
+}
+}
+
+Describe 'TPM-owned layout and legacy migration' {
+    It 'moves only known TPM-owned items and preserves TeknoParrot-owned folders' {
+        $root = Join-Path $TestDrive 'migration'
+        $scriptRoot = Join-Path $root 'program'
+        $tpRoot = Join-Path $root 'TeknoParrot'
+        New-Item -ItemType Directory -Path $scriptRoot,$tpRoot,(Join-Path $tpRoot 'GameProfiles') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $scriptRoot 'TeknoParrot-Manager.log') -Value 'log' -Encoding utf8
+        New-Item -ItemType Directory -Path (Join-Path $scriptRoot 'SupportPackages') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $scriptRoot 'SupportPackages\old.zip') -Value 'package' -Encoding utf8
+        $layout = Initialize-TpmOwnedLayout -Layout (Get-TpmOwnedLayout -TeknoParrotRoot $tpRoot)
+
+        $result = Invoke-TpmOwnedMigration -ScriptRoot $scriptRoot -Layout $layout -Unattended
+
+        $result.Outcome | Should -Be 'SUCCEEDED'
+        Test-Path -LiteralPath (Join-Path $layout.Logs 'TeknoParrot-Manager.log') -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $layout.SupportPackages 'old.zip') -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $tpRoot 'GameProfiles') -PathType Container | Should -BeTrue
+        $report = Get-ChildItem -LiteralPath $layout.Reports -Filter 'TPM-migration-*.md' -File | Select-Object -First 1
+        Test-Path -LiteralPath $report.FullName -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $scriptRoot 'TeknoParrot-Manager.log') -PathType Leaf | Should -BeFalse
+    }
+
+    It 'blocks ambiguous destinations without moving the legacy source' {
+        $root = Join-Path $TestDrive 'ambiguous'
+        $scriptRoot = Join-Path $root 'program'
+        $tpRoot = Join-Path $root 'TeknoParrot'
+        New-Item -ItemType Directory -Path $scriptRoot,$tpRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $scriptRoot 'TeknoParrot-Manager.log') -Value 'legacy' -Encoding utf8
+        $layout = Initialize-TpmOwnedLayout -Layout (Get-TpmOwnedLayout -TeknoParrotRoot $tpRoot)
+        Set-Content -LiteralPath (Join-Path $layout.Logs 'TeknoParrot-Manager.log') -Value 'new' -Encoding utf8
+
+        $result = Invoke-TpmOwnedMigration -ScriptRoot $scriptRoot -Layout $layout -Unattended
+
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        Get-Content -LiteralPath (Join-Path $scriptRoot 'TeknoParrot-Manager.log') -Raw | Should -Match 'legacy'
+        Get-Content -LiteralPath (Join-Path $layout.Logs 'TeknoParrot-Manager.log') -Raw | Should -Match 'new'
+        $report = Get-ChildItem -LiteralPath $layout.Reports -Filter 'TPM-migration-*.md' -File | Select-Object -First 1
+        Test-Path -LiteralPath $report.FullName -PathType Leaf | Should -BeTrue
+    }
+    It 'explains migration categories, destination, exclusions, and safe decline' {
+        $script:ProductionSource | Should -Match 'Destination root:'
+        foreach ($category in @('State','Logs','Reports','Backups','SupportPackages','Assets','Cache')) {
+            $script:ProductionSource | Should -Match ([regex]::Escape($category))
+        }
+        $script:ProductionSource | Should -Match 'Not moved: games, ROM ZIP sources, TeknoParrot installation files, LaunchBox data, HyperSpin data'
+        $script:ProductionSource | Should -Match 'Y applies these direct moves\. N applies nothing'
+        $script:ProductionSource | Should -Match "ReasonCode 'DECLINED'"
+    }
+    It 'uses the latest DAT release filename for the active updated path' {
+        $script:ProductionSource | Should -Match '\$preferredUpdatePath = Join-Path .*GetFileName\(\$rel\.FileName\)'
+        $script:ProductionSource | Should -Match '\$eggmanDatZip = \[System\.IO\.Path\]::GetFullPath\(\$savedPath\)'
+        $script:ProductionSource | Should -Match '\$datFilePath = '''
+        $script:ProductionSource | Should -Match 'Write-Host \("  Updated: \{0\}" -f \$eggmanDatZip\)'
+    }
+    It 'uses product wording and full profile names in normal UI output' {
+        $script:ProductionSource | Should -Not -Match 'Write-Host[^\r\n]*\bTPM\b'
+        $script:ProductionSource | Should -Match 'function Get-TpmGameDisplayLabel'
+        $script:ProductionSource | Should -Match 'Get-TpmGameDisplayLabel -ProfilePath'
+        $script:ProductionSource | Should -Match 'Write-TpmCompactExtractionProgress'
+    }
+
+    It 'uses one membership decision prompt and clear FFB completion rules' {
+        $script:ProductionSource | Should -Match 'Do you have an active, paid TeknoParrot membership\?"'
+        $script:ProductionSource | Should -Match '\$hasSub = Read-TpmYesNo -Prompt "  Choose Y or N"'
+        $script:ProductionSource | Should -Not -Match 'Read-TpmYesNo -Prompt "  Do you have an active, paid TeknoParrot membership'
+        $script:ProductionSource | Should -Match '\$succeeded = \(\$transactionResult\.Outcome -in @\(''SUCCEEDED'',''NO_OP''\) -and \$errors -eq 0 -and \$blockingSkips -eq 0 -and \$accountingComplete\)'
+        $script:ProductionSource | Should -Match "NO_SUPPORTED_PLUGIN_TARGET"
+        $script:ProductionSource | Should -Match "NATIVE_PREFERRED"
+        $script:ProductionSource | Should -Match 'TeknoParrot Manager only removes optional plugin files'
+        $script:ProductionSource | Should -Not -Match 'Write-Host "  TPM records its own deployed hook files'
+    }
+}
+
+
+Describe "S1-TX-CORE transaction outcome model" {
+    BeforeAll {
+        function New-S1Mutation {
+            param([bool]$Started=$false, [object[]]$Changed=@(), [object[]]$Completed=@(), [object[]]$Failed=@(), [object[]]$Unattempted=@(), [object[]]$Skipped=@(), [object[]]$Unknown=@(), [int]$Selected=-1)
+            if ($Selected -lt 0) { $Selected=@($Changed+$Completed+$Failed+$Unattempted+$Skipped+$Unknown | Select-Object -Unique).Count }
+            [pscustomobject]@{ Started=$Started; Completed=$false; SelectedItemCount=$Selected; AttemptedItemCount=($Completed.Count+$Failed.Count+$Skipped.Count); MutatedItemCount=$Changed.Count; AffectedItemCount=$Changed.Count; CompletedItemCount=$Completed.Count; FailedItemCount=$Failed.Count; UnattemptedItemCount=$Unattempted.Count; SkippedItemCount=$Skipped.Count; UnknownItemCount=$Unknown.Count; ChangedItems=@($Changed); AffectedItems=@($Changed); CompletedItems=@($Completed); FailedItems=@($Failed); UnattemptedItems=@($Unattempted); SkippedItems=@($Skipped); UnknownItems=@($Unknown); FailureStage=$null }
+        }
+        function New-S1Evidence {
+            param([bool]$FinalAttempted=$false, [bool]$FinalPassed=$false, [object[]]$Checks=@(), [bool]$BackupRequired=$false, [bool]$BackupAttempted=$false, [bool]$BackupCreated=$false, [bool]$BackupVerified=$false, [bool]$RollbackAttempted=$false, [bool]$RollbackCompleted=$false, [bool]$RollbackVerified=$false, [bool]$CleanupCompleted=$true, [bool]$ResiduePresent=$false, [object[]]$ResiduePaths=@())
+            [pscustomobject]@{ PreState=[pscustomobject]@{ Captured=$RollbackAttempted; Items=@(); EvidenceRoot='evidence' }; Backup=[pscustomobject]@{ Required=$BackupRequired; Attempted=$BackupAttempted; Created=$BackupCreated; Verified=$BackupVerified; RootPath=if ($BackupCreated) { 'backup' } else { $null }; Items=@() }; FinalVerification=[pscustomobject]@{ Attempted=$FinalAttempted; Passed=$FinalPassed; Checks=@($Checks); FailedItems=@(); UnknownItems=@() }; Rollback=[pscustomobject]@{ Attempted=$RollbackAttempted; Completed=$RollbackCompleted; Verified=$RollbackVerified; Items=@(); EvidenceRoot=if ($RollbackAttempted) { 'rollback' } else { $null }; FailedItems=@(); Errors=@() }; Cleanup=[pscustomobject]@{ Attempted=$true; Completed=$CleanupCompleted; ResiduePresent=$ResiduePresent; ResiduePaths=@($ResiduePaths); ResidueItems=@(); Error=$null } }
+        }
+        function New-S1Result {
+            param([string]$Outcome, [string]$ProductState, [string]$Summary='Fixture result', [object[]]$Items=@(), [object]$Mutation, [object]$Evidence, [string]$UnderlyingOutcome=$null)
+            $e=if($null -eq $Evidence){New-S1Evidence}else{$Evidence}
+            New-TpmTransactionResult -WorkflowKey 'S1Test' -OperationKey 'Fixture' -Outcome $Outcome -ProductState $ProductState -UnderlyingOutcome $UnderlyingOutcome -Summary $Summary -Items $Items -Mutation $Mutation -PreState $e.PreState -Backup $e.Backup -FinalVerification $e.FinalVerification -Rollback $e.Rollback -Cleanup $e.Cleanup
+        }
+    }
+    It "accepts exactly the seven shared outcomes" { (Get-TpmTransactionOutcomeNames).Count | Should -Be 7; (Get-TpmTransactionOutcomeNames) | Should -Be @('FAILED_BEFORE_MUTATION','SUCCEEDED','NO_OP','PARTIAL_APPLIED','ROLLED_BACK_VERIFIED','ACTION_REQUIRED','CLEANUP_RESIDUE') }
+    It "rejects an invalid outcome" { { New-S1Result -Outcome 'SUCCESSFUL' -ProductState 'UNKNOWN' -Summary 'Invalid result' } | Should -Throw }
+    It "requires final verification for SUCCEEDED" { $m=New-S1Mutation -Started $true -Changed @('game-a') -Completed @('game-a'); $e=New-S1Evidence -BackupRequired $true -BackupAttempted $true -BackupCreated $true -BackupVerified $true; { New-S1Result -Outcome 'SUCCEEDED' -ProductState 'INTENDED' -Items @('game-a') -Mutation $m -Evidence $e } | Should -Throw }
+    It "requires no affected items for FAILED_BEFORE_MUTATION" { $m=New-S1Mutation -Changed @('game-a') -Selected 1; { New-S1Result -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Items @('game-a') -Mutation $m } | Should -Throw }
+    It "requires current-state proof and no backup mutation for NO_OP" { $m=New-S1Mutation -Selected 1; $e=New-S1Evidence -FinalAttempted $true -FinalPassed $true -Checks @('current state checked') -BackupAttempted $true; { New-S1Result -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Items @('game-a') -Mutation $m -Evidence $e } | Should -Throw; $e=New-S1Evidence -FinalAttempted $true -FinalPassed $true -Checks @('current state checked'); { New-S1Result -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Items @('game-a') -Mutation $m -Evidence $e } | Should -Not -Throw }
+    It "requires separate changed, completed, failed, and unattempted item sets for PARTIAL_APPLIED" { $m=New-S1Mutation -Started $true -Changed @('game-a') -Completed @('game-a') -Failed @('game-b') -Unattempted @('game-c') -Selected 3; $e=New-S1Evidence -FinalAttempted $true -FinalPassed $true -Checks @('verified') -BackupRequired $true -BackupAttempted $true -BackupCreated $true -BackupVerified $true; $r=New-S1Result -Outcome 'PARTIAL_APPLIED' -ProductState 'PARTIAL_KNOWN' -Items @('game-a','game-b','game-c') -Mutation $m -Evidence $e; $r.Mutation.ChangedItems | Should -Be @('game-a'); $r.Mutation.CompletedItems | Should -Be @('game-a'); $r.Mutation.FailedItems | Should -Be @('game-b'); $r.Mutation.UnattemptedItems | Should -Be @('game-c') }
+    It "rejects PARTIAL_APPLIED when an affected item has unknown final state" { $m=New-S1Mutation -Started $true -Changed @('game-a','game-b') -Completed @('game-a') -Unknown @('game-b') -Selected 2; $e=New-S1Evidence -FinalAttempted $true -FinalPassed $true -Checks @('verified') -BackupRequired $true -BackupAttempted $true -BackupCreated $true -BackupVerified $true; { New-S1Result -Outcome 'PARTIAL_APPLIED' -ProductState 'PARTIAL_KNOWN' -Items @('game-a','game-b') -Mutation $m -Evidence $e } | Should -Throw }
+    It "requires per-item rollback proof for ROLLED_BACK_VERIFIED" { $m=New-S1Mutation -Started $true -Changed @('game-a') -Selected 1; $e=New-S1Evidence -RollbackAttempted $true -RollbackCompleted $true; { New-S1Result -Outcome 'ROLLED_BACK_VERIFIED' -ProductState 'UNCHANGED' -Items @('game-a') -Mutation $m -Evidence $e } | Should -Throw; $e=New-S1Evidence -RollbackAttempted $true -RollbackCompleted $true -RollbackVerified $true; { New-S1Result -Outcome 'ROLLED_BACK_VERIFIED' -ProductState 'UNCHANGED' -Items @('game-a') -Mutation $m -Evidence $e } | Should -Not -Throw }
+    It "gives ACTION_REQUIRED priority when product state is unknown and cleanup residue exists" { $m=New-S1Mutation -Started $true -Changed @('game-a') -Selected 1; $e=New-S1Evidence -FinalAttempted $true -ResiduePresent $true -CleanupCompleted $false -ResiduePaths @('recovery'); $r=New-S1Result -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Items @('game-a') -Mutation $m -Evidence $e; $r.Outcome | Should -Be 'ACTION_REQUIRED'; { New-S1Result -Outcome 'CLEANUP_RESIDUE' -UnderlyingOutcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Items @('game-a') -Mutation $m -Evidence $e } | Should -Throw }
+    It "requires UnderlyingOutcome and verified product state for CLEANUP_RESIDUE" { $m=New-S1Mutation -Started $true -Changed @('game-a') -Completed @('game-a') -Selected 1; $e=New-S1Evidence -FinalAttempted $true -FinalPassed $true -Checks @('verified') -ResiduePresent $true -CleanupCompleted $false -ResiduePaths @('staging'); { New-S1Result -Outcome 'CLEANUP_RESIDUE' -ProductState 'INTENDED' -Items @('game-a') -Mutation $m -Evidence $e } | Should -Throw; $r=New-S1Result -Outcome 'CLEANUP_RESIDUE' -UnderlyingOutcome 'SUCCEEDED' -ProductState 'INTENDED' -Items @('game-a') -Mutation $m -Evidence $e; $r.Cleanup.ResiduePresent | Should -BeTrue }
+    It "requires item counts to match item lists" { $m=New-S1Mutation -Selected 2; $m.SelectedItemCount=1; $e=New-S1Evidence -FinalAttempted $true -FinalPassed $true -Checks @('checked'); { New-S1Result -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Items @('game-a','game-b') -Mutation $m -Evidence $e } | Should -Throw }
+    It "does not let a phase receipt alone produce workflow success" { $p=New-TpmTransactionPhaseReceipt -Phase 'PROMOTION' -MutationStarted $true -Completed $true; { ConvertTo-TpmWorkflowTransactionMetadata -TransactionResult $p } | Should -Throw }
+    It "keeps technical detail out of normal summaries" -TestCases @(@{Summary='Failure at C:\TPM\backup'},@{Summary='Updated SHA256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'},@{Summary='Run powershell -File repair.ps1'},@{Summary='Password authentication failed'},@{Summary='System.IO.IOException CategoryInfo: WriteError'}) { Test-TpmTransactionUserSafeSummary -Summary $Summary | Should -BeFalse; { New-S1Result -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary $Summary } | Should -Throw }
+    It "carries transaction metadata separately from presentation outcome" { $m=New-S1Mutation -Selected 1; $e=New-S1Evidence -FinalAttempted $true -FinalPassed $true -Checks @('already matches'); $r=New-S1Result -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Items @('game-a') -Mutation $m -Evidence $e; $md=ConvertTo-TpmWorkflowTransactionMetadata $r; $md.TransactionOutcome | Should -Be 'NO_OP'; $md.PresentationOutcome | Should -Be 'Skipped'; $md.RequiresAttention | Should -BeFalse; $md.PSTypeNames | Should -Contain 'TPM.WorkflowTransactionMetadata.v1' }
+}
+Describe "S2-A transaction presentation contract" -Tag 'S2-A-PRESENTATION' {
+    BeforeAll {
+        function New-S2PresentationResult {
+            param([Parameter(Mandatory)][string]$Outcome)
+            $items=@('game-a','game-b','game-c')
+            $clean=[pscustomobject]@{ Attempted=$false; Completed=$true; ResiduePresent=$false; ResiduePaths=@(); ResidueItems=@(); Error=$null }
+            switch ($Outcome) {
+                'FAILED_BEFORE_MUTATION' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-failed' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNCHANGED' -Summary 'The fixture stopped before making changes.' -Items @('game-a') -Cleanup $clean)
+                }
+                'NO_OP' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-noop' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNCHANGED' -Summary 'The fixture found nothing to change.' -Items @('game-a') -Mutation ([pscustomobject]@{ SelectedItemCount=1; CompletedItemCount=0; FailedItemCount=0; UnattemptedItemCount=0; SkippedItemCount=0; UnknownItemCount=0; ChangedItems=@(); AffectedItems=@(); CompletedItems=@(); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Current state checked') }) -Cleanup $clean)
+                }
+                'SUCCEEDED' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-success' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'INTENDED' -Summary 'The fixture completed and was verified.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$true; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Final state checked') }) -Cleanup $clean)
+                }
+                'PARTIAL_APPLIED' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-partial' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'PARTIAL_KNOWN' -Summary 'Some fixture items changed and others did not.' -Items $items -Mutation ([pscustomobject]@{ Started=$true; Completed=$false; SelectedItemCount=3; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@('game-b'); UnattemptedItems=@('game-c'); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Final state checked') }) -Cleanup $clean)
+                }
+                'ROLLED_BACK_VERIFIED' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-rollback' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNCHANGED' -Summary 'The fixture was restored and verified.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$false; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Restored state checked') }) -Rollback ([pscustomobject]@{ Attempted=$true; Completed=$true; Verified=$true; Items=@('game-a'); EvidenceRoot='rollback-evidence'; FailedItems=@(); Errors=@() }) -Cleanup $clean)
+                }
+                'ACTION_REQUIRED' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-attention' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNKNOWN' -Summary 'The fixture needs attention because its final state could not be verified.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$false; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@(); FailedItems=@('game-a'); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$false; Checks=@('Final state was not verified') }) -Cleanup $clean)
+                }
+                'CLEANUP_RESIDUE' {
+                    return (New-TpmTransactionResult -TransactionId 's2-a-residue' -WorkflowKey 'S2A' -OperationKey 'Fixture' -Outcome $Outcome -UnderlyingOutcome 'SUCCEEDED' -ProductState 'INTENDED' -Summary 'The fixture completed and preserved cleanup evidence.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$true; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Final state checked') }) -Cleanup ([pscustomobject]@{ Attempted=$true; Completed=$false; ResiduePresent=$true; ResiduePaths=@('C:\TPM\staging'); ResidueItems=@('staging'); Error='cleanup fixture' }))
+                }
+                default { throw "Unsupported S2-A fixture outcome: $Outcome" }
+            }
+        }
+    }
+
+    It "projects all seven outcomes into the shared presentation type" {
+        $outcomes=@('SUCCEEDED','NO_OP','FAILED_BEFORE_MUTATION','PARTIAL_APPLIED','ROLLED_BACK_VERIFIED','ACTION_REQUIRED','CLEANUP_RESIDUE')
+        foreach ($outcome in $outcomes) {
+            $result=New-S2PresentationResult -Outcome $outcome
+            $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult $result
+            $presentation.PSTypeNames | Should -Contain 'TPM.TransactionPresentation.v1'
+            $presentation.Outcome | Should -Be $outcome
+            { Assert-TpmTransactionPresentation -Presentation $presentation -TransactionResult $result } | Should -Not -Throw
+        }
+    }
+
+    It "maps headline, next action, retry safety, attention, and data safety deterministically" -TestCases @(
+        @{ Outcome='SUCCEEDED'; Headline='Completed and verified.'; NextAction='No further action is required.'; RetrySafety='No retry is needed.'; RequiresAttention=$false; DataSafety='Intended' },
+        @{ Outcome='NO_OP'; Headline='Nothing needed changing.'; NextAction='No further action is required.'; RetrySafety='No retry is needed.'; RequiresAttention=$false; DataSafety='Unchanged' },
+        @{ Outcome='FAILED_BEFORE_MUTATION'; Headline='Stopped before making changes.'; NextAction='Fix the reported issue, then retry.'; RetrySafety='Retry is safe after the reported issue is fixed.'; RequiresAttention=$true; DataSafety='Unchanged' },
+        @{ Outcome='PARTIAL_APPLIED'; Headline='Some items changed; others did not.'; NextAction='Review Details, correct the remaining items, and then retry.'; RetrySafety='Do not retry blindly; review changed items first.'; RequiresAttention=$true; DataSafety='Partial' },
+        @{ Outcome='ROLLED_BACK_VERIFIED'; Headline='The change did not finish. Previous state was restored and verified.'; NextAction='Fix the reported issue, then retry.'; RetrySafety='Retry is safe after the reported issue is fixed.'; RequiresAttention=$true; DataSafety='Restored' },
+        @{ Outcome='ACTION_REQUIRED'; Headline='TPM may have changed something, but the final state could not be verified.'; NextAction='Do not retry blindly. Review Details and support evidence.'; RetrySafety='Do not retry blindly.'; RequiresAttention=$true; DataSafety='Unknown' },
+        @{ Outcome='CLEANUP_RESIDUE'; Headline='The result was verified, but temporary cleanup evidence remains.'; NextAction='Review Details and support evidence before removing the residue.'; RetrySafety='Do not retry blindly until the cleanup residue is reviewed.'; RequiresAttention=$true; DataSafety='Intended with cleanup residue' }
+    ) {
+        param($Outcome,$Headline,$NextAction,$RetrySafety,$RequiresAttention,$DataSafety)
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome $Outcome)
+        $presentation.Headline | Should -Be $Headline
+        $presentation.NextAction | Should -Be $NextAction
+        $presentation.RetrySafety | Should -Be $RetrySafety
+        $presentation.RequiresAttention | Should -Be $RequiresAttention
+        $presentation.DataSafety | Should -Be $DataSafety
+    }
+
+    It "does not treat compatibility booleans or legacy fields as presentation authority" {
+        $result=New-S2PresentationResult -Outcome 'ACTION_REQUIRED'
+        $result | Add-Member -NotePropertyName Succeeded -NotePropertyValue $true -Force
+        $result | Add-Member -NotePropertyName Installed -NotePropertyValue $true -Force
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult $result
+        $presentation.Outcome | Should -Be 'ACTION_REQUIRED'
+        $presentation.RequiresAttention | Should -BeTrue
+        $presentation.Headline | Should -Not -Match '(?i)completed|success'
+    }
+
+    It "keeps NO_OP distinct from mutation and ACTION_REQUIRED distinct from success" {
+        $noOp=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'NO_OP')
+        $noOp.ChangedItemCount | Should -Be 0
+        $noOp.WhatChanged | Should -Be 'Nothing was changed.'
+        $noOp.Headline | Should -Not -Match '(?i)completed and verified'
+        $attention=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'ACTION_REQUIRED')
+        $attention.RequiresAttention | Should -BeTrue
+        $attention.Headline | Should -Not -Match '(?i)completed|success'
+    }
+
+    It "states verified restoration for rollback and partial change for partial application" {
+        $rollback=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'ROLLED_BACK_VERIFIED')
+        $rollback.Headline | Should -Match 'Previous state was restored and verified'
+        $rollback.WhatChanged | Should -Match 'rolled back'
+        $partial=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'PARTIAL_APPLIED')
+        $partial.Headline | Should -Match 'Some items changed; others did not'
+        $partial.WhatChanged | Should -Match 'Only the completed items were changed'
+    }
+
+    It "keeps cleanup residue separate from ordinary success" {
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'CLEANUP_RESIDUE')
+        $presentation.Outcome | Should -Be 'CLEANUP_RESIDUE'
+        $presentation.UnderlyingOutcome | Should -Be 'SUCCEEDED'
+        $presentation.CleanupResiduePresent | Should -BeTrue
+        $presentation.RequiresAttention | Should -BeTrue
+        $presentation.Headline | Should -Not -Be 'Completed and verified.'
+    }
+
+    It "derives item counts and labels from v1 item sets" {
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'PARTIAL_APPLIED')
+        $presentation.SelectedItemCount | Should -Be 3
+        $presentation.ChangedItemCount | Should -Be 1
+        $presentation.CompletedItemCount | Should -Be 1
+        $presentation.FailedItemCount | Should -Be 1
+        $presentation.UnattemptedItemCount | Should -Be 1
+        @($presentation.SelectedItemLabels) | Should -Be @('game-a','game-b','game-c')
+        @($presentation.ChangedItemLabels) | Should -Be @('game-a')
+        @($presentation.FailedItemLabels) | Should -Be @('game-b')
+        @($presentation.UnattemptedItemLabels) | Should -Be @('game-c')
+        $presentation.DetailsSupportReferences.TransactionId | Should -Be 's2-a-partial'
+    }
+
+    It "redacts technical item identifiers and never embeds source technical details" {
+        $result=New-S2PresentationResult -Outcome 'CLEANUP_RESIDUE'
+        $result.TechnicalDetails=[pscustomobject]@{ Detail='password secret C:\TPM\private 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' }
+        $result.Items=@('C:\Games\GameA\game.exe')
+        $result.Mutation.SelectedItemCount=1
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult $result
+        @($presentation.SelectedItemLabels) | Should -Be @('Selected item')
+        ($presentation | ConvertTo-Json -Depth 8) | Should -Not -Match '(?i)password|credential|secret|C:\\TPM|0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+        $presentation.PSObject.Properties.Name | Should -Not -Contain 'TransactionResult'
+        $presentation.DetailsSupportReferences.PSObject.Properties.Name | Should -Not -Contain 'TechnicalDetails'
+    }
+
+    It "rejects unsafe presentation text and count/list mismatches" {
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'SUCCEEDED')
+        $presentation.NextAction='Run powershell -File C:\repair.ps1'
+        { Assert-TpmTransactionPresentation -Presentation $presentation } | Should -Throw
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2PresentationResult -Outcome 'SUCCEEDED')
+        $presentation.ChangedItemCount=99
+        { Assert-TpmTransactionPresentation -Presentation $presentation } | Should -Throw
+        Test-TpmTransactionPresentationSafeText -Text 'password=secret' | Should -BeFalse
+        Test-TpmTransactionPresentationSafeText -Text 'sha 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' | Should -BeFalse
+        Test-TpmTransactionPresentationSafeText -Text 'System.IO.IOException at Invoke-Step()' | Should -BeFalse
+    }
+}
+
+
+Describe 'S2-B1 shared transaction renderers' -Tag 'S2-B1-RENDERERS' {
+    BeforeAll {
+        function New-S2B1PresentationResult {
+            param([Parameter(Mandatory)][string]$Outcome)
+            $items=@('game-a','game-b','game-c')
+            $clean=[pscustomobject]@{ Attempted=$false; Completed=$true; ResiduePresent=$false; ResiduePaths=@(); ResidueItems=@(); Error=$null }
+            switch ($Outcome) {
+                'FAILED_BEFORE_MUTATION' { return (New-TpmTransactionResult -TransactionId 's2-b1-failed' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNCHANGED' -Summary 'The fixture stopped before making changes.' -Items @('game-a') -Cleanup $clean) }
+                'NO_OP' { return (New-TpmTransactionResult -TransactionId 's2-b1-noop' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNCHANGED' -Summary 'The fixture found nothing to change.' -Items @('game-a') -Mutation ([pscustomobject]@{ SelectedItemCount=1; CompletedItemCount=0; FailedItemCount=0; UnattemptedItemCount=0; SkippedItemCount=0; UnknownItemCount=0; ChangedItems=@(); AffectedItems=@(); CompletedItems=@(); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Current state checked') }) -Cleanup $clean) }
+                'SUCCEEDED' { return (New-TpmTransactionResult -TransactionId 's2-b1-success' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'INTENDED' -Summary 'The fixture completed and was verified.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$true; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Final state checked') }) -Cleanup $clean) }
+                'PARTIAL_APPLIED' { return (New-TpmTransactionResult -TransactionId 's2-b1-partial' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'PARTIAL_KNOWN' -Summary 'Some fixture items changed and others did not.' -Items $items -Mutation ([pscustomobject]@{ Started=$true; Completed=$false; SelectedItemCount=3; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@('game-b'); UnattemptedItems=@('game-c'); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Final state checked') }) -Cleanup $clean) }
+                'ROLLED_BACK_VERIFIED' { return (New-TpmTransactionResult -TransactionId 's2-b1-rollback' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNCHANGED' -Summary 'The fixture was restored and verified.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$false; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Restored state checked') }) -Rollback ([pscustomobject]@{ Attempted=$true; Completed=$true; Verified=$true; Items=@('game-a'); EvidenceRoot='rollback-evidence'; FailedItems=@(); Errors=@() }) -Cleanup $clean) }
+                'ACTION_REQUIRED' { return (New-TpmTransactionResult -TransactionId 's2-b1-attention' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -ProductState 'UNKNOWN' -Summary 'The fixture needs attention because its final state could not be verified.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$false; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@(); FailedItems=@('game-a'); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$false; Checks=@('Final state was not verified') }) -Cleanup $clean) }
+                'CLEANUP_RESIDUE' { return (New-TpmTransactionResult -TransactionId 's2-b1-residue' -WorkflowKey 'S2B1' -OperationKey 'Fixture' -Outcome $Outcome -UnderlyingOutcome 'SUCCEEDED' -ProductState 'INTENDED' -Summary 'The fixture completed and preserved cleanup evidence.' -Items @('game-a') -Mutation ([pscustomobject]@{ Started=$true; Completed=$true; SelectedItemCount=1; ChangedItems=@('game-a'); AffectedItems=@('game-a'); CompletedItems=@('game-a'); FailedItems=@(); UnattemptedItems=@(); SkippedItems=@(); UnknownItems=@() }) -FinalVerification ([pscustomobject]@{ Attempted=$true; Passed=$true; Checks=@('Final state checked') }) -Cleanup ([pscustomobject]@{ Attempted=$true; Completed=$false; ResiduePresent=$true; ResiduePaths=@('C:\TPM\staging'); ResidueItems=@('staging'); Error=$null })) }
+                default { throw "Unsupported S2-B1 fixture outcome: $Outcome" }
+            }
+        }
+    }
+    It 'renders every presentation outcome through the shared normal renderer' {
+        $outcomes=@('SUCCEEDED','NO_OP','FAILED_BEFORE_MUTATION','PARTIAL_APPLIED','ROLLED_BACK_VERIFIED','ACTION_REQUIRED','CLEANUP_RESIDUE')
+        foreach ($outcome in $outcomes) {
+            $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome $outcome)
+            $rows=@(Format-TpmTransactionPresentationRows -Presentation $presentation)
+            $rows.Count | Should -BeGreaterThan 5
+            ($rows -join "`n") | Should -Match ([regex]::Escape($presentation.Headline))
+            ($rows -join "`n") | Should -Match 'What changed:'
+            ($rows -join "`n") | Should -Match 'What did not change:'
+            ($rows -join "`n") | Should -Match 'Next action:'
+            ($rows -join "`n") | Should -Not -Match '(?i)password|credential|secret|powershell|System\.|StackTrace'
+        }
+    }
+
+    It 'keeps item counts and safe labels in a fixed normal-renderer order' {
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome 'PARTIAL_APPLIED')
+        $text=(Format-TpmTransactionPresentationRows -Presentation $presentation) -join "`n"
+        $text.IndexOf('Selected items: 3') | Should -BeLessThan $text.IndexOf('Changed items: 1')
+        $text.IndexOf('Changed items: 1') | Should -BeLessThan $text.IndexOf('Failed items: 1')
+        $text.IndexOf('Failed items: 1') | Should -BeLessThan $text.IndexOf('Unattempted items: 1')
+        $text | Should -Match 'game-a'
+        $text | Should -Match 'game-b'
+        $text | Should -Match 'game-c'
+    }
+
+    It 'does not turn non-success outcomes into success or skipped status text' {
+        foreach ($outcome in @('FAILED_BEFORE_MUTATION','PARTIAL_APPLIED','ROLLED_BACK_VERIFIED','ACTION_REQUIRED','CLEANUP_RESIDUE')) {
+            $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome $outcome)
+            $text=(Format-TpmTransactionPresentationRows -Presentation $presentation) -join "`n"
+            $text | Should -Not -Match '\[OK\]|\bFinished\b'
+        }
+        $noOp=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome 'NO_OP')
+        (Format-TpmTransactionPresentationRows -Presentation $noOp) -join "`n" | Should -Not -Match '^\s*Skipped\b'
+    }
+
+    It 'requires redacted safe technical references and recovery actions' {
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome 'ACTION_REQUIRED')
+        $safeReference=[pscustomobject]@{ Label='Support record'; Value='Current evidence is available'; EvidenceClass='Current'; Redacted=$true }
+        $safeAction=[pscustomobject]@{ Id='Review'; Label='Review Details and support evidence' }
+        $context=ConvertTo-TpmTransactionDetailsContext -Presentation $presentation -TechnicalReferences @($safeReference) -RecoveryActions @($safeAction)
+        { Assert-TpmTransactionDetailsContext -Context $context -TransactionId $presentation.TransactionId } | Should -Not -Throw
+        { ConvertTo-TpmTransactionDetailsContext -Presentation $presentation -TechnicalReferences @([pscustomobject]@{ Label='Raw'; Value='password=secret'; EvidenceClass='Current'; Redacted=$true }) } | Should -Throw
+        { ConvertTo-TpmTransactionDetailsContext -Presentation $presentation -TechnicalReferences @([pscustomobject]@{ Label='Raw'; Value='C:\private\trace.log'; EvidenceClass='Current'; Redacted=$true }) } | Should -Throw
+        { ConvertTo-TpmTransactionDetailsContext -Presentation $presentation -TechnicalReferences @([pscustomobject]@{ Label='Raw'; Value='leaked'; EvidenceClass='Current'; Redacted=$false }) } | Should -Throw
+    }
+
+    It 'renders Details from the presentation and approved context only' {
+        $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome 'CLEANUP_RESIDUE')
+        $context=ConvertTo-TpmTransactionDetailsContext -Presentation $presentation `
+            -TechnicalReferences @([pscustomobject]@{ Label='Evidence record'; Value='Current evidence is available'; EvidenceClass='Current'; Redacted=$true }) `
+            -RecoveryActions @([pscustomobject]@{ Id='Review'; Label='Review Details and support evidence' })
+        $rows=@(Format-TpmTransactionDetailsRows -Presentation $presentation -DetailsContext $context)
+        $text=$rows -join "`n"
+        $text | Should -Match 'Transaction ID: s2-b1-residue'
+        $text | Should -Match 'Underlying outcome: SUCCEEDED'
+        $text | Should -Match 'Selected items \(1\)'
+        $text | Should -Match 'Unknown items \(0\)'
+        $text | Should -Match 'Cleanup residue present: True'
+        $text | Should -Match 'Evidence record: Current evidence is available \[Current\]'
+        $text | Should -Match 'Review: Review Details and support evidence'
+        $text | Should -Not -Match '(?i)password|credential|secret|C:\\TPM|System\.|StackTrace'
+        ($context | ConvertTo-Json -Depth 8) | Should -Not -Match 'TransactionResult|TechnicalDetails'
+        { Format-TpmTransactionDetailsRows -Presentation $presentation -DetailsContext ([pscustomobject]@{ PSTypeName='TPM.TransactionDetailsContext.v1'; SchemaVersion=1; TransactionId='other'; TechnicalReferences=@(); RecoveryActions=@() }) } | Should -Throw
+        (Format-TpmTransactionDetailsRows -Presentation $presentation) -join "`n" | Should -Match 'Technical references: unavailable'
+    }
+
+    It 'uses the attached presentation as the terminal status authority' {
+        foreach ($outcome in @('SUCCEEDED','NO_OP','FAILED_BEFORE_MUTATION','PARTIAL_APPLIED','ROLLED_BACK_VERIFIED','ACTION_REQUIRED','CLEANUP_RESIDUE')) {
+            $presentation=ConvertTo-TpmTransactionPresentation -TransactionResult (New-S2B1PresentationResult -Outcome $outcome)
+            $context=New-TpmWorkflowStatusContext -WorkflowKey 'S2B1' -Title 'Renderer fixture' -Steps @('apply')
+            [void](Set-TpmWorkflowTransactionPresentation -Context $context -Presentation $presentation)
+            $context.State='Finished'
+            $snapshot=Get-TpmWorkflowStatusSnapshot -Context $context
+            $text=(Format-TpmWorkflowStatusRows -Snapshot $snapshot -Width 200) -join "`n"
+            if ($outcome -eq 'SUCCEEDED') {
+                $text | Should -Match '\[OK\].*Completed and verified'
+                $text | Should -Match 'Finished'
+            } else {
+                $text | Should -Not -Match '\[OK\]|(?i)Finished|Skipped'
+            }
+        }
+    }
+
+    It 'fails closed when a required terminal presentation is missing or invalid' {
+        $context=New-TpmWorkflowStatusContext -WorkflowKey 'S2B1' -Title 'Renderer fixture' -Steps @('apply')
+        [void](Require-TpmWorkflowTransactionPresentation -Context $context)
+        $context.State='Finished'
+        $text=(Format-TpmWorkflowStatusRows -Snapshot (Get-TpmWorkflowStatusSnapshot -Context $context)) -join "`n"
+        $text | Should -Match 'Result requires review'
+        $text | Should -Not -Match '\[OK\]|(?i)Finished|Skipped'
+        $context.TransactionPresentation=[pscustomobject]@{ Outcome='SUCCEEDED' }
+        $text=(Format-TpmWorkflowStatusRows -Snapshot (Get-TpmWorkflowStatusSnapshot -Context $context)) -join "`n"
+        $text | Should -Match 'Result requires review'
+        $text | Should -Not -Match '\[OK\]|(?i)Finished|Skipped'
+    }
+
+    It 'adapts the normal ReShade summary to the shared renderer without legacy counts' {
+        $start=$script:ProductionSource.IndexOf('Write-Host "  ReShade result -- review before continuing to dgVoodoo2:"')
+        $end=$script:ProductionSource.IndexOf("[void](Read-HostSafe '  Press Enter to review the ReShade result before dgVoodoo2')", $start)
+        $start | Should -BeGreaterOrEqual 0
+        $end | Should -BeGreaterThan $start
+        $summary=$script:ProductionSource.Substring($start, $end - $start)
+        $summary | Should -Match 'ConvertTo-TpmTransactionPresentation -TransactionResult \$normalReShadeResult'
+        $summary | Should -Match 'Format-TpmTransactionPresentationRows -Presentation \$normalReShadePresentation'
+        $summary | Should -Not -Match 'Transaction outcome:|ProtectedDetails|UnsafeDetails'
+        $summary | Should -Match 'Format-TpmReShadeSummaryDetailRows -Result \$normalReShadeResult'
+    }
+    It 'maps ReShade changed skipped and failed labels from the legacy result' {
+        $start=$script:ProductionSource.IndexOf('function Invoke-ReShadeSetup {')
+        $end=$script:ProductionSource.IndexOf('function Invoke-ReShadeSetupLegacy {', $start)
+        $wrapper=$script:ProductionSource.Substring($start, $end - $start)
+        $wrapper | Should -Match "Name 'ChangedItems'"
+        $wrapper | Should -Match "Name 'SkippedItems'"
+        $wrapper | Should -Match "Name 'FailedItems'"
+        $wrapper | Should -Not -Match 'ReShadeSkipped|ReShadeFailure|Select-Object -First'
+        $legacyStart=$script:ProductionSource.IndexOf('function Invoke-ReShadeSetupLegacy {')
+        $legacyEnd=$script:ProductionSource.IndexOf('function ', $legacyStart + 1)
+        $legacy=$script:ProductionSource.Substring($legacyStart, $legacyEnd - $legacyStart)
+        $legacy | Should -Match 'ChangedItems = \$changedGameIds\.ToArray\(\)'
+        $legacy | Should -Match 'SkippedItems = \$skippedGameIds\.ToArray\(\)'
+        $legacy | Should -Match 'FailedItems = \$failedGameIds\.ToArray\(\)'
+    }
+    It 'returns selected ReShade profile IDs with actual changed skipped and failed outcomes' {
+        $root=Join-Path $TestDrive 'ReShadeOutcomeMapping'
+        $profiles=Join-Path $root 'UserProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $gameRoot=Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $gameRoot -Force | Out-Null
+        foreach ($id in @('ChangedGame','SkippedGame','FailedGame')) {
+            $gamePath=Join-Path $gameRoot ($id + '.exe')
+            $xml="<GameProfile><GamePath>$gamePath</GamePath></GameProfile>"
+            [IO.File]::WriteAllText((Join-Path $profiles ($id + '.xml')), $xml, (New-Object Text.UTF8Encoding $false))
+        }
+        $profile=[pscustomobject]@{ ProfileId='Original'; FriendlyName='Original'; Description='Fixture'; TechniqueOrder=@() }
+        Mock Get-TpmReShadeProfiles { @($profile) }
+        Mock Show-TpmReShadeProfileGalleryWindow { [pscustomobject]@{ Available=$false; Session=$null; Reason='fixture' } }
+        $sourceDll=Join-Path $root 'ReShade64.dll'
+        [IO.File]::WriteAllBytes($sourceDll, [byte[]](0x4d,0x5a))
+        Mock Invoke-ReShadeUpdateIfAvailable { [pscustomobject]@{ Updated=$false; SourceDll=$SourceDll; SourceDll32=$SourceDll32 } }
+        Mock Test-ReShadeDllSignature { [pscustomobject]@{ Status='Unknown'; Signer='fixture' } }
+        Mock Read-TpmReShadeState { [pscustomobject]@{ Favorites=@() } }
+        $script:s2b1ProfilesPath=$profiles
+        Mock Select-RegisteredGamesInteractive { @(Get-ChildItem -LiteralPath $script:s2b1ProfilesPath -Filter '*.xml' -File | Sort-Object BaseName) }
+        Mock Read-TpmReShadeTerminalProfile { [pscustomobject]@{ Cancelled=$false; SelectedProfile=$profile; PreviewSession=$null } }
+        Mock Close-TpmReShadeProfileGallerySession {}
+        Mock Read-TpmChoice { 'Y' }
+        Mock Get-TpmReShadeChooserOptions { [pscustomobject]@{ Restore=[pscustomobject]@{ Found=$false; Valid=$false }; Remembered=[pscustomobject]@{ Found=$false; Valid=$false } } }
+        Mock Get-TpmReShadeApplyPreflight { [pscustomobject]@{ Ready=3; Protected=0; MissingPath=0; Unsafe=0; Failed=0 } }
+        Mock Get-TpmReShadeNativeShaderWarnings { [pscustomobject]@{ Detected=$false; Fields=@(); Warning=$null } }
+        Mock Get-ExeArchitecture { 'x64' }
+        Mock Get-TpmReShadeProfileOwnershipPath { param($GameId) Join-Path $root ($GameId + '.ownership.json') }
+        Mock Get-ReShadeTargetInfo { param($ExeDir) [pscustomobject]@{ TargetDir=$ExeDir; DllName='dxgi.dll' } }
+        Mock Get-TpmReShadeOwnershipClassification { [pscustomobject]@{ Status='ManagedTrusted'; Detail='trusted fixture'; ProfileId='Original' } }
+        Mock Test-TpmGameMutationPath {
+            param($GamePath)
+            if ($GamePath -match 'SkippedGame') {
+                [pscustomobject]@{ Valid=$false; ReasonCode='GAME_PATH_MISSING'; Reason='fixture skip'; ResolvedPath=$null; GameDirectory=$null }
+            } else {
+                [pscustomobject]@{ Valid=$true; ReasonCode=$null; Reason='valid'; ResolvedPath=$GamePath; GameDirectory=[IO.Path]::GetDirectoryName($GamePath) }
+            }
+        }
+        Mock Install-TpmReShadeProfileDeployment {
+            param($GamePath)
+            if ($GamePath -match 'FailedGame') { throw 'fixture deployment failure' }
+            [pscustomobject]@{ Succeeded=$true; State='INSTALLED'; TargetDir=[IO.Path]::GetDirectoryName($GamePath); DllName='dxgi.dll'; PresetApplied=$false; PresetSource=$null; ApiDetected=$true }
+        }
+        Mock Test-TpmReShadeDeploymentVerified { $true }
+        Mock Add-TpmReShadeProfileHistory {}
+        $result=Invoke-ReShadeSetupLegacy -UserProfilesDir $profiles -SourceDll $sourceDll -SourceDll32 '' -ConfigPath '' -TpRoot '' -Mode '' -ZipSource '' -GamesInstallFolder '' -RetroBat $false -HsDataPath ''
+        @($result.SelectedItems) | Should -Be @('ChangedGame','FailedGame','SkippedGame')
+        @($result.ChangedItems) | Should -Be @('ChangedGame')
+        @($result.SkippedItems) | Should -Be @('SkippedGame')
+        @($result.FailedItems) | Should -Be @('FailedGame')
+        @($result.ChangedItems) | Should -Not -Contain 'SkippedGame'
+        @($result.ChangedItems) | Should -Not -Contain 'FailedGame'
+    }
+    It 'uses the legacy selected set for ReShade transaction accounting' {
+        Mock Invoke-ReShadeSetupLegacy {
+            [pscustomobject]@{
+                Deployed=1; Errors=1; Skipped=1; Protected=0
+                SelectedItems=@('ChangedGame','SkippedGame','FailedGame')
+                ChangedItems=@('ChangedGame')
+                SkippedItems=@('SkippedGame')
+                FailedItems=@('FailedGame')
+            }
+        }
+        $result=Invoke-ReShadeSetup -UserProfilesDir $TestDrive -SourceDll '' -SourceDll32 '' -ConfigPath '' -TpRoot '' -Mode '' -ZipSource '' -GamesInstallFolder '' -RetroBat $false -HsDataPath ''
+        @($result.Items) | Should -Be @('ChangedGame','SkippedGame','FailedGame')
+        $result.Mutation.SelectedItemCount | Should -Be 3
+        $result.Mutation.AttemptedItemCount | Should -Be 2
+        @($result.Mutation.ChangedItems) | Should -Be @('ChangedGame')
+        @($result.Mutation.SkippedItems) | Should -Be @('SkippedGame')
+        @($result.Mutation.FailedItems) | Should -Be @('FailedGame')
+    }
+    It 'preserves ReShade protected, unsafe, and native-warning details through a redacted adapter' {
+        $result=[pscustomobject]@{
+            ProtectedDetails=@('GameA: protected C:\Games\GameA\dxgi.dll')
+            UnsafeDetails=@('GameB: password=secret')
+            NativeShaderWarnings=@([pscustomobject]@{ Game='GameC'; Warning='Native settings were preserved; display effects may stack.' })
+        }
+        $text=(Format-TpmReShadeSummaryDetailRows -Result $result) -join "`n"
+        $text | Should -Match 'Protected item:'
+        $text | Should -Match 'Unsafe/malformed item:'
+        $text | Should -Match 'Native settings preserved for GameC:'
+        $text | Should -Not -Match 'C:\\Games|password=secret'
+    }
+}
+
+Describe 'S1-FILE-PROMOTION shared multi-root transaction' {
+    BeforeAll {
+        function New-S1FileOperation {
+            param([string]$Id,[string]$Operation,[string]$Source,[string]$Destination,[string]$Root,[string]$Hash='')
+            [pscustomobject]@{
+                ItemId=$Id
+                Operation=$Operation
+                SourcePath=$Source
+                DestinationPath=$Destination
+                RootPath=$Root
+                ExpectedSourceHash=$Hash
+                ExpectedFinalHash=$Hash
+            }
+        }
+        function New-S1FileFixture {
+            param([string]$Name)
+            $root=Join-Path $TestDrive $Name
+            $source=Join-Path $root 'source'
+            $gameA=Join-Path $root 'game-a'
+            $gameB=Join-Path $root 'game-b'
+            New-Item -ItemType Directory -Path $source,$gameA,$gameB -Force | Out-Null
+            [pscustomobject]@{ Root=$root; Source=$source; GameA=$gameA; GameB=$gameB }
+        }
+    }
+
+    It 'promotes new and replacement files across multiple roots and verifies final hashes' {
+        $f=New-S1FileFixture 'batch-success'
+        $a=Join-Path $f.Source 'a.bin'; $b=Join-Path $f.Source 'b.bin'
+        [System.IO.File]::WriteAllText($a,'new-a'); [System.IO.File]::WriteAllText($b,'new-b')
+        $old=Join-Path $f.GameB 'b.bin'; [System.IO.File]::WriteAllText($old,'old-b')
+        $ops=@(
+            (New-S1FileOperation 'game-a:a' 'ADD' $a (Join-Path $f.GameA 'a.bin') $f.GameA ((Get-FileHash $a -Algorithm SHA256).Hash)),
+            (New-S1FileOperation 'game-b:b' 'REPLACE' $b $old $f.GameB ((Get-FileHash $b -Algorithm SHA256).Hash))
+        )
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'Success' -Operations $ops
+        $r.Outcome | Should -Be 'SUCCEEDED'
+        $r.ProductState | Should -Be 'INTENDED'
+        [System.IO.File]::ReadAllText((Join-Path $f.GameA 'a.bin')) | Should -Be 'new-a'
+        [System.IO.File]::ReadAllText($old) | Should -Be 'new-b'
+        $r.FinalVerification.Passed | Should -BeTrue
+        $r.Backup.Verified | Should -BeTrue
+    }
+
+    It 'returns NO_OP without creating backup state when every target already matches' {
+        $f=New-S1FileFixture 'batch-noop'
+        $source=Join-Path $f.Source 'same.bin'; $target=Join-Path $f.GameA 'same.bin'
+        [System.IO.File]::WriteAllText($source,'same'); [System.IO.File]::WriteAllText($target,'same')
+        $hash=(Get-FileHash $source -Algorithm SHA256).Hash
+        $op=New-S1FileOperation 'same' 'REPLACE' $source $target $f.GameA $hash
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'NoOp' -Operations @($op)
+        $r.Outcome | Should -Be 'NO_OP'
+        $r.Backup.Attempted | Should -BeFalse
+        $r.FinalVerification.Passed | Should -BeTrue
+        [System.IO.File]::ReadAllText($target) | Should -Be 'same'
+    }
+
+    It 'rolls back every changed root when a later promotion fails' {
+        $f=New-S1FileFixture 'batch-late-failure'
+        $a=Join-Path $f.Source 'a.bin'; $b=Join-Path $f.Source 'b.bin'
+        [System.IO.File]::WriteAllText($a,'a'); [System.IO.File]::WriteAllText($b,'b')
+        $targetA=Join-Path $f.GameA 'a.bin'; $targetB=Join-Path $f.GameB 'b.bin'
+        $ops=@(
+            (New-S1FileOperation 'a' 'ADD' $a $targetA $f.GameA ((Get-FileHash $a -Algorithm SHA256).Hash)),
+            (New-S1FileOperation 'b' 'ADD' $b $targetB $f.GameB ((Get-FileHash $b -Algorithm SHA256).Hash))
+        )
+        Mock Move-Item {
+            param($LiteralPath,$Destination)
+            if ($LiteralPath -like '*0001.payload') { throw 'simulated second promotion failure' }
+            [System.IO.File]::Move($LiteralPath,$Destination)
+        }
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'LateFailure' -Operations $ops
+        $r.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $r.Rollback.Verified | Should -BeTrue
+        Test-Path -LiteralPath $targetA | Should -BeFalse
+        Test-Path -LiteralPath $targetB | Should -BeFalse
+    }
+    It 'removes newly-created destination parents when a later nested promotion fails' {
+        $f=New-S1FileFixture 'batch-nested-parent-rollback'
+        $a=Join-Path $f.Source 'nested-a.bin'; $b=Join-Path $f.Source 'nested-b.bin'
+        [System.IO.File]::WriteAllText($a,'nested-a'); [System.IO.File]::WriteAllText($b,'nested-b')
+        $parentA=Join-Path $f.GameA 'new-parent\deeper'
+        $parentB=Join-Path $f.GameB 'other-parent\deeper'
+        $targetA=Join-Path $parentA 'a.bin'; $targetB=Join-Path $parentB 'b.bin'
+        $ops=@(
+            (New-S1FileOperation 'nested-a' 'ADD' $a $targetA $f.GameA ((Get-FileHash $a -Algorithm SHA256).Hash)),
+            (New-S1FileOperation 'nested-b' 'ADD' $b $targetB $f.GameB ((Get-FileHash $b -Algorithm SHA256).Hash))
+        )
+        Mock Move-Item {
+            param($LiteralPath,$Destination)
+            if ($LiteralPath -like '*0001.payload') { throw 'simulated nested second promotion failure' }
+            [System.IO.File]::Move($LiteralPath,$Destination)
+        }
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'NestedParentRollback' -Operations $ops
+        $r.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $r.Rollback.Verified | Should -BeTrue
+        Test-Path -LiteralPath $targetA | Should -BeFalse
+        Test-Path -LiteralPath $targetB | Should -BeFalse
+        Test-Path -LiteralPath $parentA | Should -BeFalse
+        Test-Path -LiteralPath ([System.IO.Path]::GetDirectoryName($parentA)) | Should -BeFalse
+        Test-Path -LiteralPath $parentB | Should -BeFalse
+        Test-Path -LiteralPath ([System.IO.Path]::GetDirectoryName($parentB)) | Should -BeFalse
+    }
+
+    It 'detects a promotion that writes destination bytes before throwing and restores absence' {
+        $f=New-S1FileFixture 'batch-partial-copy'
+        $source=Join-Path $f.Source 'partial.bin'; $target=Join-Path $f.GameA 'partial.bin'
+        [System.IO.File]::WriteAllText($source,'partial')
+        $hash=(Get-FileHash $source -Algorithm SHA256).Hash
+        $op=New-S1FileOperation 'partial' 'ADD' $source $target $f.GameA $hash
+        Mock Move-Item {
+            param($LiteralPath,$Destination)
+            [System.IO.File]::Copy($LiteralPath,$Destination,$true)
+            throw 'simulated post-copy promotion failure'
+        }
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'PartialCopy' -Operations @($op)
+        $r.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        Test-Path -LiteralPath $target | Should -BeFalse
+    }
+
+    It 'rolls back files when the metadata commit fails' {
+        $f=New-S1FileFixture 'batch-metadata-failure'
+        $source=Join-Path $f.Source 'plugin.dll'; $target=Join-Path $f.GameA 'plugin.dll'
+        $metadata=Join-Path $f.Root 'ownership.json'
+        [System.IO.File]::WriteAllText($source,'plugin'); [System.IO.File]::WriteAllText($metadata,'old-manifest')
+        $hash=(Get-FileHash $source -Algorithm SHA256).Hash
+        $op=New-S1FileOperation 'plugin' 'ADD' $source $target $f.GameA $hash
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'MetadataFailure' -Operations @($op) -MetadataPaths @($metadata) -CommitAction { throw 'simulated metadata commit failure' }
+        $r.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        Test-Path -LiteralPath $target | Should -BeFalse
+        [System.IO.File]::ReadAllText($metadata) | Should -Be 'old-manifest'
+    }
+
+    It 'returns ACTION_REQUIRED and preserves transaction evidence when rollback fails' {
+        $f=New-S1FileFixture 'batch-rollback-failure'
+        $source=Join-Path $f.Source 'plugin.dll'; $target=Join-Path $f.GameA 'plugin.dll'
+        [System.IO.File]::WriteAllText($source,'plugin')
+        $hash=(Get-FileHash $source -Algorithm SHA256).Hash
+        $op=New-S1FileOperation 'plugin' 'ADD' $source $target $f.GameA $hash
+        Mock Move-Item {
+            param($LiteralPath,$Destination)
+            [System.IO.File]::Move($LiteralPath,$Destination)
+        }
+        Mock Remove-Item {
+            param($LiteralPath,$Recurse,$Force,$ErrorAction)
+            if ($LiteralPath -like '*plugin.dll') { throw 'simulated rollback removal failure' }
+            if (Test-Path -LiteralPath $LiteralPath -PathType Container) { [System.IO.Directory]::Delete($LiteralPath,[bool]$Recurse) } elseif (Test-Path -LiteralPath $LiteralPath) { [System.IO.File]::Delete($LiteralPath) }
+        }
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'RollbackFailure' -Operations @($op) -CommitAction { throw 'simulated commit failure' }
+        $r.Outcome | Should -Be 'ACTION_REQUIRED'
+        $r.ProductState | Should -Be 'UNKNOWN'
+        $r.Cleanup.ResiduePresent | Should -BeTrue
+        Test-Path -LiteralPath $target | Should -BeTrue
+    }
+
+    It 'reports cleanup residue separately after a verified success' {
+        $f=New-S1FileFixture 'batch-cleanup-residue'
+        $source=Join-Path $f.Source 'plugin.dll'; $target=Join-Path $f.GameA 'plugin.dll'
+        [System.IO.File]::WriteAllText($source,'plugin')
+        $hash=(Get-FileHash $source -Algorithm SHA256).Hash
+        $op=New-S1FileOperation 'plugin' 'ADD' $source $target $f.GameA $hash
+        Mock Remove-Item {
+            param($LiteralPath,$Recurse,$Force,$ErrorAction)
+            if ($LiteralPath -like '*S1Test-CleanupResidue*') { throw 'simulated cleanup failure' }
+            if (Test-Path -LiteralPath $LiteralPath -PathType Container) { [System.IO.Directory]::Delete($LiteralPath,[bool]$Recurse) } elseif (Test-Path -LiteralPath $LiteralPath) { [System.IO.File]::Delete($LiteralPath) }
+        }
+        $r=Invoke-TpmTransactionalFileBatch -WorkflowKey 'S1Test' -OperationKey 'CleanupResidue' -Operations @($op)
+        $r.Outcome | Should -Be 'CLEANUP_RESIDUE'
+        $r.UnderlyingOutcome | Should -Be 'SUCCEEDED'
+        $r.ProductState | Should -Be 'INTENDED'
+        $r.Cleanup.ResiduePresent | Should -BeTrue
+        [System.IO.File]::ReadAllText($target) | Should -Be 'plugin'
+    }
+    It 'routes FFB wrapper deployments through ownership commit and final verification' {
+        $f=New-S1FileFixture 'ffb-wrapper'
+        $source=Join-Path $f.Source 'MAME64.dll'; $target=Join-Path $f.GameA 'd3d9.dll'
+        [System.IO.File]::WriteAllText($source,'ffb')
+        $hash=(Get-FileHash $source -Algorithm SHA256).Hash
+        $entry=[pscustomobject]@{ ProfileCode='GameA'; GameRoot=$f.GameA; Destination=$target; SourcePath=$source; SourceHash=$hash; DeployedSha256=$hash }
+        $r=Invoke-TpmFfbPluginFileTransaction -Deployments @($entry) -CacheDir $f.Root -OwnershipEntries @($entry)
+        $r.Outcome | Should -Be 'SUCCEEDED'
+        (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash | Should -Be $hash
+        @(Read-FFBPluginOwnership -CacheDir $f.Root | Where-Object { $_.Destination -ieq $target }) | Should -HaveCount 1
+    }
+
+    It 'routes Crosshair P1/P2 and last-selection state as one deduplicated batch' {
+        $f=New-S1FileFixture 'crosshair-wrapper'
+        $p1=Join-Path $f.Source 'P1.png'; $p2=Join-Path $f.Source 'P2.png'; $state=Join-Path $f.Root 'last-selection.json'
+        [System.IO.File]::WriteAllText($p1,'p1'); [System.IO.File]::WriteAllText($p2,'p2')
+        $targets=@(
+            [pscustomobject]@{ ItemId='GameA'; TargetDir=$f.GameA },
+            [pscustomobject]@{ ItemId='SharedAlias'; TargetDir=$f.GameA },
+            [pscustomobject]@{ ItemId='GameB'; TargetDir=$f.GameB }
+        )
+        $r=Invoke-TpmCrosshairAssetTransaction -P1Source $p1 -P2Source $p2 -Targets $targets -StatePath $state -P1Name '001' -P2Name '002'
+        $r.Outcome | Should -Be 'SUCCEEDED'
+        @($r.Items) | Should -HaveCount 5
+        [System.IO.File]::ReadAllText((Join-Path $f.GameA 'P1.png')) | Should -Be 'p1'
+        [System.IO.File]::ReadAllText((Join-Path $f.GameB 'P2.png')) | Should -Be 'p2'
+        ((Get-Content -LiteralPath $state -Raw) | ConvertFrom-Json).P2 | Should -Be '002'
+    }
+
+    It 'rolls back Crosshair P1/P2 and state when the second promotion fails' {
+        $f=New-S1FileFixture 'crosshair-wrapper-rollback'
+        $p1=Join-Path $f.Source 'P1.png'; $p2=Join-Path $f.Source 'P2.png'; $state=Join-Path $f.Root 'last-selection.json'
+        [System.IO.File]::WriteAllText($p1,'p1'); [System.IO.File]::WriteAllText($p2,'p2')
+        Mock Move-Item {
+            param($LiteralPath,$Destination)
+            if ($LiteralPath -like '*0001.payload') { throw 'simulated P2 promotion failure' }
+            [System.IO.File]::Move($LiteralPath,$Destination)
+        }
+        $r=Invoke-TpmCrosshairAssetTransaction `
+            -P1Source $p1 -P2Source $p2 `
+            -Targets @([pscustomobject]@{ ItemId='GameA'; TargetDir=$f.GameA }) `
+            -StatePath $state -P1Name '001' -P2Name '002'
+        $r.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        Test-Path -LiteralPath (Join-Path $f.GameA 'P1.png') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $f.GameA 'P2.png') | Should -BeFalse
+        Test-Path -LiteralPath $state | Should -BeFalse
+    }
+
+    It 'routes dgVoodoo2 direct files through the same multi-root batch' {
+        $f=New-S1FileFixture 'dgv-wrapper'
+        $dll=Join-Path $f.Source 'D3D8.dll'; $conf=Join-Path $f.Source 'dgVoodoo.conf'
+        $oldConf=Join-Path $f.GameB 'dgVoodoo.conf'; $dllDest=Join-Path $f.GameA 'D3D8.dll'
+        [System.IO.File]::WriteAllText($dll,'dll'); [System.IO.File]::WriteAllText($conf,'new-conf'); [System.IO.File]::WriteAllText($oldConf,'old-conf')
+        $dllHash=(Get-FileHash $dll -Algorithm SHA256).Hash; $confHash=(Get-FileHash $conf -Algorithm SHA256).Hash
+        $ops=@(
+            (New-S1FileOperation 'GameA:D3D8' 'ADD' $dll $dllDest $f.GameA $dllHash),
+            (New-S1FileOperation 'GameB:config' 'REPLACE' $conf $oldConf $f.GameB $confHash)
+        )
+        $r=Invoke-TpmDgVoodoo2FileTransaction -Operations $ops
+        $r.Outcome | Should -Be 'SUCCEEDED'
+        [System.IO.File]::ReadAllText($dllDest) | Should -Be 'dll'
+        [System.IO.File]::ReadAllText($oldConf) | Should -Be 'new-conf'
+        $r.FinalVerification.Passed | Should -BeTrue
+    }
+}
+
+Describe 'S1-DIRECTORY-REPLACEMENT AutoSync transaction' {
+    BeforeAll {
+        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        function New-S1DirectoryZip {
+            param([string]$ZipPath, [hashtable]$Entries)
+            if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
+            $fs = [System.IO.File]::Open($ZipPath, [System.IO.FileMode]::CreateNew)
+            try {
+                $archive = [System.IO.Compression.ZipArchive]::new($fs, [System.IO.Compression.ZipArchiveMode]::Create)
+                try {
+                    foreach ($name in $Entries.Keys) {
+                        $entry = $archive.CreateEntry($name)
+                        $writer = New-Object System.IO.StreamWriter($entry.Open())
+                        try { $writer.Write([string]$Entries[$name]) } finally { $writer.Dispose() }
+                    }
+                } finally { $archive.Dispose() }
+            } finally { $fs.Dispose() }
+        }
+        function New-S1DirectoryFixture {
+            param([string]$Name)
+            $root = Join-Path $TestDrive $Name
+            $source = Join-Path $root 'ZipSource'
+            $install = Join-Path $root 'Games'
+            New-Item -ItemType Directory -Path $source,$install -Force | Out-Null
+            [pscustomobject]@{
+                Root = $root
+                Source = $source
+                Install = $install
+                Target = Join-Path $install 'Game'
+                Zip = Join-Path $source 'Game.zip'
+                State = Join-Path $root 'sync.json'
+            }
+        }
+        function Invoke-S1DirectoryTransaction {
+            param($Fixture, [hashtable]$State = @{}, [object]$Stored = $null)
+            Invoke-TpmAutoSyncDirectoryTransaction `
+                -ZipPath $Fixture.Zip -InstallFolder $Fixture.Install -TargetDir $Fixture.Target `
+                -RawName 'Game' -SyncStatePath $Fixture.State -SyncState $State -StoredState $Stored
+        }
+    }
+
+    Context 'direct helper primitive contracts' {
+        It 'captures exact directory and ZIP inventories and rejects traversal' {
+            $f = New-S1DirectoryFixture 'directory-helper-manifest'
+            New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'expected'; 'data\config.ini' = 'config' }
+            New-Item -ItemType Directory -Path (Join-Path $f.Target 'data') -Force | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $f.Target 'game.exe'), 'expected')
+            [System.IO.File]::WriteAllText((Join-Path $f.Target 'data\config.ini'), 'config')
+            $manifest = Get-TpmDirectoryManifest -Path $f.Target
+            $inventory = Get-TpmAutoSyncZipInventory -ZipPath $f.Zip
+            $manifest.Readable | Should -BeTrue
+            $inventory.FileCount | Should -Be 2
+            $inventory.TotalBytes | Should -Be ([int64]([System.Text.Encoding]::UTF8.GetByteCount('expected') + [System.Text.Encoding]::UTF8.GetByteCount('config')))
+            (Test-TpmDirectoryAgainstZipInventory -Manifest $manifest -Inventory $inventory) | Should -BeTrue
+            Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'tampered' -NoNewline
+            (Test-TpmDirectoryAgainstZipInventory -Manifest (Get-TpmDirectoryManifest -Path $f.Target) -Inventory $inventory) | Should -BeFalse
+            $badZip = Join-Path $f.Source 'bad.zip'
+            New-S1DirectoryZip $badZip @{ '../escape.txt' = 'bad' }
+            { Get-TpmAutoSyncZipInventory -ZipPath $badZip } | Should -Throw '*escapes destination folder*'
+        }
+
+        It 'moves directories and leaves failed moves untouched' {
+            $f = New-S1DirectoryFixture 'directory-helper-move'
+            $source = Join-Path $f.Root 'source'
+            $destination = Join-Path $f.Root 'destination'
+            New-Item -ItemType Directory -Path $source -Force | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $source 'game.exe'), 'payload')
+            Invoke-TpmAutoSyncMovePath -Source $source -Destination $destination
+            Test-Path -LiteralPath $source -PathType Container | Should -BeFalse
+            Test-Path -LiteralPath $destination -PathType Container | Should -BeTrue
+            [System.IO.File]::ReadAllText((Join-Path $destination 'game.exe')) | Should -Be 'payload'
+            $collisionSource = Join-Path $f.Root 'collision-source'
+            New-Item -ItemType Directory -Path $collisionSource -Force | Out-Null
+            { Invoke-TpmAutoSyncMovePath -Source $collisionSource -Destination $destination } | Should -Throw '*destination already exists*'
+            $missingDestination = Join-Path $f.Root 'missing-destination'
+            { Invoke-TpmAutoSyncMovePath -Source $source -Destination $missingDestination } | Should -Throw '*source directory is unavailable*'
+            $failedSource = Join-Path $f.Root 'failed-source'
+            $nestedDestination = Join-Path $f.Root 'missing-parent\destination'
+            New-Item -ItemType Directory -Path $failedSource -Force | Out-Null
+            { Invoke-TpmAutoSyncMovePath -Source $failedSource -Destination $nestedDestination } | Should -Throw
+            Test-Path -LiteralPath $failedSource -PathType Container | Should -BeTrue
+            Test-Path -LiteralPath $nestedDestination | Should -BeFalse
+        }
+
+        It 'removes files and directories only after manifest inspection' {
+            $f = New-S1DirectoryFixture 'directory-helper-remove'
+            $directory = Join-Path $f.Root 'remove-directory'
+            $file = Join-Path $f.Root 'remove-file.txt'
+            New-Item -ItemType Directory -Path (Join-Path $directory 'nested') -Force | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $directory 'nested\file.txt'), 'nested')
+            [System.IO.File]::WriteAllText($file, 'file')
+            Invoke-TpmAutoSyncRemovePath -Path $directory
+            Invoke-TpmAutoSyncRemovePath -Path $file
+            Test-Path -LiteralPath $directory | Should -BeFalse
+            Test-Path -LiteralPath $file | Should -BeFalse
+        }
+
+        It 'atomically commits state and preserves the previous bytes as backup' {
+            $f = New-S1DirectoryFixture 'directory-helper-state-commit'
+            $transaction = Join-Path $f.Root 'transaction'
+            $rollback = Join-Path $transaction 'rollback'
+            $candidate = Join-Path $transaction 'syncstate.candidate.json'
+            $backup = Join-Path $rollback 'syncstate.backup.json'
+            New-Item -ItemType Directory -Path $rollback -Force | Out-Null
+            [System.IO.File]::WriteAllText($f.State, '{"Version":1}')
+            [System.IO.File]::WriteAllText($candidate, '{"Version":2}')
+            $pre = Get-TpmFileState -Path $f.State
+            $commit = Invoke-TpmAutoSyncStateCommit -StatePath $f.State -CandidatePath $candidate -ExpectedPreState $pre -BackupPath $backup
+            [System.IO.File]::ReadAllText($f.State) | Should -Be '{"Version":2}'
+            [System.IO.File]::ReadAllText($backup) | Should -Be '{"Version":1}'
+            Test-Path -LiteralPath $candidate -PathType Leaf | Should -BeFalse
+            $commit.BackupPath | Should -Be ([System.IO.Path]::GetFullPath($backup))
+            (Test-TpmFileStateMatch -Expected $commit.Candidate -Actual (Get-TpmFileState -Path $f.State) -IgnoreMetadata) | Should -BeTrue
+        }
+
+        It 'rejects an invalid state candidate without mutating the live state' {
+            $f = New-S1DirectoryFixture 'directory-helper-state-candidate-failure'
+            $transaction = Join-Path $f.Root 'transaction'
+            $rollback = Join-Path $transaction 'rollback'
+            $candidate = Join-Path $transaction 'missing-candidate.json'
+            $backup = Join-Path $rollback 'syncstate.backup.json'
+            New-Item -ItemType Directory -Path $rollback -Force | Out-Null
+            [System.IO.File]::WriteAllText($f.State, '{"Version":1}')
+            $before = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($f.State))
+            $pre = Get-TpmFileState -Path $f.State
+            { Invoke-TpmAutoSyncStateCommit -StatePath $f.State -CandidatePath $candidate -ExpectedPreState $pre -BackupPath $backup } | Should -Throw '*candidate*'
+            [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($f.State)) | Should -Be $before
+            Test-Path -LiteralPath $backup | Should -BeFalse
+        }
+
+        It 'rejects a changed live state before committing a candidate' {
+            $f = New-S1DirectoryFixture 'directory-helper-state-precondition'
+            $transaction = Join-Path $f.Root 'transaction'
+            $rollback = Join-Path $transaction 'rollback'
+            $candidate = Join-Path $transaction 'syncstate.candidate.json'
+            $backup = Join-Path $rollback 'syncstate.backup.json'
+            New-Item -ItemType Directory -Path $rollback -Force | Out-Null
+            [System.IO.File]::WriteAllText($f.State, '{"Version":1}')
+            $pre = Get-TpmFileState -Path $f.State
+            [System.IO.File]::WriteAllText($candidate, '{"Version":2}')
+            [System.IO.File]::WriteAllText($f.State, '{"Version":external}')
+            { Invoke-TpmAutoSyncStateCommit -StatePath $f.State -CandidatePath $candidate -ExpectedPreState $pre -BackupPath $backup } | Should -Throw '*changed before commit*'
+            [System.IO.File]::ReadAllText($f.State) | Should -Be '{"Version":external}'
+            Test-Path -LiteralPath $candidate -PathType Leaf | Should -BeTrue
+            Test-Path -LiteralPath $backup | Should -BeFalse
+        }
+
+        It 'restores a verified prior state and refuses an unexpected current hash' {
+            $f = New-S1DirectoryFixture 'directory-helper-state-restore'
+            $backup = Join-Path $f.Root 'syncstate.backup.json'
+            [System.IO.File]::WriteAllText($f.State, '{"Version":1}')
+            $pre = Get-TpmFileState -Path $f.State
+            [System.IO.File]::Copy($f.State, $backup)
+            [System.IO.File]::WriteAllText($f.State, '{"Version":2}')
+            $current = Get-TpmFileState -Path $f.State
+            Restore-TpmAutoSyncState -StatePath $f.State -ExpectedPreState $pre -BackupPath $backup -ExpectedCurrentHash $current.Sha256
+            [System.IO.File]::ReadAllText($f.State) | Should -Be '{"Version":1}'
+            (Test-TpmFileStateMatch -Expected $pre -Actual (Get-TpmFileState -Path $f.State) -IgnoreMetadata) | Should -BeTrue
+            [System.IO.File]::WriteAllText($f.State, '{"Version":unexpected}')
+            { Restore-TpmAutoSyncState -StatePath $f.State -ExpectedPreState $pre -BackupPath $backup -ExpectedCurrentHash $current.Sha256 } | Should -Throw '*changed before rollback*'
+            [System.IO.File]::ReadAllText($f.State) | Should -Be '{"Version":unexpected}'
+        }
+
+        It 'removes a newly-created state when rollback pre-state was absent' {
+            $f = New-S1DirectoryFixture 'directory-helper-state-absent'
+            $pre = Get-TpmFileState -Path $f.State
+            [System.IO.File]::WriteAllText($f.State, '{"Version":1}')
+            $current = Get-TpmFileState -Path $f.State
+            Restore-TpmAutoSyncState -StatePath $f.State -ExpectedPreState $pre -ExpectedCurrentHash $current.Sha256
+            Test-Path -LiteralPath $f.State | Should -BeFalse
+        }
+    }
+
+    It 'replaces an existing directory only after staging and manifest verification' {
+        $f = New-S1DirectoryFixture 'directory-success'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'new'; 'data\config.ini' = 'new-config' }
+        New-Item -ItemType Directory -Path $f.Target -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'old' -NoNewline
+        Set-Content -LiteralPath (Join-Path $f.Target 'old.txt') -Value 'old-file' -NoNewline
+        $state = @{}
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f -State $state
+        $tx.TransactionResult.Outcome | Should -Be 'SUCCEEDED'
+        $tx.TransactionResult.ProductState | Should -Be 'INTENDED'
+        { Assert-TpmTransactionResult -Result $tx.TransactionResult } | Should -Not -Throw
+        [System.IO.File]::ReadAllText((Join-Path $f.Target 'game.exe')) | Should -Be 'new'
+        [System.IO.File]::ReadAllText((Join-Path $f.Target 'data\config.ini')) | Should -Be 'new-config'
+        Test-Path -LiteralPath (Join-Path $f.Target 'old.txt') | Should -BeFalse
+        Test-Path -LiteralPath ($f.Target + '.extracting') | Should -BeFalse
+        $state.Game.LocalManifestHash | Should -Not -BeNullOrEmpty
+        [string]((Get-Content -LiteralPath $f.State -Raw) | ConvertFrom-Json).Game.LocalPath | Should -Be ([System.IO.Path]::GetFullPath($f.Target))
+    }
+
+    It 'returns NO_OP without backup or state writes when directory and state match' {
+        $f = New-S1DirectoryFixture 'directory-noop'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'same'; 'data\config.ini' = 'same-config' }
+        $state = @{}
+        $first = Invoke-S1DirectoryTransaction -Fixture $f -State $state
+        $stateBytes = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($f.State))
+        $second = Invoke-S1DirectoryTransaction -Fixture $f -State $state -Stored $state.Game
+        $second.TransactionResult.Outcome | Should -Be 'NO_OP'
+        $second.TransactionResult.Backup.Attempted | Should -BeFalse
+        $second.TransactionResult.FinalVerification.Passed | Should -BeTrue
+        [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($f.State)) | Should -Be $stateBytes
+        { Assert-TpmTransactionResult -Result $second.TransactionResult } | Should -Not -Throw
+    }
+
+    It 'repairs missing state through a state-only transaction without replacing the directory' {
+        $f = New-S1DirectoryFixture 'directory-adoption'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'existing'; 'data\config.ini' = 'existing-config' }
+        New-Item -ItemType Directory -Path $f.Target -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'existing' -NoNewline
+        New-Item -ItemType Directory -Path (Join-Path $f.Target 'data') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'data\config.ini') -Value 'existing-config' -NoNewline
+        $before = Get-TpmDirSnapshot $f.Target
+        $state = @{}
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f -State $state
+        $tx.TransactionResult.Outcome | Should -Be 'SUCCEEDED'
+        $tx.FilesystemChanged | Should -BeFalse
+        $tx.StateChanged | Should -BeTrue
+        $tx.RegistrationEligible | Should -BeFalse
+        Assert-TpmDirSnapshotUnchanged $before (Get-TpmDirSnapshot $f.Target)
+        $state.Game.LocalManifestHash | Should -Not -BeNullOrEmpty
+        Test-Path -LiteralPath ($f.Target + '.extracting') | Should -BeFalse
+    }
+
+    It 'preserves the old directory when staging fails before the live boundary' {
+        $f = New-S1DirectoryFixture 'directory-stage-failure'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'new' }
+        New-Item -ItemType Directory -Path $f.Target -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'old' -NoNewline
+        $before = Get-TpmDirSnapshot $f.Target
+        Mock Expand-ZipFileSafe { throw 'forced staging failure' }
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f
+        $tx.TransactionResult.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        $tx.TransactionResult.Mutation.Started | Should -BeFalse
+        Assert-TpmDirSnapshotUnchanged $before (Get-TpmDirSnapshot $f.Target)
+        Test-Path -LiteralPath $f.State | Should -BeFalse
+        Test-Path -LiteralPath ($f.Target + '.extracting') | Should -BeFalse
+    }
+
+    It 'rolls back a moved-aside directory when promotion fails' {
+        $f = New-S1DirectoryFixture 'directory-promotion-failure'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'new' }
+        New-Item -ItemType Directory -Path $f.Target -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'old' -NoNewline
+        $before = Get-TpmDirSnapshot $f.Target
+        Mock Invoke-TpmAutoSyncMovePath {
+            param([string]$Source, [string]$Destination)
+            if ($Source -like '*\payload') { throw 'forced promotion failure' }
+            Move-Item -LiteralPath $Source -Destination $Destination -ErrorAction Stop
+        }
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f
+        $tx.TransactionResult.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $tx.TransactionResult.Rollback.Verified | Should -BeTrue
+        Assert-TpmDirSnapshotUnchanged $before (Get-TpmDirSnapshot $f.Target)
+        Test-Path -LiteralPath $f.State | Should -BeFalse
+        Test-Path -LiteralPath ($f.Target + '.extracting') | Should -BeFalse
+    }
+
+    It 'rolls back the directory when atomic sync-state commit fails' {
+        $f = New-S1DirectoryFixture 'directory-state-failure'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'new' }
+        New-Item -ItemType Directory -Path $f.Target -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'old' -NoNewline
+        [System.IO.File]::WriteAllText($f.State, '{"Other":{"Value":"old"}}')
+        $stateBytes = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($f.State))
+        $state = @{ Other = [pscustomobject]@{ Value = 'old' } }
+        Mock Invoke-TpmAutoSyncStateCommit { throw 'forced sync-state commit failure' }
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f -State $state
+        $tx.TransactionResult.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $tx.TransactionResult.Rollback.Verified | Should -BeTrue
+        [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($f.State)) | Should -Be $stateBytes
+        [System.IO.File]::ReadAllText((Join-Path $f.Target 'game.exe')) | Should -Be 'old'
+        Test-Path -LiteralPath ($f.Target + '.extracting') | Should -BeFalse
+    }
+
+    It 'blocks a stale live sentinel without deleting its evidence' {
+        $f = New-S1DirectoryFixture 'directory-stale-sentinel'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'new' }
+        New-Item -ItemType Directory -Path $f.Target -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'old' -NoNewline
+        Set-Content -LiteralPath ($f.Target + '.extracting') -Value 'stale' -NoNewline
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f
+        $tx.TransactionResult.Outcome | Should -Be 'ACTION_REQUIRED'
+        $tx.TransactionResult.ReasonCode | Should -Be 'STALE_EXTRACTION_MARKER'
+        Test-Path -LiteralPath ($f.Target + '.extracting') | Should -BeTrue
+        [System.IO.File]::ReadAllText((Join-Path $f.Target 'game.exe')) | Should -Be 'old'
+    }
+
+    It 'replaces a divergent directory instead of trusting matching source metadata' {
+        $f = New-S1DirectoryFixture 'directory-divergence'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'expected' }
+        $state = @{}
+        $first = Invoke-S1DirectoryTransaction -Fixture $f -State $state
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'tampered' -NoNewline
+        $second = Invoke-S1DirectoryTransaction -Fixture $f -State $state -Stored $state.Game
+        $second.TransactionResult.Outcome | Should -Be 'SUCCEEDED'
+        [System.IO.File]::ReadAllText((Join-Path $f.Target 'game.exe')) | Should -Be 'expected'
+        $second.FilesystemChanged | Should -BeTrue
+    }
+
+    It 'reports cleanup residue after a verified replacement without admitting a clean transaction' {
+        $f = New-S1DirectoryFixture 'directory-cleanup-residue'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'new' }
+        Mock Invoke-TpmAutoSyncRemovePath {
+            param([string]$Path)
+            if ($Path -like '*\.tpm-autosync-*') { throw 'forced transaction cleanup failure' }
+            if (Test-Path -LiteralPath $Path -PathType Container) {
+                [System.IO.Directory]::Delete($Path, $true)
+            } elseif (Test-Path -LiteralPath $Path) {
+                [System.IO.File]::Delete($Path)
+            }
+        }
+        $state = @{}
+        $tx = Invoke-S1DirectoryTransaction -Fixture $f -State $state
+        $tx.TransactionResult.Outcome | Should -Be 'CLEANUP_RESIDUE'
+        $tx.TransactionResult.UnderlyingOutcome | Should -Be 'SUCCEEDED'
+        $tx.TransactionResult.FinalVerification.Passed | Should -BeTrue
+        $tx.RegistrationEligible | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $f.Target 'game.exe') | Should -BeTrue
+        Test-Path -LiteralPath $tx.TransactionResult.Cleanup.ResiduePaths[0] | Should -BeTrue
+        { Assert-TpmTransactionResult -Result $tx.TransactionResult } | Should -Not -Throw
+        Remove-Item -LiteralPath $tx.TransactionResult.Cleanup.ResiduePaths[0] -Recurse -Force
+    }
+
+    It 'aggregates only committed replacements as registration candidates' {
+        $f = New-S1DirectoryFixture 'directory-aggregation'
+        New-S1DirectoryZip (Join-Path $f.Source 'Good.zip') @{ 'game.exe' = 'good' }
+        Set-Content -LiteralPath (Join-Path $f.Source 'Bad.zip') -Value 'not a ZIP' -NoNewline
+        $result = Invoke-AutoSync -zipSource $f.Source -installFolder $f.Install -syncStatePath $f.State
+        $result.Synced | Should -Be 1
+        $result.Failed | Should -Be 1
+        $result.SyncedNames | Should -Be @('Good')
+        @($result.TransactionResults).Count | Should -Be 2
+        ($result.TransactionResults | Where-Object { $_.OperationKey -eq 'Bad' }).Outcome | Should -Not -Be 'SUCCEEDED'
+    }
+}
+
+Describe "S1-BACKUP-GATE verified UserProfiles backup" {
+    BeforeAll {
+        function New-BackupGateFixture {
+            param([string]$Root, [string]$Code='GameA', [string]$Value='0')
+            $profiles = Join-Path $Root 'UserProfiles'
+            $tp = Join-Path $Root 'TeknoParrot'
+            New-Item -ItemType Directory -Path $profiles,(Join-Path $tp 'GameProfiles') -Force | Out-Null
+            $xml = "<GameProfile><GameName>$Code</GameName><EmulationProfile>Daytona3</EmulationProfile><GunGame>true</GunGame><ConfigValues><FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Enable</FieldName><FieldType>Bool</FieldType><FieldValue>$Value</FieldValue></FieldInformation><FieldInformation><FieldName>HideCursor</FieldName><FieldType>Bool</FieldType><FieldValue>$Value</FieldValue></FieldInformation></ConfigValues></GameProfile>"
+            Set-Content -LiteralPath (Join-Path $profiles ($Code + '.xml')) -Value $xml -Encoding utf8
+            return [pscustomobject]@{ Profiles=$profiles; Tp=$tp; File=(Join-Path $profiles ($Code + '.xml')) }
+        }
+        function New-VerifiedBackupStub {
+            [pscustomobject]@{ Required=$true; Attempted=$true; Created=$true; Succeeded=$true; Verified=$true; Path='backup-evidence'; Manifest=@(); FailureStage=$null; Reason=$null; ResiduePaths=@() }
+        }
+    }
+    It 'copies and verifies complete UserProfiles content while excluding FullBackup' {
+        $root=Join-Path $TestDrive 'complete-backup'; $profiles=Join-Path $root 'UserProfiles'; New-Item -ItemType Directory -Path $profiles,(Join-Path $profiles 'FullBackup') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $profiles 'A.xml') -Value 'alpha' -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $profiles 'FullBackup\old.xml') -Value 'old' -Encoding utf8
+        $hidden=Join-Path $profiles 'hidden.dat'; Set-Content -LiteralPath $hidden -Value 'hidden' -Encoding utf8; (Get-Item -LiteralPath $hidden).Attributes='Hidden'
+        $result=New-TpmVerifiedUserProfilesBackup -UserProfilesDir $profiles -Label 'Test'
+        $result.Verified | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $result.Path 'A.xml') -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $result.Path 'hidden.dat') -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $result.Path 'FullBackup') -PathType Container | Should -BeFalse
+        (Get-Content -LiteralPath (Join-Path $result.Path 'A.xml') -Raw) | Should -Be (Get-Content -LiteralPath (Join-Path $profiles 'A.xml') -Raw)
+    }
+    It 'blocks FFB before Save-Xml when backup copy fails' {
+        $f=New-BackupGateFixture -Root (Join-Path $TestDrive 'ffb-copy-fail'); Mock Read-TpmYesNo { 'Y' }; Mock Get-FFBBlasterFieldNames { @('FFB Blaster') }; Mock Copy-Item { throw 'simulated copy failure' }; Mock Save-Xml { throw 'must not write' }
+        $r=Invoke-FFBBlasterSetup -UserProfilesDir $f.Profiles -TpRoot $f.Tp
+        $r.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'; $r.BackupSucceeded | Should -BeFalse; Should -Invoke Save-Xml -Times 0 -Exactly
+        [xml](Get-Content -LiteralPath $f.File -Raw) | Should -Not -BeNullOrEmpty
+    }
+    It 'returns NO_OP without backup when FFB profiles are already current' {
+        $f=New-BackupGateFixture -Root (Join-Path $TestDrive 'ffb-noop') -Value '1'; Mock Read-TpmYesNo { 'Y' }; Mock Get-FFBBlasterFieldNames { @('FFB Blaster') }; Mock New-TpmVerifiedUserProfilesBackup { throw 'NO_OP must not create backup' }; Mock Save-Xml { throw 'NO_OP must not write' }
+        $r=Invoke-FFBBlasterSetup -UserProfilesDir $f.Profiles -TpRoot $f.Tp
+        $r.Outcome | Should -Be 'NO_OP'; Should -Invoke New-TpmVerifiedUserProfilesBackup -Times 0 -Exactly; Should -Invoke Save-Xml -Times 0 -Exactly
+    }
+    It 'returns SUCCEEDED only after FFB save read-back verification' {
+        $f=New-BackupGateFixture -Root (Join-Path $TestDrive 'ffb-success'); Mock Read-TpmYesNo { 'Y' }; Mock Get-FFBBlasterFieldNames { @('FFB Blaster') }; Mock New-TpmVerifiedUserProfilesBackup { New-VerifiedBackupStub }
+        $r=Invoke-FFBBlasterSetup -UserProfilesDir $f.Profiles -TpRoot $f.Tp
+        $r.Outcome | Should -Be 'SUCCEEDED'; $r.ProductState | Should -Be 'INTENDED'; (Read-Xml $f.File).SelectSingleNode('//FieldInformation[CategoryName="FFB Blaster"]/FieldValue').InnerText | Should -Be '1'
+    }
+    It 'reports partial FFB save failure without claiming success' {
+        $root=Join-Path $TestDrive 'ffb-partial'; $a=New-BackupGateFixture -Root $root -Code 'GameA'; $b=New-BackupGateFixture -Root $root -Code 'GameB'; Mock Read-TpmYesNo { 'Y' }; Mock Get-FFBBlasterFieldNames { @('FFB Blaster') }; Mock New-TpmVerifiedUserProfilesBackup { New-VerifiedBackupStub }; $script:backupGateSaveCount=0; Mock Save-Xml { $script:backupGateSaveCount++; if($script:backupGateSaveCount -eq 2){throw 'simulated save failure'}; $doc.Save($path) }
+        $r=Invoke-FFBBlasterSetup -UserProfilesDir $a.Profiles -TpRoot $a.Tp
+        $r.Outcome | Should -Be 'PARTIAL_APPLIED'; $r.ProductState | Should -Be 'PARTIAL_KNOWN'; $r.Succeeded | Should -BeFalse; @($r.Mutation.FailedItems).Count | Should -Be 1
+    }
+    It 'blocks cursor XML writes when backup verification fails' {
+        $f=New-BackupGateFixture -Root (Join-Path $TestDrive 'cursor-backup-fail'); Mock New-TpmVerifiedUserProfilesBackup { [pscustomobject]@{ Required=$true; Attempted=$true; Created=$true; Succeeded=$false; Verified=$false; Path='backup'; Manifest=@(); FailureStage='BackupVerification'; Reason='mismatch'; ResiduePaths=@() } }; Mock Save-Xml { throw 'must not write' }
+        $r=Invoke-CursorHideSetup -UserProfilesDir $f.Profiles
+        $r.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'; $r.BackupSucceeded | Should -BeFalse; Should -Invoke Save-Xml -Times 0 -Exactly
+    }
+    It 'returns cursor NO_OP without backup when all eligible fields are current' {
+        $f=New-BackupGateFixture -Root (Join-Path $TestDrive 'cursor-noop') -Value '1'; Mock New-TpmVerifiedUserProfilesBackup { throw 'NO_OP must not create backup' }; Mock Save-Xml { throw 'NO_OP must not write' }
+        $r=Invoke-CursorHideSetup -UserProfilesDir $f.Profiles
+        $r.Outcome | Should -Be 'NO_OP'; Should -Invoke New-TpmVerifiedUserProfilesBackup -Times 0 -Exactly; Should -Invoke Save-Xml -Times 0 -Exactly
+    }
+    It 'returns cursor SUCCEEDED after read-back verification' {
+        $f=New-BackupGateFixture -Root (Join-Path $TestDrive 'cursor-success') -Value '0'; Mock New-TpmVerifiedUserProfilesBackup { New-VerifiedBackupStub }
+        $r=Invoke-CursorHideSetup -UserProfilesDir $f.Profiles
+        $r.Outcome | Should -Be 'SUCCEEDED'; $r.ProductState | Should -Be 'INTENDED'; (Read-Xml $f.File).SelectSingleNode('//FieldInformation[FieldName="HideCursor"]/FieldValue').InnerText | Should -Be '1'
+    }
+    It 'propagates cursor failure into the Crosshair parent result contract' {
+        $source=$script:ProductionSource
+        $source | Should -Match '\$cursorResult = Invoke-CursorHideSetup'
+        $source | Should -Match '\$cursorSucceeded = \(\$cursorResult.*Outcome.*SUCCEEDED.*NO_OP'
+        $source | Should -Match '\$crosshairSucceeded = \(\$transactionResult\.Outcome -in @\(''SUCCEEDED'',''NO_OP''\)'
+    }
+}
+
+Describe 'S1-DB-RESTORE PostgreSQL 8.3 transaction' -Tag 'S1-DB-RESTORE' {
+    BeforeAll {
+        function New-S1DbRestoreFixture {
+            param([string]$Name, [string[]]$Databases = @('GameDB02', 'GameDB01'))
+            $root = Join-Path $TestDrive ('s1-db-restore-' + $Name)
+            $backupRoot = Join-Path $root 'selected'
+            $bin = Join-Path $root 'bin'
+            $evidence = Join-Path $root 'evidence'
+            New-Item -ItemType Directory -Path $backupRoot, $bin, $evidence -Force | Out-Null
+            foreach ($tool in @(Get-Postgres83RestoreToolNames)) {
+                New-Item -ItemType File -Path (Join-Path $bin $tool) -Force | Out-Null
+            }
+            foreach ($db in $Databases) {
+                [System.IO.File]::WriteAllText((Join-Path $backupRoot ($db + '.backup')), ('snapshot-' + $db), (New-Object System.Text.UTF8Encoding($false)))
+            }
+            $state = [ordered]@{
+                Exists = @{}
+                Calls = New-Object System.Collections.Generic.List[object]
+                ToolVersion = '8.3.23'
+                FailList = $false
+                FailDump = $false
+                RestoreFailures = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+                UsedRestoreFailures = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+                DropCounts = @{}
+                FailRollbackDrop = $false
+                FailRollbackRestore = $false
+            }
+            foreach ($db in $Databases) { $state.Exists[$db] = $true }
+            return [pscustomobject]@{
+                Root = $root
+                BackupRoot = $backupRoot
+                Bin = $bin
+                Evidence = $evidence
+                Files = @(Get-ChildItem -LiteralPath $backupRoot -Filter '*.backup' -File | Sort-Object Name)
+                State = [pscustomobject]$state
+            }
+        }
+
+        function Get-S1DbFakeArgument {
+            param([string[]]$Arguments, [string]$Name)
+            for ($i = 0; $i -lt $Arguments.Count - 1; $i++) {
+                if ($Arguments[$i] -ceq $Name) { return [string]$Arguments[$i + 1] }
+            }
+            return ''
+        }
+
+        function New-S1DbFakeCommandResult {
+            param([string]$ToolName, [string[]]$Arguments, [int]$ExitCode, [string]$Output = '')
+            return [pscustomobject]@{
+                Tool = $ToolName
+                Executable = Join-Path $script:PostgresBinDir $ToolName
+                Arguments = @($Arguments)
+                ExitCode = $ExitCode
+                Succeeded = ($ExitCode -eq 0)
+                Output = $Output
+            }
+        }
+
+        function Invoke-S1DbFakeCommand {
+            param([string]$ToolName, [string[]]$Arguments, [string]$SuperPasswordPlain)
+            $state = $script:S1DbFakeState
+            $db = Get-S1DbFakeArgument -Arguments $Arguments -Name '-d'
+            if ([string]::IsNullOrWhiteSpace($db)) { $db = [string]$Arguments[-1] }
+            $outputPath = Get-S1DbFakeArgument -Arguments $Arguments -Name '-f'
+            [void]$state.Calls.Add([pscustomobject]@{ Tool = $ToolName; Database = $db; Arguments = @($Arguments); OutputPath = $outputPath; Mutation = ($Arguments -notcontains '--version' -and -not ($ToolName -ceq 'pg_restore.exe' -and $Arguments -contains '--list')) })
+            if ($Arguments -contains '--version') {
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0 -Output ("{0} (PostgreSQL) {1}" -f $ToolName,$state.ToolVersion)
+            }
+            if ($ToolName -eq 'pg_restore.exe' -and $Arguments -contains '--list') {
+                if ($state.FailList) { return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 9 -Output 'archive list failed' }
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
+            }
+            if ($ToolName -eq 'pg_dump.exe') {
+                if ($state.FailDump) { return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 7 -Output 'dump failed' }
+                [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($outputPath))
+                [System.IO.File]::WriteAllText($outputPath, ('current-' + $db), (New-Object System.Text.UTF8Encoding($false)))
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
+            }
+            if ($ToolName -eq 'dropdb.exe') {
+                $count = if ($state.DropCounts.ContainsKey($db)) { [int]$state.DropCounts[$db] + 1 } else { 1 }
+                $state.DropCounts[$db] = $count
+                if ($state.FailRollbackDrop -and $count -gt 1) {
+                    return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 8 -Output 'rollback drop failed'
+                }
+                $state.Exists[$db] = $false
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
+            }
+            if ($ToolName -eq 'createdb.exe') {
+                $state.Exists[$db] = $true
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
+            }
+            if ($ToolName -eq 'psql.exe') {
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
+            }
+            if ($ToolName -eq 'pg_restore.exe') {
+                if ($state.FailRollbackRestore -and [string]$Arguments[-1] -like '*current.backup') {
+                    return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 6 -Output 'rollback restore failed'
+                }
+                if ($state.RestoreFailures.Contains($db) -and $state.UsedRestoreFailures.Add($db)) {
+                    return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 5 -Output 'restore failed'
+                }
+                $state.Exists[$db] = $true
+                return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
+            }
+            return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 3 -Output 'unexpected fake tool'
+        }
+
+        function Install-S1DbRestoreMocks {
+            param([Parameter(Mandatory)]$Fixture)
+            $script:S1DbFakeState = $Fixture.State
+            $script:PostgresBinDir = $Fixture.Bin
+            $script:PostgresServiceName = 'pgsql-8.3'
+            Mock Get-Service { [pscustomobject]@{ Status = 'Running' } }
+            Mock Test-PostgresPassword { $true }
+            Mock Lock-PostgresRecoveryDirectory {}
+            Mock Invoke-Postgres83RestoreCommand {
+                param([string]$ToolName, [string[]]$Arguments, [string]$SuperPasswordPlain)
+                Invoke-S1DbFakeCommand -ToolName $ToolName -Arguments $Arguments -SuperPasswordPlain $SuperPasswordPlain
+            }
+            Mock Get-PostgresDatabaseState {
+                param([string]$DbName, [string]$SuperPasswordPlain)
+                $exists = $false
+                if ($script:S1DbFakeState.Exists.ContainsKey($DbName)) { $exists = [bool]$script:S1DbFakeState.Exists[$DbName] }
+                [pscustomobject]@{ Exists = $exists; Verified = $true }
+            }
+        }
+    }
+
+    It 'rejects an unsafe database name before any PostgreSQL mutation' {
+        $f = New-S1DbRestoreFixture -Name 'unsafe' -Databases @('bad-name')
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation }).Count | Should -Be 0
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'rejects a missing PostgreSQL 8.3 client before mutation' {
+        $f = New-S1DbRestoreFixture -Name 'missing-tool' -Databases @('GameDB01')
+        Remove-Item -LiteralPath (Join-Path $f.Bin 'pg_restore.exe') -Force
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -eq 'dropdb.exe' }).Count | Should -Be 0
+        @($result.TechnicalDetails.ToolChecks | Where-Object { $_.Name -eq 'pg_restore.exe' -and -not $_.Verified }).Count | Should -Be 1
+    }
+
+    It 'rejects a PostgreSQL 12 client set instead of silently mixing versions' {
+        $f = New-S1DbRestoreFixture -Name 'wrong-version' -Databases @('GameDB01')
+        $f.State.ToolVersion = '12.4'
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        @($result.TechnicalDetails.ToolChecks | Where-Object { -not $_.Verified }).Count | Should -Be 5
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -eq 'dropdb.exe' }).Count | Should -Be 0
+    }
+
+    It 'stops before mutation when credential verification fails' {
+        $f = New-S1DbRestoreFixture -Name 'bad-password' -Databases @('GameDB01')
+        Install-S1DbRestoreMocks -Fixture $f
+        Mock Test-PostgresPassword { $false }
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'wrong-password'
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -in @('dropdb.exe','createdb.exe','pg_dump.exe') }).Count | Should -Be 0
+    }
+
+    It 'requires verified current-database dumps before the first drop' {
+        $f = New-S1DbRestoreFixture -Name 'dump-failure' -Databases @('GameDB01')
+        $f.State.FailDump = $true
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        $result.Backup.Attempted | Should -BeTrue
+        $result.Backup.Verified | Should -BeFalse
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -eq 'dropdb.exe' }).Count | Should -Be 0
+    }
+
+    It 'preflights archive readability and stops when pg_restore list fails' {
+        $f = New-S1DbRestoreFixture -Name 'archive-failure' -Databases @('GameDB01')
+        $f.State.FailList = $true
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -in @('dropdb.exe','createdb.exe','pg_dump.exe') }).Count | Should -Be 0
+    }
+
+    It 'restores selected databases in deterministic order and verifies success' {
+        $f = New-S1DbRestoreFixture -Name 'success'
+        $f.State.Exists['GameDB02'] = $false
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'SUCCEEDED'
+        $result.ProductState | Should -Be 'INTENDED'
+        $result.Backup.Verified | Should -BeTrue
+        $result.FinalVerification.Passed | Should -BeTrue
+        @($result.DatabaseReceipts | ForEach-Object { $_.Database }) | Should -Be @('GameDB01','GameDB02')
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -eq 'createdb.exe' } | ForEach-Object { $_.Database }) | Should -Be @('GameDB01','GameDB02')
+        $script:S1DbFakeState.Exists['GameDB01'] | Should -BeTrue
+        $script:S1DbFakeState.Exists['GameDB02'] | Should -BeTrue
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'rolls back a failed restore after drop and verifies the original database' {
+        $f = New-S1DbRestoreFixture -Name 'rollback'
+        [void]$f.State.RestoreFailures.Add('GameDB01')
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        $result.Rollback.Verified | Should -BeTrue
+        @($result.Rollback.Items) | Should -Contain 'GameDB01'
+        $script:S1DbFakeState.Exists['GameDB01'] | Should -BeTrue
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'stops new database mutations after the first failure and rolls back prior changes' {
+        $f = New-S1DbRestoreFixture -Name 'stop-on-failure' -Databases @('GameDB03','GameDB01','GameDB02')
+        [void]$f.State.RestoreFailures.Add('GameDB02')
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        @($result.Mutation.UnattemptedItems) | Should -Contain 'GameDB03'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -eq 'createdb.exe' } | ForEach-Object { $_.Database }) | Should -Not -Contain 'GameDB03'
+        foreach ($db in @('GameDB01','GameDB02','GameDB03')) { $script:S1DbFakeState.Exists[$db] | Should -BeTrue }
+    }
+
+    It 'reports ACTION_REQUIRED and preserves evidence when rollback cannot be verified' {
+        $f = New-S1DbRestoreFixture -Name 'rollback-unknown' -Databases @('GameDB01')
+        [void]$f.State.RestoreFailures.Add('GameDB01')
+        $f.State.FailRollbackDrop = $true
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'ACTION_REQUIRED'
+        $result.ProductState | Should -Be 'UNKNOWN'
+        $result.Rollback.Verified | Should -BeFalse
+        $result.Cleanup.ResiduePresent | Should -BeTrue
+        Test-Path -LiteralPath $result.Cleanup.ResiduePaths[0] -PathType Container | Should -BeTrue
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'maps cleanup residue separately after a verified successful restore' {
+        $f = New-S1DbRestoreFixture -Name 'cleanup-residue' -Databases @('GameDB01')
+        Install-S1DbRestoreMocks -Fixture $f
+        Mock Remove-Item {
+            param([string]$LiteralPath)
+            if ($LiteralPath -like '*\Restore-*') { throw 'forced evidence cleanup failure' }
+            [System.IO.Directory]::Delete($LiteralPath, $true)
+        }
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'CLEANUP_RESIDUE'
+        $result.UnderlyingOutcome | Should -Be 'SUCCEEDED'
+        $result.FinalVerification.Passed | Should -BeTrue
+        Test-Path -LiteralPath $result.Cleanup.ResiduePaths[0] -PathType Container | Should -BeTrue
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+        [System.IO.Directory]::Delete($result.Cleanup.ResiduePaths[0], $true)
+    }
+
+    It 'rolls back setup-created databases when a coupled profile write fails' {
+        $f = New-S1DbRestoreFixture -Name 'profile-coupling' -Databases @('GameDB01')
+        $f.State.Exists['GameDB01'] = $false
+        $gameRoot = Join-Path $f.Root 'Game'
+        $backupDir = Join-Path $gameRoot 'pg_backup'
+        New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+        $gameExe = Join-Path $gameRoot 'game.exe'
+        New-Item -ItemType File -Path $gameExe -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $backupDir '0001.backup') -Value 'bundled' -NoNewline
+        $profilePath = Join-Path $f.Root 'GameProfile.xml'
+        $profileXml = '<GameProfile><GameName>Profile Coupling</GameName><GamePath>' + $gameExe + '</GamePath><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Path</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Address</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Port</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>User</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Automatically create Database</FieldName><FieldValue>0</FieldValue></FieldInformation></ConfigValues></GameProfile>'
+        Set-Content -LiteralPath $profilePath -Value $profileXml
+        $profiles = Join-Path $f.Root 'UserProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        Move-Item -LiteralPath $profilePath -Destination (Join-Path $profiles 'GameProfile.xml')
+        Install-S1DbRestoreMocks -Fixture $f
+        Mock Save-Xml { throw 'forced profile write failure' }
+        Mock Restore-PostgresProfileBackups { $true }
+        Mock Write-Log {}
+        $recovery = [pscustomobject]@{ Path = $f.Evidence; Verified = $true; ProfileBackups = @() }
+        $result = Invoke-PostgresGameSetup -UserProfilesDir $profiles -SuperPasswordPlain 'fixture-password' -RecoveryBackup $recovery
+        $result.RecoveryBlocked | Should -BeTrue
+        $result.DatabaseRollbackVerified | Should -BeTrue
+        $result.ProfileRollbackVerified | Should -BeTrue
+        Should -Invoke Restore-PostgresProfileBackups -Times 1 -Exactly
+        $result.TransactionResult.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $result.TransactionResult.ProductState | Should -Be 'UNCHANGED'
+        $script:S1DbFakeState.Exists['GameDB01'] | Should -BeFalse
+        { Assert-TpmTransactionResult -Result $result.TransactionResult } | Should -Not -Throw
+    }
+}
+Describe 'S1 legacy state transaction normalization' -Tag 'S1-LEGACY-STATE-TRANSACTIONS' {
+    It 'normalizes a legacy partial result while preserving item terminal sets' {
+        $legacy = [pscustomobject]@{
+            Succeeded = $false
+            Registered = @('GameA')
+            Errors = 1
+            Details = @('legacy detail')
+        }
+        $result = ConvertTo-TpmLegacyTransactionResult -Legacy $legacy -WorkflowKey 'RegisterGames' -OperationKey 'RegisterProfiles' -Items @('GameA','') -ChangedItems @('GameA') -CompletedItems @('GameA') -FailedItems @('GameB') -Summary 'Registration completed with some items needing attention.' -ReasonCode 'REGISTRATION_PARTIAL' -Outcome 'PARTIAL_APPLIED' -ProductState 'PARTIAL_KNOWN' -MutationStarted $true
+        $result.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $result.Outcome | Should -Be 'PARTIAL_APPLIED'
+        @($result.Mutation.ChangedItems) | Should -Be @('GameA')
+        @($result.Mutation.FailedItems) | Should -Be @('GameB')
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'requires rollback evidence for a verified rollback outcome' {
+        $backup = [pscustomobject]@{ Attempted = $true; Created = $true; Verified = $true }
+        $rollback = [pscustomobject]@{ Attempted = $true; Completed = $true; Verified = $true; Items = @('GameA') }
+        $result = New-TpmProfileTransactionResult -WorkflowKey 'UserProfiles' -OperationKey 'RestoreBackup' -Outcome 'ROLLED_BACK_VERIFIED' -ProductState 'UNCHANGED' -Summary 'The restore was reversed and the original state was verified.' -Items @('GameA') -ChangedItems @('GameA') -CompletedItems @('GameA') -MutationStarted $true -Backup $backup -Rollback $rollback -FinalPassed $true
+        $result.Rollback.Verified | Should -BeTrue
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'returns a typed no-op for an empty owned-state migration inventory' {
+        $root = Join-Path $TestDrive 'empty-owned-state'
+        $layout = [pscustomobject]@{
+            Assets = (Join-Path $TestDrive 'Assets')
+            State = (Join-Path $TestDrive 'State')
+            Logs = (Join-Path $TestDrive 'Logs')
+            Reports = (Join-Path $TestDrive 'Reports')
+            Backups = (Join-Path $TestDrive 'Backups')
+            Cache = (Join-Path $TestDrive 'Cache')
+            SupportPackages = (Join-Path $TestDrive 'SupportPackages')
+        }
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $result = Invoke-TpmOwnedMigration -ScriptRoot $root -Layout $layout
+        $result.Outcome | Should -Be 'NO_OP'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        $result.Backup.Attempted | Should -BeFalse
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+    It 'requires explicit outcome handling at the PCSX2 caller boundary' {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$iniStatus = switch \(\$iniResult\.Outcome\)'
+        $source | Should -Match '''SUCCEEDED'' \{ ''PCSX2\.ini updated'' \}'
+        $source | Should -Match '''NO_OP'' \{'
+        $source | Should -Match '''ACTION_REQUIRED'' \{'
+        $source | Should -Match 'cursor_path update failed before verified completion'
     }
 }

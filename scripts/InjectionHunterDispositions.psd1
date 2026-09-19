@@ -287,14 +287,6 @@
         }
         @{
             File        = 'TeknoParrot-Manager.ps1'
-            RuleName    = 'InjectionRisk.UnsafeEscaping'
-            Line        = 4359
-            Extent      = "[BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash(`$bytes))) -replace '-', ''"
-            Disposition = 'FalsePositive'
-            Reasoning   = 'This is the same fixed-literal hash formatting operation in the preview reference reader. Only the computed byte sequence is variable; the regex and replacement are fixed and cannot carry injection syntax.'
-        }
-        @{
-            File        = 'TeknoParrot-Manager.ps1'
             RuleName    = 'InjectionRisk.AddType'
             Line        = 4366
             Extent      = 'Add-Type -AssemblyName System.Drawing -ErrorAction Stop'
@@ -340,6 +332,38 @@
             Extent      = "([string]`$role).ToUpperInvariant() -replace 'PATH`$',''"
             Disposition = 'FalsePositive'
             Reasoning   = 'The role value comes from the same fixed four-entry storage-role list, and the regex pattern and replacement are fixed literals. This cannot carry attacker-controlled regex or replacement syntax.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.AddType'
+            Line        = 4724
+            Extent      = 'Add-Type -AssemblyName System.Drawing -ErrorAction Stop'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The assembly name is a fixed framework literal used to decode the bundled TPM-owned preview reference. No external or attacker-controlled value reaches Add-Type.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.AddType'
+            Line        = 5248
+            Extent      = 'Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The assembly name is a fixed framework literal used for the optional TPM-owned preview gallery. No external or attacker-controlled value reaches Add-Type.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 469
+            Extent      = "`$Layout.`$bucket"
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The bucket value is selected only from fixed internal category literals (Assets, State, Logs, Reports, Backups, Cache), and Layout is TPM-owned migration state. No untrusted input selects a property.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 6258
+            Extent      = "[string]`$Manifest.EffectId -replace '^ReShadeProfile\.', ''"
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement are fixed literals; the variable is only the searched value. No attacker-controlled pattern or replacement is evaluated.'
         }
     )
 }

@@ -33,6 +33,12 @@ have been compromised (this component's trust model assumes the
 transport and identity checks it performs are sufficient, per the
 Specification Inventory's `RESHADE-TRUST-002`).
 
+The component boundary also includes the ReShade visual profile gallery
+(`Show-TpmReShadeProfileGalleryWindow`) and its terminal-only fallback. The
+gallery is a read-only preview surface: it may render in-memory comparison
+images and update transient selection state, but it is not permitted to
+deploy files, save configuration, or claim a profile was applied.
+
 ## Invariants
 
 ### TX-001 -- Destination is never touched until a complete, valid staged set exists
@@ -203,6 +209,66 @@ theoretical property.
   would be treated as trusted and extracted -- this is the literal defect
   an independent review found and P1 #2 closes.
 
+### GALLERY-001 -- Profile identity is independent of visual view mode
+The gallery stores the selected approved profile as a stable `ProfileId` and
+stores `ViewMode` separately (`Before`, `After`, `Split`, or `Slider`). ComboBox
+entries are display-only objects carrying a validated profile ID. No gallery
+handler reads an optional `.Mode` property from a selected item or uses the
+view mode as profile identity.
+- **Verified by:** the "uses stable ProfileId identity without reading a
+  gallery item's Mode" regression, the "keeps gallery object identity and safe
+  cancel behavior" regression, and the complete `Show-TpmReShadeProfileGalleryWindow`
+  source audit.
+- **Failure mode if violated:** a profile item with an absent or conflicting
+  `Mode` property could be mistaken for view state, causing a WinForms event to
+  throw or refresh the wrong profile.
+
+### GALLERY-002 -- Gallery events cannot run against incomplete or malformed state
+Preview refresh is disabled until the gallery controls, selection state, and
+handlers are initialized. View, slider, and ComboBox callbacks validate their
+sender/item shape and are guarded so null or mismatched selected items do not
+escape as unhandled WinForms exceptions.
+- **Verified by:** the executable "executes gallery callbacks safely for
+  initialization and mismatched items" regression, the "suppresses gallery
+  refresh events until initialization completes" regression, and the native
+  source-loaded WinForms controls harness covering slider, Before/After/Split,
+  ComboBox, and close events.
+- **Failure mode if violated:** a TrackBar or ComboBox event fired during
+  setup, or against a malformed item, could crash the gallery instead of
+  leaving the terminal chooser usable.
+
+### GALLERY-003 -- Preview failures fail closed and release gallery resources
+Every gallery refresh failure records the triggering stage, disables further
+preview refresh, logs the failure, and closes the optional form without
+throwing through the WinForms event loop. Gallery cleanup disposes the actual
+`Picture.Image`, clears that reference, safely disposes the form, and is
+idempotent.
+- **Verified by:** the "fails closed and records the exact preview refresh
+  stage" regression, the executable callback regression with forced refresh
+  failure, the "disposes the gallery picture image idempotently" regression,
+  and the native forced-render-failure harness, which exits 0 after reporting
+  `PreviewEnabled=False`, `Closed=True`, and
+  `Stage=slider-value-changed`.
+- **Failure mode if violated:** renderer errors could surface as unhandled JIT
+  exceptions, leave a gallery window open in a broken state, or retain a
+  disposed/undisposed bitmap across repeated close paths.
+
+### GALLERY-004 -- Visual preview cannot mutate deployment or bypass confirmation
+Gallery rendering, selection changes, event handling, and terminal profile
+synchronization are transient/read-only operations. They do not deploy ReShade
+files, save configuration, or claim an applied profile. Deployment remains
+behind terminal `U` and the existing explicit confirmation; if the gallery is
+unavailable, the typed terminal chooser remains authoritative.
+- **Verified by:** the "keeps preview failure on the terminal-only path" and
+  "routes ReShade selection through one visual gallery before confirmation"
+  regressions, the focused 10-test menu/ReShade support run, the full 847-test
+  Pester suite (847 passed, 0 failed, 0 skipped), and the native `2 -> R -> U`
+  source-loaded chooser transcript (`chooser returned: CleanSharp`, `close
+  returned`; marker-confirmed before controlled harness termination).
+- **Failure mode if violated:** merely moving a slider or selecting a preview
+  item could mutate a live game installation or make the UI claim deployment
+  before the user explicitly confirms it.
+
 ## Status summary
 
 | ID | Status | Implementation pointer | Verification pointer |
@@ -212,6 +278,10 @@ theoretical property.
 | TX-003 | Implemented | `New-TpmStagingDirectory` + conditional `catch`/`finally` in both extractors (staging is preserved on `ROLLBACK FAILED`, `TRANSACTION CLEANUP FAILED`, or ordinary `TPM STAGING CLEANUP FAILED`) | End-to-end wrapper matrix proves no residue on clean success/ordinary rollback, preserved backup on `ROLLBACK FAILED`, preserved rollback residue on `TRANSACTION CLEANUP FAILED`, and the exact staging path plus valid destination on ordinary `TPM STAGING CLEANUP FAILED` |
 | TRUST-004 | Implemented | Menu-handler wiring (`ReShadeSetup`/`DgVoodoo2Setup` mode blocks) + `Test-ReShadeSetupTrustedSignature` + `Invoke-TpmDownload -ExpectedSha256` | Trust-matrix tests; `Test-TpmDownloadedFile -ExpectedSha256` tests |
 | TRUST-005 | Implemented | `Test-ReShadeSetupTrustedSignature` (`$statusAccepted -and $thumbprintMatch`) | "REJECTS a HashMismatch signature even with the exact pinned thumbprint" |
+| GALLERY-001 | Implemented | `Show-TpmReShadeProfileGalleryWindow`, `New-TpmReShadeGalleryEventHandlers`, `Sync-TpmReShadeGallerySelection` | 10-test gallery run; stable-ID/view-mode and object-identity regressions; complete gallery source audit |
+| GALLERY-002 | Implemented | `New-TpmReShadeGalleryEventHandlers`, `Invoke-TpmReShadeGalleryRefreshSafe` | 10-test gallery run including executable callback and initialization regressions; native slider/view/ComboBox/close harness |
+| GALLERY-003 | Implemented | `Set-TpmReShadeGalleryPreviewFailed`, `Close-TpmReShadeProfileGallerySession` | 10-test gallery run including failure-stage and idempotent-image-disposal regressions; asserted native forced-render-failure harness |
+| GALLERY-004 | Implemented | Gallery event handlers and `Read-TpmReShadeTerminalProfile` | Terminal-only fallback and visual-gallery ordering regressions; focused 10-test menu/ReShade run; full 847-test Pester suite; source-loaded `2 -> R -> U` transcript |
 
 No item in this inventory is marked `Missing` or `Intentionally out of
 scope` as of this round.
