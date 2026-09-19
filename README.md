@@ -4,6 +4,10 @@
 
 TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade libraries on Windows. It registers extracted games, propagates controls, deploys lightgun crosshairs, applies ReShade and dgVoodoo2 compatibility fixes, exports libraries to LaunchBox, and provides HyperSpin 2 plugin guidance.
 
+![TeknoParrot Manager main menu](images/tpm-main-menu.png)
+
+*The TPM main menu groups library work, optional game enhancements, maintenance and recovery, and application tools. Choose a numbered option to start that task. For a first run, confirm your TeknoParrot folder, then start with **1) AutoSync** for ZIP-based games or **2) Register only** when the games are already extracted.*
+
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
 > **Current published release: v1.0 RC7** -- read-only readiness and contract-backed compatibility warnings. Test one game after each run. Profiles are backed up automatically before every run. Previous published release: v1.0 RC6 (historical).

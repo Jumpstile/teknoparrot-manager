@@ -4,6 +4,11 @@
 
 Full documentation: [README.md](README.md)
 
+![TeknoParrot Manager main menu](images/tpm-main-menu.png)
+
+The main menu is divided into library management, optional game enhancements, maintenance and recovery, and application tools. Pick a numbered option to begin. Most beginners should confirm the TeknoParrot folder, then choose **1) AutoSync** for ZIP files or **2) Register only** for games that are already extracted.
+
+
 ---
 
 ## Contents
