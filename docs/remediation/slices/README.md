@@ -21,3 +21,5 @@ Every product remediation slice requires a contract based on `docs/templates/tpm
 7. PostgreSQL recovery: ID 16.
 
 Current slice: `PR-321-current-slice.md`.
+
+Slice 0 current implementation: `TPM-RELEASE-SNAPSHOT-001`.

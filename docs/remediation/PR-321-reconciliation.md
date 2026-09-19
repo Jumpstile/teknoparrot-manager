@@ -798,3 +798,44 @@ from that single unsafe-root classification.
 - Disposition remains source/test implementation review only; runtime
   promotion and release authorization remain blocked pending their separate
   gates.
+
+## Desktop OMP -- Slice 0 immutable current-release catalog snapshot
+
+- Slice contract: `TPM-RELEASE-SNAPSHOT-001`.
+- Owner report: `TPM_RELEASE_SNAPSHOT_001`.
+- Scope is limited to immutable release/source evidence and machine-generated
+  catalog delta artifacts. No product runtime behavior or contract migration
+  is included.
+- Stable release identity: TeknoParrotUI `1.0.0.2128`, release ID `16543041`,
+  asset `TeknoParrotUi.zip`, size `153159505`, SHA-256
+  `9e6a8628d365a9d7c32f1dee07f1a62799656a9fdb1b58afe863526c5cf84901`.
+- Snapshot ID:
+  `TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628`.
+- Catalog inventory target: `925 GameProfiles`, `383 GameSetup`, `923
+  Metadata`, and `2231` total files.
+- Matching source-proof commit:
+  `dc998e374608abbda373bb3c236db5b26b5afca7`, tree
+  `7266c43c829bfd2147247b2fae0167ec44116fc5`. The commit is recorded as an
+  immutable semantic proof only, not official release provenance and not a
+  live-master dependency.
+- The stable release asset was observed mutating in place from the earlier
+  `1.0.0.2127` digest/size observation to the current `1.0.0.2128`
+  digest/size observation. The history is preserved in
+  `asset-mutability.json`.
+- The full binary release ZIP is not vendored. The snapshot stores release
+  evidence, per-file asset hashes, semantic-root digests, source-proof
+  identity, and machine-generated delta lists. The immutable source-proof
+  commit is the approved reproducibility backing after semantic equality is
+  proven.
+- Required delta counts remain `695` historical, `925` current, `230` added,
+  `0` removed, `38` semantic changed, and `657` semantic unchanged. The
+  canonical added identity is machine-generated from the asset and must be
+  `jdredd`.
+- Matching upstream commit application changes in `GameProfile.cs`,
+  `JoystickMapping.cs`, `GameProfileLoader.cs`,
+  `JoystickControlDirectInput.cs`, and `JoystickHelper.cs` are recorded for a
+  later joystick/profile-loading/FFB slice only.
+- Slice 0 does not perform contract migration, package rebuild, owner smoke,
+  Arcade validation, merge, tag, publish, certification, or release action.
+- Current disposition: implementation evidence pending focused validation and
+  review; PR #321 remains `HOLD`.

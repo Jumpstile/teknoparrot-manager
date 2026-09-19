@@ -3360,3 +3360,36 @@ the registry or assessment into installers, Guided Setup, Automatic Repair,
 ReShade, dgVoodoo2, BepInEx, FFB, FFBPlugin, Crosshair, game registration,
 launch, or TeknoParrotUI-owned writes. Future consumers must load and validate
 through the authority modules rather than parse JSON ad hoc.
+
+## Immutable current-release catalog snapshots (TPM_RELEASE_SNAPSHOT_001)
+
+`scripts\New-TpmReleaseCatalogSnapshot.ps1` captures release evidence without
+vendoring the TeknoParrot binary ZIP. The snapshot ID is content-addressed:
+`TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628`. The manifest records the
+stable release metadata, asset size and SHA-256, capture time, catalog counts,
+per-file asset hashes, semantic file hashes, semantic-root digests, source
+proof, and the machine-generated old/current profile delta.
+
+The stable release locator is not an immutable source. The asset was observed
+changing in place from version 1.0.0.2127 to 1.0.0.2128. The previous and
+current observations are retained in `asset-mutability.json`; a later asset
+digest is a new snapshot candidate and never silently refreshes the existing
+snapshot.
+
+The captured asset semantically matches
+`teknogods/TeknoParrotUI` commit
+`dc998e374608abbda373bb3c236db5b26b5afca7`, tree
+`7266c43c829bfd2147247b2fae0167ec44116fc5`. That commit is an immutable
+semantic content proof only. It is not relabeled as official release
+provenance, and live `master` is never a catalog-generation dependency.
+
+`scripts\Test-TpmReleaseCatalogSnapshot.ps1` validates the committed manifest,
+file inventory, content identity, path safety, source-proof semantic equality,
+and regenerated delta. Hosted CI uses the immutable proof commit and historical
+source commit for reproducibility; it does not need the mutable release asset
+to regenerate or validate the historical catalog. A separate drift watcher
+reports a new asset digest without changing the snapshot.
+
+The matching proof commit also changes application joystick/profile-loading
+code. Those changes are recorded in `source-proof.json` for a later controls
+and FFB compatibility slice; Slice 0 does not implement or consume them.

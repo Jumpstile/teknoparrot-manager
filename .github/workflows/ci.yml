@@ -71,7 +71,9 @@ jobs:
             'contracts\_schema\GameSupportContractRegistryV1.1.schema.json',
             'contracts\_schema\GameSupportContractRegistryV1.2.schema.json',
             'contracts\_schema\GameSupportContractRegistryV1.3.schema.json',
-            'contracts\_schema\GameSupportContractRegistryV1.schema.json'
+            'contracts\_schema\GameSupportContractRegistryV1.schema.json',
+            'contracts\_schema\TpmReleaseCatalogSnapshotV1.schema.json',
+            'contracts\_schema\TpmReleaseCatalogDeltaV1.schema.json'
           )
           foreach ($relativePath in $schemaRelativePaths) {
             $schemaPath = Join-Path $env:GITHUB_WORKSPACE $relativePath
@@ -81,6 +83,37 @@ jobs:
             Get-Content -LiteralPath $schemaPath -Raw | ConvertFrom-Json -ErrorAction Stop | Out-Null
           }
           Write-Host "GameSupport schema JSON validation passed: $($schemaRelativePaths.Count) files."
+
+      - name: Immutable current-release catalog snapshot
+        shell: powershell
+        run: |
+          $snapshotRoot = Join-Path $env:GITHUB_WORKSPACE 'contracts\snapshots\TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628'
+          $manifestPath = Join-Path $snapshotRoot 'snapshot-manifest.json'
+          $proofRepo = Join-Path $env:RUNNER_TEMP 'tpm-release-proof'
+          $historicalRepo = Join-Path $env:RUNNER_TEMP 'tpm-release-historical'
+          foreach ($path in @($proofRepo, $historicalRepo)) {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
+          }
+          git clone --no-checkout --filter=blob:none https://github.com/teknogods/TeknoParrotUI.git $proofRepo
+          if ($LASTEXITCODE -ne 0) { throw 'Current source-proof clone failed.' }
+          git -C $proofRepo fetch --depth 1 origin dc998e374608abbda373bb3c236db5b26b5afca7
+          if ($LASTEXITCODE -ne 0) { throw 'Current source-proof fetch failed.' }
+          git -C $proofRepo checkout --detach dc998e374608abbda373bb3c236db5b26b5afca7
+          if ($LASTEXITCODE -ne 0) { throw 'Current source-proof checkout failed.' }
+          git clone --no-checkout --filter=blob:none https://github.com/teknogods/TeknoParrotUI.git $historicalRepo
+          if ($LASTEXITCODE -ne 0) { throw 'Historical source clone failed.' }
+          git -C $historicalRepo fetch --depth 1 origin 5880e019016c5c3a0576e97a6c2a7f14bf54e3d1
+          if ($LASTEXITCODE -ne 0) { throw 'Historical source fetch failed.' }
+          git -C $historicalRepo checkout --detach 5880e019016c5c3a0576e97a6c2a7f14bf54e3d1
+          if ($LASTEXITCODE -ne 0) { throw 'Historical source checkout failed.' }
+          $proofRoot = Join-Path $proofRepo 'TeknoParrotUi.Common'
+          $historicalRoot = Join-Path $historicalRepo 'TeknoParrotUi.Common'
+          & (Join-Path $env:GITHUB_WORKSPACE 'scripts\Test-TpmReleaseCatalogSnapshot.ps1') `
+            -ManifestPath $manifestPath `
+            -SourceProofRoot $proofRoot `
+            -HistoricalCatalogRoot $historicalRoot `
+            -FailOnError
+          if ($LASTEXITCODE -ne 0) { throw 'Immutable current-release catalog snapshot validation failed.' }
 
       - name: Deterministic GameSupport 1.3 generation
         shell: powershell

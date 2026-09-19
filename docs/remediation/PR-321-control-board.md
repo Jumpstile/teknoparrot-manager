@@ -549,3 +549,39 @@ actions remain outside this implementation slice and were not performed.
 - Forbidden: product menu/install/repair/launch integration, installer
   execution, download, redistribution, EULA acceptance, package rebuild,
   commit, push, merge, tag, publish, certification, or release authorization.
+
+## Desktop OMP -- Slice 0 immutable current-release catalog snapshot
+
+- Slice contract: `TPM-RELEASE-SNAPSHOT-001`.
+- Owner report: `TPM_RELEASE_SNAPSHOT_001`.
+- Scope: release asset/source identity, immutable catalog manifest, per-file
+  SHA-256 inventory, semantic source-proof comparison, release-asset
+  mutability evidence, and machine-generated old/current delta lists.
+- Current stable asset: TeknoParrotUI `1.0.0.2128`, release ID `16543041`,
+  asset size `153159505`, SHA-256
+  `9e6a8628d365a9d7c32f1dee07f1a62799656a9fdb1b58afe863526c5cf84901`.
+- Snapshot ID:
+  `TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628`.
+- Catalog counts: `925 GameProfiles`, `383 GameSetup`, `923 Metadata`,
+  `2231` total catalog files.
+- Source-proof commit:
+  `dc998e374608abbda373bb3c236db5b26b5afca7`, tree
+  `7266c43c829bfd2147247b2fae0167ec44116fc5`. This is an immutable semantic
+  content proof only, not official release provenance and not a live-master
+  dependency.
+- The stable release asset was observed changing in place from the earlier
+  `1.0.0.2127` digest and size to the current `1.0.0.2128` digest and size.
+  That mutability is preserved in `asset-mutability.json`; it is not
+  normalized away.
+- Generated artifacts are limited to the snapshot manifest, release evidence,
+  source-proof record, semantic comparison record, mutability record, and
+  machine-generated delta manifest. The full binary release ZIP is not
+  vendored.
+- Delta counts are required to remain `695` historical, `925` current,
+  `230` added, `0` removed, `38` semantic changed, and `657` semantic
+  unchanged. Raw byte differences remain separately recorded.
+- No catalog contract migration, product behavior change, package build,
+  owner smoke, Arcade work, merge, tag, publish, certification, or release
+  action is included.
+- Current status: source/evidence implementation in progress; all later
+  catalog and runtime slices remain blocked on Slice 0 validation and review.
