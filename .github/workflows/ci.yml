@@ -196,12 +196,12 @@ jobs:
 
       - name: Install Pester
         shell: powershell
-        run: Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0
+        run: Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck -RequiredVersion 5.7.1
 
       - name: Pester regression suites
         shell: powershell
         run: |
-          Import-Module Pester -MinimumVersion 5.0
+          Import-Module Pester -RequiredVersion 5.7.1
           $config = New-PesterConfiguration
           $config.Run.Path = @(
             "$PWD\Tests\TeknoParrot-Manager.Tests.ps1",
