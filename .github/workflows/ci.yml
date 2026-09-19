@@ -209,7 +209,8 @@ jobs:
             "$PWD\Tests\TPMGameSupport.Contracts.Tests.ps1",
             "$PWD\Tests\TPMGameSupport.Assessments.Tests.ps1",
             "$PWD\Tests\SupportPostureCorpus.Tests.ps1",
-            "$PWD\Tests\SupportPackage.Tests.ps1"
+            "$PWD\Tests\SupportPackage.Tests.ps1",
+            "$PWD\Tests\TpmReleaseCatalogSnapshot.Tests.ps1"
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
