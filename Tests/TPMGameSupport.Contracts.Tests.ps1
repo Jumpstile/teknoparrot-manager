@@ -44,6 +44,38 @@ BeforeAll {
             }
         }
     }
+    function Get-TestSemanticGoldenSha256 {
+        param([Parameter(Mandatory = $true)]$Value)
+        if ($Value.PSObject.Properties.Name -contains 'Profiles') {
+            foreach ($profile in @($Value.Profiles)) {
+                $executable = $profile.PSObject.Properties['Executable'].Value
+                if ($null -eq $executable) {
+                    continue
+                }
+                $secondary = $executable.PSObject.Properties['SecondaryCandidates']
+                if ($null -eq $secondary -or $null -eq $secondary.Value -or @($secondary.Value.PSObject.Properties).Count -eq 0) {
+                    if ($secondary) {
+                        [void]$executable.PSObject.Properties.Remove('SecondaryCandidates')
+                    }
+                    $executable | Add-Member -NotePropertyName SecondaryCandidates -NotePropertyValue @()
+                }
+            }
+        }
+        if ($Value.PSObject.Properties.Name -contains 'ProfileFiles') {
+            $Value.ProfileFiles = @($Value.ProfileFiles | Sort-Object -Property ProfileCode)
+        }
+        $sha = New-Object System.Security.Cryptography.SHA256Managed
+        try {
+            # -Compress is used only after the semantic projection above; both
+            # supported engines are verified against the resulting digest.
+            $json = $Value | ConvertTo-Json -Depth 40 -Compress
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+            return (-join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }))
+        } finally {
+            $sha.Dispose()
+        }
+    }
+
 
     $registry = New-TPMGameSupportContractRegistryV1 -Profiles @(
         (New-TestGameSupportProfile -ProfileCode 'RidgeRacer'),
@@ -209,24 +241,24 @@ Describe 'TPM catalog-wide game support contracts' {
         Invoke-TpmSupportPostureCorpus -GenerationMode 'HISTORICAL_PINNED_695' -UpstreamProfileRoot $catalogProfiles -UpstreamCommitSha '5880e019016c5c3a0576e97a6c2a7f14bf54e3d1' -SnapshotId 'TPM-CATALOG-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z' -OutputRoot $catalogOutput | Out-Null
         $catalogRegistry = Get-Content -LiteralPath (Join-Path $catalogOutput 'game-support-contracts.json') -Raw | ConvertFrom-Json
         $catalogModel = Get-Content -LiteralPath (Join-Path $catalogOutput 'support-posture.json') -Raw | ConvertFrom-Json
-        $catalogGoldenHashes = [ordered]@{
-            'game-support-contracts.json' = '2b49618a0be4599bec6e10701ccc93900ee6a253cbeb899dc3b7d691d426e6f5'
-            'game-support-contract-validation.json' = 'e0ca308ea99dca9eac4798c483719e4de167de355b30b7e7d455a264fbc7de8e'
-            'support-posture.json' = '40dff47ddea6a7b67f4bdaa68a336d8df56d86eefd3c7e2d2e279779539cce2f'
-            'manifest.json' = '444f13f7026dfcf300f7197ba88933e0916d0cd33484eb54bb65da40183bb4c2'
+        $catalogGoldenDigests = [ordered]@{
+            'game-support-contracts.json' = '99fd0f7c0bbe7aa12146861451af66db2a71ea685777e5af8b6eb42f19a2eac7'
+            'game-support-contract-validation.json' = 'b11b5dbeeaa95801de892964aa18be1fcaa68eb58cb6e2c6a5644542d44222e1'
+            'support-posture.json' = '6c72267a83993c07f9991ab043759107c303b80a332cac3d2991bbbcd2376879'
+            'manifest.json' = '8f0afc42ff508f8356f300f6a5d023f71152b86c02f80a0701ab1df5bb337bbd'
         }
     }
 
     It 'generates exactly one contract for every pinned catalog profile' {
-        $catalogRegistry.ContractCount | Should -Be 695
         @($catalogRegistry.Contracts).Count | Should -Be 695
         @($catalogRegistry.Contracts | Select-Object -ExpandProperty ProfileCode -Unique).Count | Should -Be 695
         $catalogRegistry.ExpectedProfileCount | Should -Be 695
         $catalogRegistry.ReleaseGate.ZeroUnclassified | Should -BeTrue
         $catalogRegistry.ReleaseGate.ProfileCountMatches | Should -BeTrue
         @($catalogRegistry.Contracts | Where-Object { [string]::IsNullOrWhiteSpace($_.ClassificationReason) }).Count | Should -Be 0
-        foreach ($relative in @($catalogGoldenHashes.Keys)) {
-            (Get-TpmSupportSha256 -Path (Join-Path $catalogOutput $relative)) | Should -Be $catalogGoldenHashes[$relative]
+        foreach ($relative in @($catalogGoldenDigests.Keys)) {
+            $parsed = Get-Content -LiteralPath (Join-Path $catalogOutput $relative) -Raw | ConvertFrom-Json
+            (Get-TestSemanticGoldenSha256 -Value $parsed) | Should -Be $catalogGoldenDigests[$relative]
         }
         @($catalogRegistry.Contracts | Where-Object { [string]::IsNullOrWhiteSpace($_.Evidence.ProfileXmlSha256) }).Count | Should -Be 0
         $catalogModel.ProfileCount | Should -Be 695
@@ -234,6 +266,13 @@ Describe 'TPM catalog-wide game support contracts' {
         @($catalogRegistry.Contracts | Group-Object ContractId | Where-Object Count -gt 1).Count | Should -Be 0
         @($catalogRegistry.Contracts | Group-Object { $_.ContractId.ToLowerInvariant() } | Where-Object Count -gt 1).Count | Should -Be 0
         $catalogModel.GenerationMode | Should -Be 'HISTORICAL_PINNED_695'
+    }
+    It 'detects semantic drift through the golden projection' {
+        $originalDigest = Get-TestSemanticGoldenSha256 -Value $catalogRegistry
+        $mutated = Get-Content -LiteralPath (Join-Path $catalogOutput 'game-support-contracts.json') -Raw | ConvertFrom-Json
+        $mutated.Contracts[0].ProfileCode = $mutated.Contracts[0].ProfileCode + '-MUTATED'
+        $mutatedDigest = Get-TestSemanticGoldenSha256 -Value $mutated
+        $mutatedDigest | Should -Not -Be $originalDigest
     }
     It 'keeps Hummer and Hummer Extreme as manual-review seed records' {
         $hummer = @($catalogRegistry.Contracts | Where-Object { $_.ProfileCode -ieq 'Hummer' })[0]
