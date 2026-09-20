@@ -15,7 +15,214 @@ Current release state: v1.0 RC7 is the current published release; RC8 is the
 candidate being prepared and is not published; v1.0 RC6 is the previous
 published release (historical); final Version 1.0 remains unpublished.
 
+## TPM-owned runtime layout and migration (RC8 candidate)
+
+TPM-generated runtime state is rooted at
+`<TeknoParrotRoot>\TeknoParrotManager\`, with separate `Logs`, `Reports`,
+`SupportPackages`, `State`, `Cache`, `Manifests`, `Backups`, `Temp`, and
+`Assets` directories. TeknoParrot-owned `UserProfiles`, `GameProfiles`, game
+folders, and required emulator configuration remain in their existing
+locations. Shipped program files under the repository root (`scripts`,
+`tools`, and `contracts`) remain package-layout files, not runtime state.
+
+The startup migration recognizes only an explicit allowlist of known TPM-owned
+files and directories from the old script-root layout. It presents every
+planned move, writes a migration report, refuses destination collisions as
+ambiguous, and never moves TeknoParrot-owned paths. Unattended mode does not
+apply ambiguous migrations. Existing backup trees move under `Backups` without
+replacement. Support collection and log opening use the new runtime roots.
+
 ---
+## RC8 runtime recovery and visual selection
+## Beginner-friendly default UX (RC8 release gate)
+
+TPM is written for a user who wants to play games, not administer Windows.
+Normal screens use plain English first, remain visible until acknowledgement,
+and explain what happened, why an item was skipped or blocked, what TPM did or
+did not change, and the next safe action. Technical paths and exceptions stay
+in Details, logs, or support packages. No workflow may require knowledge of
+PowerShell, PostgreSQL, XML, ACLs, reparse points, BepInEx internals,
+permissions, or elevation. The release acceptance question is whether a
+14-year-old can complete the workflow without that specialist knowledge.
+
+
+The PostgreSQL setup path classifies client diagnostics before presenting
+recovery. Password authentication failures receive a distinct masked-password
+validation path; rejected credentials are not saved or logged, and profile
+changes remain behind the verified backup boundary.
+The manual password-recovery path reads back and revalidates the encrypted
+credential before retrying protected database backup. Normal recovery output uses
+readable game labels and compact diagnosis statuses; raw client details remain in
+logs and Details output.
+
+Crosshair browser selection is deliberately consumed from the main PowerShell
+runspace. `HttpListener` completion is polled and finalized with
+`EndGetContext`; PowerShell scriptblocks are never used as I/O-thread callbacks.
+After valid P2 selection, the generated page enters a completed non-interactive
+state with explicit return-to-TeknoParrot Manager/close guidance. When the
+preview process exposes a closeable window, TeknoParrot Manager closes it;
+otherwise the user receives an explicit close instruction. Listener shutdown is
+guaranteed, focus return is attempted with a plain-language fallback, and typed
+numeric selection remains available when preview or browser startup fails.
+
+ReShade profile selection opens an optional non-modal gallery and immediately
+leaves the terminal at the authoritative numbered chooser. The terminal
+chooser remains usable when WinForms is behind another window, closed,
+unavailable, or fails to open. Numbered selection updates the gallery when it
+is available; the gallery has no profile-selection control and only follows
+the terminal's selected profile. `U` is the only path toward deployment, while
+`B` and invalid input remain non-mutating. The gallery changes the displayed
+deterministic, TPM-owned comparison approximation when the terminal selection
+changes, but does not run the game or execute ReShade shaders and does not
+deploy files. Actual in-game results may vary.
+The reference is the bundled `PreviewAssets\ReShadePreviews\TPM-preview-landscape.png`
+asset, validated by System.Drawing decoding, fixed dimensions, identity
+`TPM-LANDSCAPE-V1`, version `3`, and SHA-256
+`7203032094bfd4d174cd3125ef55c87d7b35053fc4e274914b6ae1ac43f286d8`. It is a
+safe deterministic approximation: TPM does not run the game or execute
+ReShade shaders. `Before` is the untouched reference, `After` contains only
+the selected profile transform, and `Split`/`Slider` compose those two
+bitmaps at the requested boundary. Actual in-game results may vary.
+Deployment remains behind the existing explicit confirmation. The reference
+identity, renderer version, and effect hashes are part of the cache key so
+stale artifacts regenerate.
+The gallery keeps a stable internal `SelectedProfileId` separate from the
+`ViewMode` (`Before`, `After`, `Split`, or `Slider`). Profile IDs and canonical
+technique names come from validated profile definitions; the preview surface
+does not expose raw objects, cache paths, or a second chooser. Initialization
+keeps preview events disabled until controls and state are complete. Every
+gallery event is closure-bound, guarded, and fail-closed: renderer or state
+errors are logged with their stage, the optional gallery is closed, and the
+terminal-only chooser remains authoritative. Gallery events, preview refresh,
+and all comparison controls are visual-only; deployment is still unreachable
+until terminal `U` plus the existing explicit confirmation.
+The normal ReShade setup path describes the gallery as view-only and keeps the
+terminal chooser authoritative. RC8 exposes five beginner-safe profiles:
+Original, Clean & Sharp, Classic Arcade CRT, Vivid Arcade, and Enhanced Arcade.
+The setup summary leads with changed, not-changed, and actual-failure totals;
+unsafe or malformed ownership/path entries remain unchanged and direct the user
+to repair, explicit Adopt for protected content, skip, or Details/support.
+
+**Shared game mutation path boundary (RC8).** ReShade, dgVoodoo2, GPU-fix,
+and BepInEx call `Test-TpmGameMutationPath` before inspection and immediately
+before a game mutation. The guard canonicalizes the registered executable,
+classifies unavailable devices separately from missing leaves, rejects
+reparse/inaccessible paths, and requires the resolved target to remain the
+same. A failed boundary leaves that game unchanged and prevents a partial
+success result from being reported as complete.
+Mutation exceptions are mapped to the same `DEVICE_UNAVAILABLE` and
+`GAME_PATH_MISSING` reason codes before workflow counters are updated, so an
+unavailable device cannot be reported as a generic deployment error.
+
+**BepInEx safety and rollback contract (RC8 Slice 1).** BepInEx validates
+the canonical game root before release discovery, inspection, backup, staging,
+and promotion. A destination parent is valid when it is equal to or contained
+by the canonical game root; missing child directories may be created only
+after that containment check. Existing path components, reparse points, and
+genuine escapes remain fail-closed. Inspection outcomes distinguish
+not-installed, not-applicable, unsupported architecture, and concrete
+inspection failures; technical exception text remains in Details/log/support
+evidence. A promotion or repair-reset rollback failure is terminal: backup and
+staging evidence are preserved, the batch may stop after repeated same-cause
+failures, and the default next action is manual inspection rather than blind
+retry. Normal BepInEx output uses the profile's full GameName when available;
+profile codes remain available in technical records.
+
+The functional transaction handoff selects the downloaded package from the
+architecture-keyed cache map and validates its nonblank, contained, existing,
+non-reparse path immediately before extraction. The canonical candidate game
+path and root are compared again before staging, backup, and promotion; TPM
+never substitutes another candidate's destination. The legacy compatibility
+result reports actual selected, changed, failed, and skipped profile IDs and
+preserves per-game FailureRecords as technical evidence. Protected/reparse and
+unavailable-path records remain unchanged safe skips rather than install
+errors. Normal output groups safe skips, uses full game names when present, and
+states separately when a verified package downloaded but a per-game install
+did not complete; raw paths and exception text stay in Details/log/support
+evidence.
+
+**PostgreSQL committed-state recovery (RC8).** The single-user `ALTER ROLE`
+is the mutation cutoff. If it succeeds but service restart or new-password
+authentication cannot be verified, recovery returns `PasswordChangeCommitted`
+and a blocked result with evidence; it never says the old password remains
+authoritative and never saves the unverified replacement credential.
+When a protected backup fails because the saved password is rejected, the
+recovery screen exposes reachable masked actions for password validation (`P`)
+and local role reset (`X`); the reset action is not merely displayed but is
+included in the accepted choice set. Raw client diagnostics remain behind
+Details and logs. PACKAGE_MISMATCH and IDENTITY_MISMATCH remain hard-stop
+conditions; no retry state is built from an unvalidated handoff payload.
+
+**PostgreSQL Slice 8B display and failure contract.** Registered PostgreSQL
+profiles use the authoritative `/GameProfile/GameName` value through the
+shared profile-title resolver. A missing or blank title is displayed as
+`Unknown game title -- see Details`; profile keys and database names are
+technical evidence only and are never CamelCase-spaced or hard-coded into
+normal recovery output. Read-only diagnosis separates beginner-safe
+`NormalChecks` from technical `TechnicalChecks`: normal output groups failure
+categories and collapses repeated detail rows, while Details, logs, and
+support guidance retain the profile key, database, category, and redacted raw
+detail. Automatic password reset results carry a `FailureStage` for every
+verification boundary, and password-entry/reset activities replace the stale
+database-backup status while those actions are running.
+
+A protected UAC resume suppresses unrelated startup, DAT, and GitHub prompts;
+it consumes only the durable recovery envelope and reports a concrete
+validation reason when that envelope or its selection plan cannot be trusted.
+
+Slice D re-audit coverage treats corruption as a distinct database failure
+category alongside password, service, missing-database, tool, permission, and
+connection failures. The caller keeps retry and Back/stop actions explicit and
+does not report recovery complete after an unverified backup, reset, restart,
+or profile-save operation.
+
+**PostgreSQL 8.3 database restore transaction (S1).** The ordinary database
+restore menu and the guided single-database reinitialize path share one
+transaction engine. It accepts only the PostgreSQL 8.3 client set
+`psql.exe`, `pg_dump.exe`, `dropdb.exe`, `createdb.exe`, and `pg_restore.exe`;
+each executable must exist and report PostgreSQL 8.3 before a restore starts.
+The selected backup folder is preflighted as a closed set: database names are
+safe, files are direct children of the selected folder, files are non-empty,
+SHA-256 identities remain stable, and `pg_restore --list` succeeds for every
+archive. The PostgreSQL service, credentials, and every target database state
+are verified before mutation.
+
+Before the first destructive drop, every existing target database is dumped
+to the locked transaction evidence root and the dump is checked for
+readability, non-zero size, hash identity, and archive readability. Missing
+targets are recorded as verified-absent pre-state and need no current dump.
+Targets are then rechecked immediately before the mutation boundary. Database
+items are sorted deterministically, each receipt records command exits,
+pre-state, changed state, final verification, and rollback status, and the
+engine stops starting new restores after the first failure.
+
+If any database changes, the engine rolls back every changed database in
+reverse deterministic order from its verified pre-state dump (or verifies
+absence for a previously absent target). Rollback is itself checked through
+database-state queries; an unverified rollback is `ACTION_REQUIRED` with
+`UNKNOWN` product state and preserved evidence. Clean completion is
+`SUCCEEDED`/`INTENDED`; a pre-mutation rejection is
+`FAILED_BEFORE_MUTATION`/`UNCHANGED`; verified rollback is
+`ROLLED_BACK_VERIFIED`/`UNCHANGED`; cleanup failure is
+`CLEANUP_RESIDUE` with the verified underlying outcome. The result is always
+`TPM.TransactionResult.v1`, and normal output contains no paths, commands,
+passwords, or hashes.
+
+The older-profile setup path applies the same coupling rule at its narrower
+boundary: databases created for profiles are tracked as changed until the
+corresponding profile writes complete. A profile write or database creation
+failure removes every database created by that pass and restores verified
+profile backups before reporting rollback; any unverified part maps to
+`ACTION_REQUIRED` rather than completion.
+
+**Support evidence provenance (RC8).** Support manifests classify evidence as
+Current, Stale, or Ambient. Action Required is stale when older than the latest
+TPM log. TeknoParrotUI intake, game-local BepInEx/plugin diagnostics, and
+metadata-only plugin inventories remain Ambient because they are supplied or
+discovered without current-workflow provenance. Ambient inventories contain
+metadata only; plugin payloads are never copied. Game-local plugin findings
+therefore cannot be presented as current-run health evidence.
+
 
 ## Startup: network-path detection and hard timeout (v0.99.23)
 
@@ -96,6 +303,39 @@ SECURITY.md ("Transactional extraction (staging + rollback-safe
 promotion)") for the full rationale and the regression tests that force a
 failure during extraction and a separate failure during promotion for
 both extractors.
+
+## AutoSync directory replacement (S1)
+
+AutoSync treats one selected ZIP and its local game directory as one
+transaction. The ZIP is inventoried before mutation, including sanitized
+relative paths, file/directory shape, lengths, and SHA-256 bytes. The existing
+target manifest and sync-state file are captured before any live mutation.
+
+For a replacement, TPM creates a uniquely named transaction root beside the
+install folder. The complete archive is extracted into a payload directory on
+the same volume, then the staged manifest is compared with the ZIP inventory.
+The existing target is moved into the transaction rollback directory and the
+payload directory is renamed into the target path. Promotion therefore does
+not perform a second full tree copy. If staging, promotion, or verification
+fails, TPM removes only a verified staged tree and restores the moved-aside
+target and sync-state pre-state. An unexpected tree is never deleted during
+rollback; the transaction becomes `ACTION_REQUIRED` and preserves its
+evidence.
+
+The live `.extracting` sentinel is created only at the live mutation boundary.
+It remains present through directory promotion, target verification, atomic
+sync-state candidate replacement, and sync-state readback. Cleanup removes it
+only after all final checks pass. A pre-existing sentinel blocks `NO_OP` and is
+reported as preserved stale evidence rather than silently deleted.
+
+Sync-state writes use a transaction-local candidate and verified readback.
+Existing state is replaced atomically with `File.Replace`; a missing state file
+is atomically moved into place. A commit or readback failure is a transaction
+failure and invokes the same rollback path as a promotion failure. Results use
+the shared transaction outcomes: `NO_OP`, `SUCCEEDED`, `ROLLED_BACK_VERIFIED`,
+`ACTION_REQUIRED`, or `CLEANUP_RESIDUE`. AutoSync registration candidates are
+added only for verified filesystem replacements with `SUCCEEDED`, or
+`CLEANUP_RESIDUE` whose underlying outcome is `SUCCEEDED`.
 
 ## ReShade deployment (Mode 5)
 
@@ -203,19 +443,93 @@ registered profiles (WRONG NAME warning for typos), never required. Same
 **Read-only multi-monitor suitability evidence (RC8).** `Get-TpmDisplayTopologyClassification` classifies caller-supplied display records without querying or changing monitor configuration. It distinguishes unavailable/zero-usable, single-display, multiple-primary, mixed-resolution/orientation/refresh, mirrored, no-primary, and malformed topologies. It does not assign a separate `EXTENDED` state; an extended desktop is represented by the applicable multiple-display state. Live Windows display acquisition is not wired into the eligibility path, so callers must supply the evidence. `TargetDisplayId` is optional evidence: an explicit target must still be present and connected to be `CONFIDENT`; duplicate matches are `AMBIGUOUS` and no monitor is selected. A missing target is `UNKNOWN` and does not fall back to another display. Without an explicit target, a sole usable display is confident, while multiple usable displays remain `AMBIGUOUS` until the caller identifies the game target.
 
 The result is advisory input to ReShade eligibility only. It may add `DISPLAY_TARGET_AMBIGUOUS` and downgrade suitability to `UNKNOWN`; it never changes the primary monitor, enables or disables displays, changes resolution/refresh/orientation, moves windows, or writes game display settings. Target resolution reuses `Get-TpmResolutionClassification`, so bounded low/normal/high/wide evidence and ReShade effect-sensitivity metadata remain advisory rather than becoming monitor configuration policy. A changed or stale topology invalidates prior target confidence and requires fresh evidence.
-**Canonical visual profiles and generated presets (RC8).** TPM exposes exactly five bounded profiles: Original (empty stack), Clean & Sharp (`SweetFX.LumaSharpen`), Vivid Arcade (`SweetFX.Vibrance`), Classic Arcade CRT (`FXShaders.CRT_Lottes`), and Enhanced Arcade (`SweetFX.LumaSharpen` followed by `SweetFX.Vibrance`). Profile IDs select definitions, but trust remains in the approved effect catalog, pinned revisions, required files, and SHA-256 values. Curated profile and effect metadata is `ADVISORY_UNMEASURED` with `MeasuredEvidence = $false`; no profile is marked `Recommended` or `VALIDATED_SINGLE` without measured evidence. CRT is isolated from sharpening and vibrance in normal profile mode; the enhanced two-effect order is explicit.
+**Canonical visual profiles and generated presets (RC8).** TPM exposes exactly five bounded profiles in display order: Original (empty stack), Clean & Sharp (`SweetFX.LumaSharpen`), Classic Arcade CRT (`FXShaders.CRT_Lottes`), Vivid Arcade (`SweetFX.Vibrance`), and Enhanced Arcade (`SweetFX.LumaSharpen` followed by `SweetFX.Vibrance`). Profile IDs select definitions, but trust remains in the approved effect catalog, pinned revisions, required files, and SHA-256 values. Curated profile and effect metadata is `ADVISORY_UNMEASURED` with `MeasuredEvidence = $false`; no profile is marked `Recommended` or `VALIDATED_SINGLE` without measured evidence. CRT is isolated from sharpening and vibrance in normal profile mode; the enhanced two-effect order is explicit.
+
+The terminal chooser and preview gallery derive their visible `Techniques:`
+line from each profile's canonical `TechniqueOrder` and the approved effect
+catalog's `RelativeFiles` and `TechniqueName` fields. The display keeps
+beginner-friendly names and descriptions first, then shows shader filenames
+and techniques without exposing internal paths:
+
+- Original -- `(none; no ReShade techniques)`
+- Clean & Sharp -- `LumaSharpen.fx / LumaSharpen`
+- Classic Arcade CRT -- `CRT_Lottes.fx / CRT_Lottes`
+- Vivid Arcade -- `Vibrance.fx / Vibrance`
+- Enhanced Arcade -- `LumaSharpen.fx / LumaSharpen; Vibrance.fx / Vibrance`
+
+These are approved TPM bundled/generated definitions, not claims about
+live-fetched runtime files. Display order follows the canonical profile order
+and `TechniqueOrder`; visible text is never a second hardcoded effect list.
 
 `New-TpmReShadePresetContent` generates stable TPM-owned preset text from the selected definition, with normalized technique order and no timestamps, randomness, paths, or user code. `Test-TpmReShadePresetContent` validates the generated structure and rejects techniques outside the approved bounded set. Original intentionally generates no effect techniques. Advanced custom `.ini` input remains opt-in and is path/extension/existence validated; its contents do not become approved effect evidence.
-**Profile suitability and report boundaries.** Profile suitability is advisory. Bounded resolution, caller-supplied multi-monitor target confidence, and effect sensitivity can report performance or review guidance, including high-cost CRT at a confidently known demanding resolution, but they do not alter profile mapping or hard-block ordinary profile selection solely on resolution evidence. TPM does not configure monitors, rewrite display settings, or silently overwrite ambiguous or user-owned preset content. `Write-TpmActionRequiredReports` writes sanitized imported notes to the separate `TeknoParrot-Manager-game-notes.txt` report and writes Action Required only when actionable evidence exists; Action Required contains authored guidance, not raw source notes.
-**Preview renderer and cache (RC8 freeze exception).** `New-TpmReShadePreviewBitmap` renders a deterministic TPM synthetic arcade test scene with engineered edges, small text, geometric shapes, color blocks, contrast regions, and CRT-visible scanline treatment. `New-TpmReShadePreviewArtifact` materializes Before, After, or Split PNG output under `ReShade\Previews\Cache\`; both comparison sides derive from the same neutral reference identity. The renderer consumes only approved profile definitions and catalog metadata; it does not execute shader files.
+**Preview renderer and cache (RC8 freeze exception).** `New-TpmReShadePreviewBitmap` decodes the bundled `TPM-preview-landscape.png` reference and renders a safe deterministic approximation for `Before`, `After`, `Split`, and percentage-driven `Slider` output; it does not run a game or execute ReShade shaders. The processed bitmap is derived from the same decoded reference and cached per profile, so actual in-game results may vary. Comparison composition copies bounded pixel regions so the untouched side remains byte-stable. `New-TpmReShadePreviewArtifact` materializes results under `ReShadePreviewCache\`; rendering does not depend on live-fetched ReShade runtime files.
 
-The cache manifest records the subject/mode, intensity identity, preset version, approved shader SHA-256 values, reference version/hash, and renderer version. A missing, corrupt, stale, or mismatched manifest/image regenerates safely; cache artifacts are never trust or deployment evidence. `Open-TpmReShadePreviewWindow`, `Update-TpmReShadePreviewWindow`, `Close-TpmReShadePreviewWindow`, and `Show-TpmReShadePreviewWindow` provide the window lifecycle. WinForms is loaded lazily, requires STA for actual display, and returns a text-only fallback in noninteractive or unavailable environments. Preview rendering and mode changes never write game files, generated presets, effect assets, trust evidence, or display settings.
+The cache manifest records the subject/mode, slider position when applicable, intensity identity, preset version, approved shader SHA-256 values, reference identity/version/hash, and renderer version. A missing, corrupt, stale, or mismatched manifest/image regenerates safely; cache artifacts are never trust or deployment evidence. Each WinForms preview keeps one decoded `Reference` bitmap and one processed bitmap per profile. Slider Paint reads only those cached bitmaps, clips the two sides, and draws the divider; it never allocates a composite bitmap, replaces `PictureBox.Image`, decodes a file, or runs the profile pixel generator during a drag. Slider changes are coalesced through a short WinForms timer, while keyboard/programmatic updates invalidate the same view immediately. Close detaches handlers, stops and disposes the timer, clears pending state, disposes the picture image and render cache, then disposes the form. `Open-TpmReShadePreviewWindow`, `Update-TpmReShadePreviewWindow`, `Close-TpmReShadePreviewWindow`, and `Show-TpmReShadePreviewWindow` provide the window lifecycle. If a terminal chooser requests `R` after disposal, it creates a fresh gallery session, synchronizes the selected profile, returns that replacement session to the caller, and leaves final teardown with the caller. WinForms is loaded lazily, requires STA for actual display, and returns a text-only fallback in noninteractive hosts.
 **Full profile deployment and restore (RC8 freeze exception).** Normal ReShade setup and the explicit per-game restore action call `Install-TpmReShadeProfileDeployment`. It stages the architecture-selected ReShade DLL, a canonical generated `ReShade.ini` when a trusted profile is selected, and every approved effect asset, then promotes them with one `Invoke-TpmTransactionalPromote` transaction. The per-game ownership manifest is stored under `ReShade\TPM-State\Deployments\<SHA256(game ID)>.json`; ownership is committed only after the physical promotion and post-promotion hashes succeed. A later profile-history entry is written only after that deployment returns success.
 
 Restore history is a selector, not trust evidence. Restore validates the profile schema, ordered approved effect IDs, ordered catalog hashes, and intensity variant before deployment; it never copies a historical path or arbitrary historical file. Missing, corrupt, stale, or unsupported history produces a friendly fresh-selection path. The chooser requires an explicit `R` restore choice, offers a remembered profile only after explicit confirmation, and exposes catalog-bound favorites through `F`.
+The normal visual-first setup prints the profile descriptions, opens an optional
+non-modal gallery, and immediately presents the terminal chooser for all five
+profiles. The numbered terminal path remains authoritative when WinForms is
+unavailable or the gallery closes. It does not block on modal UI or leave the
+workflow without a visible prompt; text selection, `U`, `R`, `B`, and `D` all
+remain available before explicit confirmation.
+Before game selection, `Invoke-ReShadeUpdateIfAvailable` compares the installed trusted
+installer version with the official `reshade.me` version, verifies the downloaded installer
+and extracted DLLs, and offers an explicit update/keep choice. It does not deploy to games
+until the source decision and all later preflight checks succeed. When multiple eligible
+games are selected, setup asks once whether to apply the chosen profile to all games;
+`S` retains the per-game chooser, `D` shows profile details, and `B` returns without
+deployment. Remembered profiles are described as reapply actions, not restore operations.
+Before deployment, the selected set is summarized by read-only preflight buckets:
+ready, protected, missing executable, and unsafe or malformed. Protected installs
+remain unchanged unless the operator explicitly selects `Adopt` and confirms the
+ownership change; successful adoptions are counted separately in the result.
+**Protected ownership and all-games accounting (TPM-RESHADE-001).** ReShade
+files without verified TPM ownership remain unchanged by default. The explicit
+`Adopt` action passes `AllowUserOwnedOverwrite` only after the user-facing
+warning explains that TPM found files it did not create, protected the custom
+setup, and will back up files before replacement; transactional promotion and
+rollback make backup failure a hard stop, and ownership metadata is committed
+only after successful promotion. Apply preflight reports ready, protected,
+missing, unsafe, and failed/preflight-blocked buckets. The final apply result
+uses `Get-TpmReShadeApplyAccounting` to expose non-overlapping terminal
+outcomes whose total must equal the selected-game count. This includes games
+explicitly kept on their previous TPM-managed profile; they are counted as
+`KeptPrevious`, not silently omitted from the accounting. Unsafe paths,
+malformed profiles, malformed ownership metadata, and mutation-boundary
+changes are included in the unsafe bucket with details and a direct
+repair/review-then-rerun action. A failed invariant stops the result
+rather than presenting an incomplete summary. ReShade setup also reads native
+TeknoParrot CRT, SSAA, shader, scanline, and post-process settings without
+writing them; when enabled settings are detected, the result warns that the
+selected ReShade effect may stack with them.
 
 Before replacing any target file, deployment requires a matching TPM-managed ownership entry. Existing files without that ownership evidence return `COLLISION` / `USER_OWNED_CONTENT_PRESERVED` and remain byte-for-byte untouched. Previous TPM-managed files not part of the new profile are retained rather than deleted, so switching to `Original` or a smaller effect set is non-destructive and may require manual review of old files.
 
+
+**ReShade removal (RC8 freeze exception).** `Get-TpmReShadeRemovalScan` emits
+one status record per registered game instead of silently discarding findings.
+Records distinguish `Removable`, `ProtectedBundled`, `ProtectedAmbiguous`,
+`Changed`, `MissingPath`, `MalformedMetadata`, and `AlreadyClean`. Only
+reviewable records enter the existing `Select-RegisteredGamesInteractive`
+chooser; no-ReShade and missing-path games are not removable targets, while
+missing paths remain in the report.
+
+`Remove-TpmReShadeOwnedDeployment` re-reads the profile and re-resolves the
+current ReShade target before every backup and every deletion. It compares the
+current GamePath, EmulatorType, target directory, and hook name with the
+scan-time record. It accepts only `ReShadeDll`, `ReShadePreset`, and
+`ApprovedEffect` entries marked `TPMManaged`, with an exact live SHA-256 match,
+an existing canonical non-reparse leaf, and a destination contained by the
+resolved target directory. It creates and verifies a backup before deleting
+files, updates or removes only the ownership manifest, and restores files and
+the manifest if the commit fails. The mode 5 `R` action previews and
+enumerates remove/keep decisions and requires the literal `REMOVE` confirmation.
+Its final report separates removed, already-clean, missing-path, protected,
+changed, malformed, rolled-back, and failed outcomes. Game executables,
+UserProfiles XML, LaunchBox data, HyperSpin data, bundled files, and ambiguous
+files are never deletion targets.
 Certification strict-mode invariant: empty approved-profile/effect/display
 lookups, optional eligibility/storage evidence, and optional failure-result
 fields are represented as explicit null/empty values. Strict certification
@@ -282,6 +596,17 @@ independently of what is bundled.
 overwrites the destination (unlike the global conf, which never overwrites). Same WRONG
 NAME validation convention as ReShadePresets.
 
+**Beginner result screen.** A successful top-level dgVoodoo2 run renders a
+plain-language summary, not just `Done.`. It identifies each deployed game's
+detected legacy API, explains why older DirectX/Glide calls need translation on
+modern Windows, states that existing dgVoodoo2 DLLs (including unowned or
+changed DLLs) and skipped missing-path games were not changed, and gives launch,
+support-package, and skipped-path recovery guidance. When the structured result
+contains a missing or unavailable saved path, the screen offers `H` to open
+Health Check; ordinary deployment errors do not receive that path-repair
+choice. `DeploymentDetails` and `SkipDetails` remain available behind `D`
+Details; `O` exposes the support/log locations without creating a package.
+
 ---
 
 ## Force feedback (FFB) setup (Mode 8)
@@ -302,16 +627,30 @@ with a non-Bool FieldType returns `Unknown`, not `Supported`, and `WouldWrite = 
 This answers TWO independent questions: "does this profile have the right field?" AND
 "is this platform one where the feature works?" A positive answer to the first alone is
 not sufficient to authorize a write.
+When the native FFB backup or profile write fails, `Invoke-FFBBlasterSetup`
+returns a structured failure record after its backup boundary. Normal membership,
+no-op, and successful returns remain arrays for compatibility. The wrapper
+checks `Succeeded` on the failure record before completing the native workflow
+step or offering the optional plugin, so a backup or profile-write failure
+cannot be hidden by later plugin success.
 
 ### Third-party plugin (mightymikem/FFBArcadePlugin)
 
-Per-game destination-DLL table fetched live from the repo's `AutoSetup.cmd` every run --
-never hardcoded or bundled. Source DLLs (`MAME32.dll`/`MAME64.dll`) also fetched live.
+The per-game destination-DLL table is fetched from the repository at a resolved
+full commit SHA, not from a mutable branch path. Source DLL downloads use the
+same pinned revision and are written to TPM-owned unique staging names under
+the cache; an existing/custom cache file is never silently overwritten or
+treated as trusted. Each downloaded source receives an audit SHA-256 and
+source-revision record. Missing revision, download, or evidence validation
+blocks the plugin path.
 
 Overlap handling: roughly half the third-party table also has a native FFB Blaster field.
 `Invoke-FFBPluginSetup` resolves all overlapping games first, then asks ONE batched
-question: keep native for all of them, or use the plugin for all of them. Never silently
-defaults either way.
+question: keep native for all of them, or use the plugin for all of them. Choosing
+the plugin creates a fresh verified profile backup, disables the native Bool fields
+for exactly those overlaps, verifies the saved values, and blocks plugin deployment
+if the switch or rollback fails. Choosing native removes only matching TPM-owned
+plugin files. The run never enables both owners for a selected overlap.
 
 DLL collision: if another DLL (e.g. ReShade's `d3d9.dll`) already occupies the plugin's
 target filename, that game is skipped with a warning, never overwritten.
@@ -319,20 +658,69 @@ target filename, that game is skipped with a warning, never overwritten.
 Per the plugin's README: true FFB on FFB-capable wheels (Thrustmaster/PWM2M2-style),
 rumble on Xbox/XInput-style controllers.
 
-**Skip counters.** `$skippedNoMatch` and `$skippedDllMissing` are separate. A game the
-AutoSetup.cmd table does not know about is `$skippedNoMatch`; a game the table matches
-but whose MAME DLL is not locally present is `$skippedDllMissing` (user-fixable). Each
-has its own summary line and log field. Ownership cleanup copies the unchanged
-hook to a verified game backup before deletion; if the ownership manifest cannot
-be atomically rewritten, the deletion is restored from that backup and the
-operation fails closed. If restoration itself fails, the backup path remains
-recovery evidence and no clean completion is reported.
+**Outcome semantics.** Every selected profile is counted exactly once. A
+zero-deployment run is successful when accounting is complete, no actual
+errors occurred, and every profile was either kept on native FFB Blaster,
+unsupported by the optional plugin, or safely skipped because an existing
+file was preserved. Missing paths, unavailable devices, unavailable verified
+DLLs, incomplete accounting, and deployment errors remain failures. Result
+codes distinguish deployed, native-preferred, no-supported-target, blocked-skip,
+and deployment-error outcomes. Normal output uses full game names when present;
+profile codes remain in logs and evidence.
+Unsupported/no-match games remain distinct from true deployment errors. Ownership cleanup copies the
+unchanged hook to a verified game backup before deletion; if the ownership manifest
+cannot be atomically rewritten, the deletion is restored from that backup and the
+operation fails closed. If restoration itself fails, the backup path remains recovery
+evidence and no clean completion is reported.
+Zero-deployment runs are not reported as success. Every selected profile is
+accounted for exactly once across deployed, native, collision/protected,
+unsupported, missing-DLL, missing-path, unavailable-device, and error states.
+Successful installs write ownership metadata only after the destination hash
+and manifest commit succeed; a manifest failure removes the newly copied hook.
+`TPM-FFB-Plugin-Evidence.json` records source revision, source hashes, selected
+games, ownership manifest, backup-related result context, and final counters.
+
+**FFB specification/system invariant inventory.** The resolver is the only
+mutable-input boundary: one call per setup run must yield exactly one
+40-character commit SHA. The support table and both DLL URLs must contain that
+same SHA; branch, tag, latest-release, and other mutable artifact URLs are
+rejected. Acquisition is all-or-nothing: both architectures are downloaded to
+TPM-owned unique staging paths, hashed, and retained as provenance before any
+game hook is copied. Existing cache files are never used as an unverified
+fallback.
+
+The mutation transaction has three protected boundaries: path containment and
+non-reparse checks immediately before each copy, ownership metadata written
+after the deployed hash is verified, and evidence persisted before success is
+reported. Ownership-write failure removes the new hook. Final evidence failure
+restores every hook created in the run, the ownership manifest snapshot, and
+any native-overlap profile backup. Zero deployment and incomplete accounting
+are failures; every selected profile is counted exactly once. The invariant
+coverage is in `Tests/TeknoParrot-Manager.Tests.ps1`, and FFB evidence is an
+allowlisted support-package input covered by `Tests/SupportPackage.Tests.ps1`.
 
 ### Eggman dat source
 
-Migrated from `Eggmansworld/Datfiles` (archived, fixed "teknoparrot" tag) to
+Migrate from `Eggmansworld/Datfiles` (archived, fixed "teknoparrot" tag) to
 `Eggmansworld/TeknoParrot` (date-based tags per release). `Get-EggmanDatRelease` queries
 `.../releases/latest` instead of a fixed tag.
+
+### Migration and DAT path clarity
+
+Legacy migration remains opt-in and confirmation-based. The preview names the
+managed destination root, groups only manager-owned state by category, and
+explicitly excludes games, ROM sources, installation files, frontend data, and
+unrelated files. Declining applies no moves and returns normally. Eggman DAT
+updates derive the new filename from the latest release and update the active
+configuration path only after the download returns its canonical saved path.
+
+### Cross-cutting user-facing cleanup (RC8 Slice 7)
+
+Normal prompts and status messages spell out TeknoParrot Manager rather than
+the internal TPM abbreviation. Registered-game selection displays the profile's
+full GameName when available while retaining the profile code for logs, Details,
+support evidence, and internal lookup. Compact progress remains the single-row
+normal-path renderer; technical diagnostics stay in logs or Details output.
 
 ### Eggman recognition-data ownership (issue #252)
 
@@ -390,14 +778,31 @@ The release ZIP is staged and inventory-checked before promotion. A
 timestamped BepInEx backup is copied and hash-verified before live changes.
 Promotion uses one rollback-safe tree transaction; recoverable failures
 restore the pre-operation tree, while rollback or cleanup uncertainty
-preserves evidence and does not report clean completion. If live promotion
-succeeds but ordinary staging cleanup fails, the update is reported separately
-as applied-with-cleanup-failure, excluded from the clean-update count, and the
+preserves evidence and does not report clean completion. Rollback failure is
+a distinct `ROLLBACK_FAILED` reason category and error counter; it takes
+precedence over device/path text embedded in the original failure so recovery
+uncertainty is never downgraded to a safe skip. If live promotion succeeds but
+ordinary staging cleanup fails, the update is reported separately as
+applied-with-cleanup-failure, excluded from the clean-update count, and the
 validated residue path is logged and shown as ACTION REQUIRED. Before version
 comparison, `Get-BepInExInstallationHealth` verifies required core/bootstrap
 files, version, architecture, and reparse safety. A current-version but
 incomplete tree therefore reaches the explicit repair-reset choice instead of
 being classified healthy by version equality alone.
+
+Path/device safe skips remain distinct from ordinary BepInEx failures. The main
+result offers `[H] Open 10) Library Health Check` only when missing or
+unavailable saved paths were reported; ordinary deployment, rollback, cleanup,
+and update-blocked failures retain their existing retry, Details, and support
+guidance instead of presenting a misleading path-repair action. This routing is
+conditional on the structured result, not on generic failure text.
+
+The BepInEx transaction adapter does not infer item identity from counters or
+from every XML profile. Its Items set is the actual selected profile set, and
+ChangedItems, FailedItems, and SkippedItems are populated only with real
+per-game records. These terminal sets remain disjoint so the shared transaction
+invariants can distinguish a clean update, a partial application, a safe
+unchanged skip, and a pre-mutation failure.
 
 ---
 
@@ -559,16 +964,22 @@ accidentally still write during a preview, covered by tests. `Invoke-AutoSync`,
 `Register-Games`, `Repair-GamePaths`, and `Invoke-ControlPropagation` all take a
 `[bool]$DryRun` parameter.
 
-**Interactive flow.** The "Run in PREVIEW mode first?" prompt is asked once per
-AutoSync/Register run, skipped when `-Unattended` or when `-DryRun` was already passed
-on the command line. Both paths converge on one runtime variable (`$dryRunActive`) passed
-into every downstream call -- never branch on the raw switch and the prompt result
-separately.
+**Interactive flow.** Before AutoSync/Register work, the operator chooses an explicit
+`[P] Preview only`, `[R] Run now`, or `[B] Back` action. The selector rejects all other
+input and defaults to preview, so `N` cannot accidentally mean "run." Back exits before
+backup, preflight, staging, or downstream input is consumed. Both preview and real paths
+converge on `$dryRunActive`, which is passed into every downstream call.
 
 **Preview skips.** The `FullBackup` step, LaunchBox/HyperSpin 2 export offers, thumbnail
 download offer, and GPU fix offer are all skipped in preview mode. They are themselves
 writes/downloads that do not make sense after a run that changed nothing. ACTION REQUIRED
 and the controls-status file still print/write normally (reports, not mutations).
+
+**Backup failure gate.** A real AutoSync run creates its `FullBackup` folder
+before extraction and copies all existing profile content with terminating
+errors. Any folder-creation or profile-copy failure returns to the menu and
+blocks extraction, including unattended runs; there is no "continue anyway"
+path for an incomplete restore point.
 
 **Apply immediately.** After a preview pass, a "Preview completed successfully... Would you
 like to perform the operation for real?" prompt lets the user commit without re-running the
@@ -609,12 +1020,48 @@ value-resolution branching a second time after calling the "pure" check.
 code, byte-identical XML output and identical counts for every GPU vendor. Repeat that
 approach if either function is touched again.
 
-**Health check scope.** The Library health check's GPU/FFB coverage report is read-only.
-It never calls `Invoke-GpuFixSetup`/`Invoke-FFBBlasterSetup` (which prompt, back up, and
-write), only the shared detection helpers. Third-party FFB plugin coverage is NOT included
--- checking it needs a live fetch of `AutoSetup.cmd` (`Get-FFBPluginGameMap`), which
-would break the health check's documented "no network access" contract. The check prints a
-one-line note pointing at mode 8 instead.
+**Health check scope and guided actions.** The Library health check is strictly
+read-only during inspection: it checks profile paths and shared optional-coverage
+helpers, but never calls setup/install/deploy functions or writes game paths,
+profiles, LaunchBox, PostgreSQL, ReShade, dgVoodoo2, GPU-fix, FFB, BepInEx, or
+control state. Third-party FFB plugin coverage is NOT included -- checking it
+needs a live fetch of `AutoSetup.cmd`, which would break the no-live-fetch
+inspection contract. The result object carries the named broken/empty profiles
+and coverage lists to the guided action screen. Automatic repair first runs a
+dry-run candidate search limited to the broken profile codes, reports compact
+progress while enumerating the actual game files and then while checking profiles
+with one stable elapsed timer, and displays redacted before/after GamePath evidence,
+then asks for explicit review before saving.
+Only the reviewed set is reapplied, with a complete
+`UserProfiles\FullBackup\HealthCheck_*` backup before confirmed writes. Every
+applied profile is read back and revalidated at the saved path before it is
+reported as `FIXED`; failed saves or verification remain `STILL BROKEN`.
+`Write-LibraryHealthRepairResults` also emits exact reviewed-game accounting:
+each report is classified once as fixed, candidate, or still broken, and the
+returned total must equal the report count. The configured games folder is the
+default search root; `[S]` accepts another folder only after
+`Test-TpmRepairSearchRoot` canonicalizes an existing, non-reparse folder and
+rejects overlap with the TeknoParrot root, TPM program folder, or either ZIP
+source. `[C]` re-enters AutoSync with an explicit whitelist of the broken
+profile codes, so the normal preview/fresh-apply pipeline cannot broaden the
+recovery into an all-games extraction. Manual repair requires an explicit
+executable selection, validates the configured games-root and reparse
+boundaries, and follows the same backup gate. PostgreSQL and optional setup
+entries are direct next actions, but no mutating workflow starts until the user
+selects one. AutoSync's extraction status explicitly means no ZIP work; it
+does not claim that saved GamePath values were repaired.
+
+**Crosshair gallery selection.** The HTML gallery contains all discovered valid
+crosshairs. A short-lived localhost bridge bound only to `127.0.0.1` accepts a
+per-session token and an integer index from 0 through 320; incidental or invalid
+requests do not consume the listener. After P2 is accepted, the page reports
+`Selections complete. Return to TeknoParrot Manager to confirm. You can close
+this tab.` and ignores further clicks. Focus return is attempted where Windows
+allows it; the terminal prompt uses the workflow renderer when available and
+the direct `Read-HostSafe` renderer in the normal completion flow, while
+selection continues through typed numeric P1/P2 fallback if the bridge times
+out or is unavailable. Deployment has a separate explicit confirmation before
+any crosshair files or state are written.
 
 **Crosshair last-used state.** `TeknoParrot-Manager-crosshairs.json` (gitignored, like
 `config.json`) remembers last-used P1/P2 crosshair filenames (not indices -- indices shift
@@ -698,11 +1145,26 @@ Transport order is:
 All methods write to a sibling `.partial` file first. The helper validates that the
 download is non-empty, and validates exact size when the release/API response supplies an
 expected byte count, before moving the partial file into the final cache/destination path.
-Failed attempts delete the partial file and leave the final path untouched whenever
-possible. Progress is reported through a single `Write-Progress` activity: percent,
-downloaded MB / total MB, MB/s, and ETA when `Content-Length`/BITS total size is known;
-otherwise an indeterminate downloaded-MB/MB/s message is shown. Completion logs the method,
+Failed attempts delete the partial file and leave the final path untouched whenever possible.
+Progress is rendered through the shared compact console row
+`Write-TpmCompactExtractionProgress`: known totals show downloaded/total MB,
+speed, and ETA; unknown totals show downloaded MB and speed without inventing a
+percentage. Completion always emits a final compact-row update, logs the method,
 file size, elapsed time, and average MB/s, and still writes the SHA256 download audit.
+
+Compact rows use fractional elapsed seconds so short operations do not repeat
+`elapsed 0s`; the normal UI names the emergency transport `web fallback` rather
+than exposing the raw PowerShell cmdlet. Thumbnail checks include the current
+profile code and count/total. A missing upstream icon (HTTP 404) remains separate
+from transient download/check failures, and failed profile codes are listed for
+retry.
+
+The shared downloader preserves a definitive HTTP 404 across transport
+fallbacks. A later unknown transport failure cannot overwrite the fact that
+the requested artifact was absent, so thumbnail callers continue to classify
+that profile as "no upstream icon" rather than as a transient retry failure.
+Only a definitive 404 is retained for this distinction; DNS, timeout, 5xx,
+validation, and other non-404 failures remain transient/failure outcomes.
 
 Current main-script call sites using the helper:
 
@@ -767,6 +1229,24 @@ the `Data\Platforms\<name>.xml` filename. `Invoke-LaunchBoxDirectWrite` also run
 input. Same "live/user-supplied value joined into a filesystem path must be sanitized"
 convention as SECURITY.md.
 
+## HyperSpin 2 JSON export (RC8)
+
+`Export-HyperSpinJson` treats the TeknoParrot emulator `id` in
+`emulators.json` as the authoritative system identity. It scans existing
+games JSON files for a matching `gameSystemId`; it never accepts a filename
+or unrelated ROM extension as identity when a valid ID is present. With a valid
+ID, an existing named file is usable only when it is empty or its entries
+carry the same system GUID.
+When the emulator entry has no `id`, export stops before creating the games
+folder or writing a games file and presents Fix, Add anyway, and Skip. Skip
+is the safe default and Fix returns without writes. Only an explicit Add
+anyway choice enables the legacy scan for a games file whose first ROM entry
+uses the `.xml` extension. If that scan finds nothing, the exporter creates
+the sanitized emulator-title filename as a new empty games file. A valid ID
+with no GUID match takes that named-file path directly; a nonempty existing
+file with mismatched IDs fails closed instead of being mutated. It does not
+use the legacy scan. Existing games files are backed up before mutation.
+
 **Config consolidation.** `Save-Config` was consolidated from seven near-duplicate
 `[ordered]@{...}` field-list blocks scattered at every settings-change call site. New
 persistent settings go into `Save-Config` once, not at each call site.
@@ -783,6 +1263,19 @@ Bowling Live, Target Toss Pro Bags/Lawn Darts, Orange County Choppers Pinball (a
 `ConfigValues/FieldInformation` under `CategoryName=Postgres` -- the same generic
 per-game-setting structure GPU Fix/FFB Blaster already use. `Test-GameNeedsPostgres`
 detects these dynamically (category existence check); no hardcoded game list.
+
+Backup verification failures are rendered before any PostgreSQL profile mutation.
+The normal screen uses the profile's friendly `GameName` plus the technical database
+identifier, states that nothing changed, and offers Retry, Skip, Details, and Back.
+When the database existence query fails, TPM captures the psql diagnostic stream and
+exit code before classifying the failure. The backup result retains structured
+`FailureDiagnoses` plus display-safe detail text, so support can distinguish a
+missing tool, stopped service, permission/elevation issue, missing database,
+connection failure, or unknown query failure without treating the database as absent.
+Other PostgreSQL failure branches carry explicit structured Retry and Stop
+actions with remediation-specific labels (for example, check the service,
+approve elevation, review evidence, or restore service state) rather than
+exposing an acknowledgement-only recovery contract.
 
 **Confirmed working silent-install recipe** (derived from real failed install attempts
 root-caused via verbose MSI logs; see LESSONS_LEARNED.md for the full post-mortem):
@@ -878,12 +1371,15 @@ and leaves database creation/restore to TPUI's first-launch flow. Only for older
 - Guided recovery changes only the postgres role password. It never edits
   pg_hba.conf, drops or recreates a database, restores over an existing
   database, or wipes PostgreSQL data.
-- Verified recovery evidence is created before service stop, role reset,
-  configuration persistence, database backup, or profile write.
-- The role reset and authentication verification complete before the recovered
-  password is saved to config.json. Database backup completes after that save,
-  and profile setup starts only after both the protected recovery evidence and
-  database backup succeed.
+- Verified recovery evidence is created before service stop, role reset, configuration
+  persistence, database backup, or profile write.
+- Database backup completes before config persistence or any UserProfile mutation. An
+  incomplete backup returns affected game/database names plus redacted failure details;
+  the operator can retry the backup, show details, skip PostgreSQL setup, or return to the
+  main menu. No PostgreSQL setup mutation is reported complete after a failed backup.
+- The role reset and authentication verification complete before the recovered password is
+  saved to config.json. Profile setup starts only after both the protected recovery evidence
+  and database backup succeed.
 - A reset, restart, backup, or profile write that cannot be verified returns
   a blocked result and is never reported complete.
 - Profiles are sorted deterministically. Database state is tri-state verified/
@@ -1115,6 +1611,14 @@ controls status before treating a registered game as ready. There is still no
 combined `Ready` flag. Uncataloged profiles remain outside this catalog-backed
 action list and stay `Unknown` in direct assessments rather than being
 promoted by heuristic structure.
+
+**Controls truthfulness contract (TPM-CONTROLS-001).** Control propagation
+results describe saved configuration changes only. `Write-ControlPropagationResults`
+must report physical verification as zero because TPM does not launch games or
+observe device input. The readiness engine may display `Verified` only when a
+structured observed-test record supplies both a nonblank method and timestamp;
+static completeness, wizard state, registration, or Input API selection cannot
+earn that state.
 
 **Fail-closed on `Controls = 'Verified'`.** `Get-ControlReadinessAssessment`
 never produces `Verified` -- this engine has no evidence source that could
@@ -1422,12 +1926,12 @@ Key invariants, each verified empirically while building the standalone tool thi
   extraction were ever skipped or broken upstream), a file missing the `TeknoParrot
 Manager` marker, or one missing a `$ScriptVersion` assignment, before it ever replaces
   the live script.
-- **`Invoke-CheckForUpdates` never calls `exit`.** It returns `$true` only when a new
-  script was actually installed; the menu dispatch block (untestable inline code, same as
-  every other mode) is the only place that decides whether to `exit` (successful update --
-  the in-memory code is now stale and must not keep running) or `continue` back to the
-  menu (every other outcome: already current, declined, read-only, or failed). Putting
-  `exit` inside the function would also kill the Pester test process that calls it.
+- **`Invoke-CheckForUpdates` and `Invoke-StartupUpdateCheck` never call `exit`.**
+  Each returns `TPM.TransactionResult.v1`; the top-level dispatch decides whether
+  to exit only after validating `Outcome -eq 'SUCCEEDED'`. `NO_OP`, rollback,
+  cleanup, and failure outcomes continue without claiming that an update was
+  installed. Keeping exit in the dispatch also prevents Pester calls from
+  terminating the test process.
 - **URL validation is `System.Uri`-parsed, not `-like`/regex prefix matching** -- rejects
   userinfo tricks (`https://github.com@evil.example.com/...`) and lookalike hosts
   (`https://github.com.evil.example.com/...`) that a naive prefix check would miss.
@@ -1468,6 +1972,11 @@ UserProfiles backup (same pattern as GPU fix/cursor hide/FFB Blaster -- each sta
 destructive flow backs up independently rather than sharing one backup call), then calls
 the same `Build-ArchetypePool` / `Invoke-ControlPropagation` functions the AutoSync/
 Register flow already uses. No propagation algorithm code is duplicated.
+All standalone profile-mutation callers use a fail-closed backup boundary:
+folder creation and profile enumeration/copy use terminating errors, and any failure
+returns before XML mutation. This includes GPU Fix, CursorHide, FFB Blaster, and
+Propagate Controls; the FFB wrapper also refuses to continue to its optional plugin
+after a failed native result.
 
 **`Write-ControlPropagationResults`** (next to `Invoke-ControlPropagation`) is a new
 extraction: the results-display block (per-status messaging, games-updated count,
@@ -1569,28 +2078,23 @@ which are historical only.
   mode specifically) reproduces the original full wording (`FullDesc`) exactly; Ultra's
   default `UltraTwoColumn` layout and Standard/Compact show progressively less detail;
   Professional has its own single-line description source (see "Description text sourcing
-  varies by tier" below) rather than sharing Ultra-two-column's. Compact prints labels only
-  plus "Type ? for descriptions."
-- `Set-ConsoleMaximizedIfSupported` -- best-effort console maximize, called once at
-  startup (not on every redraw). Wrapped in try/catch and silently no-ops on hosts that
-  don't support resizing (redirected output, ISE, some CI/test runners) -- this is a
-  cosmetic nicety, never allowed to block startup.
+  varies by tier" below) rather than sharing Ultra-two-column's. Compact prints labels only.
+- `Set-ConsoleMaximizedIfSupported` -- best-effort console sizing, called once at
+   startup (not on every redraw). It grows `RawUI.BufferSize` before assigning
+   `RawUI.WindowSize`, clamps the requested window to the resulting buffer, and
+   catches unsupported-host failures. A script-scope attempt guard prevents the
+   same resize error from repeating during later menu redraws; constrained tiers
+   remain the normal fallback when sizing is unavailable.
 
-**Wiring.** The main menu loop's `if ($mode) { ... } else { ... }` block still lives inline
-(not moved into a function) so `break`/`continue` inside the `switch` statement keep
-working exactly as before, governed by the same enclosing `while ($true)` loop. Only the
-static `Write-Host` lines were replaced with a call to `Show-MainMenu -Tier $menuTier`,
-where `$menuTier` is recomputed fresh every redraw (via `Get-ConsoleLayoutTier`) -- so a
-user resizing the window mid-session gets the right tier next time the menu draws, not just
-at startup. The `Enter 1-N` prompt and the "Invalid choice" message both use
-`$menuMaxNumber` (derived from `Get-MainMenuItems`) instead of a hardcoded `14`. Typing `?`
-at the prompt re-renders once at the Professional tier (`if ($helpTier -eq 'Compact')
-{ $helpTier = 'Professional' }`) regardless of the console's own detected tier, then
-re-prompts, without disturbing `$mode` or the surrounding loop -- this is how a Compact-tier
-console's "Type ? for descriptions." hint is actually fulfilled, since Compact's own render
-never shows per-item description text at all (see "Short-viewport truncation" below for why
-the description TEXT shown there has to stay in sync with every tier, not just the Full/
-UltraCentered one).
+**Wiring.** The main menu loop calls `Show-MainMenu -ReturnScreen` and refuses to prompt when
+the returned screen is not complete for the actual viewport. In that case it prints resize
+guidance and redraws; no hidden or clipped option can consume input. Once a complete screen
+is available, `Resolve-MainMenuCommand` is the only command allowlist before numeric
+dispatch: exact `1`-`15` selects a mode, `H` opens the distinct help screen, `L` opens the
+log/report folder, and `Q` exits. Invalid text is stored as a render notice and shown on
+the next cleared redraw before the prompt; legacy `U`, leading-zero numbers, and blank input
+are rejected before any workflow branch can see them. Help returns on Enter and does not
+alter menu expansion state.
 
 **Unchanged by design:** existing menu numbering (1-13) and every existing mode's own behavior remain
 unchanged; option 14 adds the support-package workflow and Exit is now option 15. The `switch`
@@ -1599,52 +2103,31 @@ dispatch and adaptive renderer keep the same one-source menu model.
 **Description text sourcing varies by tier -- a real gap found in review (RC3).**
 `Get-MainMenuSectionRows` does not use one shared description field for every tier:
 Standard and Compact tiers show no description at all (Detail `'Labels'`); UltraCentered
-(single-column) uses `$item.FullDesc`; Ultra-two-column and Compact's `?`-triggered
-Professional fallback route through _different_ fields depending on `$Geometry.Layout` --
-Ultra-two-column uses `$item.ShortDesc`, but Professional-two-column has its own carve-out
-(`if ($Geometry.Layout -eq 'ProfessionalTwoColumn') { Get-MainMenuDefaultDescription -Item
-$item }`) that ignores ShortDesc/FullDesc entirely and always sources from the separate
-`Get-MainMenuDefaultDescription` switch statement. A wording update to `ShortDesc`/
-`FullDesc` on `Get-MainMenuSections` (issue #140) therefore does NOT automatically reach
-Professional tier or Compact's `?` fallback -- `Get-MainMenuDefaultDescription` must be
-updated too, as its own, separate copy of the same information. Any future menu-wording
-change must update both places and be verified at every tier (Compact via `?`, Standard has
-no description to update, Professional, Ultra-two-column, and UltraCentered), not just
-whichever tier happened to be open in a terminal at the time.
+(single-column) uses `$item.FullDesc`; Ultra-two-column and Professional use their bounded
+description sources depending on `$Geometry.Layout`. The rendered command surface is
+deliberately limited to the visible numeric options plus the footer's H/L/Q commands;
+there is no hidden `?` help command or compact-tier hint advertising one.
 
-**Short-viewport truncation keeps the footer and Exit, never the earliest content (RC3
-correction, see `LESSONS_LEARNED.md`).** `Render-MainMenuScreen` builds banner, body, and
-footer rows separately and reserves the banner and footer unconditionally -- they are never
-truncated. If the body doesn't fit the remaining row budget, `Limit-MainMenuBodyRowsToBudget`
-trims body rows from the FRONT, keeping the tail, specifically so the last real menu item
-(15, Exit) and the footer's Quit/Help controls always render without the terminal itself
-having to scroll. The Compact tier's decorative "Type ? for descriptions." hint is
-deliberately built into the body BEFORE the section rows (not after) for the same reason --
-placed after, it would out-rank the real "15) Exit" line for tail-preservation priority
-purely by virtue of render order, not because it's more important. Do not "simplify" this
-back to a single flat `banner + body + footer` list truncated from one end -- that was the
-actual regression this section documents.
+**Complete-or-block rendering (RC8).** `Render-MainMenuScreen` never presents a partial
+numbered menu. It first computes the visible option set against the caller's actual width
+and height; the prompt is allowed only when every option 1-15 is visible and the layout
+fits within the viewport. A too-short or otherwise incomplete render shows resize guidance
+and the main loop consumes no menu choice. This prevents a beginner from selecting a
+different action because the intended item was clipped below the prompt.
 
-**Emergency compact presentation for the 60x10 minimum supported viewport and below (RC3-B
-correction, see `LESSONS_LEARNED.md`).** Reserving Exit and the footer is not, on its own,
-enough at very short heights: at the documented minimum supported 60x10 terminal, the normal
-Compact-tier body needs 19 rows at minimum (4 section headers + 15 item rows) even with every
-description stripped, and the normal framed banner (6 rows) plus footer (2 rows) alone
-already consume the entire available row budget there -- leaving zero rows for body content
-of any kind, Exit included. `Get-MainMenuEmergencyCompactRows` is the fallback:
-`Render-MainMenuScreen` switches to it whenever the body budget can't hold at least one row
-per item (`$bodyBudget -lt $totalItemCount`), and it replaces the framed banner and footer
-with single-line minimal versions (`Get-MainMenuMinimalBannerRows` /
-`Get-MainMenuMinimalFooterRows`) and flow-packs every item's `"N) Label"` token as densely as
-the width allows (`Get-MainMenuFlowPackedItemRows`) instead of one item per row. Tokens are
-packed whole -- a label is never split across two lines -- and if even the packed items don't
-fit the real row budget, item rows are trimmed from the front (same tail-preservation
-principle as above), so the minimal banner and footer are still never dropped, and the
-trailing item lines (ending in `15) Exit`) survive over the earliest ones. The row budget used
-here, and by the normal path above it, is the caller's real requested `-Height`, not
-`$geometry.ViewportHeight` -- `Get-MainMenuGeometry` internally clamps that to a floor of 10
-for its own column-width math, which would otherwise let more rows render than an actually
-8- or 9-row-tall real terminal can show without scrolling.
+For tall enough windows, narrow layouts use a flow-packed fallback that keeps the normal
+version banner and footer while fitting all numbered labels. For very short windows, the
+emergency compact layout uses one-line banner/footer rows and whole, never-split item
+tokens. If that still cannot fit, the renderer shows only the banner and resize guidance;
+it does not trim the front or tail of the numbered menu.
+
+**Emergency compact presentation for very short viewports (RC8).** The emergency renderer
+uses `Get-MainMenuMinimalBannerRows`, `Get-MainMenuMinimalFooterRows`, and
+`Get-MainMenuFlowPackedItemRows` to preserve the version identity, every whole numbered
+item token, and the quit/help controls. The row budget is the caller's real requested
+`-Height`, not the geometry helper's clamped math height. If all item tokens still cannot
+fit, the result is banner plus resize guidance with `PromptAllowed = $false`; no partial
+numbered list is offered and the next loop iteration redraws without consuming input.
 
 **Test changes.** "Main menu source-level drift check" was rewritten to validate the data
 model (`Get-MainMenuItems`) against the `switch` statement's case labels, instead of the
@@ -1681,20 +2164,71 @@ acknowledged. The existing menu clear/repaint path is never used as failure
 acknowledgement. Workflow start rejects a second active context, and every
 workflow branch must close or acknowledge/finalize before returning to the menu.
 
+## Progress.Core source contract (TPM-PROGRESS-001)
+
+Every user-facing long-running operation uses one of three honest surfaces:
+
+- known-total work uses `Write-TpmCompactExtractionProgress`;
+- network transfers use `Write-TpmDownloadProgress`, including final cleanup;
+- multi-step optional flows use structured `New-TpmWorkflowStatusContext` steps,
+  waiting states, failure recovery, and lifecycle closure.
+
+External waits are not represented as fake percentages. `Ensure-TeknoParrotProfilesReady`
+and `Wait-TpmForProcessClose` use bounded deadlines and actionable messages. Small
+bounded writes and renderer-aware selection remain documented no-progress surfaces.
+The production script must not use PowerShell `Write-Progress`.
+
+The Slice B inventory covers AutoSync scan/extraction, registration/import,
+Library Health search and repair, GPU Fix, thumbnail and shared downloads,
+DAT/profile-set/game-data acquisition, startup update checks, and the
+optional ReShade, dgVoodoo2, BepInEx, FFB, PostgreSQL, and support-package
+flows. Each path is classified as compact progress, structured workflow
+status, bounded waiting, or a justified renderer-aware/no-progress surface;
+there is no universal-progress exception for an unclassified long-running
+operation.
+
+## Prompt.Core finite-choice contract (TPM-PROMPT-001)
+
+`Read-TpmYesNo` owns ordinary Y/N decisions. `Read-TpmChoice` owns finite
+enumerated decisions and is the only validation loop for migrated menu routes:
+it normalizes case, validates the default against the allowed set, and
+re-prompts through `Read-HostSafe` without changing the workflow state.
+
+Back, Skip, Cancel, Preview, Run, Details, retry, and optional-setup actions
+use this contract when their choices are finite. Dynamic route menus build
+their allowed array from verified state before calling the helper.
+
+This contract does not replace exact-token safety confirmations (`YES`,
+`REMOVE`), secure password input, paths, free-text search, numeric ranges,
+stateful number-list pickers, or renderer-aware terminal/browser input. Those
+contracts retain their specialized validation and are inventoried in
+`docs/remediation/slices/PR-321-current-slice.md`.
+
+
 ## Support package architecture (issue #300)
 
 `New-TpmSupportPackage` is a fixed-scope collector invoked by the top-level
 menu's option 14. It creates a uniquely named ZIP beneath the script's
 `SupportPackages\` directory and returns a structured result with
 `Succeeded`, `Partial`, `PackagePath`, per-source records, and failures.
-Collection is split into TPM-owned files, allowlisted TeknoParrot files,
-registered-game text logs, and metadata-only plugin inventories.
+Collection is split into TPM-owned files, the exact TeknoParrotUI
+troubleshooting intake filename, allowlisted TeknoParrot files, registered-game
+text logs, redacted affected-game profile snapshots, and metadata-only plugin
+inventories.
 
 TPM and TeknoParrot sources use explicit relative filename allowlists. Game
 diagnostics are considered only for registered game paths inside the approved
 games root with non-reparse path chains. Profile paths are opened through a
 controlled .NET stream, and the stream handle's final filesystem identity is
 compared with an identity-validated profile-root handle before XML parsing.
+The profile XML is never copied. After safe XML parsing, the collector writes a
+structured metadata snapshot retaining only fields useful for path repair,
+registration, ReShade, controls, PostgreSQL, LaunchBox, and related review.
+Credential-like field names, including Pass, are redacted before the snapshot
+is staged. The snapshot is Current evidence because TPM generated it during the
+support run. TeknoParrotUI intake and TeknoParrot/game logs are Ambient because
+their current-run provenance is not established.
+
 The same opened-object identity proof protects game logs and TPM/TeknoParrot
 diagnostics. The collector reads text only; plugin directories are inspected
 for metadata and hashes but DLL payloads are never copied. Plugin hashes use
@@ -1716,6 +2250,19 @@ redaction/read failure, or ZIP failure prevents a success result. Workflow
 status is closed in `finally` on every exit path; redirected, unattended, and
 certification hosts therefore retain the existing structured-status fallback
 without cursor writes.
+
+The manifest compares the Action Required report timestamp with the latest TPM
+log timestamp. A stale report is labeled as Stale and tells the operator to
+rerun the affected workflow and create a fresh support package instead of
+presenting old metadata as Current evidence. Manifest records are ordered
+Current, Stale, then Ambient, with class counts and per-record labels. Current
+means captured or generated by this TPM run; Ambient means supplied or
+discovered without current-run provenance.
+**Operator summary.** The normal console output presents counts for games checked, files
+collected, plugin inventories, optional diagnostics not present, collection failures, and
+intentionally excluded content. The manifest retains per-record detail, including verbose
+`NotPresent` reasons, without flooding the default beginner-facing summary.
+
 
 ---
 
@@ -1840,6 +2387,10 @@ Checkpoint B1 entry). Key structural decisions:
   are ScriptProperties bound to the producing runspace, not intrinsic .NET
   properties, and cross-runspace access to them was unreliable. This gives
   every per-file scan a real wall-clock timeout.
+The default bound is 180 seconds per file for PSScriptAnalyzer because analysis
+of a real inventory file can exceed one minute on a slow Windows PowerShell 5.1
+engine. The bound remains finite; a timeout still fails the fact closed as not
+executed.
 
 ### Scratch-directory ownership invariant (New-/Remove-TPMOwnedScratchDirectoryV1)
 
@@ -2572,3 +3123,314 @@ The canonical product evolution roadmap is maintained in [ROADMAP.md](ROADMAP.md
 ARCHITECTURE.md remains the implementation reference for current and completed
 features. ROADMAP.md is planning-only and does not authorize RC7 scope changes,
 product-code, test, issue, release-package, or updater work.
+
+## Legacy workflow transaction normalization (S1)
+
+Legacy workflows may retain their detailed result properties, but their
+authoritative return value is `TPM.TransactionResult.v1`. The shared
+`New-TpmTransactionResult` and `Assert-TpmTransactionResult` functions enforce
+stable workflow and operation keys, exact changed/affected item identity,
+disjoint terminal item sets, explicit product state, verified backup evidence,
+final verification, rollback evidence, and cleanup residue classification.
+
+Adapters use `ConvertTo-TpmLegacyTransactionResult` where the underlying
+workflow remains intentionally unchanged. Destructive profile workflows make a
+verified UserProfiles backup before invoking their legacy mutator and report
+`FAILED_BEFORE_MUTATION` when that evidence cannot be established. A committed
+PostgreSQL role change without final authentication proof is `ACTION_REQUIRED`;
+it is never reported as success. PCSX2 cursor-path writes are similarly
+contract-gated and return a typed no-op when the emulator ownership contract
+cannot be consulted.
+
+The normalized workflows are GPU Fix, TPM-owned state migration, UserProfiles
+restore, Register-Games, control propagation, Library Health automatic and
+manual repair, PCSX2 cursor-path updates, ReShade, BepInEx, PostgreSQL
+password recovery, and PostgreSQL reinitialize. Beginner-facing transaction
+summaries contain no paths, commands, hashes, database names, or credentials;
+technical evidence remains in result detail fields, logs, and support
+artifacts. LaunchBox, HyperSpin, thumbnail acquisition, and optional
+artifact/download workflows remain outside this S1 boundary.
+
+## Setup and self-update transaction boundary (S1)
+
+`Invoke-PostgresGameSetup`, `Invoke-ManagerUpdateInstall`,
+`Invoke-CheckForUpdates`, and `Invoke-StartupUpdateCheck` return
+`TPM.TransactionResult.v1` on every terminal path. The result is authoritative
+for the caller; legacy counters such as `Configured`, `DbCreated`, and
+`RecoveryBlocked` remain attached as compatibility detail only.
+
+PostgreSQL setup performs profile and database preflight before mutation,
+requires verified recovery evidence before changing a non-no-op plan, and
+verifies profile/database state after writes. Database creation failure or
+profile/final-verification failure reports verified rollback when available;
+otherwise it reports `ACTION_REQUIRED` with unknown affected items. Terminal
+item sets are disjoint, and no normal summary exposes paths, commands,
+database names, credentials, hashes, or raw exception text.
+
+The manager self-update captures the current script hash and read-only state,
+verifies the backup and candidate release before replacement, verifies the
+installed hash/version after replacement, restores the previous file on a
+verifiable failure, and reports cleanup residue separately. Startup and menu
+callers validate the v1 result and restart only for `SUCCEEDED`; all other
+outcomes continue without claiming that an update was installed.
+
+## Shared transaction presentation contract (S2-A)
+
+`ConvertTo-TpmTransactionPresentation` is the deterministic projection from
+the validated `TPM.TransactionResult.v1` authority to
+`TPM.TransactionPresentation.v1`. S2-A defines the presentation data contract
+only; workflow callers are not migrated to the shared renderer in this slice.
+
+The presentation preserves the transaction identity (`TransactionId`,
+`WorkflowKey`, and `OperationKey`), exact `Outcome`, optional
+`UnderlyingOutcome` for `CLEANUP_RESIDUE`, and `ProductState`. It adds fixed
+beginner-safe wording for `Headline`, `WhatChanged`, `WhatDidNotChange`,
+`NextAction`, `RequiresAttention`, `RetrySafety`, and `DataSafety`.
+
+All item counts and labels are derived from the validated v1 item sets.
+Compatibility booleans, legacy counters, workflow status text, and console
+text cannot influence the projection. Technical item identifiers that look
+like paths or unsafe diagnostic text become the generic `Selected item`
+label. The projection contains only redacted Details/support references; it
+does not embed the source transaction or its technical evidence.
+
+The seven outcome meanings are fixed:
+
+- `SUCCEEDED`: requested changes completed and were verified.
+- `NO_OP`: current state was checked and nothing changed.
+- `FAILED_BEFORE_MUTATION`: the operation stopped before changing product state.
+- `PARTIAL_APPLIED`: only the completed items changed.
+- `ROLLED_BACK_VERIFIED`: the previous state was restored and verified.
+- `ACTION_REQUIRED`: the final product state could not be verified; blind retry
+  is prohibited.
+- `CLEANUP_RESIDUE`: the underlying product result was verified, but temporary
+  cleanup evidence remains.
+
+`Assert-TpmTransactionPresentation` enforces schema identity, exact outcome
+wording, product-state identity, non-negative counts, label/count agreement,
+cleanup-underlying-outcome rules, and safe-text rules. Normal presentation
+fields reject passwords, credentials, hashes, raw commands, stack traces, and
+filesystem paths. Passwords and credentials remain prohibited from every
+normal, Details, log, report, and support surface; technical evidence remains
+owned by the existing redaction and provenance boundaries.
+
+S2-A deliberately does not change workflow status events, support-package
+serialization, package generation, or individual workflow renderers. Those
+are S2-B and later integration boundaries.
+
+## Shared transaction renderers and status bridge (S2-B1)
+
+S2-B1 adds pure renderers over the validated `TPM.TransactionPresentation.v1`
+projection. `Format-TpmTransactionPresentationRows` is the normal summary
+renderer: it emits fixed headline, change, non-change, next-action, retry
+safety, data-safety, attention, and item-accounting rows. It does not read the
+source transaction, legacy counters, compatibility booleans, or raw technical
+details.
+
+`Format-TpmTransactionDetailsRows` is the Details renderer. It accepts the
+presentation plus an optional `TPM.TransactionDetailsContext.v1`. The context
+contains only identity-matched, redacted technical references with explicit
+evidence classes and safe recovery-action labels. Context construction and
+validation reject credentials, paths, hashes, commands, stack traces, and
+unredacted values. Missing context renders an unavailable-evidence statement;
+it never falls back to source transaction fields.
+
+`Set-TpmWorkflowTransactionPresentation` is the narrow status bridge. Once
+attached, the presentation outcome controls terminal status wording: only
+`SUCCEEDED` receives `[OK]` and `Finished`; `NO_OP` is `Unchanged`;
+`ROLLED_BACK_VERIFIED` is `Restored`; and every uncertain, partial, failed, or
+cleanup-residue result is attention-required without success or skipped
+language. `Require-TpmWorkflowTransactionPresentation` marks a terminal
+workflow fail-closed when no verified presentation is available. Invalid or
+missing required presentation output never falls back to generic completion
+claims.
+
+The normal ReShade onboarding summary is the first authorized renderer adapter.
+Its existing acquisition, ownership, and transaction logic remain unchanged;
+the legacy result now carries the selected profile IDs plus actual changed,
+skipped, and failed profile IDs into the shared normal renderer instead of a
+directory scan, filesystem-order labels, or synthetic placeholders. The final
+result summary also consumes a bounded redacted adapter for protected, unsafe,
+and native-warning detail rows. Details, support, package, runtime, and
+owner-smoke migration remain outside S2-B1.
+
+## Offline support-posture corpus and CHD taxonomy (RC8 remediation)
+
+`scripts\New-TpmSupportPostureCorpus.ps1` is an offline evidence tool. It
+reads explicitly supplied `GameProfiles`, optional `UserProfiles`, optional
+Eggman/RomVault DAT evidence, and fixture manifests. It writes only below an
+explicit output root. It never registers a game, repairs a path, edits a
+TeknoParrotUI-owned field, or adds `.chd` to the product discovery allowlist.
+
+The corpus universe is the pinned upstream profile set when one is supplied,
+overlaid by the installed profile with the same case-insensitive profile code.
+Installed and upstream XML hashes remain visible as source evidence; differing
+hashes set a source discrepancy and force manual review. `UserProfiles` are
+observation-only records and cannot expand the universe. DAT records are
+secondary recognition evidence and never override profile XML.
+
+Every profile receives exactly one posture classification:
+`AUTOMATED_SAFE`, `REVIEW_MANUAL`, `BLOCKED_UNSUPPORTED`, or `UNCLASSIFIED`.
+Safe classification requires an exact profile identity, an unambiguous launch
+candidate or explicitly identified CHD target, approved-root containment, no
+reparse-backed or protected path, no conflicting media candidate, and no write
+to a TeknoParrotUI-owned field. Ambiguous CHD relationships, missing media,
+missing launch targets, source discrepancies, and vendor-owned decisions remain
+manual review. Malformed XML, unsafe paths, missing expected directories, and
+media-layout conflicts fail closed as blocked. `UNCLASSIFIED` is a release-gate
+failure and is never silently converted to safe.
+
+The fixture taxonomy records CHD-only, mixed same-folder, content/media
+subfolder, nested one-level, nested multi-level, multiple-candidate, separate
+launcher, wrong-directory, missing-directory, required-but-absent,
+profile-rule-unknown, ordinary non-CHD, media-conflict, and unobservable
+layouts. Fixture annotations document observed evidence for layouts that cannot
+be inferred from a profile XML alone; they do not authorize product mutation.
+
+`manifest.json` carries snapshot identity, source identity, profile-file hashes,
+duplicate/malformed source records, and captured time. `support-posture.json`
+carries the normalized profile model, ownership fields, layout observations,
+classification totals, fixture coverage, DAT evidence, and release-gate
+booleans. `support-posture.md` is a beginner-readable matrix that omits raw
+filesystem paths. All generated text is deterministic BOM-less UTF-8.
+
+## Catalog-wide machine-readable game support contracts (TPM_GAME_SUPPORT_CONTRACTS_001)
+
+`scripts\TPMGameSupport.Contracts.psm1` is the PowerShell 5.1 authority for
+static contract construction, schema validation, registry routing, lookup, and
+`GameSupportContractV1` 1.1.0 remains immutable and is validated by the
+explicit 1.1 path. `GameSupportContractV1` 1.2.0 remains the base static
+contract, while current generation emits the additive 1.3.0 contract with the
+external-software prerequisite domain. The versioned reference schemas are
+`contracts/_schema/GameSupportContractV1.1.schema.json`,
+`contracts/_schema/GameSupportContractRegistryV1.1.schema.json`,
+`contracts/_schema/GameSupportContractV1.2.schema.json`, and
+`contracts/_schema/GameSupportContractRegistryV1.2.schema.json`; the 1.3
+contract is validated by the authoritative PowerShell module because its
+schema remains in the module's exact-field and domain validators. The existing
+unversioned 1.1 schema names remain compatibility references.
+
+The registry is generated from the normalized offline support-posture corpus by
+`scripts\New-TpmSupportPostureCorpus.ps1` or the standalone
+`scripts\New-TpmGameSupportContracts.ps1` wrapper. For pinned
+`teknogods/TeknoParrotUI` commit `5880e019016c5c3a0576e97a6c2a7f14bf54e3d1`,
+the expected universe is the 695 XML files under
+`TeknoParrotUi.Common/GameProfiles`. GameSetup and Metadata files are
+case-insensitive auxiliary evidence; they do not expand the profile universe.
+
+Each profile produces exactly one static contract containing identity, raw
+profile hash, launch rules, media/CHD declaration state, fix domains,
+user-owned content, TeknoParrotUI-owned settings, static prerequisites,
+release posture, classification reason, and evidence gaps. Static contracts
+contain no runtime validation result and no top-level runtime automation flag.
+Every contract has one final posture:
+`AUTOMATED_SAFE`, `REVIEW_MANUAL`, or `BLOCKED_UNSUPPORTED`. `UNCLASSIFIED`
+is an internal generation failure and makes the release gate fail.
+
+Support-file requirements are orthogonal to runtime assessment. Each item
+separately records presence, expected-path, hash, source, derivation, evidence
+references, verification rule, and granular automation permissions. The
+administrator and controller prerequisites use separate permission policies.
+`NOT_DECLARED` means unknown. It never means no fix, not applicable,
+unavailable, installed, verified, or successful, and it never enables
+automation. A declared fix requires evidence references and a verification
+rule. TeknoParrotUI metadata such as `WITH_FIX` remains evidence only unless
+an exact pinned mapping identifies the fix, installation method, and
+verification rule.
+
+The cxbxr prerequisite is backend-derived only when the pinned profile has
+`EmulatorType` equal to `cxbxr`. The exact shared checks produce four BIOS
+items: `ic10_g24lc64.bin`, `pc20_g24lc64.bin`, `ic11_24lc024.bin`, and
+`fpr21042_m29w160et.bin`. The registry records a deterministic derivation
+audit with matched profile codes; it does not infer these files from game
+names or from non-cxbxr profiles. Controller input APIs, mappings, and backend
+transport are emitted only when the posture parser has source-backed
+controller evidence.
+
+`scripts\TPMGameSupport.Assessments.psm1` and
+`contracts/_schema/GameSupportAssessmentV1.schema.json` define the separate
+1.0.0 assessment artifact. An assessment binds `ContractId`,
+`ContractSchemaVersion`, and immutable `ContractSnapshotId`; it writes only
+assessment output and never mutates the static contract. Presence, path, and
+hash states remain independent. Launch success does not imply controls
+verification. The assessment validator recomputes item and aggregate status
+from those states and rejects stale or mismatched contract bindings.
+
+The implementation slice is read-only. It emits
+`game-support-contracts.json`, `game-support-contract-validation.json`, and
+optional assessment JSON below the caller-owned output root. It does not wire
+the registry or assessment into installers, Guided Setup, Automatic Repair,
+ReShade, dgVoodoo2, BepInEx, FFB, FFBPlugin, Crosshair, game registration,
+launch, or TeknoParrotUI-owned writes. Future consumers must load and validate
+through the authority modules rather than parse JSON ad hoc.
+
+## Immutable current-release catalog snapshots (TPM_RELEASE_SNAPSHOT_001)
+
+`scripts\New-TpmReleaseCatalogSnapshot.ps1` captures release evidence without
+vendoring the TeknoParrot binary ZIP. The snapshot ID is content-addressed:
+`TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628`. The manifest records the
+stable release metadata, asset size and SHA-256, capture time, catalog counts,
+per-file asset hashes, semantic file hashes, semantic-root digests, source
+proof, and the machine-generated old/current profile delta.
+
+The stable release locator is not an immutable source. The asset was observed
+changing in place from version 1.0.0.2127 to 1.0.0.2128. The previous and
+current observations are retained in `asset-mutability.json`; a later asset
+digest is a new snapshot candidate and never silently refreshes the existing
+snapshot.
+
+The captured asset semantically matches
+`teknogods/TeknoParrotUI` commit
+`dc998e374608abbda373bb3c236db5b26b5afca7`, tree
+`7266c43c829bfd2147247b2fae0167ec44116fc5`. That commit is an immutable
+semantic content proof only. It is not relabeled as official release
+provenance, and live `master` is never a catalog-generation dependency.
+
+`scripts\Test-TpmReleaseCatalogSnapshot.ps1` validates the committed manifest,
+file inventory, content identity, path safety, source-proof semantic equality,
+and regenerated delta. Hosted CI uses the immutable proof commit and historical
+source commit for reproducibility; it does not need the mutable release asset
+to regenerate or validate the historical catalog. A separate drift watcher
+reports a new asset digest without changing the snapshot.
+
+The matching proof commit also changes application joystick/profile-loading
+code. Those changes are recorded in `source-proof.json` for a later controls
+and FFB compatibility slice; Slice 0 does not implement or consume them.
+
+## Static GameSupport corpus generation modes (Slice 1)
+
+The GameSupport generator keeps the historical 695-profile corpus reproducible
+and adds an explicit current-release mode; it never silently changes a
+historical input into a current input. `LEGACY_COMPATIBILITY` retains the
+existing installed/upstream and fixture workflow. `HISTORICAL_PINNED_695`
+requires commit `5880e019016c5c3a0576e97a6c2a7f14bf54e3d1`.
+`CURRENT_RELEASE_925` requires SnapshotId
+`TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628`, source-proof commit
+`dc998e374608abbda373bb3c236db5b26b5afca7`, the pinned historical root, and
+the accepted delta manifest. Installed state, fixtures, DAT files, and live
+network sources are rejected in current mode.
+
+Current output binds the accepted SnapshotId and semantic source proof through
+the existing schema 1.3 `Source.Commit` and registry fields. The source-proof
+commit is not labeled official release provenance. The generator checks 925
+GameProfiles, 383 GameSetup records, 923 Metadata records, 230 added
+identities, 38 changed profiles, and 657 unchanged profiles against the
+immutable snapshot evidence.
+
+Executable evidence is resolved in one place. GameProfile executable
+declarations are authoritative; GameSetup `GameExecutableLocation` is used
+only when GameProfile has no declaration. Candidate comparison normalizes path
+separators, compares executable leaf names case-insensitively, preserves the
+first source spelling, and collapses equivalent duplicates. Directory-qualified
+GameSetup evidence therefore confirms a matching GameProfile executable rather
+than becoming a false conflict. Genuine contradictions clear the selected
+target, mark source evidence conflict, and force `REVIEW_MANUAL`; no
+first-candidate guess is permitted. Current static records remain manual until
+owner runtime evidence exists.
+Historical mode deliberately preserves the pre-Slice-1 executable projection:
+GameProfile evidence is retained as parsed and GameSetup evidence is not
+allowed to select or contradict a historical executable. Current mode alone
+enables the generic resolver, including GameSetup fallback, equivalent-path
+confirmation, UNKNOWN-as-non-evidence handling, and fail-closed contradiction
+detection. This generation boundary prevents resolver evolution from rewriting
+the pinned compatibility corpus.

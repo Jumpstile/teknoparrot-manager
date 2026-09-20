@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Jumpstile/teknoparrot-manager/contracts/_schema/GameSupportContractRegistryV1.schema.json",
+  "title": "GameSupportContractRegistryV1",
+  "description": "Catalog-wide registry of one support contract per pinned TeknoParrotUI GameProfiles profile.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["RegistryId", "SchemaVersion", "SnapshotId", "CapturedAtUtc", "Source", "ExpectedProfileCount", "ContractCount", "ClassificationTotals", "ReleaseGate", "Contracts"],
+  "properties": {
+    "RegistryId": { "const": "TPM-GAME-SUPPORT-CONTRACTS" },
+    "SchemaVersion": { "const": "1.1.0" },
+    "SnapshotId": { "type": "string", "minLength": 1 },
+    "CapturedAtUtc": { "type": "string", "minLength": 1 },
+    "Source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["Repository", "Commit", "ProfileRoot"],
+      "properties": {
+        "Repository": { "type": "string" },
+        "Commit": { "type": "string" },
+        "ProfileRoot": { "type": "string" }
+      }
+    },
+    "ExpectedProfileCount": { "type": ["integer", "null"] },
+    "ContractCount": { "type": "integer", "minimum": 0 },
+    "ClassificationTotals": {
+      "type": "object", "additionalProperties": false,
+      "required": ["AUTOMATED_SAFE", "REVIEW_MANUAL", "BLOCKED_UNSUPPORTED", "UNCLASSIFIED"],
+      "properties": {
+        "AUTOMATED_SAFE": { "type": "integer", "minimum": 0 },
+        "REVIEW_MANUAL": { "type": "integer", "minimum": 0 },
+        "BLOCKED_UNSUPPORTED": { "type": "integer", "minimum": 0 },
+        "UNCLASSIFIED": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ReleaseGate": { "type": "object" },
+    "Contracts": {
+      "type": "array",
+      "items": { "$ref": "GameSupportContractV1.schema.json" }
+    }
+  }
+}

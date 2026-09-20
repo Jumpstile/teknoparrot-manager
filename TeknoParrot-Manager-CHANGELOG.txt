@@ -12,6 +12,104 @@
   Candidate source status: v1.0 RC7 remains the current published release.
   RC8 is being prepared for independent review and guarded certification.
   Final Version 1.0 remains unpublished.
+  RC8 PostgreSQL recovery remediation keeps PACKAGE_MISMATCH and
+  IDENTITY_MISMATCH fail-closed. Saved-password failures expose both masked
+  validation and the reachable local role reset choice; reset verification
+  remains mandatory. Manual password recovery reads back the saved credential
+  before retrying protected backup. Slice 8B resolves normal game names from
+  authoritative profile metadata, uses `Unknown game title -- see Details`
+  when that metadata is absent, removes profile/database pairs and repeated
+  `Backup detail: Reported` rows from normal diagnosis, preserves technical
+  evidence in Details/logs/support, reports reset failure stages, and updates
+  workflow status during password validation and reset.
+  RC8 ReShade remediation keeps the preview view-only and
+  terminal-authoritative, guards paint events when preview state or assets are
+  unavailable, and explains the five beginner-safe profile set. Apply-all
+  output reports the safely changeable and unchanged counts; result summaries
+  distinguish changed, protected, adopted/replaced, unsafe/malformed skipped,
+  and actual failure outcomes. Normal trust warnings use beginner-safe
+  wording while technical signature details remain in logs and support
+  evidence.
+  Crosshair browser selection now attempts to close the manager-owned preview
+  after valid P2 selection, reports when close or console focus is unavailable,
+  and keeps confirmation input on the active prompt line. Deployment semantics
+  remain unchanged.
+  Mode-8 FFB setup now asks the membership decision once with explicit choices.
+  Complete zero-deployment results are valid when native FFB Blaster is
+  preferred or no supported optional-plugin target exists; actual errors,
+  missing paths, unavailable devices, unavailable plugin files, and incomplete
+  accounting remain failures. Normal results distinguish installed, native,
+  unsupported, preserved, and failed outcomes and use full game names when
+  available; technical identifiers remain in logs and evidence.
+  RC8 Slice 7 cross-cutting UI cleanup spells out TeknoParrot Manager in
+  normal prompts and status messages, shows full registered game names when
+  available, keeps profile codes in technical evidence, and preserves compact
+  single-row progress output instead of repeated extraction-style lines.
+  Migration previews now identify the managed destination root, group planned
+  moves by category, explain the opt-in Y/N behavior, and list excluded game,
+  ROM-source, installation, frontend, and unrelated files. Declining applies
+  no moves and continues safely. Eggman DAT updates now use the latest release
+  filename for the saved active path and configuration.
+  RC8 now defines a machine-readable per-game static support-contract registry
+  from the offline support-posture corpus. Immutable 1.1 contracts remain
+  loadable while new generation emits 1.2 contracts with typed prerequisites,
+  backend-derived cxbxr evidence, and source-backed controller mappings. The
+  separate 1.0 assessment schema records read-only runtime observations bound
+  to an immutable contract snapshot; static generation and assessment never
+  write GameProfiles, UserProfiles, game folders, or runtime installations.
+
+
+  TPM-owned runtime files now use
+  <TeknoParrotRoot>\TeknoParrotManager\ with separated logs, reports, state,
+  cache, manifests, backups, temporary files, assets, and support packages.
+  Startup migration moves only allowlisted legacy TPM clutter, writes a report,
+  blocks ambiguous destinations, and leaves TeknoParrot-owned files untouched.
+  Package layout remains unchanged for shipped scripts, tools, and contracts.
+  Mode-8 FFBPlugin hardening now resolves the upstream repository exactly once
+  per run to one validated full commit SHA before reading the support table or
+  downloading DLLs. Both artifacts use that same SHA; mutable artifact URLs
+  are rejected. Downloads are all-or-nothing, use TPM-owned unique cache
+  staging names, record source revision and SHA-256 evidence, and never
+  overwrite existing/custom cache files. Evidence is written at preflight and
+  completion; a final evidence failure rolls back hooks, ownership metadata,
+  and native-overlap changes. Protected/collision, unsupported, missing,
+  Protected/collision, unsupported, missing, unsafe, and failed game states
+  remain distinct; zero-deployment runs are complete when all selected games
+  are validly accounted for without blocking skips or errors; every selected
+  game is included exactly once in final accounting; and the FFB evidence report
+  is included in support packages.
+  Slice C ReShade remediation now keeps explicit protected ownership
+  decisions separate from TPM-managed updates. Adopt/replace remains an
+  explicit confirmed action with transactional backup and rollback boundaries.
+  ReShade all-games accounting now includes games whose previous TPM-managed
+  profile was explicitly kept, so every selected game is counted exactly once.
+  Slice E Library Health remediation now keeps candidate search, reviewed
+  writes, and optional source recopy limited to the affected profile codes.
+  Repair results report exact fixed/candidate/still-broken accounting;
+  saved-path read-back remains required before FIXED is reported, and the
+  post-repair thumbnail prompt remains after the repair result.
+  Slice D PostgreSQL recovery remediation now classifies password, service,
+  missing-database, corruption, tool, permission, and connection failures.
+  Retry and Back/stop paths remain explicit, and recovery never reports
+  completion before verified backup, reset, restart, and profile-save outcomes.
+  Slice F Support evidence remediation now labels current, stale, and ambient
+  provenance in manifests. Action Required freshness remains tied to the latest
+  TPM log; game-local BepInEx and plugin evidence is ambient metadata only,
+  and plugin payloads are excluded.
+  Slice B Universal progress/status remediation now records a script-wide
+  long-running-path inventory. Compact progress, structured workflow status,
+  bounded waits, redirected/noninteractive behavior, and justified no-progress
+  surfaces are covered by focused source-contract tests; no unclassified
+  long-running path remains in the inspected source.
+  Slice 1 BepInEx safety remediation now accepts valid canonical child
+  destinations, keeps genuine containment and reparse hazards fail-closed,
+  classifies inspection failures with beginner-safe summaries, and preserves
+  rollback evidence when restoration cannot be verified. BepInEx failure
+  prompts visibly offer Back and do not make blind retry the default recovery
+  action. This is a source-remediation candidate change; RC8 remains
+  unpublished and owner-runtime proof is still required.
+
+
 
   Additional RC8 candidate fixes: duplicate display identities remain
   ambiguous instead of selecting the first matching monitor; the read-only
@@ -21,6 +119,147 @@
   instead of being copied into Action Required. External TPM values remain
   unchanged. No separate EXTENDED topology classification or live Windows
   display-topology acquisition is included under the feature freeze.
+  HyperSpin export now gates missing emulator IDs with explicit Fix, Add
+  anyway, or Skip choices; Skip is the safe default and no games are written.
+  Legacy .xml fallback is now limited to an explicit Add anyway choice after
+  a missing emulator ID; valid IDs never scan unrelated games files.
+  One-game AutoSync now pauses before optional library maintenance and offers
+  New game only, all games, or Back; New game only is safe default. Related-only
+  scoping is deferred rather than presented as an unimplemented choice.
+  Library Health Check repair now searches only affected profiles, shows compact
+  candidate progress, and reports explicit CANDIDATE, FIXED, or STILL BROKEN
+  outcomes. Saved GamePath values are read back and revalidated after writes;
+  repair evidence redacts user-profile path components. Registration summarizes
+  already-registered profiles, AutoSync distinguishes extraction status from
+  GamePath repair, thumbnail prompts follow repair results, and Raw Thrills
+  path-length guidance now tells users to shorten parent folders and update the
+  saved GamePath. RC8 remains a candidate and is not published.
+
+  RC8 candidate progress/thumbnail correction: compact status now uses fractional
+  elapsed seconds, reports the actual game-file scan during Library Health repair,
+  and keeps one elapsed timer across scanning and profile checks. Thumbnail checks
+  show the current profile and count/total, hide the raw web-request fallback name,
+  and list transient download/check failures separately from profiles with no
+  upstream icon. Thumbnail setup remains an optional step after repair. RC8 remains
+  a candidate and is not published.
+
+  Slice A download correction: the shared downloader now preserves a
+  definitive HTTP 404 across emergency transport fallback attempts, so
+  thumbnail setup continues to report a profile as having no upstream icon
+  instead of misclassifying it as a transient failure when a later fallback
+  encounters an unrelated network error. RC8 remains a candidate and is not
+  published.
+
+  RC8 candidate crosshair reporting correction: after valid P2 selection, the
+  browser preview enters a completed non-interactive state and tells the user
+  to return to TPM and close the tab. Console focus is attempted with a logged
+  fallback when Windows cannot restore it. Crosshair P1/P2 and follow-up prompts
+  use the workflow-aware renderer when available, while typed fallback remains
+  available. Deployment remains behind terminal confirmation. RC8 remains a
+  candidate and is not published.
+  Known RC8 owner-smoke blockers identified. Release remains blocked pending
+  re-audit, source remediation, package rebuild, and owner-runtime retest.
+  ReShade preview comparison now has a real 0-100 in-memory slider; its
+  percentage controls the Before/After split, and disk cache keys include the
+  slider position when cached artifacts are requested. The gallery now decodes
+  the bundled TPM-preview-landscape.png reference, validates its identity and
+  SHA-256, and reuses a bounded in-memory reference/processed cache.
+  RC8 runtime recovery now classifies PostgreSQL password authentication
+  failures separately and offers masked password validation before retrying
+  the protected backup. Crosshair browser selection no longer invokes a
+  PowerShell callback from an I/O thread; it polls completed requests in the
+  main runspace and preserves typed fallback. ReShade all-games chooser state
+  is initialized before iteration, and profile selection now opens a single
+  switchable visual gallery before deployment confirmation.
+  RC8 support evidence now has an explicit TeknoParrotUI intake path:
+  choose Troubleshooting -> Save information to a text file and save it beside
+  the script as TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt. Support
+  manifests label Current, Stale, and Ambient evidence and order those classes
+  explicitly; Action Required reports older than the latest TPM log are marked
+  Stale. Affected-game support uses redacted structured profile snapshots for
+  path repair, ReShade, controls, PostgreSQL, LaunchBox, and registration
+  review without copying UserProfile XML. RC8 remains a candidate and is not
+  published.
+  Console startup sizing now grows BufferSize before WindowSize, catches
+  unsupported hosts once, and leaves the constrained responsive menu usable
+  without repeating resize errors on redraw; invalid menu choices persist
+  through the next cleared redraw before the prompt.
+  ReShade's normal flow now shows the bundled, validated TPM landscape
+  reference with profile-specific in-memory processing. Before, After, Split,
+  and the 0-100 slider use the same reference and a tested moving boundary;
+  deployment remains behind explicit confirmation. Deployment output separates
+  installed, updated, protected, missing-path, and unsupported-game outcomes
+  with a direct path-repair action.
+  ReShade option 5 no longer waits behind a blocking modal gallery. It opens
+  the optional gallery non-modally and immediately shows a numbered terminal
+  chooser with U/R/B/D commands; profile selection remains usable when the
+  preview is behind, closed, unavailable, or fails. The normal menu clamps
+  anomalous Windows Terminal backing-buffer widths to a compact readable
+  layout instead of rendering a giant empty frame. Support manifests now
+  summarize routine missing optional diagnostics while preserving individual
+  collection failures.
+  Crosshair preview pages now support bounded localhost click selection with a
+  per-session token; typed numeric selection remains available as fallback.
+  ReShade mode 5 now includes a removal action. The scanner reports
+  removable TPM-owned files separately from protected bundled/preinstalled,
+  unowned/ambiguous, changed, malformed, missing-path, and already-clean
+  games. Only reviewable games enter the existing filtered chooser. Removal
+  previews enumerate keep/remove decisions, require typing REMOVE, re-read
+  profile metadata and re-resolve each target immediately before backup and
+  deletion, verify canonical containment and live SHA-256 values, back up before
+  deletion, and roll back files plus ownership metadata if the manifest update
+  fails. The final summary separates removed, already-clean, missing-path,
+  protected, changed, malformed, rolled-back, and failed outcomes. Game
+  executables, UserProfiles, LaunchBox, HyperSpin, bundled, and ambiguous files
+  remain protected.
+PostgreSQL backup diagnostics now retain the psql/pg_dump diagnostic stream
+and exit code in the blocked result, so cause categories are based on the
+actual client failure instead of a generic existence-query message.
+PostgreSQL workflow failures now carry concrete Retry/Stop remediation
+labels in the status contract instead of acknowledgement-only metadata.
+Library Health Check now has a read-only report followed by explicit
+broken-path repair, PostgreSQL, and optional-component actions. Automatic path
+repair first performs a dry-run candidate search, displays exact proposed
+paths, asks before applying the reviewed set, and creates a verified profile
+backup before saving. The configured games folder is the automatic search root;
+an [S] folder is accepted only when it is existing, canonical, non-reparse, and
+outside TeknoParrot, TPM, and ZIP source roots. If no candidate is found, the
+user can search another game folder. [C] returns to AutoSync with an explicit
+whitelist of broken profile codes, so recovery cannot broaden into an
+all-games extraction. Manual repair requires an explicit executable selection
+and never guesses. Unattended Health Check stops after the report.
+Health Check re-copy is scoped by DAT profile code, including supplementary
+sources, and no-candidate repair offers the configured-source re-copy action
+with saved-path evidence.
+All destructive profile workflows now stop before mutation if a profile backup
+folder cannot be created or any profile copy fails; interactive and unattended
+runs have no incomplete-backup override.
+ReShade setup now makes the numbered terminal chooser the sole profile
+authority; the optional gallery follows that state and has no ignored profile
+selector. Result output states what changed and did not change, reconciles
+unsafe and malformed paths/ownership metadata into final all-games accounting,
+and gives direct repair/review-then-rerun actions. Native TeknoParrot CRT,
+SSAA, shader, scanline, and post-process settings are preserved and reported
+when they may stack with the selected ReShade effect. Onboarding pauses for
+result review before continuing to dgVoodoo2.
+Thumbnail downloads now use one compact progress row, identify exact online-pack
+misses without calling them unsupported, and suppress PowerShell web progress
+overlays. The support manifest explains how to refresh stale Action Required data.
+dgVoodoo2 output describes compatibility-file copying rather than emulator setup;
+control summaries continue to distinguish saved settings from verified hardware.
+The FFB workflow now treats native FFB Blaster backup or profile-write failure as
+fatal before offering the optional plugin; a later plugin result cannot mask an
+incomplete native step.
+
+Optional setup results now route missing or unavailable saved paths directly to
+Health Check while leaving ordinary deployment failures on their normal
+failure guidance. FFB centrally classifies missing leaves and unavailable
+devices separately, preserves path metadata even when plugin deployment also
+fails, and keeps no-match games distinct from true errors. ReShade preview
+text now states that the bundled-image comparison is an approximation and does
+not run games or ReShade shaders; actual in-game results may vary.
+
+
 
   Fixes: Eggman updates offer a validated primary ZIP/source folder when the
   current DAT is protected under the TeknoParrot root; PostgreSQL setup asks
@@ -32,6 +271,15 @@
 
   UX: restore, crosshair, first-run, optional-download, update, recovery, and
   support-package paths keep beginner-readable status/retry guidance visible.
+  Beginner-flow hardening: the main menu now uses a complete-or-block render contract
+  with deterministic width/height behavior, an explicit H/L/Q command allowlist, and a
+  separate Help screen. AutoSync/Register use P/R/B preview choices with preview as the
+  safe default. ReShade offers trusted source updates and an all-games profile choice;
+  crosshair galleries are explicitly visual-only and require typed indices. PostgreSQL
+  database backups now precede config/profile writes and expose friendly affected game
+  names alongside technical database identifiers, clearly state that nothing changed,
+  and offer Retry, Details, Skip, and Back recovery choices. Support output shows concise
+  collection counts while retaining verbose NotPresent detail in the manifest.
   Create Support Package collects allowlisted TPM/TeknoParrot/game text logs
   plus metadata-only plugin inventories into one redacted ZIP; unsafe
   executable/archive masquerades and materially binary text are rejected
@@ -99,6 +347,11 @@
   retained when profiles change. The chooser exposes explicit restore,
   remembered-selection, and favorite paths without changing trust or monitor
   state.
+  ReShade chooser refinement: terminal and gallery descriptions now include
+  the exact approved shader filename and technique for each non-empty profile,
+  in canonical order. The labels are generated from TPM's approved profile
+  definitions and effect catalog; internal paths and live-fetched runtime
+  files remain hidden.
 
 
 
@@ -1522,7 +1775,11 @@
       per-game prompt, so the script resolves matches first, then asks
       ONE question covering every overlapping game at once: keep native
       for all of them, or use the third-party plugin for all of them.
-      Never silently defaults to either side.
+      Native is the safe default; only an explicit N selects the plugin.
+      Blank or invalid input keeps native.
+    - Choosing the third-party owner creates a fresh verified profile backup,
+      clears native FFB Blaster fields for exactly the overlaps, verifies the
+      switch, and blocks plugin deployment if that ownership transition fails.
     - If the third-party plugin's destination DLL filename is already
       occupied (e.g. ReShade using d3d9.dll for the same game), that game
       is skipped with a warning -- never overwritten.

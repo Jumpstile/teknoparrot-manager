@@ -212,7 +212,7 @@ function Write-TpmDownloadProgress {
 
     $activity = "Downloading $Label"
     if ($Complete) {
-        Write-Progress -Id 42 -Activity $activity -Completed
+        [Console]::Write(("`r[{0}] complete.                    `n" -f $activity))
         return
     }
 
@@ -229,9 +229,9 @@ function Write-TpmDownloadProgress {
                 $etaText = " ETA {0}" -f ([TimeSpan]::FromSeconds($remainingSeconds).ToString("mm\:ss"))
             }
         }
-        Write-Progress -Id 42 -Activity $activity -Status ("{0}: {1}%  {2}/{3} MB  {4} MB/s{5}" -f $Method, $percent, $downloadedMb, $totalMb, $mbps, $etaText) -PercentComplete $percent
+        [Console]::Write(("`r[{0}] {1}: {2}%  {3}/{4} MB  {5} MB/s{6}" -f $activity, $Method, $percent, $downloadedMb, $totalMb, $mbps, $etaText))
     } else {
-        Write-Progress -Id 42 -Activity $activity -Status ("{0}: {1} MB downloaded  {2} MB/s" -f $Method, $downloadedMb, $mbps)
+        [Console]::Write(("`r[{0}] {1}: {2} MB downloaded  {3} MB/s" -f $activity, $Method, $downloadedMb, $mbps))
     }
 }
 
@@ -334,7 +334,13 @@ function Invoke-TpmDownloadWebRequest {
     )
 
     Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes 0 -TotalBytes 0 -Elapsed ([TimeSpan]::Zero)
-    Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempPath -UseBasicParsing -ErrorAction Stop
+    $previousProgressPreference = $ProgressPreference
+    try {
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempPath -UseBasicParsing -ErrorAction Stop
+    } finally {
+        $ProgressPreference = $previousProgressPreference
+    }
     $bytes = (Get-Item -LiteralPath $TempPath -ErrorAction Stop).Length
     Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes $bytes -TotalBytes $bytes -Elapsed ([TimeSpan]::Zero) -Complete
 }

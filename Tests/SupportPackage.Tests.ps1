@@ -78,6 +78,35 @@ Describe 'New-TpmSupportPackage' {
         $entries | Should -Contain 'MANIFEST.txt'
         @($entries | Where-Object { ($_ -replace '\\','/') -like 'diagnostics/tpm-*' }).Count | Should -BeGreaterThan 0
     }
+    It 'packages FFB provenance evidence with the support diagnostics' {
+        $f = New-SupportFixture
+        $evidencePath = Join-Path $f.Script 'Reports\TPM-FFB-Plugin-Evidence.json'
+        Write-SupportText $evidencePath '{"SourceRevision":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","SourceFiles":[{"FileName":"MAME64.dll","Sha256":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}],"SelectedGames":["FixtureGame"]}'
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $entry = @((Get-SupportZipEntries $r.PackagePath) | Where-Object { $_ -like '*TPM-FFB-Plugin-Evidence*' })
+        $entry | Should -HaveCount 1
+        $text = Get-SupportZipText $r.PackagePath $entry[0]
+        $text | Should -Match 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+        $text | Should -Match 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
+        $text | Should -Match 'FixtureGame'
+    }
+    It 'records Action Required freshness in the packaged manifest' {
+        $f = New-SupportFixture
+        $actionPath = Join-Path $f.Script 'TeknoParrot-Manager-ActionItems.txt'
+        $logPath = Join-Path $f.Script 'TeknoParrot-Manager.log'
+        Write-SupportText $actionPath 'Action item from an earlier run'
+        Write-SupportText $logPath 'Current TPM run'
+        $now = [DateTime]::UtcNow
+        [System.IO.File]::SetLastWriteTimeUtc($actionPath, $now.AddMinutes(-10))
+        [System.IO.File]::SetLastWriteTimeUtc($logPath, $now)
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'Action Required evidence status: stale'
+        $manifest | Should -Match 'Action Required report is older than the latest TPM run'
+        $manifest | Should -Match 'Action Required remediation: rerun the affected workflow'
+    }
 
     It 'collects allowlisted TeknoParrot diagnostics including ParrotPatcher_Log.txt' {
         $f = New-SupportFixture
@@ -350,6 +379,44 @@ Describe 'New-TpmSupportPackage' {
         $events[$events.Count - 1] | Should -Be 'WorkflowClosed'
         $r.StatusContext.Closed | Should -BeTrue
     }
+    It 'links collected evidence and workflow results to one session RunId' {
+        $f = New-SupportFixture
+        $runId = '11111111111111111111111111111111'
+        $script:TpmSessionRunId = $runId
+        $script:LatestTpmWorkflowResult = [pscustomobject]@{
+            WorkflowId = '22222222222222222222222222222222'
+            RunId = $runId
+            WorkflowKey = 'AutoSync'
+            Lifecycle = 'Finished'
+            State = 'Finished'
+            Sequence = 9
+        }
+        (New-TpmActionRequiredReportText -RunId $runId) | Should -Match ("Run ID: " + $runId)
+        $controlsPath = Join-Path $f.Script 'controls-generated.txt'
+        Write-ControlsStatus -userProfilesDir $f.Profiles -pool @() -propagationReports @() -outputPath $controlsPath -RunId $runId | Should -Be 0
+        [System.IO.File]::ReadAllText($controlsPath) | Should -Match ("Run ID    : " + $runId)
+        Write-Log 'session linkage check'
+        [System.IO.File]::ReadAllText($script:logPath) | Should -Match ("RunId=" + $runId)
+        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager.log') "[2026-09-04 12:00:00] [RunId=$runId] workflow complete"
+        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager-ActionItems.txt') "Action Required`r`nRun ID: $runId"
+        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager-controls.txt') "Controls Status`r`nRun ID    : $runId"
+        $events = New-Object System.Collections.Generic.List[object]
+        $sink = { param($event) [void]$events.Add($event) }.GetNewClosure()
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output -EventSink $sink
+        $r.Succeeded | Should -BeTrue
+        $r.RunId | Should -Be $runId
+        @($events | Where-Object { $_.RunId -ne $runId }).Count | Should -Be 0
+        (Get-SupportZipText $r.PackagePath 'MANIFEST.txt') | Should -Match ("Run ID: " + $runId)
+        (Get-SupportZipText $r.PackagePath 'diagnostics/tpm-01-TeknoParrot-Manager.log.txt') | Should -Match $runId
+        (Get-SupportZipText $r.PackagePath 'diagnostics/tpm-02-TeknoParrot-Manager-controls.txt') | Should -Match $runId
+        (Get-SupportZipText $r.PackagePath 'diagnostics/tpm-03-TeknoParrot-Manager-ActionItems.txt') | Should -Match $runId
+        $workflowEvidence = Get-SupportZipText $r.PackagePath 'metadata/workflow-result.json' | ConvertFrom-Json
+        $workflowEvidence.RunId | Should -Be $runId
+        $workflowEvidence.LatestWorkflow.RunId | Should -Be $runId
+        $workflowEvidence.SupportWorkflow.RunId | Should -Be $runId
+        $workflowEvidence.SupportWorkflow.Lifecycle | Should -Be 'Finished'
+        $workflowEvidence.SupportWorkflow.State | Should -Be 'Finished'
+    }
     It 'writes only relative safe ZIP entry names' {
         $f = New-SupportFixture
         Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager.log') 'diagnostic'
@@ -519,5 +586,79 @@ Describe 'New-TpmSupportPackage' {
         $collected.Destination | Should -Contain 'first_.txt'
         $collected.Destination | Should -Contain 'first_-02.txt'
         $collected.Destination | ForEach-Object { $_ | Should -Not -Match '(^|[\\/])\.\.([\\/]|$)' }
+    }
+    It 'collects redacted affected-game profile snapshots with diagnostic fields' {
+        $f = New-SupportFixture
+        $game = Add-SupportGame $f
+        $profile = '<GameProfile>' +
+            '<GameName>TMNT</GameName>' +
+            '<GamePath>' + (Join-Path $game 'TMNT.exe') + '</GamePath>' +
+            '<EmulationProfile>RawThrills</EmulationProfile>' +
+            '<ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldType>String</FieldType><FieldValue>GameDB01</FieldValue></FieldInformation>' +
+            '<FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldType>String</FieldType><FieldValue>do-not-share</FieldValue></FieldInformation></ConfigValues>' +
+            '<JoystickButtons><ButtonName>Start</ButtonName><InputMapping>JOY1_BUTTON1</InputMapping><AnalogType>Digital</AnalogType></JoystickButtons>' +
+            '</GameProfile>'
+        Write-SupportText (Join-Path $f.Profiles 'TMNT.xml') $profile
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $snapshot = Get-SupportZipText $r.PackagePath 'metadata/profile-TMNT.txt'
+        $snapshot | Should -Match 'GameName = TMNT'
+        $snapshot | Should -Match 'GameDB01'
+        $snapshot | Should -Match 'Button=Start; Mapping=JOY1_BUTTON1'
+        $snapshot | Should -Match 'Value=<redacted-field>'
+        $snapshot | Should -Not -Match 'do-not-share|<GameProfile>'
+        ($r.Records | Where-Object Source -eq 'Game:TMNT:redacted profile snapshot').EvidenceClass | Should -Be 'Current'
+    }
+
+    It 'labels current, stale, and ambient evidence in manifest order' {
+        $f = New-SupportFixture
+        Add-SupportGame $f | Out-Null
+        $actionPath = Join-Path $f.Script 'TeknoParrot-Manager-ActionItems.txt'
+        $logPath = Join-Path $f.Script 'TeknoParrot-Manager.log'
+        Write-SupportText $actionPath 'older action'
+        Write-SupportText $logPath 'current manager run'
+        Write-SupportText (Join-Path $f.Tp 'TeknoParrotUI.log') 'ambient TPUI diagnostic'
+        $now = [DateTime]::UtcNow
+        [IO.File]::SetLastWriteTimeUtc($actionPath, $now.AddMinutes(-10))
+        [IO.File]::SetLastWriteTimeUtc($logPath, $now)
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -TeknoParrotRoot $f.Tp -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        ($r.Records | Where-Object Source -eq 'TPM:TeknoParrot-Manager-ActionItems.txt').EvidenceClass | Should -Be 'Stale'
+        ($r.Records | Where-Object Source -eq 'TeknoParrot:TeknoParrotUI.log').EvidenceClass | Should -Be 'Ambient'
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'Evidence classes: Current'
+        $currentIndex = $manifest.IndexOf('[Collected/Current]')
+        $staleIndex = $manifest.IndexOf('[Collected/Stale]')
+        $ambientIndex = $manifest.IndexOf('[Collected/Ambient]')
+        $currentIndex | Should -BeGreaterOrEqual 0
+        $staleIndex | Should -BeGreaterThan $currentIndex
+        $ambientIndex | Should -BeGreaterThan $staleIndex
+    }
+    It 'marks game-local plugin evidence as ambient metadata and preserves current-run separation' {
+        $f = New-SupportFixture
+        $game = Add-SupportGame $f
+        New-Item -ItemType Directory -Path (Join-Path $game 'BepInEx\plugins') -Force | Out-Null
+        [System.IO.File]::WriteAllBytes((Join-Path $game 'BepInEx\plugins\GamePlugin.dll'), [byte[]](1,2,3))
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        ($r.Records | Where-Object Source -eq 'Game:TMNT:plugin inventory').EvidenceClass | Should -Be 'Ambient'
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'Ambient = supplied or discovered without current-run provenance'
+        $manifest | Should -Match 'Game:TMNT:plugin inventory'
+        $manifest | Should -Not -Match 'GamePlugin\.dll'
+    }
+
+    It 'collects the exact TeknoParrotUI troubleshooting intake file safely' {
+        $f = New-SupportFixture
+        $intakeName = 'TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt'
+        Write-SupportText (Join-Path $f.Script $intakeName) 'TPUI diagnostic password=secret'
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $intake = Get-SupportZipText $r.PackagePath 'diagnostics/tpui-troubleshooting.txt'
+        $intake | Should -Match 'password=<redacted>'
+        $intake | Should -Not -Match 'secret'
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'TeknoParrotUI:Troubleshooting intake'
+        (Get-SupportZipText $r.PackagePath 'README.txt') | Should -Match $intakeName
     }
 }

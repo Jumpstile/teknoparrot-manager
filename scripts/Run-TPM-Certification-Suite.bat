@@ -15,7 +15,9 @@ if not defined REPO_ROOT (
     set "REPO_ROOT=!CD!"
     popd >nul
 )
-set "DEFAULT_TP_ROOT=C:\Users\EliSi\LaunchBox\Emulators\TeknoParrot"
+rem Intentional portable default: resolve the operator's profile at runtime.
+rem Callers can override it with argument 2 or TPM_TEKNOPARROT_ROOT.
+set "DEFAULT_TP_ROOT=%USERPROFILE%\LaunchBox\Emulators\TeknoParrot"
 if not exist "%REPO_ROOT%\scripts\Run-TPM-Tests.ps1" (
     echo ERROR: Certification runner not found under %REPO_ROOT%.
     exit /b 1

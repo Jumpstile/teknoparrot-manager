@@ -1,0 +1,28 @@
+{
+    "RecordSchemaVersion":  "1.0.0",
+    "CurrentSnapshotId":  "TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628",
+    "ObservedAssetHistory":  [
+                                 {
+                                     "Version":  "1.0.0.2127",
+                                     "Tag":  "TeknoParrotUI",
+                                     "AssetName":  "TeknoParrotUi.zip",
+                                     "AssetSize":  153128113,
+                                     "AssetSha256":  "1c88dbfa1c5a15cf5c836f0ede2c86f3207772b695246a9029ac151a6722986a",
+                                     "AssetUpdatedAt":  "2026-09-18T18:22:05Z"
+                                 },
+                                 {
+                                     "Version":  "1.0.0.2128",
+                                     "Tag":  "TeknoParrotUI",
+                                     "ReleaseId":  16543041,
+                                     "AssetName":  "TeknoParrotUi.zip",
+                                     "AssetUrl":  "https://github.com/teknogods/TeknoParrotUI/releases/download/TeknoParrotUI/TeknoParrotUi.zip",
+                                     "AssetSize":  153159505,
+                                     "AssetSha256":  "9e6a8628d365a9d7c32f1dee07f1a62799656a9fdb1b58afe863526c5cf84901",
+                                     "AssetUpdatedAt":  "2026-09-18T20:58:49Z",
+                                     "PublishedAt":  "2019-04-04T00:15:41Z",
+                                     "TargetCommitish":  "6b83abb30bb065b5ba35659747d0187696a90eb2"
+                                 }
+                             ],
+    "Conclusion":  "The stable release locator is mutable and must not be used as the sole historical catalog source. A changed asset requires a new reviewed snapshot.",
+    "Policy":  "Historical validation uses the immutable TPM-controlled snapshot and immutable source-proof commit. Upstream drift watch may report a changed live asset but must not silently refresh the snapshot."
+}
