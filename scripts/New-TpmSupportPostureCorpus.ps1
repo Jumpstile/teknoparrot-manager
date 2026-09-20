@@ -12,6 +12,10 @@ param(
     [string]$FixtureRoot = '',
     [string]$SnapshotId = '',
     [string]$CapturedAtUtc = '',
+    [string]$GenerationMode = 'LEGACY_COMPATIBILITY',
+    [string]$HistoricalProfileRoot = '',
+    [string]$SnapshotManifestPath = '',
+    [string]$DeltaManifestPath = '',
     [string]$OutputRoot = ''
 )
 $gameSupportContractsModule = Join-Path $PSScriptRoot 'TPMGameSupport.Contracts.psm1'
@@ -20,6 +24,14 @@ Import-Module $gameSupportContractsModule -Force
 $script:TpmPinnedTeknoParrotRepository = 'teknogods/TeknoParrotUI'
 $script:TpmPinnedTeknoParrotCommit = '5880e019016c5c3a0576e97a6c2a7f14bf54e3d1'
 $script:TpmPinnedTeknoParrotProfileCount = 695
+$script:TpmCurrentReleaseSnapshotId = 'TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628'
+$script:TpmCurrentReleaseSourceProofCommit = 'dc998e374608abbda373bb3c236db5b26b5afca7'
+$script:TpmCurrentReleaseProfileCount = 925
+$script:TpmCurrentReleaseGameSetupCount = 383
+$script:TpmCurrentReleaseMetadataCount = 923
+$script:TpmCurrentReleaseAddedCount = 230
+$script:TpmCurrentReleaseChangedCount = 38
+$script:TpmCurrentReleaseUnchangedCount = 657
 
 
 $script:TpmSupportPostureClassifications = @(
@@ -412,6 +424,79 @@ function Complete-TpmSupportProfileEvidence {
     $ProfileRecord.MetadataEvidence = Get-TpmSupportAuxiliaryEvidence -ProfileRoot $ProfileRoot -ProfileCode ([string]$ProfileRecord.ProfileCode) -DirectoryName 'Metadata' -Extension '.json' -SourceType $SourceType -SourceId $SourceId -CapturedAtUtc $CapturedAtUtc
     return $ProfileRecord
 }
+function Get-TpmSupportUniqueExecutableCandidates {
+    param([object[]]$Candidates)
+    $seen = @{}
+    $result = New-Object System.Collections.Generic.List[string]
+    foreach ($candidate in @($Candidates)) {
+        $value = [string]$candidate
+        if ([string]::IsNullOrWhiteSpace($value) -or $value.Trim() -ieq 'UNKNOWN') { continue }
+        $key = $value.Trim().ToLowerInvariant()
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            [void]$result.Add($value.Trim())
+        }
+    }
+    return @($result.ToArray())
+}
+function Get-TpmSupportExecutableComparisonKey {
+    param([string]$Candidate)
+    $normalized = ([string]$Candidate).Trim().Replace('/', '\').Trim('\')
+    if ([string]::IsNullOrWhiteSpace($normalized)) { return '' }
+    $leaf = [System.IO.Path]::GetFileName($normalized)
+    if ([string]::IsNullOrWhiteSpace($leaf)) { $leaf = $normalized }
+    return $leaf.ToLowerInvariant()
+}
+
+function Set-TpmSupportProperty {
+    param([Parameter(Mandatory = $true)]$Object, [Parameter(Mandatory = $true)][string]$Name, $Value)
+    if ($Object -is [System.Collections.IDictionary]) { $Object[$Name] = $Value }
+    elseif ($Object.PSObject.Properties[$Name]) { $Object.$Name = $Value }
+    else { Add-Member -InputObject $Object -NotePropertyName $Name -NotePropertyValue $Value -Force }
+}
+function Resolve-TpmSupportExecutableEvidence {
+    param([Parameter(Mandatory = $true)]$ProfileRecord)
+    if ($ProfileRecord.IsMalformed) { return $ProfileRecord }
+    $profilePrimary = @(Get-TpmSupportUniqueExecutableCandidates -Candidates $ProfileRecord.Executable.PrimaryCandidates)
+    $profileAlternate = @(Get-TpmSupportUniqueExecutableCandidates -Candidates $ProfileRecord.Executable.SecondaryCandidates)
+    $setupCandidates = @(Get-TpmSupportUniqueExecutableCandidates -Candidates (Get-TpmSupportExecutableAlternatives ([string]$ProfileRecord.SetupEvidence.ExecutableLocation)))
+    $profileKeys = @($profilePrimary | ForEach-Object { Get-TpmSupportExecutableComparisonKey $_ } | Where-Object { $_ } | Sort-Object -Unique)
+    $setupKeys = @($setupCandidates | ForEach-Object { Get-TpmSupportExecutableComparisonKey $_ } | Where-Object { $_ } | Sort-Object -Unique)
+    $conflict = ($profilePrimary.Count -gt 0 -and $setupCandidates.Count -gt 0 -and @($setupKeys | Where-Object { $profileKeys -notcontains $_ }).Count -gt 0)
+    $rule = 'MISSING_DECLARATION'
+    $selected = @()
+    if ($conflict) {
+        $rule = 'CONFLICT_UNRESOLVED'
+        Set-TpmSupportProperty -Object $ProfileRecord -Name 'SourceDiscrepancy' -Value $true
+    } elseif ($profilePrimary.Count -gt 0) {
+        $rule = if ($setupCandidates.Count -gt 0) { 'PROFILE_PRIMARY_GAMESETUP_CONFIRMING' } else { 'PROFILE_PRIMARY' }
+        $selected = $profilePrimary
+    } elseif ($setupCandidates.Count -gt 0) {
+        $rule = 'GAMESETUP_FALLBACK'
+        $selected = $setupCandidates
+    }
+    Set-TpmSupportProperty -Object $ProfileRecord.Executable -Name 'PrimaryCandidates' -Value $selected
+    Set-TpmSupportProperty -Object $ProfileRecord.Executable -Name 'SecondaryCandidates' -Value $profileAlternate
+    Set-TpmSupportProperty -Object $ProfileRecord.Executable -Name 'Rule' -Value $rule
+    Set-TpmSupportProperty -Object $ProfileRecord.Executable -Name 'ProfileCandidates' -Value $profilePrimary
+    Set-TpmSupportProperty -Object $ProfileRecord.Executable -Name 'GameSetupCandidates' -Value $setupCandidates
+    Set-TpmSupportProperty -Object $ProfileRecord.Executable -Name 'Conflict' -Value $conflict
+    return $ProfileRecord
+}
+
+function Get-TpmSupportStaticClassification {
+    param([object]$ProfileRecord)
+    if (-not $ProfileRecord -or $ProfileRecord.IsMalformed) {
+        return [pscustomobject]@{ Classification = 'BLOCKED_UNSUPPORTED'; ReasonCode = 'MALFORMED_PROFILE_XML'; BeginnerAction = 'Repair the pinned GameProfile XML before generating static support contracts.' }
+    }
+    if ($ProfileRecord.SourceDiscrepancy -or $ProfileRecord.Executable.Conflict) {
+        return [pscustomobject]@{ Classification = 'REVIEW_MANUAL'; ReasonCode = 'SOURCE_EVIDENCE_CONFLICT'; BeginnerAction = 'Review contradictory pinned GameProfile and GameSetup executable declarations.' }
+    }
+    if (@($ProfileRecord.Executable.PrimaryCandidates).Count -eq 0) {
+        return [pscustomobject]@{ Classification = 'REVIEW_MANUAL'; ReasonCode = 'EXECUTABLE_EVIDENCE_MISSING'; BeginnerAction = 'Review the exact launch executable before any automated action.' }
+    }
+    return [pscustomobject]@{ Classification = 'REVIEW_MANUAL'; ReasonCode = 'STATIC_SOURCE_ONLY'; BeginnerAction = 'Owner runtime evidence is required before treating this static declaration as verified.' }
+}
 
 function Finalize-TpmSupportClassification {
     param([object]$ProfileRecord, [object]$Decision)
@@ -434,7 +519,7 @@ function Finalize-TpmSupportClassification {
 }
 
 function Get-TpmSupportProfileSource {
-    param([string]$Root, [string]$SourceType, [string]$SourceId, [string]$CapturedAtUtc)
+    param([string]$Root, [string]$SourceType, [string]$SourceId, [string]$CapturedAtUtc, [bool]$ResolveExecutableEvidence = $true)
     $source = [ordered]@{
         SourceType = $SourceType
         SourceId = $SourceId
@@ -463,6 +548,7 @@ function Get-TpmSupportProfileSource {
         $record = Get-TpmSupportProfileRecord -File $file -SourceType $SourceType -SourceId $SourceId
         $record.Evidence.CapturedAtUtc = $CapturedAtUtc
         $record = Complete-TpmSupportProfileEvidence -ProfileRecord $record -ProfileRoot $rootFull -SourceType $SourceType -SourceId $SourceId -CapturedAtUtc $CapturedAtUtc
+        if ($ResolveExecutableEvidence) { $record = Resolve-TpmSupportExecutableEvidence -ProfileRecord $record }
         if ($record.IsMalformed) { $source.MalformedProfileStems += $record.ProfileCode }
         [void]$profiles.Add($record)
     }
@@ -841,23 +927,101 @@ function New-TpmSupportPostureMarkdown {
     return ($lines -join "`n") + "`n"
 }
 
+function Assert-TpmSupportCurrentReleaseInputs {
+    param([string]$SnapshotId, [string]$UpstreamCommitSha, [string]$UpstreamProfileRoot, [string]$HistoricalProfileRoot, [string]$SnapshotManifestPath, [string]$DeltaManifestPath)
+    if ($SnapshotId -cne $script:TpmCurrentReleaseSnapshotId) { throw 'CURRENT_RELEASE_SNAPSHOT_INVALID: SnapshotId is not the accepted immutable current-release snapshot.' }
+    if ($UpstreamCommitSha -cne $script:TpmCurrentReleaseSourceProofCommit) { throw 'CURRENT_RELEASE_SOURCE_INVALID: current mode requires the accepted immutable source-proof commit.' }
+    foreach ($path in @($UpstreamProfileRoot, $HistoricalProfileRoot, $SnapshotManifestPath, $DeltaManifestPath)) {
+        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath $path -PathType Container -ErrorAction SilentlyContinue)) { throw 'CURRENT_RELEASE_INPUT_MISSING: all pinned roots and evidence paths are required.' }
+    }
+    $manifest = Get-Content -LiteralPath $SnapshotManifestPath -Raw | ConvertFrom-Json
+    if ($manifest.SnapshotId -cne $script:TpmCurrentReleaseSnapshotId -or $manifest.SourceProof.Commit -cne $script:TpmCurrentReleaseSourceProofCommit -or [int]$manifest.CatalogCounts.GameProfiles -ne $script:TpmCurrentReleaseProfileCount -or [int]$manifest.CatalogCounts.GameSetup -ne $script:TpmCurrentReleaseGameSetupCount -or [int]$manifest.CatalogCounts.Metadata -ne $script:TpmCurrentReleaseMetadataCount) { throw 'CURRENT_RELEASE_MANIFEST_INVALID: accepted snapshot manifest identity or counts do not match.' }
+    $profileRoot = ConvertTo-TpmSupportFullPath $UpstreamProfileRoot
+    $parent = [System.IO.Directory]::GetParent($profileRoot).FullName
+    $profileCount = @(Get-ChildItem -LiteralPath $profileRoot -Filter '*.xml' -File -ErrorAction Stop).Count
+    $setupCount = @(Get-ChildItem -LiteralPath (Join-Path $parent 'GameSetup') -Filter '*.xml' -File -ErrorAction Stop).Count
+    $metadataCount = @(Get-ChildItem -LiteralPath (Join-Path $parent 'Metadata') -Filter '*.json' -File -ErrorAction Stop).Count
+    if ($profileCount -ne $script:TpmCurrentReleaseProfileCount -or $setupCount -ne $script:TpmCurrentReleaseGameSetupCount -or $metadataCount -ne $script:TpmCurrentReleaseMetadataCount) { throw 'CURRENT_RELEASE_SOURCE_INVALID: pinned source catalog counts do not match the accepted snapshot.' }
+    $historicalCount = @(Get-ChildItem -LiteralPath (ConvertTo-TpmSupportFullPath $HistoricalProfileRoot) -Filter '*.xml' -File -ErrorAction Stop).Count
+    if ($historicalCount -ne $script:TpmPinnedTeknoParrotProfileCount) { throw 'HISTORICAL_SOURCE_INVALID: historical pinned profile count does not match 695.' }
+    $delta = Get-Content -LiteralPath $DeltaManifestPath -Raw | ConvertFrom-Json
+    if (@($delta.Added).Count -ne $script:TpmCurrentReleaseAddedCount -or @($delta.Changed).Count -ne $script:TpmCurrentReleaseChangedCount -or @($delta.Unchanged).Count -ne $script:TpmCurrentReleaseUnchangedCount -or @($delta.Removed).Count -ne 0) { throw 'CURRENT_RELEASE_DELTA_INVALID: accepted delta counts do not match.' }
+    return $delta
+}
+
+function Get-TpmSupportComparisonProjection {
+    param($GameProfile)
+    return [ordered]@{
+        DisplayName = $GameProfile.GameTitle
+        VariantTitle = $GameProfile.VariantTitle
+        ProfileRevision = $GameProfile.ProfileRevision
+        EmulationProfile = $GameProfile.EmulationProfile
+        EmulatorType = $GameProfile.EmulatorType
+        LaunchExecutables = [ordered]@{ Primary = @($GameProfile.Executable.PrimaryCandidates); Alternate = @($GameProfile.Executable.SecondaryCandidates); Rule = [string]$GameProfile.Executable.Rule; HasTwoExecutables = [bool]$GameProfile.Executable.HasTwoExecutables }
+        Media = $GameProfile.Media
+        PathRules = $GameProfile.PathRules
+        RequiresAdmin = [bool]$GameProfile.RequiresAdmin
+        ControllerEvidence = $GameProfile.ControllerEvidence
+        SetupExecutableLocation = [string]$GameProfile.SetupEvidence.ExecutableLocation
+    }
+}
+
+function New-TpmSupportComparisonArtifacts {
+    param([object[]]$CurrentProfiles, [object[]]$HistoricalProfiles, $Delta)
+    $currentByCode = @{}; $historicalByCode = @{}
+    foreach ($profileItem in @($CurrentProfiles)) { $currentByCode[$profileItem.ProfileCode.ToLowerInvariant()] = $profileItem }
+    foreach ($profileItem in @($HistoricalProfiles)) { $historicalByCode[$profileItem.ProfileCode.ToLowerInvariant()] = $profileItem }
+    $added = @($currentByCode.Keys | Where-Object { -not $historicalByCode.ContainsKey($_) } | ForEach-Object { $currentByCode[$_].ProfileCode } | Sort-Object)
+    $expectedAdded = @($Delta.Added | Sort-Object)
+    if ((@($added) -join '|') -cne (@($expectedAdded) -join '|')) { throw 'CURRENT_RELEASE_DELTA_INVALID: generated added-profile identities differ from accepted delta.' }
+    $changes = foreach ($code in @($Delta.Changed | Sort-Object)) {
+        $key = $code.ToLowerInvariant()
+        if (-not $currentByCode.ContainsKey($key) -or -not $historicalByCode.ContainsKey($key)) { throw "CURRENT_RELEASE_DELTA_INVALID: changed profile '$code' is missing from a source." }
+        $old = Get-TpmSupportComparisonProjection $historicalByCode[$key]
+        $new = Get-TpmSupportComparisonProjection $currentByCode[$key]
+        $fields = New-Object System.Collections.Generic.List[string]
+        foreach ($field in @($old.Keys)) {
+            if ((ConvertTo-Json $old[$field] -Depth 30) -cne (ConvertTo-Json $new[$field] -Depth 30)) { [void]$fields.Add([string]$field) }
+        }
+        [ordered]@{ ProfileCode = $currentByCode[$key].ProfileCode; ChangedFields = @($fields.ToArray()); Historical = $old; Current = $new }
+    }
+    return [ordered]@{ AddedCount = @($added).Count; AddedProfiles = @($added); ChangedCount = @($changes).Count; ChangedProfiles = @($changes); RemovedCount = @($Delta.Removed).Count; UnchangedCount = @($Delta.Unchanged).Count }
+}
+
 function Invoke-TpmSupportPostureCorpus {
     param(
         [string]$TeknoParrotRoot = '', [string]$InstalledGameProfilesPath = '', [string]$InstalledUserProfilesPath = '',
         [string]$UpstreamProfileRoot = '', [string]$UpstreamCommitSha = '', [string]$UpstreamVersion = '',
         [string]$InstalledTeknoParrotVersion = '', [string]$EggmanDatZip = '', [string]$DatFilePath = '',
         [string]$FixtureRoot = '', [string]$SnapshotId = '', [string]$CapturedAtUtc = '',
+        [string]$GenerationMode = 'LEGACY_COMPATIBILITY', [string]$HistoricalProfileRoot = '',
+        [string]$SnapshotManifestPath = '', [string]$DeltaManifestPath = '',
         [Parameter(Mandatory = $true)][string]$OutputRoot
     )
     $captured = if ($CapturedAtUtc) { $CapturedAtUtc } else { (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
+    $isCurrent = ($GenerationMode -ceq 'CURRENT_RELEASE_925')
+    $isHistorical = ($GenerationMode -ceq 'HISTORICAL_PINNED_695')
+    if ($GenerationMode -notin @('LEGACY_COMPATIBILITY','HISTORICAL_PINNED_695','CURRENT_RELEASE_925')) { throw 'GENERATION_MODE_INVALID: use LEGACY_COMPATIBILITY, HISTORICAL_PINNED_695, or CURRENT_RELEASE_925.' }
+    $comparison = $null
+    $historicalSource = $null
+    $delta = $null
+    if ($isCurrent) {
+        if ($TeknoParrotRoot -or $InstalledGameProfilesPath -or $InstalledUserProfilesPath -or $FixtureRoot -or $EggmanDatZip -or $DatFilePath) { throw 'CURRENT_RELEASE_INPUT_INVALID: current static generation cannot consume installed, fixture, DAT, or runtime inputs.' }
+        $delta = Assert-TpmSupportCurrentReleaseInputs -SnapshotId $SnapshotId -UpstreamCommitSha $UpstreamCommitSha -UpstreamProfileRoot $UpstreamProfileRoot -HistoricalProfileRoot $HistoricalProfileRoot -SnapshotManifestPath $SnapshotManifestPath -DeltaManifestPath $DeltaManifestPath
+        $historicalSource = Get-TpmSupportProfileSource -Root $HistoricalProfileRoot -SourceType 'HistoricalPinnedGameProfiles' -SourceId $script:TpmPinnedTeknoParrotCommit -CapturedAtUtc $captured
+    } elseif ($isHistorical) {
+        if ($UpstreamCommitSha -cne $script:TpmPinnedTeknoParrotCommit) { throw 'HISTORICAL_SOURCE_INVALID: historical mode requires the pinned 695-profile commit.' }
+        if (-not $UpstreamProfileRoot) { throw 'HISTORICAL_SOURCE_INVALID: historical mode requires UpstreamProfileRoot.' }
+    }
     $output = ConvertTo-TpmSupportFullPath $OutputRoot
     if (-not $output) { throw 'OutputRoot must be an absolute or resolvable path.' }
     [void][System.IO.Directory]::CreateDirectory($output)
-    $installedRoot = if ($InstalledGameProfilesPath) { $InstalledGameProfilesPath } elseif ($TeknoParrotRoot) { Join-Path $TeknoParrotRoot 'GameProfiles' } else { '' }
-    $userRoot = if ($InstalledUserProfilesPath) { $InstalledUserProfilesPath } elseif ($TeknoParrotRoot) { Join-Path $TeknoParrotRoot 'UserProfiles' } else { '' }
+    $installedRoot = if ($isCurrent -or $isHistorical) { '' } elseif ($InstalledGameProfilesPath) { $InstalledGameProfilesPath } elseif ($TeknoParrotRoot) { Join-Path $TeknoParrotRoot 'GameProfiles' } else { '' }
+    $userRoot = if ($isCurrent -or $isHistorical) { '' } elseif ($InstalledUserProfilesPath) { $InstalledUserProfilesPath } elseif ($TeknoParrotRoot) { Join-Path $TeknoParrotRoot 'UserProfiles' } else { '' }
     $sources = New-Object System.Collections.Generic.List[object]
+    $resolveSourceExecutables = -not $isHistorical
     if ($installedRoot) { [void]$sources.Add((Get-TpmSupportProfileSource -Root $installedRoot -SourceType 'InstalledGameProfiles' -SourceId $(if ($InstalledTeknoParrotVersion) { $InstalledTeknoParrotVersion } else { 'LOCAL-INSTALL' }) -CapturedAtUtc $captured)) }
-    if ($UpstreamProfileRoot) { [void]$sources.Add((Get-TpmSupportProfileSource -Root $UpstreamProfileRoot -SourceType 'PinnedUpstreamGameProfiles' -SourceId $(if ($UpstreamCommitSha) { $UpstreamCommitSha } elseif ($UpstreamVersion) { $UpstreamVersion } else { 'UNPINNED-SOURCE' }) -CapturedAtUtc $captured)) }
+    if ($UpstreamProfileRoot) { [void]$sources.Add((Get-TpmSupportProfileSource -Root $UpstreamProfileRoot -SourceType 'PinnedUpstreamGameProfiles' -SourceId $(if ($UpstreamCommitSha) { $UpstreamCommitSha } elseif ($UpstreamVersion) { $UpstreamVersion } else { 'UNPINNED-SOURCE' }) -CapturedAtUtc $captured -ResolveExecutableEvidence $resolveSourceExecutables)) }
     $availableRoots = @($sources | Where-Object Available | ForEach-Object { $_.Profiles | ForEach-Object SourcePath } | Where-Object { $_ })
     foreach ($root in @($installedRoot, $UpstreamProfileRoot)) {
         $rootFull = ConvertTo-TpmSupportFullPath $root
@@ -903,13 +1067,16 @@ function Invoke-TpmSupportPostureCorpus {
         $clone.LayoutObservations = @()
         [void]$profiles.Add([pscustomobject]$clone)
     }
+    if ($isCurrent) { $comparison = New-TpmSupportComparisonArtifacts -CurrentProfiles ([object[]]$profiles.ToArray()) -HistoricalProfiles ([object[]]$historicalSource.Profiles) -Delta $delta }
     $profilesByCode = @{}
     foreach ($profileRecord in $profiles) { $profilesByCode[$profileRecord.ProfileCode] = $profileRecord }
-    $fixtureResults = @(Get-TpmSupportFixtureResults -FixtureRoot $FixtureRoot -ProfilesByCode $profilesByCode)
+    $fixtureResults = if ($isCurrent -or $isHistorical) { New-Object System.Collections.Generic.List[object] } else { @(Get-TpmSupportFixtureResults -FixtureRoot $FixtureRoot -ProfilesByCode $profilesByCode) }
     foreach ($profileRecord in $profiles) {
         $rows = @($fixtureResults | Where-Object { $_.ProfileCode -ieq $profileRecord.ProfileCode })
         $profileRecord.LayoutObservations = @($rows | ForEach-Object { $_.Observation })
-        if ($rows.Count -eq 0) {
+        if ($isCurrent) {
+            $decision = Get-TpmSupportStaticClassification -ProfileRecord $profileRecord
+        } elseif ($rows.Count -eq 0) {
             $decision = Get-TpmSupportClassification -ProfileRecord $profileRecord -Layout $null -Fixture ([pscustomobject]@{})
         } else {
             $decision = [pscustomobject]@{ Classification = $rows[0].Classification; ReasonCode = $rows[0].ReasonCode; BeginnerAction = $rows[0].BeginnerAction }
@@ -946,7 +1113,7 @@ function Invoke-TpmSupportPostureCorpus {
     })
     $snapshotMaterial = @($profiles | ForEach-Object ProfileXmlSha256) -join '|'
     $snapshotIdValue = if ($SnapshotId) { $SnapshotId } else { 'TPM-SUPPORT-' + (Get-TpmSupportShortHash -Bytes ([Text.Encoding]::UTF8.GetBytes($snapshotMaterial))) }
-    $expectedProfileCount = if ($UpstreamCommitSha -eq $script:TpmPinnedTeknoParrotCommit) { $script:TpmPinnedTeknoParrotProfileCount } else { $null }
+    $expectedProfileCount = if ($isCurrent) { $script:TpmCurrentReleaseProfileCount } elseif ($isHistorical -or $UpstreamCommitSha -eq $script:TpmPinnedTeknoParrotCommit) { $script:TpmPinnedTeknoParrotProfileCount } else { $null }
     $contractSource = [ordered]@{
         Repository = if ($UpstreamProfileRoot) { $script:TpmPinnedTeknoParrotRepository } else { 'TPM-SUPPORT-POSTURE' }
         Commit = if ($UpstreamCommitSha) { $UpstreamCommitSha } elseif ($UpstreamVersion) { $UpstreamVersion } else { 'LOCAL-SOURCE' }
@@ -963,6 +1130,7 @@ function Invoke-TpmSupportPostureCorpus {
         CorpusId = 'TPM-TPUI-GAME-SUPPORT'
         SnapshotId = $snapshotIdValue
         CapturedAtUtc = $captured
+        GenerationMode = $GenerationMode
         ProfileCount = $profiles.Count
         ContractSource = $contractSource
         ExpectedProfileCount = $expectedProfileCount
@@ -994,6 +1162,7 @@ function Invoke-TpmSupportPostureCorpus {
             RegistryValid = [bool]$gameSupportContractValidation.Valid
             ClosureEligible = ($profileCountMatches -and $profiles.Count -gt 0 -and $classificationTotals.UNCLASSIFIED -eq 0 -and $sourceIdentityComplete -and @($sources | ForEach-Object DuplicateProfileStems).Count -eq 0 -and $fixtureCoverage.Failed -eq 0 -and $profileHashesComplete -and [bool]$gameSupportContractValidation.Valid)
         }
+        ComparisonArtifacts = $comparison
         Profiles = @($profiles | Sort-Object ProfileCode)
     }
     $manifestFiles = New-Object System.Collections.Generic.List[object]
@@ -1019,6 +1188,10 @@ function Invoke-TpmSupportPostureCorpus {
     Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'game-support-contracts.json') -Text (ConvertTo-TpmSupportJsonValue $gameSupportContracts)
     Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'game-support-contract-validation.json') -Text (ConvertTo-TpmSupportJsonValue $gameSupportContractValidation)
     Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'fixture-coverage.json') -Text (ConvertTo-TpmSupportJsonValue $fixtureCoverage)
+    if ($isCurrent) {
+        Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'current-release-added-profiles.json') -Text (ConvertTo-TpmSupportJsonValue ([ordered]@{ SnapshotId = $snapshotIdValue; Profiles = $comparison.AddedProfiles; Count = $comparison.AddedCount }))
+        Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'current-release-semantic-changes.json') -Text (ConvertTo-TpmSupportJsonValue $comparison)
+    }
     Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'support-posture.md') -Text (New-TpmSupportPostureMarkdown -Model ([pscustomobject]$model) -FixtureCoverage ([pscustomobject]$fixtureCoverage))
     [void][System.IO.Directory]::CreateDirectory((Join-Path $output 'observations'))
     [void][System.IO.Directory]::CreateDirectory((Join-Path $output 'dat'))
@@ -1039,7 +1212,7 @@ function Get-TpmSupportShortHash {
 if ($MyInvocation.InvocationName -ne '.') {
     try {
         if ([string]::IsNullOrWhiteSpace($OutputRoot)) { throw 'OutputRoot is required.' }
-        Invoke-TpmSupportPostureCorpus -TeknoParrotRoot $TeknoParrotRoot -InstalledGameProfilesPath $InstalledGameProfilesPath -InstalledUserProfilesPath $InstalledUserProfilesPath -UpstreamProfileRoot $UpstreamProfileRoot -UpstreamCommitSha $UpstreamCommitSha -UpstreamVersion $UpstreamVersion -InstalledTeknoParrotVersion $InstalledTeknoParrotVersion -EggmanDatZip $EggmanDatZip -DatFilePath $DatFilePath -FixtureRoot $FixtureRoot -SnapshotId $SnapshotId -CapturedAtUtc $CapturedAtUtc -OutputRoot $OutputRoot
+        Invoke-TpmSupportPostureCorpus -TeknoParrotRoot $TeknoParrotRoot -InstalledGameProfilesPath $InstalledGameProfilesPath -InstalledUserProfilesPath $InstalledUserProfilesPath -UpstreamProfileRoot $UpstreamProfileRoot -UpstreamCommitSha $UpstreamCommitSha -UpstreamVersion $UpstreamVersion -InstalledTeknoParrotVersion $InstalledTeknoParrotVersion -EggmanDatZip $EggmanDatZip -DatFilePath $DatFilePath -FixtureRoot $FixtureRoot -SnapshotId $SnapshotId -CapturedAtUtc $CapturedAtUtc -GenerationMode $GenerationMode -HistoricalProfileRoot $HistoricalProfileRoot -SnapshotManifestPath $SnapshotManifestPath -DeltaManifestPath $DeltaManifestPath -OutputRoot $OutputRoot
         exit 0
     } catch {
         Write-Error $_

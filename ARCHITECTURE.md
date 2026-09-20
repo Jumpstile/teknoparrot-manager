@@ -3298,13 +3298,16 @@ filesystem paths. All generated text is deterministic BOM-less UTF-8.
 
 `scripts\TPMGameSupport.Contracts.psm1` is the PowerShell 5.1 authority for
 static contract construction, schema validation, registry routing, lookup, and
-deterministic writing. `GameSupportContractV1` 1.1.0 remains immutable and is
-validated by the explicit 1.1 path. `GameSupportContractV1` 1.2.0 is the
-static-only contract used by new generation. The versioned reference schemas
-are `contracts/_schema/GameSupportContractV1.1.schema.json`,
+`GameSupportContractV1` 1.1.0 remains immutable and is validated by the
+explicit 1.1 path. `GameSupportContractV1` 1.2.0 remains the base static
+contract, while current generation emits the additive 1.3.0 contract with the
+external-software prerequisite domain. The versioned reference schemas are
+`contracts/_schema/GameSupportContractV1.1.schema.json`,
 `contracts/_schema/GameSupportContractRegistryV1.1.schema.json`,
 `contracts/_schema/GameSupportContractV1.2.schema.json`, and
-`contracts/_schema/GameSupportContractRegistryV1.2.schema.json`. The existing
+`contracts/_schema/GameSupportContractRegistryV1.2.schema.json`; the 1.3
+contract is validated by the authoritative PowerShell module because its
+schema remains in the module's exact-field and domain validators. The existing
 unversioned 1.1 schema names remain compatibility references.
 
 The registry is generated from the normalized offline support-posture corpus by
@@ -3393,3 +3396,41 @@ reports a new asset digest without changing the snapshot.
 The matching proof commit also changes application joystick/profile-loading
 code. Those changes are recorded in `source-proof.json` for a later controls
 and FFB compatibility slice; Slice 0 does not implement or consume them.
+
+## Static GameSupport corpus generation modes (Slice 1)
+
+The GameSupport generator keeps the historical 695-profile corpus reproducible
+and adds an explicit current-release mode; it never silently changes a
+historical input into a current input. `LEGACY_COMPATIBILITY` retains the
+existing installed/upstream and fixture workflow. `HISTORICAL_PINNED_695`
+requires commit `5880e019016c5c3a0576e97a6c2a7f14bf54e3d1`.
+`CURRENT_RELEASE_925` requires SnapshotId
+`TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628`, source-proof commit
+`dc998e374608abbda373bb3c236db5b26b5afca7`, the pinned historical root, and
+the accepted delta manifest. Installed state, fixtures, DAT files, and live
+network sources are rejected in current mode.
+
+Current output binds the accepted SnapshotId and semantic source proof through
+the existing schema 1.3 `Source.Commit` and registry fields. The source-proof
+commit is not labeled official release provenance. The generator checks 925
+GameProfiles, 383 GameSetup records, 923 Metadata records, 230 added
+identities, 38 changed profiles, and 657 unchanged profiles against the
+immutable snapshot evidence.
+
+Executable evidence is resolved in one place. GameProfile executable
+declarations are authoritative; GameSetup `GameExecutableLocation` is used
+only when GameProfile has no declaration. Candidate comparison normalizes path
+separators, compares executable leaf names case-insensitively, preserves the
+first source spelling, and collapses equivalent duplicates. Directory-qualified
+GameSetup evidence therefore confirms a matching GameProfile executable rather
+than becoming a false conflict. Genuine contradictions clear the selected
+target, mark source evidence conflict, and force `REVIEW_MANUAL`; no
+first-candidate guess is permitted. Current static records remain manual until
+owner runtime evidence exists.
+Historical mode deliberately preserves the pre-Slice-1 executable projection:
+GameProfile evidence is retained as parsed and GameSetup evidence is not
+allowed to select or contradict a historical executable. Current mode alone
+enables the generic resolver, including GameSetup fallback, equivalent-path
+confirmation, UNKNOWN-as-non-evidence handling, and fail-closed contradiction
+detection. This generation boundary prevents resolver evolution from rewriting
+the pinned compatibility corpus.

@@ -206,9 +206,15 @@ Describe 'TPM catalog-wide game support contracts' {
         $catalogOutput = Join-Path $TestDrive 'pinned-catalog-output'
         $supportScript = Join-Path $PSScriptRoot '..\scripts\New-TpmSupportPostureCorpus.ps1'
         . $supportScript
-        Invoke-TpmSupportPostureCorpus -UpstreamProfileRoot $catalogProfiles -UpstreamCommitSha '5880e019016c5c3a0576e97a6c2a7f14bf54e3d1' -SnapshotId 'TPM-CATALOG-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z' -OutputRoot $catalogOutput | Out-Null
+        Invoke-TpmSupportPostureCorpus -GenerationMode 'HISTORICAL_PINNED_695' -UpstreamProfileRoot $catalogProfiles -UpstreamCommitSha '5880e019016c5c3a0576e97a6c2a7f14bf54e3d1' -SnapshotId 'TPM-CATALOG-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z' -OutputRoot $catalogOutput | Out-Null
         $catalogRegistry = Get-Content -LiteralPath (Join-Path $catalogOutput 'game-support-contracts.json') -Raw | ConvertFrom-Json
         $catalogModel = Get-Content -LiteralPath (Join-Path $catalogOutput 'support-posture.json') -Raw | ConvertFrom-Json
+        $catalogGoldenHashes = [ordered]@{
+            'game-support-contracts.json' = '2b49618a0be4599bec6e10701ccc93900ee6a253cbeb899dc3b7d691d426e6f5'
+            'game-support-contract-validation.json' = 'e0ca308ea99dca9eac4798c483719e4de167de355b30b7e7d455a264fbc7de8e'
+            'support-posture.json' = '40dff47ddea6a7b67f4bdaa68a336d8df56d86eefd3c7e2d2e279779539cce2f'
+            'manifest.json' = '444f13f7026dfcf300f7197ba88933e0916d0cd33484eb54bb65da40183bb4c2'
+        }
     }
 
     It 'generates exactly one contract for every pinned catalog profile' {
@@ -219,9 +225,16 @@ Describe 'TPM catalog-wide game support contracts' {
         $catalogRegistry.ReleaseGate.ZeroUnclassified | Should -BeTrue
         $catalogRegistry.ReleaseGate.ProfileCountMatches | Should -BeTrue
         @($catalogRegistry.Contracts | Where-Object { [string]::IsNullOrWhiteSpace($_.ClassificationReason) }).Count | Should -Be 0
+        foreach ($relative in @($catalogGoldenHashes.Keys)) {
+            (Get-TpmSupportSha256 -Path (Join-Path $catalogOutput $relative)) | Should -Be $catalogGoldenHashes[$relative]
+        }
         @($catalogRegistry.Contracts | Where-Object { [string]::IsNullOrWhiteSpace($_.Evidence.ProfileXmlSha256) }).Count | Should -Be 0
+        $catalogModel.ProfileCount | Should -Be 695
+        $catalogModel.ClassificationTotals.UNCLASSIFIED | Should -Be 0
+        @($catalogRegistry.Contracts | Group-Object ContractId | Where-Object Count -gt 1).Count | Should -Be 0
+        @($catalogRegistry.Contracts | Group-Object { $_.ContractId.ToLowerInvariant() } | Where-Object Count -gt 1).Count | Should -Be 0
+        $catalogModel.GenerationMode | Should -Be 'HISTORICAL_PINNED_695'
     }
-
     It 'keeps Hummer and Hummer Extreme as manual-review seed records' {
         $hummer = @($catalogRegistry.Contracts | Where-Object { $_.ProfileCode -ieq 'Hummer' })[0]
         $extreme = @($catalogRegistry.Contracts | Where-Object { $_.ProfileCode -ieq 'hummerextreme' })[0]

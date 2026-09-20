@@ -120,3 +120,15 @@ Status: IMPLEMENTATION COMPLETE; OWNER-RUNTIME EVIDENCE REQUIRED
 - Stop condition: retain `REVIEW`, `NOT_EVALUATED`, or owner-runtime-needed
   dispositions when independent installation evidence, source verification,
   hash authority, or owner-approved runtime proof is absent.
+
+## Current-release migration addendum
+
+The historical 695-profile contract remains the compatibility corpus. Slice
+`TPM-S1-CURRENT-RELEASE-GAMESUPPORT-002` adds explicit current mode
+`CURRENT_RELEASE_925`; it does not reinterpret or overwrite the historical
+snapshot. Current mode binds the accepted immutable SnapshotId and semantic
+source-proof commit, emits schema 1.3 contracts, and checks the exact
+230/0/38/657 delta. Source-only current records remain `REVIEW_MANUAL` until
+owner runtime evidence exists. GameProfile executable declarations take
+precedence over GameSetup fallback evidence, and contradictory declarations
+remain non-safe.

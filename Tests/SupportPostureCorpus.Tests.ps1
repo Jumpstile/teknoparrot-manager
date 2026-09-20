@@ -177,6 +177,85 @@ Describe 'TPM support posture corpus' {
         @($files | Where-Object { -not (Test-TpmSupportPathInside -Child $_.FullName -Parent $outputOne) }).Count | Should -Be 0
     }
 
+    It 'preserves historical executable semantics when the current resolver evolves' {
+        $boundaryRoot = Join-Path $supportRoot 'boundary'
+        $boundaryProfiles = Join-Path $boundaryRoot 'GameProfiles'
+        $boundarySetup = Join-Path $boundaryRoot 'GameSetup'
+        [void][System.IO.Directory]::CreateDirectory($boundaryProfiles)
+        [void][System.IO.Directory]::CreateDirectory($boundarySetup)
+        Add-SupportTestFile -Root $boundaryProfiles -RelativePath 'HistoricalFallback.xml' -Content '<GameProfile><GameName>HistoricalFallback</GameName><EmulationProfile>Raw</EmulationProfile></GameProfile>'
+        Add-SupportTestFile -Root $boundarySetup -RelativePath 'HistoricalFallback.xml' -Content '<GameSetup><GameExecutableLocation>launcher.exe</GameExecutableLocation></GameSetup>'
+        $historicalSource = Get-TpmSupportProfileSource -Root $boundaryProfiles -SourceType 'HistoricalPinnedGameProfiles' -SourceId 'historical-test' -CapturedAtUtc '2026-08-22T00:00:00Z' -ResolveExecutableEvidence $false
+        $currentSource = Get-TpmSupportProfileSource -Root $boundaryProfiles -SourceType 'PinnedUpstreamGameProfiles' -SourceId 'current-test' -CapturedAtUtc '2026-08-22T00:00:00Z' -ResolveExecutableEvidence $true
+        $historical = @($historicalSource.Profiles | Where-Object ProfileCode -eq 'HistoricalFallback')[0]
+        $current = @($currentSource.Profiles | Where-Object ProfileCode -eq 'HistoricalFallback')[0]
+        @($historical.Executable.PrimaryCandidates).Count | Should -Be 0
+        $historical.Executable.Rule | Should -BeNullOrEmpty
+        $current.Executable.Rule | Should -Be 'GAMESETUP_FALLBACK'
+        @($current.Executable.PrimaryCandidates) | Should -Be @('launcher.exe')
+    }
+
+    It 'uses GameSetup only as an executable fallback' {
+        $profileRecord = [pscustomobject]@{
+            IsMalformed = $false
+            SourceDiscrepancy = $false
+            Executable = [pscustomobject]@{ PrimaryCandidates = @(); SecondaryCandidates = @(); HasTwoExecutables = $false }
+            SetupEvidence = [pscustomobject]@{ ExecutableLocation = 'Launcher.EXE' }
+        }
+        $resolved = Resolve-TpmSupportExecutableEvidence -ProfileRecord $profileRecord
+        $resolved.Executable.Rule | Should -Be 'GAMESETUP_FALLBACK'
+        @($resolved.Executable.PrimaryCandidates) | Should -Be @('Launcher.EXE')
+    }
+
+    It 'preserves a GameProfile executable over equivalent GameSetup evidence' {
+        $profileRecord = [pscustomobject]@{
+            IsMalformed = $false
+            SourceDiscrepancy = $false
+            Executable = [pscustomobject]@{ PrimaryCandidates = @('game.exe'); SecondaryCandidates = @(); HasTwoExecutables = $false }
+            SetupEvidence = [pscustomobject]@{ ExecutableLocation = 'GAME.EXE' }
+        }
+        $resolved = Resolve-TpmSupportExecutableEvidence -ProfileRecord $profileRecord
+        $resolved.Executable.Rule | Should -Be 'PROFILE_PRIMARY_GAMESETUP_CONFIRMING'
+        @($resolved.Executable.PrimaryCandidates) | Should -Be @('game.exe')
+    }
+
+    It 'treats directory-qualified equivalent executable evidence as confirming' {
+        $profileRecord = [pscustomobject]@{
+            IsMalformed = $false
+            SourceDiscrepancy = $false
+            Executable = [pscustomobject]@{ PrimaryCandidates = @('game.exe'); SecondaryCandidates = @(); HasTwoExecutables = $false }
+            SetupEvidence = [pscustomobject]@{ ExecutableLocation = 'DATA\GAME.EXE' }
+        }
+        $resolved = Resolve-TpmSupportExecutableEvidence -ProfileRecord $profileRecord
+        $resolved.Executable.Rule | Should -Be 'PROFILE_PRIMARY_GAMESETUP_CONFIRMING'
+        $resolved.Executable.Conflict | Should -BeFalse
+    }
+
+    It 'ignores UNKNOWN as a non-evidence GameSetup placeholder' {
+        $profileRecord = [pscustomobject]@{
+            IsMalformed = $false
+            SourceDiscrepancy = $false
+            Executable = [pscustomobject]@{ PrimaryCandidates = @('game.exe'); SecondaryCandidates = @(); HasTwoExecutables = $false }
+            SetupEvidence = [pscustomobject]@{ ExecutableLocation = 'UNKNOWN' }
+        }
+        $resolved = Resolve-TpmSupportExecutableEvidence -ProfileRecord $profileRecord
+        $resolved.Executable.Rule | Should -Be 'PROFILE_PRIMARY'
+        $resolved.Executable.Conflict | Should -BeFalse
+        @($resolved.Executable.GameSetupCandidates).Count | Should -Be 0
+    }
+
+    It 'fails closed on contradictory executable declarations' {
+        $profileRecord = [pscustomobject]@{
+            IsMalformed = $false
+            SourceDiscrepancy = $false
+            Executable = [pscustomobject]@{ PrimaryCandidates = @('profile.exe'); SecondaryCandidates = @(); HasTwoExecutables = $false }
+            SetupEvidence = [pscustomobject]@{ ExecutableLocation = 'setup.exe' }
+        }
+        $resolved = Resolve-TpmSupportExecutableEvidence -ProfileRecord $profileRecord
+        $resolved.Executable.Rule | Should -Be 'CONFLICT_UNRESOLVED'
+        $resolved.SourceDiscrepancy | Should -BeTrue
+        @($resolved.Executable.PrimaryCandidates).Count | Should -Be 0
+    }
 }
 
 AfterAll {

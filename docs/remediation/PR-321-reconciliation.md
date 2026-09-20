@@ -839,3 +839,45 @@ from that single unsafe-root classification.
   Arcade validation, merge, tag, publish, certification, or release action.
 - Current disposition: implementation evidence pending focused validation and
   review; PR #321 remains `HOLD`.
+
+## Desktop OMP -- Slice 1 current-release GameSupport contract migration
+
+- Slice contract: `TPM-S1-CURRENT-RELEASE-GAMESUPPORT-002`.
+- Inventory: `docs/remediation/inventories/TPM-S1-GAMESUPPORT-CONTRACT-INVENTORY.md`.
+- The generator now has explicit `LEGACY_COMPATIBILITY`,
+  `HISTORICAL_PINNED_695`, and `CURRENT_RELEASE_925` modes. Current mode
+  rejects installed, fixture, DAT, and live-source inputs.
+- Current output binds SnapshotId
+  `TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628` and semantic proof
+  commit `dc998e374608abbda373bb3c236db5b26b5afca7`, with 925 validated
+  schema 1.3 contracts and zero `UNCLASSIFIED` records.
+- Generated comparison evidence is exact: 230 added, 0 removed, 38 changed,
+  and 657 unchanged. The added identities and changed-field matrix are
+  written below the caller output root.
+- Executable evidence is fail-closed: GameProfile wins, GameSetup fills only a
+  missing profile declaration, equivalent case differences normalize, and
+  contradictions clear the selected target and retain manual review.
+- Historical fixture generation remains the compatibility path. No package,
+  owner runtime, Arcade, hosted CI, commit, push, merge, tag, publish,
+  certification, or release operation was performed.
+- Current executable evidence is intentionally generation-mode scoped:
+  `CURRENT_RELEASE_925` uses the generic resolver, while
+  `HISTORICAL_PINNED_695` preserves the pre-Slice-1 GameProfile executable
+  projection and does not allow GameSetup evidence to select or contradict a
+  historical executable.
+- Historical compatibility correction is exact at the contract, validation,
+  and manifest byte level. `support-posture.json` is semantically equivalent
+  after excluding only the deterministic `GenerationMode` and
+  `ComparisonArtifacts` metadata fields.
+- Current mode retains equivalent-path confirmation, UNKNOWN-as-non-evidence
+  handling, and fail-closed contradictions.
+- Representative current-mode evidence remains:
+  `VirtuaRLimit` selects `launcher.exe` through `GAMESETUP_FALLBACK`;
+  contradictory declarations clear the selected target; literal `UNKNOWN`
+  setup evidence is discarded.
+- Documentation screenshot gate is not satisfied: no current validated runtime
+  screenshots exist. No mock, stale, or synthetic screenshots were added, and
+  README, QuickStart, setup, and feature documentation remain unchanged until a
+  later authorized runtime capture/doc slice.
+- Corrected local evidence gates pass, but the current disposition remains
+  `HOLD_SLICE_1_CONTRACT_MIGRATION` pending screenshot evidence and review.

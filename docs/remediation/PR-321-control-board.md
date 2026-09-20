@@ -585,3 +585,42 @@ actions remain outside this implementation slice and were not performed.
   action is included.
 - Current status: source/evidence implementation in progress; all later
   catalog and runtime slices remain blocked on Slice 0 validation and review.
+
+## Desktop OMP -- Slice 1 current-release GameSupport contract migration
+
+- Slice contract: `docs/remediation/slices/TPM-S1-CURRENT-RELEASE-GAMESUPPORT-002.md`.
+- Specification and invariant inventory:
+  `docs/remediation/inventories/TPM-S1-GAMESUPPORT-CONTRACT-INVENTORY.md`.
+- Mode boundary: `HISTORICAL_PINNED_695` preserves the historical source;
+  `CURRENT_RELEASE_925` requires the accepted SnapshotId, source-proof commit,
+  historical root, and delta manifest. `LEGACY_COMPATIBILITY` preserves the
+  existing fixture/integrated caller behavior.
+- Current binding: SnapshotId
+  `TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628`; source-proof commit
+  `dc998e374608abbda373bb3c236db5b26b5afca7`; registry schema `1.3.0`;
+  925 contracts; `REVIEW_MANUAL=925`; `UNCLASSIFIED=0`.
+- Current source evidence is static only. GameProfile executable declarations
+  take precedence; GameSetup `GameExecutableLocation` is a fallback when the
+  profile has no executable declaration; contradictory declarations produce a
+  non-safe `SOURCE_EVIDENCE_CONFLICT` posture.
+- The generator emits a machine-checked 230-profile added list and a 38-profile
+  semantic-change matrix. The accepted 0 removed and 657 unchanged counts are
+  checked against `delta.json`.
+- No runtime reproduction, package, owner smoke, Arcade, hosted CI, push,
+  merge, tag, publish, certification, or release action is authorized.
+- Historical compatibility is a hard boundary: `HISTORICAL_PINNED_695` keeps
+  the pre-Slice-1 GameProfile executable projection and does not let GameSetup
+  evidence select or contradict a historical executable. `CURRENT_RELEASE_925`
+  alone enables the generic resolver, including basename normalization,
+  GameSetup fallback, UNKNOWN-as-non-evidence handling, and fail-closed
+  contradictions.
+- Historical contract and manifest artifacts are byte-equivalent to the
+  accepted pre-Slice-1 baseline. `support-posture.json` is semantically
+  equivalent after excluding only deterministic `GenerationMode` and
+  `ComparisonArtifacts` metadata fields.
+- Documentation screenshot gate: no current validated runtime screenshots exist.
+  No mock, stale, or synthetic screenshots are permitted, so README, QuickStart,
+  setup, and feature documentation updates remain blocked pending an authorized
+  runtime capture/doc slice.
+- Current status: static implementation and local evidence gates complete; Slice 1
+  remains HOLD pending documentation screenshots and review.
