@@ -153,6 +153,17 @@ included in the accepted choice set. Raw client diagnostics remain behind
 Details and logs. PACKAGE_MISMATCH and IDENTITY_MISMATCH remain hard-stop
 conditions; no retry state is built from an unvalidated handoff payload.
 
+The password-recovery producer's raw evidence bundle (`Path`, required array-valued
+`ConfigBackups` and `ProfileBackups`, and `Verified`) remains separate from the
+canonical `TPM.TransactionResult.v1.Backup` object. The wrapper carries that
+bundle in `RecoveryBundle`; guided setup passes it unchanged so it can enumerate
+both evidence collections. `Backup` retains generic `Required`, `Attempted`,
+`Created`, `Verified`, `RootPath`, and `Items` fields: `Created` reflects the
+observed existence of the evidence directory, `Verified` reflects producer
+verification, and `Attempted` reflects a returned bundle or an actual producer
+invocation. `Items` remains a flat list of evidence sources; path existence
+does not imply verification.
+
 **PostgreSQL Slice 8B display and failure contract.** Registered PostgreSQL
 profiles use the authoritative `/GameProfile/GameName` value through the
 shared profile-title resolver. A missing or blank title is displayed as
@@ -789,6 +800,12 @@ comparison, `Get-BepInExInstallationHealth` verifies required core/bootstrap
 files, version, architecture, and reparse safety. A current-version but
 incomplete tree therefore reaches the explicit repair-reset choice instead of
 being classified healthy by version equality alone.
+
+The typed transaction result is `CLEANUP_RESIDUE`; it preserves the underlying
+product outcome (`SUCCEEDED` when every selected update was promoted) and
+retains the exact staging path in `Cleanup.ResiduePaths` and `FailureRecords`.
+The adapter does not fabricate an incomplete item to label a fully promoted,
+otherwise-complete update as `PARTIAL_APPLIED`.
 
 Path/device safe skips remain distinct from ordinary BepInEx failures. The main
 result offers `[H] Open 10) Library Health Check` only when missing or
@@ -3434,3 +3451,53 @@ enables the generic resolver, including GameSetup fallback, equivalent-path
 confirmation, UNKNOWN-as-non-evidence handling, and fail-closed contradiction
 detection. This generation boundary prevents resolver evolution from rewriting
 the pinned compatibility corpus.
+
+Historical manifest ordering is an identity-bound compatibility rule, not an
+ambient sort result. `contracts/TPM-HISTORICAL-695-MANIFEST-ORDER.json` is
+validated before rank-map construction for every historical generation:
+schema identity, pinned SnapshotId and commit, declared and actual array
+counts, exact and case-insensitive uniqueness, and complete generated-profile
+coverage must all pass. Malformed or missing rank data fails closed before any
+manifest ordering is emitted. JSON serialization uses the shared quote-aware
+canonical escape boundary and structural formatter so PS5.1, PS7, and
+non-default cultures produce governed-equivalent bytes.
+
+The accepted order is independently bound by SHA-256
+`b7ec88b0de487fbcdcdf697334ccbec154a0f61e8c0a24712f2e99425425f4aa`.
+The digest projection is UTF-8 without BOM of each ordered ProfileCode
+followed by a literal LF, including the final LF. A complete identity set in
+the wrong order therefore fails with `HISTORICAL_MANIFEST_ORDER_SEQUENCE_INVALID`
+before rank-map construction.
+## Historical baseline provenance and re-baseline control
+
+The historical 695 corpus has two distinct evidence identities. The legacy
+candidate at `C:\tmp\tpm-slice1-baseline-output` remains preserved as
+corroborative content evidence only: its original creation command could not
+be recovered, so it is not retroactively authoritative. A durable replacement
+evidence record is retained under
+`contracts/baselines/TPM-HISTORICAL-695/`.
+
+`baseline-provenance.json` binds the generation mode, generator HEAD and
+script hash, accepted historical source identity and commit, SnapshotId,
+engine set, explicit parameters, output identity, ProfileCode sequence
+digest, and governed tree digest. `baseline-files.sha256` records all 703
+governed relative paths, byte lengths, and SHA-256 values in ordinal path
+order. The tree projection is UTF-8 without BOM, with one normalized relative
+path, decimal byte length, and lowercase SHA-256 separated by tabs and
+terminated by LF. The replacement baseline preserves the existing
+`TPM-HISTORICAL-695` compatibility semantics; compatibility with the legacy
+candidate is recorded separately and does not establish its provenance.
+
+The authoritative provenance manifest uses an omitted-field self-hash: the
+`ProvenanceManifestSha256` property is removed before canonical serialization
+and hashing, rather than retained with a null value. Canonical JSON is UTF-8
+without BOM, uses deterministic sorted object properties, retains governed
+array order, and has no culture-sensitive behavior. The authoritative
+inventory is ordinal and case-sensitive path ordered.
+
+Because the replacement was generated from the authorized dirty worktree,
+`GeneratorHead` is accompanied by `RepositoryDirty`, the generator script
+hash, a complete executable dependency inventory and digest, and an explicit
+raw Git diff projection and digest. Each generating process records its engine
+version, edition, PSHOME, executable path and hash, timing, parameters, output
+root, and exit result. HEAD alone is not treated as executable-state identity.

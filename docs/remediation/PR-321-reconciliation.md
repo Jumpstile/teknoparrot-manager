@@ -865,10 +865,22 @@ from that single unsafe-root classification.
   `HISTORICAL_PINNED_695` preserves the pre-Slice-1 GameProfile executable
   projection and does not allow GameSetup evidence to select or contradict a
   historical executable.
-- Historical compatibility correction is exact at the contract, validation,
-  and manifest byte level. `support-posture.json` is semantically equivalent
-  after excluding only the deterministic `GenerationMode` and
-  `ComparisonArtifacts` metadata fields.
+- Governing historical compatibility requirement: complete 703-file byte
+  equality across every emitted artifact, not only contracts, validation, and
+  manifest. Earlier implementation-pass evidence reached zero differences
+  under both engines, but final frozen revalidation remains pending.
+- Historical manifest ordering uses the immutable identity-bound input artifact.
+  SchemaVersion, SnapshotId, source commit, declared/actual counts, exact and
+  case-insensitive uniqueness, and complete coverage are validated before rank
+  construction and fail closed. Permanent malformed-artifact and
+  production-wiring tests cover those branches.
+- Current-release generation was previously exercised under both engines with
+  935 files and 925/230/38/657/0 invariants. Final frozen revalidation remains
+  pending.
+- The accepted historical order is independently bound by SHA-256
+  `b7ec88b0de487fbcdcdf697334ccbec154a0f61e8c0a24712f2e99425425f4aa` over
+  the UTF-8/LF ProfileCode projection. Reorder-only complete-set artifacts
+  fail closed before rank construction. Final frozen equality remains pending.
 - Current mode retains equivalent-path confirmation, UNKNOWN-as-non-evidence
   handling, and fail-closed contradictions.
 - Representative current-mode evidence remains:
@@ -881,3 +893,29 @@ from that single unsafe-root classification.
   later authorized runtime capture/doc slice.
 - Corrected local evidence gates pass, but the current disposition remains
   `HOLD_SLICE_1_CONTRACT_MIGRATION` pending screenshot evidence and review.
+
+## Historical baseline provenance re-baseline
+
+The previous temporary baseline remains preserved as a legacy candidate. Its
+703-file content, historical identity, and ordered sequence are strongly
+corroborated, but the original creation command was not recoverable from
+retained evidence. It is therefore not relabeled as an authoritative
+baseline, and the issue is classified as evidence-retention/process loss,
+not a demonstrated product defect.
+
+The replacement evidence is durable under
+`contracts/baselines/TPM-HISTORICAL-695/`. Its provenance manifest binds
+`HISTORICAL_PINNED_695`, generator HEAD and script hash, the accepted source
+root and commit `5880e019016c5c3a0576e97a6c2a7f14bf54e3d1`, SnapshotId
+`TPM-HISTORICAL-695`, both execution engines, fixed generation parameters,
+and the replacement output identity. The complete inventory records all 703
+relative paths, byte lengths, and SHA-256 values. Its tree projection is
+ordinal normalized-path order with UTF-8/LF serialization.
+
+Independent PS5.1 and PS7 replacement generations matched with zero missing,
+extra, or differing files. The replacement matched the legacy candidate
+across all 703 files; this is retained only as
+`CORROBORATIVE_COMPATIBILITY_WITH_LEGACY_CANDIDATE`. Compatibility semantics
+and the independently pinned ProfileCode sequence digest remain unchanged.
+Formal acceptance remains pending review; this record does not authorize
+commit, release, certification, or runtime activity.

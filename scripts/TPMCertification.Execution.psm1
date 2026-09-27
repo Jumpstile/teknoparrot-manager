@@ -336,9 +336,23 @@ function Invoke-TPMCertificationGitReadV1 {
     $repo=[IO.Path]::GetFullPath($RepositoryPath).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
     $scoped=@('-c',("safe.directory={0}"-f$repo),'-C',$repo)
     $commandArguments=@($scoped)+@($Arguments)
-    $output=@(& git @commandArguments 2>$null)
-    $exitCode=$LASTEXITCODE
-    return [pscustomobject]@{Output=$output;ExitCode=$exitCode}
+    $oldErrorActionPreference = $ErrorActionPreference
+    try {
+        if ($PSVersionTable.PSVersion.Major -eq 5) {
+            $ErrorActionPreference = 'Continue'
+            $combinedOutput = @(& git @commandArguments 2>&1)
+            $exitCode = $LASTEXITCODE
+            $errorOutput = @($combinedOutput | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { [string]$_.ToString() })
+            $output = @($combinedOutput | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+        } else {
+            $output = @(& git @commandArguments 2>$null)
+            $exitCode = $LASTEXITCODE
+            $errorOutput = @()
+        }
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
+    return [pscustomobject]@{Output=$output;ErrorOutput=$errorOutput;ExitCode=$exitCode}
 }
 
 function Get-TPMCertificationGitIdentitySnapshotV1 {

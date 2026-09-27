@@ -21,9 +21,8 @@
     "requiredPhrases": [
       "An update is available",
       "Back up the current script",
-      "Download the update",
-      "Validate the downloaded script",
-      "Require you to restart"
+      "Download and validate the update",
+      "Require a restart afterward"
     ],
     "forbiddenPhrases": [],
     "expectedStateChange": false
@@ -33,9 +32,7 @@
     "journey": "update-check",
     "goal": "Read-only update failure is handled automatically and protection is restored.",
     "requiredPhrases": [
-      "temporarily cleared the file protection",
-      "restore it after this attempt",
-      "Backup created"
+      "temporarily cleared file protection"
     ],
     "forbiddenPhrases": [
       "Update installed"

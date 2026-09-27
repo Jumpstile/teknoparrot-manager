@@ -28,8 +28,18 @@
 
 ## 5. Source/function ownership
 
-- Files: `scripts/New-TpmSupportPostureCorpus.ps1`, `scripts/TPMGameSupport.Contracts.psm1`, `scripts/New-TpmGameSupportContracts.ps1`, `Tests/SupportPostureCorpus.Tests.ps1`, `Tests/TPMGameSupport.Contracts.Tests.ps1`, and the current snapshot evidence under `contracts/snapshots/`.
-- Functions/regions: generation-mode validation, pinned source ingestion, GameProfile/GameSetup executable precedence, current/historical delta comparison, registry generation, and fail-closed validation.
+- Files: `scripts/New-TpmSupportPostureCorpus.ps1`,
+  `scripts/TPMGameSupport.Contracts.psm1`,
+  `scripts/New-TpmGameSupportContracts.ps1`,
+  `Tests/SupportPostureCorpus.Tests.ps1`,
+  `Tests/TPMGameSupport.Contracts.Tests.ps1`, the immutable input contract
+  `contracts/TPM-HISTORICAL-695-MANIFEST-ORDER.json`, and the current snapshot
+  evidence under `contracts/snapshots/`.
+- Functions/regions: generation-mode validation, pinned source ingestion,
+  `Assert-TpmSupportHistoricalManifestOrder`, GameProfile/GameSetup executable
+  precedence, current/historical delta comparison, registry generation, and
+  fail-closed validation. The immutable rank artifact is an input contract,
+  never derived from the baseline output tree at runtime.
 - Owning subsystem: static GameSupport corpus generation and contract validation.
 
 ## 6. Tests required before implementation
@@ -42,24 +52,60 @@
 - Executable evidence comparison must normalize path separators and compare the
   executable leaf name before declaring a conflict; directory-qualified
   GameSetup evidence is not a contradiction when it names the same executable.
-- Historical comparison must be semantically equivalent to the accepted
-  pre-Slice-1 corpus. The only permitted differences are deterministic
-  generation metadata added by the explicit mode model; resolver-driven
-  contract or posture drift is a failed implementation.
-- Documentation screenshot gate must be explicit: README, QuickStart, setup,
-  and feature docs require current validated runtime screenshots before release.
-  If no such screenshots exist, do not create placeholders; keep the slice on
-  hold and leave those user-facing docs unchanged.
-
-- Focused current-release generation: 925 profiles/contracts, zero duplicates, zero `UNCLASSIFIED`, exact snapshot/source binding, 230 added identities, 38 changed-profile matrix, `jdredd`, Showdown, cxbxr, ReVolt, rrv, Road Fighters 3D, and VirtuaRLimit.
-- Executable evidence tests: profile precedence, GameSetup fallback, duplicate/case normalization, directory-qualified equivalent paths, and contradictory declarations fail closed.
-- Historical compatibility: canonical semantic projections of historical
-  `game-support-contracts.json`, `game-support-contract-validation.json`,
-  `support-posture.json`, and `manifest.json` must match the accepted
-  baseline. The support-posture projection excludes only `GenerationMode` and
-  `ComparisonArtifacts`, which are deterministic mode metadata.
-- Determinism: two clean output roots have identical path sets, file counts, bytes, and SHA-256 hashes.
-- Static gates: schema validation, output containment, checkout contamination, parser, PSScriptAnalyzer, ASCII, `git diff --check`, and the seven-suite Pester 5.7.1 run.
+- Historical compatibility is a byte-level contract against the durable
+  replacement evidence inventory at
+  `contracts/baselines/TPM-HISTORICAL-695/`: all 703 files, path names, file
+  bytes, and tree digest must match under the accepted historical identity.
+  `C:\tmp\tpm-slice1-baseline-output` is preserved only as a legacy candidate
+  for corroborative compatibility comparison; it is not authoritative.
+- Historical `GenerationMode` and `ComparisonArtifacts` root fields are
+  absent where absent in the baseline; they must not be added merely to
+  describe the explicit generation mode.
+- Historical `PrimaryCandidates` and `SecondaryCandidates` preserve the
+  producer's external shape: zero candidates are `null`, one candidate is a
+  scalar string, and multiple candidates are an array.
+- Historical profile, contract, manifest, and Markdown ordering must match
+  the baseline while remaining deterministic across supported engines and
+  cultures. The manifest's accepted historical order is an immutable,
+  identity-bound rank artifact at
+  `contracts/TPM-HISTORICAL-695-MANIFEST-ORDER.json`; generation must not read
+  the baseline output tree to derive order.
+- Current-release generation must produce 925 profiles/contracts with zero
+  duplicate identities, zero `UNCLASSIFIED`, exact snapshot/source binding,
+  230 added identities, 38 changed-profile records, and the required
+  `jdredd`, Showdown, cxbxr, ReVolt, rrv, Road Fighters 3D, and
+  VirtuaRLimit cases.
+- Executable-evidence tests must cover precedence, GameSetup fallback,
+  duplicate/case normalization, directory-qualified equivalent paths, and
+  contradictory declarations failing closed.
+- The documentation screenshot gate remains explicit: README, QuickStart,
+  setup, and feature documentation require current validated runtime
+  screenshots before release. If absent, do not create placeholders; keep
+  user-facing documentation unchanged and the slice on hold.
+- Canonicalizer tests must cover actual characters, literal escape text,
+  valid JSON parsing, exact value round trips, repeated byte determinism,
+  and PS5.1/PS7 parity.
+- Static gates are required after implementation: parser check,
+  PSScriptAnalyzer with `PSScriptAnalyzerSettings.psd1`, ASCII check,
+  `git diff --check`, and the seven-suite Pester 5.7.1 gate
+  `Invoke-Pester -Path .\Tests`.
+- Culture tests must compare default and deliberately non-default cultures
+  against identical inputs and require identical governed output bytes.
+- Determinism tests must cover independent source enumeration order,
+  repeated generation, cross-engine output, raw serializer compatibility,
+  Unicode preservation, and controller/control semantic invariants.
+- Permanent manifest-order regression coverage must exercise the production
+  validator and fail closed for: missing artifact, duplicate-696, real
+  case-insensitive collision, missing required identity, extra identity,
+  wrong SchemaVersion, wrong SnapshotId, wrong UpstreamCommitSha, and wrong
+  declared ProfileCount. The duplicate-696 case has ProfileCount 695, an
+  actual ProfileCodes array of 696 containing all legitimate identities plus
+  one duplicate; hashtable cardinality is not sufficient evidence.
+- The accepted ordered sequence is independently bound by SHA-256
+  `b7ec88b0de487fbcdcdf697334ccbec154a0f61e8c0a24712f2e99425425f4aa`.
+  The projection is UTF-8 without BOM of each ProfileCode followed by literal
+  LF, including the final LF. A reorder-only complete-set mutation must fail
+  as `HISTORICAL_MANIFEST_ORDER_SEQUENCE_INVALID` before rank construction.
 
 ## 8. Documentation/report updates required
 
@@ -94,3 +140,34 @@ No runtime reproduction, package, owner smoke, Arcade work, merge, tag, publish,
 - Commit authorized: No; implementation packet review required.
 - Package authorized: No.
 - Release/certification authorized: No.
+## 14. Historical baseline provenance remediation
+
+The former `C:\tmp\tpm-slice1-baseline-output` is preserved as a legacy
+candidate. Its content is corroborated, but its original creation command and
+provenance were not recovered. This is an evidence-retention/process issue,
+not a demonstrated product defect, and it does not change the historical
+compatibility semantics.
+
+The durable replacement evidence is retained under
+`contracts/baselines/TPM-HISTORICAL-695/`:
+
+- `baseline-provenance.json` binds `HISTORICAL_PINNED_695`, generator identity,
+  accepted source root/commit, SnapshotId, fixed parameters, engine set,
+  output identity, ProfileCode sequence digest, and governed tree digest.
+- `baseline-files.sha256` contains every governed relative path, byte length,
+  and SHA-256 in deterministic ordinal path order.
+
+The replacement baseline is generated independently under Windows PowerShell
+5.1 and pwsh 7.6.6 and must match byte-for-byte. Matching the legacy
+candidate is recorded only as
+`CORROBORATIVE_COMPATIBILITY_WITH_LEGACY_CANDIDATE`; this does not
+retroactively make the legacy candidate authoritative.
+
+Authoritative provenance additionally binds the omitted-field self-hash
+projection, ordinal/case-sensitive file inventory, dirty-worktree generator
+dependency hashes, working-tree diff digest, and in-process engine records.
+Generator HEAD alone and an unversioned `pwsh` command are not sufficient
+provenance.
+
+`AcceptedAtUtc` remains null, and acceptance authority and acceptance time
+remain pending formal ChatGPT/release-authority review.

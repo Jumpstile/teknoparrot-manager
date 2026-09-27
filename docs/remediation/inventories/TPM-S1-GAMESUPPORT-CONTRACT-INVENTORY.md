@@ -48,7 +48,7 @@ Status: implementation basis for `TPM-S1-CURRENT-RELEASE-GAMESUPPORT-002`
 | S1-I11 | Static output contains no runtime observations | Contract schema and output scan |
 | S1-I12 | Source evidence paths/hashes are deterministic | Dual-generation byte/hash comparison |
 | S1-I13 | Output is contained below caller root | Containment test |
-| S1-I14 | Historical 695 compatibility remains unchanged | Existing posture corpus and historical mode tests |
+| S1-I14 | Historical compatibility is a complete 703-file byte contract. The immutable manifest-order input is schema- and identity-bound and independently sequence-bound by SHA-256 `b7ec88b0de487fbcdcdf697334ccbec154a0f61e8c0a24712f2e99425425f4aa` over UTF-8/LF ProfileCode projection; declared and actual counts, exact and case-insensitive uniqueness, missing/extra coverage, null/scalar/array shape, cross-engine/culture ordering, and literal-escape preservation are validated before rank-map construction and fail closed | `Assert-TpmSupportHistoricalManifestOrder`; malformed/reorder-artifact and production-wiring tests; frozen PS5.1/PS7 and culture byte comparisons |
 | S1-I15 | Special contract declarations remain exact | Showdown, cxbxr, ReVolt, rrv/Road Fighters checks |
 
 ## Adversarial review questions
@@ -61,3 +61,26 @@ Status: implementation basis for `TPM-S1-CURRENT-RELEASE-GAMESUPPORT-002`
 - Can a runtime observation or launch result appear in a static contract? It must not.
 - Can the accepted delta counts be asserted while the actual generated identities differ? The generator must compare identities, not counts alone.
 - Can schema validation pass while `UNCLASSIFIED` remains? The registry release gate must still fail.
+
+## Historical baseline evidence-retention invariant
+
+`S1-I16` | Every authoritative historical baseline must have durable
+provenance independent of a temporary output path: generation mode, generator
+HEAD and script hash, source identity and commit, SnapshotId, execution
+engine/version, exact parameters, complete relative-path/byte-length/SHA-256
+inventory, ProfileCode sequence digest, governed tree digest, creation and
+acceptance metadata, and superseded-baseline relationship | `contracts/baselines/TPM-HISTORICAL-695/baseline-provenance.json` and
+`baseline-files.sha256`; acceptance authority remains explicit and pending
+formal review.
+
+The legacy `C:\tmp\tpm-slice1-baseline-output` is retained as a
+`LEGACY_CANDIDATE` with corroborated content identity and unproven original
+creation provenance. A byte-identical comparison against the replacement
+baseline is compatibility evidence only; it never retroactively proves the
+legacy candidate's provenance.
+
+The durable provenance contract requires the self-hash projection to remove
+`ProvenanceManifestSha256` entirely before canonical JSON serialization.
+Retaining the field with null is not equivalent. It also requires the
+ordinal/case-sensitive inventory projection, dirty-worktree generator
+dependency and diff binding, and in-process PS5.1/PS7 engine identity.

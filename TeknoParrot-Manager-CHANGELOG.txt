@@ -108,6 +108,10 @@
   prompts visibly offer Back and do not make blind retry the default recovery
   action. This is a source-remediation candidate change; RC8 remains
   unpublished and owner-runtime proof is still required.
+  RC8 BepInEx result correction: a verified promotion followed by staging
+  cleanup residue now returns CLEANUP_RESIDUE over the underlying product
+  outcome, retains the validated path in Details, and stays out of the
+  clean-update count. RC8 remains a candidate and is not published.
 
 
 

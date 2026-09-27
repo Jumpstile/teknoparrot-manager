@@ -1219,14 +1219,22 @@ function Format-TpmTransactionDetailsRows {
     [void]$rows.Add((&$clip ('Cleanup residue present: ' + [bool]$Presentation.CleanupResiduePresent)))
     [void]$rows.Add((&$clip ('Evidence available: ' + [bool]$Presentation.DetailsSupportReferences.EvidenceAvailable)))
     [void]$rows.Add((&$clip ('Technical details available: ' + [bool]$Presentation.DetailsSupportReferences.TechnicalDetailsAvailable)))
-    $references = if ($null -ne $DetailsContext) { @(Get-TpmTransactionField -Object $DetailsContext -Name 'TechnicalReferences' -Default @()) } else { @() }
+    $references = @(
+        if ($null -ne $DetailsContext) {
+            Get-TpmTransactionField -Object $DetailsContext -Name 'TechnicalReferences' -Default @()
+        }
+    )
     if ($references.Count -eq 0) {
         [void]$rows.Add((&$clip 'Technical references: unavailable through the approved evidence boundary.'))
     } else {
         [void]$rows.Add((&$clip 'Technical references:'))
         foreach ($reference in $references) { [void]$rows.Add((&$clip ('  {0}: {1} [{2}]' -f $reference.Label, $reference.Value, $reference.EvidenceClass))) }
     }
-    $actions = if ($null -ne $DetailsContext) { @(Get-TpmTransactionField -Object $DetailsContext -Name 'RecoveryActions' -Default @()) } else { @() }
+    $actions = @(
+        if ($null -ne $DetailsContext) {
+            Get-TpmTransactionField -Object $DetailsContext -Name 'RecoveryActions' -Default @()
+        }
+    )
     if ($actions.Count -eq 0) {
         [void]$rows.Add((&$clip 'Recovery actions: none recorded.'))
     } else {
@@ -1327,7 +1335,7 @@ function ConvertTo-TpmWorkflowTransactionMetadata {
     $dataSafety = switch ($productState) { 'UNCHANGED' { 'Unchanged' } 'INTENDED' { 'Intended' } 'PARTIAL_KNOWN' { 'Partial' } default { 'Unknown' } }
     if ($outcome -eq 'ROLLED_BACK_VERIFIED') { $dataSafety = 'Restored' }
     if ($outcome -eq 'CLEANUP_RESIDUE') { $dataSafety = "$dataSafety with cleanup residue" }
-    return [pscustomobject]@{ PSTypeName='TPM.WorkflowTransactionMetadata.v1'; SchemaVersion=1; TransactionResultId=$TransactionResult.TransactionId; TransactionOutcome=$outcome; ProductState=$productState; PresentationOutcome=if ($outcome -eq 'SUCCEEDED') { 'Succeeded' } elseif ($outcome -eq 'NO_OP') { 'Skipped' } else { $null }; RequiresAttention=($outcome -notin @('SUCCEEDED','NO_OP')); DataSafety=$dataSafety; SelectedItemCount=[int]$TransactionResult.Mutation.SelectedItemCount; AffectedItemCount=[int]$TransactionResult.Mutation.AffectedItemCount; FailedItemCount=[int]$TransactionResult.Mutation.FailedItemCount; EvidenceAvailable=[bool](@($TransactionResult.PreState.EvidenceRoot,$TransactionResult.Backup.RootPath,$TransactionResult.Rollback.EvidenceRoot,$TransactionResult.Cleanup.ResiduePaths) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count; CleanupResiduePresent=[bool]$TransactionResult.Cleanup.ResiduePresent }
+    return [pscustomobject]@{ PSTypeName='TPM.WorkflowTransactionMetadata.v1'; SchemaVersion=1; TransactionResultId=$TransactionResult.TransactionId; TransactionOutcome=$outcome; ProductState=$productState; PresentationOutcome=if ($outcome -eq 'SUCCEEDED') { 'Succeeded' } elseif ($outcome -eq 'NO_OP') { 'Skipped' } else { $null }; RequiresAttention=($outcome -notin @('SUCCEEDED','NO_OP')); DataSafety=$dataSafety; SelectedItemCount=[int]$TransactionResult.Mutation.SelectedItemCount; AffectedItemCount=[int]$TransactionResult.Mutation.AffectedItemCount; FailedItemCount=[int]$TransactionResult.Mutation.FailedItemCount; EvidenceAvailable=(@(@($TransactionResult.PreState.EvidenceRoot,$TransactionResult.Backup.RootPath,$TransactionResult.Rollback.EvidenceRoot,$TransactionResult.Cleanup.ResiduePaths) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0); CleanupResiduePresent=[bool]$TransactionResult.Cleanup.ResiduePresent }
 }
 
 
@@ -1493,7 +1501,7 @@ function ConvertTo-TpmLegacyTransactionResult {
         [bool]$MutationStarted=$false,
         [bool]$FinalPassed=$true,
         [string]$Outcome=$null,
-        [string]$ProductState=$null
+        [string]$ProductState=$null, [object]$Cleanup=$null
     )
     if (@($Legacy.PSTypeNames) -contains 'TPM.TransactionResult.v1') { return $Legacy }
     $items=@($Items | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) })
@@ -1511,7 +1519,7 @@ function ConvertTo-TpmLegacyTransactionResult {
     }
     $started=$MutationStarted -or $changed.Count -gt 0
     if ($Outcome -eq 'NO_OP') { $started=$false }
-    $tx=New-TpmProfileTransactionResult -WorkflowKey $WorkflowKey -OperationKey $OperationKey -Outcome $Outcome -ProductState $ProductState -Summary $Summary -Items $items -ChangedItems $changed -CompletedItems $completed -FailedItems $failed -SkippedItems $skipped -UnattemptedItems $UnattemptedItems -MutationStarted $started -MutationCompleted:($Outcome -eq 'SUCCEEDED' -or $Outcome -eq 'NO_OP') -Backup $Backup -FinalPassed $FinalPassed -ReasonCode $ReasonCode -FinalChecks @('Legacy workflow completion was mapped to TPM.TransactionResult.v1.') -TechnicalDetails $Legacy
+    $tx=New-TpmProfileTransactionResult -WorkflowKey $WorkflowKey -OperationKey $OperationKey -Outcome $Outcome -ProductState $ProductState -Summary $Summary -Items $items -ChangedItems $changed -CompletedItems $completed -FailedItems $failed -SkippedItems $skipped -UnattemptedItems $UnattemptedItems -MutationStarted $started -MutationCompleted:($Outcome -eq 'SUCCEEDED' -or $Outcome -eq 'NO_OP') -Backup $Backup -Cleanup $Cleanup -FinalPassed $FinalPassed -ReasonCode $ReasonCode -FinalChecks @('Legacy workflow completion was mapped to TPM.TransactionResult.v1.') -TechnicalDetails $Legacy
     foreach($property in @($Legacy.PSObject.Properties.Name)) {
         $legacyProperty=$Legacy.PSObject.Properties[$property]
         if ($legacyProperty -and -not $tx.PSObject.Properties[$property]) { $tx | Add-Member -NotePropertyName $property -NotePropertyValue $legacyProperty.Value -Force }
@@ -5166,14 +5174,16 @@ function Invoke-TpmTransactionalFileBatch {
                     throw "File transaction source hash changed before staging: $source"
                 }
             }
-            if ($op.ExpectedDestinationHash -and $pre.Exists -and $pre.Sha256 -ine [string]$op.ExpectedDestinationHash) {
+            $expectedDestinationHashProperty = $op.PSObject.Properties['ExpectedDestinationHash']
+            if ($expectedDestinationHashProperty -and $expectedDestinationHashProperty.Value -and $pre.Exists -and $pre.Sha256 -ine [string]$expectedDestinationHashProperty.Value) {
                 throw "File transaction destination hash no longer matches its plan: $canonicalDestination"
             }
+            $expectedFinalHashProperty = $op.PSObject.Properties['ExpectedFinalHash']
             $record = [pscustomobject]@{
                 ItemId=$itemId; Operation=$kind; DestinationPath=$canonicalDestination
                 SourcePath=if($sourceState){$source}else{$null}; RootPath=$rootPath; PreState=$pre; SourceState=$sourceState
                 SourceHash=if($sourceState){$sourceState.Sha256}else{$null}
-                ExpectedFinalHash=if($op.ExpectedFinalHash){[string]$op.ExpectedFinalHash}elseif($sourceState){$sourceState.Sha256}else{$null}
+                ExpectedFinalHash=if($expectedFinalHashProperty -and $expectedFinalHashProperty.Value){[string]$expectedFinalHashProperty.Value}elseif($sourceState){$sourceState.Sha256}else{$null}
                 StagePath=$null; BackupPath=$null; Changed=$false; BackupMade=$false
             }
             [void]$records.Add($record)
@@ -7347,8 +7357,9 @@ function Get-TpmReShadeProfileTechniqueDisplay {
     $catalog = @(Get-TpmReShadeEffectCatalog)
     $rows = @()
     foreach ($techniqueName in @($ProfileDefinition.TechniqueOrder)) {
-        $effectEntry = @($catalog | Where-Object { $_.TechniqueName -eq $techniqueName })[0]
-        if (-not $effectEntry) { throw ("No approved ReShade effect catalog entry exists for technique '{0}'." -f $techniqueName) }
+        $effectEntries = @($catalog | Where-Object { $_.TechniqueName -eq $techniqueName })
+        if ($effectEntries.Count -eq 0) { throw ("No approved ReShade effect catalog entry exists for technique '{0}'." -f $techniqueName) }
+        $effectEntry = $effectEntries[0]
         $shaderFiles = @($effectEntry.RelativeFiles | Where-Object { [IO.Path]::GetExtension($_) -ieq '.fx' } | ForEach-Object { [IO.Path]::GetFileName($_) })
         if ($shaderFiles.Count -eq 0) { throw ("No approved shader file exists for technique '{0}'." -f $techniqueName) }
         $rows += ('{0} / {1}' -f ($shaderFiles -join ', '), $effectEntry.TechniqueName)
@@ -9321,7 +9332,7 @@ function Install-TpmReShadeProfileDeployment {
             $presetSource = 'generated'
             $presetContent = New-TpmReShadePresetContent -ProfileDefinition $approvedProfile
         } else {
-            $priorIni = @($prior.Files | Where-Object { [string]$_.RelativeSource -ieq 'ReShade.ini' -and $_.TPMManaged -eq $true })[0]
+            $priorIni = if ($prior) { @($prior.Files | Where-Object { [string]$_.RelativeSource -ieq 'ReShade.ini' -and $_.TPMManaged -eq $true })[0] } else { $null }
             if ($priorIni -and (Test-Path -LiteralPath ([string]$priorIni.DestinationPath) -PathType Leaf)) {
                 $presetSource = 'tutorial'
                 $presetContent = [IO.File]::ReadAllText([string]$priorIni.DestinationPath)
@@ -9914,7 +9925,7 @@ function Read-TpmReShadeTerminalProfile {
 }
 function Update-TpmReShadeTutorialProgressText {
     param([AllowEmptyString()][string]$Content)
-    $lines = if ([string]::IsNullOrEmpty($Content)) { @() } else { [regex]::Split($Content, "`r`n|`n|`r") }
+    $lines = @(if ([string]::IsNullOrEmpty($Content)) { @() } else { [regex]::Split($Content, "`r`n|`n|`r") })
     $overlayIndex = -1
     for ($index = 0; $index -lt $lines.Count; $index++) {
         if ($lines[$index] -match '^\s*\[OVERLAY\]\s*$') { $overlayIndex = $index; break }
@@ -10134,6 +10145,8 @@ function Invoke-ReShadeSetupLegacy {
         [bool]$RetroBat,
         [string]$HsDataPath
     )
+    $generatedPresetPath = $null
+    $presetPath = $null
 
     if ([string]::IsNullOrWhiteSpace($SourceDll) -or -not (Test-Path -LiteralPath $SourceDll -PathType Leaf)) {
         Write-Host '  ReShade setup stopped: a valid 64-bit ReShade source DLL was not found.' -ForegroundColor Yellow
@@ -11979,6 +11992,23 @@ function New-PostgresRecoveryBackup {
         return [pscustomobject]@{ Path = $backupRoot; ConfigBackups = $configBackups.ToArray(); ProfileBackups = $profileBackups.ToArray(); Verified = $false }
     }
 }
+function Get-PostgresRecoveryBackupState {
+    param(
+        [object]$RecoveryBackup,
+        [Parameter(Mandatory)][bool]$Attempted
+    )
+    $backupPath = [string](Get-TpmTransactionField -Object $RecoveryBackup -Name 'Path' -Default $null)
+    $created = $false
+    if (-not [string]::IsNullOrWhiteSpace($backupPath)) {
+        $created = [bool](Test-Path -LiteralPath $backupPath -PathType Container -ErrorAction SilentlyContinue)
+    }
+    return [pscustomobject]@{
+        Attempted = [bool]$Attempted
+        Created = $created
+        Verified = [bool](Get-TpmTransactionField -Object $RecoveryBackup -Name 'Verified' -Default $false)
+        Path = $backupPath
+    }
+}
 
 function Restore-PostgresProfileBackups {
     param([Parameter(Mandatory)]$RecoveryBackup)
@@ -12018,20 +12048,21 @@ function Get-PostgresResetFailureGuidance {
 
 function Reset-PostgresPasswordAutomatically {
     param([Parameter(Mandatory)][string]$NewPassword, [Parameter(Mandatory)]$RecoveryBackup)
+    $backupState = Get-PostgresRecoveryBackupState -RecoveryBackup $RecoveryBackup -Attempted ($null -ne $RecoveryBackup)
     $legacy = [ordered]@{
         Attempted = $false
         Succeeded = $false
         RecoveryBlocked = $true
         PasswordChangeCommitted = $false
-        BackupPath = $RecoveryBackup.Path
+        BackupPath = $backupState.Path
         FailureStage = ''
         Reason = ''
     }
     $backupInfo=[pscustomobject]@{
-        Required=$true; Attempted=[bool]$RecoveryBackup.Attempted; Created=[bool]$RecoveryBackup.Created
-        Verified=[bool]$RecoveryBackup.Verified; RootPath=$RecoveryBackup.Path; Items=@('PostgreSQL recovery evidence')
-        FailureStage=if($RecoveryBackup.Verified){$null}else{'RecoveryEvidence'}
-        Reason=if($RecoveryBackup.Verified){$null}else{'Verified recovery evidence is unavailable.'}; ResiduePaths=@()
+        Required=$true; Attempted=$backupState.Attempted; Created=$backupState.Created
+        Verified=$backupState.Verified; RootPath=$backupState.Path; Items=@('PostgreSQL recovery evidence')
+        FailureStage=if($backupState.Verified){$null}else{'RecoveryEvidence'}
+        Reason=if($backupState.Verified){$null}else{'Verified recovery evidence is unavailable.'}; ResiduePaths=@()
     }
     $makeResult = {
         param([string]$Outcome,[string]$ProductState,[bool]$Started,[object[]]$Changed,[object[]]$Completed,[object[]]$Failed,[bool]$FinalPassed,[string]$ReasonCode,[string]$Summary,[bool]$RecoveryBlocked)
@@ -12039,7 +12070,7 @@ function Reset-PostgresPasswordAutomatically {
         foreach ($property in @('Attempted','Succeeded','RecoveryBlocked','PasswordChangeCommitted','BackupPath','FailureStage','Reason')) { $tx | Add-Member -NotePropertyName $property -NotePropertyValue $legacy[$property] -Force }
         return $tx
     }
-    if (-not $RecoveryBackup.Verified) {
+    if (-not $backupState.Verified) {
         $legacy.FailureStage = 'RecoveryEvidence'
         $legacy.Reason = 'Verified recovery evidence is unavailable.'
         return (& $makeResult 'FAILED_BEFORE_MUTATION' 'UNCHANGED' $false @() @() @('postgres-role') $true 'RECOVERY_EVIDENCE_REQUIRED' 'PostgreSQL recovery stopped before a role change because verified safety evidence was unavailable.' $true)
@@ -12090,12 +12121,12 @@ function Reset-PostgresPasswordAutomatically {
     } catch {
         if ($legacy.PasswordChangeCommitted) {
             $legacy.Reason = 'The PostgreSQL password was changed, but TPM could not verify the service restart and new login.'
-            Write-Log "Postgres recovery: password change committed but verification failed; no database or profile changes were made. Evidence=$($RecoveryBackup.Path)"
+            Write-Log "Postgres recovery: password change committed but verification failed; no database or profile changes were made. Evidence=$($backupState.Path)"
         } else {
             $legacy.Reason = 'Automatic PostgreSQL password reset did not complete; the role password was not changed.'
-            Write-Log "Postgres recovery: reset failed before password change; no recovery-complete result was reported. Evidence=$($RecoveryBackup.Path)"
+            Write-Log "Postgres recovery: reset failed before password change; no recovery-complete result was reported. Evidence=$($backupState.Path)"
         }
-        Write-Log "Postgres recovery: blocked; no recovery-complete result was reported. Evidence=$($RecoveryBackup.Path)"
+        Write-Log "Postgres recovery: blocked; no recovery-complete result was reported. Evidence=$($backupState.Path)"
         $failureStage = [string]$legacy.FailureStage
         try {
             $current = Get-Service -Name $script:PostgresServiceName -ErrorAction SilentlyContinue
@@ -12145,15 +12176,16 @@ function Restore-PostgresServiceState {
 function Invoke-GpuFixSetup {
     param([string]$UserProfilesDir,[string]$TpRoot)
     $legacy=Invoke-GpuFixSetupLegacy -UserProfilesDir $UserProfilesDir -TpRoot $TpRoot
-    if ($null -eq $legacy) { $legacy=[pscustomobject]@{ Succeeded=$false; Updated=0; Unchanged=0; Skipped=0; Errors=0; SkipDetails=@(); Reason='CANCELLED' } }
+    if ($null -eq $legacy) { $legacy=[pscustomobject]@{ Succeeded=$false; Updated=0; Unchanged=0; Skipped=0; Errors=0; SkipDetails=@(); Reason='CANCELLED'; Backup=$null } }
+    $legacyBackup=Get-TpmTransactionField -Object $legacy -Name 'Backup'
     $items=@(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | ForEach-Object BaseName)
     $changed=@($items | Select-Object -First ([int]$legacy.Updated))
     $skipped=@($legacy.SkipDetails | ForEach-Object Game)
     $failed=@(1..([int]$legacy.Errors) | ForEach-Object { 'GPUFixFailure{0}' -f $_ })
     $completed=@($changed + @($items | Where-Object { $_ -notin $changed -and $_ -notin $skipped -and $_ -notin $failed }))
-    $outcome=if($legacy.Updated -gt 0 -and ($legacy.Skipped -gt 0 -or $legacy.Errors -gt 0)){'PARTIAL_APPLIED'}elseif($legacy.Updated -gt 0){'SUCCEEDED'}elseif($legacy.Backup){'FAILED_BEFORE_MUTATION'}else{'NO_OP'}
+    $outcome=if($legacy.Updated -gt 0 -and ($legacy.Skipped -gt 0 -or $legacy.Errors -gt 0)){'PARTIAL_APPLIED'}elseif($legacy.Updated -gt 0){'SUCCEEDED'}elseif($legacyBackup){'FAILED_BEFORE_MUTATION'}else{'NO_OP'}
     $productState=if($outcome -eq 'SUCCEEDED'){'INTENDED'}elseif($outcome -eq 'PARTIAL_APPLIED'){'PARTIAL_KNOWN'}else{'UNCHANGED'}
-    $tx=ConvertTo-TpmLegacyTransactionResult -Legacy $legacy -WorkflowKey 'GPUFix' -OperationKey 'ApplyProfileFields' -Items $items -ChangedItems $changed -CompletedItems $completed -FailedItems $failed -SkippedItems $skipped -Summary 'GPU compatibility fields were processed with a verified transaction result.' -ReasonCode $(if($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}elseif($legacy.Backup){'PROFILE_BACKUP_COMPLETED_NO_WRITE'}else{'GPU_FIELDS_PROCESSED'}) -Outcome $outcome -ProductState $productState -MutationStarted ($changed.Count -gt 0) -Backup $legacy.Backup
+    $tx=ConvertTo-TpmLegacyTransactionResult -Legacy $legacy -WorkflowKey 'GPUFix' -OperationKey 'ApplyProfileFields' -Items $items -ChangedItems $changed -CompletedItems $completed -FailedItems $failed -SkippedItems $skipped -Summary 'GPU compatibility fields were processed with a verified transaction result.' -ReasonCode $(if($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}elseif($legacyBackup){'PROFILE_BACKUP_COMPLETED_NO_WRITE'}else{'GPU_FIELDS_PROCESSED'}) -Outcome $outcome -ProductState $productState -MutationStarted ($changed.Count -gt 0) -Backup $legacyBackup
     $tx | Add-Member -NotePropertyName Errors -NotePropertyValue ([int]$legacy.Errors) -Force
     return $tx
 }
@@ -12306,7 +12338,7 @@ function Invoke-GpuFixSetupLegacy {
     Write-Host "  Note: GPU Fix changes saved compatibility fields only; TeknoParrot Manager does not verify game launch or display output." -ForegroundColor DarkGray
     Write-Log ("GPU Fix: complete. Vendor={0} Updated={1} Unchanged={2} Skipped={3} MissingDevice={4} MissingPath={5} Errors={6}" -f `
         $gpuVendor, $updated, $unchanged, $skipped, $missingDevice, $missingPath, $errors)
-    return [pscustomobject]@{ Succeeded = ($errors -eq 0 -and $skipped -eq 0); GpuName = $gpuName; GpuVendor = $gpuVendor; Updated = $updated; Unchanged = $unchanged; Skipped = $skipped; MissingDevice = $missingDevice; MissingPath = $missingPath; Errors = $errors; SkipDetails = $skipDetails.ToArray() }
+    return [pscustomobject]@{ Succeeded = ($errors -eq 0 -and $skipped -eq 0); GpuName = $gpuName; GpuVendor = $gpuVendor; Updated = $updated; Unchanged = $unchanged; Skipped = $skipped; MissingDevice = $missingDevice; MissingPath = $missingPath; Errors = $errors; SkipDetails = $skipDetails.ToArray(); Backup = $backup }
 }
 
 # =============================================================================
@@ -12990,7 +13022,8 @@ function Invoke-CrosshairSetup {
         try {
             $doc = Read-Xml $pf.FullName
             if ($null -eq $doc.GameProfile) { continue }
-            $gameLabel = if ($doc.GameProfile.GameName) { ([string]$doc.GameProfile.GameName).Trim() } else { $pf.BaseName }
+            $gameNameNode = $doc.GameProfile.SelectSingleNode('GameName')
+            $gameLabel = if ($gameNameNode -and -not [string]::IsNullOrWhiteSpace($gameNameNode.InnerText)) { $gameNameNode.InnerText.Trim() } else { $pf.BaseName }
             $gunNode = $doc.GameProfile.SelectSingleNode("GunGame")
             if (-not $gunNode -or $gunNode.InnerText -ne "true") { continue }
 
@@ -13436,7 +13469,6 @@ function Invoke-TpmAutoSyncDirectoryTransaction {
         if (-not $sourceBefore.Readable -or -not $sourceBefore.Exists) {
             throw "AutoSync source ZIP is unavailable: $ZipPath"
         }
-        $inventory = Get-TpmAutoSyncZipInventory -ZipPath $ZipPath
         $targetPre = Get-TpmDirectoryManifest -Path $targetFull
         $statePre = Get-TpmFileState -Path $stateFull
         $sentinelPre = Get-TpmFileState -Path $sentinelFull
@@ -13501,6 +13533,7 @@ function Invoke-TpmAutoSyncDirectoryTransaction {
             })
         }
         $preStateCaptured = $true
+        $inventory = Get-TpmAutoSyncZipInventory -ZipPath $ZipPath
 
         if ($sentinelPre.Exists -or $legacySentinelPre.Exists) {
             $requestedOutcome = 'ACTION_REQUIRED'
@@ -16186,19 +16219,33 @@ function Invoke-PostgresSelectedPasswordRecovery {
     if ($StatusContext) { [void](Update-TpmWorkflowActivity -Context $StatusContext -Activity 'Making a verified safety backup') }
     Write-Host "  TeknoParrot Manager is creating a verified recovery backup before resetting the PostgreSQL role password..." -ForegroundColor Cyan
     $backup = New-PostgresRecoveryBackup -UserProfilesDir $UserProfilesDir
-    if (-not $backup.Verified) {
-        $result=New-TpmProfileTransactionResult -WorkflowKey 'PostgresRecovery' -OperationKey 'RecoverRolePassword' -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary 'PostgreSQL recovery stopped before a role change because verified safety evidence was unavailable.' -Items @('postgres-role') -FailedItems @('postgres-role') -Backup $backup -ReasonCode 'RECOVERY_BACKUP_UNVERIFIED' -FinalChecks @('No role change was attempted.')
+    $backupState = Get-PostgresRecoveryBackupState -RecoveryBackup $backup -Attempted ($null -ne $backup)
+    if (-not $backupState.Verified) {
+        $backupInfo = [pscustomobject]@{
+            Required=$true
+            Attempted=$backupState.Attempted
+            Created=$backupState.Created
+            Verified=$backupState.Verified
+            RootPath=$backupState.Path
+            Items=@('PostgreSQL recovery evidence')
+            FailureStage='RecoveryEvidence'
+            FailureCode='RECOVERY_BACKUP_UNVERIFIED'
+        }
+        $result=New-TpmProfileTransactionResult -WorkflowKey 'PostgresRecovery' -OperationKey 'RecoverRolePassword' -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary 'PostgreSQL recovery stopped before a role change because verified safety evidence was unavailable.' -Items @('postgres-role') -FailedItems @('postgres-role') -Backup $backupInfo -ReasonCode 'RECOVERY_BACKUP_UNVERIFIED' -FinalChecks @('No role change was attempted.')
         $result | Add-Member -NotePropertyName WrapperOperationKey -NotePropertyValue 'RecoverRolePassword' -Force
+        $result | Add-Member -NotePropertyName RecoveryBundle -NotePropertyValue $backup -Force
         return $result
     }
     if ($StatusContext) { [void](Update-TpmWorkflowActivity -Context $StatusContext -Activity 'Repairing the PostgreSQL password') }
     $reset = Reset-PostgresPasswordAutomatically -NewPassword $PasswordPlain -RecoveryBackup $backup
     $reset | Add-Member -NotePropertyName WrapperOperationKey -NotePropertyValue 'RecoverRolePassword' -Force
-    if (-not $reset.PSObject.Properties['Backup']) { $reset | Add-Member -NotePropertyName Backup -NotePropertyValue $backup -Force }
+    $reset | Add-Member -NotePropertyName RecoveryBundle -NotePropertyValue $backup -Force
     if ($reset.Outcome -eq 'SUCCEEDED') {
         if ($StatusContext) { [void](Update-TpmWorkflowActivity -Context $StatusContext -Activity 'Verifying the repaired PostgreSQL password') }
         if (-not (Test-PostgresPassword -SuperPasswordPlain $PasswordPlain)) {
-            return (New-TpmProfileTransactionResult -WorkflowKey 'PostgresRecovery' -OperationKey 'RecoverRolePassword' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'PostgreSQL role change needs attention because final authentication could not be verified.' -Items @('postgres-role') -ChangedItems @('postgres-role') -FailedItems @('postgres-role') -MutationStarted $true -Backup $backup -FinalPassed $false -ReasonCode 'FINAL_AUTHENTICATION_UNVERIFIED' -FinalChecks @('The committed role change was not reported as complete without final authentication proof.'))
+            $final = New-TpmProfileTransactionResult -WorkflowKey 'PostgresRecovery' -OperationKey 'RecoverRolePassword' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'PostgreSQL role change needs attention because final authentication could not be verified.' -Items @('postgres-role') -ChangedItems @('postgres-role') -FailedItems @('postgres-role') -MutationStarted $true -Backup $reset.Backup -FinalPassed $false -ReasonCode 'FINAL_AUTHENTICATION_UNVERIFIED' -FinalChecks @('The committed role change was not reported as complete without final authentication proof.')
+            $final | Add-Member -NotePropertyName RecoveryBundle -NotePropertyValue $backup -Force
+            return $final
         }
         if ($StatusContext) { [void](Update-TpmWorkflowActivity -Context $StatusContext -Activity 'Password repaired and verified') }
     }
@@ -16781,15 +16828,17 @@ function Invoke-PostgresGameSetup {
     $changedProfileItems = @($preflightPlans | Where-Object Changed | ForEach-Object { 'profile:' + $_.Profile.BaseName })
     $plannedDatabaseItems = @($databaseItems)
     $skippedItems = @($items | Where-Object { $changedProfileItems -notcontains $_ -and $plannedDatabaseItems -notcontains $_ })
+    $recoveryBackupAttempted = ($null -ne $RecoveryBackup)
     if ($RecoveryBackup -and -not $RecoveryBackup.Verified) {
         $results.Errors++
         $results.RecoveryBlocked = $true
+        $backupState = Get-PostgresRecoveryBackupState -RecoveryBackup $RecoveryBackup -Attempted $recoveryBackupAttempted
         $backupInfo = [pscustomobject]@{
             Required = $true
-            Attempted = $true
-            Created = [bool]$RecoveryBackup
-            Verified = $false
-            RootPath = $RecoveryBackup.Path
+            Attempted = $backupState.Attempted
+            Created = $backupState.Created
+            Verified = $backupState.Verified
+            RootPath = $backupState.Path
             Items = @()
             FailureStage = 'RecoveryEvidence'
             FailureCode = 'RECOVERY_EVIDENCE_REQUIRED'
@@ -16832,20 +16881,21 @@ function Invoke-PostgresGameSetup {
             -ReasonCode 'POSTGRES_ALREADY_CONFIGURED' `
             -TechnicalDetails ([pscustomobject]@{ Stage='Preflight'; PlanCount=$preflightPlans.Count }))
     }
-    if (-not $RecoveryBackup) { $RecoveryBackup = New-PostgresRecoveryBackup -UserProfilesDir $UserProfilesDir }
-    if ($RecoveryBackup) { $results.BackupPath = $RecoveryBackup.Path }
+    if (-not $RecoveryBackup) {
+        $recoveryBackupAttempted = $true
+        $RecoveryBackup = New-PostgresRecoveryBackup -UserProfilesDir $UserProfilesDir
+    }
+    $backupState = Get-PostgresRecoveryBackupState -RecoveryBackup $RecoveryBackup -Attempted $recoveryBackupAttempted
+    if ($RecoveryBackup) { $results.BackupPath = $backupState.Path }
     $backupInfo = [pscustomobject]@{
         Required = $true
-        Attempted = $true
-        Created = [bool]$RecoveryBackup
-        Verified = [bool]($RecoveryBackup -and $RecoveryBackup.Verified)
-        RootPath = if ($RecoveryBackup) { $RecoveryBackup.Path } else { $null }
-        Items = @(
-            @($RecoveryBackup.ProfileBackups | ForEach-Object { $_.Source }),
-            @($RecoveryBackup.ConfigBackups | ForEach-Object { $_.Source })
-        )
-        FailureStage = if ($RecoveryBackup -and $RecoveryBackup.Verified) { $null } else { 'RecoveryEvidence' }
-        FailureCode = if ($RecoveryBackup -and $RecoveryBackup.Verified) { $null } else { 'RECOVERY_EVIDENCE_REQUIRED' }
+        Attempted = $backupState.Attempted
+        Created = $backupState.Created
+        Verified = $backupState.Verified
+        RootPath = $backupState.Path
+        Items = @($RecoveryBackup.ProfileBackups | ForEach-Object { $_.Source }) + @($RecoveryBackup.ConfigBackups | ForEach-Object { $_.Source })
+        FailureStage = if ($backupState.Verified) { $null } else { 'RecoveryEvidence' }
+        FailureCode = if ($backupState.Verified) { $null } else { 'RECOVERY_EVIDENCE_REQUIRED' }
     }
     if (-not $RecoveryBackup -or -not $RecoveryBackup.Verified) {
         $results.Errors++
@@ -19123,9 +19173,29 @@ function Invoke-BepInExUpdateCheck {
     $changed=@($changed | Where-Object { $_ -in $items } | Select-Object -Unique)
     $failed=@($failed | Where-Object { $_ -in $items -and $_ -notin $changed -and $_ -notin $skipped } | Select-Object -Unique)
     $skipped=@($skipped | Where-Object { $_ -in $items -and $_ -notin $changed -and $_ -notin $failed } | Select-Object -Unique)
-    $outcome=if($changed.Count -gt 0 -and ($failed.Count -gt 0 -or $skipped.Count -gt 0 -or $legacy.UpdatedWithCleanupFailure -gt 0)){'PARTIAL_APPLIED'}elseif($changed.Count -gt 0){'SUCCEEDED'}elseif($failed.Count -gt 0){'FAILED_BEFORE_MUTATION'}else{'NO_OP'}
-    $tx=ConvertTo-TpmLegacyTransactionResult -Legacy $legacy -WorkflowKey 'BepInEx' -OperationKey 'InstallOrUpdate' -Items $items -ChangedItems $changed -CompletedItems $changed -FailedItems $failed -SkippedItems $skipped -Summary 'BepInEx updates were processed with a verified transaction result.' -ReasonCode $(if($outcome -eq 'NO_OP' -and $legacy.Reason){$legacy.Reason}elseif($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}else{'UPDATES_PROCESSED'}) -Outcome $outcome -ProductState $(if($outcome -eq 'PARTIAL_APPLIED'){'PARTIAL_KNOWN'}elseif($outcome -eq 'SUCCEEDED'){'INTENDED'}else{'UNCHANGED'}) -MutationStarted ($changed.Count -gt 0)
-    $tx | Add-Member -NotePropertyName Errors -NotePropertyValue ([int]$legacy.Errors) -Force
+    $cleanupRecords=@(
+        (Get-TpmTransactionField -Object $legacy -Name 'FailureRecords' -Default @()) |
+            Where-Object {
+                (Get-TpmTransactionField -Object $_ -Name 'Operation' -Default '') -eq 'staging cleanup' -and
+                [bool](Get-TpmTransactionField -Object $_ -Name 'EvidencePreserved' -Default $false)
+            }
+    )
+    $cleanupPaths=@(
+        $cleanupRecords |
+            ForEach-Object { [string](Get-TpmTransactionField -Object $_ -Name 'StagingPath' -Default '') } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+    )
+    $cleanup=if($cleanupPaths.Count -gt 0) {
+        [pscustomobject]@{ Attempted=$true; Completed=$false; ResiduePresent=$true; ResiduePaths=$cleanupPaths; ResidueItems=@(); Error='BepInEx staging cleanup failed.' }
+    } else { $null }
+    $outcome=if($changed.Count -gt 0 -and ($failed.Count -gt 0 -or $skipped.Count -gt 0)){'PARTIAL_APPLIED'}elseif($changed.Count -gt 0){'SUCCEEDED'}elseif($failed.Count -gt 0){'FAILED_BEFORE_MUTATION'}else{'NO_OP'}
+    $productState=switch($outcome){'SUCCEEDED'{'INTENDED'}'PARTIAL_APPLIED'{'PARTIAL_KNOWN'}default{'UNCHANGED'}}
+    $legacyReason=Get-TpmTransactionField -Object $legacy -Name 'Reason' -Default $null
+    $reasonCode=if($cleanupPaths.Count -gt 0){'CLEANUP_RESIDUE'}elseif($outcome -eq 'NO_OP' -and $legacyReason){$legacyReason}elseif($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}else{'UPDATES_PROCESSED'}
+    $summary=if($cleanupPaths.Count -gt 0){'BepInEx update processing completed with staging cleanup residue requiring attention.'}else{'BepInEx updates were processed with a verified transaction result.'}
+    $tx=ConvertTo-TpmLegacyTransactionResult -Legacy $legacy -WorkflowKey 'BepInEx' -OperationKey 'InstallOrUpdate' -Items $items -ChangedItems $changed -CompletedItems $changed -FailedItems $failed -SkippedItems $skipped -Summary $summary -ReasonCode $reasonCode -Outcome $outcome -ProductState $productState -Cleanup $cleanup -MutationStarted ($changed.Count -gt 0)
+    $tx | Add-Member -NotePropertyName Errors -NotePropertyValue ([int](Get-TpmTransactionField -Object $legacy -Name 'Errors' -Default 0)) -Force
     return $tx
 }
 function Invoke-BepInExUpdateCheckLegacy {
@@ -19369,10 +19439,22 @@ function Invoke-BepInExUpdateCheckLegacy {
             $updated++
         } catch {
             if ($promotionSucceeded -and $_.Exception.Message -match '^TPM BEPINEX STAGING CLEANUP (FAILED|REFUSED)') {
+                [void]$changedItems.Add($o.Code)
                 $preserveStaging = $true
                 Write-Host ("    WARNING {0} -- update applied, but staging cleanup failed" -f $o.Label) -ForegroundColor Yellow
                 Write-Host '            ACTION REQUIRED: inspect the preserved staging evidence before retrying.' -ForegroundColor Yellow
                 Write-Log "BepInEx: update applied for $($o.Code), but staging cleanup failed; action required; residue=$stagingDir; backup=$backupPath"
+                [void]$failureRecords.Add([pscustomobject]@{
+                    Game = $o.Code
+                    GameRoot = $o.ExeDir
+                    StagingPath = $stagingDir
+                    BackupPath = $backupPath
+                    Operation = 'staging cleanup'
+                    ReasonKey = 'CLEANUP_FAILED'
+                    Exception = $_.Exception.Message
+                    EvidencePreserved = $true
+                    NextAction = 'Close TeknoParrot and remove the validated staging residue after confirming the game files are intact.'
+                })
                 $updatedWithCleanupFailure++
                 $cleanupErrors++
             } else {
@@ -19410,7 +19492,12 @@ function Invoke-BepInExUpdateCheckLegacy {
                 } elseif ($failureMessage -match 'CLEANUP FAILED') {
                     $cleanupFailure = $true
                     $preserveStaging = $true
-                    [void]$failedItems.Add($o.Code)
+                    if ($promotionSucceeded) {
+                        [void]$changedItems.Add($o.Code)
+                        $updatedWithCleanupFailure++
+                    } else {
+                        [void]$failedItems.Add($o.Code)
+                    }
                     [void]$failureRecords.Add([pscustomobject]@{
                         Game = $o.Code
                         GameRoot = $o.ExeDir
@@ -20224,7 +20311,7 @@ function Invoke-StartupUpdateCheck {
     }
     Write-Log "StartupUpdateCheck: update available (v$ScriptVersion -> $($release.TagName))."
     while ($true) {
-        $ans = Read-TpmChoice -Prompt "  Update now, remind me later, or view release notes? (Y/N/V)" -Choices @('Y', 'N', 'V')
+        $ans = Read-TpmChoice -Prompt "  Update now, remind me later, or view release notes? (Y/N/V)" -Choices @('Y', 'N', 'V') -Default 'N'
         if ($ans -eq 'V') {
             Write-Host ""
             if ($release.Body) { Write-Host $release.Body -ForegroundColor DarkGray } else { Write-Host '  No release notes were provided for this release.' -ForegroundColor DarkGray }
@@ -20302,6 +20389,7 @@ function Register-GamesLegacy {
           [bool]$DryRun = $false,
           [string]$tpRootDir = '', [hashtable]$subFolderMap = $null,
           [string[]]$GameFolders = $null)
+    if ($null -eq $datIndex) { $datIndex = @{} }
 
     if ($null -eq $GameFolders -or $GameFolders.Count -eq 0) {
         $exeFiles = @(Get-GameFiles $installFolder)
@@ -21135,7 +21223,8 @@ function Write-LibraryHealthRepairResults {
     $stillBroken = @($Reports | Where-Object { $_.Status -ne 'fixed' -and $_.Status -ne 'candidate' })
     foreach ($report in @($fixed + $candidates + $stillBroken)) {
         $before = ConvertTo-TpmDisplayPath $report.PreviousPath
-        $after = if ($report.NewPath) { ConvertTo-TpmDisplayPath $report.NewPath } else { '<not saved>' }
+        $newPath = Get-TpmTransactionField -Object $report -Name 'NewPath' -Default $null
+        $after = if ($newPath) { ConvertTo-TpmDisplayPath ([string]$newPath) } else { '<not saved>' }
         if ($report.Status -eq 'fixed') {
             Write-Host ("  FIXED: {0}" -f $report.Code) -ForegroundColor Green
             Write-Host ("    GamePath before: {0}" -f $before) -ForegroundColor DarkGray
@@ -21264,14 +21353,15 @@ function Repair-GamePathsLegacy {
             continue
         }
 
-        $reviewed = @($ReviewedCandidates | Where-Object { [string]$_.Code -ieq $f.BaseName })[0]
-        if ($ReviewedCandidates.Count -gt 0 -and -not $reviewed) {
+        $matchingReviewed = @($ReviewedCandidates | Where-Object { [string]$_.Code -ieq $f.BaseName })
+        if ($ReviewedCandidates.Count -gt 0 -and $matchingReviewed.Count -eq 0) {
             [void]$reports.Add([pscustomobject]@{
                 Code = $f.BaseName; Status = 'not-reviewed'; Outcome = 'STILL BROKEN'
                 Exe = $exeName; PreviousPath = $curPath; Reason = 'candidate was not explicitly reviewed'
             })
             continue
         }
+        $reviewed = if ($matchingReviewed.Count -gt 0) { $matchingReviewed[0] } else { $null }
         $key = $null
         $newPath = $null
         if ($reviewed) {
@@ -22991,8 +23081,9 @@ function Write-ControlPropagationResults {
             "skipped-override" { Write-Host ("    {0}  -- skipped (per-game override)" -f $r.Code) -ForegroundColor DarkGray }
             "save-failed" { Write-Host ("    {0}  -- ERROR saving (see TeknoParrot-Manager.log)" -f $r.Code) -ForegroundColor Red }
         }
-        if ($r.MismatchSlots) {
-            Write-Host ("       ACTION REQUIRED -- directional/action mismatch: {0}" -f $r.MismatchSlots) -ForegroundColor Yellow
+        $mismatchSlots = Get-TpmTransactionField -Object $r -Name 'MismatchSlots' -Default $null
+        if ($mismatchSlots) {
+            Write-Host ("       ACTION REQUIRED -- directional/action mismatch: {0}" -f $mismatchSlots) -ForegroundColor Yellow
             Write-Host ("       Rebind these slots manually in TeknoParrot's own UI (see issue #17)" ) -ForegroundColor Yellow
         }
     }
@@ -23109,14 +23200,86 @@ function Invoke-DeviceSurvey {
 # Lists all timestamped backups in UserProfiles\FullBackup, lets the user pick
 # one, confirms, then copies it back to UserProfiles -- overwriting current files.
 # The FullBackup subfolder itself is never touched during the restore.
+function New-TpmRestoreBackupLegacyResult {
+    param(
+        [Parameter(Mandatory)][ValidateSet('NO_OP','FAILED_BEFORE_MUTATION','SUCCEEDED','ROLLED_BACK_VERIFIED','ACTION_REQUIRED')][string]$Outcome,
+        [Parameter(Mandatory)][string]$ReasonCode,
+        [Parameter(Mandatory)][string]$Summary,
+        [Parameter(Mandatory)][string]$FinalCheck,
+        [string]$Name = $null,
+        [int]$ErrorCount = 0,
+        [string]$RollbackPath = $null,
+        [object]$Backup = $null
+    )
+    $productState = switch ($Outcome) {
+        'SUCCEEDED' { 'INTENDED' }
+        'ACTION_REQUIRED' { 'UNKNOWN' }
+        default { 'UNCHANGED' }
+    }
+    return [pscustomobject]@{
+        PSTypeName = 'TPM.RestoreBackupLegacyResult.v1'
+        Outcome = $Outcome
+        ProductState = $productState
+        MutationStarted = ($Outcome -in @('SUCCEEDED','ROLLED_BACK_VERIFIED','ACTION_REQUIRED'))
+        Succeeded = ($Outcome -eq 'SUCCEEDED')
+        RollbackSucceeded = ($Outcome -in @('SUCCEEDED','ROLLED_BACK_VERIFIED'))
+        Name = $Name
+        ErrorCount = $ErrorCount
+        ReasonCode = $ReasonCode
+        Summary = $Summary
+        FinalCheck = $FinalCheck
+        RollbackPath = $RollbackPath
+        Backup = $Backup
+    }
+}
+
 function Invoke-RestoreBackup {
     param([string]$userProfilesDir)
-    $legacy=Invoke-RestoreBackupLegacy -userProfilesDir $userProfilesDir
-    $items=@(Get-ChildItem -LiteralPath $userProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | ForEach-Object BaseName)
-    $changed=if($legacy.Succeeded -or $legacy.RollbackSucceeded){$items}else{@()}
-    $outcome=if($legacy.Succeeded){'SUCCEEDED'}elseif($legacy.RollbackSucceeded){'ROLLED_BACK_VERIFIED'}else{'ACTION_REQUIRED'}
-    $state=if($legacy.Succeeded){'INTENDED'}else{if($legacy.RollbackSucceeded){'UNCHANGED'}else{'UNKNOWN'}}
-    return (ConvertTo-TpmLegacyTransactionResult -Legacy $legacy -WorkflowKey 'UserProfiles' -OperationKey 'RestoreBackup' -Items $items -ChangedItems $changed -CompletedItems $changed -FailedItems $(if($legacy.Succeeded){@()}else{$items}) -Summary $(if($legacy.Succeeded){'UserProfiles restore completed and was verified.'}elseif($legacy.RollbackSucceeded){'UserProfiles restore stopped and the original state was restored.'}else{'UserProfiles restore needs attention because its final state could not be verified.'}) -ReasonCode $(if($legacy.Succeeded){'RESTORED'}elseif($legacy.RollbackSucceeded){'ROLLED_BACK'}else{'RESTORE_UNVERIFIED'}) -Outcome $outcome -ProductState $state -MutationStarted ($changed.Count -gt 0) -FinalPassed ($legacy.Succeeded -or $legacy.RollbackSucceeded))
+    $legacy = Invoke-RestoreBackupLegacy -userProfilesDir $userProfilesDir
+    $items = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | ForEach-Object BaseName)
+    if ($null -eq $legacy) {
+        $legacy = New-TpmRestoreBackupLegacyResult -Outcome 'NO_OP' -ReasonCode 'RESTORE_NOT_PERFORMED' -Summary 'Restore was not performed; no profile changes were made.' -FinalCheck 'The legacy restore returned before the profile mutation boundary.'
+    }
+
+    $outcome = [string]$legacy.Outcome
+    $changed = @()
+    if ([bool]$legacy.MutationStarted) { $changed = @($items) }
+
+    $rollback = $null
+    if ($outcome -eq 'ROLLED_BACK_VERIFIED') {
+        $rollback = [pscustomobject]@{
+            Attempted = $true
+            Completed = $true
+            Verified = $true
+            Items = @($changed)
+            EvidenceRoot = $legacy.RollbackPath
+            FailedItems = @()
+            Errors = @()
+        }
+    }
+    $finalPassed = $outcome -ne 'ACTION_REQUIRED'
+    $finalChecks = @([string]$legacy.FinalCheck)
+    $unattempted = @()
+    if ($outcome -eq 'FAILED_BEFORE_MUTATION') { $unattempted = @($items) }
+    $skipped = @()
+    if ($outcome -eq 'NO_OP') { $skipped = @($items) }
+    $unknown = @()
+    if ($outcome -eq 'ACTION_REQUIRED') { $unknown = @($items) }
+    $completed = @()
+    if ($outcome -in @('SUCCEEDED','ROLLED_BACK_VERIFIED')) { $completed = @($changed) }
+
+    return (New-TpmProfileTransactionResult `
+        -WorkflowKey 'UserProfiles' -OperationKey 'RestoreBackup' `
+        -Outcome $outcome -ProductState ([string]$legacy.ProductState) `
+        -Summary ([string]$legacy.Summary) -ReasonCode ([string]$legacy.ReasonCode) `
+        -Items $items -ChangedItems $changed -CompletedItems $completed `
+        -UnattemptedItems $unattempted -SkippedItems $skipped -UnknownItems $unknown `
+        -MutationStarted ([bool]$legacy.MutationStarted) `
+        -MutationCompleted ($outcome -eq 'SUCCEEDED') `
+        -Backup $legacy.Backup -FinalAttempted:$true -FinalPassed:$finalPassed `
+        -FinalChecks $finalChecks -Rollback $rollback `
+        -Errors $(if ($legacy.ErrorCount -gt 0) { @([string]$legacy.ReasonCode) } else { @() }) `
+        -TechnicalDetails $legacy)
 }
 function Invoke-RestoreBackupLegacy {
     param([string]$userProfilesDir)
@@ -23124,14 +23287,14 @@ function Invoke-RestoreBackupLegacy {
     $backupRoot = Join-Path $userProfilesDir "FullBackup"
     if (-not (Test-Path -LiteralPath $backupRoot)) {
         Write-Host "  No backups found in: $backupRoot" -ForegroundColor Yellow
-        return
+        return (New-TpmRestoreBackupLegacyResult -Outcome 'NO_OP' -ReasonCode 'NO_BACKUPS_FOUND' -Summary 'No restore backups were found. Nothing was changed.' -FinalCheck 'Backup enumeration found no restore candidate before the profile mutation boundary.')
     }
 
     $backups = @(Get-ChildItem -LiteralPath $backupRoot -Directory -ErrorAction SilentlyContinue |
                      Sort-Object Name -Descending)
     if ($backups.Count -eq 0) {
         Write-Host "  No backup folders found." -ForegroundColor Yellow
-        return
+        return (New-TpmRestoreBackupLegacyResult -Outcome 'NO_OP' -ReasonCode 'NO_BACKUPS_FOUND' -Summary 'No restore backups were found. Nothing was changed.' -FinalCheck 'Backup enumeration found no restore candidate before the profile mutation boundary.')
     }
 
     Write-Host ""
@@ -23146,12 +23309,12 @@ function Invoke-RestoreBackupLegacy {
     if ([string]::IsNullOrWhiteSpace($choice)) {
         Write-Host "  Restore cancelled." -ForegroundColor DarkGray
         Write-Log "Restore: cancelled by user."
-        return
+        return (New-TpmRestoreBackupLegacyResult -Outcome 'NO_OP' -ReasonCode 'USER_CANCELLED' -Summary 'Restore was cancelled at backup selection. No profiles were changed.' -FinalCheck 'The selection prompt was cancelled before the profile mutation boundary.')
     }
     if ($choice -notmatch '^\d+$' -or $choice.Length -gt 9 -or [int]$choice -lt 1 -or [int]$choice -gt $backups.Count) {
         Write-Host "  Invalid selection. Restore cancelled." -ForegroundColor Yellow
         Write-Log "Restore: invalid selection '$choice'."
-        return
+        return (New-TpmRestoreBackupLegacyResult -Outcome 'NO_OP' -ReasonCode 'INVALID_SELECTION' -Summary 'Restore was cancelled because the selection was invalid. No profiles were changed.' -FinalCheck 'Invalid selection was rejected before the profile mutation boundary.')
     }
     $selected = $backups[[int]$choice - 1]
 
@@ -23160,7 +23323,7 @@ function Invoke-RestoreBackupLegacy {
     if ($backupXmls.Count -eq 0) {
         Write-Host ("  ERROR: Selected backup '{0}' contains no XML profiles -- restore aborted." -f $selected.Name) -ForegroundColor Red
         Write-Log "Restore: aborted -- backup '$($selected.Name)' contains no XML files."
-        return
+        return (New-TpmRestoreBackupLegacyResult -Outcome 'FAILED_BEFORE_MUTATION' -ReasonCode 'BACKUP_EMPTY' -Summary 'Restore stopped because the selected backup contained no profiles. No profiles were changed.' -FinalCheck 'The selected backup was checked before the profile mutation boundary.' -Name $selected.Name)
     }
 
     Write-Host ""
@@ -23170,7 +23333,7 @@ function Invoke-RestoreBackupLegacy {
     if ($confirm.ToUpper() -ne "YES") {
         Write-Host "  Restore cancelled." -ForegroundColor DarkGray
         Write-Log "Restore: user did not confirm."
-        return
+        return (New-TpmRestoreBackupLegacyResult -Outcome 'NO_OP' -ReasonCode 'USER_DECLINED' -Summary 'Restore was declined. No profiles were changed.' -FinalCheck 'Confirmation was declined before the profile mutation boundary.' -Name $selected.Name)
     }
 
     # TeknoParrot must be fully closed before files can be safely replaced.
@@ -23179,7 +23342,7 @@ function Invoke-RestoreBackupLegacy {
     if (-not (Wait-TpmForProcessClose -ProcessNames @('TeknoParrotUi') -FriendlyName 'TeknoParrot')) {
         Write-Host '  Restore cancelled. Your selected backup is unchanged.' -ForegroundColor Yellow
         Write-Log 'Restore: cancelled while waiting for TeknoParrot to close.'
-        return
+        return (New-TpmRestoreBackupLegacyResult -Outcome 'FAILED_BEFORE_MUTATION' -ReasonCode 'APPLICATION_RUNNING' -Summary 'Restore stopped because TeknoParrot was still running. No profiles were changed.' -FinalCheck 'The running-application check stopped restore before the profile mutation boundary.' -Name $selected.Name)
     }
 
     # Snapshot the live profiles before deletion so a partial copy failure can
@@ -23193,7 +23356,8 @@ function Invoke-RestoreBackupLegacy {
         Write-Host '  ERROR: Could not snapshot current profiles before restore; nothing was changed.' -ForegroundColor Red
         Write-Log "Restore: rollback snapshot failed -- $_"
         if (Test-Path -LiteralPath $rollbackDir) { Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue }
-        return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = 1; RollbackSucceeded = $false }
+        $backupEvidence = [pscustomobject]@{ Required=$true; Attempted=$true; Created=$false; Verified=$false; RootPath=$null; Path=$null; Items=@(); FailureStage='RollbackSnapshot'; FailureCode='ROLLBACK_SNAPSHOT_FAILED'; Reason='The pre-restore rollback snapshot could not be created.'; ResiduePaths=@() }
+        return (New-TpmRestoreBackupLegacyResult -Outcome 'FAILED_BEFORE_MUTATION' -ReasonCode 'ROLLBACK_SNAPSHOT_FAILED' -Summary 'Restore stopped because the pre-restore safety snapshot could not be created. No profiles were changed.' -FinalCheck 'Snapshot creation failed before any UserProfiles content was removed.' -Name $selected.Name -ErrorCount 1 -Backup $backupEvidence)
     }
 
     # Remove current UserProfiles content, keeping FullBackup intact.
@@ -23215,10 +23379,10 @@ function Invoke-RestoreBackupLegacy {
             Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne 'FullBackup' } | Remove-Item -Recurse -Force -ErrorAction Stop
             Get-ChildItem -LiteralPath $rollbackDir | Copy-Item -Destination $userProfilesDir -Recurse -Force -ErrorAction Stop
             Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue
-            return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $deleteErrs.Count; RollbackSucceeded = $true }
+            return (New-TpmRestoreBackupLegacyResult -Outcome 'ROLLED_BACK_VERIFIED' -ReasonCode 'RESTORE_DELETE_FAILED_ROLLED_BACK' -Summary 'Restore stopped and the previous profile state was restored.' -FinalCheck 'The rollback operation completed before the restore result was returned.' -Name $selected.Name -ErrorCount $deleteErrs.Count)
         } catch {
             Write-Log "Restore: rollback after delete failure failed -- $_"
-            return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $deleteErrs.Count; RollbackSucceeded = $false; RollbackPath = $rollbackDir }
+            return (New-TpmRestoreBackupLegacyResult -Outcome 'ACTION_REQUIRED' -ReasonCode 'RESTORE_DELETE_ROLLBACK_FAILED' -Summary 'Restore stopped and the final profile state needs attention.' -FinalCheck 'The rollback operation failed; the final profile state was not verified.' -Name $selected.Name -ErrorCount $deleteErrs.Count -RollbackPath $rollbackDir)
         }
     }
 
@@ -23241,16 +23405,16 @@ function Invoke-RestoreBackupLegacy {
             Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne 'FullBackup' } | Remove-Item -Recurse -Force -ErrorAction Stop
             Get-ChildItem -LiteralPath $rollbackDir | Copy-Item -Destination $userProfilesDir -Recurse -Force -ErrorAction Stop
             Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue
-            return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $errCount; RollbackSucceeded = $true }
+            return (New-TpmRestoreBackupLegacyResult -Outcome 'ROLLED_BACK_VERIFIED' -ReasonCode 'RESTORE_COPY_FAILED_ROLLED_BACK' -Summary 'Restore stopped and the previous profile state was restored.' -FinalCheck 'The rollback operation completed before the restore result was returned.' -Name $selected.Name -ErrorCount $errCount)
         } catch {
             Write-Log "Restore: rollback after copy failure failed -- $_"
-            return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $errCount; RollbackSucceeded = $false; RollbackPath = $rollbackDir }
+            return (New-TpmRestoreBackupLegacyResult -Outcome 'ACTION_REQUIRED' -ReasonCode 'RESTORE_COPY_ROLLBACK_FAILED' -Summary 'Restore stopped and the final profile state needs attention.' -FinalCheck 'The rollback operation failed; the final profile state was not verified.' -Name $selected.Name -ErrorCount $errCount -RollbackPath $rollbackDir)
         }
     }
     Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "  Restore complete." -ForegroundColor Green
     Write-Log "Restore: completed from $($selected.Name), no errors."
-    return [pscustomobject]@{ Succeeded = $true; Name = $selected.Name; ErrorCount = 0; RollbackSucceeded = $true }
+    return (New-TpmRestoreBackupLegacyResult -Outcome 'SUCCEEDED' -ReasonCode 'RESTORED' -Summary 'UserProfiles restore completed successfully.' -FinalCheck 'The restore completed without reported copy errors.' -Name $selected.Name)
 }
 
 # =============================================================================
@@ -25157,7 +25321,8 @@ function Export-HyperSpinJson {
 
     # Use the emulator system GUID only when it is present. A missing ID routes
     # to plugin guidance or skip; TPM does not synthesize HyperSpin associations.
-    $tpSystemGuid = [string]$tpEmu.id
+    $idProperty = $tpEmu.PSObject.Properties['id']
+    $tpSystemGuid = if ($idProperty) { [string]$idProperty.Value } else { '' }
     if ([string]::IsNullOrEmpty($tpSystemGuid)) {
         Write-Host "  WARNING: TeknoParrot emulator entry has no 'id' field in emulators.json." -ForegroundColor Yellow
         Write-Host "  HyperSpin cannot associate exported games with this emulator safely." -ForegroundColor Yellow
@@ -28868,10 +29033,10 @@ $mode = $null
                     } else {
                         $recovery = Invoke-PostgresSelectedPasswordRecovery -UserProfilesDir $userProfilesDir -PasswordPlain $typedPwPlain -StatusContext $postgresStatus
                         if ($recovery.Outcome -ne 'SUCCEEDED') {
-                            if ($recovery.Backup.Path) { Write-Host ("  Recovery BLOCKED. Evidence: {0}" -f $recovery.Backup.Path) -ForegroundColor Red }
+                            if ($recovery.RecoveryBundle.Path) { Write-Host ("  Recovery BLOCKED. Evidence: {0}" -f $recovery.RecoveryBundle.Path) -ForegroundColor Red }
                             Exit-PostgresRecoveryResume -Message ('TPM could not complete the protected PostgreSQL repair ({0}).' -f $recovery.Reason)
                         }
-                        $recoveryBackup = $recovery.Backup
+                        $recoveryBackup = $recovery.RecoveryBundle
                         $superPwPlain = $typedPwPlain
                         $postgresSuperPasswordEncrypted = $postgresResumeState.PasswordOriginEncrypted
                     }
@@ -28929,14 +29094,14 @@ $mode = $null
                             while (-not $directRecoverySucceeded) {
                                 $recovery = Invoke-PostgresSelectedPasswordRecovery -UserProfilesDir $userProfilesDir -PasswordPlain $typedPwPlain -StatusContext $postgresStatus
                                 if ($recovery.Outcome -eq 'SUCCEEDED') {
-                                    $recoveryBackup = $recovery.Backup
+                                    $recoveryBackup = $recovery.RecoveryBundle
                                     $superPwPlain = $typedPwPlain
                                     $directRecoverySucceeded = $true
                                     break
                                 }
                                 Write-Host '  PostgreSQL repair did not finish. Nothing was reported as complete.' -ForegroundColor Red
                                 if ($recovery.Reason) { Write-Host ("  What happened: {0}" -f $recovery.Reason) -ForegroundColor Yellow }
-                                if ($recovery.Backup.Path) { Write-Host ("  Verified backup evidence: {0}" -f $recovery.Backup.Path) -ForegroundColor Yellow }
+                                if ($recovery.RecoveryBundle.Path) { Write-Host ("  Verified backup evidence: {0}" -f $recovery.RecoveryBundle.Path) -ForegroundColor Yellow }
                                 Write-Host '  TeknoParrot Manager can try the same approved repair again without asking for the password again.' -ForegroundColor Yellow
                                 Write-Log 'Postgres setup: direct recovery failed; user acknowledgement and retry offered.'
                                 [void](Set-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-direct-recovery' -Message 'PostgreSQL repair did not finish.' -DataSafety 'The verified backup remains available; TPM did not report setup complete.' -RecoveryActions @(@{ Id = 'Retry'; Label = 'Try the repair again' }; @{ Id = 'Stop'; Label = 'Stop safely' }))

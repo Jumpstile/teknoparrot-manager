@@ -749,6 +749,10 @@ are offered a direct `[H] 10) Library Health Check` handoff, while ordinary
 deployment failures keep their normal Details/support guidance. The official
 troubleshooting guide remains available for advanced cases.
 
+If promotion succeeds but cleanup cannot be verified, the game is not counted
+as updated cleanly. TPM reports ACTION REQUIRED and preserves the exact
+staging-residue path in Details for recovery.
+
 ---
 
 ## Postgres Setup

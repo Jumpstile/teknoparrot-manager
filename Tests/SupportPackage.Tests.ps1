@@ -9,6 +9,7 @@ BeforeAll {
     $functionFile = Join-Path $TestDrive 'tpm-support-functions.ps1'
     ($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n" | Set-Content -LiteralPath $functionFile -Encoding utf8
     . $functionFile
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $script:DisplayVersion = 'v1.0 RC8'
     $script:ScriptVersion = '1.0'
@@ -318,7 +319,7 @@ Describe 'New-TpmSupportPackage' {
 
     It 'redacts every dynamic manifest field before insertion' {
         $records = New-Object System.Collections.Generic.List[object]
-        [void]$records.Add([pscustomobject]@{Source='Authorization: Bearer abc';Status='CollectionFailed';Destination='C:\Users\EliSi\secret';Detail='api_key=one'})
+        [void]$records.Add([pscustomobject]@{Source='Authorization: Bearer abc';Status='CollectionFailed';Destination='C:\Users\EliSi\secret';Detail='api_key=one';EvidenceClass='Current'})
         $errors = New-Object System.Collections.Generic.List[string]
         [void]$errors.Add('postgresql://user:pw@host/db token=two')
         $manifest = Get-TpmSupportManifestText -Records $records -Errors $errors -GameCodes ([string[]]@()) -AffectedGameSummary 'password=leaked-secret UNC=\\server\share'

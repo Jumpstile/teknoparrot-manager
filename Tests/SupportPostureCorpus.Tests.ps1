@@ -16,7 +16,7 @@ BeforeAll {
         $path = Join-Path $Root ($RelativePath -replace '/', '\')
         $parent = [System.IO.Path]::GetDirectoryName($path)
         [void][System.IO.Directory]::CreateDirectory($parent)
-        [System.IO.File]::WriteAllText($path, $Content)
+        [System.IO.File]::WriteAllText($path, $Content, (New-Object System.Text.UTF8Encoding($false)))
     }
 
     $supportCases = @(
@@ -43,6 +43,27 @@ BeforeAll {
         [pscustomobject]@{ id = 'SAFE-06'; profileCode = 'SourceConflict'; layoutClass = 'NO_CHD_REQUIRED_ORDINARY_GAME_LAYOUT'; files = @('conflict.exe'); exe = 'conflict.exe'; sourceConflict = $true; expectedClassification = 'REVIEW_MANUAL'; expectedReasonCode = 'SOURCE_EVIDENCE_CONFLICT' },
         [pscustomobject]@{ id = 'SAFE-07'; profileCode = 'Broken'; layoutClass = 'LAYOUT_UNOBSERVABLE'; files = @(); malformed = $true; expectedClassification = 'BLOCKED_UNSUPPORTED'; expectedReasonCode = 'MALFORMED_PROFILE_XML' }
     )
+    $optionalCaseProperties = [ordered]@{
+        files = @()
+        exe = $null
+        selectedPath = $null
+        chdRequirement = $null
+        exactFolderIdentity = $false
+        hasTwoExecutables = $false
+        mediaConflict = $false
+        sourceConflict = $false
+        forceProtected = $false
+        forceReparse = $false
+        malformed = $false
+    }
+    foreach ($case in $supportCases) {
+        foreach ($propertyName in $optionalCaseProperties.Keys) {
+            if (-not $case.PSObject.Properties[$propertyName]) {
+                $case | Add-Member -MemberType NoteProperty -Name $propertyName -Value $optionalCaseProperties[$propertyName]
+            }
+        }
+    }
+
     foreach ($case in $supportCases) {
         $gameRoot = Join-Path $fixtureRoot ('games\' + $case.id)
         if ($case.profileCode -ne 'ChdMissingDir') {
@@ -71,6 +92,8 @@ BeforeAll {
     }) }
     [System.IO.File]::WriteAllText((Join-Path $fixtureRoot 'fixtures.json'), ($fixtureManifest | ConvertTo-Json -Depth 10))
     Add-SupportTestFile -Root (Join-Path $supportRoot 'user\UserProfiles') -RelativePath 'Ordinary.xml' -Content '<GameProfile><GamePath>games/Ordinary</GamePath><GamePath2>games/Ordinary2</GamePath2></GameProfile>'
+    Add-SupportTestFile -Root (Join-Path $supportRoot 'installed\Metadata') -RelativePath 'Ordinary.json' -Content ('{"game_name":"Caf' + [char]0x00e9 + '''s & <Test>","nvidia":"OK"}')
+
     Add-SupportTestFile -Root $supportRoot -RelativePath 'sample.dat' -Content '<datafile><game name="Ordinary"><GameProfile>Ordinary</GameProfile><Executable>ordinary.exe</Executable></game></datafile>'
 
     function Invoke-TestSupportCorpus {
@@ -90,7 +113,7 @@ Describe 'TPM support posture corpus' {
     }
 
     It 'emits deterministic profile posture and passes the zero UNCLASSIFIED gate' {
-        $model = Get-Content -LiteralPath (Join-Path $outputOne 'support-posture.json') -Raw | ConvertFrom-Json
+        $model = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $outputOne 'support-posture.json') -Raw | ConvertFrom-Json
         $model.SchemaVersion | Should -Be 1
         $model.ProfileCount | Should -Be 22
         $model.ClassificationTotals.UNCLASSIFIED | Should -Be 0
@@ -101,7 +124,7 @@ Describe 'TPM support posture corpus' {
     }
 
     It 'covers every CHD and ordinary layout taxonomy class' {
-        $model = Get-Content -LiteralPath (Join-Path $outputOne 'support-posture.json') -Raw | ConvertFrom-Json
+        $model = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $outputOne 'support-posture.json') -Raw | ConvertFrom-Json
         $observed = @($model.Profiles | ForEach-Object { $_.LayoutObservations } | ForEach-Object LayoutClass | Sort-Object -Unique)
         foreach ($taxonomy in @('CHD_ONLY', 'CHD_PLUS_EXECUTABLE_SAME_FOLDER', 'CHD_PLUS_EXECUTABLE_PLUS_CONTENT_SUBFOLDER', 'CHD_IN_CONTENT_OR_MEDIA_SUBFOLDER', 'CHD_NESTED_ONE_LEVEL', 'CHD_NESTED_MULTIPLE_LEVELS', 'MULTIPLE_CHD_CANDIDATES', 'CHD_PLUS_SEPARATE_LAUNCHER', 'CHD_PRESENT_WRONG_DIRECTORY_SELECTED', 'CHD_EXPECTED_GAME_DIRECTORY_MISSING', 'CHD_REQUIRED_BUT_ABSENT', 'CHD_PRESENT_BUT_PROFILE_MEDIA_RULE_UNKNOWN', 'NO_CHD_REQUIRED_ORDINARY_GAME_LAYOUT', 'MEDIA_LAYOUT_CONFLICTS_WITH_PROFILE', 'LAYOUT_UNOBSERVABLE')) {
             $observed | Should -Contain $taxonomy
@@ -109,13 +132,17 @@ Describe 'TPM support posture corpus' {
     }
 
     It 'records source identity, raw XML hashes, malformed XML, and DAT evidence' {
-        $model = Get-Content -LiteralPath (Join-Path $outputOne 'support-posture.json') -Raw | ConvertFrom-Json
-        $manifest = Get-Content -LiteralPath (Join-Path $outputOne 'manifest.json') -Raw | ConvertFrom-Json
+        $model = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $outputOne 'support-posture.json') -Raw | ConvertFrom-Json
+        $manifest = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $outputOne 'manifest.json') -Raw | ConvertFrom-Json
         @($manifest.Sources | Where-Object { $_.SourceId -eq 'upstream-commit-001' }).Count | Should -Be 1
         $broken = @($model.Profiles | Where-Object ProfileCode -eq 'Broken')[0]
         $broken.Classification | Should -Be 'BLOCKED_UNSUPPORTED'
         $broken.ReasonCode | Should -Be 'MALFORMED_PROFILE_XML'
         $broken.ProfileXmlSha256 | Should -Not -BeNullOrEmpty
+        $ordinary = @($model.Profiles | Where-Object ProfileCode -eq 'Ordinary')[0]
+        $ordinary.MetadataEvidence.GameName | Should -Be ('Caf' + [char]0x00e9 + '''s & <Test>')
+        $ordinary.Executable.SecondaryCandidates.GetType().FullName | Should -Be 'System.Object[]'
+        @($ordinary.Executable.SecondaryCandidates).Count | Should -Be 0
         $model.SecondaryDat.Status | Should -Be 'READ'
         $model.SecondaryDat.EntryCount | Should -Be 1
         $model.SecondaryDat.Entries[0].ProfileCode | Should -Be 'Ordinary'
@@ -130,8 +157,8 @@ Describe 'TPM support posture corpus' {
     }
 
     It 'emits a validated contract registry aligned with the support posture snapshot' {
-        $registry = Get-Content -LiteralPath (Join-Path $outputOne 'game-support-contracts.json') -Raw | ConvertFrom-Json
-        $model = Get-Content -LiteralPath (Join-Path $outputOne 'support-posture.json') -Raw | ConvertFrom-Json
+        $registry = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $outputOne 'game-support-contracts.json') -Raw | ConvertFrom-Json
+        $model = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $outputOne 'support-posture.json') -Raw | ConvertFrom-Json
         $registry.SchemaVersion | Should -Be '1.3.0'
         @($registry.Contracts | Where-Object { $_.Prerequisites.ExternalSoftware.DeclarationState -eq 'NOT_DECLARED' -and @($_.Prerequisites.ExternalSoftware.Items).Count -eq 0 }).Count | Should -Be $model.ProfileCount
         $registry.ContractCount | Should -Be $model.ProfileCount
@@ -139,7 +166,7 @@ Describe 'TPM support posture corpus' {
         @($registry.Contracts).Count | Should -Be $model.ProfileCount
         @($registry.Contracts | Where-Object { $_.MediaRequirements -and $_.ChdRequirements -and $_.RequiredPatches -and $_.BepInExRequirements -and $_.DgVoodoo2Requirements -and $_.ReShadeCompatibility -and $_.CrosshairCompatibility -and $_.ForceFeedbackCompatibility -and $_.GpuLimitations -and $_.KnownRuntimeFixes }).Count | Should -Be $model.ProfileCount
         @($registry.Contracts | Where-Object { $_.RequiredPatches.Status -eq 'NOT_DECLARED' -and $_.BepInExRequirements.Status -eq 'NOT_DECLARED' }).Count | Should -Be $model.ProfileCount
-        (Get-Content -LiteralPath (Join-Path $outputOne 'game-support-contract-validation.json') -Raw | ConvertFrom-Json).Valid | Should -BeTrue
+        (Get-Content -Encoding UTF8 -LiteralPath (Join-Path $outputOne 'game-support-contract-validation.json') -Raw | ConvertFrom-Json).Valid | Should -BeTrue
     }
 
     It 'reproduces identical game contract artifacts from the same snapshot inputs' {
@@ -148,7 +175,7 @@ Describe 'TPM support posture corpus' {
     }
 
     It 'keeps UserProfiles as read-only observations and excludes them from the game universe' {
-        $observations = Get-Content -LiteralPath (Join-Path $outputOne 'observations\userprofiles.json') -Raw | ConvertFrom-Json
+        $observations = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $outputOne 'observations\userprofiles.json') -Raw | ConvertFrom-Json
         $ordinary = @($observations.Records | Where-Object ProfileCode -eq 'Ordinary')[0]
         $ordinary.RegistrationState | Should -Be 'REGISTERED_PATH_PRESENT'
         $ordinary.GamePath2 | Should -Be 'games/Ordinary2'
@@ -190,7 +217,9 @@ Describe 'TPM support posture corpus' {
         $historical = @($historicalSource.Profiles | Where-Object ProfileCode -eq 'HistoricalFallback')[0]
         $current = @($currentSource.Profiles | Where-Object ProfileCode -eq 'HistoricalFallback')[0]
         @($historical.Executable.PrimaryCandidates).Count | Should -Be 0
-        $historical.Executable.Rule | Should -BeNullOrEmpty
+        (Get-TPMGameSupportValueV1 $historical.Executable 'Rule' $null) | Should -BeNullOrEmpty
+        $historicalProjection = Get-TpmSupportComparisonProjection $historical
+        $historicalProjection.LaunchExecutables.Rule | Should -Be ''
         $current.Executable.Rule | Should -Be 'GAMESETUP_FALLBACK'
         @($current.Executable.PrimaryCandidates) | Should -Be @('launcher.exe')
     }

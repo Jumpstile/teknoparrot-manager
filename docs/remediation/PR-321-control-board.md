@@ -614,13 +614,51 @@ actions remain outside this implementation slice and were not performed.
   alone enables the generic resolver, including basename normalization,
   GameSetup fallback, UNKNOWN-as-non-evidence handling, and fail-closed
   contradictions.
-- Historical contract and manifest artifacts are byte-equivalent to the
-  accepted pre-Slice-1 baseline. `support-posture.json` is semantically
-  equivalent after excluding only deterministic `GenerationMode` and
-  `ComparisonArtifacts` metadata fields.
+- Governing historical compatibility requirement: complete 703-file byte
+  equality, including profiles, contracts, validation, manifest, posture,
+  Markdown, observations, DAT summary, and all other emitted artifacts.
+  Earlier implementation-pass evidence reached zero differences under both
+  engines, but final frozen revalidation remains pending.
+- Historical ordering is controlled by the immutable
+  `TPM-HISTORICAL-695-MANIFEST-ORDER.json` input. SchemaVersion, SnapshotId,
+  source commit, declared/actual counts, exact and case-insensitive
+  uniqueness, and complete coverage are validated fail-closed before rank use.
+- Current-release generation was previously exercised under both PS5.1 and PS7:
+  925 profiles, 230 added, 38 changed, 657 unchanged, zero `UNCLASSIFIED`, and
+  zero cross-engine byte differences across 935 files. Final frozen
+  revalidation remains pending.
+- The accepted historical order is independently bound by SHA-256
+  `b7ec88b0de487fbcdcdf697334ccbec154a0f61e8c0a24712f2e99425425f4aa` over
+  the UTF-8/LF ProfileCode projection; reorder-only complete-set mutations
+  fail closed before rank construction. Final frozen equality remains pending.
 - Documentation screenshot gate: no current validated runtime screenshots exist.
   No mock, stale, or synthetic screenshots are permitted, so README, QuickStart,
   setup, and feature documentation updates remain blocked pending an authorized
   runtime capture/doc slice.
 - Current status: static implementation and local evidence gates complete; Slice 1
   remains HOLD pending documentation screenshots and review.
+
+## Desktop OMP -- Historical baseline provenance re-baseline
+
+- The legacy candidate `C:\tmp\tpm-slice1-baseline-output` remains preserved
+  as corroborative content evidence. Its original creation command and exact
+  provenance were not recovered from retained evidence, so it is not
+  retroactively authoritative.
+- No TPM product or determinism defect was demonstrated. The remediation
+  addresses evidence retention and governance only.
+- A durable replacement evidence record is established under
+  `contracts/baselines/TPM-HISTORICAL-695/`, containing
+  `baseline-provenance.json` and the complete 703-file
+  `baseline-files.sha256` inventory.
+- The replacement binds `HISTORICAL_PINNED_695`, generator identity, accepted
+  historical source commit `5880e019016c5c3a0576e97a6c2a7f14bf54e3d1`,
+  SnapshotId `TPM-HISTORICAL-695`, the accepted ordered ProfileCode digest
+  `b7ec88b0de487fbcdcdf697334ccbec154a0f61e8c0a24712f2e99425425f4aa`, and
+  the governed 703-file tree digest.
+- Windows PowerShell 5.1 and pwsh 7.6.6 replacement generations produced
+  identical 703-file inventories with zero missing, extra, or differing
+  files. The replacement also matches the legacy candidate byte-for-byte;
+  that result is recorded only as `CORROBORATIVE_COMPATIBILITY_WITH_LEGACY_CANDIDATE`.
+- Acceptance authority remains pending the formal re-baseline review. No
+  commit, package, runtime, owner smoke, Arcade, merge, tag, publish,
+  certification, or release action is authorized.

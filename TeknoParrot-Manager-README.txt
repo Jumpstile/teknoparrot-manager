@@ -1660,6 +1660,10 @@
     closed. A network failure keeps the operation incomplete and offers the
     automatic retry path; it never reports an update as complete.
 
+    If promotion succeeds but cleanup cannot be verified, the game is not
+    counted as updated cleanly. TPM reports ACTION REQUIRED and preserves the
+    exact staging-residue path in Details for recovery.
+
     A BepInEx download audit entry records the GitHub release source, asset
     filename/version, computed SHA-256, and transfer metrics. When GitHub
     supplies an asset digest, TPM validates it and fails closed on a mismatch;

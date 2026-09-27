@@ -47,8 +47,8 @@ BeforeAll {
     function Get-TestSemanticGoldenSha256 {
         param([Parameter(Mandatory = $true)]$Value)
         if ($Value.PSObject.Properties.Name -contains 'Profiles') {
-            foreach ($profile in @($Value.Profiles)) {
-                $executable = $profile.PSObject.Properties['Executable'].Value
+            foreach ($profileRecord in @($Value.Profiles)) {
+                $executable = $profileRecord.PSObject.Properties['Executable'].Value
                 if ($null -eq $executable) {
                     continue
                 }
@@ -63,6 +63,15 @@ BeforeAll {
         }
         if ($Value.PSObject.Properties.Name -contains 'ProfileFiles') {
             $Value.ProfileFiles = @($Value.ProfileFiles | Sort-Object -Property ProfileCode)
+        }
+        if ($Value.PSObject.Properties.Name -contains 'CorpusId' -and $Value.PSObject.Properties.Name -contains 'Profiles' -and $Value.PSObject.Properties.Name -notcontains 'GenerationMode') {
+            $withHistoricalFields = [ordered]@{}
+            foreach ($property in $Value.PSObject.Properties) {
+                $withHistoricalFields[$property.Name] = $property.Value
+                if ($property.Name -eq 'CapturedAtUtc') { $withHistoricalFields['GenerationMode'] = 'HISTORICAL_PINNED_695' }
+                if ($property.Name -eq 'ReleaseGate') { $withHistoricalFields['ComparisonArtifacts'] = $null }
+            }
+            $Value = [pscustomobject]$withHistoricalFields
         }
         $sha = New-Object System.Security.Cryptography.SHA256Managed
         try {
@@ -144,6 +153,10 @@ Describe 'TPM game support contracts' {
         $loaded = Get-TPMGameSupportContractRegistryV1 -Path $outputPath
         $loaded.SnapshotId | Should -Be 'TPM-SUPPORT-GENERATOR'
         $loaded.Contracts[0].ProfileCode | Should -Be 'GeneratorProfile'
+        $loaded.Source.Repository | Should -Be 'TPM-SUPPORT-POSTURE'
+        $loaded.Source.Commit | Should -Be 'TPM-SUPPORT-GENERATOR'
+        $loaded.Source.ProfileRoot | Should -Be 'GameProfiles'
+        $loaded.ExpectedProfileCount | Should -BeNullOrEmpty
     }
     It 'routes and validates immutable 1.1 contracts without changing the 1.2 path' {
         $legacyNames = @(
@@ -198,16 +211,16 @@ Describe 'TPM game support contracts' {
     }
 
     It 'derives cxbxr support files only for matching backends' {
-        $profile = New-TestGameSupportProfile -ProfileCode 'CxbxrProfile'
-        $profile.EmulatorType = 'cxbxr'
-        $profile.EmulationProfile = 'cxbxr'
-        $profile | Add-Member -NotePropertyName ControllerEvidence -NotePropertyValue ([pscustomobject]@{
+        $profileRecord = New-TestGameSupportProfile -ProfileCode 'CxbxrProfile'
+        $profileRecord.EmulatorType = 'cxbxr'
+        $profileRecord.EmulationProfile = 'cxbxr'
+        $profileRecord | Add-Member -NotePropertyName ControllerEvidence -NotePropertyValue ([pscustomobject]@{
             DefaultInputApi = 'DirectInput'
             AlternativeInputApis = @('XInput')
             Settings = @([ordered]@{ Name = 'Input API'; Value = 'DirectInput'; EvidenceRefs = @('fixture-controller') })
             Controls = @([ordered]@{ ControlId = 'wheel-axis'; Name = 'Wheel Axis'; BindingTarget = 'Analog2'; AnalogType = 'Wheel'; ModeConditions = [ordered]@{}; EvidenceRefs = @('fixture-controller') })
         })
-        $generated = New-TPMGameSupportContractRegistryV1 -Profiles @($profile) -SnapshotId 'TPM-CXBXR-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z'
+        $generated = New-TPMGameSupportContractRegistryV1 -Profiles @($profileRecord) -SnapshotId 'TPM-CXBXR-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z'
         $contract = $generated.Contracts[0]
         $contract.Prerequisites.SupportFiles.DeclarationState | Should -Be 'DECLARED'
         @($contract.Prerequisites.SupportFiles.Items).Count | Should -Be 4
@@ -221,6 +234,29 @@ Describe 'TPM game support contracts' {
         $audit['MatchedProfileCodes'] | Should -Contain 'CxbxrProfile'
     }
 
+    It 'orders contract registries by invariant ordinal profile code' {
+        $ordered = New-TPMGameSupportContractRegistryV1 -Profiles @(
+            (New-TestGameSupportProfile -ProfileCode 'RabbidsHollywood'),
+            (New-TestGameSupportProfile -ProfileCode 'R-Tuned')
+        ) -SnapshotId 'TPM-ORDER-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z'
+        @($ordered.Contracts | ForEach-Object ProfileCode) | Should -Be @('R-Tuned', 'RabbidsHollywood')
+    }
+
+    It 'uses invariant UTF-16 ordering for non-ASCII values' {
+        $ascii = Get-TPMGameSupportOrdinalSortKeyV1 'A'
+        $nonAscii = Get-TPMGameSupportOrdinalSortKeyV1 ([string][char]0x0100)
+        $ascii | Should -BeLessThan $nonAscii
+    }
+
+    It 'preserves actual characters and literal JSON escape text' {
+        $values = @('&', '<', '>', "'", '"', '\', "`n", "`t", [string][char]0x00e9, '\u0026', '\u0027', '\u003c', '\u003e', '\\', '\n', '\t', 'prefix\u0026suffix', 'actual &: \u0026')
+        foreach ($value in $values) {
+            $inputValue = [ordered]@{ Value = $value }
+            $json = ConvertTo-TPMGameSupportCanonicalJsonV1 ($inputValue | ConvertTo-Json -Compress)
+            { ConvertFrom-Json $json -ErrorAction Stop } | Should -Not -Throw
+            (ConvertFrom-Json $json).Value | Should -Be $value
+        }
+    }
 }
 
 Describe 'TPM catalog-wide game support contracts' {
@@ -238,6 +274,12 @@ Describe 'TPM catalog-wide game support contracts' {
         $catalogOutput = Join-Path $TestDrive 'pinned-catalog-output'
         $supportScript = Join-Path $PSScriptRoot '..\scripts\New-TpmSupportPostureCorpus.ps1'
         . $supportScript
+        $realManifestValidator = ${function:Assert-TpmSupportHistoricalManifestOrder}
+        Mock -CommandName Assert-TpmSupportHistoricalManifestOrder -MockWith {
+            $result = @{}; $index = 0
+            foreach ($code in $GeneratedProfileCodes) { $result[$code] = $index++ }
+            return $result
+        }
         Invoke-TpmSupportPostureCorpus -GenerationMode 'HISTORICAL_PINNED_695' -UpstreamProfileRoot $catalogProfiles -UpstreamCommitSha '5880e019016c5c3a0576e97a6c2a7f14bf54e3d1' -SnapshotId 'TPM-CATALOG-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z' -OutputRoot $catalogOutput | Out-Null
         $catalogRegistry = Get-Content -LiteralPath (Join-Path $catalogOutput 'game-support-contracts.json') -Raw | ConvertFrom-Json
         $catalogModel = Get-Content -LiteralPath (Join-Path $catalogOutput 'support-posture.json') -Raw | ConvertFrom-Json
@@ -248,14 +290,52 @@ Describe 'TPM catalog-wide game support contracts' {
             'manifest.json' = '8f0afc42ff508f8356f300f6a5d023f71152b86c02f80a0701ab1df5bb337bbd'
         }
     }
-
+    It 'fails closed for every malformed historical manifest-order artifact' {
+        $sourcePath = Join-Path $PSScriptRoot '..\contracts\TPM-HISTORICAL-695-MANIFEST-ORDER.json'
+        $valid = Get-Content -LiteralPath $sourcePath -Raw | ConvertFrom-Json
+        $required = @($valid.ProfileCodes)
+        { & $realManifestValidator -Path $sourcePath -GeneratedProfileCodes $required } | Should -Not -Throw
+        $invoke = {
+            param($value)
+            $path = Join-Path $TestDrive ('manifest-order-' + [guid]::NewGuid().ToString() + '.json')
+            $value | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $path -Encoding UTF8
+            & $realManifestValidator -Path $path -GeneratedProfileCodes $required | Out-Null
+        }
+        $missing = Join-Path $TestDrive ('manifest-order-missing-' + [guid]::NewGuid().ToString() + '.json')
+        { & $realManifestValidator -Path $missing -GeneratedProfileCodes $required } | Should -Throw '*MISSING*'
+        foreach ($case in @(
+            @{ Name = 'duplicate-696'; Mutate = { param($v) $v.ProfileCodes = @($v.ProfileCodes) + $v.ProfileCodes[0] } ; Error = 'DUPLICATE' },
+            @{ Name = 'reordered'; Mutate = { param($v) $x = $v.ProfileCodes[0]; $v.ProfileCodes[0] = $v.ProfileCodes[1]; $v.ProfileCodes[1] = $x } ; Error = 'SEQUENCE_INVALID' },
+            @{ Name = 'wrong-case-schema'; Mutate = { param($v) $v.SchemaVersion = $v.SchemaVersion.ToLowerInvariant() } ; Error = 'IDENTITY_INVALID' },
+            @{ Name = 'wrong-case-snapshot'; Mutate = { param($v) $v.SnapshotId = $v.SnapshotId.ToLowerInvariant() } ; Error = 'IDENTITY_INVALID' },
+            @{ Name = 'wrong-case-commit'; Mutate = { param($v) $v.UpstreamCommitSha = $v.UpstreamCommitSha.ToUpperInvariant() } ; Error = 'IDENTITY_INVALID' },
+            @{ Name = 'schema'; Mutate = { param($v) $v.SchemaVersion = 'WRONG' } ; Error = 'IDENTITY_INVALID' },
+            @{ Name = 'missing'; Mutate = { param($v) $v.ProfileCodes = @($v.ProfileCodes | Select-Object -Skip 1) } ; Error = 'COUNT_INVALID' },
+            @{ Name = 'extra'; Mutate = { param($v) $v.ProfileCodes = @($v.ProfileCodes[1..694]) + 'NotInHistoricalCorpus' } ; Error = 'COVERAGE_INVALID' },
+            @{ Name = 'snapshot'; Mutate = { param($v) $v.SnapshotId = 'WRONG' } ; Error = 'IDENTITY_INVALID' },
+            @{ Name = 'commit'; Mutate = { param($v) $v.UpstreamCommitSha = 'WRONG' } ; Error = 'IDENTITY_INVALID' },
+            @{ Name = 'count'; Mutate = { param($v) $v.ProfileCount = 694 } ; Error = 'COUNT_INVALID' },
+            @{ Name = 'case-collision'; Mutate = { param($v) $v.ProfileCodes = @($v.ProfileCodes); $v.ProfileCodes[1] = $v.ProfileCodes[0].ToUpperInvariant() } ; Error = 'DUPLICATE' }
+        )) {
+            $candidate = $valid | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+            & $case.Mutate $candidate
+            { & $invoke $candidate } | Should -Throw "*$($case.Error)*"
+        }
+    }
+    It 'fails closed through production generation when manifest validation fails' {
+        Mock -CommandName Assert-TpmSupportHistoricalManifestOrder -MockWith { throw 'HISTORICAL_MANIFEST_ORDER_TEST_FAILURE' }
+        $output = Join-Path $TestDrive 'production-historical-order-failure'
+        { Invoke-TpmSupportPostureCorpus -GenerationMode HISTORICAL_PINNED_695 -UpstreamProfileRoot $catalogProfiles -UpstreamCommitSha '5880e019016c5c3a0576e97a6c2a7f14bf54e3d1' -SnapshotId 'TPM-CATALOG-TEST' -CapturedAtUtc '2026-01-01T00:00:00Z' -OutputRoot $output } | Should -Throw '*HISTORICAL_MANIFEST_ORDER_TEST_FAILURE*'
+    }
     It 'generates exactly one contract for every pinned catalog profile' {
         @($catalogRegistry.Contracts).Count | Should -Be 695
-        @($catalogRegistry.Contracts | Select-Object -ExpandProperty ProfileCode -Unique).Count | Should -Be 695
         $catalogRegistry.ExpectedProfileCount | Should -Be 695
         $catalogRegistry.ReleaseGate.ZeroUnclassified | Should -BeTrue
         $catalogRegistry.ReleaseGate.ProfileCountMatches | Should -BeTrue
         @($catalogRegistry.Contracts | Where-Object { [string]::IsNullOrWhiteSpace($_.ClassificationReason) }).Count | Should -Be 0
+        @($catalogRegistry.Contracts | Group-Object ContractId | Where-Object Count -gt 1).Count | Should -Be 0
+        @($catalogRegistry.Contracts | Group-Object { $_.ProfileCode.ToLowerInvariant() } | Where-Object Count -gt 1).Count | Should -Be 0
+        @($catalogRegistry.Contracts | Group-Object { $_.ContractId.ToLowerInvariant() } | Where-Object Count -gt 1).Count | Should -Be 0
         foreach ($relative in @($catalogGoldenDigests.Keys)) {
             $parsed = Get-Content -LiteralPath (Join-Path $catalogOutput $relative) -Raw | ConvertFrom-Json
             (Get-TestSemanticGoldenSha256 -Value $parsed) | Should -Be $catalogGoldenDigests[$relative]
@@ -263,9 +343,8 @@ Describe 'TPM catalog-wide game support contracts' {
         @($catalogRegistry.Contracts | Where-Object { [string]::IsNullOrWhiteSpace($_.Evidence.ProfileXmlSha256) }).Count | Should -Be 0
         $catalogModel.ProfileCount | Should -Be 695
         $catalogModel.ClassificationTotals.UNCLASSIFIED | Should -Be 0
-        @($catalogRegistry.Contracts | Group-Object ContractId | Where-Object Count -gt 1).Count | Should -Be 0
-        @($catalogRegistry.Contracts | Group-Object { $_.ContractId.ToLowerInvariant() } | Where-Object Count -gt 1).Count | Should -Be 0
-        $catalogModel.GenerationMode | Should -Be 'HISTORICAL_PINNED_695'
+        $catalogModel.PSObject.Properties.Name | Should -Not -Contain 'GenerationMode'
+        $catalogModel.PSObject.Properties.Name | Should -Not -Contain 'ComparisonArtifacts'
     }
     It 'detects semantic drift through the golden projection' {
         $originalDigest = Get-TestSemanticGoldenSha256 -Value $catalogRegistry
@@ -288,9 +367,9 @@ Describe 'TPM catalog-wide game support contracts' {
     }
 
     It 'does not convert vendor WITH_FIX metadata into a required patch' {
-        $profile = New-TestGameSupportProfile -ProfileCode 'WithFixMetadata'
-        $profile | Add-Member -NotePropertyName MetadataEvidence -NotePropertyValue ([pscustomobject]@{ Available = $true; VendorStatuses = [pscustomobject]@{ nvidia = 'WITH_FIX'; amd = 'WITH_FIX'; intel = 'WITH_FIX' } })
-        $withFixRegistry = New-TPMGameSupportContractRegistryV1 -Profiles @($profile) -SnapshotId 'TPM-WITH-FIX' -CapturedAtUtc '2026-01-01T00:00:00Z'
+        $profileRecord = New-TestGameSupportProfile -ProfileCode 'WithFixMetadata'
+        $profileRecord | Add-Member -NotePropertyName MetadataEvidence -NotePropertyValue ([pscustomobject]@{ Available = $true; VendorStatuses = [pscustomobject]@{ nvidia = 'WITH_FIX'; amd = 'WITH_FIX'; intel = 'WITH_FIX' } })
+        $withFixRegistry = New-TPMGameSupportContractRegistryV1 -Profiles @($profileRecord) -SnapshotId 'TPM-WITH-FIX' -CapturedAtUtc '2026-01-01T00:00:00Z'
         $withFix = $withFixRegistry.Contracts[0]
         $withFix.RequiredFixes.Status | Should -Be 'NOT_DECLARED'
         $withFix.GpuLimitations.Status | Should -Be 'NOT_DECLARED'
@@ -298,11 +377,10 @@ Describe 'TPM catalog-wide game support contracts' {
     }
 
     It 'requires evidence and verification for declared fixes' {
-        $profile = New-TestGameSupportProfile -ProfileCode 'DeclaredFix'
-        $profile | Add-Member -NotePropertyName FixDomains -NotePropertyValue ([pscustomobject]@{
+        $profileRecord = New-TestGameSupportProfile -ProfileCode 'DeclaredFix'
+        $profileRecord | Add-Member -NotePropertyName FixDomains -NotePropertyValue ([pscustomobject]@{
             RequiredFixes = [pscustomobject]@{
                 DeclarationState = 'DECLARED'
-                Items = @([pscustomobject]@{ fixId = 'fixture-fix'; component = 'GamePatch' })
                 EvidenceRefs = @('fixture-source')
                 AutomationAllowed = $false
                 Preconditions = @('fixture-precondition')
@@ -311,7 +389,7 @@ Describe 'TPM catalog-wide game support contracts' {
                 Risk = 'Fixture only.'
             }
         })
-        $declared = New-TPMGameSupportContractRegistryV1 -Profiles @($profile) -SnapshotId 'TPM-DECLARED' -CapturedAtUtc '2026-01-01T00:00:00Z'
+        $declared = New-TPMGameSupportContractRegistryV1 -Profiles @($profileRecord) -SnapshotId 'TPM-DECLARED' -CapturedAtUtc '2026-01-01T00:00:00Z'
         $declared.Contracts[0].RequiredFixes.DeclarationState | Should -Be 'DECLARED'
         $declared.Contracts[0].RequiredFixes.EvidenceRefs | Should -Contain 'fixture-source'
         $declared.Contracts[0].RequiredFixes.VerificationRule | Should -Be 'Verify fixture patch hash.'

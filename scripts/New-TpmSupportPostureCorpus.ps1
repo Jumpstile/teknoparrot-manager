@@ -24,6 +24,7 @@ Import-Module $gameSupportContractsModule -Force
 $script:TpmPinnedTeknoParrotRepository = 'teknogods/TeknoParrotUI'
 $script:TpmPinnedTeknoParrotCommit = '5880e019016c5c3a0576e97a6c2a7f14bf54e3d1'
 $script:TpmPinnedTeknoParrotProfileCount = 695
+$script:TpmPinnedHistoricalManifestOrderSha256 = 'b7ec88b0de487fbcdcdf697334ccbec154a0f61e8c0a24712f2e99425425f4aa'
 $script:TpmCurrentReleaseSnapshotId = 'TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628'
 $script:TpmCurrentReleaseSourceProofCommit = 'dc998e374608abbda373bb3c236db5b26b5afca7'
 $script:TpmCurrentReleaseProfileCount = 925
@@ -130,7 +131,11 @@ function Get-TpmSupportXmlText {
 
 function Get-TpmSupportExecutableAlternatives {
     param([string]$Value)
-    return @($Value -split '[;|]' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $result = New-Object System.Collections.Generic.List[string]
+    foreach ($candidate in @($Value -split '[;|]' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+        [void]$result.Add($candidate)
+    }
+    return ,$result.ToArray()
 }
 
 function Get-TpmSupportTitle {
@@ -395,7 +400,7 @@ function Get-TpmSupportAuxiliaryEvidence {
             if ($node) { $result.ExecutableLocation = ([string]$node.InnerText).Trim() }
             $result.ParseStatus = 'PARSED'
         } elseif ($Extension -ieq '.json') {
-            $metadata = Get-Content -LiteralPath $item.FullName -Raw | ConvertFrom-Json -ErrorAction Stop
+            $metadata = Get-Content -Encoding UTF8 -LiteralPath $item.FullName -Raw | ConvertFrom-Json -ErrorAction Stop
             $result.GameName = [string]$metadata.game_name
             foreach ($vendor in @('nvidia', 'amd', 'intel')) {
                 $value = $metadata.PSObject.Properties[$vendor]
@@ -449,7 +454,7 @@ function Get-TpmSupportExecutableComparisonKey {
 }
 
 function Set-TpmSupportProperty {
-    param([Parameter(Mandatory = $true)]$Object, [Parameter(Mandatory = $true)][string]$Name, $Value)
+    param([Parameter(Mandatory = $true)]$Object, [Parameter(Mandatory = $true)][string]$Name, [AllowEmptyCollection()]$Value)
     if ($Object -is [System.Collections.IDictionary]) { $Object[$Name] = $Value }
     elseif ($Object.PSObject.Properties[$Name]) { $Object.$Name = $Value }
     else { Add-Member -InputObject $Object -NotePropertyName $Name -NotePropertyValue $Value -Force }
@@ -552,7 +557,7 @@ function Get-TpmSupportProfileSource {
         if ($record.IsMalformed) { $source.MalformedProfileStems += $record.ProfileCode }
         [void]$profiles.Add($record)
     }
-    $source.Profiles = @($profiles | Sort-Object ProfileCode)
+    $source.Profiles = @(Sort-TPMGameSupportByOrdinalPropertyV1 -Items $profiles -Property ProfileCode)
     $source.ProfileCount = $source.Profiles.Count
     $source.DuplicateProfileStems = @($source.DuplicateProfileStems | Sort-Object -Unique)
     $source.MalformedProfileStems = @($source.MalformedProfileStems | Sort-Object -Unique)
@@ -697,7 +702,7 @@ function Get-TpmSupportFixtureManifest {
     $manifestPath = Join-Path $FixtureRoot 'fixtures.json'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return @() }
     try {
-        $raw = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $raw = Get-Content -Encoding UTF8 -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         if ($raw.fixtures) { return @($raw.fixtures) }
         return @($raw)
     } catch { throw ('Fixture manifest is invalid: ' + $_.Exception.Message) }
@@ -759,7 +764,10 @@ function Get-TpmSupportLayoutObservation {
     $files = @(Get-ChildItem -LiteralPath $rootFull -Recurse -File -ErrorAction SilentlyContinue)
     $chd = @($files | Where-Object { $_.Extension -ieq '.chd' })
     $observation.ChdFiles = @($chd | ForEach-Object { Get-TpmSupportRelativePath -Path $_.FullName -Root $rootFull })
-    $allowed = if ($ProfileRecord -and $ProfileRecord.Executable) { @($ProfileRecord.Executable.PrimaryCandidates) } else { @() }
+    $allowed = @()
+    if ($ProfileRecord -and $ProfileRecord.Executable) {
+        $allowed = @($ProfileRecord.Executable.PrimaryCandidates)
+    }
     $exe = @($files | Where-Object {
         if ($allowed.Count -gt 0) {
             $fileName = $_.Name
@@ -836,7 +844,7 @@ function Get-TpmSupportClassification {
     } elseif ($Layout.CandidateCount -eq 0) {
         $classification = 'REVIEW_MANUAL'; $reason = 'REQUIRED_LAUNCH_TARGET_MISSING'; $action = 'Restore the expected launcher or select the correct game directory in TeknoParrotUI, then run TPM again.'
     }
-    if ($Fixture.sourceConflict) {
+    if ([bool](Get-TPMGameSupportValueV1 $Fixture 'sourceConflict' $false)) {
         $classification = 'REVIEW_MANUAL'; $reason = 'SOURCE_EVIDENCE_CONFLICT'; $action = 'Review the installed and pinned profile sources before choosing a game directory in TeknoParrotUI.'
     }
     return [pscustomobject]@{ Classification = $classification; ReasonCode = $reason; BeginnerAction = $action }
@@ -846,7 +854,7 @@ function Get-TpmSupportClassification {
 function Get-TpmSupportFixtureResults {
     param([string]$FixtureRoot, [hashtable]$ProfilesByCode)
     $results = New-Object System.Collections.Generic.List[object]
-    foreach ($fixture in @(Get-TpmSupportFixtureManifest -FixtureRoot $FixtureRoot | Sort-Object id)) {
+    foreach ($fixture in @(Get-TpmSupportFixtureManifest -FixtureRoot $FixtureRoot | Sort-Object @{ Expression = { Get-TPMGameSupportOrdinalSortKeyV1 $_.id } })) {
         $code = [string]$fixture.profileCode
         $fixtureProfile = if ($ProfilesByCode.ContainsKey($code)) { $ProfilesByCode[$code] } else { $null }
         $layout = Get-TpmSupportLayoutObservation -FixtureRoot $FixtureRoot -Fixture $fixture -ProfileRecord $fixtureProfile
@@ -878,9 +886,101 @@ function Get-TpmSupportFixtureResults {
     return @($results.ToArray())
 }
 
-function ConvertTo-TpmSupportJsonValue {
+function Sort-TpmSupportOrdinalValues {
+    param([object[]]$Values, [switch]$Unique)
+    $ordered = @($Values | Sort-Object @{ Expression = { Get-TPMGameSupportOrdinalSortKeyV1 $_ } })
+    if (-not $Unique) { return $ordered }
+    $seen = @{}
+    $result = New-Object System.Collections.Generic.List[object]
+    foreach ($value in $ordered) {
+        $key = ([string]$value).ToUpperInvariant()
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            [void]$result.Add($value)
+        }
+    }
+    return @($result.ToArray())
+}
+
+function ConvertTo-TpmSupportHistoricalExternalValue {
     param([object]$Value)
-    return ($Value | ConvertTo-Json -Depth 30)
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $result = [ordered]@{}
+        foreach ($key in $Value.Keys) {
+            $child = ConvertTo-TpmSupportHistoricalExternalValue $Value[$key]
+            if ($key -in @('PrimaryCandidates', 'SecondaryCandidates')) {
+                $items = @($Value[$key])
+                $child = if ($items.Count -eq 0) { $null } elseif ($items.Count -eq 1) { [string]$items[0] } else { @($items) }
+            }
+            $result[[string]$key] = $child
+        }
+        return $result
+    }
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
+        $result = [ordered]@{}
+        foreach ($property in $Value.PSObject.Properties) {
+            $result[$property.Name] = ConvertTo-TpmSupportHistoricalExternalValue $property.Value
+        }
+        return $result
+    }
+    if (($Value -is [System.Collections.IEnumerable]) -and ($Value -isnot [string])) {
+        $result = New-Object System.Collections.Generic.List[object]
+        foreach ($item in $Value) { [void]$result.Add((ConvertTo-TpmSupportHistoricalExternalValue $item)) }
+        return ,$result.ToArray()
+    }
+    return $Value
+}
+
+function Format-TpmSupportJsonIndented {
+    param([Parameter(Mandatory = $true)][string]$Json)
+    $builder = New-Object System.Text.StringBuilder
+    $indent = 0
+    $inString = $false
+    $escaped = $false
+    $lineStart = $true
+    for ($i = 0; $i -lt $Json.Length; $i++) {
+        $char = $Json[$i]
+        if ($inString) {
+            [void]$builder.Append($char)
+            if ($escaped) { $escaped = $false }
+            elseif ($char -eq '\') { $escaped = $true }
+            elseif ($char -eq '"') { $inString = $false }
+            continue
+        }
+        if ($char -eq '"') { $inString = $true; [void]$builder.Append($char); continue }
+        if ($char -eq '{' -or $char -eq '[') {
+            [void]$builder.Append($char)
+            $next = $i + 1
+            $closing = if ($char -eq '{') { '}' } else { ']' }
+            if ($next -lt $Json.Length -and $Json[$next] -ne $closing) {
+                $indent++
+                [void]$builder.Append("`r`n" + ('  ' * $indent))
+            }
+            continue
+        }
+        if ($char -eq '}' -or $char -eq ']') {
+            $previous = if ($i -gt 0) { $Json[$i - 1] } else { '' }
+            $opening = if ($char -eq '}') { '{' } else { '[' }
+            if ($previous -ne $opening) {
+                $indent--
+                [void]$builder.Append("`r`n" + ('  ' * $indent))
+            }
+            [void]$builder.Append($char)
+            continue
+        }
+        if ($char -eq ',') { [void]$builder.Append(",`r`n" + ('  ' * $indent)); $lineStart = $true; continue }
+        if ($char -eq ':') { [void]$builder.Append(': '); continue }
+        [void]$builder.Append($char)
+    }
+    return $builder.ToString()
+}
+function ConvertTo-TpmSupportJsonValue {
+    param([object]$Value, [switch]$HistoricalCompatibility)
+    if ($HistoricalCompatibility) { $Value = ConvertTo-TpmSupportHistoricalExternalValue $Value }
+    $compact = $Value | ConvertTo-Json -Depth 30 -Compress
+    $canonical = ConvertTo-TPMGameSupportCanonicalJsonV1 $compact
+    return Format-TpmSupportJsonIndented $canonical
 }
 
 function ConvertTo-TpmSupportMarkdownCell {
@@ -902,7 +1002,7 @@ function New-TpmSupportPostureMarkdown {
     [void]$lines.Add('')
     [void]$lines.Add('| ProfileCode | Game title | Emulator | Executable rule | Media rule | Layout | Classification | Reason | Beginner action | Fixtures | Evidence |')
     [void]$lines.Add('|---|---|---|---|---|---|---|---|---|---|---|')
-    foreach ($profileRecord in @($Model.Profiles | Sort-Object ProfileCode)) {
+    foreach ($profileRecord in @(Sort-TPMGameSupportByOrdinalPropertyV1 -Items $Model.Profiles -Property ProfileCode)) {
         $evidence = @($profileRecord.Evidence.SourceIds) -join ', '
         $exe = @($profileRecord.Executable.PrimaryCandidates) -join ', '
         $media = [string]$profileRecord.Media.ChdRequirement
@@ -921,7 +1021,7 @@ function New-TpmSupportPostureMarkdown {
     [void]$lines.Add('')
     [void]$lines.Add('| FixtureId | ProfileCode | Layout | Classification | Reason | Pass |')
     [void]$lines.Add('|---|---|---|---|---|---|')
-    foreach ($fixture in @($FixtureCoverage.Records | Sort-Object FixtureId)) {
+    foreach ($fixture in @(Sort-TPMGameSupportByOrdinalPropertyV1 -Items $FixtureCoverage.Records -Property FixtureId)) {
         [void]$lines.Add(('| {0} | {1} | {2} | {3} | {4} | {5} |' -f (ConvertTo-TpmSupportMarkdownCell $fixture.FixtureId), (ConvertTo-TpmSupportMarkdownCell $fixture.ProfileCode), (ConvertTo-TpmSupportMarkdownCell $fixture.LayoutClass), (ConvertTo-TpmSupportMarkdownCell $fixture.Classification), (ConvertTo-TpmSupportMarkdownCell $fixture.ReasonCode), (ConvertTo-TpmSupportMarkdownCell $fixture.Pass)))
     }
     return ($lines -join "`n") + "`n"
@@ -934,7 +1034,7 @@ function Assert-TpmSupportCurrentReleaseInputs {
     foreach ($path in @($UpstreamProfileRoot, $HistoricalProfileRoot, $SnapshotManifestPath, $DeltaManifestPath)) {
         if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath $path -PathType Container -ErrorAction SilentlyContinue)) { throw 'CURRENT_RELEASE_INPUT_MISSING: all pinned roots and evidence paths are required.' }
     }
-    $manifest = Get-Content -LiteralPath $SnapshotManifestPath -Raw | ConvertFrom-Json
+    $manifest = Get-Content -Encoding UTF8 -LiteralPath $SnapshotManifestPath -Raw | ConvertFrom-Json
     if ($manifest.SnapshotId -cne $script:TpmCurrentReleaseSnapshotId -or $manifest.SourceProof.Commit -cne $script:TpmCurrentReleaseSourceProofCommit -or [int]$manifest.CatalogCounts.GameProfiles -ne $script:TpmCurrentReleaseProfileCount -or [int]$manifest.CatalogCounts.GameSetup -ne $script:TpmCurrentReleaseGameSetupCount -or [int]$manifest.CatalogCounts.Metadata -ne $script:TpmCurrentReleaseMetadataCount) { throw 'CURRENT_RELEASE_MANIFEST_INVALID: accepted snapshot manifest identity or counts do not match.' }
     $profileRoot = ConvertTo-TpmSupportFullPath $UpstreamProfileRoot
     $parent = [System.IO.Directory]::GetParent($profileRoot).FullName
@@ -944,7 +1044,7 @@ function Assert-TpmSupportCurrentReleaseInputs {
     if ($profileCount -ne $script:TpmCurrentReleaseProfileCount -or $setupCount -ne $script:TpmCurrentReleaseGameSetupCount -or $metadataCount -ne $script:TpmCurrentReleaseMetadataCount) { throw 'CURRENT_RELEASE_SOURCE_INVALID: pinned source catalog counts do not match the accepted snapshot.' }
     $historicalCount = @(Get-ChildItem -LiteralPath (ConvertTo-TpmSupportFullPath $HistoricalProfileRoot) -Filter '*.xml' -File -ErrorAction Stop).Count
     if ($historicalCount -ne $script:TpmPinnedTeknoParrotProfileCount) { throw 'HISTORICAL_SOURCE_INVALID: historical pinned profile count does not match 695.' }
-    $delta = Get-Content -LiteralPath $DeltaManifestPath -Raw | ConvertFrom-Json
+    $delta = Get-Content -Encoding UTF8 -LiteralPath $DeltaManifestPath -Raw | ConvertFrom-Json
     if (@($delta.Added).Count -ne $script:TpmCurrentReleaseAddedCount -or @($delta.Changed).Count -ne $script:TpmCurrentReleaseChangedCount -or @($delta.Unchanged).Count -ne $script:TpmCurrentReleaseUnchangedCount -or @($delta.Removed).Count -ne 0) { throw 'CURRENT_RELEASE_DELTA_INVALID: accepted delta counts do not match.' }
     return $delta
 }
@@ -957,7 +1057,7 @@ function Get-TpmSupportComparisonProjection {
         ProfileRevision = $GameProfile.ProfileRevision
         EmulationProfile = $GameProfile.EmulationProfile
         EmulatorType = $GameProfile.EmulatorType
-        LaunchExecutables = [ordered]@{ Primary = @($GameProfile.Executable.PrimaryCandidates); Alternate = @($GameProfile.Executable.SecondaryCandidates); Rule = [string]$GameProfile.Executable.Rule; HasTwoExecutables = [bool]$GameProfile.Executable.HasTwoExecutables }
+        LaunchExecutables = [ordered]@{ Primary = @($GameProfile.Executable.PrimaryCandidates); Alternate = @($GameProfile.Executable.SecondaryCandidates); Rule = [string](Get-TPMGameSupportValueV1 $GameProfile.Executable 'Rule' ''); HasTwoExecutables = [bool]$GameProfile.Executable.HasTwoExecutables }
         Media = $GameProfile.Media
         PathRules = $GameProfile.PathRules
         RequiresAdmin = [bool]$GameProfile.RequiresAdmin
@@ -971,10 +1071,10 @@ function New-TpmSupportComparisonArtifacts {
     $currentByCode = @{}; $historicalByCode = @{}
     foreach ($profileItem in @($CurrentProfiles)) { $currentByCode[$profileItem.ProfileCode.ToLowerInvariant()] = $profileItem }
     foreach ($profileItem in @($HistoricalProfiles)) { $historicalByCode[$profileItem.ProfileCode.ToLowerInvariant()] = $profileItem }
-    $added = @($currentByCode.Keys | Where-Object { -not $historicalByCode.ContainsKey($_) } | ForEach-Object { $currentByCode[$_].ProfileCode } | Sort-Object)
-    $expectedAdded = @($Delta.Added | Sort-Object)
+    $added = @($currentByCode.Keys | Where-Object { -not $historicalByCode.ContainsKey($_) } | ForEach-Object { $currentByCode[$_].ProfileCode } | Sort-Object @{ Expression = { Get-TPMGameSupportOrdinalSortKeyV1 $_ } })
+    $expectedAdded = @($Delta.Added | Sort-Object @{ Expression = { Get-TPMGameSupportOrdinalSortKeyV1 $_ } })
     if ((@($added) -join '|') -cne (@($expectedAdded) -join '|')) { throw 'CURRENT_RELEASE_DELTA_INVALID: generated added-profile identities differ from accepted delta.' }
-    $changes = foreach ($code in @($Delta.Changed | Sort-Object)) {
+    $changes = foreach ($code in @($Delta.Changed | Sort-Object @{ Expression = { Get-TPMGameSupportOrdinalSortKeyV1 $_ } })) {
         $key = $code.ToLowerInvariant()
         if (-not $currentByCode.ContainsKey($key) -or -not $historicalByCode.ContainsKey($key)) { throw "CURRENT_RELEASE_DELTA_INVALID: changed profile '$code' is missing from a source." }
         $old = Get-TpmSupportComparisonProjection $historicalByCode[$key]
@@ -986,6 +1086,38 @@ function New-TpmSupportComparisonArtifacts {
         [ordered]@{ ProfileCode = $currentByCode[$key].ProfileCode; ChangedFields = @($fields.ToArray()); Historical = $old; Current = $new }
     }
     return [ordered]@{ AddedCount = @($added).Count; AddedProfiles = @($added); ChangedCount = @($changes).Count; ChangedProfiles = @($changes); RemovedCount = @($Delta.Removed).Count; UnchangedCount = @($Delta.Unchanged).Count }
+}
+
+function Assert-TpmSupportHistoricalManifestOrder {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string[]]$GeneratedProfileCodes
+    )
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'HISTORICAL_MANIFEST_ORDER_MISSING' }
+    $rankData = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    if ([string]$rankData.SchemaVersion -cne 'TPM-HISTORICAL-MANIFEST-ORDER-V1' -or [string]$rankData.SnapshotId -cne 'TPM-HISTORICAL-695' -or [string]$rankData.UpstreamCommitSha -cne $script:TpmPinnedTeknoParrotCommit) { throw 'HISTORICAL_MANIFEST_ORDER_IDENTITY_INVALID' }
+    $codes = @($rankData.ProfileCodes | ForEach-Object { [string]$_ })
+    $exact = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+    $insensitive = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($code in $codes) {
+        if (-not $exact.Add($code) -or -not $insensitive.Add($code)) { throw 'HISTORICAL_MANIFEST_ORDER_DUPLICATE' }
+    }
+    if ([int]$rankData.ProfileCount -ne $script:TpmPinnedTeknoParrotProfileCount -or $codes.Count -ne $script:TpmPinnedTeknoParrotProfileCount) { throw 'HISTORICAL_MANIFEST_ORDER_COUNT_INVALID' }
+    $required = @($GeneratedProfileCodes | ForEach-Object { [string]$_ })
+    $requiredSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+    foreach ($code in $required) { [void]$requiredSet.Add($code) }
+    $missing = New-Object System.Collections.Generic.List[string]
+    foreach ($code in $requiredSet) { if (-not $exact.Contains($code)) { [void]$missing.Add($code) } }
+    $extra = New-Object System.Collections.Generic.List[string]
+    foreach ($code in $exact) { if (-not $requiredSet.Contains($code)) { [void]$extra.Add($code) } }
+    if ($missing.Count -gt 0 -or $extra.Count -gt 0 -or $requiredSet.Count -ne $script:TpmPinnedTeknoParrotProfileCount) { throw 'HISTORICAL_MANIFEST_ORDER_COVERAGE_INVALID' }
+    $sequenceBytes = [System.Text.Encoding]::UTF8.GetBytes(($codes -join "`n") + "`n")
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $sequenceDigest = ([System.BitConverter]::ToString($sha.ComputeHash($sequenceBytes))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+    if ($sequenceDigest -cne $script:TpmPinnedHistoricalManifestOrderSha256) { throw 'HISTORICAL_MANIFEST_ORDER_SEQUENCE_INVALID' }
+    $rank = @{}
+    for ($i = 0; $i -lt $codes.Count; $i++) { $rank[$codes[$i]] = $i }
+    return $rank
 }
 
 function Invoke-TpmSupportPostureCorpus {
@@ -1125,46 +1257,53 @@ function Invoke-TpmSupportPostureCorpus {
     $profileHashesComplete = @($profiles | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ProfileXmlSha256) }).Count -eq 0
     $profileCountMatches = ($null -eq $expectedProfileCount -or $profiles.Count -eq $expectedProfileCount)
     $sourceIdentityComplete = ($sources.Count -gt 0 -and @($sources | Where-Object { -not $_.Available -or [string]::IsNullOrWhiteSpace($_.SourceId) -or [string]$_.SourceId -eq 'UNPINNED-SOURCE' }).Count -eq 0)
-    $model = [ordered]@{
-        SchemaVersion = 1
-        CorpusId = 'TPM-TPUI-GAME-SUPPORT'
-        SnapshotId = $snapshotIdValue
-        CapturedAtUtc = $captured
-        GenerationMode = $GenerationMode
-        ProfileCount = $profiles.Count
-        ContractSource = $contractSource
+$model = [ordered]@{
+    SchemaVersion = 1
+    CorpusId = 'TPM-TPUI-GAME-SUPPORT'
+    SnapshotId = $snapshotIdValue
+    CapturedAtUtc = $captured
+    GenerationMode = $GenerationMode
+    ProfileCount = $profiles.Count
+    ContractSource = $contractSource
+    ExpectedProfileCount = $expectedProfileCount
+    Sources = $sourceSummaries
+    SecondaryDat = $datSummary
+    ClassificationTotals = $classificationTotals
+    FixtureCoverage = $fixtureCoverage
+    GameSupportContracts = [ordered]@{
+        RegistryId = $gameSupportContracts.RegistryId
+        SchemaVersion = $gameSupportContracts.SchemaVersion
+        ContractCount = $gameSupportContracts.ContractCount
         ExpectedProfileCount = $expectedProfileCount
-        Sources = $sourceSummaries
-        SecondaryDat = $datSummary
-        ClassificationTotals = $classificationTotals
-        FixtureCoverage = $fixtureCoverage
-        GameSupportContracts = [ordered]@{
-            RegistryId = $gameSupportContracts.RegistryId
-            SchemaVersion = $gameSupportContracts.SchemaVersion
-            ContractCount = $gameSupportContracts.ContractCount
-            ExpectedProfileCount = $expectedProfileCount
-            ClassificationTotals = $gameSupportContracts.ClassificationTotals
-            Validation = $gameSupportContractValidation
-            ReleaseGate = $gameSupportContracts.ReleaseGate
-            RelativePath = 'game-support-contracts.json'
-        }
-        ReleaseGate = [ordered]@{
-            ProfileCountExpected = $expectedProfileCount
-            ProfileCountMatches = $profileCountMatches
-            ZeroUnclassified = ($classificationTotals.UNCLASSIFIED -eq 0)
-            NoDuplicateProfileStems = (@($sources | ForEach-Object DuplicateProfileStems).Count -eq 0)
-            SourceIdentityComplete = $sourceIdentityComplete
-            EveryRecordHasPosture = (@($profiles | Where-Object { $script:TpmSupportPostureClassifications -notcontains $_.Classification }).Count -eq 0)
-            EveryRecordHasReason = (@($profiles | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ReasonCode) -or $_.ReasonCode -eq 'NOT_CLASSIFIED' }).Count -eq 0)
-            EveryRecordHasProfileEvidenceHash = $profileHashesComplete
-            ProfilesPresent = ($profiles.Count -gt 0)
-            FixtureExpectationsPass = ($fixtureCoverage.Failed -eq 0)
-            RegistryValid = [bool]$gameSupportContractValidation.Valid
-            ClosureEligible = ($profileCountMatches -and $profiles.Count -gt 0 -and $classificationTotals.UNCLASSIFIED -eq 0 -and $sourceIdentityComplete -and @($sources | ForEach-Object DuplicateProfileStems).Count -eq 0 -and $fixtureCoverage.Failed -eq 0 -and $profileHashesComplete -and [bool]$gameSupportContractValidation.Valid)
-        }
-        ComparisonArtifacts = $comparison
-        Profiles = @($profiles | Sort-Object ProfileCode)
+        ClassificationTotals = $gameSupportContracts.ClassificationTotals
+        Validation = $gameSupportContractValidation
+        ReleaseGate = $gameSupportContracts.ReleaseGate
+        RelativePath = 'game-support-contracts.json'
     }
+    ReleaseGate = [ordered]@{
+        ProfileCountExpected = $expectedProfileCount
+        ProfileCountMatches = $profileCountMatches
+        ZeroUnclassified = ($classificationTotals.UNCLASSIFIED -eq 0)
+        NoDuplicateProfileStems = (@($sources | ForEach-Object DuplicateProfileStems).Count -eq 0)
+        SourceIdentityComplete = $sourceIdentityComplete
+        EveryRecordHasPosture = (@($profiles | Where-Object { $script:TpmSupportPostureClassifications -notcontains $_.Classification }).Count -eq 0)
+        EveryRecordHasReason = (@($profiles | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.ReasonCode) -or $_.ReasonCode -eq 'NOT_CLASSIFIED' }).Count -eq 0)
+        EveryRecordHasProfileEvidenceHash = $profileHashesComplete
+        ProfilesPresent = ($profiles.Count -gt 0)
+        FixtureExpectationsPass = ($fixtureCoverage.Failed -eq 0)
+        RegistryValid = [bool]$gameSupportContractValidation.Valid
+        ClosureEligible = ($profileCountMatches -and $profiles.Count -gt 0 -and $classificationTotals.UNCLASSIFIED -eq 0 -and $sourceIdentityComplete -and @($sources | ForEach-Object DuplicateProfileStems).Count -eq 0 -and $fixtureCoverage.Failed -eq 0 -and $profileHashesComplete -and [bool]$gameSupportContractValidation.Valid)
+    }
+    ComparisonArtifacts = $comparison
+    Profiles = @(Sort-TPMGameSupportByOrdinalPropertyV1 -Items $profiles -Property ProfileCode)
+}
+if ($isHistorical) {
+    # The pinned historical artifacts predate these root metadata fields.
+    # Keep them for current/legacy modes, but omit them only at this
+    # compatibility boundary rather than changing the modern contract.
+    [void]$model.Remove('GenerationMode')
+    [void]$model.Remove('ComparisonArtifacts')
+}
     $manifestFiles = New-Object System.Collections.Generic.List[object]
     foreach ($profileRecord in $profiles) {
         $relative = 'profiles/' + $profileRecord.ProfileCode + '.xml'
@@ -1172,6 +1311,14 @@ function Invoke-TpmSupportPostureCorpus {
         if (Test-Path -LiteralPath $path -PathType Leaf) {
             [void]$manifestFiles.Add([ordered]@{ RelativePath = $relative; ProfileCode = $profileRecord.ProfileCode; Sha256 = Get-TpmSupportSha256 -Path $path })
         }
+    }
+    if ($isHistorical) {
+        $rankPath = Join-Path $PSScriptRoot '..\contracts\TPM-HISTORICAL-695-MANIFEST-ORDER.json'
+        $rank = Assert-TpmSupportHistoricalManifestOrder -Path $rankPath -GeneratedProfileCodes @($manifestFiles | ForEach-Object ProfileCode)
+        $manifestFilesOrdered = @($manifestFiles | Sort-Object @{ Expression = { $rank[$_.ProfileCode] } })
+    }
+    else {
+        $manifestFilesOrdered = @(Sort-TPMGameSupportByOrdinalPropertyV1 -Items $manifestFiles -Property ProfileCode)
     }
     $manifest = [ordered]@{
         SchemaVersion = 1
@@ -1181,13 +1328,14 @@ function Invoke-TpmSupportPostureCorpus {
         ProfileCount = $model.ProfileCount
         SourceCount = $sources.Count
         Sources = @($sources | ForEach-Object { [ordered]@{ SourceType = $_.SourceType; SourceId = $_.SourceId; Available = $_.Available; ProfileCount = $_.ProfileCount; DuplicateProfileStems = $_.DuplicateProfileStems; MalformedProfileStems = $_.MalformedProfileStems } })
-        ProfileFiles = @($manifestFiles | Sort-Object ProfileCode)
+        ProfileFiles = @($manifestFilesOrdered)
     }
-    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'manifest.json') -Text (ConvertTo-TpmSupportJsonValue $manifest)
-    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'support-posture.json') -Text (ConvertTo-TpmSupportJsonValue $model)
-    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'game-support-contracts.json') -Text (ConvertTo-TpmSupportJsonValue $gameSupportContracts)
-    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'game-support-contract-validation.json') -Text (ConvertTo-TpmSupportJsonValue $gameSupportContractValidation)
-    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'fixture-coverage.json') -Text (ConvertTo-TpmSupportJsonValue $fixtureCoverage)
+    $historicalJson = if ($isHistorical) { $true } else { $false }
+    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'manifest.json') -Text (ConvertTo-TpmSupportJsonValue $manifest -HistoricalCompatibility:$historicalJson)
+    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'support-posture.json') -Text (ConvertTo-TpmSupportJsonValue $model -HistoricalCompatibility:$historicalJson)
+    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'game-support-contracts.json') -Text (ConvertTo-TpmSupportJsonValue $gameSupportContracts -HistoricalCompatibility:$historicalJson)
+    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'game-support-contract-validation.json') -Text (ConvertTo-TpmSupportJsonValue $gameSupportContractValidation -HistoricalCompatibility:$historicalJson)
+    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'fixture-coverage.json') -Text (ConvertTo-TpmSupportJsonValue $fixtureCoverage -HistoricalCompatibility:$historicalJson)
     if ($isCurrent) {
         Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'current-release-added-profiles.json') -Text (ConvertTo-TpmSupportJsonValue ([ordered]@{ SnapshotId = $snapshotIdValue; Profiles = $comparison.AddedProfiles; Count = $comparison.AddedCount }))
         Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'current-release-semantic-changes.json') -Text (ConvertTo-TpmSupportJsonValue $comparison)
@@ -1195,8 +1343,8 @@ function Invoke-TpmSupportPostureCorpus {
     Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'support-posture.md') -Text (New-TpmSupportPostureMarkdown -Model ([pscustomobject]$model) -FixtureCoverage ([pscustomobject]$fixtureCoverage))
     [void][System.IO.Directory]::CreateDirectory((Join-Path $output 'observations'))
     [void][System.IO.Directory]::CreateDirectory((Join-Path $output 'dat'))
-    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'observations\userprofiles.json') -Text (ConvertTo-TpmSupportJsonValue ([ordered]@{ SchemaVersion = 1; CapturedAtUtc = $captured; Records = $userObservations }))
-    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'dat\dat-summary.json') -Text (ConvertTo-TpmSupportJsonValue $datSummary)
+    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'observations\userprofiles.json') -Text (ConvertTo-TpmSupportJsonValue ([ordered]@{ SchemaVersion = 1; CapturedAtUtc = $captured; Records = $userObservations }) -HistoricalCompatibility:$historicalJson)
+    Write-TpmSupportUtf8NoBom -Path (Join-Path $output 'dat\dat-summary.json') -Text (ConvertTo-TpmSupportJsonValue $datSummary -HistoricalCompatibility:$historicalJson)
     Write-Output ([pscustomobject]@{ SnapshotId = $model.SnapshotId; OutputRoot = $output; ProfileCount = $model.ProfileCount; ClassificationTotals = [pscustomobject]$classificationTotals; FixtureCoverage = [pscustomobject]$fixtureCoverage; GameSupportContracts = [pscustomobject]$model.GameSupportContracts; ReleaseGate = [pscustomobject]$model.ReleaseGate })
 }
 

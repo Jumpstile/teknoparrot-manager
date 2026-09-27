@@ -29,6 +29,59 @@ function Get-TPMGameSupportValueV1 {
     if ($property) { return $property.Value }
     return $Default
 }
+function Get-TPMGameSupportHistoricalSortKeyV1 {
+    param($Value)
+    $text = ([string]$Value).ToUpperInvariant()
+    $units = New-Object System.Collections.Generic.List[string]
+    foreach ($character in $text.ToCharArray()) { [void]$units.Add(([int][char]$character).ToString('x4')) }
+    return (-join $units)
+}
+
+function Get-TPMGameSupportOrdinalSortKeyV1 {
+    param($Value)
+    return Get-TPMGameSupportHistoricalSortKeyV1 $Value
+}
+
+function Sort-TPMGameSupportByOrdinalPropertyV1 {
+    param([object[]]$Items, [Parameter(Mandatory = $true)][string]$Property)
+    return @($Items | Sort-Object @{ Expression = { Get-TPMGameSupportHistoricalSortKeyV1 $_.$Property } })
+}
+
+function ConvertTo-TPMGameSupportCanonicalJsonV1 {
+    param([Parameter(Mandatory = $true)][string]$Json)
+    $builder = New-Object System.Text.StringBuilder
+    $inString = $false
+    $escaped = $false
+    for ($i = 0; $i -lt $Json.Length; $i++) {
+        $char = $Json[$i]
+        if (-not $inString) {
+            if ($char -eq '"') { $inString = $true }
+            [void]$builder.Append($char)
+            continue
+        }
+        if ($escaped) {
+            if ($char -eq 'u' -and $i + 4 -lt $Json.Length) {
+                $hex = $Json.Substring($i + 1, 4)
+                if ($hex -match '^(0026|0027|003[cC]|003[eE])$') {
+                    [void]$builder.Append([char]([Convert]::ToInt32($hex, 16)))
+                    $i += 4
+                    $escaped = $false
+                    continue
+                }
+            }
+            [void]$builder.Append('\')
+            [void]$builder.Append($char)
+            $escaped = $false
+            continue
+        }
+        if ($char -eq '\') { $escaped = $true; continue }
+        [void]$builder.Append($char)
+        if ($char -eq '"') { $inString = $false }
+    }
+    if ($escaped) { [void]$builder.Append('\') }
+    return $builder.ToString()
+}
+
 
 function ConvertTo-TPMGameSupportOrderedValueV1 {
     param($Value)
@@ -645,7 +698,7 @@ function New-TPMGameSupportContractRegistryV1 {
     param([Parameter(Mandatory = $true)][object[]]$Profiles, [Parameter(Mandatory = $true)][string]$SnapshotId, [Parameter(Mandatory = $true)][string]$CapturedAtUtc, [object]$Source = $null, [Nullable[int]]$ExpectedProfileCount = $null)
     $sourceValue = New-TPMGameSupportGameSourceV1 -Source $Source
     $contracts = New-Object System.Collections.Generic.List[object]
-    foreach ($profileItem in @($Profiles | Sort-Object ProfileCode)) { [void]$contracts.Add((New-TPMGameSupportContractV1 -Profile $profileItem -SnapshotId $SnapshotId -CapturedAtUtc $CapturedAtUtc -Repository $sourceValue.Repository -Commit $sourceValue.Commit)) }
+    foreach ($profileItem in @(Sort-TPMGameSupportByOrdinalPropertyV1 -Items $Profiles -Property ProfileCode)) { [void]$contracts.Add((New-TPMGameSupportContractV1 -Profile $profileItem -SnapshotId $SnapshotId -CapturedAtUtc $CapturedAtUtc -Repository $sourceValue.Repository -Commit $sourceValue.Commit)) }
     $totals = [ordered]@{ AUTOMATED_SAFE = 0; REVIEW_MANUAL = 0; BLOCKED_UNSUPPORTED = 0; UNCLASSIFIED = 0 }
     foreach ($contract in $contracts) { if ($totals.Contains($contract.ReleasePosture)) { $totals[$contract.ReleasePosture] = [int]$totals[$contract.ReleasePosture] + 1 } }
     $registry = [ordered]@{ RegistryId = 'TPM-GAME-SUPPORT-CONTRACTS'; SchemaVersion = $script:TpmGameSupportSchemaVersionV12; SnapshotId = $SnapshotId; CapturedAtUtc = $CapturedAtUtc; Source = $sourceValue; ExpectedProfileCount = $ExpectedProfileCount; ContractCount = $contracts.Count; ClassificationTotals = $totals; BackendDerivationAudit = New-TPMGameSupportBackendDerivationAuditV12 -Profiles $Profiles; ReleaseGate = [ordered]@{}; Contracts = $contracts.ToArray() }
@@ -659,7 +712,7 @@ function New-TPMGameSupportContractRegistryV13 {
     param([Parameter(Mandatory = $true)][object[]]$Profiles, [Parameter(Mandatory = $true)][string]$SnapshotId, [Parameter(Mandatory = $true)][string]$CapturedAtUtc, [object]$Source = $null, [Nullable[int]]$ExpectedProfileCount = $null)
     $sourceValue = New-TPMGameSupportGameSourceV1 -Source $Source
     $contracts = New-Object System.Collections.Generic.List[object]
-    foreach ($profileItem in @($Profiles | Sort-Object ProfileCode)) { [void]$contracts.Add((New-TPMGameSupportContractV13 -Profile $profileItem -SnapshotId $SnapshotId -CapturedAtUtc $CapturedAtUtc -Repository $sourceValue.Repository -Commit $sourceValue.Commit)) }
+    foreach ($profileItem in @(Sort-TPMGameSupportByOrdinalPropertyV1 -Items $Profiles -Property ProfileCode)) { [void]$contracts.Add((New-TPMGameSupportContractV13 -Profile $profileItem -SnapshotId $SnapshotId -CapturedAtUtc $CapturedAtUtc -Repository $sourceValue.Repository -Commit $sourceValue.Commit)) }
     $totals = [ordered]@{ AUTOMATED_SAFE = 0; REVIEW_MANUAL = 0; BLOCKED_UNSUPPORTED = 0; UNCLASSIFIED = 0 }
     foreach ($contract in $contracts) { if ($totals.Contains($contract.ReleasePosture)) { $totals[$contract.ReleasePosture] = [int]$totals[$contract.ReleasePosture] + 1 } }
     $registry = [ordered]@{ RegistryId = 'TPM-GAME-SUPPORT-CONTRACTS'; SchemaVersion = $script:TpmGameSupportSchemaVersionV13; SnapshotId = $SnapshotId; CapturedAtUtc = $CapturedAtUtc; Source = $sourceValue; ExpectedProfileCount = $ExpectedProfileCount; ContractCount = $contracts.Count; ClassificationTotals = $totals; BackendDerivationAudit = New-TPMGameSupportBackendDerivationAuditV12 -Profiles $Profiles; ReleaseGate = [ordered]@{}; Contracts = $contracts.ToArray() }
@@ -783,7 +836,8 @@ function Write-TPMGameSupportContractRegistryV1 {
     elseif ($version -eq $script:TpmGameSupportSchemaVersionV13) { $validation = Test-TPMGameSupportContractRegistryV13 -Registry $Registry; if (-not $validation.Valid) { throw "GAME_SUPPORT_CONTRACT_INVALID: $($validation.Errors -join '; ')" } }
     else { throw "GAME_SUPPORT_CONTRACT_INVALID: unsupported SchemaVersion '$version'" }
     $parent = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($Path)); if ($parent -and -not (Test-Path -LiteralPath $parent -PathType Container)) { [void][System.IO.Directory]::CreateDirectory($parent) }
-    [System.IO.File]::WriteAllText($Path, (($Registry | ConvertTo-Json -Depth 40) + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    $json = ConvertTo-TPMGameSupportCanonicalJsonV1 ($Registry | ConvertTo-Json -Depth 40 -Compress)
+    [System.IO.File]::WriteAllText($Path, ($json + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 }
 
-Export-ModuleMember -Function New-TPMGameSupportContractV1,New-TPMGameSupportContractV13,New-TPMGameSupportExternalSoftwareV13,New-TPMGameSupportContractRegistryV1,New-TPMGameSupportContractRegistryV13,Test-TPMGameSupportContractV1,Test-TPMGameSupportContractRegistryV1,Get-TPMGameSupportContractRegistryV1,Get-TPMGameSupportContractV1,Write-TPMGameSupportContractRegistryV1,Get-TPMGameSupportContractIdV1,Get-TPMGameSupportValueV1
+Export-ModuleMember -Function New-TPMGameSupportContractV1,New-TPMGameSupportContractV13,New-TPMGameSupportExternalSoftwareV13,New-TPMGameSupportContractRegistryV1,New-TPMGameSupportContractRegistryV13,Test-TPMGameSupportContractV1,Test-TPMGameSupportContractRegistryV1,Get-TPMGameSupportContractRegistryV1,Get-TPMGameSupportContractV1,Write-TPMGameSupportContractRegistryV1,Get-TPMGameSupportContractIdV1,Get-TPMGameSupportValueV1,Get-TPMGameSupportOrdinalSortKeyV1,Sort-TPMGameSupportByOrdinalPropertyV1,ConvertTo-TPMGameSupportCanonicalJsonV1

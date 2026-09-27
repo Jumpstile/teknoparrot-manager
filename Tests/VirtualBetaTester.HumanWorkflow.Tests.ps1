@@ -126,6 +126,7 @@ function Invoke-VbtUpdateInstall {
 '@
     Set-Content -LiteralPath $extractedFunctionsPath -Value ($functionSource + "`n`n" + $updateBoundarySource) -Encoding utf8
     . $extractedFunctionsPath
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
     $script:PostgresRecoveryStatus = $null
@@ -240,16 +241,23 @@ Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
         $fixturePath = Join-Path $root 'TeknoParrot-Manager.ps1'
         Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
         Set-ItemProperty -LiteralPath $fixturePath -Name IsReadOnly -Value $true
+        $initialIsReadOnly = (Get-Item -LiteralPath $fixturePath -Force).IsReadOnly
+        $initialIsReadOnly | Should -Be $true -Because "the scenario must begin with a protected fixture"
 
         try {
             Assert-ScenarioOutput -ScenarioId 'read-only-update-failure-actionable' -Action {
                 Invoke-CheckForUpdates -ScriptPath $fixturePath | Out-Null
             }
-            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeTrue -Because "an approved update creates its backup before the network attempt"
+            $postFailureIsReadOnly = (Get-Item -LiteralPath $fixturePath -Force).IsReadOnly
+            $postFailureIsReadOnly | Should -Be $initialIsReadOnly -Because "failed update cleanup must restore the original protection state"
+            $postFailureIsReadOnly | Should -Be $true -Because "the read-only fixture must remain protected after the failed update"
+            $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Filter 'TeknoParrot-Manager.ps1' -File -Recurse -ErrorAction Stop)
+            $backupFiles.Count | Should -Be 1 -Because "the failed update must leave one verified manager-script backup artifact"
         } finally {
             Set-ItemProperty -LiteralPath $fixturePath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
         }
     }
+
 
     It "cancel-path-no-change: declining leaves files unchanged and says so, without destructive-action language" {
         Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson) })
@@ -335,6 +343,7 @@ function Get-ConsoleContentHeight { return 60 }
 `$forceRealApply = `$false
 `$Unattended = `$false
 `$menuExpanded = `$false
+`$menuNotice = ''
 `$iterations = 0
 while (`$true) {
     `$iterations++

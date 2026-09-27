@@ -848,3 +848,13 @@ replacement for the structured failure that caused it.
 The Pester certification gate remains an exact `5.7.1` pin. Installed
 `5.8.0` or `3.4.0` results are not certification evidence; the environment
 must provide `5.7.1` before a certification run can start.
+
+## PostgreSQL recovery handoff -- normalized backup evidence is not the raw bundle
+
+Guided password recovery had two different backup representations. `New-PostgresRecoveryBackup` returns the raw PostgreSQL bundle with `Path`, `ConfigBackups`, `ProfileBackups`, and `Verified`; the profile-setup consumer directly enumerates both required arrays. `Reset-PostgresPasswordAutomatically` already returned a normalized `TPM.TransactionResult.v1.Backup`, so the wrapper's fallback that attached the raw bundle only when `Backup` was absent never ran. The top-level flow then passed the generic `Backup` to profile setup, losing both collections.
+
+Setup also wrapped profile and config sources in separate nested arrays, so the generic `Items` field appeared populated while scalar source paths were not members of the list. Concatenating the two source arrays keeps `Items` flat without adding PostgreSQL-specific fields to `Backup`.
+
+Keep the representations separate: the normalized `Backup` remains the generic transaction evidence object, while `RecoveryBundle` carries the original raw producer result through the wrapper and top-level setup handoff. Derive `Attempted` from a returned producer result or an actual producer invocation, `Created` from observed evidence-directory existence, and `Verified` from the producer's explicit result; do not infer verification from a path or object being non-null.
+
+Rule: when one workflow hands a domain-specific evidence bundle through a generic transaction result, preserve the original bundle in a distinct sidecar and pass that sidecar to its consumer. Test non-empty required collections through the real wrapper and setup call, and assert both the raw sidecar identity and canonical generic `Backup` shape.

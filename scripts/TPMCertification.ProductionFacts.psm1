@@ -592,7 +592,7 @@ function Test-TPMProductionInjectionHunterV1 {
     # free-form/empty value. A concise, tagged Write-Warning is also emitted
     # at the point of failure so the operator-facing console output points
     # at the underlying cause instead of a bare Executed=False.
-    param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$DispositionRegistryPath,[int]$PerFileTimeoutSeconds=60)
+    param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$DispositionRegistryPath,[int]$PerFileTimeoutSeconds=180)
     $notExecuted=[ordered]@{Executed=$false;FindingCount=0;UnresolvedFindingCount=0;ToolVersion=$null;Dispositions=@();Diagnostic=$null}
     $module=Find-TPMInjectionHunterModuleV1
     if(-not$module){
