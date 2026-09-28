@@ -337,20 +337,23 @@ function Invoke-TPMCertificationGitReadV1 {
     $scoped=@('-c',("safe.directory={0}"-f$repo),'-C',$repo)
     $commandArguments=@($scoped)+@($Arguments)
     $oldErrorActionPreference = $ErrorActionPreference
+    $stderrPath = [IO.Path]::GetTempFileName()
+    $hasNativeErrorPreference = Test-Path variable:PSNativeCommandUseErrorActionPreference
+    $oldNativeErrorPreference = if ($hasNativeErrorPreference) { $PSNativeCommandUseErrorActionPreference } else { $null }
     try {
-        if ($PSVersionTable.PSVersion.Major -eq 5) {
-            $ErrorActionPreference = 'Continue'
-            $combinedOutput = @(& git @commandArguments 2>&1)
-            $exitCode = $LASTEXITCODE
-            $errorOutput = @($combinedOutput | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { [string]$_.ToString() })
-            $output = @($combinedOutput | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+        $ErrorActionPreference = 'Continue'
+        if ($hasNativeErrorPreference) { $PSNativeCommandUseErrorActionPreference = $false }
+        $output = @(& git @commandArguments 2> $stderrPath)
+        $exitCode = $LASTEXITCODE
+        $errorOutput = if (Test-Path -LiteralPath $stderrPath) {
+            @(Get-Content -LiteralPath $stderrPath -ErrorAction SilentlyContinue | ForEach-Object { [string]$_ })
         } else {
-            $output = @(& git @commandArguments 2>$null)
-            $exitCode = $LASTEXITCODE
-            $errorOutput = @()
+            @()
         }
     } finally {
+        if ($hasNativeErrorPreference) { $PSNativeCommandUseErrorActionPreference = $oldNativeErrorPreference }
         $ErrorActionPreference = $oldErrorActionPreference
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
     }
     return [pscustomobject]@{Output=$output;ErrorOutput=$errorOutput;ExitCode=$exitCode}
 }
