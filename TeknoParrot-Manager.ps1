@@ -16076,7 +16076,9 @@ function Exit-PostgresRecoveryResume {
         Write-Host '  TeknoParrot Manager could not preserve a safe retry state. Nothing else was changed.' -ForegroundColor Yellow
         Write-Log 'Postgres recovery resume: stopped before completion; no retry state was retained.'
     }
-    [void](Read-HostSafe '  Press Enter to close this window')
+    # This function only runs inside the elevated protected-resume child.
+    # Never pause for input here: the parent TPM process is waiting on this
+    # child and must regain control as soon as the protected attempt ends.
     if ($script:PostgresRecoveryStatus -and $script:PostgresRecoveryStatus.Failure) {
         try {
             [void](Acknowledge-TpmWorkflowFailure -Context $script:PostgresRecoveryStatus -FailureId 'postgres-resume-failure')
@@ -16086,6 +16088,24 @@ function Exit-PostgresRecoveryResume {
     }
     exit $ExitCode
 }
+
+function Exit-PostgresRecoveryResumeSuccess {
+    param([Parameter(Mandatory)]$ResumeState)
+    if (-not (Remove-PostgresRecoveryState -Path $ResumeState.Path -ClaimPath $ResumeState.ClaimPath)) {
+        Exit-PostgresRecoveryResume -Message 'PostgreSQL setup finished, but TPM could not remove its protected temporary repair state.'
+    }
+    if ($ResumeState.Operation -eq 'Recovery') {
+        Write-Host '  PostgreSQL is fixed.' -ForegroundColor Green
+        Write-Host '  TeknoParrot Manager reset and verified the password successfully.' -ForegroundColor Green
+    } else {
+        Write-Host '  PostgreSQL setup is complete. TeknoParrot Manager continued the repair automatically.' -ForegroundColor Green
+    }
+    # Protected resume is an elevated child process. Exit immediately
+    # after verified completion so its window closes automatically and
+    # the original TPM process can continue.
+    exit 0
+}
+
 
 function ConvertTo-PostgresProcessArgument {
     param([Parameter(Mandatory)][string]$Value)
@@ -29016,11 +29036,9 @@ $mode = $null
             [void](Complete-TpmWorkflowStatus -Context $postgresStatus -Summary 'No action needed')
             [void](Close-TpmWorkflowStatus -Context $postgresStatus)
             if ($isPostgresRecoveryResume) {
-                [void](Remove-PostgresRecoveryState -Path $postgresResumeState.Path -ClaimPath $postgresResumeState.ClaimPath)
-                Write-Host '  The automatic PostgreSQL setup is complete.' -ForegroundColor Green
-                [void](Read-HostSafe '  Press Enter to close this window')
-                exit 0
+                Exit-PostgresRecoveryResumeSuccess -ResumeState $postgresResumeState
             }
+        }
             [void](Read-Host "  Press Enter to return to menu")
             continue
         }
@@ -29192,10 +29210,16 @@ $mode = $null
             [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'database' -Activity 'Backing up existing databases')
             Write-Host "  Backing up existing Postgres databases..." -ForegroundColor Cyan
             $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
+            if ($isPostgresRecoveryResume -and -not $pgBackup.Succeeded) {
+                Exit-PostgresRecoveryResume -Message 'TPM could not finish the PostgreSQL database backup.'
+            }
             $leavePostgres = $false
             if ($recoveryEvidenceUnavailable -and $pgBackup.Succeeded) {
                 Write-Host ("  Recovery BLOCKED. No profile changes were made. Evidence: {0}" -f $recoveryBackup.Path) -ForegroundColor Red
                 Write-Log 'Postgres setup: verified recovery evidence was unavailable before configuration changes.'
+                if ($isPostgresRecoveryResume) {
+                    Exit-PostgresRecoveryResume -Message 'TPM could not verify the protected backup before continuing PostgreSQL setup.'
+                }
                 [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-backup-unverified' -Message 'Verified PostgreSQL recovery evidence was unavailable.' -DataSafety 'No PostgreSQL or game-profile changes were made.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-backup-unverified') -Acknowledge)
                 continue
             }
@@ -29552,17 +29576,7 @@ $mode = $null
             continue
         }
         if ($isPostgresRecoveryResume) {
-            if (-not (Remove-PostgresRecoveryState -Path $postgresResumeState.Path -ClaimPath $postgresResumeState.ClaimPath)) {
-                Exit-PostgresRecoveryResume -Message 'PostgreSQL setup finished, but TPM could not remove its protected temporary repair state.'
-            }
-            if ($postgresResumeState.Operation -eq 'Recovery') {
-                Write-Host '  PostgreSQL is fixed.' -ForegroundColor Green
-                Write-Host '  TeknoParrot Manager reset and verified the password successfully.' -ForegroundColor Green
-            } else {
-                Write-Host '  PostgreSQL setup is complete. TeknoParrot Manager continued the repair automatically.' -ForegroundColor Green
-            }
-            [void](Read-HostSafe '  Press Enter to continue')
-            exit 0
+            Exit-PostgresRecoveryResumeSuccess -ResumeState $postgresResumeState
         }
         [void](Complete-TpmWorkflowStatus -Context $postgresStatus -Summary 'PostgreSQL setup finished and was verified')
         [void](Close-TpmWorkflowStatus -Context $postgresStatus)

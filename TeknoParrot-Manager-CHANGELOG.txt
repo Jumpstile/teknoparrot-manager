@@ -12,7 +12,9 @@
   Candidate source status: v1.0 RC7 remains the current published release.
   RC8 is being prepared for independent review and guarded certification.
   Final Version 1.0 remains unpublished.
-  RC8 PostgreSQL recovery remediation keeps PACKAGE_MISMATCH and
+  RC8 protected PostgreSQL UAC resume now closes the elevated child
+  deterministically after verified success or fail-closed failure, without
+  waiting for console input; normal non-resume prompts are unchanged.
   IDENTITY_MISMATCH fail-closed. Saved-password failures expose both masked
   validation and the reachable local role reset choice; reset verification
   remains mandatory. Manual password recovery reads back the saved credential

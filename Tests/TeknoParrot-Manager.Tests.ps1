@@ -6200,6 +6200,91 @@ Describe "RC8 PostgreSQL and support UX" {
 
 
 Describe "Issue #292 PostgreSQL automatic elevation and resume" {
+    BeforeAll {
+        $script:InvokeProtectedResumeTerminalProbe = {
+            param([ValidateSet('Failure', 'Success')][string]$Mode)
+            $functionName = if ($Mode -eq 'Failure') { 'Exit-PostgresRecoveryResume' } else { 'Exit-PostgresRecoveryResumeSuccess' }
+            $functionText = (Get-Command $functionName).ScriptBlock.ToString()
+            $callText = if ($Mode -eq 'Failure') {
+                "& `$functionName -Message 'synthetic protected resume failure' -ExitCode 23"
+            } else {
+                '& $functionName -ResumeState $script:PostgresRecoveryResumeState'
+            }
+            $stubText = @'
+function New-PostgresRecoveryRetryState {
+    [Console]::Out.WriteLine('RETRY_STATE_ISSUED')
+    return 'retry-state'
+}
+function Remove-PostgresRecoveryState {
+    param([string]$Path, [string]$ClaimPath)
+    [Console]::Out.WriteLine('STATE_REMOVED')
+    return $true
+}
+function Set-TpmWorkflowFailure {
+    param($Context, $FailureId, $Message, $DataSafety, $RecoveryActions)
+}
+function Acknowledge-TpmWorkflowFailure {
+    param($Context, $FailureId)
+}
+function Stop-TpmWorkflowStatus {
+    param($Context, $Reason)
+}
+function Close-TpmWorkflowStatus {
+    param($Context)
+}
+function Write-Log {
+    param([string]$Message)
+}
+function Read-HostSafe {
+    [Console]::Out.WriteLine('PROMPT_CALLED')
+    exit 88
+}
+function Read-Host {
+    [Console]::Out.WriteLine('PROMPT_CALLED')
+    exit 88
+}
+'@
+            if ($Mode -eq 'Success') {
+                $stubText += @'
+function Exit-PostgresRecoveryResume {
+    param([string]$Message, [int]$ExitCode = 1)
+    [Console]::Out.WriteLine('UNEXPECTED_FAILURE')
+    exit 89
+}
+'@
+            }
+            $probeText = @(
+                "`$ErrorActionPreference = 'Stop'"
+                "function $functionName {"
+                $functionText
+                "}"
+                $stubText
+                '$script:PostgresRecoveryStatus = $null'
+                '$script:PostgresRecoveryResumeState = [pscustomobject]@{ Path = ''state''; ClaimPath = ''state.claim''; Operation = ''Recovery'' }'
+                $callText
+            ) -join [Environment]::NewLine
+            $probeRoot = Join-Path $TestDrive ('protected-resume-terminal-' + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $probeRoot -Force | Out-Null
+            $probePath = Join-Path $probeRoot 'probe.ps1'
+            $stdoutPath = Join-Path $probeRoot 'stdout.txt'
+            $stderrPath = Join-Path $probeRoot 'stderr.txt'
+            [System.IO.File]::WriteAllText($probePath, $probeText, (New-Object System.Text.UTF8Encoding($false)))
+            $engine = if ($PSVersionTable.PSEdition -eq 'Core') { (Get-Command pwsh).Source } else { (Get-Command powershell.exe).Source }
+            $process = Start-Process -FilePath $engine -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $probePath) `
+                -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
+            if (-not $process.WaitForExit(10000)) {
+                try { $process.Kill() } catch {}
+                throw 'Protected resume terminal probe did not exit within the timeout.'
+            }
+            $process.Refresh()
+            [pscustomobject]@{
+                ExitCode = [int]$process.ExitCode
+                StdOut = if (Test-Path -LiteralPath $stdoutPath) { [System.IO.File]::ReadAllText($stdoutPath) } else { '' }
+                StdErr = if (Test-Path -LiteralPath $stderrPath) { [System.IO.File]::ReadAllText($stderrPath) } else { '' }
+            }
+        }
+    }
+
     BeforeEach {
         $script:postgresGuidanceMessages = @()
         Mock Write-Host { $script:postgresGuidanceMessages += [string]$Object }
@@ -6250,12 +6335,47 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
         $script:ProductionSource | Should -Not -Match '(?i)right-click.*administrator|select PostgreSQL setup.*again'
     }
 
-    It "resumes option 12 without re-entering the main menu" {
-        $script:ProductionSource | Should -Match ([regex]::Escape('$pendingApplyMode = ''PostgresSetup'''))
-        $script:ProductionSource | Should -Match '-PostgresRecoveryResumeToken'
-        $script:ProductionSource | Should -Match 'PostgreSQL is fixed'
-        $script:ProductionSource | Should -Match 'Press Enter to continue'
-        $script:ProductionSource | Should -Match 'will not claim recovery is complete'
+    It "resumes option 12 without re-entering the main menu or waiting for input" {
+        $source = $script:ProductionSource
+        $source | Should -Match ([regex]::Escape('$pendingApplyMode = ''PostgresSetup'''))
+        $source | Should -Match '-PostgresRecoveryResumeToken'
+        $source | Should -Match 'Exit-PostgresRecoveryResumeSuccess -ResumeState \$postgresResumeState'
+        $successFunction = (Get-Command Exit-PostgresRecoveryResumeSuccess).ScriptBlock.ToString()
+        $successFunction | Should -Match 'Remove-PostgresRecoveryState'
+        $successFunction | Should -Match 'exit 0'
+        $successFunction | Should -Not -Match 'Read-HostSafe|Read-Host'
+        $source | Should -Match 'will not claim recovery is complete'
+    }
+    It "exits protected resume failures without Read-HostSafe or Read-Host prompts" {
+        $exitFunction = (Get-Command Exit-PostgresRecoveryResume).ScriptBlock.ToString()
+        $exitFunction | Should -Not -Match 'Read-HostSafe|Read-Host'
+        $source = $script:ProductionSource
+        $source | Should -Match 'if \(\$isPostgresRecoveryResume\) \{ Exit-PostgresRecoveryResume'
+        $source | Should -Match 'function Exit-PostgresRecoveryResume[\s\S]*?exit \$ExitCode'
+    }
+    It "runs protected resume failure terminal cleanup without prompting and returns its failure code" {
+        $probe = & $script:InvokeProtectedResumeTerminalProbe -Mode Failure
+        $probe.ExitCode | Should -Be 23
+        ($probe.StdOut + $probe.StdErr) | Should -Match 'RETRY_STATE_ISSUED'
+        ($probe.StdOut + $probe.StdErr) | Should -Match 'STATE_REMOVED'
+        ($probe.StdOut + $probe.StdErr) | Should -Not -Match 'PROMPT_CALLED'
+    }
+    It "runs protected resume success terminal cleanup without prompting and returns code zero" {
+        $probe = & $script:InvokeProtectedResumeTerminalProbe -Mode Success
+        $probe.ExitCode | Should -Be 0
+        ($probe.StdOut + $probe.StdErr) | Should -Match 'STATE_REMOVED'
+        ($probe.StdOut + $probe.StdErr) | Should -Match 'PostgreSQL is fixed'
+        ($probe.StdOut + $probe.StdErr) | Should -Not -Match 'PROMPT_CALLED|UNEXPECTED_FAILURE'
+    }
+    It "keeps normal non-resume PostgreSQL prompts" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\[void\]\(Read-Host "  Press Enter to return to menu"\)'
+        $source | Should -Match '\[void\]\(Read-HostSafe ''  Press Enter to acknowledge this message''\)'
+    }
+    It "does not wait for console input immediately before protected resume exit" {
+        $successFunction = (Get-Command Exit-PostgresRecoveryResumeSuccess).ScriptBlock.ToString()
+        $successFunction | Should -Match 'exit 0'
+        $successFunction | Should -Not -Match 'Read-HostSafe|Read-Host'
     }
 
     It "keeps backup, reset, verification, save, and setup ordering fail-closed" {

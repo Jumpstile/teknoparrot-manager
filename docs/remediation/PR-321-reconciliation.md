@@ -224,7 +224,10 @@ reinitialize (`I`).
 
 Focused Slice 8B tests cover authoritative and missing-title fixtures, normal
 diagnosis exclusions, technical evidence retention, reset stages and guidance,
-workflow activities, and password/reset routing. Package rebuild and
+workflow activities, and password/reset routing. The protected-resume exit
+slice additionally guarantees that every elevated child terminal path exits
+without `Read-HostSafe`/`Read-Host`; ordinary non-resume prompts remain
+interactive. Contract: `TPM-POSTGRES-RESUME-EXIT-001`. Package rebuild and
 owner-runtime proof remain outstanding.
 ### Slice F -- Support evidence scoping
 
