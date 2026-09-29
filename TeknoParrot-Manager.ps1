@@ -29038,7 +29038,6 @@ $mode = $null
             if ($isPostgresRecoveryResume) {
                 Exit-PostgresRecoveryResumeSuccess -ResumeState $postgresResumeState
             }
-        }
             [void](Read-Host "  Press Enter to return to menu")
             continue
         }

@@ -5050,7 +5050,8 @@ Describe "Postgres guided recovery and profile transaction" {
                 [bool]$Installed,
                 [bool]$RecoverExistingData,
                 [bool]$BackupFails,
-                [int]$ProfileCount
+                [int]$ProfileCount,
+                [bool]$ProtectedResume = $false
             )
             $tokens = $null
             $parseErrors = $null
@@ -5115,8 +5116,9 @@ $script:PostgresBinDir = Join-Path $script:FixtureRoot 'bin'
 $script:PostgresInstallDir = $script:FixtureRoot
 $Unattended = $true
 $DryRun = $false
-$PostgresRecoveryResumeToken = ''
-$isPostgresRecoveryResume = $false
+$script:ProtectedResume = [bool]::Parse('__PROTECTED_RESUME__')
+$PostgresRecoveryResumeToken = if ($script:ProtectedResume) { 'protected-state' } else { '' }
+$isPostgresRecoveryResume = $script:ProtectedResume
 $tpRoot = $script:FixtureRoot
 $userProfilesDir = Join-Path $script:FixtureRoot 'UserProfiles'
 $gamesInstallFolder = Join-Path $script:FixtureRoot 'Games'
@@ -5126,6 +5128,28 @@ $zipSourceSupplementary = ''
 $postgresSuperPasswordEncrypted = if ($script:FakeInstalled -and -not $script:RecoverExistingData) { 'fixture-encrypted' } else { '' }
 
 __FUNCTIONS__
+if ($script:ProtectedResume) {
+    function Read-PostgresRecoveryState {
+        param([string]$StatePath, [string]$ExpectedConfigPath, [string]$ExpectedScriptPath, [string]$ExpectedTpRoot, [string]$ExpectedUserProfilesDir)
+        return [pscustomobject]@{
+            Path = $StatePath
+            ClaimPath = ($StatePath + '.claim')
+            Operation = 'Recovery'
+            PasswordPlain = 'fixture-password'
+            PasswordOriginEncrypted = 'fixture-encrypted'
+        }
+    }
+    function Exit-PostgresRecoveryResumeSuccess {
+        param($ResumeState)
+        [Console]::Out.WriteLine('PROTECTED_RESUME_SUCCESS')
+        exit 0
+    }
+    function Exit-PostgresRecoveryResume {
+        param([string]$Message, [int]$ExitCode = 1)
+        [Console]::Out.WriteLine('PROTECTED_RESUME_FAILURE')
+        exit $ExitCode
+    }
+}
 
 function Write-Log { param([object]$msg) }
 function Test-RunningAsAdministrator { return $true }
@@ -5140,11 +5164,16 @@ function Stop-Service { param([string]$Name, [switch]$Force) }
 function Wait-PostgresServiceState { param([string]$DesiredStatus) }
 function Read-HostSafe {
     param([string]$Prompt, [string]$Default = $null)
+    if ($script:ProtectedResume) { [Console]::Out.WriteLine('PROTECTED_PROMPT_CALLED') }
     if ($script:Scenario -eq 'ExistingDatabaseBackupFailure' -and $Prompt -like '*Choice*') { return 'B' }
     if ($null -ne $Default) { return $Default }
     return ''
 }
-function Read-Host { param([string]$Prompt) return '' }
+function Read-Host {
+    param([string]$Prompt)
+    if ($script:ProtectedResume) { [Console]::Out.WriteLine('PROTECTED_PROMPT_CALLED') }
+    return ''
+}
 function Read-TpmYesNo { param([string]$Prompt, [string]$Default = '') return 'Y' }
 function Read-ConfirmedPostgresPassword { param([string]$Prompt) return 'fixture-password' }
 function ConvertTo-SecureString { param([string]$String) return 'fixture-secure' }
@@ -5251,6 +5280,7 @@ while ($true) {
     [void]($script:LoopCount++)
     $mode = if ($script:LoopCount -eq 1) { 'PostgresSetup' } else { 'Exit' }
 __BRANCH__
+    if ($script:ProtectedResume -and $script:LoopCount -gt 1) { [Console]::Out.WriteLine('MENU_FALLTHROUGH') }
     if ($script:LoopCount -gt 1) { break }
 }
 [pscustomobject]@{
@@ -5267,12 +5297,18 @@ __BRANCH__
     RecoveryProfileBackupCount = $script:RecoveryProfileBackupCount
 } | ConvertTo-Json -Compress
 '@
-                $harness = $harnessTemplate.Replace('__FUNCTIONS__', $functionText).Replace('__BRANCH__', $branchAst.Extent.Text)
+                $harness = $harnessTemplate.Replace('__FUNCTIONS__', $functionText).Replace('__BRANCH__', $branchAst.Extent.Text).Replace('__PROTECTED_RESUME__', [string]$ProtectedResume)
                 $harnessPath = Join-Path $fixtureRoot 'Run-PostgresTopLevelFixture.ps1'
                 [System.IO.File]::WriteAllText($harnessPath, $harness, (New-Object System.Text.UTF8Encoding($false)))
                 $env:TPM_PG_FIXTURE_ROOT = $fixtureRoot
                 $output = @(& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $harnessPath 2>&1)
                 $exitCode = $LASTEXITCODE
+                if ($ProtectedResume) {
+                    return [pscustomobject]@{
+                        ExitCode = $exitCode
+                        Output = ($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+                    }
+                }
                 $jsonLine = @($output | ForEach-Object { [string]$_ } | Where-Object { $_ -match '^\{"Scenario"' } | Select-Object -Last 1)
                 if ($exitCode -ne 0 -or $jsonLine.Count -ne 1) {
                     throw ("Top-level PostgreSQL fixture failed for {0} (exit={1}): {2}" -f $Scenario, $exitCode, ($output -join [Environment]::NewLine))
@@ -5315,6 +5351,13 @@ __BRANCH__
         } else {
             $result.RecoveryBundleReceived | Should -BeFalse
         }
+    }
+
+    It "exits a protected resume with zero needed games before prompts or menu fall-through" {
+        $result = Invoke-TpmPostgresTopLevelFixture -Scenario 'ProtectedNoPostgresNeeded' -Installed $true -RecoverExistingData $false -BackupFails $false -ProfileCount 0 -ProtectedResume $true
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'PROTECTED_RESUME_SUCCESS'
+        $result.Output | Should -Not -Match 'PROTECTED_PROMPT_CALLED|MENU_FALLTHROUGH|PROTECTED_RESUME_FAILURE'
     }
 
     It "accepts a confirmed new password through SecureString input without echoing it" {
@@ -5926,7 +5969,6 @@ Describe "RC8 PostgreSQL and support UX" {
         $script:ProductionSource | Should -Match 'protected PostgreSQL setup\. Reason \[.*\]:'
         $script:ProductionSource | Should -Match 'RESUME_EXPIRED|PACKAGE_MISMATCH|SELECTION_PLAN_INVALID'
         $script:ProductionSource | Should -Match '\$eggmanDatZip -and -not \$Unattended -and -not \$isPostgresRecoveryResume'
-        $script:ProductionSource | Should -Match 'Press Enter to close this window'
     }
     It "uses one unambiguous request-action parameter for the web wrapper" {
         $script:ProductionSource | Should -Match '\[System\.Management\.Automation\.ActionPreference\]\$RequestErrorAction'
@@ -6206,9 +6248,9 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
             $functionName = if ($Mode -eq 'Failure') { 'Exit-PostgresRecoveryResume' } else { 'Exit-PostgresRecoveryResumeSuccess' }
             $functionText = (Get-Command $functionName).ScriptBlock.ToString()
             $callText = if ($Mode -eq 'Failure') {
-                "& `$functionName -Message 'synthetic protected resume failure' -ExitCode 23"
+                "Exit-PostgresRecoveryResume -Message 'synthetic protected resume failure'"
             } else {
-                '& $functionName -ResumeState $script:PostgresRecoveryResumeState'
+                'Exit-PostgresRecoveryResumeSuccess -ResumeState $script:PostgresRecoveryResumeState'
             }
             $stubText = @'
 function New-PostgresRecoveryRetryState {
@@ -6261,26 +6303,32 @@ function Exit-PostgresRecoveryResume {
                 $stubText
                 '$script:PostgresRecoveryStatus = $null'
                 '$script:PostgresRecoveryResumeState = [pscustomobject]@{ Path = ''state''; ClaimPath = ''state.claim''; Operation = ''Recovery'' }'
+                ('$functionName = ''{0}''' -f $functionName)
                 $callText
             ) -join [Environment]::NewLine
             $probeRoot = Join-Path $TestDrive ('protected-resume-terminal-' + [guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Path $probeRoot -Force | Out-Null
             $probePath = Join-Path $probeRoot 'probe.ps1'
-            $stdoutPath = Join-Path $probeRoot 'stdout.txt'
-            $stderrPath = Join-Path $probeRoot 'stderr.txt'
             [System.IO.File]::WriteAllText($probePath, $probeText, (New-Object System.Text.UTF8Encoding($false)))
             $engine = if ($PSVersionTable.PSEdition -eq 'Core') { (Get-Command pwsh).Source } else { (Get-Command powershell.exe).Source }
-            $process = Start-Process -FilePath $engine -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $probePath) `
-                -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
+            $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+            $startInfo.FileName = $engine
+            $startInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $probePath.Replace('"', '\"') + '"'
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            $process = New-Object System.Diagnostics.Process
+            $process.StartInfo = $startInfo
+            [void]$process.Start()
             if (-not $process.WaitForExit(10000)) {
                 try { $process.Kill() } catch {}
                 throw 'Protected resume terminal probe did not exit within the timeout.'
             }
-            $process.Refresh()
             [pscustomobject]@{
                 ExitCode = [int]$process.ExitCode
-                StdOut = if (Test-Path -LiteralPath $stdoutPath) { [System.IO.File]::ReadAllText($stdoutPath) } else { '' }
-                StdErr = if (Test-Path -LiteralPath $stderrPath) { [System.IO.File]::ReadAllText($stderrPath) } else { '' }
+                StdOut = $process.StandardOutput.ReadToEnd()
+                StdErr = $process.StandardError.ReadToEnd()
             }
         }
     }
@@ -6355,14 +6403,14 @@ function Exit-PostgresRecoveryResume {
     }
     It "runs protected resume failure terminal cleanup without prompting and returns its failure code" {
         $probe = & $script:InvokeProtectedResumeTerminalProbe -Mode Failure
-        $probe.ExitCode | Should -Be 23
+        $probe.ExitCode | Should -Be 1 -Because ("stdout={0}; stderr={1}" -f $probe.StdOut, $probe.StdErr)
         ($probe.StdOut + $probe.StdErr) | Should -Match 'RETRY_STATE_ISSUED'
         ($probe.StdOut + $probe.StdErr) | Should -Match 'STATE_REMOVED'
         ($probe.StdOut + $probe.StdErr) | Should -Not -Match 'PROMPT_CALLED'
     }
     It "runs protected resume success terminal cleanup without prompting and returns code zero" {
         $probe = & $script:InvokeProtectedResumeTerminalProbe -Mode Success
-        $probe.ExitCode | Should -Be 0
+        $probe.ExitCode | Should -Be 0 -Because ("stdout={0}; stderr={1}" -f $probe.StdOut, $probe.StdErr)
         ($probe.StdOut + $probe.StdErr) | Should -Match 'STATE_REMOVED'
         ($probe.StdOut + $probe.StdErr) | Should -Match 'PostgreSQL is fixed'
         ($probe.StdOut + $probe.StdErr) | Should -Not -Match 'PROMPT_CALLED|UNEXPECTED_FAILURE'

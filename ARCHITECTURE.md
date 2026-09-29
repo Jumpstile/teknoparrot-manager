@@ -180,6 +180,10 @@ database-backup status while those actions are running.
 A protected UAC resume suppresses unrelated startup, DAT, and GitHub prompts;
 it consumes only the durable recovery envelope and reports a concrete
 validation reason when that envelope or its selection plan cannot be trusted.
+After the protected transaction reaches a terminal success or fail-closed
+failure, the elevated child exits with its correct code without waiting for
+console input or entering the main menu; ordinary non-resume PostgreSQL
+screens remain interactive.
 
 Slice D re-audit coverage treats corruption as a distinct database failure
 category alongside password, service, missing-database, tool, permission, and
