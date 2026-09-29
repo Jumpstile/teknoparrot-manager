@@ -27,8 +27,10 @@
   instead of aborting the whole script under PowerShell 5.1. Follow-up live
   recovery testing routes the recovery-menu password reset through the same
   protected UAC resume path before privileged service changes, and resolves
-  missing UserProfiles titles from the authoritative matching GameProfiles
-  metadata so affected-game recovery output remains beginner-readable.
+  missing UserProfiles titles from authoritative matching GameProfiles metadata
+  or, when those legacy XML titles are also blank, the unique original game
+  name already loaded from the collection DAT. Affected-game recovery output
+  remains beginner-readable without inventing names from profile codes.
   RC8 ReShade remediation keeps the preview view-only and
   terminal-authoritative, guards paint events when preview state or assets are
   unavailable, and explains the five beginner-safe profile set. Apply-all

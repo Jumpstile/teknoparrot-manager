@@ -16464,3 +16464,33 @@ Describe 'PostgreSQL live-smoke recovery regressions' {
         $block | Should -Match '-Operation Recovery -PasswordPlain \$newPassword'
     }
 }
+
+Describe 'PostgreSQL DAT title fallback regression' {
+    It 'uses one unique DAT OriginalName when both profile XML titles are blank' {
+        $oldTpRoot = $script:tpRoot
+        $oldDatVariable = Get-Variable -Name datIndex -Scope Script -ErrorAction SilentlyContinue
+        try {
+            $root = Join-Path $TestDrive 'postgres-dat-title'
+            $userProfiles = Join-Path $root 'UserProfiles'
+            $gameProfiles = Join-Path $root 'GameProfiles'
+            New-Item -ItemType Directory -Path $userProfiles,$gameProfiles -Force | Out-Null
+            $userProfile = Join-Path $userProfiles 'PowerPuttLive2012.xml'
+            $canonicalProfile = Join-Path $gameProfiles 'PowerPuttLive2012.xml'
+            Set-Content -LiteralPath $userProfile -Value '<GameProfile><ConfigValues /></GameProfile>'
+            Set-Content -LiteralPath $canonicalProfile -Value '<GameProfile><ConfigValues /></GameProfile>'
+            $script:tpRoot = $root
+            $script:datIndex = @{
+                'power putt live 2012' = [pscustomobject]@{ ProfileCode = 'PowerPuttLive2012'; OriginalName = 'PowerPutt Live 2012'; Executable = 'game.exe' }
+            }
+
+            $metadata = Get-PostgresProfileDisplayMetadata -ProfilePath $userProfile
+
+            $metadata.DisplayName | Should -Be 'PowerPutt Live 2012'
+            $metadata.HasAuthoritativeTitle | Should -BeTrue
+        } finally {
+            $script:tpRoot = $oldTpRoot
+            if ($oldDatVariable) { $script:datIndex = $oldDatVariable.Value }
+            else { Remove-Variable -Name datIndex -Scope Script -ErrorAction SilentlyContinue }
+        }
+    }
+}

@@ -9811,6 +9811,14 @@ function Get-PostgresProfileDisplayMetadata {
             $displayName = Get-TpmGameDisplayLabel -ProfilePath $canonicalProfile -Fallback ' '
         }
     }
+    $datIndexVariable = Get-Variable -Name datIndex -Scope Script -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($displayName) -and $datIndexVariable -and $datIndexVariable.Value) {
+        $datNames = @($datIndexVariable.Value.Values |
+            Where-Object { [string]$_.ProfileCode -eq $profileKey -and -not [string]::IsNullOrWhiteSpace([string]$_.OriginalName) } |
+            ForEach-Object { ([string]$_.OriginalName).Trim() } |
+            Sort-Object -Unique)
+        if ($datNames.Count -eq 1) { $displayName = [string]$datNames[0] }
+    }
     $hasAuthoritativeTitle = -not [string]::IsNullOrWhiteSpace($displayName)
     if (-not $hasAuthoritativeTitle) { $displayName = 'Unknown game title -- see Details' }
     return [pscustomobject]@{
