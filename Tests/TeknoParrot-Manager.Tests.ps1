@@ -16400,3 +16400,26 @@ Describe 'S1 legacy state transaction normalization' -Tag 'S1-LEGACY-STATE-TRANS
         $source | Should -Match 'cursor_path update failed before verified completion'
     }
 }
+
+Describe 'PostgreSQL native command nonzero-exit contract' {
+    It 'returns stderr and exit code without terminating under ErrorActionPreference Stop' {
+        $oldPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Stop'
+            $cmd = (Get-Command cmd.exe -ErrorAction Stop).Source
+            $result = Invoke-PostgresNativeCommand -FilePath $cmd -Arguments @('/d','/c','echo postgres-native-test 1>&2 & exit /b 7')
+            $result.ExitCode | Should -Be 7
+            $result.Output | Should -Match 'postgres-native-test'
+        } finally {
+            $ErrorActionPreference = $oldPreference
+        }
+    }
+
+    It 'redacts supplied secrets from native diagnostics' {
+        $cmd = (Get-Command cmd.exe -ErrorAction Stop).Source
+        $result = Invoke-PostgresNativeCommand -FilePath $cmd -Arguments @('/d','/c','echo postgres-secret 1>&2 & exit /b 9') -Secrets @('postgres-secret')
+        $result.ExitCode | Should -Be 9
+        $result.Output | Should -Match '\[REDACTED\]'
+        $result.Output | Should -Not -Match 'postgres-secret'
+    }
+}

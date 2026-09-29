@@ -21,7 +21,10 @@
   when that metadata is absent, removes profile/database pairs and repeated
   `Backup detail: Reported` rows from normal diagnosis, preserves technical
   evidence in Details/logs/support, reports reset failure stages, and updates
-  workflow status during password validation and reset.
+  workflow status during password validation and reset. Real ARCADE smoke testing
+  also hardened PostgreSQL native-command handling so expected authentication,
+  backup, restore, and client-tool failures return structured exit-code evidence
+  instead of aborting the whole script under PowerShell 5.1.
   RC8 ReShade remediation keeps the preview view-only and
   terminal-authoritative, guards paint events when preview state or assets are
   unavailable, and explains the five beginner-safe profile set. Apply-all

@@ -11492,8 +11492,9 @@ function Get-PostgresBackupRepairDiagnosis {
     $versionCheck = $null
     if (Test-Path -LiteralPath $pgDumpPath -PathType Leaf) {
         try {
-            $versionText = (& $pgDumpPath '--version' 2>&1 | Out-String).Trim()
-            $versionExitCode = $LASTEXITCODE
+            $versionResult = Invoke-PostgresNativeCommand -FilePath $pgDumpPath -Arguments @('--version')
+            $versionText = [string]$versionResult.Output
+            $versionExitCode = [int]$versionResult.ExitCode
             if ($versionExitCode -eq 0 -and $versionText) {
                 $versionCheck = [pscustomobject]@{
                     Name = 'pg_dump version'
@@ -11813,8 +11814,9 @@ function Get-PostgresDatabaseState {
     $previousPgPassFile = $null
     try {
         $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
-        $queryOutput = (& $psqlExe -U postgres -h 127.0.0.1 -p 5432 -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DbName'" 2>&1 | Out-String).Trim()
-        $queryExitCode = $LASTEXITCODE
+        $queryResult = Invoke-PostgresNativeCommand -FilePath $psqlExe -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','-d','postgres','-tAc',("SELECT 1 FROM pg_database WHERE datname='{0}'" -f $DbName)) -Secrets @($SuperPasswordPlain)
+        $queryOutput = [string]$queryResult.Output
+        $queryExitCode = [int]$queryResult.ExitCode
         if ($queryExitCode -ne 0) {
             $detail = if ($queryOutput) { ConvertTo-PostgresRedactedText -Text $queryOutput -Secrets @($SuperPasswordPlain) } else { 'psql returned no diagnostic text.' }
             throw ("Postgres: database existence query failed (exit code {0}). Detail: {1}" -f $queryExitCode, $detail)
@@ -11843,8 +11845,8 @@ function Test-PostgresPassword {
     $previousPgPassFile = $null
     try {
         $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
-        & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -d postgres -tAc 'SELECT 1' 2>$null | Out-Null
-        return ($LASTEXITCODE -eq 0)
+        $probe = Invoke-PostgresNativeCommand -FilePath $psqlExe -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','-d','postgres','-tAc','SELECT 1') -Secrets @($SuperPasswordPlain)
+        return ($probe.ExitCode -eq 0)
     } finally {
         Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile
         Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure
@@ -11901,6 +11903,31 @@ function ConvertTo-PostgresRedactedText {
         if (-not [string]::IsNullOrEmpty($secret)) { $safe = $safe.Replace($secret, '[REDACTED]') }
     }
     return $safe
+}
+
+function Invoke-PostgresNativeCommand {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string[]]$Arguments = @(),
+        [string[]]$Secrets = @()
+    )
+    $oldErrorActionPreference = $ErrorActionPreference
+    $hasNativeErrorPreference = Test-Path variable:PSNativeCommandUseErrorActionPreference
+    $oldNativeErrorPreference = if ($hasNativeErrorPreference) { $PSNativeCommandUseErrorActionPreference } else { $null }
+    try {
+        $ErrorActionPreference = 'Continue'
+        if ($hasNativeErrorPreference) { $PSNativeCommandUseErrorActionPreference = $false }
+        $captured = @(& $FilePath @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+        $output = ($captured | ForEach-Object { [string]$_ } | Out-String).Trim()
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            Output = ConvertTo-PostgresRedactedText -Text $output -Secrets $Secrets
+        }
+    } finally {
+        if ($hasNativeErrorPreference) { $PSNativeCommandUseErrorActionPreference = $oldNativeErrorPreference }
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
 }
 
 function Invoke-PostgresNativeProcessWithInput {
@@ -23706,8 +23733,9 @@ function Invoke-Postgres83RestoreCommand {
             $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
             $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
         }
-        $output = (& $executable @Arguments 2>&1 | Out-String).Trim()
-        $exitCode = $LASTEXITCODE
+        $nativeResult = Invoke-PostgresNativeCommand -FilePath $executable -Arguments $Arguments -Secrets @($SuperPasswordPlain)
+        $output = [string]$nativeResult.Output
+        $exitCode = [int]$nativeResult.ExitCode
         return [pscustomobject]@{
             Tool = $ToolName
             Executable = $executable
@@ -24706,8 +24734,9 @@ function Backup-PostgresDatabases {
             $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
             foreach ($dbName in @($names | Sort-Object)) {
                 $destFile = Join-Path $result.Path ($dbName + '.backup')
-                $dumpOutput = (& $pgDumpExe -U postgres -h 127.0.0.1 -p 5432 -d $dbName -F c -f $destFile 2>&1 | Out-String).Trim()
-                $exitCode = $LASTEXITCODE
+                $dumpResult = Invoke-PostgresNativeCommand -FilePath $pgDumpExe -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','-d',$dbName,'-F','c','-f',$destFile) -Secrets @($SuperPasswordPlain)
+                $dumpOutput = [string]$dumpResult.Output
+                $exitCode = [int]$dumpResult.ExitCode
                 if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $destFile -PathType Leaf) -or (Get-Item -LiteralPath $destFile).Length -eq 0) {
                     $result.Succeeded = $false
                     $metadata = if ($databaseGameMetadata.ContainsKey($dbName)) {
