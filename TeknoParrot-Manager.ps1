@@ -9805,6 +9805,12 @@ function Get-PostgresProfileDisplayMetadata {
     param([Parameter(Mandatory)][string]$ProfilePath)
     $profileKey = [System.IO.Path]::GetFileNameWithoutExtension($ProfilePath)
     $displayName = Get-TpmGameDisplayLabel -ProfilePath $ProfilePath -Fallback ' '
+    if ([string]::IsNullOrWhiteSpace($displayName) -and -not [string]::IsNullOrWhiteSpace([string]$script:tpRoot)) {
+        $canonicalProfile = Join-Path (Join-Path $script:tpRoot 'GameProfiles') ($profileKey + '.xml')
+        if (Test-Path -LiteralPath $canonicalProfile -PathType Leaf) {
+            $displayName = Get-TpmGameDisplayLabel -ProfilePath $canonicalProfile -Fallback ' '
+        }
+    }
     $hasAuthoritativeTitle = -not [string]::IsNullOrWhiteSpace($displayName)
     if (-not $hasAuthoritativeTitle) { $displayName = 'Unknown game title -- see Details' }
     return [pscustomobject]@{
@@ -29307,6 +29313,24 @@ $mode = $null
                     if ($suppressBackupFailureWall) { continue }
                     if (-not $resetAttempt.Succeeded) { continue }
                     $newPassword = [string]$resetAttempt.Password
+                    if (-not (Test-RunningAsAdministrator)) {
+                        Write-PostgresAdministratorGuidance -Operation Recovery
+                        [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Windows needs permission to reset PostgreSQL.' -UserAction 'Approve the Windows permission box')
+                        $elevated = Start-PostgresRecoveryAsAdministrator -ConfigPath $configPath -ScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -Operation Recovery -PasswordPlain $newPassword
+                        $resetAttempt.Password = $null
+                        $newPassword = $null
+                        [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
+                        if ($elevated) {
+                            [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Fixed -Summary 'PostgreSQL repair continued automatically')
+                            [void](Complete-TpmWorkflowStatus -Context $postgresStatus -Summary 'PostgreSQL repair finished')
+                            [void](Close-TpmWorkflowStatus -Context $postgresStatus)
+                            exit 0
+                        }
+                        Write-Host '  Windows permission was not granted, so the PostgreSQL password was not reset.' -ForegroundColor Yellow
+                        Write-Host '  No database or game-profile changes were made.' -ForegroundColor Green
+                        Write-Log 'Postgres setup: recovery-menu password-reset handoff did not complete.'
+                        continue
+                    }
                     $resetResult = $null
                     try {
                         [void](Update-TpmWorkflowActivity -Context $postgresStatus -Activity 'Resetting the PostgreSQL password')

@@ -16423,3 +16423,44 @@ Describe 'PostgreSQL native command nonzero-exit contract' {
         $result.Output | Should -Not -Match 'postgres-secret'
     }
 }
+
+Describe 'PostgreSQL live-smoke recovery regressions' {
+    It 'uses the canonical GameProfiles title when a UserProfiles copy omits GameName' {
+        $oldTpRoot = $script:tpRoot
+        try {
+            $root = Join-Path $TestDrive 'postgres-canonical-title'
+            $userProfiles = Join-Path $root 'UserProfiles'
+            $gameProfiles = Join-Path $root 'GameProfiles'
+            New-Item -ItemType Directory -Path $userProfiles,$gameProfiles -Force | Out-Null
+            $userProfile = Join-Path $userProfiles 'PowerPuttLive2012.xml'
+            $canonicalProfile = Join-Path $gameProfiles 'PowerPuttLive2012.xml'
+            Set-Content -LiteralPath $userProfile -Value '<GameProfile><ConfigValues /></GameProfile>'
+            Set-Content -LiteralPath $canonicalProfile -Value '<GameProfile><GameName>PowerPutt Live 2012</GameName><ConfigValues /></GameProfile>'
+            $script:tpRoot = $root
+
+            $metadata = Get-PostgresProfileDisplayMetadata -ProfilePath $userProfile
+
+            $metadata.DisplayName | Should -Be 'PowerPutt Live 2012'
+            $metadata.ProfileKey | Should -Be 'PowerPuttLive2012'
+            $metadata.HasAuthoritativeTitle | Should -BeTrue
+        } finally {
+            $script:tpRoot = $oldTpRoot
+        }
+    }
+
+    It 'routes recovery-menu password reset through UAC before direct reset when not elevated' {
+        $source = $script:ProductionSource
+        $start = $source.IndexOf("if (`$authFailure -and `$backupChoice -eq 'X')")
+        $finish = $source.IndexOf("if (-not `$authFailure -and `$backupChoice -eq 'F')", $start)
+        $start | Should -BeGreaterThan -1
+        $finish | Should -BeGreaterThan $start
+        $block = $source.Substring($start, $finish - $start)
+        $adminCheck = $block.IndexOf('Test-RunningAsAdministrator')
+        $handoff = $block.IndexOf('Start-PostgresRecoveryAsAdministrator')
+        $directReset = $block.IndexOf('Reset-PostgresPasswordAutomatically')
+        $adminCheck | Should -BeGreaterThan -1
+        $handoff | Should -BeGreaterThan $adminCheck
+        $directReset | Should -BeGreaterThan $handoff
+        $block | Should -Match '-Operation Recovery -PasswordPlain \$newPassword'
+    }
+}
