@@ -2067,14 +2067,15 @@ pane, a small cabinet-mounted display, a low-resolution remote session) that lay
 force scrolling or wrap awkwardly -- readable on a full-size window, cramped everywhere
 else.
 
-**Design: one data model, four rendering tiers.**
+**Design: one data model, a conservative production selector, and explicit renderer tiers.**
 
-The three-tier design (`Full` >=160 / `Standard` >=120 / `Compact` narrower) described in
-the original issue #104 proposal was superseded during implementation by four tiers with
-different breakpoints, refined through the RC2/RC2.1 cycle to cover real console width
-ranges better than the original illustrative spec. This is the current, shipped design --
-see `Get-ConsoleLayoutTier`'s actual thresholds below, not the three-tier numbers above,
-which are historical only.
+The renderer retains Compact, Standard, Professional, and Ultra helpers for deterministic
+layout tests and explicitly requested diagnostic rendering. Production selection is
+deliberately narrower: ordinary/default viewports select Compact, and Ultra requires both
+the centralized minimum width and height. The former width-only selector was duplicated;
+its later legacy definition overrode the conservative policy and caused ordinary terminal
+widths to select a crowded two-column layout. There is now exactly one production
+`Get-ConsoleLayoutTier` definition.
 
 - `Get-MainMenuSections` -- the single source of truth. Returns an ordered array of section
   objects (`Header`, `Items`), each item carrying `Number`, `Mode` (the string the `switch`
@@ -2086,15 +2087,13 @@ which are historical only.
 - `Get-MainMenuItems` -- flattens every section's items into one number-ordered list; used
   to derive the highest option number (the `Enter 1-N` prompt) and to avoid every caller
   re-flattening the section list itself.
-- `Get-ConsoleLayoutTier -Width -Height -RequiredFullLines` -- pure, testable, and
-  width-driven (console menus render in columns, not pixels; `-Height`/`-RequiredFullLines`
-  are accepted and tracked for diagnostic/metrics purposes -- see
-  `Get-MainMenuRenderMetrics`'s `HeightConstrained` output -- but do not themselves change
-  which tier is selected). Returns exactly one of:
-  - `Compact` -- width < 90
-  - `Standard` -- width 90-119
-  - `Professional` -- width 120-149
-  - `Ultra` -- width >= 150
+- `Get-MainMenuWideLayoutPolicy` -- the single source for wide-layout bounds:
+  `MinimumWidth = 200` and `MinimumHeight = 50`.
+- `Get-ConsoleLayoutTier -Width -Height -RequiredFullLines` -- pure and testable. It selects
+  `Ultra` only when both dimensions meet `Get-MainMenuWideLayoutPolicy`; every other
+  production viewport selects `Compact`. `RequiredFullLines` remains accepted for the
+  renderer/diagnostic contract but does not expand production selection to Standard or
+  Professional.
 - `Show-MainMenu -Tier` -- pure display, never reads input. Ultra (`UltraCentered` layout
   mode specifically) reproduces the original full wording (`FullDesc`) exactly; Ultra's
   default `UltraTwoColumn` layout and Standard/Compact show progressively less detail;

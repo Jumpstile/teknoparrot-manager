@@ -662,3 +662,26 @@ actions remain outside this implementation slice and were not performed.
 - Acceptance authority remains pending the formal re-baseline review. No
   commit, package, runtime, owner smoke, Arcade, merge, tag, publish,
   certification, or release action is authorized.
+
+## Desktop OMP -- RC8 compact-default menu corrective slice
+
+- Owner report: `ARC-UX-S01` (Issue #323).
+- Slice contract: `TPM-MENU-COMPACT-DEFAULT-001`.
+- Confirmed failure: the production script contained two `Get-ConsoleLayoutTier`
+  definitions. The later legacy width-only definition overrode the compact-default
+  width-and-height policy, so ordinary Windows Terminal viewports selected a
+  crowded two-column layout.
+- Source disposition: `SOURCE FIXED; OWNER RUNTIME NEEDED`. The corrective slice
+  keeps exactly one selector, centralizes the safe wide threshold, preserves the
+  constrained-height fallback, and closes the PostgreSQL workflow before normal
+  menu return.
+- Source/test evidence: `TeknoParrot-Manager.ps1`,
+  `Tests/TeknoParrot-Manager.Tests.ps1`, and
+  `scripts/Debug-TPM-MenuLayout.ps1`; focused PS7/PS5.1 menu and PostgreSQL
+  return-to-menu evidence is required before final disposition.
+- Runtime proof still needed: rebuild the exact package and capture the ordinary
+  menu, constrained viewport, wide threshold, and PostgreSQL failure-return
+  behavior on the authorized owner runtime. No ARCADE runtime work is performed
+  by this slice.
+- Hunk mapping: `TPM-MENU-COMPACT-DEFAULT-001` / `ARC-UX-S01` /
+  `TPM-TRACE-001` / `TPM-OWNER-001` through `TPM-OWNER-003`.

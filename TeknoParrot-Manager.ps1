@@ -27418,19 +27418,40 @@ if ($datIndex.Count -gt 0 -and $gameProfilesDir) {
 }
 
 # =============================================================================
-# ADAPTIVE MAIN MENU (issue #104) -- single data-driven model, rendered at one
-# of four layout tiers depending on the current console window's width
-# (Get-ConsoleLayoutTier is width-driven; see that function for the exact
-# breakpoints): Compact (<90 columns), Standard (90-119), Professional
-# (120-149), or Ultra (>=150). Every tier shows the same 15 numbered options
-# with the same meaning; only how much description text is shown, and
-# whether the layout is one or two columns, changes. Numbering, the
-# switch-statement dispatch, and all mode behavior are completely unaffected
-# by this -- only Show-MainMenu's own rendering varies. At extremely short
-# heights (below the documented 60x10 minimum-supported viewport), an
-# emergency compact presentation takes over regardless of tier -- see
-# Get-MainMenuEmergencyCompactRows.
+# ADAPTIVE MAIN MENU (issue #104) -- one compact default with an explicitly
+# safe wide tier for genuinely large viewports.
+#
+# Normal Windows Terminal/PowerShell launches must not choose a two-column
+# presentation merely because the host reports spare horizontal space. The
+# wide tier is enabled only when both dimensions clear the conservative
+# thresholds returned by Get-MainMenuWideLayoutPolicy. All other viewports use
+# the compact one-column presentation; short-height fallback remains inside
+# that presentation.
 # =============================================================================
+
+function Get-MainMenuWideLayoutPolicy {
+    return [pscustomobject]@{
+        MinimumWidth  = 200
+        MinimumHeight = 50
+    }
+}
+
+# Pure/testable: chooses the production default menu tier. The compact tier is
+# intentionally the default even when width is available. Two columns require
+# both conservative width and height margins so descriptions remain single
+# line and the complete menu remains visible.
+function Get-ConsoleLayoutTier {
+    param(
+        [int]$Width,
+        [int]$Height,
+        [int]$RequiredFullLines
+    )
+    $widePolicy = Get-MainMenuWideLayoutPolicy
+    if ($Width -ge $widePolicy.MinimumWidth -and $Height -ge $widePolicy.MinimumHeight) {
+        return 'Ultra'
+    }
+    return 'Compact'
+}
 
 # Single source of truth for every menu item's number, mode string, section,
 # and description -- ShortDesc (one line) and FullDesc (an array of lines).
@@ -27495,17 +27516,6 @@ function Get-MainMenuItems {
 # Width is the primary breakpoint because console menus render in columns, not
 # pixels. Height is tracked separately in the render metrics so diagnostics can
 # show whether the selected layout is still vertically constrained.
-function Get-ConsoleLayoutTier {
-    param(
-        [int]$Width,
-        [int]$Height,
-        [int]$RequiredFullLines
-    )
-    if ($Width -ge 150) { return 'Ultra' }
-    if ($Width -ge 120) { return 'Professional' }
-    if ($Width -ge 90) { return 'Standard' }
-    return 'Compact'
-}
 
 function Get-MainMenuRenderMetrics {
     param(

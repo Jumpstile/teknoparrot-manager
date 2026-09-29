@@ -922,3 +922,28 @@ across all 703 files; this is retained only as
 and the independently pinned ProfileCode sequence digest remain unchanged.
 Formal acceptance remains pending review; this record does not authorize
 commit, release, certification, or runtime activity.
+
+## Desktop OMP -- RC8 compact-default menu corrective slice
+
+- Owner report: `ARC-UX-S01` (Issue #323).
+- Slice contract: `TPM-MENU-COMPACT-DEFAULT-001`.
+- Root cause: `TeknoParrot-Manager.ps1` had duplicate
+  `Get-ConsoleLayoutTier` definitions. PowerShell used the later legacy
+  width-only definition, defeating the compact-default policy and selecting a
+  crowded two-column menu for ordinary viewports.
+- Required source evidence: exactly one production selector definition; one
+  centralized wide threshold used by production and
+  `Debug-TPM-MenuLayout.ps1`; ordered options 1-15 with H/L/Q and prompt below;
+  no consecutive blank render rows in the normal compact screen; complete
+  constrained-height fallback; and workflow status closed before PostgreSQL
+  failure return to the outer menu.
+- Required test evidence: focused menu/layout and PostgreSQL return-to-menu
+  tests under PS7 and Windows PowerShell 5.1, plus parser, PSScriptAnalyzer,
+  ASCII, and `git diff --check`.
+- Runtime disposition: `SOURCE FIXED; OWNER RUNTIME NEEDED`. Package identity,
+  owner-runtime screenshots, and release authorization remain outside this
+  desktop slice.
+- Hunk mapping: `TeknoParrot-Manager.ps1` and
+  `Tests/TeknoParrot-Manager.Tests.ps1` -> `TPM-MENU-COMPACT-DEFAULT-001` /
+  `ARC-UX-S01` / `TPM-TRACE-001`; documentation evidence ->
+  `TPM-OWNER-001` through `TPM-OWNER-003`.

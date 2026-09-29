@@ -9776,17 +9776,32 @@ Describe "Path-concept non-conflation guard (Part 2 item 9)" {
 }
 
 Describe "Get-ConsoleLayoutTier" {
-    It "uses the RC2 viewport breakpoints" {
-        Get-ConsoleLayoutTier -Width 80 -Height 80 -RequiredFullLines 60 | Should -Be 'Compact'
-        Get-ConsoleLayoutTier -Width 89 -Height 80 -RequiredFullLines 60 | Should -Be 'Compact'
-        Get-ConsoleLayoutTier -Width 90 -Height 80 -RequiredFullLines 60 | Should -Be 'Standard'
-        Get-ConsoleLayoutTier -Width 119 -Height 80 -RequiredFullLines 60 | Should -Be 'Standard'
-        Get-ConsoleLayoutTier -Width 120 -Height 80 -RequiredFullLines 60 | Should -Be 'Professional'
-        Get-ConsoleLayoutTier -Width 149 -Height 80 -RequiredFullLines 60 | Should -Be 'Professional'
-        Get-ConsoleLayoutTier -Width 150 -Height 80 -RequiredFullLines 60 | Should -Be 'Ultra'
+    It "has exactly one production definition" {
+        @([regex]::Matches($script:ProductionSource, '(?m)^function Get-ConsoleLayoutTier\s*\{')).Count | Should -Be 1
     }
-    It "does not demote a wide viewport solely because it is short" {
-        Get-ConsoleLayoutTier -Width 200 -Height 30 -RequiredFullLines 60 | Should -Be 'Ultra'
+    It "selects Compact or Ultra at every specified viewport boundary" {
+        foreach ($case in @(
+            @{ Width = 80; Height = 80; Expected = 'Compact' }
+            @{ Width = 90; Height = 80; Expected = 'Compact' }
+            @{ Width = 120; Height = 80; Expected = 'Compact' }
+            @{ Width = 150; Height = 80; Expected = 'Compact' }
+            @{ Width = 199; Height = 80; Expected = 'Compact' }
+            @{ Width = 200; Height = 49; Expected = 'Compact' }
+            @{ Width = 200; Height = 50; Expected = 'Ultra' }
+            @{ Width = 240; Height = 30; Expected = 'Compact' }
+            @{ Width = 240; Height = 80; Expected = 'Ultra' }
+        )) {
+            $actual = Get-ConsoleLayoutTier -Width $case.Width -Height $case.Height -RequiredFullLines 60
+            $actual | Should -Be $case.Expected -Because "$($case.Width)x$($case.Height)"
+        }
+    }
+}
+
+Describe "Get-MainMenuWideLayoutPolicy" {
+    It "documents the conservative production wide-layout thresholds" {
+        $policy = Get-MainMenuWideLayoutPolicy
+        $policy.MinimumWidth | Should -Be 200
+        $policy.MinimumHeight | Should -Be 50
     }
 }
 
@@ -10044,15 +10059,65 @@ Describe "RC8 main-menu command routing and visibility" {
         $preview | Should -BeLessThan $create
         $source | Should -Match '\$previewChoice -eq ''B''\) \{ continue \}'
     }
-    It "keeps the polished banner and first option at full-screen size" {
-        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 200 -Height 60
-        $output = ($screen.Rows | ForEach-Object Text) -join "`n"
-        $screen.Geometry.Layout | Should -Be 'UltraTwoColumn'
+    It "renders the compact one-column menu by default at ordinary terminal dimensions" {
+        $width = 120
+        $height = 80
+        $tier = Get-ConsoleLayoutTier -Width $width -Height $height -RequiredFullLines 60
+        $screen = Render-MainMenuScreen -Tier $tier -Width $width -Height $height
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+        $screen.Geometry.Layout | Should -Be 'Compact'
+        $screen.Geometry.ColumnCount | Should -Be 1
+        $output | Should -Match 'TeknoParrot Manager'
         $output | Should -Match ([regex]::Escape((Get-ManagerVersionLine)))
-        $output.IndexOf('1) AutoSync') | Should -BeGreaterThan -1
-        $output.IndexOf('1) AutoSync') | Should -BeLessThan $output.IndexOf('6) dgVoodoo2 setup')
+        $numbers = @([regex]::Matches($output, '(?m)^\s*(\d+)\)\s') | ForEach-Object { [int]$_.Groups[1].Value })
+        ($numbers -join ',') | Should -Be ((1..15) -join ',')
+        $output | Should -Match 'H\s*=\s*Help'
+        $output | Should -Match 'L\s*=\s*View Log'
+        $output | Should -Match 'Q\s*=\s*Quit'
         $screen.PromptAllowed | Should -BeTrue
+        ($screen.VisibleOptionNumbers -join ',') | Should -Be ((1..15) -join ',')
+        $screen.Rows[-2].Text | Should -Match '15\)\s+Exit\s*$'
+        $screen.Rows[-1].Text | Should -Match 'Enter number.*H\s*=\s*Help.*L\s*=\s*View Log.*Q\s*=\s*Quit'
+        $showCall = $script:ProductionSource.IndexOf('$screen = Show-MainMenu')
+        $promptCall = $script:ProductionSource.IndexOf('$choiceResult = Read-MainMenuChoiceResponsive', $showCall)
+        $promptCall | Should -BeGreaterThan $showCall
+        $script:ProductionSource | Should -Match 'function Show-MainMenu \{(?s:.*?)Write-ConsoleRenderRows -Rows \$screen\.Rows'
     }
+    It "uses two columns without wrapping or clipping at the minimum and large safe wide thresholds" {
+        foreach ($viewport in @(
+            @{ Width = 200; Height = 50 }
+            @{ Width = 240; Height = 80 }
+        )) {
+            $tier = Get-ConsoleLayoutTier -Width $viewport.Width -Height $viewport.Height -RequiredFullLines 60
+            $screen = Render-MainMenuScreen -Tier $tier -Width $viewport.Width -Height $viewport.Height
+            $screen.Geometry.Layout | Should -Be 'UltraTwoColumn'
+            $screen.Geometry.ColumnCount | Should -Be 2
+            $screen.PromptAllowed | Should -BeTrue
+            $screen.Rows.Count | Should -BeLessOrEqual $viewport.Height
+            foreach ($row in $screen.Rows) {
+                $row.Text.Length | Should -BeLessOrEqual $viewport.Width
+            }
+            foreach ($item in (Get-MainMenuItems)) {
+                @($screen.Rows | Where-Object { $_.Text.Contains("$($item.Number)) $($item.Label)") }).Count | Should -Be 1
+            }
+        }
+    }
+
+    It "keeps every actionable item and the prompt inside a constrained-height fallback" {
+        $tier = Get-ConsoleLayoutTier -Width 200 -Height 20 -RequiredFullLines 60
+        $screen = Render-MainMenuScreen -Tier $tier -Width 200 -Height 20
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+        $screen.Geometry.ColumnCount | Should -Be 1
+        $screen.Rows.Count | Should -BeLessOrEqual 18
+        $screen.PromptAllowed | Should -BeTrue
+        ($screen.VisibleOptionNumbers -join ',') | Should -Be ((1..15) -join ',')
+        $lastOptionIndex = 0
+        foreach ($item in (Get-MainMenuItems)) {
+            $lastOptionIndex = [Math]::Max($lastOptionIndex, $output.IndexOf("$($item.Number)) $($item.Label)"))
+        }
+        $output.IndexOf('Enter number') | Should -BeGreaterThan $lastOptionIndex
+    }
+
 
 }
 
@@ -10467,18 +10532,16 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
     # per-case execution/reporting, which is what this rewrite is for.)
     It "at <Width>x<Height>, Exit and the footer stay visible without scrolling, using this case's own dimensions" -TestCases @(
         @{ Width = 80;  Height = 8;  ExpectedTier = 'Compact' }
-        @{ Width = 100; Height = 8;  ExpectedTier = 'Standard' }
-        @{ Width = 150; Height = 8;  ExpectedTier = 'Ultra' }
-        @{ Width = 100; Height = 20; ExpectedTier = 'Standard' }
+        @{ Width = 100; Height = 8;  ExpectedTier = 'Compact' }
+        @{ Width = 150; Height = 8;  ExpectedTier = 'Compact' }
+        @{ Width = 100; Height = 20; ExpectedTier = 'Compact' }
     ) {
         param($Width, $Height, $ExpectedTier)
         $tier = Get-ConsoleLayoutTier -Width $Width -Height $Height -RequiredFullLines 0
 
         # Proves the WIDTH bound into this case actually drove tier
-        # selection (Get-ConsoleLayoutTier is width-only, so this is a
-        # second, independent confirmation of the Width binding below, not
-        # a duplicate of it) -- a cross-case value swap between the 80/100/
-        # 150-wide cases would flip this and fail.
+        # selection under the production width-and-height policy -- a
+        # cross-case value swap would flip this and fail.
         $tier | Should -Be $ExpectedTier
 
         $screen = Render-MainMenuScreen -Tier $tier -Width $Width -Height $Height
@@ -10627,7 +10690,7 @@ Describe "Issue #140 wording surfaces at every layout tier (issue #104/#140 RC3 
 }
 
 Describe "Menu layout debug script" {
-    It "prints host dimensions and renderer metrics without launching the interactive manager" {
+    It "prints host dimensions and the same ordinary-width layout as production" {
         $debugScript = Join-Path $PSScriptRoot '..\scripts\Debug-TPM-MenuLayout.ps1'
         $output = & $debugScript -Width 200 -Height 30 6>&1 | Out-String
 
@@ -10636,16 +10699,14 @@ Describe "Menu layout debug script" {
         $output | Should -Match 'Host\.RawUI\.BufferSize\.Height'
         $output | Should -Match 'Selected viewport width\s+:\s+200'
         $output | Should -Match 'Selected viewport height\s+:\s+30'
-        $output | Should -Match 'Selected layout tier\s+:\s+Ultra'
-        $output | Should -Match 'Selected layout mode\s+:\s+UltraTwoColumn'
+        $output | Should -Match 'Selected layout tier\s+:\s+Compact'
+        $output | Should -Match 'Selected layout mode\s+:\s+CompactWrappedSingleColumn'
         $output | Should -Match 'Requested ultra mode\s+:\s+Auto'
-        $output | Should -Match 'Description width\s+:\s+79'
-        $output | Should -Match 'Total render width\s+:\s+198'
-        $output | Should -Match 'Constrained by\s+:\s+height'
+        $output | Should -Match 'Constrained by\s+:\s+width,height'
     }
-    It "can render the experimental UltraCentered layout for comparison" {
+    It "can render UltraCentered at a genuinely wide viewport" {
         $debugScript = Join-Path $PSScriptRoot '..\scripts\Debug-TPM-MenuLayout.ps1'
-        $output = & $debugScript -Width 180 -Height 30 -UltraLayoutMode UltraCentered -Render 6>&1 | Out-String
+        $output = & $debugScript -Width 240 -Height 60 -UltraLayoutMode UltraCentered -Render 6>&1 | Out-String
 
         $output | Should -Match 'Selected layout tier\s+:\s+Ultra'
         $output | Should -Match 'Selected layout mode\s+:\s+UltraCentered'
@@ -13192,10 +13253,13 @@ Describe "ReShade trusted profile restore" {
     }
     It "captures PostgreSQL client diagnostics before blocking writes" {
         $source = $script:ProductionSource
-        $source | Should -Match '\$queryOutput = \(& \$psqlExe .*2>&1 \| Out-String\)\.Trim\(\)'
-        $source | Should -Match '\$queryExitCode = \$LASTEXITCODE'
+        $source | Should -Match '\$queryResult = Invoke-PostgresNativeCommand -FilePath \$psqlExe -Arguments @\(''-U'',''postgres'',''-h'',''127\.0\.0\.1'',''-p'',''5432'',''-d'',''postgres'',''-tAc'''
+        $source | Should -Match '\$queryOutput = \[string\]\$queryResult\.Output'
+        $source | Should -Match '\$queryExitCode = \[int\]\$queryResult\.ExitCode'
         $source | Should -Match 'database existence query failed \(exit code \{0\}\)'
         $source | Should -Match 'FailureDiagnoses = @\(\$failureDiagnoses\.ToArray\(\)\)'
+        $source | Should -Match '\$output = \(\$captured \| ForEach-Object \{ \[string\]\$_ \} \| Out-String\)\.Trim\(\)'
+        $source | Should -Match 'Output = ConvertTo-PostgresRedactedText -Text \$output -Secrets \$Secrets'
     }
 
     It "keeps ReShade preview and deployment confirmation wording explicit" {
@@ -14892,10 +14956,13 @@ Describe "Focused RC8 remediation contracts" {
     }
     It "uses one explicit PostgreSQL credential context for validation and dumps" {
         $source = $script:ProductionSource
-        $source | Should -Match 'psqlExe -U postgres -h 127\.0\.0\.1 -p 5432 -d postgres -tAc'
-        $source | Should -Match 'pgDumpExe -U postgres -h 127\.0\.0\.1 -p 5432 -d \$dbName -F c'
-        $source | Should -Not -Match 'psqlExe -U postgres -h 127\.0\.0\.1 -p 5432 -d postgres -w'
-        $source | Should -Not -Match 'pgDumpExe -U postgres -h 127\.0\.0\.1 -p 5432 -d \$dbName -w'
+        $source | Should -Match '\$pgpassFile = New-PostgresPgPassFile -Password \$SuperPasswordPlain'
+        $source | Should -Match 'Set-PostgresPgPassFileEnvironment -Path \$pgpassFile'
+        $source | Should -Match 'Invoke-PostgresNativeCommand -FilePath \$psqlExe -Arguments @\(''-U'',''postgres'',''-h'',''127\.0\.0\.1'',''-p'',''5432'',''-d'',''postgres'',''-tAc'''
+        $source | Should -Match 'Invoke-PostgresNativeCommand -FilePath \$pgDumpExe -Arguments @\(''-U'',''postgres'',''-h'',''127\.0\.0\.1'',''-p'',''5432'',''-d'',\$dbName,''-F'',''c'''
+        $source | Should -Match '-Secrets @\(\$SuperPasswordPlain\)'
+        $source | Should -Not -Match 'psqlExe.*''-w'''
+        $source | Should -Not -Match 'pgDumpExe.*''-w'''
     }
     It "routes GPU path skips to Health Check and explains the next action" {
         $source = $script:ProductionSource
