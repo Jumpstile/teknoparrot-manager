@@ -16051,7 +16051,7 @@ function Exit-PostgresRecoveryResume {
     param([Parameter(Mandatory)][string]$Message, [int]$ExitCode = 1)
     $retryPath = $null
     $resumeState = $script:PostgresRecoveryResumeState
-    if ($resumeState -and $resumeState.ClaimPath) {
+    if ($resumeState -and $resumeState.ClaimPath -and -not [bool]$resumeState.CredentialCommitUnverified) {
         try {
             $retryPath = New-PostgresRecoveryRetryState -State $resumeState
             if (-not (Remove-PostgresRecoveryState -Path $resumeState.Path -ClaimPath $resumeState.ClaimPath)) {
@@ -16060,21 +16060,33 @@ function Exit-PostgresRecoveryResume {
         } catch {
             $retryPath = $null
         }
+    } elseif ($resumeState -and $resumeState.CredentialCommitUnverified) {
+        [void](Remove-PostgresRecoveryState -Path $resumeState.Path -ClaimPath $resumeState.ClaimPath)
     }
     if ($script:PostgresRecoveryStatus) {
         try {
-            [void](Set-TpmWorkflowFailure -Context $script:PostgresRecoveryStatus -FailureId 'postgres-resume-failure' -Message $Message -DataSafety 'TPM did not report profile or database changes as complete.' -RecoveryActions @(@{ Id = 'Retry'; Label = 'Use the protected retry' }; @{ Id = 'Stop'; Label = 'Stop safely' }))
+            $recoveryActions = if ($resumeState -and $resumeState.CredentialCommitUnverified) {
+                @(@{ Id = 'Stop'; Label = 'Stop safely and ask for help' })
+            } else {
+                @(@{ Id = 'Retry'; Label = 'Use the protected retry' }; @{ Id = 'Stop'; Label = 'Stop safely' })
+            }
+            [void](Set-TpmWorkflowFailure -Context $script:PostgresRecoveryStatus -FailureId 'postgres-resume-failure' -Message $Message -DataSafety 'TPM did not report profile or database changes as complete.' -RecoveryActions $recoveryActions)
         } catch {}
     }
     Write-Host ''
     Write-Host ('  ' + $Message) -ForegroundColor Red
-    Write-Host '  TeknoParrot Manager did not report the PostgreSQL setup as complete. No further profile changes were made.' -ForegroundColor Yellow
-    if ($retryPath) {
-        Write-Host '  TeknoParrot Manager preserved a protected retry. Choose PostgreSQL setup again to continue safely.' -ForegroundColor Yellow
-        Write-Log 'Postgres recovery resume: stopped before completion; a fresh protected retry state was issued.'
+    if ($resumeState -and $resumeState.CredentialCommitUnverified) {
+        Write-Host '  PostgreSQL password change was committed, but the new password could not be verified. No protected retry was saved; ask for help before trying again.' -ForegroundColor Yellow
+        Write-Log 'Postgres recovery resume: password change committed without authentication proof; no credential retry state was issued.'
     } else {
-        Write-Host '  TeknoParrot Manager could not preserve a safe retry state. Nothing else was changed.' -ForegroundColor Yellow
-        Write-Log 'Postgres recovery resume: stopped before completion; no retry state was retained.'
+        Write-Host '  TeknoParrot Manager did not report the PostgreSQL setup as complete. No further profile changes were made.' -ForegroundColor Yellow
+        if ($retryPath) {
+            Write-Host '  TeknoParrot Manager preserved a protected retry. Choose PostgreSQL setup again to continue safely.' -ForegroundColor Yellow
+            Write-Log 'Postgres recovery resume: stopped before completion; a fresh protected retry state was issued.'
+        } else {
+            Write-Host '  TeknoParrot Manager could not preserve a safe retry state. Nothing else was changed.' -ForegroundColor Yellow
+            Write-Log 'Postgres recovery resume: stopped before completion; no retry state was retained.'
+        }
     }
     # This function only runs inside the elevated protected-resume child.
     # Never pause for input here: the parent TPM process is waiting on this
@@ -16305,6 +16317,8 @@ function Invoke-PostgresSelectedPasswordRecovery {
         if ($StatusContext) { [void](Update-TpmWorkflowActivity -Context $StatusContext -Activity 'Verifying the repaired PostgreSQL password') }
         if (-not (Test-PostgresPassword -SuperPasswordPlain $PasswordPlain)) {
             $final = New-TpmProfileTransactionResult -WorkflowKey 'PostgresRecovery' -OperationKey 'RecoverRolePassword' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'PostgreSQL role change needs attention because final authentication could not be verified.' -Items @('postgres-role') -ChangedItems @('postgres-role') -FailedItems @('postgres-role') -MutationStarted $true -Backup $reset.Backup -FinalPassed $false -ReasonCode 'FINAL_AUTHENTICATION_UNVERIFIED' -FinalChecks @('The committed role change was not reported as complete without final authentication proof.')
+            $final | Add-Member -NotePropertyName PasswordChangeCommitted -NotePropertyValue ([bool]$reset.PasswordChangeCommitted) -Force
+            $final | Add-Member -NotePropertyName FailureStage -NotePropertyValue ([string]$reset.FailureStage) -Force
             $final | Add-Member -NotePropertyName RecoveryBundle -NotePropertyValue $backup -Force
             return $final
         }
@@ -29103,6 +29117,9 @@ $mode = $null
                     } else {
                         $recovery = Invoke-PostgresSelectedPasswordRecovery -UserProfilesDir $userProfilesDir -PasswordPlain $typedPwPlain -StatusContext $postgresStatus
                         if ($recovery.Outcome -ne 'SUCCEEDED') {
+                            if ($recovery.PasswordChangeCommitted) {
+                                $postgresResumeState | Add-Member -NotePropertyName CredentialCommitUnverified -NotePropertyValue $true -Force
+                            }
                             if ($recovery.RecoveryBundle.Path) { Write-Host ("  Recovery BLOCKED. Evidence: {0}" -f $recovery.RecoveryBundle.Path) -ForegroundColor Red }
                             Exit-PostgresRecoveryResume -Message ('TPM could not complete the protected PostgreSQL repair ({0}).' -f $recovery.Reason)
                         }

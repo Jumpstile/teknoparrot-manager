@@ -1,97 +1,69 @@
-# PR #321 Current Slice: ReShade Ownership and Accounting
+# PR #321 Current Slice: PostgreSQL Retry Authentication Boundary
 
-- Slice ID: TPM-RESHADE-001
-- Slice name: Protected ReShade adopt/replace and all-games accounting
-- Included owner-report IDs: 11, 12.
+- Slice ID: TPM-POSTGRES-RETRY-AUTH-001
+- Slice name: Protected PostgreSQL retry credential authentication boundary
+- Included owner-report IDs: 16.
 - Issue: PR #321.
-- Permanent procedures: TPM-TRACE-001, TPM-OWNER-001.
-- Explicit exclusions: controls runtime proof (30), progress inventory (3), prompt migration (26/32), repair (16-22), packaging, release, certification, owner-runtime smoke, ARCADE/#323, wiki, commit, and push.
+- Permanent procedures: TPM-TRACE-001, TPM-OWNER-001, TPM-AUTH-001.
+- Explicit exclusions: Other owner IDs; PostgreSQL reinitialization policy; backup implementation; unrelated recovery UX; merge, tag, publication, release assets, release-identity changes, and wiki publication. Exact-head package rebuild, ARCADE staging, and exhaustive #323 smoke are authorized only after the source gate, commit/push, and exact-head CI succeed.
 
 ## Behavior contract
 
-- Protected or unknown ReShade files are preserved by default.
-- Explicit adopt/replace is the only path that may replace protected files; the UI must explain the risk and backup requirement.
-- Existing protected files are backed up before replacement. Backup failure blocks replacement and ownership metadata is not written.
-- Ownership metadata is written only after successful replacement and records TPM-managed ownership for future operations.
-- All-games preflight reports managed-ready, protected, missing-path, unsafe, and failed/preflight-blocked counts before mutation.
-- Every selected game receives exactly one terminal accounting outcome: changed, adopted/replaced, protected unchanged, missing, unsafe, failed, skipped, or cancelled.
-- Missing paths, unsafe paths, cancel, Back, and preview remain non-mutating.
-- The numbered terminal profile chooser is the sole profile authority. The optional gallery follows the selected profile and exposes only comparison view controls, never a second profile selector.
-- Final result output states what changed and did not change, lists unsafe or malformed details, and gives a direct review/repair-then-rerun action.
-- Native TeknoParrot CRT, SSAA, shader, scanline, and post-process settings are read-only inputs; detected enabled settings produce a stacking warning and are never overwritten.
-- Onboarding pauses after the ReShade result and before dgVoodoo2.
+- Current failure: A committed PostgreSQL role-password mutation followed by failed live revalidation could flow through protected resume as retryable. The result could omit `PasswordChangeCommitted` and mint a fresh protected resume envelope containing the rejected candidate.
+- Expected behavior: Preserve committed-mutation state through wrapper results. On committed-but-unverified failure, remove consumed resume state, do not mint or advertise a credential retry, and report that the password change committed but the new password could not be verified. A verified credential continues only through the existing protected envelope and child-side authentication check; database/profile mutation still requires verified safety backup.
+- Forbidden regressions: No plaintext password in artifacts, logs, or user-facing output; no retry with unverified credentials; no claim that the old password remains authoritative after commit; no database/profile mutation without verified backup; preserve DPAPI, PGPASSFILE, fatal native-command, and redaction protections.
 
 ## Prompt inventory and classification
 
-- Profile selection, game selection, bulk-apply, adopt/replace, preview, and
-  Back/cancel decisions are in scope for this slice.
-- Stateful game/profile pickers remain renderer-aware boundaries; this slice
-  does not replace their selection grammar with a generic one-letter reader.
-- Exact-token safety confirmations remain exact-token gates.
+- The change does not alter prompt choices or routing; protected-resume retry/status output and action handling are the affected terminal paths.
+- Password input remains secure input and is not migrated to the finite-choice prompt reader.
+- Existing recovery choice, cancel, and Back semantics remain unchanged.
 
 ## Source inventory
 
-- Ownership manifests are read and validated before mutation.
-- ReShade removal already protects bundled, preinstalled, changed, ambiguous,
-  missing, and malformed entries.
-- Profile installation already has transactional staging, backup, promotion,
-  rollback, and manifest commit boundaries.
-- The slice must close the remaining protected-adopt/replace decision and prove
-  complete all-games result accounting without weakening fail-closed paths.
+- The selected-recovery wrapper must preserve `PasswordChangeCommitted` through its final live revalidation result.
+- The shared protected exit must not issue a retry envelope after committed-but-unverified mutation.
+- Existing live authentication, protected envelope, backup-before-database/profile-mutation, and redaction boundaries remain in force.
 
 ## Required focused tests
 
-- Protected files remain unchanged by default.
-- Explicit adopt/replace backs up before replacement.
-- Backup failure blocks replacement.
-- Ownership metadata is committed only after successful replacement.
-- Adopted ownership is recognized by later managed updates.
-- All-games preflight counts safe, protected, missing, unsafe, and failed states.
-- Final accounting totals equal selected games exactly once.
-- Unsafe/malformed results expose details and route directly to review/repair then Select.
-- Terminal selection updates the optional preview state; the preview cannot override it.
-- Native shader/display warnings are read-only and preserve the source XML.
-- Cancel, Back, preview, missing, unsafe, and null-result paths do not mutate.
-- Existing ReShade focused tests remain green.
+- Committed post-change authentication failure removes consumed envelope and neither mints nor advertises a retry.
+- Ordinary protected failure remains retryable when no password mutation committed.
+- Successful protected resume exits cleanly.
+- Reset authentication and database backup contracts remain intact.
+- Run focused PostgreSQL recovery/password/resume tests under PS7 and Windows PowerShell 5.1; run the full main Pester and SupportPackage suites.
 
 ## Files allowed to change
 
 - `TeknoParrot-Manager.ps1`
 - `Tests/TeknoParrot-Manager.Tests.ps1`
 - `ARCHITECTURE.md`
-- `README.md`
-- `TeknoParrot-Manager-README.txt`
-- `TeknoParrot-Manager-QuickStart.txt`
-- `TeknoParrot-Manager-CHANGELOG.txt`
 - `docs/RC8-REMEDIATION-INVENTORY.md`
 - `docs/remediation/PR-321-current-slice.md`
 - `docs/remediation/PR-321-control-board.md`
 - `docs/remediation/PR-321-reconciliation.md`
+- `docs/remediation/slices/TPM-POSTGRES-RETRY-AUTH-001.md`
+- `scripts/Test-TpmPermanentProcedures.ps1`
+- `scripts/Run-TpmQualityGate.ps1`
+- `docs/governance/permanent-procedures.md`
 
 ## Runtime proof required
 
-None authorized in this slice. Owner proof requires a packaged candidate and a multi-game ReShade operation matrix.
+- Exact packaged behavior: From a candidate rebuilt from the exact reviewed source identity, exercise protected password reset with failed post-change authentication; verify no retry state is issued or advertised, and verify truthful committed-state guidance. Also exercise verified-password backup retry and successful recovery.
+- Required source/package identity: Exact source commit and package rebuilt from it; a stale package is not evidence.
+- Evidence artifacts: Child exit code, parent-side routing, visible committed-state guidance, retry-state absence, PostgreSQL service state, and backup evidence.
+- Owner authorization: The 2026-09-30 owner directive authorizes commit/push after legitimate source gates, exact-head CI monitoring, exact-SHA package rebuild/verification, ARCADE staging, and the full exhaustive RC8 smoke. Merge, tag, publication, and release remain owner-blocked.
 
 ## Stop condition
 
-Stop if the implementation cannot preserve protected files by default, if backup/metadata ordering is ambiguous, if accounting cannot prove one outcome per selected game, or if package/runtime proof is required.
+Keep HOLD until the source-mode permanent-procedure gate passes legitimately, the exact source SHA is committed/pushed with exact-head CI green, a fresh package is rebuilt from that SHA, and the authorized ARCADE runtime proof completes. Certification-mode procedure validation must then pass before any release-ready claim. Stop immediately if a retry would contain an unverified credential or mutation could proceed without verified backup.
 
 ## Forbidden actions
 
-No commit, push, package, release, certification, wiki, owner smoke, controls work, progress/prompt redesign, ARCADE/#323 work, or unrelated source cleanup.
+No destructive ARCADE baseline change, baseline deletion, unrelated cleanup, merge, tag, publication, wiki update, release action, or release-identity change. Commit/push, exact-head package build, ARCADE staging, and exhaustive smoke are authorized by the current owner directive only after their preceding gates legitimately pass.
 
-## Working-tree evidence for this ReShade UX correction
+## Hunk classification
 
-- `Show-TpmReShadeProfileGalleryWindow` has no profile ComboBox or ignored
-  profile-selection action. `Read-TpmReShadeTerminalProfile` owns the choice;
-  `Sync-TpmReShadeGallerySelection` updates the optional preview state.
-- `Invoke-ReShadeSetup` reports changed, protected, missing, unsafe/malformed,
-  unsupported, and failed outcomes. Unsafe details are reconciled through
-  `Get-TpmReShadeApplyAccounting` and the result action model routes directly
-  to review/repair then Select.
-- Native TeknoParrot CRT/SSAA/shader/scanline/post-process fields are read
-  without XML mutation. Canonical shader filenames and technique names are
-  shown instead of raw profile objects or cache paths.
-- Normal onboarding prints and pauses on the ReShade result before the
-  dgVoodoo2 section. Packaging, owner-runtime proof, and release authorization
-  remain outside this slice.
+- `TeknoParrot-Manager.ps1`, `Tests/TeknoParrot-Manager.Tests.ps1`, `ARCHITECTURE.md`, `docs/RC8-REMEDIATION-INVENTORY.md`, control board, this current-slice record, and detailed contract: owner report 16 / PR #321 / TPM-TRACE-001 / TPM-POSTGRES-RETRY-AUTH-001.
+- `scripts/Test-TpmPermanentProcedures.ps1`, `scripts/Run-TpmQualityGate.ps1`, `docs/governance/permanent-procedures.md`, and the governance assertions in `Tests/TeknoParrot-Manager.Tests.ps1`: PR #321 / TPM-TRACE-001 / TPM-OWNER-001 / TPM-AUTH-001 / TPM-POSTGRES-RETRY-AUTH-001; separates source-gate eligibility from runtime-complete certification without converting source evidence into runtime proof.
+- Per-run owner/runtime evidence and disposition: owner report 16 / PR #321 / TPM-OWNER-001 / TPM-POSTGRES-RETRY-AUTH-001.

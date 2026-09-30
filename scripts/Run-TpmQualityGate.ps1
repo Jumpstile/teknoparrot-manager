@@ -34,9 +34,26 @@ Invoke-GateStep 'PSScriptAnalyzer' {
 Invoke-GateStep 'Main Pester' { & pwsh -NoProfile -Command "Invoke-Pester -Path '$tests' -CI" }
 if (Test-Path -LiteralPath $supportTests -PathType Leaf) { Invoke-GateStep 'SupportPackage Pester' { & pwsh -NoProfile -Command "Invoke-Pester -Path '$supportTests' -CI" } }
 Invoke-GateStep 'git diff check' { git -C $repo diff --check }
-$changedAt = (Get-Item -LiteralPath $source).LastWriteTimeUtc
+$freshnessPaths = @(
+    $source,
+    $tests,
+    $supportTests,
+    (Join-Path $PSScriptRoot 'Test-TpmPermanentProcedures.ps1'),
+    $PSCommandPath,
+    (Join-Path $repo 'docs\governance\permanent-procedures.md'),
+    (Join-Path $repo 'docs\remediation\slices\PR-321-current-slice.md'),
+    (Join-Path $repo 'docs\remediation\slices\TPM-POSTGRES-RETRY-AUTH-001.md')
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+$changedAt = ($freshnessPaths | ForEach-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc } | Sort-Object -Descending | Select-Object -First 1)
 Invoke-GateStep 'Permanent procedure gate' {
-    & (Join-Path $PSScriptRoot 'Test-TpmPermanentProcedures.ps1') -RepoRoot $repo -ReportPath $reportForGate -SourcePath $source -ChangedAtUtc $changedAt
+    $permanentGateArgs = @{
+        RepoRoot = $repo
+        ReportPath = $reportForGate
+        SourcePath = $source
+        ChangedAtUtc = $changedAt
+    }
+    if ($CertificationMode) { $permanentGateArgs.RequireOwnerRuntime = $true }
+    & (Join-Path $PSScriptRoot 'Test-TpmPermanentProcedures.ps1') @permanentGateArgs
 }
 if ($CertificationMode) {
     $pester = Get-Module -Name Pester -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1

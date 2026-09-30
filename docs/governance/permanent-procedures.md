@@ -23,14 +23,15 @@ or test result cannot silently become packaged-runtime proof.
 ## Required workflow
 
 1. Create a remediation report from `docs/templates/remediation-gate-report.md`.
-2. Run `scripts/Run-TpmQualityGate.ps1` from the authorized local worktree.
-3. Resolve every gate failure or explicitly record the report item as `NOT FIXED`.
-4. Obtain the required owner-runtime evidence where the report identifies it.
-5. Obtain explicit authorization before commit, push, package, release,
-   certification, wiki, or ARCADE work.
+2. Run `scripts/Run-TpmQualityGate.ps1` from the authorized local worktree. This is the source/test gate and may legitimately retain `SOURCE FIXED; OWNER RUNTIME NEEDED` rows.
+3. Resolve every source/test gate failure or explicitly record the report item as `NOT FIXED`.
+4. Obtain explicit authorization before commit, push, package, certification, wiki, or ARCADE work. When runtime proof requires an exact immutable package, freeze the authorized commit, verify exact-head CI, and build the candidate from that SHA.
+5. Obtain the required owner-runtime evidence from that exact package where the report identifies it.
+6. Run `scripts/Run-TpmQualityGate.ps1 -CertificationMode` before any release-ready claim. Certification mode requires all owner-runtime evidence to be complete.
+7. Obtain explicit owner approval before merge, tag, publication, release assets, or release-identity changes.
 
-The gate does not authorize any of those actions. A passing gate is evidence of
-procedure compliance only.
+Neither gate mode authorizes an action by itself. A passing gate is evidence of
+procedure compliance only; authorization remains a separate requirement.
 ## TPM contract-first rule
 
 TPM follows the contract-first remediation workflow. No future TPM source

@@ -143,16 +143,24 @@ evidence.
 
 **PostgreSQL committed-state recovery (RC8).** The single-user `ALTER ROLE`
 is the mutation cutoff. If it succeeds but service restart or new-password
-authentication cannot be verified, recovery returns `PasswordChangeCommitted`
-and a blocked result with evidence; it never says the old password remains
-authoritative and never saves the unverified replacement credential.
+authentication cannot be verified, recovery returns
+`PasswordChangeCommitted` through the final selected-recovery wrapper as well
+as the reset helper and returns a blocked result; it never says the old
+password remains authoritative and never saves or advertises the unverified
+replacement credential as a protected retry. The wrapper preserves the commit
+marker if its final authentication check fails after reset-level revalidation
+passed. A protected child retry is issued only while the credential remains
+safe to reuse; when a password change committed but live authentication
+failed, TPM removes the consumed state and offers no retry action. A verified
+credential remains protected by the DPAPI envelope, is revalidated by the
+resumed child before backup, and database/profile mutation remains behind
+verified safety backup.
 When a protected backup fails because the saved password is rejected, the
 recovery screen exposes reachable masked actions for password validation (`P`)
 and local role reset (`X`); the reset action is not merely displayed but is
 included in the accepted choice set. Raw client diagnostics remain behind
 Details and logs. PACKAGE_MISMATCH and IDENTITY_MISMATCH remain hard-stop
 conditions; no retry state is built from an unvalidated handoff payload.
-
 The password-recovery producer's raw evidence bundle (`Path`, required array-valued
 `ConfigBackups` and `ProfileBackups`, and `Verified`) remains separate from the
 canonical `TPM.TransactionResult.v1.Backup` object. The wrapper carries that

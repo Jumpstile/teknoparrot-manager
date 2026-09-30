@@ -6,7 +6,7 @@
 - Report generated for Desktop OMP source-remediation Slice 1.
 - Candidate ZIP: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`
 - Candidate SHA-256: `98F9C028AFAC7CDDC72D314C5D8DB1A9DBFA6D09BE1B2FA94A84A902AD8A1F22`
-- Candidate remains runtime-blocked; no package rebuild or owner smoke is authorized.
+- Candidate remains runtime-blocked until a fresh exact-head package completes the authorized ARCADE smoke. The 2026-09-30 owner directive authorizes source-gated commit/push, exact-head CI, package rebuild/verification, ARCADE staging, and exhaustive smoke; merge, tag, publication, and release remain prohibited.
 - Scope: BepInEx containment, inspection classification, rollback failure, retry
   guidance, prompt visibility, and touched BepInEx naming.
 - Current status: source remediation in progress; release remains blocked.
@@ -255,6 +255,8 @@ Package rebuild and owner-runtime proof remain outstanding.
 ## Tests with exact counts and timestamps
 | Gate/test | Exact command | Count/result | Started UTC | Finished UTC | Engine/version |
 |---|---|---|---|---|---|
+| 2026-09-30 source quality gate | `Run-TpmQualityGate.ps1 -RepoRoot C:\\REPOS\\tpm-rc8-determinism-integration -ReportPath C:\\REPOS\\tpm-rc8-determinism-integration\\docs\\remediation\\PR-321-reconciliation.md` | Main Pester 1176 passed, 0 failed, 0 skipped, 0 not run; SupportPackage 41 passed, 0 failed, 0 skipped, 0 not run; ASCII/parse, PSScriptAnalyzer, and `git diff --check` passed; permanent-procedure phase reached and failed only because this report still predated the final governance edits | 2026-09-30T10:56:57 | 2026-09-30T11:10:55 | Pester 6.1.0 / pwsh |
+| 2026-09-30 permanent-procedure source gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot <absolute worktree> -ReportPath <absolute report> -SourcePath <absolute source> -ChangedAtUtc <latest governed-input UTC>` | PASS; governed-input freshness boundary `2026-09-30T10:56:11`; owner-runtime evidence remains separately pending | 2026-09-30T11:12:33 | 2026-09-30T11:12:33 | Windows PowerShell / pwsh-compatible script |
 | Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal` | 1052 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
 | Slice A focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*Invoke-TpmDownload*','*Thumbnail*','*RC8 PostgreSQL and support UX*') -CI -Output Normal` | 54 passed, 0 failed, 0 skipped, 975 not run | not captured | not captured | Pester 5.7.1 |
 | SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -CI -Output Normal` | 41 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
@@ -369,6 +371,8 @@ owner-runtime smoke, release, certification, commit, or push was performed.
 | Tests/SupportPackage.Tests.ps1 | FFB evidence allowlist and support-package collection | TPM-FFB-001, TPM-EVIDENCE-001, PR #321 | 40 support-package tests |
 | scripts/InjectionHunterDispositions.psd1 | Added dispositions for two pre-existing fixed-input false positives surfaced by the Slice 8B gate run | InjectionHunter evidence gate | 42 findings, 0 unresolved |
 | TeknoParrot-Manager.ps1; Tests/TeknoParrot-Manager.Tests.ps1; ARCHITECTURE.md; TeknoParrot-Manager-CHANGELOG.txt; docs/remediation/PR-321-control-board.md; docs/remediation/PR-321-reconciliation.md | PostgreSQL Slice 8B display, diagnosis, reset-stage, status, and routing contract | owner ID 16, PR #321 Slice 8B | 54 focused tests; 1052 full main tests; owner runtime outstanding |
+| TeknoParrot-Manager.ps1; Tests/TeknoParrot-Manager.Tests.ps1; ARCHITECTURE.md; docs/RC8-REMEDIATION-INVENTORY.md; docs/remediation/PR-321-control-board.md; docs/remediation/slices/PR-321-current-slice.md; docs/remediation/slices/TPM-POSTGRES-RETRY-AUTH-001.md; docs/remediation/PR-321-reconciliation.md | PostgreSQL protected retry-authentication boundary: preserve committed-password state, suppress unverified retry-envelope issuance, update exact regression coverage and governance evidence | owner report 16 / PR #321 / TPM-TRACE-001 / TPM-OWNER-001 / TPM-POSTGRES-RETRY-AUTH-001 | Focused PostgreSQL recovery/password/resume PS7 57 passed / 0 failed; Windows PowerShell 5.1 57 passed / 0 failed; full main Pester 1176 passed / 0 failed; SupportPackage 41 passed / 0 failed; owner runtime remains outstanding |
+| scripts/Test-TpmPermanentProcedures.ps1; scripts/Run-TpmQualityGate.ps1; docs/governance/permanent-procedures.md; Tests/TeknoParrot-Manager.Tests.ps1; docs/remediation/slices/PR-321-current-slice.md; docs/remediation/slices/TPM-POSTGRES-RETRY-AUTH-001.md; docs/remediation/PR-321-reconciliation.md | Split permanent-procedure enforcement into source/test eligibility and runtime-complete certification so an exact committed SHA and fresh package can exist before owner-runtime proof, while certification still fails closed on pending owner runtime | PR #321 / TPM-TRACE-001 / TPM-OWNER-001 / TPM-AUTH-001 / TPM-POSTGRES-RETRY-AUTH-001 | Source gate must allow `SOURCE FIXED; OWNER RUNTIME NEEDED`; `-CertificationMode` must reject it until ARCADE proof updates statuses |
 
 ## Permanent procedure compliance
 
@@ -383,11 +387,7 @@ owner-runtime smoke, release, certification, commit, or push was performed.
 
 ## Non-actions
 
-No package, push, wiki, release, certification, or ARCADE/#323 action was
-performed. The earlier accepted FFB source/test checkpoint is historical
-evidence only; this governance reconciliation slice and the BepInEx
-source/test changes remain uncommitted. No monitor-pipeline work was mixed
-into PR #321.
+No new package, push, wiki publication, release, certification, or ARCADE/#323 action has yet been performed for the current PostgreSQL/gate correction. The current owner directive authorizes commit/push after legitimate source gates, then exact-head CI, package rebuild/verification, ARCADE staging, and exhaustive smoke. Merge, tag, publication, and release remain prohibited. No monitor-pipeline work was mixed into PR #321.
 No generated runtime artifact remains in the worktree.
 
 ## Runtime owner-smoke checklist

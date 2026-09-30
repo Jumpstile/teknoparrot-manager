@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory)][string]$ReportPath,
     [string]$SourcePath = '',
     [datetime]$ChangedAtUtc = [datetime]::MinValue,
-    [switch]$AllowMissingReport
+    [switch]$AllowMissingReport,
+    [switch]$RequireOwnerRuntime
 )
 Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
@@ -62,7 +63,7 @@ if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
         if ($allowed -notcontains $status) { Fail "Invalid owner report status: $status" }
     }
     if ($ownerSection -match '(?im)\|\s*NOT FIXED\s*\|') { Fail 'Owner report contains unresolved NOT FIXED items.' }
-    if ($ownerSection -match '(?im)\|\s*SOURCE FIXED; OWNER RUNTIME NEEDED\s*\|') { Fail 'Owner-runtime evidence remains outstanding.' }
+    if ($RequireOwnerRuntime -and $ownerSection -match '(?im)\|\s*SOURCE FIXED; OWNER RUNTIME NEEDED\s*\|') { Fail 'Owner-runtime evidence remains outstanding.' }
     if ($report -match '(?im)candidate[^.\r\n]*(predates|stale)') { Fail 'Candidate package is stale relative to source changes.' }
     foreach ($word in @('addressed','improved','mostly','done-ish','should be fixed','probably')) {
         if ($report -match ('(?i)\b' + [regex]::Escape($word) + '\b')) { Fail "Vague status language is forbidden: $word" }
@@ -111,9 +112,13 @@ if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
     if ($ChangedAtUtc -ne [datetime]::MinValue) {
         $testsSection = $report.Substring($report.IndexOf('## Tests with exact counts and timestamps'))
         $times = [regex]::Matches($testsSection, '\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}')
-        if ($times.Count -eq 0) { Fail 'Validation timestamps are missing.' }
-        foreach ($file in @($ReportPath,$SourcePath)) {
-            if ($file -and (Test-Path -LiteralPath $file -PathType Leaf) -and (Get-Item -LiteralPath $file).LastWriteTimeUtc -gt $ChangedAtUtc) { Fail "Evidence/report is newer than supplied ChangedAtUtc but validation freshness is not proven: $file" }
+        if ($times.Count -eq 0) {
+            Fail 'Validation timestamps are missing.'
+        } else {
+            $latestValidationUtc = $times | ForEach-Object {
+                [datetime]::ParseExact($_.Value, 'yyyy-MM-ddTHH:mm:ss', [Globalization.CultureInfo]::InvariantCulture, ([Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal))
+            } | Sort-Object -Descending | Select-Object -First 1
+            if ($latestValidationUtc -lt $ChangedAtUtc.ToUniversalTime()) { Fail 'Validation evidence predates the latest source/test/gate change.' }
         }
     }
 }

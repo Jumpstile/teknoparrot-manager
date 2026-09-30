@@ -5487,6 +5487,19 @@ __BRANCH__
             Should -Invoke Reset-PostgresPasswordAutomatically -Times 1 -Exactly
             Should -Invoke Test-PostgresPassword -Times 1 -Exactly
         }
+        It "preserves committed password-change state when final live revalidation fails" {
+            Mock New-PostgresRecoveryBackup { $script:pgBackup }
+            $script:pgResetResult | Add-Member -NotePropertyName PasswordChangeCommitted -NotePropertyValue $true -Force
+            $script:pgResetResult | Add-Member -NotePropertyName FailureStage -NotePropertyValue 'PasswordValidation' -Force
+            Mock Reset-PostgresPasswordAutomatically { $script:pgResetResult }
+            Mock Test-PostgresPassword { $false }
+            $result = Invoke-PostgresSelectedPasswordRecovery -UserProfilesDir (Join-Path $TestDrive 'profiles') -PasswordPlain $script:pgSecret
+            $result.Outcome | Should -Be 'ACTION_REQUIRED'
+            $result.PasswordChangeCommitted | Should -BeTrue
+            $result.FailureStage | Should -Be 'PasswordValidation'
+            $result.Summary | Should -Match 'final authentication could not be verified'
+            Should -Invoke Test-PostgresPassword -Times 1 -Exactly
+        }
 
         It "updates an existing PostgreSQL workflow step without opening a nested step" {
             Mock New-PostgresRecoveryBackup { $script:pgBackup }
@@ -6244,13 +6257,13 @@ Describe "RC8 PostgreSQL and support UX" {
 Describe "Issue #292 PostgreSQL automatic elevation and resume" {
     BeforeAll {
         $script:InvokeProtectedResumeTerminalProbe = {
-            param([ValidateSet('Failure', 'Success')][string]$Mode)
-            $functionName = if ($Mode -eq 'Failure') { 'Exit-PostgresRecoveryResume' } else { 'Exit-PostgresRecoveryResumeSuccess' }
+            param([ValidateSet('Failure', 'Success', 'CommittedFailure')][string]$Mode)
+            $functionName = if ($Mode -eq 'Success') { 'Exit-PostgresRecoveryResumeSuccess' } else { 'Exit-PostgresRecoveryResume' }
             $functionText = (Get-Command $functionName).ScriptBlock.ToString()
-            $callText = if ($Mode -eq 'Failure') {
-                "Exit-PostgresRecoveryResume -Message 'synthetic protected resume failure'"
-            } else {
+            $callText = if ($Mode -eq 'Success') {
                 'Exit-PostgresRecoveryResumeSuccess -ResumeState $script:PostgresRecoveryResumeState'
+            } else {
+                "Exit-PostgresRecoveryResume -Message 'synthetic protected resume failure'"
             }
             $stubText = @'
 function New-PostgresRecoveryRetryState {
@@ -6295,6 +6308,7 @@ function Exit-PostgresRecoveryResume {
 }
 '@
             }
+            $credentialCommitFlag = if ($Mode -eq 'CommittedFailure') { '$true' } else { '$false' }
             $probeText = @(
                 "`$ErrorActionPreference = 'Stop'"
                 "function $functionName {"
@@ -6302,7 +6316,7 @@ function Exit-PostgresRecoveryResume {
                 "}"
                 $stubText
                 '$script:PostgresRecoveryStatus = $null'
-                '$script:PostgresRecoveryResumeState = [pscustomobject]@{ Path = ''state''; ClaimPath = ''state.claim''; Operation = ''Recovery'' }'
+                ('$script:PostgresRecoveryResumeState = [pscustomobject]@{ Path = ''state''; ClaimPath = ''state.claim''; Operation = ''Recovery''; CredentialCommitUnverified = __FLAG__ }'.Replace('__FLAG__', $credentialCommitFlag))
                 ('$functionName = ''{0}''' -f $functionName)
                 $callText
             ) -join [Environment]::NewLine
@@ -6407,6 +6421,42 @@ function Exit-PostgresRecoveryResume {
         ($probe.StdOut + $probe.StdErr) | Should -Match 'RETRY_STATE_ISSUED'
         ($probe.StdOut + $probe.StdErr) | Should -Match 'STATE_REMOVED'
         ($probe.StdOut + $probe.StdErr) | Should -Not -Match 'PROMPT_CALLED'
+    }
+    It "does not issue or advertise retry after a committed password change fails live authentication" {
+        $probe = & $script:InvokeProtectedResumeTerminalProbe -Mode CommittedFailure
+        $probe.ExitCode | Should -Be 1
+        ($probe.StdOut + $probe.StdErr) | Should -Match 'STATE_REMOVED'
+        ($probe.StdOut + $probe.StdErr) | Should -Not -Match 'RETRY_STATE_ISSUED|preserved a protected retry'
+        ($probe.StdOut + $probe.StdErr) | Should -Match 'password change was committed.*could not be verified'
+    }
+    It "carries the authenticated recovery credential into the protected retry envelope" {
+        Mock Test-PostgresPassword { param([string]$SuperPasswordPlain) $SuperPasswordPlain -eq 'Verified-Password-123' }
+        $script:retryCredentialCapture = $null
+        Mock New-PostgresRecoveryState {
+            param([string]$ConfigPath,[string]$ScriptPath,[string]$TpRoot,[string]$UserProfilesDir,[string]$Operation,[string]$PasswordPlain,[int]$AttemptId,[string]$ExpectedScriptSha256,[string]$ExpectedConfigSha256)
+            $script:retryCredentialCapture = [pscustomobject]@{
+                PasswordPlain = $PasswordPlain
+                AttemptId = $AttemptId
+                ExpectedScriptSha256 = $ExpectedScriptSha256
+                ExpectedConfigSha256 = $ExpectedConfigSha256
+            }
+            'protected-retry-state'
+        }
+        $state = [pscustomobject]@{
+            ConfigPath='config.json'; ScriptPath='manager.ps1'; TpRoot='TP'; UserProfilesDir='Profiles'
+            Operation='Recovery'; PasswordPlain='Verified-Password-123'; AttemptId=2
+            ParentPid=100; ParentStartTicks=200; ParentProcessPath='parent.exe'; ParentProcessSha256='parent-hash'
+            OriginUserSid='S-1-test'; ScriptSha256='script-hash'; ConfigSha256='config-hash'
+            SelectionPlanJson=''; SelectionPlanHash=''
+        }
+        (Test-PostgresPassword -SuperPasswordPlain 'Verified-Password-123') | Should -BeTrue
+        $path = New-PostgresRecoveryRetryState -State $state
+        $path | Should -Be 'protected-retry-state'
+        $script:retryCredentialCapture.PasswordPlain | Should -Be 'Verified-Password-123'
+        $script:retryCredentialCapture.AttemptId | Should -Be 3
+        $script:retryCredentialCapture.ExpectedScriptSha256 | Should -Be 'script-hash'
+        $script:retryCredentialCapture.ExpectedConfigSha256 | Should -Be 'config-hash'
+        Should -Invoke Test-PostgresPassword -Times 1 -Exactly -ParameterFilter { $SuperPasswordPlain -eq 'Verified-Password-123' }
     }
     It "runs protected resume success terminal cleanup without prompting and returns code zero" {
         $probe = & $script:InvokeProtectedResumeTerminalProbe -Mode Success
@@ -15093,6 +15143,13 @@ Describe "Focused RC8 remediation contracts" {
         $gate | Should -Match 'PR-321-control-board.md'
         $gate | Should -Match 'PR-321-current-slice.md'
         $gate | Should -Match 'Slice ID'
+        $gate | Should -Match '\[switch\]\$RequireOwnerRuntime'
+        $gate | Should -Match '\$RequireOwnerRuntime -and \$ownerSection'
+        $qualityGate = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\scripts\Run-TpmQualityGate.ps1') -Raw
+        $qualityGate | Should -Match 'if \(\$CertificationMode\).*RequireOwnerRuntime'
+        $gate | Should -Match 'latestValidationUtc'
+        $gate | Should -Match 'Validation evidence predates the latest source/test/gate change'
+        $qualityGate | Should -Match 'freshnessPaths'
     }
 Describe "ReShade protected adoption and accounting" {
     It "keeps protected installs unchanged by default and makes accounting exact" {
