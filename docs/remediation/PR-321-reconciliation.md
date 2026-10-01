@@ -3,10 +3,10 @@
 - Repository root: `C:\REPOS\.worktrees\postgres-runtime-defect-193796a`
 - Branch: `fix/postgres-runtime-defect-193796a`
 - Base HEAD: `193796a08d17f87f823d047646a3e848b85977fc`
-- Report generated UTC: `2026-10-01T14:09:42.0921265Z` (full quality and freshness-validated permanent-procedure gates passed)
+- Report generated UTC: `2026-10-01T14:11:27.2318490Z` (full quality and freshness-validated permanent-procedure gates passed)
 - Source/test last-edit UTC: `2026-10-01T13:47:10.9633784Z`
-- Source SHA: `193796a08d17f87f823d047646a3e848b85977fc` (working changes uncommitted)
-- Candidate package: not yet built. Owner authorizes a new SHA-scoped, diagnostic-only exact-head package after commit/push; it is not a release candidate.
+- Product source commit: `93f63664680fb9792494b4c70a0f54da2dad0dd8` (committed and pushed; base HEAD `193796a08d17f87f823d047646a3e848b85977fc`)
+- Diagnostic package: not yet built. It will be created only from the final clean pushed HEAD after this provenance correction; diagnostic-only, not a release candidate.
 - Scope: PostgreSQL protected recovery failure-stage observability and professional normal-mode pre-UAC permission panel/readiness gate; documentation and regression coverage.
 - Current status: focused UAC/PostgreSQL Pester passes 142/142 on PowerShell 7 and Windows PowerShell 5.1; full source, test, static, and permanent-procedure gates passed; runtime root cause remains unknown.
 
@@ -291,7 +291,7 @@ Package rebuild and owner-runtime proof remain outstanding.
 | UAC/PostgreSQL focused Pester (PS7) | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*permission guidance*','*readiness*','*protected request*','*automatic reset*','*guided recovery*','*committed password-change*','*database state cannot be verified*') -CI -Output Normal` | 142 passed, 0 failed, 0 skipped, 1050 not run | not captured | observed complete by 2026-10-01T13:52:51Z | PowerShell 7 / Pester 5.7.1 |
 | UAC/PostgreSQL focused Pester (Windows PowerShell 5.1) | Same focused filter under `powershell.exe` | 142 passed, 0 failed, 0 skipped, 1050 not run | not captured | observed complete by 2026-10-01T13:52:51Z | Windows PowerShell 5.1 / Pester 5.7.1 |
 | Full final TPM source quality gate | `pwsh -NoProfile -File C:/REPOS/.worktrees/postgres-runtime-defect-193796a/scripts/Run-TpmQualityGate.ps1 -ReportPath C:/REPOS/.worktrees/postgres-runtime-defect-193796a/docs/remediation/PR-321-reconciliation.md` | PASS; Main Pester 1192 passed, 0 failed, 0 skipped, 0 not run; SupportPackage 41 passed, 0 failed, 0 skipped, 0 not run; ASCII/parse, PSScriptAnalyzer, diff check, and permanent-procedure gate passed | not captured | observed complete by 2026-10-01T14:06:45.0968279Z | PowerShell 7 / Pester 5.7.1 |
-| Refreshed permanent-procedure gate | `Test-TpmPermanentProcedures.ps1` with `-ChangedAtUtc 2026-10-01T13:47:10.9633784Z` (maximum timestamp across all governed source, tests, gate scripts, governance doc, and slice inputs) | PASS; owner-runtime proof remains pending | not captured | observed complete by 2026-10-01T14:09:42.0921265Z | PowerShell 7 |
+| Refreshed permanent-procedure gate | `Test-TpmPermanentProcedures.ps1` with `-ChangedAtUtc 2026-10-01T13:47:10.9633784Z` (maximum timestamp across all governed source, tests, gate scripts, governance doc, and slice inputs) | PASS; owner-runtime proof remains pending | not captured | observed complete by 2026-10-01T14:11:27.2318490Z | PowerShell 7 |
 
 ## Migration and Eggman DAT remediation -- Slice 6
 
