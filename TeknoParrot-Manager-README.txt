@@ -1709,10 +1709,11 @@
     verifies a protected recovery backup, resets only the postgres role,
     verifies the new password, saves the repaired settings, backs up existing
     databases, and then finishes the remaining profile/database setup. The
-    service is kept running for that full transaction and restored to its
-    original state afterward. If Windows permission is declined or a
-    predictable step fails, TPM keeps protected retry information and offers
-    to try again.
+    PostgreSQL may stop and restart during recovery. After successful
+    verification, TPM returns the service to its original running or stopped
+    state. If recovery cannot verify the service or security policy, TPM
+    reports Action Required and directs you to Details and support before
+    retrying.
 
     Recovery changes the role password only. TPM temporarily adjusts
     PostgreSQL's authentication policy for the verified reset, then restores

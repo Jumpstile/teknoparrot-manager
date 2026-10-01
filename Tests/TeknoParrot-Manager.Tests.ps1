@@ -15066,6 +15066,8 @@ Describe "PostgreSQL Slice 8B owner-transcript behavior" {
             'ServiceLookup',
             'ServiceStop',
             'PostmasterPid',
+            'AuthenticationPolicy',
+            'AuthenticationRestore',
             'AlterRole',
             'ServiceRestart',
             'PasswordValidation',

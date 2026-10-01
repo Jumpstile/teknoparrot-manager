@@ -258,8 +258,12 @@ Package rebuild and owner-runtime proof remain outstanding.
 | 2026-09-30 permanent-procedure source gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot <absolute worktree> -ReportPath <absolute report> -SourcePath <absolute source> -ChangedAtUtc <latest governed-input UTC>` | PASS; governed-input freshness boundary `2026-09-30T10:56:11`; owner-runtime evidence remains separately pending | 2026-09-30T11:12:33 | 2026-09-30T11:12:33 | Windows PowerShell / pwsh-compatible script |
 | PostgreSQL reset transport focused Pester (PS7) | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*automatic reset*','*low-level reset mechanics*','*single-user transport*') -PassThru` | 15 passed, 0 failed, 0 skipped, 1172 not run | 2026-10-01T01:25:45 | 2026-10-01T01:25:58 | PowerShell 7 / Pester 5.7.1 |
 | PostgreSQL reset transport focused Pester (Windows PowerShell 5.1) | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*automatic reset*','*low-level reset mechanics*','*single-user transport*') -PassThru` | 15 passed, 0 failed, 0 skipped, 1172 not run | 2026-10-01T01:26:08 | 2026-10-01T01:26:22 | Windows PowerShell 5.1 / Pester 5.7.1 |
+| PostgreSQL reset and guidance follow-up focused Pester (Windows PowerShell 5.1) | `powershell.exe -NoProfile -Command "Import-Module Pester -RequiredVersion 5.7.1; Invoke-Pester -Path './Tests/TeknoParrot-Manager.Tests.ps1' -FullNameFilter '*automatic reset*','*beginner-safe guidance*','*password recovery activity*' -CI"` | 16 passed, 0 failed, 0 skipped, 1171 not run; result observed by 2026-10-01T02:13:33Z. The earlier 15-test run used different filters (`*low-level reset mechanics*`, `*single-user transport*`). | not captured | not captured | Windows PowerShell 5.1 / Pester 5.7.1 |
 | Main Pester (Slice 8B historical checkpoint) | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal` | 1052 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
-| Final TPM source quality gate | `pwsh -NoProfile -File scripts/Run-TpmQualityGate.ps1 -ReportPath docs/remediation/PR-321-reconciliation.md` | Main Pester 1187 passed, 0 failed, 0 skipped, 0 not run; SupportPackage 41 passed, 0 failed, 0 skipped, 0 not run; parse/ASCII, PSScriptAnalyzer, diff check, and permanent procedure gate passed | 2026-10-01T01:27:12 | 2026-10-01T01:40:29 | PowerShell 7 / Pester 5.7.1 |
+| TPM source quality gate before follow-up corrections | `pwsh -NoProfile -File scripts/Run-TpmQualityGate.ps1 -ReportPath docs/remediation/PR-321-reconciliation.md` | Main Pester 1187 passed, 0 failed, 0 skipped, 0 not run; SupportPackage 41 passed, 0 failed, 0 skipped, 0 not run; parse/ASCII, PSScriptAnalyzer, diff check, and permanent procedure gate passed | 2026-10-01T01:27:12 | 2026-10-01T01:40:29 | PowerShell 7 / Pester 5.7.1 |
+| 2026-10-01 follow-up suite rerun | `pwsh -NoProfile -File ./scripts/Run-TpmQualityGate.ps1 -ReportPath ./docs/remediation/PR-321-reconciliation.md` | Main Pester 1187 passed, 0 failed, 0 skipped, 0 not run; SupportPackage 41 passed, 0 failed, 0 skipped, 0 not run; parse/ASCII, PSScriptAnalyzer, and `git diff --check` passed. Quality-gate command failed only because permanent-procedure freshness evidence was older than the latest source/test edits; result observed by 2026-10-01T02:13:33Z. | not captured | not captured | PowerShell 7 / Pester 5.7.1 |
+| 2026-10-01 permanent procedure recheck | `Test-TpmPermanentProcedures.ps1 -RepoRoot C:\REPOS\teknoparrot-manager -ReportPath C:\REPOS\teknoparrot-manager\docs\remediation\PR-321-reconciliation.md -SourcePath C:\REPOS\teknoparrot-manager\TeknoParrot-Manager.ps1 -ChangedAtUtc 2026-10-01T01:50:17.7041915Z` | PASS; latest governed-input freshness boundary 2026-10-01T01:50:17.7041915Z | 2026-10-01T02:15:43 | 2026-10-01T02:15:43 | PowerShell 7 |
+| 2026-10-01 final TPM quality gate after evidence refresh | `pwsh -NoProfile -File ./scripts/Run-TpmQualityGate.ps1 -ReportPath ./docs/remediation/PR-321-reconciliation.md` | PASS; Main Pester 1187 passed, 0 failed, 0 skipped, 0 not run; SupportPackage 41 passed, 0 failed, 0 skipped, 0 not run; ASCII/parse, PSScriptAnalyzer, `git diff --check`, and permanent procedure gate passed; output observed by 2026-10-01T02:30:24Z | not captured | not captured | PowerShell 7 / Pester 5.7.1 |
 | Slice A focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*Invoke-TpmDownload*','*Thumbnail*','*RC8 PostgreSQL and support UX*') -CI -Output Normal` | 54 passed, 0 failed, 0 skipped, 975 not run | not captured | not captured | Pester 5.7.1 |
 | SupportPackage Pester (current) | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -CI -Output Normal -PassThru` | 41 passed, 0 failed, 0 skipped, 0 not run | 2026-10-01T01:02:37 | 2026-10-01T01:03:05 | PowerShell 7 / Pester 5.7.1 |
 | Controls focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Write-ControlPropagationResults*' -Output Detailed` | 3 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
@@ -335,18 +339,20 @@ owner-runtime smoke, release, certification, commit, or push was performed.
 
 ## Static gates
 
-## PostgreSQL reset transport source gates -- 2026-10-01
+### PostgreSQL reset transport source gates -- 2026-10-01
 
 - PS7 reset transport focused Pester: 15 passed, 0 failed, 0 skipped; 1172 not run; 2026-10-01T01:25:45Z--2026-10-01T01:25:58Z.
 - Windows PowerShell 5.1 reset transport focused Pester: 15 passed, 0 failed, 0 skipped; 1172 not run; 2026-10-01T01:26:08Z--2026-10-01T01:26:22Z.
 - PS7 full main Pester suite: 1187 passed, 0 failed, 0 skipped, 0 not run; 2026-10-01T01:27:12Z--2026-10-01T01:40:29Z (full quality-gate interval).
 - SupportPackage suite: 41 passed, 0 failed, 0 skipped, 0 not run in the same quality-gate run.
+- Follow-up source quality gate: all source/static checks passed; 1187 main tests and 41 SupportPackage tests passed; Windows PowerShell 5.1 reset-focused suite passed 16/16. Its permanent-procedure phase initially rejected stale report timestamps; following evidence refresh, the permanent gate passed at 2026-10-01T02:15:43Z with freshness boundary 2026-10-01T01:50:17.7041915Z.
+- Final `Run-TpmQualityGate.ps1` rerun after refreshing the report evidence passed; output observed by 2026-10-01T02:30:24Z.
 - Production and test PowerShell parse: 0 errors.
 - Production ASCII: 0 non-ASCII bytes.
 - PSScriptAnalyzer: 0 Error/Warning findings (also confirmed directly).
 - `git diff --check`: passed.
 - Permanent procedure gate: passed.
-- TPM quality gate: passed; exact run interval 2026-10-01T01:27:12Z--2026-10-01T01:40:29Z.
+- Earlier TPM quality gate (before follow-up corrections): passed; exact run interval 2026-10-01T01:27:12Z--2026-10-01T01:40:29Z.
 - Runtime: owner-reported ARCADE mechanism proof predates this source revision. Exact pushed-SHA package proof remains outstanding.
 
 ## Hunk classification

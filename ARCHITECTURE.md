@@ -61,12 +61,16 @@ It stops PostgreSQL, temporarily prepends only `host all postgres
 127.0.0.1/32 trust`, starts the service to load the recovery policy, issues
 `ALTER ROLE` through local `psql` standard input, then stops the service,
 restores and hash-verifies the exact original file, and restarts for password
-validation under the restored policy.
-The new password is considered verified only after authentication against the
-restored policy. Failure to restore that policy after the role change leaves
-the service stopped and returns an unknown, committed-but-unverified result.
-Normal output uses plain-language stages; implementation details belong in
-Details and logs.
+validation under the restored policy. The new password is verified only after
+authentication succeeds there. TPM then returns the service to its original
+running or stopped state.
+If policy restoration fails, TPM does not restart PostgreSQL and reports
+`ACTION_REQUIRED / UNKNOWN`. If the service cannot be confirmed stopped, the
+original policy is restored on disk when possible, no restart is attempted,
+and Details/logs warn that the temporary rule may still be active in the
+running server.
+Normal workflow status uses plain-language stages; implementation details
+belong in Details and logs.
 
 Crosshair browser selection is deliberately consumed from the main PowerShell
 runspace. `HttpListener` completion is polled and finalized with
@@ -154,8 +158,8 @@ states separately when a verified package downloaded but a per-game install
 did not complete; raw paths and exception text stay in Details/log/support
 evidence.
 
-**PostgreSQL committed-state recovery (RC8).** The single-user `ALTER ROLE`
-is the mutation cutoff. If it succeeds but service restart or new-password
+**PostgreSQL committed-state recovery (RC8).** A successful `ALTER ROLE`
+command is the mutation cutoff. If service restart or new-password
 authentication cannot be verified, recovery returns
 `PasswordChangeCommitted` through the final selected-recovery wrapper as well
 as the reset helper and returns a blocked result; it never says the old

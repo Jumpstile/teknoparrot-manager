@@ -12168,13 +12168,11 @@ function Reset-PostgresPasswordAutomatically {
     }
     $legacy.FailureStage = 'PostmasterPid'
     if (Test-Path -LiteralPath (Join-Path $dataDir 'postmaster.pid') -PathType Leaf) { throw 'A live PostgreSQL postmaster is still present.' }
-    Write-Host '  Preparing a safe PostgreSQL recovery...' -ForegroundColor Cyan
     $legacy.FailureStage = 'AlterRole'
     $temporaryPolicyWritten = $true
     [System.IO.File]::WriteAllText($hbaPath, $trustRule + [Environment]::NewLine + $hbaText, (New-Object System.Text.UTF8Encoding $false))
     Start-Service -Name $script:PostgresServiceName -ErrorAction Stop
     Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null
-    Write-Host '  Resetting the PostgreSQL password...' -ForegroundColor Cyan
     $literal = ConvertTo-PostgresSqlPasswordLiteral -Password $NewPassword
     $sql = 'ALTER ROLE postgres WITH PASSWORD ' + $literal + ';' + [Environment]::NewLine
     $processResult = Invoke-PostgresNativeProcessWithInput -FilePath $psqlExe -Arguments '-h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1' -InputText $sql -Secrets @($NewPassword)
@@ -12189,7 +12187,6 @@ function Reset-PostgresPasswordAutomatically {
     $legacy.FailureStage = 'ServiceRestart'
     Start-Service -Name $script:PostgresServiceName -ErrorAction Stop
     Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null
-    Write-Host '  Verifying the new PostgreSQL password...' -ForegroundColor Cyan
     $legacy.FailureStage = 'PasswordValidation'
     if (-not (Test-PostgresPassword -SuperPasswordPlain $NewPassword)) { throw 'The reset completed but the approved password did not authenticate.' }
     if (-not $wasRunning) {
@@ -12201,7 +12198,6 @@ function Reset-PostgresPasswordAutomatically {
     $legacy.RecoveryBlocked = $false
     $legacy.FailureStage = ''
     $legacy.Reason = 'Automatic PostgreSQL password reset and authentication verification completed.'
-    Write-Host '  PostgreSQL recovery complete.' -ForegroundColor Green
     } catch {
         $failureStage = [string]$legacy.FailureStage
         if ($temporaryPolicyWritten) {
