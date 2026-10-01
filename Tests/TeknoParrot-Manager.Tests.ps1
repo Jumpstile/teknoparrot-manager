@@ -5381,10 +5381,17 @@ __BRANCH__
             $script:PostgresInstallDir = $script:pgRoot
             $script:PostgresBinDir = Join-Path $script:pgRoot 'bin'
             $script:PostgresServiceName = 'pgsql-test'
-            New-Item -ItemType Directory -Path (Join-Path $script:PostgresBinDir '..\data') -Force | Out-Null
-            New-Item -ItemType File -Path (Join-Path $script:PostgresBinDir 'postgres.exe') -Force | Out-Null
+            $pgData = Join-Path $script:pgRoot 'data'
+            New-Item -ItemType Directory -Path $pgData -Force | Out-Null
+            New-Item -ItemType Directory -Path $script:PostgresBinDir -Force | Out-Null
+            New-Item -ItemType File -Path (Join-Path $script:PostgresBinDir 'psql.exe') -Force | Out-Null
+            $script:pgHbaPath = Join-Path $pgData 'pg_hba.conf'
+            if (Test-Path -LiteralPath $script:pgHbaPath -PathType Container) { Remove-Item -LiteralPath $script:pgHbaPath -Recurse -Force }
+            Set-Content -LiteralPath $script:pgHbaPath -Value 'host all all 127.0.0.1/32 md5' -NoNewline
             $script:pgBackupPath = Join-Path $TestDrive 'PostgresRecoveryBackups\evidence'
             New-Item -ItemType Directory -Path $script:pgBackupPath -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $script:pgBackupPath 'PostgreSQL') -Force | Out-Null
+            Copy-Item -LiteralPath $script:pgHbaPath -Destination (Join-Path $script:pgBackupPath 'PostgreSQL\pg_hba.conf')
             $script:pgBackup = [pscustomobject]@{
                 Path = $script:pgBackupPath
                 ConfigBackups = @()
@@ -5399,40 +5406,104 @@ __BRANCH__
                 -FinalPassed:$true -ReasonCode 'ROLE_RESET_VERIFIED' -FinalChecks @('The fixture reset result is verified.')
             $script:pgNativeArguments = $null
             $script:pgNativeInput = $null
+            $script:pgServiceStatus = 'Running'
             Mock Write-Log { param([string]$Message) if ($Message -match [regex]::Escape($script:pgSecret)) { throw 'secret reached log mock' } }
-            Mock Get-Service { [pscustomobject]@{ Status = 'Stopped' } }
-            Mock Start-Service {}
-            Mock Stop-Service {}
+            Mock Get-Service { [pscustomobject]@{ Status = $script:pgServiceStatus } }
+            Mock Start-Service { $script:pgServiceStatus = 'Running' }
+            Mock Stop-Service { $script:pgServiceStatus = 'Stopped' }
             Mock Wait-PostgresServiceState {}
             Mock Test-PostgresPassword { $true }
         }
 
-        It "attempts the reset through PostgreSQL single-user standard input and reports success" {
+        It "uses a localhost-only temporary recovery rule, restores the original policy, and verifies the password" {
             Mock Invoke-PostgresNativeProcessWithInput {
                 param([string]$FilePath, [string]$Arguments, [string]$InputText, [string[]]$Secrets)
                 $script:pgNativeArguments = $Arguments
                 $script:pgNativeInput = $InputText
+                $script:pgTrustDuringAlter = [System.IO.File]::ReadAllText($script:pgHbaPath).Split([Environment]::NewLine)[0]
                 [pscustomobject]@{ ExitCode = 0; Output = ''; Error = '' }
             }
+            $originalHash = (Get-FileHash -LiteralPath $script:pgHbaPath -Algorithm SHA256).Hash
             $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
             $result.Attempted | Should -BeTrue
             $result.Succeeded | Should -BeTrue
             $result.RecoveryBlocked | Should -BeFalse
-            $result.Backup.Required | Should -BeTrue
-            $result.Backup.Attempted | Should -BeTrue
-            $result.Backup.Created | Should -BeTrue
-            $result.Backup.Verified | Should -BeTrue
-            $result.Backup.RootPath | Should -Be $script:pgBackupPath
+            $script:pgNativeArguments | Should -Be '-h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1'
             $script:pgNativeArguments | Should -Not -Match ([regex]::Escape($script:pgSecret))
+            $script:pgTrustDuringAlter | Should -Be 'host all postgres 127.0.0.1/32 trust'
             $script:pgNativeInput | Should -Match 'ALTER ROLE postgres WITH PASSWORD'
+            $script:pgNativeInput | Should -Match ([regex]::Escape($script:pgSecret))
+            (Get-FileHash -LiteralPath $script:pgHbaPath -Algorithm SHA256).Hash | Should -Be $originalHash
             Should -Invoke Invoke-PostgresNativeProcessWithInput -Times 1
             Should -Invoke Test-PostgresPassword -Times 1
+            $script:pgServiceStatus | Should -Be 'Running'
+        }
+
+        It "reports uncertain service state when PostgreSQL cannot be stopped after a committed reset" {
+            Mock Invoke-PostgresNativeProcessWithInput {
+                [pscustomobject]@{ ExitCode = 0; Output = ''; Error = '' }
+            }
+            $script:pgStopCount = 0
+            Mock Stop-Service {
+                $script:pgStopCount++
+                if ($script:pgStopCount -gt 1) { throw 'service stop failed' }
+                $script:pgServiceStatus = 'Stopped'
+            }
+            $originalHash = (Get-FileHash -LiteralPath $script:pgHbaPath -Algorithm SHA256).Hash
+            $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
+            $result.Outcome | Should -Be 'ACTION_REQUIRED'
+            $result.ProductState | Should -Be 'UNKNOWN'
+            $result.FailureStage | Should -Be 'ServiceRestore'
+            $result.ReasonCode | Should -Be 'POSTGRES_SERVICE_STATE_UNVERIFIED'
+            $result.Reason | Should -Match 'temporary localhost trust rule may still be active'
+            (Get-FileHash -LiteralPath $script:pgHbaPath -Algorithm SHA256).Hash | Should -Be $originalHash
+            $script:pgServiceStatus | Should -Be 'Running'
+            Should -Invoke Start-Service -Times 1
+        }
+
+        It "returns PostgreSQL to its original stopped state after password verification" {
+            $script:pgServiceStatus = 'Stopped'
+            Mock Invoke-PostgresNativeProcessWithInput {
+                [pscustomobject]@{ ExitCode = 0; Output = ''; Error = '' }
+            }
+            $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
+            $result.Succeeded | Should -BeTrue
+            $script:pgServiceStatus | Should -Be 'Stopped'
+        }
+
+        It "keeps an originally stopped PostgreSQL service stopped after reset failure" {
+            $script:pgServiceStatus = 'Stopped'
+            $originalHash = (Get-FileHash -LiteralPath $script:pgHbaPath -Algorithm SHA256).Hash
+            Mock Invoke-PostgresNativeProcessWithInput {
+                [pscustomobject]@{ ExitCode = 7; Output = ''; Error = '' }
+            }
+            $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
+            $result.FailureStage | Should -Be 'AlterRole'
+            $result.PasswordChangeCommitted | Should -BeFalse
+            $script:pgServiceStatus | Should -Be 'Stopped'
+            (Get-FileHash -LiteralPath $script:pgHbaPath -Algorithm SHA256).Hash | Should -Be $originalHash
+            Should -Invoke Start-Service -Times 1
+            Should -Invoke Stop-Service -Times 1
+        }
+
+        It "blocks before service or role mutation when the live authentication policy drifted" {
+            Set-Content -LiteralPath $script:pgHbaPath -Value 'host all all 0.0.0.0/0 trust' -NoNewline
+            $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
+            $result.FailureStage | Should -Be 'AuthenticationPolicy'
+            $result.PasswordChangeCommitted | Should -BeFalse
+            $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+            Should -Invoke Stop-Service -Times 0
         }
         It "reports a committed but unverified reset when restart fails after ALTER" {
             Mock Invoke-PostgresNativeProcessWithInput {
                 [pscustomobject]@{ ExitCode = 0; Output = ''; Error = '' }
             }
-            Mock Start-Service { throw 'service restart failed' }
+            $script:pgStartCount = 0
+            Mock Start-Service {
+                $script:pgStartCount++
+                if ($script:pgStartCount -eq 2) { throw 'service restart failed' }
+                $script:pgServiceStatus = 'Running'
+            }
             $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
             $result.PasswordChangeCommitted | Should -BeTrue
             $result.Succeeded | Should -BeFalse
@@ -5440,6 +5511,20 @@ __BRANCH__
             $result.FailureStage | Should -Be 'ServiceRestart'
             $result.Reason | Should -Match 'password was changed'
             $result.Reason | Should -Not -Match 'password was not changed'
+        }
+
+        It "leaves PostgreSQL stopped and returns action required when policy restoration fails after ALTER" {
+            Mock Invoke-PostgresNativeProcessWithInput {
+                Remove-Item -LiteralPath $script:pgHbaPath -Force
+                New-Item -ItemType Directory -Path $script:pgHbaPath | Out-Null
+                [pscustomobject]@{ ExitCode = 0; Output = ''; Error = '' }
+            }
+            $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
+            $result.Outcome | Should -Be 'ACTION_REQUIRED'
+            $result.ProductState | Should -Be 'UNKNOWN'
+            $result.PasswordChangeCommitted | Should -BeTrue
+            $result.FailureStage | Should -Be 'AuthenticationRestore'
+            Should -Invoke Start-Service -Times 1
         }
         It "reports password validation as the failure stage after restart" {
             Mock Invoke-PostgresNativeProcessWithInput {
@@ -5467,8 +5552,9 @@ __BRANCH__
             $result.Backup.Verified | Should -BeTrue
             $result.Backup.RootPath | Should -Be $script:pgBackupPath
             $result.FailureStage | Should -Be 'AlterRole'
+            (Get-FileHash -LiteralPath $script:pgHbaPath -Algorithm SHA256).Hash | Should -Be (Get-FileHash -LiteralPath (Join-Path $script:pgBackupPath 'PostgreSQL\pg_hba.conf') -Algorithm SHA256).Hash
             $result.Reason | Should -Not -Match ([regex]::Escape($script:pgSecret))
-            Should -Invoke Start-Service -Times 0
+            Should -Invoke Start-Service -Times 2
             Should -Invoke Test-PostgresPassword -Times 0
         }
         It "keeps verified backup, reset, and password verification in one recovery path" {
@@ -14960,6 +15046,19 @@ Describe "PostgreSQL Slice 8B owner-transcript behavior" {
         }
     }
 
+    It "keeps low-level reset mechanics out of normal failure guidance" {
+        foreach ($stage in @('AuthenticationPolicy','AuthenticationRestore')) {
+            $guidance = Get-PostgresResetFailureGuidance -FailureStage $stage -PasswordChangeCommitted:($stage -eq 'AuthenticationRestore')
+            $guidance | Should -Not -Match 'pg_hba|trust|127\.0\.0\.1|hash|psql|command line|process argument'
+        }
+    }
+
+    It "does not use PostgreSQL single-user transport in the automatic reset" {
+        $functionSource = (Get-Command Reset-PostgresPasswordAutomatically).ScriptBlock.ToString()
+        $functionSource | Should -Not -Match '--single|postgres\.exe'
+        $functionSource | Should -Match '127\.0\.0\.1/32 trust'
+    }
+
     It "renders beginner-safe guidance for a reset failure stage" {
         $stages = @(
             'RecoveryEvidence',
@@ -16784,5 +16883,68 @@ Describe 'PostgreSQL DAT title fallback regression' {
             if ($oldDatVariable) { $script:datIndex = $oldDatVariable.Value }
             else { Remove-Variable -Name datIndex -Scope Script -ErrorAction SilentlyContinue }
         }
+    }
+}
+
+Describe 'RC8 owner-smoke transaction regressions' {
+    It 'deduplicates legacy terminal-item lists before transaction validation' {
+        $legacy = [pscustomobject]@{ Succeeded = $false }
+        $result = ConvertTo-TpmLegacyTransactionResult `
+            -Legacy $legacy -WorkflowKey 'GameRegistration' -OperationKey 'RegisterProfiles' `
+            -Items @('Terminator') -FailedItems @('Terminator','Terminator') `
+            -Summary 'Game registration stopped before changing profiles.' `
+            -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED'
+
+        @($result.Mutation.FailedItems).Count | Should -Be 1
+        $result.Mutation.FailedItems[0] | Should -Be 'Terminator'
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'returns a contract-valid no-op when FFB Blaster is declined for no membership' {
+        Mock Read-TpmYesNo { 'N' }
+        Mock Write-Log {}
+
+        $result = Invoke-FFBBlasterSetup -UserProfilesDir $TestDrive -TpRoot $TestDrive
+
+        $result.Outcome | Should -Be 'NO_OP'
+        $result.ReasonCode | Should -Be 'NO_MEMBERSHIP'
+        @($result.FinalVerification.Checks).Count | Should -BeGreaterThan 0
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'classifies zero-change zero-error GPU Fix as a valid no-op even when legacy made a backup' {
+        $profiles = Join-Path $TestDrive 'gpu-noop-profiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $profiles 'Example.xml') -Value '<GameProfile />'
+        Mock Invoke-GpuFixSetupLegacy {
+            [pscustomobject]@{
+                Succeeded = $true
+                Updated = 0
+                Unchanged = 1
+                Skipped = 0
+                Errors = 0
+                SkipDetails = @()
+                Reason = $null
+                Backup = [pscustomobject]@{ Verified = $true; Path = 'legacy-backup' }
+                GpuVendor = 'NVIDIA'
+                GpuName = 'Test GPU'
+            }
+        }
+
+        $result = Invoke-GpuFixSetup -UserProfilesDir $profiles -TpRoot $TestDrive
+
+        $result.Outcome | Should -Be 'NO_OP'
+        @($result.Mutation.FailedItems).Count | Should -Be 0
+        $result.Backup.Attempted | Should -BeFalse
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'renders an actual bounded progress bar for known-total scanning work' {
+        $text = Get-TpmCompactProgressText -Phase Scanning -Label 'ExampleGame' -Current 5 -Total 10 -StartedAt (Get-Date).AddSeconds(-1) -Width 100
+        $text | Should -Match '\[[#-]+\]'
+        $text | Should -Match '50%'
+        $text | Should -Match '5/10'
+        $text | Should -Match 'elapsed'
+        $text.Length | Should -Be 100
     }
 }

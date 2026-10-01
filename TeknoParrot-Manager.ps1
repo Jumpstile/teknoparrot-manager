@@ -1504,11 +1504,11 @@ function ConvertTo-TpmLegacyTransactionResult {
         [string]$ProductState=$null, [object]$Cleanup=$null
     )
     if (@($Legacy.PSTypeNames) -contains 'TPM.TransactionResult.v1') { return $Legacy }
-    $items=@($Items | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) })
-    $changed=@($ChangedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) })
-    $failed=@($FailedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) })
-    $skipped=@($SkippedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) })
-    $completed=@($CompletedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $items=@($Items | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
+    $changed=@($ChangedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
+    $failed=@($FailedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
+    $skipped=@($SkippedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
+    $completed=@($CompletedItems | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
     if ([string]::IsNullOrWhiteSpace($Outcome)) {
         if ($Legacy.Succeeded -eq $true) { $Outcome=if($changed.Count -gt 0){'SUCCEEDED'}else{'NO_OP'} }
         elseif ($changed.Count -gt 0 -and $FinalPassed) { $Outcome='PARTIAL_APPLIED' }
@@ -12064,7 +12064,7 @@ function Restore-PostgresProfileBackups {
 
 function Get-PostgresResetFailureGuidance {
     param(
-        [ValidateSet('RecoveryEvidence','ExecutableOrDataDirectory','DataPathSafety','ServiceLookup','ServiceStop','PostmasterPid','AlterRole','ServiceRestart','PasswordValidation','ServiceRestore','ResetInvocation')]
+        [ValidateSet('RecoveryEvidence','ExecutableOrDataDirectory','DataPathSafety','ServiceLookup','ServiceStop','PostmasterPid','AuthenticationPolicy','AlterRole','AuthenticationRestore','ServiceRestart','PasswordValidation','ServiceRestore','ResetInvocation')]
         [string]$FailureStage,
         [switch]$PasswordChangeCommitted
     )
@@ -12075,13 +12075,18 @@ function Get-PostgresResetFailureGuidance {
         'ServiceLookup' { return 'TPM could not verify the local PostgreSQL service. Check the installation, then retry.' }
         'ServiceStop' { return 'TPM could not stop PostgreSQL safely. No password change was attempted.' }
         'PostmasterPid' { return 'PostgreSQL still appeared to be running. Close other PostgreSQL tools, then retry.' }
+        'AuthenticationPolicy' { return 'TPM could not prepare PostgreSQL recovery safely. No password change was attempted. Review Details before retrying.' }
         'AlterRole' { return 'TPM could not change the PostgreSQL password. No completed reset was reported.' }
+        'AuthenticationRestore' {
+            if ($PasswordChangeCommitted) { return 'The PostgreSQL password may have changed, but TPM could not restore normal security. Do not retry yet. Review Details and contact support.' }
+            return 'TPM could not restore normal PostgreSQL security. Do not retry yet. Review Details and contact support.'
+        }
         'ServiceRestart' {
             if ($PasswordChangeCommitted) { return 'The PostgreSQL password may have changed, but TPM could not restart and verify PostgreSQL. Review Details before retrying.' }
             return 'TPM could not restart PostgreSQL after the password reset. Review Details before retrying.'
         }
         'PasswordValidation' { return 'PostgreSQL restarted, but the new password could not be verified. Review Details before retrying.' }
-        'ServiceRestore' { return 'TPM could not restore PostgreSQL to its original service state. Ask for manual help before retrying.' }
+        'ServiceRestore' { return 'TPM could not safely restore PostgreSQL after recovery. Do not retry yet. Review Details and contact support.' }
         'ResetInvocation' { return 'TPM could not start the PostgreSQL password repair. No database or game-profile changes were made.' }
         default { return 'TPM could not complete the PostgreSQL password reset. No database or game-profile changes were made.' }
     }
@@ -12117,10 +12122,12 @@ function Reset-PostgresPasswordAutomatically {
         return (& $makeResult 'FAILED_BEFORE_MUTATION' 'UNCHANGED' $false @() @() @('postgres-role') $true 'RECOVERY_EVIDENCE_REQUIRED' 'PostgreSQL recovery stopped before a role change because verified safety evidence was unavailable.' $true)
     }
     $legacy.FailureStage = 'ExecutableOrDataDirectory'
-    $postgresExe = Join-Path $script:PostgresBinDir 'postgres.exe'
+    $psqlExe = Join-Path $script:PostgresBinDir 'psql.exe'
     $dataDir = Join-Path $script:PostgresInstallDir 'data'
-    if (-not (Test-Path -LiteralPath $postgresExe -PathType Leaf) -or -not (Test-Path -LiteralPath $dataDir -PathType Container)) {
-        $legacy.Reason = 'The PostgreSQL executable or data directory could not be verified.'
+    $hbaPath = Join-Path $dataDir 'pg_hba.conf'
+    $backupHbaPath = if ($backupState.Path) { Join-Path (Join-Path $backupState.Path 'PostgreSQL') 'pg_hba.conf' } else { $null }
+    if (-not (Test-Path -LiteralPath $psqlExe -PathType Leaf) -or -not (Test-Path -LiteralPath $dataDir -PathType Container) -or -not (Test-Path -LiteralPath $hbaPath -PathType Leaf) -or [string]::IsNullOrWhiteSpace($backupHbaPath) -or -not (Test-Path -LiteralPath $backupHbaPath -PathType Leaf)) {
+        $legacy.Reason = 'The PostgreSQL client, data directory, or verified authentication backup could not be verified.'
         return (& $makeResult 'FAILED_BEFORE_MUTATION' 'UNCHANGED' $false @() @() @('postgres-role') $true 'RECOVERY_RUNTIME_UNAVAILABLE' 'PostgreSQL recovery stopped before a role change because its verified runtime was unavailable.' $true)
     }
     $legacy.FailureStage = 'DataPathSafety'
@@ -12135,58 +12142,123 @@ function Reset-PostgresPasswordAutomatically {
         return (& $makeResult 'FAILED_BEFORE_MUTATION' 'UNCHANGED' $false @() @() @('postgres-role') $true 'RECOVERY_SERVICE_UNAVAILABLE' 'PostgreSQL recovery stopped before a role change because its service was unavailable.' $true)
     }
     $wasRunning = ([string]$service.Status -ne 'Stopped')
+    $temporaryPolicyWritten = $false
+    $serviceStopFailed = $false
+    $restoreFailed = $false
     try {
-        $legacy.Attempted = $true
-        $legacy.FailureStage = 'ServiceStop'
-        if ($wasRunning) {
-            Stop-Service -Name $script:PostgresServiceName -Force -ErrorAction Stop
-            Wait-PostgresServiceState -DesiredStatus 'Stopped' | Out-Null
-        }
-        $legacy.FailureStage = 'PostmasterPid'
-        if (Test-Path -LiteralPath (Join-Path $dataDir 'postmaster.pid') -PathType Leaf) { throw 'A live PostgreSQL postmaster is still present.' }
-        $legacy.FailureStage = 'AlterRole'
-        $literal = ConvertTo-PostgresSqlPasswordLiteral -Password $NewPassword
-        $sql = 'ALTER ROLE postgres WITH PASSWORD ' + $literal + ';' + [Environment]::NewLine + [Environment]::NewLine
-        $processResult = Invoke-PostgresNativeProcessWithInput -FilePath $postgresExe -Arguments ('--single -D "' + $dataDir + '" -j postgres') -InputText $sql -Secrets @($NewPassword)
-        if ($processResult.ExitCode -ne 0) { throw "Automatic PostgreSQL password reset failed with exit code $($processResult.ExitCode)." }
-        $legacy.PasswordChangeCommitted = $true
-        $legacy.FailureStage = 'ServiceRestart'
-        Start-Service -Name $script:PostgresServiceName -ErrorAction Stop
-        Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null
-        $legacy.FailureStage = 'PasswordValidation'
-        if (-not (Test-PostgresPassword -SuperPasswordPlain $NewPassword)) { throw 'The reset completed but the approved password did not authenticate.' }
-        $legacy.Succeeded = $true
-        $legacy.RecoveryBlocked = $false
-        $legacy.FailureStage = ''
-        $legacy.Reason = 'Automatic PostgreSQL password reset and authentication verification completed.'
+    $legacy.FailureStage = 'AuthenticationPolicy'
+    $originalHbaBytes = [System.IO.File]::ReadAllBytes($hbaPath)
+    $originalHbaHash = (Get-FileHash -LiteralPath $backupHbaPath -Algorithm SHA256 -ErrorAction Stop).Hash
+    if ((Get-FileHash -LiteralPath $hbaPath -Algorithm SHA256 -ErrorAction Stop).Hash -ne $originalHbaHash) {
+        $legacy.FailureStage = 'AuthenticationPolicy'
+        $legacy.Reason = 'The live PostgreSQL authentication policy differs from the verified recovery evidence.'
+        return (& $makeResult 'FAILED_BEFORE_MUTATION' 'UNCHANGED' $false @() @() @('postgres-role') $true 'AUTHENTICATION_POLICY_DRIFT' 'PostgreSQL recovery stopped because its verified safety information no longer matches.' $true)
+    }
+    $hbaText = [System.IO.File]::ReadAllText($hbaPath)
+    $trustRule = 'host all postgres 127.0.0.1/32 trust'
+    if ($hbaText -match '(?im)^\s*host\s+all\s+postgres\s+127\.0\.0\.1/32\s+trust\s*(?:#.*)?$') {
+        $legacy.FailureStage = 'AuthenticationPolicy'
+        return (& $makeResult 'FAILED_BEFORE_MUTATION' 'UNCHANGED' $false @() @() @('postgres-role') $true 'AUTHENTICATION_POLICY_UNSAFE' 'PostgreSQL recovery stopped because its verified safety information could not be safely applied.' $true)
+    }
+    $legacy.Attempted = $true
+    $legacy.FailureStage = 'ServiceStop'
+    if ($wasRunning) {
+        Stop-Service -Name $script:PostgresServiceName -Force -ErrorAction Stop
+        Wait-PostgresServiceState -DesiredStatus 'Stopped' | Out-Null
+    }
+    $legacy.FailureStage = 'PostmasterPid'
+    if (Test-Path -LiteralPath (Join-Path $dataDir 'postmaster.pid') -PathType Leaf) { throw 'A live PostgreSQL postmaster is still present.' }
+    Write-Host '  Preparing a safe PostgreSQL recovery...' -ForegroundColor Cyan
+    $legacy.FailureStage = 'AlterRole'
+    $temporaryPolicyWritten = $true
+    [System.IO.File]::WriteAllText($hbaPath, $trustRule + [Environment]::NewLine + $hbaText, (New-Object System.Text.UTF8Encoding $false))
+    Start-Service -Name $script:PostgresServiceName -ErrorAction Stop
+    Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null
+    Write-Host '  Resetting the PostgreSQL password...' -ForegroundColor Cyan
+    $literal = ConvertTo-PostgresSqlPasswordLiteral -Password $NewPassword
+    $sql = 'ALTER ROLE postgres WITH PASSWORD ' + $literal + ';' + [Environment]::NewLine
+    $processResult = Invoke-PostgresNativeProcessWithInput -FilePath $psqlExe -Arguments '-h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1' -InputText $sql -Secrets @($NewPassword)
+    if ($processResult.ExitCode -ne 0) { throw 'Automatic PostgreSQL password reset failed.' }
+    $legacy.PasswordChangeCommitted = $true
+    $legacy.FailureStage = 'ServiceStop'
+    Stop-Service -Name $script:PostgresServiceName -Force -ErrorAction Stop
+    Wait-PostgresServiceState -DesiredStatus 'Stopped' | Out-Null
+    $legacy.FailureStage = 'AuthenticationRestore'
+    [System.IO.File]::WriteAllBytes($hbaPath, $originalHbaBytes)
+    if ((Get-FileHash -LiteralPath $hbaPath -Algorithm SHA256 -ErrorAction Stop).Hash -ne $originalHbaHash) { throw 'The original PostgreSQL authentication policy could not be verified.' }
+    $legacy.FailureStage = 'ServiceRestart'
+    Start-Service -Name $script:PostgresServiceName -ErrorAction Stop
+    Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null
+    Write-Host '  Verifying the new PostgreSQL password...' -ForegroundColor Cyan
+    $legacy.FailureStage = 'PasswordValidation'
+    if (-not (Test-PostgresPassword -SuperPasswordPlain $NewPassword)) { throw 'The reset completed but the approved password did not authenticate.' }
+    if (-not $wasRunning) {
+        $legacy.FailureStage = 'ServiceRestore'
+        Stop-Service -Name $script:PostgresServiceName -Force -ErrorAction Stop
+        Wait-PostgresServiceState -DesiredStatus 'Stopped' | Out-Null
+    }
+    $legacy.Succeeded = $true
+    $legacy.RecoveryBlocked = $false
+    $legacy.FailureStage = ''
+    $legacy.Reason = 'Automatic PostgreSQL password reset and authentication verification completed.'
+    Write-Host '  PostgreSQL recovery complete.' -ForegroundColor Green
     } catch {
-        if ($legacy.PasswordChangeCommitted) {
+        $failureStage = [string]$legacy.FailureStage
+        if ($temporaryPolicyWritten) {
+            try {
+                $current = Get-Service -Name $script:PostgresServiceName -ErrorAction Stop
+                if ([string]$current.Status -ne 'Stopped') {
+                    Stop-Service -Name $script:PostgresServiceName -Force -ErrorAction Stop
+                }
+                Wait-PostgresServiceState -DesiredStatus 'Stopped' | Out-Null
+            } catch { $serviceStopFailed = $true }
+            try {
+                [System.IO.File]::WriteAllBytes($hbaPath, $originalHbaBytes)
+                if ((Get-FileHash -LiteralPath $hbaPath -Algorithm SHA256 -ErrorAction Stop).Hash -ne $originalHbaHash) { throw 'Authentication policy hash mismatch.' }
+            } catch { $restoreFailed = $true }
+        }
+        if ($restoreFailed) {
+            $legacy.FailureStage = 'AuthenticationRestore'
+            $legacy.Reason = 'The PostgreSQL password may have changed, but its original authentication policy could not be restored.'
+            Write-Log "Postgres recovery: authentication policy restoration failed; PostgreSQL was not restarted. Evidence=$($backupState.Path)"
+        } elseif ($serviceStopFailed) {
+            $legacy.FailureStage = 'ServiceRestore'
+            $legacy.Reason = 'PostgreSQL could not be confirmed stopped. The original authentication policy was restored on disk, but its temporary localhost trust rule may still be active in the running service.'
+            Write-Log "Postgres recovery: service stop could not be confirmed; original policy restored on disk, but temporary localhost trust may remain active in the running server. Evidence=$($backupState.Path)"
+        } elseif ($legacy.PasswordChangeCommitted) {
+            $legacy.FailureStage = $failureStage
             $legacy.Reason = 'The PostgreSQL password was changed, but TPM could not verify the service restart and new login.'
             Write-Log "Postgres recovery: password change committed but verification failed; no database or profile changes were made. Evidence=$($backupState.Path)"
         } else {
+            $legacy.FailureStage = $failureStage
             $legacy.Reason = 'Automatic PostgreSQL password reset did not complete; the role password was not changed.'
             Write-Log "Postgres recovery: reset failed before password change; no recovery-complete result was reported. Evidence=$($backupState.Path)"
         }
         Write-Log "Postgres recovery: blocked; no recovery-complete result was reported. Evidence=$($backupState.Path)"
-        $failureStage = [string]$legacy.FailureStage
         try {
+            if ($restoreFailed -or $serviceStopFailed) { throw 'PostgreSQL service state is not safe to restore automatically.' }
             $current = Get-Service -Name $script:PostgresServiceName -ErrorAction SilentlyContinue
             if ($current -and $wasRunning -and [string]$current.Status -eq 'Stopped') { Start-Service -Name $script:PostgresServiceName -ErrorAction Stop; Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null }
             if ($current -and -not $wasRunning -and [string]$current.Status -eq 'Running') { Stop-Service -Name $script:PostgresServiceName -Force -ErrorAction Stop; Wait-PostgresServiceState -DesiredStatus 'Stopped' | Out-Null }
-            $legacy.FailureStage = $failureStage
         } catch {
-            $legacy.FailureStage = 'ServiceRestore'
-            Write-Log 'Postgres recovery: original service state could not be restored.'
+            if (-not $restoreFailed -and -not $serviceStopFailed) { $legacy.FailureStage = 'ServiceRestore'; Write-Log 'Postgres recovery: original service state could not be restored.' }
         }
+        if ($restoreFailed) { $legacy.FailureStage = 'AuthenticationRestore' }
+        if ($serviceStopFailed) { $legacy.FailureStage = 'ServiceRestore' }
     }
     if ($legacy.PasswordChangeCommitted -and -not $legacy.Succeeded) {
-        return (& $makeResult 'ACTION_REQUIRED' 'UNKNOWN' $true @('postgres-role') @() @('postgres-role') $false 'COMMITTED_UNVERIFIED' 'PostgreSQL role change committed but could not be verified.' $true)
+        $reasonCode = if ($legacy.FailureStage -eq 'AuthenticationRestore') { 'AUTHENTICATION_RESTORE_FAILED' } elseif ($legacy.FailureStage -eq 'ServiceRestore') { 'POSTGRES_SERVICE_STATE_UNVERIFIED' } else { 'COMMITTED_UNVERIFIED' }
+        $summary = if ($legacy.FailureStage -eq 'ServiceRestore') { 'PostgreSQL role change committed, but its service state could not be verified.' } else { 'PostgreSQL role change committed but could not be verified.' }
+        return (& $makeResult 'ACTION_REQUIRED' 'UNKNOWN' $true @('postgres-role') @() @('postgres-role') $false $reasonCode $summary $true)
     }
     if ($legacy.Succeeded) {
         return (& $makeResult 'SUCCEEDED' 'INTENDED' $true @('postgres-role') @('postgres-role') @() $true 'ROLE_RESET_VERIFIED' 'PostgreSQL role change completed and was verified.' $false)
     }
+    if ($legacy.FailureStage -eq 'AuthenticationRestore') {
+        return (& $makeResult 'ACTION_REQUIRED' 'UNKNOWN' $true @() @() @('postgres-role') $false 'AUTHENTICATION_RESTORE_FAILED' 'PostgreSQL recovery needs attention because its security policy could not be verified.' $true)
+    }
     if ($legacy.FailureStage -eq 'ServiceRestore') {
-        return (& $makeResult 'ACTION_REQUIRED' 'UNKNOWN' $true @() @() @('postgres-role') $false 'SERVICE_STATE_UNVERIFIED' 'PostgreSQL recovery needs attention because service state could not be verified.' $true)
+        return (& $makeResult 'ACTION_REQUIRED' 'UNKNOWN' $true @() @() @('postgres-role') $false 'POSTGRES_SERVICE_STATE_UNVERIFIED' 'PostgreSQL recovery needs attention because its service state could not be verified.' $true)
     }
     return (& $makeResult 'FAILED_BEFORE_MUTATION' 'UNCHANGED' $false @() @() @('postgres-role') $true 'ROLE_RESET_FAILED' 'PostgreSQL recovery stopped before a role change.' $true)
 }
@@ -12222,11 +12294,11 @@ function Invoke-GpuFixSetup {
     $items=@(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | ForEach-Object BaseName)
     $changed=@($items | Select-Object -First ([int]$legacy.Updated))
     $skipped=@($legacy.SkipDetails | ForEach-Object Game)
-    $failed=@(1..([int]$legacy.Errors) | ForEach-Object { 'GPUFixFailure{0}' -f $_ })
+    $failed=if([int]$legacy.Errors -gt 0){@(1..([int]$legacy.Errors) | ForEach-Object { 'GPUFixFailure{0}' -f $_ })}else{@()}
     $completed=@($changed + @($items | Where-Object { $_ -notin $changed -and $_ -notin $skipped -and $_ -notin $failed }))
-    $outcome=if($legacy.Updated -gt 0 -and ($legacy.Skipped -gt 0 -or $legacy.Errors -gt 0)){'PARTIAL_APPLIED'}elseif($legacy.Updated -gt 0){'SUCCEEDED'}elseif($legacyBackup){'FAILED_BEFORE_MUTATION'}else{'NO_OP'}
+    $outcome=if($legacy.Updated -gt 0 -and ($legacy.Skipped -gt 0 -or $legacy.Errors -gt 0)){'PARTIAL_APPLIED'}elseif($legacy.Updated -gt 0){'SUCCEEDED'}elseif($legacy.Errors -gt 0 -or $legacy.Skipped -gt 0){'FAILED_BEFORE_MUTATION'}else{'NO_OP'}
     $productState=if($outcome -eq 'SUCCEEDED'){'INTENDED'}elseif($outcome -eq 'PARTIAL_APPLIED'){'PARTIAL_KNOWN'}else{'UNCHANGED'}
-    $tx=ConvertTo-TpmLegacyTransactionResult -Legacy $legacy -WorkflowKey 'GPUFix' -OperationKey 'ApplyProfileFields' -Items $items -ChangedItems $changed -CompletedItems $completed -FailedItems $failed -SkippedItems $skipped -Summary 'GPU compatibility fields were processed with a verified transaction result.' -ReasonCode $(if($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}elseif($legacyBackup){'PROFILE_BACKUP_COMPLETED_NO_WRITE'}else{'GPU_FIELDS_PROCESSED'}) -Outcome $outcome -ProductState $productState -MutationStarted ($changed.Count -gt 0) -Backup $legacyBackup
+    $tx=ConvertTo-TpmLegacyTransactionResult -Legacy $legacy -WorkflowKey 'GPUFix' -OperationKey 'ApplyProfileFields' -Items $items -ChangedItems $changed -CompletedItems $completed -FailedItems $failed -SkippedItems $skipped -Summary 'GPU compatibility fields were processed with a verified transaction result.' -ReasonCode $(if($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}elseif($legacyBackup){'PROFILE_BACKUP_COMPLETED_NO_WRITE'}else{'GPU_FIELDS_PROCESSED'}) -Outcome $outcome -ProductState $productState -MutationStarted ($changed.Count -gt 0) -Backup $(if($outcome -eq 'NO_OP'){$null}else{$legacyBackup})
     $tx | Add-Member -NotePropertyName Errors -NotePropertyValue ([int]$legacy.Errors) -Force
     return $tx
 }
@@ -13321,8 +13393,11 @@ function Get-TpmCompactProgressText {
     param([ValidateSet('Scanning','Extracting','Repairing','Checking')][string]$Phase = 'Extracting', [string]$Label, [int]$Current, [int]$Total, [datetime]$StartedAt = (Get-Date), [int]$Width = 79)
     $elapsed = [Math]::Max(0, [Math]::Round(((Get-Date) - $StartedAt).TotalSeconds, 1))
     $text = if ($Total -gt 0) {
-        $percent = [Math]::Min(100, [int](($Current / $Total) * 100))
-        '  {0} {1} -- {2}/{3} ({4}%)  elapsed {5:0.0}s' -f $Phase, $Label, $Current, $Total, $percent, $elapsed
+        $percent = [Math]::Min(100, [Math]::Max(0, [int](($Current / $Total) * 100)))
+        $barWidth = [Math]::Max(10, [Math]::Min(24, [int][Math]::Floor($Width * 0.22)))
+        $filled = [Math]::Min($barWidth, [Math]::Max(0, [int][Math]::Floor(($percent / 100.0) * $barWidth)))
+        $bar = ('#' * $filled) + ('-' * ($barWidth - $filled))
+        '  [{0}] {1,3}%  {2} {3} -- {4}/{5}  elapsed {6:0.0}s' -f $bar, $percent, $Phase, $Label, $Current, $Total, $elapsed
     } else {
         '  {0} {1} -- {2}  elapsed {3:0.0}s' -f $Phase, $Label, $Current, $elapsed
     }
@@ -18363,7 +18438,7 @@ function Invoke-FFBBlasterSetup {
     if ($hasSub -ne "Y") {
         Write-Host "  Skipped -- no membership." -ForegroundColor DarkGray
         Write-Log "FFBBlaster setup: skipped -- user has no TeknoParrot membership."
-        return (New-TpmProfileTransactionResult -WorkflowKey 'FFBSetup' -OperationKey 'FFBBlaster' -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Summary 'FFB Blaster setup skipped.' -ReasonCode 'NO_MEMBERSHIP')
+        return (New-TpmProfileTransactionResult -WorkflowKey 'FFBSetup' -OperationKey 'FFBBlaster' -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Summary 'FFB Blaster setup skipped.' -ReasonCode 'NO_MEMBERSHIP' -FinalChecks @('The user declined membership-gated FFB Blaster setup before any profile mutation or backup work.'))
     }
 
     Write-Host "  Scanning GameProfiles for FFB Blaster fields..." -ForegroundColor DarkGray

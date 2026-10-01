@@ -4,14 +4,11 @@ Status: blocked. This board is the source of truth for TPM remediation state.
 
 ## Current repository state
 
-- Root: `C:\REPOS\tpm-rc8-certified-a700d093`
+- Root: `C:\REPOS\teknoparrot-manager`
 - Branch: `fix/rc8-release-blockers`
-- HEAD: `da2d0f29017dbb9801f254f77d9006fa1d8f2328` before Slice 5 edits.
-- This working-tree Slice 5 is source remediation only; no commit or package
-  identity is authorized yet.
-- Slice 5 scope: FFB membership prompt clarity, optional-plugin completion
-  semantics, normal-path wording, and full-game-name output. Package rebuild
-  and owner-runtime proof remain outstanding.
+- HEAD before PostgreSQL reset-transport slice: `e3552cd238374044d79277223fee1e01781dc7b6`
+- This working-tree slice covers the PostgreSQL 8.3 password reset transport and its required tests, documentation, and governance evidence.
+- Commit and push are authorized after source gates pass. Merge, tag, package publication, and release are not authorized.
 
 ## Status rules
 
@@ -95,6 +92,19 @@ canonical release-decision statuses are in the corrected table below.
 ## Control-board rule
 
 A remediation change is not complete until its owner IDs, slice contract, behavior contract, focused tests, runtime proof requirement, and hunk classification are recorded here and in the remediation report.
+
+## PostgreSQL reset transport remediation slice
+
+Owner report ID 16 / PR #321 is assigned to
+`TPM-POSTGRES-RESET-TRANSPORT-001`. The source contract requires byte-verified
+authentication-policy restoration before restart and fail-closed service state
+if restoration cannot be verified. Owner-reported ARCADE evidence establishes
+that the mechanism succeeded on the physical PostgreSQL 8.3 install; it does
+not establish that this source revision or a rebuilt package has been tested.
+PS7 and Windows PowerShell 5.1 focused regressions cover reset success, failure,
+service-stop failure, originally-stopped service state, and policy restoration.
+The source-quality gate, exact pushed-SHA package, and new runtime evidence
+remain required before release.
 ## Canonical release-decision status -- live re-audit correction -- 2026-09-08
 
 This section is the canonical release-decision source. It supersedes the
@@ -118,7 +128,7 @@ remains stale and is not a release gate.
 | 13 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Completed non-interactive browser state after valid P2; explicit return/close guidance; no further click mutation | No | Yes |
 | 14 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Best-effort console focus return with logged fallback; terminal remains usable | No | Yes |
 | 15 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Workflow-aware P1/P2, confirmation, first-run, and cursor-hide prompts with typed fallback | No | Yes |
-| 16 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION IMPLEMENTED; OWNER RUNTIME NEEDED | PostgreSQL committed-but-unverified reset no longer mints or advertises a retry containing the rejected credential; source regression covers state removal and truthful status. Runtime retest remains required. | `TPM-POSTGRES-RETRY-AUTH-001`; PostgreSQL/UAC focused tests | Rebuilt-package repair success/failure smoke |
+| 16 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | PostgreSQL 8.3 reset transport uses verified localhost-only temporary authentication, stdin SQL, byte/hash-verified policy restoration, and explicit committed/service-state failure reporting. Focused PS7 and Windows PowerShell 5.1 tests pass; full source gate and exact pushed-SHA runtime evidence remain required. | `TPM-POSTGRES-RESET-TRANSPORT-001`; PostgreSQL focused tests | Exact pushed-SHA package reset success/failure smoke |
 | 17 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Repair candidate search and apply calls are limited to the affected broken profile codes; focused one/multiple/zero-scope tests pass | No | Yes |
 | 18 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | No-candidate reporting includes searched-folder and affected-profile evidence plus Back; focused tests pass | No | Yes |
 | 19 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Optional source recopy hands only affected profile codes to AutoSync; no broad extraction escape found | No | Yes |

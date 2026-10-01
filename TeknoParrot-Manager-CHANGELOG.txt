@@ -12,6 +12,12 @@
   Candidate source status: v1.0 RC7 remains the current published release.
   RC8 is being prepared for independent review and guarded certification.
   Final Version 1.0 remains unpublished.
+  RC8 PostgreSQL password reset now uses the supported PostgreSQL 8.3 client
+  against a temporary localhost-only recovery rule, restores and hash-verifies
+  the original authentication policy before restart, and verifies the new
+  password under that restored policy. Normal progress stays plain-language;
+  Failed restoration or an unverified service stop reports Action Required and
+  requires support review before retry; no unsafe restart is attempted.
   RC8 protected PostgreSQL UAC resume now closes the elevated child
   deterministically after verified success or fail-closed failure, without
   waiting for console input; normal non-resume prompts are unchanged.

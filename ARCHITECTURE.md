@@ -55,6 +55,19 @@ credential before retrying protected database backup. Normal recovery output use
 readable game labels and compact diagnosis statuses; raw client details remain in
 logs and Details output.
 
+Automatic PostgreSQL password recovery requires verified recovery evidence and
+compares the live `pg_hba.conf` SHA-256 with its backed-up copy before mutation.
+It stops PostgreSQL, temporarily prepends only `host all postgres
+127.0.0.1/32 trust`, starts the service to load the recovery policy, issues
+`ALTER ROLE` through local `psql` standard input, then stops the service,
+restores and hash-verifies the exact original file, and restarts for password
+validation under the restored policy.
+The new password is considered verified only after authentication against the
+restored policy. Failure to restore that policy after the role change leaves
+the service stopped and returns an unknown, committed-but-unverified result.
+Normal output uses plain-language stages; implementation details belong in
+Details and logs.
+
 Crosshair browser selection is deliberately consumed from the main PowerShell
 runspace. `HttpListener` completion is polled and finalized with
 `EndGetContext`; PowerShell scriptblocks are never used as I/O-thread callbacks.
@@ -184,6 +197,15 @@ support guidance retain the profile key, database, category, and redacted raw
 detail. Automatic password reset results carry a `FailureStage` for every
 verification boundary, and password-entry/reset activities replace the stale
 database-backup status while those actions are running.
+Automatic PostgreSQL 8.3 password recovery uses the supported local `psql`
+client rather than single-user mode. After verifying recovery evidence and
+the exact original `pg_hba.conf` hash, TPM temporarily places a localhost-only
+rule first, sends `ALTER ROLE` on standard input while pinning port 5432, then
+restores and hash-verifies the original policy before restarting and checking
+the new password. The original service state is restored on success. If TPM
+cannot confirm PostgreSQL stopped, it does not restart the service, returns
+ACTION_REQUIRED / UNKNOWN, and records that the temporary rule may remain
+active in the running server until the service is stopped.
 
 A protected UAC resume suppresses unrelated startup, DAT, and GitHub prompts;
 it consumes only the durable recovery envelope and reports a concrete

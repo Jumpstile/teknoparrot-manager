@@ -1,15 +1,14 @@
 # PR #321 Remediation Gate Report
 
-- Repository root: `C:\REPOS\tpm-rc8-certified-a700d093`
+- Repository root: `C:\REPOS\teknoparrot-manager`
 - Branch: `fix/rc8-release-blockers`
-- HEAD before this working-tree slice: `66d896d98fb248ccef2350fbf55243e4ac803960`
-- Report generated for Desktop OMP source-remediation Slice 1.
+- HEAD before this working-tree slice: `e3552cd238374044d79277223fee1e01781dc7b6`
+- Report generated for Desktop OMP PostgreSQL reset-transport source-remediation slice.
 - Candidate ZIP: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`
 - Candidate SHA-256: `98F9C028AFAC7CDDC72D314C5D8DB1A9DBFA6D09BE1B2FA94A84A902AD8A1F22`
 - Candidate remains runtime-blocked until a fresh exact-head package completes the authorized ARCADE smoke. The 2026-09-30 owner directive authorizes source-gated commit/push, exact-head CI, package rebuild/verification, ARCADE staging, and exhaustive smoke; merge, tag, publication, and release remain prohibited.
-- Scope: BepInEx containment, inspection classification, rollback failure, retry
-  guidance, prompt visibility, and touched BepInEx naming.
-- Current status: source remediation in progress; release remains blocked.
+- Scope: PostgreSQL 8.3 reset transport, service-state rollback reporting, focused regressions, and documentation synchronization.
+- Current status: source remediation and source-quality gates passed; exact pushed-SHA package/runtime proof remains outstanding.
 
 ## Provenance
 
@@ -257,9 +256,12 @@ Package rebuild and owner-runtime proof remain outstanding.
 |---|---|---|---|---|---|
 | 2026-09-30 source quality gate | `Run-TpmQualityGate.ps1 -RepoRoot C:\\REPOS\\tpm-rc8-determinism-integration -ReportPath C:\\REPOS\\tpm-rc8-determinism-integration\\docs\\remediation\\PR-321-reconciliation.md` | Main Pester 1176 passed, 0 failed, 0 skipped, 0 not run; SupportPackage 41 passed, 0 failed, 0 skipped, 0 not run; ASCII/parse, PSScriptAnalyzer, and `git diff --check` passed; permanent-procedure phase reached and failed only because this report still predated the final governance edits | 2026-09-30T10:56:57 | 2026-09-30T11:10:55 | Pester 6.1.0 / pwsh |
 | 2026-09-30 permanent-procedure source gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot <absolute worktree> -ReportPath <absolute report> -SourcePath <absolute source> -ChangedAtUtc <latest governed-input UTC>` | PASS; governed-input freshness boundary `2026-09-30T10:56:11`; owner-runtime evidence remains separately pending | 2026-09-30T11:12:33 | 2026-09-30T11:12:33 | Windows PowerShell / pwsh-compatible script |
-| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal` | 1052 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
+| PostgreSQL reset transport focused Pester (PS7) | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*automatic reset*','*low-level reset mechanics*','*single-user transport*') -PassThru` | 15 passed, 0 failed, 0 skipped, 1172 not run | 2026-10-01T01:25:45 | 2026-10-01T01:25:58 | PowerShell 7 / Pester 5.7.1 |
+| PostgreSQL reset transport focused Pester (Windows PowerShell 5.1) | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*automatic reset*','*low-level reset mechanics*','*single-user transport*') -PassThru` | 15 passed, 0 failed, 0 skipped, 1172 not run | 2026-10-01T01:26:08 | 2026-10-01T01:26:22 | Windows PowerShell 5.1 / Pester 5.7.1 |
+| Main Pester (Slice 8B historical checkpoint) | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal` | 1052 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
+| Final TPM source quality gate | `pwsh -NoProfile -File scripts/Run-TpmQualityGate.ps1 -ReportPath docs/remediation/PR-321-reconciliation.md` | Main Pester 1187 passed, 0 failed, 0 skipped, 0 not run; SupportPackage 41 passed, 0 failed, 0 skipped, 0 not run; parse/ASCII, PSScriptAnalyzer, diff check, and permanent procedure gate passed | 2026-10-01T01:27:12 | 2026-10-01T01:40:29 | PowerShell 7 / Pester 5.7.1 |
 | Slice A focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*Invoke-TpmDownload*','*Thumbnail*','*RC8 PostgreSQL and support UX*') -CI -Output Normal` | 54 passed, 0 failed, 0 skipped, 975 not run | not captured | not captured | Pester 5.7.1 |
-| SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -CI -Output Normal` | 41 passed, 0 failed, 0 skipped | not captured | not captured | Pester 5.7.1 |
+| SupportPackage Pester (current) | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -CI -Output Normal -PassThru` | 41 passed, 0 failed, 0 skipped, 0 not run | 2026-10-01T01:02:37 | 2026-10-01T01:03:05 | PowerShell 7 / Pester 5.7.1 |
 | Controls focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Write-ControlPropagationResults*' -Output Detailed` | 3 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
 | ReShade focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*ReShade*','*protected adoption and accounting*','*ReShade result action priority*') -CI -Output Normal` | 192 passed, 0 failed, 0 skipped, 837 not run | not captured | not captured | Pester 5.7.1 |
 | Progress.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Progress.Core*' -Output Detailed` | 2 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
@@ -333,12 +335,19 @@ owner-runtime smoke, release, certification, commit, or push was performed.
 
 ## Static gates
 
-- Parse: passed for production; 0 errors.
-- ASCII: 0 non-ASCII bytes in production.
-- PSScriptAnalyzer: production returned 0 Error/Warning findings.
+## PostgreSQL reset transport source gates -- 2026-10-01
+
+- PS7 reset transport focused Pester: 15 passed, 0 failed, 0 skipped; 1172 not run; 2026-10-01T01:25:45Z--2026-10-01T01:25:58Z.
+- Windows PowerShell 5.1 reset transport focused Pester: 15 passed, 0 failed, 0 skipped; 1172 not run; 2026-10-01T01:26:08Z--2026-10-01T01:26:22Z.
+- PS7 full main Pester suite: 1187 passed, 0 failed, 0 skipped, 0 not run; 2026-10-01T01:27:12Z--2026-10-01T01:40:29Z (full quality-gate interval).
+- SupportPackage suite: 41 passed, 0 failed, 0 skipped, 0 not run in the same quality-gate run.
+- Production and test PowerShell parse: 0 errors.
+- Production ASCII: 0 non-ASCII bytes.
+- PSScriptAnalyzer: 0 Error/Warning findings (also confirmed directly).
 - `git diff --check`: passed.
-- InjectionHunter 1.0.0: 42 findings, 0 unresolved after disposition matching.
-- GPU-specific source scan found 0 `Write-Progress` calls and 2 per-profile `Write-TpmCompactExtractionProgress` calls in `Invoke-GpuFixSetup`; the remaining proof is packaged runtime behavior.
+- Permanent procedure gate: passed.
+- TPM quality gate: passed; exact run interval 2026-10-01T01:27:12Z--2026-10-01T01:40:29Z.
+- Runtime: owner-reported ARCADE mechanism proof predates this source revision. Exact pushed-SHA package proof remains outstanding.
 
 ## Hunk classification
 
@@ -373,6 +382,7 @@ owner-runtime smoke, release, certification, commit, or push was performed.
 | TeknoParrot-Manager.ps1; Tests/TeknoParrot-Manager.Tests.ps1; ARCHITECTURE.md; TeknoParrot-Manager-CHANGELOG.txt; docs/remediation/PR-321-control-board.md; docs/remediation/PR-321-reconciliation.md | PostgreSQL Slice 8B display, diagnosis, reset-stage, status, and routing contract | owner ID 16, PR #321 Slice 8B | 54 focused tests; 1052 full main tests; owner runtime outstanding |
 | TeknoParrot-Manager.ps1; Tests/TeknoParrot-Manager.Tests.ps1; ARCHITECTURE.md; docs/RC8-REMEDIATION-INVENTORY.md; docs/remediation/PR-321-control-board.md; docs/remediation/slices/PR-321-current-slice.md; docs/remediation/slices/TPM-POSTGRES-RETRY-AUTH-001.md; docs/remediation/PR-321-reconciliation.md | PostgreSQL protected retry-authentication boundary: preserve committed-password state, suppress unverified retry-envelope issuance, update exact regression coverage and governance evidence | owner report 16 / PR #321 / TPM-TRACE-001 / TPM-OWNER-001 / TPM-POSTGRES-RETRY-AUTH-001 | Focused PostgreSQL recovery/password/resume PS7 57 passed / 0 failed; Windows PowerShell 5.1 57 passed / 0 failed; full main Pester 1176 passed / 0 failed; SupportPackage 41 passed / 0 failed; owner runtime remains outstanding |
 | scripts/Test-TpmPermanentProcedures.ps1; scripts/Run-TpmQualityGate.ps1; docs/governance/permanent-procedures.md; Tests/TeknoParrot-Manager.Tests.ps1; docs/remediation/slices/PR-321-current-slice.md; docs/remediation/slices/TPM-POSTGRES-RETRY-AUTH-001.md; docs/remediation/PR-321-reconciliation.md | Split permanent-procedure enforcement into source/test eligibility and runtime-complete certification so an exact committed SHA and fresh package can exist before owner-runtime proof, while certification still fails closed on pending owner runtime | PR #321 / TPM-TRACE-001 / TPM-OWNER-001 / TPM-AUTH-001 / TPM-POSTGRES-RETRY-AUTH-001 | Source gate must allow `SOURCE FIXED; OWNER RUNTIME NEEDED`; `-CertificationMode` must reject it until ARCADE proof updates statuses |
+| TeknoParrot-Manager.ps1; Tests/TeknoParrot-Manager.Tests.ps1; ARCHITECTURE.md; docs/RC8-REMEDIATION-INVENTORY.md; TeknoParrot-Manager-CHANGELOG.txt; TeknoParrot-Manager-README.txt; README.md; docs/remediation/PR-321-control-board.md; docs/remediation/PR-321-reconciliation.md; docs/remediation/slices/TPM-POSTGRES-RESET-TRANSPORT-001.md | PostgreSQL 8.3 reset transport: verified localhost-only temporary authentication rule, psql stdin ALTER ROLE pinned to port 5432, hash-verified original-policy restoration, accurate service-state and committed-mutation reporting, restore of original running/stopped state, and ordinary-mode progress/guidance | owner report 16 / PR #321 / TPM-TRACE-001 / TPM-OWNER-001 / TPM-POSTGRES-RESET-TRANSPORT-001 | Focused PS7 and Windows PowerShell 5.1 transport suites: 15 passed each; final main Pester: 1187 passed; SupportPackage: 41 passed; static and permanent-procedure gates passed; exact pushed-SHA runtime remains outstanding |
 
 ## Permanent procedure compliance
 

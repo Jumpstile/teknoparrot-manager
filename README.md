@@ -776,8 +776,7 @@ Lawn Darts), and Orange County Choppers Pinball -- need a small local PostgreSQL
 - If Windows permission is declined or a predictable recovery step fails, TPM
   keeps the protected retry information and offers to try again. The chosen
   password is never shown in commands, logs, messages, or reports.
-- Recovery changes the role password only. TPM does not edit pg_hba.conf, drop
-  or recreate databases, or wipe existing PostgreSQL data.
+- Recovery changes the role password only. TPM temporarily adjusts PostgreSQL's authentication policy for the verified reset, then restores and verifies the original policy before restarting. It does not drop or recreate databases or wipe existing PostgreSQL data.
 - TPM updates only affected profiles whose connection values are not already
   correct. The TeknoParrotUI Pass field remains plaintext because TeknoParrotUI
   reads it directly; already-correct profiles are skipped.

@@ -1714,9 +1714,11 @@
     predictable step fails, TPM keeps protected retry information and offers
     to try again.
 
-    Recovery changes the role password only. TPM does not edit pg_hba.conf,
-    drop or recreate databases, or wipe existing PostgreSQL data. A database
-    that already exists is never recreated or restored over. TPM updates
+    Recovery changes the role password only. TPM temporarily adjusts
+    PostgreSQL's authentication policy for the verified reset, then restores
+    and verifies the original policy before restarting. It does not drop or
+    recreate databases or wipe existing PostgreSQL data. A database that
+    already exists is never recreated or restored over. TPM updates
     only affected profiles whose values are not already correct, in a
     deterministic order, and fails closed on any backup or write failure.
     Any backup failure is shown before profile writes. TPM captures the
