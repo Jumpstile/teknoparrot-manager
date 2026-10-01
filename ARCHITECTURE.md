@@ -46,6 +46,16 @@ permissions, or elevation. The release acceptance question is whether a
 14-year-old can complete the workflow without that specialist knowledge.
 
 
+
+Immediately before every non-administrator PostgreSQL install, password
+recovery, or reinitialize UAC handoff, TPM explains that temporary
+administrator access is needed to safely install or repair the local
+PostgreSQL component/password for the affected games. It identifies the
+User Account Control prompt, tells the user to click Yes, and confirms TPM
+continues automatically without relaunch or choosing PostgreSQL setup again.
+The access is limited to the protected operation. This default guidance
+contains no service mechanics, commands, authentication-policy details, or
+hashes; each call is placed directly before its elevation handoff.
 The PostgreSQL setup path classifies client diagnostics before presenting
 recovery. Password authentication failures receive a distinct masked-password
 validation path; rejected credentials are not saved or logged, and profile

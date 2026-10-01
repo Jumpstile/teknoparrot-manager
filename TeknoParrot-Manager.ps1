@@ -11799,6 +11799,7 @@ function Invoke-PostgresReinitializeChoice {
         return [pscustomobject]@{ Outcome = 'Blocked'; Plans = $plans; PlanJson = $planJson; PlanHash = $planHash }
     }
     if (-not (Test-RunningAsAdministrator)) {
+        Write-PostgresAdministratorGuidance -Operation Recovery
         $elevated = Start-PostgresRecoveryAsAdministrator -ConfigPath $ConfigPath -ScriptPath $ScriptPath -TpRoot $TpRoot `
             -UserProfilesDir $UserProfilesDir -Operation Reinitialize -PasswordPlain $SuperPasswordPlain `
             -SelectionPlanJson $planJson -SelectionPlanHash $planHash
@@ -15758,24 +15759,23 @@ function Test-RunningAsAdministrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Explain why Windows permission is needed before TPM starts its automatic
-# elevation/resume handoff. The normal user path never asks a beginner to
-# close TPM, find a script, or select the same menu item again.
+# Explain the temporary administrator access and UAC approval before each
+# PostgreSQL install or recovery handoff. Beginner output stays free of
+# implementation details; the protected child resumes the operation.
 function Write-PostgresAdministratorGuidance {
     param(
         [ValidateSet('Install','Recovery')]
         [string]$Operation = 'Recovery'
     )
     if ($Operation -eq 'Install') {
-        Write-Host '  TeknoParrot Manager needs Windows permission to install the small local database used by these games.' -ForegroundColor Yellow
+        Write-Host '  TeknoParrot Manager needs temporary administrator access to safely install the local PostgreSQL component for these games.' -ForegroundColor Yellow
     } else {
-        Write-Host '  TeknoParrot Manager needs Windows permission to repair the saved PostgreSQL password.' -ForegroundColor Yellow
+        Write-Host '  TeknoParrot Manager needs temporary administrator access to safely repair the local PostgreSQL component and password for these games.' -ForegroundColor Yellow
     }
-    Write-Host '  Windows will ask you to approve this. TeknoParrot Manager will continue the same setup automatically.' -ForegroundColor Yellow
-    Write-Host '  You do not need to close TeknoParrot Manager or choose PostgreSQL setup again.' -ForegroundColor Yellow
-    Write-Host '  Existing PostgreSQL data and profiles are protected; TeknoParrot Manager backs up before changing anything.' -ForegroundColor Yellow
+    Write-Host '  Windows will show a User Account Control prompt. Click Yes to continue.' -ForegroundColor Yellow
+    Write-Host '  After approval, TeknoParrot Manager continues automatically; you do not need to relaunch it or choose PostgreSQL setup again.' -ForegroundColor Yellow
+    Write-Host '  This access is temporary and limited to this protected operation.' -ForegroundColor Yellow
 }
-
 function Get-PostgresRecoveryStateDirectory {
     $base = if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { $env:LOCALAPPDATA } else { $env:TEMP }
     return (Join-Path $base 'TeknoParrotManager\Recovery')
@@ -29138,8 +29138,8 @@ $mode = $null
         }
         Write-Host ("  {0} registered game(s) need PostgreSQL." -f $needCount) -ForegroundColor Cyan
         if (-not (Test-PostgresInstalled) -and -not (Test-RunningAsAdministrator)) {
-            Write-PostgresAdministratorGuidance -Operation Install
             [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Windows needs permission to install PostgreSQL.' -UserAction 'Approve the Windows permission box')
+            Write-PostgresAdministratorGuidance -Operation Install
             $elevated = Start-PostgresRecoveryAsAdministrator -ConfigPath $configPath -ScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -Operation Install
             if ($elevated) {
                 [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Fixed -Summary 'PostgreSQL installation continued automatically')
@@ -29230,8 +29230,8 @@ $mode = $null
                             $superPwPlain = $typedPwPlain
                         } else {
                             if (-not (Test-RunningAsAdministrator)) {
-                                Write-PostgresAdministratorGuidance -Operation Recovery
                                 [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Windows needs permission to repair PostgreSQL.' -UserAction 'Approve the Windows permission box')
+                                Write-PostgresAdministratorGuidance -Operation Recovery
                                 $elevated = Start-PostgresRecoveryAsAdministrator -ConfigPath $configPath -ScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -Operation Recovery -PasswordPlain $typedPwPlain
                                 if ($elevated) {
                                     [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Fixed -Summary 'PostgreSQL repair continued automatically')
@@ -29443,8 +29443,8 @@ $mode = $null
                     if (-not $resetAttempt.Succeeded) { continue }
                     $newPassword = [string]$resetAttempt.Password
                     if (-not (Test-RunningAsAdministrator)) {
-                        Write-PostgresAdministratorGuidance -Operation Recovery
                         [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Windows needs permission to reset PostgreSQL.' -UserAction 'Approve the Windows permission box')
+                        Write-PostgresAdministratorGuidance -Operation Recovery
                         $elevated = Start-PostgresRecoveryAsAdministrator -ConfigPath $configPath -ScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -Operation Recovery -PasswordPlain $newPassword
                         $resetAttempt.Password = $null
                         $newPassword = $null

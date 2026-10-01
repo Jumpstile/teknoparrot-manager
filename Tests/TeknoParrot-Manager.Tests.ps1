@@ -6439,21 +6439,43 @@ function Exit-PostgresRecoveryResume {
         Mock Write-Log {}
     }
 
-    It "explains that TPM will request permission and continue the same repair" {
+    It "explains temporary administrator access and the complete UAC recovery handoff" {
         Write-PostgresAdministratorGuidance -Operation Recovery
 
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Windows will ask you to approve this'
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'continue the same setup automatically'
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'do not need to close TeknoParrot Manager'
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'backs up before changing anything'
+        $guidance = $script:postgresGuidanceMessages -join [Environment]::NewLine
+        $guidance | Should -Match 'temporary administrator access'
+        $guidance | Should -Match 'safely repair the local PostgreSQL component and password for these games'
+        $guidance | Should -Match 'User Account Control prompt'
+        $guidance | Should -Match 'Click Yes to continue'
+        $guidance | Should -Match 'continues automatically'
+        $guidance | Should -Match 'do not need to relaunch it or choose PostgreSQL setup again'
+        $guidance | Should -Match 'temporary and limited to this protected operation'
+        $guidance | Should -Not -Match '(?i)service stop|service start|psql|pg_hba\.conf|trust authentication|hash|command line|process internals'
     }
 
-    It "uses the same automatic permission handoff for a first install" {
+    It "uses the same UAC expectations for PostgreSQL installation" {
         Write-PostgresAdministratorGuidance -Operation Install
 
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'needs Windows permission to install'
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'continue the same setup automatically'
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Not -Match '(?i)right-click|Run as administrator|select PostgreSQL setup'
+        $guidance = $script:postgresGuidanceMessages -join [Environment]::NewLine
+        $guidance | Should -Match 'temporary administrator access'
+        $guidance | Should -Match 'safely install the local PostgreSQL component for these games'
+        $guidance | Should -Match 'User Account Control prompt'
+        $guidance | Should -Match 'Click Yes to continue'
+        $guidance | Should -Match 'continues automatically'
+        $guidance | Should -Match 'do not need to relaunch it or choose PostgreSQL setup again'
+        $guidance | Should -Match 'temporary and limited to this protected operation'
+        $guidance | Should -Not -Match '(?i)right-click|Run as administrator|psql|pg_hba\.conf|trust authentication|hash|command line|process internals'
+    }
+
+    It "prints one guidance block immediately before every non-admin PostgreSQL UAC handoff" {
+        $handoffs = [regex]::Matches($script:ProductionSource, '(?m)^\s*\$elevated = Start-PostgresRecoveryAsAdministrator')
+        $guidedHandoffs = [regex]::Matches($script:ProductionSource, '(?m)^\s*Write-PostgresAdministratorGuidance -Operation (?:Install|Recovery)\r?\n\s*\$elevated = Start-PostgresRecoveryAsAdministrator')
+        $workflowGatedHandoffs = [regex]::Matches($script:ProductionSource, '(?m)^\s*\[void\]\(Set-TpmWorkflowWaiting[^\r\n]*\)\r?\n\s*Write-PostgresAdministratorGuidance -Operation (?:Install|Recovery)\r?\n\s*\$elevated = Start-PostgresRecoveryAsAdministrator')
+
+        $handoffs.Count | Should -Be 4
+        $guidedHandoffs.Count | Should -Be $handoffs.Count
+        $workflowGatedHandoffs.Count | Should -Be 3
+        $script:ProductionSource | Should -Match 'Write-PostgresAdministratorGuidance -Operation Recovery\r?\n\s*\$elevated = Start-PostgresRecoveryAsAdministrator[\s\S]*?-Operation Reinitialize'
     }
 
     It "offers automatic repair instead of manual relaunch instructions" {
