@@ -30,6 +30,7 @@ BeforeAll {
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-idempotency-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
     . $extractedFunctionsPath
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
     $script:PostgresRecoveryStatus = $null
@@ -108,8 +109,20 @@ Describe "Virtual Beta Tester: idempotency / repeat-run safety (issue #88 phase 
         $secondResult = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path $p1 -P2Path $p2
         $afterSecondRun = Get-Content -LiteralPath $iniPath -Raw
 
-        $firstResult | Should -Be $false -Because "USB1/USB2 guncon2_cursor_path is Owner=Emulator, WritePolicy=NeverWrite -- TPM must never write it"
-        $secondResult | Should -Be $false -Because "a repeat call must deny the write identically, not eventually fall back to writing"
+        $firstResult.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $secondResult.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $firstResult.Outcome | Should -Be 'NO_OP'
+        $secondResult.Outcome | Should -Be 'NO_OP'
+        $firstResult.ProductState | Should -Be 'UNCHANGED'
+        $secondResult.ProductState | Should -Be 'UNCHANGED'
+        $firstResult.ReasonCode | Should -Be 'ECVF_DENIED'
+        $secondResult.ReasonCode | Should -Be 'ECVF_DENIED'
+        $firstResult.Mutation.Started | Should -BeFalse
+        $secondResult.Mutation.Started | Should -BeFalse
+        $firstResult.Backup.Attempted | Should -BeFalse
+        $secondResult.Backup.Attempted | Should -BeFalse
+        @($firstResult.Mutation.SkippedItems) | Should -Contain 'USB1.guncon2'
+        @($firstResult.Mutation.SkippedItems) | Should -Contain 'USB2.guncon2'
         $afterFirstRun | Should -Be $originalContent -Because "a denied write must leave emulator-owned INI content byte-identical to what the user had"
         $afterSecondRun | Should -Be $afterFirstRun -Because "repeat denial must not drift the file across runs"
     }
@@ -148,7 +161,12 @@ Describe "Virtual Beta Tester: idempotency / repeat-run safety (issue #88 phase 
 
         $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
 
-        $result | Should -Be $false
+        $result.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $result.Outcome | Should -Be 'NO_OP'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        $result.ReasonCode | Should -Be 'ECVF_DENIED'
+        $result.Mutation.Started | Should -BeFalse
+        $result.Backup.Attempted | Should -BeFalse
         (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "the real pcsx2x6 contract marks cursor_path Owner=Emulator, WritePolicy=NeverWrite -- the write must be denied and the emulator-owned file left untouched"
         Should -Invoke Write-Log -ParameterFilter { $msg -match 'OWNERSHIP_VIOLATION' } -Because "the skip reason must come from the real contract's ownership check, proving this exercised actual contract denial rather than the generic framework-unavailable fallback"
     }

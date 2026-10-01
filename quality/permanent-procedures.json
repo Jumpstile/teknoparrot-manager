@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "procedureStatuses": [
+    "FIXED + TESTED",
+    "SOURCE FIXED; OWNER RUNTIME NEEDED",
+    "NOT FIXED",
+    "DEFERRED BY OWNER"
+  ],
+  "procedures": [
+    {"id":"TPM-OWNER-001","rule":"Owner runtime is the acceptance gate.","enforcementType":"owner-runtime-gate","requiredEvidence":"Runtime owner-smoke checklist","failureMessage":"Owner-runtime evidence is missing."},
+    {"id":"TPM-OWNER-002","rule":"Do not report fixed without exact behavior proof and identified owner-runtime evidence.","enforcementType":"report-checklist","requiredEvidence":"Owner report status and runtime-proof field","failureMessage":"Fix claim lacks exact evidence or runtime-proof identification."},
+    {"id":"TPM-OWNER-003","rule":"Every owner report must map to an allowed status.","enforcementType":"static-gate","requiredEvidence":"Owner report mapping table","failureMessage":"Owner report mapping or status is missing or invalid."},
+    {"id":"TPM-EVIDENCE-001","rule":"Behavioral tests are required when feasible; source-string checks alone are insufficient.","enforcementType":"behavioral-test","requiredEvidence":"Exact behavioral test name","failureMessage":"Behavioral evidence is missing for a feasible behavior claim."},
+    {"id":"TPM-EVIDENCE-002","rule":"Every crash requires fresh support-package inspection before a fix packet.","enforcementType":"report-checklist","requiredEvidence":"Fresh support-package reference","failureMessage":"Fresh crash evidence is missing."},
+    {"id":"TPM-PROGRESS-001","rule":"Every noticeable long-running user operation uses universal TPM progress.","enforcementType":"static-gate","requiredEvidence":"Script-wide progress audit","failureMessage":"Universal progress audit is missing or incomplete."},
+    {"id":"TPM-PROGRESS-002","rule":"Progress paths must be inventoried path by path.","enforcementType":"report-checklist","requiredEvidence":"Required progress-path rows","failureMessage":"A required progress path is unclassified."},
+    {"id":"TPM-PROGRESS-003","rule":"User-facing production paths must not use PowerShell blue progress.","enforcementType":"static-gate","requiredEvidence":"Production source scan","failureMessage":"Write-Progress is present in a user-facing production path."},
+    {"id":"TPM-PROGRESS-004","rule":"Raw web-progress UI and old ad hoc progress strings are forbidden.","enforcementType":"static-gate","requiredEvidence":"Web/progress source scan","failureMessage":"Raw web progress or a banned legacy progress string remains."},
+    {"id":"TPM-PROMPT-001","rule":"Prompt choices shown must match choices accepted.","enforcementType":"behavioral-test","requiredEvidence":"Prompt validation test","failureMessage":"Prompt choices are not reconciled with accepted input."},
+    {"id":"TPM-PROMPT-002","rule":"Back means Back to the documented parent screen.","enforcementType":"behavioral-test","requiredEvidence":"Back-routing test","failureMessage":"Back routing evidence is missing or contradictory."},
+    {"id":"TPM-PROMPT-003","rule":"Cancel and Skip must not mutate state.","enforcementType":"behavioral-test","requiredEvidence":"No-mutation test","failureMessage":"Cancel/Skip no-mutation evidence is missing."},
+    {"id":"TPM-PROMPT-004","rule":"Preview must not mutate state.","enforcementType":"behavioral-test","requiredEvidence":"Preview no-mutation test","failureMessage":"Preview no-mutation evidence is missing."},
+    {"id":"TPM-PROMPT-005","rule":"Mutation requires explicit confirmation.","enforcementType":"behavioral-test","requiredEvidence":"Mutation-gate test","failureMessage":"Explicit mutation confirmation evidence is missing."},
+    {"id":"TPM-REPAIR-001","rule":"Repair flows are scoped to affected games, never the whole library.","enforcementType":"behavioral-test","requiredEvidence":"One/multiple/zero affected-game tests","failureMessage":"Affected-game scope evidence is incomplete."},
+    {"id":"TPM-REPAIR-002","rule":"Scoped repair must not trigger unrelated optional flows.","enforcementType":"behavioral-test","requiredEvidence":"Forbidden-flow assertions","failureMessage":"Scoped-repair escape evidence is missing."},
+    {"id":"TPM-SUPPORT-001","rule":"Support manifests surface recent fatal workflow evidence when metadata is unavailable.","enforcementType":"behavioral-test","requiredEvidence":"Fatal fallback test","failureMessage":"Fatal workflow fallback evidence is missing."},
+    {"id":"TPM-SUPPORT-002","rule":"Support packages include the newest Action Required report when available.","enforcementType":"behavioral-test","requiredEvidence":"Action Required freshness test","failureMessage":"Newest Action Required evidence is missing."},
+    {"id":"TPM-SUPPORT-003","rule":"Stale support evidence is labeled stale.","enforcementType":"behavioral-test","requiredEvidence":"Stale evidence test","failureMessage":"Stale evidence labeling is missing."},
+    {"id":"TPM-TRUTH-001","rule":"Controls readiness remains truthful and never claims verification without evidence.","enforcementType":"behavioral-test","requiredEvidence":"Controls truthfulness test","failureMessage":"Controls truthfulness evidence is missing."},
+    {"id":"TPM-UX-001","rule":"User-facing wording is beginner-friendly.","enforcementType":"report-checklist","requiredEvidence":"Wording review","failureMessage":"Beginner-friendly wording review is missing."},
+    {"id":"TPM-UX-002","rule":"Technical terms are accurate and explained.","enforcementType":"report-checklist","requiredEvidence":"Technical wording review","failureMessage":"Technical wording review is missing."},
+    {"id":"TPM-AUTH-001","rule":"No commit, push, package, wiki, release, certification, or ARCADE action occurs without explicit authorization.","enforcementType":"manual-authorization-gate","requiredEvidence":"Non-actions declaration","failureMessage":"Authorization boundary declaration is missing."},
+    {"id":"TPM-AUTH-002","rule":"Monitor-pipeline work must not be mixed into PR #321.","enforcementType":"static-gate","requiredEvidence":"Changed-file inventory","failureMessage":"Monitor-pipeline scope contamination detected."},
+    {"id":"TPM-CLEAN-001","rule":"Generated artifacts must not remain unless explicitly intended.","enforcementType":"static-gate","requiredEvidence":"Clean worktree inventory","failureMessage":"Unexpected generated artifact remains."},
+    {"id":"TPM-TRACE-001","rule":"Every changed hunk maps to an owner report, issue, procedure, or authorized requirement.","enforcementType":"static-gate","requiredEvidence":"Hunk classification table","failureMessage":"An changed hunk is unassigned."},
+    {"id":"TPM-TRACE-002","rule":"Fixing a pattern in one place requires auditing the same pattern everywhere.","enforcementType":"report-checklist","requiredEvidence":"Script-wide pattern audit","failureMessage":"Pattern-wide audit evidence is missing."}
+  ]
+}

@@ -1,0 +1,30 @@
+{
+    "RecordSchemaVersion":  "1.0.0",
+    "SnapshotId":  "TPM-GAME-SUPPORT-RELEASE-1.0.0.2128-ASSET-9E6A8628",
+    "AssetSha256":  "9e6a8628d365a9d7c32f1dee07f1a62799656a9fdb1b58afe863526c5cf84901",
+    "ProofCommit":  "dc998e374608abbda373bb3c236db5b26b5afca7",
+    "ComparisonMethod":  "Parsed XML and JSON semantic canonicalization; relative catalog paths compared one-to-one.",
+    "Roots":  {
+                  "GameProfiles":  {
+                                       "AssetCount":  925,
+                                       "ProofCount":  925,
+                                       "Compared":  925,
+                                       "Mismatches":  0
+                                   },
+                  "GameSetup":  {
+                                    "AssetCount":  383,
+                                    "ProofCount":  383,
+                                    "Compared":  383,
+                                    "Mismatches":  0
+                                },
+                  "Metadata":  {
+                                   "AssetCount":  923,
+                                   "ProofCount":  923,
+                                   "Compared":  923,
+                                   "Mismatches":  0
+                               }
+              },
+    "TotalCompared":  2231,
+    "TotalMismatches":  0,
+    "Result":  "PASS"
+}

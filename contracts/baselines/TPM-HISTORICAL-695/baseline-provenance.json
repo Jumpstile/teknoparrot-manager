@@ -1,0 +1,77 @@
+{
+  "SchemaVersion": "TPM-HISTORICAL-BASELINE-PROVENANCE-V2",
+  "BaselineId": "TPM-HISTORICAL-695-AUTHORITATIVE-20260918",
+  "GenerationMode": "HISTORICAL_PINNED_695",
+  "GeneratorRepository": "Jumpstile/teknoparrot-manager",
+  "GeneratorHead": "330db8a99449ed5834007b48445fdf4427cdab6b",
+  "RepositoryDirty": true,
+  "GeneratorScriptPath": "scripts/New-TpmSupportPostureCorpus.ps1",
+  "GeneratorScriptSha256": "22ccc4bd8696817f36a18a98ce538fc9037074bbfe2030de04d52da5739ffc7a",
+  "GeneratorDependencyInventory": [
+    {
+      "RelativePath": "scripts/New-TpmSupportPostureCorpus.ps1",
+      "ByteLength": 84558,
+      "Sha256": "22ccc4bd8696817f36a18a98ce538fc9037074bbfe2030de04d52da5739ffc7a"
+    },
+    {
+      "RelativePath": "scripts/TPMGameSupport.Contracts.psm1",
+      "ByteLength": 80901,
+      "Sha256": "04f3e085f013e933c6ecf0ce82164cb85388b007cbccb521b6c5afb18ad3dc3d"
+    }
+  ],
+  "GeneratorDependencyInventoryProjection": "UTF-8 LF, ordinal case-sensitive normalized path + TAB + byte length + TAB + lowercase SHA-256 + LF",
+  "GeneratorDependencyInventorySha256": "bdc31803e1dca8df03875ffdf45681333761c249e0aa8551dd8a5e99dfeec8a5",
+  "WorkingTreeDiffProjection": "git -c core.autocrlf=false diff --binary --no-ext-diff --no-textconv -- scripts/New-TpmSupportPostureCorpus.ps1 scripts/TPMGameSupport.Contracts.psm1; SHA-256 raw bytes",
+  "WorkingTreeDiffSha256": "dbfdae3084728559c38d14e70f64ecf72bfc1c7c7b970fffae5b147cf8b9da00",
+  "SourceRootIdentity": "Pinned historical GameProfiles root",
+  "SourceRootPathUsed": "C:\\tmp\\tpm-slice1-historical\\TeknoParrotUi.Common\\GameProfiles",
+  "SourceCommit": "5880e019016c5c3a0576e97a6c2a7f14bf54e3d1",
+  "SnapshotId": "TPM-HISTORICAL-695",
+  "CapturedAtUtc": "2026-09-18T22:22:33Z",
+  "ExecutionRecords": {
+    "PS7": {
+      "PowerShellVersion": "7.6.6",
+      "PSEdition": "Core",
+      "PSHOME": "C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7.6.6.0_x64__8wekyb3d8bbwe",
+      "ExecutablePath": "C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7.6.6.0_x64__8wekyb3d8bbwe\\pwsh.exe",
+      "ExecutableSha256": "bfb46af89433268872ddb43d1ca7a3f433452ee91ed356a9786940f90118e285",
+      "StartUtc": "2026-09-22T13:00:09.2900899Z",
+      "Command": "New-TpmSupportPostureCorpus.ps1 -GenerationMode HISTORICAL_PINNED_695",
+      "OutputRoot": "C:\\tmp\\tpm-authoritative-20260918-ps7",
+      "EndUtc": "2026-09-22T13:04:12.3760410Z",
+      "ExitResult": 0
+    },
+    "PS5.1": {
+      "PowerShellVersion": "5.1.26100.9444",
+      "PSEdition": "Desktop",
+      "PSHOME": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0",
+      "ExecutablePath": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "ExecutableSha256": "8bb6fa8c283b4d92120b1ef249a9b311b0f804d4cabbe9981159976c8be76a5e",
+      "StartUtc": "2026-09-22T13:00:09.2729933Z",
+      "Command": "New-TpmSupportPostureCorpus.ps1 -GenerationMode HISTORICAL_PINNED_695",
+      "OutputRoot": "C:\\tmp\\tpm-authoritative-20260918-ps51",
+      "EndUtc": "2026-09-22T13:03:41.5070905Z",
+      "ExitResult": 0
+    }
+  },
+  "OutputArtifactIdentity": {
+    "PS7": "C:\\tmp\\tpm-authoritative-20260918-ps7",
+    "PS5.1": "C:\\tmp\\tpm-authoritative-20260918-ps51"
+  },
+  "ProfileCount": 695,
+  "GovernedFileCount": 703,
+  "FirstProfileCode": "2Spicy",
+  "LastProfileCode": "zoidsinf",
+  "ProfileCodeSequenceSha256": "b7ec88b0de487fbcdcdf697334ccbec154a0f61e8c0a24712f2e99425425f4aa",
+  "InventoryProjection": "UTF-8 without BOM; ordinal case-sensitive normalized relative path + TAB + byte length + TAB + lowercase SHA-256 + LF",
+  "InventorySha256": "45223244b82d1b1f7e93c8abb83c53de68e0c6b4faa0e15ff7b5725ef25f2232",
+  "GovernedTreeDigest": "45223244b82d1b1f7e93c8abb83c53de68e0c6b4faa0e15ff7b5725ef25f2232",
+  "TreeDigestProjection": "Same bytes as ordered baseline-files.sha256 projection: RelativePath<TAB>ByteLength<TAB>lowercase SHA-256<LF>",
+  "CreatedAtUtc": "2026-09-22T13:05:02.981239Z",
+  "AcceptedAtUtc": null,
+  "AcceptanceAuthority": "Pending ChatGPT/release authority review",
+  "SupersedesOrReplaces": "C:\\tmp\\tpm-slice1-baseline-output (legacy candidate; provenance unproven)",
+  "LegacyCandidateRelationship": "Corroborative compatibility comparison only; not retroactively authoritative",
+  "ProvenanceManifestSha256Projection": "Canonical UTF-8 JSON with ProvenanceManifestSha256 property removed entirely; sorted object keys; arrays retained in stored order; compact separators; no BOM",
+  "ProvenanceManifestSha256": "50844fd8661cd5dc989e86553bc13cabdfaf075614f1a7fb06156e1926e00361"
+}

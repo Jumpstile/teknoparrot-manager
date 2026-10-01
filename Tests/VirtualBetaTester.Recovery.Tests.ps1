@@ -25,6 +25,7 @@ BeforeAll {
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-recovery-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
     . $extractedFunctionsPath
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
     $script:PostgresRecoveryStatus = $null
@@ -212,7 +213,12 @@ Describe "Virtual Beta Tester: partial/malformed state recovery (issue #88 phase
 
         $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
 
-        $result | Should -Be $false -Because "USB1/USB2 guncon2_cursor_path is Owner=Emulator, WritePolicy=NeverWrite -- missing sections must not be appended by TPM"
+        $result.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $result.Outcome | Should -Be 'NO_OP'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        $result.Succeeded | Should -BeTrue
+        $result.Mutation.Started | Should -BeFalse
+        $result.Backup.Attempted | Should -BeFalse
         (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "a denied write must leave an INI with neither guncon2 section exactly as found, not partially repaired"
     }
 
@@ -223,7 +229,12 @@ Describe "Virtual Beta Tester: partial/malformed state recovery (issue #88 phase
 
         $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
 
-        $result | Should -Be $false -Because "a partially-present pair of emulator-owned sections must still be denied, not repaired by adding the missing one"
+        $result.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $result.Outcome | Should -Be 'NO_OP'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        $result.Succeeded | Should -BeTrue
+        $result.Mutation.Started | Should -BeFalse
+        $result.Backup.Attempted | Should -BeFalse
         (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "the existing section's own emulator-owned cursor_path value must also remain untouched, not just the missing section left absent"
     }
 
@@ -246,7 +257,13 @@ Describe "Virtual Beta Tester: partial/malformed state recovery (issue #88 phase
 
         $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
 
-        $result | Should -Be $false
+        $result.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $result.Outcome | Should -Be 'NO_OP'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        $result.Succeeded | Should -BeTrue
+        $result.Mutation.Started | Should -BeFalse
+        $result.ReasonCode | Should -Be 'ECVF_DENIED'
+        $result.Backup.Attempted | Should -BeFalse
         (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "the real pcsx2x6 contract denies the write regardless of how incomplete the existing INI is"
         Should -Invoke Write-Log -ParameterFilter { $msg -match 'OWNERSHIP_VIOLATION' } -Because "the skip reason must come from the real contract's ownership check even on partial/malformed state, proving this exercised actual contract denial rather than the generic framework-unavailable fallback"
     }
@@ -561,7 +578,10 @@ Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medi
     It "Invoke-CrosshairSetup: Unknown ECVF state performs zero crosshair PNG writes" {
         $fixture = New-Pcsx2CrosshairSetupFixture
         . $fixture.FixturePath
-        Mock Read-HostSafe { '0' }
+        Mock Read-Host {
+            param([string]$Prompt)
+            if ($Prompt -match 'Apply these crosshairs') { 'N' } else { '0' }
+        }
         Mock Start-Process {}
         Mock Export-CrosshairPreview {}
         Mock Get-Pcsx2CrosshairPrerequisiteState {
@@ -588,7 +608,10 @@ Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medi
         $state = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $fixture.Pcsx2Root
         $state.State | Should -Be 'Unknown'
         $state.Reason | Should -Match 'framework was not available'
-        Mock Read-HostSafe { '0' }
+        Mock Read-Host {
+            param([string]$Prompt)
+            if ($Prompt -match 'Apply these crosshairs') { 'N' } else { '0' }
+        }
         Mock Start-Process {}
         Mock Export-CrosshairPreview {}
 
@@ -605,8 +628,12 @@ Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medi
         $customRoot = Join-Path $fixture.Pcsx2Root 'PortableData'
         New-Item -ItemType Directory -Path $customRoot -Force | Out-Null
         . $fixture.FixturePath
-        Mock Read-HostSafe { '0' }
-        Mock Start-Process {}
+        Mock Read-Host {
+            param([string]$Prompt)
+            if ($Prompt -match 'Apply these crosshairs') { 'Y' }
+            elseif ($Prompt -match 'Also hide the Windows cursor') { 'N' }
+            else { '0' }
+        }
         Mock Export-CrosshairPreview {}
         Mock Get-Pcsx2CrosshairPrerequisiteState {
             [pscustomobject]@{

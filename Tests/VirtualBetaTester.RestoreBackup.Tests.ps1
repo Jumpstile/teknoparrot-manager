@@ -25,6 +25,7 @@ BeforeAll {
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-restore-backup-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
     . $extractedFunctionsPath
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
     $script:PostgresRecoveryStatus = $null
@@ -87,9 +88,21 @@ Describe "Virtual Beta Tester: restore backup safe cancel/decline (issue #88 A2 
         New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $backupDir 'ALIENS.xml') -Value '<GameProfile>backed-up</GameProfile>' -Encoding ascii
         Mock Read-Host { return "" } -ParameterFilter { $Prompt -like "*Enter number to restore*" }
-        Invoke-RestoreBackup -userProfilesDir $userProfilesDir
+        Mock Save-Config { throw 'Restore must not write configuration.' }
+        $result = Invoke-RestoreBackup -userProfilesDir $userProfilesDir
+        $result.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $result.Outcome | Should -Be 'NO_OP'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        $result.Mutation.Started | Should -BeFalse
+        $result.ReasonCode | Should -Be 'USER_CANCELLED'
+        $result.Backup.Attempted | Should -BeFalse
+        $result.Backup.Created | Should -BeFalse
         (Test-Path -LiteralPath (Join-Path $userProfilesDir 'CURRENT.xml')) | Should -Be $true
         (Test-Path -LiteralPath $backupDir) | Should -Be $true
+        (Get-Content -LiteralPath (Join-Path $userProfilesDir 'CURRENT.xml') -Raw) | Should -Be ('<GameProfile>current</GameProfile>' + [Environment]::NewLine)
+        (Test-Path -LiteralPath (Join-Path $backupDir 'ALIENS.xml')) | Should -BeTrue
+        (Get-Content -LiteralPath (Join-Path $backupDir 'ALIENS.xml') -Raw) | Should -Be ('<GameProfile>backed-up</GameProfile>' + [Environment]::NewLine)
+        Assert-MockCalled Save-Config -Times 0 -Exactly
     }
 
     It "refuses a restore when the pre-restore rollback snapshot cannot be created" {
@@ -103,12 +116,24 @@ Describe "Virtual Beta Tester: restore backup safe cancel/decline (issue #88 A2 
         Mock Read-Host { return 'YES' } -ParameterFilter { $Prompt -like '*Type YES to confirm*' }
         Mock Wait-TpmForProcessClose { return $true }
         Mock Copy-Item { throw 'simulated rollback snapshot failure' }
+        Mock Save-Config { throw 'Restore must not write configuration.' }
 
         $result = Invoke-RestoreBackup -userProfilesDir $userProfilesDir
 
         $result.Succeeded | Should -BeFalse
+        $result.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        $result.Mutation.Started | Should -BeFalse
+        $result.ReasonCode | Should -Be 'ROLLBACK_SNAPSHOT_FAILED'
+        $result.Backup.Attempted | Should -BeTrue
+        $result.Backup.Created | Should -BeFalse
         (Get-Content -LiteralPath $current -Raw) | Should -Be ('<GameProfile>current</GameProfile>' + [Environment]::NewLine)
         (Test-Path -LiteralPath (Join-Path $userProfilesDir 'ALIENS.xml')) | Should -BeFalse
+        (Test-Path -LiteralPath $backupDir) | Should -BeTrue
+        (Test-Path -LiteralPath (Join-Path $backupDir 'ALIENS.xml')) | Should -BeTrue
+        (Get-Content -LiteralPath (Join-Path $backupDir 'ALIENS.xml') -Raw) | Should -Be ('<GameProfile>backed-up</GameProfile>' + [Environment]::NewLine)
+        Assert-MockCalled Save-Config -Times 0 -Exactly
     }
 
     It "declining the YES confirmation cancels with zero changes -- current content is never deleted before confirmation" {
@@ -119,9 +144,21 @@ Describe "Virtual Beta Tester: restore backup safe cancel/decline (issue #88 A2 
         Set-Content -LiteralPath (Join-Path $backupDir 'ALIENS.xml') -Value '<GameProfile>backed-up</GameProfile>' -Encoding ascii
         Mock Read-Host { return "1" } -ParameterFilter { $Prompt -like "*Enter number to restore*" }
         Mock Read-Host { return "no" } -ParameterFilter { $Prompt -like "*Type YES to confirm*" }
-        Invoke-RestoreBackup -userProfilesDir $userProfilesDir
+        Mock Save-Config { throw 'Restore must not write configuration.' }
+        $result = Invoke-RestoreBackup -userProfilesDir $userProfilesDir
+        $result.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $result.Outcome | Should -Be 'NO_OP'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        $result.Mutation.Started | Should -BeFalse
+        $result.ReasonCode | Should -Be 'USER_DECLINED'
+        $result.Backup.Attempted | Should -BeFalse
+        $result.Backup.Created | Should -BeFalse
         (Test-Path -LiteralPath (Join-Path $userProfilesDir 'CURRENT.xml')) | Should -Be $true
         (Test-Path -LiteralPath (Join-Path $userProfilesDir 'ALIENS.xml')) | Should -Be $false
+        (Get-Content -LiteralPath (Join-Path $userProfilesDir 'CURRENT.xml') -Raw) | Should -Be ('<GameProfile>current</GameProfile>' + [Environment]::NewLine)
+        (Test-Path -LiteralPath $backupDir) | Should -BeTrue
+        (Get-Content -LiteralPath (Join-Path $backupDir 'ALIENS.xml') -Raw) | Should -Be ('<GameProfile>backed-up</GameProfile>' + [Environment]::NewLine)
+        Assert-MockCalled Save-Config -Times 0 -Exactly
     }
 
     It "an invalid selection (out of range) is treated as a cancel with zero changes" {
@@ -131,9 +168,21 @@ Describe "Virtual Beta Tester: restore backup safe cancel/decline (issue #88 A2 
         New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $backupDir 'ALIENS.xml') -Value '<GameProfile>backed-up</GameProfile>' -Encoding ascii
         Mock Read-Host { return "99" } -ParameterFilter { $Prompt -like "*Enter number to restore*" }
-        Invoke-RestoreBackup -userProfilesDir $userProfilesDir
+        Mock Save-Config { throw 'Restore must not write configuration.' }
+        $result = Invoke-RestoreBackup -userProfilesDir $userProfilesDir
+        $result.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $result.Outcome | Should -Be 'NO_OP'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        $result.Mutation.Started | Should -BeFalse
+        $result.ReasonCode | Should -Be 'INVALID_SELECTION'
+        $result.Backup.Attempted | Should -BeFalse
+        $result.Backup.Created | Should -BeFalse
         (Test-Path -LiteralPath (Join-Path $userProfilesDir 'CURRENT.xml')) | Should -Be $true
         (Test-Path -LiteralPath (Join-Path $userProfilesDir 'ALIENS.xml')) | Should -Be $false
+        (Get-Content -LiteralPath (Join-Path $userProfilesDir 'CURRENT.xml') -Raw) | Should -Be ('<GameProfile>current</GameProfile>' + [Environment]::NewLine)
+        (Test-Path -LiteralPath $backupDir) | Should -BeTrue
+        (Get-Content -LiteralPath (Join-Path $backupDir 'ALIENS.xml') -Raw) | Should -Be ('<GameProfile>backed-up</GameProfile>' + [Environment]::NewLine)
+        Assert-MockCalled Save-Config -Times 0 -Exactly
     }
 }
 
