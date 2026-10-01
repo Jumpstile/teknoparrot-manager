@@ -1,4 +1,4 @@
-# TPM PostgreSQL Pre-UAC Guidance
+# TPM PostgreSQL Pre-UAC Guidance (superseded by TPM-POSTGRES-RESET-TRANSPORT-001)
 
 ## 1. Slice name
 
@@ -19,9 +19,9 @@
 ## 4. Behavior contract
 
 - Current failure: Default-mode guidance before administrator handoff omits key UAC expectations, and some wording is separated from the UAC handoff by workflow status output. One reinitialize handoff lacks guidance.
-- Expected behavior: Immediately before each non-administrator PostgreSQL install, password-recovery, or reinitialize handoff, normal mode explains in plain language that temporary administrator access is needed to safely install/repair the local PostgreSQL component/password for the affected games; Windows will show a User Account Control prompt; click Yes; TPM continues automatically after approval without relaunch or choosing PostgreSQL setup again; and access is temporary for this protected operation. Install and recovery use the same expectations. Do not duplicate guidance in a handoff call path.
+- Expected behavior: Every non-admin PostgreSQL install, password-recovery, and reinitialize handoff renders the same compact permission panel with temporary-access reason, Windows User Account Control notice, click-Yes action, and automatic continuation; waits for explicit Enter before UAC; and repeats the panel on retry. The protected child remains non-interactive.
 - Forbidden regressions: No service stop/start mechanics, psql commands, pg_hba.conf, trust authentication, hashes, commands/process internals in default output; no changed fail-closed PostgreSQL behavior or credential exposure; no claim that source tests establish packaged runtime behavior.
-- Design boundaries and deliberate exclusions: Keep guidance in `Write-PostgresAdministratorGuidance`; place its single call after workflow waiting status and immediately before `Start-PostgresRecoveryAsAdministrator`. Preserve the existing operation-specific setup/recovery context and protected handoff.
+- Design boundaries and deliberate exclusions: This newer contract supersedes the previous caller-level placement rule. `Start-PostgresRecoveryAsAdministrator` owns both panel rendering and the readiness gate inside its retry loop, so every UAC attempt receives one panel immediately before acknowledgement; callers do not duplicate the panel.
 
 ## 5. Source/function ownership
 
@@ -36,7 +36,7 @@
 
 ## 7. Tests required after implementation
 
-- Focused behavior tests: Install and recovery guidance each contain all required beginner semantics and exclude implementation details; every production handoff has exactly one guidance call directly before handoff after any workflow status call; reinitialize is included; existing UAC denial/retry and recovery safety tests remain unchanged.
+- Focused behavior tests: The ordered 58-column panel contains the required beginner semantics, excludes implementation details, and precedes the compact Enter gate and `RunAs` in the centralized handoff; retry rendering and protected-child non-interactivity remain covered.
 - Regression suite: Focused PostgreSQL/UX Pester tests under PowerShell 7 and Windows PowerShell 5.1.
 - Static and procedure gates: Production parse, PSScriptAnalyzer Error/Warning, ASCII, `git diff --check`, and `pwsh -NoProfile -File .\scripts\Run-TpmQualityGate.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md`.
 
@@ -53,10 +53,10 @@
 
 ## 10. Runtime smoke checklist
 
-- Exact packaged behavior: In default mode, exercise PostgreSQL installation, password recovery, and reinitialize paths; confirm the required message is immediately before each UAC prompt, click Yes, and observe automatic continuation without relaunch/reselection. Confirm no implementation mechanics appear in beginner output.
-- Required source/package identity: Exact pushed source SHA and later separately authorized rebuilt RC8 candidate; this slice does not build a package.
+- Exact packaged behavior: Exercise PostgreSQL installation, password recovery, and reinitialize paths; confirm the panel and readiness acknowledgement precede each UAC prompt, click Yes, and observe automatic continuation without relaunch/reselection. Confirm no implementation mechanics appear in beginner output.
+- Required source/package identity: Exact pushed source SHA and diagnostic-only exact-head package, as defined by the superseding transport contract; the package is not a release candidate.
 - Evidence artifacts: Captured default-mode screen and log for each path, UAC approval/denial outcome, and exact package/source identity.
-- Owner/runtime authorization: Runtime proof remains assigned to the separately authorized package/owner lane; no runtime result is claimed here.
+- Owner/runtime authorization: The diagnostic package is authorized for later ARCADE diagnosis by the 2026-10-01 owner directive. ARCADE runtime execution remains pending and outside this worktree; no runtime proof is claimed.
 
 ## 11. Stop condition
 
@@ -68,6 +68,6 @@ No unrelated cleanup, merge, tag, publication, release, package build, certifica
 
 ## 13. Commit/package authorization status
 
-- Commit authorized: Yes, conditional on all required source gates passing, by the owner-provided task.
-- Package authorized: No; explicitly excluded from this lane.
+- Commit/push authorized: Yes, conditional on required source gates passing, by the 2026-10-01 owner directive.
+- Diagnostic exact-head package authorized after commit/push for later ARCADE diagnosis only; ARCADE runtime execution is pending and outside this worktree.
 - Release/certification authorized: No; merge/tag/publication/release are prohibited.

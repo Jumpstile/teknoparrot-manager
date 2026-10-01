@@ -140,11 +140,16 @@ Plaintext exists only in TPM memory for the operation and is cleared when the
 mode exits. If the saved DPAPI-protected password fails, TPM requires the
 recovery backup to verify before stopping PostgreSQL or changing a profile.
 
-TPM stops the service, refuses a live postmaster.pid, and invokes PostgreSQL
-8.3 single-user mode with an ALTER ROLE statement on standard input. It starts
-the service again, verifies the service state, and tests the new password.
-The reset does not edit pg_hba.conf and does not drop, recreate, restore over,
-or wipe any existing database. Any reset, restart, backup, or profile-write
+TPM stops the service, refuses a live postmaster.pid, verifies that the live
+`pg_hba.conf` matches its protected backup, and temporarily prepends a
+localhost-only trust rule for the `postgres` role. It issues ALTER ROLE via
+the local PostgreSQL 8.3 `psql` client on standard input, stops the service,
+restores and hash-verifies the exact original policy before restart, then
+tests the new password under that restored policy and restores the original
+service state. It does not drop, recreate, restore over, or wipe any existing
+database. Recovery results retain the failure stage, reason code, and safe
+reason; recovery-backup verification, password reset, and later database
+backup failures remain distinct. Any reset, restart, backup, or profile-write
 failure returns a recovery-blocked result.
 
 Temporary .pgpass files are created under the Windows temporary directory with

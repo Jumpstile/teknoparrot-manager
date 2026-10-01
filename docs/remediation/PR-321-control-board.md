@@ -4,11 +4,11 @@ Status: blocked. This board is the source of truth for TPM remediation state.
 
 ## Current repository state
 
-- Root: `C:\REPOS\teknoparrot-manager`
-- Branch: `fix/rc8-release-blockers`
-- HEAD before PostgreSQL reset-transport slice: `e3552cd238374044d79277223fee1e01781dc7b6`
-- This working-tree slice covers the PostgreSQL 8.3 password reset transport and its required tests, documentation, and governance evidence.
-- Commit and push are authorized after source gates pass. Merge, tag, package publication, and release are not authorized.
+- Root: `C:\REPOS\.worktrees\postgres-runtime-defect-193796a`
+- Branch: `fix/postgres-runtime-defect-193796a`
+- Base HEAD: `193796a08d17f87f823d047646a3e848b85977fc`
+- This working-tree slice addresses the PostgreSQL packaged-runtime defect and improves normal-mode pre-UAC presentation under owner report ID 16.
+- Commit/push and a diagnostic-only exact-head package for ARCADE runtime diagnosis are authorized after required source gates pass. No merge, tag, publication, or release is authorized.
 
 ## Status rules
 
@@ -128,7 +128,7 @@ remains stale and is not a release gate.
 | 13 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Completed non-interactive browser state after valid P2; explicit return/close guidance; no further click mutation | No | Yes |
 | 14 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Best-effort console focus return with logged fallback; terminal remains usable | No | Yes |
 | 15 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Workflow-aware P1/P2, confirmation, first-run, and cursor-hide prompts with typed fallback | No | Yes |
-| 16 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | PostgreSQL 8.3 reset transport and committed-state protections remain; default install/recovery/reinitialize now gives explicit temporary-admin/UAC/Yes/automatic-resume guidance immediately before each elevation handoff without exposing internals. PS7 and Windows PowerShell 5.1 focused UX suites each pass 60/60; complete source-quality and permanent procedure gates pass. Exact pushed-SHA package/runtime evidence remains pending. | `TPM-POSTGRES-RESET-TRANSPORT-001`; `TPM-POSTGRES-UAC-GUIDANCE-001`; PostgreSQL focused tests | Exact pushed-SHA package install/recovery/reinitialize smoke |
+| 16 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | PostgreSQL reset-stage diagnostics and committed-state protections remain; every non-admin install/recovery/reinitialize handoff renders the fixed-width permission panel and compact Enter gate before UAC, with no expert internals. PS7/PS5.1 focused and full source gates pass; exact pushed-SHA diagnostic package/runtime evidence remains pending. | `TPM-POSTGRES-RESET-TRANSPORT-001`; `TPM-POSTGRES-UAC-GUIDANCE-001`; UAC/PostgreSQL focused tests | Exact pushed-SHA package install/recovery/reinitialize smoke |
 | 17 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Repair candidate search and apply calls are limited to the affected broken profile codes; focused one/multiple/zero-scope tests pass | No | Yes |
 | 18 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | No-candidate reporting includes searched-folder and affected-profile evidence plus Back; focused tests pass | No | Yes |
 | 19 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Optional source recopy hands only affected profile codes to AutoSync; no broad extraction escape found | No | Yes |
@@ -695,3 +695,33 @@ actions remain outside this implementation slice and were not performed.
   by this slice.
 - Hunk mapping: `TPM-MENU-COMPACT-DEFAULT-001` / `ARC-UX-S01` /
   `TPM-TRACE-001` / `TPM-OWNER-001` through `TPM-OWNER-003`.
+
+## PostgreSQL packaged-runtime defect and pre-UAC readiness pause -- 2026-10-01
+
+Owner report ID 16 is assigned to
+`TPM-POSTGRES-RESET-TRANSPORT-001`. Arcade evidence identifies two runs of the
+package built from `193796a08d17f87f823d047646a3e848b85977fc`, both with
+verified recovery evidence present, the original live `pg_hba.conf` hash
+unchanged, and the prior known-good credential still authenticating. The
+protected child reported database-backup failure and issued a fresh retry.
+This evidence proves neither that reset entered a particular pre-commit stage
+nor that ALTER ROLE committed; no specific historical reset-stage root cause
+is asserted.
+
+The source change adds stage-specific reset FailureStage/ResetReasonCode and
+safe reason logging, including distinct recovery-evidence, reset, and later
+database-backup categories. Normal-mode non-admin PostgreSQL handoff now
+renders a compact, 58-column permission panel inside the handoff loop, then
+waits for explicit Enter before `RunAs`. Every retry redraws the panel;
+protected-child behavior remains non-interactive. Existing committed-but-
+unverified credential fail-closed handling is unchanged. No runtime root
+cause is established by the supplied evidence or these source tests.
+
+Source gates and runtime status:
+
+- UAC/PostgreSQL focused Pester: 142 passed on PowerShell 7 and 142 passed on
+  Windows PowerShell 5.1; full TPM quality gate passed (Main Pester 1192/1192,
+  SupportPackage 41/41, static and permanent-procedure gates passed).
+- Diagnostic exact-head package is authorized after commit/push for ARCADE
+  diagnosis only; package identity/contents validation and ARCADE runtime proof
+  remain pending. This package is not a release candidate.

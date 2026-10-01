@@ -48,14 +48,15 @@ permissions, or elevation. The release acceptance question is whether a
 
 
 Immediately before every non-administrator PostgreSQL install, password
-recovery, or reinitialize UAC handoff, TPM explains that temporary
-administrator access is needed to safely install or repair the local
-PostgreSQL component/password for the affected games. It identifies the
-User Account Control prompt, tells the user to click Yes, and confirms TPM
-continues automatically without relaunch or choosing PostgreSQL setup again.
-The access is limited to the protected operation. This default guidance
-contains no service mechanics, commands, authentication-policy details, or
-hashes; each call is placed directly before its elevation handoff.
+recovery, or reinitialize UAC handoff, TPM displays a compact permission panel
+with a clear heading, one short reason, the Windows User Account Control
+notice, the "Click Yes" action, and automatic-continuation guidance. The panel
+uses deliberate spacing and stays within 60 console columns; no service,
+command, authentication-policy, or hash details appear in normal mode. The
+access is limited to the protected PostgreSQL operation. The handoff then
+requires an explicit Enter readiness acknowledgement before invoking the
+Windows permission prompt. Every retry renders the panel again. The protected
+resume child remains non-interactive.
 The PostgreSQL setup path classifies client diagnostics before presenting
 recovery. Password authentication failures receive a distinct masked-password
 validation path; rejected credentials are not saved or logged, and profile
@@ -208,9 +209,15 @@ normal recovery output. Read-only diagnosis separates beginner-safe
 `NormalChecks` from technical `TechnicalChecks`: normal output groups failure
 categories and collapses repeated detail rows, while Details, logs, and
 support guidance retain the profile key, database, category, and redacted raw
-detail. Automatic password reset results carry a `FailureStage` for every
-verification boundary, and password-entry/reset activities replace the stale
-database-backup status while those actions are running.
+detail. Automatic password reset results expose `FailureStage`, `ResetReasonCode`,
+a beginner-safe `Reason`, and a separately redacted `TechnicalReason` in logs.
+Failure stages distinguish verified-evidence rejection, temporary-policy
+application, recovery-service start, ALTER ROLE, policy restore, restart,
+password validation, and service restoration. Protected resume also logs a
+password-redacted `DatabaseBackup` stage and diagnostic after reset succeeds
+but the later database backup fails. Recovery-evidence verification, reset,
+and later database-backup failures therefore cannot be confused. Password
+entry/reset activities replace stale database-backup status while active.
 Automatic PostgreSQL 8.3 password recovery uses the supported local `psql`
 client rather than single-user mode. After verifying recovery evidence and
 the exact original `pg_hba.conf` hash, TPM temporarily places a localhost-only

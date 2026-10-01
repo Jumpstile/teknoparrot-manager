@@ -31,8 +31,8 @@ Invoke-GateStep 'ASCII and parse' {
 Invoke-GateStep 'PSScriptAnalyzer' {
     Invoke-ScriptAnalyzer -Path $source -Severity Error,Warning -Settings $settings -ErrorAction Stop
 }
-Invoke-GateStep 'Main Pester' { & pwsh -NoProfile -Command "Invoke-Pester -Path '$tests' -CI" }
-if (Test-Path -LiteralPath $supportTests -PathType Leaf) { Invoke-GateStep 'SupportPackage Pester' { & pwsh -NoProfile -Command "Invoke-Pester -Path '$supportTests' -CI" } }
+Invoke-GateStep 'Main Pester' { & pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 5.7.1; Invoke-Pester -Path '$tests' -CI" }
+if (Test-Path -LiteralPath $supportTests -PathType Leaf) { Invoke-GateStep 'SupportPackage Pester' { & pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 5.7.1; Invoke-Pester -Path '$supportTests' -CI" } }
 Invoke-GateStep 'git diff check' { git -C $repo diff --check }
 $freshnessPaths = @(
     $source,

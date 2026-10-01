@@ -5407,7 +5407,8 @@ __BRANCH__
             $script:pgNativeArguments = $null
             $script:pgNativeInput = $null
             $script:pgServiceStatus = 'Running'
-            Mock Write-Log { param([string]$Message) if ($Message -match [regex]::Escape($script:pgSecret)) { throw 'secret reached log mock' } }
+            $script:postgresLogMessages = @()
+            Mock Write-Log { $script:postgresLogMessages += [string]$Message }
             Mock Get-Service { [pscustomobject]@{ Status = $script:pgServiceStatus } }
             Mock Start-Service { $script:pgServiceStatus = 'Running' }
             Mock Stop-Service { $script:pgServiceStatus = 'Stopped' }
@@ -5556,6 +5557,16 @@ __BRANCH__
             $result.Reason | Should -Not -Match ([regex]::Escape($script:pgSecret))
             Should -Invoke Start-Service -Times 2
             Should -Invoke Test-PostgresPassword -Times 0
+        }
+        It "returns a stage-specific reset reason code without exposing the password" {
+            Mock Invoke-PostgresNativeProcessWithInput {
+                [pscustomobject]@{ ExitCode = 7; Output = ''; Error = $script:pgSecret }
+            }
+            $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
+            $result.FailureStage | Should -Be 'AlterRole'
+            $result.ResetReasonCode | Should -Be 'ALTER_ROLE_FAILED'
+            $result.Reason | Should -Not -Match ([regex]::Escape($script:pgSecret))
+            ($script:postgresLogMessages -join "`n") | Should -Not -Match ([regex]::Escape($script:pgSecret))
         }
         It "keeps verified backup, reset, and password verification in one recovery path" {
             Mock New-PostgresRecoveryBackup { $script:pgBackup }
@@ -6137,14 +6148,19 @@ Describe "RC8 PostgreSQL and support UX" {
             $xml = '<GameProfile><GameName>{0}</GameName><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>{1}</FieldValue></FieldInformation></ConfigValues></GameProfile>' -f $entry.Game, $entry.File
             Set-Content -LiteralPath (Join-Path $profiles ($entry.File + '.xml')) -Value $xml
         }
+        $script:databaseBackupSecret = 'Backup-Path-Password-739'
+        $script:databaseBackupLog = @()
         Mock Test-PostgresInstalled { $true }
-        Mock Get-PostgresDatabaseState { throw 'database state could not be verified' }
-        $result = Backup-PostgresDatabases -UserProfilesDir $profiles -SuperPasswordPlain 'secret'
+        Mock Get-PostgresDatabaseState { throw "database state failed with password=$script:databaseBackupSecret" }
+        Mock Write-Log { $script:databaseBackupLog += [string]$Message }
+        $result = Backup-PostgresDatabases -UserProfilesDir $profiles -SuperPasswordPlain $script:databaseBackupSecret
         $display = @($result.FailedDatabases) -join ', '
         foreach ($entry in $entries) {
             $display | Should -Match ([regex]::Escape(('{0} / {1}' -f $entry.Game, $entry.File)))
         }
         $result.Succeeded | Should -BeFalse
+        ($result.FailureDetails -join "`n") | Should -Not -Match ([regex]::Escape($script:databaseBackupSecret))
+        ($script:databaseBackupLog -join "`n") | Should -Not -Match ([regex]::Escape($script:databaseBackupSecret))
     }
     It "separates path-limited support omissions from true collection failures" {
         $records = @(
@@ -6439,43 +6455,96 @@ function Exit-PostgresRecoveryResume {
         Mock Write-Log {}
     }
 
-    It "explains temporary administrator access and the complete UAC recovery handoff" {
-        Write-PostgresAdministratorGuidance -Operation Recovery
+    It "renders the permission guidance as a compact, ordered panel without expert details" {
+        Write-PostgresAdministratorGuidance
 
         $guidance = $script:postgresGuidanceMessages -join [Environment]::NewLine
-        $guidance | Should -Match 'temporary administrator access'
-        $guidance | Should -Match 'safely repair the local PostgreSQL component and password for these games'
-        $guidance | Should -Match 'User Account Control prompt'
+        $guidance | Should -Match 'Administrator permission needed'
+        $guidance | Should -Match 'Temporary admin permission is needed only for the'
+        $guidance | Should -Match 'protected PostgreSQL operation'
+        $guidance | Should -Match 'Windows User Account Control will appear'
         $guidance | Should -Match 'Click Yes to continue'
-        $guidance | Should -Match 'continues automatically'
-        $guidance | Should -Match 'do not need to relaunch it or choose PostgreSQL setup again'
-        $guidance | Should -Match 'temporary and limited to this protected operation'
+        $guidance | Should -Match 'TPM continues automatically after approval'
+        $headingIndex = $guidance.IndexOf('Administrator permission needed')
+        $reasonIndex = $guidance.IndexOf('Temporary admin permission')
+        $uacIndex = $guidance.IndexOf('Windows User Account Control')
+        $yesIndex = $guidance.IndexOf('Click Yes to continue')
+        $continueIndex = $guidance.IndexOf('TPM continues automatically')
+        ($headingIndex -lt $reasonIndex -and $reasonIndex -lt $uacIndex -and $uacIndex -lt $yesIndex -and $yesIndex -lt $continueIndex) | Should -BeTrue
+        $panelRows = @($script:postgresGuidanceMessages | Where-Object { [string]$_ -match '^\s*\|.*\|$' })
+        @($panelRows | ForEach-Object { ([string]$_).Length } | Where-Object { $_ -ne 58 }).Count | Should -Be 0
+        @($script:postgresGuidanceMessages | Where-Object { ([string]$_).Length -gt 60 }).Count | Should -Be 0
+        $guidance | Should -Match '\+[-]{54}\+'
         $guidance | Should -Not -Match '(?i)service stop|service start|psql|pg_hba\.conf|trust authentication|hash|command line|process internals'
+    }
+    It "waits for explicit readiness before handing the protected request to Windows" {
+        $functionText = (Get-Command Start-PostgresRecoveryAsAdministrator).ScriptBlock.ToString()
+        $readinessPrompt = '  Continue: press Enter when ready'
+        $promptIndex = $functionText.IndexOf($readinessPrompt)
+        $readinessPrompt.Length | Should -BeLessOrEqual 60
+        $runAsIndex = $functionText.IndexOf('-Verb RunAs')
+        $promptIndex | Should -BeGreaterOrEqual 0
+        $runAsIndex | Should -BeGreaterThan $promptIndex
+        $functionText | Should -Not -Match 'pg_hba\.conf|psql|ALTER ROLE|trust authentication'
+    }
+    It "does not invoke UAC until the readiness acknowledgement returns" {
+        $script:uacWasStarted = $false
+        Mock New-PostgresRecoveryState { 'state-envelope' }
+        Mock Read-HostSafe { throw 'readiness acknowledgement did not complete' }
+        Mock Start-Process { $script:uacWasStarted = $true; [pscustomobject]@{ ExitCode = 0 } }
+        {
+            Start-PostgresRecoveryAsAdministrator -ConfigPath 'config' -ScriptPath 'script' -TpRoot 'root' -UserProfilesDir 'profiles' -Operation Install
+        } | Should -Throw 'readiness acknowledgement did not complete'
+        $script:uacWasStarted | Should -BeFalse
+    }
+    It "pauses after normal guidance and before invoking the UAC process without exposing the password" {
+        $script:handoffEvents = @()
+        $script:handoffArguments = ''
+        $script:handoffOutput = @()
+        $script:handoffLogs = @()
+        Mock Write-Host { $script:handoffOutput += [string]$Object; if ([string]$Object -match 'Administrator permission needed') { $script:handoffEvents += 'Guidance' } }
+        Mock Write-Log { $script:handoffLogs += [string]$Message }
+        Mock New-PostgresRecoveryState { 'state-envelope' }
+        Mock Read-HostSafe { $script:handoffEvents += 'Ready'; return '' }
+        Mock Start-Process {
+            $script:handoffArguments = [string]$ArgumentList
+            $script:handoffEvents += 'UAC'
+            [pscustomobject]@{ ExitCode = 0 }
+        }
+        Mock Remove-PostgresRecoveryState { $true }
+        $started = Start-PostgresRecoveryAsAdministrator -ConfigPath 'config' -ScriptPath 'script' -TpRoot 'root' -UserProfilesDir 'profiles' -Operation Recovery -PasswordPlain 'never-log-this-password'
+        $started | Should -BeTrue
+        $script:handoffEvents | Should -Be @('Guidance','Ready','UAC')
+        ($script:handoffEvents -join '|') | Should -Not -Match 'never-log-this-password'
+        $script:handoffArguments | Should -Not -Match 'never-log-this-password'
+        ($script:handoffOutput -join '|') | Should -Not -Match 'never-log-this-password'
+        ($script:handoffLogs -join '|') | Should -Not -Match 'never-log-this-password'
     }
 
     It "uses the same UAC expectations for PostgreSQL installation" {
-        Write-PostgresAdministratorGuidance -Operation Install
+        Write-PostgresAdministratorGuidance
 
         $guidance = $script:postgresGuidanceMessages -join [Environment]::NewLine
-        $guidance | Should -Match 'temporary administrator access'
-        $guidance | Should -Match 'safely install the local PostgreSQL component for these games'
-        $guidance | Should -Match 'User Account Control prompt'
+        $guidance | Should -Match 'Administrator permission needed'
+        $guidance | Should -Match 'Temporary admin permission is needed only for the'
+        $guidance | Should -Match 'protected PostgreSQL operation'
+        $guidance | Should -Match 'Windows User Account Control will appear'
         $guidance | Should -Match 'Click Yes to continue'
-        $guidance | Should -Match 'continues automatically'
-        $guidance | Should -Match 'do not need to relaunch it or choose PostgreSQL setup again'
-        $guidance | Should -Match 'temporary and limited to this protected operation'
+        $guidance | Should -Match 'TPM continues automatically after approval'
         $guidance | Should -Not -Match '(?i)right-click|Run as administrator|psql|pg_hba\.conf|trust authentication|hash|command line|process internals'
     }
 
-    It "prints one guidance block immediately before every non-admin PostgreSQL UAC handoff" {
+    It "renders the permission panel and readiness gate inside every non-admin PostgreSQL handoff" {
         $handoffs = [regex]::Matches($script:ProductionSource, '(?m)^\s*\$elevated = Start-PostgresRecoveryAsAdministrator')
-        $guidedHandoffs = [regex]::Matches($script:ProductionSource, '(?m)^\s*Write-PostgresAdministratorGuidance -Operation (?:Install|Recovery)\r?\n\s*\$elevated = Start-PostgresRecoveryAsAdministrator')
-        $workflowGatedHandoffs = [regex]::Matches($script:ProductionSource, '(?m)^\s*\[void\]\(Set-TpmWorkflowWaiting[^\r\n]*\)\r?\n\s*Write-PostgresAdministratorGuidance -Operation (?:Install|Recovery)\r?\n\s*\$elevated = Start-PostgresRecoveryAsAdministrator')
-
         $handoffs.Count | Should -Be 4
-        $guidedHandoffs.Count | Should -Be $handoffs.Count
-        $workflowGatedHandoffs.Count | Should -Be 3
-        $script:ProductionSource | Should -Match 'Write-PostgresAdministratorGuidance -Operation Recovery\r?\n\s*\$elevated = Start-PostgresRecoveryAsAdministrator[\s\S]*?-Operation Reinitialize'
+        $handoffFunction = (Get-Command Start-PostgresRecoveryAsAdministrator).ScriptBlock.ToString()
+        $panelIndex = $handoffFunction.IndexOf('Write-PostgresAdministratorGuidance')
+        $promptIndex = $handoffFunction.IndexOf('Continue: press Enter when ready')
+        $runAsIndex = $handoffFunction.IndexOf('-Verb RunAs')
+        $panelIndex | Should -BeGreaterOrEqual 0
+        $promptIndex | Should -BeGreaterThan $panelIndex
+        $runAsIndex | Should -BeGreaterThan $promptIndex
+        $handoffFunction | Should -Not -Match 'pg_hba\.conf|psql|ALTER ROLE|trust authentication'
     }
 
     It "offers automatic repair instead of manual relaunch instructions" {
@@ -6644,6 +6713,7 @@ function Exit-PostgresRecoveryResume {
             Mock Get-PostgresRecoveryStateDirectory { Join-Path $TestDrive 'RecoveryState' }
             Mock Set-PostgresRecoveryStateAcl {}
             Mock Write-Log {}
+            Mock Read-HostSafe { return '' }
         }
 
         It "stores the chosen password encrypted and validates it only at resume time" {

@@ -1,23 +1,23 @@
 # PR #321 Remediation Gate Report
 
-- Repository root: `C:\REPOS\teknoparrot-manager`
-- Branch: `fix/rc8-release-blockers`
-- HEAD before this working-tree slice: `89115a16f6c44108ddbe281b62f4bf95041a5d41`
-- Report generated UTC: `2026-10-01T05:01:51Z` (after test, source-gate, InjectionHunter, and evidence review)
-- Source/test last-edit UTC: `2026-10-01T04:14:11Z` (latest governed input)
-- Source SHA: `89115a16f6c44108ddbe281b62f4bf95041a5d41` (working changes uncommitted)
-- Candidate ZIP remains unchanged and is not validated for this source slice; this lane does not build packages.
-- Scope: beginner-safe PostgreSQL install/recovery/reinitialize guidance immediately before UAC handoff, focused tests, and governance documentation.
-- Current status: focused tests, complete source quality gate, permanent procedure gate, and InjectionHunter review passed; exact pushed-SHA package/runtime proof remains outstanding.
+- Repository root: `C:\REPOS\.worktrees\postgres-runtime-defect-193796a`
+- Branch: `fix/postgres-runtime-defect-193796a`
+- Base HEAD: `193796a08d17f87f823d047646a3e848b85977fc`
+- Report generated UTC: `2026-10-01T14:09:42.0921265Z` (full quality and freshness-validated permanent-procedure gates passed)
+- Source/test last-edit UTC: `2026-10-01T13:47:10.9633784Z`
+- Source SHA: `193796a08d17f87f823d047646a3e848b85977fc` (working changes uncommitted)
+- Candidate package: not yet built. Owner authorizes a new SHA-scoped, diagnostic-only exact-head package after commit/push; it is not a release candidate.
+- Scope: PostgreSQL protected recovery failure-stage observability and professional normal-mode pre-UAC permission panel/readiness gate; documentation and regression coverage.
+- Current status: focused UAC/PostgreSQL Pester passes 142/142 on PowerShell 7 and Windows PowerShell 5.1; full source, test, static, and permanent-procedure gates passed; runtime root cause remains unknown.
 
 ## Provenance
 
-- This working-tree slice contains the PostgreSQL UAC guidance source, focused
-  tests, architecture/inventory/changelog, control-board, slice-contract, and
-  remediation-report updates.
+- This working-tree slice changes PostgreSQL recovery source, focused tests,
+  architecture/security/inventory/changelog, control-board, slice-contract,
+  and this report.
 - The canonical control board is `docs/remediation/PR-321-control-board.md`.
 - No monitor-pipeline files changed.
-- No runtime, state, log, ZIP, or package artifact was created by this work.
+- No runtime, state, log, ZIP, or package artifact was created in this worktree.
 
 ## Owner report mapping table
 This retained mapping is the historical pre-reaudit snapshot. The canonical
@@ -40,7 +40,7 @@ release-decision table appears below and supersedes this snapshot.
 | 13 | Crosshair browser close | SOURCE FIXED; OWNER RUNTIME NEEDED | Export-CrosshairPreview | Crosshair source-contract coverage | Actual browser P1/P2 smoke |
 | 14 | Crosshair focus return | SOURCE FIXED; OWNER RUNTIME NEEDED | Crosshair focus fallback | Crosshair fallback tests | Actual focus smoke |
 | 15 | Crosshair prompt row | SOURCE FIXED; OWNER RUNTIME NEEDED | `Invoke-CrosshairSetup` and `Read-TpmWorkflowInput` | `routes the P1 and P2 prompts through workflow input when a status context exists` | Constrained console smoke |
-| 16 | PostgreSQL repair loop | SOURCE FIXED; OWNER RUNTIME NEEDED | PostgreSQL recovery action loop and password-mismatch retry | `keeps password mismatch inside the reset flow`; `retries protected backup after validated password` | Backup-failure R smoke |
+| 16 | PostgreSQL protected recovery/runtime failure | SOURCE FIXED; OWNER RUNTIME NEEDED | `Reset-PostgresPasswordAutomatically`; protected-resume database backup; `Write-PostgresAdministratorGuidance`; `Start-PostgresRecoveryAsAdministrator` | `returns a stage-specific reset reason code without exposing the password`; `renders the permission guidance as a compact, ordered panel without expert details`; `waits for explicit readiness before handing the protected request to Windows`; `does not invoke UAC until the readiness acknowledgement returns`; `pauses after normal guidance and before invoking the UAC process without exposing the password`; `renders the permission panel and readiness gate inside every non-admin PostgreSQL handoff` | Exact-SHA packaged diagnosis: prior authenticating credential, new credential, original hba hash, database backup, reset-stage log, and permission-panel/Enter/UAC capture |
 | 17 | Affected-games repair scope | SOURCE FIXED; OWNER RUNTIME NEEDED | Repair-GamePaths and Health Check handoff | `emits compact repair progress for each profile` | One/multiple/zero affected smoke |
 | 18 | Health Check no-candidate explanation | SOURCE FIXED; OWNER RUNTIME NEEDED | Health Check repair reporting | Health Check repair tests | No-candidate smoke |
 | 19 | Health Check source recopy | SOURCE FIXED; OWNER RUNTIME NEEDED | Scoped AutoSync re-entry | Affected-path source contracts | Source recopy smoke |
@@ -284,6 +284,14 @@ Package rebuild and owner-runtime proof remain outstanding.
 | PostgreSQL pre-UAC guidance focused Pester (Windows PowerShell 5.1) | `powershell.exe -NoProfile -Command "Import-Module Pester -RequiredVersion 5.7.1; Invoke-Pester -Path './Tests/TeknoParrot-Manager.Tests.ps1' -FullNameFilter '*RC8 PostgreSQL and support UX*','*Postgres guided recovery*','*PostgreSQL Slice 8B*' -CI -Output Normal"` | 60 passed, 0 failed, 0 skipped, 1128 not run | 2026-10-01T04:35:14 | 2026-10-01T04:36:16 | Windows PowerShell 5.1 / Pester 5.7.1 |
 | TPM source quality gate | `pwsh -NoProfile -File ./scripts/Run-TpmQualityGate.ps1 -ReportPath ./docs/remediation/PR-321-reconciliation.md` | Main Pester 1188 passed, 0 failed; SupportPackage 41 passed, 0 failed; ASCII/parse, PSScriptAnalyzer, diff check, and permanent procedure gate passed | not captured | observed complete by 2026-10-01T04:52:36Z | PowerShell 7 / Pester 5.7.1 |
 | InjectionHunter production-script scan | `Invoke-ScriptAnalyzer -Path ./TeknoParrot-Manager.ps1 -CustomRulePath C:/Users/EliSi/OneDrive/Documents/PowerShell/Modules/InjectionHunter/1.0.0/InjectionHunter.psm1` plus matching against `scripts/InjectionHunterDispositions.psd1` | 30 findings; all 30 matched individually reviewed FalsePositive entries; 0 unmatched/unresolved. Fixed regex/replacement literals, assembly names, bounded internal properties, and fixed argument-array quoting; no new finding from this guidance change. | not captured | observed complete by 2026-10-01T05:00:36Z | pwsh / PSScriptAnalyzer / InjectionHunter 1.0.0 |
+| PostgreSQL defect full source quality gate | `pwsh -NoProfile -File ./scripts/Run-TpmQualityGate.ps1 -ReportPath ./docs/remediation/PR-321-reconciliation.md` | Main Pester 1191 passed, 0 failed, 0 skipped, 0 not run; SupportPackage 41 passed, 0 failed; ASCII/parse, PSScriptAnalyzer, and `git diff --check` passed. Gate failed only because report validation evidence predated the latest source/test change; a fresh permanent-procedure check is pending. | not captured | 2026-10-01T12:11:30.2874167Z (gate completion observed by) | PowerShell 7.6.6 / Pester 5.7.1 |
+| PostgreSQL focused Pester (Windows PowerShell 5.1) | `powershell.exe -NoProfile -Command "Import-Module Pester -RequiredVersion 5.7.1; Invoke-Pester -Path './Tests/TeknoParrot-Manager.Tests.ps1' -FullNameFilter @('*automatic reset*','*explicit readiness*','*pauses after normal guidance*','*guided recovery*','*committed password-change*','*database state cannot be verified*') -CI -Output Normal"` | 34 passed, 0 failed, 1157 not run | not captured | 2026-10-01T12:14:48.7776437Z (result received by) | Windows PowerShell 5.1 / Pester 5.7.1 |
+| InjectionHunter production inventory reconciliation | `Test-TPMProductionInjectionHunterV1` on `Get-TPMProductionPowerShellInventoryV1` with `scripts/InjectionHunterDispositions.psd1` | Executed; 42 findings, 0 unresolved; disposition registry matched all observed findings; InjectionHunter 1.0.0 | not captured | 2026-10-01T12:14:48.7776437Z (result received by) | PowerShell 7 / InjectionHunter 1.0.0 |
+| Refreshed permanent-procedure gate | `pwsh -NoProfile -File ./scripts/Test-TpmPermanentProcedures.ps1 -RepoRoot C:/REPOS/.worktrees/postgres-runtime-defect-193796a -ReportPath C:/REPOS/.worktrees/postgres-runtime-defect-193796a/docs/remediation/PR-321-reconciliation.md -SourcePath C:/REPOS/.worktrees/postgres-runtime-defect-193796a/TeknoParrot-Manager.ps1 -ChangedAtUtc 2026-10-01T11:57:01.0682273Z` | PASS; latest governed-input freshness boundary `2026-10-01T11:57:01.0682273Z`; exact-SHA owner-runtime proof remains pending | not captured | 2026-10-01T12:17:56.7888834Z (pass observed by) | PowerShell 7 |
+| UAC/PostgreSQL focused Pester (PS7) | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*permission guidance*','*readiness*','*protected request*','*automatic reset*','*guided recovery*','*committed password-change*','*database state cannot be verified*') -CI -Output Normal` | 142 passed, 0 failed, 0 skipped, 1050 not run | not captured | observed complete by 2026-10-01T13:52:51Z | PowerShell 7 / Pester 5.7.1 |
+| UAC/PostgreSQL focused Pester (Windows PowerShell 5.1) | Same focused filter under `powershell.exe` | 142 passed, 0 failed, 0 skipped, 1050 not run | not captured | observed complete by 2026-10-01T13:52:51Z | Windows PowerShell 5.1 / Pester 5.7.1 |
+| Full final TPM source quality gate | `pwsh -NoProfile -File C:/REPOS/.worktrees/postgres-runtime-defect-193796a/scripts/Run-TpmQualityGate.ps1 -ReportPath C:/REPOS/.worktrees/postgres-runtime-defect-193796a/docs/remediation/PR-321-reconciliation.md` | PASS; Main Pester 1192 passed, 0 failed, 0 skipped, 0 not run; SupportPackage 41 passed, 0 failed, 0 skipped, 0 not run; ASCII/parse, PSScriptAnalyzer, diff check, and permanent-procedure gate passed | not captured | observed complete by 2026-10-01T14:06:45.0968279Z | PowerShell 7 / Pester 5.7.1 |
+| Refreshed permanent-procedure gate | `Test-TpmPermanentProcedures.ps1` with `-ChangedAtUtc 2026-10-01T13:47:10.9633784Z` (maximum timestamp across all governed source, tests, gate scripts, governance doc, and slice inputs) | PASS; owner-runtime proof remains pending | not captured | observed complete by 2026-10-01T14:09:42.0921265Z | PowerShell 7 |
 
 ## Migration and Eggman DAT remediation -- Slice 6
 
@@ -394,16 +402,16 @@ owner-runtime smoke, release, certification, commit, or push was performed.
 | TeknoParrot-Manager.ps1; Tests/TeknoParrot-Manager.Tests.ps1; ARCHITECTURE.md; docs/RC8-REMEDIATION-INVENTORY.md; docs/remediation/PR-321-control-board.md; docs/remediation/slices/PR-321-current-slice.md; docs/remediation/slices/TPM-POSTGRES-RETRY-AUTH-001.md; docs/remediation/PR-321-reconciliation.md | PostgreSQL protected retry-authentication boundary: preserve committed-password state, suppress unverified retry-envelope issuance, update exact regression coverage and governance evidence | owner report 16 / PR #321 / TPM-TRACE-001 / TPM-OWNER-001 / TPM-POSTGRES-RETRY-AUTH-001 | Focused PostgreSQL recovery/password/resume PS7 57 passed / 0 failed; Windows PowerShell 5.1 57 passed / 0 failed; full main Pester 1176 passed / 0 failed; SupportPackage 41 passed / 0 failed; owner runtime remains outstanding |
 | scripts/Test-TpmPermanentProcedures.ps1; scripts/Run-TpmQualityGate.ps1; docs/governance/permanent-procedures.md; Tests/TeknoParrot-Manager.Tests.ps1; docs/remediation/slices/PR-321-current-slice.md; docs/remediation/slices/TPM-POSTGRES-RETRY-AUTH-001.md; docs/remediation/PR-321-reconciliation.md | Split permanent-procedure enforcement into source/test eligibility and runtime-complete certification so an exact committed SHA and fresh package can exist before owner-runtime proof, while certification still fails closed on pending owner runtime | PR #321 / TPM-TRACE-001 / TPM-OWNER-001 / TPM-AUTH-001 / TPM-POSTGRES-RETRY-AUTH-001 | Source gate must allow `SOURCE FIXED; OWNER RUNTIME NEEDED`; `-CertificationMode` must reject it until ARCADE proof updates statuses |
 | TeknoParrot-Manager.ps1; Tests/TeknoParrot-Manager.Tests.ps1; ARCHITECTURE.md; docs/RC8-REMEDIATION-INVENTORY.md; TeknoParrot-Manager-CHANGELOG.txt; TeknoParrot-Manager-README.txt; README.md; docs/remediation/PR-321-control-board.md; docs/remediation/PR-321-reconciliation.md; docs/remediation/slices/TPM-POSTGRES-RESET-TRANSPORT-001.md | PostgreSQL 8.3 reset transport: verified localhost-only temporary authentication rule, psql stdin ALTER ROLE pinned to port 5432, hash-verified original-policy restoration, accurate service-state and committed-mutation reporting, restore of original running/stopped state, and ordinary-mode progress/guidance | owner report 16 / PR #321 / TPM-TRACE-001 / TPM-OWNER-001 / TPM-POSTGRES-RESET-TRANSPORT-001 | Focused PS7 and Windows PowerShell 5.1 transport suites: 15 passed each; final main Pester: 1187 passed; SupportPackage: 41 passed; static and permanent-procedure gates passed; exact pushed-SHA runtime remains outstanding |
-| TeknoParrot-Manager.ps1; Tests/TeknoParrot-Manager.Tests.ps1; ARCHITECTURE.md; docs/RC8-REMEDIATION-INVENTORY.md; TeknoParrot-Manager-CHANGELOG.txt; docs/remediation/PR-321-control-board.md; docs/remediation/PR-321-reconciliation.md; docs/remediation/slices/TPM-POSTGRES-UAC-GUIDANCE-001.md | Beginner-safe PostgreSQL UAC guidance before all four install/recovery/reinitialize elevation handoffs; exact semantic and immediate-order tests | owner report 16 / PR #321 / TPM-TRACE-001 / TPM-OWNER-001 / TPM-POSTGRES-UAC-GUIDANCE-001 | Focused PS7 and Windows PowerShell 5.1 PostgreSQL/UX tests; exact counts and gate evidence recorded above; package/runtime proof outstanding |
+| TeknoParrot-Manager.ps1; Tests/TeknoParrot-Manager.Tests.ps1; ARCHITECTURE.md; SECURITY.md; docs/RC8-REMEDIATION-INVENTORY.md; TeknoParrot-Manager-CHANGELOG.txt; docs/remediation/PR-321-control-board.md; docs/remediation/PR-321-reconciliation.md; docs/remediation/slices/TPM-POSTGRES-UAC-GUIDANCE-001.md; docs/remediation/slices/TPM-POSTGRES-RESET-TRANSPORT-001.md | Centralized PostgreSQL UAC retry-loop panel, exact 58-column framing, compact readiness prompt, explicit acknowledgement before `RunAs`, and no expert details | owner report 16 / PR #321 / TPM-TRACE-001 / TPM-OWNER-001 / TPM-POSTGRES-RESET-TRANSPORT-001 | PS7/PS5.1 focused tests 142/142; full source quality gate, static checks, and permanent-procedure gate passed; diagnostic exact-head package authorized for later ARCADE diagnosis, runtime remains pending |
 
-### PostgreSQL pre-UAC guidance correction -- 2026-10-01
+### PostgreSQL permission-panel correction -- 2026-10-01
 
-- Owner report 16 / PR #321 / `TPM-POSTGRES-UAC-GUIDANCE-001`.
-- Focused behavioral tests: `explains temporary administrator access and the complete UAC recovery handoff`; `uses the same UAC expectations for PostgreSQL installation`; `prints one guidance block immediately before every non-admin PostgreSQL UAC handoff`.
-- PS7: 60 passed; 0 failed; 0 skipped. Windows PowerShell 5.1: 60 passed; 0 failed; 0 skipped. Exact run times and command are recorded above.
-- Fresh `Test-TpmPermanentProcedures.ps1` passed with ChangedAtUtc `2026-10-01T04:14:11.1751832Z`; complete `Run-TpmQualityGate.ps1` passed with main 1188/1188 and SupportPackage 41/41.
-- InjectionHunter found 30 production-script matches; all matched existing individually reviewed `FalsePositive` dispositions, with 0 unmatched/unresolved. Dynamic property reads were verified against closed internal field lists; Add-Type, regex, and argument-quoting inputs were verified as fixed or bounded.
-- Default guidance is source/test-covered for all four non-admin callsites. Exact pushed-SHA package/runtime proof remains outstanding; no package was built in this lane.
+- Owner report 16 / PR #321 / `TPM-POSTGRES-RESET-TRANSPORT-001`; this supersedes the earlier caller-local presentation boundary in `TPM-POSTGRES-UAC-GUIDANCE-001`.
+- Focused behavior regressions cover required text/order, exact panel row widths, compact Enter prompt, expert-detail exclusion, retry rendering, and no UAC start before acknowledgement completes.
+- PowerShell 7 and Windows PowerShell 5.1 focused UAC/PostgreSQL suites: 142 passed each; 0 failed.
+- Current full quality and permanent-procedure gate results are recorded in the validation table above after completion.
+- The production inventory PSScriptAnalyzer/InjectionHunter contract test passed; no runtime root cause is inferred from source tests.
+- A diagnostic exact-head package is authorized for later ARCADE diagnosis. ARCADE execution remains pending/outside this worktree; no release action is authorized.
 
 ## Permanent procedure compliance
 
@@ -978,3 +986,42 @@ commit, release, certification, or runtime activity.
   `Tests/TeknoParrot-Manager.Tests.ps1` -> `TPM-MENU-COMPACT-DEFAULT-001` /
   `ARC-UX-S01` / `TPM-TRACE-001`; documentation evidence ->
   `TPM-OWNER-001` through `TPM-OWNER-003`.
+
+## PostgreSQL runtime-defect addendum -- 2026-10-01
+
+Owner report ID 16 / PR #321 / `TPM-POSTGRES-RESET-TRANSPORT-001`.
+The supplied exact-package evidence proves that recovery backup files existed,
+the prior known-good credential still authenticated, the live original
+`pg_hba.conf` SHA-256 remained
+`61880D9C7CA4C879D6D6514A9EF3EBD6F46BD6C04E40DFEADC175D0E5D5B27CB`, and
+the protected child later returned the generic PostgreSQL database-backup
+failure summary. It does not establish the earlier reset stage or a unique
+historical root cause. No speculative behavioral repair was applied.
+
+Source adds failure-stage/reason-code/safe-reason reporting for automatic
+reset, including separate recovery-evidence, temporary-policy application,
+service startup, ALTER ROLE, restore/restart/authentication, and later
+database-backup categories. The database-backup diagnostic is redacted with
+the selected password before logging. Committed-but-unverified failures remain
+non-retryable. The cause of the supplied historical failure remains unknown.
+
+Normal mode now presents a 58-column permission panel immediately before the
+administrator retry loop, then waits for the user to press Enter before
+`Start-Process -Verb RunAs`. The child remains noninteractive. A console smoke
+rendered the panel from the production function; no UAC prompt was invoked.
+
+Focused verification observed:
+
+| Gate | Command | Result |
+|---|---|---|
+| PostgreSQL/UAC focused Pester (PowerShell 7, Pester 5.7.1) | `Invoke-Pester -Path ./Tests/TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*permission guidance*','*readiness*','*protected request*','*automatic reset*','*guided recovery*','*committed password-change*','*database state cannot be verified*') -CI -Output Normal` | 142 passed, 0 failed, 1050 not run |
+| PostgreSQL/UAC focused Pester (Windows PowerShell 5.1, Pester 5.7.1) | Same focused filter under `powershell.exe` | 142 passed, 0 failed, 1050 not run |
+| Production-inventory PSScriptAnalyzer/InjectionHunter contract | Focused Pester inventory contract | 1 passed, 0 failed |
+
+- Final `Run-TpmQualityGate.ps1`: PASS; Main Pester 1192/1192 and
+  SupportPackage 41/41; ASCII/parse, PSScriptAnalyzer, diff check, and
+  permanent-procedure gate passed. Completion observed by
+  `2026-10-01T14:06:45.0968279Z`.
+- Exact-head diagnostic package is authorized after commit/push, solely for
+  later ARCADE diagnosis. ARCADE runtime proof, merge, tag, publication, and
+  release remain outside this task.

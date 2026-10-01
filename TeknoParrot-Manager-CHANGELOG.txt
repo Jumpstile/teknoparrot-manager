@@ -39,9 +39,16 @@
   or, when those legacy XML titles are also blank, the unique original game
   name already loaded from the collection DAT. Affected-game recovery output
   remains beginner-readable without inventing names from profile codes.
-  Before any PostgreSQL administrator handoff, normal mode now explains the
-  temporary access request, the Windows User Account Control prompt, clicking
-  Yes, and automatic continuation without relaunching TPM.
+  Before any PostgreSQL administrator handoff, normal mode shows a compact,
+  aligned permission panel explaining why approval is needed, that Windows
+  User Account Control will appear, to click Yes, and that TPM continues
+  automatically. The user must press Enter before UAC starts; each retry
+  re-displays the panel, while the protected child remains non-interactive.
+  PostgreSQL protected recovery now logs and
+  returns a reset failure stage, reason code, and password-redacted reason.
+  Recovery-backup verification, password reset, and later database-backup
+  failures are recorded as distinct stages; committed-but-unverified password
+  changes remain fail-closed and cannot issue a credential retry.
   Ordinary/default menu viewports now stay Compact and one-column; the
   production selector requires both the centralized 200-column and 50-row
   wide-layout thresholds. Root cause: a duplicate legacy width-only

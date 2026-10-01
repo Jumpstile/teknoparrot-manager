@@ -11799,7 +11799,6 @@ function Invoke-PostgresReinitializeChoice {
         return [pscustomobject]@{ Outcome = 'Blocked'; Plans = $plans; PlanJson = $planJson; PlanHash = $planHash }
     }
     if (-not (Test-RunningAsAdministrator)) {
-        Write-PostgresAdministratorGuidance -Operation Recovery
         $elevated = Start-PostgresRecoveryAsAdministrator -ConfigPath $ConfigPath -ScriptPath $ScriptPath -TpRoot $TpRoot `
             -UserProfilesDir $UserProfilesDir -Operation Reinitialize -PasswordPlain $SuperPasswordPlain `
             -SelectionPlanJson $planJson -SelectionPlanHash $planHash
@@ -12065,7 +12064,7 @@ function Restore-PostgresProfileBackups {
 
 function Get-PostgresResetFailureGuidance {
     param(
-        [ValidateSet('RecoveryEvidence','ExecutableOrDataDirectory','DataPathSafety','ServiceLookup','ServiceStop','PostmasterPid','AuthenticationPolicy','AlterRole','AuthenticationRestore','ServiceRestart','PasswordValidation','ServiceRestore','ResetInvocation')]
+        [ValidateSet('RecoveryEvidence','ExecutableOrDataDirectory','DataPathSafety','ServiceLookup','ServiceStop','PostmasterPid','AuthenticationPolicy','RecoveryPolicyApply','RecoveryServiceStart','AlterRole','AuthenticationRestore','ServiceRestart','PasswordValidation','ServiceRestore','ResetInvocation')]
         [string]$FailureStage,
         [switch]$PasswordChangeCommitted
     )
@@ -12077,6 +12076,8 @@ function Get-PostgresResetFailureGuidance {
         'ServiceStop' { return 'TPM could not stop PostgreSQL safely. No password change was attempted.' }
         'PostmasterPid' { return 'PostgreSQL still appeared to be running. Close other PostgreSQL tools, then retry.' }
         'AuthenticationPolicy' { return 'TPM could not prepare PostgreSQL recovery safely. No password change was attempted. Review Details before retrying.' }
+        'RecoveryPolicyApply' { return 'TPM could not prepare PostgreSQL recovery safely. No password change was attempted. Review Details before retrying.' }
+        'RecoveryServiceStart' { return 'TPM could not start PostgreSQL for its protected repair. No password change was reported.' }
         'AlterRole' { return 'TPM could not change the PostgreSQL password. No completed reset was reported.' }
         'AuthenticationRestore' {
             if ($PasswordChangeCommitted) { return 'The PostgreSQL password may have changed, but TPM could not restore normal security. Do not retry yet. Review Details and contact support.' }
@@ -12103,7 +12104,9 @@ function Reset-PostgresPasswordAutomatically {
         PasswordChangeCommitted = $false
         BackupPath = $backupState.Path
         FailureStage = ''
+        FailureCode = ''
         Reason = ''
+        TechnicalReason = ''
     }
     $backupInfo=[pscustomobject]@{
         Required=$true; Attempted=$backupState.Attempted; Created=$backupState.Created
@@ -12114,11 +12117,25 @@ function Reset-PostgresPasswordAutomatically {
     $makeResult = {
         param([string]$Outcome,[string]$ProductState,[bool]$Started,[object[]]$Changed,[object[]]$Completed,[object[]]$Failed,[bool]$FinalPassed,[string]$ReasonCode,[string]$Summary,[bool]$RecoveryBlocked)
         $tx=New-TpmProfileTransactionResult -WorkflowKey 'PostgresRecovery' -OperationKey 'ResetRolePassword' -Outcome $Outcome -ProductState $ProductState -Summary $Summary -Items @('postgres-role') -ChangedItems $Changed -CompletedItems $Completed -FailedItems $Failed -MutationStarted $Started -MutationCompleted:($Outcome -eq 'SUCCEEDED') -Backup $backupInfo -FinalPassed $FinalPassed -ReasonCode $ReasonCode -FinalChecks @('Recovery evidence and service state were evaluated before the result was returned.')
-        foreach ($property in @('Attempted','Succeeded','RecoveryBlocked','PasswordChangeCommitted','BackupPath','FailureStage','Reason')) { $tx | Add-Member -NotePropertyName $property -NotePropertyValue $legacy[$property] -Force }
+        foreach ($property in @('Attempted','Succeeded','RecoveryBlocked','PasswordChangeCommitted','BackupPath','FailureStage','Reason','TechnicalReason')) { $tx | Add-Member -NotePropertyName $property -NotePropertyValue $legacy[$property] -Force }
+        $stageReasonCodes = @{
+            RecoveryEvidence='RECOVERY_EVIDENCE_REQUIRED'; ExecutableOrDataDirectory='RECOVERY_RUNTIME_UNAVAILABLE'
+            DataPathSafety='RECOVERY_PATH_UNSAFE'; ServiceLookup='RECOVERY_SERVICE_UNAVAILABLE'
+            ServiceStop='POSTGRES_SERVICE_STOP_FAILED'; PostmasterPid='POSTGRES_PROCESS_STILL_RUNNING'
+            AuthenticationPolicy='AUTHENTICATION_POLICY_REJECTED'; RecoveryPolicyApply='RECOVERY_POLICY_APPLY_FAILED'
+            RecoveryServiceStart='RECOVERY_SERVICE_START_FAILED'; AlterRole='ALTER_ROLE_FAILED'
+            AuthenticationRestore='AUTHENTICATION_RESTORE_FAILED'; ServiceRestart='POSTGRES_SERVICE_RESTART_FAILED'
+        }
+        $resetReasonCode = if ($legacy.FailureCode) { [string]$legacy.FailureCode } elseif ($stageReasonCodes.ContainsKey([string]$legacy.FailureStage)) { [string]$stageReasonCodes[[string]$legacy.FailureStage] } else { $ReasonCode }
+        $tx | Add-Member -NotePropertyName ResetReasonCode -NotePropertyValue $resetReasonCode -Force
+        if (-not $legacy.Succeeded -and $legacy.FailureStage) {
+            Write-Log ("Postgres recovery reset: stage={0}; reasonCode={1}; reason={2}; technicalReason={3}; passwordChangeCommitted={4}" -f $legacy.FailureStage,$resetReasonCode,$legacy.Reason,$legacy.TechnicalReason,[bool]$legacy.PasswordChangeCommitted)
+        }
         return $tx
     }
     if (-not $backupState.Verified) {
         $legacy.FailureStage = 'RecoveryEvidence'
+        $legacy.FailureCode = 'RECOVERY_EVIDENCE_REQUIRED'
         $legacy.Reason = 'Verified recovery evidence is unavailable.'
         return (& $makeResult 'FAILED_BEFORE_MUTATION' 'UNCHANGED' $false @() @() @('postgres-role') $true 'RECOVERY_EVIDENCE_REQUIRED' 'PostgreSQL recovery stopped before a role change because verified safety evidence was unavailable.' $true)
     }
@@ -12169,11 +12186,13 @@ function Reset-PostgresPasswordAutomatically {
     }
     $legacy.FailureStage = 'PostmasterPid'
     if (Test-Path -LiteralPath (Join-Path $dataDir 'postmaster.pid') -PathType Leaf) { throw 'A live PostgreSQL postmaster is still present.' }
-    $legacy.FailureStage = 'AlterRole'
+    $legacy.FailureStage = 'RecoveryPolicyApply'
     $temporaryPolicyWritten = $true
     [System.IO.File]::WriteAllText($hbaPath, $trustRule + [Environment]::NewLine + $hbaText, (New-Object System.Text.UTF8Encoding $false))
+    $legacy.FailureStage = 'RecoveryServiceStart'
     Start-Service -Name $script:PostgresServiceName -ErrorAction Stop
     Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null
+    $legacy.FailureStage = 'AlterRole'
     $literal = ConvertTo-PostgresSqlPasswordLiteral -Password $NewPassword
     $sql = 'ALTER ROLE postgres WITH PASSWORD ' + $literal + ';' + [Environment]::NewLine
     $processResult = Invoke-PostgresNativeProcessWithInput -FilePath $psqlExe -Arguments '-h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1' -InputText $sql -Secrets @($NewPassword)
@@ -12200,6 +12219,7 @@ function Reset-PostgresPasswordAutomatically {
     $legacy.FailureStage = ''
     $legacy.Reason = 'Automatic PostgreSQL password reset and authentication verification completed.'
     } catch {
+        $legacy.TechnicalReason = ConvertTo-PostgresRedactedText -Text ([string]$_.Exception.Message) -Secrets @($NewPassword)
         $failureStage = [string]$legacy.FailureStage
         if ($temporaryPolicyWritten) {
             try {
@@ -12246,17 +12266,22 @@ function Reset-PostgresPasswordAutomatically {
     if ($legacy.PasswordChangeCommitted -and -not $legacy.Succeeded) {
         $reasonCode = if ($legacy.FailureStage -eq 'AuthenticationRestore') { 'AUTHENTICATION_RESTORE_FAILED' } elseif ($legacy.FailureStage -eq 'ServiceRestore') { 'POSTGRES_SERVICE_STATE_UNVERIFIED' } else { 'COMMITTED_UNVERIFIED' }
         $summary = if ($legacy.FailureStage -eq 'ServiceRestore') { 'PostgreSQL role change committed, but its service state could not be verified.' } else { 'PostgreSQL role change committed but could not be verified.' }
+        $legacy.FailureCode = $reasonCode
         return (& $makeResult 'ACTION_REQUIRED' 'UNKNOWN' $true @('postgres-role') @() @('postgres-role') $false $reasonCode $summary $true)
     }
     if ($legacy.Succeeded) {
+        $legacy.FailureCode = 'ROLE_RESET_VERIFIED'
         return (& $makeResult 'SUCCEEDED' 'INTENDED' $true @('postgres-role') @('postgres-role') @() $true 'ROLE_RESET_VERIFIED' 'PostgreSQL role change completed and was verified.' $false)
     }
     if ($legacy.FailureStage -eq 'AuthenticationRestore') {
+        $legacy.FailureCode = 'AUTHENTICATION_RESTORE_FAILED'
         return (& $makeResult 'ACTION_REQUIRED' 'UNKNOWN' $true @() @() @('postgres-role') $false 'AUTHENTICATION_RESTORE_FAILED' 'PostgreSQL recovery needs attention because its security policy could not be verified.' $true)
     }
     if ($legacy.FailureStage -eq 'ServiceRestore') {
+        $legacy.FailureCode = 'POSTGRES_SERVICE_STATE_UNVERIFIED'
         return (& $makeResult 'ACTION_REQUIRED' 'UNKNOWN' $true @() @() @('postgres-role') $false 'POSTGRES_SERVICE_STATE_UNVERIFIED' 'PostgreSQL recovery needs attention because its service state could not be verified.' $true)
     }
+    $legacy.FailureCode = if ($legacy.FailureStage -eq 'AuthenticationPolicy') { 'AUTHENTICATION_POLICY_REJECTED' } elseif ($legacy.FailureStage -eq 'AlterRole') { 'ALTER_ROLE_FAILED' } elseif ($legacy.FailureStage -eq 'ServiceStop') { 'POSTGRES_SERVICE_STOP_FAILED' } elseif ($legacy.FailureStage -eq 'PostmasterPid') { 'POSTGRES_PROCESS_STILL_RUNNING' } else { 'ROLE_RESET_FAILED' }
     return (& $makeResult 'FAILED_BEFORE_MUTATION' 'UNCHANGED' $false @() @() @('postgres-role') $true 'ROLE_RESET_FAILED' 'PostgreSQL recovery stopped before a role change.' $true)
 }
 
@@ -15759,23 +15784,31 @@ function Test-RunningAsAdministrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Explain the temporary administrator access and UAC approval before each
-# PostgreSQL install or recovery handoff. Beginner output stays free of
-# implementation details; the protected child resumes the operation.
+# Render the normal-mode permission handoff as one compact, aligned panel.
+# Keep the panel within 58 columns so it remains readable in narrow consoles.
 function Write-PostgresAdministratorGuidance {
-    param(
-        [ValidateSet('Install','Recovery')]
-        [string]$Operation = 'Recovery'
+    $contentWidth = 52
+    $border = '  +' + ('-' * ($contentWidth + 2)) + '+'
+    $heading = 'Administrator permission needed'
+    $headingText = (' ' * [int][Math]::Floor(($contentWidth - $heading.Length) / 2)) + $heading
+    $panelRows = @(
+        [pscustomobject]@{ Text = $headingText; Color = 'Cyan' }
+        [pscustomobject]@{ Text = ''; Color = 'DarkCyan' }
+        [pscustomobject]@{ Text = 'Temporary admin permission is needed only for the'; Color = 'White' }
+        [pscustomobject]@{ Text = 'protected PostgreSQL operation.'; Color = 'White' }
+        [pscustomobject]@{ Text = ''; Color = 'DarkCyan' }
+        [pscustomobject]@{ Text = 'Windows User Account Control will appear.'; Color = 'White' }
+        [pscustomobject]@{ Text = 'Click Yes to continue.'; Color = 'Yellow' }
+        [pscustomobject]@{ Text = ''; Color = 'DarkCyan' }
+        [pscustomobject]@{ Text = 'TPM continues automatically after approval.'; Color = 'White' }
     )
-    if ($Operation -eq 'Install') {
-        Write-Host '  TeknoParrot Manager needs temporary administrator access to safely install the local PostgreSQL component for these games.' -ForegroundColor Yellow
-    } else {
-        Write-Host '  TeknoParrot Manager needs temporary administrator access to safely repair the local PostgreSQL component and password for these games.' -ForegroundColor Yellow
+    Write-Host $border -ForegroundColor DarkCyan
+    foreach ($row in $panelRows) {
+        Write-Host ('  | {0,-52} |' -f $row.Text) -ForegroundColor $row.Color
     }
-    Write-Host '  Windows will show a User Account Control prompt. Click Yes to continue.' -ForegroundColor Yellow
-    Write-Host '  After approval, TeknoParrot Manager continues automatically; you do not need to relaunch it or choose PostgreSQL setup again.' -ForegroundColor Yellow
-    Write-Host '  This access is temporary and limited to this protected operation.' -ForegroundColor Yellow
+    Write-Host $border -ForegroundColor DarkCyan
 }
+
 function Get-PostgresRecoveryStateDirectory {
     $base = if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { $env:LOCALAPPDATA } else { $env:TEMP }
     return (Join-Path $base 'TeknoParrotManager\Recovery')
@@ -16232,7 +16265,8 @@ function Start-PostgresRecoveryAsAdministrator {
     }
 
     while ($true) {
-        Write-Host '  TeknoParrot Manager will ask Windows for permission, then continue this setup automatically.' -ForegroundColor Cyan
+        Write-PostgresAdministratorGuidance
+        [void](Read-HostSafe '  Continue: press Enter when ready')
         $childExit = $null
         try {
             $child = Start-Process -FilePath $hostPath -ArgumentList $argumentString -Verb RunAs -Wait -PassThru -ErrorAction Stop
@@ -16376,12 +16410,17 @@ function Invoke-PostgresSelectedPasswordRecovery {
             FailureCode='RECOVERY_BACKUP_UNVERIFIED'
         }
         $result=New-TpmProfileTransactionResult -WorkflowKey 'PostgresRecovery' -OperationKey 'RecoverRolePassword' -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary 'PostgreSQL recovery stopped before a role change because verified safety evidence was unavailable.' -Items @('postgres-role') -FailedItems @('postgres-role') -Backup $backupInfo -ReasonCode 'RECOVERY_BACKUP_UNVERIFIED' -FinalChecks @('No role change was attempted.')
+        Write-Log 'Postgres recovery: stage=RecoveryEvidence; reasonCode=RECOVERY_BACKUP_UNVERIFIED; reason=Verified recovery evidence is unavailable.'
         $result | Add-Member -NotePropertyName WrapperOperationKey -NotePropertyValue 'RecoverRolePassword' -Force
+        $result | Add-Member -NotePropertyName FailureStage -NotePropertyValue 'RecoveryEvidence' -Force
+        $result | Add-Member -NotePropertyName ResetReasonCode -NotePropertyValue 'RECOVERY_BACKUP_UNVERIFIED' -Force
+        $result | Add-Member -NotePropertyName Reason -NotePropertyValue 'Verified recovery evidence is unavailable.' -Force
         $result | Add-Member -NotePropertyName RecoveryBundle -NotePropertyValue $backup -Force
         return $result
     }
     if ($StatusContext) { [void](Update-TpmWorkflowActivity -Context $StatusContext -Activity 'Repairing the PostgreSQL password') }
     $reset = Reset-PostgresPasswordAutomatically -NewPassword $PasswordPlain -RecoveryBackup $backup
+    Write-Log ("Postgres recovery: stage=RoleReset; failureStage={0}; reasonCode={1}; outcome={2}; passwordChangeCommitted={3}; reason={4}; technicalReason={5}" -f [string]$reset.FailureStage,[string]$reset.ResetReasonCode,[string]$reset.Outcome,[bool]$reset.PasswordChangeCommitted,[string]$reset.Reason,[string]$reset.TechnicalReason)
     $reset | Add-Member -NotePropertyName WrapperOperationKey -NotePropertyValue 'RecoverRolePassword' -Force
     $reset | Add-Member -NotePropertyName RecoveryBundle -NotePropertyValue $backup -Force
     if ($reset.Outcome -eq 'SUCCEEDED') {
@@ -16391,6 +16430,10 @@ function Invoke-PostgresSelectedPasswordRecovery {
             $final | Add-Member -NotePropertyName PasswordChangeCommitted -NotePropertyValue ([bool]$reset.PasswordChangeCommitted) -Force
             $final | Add-Member -NotePropertyName FailureStage -NotePropertyValue ([string]$reset.FailureStage) -Force
             $final | Add-Member -NotePropertyName RecoveryBundle -NotePropertyValue $backup -Force
+            $final | Add-Member -NotePropertyName ResetReasonCode -NotePropertyValue ([string]$reset.ResetReasonCode) -Force
+            $final | Add-Member -NotePropertyName Reason -NotePropertyValue 'PostgreSQL role change committed, but final authentication could not be verified.' -Force
+            $final | Add-Member -NotePropertyName TechnicalReason -NotePropertyValue ([string]$reset.TechnicalReason) -Force
+            Write-Log ("Postgres recovery: stage=FinalPasswordValidation; failureStage=PasswordValidation; reasonCode=FINAL_AUTHENTICATION_UNVERIFIED; outcome=ACTION_REQUIRED; passwordChangeCommitted={0}; reason=Final authentication could not be verified." -f [bool]$reset.PasswordChangeCommitted)
             return $final
         }
         if ($StatusContext) { [void](Update-TpmWorkflowActivity -Context $StatusContext -Activity 'Password repaired and verified') }
@@ -24802,7 +24845,7 @@ function Backup-PostgresDatabases {
                 $state = Get-PostgresDatabaseState -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain
                 if ($state.Exists) { [void]$names.Add($dbName) }
             } catch {
-                $detail = [string]$_.Exception.Message
+                $detail = ConvertTo-PostgresRedactedText -Text ([string]$_.Exception.Message) -Secrets @($SuperPasswordPlain)
                 $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $gameLabel -ProfileKey $profileMetadata.ProfileKey -DbName $dbName -Detail $detail
                 [void]$failureDiagnoses.Add($diagnosis)
                 [void]$failedDatabases.Add(('{0} / {1}' -f $gameLabel, $dbName))
@@ -24878,7 +24921,8 @@ function Backup-PostgresDatabases {
             }
         } catch {
             $result.Succeeded = $false
-            [void]$failureDetails.Add(('Backup execution failed: {0}' -f $_.Exception.Message))
+            $backupException = ConvertTo-PostgresRedactedText -Text ([string]$_.Exception.Message) -Secrets @($SuperPasswordPlain)
+            [void]$failureDetails.Add(('Backup execution failed: {0}' -f $backupException))
         } finally {
             if ($previousPgPassFile -ne $null -or $pgpassFile) { Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile }
             if ($pgpassFile) { Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure }
@@ -29139,7 +29183,6 @@ $mode = $null
         Write-Host ("  {0} registered game(s) need PostgreSQL." -f $needCount) -ForegroundColor Cyan
         if (-not (Test-PostgresInstalled) -and -not (Test-RunningAsAdministrator)) {
             [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Windows needs permission to install PostgreSQL.' -UserAction 'Approve the Windows permission box')
-            Write-PostgresAdministratorGuidance -Operation Install
             $elevated = Start-PostgresRecoveryAsAdministrator -ConfigPath $configPath -ScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -Operation Install
             if ($elevated) {
                 [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Fixed -Summary 'PostgreSQL installation continued automatically')
@@ -29231,7 +29274,6 @@ $mode = $null
                         } else {
                             if (-not (Test-RunningAsAdministrator)) {
                                 [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Windows needs permission to repair PostgreSQL.' -UserAction 'Approve the Windows permission box')
-                                Write-PostgresAdministratorGuidance -Operation Recovery
                                 $elevated = Start-PostgresRecoveryAsAdministrator -ConfigPath $configPath -ScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -Operation Recovery -PasswordPlain $typedPwPlain
                                 if ($elevated) {
                                     [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Fixed -Summary 'PostgreSQL repair continued automatically')
@@ -29308,6 +29350,9 @@ $mode = $null
             Write-Host "  Backing up existing Postgres databases..." -ForegroundColor Cyan
             $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
             if ($isPostgresRecoveryResume -and -not $pgBackup.Succeeded) {
+                $databaseBackupReason = ConvertTo-PostgresRedactedText -Text (@($pgBackup.FailureDetails) -join ' | ') -Secrets @($superPwPlain)
+                if ([string]::IsNullOrWhiteSpace($databaseBackupReason)) { $databaseBackupReason = 'No diagnostic detail was returned.' }
+                Write-Log ("Postgres protected resume: stage=DatabaseBackup; reasonCode=DATABASE_BACKUP_FAILED; reason={0}" -f $databaseBackupReason)
                 Exit-PostgresRecoveryResume -Message 'TPM could not finish the PostgreSQL database backup.'
             }
             $leavePostgres = $false
@@ -29444,7 +29489,6 @@ $mode = $null
                     $newPassword = [string]$resetAttempt.Password
                     if (-not (Test-RunningAsAdministrator)) {
                         [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Windows needs permission to reset PostgreSQL.' -UserAction 'Approve the Windows permission box')
-                        Write-PostgresAdministratorGuidance -Operation Recovery
                         $elevated = Start-PostgresRecoveryAsAdministrator -ConfigPath $configPath -ScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -Operation Recovery -PasswordPlain $newPassword
                         $resetAttempt.Password = $null
                         $newPassword = $null
