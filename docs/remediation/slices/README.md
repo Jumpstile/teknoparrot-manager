@@ -15,11 +15,13 @@ Every product remediation slice requires a contract based on `docs/templates/tpm
 1. Prompt.Core / global prompt consistency: IDs 24, 25, 26, 27, part of 32.
 2. Progress.Core / universal progress completion: IDs 3, 4, 5, 6, part of 32.
 3. Repair.Core / affected-games repair: IDs 17-22.
-4. ReShade.Core / ownership and accounting: IDs 1, 9-12.
+4. ReShade.Core / ownership, accounting, and authorized ten-effect selection: IDs 1, 9-12.
 5. SupportPackage.Core: IDs 27-29.
 6. ControlsReadiness.Core: ID 30.
 7. PostgreSQL recovery: ID 16.
 
 Current slice: `PR-321-current-slice.md`.
+
+The current pointer also carries bounded supplemental behavior contracts for Library Health transaction outcomes, owner-status gate semantics, and the authorized ReShade ten-effect selector. See `PR-321-current-slice.md` for exact owner, procedure, test, and runtime-proof mappings.
 
 Slice 0 current implementation: `TPM-RELEASE-SNAPSHOT-001`.

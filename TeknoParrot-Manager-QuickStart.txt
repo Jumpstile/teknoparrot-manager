@@ -142,8 +142,8 @@
                           and both ZIP source folders. C returns to AutoSync
                           with only the broken profile codes selected for
                           re-extraction, never the whole library.
-       11) Restore backup  -- roll UserProfiles, LaunchBox files, or Postgres
-                             databases back to a previous backup.
+       11) Restore backup  -- list UserProfiles, LaunchBox, or Postgres
+                             backups; invalid numbers reprompt and Enter cancels.
        12) Postgres setup  -- install/configure PostgreSQL for games that
                              need it (Golden Tee Live, Power Putt Live, etc).
 
@@ -175,6 +175,11 @@
    The package output begins with "What failed" and "What TPM did not
    change". Detailed allowlisted collection failures are preserved; routine
    missing optional diagnostics remain summarized.
+
+   After TPM creates a ZIP, choose O to open SupportPackages\ or B to return to
+   the main menu. TPM checks the folder before opening it; a failed package
+   without a ZIP has no folder-opening follow-up.
+
 
 
 

@@ -273,7 +273,7 @@
     architecture. Checks reshade.me for newer versions on each run. Optional --
     your games work perfectly without it.
     Beginner profile and restore choices are explicit and per-game. TPM offers
-    the five approved profile IDs, catalog-bound favorites, and a remembered
+    the twelve approved profile IDs, catalog-bound favorites, and a remembered
     selection. No profile is marked recommended or validated without measured
     evidence; pinned effect hashes establish catalog integrity, not performance
     validation. It also offers R to restore the previous trusted profile for
@@ -289,7 +289,14 @@
       [3] Classic Arcade CRT
       [4] Vivid Arcade
       [5] Enhanced Arcade
-    Choose: [1-5] Select profile  [U] Use selected profile  [R] Reopen preview
+      [6] Cartoon
+      [7] Contrast Curves
+      [8] Film Grain
+      [9] Levels
+      [10] Monochrome
+      [11] Sepia Tone
+      [12] Vignette
+    Choose: [1-12] Select profile  [U] Use selected profile  [R] Reopen preview
             [B] Back  [D] Details
     The terminal is the only profile selector. Numbered selection updates the
     optional preview; the gallery has no second profile-selection control.
@@ -1151,12 +1158,13 @@
        anything that fails validation is reported and skipped.
 
     2. An HTML preview grid (TeknoParrot-Crosshairs-Preview.html) is
-       generated and opened in your default browser. All 321 included designs
-       are listed. Click a design to select P1 when the short-lived localhost
-       bridge is available; it accepts only the session token and index 0-320.
-       After P2 is selected, the browser enters a completed state and tells you
-       to return to TPM to confirm; you can close the tab. If Windows cannot
-       restore focus automatically, continue at the TPM console prompt.
+       generated and opened in your default browser. The preview grid lists all
+       valid images: the 321 included designs plus any valid user-added PNGs.
+       Click a design to select P1 when the short-lived localhost bridge is
+       available; it accepts only the session token and a current valid-image
+       index. After P2 is selected, the browser enters a completed state and
+       tells you to return to TPM to confirm; you can close the tab. If Windows
+       cannot restore focus automatically, continue at the TPM console prompt.
 
     3. Choose the Player 1 and Player 2 indices. If the bridge times out or
        is unavailable, type the numeric indices in the console. The two can be
@@ -1227,7 +1235,7 @@
       Use the preview window to compare the options.
       Nothing will be changed until you confirm.
 
-    It then lists five bounded visual profiles in this order. The friendly
+    It then lists twelve bounded visual profiles in this order. The friendly
     description is followed by the approved shader filename and technique:
 
       Original            No visual processing.
@@ -1238,16 +1246,32 @@
       Classic Arcade CRT  Traditional scanlines and restrained arcade-monitor
                           character.
                           Techniques: CRT_Lottes.fx / CRT_Lottes
-      Vivid Arcade         Richer color for modern displays.
+      Vivid Arcade        Richer color for modern displays.
                           Techniques: Vibrance.fx / Vibrance
-      Enhanced Arcade      Sharper edges and richer color while preserving
+      Enhanced Arcade     Sharper edges and richer color while preserving
                           the approved effect order.
                           Techniques: LumaSharpen.fx / LumaSharpen; Vibrance.fx
                                       / Vibrance
+      Cartoon             Bold edges and fewer colors for a poster-style
+                          arcade look.
+                          Techniques: Cartoon.fx / Cartoon
+      Contrast Curves     Add contrast through the middle tones.
+                          Techniques: Curves.fx / Curves
+      Film Grain          Add a subtle grain-like texture.
+                          Techniques: FilmGrain.fx / FilmGrain
+      Levels              Expand the dark and bright ends of the image.
+                          Techniques: Levels.fx / Levels
+      Monochrome          Remove color while keeping image detail.
+                          Techniques: Monochrome.fx / Monochrome
+      Sepia Tone          Warm the image with a classic brown tone.
+                          Techniques: Sepia.fx / Tint
+      Vignette            Gently darken image edges to focus attention in the
+                          center.
+                          Techniques: Vignette.fx / Vignette
 
-    These are approved TPM bundled/generated definitions. The labels do not
-    expose internal cache paths or imply that live-fetched runtime files are
-    included in the release.
+    These are approved TPM-generated profile definitions. Shader sources are
+    live-fetched and integrity-checked during deployment; they are not bundled
+    in the release ZIP. Labels do not expose internal cache paths.
 
     One visual gallery opens before the final confirmation. It uses the
     bundled and hash-validated TPM landscape reference at
@@ -2360,10 +2384,10 @@
   the script exits rather than proceeding without a restore point. If any
   files fail to copy during the backup, the script asks before continuing.
 
-  To restore from inside the script, choose mode 11) Restore from backup at
-  the startup menu. The script checks that TeknoParrot is fully closed first,
-  lists all available backups with file counts, and asks you to type YES to
-  confirm before changing anything.
+  To restore from inside the script, choose mode 11) Restore from backup.
+  The script lists available backups by number; invalid numbers reprompt and
+  pressing Enter cancels before any restore begins. Existing backup and
+  confirmation checks still apply before files or databases are changed.
 
   Advanced emergency recovery only: the normal mode-11 flow keeps the selected
   backup, asks you to close TeknoParrot, and verifies the restore. Do not copy
@@ -2516,6 +2540,10 @@
   Missing optional diagnostics are recorded in the manifest. A partial
   package is clearly marked. A collection or ZIP failure never reports
   success.
+
+  After TPM creates a ZIP, it offers O to open SupportPackages\ or B to return
+  to the main menu. The folder opens only after canonical-path and reparse
+  checks pass. A failed package with no ZIP has no folder-opening follow-up.
 
 -------------------------------------------------------------------------------
   WHAT IT DOES NOT DO

@@ -11,9 +11,46 @@ Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
 $failures = New-Object System.Collections.Generic.List[string]
 function Fail([string]$Message) { [void]$failures.Add($Message) }
-$repo = [IO.Path]::GetFullPath($RepoRoot)
-$registryPath = Join-Path $repo 'quality\permanent-procedures.json'
-if (-not (Test-Path -LiteralPath $registryPath -PathType Leaf)) { Fail "Missing registry: $registryPath" }
+function Get-TpmOwnerStatusDisposition {
+    param([string]$Status,[string[]]$AllowedStatuses,[hashtable]$Dispositions)
+    if ($AllowedStatuses -notcontains $Status) { return 'INVALID' }
+    if (-not $Dispositions.ContainsKey($Status)) { return 'INVALID' }
+    $disposition = [string]$Dispositions[$Status]
+    if (@('CLOSED','OWNER RUNTIME NEEDED','DEFERRED','UNRESOLVED') -notcontains $disposition) { return 'INVALID' }
+    return $disposition
+}
+    $repo = [IO.Path]::GetFullPath($RepoRoot)
+    $registryPath = Join-Path $repo 'quality\permanent-procedures.json'
+    $registry = $null
+    $allowedOwnerStatuses = @()
+    $ownerStatusDispositions = @{}
+    if (-not (Test-Path -LiteralPath $registryPath -PathType Leaf)) {
+        Fail "Missing registry: $registryPath"
+    } else {
+        try {
+            $registry = Get-Content -LiteralPath $registryPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $allowedOwnerStatuses = @($registry.procedureStatuses | ForEach-Object { [string]$_ })
+            $dispositionDefinitions = @($registry.procedureStatusDispositions)
+            if ($allowedOwnerStatuses.Count -eq 0) { Fail 'Registry has no procedureStatuses.' }
+            if ($dispositionDefinitions.Count -ne $allowedOwnerStatuses.Count) { Fail 'Registry owner-status disposition count does not match procedureStatuses.' }
+            foreach ($status in $allowedOwnerStatuses) {
+                $definitions = @($dispositionDefinitions | Where-Object { [string]$_.status -ceq $status })
+                if ($definitions.Count -ne 1) { Fail "Owner status '$status' must have exactly one disposition."; continue }
+                $disposition = [string]$definitions[0].disposition
+                if (@('CLOSED','OWNER RUNTIME NEEDED','DEFERRED','UNRESOLVED') -notcontains $disposition) { Fail "Owner status '$status' has invalid disposition '$disposition'."; continue }
+                $ownerStatusDispositions[$status] = $disposition
+            }
+            foreach ($definition in $dispositionDefinitions) {
+                $status = [string]$definition.status
+                if ([string]::IsNullOrWhiteSpace($status) -or $allowedOwnerStatuses -notcontains $status) { Fail "Owner status disposition refers to unknown status '$status'." }
+            }
+        } catch {
+            Fail "Registry JSON is invalid: $($_.Exception.Message)"
+            $registry = $null
+            $allowedOwnerStatuses = @()
+            $ownerStatusDispositions = @{}
+        }
+    }
 $controlBoardPath = Join-Path $repo 'docs\remediation\PR-321-control-board.md'
 $sliceTemplatePath = Join-Path $repo 'docs\templates\tpm-slice-contract.md'
 $currentSlicePath = Join-Path $repo 'docs\remediation\slices\PR-321-current-slice.md'
@@ -36,17 +73,47 @@ if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
         if ($slice.IndexOf($requiredSliceText, [StringComparison]::OrdinalIgnoreCase) -lt 0) { Fail "Current slice is missing: $requiredSliceText" }
     }
     $requiredSections = @(
-        '## Provenance','## Owner report mapping table','## SCRIPT-WIDE UNIVERSAL PROGRESS BAR AUDIT',
-        '## Prompt/gate/back-routing consistency audit','## Affected-games repair-flow scoping audit',
+        '## Provenance','## Owner report mapping table','## Canonical owner-ID status table -- release decisions',
+        '## SCRIPT-WIDE UNIVERSAL PROGRESS BAR AUDIT','## Prompt/gate/back-routing consistency audit','## Affected-games repair-flow scoping audit',
         '## Support package/fatal surfacing audit','## Tests with exact counts and timestamps',
         '## Static gates','## Hunk classification','## Permanent procedure compliance',
         '## Non-actions','## Runtime owner-smoke checklist'
     )
     foreach ($section in $requiredSections) { if ($report.IndexOf($section, [StringComparison]::OrdinalIgnoreCase) -lt 0) { Fail "Report missing required section: $section" } }
-    $allowed = @('FIXED + TESTED','SOURCE FIXED; OWNER RUNTIME NEEDED','NOT FIXED','DEFERRED BY OWNER')
     $ownerStart = $report.IndexOf('## Owner report mapping table')
     $ownerEnd = $report.IndexOf('## SCRIPT-WIDE UNIVERSAL PROGRESS BAR AUDIT')
-    $ownerSection = if ($ownerStart -ge 0 -and $ownerEnd -gt $ownerStart) { $report.Substring($ownerStart, $ownerEnd - $ownerStart) } else { '' }
+    $ownerMappingSection = if ($ownerStart -ge 0 -and $ownerEnd -gt $ownerStart) { $report.Substring($ownerStart, $ownerEnd - $ownerStart) } else { '' }
+    $canonicalOwnerHeader = '## Canonical owner-ID status table -- release decisions'
+    $canonicalOwnerStart = $report.IndexOf($canonicalOwnerHeader)
+    $canonicalOwnerEnd = if ($canonicalOwnerStart -ge 0) { $report.IndexOf("`n## ", $canonicalOwnerStart + $canonicalOwnerHeader.Length, [StringComparison]::Ordinal) } else { -1 }
+    $canonicalOwnerSection = if ($canonicalOwnerStart -ge 0 -and $canonicalOwnerEnd -gt $canonicalOwnerStart) { $report.Substring($canonicalOwnerStart, $canonicalOwnerEnd - $canonicalOwnerStart) } elseif ($canonicalOwnerStart -ge 0) { $report.Substring($canonicalOwnerStart) } else { '' }
+    $boardOwnerHeader = '## Owner report table'
+    $boardOwnerStart = $board.IndexOf($boardOwnerHeader, [StringComparison]::OrdinalIgnoreCase)
+    $boardOwnerEnd = if ($boardOwnerStart -ge 0) { $board.IndexOf("`n## ", $boardOwnerStart + $boardOwnerHeader.Length, [StringComparison]::Ordinal) } else { -1 }
+    $boardOwnerSection = if ($boardOwnerStart -ge 0 -and $boardOwnerEnd -gt $boardOwnerStart) { $board.Substring($boardOwnerStart, $boardOwnerEnd - $boardOwnerStart) } elseif ($boardOwnerStart -ge 0) { $board.Substring($boardOwnerStart) } else { '' }
+    $boardOwnerIds = @([regex]::Matches($boardOwnerSection, '(?im)^\|\s*(\d+)\s*\|') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    $canonicalRowMatches = [regex]::Matches($canonicalOwnerSection, '(?im)^\|\s*(\d+)\s*\|([^\n]*)$')
+    $canonicalOwnerIds = @($canonicalRowMatches | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    if ($boardOwnerIds.Count -eq 0) { Fail 'Control board owner report table contains no numbered IDs.' }
+    $boardIdCounts = @([regex]::Matches($boardOwnerSection, '(?im)^\|\s*(\d+)\s*\|') | ForEach-Object { $_.Groups[1].Value } | Group-Object | Where-Object { $_.Count -gt 1 })
+    $canonicalIdCounts = @($canonicalRowMatches | ForEach-Object { $_.Groups[1].Value } | Group-Object | Where-Object { $_.Count -gt 1 })
+    if ($boardIdCounts.Count -gt 0) { Fail ('Control board owner report table contains duplicate IDs: ' + (($boardIdCounts | ForEach-Object { $_.Name }) -join ', ')) }
+    if ($canonicalIdCounts.Count -gt 0) { Fail ('Canonical owner-ID status table contains duplicate IDs: ' + (($canonicalIdCounts | ForEach-Object { $_.Name }) -join ', ')) }
+    $missingCanonicalIds = @($boardOwnerIds | Where-Object { $canonicalOwnerIds -notcontains $_ })
+    $extraCanonicalIds = @($canonicalOwnerIds | Where-Object { $boardOwnerIds -notcontains $_ })
+    if ($missingCanonicalIds.Count -gt 0) { Fail ('Canonical owner-ID status table is missing board IDs: ' + ($missingCanonicalIds -join ', ')) }
+    if ($extraCanonicalIds.Count -gt 0) { Fail ('Canonical owner-ID status table has IDs absent from the control board: ' + ($extraCanonicalIds -join ', ')) }
+    if ($canonicalOwnerSection -notmatch '(?im)^\|\s*ID\s*\|[^|\r\n]*\|[^|\r\n]*\|\s*Corrected status\s*\|') { Fail 'Canonical owner-ID status table must place Corrected status in the fourth column.' }
+    $canonicalStatusRows = New-Object System.Collections.Generic.List[object]
+    foreach ($rowMatch in $canonicalRowMatches) {
+        $cells = $rowMatch.Groups[2].Value.Split('|')
+        if ($cells.Count -lt 3 -or [string]::IsNullOrWhiteSpace($cells[2])) {
+            Fail "Canonical owner-ID row $($rowMatch.Groups[1].Value) has no corrected status."
+            continue
+        }
+        [void]$canonicalStatusRows.Add([pscustomobject]@{ Id = $rowMatch.Groups[1].Value; Status = $cells[2].Trim() })
+    }
+    if ($canonicalStatusRows.Count -ne $canonicalRowMatches.Count) { Fail 'Every canonical owner-ID row must contain a corrected status.' }
     $sliceIdMatch = [regex]::Match($slice, '(?im)^\s*-\s*Slice ID:\s*(\S+)')
     if (-not $sliceIdMatch.Success) {
         Fail 'Current slice does not declare a Slice ID.'
@@ -54,17 +121,29 @@ if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
         Fail 'Remediation report hunk classification does not reference the current slice contract.'
     }
     if ($report -match '(?im)## Tests with exact counts and timestamps[\s\S]*Main Pester[^|]*\|[^|]*\|\s*[^|]*\|\s*[^|]*\|\s*[^|]*\|') {
-        if ($ownerSection -notmatch '(?i)Exact test names') { Fail 'Broad suite counts are not accompanied by focused owner test names.' }
+        if ($ownerMappingSection -notmatch '(?i)Exact test names') { Fail 'Broad suite counts are not accompanied by focused owner test names.' }
     }
-    $statusMatches = [regex]::Matches($ownerSection, '(?im)^\|\s*\d+\s*\|[^|]*\|\s*([^|]+?)\s*\|')
-    if ($statusMatches.Count -eq 0) { Fail 'Owner report mapping contains no numbered status rows.' }
-    foreach ($match in $statusMatches) {
-        $status = $match.Groups[1].Value.Trim()
-        if ($allowed -notcontains $status) { Fail "Invalid owner report status: $status" }
+    if ($canonicalStatusRows.Count -eq 0) { Fail 'Canonical owner-ID status table contains no status-bearing numbered rows.' }
+    foreach ($row in $canonicalStatusRows) {
+        $status = $row.Status
+        $disposition = Get-TpmOwnerStatusDisposition -Status $status -AllowedStatuses $allowedOwnerStatuses -Dispositions $ownerStatusDispositions
+        if ($disposition -eq 'INVALID') { Fail "Invalid canonical owner report status for ID $($row.Id): $status"; continue }
+        if ($disposition -eq 'UNRESOLVED') { Fail "Canonical owner report contains unresolved status for ID $($row.Id): $status"; continue }
+        if ($RequireOwnerRuntime -and $disposition -eq 'OWNER RUNTIME NEEDED') { Fail "Owner-runtime evidence remains outstanding for ID $($row.Id)." }
     }
-    if ($ownerSection -match '(?im)\|\s*NOT FIXED\s*\|') { Fail 'Owner report contains unresolved NOT FIXED items.' }
-    if ($RequireOwnerRuntime -and $ownerSection -match '(?im)\|\s*SOURCE FIXED; OWNER RUNTIME NEEDED\s*\|') { Fail 'Owner-runtime evidence remains outstanding.' }
-    if ($report -match '(?im)candidate[^.\r\n]*(predates|stale)') { Fail 'Candidate package is stale relative to source changes.' }
+    if ($RequireOwnerRuntime) {
+        $candidateStatusMatches = [regex]::Matches($report, '(?im)^-[ \t]*Current candidate status:[ \t]*(.*?)[ \t]*$')
+        if ($candidateStatusMatches.Count -ne 1) {
+            Fail 'Current candidate status is missing or invalid.'
+        } else {
+            $candidateStatus = $candidateStatusMatches[0].Groups[1].Value.Trim()
+            if ($candidateStatus -ceq 'STALE') {
+                Fail 'Candidate package is stale relative to source changes.'
+            } elseif ($candidateStatus -cne 'VALIDATED') {
+                Fail 'Current candidate status is missing or invalid.'
+            }
+        }
+    }
     foreach ($word in @('addressed','improved','mostly','done-ish','should be fixed','probably')) {
         if ($report -match ('(?i)\b' + [regex]::Escape($word) + '\b')) { Fail "Vague status language is forbidden: $word" }
     }
@@ -97,8 +176,8 @@ if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
     )) {
         if ($progressSection.IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -lt 0) { Fail "Progress audit missing path: $path" }
     }
-    foreach ($disposition in @('CONVERTED TO UNIVERSAL TPM PROGRESS','NOT FIXED','JUSTIFIED NO PROGRESS SURFACE')) {
-        if ($progressSection.IndexOf($disposition, [StringComparison]::OrdinalIgnoreCase) -lt 0) { Fail "Progress audit missing disposition: $disposition" }
+    if ($progressSection -match '(?im)^\|[^|\r\n]*\|[^|\r\n]*\|[^|\r\n]*\|\s*NOT FIXED\s*\|') {
+        Fail 'Progress audit contains an unaddressed NOT FIXED path.'
     }
     $consistencyStart = $report.IndexOf('## Prompt/gate/back-routing consistency audit')
     $consistencyEnd = $report.IndexOf('## Affected-games repair-flow scoping audit')
@@ -122,8 +201,15 @@ if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
         }
     }
 }
-if (Test-Path -LiteralPath $registryPath -PathType Leaf) {
-    try { $registry = Get-Content -LiteralPath $registryPath -Raw | ConvertFrom-Json; foreach ($entry in @($registry.procedures)) { foreach ($property in @('id','rule','enforcementType','requiredEvidence','failureMessage')) { if (-not $entry.PSObject.Properties[$property] -or [string]::IsNullOrWhiteSpace([string]$entry.$property)) { Fail "Registry entry is incomplete: $($entry.id) / $property" } } } } catch { Fail "Registry JSON is invalid: $($_.Exception.Message)" }
+if ($null -ne $registry) {
+    try {
+        if (-not $registry.PSObject.Properties['procedures']) { Fail 'Registry procedure list is missing.' }
+        foreach ($entry in @($registry.procedures)) {
+            foreach ($property in @('id','rule','enforcementType','requiredEvidence','failureMessage')) {
+                if (-not $entry.PSObject.Properties[$property] -or [string]::IsNullOrWhiteSpace([string]$entry.$property)) { Fail "Registry entry is incomplete: $($entry.id) / $property" }
+            }
+        }
+    } catch { Fail "Registry procedure validation failed: $($_.Exception.Message)" }
 }
 if ($SourcePath -and (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
     $source = Get-Content -LiteralPath $SourcePath -Raw

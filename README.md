@@ -245,7 +245,7 @@ Choosing mode 1 or 2 offers a preview/dry-run option first — see [Preview / Dr
 | 9                                                               | **BepInEx setup**            | User-approved install/update/repair-reset using stable x64/x86 releases                                                                                                                                    |
 | **Maintenance and Recovery**                                    |                                |                                                                                                                                                                                                           |
 | 10                                                              | **Library health check**       | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx install counts                                                                   |
-| 11                                                              | **Restore backup**             | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup                                                                                                     |
+| 11                                                              | **Restore backup**             | Lists UserProfiles, LaunchBox, or Postgres backups; invalid numbers reprompt, and Enter cancels before restore                                                                                              |
 | 12                                                              | **Postgres setup**             | Installs/configures the local PostgreSQL database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball) |
 | **Application**                                                 |                                |                                                                                                                                                                                                           |
 | 13                                                              | **Check for Updates**          | Manual, backup-first check against the latest GitHub release                                                                                                                                              |
@@ -475,9 +475,11 @@ Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun g
 
 **How to use it:**
 
-1. An HTML preview grid opens in your browser showing all 321 included designs.
+1. An HTML preview grid opens in your browser showing every valid design found
+   in `Crosshairs\`: the 321 included designs plus any valid user-added PNGs.
    Click a design to select P1 when the short-lived local bridge is available.
-   The bridge accepts only a per-session token and an index from 0 through 320.
+   The bridge accepts only a per-session token and an index in the current
+   valid-design list.
    After P2 is selected, the browser reports that selections are complete and
    tells you to return to TPM to confirm; you can close the tab. If Windows
    cannot return focus automatically, use the visible TPM console prompt.
@@ -506,10 +508,18 @@ closed, unavailable, or fails to open:
 [3] Classic Arcade CRT
 [4] Vivid Arcade
 [5] Enhanced Arcade
+[6] Cartoon
+[7] Contrast Curves
+[8] Film Grain
+[9] Levels
+[10] Monochrome
+[11] Sepia Tone
+[12] Vignette
 
-Current selection: none -- choose 1-5 first
-Choose: [1-5] Select profile  [U] Use selected profile  [R] Reopen preview  [B] Back  [D] Details
+Current selection: none -- choose 1-12 first
+Choose: [1-12] Select profile  [U] Use selected profile  [R] Reopen preview  [B] Back  [D] Details
 ```
+
 
 The terminal chooser is the only profile selector. Numbered selection changes
 the selected profile and the optional gallery follows that state; the gallery
@@ -533,11 +543,34 @@ technique name:
 [5] Enhanced Arcade
     Sharper edges and richer color while preserving the approved effect order.
     Techniques: LumaSharpen.fx / LumaSharpen; Vibrance.fx / Vibrance
+[6] Cartoon
+    Bold edges and fewer colors for a poster-style arcade look.
+    Techniques: Cartoon.fx / Cartoon
+[7] Contrast Curves
+    Add contrast through the middle tones.
+    Techniques: Curves.fx / Curves
+[8] Film Grain
+    Add a subtle grain-like texture.
+    Techniques: FilmGrain.fx / FilmGrain
+[9] Levels
+    Expand the dark and bright ends of the image.
+    Techniques: Levels.fx / Levels
+[10] Monochrome
+     Remove color while keeping image detail.
+     Techniques: Monochrome.fx / Monochrome
+[11] Sepia Tone
+     Warm the image with a classic brown tone.
+     Techniques: Sepia.fx / Tint
+[12] Vignette
+     Gently darken image edges to focus attention in the center.
+     Techniques: Vignette.fx / Vignette
 ```
 
-The technique labels come from TPM's approved bundled/generated profile
-definitions. They identify the intended shader and technique without exposing
-internal cache paths or implying that live-fetched runtime files are bundled.
+
+The technique labels come from TPM's approved generated profile definitions.
+Shader sources are live-fetched and integrity-checked during deployment; they
+are not bundled in the release ZIP. These labels identify the intended shader
+and technique without exposing internal cache paths.
 
 `U` is the only path toward deployment. `B` cancels without changes, `D`
 shows descriptions, and `R` reopens the optional gallery without taking
@@ -683,12 +716,11 @@ The wizard scans every registered game exe for legacy API imports and shows auto
 After a successful run the beginner result screen says `dgVoodoo2 setup
 finished`, names each installed game and detected API (for example `Glide2x`),
 explains that older DirectX/Glide calls may not display correctly on modern
-Windows, and says what to try next. It also states that existing dgVoodoo2
-DLLs, including unowned or changed files, were not removed or replaced and
-that skipped missing-path games were unchanged. For missing saved paths, the
-result offers `[H] Open 10) Library Health Check`; ordinary deployment errors
-do not offer that path-specific choice. Press `D` for technical
-deployment/skip details or `O` for support-package and log guidance.
+Windows, and says what to try next. Existing dgVoodoo2 DLLs, including
+unowned or changed files, are not removed or replaced. On a partial or blocked
+result, unavailable-device counts include reconnect guidance; Library Health
+Check is offered only when a saved game path is missing. Press `D` for
+technical deployment/skip details or `O` for support-package and log guidance.
 
 ---
 
@@ -1228,8 +1260,10 @@ temporary staging cleanup cannot be proven safe, TPM reports a partial result
 and action required instead of clean success. A collection or ZIP failure
 never produces a success message.
 
-**Open TPM Logs and Reports** is available in the same support menu when you
-want to browse the folder containing TPM's current log and report files.
+After TPM creates a ZIP, it offers **O** to open the `SupportPackages\` folder
+or **B** to return to the main menu. The folder opens only after canonical-path
+and reparse checks pass. A failed package with no ZIP does not offer the
+folder-opening follow-up.
 
 The exact TeknoParrotUI intake filename and evidence-class labels are also
 printed in the package README and manifest so support intake can distinguish

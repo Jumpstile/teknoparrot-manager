@@ -42,7 +42,19 @@ $freshnessPaths = @(
     $PSCommandPath,
     (Join-Path $repo 'docs\governance\permanent-procedures.md'),
     (Join-Path $repo 'docs\remediation\slices\PR-321-current-slice.md'),
-    (Join-Path $repo 'docs\remediation\slices\TPM-POSTGRES-RETRY-AUTH-001.md')
+    (Join-Path $repo 'docs\remediation\slices\TPM-POSTGRES-RETRY-AUTH-001.md'),
+    (Join-Path $repo 'quality\permanent-procedures.json'),
+    (Join-Path $repo 'docs\templates\remediation-gate-report.md'),
+    (Join-Path $repo 'docs\remediation\PR-321-control-board.md'),
+    (Join-Path $repo 'docs\governance\tpm-development-operating-model.md'),
+    (Join-Path $repo 'docs\remediation\slices\TPM-PROGRESS-SCAN-COVERAGE-001.md'),
+    (Join-Path $repo 'docs\remediation\slices\TPM-OWNER-STATUS-GATE-001.md'),
+    (Join-Path $repo 'docs\remediation\slices\TPM-LIBRARY-HEALTH-TRANSACTION-001.md'),
+    (Join-Path $repo 'docs\remediation\slices\TPM-RESHADE-TEN-EFFECTS-001.md'),
+    (Join-Path $repo 'docs\RESHADE-PROFILE-SELECTION-SPECIFICATION-INVENTORY.md'),
+    (Join-Path $repo 'docs\RESHADE-PROFILE-SELECTION-INVARIANT-INVENTORY.md'),
+    (Join-Path $repo 'docs\RESHADE-DGVOODOO2-AUTODOWNLOAD-SPECIFICATION-INVENTORY.md'),
+    (Join-Path $repo 'docs\RESHADE-DGVOODOO2-AUTODOWNLOAD-INVARIANT-INVENTORY.md')
 ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
 $changedAt = ($freshnessPaths | ForEach-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc } | Sort-Object -Descending | Select-Object -First 1)
 Invoke-GateStep 'Permanent procedure gate' {

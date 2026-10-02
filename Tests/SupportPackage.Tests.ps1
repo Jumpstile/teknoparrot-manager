@@ -133,6 +133,10 @@ Describe 'New-TpmSupportPackage' {
         New-Item -ItemType Directory -Path (Join-Path $game 'BepInEx\plugins'),(Join-Path $game 'TMNT_Data\Plugins\x86_64') -Force | Out-Null
         [System.IO.File]::WriteAllBytes((Join-Path $game 'BepInEx\plugins\TMNTTPPlugin.dll'),[byte[]](1,2,3))
         [System.IO.File]::WriteAllBytes((Join-Path $game 'TMNT_Data\Plugins\x86_64\OrenVid.dll'),[byte[]](4,5,6))
+        $script:supportProgressCalls = New-Object System.Collections.Generic.List[object]
+        Mock Write-TpmCompactExtractionProgress {
+            [void]$script:supportProgressCalls.Add([pscustomobject]@{ Label=$Label; Current=$Current; Total=$Total; Complete=[bool]$Complete })
+        }
         $r = New-TpmSupportPackage -ScriptRoot $f.Script -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
         $r.Succeeded | Should -BeTrue
         $entries = Get-SupportZipEntries $r.PackagePath
@@ -140,7 +144,17 @@ Describe 'New-TpmSupportPackage' {
         $inventory = Get-SupportZipText $r.PackagePath $inventoryEntry[0]
         $inventory | Should -Match 'TMNTTPPlugin.dll'
         $inventory | Should -Match 'OrenVid.dll'
+        $inventoryRows = @($inventory -split "`r?`n" | Where-Object { $_ -match '\.dll\t' })
+        @($inventoryRows | Where-Object { $_ -like 'BepInEx/plugins/TMNTTPPlugin.dll*' }).Count | Should -Be 1
+        @($inventoryRows | Where-Object { $_ -like 'TMNT_Data/Plugins/x86_64/OrenVid.dll*' }).Count | Should -Be 1
         $entries | Where-Object { $_ -match '\.(dll|exe)$' } | Should -BeNullOrEmpty
+        @($script:supportProgressCalls | Where-Object { $_.Label -eq 'Support profile scan' -and $_.Total -eq 1 -and -not $_.Complete }).Count | Should -Be 1
+        @($script:supportProgressCalls | Where-Object { $_.Label -eq 'Support profile scan' -and $_.Complete }).Count | Should -Be 1
+        $pluginProgress = @($script:supportProgressCalls | Where-Object { $_.Label -eq 'Support plugin inventory' -and $_.Current -gt 0 -and -not $_.Complete })
+        (@($pluginProgress | ForEach-Object Current) -join ',') | Should -Be '1,2,3'
+        @($pluginProgress | Where-Object Total -ne 0).Count | Should -Be 0
+        @($script:supportProgressCalls | Where-Object { $_.Label -eq 'Support plugin inventory' -and $_.Complete }).Count | Should -Be 1
+        @($script:supportProgressCalls | Where-Object { $_.Label -eq 'Support package ZIP' -and $_.Complete }).Count | Should -Be 1
     }
 
     It 'does not collect forbidden binaries or arbitrary game content' {
@@ -367,17 +381,23 @@ Describe 'New-TpmSupportPackage' {
         if ($r.PackagePath) { Remove-Item -LiteralPath $r.PackagePath -Force -ErrorAction SilentlyContinue }
     }
 
-    It 'emits support workflow events in phase order and closes ownership' {
+    It 'publishes workflow completion only after the support ZIP is promoted' {
         $f = New-SupportFixture
-        $events = New-Object System.Collections.Generic.List[string]
-        $sink = { param($event) [void]$events.Add([string]$event.EventKind) }.GetNewClosure()
+        $events = New-Object System.Collections.Generic.List[object]
+        $sink = {
+            param($event)
+            $packageExists = (Get-ChildItem -LiteralPath $f.Output -Filter '*.zip' -File -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
+            [void]$events.Add([pscustomobject]@{ EventKind=[string]$event.EventKind; PackageExists=$packageExists })
+        }.GetNewClosure()
         $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output -EventSink $sink
         $r.Succeeded | Should -BeTrue
-        @($events | Where-Object { $_ -eq 'WorkflowStarted' }).Count | Should -Be 1
-        $steps = @($events | Where-Object { $_ -eq 'StepStarted' })
-        $steps.Count | Should -Be 5
-        $steps | Should -Be @('StepStarted','StepStarted','StepStarted','StepStarted','StepStarted')
-        $events[$events.Count - 1] | Should -Be 'WorkflowClosed'
+        @($events | Where-Object { $_.EventKind -eq 'WorkflowStarted' }).Count | Should -Be 1
+        @($events | Where-Object { $_.EventKind -eq 'StepStarted' }).Count | Should -Be 5
+        $finished = @($events | Where-Object { $_.EventKind -eq 'WorkflowCompleted' })
+        $finished | Should -HaveCount 1
+        $finished[0].PackageExists | Should -BeTrue
+        $events[$events.Count - 1].EventKind | Should -Be 'WorkflowClosed'
+        $r.SupportWorkflowResult.Lifecycle | Should -Be 'Finished'
         $r.StatusContext.Closed | Should -BeTrue
     }
     It 'links collected evidence and workflow results to one session RunId' {
@@ -414,9 +434,11 @@ Describe 'New-TpmSupportPackage' {
         $workflowEvidence = Get-SupportZipText $r.PackagePath 'metadata/workflow-result.json' | ConvertFrom-Json
         $workflowEvidence.RunId | Should -Be $runId
         $workflowEvidence.LatestWorkflow.RunId | Should -Be $runId
-        $workflowEvidence.SupportWorkflow.RunId | Should -Be $runId
-        $workflowEvidence.SupportWorkflow.Lifecycle | Should -Be 'Finished'
-        $workflowEvidence.SupportWorkflow.State | Should -Be 'Finished'
+        $workflowEvidence.SupportWorkflowAtArchiveSnapshot.RunId | Should -Be $runId
+        $workflowEvidence.SupportWorkflowAtArchiveSnapshot.Lifecycle | Should -Be 'Running'
+        $workflowEvidence.SupportWorkflowAtArchiveSnapshot.State | Should -Be 'Working'
+        $r.SupportWorkflowResult.Lifecycle | Should -Be 'Finished'
+        (Get-SupportZipText $r.PackagePath 'MANIFEST.txt') | Should -Match 'Support workflow snapshot at archive creation: SupportPackage / Working'
     }
     It 'writes only relative safe ZIP entry names' {
         $f = New-SupportFixture
@@ -539,6 +561,33 @@ Describe 'New-TpmSupportPackage' {
         @((Get-ChildItem -LiteralPath $outside -Filter '*.zip' -File -ErrorAction SilentlyContinue)).Count | Should -Be 0
     }
 
+    It 'reports per-entry discovery and removal while cleaning a nested owned support stage' {
+        $f = New-SupportFixture
+        $stage = Join-Path $f.Root 'owned-stage-progress'
+        New-Item -ItemType Directory -Path (Join-Path $stage 'diagnostics\nested'),(Join-Path $stage 'metadata') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $stage 'diagnostics\one.log'), 'one')
+        [IO.File]::WriteAllText((Join-Path $stage 'diagnostics\nested\two.log'), 'two')
+        [IO.File]::WriteAllText((Join-Path $stage 'metadata\report.txt'), 'report')
+        [IO.File]::WriteAllText((Join-Path $stage 'MANIFEST.txt'), 'manifest')
+        [IO.File]::WriteAllText((Join-Path $stage 'README.txt'), 'readme')
+        $script:supportCleanupProgress = New-Object System.Collections.Generic.List[object]
+        Mock Write-TpmCompactExtractionProgress {
+            [void]$script:supportCleanupProgress.Add([pscustomobject]@{
+                Label=$Label; Current=$Current; Total=$Total; Complete=[bool]$Complete
+            })
+        }
+
+        Remove-TpmSupportStageDirectory -Path $stage | Should -BeTrue
+
+        Test-Path -LiteralPath $stage | Should -BeFalse
+        $discovery = @($script:supportCleanupProgress | Where-Object { $_.Label -eq 'Support staging cleanup discovery' })
+        @($discovery | Where-Object { -not $_.Complete -and $_.Total -eq 0 }).Count | Should -Be 4
+        @($discovery | Where-Object { $_.Complete -and $_.Current -eq 4 -and $_.Total -eq 0 }).Count | Should -Be 1
+        $removal = @($script:supportCleanupProgress | Where-Object { $_.Label -eq 'Support staging cleanup removal' })
+        @($removal | Where-Object { -not $_.Complete -and $_.Total -eq 0 }).Count | Should -Be 8
+        @($removal | Where-Object { $_.Complete -and $_.Current -eq 8 -and $_.Total -eq 0 }).Count | Should -Be 1
+    }
+
     It 'preserves residue when a staging child becomes a real junction' {
         $f = New-SupportFixture
         $stage = Join-Path $f.Root 'owned-stage'
@@ -546,10 +595,18 @@ Describe 'New-TpmSupportPackage' {
         New-Item -ItemType Directory -Path (Join-Path $stage 'diagnostics'),(Join-Path $stage 'metadata'),$outside -Force | Out-Null
         Write-SupportText (Join-Path $stage 'MANIFEST.txt') 'manifest'
         New-Item -ItemType Junction -Path (Join-Path $stage 'diagnostics') -Target $outside -ErrorAction Stop | Out-Null
+        $script:supportCleanupFailureProgress = New-Object System.Collections.Generic.List[object]
+        Mock Write-TpmCompactExtractionProgress {
+            [void]$script:supportCleanupFailureProgress.Add([pscustomobject]@{
+                Label=$Label; Current=$Current; Total=$Total; Complete=[bool]$Complete
+            })
+        }
         $removed = Remove-TpmSupportStageDirectory -Path $stage
         $removed | Should -BeFalse
         Test-Path -LiteralPath $stage | Should -BeTrue
         Test-Path -LiteralPath $outside | Should -BeTrue
+        @($script:supportCleanupFailureProgress | Where-Object { $_.Label -eq 'Support staging cleanup discovery' -and $_.Complete -and $_.Current -eq 0 -and $_.Total -eq 0 }).Count | Should -Be 1
+        @($script:supportCleanupFailureProgress | Where-Object { $_.Label -eq 'Support staging cleanup removal' -and $_.Complete -and $_.Current -eq 1 -and $_.Total -eq 0 }).Count | Should -Be 1
     }
     It 'includes explanatory README and concise manifest summary without duplicate extensions' {
         $f = New-SupportFixture

@@ -44,3 +44,35 @@ permitted by law, Jumpstile is not liable for any claim, damages, or other
 liability arising from the Materials or their use.
 
 Any permission not expressly granted by this license is reserved.
+
+Third-party shader source used by the ReShade effect catalog
+
+The MIT License (MIT)
+
+Copyright (c) 2014 CeeJayDK
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+ReShade shader API header fetched for the ReShade effect catalog
+
+Source: crosire/reshade-shaders, Shaders/ReShade.fxh, pinned commit
+fd0022170615ce0d8162d219bff07232fa6dd84f.
+The upstream file identifies its license as SPDX-License-Identifier: CC0-1.0.
+The header is fetched and integrity-checked during deployment; it is not
+included in the release ZIP.

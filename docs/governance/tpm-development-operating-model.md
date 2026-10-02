@@ -20,7 +20,8 @@ Run focused tests first, then the full suite after the final edit, static checks
 
 ## Status language
 
-Allowed statuses: `NOT FIXED`, `SOURCE FIXED; OWNER RUNTIME NEEDED`, `FIXED + TESTED`, `DEFERRED BY OWNER`, `BLOCKED BY OWNER DESIGN DECISION`, and `BLOCKED BY PACKAGE/RUNTIME PROOF`. The last two are planning blockers and must not replace the four report statuses unless the registry is explicitly extended.
+Allowed owner-report statuses are exactly those in `quality/permanent-procedures.json`: `NOT FIXED`, `SOURCE FIXED; OWNER RUNTIME NEEDED`, `FIXED + TESTED`, `DEFERRED BY OWNER`, `SOURCE CLAIM REQUIRES RE-AUDIT`, `SOURCE CLAIM INVALID / RE-AUDIT REQUIRED`, and `SOURCE REMEDIATION REQUIRED`. The registry maps each status to its gate disposition.
+`NOT FIXED`, `SOURCE REMEDIATION REQUIRED`, and both re-audit-required statuses block the source gate. `SOURCE FIXED; OWNER RUNTIME NEEDED` may pass source/test gating but remains blocked in certification mode; `DEFERRED BY OWNER` records an explicit owner decision.
 
 Do not use fixed, done, probably fixed, mostly fixed, should be fixed, addressed, or improved as a status without mapping it to an allowed status.
 

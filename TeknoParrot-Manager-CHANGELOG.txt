@@ -49,16 +49,28 @@
   selector. The debug renderer now reports the production selector's choice.
   RC8 ReShade remediation keeps the preview view-only and
   terminal-authoritative, guards paint events when preview state or assets are
-  unavailable, and explains the five beginner-safe profile set. Apply-all
+  unavailable, and explains the twelve beginner-safe profiles. Apply-all
   output reports the safely changeable and unchanged counts; result summaries
   distinguish changed, protected, adopted/replaced, unsafe/malformed skipped,
   and actual failure outcomes. Normal trust warnings use beginner-safe
   wording while technical signature details remain in logs and support
   evidence.
+  The explicitly authorized ten-effect selection adds Cartoon, Contrast
+  Curves, Film Grain, Levels, Monochrome, Sepia Tone, and Vignette to the
+  existing catalog. Effect files and their required includes are fetched and
+  integrity-checked during deployment; no ReShade shader sources are bundled.
+  The pinned ReShade API header is CC0-1.0, and the minimal UI compatibility
+  shim is TPM-authored. Generated configuration restricts shader search roots
+  and binds both ReShade preset settings to the selected root-level preset.
+  Each preset writes its effect and sorting lists in the canonical profile
+  order; Original leaves both lists empty and selects no catalog effect.
   Crosshair browser selection now attempts to close the manager-owned preview
   after valid P2 selection, reports when close or console focus is unavailable,
   and keeps confirmation input on the active prompt line. Deployment semantics
   remain unchanged.
+  Crosshair Setup now reports progress while discovering and validating bundled
+  and user-added PNGs; the valid-image order and deployment behavior are
+  unchanged.
   Mode-8 FFB setup now asks the membership decision once with explicit choices.
   Complete zero-deployment results are valid when native FFB Blaster is
   preferred or no supported optional-plugin target exists; actual errors,
@@ -75,6 +87,25 @@
   ROM-source, installation, frontend, and unrelated files. Declining applies
   no moves and continues safely. Eggman DAT updates now use the latest release
   filename for the saved active path and configuration.
+  Support package creation now offers a validated Open/Back follow-up only
+  when a ZIP exists, and opens its TPM-owned folder through canonical-path and
+  reparse checks. UserProfiles, LaunchBox, and PostgreSQL restore-number menus
+  now reprompt invalid choices and preserve Enter-to-cancel before mutation.
+  dgVoodoo2 failure guidance now distinguishes unavailable devices from
+  missing saved paths: reconnect guidance covers device failures, and Library
+  Health Check is offered only when a saved path is missing.
+  Additional RC8 compact-progress coverage now reports UserProfiles and
+  PostgreSQL restore-menu discovery, UserProfiles backup-root scans,
+  registered-game picker and AutoSync ZIP-source discovery, ZIP-size
+  preflight, and throughput sample selection/read/write work. Directory
+  readiness and emptiness probes now stop after the first matching entry.
+  Further RC8 discovery coverage reports transactional FFB and UserProfiles
+  snapshot/rollback roots, support-package and plugin inventories, per-game
+  ReShade/dgVoodoo2 overrides, custom thumbnails, HyperSpin system files, and
+  PostgreSQL recovery-state and game-backup candidates. The final source census
+  found no unbounded uncovered materialized inventory; seven residual
+  expressions are bounded or short-circuit. Aggregate gates, exact-package
+  validation, and owner-runtime proof remain outstanding; RC8 is unpublished.
   RC8 now defines a machine-readable per-game static support-contract registry
   from the offline support-posture corpus. Immutable 1.1 contracts remain
   loadable while new generation emits 1.2 contracts with typed prerequisites,
@@ -121,11 +152,14 @@
   provenance in manifests. Action Required freshness remains tied to the latest
   TPM log; game-local BepInEx and plugin evidence is ambient metadata only,
   and plugin payloads are excluded.
-  Slice B Universal progress/status remediation now records a script-wide
-  long-running-path inventory. Compact progress, structured workflow status,
-  bounded waits, redirected/noninteractive behavior, and justified no-progress
-  surfaces are covered by focused source-contract tests; no unclassified
-  long-running path remains in the inspected source.
+  Slice B Universal progress/status source census is complete: no unbounded
+  uncovered materialized inventory remains, and seven residual expressions
+  are bounded or short-circuit. The source changes add discovery status for
+  transactional restore/rollback roots, support inventories, per-game
+  ReShade/dgVoodoo2 overrides, custom thumbnails, HyperSpin system files, and
+  PostgreSQL recovery/backup candidates. Aggregate quality gates,
+  exact-package validation, and owner-runtime proof remain outstanding; RC8
+  remains unpublished.
   Slice 1 BepInEx safety remediation now accepts valid canonical child
   destinations, keeps genuine containment and reparse hazards fail-closed,
   classifies inspection failures with beginner-safe summaries, and preserves
@@ -335,23 +369,25 @@ not run games or ReShade shaders; actual in-game results may vary.
 
   Governance: local-worktree/GitHub handoff, package identity, and #290
   documentation-freshness evidence are mandatory source-controlled gates.
-  ReShade visual profiles: RC8 defines five deterministic, bounded choices:
-  Original, Clean & Sharp, Vivid Arcade, Classic Arcade CRT, and Enhanced
-  Arcade. Generated presets use only approved catalog effects with pinned
+  ReShade visual profiles: RC8 defines twelve deterministic, bounded choices:
+  Original, Clean & Sharp, Classic Arcade CRT, Vivid Arcade, Enhanced Arcade,
+  Cartoon, Contrast Curves, Film Grain, Levels, Monochrome, Sepia Tone, and
+  Vignette. Generated presets use only approved catalog effects with pinned
   revisions, exact hashes, required dependencies, safe defaults, and explicit
-  ordering. Enhanced Arcade orders LumaSharpen before Vibrance; CRT remains
-  isolated from those effects in normal profile mode. Profile/effect metadata
-  is `ADVISORY_UNMEASURED` with no measured-evidence or recommendation claim;
-  pinned hashes establish catalog integrity, not performance validation. Preset
-  generation is deterministic, while advanced custom presets remain bounded
-  user input and never become approved effect evidence. Display and resolution
-  checks remain advisory; TPM does not configure monitors or overwrite
-  ambiguous/user-owned preset content.
+  ordering.
+  Enhanced Arcade orders LumaSharpen before Vibrance; CRT remains isolated
+  from those effects in normal profile mode. Profile/effect metadata is
+  `ADVISORY_UNMEASURED` with no measured-evidence or recommendation claim;
+  pinned hashes establish catalog integrity, not performance validation.
+  Preset generation is deterministic, while advanced custom presets remain
+  bounded user input and never become approved effect evidence. Display and
+  resolution checks remain advisory; TPM does not configure monitors or
+  overwrite ambiguous/user-owned preset content.
   Report hardening: imported setup notes are sanitized into the separate
   TeknoParrot-Manager-game-notes.txt report, including on notes-only runs;
   Action Required contains authored guidance only, and external `TPM` values in
   paths, contract fields, and game identifiers are preserved.
-  Added a local preview gallery for the five canonical visual profiles using
+  Added a local preview gallery for the twelve canonical visual profiles using
   TPM-owned synthetic imagery only. Preview metadata is illustrative and is
   not part of the approved effect trust boundary. Missing or invalid previews
   fall back gracefully without blocking profile selection or ReShade safety;

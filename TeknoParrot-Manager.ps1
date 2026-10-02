@@ -457,7 +457,7 @@ function Invoke-TpmOwnedMigration {
     $destinations = @()
     foreach ($item in $items) {
         if ($item.Name -eq 'SupportPackages') {
-            foreach ($child in @(Get-ChildItem -LiteralPath $item.Path -Force -ErrorAction Stop)) {
+            foreach ($child in @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $item.Path -ProgressLabel 'Support package migration discovery' -Filter '*' -EnumerationErrorAction Stop -IncludeDirectories -Force)) {
                 $destinations += [pscustomobject]@{ Item=[pscustomobject]@{ Name=$child.Name; Path=$child.FullName; IsDirectory=$child.PSIsContainer }; Bucket='SupportPackages'; Destination=(Join-Path ([string]$Layout.SupportPackages) $child.Name) }
             }
             continue
@@ -474,7 +474,7 @@ function Invoke-TpmOwnedMigration {
     $ambiguous = @()
     foreach ($entry in $destinations) {
         if (Test-Path -LiteralPath $entry.Destination) {
-            $occupied = if ($entry.Item.IsDirectory) { @(Get-ChildItem -LiteralPath $entry.Destination -Force -ErrorAction SilentlyContinue).Count -gt 0 } else { $true }
+            $occupied = if ($entry.Item.IsDirectory) { if (Test-Path -LiteralPath $entry.Destination -PathType Container) { Test-ExtractedFolderHasContent -Path $entry.Destination } else { $true } } else { $true }
             if ($occupied) { $ambiguous += $entry }
         }
     }
@@ -521,12 +521,16 @@ function Invoke-TpmOwnedMigration {
             return (New-TpmProfileTransactionResult -WorkflowKey 'OwnedStateMigration' -OperationKey 'RelocateOwnedState' -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Summary 'State migration was declined; no managed state was changed.' -Items $itemIds -SkippedItems $itemIds -ReasonCode 'DECLINED' -FinalChecks @('The migration prompt was declined before the first move.'))
         }
     }
+    $progressStarted=Get-Date
+    $backupProgressCurrent=0
     $backupRoot=Join-Path ([string]$Layout.Backups) ('LegacyMigration_{0}' -f [guid]::NewGuid().ToString('N'))
     $backupEntries=New-Object System.Collections.Generic.List[object]
     try {
         [void][System.IO.Directory]::CreateDirectory($backupRoot)
         if (-not (Test-TpmNoReparsePath -Path $backupRoot)) { throw 'Migration backup path failed the safety check.' }
         foreach ($entry in $destinations) {
+            $backupProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Owned-state backup' -Current $backupProgressCurrent -Total $destinations.Count -StartedAt $progressStarted
             if (-not (Test-TpmNoReparsePath -Path $entry.Item.Path)) { throw 'A legacy owned path failed the safety check.' }
             $copy=Join-Path $backupRoot ([string]$entry.Item.Name)
             Copy-Item -LiteralPath $entry.Item.Path -Destination $copy -Recurse -Force -ErrorAction Stop
@@ -535,28 +539,40 @@ function Invoke-TpmOwnedMigration {
             if ($sourceHash -and $sourceHash -ine $copyHash) { throw 'Migration backup verification failed.' }
             [void]$backupEntries.Add([pscustomobject]@{ ItemId=[string]$entry.Item.Name; Source=[string]$entry.Item.Path; Backup=[string]$copy; Sha256=$sourceHash })
         }
+        if ($destinations.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Owned-state backup' -Current $backupProgressCurrent -Total $destinations.Count -StartedAt $progressStarted -Complete }
     } catch {
+        if ($backupProgressCurrent -gt 0) { Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Owned-state backup' -Current $backupProgressCurrent -Total $destinations.Count -StartedAt $progressStarted -Complete }
         return (New-TpmProfileTransactionResult -WorkflowKey 'OwnedStateMigration' -OperationKey 'RelocateOwnedState' -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary 'State migration stopped because its safety backup could not be verified.' -Items $itemIds -FailedItems $itemIds -Backup ([pscustomobject]@{ Required=$true; Attempted=$true; Created=(Test-Path -LiteralPath $backupRoot -PathType Container); Verified=$false; RootPath=$backupRoot; Items=$backupEntries.ToArray(); FailureStage='Backup'; Reason=$_.Exception.Message; ResiduePaths=@() }) -ReasonCode 'BACKUP_FAILED' -FinalChecks @('No legacy state move was attempted.'))
     }
     $moved=New-Object System.Collections.Generic.List[object]
+    $migrationProgressCurrent=0
     try {
         foreach ($entry in $destinations) {
+            $migrationProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Owned-state migration' -Current $migrationProgressCurrent -Total $destinations.Count -StartedAt $progressStarted
             [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($entry.Destination))
             Move-Item -LiteralPath $entry.Item.Path -Destination $entry.Destination -ErrorAction Stop
             [void]$moved.Add($entry)
         }
+        if ($destinations.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Owned-state migration' -Current $migrationProgressCurrent -Total $destinations.Count -StartedAt $progressStarted -Complete }
         $lines += ''; $lines += 'Migration applied successfully.'
         Set-Content -LiteralPath $reportPath -Value (($lines -join [Environment]::NewLine) + [Environment]::NewLine) -Encoding UTF8
         $backup=[pscustomobject]@{ Required=$true; Attempted=$true; Created=$true; Verified=$true; RootPath=$backupRoot; Items=$backupEntries.ToArray(); FailureStage=$null; Reason=$null; ResiduePaths=@() }
         return (New-TpmProfileTransactionResult -WorkflowKey 'OwnedStateMigration' -OperationKey 'RelocateOwnedState' -Outcome 'SUCCEEDED' -ProductState 'INTENDED' -Summary 'Managed state migration completed and was verified.' -Items $itemIds -ChangedItems $itemIds -CompletedItems $itemIds -MutationStarted $true -MutationCompleted $true -Backup $backup -ReasonCode 'MIGRATED' -FinalChecks @('Every planned move completed after the verified backup.'))
     } catch {
+        if ($migrationProgressCurrent -gt 0) { Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Owned-state migration' -Current $migrationProgressCurrent -Total $destinations.Count -StartedAt $progressStarted -Complete }
         $rollbackFailed=New-Object System.Collections.Generic.List[string]
-        foreach ($entry in @($moved | Sort-Object { $_.Destination.Length } -Descending)) {
+        $rollbackEntries=@($moved | Sort-Object { $_.Destination.Length } -Descending)
+        $rollbackProgressCurrent=0
+        foreach ($entry in $rollbackEntries) {
+            $rollbackProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Owned-state rollback' -Current $rollbackProgressCurrent -Total $rollbackEntries.Count -StartedAt $progressStarted
             try {
                 Move-Item -LiteralPath $entry.Destination -Destination $entry.Item.Path -ErrorAction Stop
                 if (Test-Path -LiteralPath $entry.Destination) { throw 'Rollback destination still exists.' }
             } catch { [void]$rollbackFailed.Add([string]$entry.Item.Name) }
         }
+        if ($rollbackEntries.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Owned-state rollback' -Current $rollbackProgressCurrent -Total $rollbackEntries.Count -StartedAt $progressStarted -Complete }
         $backup=[pscustomobject]@{ Required=$true; Attempted=$true; Created=$true; Verified=$true; RootPath=$backupRoot; Items=$backupEntries.ToArray(); FailureStage='Mutation'; Reason=$_.Exception.Message; ResiduePaths=@() }
         if ($rollbackFailed.Count -eq 0) {
             return (New-TpmProfileTransactionResult -WorkflowKey 'OwnedStateMigration' -OperationKey 'RelocateOwnedState' -Outcome 'ROLLED_BACK_VERIFIED' -ProductState 'UNCHANGED' -Summary 'State migration stopped and all completed moves were rolled back.' -Items $itemIds -ChangedItems @($moved | ForEach-Object { [string]$_.Item.Name }) -CompletedItems @($moved | ForEach-Object { [string]$_.Item.Name }) -MutationStarted $true -Backup $backup -Rollback ([pscustomobject]@{ Attempted=$true; Completed=$true; Verified=$true; Items=@($moved | ForEach-Object { [string]$_.Item.Name }); EvidenceRoot=$backupRoot; FailedItems=@(); Errors=@() }) -ReasonCode 'ROLLED_BACK' -FinalChecks @('Source and destination identities were checked after rollback.'))
@@ -1340,19 +1356,84 @@ function ConvertTo-TpmWorkflowTransactionMetadata {
 
 
 function Get-TpmUserProfilesBackupManifest {
-    param([Parameter(Mandatory)][string]$UserProfilesDir)
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [string]$ProgressLabel='UserProfiles manifest scan')
     $root = [System.IO.Path]::GetFullPath($UserProfilesDir).TrimEnd('\','/')
-    $top = @(Get-ChildItem -LiteralPath $root -Force -ErrorAction Stop | Where-Object { $_.Name -ne 'FullBackup' } | Sort-Object FullName)
+    $topCandidates = New-Object System.Collections.Generic.List[object]
+    $rootDiscoveryStarted = Get-Date
+    $rootDiscoveryCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles manifest root discovery' -Current $rootDiscoveryCurrent -Total 0 -StartedAt $rootDiscoveryStarted
+    try {
+        Get-ChildItem -LiteralPath $root -Force -ErrorAction Stop | ForEach-Object {
+            $rootDiscoveryCurrent++
+            if ($_.Name -ne 'FullBackup') { [void]$topCandidates.Add($_) }
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles manifest root discovery' -Current $rootDiscoveryCurrent -Total 0 -StartedAt $rootDiscoveryStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles manifest root discovery' -Current $rootDiscoveryCurrent -Total 0 -StartedAt $rootDiscoveryStarted -Complete
+    }
+    $top = @($topCandidates.ToArray() | Sort-Object FullName)
     $records = New-Object System.Collections.Generic.List[object]
-    foreach ($item in $top) {
-        $all = @($item) + @(if ($item.PSIsContainer) { Get-ChildItem -LiteralPath $item.FullName -Force -Recurse -ErrorAction Stop })
-        foreach ($entry in @($all | Sort-Object FullName)) {
-            $relative = $entry.FullName.Substring($root.Length).TrimStart('\','/')
-            $hash = if (-not $entry.PSIsContainer) { (Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
-            [void]$records.Add([pscustomobject]@{ RelativePath=$relative; IsDirectory=[bool]$entry.PSIsContainer; Length=if($entry.PSIsContainer){$null}else{[int64]$entry.Length}; Sha256=$hash })
+    $discovered = 0
+    $hashed = 0
+    $startedAt = Get-Date
+    try {
+        foreach ($item in $top) {
+            $all = @($item) + @(if ($item.PSIsContainer) {
+                Get-ChildItem -LiteralPath $item.FullName -Force -Recurse -ErrorAction Stop | ForEach-Object {
+                    $discovered++
+                    Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles manifest discovery' -Current $discovered -Total 0 -StartedAt $startedAt
+                    $_
+                }
+            })
+            foreach ($entry in @($all | Sort-Object FullName)) {
+                $relative = $entry.FullName.Substring($root.Length).TrimStart('\','/')
+                $hash = if (-not $entry.PSIsContainer) { (Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256 -ErrorAction Stop).Hash } else { $null }
+                [void]$records.Add([pscustomobject]@{ RelativePath=$relative; IsDirectory=[bool]$entry.PSIsContainer; Length=if($entry.PSIsContainer){$null}else{[int64]$entry.Length}; Sha256=$hash })
+                $hashed++
+                Write-TpmCompactExtractionProgress -Phase Checking -Label $ProgressLabel -Current $hashed -Total 0 -StartedAt $startedAt
+            }
+        }
+    } finally {
+        if ($hashed -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Checking -Label $ProgressLabel -Current $hashed -Total $records.Count -StartedAt $startedAt
+            Write-TpmCompactExtractionProgress -Phase Checking -Label $ProgressLabel -Current $hashed -Total $records.Count -StartedAt $startedAt -Complete
+        }
+        if ($discovered -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles manifest discovery' -Current $discovered -Total 0 -StartedAt $startedAt -Complete
         }
     }
-    return $records.ToArray()
+    return @($records.ToArray() | Sort-Object RelativePath)
+}
+
+function Copy-TpmAutoSyncUserProfilesBackup {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$BackupPath)
+    $entryCandidates = New-Object System.Collections.Generic.List[object]
+    $discoveryStarted = Get-Date
+    $discoveryCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'AutoSync UserProfiles backup source discovery' -Current $discoveryCurrent -Total 0 -StartedAt $discoveryStarted
+    try {
+        Get-ChildItem -LiteralPath $UserProfilesDir -ErrorAction Stop | ForEach-Object {
+            $discoveryCurrent++
+            if ($_.Name -ne 'FullBackup') { [void]$entryCandidates.Add($_) }
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'AutoSync UserProfiles backup source discovery' -Current $discoveryCurrent -Total 0 -StartedAt $discoveryStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'AutoSync UserProfiles backup source discovery' -Current $discoveryCurrent -Total 0 -StartedAt $discoveryStarted -Complete
+    }
+    $entries = $entryCandidates.ToArray()
+    $started = Get-Date
+    $current = 0
+    try {
+        foreach ($entry in $entries) {
+            $current++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'AutoSync UserProfiles backup' -Current $current -Total $entries.Count -StartedAt $started
+            Copy-Item -LiteralPath $entry.FullName -Destination $BackupPath -Recurse -Force -ErrorAction Stop
+        }
+    } finally {
+        if ($entries.Count -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'AutoSync UserProfiles backup' -Current $current -Total $entries.Count -StartedAt $started -Complete
+        }
+    }
 }
 
 function New-TpmVerifiedUserProfilesBackup {
@@ -1361,6 +1442,11 @@ function New-TpmVerifiedUserProfilesBackup {
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd_HH-mm-ss_fff')
     $backupPath = Join-Path $backupRoot ('{0}_{1}_{2}' -f $Label,$stamp,[guid]::NewGuid().ToString('N'))
     $manifest = @()
+    $progressStarted = Get-Date
+    $activeProgressLabel = $null
+    $activeProgressPhase = 'Checking'
+    $activeProgressCurrent = 0
+    $activeProgressTotal = 0
     try {
         if (-not (Test-Path -LiteralPath $UserProfilesDir -PathType Container -ErrorAction Stop)) { throw 'UserProfiles directory is unavailable.' }
         if (-not (Test-TpmNoReparsePath -Path $UserProfilesDir)) { throw 'UserProfiles directory failed the safety check.' }
@@ -1368,11 +1454,21 @@ function New-TpmVerifiedUserProfilesBackup {
         [void][System.IO.Directory]::CreateDirectory($backupPath)
         if (-not (Test-TpmNoReparsePath -Path $backupRoot) -or -not (Test-TpmNoReparsePath -Path $backupPath)) { throw 'Backup directory failed the safety check.' }
         $manifest = @(Get-TpmUserProfilesBackupManifest -UserProfilesDir $UserProfilesDir)
-        foreach ($entry in @($manifest | Where-Object IsDirectory | Sort-Object RelativePath)) {
+        $directoryEntries = @($manifest | Where-Object IsDirectory | Sort-Object RelativePath)
+        $activeProgressLabel = 'UserProfiles backup folders'; $activeProgressPhase = 'Repairing'; $activeProgressCurrent = 0; $activeProgressTotal = $directoryEntries.Count
+        foreach ($entry in $directoryEntries) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $destination = Join-Path $backupPath $entry.RelativePath
             [void][System.IO.Directory]::CreateDirectory($destination)
         }
-        foreach ($entry in @($manifest | Where-Object { -not $_.IsDirectory } | Sort-Object RelativePath)) {
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel = $null
+        $fileEntries = @($manifest | Where-Object { -not $_.IsDirectory } | Sort-Object RelativePath)
+        $activeProgressLabel = 'UserProfiles backup files'; $activeProgressPhase = 'Repairing'; $activeProgressCurrent = 0; $activeProgressTotal = $fileEntries.Count
+        foreach ($entry in $fileEntries) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $source = Join-Path $UserProfilesDir $entry.RelativePath
             $destination = Join-Path $backupPath $entry.RelativePath
             $parent = [System.IO.Path]::GetDirectoryName($destination)
@@ -1381,7 +1477,12 @@ function New-TpmVerifiedUserProfilesBackup {
             }
             Copy-Item -LiteralPath $source -Destination $destination -Force -ErrorAction Stop
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel = $null
+        $activeProgressLabel = 'UserProfiles backup verification'; $activeProgressPhase = 'Checking'; $activeProgressCurrent = 0; $activeProgressTotal = $manifest.Count
         foreach ($entry in $manifest) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $destination = Join-Path $backupPath $entry.RelativePath
             $destinationItem = Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
             if ($entry.IsDirectory) {
@@ -1393,10 +1494,13 @@ function New-TpmVerifiedUserProfilesBackup {
                 if ([int64]$item.Length -ne [int64]$entry.Length -or $hash -ine [string]$entry.Sha256) { throw ("Backup verification failed for '{0}'." -f $entry.RelativePath) }
             }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel = $null
         $after = @(Get-TpmUserProfilesBackupManifest -UserProfilesDir $UserProfilesDir)
         if ((@($after | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.RelativePath,$_.IsDirectory,$_.Length,$_.Sha256 }) -join "`n") -ne (@($manifest | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.RelativePath,$_.IsDirectory,$_.Length,$_.Sha256 }) -join "`n")) { throw 'UserProfiles changed while the backup was being verified.' }
         return [pscustomobject]@{ Required=$true; Attempted=$true; Created=$true; Succeeded=$true; Verified=$true; Path=$backupPath; Manifest=$manifest; FailureStage=$null; Reason=$null; ResiduePaths=@() }
     } catch {
+        if ($activeProgressLabel) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
         $residue = @()
         if (Test-Path -LiteralPath $backupPath -PathType Container -ErrorAction SilentlyContinue) {
             try { Remove-Item -LiteralPath $backupPath -Recurse -Force -ErrorAction Stop } catch { $residue = @($backupPath) }
@@ -1463,26 +1567,49 @@ function Restore-TpmVerifiedUserProfilesBackup {
     $backupPath=[string](Get-TpmTransactionField -Object $Backup -Name 'Path' -Default (Get-TpmTransactionField -Object $Backup -Name 'RootPath'))
     if ([string]::IsNullOrWhiteSpace($backupPath) -or -not [bool](Get-TpmTransactionField -Object $Backup -Name 'Verified')) { throw 'Verified UserProfiles backup evidence is unavailable.' }
     $expected=@(Get-TpmTransactionField -Object $Backup -Name 'Manifest' -Default (Get-TpmTransactionField -Object $Backup -Name 'Items' -Default @()))
-    foreach ($entry in @($expected | Sort-Object RelativePath -Descending)) {
-        $destination=Join-Path $UserProfilesDir ([string]$entry.RelativePath)
-        if ($entry.IsDirectory) {
-            if (-not (Test-Path -LiteralPath $destination -PathType Container -ErrorAction SilentlyContinue)) { [void][System.IO.Directory]::CreateDirectory($destination) }
-        } elseif (Test-Path -LiteralPath $destination -PathType Leaf -ErrorAction SilentlyContinue) {
-            Remove-Item -LiteralPath $destination -Force -ErrorAction Stop
+    $progressStarted=Get-Date
+    $activeProgressLabel=$null
+    $activeProgressPhase='Checking'
+    $activeProgressCurrent=0
+    $activeProgressTotal=0
+    try {
+        $restoreEntries=@($expected | Sort-Object RelativePath -Descending)
+        $activeProgressLabel='UserProfiles restore'; $activeProgressPhase='Repairing'; $activeProgressTotal=$restoreEntries.Count
+        foreach ($entry in $restoreEntries) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
+            $destination=Join-Path $UserProfilesDir ([string]$entry.RelativePath)
+            if ($entry.IsDirectory) {
+                if (-not (Test-Path -LiteralPath $destination -PathType Container -ErrorAction SilentlyContinue)) { [void][System.IO.Directory]::CreateDirectory($destination) }
+            } elseif (Test-Path -LiteralPath $destination -PathType Leaf -ErrorAction SilentlyContinue) {
+                Remove-Item -LiteralPath $destination -Force -ErrorAction Stop
+            }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
+
+        $restoreFiles=@($expected | Where-Object { -not $_.IsDirectory } | Sort-Object RelativePath)
+        $activeProgressLabel='UserProfiles restore'; $activeProgressPhase='Repairing'; $activeProgressCurrent=0; $activeProgressTotal=$restoreFiles.Count
+        foreach ($entry in $restoreFiles) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
+            $source=Join-Path $backupPath ([string]$entry.RelativePath)
+            $destination=Join-Path $UserProfilesDir ([string]$entry.RelativePath)
+            $parent=[System.IO.Path]::GetDirectoryName($destination)
+            if (-not (Test-Path -LiteralPath $parent -PathType Container -ErrorAction SilentlyContinue)) { [void][System.IO.Directory]::CreateDirectory($parent) }
+            Copy-Item -LiteralPath $source -Destination $destination -Force -ErrorAction Stop
+        }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
+
+        $after=@(Get-TpmUserProfilesBackupManifest -UserProfilesDir $UserProfilesDir -ProgressLabel 'UserProfiles restore verification')
+        $left=@($expected | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.RelativePath,$_.IsDirectory,$_.Length,$_.Sha256 })
+        $right=@($after | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.RelativePath,$_.IsDirectory,$_.Length,$_.Sha256 })
+        if (($left -join "`n") -ne ($right -join "`n")) { throw 'UserProfiles rollback verification failed.' }
+        return [pscustomobject]@{ Attempted=$true; Completed=$true; Verified=$true; VerifiedUtc=(Get-Date).ToUniversalTime().ToString('o'); Items=@($expected | ForEach-Object RelativePath); EvidenceRoot=$backupPath; FailedItems=@(); Errors=@() }
+    } finally {
+        if ($activeProgressLabel) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
     }
-    foreach ($entry in @($expected | Where-Object { -not $_.IsDirectory } | Sort-Object RelativePath)) {
-        $source=Join-Path $backupPath ([string]$entry.RelativePath)
-        $destination=Join-Path $UserProfilesDir ([string]$entry.RelativePath)
-        $parent=[System.IO.Path]::GetDirectoryName($destination)
-        if (-not (Test-Path -LiteralPath $parent -PathType Container -ErrorAction SilentlyContinue)) { [void][System.IO.Directory]::CreateDirectory($parent) }
-        Copy-Item -LiteralPath $source -Destination $destination -Force -ErrorAction Stop
-    }
-    $after=@(Get-TpmUserProfilesBackupManifest -UserProfilesDir $UserProfilesDir)
-    $left=@($expected | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.RelativePath,$_.IsDirectory,$_.Length,$_.Sha256 })
-    $right=@($after | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.RelativePath,$_.IsDirectory,$_.Length,$_.Sha256 })
-    if (($left -join "`n") -ne ($right -join "`n")) { throw 'UserProfiles rollback verification failed.' }
-    return [pscustomobject]@{ Attempted=$true; Completed=$true; Verified=$true; VerifiedUtc=(Get-Date).ToUniversalTime().ToString('o'); Items=@($expected | ForEach-Object RelativePath); EvidenceRoot=$backupPath; FailedItems=@(); Errors=@() }
 }
 function ConvertTo-TpmLegacyTransactionResult {
     param(
@@ -2227,23 +2354,35 @@ function Open-TpmSupportOwnedHandle {
 }
 
 function Remove-TpmSupportOwnedDirectoryTree {
-    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$RootFinal)
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$RootFinal,[hashtable]$ProgressState = $null)
     $opened = Open-TpmSupportOwnedHandle -Path $Path -ExpectedRoot $RootFinal
     try {
         if (-not $opened.IsDirectory) { throw 'Support staging ownership expected a directory.' }
-        foreach ($child in @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)) {
-            Remove-TpmSupportOwnedEntry -Path $child.FullName -RootFinal $RootFinal
+        $children = New-Object 'System.Collections.Generic.List[object]'
+        Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop | ForEach-Object {
+            if ($ProgressState) {
+                $ProgressState.ScanCurrent++
+                Write-TpmCompactExtractionProgress -Phase Checking -Label 'Support staging cleanup discovery' -Current $ProgressState.ScanCurrent -Total 0 -StartedAt $ProgressState.StartedAt
+            }
+            [void]$children.Add($_)
         }
-        if (@(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop).Count -ne 0) { throw 'Support staging contains unowned residue.' }
+        foreach ($child in $children) {
+            Remove-TpmSupportOwnedEntry -Path $child.FullName -RootFinal $RootFinal -ProgressState $ProgressState
+        }
+        if ($null -ne (Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop | Select-Object -First 1)) { throw 'Support staging contains unowned residue.' }
         Remove-TpmSupportHandle -Handle $opened.Handle
     } finally { $opened.Handle.Dispose() }
 }
 
 function Remove-TpmSupportOwnedEntry {
-    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$RootFinal)
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$RootFinal,[hashtable]$ProgressState = $null)
+    if ($ProgressState) {
+        $ProgressState.RemoveCurrent++
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Support staging cleanup removal' -Current $ProgressState.RemoveCurrent -Total 0 -StartedAt $ProgressState.StartedAt
+    }
     $opened = Open-TpmSupportOwnedHandle -Path $Path -ExpectedRoot $RootFinal
     try {
-        if ($opened.IsDirectory) { Remove-TpmSupportOwnedDirectoryTree -Path $Path -RootFinal $RootFinal }
+        if ($opened.IsDirectory) { Remove-TpmSupportOwnedDirectoryTree -Path $Path -RootFinal $RootFinal -ProgressState $ProgressState }
         else { Remove-TpmSupportHandle -Handle $opened.Handle }
     } finally { $opened.Handle.Dispose() }
 }
@@ -2252,16 +2391,21 @@ function Remove-TpmSupportStageDirectory {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return $true }
     $root = Open-TpmSupportOwnedHandle -Path $Path -ExpectedRoot ([System.IO.Path]::GetFullPath($Path))
+    $progressState = @{ StartedAt = Get-Date; ScanCurrent = 0; RemoveCurrent = 0 }
     try {
-        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'diagnostics') -RootFinal $root.FinalPath
-        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'metadata') -RootFinal $root.FinalPath
-        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'MANIFEST.txt') -RootFinal $root.FinalPath
-        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'README.txt') -RootFinal $root.FinalPath
-        if (@(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop).Count -ne 0) { return $false }
+        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'diagnostics') -RootFinal $root.FinalPath -ProgressState $progressState
+        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'metadata') -RootFinal $root.FinalPath -ProgressState $progressState
+        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'MANIFEST.txt') -RootFinal $root.FinalPath -ProgressState $progressState
+        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'README.txt') -RootFinal $root.FinalPath -ProgressState $progressState
+        if ($null -ne (Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop | Select-Object -First 1)) { return $false }
         Remove-TpmSupportHandle -Handle $root.Handle
         $root.Handle.Dispose()
         return (-not (Test-Path -LiteralPath $Path))
-    } catch { return $false } finally { $root.Handle.Dispose() }
+    } catch { return $false } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'Support staging cleanup discovery' -Current $progressState.ScanCurrent -Total 0 -StartedAt $progressState.StartedAt -Complete
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Support staging cleanup removal' -Current $progressState.RemoveCurrent -Total 0 -StartedAt $progressState.StartedAt -Complete
+        $root.Handle.Dispose()
+    }
 }
 function Move-TpmSupportZipByIdentity {
     param(
@@ -2495,11 +2639,24 @@ function Get-TpmSupportPluginInventory {
     $bepPlugins = Join-Path $GameRoot 'BepInEx\plugins'
     if (Test-Path -LiteralPath $bepPlugins -PathType Container) { [void]$pluginRoots.Add($bepPlugins) }
     try {
-        foreach ($dataDir in @(Get-ChildItem -LiteralPath $GameRoot -Directory -Force -ErrorAction Stop | Where-Object { $_.Name -match '_Data$' })) {
+        foreach ($dataDir in @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $GameRoot -ProgressLabel 'Support plugin data-directory discovery' -Filter '*' -EnumerationErrorAction Stop -DirectoriesOnly -Force | Where-Object { $_.Name -match '_Data$' })) {
             if (($dataDir.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
             foreach ($relative in @('Plugins','Plugins\x86_64','Plugins\x86')) {
                 $candidate = Join-Path $dataDir.FullName $relative
-                if (Test-Path -LiteralPath $candidate -PathType Container) { [void]$pluginRoots.Add($candidate) }
+                if (Test-Path -LiteralPath $candidate -PathType Container) {
+                    $candidateFull = [System.IO.Path]::GetFullPath($candidate).TrimEnd([char[]]@('\','/'))
+                    $coveredByExistingRoot = $false
+                    foreach ($existingRoot in $pluginRoots) {
+                        $existingFull = [System.IO.Path]::GetFullPath($existingRoot).TrimEnd([char[]]@('\','/'))
+                        $existingPrefix = $existingFull + [System.IO.Path]::DirectorySeparatorChar
+                        if ($candidateFull.Equals($existingFull,[StringComparison]::OrdinalIgnoreCase) -or
+                            $candidateFull.StartsWith($existingPrefix,[StringComparison]::OrdinalIgnoreCase)) {
+                            $coveredByExistingRoot = $true
+                            break
+                        }
+                    }
+                    if (-not $coveredByExistingRoot) { [void]$pluginRoots.Add($candidate) }
+                }
             }
         }
     } catch {
@@ -2513,6 +2670,8 @@ function Get-TpmSupportPluginInventory {
     $rows = New-Object System.Collections.Generic.List[string]
     $rows.Add('RelativePath' + "`t" + 'FileName' + "`t" + 'SizeBytes' + "`t" + 'Version' + "`t" + 'SHA256') | Out-Null
     $fileCount = 0
+    $progressStarted = Get-Date
+    $progressCurrent = 0
     foreach ($pluginRoot in @($pluginRoots | Select-Object -Unique)) {
         if (-not (Test-TpmNoReparsePath -Path $pluginRoot)) {
             $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName (Split-Path -LiteralPath $pluginRoot -Leaf)) + "`tunsafe-reparse-path") | Out-Null
@@ -2527,7 +2686,10 @@ function Get-TpmSupportPluginInventory {
                 continue
             }
             try {
-                foreach ($child in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
+                $children = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $current -ProgressLabel 'Support plugin child discovery' -Filter '*' -EnumerationErrorAction Stop -IncludeDirectories -Force)
+                foreach ($child in $children) {
+                    $progressCurrent++
+                    Write-TpmCompactExtractionProgress -Phase Checking -Label 'Support plugin inventory' -Current $progressCurrent -Total 0 -StartedAt $progressStarted
                     if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
                         $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName $child.Name) + "`treparse-backed entry") | Out-Null
                         continue
@@ -2571,6 +2733,7 @@ function Get-TpmSupportPluginInventory {
             }
         }
     }
+    if ($progressCurrent -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'Support plugin inventory' -Current $progressCurrent -Total 0 -StartedAt $progressStarted -Complete }
     if ($fileCount -eq 0) {
         Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status NotPresent -Detail 'Allowlisted plugin directories contained no safe regular files.' -EvidenceClass Ambient
         return
@@ -2591,7 +2754,7 @@ function Get-TpmSupportManifestText {
         [string]$ManagerLogPath = '',
         [string]$RunId = '',
         [object]$LatestWorkflowResult = $null,
-        [object]$SupportWorkflowResult = $null
+        [object]$SupportWorkflowSnapshot = $null
     )
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add('TPM Support Package Manifest v1') | Out-Null
@@ -2599,9 +2762,9 @@ function Get-TpmSupportManifestText {
     $effectiveRunId = if ([string]::IsNullOrWhiteSpace($RunId)) { Get-TpmSessionRunId } else { $RunId }
     $lines.Add('Run ID: ' + (Redact-TpmSupportText -Text $effectiveRunId).Text) | Out-Null
     $latestWorkflow = if ($LatestWorkflowResult) { $LatestWorkflowResult } else { $null }
-    $supportWorkflow = if ($SupportWorkflowResult) { $SupportWorkflowResult } else { $null }
+    $supportWorkflowSnapshot = if ($SupportWorkflowSnapshot) { $SupportWorkflowSnapshot } else { $null }
     $lines.Add('Latest workflow result: ' + $(if ($latestWorkflow) { '{0} / {1} / {2}' -f $latestWorkflow.WorkflowKey, $latestWorkflow.State, $latestWorkflow.WorkflowId } else { 'unavailable' })) | Out-Null
-    $lines.Add('Support workflow result: ' + $(if ($supportWorkflow) { '{0} / {1} / {2}' -f $supportWorkflow.WorkflowKey, $supportWorkflow.State, $supportWorkflow.WorkflowId } else { 'unavailable' })) | Out-Null
+    $lines.Add('Support workflow snapshot at archive creation: ' + $(if ($supportWorkflowSnapshot) { '{0} / {1} / {2}' -f $supportWorkflowSnapshot.WorkflowKey, $supportWorkflowSnapshot.State, $supportWorkflowSnapshot.WorkflowId } else { 'unavailable' })) | Out-Null
     $actionItemsStamp = $null
     $managerLogStamp = $null
     if ($ActionItemsPath -and (Test-Path -LiteralPath $ActionItemsPath -PathType Leaf)) { $actionItemsStamp = (Get-Item -LiteralPath $ActionItemsPath).LastWriteTimeUtc }
@@ -2758,6 +2921,11 @@ function New-TpmSupportPackage {
         LatestWorkflowResult = $latestWorkflowResult
         SupportWorkflowResult = $null
     }
+    $activeProgressLabel = $null
+    $activeProgressPhase = 'Checking'
+    $activeProgressCurrent = 0
+    $activeProgressTotal = 0
+    $activeProgressStarted = $null
     try {
         Start-TpmWorkflowStatus -Context $status
         Start-TpmWorkflowStep -Context $status -StepId 'tpm' -Activity 'Collecting TPM logs and reports'
@@ -2812,7 +2980,14 @@ function New-TpmSupportPackage {
             Add-TpmSupportRecord -Records $records -Source 'Registered game diagnostics' -Status IntentionallyExcluded -Detail 'UserProfiles folder is reparse-backed or inaccessible.' -EvidenceClass Ambient
         } else {
             $profileFiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Select-Object -First 200)
+            $activeProgressLabel = if ($profileFiles.Count -gt 0) { 'Support profile scan' } else { $null }
+            $activeProgressPhase = 'Scanning'
+            $activeProgressCurrent = 0
+            $activeProgressTotal = $profileFiles.Count
+            $activeProgressStarted = Get-Date
             foreach ($profileFile in $profileFiles) {
+                $activeProgressCurrent++
+                Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted
                 $code = Get-TpmSupportSafeName $profileFile.BaseName
                 try {
                     $profileFull = [System.IO.Path]::GetFullPath($profileFile.FullName)
@@ -2849,6 +3024,10 @@ function New-TpmSupportPackage {
                     Add-TpmSupportRecord -Records $records -Source ('Game:' + $code) -Status CollectionFailed -Detail 'Registered game diagnostics could not be identified safely.'
                 }
             }
+            if ($activeProgressLabel) {
+                Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted -Complete
+                $activeProgressLabel = $null
+            }
         }
         Complete-TpmWorkflowStep -Context $status -Summary 'Game-specific diagnostics checked' -NextStep 'Remove private information'
         Start-TpmWorkflowStep -Context $status -StepId 'redact' -Activity 'Removing private information from collected text'
@@ -2857,10 +3036,7 @@ function New-TpmSupportPackage {
         $result.RedactionCount = if ($redactionMeasure) { [int]$redactionMeasure.Sum } else { 0 }
         Complete-TpmWorkflowStep -Context $status -Summary 'Private information redacted where detected' -NextStep 'Create support ZIP'
         Start-TpmWorkflowStep -Context $status -StepId 'zip' -Activity 'Writing the support package manifest and ZIP'
-        Complete-TpmWorkflowStep -Context $status -Summary 'Support package manifest and ZIP generation started' -NextStep 'Send the ZIP when asking for help'
-        Complete-TpmWorkflowStatus -Context $status -Summary 'Support package created'
-        $supportWorkflowResult = Get-TpmWorkflowStatusSnapshot -Context $status
-        $result.SupportWorkflowResult = $supportWorkflowResult
+        $supportWorkflowSnapshot = Get-TpmWorkflowStatusSnapshot -Context $status
         $workflowEvidence = [ordered]@{
             SchemaVersion = 1
             RunId = $runId
@@ -2874,18 +3050,18 @@ function New-TpmSupportPackage {
                     Sequence = $latestWorkflowResult.Sequence
                 }
             } else { $null }
-            SupportWorkflow = [ordered]@{
-                WorkflowId = $supportWorkflowResult.WorkflowId
-                RunId = $supportWorkflowResult.RunId
-                WorkflowKey = $supportWorkflowResult.WorkflowKey
-                Lifecycle = $supportWorkflowResult.Lifecycle
-                State = $supportWorkflowResult.State
-                Sequence = $supportWorkflowResult.Sequence
+            SupportWorkflowAtArchiveSnapshot = [ordered]@{
+                WorkflowId = $supportWorkflowSnapshot.WorkflowId
+                RunId = $supportWorkflowSnapshot.RunId
+                WorkflowKey = $supportWorkflowSnapshot.WorkflowKey
+                Lifecycle = $supportWorkflowSnapshot.Lifecycle
+                State = $supportWorkflowSnapshot.State
+                Sequence = $supportWorkflowSnapshot.Sequence
             }
         }
         $workflowEvidencePath = Join-Path $stage 'metadata\workflow-result.json'
         [System.IO.File]::WriteAllText($workflowEvidencePath, ($workflowEvidence | ConvertTo-Json -Depth 6) + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
-        $manifest = Get-TpmSupportManifestText -Records $records -Errors $errors -GameCodes @($gameCodes) -AffectedGameSummary $AffectedGameSummary -RunId $runId -LatestWorkflowResult $latestWorkflowResult -SupportWorkflowResult $supportWorkflowResult -ActionItemsPath $actionItemsPath -ManagerLogPath $managerLogPath
+        $manifest = Get-TpmSupportManifestText -Records $records -Errors $errors -GameCodes @($gameCodes) -AffectedGameSummary $AffectedGameSummary -RunId $runId -LatestWorkflowResult $latestWorkflowResult -SupportWorkflowSnapshot $supportWorkflowSnapshot -ActionItemsPath $actionItemsPath -ManagerLogPath $managerLogPath
         [System.IO.File]::WriteAllText((Join-Path $stage 'MANIFEST.txt'), $manifest, (New-Object System.Text.UTF8Encoding($false)))
         $readme = @(
             'TPM Support Package'
@@ -2913,10 +3089,21 @@ function New-TpmSupportPackage {
         }
         if ([string]::IsNullOrWhiteSpace($packagePath)) { throw 'Could not reserve a safe support package filename.' }
         $zipTemp = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-support-' + [guid]::NewGuid().ToString('N') + '.zip')
+        $activeProgressLabel = 'Support package ZIP'
+        $activeProgressPhase = 'Extracting'
+        $activeProgressCurrent = 0
+        $activeProgressTotal = 0
+        $activeProgressStarted = Get-Date
+        Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted
         [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zipTemp, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+        Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted -Complete
+        $activeProgressLabel = $null
         $promotion = Move-TpmSupportZipByIdentity -ZipTempPath $zipTemp -OutputRoot $OutputRoot -DestinationPath $packagePath
         if (-not (Test-Path -LiteralPath $promotion.Path -PathType Leaf)) { throw 'The support ZIP could not be verified after identity-bound promotion.' }
         $result.PackagePath = $promotion.Path
+        Complete-TpmWorkflowStep -Context $status -Summary 'Support ZIP created and verified' -NextStep 'Send the ZIP when asking for help'
+        Complete-TpmWorkflowStatus -Context $status -Summary 'Support package created'
+        $result.SupportWorkflowResult = Get-TpmWorkflowStatusSnapshot -Context $status
         if (-not (Remove-TpmSupportStageDirectory -Path $stage)) {
             $result.Partial = $true
             [void]$errors.Add('Support ZIP was created, but temporary diagnostic staging cleanup needs attention.')
@@ -2924,10 +3111,9 @@ function New-TpmSupportPackage {
         }
         $stage = $null
         if (@($records | Where-Object Status -eq 'CollectionFailed').Count -gt 0) { $result.Partial = $true }
-        # The support workflow was completed before its final metadata snapshot so
-        # the manifest and workflow-result evidence cannot remain in Working state.
         $result.Succeeded = $true
     } catch {
+        if ($activeProgressLabel -and $activeProgressStarted) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted -Complete; $activeProgressLabel = $null }
         if ($status.State -eq 'Finished' -and -not $result.PackagePath) {
             try { Publish-TpmWorkflowStatusEvent -Context $status -EventKind WorkflowAborted -Summary 'Support package artifact creation failed after collection completed' } catch {}
         }
@@ -2977,15 +3163,50 @@ function New-TpmSupportPackage {
 
 function Open-TpmLogsAndReports {
     param([Parameter(Mandatory)][string]$ScriptRoot)
+    return (Open-TpmOwnedFolder -Path $ScriptRoot -Label 'TeknoParrot Manager logs and reports')
+}
+function Open-TpmOwnedFolder {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$Label = 'TeknoParrot Manager folder'
+    )
     try {
-        $target = [System.IO.Path]::GetFullPath($ScriptRoot)
-        if (-not (Test-TpmNoReparsePath -Path $target)) { return [pscustomobject]@{ Succeeded = $false; Path = $target; Error = 'The TPM folder could not be opened safely.' } }
-        if (-not (Test-Path -LiteralPath $target -PathType Container)) { return [pscustomobject]@{ Succeeded = $false; Path = $target; Error = 'The TPM logs folder does not exist yet.' } }
+        $target = [System.IO.Path]::GetFullPath($Path)
+        if (-not (Test-TpmNoReparsePath -Path $target)) {
+            return [pscustomobject]@{ Succeeded = $false; Path = $target; Error = ('The {0} folder could not be opened safely.' -f $Label) }
+        }
+        if (-not (Test-Path -LiteralPath $target -PathType Container)) {
+            return [pscustomobject]@{ Succeeded = $false; Path = $target; Error = ('The {0} folder does not exist.' -f $Label) }
+        }
         Start-Process -FilePath 'explorer.exe' -ArgumentList @($target) -ErrorAction Stop | Out-Null
         return [pscustomobject]@{ Succeeded = $true; Path = $target; Error = $null }
     } catch {
-        return [pscustomobject]@{ Succeeded = $false; Path = $ScriptRoot; Error = 'Windows could not open the TPM logs folder.' }
+        return [pscustomobject]@{ Succeeded = $false; Path = $Path; Error = ('Windows could not open the {0} folder.' -f $Label) }
     }
+}
+
+function Invoke-TpmSupportPackageFollowUp {
+    param(
+        [Parameter(Mandatory)][string]$PackagePath,
+        [Parameter(Mandatory)][string]$SupportPackagesRoot
+    )
+    if (-not (Test-PathInside $PackagePath $SupportPackagesRoot) -or -not (Test-Path -LiteralPath $PackagePath -PathType Leaf)) {
+        return [pscustomobject]@{ Choice = 'B'; Succeeded = $false; Path = $SupportPackagesRoot; Error = 'The support package is no longer available in the TPM support package folder.' }
+    }
+    Write-Host ""
+    Write-Host "  [O] Open the support package folder"
+    Write-Host "  [B] Back to the main menu"
+    $choice = Read-TpmChoice -Prompt '  Choose O or B' -Choices @('O', 'B') -Default 'B'
+    if ($choice -eq 'O') {
+        $openResult = Open-TpmOwnedFolder -Path $SupportPackagesRoot -Label 'support package'
+        if ($openResult.Succeeded) {
+            Write-Host ("  Opened: {0}" -f $openResult.Path) -ForegroundColor Green
+        } else {
+            Write-Host ("  The support package folder could not be opened: {0}" -f $openResult.Error) -ForegroundColor Yellow
+        }
+        return [pscustomobject]@{ Choice = 'O'; Succeeded = $openResult.Succeeded; Path = $openResult.Path; Error = $openResult.Error }
+    }
+    return [pscustomobject]@{ Choice = 'B'; Succeeded = $true; Path = $SupportPackagesRoot; Error = $null }
 }
 
 # Prompts for a file/folder path with an option to browse for it using a
@@ -3539,28 +3760,55 @@ function Test-IsNetworkPath {
 # Reads up to 20 MB from the largest ZIP in $path and returns MB/s, or $null.
 # The FileStream is always disposed via finally, even if an exception occurs
 # mid-read, preventing a file handle leak on the network share.
+function Get-TpmLargestZipSourceFile {
+    param([string]$Path)
+    $candidates = New-Object System.Collections.Generic.List[object]
+    $scanStarted = Get-Date
+    $scanCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'Path throughput ZIP source scan' -Current $scanCurrent -Total 0 -StartedAt $scanStarted
+    try {
+        Get-ChildItem -LiteralPath $Path -Filter *.zip -ErrorAction SilentlyContinue | ForEach-Object {
+            [void]$candidates.Add($_)
+            $scanCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'Path throughput ZIP source scan' -Current $scanCurrent -Total 0 -StartedAt $scanStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'Path throughput ZIP source scan' -Current $scanCurrent -Total 0 -StartedAt $scanStarted -Complete
+    }
+    return ($candidates.ToArray() | Sort-Object Length -Descending | Select-Object -First 1)
+}
+
 function Measure-PathThroughput {
     param([string]$path)
-    $testFile = Get-ChildItem -LiteralPath $path -Filter *.zip -ErrorAction SilentlyContinue |
-                Sort-Object Length -Descending | Select-Object -First 1
+    $testFile = Get-TpmLargestZipSourceFile -Path $path
     if (-not $testFile -or $testFile.Length -eq 0) { return $null }
     $sampleBytes = [Math]::Min($testFile.Length, 20MB)
     $buffer      = New-Object byte[] $sampleBytes
     $fs          = $null
+    $sampleProgressStarted = $null
+    $sampleProgressCurrent = 0
     try {
-        $sw    = [System.Diagnostics.Stopwatch]::StartNew()
-        $fs    = [System.IO.File]::OpenRead($testFile.FullName)
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $fs = [System.IO.File]::OpenRead($testFile.FullName)
         $total = 0
+        $sampleProgressStarted = Get-Date
+        $sampleProgressCurrent = 0
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'Path throughput ZIP sample read' -Current $sampleProgressCurrent -Total $sampleBytes -StartedAt $sampleProgressStarted
         while ($total -lt $sampleBytes) {
             $chunk = $fs.Read($buffer, $total, $sampleBytes - $total)
             if ($chunk -eq 0) { break }
             $total += $chunk
+            $sampleProgressCurrent = $total
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'Path throughput ZIP sample read' -Current $sampleProgressCurrent -Total $sampleBytes -StartedAt $sampleProgressStarted
         }
         $sw.Stop()
         if ($sw.Elapsed.TotalSeconds -lt 0.01 -or $total -eq 0) { return $null }
         return [Math]::Round(($total / 1MB) / $sw.Elapsed.TotalSeconds, 1)
     } catch { return $null }
-    finally   { if ($null -ne $fs) { $fs.Dispose() } }
+    finally {
+        if ($null -ne $sampleProgressStarted) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'Path throughput ZIP sample read' -Current $sampleProgressCurrent -Total $sampleBytes -StartedAt $sampleProgressStarted -Complete }
+        if ($null -ne $fs) { $fs.Dispose() }
+    }
 }
 
 # Measures write throughput to $path by writing 10 MB of zeros to a temp file.
@@ -3571,6 +3819,8 @@ function Measure-PathWriteThroughput {
     if (-not (Test-Path -LiteralPath $path)) { return $null }
     $testFile = Join-Path $path "._tp_write_test_tmp"
     $fs = $null
+    $writeProgressStarted = $null
+    $writeProgressCurrent = 0
     try {
         $sampleBytes = 10MB
         $buffer      = New-Object byte[] 65536
@@ -3578,10 +3828,14 @@ function Measure-PathWriteThroughput {
         $fs          = [System.IO.File]::Open($testFile, [System.IO.FileMode]::Create,
                            [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
         $written = 0
+        $writeProgressStarted = Get-Date
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'Path throughput test write' -Current $writeProgressCurrent -Total $sampleBytes -StartedAt $writeProgressStarted
         while ($written -lt $sampleBytes) {
             $chunk = [Math]::Min(65536, $sampleBytes - $written)
             $fs.Write($buffer, 0, $chunk)
             $written += $chunk
+            $writeProgressCurrent = $written
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'Path throughput test write' -Current $writeProgressCurrent -Total $sampleBytes -StartedAt $writeProgressStarted
         }
         $fs.Flush()
         $sw.Stop()
@@ -3589,9 +3843,10 @@ function Measure-PathWriteThroughput {
         return [Math]::Round(($written / 1MB) / $sw.Elapsed.TotalSeconds, 1)
     } catch { return $null }
     finally {
+        if ($null -ne $writeProgressStarted) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'Path throughput test write' -Current $writeProgressCurrent -Total $sampleBytes -StartedAt $writeProgressStarted -Complete }
         if ($null -ne $fs) { $fs.Dispose() }
         Remove-Item -LiteralPath $testFile -Force -ErrorAction SilentlyContinue
-    }
+}
 }
 
 # True if $child is the same folder as, or inside, $parent. Both paths are
@@ -4105,12 +4360,20 @@ function Invoke-TpmTransactionalPromote {
     $lostSources = New-Object System.Collections.Generic.List[string]
     $invalidBackups = New-Object System.Collections.Generic.List[string]
     $createdDirectories = New-Object System.Collections.Generic.List[string]
+    $progressStarted = Get-Date
+    $activeProgressLabel = $null
+    $activeProgressPhase = 'Repairing'
+    $activeProgressCurrent = 0
+    $activeProgressTotal = 0
 
     try {
         [void][System.IO.Directory]::CreateDirectory($DestDir)
         [void][System.IO.Directory]::CreateDirectory($rollbackDir)
 
+        $activeProgressLabel='Promotion move-aside'; $activeProgressCurrent=0; $activeProgressTotal=@($FileNames).Count
         foreach ($name in $FileNames) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $relativeName = ($name -replace '/', '\').TrimStart('\')
             $safeName = [System.IO.Path]::GetFileName($relativeName)
             $destPath = Join-Path $DestDir $relativeName
@@ -4171,8 +4434,13 @@ function Invoke-TpmTransactionalPromote {
                 }
             }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
+        $activeProgressLabel='Promotion staging'; $activeProgressCurrent=0; $activeProgressTotal=@($FileNames).Count
 
         foreach ($name in $FileNames) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $relativeName = ($name -replace '/', '\').TrimStart('\')
             $srcPath  = Join-Path $StagingDir $relativeName
             $destPath = Join-Path $DestDir $relativeName
@@ -4185,15 +4453,22 @@ function Invoke-TpmTransactionalPromote {
                 throw
             }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
         if ($CommitAction) { & $CommitAction }
     } catch {
+        if ($activeProgressLabel) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
         $promotionError = $_
         Write-Log "Invoke-TpmTransactionalPromote: FAILED promoting into '$DestDir' -- rolling back. $promotionError"
         $rollbackErrors = New-Object System.Collections.ArrayList
         foreach ($lostMsg in $lostSources) { [void]$rollbackErrors.Add($lostMsg) }
         foreach ($invalidMsg in $invalidBackups) { [void]$rollbackErrors.Add($invalidMsg) }
 
+        $activeProgressLabel='Promotion rollback'; $activeProgressPhase='Repairing'; $activeProgressCurrent=0; $activeProgressTotal=$promoted.Count + $movedAside.Count
         foreach ($name in $promoted) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $destPath = Join-Path $DestDir $name
             try {
                 if (Test-Path -LiteralPath $destPath) { Remove-Item -LiteralPath $destPath -Force -ErrorAction Stop }
@@ -4203,6 +4478,8 @@ function Invoke-TpmTransactionalPromote {
             }
         }
         foreach ($name in $movedAside) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $bakPath  = Join-Path $rollbackDir $name
             $destPath = Join-Path $DestDir $name
             try {
@@ -4217,9 +4494,11 @@ function Invoke-TpmTransactionalPromote {
                 [void]$rollbackErrors.Add("restore '$destPath' -- $_")
             }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
         if (-not $destDirExisted) {
             try {
-                if ((Test-Path -LiteralPath $DestDir) -and (@(Get-ChildItem -LiteralPath $DestDir -Force -ErrorAction SilentlyContinue).Count -eq 0)) {
+                if ((Test-Path -LiteralPath $DestDir) -and -not (@(Get-ChildItem -LiteralPath $DestDir -Force -ErrorAction SilentlyContinue | Select-Object -First 1).Count -gt 0)) {
                     Remove-Item -LiteralPath $DestDir -Force -ErrorAction Stop
                 }
             } catch {
@@ -4227,9 +4506,12 @@ function Invoke-TpmTransactionalPromote {
                 [void]$rollbackErrors.Add("remove newly-created destination directory '$DestDir' -- $_")
             }
         }
+        $activeProgressLabel='Promotion rollback directories'; $activeProgressCurrent=0; $activeProgressTotal=$createdDirectories.Count
         foreach ($createdDir in @($createdDirectories | Sort-Object Length -Descending)) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             try {
-                if ((Test-Path -LiteralPath $createdDir -PathType Container) -and (@(Get-ChildItem -LiteralPath $createdDir -Force -ErrorAction SilentlyContinue).Count -eq 0)) {
+                if ((Test-Path -LiteralPath $createdDir -PathType Container) -and -not (Test-ExtractedFolderHasContent -Path $createdDir)) {
                     Remove-Item -LiteralPath $createdDir -Force -ErrorAction Stop
                 }
             } catch {
@@ -4237,6 +4519,8 @@ function Invoke-TpmTransactionalPromote {
                 [void]$rollbackErrors.Add("remove newly-created directory '$createdDir' -- $_")
             }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
         if ($rollbackErrors.Count -gt 0) {
             $rollbackMsg = "TPM TRANSACTION ROLLBACK FAILED for '$DestDir' -- destination state may be INCONSISTENT and requires manual inspection. Backups (if any) preserved at '$rollbackDir'. Original error: $promotionError | Rollback failure(s): $($rollbackErrors -join ' ;; ')"
             Write-Log "Invoke-TpmTransactionalPromote: $rollbackMsg"
@@ -4384,6 +4668,8 @@ function Get-TpmDirectoryManifest {
         return [pscustomobject]$result
     }
 
+    $manifestStarted = Get-Date
+    $manifestCurrent = 0
     try {
         if (-not (Test-TpmNoReparsePath -Path $canonical)) {
             throw "Directory manifest path contains a reparse point: $canonical"
@@ -4399,6 +4685,8 @@ function Get-TpmDirectoryManifest {
             $cursorLong = ConvertTo-TpmAutoSyncLongPath -Path $cursor.FullPath
             $cursorInfo = New-Object System.IO.DirectoryInfo($cursorLong)
             foreach ($child in $cursorInfo.EnumerateFileSystemInfos()) {
+                $manifestCurrent++
+                Write-TpmCompactExtractionProgress -Phase 'Scanning' -Label 'AutoSync directory manifest' -Current $manifestCurrent -Total 0 -StartedAt $manifestStarted
                 if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
                     throw "Directory manifest refused a reparse entry: $($child.FullName)"
                 }
@@ -4444,6 +4732,8 @@ function Get-TpmDirectoryManifest {
     } catch {
         $result.Readable = $false
         $result.Error = $_.Exception.Message
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase 'Scanning' -Label 'AutoSync directory manifest' -Current $manifestCurrent -Total 0 -StartedAt $manifestStarted -Complete
     }
     return [pscustomobject]$result
 }
@@ -4488,11 +4778,16 @@ function Test-TpmDirectoryManifestMatch {
 
 function Get-TpmAutoSyncZipInventory {
     param([Parameter(Mandatory)][string]$ZipPath)
-    $archive = $null
+    $progressStarted = Get-Date
+    $progressCurrent = 0
+    $progressTotal = 0
     try {
         $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+        $progressTotal = $archive.Entries.Count
         $recordsByKey = @{}
         foreach ($entry in $archive.Entries) {
+            $progressCurrent++
+            Write-TpmCompactExtractionProgress -Phase 'Scanning' -Label 'AutoSync ZIP inventory' -Current $progressCurrent -Total $progressTotal -StartedAt $progressStarted
             $relative = $entry.FullName.Replace('/', '\').TrimStart('\')
             if ([string]::IsNullOrWhiteSpace($relative)) { continue }
             if ($relative -match '(^|\\)\.\.($|\\)' -or
@@ -4561,6 +4856,7 @@ function Get-TpmAutoSyncZipInventory {
             TotalBytes = $totalBytes
         }
     } finally {
+        Write-TpmCompactExtractionProgress -Phase 'Scanning' -Label 'AutoSync ZIP inventory' -Current $progressCurrent -Total $progressTotal -StartedAt $progressStarted -Complete
         if ($archive) { $archive.Dispose() }
     }
 }
@@ -4572,24 +4868,46 @@ function Test-TpmDirectoryAgainstZipInventory {
     )
     if (-not $Manifest.Readable -or -not $Manifest.Exists -or -not $Manifest.IsDirectory) { return $false }
     $expected = @{}
-    foreach ($entry in @($Inventory.Entries)) {
-        $expected[([string]$entry.RelativePath).ToLowerInvariant()] = $entry
-    }
     $actual = @{}
-    foreach ($entry in @($Manifest.Items)) {
-        $actual[([string]$entry.RelativePath).ToLowerInvariant()] = $entry
+    $inventoryEntries = @($Inventory.Entries)
+    $manifestItems = @($Manifest.Items)
+    $indexTotal = $inventoryEntries.Count + $manifestItems.Count
+    $indexCurrent = 0
+    $indexStarted = Get-Date
+    try {
+        foreach ($entry in $inventoryEntries) {
+            $expected[([string]$entry.RelativePath).ToLowerInvariant()] = $entry
+            $indexCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'AutoSync ZIP/directory inventory indexing' -Current $indexCurrent -Total $indexTotal -StartedAt $indexStarted
+        }
+        foreach ($entry in $manifestItems) {
+            $actual[([string]$entry.RelativePath).ToLowerInvariant()] = $entry
+            $indexCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'AutoSync ZIP/directory inventory indexing' -Current $indexCurrent -Total $indexTotal -StartedAt $indexStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'AutoSync ZIP/directory inventory indexing' -Current $indexCurrent -Total $indexTotal -StartedAt $indexStarted -Complete
     }
     if ($expected.Count -ne $actual.Count) { return $false }
-    foreach ($key in $expected.Keys) {
-        if (-not $actual.ContainsKey($key)) { return $false }
-        $left = $expected[$key]
-        $right = $actual[$key]
-        if ([bool]$left.IsDirectory -ne [bool]$right.IsDirectory) { return $false }
-        if (-not $left.IsDirectory -and
-            ([int64]$left.Length -ne [int64]$right.Length -or
-             [string]$left.Sha256 -ine [string]$right.Sha256)) { return $false }
+    $compareCurrent = 0
+    $compareTotal = $expected.Count
+    $compareStarted = Get-Date
+    try {
+        foreach ($key in $expected.Keys) {
+            $compareCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'AutoSync ZIP/directory inventory comparison' -Current $compareCurrent -Total $compareTotal -StartedAt $compareStarted
+            if (-not $actual.ContainsKey($key)) { return $false }
+            $left = $expected[$key]
+            $right = $actual[$key]
+            if ([bool]$left.IsDirectory -ne [bool]$right.IsDirectory) { return $false }
+            if (-not $left.IsDirectory -and
+                ([int64]$left.Length -ne [int64]$right.Length -or
+                 [string]$left.Sha256 -ine [string]$right.Sha256)) { return $false }
+        }
+        return $true
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'AutoSync ZIP/directory inventory comparison' -Current $compareCurrent -Total $compareTotal -StartedAt $compareStarted -Complete
     }
-    return $true
 }
 
 function New-TpmAutoSyncTransactionRoot {
@@ -5133,10 +5451,18 @@ function Invoke-TpmTransactionalFileBatch {
     $requestedState = 'UNCHANGED'
     $requestedSummary = $Summary
     $requestedReason = $ReasonCode
+    $progressStarted=Get-Date
+    $activeProgressLabel=$null
+    $activeProgressPhase='Checking'
+    $activeProgressCurrent=0
+    $activeProgressTotal=0
 
     try {
+        $activeProgressLabel='File transaction preflight'; $activeProgressPhase='Checking'; $activeProgressCurrent=0; $activeProgressTotal=$operations.Count
         $seenIds = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
         foreach ($op in $operations) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $itemId = [string]$op.ItemId
             if ([string]::IsNullOrWhiteSpace($itemId) -or -not $seenIds.Add($itemId)) {
                 throw 'File transaction operation identifiers must be unique and nonblank.'
@@ -5189,8 +5515,13 @@ function Invoke-TpmTransactionalFileBatch {
             [void]$records.Add($record)
             [void]$preStateItems.Add([pscustomobject]@{ ItemId=$itemId; Path=$canonicalDestination; Exists=$pre.Exists; IsDirectory=$pre.IsDirectory; Length=$pre.Length; Sha256=$pre.Sha256; LastWriteTimeUtc=$pre.LastWriteTimeUtc; Attributes=$pre.Attributes })
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
         $metadataSeen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        $activeProgressLabel='File transaction metadata check'; $activeProgressPhase='Checking'; $activeProgressCurrent=0; $activeProgressTotal=@($MetadataPaths).Count
         foreach ($metadataPath in @($MetadataPaths)) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             if ([string]::IsNullOrWhiteSpace($metadataPath)) { continue }
             $canonicalMetadata = [System.IO.Path]::GetFullPath($metadataPath)
             if (-not $metadataSeen.Add($canonicalMetadata)) { continue }
@@ -5204,6 +5535,8 @@ function Invoke-TpmTransactionalFileBatch {
             [void]$metadataRecords.Add($metadataRecord)
             [void]$preStateItems.Add([pscustomobject]@{ ItemId=('metadata:' + [System.IO.Path]::GetFileName($canonicalMetadata)); Path=$canonicalMetadata; Exists=$metadataPre.Exists; IsDirectory=$metadataPre.IsDirectory; Length=$metadataPre.Length; Sha256=$metadataPre.Sha256; LastWriteTimeUtc=$metadataPre.LastWriteTimeUtc; Attributes=$metadataPre.Attributes })
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
         $preStateCaptured = $true
         $technical.TransactionId = [guid]::NewGuid().ToString('N')
         $hasCommit = ($null -ne $CommitAction)
@@ -5246,7 +5579,11 @@ function Invoke-TpmTransactionalFileBatch {
         $rollbackRoot = Join-Path $transactionRoot '.tpm-file-rollback'
         [void][System.IO.Directory]::CreateDirectory($payloadRoot)
         [void][System.IO.Directory]::CreateDirectory($rollbackRoot)
-        foreach ($record in @($records | Where-Object { $_.Operation -in @('ADD','REPLACE') })) {
+        $stageRecords=@($records | Where-Object { $_.Operation -in @('ADD','REPLACE') })
+        $activeProgressLabel='File transaction staging'; $activeProgressPhase='Extracting'; $activeProgressCurrent=0; $activeProgressTotal=$stageRecords.Count
+        foreach ($record in $stageRecords) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $stagePath = Join-Path $payloadRoot (($records.IndexOf($record)).ToString('0000') + '.payload')
             Copy-Item -LiteralPath $record.SourcePath -Destination $stagePath -Force -ErrorAction Stop
             $stagedState = Get-TpmFileState -Path $stagePath
@@ -5255,10 +5592,16 @@ function Invoke-TpmTransactionalFileBatch {
             }
             $record.StagePath = $stagePath
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
 
         $technical.Stage = 'Backup'
         $backupAttempted = $true
-        foreach ($record in @($records | Where-Object { $_.PreState.Exists })) {
+        $backupRecords=@($records | Where-Object { $_.PreState.Exists })
+        $activeProgressLabel='File transaction backup'; $activeProgressPhase='Repairing'; $activeProgressCurrent=0; $activeProgressTotal=$backupRecords.Count
+        foreach ($record in $backupRecords) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $backupPath = Join-Path $rollbackRoot (($records.IndexOf($record)).ToString('0000') + '.backup')
             Copy-Item -LiteralPath $record.DestinationPath -Destination $backupPath -Force -ErrorAction Stop
             $backupState = Get-TpmFileState -Path $backupPath
@@ -5271,7 +5614,13 @@ function Invoke-TpmTransactionalFileBatch {
             $record.BackupMade = $true
             [void]$backupItems.Add([pscustomobject]@{ ItemId=$record.ItemId; Path=$record.DestinationPath; BackupPath=$backupPath; Sha256=$record.PreState.Sha256 })
         }
-        foreach ($metadataRecord in $metadataRecords | Where-Object { $_.PreState.Exists }) {
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
+        $metadataBackupRecords=@($metadataRecords | Where-Object { $_.PreState.Exists })
+        $activeProgressLabel='File transaction metadata backup'; $activeProgressPhase='Repairing'; $activeProgressCurrent=0; $activeProgressTotal=$metadataBackupRecords.Count
+        foreach ($metadataRecord in $metadataBackupRecords) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $metadataBackup = Join-Path $rollbackRoot ('metadata-' + $metadataRecords.IndexOf($metadataRecord).ToString('0000') + '.backup')
             Copy-Item -LiteralPath $metadataRecord.Path -Destination $metadataBackup -Force -ErrorAction Stop
             $metadataBackupState = Get-TpmFileState -Path $metadataBackup
@@ -5284,11 +5633,16 @@ function Invoke-TpmTransactionalFileBatch {
             $metadataRecord.BackupMade = $true
             [void]$backupItems.Add([pscustomobject]@{ ItemId=('metadata:' + [System.IO.Path]::GetFileName($metadataRecord.Path)); Path=$metadataRecord.Path; BackupPath=$metadataBackup; Sha256=$metadataRecord.PreState.Sha256 })
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
         $backupCreated = $true
         $backupVerified = $true
 
         $technical.Stage = 'MutationBoundary'
+        $activeProgressLabel='File transaction preflight'; $activeProgressPhase='Checking'; $activeProgressCurrent=0; $activeProgressTotal=$records.Count
         foreach ($record in $records) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $current = Get-TpmFileState -Path $record.DestinationPath
             if (-not (Test-TpmFileStateMatch -Expected $record.PreState -Actual $current)) {
                 throw "File transaction destination changed before promotion: $($record.DestinationPath)"
@@ -5300,15 +5654,25 @@ function Invoke-TpmTransactionalFileBatch {
                 }
             }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
+        $activeProgressLabel='File transaction preflight metadata'; $activeProgressPhase='Checking'; $activeProgressCurrent=0; $activeProgressTotal=$metadataRecords.Count
         foreach ($metadataRecord in $metadataRecords) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $metadataNow = Get-TpmFileState -Path $metadataRecord.Path
             if (-not (Test-TpmFileStateMatch -Expected $metadataRecord.PreState -Actual $metadataNow)) {
                 throw "File transaction metadata changed before promotion: $($metadataRecord.Path)"
             }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
 
         $technical.Stage = 'Promotion'
+        $activeProgressLabel='File transaction promotion'; $activeProgressPhase='Repairing'; $activeProgressCurrent=0; $activeProgressTotal=$records.Count
         foreach ($record in $records) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             if ($record.Operation -eq 'PRESERVE') {
                 [void]$skippedItems.Add($record.ItemId)
                 continue
@@ -5360,6 +5724,8 @@ function Invoke-TpmTransactionalFileBatch {
             }
             [void]$completedItems.Add($record.ItemId)
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
 
         if ($CommitAction) {
             $technical.Stage = 'MetadataCommit'
@@ -5369,7 +5735,10 @@ function Invoke-TpmTransactionalFileBatch {
 
         $technical.Stage = 'FinalVerification'
         $finalAttempted = $true
+        $activeProgressLabel='File transaction verification'; $activeProgressPhase='Checking'; $activeProgressCurrent=0; $activeProgressTotal=$records.Count
         foreach ($record in $records) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $actual = Get-TpmFileState -Path $record.DestinationPath
             $valid = $false
             if ($record.Operation -eq 'PRESERVE') {
@@ -5382,7 +5751,12 @@ function Invoke-TpmTransactionalFileBatch {
             if ($valid) { [void]$finalChecks.Add(("Verified {0}." -f $record.ItemId)) }
             else { [void]$finalFailedItems.Add($record.ItemId); throw "File transaction final verification failed for '$($record.ItemId)'." }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
+        $activeProgressLabel='File transaction verification metadata'; $activeProgressPhase='Checking'; $activeProgressCurrent=0; $activeProgressTotal=$metadataRecords.Count
         foreach ($metadataRecord in $metadataRecords) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             if ($PostCommitVerification) { continue }
             $metadataActual = Get-TpmFileState -Path $metadataRecord.Path
             if (-not (Test-TpmFileStateMatch -Expected $metadataRecord.PreState -Actual $metadataActual)) {
@@ -5391,6 +5765,8 @@ function Invoke-TpmTransactionalFileBatch {
             }
             [void]$finalChecks.Add(("Verified unchanged metadata {0}." -f $metadataRecord.Path))
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
         if ($PostCommitVerification) {
             & $PostCommitVerification
             [void]$finalChecks.Add('Metadata commit callback verification passed.')
@@ -5401,14 +5777,22 @@ function Invoke-TpmTransactionalFileBatch {
         $requestedState = 'INTENDED'
         $requestedSummary = $SuccessSummary
         $requestedReason = 'COMPLETED'
+        if ($activeProgressLabel) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
     } catch {
+        if ($activeProgressLabel) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel=$null
         $failure = $_
         $technical.Error = [string]$_.Exception.Message
         if ($backupFailureStage) { $technical.Stage = $backupFailureStage }
         if ($mutationStarted -or $commitAttempted) {
             $rollbackAttempted = $true
             $technical.Stage = 'Rollback'
-            foreach ($record in @($records | Where-Object { $_.Changed }) | Sort-Object { $records.IndexOf($_) } -Descending) {
+            $rollbackRecords=@(@($records | Where-Object { $_.Changed }) | Sort-Object { $records.IndexOf($_) } -Descending)
+            $activeProgressLabel='File transaction rollback'; $activeProgressPhase='Repairing'; $activeProgressCurrent=0; $activeProgressTotal=$rollbackRecords.Count
+            foreach ($record in $rollbackRecords) {
+                $activeProgressCurrent++
+                Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
                 try {
                     $current = Get-TpmFileState -Path $record.DestinationPath
                     if ($record.ExpectedFinalHash -and $current.Exists -and $current.Sha256 -ine $record.ExpectedFinalHash) {
@@ -5428,8 +5812,13 @@ function Invoke-TpmTransactionalFileBatch {
                     [void]$rollbackErrors.Add(("{0}: {1}" -f $record.ItemId,$_.Exception.Message))
                 }
             }
+            if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+            $activeProgressLabel=$null
             if ($commitAttempted) {
+                $activeProgressLabel='File transaction rollback metadata'; $activeProgressPhase='Repairing'; $activeProgressCurrent=0; $activeProgressTotal=$metadataRecords.Count
                 foreach ($metadataRecord in $metadataRecords) {
+                    $activeProgressCurrent++
+                    Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
                     try {
                         $currentMetadata = Get-TpmFileState -Path $metadataRecord.Path
                         if ($currentMetadata.Exists) { Remove-Item -LiteralPath $metadataRecord.Path -Force -ErrorAction Stop }
@@ -5446,11 +5835,17 @@ function Invoke-TpmTransactionalFileBatch {
                         [void]$rollbackErrors.Add(("metadata:{0}: {1}" -f [System.IO.Path]::GetFileName($metadataRecord.Path),$_.Exception.Message))
                     }
                 }
+                if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+                $activeProgressLabel=$null
             }
-            foreach ($createdDir in @($createdDirectories | Sort-Object Length -Descending)) {
+            $rollbackDirectoryEntries=@($createdDirectories | Sort-Object Length -Descending)
+            $activeProgressLabel='File transaction rollback directories'; $activeProgressPhase='Repairing'; $activeProgressCurrent=0; $activeProgressTotal=$rollbackDirectoryEntries.Count
+            foreach ($createdDir in $rollbackDirectoryEntries) {
+                $activeProgressCurrent++
+                Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
                 try {
                     if ((Test-Path -LiteralPath $createdDir -PathType Container) -and
-                        (@(Get-ChildItem -LiteralPath $createdDir -Force -ErrorAction SilentlyContinue).Count -eq 0)) {
+                        -not (Test-ExtractedFolderHasContent -Path $createdDir)) {
                         Remove-Item -LiteralPath $createdDir -Force -ErrorAction Stop
                     }
                 } catch {
@@ -5458,6 +5853,8 @@ function Invoke-TpmTransactionalFileBatch {
                     [void]$rollbackErrors.Add(("directory:{0}: {1}" -f $createdDir,$_.Exception.Message))
                 }
             }
+            if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+            $activeProgressLabel=$null
             $rollbackCompleted = ($rollbackErrors.Count -eq 0)
             $rollbackVerified = $rollbackCompleted
             if ($rollbackVerified) {
@@ -5777,7 +6174,7 @@ function Find-TeknoParrotRoot {
 function Ensure-TeknoParrotProfilesReady {
     param([Parameter(Mandatory)][string]$TeknoParrotRoot, [Parameter(Mandatory)][string]$TeknoParrotExe)
     $profilesDir = Join-Path $TeknoParrotRoot 'GameProfiles'
-    while (@(Get-ChildItem -LiteralPath $profilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue).Count -eq 0) {
+    while (@(Get-ChildItem -LiteralPath $profilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Select-Object -First 1).Count -eq 0) {
         Write-Host ''
         Write-Host '  TeknoParrot Manager needs TeknoParrot to finish its first setup so it can recognize your games.' -ForegroundColor Yellow
         Write-Host '  TeknoParrot Manager will open TeknoParrot now. It will not edit TeknoParrot settings or controls.' -ForegroundColor DarkGray
@@ -5794,7 +6191,7 @@ function Ensure-TeknoParrotProfilesReady {
         Write-Host '  Waiting for TeknoParrot to finish downloading its game profiles...' -ForegroundColor Cyan
         $deadline = (Get-Date).ToUniversalTime().AddSeconds(120)
         while ((Get-Date).ToUniversalTime() -lt $deadline) {
-            if (@(Get-ChildItem -LiteralPath $profilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue).Count -gt 0) {
+            if (@(Get-ChildItem -LiteralPath $profilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Select-Object -First 1).Count -gt 0) {
                 Write-Host '  TeknoParrot profiles are ready. TeknoParrot Manager is continuing.' -ForegroundColor Green
                 return $true
             }
@@ -6165,6 +6562,77 @@ function Expand-NumberList {
 #   $null   -- D pressed with no games selected (skip extraction)
 #   @()     -- A pressed; no filter (extract all)
 #   @(...)  -- explicit whitelist of ZIP BaseName strings
+function Get-TpmImmediateZipSubdirectorySummary {
+    param([Parameter(Mandatory)][string]$ZipSource)
+    $directoryCandidates = New-Object System.Collections.Generic.List[object]
+    $directoryDiscoveryStarted = Get-Date
+    $directoryDiscoveryCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Scanning -Label 'ZIP source subfolder discovery' -Current $directoryDiscoveryCurrent -Total 0 -StartedAt $directoryDiscoveryStarted
+    try {
+        Get-ChildItem -LiteralPath $ZipSource -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            [void]$directoryCandidates.Add($_)
+            $directoryDiscoveryCurrent++
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'ZIP source subfolder discovery' -Current $directoryDiscoveryCurrent -Total 0 -StartedAt $directoryDiscoveryStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'ZIP source subfolder discovery' -Current $directoryDiscoveryCurrent -Total 0 -StartedAt $directoryDiscoveryStarted -Complete
+    }
+    $directories = $directoryCandidates
+    $started = Get-Date
+    $current = 0
+    $hits = New-Object System.Collections.Generic.List[object]
+    try {
+        foreach ($directory in $directories) {
+            $current++
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'ZIP source subfolder scan' -Current $current -Total $directories.Count -StartedAt $started
+            $count = 0
+            $zipDiscoveryStarted = Get-Date
+            $zipDiscoveryCurrent = 0
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'ZIP source subfolder ZIP discovery' -Current $zipDiscoveryCurrent -Total 0 -StartedAt $zipDiscoveryStarted
+            try {
+                Get-ChildItem -LiteralPath $directory.FullName -Filter '*.zip' -ErrorAction SilentlyContinue | ForEach-Object {
+                    $count++
+                    $zipDiscoveryCurrent++
+                    Write-TpmCompactExtractionProgress -Phase Scanning -Label 'ZIP source subfolder ZIP discovery' -Current $zipDiscoveryCurrent -Total 0 -StartedAt $zipDiscoveryStarted
+                }
+            } finally {
+                Write-TpmCompactExtractionProgress -Phase Scanning -Label 'ZIP source subfolder ZIP discovery' -Current $zipDiscoveryCurrent -Total 0 -StartedAt $zipDiscoveryStarted -Complete
+            }
+            if ($count -gt 0) { [void]$hits.Add([pscustomobject]@{ Path=$directory.FullName; Count=$count }) }
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'ZIP source subfolder scan' -Current $current -Total $directories.Count -StartedAt $started -Complete
+    }
+    return $hits.ToArray()
+}
+
+function Get-TpmTopLevelZipSourceFiles {
+    param(
+        [Parameter(Mandatory)][string]$ZipSource,
+        [Parameter(Mandatory)][string]$ProgressLabel,
+        [switch]$ExcludeCollectionArchives,
+        [switch]$SortByBaseName
+    )
+    $fileCandidates = New-Object System.Collections.Generic.List[object]
+    $started = Get-Date
+    $current = 0
+    Write-TpmCompactExtractionProgress -Phase Scanning -Label $ProgressLabel -Current $current -Total 0 -StartedAt $started
+    try {
+        Get-ChildItem -LiteralPath $ZipSource -Filter *.zip -ErrorAction SilentlyContinue | ForEach-Object {
+            $current++
+            if (-not $ExcludeCollectionArchives -or $_.BaseName -notlike '!TeknoParrot Collection*') {
+                [void]$fileCandidates.Add($_)
+            }
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label $ProgressLabel -Current $current -Total 0 -StartedAt $started
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label $ProgressLabel -Current $current -Total 0 -StartedAt $started -Complete
+    }
+    $files = $fileCandidates.ToArray()
+    if ($SortByBaseName) { $files = @($files | Sort-Object BaseName) }
+    return $files
+}
+
 function Select-GamesInteractive {
     param([string]$zipSource, [string]$installFolder, [hashtable]$datIndex = $null, [string]$userProfilesDir = '', [string[]]$AllowedNames = @())
 
@@ -6172,9 +6640,7 @@ function Select-GamesInteractive {
         Write-Log "Select-GamesInteractive: called with empty path -- skipping"
         return $null
     }
-    $all = @(Get-ChildItem -LiteralPath $zipSource -Filter *.zip -ErrorAction SilentlyContinue |
-                 Where-Object { $_.BaseName -notlike '!TeknoParrot Collection*' } |
-                 Sort-Object BaseName)
+    $all = @(Get-TpmTopLevelZipSourceFiles -ZipSource $zipSource -ProgressLabel 'AutoSync picker source ZIP discovery' -ExcludeCollectionArchives -SortByBaseName)
     $restrictedNames = @($AllowedNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_ ) })
     if ($restrictedNames.Count -gt 0) {
         $allowedNameSet = @{}
@@ -6190,10 +6656,7 @@ function Select-GamesInteractive {
 
     if ($all.Count -eq 0) {
         Write-Host "  No game ZIPs found in source folder." -ForegroundColor Yellow
-        $subdirHits = @(Get-ChildItem -LiteralPath $zipSource -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-            $c = (Get-ChildItem -LiteralPath $_.FullName -Filter *.zip -ErrorAction SilentlyContinue | Measure-Object).Count
-            if ($c -gt 0) { [PSCustomObject]@{ Path = $_.FullName; Count = $c } }
-        })
+        $subdirHits = @(Get-TpmImmediateZipSubdirectorySummary -ZipSource $zipSource)
         if ($subdirHits.Count -gt 0) {
             Write-Host "  Tip: ZIPs found one level down -- point the source path at one of these directly:" -ForegroundColor Cyan
             foreach ($sd in $subdirHits) {
@@ -6213,9 +6676,17 @@ function Select-GamesInteractive {
     # not-yet-extracted. The picker only shows the not-yet-extracted ones.
     $alreadyExtracted = @()
     $toExtract        = @()
-    foreach ($zip in $all) {
-        $existingPath = Resolve-ExtractedGameFolder -RawZipName $zip.BaseName -InstallFolder $installFolder -FolderMap $normalizedFolderMap -DatIndex $datIndex -UserProfilesDir $userProfilesDir
-        if ($existingPath) { $alreadyExtracted += $zip } else { $toExtract += $zip }
+    $classificationStarted = Get-Date
+    $classificationCurrent = 0
+    try {
+        foreach ($zip in $all) {
+            $classificationCurrent++
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'AutoSync ZIP classification' -Current $classificationCurrent -Total $all.Count -StartedAt $classificationStarted
+            $existingPath = Resolve-ExtractedGameFolder -RawZipName $zip.BaseName -InstallFolder $installFolder -FolderMap $normalizedFolderMap -DatIndex $datIndex -UserProfilesDir $userProfilesDir
+            if ($existingPath) { $alreadyExtracted += $zip } else { $toExtract += $zip }
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'source ZIPs' -Current $classificationCurrent -Total $all.Count -StartedAt $classificationStarted -Complete
     }
 
     Write-Host ""
@@ -6400,12 +6871,8 @@ function Select-GamesInteractiveCombined {
         Write-Log "Select-GamesInteractiveCombined: called with empty path -- skipping"
         return [PSCustomObject]@{ Main = $null; Supp = $null }
     }
-    $allMain = @(Get-ChildItem -LiteralPath $zipSourceMain -Filter *.zip -ErrorAction SilentlyContinue |
-                     Where-Object { $_.BaseName -notlike '!TeknoParrot Collection*' } |
-                     Sort-Object BaseName)
-    $allSupp = @(Get-ChildItem -LiteralPath $zipSourceSupp -Filter *.zip -ErrorAction SilentlyContinue |
-                     Where-Object { $_.BaseName -notlike '!TeknoParrot Collection*' } |
-                     Sort-Object BaseName)
+    $allMain = @(Get-TpmTopLevelZipSourceFiles -ZipSource $zipSourceMain -ProgressLabel 'AutoSync combined main ZIP discovery' -ExcludeCollectionArchives -SortByBaseName)
+    $allSupp = @(Get-TpmTopLevelZipSourceFiles -ZipSource $zipSourceSupp -ProgressLabel 'AutoSync combined supplementary ZIP discovery' -ExcludeCollectionArchives -SortByBaseName)
     $restrictedNames = @($AllowedNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_ ) })
     if ($restrictedNames.Count -gt 0) {
         $allowedNameSet = @{}
@@ -6426,16 +6893,26 @@ function Select-GamesInteractiveCombined {
     $sourceMap   = @{}
     $alreadyMain = 0; $alreadySupp = 0
     $toExtractMain = @(); $toExtractSupp = @()
-
-    foreach ($zip in $allMain) {
-        $existing = Resolve-ExtractedGameFolder -RawZipName $zip.BaseName -InstallFolder $installFolder -FolderMap $normalizedFolderMap -DatIndex $datIndex -UserProfilesDir $userProfilesDir
-        if ($existing) { $alreadyMain++ } else { $toExtractMain += $zip; $sourceMap[$zip.BaseName] = 'Main' }
-    }
-    # Supp iterates after Main -- if the same BaseName appears in both sources,
-    # 'Supp' overwrites 'Main' in $sourceMap (supplementary takes precedence).
-    foreach ($zip in $allSupp) {
-        $existing = Resolve-ExtractedGameFolder -RawZipName $zip.BaseName -InstallFolder $installFolder -FolderMap $normalizedFolderMap -DatIndex $datIndex -UserProfilesDir $userProfilesDir
-        if ($existing) { $alreadySupp++ } else { $toExtractSupp += $zip; $sourceMap[$zip.BaseName] = 'Supp' }
+    $classificationTotal = $allMain.Count + $allSupp.Count
+    $classificationCurrent = 0
+    $classificationStarted = Get-Date
+    try {
+        foreach ($zip in $allMain) {
+            $classificationCurrent++
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'AutoSync main ZIP classification' -Current $classificationCurrent -Total $classificationTotal -StartedAt $classificationStarted
+            $existing = Resolve-ExtractedGameFolder -RawZipName $zip.BaseName -InstallFolder $installFolder -FolderMap $normalizedFolderMap -DatIndex $datIndex -UserProfilesDir $userProfilesDir
+            if ($existing) { $alreadyMain++ } else { $toExtractMain += $zip; $sourceMap[$zip.BaseName] = 'Main' }
+        }
+        # Supp iterates after Main -- if the same BaseName appears in both sources,
+        # 'Supp' overwrites 'Main' in $sourceMap (supplementary takes precedence).
+        foreach ($zip in $allSupp) {
+            $classificationCurrent++
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'AutoSync supplementary ZIP classification' -Current $classificationCurrent -Total $classificationTotal -StartedAt $classificationStarted
+            $existing = Resolve-ExtractedGameFolder -RawZipName $zip.BaseName -InstallFolder $installFolder -FolderMap $normalizedFolderMap -DatIndex $datIndex -UserProfilesDir $userProfilesDir
+            if ($existing) { $alreadySupp++ } else { $toExtractSupp += $zip; $sourceMap[$zip.BaseName] = 'Supp' }
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'source ZIPs' -Current $classificationCurrent -Total $classificationTotal -StartedAt $classificationStarted -Complete
     }
 
     $all = @($toExtractMain + $toExtractSupp | Sort-Object BaseName)
@@ -6846,9 +7323,20 @@ function Select-RegisteredGamesInteractive {
     param([string]$UserProfilesDir, [System.IO.FileInfo[]]$Profiles = $null)
     $fullBackupDir = Join-Path $UserProfilesDir "FullBackup"
     if ($null -eq $Profiles) {
-        $Profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-                      Where-Object { $_.DirectoryName -ne $fullBackupDir } |
-                      Sort-Object BaseName)
+        $profileCandidates = New-Object System.Collections.Generic.List[object]
+        $profileDiscoveryStarted = Get-Date
+        $profileDiscoveryCurrent = 0
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Registered-game picker profile discovery' -Current $profileDiscoveryCurrent -Total 0 -StartedAt $profileDiscoveryStarted
+        try {
+            Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue | ForEach-Object {
+                $profileDiscoveryCurrent++
+                if ($_.DirectoryName -ne $fullBackupDir) { [void]$profileCandidates.Add($_) }
+                Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Registered-game picker profile discovery' -Current $profileDiscoveryCurrent -Total 0 -StartedAt $profileDiscoveryStarted
+            }
+        } finally {
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Registered-game picker profile discovery' -Current $profileDiscoveryCurrent -Total 0 -StartedAt $profileDiscoveryStarted -Complete
+        }
+        $Profiles = @($profileCandidates.ToArray() | Sort-Object BaseName)
     } else {
         $Profiles = @($Profiles | Where-Object { $_ -and $_.DirectoryName -ne $fullBackupDir } | Sort-Object BaseName)
     }
@@ -6899,9 +7387,20 @@ function Select-RegisteredGamesInteractive {
 function Select-DgVoodoo2GamesInteractive {
     param([string]$UserProfilesDir)
     $fullBackupDir = Join-Path $UserProfilesDir "FullBackup"
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-                  Where-Object { $_.DirectoryName -ne $fullBackupDir } |
-                  Sort-Object BaseName)
+    $profileCandidates = New-Object System.Collections.Generic.List[object]
+    $profileDiscoveryStarted = Get-Date
+    $profileDiscoveryCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Scanning -Label 'dgVoodoo2 picker profile discovery' -Current $profileDiscoveryCurrent -Total 0 -StartedAt $profileDiscoveryStarted
+    try {
+        Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue | ForEach-Object {
+            $profileDiscoveryCurrent++
+            if ($_.DirectoryName -ne $fullBackupDir) { [void]$profileCandidates.Add($_) }
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'dgVoodoo2 picker profile discovery' -Current $profileDiscoveryCurrent -Total 0 -StartedAt $profileDiscoveryStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'dgVoodoo2 picker profile discovery' -Current $profileDiscoveryCurrent -Total 0 -StartedAt $profileDiscoveryStarted -Complete
+    }
+    $profiles = @($profileCandidates.ToArray() | Sort-Object BaseName)
     if ($profiles.Count -eq 0) { return ,@() }
     $pageSize = 20
     $pages = [Math]::Ceiling($profiles.Count / $pageSize)
@@ -7154,11 +7653,27 @@ function Expand-ReShadeSelfExtractingArchive {
     $allBytes = [System.IO.File]::ReadAllBytes($SetupExePath)
     $pkSig    = [byte[]](0x50, 0x4B, 0x03, 0x04)   # "PK\x03\x04"
     $offsets  = New-Object System.Collections.Generic.List[int]
-    for ($i = 0; $i -le ($allBytes.Length - $pkSig.Length); $i++) {
-        if ($allBytes[$i] -eq $pkSig[0] -and $allBytes[$i + 1] -eq $pkSig[1] -and
-            $allBytes[$i + 2] -eq $pkSig[2] -and $allBytes[$i + 3] -eq $pkSig[3]) {
-            [void]$offsets.Add($i)
+    $signatureScanTotal = [Math]::Max(0, $allBytes.Length - $pkSig.Length + 1)
+    $signatureScanCurrent = 0
+    $signatureScanCompleted = $false
+    $signatureScanNextReport = 0
+    $signatureScanStarted = Get-Date
+    try {
+        for ($i = 0; $i -lt $signatureScanTotal; $i++) {
+            if ($i -ge $signatureScanNextReport) {
+                $signatureScanCurrent = $i + 1
+                Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade installer signature scan' -Current $signatureScanCurrent -Total $signatureScanTotal -StartedAt $signatureScanStarted
+                $signatureScanNextReport = $i + 1048576
+            }
+            if ($allBytes[$i] -eq $pkSig[0] -and $allBytes[$i + 1] -eq $pkSig[1] -and
+                $allBytes[$i + 2] -eq $pkSig[2] -and $allBytes[$i + 3] -eq $pkSig[3]) {
+                [void]$offsets.Add($i)
+            }
         }
+        $signatureScanCompleted = $true
+    } finally {
+        if ($signatureScanCompleted) { $signatureScanCurrent = $signatureScanTotal }
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade installer signature scan' -Current $signatureScanCurrent -Total $signatureScanTotal -StartedAt $signatureScanStarted -Complete
     }
     if ($offsets.Count -eq 0) {
         throw "ReShade installer: no embedded ZIP archive found (PK signature not present) -- format may have changed."
@@ -7181,37 +7696,59 @@ function Expand-ReShadeSelfExtractingArchive {
         # contains both required entries -- narrowly scoped to "the
         # confirmed real archive," not a generic best-effort parse.
         $extracted = $false
-        foreach ($offset in $offsets) {
-            $zipBytes = New-Object byte[] ($allBytes.Length - $offset)
-            [System.Array]::Copy($allBytes, $offset, $zipBytes, 0, $zipBytes.Length)
-            $ms      = New-Object System.IO.MemoryStream(, $zipBytes)
-            $archive = $null
-            try {
-                $archive = [System.IO.Compression.ZipArchive]::new($ms, [System.IO.Compression.ZipArchiveMode]::Read)
-                $entries = @{}
-                foreach ($e in $archive.Entries) { $entries[$e.Name] = $e }
-                $missing = @($required | Where-Object { -not $entries.ContainsKey($_) })
-                if ($missing.Count -gt 0) { continue }
-
-                # This candidate is the confirmed real archive -- copy both
-                # entries into the STAGING directory only, entirely inside
-                # this loop iteration, so nothing here is ever used after
-                # disposal. $DestDir is not touched at all in this phase.
-                foreach ($name in $required) {
-                    $stagePath = Join-Path $stagingDir $name
-                    if (-not (Test-PathInside $stagePath $stagingDir)) {
-                        throw "SECURITY: refused to stage ReShade entry outside staging folder ($name)."
+        $candidateStarted = Get-Date
+        $candidateCurrent = 0
+        try {
+            foreach ($offset in $offsets) {
+                $candidateCurrent++
+                Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade embedded archive candidates' -Current $candidateCurrent -Total $offsets.Count -StartedAt $candidateStarted
+                $zipBytes = New-Object byte[] ($allBytes.Length - $offset)
+                [System.Array]::Copy($allBytes, $offset, $zipBytes, 0, $zipBytes.Length)
+                $ms      = New-Object System.IO.MemoryStream(, $zipBytes)
+                $archive = $null
+                try {
+                    $archive = [System.IO.Compression.ZipArchive]::new($ms, [System.IO.Compression.ZipArchiveMode]::Read)
+                    $entries = @{}
+                    $candidateEntries = $null
+                    $entryTotal = 0
+                    $entryCurrent = 0
+                    $entryStarted = Get-Date
+                    try {
+                        $candidateEntries = $archive.Entries
+                        $entryTotal = $candidateEntries.Count
+                        foreach ($e in $candidateEntries) {
+                            $entryCurrent++
+                            Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade embedded archive entry scan' -Current $entryCurrent -Total $entryTotal -StartedAt $entryStarted
+                            $entries[$e.Name] = $e
+                        }
+                    } finally {
+                        Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade embedded archive entry scan' -Current $entryCurrent -Total $entryTotal -StartedAt $entryStarted -Complete
                     }
-                    Copy-TpmZipEntryToFile -Entry $entries[$name] -DestPath $stagePath
+                    $missing = @($required | Where-Object { -not $entries.ContainsKey($_) })
+                    if ($missing.Count -gt 0) { continue }
+
+                    # This candidate is the confirmed real archive -- copy both
+                    # entries into the STAGING directory only, entirely inside
+                    # this loop iteration, so nothing here is ever used after
+                    # disposal. $DestDir is not touched at all in this phase.
+                    foreach ($name in $required) {
+                        $stagePath = Join-Path $stagingDir $name
+                        if (-not (Test-PathInside $stagePath $stagingDir)) {
+                            throw "SECURITY: refused to stage ReShade entry outside staging folder ($name)."
+                        }
+                        Copy-TpmZipEntryToFile -Entry $entries[$name] -DestPath $stagePath
+                    }
+                    $extracted = $true
+                } catch [System.IO.InvalidDataException] {
+                    # Not a valid archive at this offset -- try the next candidate.
+                } finally {
+                    if ($archive) { $archive.Dispose() }
+                    $ms.Dispose()
                 }
-                $extracted = $true
-            } catch [System.IO.InvalidDataException] {
-                # Not a valid archive at this offset -- try the next candidate.
-            } finally {
-                if ($archive) { $archive.Dispose() }
-                $ms.Dispose()
+                if ($extracted) { break }
             }
-            if ($extracted) { break }
+        } finally {
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade embedded archive candidates' -Current $candidateCurrent -Total $offsets.Count -StartedAt $candidateStarted -Complete
         }
         if (-not $extracted) {
             throw "ReShade installer: expected entries (ReShade32.dll, ReShade64.dll) not found in any embedded archive candidate -- format may have changed."
@@ -7332,6 +7869,62 @@ function Get-TpmReShadeProfiles {
             CompatibleWith = @(); ConflictsWith = @('CRT_Lottes'); OrderConstraints = @('LumaSharpen before Vibrance')
             FallbackProfileId = 'CleanSharp'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
         }
+        [pscustomobject]@{
+            ProfileId = 'Cartoon'; FriendlyName = 'Cartoon'; Description = 'Bold edges and fewer colors for a poster-style arcade look.'
+            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Cartoon'); RequiredEffects = @('Cartoon.fx')
+            TechniqueOrder = @('Cartoon'); Parameters = @{}; PerformanceClass = 'MEDIUM'
+            ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'
+            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
+            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+        }
+        [pscustomobject]@{
+            ProfileId = 'ContrastCurves'; FriendlyName = 'Contrast Curves'; Description = 'Add contrast through the middle tones.'
+            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Curves'); RequiredEffects = @('Curves.fx')
+            TechniqueOrder = @('Curves'); Parameters = @{}; PerformanceClass = 'MEDIUM'
+            ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
+            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
+            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+        }
+        [pscustomobject]@{
+            ProfileId = 'FilmGrain'; FriendlyName = 'Film Grain'; Description = 'Add a subtle grain-like texture.'
+            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.FilmGrain'); RequiredEffects = @('FilmGrain.fx')
+            TechniqueOrder = @('FilmGrain'); Parameters = @{}; PerformanceClass = 'HIGH'
+            ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
+            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
+            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+        }
+        [pscustomobject]@{
+            ProfileId = 'Levels'; FriendlyName = 'Levels'; Description = 'Expand the dark and bright ends of the image.'
+            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Levels'); RequiredEffects = @('Levels.fx')
+            TechniqueOrder = @('Levels'); Parameters = @{}; PerformanceClass = 'LOW'
+            ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
+            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
+            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+        }
+        [pscustomobject]@{
+            ProfileId = 'Monochrome'; FriendlyName = 'Monochrome'; Description = 'Remove color while keeping image detail.'
+            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Monochrome'); RequiredEffects = @('Monochrome.fx')
+            TechniqueOrder = @('Monochrome'); Parameters = @{}; PerformanceClass = 'LOW'
+            ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
+            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
+            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+        }
+        [pscustomobject]@{
+            ProfileId = 'Sepia'; FriendlyName = 'Sepia Tone'; Description = 'Warm the image with a classic brown tone.'
+            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Sepia'); RequiredEffects = @('Sepia.fx')
+            TechniqueOrder = @('Tint'); Parameters = @{}; PerformanceClass = 'LOW'
+            ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
+            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
+            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+        }
+        [pscustomobject]@{
+            ProfileId = 'Vignette'; FriendlyName = 'Vignette'; Description = 'Gently darken image edges to focus attention in the center.'
+            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Vignette'); RequiredEffects = @('Vignette.fx')
+            TechniqueOrder = @('Vignette'); Parameters = @{}; PerformanceClass = 'LOW'
+            ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'
+            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
+            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+        }
     )
 }
 
@@ -7340,15 +7933,24 @@ function Get-TpmReShadeEffectCatalog {
         [pscustomobject]@{ EffectId = 'SweetFX.LumaSharpen'; FriendlyName = 'LumaSharpen'; Category = 'SHARPNESS'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/LumaSharpen.fx'); SHA256 = @('7B358EBBDAA7BC4C44EBF6E9D41AFCB3F21EE3DDE5C5F85BF40201D5C6044680'); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'LumaSharpen'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original' }
         [pscustomobject]@{ EffectId = 'SweetFX.Vibrance'; FriendlyName = 'Vibrance'; Category = 'COLOR'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Vibrance.fx'); SHA256 = @('B9189A28CA4A645A0E188F8396C81889D217E3C706E8900DFE6594D43E7C33EB'); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Vibrance'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original' }
         [pscustomobject]@{ EffectId = 'FXShaders.CRT_Lottes'; FriendlyName = 'CRT Lottes'; Category = 'ARCADE DISPLAY'; Repository = 'luluco250/FXShaders'; PinnedCommit = '76365e35c48e30170985ca371e67d8daf8eb9a98'; RelativeFiles = @('Shaders/CRT_Lottes.fx','Shaders/CRT_Lottes.fxh'); SHA256 = @('6B214F43C97650A34D9848211402B475627092E127258F02BB0C5919451C9B20','FE19870235B2C4C166BD367227366AAE115E9AC9EF60E84774A069D4CFC0B1E6'); RequiredIncludes = @('ReShade.fxh','CRT_Lottes.fxh'); RequiredTextures = @(); License = 'MIT; Unlicense/public domain dedication for Timothy Lottes implementation'; Attribution = 'Lucas Melo; Timothy Lottes'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/luluco250/FXShaders/76365e35c48e30170985ca371e67d8daf8eb9a98/'; TechniqueName = 'CRT_Lottes'; PerformanceClass = 'HIGH'; ResolutionSensitivity = 'HIGH'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'CleanSharp' }
+        [pscustomobject]@{ EffectId = 'SweetFX.Cartoon'; FriendlyName = 'Cartoon'; Category = 'STYLIZED'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Cartoon.fx'); SHA256 = @('5D90E1C72318A28255D268FF3AC3FCB64D1E9469F5CA1334A50FB7D1B1A005F4'); ByteLengths = @([int64]1378); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Cartoon'; PerformanceClass = 'MEDIUM'; ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
+        [pscustomobject]@{ EffectId = 'SweetFX.Curves'; FriendlyName = 'Curves'; Category = 'CONTRAST'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Curves.fx'); SHA256 = @('8368029D2254856505ABF7DD789342024465403DA49434DD776C6D1AF4079A98'); ByteLengths = @([int64]6274); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Curves'; PerformanceClass = 'MEDIUM'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
+        [pscustomobject]@{ EffectId = 'SweetFX.FilmGrain'; FriendlyName = 'Film Grain'; Category = 'FILM'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/FilmGrain.fx'); SHA256 = @('520F0C40247C457A23A8F66A761C71EB43E5CA85DB5F68A92F1FBF0700F37154'); ByteLengths = @([int64]3514); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'FilmGrain'; PerformanceClass = 'HIGH'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
+        [pscustomobject]@{ EffectId = 'SweetFX.Levels'; FriendlyName = 'Levels'; Category = 'CONTRAST'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Levels.fx'); SHA256 = @('C603D3EA12D6D5710F2246BB7DD446D19E561154656F1FA8D579CA7FBBEEF70E'); ByteLengths = @([int64]2976); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Levels'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
+        [pscustomobject]@{ EffectId = 'SweetFX.Monochrome'; FriendlyName = 'Monochrome'; Category = 'COLOR'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Monochrome.fx'); SHA256 = @('36E0C42CE96F7CA61D44FDEEDBDB2E2B859D3359B29AD1E5DC3F1772D3B2459E'); ByteLengths = @([int64]3183); RequiredIncludes = @('ReShade.fxh','ReShadeUI.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'CeeJay.dk'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Monochrome'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
+        [pscustomobject]@{ EffectId = 'SweetFX.Sepia'; FriendlyName = 'Sepia'; Category = 'COLOR'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Sepia.fx'); SHA256 = @('4A4C7B4A3CC6CDF717AA96F0D3586B98C143A5584A29FD3A9D57AECD895B0BC6'); ByteLengths = @([int64]549); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'CeeJayDK'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Tint'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
+        [pscustomobject]@{ EffectId = 'SweetFX.Vignette'; FriendlyName = 'Vignette'; Category = 'IMAGE'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Vignette.fx'); SHA256 = @('A7358B592830FA74A0A50A842682C99DB751E35666E49C229567DAF9EA59AFA2'); ByteLengths = @([int64]3502); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Vignette'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
     )
     foreach ($effect in $effects) {
         if ($effect.EffectId -eq 'SweetFX.LumaSharpen') { $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @('SweetFX.Vibrance') -Force; $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @('FXShaders.CRT_Lottes') -Force }
         elseif ($effect.EffectId -eq 'SweetFX.Vibrance') { $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @('SweetFX.LumaSharpen') -Force; $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @() -Force }
-        else { $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @() -Force; $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @('SweetFX.LumaSharpen','SweetFX.Vibrance') -Force }
+        elseif ($effect.EffectId -eq 'FXShaders.CRT_Lottes') { $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @() -Force; $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @('SweetFX.LumaSharpen','SweetFX.Vibrance') -Force }
+        else { $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @() -Force; $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @() -Force }
         $effect | Add-Member -NotePropertyName OrderConstraints -NotePropertyValue @() -Force
-        if ($effect.EffectId -eq 'SweetFX.LumaSharpen') { $effect | Add-Member -NotePropertyName ByteLengths -NotePropertyValue @([int64]8688) -Force }
-        elseif ($effect.EffectId -eq 'SweetFX.Vibrance') { $effect | Add-Member -NotePropertyName ByteLengths -NotePropertyValue @([int64]2217) -Force }
-        else { $effect | Add-Member -NotePropertyName ByteLengths -NotePropertyValue @([int64]5114,[int64]21710) -Force }
+        if (-not $effect.PSObject.Properties['ByteLengths']) {
+            $lengths = if ($effect.EffectId -eq 'SweetFX.LumaSharpen') { @([int64]8688) } elseif ($effect.EffectId -eq 'SweetFX.Vibrance') { @([int64]2217) } elseif ($effect.EffectId -eq 'FXShaders.CRT_Lottes') { @([int64]5114,[int64]21710) } else { @() }
+            $effect | Add-Member -NotePropertyName ByteLengths -NotePropertyValue $lengths -Force
+        }
     }
     return $effects
 }
@@ -7399,12 +8001,19 @@ function Get-TpmReShadeProfile {
 function Test-TpmReShadePresetContent {
     param([Parameter(Mandatory)][string]$Content, [Parameter(Mandatory)]$ProfileDefinition)
     if ($Content -match '[^\x09\x0A\x0D\x20-\x7E]') { return $false }
-    $techniqueLine = @($Content -split "`r?`n" | Where-Object { $_ -like 'Techniques=*' })[0]
-    if ($null -eq $techniqueLine) { return $false }
-    $actual = if ($techniqueLine.Length -gt 11) { @($techniqueLine.Substring(11) -split ',') } else { @() }
     $expected = @($ProfileDefinition.TechniqueOrder)
-    if (($actual -join ',') -ne ($expected -join ',')) { return $false }
-    foreach ($technique in $actual) { if ($technique -notin @('LumaSharpen','Vibrance','CRT_Lottes')) { return $false } }
+    $presetLines = @($Content -split "`r?`n")
+    $actual = @()
+    foreach ($setting in @('Techniques','TechniqueSorting')) {
+        $settingLine = @($presetLines | Where-Object { $_ -like ($setting + '=*') })[0]
+        if ($null -eq $settingLine) { return $false }
+        $prefix = $setting + '='
+        $value = if ($settingLine.Length -gt $prefix.Length) { $settingLine.Substring($prefix.Length).Trim() } else { '' }
+        $actual = if ([string]::IsNullOrWhiteSpace($value)) { @() } else { @($value -split ',' | ForEach-Object { $_.Trim() }) }
+        if (($actual -join ',') -ne ($expected -join ',')) { return $false }
+    }
+    $approvedTechniques = @(Get-TpmReShadeEffectCatalog | ForEach-Object { [string]$_.TechniqueName } | Sort-Object -Unique)
+    foreach ($technique in $actual) { if ($technique -notin $approvedTechniques) { return $false } }
     return $true
 }
 
@@ -7419,6 +8028,7 @@ function New-TpmReShadePresetContent {
     [void]$lines.Add('; Generated by TeknoParrot Manager. Do not edit.')
     [void]$lines.Add('PresetName=' + $ProfileDefinition.FriendlyName)
     [void]$lines.Add('Techniques=' + (@($ProfileDefinition.TechniqueOrder) -join ','))
+    [void]$lines.Add('TechniqueSorting=' + (@($ProfileDefinition.TechniqueOrder) -join ','))
     foreach ($key in @($ProfileDefinition.Parameters.Keys | Sort-Object)) { [void]$lines.Add(('{0}={1}' -f $key, $ProfileDefinition.Parameters[$key])) }
     $content = ($lines -join "`r`n") + "`r`n"
     if (-not (Test-TpmReShadePresetContent -Content $content -ProfileDefinition $ProfileDefinition)) { throw 'Generated ReShade preset failed validation.' }
@@ -7719,9 +8329,17 @@ function Invoke-TpmReShadePreviewProfilePixels {
     param([Parameter(Mandatory)][Drawing.Bitmap]$Bitmap, [Parameter(Mandatory)]$ProfileDefinition)
     $profileId = [string]$ProfileDefinition.ProfileId
     if ($profileId -eq 'Original') { return }
-    $isSharp = $profileId -in @('CleanSharp', 'EnhancedArcade')
-    $isVivid = $profileId -in @('Vivid', 'EnhancedArcade')
-    $isCrt = $profileId -eq 'ClassicCrt'
+    $techniques = @($ProfileDefinition.TechniqueOrder)
+    $isSharp = $techniques -contains 'LumaSharpen'
+    $isVivid = $techniques -contains 'Vibrance'
+    $isCrt = $techniques -contains 'CRT_Lottes'
+    $isCartoon = $techniques -contains 'Cartoon'
+    $isCurves = $techniques -contains 'Curves'
+    $isFilmGrain = $techniques -contains 'FilmGrain'
+    $isLevels = $techniques -contains 'Levels'
+    $isMonochrome = $techniques -contains 'Monochrome'
+    $isSepia = $techniques -contains 'Tint'
+    $isVignette = $techniques -contains 'Vignette'
     $rectangle = New-Object Drawing.Rectangle -ArgumentList @(0, 0, $Bitmap.Width, $Bitmap.Height)
     $data = $null
     try {
@@ -7781,6 +8399,45 @@ function Invoke-TpmReShadePreviewProfilePixels {
                     $red *= $scanline * $maskRed * $vignette
                     $green *= $scanline * $maskGreen * $vignette
                     $blue *= $scanline * $maskBlue * $vignette
+                }
+                if ($isCartoon) {
+                    $quantum = 42.5
+                    $red = [Math]::Round($red / $quantum) * $quantum
+                    $green = [Math]::Round($green / $quantum) * $quantum
+                    $blue = [Math]::Round($blue / $quantum) * $quantum
+                }
+                if ($isCurves) {
+                    $red = (($red / 255.0 - 0.5) * 1.45 + 0.5) * 255.0
+                    $green = (($green / 255.0 - 0.5) * 1.45 + 0.5) * 255.0
+                    $blue = (($blue / 255.0 - 0.5) * 1.45 + 0.5) * 255.0
+                }
+                if ($isFilmGrain) {
+                    $grain = [double]((($x * 73 + $y * 151 + (($x + 1) * ($y + 1) * 19)) % 31) - 15)
+                    $red += $grain
+                    $green += $grain
+                    $blue += $grain
+                }
+                if ($isLevels) {
+                    $red = ($red - 12.0) * 1.10
+                    $green = ($green - 12.0) * 1.10
+                    $blue = ($blue - 12.0) * 1.10
+                }
+                if ($isMonochrome) {
+                    $luma = (0.2126 * $red) + (0.7152 * $green) + (0.0722 * $blue)
+                    $red = $luma; $green = $luma; $blue = $luma
+                }
+                if ($isSepia) {
+                    $sepiaRed = (0.393 * $red) + (0.769 * $green) + (0.189 * $blue)
+                    $sepiaGreen = (0.349 * $red) + (0.686 * $green) + (0.168 * $blue)
+                    $sepiaBlue = (0.272 * $red) + (0.534 * $green) + (0.131 * $blue)
+                    $red = $sepiaRed; $green = $sepiaGreen; $blue = $sepiaBlue
+                }
+                if ($isVignette) {
+                    $vignetteX = (2.0 * $x / [Math]::Max(1, $width - 1)) - 1.0
+                    $vignetteY = (2.0 * $y / [Math]::Max(1, $height - 1)) - 1.0
+                    $radius = [Math]::Min(1.0, [Math]::Sqrt(($vignetteX * $vignetteX) + ($vignetteY * $vignetteY)) / 1.4142135623730951)
+                    $vignetteScale = 1.0 - (0.32 * $radius * $radius)
+                    $red *= $vignetteScale; $green *= $vignetteScale; $blue *= $vignetteScale
                 }
                 if ($red -lt 0) { $red = 0 }; if ($red -gt 255) { $red = 255 }
                 if ($green -lt 0) { $green = 0 }; if ($green -gt 255) { $green = 255 }
@@ -8329,7 +8986,8 @@ function Show-TpmReShadeProfileGalleryWindow {
         $instructionLabel.Height = 58
         $instructionLabel.Padding = New-Object Windows.Forms.Padding(6, 4, 6, 4)
         $instructionLabel.TextAlign = 'TopLeft'
-        $instructionLabel.Text = "ReShade preview only`r`nThe terminal chooser is authoritative. Select 1-5 in TeknoParrot Manager; this preview follows that selection. Close this window when finished."
+        $profileCount = @($Profiles).Count
+        $instructionLabel.Text = ("ReShade preview only`r`nThe terminal chooser is authoritative. Select 1-{0} in TeknoParrot Manager; this preview follows that selection. Close this window when finished." -f $profileCount)
         $instructionLabel.ForeColor = [System.Drawing.Color]::DarkBlue
         $instructionLabel.BackColor = [System.Drawing.Color]::AliceBlue
         $instructionLabel.BorderStyle = 'FixedSingle'
@@ -8492,33 +9150,79 @@ function Show-TpmReShadePreviewWindow {
 
 
 function Get-TpmReShadeAssetInventory {
-    return @(Get-TpmReShadeEffectCatalog | ForEach-Object { $_.RelativeFiles })
+    $paths = New-Object System.Collections.Generic.List[string]
+    foreach ($effect in (Get-TpmReShadeEffectCatalog)) {
+        foreach ($file in @(Get-TpmReShadeApprovedEffectFiles -EffectId $effect.EffectId)) {
+            if (-not $paths.Contains([string]$file.RelativePath)) { [void]$paths.Add([string]$file.RelativePath) }
+        }
+    }
+    return $paths.ToArray()
 }
 
 function Test-TpmReShadeAssetInventory {
     param([string]$AssetRoot)
-    foreach ($effect in (Get-TpmReShadeEffectCatalog)) {
-        for ($i = 0; $i -lt @($effect.RelativeFiles).Count; $i++) {
-
-            $path = Join-Path $AssetRoot ($effect.RelativeFiles[$i] -replace '/', '\')
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
-        }
+    foreach ($relative in @(Get-TpmReShadeAssetInventory)) {
+        $path = Join-Path $AssetRoot ($relative -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
     }
     return $true
 }
+
+function Get-TpmReShadeUICompatibilityBytes {
+    $lines = @(
+        '#pragma once'
+        '#define __UNIFORM_SLIDER_FLOAT1 ui_type = "slider";'
+        '#define __UNIFORM_SLIDER_FLOAT2 ui_type = "slider";'
+        '#define __UNIFORM_SLIDER_INT1 ui_type = "slider";'
+        '#define __UNIFORM_COLOR_FLOAT3 ui_type = "color";'
+    )
+    return ,([Text.Encoding]::ASCII.GetBytes(($lines -join "`r`n") + "`r`n"))
+}
+
 function Get-TpmReShadeApprovedEffectFiles {
     param([Parameter(Mandatory)][string]$EffectId)
     $effect = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq $EffectId)[0]
     if (-not $effect) { throw "Effect is not approved: $EffectId" }
     $files = New-Object System.Collections.Generic.List[object]
+    $safeEffectCache = $effect.EffectId -replace '[^A-Za-z0-9_.-]', '_'
     for ($i = 0; $i -lt @($effect.RelativeFiles).Count; $i++) {
         $relative = [string]$effect.RelativeFiles[$i]
-        if ($relative -match '(^|/)\.\.?(/|$)' -or $relative.StartsWith('/') -or $relative -match '%2f|%5c|%2e' ) { throw 'Approved effect path is unsafe.' }
+        if ($relative -match '(^|/)\.\.?(/|$)' -or $relative.StartsWith('/') -or $relative -match '%2f|%5c|%2e') { throw 'Approved effect path is unsafe.' }
         $url = 'https://raw.githubusercontent.com/' + $effect.AllowedPathPrefix.Trim('/') + '/' + $relative
         $uri = $null
         $validUri = [Uri]::TryCreate($url, [UriKind]::Absolute, [ref]$uri)
         if (-not $validUri -or $uri.Scheme -ne 'https' -or $uri.Host -notin $effect.AllowedHosts -or $uri.Query -or $uri.Fragment -or $uri.AbsolutePath -ne ('/' + $effect.AllowedPathPrefix.Trim('/') + '/' + $relative) -or $uri.AbsolutePath -match '%2f|%5c|%2e' -or -not $uri.AbsolutePath.StartsWith($effect.AllowedPathPrefix, [StringComparison]::Ordinal)) { throw 'Approved effect URL failed allowlist validation.' }
-        [void]$files.Add([pscustomobject]@{ EffectId = $effect.EffectId; RelativePath = $relative; Url = $url; SHA256 = $effect.SHA256[$i] })
+        $length = if (@($effect.ByteLengths).Count -gt $i) { [int64]$effect.ByteLengths[$i] } else { $null }
+        [void]$files.Add([pscustomobject]@{
+            EffectId = $effect.EffectId; Role = 'EffectAsset'; RelativePath = $relative; SourceRelativePath = $relative
+            CacheRelativePath = ($safeEffectCache + '/' + [IO.Path]::GetFileName($relative)); Url = $url
+            SHA256 = $effect.SHA256[$i]; ByteLength = $length; PinnedRevision = $effect.PinnedCommit
+            Repository = $effect.Repository; License = $effect.License; InlineBytes = $null
+        })
+    }
+    if (@($effect.RequiredIncludes) -contains 'ReShade.fxh') {
+        $revision = 'fd0022170615ce0d8162d219bff07232fa6dd84f'
+        $source = 'Shaders/ReShade.fxh'
+        $pathPrefix = "/crosire/reshade-shaders/$revision/"
+        $url = 'https://raw.githubusercontent.com' + $pathPrefix + $source
+        $uri = $null
+        if (-not [Uri]::TryCreate($url, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'https' -or $uri.Host -ne 'raw.githubusercontent.com' -or $uri.AbsolutePath -ne ($pathPrefix + $source) -or $uri.Query -or $uri.Fragment) { throw 'Approved ReShade include URL failed allowlist validation.' }
+        [void]$files.Add([pscustomobject]@{
+            EffectId = $effect.EffectId; Role = 'RuntimeInclude'; RelativePath = 'Shaders/TPM/ReShade.fxh'; SourceRelativePath = $source
+            CacheRelativePath = 'Shared/ReShade.fxh'; Url = $url; SHA256 = '6DABFBBAF968C3871905D2EA17F96572FF7B1CEC01310B5D0E5252B66B30174F'
+            ByteLength = [int64]4250; PinnedRevision = $revision; Repository = 'crosire/reshade-shaders'
+            License = 'CC0-1.0'; InlineBytes = $null
+        })
+    }
+    if (@($effect.RequiredIncludes) -contains 'ReShadeUI.fxh') {
+        $bytes = [byte[]](Get-TpmReShadeUICompatibilityBytes)
+        $hasher = [Security.Cryptography.SHA256]::Create()
+        try { $hash = [BitConverter]::ToString($hasher.ComputeHash($bytes)).Replace('-', '') } finally { $hasher.Dispose() }
+        [void]$files.Add([pscustomobject]@{
+            EffectId = $effect.EffectId; Role = 'RuntimeInclude'; RelativePath = 'Shaders/TPM/ReShadeUI.fxh'; SourceRelativePath = 'TPM-authored/ReShadeUI.fxh'
+            CacheRelativePath = 'Shared/ReShadeUI.fxh'; Url = $null; SHA256 = $hash; ByteLength = [int64]$bytes.Length
+            PinnedRevision = 'TPM'; Repository = 'TeknoParrot-Manager'; License = 'Project-authored'; InlineBytes = $bytes
+        })
     }
     return $files.ToArray()
 }
@@ -8526,34 +9230,55 @@ function Get-TpmReShadeApprovedEffectFiles {
 function Test-TpmReShadeApprovedEffectFile {
     param([Parameter(Mandatory)]$FileSpec, [Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
-
-    try { return ((Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash -ieq $FileSpec.SHA256) } catch { return $false }
+    try {
+        $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+        if ($FileSpec.PSObject.Properties['ByteLength'] -and $null -ne $FileSpec.ByteLength -and [int64]$item.Length -ne [int64]$FileSpec.ByteLength) { return $false }
+        return ((Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash -ieq $FileSpec.SHA256)
+    } catch { return $false }
 }
+
 function Acquire-TpmReShadeApprovedEffect {
     param([Parameter(Mandatory)][string]$EffectId, [Parameter(Mandatory)][string]$CacheRoot, [string]$StagingRoot = '')
     $specs = @(Get-TpmReShadeApprovedEffectFiles -EffectId $EffectId)
-    $effectCache = Join-Path $CacheRoot ($EffectId -replace '[^A-Za-z0-9_.-]', '_')
-    [void][IO.Directory]::CreateDirectory($effectCache)
     $stage = if ($StagingRoot) { $StagingRoot } else { New-TpmStagingDirectory -Label 'ReShadeEffect' }
     if (-not (Test-Path -LiteralPath $stage -PathType Container)) { [void][IO.Directory]::CreateDirectory($stage) }
     $result = New-Object System.Collections.Generic.List[object]
-    foreach ($spec in $specs) {
-        $cachePath = Join-Path $effectCache ([IO.Path]::GetFileName($spec.RelativePath))
-        $stagePath = Join-Path $stage ($spec.RelativePath -replace '/', '\')
-        $stageDir = [IO.Path]::GetDirectoryName($stagePath)
-        [void][IO.Directory]::CreateDirectory($stageDir)
-        $source = $null
-        if (Test-TpmReShadeApprovedEffectFile -FileSpec $spec -Path $cachePath) { $source = $cachePath }
-        else {
-            try {
-                Invoke-TpmWebRequestSilently -Uri $spec.Url -UseBasicParsing -OutFile $stagePath -RequestErrorAction Stop
-                if (-not (Test-TpmReShadeApprovedEffectFile -FileSpec $spec -Path $stagePath)) { throw "Hash mismatch for $($spec.RelativePath)." }
+    $progressStarted = Get-Date
+    $progressCurrent = 0
+    try {
+        foreach ($spec in $specs) {
+            $progressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade effect acquisition' -Current $progressCurrent -Total $specs.Count -StartedAt $progressStarted
+            $cacheRelative = if ($spec.CacheRelativePath) { [string]$spec.CacheRelativePath } else { ($EffectId -replace '[^A-Za-z0-9_.-]', '_') + '/' + [IO.Path]::GetFileName($spec.RelativePath) }
+            if ($cacheRelative -match '(^|[\\/])\.\.?([\\/]|$)' -or [IO.Path]::IsPathRooted($cacheRelative)) { throw 'Approved effect cache path is unsafe.' }
+            $cachePath = Join-Path $CacheRoot ($cacheRelative -replace '/', '\')
+            $stagePath = Join-Path $stage ($spec.RelativePath -replace '/', '\')
+            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($cachePath))
+            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($stagePath))
+            $source = $null
+            if (Test-TpmReShadeApprovedEffectFile -FileSpec $spec -Path $cachePath) { $source = $cachePath }
+            elseif ($spec.InlineBytes) {
+                [IO.File]::WriteAllBytes($stagePath, [byte[]]$spec.InlineBytes)
+                if (-not (Test-TpmReShadeApprovedEffectFile -FileSpec $spec -Path $stagePath)) { throw "Integrity validation failed for TPM include $($spec.RelativePath)." }
                 Copy-Item -LiteralPath $stagePath -Destination $cachePath -Force -ErrorAction Stop
                 $source = $stagePath
-            } catch { throw "Approved effect acquisition failed for $($spec.RelativePath): $($_.Exception.Message)" }
+            } else {
+                try {
+                    Invoke-TpmDownloadWebRequest -DownloadUrl $spec.Url -TempPath $stagePath -Label 'ReShade effect asset'
+                    if (-not (Test-TpmReShadeApprovedEffectFile -FileSpec $spec -Path $stagePath)) { throw "Hash or byte-length mismatch for $($spec.RelativePath)." }
+                    Copy-Item -LiteralPath $stagePath -Destination $cachePath -Force -ErrorAction Stop
+                    $source = $stagePath
+                } catch { throw "Approved effect acquisition failed for $($spec.RelativePath): $($_.Exception.Message)" }
+            }
+            if ($source -ne $stagePath) { Copy-Item -LiteralPath $source -Destination $stagePath -Force -ErrorAction Stop }
+            [void]$result.Add([pscustomobject]@{
+                EffectId = $EffectId; Role = $spec.Role; RelativePath = $spec.RelativePath; SourceRelativePath = $spec.SourceRelativePath
+                Path = $stagePath; SHA256 = $spec.SHA256; ByteLength = $spec.ByteLength; PinnedRevision = $spec.PinnedRevision
+                Repository = $spec.Repository; License = $spec.License; FromCache = ($source -eq $cachePath)
+            })
         }
-        if ($source -ne $stagePath) { Copy-Item -LiteralPath $source -Destination $stagePath -Force -ErrorAction Stop }
-        [void]$result.Add([pscustomobject]@{ EffectId = $EffectId; RelativePath = $spec.RelativePath; Path = $stagePath; SHA256 = $spec.SHA256; FromCache = ($source -eq $cachePath) })
+    } finally {
+        if ($specs.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade effect acquisition' -Current $progressCurrent -Total $specs.Count -StartedAt $progressStarted -Complete }
     }
     return [pscustomobject]@{ EffectId = $EffectId; StagingRoot = $stage; Files = $result.ToArray() }
 }
@@ -8567,7 +9292,15 @@ function New-TpmReShadeOwnershipManifest {
         $destination = Join-Path $DestinationRoot ($file.RelativePath -replace '/', '\')
         $actual = $null
         if (Test-Path -LiteralPath $file.Path -PathType Leaf) { try { $actual = (Get-FileHash -LiteralPath $file.Path -Algorithm SHA256 -ErrorAction Stop).Hash } catch {} }
-        [void]$entries.Add([pscustomobject]@{ EffectId = $EffectId; PinnedRevision = $effect.PinnedCommit; RelativeSource = $file.RelativePath; DestinationPath = $destination; ExpectedSHA256 = $file.SHA256; ActualSHA256 = $actual; TPMManaged = $true })
+        $revision = if ($file.PSObject.Properties['PinnedRevision'] -and $file.PinnedRevision) { [string]$file.PinnedRevision } else { [string]$effect.PinnedCommit }
+        $sourcePath = if ($file.PSObject.Properties['SourceRelativePath'] -and $file.SourceRelativePath) { [string]$file.SourceRelativePath } else { [string]$file.RelativePath }
+        $repository = if ($file.PSObject.Properties['Repository']) { [string]$file.Repository } else { [string]$effect.Repository }
+        $license = if ($file.PSObject.Properties['License']) { [string]$file.License } else { [string]$effect.License }
+        [void]$entries.Add([pscustomobject]@{
+            EffectId = $EffectId; PinnedRevision = $revision; Repository = $repository; License = $license
+            RelativeSource = $sourcePath; DestinationPath = $destination; ExpectedSHA256 = $file.SHA256
+            ActualSHA256 = $actual; ByteLength = if ($file.PSObject.Properties['ByteLength']) { $file.ByteLength } else { $null }; TPMManaged = $true
+        })
     }
     return [pscustomobject]@{ SchemaVersion = 1; EffectId = $EffectId; PinnedRevision = $effect.PinnedCommit; Files = $entries.ToArray() }
 }
@@ -8754,14 +9487,13 @@ function Get-TpmReShadeTransactionStoragePlan {
 }
 function Get-TpmReShadePreAcquisitionStoragePlan {
     param([Parameter(Mandatory)][string]$EffectId, [Parameter(Mandatory)][string]$CacheRoot, [Parameter(Mandatory)][string]$DestinationRoot, [object]$PriorManifest = $null)
-    $cache = Join-Path $CacheRoot ($EffectId -replace '[^A-Za-z0-9_.-]', '_')
-    $effect = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq $EffectId)[0]
     $specs = @(Get-TpmReShadeApprovedEffectFiles -EffectId $EffectId)
     $assetBytes = [int64]0; $known = $true
-    for ($index = 0; $index -lt $specs.Count; $index++) {
-        $spec = $specs[$index]; $cached = Join-Path $cache ([IO.Path]::GetFileName($spec.RelativePath))
+    foreach ($spec in $specs) {
+        $cacheRelative = if ($spec.CacheRelativePath) { [string]$spec.CacheRelativePath } else { ($EffectId -replace '[^A-Za-z0-9_.-]', '_') + '/' + [IO.Path]::GetFileName($spec.RelativePath) }
+        $cached = Join-Path $CacheRoot ($cacheRelative -replace '/', '\')
         if ((Test-Path -LiteralPath $cached -PathType Leaf) -and (Test-TpmReShadeApprovedEffectFile -FileSpec $spec -Path $cached)) { $assetBytes += [int64](Get-Item -LiteralPath $cached -ErrorAction Stop).Length }
-        elseif ($effect -and $effect.PSObject.Properties['ByteLengths'] -and @($effect.ByteLengths).Count -gt $index) { $assetBytes += [int64]$effect.ByteLengths[$index] }
+        elseif ($spec.PSObject.Properties['ByteLength'] -and $null -ne $spec.ByteLength) { $assetBytes += [int64]$spec.ByteLength }
         else { $known = $false }
     }
     $backupBytes = [int64]0
@@ -8769,7 +9501,7 @@ function Get-TpmReShadePreAcquisitionStoragePlan {
     $targetBytes = $assetBytes
     $roleBytes = [pscustomobject][ordered]@{ CACHE = $assetBytes; STAGING = $assetBytes; BACKUP = $backupBytes; TARGET = $targetBytes; ROLLBACK = $backupBytes }
     $required = if ($known) { $assetBytes + $backupBytes + $targetBytes + $backupBytes } else { $null }
-    return [pscustomobject]@{ EffectId = $EffectId; CapacityKnown = $known; CacheBytes = $assetBytes; StagingBytes = $assetBytes; BackupBytes = $backupBytes; TargetBytes = $targetBytes; RollbackBytes = $backupBytes; RoleBytes = $roleBytes; RolePaths = [pscustomobject][ordered]@{ CACHE = $cache; STAGING = $CacheRoot; BACKUP = $DestinationRoot; TARGET = $DestinationRoot; ROLLBACK = $DestinationRoot }; RequiredWorkingBytes = $required; Reason = if ($known) { 'Validated cache or pinned catalog byte lengths.' } else { 'Pinned asset size unavailable before acquisition.' } }
+    return [pscustomobject]@{ EffectId = $EffectId; CapacityKnown = $known; CacheBytes = $assetBytes; StagingBytes = $assetBytes; BackupBytes = $backupBytes; TargetBytes = $targetBytes; RollbackBytes = $backupBytes; RoleBytes = $roleBytes; RolePaths = [pscustomobject][ordered]@{ CACHE = $CacheRoot; STAGING = $CacheRoot; BACKUP = $DestinationRoot; TARGET = $DestinationRoot; ROLLBACK = $DestinationRoot }; RequiredWorkingBytes = $required; Reason = if ($known) { 'Validated cache or pinned asset/include byte lengths.' } else { 'Pinned asset or include size unavailable before acquisition.' } }
 }
 
 function Install-TpmReShadeApprovedEffect {
@@ -8819,7 +9551,13 @@ function Install-TpmReShadeApprovedEffect {
     }
     if ($allExact) { return [pscustomobject]@{ Succeeded = $true; State = 'NO_OP'; Manifest = $old } }
     try {
+        $activeProgressLabel = 'ReShade effect deployment'
+        $activeProgressStarted = Get-Date
+        $activeProgressCurrent = 0
+        $activeProgressTotal = @($manifest.Files).Count
         foreach ($entry in @($manifest.Files)) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Extracting -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted
             if ([IO.File]::Exists([string]$entry.DestinationPath)) {
                 $owned = $false
                 if ($null -ne $old) {
@@ -8852,20 +9590,37 @@ function Install-TpmReShadeApprovedEffect {
             $changed += $entry
             if (($FaultStage -eq 'AfterFirstPromotion' -or $FaultStage -eq 'AfterFirstPromotionRollbackFailure') -and $changed.Count -eq 1) { throw 'TEST: forced promotion failure after first promotion.' }
         }
+        Write-TpmCompactExtractionProgress -Phase Extracting -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted -Complete
+        $activeProgressLabel = $null
+        $activeProgressLabel = 'ReShade deployment verification'
+        $activeProgressStarted = Get-Date
+        $activeProgressCurrent = 0
+        $activeProgressTotal = @($manifest.Files).Count
         foreach ($entry in @($manifest.Files)) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted
             if (-not (Test-TpmReShadeApprovedEffectFile -FileSpec ([pscustomobject]@{ SHA256 = $entry.ExpectedSHA256 }) -Path $entry.DestinationPath)) { throw "VERIFY: installed hash mismatch for $($entry.RelativeSource)." }
             $entry.ActualSHA256 = (Get-FileHash -LiteralPath $entry.DestinationPath -Algorithm SHA256).Hash
         }
+        Write-TpmCompactExtractionProgress -Phase Checking -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted -Complete
+        $activeProgressLabel = $null
         if ($FaultStage -eq 'BeforeCommit') { throw 'TEST: forced final verification failure.' }
         Save-TpmReShadeOwnershipManifest -Manifest $manifest -Path $OwnershipPath
         $installState = 'INSTALLED'
         if ($wasRepair) { $installState = 'REPAIR' }
         return [pscustomobject]@{ Succeeded = $true; State = $installState; Manifest = $manifest }
     } catch {
+        if ($activeProgressLabel -and $activeProgressStarted) { Write-TpmCompactExtractionProgress -Phase Checking -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted -Complete; $activeProgressLabel = $null }
         if ($_.Exception.Message -like 'COLLISION:*') { return [pscustomobject]@{ Succeeded = $false; State = 'COLLISION'; Error = $_.Exception.Message } }
         $rollbackOk = $true
         $rollbackErrors = @()
+        $activeProgressLabel = 'ReShade effect rollback'
+        $activeProgressStarted = Get-Date
+        $activeProgressCurrent = 0
+        $activeProgressTotal = @($changed).Count
         foreach ($entry in @($changed)) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted
             $bak = Join-Path $backup ([IO.Path]::GetFileName($entry.DestinationPath))
             try {
                 if ($FaultStage -eq 'RollbackFailure' -or $FaultStage -eq 'AfterFirstPromotionRollbackFailure') { throw 'TEST: forced rollback restore failure.' }
@@ -8883,6 +9638,8 @@ function Install-TpmReShadeApprovedEffect {
                 if (-not $prior -and (Test-Path -LiteralPath $entry.DestinationPath -PathType Leaf)) { throw 'new file remained after rollback' }
             } catch { $rollbackOk = $false; $rollbackErrors += $_.Exception.Message }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Repairing -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted -Complete }
+        $activeProgressLabel = $null
         $rollbackState = 'ACTION_REQUIRED'
         if ($rollbackOk) { $rollbackState = 'ROLLED_BACK' }
         return [pscustomobject]@{ Succeeded = $false; State = $rollbackState; Error = $_.Exception.Message; RollbackError = ($rollbackErrors -join '; '); RollbackVerified = $rollbackOk }
@@ -8901,7 +9658,13 @@ function Get-TpmReShadeRemovalScan {
     param([Parameter(Mandatory)][string]$UserProfilesDir, [string]$StateRoot = '')
     $fullBackupDir = Join-Path $UserProfilesDir 'FullBackup'
     $records = New-Object System.Collections.Generic.List[object]
-    foreach ($profileFile in @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.DirectoryName -ne $fullBackupDir } | Sort-Object BaseName)) {
+    $profileFiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'ReShade removal profile discovery' -EnumerationErrorAction SilentlyContinue | Sort-Object BaseName)
+    $progressStarted = Get-Date
+    $progressCurrent = 0
+    try {
+        foreach ($profileFile in $profileFiles) {
+            $progressCurrent++
+            if ($profileFiles.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade removal scan' -Current $progressCurrent -Total $profileFiles.Count -StartedAt $progressStarted }
         $base = [ordered]@{ GameId=$profileFile.BaseName; ProfileFile=$profileFile; StateRoot=$StateRoot; Status=''; Detail=''; GamePath=''; EmulatorType=''; TargetDir=''; DllName=''; OwnershipPath=''; Manifest=$null; RemovableFiles=@(); ProtectedFiles=@(); ChangedFiles=@(); ProtectedCount=0; ChangedCount=0; Reviewable=$false }
         try {
             $doc = Read-Xml -Path $profileFile.FullName
@@ -8988,6 +9751,9 @@ function Get-TpmReShadeRemovalScan {
             $base.Status='MalformedMetadata'; $base.Detail=('ReShade metadata could not be inspected safely: ' + $_.Exception.Message + ' at ' + $_.InvocationInfo.PositionMessage); [void]$records.Add([pscustomobject]$base)
             Write-Log "ReShade removal scan skipped $($profileFile.BaseName) -- $_"
         }
+    }
+    } finally {
+        if ($profileFiles.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade removal scan' -Current $progressCurrent -Total $profileFiles.Count -StartedAt $progressStarted -Complete }
     }
     $reviewable = @($records | Where-Object Reviewable)
     return [pscustomobject]@{
@@ -9080,6 +9846,10 @@ function Remove-TpmReShadeOwnedDeployment {
     $operationDir = $null
     $backups = New-Object System.Collections.Generic.List[object]
     $manifestBackup = $null
+    $activeProgressLabel = $null
+    $activeProgressStarted = $null
+    $activeProgressCurrent = 0
+    $activeProgressTotal = 0
     try {
         $profileRoot = [System.IO.Path]::GetFullPath($UserProfilesDir)
         $removalContext = Get-TpmReShadeRemovalContext -ProfileFile $ScanRecord.ProfileFile
@@ -9091,10 +9861,18 @@ function Remove-TpmReShadeOwnedDeployment {
         if (-not (Test-TpmNoReparsePath -Path $targetInfo.TargetDir)) { throw 'ReShade target could not be resolved safely before removal.' }
         $expectedOwnershipPath = Get-TpmReShadeProfileOwnershipPath -GameId ([string]$ScanRecord.GameId) -StateRoot $StateRoot
         if ([IO.Path]::GetFullPath([string]$ScanRecord.OwnershipPath) -ine [IO.Path]::GetFullPath($expectedOwnershipPath)) { throw 'ReShade ownership manifest path is not the expected TPM deployment path.' }
+        $activeProgressLabel = 'ReShade removal validation'
+        $activeProgressStarted = Get-Date
+        $activeProgressCurrent = 0
+        $activeProgressTotal = @($ScanRecord.RemovableFiles).Count
         foreach ($entry in @($ScanRecord.RemovableFiles)) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted
             $validated = Get-TpmReShadeValidatedRemovalEntry -Entry $entry -ProfileRoot $profileRoot -TargetRoot $targetInfo.TargetDir
             if (-not $validated) { throw "ReShade ownership validation rejected '$([string]$entry.DestinationPath)'." }
         }
+        Write-TpmCompactExtractionProgress -Phase Checking -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted -Complete
+        $activeProgressLabel = $null
 
         [void][IO.Directory]::CreateDirectory($BackupRoot)
         if (-not (Test-TpmNoReparsePath -Path $BackupRoot)) { throw "ReShade backup path is unsafe: $BackupRoot" }
@@ -9102,7 +9880,13 @@ function Remove-TpmReShadeOwnedDeployment {
         [void][IO.Directory]::CreateDirectory($operationDir)
         if (-not (Test-TpmNoReparsePath -Path $operationDir)) { throw "ReShade backup operation path is unsafe." }
         $index = 0
+        $activeProgressLabel = 'ReShade removal backup'
+        $activeProgressStarted = Get-Date
+        $activeProgressCurrent = 0
+        $activeProgressTotal = @($ScanRecord.RemovableFiles).Count
         foreach ($entry in @($ScanRecord.RemovableFiles)) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted
             $currentContext = Get-TpmReShadeRemovalContext -ProfileFile $ScanRecord.ProfileFile
             Assert-TpmReShadeRemovalContext -ScanRecord $ScanRecord -Context $currentContext -Phase 'before backup'
             $validated = Get-TpmReShadeValidatedRemovalEntry -Entry $entry -ProfileRoot $profileRoot -TargetRoot $currentContext.TargetInfo.TargetDir
@@ -9116,6 +9900,8 @@ function Remove-TpmReShadeOwnedDeployment {
             [void]$backups.Add([pscustomobject]@{ Source=$source; Backup=$backup; Entry=$entry })
             $index++
         }
+        Write-TpmCompactExtractionProgress -Phase Checking -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted -Complete
+        $activeProgressLabel = $null
 
 
         $manifestPath = [string]$ScanRecord.OwnershipPath
@@ -9124,7 +9910,13 @@ function Remove-TpmReShadeOwnedDeployment {
             Copy-Item -LiteralPath $manifestPath -Destination $manifestBackup -Force -ErrorAction Stop
             if ((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ine (Get-FileHash -LiteralPath $manifestBackup -Algorithm SHA256).Hash) { throw 'ReShade ownership manifest backup verification failed.' }
         }
+        $activeProgressLabel = 'ReShade removal'
+        $activeProgressStarted = Get-Date
+        $activeProgressCurrent = 0
+        $activeProgressTotal = $backups.Count
         foreach ($backup in $backups.ToArray()) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted
             $deleteContext = Get-TpmReShadeRemovalContext -ProfileFile $ScanRecord.ProfileFile
             Assert-TpmReShadeRemovalContext -ScanRecord $ScanRecord -Context $deleteContext -Phase 'immediately before deletion'
             $validated = Get-TpmReShadeValidatedRemovalEntry -Entry $backup.Entry -ProfileRoot $profileRoot -TargetRoot $deleteContext.TargetInfo.TargetDir
@@ -9132,6 +9924,8 @@ function Remove-TpmReShadeOwnedDeployment {
             if ($validated.ActualSHA256 -ine [string]$backup.Entry.ExpectedSHA256) { throw "ReShade ownership hash changed before deletion for '$($backup.Source)'." }
             Remove-Item -LiteralPath $validated.Path -Force -ErrorAction Stop
         }
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted -Complete
+        $activeProgressLabel = $null
         $manifest = $ScanRecord.Manifest
         if ($manifestPath -and $manifest) {
             $remaining = @($manifest.Files | Where-Object { $remove = $_; -not (@($ScanRecord.RemovableFiles) | Where-Object { $_.DestinationPath -eq $remove.DestinationPath -and $_.ExpectedSHA256 -eq $remove.ExpectedSHA256 -and $_.Kind -eq $remove.Kind }) })
@@ -9143,14 +9937,23 @@ function Remove-TpmReShadeOwnedDeployment {
         }
         return [pscustomobject]@{ GameId=$ScanRecord.GameId; Status='Removed'; RemovedFiles=@($backups | ForEach-Object Source); BackupPath=$operationDir; Detail=('{0} verified TPM-managed file(s) removed.' -f $backups.Count) }
     } catch {
+        if ($activeProgressLabel -and $activeProgressStarted) { Write-TpmCompactExtractionProgress -Phase Checking -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted -Complete; $activeProgressLabel = $null }
         $rollbackErrors = New-Object System.Collections.Generic.List[string]
+        $activeProgressLabel = 'ReShade removal rollback'
+        $activeProgressStarted = Get-Date
+        $activeProgressCurrent = 0
+        $activeProgressTotal = $backups.Count
         foreach ($backup in $backups.ToArray()) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted
             try {
                 [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($backup.Source))
                 Copy-Item -LiteralPath $backup.Backup -Destination $backup.Source -Force -ErrorAction Stop
                 if ((Get-FileHash -LiteralPath $backup.Source -Algorithm SHA256).Hash -ine [string]$backup.Entry.ExpectedSHA256) { throw 'restored hash mismatch' }
             } catch { [void]$rollbackErrors.Add("$($backup.Source): $($_.Exception.Message)") }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Repairing -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $activeProgressStarted -Complete }
+        $activeProgressLabel = $null
         if ($manifestBackup -and $ScanRecord.OwnershipPath) {
             try {
                 Copy-Item -LiteralPath $manifestBackup -Destination $ScanRecord.OwnershipPath -Force -ErrorAction Stop
@@ -9284,6 +10087,10 @@ function Install-TpmReShadeProfileDeployment {
     $staging = $null
     $preparedStages = New-Object System.Collections.Generic.List[string]
     $preserveStaging = $false
+    $assetProgressLabel = $null
+    $assetProgressStarted = $null
+    $assetProgressCurrent = 0
+    $assetProgressTotal = 0
     try {
         $approvedProfile = Get-TpmReShadeProfile -ProfileId $ProfileDefinition.ProfileId
         if (-not $approvedProfile -or [string]$approvedProfile.SchemaVersion -ne [string]$ProfileDefinition.SchemaVersion -or (@($approvedProfile.Effects) -join ',') -ne (@($ProfileDefinition.Effects) -join ',')) {
@@ -9328,7 +10135,7 @@ function Install-TpmReShadeProfileDeployment {
             if ([System.IO.Path]::GetExtension($effectivePreset) -ine '.ini') { return [pscustomobject]@{ Succeeded = $false; State = 'INVALID_PRESET'; Reason = 'INVALID_PRESET' } }
             $presetContent = [IO.File]::ReadAllText($effectivePreset)
             if ($CanonicalPreset -and $presetSource -eq 'generated' -and -not (Test-TpmReShadePresetContent -Content $presetContent -ProfileDefinition $approvedProfile)) { return [pscustomobject]@{ Succeeded = $false; State = 'INVALID_PRESET'; Reason = 'INVALID_PRESET' } }
-        } elseif ($CanonicalPreset -and $approvedProfile.ProfileId -ne 'Original') {
+        } elseif ($CanonicalPreset) {
             $presetSource = 'generated'
             $presetContent = New-TpmReShadePresetContent -ProfileDefinition $approvedProfile
         } else {
@@ -9358,7 +10165,15 @@ function Install-TpmReShadeProfileDeployment {
             $prepared = Install-TpmReShadeApprovedEffect -EffectId $effectId -CacheRoot $CacheRoot -DestinationRoot $targetInfo.TargetDir -OwnershipPath $OwnershipPath -PrepareOnly
             if (-not $prepared -or -not $prepared.Succeeded -or $prepared.State -ne 'PREPARED' -or [string]::IsNullOrWhiteSpace([string]$prepared.StagingRoot)) { throw "Approved effect preparation failed for $effectId." }
             [void]$preparedStages.Add([string]$prepared.StagingRoot)
-            foreach ($asset in @($prepared.Files)) {
+            $assetFiles = @($prepared.Files)
+            $assetProgressLabel = 'ReShade profile asset staging'
+            $assetProgressStarted = Get-Date
+            $assetProgressCurrent = 0
+            $assetProgressTotal = $assetFiles.Count
+            if ($assetProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label $assetProgressLabel -Current $assetProgressCurrent -Total $assetProgressTotal -StartedAt $assetProgressStarted }
+            foreach ($asset in $assetFiles) {
+                $assetProgressCurrent++
+                Write-TpmCompactExtractionProgress -Phase Extracting -Label $assetProgressLabel -Current $assetProgressCurrent -Total $assetProgressTotal -StartedAt $assetProgressStarted
                 $rawRelative = [string]$asset.RelativePath
                 $relative = ($rawRelative -replace '/', '\').TrimStart('\')
                 $assetDestination = Join-Path $targetInfo.TargetDir $relative
@@ -9367,11 +10182,19 @@ function Install-TpmReShadeProfileDeployment {
                 [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($assetStage))
                 Copy-Item -LiteralPath $asset.Path -Destination $assetStage -Force -ErrorAction Stop
                 if (-not (Test-TpmReShadeApprovedEffectFile -FileSpec $asset -Path $assetStage)) { throw "INTEGRITY: staged approved effect hash validation failed for $relative." }
-                if ($fileNames -contains $relative) { throw "Duplicate staged ReShade path: $relative" }
-                [void]$fileNames.Add($relative)
                 $assetHash = (Get-FileHash -LiteralPath $assetStage -Algorithm SHA256 -ErrorAction Stop).Hash
-                [void]$manifestFiles.Add([pscustomobject]@{ RelativeSource = $relative; DestinationPath = $assetDestination; ExpectedSHA256 = $assetHash; ActualSHA256 = $assetHash; TPMManaged = $true; Kind = 'ApprovedEffect' })
+                if ($fileNames -contains $relative) {
+                    $existingAsset = @($manifestFiles.ToArray() | Where-Object { [string]::Equals([string]$_.DestinationPath, [string]$assetDestination, [StringComparison]::OrdinalIgnoreCase) })[0]
+                    $assetLength = [int64](Get-Item -LiteralPath $assetStage -ErrorAction Stop).Length
+                    if (-not $existingAsset -or $existingAsset.Kind -ne 'ApprovedEffect' -or [string]$existingAsset.ExpectedSHA256 -ine $assetHash -or -not $existingAsset.PSObject.Properties['ByteLength'] -or [int64]$existingAsset.ByteLength -ne $assetLength) { throw "Conflicting approved assets target the same ReShade path: $relative" }
+                    continue
+                }
+                [void]$fileNames.Add($relative)
+                $assetLength = [int64](Get-Item -LiteralPath $assetStage -ErrorAction Stop).Length
+                [void]$manifestFiles.Add([pscustomobject]@{ RelativeSource = [string]$asset.SourceRelativePath; DestinationPath = $assetDestination; ExpectedSHA256 = $assetHash; ActualSHA256 = $assetHash; ByteLength = $assetLength; TPMManaged = $true; Kind = 'ApprovedEffect' })
             }
+            if ($assetProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Extracting -Label $assetProgressLabel -Current $assetProgressCurrent -Total $assetProgressTotal -StartedAt $assetProgressStarted -Complete }
+            $assetProgressLabel = $null
         }
         foreach ($entry in $manifestFiles.ToArray()) {
             if (-not (Test-PathInside ([string]$entry.DestinationPath) ([string]$targetInfo.TargetDir))) { throw 'SECURITY: profile destination escaped target folder.' }
@@ -9392,6 +10215,7 @@ function Install-TpmReShadeProfileDeployment {
         if ($message -match 'ROLLBACK FAILED|CLEANUP FAILED') { $preserveStaging = $true }
         return [pscustomobject]@{ Succeeded = $false; State = if ($message -match 'COLLISION') { 'COLLISION' } elseif ($message -match 'ROLLBACK FAILED') { 'ACTION_REQUIRED' } else { 'ROLLED_BACK' }; Reason = if ($message -match 'TUTORIAL_PROGRESS_FAILED') { 'TUTORIAL_PROGRESS_FAILED' } else { 'PROFILE_DEPLOYMENT_FAILED' }; Error = $message; RollbackVerified = ($message -notmatch 'ROLLBACK FAILED') }
     } finally {
+        if ($assetProgressLabel -and $assetProgressStarted) { Write-TpmCompactExtractionProgress -Phase Extracting -Label $assetProgressLabel -Current $assetProgressCurrent -Total $assetProgressTotal -StartedAt $assetProgressStarted -Complete; $assetProgressLabel = $null }
         foreach ($preparedStage in @($preparedStages.ToArray())) { if (Test-Path -LiteralPath $preparedStage) { Remove-Item -LiteralPath $preparedStage -Recurse -Force -ErrorAction SilentlyContinue } }
         if ($staging -and -not $preserveStaging -and (Test-Path -LiteralPath $staging)) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
     }
@@ -9846,7 +10670,7 @@ function Read-TpmReShadeTerminalProfile {
         [string]$DefaultProfileId = '',
         [object]$PreviewSession = $null
     )
-    $orderedIds = @('Original', 'CleanSharp', 'ClassicCrt', 'Vivid', 'EnhancedArcade')
+    $orderedIds = @($Profiles | ForEach-Object { [string]$_.ProfileId })
     $selected = $null
     if ($DefaultProfileId) { $selected = Get-TpmReShadeProfile -ProfileId $DefaultProfileId }
     while ($true) {
@@ -9856,6 +10680,8 @@ function Read-TpmReShadeTerminalProfile {
         Write-Host ''
         Write-Host '  Preview uses a bundled image only; the terminal chooser is authoritative and view-only.' -ForegroundColor DarkCyan
         Write-Host '  Choose a profile number in the terminal. The preview follows it and never selects a profile.' -ForegroundColor DarkCyan
+        $profileCount = $orderedIds.Count
+        $lastProfileNumber = [Math]::Max(1, $profileCount)
         for ($profileIndex = 0; $profileIndex -lt $orderedIds.Count; $profileIndex++) {
             $id = $orderedIds[$profileIndex]
             $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
@@ -9865,10 +10691,11 @@ function Read-TpmReShadeTerminalProfile {
             Write-Host ('      {0}' -f $profileEntry.Description) -ForegroundColor DarkGray
         }
         Write-Host ('  Current selection: {0}' -f $(if ($selected) { $selected.FriendlyName } else { 'none -- choose a profile number in the terminal' })) -ForegroundColor Yellow
-        Write-Host '  Choose: [1-5] Select profile  [U] Use selected profile  [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back  [D] Details' -ForegroundColor White
+        Write-Host ('  Choose: [1-{0}] Select profile  [U] Use selected profile  [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back  [D] Details' -f $lastProfileNumber) -ForegroundColor White
         $choice = (Read-TpmReShadeTerminalInput -Prompt '  Choice' -PumpPreviewMessages ([bool]$PreviewSession)).Trim().ToUpperInvariant()
-        if ($choice -match '^[1-5]$') {
-            $selectedProfileId = $orderedIds[[int]$choice - 1]
+        $selectedNumber = 0
+        if ([int]::TryParse($choice, [ref]$selectedNumber) -and $selectedNumber -ge 1 -and $selectedNumber -le $profileCount) {
+            $selectedProfileId = $orderedIds[$selectedNumber - 1]
             $selected = @($Profiles | Where-Object { $_.ProfileId -eq $selectedProfileId })[0]
             if ($selected) {
                 if ($PreviewSession) {
@@ -9881,7 +10708,8 @@ function Read-TpmReShadeTerminalProfile {
         if ($choice -eq 'D') {
             Write-Host '  TeknoParrot Manager shows a safe preview approximation using a bundled image.' -ForegroundColor DarkCyan
             Write-Host '  It does not run the game or execute ReShade shaders during preview.' -ForegroundColor DarkCyan
-            Write-Host '  RC8 includes five beginner-safe profiles; additional profile codes are not part of this release.' -ForegroundColor DarkCyan
+            $effectCount = @($Profiles | ForEach-Object { $_.Effects } | Sort-Object -Unique).Count
+            Write-Host ('  RC8 includes {0} beginner-friendly profiles backed by {1} pinned shader effects.' -f $orderedIds.Count, $effectCount) -ForegroundColor DarkCyan
             Write-Host '  Actual in-game results may vary.' -ForegroundColor DarkCyan
             foreach ($id in $orderedIds) {
                 $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
@@ -9934,12 +10762,44 @@ function Read-TpmReShadeTerminalProfile {
             Write-Host '  Choose a numbered profile before using it.' -ForegroundColor Yellow
             continue
         }
-        Write-Host '  Invalid choice. Use 1-5, U, N, R, B, or D.' -ForegroundColor Yellow
+        Write-Host ('  Invalid choice. Use 1-{0}, U, N, R, B, or D.' -f $lastProfileNumber) -ForegroundColor Yellow
     }
 }
 function Update-TpmReShadeTutorialProgressText {
     param([AllowEmptyString()][string]$Content)
     $lines = @(if ([string]::IsNullOrEmpty($Content)) { @() } else { [regex]::Split($Content, "`r`n|`n|`r") })
+    $hasGeneral = $false
+    foreach ($line in $lines) { if ($line -match '^\s*\[GENERAL\]\s*$') { $hasGeneral = $true; break } }
+    if (-not $hasGeneral) {
+        $insertIndex = $lines.Count
+        for ($index = 0; $index -lt $lines.Count; $index++) {
+            if ($lines[$index] -match '^\s*\[[^\]]+\]\s*$') { $insertIndex = $index; break }
+        }
+        $before = if ($insertIndex -gt 0) { @($lines[0..($insertIndex - 1)]) } else { @() }
+        $after = if ($insertIndex -lt $lines.Count) { @($lines[$insertIndex..($lines.Count - 1)]) } else { @() }
+        $lines = @($before + @('[GENERAL]') + $after)
+    }
+    $normalized = New-Object System.Collections.Generic.List[string]
+    $currentSection = ''
+    $generalSettingsInserted = $false
+    foreach ($line in $lines) {
+        if ($line -match '^\s*\[([^\]]+)\]\s*$') {
+            $currentSection = $Matches[1].Trim()
+            [void]$normalized.Add($line)
+            if ($currentSection -ieq 'GENERAL') {
+                if (-not $generalSettingsInserted) {
+                    [void]$normalized.Add('EffectSearchPaths=.\Shaders,.\Shaders\SweetFX,.\Shaders\TPM')
+                    [void]$normalized.Add('PresetPath=.\ReShade.ini')
+                    [void]$normalized.Add('StartupPresetPath=.\ReShade.ini')
+                    $generalSettingsInserted = $true
+                }
+            }
+            continue
+        }
+        if ($currentSection -ieq 'GENERAL' -and $line -match '^\s*(EffectSearchPaths|PresetPath|StartupPresetPath)\s*=') { continue }
+        [void]$normalized.Add($line)
+    }
+    $lines = $normalized.ToArray()
     $overlayIndex = -1
     for ($index = 0; $index -lt $lines.Count; $index++) {
         if ($lines[$index] -match '^\s*\[OVERLAY\]\s*$') { $overlayIndex = $index; break }
@@ -9955,9 +10815,8 @@ function Update-TpmReShadeTutorialProgressText {
         for ($index = $overlayIndex + 1; $index -lt $sectionEnd; $index++) {
             if ($lines[$index] -match '^\s*TutorialProgress\s*=') { $progressIndex = $index; break }
         }
-        if ($progressIndex -ge 0) {
-            $lines[$progressIndex] = 'TutorialProgress=4'
-        } else {
+        if ($progressIndex -ge 0) { $lines[$progressIndex] = 'TutorialProgress=4' }
+        else {
             $before = @($lines[0..($sectionEnd - 1)])
             $after = if ($sectionEnd -lt $lines.Count) { @($lines[$sectionEnd..($lines.Count - 1)]) } else { @() }
             $lines = @($before + @('TutorialProgress=4') + $after)
@@ -9981,7 +10840,11 @@ function Get-TpmReShadeApplyPreflight {
     $protected = 0
     $missingPath = 0
     $unsafe = 0
+    $progressStarted = Get-Date
+    $progressCurrent = 0
     foreach ($pf in $SelectedGames) {
+        $progressCurrent++
+        if ($SelectedGames.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade apply preflight' -Current $progressCurrent -Total $SelectedGames.Count -StartedAt $progressStarted }
         $gameLabel = Get-TpmReShadeGameLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
         $record = [ordered]@{ Game = $gameLabel; Status = 'Unsafe'; Detail = '' }
         try {
@@ -10056,6 +10919,7 @@ function Get-TpmReShadeApplyPreflight {
         }
         [void]$records.Add([pscustomobject]$record)
     }
+    if ($SelectedGames.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade apply preflight' -Current $progressCurrent -Total $SelectedGames.Count -StartedAt $progressStarted -Complete }
     return [pscustomobject]@{
         Total = $SelectedGames.Count
         Ready = $ready
@@ -10130,6 +10994,79 @@ function Format-TpmReShadeSummaryDetailRows {
         [void]$rows.Add(('Native settings preserved for {0}: {1}' -f $game, $redactedWarning))
     }
     return @($rows)
+}
+
+function Get-TpmDirectoryEntriesWithDiscoveryProgress {
+    param(
+        [Parameter(Mandatory)][string]$DirectoryPath,
+        [Parameter(Mandatory)][string]$ProgressLabel,
+        [string]$Filter = '*.xml',
+        [ValidateSet('Continue', 'SilentlyContinue', 'Stop')][string]$EnumerationErrorAction = 'Continue',
+        [switch]$IncludeDirectories,
+        [switch]$Force,
+        [switch]$DirectoriesOnly,
+        [switch]$ExcludeFullBackup
+    )
+    $directoryOnly = [bool]$DirectoriesOnly
+    $fileOnly = -not [bool]$IncludeDirectories -and -not $directoryOnly
+    $entries = New-Object System.Collections.Generic.List[object]
+    $discoveryStarted = Get-Date
+    $discoveryCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Scanning -Label $ProgressLabel -Current $discoveryCurrent -Total 0 -StartedAt $discoveryStarted
+    try {
+        Get-ChildItem -LiteralPath $DirectoryPath -Filter $Filter -File:$fileOnly -Directory:$directoryOnly -Force:$Force -ErrorAction $EnumerationErrorAction | ForEach-Object {
+            $discoveryCurrent++
+            if (-not ($ExcludeFullBackup -and $_.Directory.Name -eq 'FullBackup')) { [void]$entries.Add($_) }
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label $ProgressLabel -Current $discoveryCurrent -Total 0 -StartedAt $discoveryStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label $ProgressLabel -Current $discoveryCurrent -Total 0 -StartedAt $discoveryStarted -Complete
+    }
+    return $entries.ToArray()
+}
+
+function Get-TpmRegisteredProfileFilesWithDiscoveryProgress {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [Parameter(Mandatory)][string]$ProgressLabel,
+        [ValidateSet('SilentlyContinue', 'Stop')][string]$EnumerationErrorAction = 'Stop',
+        [switch]$IncludeDirectories,
+        [switch]$IncludeFullBackup
+    )
+    $excludeFullBackup = -not [bool]$IncludeFullBackup
+    return (Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $UserProfilesDir -ProgressLabel $ProgressLabel -Filter '*.xml' -EnumerationErrorAction $EnumerationErrorAction -IncludeDirectories:$IncludeDirectories -ExcludeFullBackup:$excludeFullBackup)
+}
+
+function Get-TpmRegisteredProfileCodes {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$ProgressLabel)
+    $profileCandidates = New-Object System.Collections.Generic.List[object]
+    $profileDiscoveryLabel = "$ProgressLabel discovery"
+    $profileDiscoveryStarted = Get-Date
+    $profileDiscoveryCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Scanning -Label $profileDiscoveryLabel -Current $profileDiscoveryCurrent -Total 0 -StartedAt $profileDiscoveryStarted
+    try {
+        Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | ForEach-Object {
+            $profileDiscoveryCurrent++
+            if ($_.Directory.Name -ne 'FullBackup') { [void]$profileCandidates.Add($_) }
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label $profileDiscoveryLabel -Current $profileDiscoveryCurrent -Total 0 -StartedAt $profileDiscoveryStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label $profileDiscoveryLabel -Current $profileDiscoveryCurrent -Total 0 -StartedAt $profileDiscoveryStarted -Complete
+    }
+    $profiles = @($profileCandidates.ToArray() | Sort-Object BaseName)
+    $codes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $scanStarted = Get-Date
+    $current = 0
+    try {
+        foreach ($profileFile in $profiles) {
+            $current++
+            [void]$codes.Add($profileFile.BaseName)
+            Write-TpmCompactExtractionProgress -Phase 'Scanning' -Label $ProgressLabel -Current $current -Total $profiles.Count -StartedAt $scanStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase 'Scanning' -Label $ProgressLabel -Current $profiles.Count -Total $profiles.Count -Complete
+    }
+    return ,$codes
 }
 
 function Invoke-ReShadeSetup {
@@ -10232,7 +11169,8 @@ function Invoke-ReShadeSetupLegacy {
         }
     }
 
-    Write-Host "  Choose how your game should look. Use the preview window to compare the five beginner-safe RC8 profiles." -ForegroundColor Cyan
+    $profileCount = @(Get-TpmReShadeProfiles).Count
+    Write-Host ("  Choose how your game should look. Use the preview window to compare the {0} beginner-friendly RC8 profiles." -f $profileCount) -ForegroundColor Cyan
     Write-Host "  The preview is view-only; select the profile in the terminal. Nothing will be changed until you confirm." -ForegroundColor DarkCyan
     Write-Host "  Preview gallery (bundled landscape; compare Original/After or Split; choose profiles in the terminal)" -ForegroundColor DarkCyan
     $favoriteState = Read-TpmReShadeState
@@ -10284,12 +11222,9 @@ function Invoke-ReShadeSetupLegacy {
     # name is the profile code, validated against registered profiles, with
     $reShadePresetsDir = if($script:TpmOwnedLayout){Join-Path $script:TpmOwnedLayout.Assets 'ReShadePresets'}else{Join-Path $PSScriptRoot "ReShadePresets"}
     if (Test-Path -LiteralPath $reShadePresetsDir) {
-        $presetFiles = @(Get-ChildItem -LiteralPath $reShadePresetsDir -Filter "*.ini" -File -ErrorAction SilentlyContinue)
+        $presetFiles = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $reShadePresetsDir -ProgressLabel 'ReShade preset file discovery' -Filter '*.ini' -EnumerationErrorAction SilentlyContinue)
         if ($presetFiles.Count -gt 0) {
-            $knownPresetCodes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-            Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-                Where-Object { $_.Directory.Name -ne "FullBackup" } |
-                ForEach-Object { [void]$knownPresetCodes.Add($_.BaseName) }
+            $knownPresetCodes = Get-TpmRegisteredProfileCodes -UserProfilesDir $UserProfilesDir -ProgressLabel 'ReShade preset profile-code scan'
             foreach ($pfile in $presetFiles) {
                 $code = [System.IO.Path]::GetFileNameWithoutExtension($pfile.Name)
                 if (-not $knownPresetCodes.Contains($code)) {
@@ -10314,7 +11249,11 @@ function Invoke-ReShadeSetupLegacy {
         return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; SelectedItems = @(); ChangedItems = @(); SkippedItems = @(); FailedItems = @(); Reason = 'NO_GAMES_SELECTED' }
     }
     $nativeShaderWarnings = New-Object System.Collections.Generic.List[object]
+    $nativeScanStarted = Get-Date
+    $nativeScanCurrent = 0
     foreach ($nativeProfile in $selectedGames) {
+        $nativeScanCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade native shader scan' -Current $nativeScanCurrent -Total $selectedGames.Count -StartedAt $nativeScanStarted
         try {
             $nativeDoc = Read-Xml $nativeProfile.FullName
             $nativeWarning = Get-TpmReShadeNativeShaderWarnings -Document $nativeDoc
@@ -10325,6 +11264,7 @@ function Invoke-ReShadeSetupLegacy {
             Write-Log ("ReShade: native shader setting scan unavailable for {0} -- {1}" -f $nativeProfile.BaseName, $_.Exception.Message)
         }
     }
+    if ($selectedGames.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade native shader scan' -Current $nativeScanCurrent -Total $selectedGames.Count -StartedAt $nativeScanStarted -Complete }
     if ($nativeShaderWarnings.Count -gt 0) {
         Write-Host '  Native TeknoParrot display/shader settings detected:' -ForegroundColor Yellow
         foreach ($nativeWarning in $nativeShaderWarnings) {
@@ -10367,11 +11307,19 @@ function Invoke-ReShadeSetupLegacy {
     }
     if ($bulkApply) {
         $conflicts = @()
-        foreach ($pf in $selectedGames) {
-            $options = Get-TpmReShadeChooserOptions -GameId $pf.BaseName
-            if ($options.Restore.Found -and $options.Restore.Valid -and $options.Restore.Profile.ProfileId -ne $selectedProfile.ProfileId) {
-                $conflicts += [pscustomobject]@{ Game = $pf; Previous = $options.Restore }
+        $conflictScanStarted = Get-Date
+        $conflictScanCurrent = 0
+        try {
+            foreach ($pf in $selectedGames) {
+                $conflictScanCurrent++
+                Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'ReShade bulk conflict scan' -Current $conflictScanCurrent -Total $selectedGames.Count -StartedAt $conflictScanStarted
+                $options = Get-TpmReShadeChooserOptions -GameId $pf.BaseName
+                if ($options.Restore.Found -and $options.Restore.Valid -and $options.Restore.Profile.ProfileId -ne $selectedProfile.ProfileId) {
+                    $conflicts += [pscustomobject]@{ Game = $pf; Previous = $options.Restore }
+                }
             }
+        } finally {
+            Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'ReShade bulk conflict scan' -Current $conflictScanCurrent -Total $selectedGames.Count -StartedAt $conflictScanStarted -Complete
         }
         if ($conflicts.Count -gt 0) {
             Write-Host ("  Previously TeknoParrot Manager-managed: {0} game(s) use a different profile." -f $conflicts.Count) -ForegroundColor Yellow
@@ -10429,7 +11377,11 @@ function Invoke-ReShadeSetupLegacy {
     $pathReasonCounts = @{}
     $preflightValid = 0
     $preflightReasonCounts = @{}
+    $pathPreflightStarted = Get-Date
+    $pathPreflightCurrent = 0
     foreach ($preflightProfile in $selectedGames) {
+        $pathPreflightCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade apply path preflight' -Current $pathPreflightCurrent -Total $selectedGames.Count -StartedAt $pathPreflightStarted
         try {
             $preflightDoc = Read-Xml $preflightProfile.FullName
             $preflightNode = if ($preflightDoc.GameProfile) { $preflightDoc.GameProfile.SelectSingleNode('GamePath') } else { $null }
@@ -10447,11 +11399,16 @@ function Invoke-ReShadeSetupLegacy {
             $preflightReasonCounts['PROFILE_READ_FAILED']++
         }
     }
+    if ($selectedGames.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade apply path preflight' -Current $pathPreflightCurrent -Total $selectedGames.Count -StartedAt $pathPreflightStarted -Complete }
     Write-Host ("  Path preflight: {0} valid, {1} skipped before transaction." -f $preflightValid, ($selectedGames.Count - $preflightValid)) -ForegroundColor DarkCyan
     foreach ($preflightReason in ($preflightReasonCounts.Keys | Sort-Object)) {
         Write-Host ("    {0}: {1}" -f $preflightReason, $preflightReasonCounts[$preflightReason]) -ForegroundColor DarkGray
     }
+    $deploymentStarted = Get-Date
+    $deploymentCurrent = 0
     foreach ($pf in $selectedGames) {
+        $deploymentCurrent++
+        Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current $deploymentCurrent -Total $selectedGames.Count -StartedAt $deploymentStarted
         try {
             $doc = Read-Xml $pf.FullName
             $gameLabel = Get-TpmReShadeGameLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
@@ -10615,6 +11572,7 @@ function Invoke-ReShadeSetupLegacy {
             }
         }
     }
+    if ($selectedGames.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current $deploymentCurrent -Total $selectedGames.Count -StartedAt $deploymentStarted -Complete }
     $skippedForAccounting = [Math]::Max(0, $skipped - $missingPath - $missingDevice - $unsafe)
     $accounting = Get-TpmReShadeApplyAccounting -Selected $selectedGames.Count -Deployed $deployed -Adopted $adopted -Protected $protected -MissingPath $missingPath -MissingDevice $missingDevice -Unsafe $unsafe -Failed $errors -KeptPrevious $keptProfile -SkippedCancelled $skippedForAccounting
     $changedTotal = $accounting.ChangedTpmManaged + $accounting.AdoptedReplaced
@@ -10778,12 +11736,9 @@ function Invoke-DgVoodoo2Setup {
     # and CustomThumbnails\<ProfileCode>.png (Invoke-ThumbnailDownload).
     $dgVoodoo2PresetsDir = if($script:TpmOwnedLayout){Join-Path $script:TpmOwnedLayout.Assets 'dgVoodoo2Presets'}else{Join-Path $PSScriptRoot "dgVoodoo2Presets"}
     if (Test-Path -LiteralPath $dgVoodoo2PresetsDir) {
-        $confFiles = @(Get-ChildItem -LiteralPath $dgVoodoo2PresetsDir -Filter "*.conf" -File -ErrorAction SilentlyContinue)
+        $confFiles = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $dgVoodoo2PresetsDir -ProgressLabel 'dgVoodoo2 preset file discovery' -Filter '*.conf' -EnumerationErrorAction SilentlyContinue)
         if ($confFiles.Count -gt 0) {
-            $knownConfCodes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-            Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-                Where-Object { $_.Directory.Name -ne "FullBackup" } |
-                ForEach-Object { [void]$knownConfCodes.Add($_.BaseName) }
+            $knownConfCodes = Get-TpmRegisteredProfileCodes -UserProfilesDir $UserProfilesDir -ProgressLabel 'dgVoodoo2 preset profile-code scan'
             foreach ($cfile in $confFiles) {
                 $code = [System.IO.Path]::GetFileNameWithoutExtension($cfile.Name)
                 if (-not $knownConfCodes.Contains($code)) {
@@ -10800,9 +11755,7 @@ function Invoke-DgVoodoo2Setup {
     # Scan all registered games for legacy API usage and build a detection map.
     Write-Host ""
     Write-Host "  Scanning registered games for old DirectX / Glide usage..." -ForegroundColor Cyan
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Directory.Name -ne "FullBackup" } |
-                  Sort-Object BaseName)
+    $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'dgVoodoo2 profile discovery' -EnumerationErrorAction SilentlyContinue | Sort-Object BaseName)
     if ($profiles.Count -eq 0) {
         Write-Host "  No registered games found." -ForegroundColor Yellow
         Write-Log "dgVoodoo2 setup: aborted -- no registered profiles."
@@ -10812,30 +11765,38 @@ function Invoke-DgVoodoo2Setup {
     $detectedMap = @{}   # BaseName -> API array
     $scanPathReasons = @{}
     $skipDetails = New-Object System.Collections.Generic.List[object]
-    foreach ($pf in $profiles) {
-        try {
-            $doc = Read-Xml $pf.FullName
-            if (-not $doc.GameProfile) { continue }
-            $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
-            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
-            $gamePath = $gpNode.InnerText.Trim()
-            $pathCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
-            if (-not $pathCheck.Valid) {
-                $reasonCode = [string]$pathCheck.ReasonCode
-                if (-not $scanPathReasons.ContainsKey($reasonCode)) { $scanPathReasons[$reasonCode] = 0 }
-                $scanPathReasons[$reasonCode]++
-                $skipReason = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'TPM has a saved location for this game, but Windows cannot find the executable.' }
-                $nextAction = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 10) Library Health Check to repair saved game paths.' }
-                [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonCode = $reasonCode; Reason = $skipReason; SavedPath = $gamePath; NextAction = $nextAction; Technical = [string]$pathCheck.Reason })
-                Write-Log ("dgVoodoo2 scan: skipped {0}; path reason={1}; detail={2}" -f $pf.BaseName, $reasonCode, $pathCheck.Reason)
-                continue
+    $scanStarted = Get-Date
+    $scanCurrent = 0
+    try {
+        foreach ($pf in $profiles) {
+            $scanCurrent++
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'dgVoodoo2 profile scan' -Current $scanCurrent -Total $profiles.Count -StartedAt $scanStarted
+            try {
+                $doc = Read-Xml $pf.FullName
+                if (-not $doc.GameProfile) { continue }
+                $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
+                if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
+                $gamePath = $gpNode.InnerText.Trim()
+                $pathCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
+                if (-not $pathCheck.Valid) {
+                    $reasonCode = [string]$pathCheck.ReasonCode
+                    if (-not $scanPathReasons.ContainsKey($reasonCode)) { $scanPathReasons[$reasonCode] = 0 }
+                    $scanPathReasons[$reasonCode]++
+                    $skipReason = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'TPM has a saved location for this game, but Windows cannot find the executable.' }
+                    $nextAction = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 10) Library Health Check to repair saved game paths.' }
+                    [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonCode = $reasonCode; Reason = $skipReason; SavedPath = $gamePath; NextAction = $nextAction; Technical = [string]$pathCheck.Reason })
+                    Write-Log ("dgVoodoo2 scan: skipped {0}; path reason={1}; detail={2}" -f $pf.BaseName, $reasonCode, $pathCheck.Reason)
+                    continue
+                }
+                $gamePath = [string]$pathCheck.ResolvedPath
+                $apis = @(Get-GameLegacyApi -ExePath $gamePath)
+                if ($apis.Count -gt 0) { $detectedMap[$pf.BaseName] = $apis }
+            } catch {
+                Write-Log "dgVoodoo2 scan: error reading $($pf.BaseName) -- $_"
             }
-            $gamePath = [string]$pathCheck.ResolvedPath
-            $apis = @(Get-GameLegacyApi -ExePath $gamePath)
-            if ($apis.Count -gt 0) { $detectedMap[$pf.BaseName] = $apis }
-        } catch {
-            Write-Log "dgVoodoo2 scan: error reading $($pf.BaseName) -- $_"
         }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'dgVoodoo2 profile scan' -Current $scanCurrent -Total $profiles.Count -StartedAt $scanStarted -Complete
     }
     foreach ($reasonCode in ($scanPathReasons.Keys | Sort-Object)) {
         Write-Host ("  Preflight skipped {0} game(s): {1}" -f $scanPathReasons[$reasonCode], $reasonCode) -ForegroundColor Yellow
@@ -10933,7 +11894,12 @@ function Invoke-DgVoodoo2Setup {
     $plannedProfiles = New-Object System.Collections.Generic.List[object]
     $hasConf  = Test-Path -LiteralPath (Join-Path $SourceDir "dgVoodoo.conf")
 
-    foreach ($pf in $targetProfiles) {
+    $preflightStarted = Get-Date
+    $preflightCurrent = 0
+    try {
+        foreach ($pf in $targetProfiles) {
+            $preflightCurrent++
+            Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'dgVoodoo2 deployment preflight' -Current $preflightCurrent -Total $targetProfiles.Count -StartedAt $preflightStarted
         try {
             $doc = Read-Xml $pf.FullName
             if (-not $doc.GameProfile) { $skipped++; continue }
@@ -11053,6 +12019,9 @@ function Invoke-DgVoodoo2Setup {
             }
         }
     }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'dgVoodoo2 deployment preflight' -Current $preflightCurrent -Total $targetProfiles.Count -StartedAt $preflightStarted -Complete
+    }
 
     if ($errors -gt 0) {
         $transactionResult = New-TpmFileBatchResult `
@@ -11108,6 +12077,21 @@ function Invoke-DgVoodoo2Setup {
         DeploymentDetails = $deploymentDetails.ToArray()
         SkipDetails = $skipDetails.ToArray()
         TransactionResult = $transactionResult
+    }
+}
+
+function Get-DgVoodoo2FailureGuidance {
+    param($Result)
+    $missingDevice = $false
+    $missingPath = $false
+    if ($null -ne $Result) {
+        $missingDevice = [int]$Result.MissingDevice -gt 0
+        $missingPath = [int]$Result.MissingPath -gt 0
+    }
+    return [pscustomobject]@{
+        DeviceMessage = if ($missingDevice) { 'The saved game drive or device is unavailable. Reconnect the game drive or device containing the affected games, then retry dgVoodoo2 setup.' } else { $null }
+        MissingPathMessage = if ($missingPath) { 'Windows cannot find one or more saved game paths. Use 10) Library Health Check to repair them.' } else { $null }
+        OfferHealthCheck = $missingPath
     }
 }
 
@@ -11168,9 +12152,14 @@ function Get-GpuFixFieldNames {
                              [System.StringComparer]::OrdinalIgnoreCase)
 
     if (Test-Path -LiteralPath $gpDir) {
-        $gpFiles = @(Get-ChildItem -LiteralPath $gpDir -Filter "*.xml" -ErrorAction SilentlyContinue)
-        foreach ($gf in $gpFiles) {
-            try {
+        $gpFiles = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $gpDir -ProgressLabel 'GPU Fix GameProfiles discovery' -Filter '*.xml' -EnumerationErrorAction SilentlyContinue -IncludeDirectories)
+        $scanStarted = Get-Date
+        $scanCurrent = 0
+        try {
+            foreach ($gf in $gpFiles) {
+                $scanCurrent++
+                Write-TpmCompactExtractionProgress -Phase Scanning -Label 'TeknoParrot profile catalog scan' -Current $scanCurrent -Total $gpFiles.Count -StartedAt $scanStarted
+                try {
                 $gdoc = Read-Xml $gf.FullName
                 $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
                 foreach ($n in $fnodes) {
@@ -11186,9 +12175,12 @@ function Get-GpuFixFieldNames {
                         }
                     }
                 }
-            } catch {
-                Write-Log ("GPU Fix: WARNING -- could not parse GameProfile '$($gf.BaseName)': $_")
+                } catch {
+                    Write-Log ("GPU Fix: WARNING -- could not parse GameProfile '$($gf.BaseName)': $_")
+                }
             }
+        } finally {
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'GameProfiles' -Current $scanCurrent -Total $gpFiles.Count -StartedAt $scanStarted -Complete
         }
     }
     return [pscustomobject]@{ BoolFields = $boolAmdFields; DropdownFields = $dropdownGpuFields; GameProfilesFound = (Test-Path -LiteralPath $gpDir) }
@@ -11216,9 +12208,14 @@ function Get-GpuAndFfbFieldNames {
     $gpDirExists       = Test-Path -LiteralPath $gpDir
 
     if ($gpDirExists) {
-        $gpFiles = @(Get-ChildItem -LiteralPath $gpDir -Filter "*.xml" -ErrorAction SilentlyContinue)
-        foreach ($gf in $gpFiles) {
-            try {
+        $gpFiles = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $gpDir -ProgressLabel 'GPU and FFB GameProfiles discovery' -Filter '*.xml' -EnumerationErrorAction SilentlyContinue -IncludeDirectories)
+        $scanStarted = Get-Date
+        $scanCurrent = 0
+        try {
+            foreach ($gf in $gpFiles) {
+                $scanCurrent++
+                Write-TpmCompactExtractionProgress -Phase Scanning -Label 'TeknoParrot profile catalog scan' -Current $scanCurrent -Total $gpFiles.Count -StartedAt $scanStarted
+                try {
                 $gdoc = Read-Xml $gf.FullName
                 $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
                 foreach ($n in $fnodes) {
@@ -11245,7 +12242,10 @@ function Get-GpuAndFfbFieldNames {
                 Write-Log ("GpuAndFfbFieldScan: WARNING -- could not parse GameProfile '$($gf.BaseName)': $_")
             }
         }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'GameProfiles' -Current $scanCurrent -Total $gpFiles.Count -StartedAt $scanStarted -Complete
     }
+}
 
     return [pscustomobject]@{
         Gpu = [pscustomobject]@{ BoolFields = $boolAmdFields; DropdownFields = $dropdownGpuFields; GameProfilesFound = $gpDirExists }
@@ -11329,6 +12329,30 @@ function Test-GameNeedsPostgres {
     param([System.Xml.XmlDocument]$Doc)
     $node = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[CategoryName='Postgres']")
     return ($null -ne $node)
+}
+
+function Get-TpmPostgresRequirementScan {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][System.IO.FileInfo[]]$ProfileFiles)
+    $needCount = 0
+    $scanBlocked = $false
+    $scanStarted = Get-Date
+    $scanCurrent = 0
+    try {
+        foreach ($profileFile in $ProfileFiles) {
+            $scanCurrent++
+            Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'PostgreSQL requirement profile scan' -Current $scanCurrent -Total $ProfileFiles.Count -StartedAt $scanStarted
+            try {
+                $doc = Read-Xml $profileFile.FullName
+                if ($doc.GameProfile -and (Test-GameNeedsPostgres $doc)) { $needCount++ }
+            } catch {
+                $scanBlocked = $true
+                Write-Log "Postgres setup: profile scan failed for $($profileFile.BaseName); recovery is blocked."
+            }
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'PostgreSQL requirement profile scan' -Current $scanCurrent -Total $ProfileFiles.Count -StartedAt $scanStarted -Complete
+    }
+    return [pscustomobject]@{ NeedCount = $needCount; ScanBlocked = $scanBlocked }
 }
 
 # Reads one named field's current value from the Postgres category, or
@@ -11689,19 +12713,28 @@ function Get-PostgresReinitializePlansFromDiagnoses {
 function Get-PostgresReinitializePlansFromProfiles {
     param([Parameter(Mandatory)][string]$UserProfilesDir, [string[]]$OnlyDatabases = @())
     $plans = New-Object System.Collections.Generic.List[object]
-    foreach ($pf in @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)) {
-        $doc = Read-Xml $pf.FullName
-        if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc)) { continue }
-        $db = [string](Get-PostgresFieldValue $doc 'DbName')
-        if ([string]::IsNullOrWhiteSpace($db) -or -not (Test-SafePostgresDbName $db)) { continue }
-        if ($OnlyDatabases.Count -gt 0 -and $OnlyDatabases -notcontains $db) { continue }
-        $metadata = Get-PostgresProfileDisplayMetadata -ProfilePath $pf.FullName
-        $label = $metadata.DisplayName
-        $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
-        $gamePath = if ($gamePathNode) { [string]$gamePathNode.InnerText } else { '' }
-        $backupFile = if ($gamePath -and (Test-Path -LiteralPath $gamePath -PathType Leaf)) { Get-PostgresBackupFile -GameFolder ([System.IO.Path]::GetDirectoryName($gamePath)) } else { '' }
-        $encoding = if ($db -eq 'GameDB06') { 'UTF8' } else { 'SQL_ASCII' }
-        [void]$plans.Add([pscustomobject]@{ GameLabel = $label; ProfileName = $metadata.ProfileKey; Database = $db; BackupFile = $backupFile; Encoding = $encoding })
+    $profileFiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'PostgreSQL reinitialize profile discovery' -EnumerationErrorAction Stop | Sort-Object Name)
+    $progressStarted = Get-Date
+    $progressCurrent = 0
+    try {
+        foreach ($pf in $profileFiles) {
+            $progressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL reinitialize plan scan' -Current $progressCurrent -Total $profileFiles.Count -StartedAt $progressStarted
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc)) { continue }
+            $db = [string](Get-PostgresFieldValue $doc 'DbName')
+            if ([string]::IsNullOrWhiteSpace($db) -or -not (Test-SafePostgresDbName $db)) { continue }
+            if ($OnlyDatabases.Count -gt 0 -and $OnlyDatabases -notcontains $db) { continue }
+            $metadata = Get-PostgresProfileDisplayMetadata -ProfilePath $pf.FullName
+            $label = $metadata.DisplayName
+            $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
+            $gamePath = if ($gamePathNode) { [string]$gamePathNode.InnerText } else { '' }
+            $backupFile = if ($gamePath -and (Test-Path -LiteralPath $gamePath -PathType Leaf)) { Get-PostgresBackupFile -GameFolder ([System.IO.Path]::GetDirectoryName($gamePath)) } else { '' }
+            $encoding = if ($db -eq 'GameDB06') { 'UTF8' } else { 'SQL_ASCII' }
+            [void]$plans.Add([pscustomobject]@{ GameLabel = $label; ProfileName = $metadata.ProfileKey; Database = $db; BackupFile = $backupFile; Encoding = $encoding })
+        }
+    } finally {
+        if ($profileFiles.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL reinitialize plan scan' -Current $progressCurrent -Total $profileFiles.Count -StartedAt $progressStarted -Complete }
     }
     return @($plans | Sort-Object GameLabel, ProfileName, Database -Unique)
 }
@@ -12006,6 +13039,9 @@ function New-PostgresRecoveryBackup {
     $profileBackupRoot = Join-Path $backupRoot 'Profiles'
     $profileBackups = New-Object System.Collections.Generic.List[object]
     $configBackups = New-Object System.Collections.Generic.List[object]
+    $profileProgressStarted = $null
+    $profileProgressCurrent = 0
+    $profileProgressTotal = 0
     try {
         [void][System.IO.Directory]::CreateDirectory($configBackupRoot)
         [void][System.IO.Directory]::CreateDirectory($profileBackupRoot)
@@ -12020,16 +13056,25 @@ function New-PostgresRecoveryBackup {
             [void]$configBackups.Add((Copy-PostgresRecoveryEvidenceFile -Source $configVariable.Value -Destination (Join-Path $backupRoot 'TeknoParrot-Manager.config.json')))
         }
         if (-not (Test-Path -LiteralPath $UserProfilesDir -PathType Container)) { throw 'UserProfiles directory is not present.' }
-        $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
+        $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'PostgreSQL recovery profile discovery' -EnumerationErrorAction Stop | Sort-Object Name)
+        $profileProgressTotal = $profiles.Count
+        if ($profileProgressTotal -gt 0) { $profileProgressStarted = Get-Date }
         foreach ($profileFile in $profiles) {
+            $profileProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL recovery profile scan' -Current $profileProgressCurrent -Total $profileProgressTotal -StartedAt $profileProgressStarted
             $doc = Read-Xml $profileFile.FullName
             if ($doc.GameProfile -and (Test-GameNeedsPostgres $doc)) {
                 [void]$profileBackups.Add((Copy-PostgresRecoveryEvidenceFile -Source $profileFile.FullName -Destination (Join-Path $profileBackupRoot $profileFile.Name)))
             }
         }
+        if ($profileProgressTotal -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL recovery profile scan' -Current $profileProgressCurrent -Total $profileProgressTotal -StartedAt $profileProgressStarted -Complete
+            $profileProgressStarted = $null
+        }
         if ($profileBackups.Count -eq 0) { throw 'No affected PostgreSQL profiles were identified.' }
         return [pscustomobject]@{ Path = $backupRoot; ConfigBackups = $configBackups.ToArray(); ProfileBackups = $profileBackups.ToArray(); Verified = $true }
     } catch {
+        if ($profileProgressStarted -and $profileProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL recovery profile scan' -Current $profileProgressCurrent -Total $profileProgressTotal -StartedAt $profileProgressStarted -Complete }
         Write-Log "Postgres recovery backup: blocked; evidence remains at $backupRoot."
         return [pscustomobject]@{ Path = $backupRoot; ConfigBackups = $configBackups.ToArray(); ProfileBackups = $profileBackups.ToArray(); Verified = $false }
     }
@@ -12054,11 +13099,22 @@ function Get-PostgresRecoveryBackupState {
 
 function Restore-PostgresProfileBackups {
     param([Parameter(Mandatory)]$RecoveryBackup)
-    foreach ($item in @($RecoveryBackup.ProfileBackups | Sort-Object Source)) {
-        Copy-Item -LiteralPath $item.Backup -Destination $item.Source -Force -ErrorAction Stop
-        $sourceHash = (Get-FileHash -LiteralPath $item.Source -Algorithm SHA256 -ErrorAction Stop).Hash
-        $backupHash = (Get-FileHash -LiteralPath $item.Backup -Algorithm SHA256 -ErrorAction Stop).Hash
-        if ($sourceHash -ne $backupHash) { throw 'Postgres profile rollback hash verification failed.' }
+    $items = @($RecoveryBackup.ProfileBackups | Sort-Object Source)
+    $started = Get-Date
+    $current = 0
+    try {
+        foreach ($item in $items) {
+            $current++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'PostgreSQL profile rollback' -Current $current -Total $items.Count -StartedAt $started
+            Copy-Item -LiteralPath $item.Backup -Destination $item.Source -Force -ErrorAction Stop
+            $sourceHash = (Get-FileHash -LiteralPath $item.Source -Algorithm SHA256 -ErrorAction Stop).Hash
+            $backupHash = (Get-FileHash -LiteralPath $item.Backup -Algorithm SHA256 -ErrorAction Stop).Hash
+            if ($sourceHash -ne $backupHash) { throw 'Postgres profile rollback hash verification failed.' }
+        }
+    } finally {
+        if ($items.Count -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'PostgreSQL profile rollback' -Current $current -Total $items.Count -StartedAt $started -Complete
+        }
     }
     return $true
 }
@@ -12288,7 +13344,7 @@ function Invoke-GpuFixSetup {
     $legacy=Invoke-GpuFixSetupLegacy -UserProfilesDir $UserProfilesDir -TpRoot $TpRoot
     if ($null -eq $legacy) { $legacy=[pscustomobject]@{ Succeeded=$false; Updated=0; Unchanged=0; Skipped=0; Errors=0; SkipDetails=@(); Reason='CANCELLED'; Backup=$null } }
     $legacyBackup=Get-TpmTransactionField -Object $legacy -Name 'Backup'
-    $items=@(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | ForEach-Object BaseName)
+    $items = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'GPU Fix result profile discovery' -EnumerationErrorAction SilentlyContinue | ForEach-Object BaseName)
     $changed=@($items | Select-Object -First ([int]$legacy.Updated))
     $skipped=@($legacy.SkipDetails | ForEach-Object Game)
     $failed=if([int]$legacy.Errors -gt 0){@(1..([int]$legacy.Errors) | ForEach-Object { 'GPUFixFailure{0}' -f $_ })}else{@()}
@@ -12369,7 +13425,7 @@ function Invoke-GpuFixSetupLegacy {
     # -- Walk UserProfiles ------------------------------------------------------
     Write-Host ""
     Write-Host "  Applying GPU fixes to registered profiles..." -ForegroundColor DarkGray
-    $profiles  = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -ErrorAction SilentlyContinue)
+    $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'GPU Fix profile discovery' -EnumerationErrorAction SilentlyContinue -IncludeDirectories -IncludeFullBackup)
     $updated    = 0
     $unchanged  = 0
     $skipped    = 0
@@ -12437,7 +13493,7 @@ function Invoke-GpuFixSetupLegacy {
             }
         }
     }
-    Write-TpmCompactExtractionProgress -Phase Checking -Label 'GPU Fix' -Current 0 -Total 0 -StartedAt (Get-Date) -Complete
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'GPU Fix' -Current $gpuProgressCurrent -Total $profiles.Count -StartedAt $gpuProgressStarted -Complete
     Write-Host ""
     Write-Host ("  Updated  : {0} profile(s)" -f $updated) -ForegroundColor Green
     if ($unchanged -gt 0) { Write-Host ("  No change: {0} (already correct or no GPU fix fields)" -f $unchanged) -ForegroundColor DarkGray }
@@ -12957,19 +14013,38 @@ function Invoke-CrosshairSetup {
         Write-Log "Crosshairs: Crosshairs folder not found"; return
     }
 
-    # Scan and validate -- any PNG in the folder is a candidate
-    $allFiles = @(Get-ChildItem -LiteralPath $crosshairsDir -Filter "*.png" -File -ErrorAction SilentlyContinue |
-                     Sort-Object Name)
+    # Keep discovery indeterminate through the unbounded filename sort. Users may
+    # add any number of images, so neither discovery nor sorting has a fixed cap.
+    $allFileCandidates = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
+    $crosshairDiscoveryStarted = Get-Date
+    $crosshairDiscoveryCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'Crosshair PNG discovery' -Current $crosshairDiscoveryCurrent -Total 0 -StartedAt $crosshairDiscoveryStarted
+    try {
+        Get-ChildItem -LiteralPath $crosshairsDir -Filter "*.png" -File -ErrorAction Stop | ForEach-Object {
+            [void]$allFileCandidates.Add($_)
+            $crosshairDiscoveryCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'Crosshair PNG discovery' -Current $crosshairDiscoveryCurrent -Total 0 -StartedAt $crosshairDiscoveryStarted
+        }
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'Crosshair PNG discovery' -Current $crosshairDiscoveryCurrent -Total 0 -StartedAt $crosshairDiscoveryStarted
+        $allFiles = @($allFileCandidates.ToArray() | Sort-Object Name)
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'Crosshair PNG discovery' -Current $crosshairDiscoveryCurrent -Total 0 -StartedAt $crosshairDiscoveryStarted -Complete
+    }
     $valid   = [System.Collections.Generic.List[string]]::new()
     $invalid = [System.Collections.Generic.List[string]]::new()
+    $crosshairScanStarted = Get-Date
+    $crosshairScanCurrent = 0
 
     foreach ($f in $allFiles) {
+        $crosshairScanCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'Crosshair image validation' -Current $crosshairScanCurrent -Total $allFiles.Count -StartedAt $crosshairScanStarted
         if (Test-PngFile -Path $f.FullName) { $valid.Add($f.FullName) }
         else {
             $invalid.Add($f.Name)
             Write-Log "Crosshairs: rejected invalid PNG -- $($f.Name)"
         }
     }
+    if ($allFiles.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'Crosshair image validation' -Current $crosshairScanCurrent -Total $allFiles.Count -StartedAt $crosshairScanStarted -Complete }
 
     if ($invalid.Count -gt 0) {
         Write-Host ("  WARNING: {0} file(s) failed PNG validation and were skipped:" -f $invalid.Count) -ForegroundColor Yellow
@@ -13125,10 +14200,14 @@ function Invoke-CrosshairSetup {
     $logicalDeployments = New-Object System.Collections.Generic.List[string]
     $elfPlanned = $false; $pcsx2Planned = $false; $pcsx2IniPath = $null; $pcsx2AssetDir = $null
 
-    $xmlFiles = Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-                Where-Object { $_.Directory.Name -ne "FullBackup" }
+    $xmlFiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Crosshair profile discovery' -EnumerationErrorAction SilentlyContinue)
 
+    $profileScanStarted = Get-Date
+    $profileScanCurrent = 0
+    $profileScanTotal = $xmlFiles.Count
     foreach ($pf in $xmlFiles) {
+        $profileScanCurrent++
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Crosshair profile planning' -Current $profileScanCurrent -Total $profileScanTotal -StartedAt $profileScanStarted
         try {
             $doc = Read-Xml $pf.FullName
             if ($null -eq $doc.GameProfile) { continue }
@@ -13228,6 +14307,7 @@ function Invoke-CrosshairSetup {
             $errors++
         }
     }
+    if ($profileScanTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Crosshair profile planning' -Current $profileScanCurrent -Total $profileScanTotal -StartedAt $profileScanStarted -Complete }
 
     $transactionResult = Invoke-TpmCrosshairAssetTransaction `
         -P1Source $valid[$p1Idx] -P2Source $valid[$p2Idx] `
@@ -13301,11 +14381,15 @@ function Invoke-CursorHideSetup {
     param([string]$UserProfilesDir)
 
     $cursorFields = @('HideCursor','Hide Cursor','DisableCursor')
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object BaseName)
+    $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'CursorHide profile discovery' -EnumerationErrorAction SilentlyContinue | Sort-Object BaseName)
+    $progressStarted = Get-Date
+    $profileScanCurrent = 0
     $eligible = New-Object System.Collections.Generic.List[string]
     $plans = New-Object System.Collections.Generic.List[object]
     $alreadySet = 0; $noField = 0
     foreach ($pf in $profiles) {
+        $profileScanCurrent++
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'CursorHide profile scan' -Current $profileScanCurrent -Total $profiles.Count -StartedAt $progressStarted
         try {
             $doc = Read-Xml $pf.FullName
             $gunNode = if ($doc.GameProfile) { $doc.GameProfile.SelectSingleNode('GunGame') } else { $null }
@@ -13321,6 +14405,7 @@ function Invoke-CursorHideSetup {
             [void]$plans.Add([pscustomobject]@{ ProfileId=$pf.BaseName; ProfileFile=$pf; SourceHash=(Get-FileHash -LiteralPath $pf.FullName -Algorithm SHA256 -ErrorAction Stop).Hash })
         } catch { Write-Log "CursorHide: planning failed for $($pf.BaseName) -- $_" }
     }
+    if ($profiles.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Scanning -Label 'CursorHide profile scan' -Current $profileScanCurrent -Total $profiles.Count -StartedAt $progressStarted -Complete }
     if ($plans.Count -eq 0) {
         Write-Host '  No cursor-hiding profile changes are needed. Nothing was changed.' -ForegroundColor DarkGray
         Write-Log ("CursorHide setup: NO_OP. Eligible={0} AlreadySet={1} NoField={2}" -f $eligible.Count,$alreadySet,$noField)
@@ -13336,18 +14421,29 @@ function Invoke-CursorHideSetup {
         return (New-TpmProfileTransactionResult -WorkflowKey 'CrosshairSetup' -OperationKey 'CursorHide' -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary 'Cursor-hiding setup stopped before changing your profiles because the safety backup could not be verified.' -Items @() -Backup $backup -ReasonCode 'PROFILE_BACKUP_FAILED' -FinalChecks @('No cursor XML write was attempted.'))
     }
 
+    $revalidationCurrent = 0
     foreach ($plan in $plans) {
+        $revalidationCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'CursorHide profile revalidation' -Current $revalidationCurrent -Total $plans.Count -StartedAt $progressStarted
         if ((Get-FileHash -LiteralPath $plan.ProfileFile.FullName -Algorithm SHA256 -ErrorAction Stop).Hash -ine [string]$plan.SourceHash) {
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'CursorHide profile revalidation' -Current $revalidationCurrent -Total $plans.Count -StartedAt $progressStarted -Complete
             return (New-TpmProfileTransactionResult -WorkflowKey 'CrosshairSetup' -OperationKey 'CursorHide' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'Cursor-hiding setup needs attention because a profile changed before it could be updated.' -Items @($plans | ForEach-Object ProfileId) -Backup $backup -ReasonCode 'PROFILE_CHANGED_BEFORE_WRITE' -MutationStarted $false -FinalPassed $false -FinalChecks @('Source profile revalidation failed before the first XML write.'))
         }
         $current = Read-Xml $plan.ProfileFile.FullName
         $gunNode = if ($current.GameProfile) { $current.GameProfile.SelectSingleNode('GunGame') } else { $null }
         $needs = @($cursorFields | ForEach-Object { $fi=$current.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral $_)]"); if($fi){$fv=$fi.SelectSingleNode('FieldValue'); if($fv -and $fv.InnerText -ne '1'){$true}} })
-        if (-not $gunNode -or $gunNode.InnerText -ne 'true' -or $needs.Count -eq 0) { return (New-TpmProfileTransactionResult -WorkflowKey 'CrosshairSetup' -OperationKey 'CursorHide' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'Cursor-hiding setup needs attention because a profile changed before it could be updated.' -Items @($plans | ForEach-Object ProfileId) -Backup $backup -ReasonCode 'PROFILE_PLAN_CHANGED' -MutationStarted $false -FinalPassed $false -FinalChecks @('Source profile revalidation failed before the first XML write.')) }
+        if (-not $gunNode -or $gunNode.InnerText -ne 'true' -or $needs.Count -eq 0) {
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'CursorHide profile revalidation' -Current $revalidationCurrent -Total $plans.Count -StartedAt $progressStarted -Complete
+            return (New-TpmProfileTransactionResult -WorkflowKey 'CrosshairSetup' -OperationKey 'CursorHide' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'Cursor-hiding setup needs attention because a profile changed before it could be updated.' -Items @($plans | ForEach-Object ProfileId) -Backup $backup -ReasonCode 'PROFILE_PLAN_CHANGED' -MutationStarted $false -FinalPassed $false -FinalChecks @('Source profile revalidation failed before the first XML write.'))
+        }
     }
+    if ($plans.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'CursorHide profile revalidation' -Current $revalidationCurrent -Total $plans.Count -StartedAt $progressStarted -Complete }
 
     $completed = New-Object System.Collections.Generic.List[string]
+    $updateCurrent = 0
     foreach ($plan in $plans) {
+        $updateCurrent++
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'CursorHide profile update' -Current $updateCurrent -Total $plans.Count -StartedAt $progressStarted
         try {
             $doc = Read-Xml $plan.ProfileFile.FullName
             foreach ($fieldName in $cursorFields) {
@@ -13362,15 +14458,20 @@ function Invoke-CursorHideSetup {
             Write-Host ("    Updated : {0}" -f $plan.ProfileId) -ForegroundColor Green
         } catch { Write-Host ("    FAILED  {0}: profile was not verified" -f $plan.ProfileId) -ForegroundColor Red; Write-Log "CursorHide: FAILED $($plan.ProfileId) -- $_" }
     }
+    if ($plans.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Repairing -Label 'CursorHide profile update' -Current $updateCurrent -Total $plans.Count -StartedAt $progressStarted -Complete }
     $failed = New-Object System.Collections.Generic.List[string]
     $unknownFinal = New-Object System.Collections.Generic.List[string]
+    $verificationCurrent = 0
     foreach ($plan in $plans) {
+        $verificationCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'CursorHide final verification' -Current $verificationCurrent -Total $plans.Count -StartedAt $progressStarted
         try {
             $verify=Read-Xml $plan.ProfileFile.FullName
             $remaining=@($cursorFields | ForEach-Object { $fi=$verify.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral $_)]"); if($fi){$fv=$fi.SelectSingleNode('FieldValue'); if($fv -and $fv.InnerText -ne '1'){$true}} })
             if($remaining.Count -gt 0){[void]$failed.Add($plan.ProfileId)} elseif($completed -notcontains $plan.ProfileId){[void]$completed.Add($plan.ProfileId)}
         } catch {[void]$unknownFinal.Add($plan.ProfileId)}
     }
+    if ($plans.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'CursorHide final verification' -Current $verificationCurrent -Total $plans.Count -StartedAt $progressStarted -Complete }
     $allIds=@($plans | ForEach-Object ProfileId)
     if($unknownFinal.Count -gt 0){$outcome='ACTION_REQUIRED';$state='UNKNOWN';$summary='Cursor-hiding setup needs attention because the final profile state could not be verified.';$passed=$false;$reason='PROFILE_FINAL_STATE_UNKNOWN'}
     elseif($failed.Count -gt 0){$outcome='PARTIAL_APPLIED';$state='PARTIAL_KNOWN';$summary='Some cursor-hiding profiles were updated, but the operation did not finish.';$passed=$true;$reason='PROFILE_SAVE_PARTIAL'}
@@ -14330,6 +15431,25 @@ function Expand-ZipFileSafe {
     }
 }
 
+# Sums top-level source ZIP sizes for the AutoSync staging-space preflight.
+function Get-TpmZipSourceByteTotal {
+    param([string]$ZipSource)
+    $totalBytes = [double]0
+    $scanStarted = Get-Date
+    $scanCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'AutoSync source ZIP size scan' -Current $scanCurrent -Total 0 -StartedAt $scanStarted
+    try {
+        Get-ChildItem -LiteralPath $ZipSource -Filter *.zip -ErrorAction SilentlyContinue | ForEach-Object {
+            $totalBytes += [double]$_.Length
+            $scanCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'AutoSync source ZIP size scan' -Current $scanCurrent -Total 0 -StartedAt $scanStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'AutoSync source ZIP size scan' -Current $scanCurrent -Total 0 -StartedAt $scanStarted -Complete
+    }
+    return $totalBytes
+}
+
 # Extracts NAS ZIPs through a verified directory transaction. Existing target
 # folders are preserved until staging and pre-state verification are complete.
 # ZIP base names listed in $noSync are skipped.
@@ -14346,13 +15466,10 @@ function Invoke-AutoSync {
         } catch { Write-Log "AutoSync: could not read sync state -- starting fresh." }
     }
 
-    $zipFiles = @(Get-ChildItem -LiteralPath $zipSource -Filter *.zip -ErrorAction SilentlyContinue)
+    $zipFiles = @(Get-TpmTopLevelZipSourceFiles -ZipSource $zipSource -ProgressLabel 'AutoSync source ZIP discovery')
     if (-not $zipFiles -or $zipFiles.Count -eq 0) {
         Write-Host "  No ZIP files found in source. Skipping extraction." -ForegroundColor Yellow
-        $subdirHits = @(Get-ChildItem -LiteralPath $zipSource -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-            $c = (Get-ChildItem -LiteralPath $_.FullName -Filter *.zip -ErrorAction SilentlyContinue | Measure-Object).Count
-            if ($c -gt 0) { [PSCustomObject]@{ Path = $_.FullName; Count = $c } }
-        })
+        $subdirHits = @(Get-TpmImmediateZipSubdirectorySummary -ZipSource $zipSource)
         if ($subdirHits.Count -gt 0) {
             Write-Host "  Tip: ZIPs found one level down -- point the source path at one of these directly:" -ForegroundColor Cyan
             foreach ($sd in $subdirHits) {
@@ -14544,20 +15661,28 @@ function Invoke-AutoSync {
 function Build-ProfileIndex {
     param([string]$gameProfilesDir)
     $index = @{}
-    $templates = Get-ChildItem -LiteralPath $gameProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue
-    foreach ($tpl in $templates) {
-        $exe = Get-PrimaryExecutableName $tpl.FullName
-        if ($exe -and $exe.Trim() -ne "") {
-            foreach ($alt in (Get-ExeAlternatives $exe.Trim())) {
-                $k = $alt.ToLower()
-                if (-not $index.ContainsKey($k)) { $index[$k] = @() }
-                $index[$k] += [pscustomobject]@{
-                    Code         = $tpl.BaseName
-                    TemplatePath = $tpl.FullName
-                    ExeName      = $exe.Trim()
+    $templates = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $gameProfilesDir -ProgressLabel 'TeknoParrot executable index discovery' -Filter '*.xml' -EnumerationErrorAction SilentlyContinue)
+    $scanStarted = Get-Date
+    $scanCurrent = 0
+    try {
+        foreach ($tpl in $templates) {
+            $scanCurrent++
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'TeknoParrot executable index scan' -Current $scanCurrent -Total $templates.Count -StartedAt $scanStarted
+            $exe = Get-PrimaryExecutableName $tpl.FullName
+            if ($exe -and $exe.Trim() -ne "") {
+                foreach ($alt in (Get-ExeAlternatives $exe.Trim())) {
+                    $k = $alt.ToLower()
+                    if (-not $index.ContainsKey($k)) { $index[$k] = @() }
+                    $index[$k] += [pscustomobject]@{
+                        Code         = $tpl.BaseName
+                        TemplatePath = $tpl.FullName
+                        ExeName      = $exe.Trim()
+                    }
                 }
             }
         }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'GameProfiles' -Current $scanCurrent -Total $templates.Count -StartedAt $scanStarted -Complete
     }
     return $index
 }
@@ -14574,7 +15699,11 @@ function Build-DatIndexFromStream {
     $settings.IgnoreWhitespace = $true
     $settings.DtdProcessing    = [System.Xml.DtdProcessing]::Prohibit
     $reader = [System.Xml.XmlReader]::Create($stream, $settings)
+    $progressStarted = Get-Date
+    $progressCurrent = 0
+    $lastProgressCurrent = 0
     try {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'DAT index parsing' -Current $progressCurrent -Total 0 -StartedAt $progressStarted
         $gameName    = ''
         $profCode    = ''
         $exePath     = ''
@@ -14627,10 +15756,17 @@ function Build-DatIndexFromStream {
                         }
                     }
                 }
+                $progressCurrent++
+                if (($progressCurrent - $lastProgressCurrent) -ge 100) {
+                    Write-TpmCompactExtractionProgress -Phase Scanning -Label 'DAT index parsing' -Current $progressCurrent -Total 0 -StartedAt $progressStarted
+                    $lastProgressCurrent = $progressCurrent
+                }
             }
         }
     } finally {
-        $reader.Close()
+        try { $reader.Close() } finally {
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'DAT index parsing' -Current $progressCurrent -Total 0 -StartedAt $progressStarted -Complete
+        }
     }
     return $index
 }
@@ -14688,7 +15824,11 @@ function Build-GameNotesIndexFromStream {
     param([System.IO.Stream]$stream)
     $index   = @{}
     $reader  = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+    $progressStarted = Get-Date
+    $progressCurrent = 0
+    $lastProgressCurrent = 0
     try {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Game notes parsing' -Current $progressCurrent -Total 0 -StartedAt $progressStarted
         $code       = ''
         $noteLines  = New-Object System.Collections.Generic.List[string]
         $inSection  = $false
@@ -14696,6 +15836,11 @@ function Build-GameNotesIndexFromStream {
 
         while (-not $reader.EndOfStream) {
             $ln = $reader.ReadLine()
+            $progressCurrent++
+            if (($progressCurrent - $lastProgressCurrent) -ge 100) {
+                Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Game notes parsing' -Current $progressCurrent -Total 0 -StartedAt $progressStarted
+                $lastProgressCurrent = $progressCurrent
+            }
             if ($ln -match '^={60,}') {
                 if ($code -and $noteLines.Count -gt 0) {
                     $body = (($noteLines | Where-Object { $_.Trim() }) -join "`n").Trim()
@@ -14718,7 +15863,11 @@ function Build-GameNotesIndexFromStream {
             $body = (($noteLines | Where-Object { $_.Trim() }) -join "`n").Trim()
             if ($body) { $index[$code] = $body }
         }
-    } finally { $reader.Close() }
+    } finally {
+        try { $reader.Close() } finally {
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Game notes parsing' -Current $progressCurrent -Total 0 -StartedAt $progressStarted -Complete
+        }
+    }
     return $index
 }
 
@@ -14752,6 +15901,8 @@ function Build-GameNotesIndexFromZip {
 function Get-TeknoParrotProfileSet {
     param([string]$localGameProfilesDir = '')
     $result = New-Object 'System.Collections.Generic.HashSet[string]'([StringComparer]::OrdinalIgnoreCase)
+    $profileScanStarted = Get-Date
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'TeknoParrot profile list' -Current 0 -Total 0 -StartedAt $profileScanStarted
     $loaded = $false
     # Resolve the repo's actual default branch instead of hardcoding "master" --
     # if teknogods/TeknoParrotUI ever renames its default branch, this still
@@ -14769,15 +15920,20 @@ function Get-TeknoParrotProfileSet {
     $branchEncoded = [System.Uri]::EscapeDataString($branch)
     $apiUri = "https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/${branchEncoded}?recursive=1"
     for ($attempt = 1; $attempt -le 3; $attempt++) {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'GitHub profile query' -Current $attempt -Total 3 -StartedAt $profileScanStarted
         try {
             $resp = Invoke-TpmWebRequestSilently -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
                         -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
             $tree   = ($resp.Content | ConvertFrom-Json).tree
             $prefix = 'TeknoParrotUi.Common/GameProfiles/'
+            $tree = @($tree)
+            $treeCurrent = 0
             foreach ($node in $tree) {
+                $treeCurrent++
+                Write-TpmCompactExtractionProgress -Phase Scanning -Label 'GitHub profile tree' -Current $treeCurrent -Total $tree.Count -StartedAt $profileScanStarted
                 if ($node.type -eq 'blob' -and $node.path -like ($prefix + '*.xml')) {
                     $stem = [System.IO.Path]::GetFileNameWithoutExtension($node.path.Substring($prefix.Length))
-                    if ($stem -match '^[\w]+$') { [void]$result.Add($stem) }   # security: reject stems with path separators or dots
+                    if ($stem -match '^[\w]+$') { [void]$result.Add($stem) }
                 }
             }
             if ($result.Count -gt 0) {
@@ -14788,13 +15944,6 @@ function Get-TeknoParrotProfileSet {
             }
             break
         } catch {
-            $status = 0
-            # Get-TpmHttpStatusCodeFromError guards the same optional
-            # .Exception.Response/.StatusCode access this used to do inline
-            # (unsafe under strict mode for exception types that lack either
-            # property entirely -- RuntimeException from a plain "throw",
-            # HttpRequestException, etc.) and additionally falls back to
-            # extracting a status code embedded only in the message text.
             $status = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
             if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
                 Write-Log "ProfileSet (GitHub): query failed -- HTTP $status -- $_"; break
@@ -14804,13 +15953,17 @@ function Get-TeknoParrotProfileSet {
         }
     }
     if (-not $loaded -and $localGameProfilesDir -and (Test-Path -LiteralPath $localGameProfilesDir)) {
-        Get-ChildItem -LiteralPath $localGameProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue |
-            ForEach-Object {
-                $s = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
-                if ($s -match '^[\w]+$') { [void]$result.Add($s) }
-            }
+        $localProfiles = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $localGameProfilesDir -ProgressLabel 'TeknoParrot profile list discovery' -Filter '*.xml' -EnumerationErrorAction SilentlyContinue)
+        $localCurrent = 0
+        foreach ($localProfileFile in $localProfiles) {
+            $localCurrent++
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'TeknoParrot profile list' -Current $localCurrent -Total $localProfiles.Count -StartedAt $profileScanStarted
+            $s = [System.IO.Path]::GetFileNameWithoutExtension($localProfileFile.Name)
+            if ($s -match '^[\w]+$') { [void]$result.Add($s) }
+        }
         Write-Log "ProfileSet (local fallback): $($result.Count) profiles from $localGameProfilesDir"
     }
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'TeknoParrot profile list' -Current 0 -Total 0 -StartedAt $profileScanStarted -Complete
     return $result
 }
 
@@ -15963,7 +17116,8 @@ function Find-PostgresRecoveryRetryState {
     )
     $stateDirectory = [System.IO.Path]::GetFullPath((Get-PostgresRecoveryStateDirectory)).TrimEnd('\','/')
     $previousFull = [System.IO.Path]::GetFullPath($PreviousStatePath)
-    foreach ($candidate in @(Get-ChildItem -LiteralPath $stateDirectory -Filter '.tpm-postgres-recovery-*.json' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending)) {
+    $retryCandidates = Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $stateDirectory -ProgressLabel 'PostgreSQL recovery retry-state discovery' -Filter '.tpm-postgres-recovery-*.json' -EnumerationErrorAction SilentlyContinue
+    foreach ($candidate in @($retryCandidates | Sort-Object LastWriteTimeUtc -Descending)) {
         if ($candidate.FullName -ieq $previousFull) { continue }
         try {
             $outer = Get-Content -LiteralPath $candidate.FullName -Raw -ErrorAction Stop | ConvertFrom-Json
@@ -16448,7 +17602,14 @@ function Test-PostgresInstallationsRegistry {
 # Safe to call even when nothing is present -- every step checks first and
 # skips cleanly. Never called when Test-PostgresInstalled is already true.
 function Remove-PostgresPartialInstall {
+    $cleanupProgressStarted = Get-Date
+    $cleanupProgressCurrent = 0
+    $cleanupProgressLabel = 'PostgreSQL partial-install cleanup'
+    try {
+    Write-TpmCompactExtractionProgress -Phase Checking -Label $cleanupProgressLabel -Current $cleanupProgressCurrent -Total 0 -StartedAt $cleanupProgressStarted
     Write-Log "Postgres: checking for partial/stale install before fresh attempt..."
+    $cleanupProgressCurrent++
+    Write-TpmCompactExtractionProgress -Phase Checking -Label $cleanupProgressLabel -Current $cleanupProgressCurrent -Total 0 -StartedAt $cleanupProgressStarted
 
     $uninstallKeys = @(
         "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
@@ -16456,8 +17617,14 @@ function Remove-PostgresPartialInstall {
     )
     $expectedInstallDir = $script:PostgresInstallDir.TrimEnd('\')
     $pgInstallationsCheck = Test-PostgresInstallationsRegistry -ExpectedInstallDir $expectedInstallDir
-    $pgEntries = Get-ItemProperty -Path $uninstallKeys -ErrorAction SilentlyContinue |
-                     Where-Object { $_.DisplayName -like "PostgreSQL*8.3*" }
+    $pgEntries = New-Object System.Collections.Generic.List[object]
+    Get-ItemProperty -Path $uninstallKeys -ErrorAction SilentlyContinue | ForEach-Object {
+        $cleanupProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label $cleanupProgressLabel -Current $cleanupProgressCurrent -Total 0 -StartedAt $cleanupProgressStarted
+        if ($_.DisplayName -like "PostgreSQL*8.3*") {
+            [void]$pgEntries.Add($_)
+        }
+    }
     foreach ($entry in $pgEntries) {
         # Only ever uninstall an entry confirmed to be OUR install location --
         # someone could have an unrelated standalone PostgreSQL 8.3 for
@@ -16481,6 +17648,8 @@ function Remove-PostgresPartialInstall {
         $productCode = $entry.PSChildName
         if ($productCode -notmatch '^\{[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\}$') { continue }
         $uninstallLog = Join-Path $env:TEMP ("pg83-uninstall-" + [guid]::NewGuid().ToString("N") + ".log")
+        $cleanupProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label $cleanupProgressLabel -Current $cleanupProgressCurrent -Total 0 -StartedAt $cleanupProgressStarted
         try {
             Start-Process -FilePath "msiexec.exe" -ArgumentList @("/x", $productCode, "/qn", "/l*v", "`"$uninstallLog`"") -Wait -PassThru | Out-Null
             Write-Log "Postgres: uninstalled stale entry $productCode"
@@ -16495,18 +17664,24 @@ function Remove-PostgresPartialInstall {
     # by this cleanup.
     $pgServices = @(Get-Service -Name $script:PostgresServiceName -ErrorAction SilentlyContinue)
     foreach ($svc in $pgServices) {
+        $cleanupProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label $cleanupProgressLabel -Current $cleanupProgressCurrent -Total 0 -StartedAt $cleanupProgressStarted
         if ($svc.Status -eq 'Running') { Stop-Service -Name $svc.Name -Force -ErrorAction SilentlyContinue }
         & sc.exe delete $svc.Name | Out-Null
         Write-Log "Postgres: removed leftover service $($svc.Name)"
     }
 
     if (Test-Path -LiteralPath $script:PostgresInstallDir) {
+        $cleanupProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label $cleanupProgressLabel -Current $cleanupProgressCurrent -Total 0 -StartedAt $cleanupProgressStarted
         Remove-Item -LiteralPath $script:PostgresInstallDir -Recurse -Force -ErrorAction SilentlyContinue
         Write-Log "Postgres: removed leftover $script:PostgresInstallDir"
     }
 
     $pgUser = Get-LocalUser -Name "postgres" -ErrorAction SilentlyContinue
     if ($pgUser) {
+        $cleanupProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label $cleanupProgressLabel -Current $cleanupProgressCurrent -Total 0 -StartedAt $cleanupProgressStarted
         Remove-LocalUser -Name "postgres" -ErrorAction SilentlyContinue
         Write-Log "Postgres: removed leftover local user 'postgres'"
     }
@@ -16516,11 +17691,19 @@ function Remove-PostgresPartialInstall {
     # mapping between account names and security IDs was done" on the next
     # install attempt (confirmed empirically this session).
     $profileListPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
-    $staleProfiles = Get-ChildItem -Path $profileListPath -ErrorAction SilentlyContinue | Where-Object {
-        $imagePath = (Get-ItemProperty -Path $_.PSPath -Name ProfileImagePath -ErrorAction SilentlyContinue).ProfileImagePath
-        $imagePath -and ($imagePath -like "*\postgres")
+    $staleProfiles = New-Object System.Collections.Generic.List[object]
+    Get-ChildItem -Path $profileListPath -ErrorAction SilentlyContinue | ForEach-Object {
+        $profileKey = $_
+        $cleanupProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label $cleanupProgressLabel -Current $cleanupProgressCurrent -Total 0 -StartedAt $cleanupProgressStarted
+        $imagePath = (Get-ItemProperty -Path $profileKey.PSPath -Name ProfileImagePath -ErrorAction SilentlyContinue).ProfileImagePath
+        if ($imagePath -and ($imagePath -like "*\postgres")) {
+            [void]$staleProfiles.Add($profileKey)
+        }
     }
     foreach ($sidKey in $staleProfiles) {
+        $cleanupProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label $cleanupProgressLabel -Current $cleanupProgressCurrent -Total 0 -StartedAt $cleanupProgressStarted
         $imagePath = (Get-ItemProperty -Path $sidKey.PSPath -Name ProfileImagePath).ProfileImagePath
         Remove-Item -Path $sidKey.PSPath -Recurse -Force -ErrorAction SilentlyContinue
         if (Test-Path -LiteralPath $imagePath) {
@@ -16529,8 +17712,13 @@ function Remove-PostgresPartialInstall {
         Write-Log "Postgres: removed orphaned profile registration for $imagePath"
     }
     if (Test-Path -LiteralPath "C:\Users\postgres") {
+        $cleanupProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label $cleanupProgressLabel -Current $cleanupProgressCurrent -Total 0 -StartedAt $cleanupProgressStarted
         Remove-Item -LiteralPath "C:\Users\postgres" -Recurse -Force -ErrorAction SilentlyContinue
     }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label $cleanupProgressLabel -Current $cleanupProgressCurrent -Total 0 -StartedAt $cleanupProgressStarted -Complete
+}
 }
 
 # Windows Installer's Automation interface accepts the same public MSI
@@ -16696,11 +17884,11 @@ function Get-PostgresBackupFile {
     $pgBackupDir = Join-Path $GameFolder "pg_backup"
     if (-not (Test-Path -LiteralPath $pgBackupDir)) { return $null }
 
-    $dateSubfolders = @(Get-ChildItem -LiteralPath $pgBackupDir -Directory -ErrorAction SilentlyContinue |
+    $dateSubfolders = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $pgBackupDir -ProgressLabel 'PostgreSQL backup date-folder discovery' -Filter '*' -EnumerationErrorAction SilentlyContinue -DirectoriesOnly |
                             Where-Object { $_.Name -match '^\d{4}-\d{2}-\d{2}$' } | Sort-Object Name -Descending)
     $searchDir = if ($dateSubfolders.Count -gt 0) { $dateSubfolders[0].FullName } else { $pgBackupDir }
 
-    $candidates = @(Get-ChildItem -LiteralPath $searchDir -File -ErrorAction SilentlyContinue)
+    $candidates = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $searchDir -ProgressLabel 'PostgreSQL backup file discovery' -Filter '*' -EnumerationErrorAction SilentlyContinue)
     if ($candidates.Count -eq 0) { return $null }
 
     $best = $candidates | Sort-Object -Descending -Property {
@@ -16892,10 +18080,13 @@ function Invoke-PostgresGameSetup {
     $preflightError = $null
     try {
         $relBinPath = $script:PostgresBinDir.TrimEnd('\') + '\'
-        $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop |
-            Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
+        $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'PostgreSQL setup profile discovery' -EnumerationErrorAction Stop | Sort-Object Name)
+        $profileSetupStarted = Get-Date
+        $profileSetupCurrent = 0
         foreach ($pf in $profiles) {
             try {
+                $profileSetupCurrent++
+                Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL profile setup' -Current $profileSetupCurrent -Total $profiles.Count -StartedAt $profileSetupStarted
                 $doc = Read-Xml $pf.FullName
                 if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc)) { continue }
                 $dbName = Get-PostgresFieldValue $doc 'DbName'
@@ -16945,6 +18136,9 @@ function Invoke-PostgresGameSetup {
                 $results.Errors++
                 Write-Log "Postgres: preflight blocked for $($pf.BaseName); no profile write was attempted."
             }
+        }
+        if ($profiles.Count -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL profile setup' -Current $profileSetupCurrent -Total $profiles.Count -StartedAt $profileSetupStarted -Complete
         }
     } catch {
         $preflightBlocked = $true
@@ -17067,8 +18261,14 @@ function Invoke-PostgresGameSetup {
     $completedProfileItems = New-Object System.Collections.Generic.List[string]
     $attemptedDatabaseItems = New-Object System.Collections.Generic.List[string]
     $completedDatabaseItems = New-Object System.Collections.Generic.List[string]
-    foreach ($plan in @($preflightPlans | Sort-Object { $_.Profile.Name })) {
+    $databaseProgressPlans = @($preflightPlans | Where-Object { -not $_.DbExists -and -not $_.AutoCreate })
+    $databaseProgressStarted = Get-Date
+    $databaseProgressCurrent = 0
+    try {
+        foreach ($plan in @($preflightPlans | Sort-Object { $_.Profile.Name })) {
         if ($plan.DbExists -or $plan.AutoCreate) { continue }
+            $databaseProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'PostgreSQL database creation' -Current $databaseProgressCurrent -Total $databaseProgressPlans.Count -StartedAt $databaseProgressStarted
         $dbItem = 'database:' + $plan.DbName
         [void]$attemptedDatabaseItems.Add($dbItem)
         try {
@@ -17139,36 +18339,62 @@ function Invoke-PostgresGameSetup {
                 -RecoveryActions $(if ($dbRollback.Verified) { @() } else { @(@{ Id='Review'; Label='Open Details and review the preserved recovery evidence.' }) }))
         }
     }
+    } finally {
+        if ($databaseProgressPlans.Count -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'PostgreSQL database creation' -Current $databaseProgressCurrent -Total $databaseProgressPlans.Count -StartedAt $databaseProgressStarted -Complete
+        }
+    }
     try {
-        foreach ($plan in @($preflightPlans | Sort-Object { $_.Profile.Name })) {
-            $profileItem = 'profile:' + $plan.Profile.BaseName
-            if ($plan.Changed) {
-                [void]$attemptedProfileItems.Add($profileItem)
-                Save-Xml $plan.Document $plan.Profile.FullName
-                [void]$completedProfileItems.Add($profileItem)
-                $results.Configured++
-            } else {
-                $results.AlreadyConfigured++
+        $orderedProfilePlans = @($preflightPlans | Sort-Object { $_.Profile.Name })
+        $profileUpdateStarted = Get-Date
+        $profileUpdateCurrent = 0
+        try {
+            foreach ($plan in $orderedProfilePlans) {
+                $profileUpdateCurrent++
+                Write-TpmCompactExtractionProgress -Phase Repairing -Label 'PostgreSQL profile update' -Current $profileUpdateCurrent -Total $orderedProfilePlans.Count -StartedAt $profileUpdateStarted
+                $profileItem = 'profile:' + $plan.Profile.BaseName
+                if ($plan.Changed) {
+                    [void]$attemptedProfileItems.Add($profileItem)
+                    Save-Xml $plan.Document $plan.Profile.FullName
+                    [void]$completedProfileItems.Add($profileItem)
+                    $results.Configured++
+                } else {
+                    $results.AlreadyConfigured++
+                }
+            }
+        } finally {
+            if ($orderedProfilePlans.Count -gt 0) {
+                Write-TpmCompactExtractionProgress -Phase Repairing -Label 'PostgreSQL profile update' -Current $profileUpdateCurrent -Total $orderedProfilePlans.Count -StartedAt $profileUpdateStarted -Complete
             }
         }
         $finalChecks = New-Object System.Collections.Generic.List[string]
-        foreach ($plan in @($preflightPlans | Sort-Object { $_.Profile.Name })) {
-            $doc = Read-Xml $plan.Profile.FullName
-            foreach ($field in @(@('Path', $relBinPath), @('Address', '127.0.0.1'), @('Port', '5432'), @('User', 'postgres'))) {
-                $actualValue = [string](Get-PostgresFieldValue $doc $field[0])
-                $expectedValue = [string]$field[1]
-                if ($field[0] -eq 'Path') {
-                    $actualValue = $actualValue -replace '\\{2,}', '\'
-                    $expectedValue = $expectedValue -replace '\\{2,}', '\'
+        $profileVerificationStarted = Get-Date
+        $profileVerificationCurrent = 0
+        try {
+            foreach ($plan in $orderedProfilePlans) {
+                $profileVerificationCurrent++
+                Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL profile verification' -Current $profileVerificationCurrent -Total $orderedProfilePlans.Count -StartedAt $profileVerificationStarted
+                $doc = Read-Xml $plan.Profile.FullName
+                foreach ($field in @(@('Path', $relBinPath), @('Address', '127.0.0.1'), @('Port', '5432'), @('User', 'postgres'))) {
+                    $actualValue = [string](Get-PostgresFieldValue $doc $field[0])
+                    $expectedValue = [string]$field[1]
+                    if ($field[0] -eq 'Path') {
+                        $actualValue = $actualValue -replace '\\{2,}', '\'
+                        $expectedValue = $expectedValue -replace '\\{2,}', '\'
+                    }
+                    if (-not [string]::Equals($actualValue, $expectedValue, [System.StringComparison]::Ordinal)) { throw "PostgreSQL profile verification failed for $($plan.Profile.BaseName)." }
                 }
-                if (-not [string]::Equals($actualValue, $expectedValue, [System.StringComparison]::Ordinal)) { throw "PostgreSQL profile verification failed for $($plan.Profile.BaseName)." }
+                if (-not [string]::Equals([string](Get-PostgresFieldValue $doc 'Pass'), $SuperPasswordPlain, [System.StringComparison]::Ordinal)) { throw "PostgreSQL profile password verification failed for $($plan.Profile.BaseName)." }
+                if ($plan.DbExists -and -not $plan.AutoCreate) {
+                    $finalDb = Get-PostgresDatabaseState -DbName $plan.DbName -SuperPasswordPlain $SuperPasswordPlain
+                    if (-not $finalDb.Verified -or -not $finalDb.Exists) { throw "PostgreSQL database verification failed for $($plan.DbName)." }
+                }
+                [void]$finalChecks.Add(('Verified PostgreSQL profile and database state for {0}.' -f $plan.Profile.BaseName))
             }
-            if (-not [string]::Equals([string](Get-PostgresFieldValue $doc 'Pass'), $SuperPasswordPlain, [System.StringComparison]::Ordinal)) { throw "PostgreSQL profile password verification failed for $($plan.Profile.BaseName)." }
-            if ($plan.DbExists -and -not $plan.AutoCreate) {
-                $finalDb = Get-PostgresDatabaseState -DbName $plan.DbName -SuperPasswordPlain $SuperPasswordPlain
-                if (-not $finalDb.Verified -or -not $finalDb.Exists) { throw "PostgreSQL database verification failed for $($plan.DbName)." }
+        } finally {
+            if ($orderedProfilePlans.Count -gt 0) {
+                Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL profile verification' -Current $profileVerificationCurrent -Total $orderedProfilePlans.Count -StartedAt $profileVerificationStarted -Complete
             }
-            [void]$finalChecks.Add(('Verified PostgreSQL profile and database state for {0}.' -f $plan.Profile.BaseName))
         }
         $changed = @($attemptedDatabaseItems.ToArray() + $attemptedProfileItems.ToArray())
         $completed = @($completedDatabaseItems.ToArray() + $completedProfileItems.ToArray())
@@ -17580,8 +18806,20 @@ function Restore-FFBPluginDeploymentTransaction {
             if ([string]::IsNullOrWhiteSpace($UserProfilesDir)) {
                 throw 'overlap rollback has no UserProfiles directory.'
             }
-            Get-ChildItem -LiteralPath $OverlapBackupPath -Force -ErrorAction Stop |
-                Copy-Item -Destination $UserProfilesDir -Recurse -Force -ErrorAction Stop
+            $rollbackItems = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $OverlapBackupPath -ProgressLabel 'FFB plugin overlap rollback discovery' -Filter '*' -EnumerationErrorAction Stop -IncludeDirectories -Force)
+            $rollbackStarted = Get-Date
+            $rollbackCurrent = 0
+            try {
+                foreach ($rollbackItem in $rollbackItems) {
+                    $rollbackCurrent++
+                    Write-TpmCompactExtractionProgress -Phase Repairing -Label 'FFB plugin overlap rollback' -Current $rollbackCurrent -Total $rollbackItems.Count -StartedAt $rollbackStarted
+                    $rollbackItem | Copy-Item -Destination $UserProfilesDir -Recurse -Force -ErrorAction Stop
+                }
+            } finally {
+                if ($rollbackItems.Count -gt 0) {
+                    Write-TpmCompactExtractionProgress -Phase Repairing -Label 'FFB plugin overlap rollback' -Current $rollbackCurrent -Total $rollbackItems.Count -StartedAt $rollbackStarted -Complete
+                }
+            }
         } catch {
             [void]$errors.Add("native overlap rollback failed: $($_.Exception.Message)")
         }
@@ -17698,8 +18936,7 @@ function Invoke-FFBPluginSetup {
     }
     Write-Host ("  {0} game(s) in the supported-games list." -f $gameMap.Count) -ForegroundColor DarkGray
 
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Directory.Name -ne "FullBackup" })
+    $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'FFB plugin profile discovery' -EnumerationErrorAction SilentlyContinue)
     if ($profiles.Count -eq 0) {
         Write-Host "  No registered games found." -ForegroundColor Yellow
         Write-Log "FFBPlugin setup: aborted -- no registered profiles."
@@ -17787,7 +19024,11 @@ function Invoke-FFBPluginSetup {
     $missingDeviceGames = New-Object System.Collections.Generic.List[string]
     $pathReasonCounts = @{}
     $matchErrors = 0
+    $matchStarted = Get-Date
+    $matchCurrent = 0
     foreach ($pf in $profiles) {
+        $matchCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'FFB plugin profile matching' -Current $matchCurrent -Total $profiles.Count -StartedAt $matchStarted
         try {
             $doc = Read-Xml $pf.FullName
             $gamePath = ''
@@ -17826,6 +19067,9 @@ function Invoke-FFBPluginSetup {
             Write-Log "FFBPlugin: error reading $($pf.BaseName) -- $_"
             $matchErrors++
         }
+    }
+    if ($profiles.Count -gt 0) {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'FFB plugin profile matching' -Current $matchCurrent -Total $profiles.Count -StartedAt $matchStarted -Complete
     }
 
     $overlaps = @($candidates | Where-Object { $nativeEnabledSet.Contains($_.Profile.BaseName) })
@@ -17873,7 +19117,11 @@ function Invoke-FFBPluginSetup {
     $skippedNoMatch = [Math]::Max(0, $profiles.Count - $candidates.Count - $matchErrors - $invalidPathCount)
 
     $deploymentPlans = New-Object System.Collections.Generic.List[object]
+    $planningStarted = Get-Date
+    $planningCurrent = 0
     foreach ($c in $candidates) {
+        $planningCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'FFB plugin deployment planning' -Current $planningCurrent -Total $candidates.Count -StartedAt $planningStarted
         $pf = $c.Profile
         $gameLabel = $pf.BaseName
         try {
@@ -17954,6 +19202,9 @@ function Invoke-FFBPluginSetup {
             Write-Log "FFBPlugin: preflight error on $($pf.BaseName) -- $_"
             $errors++
         }
+    }
+    if ($candidates.Count -gt 0) {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'FFB plugin deployment planning' -Current $planningCurrent -Total $candidates.Count -StartedAt $planningStarted -Complete
     }
     if ($errors -gt 0) {
         $transactionResult = New-TpmFileBatchResult `
@@ -18092,8 +19343,13 @@ function Get-FFBBlasterFieldNames {
 
     $ffbFields = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     if (Test-Path -LiteralPath $GameProfilesDir) {
-        $gpFiles = @(Get-ChildItem -LiteralPath $GameProfilesDir -Filter "*.xml" -ErrorAction SilentlyContinue)
-        foreach ($gf in $gpFiles) {
+        $gpFiles = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $GameProfilesDir -ProgressLabel 'FFB GameProfiles discovery' -Filter '*.xml' -EnumerationErrorAction SilentlyContinue -IncludeDirectories)
+        $scanStarted = Get-Date
+        $scanCurrent = 0
+        try {
+            foreach ($gf in $gpFiles) {
+                $scanCurrent++
+                Write-TpmCompactExtractionProgress -Phase Scanning -Label 'FFB profile catalog scan' -Current $scanCurrent -Total $gpFiles.Count -StartedAt $scanStarted
             try {
                 $gdoc = Read-Xml $gf.FullName
                 $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
@@ -18114,6 +19370,9 @@ function Get-FFBBlasterFieldNames {
             } catch {
                 Write-Log ("FFBBlaster: WARNING -- could not parse GameProfile '$($gf.BaseName)': $_")
             }
+            }
+        } finally {
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'GameProfiles' -Current $scanCurrent -Total $gpFiles.Count -StartedAt $scanStarted -Complete
         }
     }
     return $ffbFields
@@ -18332,9 +19591,7 @@ function Disable-FFBBlasterForOverlap {
         if (-not (Test-Path -LiteralPath $UserProfilesDir -PathType Container -ErrorAction Stop)) {
             throw "UserProfiles directory is unavailable: $UserProfilesDir"
         }
-        $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop |
-                      Where-Object { $_.DirectoryName -ne (Join-Path $UserProfilesDir 'FullBackup') } |
-                      Sort-Object BaseName)
+        $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'FFB overlap profile discovery' -EnumerationErrorAction Stop | Sort-Object BaseName)
         $targets = @($profiles | Where-Object { $codes.Contains($_.BaseName) })
         if ($targets.Count -ne $codes.Count) {
             throw 'An overlapping native FFB profile disappeared before ownership could be switched.'
@@ -18344,7 +19601,12 @@ function Disable-FFBBlasterForOverlap {
             throw 'FFB Blaster fields could not be rediscovered before the ownership switch.'
         }
         $plans = New-Object System.Collections.Generic.List[object]
-        foreach ($profileFile in $targets) {
+        $planStarted = Get-Date
+        $planCurrent = 0
+        try {
+            foreach ($profileFile in $targets) {
+                $planCurrent++
+                Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'FFB overlap profile preflight' -Current $planCurrent -Total $targets.Count -StartedAt $planStarted
             $doc = Read-Xml $profileFile.FullName
             $nodes = @(Get-FFBBlasterFieldValueNodes -Doc $doc -Categories $categories)
             if ($nodes.Count -eq 0) {
@@ -18355,6 +19617,9 @@ function Disable-FFBBlasterForOverlap {
                 throw ("Native FFB field is no longer enabled for profile '{0}'." -f $profileFile.BaseName)
             }
             [void]$plans.Add([pscustomobject]@{ ProfileFile = $profileFile; Document = $doc; Nodes = $nodes })
+        }
+        } finally {
+            Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'FFB overlap profile preflight' -Current $planCurrent -Total $targets.Count -StartedAt $planStarted -Complete
         }
         if ($plans.Count -eq 0) {
             return [pscustomobject]@{ Succeeded = $true; Disabled = 0; BackupPath = $null; Reason = $null }
@@ -18371,28 +19636,59 @@ function Disable-FFBBlasterForOverlap {
         if (-not (Test-TpmNoReparsePath -Path $backupPath)) {
             throw "FFB overlap backup path is unsafe: $backupPath"
         }
-        Get-ChildItem -LiteralPath $UserProfilesDir -Force -ErrorAction Stop |
-            Where-Object { $_.Name -ne 'FullBackup' } |
-            Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction Stop
-        foreach ($plan in $plans) {
-            $backupFile = Join-Path $backupPath $plan.ProfileFile.Name
-            if (-not (Test-Path -LiteralPath $backupFile -PathType Leaf -ErrorAction Stop)) {
-                throw ("FFB overlap backup is missing profile '{0}'." -f $plan.ProfileFile.Name)
+        $snapshotItems = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $UserProfilesDir -ProgressLabel 'FFB overlap safety snapshot discovery' -Filter '*' -EnumerationErrorAction Stop -IncludeDirectories -Force | Where-Object { $_.Name -ne 'FullBackup' })
+        $snapshotStarted = Get-Date
+        $snapshotCurrent = 0
+        try {
+            foreach ($snapshotItem in $snapshotItems) {
+                $snapshotCurrent++
+                Write-TpmCompactExtractionProgress -Phase Repairing -Label 'FFB overlap safety snapshot' -Current $snapshotCurrent -Total $snapshotItems.Count -StartedAt $snapshotStarted
+                $snapshotItem | Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction Stop
             }
-            $sourceHash = (Get-FileHash -LiteralPath $plan.ProfileFile.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
-            $backupHash = (Get-FileHash -LiteralPath $backupFile -Algorithm SHA256 -ErrorAction Stop).Hash
-            if ($sourceHash -ne $backupHash) {
-                throw ("FFB overlap backup hash verification failed for profile '{0}'." -f $plan.ProfileFile.Name)
+        } finally {
+            if ($snapshotItems.Count -gt 0) {
+                Write-TpmCompactExtractionProgress -Phase Repairing -Label 'FFB overlap safety snapshot' -Current $snapshotCurrent -Total $snapshotItems.Count -StartedAt $snapshotStarted -Complete
+            }
+        }
+        $verifyStarted = Get-Date
+        $verifyCurrent = 0
+        try {
+            foreach ($plan in $plans) {
+                $verifyCurrent++
+                Write-TpmCompactExtractionProgress -Phase Checking -Label 'FFB overlap backup verification' -Current $verifyCurrent -Total $plans.Count -StartedAt $verifyStarted
+                $backupFile = Join-Path $backupPath $plan.ProfileFile.Name
+                if (-not (Test-Path -LiteralPath $backupFile -PathType Leaf -ErrorAction Stop)) {
+                    throw ("FFB overlap backup is missing profile '{0}'." -f $plan.ProfileFile.Name)
+                }
+                $sourceHash = (Get-FileHash -LiteralPath $plan.ProfileFile.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+                $backupHash = (Get-FileHash -LiteralPath $backupFile -Algorithm SHA256 -ErrorAction Stop).Hash
+                if ($sourceHash -ne $backupHash) {
+                    throw ("FFB overlap backup hash verification failed for profile '{0}'." -f $plan.ProfileFile.Name)
+                }
+            }
+        } finally {
+            if ($plans.Count -gt 0) {
+                Write-TpmCompactExtractionProgress -Phase Checking -Label 'FFB overlap backup verification' -Current $verifyCurrent -Total $plans.Count -StartedAt $verifyStarted -Complete
             }
         }
 
-        foreach ($plan in $plans) {
-            foreach ($node in $plan.Nodes) { $node.InnerText = '0' }
-            Save-Xml $plan.Document $plan.ProfileFile.FullName
-            $verifyDoc = Read-Xml $plan.ProfileFile.FullName
-            $remaining = @(Get-FFBBlasterFieldValueNodes -Doc $verifyDoc -Categories $categories | Where-Object { $_.InnerText -eq '1' })
-            if ($remaining.Count -gt 0) {
-                throw ("Native FFB remained enabled for profile '{0}' after the ownership switch." -f $plan.ProfileFile.BaseName)
+        $switchStarted = Get-Date
+        $switchCurrent = 0
+        try {
+            foreach ($plan in $plans) {
+                $switchCurrent++
+                Write-TpmCompactExtractionProgress -Phase Repairing -Label 'FFB overlap native switch' -Current $switchCurrent -Total $plans.Count -StartedAt $switchStarted
+                foreach ($node in $plan.Nodes) { $node.InnerText = '0' }
+                Save-Xml $plan.Document $plan.ProfileFile.FullName
+                $verifyDoc = Read-Xml $plan.ProfileFile.FullName
+                $remaining = @(Get-FFBBlasterFieldValueNodes -Doc $verifyDoc -Categories $categories | Where-Object { $_.InnerText -eq '1' })
+                if ($remaining.Count -gt 0) {
+                    throw ("Native FFB remained enabled for profile '{0}' after the ownership switch." -f $plan.ProfileFile.BaseName)
+                }
+            }
+        } finally {
+            if ($plans.Count -gt 0) {
+                Write-TpmCompactExtractionProgress -Phase Repairing -Label 'FFB overlap native switch' -Current $switchCurrent -Total $plans.Count -StartedAt $switchStarted -Complete
             }
         }
         return [pscustomobject]@{ Succeeded = $true; Disabled = $plans.Count; BackupPath = $backupPath; Reason = $null }
@@ -18400,8 +19696,20 @@ function Disable-FFBBlasterForOverlap {
         $message = $_.Exception.Message
         if ($backupPath -and (Test-Path -LiteralPath $backupPath -PathType Container -ErrorAction SilentlyContinue)) {
             try {
-                Get-ChildItem -LiteralPath $backupPath -Force -ErrorAction Stop |
-                    Copy-Item -Destination $UserProfilesDir -Recurse -Force -ErrorAction Stop
+                $rollbackItems = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $backupPath -ProgressLabel 'FFB overlap rollback discovery' -Filter '*' -EnumerationErrorAction Stop -IncludeDirectories -Force)
+                $rollbackStarted = Get-Date
+                $rollbackCurrent = 0
+                try {
+                    foreach ($rollbackItem in $rollbackItems) {
+                        $rollbackCurrent++
+                        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'FFB overlap rollback' -Current $rollbackCurrent -Total $rollbackItems.Count -StartedAt $rollbackStarted
+                        $rollbackItem | Copy-Item -Destination $UserProfilesDir -Recurse -Force -ErrorAction Stop
+                    }
+                } finally {
+                    if ($rollbackItems.Count -gt 0) {
+                        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'FFB overlap rollback' -Current $rollbackCurrent -Total $rollbackItems.Count -StartedAt $rollbackStarted -Complete
+                    }
+                }
                 Write-Log "FFB overlap switch rolled back after failure: $message"
             } catch {
                 Write-Log "FFB overlap switch rollback failed after '$message': $_"
@@ -18440,12 +19748,16 @@ function Invoke-FFBBlasterSetup {
     Write-Host "  Scanning GameProfiles for FFB Blaster fields..." -ForegroundColor DarkGray
     $gpDir = Join-Path $TpRoot "GameProfiles"
     $ffbFields = Get-FFBBlasterFieldNames -GameProfilesDir $gpDir
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object BaseName)
+    $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'FFB Blaster profile discovery' -EnumerationErrorAction SilentlyContinue | Sort-Object BaseName)
     $supportedCodes = New-Object System.Collections.Generic.List[string]
     $plans = New-Object System.Collections.Generic.List[object]
     $unknownNames = New-Object System.Collections.Generic.List[string]
     $unsupported = 0; $unknown = 0
+    $profileScanStarted = Get-Date
+    $profileScanCurrent = 0
     foreach ($pf in $profiles) {
+        $profileScanCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'FFB profiles' -Current $profileScanCurrent -Total $profiles.Count -StartedAt $profileScanStarted
         try {
             $doc = Read-Xml $pf.FullName
             $support = Get-FFBBlasterSupport -Doc $doc -Categories $ffbFields
@@ -18460,6 +19772,7 @@ function Invoke-FFBBlasterSetup {
             Write-Log "FFBBlaster: planning failed for $($pf.BaseName) -- $_"
         }
     }
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'FFB profiles' -Current $profileScanCurrent -Total $profiles.Count -StartedAt $profileScanStarted -Complete
     if ($plans.Count -eq 0) {
         $outcome = if ($unknown -gt 0) { 'ACTION_REQUIRED' } else { 'NO_OP' }
         $state = if ($unknown -gt 0) { 'UNKNOWN' } else { 'UNCHANGED' }
@@ -18479,44 +19792,68 @@ function Invoke-FFBBlasterSetup {
         return (New-TpmProfileTransactionResult -WorkflowKey 'FFBSetup' -OperationKey 'FFBBlaster' -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary 'FFB Blaster setup stopped before changing your profiles because the safety backup could not be verified.' -Items @() -Backup $backup -ReasonCode 'PROFILE_BACKUP_FAILED' -FinalChecks @('No XML write was attempted.'))
     }
 
-    foreach ($plan in $plans) {
-        if ((Get-FileHash -LiteralPath $plan.ProfileFile.FullName -Algorithm SHA256 -ErrorAction Stop).Hash -ine [string]$plan.SourceHash) {
-            Write-Log "FFBBlaster: source profile changed before first write: $($plan.ProfileId)"
-            return (New-TpmProfileTransactionResult -WorkflowKey 'FFBSetup' -OperationKey 'FFBBlaster' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'FFB Blaster setup needs attention because a profile changed before it could be updated.' -Items @($plans | ForEach-Object ProfileId) -Backup $backup -MutationStarted $false -FinalPassed $false -ReasonCode 'PROFILE_CHANGED_BEFORE_WRITE' -FinalChecks @('Source profile revalidation failed before the first XML write.'))
+    $revalidateStarted = Get-Date
+    $revalidateCurrent = 0
+    try {
+        foreach ($plan in $plans) {
+            $revalidateCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'FFB profile revalidation' -Current $revalidateCurrent -Total $plans.Count -StartedAt $revalidateStarted
+            if ((Get-FileHash -LiteralPath $plan.ProfileFile.FullName -Algorithm SHA256 -ErrorAction Stop).Hash -ine [string]$plan.SourceHash) {
+                Write-Log "FFBBlaster: source profile changed before first write: $($plan.ProfileId)"
+                return (New-TpmProfileTransactionResult -WorkflowKey 'FFBSetup' -OperationKey 'FFBBlaster' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'FFB Blaster setup needs attention because a profile changed before it could be updated.' -Items @($plans | ForEach-Object ProfileId) -Backup $backup -MutationStarted $false -FinalPassed $false -ReasonCode 'PROFILE_CHANGED_BEFORE_WRITE' -FinalChecks @('Source profile revalidation failed before the first XML write.'))
+            }
+            $current = Read-Xml $plan.ProfileFile.FullName
+            $currentSupport = Get-FFBBlasterSupport -Doc $current -Categories $ffbFields
+            if ($currentSupport.Status -ne 'Supported' -or -not $currentSupport.WouldWrite) {
+                return (New-TpmProfileTransactionResult -WorkflowKey 'FFBSetup' -OperationKey 'FFBBlaster' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'FFB Blaster setup needs attention because a profile changed before it could be updated.' -Items @($plans | ForEach-Object ProfileId) -Backup $backup -MutationStarted $false -FinalPassed $false -ReasonCode 'PROFILE_PLAN_CHANGED' -FinalChecks @('Source profile revalidation failed before the first XML write.'))
+            }
         }
-        $current = Read-Xml $plan.ProfileFile.FullName
-        $currentSupport = Get-FFBBlasterSupport -Doc $current -Categories $ffbFields
-        if ($currentSupport.Status -ne 'Supported' -or -not $currentSupport.WouldWrite) {
-            return (New-TpmProfileTransactionResult -WorkflowKey 'FFBSetup' -OperationKey 'FFBBlaster' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'FFB Blaster setup needs attention because a profile changed before it could be updated.' -Items @($plans | ForEach-Object ProfileId) -Backup $backup -MutationStarted $false -FinalPassed $false -ReasonCode 'PROFILE_PLAN_CHANGED' -FinalChecks @('Source profile revalidation failed before the first XML write.'))
-        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'FFB profile revalidation' -Current $revalidateCurrent -Total $plans.Count -StartedAt $revalidateStarted -Complete
     }
 
     $completed = New-Object System.Collections.Generic.List[string]
     $saveErrors = New-Object System.Collections.Generic.List[string]
-    foreach ($plan in $plans) {
-        try {
-            $doc = Read-Xml $plan.ProfileFile.FullName
-            $support = Get-FFBBlasterSupport -Doc $doc -Categories $ffbFields
-            foreach ($change in $support.Changes) { $change.Node.InnerText = $change.NewValue }
-            Save-Xml $doc $plan.ProfileFile.FullName
-            $verify = Get-FFBBlasterSupport -Doc (Read-Xml $plan.ProfileFile.FullName) -Categories $ffbFields
-            if ($verify.WouldWrite) { throw 'FFB Blaster read-back verification failed.' }
-            [void]$completed.Add($plan.ProfileId)
-            Write-Host ("    {0}" -f $plan.ProfileId) -ForegroundColor Green
-        } catch {
-            [void]$saveErrors.Add($plan.ProfileId)
-            Write-Host ("    FAILED {0}: profile was not verified" -f $plan.ProfileId) -ForegroundColor Red
-            Write-Log "FFBBlaster: FAILED $($plan.ProfileId) -- $_"
+    $mutationStarted = Get-Date
+    $mutationCurrent = 0
+    try {
+        foreach ($plan in $plans) {
+            $mutationCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'FFB profile updates' -Current $mutationCurrent -Total $plans.Count -StartedAt $mutationStarted
+            try {
+                $doc = Read-Xml $plan.ProfileFile.FullName
+                $support = Get-FFBBlasterSupport -Doc $doc -Categories $ffbFields
+                foreach ($change in $support.Changes) { $change.Node.InnerText = $change.NewValue }
+                Save-Xml $doc $plan.ProfileFile.FullName
+                $verify = Get-FFBBlasterSupport -Doc (Read-Xml $plan.ProfileFile.FullName) -Categories $ffbFields
+                if ($verify.WouldWrite) { throw 'FFB Blaster read-back verification failed.' }
+                [void]$completed.Add($plan.ProfileId)
+                Write-Host ("    {0}" -f $plan.ProfileId) -ForegroundColor Green
+            } catch {
+                [void]$saveErrors.Add($plan.ProfileId)
+                Write-Host ("    FAILED {0}: profile was not verified" -f $plan.ProfileId) -ForegroundColor Red
+                Write-Log "FFBBlaster: FAILED $($plan.ProfileId) -- $_"
+            }
         }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'FFB profile updates' -Current $mutationCurrent -Total $plans.Count -StartedAt $mutationStarted -Complete
     }
     $failed = New-Object System.Collections.Generic.List[string]
     $unknownFinal = New-Object System.Collections.Generic.List[string]
-    foreach ($plan in $plans) {
-        try {
-            $verify = Get-FFBBlasterSupport -Doc (Read-Xml $plan.ProfileFile.FullName) -Categories $ffbFields
-            if ($verify.WouldWrite) { [void]$failed.Add($plan.ProfileId) }
-            elseif ($completed -notcontains $plan.ProfileId) { [void]$completed.Add($plan.ProfileId) }
-        } catch { [void]$unknownFinal.Add($plan.ProfileId) }
+    $verificationStarted = Get-Date
+    $verificationCurrent = 0
+    try {
+        foreach ($plan in $plans) {
+            $verificationCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'FFB final verification' -Current $verificationCurrent -Total $plans.Count -StartedAt $verificationStarted
+            try {
+                $verify = Get-FFBBlasterSupport -Doc (Read-Xml $plan.ProfileFile.FullName) -Categories $ffbFields
+                if ($verify.WouldWrite) { [void]$failed.Add($plan.ProfileId) }
+                elseif ($completed -notcontains $plan.ProfileId) { [void]$completed.Add($plan.ProfileId) }
+            } catch { [void]$unknownFinal.Add($plan.ProfileId) }
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'FFB final verification' -Current $verificationCurrent -Total $plans.Count -StartedAt $verificationStarted -Complete
     }
     $allIds=@($plans | ForEach-Object ProfileId)
     if ($unknownFinal.Count -gt 0) {
@@ -18771,9 +20108,18 @@ function Expand-DgVoodoo2Zip {
             # entry paths -> ZipArchiveEntry, so each expected subpath can be
             # matched exactly regardless of the ZIP's own separator style.
             $byPath = @{}
-            foreach ($entry in $archive.Entries) {
-                $norm = $entry.FullName.Replace('/', '\').TrimStart('\')
-                $byPath[$norm] = $entry
+            $zipScanStarted = Get-Date
+            $zipScanCurrent = 0
+            $zipScanTotal = $archive.Entries.Count
+            try {
+                foreach ($entry in $archive.Entries) {
+                    $zipScanCurrent++
+                    Write-TpmCompactExtractionProgress -Phase 'Scanning' -Label 'dgVoodoo2 ZIP entry scan' -Current $zipScanCurrent -Total $zipScanTotal -StartedAt $zipScanStarted
+                    $norm = $entry.FullName.Replace('/', '\').TrimStart('\')
+                    $byPath[$norm] = $entry
+                }
+            } finally {
+                Write-TpmCompactExtractionProgress -Phase 'Scanning' -Label 'dgVoodoo2 ZIP entry scan' -Current $zipScanCurrent -Total $zipScanTotal -StartedAt $zipScanStarted -Complete
             }
 
             $missing = @($expectedEntries.Keys | Where-Object { -not $byPath.ContainsKey($_) })
@@ -18991,6 +20337,33 @@ function Get-BepInExInstallationHealth {
     return [pscustomobject]$result
 }
 
+function Get-BepInExEnumeratedItems {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Label,
+        [switch]$FilesOnly
+    )
+    $started = Get-Date
+    $current = 0
+    try {
+        if ($FilesOnly) {
+            Get-ChildItem -LiteralPath $Path -File -Recurse -ErrorAction Stop | ForEach-Object {
+                $current++
+                Write-TpmCompactExtractionProgress -Phase 'Checking' -Label $Label -Current $current -Total 0 -StartedAt $started
+                $_
+            }
+        } else {
+            Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction Stop | ForEach-Object {
+                $current++
+                Write-TpmCompactExtractionProgress -Phase 'Checking' -Label $Label -Current $current -Total 0 -StartedAt $started
+                $_
+            }
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase 'Checking' -Label $Label -Current $current -Total 0 -StartedAt $started -Complete
+    }
+}
+
 function Test-BepInExExistingTreeSafe {
     param([Parameter(Mandatory)][string]$GameRoot)
     foreach ($name in @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')) {
@@ -19000,8 +20373,8 @@ function Test-BepInExExistingTreeSafe {
         try {
             $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
             if ($item.PSIsContainer) {
-                foreach ($child in @(Get-ChildItem -LiteralPath $path -Force -Recurse -ErrorAction Stop)) {
-                    if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+                Get-BepInExEnumeratedItems -Path $path -Label 'BepInEx installed-tree safety scan' | ForEach-Object {
+                    if (($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'BepInEx installed tree contains a reparse point.' }
                 }
             }
         } catch { return $false }
@@ -19012,22 +20385,30 @@ function Test-BepInExExistingTreeSafe {
 function Get-BepInExStagedFiles {
     param([Parameter(Mandatory)][string]$StagingDir, [Parameter(Mandatory)][string]$DestDir)
     if (-not (Test-Path -LiteralPath $StagingDir -PathType Container)) { throw 'BepInEx staging directory is missing.' }
-    foreach ($item in @(Get-ChildItem -LiteralPath $StagingDir -Force -Recurse -ErrorAction Stop)) {
-        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'BepInEx staging contains a reparse point.' }
+    Get-BepInExEnumeratedItems -Path $StagingDir -Label 'BepInEx staged-tree safety scan' | ForEach-Object {
+        if (($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'BepInEx staging contains a reparse point.' }
     }
     $stageFull = [System.IO.Path]::GetFullPath($StagingDir).TrimEnd('\','/')
-    $files = @(Get-ChildItem -LiteralPath $StagingDir -File -Recurse -ErrorAction Stop | Sort-Object FullName)
+    $files = @(Get-BepInExEnumeratedItems -Path $StagingDir -Label 'BepInEx staged-file discovery' -FilesOnly | Sort-Object FullName)
     $result = New-Object System.Collections.Generic.List[string]
     $seen = @{}
-    foreach ($file in $files) {
-        $relative = $file.FullName.Substring($stageFull.Length).TrimStart('\','/')
-        if ([string]::IsNullOrWhiteSpace($relative) -or [System.IO.Path]::IsPathRooted($relative) -or $relative -match '(^|[\/])\.\.([\/]|$)') { throw 'BepInEx staging contains an unsafe relative path.' }
-        $destPath = Join-Path $DestDir $relative
-        if (-not (Test-PathInside -child $file.FullName -parent $StagingDir) -or -not (Test-PathInside -child $destPath -parent $DestDir)) { throw 'BepInEx staging path escaped its approved directory.' }
-        $key = $relative.ToLowerInvariant()
-        if ($seen.ContainsKey($key)) { throw 'BepInEx staging contains duplicate file names.' }
-        $seen[$key] = $true
-        [void]$result.Add($relative)
+    $fileStarted = Get-Date
+    $fileCurrent = 0
+    try {
+        foreach ($file in $files) {
+            $fileCurrent++
+            Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'BepInEx staged-file classification' -Current $fileCurrent -Total $files.Count -StartedAt $fileStarted
+            $relative = $file.FullName.Substring($stageFull.Length).TrimStart('\','/')
+            if ([string]::IsNullOrWhiteSpace($relative) -or [System.IO.Path]::IsPathRooted($relative) -or $relative -match '(^|[\/])\.\.([\/]|$)') { throw 'BepInEx staging contains an unsafe relative path.' }
+            $destPath = Join-Path $DestDir $relative
+            if (-not (Test-PathInside -child $file.FullName -parent $StagingDir) -or -not (Test-PathInside -child $destPath -parent $DestDir)) { throw 'BepInEx staging path escaped its approved directory.' }
+            $key = $relative.ToLowerInvariant()
+            if ($seen.ContainsKey($key)) { throw 'BepInEx staging contains duplicate file names.' }
+            $seen[$key] = $true
+            [void]$result.Add($relative)
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'BepInEx staged-file classification' -Current $fileCurrent -Total $files.Count -StartedAt $fileStarted -Complete
     }
     if ($result.Count -eq 0) { throw 'BepInEx ZIP contained no files to promote.' }
     return @($result)
@@ -19062,40 +20443,64 @@ function Remove-BepInExStagingDirectory {
         $files = New-Object 'System.Collections.Generic.List[string]'
         $directories = New-Object 'System.Collections.Generic.List[string]'
         $pending.Push($stagingFull)
-        while ($pending.Count -gt 0) {
-            $current = $pending.Pop()
-            if (-not (Test-PathInside -child $current -parent $stagingRoot) -or
-                -not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $current)) {
-                throw "staging directory is outside the controlled root or reparse-backed: $current"
-            }
-            [void]$directories.Add($current)
-            foreach ($child in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
-                $childFull = [System.IO.Path]::GetFullPath($child.FullName)
-                if (-not (Test-PathInside -child $childFull -parent $stagingFull)) {
-                    throw "staging descendant escaped the validated directory: $childFull"
+        $scanStarted = Get-Date
+        $scanCurrent = 0
+        try {
+            while ($pending.Count -gt 0) {
+                $current = $pending.Pop()
+                if (-not (Test-PathInside -child $current -parent $stagingRoot) -or
+                    -not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $current)) {
+                    throw "staging directory is outside the controlled root or reparse-backed: $current"
                 }
-                if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-                    throw "staging descendant is reparse-backed: $childFull"
+                [void]$directories.Add($current)
+                Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop | ForEach-Object {
+                    $scanCurrent++
+                    Write-TpmCompactExtractionProgress -Phase Checking -Label 'BepInEx staging cleanup safety scan' -Current $scanCurrent -Total 0 -StartedAt $scanStarted
+                    $childFull = [System.IO.Path]::GetFullPath($_.FullName)
+                    if (-not (Test-PathInside -child $childFull -parent $stagingFull)) {
+                        throw "staging descendant escaped the validated directory: $childFull"
+                    }
+                    if (($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                        throw "staging descendant is reparse-backed: $childFull"
+                    }
+                    if ($_.PSIsContainer) { $pending.Push($childFull) } else { [void]$files.Add($childFull) }
                 }
-                if ($child.PSIsContainer) { $pending.Push($childFull) } else { [void]$files.Add($childFull) }
             }
+        } finally {
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'BepInEx staging cleanup safety scan' -Current $scanCurrent -Total 0 -StartedAt $scanStarted -Complete
         }
-        foreach ($file in $files) {
-            if (-not (Test-Path -LiteralPath $file)) { continue }
-            if (-not (Test-PathInside -child $file -parent $stagingFull) -or
-                -not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $file)) {
-                throw "staging file changed to an unsafe path before cleanup: $file"
+        $fileStarted = Get-Date
+        $fileCurrent = 0
+        try {
+            foreach ($file in $files) {
+                $fileCurrent++
+                Write-TpmCompactExtractionProgress -Phase Repairing -Label 'BepInEx staging cleanup files' -Current $fileCurrent -Total $files.Count -StartedAt $fileStarted
+                if (-not (Test-Path -LiteralPath $file)) { continue }
+                if (-not (Test-PathInside -child $file -parent $stagingFull) -or
+                    -not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $file)) {
+                    throw "staging file changed to an unsafe path before cleanup: $file"
+                }
+                Remove-Item -LiteralPath $file -Force -ErrorAction Stop
             }
-            Remove-Item -LiteralPath $file -Force -ErrorAction Stop
+        } finally {
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'BepInEx staging cleanup files' -Current $fileCurrent -Total $files.Count -StartedAt $fileStarted -Complete
         }
-        for ($i = $directories.Count - 1; $i -ge 0; $i--) {
-            $directory = $directories[$i]
-            if (-not (Test-Path -LiteralPath $directory)) { continue }
-            if (-not (Test-PathInside -child $directory -parent $stagingRoot) -or
-                -not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $directory)) {
-                throw "staging directory changed to an unsafe path before cleanup: $directory"
+        $directoryStarted = Get-Date
+        $directoryCurrent = 0
+        try {
+            for ($i = $directories.Count - 1; $i -ge 0; $i--) {
+                $directoryCurrent++
+                Write-TpmCompactExtractionProgress -Phase Repairing -Label 'BepInEx staging cleanup directories' -Current $directoryCurrent -Total $directories.Count -StartedAt $directoryStarted
+                $directory = $directories[$i]
+                if (-not (Test-Path -LiteralPath $directory)) { continue }
+                if (-not (Test-PathInside -child $directory -parent $stagingRoot) -or
+                    -not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $directory)) {
+                    throw "staging directory changed to an unsafe path before cleanup: $directory"
+                }
+                Remove-Item -LiteralPath $directory -Force -ErrorAction Stop
             }
-            Remove-Item -LiteralPath $directory -Force -ErrorAction Stop
+        } finally {
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'BepInEx staging cleanup directories' -Current $directoryCurrent -Total $directories.Count -StartedAt $directoryStarted -Complete
         }
         if (Test-Path -LiteralPath $stagingFull) { throw 'staging directory remains after removal' }
     } catch {
@@ -19123,16 +20528,24 @@ function Test-BepInExBackupEntry {
         if (-not (Test-Path -LiteralPath $Source) -or -not (Test-Path -LiteralPath $Backup)) { return $false }
         $sourceItem = Get-Item -LiteralPath $Source -Force -ErrorAction Stop
         if (-not $sourceItem.PSIsContainer) { return (Test-BepInExFileMatch -Source $Source -Destination $Backup) }
-        foreach ($child in @(Get-ChildItem -LiteralPath $Backup -Force -Recurse -ErrorAction Stop)) {
-            if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+        Get-BepInExEnumeratedItems -Path $Backup -Label 'BepInEx backup-tree safety scan' | ForEach-Object {
+            if (($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'BepInEx backup tree contains a reparse point.' }
         }
-        $sourceFiles = @(Get-ChildItem -LiteralPath $Source -File -Recurse -ErrorAction Stop)
-        $backupFiles = @(Get-ChildItem -LiteralPath $Backup -File -Recurse -ErrorAction Stop)
+        $sourceFiles = @(Get-BepInExEnumeratedItems -Path $Source -Label 'BepInEx backup source-file discovery' -FilesOnly)
+        $backupFiles = @(Get-BepInExEnumeratedItems -Path $Backup -Label 'BepInEx backup destination-file discovery' -FilesOnly)
         if ($sourceFiles.Count -ne $backupFiles.Count) { return $false }
         $sourceRoot = [System.IO.Path]::GetFullPath($Source).TrimEnd('\','/')
-        foreach ($file in $sourceFiles) {
-            $relative = $file.FullName.Substring($sourceRoot.Length).TrimStart('\','/')
-            if (-not (Test-BepInExFileMatch -Source $file.FullName -Destination (Join-Path $Backup $relative))) { return $false }
+        $verifyStarted = Get-Date
+        $verifyCurrent = 0
+        try {
+            foreach ($file in $sourceFiles) {
+                $verifyCurrent++
+                Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'BepInEx backup file verification' -Current $verifyCurrent -Total $sourceFiles.Count -StartedAt $verifyStarted
+                $relative = $file.FullName.Substring($sourceRoot.Length).TrimStart('\','/')
+                if (-not (Test-BepInExFileMatch -Source $file.FullName -Destination (Join-Path $Backup $relative))) { return $false }
+            }
+        } finally {
+            Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'BepInEx backup file verification' -Current $verifyCurrent -Total $sourceFiles.Count -StartedAt $verifyStarted -Complete
         }
         return $true
     } catch { return $false }
@@ -19146,8 +20559,13 @@ function New-BepInExUpdateBackup {
     $suffix = 1
     while (Test-Path -LiteralPath $backupPath) { $backupPath = Join-Path $GameRoot ($baseName + '-' + $suffix); $suffix++ }
     [void][System.IO.Directory]::CreateDirectory($backupPath)
+    $names = @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')
+    $progressStarted = Get-Date
+    $progressCurrent = 0
     try {
-        foreach ($name in @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')) {
+        foreach ($name in $names) {
+            $progressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'BepInEx backup copy' -Current $progressCurrent -Total $names.Count -StartedAt $progressStarted
             $source = Join-Path $GameRoot $name
             if (-not (Test-Path -LiteralPath $source)) { continue }
             if (-not (Test-BepInExNoReparsePath -Root $GameRoot -Path $source)) { throw "BepInEx source is reparse-backed: $name" }
@@ -19156,26 +20574,46 @@ function New-BepInExUpdateBackup {
             if (-not (Test-BepInExBackupEntry -Source $source -Backup $destination)) { throw "BepInEx backup verification failed for $name" }
         }
         return $backupPath
-    } catch { throw "BepInEx backup failed; evidence remains at '$backupPath'." }
+    } catch { throw "BepInEx backup failed; evidence remains at '$backupPath'." } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'BepInEx backup copy' -Current $progressCurrent -Total $names.Count -StartedAt $progressStarted -Complete
+    }
 }
 
 function Restore-BepInExUpdateBackup {
     param([Parameter(Mandatory)][string]$GameRoot, [Parameter(Mandatory)][string]$BackupPath)
-    foreach ($item in @(Get-ChildItem -LiteralPath $BackupPath -Force -ErrorAction Stop)) {
-        $destination = Join-Path $GameRoot $item.Name
-        Copy-Item -LiteralPath $item.FullName -Destination $destination -Recurse -Force -ErrorAction Stop
-        if (-not (Test-BepInExBackupEntry -Source $item.FullName -Backup $destination)) { throw "BepInEx reset rollback verification failed: $($item.Name)" }
+    $items = @(Get-ChildItem -LiteralPath $BackupPath -Force -ErrorAction Stop)
+    $progressStarted = Get-Date
+    $progressCurrent = 0
+    try {
+        foreach ($item in $items) {
+            $progressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'BepInEx backup restore' -Current $progressCurrent -Total $items.Count -StartedAt $progressStarted
+            $destination = Join-Path $GameRoot $item.Name
+            Copy-Item -LiteralPath $item.FullName -Destination $destination -Recurse -Force -ErrorAction Stop
+            if (-not (Test-BepInExBackupEntry -Source $item.FullName -Backup $destination)) { throw "BepInEx reset rollback verification failed: $($item.Name)" }
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'BepInEx backup restore' -Current $progressCurrent -Total $items.Count -StartedAt $progressStarted -Complete
     }
 }
 
 function Remove-BepInExFixedTree {
     param([Parameter(Mandatory)][string]$GameRoot)
-    foreach ($name in @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')) {
-        $path = Join-Path $GameRoot $name
-        if (Test-Path -LiteralPath $path) {
-            if (-not (Test-BepInExNoReparsePath -Root $GameRoot -Path $path)) { throw "BepInEx reset refused unsafe path: $name" }
-            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+    $names = @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')
+    $progressStarted = Get-Date
+    $progressCurrent = 0
+    try {
+        foreach ($name in $names) {
+            $progressCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'BepInEx fixed-tree removal' -Current $progressCurrent -Total $names.Count -StartedAt $progressStarted
+            $path = Join-Path $GameRoot $name
+            if (Test-Path -LiteralPath $path) {
+                if (-not (Test-BepInExNoReparsePath -Root $GameRoot -Path $path)) { throw "BepInEx reset refused unsafe path: $name" }
+                Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+            }
         }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'BepInEx fixed-tree removal' -Current $progressCurrent -Total $names.Count -StartedAt $progressStarted -Complete
     }
 }
 
@@ -19190,11 +20628,23 @@ function Invoke-TpmTransactionalTreePromote {
     $originals = New-Object System.Collections.Generic.List[object]
     $promoted = New-Object System.Collections.Generic.List[string]
     $createdDirs = New-Object System.Collections.Generic.List[string]
+    $orderedRelativeFiles = @($RelativeFiles | Sort-Object)
+    $progressStarted = Get-Date
+    $activeProgressPhase = 'Checking'
+    $activeProgressLabel = $null
+    $activeProgressCurrent = 0
+    $activeProgressTotal = 0
     try {
         if (-not (Test-Path -LiteralPath $DestDir -PathType Container)) { throw 'BepInEx destination directory is missing.' }
         [void][System.IO.Directory]::CreateDirectory($rollbackDir)
         $seen = @{}
-        foreach ($relative in @($RelativeFiles | Sort-Object)) {
+        $activeProgressPhase = 'Checking'
+        $activeProgressLabel = 'BepInEx destination preflight'
+        $activeProgressCurrent = 0
+        $activeProgressTotal = $orderedRelativeFiles.Count
+        foreach ($relative in $orderedRelativeFiles) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             if ([string]::IsNullOrWhiteSpace($relative) -or [System.IO.Path]::IsPathRooted($relative) -or $relative -match '(^|[\/])\.\.([\/]|$)') { throw 'BepInEx transaction received an unsafe relative path.' }
             $source = Join-Path $StagingDir $relative
             $destination = Join-Path $DestDir $relative
@@ -19213,9 +20663,17 @@ function Invoke-TpmTransactionalTreePromote {
                 [void]$originals.Add([pscustomobject]@{ Relative = $relative; Backup = $rollbackFile })
             }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel = $null
+        $activeProgressPhase = 'Repairing'
+        $activeProgressLabel = 'BepInEx file promotion'
+        $activeProgressCurrent = 0
+        $activeProgressTotal = $orderedRelativeFiles.Count
         $destFull = [System.IO.Path]::GetFullPath($DestDir).TrimEnd('\','/')
         Write-Log "BepInEx destination resolution: game root '$DestDir' resolved to '$destFull'."
-        foreach ($relative in @($RelativeFiles | Sort-Object)) {
+        foreach ($relative in $orderedRelativeFiles) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $source = Join-Path $StagingDir $relative
             $destination = Join-Path $DestDir $relative
             $parent = [System.IO.Path]::GetDirectoryName($destination)
@@ -19241,11 +20699,23 @@ function Invoke-TpmTransactionalTreePromote {
             Copy-Item -LiteralPath $source -Destination $destination -Force -ErrorAction Stop
             if (-not (Test-BepInExFileMatch -Source $source -Destination $destination)) { throw "BepInEx promoted file verification failed: $relative" }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel = $null
         if ($ValidationScript -and -not [bool](& $ValidationScript)) { throw 'BepInEx post-promotion validation failed.' }
     } catch {
+        if ($activeProgressLabel) {
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete
+            $activeProgressLabel = $null
+        }
         $promotionError = $_
         $rollbackErrors = New-Object System.Collections.Generic.List[string]
+        $activeProgressPhase = 'Repairing'
+        $activeProgressLabel = 'BepInEx promoted-file rollback'
+        $activeProgressCurrent = 0
+        $activeProgressTotal = $promoted.Count
         for ($i = $promoted.Count - 1; $i -ge 0; $i--) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $destination = Join-Path $DestDir $promoted[$i]
             try {
                 if (Test-Path -LiteralPath $destination) {
@@ -19255,7 +20725,13 @@ function Invoke-TpmTransactionalTreePromote {
                 }
             } catch { [void]$rollbackErrors.Add(("remove '{0}' -- {1}: {2}" -f $destination, $_.Exception.GetType().FullName, $_.Exception.Message)) }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel = 'BepInEx original-file restoration'
+        $activeProgressCurrent = 0
+        $activeProgressTotal = $originals.Count
         for ($i = $originals.Count - 1; $i -ge 0; $i--) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             $entry = $originals[$i]; $destination = Join-Path $DestDir $entry.Relative
             try {
                 [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($destination))
@@ -19263,12 +20739,20 @@ function Invoke-TpmTransactionalTreePromote {
                 if (-not (Test-BepInExFileMatch -Source $entry.Backup -Destination $destination)) { throw 'restored hash mismatch' }
             } catch { [void]$rollbackErrors.Add(("restore '{0}' -- {1}: {2}" -f $destination, $_.Exception.GetType().FullName, $_.Exception.Message)) }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel = 'BepInEx created-directory rollback'
+        $activeProgressCurrent = 0
+        $activeProgressTotal = $createdDirs.Count
         for ($i = $createdDirs.Count - 1; $i -ge 0; $i--) {
+            $activeProgressCurrent++
+            Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted
             try {
                 $dir = $createdDirs[$i]
-                if (Test-Path -LiteralPath $dir -PathType Container -and @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue).Count -eq 0) { Remove-Item -LiteralPath $dir -Force -ErrorAction Stop }
+                if (Test-Path -LiteralPath $dir -PathType Container -and -not (Test-ExtractedFolderHasContent -Path $dir)) { Remove-Item -LiteralPath $dir -Force -ErrorAction Stop }
             } catch { [void]$rollbackErrors.Add(("remove created directory '{0}' -- {1}: {2}" -f $createdDirs[$i], $_.Exception.GetType().FullName, $_.Exception.Message)) }
         }
+        if ($activeProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase $activeProgressPhase -Label $activeProgressLabel -Current $activeProgressCurrent -Total $activeProgressTotal -StartedAt $progressStarted -Complete }
+        $activeProgressLabel = $null
         if ($rollbackErrors.Count -gt 0) {
             $message = "TPM TRANSACTION ROLLBACK FAILED for '$DestDir'; evidence remains at '$rollbackDir'."
             Write-Log "BepInEx: $message"
@@ -19347,7 +20831,7 @@ function Invoke-BepInExUpdateCheck {
 function Invoke-BepInExUpdateCheckLegacy {
     param([string]$UserProfilesDir, [string]$CacheDir, [string]$ApprovedGamesRoot = '')
     if ([string]::IsNullOrWhiteSpace($ApprovedGamesRoot)) { $ApprovedGamesRoot = $gamesInstallFolder }
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
+    $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'BepInEx profile discovery' -EnumerationErrorAction SilentlyContinue | Sort-Object Name)
     if ($profiles.Count -eq 0) { Write-Host '  No registered games found.' -ForegroundColor Yellow; Write-Log 'BepInEx update check: aborted -- no registered profiles.'; return }
     if (-not (Test-Path -LiteralPath $ApprovedGamesRoot -PathType Container -ErrorAction SilentlyContinue)) { Write-Host '  The configured games root could not be verified -- no BepInEx changes made.' -ForegroundColor Red; Write-Log "BepInEx update check: blocked because approved root is unavailable: $ApprovedGamesRoot"; return }
     $candidates = New-Object System.Collections.Generic.List[object]
@@ -19361,7 +20845,12 @@ function Invoke-BepInExUpdateCheckLegacy {
     $missingPath = 0
     $protected = 0
     $pathReasonCounts = @{}
+    $pathProgressStarted = Get-Date
+    $pathProgressCurrent = 0
+    $pathProgressTotal = $profiles.Count
     foreach ($pf in $profiles) {
+        $pathProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'BepInEx path preflight' -Current $pathProgressCurrent -Total $pathProgressTotal -StartedAt $pathProgressStarted
         try {
             $doc = Read-Xml $pf.FullName
             if (-not $doc.GameProfile) { continue }
@@ -19435,6 +20924,7 @@ function Invoke-BepInExUpdateCheckLegacy {
             })
         }
     }
+    if ($pathProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'BepInEx path preflight' -Current $pathProgressCurrent -Total $pathProgressTotal -StartedAt $pathProgressStarted -Complete }
     Write-Host ("  Path preflight: {0} eligible game(s), {1} unavailable-device skip(s), {2} missing-path skip(s), {3} protected/reparse skip(s)." -f $candidates.Count, $missingDevice, $missingPath, $protected) -ForegroundColor DarkCyan
     if ($candidates.Count -eq 0) {
         Write-Host '  No eligible BepInEx game folders remain. Nothing was changed.' -ForegroundColor Yellow
@@ -19462,7 +20952,12 @@ function Invoke-BepInExUpdateCheckLegacy {
     }
     $outdated = New-Object System.Collections.Generic.List[object]
     $upToDate = 0; $errors = 0; $unsupportedArchitecture = 0
+    $inspectionProgressStarted = Get-Date
+    $inspectionProgressCurrent = 0
+    $inspectionProgressTotal = $candidates.Count
     foreach ($candidate in $candidates) {
+        $inspectionProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'BepInEx installation inspection' -Current $inspectionProgressCurrent -Total $inspectionProgressTotal -StartedAt $inspectionProgressStarted
         try {
             $health = Get-BepInExInstallationHealth -ExeDir $candidate.ExeDir
             $installedVer = $health.Version
@@ -19513,6 +21008,7 @@ function Invoke-BepInExUpdateCheckLegacy {
             Write-Log ("BepInEx update check: inspection failed for {0}; reason={1}; detail={2}" -f $candidate.Code, $classification.Code, $classification.Technical)
         }
     }
+    if ($inspectionProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'BepInEx installation inspection' -Current $inspectionProgressCurrent -Total $inspectionProgressTotal -StartedAt $inspectionProgressStarted -Complete }
     if ($outdated.Count -eq 0) {
         Write-Host ("  Up to date: {0} game(s)" -f $upToDate) -ForegroundColor Green
         if ($unsupportedArchitecture -gt 0) { Write-Host ("  Unsupported architecture: {0} game(s) -- left unchanged" -f $unsupportedArchitecture) -ForegroundColor Yellow }
@@ -19550,8 +21046,13 @@ function Invoke-BepInExUpdateCheckLegacy {
     $updated = 0; $updatedWithCleanupFailure = 0; $updateErrors = 0; $cleanupErrors = 0
     $rollbackRootCause = $null
     $batchStopped = $false
+    $updateProgressStarted = Get-Date
+    $updateProgressCurrent = 0
+    $updateProgressTotal = $outdated.Count
     foreach ($o in @($outdated | Sort-Object Code)) {
         if ($batchStopped) { break }
+        $updateProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'BepInEx game updates' -Current $updateProgressCurrent -Total $updateProgressTotal -StartedAt $updateProgressStarted
         $stagingDir = $null; $preserveStaging = $false; $promotionSucceeded = $false; $cleanupFailureRecorded = $false; $rollbackFailure = $false; $cleanupFailure = $false
         $backupPath = $null
         $resetApplied = $false
@@ -19739,6 +21240,7 @@ function Invoke-BepInExUpdateCheckLegacy {
             }
         }
     }
+    if ($updateProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Repairing -Label 'BepInEx game updates' -Current $updateProgressCurrent -Total $updateProgressTotal -StartedAt $updateProgressStarted -Complete }
     Write-Host ("  Updated cleanly: {0} game(s)" -f $updated) -ForegroundColor Green
     if ($updatedWithCleanupFailure -gt 0) { Write-Host ("  Updated with cleanup failure: {0} -- ACTION REQUIRED" -f $updatedWithCleanupFailure) -ForegroundColor Yellow }
     if ($missingDevice -gt 0) { Write-Host ("  Skipped unavailable device: {0} game(s) -- nothing changed for these games" -f $missingDevice) -ForegroundColor Yellow }
@@ -20537,20 +22039,31 @@ function Register-GamesLegacy {
           [string[]]$GameFolders = $null)
     if ($null -eq $datIndex) { $datIndex = @{} }
 
-    if ($null -eq $GameFolders -or $GameFolders.Count -eq 0) {
-        $exeFiles = @(Get-GameFiles $installFolder)
-    } else {
-        $installRoot = [System.IO.Path]::GetFullPath($installFolder).TrimEnd('\')
-        $scanRoots = New-Object System.Collections.Generic.List[string]
-        foreach ($folder in $GameFolders) {
-            $child = [System.IO.Path]::GetFullPath((Join-Path $installRoot ([string]$folder))).TrimEnd('\')
-            if (-not (Test-PathInside $child $installRoot) -or -not (Test-Path -LiteralPath $child -PathType Container)) {
-                Write-Log "Register-Games: rejected unsafe or missing filtered game folder '$folder'."
-                continue
+    $discoveryStarted = Get-Date
+    $discoveryState = [pscustomobject]@{ Current = 0 }
+    $discoveryProgress = {
+        param($file, $seen)
+        $discoveryState.Current++
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Game-file discovery' -Current $discoveryState.Current -Total 0 -StartedAt $discoveryStarted
+    }
+    try {
+        if ($null -eq $GameFolders -or $GameFolders.Count -eq 0) {
+            $exeFiles = @(Get-GameFiles $installFolder -ProgressScript $discoveryProgress)
+        } else {
+            $installRoot = [System.IO.Path]::GetFullPath($installFolder).TrimEnd('\')
+            $scanRoots = New-Object System.Collections.Generic.List[string]
+            foreach ($folder in $GameFolders) {
+                $child = [System.IO.Path]::GetFullPath((Join-Path $installRoot ([string]$folder))).TrimEnd('\')
+                if (-not (Test-PathInside $child $installRoot) -or -not (Test-Path -LiteralPath $child -PathType Container)) {
+                    Write-Log "Register-Games: rejected unsafe or missing filtered game folder '$folder'."
+                    continue
+                }
+                [void]$scanRoots.Add($child)
             }
-            [void]$scanRoots.Add($child)
+            $exeFiles = @($scanRoots | ForEach-Object { Get-GameFiles $_ -ProgressScript $discoveryProgress })
         }
-        $exeFiles = @($scanRoots | ForEach-Object { Get-GameFiles $_ })
+    } finally {
+        if ($discoveryState.Current -gt 0) { Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Game-file discovery' -Current $discoveryState.Current -Total 0 -StartedAt $discoveryStarted -Complete }
     }
     $registered     = New-Object System.Collections.ArrayList
     $already        = New-Object System.Collections.ArrayList
@@ -20570,9 +22083,20 @@ function Register-GamesLegacy {
     # already-registered sibling from that same shared-exe pool is scanned
     # first and incidentally marks this folder's own code as "seen".
     $preExistingCodes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    Get-ChildItem -LiteralPath $userProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Directory.Name -ne "FullBackup" } |
-        ForEach-Object { [void]$preExistingCodes.Add($_.BaseName) }
+    $preExistingFiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'Existing profile index discovery' -EnumerationErrorAction SilentlyContinue)
+    $profileScanStarted = Get-Date
+    $profileScanCurrent = 0
+    try {
+        foreach ($existingProfile in $preExistingFiles) {
+            $profileScanCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'Existing profile index' -Current $profileScanCurrent -Total $preExistingFiles.Count -StartedAt $profileScanStarted
+            [void]$preExistingCodes.Add($existingProfile.BaseName)
+        }
+    } finally {
+        if ($preExistingFiles.Count -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'Existing profile index' -Current $profileScanCurrent -Total $preExistingFiles.Count -StartedAt $profileScanStarted -Complete
+        }
+    }
     # Maps an exe's exact full path to the profile code already pointing at it
     # (if any). This is a stronger, name-independent signal than fuzzy-matching
     # the folder name against candidate profile codes: it catches a folder
@@ -20584,11 +22108,15 @@ function Register-GamesLegacy {
     # filename (e.g. "Nosferatu" not appearing among the "main.exe" candidates
     # for Nosferatu Lilinor). See issue #9.
     $gamePathIndex = [System.Collections.Generic.Dictionary[string,string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    Get-ChildItem -LiteralPath $userProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Directory.Name -ne "FullBackup" } |
-        ForEach-Object {
+    $gamePathProfiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'Existing GamePath index discovery' -EnumerationErrorAction SilentlyContinue)
+    $gamePathScanStarted = Get-Date
+    $gamePathScanCurrent = 0
+    try {
+        foreach ($existingProfile in $gamePathProfiles) {
+            $gamePathScanCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'Existing GamePath index' -Current $gamePathScanCurrent -Total $gamePathProfiles.Count -StartedAt $gamePathScanStarted
             try {
-                $existingDoc = Read-Xml $_.FullName
+                $existingDoc = Read-Xml $existingProfile.FullName
                 $gpNode = $existingDoc.GameProfile.SelectSingleNode("GamePath")
                 if ($null -ne $gpNode -and $gpNode.InnerText) {
                     # Trim() first: a GamePath written by a tool other than this
@@ -20596,12 +22124,17 @@ function Register-GamesLegacy {
                     # whitespace, which would otherwise make this key never match
                     # $exe.FullName (a clean FileInfo path) even when they refer to
                     # the same file. See issue #9.
-                    $gamePathIndex[$gpNode.InnerText.Trim().TrimEnd('\')] = $_.BaseName
+                    $gamePathIndex[$gpNode.InnerText.Trim().TrimEnd('\')] = $existingProfile.BaseName
                 }
             } catch {
-                Write-Log ("Register-Games: WARNING -- could not parse existing UserProfile '$($_.BaseName)' while building GamePath index: $_")
+                Write-Log ("Register-Games: WARNING -- could not parse existing UserProfile '$($existingProfile.BaseName)' while building GamePath index: $_")
             }
         }
+    } finally {
+        if ($gamePathProfiles.Count -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'Existing GamePath index' -Current $gamePathScanCurrent -Total $gamePathProfiles.Count -StartedAt $gamePathScanStarted -Complete
+        }
+    }
     $installBase    = $installFolder.TrimEnd('\')
     $matchedFolders = @{}
     $allExeFolders  = @{}
@@ -20610,7 +22143,7 @@ function Register-GamesLegacy {
 
     foreach ($exe in $exeFiles) {
         $_regI++
-        Write-TpmCompactExtractionProgress -Phase Scanning -Label $exe.Directory.Name -Current $_regI -Total $_regTotal
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Registration executable discovery' -Current $_regI -Total $_regTotal
         $relPath    = $exe.FullName.Substring($installBase.Length).TrimStart('\')
         $folderName = ($relPath -split '\\')[0]
         $folderKey  = $folderName -replace '\.(teknoparrot|parrot|game)$', ''   # strip suffix for matching/tracking
@@ -21403,22 +22936,81 @@ function Write-LibraryHealthRepairResults {
 function Repair-GamePaths {
     param([string]$userProfilesDir,[string]$installFolder,[hashtable]$profileIndex,[bool]$DryRun=$false,[object[]]$ReviewedCandidates=@(),[string[]]$OnlyGames=@())
     $backup=$null
-    if (-not $DryRun) {
-        $backup=New-TpmVerifiedUserProfilesBackup -UserProfilesDir $userProfilesDir -Label 'LibraryHealthAuto'
-        if (-not $backup.Verified) {
-            return (New-TpmProfileTransactionResult -WorkflowKey 'LibraryHealth' -OperationKey 'AutoRepairPaths' -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary 'Library Health repair stopped before changing profiles because its safety backup could not be verified.' -Items @() -Backup $backup -ReasonCode 'PROFILE_BACKUP_FAILED' -FinalChecks @('No automatic path repair was attempted.'))
-        }
+    $attachReports = {
+        param([object]$Transaction,[object[]]$Reports)
+        $stillBroken=@($Reports | Where-Object { $_.Status -ne 'fixed' -and $_.Status -ne 'candidate' })
+        $Transaction | Add-Member -NotePropertyName Reports -NotePropertyValue $Reports -Force
+        $Transaction | Add-Member -NotePropertyName Total -NotePropertyValue @($Reports).Count -Force
+        $Transaction | Add-Member -NotePropertyName Fixed -NotePropertyValue @($Reports | Where-Object Status -eq 'fixed').Count -Force
+        $Transaction | Add-Member -NotePropertyName Candidates -NotePropertyValue @($Reports | Where-Object Status -eq 'candidate').Count -Force
+        $Transaction | Add-Member -NotePropertyName StillBroken -NotePropertyValue $stillBroken.Count -Force
+        $Transaction.Succeeded = ($Transaction.Outcome -eq 'SUCCEEDED')
+        return $Transaction
     }
-    $legacy=Repair-GamePathsLegacy -userProfilesDir $userProfilesDir -installFolder $installFolder -profileIndex $profileIndex -DryRun $DryRun -ReviewedCandidates $ReviewedCandidates -OnlyGames $OnlyGames
+    if ($DryRun) {
+        $legacyReports=Repair-GamePathsLegacy -userProfilesDir $userProfilesDir -installFolder $installFolder -profileIndex $profileIndex -DryRun:$true -ReviewedCandidates $ReviewedCandidates -OnlyGames $OnlyGames
+        $reports=@($legacyReports)
+        $items=@($reports | ForEach-Object Code)
+        $skipped=@($reports | Where-Object { $_.Status -in @('candidate','ambiguous','no-candidate','not-reviewed') } | ForEach-Object Code)
+        $failed=@($reports | Where-Object { $_.Status -notin @('fixed','candidate','ambiguous','no-candidate','not-reviewed') } | ForEach-Object Code)
+        $tx=New-TpmProfileTransactionResult -WorkflowKey 'LibraryHealth' -OperationKey 'AutoRepairPaths' -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Summary 'Library Health repair planning made no profile changes.' -Items $items -FailedItems $failed -SkippedItems $skipped -ReasonCode 'REPAIR_PLAN_ONLY' -FinalChecks @('The repair plan was read without writing profile or backup data.')
+        return (& $attachReports $tx $reports)
+    }
+    $legacyPlan=Repair-GamePathsLegacy -userProfilesDir $userProfilesDir -installFolder $installFolder -profileIndex $profileIndex -DryRun:$true -ReviewedCandidates $ReviewedCandidates -OnlyGames $OnlyGames
+    $plan=@($legacyPlan)
+    if ($plan.Count -eq 0) {
+        $tx=New-TpmProfileTransactionResult -WorkflowKey 'LibraryHealth' -OperationKey 'AutoRepairPaths' -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Summary 'All selected profile paths are already valid.' -ReasonCode 'NO_CHANGES_NEEDED' -FinalChecks @('A read-only candidate scan found no profile requiring a path repair.')
+        $reports=@()
+        return (& $attachReports $tx $reports)
+    }
+    $planCandidates=@($plan | Where-Object Status -eq 'candidate')
+    if ($planCandidates.Count -eq 0) {
+        $items=@($plan | ForEach-Object Code)
+        $skipped=@($plan | Where-Object { $_.Status -in @('candidate','ambiguous','no-candidate','not-reviewed') } | ForEach-Object Code)
+        $failed=@($plan | Where-Object { $_.Status -notin @('candidate','ambiguous','no-candidate','not-reviewed') } | ForEach-Object Code)
+        $tx=New-TpmProfileTransactionResult -WorkflowKey 'LibraryHealth' -OperationKey 'AutoRepairPaths' -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary 'Library Health repair found no safe reviewed path candidate; no profile was changed.' -Items $items -FailedItems $failed -SkippedItems $skipped -ReasonCode 'NO_REPAIR_CANDIDATE' -FinalChecks @('Every affected profile was left unchanged because no safe candidate was available.')
+        return (& $attachReports $tx $plan)
+    }
+    $backup=New-TpmVerifiedUserProfilesBackup -UserProfilesDir $userProfilesDir -Label 'LibraryHealthAuto'
+    if (-not $backup.Verified) {
+        $items=@($plan | ForEach-Object Code)
+        $tx=New-TpmProfileTransactionResult -WorkflowKey 'LibraryHealth' -OperationKey 'AutoRepairPaths' -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary 'Library Health repair stopped before changing profiles because its safety backup could not be verified.' -Items $items -FailedItems @($planCandidates | ForEach-Object Code) -Backup $backup -ReasonCode 'PROFILE_BACKUP_FAILED' -FinalChecks @('No automatic path repair was attempted.')
+        return (& $attachReports $tx $plan)
+    }
+    $legacy=Repair-GamePathsLegacy -userProfilesDir $userProfilesDir -installFolder $installFolder -profileIndex $profileIndex -DryRun:$false -ReviewedCandidates $ReviewedCandidates -OnlyGames $OnlyGames
     $reports=@($legacy)
     $items=@($reports | ForEach-Object Code)
     $changed=@($reports | Where-Object Status -eq 'fixed' | ForEach-Object Code)
-    $failed=@($reports | Where-Object { $_.Status -in @('save-failed','parse-failed','malformed-profile','still-broken') } | ForEach-Object Code)
-    $skipped=@($reports | Where-Object { $_.Status -in @('candidate','ambiguous','no-candidate') } | ForEach-Object Code)
-    $outcome=if($DryRun){'NO_OP'}elseif($changed.Count -gt 0 -and $failed.Count -gt 0){'PARTIAL_APPLIED'}elseif($changed.Count -gt 0){'SUCCEEDED'}elseif($backup){'FAILED_BEFORE_MUTATION'}else{'NO_OP'}
-    $tx=ConvertTo-TpmLegacyTransactionResult -Legacy ([pscustomobject]@{ Reports=$reports; Total=$reports.Count; Fixed=$changed.Count; Candidates=@($reports|Where-Object Status -eq 'candidate').Count; StillBroken=$failed.Count }) -WorkflowKey 'LibraryHealth' -OperationKey 'AutoRepairPaths' -Items $items -ChangedItems $(if($DryRun){@()}else{$changed}) -CompletedItems $changed -FailedItems $failed -SkippedItems $skipped -Summary 'Library Health path repair completed with a verified transaction result.' -ReasonCode $(if($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}elseif($backup -and $changed.Count -eq 0){'PROFILE_BACKUP_COMPLETED_NO_WRITE'}else{'PATHS_PROCESSED'}) -Outcome $outcome -ProductState $(if($outcome -eq 'SUCCEEDED'){'INTENDED'}elseif($outcome -eq 'PARTIAL_APPLIED'){'PARTIAL_KNOWN'}else{'UNCHANGED'}) -MutationStarted (-not $DryRun -and $changed.Count -gt 0) -Backup $backup
-    $tx | Add-Member -NotePropertyName Reports -NotePropertyValue $reports -Force
-    return $tx
+    $unknown=@($reports | Where-Object { $_.Status -in @('save-failed','still-broken') } | ForEach-Object Code)
+    $skipped=@($reports | Where-Object { $_.Status -in @('candidate','ambiguous','no-candidate','not-reviewed') } | ForEach-Object Code)
+    $failed=@($reports | Where-Object { $_.Status -notin @('fixed','save-failed','still-broken','candidate','ambiguous','no-candidate','not-reviewed') } | ForEach-Object Code)
+    if ($unknown.Count -gt 0) {
+        $outcome='ACTION_REQUIRED'
+        $productState='UNKNOWN'
+        $reasonCode='PROFILE_STATE_UNVERIFIED'
+        $summary='Library Health repair needs attention because one or more profile writes could not be verified.'
+        $finalPassed=$false
+    } elseif ($changed.Count -gt 0 -and ($failed.Count -gt 0 -or $skipped.Count -gt 0)) {
+        $outcome='PARTIAL_APPLIED'
+        $productState='PARTIAL_KNOWN'
+        $reasonCode='PARTIAL_PATH_REPAIR'
+        $summary='Library Health repair fixed some profiles but left other reports unresolved.'
+        $finalPassed=$true
+    } elseif ($changed.Count -gt 0 -and $changed.Count -eq $reports.Count -and $failed.Count -eq 0 -and $skipped.Count -eq 0 -and $unknown.Count -eq 0) {
+        $outcome='SUCCEEDED'
+        $productState='INTENDED'
+        $reasonCode='PATHS_REPAIRED'
+        $summary='Library Health repaired and verified every reported profile path.'
+        $finalPassed=$true
+    } else {
+        $outcome='FAILED_BEFORE_MUTATION'
+        $productState='UNCHANGED'
+        $reasonCode=if($reports.Count -eq 0){'PROFILE_STATE_CHANGED_DURING_PLANNING'}else{'NO_PROFILE_PATH_REPAIRED'}
+        $summary='Library Health repair did not verify a profile path change.'
+        $finalPassed=$true
+    }
+    $tx=New-TpmProfileTransactionResult -WorkflowKey 'LibraryHealth' -OperationKey 'AutoRepairPaths' -Outcome $outcome -ProductState $productState -Summary $summary -Items $items -ChangedItems $changed -CompletedItems $changed -FailedItems $failed -SkippedItems $skipped -UnknownItems $unknown -MutationStarted ($changed.Count -gt 0 -or $unknown.Count -gt 0) -MutationCompleted ($outcome -eq 'SUCCEEDED') -Backup $backup -FinalPassed $finalPassed -FinalFailedItems $unknown -ReasonCode $reasonCode -FinalChecks @('Every reported profile status was classified; fixed paths were re-read and validated.')
+    return (& $attachReports $tx $reports)
 }
 function Repair-GamePathsLegacy {
     param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex, [bool]$DryRun = $false, [object[]]$ReviewedCandidates = @(), [string[]]$OnlyGames = @())
@@ -21430,7 +23022,7 @@ function Repair-GamePathsLegacy {
     $repairStarted = Get-Date
     $scanProgress = {
         param($file, $current)
-        Write-TpmCompactExtractionProgress -Phase Scanning -Label $file.Name -Current $current -Total 0 -StartedAt $repairStarted
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Game-file discovery' -Current $current -Total 0 -StartedAt $repairStarted
     }
     foreach ($file in (Get-GameFiles $installFolder -ProgressScript $scanProgress)) {
         $k = $file.Name.ToLower()
@@ -21440,7 +23032,7 @@ function Repair-GamePathsLegacy {
     Write-TpmCompactExtractionProgress -Phase Scanning -Label 'game files' -Current 0 -Total 0 -StartedAt $repairStarted -Complete
 
     $reports = New-Object System.Collections.ArrayList
-    $files = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue)
+    $files = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'Game path repair profile discovery' -EnumerationErrorAction SilentlyContinue)
     if (@($OnlyGames).Count -gt 0) {
         $allowedGames = @($OnlyGames | ForEach-Object { [string]$_ } | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() })
         $files = @($files | Where-Object { $allowedGames -contains $_.BaseName.ToLowerInvariant() })
@@ -21448,7 +23040,7 @@ function Repair-GamePathsLegacy {
     $repairIndex = 0
     foreach ($f in $files) {
         $repairIndex++
-        Write-TpmCompactExtractionProgress -Phase Repairing -Label $f.BaseName -Current $repairIndex -Total $files.Count -StartedAt $repairStarted
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Game path repair profile scan' -Current $repairIndex -Total $files.Count -StartedAt $repairStarted
         try {
             $doc = Read-Xml $f.FullName
         } catch {
@@ -21628,8 +23220,7 @@ function New-LibraryHealthProfileBackup {
     if (-not (Test-TpmNoReparsePath -Path $UserProfilesDir)) {
         throw "UserProfiles directory failed the reparse-point safety check: $UserProfilesDir"
     }
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop |
-        Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
+    $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Library Health backup profile discovery' -EnumerationErrorAction Stop | Sort-Object Name)
     if ($profiles.Count -eq 0) {
         throw 'No registered profiles were available to back up.'
     }
@@ -21646,14 +23237,24 @@ function New-LibraryHealthProfileBackup {
         -not (Test-TpmNoReparsePath -Path $backupPath)) {
         throw "Profile backup directory could not be safely verified: $backupPath"
     }
+    $backupStarted = Get-Date
+    $backupCurrent = 0
     try {
+        try {
         foreach ($profileFile in $profiles) {
+            $backupCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Library Health profile backup' -Current $backupCurrent -Total $profiles.Count -StartedAt $backupStarted
             if (-not (Test-TpmNoReparsePath -Path $profileFile.FullName) -or
                 -not (Test-TpmNoReparsePath -Path $backupPath)) {
                 throw 'A profile or backup path failed immediate safety validation.'
             }
             $destination = Join-Path $backupPath $profileFile.Name
             [void](Copy-Item -LiteralPath $profileFile.FullName -Destination $destination -Force -ErrorAction Stop)
+        }
+        } finally {
+            if ($profiles.Count -gt 0) {
+                Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Library Health profile backup' -Current $backupCurrent -Total $profiles.Count -StartedAt $backupStarted -Complete
+            }
         }
     } catch {
         throw "Profile backup failed before Health Check repair: $_"
@@ -21808,14 +23409,17 @@ function Invoke-LibraryHealthManualPathRepairLegacy {
 function Invoke-LibraryHealthCheck {
     param([string]$UserProfilesDir, [string]$LogPath, [string]$TpRoot)
 
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Directory.Name -ne "FullBackup" } | Sort-Object BaseName)
+    $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Library Health profile discovery' -EnumerationErrorAction SilentlyContinue | Sort-Object BaseName)
 
     $valid = New-Object System.Collections.ArrayList
     $broken = New-Object System.Collections.ArrayList
     $empty = New-Object System.Collections.ArrayList
 
+    $profileCurrent = 0
+    $profileStarted = Get-Date
     foreach ($pf in $profiles) {
+        $profileCurrent++
+        Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Library Health profile scan' -Current $profileCurrent -Total $profiles.Count -StartedAt $profileStarted
         try {
             $doc = Read-Xml $pf.FullName
             if (-not $doc.GameProfile) { [void]$broken.Add($pf.BaseName); continue }
@@ -21834,6 +23438,7 @@ function Invoke-LibraryHealthCheck {
         }
     }
 
+    Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Library Health profile scan' -Current $profiles.Count -Total $profiles.Count -StartedAt $profileStarted -Complete
     Write-Host ""
     Write-Host "  Library Health Check is read-only." -ForegroundColor Cyan
     Write-Host "  TeknoParrot Manager checked your setup and did not change anything." -ForegroundColor Cyan
@@ -21876,7 +23481,11 @@ function Invoke-LibraryHealthCheck {
     $gpuFields        = $combinedFields.Gpu
     $ffbFields        = $combinedFields.Ffb
 
+    $coverageStarted = Get-Date
+    $coverageCurrent = 0
     foreach ($pf in $profiles) {
+        $coverageCurrent++
+        Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Library Health optional coverage scan' -Current $coverageCurrent -Total $profiles.Count -StartedAt $coverageStarted
         try {
             $doc = Read-Xml $pf.FullName
             if (-not $doc.GameProfile) { continue }
@@ -21922,6 +23531,7 @@ function Invoke-LibraryHealthCheck {
         Write-Log "HealthCheck: coverage check could not parse $($pf.Name) -- $_"
         }
     }
+    Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Library Health optional coverage scan' -Current $coverageCurrent -Total $profiles.Count -StartedAt $coverageStarted -Complete
     Write-Host ""
     Write-Host "  Optional setup coverage (also read-only):" -ForegroundColor Cyan
     if ($detected.Vendor) {
@@ -22174,7 +23784,8 @@ function Test-ExtractedFolderHasContent {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
-    return ((Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
+    $firstChild = Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue | Select-Object -First 1
+    return ($null -ne $firstChild)
 }
 
 # Exact-key lookup only (no fuzzy/Dice fallback): the dat's own game names
@@ -22381,10 +23992,7 @@ function Get-GameSetupNotes {
     $games = Get-EggmanGameData
     if (-not $games) { return ,@() }
 
-    $registeredCodes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Directory.Name -ne "FullBackup" } |
-        ForEach-Object { [void]$registeredCodes.Add($_.BaseName) }
+    $registeredCodes = Get-TpmRegisteredProfileCodes -UserProfilesDir $UserProfilesDir -ProgressLabel 'Game setup notes profile-code scan'
 
     return @($games | Where-Object { $_.notes -and $registeredCodes.Contains($_.profile_name) } |
               ForEach-Object {
@@ -22424,10 +24032,14 @@ function Get-CompatibilityWarnings {
             [string[]]$GpuIncompatibleGames[$detectedVendor], [System.StringComparer]::OrdinalIgnoreCase)
     } else { $null }
 
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Directory.Name -ne "FullBackup" })
+    $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Compatibility warning profile discovery' -EnumerationErrorAction SilentlyContinue)
 
+    $profileScanStarted = Get-Date
+    $profileScanCurrent = 0
+    try {
     foreach ($pf in $profiles) {
+        $profileScanCurrent++
+        Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Compatibility warning profile scan' -Current $profileScanCurrent -Total $profiles.Count -StartedAt $profileScanStarted
         $code = $pf.BaseName
         $relevant = $RawThrillsPathLimits.ContainsKey($code) -or $FileVersionPins.ContainsKey($code) -or
                     ($gpuList -and $gpuList.Contains($code))
@@ -22478,6 +24090,9 @@ function Get-CompatibilityWarnings {
             Write-Log "CompatibilityWarnings: could not parse $($pf.Name) -- $_"
         }
     }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Compatibility warning profile scan' -Current $profileScanCurrent -Total $profiles.Count -StartedAt $profileScanStarted -Complete
+    }
 
     # Issue #85 Tier 1: known per-emulator firmware/BIOS prerequisites.
     # Existence-only check (Test-Path), never reads file content -- TPM
@@ -22491,7 +24106,11 @@ function Get-CompatibilityWarnings {
     # duplicate warning.
     if ($TeknoParrotRoot) {
         $emulatorGames = @{}
+        $biosScanStarted = Get-Date
+        $biosScanCurrent = 0
         foreach ($pf in $profiles) {
+            $biosScanCurrent++
+            Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Compatibility BIOS profile scan' -Current $biosScanCurrent -Total $profiles.Count -StartedAt $biosScanStarted
             try {
                 $doc = Read-Xml $pf.FullName
                 if (-not $doc.GameProfile) { continue }
@@ -22505,6 +24124,7 @@ function Get-CompatibilityWarnings {
                 Write-Log "CompatibilityWarnings: could not parse $($pf.Name) for BIOS check -- $_"
             }
         }
+        Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Compatibility BIOS profile scan' -Current $biosScanCurrent -Total $profiles.Count -StartedAt $biosScanStarted -Complete
 
         foreach ($emuType in $emulatorGames.Keys) {
             $hasBiosRequirement = $EmulatorBiosRequirements -and $EmulatorBiosRequirements.ContainsKey($emuType)
@@ -22844,8 +24464,13 @@ function Set-ConfigField {
 function Build-ArchetypePool {
     param([string]$userProfilesDir, [int]$minBound)
     $pool  = New-Object System.Collections.ArrayList
-    $files = Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue
-    foreach ($f in $files) {
+    $files = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'Control propagation archetype discovery' -EnumerationErrorAction SilentlyContinue)
+    $poolProgressStarted = Get-Date
+    $poolProgressCurrent = 0
+    try {
+        foreach ($f in $files) {
+        $poolProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'Control propagation archetype scan' -Current $poolProgressCurrent -Total $files.Count -StartedAt $poolProgressStarted
         try { $doc = Read-Xml $f.FullName }
         catch { Write-Log "Pool scan: could not parse $($f.Name)"; continue }
         if ($null -eq $doc.GameProfile) { continue }
@@ -22868,6 +24493,9 @@ function Build-ArchetypePool {
                 BoundCount  = $boundCount
             })
         }
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'Control propagation archetype scan' -Current $poolProgressCurrent -Total $files.Count -StartedAt $poolProgressStarted -Complete
     }
     return $pool
 }
@@ -22900,11 +24528,16 @@ function Invoke-ControlPropagationLegacy {
     param([string]$userProfilesDir, $pool, [int]$minBound, $noPropagate = @(), $forceArchetype = @{}, $familyOverride = @{}, $canonicalArchetype = @{}, [bool]$DryRun = $false)
 
     $reports     = New-Object System.Collections.ArrayList
-    $files       = Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue
+    $files = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'Control propagation profile discovery' -EnumerationErrorAction SilentlyContinue)
     $sourcePaths = @{}
     foreach ($s in $pool) { $sourcePaths[$s.Path] = $true }
 
+    $propagationProgressStarted = Get-Date
+    $propagationProgressCurrent = 0
+    try {
     foreach ($f in $files) {
+        $propagationProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Control propagation profile scan' -Current $propagationProgressCurrent -Total $files.Count -StartedAt $propagationProgressStarted
         # An archetype's BINDINGS are never modified, full stop. Its own
         # Input API may only be corrected against a family's user-
         # designated canonical archetype (canonicalArchetype in
@@ -23151,42 +24784,12 @@ function Invoke-ControlPropagationLegacy {
             [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "save-failed"; Archetype = $best.Code })
         }
     }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'Control propagation profile scan' -Current $propagationProgressCurrent -Total $files.Count -StartedAt $propagationProgressStarted -Complete
+    }
     return $reports
 }
 
-# Backup-before-write for the standalone "Propagate Controls" menu option.
-# Extracted specifically so backup-copy-failure handling is unit-testable:
-# a caller must abort before calling Invoke-ControlPropagation whenever
-# ErrorCount is greater than zero, in every mode (interactive or
-# -Unattended) -- there is no safe "continue anyway" for an incomplete
-# backup, since this mode's own promised safety net (and the README's) is
-# that UserProfiles is backed up before anything is written.
-function New-PropagationBackup {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string]$UserProfilesDir
-    )
-
-    $backupRoot = Join-Path $UserProfilesDir "FullBackup"
-    $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
-    $backupPath = Join-Path $backupRoot ("PropagateControls_" + $timestamp)
-
-    [void][System.IO.Directory]::CreateDirectory($backupRoot)
-    [void][System.IO.Directory]::CreateDirectory($backupPath)
-
-    try {
-        Get-ChildItem -LiteralPath $UserProfilesDir -ErrorAction Stop | Where-Object { $_.Name -ne "FullBackup" } |
-            Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction Stop
-    } catch {
-        throw "Propagation profile backup failed: $_"
-    }
-
-    return [pscustomobject]@{
-        Path       = $backupPath
-        ErrorCount = 0
-    }
-}
 
 # Prints Invoke-ControlPropagation's $reports in the same format used by both
 # the AutoSync/Register-only flow and the standalone "Propagate Controls" menu
@@ -23382,7 +24985,7 @@ function New-TpmRestoreBackupLegacyResult {
 function Invoke-RestoreBackup {
     param([string]$userProfilesDir)
     $legacy = Invoke-RestoreBackupLegacy -userProfilesDir $userProfilesDir
-    $items = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | ForEach-Object BaseName)
+    $items = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'UserProfiles restore result discovery' -EnumerationErrorAction SilentlyContinue | ForEach-Object BaseName)
     if ($null -eq $legacy) {
         $legacy = New-TpmRestoreBackupLegacyResult -Outcome 'NO_OP' -ReasonCode 'RESTORE_NOT_PERFORMED' -Summary 'Restore was not performed; no profile changes were made.' -FinalCheck 'The legacy restore returned before the profile mutation boundary.'
     }
@@ -23427,6 +25030,44 @@ function Invoke-RestoreBackup {
         -Errors $(if ($legacy.ErrorCount -gt 0) { @([string]$legacy.ReasonCode) } else { @() }) `
         -TechnicalDetails $legacy)
 }
+
+function Restore-TpmLegacyUserProfilesSnapshot {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [Parameter(Mandatory)][string]$RollbackDir
+    )
+    $removeItems = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $UserProfilesDir -ProgressLabel 'UserProfiles rollback removal discovery' -Filter '*' -EnumerationErrorAction Continue -IncludeDirectories | Where-Object { $_.Name -ne 'FullBackup' })
+    $removeStarted = Get-Date
+    $removeCurrent = 0
+    try {
+        foreach ($removeItem in $removeItems) {
+            $removeCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'UserProfiles rollback removal' -Current $removeCurrent -Total $removeItems.Count -StartedAt $removeStarted
+            $removeItem | Remove-Item -Recurse -Force -ErrorAction Stop
+        }
+    } finally {
+        if ($removeItems.Count -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'UserProfiles rollback removal' -Current $removeCurrent -Total $removeItems.Count -StartedAt $removeStarted -Complete
+        }
+    }
+
+    $rollbackItems = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $RollbackDir -ProgressLabel 'UserProfiles rollback restore discovery' -Filter '*' -EnumerationErrorAction Stop -IncludeDirectories)
+    $rollbackStarted = Get-Date
+    $rollbackCurrent = 0
+    try {
+        foreach ($rollbackItem in $rollbackItems) {
+            $rollbackCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'UserProfiles rollback restore' -Current $rollbackCurrent -Total $rollbackItems.Count -StartedAt $rollbackStarted
+            $rollbackItem | Copy-Item -Destination $UserProfilesDir -Recurse -Force -ErrorAction Stop
+        }
+    } finally {
+        if ($rollbackItems.Count -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'UserProfiles rollback restore' -Current $rollbackCurrent -Total $rollbackItems.Count -StartedAt $rollbackStarted -Complete
+        }
+    }
+}
+
+
 function Invoke-RestoreBackupLegacy {
     param([string]$userProfilesDir)
 
@@ -23436,8 +25077,20 @@ function Invoke-RestoreBackupLegacy {
         return (New-TpmRestoreBackupLegacyResult -Outcome 'NO_OP' -ReasonCode 'NO_BACKUPS_FOUND' -Summary 'No restore backups were found. Nothing was changed.' -FinalCheck 'Backup enumeration found no restore candidate before the profile mutation boundary.')
     }
 
-    $backups = @(Get-ChildItem -LiteralPath $backupRoot -Directory -ErrorAction SilentlyContinue |
-                     Sort-Object Name -Descending)
+    $backupFolderCandidates = New-Object System.Collections.Generic.List[object]
+    $folderDiscoveryStarted = Get-Date
+    $folderDiscoveryCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles backup folder discovery' -Current $folderDiscoveryCurrent -Total 0 -StartedAt $folderDiscoveryStarted
+    try {
+        Get-ChildItem -LiteralPath $backupRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            [void]$backupFolderCandidates.Add($_)
+            $folderDiscoveryCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles backup folder discovery' -Current $folderDiscoveryCurrent -Total 0 -StartedAt $folderDiscoveryStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles backup folder discovery' -Current $folderDiscoveryCurrent -Total 0 -StartedAt $folderDiscoveryStarted -Complete
+    }
+    $backups = @($backupFolderCandidates | Sort-Object Name -Descending)
     if ($backups.Count -eq 0) {
         Write-Host "  No backup folders found." -ForegroundColor Yellow
         return (New-TpmRestoreBackupLegacyResult -Outcome 'NO_OP' -ReasonCode 'NO_BACKUPS_FOUND' -Summary 'No restore backups were found. Nothing was changed.' -FinalCheck 'Backup enumeration found no restore candidate before the profile mutation boundary.')
@@ -23445,27 +25098,55 @@ function Invoke-RestoreBackupLegacy {
 
     Write-Host ""
     Write-Host "  Available backups (most recent first):" -ForegroundColor Cyan
-    for ($i = 0; $i -lt $backups.Count; $i++) {
-        $b         = $backups[$i]
-        $fileCount = @(Get-ChildItem -LiteralPath $b.FullName -File -ErrorAction SilentlyContinue).Count
-        Write-Host ("    {0,3})  {1}   ({2} file(s))" -f ($i + 1), $b.Name, $fileCount)
+    $menuStarted = Get-Date
+    $menuCurrent = 0
+    try {
+        for ($i = 0; $i -lt $backups.Count; $i++) {
+            $menuCurrent = $i + 1
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles backup menu indexing' -Current $menuCurrent -Total $backups.Count -StartedAt $menuStarted
+            $b = $backups[$i]
+            $fileCount = 0
+            $fileDiscoveryStarted = Get-Date
+            $fileDiscoveryCurrent = 0
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles backup file-count discovery' -Current $fileDiscoveryCurrent -Total 0 -StartedAt $fileDiscoveryStarted
+            try {
+                Get-ChildItem -LiteralPath $b.FullName -File -ErrorAction SilentlyContinue | ForEach-Object {
+                    $fileCount++
+                    $fileDiscoveryCurrent++
+                    Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles backup file-count discovery' -Current $fileDiscoveryCurrent -Total 0 -StartedAt $fileDiscoveryStarted
+                }
+            } finally {
+                Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles backup file-count discovery' -Current $fileDiscoveryCurrent -Total 0 -StartedAt $fileDiscoveryStarted -Complete
+            }
+            Write-Host ("    {0,3})  {1}   ({2} file(s))" -f ($i + 1), $b.Name, $fileCount)
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles backup menu indexing' -Current $menuCurrent -Total $backups.Count -StartedAt $menuStarted -Complete
     }
     Write-Host ""
-    $choice = (Read-HostSafe "  Enter number to restore, or Enter to cancel")
-    if ([string]::IsNullOrWhiteSpace($choice)) {
+    $restoreChoices = @('B') + @((1..$backups.Count) | ForEach-Object { [string]$_ })
+    $choice = Read-TpmChoice -Prompt "  Enter number to restore, or Enter to cancel" -Choices $restoreChoices -Default 'B'
+    if ($choice -eq 'B') {
         Write-Host "  Restore cancelled." -ForegroundColor DarkGray
         Write-Log "Restore: cancelled by user."
         return (New-TpmRestoreBackupLegacyResult -Outcome 'NO_OP' -ReasonCode 'USER_CANCELLED' -Summary 'Restore was cancelled at backup selection. No profiles were changed.' -FinalCheck 'The selection prompt was cancelled before the profile mutation boundary.')
     }
-    if ($choice -notmatch '^\d+$' -or $choice.Length -gt 9 -or [int]$choice -lt 1 -or [int]$choice -gt $backups.Count) {
-        Write-Host "  Invalid selection. Restore cancelled." -ForegroundColor Yellow
-        Write-Log "Restore: invalid selection '$choice'."
-        return (New-TpmRestoreBackupLegacyResult -Outcome 'NO_OP' -ReasonCode 'INVALID_SELECTION' -Summary 'Restore was cancelled because the selection was invalid. No profiles were changed.' -FinalCheck 'Invalid selection was rejected before the profile mutation boundary.')
-    }
     $selected = $backups[[int]$choice - 1]
 
-    $backupXmls = @(Get-ChildItem -LiteralPath $selected.FullName -Filter "*.xml" -File `
-                        -ErrorAction SilentlyContinue)
+    $backupXmlCandidates = New-Object System.Collections.Generic.List[object]
+    $restoreSourceStarted = Get-Date
+    $restoreSourceCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles restore source discovery' -Current $restoreSourceCurrent -Total 0 -StartedAt $restoreSourceStarted
+    try {
+        Get-ChildItem -LiteralPath $selected.FullName -Filter "*.xml" -File -ErrorAction SilentlyContinue | ForEach-Object {
+            [void]$backupXmlCandidates.Add($_)
+            $restoreSourceCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles restore source discovery' -Current $restoreSourceCurrent -Total 0 -StartedAt $restoreSourceStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'UserProfiles restore source discovery' -Current $restoreSourceCurrent -Total 0 -StartedAt $restoreSourceStarted -Complete
+    }
+    $backupXmls = $backupXmlCandidates.ToArray()
     if ($backupXmls.Count -eq 0) {
         Write-Host ("  ERROR: Selected backup '{0}' contains no XML profiles -- restore aborted." -f $selected.Name) -ForegroundColor Red
         Write-Log "Restore: aborted -- backup '$($selected.Name)' contains no XML files."
@@ -23496,8 +25177,20 @@ function Invoke-RestoreBackupLegacy {
     $rollbackDir = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-restore-rollback-' + [guid]::NewGuid().ToString('N'))
     try {
         [void][System.IO.Directory]::CreateDirectory($rollbackDir)
-        Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne 'FullBackup' } |
-            Copy-Item -Destination $rollbackDir -Recurse -Force -ErrorAction Stop
+        $snapshotItems = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $userProfilesDir -ProgressLabel 'UserProfiles rollback snapshot discovery' -Filter '*' -EnumerationErrorAction Continue -IncludeDirectories | Where-Object { $_.Name -ne 'FullBackup' })
+        $snapshotStarted = Get-Date
+        $snapshotCurrent = 0
+        try {
+            foreach ($snapshotItem in $snapshotItems) {
+                $snapshotCurrent++
+                Write-TpmCompactExtractionProgress -Phase Repairing -Label 'UserProfiles rollback snapshot' -Current $snapshotCurrent -Total $snapshotItems.Count -StartedAt $snapshotStarted
+                $snapshotItem | Copy-Item -Destination $rollbackDir -Recurse -Force -ErrorAction Stop
+            }
+        } finally {
+            if ($snapshotItems.Count -gt 0) {
+                Write-TpmCompactExtractionProgress -Phase Repairing -Label 'UserProfiles rollback snapshot' -Current $snapshotCurrent -Total $snapshotItems.Count -StartedAt $snapshotStarted -Complete
+            }
+        }
     } catch {
         Write-Host '  ERROR: Could not snapshot current profiles before restore; nothing was changed.' -ForegroundColor Red
         Write-Log "Restore: rollback snapshot failed -- $_"
@@ -23511,19 +25204,27 @@ function Invoke-RestoreBackupLegacy {
     # Treat any deletion failures as fatal: a partial delete followed by a
     # partial copy would leave UserProfiles in an undefined mixed state.
     $deleteErrs = @()
-    # Remove-Item receives FileInfo/DirectoryInfo objects from the pipeline
-    # (not path strings), so pipeline binding already bypasses wildcard
-    # expansion -- safe even with [, ], $ in game folder names. If this
-    # source is ever changed to raw path strings, add -LiteralPath there.
-    Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable deleteErrs
+    # Preserve FileInfo/DirectoryInfo pipeline binding for literal filenames.
+    $deleteItems = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $userProfilesDir -ProgressLabel 'UserProfiles removal discovery' -Filter '*' -EnumerationErrorAction Continue -IncludeDirectories | Where-Object { $_.Name -ne 'FullBackup' })
+    $deleteStarted = Get-Date
+    $deleteCurrent = 0
+    try {
+        foreach ($deleteItem in $deleteItems) {
+            $deleteCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'UserProfiles removal' -Current $deleteCurrent -Total $deleteItems.Count -StartedAt $deleteStarted
+            $deleteItem | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable +deleteErrs
+        }
+    } finally {
+        if ($deleteItems.Count -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'UserProfiles removal' -Current $deleteCurrent -Total $deleteItems.Count -StartedAt $deleteStarted -Complete
+        }
+    }
     if ($deleteErrs.Count -gt 0) {
         Write-Host ("  ERROR: {0} file(s) could not be removed. The restore was not completed." -f $deleteErrs.Count) -ForegroundColor Red
         Write-Host "  TeknoParrot Manager will keep the selected backup and attempt to restore the previous live profiles." -ForegroundColor Yellow
         Write-Log "Restore: FAILED -- $($deleteErrs.Count) file(s) could not be removed."
         try {
-            Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne 'FullBackup' } | Remove-Item -Recurse -Force -ErrorAction Stop
-            Get-ChildItem -LiteralPath $rollbackDir | Copy-Item -Destination $userProfilesDir -Recurse -Force -ErrorAction Stop
+            Restore-TpmLegacyUserProfilesSnapshot -UserProfilesDir $userProfilesDir -RollbackDir $rollbackDir
             Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue
             return (New-TpmRestoreBackupLegacyResult -Outcome 'ROLLED_BACK_VERIFIED' -ReasonCode 'RESTORE_DELETE_FAILED_ROLLED_BACK' -Summary 'Restore stopped and the previous profile state was restored.' -FinalCheck 'The rollback operation completed before the restore result was returned.' -Name $selected.Name -ErrorCount $deleteErrs.Count)
         } catch {
@@ -23538,9 +25239,21 @@ function Invoke-RestoreBackupLegacy {
     # folder names. If this source is ever changed to raw path strings, add
     # -LiteralPath there.
     $restoreErrs = @()
-    Get-ChildItem -LiteralPath $selected.FullName |
-        Copy-Item -Destination $userProfilesDir -Recurse -Force `
-                  -ErrorAction SilentlyContinue -ErrorVariable restoreErrs
+    $restoreItems = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $selected.FullName -ProgressLabel 'UserProfiles restore item discovery' -Filter '*' -EnumerationErrorAction Continue -IncludeDirectories)
+    $restoreStarted = Get-Date
+    $restoreCurrent = 0
+    try {
+        foreach ($bf in $restoreItems) {
+            $restoreCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'UserProfiles restore' -Current $restoreCurrent -Total $restoreItems.Count -StartedAt $restoreStarted
+            $bf | Copy-Item -Destination $userProfilesDir -Recurse -Force `
+                            -ErrorAction SilentlyContinue -ErrorVariable +restoreErrs
+        }
+    } finally {
+        if ($restoreItems.Count -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'UserProfiles restore' -Current $restoreCurrent -Total $restoreItems.Count -StartedAt $restoreStarted -Complete
+        }
+    }
     $errCount = $restoreErrs.Count
 
     if ($errCount -gt 0) {
@@ -23548,8 +25261,7 @@ function Invoke-RestoreBackupLegacy {
         Write-Host '  TeknoParrot Manager will attempt to restore the previous live profiles from its rollback snapshot.' -ForegroundColor Yellow
         Write-Log "Restore: failed with $errCount error(s) from $($selected.Name)"
         try {
-            Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne 'FullBackup' } | Remove-Item -Recurse -Force -ErrorAction Stop
-            Get-ChildItem -LiteralPath $rollbackDir | Copy-Item -Destination $userProfilesDir -Recurse -Force -ErrorAction Stop
+            Restore-TpmLegacyUserProfilesSnapshot -UserProfilesDir $userProfilesDir -RollbackDir $rollbackDir
             Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue
             return (New-TpmRestoreBackupLegacyResult -Outcome 'ROLLED_BACK_VERIFIED' -ReasonCode 'RESTORE_COPY_FAILED_ROLLED_BACK' -Summary 'Restore stopped and the previous profile state was restored.' -FinalCheck 'The rollback operation completed before the restore result was returned.' -Name $selected.Name -ErrorCount $errCount)
         } catch {
@@ -23587,15 +25299,17 @@ function Invoke-RestoreBackupLegacy {
 function Export-LaunchBoxXml {
     param([string]$userProfilesDir, [string]$lbRoot, [string]$outputPath)
 
-    $files = Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
-                 Where-Object { $_.Directory.Name -ne "FullBackup" }
+    $files = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'LaunchBox profile export discovery' -EnumerationErrorAction SilentlyContinue)
 
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.AppendLine('<?xml version="1.0" encoding="utf-8"?>')
     [void]$sb.AppendLine('<LaunchBox>')
 
-    $count = 0
+    $exportStarted = Get-Date
+    $exportCurrent = 0
     foreach ($f in $files) {
+        $exportCurrent++
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'LaunchBox profile export' -Current $exportCurrent -Total $files.Count -StartedAt $exportStarted
         try {
             $doc = Read-Xml $f.FullName
             if ($null -eq $doc.GameProfile) { continue }
@@ -23632,6 +25346,9 @@ function Export-LaunchBoxXml {
         } catch {
             Write-Log "LaunchBox export: skipped $($f.Name) -- $_"
         }
+    }
+    if ($files.Count -gt 0) {
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'LaunchBox profile export' -Current $exportCurrent -Total $files.Count -StartedAt $exportStarted -Complete
     }
 
     [void]$sb.AppendLine('</LaunchBox>')
@@ -23680,8 +25397,13 @@ function Backup-LaunchBoxFiles {
     $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
     $backupPath = Join-Path (Join-Path $PSScriptRoot "LaunchBoxBackups") $timestamp
 
+    $relativeFiles = @($relativeFiles)
+    $backupStarted = Get-Date
+    $backupCurrent = 0
     try {
         foreach ($rel in $relativeFiles) {
+            $backupCurrent++
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'LaunchBox backup' -Current $backupCurrent -Total $relativeFiles.Count -StartedAt $backupStarted
             $srcFull = Join-Path $lbRoot $rel
             if (-not (Test-Path -LiteralPath $srcFull)) { continue }   # nothing to back up yet (new platform file)
             $dstFull = Join-Path $backupPath $rel
@@ -23696,6 +25418,11 @@ function Backup-LaunchBoxFiles {
         Write-Log "LaunchBox backup: FAILED -- $_"
         return $null
     }
+    finally {
+        if ($relativeFiles.Count -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Repairing -Label 'LaunchBox backup' -Current $backupCurrent -Total $relativeFiles.Count -StartedAt $backupStarted -Complete
+        }
+    }
     Write-Log "LaunchBox backup: saved to $backupPath"
     return $backupPath
 }
@@ -23706,15 +25433,31 @@ function Backup-LaunchBoxFiles {
 # while the target app is running) so both restore flows feel like the
 # same feature.
 function Invoke-RestoreLaunchBoxBackup {
-    param([string]$lbRoot)
+    param(
+        [string]$lbRoot,
+        [string]$BackupRoot = (Join-Path $PSScriptRoot 'LaunchBoxBackups')
+    )
 
-    $backupRoot = Join-Path $PSScriptRoot "LaunchBoxBackups"
+    $backupRoot = $BackupRoot
     if (-not (Test-Path -LiteralPath $backupRoot)) {
         Write-Host "  No LaunchBox backups found in: $backupRoot" -ForegroundColor Yellow
         return
     }
 
-    $backups = @(Get-ChildItem -LiteralPath $backupRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+    $backupFolders = New-Object System.Collections.Generic.List[object]
+    $folderDiscoveryStarted = Get-Date
+    $folderDiscoveryCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'LaunchBox backup folder discovery' -Current $folderDiscoveryCurrent -Total 0 -StartedAt $folderDiscoveryStarted
+    try {
+        Get-ChildItem -LiteralPath $backupRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            [void]$backupFolders.Add($_)
+            $folderDiscoveryCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'LaunchBox backup folder discovery' -Current $folderDiscoveryCurrent -Total 0 -StartedAt $folderDiscoveryStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'LaunchBox backup folder discovery' -Current $folderDiscoveryCurrent -Total 0 -StartedAt $folderDiscoveryStarted -Complete
+    }
+    $backups = @($backupFolders | Sort-Object Name -Descending)
     if ($backups.Count -eq 0) {
         Write-Host "  No LaunchBox backup folders found." -ForegroundColor Yellow
         return
@@ -23722,21 +25465,37 @@ function Invoke-RestoreLaunchBoxBackup {
 
     Write-Host ""
     Write-Host "  Available LaunchBox backups (most recent first):" -ForegroundColor Cyan
-    for ($i = 0; $i -lt $backups.Count; $i++) {
-        $b         = $backups[$i]
-        $fileCount = (Get-ChildItem -LiteralPath $b.FullName -Recurse -File -ErrorAction SilentlyContinue).Count
-        Write-Host ("    {0,3})  {1}   ({2} file(s))" -f ($i + 1), $b.Name, $fileCount)
+    $backupMenuStarted = Get-Date
+    $backupMenuCurrent = 0
+    try {
+        for ($i = 0; $i -lt $backups.Count; $i++) {
+            $backupMenuCurrent = $i + 1
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'LaunchBox backup menu indexing' -Current $backupMenuCurrent -Total $backups.Count -StartedAt $backupMenuStarted
+            $b         = $backups[$i]
+            $fileCount = 0
+            $menuFileScanStarted = Get-Date
+            $menuFileScanCurrent = 0
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'LaunchBox backup file-count discovery' -Current $menuFileScanCurrent -Total 0 -StartedAt $menuFileScanStarted
+            try {
+                Get-ChildItem -LiteralPath $b.FullName -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+                    $fileCount++
+                    $menuFileScanCurrent++
+                    Write-TpmCompactExtractionProgress -Phase Checking -Label 'LaunchBox backup file-count discovery' -Current $menuFileScanCurrent -Total 0 -StartedAt $menuFileScanStarted
+                }
+            } finally {
+                Write-TpmCompactExtractionProgress -Phase Checking -Label 'LaunchBox backup file-count discovery' -Current $menuFileScanCurrent -Total 0 -StartedAt $menuFileScanStarted -Complete
+            }
+            Write-Host ("    {0,3})  {1}   ({2} file(s))" -f ($i + 1), $b.Name, $fileCount)
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'LaunchBox backup menu indexing' -Current $backupMenuCurrent -Total $backups.Count -StartedAt $backupMenuStarted -Complete
     }
     Write-Host ""
-    $choice = (Read-HostSafe "  Enter number to restore, or Enter to cancel")
-    if ([string]::IsNullOrWhiteSpace($choice)) {
+    $restoreChoices = @('B') + @((1..$backups.Count) | ForEach-Object { [string]$_ })
+    $choice = Read-TpmChoice -Prompt "  Enter number to restore, or Enter to cancel" -Choices $restoreChoices -Default 'B'
+    if ($choice -eq 'B') {
         Write-Host "  Restore cancelled." -ForegroundColor DarkGray
         Write-Log "LaunchBox restore: cancelled by user."
-        return
-    }
-    if ($choice -notmatch '^\d+$' -or $choice.Length -gt 9 -or [int]$choice -lt 1 -or [int]$choice -gt $backups.Count) {
-        Write-Host "  Invalid selection. Restore cancelled." -ForegroundColor Yellow
-        Write-Log "LaunchBox restore: invalid selection '$choice'."
         return
     }
     $selected = $backups[[int]$choice - 1]
@@ -23758,9 +25517,25 @@ function Invoke-RestoreLaunchBoxBackup {
         return
     }
 
-    $backupFiles = @(Get-ChildItem -LiteralPath $selected.FullName -Recurse -File -ErrorAction SilentlyContinue)
+    $backupFiles = New-Object System.Collections.Generic.List[object]
+    $restoreDiscoveryStarted = Get-Date
+    $restoreDiscoveryCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'LaunchBox restore file discovery' -Current $restoreDiscoveryCurrent -Total 0 -StartedAt $restoreDiscoveryStarted
+    try {
+        Get-ChildItem -LiteralPath $selected.FullName -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+            [void]$backupFiles.Add($_)
+            $restoreDiscoveryCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'LaunchBox restore file discovery' -Current $restoreDiscoveryCurrent -Total 0 -StartedAt $restoreDiscoveryStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'LaunchBox restore file discovery' -Current $restoreDiscoveryCurrent -Total 0 -StartedAt $restoreDiscoveryStarted -Complete
+    }
     $errCount = 0
+    $restoreStarted = Get-Date
+    $restoreCurrent = 0
     foreach ($bf in $backupFiles) {
+        $restoreCurrent++
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'LaunchBox restore' -Current $restoreCurrent -Total $backupFiles.Count -StartedAt $restoreStarted
         try {
             $rel = Get-RelativePath $selected.FullName $bf.FullName
             $dst = Join-Path $lbRoot $rel
@@ -23771,6 +25546,9 @@ function Invoke-RestoreLaunchBoxBackup {
             $errCount++
             Write-Log "LaunchBox restore: failed to restore $($bf.FullName) -- $_"
         }
+    }
+    if ($backupFiles.Count -gt 0) {
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'LaunchBox restore' -Current $restoreCurrent -Total $backupFiles.Count -StartedAt $restoreStarted -Complete
     }
 
     if ($errCount -gt 0) {
@@ -24677,7 +26455,12 @@ function Restore-PostgresSetupCreatedDatabases {
     $restored = New-Object System.Collections.Generic.List[string]
     $failed = New-Object System.Collections.Generic.List[string]
     $errors = New-Object System.Collections.Generic.List[string]
-    foreach ($database in @($Databases | Sort-Object @{ Expression = { $_.DbName.ToUpperInvariant() } } -Descending)) {
+    $databaseItems = @($Databases | Sort-Object @{ Expression = { $_.DbName.ToUpperInvariant() } } -Descending)
+    $started = Get-Date
+    $current = 0
+    foreach ($database in $databaseItems) {
+        $current++
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'PostgreSQL database rollback' -Current $current -Total $databaseItems.Count -StartedAt $started
         try {
             $log = New-Object System.Collections.Generic.List[object]
             [void](Invoke-Postgres83RestoreCommandChecked -ToolName 'dropdb.exe' -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','--if-exists',$database.DbName) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $log -DatabaseName $database.DbName)
@@ -24688,6 +26471,9 @@ function Restore-PostgresSetupCreatedDatabases {
             [void]$failed.Add($database.DbName)
             [void]$errors.Add(("{0}: {1}" -f $database.DbName,(ConvertTo-PostgresRedactedText -Text ([string]$_.Exception.Message) -Secrets @($SuperPasswordPlain))))
         }
+    }
+    if ($databaseItems.Count -gt 0) {
+        Write-TpmCompactExtractionProgress -Phase Repairing -Label 'PostgreSQL database rollback' -Current $current -Total $databaseItems.Count -StartedAt $started -Complete
     }
     return [pscustomobject]@{
         Verified = ($failed.Count -eq 0)
@@ -24784,8 +26570,12 @@ function Backup-PostgresDatabases {
     $names = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
     $databaseGameMetadata = @{}
     try {
-        $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
+        $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'PostgreSQL backup profile discovery' -EnumerationErrorAction Stop | Sort-Object Name)
+        $profileScanStarted = Get-Date
+        $profileScanCurrent = 0
         foreach ($pf in $profiles) {
+            $profileScanCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL backup profile scan' -Current $profileScanCurrent -Total $profiles.Count -StartedAt $profileScanStarted
             $dbName = ''
             $profileMetadata = Get-PostgresProfileDisplayMetadata -ProfilePath $pf.FullName
             $gameLabel = $profileMetadata.DisplayName
@@ -24809,6 +26599,9 @@ function Backup-PostgresDatabases {
                 [void]$failureDetails.Add(('{0} / {1}: {2} ({3}) Next action: {4}' -f $gameLabel, $dbName, $detail, $diagnosis.Category, $diagnosis.NextAction))
             }
         }
+        if ($profiles.Count -gt 0) {
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL backup profile scan' -Current $profileScanCurrent -Total $profiles.Count -StartedAt $profileScanStarted -Complete
+        }
     } catch {
         [void]$failedDatabases.Add('UserProfiles enumeration')
         [void]$failureDetails.Add(('Could not enumerate game profiles: {0}' -f $_.Exception.Message))
@@ -24827,23 +26620,34 @@ function Backup-PostgresDatabases {
     $result.Path = Join-Path (Join-Path $PSScriptRoot 'PostgresBackups') ((Get-Date).ToString('yyyy-MM-dd_HH-mm-ss_fff'))
     [void][System.IO.Directory]::CreateDirectory($result.Path)
     $pgDumpExe = Join-Path $script:PostgresBinDir 'pg_dump.exe'
+    $backupNames = @($names | Sort-Object)
     if (-not (Test-Path -LiteralPath $pgDumpExe -PathType Leaf)) {
         $result.Succeeded = $false
-        foreach ($dbName in @($names | Sort-Object)) {
-            $metadata = if ($databaseGameMetadata.ContainsKey($dbName)) {
-                $databaseGameMetadata[$dbName]
-            } else {
-                [pscustomobject]@{
-                    DisplayName = 'Unknown game title -- see Details'
-                    ProfileKey = ''
+        $databaseBackupStarted = Get-Date
+        $databaseBackupCurrent = 0
+        try {
+            foreach ($dbName in $backupNames) {
+                $databaseBackupCurrent++
+                Write-TpmCompactExtractionProgress -Phase Repairing -Label 'PostgreSQL database backup' -Current $databaseBackupCurrent -Total $backupNames.Count -StartedAt $databaseBackupStarted
+                $metadata = if ($databaseGameMetadata.ContainsKey($dbName)) {
+                    $databaseGameMetadata[$dbName]
+                } else {
+                    [pscustomobject]@{
+                        DisplayName = 'Unknown game title -- see Details'
+                        ProfileKey = ''
+                    }
                 }
+                $label = [string]$metadata.DisplayName
+                $detail = 'pg_dump.exe was not found at {0}.' -f $pgDumpExe
+                $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $label -ProfileKey ([string]$metadata.ProfileKey) -DbName $dbName -Detail $detail
+                [void]$failureDiagnoses.Add($diagnosis)
+                [void]$failedDatabases.Add(('{0} / {1}' -f $label, $dbName))
+                [void]$failureDetails.Add(('{0}: {1}' -f $dbName, $detail))
             }
-            $label = [string]$metadata.DisplayName
-            $detail = 'pg_dump.exe was not found at {0}.' -f $pgDumpExe
-            $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $label -ProfileKey ([string]$metadata.ProfileKey) -DbName $dbName -Detail $detail
-            [void]$failureDiagnoses.Add($diagnosis)
-            [void]$failedDatabases.Add(('{0} / {1}' -f $label, $dbName))
-            [void]$failureDetails.Add(('{0}: {1}' -f $dbName, $detail))
+        } finally {
+            if ($backupNames.Count -gt 0) {
+                Write-TpmCompactExtractionProgress -Phase Repairing -Label 'PostgreSQL database backup' -Current $databaseBackupCurrent -Total $backupNames.Count -StartedAt $databaseBackupStarted -Complete
+            }
         }
     } else {
         $pgpassFile = $null
@@ -24851,29 +26655,39 @@ function Backup-PostgresDatabases {
         try {
             $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
             $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
-            foreach ($dbName in @($names | Sort-Object)) {
-                $destFile = Join-Path $result.Path ($dbName + '.backup')
-                $dumpResult = Invoke-PostgresNativeCommand -FilePath $pgDumpExe -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','-d',$dbName,'-F','c','-f',$destFile) -Secrets @($SuperPasswordPlain)
-                $dumpOutput = [string]$dumpResult.Output
-                $exitCode = [int]$dumpResult.ExitCode
-                if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $destFile -PathType Leaf) -or (Get-Item -LiteralPath $destFile).Length -eq 0) {
-                    $result.Succeeded = $false
-                    $metadata = if ($databaseGameMetadata.ContainsKey($dbName)) {
-                        $databaseGameMetadata[$dbName]
-                    } else {
-                        [pscustomobject]@{
-                            DisplayName = 'Unknown game title -- see Details'
-                            ProfileKey = ''
+            $databaseBackupStarted = Get-Date
+            $databaseBackupCurrent = 0
+            try {
+                foreach ($dbName in $backupNames) {
+                    $databaseBackupCurrent++
+                    Write-TpmCompactExtractionProgress -Phase Repairing -Label 'PostgreSQL database backup' -Current $databaseBackupCurrent -Total $backupNames.Count -StartedAt $databaseBackupStarted
+                    $destFile = Join-Path $result.Path ($dbName + '.backup')
+                    $dumpResult = Invoke-PostgresNativeCommand -FilePath $pgDumpExe -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','-d',$dbName,'-F','c','-f',$destFile) -Secrets @($SuperPasswordPlain)
+                    $dumpOutput = [string]$dumpResult.Output
+                    $exitCode = [int]$dumpResult.ExitCode
+                    if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $destFile -PathType Leaf) -or (Get-Item -LiteralPath $destFile).Length -eq 0) {
+                        $result.Succeeded = $false
+                        $metadata = if ($databaseGameMetadata.ContainsKey($dbName)) {
+                            $databaseGameMetadata[$dbName]
+                        } else {
+                            [pscustomobject]@{
+                                DisplayName = 'Unknown game title -- see Details'
+                                ProfileKey = ''
+                            }
                         }
+                        $label = [string]$metadata.DisplayName
+                        $detail = if ($dumpOutput) { ConvertTo-PostgresRedactedText -Text $dumpOutput -Secrets @($SuperPasswordPlain) } else { 'pg_dump returned no diagnostic text.' }
+                        $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $label -ProfileKey ([string]$metadata.ProfileKey) -DbName $dbName -Detail $detail -ExitCode $exitCode
+                        [void]$failureDiagnoses.Add($diagnosis)
+                        [void]$failedDatabases.Add(('{0} / {1}' -f $label, $dbName))
+                        [void]$failureDetails.Add(('{0}: pg_dump exit code {1}. {2} ({3}) Next action: {4}' -f $dbName, $exitCode, $detail, $diagnosis.Category, $diagnosis.NextAction))
+                    } else {
+                        Write-Log "Postgres backup: verified database backup for $dbName at $($result.Path)."
                     }
-                    $label = [string]$metadata.DisplayName
-                    $detail = if ($dumpOutput) { ConvertTo-PostgresRedactedText -Text $dumpOutput -Secrets @($SuperPasswordPlain) } else { 'pg_dump returned no diagnostic text.' }
-                    $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $label -ProfileKey ([string]$metadata.ProfileKey) -DbName $dbName -Detail $detail -ExitCode $exitCode
-                    [void]$failureDiagnoses.Add($diagnosis)
-                    [void]$failedDatabases.Add(('{0} / {1}' -f $label, $dbName))
-                    [void]$failureDetails.Add(('{0}: pg_dump exit code {1}. {2} ({3}) Next action: {4}' -f $dbName, $exitCode, $detail, $diagnosis.Category, $diagnosis.NextAction))
-                } else {
-                    Write-Log "Postgres backup: verified database backup for $dbName at $($result.Path)."
+                }
+            } finally {
+                if ($backupNames.Count -gt 0) {
+                    Write-TpmCompactExtractionProgress -Phase Repairing -Label 'PostgreSQL database backup' -Current $databaseBackupCurrent -Total $backupNames.Count -StartedAt $databaseBackupStarted -Complete
                 }
             }
         } catch {
@@ -24903,38 +26717,82 @@ function Backup-PostgresDatabases {
 # shows only beginner-safe status; paths, command exits, hashes, and rollback
 # receipts stay in the log or behind the explicit technical-details prompt.
 function Invoke-RestorePostgresBackup {
-    $backupRoot = Join-Path $PSScriptRoot 'PostgresBackups'
+    param([string]$BackupRoot = (Join-Path $PSScriptRoot 'PostgresBackups'))
+    $backupRoot = $BackupRoot
     if (-not (Test-Path -LiteralPath $backupRoot)) {
         Write-Host "  No Postgres database backups found in: $backupRoot" -ForegroundColor Yellow
         return
     }
-    $backups = @(Get-ChildItem -LiteralPath $backupRoot -Directory -ErrorAction SilentlyContinue | Sort-Object @{ Expression = { $_.LastWriteTime }; Descending = $true }, @{ Expression = { $_.Name } })
+    $backupFolderCandidates = New-Object System.Collections.Generic.List[object]
+    $folderDiscoveryStarted = Get-Date
+    $folderDiscoveryCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL backup folder discovery' -Current $folderDiscoveryCurrent -Total 0 -StartedAt $folderDiscoveryStarted
+    try {
+        Get-ChildItem -LiteralPath $backupRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            [void]$backupFolderCandidates.Add($_)
+            $folderDiscoveryCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL backup folder discovery' -Current $folderDiscoveryCurrent -Total 0 -StartedAt $folderDiscoveryStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL backup folder discovery' -Current $folderDiscoveryCurrent -Total 0 -StartedAt $folderDiscoveryStarted -Complete
+    }
+    $backups = @($backupFolderCandidates | Sort-Object @{ Expression = { $_.LastWriteTime }; Descending = $true }, @{ Expression = { $_.Name } })
     if ($backups.Count -eq 0) {
         Write-Host '  No Postgres backup folders found.' -ForegroundColor Yellow
         return
     }
     Write-Host ''
     Write-Host '  Available Postgres database backups (most recent first):' -ForegroundColor Cyan
-    for ($i = 0; $i -lt $backups.Count; $i++) {
-        $b = $backups[$i]
-        $dbFiles = @(Get-ChildItem -LiteralPath $b.FullName -Filter '*.backup' -File -ErrorAction SilentlyContinue | Sort-Object BaseName, Name)
-        $names = ($dbFiles | ForEach-Object { $_.BaseName }) -join ', '
-        Write-Host ('    {0,3})  {1}   ({2} database(s): {3})' -f ($i + 1), $b.Name, $dbFiles.Count, $names)
+    $menuStarted = Get-Date
+    $menuCurrent = 0
+    try {
+        for ($i = 0; $i -lt $backups.Count; $i++) {
+            $menuCurrent = $i + 1
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL backup menu indexing' -Current $menuCurrent -Total $backups.Count -StartedAt $menuStarted
+            $b = $backups[$i]
+            $dbFileCandidates = New-Object System.Collections.Generic.List[object]
+            $fileDiscoveryStarted = Get-Date
+            $fileDiscoveryCurrent = 0
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL backup file-count discovery' -Current $fileDiscoveryCurrent -Total 0 -StartedAt $fileDiscoveryStarted
+            try {
+                Get-ChildItem -LiteralPath $b.FullName -Filter '*.backup' -File -ErrorAction SilentlyContinue | ForEach-Object {
+                    [void]$dbFileCandidates.Add($_)
+                    $fileDiscoveryCurrent++
+                    Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL backup file-count discovery' -Current $fileDiscoveryCurrent -Total 0 -StartedAt $fileDiscoveryStarted
+                }
+            } finally {
+                Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL backup file-count discovery' -Current $fileDiscoveryCurrent -Total 0 -StartedAt $fileDiscoveryStarted -Complete
+            }
+            $dbFiles = @($dbFileCandidates | Sort-Object BaseName, Name)
+            $names = ($dbFiles | ForEach-Object { $_.BaseName }) -join ', '
+            Write-Host ('    {0,3})  {1}   ({2} database(s): {3})' -f ($i + 1), $b.Name, $dbFiles.Count, $names)
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL backup menu indexing' -Current $menuCurrent -Total $backups.Count -StartedAt $menuStarted -Complete
     }
     Write-Host ''
-    $choice = Read-HostSafe '  Enter number to restore, or Enter to cancel'
-    if ([string]::IsNullOrWhiteSpace($choice)) {
+    $restoreChoices = @('B') + @((1..$backups.Count) | ForEach-Object { [string]$_ })
+    $choice = Read-TpmChoice -Prompt '  Enter number to restore, or Enter to cancel' -Choices $restoreChoices -Default 'B'
+    if ($choice -eq 'B') {
         Write-Host '  Restore cancelled.' -ForegroundColor DarkGray
         Write-Log 'Postgres restore: cancelled by user.'
         return
     }
-    if ($choice -notmatch '^\d+$' -or $choice.Length -gt 9 -or [int]$choice -lt 1 -or [int]$choice -gt $backups.Count) {
-        Write-Host '  Invalid selection. Restore cancelled.' -ForegroundColor Yellow
-        Write-Log 'Postgres restore: invalid selection.'
-        return
-    }
     $selected = $backups[[int]$choice - 1]
-    $backupFiles = @(Get-ChildItem -LiteralPath $selected.FullName -Filter '*.backup' -File -ErrorAction SilentlyContinue | Sort-Object BaseName, Name)
+    $backupFileCandidates = New-Object System.Collections.Generic.List[object]
+    $restoreSourceStarted = Get-Date
+    $restoreSourceCurrent = 0
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL restore source discovery' -Current $restoreSourceCurrent -Total 0 -StartedAt $restoreSourceStarted
+    try {
+        Get-ChildItem -LiteralPath $selected.FullName -Filter '*.backup' -File -ErrorAction SilentlyContinue | ForEach-Object {
+            [void]$backupFileCandidates.Add($_)
+            $restoreSourceCurrent++
+            Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL restore source discovery' -Current $restoreSourceCurrent -Total 0 -StartedAt $restoreSourceStarted
+        }
+    } finally {
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'PostgreSQL restore source discovery' -Current $restoreSourceCurrent -Total 0 -StartedAt $restoreSourceStarted -Complete
+    }
+    $backupFiles = @($backupFileCandidates | Sort-Object BaseName, Name)
     if ($backupFiles.Count -eq 0) {
         Write-Host '  ERROR: Selected backup contains no .backup files -- restore aborted.' -ForegroundColor Red
         return
@@ -25352,8 +27210,7 @@ function Invoke-LaunchBoxDirectWrite {
     $platformsListDoc = Read-Xml $platformsXmlPath
     $emulatorId       = Get-OrCreateLaunchBoxEmulator -emulatorsDoc $emulatorsDoc -tpRoot $tpRoot -lbRoot $lbRoot
 
-    $files = Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
-                 Where-Object { $_.Directory.Name -ne "FullBackup" }
+    $files = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'LaunchBox direct-write profile discovery' -EnumerationErrorAction SilentlyContinue)
 
     $results      = [ordered]@{}
     $platformDocs = [ordered]@{}
@@ -25375,7 +27232,12 @@ function Invoke-LaunchBoxDirectWrite {
         Add-LaunchBoxEmulatorPlatformLink -emulatorsDoc $emulatorsDoc -emulatorId $emulatorId -platformName $name -isNewPlatform $platformCreated
 
         $added = 0
+        $profileIndex = 0
+        $profileTotal = $files.Count
+        $scanStarted = Get-Date
         foreach ($f in $files) {
+            $profileIndex++
+            Write-TpmCompactExtractionProgress -Phase 'Scanning' -Label 'LaunchBox direct-write profile scan' -Current $profileIndex -Total $profileTotal -StartedAt $scanStarted
             try {
                 $profileDoc = Read-Xml $f.FullName
                 if ($null -eq $profileDoc.GameProfile) { continue }
@@ -25399,6 +27261,7 @@ function Invoke-LaunchBoxDirectWrite {
             }
         }
 
+        Write-TpmCompactExtractionProgress -Phase 'Scanning' -Label 'LaunchBox direct-write profile scan' -Current $profileTotal -Total $profileTotal -Complete
         $platformDocs[$name] = @{ Doc = $platformGamesDoc; Path = $filePath }
         $results[$name] = $added
     }
@@ -25512,7 +27375,13 @@ function Export-HyperSpinJson {
     # Primary scan: match games files by system GUID. Works with 0 or more existing
     # games and is reliable regardless of the file's name.
     if ($tpSystemGuid) {
-        foreach ($gf in (Get-ChildItem -LiteralPath $gamesDir -Filter "*.json" -File -ErrorAction SilentlyContinue)) {
+        $systemGameFiles = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $gamesDir -ProgressLabel 'HyperSpin system-file discovery' -Filter '*.json' -EnumerationErrorAction SilentlyContinue)
+        $systemFileScanStarted = Get-Date
+        $systemFileScanCurrent = 0
+        $systemFileScanTotal = $systemGameFiles.Count
+        foreach ($gf in $systemGameFiles) {
+            $systemFileScanCurrent++
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'HyperSpin system-file scan' -Current $systemFileScanCurrent -Total $systemFileScanTotal -StartedAt $systemFileScanStarted
             try {
                 $sample    = Get-Content -LiteralPath $gf.FullName -Raw | ConvertFrom-Json
                 $firstGame = if ($sample -is [array]) { $sample[0] } else { $sample }
@@ -25521,6 +27390,7 @@ function Export-HyperSpinJson {
                 }
             } catch { Write-Log "HyperSpin export: GUID scan skipped $($gf.Name) -- $_"; continue }
         }
+        if ($systemFileScanTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Scanning -Label 'HyperSpin system-file scan' -Current $systemFileScanCurrent -Total $systemFileScanTotal -StartedAt $systemFileScanStarted -Complete }
     }
 
 
@@ -25546,9 +27416,18 @@ function Export-HyperSpinJson {
             if ($tpSystemGuid) {
                 try {
                     $namedEntries = @(Get-Content -LiteralPath $tpGamesPath -Raw | ConvertFrom-Json)
-                    $mismatchedNamedEntries = @($namedEntries | Where-Object {
-                        -not $_ -or [string]$_.gameSystemId -ne $tpSystemGuid
-                    })
+                    $mismatchedNamedEntries = New-Object System.Collections.Generic.List[object]
+                    $namedScanStarted = Get-Date
+                    $namedScanCurrent = 0
+                    $namedScanTotal = $namedEntries.Count
+                    foreach ($namedEntry in $namedEntries) {
+                        $namedScanCurrent++
+                        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'HyperSpin named-file validation' -Current $namedScanCurrent -Total $namedScanTotal -StartedAt $namedScanStarted
+                        if (-not $namedEntry -or [string]$namedEntry.gameSystemId -ne $tpSystemGuid) {
+                            [void]$mismatchedNamedEntries.Add($namedEntry)
+                        }
+                    }
+                    if ($namedScanTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Scanning -Label 'HyperSpin named-file validation' -Current $namedScanCurrent -Total $namedScanTotal -StartedAt $namedScanStarted -Complete }
                     if ($mismatchedNamedEntries.Count -gt 0) {
                         Write-Host "  ERROR: Existing HyperSpin games file '$($safeName).json' does not match TeknoParrot's emulator ID; no changes made." -ForegroundColor Red
                         Write-Log "HyperSpin export: refused named games file with mismatched system ID at $tpGamesPath"
@@ -25568,9 +27447,16 @@ function Export-HyperSpinJson {
     try {
         $existing = New-Object System.Collections.ArrayList
         # @() guard: ConvertFrom-Json returns $null for an empty "[]" in PS 5.1, not an empty array.
-        foreach ($g in @(Get-Content -LiteralPath $tpGamesPath -Raw | ConvertFrom-Json)) {
+        $existingGameEntries = @(Get-Content -LiteralPath $tpGamesPath -Raw | ConvertFrom-Json)
+        $existingGameScanStarted = Get-Date
+        $existingGameScanCurrent = 0
+        $existingGameScanTotal = $existingGameEntries.Count
+        foreach ($g in $existingGameEntries) {
+            $existingGameScanCurrent++
+            Write-TpmCompactExtractionProgress -Phase Scanning -Label 'HyperSpin existing-game load' -Current $existingGameScanCurrent -Total $existingGameScanTotal -StartedAt $existingGameScanStarted
             [void]$existing.Add($g)
         }
+        if ($existingGameScanTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Scanning -Label 'HyperSpin existing-game load' -Current $existingGameScanCurrent -Total $existingGameScanTotal -StartedAt $existingGameScanStarted -Complete }
     } catch {
         Write-Host "  ERROR: Could not read games file: $_" -ForegroundColor Red
         Write-Log "HyperSpin export: failed to read games file -- $_"
@@ -25579,17 +27465,27 @@ function Export-HyperSpinJson {
 
     # Build set of already-known profile codes (case-insensitive)
     $known = @{}
+    $knownScanStarted = Get-Date
+    $knownScanCurrent = 0
+    $knownScanTotal = $existing.Count
     foreach ($g in $existing) {
+        $knownScanCurrent++
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'HyperSpin existing-game index' -Current $knownScanCurrent -Total $knownScanTotal -StartedAt $knownScanStarted
         if ($g.fileName) { $known[$g.fileName.ToLower()] = $true }
     }
+    if ($knownScanTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Scanning -Label 'HyperSpin existing-game index' -Current $knownScanCurrent -Total $knownScanTotal -StartedAt $knownScanStarted -Complete }
 
     # Iterate UserProfiles; add each game not already in HyperSpin
     $added   = 0
     $now     = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss.fffffff")
-    $xmlFiles = Get-ChildItem -LiteralPath $userProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-                Where-Object { $_.Directory.Name -ne "FullBackup" }
+    $xmlFiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'HyperSpin profile discovery' -EnumerationErrorAction SilentlyContinue)
+    $profileScanStarted = Get-Date
+    $profileScanCurrent = 0
+    $profileScanTotal = $xmlFiles.Count
 
     foreach ($pf in $xmlFiles) {
+        $profileScanCurrent++
+        Write-TpmCompactExtractionProgress -Phase Scanning -Label 'HyperSpin profile scan' -Current $profileScanCurrent -Total $profileScanTotal -StartedAt $profileScanStarted
         $code = $pf.BaseName
         if ($known.ContainsKey($code.ToLower())) { continue }
 
@@ -25666,6 +27562,7 @@ function Export-HyperSpinJson {
         $known[$code.ToLower()] = $true
         $added++
     }
+    if ($profileScanTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Scanning -Label 'HyperSpin profile scan' -Current $profileScanCurrent -Total $profileScanTotal -StartedAt $profileScanStarted -Complete }
 
     if ($added -eq 0) {
         Write-Log "HyperSpin export: no new games to add (all already present)"
@@ -25737,8 +27634,7 @@ function Invoke-ThumbnailDownload {
     }
 
     # Load registered profiles first -- needed for custom thumbnail validation below.
-    $profiles = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Directory.Name -ne "FullBackup" })
+    $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'Thumbnail profile discovery' -EnumerationErrorAction SilentlyContinue)
 
     if ($profiles.Count -eq 0) {
         Write-Host "  No registered profiles found." -ForegroundColor DarkGray
@@ -25752,19 +27648,30 @@ function Invoke-ThumbnailDownload {
     # Build a case-insensitive lookup of all registered profile codes.
     $knownCodes = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($p in $profiles) { [void]$knownCodes.Add($p.BaseName) }
+    $profileCodeStarted = Get-Date
+    $profileCodeCurrent = 0
+    foreach ($p in $profiles) {
+        $profileCodeCurrent++
+        Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Thumbnail profile-code index' -Current $profileCodeCurrent -Total $profiles.Count -StartedAt $profileCodeStarted
+        [void]$knownCodes.Add($p.BaseName)
+    }
+    Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Thumbnail profile-code index' -Current $profiles.Count -Total $profiles.Count -StartedAt $profileCodeStarted -Complete
 
     # Copy custom thumbnails from Scripts\CustomThumbnails\ into the Icons folder.
     # Each file is validated against the registered profile codes first.
     $customThumbDir = if($script:TpmOwnedLayout){Join-Path $script:TpmOwnedLayout.Assets 'CustomThumbnails'}else{Join-Path $PSScriptRoot "CustomThumbnails"}
     if (Test-Path -LiteralPath $customThumbDir) {
-        $customFiles = @(Get-ChildItem -LiteralPath $customThumbDir -Filter "*.png" -File -ErrorAction SilentlyContinue)
+        $customFiles = @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $customThumbDir -ProgressLabel 'Thumbnail custom-image discovery' -Filter '*.png' -EnumerationErrorAction SilentlyContinue)
         if ($customFiles.Count -gt 0) {
             Write-Host ("  Found {0} of your own icon(s) in CustomThumbnails\." -f $customFiles.Count) -ForegroundColor Cyan
             $custCopied = 0
             $custSkipped = 0
             $custBadName = 0
+            $customStarted = Get-Date
+            $customCurrent = 0
             foreach ($cf in $customFiles) {
+                $customCurrent++
+                Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Thumbnail custom-image processing' -Current $customCurrent -Total $customFiles.Count -StartedAt $customStarted
                 $code = [System.IO.Path]::GetFileNameWithoutExtension($cf.Name)
                 if (-not $knownCodes.Contains($code)) {
                     Write-Host ("  SKIPPED: CustomThumbnails\{0}" -f $cf.Name) -ForegroundColor Yellow
@@ -25789,6 +27696,7 @@ function Invoke-ThumbnailDownload {
                     }
                 }
             }
+            Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Thumbnail custom-image processing' -Current $customCurrent -Total $customFiles.Count -StartedAt $customStarted -Complete
             if ($custCopied -gt 0) { Write-Host ("  Added   : {0} of your own icon(s)." -f $custCopied) -ForegroundColor Green }
             if ($custSkipped -gt 0) { Write-Host ("  Skipped : {0} -- that game already has an icon." -f $custSkipped) -ForegroundColor DarkGray }
             if ($custBadName -gt 0) { Write-Host ("  Skipped : {0} -- file name didn't match a game (see above)." -f $custBadName) -ForegroundColor Yellow }
@@ -25798,13 +27706,18 @@ function Invoke-ThumbnailDownload {
 
     $missing = New-Object System.Collections.Generic.List[string]
     $alreadyCount = 0
+    $iconScanStarted = Get-Date
+    $iconScanCurrent = 0
     foreach ($f in $profiles) {
+        $iconScanCurrent++
+        Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Thumbnail missing-icon classification' -Current $iconScanCurrent -Total $profiles.Count -StartedAt $iconScanStarted
         if (Test-Path -LiteralPath (Join-Path $iconsDir ($f.BaseName + ".png"))) {
             $alreadyCount++
         } else {
             [void]$missing.Add($f.BaseName)
         }
     }
+    Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Thumbnail missing-icon classification' -Current $profiles.Count -Total $profiles.Count -StartedAt $iconScanStarted -Complete
     if ($missing.Count -eq 0) {
         Write-Host "  All registered games already have an icon." -ForegroundColor Green
         Write-Log "Thumbnails: no missing icons after custom thumbnail processing."
@@ -25941,12 +27854,15 @@ function Write-ControlsStatus {
         foreach ($r in $propagationReports) { $reportMap[$r.Code] = $r }
     }
 
-    $files = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
-               Where-Object { $_.Directory.Name -ne "FullBackup" } |
-               Sort-Object BaseName)
+    $files = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'Controls status profile discovery' -EnumerationErrorAction SilentlyContinue | Sort-Object BaseName)
 
     $rows = New-Object System.Collections.ArrayList
+    $profileIndex = 0
+    $profileTotal = $files.Count
+    $scanStarted = Get-Date
     foreach ($f in $files) {
+        $profileIndex++
+        Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Controls status profile scan' -Current $profileIndex -Total $profileTotal -StartedAt $scanStarted
         try { $doc = Read-Xml $f.FullName } catch { Write-Log "Write-ControlsStatus: could not parse $($f.Name) -- $_"; continue }
         if ($null -eq $doc.GameProfile) { continue }
 
@@ -26010,6 +27926,7 @@ function Write-ControlsStatus {
         })
     }
 
+    Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Controls status profile scan' -Current $profileTotal -Total $profileTotal -Complete
     $knownFamilies = @('button','driving','lightgun','trackball','analog','spinner')
     $extraFamilies = @($rows | ForEach-Object { $_.Family } | Sort-Object -Unique |
                        Where-Object { $knownFamilies -notcontains $_ })
@@ -26631,11 +28548,14 @@ function Get-ControlReadinessActionItems {
         [pscustomobject]@{ State = 'Unknown'; DatXmlLocation = $null }
     }
 
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Directory.Name -ne 'FullBackup' } |
-        Sort-Object BaseName)
+    $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Control readiness profile discovery' -EnumerationErrorAction SilentlyContinue | Sort-Object BaseName)
 
+    $profileIndex = 0
+    $profileTotal = $profiles.Count
+    $scanStarted = Get-Date
     foreach ($profileFile in $profiles) {
+        $profileIndex++
+        Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Control readiness profile scan' -Current $profileIndex -Total $profileTotal -StartedAt $scanStarted
         $code = $profileFile.BaseName
         if ($null -eq (Get-ControlReadinessKnownRequirements -Code $code)) { continue }
 
@@ -26663,6 +28583,7 @@ function Get-ControlReadinessActionItems {
         })
     }
 
+    Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Control readiness profile scan' -Current $profileTotal -Total $profileTotal -Complete
     return @($items)
 }
 
@@ -29088,14 +31009,10 @@ $mode = $null
             Write-Host '  TeknoParrot Manager is continuing the PostgreSQL setup automatically.' -ForegroundColor Cyan
         }
         Write-Host "  Scanning registered games for Postgres requirements..." -ForegroundColor DarkGray
-        $pgProfiles = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
-        $needCount = 0; $scanBlocked = $false
-        foreach ($pf in $pgProfiles) {
-            try {
-                $doc = Read-Xml $pf.FullName
-                if ($doc.GameProfile -and (Test-GameNeedsPostgres $doc)) { $needCount++ }
-            } catch { $scanBlocked = $true; Write-Log "Postgres setup: profile scan failed for $($pf.BaseName); recovery is blocked." }
-        }
+        $pgProfiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'PostgreSQL requirement profile discovery' -EnumerationErrorAction SilentlyContinue | Sort-Object Name)
+        $requirementScan = Get-TpmPostgresRequirementScan -ProfileFiles $pgProfiles
+        $needCount = [int]$requirementScan.NeedCount
+        $scanBlocked = [bool]$requirementScan.ScanBlocked
         if ($scanBlocked) {
             Write-Host "  Could not safely scan every registered profile -- no changes made." -ForegroundColor Red
             if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not safely read every registered game profile.' }
@@ -29769,6 +31686,9 @@ $mode = $null
                 }
                 foreach ($errorText in @($supportResult.Errors)) { Write-Host ("  Reason: {0}" -f $errorText) -ForegroundColor DarkGray }
             }
+            if ($supportResult.PackagePath) {
+                [void](Invoke-TpmSupportPackageFollowUp -PackagePath $supportResult.PackagePath -SupportPackagesRoot $script:TpmOwnedLayout.SupportPackages)
+            }
         }
         continue
     }
@@ -30260,14 +32180,17 @@ $mode = $null
             }
             [void](Set-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-deployment-failed' -Message $dgSummary -DataSafety 'TPM did not claim a complete dgVoodoo2 deployment; blocked or failed games were left unchanged.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
             Write-Host ("  {0}" -f $dgSummary) -ForegroundColor Yellow
-            $dgPathIssue = $dgResult -and ($dgResult.MissingPath -gt 0 -or $dgResult.MissingDevice -gt 0)
-            if ($dgPathIssue) {
+            $dgGuidance = Get-DgVoodoo2FailureGuidance -Result $dgResult
+            if ($dgGuidance.DeviceMessage) {
+                Write-Host ("  {0}" -f $dgGuidance.DeviceMessage) -ForegroundColor Yellow
+            }
+            if ($dgGuidance.MissingPathMessage) {
+                Write-Host ("  {0}" -f $dgGuidance.MissingPathMessage) -ForegroundColor Yellow
+            }
+            if ($dgGuidance.OfferHealthCheck) {
                 Write-Host "  [H] Open 10) Library Health Check for missing paths" -ForegroundColor White
                 Write-Host "  [B] Back to main menu" -ForegroundColor White
-                do {
-                    $dgFailureChoice = Read-TpmChoice -Prompt '  Choose H or B' -Choices @('H', 'B') -Default 'B'
-                    if ($dgFailureChoice -notin @('H', 'B')) { Write-Host '  Choose H or B.' -ForegroundColor Yellow }
-                } while ($dgFailureChoice -notin @('H', 'B'))
+                $dgFailureChoice = Read-TpmChoice -Prompt '  Choose H or B' -Choices @('H', 'B') -Default 'B'
                 if ($dgFailureChoice -eq 'H') {
                     $pendingApplyMode = 'HealthCheck'
                     $pendingApplyForce = $false
@@ -30826,7 +32749,7 @@ $mode = $null
             $pathBoundariesValid = $true
         }
         try {
-            $zipBytes = (Get-ChildItem -LiteralPath $zipSource -Filter *.zip -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+            $zipBytes = Get-TpmZipSourceByteTotal -ZipSource $zipSource
             if (-not $zipBytes) { $zipBytes = 0 }
             $root      = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($gamesInstallFolder))
             $drive     = New-Object System.IO.DriveInfo($root)
@@ -30912,15 +32835,10 @@ $mode = $null
             continue
         }
 
-        # Use Where-Object instead of -Exclude so FullBackup is reliably excluded
-        # across all PowerShell 5.1 versions (-Exclude has known edge-case behaviour).
-        # Copy-Item below receives FileInfo/DirectoryInfo objects from the pipeline
-        # (not path strings), so pipeline binding already bypasses wildcard
-        # expansion -- safe even with [, ], $ in game folder names. If this source
-        # is ever changed to raw path strings, add -LiteralPath there.
+        # The helper preserves the legacy top-level recursive copy and reports
+        # one known-total progress item per UserProfiles entry.
         try {
-            Get-ChildItem -LiteralPath $userProfilesDir -ErrorAction Stop | Where-Object { $_.Name -ne "FullBackup" } |
-                Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction Stop
+            Copy-TpmAutoSyncUserProfilesBackup -UserProfilesDir $userProfilesDir -BackupPath $backupPath
         } catch {
             Write-Host "  ERROR: UserProfiles backup failed: $_" -ForegroundColor Red
             Write-Host "  The script will not continue without a complete backup." -ForegroundColor Red

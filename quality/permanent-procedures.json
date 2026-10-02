@@ -4,7 +4,19 @@
     "FIXED + TESTED",
     "SOURCE FIXED; OWNER RUNTIME NEEDED",
     "NOT FIXED",
-    "DEFERRED BY OWNER"
+    "DEFERRED BY OWNER",
+    "SOURCE CLAIM REQUIRES RE-AUDIT",
+    "SOURCE CLAIM INVALID / RE-AUDIT REQUIRED",
+    "SOURCE REMEDIATION REQUIRED"
+  ],
+  "procedureStatusDispositions": [
+    {"status":"FIXED + TESTED","disposition":"CLOSED"},
+    {"status":"SOURCE FIXED; OWNER RUNTIME NEEDED","disposition":"OWNER RUNTIME NEEDED"},
+    {"status":"NOT FIXED","disposition":"UNRESOLVED"},
+    {"status":"DEFERRED BY OWNER","disposition":"DEFERRED"},
+    {"status":"SOURCE CLAIM REQUIRES RE-AUDIT","disposition":"UNRESOLVED"},
+    {"status":"SOURCE CLAIM INVALID / RE-AUDIT REQUIRED","disposition":"UNRESOLVED"},
+    {"status":"SOURCE REMEDIATION REQUIRED","disposition":"UNRESOLVED"}
   ],
   "procedures": [
     {"id":"TPM-OWNER-001","rule":"Owner runtime is the acceptance gate.","enforcementType":"owner-runtime-gate","requiredEvidence":"Runtime owner-smoke checklist","failureMessage":"Owner-runtime evidence is missing."},

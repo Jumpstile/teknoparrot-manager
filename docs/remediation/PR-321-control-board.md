@@ -4,27 +4,30 @@ Status: blocked. This board is the source of truth for TPM remediation state.
 
 ## Current repository state
 
-- Root: `C:\REPOS\teknoparrot-manager`
-- Branch: `fix/rc8-release-blockers`
-- HEAD before PostgreSQL reset-transport slice: `e3552cd238374044d79277223fee1e01781dc7b6`
-- This working-tree slice covers the PostgreSQL 8.3 password reset transport and its required tests, documentation, and governance evidence.
-- Commit and push are authorized after source gates pass. Merge, tag, package publication, and release are not authorized.
+- Root: `C:\REPOS\teknoparrot-manager\.worktrees\rc8-release-readiness`
+- Branch: `release/rc8-readiness-2026-10-01`
+- HEAD before this uncommitted RC8 progress/remediation-evidence slice: `193796a08d17f87f823d047646a3e848b85977fc`
+- At source-gate evidence capture, no upstream was configured and the matching origin branch ref was absent locally; ancestry against an origin ref was unavailable.
+- At source-gate evidence capture, the worktree was dirty across product source, tests, release documentation, remediation docs, and untracked slice contracts; this record does not attribute every entry to one slice.
+- This slice covers RC8 progress-path remediation, permanent-gate status semantics, source re-audits, and the separately authorized ReShade ten-effect/twelve-profile behavior contract. Independent review reopened ID 3 because user-added Crosshairs PNGs were materialized/sorted before progress. The working-tree fix reports unknown-total progress through sorting and fails visibly on enumeration errors. The final source gates passed; exact-SHA candidate-source preparation is conditionally authorized. Package, runtime smoke, merge, tag, publication, and release remain unauthorized.
 
 ## Status rules
 
-Allowed statuses are: `NOT FIXED`, `SOURCE FIXED; OWNER RUNTIME NEEDED`, `FIXED + TESTED`, `DEFERRED BY OWNER`, `SOURCE CLAIM REQUIRES RE-AUDIT`, `SOURCE CLAIM INVALID / RE-AUDIT REQUIRED`, and `SOURCE REMEDIATION REQUIRED`.
+Allowed statuses exactly match `procedureStatuses` in `quality/permanent-procedures.json`: `NOT FIXED`, `SOURCE FIXED; OWNER RUNTIME NEEDED`, `FIXED + TESTED`, `DEFERRED BY OWNER`, `SOURCE CLAIM REQUIRES RE-AUDIT`, `SOURCE CLAIM INVALID / RE-AUDIT REQUIRED`, and `SOURCE REMEDIATION REQUIRED`. The registry also maps each status to the gate disposition.
 
-Re-audit statuses are fail-closed and cannot advance to owner-runtime-only until source evidence, focused tests, rebuilt package identity, and runtime proof exist.
+Promote a source-remediation or re-audit status to `SOURCE FIXED; OWNER RUNTIME NEEDED` only after complete source evidence and focused tests establish the fix. Rebuilt package identity and runtime proof close the separate owner-runtime disposition; they are not prerequisites for recording the source-fixed status.
 
-## Owner report table (historical pre-re-audit snapshot)
-The status values in this retained snapshot are historical evidence. The
-canonical release-decision statuses are in the corrected table below.
+## Owner report table (historical source audit snapshot)
+This table preserves the owner-visible failures and earlier audit evidence.
+The historical snapshot above does not control current decisions. The canonical
+table below records ID 3 as `SOURCE FIXED; OWNER RUNTIME NEEDED` after
+regression/census closure; final source/permanent gates passed.
 
 | ID | Owner-visible failure | Expected behavior | Current status | Owning subsystem | Source/functions | Tests | Runtime proof needed | Next action | Slice assignment |
 |---:|---|---|---|---|---|---|---|---|---|
 | 1 | ReShade no-change/back/cancel crash | Safe no-op and correct return routing | SOURCE FIXED; OWNER RUNTIME NEEDED | ReShade | ReShade action results | Existing ReShade regressions | Packaged U/B smoke | Owner runtime | ReShade follow-up |
 | 2 | Duplicate error handling | One authoritative error policy | SOURCE FIXED; OWNER RUNTIME NEEDED | Downloads | Web/download wrappers; RequestErrorAction remediation | RC8 remediation contracts; wrapper source test | Startup/download smoke | Rebuild then owner runtime | Slice 1 |
-| 3 | Missing universal progress | Every long-running path has TPM progress, structured workflow status, or an explicit bounded/no-progress reason | SOURCE FIXED; OWNER RUNTIME NEEDED | Progress/status | Progress.Core inventory: compact progress, workflow status, bounded waits, and justified bounded writes | `PR #321 Progress.Core source inventory`; existing progress contracts | Full packaged operation matrix | Owner runtime | Progress.Core |
+| 3 | Missing universal progress | Every long-running path has TPM progress, structured workflow status, or an explicit bounded/no-progress reason | SOURCE FIXED; OWNER RUNTIME NEEDED | Progress/status | Source streams unknown-total progress through user-extensible PNG discovery and filename sorting; terminating enumeration failures propagate | Corrected focused regressions pass under Windows PowerShell and PowerShell 7; full Windows PowerShell suite passes 1276/1276; final PS7 aggregate passes 1276/1276 main and 42/42 support plus static/permanent gates | Full packaged operation matrix | Prepare exact-SHA source ref; package only after #290/READY/human gates | Progress.Core |
 | 4 | AutoSync scan output | Compact bounded progress | SOURCE FIXED; OWNER RUNTIME NEEDED | Progress/status | Select-GamesInteractive | Compact progress tests | AutoSync smoke | Owner runtime | Progress slice |
 | 5 | GPU Fix progress | Compact status without PowerShell panel | SOURCE FIXED; OWNER RUNTIME NEEDED | Progress/status | Invoke-GpuFixSetup | GPU source contracts | GPU Fix smoke | Owner runtime | Progress slice |
 | 6 | Thumbnail progress | Accurate compact download status | SOURCE FIXED; OWNER RUNTIME NEEDED | Progress/status | Invoke-ThumbnailDownload | Thumbnail tests | Thumbnail smoke | Owner runtime | Progress slice |
@@ -50,7 +53,7 @@ canonical release-decision statuses are in the corrected table below.
 | 26 | Invalid optional Y/N input | Invalid values reprompt consistently | SOURCE FIXED; OWNER RUNTIME NEEDED | Prompts/navigation | Read-TpmChoice/Read-TpmYesNo migration; stateful picker boundaries documented | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Invalid-input matrix | Owner runtime | Prompt.Core |
 | 27 | Support final prompt | Support choices validate and preserve Back/open-folder behavior | SOURCE FIXED; OWNER RUNTIME NEEDED | Prompts/navigation | Support `1-3` and package `O/B` routes | `Prompt.Core fixed choice routes`; SupportPackage.Tests | Packaged support prompt | Owner runtime | Prompt.Core |
 | 28 | Support fatal workflow surfacing | Fatal evidence surfaces | SOURCE FIXED; OWNER RUNTIME NEEDED | Support package | Support manifest | SupportPackage.Tests | Fatal-log smoke | Owner runtime | Support follow-up |
-| 29 | Action Required freshness mismatch | Newest evidence is labeled and ambient diagnostics are scoped | SOURCE FIXED; OWNER RUNTIME NEEDED | Support package | Support package freshness, EvidenceClass manifest records | SupportPackage.Tests; support evidence source review | Rebuilt support package and owner review | Complete troubleshooting intake | Support follow-up |
+| 29 | Action Required freshness mismatch | Newest evidence is labeled and ambient diagnostics are scoped | SOURCE FIXED; OWNER RUNTIME NEEDED | Support package | Support package freshness, EvidenceClass manifest records, nested plugin-root deduplication | SupportPackage.Tests; support evidence source review | Rebuilt support package and owner review | Complete troubleshooting intake | Support follow-up |
 | 30 | Controls truthfulness | Zero-bound results never imply verified readiness | SOURCE FIXED; OWNER RUNTIME NEEDED | Controls truthfulness | Write-ControlPropagationResults; control-readiness engine | Controls truthfulness focused tests; existing controls tests | Zero-bound packaged runtime result | Owner runtime | TPM-CONTROLS-001 |
 | 31 | dgVoodoo2 wording | Results explain deployment state | SOURCE FIXED; OWNER RUNTIME NEEDED | Progress/status | dgVoodoo2 result wording | Existing tests | Owner wording review | Owner runtime | Progress slice |
 | 32 | Global consistency rule | Every enumerated prompt uses the central contract or has a documented design boundary | SOURCE FIXED; OWNER RUNTIME NEEDED | Prompts/navigation | TPM-PROMPT-001 inventory; finite-choice routes centralized; stateful, exact-token, secure, path, and renderer-aware boundaries documented | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Packaged consistency smoke | Owner runtime | Prompt.Core |
@@ -60,7 +63,7 @@ canonical release-decision statuses are in the corrected table below.
 
 ## Subsystem grouping
 
-- Progress/status: 2-8, 31; ID 3 has source evidence and remains owner-runtime needed.
+- Progress/status: IDs 2-8 and 31; ID 3 is `SOURCE FIXED; OWNER RUNTIME NEEDED` after the finite census and passing focused/full Windows PowerShell coverage. The final PS7 aggregate passed. Candidate source-ref preparation is conditionally eligible; exact-package owner runtime remains mandatory.
 - Prompts/navigation: 26, 32.
 - Repair/scoping: 16-23.
 - Migration/DAT: 34.
@@ -76,18 +79,19 @@ canonical release-decision statuses are in the corrected table below.
 
 ## Current blockers
 
-- Canonical source-remediation blockers: none in the completed Desktop source slices.
-- Canonical source re-audit blockers: IDs 4, 5, 7, 20, 23-27, and 30-32.
-- Canonical `SOURCE FIXED; OWNER RUNTIME NEEDED` rows: IDs 1-3, 6, and 8-22, 28, and 29.
-- ID 3 is source-fixed by the Slice B universal progress/status inventory and focused source-contract tests; packaged operation-matrix and owner-runtime proof remain outstanding.
-- Test blockers: no focused source-test blocker remains for audited paths, but unresolved design work and owner-runtime routes remain.
-- Package/runtime blockers: candidate ZIP is stale; no owner smoke is authorized.
+- ID 3 is `SOURCE FIXED; OWNER RUNTIME NEEDED` after the discovery/sort fix, `-ErrorAction Stop`, failing-before/passing-after coverage, and finite census. The final aggregate source/permanent gates passed. Focused tests cover failure closure, sort-before-close, dynamic indices, candidate names, and P1/P2 bytes.
+- Historical gate evidence at 2026-10-02T10:29:33.3911233Z predates this source fix. The final frozen full/static source gates and permanent procedure gate passed. Certification's stale check inspects exactly one current-candidate status and continues to block owner-runtime-needed statuses.
+- Canonical source re-audit blockers: none among IDs 7, 20, 23-27, or 30-32; IDs 27, 31, and 32 received focused source fixes.
+- Other source-fixed/owner-runtime rows are listed individually in the canonical table; do not infer status from the historical snapshot above.
+- The earlier wrapper and gate rationale remain historical in `docs/remediation/PR-321-reconciliation.md`; the user-extensible Crosshairs gap is fixed in the working tree. ID 3 is source-fixed with owner runtime needed; final source/permanent validation passed.
+- Candidate/package blockers: the candidate ZIP remains stale; current-cycle #290 repository-document/live-wiki review, exact-SHA READY, and human authorization are not established. Use the exact pushed source ref as the #290 audit input; package build remains blocked until those gates pass. Owner smoke and final approval remain outstanding.
 - Owner-design blockers: ReShade ownership/accounting and remaining stateful prompt-picker boundaries need explicit future contracts.
 
 ## Next-slice queue
-1. Controls truthfulness (`TPM-CONTROLS-001`). Contract: saved configuration, inferred readiness, and observed physical binding remain separate. Gate: expected fail until owner runtime.
-2. ReShade ownership and accounting. Excludes controls. Contract: protected files are never silently adopted or removed and every selected game has one terminal outcome. Gate: expected fail until owner runtime.
-3. Final PR #321 reconciliation and package identity review.
+
+1. Run full validation on the updated canonical ID 3 status and regression, then rerun the permanent procedure gate with fresh evidence.
+2. If every source gate passes, follow the authorized candidate-preparation path; retain exact pushed-SHA identity and package validation, then hand the candidate to Eli/ARCADE for owner smoke.
+3. Do not merge, tag, publish, release, or claim owner-runtime completion before Eli's final approval.
 
 ## Control-board rule
 
@@ -105,7 +109,7 @@ PS7 and Windows PowerShell 5.1 focused regressions cover reset success, failure,
 service-stop failure, originally-stopped service state, and policy restoration.
 The source-quality gate, exact pushed-SHA package, and new runtime evidence
 remain required before release.
-## Canonical release-decision status -- live re-audit correction -- 2026-09-08
+## Canonical release-decision status -- live re-audit correction -- 2026-10-01
 
 This section is the canonical release-decision source. It supersedes the
 historical owner mapping and prior blocker prose above. The candidate ZIP
@@ -115,11 +119,11 @@ remains stale and is not a release gate.
 |---:|---|---|---|---|---|
 | 1 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Source/test claim not contradicted by the re-audit | No | Yes, rebuilt package |
 | 2 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Full source audit found only the wrapper's splatted Invoke-WebRequest call; all callers use the typed RequestErrorAction contract; Slice A source test passes | No | Yes, rebuilt package |
-| 3 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Owner smoke exposed long-running/progress failure surface; package proof is invalid | Yes | Yes |
-| 4 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Existing source claim lacks trustworthy package evidence | Re-audit first | Yes |
-| 5 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Existing source claim lacks trustworthy package evidence | Re-audit first | Yes |
+| 3 | SOURCE REMEDIATION REQUIRED | SOURCE FIXED; OWNER RUNTIME NEEDED | The user-extensible discovery/sort gap is fixed; focused tests and finite census pass; the final full source/permanent aggregate gate passed. | No source edits remain for the gap | Yes, full packaged operation matrix |
+| 4 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | `Select-GamesInteractive` and `Select-GamesInteractiveCombined` report each ZIP across their known source total, including main and supplementary sources; both real call-site tests pass in PS7 and Windows PowerShell 5.1 | No further source change | Yes |
+| 5 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Both GPU GameProfiles scan helpers report each catalog item against the known XML total and close the compact row; real call-site behavior tests passed in PS7 and Windows PowerShell 5.1 | No further source change | Yes |
 | 6 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Thumbnail progress and named failure reporting are source/test covered; Slice A focused tests pass | No | Yes |
-| 7 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | No complete current-run no-icon proof | Re-audit first | Yes |
+| 7 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | `Invoke-ThumbnailDownload` adds only definitive-404 profile codes to the current missing-no-icon list and reports that list separately from transient download failures; source supports complete per-run accounting | No | Yes, full no-icon matrix |
 | 8 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Definitive 404 is preserved across fallback; Slice A regression test passes | No | Yes |
 | 9 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | No contrary source evidence found | No | Yes |
 | 10 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Selector contract remains source/test supported | No | Yes |
@@ -132,23 +136,23 @@ remains stale and is not a release gate.
 | 17 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Repair candidate search and apply calls are limited to the affected broken profile codes; focused one/multiple/zero-scope tests pass | No | Yes |
 | 18 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | No-candidate reporting includes searched-folder and affected-profile evidence plus Back; focused tests pass | No | Yes |
 | 19 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Optional source recopy hands only affected profile codes to AutoSync; no broad extraction escape found | No | Yes |
-| 20 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Back routing has source tests but no trusted package proof | Re-audit first | Yes |
+| 20 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | `Show-LibraryHealthNextActions` exposes validated Back in both broken-path and normal menus; main-loop dispatch performs no optional action for B and returns to the menu | No | Yes |
 | 21 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Repair results classify every report once and require saved-path read-back before FIXED; focused accounting tests pass | No | Yes |
 | 22 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Post-repair result completes before the optional thumbnail prompt; scoped source handoff remains affected-only | No | Yes |
-| 23 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | No new source contradiction; package gate is stale | Re-audit first | Yes |
-| 24 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Prompt source evidence exists; packaged behavior unproven | Re-audit first | Yes |
-| 25 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Normal completion source evidence lacks trusted package proof | Re-audit first | Yes |
-| 26 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Central choice contract exists; all-row claim needs renewed audit | Re-audit first | Yes |
-| 27 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Support prompt source evidence exists; package was stale | Re-audit first | Yes |
+| 23 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | LaunchBox presents B as Back; only A enters direct-write setup and only F creates the manual reference route | No | Yes |
+| 24 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | LaunchBox prompt explicitly distinguishes preview/no-write, add/update/write, manual reference/no-write, and Back; platform selection is enumerated | No | Yes |
+| 25 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Missing HyperSpin emulator ID offers validated G/S; both paths return without writing game associations or inventing an ID | No | Yes |
+| 26 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Shared `Read-TpmChoice`/`Read-TpmYesNo` reject invalid finite choices; secure, exact-token, free-text, and stateful exceptions remain specialized | No | Yes |
+| 27 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Support `1-3` plus post-ZIP O/B are validated; O uses the canonical non-reparse folder opener; route and restore-transition behavior tests pass | `TPM-PR321-PROMPT-RESULTS-002`; PS7 focused tests | Yes |
 | 28 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Manifest includes stale Action Required evidence correctly | No | Yes |
-| 29 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE REMEDIATION REQUIRED | Freshness label works; ambient plugin diagnostics are not clearly current-run/untested scoped | Yes | Yes |
-| 30 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Controls tests exist; package gate is not trustworthy | Re-audit first | Yes |
-| 31 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Wording source claim lacks owner/package proof | Re-audit first | Yes |
-| 32 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE CLAIM REQUIRES RE-AUDIT | Global claim depended on the invalid accepted count | Re-audit first | Yes |
+| 29 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Support manifest classifies game-local plugin inventories as Ambient; manifest defines Ambient as supplied/discovered without current-run provenance; entries explicitly say metadata-only and DLL payloads not copied; focused SupportPackage test verifies class and excludes plugin filenames | No further source change | Yes, rebuilt package and owner review |
+| 30 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Zero-bound results return and display `VerifiedPhysicalBindingsCount = 0`; controls-readiness remains NotVerified absent current physical verification; focused result tests cover settings-only and API-fixed reports | No | Yes |
+| 31 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | `Get-DgVoodoo2FailureGuidance` recommends reconnecting an unavailable device and offers Library Health Check only for MissingPath; mixed results preserve both actions. The apparent successful-with-skips screen remains unreachable. | `TPM-PR321-PROMPT-RESULTS-002`; three guidance behavior tests | Yes |
+| 32 | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Three previously direct restore-number prompts now use `Read-TpmChoice`; focused tests exercise invalid retry and blank-to-Back for UserProfiles, LaunchBox, and PostgreSQL; source audit found no other finite numbered/Y-N route outside documented boundaries | `TPM-PR321-PROMPT-RESULTS-002`; focused route tests | Yes |
 
-- Historical false source-fixed claims included IDs 2, 13, and 14. The current crosshair slice supersedes the prior ID 13/14 disposition with source-fixed completed-state/focus behavior; IDs 16 and 29 are now source-fixed by the PostgreSQL and support-evidence re-audits, IDs 11 and 12 remain source-fixed with owner-runtime evidence outstanding, ID 3 remains the source-remediation blocker, and remaining rows require renewed source/package audit before owner-only classification.
+- Historical false source-fixed claims included IDs 2, 13, and 14. The current crosshair slice supersedes the prior ID 13/14 disposition with source-fixed completed-state/focus behavior. IDs 16 and 29 remain source-fixed by their re-audits; IDs 7, 20, 23-27, and 30-32 have now been re-audited and are source-supported, with IDs 27, 31, and 32 receiving focused fixes. ID 3's discovery/sort implementation, focused tests, and finite census are complete; its canonical status is `SOURCE FIXED; OWNER RUNTIME NEEDED`, and the final source/permanent validation passed.
 
-Changelog decision queued for the next authorized source slice: `Known RC8 owner-smoke blockers identified. Release remains blocked pending re-audit, source remediation, package rebuild, and owner-runtime retest.`
+Candidate source-ref preparation is conditionally authorized after the source gates. Package build remains blocked on exact pushed-SHA identity, current-cycle #290 repository-document/live-wiki review, exact-SHA READY, and human authorization. Owner-runtime verification remains required; no merge, tag, publication, or release action is authorized.
 
 ## Library Health repair slice -- working-tree evidence
 

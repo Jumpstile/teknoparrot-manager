@@ -124,8 +124,10 @@ terminal-only chooser remains authoritative. Gallery events, preview refresh,
 and all comparison controls are visual-only; deployment is still unreachable
 until terminal `U` plus the existing explicit confirmation.
 The normal ReShade setup path describes the gallery as view-only and keeps the
-terminal chooser authoritative. RC8 exposes five beginner-safe profiles:
-Original, Clean & Sharp, Classic Arcade CRT, Vivid Arcade, and Enhanced Arcade.
+terminal chooser authoritative. RC8 exposes twelve bounded profiles in display
+order: Original, Clean & Sharp, Classic Arcade CRT, Vivid Arcade, Enhanced
+Arcade, Cartoon, Contrast Curves, Film Grain, Levels, Monochrome, Sepia Tone,
+and Vignette.
 The setup summary leads with changed, not-changed, and actual-failure totals;
 unsafe or malformed ownership/path entries remain unchanged and direct the user
 to repair, explicit Adopt for protected content, skip, or Details/support.
@@ -502,7 +504,7 @@ registered profiles (WRONG NAME warning for typos), never required. Same
 **Read-only multi-monitor suitability evidence (RC8).** `Get-TpmDisplayTopologyClassification` classifies caller-supplied display records without querying or changing monitor configuration. It distinguishes unavailable/zero-usable, single-display, multiple-primary, mixed-resolution/orientation/refresh, mirrored, no-primary, and malformed topologies. It does not assign a separate `EXTENDED` state; an extended desktop is represented by the applicable multiple-display state. Live Windows display acquisition is not wired into the eligibility path, so callers must supply the evidence. `TargetDisplayId` is optional evidence: an explicit target must still be present and connected to be `CONFIDENT`; duplicate matches are `AMBIGUOUS` and no monitor is selected. A missing target is `UNKNOWN` and does not fall back to another display. Without an explicit target, a sole usable display is confident, while multiple usable displays remain `AMBIGUOUS` until the caller identifies the game target.
 
 The result is advisory input to ReShade eligibility only. It may add `DISPLAY_TARGET_AMBIGUOUS` and downgrade suitability to `UNKNOWN`; it never changes the primary monitor, enables or disables displays, changes resolution/refresh/orientation, moves windows, or writes game display settings. Target resolution reuses `Get-TpmResolutionClassification`, so bounded low/normal/high/wide evidence and ReShade effect-sensitivity metadata remain advisory rather than becoming monitor configuration policy. A changed or stale topology invalidates prior target confidence and requires fresh evidence.
-**Canonical visual profiles and generated presets (RC8).** TPM exposes exactly five bounded profiles in display order: Original (empty stack), Clean & Sharp (`SweetFX.LumaSharpen`), Classic Arcade CRT (`FXShaders.CRT_Lottes`), Vivid Arcade (`SweetFX.Vibrance`), and Enhanced Arcade (`SweetFX.LumaSharpen` followed by `SweetFX.Vibrance`). Profile IDs select definitions, but trust remains in the approved effect catalog, pinned revisions, required files, and SHA-256 values. Curated profile and effect metadata is `ADVISORY_UNMEASURED` with `MeasuredEvidence = $false`; no profile is marked `Recommended` or `VALIDATED_SINGLE` without measured evidence. CRT is isolated from sharpening and vibrance in normal profile mode; the enhanced two-effect order is explicit.
+**Canonical visual profiles and generated presets (RC8).** TPM exposes exactly twelve bounded profiles in display order: Original (empty stack), Clean & Sharp (`SweetFX.LumaSharpen`), Classic Arcade CRT (`FXShaders.CRT_Lottes`), Vivid Arcade (`SweetFX.Vibrance`), Enhanced Arcade (`SweetFX.LumaSharpen` followed by `SweetFX.Vibrance`), Cartoon (`SweetFX.Cartoon`), Contrast Curves (`SweetFX.Curves`), Film Grain (`SweetFX.FilmGrain`), Levels (`SweetFX.Levels`), Monochrome (`SweetFX.Monochrome`), Sepia Tone (`SweetFX.Sepia`), and Vignette (`SweetFX.Vignette`). Profile IDs select definitions, but trust remains in the approved effect catalog, pinned revisions, exact hashes and byte lengths, and required include closure. Curated profile and effect metadata remains `ADVISORY_UNMEASURED` with `MeasuredEvidence = $false`; no profile is marked `Recommended` or `VALIDATED_SINGLE` without measured evidence. CRT is isolated from sharpening and vibrance in normal profile mode; the enhanced two-effect order is explicit.
 
 The terminal chooser and preview gallery derive their visible `Techniques:`
 line from each profile's canonical `TechniqueOrder` and the approved effect
@@ -515,12 +517,32 @@ and techniques without exposing internal paths:
 - Classic Arcade CRT -- `CRT_Lottes.fx / CRT_Lottes`
 - Vivid Arcade -- `Vibrance.fx / Vibrance`
 - Enhanced Arcade -- `LumaSharpen.fx / LumaSharpen; Vibrance.fx / Vibrance`
+- Cartoon -- `Cartoon.fx / Cartoon`
+- Contrast Curves -- `Curves.fx / Curves`
+- Film Grain -- `FilmGrain.fx / FilmGrain`
+- Levels -- `Levels.fx / Levels`
+- Monochrome -- `Monochrome.fx / Monochrome`
+- Sepia Tone -- `Sepia.fx / Tint`
+- Vignette -- `Vignette.fx / Vignette`
 
-These are approved TPM bundled/generated definitions, not claims about
-live-fetched runtime files. Display order follows the canonical profile order
-and `TechniqueOrder`; visible text is never a second hardcoded effect list.
+The new SweetFX sources are fetched only during explicit deployment and
+validated against pinned SHA-256 and byte lengths; they are not bundled.
+Required `ReShade.fxh` is fetched from the pinned ReShade shader repository
+with its CC0-1.0 provenance. The small `ReShadeUI.fxh` compatibility shim is
+TPM-authored and hash-checked from generated bytes. Shared includes are staged
+once per destination when their relative path, hash, and byte length agree.
+Generated `ReShade.ini` restricts shader search paths to the canonical TPM
+roots and sets both `PresetPath` and `StartupPresetPath` to that file,
+preventing an older startup override from superseding the selected profile.
+
+These are approved TPM-generated profile definitions, not claims that
+live-fetched runtime files are bundled. Display order follows the canonical
+profile order and `TechniqueOrder`; visible text is never a second hardcoded
+effect list.
 
 `New-TpmReShadePresetContent` generates stable TPM-owned preset text from the selected definition, with normalized technique order and no timestamps, randomness, paths, or user code. `Test-TpmReShadePresetContent` validates the generated structure and rejects techniques outside the approved bounded set. Original intentionally generates no effect techniques. Advanced custom `.ini` input remains opt-in and is path/extension/existence validated; its contents do not become approved effect evidence.
+
+Each generated preset writes both `Techniques` and `TechniqueSorting` from the same canonical order. This is required because the pinned ReShade 6.8.0 runtime falls back to `[GENERAL] TechniqueSorting` when the preset key is absent; an older user value could otherwise reorder a multi-effect stack. Preset validation rejects a sorting list that differs from the selected profile. Original leaves both lists empty.
 **Preview renderer and cache (RC8 freeze exception).** `New-TpmReShadePreviewBitmap` decodes the bundled `TPM-preview-landscape.png` reference and renders a safe deterministic approximation for `Before`, `After`, `Split`, and percentage-driven `Slider` output; it does not run a game or execute ReShade shaders. The processed bitmap is derived from the same decoded reference and cached per profile, so actual in-game results may vary. Comparison composition copies bounded pixel regions so the untouched side remains byte-stable. `New-TpmReShadePreviewArtifact` materializes results under `ReShadePreviewCache\`; rendering does not depend on live-fetched ReShade runtime files.
 
 The cache manifest records the subject/mode, slider position when applicable, intensity identity, preset version, approved shader SHA-256 values, reference identity/version/hash, and renderer version. A missing, corrupt, stale, or mismatched manifest/image regenerates safely; cache artifacts are never trust or deployment evidence. Each WinForms preview keeps one decoded `Reference` bitmap and one processed bitmap per profile. Slider Paint reads only those cached bitmaps, clips the two sides, and draws the divider; it never allocates a composite bitmap, replaces `PictureBox.Image`, decodes a file, or runs the profile pixel generator during a drag. Slider changes are coalesced through a short WinForms timer, while keyboard/programmatic updates invalidate the same view immediately. Close detaches handlers, stops and disposes the timer, clears pending state, disposes the picture image and render cache, then disposes the form. `Open-TpmReShadePreviewWindow`, `Update-TpmReShadePreviewWindow`, `Close-TpmReShadePreviewWindow`, and `Show-TpmReShadePreviewWindow` provide the window lifecycle. If a terminal chooser requests `R` after disposal, it creates a fresh gallery session, synchronizes the selected profile, returns that replacement session to the caller, and leaves final teardown with the caller. WinForms is loaded lazily, requires STA for actual display, and returns a text-only fallback in noninteractive hosts.
@@ -528,8 +550,8 @@ The cache manifest records the subject/mode, slider position when applicable, in
 
 Restore history is a selector, not trust evidence. Restore validates the profile schema, ordered approved effect IDs, ordered catalog hashes, and intensity variant before deployment; it never copies a historical path or arbitrary historical file. Missing, corrupt, stale, or unsupported history produces a friendly fresh-selection path. The chooser requires an explicit `R` restore choice, offers a remembered profile only after explicit confirmation, and exposes catalog-bound favorites through `F`.
 The normal visual-first setup prints the profile descriptions, opens an optional
-non-modal gallery, and immediately presents the terminal chooser for all five
-profiles. The numbered terminal path remains authoritative when WinForms is
+non-modal gallery, and immediately presents the terminal chooser for all twelve
+canonical profiles. The numbered terminal path remains authoritative when WinForms is
 unavailable or the gallery closes. It does not block on modal UI or leave the
 workflow without a visible prompt; text selection, `U`, `R`, `B`, and `D` all
 remain available before explicit confirmation.
@@ -823,6 +845,12 @@ known), open as a readable archive, and contain the collection DAT entry used
 by `Build-DatIndexFromZip`. Validation happens before the shared downloader
 replaces an existing destination. A failed or invalid download therefore
 leaves the previous destination untouched and removes the partial file.
+
+The startup `Build-DatIndexFromStream` and
+`Build-GameNotesIndexFromStream` parsers emit unknown-total compact progress
+every 100 completed game records or text lines, respectively. Disk and ZIP
+wrappers share these parsers; completion closes the status on parse failure,
+and existing stream ownership and index results are unchanged.
 
 ---
 
@@ -1118,7 +1146,8 @@ does not claim that saved GamePath values were repaired.
 
 **Crosshair gallery selection.** The HTML gallery contains all discovered valid
 crosshairs. A short-lived localhost bridge bound only to `127.0.0.1` accepts a
-per-session token and an integer index from 0 through 320; incidental or invalid
+per-session token and an integer index from 0 through the current valid-image
+count minus one; user-added PNGs extend that range. Incidental or invalid
 requests do not consume the listener. After P2 is accepted, the page reports
 `Selections complete. Return to TeknoParrot Manager to confirm. You can close
 this tab.` and ignores further clicks. Focus return is attempted where Windows
@@ -1127,6 +1156,11 @@ the direct `Read-HostSafe` renderer in the normal completion flow, while
 selection continues through typed numeric P1/P2 fallback if the bridge times
 out or is unavailable. Deployment has a separate explicit confirmation before
 any crosshair files or state are written.
+
+`Invoke-CrosshairSetup` reports unknown-total progress while discovering every
+direct `*.png`, keeps that row active through filename sorting, then validates
+against the discovered count. The 321 bundled files do not cap valid user-added
+images.
 
 **Crosshair last-used state.** `TeknoParrot-Manager-crosshairs.json` (gitignored, like
 `config.json`) remembers last-used P1/P2 crosshair filenames (not indices -- indices shift
@@ -2251,6 +2285,107 @@ status, bounded waiting, or a justified renderer-aware/no-progress surface;
 there is no universal-progress exception for an unclassified long-running
 operation.
 
+Known-total ZIP classification in `Select-GamesInteractive` and
+`Select-GamesInteractiveCombined` counts both sources and closes the compact
+row after classification. GameProfiles catalog work in `Get-GpuFixFieldNames`,
+`Get-GpuAndFfbFieldNames`, `Get-FFBBlasterFieldNames`, and `Build-ProfileIndex`
+reports each XML against the enumerated total. `Get-TeknoParrotProfileSet`
+uses a three-attempt query row and known-total GitHub-tree/local-fallback
+scans. dgVoodoo2 reports its registered-profile and selected-target deployment
+preflight scans; standalone FFB reports planning, selected-profile overlap
+preflight, pre-write revalidation, updates, and final verification over their
+known profile totals. Control Propagation's archetype pool, target scan, and
+final controls-status report also expose known-total per-profile progress.
+`Get-ControlReadinessActionItems` reports each registered UserProfiles XML in
+its onboarding readiness scan before applying the catalog-backed filter.
+LaunchBox direct-write now reports platform/profile totals; ReShade and
+dgVoodoo2 membership checks plus setup notes share the case-insensitive
+registered-profile code scan. PostgreSQL setup counts required profiles with a
+known-total row. Library Health reports its path and optional-coverage passes;
+compatibility warnings report both profile passes; thumbnail indexing,
+custom-thumbnail processing, and missing-icon classification each close a
+known-total row.
+AutoSync target/staging directory manifests report unknown-total per-entry
+enumeration and hashing; ZIP inventory hashes each archive entry against the
+known entry total before staging. `Test-TpmDirectoryAgainstZipInventory`
+reports known-total indexing across the prebuilt ZIP/directory entries, then
+a known-total comparison pass; both rows close on early mismatch as well as
+success. When a source root has no ZIPs, both selection and AutoSync report a
+known-total scan of immediate subdirectories while counting one-level-deep
+ZIPs. The source census is complete at the call-site level. No unbounded
+uncovered materialized inventory remains. Seven residual expressions are
+explicitly bounded or short-circuit: the 200-profile support cap, four
+first-match probes, 321 bundled crosshair assets, and the fixed five-name
+BepInEx backup.
+The frozen aggregate Pester suites passed. The quality wrapper passed its
+source, parser, ASCII, and diff checks, but the permanent procedure gate
+failed on unresolved ID 3 status and stale validation timestamps; a fresh
+timestamped procedure-gate recheck remains pending.
+
+The final ID 3 re-audit extends unknown-total discovery to FFB/UserProfiles snapshot and rollback roots; SupportPackages migration and support-plugin data-directory and recursive child inventories; ReShade/dgVoodoo2 per-game override files; custom thumbnails; HyperSpin system JSON; PostgreSQL recovery retry-state files; and PostgreSQL game-backup date/file candidates. `Get-TpmDirectoryEntriesWithDiscoveryProgress` preserves each caller's filter, error action, Force behavior, entry types, order, and later operation while closing discovery before known-total work.
+The wider source pass also covers verified UserProfiles manifest/backup/restore
+loops; AutoSync's top-level UserProfiles backup and the legacy restore's
+snapshot, removal, and selected-backup phases; LaunchBox export, backup, and
+restore loops; Health Check profile backups; BepInEx path preflight and
+transactional promotion; FFB plugin matching/planning and native-overlap
+safety/rollback copies; PostgreSQL profile scans, per-database backup,
+database rollback, profile-backup restore, setup preflight, database creation,
+profile updates, and final read-back; generic file-transaction staging, backup,
+verification, and rollback; owned-state migration; CursorHide/Crosshair scans;
+both Control Propagation profile passes; recursive registration discovery;
+and ReShade acquisition, apply, and removal. Both failure paths in
+legacy UserProfiles restore use `Restore-TpmLegacyUserProfilesSnapshot`, which
+reports known-total removal and top-level snapshot-copy progress while keeping
+`FullBackup` outside the rollback mutation.
+BepInEx installed/staged/backup recursive discovery streams unknown-total
+progress before known-total file classification and hash verification, while
+staging cleanup streams descendant safety checks and reports its known-total
+file/directory deletion phases. Root/descendant reparse checks remain intact.
+`New-BepInExUpdateBackup`, `Restore-BepInExUpdateBackup`, and
+`Remove-BepInExFixedTree` report known-total top-level entry phases; recursive
+`Copy-Item`/`Remove-Item` internals have no per-descendant callback.
+`Expand-DgVoodoo2Zip` reports known-total archive-entry indexing before staging
+its fixed required file set.
+The LaunchBox backup restore menu reports a known-total scan across candidate
+backup folders and streams unknown-total per-file discovery during both
+recursive menu counting and selected restore-source indexing before the
+known-total file-copy phase.
+Support collection reports profile/plugin inventory work, and its workflow remains active through
+ZIP creation, identity-bound promotion, and path verification. The archive
+embeds `SupportWorkflowAtArchiveSnapshot` as a point-in-time `Running`/`Working`
+record; the returned workflow result and `WorkflowCompleted` event are
+published only after promotion verification. HyperSpin export reports system
+file lookup, named-file validation, existing-game load/index, and UserProfiles
+scan. Support package staging cleanup streams unknown-total descendant discovery
+and per-entry removal status through the handle-bound recursion; canonical-root,
+identity, reparse, and residue checks remain unchanged. ReShade latest-version
+discovery remains one 10-second metadata request with a visible checking
+message; installer transfers use the shared download row, while signature
+checks and local preview rendering are bounded no-progress work.
+FFB source-revision/support-table lookups remain stage-visible bounded
+requests, and DLL transfers use shared download progress.
+`Remove-PostgresPartialInstall` reports unknown-total cleanup status while
+streaming installed-product/profile-registry enumeration and before opaque
+uninstall/filesystem work; service and profile cleanup advances the same row,
+which closes in `finally`.
+`Expand-ReShadeSelfExtractingArchive` reports bounded-interval installer-byte
+scan progress, known-total candidate and archive-entry scans, and still stages
+the first candidate containing both required DLLs before transactional promote.
+The ZIP API call `ZipFile.CreateFromDirectory` has no per-entry progress
+callback; compact status identifies it as an active unknown-total operation,
+not completed entry work. Recursive `Copy-Item` migration operations likewise
+have no per-descendant callback; status advances only at the top-level owned
+item boundary. `pg_dump.exe` has no internal callback; backup progress advances
+at each known-total database boundary without implying progress inside a dump.
+The ID 3 census is complete: zero unbounded uncovered materialized
+inventories remain, with seven residual expressions classified as bounded or
+short-circuit surfaces above. Aggregate Pester suites passed; the quality
+wrapper's source checks passed, but the permanent procedure gate failed on
+unresolved ID 3 and stale validation timestamps. The final procedure-gate
+recheck remains pending before source remediation can be cleared.
+Package identity and owner-runtime proof remain outstanding; owner runtime is
+not authorized by this source slice.
+
 ## Prompt.Core finite-choice contract (TPM-PROMPT-001)
 
 `Read-TpmYesNo` owns ordinary Y/N decisions. `Read-TpmChoice` owns finite
@@ -2261,6 +2396,20 @@ re-prompts through `Read-HostSafe` without changing the workflow state.
 Back, Skip, Cancel, Preview, Run, Details, retry, and optional-setup actions
 use this contract when their choices are finite. Dynamic route menus build
 their allowed array from verified state before calling the helper.
+
+UserProfiles, LaunchBox, and PostgreSQL restore backup lists are finite-choice
+routes: `Read-TpmChoice` accepts only the displayed backup numbers or `B`, with
+blank defaulting to `B`. The restore mutation boundary remains after selection,
+so invalid input is reprompted and blank cancels before any change.
+
+After support ZIP creation, the result flow offers `O` to open the TPM-owned
+`SupportPackages` folder or `B` to return to the main menu. Folder opening uses
+`Open-TpmOwnedFolder`, which canonicalizes the path, rejects reparse-backed or
+missing folders, and launches Explorer only after those checks pass.
+
+dgVoodoo2 failure guidance keeps the two recovery causes separate:
+unavailable-device results recommend reconnecting the drive/device, while
+Library Health Check is offered only when a saved game path is missing.
 
 This contract does not replace exact-token safety confirmations (`YES`,
 `REMOVE`), secure password input, paths, free-text search, numeric ranges,
@@ -2297,6 +2446,9 @@ The same opened-object identity proof protects game logs and TPM/TeknoParrot
 diagnostics. The collector reads text only; plugin directories are inspected
 for metadata and hashes but DLL payloads are never copied. Plugin hashes use
 the validated opened stream; unsafe path-based version probes are omitted.
+Nested allowlisted plugin roots are collapsed before traversal, so an
+architecture-specific directory covered by a parent `Plugins` root is visited
+once and each safe file path contributes one inventory row.
 Every text artifact is validated as strict BOM-aware UTF-8/UTF-16 text and
 rejected with `RejectedUnsafeContent` when it has executable/archive
 signatures, NUL/control bytes, or invalid encoding.

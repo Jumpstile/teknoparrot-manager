@@ -22,13 +22,31 @@ source/package/runtime provenance, and a hunk classification mapping each
 change to an owner ID, procedure ID, issue ID, or slice ID.
 ## Owner report mapping table
 
-Use every owner report ID. Status must be exactly one of:
-`FIXED + TESTED`, `SOURCE FIXED; OWNER RUNTIME NEEDED`, `NOT FIXED`,
-`DEFERRED BY OWNER`.
+Use every owner report ID. Status must exactly match a value in
+`quality/permanent-procedures.json`: `NOT FIXED`,
+`SOURCE FIXED; OWNER RUNTIME NEEDED`, `FIXED + TESTED`, `DEFERRED BY OWNER`,
+`SOURCE CLAIM REQUIRES RE-AUDIT`, `SOURCE CLAIM INVALID / RE-AUDIT REQUIRED`,
+or `SOURCE REMEDIATION REQUIRED`.
+The four unresolved statuses (`NOT FIXED`, `SOURCE REMEDIATION REQUIRED`, and
+the two `SOURCE CLAIM` re-audit statuses) block the source gate. Owner-runtime
+pending remains distinct from source eligibility; certification mode requires
+fresh package/runtime proof.
 
 | ID | Owner report | Status | Files/functions | Exact test names | Runtime proof still needed |
 |---:|---|---|---|---|---|
 | 1 | | | | | |
+
+
+## Canonical owner-ID status table -- release decisions
+
+This table is the sole release-decision status source. Keep the historical
+owner-mapping table above for function/file mapping and exact focused test
+names; do not copy its status cells into this table without re-auditing them.
+The `Corrected status` column must exactly match a registered value.
+
+| ID | Owner report | Finding | Corrected status | Decision evidence |
+|---:|---|---|---|---|
+| 1 | | | | |
 
 ## SCRIPT-WIDE UNIVERSAL PROGRESS BAR AUDIT
 

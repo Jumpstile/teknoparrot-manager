@@ -39,6 +39,8 @@ gallery is a read-only preview surface: it may render in-memory comparison
 images and update transient selection state, but it is not permitted to
 deploy files, save configuration, or claim a profile was applied.
 
+This inventory remains limited to ReShade installer download/extraction and gallery read-only behavior. Curated profile/effect acquisition, include closure, preset configuration, and game-target deployment are governed by `RESHADE-PROFILE-SELECTION-INVARIANT-INVENTORY.md`.
+
 ## Invariants
 
 ### TX-001 -- Destination is never touched until a complete, valid staged set exists

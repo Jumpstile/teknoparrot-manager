@@ -24,7 +24,7 @@ or test result cannot silently become packaged-runtime proof.
 
 1. Create a remediation report from `docs/templates/remediation-gate-report.md`.
 2. Run `scripts/Run-TpmQualityGate.ps1` from the authorized local worktree. This is the source/test gate and may legitimately retain `SOURCE FIXED; OWNER RUNTIME NEEDED` rows.
-3. Resolve every source/test gate failure or explicitly record the report item as `NOT FIXED`.
+3. Keep every owner status truthful and exact. `NOT FIXED`, `SOURCE REMEDIATION REQUIRED`, `SOURCE CLAIM REQUIRES RE-AUDIT`, and `SOURCE CLAIM INVALID / RE-AUDIT REQUIRED` block the source gate; do not relabel an unresolved item as owner-runtime-only.
 4. Obtain explicit authorization before commit, push, package, certification, wiki, or ARCADE work. When runtime proof requires an exact immutable package, freeze the authorized commit, verify exact-head CI, and build the candidate from that SHA.
 5. Obtain the required owner-runtime evidence from that exact package where the report identifies it.
 6. Run `scripts/Run-TpmQualityGate.ps1 -CertificationMode` before any release-ready claim. Certification mode requires all owner-runtime evidence to be complete.
