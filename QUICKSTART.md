@@ -1,6 +1,6 @@
 # TeknoParrot Manager — Quick Start
 
-> Current published release: v1.0 RC7 -- test one game after every run. Profiles are backed up automatically before every run. [RC7 release archive](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7). Previous published release: v1.0 RC6 (historical). v1.0 RC8 is the candidate being prepared and is not published. Final Version 1.0 remains unpublished.
+> Current published release: v1.0 RC7 -- test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [RC7 release archive](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7). Previous published release: v1.0 RC6 (historical). v1.0 RC8 is the candidate being prepared and is not published. Final Version 1.0 remains unpublished.
 
 Full documentation: [README.md](README.md)
 
@@ -203,7 +203,7 @@ Mode 4 deploys custom crosshair cursor images to all registered lightgun games.
 3. The script copies the images to every registered lightgun game:
    - Standard games: `P1.png` + `P2.png` in the game's exe folder
    - ElfLdr2 games: shared pair in the ElfLdr2 emulator folder
-   - Pcsx2x6 games: shared pair in `pcsx2x6\TeknoParrot\crosshairs\` (the official upstream location); `inis\PCSX2.ini` is also updated with `cursor_path` for each USB guncon2 port
+   - Pcsx2x6 games: shared pair in `pcsx2x6\TeknoParrot\crosshairs\` (the official upstream location); under the current contract, `cursor_path` remains emulator-owned, so TPM leaves it unchanged and reports existing values read-only when available.
 4. Optionally choose to hide the Windows cursor in all gun game profiles (a backup is taken automatically first)
 
 Run mode 4 again any time to change designs. Add your own PNG files to the `Crosshairs\` folder and the script picks them up automatically.
@@ -551,8 +551,8 @@ At the end of every run the script prints — and saves to a text file (default 
 
 ## Good to Know
 
-- Profiles are backed up before every run to `UserProfiles\FullBackup\<date_time>\`. Nothing is ever deleted automatically.
-- If backup folder creation fails, the script stops rather than proceeding without a restore point.
+- AutoSync backs up the current UserProfiles contents before extraction; preview mode skips this backup. Nothing is ever deleted automatically.
+- If the backup cannot be created or completed, AutoSync does not proceed with extraction.
 - You must own or otherwise have lawful rights to the original arcade PCB and any ROM/game data you use. TPM does not provide, distribute, or endorse unauthorized game files.
   The log also records a download audit trail: ReShade installer source/filename/version/SHA-256 plus Authenticode signer/status/thumbprint/trust result; BepInEx GitHub source/filename/version/SHA-256 plus digest validation when available; dgVoodoo2, FFBArcadePlugin, Eggman/RomVault dat, PostgreSQL guide, TPM update package, and TeknoParrotUI thumbnails with source/hash/transfer audit fields. Transfer method, size, elapsed time, and average MB/s are included. Sources without a published digest or signing anchor are not described as cryptographically authenticated.
 - If an extraction is interrupted (Ctrl+C, power loss, disk error), the incomplete folder is automatically detected and re-extracted on the next run.

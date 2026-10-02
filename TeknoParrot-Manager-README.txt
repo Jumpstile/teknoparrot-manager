@@ -8,8 +8,8 @@
   keeps your game library organised. Windows / PowerShell 5.1+.
 
   This is the RC8 release candidate source under review. RC8 is not published.
-  Test one game after each run. Your profiles are backed up automatically at
-  the start of every run.
+  Test one game after each run. AutoSync backs up UserProfiles before
+  extraction; preview mode skips that backup.
 
   Current published release: v1.0 RC7. The RC7 release archive is available at:
   https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
@@ -270,8 +270,9 @@
     game folders, auto-detecting the correct DLL name from each game's
     executable. Supports both 64-bit (ReShade64.dll) and 32-bit (ReShade32.dll)
     games -- the correct DLL is chosen automatically based on each game's
-    architecture. Checks reshade.me for newer versions on each run. Optional --
-    your games work perfectly without it.
+    architecture. During ReShade setup, TPM checks for a newer version and
+    offers an automatic official download and update. Optional -- your games
+    work perfectly without it.
     Beginner profile and restore choices are explicit and per-game. TPM offers
     the twelve approved profile IDs, catalog-bound favorites, and a remembered
     selection. No profile is marked recommended or validated without measured
@@ -407,9 +408,10 @@
     ambiguous games received an explicit candidate choice, which paths to fix,
     and which control types still need to be set up.
 
-  - Safe by design. Backs up all profiles before every run, never deletes
-    your games, guards the staging folder against the emulator and source
-    folders, checks free space, and logs everything.
+  - Safe by design. AutoSync backs up UserProfiles before extraction
+    (preview skips the backup), never deletes your games, guards the staging
+    folder against the emulator and source folders, checks free space, and logs
+    everything.
 
 
 -------------------------------------------------------------------------------
@@ -1143,10 +1145,9 @@
     Pcsx2x6 games: P1.png and P2.png are placed in
     <pcsx2x6 folder>\TeknoParrot\crosshairs\, the official upstream location
     (pcsx2x6 folder searched as pcsx2x6, PCSX2x6, pcsx2, PCSX2, or any
-    pcsx2-prefixed subfolder). If inis\PCSX2.ini exists, cursor_path is set
-    automatically under [USB Port 1 guncon2] and [USB Port 2 guncon2].
-    Existing keys are replaced; missing keys are inserted; absent sections
-    are appended.
+    pcsx2-prefixed subfolder). The current contract marks cursor_path as
+    emulator-owned: TPM does not write PCSX2.ini and reports existing values
+    read-only when available. Unknown or unavailable contract state fails closed.
 
     Standard games: each game receives its own P1.png and P2.png in the folder
     containing the game's executable.
@@ -1402,12 +1403,15 @@
 
   UPDATING RESHADE
 
-    The script checks reshade.me for a newer version each time ReShade setup
-    runs. If a newer version is available you will be told. To update:
+    During ReShade setup, the script checks reshade.me for a newer version.
+    If one is available, it offers [Y] Update now (default) or [N] Keep
+    current version. Y downloads and verifies the official installer, extracts
+    the DLLs, and uses them in the setup; N keeps the current version.
 
+    Manual replacement is an advanced fallback:
     1. Download the new installer from reshade.me.
     2. Run it on any game exe (or extract the DLL manually with 7-Zip).
-    3. Copy the new DLL to  ReShade\ReShade64.dll, replacing the old one.
+    3. Copy the new DLL to ReShade\ReShade64.dll, replacing the old one.
        If you use ReShade32.dll for 32-bit games, update that file too.
     4. Re-run ReShade setup (mode 5) to redeploy the updated DLLs.
 
@@ -2375,14 +2379,14 @@
   SAFETY, BACKUP AND LOG
 -------------------------------------------------------------------------------
 
-  Backup. Before any change, the script copies your entire UserProfiles
-  folder to:
+  Backup. AutoSync creates a timestamped UserProfiles backup before
+  extraction:
 
     <TeknoParrot>\UserProfiles\FullBackup\<date_time>\
 
-  If backup folder creation fails (for example, disk full or permissions),
-  the script exits rather than proceeding without a restore point. If any
-  files fail to copy during the backup, the script asks before continuing.
+  Preview mode skips the backup. If the folder cannot be created or the copy
+  cannot be completed, AutoSync does not begin extraction.
+
 
   To restore from inside the script, choose mode 11) Restore from backup.
   The script lists available backups by number; invalid numbers reprompt and
@@ -2422,9 +2426,10 @@
   RE-RUNNING
 -------------------------------------------------------------------------------
 
-  Run the script as often as you like. Each run backs up first, then only
-  does what is needed: new games are extracted and registered, unchanged games
-  are skipped, already-bound games are left alone. Safe to re-run any time.
+  Run the script as often as you like. A real AutoSync run backs up
+  UserProfiles before extraction; preview mode skips the backup. AutoSync then
+  extracts and registers new games, skips unchanged games, and leaves
+  already-bound games alone. Safe to re-run any time.
 
 
 -------------------------------------------------------------------------------
@@ -2643,6 +2648,6 @@
 ===============================================================================
   v1.0 RC8 candidate (not published) -- RC7 remains the current published
   release; previous published release: v1.0 RC6 (historical). Test one game
-  after every run. Profiles are backed up automatically at the start of every
-  run.
+  after every run. AutoSync backs up UserProfiles before extraction; preview
+  mode skips the backup.
 ===============================================================================

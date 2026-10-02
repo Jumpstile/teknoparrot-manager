@@ -10,7 +10,7 @@ TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-> **Current published release: v1.0 RC7** -- read-only readiness and contract-backed compatibility warnings. Test one game after each run. Profiles are backed up automatically before every run. Previous published release: v1.0 RC6 (historical).
+> **Current published release: v1.0 RC7** -- read-only readiness and contract-backed compatibility warnings. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Previous published release: v1.0 RC6 (historical).
 
 > **RC8 candidate status:** this source tree prepares v1.0 RC8 with the
 > runtime-recovery, certification-identity, governance, and evidence-boundary
@@ -98,7 +98,7 @@ tree is for review, certification, and release preparation only.
 - **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
 - **Preview / dry-run mode** — see what AutoSync/Register would do (extract, register, repair, propagate) with zero files written, then decide whether to apply it for real.
 - **Download audit logging** -- every shared-pipeline download records its authoritative source URL, filename, version when known, computed SHA-256, and transfer metrics (method, size, elapsed time, average speed). ReShade additionally logs the installer signer/subject, Authenticode status, signer thumbprint, and the status/thumbprint/trust result; its SHA-256 is an audit hash, not a published-digest comparison. BepInEx records its GitHub release source, filename/version, and computed SHA-256; when GitHub supplies an asset digest, the downloader validates it before extraction and logs/fails closed on a mismatch. dgVoodoo2 uses the same digest validation when available. FFBArcadePlugin, Eggman/RomVault dat, the PostgreSQL guide bundle, the TPM update package, and TeknoParrotUI thumbnail downloads receive source/hash/transfer audit entries; unsigned or digest-less sources are not described as cryptographically authenticated.
-- **Safe by design** — timestamped backups before every run, free-space check, full log, one-click restore.
+- **Safe by design** — backups before destructive changes, free-space check, full log, one-click restore.
 
 ---
 
@@ -471,7 +471,7 @@ Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun g
 
 - **Standard games** — `P1.png` + `P2.png` in the game's executable folder
 - **ElfLdr2 games** — shared pair in the ElfLdr2 loader folder (auto-detected)
-- **Pcsx2x6 games** — shared pair in `pcsx2x6\TeknoParrot\crosshairs\` (the official upstream location); `inis\PCSX2.ini` is also updated with `cursor_path` under `[USB Port 1 guncon2]` and `[USB Port 2 guncon2]`
+- **Pcsx2x6 games** — shared pair in `pcsx2x6\TeknoParrot\crosshairs\` (the official upstream location); under the current contract, `cursor_path` remains emulator-owned, so TPM leaves it unchanged and reports existing values read-only when available.
 
 **How to use it:**
 
@@ -659,11 +659,20 @@ The script looks for DLLs in a `ReShade\` folder next to the script:
 - `ReShade64.dll` — for 64-bit games (required)
 - `ReShade32.dll` — for 32-bit games (optional)
 
-DLLs are never bundled in the release ZIP (ReShade's own policy prohibits redistributing the binaries — TPM always fetches fresh from reshade.me).
+DLLs are never bundled in the release ZIP. When the required 64-bit DLL is
+missing, TPM can automatically download the official installer from reshade.me
+and extract the DLLs; existing or user-supplied DLL paths are used as supplied
+instead of being freshly fetched. If automatic acquisition is unavailable or
+you prefer not to use it, the manual steps below are an advanced fallback.
+For automatic acquisition, choose D when prompted. TPM checks the installer's
+Authenticode status and signer thumbprint against ReShade's pinned trust policy
+before trusting it. The log records the authoritative installer URL,
+filename/version, computed SHA-256, transfer method/size/time/speed, and the
+Authenticode signer/subject, status, thumbprint, and final trust result. The
+SHA-256 is an audit hash; the trust gate is the pinned thumbprint plus accepted
+status, not a published ReShade digest.
 
-**Automatic (recommended):** run ReShade setup from the main menu and choose D. TPM downloads the official installer from reshade.me, verifies its Authenticode status and signer thumbprint against ReShade pinned trust policy before trusting it, and extracts ReShade32.dll/ReShade64.dll from it automatically. The log records the authoritative installer URL, filename/version, computed SHA-256, transfer method/size/time/speed, and the Authenticode signer/subject, status, thumbprint, and final trust result. The SHA-256 is an audit hash; the trust gate is the pinned thumbprint plus accepted status, not a published ReShade digest.
-
-**Manual:**
+**Advanced manual fallback:**
 
 1. Download the free installer from [reshade.me](https://reshade.me)
 2. Run it — point it at any 64-bit TeknoParrot game exe. It creates a DLL in that folder.
@@ -673,7 +682,10 @@ DLLs are never bundled in the release ZIP (ReShade's own policy prohibits redist
 
 **In-game:** press **Home** to open the ReShade overlay. Toggle effects with tick-boxes, adjust with sliders. Settings save automatically to `ReShade.ini` in the game folder.
 
-**Updating:** the script checks reshade.me for newer versions each run. To update: download the new installer, extract the DLL, replace `ReShade64.dll`, re-run mode 5.
+**Updating:** when a newer version is found, the current setup offers an
+automatic official download/update prompt. Choose Y to download and verify the
+update, or N to keep the current version; declining does not update the DLLs.
+Manual replacement is an alternative, not the only update path.
 
 **Signature check:** before deploying, the script checks the Authenticode signature on your ReShade DLL(s) — ReShade's own installer is code-signed, and that signature survives extracting/renaming the DLL. An invalid or missing signature is shown as a warning (with a plain-English reason) but doesn't block setup, since you supplied the file yourself; just make sure it actually came from reshade.me.
 
@@ -1084,13 +1096,13 @@ After registration the script offers to repair broken game paths — paths that 
 
 ## Safety, Backup and Log
 
-**Backup:** before any change the script copies your entire `UserProfiles` folder to:
+**UserProfiles backup:** AutoSync creates a timestamped backup before extraction:
 
 ```
 <TeknoParrot>\UserProfiles\FullBackup\<date_time>\
 ```
 
-If backup folder creation fails, the script exits rather than proceeding without a restore point.
+Preview mode skips the backup. If it cannot be created or completed, AutoSync does not start extraction.
 
 **Restore:** choose mode 11 from the menu, then pick which backup to restore:
 
@@ -1319,4 +1331,4 @@ TeknoParrot Manager name and branding are reserved.
 
 > v1.0 RC8 candidate (not published) -- RC7 remains the current published
 > release; previous published release: v1.0 RC6 (historical). Test one game
-> after each run. Profiles are backed up automatically at the start of every run.
+> after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
