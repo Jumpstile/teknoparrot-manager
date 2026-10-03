@@ -33,13 +33,22 @@ the standalone updater, downloaded-script/tag validation, and installed-version
 readback. Numeric-base parsing alone is not version ordering.
 
 Candidate and installed-script identity checks use the PowerShell AST parser;
-they do not execute a downloaded script to read its version. The parser
-requires one direct, unscoped top-level constant-string `$ScriptVersion`
-declaration and at most one such `$ReleaseCandidateLabel` declaration.
-Duplicate, scoped, nested, compound, nonliteral, or syntactically invalid
-declarations fail closed; comments and string data cannot spoof the identity.
-This is static declaration validation, not a general sandbox or full data-flow
-proof against indirect runtime mutation.
+they do not execute a downloaded script to read its version. The accepted
+identity consists of exactly one bare, unwrapped, unscoped root
+`$ScriptVersion =` assignment with a direct constant-string RHS, plus at most
+one equivalent `$ReleaseCandidateLabel` assignment. The parsers scan known
+static write forms: assignments and destructuring targets, attributed/cast
+and transparent parenthesized targets, member/index lvalue roots,
+increment/decrement, `foreach` variables, root script parameters, and named
+data-statement variables. Any additional protected write or unsupported
+declaration shape fails closed. Function-local parameters do not bind the
+root script identity.
+
+This finite AST check is not a general sandbox or full data-flow analysis.
+Indirect mutation through commands such as `Set-Variable`, variable-provider
+writes, `-OutVariable`, `[ref]`, .NET/session-state APIs, aliases/splatting,
+dynamic names, imports/dot-sourcing, or invoked scriptblocks is outside its
+guarantee. Comments and string data cannot spoof AST declarations.
 
 TeknoParrot Manager uses a **manual, backup-first auto-update model**.
 
@@ -65,7 +74,7 @@ An independent engineering review found real blockers on the first pass. The pac
 
 2. **Content validation before replacement -- fixed**
    - The updater extracts only the `TeknoParrot-Manager.ps1` entry from the downloaded zip (via `Expand-TpmReleaseZipEntry`), never the whole archive.
-   - Before replacing the live script, `Test-TpmExtractedScript` verifies that the file exists, is non-empty, is not raw zip data, contains the `TeknoParrot Manager` marker, and declares a valid full identity through unique direct top-level literal `$ScriptVersion` and optional `$ReleaseCandidateLabel` assignments. It rejects any extracted-script byte above `0x7F` before AST parsing, preserving the BOM-less ASCII/Windows PowerShell 5.1 source interpretation.
+   - Before replacing the live script, `Test-TpmExtractedScript` verifies that the file exists, is non-empty, is not raw zip data, contains the `TeknoParrot Manager` marker, and exposes one bare, unwrapped, unscoped root `EndBlock` `$ScriptVersion =` assignment with a direct constant-string RHS plus at most one equivalent `$ReleaseCandidateLabel` assignment. Additional statically identifiable protected writes fail closed: attributed/cast or transparent-parenthesis targets, scoped/nested/destructured or compound assignments, increment/decrement, foreach variables, root-script parameters, data-statement variables, and member/index lvalue roots. Function-local parameters are not root declarations; indirect/dynamic runtime mutation is outside the finite static-analysis contract. It rejects any extracted-script byte above `0x7F` before AST parsing, preserving the BOM-less ASCII/Windows PowerShell 5.1 source interpretation.
    - The standalone updater requires the extracted candidate identity to match the release tag before replacement. The main updater also reads the installed script identity back after replacement and verifies it against the release tag. Both compare the complete numeric-version/RC identity; standalone local-version reads use the same static declaration contract.
    - Historical live verification: a full -Apply against v0.99.38 previously
      downloaded, extracted, validated, and installed the genuine script. That

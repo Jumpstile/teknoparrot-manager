@@ -845,10 +845,18 @@ Mode 13 manually checks the latest TeknoParrot Manager release on GitHub against
 All update checks compare full version identity: numeric base, then numeric
 RC number, then final release. For example, `v1.0-RC7 < v1.0-RC8 < 1.0`.
 
-Before replacement, both updater paths parse unique top-level literal version
-declarations without executing the downloaded candidate and require its full
-numeric-version/RC identity to match the release tag. The main updater also
-reads the installed script identity back after replacement.
+Before replacement, both updater paths parse candidate source without
+executing it. They accept exactly one bare, unwrapped, unscoped root
+`$ScriptVersion =` declaration with a constant-string value and at most one
+equivalent `$ReleaseCandidateLabel` declaration. Attributes/casts,
+parentheses, scoped or nested assignments, duplicate/destructured writes,
+compound assignments, increment/decrement, `foreach` targets, root parameters,
+data-statement variables, and member/index writes rooted at either identity
+are rejected. Function-local parameters do not count as root declarations.
+This finite AST check does not prove absence of indirect runtime mutation
+through commands, providers, `[ref]`, .NET/session state, dynamic names,
+imports/dot-sourcing, aliases/splatting, or invoked scriptblocks. The main
+updater also reads the installed script identity back after replacement.
 
 - If you're already current, it says so and returns you to the menu.
 - If a newer version exists, it explains exactly what updating will do — back up the current script, download the update, validate it, replace the script, and require a restart — before asking a single Y/N question.

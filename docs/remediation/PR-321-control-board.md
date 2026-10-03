@@ -6,8 +6,8 @@ Status: blocked. This board is the source of truth for TPM remediation state.
 
 - Root: `C:\REPOS\teknoparrot-manager\.worktrees\rc8-release-readiness`
 - Branch: `release/rc8-readiness-2026-10-01`
-- HEAD before this uncommitted RC8 progress/remediation-evidence slice: `193796a08d17f87f823d047646a3e848b85977fc`
-- At source-gate evidence capture, no upstream was configured and the matching origin branch ref was absent locally; ancestry against an origin ref was unavailable.
+- HEAD at UVO-08 source/evidence capture: `7d92a3f2379038b9c1ba3e3750766e8cf1a5ac42`.
+- `origin/release/rc8-readiness-2026-10-01` was verified at `0295415fb1b9d4bf6880945eb4807d4b2b27ec96`; local HEAD is a descendant and one commit ahead. No upstream is configured.
 - At source-gate evidence capture, the worktree was dirty across product source, tests, release documentation, remediation docs, and untracked slice contracts; this record does not attribute every entry to one slice.
 - This slice covers RC8 progress-path remediation, permanent-gate status semantics, source re-audits, and the separately authorized ReShade ten-effect/twelve-profile behavior contract. Independent review reopened ID 3 because user-added Crosshairs PNGs were materialized/sorted before progress. The working-tree fix reports unknown-total progress through sorting and fails visibly on enumeration errors. The final source gates passed; exact-SHA candidate-source preparation is conditionally authorized. Package, runtime smoke, merge, tag, publication, and release remain unauthorized.
 
@@ -386,6 +386,28 @@ findings for the main script and both updater scripts. Canonical InjectionHunter
 40 findings, all 40 matched to individually reviewed `FalsePositive`
 dispositions, zero unresolved. The source quality wrapper passed at
 `2026-10-03T07:45:16.7882201Z`; exact-head CI remains pending.
+
+## Desktop OMP -- RC8 typed identity-target delta
+
+The P1-1 test counts and gate results above are the pre-delta baseline; they do not verify the current change.
+
+Status: EXPANDED UVO-08 IMPLEMENTED; FULL MAIN/SUPPORT/UPDATER-CORE/DESTRUCTIVE SUITES PASSED UNDER WINDOWS POWERSHELL 5.1 AND POWERSHELL 7.6.6; PARSE/ASCII/ANALYZER/INJECTIONHUNTER PASSED; FRESH Run-TpmQualityGate AND PERMANENT PROCEDURE GATE PASSED 2026-10-03T13:03:44.2421320Z
+
+Review report: `TPM-7D92-DELTA-20261003`; reviewed commit `7d92a3f2379038b9c1ba3e3750766e8cf1a5ac42`; original finding was a typed/cast-wrapped assignment target skipped by both variable-only AST filters. A parsed-only follow-up found direct parenthesized and cast-parenthesized targets expose additional target AST shapes.
+
+Mapping: PR #321 owner row 81; PR #321 review finding `TPM-7D92-DELTA-20261003`; supporting issue #105; slice `TPM-S1-UPDATE-VERSION-ORDERING-001`; permanent procedures `TPM-TRACE-001` and `TPM-EVIDENCE-001`; owner-runtime evidence remains under `TPM-OWNER-001`.
+
+Before-fix evidence: the added `[UVO-08]` focused tests failed under both Windows PowerShell 5.1 and PowerShell 7.6.6. The main parser and candidate-validator tests did not throw, and the main install test observed one `Move-Item` call. The standalone local reader, candidate validator, and `-Apply` no-replacement tests did not throw. This reproduces the reviewed acceptance path; candidate content was not executed.
+
+Current implementation: both parsers explicitly traverse only assignment targets and recognized lvalue structures: attributed/cast child, transparent single-expression parentheses, array elements, member-expression roots, and index-expression targets. Iterative stack traversal handles nested destructuring without recursive call-stack growth. Both scanners additionally reject protected increment/decrement, foreach variables, root-script parameters, and named data-statement variables while allowing function-local parameters. Dynamic and indirect mutation remains outside the finite static contract; this is not a sandbox.
+Contract-plan review: reviewer confirmed the finite matrix and the root-parameter refinement. Scan only `$scriptAst.ParamBlock.Parameters` for protected root parameters; function-local `ScriptVersion` and `ReleaseCandidateLabel` parameters in `Get-ManagerVersionIdentity` must remain allowed. Member/index detection follows only their lvalue-root properties, not arbitrary descendants.
+Mapping: PR #321 owner row 81; review report `TPM-7D92-DELTA-20261003`; issue #105; slice `TPM-S1-UPDATE-VERSION-ORDERING-001`; permanent procedures `TPM-TRACE-001` and `TPM-EVIDENCE-001`; owner-runtime evidence remains under `TPM-OWNER-001`.
+Pre-expansion before-fix evidence: focused tests reproduced accepted cast/parenthesized protected writes under both engines; prior review artifacts document the main install `Move-Item` and standalone apply no-replacement failures. Candidate content was not executed.
+Historical pre-expansion checks only: focused UVO-08 tests passed 6/6 in both engines; PS7 full Pester passed 1357/1357 and PS5 full Pester passed 1357/1357 before the latest attributed-expression discovery. The integrated `bg_87` run passed main Pester 1293/1293 and SupportPackage 42/42, but its permanent procedure gate failed because validation evidence predated the latest source/test/gate changes (`artifact://1060`). Preserve these outputs; none is current final acceptance.
+Current focused proof after implementation: main `[UVO-08]` Pester tests passed `6/6` under Windows PowerShell 5.1 and `6/6` under PowerShell 7.6.6; standalone core tests passed `7/7` under both engines. The matrix explicitly checks parser errors are zero for valid proof snippets, direct and nested tuples, wrapped/cast/attributed/scoped writes, unary operators, foreach/root parameters/data statements, member/index roots, local-parameter and unrelated-index near-misses, candidate validation, and no replacement. The standalone local reader also accepted the actual manager source identity `1.0-RC8` under both engines. These focused results do not replace final source review, full suites, static gates, or the permanent procedure gate.
+The earlier `APPROVED` source/test review applied only to pre-expansion hashes; the subsequent attributed-target review returned CHANGES REQUIRED. The final review of the expanded implementation and regression matrix found no blocking findings. Exact reviewed source/test SHA-256 values and the audit timestamp are recorded in the reconciliation report. Dottie owns remote CI; do not poll or terminate that process.
+Full-suite evidence: each engine passed Main `1296/1296`, SupportPackage `42/42`, updater core `58/58`, and destructive-path `10/10`. Static evidence: parser errors `0` in the four changed PowerShell files under both engines; product main script non-ASCII byte count `0`; configured PSScriptAnalyzer `0` findings for main and both updater scripts under both engines; canonical InjectionHunter `40` findings, `0` unresolved, version `1.0.0`. The fresh source wrapper and its permanent procedure gate passed at 2026-10-03T13:03:44Z. The report records the following post-board-sync artifact test and permanent gate run; a final report-consistency pass must follow the evidence update before commit.
+No package build, runtime/owner smoke, merge, tag, release, certification, publication, or live wiki action is authorized. User-authorized scoped commit/push to the existing PR #321 head is conditional on all required gates passing; parent owns exact-head CI, and CI will not be monitored from this lane.
 
 ## Desktop OMP -- exact-head CI and owner-status output
 

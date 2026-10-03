@@ -21294,6 +21294,91 @@ function Get-ManagerVersionIdentity {
     return $identity
 }
 
+function Get-ManagerIdentityWriteTargetInfo {
+    param(
+        [Parameter(Mandatory)]
+        [System.Management.Automation.Language.ExpressionAst]$Target,
+        [bool]$WasWrapped = $false,
+        [bool]$IsMemberOrIndex = $false,
+        [bool]$IsDestructuring = $false
+    )
+
+    $pendingTargets = [System.Collections.Stack]::new()
+    $targetInfos = [System.Collections.ArrayList]::new()
+    $pendingTargets.Push([pscustomobject]@{
+            Target = $Target
+            WasWrapped = $WasWrapped
+            IsMemberOrIndex = $IsMemberOrIndex
+            IsDestructuring = $IsDestructuring
+        })
+    while ($pendingTargets.Count -gt 0) {
+        $pendingTarget = $pendingTargets.Pop()
+        $currentTarget = $pendingTarget.Target
+        $wasWrapped = [bool]$pendingTarget.WasWrapped
+        $isMemberOrIndex = [bool]$pendingTarget.IsMemberOrIndex
+        $isDestructuring = [bool]$pendingTarget.IsDestructuring
+        while ($null -ne $currentTarget) {
+            if ($currentTarget -is [System.Management.Automation.Language.AttributedExpressionAst]) {
+                $currentTarget = $currentTarget.Child
+                $wasWrapped = $true
+                continue
+            }
+            if ($currentTarget -is [System.Management.Automation.Language.ParenExpressionAst]) {
+                $pipeline = $currentTarget.Pipeline
+                if ($pipeline -isnot [System.Management.Automation.Language.PipelineAst] -or
+                    $pipeline.PipelineElements.Count -ne 1 -or
+                    $pipeline.PipelineElements[0] -isnot [System.Management.Automation.Language.CommandExpressionAst]) {
+                    break
+                }
+                $currentTarget = $pipeline.PipelineElements[0].Expression
+                $wasWrapped = $true
+                continue
+            }
+            if ($currentTarget -is [System.Management.Automation.Language.ArrayLiteralAst]) {
+                for ($index = $currentTarget.Elements.Count - 1; $index -ge 0; $index--) {
+                    $pendingTargets.Push([pscustomobject]@{
+                            Target = $currentTarget.Elements[$index]
+                            WasWrapped = $wasWrapped
+                            IsMemberOrIndex = $isMemberOrIndex
+                            IsDestructuring = $true
+                        })
+                }
+                break
+            }
+            if ($currentTarget -is [System.Management.Automation.Language.MemberExpressionAst]) {
+                $currentTarget = $currentTarget.Expression
+                $isMemberOrIndex = $true
+                continue
+            }
+            if ($currentTarget -is [System.Management.Automation.Language.IndexExpressionAst]) {
+                $currentTarget = $currentTarget.Target
+                $isMemberOrIndex = $true
+                continue
+            }
+            if ($currentTarget -is [System.Management.Automation.Language.VariableExpressionAst]) {
+                [void]$targetInfos.Add([pscustomobject]@{
+                        Variable = $currentTarget
+                        WasWrapped = $wasWrapped
+                        IsMemberOrIndex = $isMemberOrIndex
+                        IsDestructuring = $isDestructuring
+                    })
+            }
+            break
+        }
+    }
+    return $targetInfos.ToArray()
+}
+
+function Get-ManagerIdentityTargetName {
+    param([AllowEmptyString()][string]$Path)
+
+    $scopeSeparator = $Path.LastIndexOf(':')
+    if ($scopeSeparator -ge 0) {
+        return $Path.Substring($scopeSeparator + 1)
+    }
+    return $Path
+}
+
 function Get-ManagerScriptVersionIdentityFromContent {
     param([AllowEmptyString()][string]$Content)
 
@@ -21312,25 +21397,85 @@ function Get-ManagerScriptVersionIdentityFromContent {
     $identityAssignments = @(
         foreach ($assignment in $assignmentStatements) {
             foreach ($target in $assignment.GetAssignmentTargets()) {
-                if ($target -isnot [System.Management.Automation.Language.VariableExpressionAst]) {
-                    continue
-                }
-                $targetPath = [string]$target.VariablePath.UserPath
-                $targetName = $targetPath
-                $scopeSeparator = $targetPath.LastIndexOf(':')
-                if ($scopeSeparator -ge 0) {
-                    $targetName = $targetPath.Substring($scopeSeparator + 1)
-                }
-                if ($targetName -ieq 'ScriptVersion' -or $targetName -ieq 'ReleaseCandidateLabel') {
-                    [pscustomobject]@{
-                        Assignment = $assignment
-                        Name = $targetName
-                        Path = $targetPath
+                $targetInfos = @(Get-ManagerIdentityWriteTargetInfo -Target $target)
+                foreach ($targetInfo in $targetInfos) {
+                    $targetVariable = $targetInfo.Variable
+                    $targetPath = [string]$targetVariable.VariablePath.UserPath
+                    $targetName = Get-ManagerIdentityTargetName -Path $targetPath
+                    if ($targetName -ieq 'ScriptVersion' -or $targetName -ieq 'ReleaseCandidateLabel') {
+                        if ($assignment.Left -isnot [System.Management.Automation.Language.VariableExpressionAst] -or
+                            $targetInfo.WasWrapped -or
+                            $targetInfo.IsMemberOrIndex -or
+                            $targetInfo.IsDestructuring) {
+                            throw "Candidate script identity assignments must target a bare variable, not a wrapper, destructuring, member, or index."
+                        }
+                        [pscustomobject]@{
+                            Assignment = $assignment
+                            Name = $targetName
+                            Path = $targetPath
+                        }
                     }
                 }
             }
         }
     )
+
+    $identityUnaryOperators = @(
+        [System.Management.Automation.Language.TokenKind]::PlusPlus
+        [System.Management.Automation.Language.TokenKind]::PostfixPlusPlus
+        [System.Management.Automation.Language.TokenKind]::MinusMinus
+        [System.Management.Automation.Language.TokenKind]::PostfixMinusMinus
+    )
+    $unaryExpressions = @($scriptAst.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.UnaryExpressionAst]
+            }, $true))
+    foreach ($unaryExpression in $unaryExpressions) {
+        if ($identityUnaryOperators -notcontains $unaryExpression.TokenKind) {
+            continue
+        }
+        foreach ($targetInfo in @(Get-ManagerIdentityWriteTargetInfo -Target $unaryExpression.Child)) {
+            $targetPath = [string]$targetInfo.Variable.VariablePath.UserPath
+            $targetName = Get-ManagerIdentityTargetName -Path $targetPath
+            if ($targetName -ieq 'ScriptVersion' -or $targetName -ieq 'ReleaseCandidateLabel') {
+                throw "Candidate script identity variables cannot be incremented or decremented."
+            }
+        }
+    }
+
+    foreach ($forEachStatement in @($scriptAst.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.ForEachStatementAst]
+            }, $true))) {
+        $targetPath = [string]$forEachStatement.Variable.VariablePath.UserPath
+        $targetName = Get-ManagerIdentityTargetName -Path $targetPath
+        if ($targetName -ieq 'ScriptVersion' -or $targetName -ieq 'ReleaseCandidateLabel') {
+            throw "Candidate script identity variables cannot be foreach loop variables."
+        }
+    }
+
+    if ($null -ne $scriptAst.ParamBlock) {
+        foreach ($parameter in $scriptAst.ParamBlock.Parameters) {
+            $targetPath = [string]$parameter.Name.VariablePath.UserPath
+            $targetName = Get-ManagerIdentityTargetName -Path $targetPath
+            if ($targetName -ieq 'ScriptVersion' -or $targetName -ieq 'ReleaseCandidateLabel') {
+                throw "Candidate script identity variables cannot be root script parameters."
+            }
+        }
+    }
+
+    foreach ($dataStatement in @($scriptAst.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.DataStatementAst]
+            }, $true))) {
+        if ($null -eq $dataStatement.Variable) {
+            continue
+        }
+        $targetName = Get-ManagerIdentityTargetName -Path ([string]$dataStatement.Variable)
+        if ($targetName -ieq 'ScriptVersion' -or $targetName -ieq 'ReleaseCandidateLabel') {
+            throw "Candidate script identity variables cannot be data-statement variables."
+        }
+    }
 
     $versionAssignments = @($identityAssignments | Where-Object { $_.Name -ieq 'ScriptVersion' })
     $labelAssignments = @($identityAssignments | Where-Object { $_.Name -ieq 'ReleaseCandidateLabel' })

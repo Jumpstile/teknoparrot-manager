@@ -15,12 +15,19 @@
   RC8 updater now orders RC7, RC8, and final Version 1.0 by complete version
   identity across the menu, startup, and standalone checks; candidate and final
   releases with the same numeric base are no longer treated as already current.
-  Both updater paths parse unique top-level literal version declarations
-  without executing candidate content and require the complete candidate
-  identity to match the release tag before replacement. Non-ASCII candidate
-  bytes are rejected before parsing so Windows PowerShell 5.1 source decoding
-  and the AST validator cannot disagree about the source; the main updater
-  also reads the installed script identity back. Comment and string
+  Both updater paths parse source into ASTs without executing candidate
+  content. A valid identity is one bare, unwrapped, unscoped root
+  $ScriptVersion = assignment with a constant-string value and at most one
+  equivalent $ReleaseCandidateLabel assignment. Both parsers reject
+  additional statically identifiable writes through attributes/casts,
+  parentheses, scoping, nesting, destructuring, compound assignment,
+  increment/decrement, foreach targets, root parameters, data-statement
+  variables, and member/index lvalue roots. Function-local parameters are not
+  mistaken for root identity declarations. The check is finite static
+  analysis, not a sandbox or proof against indirect runtime mutation.
+  Non-ASCII candidate bytes are rejected before parsing so Windows PowerShell 5.1 source
+  decoding and the AST validator cannot disagree about the source; the main
+  updater also reads the installed script identity back. Comment and string
   lookalikes cannot spoof the RC identity.
   Startup stops before adopting new log/config paths when owned-state migration
   returns an invalid transaction result, reports ACTION_REQUIRED, or has

@@ -2036,18 +2036,26 @@ Key invariants, each verified empirically while building the standalone tool thi
   version readback use that ordering. The main
   `Get-ManagerScriptVersionIdentityFromContent` and standalone
   `Get-TpmScriptVersionIdentityFromContent` parsers use `Parser.ParseInput`
-  without executing candidate content. Both accept exactly one direct,
-  unscoped top-level `$ScriptVersion` assignment and at most one corresponding
-  `$ReleaseCandidateLabel` assignment, each with a constant string literal
-  RHS. Parse errors, duplicates, scoped/nested/compound assignments, and
-  nonliteral values fail closed. Before AST parsing, both extracted-candidate
-  validators also reject every byte above `0x7F`, preserving the source
-  interpretation shared by the BOM-less ASCII product and Windows PowerShell
-  5.1. AST parsing prevents comments and string/here-string data from spoofing
-  identity. Each extracted candidate must match its release tag before
-  replacement; the main updater additionally reads installed identity back.
-  This validates static declarations only; it is not full data-flow analysis
-  or a sandbox against indirect runtime mutation.
+  without executing candidate content. The accepted declaration is exactly
+  one bare, unwrapped, unscoped root `EndBlock` `$ScriptVersion =` assignment
+  with a direct constant-string RHS, plus zero or one equivalent
+  `$ReleaseCandidateLabel` assignment. Assignment targets are traced only
+  through attributed/cast children, transparent single-expression parentheses,
+  `ArrayLiteralAst.Elements`, and member/index lvalue roots. Both parsers reject
+  any other statically identified protected write, including duplicate,
+  scoped, nested, compound, destructured, wrapped, increment/decrement,
+  `foreach`, root-script parameter, data-statement, and member/index targets.
+  Function-local parameters are not treated as root identity declarations.
+  Unsupported parenthesized forms and parse errors fail closed. Before AST
+  parsing, both extracted-candidate validators also reject every byte above
+  `0x7F`, preserving the source interpretation shared by the BOM-less ASCII
+  product and Windows PowerShell 5.1. AST parsing prevents comments and string/
+  here-string data from spoofing identity. Each extracted candidate must match
+  its release tag before replacement; the main updater additionally reads
+  installed identity back. This is a finite static-write check, not a sandbox
+  or full data-flow analysis; indirect command/provider writes, `-OutVariable`,
+  `[ref]`, .NET/session-state mutation, dynamic names, imports/dot-sourcing,
+  aliases/splatting, and invoked scriptblocks are outside its guarantee.
 - **`Invoke-CheckForUpdates` and `Invoke-StartupUpdateCheck` never call `exit`.**
   Each returns `TPM.TransactionResult.v1`; the top-level dispatch decides whether
   to exit only after validating `Outcome -eq 'SUCCEEDED'`. `NO_OP`, rollback,

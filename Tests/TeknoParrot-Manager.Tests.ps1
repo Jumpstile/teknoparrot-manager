@@ -10714,6 +10714,82 @@ $ReleaseCandidateLabel = 'RC8'
             { Get-ManagerScriptVersionIdentityFromContent -Content $invalidContent } | Should -Throw
         }
     }
+    It "[UVO-08] rejects wrapped version and label targets, including sole, duplicate, scoped, and nested assignments" {
+        $invalidContents = @(
+            '[string]$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[string]$ReleaseCandidateLabel = "RC8"'
+            '[string]($ScriptVersion) = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[string]($ReleaseCandidateLabel) = "RC8"'
+            '([string]$ScriptVersion) = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '([string]$ReleaseCandidateLabel) = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[string]$ScriptVersion = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[string]$script:ScriptVersion = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '($script:ScriptVersion) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[string]($script:ScriptVersion) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + 'function Set-Version { [string]$ScriptVersion = "0.99" }' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '([string]($script:ScriptVersion)) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '[string]$script:ReleaseCandidateLabel = "RC7"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '[string]($script:ReleaseCandidateLabel) = "RC7"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '($script:ReleaseCandidateLabel) = "RC7"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + 'function Set-Label { [string]$ReleaseCandidateLabel = "RC7" }',
+            '[ValidateNotNull()]$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[ValidateNotNull()]$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[ValidateNotNull()]$script:ScriptVersion = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '([ValidateNotNull()]$script:ScriptVersion) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[string]([ValidateNotNull()]$script:ScriptVersion) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '(([string]([ValidateNotNull()]$script:ScriptVersion))) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '([ValidateNotNull()]$script:ReleaseCandidateLabel) = "RC7"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '[ValidateNotNull()]$script:ReleaseCandidateLabel = "RC7"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$script:ScriptVersion++'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '++$script:ScriptVersion'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$script:ScriptVersion--'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '--$script:ScriptVersion'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '($script:ScriptVersion)++'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '--($script:ReleaseCandidateLabel)'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + 'foreach ($script:ScriptVersion in @("1.1")) { }'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + 'foreach ($ReleaseCandidateLabel in @("RC7")) { }'
+            'param($ScriptVersion, $ReleaseCandidateLabel)' + "`n" + '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            'data ScriptVersion { "1.1" }' + "`n" + '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + 'data ReleaseCandidateLabel { "RC7" }'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$script:ScriptVersion[0] = "x"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '($script:ScriptVersion).Length = 1'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$script:ScriptVersion[0].Length = 1'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$script:ReleaseCandidateLabel[0] = "x"'
+            '$ScriptVersion, $other = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '($ScriptVersion, $other) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '(($ScriptVersion, $other)) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '(($ScriptVersion), $other) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ReleaseCandidateLabel = "RC8"' + "`n" + '$other, $ScriptVersion = "1.0"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$global:ScriptVersion += "1"'
+        )
+        foreach ($invalidContent in $invalidContents) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseInput(
+                $invalidContent,
+                [ref]$tokens,
+                [ref]$parseErrors
+            ) | Out-Null
+            @($parseErrors).Count | Should -Be 0
+            { Get-ManagerScriptVersionIdentityFromContent -Content $invalidContent } | Should -Throw
+        }
+    }
+    It "[UVO-08] permits local function parameters and unrelated member/index reads" {
+        $content = '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" +
+            'function Get-ManagerVersionIdentity { param([string]$ScriptVersion, [string]$ReleaseCandidateLabel) }' + "`n" +
+            '& { param([string]$ScriptVersion, [string]$ReleaseCandidateLabel) }' + "`n" +
+            '$text = ''$ScriptVersion = "99"''' + "`n" +
+            '$other[$ScriptVersion] = "x"'
+        $tokens = $null
+        $parseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseInput(
+            $content,
+            [ref]$tokens,
+            [ref]$parseErrors
+        ) | Out-Null
+        @($parseErrors).Count | Should -Be 0
+        Get-ManagerScriptVersionIdentityFromContent -Content $content | Should -Be '1.0-RC8'
+    }
 
 }
 
@@ -10992,6 +11068,26 @@ Describe "Expand-ManagerUpdateAsset and Test-ManagerUpdateExtractedScript" {
         Set-Content -LiteralPath $path -Value '# TeknoParrot Manager' -Encoding ascii
         { Test-ManagerUpdateExtractedScript -Path $path } | Should -Throw '*ScriptVersion*'
     }
+    It "[UVO-08] rejects a candidate with a cast-parenthesized scoped version overwrite" {
+        $path = Join-Path $TestDrive 'cast-parenthesized-scoped-version-candidate.ps1'
+        $content = '# TeknoParrot Manager' + "`n" + '$ScriptVersion = "1.0"' + "`n" +
+            '[string]($script:ScriptVersion) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+        Set-Content -LiteralPath $path -Value $content -Encoding ascii
+
+        { Test-ManagerUpdateExtractedScript -Path $path } | Should -Throw
+    }
+    It "[UVO-08] rejects an attributed scoped version overwrite in an extracted candidate" {
+        $path = Join-Path $TestDrive 'attributed-scoped-version-candidate.ps1'
+        $content = '# TeknoParrot Manager' + "`n" + '$ScriptVersion = "1.0"' + "`n" +
+            '[ValidateNotNull()]$script:ScriptVersion = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+        $tokens = $null
+        $parseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseInput($content, [ref]$tokens, [ref]$parseErrors) | Out-Null
+        @($parseErrors).Count | Should -Be 0
+        Set-Content -LiteralPath $path -Value $content -Encoding ascii
+
+        { Test-ManagerUpdateExtractedScript -Path $path } | Should -Throw
+    }
 }
 
 Describe "Invoke-CheckForUpdates" {
@@ -11242,6 +11338,62 @@ $ReleaseCandidateLabel = "RC7"
         $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
         $result.ReasonCode | Should -Be 'UPDATE_VERSION_MISMATCH'
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+    }
+    It "[UVO-08] rejects cast-parenthesized scoped version writes before replacing the manager script" {
+        $entryContent = '# TeknoParrot Manager' + "`n" + '$ScriptVersion = "1.0"' + "`n" +
+            '[string]($script:ScriptVersion) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+        $zipBytes = New-StartupCheckFixtureZipBytes -EntryContent $entryContent
+        Mock Invoke-TpmDownload { param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version) [System.IO.File]::WriteAllBytes($DestinationPath, $zipBytes); return $true }.GetNewClosure()
+
+        $path = Join-Path $TestDrive 'typed-scoped-version-install.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.99"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+        $release = [pscustomobject]@{
+            TagName = 'v1.0-RC8'
+            Name = 'v1.0 RC8'
+            Body = 'Test release notes.'
+            AssetName = 'TeknoParrot.Manager.v1.0.RC8.zip'
+            DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v1.0-RC8/TeknoParrot.Manager.v1.0.RC8.zip'
+            SizeBytes = 1
+        }
+        Mock Move-Item { throw 'Replacement must not run for an invalid candidate identity.' }
+
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release $release
+
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        $result.MutationStarted | Should -BeFalse
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+        Should -Invoke Move-Item -Times 0 -Exactly
+    }
+    It "[UVO-08] rejects an attributed scoped overwrite before replacing the manager script" {
+        $entryContent = '# TeknoParrot Manager' + "`n" + '$ScriptVersion = "1.0"' + "`n" +
+            '[ValidateNotNull()]$script:ScriptVersion = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+        $tokens = $null
+        $parseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseInput($entryContent, [ref]$tokens, [ref]$parseErrors) | Out-Null
+        @($parseErrors).Count | Should -Be 0
+        $zipBytes = New-StartupCheckFixtureZipBytes -EntryContent $entryContent
+        Mock Invoke-TpmDownload { param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version) [System.IO.File]::WriteAllBytes($DestinationPath, $zipBytes); return $true }.GetNewClosure()
+
+        $path = Join-Path $TestDrive 'attributed-scoped-version-install.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.99"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+        $release = [pscustomobject]@{
+            TagName = 'v1.0-RC8'
+            Name = 'v1.0 RC8'
+            Body = 'Test release notes.'
+            AssetName = 'TeknoParrot.Manager.v1.0.RC8.zip'
+            DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v1.0-RC8/TeknoParrot.Manager.v1.0.RC8.zip'
+            SizeBytes = 1
+        }
+        Mock Move-Item { throw 'Replacement must not run for an invalid candidate identity.' }
+
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release $release
+
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        $result.MutationStarted | Should -BeFalse
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+        Should -Invoke Move-Item -Times 0 -Exactly
     }
     It "installs an RC8 candidate and verifies the installed full version identity" {
         $entryContent = '# TeknoParrot Manager' + "`n" + '$ScriptVersion = ''1.0''' + "`n" + '$ReleaseCandidateLabel = ''RC8''' + "`n"
