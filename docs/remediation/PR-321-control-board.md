@@ -57,7 +57,7 @@ regression/census closure; final source/permanent gates passed.
 | 30 | Controls truthfulness | Zero-bound results never imply verified readiness | SOURCE FIXED; OWNER RUNTIME NEEDED | Controls truthfulness | Write-ControlPropagationResults; control-readiness engine | Controls truthfulness focused tests; existing controls tests | Zero-bound packaged runtime result | Owner runtime | TPM-CONTROLS-001 |
 | 31 | dgVoodoo2 wording | Results explain deployment state | SOURCE FIXED; OWNER RUNTIME NEEDED | Progress/status | dgVoodoo2 result wording | Existing tests | Owner wording review | Owner runtime | Progress slice |
 | 32 | Global consistency rule | Every enumerated prompt uses the central contract or has a documented design boundary | SOURCE FIXED; OWNER RUNTIME NEEDED | Prompts/navigation | TPM-PROMPT-001 inventory; finite-choice routes centralized; stateful, exact-token, secure, path, and renderer-aware boundaries documented | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Packaged consistency smoke | Owner runtime | Prompt.Core |
-| 34 | Migration explanation and Eggman DAT update path | Migration previews explain destination/categories/exclusions and decline safely; DAT latest/current/updated paths stay consistent and config follows the active file | SOURCE FIXED; OWNER RUNTIME NEEDED | Migration/DAT | Invoke-TpmOwnedMigration; Eggman DAT update orchestration | Migration and DAT source contracts | Packaged migration decline/confirm and DAT update smoke | Owner runtime | Slice 6 |
+| 34 | Migration explanation and Eggman DAT update path | Migration previews explain destination/categories/exclusions and decline safely; DAT latest/current/updated paths stay consistent; startup requires a valid transaction result and stops on `ACTION_REQUIRED` / `UNKNOWN` before new log/config path selection | SOURCE FIXED; OWNER RUNTIME NEEDED | Migration/DAT | `Test-TpmOwnedMigrationStartupAllowed` and pre-path startup guard; Eggman DAT update orchestration | `rejects invalid migration transaction results before startup`; `allows only valid typed migration outcomes without requiring prompt input`; migration and DAT source contracts | Packaged migration decline/confirm and DAT update smoke | Owner runtime | Slice 6 |
 | 33 | FFB membership/prompt and optional-plugin completion | One membership decision, native/no-match zero-deployment outcomes complete, actual errors fail, beginner-safe result wording | SOURCE FIXED; OWNER RUNTIME NEEDED | Force feedback | Invoke-FFBBlasterSetup; Invoke-FFBPluginSetup; Invoke-TpmFfbSetupMode | FFB focused tests; accounting invariants | Packaged mode-8 smoke with native-preferred, no-match, deployment-error paths | Owner runtime | Slice 5 |
 | 35 | Cross-cutting user-facing cleanup | Normal prompts spell out TeknoParrot Manager; available full game names lead normal output; compact progress stays bounded; technical identifiers remain in Details/log/support evidence | SOURCE FIXED; OWNER RUNTIME NEEDED | Cross-cutting UI | Normal Write-Host/Read-Host wording; Get-TpmGameDisplayLabel; compact progress renderer | Slice 7 terminology/full-name/progress source contracts | Packaged terminology, representative full-name, and progress smoke | Owner runtime | Slice 7 |
 
@@ -305,7 +305,7 @@ smoke remains paused pending ChatGPT review and later explicit authorization.
 
 ## Desktop OMP S1 -- legacy state transaction normalization
 
-Status: SOURCE REMEDIATION IMPLEMENTED; OWNER SMOKE PAUSED
+Status: EXISTING TRANSACTION FIXES IMPLEMENTED; RC8 REVIEW P1-2 SOURCE FIXED; FOCUSED POLICY TESTS 2/2 PASSED; SOURCE GATES/EXACT-HEAD CI PENDING; OWNER SMOKE PAUSED
 
 Slice contract: `TPM-S1-LEGACY-STATE-TRANSACTIONS-001`.
 The authorized scope normalizes legacy result shapes to
@@ -325,13 +325,13 @@ properties and existing logs. LaunchBox export/restore, HyperSpin export,
 thumbnail acquisition, and optional artifact/download workflows were not
 changed.
 
-Source and focused tests are in progress for this working tree. No package
-rebuild, owner runtime, Arcade, wiki, push, merge, tag, publish,
-certification, or release-ready action is authorized by this slice.
+RC8FullReview P1-2 found that `ACTION_REQUIRED` / `UNKNOWN` migration results continued into the new log/config paths. The ID 34 fix now requires `Test-TpmTransactionResult` to accept a valid `TPM.TransactionResult.v1`, then stops non-interactively before path selection for `ACTION_REQUIRED` or `UNKNOWN`. The focused typed-result and malformed-result policy tests passed 2/2. The full source quality wrapper has now passed; exact-head CI and owner runtime remain pending or paused.
+
+Source and focused migration policy tests pass; the full source quality wrapper has now passed and fresh exact-head CI remains pending. Commit/push is authorized only to PR #321's existing head ref for exact-head CI. Package rebuild, owner runtime, Arcade, wiki, merge, tag, publish, certification, and release-ready action remain unauthorized.
 
 ## Desktop OMP S1 -- setup and manager-update transaction normalization
 
-Status: SOURCE REMEDIATION IMPLEMENTED; OWNER SMOKE PAUSED
+Status: EXISTING TRANSACTION NORMALIZATION IMPLEMENTED; MAIN AND STANDALONE P1-1 IDENTITY/PRE-REPLACEMENT VALIDATION IMPLEMENTED; MAIN FULL SUITE 1290/1290 UNDER BOTH ENGINES; STANDALONE CORE 51/51 UNDER BOTH ENGINES; SOURCE QUALITY WRAPPER PASSED 2026-10-03T07:45:16.7882201Z; EXACT-HEAD CI PENDING; OWNER RUNTIME NEEDED; OWNER SMOKE PAUSED
 
 Slice contract: `docs/remediation/slices/TPM-S1-SETUP-UPDATE-TRANSACTIONS-001.md`.
 The authorized boundary makes `Invoke-PostgresGameSetup`,
@@ -339,19 +339,57 @@ The authorized boundary makes `Invoke-PostgresGameSetup`,
 `Invoke-StartupUpdateCheck` return authoritative `TPM.TransactionResult.v1`
 results. PostgreSQL setup now gates non-no-op mutation on verified recovery
 evidence and verifies profile/database state after writes. Manager update paths
-capture pre-state, verify backup and candidate content, verify final hash/version,
-and classify rollback and cleanup residue.
+carry full local version identity and verify candidate/version plus installed
+file hash and identity. Both updater paths now parse unique direct, unscoped
+top-level literal declarations without executing candidate content; each
+candidate must match the release tag before replacement, and extracted bytes
+above `0x7F` fail closed before AST parsing. The main updater verifies installed
+identity after replacement. P1-1 source remediation is implemented; the full
+source quality wrapper passed at `2026-10-03T07:45:16.7882201Z`; exact-head CI
+remains pending.
 
 Top-level callers validate the v1 result and restart only after `SUCCEEDED`.
-Legacy counters and detail properties remain compatibility fields; they are not
-the authoritative completion signal. Focused setup/update coverage passed
-`60/60`; required S1 transaction regression tags passed `16/16`. The full main
-Pester suite passed `1125/1125`. Parser `ParseErrors=0`, source ASCII
-`NonAscii=0`, PSScriptAnalyzer Error/Warning `Findings=0`, and
-`git diff --check` passed. InjectionHunter 1.0.0 reported `42` findings and
-`0` unresolved after disposition matching. Package rebuild, owner runtime,
-Arcade, wiki, push, merge, tag, publish, certification, and release-ready
-actions remain unauthorized.
+Legacy counters and detail properties remain compatibility fields, not the
+authoritative completion signal.
+At the earlier transaction-normalization checkpoint, focused setup/update
+coverage passed `60/60`, required S1 transaction regression tags passed
+`16/16`, and the main Pester suite passed `1125/1125`. That checkpoint recorded
+parser `ParseErrors=0`, source ASCII `NonAscii=0`, PSScriptAnalyzer
+Error/Warning `Findings=0`, `git diff --check`, and InjectionHunter 1.0.0 with
+`42` findings and `0` unresolved after matching the then-current disposition
+registry. The current update-identity regression counts and static-gate status
+are recorded in the P1-1 section below. Package rebuild, owner runtime, Arcade,
+wiki, merge, tag, publish, certification, and release-ready actions remain
+unauthorized. Commit/push is authorized only after source gates pass and only
+to PR #321's existing head ref for exact-head CI.
+
+## Desktop OMP S1 -- RC8 update version ordering
+
+Status: MAIN FULL SUITE 1290/1290 UNDER BOTH ENGINES; STANDALONE CORE 51/51 UNDER BOTH ENGINES; DESTRUCTIVE APPLY 10/10; SOURCE QUALITY WRAPPER PASSED 2026-10-03T07:45:16.7882201Z; EXACT-HEAD CI PENDING; OWNER RUNTIME NEEDED; OWNER SMOKE PAUSED
+
+Slice contract: `docs/remediation/slices/TPM-S1-UPDATE-VERSION-ORDERING-001.md`.
+Owner mapping: PR #321 row 81 (startup/update flow); review finding RC8FullReview P1-1; issue #105 is supporting context only. Its earlier final/RC equality assumption is superseded by the explicit RC7 < RC8 < final 1.0 requirement.
+
+Both updater paths parse identity declarations without executing candidate
+content, reject extracted bytes above `0x7F` before AST parsing, and require
+complete candidate identity to equal the release tag before replacement. The
+main updater also verifies installed identity after replacement; the
+standalone local-version reader uses the same strict AST declaration contract.
+Main Pester passed 1290/1290 under PowerShell 7 and Windows PowerShell 5.1;
+the latest full Windows PowerShell run finished at
+2026-10-03T07:14:35.7219195Z. The standalone core suite passed 51/51 under
+both engines and destructive apply passed 10/10 under PowerShell 7. Both
+engines parsed every changed PowerShell file with zero errors, the main script
+has zero non-ASCII bytes, and configured PSScriptAnalyzer returned zero
+findings for the main script and both updater scripts. Canonical InjectionHunter
+1.0.0 ran at 2026-10-03T07:13:10.8658645Z--2026-10-03T07:14:39.3309246Z:
+40 findings, all 40 matched to individually reviewed `FalsePositive`
+dispositions, zero unresolved. The source quality wrapper passed at
+`2026-10-03T07:45:16.7882201Z`; exact-head CI remains pending.
+
+## Desktop OMP -- exact-head CI and owner-status output
+
+Run `37090573916` checked out synthetic merge tree `39301e430849c0996746187aecfffa937fe705b6`, not PR head `0295415fb1b9d4bf6880945eb4807d4b2b27ec96`. The failed assertion is in the owner-status gate test, not either RC8FullReview product path. Captured child `Write-Error` output contains ANSI escapes between the expected status tokens; Pester's NUnit exporter then fails on the raw ESC byte. The `TPM-OWNER-STATUS-GATE-001` delta (owner ID 3; `TPM-OWNER-003`, `TPM-TRACE-001`, and `TPM-AUTH-001`) normalizes captured output and makes CI checkout/assert the exact PR head SHA. No owner status is promoted by this test-only correction.
 
 ## Desktop OMP S2-A -- shared transaction presentation contract
 

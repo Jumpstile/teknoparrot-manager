@@ -1,20 +1,19 @@
 # PR #321 Current Slice: Universal Progress Scan Coverage
 
 - Slice ID: TPM-PROGRESS-SCAN-COVERAGE-001
-- Supplemental governance slice ID: TPM-OWNER-STATUS-GATE-001
-- Supplemental behavior slice ID: `TPM-LIBRARY-HEALTH-TRANSACTION-001`
-- Supplemental ReShade behavior slice ID: `TPM-RESHADE-TEN-EFFECTS-001`
+- Supplemental governance slice IDs: `TPM-OWNER-STATUS-GATE-001`.
+- Supplemental behavior slice IDs: `TPM-LIBRARY-HEALTH-TRANSACTION-001`, `TPM-RESHADE-TEN-EFFECTS-001`, `TPM-S1-LEGACY-STATE-TRANSACTIONS-001`, `TPM-S1-SETUP-UPDATE-TRANSACTIONS-001`, and `TPM-S1-UPDATE-VERSION-ORDERING-001`.
 - Slice name: RC8 universal progress coverage and truthful permanent-gate status semantics
-- Included owner-report IDs: 3, 4, 5, and 29 for progress/source evidence; ID 3 for the supplemental gate-status correction; ID 21 for Library Health transaction outcomes; IDs 1, 9, and 10 for the authorized ReShade ten-effect selection behavior.
-- Issue: PR #321.
-- Permanent procedures: TPM-PROGRESS-001, TPM-PROGRESS-002, TPM-PROGRESS-003, TPM-REPAIR-001, TPM-REPAIR-002, TPM-RESHADE-001, TPM-EVIDENCE-001, TPM-OWNER-002, TPM-OWNER-003, TPM-TRACE-001, TPM-AUTH-001.
-- Base HEAD: `193796a08d17f87f823d047646a3e848b85977fc`; working-tree changes remain uncommitted.
+- Included owner-report IDs: 3, 4, 5, and 29 for progress/source evidence; ID 3 for supplemental gate-status semantics; ID 21 for Library Health outcomes; IDs 1, 9, and 10 for ReShade; ID 34 for migration startup fail-closed behavior; and owner row 81 for update-version ordering.
+- Issues: PR #321 and issue #105.
+- Permanent procedures: TPM-PROGRESS-001, TPM-PROGRESS-002, TPM-PROGRESS-003, TPM-REPAIR-001, TPM-REPAIR-002, TPM-RESHADE-001, TPM-EVIDENCE-001, TPM-OWNER-001, TPM-OWNER-002, TPM-OWNER-003, TPM-TRACE-001, TPM-AUTH-001.
+- Base HEAD: `0295415fb1b9d4bf6880945eb4807d4b2b27ec96`; current working-tree changes are being prepared for PR #321's exact-head CI.
 - The prior PostgreSQL retry-authentication slice remains separately documented in `TPM-POSTGRES-RETRY-AUTH-001.md`; this pointer does not reassign its hunks.
 
 ## Explicit exclusions
 
-- Owner IDs not included: all PR #321 IDs other than the progress rows, ID 3 gate-status semantics, ID 21 transaction outcomes, and ReShade IDs 1, 9, and 10 listed above.
-- Features, modules, and runtime behavior excluded: no capability beyond the separately authorized ReShade ten-effect slice, no network/retry/error-policy change, no runtime mutation, merge, tag, publication, certification, or release. The user conditionally authorizes exact-SHA candidate preparation after every source gate passes; owner smoke remains for Eli after handoff, with Eli's final approval required.
+- Owner IDs not included: all PR #321 IDs other than the progress rows, ID 3 gate-status semantics, ID 21 transaction outcomes, ReShade IDs 1, 9, and 10, migration ID 34, and update owner row 81 listed above.
+- Features, modules, and runtime behavior excluded: no unrelated capability, network/retry/error-policy change, runtime mutation, package, merge, tag, publication, certification, or release. Commit/push is authorized only to PR #321's existing head ref after source gates pass, to obtain exact-head CI; owner smoke remains paused.
 
 ## Behavior contract
 
@@ -23,6 +22,12 @@
 - Certification requires exactly one `Current candidate status: VALIDATED` field; missing, duplicate, malformed, `NOT BUILT`, and `STALE` values fail closed. Historical stale-package prose is ignored; owner-runtime-needed statuses remain blocking.
 - Forbidden regressions: no invented percentage for unknown totals; no `Write-Progress`; no changed profile/game ordering, file contents, transaction/rollback semantics, prompt routing, or network behavior; no `SOURCE FIXED; OWNER RUNTIME NEEDED` status before complete census and focused source coverage; no unresolved status passing the source gate; no repair success while any affected profile remains unresolved.
 - Design boundaries and deliberate exclusions: compact progress remains redirected-output-aware; bounded metadata, synchronous local work, opaque calls, stateful prompts, and external waits are not given fake progress. The status-gate correction changes no product behavior; Library Health outcome correction and the separately authorized ReShade selector/catalog change are limited to their contracts.
+
+Supplemental source findings and exact mappings:
+
+- Migration startup gate: `TPM-S1-LEGACY-STATE-TRANSACTIONS-001`; owner ID 34; PR #321; `TPM-TRACE-001` and `TPM-EVIDENCE-001`. Startup first requires a valid `TPM.TransactionResult.v1`; invalid or missing results, `ACTION_REQUIRED`, and `UNKNOWN` stop before new log/config paths are selected and without prompting.
+- Update version ordering: `TPM-S1-UPDATE-VERSION-ORDERING-001`; owner row 81; PR #321 review finding P1-1; issue #105 is supporting context only, and its earlier final/RC equality assumption is superseded; `TPM-TRACE-001` and `TPM-EVIDENCE-001`. RC7 sorts before RC8, both sort before final 1.0. Before-fix main and standalone here-string spoof cases and main/standalone valid-UTF-8 non-ASCII candidate cases were reproduced. Main Pester passed `1290/1290` and standalone core Pester passed `51/51` under PowerShell 7 and Windows PowerShell 5.1; destructive apply passed `10/10` under PowerShell 7. Full source gates and exact-head CI remain pending.
+- CI evidence: `TPM-OWNER-STATUS-GATE-001`; owner ID 3 status semantics; PR #321; `TPM-OWNER-003`, `TPM-TRACE-001`, and `TPM-AUTH-001`. Child-gate output is normalized before matching; pull-request CI checks out the head repository/ref and verifies that checked-out HEAD equals the PR head SHA.
 
 ## Prompt inventory and classification
 
@@ -42,6 +47,7 @@
 - The owner-status test must cover all seven registry statuses and an unknown status; every unresolved status remains blocking.
 - The permanent-gate tests must cover canonical-vs-historical precedence, exact control-board/canonical ID equality, missing/extra IDs, blank corrected status, and source-vs-certification stale-package handling.
 - Run the full main and SupportPackage Pester suites under Pester 5.7.1; run the main suite under PowerShell 7 and Windows PowerShell 5.1.
+- Both source identity parsers must prove full-source extraction, here-string/comment/string-decoy handling, single-quoted literal acceptance, and fail-closed duplicate, scoped, nested, compound, nonliteral, malformed-source, and valid-UTF-8 non-ASCII candidate cases under Windows PowerShell 5.1 and PowerShell 7.
 - ReShade tests must prove ten exact pinned effect entries, twelve canonical profiles, terminal selection of the twelfth profile, preview synchronization, deterministic output, and slider boundaries.
 - ReShade preset conformance must cover `StartupPresetPath`/`PresetPath` precedence, canonical `Techniques` plus `TechniqueSorting`, empty Original lists, and rejection of a sorting list that diverges from the selected profile.
 - ReShade include-deployment tests must cover the complete profile closure, shared-include deduplication, conflicting same-path identities rejected before target mutation, and exact rollback/ownership state.
@@ -71,33 +77,44 @@
 - `docs/RESHADE-DGVOODOO2-AUTODOWNLOAD-INVARIANT-INVENTORY.md`
 - `LICENSE`
 - `README.md`
+- `docs/AUTO_UPDATE.md`
 - `TeknoParrot-Manager-README.txt`
+- `.github/workflows/ci.yml`
+- `tools/TpmAutoUpdate.Core.psm1`
+- `tools/Invoke-TpmAutoUpdate.ps1`
+- `Tests/TpmAutoUpdate.Core.Tests.ps1`
+- `Tests/TpmAutoUpdate.DestructivePath.Tests.ps1`
+- `docs/remediation/slices/TPM-S1-LEGACY-STATE-TRANSACTIONS-001.md`
+- `docs/remediation/slices/TPM-S1-UPDATE-VERSION-ORDERING-001.md`
 - `TeknoParrot-Manager-CHANGELOG.txt`
+- `scripts/InjectionHunterDispositions.psd1`
 
 ## Runtime proof required
 
-- Exact packaged behavior: after a fresh candidate is built from the exact reviewed source SHA and authorized, exercise representative long scans, AutoSync, profile/transaction paths, Crosshair setup, HyperSpin export, and support ZIP creation; observe bounded progress and unchanged operation results.
-- Required source/package identity: pushed source SHA and package SHA must match exactly; the current candidate ZIP is stale and is not evidence.
-- Evidence artifacts: operator-visible progress output, operation results, exact source/package identities, and owner-runtime record.
-- Owner/runtime verification: not performed by this source-gate lane; hand the exact candidate identity to Eli/ARCADE for owner smoke after validation. Eli retains final approval.
+- Exact packaged behavior: not run or authorized in this task. Prior source slices remain subject to their separate package/runtime gates; this task does not build a package.
+- Required source identity: source changes are pushed to PR #321's existing head ref; CI must assert the checked-out SHA equals the PR head SHA. No package identity is requested or authorized.
+- Evidence artifacts: focused behavior-test output, exact checked-out source SHA, fresh CI result, and the validated remediation report. Owner/runtime proof remains paused.
+- Owner/runtime verification: not performed or authorized by this source-gate task; no candidate package identity is available or implied.
 
 ## Stop condition
-Do not start candidate preparation while any source gate fails or evidence is stale. The Crosshairs fix covers discovery through sorting, fails visibly on enumeration errors, and preserves selection/output behavior. ID 3 is `SOURCE FIXED; OWNER RUNTIME NEEDED` after focused source coverage and finite census closure; the final full source/permanent gate passed. Exact-SHA candidate-source preparation is eligible. Package build additionally requires exact pushed-SHA identity and the release checklist's documentation/READY/authorization gates. Owner-runtime completion remains held until Eli's smoke and final approval.
+Do not claim release readiness. Stop on any failed source gate, missing hunk mapping, version-identity mismatch, or CI checkout SHA mismatch. Exact-head CI is required; package build and owner-runtime proof remain unauthorized and separate.
 
 ## Forbidden actions
 
-No unrelated cleanup, broad rewrite, product feature work, runtime mutation, owner smoke by this lane, merge, tag, publication, certification, wiki update, or ARCADE execution. Commit/push and candidate-package preparation are allowed only after all source gates pass and the exact-source identity gate is satisfied.
+No unrelated cleanup, broad rewrite, product feature work, runtime mutation, owner smoke by this lane, merge, tag, publication, certification, wiki update, or ARCADE execution. Commit/push is authorized only after source gates pass and only to PR #321's existing head ref for exact-head CI. Package preparation is not authorized in this task.
 
 ## Hunk classification
 
 - Progress source/tests/architecture/report/board: owner IDs 3, 4, 5, and 29 as individually identified in `TPM-PROGRESS-SCAN-COVERAGE-001.md`; PR #321; TPM-PROGRESS-001/002/003; TPM-TRACE-001.
-- Permanent status-gate source/test/registry/docs/report/pointer: owner ID 3 status semantics only; PR #321; `TPM-OWNER-STATUS-GATE-001`; TPM-OWNER-003; TPM-TRACE-001; TPM-AUTH-001.
+- Permanent status-gate source/test/registry/docs/report/pointer and CI checkout/output-normalization hunks: owner ID 3 status semantics only; PR #321; `TPM-OWNER-STATUS-GATE-001`; TPM-OWNER-003; TPM-TRACE-001; TPM-AUTH-001.
 - Library Health transaction source/tests/architecture/report/board: owner ID 21; PR #321; `TPM-LIBRARY-HEALTH-TRANSACTION-001`; TPM-REPAIR-001/002; TPM-EVIDENCE-001; TPM-OWNER-002/003; TPM-TRACE-001.
 - ReShade catalog/selector/preview source/tests/docs: owner IDs 1, 9, and 10; PR #321; `TPM-RESHADE-TEN-EFFECTS-001`; TPM-RESHADE-001; TPM-EVIDENCE-001; TPM-OWNER-002/003; TPM-TRACE-001; TPM-AUTH-001.
+- Migration startup gate source/tests/docs: owner ID 34; PR #321; `TPM-S1-LEGACY-STATE-TRANSACTIONS-001`; TPM-TRACE-001; TPM-EVIDENCE-001.
+- Update version ordering source/tests/docs across both updater paths: owner row 81; issue #105; PR #321; `TPM-S1-UPDATE-VERSION-ORDERING-001`; TPM-TRACE-001; TPM-EVIDENCE-001.
 - Earlier PostgreSQL retry-authentication hunks remain mapped to `TPM-POSTGRES-RETRY-AUTH-001.md` and are not reassigned by this current-slice pointer.
 
 ## Commit/package authorization status
 
-- Commit/push authorized: Yes, conditionally after all source gates pass, solely to establish the exact candidate source SHA; no merge.
-- Candidate package authorized: Yes, conditionally after all source gates pass, the exact pushed SHA is available, and the release checklist's exact-SHA READY/authorization gate is satisfied.
+- Commit/push authorized: Yes, after all source gates pass, solely to update PR #321's existing head ref and establish the exact source SHA for CI; no merge.
+- Candidate package authorized: No; package build is explicitly excluded from this task.
 - Release/certification authorized: No.

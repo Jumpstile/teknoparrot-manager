@@ -22,6 +22,25 @@ and are not current download instructions. The asset-name pattern is
 version-agnostic; published RC7 validation runs the package validator against
 the exact GitHub asset and its Scripts mirror copy.
 
+## Release version identity
+
+Comparison uses the complete local script identity (`$ScriptVersion` plus the
+optional `$ReleaseCandidateLabel`) and the release tag. Numeric version
+components compare numerically; for the same base, RC numbers compare
+numerically and every RC precedes the final release. Thus
+`1.0-RC7 < 1.0-RC8 < 1.0`. The same ordering drives menu and startup checks,
+the standalone updater, downloaded-script/tag validation, and installed-version
+readback. Numeric-base parsing alone is not version ordering.
+
+Candidate and installed-script identity checks use the PowerShell AST parser;
+they do not execute a downloaded script to read its version. The parser
+requires one direct, unscoped top-level constant-string `$ScriptVersion`
+declaration and at most one such `$ReleaseCandidateLabel` declaration.
+Duplicate, scoped, nested, compound, nonliteral, or syntactically invalid
+declarations fail closed; comments and string data cannot spoof the identity.
+This is static declaration validation, not a general sandbox or full data-flow
+proof against indirect runtime mutation.
+
 TeknoParrot Manager uses a **manual, backup-first auto-update model**.
 
 The updater must never silently replace files. It checks GitHub Releases, explains what it found, creates a local backup, downloads the selected release asset, validates the downloaded file, and only then replaces the local script.
@@ -46,7 +65,8 @@ An independent engineering review found real blockers on the first pass. The pac
 
 2. **Content validation before replacement -- fixed**
    - The updater extracts only the `TeknoParrot-Manager.ps1` entry from the downloaded zip (via `Expand-TpmReleaseZipEntry`), never the whole archive.
-   - Before replacing the live script, `Test-TpmExtractedScript` verifies: the file exists, is non-empty, does not begin with a zip signature (`PK`), contains the `TeknoParrot Manager` marker, and contains a `$ScriptVersion = "..."` assignment.
+   - Before replacing the live script, `Test-TpmExtractedScript` verifies that the file exists, is non-empty, is not raw zip data, contains the `TeknoParrot Manager` marker, and declares a valid full identity through unique direct top-level literal `$ScriptVersion` and optional `$ReleaseCandidateLabel` assignments. It rejects any extracted-script byte above `0x7F` before AST parsing, preserving the BOM-less ASCII/Windows PowerShell 5.1 source interpretation.
+   - The standalone updater requires the extracted candidate identity to match the release tag before replacement. The main updater also reads the installed script identity back after replacement and verifies it against the release tag. Both compare the complete numeric-version/RC identity; standalone local-version reads use the same static declaration contract.
    - Historical live verification: a full -Apply against v0.99.38 previously
      downloaded, extracted, validated, and installed the genuine script. That
     release is retired; RC6 is historical. RC7 validation uses the exact
@@ -164,7 +184,13 @@ Any failure at any step displays the exact error, states whether a backup was cr
 
 ## Startup update check (v0.99.39)
 
-In addition to the menu option, `TeknoParrot-Manager.ps1` also offers a quiet, opt-out check at launch, controlled by `CheckForUpdatesOnStartup` in `TeknoParrot-Manager.config.json` (default `true`). Implemented as `Invoke-StartupUpdateCheck`, sharing `Get-ManagerUpdateRelease`, `ConvertTo-ManagerComparableVersion`, and the same install path (`Invoke-ManagerUpdateInstall`, extracted from `Invoke-CheckForUpdates` so both callers use it without duplicating the backup/download/extract/validate/replace logic or its confirmation prompts).
+In addition to the menu option, `TeknoParrot-Manager.ps1` also offers a quiet,
+opt-out check at launch, controlled by `CheckForUpdatesOnStartup` in
+`TeknoParrot-Manager.config.json` (default `true`). `Invoke-StartupUpdateCheck`
+shares `Get-ManagerUpdateRelease`, `Get-ManagerVersionIdentity`, and
+`Compare-ManagerVersionText` with the menu and uses the same install path
+(`Invoke-ManagerUpdateInstall`), so the callers retain the same full RC/final
+version ordering and backup/download/extract/validate/replace behavior.
 
 Flow:
 

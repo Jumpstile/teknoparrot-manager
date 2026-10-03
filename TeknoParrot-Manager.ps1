@@ -580,6 +580,19 @@ function Invoke-TpmOwnedMigration {
         return (New-TpmProfileTransactionResult -WorkflowKey 'OwnedStateMigration' -OperationKey 'RelocateOwnedState' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'State migration stopped and rollback could not be verified.' -Items $itemIds -ChangedItems @($moved | ForEach-Object { [string]$_.Item.Name }) -FailedItems $rollbackFailed.ToArray() -MutationStarted $true -Backup $backup -Rollback ([pscustomobject]@{ Attempted=$true; Completed=$false; Verified=$false; Items=@($moved | ForEach-Object { [string]$_.Item.Name }); EvidenceRoot=$backupRoot; FailedItems=$rollbackFailed.ToArray(); Errors=@($_.Exception.Message) }) -FinalPassed $false -ReasonCode 'ROLLBACK_UNVERIFIED' -FinalChecks @('Rollback evidence was preserved for manual recovery.'))
     }
 }
+function Test-TpmOwnedMigrationStartupAllowed {
+    param([AllowNull()][object]$MigrationResult)
+    if ($null -eq $MigrationResult) {
+        return $false
+    }
+    if (-not (Test-TpmTransactionResult -Result $MigrationResult)) {
+        return $false
+    }
+    return (
+        [string]$MigrationResult.Outcome -ne 'ACTION_REQUIRED' -and
+        [string]$MigrationResult.ProductState -ne 'UNKNOWN'
+    )
+}
 $script:TpmSessionRunId = $null
 $script:LatestTpmWorkflowResult = $null
 $script:logWarnShown   = $false   # full warning shown at most once to avoid repeated noise
@@ -21263,26 +21276,132 @@ function Invoke-BepInExUpdateCheckLegacy {
 # TLS 1.2 is already forced globally near the top of this script, so no
 # separate per-call TLS setup is needed here.
 
-function ConvertTo-ManagerComparableVersion {
-    # [version] can only hold numeric dot-separated segments -- it throws on
-    # any non-numeric suffix (e.g. "1.0-RC1"). Release tags carry a "-RC#"
-    # (or similar prerelease) suffix for display purposes, so the numeric
-    # base is extracted before parsing. This is sufficient for this script's
-    # only actual use of the result: comparing the single current
-    # $ScriptVersion against a single latest-release tag, never two
-    # prereleases of the same numeric base against each other, so a release
-    # candidate and its own eventual final release under the same numeric
-    # base (e.g. "1.0-RC1" and "1.0") compare as equal rather than the RC
-    # being "older" -- correct for "don't re-offer the version I'm already
-    # on," not a general semver-precedence implementation. See issue #105.
-    param([Parameter(Mandatory)][string]$VersionText)
-    $normalized  = ($VersionText -replace '^v', '').Trim()
-    $numericPart = ($normalized -split '-')[0].Trim()
-    try {
-        return [version]$numericPart
-    } catch {
-        throw "Version '$VersionText' is not a valid version number after normalization."
+function Get-ManagerVersionIdentity {
+    param(
+        [Parameter(Mandatory)][string]$ScriptVersion,
+        [AllowEmptyString()][string]$ReleaseCandidateLabel = ''
+    )
+    $base = $ScriptVersion.Trim()
+    if ([string]::IsNullOrWhiteSpace($base)) {
+        throw 'The manager version is empty.'
     }
+    $label = $ReleaseCandidateLabel.Trim()
+    if ($label -and $label -notmatch '^(?i:RC)[1-9][0-9]*$') {
+        throw "Release-candidate label '$ReleaseCandidateLabel' is invalid."
+    }
+    $identity = if ($label) { "$base-$($label.ToUpperInvariant())" } else { $base }
+    [void](Get-ManagerVersionParts -VersionText $identity)
+    return $identity
+}
+
+function Get-ManagerScriptVersionIdentityFromContent {
+    param([AllowEmptyString()][string]$Content)
+
+    # Parse only. Candidate content is never executed to determine its identity.
+    $tokens = $null
+    $parseErrors = $null
+    $scriptAst = [System.Management.Automation.Language.Parser]::ParseInput($Content, [ref]$tokens, [ref]$parseErrors)
+    if (@($parseErrors).Count -gt 0) {
+        throw "Candidate script cannot be parsed to verify its version identity."
+    }
+
+    $assignmentStatements = @($scriptAst.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.AssignmentStatementAst]
+            }, $true))
+    $identityAssignments = @(
+        foreach ($assignment in $assignmentStatements) {
+            foreach ($target in $assignment.GetAssignmentTargets()) {
+                if ($target -isnot [System.Management.Automation.Language.VariableExpressionAst]) {
+                    continue
+                }
+                $targetPath = [string]$target.VariablePath.UserPath
+                $targetName = $targetPath
+                $scopeSeparator = $targetPath.LastIndexOf(':')
+                if ($scopeSeparator -ge 0) {
+                    $targetName = $targetPath.Substring($scopeSeparator + 1)
+                }
+                if ($targetName -ieq 'ScriptVersion' -or $targetName -ieq 'ReleaseCandidateLabel') {
+                    [pscustomobject]@{
+                        Assignment = $assignment
+                        Name = $targetName
+                        Path = $targetPath
+                    }
+                }
+            }
+        }
+    )
+
+    $versionAssignments = @($identityAssignments | Where-Object { $_.Name -ieq 'ScriptVersion' })
+    $labelAssignments = @($identityAssignments | Where-Object { $_.Name -ieq 'ReleaseCandidateLabel' })
+    if ($versionAssignments.Count -gt 1 -or $labelAssignments.Count -gt 1) {
+        throw "Candidate script contains duplicate version identity assignments."
+    }
+
+    foreach ($identityAssignment in $identityAssignments) {
+        $assignment = $identityAssignment.Assignment
+        if (-not [object]::ReferenceEquals($assignment.Parent, $scriptAst.EndBlock) -or
+            $identityAssignment.Path -ine $identityAssignment.Name) {
+            throw "Candidate version identity assignments must be direct, unscoped top-level declarations."
+        }
+        if ($assignment.Operator -ne [System.Management.Automation.Language.TokenKind]::Equals -or
+            $assignment.Right -isnot [System.Management.Automation.Language.CommandExpressionAst] -or
+            $assignment.Right.Expression -isnot [System.Management.Automation.Language.StringConstantExpressionAst]) {
+            throw "Candidate version identity assignments must use constant string literals."
+        }
+    }
+
+    if ($versionAssignments.Count -eq 0) {
+        return $null
+    }
+    $version = $versionAssignments[0].Assignment.Right.Expression.Value
+    $label = if ($labelAssignments.Count -eq 1) {
+        $labelAssignments[0].Assignment.Right.Expression.Value
+    } else {
+        ''
+    }
+    return Get-ManagerVersionIdentity -ScriptVersion $version -ReleaseCandidateLabel $label
+}
+
+function Get-ManagerVersionParts {
+    param([Parameter(Mandatory)][string]$VersionText)
+    $match = [regex]::Match($VersionText.Trim(), '^(?i:v)?(?<base>[0-9]+(?:\.[0-9]+){1,3})(?:-(?i:RC)(?<candidate>[1-9][0-9]*))?$')
+    if (-not $match.Success) {
+        throw "Version '$VersionText' is not a supported manager version identity."
+    }
+    try {
+        $baseVersion = [version]::Parse($match.Groups['base'].Value)
+        $candidateNumber = if ($match.Groups['candidate'].Success) { [int64]::Parse($match.Groups['candidate'].Value) } else { $null }
+    } catch {
+        throw "Version '$VersionText' is not a supported manager version identity."
+    }
+    return [pscustomobject]@{
+        BaseVersion = $baseVersion
+        CandidateNumber = $candidateNumber
+    }
+}
+
+function Compare-ManagerVersionText {
+    param(
+        [Parameter(Mandatory)][string]$VersionTextA,
+        [Parameter(Mandatory)][string]$VersionTextB
+    )
+    $a = Get-ManagerVersionParts -VersionText $VersionTextA
+    $b = Get-ManagerVersionParts -VersionText $VersionTextB
+    $baseComparison = $a.BaseVersion.CompareTo($b.BaseVersion)
+    if ($baseComparison -ne 0) {
+        return $baseComparison
+    }
+    if ($null -eq $a.CandidateNumber -and $null -eq $b.CandidateNumber) {
+        return 0
+    }
+    if ($null -eq $a.CandidateNumber) {
+        return 1
+    }
+    if ($null -eq $b.CandidateNumber) {
+        return -1
+    }
+    return [int]$a.CandidateNumber.CompareTo($b.CandidateNumber)
 }
 
 # Converts a raw GitHub release tag (e.g. "v1.0-RC2", "v0.99.44") into this
@@ -21292,8 +21411,8 @@ function ConvertTo-ManagerComparableVersion {
 # "Current version" line (built from $DisplayVersion/$ScriptVersion) and
 # the "Latest version" line (previously the raw tag) could show the same
 # release two different ways side by side, e.g. "v1.0" vs "v1.0-RC2" --
-# correct per ConvertTo-ManagerComparableVersion's numeric-base comparison,
-# but confusing to read. See issue #134.
+# where the RC tag is a distinct, earlier release identity. See issue #134.
+# The formatter keeps the canonical space-separated display shape.
 function ConvertTo-ManagerDisplayVersionFromTag {
     param([Parameter(Mandatory)][string]$VersionText)
     $normalized = ($VersionText -replace '^v', '').Trim()
@@ -21466,12 +21585,21 @@ function Test-ManagerUpdateExtractedScript {
     if ($bytes.Length -ge 2 -and $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B) {
         throw "Extracted script begins with a zip signature (PK) -- refusing to install: $Path"
     }
+    # Windows PowerShell 5.1 interprets BOM-less script bytes as Windows-1252.
+    # Require ASCII so AST validation and installed-source interpretation agree.
+    foreach ($byte in $bytes) {
+        if ($byte -gt 0x7F) {
+            throw "Extracted script contains non-ASCII bytes -- refusing to install: $Path"
+        }
+    }
+
     $content = [System.Text.Encoding]::UTF8.GetString($bytes)
     if ($content -notmatch 'TeknoParrot Manager') {
         throw "Extracted script does not contain the expected 'TeknoParrot Manager' marker: $Path"
     }
-    if ($content -notmatch '\$ScriptVersion\s*=\s*"[^"]+"') {
-        throw "Extracted script does not contain a `$ScriptVersion assignment: $Path"
+    $identity = Get-ManagerScriptVersionIdentityFromContent -Content $content
+    if (-not $identity) {
+        throw "Extracted script does not contain a valid top-level `$ScriptVersion assignment: $Path"
     }
     return $true
 }
@@ -21497,7 +21625,7 @@ function Get-ManagerUpdatePreState {
         $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
         $bytes = [System.IO.File]::ReadAllBytes($Path)
         $content = [System.Text.Encoding]::UTF8.GetString($bytes)
-        $versionMatch = [regex]::Match($content, '\$ScriptVersion\s*=\s*"([^"]+)"')
+        $version = Get-ManagerScriptVersionIdentityFromContent -Content $content
         return [pscustomobject]@{
             Captured = $true
             CaptureMethod = 'Read and hashed the current manager script before replacement.'
@@ -21508,7 +21636,7 @@ function Get-ManagerUpdatePreState {
             Path = $Path
             Sha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash
             Length = [int64]$bytes.Length
-            Version = if ($versionMatch.Success) { $versionMatch.Groups[1].Value } else { $null }
+            Version = $version
             IsReadOnly = [bool]$item.IsReadOnly
         }
     } catch {
@@ -21664,13 +21792,12 @@ function Invoke-ManagerUpdateInstall {
         Test-ManagerUpdateExtractedScript -Path $extractedScriptPath | Out-Null
         $candidateBytes = [System.IO.File]::ReadAllBytes($extractedScriptPath)
         $candidateContent = [System.Text.Encoding]::UTF8.GetString($candidateBytes)
-        $candidateVersionMatch = [regex]::Match($candidateContent, '\$ScriptVersion\s*=\s*"([^"]+)"')
-        if (-not $candidateVersionMatch.Success) {
+        $candidateVersion = Get-ManagerScriptVersionIdentityFromContent -Content $candidateContent
+        if ([string]::IsNullOrWhiteSpace([string]$candidateVersion)) {
             $reasonCode = 'UPDATE_VERSION_MISSING'
             throw 'The approved update did not contain a readable version.'
         }
-        $candidateVersion = $candidateVersionMatch.Groups[1].Value
-        if ((ConvertTo-ManagerComparableVersion -VersionText $candidateVersion) -ne (ConvertTo-ManagerComparableVersion -VersionText ([string]$Release.TagName))) {
+        if ((Compare-ManagerVersionText -VersionTextA $candidateVersion -VersionTextB ([string]$Release.TagName)) -ne 0) {
             $reasonCode = 'UPDATE_VERSION_MISMATCH'
             throw 'The approved update version did not match the release being installed.'
         }
@@ -21684,7 +21811,7 @@ function Invoke-ManagerUpdateInstall {
             $reasonCode = 'UPDATE_FINAL_HASH_MISMATCH'
             throw 'The installed manager script did not match the validated update.'
         }
-        if ((ConvertTo-ManagerComparableVersion -VersionText ([string]$installedState.Version)) -ne (ConvertTo-ManagerComparableVersion -VersionText ([string]$Release.TagName))) {
+        if ((Compare-ManagerVersionText -VersionTextA ([string]$installedState.Version) -VersionTextB ([string]$Release.TagName)) -ne 0) {
             $reasonCode = 'UPDATE_FINAL_VERSION_MISMATCH'
             throw 'The installed manager script version did not match the approved release.'
         }
@@ -21830,7 +21957,7 @@ function Invoke-CheckForUpdates {
     Write-Host "  Checking for updates..." -ForegroundColor DarkGray
     Write-Log "CheckForUpdates: checking current v$ScriptVersion against latest GitHub release."
     try {
-        $localVersion = ConvertTo-ManagerComparableVersion -VersionText $ScriptVersion
+        $localVersion = Get-ManagerVersionIdentity -ScriptVersion $ScriptVersion -ReleaseCandidateLabel $ReleaseCandidateLabel
     } catch {
         return New-TpmManagerUpdateTransactionResult `
             -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
@@ -21848,7 +21975,7 @@ function Invoke-CheckForUpdates {
             -TechnicalDetails ([pscustomobject]@{ Stage='ReleaseQuery' })
     }
     try {
-        $latestVersion = ConvertTo-ManagerComparableVersion -VersionText $release.TagName
+        $versionComparison = Compare-ManagerVersionText -VersionTextA $localVersion -VersionTextB ([string]$release.TagName)
     } catch {
         return New-TpmManagerUpdateTransactionResult `
             -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
@@ -21860,7 +21987,7 @@ function Invoke-CheckForUpdates {
     Write-Host ""
     Write-Host ("  Current version : {0}" -f (Get-ManagerDisplayVersion)) -ForegroundColor Cyan
     Write-Host ("  Latest version  : {0}" -f $latestDisplay) -ForegroundColor Cyan
-    if ($latestVersion -le $localVersion) {
+    if ($versionComparison -ge 0) {
         Write-Host "  You're already running the latest version. No update needed." -ForegroundColor Green
         return New-TpmManagerUpdateTransactionResult `
             -Outcome 'NO_OP' -ProductState 'UNCHANGED' `
@@ -21868,7 +21995,7 @@ function Invoke-CheckForUpdates {
             -PreState $preState -FinalAttempted:$true -FinalPassed:$true `
             -FinalChecks @('The current manager script was read and hashed before the update check.') `
             -ReasonCode 'UPDATE_ALREADY_CURRENT' `
-            -TechnicalDetails ([pscustomobject]@{ Stage='ReleaseComparison'; CurrentVersion=$ScriptVersion; LatestVersion=$release.TagName })
+            -TechnicalDetails ([pscustomobject]@{ Stage='ReleaseComparison'; CurrentVersion=$localVersion; LatestVersion=$release.TagName })
     }
     Write-Host ""
     Write-Host ("  An update is available: $(Get-ManagerDisplayVersion) -> $latestDisplay") -ForegroundColor Yellow
@@ -21909,7 +22036,7 @@ function Invoke-StartupUpdateCheck {
     param([Parameter(Mandatory)][string]$ScriptPath)
     $preState = Get-ManagerUpdatePreState -Path $ScriptPath
     try {
-        $localVersion = ConvertTo-ManagerComparableVersion -VersionText $ScriptVersion
+        $localVersion = Get-ManagerVersionIdentity -ScriptVersion $ScriptVersion -ReleaseCandidateLabel $ReleaseCandidateLabel
     } catch {
         return New-TpmManagerUpdateTransactionResult `
             -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
@@ -21926,7 +22053,7 @@ function Invoke-StartupUpdateCheck {
             -TechnicalDetails ([pscustomobject]@{ Stage='StartupReleaseQuery' })
     }
     try {
-        $latestVersion = ConvertTo-ManagerComparableVersion -VersionText $release.TagName
+        $versionComparison = Compare-ManagerVersionText -VersionTextA $localVersion -VersionTextB ([string]$release.TagName)
     } catch {
         return New-TpmManagerUpdateTransactionResult `
             -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' `
@@ -21934,7 +22061,7 @@ function Invoke-StartupUpdateCheck {
             -PreState $preState -ReasonCode 'UPDATE_RELEASE_VERSION_INVALID' `
             -TechnicalDetails ([pscustomobject]@{ Stage='StartupReleaseVersion'; Error=[string]$_.Exception.Message })
     }
-    if ($latestVersion -le $localVersion) {
+    if ($versionComparison -ge 0) {
         Write-Log "StartupUpdateCheck: already current (v$ScriptVersion)."
         return New-TpmManagerUpdateTransactionResult `
             -Outcome 'NO_OP' -ProductState 'UNCHANGED' `
@@ -21942,7 +22069,7 @@ function Invoke-StartupUpdateCheck {
             -PreState $preState -FinalAttempted:$true -FinalPassed:$true `
             -FinalChecks @('The current manager script was read and hashed before the startup update check.') `
             -ReasonCode 'UPDATE_ALREADY_CURRENT' `
-            -TechnicalDetails ([pscustomobject]@{ Stage='StartupReleaseComparison'; CurrentVersion=$ScriptVersion; LatestVersion=$release.TagName })
+            -TechnicalDetails ([pscustomobject]@{ Stage='StartupReleaseComparison'; CurrentVersion=$localVersion; LatestVersion=$release.TagName })
     }
     $latestDisplay = ConvertTo-ManagerDisplayVersionFromTag -VersionText $release.TagName
     Write-Host ""
@@ -29122,14 +29249,16 @@ if (-not (Test-Path -LiteralPath $tpExe)) {
 
 $script:TpmOwnedLayout = Initialize-TpmOwnedLayout -Layout (Get-TpmOwnedLayout -TeknoParrotRoot $tpRoot)
 $migration = Invoke-TpmOwnedMigration -ScriptRoot $PSScriptRoot -Layout $script:TpmOwnedLayout -Unattended:$Unattended
+if (-not (Test-TpmOwnedMigrationStartupAllowed -MigrationResult $migration)) {
+    Write-Host '  Startup stopped because owned-state migration could not be verified. Review the migration evidence before starting normal workflows.' -ForegroundColor Red
+    exit 1
+}
 if ($migration.Outcome -eq 'FAILED_BEFORE_MUTATION') {
     Write-Host '  Migration is blocked until the destination state is reviewed.' -ForegroundColor Yellow
 } elseif ($migration.Outcome -eq 'SUCCEEDED') {
     Write-Host '  TeknoParrot Manager-owned state migration completed.' -ForegroundColor Green
 } elseif ($migration.Outcome -eq 'ROLLED_BACK_VERIFIED') {
     Write-Host '  State migration was rolled back and no managed state was changed.' -ForegroundColor Yellow
-} elseif ($migration.Outcome -eq 'ACTION_REQUIRED') {
-    Write-Host '  State migration needs manual attention before retrying.' -ForegroundColor Red
 }
 $logPath = $script:TpmOwnedLayout.LogPath
 $configPath = $script:TpmOwnedLayout.ConfigPath

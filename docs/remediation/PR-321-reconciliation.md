@@ -2,14 +2,16 @@
 
 - Repository root: `C:\REPOS\teknoparrot-manager\.worktrees\rc8-release-readiness`
 - Branch: `release/rc8-readiness-2026-10-01`
-- HEAD before this working-tree slice: `193796a08d17f87f823d047646a3e848b85977fc`
-- Report generated UTC: 2026-10-02T13:15:57.9448360Z.
-- Frozen source/test last-edit UTC: source 2026-10-02T11:03:22.1485863Z; main tests 2026-10-02T12:17:23.5863114Z; SupportPackage tests 2026-10-02T06:01:00.5945312Z.
-- Source SHA-256: `3C93F626130BC96415AF5A2C03BCBD0B825D903162D3F2E3F1C89CC41512D934`.
-- Main test SHA-256: `17D43929D335EC09B1267EEA0DCB8047B1D234563A4C01C227561418D264F8F4`.
+- HEAD before this review-reconciliation slice: `0295415fb1b9d4bf6880945eb4807d4b2b27ec96`.
+- Repository and source fingerprints captured UTC: 2026-10-03T06:59:31Z.
+- Source/test last-edit UTC: main 2026-10-03T06:53:52.1870530Z; main tests 2026-10-03T06:42:11.2481964Z; updater module 2026-10-03T06:53:52.1603705Z; updater runner 2026-10-03T06:30:32.1621661Z; updater tests 2026-10-03T06:38:34.6622642Z; destructive updater tests 2026-10-03T06:32:22.7512886Z; SupportPackage tests 2026-10-02T06:01:00.5945312Z.
+- Source SHA-256: `D60E964FC4A496DBC45F7A6015B50D19C9B4C8166AD1F853366283873D4C3419`.
+- Main test SHA-256: `B55D1A790AC9C3556C9445FDE76C733929D588759CEA1ADDC401FA79FC9C68DD`.
 - Support test SHA-256: `C56CFC5947DC989AF89036877519725B4F03340375F84D45F60989335628F4A9`.
+- Updater module SHA-256: `306DA20AF437F1886B0273FE0D66FDC6C7DB9650870D1176D742FDDC46A25526`; runner SHA-256: `CAAE71ABD4D2D859FC545802BE06E273CD8CFC026F885494C4989965546933E9`.
+- Updater core test SHA-256: `A8FF543C4DEA17A6359D52BB327252BB4C5AB526C9FBEE734F7F28082F794035`; destructive updater test SHA-256: `32445A67C398AECFE190D10B7B978D2007989CC9D03DAD6C0E8D1A0DF523C21B`.
 - Permanent procedure gate last-edit UTC: 2026-10-02T11:14:26.5739714Z; SHA-256: `489819CAD9A3FD8981CBC4996E46D3F8D2E7660D3A306BB6C91735B70A0501F2`.
-- Gate evidence was captured on branch `release/rc8-readiness-2026-10-01` from base HEAD `193796a08d17f87f823d047646a3e848b85977fc` while the source worktree was dirty and no matching origin branch ref existed. Exact-SHA source-ref preparation is separate from package, runtime, and release actions; no package build, runtime smoke, or release action has occurred.
+- This worktree is based on PR #321 head `0295415fb1b9d4bf6880945eb4807d4b2b27ec96`; the P1 source changes have not yet been committed or pushed. No package build, runtime smoke, or release action has occurred.
 - The earlier PS7 aggregate attempts exposed a Pester assertion issue and stale evidence; both were corrected. The final aggregate passed at 2026-10-02T12:54:54.9646896Z: main Pester 1276/1276, SupportPackage 42/42, ASCII/parse, configured PSScriptAnalyzer, `git diff --check`, and permanent procedure gate. ID 3 is recorded `SOURCE FIXED; OWNER RUNTIME NEEDED`; candidate identity, owner-runtime proof, and release authorization remain outstanding.
 - Current candidate status: STALE
 - Current candidate source SHA: NONE
@@ -70,7 +72,7 @@ historical status cells.
 | 31 | dgVoodoo2 wording | SOURCE FIXED; OWNER RUNTIME NEEDED | dgVoodoo2 result wording | No dedicated wording test | Owner wording review |
 | 32 | Global consistency rule | SOURCE FIXED; OWNER RUNTIME NEEDED | `TPM-PROMPT-001` finite-choice inventory and documented stateful/exact-token/secure/path/renderer-aware boundaries | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Packaged consistency smoke |
 | 33 | FFB membership/prompt and optional-plugin completion | SOURCE FIXED; OWNER RUNTIME NEEDED | FFB caller and plugin transaction completion | `uses one membership decision prompt and clear FFB completion rules`; `blocks the optional plugin after a failed native FFB setup` | Packaged mode-8 matrix |
-| 34 | Migration explanation and Eggman DAT update path | SOURCE FIXED; OWNER RUNTIME NEEDED | Owned-state migration and active DAT update filename | `explains migration categories, destination, exclusions, and safe decline`; `uses the latest DAT release filename for the active updated path` | Packaged migration and DAT update smoke |
+| 34 | Migration explanation and Eggman DAT update path | SOURCE FIXED; OWNER RUNTIME NEEDED | Owned-state migration, valid transaction-result startup gate, and active DAT update filename | `rejects invalid migration transaction results before startup`; `allows only valid typed migration outcomes without requiring prompt input`; migration and DAT tests | Packaged migration decline/confirm and DAT update smoke |
 | 35 | Cross-cutting user-facing cleanup | SOURCE FIXED; OWNER RUNTIME NEEDED | Normal prompts, full profile labels, compact progress | `uses product wording and full profile names in normal UI output`; `truncates compact progress to constrained width and shows elapsed heartbeat` | Packaged terminology and progress smoke |
 
 
@@ -457,6 +459,26 @@ Package rebuild and owner-runtime proof remain outstanding.
 | Final PowerShell 7 source-quality aggregate after canonical ID 3 row correction | `powershell.exe -NoLogo -NoProfile -Command "& { $started=[DateTime]::UtcNow; 'STARTED UTC: '+$started.ToString('o'); & pwsh -NoLogo -NoProfile -File './scripts/Run-TpmQualityGate.ps1' -ReportPath './docs/remediation/PR-321-reconciliation.md'; $code=$LASTEXITCODE; $finished=[DateTime]::UtcNow; 'FINISHED UTC: '+$finished.ToString('o'); 'GATE EXIT CODE: '+$code; exit $code }"` | Main Pester 1276 passed, 0 failed; SupportPackage 42 passed, 0 failed; ASCII/parse, configured PSScriptAnalyzer, `git diff --check`, and permanent procedure gate passed; exit code 0 | 2026-10-02T12:45:32.2927796Z | 2026-10-02T12:54:54.9646896Z | PowerShell 7 / default Pester 6.1.0 |
 | Final owner-status regressions after status/document synchronization (Windows PowerShell 5.1) | `Invoke-Pester -Path ./Tests/TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*requires the TPM remediation and prompt-slice artifacts*','*classifies every registry owner status and blocks unresolved dispositions*','*uses canonical owner statuses and scopes stale-package rejection to certification mode*') -CI -Output Detailed -PassThru` | 3 passed, 0 failed, 1273 not run | 2026-10-02T13:00:01.4719456Z | 2026-10-02T13:00:23.7286347Z | Windows PowerShell 5.1 / Pester 5.7.1 |
 | Owner-status regressions after source-ref handoff wording updates (Windows PowerShell 5.1) | `Invoke-Pester -Path ./Tests/TeknoParrot-Manager.Tests.ps1 -FullNameFilter @('*requires the TPM remediation and prompt-slice artifacts*','*classifies every registry owner status and blocks unresolved dispositions*','*uses canonical owner statuses and scopes stale-package rejection to certification mode*') -CI -Output Detailed -PassThru` | 3 passed, 0 failed, 1273 not run | 2026-10-02T13:15:13.2108829Z | 2026-10-02T13:15:40.8664393Z | Windows PowerShell 5.1 / Pester 5.7.1 |
+| RC8 updater core Pester | `Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path .\Tests\TpmAutoUpdate.Core.Tests.ps1 -PassThru` | 51 passed, 0 failed, 0 skipped; includes valid-UTF-8 non-ASCII candidate rejection, local AST identity, release-tag equality, and Apply spoof rejection | 2026-10-03T06:40:59Z | 2026-10-03T06:41:02Z | PowerShell 7.6.6 / Pester 5.7.1 |
+| RC8 updater core Pester | `Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path .\Tests\TpmAutoUpdate.Core.Tests.ps1 -PassThru` | 51 passed, 0 failed, 0 skipped | 2026-10-03T06:40:59Z | 2026-10-03T06:41:02Z | Windows PowerShell 5.1 / Pester 5.7.1 |
+| Full main Pester suite | `Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -PassThru` | 1290 passed, 0 failed, 0 skipped; includes successful single-quoted RC8 Apply and valid-UTF-8 non-ASCII candidate rejection | 2026-10-03T06:43:18Z | 2026-10-03T06:52:16Z | PowerShell 7.6.6 / Pester 5.7.1 |
+| Full main Pester suite | `Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -PassThru` | 1290 passed, 0 failed, 0 skipped | 2026-10-03T06:43:17Z | 2026-10-03T06:49:11Z | Windows PowerShell 5.1 / Pester 5.7.1 |
+| Destructive updater-path Pester | `Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path .\Tests\TpmAutoUpdate.DestructivePath.Tests.ps1 -PassThru` | 10 passed, 0 failed, 0 skipped; candidate validation precedes replacement and preserves original on failure | 2026-10-03T06:43:17Z | 2026-10-03T06:43:19Z | PowerShell 7.6.6 / Pester 5.7.1 |
+| SupportPackage Pester | `Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -PassThru` | 42 passed, 0 failed, 0 skipped | 2026-10-03T06:49:05Z | 2026-10-03T06:49:26Z | PowerShell 7.6.6 / Pester 5.7.1 |
+| QualitySystem Pester | `Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path .\Tests\QualitySystem.Tests.ps1 -PassThru` | 24 passed, 0 failed, 0 skipped | 2026-10-03T06:49:06Z | 2026-10-03T06:49:08Z | PowerShell 7.6.6 / Pester 5.7.1 |
+| Main updater identity/extraction/install focused regressions | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @("*Manager script version identity*","*Test-ManagerUpdateExtractedScript*","*Invoke-ManagerUpdateInstall*") -PassThru` | PowerShell 7 run: 27 passed, 0 failed. Windows PowerShell 5.1 simultaneous run: 26 passed, 1 failed because the extraction-failure test observed one file in its process-global temp-directory glob (`Expected 0, but got 1`); the same PS 5.1 test then passed in isolation (1/1), and a post-run inspection found no matching temp files. Cross-process temp-file interference is the explanation consistent with the overlapping runs, but remains an inference. | 2026-10-03T07:01:48.2892948Z (PS7); 2026-10-03T07:01:47.5389815Z (PS5.1) | 2026-10-03T07:02:01.2213102Z (PS7); 2026-10-03T07:02:00.7734186Z (PS5.1) | Pester 5.7.1; PS7 7.6.6 and Windows PowerShell 5.1 |
+| Isolated updater extraction-failure regression after parallel temp-glob observation | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter "*extraction failure (valid ZIP, corrupted entry payload)*" -PassThru` | 1 passed, 0 failed, 1289 not run; no matching updater temp files remained after the concurrent runs | 2026-10-03T07:03:25.3321083Z | 2026-10-03T07:03:31.6730242Z | Windows PowerShell 5.1 / Pester 5.7.1 |
+| RC8 main updater focused regressions after source/doc sync | `Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @("*Manager script version identity*","*Test-ManagerUpdateExtractedScript*","*Invoke-ManagerUpdateInstall*") -PassThru` | 27 passed, 0 failed, 1263 not run | 2026-10-03T07:01:48.2892948Z | 2026-10-03T07:02:01.2213102Z | PowerShell 7.6.6 / Pester 5.7.1 |
+| RC8 standalone updater core Pester after source/doc sync | `Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path .\Tests\TpmAutoUpdate.Core.Tests.ps1 -PassThru` | 51 passed, 0 failed, 0 skipped | 2026-10-03T07:01:48.9587670Z | 2026-10-03T07:01:54.4987628Z | PowerShell 7.6.6 / Pester 5.7.1 |
+| RC8 standalone updater core Pester after source/doc sync | `Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path .\Tests\TpmAutoUpdate.Core.Tests.ps1 -PassThru` | 51 passed, 0 failed, 0 skipped | 2026-10-03T07:01:48.8856769Z | 2026-10-03T07:01:54.5033360Z | Windows PowerShell 5.1 / Pester 5.7.1 |
+| Final frozen full main Pester suite after updater source changes | `powershell.exe -NoLogo -NoProfile -Command "Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Minimal -PassThru"` | 1290 passed, 0 failed, 0 skipped, 0 not run | 2026-10-03T07:08:31.9249935Z | 2026-10-03T07:14:35.7219195Z | Windows PowerShell 5.1 / Pester 5.7.1 |
+| Canonical production InjectionHunter inventory | `Import-Module .\scripts\TPMCertification.ProductionFacts.psm1 -Force; invoke private Test-TPMProductionInjectionHunterV1 in that module scope with Get-TPMProductionPowerShellInventoryV1 and .\scripts\InjectionHunterDispositions.psd1` | Executed=True; 40 findings, all 40 individually reviewed `FalsePositive` dispositions; 0 unresolved; tool 1.0.0. All 40 source/rule/extent entries match; no stale disposition failure. | 2026-10-03T07:13:10.8658645Z | 2026-10-03T07:14:39.3309246Z | PowerShell 7 / InjectionHunter 1.0.0 |
+| Current owner-status and remediation-artifact contract tests after P1 board sync | `Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @("*requires the TPM remediation and prompt-slice artifacts*","*classifies every registry owner status and blocks unresolved dispositions*","*uses canonical owner statuses and scopes stale-package rejection to certification mode*") -PassThru` | 3 passed, 0 failed, 1287 not run | 2026-10-03T07:20:05.1699281Z | 2026-10-03T07:20:30.8266990Z | PowerShell 7.6.6 / Pester 5.7.1 |
+| Governance/QualitySystem tests after SECURITY.md and P1 evidence synchronization | `Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @("*requires the TPM remediation and prompt-slice artifacts*","*classifies every registry owner status and blocks unresolved dispositions*","*uses canonical owner statuses and scopes stale-package rejection to certification mode*") -PassThru; Invoke-Pester -Path .\Tests\QualitySystem.Tests.ps1 -PassThru` | Owner/status/artifact tests 3 passed, 0 failed; QualitySystem 24 passed, 0 failed | 2026-10-03T07:34:44.2531124Z | 2026-10-03T07:35:08.4620996Z | PowerShell 7.6.6 / Pester 5.7.1 |
+| Final source quality wrapper after SECURITY.md synchronization | `pwsh.exe -NoProfile -File ./scripts/Run-TpmQualityGate.ps1 -ReportPath ./docs/remediation/PR-321-reconciliation.md` | PASS (exit 0); Main Pester 1290/1290; SupportPackage 42/42; ASCII/parse, configured PSScriptAnalyzer, `git diff --check`, and permanent procedure gate passed | 2026-10-03T07:35:44.2922377Z | 2026-10-03T07:45:16.7882201Z | PowerShell 7 |
+| Final board/report contract verification | `Import-Module Pester -RequiredVersion 5.7.1 -Force; $tests=Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter @("*requires the TPM remediation and prompt-slice artifacts*","*classifies every registry owner status and blocks unresolved dispositions*","*uses canonical owner statuses and scopes stale-package rejection to certification mode*") -PassThru; if($tests.FailedCount -ne 0 -or $tests.PassedCount -ne 3){throw "Final board-contract Pester count mismatch."}; & .\scripts\Test-TpmPermanentProcedures.ps1 -RepoRoot (Get-Location).Path -ReportPath (Join-Path (Get-Location).Path "docs\remediation\PR-321-reconciliation.md") -SourcePath (Join-Path (Get-Location).Path "TeknoParrot-Manager.ps1"); if($LASTEXITCODE -ne 0){throw "Permanent procedure gate failed with exit code $LASTEXITCODE."}` | Owner/status/artifact tests 3 passed, 0 failed, 1287 not run; permanent procedure gate passed | 2026-10-03T07:47:09.3878984Z | 2026-10-03T07:47:32.3320146Z | PowerShell 7.6.6 / Pester 5.7.1 |
+| Final post-board-sync source quality wrapper | `powershell.exe -NoLogo -NoProfile -Command '$started=[DateTime]::UtcNow; Write-Output ("STARTED UTC: "+$started.ToString("o")); & pwsh.exe -NoLogo -NoProfile -File .\scripts\Run-TpmQualityGate.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md; $code=$LASTEXITCODE; $finished=[DateTime]::UtcNow; Write-Output ("FINISHED UTC: "+$finished.ToString("o")); Write-Output ("GATE EXIT CODE: "+$code); exit $code'` | PASS (exit 0); Main Pester 1290/1290; SupportPackage 42/42; ASCII/parse, configured PSScriptAnalyzer, `git diff --check`, and permanent procedure gate with wrapper-computed `ChangedAtUtc` passed | 2026-10-03T07:50:11.2656367Z | 2026-10-03T07:59:42.0035591Z | PowerShell 7 |
+
 
 
 ## ReShade ten-effect/twelve-profile source slice
@@ -692,7 +714,7 @@ traceability but do not override these corrected classifications.
 | 31 | dgVoodoo2 wording | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Reachable device-only failure guidance recommends reconnecting and exposes Health Check only for MissingPath; successful-with-skips route was unreachable | Yes, source fix | Yes | 5578628627 |
 | 32 | Global consistency | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Enumerated finite-choice routes are centralized or retain documented stateful/exact-token/secure/path/renderer-aware boundaries | Yes, source fix | Yes | 5578628627 |
 | 33 | FFB membership/prompt and optional-plugin completion | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Membership, completion, and deployment-error behavior remain source-covered by the FFB focused suite | No further source change in this slice | Yes | PR-321 control board |
-| 34 | Migration explanation and Eggman DAT update path | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Migration preview/decline and current DAT filename behavior have source contracts | No further source change in this slice | Yes | PR-321 control board |
+| 34 | Migration explanation and Eggman DAT update path | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Migration preview/decline and current DAT filename behavior remain covered; the RC8 startup gate validates typed transaction results and stops on ACTION_REQUIRED / UNKNOWN | Yes, RC8 P1-2 source fix | Yes | PR-321 control board |
 | 35 | Cross-cutting user-facing cleanup | SOURCE FIXED; OWNER RUNTIME NEEDED | SOURCE FIXED; OWNER RUNTIME NEEDED | Full-name output and bounded compact progress remain source-covered; owner-visible runtime review is pending | No further source change in this slice | Yes | PR-321 control board |
 
 Product requirements retained for subsequent slices:
@@ -772,7 +794,7 @@ from that single unsafe-root classification.
 - Authorized owner mapping: IDs 5, 11, 12, 16, 17, 18, 19, 20, 21, 22,
   and 30, plus the explicitly authorized S1 legacy-result normalization
   findings.
-- System invariant inventory: LST-01 through LST-10 in the slice contract.
+- System invariant inventory: LST-01 through LST-11 in the slice contract.
 - Source boundary: legacy workflow adapters, verified profile-backup gates,
   PostgreSQL recovery/reinitialize wrappers, PCSX2 cursor-path transaction,
   migration transaction, and the shared v1 validator.
@@ -789,6 +811,7 @@ from that single unsafe-root classification.
 - No-action confirmations: no package, push, owner smoke, Arcade, wiki,
   merge, tag, publish, certification, or release-ready disposition was
   performed. Runtime proof remains unauthorized and owner smoke is paused.
+- RC8FullReview P1-2 delta: owner ID 34; PR #321; `TPM-S1-LEGACY-STATE-TRANSACTIONS-001`; `TPM-TRACE-001`; behavioral tests also map to `TPM-EVIDENCE-001`. Source fixed: `Test-TpmOwnedMigrationStartupAllowed` first requires `Test-TpmTransactionResult`, then rejects `ACTION_REQUIRED` / `UNKNOWN` before new log/config path selection. Typed/malformed migration policy coverage passed `2/2`; the full source quality wrapper has now passed, while exact-head CI remains pending. Commit/push is authorized only to PR #321's existing head after source gates pass; package, merge, release, and owner runtime remain unauthorized.
 
 ## Desktop OMP S1 -- setup and manager-update transaction normalization
 
@@ -820,6 +843,64 @@ from that single unsafe-root classification.
   because owner-runtime evidence remains outstanding and report validation
   freshness was not proven. This is expected while owner smoke is paused.
   Owner/runtime proof remains unauthorized and paused.
+
+## RC8FullReview P1-1 -- update version identity ordering
+
+Status: MAIN AND STANDALONE AST/ASCII FIXES IMPLEMENTED; MAIN PESTER 1290/1290 AND STANDALONE CORE PESTER 51/51 UNDER BOTH ENGINES; DESTRUCTIVE APPLY 10/10; FULL SOURCE QUALITY WRAPPER PASSED 2026-10-03T07:59:42.0035591Z; EXACT-HEAD CI PENDING; OWNER RUNTIME NEEDED; OWNER SMOKE PAUSED
+
+- Slice contract: `TPM-S1-UPDATE-VERSION-ORDERING-001`.
+- Owner mapping: PR #321 owner row 81 (startup/update flow); review finding RC8FullReview P1-1; issue #105 is supporting context only.
+- Conflict resolution: issue #105's historical equality of final `1.0` and `1.0-RC1` is superseded by the current user-authorized finding. The current candidate must distinguish RC7, RC8, and final 1.0; the required precedence is `1.0-RC7 < 1.0-RC8 < 1.0`. Issue #105 remains applicable to numeric-base ordering such as `0.99.99 < 1.0-RC1` and to coverage across all updater paths.
+- Prior failure: main and standalone updater comparisons stripped or omitted `$ReleaseCandidateLabel`; candidate and installed script verification compared only `$ScriptVersion`, making RC7, RC8, and final 1.0 indistinguishable at the same numeric base.
+- Source boundary: main `Get-ManagerVersionIdentity`, `Get-ManagerScriptVersionIdentityFromContent`, `Compare-ManagerVersionText`, update/candidate/installed identity checks, `tools/TpmAutoUpdate.Core.psm1` (`Compare-TpmVersions`, `Get-TpmLocalVersion`), and `tools/Invoke-TpmAutoUpdate.ps1`. The main script remains self-contained; no module import is added.
+- Before evidence: after correcting test scope, the RC7-to-RC8 menu and RC8-to-final startup decision tests failed because the updater returned `UPDATE_ALREADY_CURRENT`; an RC7 candidate for an RC8 tag was accepted, and pre-state identity omitted the RC label.
+- Spoof reproduction before AST correction: a here-string containing apparent `$ScriptVersion = "1.0"` and `$ReleaseCandidateLabel = "RC8"` declarations caused the raw-line parser to return `1.0-RC8`, while the actual top-level label was RC7; the regression expected `1.0-RC7` and failed with actual `1.0-RC8`.
+- Main-path after evidence: `Tests/TeknoParrot-Manager.Tests.ps1` passed `1290/1290` under PowerShell 7 and Windows PowerShell 5.1. This includes the full comparator, source-identity, pre-state, menu/startup, candidate-install, installed-readback, rollback, and owner-status coverage; the main updater now installs a single-quoted RC8 candidate and rejects a valid-UTF-8 non-ASCII candidate before parsing.
+- Standalone failing-before evidence: the focused local-reader/apply set failed `5/9`: here-string data spoofed the local identity, a valid single-quoted declaration was rejected by the regex parser, invalid declarations were not rejected, a string-only candidate passed Apply validation, and an RC7 candidate was installed under an RC8 release tag. A valid-UTF-8 candidate containing U+2014 in quoted source also passed the pre-guard standalone validator.
+- Standalone after evidence: `Tests/TpmAutoUpdate.Core.Tests.ps1` passed `51/51` under PowerShell 7 and Windows PowerShell 5.1, including local AST identity extraction, candidate/tag matching, valid-UTF-8 non-ASCII rejection, and mocked Apply rejection before replacement. `Tests/TpmAutoUpdate.DestructivePath.Tests.ps1` passed `10/10` under PowerShell 7 after its harness began supplying the expected release identity. These tests establish source behavior only; the full source quality wrapper subsequently passed, and exact-head CI remains pending.
+- Current static-gate evidence: Windows PowerShell 5.1 and PowerShell 7 parsed
+  all six changed PowerShell source/test files with zero errors; the main
+  script contains zero non-ASCII bytes; configured PSScriptAnalyzer returned
+  zero findings for the main script and both updater scripts. The canonical
+  production InjectionHunter scan found 40 entries, all matched to reviewed
+  `FalsePositive` dispositions, with zero unresolved. Its exact time/count and
+  all 40 source/rule identifiers are recorded in the test/evidence table.
+- Full source-quality wrapper: `Run-TpmQualityGate.ps1` started at
+  `2026-10-03T07:35:44.2922377Z` and passed at
+  `2026-10-03T07:45:16.7882201Z` (exit 0). Main Pester passed `1290/1290`;
+  SupportPackage passed `42/42`; ASCII/parse, configured PSScriptAnalyzer,
+  `git diff --check`, and the permanent procedure gate passed.
+- Direct production-validator smoke (PowerShell 7; temporary directory
+  removed): extracted the actual main validator functions from the source AST
+  without dot-sourcing the interactive script, then exercised those functions
+  and the standalone module. Both reported local identity `1.0-RC8`, accepted
+  a single-quoted RC8 candidate, and rejected a valid-UTF-8 non-ASCII candidate;
+  the standalone validator also rejected an RC7 candidate under an RC8 tag.
+  Candidate content was parsed, never executed. Runtime/network update paths
+  were not exercised.
+- One cross-engine focused Pester invocation was run concurrently in both
+  PowerShell processes; Windows PowerShell 5.1's global-temp cleanup assertion
+  observed a transient matching file while the PowerShell 7 updater group was
+  also executing. The isolated assertion passed 1/1, and the subsequent
+  serial full Windows PowerShell suite passed 1290/1290. Cross-process
+  interference is the explanation consistent with the overlap, but remains
+  an inference; no product cleanup behavior was changed for that observation.
+- Self-adversarial identity check: PowerShell 7.6.6 and Windows PowerShell
+  5.1 parse direct prefix/postfix `++` and `--` against the literal string
+  identity variables as unary AST nodes, not assignment nodes. Executing
+  those operators on the declared `System.String` values throws and leaves
+  `1.0` / `RC8` unchanged; no identity bypass was observed. Command-based or
+  dynamic-scope mutation remains the documented static-analysis boundary.
+- Hunk mapping: owner row 81; PR #321 review finding P1-1; supporting issue #105 with its earlier final/RC equality assumption explicitly superseded; `TPM-S1-UPDATE-VERSION-ORDERING-001`; `TPM-TRACE-001`. Behavioral test hunks also map to `TPM-EVIDENCE-001`; architecture, security model, updater design docs, user readmes, candidate changelog, board, report, current-slice pointer, and `scripts/InjectionHunterDispositions.psd1` are mapped through the same contract and `TPM-TRACE-001`.
+- No package, owner-runtime, merge, tag, release, certification, wiki, or publication action is authorized.
+
+## Run 37090573916 -- narrow CI failure reconciliation
+
+- CI metadata identifies PR head `0295415fb1b9d4bf6880945eb4807d4b2b27ec96`; the workflow checked out synthetic merge commit `39301e430849c0996746187aecfffa937fe705b6` with tree `8ff087e02ed81f8352b7991753d07b35b8ab2e3f`, not candidate tree `07d45a549d6db53371bfcb1f1a014d1a0b1b9b3b`.
+- The one Pester assertion failure is `uses canonical owner statuses and scopes stale-package rejection to certification mode` at `Tests/TeknoParrot-Manager.Tests.ps1:17648`. It captures a child `pwsh` gate's redirected `Write-Error` output. CI log evidence shows ANSI escape sequences interleaved with `SOURCE REMEDIATION REQUIRED`; those non-whitespace bytes prevent the expected status regex from matching. The same raw ESC character causes Pester 5.7.1 NUnit XML export to fail.
+- This test exercises synthetic owner-report status fixtures and `Test-TpmPermanentProcedures.ps1`; it does not run either updater comparison or migration startup. The failure is independent of both RC8FullReview P1 findings.
+- Scoped correction: strip ANSI CSI sequences from captured child output; configure checkout to use the PR head repository and SHA, then assert `git rev-parse HEAD` equals the expected PR-head SHA. Map to owner ID 3 status semantics, PR #321, `TPM-OWNER-STATUS-GATE-001`, `TPM-OWNER-003`, `TPM-TRACE-001`, and `TPM-AUTH-001`.
+- After correction, the focused main matrix including the owner-status assertion passed `21/21`. The broad workflow gate and fresh exact-head CI remain pending; the source correction does not promote owner status.
 
 ## Desktop OMP S2-A -- shared transaction presentation contract
 

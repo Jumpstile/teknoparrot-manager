@@ -19,6 +19,78 @@
 # the same reason, since New-TpmUpdateBackup's Copy-Item has the same shape.)
 $ErrorActionPreference = 'Stop'
 
+function Get-TpmScriptVersionIdentityFromContent {
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$Content)
+
+    # Parse only. Candidate content is never executed to determine its identity.
+    $tokens = $null
+    $parseErrors = $null
+    $scriptAst = [System.Management.Automation.Language.Parser]::ParseInput($Content, [ref]$tokens, [ref]$parseErrors)
+    if (@($parseErrors).Count -gt 0) {
+        throw "Candidate script cannot be parsed to verify its version identity."
+    }
+
+    $assignmentStatements = @($scriptAst.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.AssignmentStatementAst]
+            }, $true))
+    $identityAssignments = @(
+        foreach ($assignment in $assignmentStatements) {
+            foreach ($target in $assignment.GetAssignmentTargets()) {
+                if ($target -isnot [System.Management.Automation.Language.VariableExpressionAst]) {
+                    continue
+                }
+                $targetPath = [string]$target.VariablePath.UserPath
+                $targetName = $targetPath
+                $scopeSeparator = $targetPath.LastIndexOf(':')
+                if ($scopeSeparator -ge 0) {
+                    $targetName = $targetPath.Substring($scopeSeparator + 1)
+                }
+                if ($targetName -ieq 'ScriptVersion' -or $targetName -ieq 'ReleaseCandidateLabel') {
+                    [pscustomobject]@{
+                        Assignment = $assignment
+                        Name = $targetName
+                        Path = $targetPath
+                    }
+                }
+            }
+        }
+    )
+
+    $versionAssignments = @($identityAssignments | Where-Object { $_.Name -ieq 'ScriptVersion' })
+    $labelAssignments = @($identityAssignments | Where-Object { $_.Name -ieq 'ReleaseCandidateLabel' })
+    if ($versionAssignments.Count -gt 1 -or $labelAssignments.Count -gt 1) {
+        throw "Candidate script contains duplicate version identity assignments."
+    }
+
+    foreach ($identityAssignment in $identityAssignments) {
+        $assignment = $identityAssignment.Assignment
+        if (-not [object]::ReferenceEquals($assignment.Parent, $scriptAst.EndBlock) -or
+            $identityAssignment.Path -ine $identityAssignment.Name) {
+            throw "Candidate version identity assignments must be direct, unscoped top-level declarations."
+        }
+        if ($assignment.Operator -ne [System.Management.Automation.Language.TokenKind]::Equals -or
+            $assignment.Right -isnot [System.Management.Automation.Language.CommandExpressionAst] -or
+            $assignment.Right.Expression -isnot [System.Management.Automation.Language.StringConstantExpressionAst]) {
+            throw "Candidate version identity assignments must use constant string literals."
+        }
+    }
+
+    if ($versionAssignments.Count -eq 0) {
+        return $null
+    }
+    $version = $versionAssignments[0].Assignment.Right.Expression.Value
+    $label = if ($labelAssignments.Count -eq 1) {
+        $labelAssignments[0].Assignment.Right.Expression.Value
+    } else {
+        ''
+    }
+    $identity = if ($label) { "$version-$label" } else { $version }
+    [void](Compare-TpmVersions -VersionTextA $identity -VersionTextB $identity)
+    return $identity
+}
+
 function Get-TpmLocalVersion {
     [CmdletBinding()]
     param(
@@ -30,18 +102,17 @@ function Get-TpmLocalVersion {
         throw "TeknoParrot Manager script not found: $Path"
     }
 
-    $match = Select-String -LiteralPath $Path -Pattern '^\s*\$ScriptVersion\s*=\s*"(?<version>[^"]+)"' -ErrorAction Stop | Select-Object -First 1
-    if (-not $match) {
+    $content = [System.IO.File]::ReadAllText($Path)
+    $identity = Get-TpmScriptVersionIdentityFromContent -Content $content
+    if (-not $identity) {
         throw "Could not find `$ScriptVersion in $Path"
     }
-
-    return $match.Matches[0].Groups['version'].Value
+    return $identity
 }
 
 function ConvertTo-TpmVersion {
-    # Kept in lockstep with TeknoParrot-Manager.ps1's own
-    # ConvertTo-ManagerComparableVersion -- see that function's comment
-    # (issue #105) for why the "-RC#" suffix is stripped before parsing.
+# Parses the numeric base only. Release ordering must use Compare-TpmVersions
+# so RC ordinals and the final-release precedence are preserved.
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -55,6 +126,46 @@ function ConvertTo-TpmVersion {
     } catch {
         throw "Version '$VersionText' is not a valid System.Version value after normalization."
     }
+}
+function Compare-TpmVersions {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$VersionTextA,
+
+        [Parameter(Mandatory)]
+        [string]$VersionTextB
+    )
+
+    $pattern = '^(?i:v)?(?<base>[0-9]+(?:\.[0-9]+){1,3})(?:-(?i:RC)(?<candidate>[1-9][0-9]*))?$'
+    $matchA = [regex]::Match($VersionTextA.Trim(), $pattern)
+    $matchB = [regex]::Match($VersionTextB.Trim(), $pattern)
+    if (-not $matchA.Success) {
+        throw "Version '$VersionTextA' is not a supported manager version identity."
+    }
+    if (-not $matchB.Success) {
+        throw "Version '$VersionTextB' is not a supported manager version identity."
+    }
+
+    $baseA = ConvertTo-TpmVersion -VersionText $matchA.Groups['base'].Value
+    $baseB = ConvertTo-TpmVersion -VersionText $matchB.Groups['base'].Value
+    $baseComparison = $baseA.CompareTo($baseB)
+    if ($baseComparison -ne 0) {
+        return $baseComparison
+    }
+
+    $candidateA = if ($matchA.Groups['candidate'].Success) { [int64]::Parse($matchA.Groups['candidate'].Value, [System.Globalization.CultureInfo]::InvariantCulture) } else { $null }
+    $candidateB = if ($matchB.Groups['candidate'].Success) { [int64]::Parse($matchB.Groups['candidate'].Value, [System.Globalization.CultureInfo]::InvariantCulture) } else { $null }
+    if ($null -eq $candidateA -and $null -eq $candidateB) {
+        return 0
+    }
+    if ($null -eq $candidateA) {
+        return 1
+    }
+    if ($null -eq $candidateB) {
+        return -1
+    }
+    return [int]$candidateA.CompareTo($candidateB)
 }
 
 function Test-TpmReleaseAssetUrl {
@@ -545,7 +656,10 @@ function Test-TpmExtractedScript {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string]$Path
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedVersion
     )
 
     # Defense-in-depth before the extracted file ever replaces the live
@@ -566,14 +680,25 @@ function Test-TpmExtractedScript {
         throw "Extracted script begins with a zip signature (PK) -- refusing to install: $Path"
     }
 
-    $content = [System.Text.Encoding]::UTF8.GetString($bytes)
+    # Windows PowerShell 5.1 interprets BOM-less script bytes as Windows-1252.
+    # Require ASCII so AST validation and installed-source interpretation agree.
+    foreach ($byte in $bytes) {
+        if ($byte -gt 0x7F) {
+            throw "Extracted script contains non-ASCII bytes -- refusing to install: $Path"
+        }
+    }
+    $content = [System.Text.Encoding]::ASCII.GetString($bytes)
 
     if ($content -notmatch 'TeknoParrot Manager') {
         throw "Extracted script does not contain the expected 'TeknoParrot Manager' marker: $Path"
     }
 
-    if ($content -notmatch '\$ScriptVersion\s*=\s*"[^"]+"') {
-        throw "Extracted script does not contain a `$ScriptVersion assignment: $Path"
+    $identity = Get-TpmScriptVersionIdentityFromContent -Content $content
+    if (-not $identity) {
+        throw "Extracted script does not contain a top-level `$ScriptVersion assignment: $Path"
+    }
+    if ((Compare-TpmVersions -VersionTextA $identity -VersionTextB $ExpectedVersion) -ne 0) {
+        throw "Extracted script identity '$identity' does not match release tag '$ExpectedVersion'."
     }
 
     return $true
@@ -601,6 +726,7 @@ function Enable-TpmTls12 {
 Export-ModuleMember -Function @(
     'Get-TpmLocalVersion',
     'ConvertTo-TpmVersion',
+    'Compare-TpmVersions',
     'Test-TpmReleaseAssetUrl',
     'Invoke-GitHubJsonRequest',
     'Get-LatestRelease',

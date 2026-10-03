@@ -10625,47 +10625,118 @@ Describe "GPU fix vendor matrix + safe re-run (issue #46)" {
     }
 }
 
-Describe "ConvertTo-ManagerComparableVersion" {
-    It "strips a leading v and parses a normal version" {
-        ConvertTo-ManagerComparableVersion -VersionText 'v0.99.39' | Should -Be ([version]'0.99.39')
-    }
-    It "parses a version with no leading v" {
-        ConvertTo-ManagerComparableVersion -VersionText '0.99.39' | Should -Be ([version]'0.99.39')
-    }
-    It "throws on a non-numeric version string" {
-        { ConvertTo-ManagerComparableVersion -VersionText 'latest' } | Should -Throw
+Describe "Compare-ManagerVersionText" {
+    It "orders numeric base versions before release-candidate labels" {
+        Compare-ManagerVersionText -VersionTextA '0.99.99' -VersionTextB 'v1.0-RC1' | Should -Be -1
     }
 
-    # Issue #105: v1.0-RC1's own release tag broke this function -- [version]
-    # cannot hold a "-RC1" suffix, so every updater path (menu-triggered and
-    # the quiet startup check) failed to recognize the RC1 release at all.
-    It "strips a release-candidate suffix and parses the numeric base" {
-        ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC1' | Should -Be ([version]'1.0')
-        ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC2' | Should -Be ([version]'1.0')
+    It "orders release candidates numerically and before the final release" {
+        Compare-ManagerVersionText -VersionTextA 'v1.0-RC7' -VersionTextB 'v1.0-RC8' | Should -Be -1
+        Compare-ManagerVersionText -VersionTextA 'v1.0-RC9' -VersionTextB 'v1.0-RC10' | Should -Be -1
+        Compare-ManagerVersionText -VersionTextA 'v1.0-RC8' -VersionTextB 'v1.0' | Should -Be -1
+        Compare-ManagerVersionText -VersionTextA 'v1.0' -VersionTextB 'v1.0-RC8' | Should -Be 1
     }
-    It "a 0.99.x version compares as older than 1.0-RC2" {
-        $local  = ConvertTo-ManagerComparableVersion -VersionText '0.99.44'
-        $latest = ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC2'
-        $latest -gt $local | Should -Be $true -Because "a release candidate for 1.0 must be recognized as newer than any 0.99.x release"
+
+    It "returns equality only for identical full version identities" {
+        Compare-ManagerVersionText -VersionTextA 'v1.0-RC8' -VersionTextB '1.0-RC8' | Should -Be 0
+        Compare-ManagerVersionText -VersionTextA 'v1.0-RC8' -VersionTextB '1.0' | Should -Be -1
     }
-    It "0.99.99 compares as older than 1.0-RC2 (not just a higher patch number in the same line)" {
-        $local  = ConvertTo-ManagerComparableVersion -VersionText '0.99.99'
-        $latest = ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC2'
-        $latest -gt $local | Should -Be $true
-    }
-    It "a version equal to the current release candidate is not offered as an update" {
-        $local  = ConvertTo-ManagerComparableVersion -VersionText '1.0'
-        $latest = ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC2'
-        $latest -gt $local | Should -Be $false -Because "already running v1.0 RC2 must not be offered v1.0-RC2 as a new update"
+
+    It "rejects malformed and unsupported version identities" {
+        { Compare-ManagerVersionText -VersionTextA 'latest' -VersionTextB '1.0' } | Should -Throw
+        { Compare-ManagerVersionText -VersionTextA '1.0-BETA' -VersionTextB '1.0' } | Should -Throw
     }
 }
+
+Describe "Manager script version identity" {
+    It "combines the script version and candidate label without losing the RC ordinal" {
+        Get-ManagerVersionIdentity -ScriptVersion '1.0' -ReleaseCandidateLabel 'RC8' | Should -Be '1.0-RC8'
+        Get-ManagerVersionIdentity -ScriptVersion '1.0' -ReleaseCandidateLabel '' | Should -Be '1.0'
+    }
+
+    It "extracts the full identity from script content" {
+        $content = '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+        Get-ManagerScriptVersionIdentityFromContent -Content $content | Should -Be '1.0-RC8'
+        Get-ManagerScriptVersionIdentityFromContent -Content '$ScriptVersion = "1.0"' | Should -Be '1.0'
+    }
+    It "ignores commented assignment lookalikes when extracting version identity" {
+        $content = @(
+            '# $ScriptVersion = "0.99.99"'
+            '$ScriptVersion = "1.0"'
+            '# $ReleaseCandidateLabel = "RC8"'
+            '$ReleaseCandidateLabel = "RC7"'
+        ) -join "`n"
+
+        Get-ManagerScriptVersionIdentityFromContent -Content $content | Should -Be '1.0-RC7'
+        Get-ManagerScriptVersionIdentityFromContent -Content '# $ScriptVersion = "1.0"' | Should -BeNullOrEmpty
+    }
+
+    It "extracts the current script's literal identity from its full source" {
+        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC8'
+    }
+
+    It "ignores assignment-looking lines inside a here-string" {
+        $content = @'
+$decoy = @"
+$ScriptVersion = "1.0"
+$ReleaseCandidateLabel = "RC8"
+"@
+$ScriptVersion = "1.0"
+$ReleaseCandidateLabel = "RC7"
+'@
+
+        Get-ManagerScriptVersionIdentityFromContent -Content $content | Should -Be '1.0-RC7'
+    }
+
+    It "accepts single-quoted literal version declarations" {
+        $content = @'
+$ScriptVersion = '1.0'
+$ReleaseCandidateLabel = 'RC8'
+'@
+
+        Get-ManagerScriptVersionIdentityFromContent -Content $content | Should -Be '1.0-RC8'
+    }
+
+    It "rejects duplicate, scoped, nested, compound, nonliteral, and malformed declarations" {
+        $invalidContents = @(
+            '$ScriptVersion = "1.0"' + "`n" + '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$script:ScriptVersion = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + 'function Set-Version { $ScriptVersion = "0.99" }' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ScriptVersion += "1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = Get-CandidateLabel'
+            '$ScriptVersion = (Get-VersionBase)' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "$env:TPM_LABEL"'
+            '$ScriptVersion = "1.0"' + "`n" + 'if ('
+        )
+
+        foreach ($invalidContent in $invalidContents) {
+            { Get-ManagerScriptVersionIdentityFromContent -Content $invalidContent } | Should -Throw
+        }
+    }
+
+}
+
+Describe "Get-ManagerUpdatePreState version identity" {
+    It "captures the release-candidate label from the installed script" {
+        $path = Join-Path $TestDrive 'installed-rc-version.ps1'
+        Set-Content -LiteralPath $path -Value ('$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"') -Encoding ascii
+
+        $state = Get-ManagerUpdatePreState -Path $path
+
+        $state.Captured | Should -BeTrue
+        $state.Version | Should -Be '1.0-RC8'
+    }
+}
+
+
 
 Describe "ConvertTo-ManagerDisplayVersionFromTag" {
     # Issue #134: "Current version" (built from $DisplayVersion, e.g.
     # "v1.0 RC2") and "Latest version" (previously the raw git tag, e.g.
     # "v1.0-RC2") showed the exact same release in two different formats --
-    # confusing even though ConvertTo-ManagerComparableVersion correctly
-    # treats them as equal. Every raw tag shown to the user must go through
+    # confusing even though Compare-ManagerVersionText treats matching RC labels
+    # as the same identity. Every raw tag shown to the user must go through
     # this formatter so both lines share one canonical "v<version> <LABEL>"
     # shape.
     It "converts a release-candidate tag's dash suffix into the canonical space-separated form" {
@@ -10899,6 +10970,17 @@ Describe "Expand-ManagerUpdateAsset and Test-ManagerUpdateExtractedScript" {
         { Test-ManagerUpdateExtractedScript -Path $path } | Should -Throw '*zip signature*'
     }
 
+    It "rejects a valid UTF-8 candidate containing non-ASCII source bytes" {
+        $path = Join-Path $TestDrive 'non-ascii-candidate.ps1'
+        $prefixText = '# TeknoParrot Manager' + "`n" + '$ScriptVersion = "0.99.99"' + "`n" + '$decoy = "'
+        $prefix = [System.Text.Encoding]::ASCII.GetBytes($prefixText)
+        $suffix = [System.Text.Encoding]::ASCII.GetBytes('"' + "`n")
+        $nonAscii = [System.Text.UTF8Encoding]::new($false).GetBytes([string][char]0x2014)
+        [System.IO.File]::WriteAllBytes($path, [byte[]]($prefix + $nonAscii + $suffix))
+        { Test-ManagerUpdateExtractedScript -Path $path } | Should -Throw '*non-ASCII bytes*'
+    }
+
+
     It "rejects an extracted file missing the TeknoParrot Manager marker" {
         $path = Join-Path $TestDrive 'nomarker.ps1'
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.99"' -Encoding ascii
@@ -10929,12 +11011,40 @@ Describe "Invoke-CheckForUpdates" {
         }
     }
 
+    It "offers RC8 to an installation running RC7" {
+        $originalVersion = $ScriptVersion
+        $originalLabel = $ReleaseCandidateLabel
+        $originalDisplay = $DisplayVersion
+        try {
+            $ScriptVersion = '1.0'
+            $ReleaseCandidateLabel = 'RC7'
+            $DisplayVersion = 'v1.0 RC7'
+            Mock Get-ManagerUpdateRelease {
+                [pscustomobject]@{ TagName = 'v1.0-RC8'; Name = 'v1.0 RC8'; Body = 'Test notes.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v1.0-RC8/x.zip'; SizeBytes = 1 }
+            }
+            Mock Read-Host { 'N' }
+
+            $path = Join-Path $TestDrive 'rc7-current.ps1'
+            Set-Content -LiteralPath $path -Value ('$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC7"') -Encoding ascii
+            Get-ManagerDisplayVersion | Should -Be 'v1.0 RC7'
+            $result = Invoke-CheckForUpdates -ScriptPath $path
+
+            $result.ReasonCode | Should -Be 'UPDATE_DECLINED'
+            Should -Invoke Read-Host -Times 1
+        } finally {
+            $ScriptVersion = $originalVersion
+            $ReleaseCandidateLabel = $originalLabel
+            $DisplayVersion = $originalDisplay
+        }
+    }
+
     It "returns a verified NO_OP without prompting when there is no newer release" {
-        Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-CheckForUpdatesReleaseJson -TagName $ScriptVersion) } }
+        Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-CheckForUpdatesReleaseJson -TagName ("v{0}-{1}" -f $ScriptVersion, $ReleaseCandidateLabel)) } }
+
         Mock Read-Host { throw "Read-Host should not be called when already current" }
 
         $path = Join-Path $TestDrive 'current.ps1'
-        Set-Content -LiteralPath $path -Value "`$ScriptVersion = `"$ScriptVersion`"" -Encoding ascii
+        Set-Content -LiteralPath $path -Value ("`$ScriptVersion = `"$ScriptVersion`"`n`$ReleaseCandidateLabel = `"$ReleaseCandidateLabel`"") -Encoding ascii
 
         $result = Invoke-CheckForUpdates -ScriptPath $path
         (Test-TpmTransactionResult -Result $result) | Should -BeTrue
@@ -11077,6 +11187,128 @@ Describe "Invoke-ManagerUpdateInstall" {
             return , $bytes
         }
     }
+
+    It "rejects a candidate whose here-string spoofs its RC tag" {
+        $entryContent = @'
+# TeknoParrot Manager
+$decoy = @"
+$ScriptVersion = "1.0"
+$ReleaseCandidateLabel = "RC8"
+"@
+$ScriptVersion = "1.0"
+$ReleaseCandidateLabel = "RC7"
+'@
+        $zipBytes = New-StartupCheckFixtureZipBytes -EntryContent $entryContent
+        Mock Invoke-TpmDownload { param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version) [System.IO.File]::WriteAllBytes($DestinationPath, $zipBytes); return $true }.GetNewClosure()
+
+        $path = Join-Path $TestDrive 'rc-here-string-spoof.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.99"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+        $release = [pscustomobject]@{
+            TagName = 'v1.0-RC8'
+            Name = 'v1.0 RC8'
+            Body = 'Test release notes.'
+            AssetName = 'TeknoParrot.Manager.v1.0.RC8.zip'
+            DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v1.0-RC8/TeknoParrot.Manager.v1.0.RC8.zip'
+            SizeBytes = 1
+        }
+
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release $release
+
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        $result.ReasonCode | Should -Be 'UPDATE_VERSION_MISMATCH'
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+    }
+
+    It "rejects a candidate RC label that does not match the approved release tag" {
+        $entryContent = '# TeknoParrot Manager' + "`n" + '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC7"' + "`n"
+        $zipBytes = New-StartupCheckFixtureZipBytes -EntryContent $entryContent
+        Mock Invoke-TpmDownload { param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version) [System.IO.File]::WriteAllBytes($DestinationPath, $zipBytes); return $true }.GetNewClosure()
+
+        $path = Join-Path $TestDrive 'rc-candidate-mismatch.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.99"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+        $release = [pscustomobject]@{
+            TagName = 'v1.0-RC8'
+            Name = 'v1.0 RC8'
+            Body = 'Test release notes.'
+            AssetName = 'x.zip'
+            DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v1.0-RC8/x.zip'
+            SizeBytes = 1
+        }
+
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release $release
+
+        $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        $result.ReasonCode | Should -Be 'UPDATE_VERSION_MISMATCH'
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+    }
+    It "installs an RC8 candidate and verifies the installed full version identity" {
+        $entryContent = '# TeknoParrot Manager' + "`n" + '$ScriptVersion = ''1.0''' + "`n" + '$ReleaseCandidateLabel = ''RC8''' + "`n"
+        $zipBytes = New-StartupCheckFixtureZipBytes -EntryContent $entryContent
+        Mock Invoke-TpmDownload { param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version) [System.IO.File]::WriteAllBytes($DestinationPath, $zipBytes); return $true }.GetNewClosure()
+
+        $path = Join-Path $TestDrive 'rc8-install-target.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.99"' -Encoding ascii -NoNewline
+        $release = [pscustomobject]@{
+            TagName = 'v1.0-RC8'
+            Name = 'v1.0 RC8'
+            Body = 'Test release notes.'
+            AssetName = 'TeknoParrot.Manager.v1.0.RC8.zip'
+            DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v1.0-RC8/TeknoParrot.Manager.v1.0.RC8.zip'
+            SizeBytes = 1
+        }
+
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release $release
+
+        $result.Outcome | Should -Be 'SUCCEEDED'
+        $result.ReasonCode | Should -Be 'UPDATE_INSTALLED_VERIFIED'
+        (Get-ManagerUpdatePreState -Path $path).Version | Should -Be '1.0-RC8'
+    }
+    It "rejects an installed RC mismatch despite a matching validated candidate hash" {
+        $entryContent = '# TeknoParrot Manager' + "`n" + '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n"
+        $zipBytes = New-StartupCheckFixtureZipBytes -EntryContent $entryContent
+        Mock Invoke-TpmDownload { param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version) [System.IO.File]::WriteAllBytes($DestinationPath, $zipBytes); return $true }.GetNewClosure()
+
+        $path = Join-Path $TestDrive 'rc8-readback-mismatch.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.99"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+        $preStateHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        $candidateZipPath = Join-Path $TestDrive 'rc8-readback-candidate.zip'
+        [System.IO.File]::WriteAllBytes($candidateZipPath, $zipBytes)
+        $candidatePath = Join-Path $TestDrive 'rc8-readback-candidate.ps1'
+        Expand-ManagerUpdateAsset -ZipPath $candidateZipPath -EntryName 'TeknoParrot-Manager.ps1' -DestinationPath $candidatePath | Out-Null
+        $candidateHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash
+        # Fault-inject an inconsistent readback: the candidate hash matches, but
+        # the version identity is RC7. This exercises the defensive identity
+        # check that ordinary single-read file contents cannot reach.
+        $readbackCounter = [pscustomobject]@{ Value = 0 }
+        Mock Get-ManagerUpdatePreState {
+            $readbackCounter.Value++
+            switch ($readbackCounter.Value) {
+                1 { [pscustomobject]@{ Captured = $true; Sha256 = $preStateHash; Version = '0.99.99'; IsReadOnly = $false } }
+                2 { [pscustomobject]@{ Captured = $true; Sha256 = $candidateHash; Version = '1.0-RC7'; IsReadOnly = $false } }
+                3 { [pscustomobject]@{ Captured = $true; Sha256 = $candidateHash; Version = '1.0-RC8'; IsReadOnly = $false } }
+                default { [pscustomobject]@{ Captured = $true; Sha256 = $preStateHash; Version = '0.99.99'; IsReadOnly = $false } }
+            }
+        }.GetNewClosure()
+        $release = [pscustomobject]@{
+            TagName = 'v1.0-RC8'
+            Name = 'v1.0 RC8'
+            Body = 'Test release notes.'
+            AssetName = 'TeknoParrot.Manager.v1.0.RC8.zip'
+            DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v1.0-RC8/TeknoParrot.Manager.v1.0.RC8.zip'
+            SizeBytes = 1
+        }
+
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release $release
+
+        $result.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $result.Errors | Should -Contain 'The installed manager script version did not match the approved release.'
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+    }
+
+
 
     It "installs successfully and returns a verified SUCCEEDED result" {
         $zipBytes = New-StartupCheckFixtureZipBytes
@@ -11326,12 +11558,39 @@ Describe "Invoke-ManagerUpdateInstall" {
 }
 
 Describe "Invoke-StartupUpdateCheck" {
+    It "offers final v1.0 to an installation running RC8" {
+        $originalVersion = $ScriptVersion
+        $originalLabel = $ReleaseCandidateLabel
+        $originalDisplay = $DisplayVersion
+        try {
+            $ScriptVersion = '1.0'
+            $ReleaseCandidateLabel = 'RC8'
+            $DisplayVersion = 'v1.0 RC8'
+            Mock Get-ManagerUpdateRelease {
+                [pscustomobject]@{ TagName = 'v1.0'; Name = 'v1.0'; Body = 'Final release.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v1.0/x.zip' }
+            }
+            Mock Read-Host { 'N' }
+
+            $path = Join-Path $TestDrive 'rc8-startup.ps1'
+            Set-Content -LiteralPath $path -Value ('$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"') -Encoding ascii
+            Get-ManagerDisplayVersion | Should -Be 'v1.0 RC8'
+            $result = Invoke-StartupUpdateCheck -ScriptPath $path
+
+            $result.ReasonCode | Should -Be 'UPDATE_REMIND_LATER'
+            Should -Invoke Read-Host -Times 1
+        } finally {
+            $ScriptVersion = $originalVersion
+            $ReleaseCandidateLabel = $originalLabel
+            $DisplayVersion = $originalDisplay
+        }
+    }
+
     It "returns a verified NO_OP and does not prompt when already current" {
-        Mock Get-ManagerUpdateRelease { [pscustomobject]@{ TagName = "v$ScriptVersion"; Name = $null; Body = $null; AssetName = 'x'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.39/x' } }
+        Mock Get-ManagerUpdateRelease { [pscustomobject]@{ TagName = "v$ScriptVersion-$ReleaseCandidateLabel"; Name = $null; Body = $null; AssetName = 'x'; DownloadUrl = "https://github.com/Jumpstile/teknoparrot-manager/releases/download/v$ScriptVersion-$ReleaseCandidateLabel/x" } }
         Mock Read-Host { throw "Read-Host should not be called when already current" }
 
         $path = Join-Path $TestDrive 'startup-current.ps1'
-        Set-Content -LiteralPath $path -Value "`$ScriptVersion = `"$ScriptVersion`"" -Encoding ascii
+        Set-Content -LiteralPath $path -Value ("`$ScriptVersion = `"$ScriptVersion`"`n`$ReleaseCandidateLabel = `"$ReleaseCandidateLabel`"") -Encoding ascii
 
         $result = Invoke-StartupUpdateCheck -ScriptPath $path
         (Test-TpmTransactionResult -Result $result) | Should -BeTrue
@@ -17639,6 +17898,8 @@ Describe "Focused RC8 remediation contracts" {
             try {
                 [void]$process.Start()
                 $output = $process.StandardOutput.ReadToEnd() + "`n" + $process.StandardError.ReadToEnd()
+                $output = [regex]::Replace($output, '\x1b\[[0-?]*[ -/]*[@-~]', '')
+
                 $process.WaitForExit()
                 return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $output }
             } finally { $process.Dispose() }
@@ -17876,6 +18137,51 @@ Describe 'TPM-owned layout and legacy migration' {
         $report = Get-ChildItem -LiteralPath $layout.Reports -Filter 'TPM-migration-*.md' -File | Select-Object -First 1
         Test-Path -LiteralPath $report.FullName -PathType Leaf | Should -BeTrue
     }
+    It 'rejects invalid migration transaction results before startup' {
+        Test-TpmOwnedMigrationStartupAllowed -MigrationResult $null | Should -BeFalse
+
+        $untypedResult = [pscustomobject]@{ Outcome = 'NO_OP'; ProductState = 'UNCHANGED' }
+        (Test-TpmTransactionResult -Result $untypedResult) | Should -BeFalse
+        Test-TpmOwnedMigrationStartupAllowed -MigrationResult $untypedResult | Should -BeFalse
+
+        $malformedTypedResult = [pscustomobject]@{
+            SchemaVersion = 1
+            Outcome = 'NO_OP'
+            ProductState = 'UNCHANGED'
+            Summary = 'This typed fixture has no transaction evidence sections.'
+        }
+        $malformedTypedResult.PSTypeNames.Insert(0, 'TPM.TransactionResult.v1')
+        $malformedTypedResult.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        (Test-TpmTransactionResult -Result $malformedTypedResult) | Should -BeFalse
+        Test-TpmOwnedMigrationStartupAllowed -MigrationResult $malformedTypedResult | Should -BeFalse
+
+        $invalidOutcome = New-TpmProfileTransactionResult -WorkflowKey 'OwnedStateMigration' -OperationKey 'RelocateOwnedState' -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Summary 'No legacy manager-owned state needed migration.' -FinalChecks @('The legacy owned-state inventory was empty.')
+        $invalidOutcome.Outcome = 'UNRECOGNIZED'
+        (Test-TpmTransactionResult -Result $invalidOutcome) | Should -BeFalse
+        Test-TpmOwnedMigrationStartupAllowed -MigrationResult $invalidOutcome | Should -BeFalse
+
+        $fixtureItem = @('legacy-state')
+        $verifiedBackup = [pscustomobject]@{ Required = $true; Attempted = $true; Created = $true; Verified = $true; RootPath = 'fixture-backup'; Items = $fixtureItem }
+        $actionRequired = New-TpmProfileTransactionResult -WorkflowKey 'OwnedStateMigration' -OperationKey 'RelocateOwnedState' -Outcome 'ACTION_REQUIRED' -ProductState 'UNKNOWN' -Summary 'State migration needs review.' -Items $fixtureItem -ChangedItems $fixtureItem -FailedItems $fixtureItem -MutationStarted $true -Backup $verifiedBackup -FinalPassed $false -FinalChecks @('Migration rollback could not be verified.') -Rollback ([pscustomobject]@{ Attempted = $true; Completed = $false; Verified = $false; Items = $fixtureItem; EvidenceRoot = 'fixture-backup'; FailedItems = $fixtureItem; Errors = @('Rollback verification failed.') })
+        (Test-TpmTransactionResult -Result $actionRequired) | Should -BeTrue
+        Test-TpmOwnedMigrationStartupAllowed -MigrationResult $actionRequired | Should -BeFalse
+    }
+
+    It 'allows only valid typed migration outcomes without requiring prompt input' {
+        $fixtureItem = @('legacy-state')
+        $verifiedBackup = [pscustomobject]@{ Required = $true; Attempted = $true; Created = $true; Verified = $true; RootPath = 'fixture-backup'; Items = $fixtureItem }
+        $noOp = New-TpmProfileTransactionResult -WorkflowKey 'OwnedStateMigration' -OperationKey 'RelocateOwnedState' -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Summary 'No legacy manager-owned state needed migration.' -FinalChecks @('The legacy owned-state inventory was empty.')
+        $succeeded = New-TpmProfileTransactionResult -WorkflowKey 'OwnedStateMigration' -OperationKey 'RelocateOwnedState' -Outcome 'SUCCEEDED' -ProductState 'INTENDED' -Summary 'Managed state migration completed and was verified.' -Items $fixtureItem -ChangedItems $fixtureItem -CompletedItems $fixtureItem -MutationStarted $true -MutationCompleted $true -Backup $verifiedBackup -FinalChecks @('Every planned move completed after the verified backup.')
+        $rolledBack = New-TpmProfileTransactionResult -WorkflowKey 'OwnedStateMigration' -OperationKey 'RelocateOwnedState' -Outcome 'ROLLED_BACK_VERIFIED' -ProductState 'UNCHANGED' -Summary 'State migration stopped and all completed moves were rolled back.' -Items $fixtureItem -ChangedItems $fixtureItem -CompletedItems $fixtureItem -MutationStarted $true -Backup $verifiedBackup -Rollback ([pscustomobject]@{ Attempted = $true; Completed = $true; Verified = $true; Items = $fixtureItem; EvidenceRoot = 'fixture-backup'; FailedItems = @(); Errors = @() }) -FinalChecks @('Source and destination identities were checked after rollback.')
+        $failedBeforeMutation = New-TpmProfileTransactionResult -WorkflowKey 'OwnedStateMigration' -OperationKey 'RelocateOwnedState' -Outcome 'FAILED_BEFORE_MUTATION' -ProductState 'UNCHANGED' -Summary 'State migration stopped before any move.' -Items $fixtureItem -FailedItems $fixtureItem -FinalChecks @('No legacy state move was attempted.')
+
+        foreach ($result in @($noOp, $succeeded, $rolledBack, $failedBeforeMutation)) {
+            $result.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+            (Test-TpmTransactionResult -Result $result) | Should -BeTrue
+            Test-TpmOwnedMigrationStartupAllowed -MigrationResult $result | Should -BeTrue
+        }
+    }
+
     It 'explains migration categories, destination, exclusions, and safe decline' {
         $script:ProductionSource | Should -Match 'Destination root:'
         foreach ($category in @('State','Logs','Reports','Backups','SupportPackages','Assets','Cache')) {

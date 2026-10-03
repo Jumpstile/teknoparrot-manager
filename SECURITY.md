@@ -345,10 +345,17 @@ ask for confirmation before applying, back up the current script before
 replacement, validate the extracted script, then instruct the user to restart.
 
 Update release assets are limited to the Jumpstile TeknoParrot Manager GitHub
-release path. The downloaded ZIP is extracted to a temporary location, and the
-candidate script is rejected if it is missing, empty, begins with raw ZIP bytes,
-does not contain the TeknoParrot Manager marker, or does not contain a
-`$ScriptVersion = "..."` assignment.
+release path. The downloaded ZIP is extracted to a temporary location. A
+candidate is rejected if it is missing, empty, begins with raw ZIP bytes,
+lacks the TeknoParrot Manager marker, has parser errors, or does not expose a
+valid full identity through one direct, unscoped top-level constant-string
+`$ScriptVersion` declaration and at most one such `$ReleaseCandidateLabel`
+declaration. Both updater implementations parse source without executing it
+and require the candidate identity to equal the release tag before replacement.
+They reject any extracted-script byte above `0x7F` before parsing, preventing
+BOM-less Windows PowerShell 5.1 Windows-1252 decoding from differing from the
+validator's ASCII source interpretation. The main updater also reads the
+installed identity back and verifies it against the release tag.
 
 Current limitation: the TPM menu self-update path computes and logs the ZIP's
 SHA-256 but does not currently consume an optional GitHub asset digest as an

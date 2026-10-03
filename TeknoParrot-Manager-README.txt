@@ -1797,9 +1797,16 @@
   What mode 13 does
 
     Manually checks the latest TeknoParrot Manager release on GitHub
-    against the version you're running. This is entirely opt-in --
-    nothing is downloaded or changed without your explicit confirmation,
-    and the script never checks for updates on its own.
+    against the version you're running. Mode 13 never downloads or changes
+    anything without your explicit confirmation. A quiet, read-only check
+    may also run at startup when enabled; see that section below.
+    RC releases compare by numeric version, numeric RC number, then final
+    release -- for example, v1.0-RC7 < v1.0-RC8 < 1.0.
+
+    Before replacement, both updater paths parse unique top-level literal
+    version declarations without executing the downloaded candidate and
+    require its full numeric-version/RC identity to match the release tag. The
+    main updater also reads the installed script identity back after replacement.
 
     If you're already current, it says so and returns you to the menu.
 

@@ -842,6 +842,14 @@ Lawn Darts), and Orange County Choppers Pinball -- need a small local PostgreSQL
 
 Mode 13 manually checks the latest TeknoParrot Manager release on GitHub against the version you're running. Nothing is downloaded or changed without your explicit confirmation.
 
+All update checks compare full version identity: numeric base, then numeric
+RC number, then final release. For example, `v1.0-RC7 < v1.0-RC8 < 1.0`.
+
+Before replacement, both updater paths parse unique top-level literal version
+declarations without executing the downloaded candidate and require its full
+numeric-version/RC identity to match the release tag. The main updater also
+reads the installed script identity back after replacement.
+
 - If you're already current, it says so and returns you to the menu.
 - If a newer version exists, it explains exactly what updating will do — back up the current script, download the update, validate it, replace the script, and require a restart — before asking a single Y/N question.
 - The current script is backed up to `UpdateBackups\TeknoParrotManager_<timestamp>\` before anything is replaced. If the target is marked read-only, an approved update temporarily clears only that file attribute and restores it after the attempt; failures remain actionable.

@@ -12,6 +12,19 @@
   Candidate source status: v1.0 RC7 remains the current published release.
   RC8 is being prepared for independent review and guarded certification.
   Final Version 1.0 remains unpublished.
+  RC8 updater now orders RC7, RC8, and final Version 1.0 by complete version
+  identity across the menu, startup, and standalone checks; candidate and final
+  releases with the same numeric base are no longer treated as already current.
+  Both updater paths parse unique top-level literal version declarations
+  without executing candidate content and require the complete candidate
+  identity to match the release tag before replacement. Non-ASCII candidate
+  bytes are rejected before parsing so Windows PowerShell 5.1 source decoding
+  and the AST validator cannot disagree about the source; the main updater
+  also reads the installed script identity back. Comment and string
+  lookalikes cannot spoof the RC identity.
+  Startup stops before adopting new log/config paths when owned-state migration
+  returns an invalid transaction result, reports ACTION_REQUIRED, or has
+  product state UNKNOWN; review the migration evidence before retrying.
   RC8 PostgreSQL password reset now uses the supported PostgreSQL 8.3 client
   against a temporary localhost-only recovery rule, restores and hash-verifies
   the original authentication policy before restart, and verifies the new

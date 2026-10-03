@@ -104,18 +104,10 @@
         @{
             File        = 'TeknoParrot-Manager.ps1'
             RuleName    = 'InjectionRisk.UnsafeEscaping'
-            Line        = 5736
+            Line        = 21360
             Extent      = "`$VersionText -replace '^v', ''"
             Disposition = 'FalsePositive'
             Reasoning   = 'Pattern and replacement are fixed literals; only the searched value is a variable. Not a regex/replacement injection vector.'
-        }
-        @{
-            File        = 'TeknoParrot-Manager.ps1'
-            RuleName    = 'InjectionRisk.UnsafeEscaping'
-            Line        = 5756
-            Extent      = "`$VersionText -replace '^v', ''"
-            Disposition = 'FalsePositive'
-            Reasoning   = 'A second, separate occurrence of the identical construct elsewhere in this file (see line 5736 above). Pattern and replacement are fixed literals; only the searched value is a variable.'
         }
         @{
             File        = 'TeknoParrot-Manager.ps1'
@@ -188,14 +180,6 @@
             Extent      = '[scriptblock]::Create($fn.Extent.Text)'
             Disposition = 'FalsePositive'
             Reasoning   = '$fn.Extent.Text is source text re-parsed out of TeknoParrot-Manager.ps1 itself (the AST of the same trusted, repository-controlled file this diagnostic ships alongside), not external or attacker-supplied input. Dot-sourcing every function definition it finds is the documented, deliberate design (see the comment immediately above this line in the source) so the diagnostic tracks the render pipeline automatically; it does not execute anything the production script itself does not already contain.'
-        }
-        @{
-            File        = 'tools/Invoke-TpmAutoUpdate.ps1'
-            RuleName    = 'InjectionRisk.UnsafeEscaping'
-            Line        = 53
-            Extent      = "`$release.tag_name -replace '^v', ''"
-            Disposition = 'FalsePositive'
-            Reasoning   = 'Pattern and replacement are fixed literals; only the searched value (a GitHub release tag name) is a variable. Not a regex/replacement injection vector.'
         }
         @{
             File        = 'tools/TpmAutoUpdate.Core.psm1'

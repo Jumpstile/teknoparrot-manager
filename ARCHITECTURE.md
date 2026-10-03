@@ -31,6 +31,11 @@ planned move, writes a migration report, refuses destination collisions as
 ambiguous, and never moves TeknoParrot-owned paths. Unattended mode does not
 apply ambiguous migrations. Existing backup trees move under `Backups` without
 replacement. Support collection and log opening use the new runtime roots.
+If the migration result is missing, malformed, or not a valid
+`TPM.TransactionResult.v1`, has outcome `ACTION_REQUIRED`, or has product state
+`UNKNOWN`, startup prints a non-interactive stop message and exits before assigning
+the new log/config paths or entering normal workflows. Review the migration report
+and preserved evidence before retry.
 
 ---
 ## RC8 runtime recovery and visual selection
@@ -2005,10 +2010,11 @@ standalone `tools/Invoke-TpmAutoUpdate.ps1` helper (PR #51, merged) -- see
 `docs/AUTO_UPDATE.md` for the full design and safety model shared by both.
 
 The interactive checker is implemented as plain functions inside `TeknoParrot-Manager.ps1`
-itself (`Get-ManagerUpdateRelease`, `Assert-ManagerUpdateTargetWritable`,
-`New-ManagerUpdateBackup`, `Expand-ManagerUpdateAsset`, `Test-ManagerUpdateExtractedScript`,
-`ConvertTo-ManagerComparableVersion`, `Invoke-CheckForUpdates`) rather than by importing
-`tools/TpmAutoUpdate.Core.psm1` -- this script has no external module dependency anywhere
+itself (`Get-ManagerUpdateRelease`, `Get-ManagerVersionIdentity`,
+`Get-ManagerScriptVersionIdentityFromContent`, `Compare-ManagerVersionText`,
+`Assert-ManagerUpdateTargetWritable`, `New-ManagerUpdateBackup`,
+`Expand-ManagerUpdateAsset`, `Test-ManagerUpdateExtractedScript`,
+`Invoke-CheckForUpdates`) rather than by importing
 else, and this feature deliberately keeps that single-file, self-contained architecture. The
 tradeoff is duplicated logic between the two; both are kept in lockstep deliberately (same
 asset name pattern, same content-validation checks, same read-only pre-check) rather than
@@ -2021,10 +2027,27 @@ Key invariants, each verified empirically while building the standalone tool thi
   checks explicitly, before any backup or download work begins, and refuses with an
   actionable error instead.
 - **Never install unvalidated content.** `Test-ManagerUpdateExtractedScript` rejects an
-  empty file, a file that is itself raw zip bytes (`PK` signature -- would happen if
-  extraction were ever skipped or broken upstream), a file missing the `TeknoParrot
-Manager` marker, or one missing a `$ScriptVersion` assignment, before it ever replaces
-  the live script.
+  empty file, raw zip bytes (`PK` signature), a missing `TeknoParrot Manager` marker,
+  non-ASCII bytes, or a script without a valid, unambiguous top-level version identity
+  before it replaces the live script.
+- **Release identity includes the RC label.** `Compare-ManagerVersionText` orders numeric base
+  components first, then RC numbers numerically, with the final release after every RC of the
+  same base. The menu check, startup check, extracted candidate validation, and installed
+  version readback use that ordering. The main
+  `Get-ManagerScriptVersionIdentityFromContent` and standalone
+  `Get-TpmScriptVersionIdentityFromContent` parsers use `Parser.ParseInput`
+  without executing candidate content. Both accept exactly one direct,
+  unscoped top-level `$ScriptVersion` assignment and at most one corresponding
+  `$ReleaseCandidateLabel` assignment, each with a constant string literal
+  RHS. Parse errors, duplicates, scoped/nested/compound assignments, and
+  nonliteral values fail closed. Before AST parsing, both extracted-candidate
+  validators also reject every byte above `0x7F`, preserving the source
+  interpretation shared by the BOM-less ASCII product and Windows PowerShell
+  5.1. AST parsing prevents comments and string/here-string data from spoofing
+  identity. Each extracted candidate must match its release tag before
+  replacement; the main updater additionally reads installed identity back.
+  This validates static declarations only; it is not full data-flow analysis
+  or a sandbox against indirect runtime mutation.
 - **`Invoke-CheckForUpdates` and `Invoke-StartupUpdateCheck` never call `exit`.**
   Each returns `TPM.TransactionResult.v1`; the top-level dispatch decides whether
   to exit only after validating `Outcome -eq 'SUCCEEDED'`. `NO_OP`, rollback,
@@ -2046,8 +2069,9 @@ Manager` marker, or one missing a `$ScriptVersion` assignment, before it ever re
 Startup update check (v0.99.39, same commit): `Invoke-StartupUpdateCheck`, wired in near the
 top of the config-loading section (SECTION 1), gated on a new `CheckForUpdatesOnStartup`
 config.json setting (default `true`) and never run under `-Unattended`. Shares
-`Get-ManagerUpdateRelease`/`ConvertTo-ManagerComparableVersion`/`Invoke-ManagerUpdateInstall`
-with the menu option -- the only new shared extraction was pulling the actual
+`Get-ManagerUpdateRelease`/`Get-ManagerVersionIdentity`/`Compare-ManagerVersionText`/
+`Invoke-ManagerUpdateInstall` with the menu option; version ordering retains RC identity.
+The only new shared extraction was pulling the actual
 backup/download/extract/validate/replace steps out of `Invoke-CheckForUpdates` into
 `Invoke-ManagerUpdateInstall` so neither caller duplicates them or their confirmation
 prompts (which differ: numbered "what will happen" list for the menu vs. a Y/N/V prompt
