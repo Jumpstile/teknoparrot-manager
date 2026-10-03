@@ -453,6 +453,11 @@ not run games or ReShade shaders; actual in-game results may vary.
   enables/disables displays, changes resolution/refresh/orientation, moves
   windows, or writes game display settings.
 
+  RC8 PostgreSQL restore rollback now drops a database only after TPM verifies
+  that its createdb.exe call succeeded. An existing or concurrently appearing
+  database without that ownership proof is preserved. If the final recovery
+  receipt refresh fails, TPM keeps the recovery evidence as cleanup residue
+  instead of deleting it or advertising a stale receipt path.
 
 -------------------------------------------------------------------------------
   v1.0 RC7  (2026-08-22)  -- published release candidate

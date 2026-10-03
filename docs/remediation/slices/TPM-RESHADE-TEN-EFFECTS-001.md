@@ -10,12 +10,12 @@
 ## 2. Owner report IDs included
 
 - IDs: 1, 9, and 10.
-- Exact handoff requirements: retain safe no-change/Back/cancel behavior; make every catalog effect selectable and deployable through the terminal chooser; keep terminal selection authoritative and reflected by the non-modal preview; preserve the working Before/After/Split/Slider comparison and deterministic preview close behavior.
+- Exact handoff requirements: retain safe no-change/Back/cancel behavior; make every catalog effect selectable and deployable through the terminal chooser; keep terminal selection authoritative and reflected by the non-modal preview; wire the gallery's existing comparison slider to its cached preview while preserving Before/After/Split/Slider modes and deterministic close behavior.
 
 ## 3. Explicit exclusions
 
 - No ReShade runtime binaries or shader source files are bundled. Effects remain live-fetched from allowlisted pinned upstream URLs and validated by exact SHA-256.
-- No shader execution in the preview, game launch, runtime smoke, package build, commit, push, merge, tag, publication, wiki push, or certification.
+- No shader execution in preview, game launch, runtime smoke, package build, merge, tag, publication, wiki push, or certification. Scoped commit/push to PR #321's existing head is authorized only after fresh required source gates and independent exact-diff review.
 - No new parameter editor, profile persistence redesign, network retry, compatibility recommendation, or measured-performance claim.
 
 ## 4. Behavior contract
@@ -24,10 +24,12 @@
 - Expected behavior: retain the five existing profiles and add seven individually selectable beginner-facing profiles, for twelve profiles total and ten pinned shader effects total. Each new effect has exact repository, immutable commit, source-relative file, SHA-256, byte length, MIT license, attribution, include requirements, and approved raw GitHub host/path metadata. The terminal chooser derives its numbered range from the supplied canonical profile list; choosing any number from 1 through 12 selects that canonical profile and synchronizes the preview. Each profile produces a deterministic TPM-owned approximation from the bundled landscape image; preview sliders and view modes remain functional. At the resolver boundary, repeated approved effect IDs normalize to one copy in first-request order, while unknown IDs are rejected; canonical profile definitions remain duplicate-free. Returning from the chooser closes the manager-owned preview…
 - Forbidden regressions: no unpinned URL, unverified effect or include bytes, missing include closure, missing ReShade effect search paths or preset linkage, duplicate emitted effect-stack or target entries, unknown effect acceptance, ignored gallery selector, hard-coded five-profile limit, false shader-execution claim, changed effect ordering, preset injection, or release bundle of ReShade binaries/effect source files. Repeated approved IDs normalize to their first occurrence. Compatibility stays `ADVISORY_UNMEASURED` and `Recommended` remains false.
 
+- Slider/selection boundary: the non-modal gallery exposes a 0-100 comparison TrackBar wired to its guarded change and keyboard handlers. Slider interaction changes only view mode/position; a numbered terminal choice updates the canonical `SelectedProfileId` and the preview follows it, including while Slider mode is active. The gallery does not select a profile directly.
+
 ## 5. Source/function ownership
 
 - Files: `TeknoParrot-Manager.ps1`; `Tests/TeknoParrot-Manager.Tests.ps1`; `scripts/Run-TpmQualityGate.ps1`; `ARCHITECTURE.md`; `LICENSE`; `TeknoParrot-Manager-README.txt`; `README.md`; `TeknoParrot-Manager-CHANGELOG.txt`; `docs/RESHADE-PROFILE-SELECTION-SPECIFICATION-INVENTORY.md`; `docs/RESHADE-PROFILE-SELECTION-INVARIANT-INVENTORY.md`; `docs/RESHADE-DGVOODOO2-AUTODOWNLOAD-SPECIFICATION-INVENTORY.md`; `docs/RESHADE-DGVOODOO2-AUTODOWNLOAD-INVARIANT-INVENTORY.md`; `docs/remediation/PR-321-control-board.md`; `docs/remediation/PR-321-reconciliation.md`; `docs/remediation/slices/PR-321-current-slice.md`.
-- Functions/regions: `Get-TpmReShadeProfiles`; `Get-TpmReShadeEffectCatalog`; `Get-TpmReShadeApprovedEffectFiles`; `Acquire-TpmReShadeApprovedEffect`; `Test-TpmReShadePresetContent`; `Update-TpmReShadeTutorialProgressText`; `Install-TpmReShadeProfileDeployment`; `Invoke-TpmReShadePreviewProfilePixels`; `Show-TpmReShadeProfileGalleryWindow`; `Read-TpmReShadeTerminalProfile`.
+- Functions/regions: `Get-TpmReShadeProfiles`; `Get-TpmReShadeEffectCatalog`; `Get-TpmReShadeApprovedEffectFiles`; `Acquire-TpmReShadeApprovedEffect`; `Test-TpmReShadePresetContent`; `Update-TpmReShadeTutorialProgressText`; `Install-TpmReShadeProfileDeployment`; `Invoke-TpmReShadePreviewProfilePixels`; `New-TpmReShadePreviewPaintHandler`; `Get-TpmReShadePreviewStateValue`; `New-TpmReShadeGalleryEventHandlers`; `Flush-TpmReShadeGallerySlider`; `Show-TpmReShadeProfileGalleryWindow`; `Sync-TpmReShadeGallerySelection`; `Close-TpmReShadeProfileGallerySession`; `Read-TpmReShadeTerminalProfile`.
 - Gate freshness: `scripts/Run-TpmQualityGate.ps1` includes both profile-selection inventories and the adjacent installer inventory pair in `$freshnessPaths`; `requires the TPM remediation and prompt-slice artifacts` verifies their presence and freshness-list membership.
 - Upstream provenance for the seven added SweetFX effects: `CeeJayDK/SweetFX`, commit `16d1a42247cb5baaf660120ee35c9a33bb94649c`, repository `LICENSE` MIT, copyright `CeeJayDK`.
   - `Shaders/SweetFX/Cartoon.fx`: 1,378 bytes; SHA-256 `5D90E1C72318A28255D268FF3AC3FCB64D1E9469F5CA1334A50FB7D1B1A005F4`.
@@ -51,7 +53,7 @@ Process deviation: the two required inventories were identified after implementa
 - Clean-target deployment: table-driven proof deploys all twelve canonical profiles with no pre-existing shader files. For each profile, exercise transactional staging and verify the complete effect/include closure at expected target paths, canonical `[GENERAL] EffectSearchPaths`, `PresetPath`, and `StartupPresetPath`, and ownership entries for every promoted file. Original must deploy no shader assets.
 - Preset conformance: all twelve generated presets carry canonical `Techniques` and `TechniqueSorting`; sorting divergence is rejected, and Original carries both lists empty.
 - Shared include boundary: identical same-path includes deduplicate once; mismatched hash/byte-length identities fail before target promotion and leave target files and ownership unchanged.
-- Terminal/preview: choosing profile number 12 selects Vignette; refresh observes the updated `SelectedProfileId` at invocation and the gallery renders from that terminal-selected canonical profile. Each added profile renders a deterministic output distinct from the baseline; slider extremes and terminal-to-preview synchronization remain correct; preview teardown closes the owned window.
+- Terminal/preview: choosing profile number 12 selects Vignette; refresh observes the updated `SelectedProfileId` at invocation and the gallery renders from that terminal-selected canonical profile. The visible TrackBar changes Slider position and invalidates the cached preview; terminal selection continues to update the profile during slider mode. Each added profile renders a deterministic output distinct from the baseline; slider extremes and terminal-to-preview synchronization remain correct; preview teardown closes the owned window.
 - Regression suite: full main Pester suite under Pester 5.7.1 in PowerShell 7 and Windows PowerShell 5.1; SupportPackage Pester suite under Pester 5.7.1.
 - Static and procedure gates: PowerShell parse/ASCII, PSScriptAnalyzer, InjectionHunter, `git diff --check`, and `TPM-RESHADE-001`, `TPM-EVIDENCE-001`, `TPM-OWNER-002`, `TPM-OWNER-003`, `TPM-TRACE-001`, and `TPM-AUTH-001`.
 
@@ -81,10 +83,10 @@ Stop when the ten-effect catalog and twelve-profile chooser are entirely backed 
 
 ## 12. Forbidden actions
 
-No bundled third-party shaders or ReShade binaries, game launch, owner runtime mutation, package creation, commit, push, merge, tag, publication, wiki update, certification, or expansion beyond this exact ten-effect/twelve-profile contract.
+- No bundled third-party shaders or ReShade binaries, game launch, owner runtime mutation, package creation, merge, tag, publication, wiki update, certification, or expansion beyond this exact ten-effect/twelve-profile contract. Scoped commit/push to PR #321's existing head is authorized only after fresh gates and independent exact-diff review.
 
 ## 13. Commit/package authorization status
 
-- Commit authorized: No; explicit authorization required.
+- Commit authorized: Yes, scoped to PR #321's existing head after fresh required source gates and independent exact-diff review.
 - Package authorized: No.
 - Release/certification authorized: No.

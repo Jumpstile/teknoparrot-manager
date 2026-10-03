@@ -15592,23 +15592,6 @@ Describe "ReShade preview renderer and cache" {
         $p=Get-TpmReShadeProfile -ProfileId Vivid;(Show-TpmReShadePreviewWindow -ProfileDefinition $p).Reason|Should -Be 'PREVIEW_WINDOW_NOT_REQUESTED'
         $base=Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r';(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('b') -ReferenceSha256 'r')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 's')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r' -RendererVersion '1')|Should -Not -Be $base
     }
-    It "keeps slider interaction on cached paint and updates synchronously" {
-        $source = $script:ProductionSource
-        $paintStart = $source.IndexOf('function New-TpmReShadePreviewPaintHandler')
-        $paintEnd = $source.IndexOf('function New-TpmReShadePreviewArtifact', $paintStart)
-        $paint = $source.Substring($paintStart, $paintEnd - $paintStart)
-        $paint | Should -Match 'Get-TpmReShadePreviewProcessedBitmap'
-        $paint | Should -Not -Match '\$cache\.Processed\[\[string\]\$selectedProfile\.ProfileId\]'
-        $paint | Should -Not -Match 'New-TpmReShadePreviewBitmapFromCache'
-        $paint | Should -Not -Match '\.Image\s*='
-        $source | Should -Match 'slider-keyboard-handler'
-        $source | Should -Match 'Add_KeyUp'
-        $source | Should -Match 'Remove_KeyUp'
-        $source | Should -Match ([regex]::Escape("`$State['SliderPosition'] = `$position"))
-        $source | Should -Match ([regex]::Escape("`$State['PendingSliderPosition'] = `$null"))
-        $source | Should -Match '\$State\[''Picture''\]\.Invalidate\(\)'
-        $source | Should -Match 'Remove_Paint'
-    }
     It "returns the replacement gallery session so the caller owns teardown after R" {
         $source = $script:ProductionSource
         $source | Should -Match 'PreviewSession = \$PreviewSession'
@@ -16140,12 +16123,28 @@ Describe "ReShade trusted profile restore" {
         }
     }
     It "executes gallery callbacks safely for initialization and invalid view or slider events" {
+        $sliderTimer = [pscustomobject]@{ Enabled = $false; StartCount = 0; StopCount = 0 }
+        Add-Member -InputObject $sliderTimer -MemberType ScriptMethod -Name Start -Value {
+            $this.Enabled = $true
+            $this.StartCount = [int]$this.StartCount + 1
+        }
+        Add-Member -InputObject $sliderTimer -MemberType ScriptMethod -Name Stop -Value {
+            $this.Enabled = $false
+            $this.StopCount = [int]$this.StopCount + 1
+        }
+        $picture = [pscustomobject]@{ InvalidationCount = 0 }
+        Add-Member -InputObject $picture -MemberType ScriptMethod -Name Invalidate -Value {
+            $this.InvalidationCount = [int]$this.InvalidationCount + 1
+        }
         $state = [hashtable]::Synchronized(@{
             Initialized = $false
             PreviewEnabled = $true
             Closed = $false
             ViewMode = 'Split'
             SliderPosition = 50
+            PendingSliderPosition = $null
+            SliderTimer = $sliderTimer
+            Picture = $picture
             SelectedProfileId = 'CleanSharp'
             Refresh = { return $true }
         })
@@ -16163,12 +16162,27 @@ Describe "ReShade trusted profile restore" {
         }
         { & $handlers.Slider ([pscustomobject]@{ Value = 75 }) $null } | Should -Not -Throw
         $state['ViewMode'] | Should -Be 'Slider'
-        $state['SliderPosition'] | Should -Be 75
+        $state['SliderPosition'] | Should -Be 50
+        $state['PendingSliderPosition'] | Should -Be 75
+        $sliderTimer.StartCount | Should -Be 1
+        { & $handlers.Slider ([pscustomobject]@{ Value = 65 }) $null } | Should -Not -Throw
+        $state['PendingSliderPosition'] | Should -Be 65
+        $sliderTimer.StartCount | Should -Be 1
+        (Flush-TpmReShadeGallerySlider -State $state) | Should -BeTrue
+        $state['SliderPosition'] | Should -Be 65
         $state['PendingSliderPosition'] | Should -BeNullOrEmpty
+        $sliderTimer.StopCount | Should -Be 1
+        $picture.InvalidationCount | Should -Be 1
+        $state['SelectedProfileId'] | Should -Be 'CleanSharp'
         { & $handlers.Slider ([pscustomobject]@{ Value = -20 }) $null } | Should -Not -Throw
+        (Flush-TpmReShadeGallerySlider -State $state) | Should -BeTrue
         $state['SliderPosition'] | Should -Be 0
         { & $handlers.Slider ([pscustomobject]@{ Value = 140 }) $null } | Should -Not -Throw
+        (Flush-TpmReShadeGallerySlider -State $state) | Should -BeTrue
         $state['SliderPosition'] | Should -Be 100
+        { & $handlers.KeyUp ([pscustomobject]@{ Value = 33 }) $null } | Should -Not -Throw
+        $state['SliderPosition'] | Should -Be 33
+        $state['PendingSliderPosition'] | Should -BeNullOrEmpty
 
         $state['PreviewEnabled'] = $true
         $state['Closed'] = $false
@@ -16182,6 +16196,25 @@ Describe "ReShade trusted profile restore" {
         $state['PreviewEnabled'] | Should -BeFalse
         $state['PreviewFailureStage'] | Should -Be 'slider-value-changed-handler'
     }
+
+
+    It "reads preview state from synchronized dictionaries and object properties" {
+        $state = [hashtable]::Synchronized(@{
+            Initialized = $true
+            ViewMode = 'Slider'
+            SliderPosition = 30
+            SelectedProfileId = 'Vignette'
+        })
+        (Get-TpmReShadePreviewStateValue -State $state -Name 'Initialized') | Should -BeTrue
+        (Get-TpmReShadePreviewStateValue -State $state -Name 'ViewMode') | Should -Be 'Slider'
+        (Get-TpmReShadePreviewStateValue -State $state -Name 'SliderPosition') | Should -Be 30
+        (Get-TpmReShadePreviewStateValue -State $state -Name 'SelectedProfileId') | Should -Be 'Vignette'
+
+        $legacyState = [pscustomobject]@{ ViewMode = 'After'; SliderPosition = 75 }
+        (Get-TpmReShadePreviewStateValue -State $legacyState -Name 'ViewMode') | Should -Be 'After'
+        (Get-TpmReShadePreviewStateValue -State $legacyState -Name 'SliderPosition') | Should -Be 75
+    }
+
     It "disposes the gallery picture image idempotently" {
         $image = [pscustomobject]@{ DisposeCount = 0 }
         Add-Member -InputObject $image -MemberType ScriptMethod -Name Dispose -Value {
@@ -19742,12 +19775,19 @@ Describe 'S1-DB-RESTORE PostgreSQL 8.3 transaction' -Tag 'S1-DB-RESTORE' {
                 Calls = New-Object System.Collections.Generic.List[object]
                 ToolVersion = '8.3.23'
                 FailList = $false
+                CreateCollision = $false
                 FailDump = $false
                 RestoreFailures = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
                 UsedRestoreFailures = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
                 DropCounts = @{}
+                RejectedDropCalls = New-Object System.Collections.ArrayList
+                StateQueryCounts = @{}
+                AppearOnStateQuery = @{}
+                UnknownOnStateQuery = @{}
+                RestoreFailureTriggered = $false
                 FailRollbackDrop = $false
                 FailRollbackRestore = $false
+                FailRollbackDropDatabase = ''
             }
             foreach ($db in $Databases) { $state.Exists[$db] = $true }
             return [pscustomobject]@{
@@ -19801,15 +19841,24 @@ Describe 'S1-DB-RESTORE PostgreSQL 8.3 transaction' -Tag 'S1-DB-RESTORE' {
                 return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
             }
             if ($ToolName -eq 'dropdb.exe') {
+                if ($Arguments -contains '--if-exists') {
+                    [void]$state.RejectedDropCalls.Add([pscustomobject]@{ Database = $db; Arguments = @($Arguments) })
+                    return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 2 -Output 'unrecognized option --if-exists (PostgreSQL 8.3 fixture)'
+                }
                 $count = if ($state.DropCounts.ContainsKey($db)) { [int]$state.DropCounts[$db] + 1 } else { 1 }
                 $state.DropCounts[$db] = $count
-                if ($state.FailRollbackDrop -and $count -gt 1) {
+                if ((($state.FailRollbackDrop -and $state.RestoreFailureTriggered) -or
+                     ($state.RestoreFailureTriggered -and $state.FailRollbackDropDatabase -and $db -ieq $state.FailRollbackDropDatabase))) {
                     return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 8 -Output 'rollback drop failed'
                 }
                 $state.Exists[$db] = $false
                 return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
             }
             if ($ToolName -eq 'createdb.exe') {
+                if ($state.CreateCollision) {
+                    $state.Exists[$db] = $true
+                    return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 4 -Output 'database already exists'
+                }
                 $state.Exists[$db] = $true
                 return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0
             }
@@ -19821,6 +19870,7 @@ Describe 'S1-DB-RESTORE PostgreSQL 8.3 transaction' -Tag 'S1-DB-RESTORE' {
                     return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 6 -Output 'rollback restore failed'
                 }
                 if ($state.RestoreFailures.Contains($db) -and $state.UsedRestoreFailures.Add($db)) {
+                    $state.RestoreFailureTriggered = $true
                     return New-S1DbFakeCommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 5 -Output 'restore failed'
                 }
                 $state.Exists[$db] = $true
@@ -19843,9 +19893,41 @@ Describe 'S1-DB-RESTORE PostgreSQL 8.3 transaction' -Tag 'S1-DB-RESTORE' {
             }
             Mock Get-PostgresDatabaseState {
                 param([string]$DbName, [string]$SuperPasswordPlain)
+                $state = $script:S1DbFakeState
+                $count = if ($state.StateQueryCounts.ContainsKey($DbName)) { [int]$state.StateQueryCounts[$DbName] + 1 } else { 1 }
+                $state.StateQueryCounts[$DbName] = $count
+                if ($state.AppearOnStateQuery.ContainsKey($DbName) -and $count -ge [int]$state.AppearOnStateQuery[$DbName]) {
+                    $state.Exists[$DbName] = $true
+                }
+                if ($state.UnknownOnStateQuery.ContainsKey($DbName) -and $count -eq [int]$state.UnknownOnStateQuery[$DbName]) {
+                    return [pscustomobject]@{ Exists = $null; Verified = $false }
+                }
                 $exists = $false
-                if ($script:S1DbFakeState.Exists.ContainsKey($DbName)) { $exists = [bool]$script:S1DbFakeState.Exists[$DbName] }
+                if ($state.Exists.ContainsKey($DbName)) { $exists = [bool]$state.Exists[$DbName] }
                 [pscustomobject]@{ Exists = $exists; Verified = $true }
+            }
+        }
+        function New-S1DbSetupFixture {
+            param([Parameter(Mandatory)]$Fixture, [string]$GameName = 'PostgreSQL Setup')
+            $gameRoot = Join-Path $Fixture.Root 'Game'
+            $backupDir = Join-Path $gameRoot 'pg_backup'
+            $gameExe = Join-Path $gameRoot 'game.exe'
+            $profiles = Join-Path $Fixture.Root 'UserProfiles'
+            New-Item -ItemType Directory -Path $backupDir, $profiles -Force | Out-Null
+            New-Item -ItemType File -Path $gameExe -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $backupDir '0001.backup') -Value 'bundled' -NoNewline
+            $xml = '<GameProfile><GameName>' + $GameName + '</GameName><GamePath>' + $gameExe + '</GamePath><ConfigValues>' +
+                '<FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation>' +
+                '<FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldValue></FieldValue></FieldInformation>' +
+                '<FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Path</FieldName><FieldValue></FieldValue></FieldInformation>' +
+                '<FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Address</FieldName><FieldValue></FieldValue></FieldInformation>' +
+                '<FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Port</FieldName><FieldValue></FieldValue></FieldInformation>' +
+                '<FieldInformation><CategoryName>Postgres</CategoryName><FieldName>User</FieldName><FieldValue></FieldValue></FieldInformation>' +
+                '</ConfigValues></GameProfile>'
+            Set-Content -LiteralPath (Join-Path $profiles 'GameProfile.xml') -Value $xml
+            return [pscustomobject]@{
+                Profiles = $profiles
+                Recovery = [pscustomobject]@{ Path = $Fixture.Evidence; ConfigBackups = @(); Verified = $true; ProfileBackups = @() }
             }
         }
     }
@@ -19924,6 +20006,36 @@ Describe 'S1-DB-RESTORE PostgreSQL 8.3 transaction' -Tag 'S1-DB-RESTORE' {
         $script:S1DbFakeState.Exists['GameDB02'] | Should -BeTrue
         { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
     }
+    It 'does not drop a database that appears after absent-state preflight when createdb fails' {
+        $f = New-S1DbRestoreFixture -Name 'create-collision' -Databases @('GameDB01')
+        $f.State.Exists['GameDB01'] = $false
+        $f.State.CreateCollision = $true
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'ACTION_REQUIRED'
+        $result.ProductState | Should -Be 'UNKNOWN'
+        $result.Mutation.UnknownItems | Should -Contain 'GameDB01'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -eq 'dropdb.exe' }).Count | Should -Be 0
+        $script:S1DbFakeState.Exists['GameDB01'] | Should -BeTrue
+        $result.DatabaseReceipts[0].CreateOwnedForRollback | Should -BeFalse
+        $result.DatabaseReceipts[0].RollbackAttempted | Should -BeFalse
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+    It 'does not drop an appeared database while restoring a previously present database' {
+        $f = New-S1DbRestoreFixture -Name 'rollback-create-collision' -Databases @('GameDB01')
+        $f.State.CreateCollision = $true
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'ACTION_REQUIRED'
+        $result.ProductState | Should -Be 'UNKNOWN'
+        $result.Mutation.UnknownItems | Should -Contain 'GameDB01'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Mutation -and $_.Tool -eq 'dropdb.exe' }).Count | Should -Be 1
+        $script:S1DbFakeState.Exists['GameDB01'] | Should -BeTrue
+        $result.DatabaseReceipts[0].CreateOwnedForRollback | Should -BeFalse
+        $result.DatabaseReceipts[0].RollbackAttempted | Should -BeTrue
+        $result.DatabaseReceipts[0].RollbackDropReceipt.DropAttempted | Should -BeFalse
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
 
     It 'rolls back a failed restore after drop and verifies the original database' {
         $f = New-S1DbRestoreFixture -Name 'rollback'
@@ -19934,6 +20046,8 @@ Describe 'S1-DB-RESTORE PostgreSQL 8.3 transaction' -Tag 'S1-DB-RESTORE' {
         $result.ProductState | Should -Be 'UNCHANGED'
         $result.Rollback.Verified | Should -BeTrue
         @($result.Rollback.Items) | Should -Contain 'GameDB01'
+        $script:S1DbFakeState.DropCounts['GameDB01'] | Should -Be 2
+        $script:S1DbFakeState.RejectedDropCalls.Count | Should -Be 0
         $script:S1DbFakeState.Exists['GameDB01'] | Should -BeTrue
         { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
     }
@@ -19960,6 +20074,89 @@ Describe 'S1-DB-RESTORE PostgreSQL 8.3 transaction' -Tag 'S1-DB-RESTORE' {
         $result.Rollback.Verified | Should -BeFalse
         $result.Cleanup.ResiduePresent | Should -BeTrue
         Test-Path -LiteralPath $result.Cleanup.ResiduePaths[0] -PathType Container | Should -BeTrue
+        $result.TechnicalDetails.ReceiptPath | Should -Not -BeNullOrEmpty
+        Test-Path -LiteralPath $result.TechnicalDetails.ReceiptPath -PathType Leaf | Should -BeTrue
+        $savedReceipts = @(Get-Content -LiteralPath $result.TechnicalDetails.ReceiptPath -Raw | ConvertFrom-Json)
+        $savedReceipts[0].DropReceipt.DropAttempted | Should -BeTrue
+        $savedReceipts[0].RollbackDropReceipt.Verified | Should -BeFalse
+        ($savedReceipts | ConvertTo-Json -Depth 12) | Should -Not -Match 'fixture-password'
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'persists rollback updates and the failing receipt for a multi-item ACTION_REQUIRED restore' {
+        $f = New-S1DbRestoreFixture -Name 'multi-item-rollback-evidence' -Databases @('GameDB03','GameDB01','GameDB02')
+        [void]$f.State.RestoreFailures.Add('GameDB02')
+        $f.State.FailRollbackDropDatabase = 'GameDB02'
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'ACTION_REQUIRED'
+        $result.TechnicalDetails.ReceiptPath | Should -Not -BeNullOrEmpty
+        Test-Path -LiteralPath $result.TechnicalDetails.ReceiptPath -PathType Leaf | Should -BeTrue
+        $savedReceipts = [object[]](Get-Content -LiteralPath $result.TechnicalDetails.ReceiptPath -Raw | ConvertFrom-Json)
+        $savedReceipts.Count | Should -Be 2
+        $priorReceipt = @($savedReceipts | Where-Object { $_.Database -eq 'GameDB01' })
+        $failedReceipt = @($savedReceipts | Where-Object { $_.Database -eq 'GameDB02' })
+        $priorReceipt.Count | Should -Be 1
+        $failedReceipt.Count | Should -Be 1
+        $priorReceipt[0].RollbackAttempted | Should -BeTrue
+        $priorReceipt[0].RollbackVerified | Should -BeTrue
+        $priorReceipt[0].RollbackDropReceipt.Verified | Should -BeTrue
+        $failedReceipt[0].RollbackDropReceipt.Verified | Should -BeFalse
+        $failedReceipt[0].RollbackAttempted | Should -BeTrue
+        $failedReceipt[0].RollbackVerified | Should -BeFalse
+        ($savedReceipts | ConvertTo-Json -Depth 12) | Should -Not -Match 'fixture-password'
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+    It 'preserves recovery evidence when the post-rollback receipt refresh fails' {
+        $f = New-S1DbRestoreFixture -Name 'receipt-refresh-failure' -Databases @('GameDB01','GameDB02')
+        [void]$f.State.RestoreFailures.Add('GameDB02')
+        $f.State | Add-Member -NotePropertyName ReceiptWriteCount -NotePropertyValue 0
+        Install-S1DbRestoreMocks -Fixture $f
+        Mock Write-PostgresRestoreReceiptFile {
+            param([string]$EvidenceRoot, [object[]]$Receipts)
+            $script:S1DbFakeState.ReceiptWriteCount++
+            if ($script:S1DbFakeState.ReceiptWriteCount -eq 1) {
+                $path = Join-Path $EvidenceRoot 'database-receipts.json'
+                [System.IO.File]::WriteAllText($path, '[]', (New-Object System.Text.UTF8Encoding($false)))
+                return $path
+            }
+            throw 'forced receipt refresh failure'
+        }
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'CLEANUP_RESIDUE'
+        $result.UnderlyingOutcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $result.Rollback.Verified | Should -BeTrue
+        $result.Cleanup.Completed | Should -BeFalse
+        $result.Cleanup.ResiduePresent | Should -BeTrue
+        Test-Path -LiteralPath $result.Cleanup.ResiduePaths[0] -PathType Container | Should -BeTrue
+        $result.TechnicalDetails.ReceiptError | Should -Match 'forced receipt refresh failure'
+        $result.TechnicalDetails.ReceiptPath | Should -BeNullOrEmpty
+        $staleReceiptPath = Join-Path $result.Cleanup.ResiduePaths[0] 'database-receipts.json'
+        Test-Path -LiteralPath $staleReceiptPath -PathType Leaf | Should -BeTrue
+        (Get-Content -LiteralPath $staleReceiptPath -Raw).Trim() | Should -Be '[]'
+        $script:S1DbFakeState.ReceiptWriteCount | Should -Be 2
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    It 'marks a previously restored database unknown when its rollback fails' {
+        $f = New-S1DbRestoreFixture -Name 'multi-item-prior-rollback-unknown' -Databases @('GameDB03','GameDB01','GameDB02')
+        [void]$f.State.RestoreFailures.Add('GameDB02')
+        $f.State.FailRollbackDropDatabase = 'GameDB01'
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresRestoreTransaction -BackupFiles $f.Files -SelectedBackupRoot $f.BackupRoot -EvidenceRoot $f.Evidence -SuperPasswordPlain 'fixture-password'
+        $result.Outcome | Should -Be 'ACTION_REQUIRED'
+        $result.ProductState | Should -Be 'UNKNOWN'
+        @($result.Mutation.CompletedItems) | Should -Not -Contain 'GameDB01'
+        @($result.Mutation.UnknownItems) | Should -Contain 'GameDB01'
+        $savedReceipts = [object[]](Get-Content -LiteralPath $result.TechnicalDetails.ReceiptPath -Raw | ConvertFrom-Json)
+        $priorReceipt = @($savedReceipts | Where-Object { $_.Database -eq 'GameDB01' })
+        $failedReceipt = @($savedReceipts | Where-Object { $_.Database -eq 'GameDB02' })
+        $priorReceipt.Count | Should -Be 1
+        $failedReceipt.Count | Should -Be 1
+        $priorReceipt[0].RollbackAttempted | Should -BeTrue
+        $priorReceipt[0].RollbackVerified | Should -BeFalse
+        $failedReceipt[0].RollbackAttempted | Should -BeTrue
+        $failedReceipt[0].RollbackVerified | Should -BeTrue
         { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
     }
 
@@ -20010,6 +20207,11 @@ Describe 'S1-DB-RESTORE PostgreSQL 8.3 transaction' -Tag 'S1-DB-RESTORE' {
         $result.TransactionResult.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
         $result.TransactionResult.ProductState | Should -Be 'UNCHANGED'
         $script:S1DbFakeState.Exists['GameDB01'] | Should -BeFalse
+        $result.TransactionResult.TechnicalDetails.DatabaseCreationReceipts.Count | Should -Be 1
+        $result.TransactionResult.TechnicalDetails.DatabaseCreationReceipts[0].Commands.Count | Should -BeGreaterThan 0
+        $result.TransactionResult.TechnicalDetails.DatabaseRollback.DatabaseReceipts.Count | Should -Be 1
+        $result.TransactionResult.TechnicalDetails.DatabaseRollback.DatabaseReceipts[0].Verified | Should -BeTrue
+        ($result.TransactionResult.TechnicalDetails | ConvertTo-Json -Depth 12) | Should -Not -Match 'fixture-password'
         { Assert-TpmTransactionResult -Result $result.TransactionResult } | Should -Not -Throw
         @($script:pgProfileSetupProgress | Where-Object { $_.Label -eq 'PostgreSQL profile setup' -and -not $_.Complete -and $_.Total -eq 1 }).Count | Should -Be 1
         @($script:pgProfileSetupProgress | Where-Object { $_.Label -eq 'PostgreSQL profile setup' -and $_.Complete -and $_.Current -eq 1 }).Count | Should -Be 1
@@ -20019,8 +20221,134 @@ Describe 'S1-DB-RESTORE PostgreSQL 8.3 transaction' -Tag 'S1-DB-RESTORE' {
             @($script:pgProfileSetupProgress | Where-Object { $_.Label -eq $label -and -not $_.Complete -and $_.Total -eq 1 }).Count | Should -Be 1
             @($script:pgProfileSetupProgress | Where-Object { $_.Label -eq $label -and $_.Complete -and $_.Current -eq 1 }).Count | Should -Be 1
         }
-        @($script:pgProfileSetupProgress | Where-Object { $_.Label -eq 'PostgreSQL database rollback' -and -not $_.Complete -and $_.Total -eq 1 }).Count | Should -Be 1
-        @($script:pgProfileSetupProgress | Where-Object { $_.Label -eq 'PostgreSQL database rollback' -and $_.Complete -and $_.Current -eq 1 }).Count | Should -Be 1
+        $script:S1DbFakeState.DropCounts['GameDB01'] | Should -Be 1
+        $script:S1DbFakeState.RejectedDropCalls.Count | Should -Be 0
+    }
+    It 'does not drop a database when setup creation fails before its mutation boundary' {
+        $f = New-S1DbRestoreFixture -Name 'setup-before-create' -Databases @('GameDB01')
+        $f.State.Exists['GameDB01'] = $false
+        $f.State.FailList = $true
+        $setup = New-S1DbSetupFixture -Fixture $f
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresGameSetup -UserProfilesDir $setup.Profiles -SuperPasswordPlain 'fixture-password' -RecoveryBackup $setup.Recovery
+        $result.TransactionResult.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        $result.TransactionResult.ProductState | Should -Be 'UNCHANGED'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Tool -eq 'dropdb.exe' -and $_.Mutation }).Count | Should -Be 0
+        { Assert-TpmTransactionResult -Result $result.TransactionResult } | Should -Not -Throw
+    }
+    It 'does not drop a late database after createdb reports a collision' {
+        $f = New-S1DbRestoreFixture -Name 'setup-create-collision' -Databases @('GameDB01')
+        $f.State.Exists['GameDB01'] = $false
+        $f.State.CreateCollision = $true
+        $setup = New-S1DbSetupFixture -Fixture $f
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresGameSetup -UserProfilesDir $setup.Profiles -SuperPasswordPlain 'fixture-password' -RecoveryBackup $setup.Recovery
+        $creation = $result.TransactionResult.TechnicalDetails.DatabaseCreation
+        $result.TransactionResult.Outcome | Should -Be 'ACTION_REQUIRED'
+        $result.TransactionResult.ProductState | Should -Be 'UNKNOWN'
+        $creation.MutationAttempted | Should -BeTrue
+        $creation.DatabaseMayExist | Should -BeFalse
+        $creation.PostMutationState.Verified | Should -BeTrue
+        $creation.PostMutationState.Exists | Should -BeTrue
+        @($creation.Commands | Where-Object { $_.Tool -eq 'createdb.exe' -and -not $_.Succeeded }).Count | Should -Be 1
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Tool -eq 'dropdb.exe' -and $_.Mutation }).Count | Should -Be 0
+        ($creation | ConvertTo-Json -Depth 8) | Should -Not -Match 'fixture-password'
+        { Assert-TpmTransactionResult -Result $result.TransactionResult } | Should -Not -Throw
+    }
+
+    It 'preserves a database that appears after setup preflight and returns unknown state' {
+        $f = New-S1DbRestoreFixture -Name 'setup-late-database' -Databases @('GameDB01')
+        $f.State.Exists['GameDB01'] = $false
+        $f.State.AppearOnStateQuery['GameDB01'] = 2
+        $setup = New-S1DbSetupFixture -Fixture $f
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresGameSetup -UserProfilesDir $setup.Profiles -SuperPasswordPlain 'fixture-password' -RecoveryBackup $setup.Recovery
+        $result.TransactionResult.Outcome | Should -Be 'ACTION_REQUIRED'
+        $result.TransactionResult.ProductState | Should -Be 'UNKNOWN'
+        $f.State.Exists['GameDB01'] | Should -BeTrue
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Tool -eq 'dropdb.exe' }).Count | Should -Be 0
+        { Assert-TpmTransactionResult -Result $result.TransactionResult } | Should -Not -Throw
+    }
+
+    It 'returns unknown without dropping when setup mutation-boundary state is unverified' {
+        $f = New-S1DbRestoreFixture -Name 'setup-unknown-boundary' -Databases @('GameDB01')
+        $f.State.Exists['GameDB01'] = $false
+        $f.State.UnknownOnStateQuery['GameDB01'] = 2
+        $setup = New-S1DbSetupFixture -Fixture $f
+        Install-S1DbRestoreMocks -Fixture $f
+        $result = Invoke-PostgresGameSetup -UserProfilesDir $setup.Profiles -SuperPasswordPlain 'fixture-password' -RecoveryBackup $setup.Recovery
+        $result.TransactionResult.Outcome | Should -Be 'ACTION_REQUIRED'
+        $result.TransactionResult.ProductState | Should -Be 'UNKNOWN'
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Tool -eq 'dropdb.exe' }).Count | Should -Be 0
+        { Assert-TpmTransactionResult -Result $result.TransactionResult } | Should -Not -Throw
+    }
+
+    It 'rolls back a post-create setup restore failure exactly once with receipts' {
+        $f = New-S1DbRestoreFixture -Name 'setup-post-create-failure' -Databases @('GameDB01')
+        $f.State.Exists['GameDB01'] = $false
+        [void]$f.State.RestoreFailures.Add('GameDB01')
+        $setup = New-S1DbSetupFixture -Fixture $f
+        Install-S1DbRestoreMocks -Fixture $f
+        Mock Write-Log {}
+        $result = Invoke-PostgresGameSetup -UserProfilesDir $setup.Profiles -SuperPasswordPlain 'fixture-password' -RecoveryBackup $setup.Recovery
+        $result.TransactionResult.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        $result.TransactionResult.ProductState | Should -Be 'UNCHANGED'
+        $f.State.Exists['GameDB01'] | Should -BeFalse
+        $f.State.DropCounts['GameDB01'] | Should -Be 1
+        $f.State.RejectedDropCalls.Count | Should -Be 0
+        $result.TransactionResult.TechnicalDetails.DatabaseCreation.MutationAttempted | Should -BeTrue
+        $result.TransactionResult.TechnicalDetails.DatabaseCreation.DatabaseMayExist | Should -BeTrue
+        $result.TransactionResult.TechnicalDetails.DatabaseCreation.Commands.Count | Should -BeGreaterThan 0
+        $result.TransactionResult.Rollback.Verified | Should -BeTrue
+        { Assert-TpmTransactionResult -Result $result.TransactionResult } | Should -Not -Throw
+    }
+
+    It 'does not retry a failed setup rollback and preserves unknown state' {
+        $f = New-S1DbRestoreFixture -Name 'setup-rollback-failure' -Databases @('GameDB01')
+        $f.State.Exists['GameDB01'] = $false
+        [void]$f.State.RestoreFailures.Add('GameDB01')
+        $f.State.FailRollbackDrop = $true
+        $setup = New-S1DbSetupFixture -Fixture $f
+        Install-S1DbRestoreMocks -Fixture $f
+        Mock Write-Log {}
+        $result = Invoke-PostgresGameSetup -UserProfilesDir $setup.Profiles -SuperPasswordPlain 'fixture-password' -RecoveryBackup $setup.Recovery
+        $result.TransactionResult.Outcome | Should -Be 'ACTION_REQUIRED'
+        $result.TransactionResult.ProductState | Should -Be 'UNKNOWN'
+        $f.State.Exists['GameDB01'] | Should -BeTrue
+        $f.State.DropCounts['GameDB01'] | Should -Be 1
+        $f.State.RejectedDropCalls.Count | Should -Be 0
+        $result.TransactionResult.Rollback.Verified | Should -BeFalse
+        { Assert-TpmTransactionResult -Result $result.TransactionResult } | Should -Not -Throw
+    }
+
+    It 'preserves an existing PostgreSQL database during setup' {
+        $f = New-S1DbRestoreFixture -Name 'setup-existing-database' -Databases @('GameDB01')
+        $setup = New-S1DbSetupFixture -Fixture $f
+        Install-S1DbRestoreMocks -Fixture $f
+        Mock Write-Log {}
+        $result = Invoke-PostgresGameSetup -UserProfilesDir $setup.Profiles -SuperPasswordPlain 'fixture-password' -RecoveryBackup $setup.Recovery
+        $result.TransactionResult.Outcome | Should -Be 'SUCCEEDED'
+        $f.State.Exists['GameDB01'] | Should -BeTrue
+        @($script:S1DbFakeState.Calls | Where-Object { $_.Tool -eq 'dropdb.exe' }).Count | Should -Be 0
+        { Assert-TpmTransactionResult -Result $result.TransactionResult } | Should -Not -Throw
+    }
+
+    It 'returns redacted command receipts after successful setup database creation' {
+        $f = New-S1DbRestoreFixture -Name 'setup-creation-receipts' -Databases @('GameDB01')
+        $f.State.Exists['GameDB01'] = $false
+        $setup = New-S1DbSetupFixture -Fixture $f
+        Install-S1DbRestoreMocks -Fixture $f
+        Mock Write-Log {}
+
+        $result = Invoke-PostgresGameSetup -UserProfilesDir $setup.Profiles -SuperPasswordPlain 'fixture-password' -RecoveryBackup $setup.Recovery
+
+        $result.TransactionResult.Outcome | Should -Be 'SUCCEEDED'
+        $f.State.Exists['GameDB01'] | Should -BeTrue
+        $receipts = @($result.TransactionResult.TechnicalDetails.DatabaseCreationReceipts)
+        $receipts.Count | Should -Be 1
+        @($receipts[0].Commands | Where-Object { $_.Tool -eq 'createdb.exe' -and $_.Succeeded }).Count | Should -Be 1
+        ($result.TransactionResult.TechnicalDetails | ConvertTo-Json -Depth 12) | Should -Not -Match 'fixture-password'
+        { Assert-TpmTransactionResult -Result $result.TransactionResult } | Should -Not -Throw
     }
     It 'reports progress through PostgreSQL profile update and final verification' {
         $f = New-S1DbRestoreFixture -Name 'profile-progress' -Databases @('GameDB01')

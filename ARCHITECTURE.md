@@ -261,6 +261,20 @@ Targets are then rechecked immediately before the mutation boundary. Database
 items are sorted deterministically, each receipt records command exits,
 pre-state, changed state, final verification, and rollback status, and the
 engine stops starting new restores after the first failure.
+Each receipt also distinguishes a successful TPM `createdb.exe` from a
+database merely observed after a failed command. Rollback may drop a present
+database only when that receipt proves TPM's creation command succeeded. If a
+database appears after an absent pre-state and creation fails, TPM records
+`ACTION_REQUIRED`/`UNKNOWN`, preserves evidence, and does not drop the
+unowned database. When a pre-existing database was dropped but replacement
+creation fails, rollback restores the captured dump only if a fresh state
+check confirms absence; a present database without successful creation
+ownership is left untouched and the result remains unknown.
+If the final receipt JSON refresh fails, TPM clears `ReceiptPath` so the stale
+file is not advertised as current, retains the recovery root as residue, and
+exposes `ReceiptError`. A verified rollback then returns
+`CLEANUP_RESIDUE` with cleanup incomplete; the in-memory receipts retain the
+final rollback state.
 
 If any database changes, the engine rolls back every changed database in
 reverse deterministic order from its verified pre-state dump (or verifies
@@ -551,6 +565,8 @@ Each generated preset writes both `Techniques` and `TechniqueSorting` from the s
 **Preview renderer and cache (RC8 freeze exception).** `New-TpmReShadePreviewBitmap` decodes the bundled `TPM-preview-landscape.png` reference and renders a safe deterministic approximation for `Before`, `After`, `Split`, and percentage-driven `Slider` output; it does not run a game or execute ReShade shaders. The processed bitmap is derived from the same decoded reference and cached per profile, so actual in-game results may vary. Comparison composition copies bounded pixel regions so the untouched side remains byte-stable. `New-TpmReShadePreviewArtifact` materializes results under `ReShadePreviewCache\`; rendering does not depend on live-fetched ReShade runtime files.
 
 The cache manifest records the subject/mode, slider position when applicable, intensity identity, preset version, approved shader SHA-256 values, reference identity/version/hash, and renderer version. A missing, corrupt, stale, or mismatched manifest/image regenerates safely; cache artifacts are never trust or deployment evidence. Each WinForms preview keeps one decoded `Reference` bitmap and one processed bitmap per profile. Slider Paint reads only those cached bitmaps, clips the two sides, and draws the divider; it never allocates a composite bitmap, replaces `PictureBox.Image`, decodes a file, or runs the profile pixel generator during a drag. Slider changes are coalesced through a short WinForms timer, while keyboard/programmatic updates invalidate the same view immediately. Close detaches handlers, stops and disposes the timer, clears pending state, disposes the picture image and render cache, then disposes the form. `Open-TpmReShadePreviewWindow`, `Update-TpmReShadePreviewWindow`, `Close-TpmReShadePreviewWindow`, and `Show-TpmReShadePreviewWindow` provide the window lifecycle. If a terminal chooser requests `R` after disposal, it creates a fresh gallery session, synchronizes the selected profile, returns that replacement session to the caller, and leaves final teardown with the caller. WinForms is loaded lazily, requires STA for actual display, and returns a text-only fallback in noninteractive hosts.
+
+The visual-first gallery owns a 0-100 `ComparisonSlider` TrackBar. `Get-TpmReShadePreviewStateValue` reads synchronized gallery state; the 16 ms WinForms timer coalesces `ValueChanged` bursts and paints the latest position, while keyboard `KeyUp` applies immediately. Gallery slider input changes only comparison view/position. The terminal chooser remains the sole profile selector, and `Sync-TpmReShadeGallerySelection` refreshes the selected profile even while Slider mode is active.
 **Full profile deployment and restore (RC8 freeze exception).** Normal ReShade setup and the explicit per-game restore action call `Install-TpmReShadeProfileDeployment`. It stages the architecture-selected ReShade DLL, a canonical generated `ReShade.ini` when a trusted profile is selected, and every approved effect asset, then promotes them with one `Invoke-TpmTransactionalPromote` transaction. The per-game ownership manifest is stored under `ReShade\TPM-State\Deployments\<SHA256(game ID)>.json`; ownership is committed only after the physical promotion and post-promotion hashes succeed. A later profile-history entry is written only after that deployment returns success.
 
 Restore history is a selector, not trust evidence. Restore validates the profile schema, ordered approved effect IDs, ordered catalog hashes, and intensity variant before deployment; it never copies a historical path or arbitrary historical file. Missing, corrupt, stale, or unsupported history produces a friendly fresh-selection path. The chooser requires an explicit `R` restore choice, offers a remembered profile only after explicit confirmation, and exposes catalog-bound favorites through `F`.
@@ -3409,11 +3425,21 @@ for the caller; legacy counters such as `Configured`, `DbCreated`, and
 
 PostgreSQL setup performs profile and database preflight before mutation,
 requires verified recovery evidence before changing a non-no-op plan, and
-verifies profile/database state after writes. Database creation failure or
-profile/final-verification failure reports verified rollback when available;
-otherwise it reports `ACTION_REQUIRED` with unknown affected items. Terminal
-item sets are disjoint, and no normal summary exposes paths, commands,
-database names, credentials, hashes, or raw exception text.
+verifies profile/database state after writes. The PostgreSQL 8.3 drop boundary
+re-queries each database immediately before dropping, skips a verified-absent
+database, invokes `dropdb` with only 8.3-supported arguments, and verifies
+absence afterward. Setup creation returns structured mutation, command, and
+verification receipts; the transaction owner performs at most one rollback
+pass and only for databases whose successful `createdb` established ownership.
+A failed `createdb` is not treated as ownership; a fresh verified-absent result
+can establish rollback completion, while existing or unknown state remains
+`ACTION_REQUIRED`/`UNKNOWN` without a destructive guess. Creation and rollback
+receipts remain in transaction details, and restore receipts persist the drop
+state evidence. Profile/final-verification failure reports verified rollback
+when available; otherwise it reports `ACTION_REQUIRED` with unknown affected
+items. Terminal item sets are disjoint, and no normal summary exposes paths,
+commands, database names, credentials, hashes, or raw exception text.
+After rollback, the receipt file is refreshed with each receipt's final rollback attempts and verification. An item whose rollback is unverified is removed from completed items and classified as `UNKNOWN`; the persisted per-database evidence and transaction result therefore agree even when an earlier item succeeded before a later failure.
 
 The manager self-update captures the current script hash and read-only state,
 verifies the backup and candidate release before replacement, verifies the

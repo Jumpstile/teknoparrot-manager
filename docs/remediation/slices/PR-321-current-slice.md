@@ -2,10 +2,10 @@
 
 - Slice ID: TPM-PROGRESS-SCAN-COVERAGE-001
 - Supplemental governance slice IDs: `TPM-OWNER-STATUS-GATE-001`.
-- Supplemental behavior slice IDs: `TPM-LIBRARY-HEALTH-TRANSACTION-001`, `TPM-RESHADE-TEN-EFFECTS-001`, `TPM-S1-LEGACY-STATE-TRANSACTIONS-001`, `TPM-S1-SETUP-UPDATE-TRANSACTIONS-001`, and `TPM-S1-UPDATE-VERSION-ORDERING-001`.
+- Supplemental behavior slice IDs: `TPM-LIBRARY-HEALTH-TRANSACTION-001`, `TPM-RESHADE-TEN-EFFECTS-001`, `TPM-S1-LEGACY-STATE-TRANSACTIONS-001`, `TPM-S1-SETUP-UPDATE-TRANSACTIONS-001`, `TPM-S1-UPDATE-VERSION-ORDERING-001`, and `TPM-POSTGRES-SETUP-ROLLBACK-001`.
 - Slice name: RC8 universal progress coverage and truthful permanent-gate status semantics
-- Included owner-report IDs: 3, 4, 5, and 29 for progress/source evidence; ID 3 for supplemental gate-status semantics; ID 21 for Library Health outcomes; IDs 1, 9, and 10 for ReShade; ID 34 for migration startup fail-closed behavior; and owner row 81 for update-version ordering.
-- Issues: PR #321 and issue #105.
+- Included owner-report IDs: 3, 4, 5, and 29 for progress/source evidence; ID 3 for supplemental gate-status semantics; ID 21 for Library Health outcomes; IDs 1, 9, and 10 for ReShade; owner ID 34 for migration; owner row 81 for update-version ordering; and owner row 88 for PostgreSQL 8.3 rollback/setup safety.
+- Issues: PR #321, issue #105, and issue #323 exact-package PostgreSQL owner-smoke evidence.
 - Permanent procedures: TPM-PROGRESS-001, TPM-PROGRESS-002, TPM-PROGRESS-003, TPM-REPAIR-001, TPM-REPAIR-002, TPM-RESHADE-001, TPM-EVIDENCE-001, TPM-OWNER-001, TPM-OWNER-002, TPM-OWNER-003, TPM-TRACE-001, TPM-AUTH-001.
 - PR #321 base ref: `0295415fb1b9d4bf6880945eb4807d4b2b27ec96`; local UVO-08 source/evidence worktree HEAD at gate start: `7d92a3f2379038b9c1ba3e3750766e8cf1a5ac42`; the existing PR branch was verified and local HEAD was its descendant.
 - The prior PostgreSQL retry-authentication slice remains separately documented in `TPM-POSTGRES-RETRY-AUTH-001.md`; this pointer does not reassign its hunks.
@@ -13,7 +13,7 @@
 ## Explicit exclusions
 
 - Owner IDs not included: all PR #321 IDs other than the progress rows, ID 3 gate-status semantics, ID 21 transaction outcomes, ReShade IDs 1, 9, and 10, migration ID 34, and update owner row 81 listed above.
-- Features, modules, and runtime behavior excluded: no unrelated capability, network/retry/error-policy change, runtime mutation, package, merge, tag, publication, certification, or release. Commit/push is authorized only to PR #321's existing head ref after source gates pass, to obtain exact-head CI; owner smoke remains paused.
+- Features, modules, and runtime behavior excluded: no unrelated capability, network/retry/error-policy change, actual Arcade database/service/profile/credential/UAC/reset/recovery action, new release-package build or copy, merge, tag, publication, certification, or release. Recovery of the pre-existing untracked staging directory is documented under final source-quality evidence; it did not build, change, or validate the candidate ZIP. Commit/push is authorized only to PR #321's existing head after fresh required source gates and independent exact-diff review; owner smoke remains paused.
 
 ## Behavior contract
 
@@ -29,6 +29,9 @@ Supplemental source findings and exact mappings:
 - Update version ordering: `TPM-S1-UPDATE-VERSION-ORDERING-001`; owner row 81; PR #321 review finding P1-1; issue #105 is supporting context only, and its earlier final/RC equality assumption is superseded; `TPM-TRACE-001` and `TPM-EVIDENCE-001`. RC7 sorts before RC8, both sort before final 1.0. Before-fix here-string spoof and non-ASCII candidate cases were reproduced. The expanded UVO-08 implementation passed focused tests (main 6/6, core 7/7) and full relevant suites in both engines (main 1296/1296, SupportPackage 42/42, core 58/58, destructive-path 10/10). Static parser/ASCII/analyzer and canonical InjectionHunter checks passed. Fresh `Run-TpmQualityGate.ps1` and its permanent procedure gate passed at 2026-10-03T13:03:44Z; final post-status-sync focused contract tests and permanent procedure gate are recorded in the reconciliation report. Scoped commit/push remains authorized only after these final gates pass; no CI status checks, package build, owner runtime, merge, tag, release, wiki, or publication action is authorized.
 - UVO-08 boundary: reject additional statically identified assignment/destructuring, attributed/cast or transparent-parenthesized, member/index-root, increment/decrement, foreach, root-script-parameter, and data-statement writes; preserve function-local parameters and unrelated index/member reads. Indirect/dynamic command and data-flow mutation is explicitly out of scope; this is not a sandbox. Historical integrated run `bg_87` passed main Pester 1293/1293 and SupportPackage 42/42 but failed the permanent gate on stale validation evidence (`artifact://1060`). Preserve those results; they are not current acceptance. No CI polling/termination, package, owner runtime, merge, tag, release, wiki, or publication action is authorized. Scoped commit/push to the existing PR #321 head is authorized only after all required gates pass; parent owns exact-head CI.
 - CI evidence: `TPM-OWNER-STATUS-GATE-001`; owner ID 3 status semantics; PR #321; `TPM-OWNER-003`, `TPM-TRACE-001`, and `TPM-AUTH-001`. Child-gate output is normalized before matching; pull-request CI checks out the head repository/ref and verifies that checked-out HEAD equals the PR head SHA.
+
+- ReShade gallery behavior: `TPM-RESHADE-TEN-EFFECTS-001`; owner IDs 1, 9, and 10; terminal chooser remains the sole profile selector. The gallery exposes a 0-100 TrackBar, coalesces rapid changes through a 16 ms timer, and applies keyboard updates immediately. A local Windows PowerShell 5.1 STA WinForms smoke displayed all twelve profiles, moved the comparison to 30, synchronized the terminal-selected `Vignette` profile while retaining Slider mode, rendered non-black pixels on both sides, and emitted no paint diagnostics. Focused ReShade Pester passed 44/44 under PS5.1 and PS7 with Pester 5.7.1; preview-state adapter coverage passed 1/1 under both engines. This is source-level UI proof, not packaged owner-runtime evidence.
+- PostgreSQL owner row 88 packet: profile-impact JSON SHA-256 `42B9554AB7DFFFC9465B5F8FA9B0BC57D63943310D63B4C622F5E630E493C31D`; observed time-of-day `18:46:04.1230563` only; baseline SHA-256 `02DEA729E19CB9D64CDED338B2FC72CDE28AF78CC17209B28F9BF0E068518322`. GameProfiles remained 969 files / 7,574,923 bytes and UserProfiles remained 8,698 files / 297,810,587 bytes, with zero profile-file adds/removes/changes; raw XML was not emitted. `DatabaseCatalogVerified=false`; database state remains UNKNOWN. These deltas do not establish that database state is unchanged. A newly reproduced restore collision showed `createdb.exe` failure after absent pre-state could cause TPM to drop an unowned database; fixed with explicit `CreateOwnedForRollback` evidence and ownership-guarded rollback. The before-fix regression failed with `ROLLED_BACK_VERIFIED`; absent-prestate and existing-prestate collision regressions pass under PS5.1 and PS7 with Pester 5.7.1, preserving the appeared database and returning `ACTION_REQUIRED`/`UNKNOWN`. A forced final receipt-refresh failure now clears `ReceiptPath`, preserves the root/stale file only as residue, reports `ReceiptError`, and returns validated `CLEANUP_RESIDUE` with cleanup incomplete; the regression passes under both engines. Exact full-suite, static, procedure-gate, and review evidence is recorded in the appended reconciliation report; no unchanged-database claim is supported.
 
 ## Prompt inventory and classification
 
@@ -52,6 +55,7 @@ Supplemental source findings and exact mappings:
 - ReShade tests must prove ten exact pinned effect entries, twelve canonical profiles, terminal selection of the twelfth profile, preview synchronization, deterministic output, and slider boundaries.
 - ReShade preset conformance must cover `StartupPresetPath`/`PresetPath` precedence, canonical `Techniques` plus `TechniqueSorting`, empty Original lists, and rejection of a sorting list that diverges from the selected profile.
 - ReShade include-deployment tests must cover the complete profile closure, shared-include deduplication, conflicting same-path identities rejected before target mutation, and exact rollback/ownership state.
+- PostgreSQL restore collision and receipt-persistence tests must prove that failed `createdb.exe` does not authorize dropping a database observed after either preflight boundary, and that a failed final receipt refresh clears the advertised path, preserves evidence, and returns valid `CLEANUP_RESIDUE`.
 
 ## Files allowed to change
 
@@ -87,22 +91,23 @@ Supplemental source findings and exact mappings:
 - `Tests/TpmAutoUpdate.DestructivePath.Tests.ps1`
 - `docs/remediation/slices/TPM-S1-LEGACY-STATE-TRANSACTIONS-001.md`
 - `docs/remediation/slices/TPM-S1-UPDATE-VERSION-ORDERING-001.md`
+- `docs/remediation/slices/TPM-POSTGRES-SETUP-ROLLBACK-001.md`
+- `docs/RC8-REMEDIATION-INVENTORY.md`
 - `TeknoParrot-Manager-CHANGELOG.txt`
 - `scripts/InjectionHunterDispositions.psd1`
 
 ## Runtime proof required
 
 - Exact packaged behavior: not run or authorized in this task. Prior source slices remain subject to their separate package/runtime gates; this task does not build a package.
-- Required source identity: source changes are pushed to PR #321's existing head ref; CI must assert the checked-out SHA equals the PR head SHA. No package identity is requested or authorized.
-- Evidence artifacts: focused behavior-test output, exact checked-out source SHA, fresh CI result, and the validated remediation report. Owner/runtime proof remains paused.
-- Owner/runtime verification: not performed or authorized by this source-gate task; no candidate package identity is available or implied.
+- Required source identity: source changes are pushed to PR #321's existing head ref only after fresh source gates and independent exact-diff review; CI must assert checked-out HEAD equals the PR head SHA. No package identity is requested or authorized.
+- Evidence artifacts: focused behavior-test output, exact checked-out source SHA, fresh CI result if available under the standing gate, and the validated remediation report. Owner/runtime proof remains paused.
+- Owner/runtime verification: not performed or authorized by this source lane; failed candidate package identity is incident evidence only.
 
-## Stop condition
-Do not claim release readiness. Stop on any failed source gate, missing hunk mapping, version-identity mismatch, or CI checkout SHA mismatch. Exact-head CI is required; package build and owner-runtime proof remain unauthorized and separate.
+- Stop condition: Do not claim release readiness. Stop on any failed source gate, missing hunk mapping, version-identity mismatch, CI checkout SHA mismatch, or any state/result that is not proven. Exact-head CI remains a source gate; package build and owner-runtime proof remain unauthorized and separate.
 
 ## Forbidden actions
 
-No unrelated cleanup, broad rewrite, product feature work, runtime mutation, owner smoke by this lane, merge, tag, publication, certification, wiki update, or ARCADE execution. Commit/push is authorized only after source gates pass and only to PR #321's existing head ref for exact-head CI. Package preparation is not authorized in this task.
+No unrelated cleanup, broad rewrite, product feature work, actual Arcade database/service/profile/credential/UAC/reset/recovery action, owner smoke, package build, merge, tag, publication, certification, wiki update, or release. Scoped commit/push is authorized only after fresh source gates and independent review, and only to PR #321's existing head ref. Package preparation is not authorized.
 
 ## Hunk classification
 
@@ -112,10 +117,15 @@ No unrelated cleanup, broad rewrite, product feature work, runtime mutation, own
 - ReShade catalog/selector/preview source/tests/docs: owner IDs 1, 9, and 10; PR #321; `TPM-RESHADE-TEN-EFFECTS-001`; TPM-RESHADE-001; TPM-EVIDENCE-001; TPM-OWNER-002/003; TPM-TRACE-001; TPM-AUTH-001.
 - Migration startup gate source/tests/docs: owner ID 34; PR #321; `TPM-S1-LEGACY-STATE-TRANSACTIONS-001`; TPM-TRACE-001; TPM-EVIDENCE-001.
 - Update version ordering source/tests/docs across both updater paths: owner row 81; issue #105; PR #321 review report `TPM-7D92-DELTA-20261003`; `TPM-S1-UPDATE-VERSION-ORDERING-001`; `TPM-TRACE-001`; `TPM-EVIDENCE-001`.
-- Earlier PostgreSQL retry-authentication hunks remain mapped to `TPM-POSTGRES-RETRY-AUTH-001.md` and are not reassigned by this current-slice pointer.
+- PostgreSQL 8.3 rollback/setup compatibility and single-owner rollback source/tests/architecture/inventory/report hunks: owner row 88; PR #321; issue #323 exact-package smoke evidence; `TPM-POSTGRES-SETUP-ROLLBACK-001`; TPM-TRACE-001; TPM-OWNER-001. Failed package identity and live-state UNKNOWN remain explicit; no owner recovery action is authorized.
 
 ## Commit/package authorization status
 
 - Commit/push authorized: Yes, after all source gates pass, solely to update PR #321's existing head ref and establish the exact source SHA for CI; no merge.
 - Candidate package authorized: No; package build is explicitly excluded from this task.
 - Release/certification authorized: No.
+
+## Final PR #321 source-quality evidence -- 2026-10-04
+
+- The UTC-stamped `Run-TpmQualityGate.ps1` wrapper passed against the source/test contents of commit `4f219a504018f98e816c716424bc5da4928a7cc8` before this report-only evidence amendment: 2026-10-04T00:22:22.8702405Z–2026-10-04T00:33:26.5048085Z; PowerShell 7.6.6 / Pester 5.7.1; exit 0.
+- Main Pester 1311/1311 and SupportPackage 42/42 passed. ASCII/parse, configured PSScriptAnalyzer, `git diff --check`, and permanent procedure gate passed. Package release validation and owner-runtime proof remain separate and outstanding.

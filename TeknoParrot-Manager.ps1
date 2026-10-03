@@ -8609,38 +8609,44 @@ function New-TpmReShadePreviewBitmap {
         return New-TpmReShadePreviewBitmapFromCache -Cache $cache -ProfileDefinition $ProfileDefinition -Mode $Mode -SliderPosition $SliderPosition
     } finally { Dispose-TpmReShadePreviewRenderCache -Cache $cache }
 }
+function Get-TpmReShadePreviewStateValue {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Name)
+    if ($State -is [System.Collections.IDictionary]) { return $State[$Name] }
+    if (-not $State) { return $null }
+    $properties = $State.PSObject.Properties
+    if ($null -eq $properties) { return $null }
+    $property = $properties[$Name]
+    if ($property) { return $property.Value }
+    return $null
+}
+
 function New-TpmReShadePreviewPaintHandler {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)]$Picture)
+    $stateRef = $State
+    $pictureRef = $Picture
     return {
         param($senderArg, $eventArgsArg)
         try {
-            if (-not $State -or -not $Picture -or -not $eventArgsArg -or -not $eventArgsArg.Graphics) { return }
-            $getState = {
-                param([string]$Name)
-                if ($State -is [hashtable]) { return $State[$Name] }
-                $property = $State.PSObject.Properties[$Name]
-                if ($property) { return $property.Value }
-                return $null
-            }.GetNewClosure()
-            if (-not [bool](& $getState 'Initialized') -and $State -is [hashtable]) { return }
-            $previewEnabled = & $getState 'PreviewEnabled'
+            if ($null -eq $stateRef -or $null -eq $pictureRef -or $null -eq $eventArgsArg -or $null -eq $eventArgsArg.Graphics) { return }
+            if (-not [bool](Get-TpmReShadePreviewStateValue -State $stateRef -Name 'Initialized') -and $stateRef -is [System.Collections.IDictionary]) { return }
+            $previewEnabled = Get-TpmReShadePreviewStateValue -State $stateRef -Name 'PreviewEnabled'
             if ($null -ne $previewEnabled -and -not [bool]$previewEnabled) { return }
-            $viewState = & $getState 'ViewMode'
-            $modeState = & $getState 'Mode'
+            $viewState = Get-TpmReShadePreviewStateValue -State $stateRef -Name 'ViewMode'
+            $modeState = Get-TpmReShadePreviewStateValue -State $stateRef -Name 'Mode'
             if ($viewState -ne 'Slider' -and $modeState -ne 'Slider') { return }
-            $selectedProfile = & $getState 'Profile'
+            $selectedProfile = Get-TpmReShadePreviewStateValue -State $stateRef -Name 'Profile'
             if (-not $selectedProfile) {
-                $profileId = [string](& $getState 'SelectedProfileId')
+                $profileId = [string](Get-TpmReShadePreviewStateValue -State $stateRef -Name 'SelectedProfileId')
                 if ($profileId) { $selectedProfile = Get-TpmReShadeProfile -ProfileId $profileId }
             }
             if (-not $selectedProfile) { return }
-            $cache = & $getState 'PreviewCache'
+            $cache = Get-TpmReShadePreviewStateValue -State $stateRef -Name 'PreviewCache'
             $reference = if ($cache) { $cache.Reference } else { $null }
             $processed = if ($cache -and $selectedProfile) {
                 Get-TpmReShadePreviewProcessedBitmap -Cache $cache -ProfileDefinition $selectedProfile
             } else { $null }
             if (-not $reference -or -not $processed) { return }
-            $canvas = $Picture.ClientRectangle
+            $canvas = $pictureRef.ClientRectangle
             if ($canvas.Width -le 0 -or $canvas.Height -le 0) { return }
             $scale = [Math]::Min($canvas.Width / [double]$reference.Width, $canvas.Height / [double]$reference.Height)
             $drawWidth = [Math]::Max(1, [int][Math]::Round($reference.Width * $scale))
@@ -8648,8 +8654,8 @@ function New-TpmReShadePreviewPaintHandler {
             $drawX = [int][Math]::Floor(($canvas.Width - $drawWidth) / 2)
             $drawY = [int][Math]::Floor(($canvas.Height - $drawHeight) / 2)
             $destination = New-Object Drawing.Rectangle($drawX, $drawY, $drawWidth, $drawHeight)
-            $position = & $getState 'SliderPosition'
-            if ($null -eq $position) { $position = & $getState 'SliderValue' }
+            $position = Get-TpmReShadePreviewStateValue -State $stateRef -Name 'SliderPosition'
+            if ($null -eq $position) { $position = Get-TpmReShadePreviewStateValue -State $stateRef -Name 'SliderValue' }
             $position = [Math]::Max(0, [Math]::Min(100, [int]$position))
             $splitPixels = [int][Math]::Round($drawWidth * ($position / 100.0))
             $graphics = $eventArgsArg.Graphics
@@ -8662,7 +8668,8 @@ function New-TpmReShadePreviewPaintHandler {
                 $graphics.DrawImage($reference, $destination)
             }
             if ($rightWidth -gt 0) {
-                $rightClip = New-Object Drawing.Rectangle($drawX + $splitPixels, $drawY, $rightWidth, $drawHeight)
+                $rightClipX = [int]$drawX + [int]$splitPixels
+                $rightClip = New-Object Drawing.Rectangle($rightClipX, $drawY, $rightWidth, $drawHeight)
                 $graphics.SetClip($rightClip)
                 $graphics.DrawImage($processed, $destination)
             }
@@ -8901,6 +8908,18 @@ function Invoke-TpmReShadeGalleryRefreshSafe {
     }
 }
 
+function Flush-TpmReShadeGallerySlider {
+    param([Parameter(Mandatory)][object]$State)
+    if (-not [bool]$State['Initialized'] -or -not [bool]$State['PreviewEnabled'] -or [bool]$State['Closed']) { return $false }
+    $pending = $State['PendingSliderPosition']
+    if ($null -eq $pending) { return $false }
+    $State['SliderPosition'] = [Math]::Max(0, [Math]::Min(100, [int]$pending))
+    $State['PendingSliderPosition'] = $null
+    if ($State['Picture']) { $State['Picture'].Invalidate() }
+    if ($State['SliderTimer']) { $State['SliderTimer'].Stop() }
+    return $true
+}
+
 function New-TpmReShadeGalleryEventHandlers {
     param(
         [Parameter(Mandatory)]$State
@@ -8932,9 +8951,8 @@ function New-TpmReShadeGalleryEventHandlers {
             if (-not $valueProperty) { throw 'Gallery slider event sender has no Value property.' }
             $State['ViewMode'] = 'Slider'
             $position = [Math]::Max(0, [Math]::Min(100, [int]$valueProperty.Value))
-            $State['SliderPosition'] = $position
-            $State['PendingSliderPosition'] = $null
-            if ($State['Picture']) { $State['Picture'].Invalidate() }
+            $State['PendingSliderPosition'] = $position
+            if ($State['SliderTimer'] -and -not $State['SliderTimer'].Enabled) { $State['SliderTimer'].Start() }
         } catch {
             [void](& $previewFailure -State $State -Stage 'slider-value-changed-handler' -ErrorRecord $_)
         }
@@ -8949,6 +8967,7 @@ function New-TpmReShadeGalleryEventHandlers {
             if (-not $valueProperty) { throw 'Gallery keyboard event sender has no Value property.' }
             $State['ViewMode'] = 'Slider'
             $State['PendingSliderPosition'] = $null
+            if ($State['SliderTimer']) { $State['SliderTimer'].Stop() }
             $State['SliderPosition'] = [Math]::Max(0, [Math]::Min(100, [int]$valueProperty.Value))
             if ($State['Picture']) { $State['Picture'].Invalidate() }
         } catch {
@@ -9036,7 +9055,19 @@ function Show-TpmReShadeProfileGalleryWindow {
             DescriptionLabel = $descriptionLabel
             Slider = $null
             ViewButtons = @()
+            SliderTimer = $null
+            SliderTimerHandler = $null
         })
+        $sliderTimer = New-Object Windows.Forms.Timer
+        $sliderTimer.Interval = 16
+        $sliderTimerHandler = {
+            try { [void](Flush-TpmReShadeGallerySlider -State $state) }
+            catch { [void](Set-TpmReShadeGalleryPreviewFailed -State $state -Stage 'slider-timer-tick' -ErrorRecord $_) }
+            finally { try { $this.Stop() } catch {} }
+        }.GetNewClosure()
+        $state['SliderTimer'] = $sliderTimer
+        $state['SliderTimerHandler'] = $sliderTimerHandler
+        $sliderTimer.Add_Tick($sliderTimerHandler)
         $paintHandler = New-TpmReShadePreviewPaintHandler -State $state -Picture $picture
         $state['PaintHandler'] = $paintHandler
         $picture.Add_Paint($paintHandler)
@@ -9094,6 +9125,21 @@ function Show-TpmReShadeProfileGalleryWindow {
             $viewButton.Add_Click($viewHandler)
             [void]$toolbar.Controls.Add($viewButton)
         }
+        $sliderLabel = New-Object Windows.Forms.Label
+        $sliderLabel.Text = 'Before / After'
+        $sliderLabel.AutoSize = $true
+        [void]$toolbar.Controls.Add($sliderLabel)
+        $slider = New-Object Windows.Forms.TrackBar
+        $slider.Name = 'ComparisonSlider'
+        $slider.Minimum = 0
+        $slider.Maximum = 100
+        $slider.Value = [int]$state['SliderPosition']
+        $slider.TickFrequency = 25
+        $slider.Width = 300
+        $state['Slider'] = $slider
+        $slider.Add_ValueChanged($sliderHandler)
+        $slider.Add_KeyUp($sliderKeyUpHandler)
+        [void]$toolbar.Controls.Add($slider)
         $state['ViewButtons'] = @($toolbar.Controls | Where-Object { $_ -is [Windows.Forms.Button] })
         $form.Add_FormClosed($formClosedHandler)
         $form.Controls.Add($picture)
@@ -9131,6 +9177,11 @@ function Close-TpmReShadeProfileGallerySession {
     try { $Session['Closed'] = $true } catch {}
     try {
         $Session['PendingSliderPosition'] = $null
+    } catch {}
+    try {
+        if ($Session['SliderTimer'] -and $Session['SliderTimerHandler']) { $Session['SliderTimer'].Remove_Tick($Session['SliderTimerHandler']) }
+        if ($Session['SliderTimer']) { $Session['SliderTimer'].Stop(); $Session['SliderTimer'].Dispose(); $Session['SliderTimer'] = $null }
+        $Session['SliderTimerHandler'] = $null
     } catch {}
     try { if ($Session['Picture'] -and $Session['PaintHandler']) { $Session['Picture'].Remove_Paint($Session['PaintHandler']); $Session['PaintHandler'] = $null } } catch {}
     try { if ($Session['Slider'] -and $Session['SliderHandler']) { $Session['Slider'].Remove_ValueChanged($Session['SliderHandler']) } } catch {}
@@ -17910,39 +17961,78 @@ function Get-PostgresBackupFile {
     return $best.FullName
 }
 
-# Creates a database and restores a bundled backup only after a verified
-# database-state query proved that the exact database name is absent. It
-# never drops or recreates an existing database. If creation succeeds but a
-# later compatibility or restore step fails, the newly created database is
-# removed and verified absent before the helper reports failure.
+# Creates a database and restores its bundled backup. The caller owns rollback
+# and receives the mutation boundary, verified state, and command receipts.
 function New-PostgresDatabaseFromBackup {
     param([string]$DbName, [string]$Encoding, [string]$BackupFile, [string]$SuperPasswordPlain)
-    if (-not (Test-SafePostgresDbName $DbName)) { Write-Log 'Postgres: refusing unsafe database name.'; return $false }
-    if (-not (Test-Path -LiteralPath $BackupFile -PathType Leaf)) { return $false }
-    $backupState = Get-TpmFileState -Path $BackupFile
-    if (-not $backupState.Readable -or -not $backupState.Exists -or $backupState.IsDirectory -or [int64]$backupState.Length -le 0) { return $false }
-    $toolSet = Test-Postgres83RestoreToolSet -SuperPasswordPlain $SuperPasswordPlain
-    if (-not $toolSet.Verified) { return $false }
-    $commandLog = New-Object System.Collections.Generic.List[object]
-    $createdOrUncertain = $false
-    try {
-        $current = Get-PostgresDatabaseState -DbName $DbName -SuperPasswordPlain $SuperPasswordPlain
-        if (-not $current.Verified -or $current.Exists) { throw 'The PostgreSQL database was not verified absent before creation.' }
-        [void](Invoke-Postgres83RestoreCommandChecked -ToolName 'pg_restore.exe' -Arguments @('--list',$BackupFile) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $commandLog -DatabaseName $DbName)
-        $createdOrUncertain = $true
-        [void](Invoke-Postgres83RestoreCommandChecked -ToolName 'createdb.exe' -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','-E',$Encoding,'-T','template0',$DbName) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $commandLog -DatabaseName $DbName)
-        [void](Invoke-Postgres83RestoreCommandChecked -ToolName 'psql.exe' -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','-d',$DbName,'-c',('ALTER DATABASE "' + $DbName + '" SET standard_conforming_strings = on;')) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $commandLog -DatabaseName $DbName)
-        [void](Invoke-Postgres83RestoreCommandChecked -ToolName 'pg_restore.exe' -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','-d',$DbName,$BackupFile) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $commandLog -DatabaseName $DbName)
-        $state = Get-PostgresDatabaseState -DbName $DbName -SuperPasswordPlain $SuperPasswordPlain
-        if (-not $state.Verified -or -not $state.Exists) { throw 'The newly created PostgreSQL database could not be verified.' }
-        return $true
-    } catch {
-        if ($createdOrUncertain) {
-            $rollback = Restore-PostgresSetupCreatedDatabases -Databases @([pscustomobject]@{ DbName = $DbName; Encoding = $Encoding; BackupFile = $BackupFile }) -SuperPasswordPlain $SuperPasswordPlain
-            Write-Log ("Postgres: bundled database restore failed for {0}; created-database rollback-verified={1}." -f $DbName,$rollback.Verified)
-        }
-        return $false
+    $commands = New-Object System.Collections.Generic.List[object]
+    $result = [ordered]@{
+        PSTypeName = 'TPM.PostgresSetupDatabaseResult.v1'
+        SchemaVersion = 1
+        Database = $DbName
+        Succeeded = $false
+        MutationAttempted = $false
+        DatabaseMayExist = $false
+        FailureStage = $null
+        PreMutationState = $null
+        PostMutationState = $null
+        FinalVerification = [pscustomobject]@{ Attempted = $false; Passed = $false; Exists = $null }
+        Commands = @()
+        Error = $null
     }
+    $stage = 'DatabaseName'
+    try {
+        if (-not (Test-SafePostgresDbName $DbName)) { throw 'The PostgreSQL database name is unsafe.' }
+        $stage = 'PreMutationState'
+        $current = Get-PostgresDatabaseState -DbName $DbName -SuperPasswordPlain $SuperPasswordPlain
+        $result.PreMutationState = $current
+        if (-not $current.Verified -or $current.Exists) { throw 'The PostgreSQL database was not verified absent before creation.' }
+        $stage = 'BackupVerification'
+        if (-not (Test-Path -LiteralPath $BackupFile -PathType Leaf)) { throw 'The bundled PostgreSQL backup is unavailable.' }
+        $backupState = Get-TpmFileState -Path $BackupFile
+        if (-not $backupState.Readable -or -not $backupState.Exists -or $backupState.IsDirectory -or [int64]$backupState.Length -le 0) {
+            throw 'The bundled PostgreSQL backup is unreadable or empty.'
+        }
+        $stage = 'ToolsetVerification'
+        $toolSet = Test-Postgres83RestoreToolSet -SuperPasswordPlain $SuperPasswordPlain
+        if (-not $toolSet.Verified) { throw 'The PostgreSQL 8.3 client tool set could not be verified.' }
+        $stage = 'ArchiveValidation'
+        [void](Invoke-Postgres83RestoreCommandChecked -ToolName 'pg_restore.exe' -Arguments @('--list',$BackupFile) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $commands -DatabaseName $DbName)
+        $stage = 'DatabaseCreation'
+        $result.MutationAttempted = $true
+        [void](Invoke-Postgres83RestoreCommandChecked -ToolName 'createdb.exe' -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','-E',$Encoding,'-T','template0',$DbName) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $commands -DatabaseName $DbName)
+        $result.DatabaseMayExist = $true
+        $stage = 'DatabaseCompatibility'
+        [void](Invoke-Postgres83RestoreCommandChecked -ToolName 'psql.exe' -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','-d',$DbName,'-c',('ALTER DATABASE "' + $DbName + '" SET standard_conforming_strings = on;')) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $commands -DatabaseName $DbName)
+        $stage = 'DatabaseRestore'
+        [void](Invoke-Postgres83RestoreCommandChecked -ToolName 'pg_restore.exe' -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','-d',$DbName,$BackupFile) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $commands -DatabaseName $DbName)
+        $stage = 'FinalVerification'
+        $finalState = Get-PostgresDatabaseState -DbName $DbName -SuperPasswordPlain $SuperPasswordPlain
+        $result.PostMutationState = $finalState
+        $result.FinalVerification = [pscustomobject]@{ Attempted = $true; Passed = [bool]($finalState.Verified -and $finalState.Exists); Exists = if ($finalState.Verified) { [bool]$finalState.Exists } else { $null } }
+        if (-not $finalState.Verified -or -not $finalState.Exists) { throw 'The newly created PostgreSQL database could not be verified.' }
+        $result.Succeeded = $true
+        $stage = 'Complete'
+    } catch {
+        $result.Error = ConvertTo-PostgresRedactedText -Text ([string]$_.Exception.Message) -Secrets @($SuperPasswordPlain)
+        if ($result.MutationAttempted) {
+            try {
+                $result.PostMutationState = Get-PostgresDatabaseState -DbName $DbName -SuperPasswordPlain $SuperPasswordPlain
+            } catch {
+                $result.PostMutationState = [pscustomobject]@{ Verified = $false; Exists = $null; Error = ConvertTo-PostgresRedactedText -Text ([string]$_.Exception.Message) -Secrets @($SuperPasswordPlain) }
+            }
+        }
+        $finalAbsentVerified = ($result.PreMutationState -and $result.PreMutationState.Verified -and -not $result.PreMutationState.Exists -and $result.PostMutationState -and $result.PostMutationState.Verified -and -not $result.PostMutationState.Exists)
+        $result.FinalVerification = [pscustomobject]@{
+            Attempted = [bool]$result.MutationAttempted
+            Passed = [bool]$finalAbsentVerified
+            Exists = if ($result.PostMutationState -and $result.PostMutationState.Verified) { [bool]$result.PostMutationState.Exists } else { $null }
+        }
+        $result.FailureStage = $stage
+    } finally {
+        $result.Commands = @($commands.ToArray())
+    }
+    return [pscustomobject]$result
 }
 # Explicit destructive recovery for a known affected database. The caller must
 # obtain confirmation after showing the affected game/database list. The
@@ -18270,6 +18360,7 @@ function Invoke-PostgresGameSetup {
             -RecoveryActions @(@{ Id='Review'; Label='Review the protected recovery evidence, then retry.' }))
     }
     $createdDatabases = New-Object System.Collections.Generic.List[object]
+    $databaseCreationReceipts = New-Object System.Collections.Generic.List[object]
     $attemptedProfileItems = New-Object System.Collections.Generic.List[string]
     $completedProfileItems = New-Object System.Collections.Generic.List[string]
     $attemptedDatabaseItems = New-Object System.Collections.Generic.List[string]
@@ -18285,11 +18376,12 @@ function Invoke-PostgresGameSetup {
         $dbItem = 'database:' + $plan.DbName
         [void]$attemptedDatabaseItems.Add($dbItem)
         try {
-            if (-not (New-PostgresDatabaseFromBackup -DbName $plan.DbName -Encoding $plan.Encoding -BackupFile $plan.BackupFile -SuperPasswordPlain $SuperPasswordPlain)) {
-                throw 'The PostgreSQL database creation and restore did not complete.'
+            $creationResult = $null
+            $creationResult = New-PostgresDatabaseFromBackup -DbName $plan.DbName -Encoding $plan.Encoding -BackupFile $plan.BackupFile -SuperPasswordPlain $SuperPasswordPlain
+            [void]$databaseCreationReceipts.Add($creationResult)
+            if (-not $creationResult.Succeeded) {
+                throw [System.InvalidOperationException]::new('The PostgreSQL database creation and restore did not complete.')
             }
-            $createdState = Get-PostgresDatabaseState -DbName $plan.DbName -SuperPasswordPlain $SuperPasswordPlain
-            if (-not $createdState.Verified -or -not $createdState.Exists) { throw 'The newly created PostgreSQL database could not be verified.' }
             [void]$createdDatabases.Add([pscustomobject]@{ DbName = $plan.DbName; Encoding = $plan.Encoding; BackupFile = $plan.BackupFile })
             $plan.DbExists = $true
             $dbState[$plan.DbName] = [pscustomobject]@{ Exists = $true; Verified = $true }
@@ -18298,31 +18390,96 @@ function Invoke-PostgresGameSetup {
         } catch {
             $results.Errors++
             $results.RecoveryBlocked = $true
+            $creationError = if ($creationResult -and $creationResult.Error) { [string]$creationResult.Error } else { 'The PostgreSQL database creation result was unavailable.' }
+            $preMutationState = if ($creationResult) { $creationResult.PreMutationState } else { $null }
+            $preMutationUnknown = ($null -eq $preMutationState -or -not $preMutationState.Verified -or [bool]$preMutationState.Exists)
+            $creationAttemptedWithoutOwnership = [bool]($creationResult -and $creationResult.MutationAttempted -and -not $creationResult.DatabaseMayExist)
+            $creationAttemptedAbsenceVerified = [bool]($creationAttemptedWithoutOwnership -and $creationResult.FinalVerification.Attempted -and $creationResult.FinalVerification.Passed)
+            if ($creationAttemptedWithoutOwnership -and -not $creationAttemptedAbsenceVerified) { $preMutationUnknown = $true }
             $failedDatabase = @($createdDatabases | Where-Object { $_.DbName -eq $plan.DbName })
-            if ($failedDatabase.Count -eq 0) { [void]$createdDatabases.Add([pscustomobject]@{ DbName = $plan.DbName; Encoding = $plan.Encoding; BackupFile = $plan.BackupFile }) }
-            $dbRollback = Restore-PostgresSetupCreatedDatabases -Databases $createdDatabases.ToArray() -SuperPasswordPlain $SuperPasswordPlain
-            $results.DatabaseRollbackVerified = [bool]$dbRollback.Verified
+            if ($creationResult -and $creationResult.DatabaseMayExist -and $failedDatabase.Count -eq 0) {
+                [void]$createdDatabases.Add([pscustomobject]@{ DbName = $plan.DbName; Encoding = $plan.Encoding; BackupFile = $plan.BackupFile })
+            }
+            $rollbackCandidates = @($createdDatabases.ToArray())
+            if ($rollbackCandidates.Count -eq 0 -and -not $preMutationUnknown -and -not $creationAttemptedAbsenceVerified) {
+                $results.DatabaseRollbackVerified = $false
+                $unattempted = @($databaseItems | Where-Object { $_ -ne $dbItem -and $skippedItems -notcontains $_ })
+                return (& $finish `
+                    -Outcome 'FAILED_BEFORE_MUTATION' `
+                    -ProductState 'UNCHANGED' `
+                    -Summary 'PostgreSQL setup stopped before changing any databases or profiles.' `
+                    -Items $items `
+                    -FailedItems @($dbItem) `
+                    -UnattemptedItems $unattempted `
+                    -SkippedItems $skippedItems `
+                    -MutationStarted:$false `
+                    -MutationCompleted:$false `
+                    -Backup $backupInfo `
+                    -PreState ([pscustomobject]@{ Captured=$true; CaptureMethod='Verified PostgreSQL recovery evidence and mutation-boundary database query'; Items=$items; EvidenceRoot=$RecoveryBackup.Path; CaptureError=$null }) `
+                    -FinalAttempted:$false `
+                    -FinalPassed:$false `
+                    -Rollback ([pscustomobject]@{ Attempted=$false; Completed=$false; Verified=$false; Items=@(); FailedItems=@(); Errors=@() }) `
+                    -ReasonCode 'POSTGRES_DATABASE_CREATION_FAILED_BEFORE_MUTATION' `
+                    -TechnicalDetails ([pscustomobject]@{ Stage='DatabaseCreation'; FailedDatabase=$plan.DbName; DatabaseCreation=$creationResult; DatabaseCreationReceipts=@($databaseCreationReceipts.ToArray()) }) `
+                    -Errors @($creationError) `
+                    -RecoveryActions @(@{ Id='Review'; Label='Open Details and review the PostgreSQL setup failure.' }))
+            }
+            if ($rollbackCandidates.Count -gt 0) {
+                $dbRollback = Restore-PostgresSetupCreatedDatabases -Databases $rollbackCandidates -SuperPasswordPlain $SuperPasswordPlain
+            } else {
+                $dbRollback = [pscustomobject]@{
+                    Verified = (-not $preMutationUnknown)
+                    RestoredItems = @()
+                    FailedItems = @()
+                    Errors = @()
+                    DatabaseReceipts = @()
+                }
+            }
+            if ($creationAttemptedAbsenceVerified) {
+                $absenceReceipt = [pscustomobject]@{
+                    Kind = 'VerifiedAbsentAfterCreationCommandFailure'
+                    Database = $plan.DbName
+                    BeforeState = $creationResult.PreMutationState
+                    AfterState = $creationResult.PostMutationState
+                    DropAttempted = $false
+                    Verified = $true
+                    Commands = @($creationResult.Commands)
+                }
+                $dbRollback = [pscustomobject]@{
+                    Verified = [bool]$dbRollback.Verified
+                    RestoredItems = @($dbRollback.RestoredItems + @($plan.DbName))
+                    FailedItems = @($dbRollback.FailedItems)
+                    Errors = @($dbRollback.Errors)
+                    DatabaseReceipts = @($dbRollback.DatabaseReceipts + @($absenceReceipt))
+                }
+            }
             $rollbackItems = @($dbRollback.RestoredItems)
             $rollbackFailed = @($dbRollback.FailedItems)
-            $rollbackErrors = @($dbRollback.Errors)
+            $rollbackErrors = @($dbRollback.Errors + @($creationError))
+            if ($preMutationUnknown) { $rollbackErrors += 'The setup database state was not verified absent at the mutation boundary.' }
+            $rollbackUnknown = @($rollbackFailed | ForEach-Object { 'database:' + $_ })
+            if ($preMutationUnknown) { $rollbackUnknown += $dbItem }
+            $rollbackVerified = ([bool]$dbRollback.Verified -and -not $preMutationUnknown)
+            $results.DatabaseRollbackVerified = $rollbackVerified
             $rollback = [pscustomobject]@{
-                Attempted = $true
-                Completed = [bool]$dbRollback.Verified
-                Verified = [bool]$dbRollback.Verified
-                VerifiedUtc = (Get-Date).ToUniversalTime().ToString('o')
+                Attempted = ($rollbackCandidates.Count -gt 0 -or $creationAttemptedAbsenceVerified)
+                Completed = $rollbackVerified
+                Verified = $rollbackVerified
+                VerifiedUtc = if ($rollbackVerified) { (Get-Date).ToUniversalTime().ToString('o') } else { $null }
                 Items = $rollbackItems
                 EvidenceRoot = $RecoveryBackup.Path
                 FailedItems = $rollbackFailed
                 Errors = $rollbackErrors
+                DatabaseReceipts = @($dbRollback.DatabaseReceipts)
             }
-            $outcome = if ($dbRollback.Verified) { 'ROLLED_BACK_VERIFIED' } else { 'ACTION_REQUIRED' }
-            $product = if ($dbRollback.Verified) { 'UNCHANGED' } else { 'UNKNOWN' }
-            $summary = if ($dbRollback.Verified) { 'PostgreSQL setup stopped and the previous verified state was restored.' } else { 'PostgreSQL setup needs attention because the previous database state could not be verified.' }
-            $attemptedItems = @($attemptedDatabaseItems.ToArray())
-            $rollbackUnknown = @($rollbackFailed)
+            $outcome = if ($rollbackVerified) { 'ROLLED_BACK_VERIFIED' } else { 'ACTION_REQUIRED' }
+            $product = if ($rollbackVerified) { 'UNCHANGED' } else { 'UNKNOWN' }
+            $summary = if ($rollbackVerified) { 'PostgreSQL setup stopped and the previous verified state was restored.' } else { 'PostgreSQL setup needs attention because the previous database state could not be verified.' }
+            $changedItems = @($rollbackCandidates | ForEach-Object { 'database:' + $_.DbName })
+            if ($creationResult -and $creationResult.MutationAttempted -and $changedItems -notcontains $dbItem) { $changedItems += $dbItem }
             $failedTerminal = @($dbItem | Where-Object { $rollbackUnknown -notcontains $_ })
             $unattempted = @($databaseItems | Where-Object {
-                $attemptedItems -notcontains $_ -and
+                $attemptedDatabaseItems -notcontains $_ -and
                 $rollbackUnknown -notcontains $_ -and
                 $skippedItems -notcontains $_
             })
@@ -18331,25 +18488,25 @@ function Invoke-PostgresGameSetup {
                 -ProductState $product `
                 -Summary $summary `
                 -Items $items `
-                -ChangedItems $attemptedItems `
+                -ChangedItems $changedItems `
                 -CompletedItems @($completedDatabaseItems.ToArray() | Where-Object { $rollbackUnknown -notcontains $_ }) `
                 -FailedItems $failedTerminal `
                 -UnattemptedItems $unattempted `
                 -SkippedItems @($skippedItems | Where-Object { $rollbackUnknown -notcontains $_ }) `
                 -UnknownItems $rollbackUnknown `
-                -MutationStarted:$true `
+                -MutationStarted:($changedItems.Count -gt 0 -or [bool]($creationResult -and $creationResult.MutationAttempted)) `
                 -MutationCompleted:$false `
                 -Backup $backupInfo `
                 -PreState ([pscustomobject]@{ Captured=$true; CaptureMethod='Verified PostgreSQL recovery evidence and database preflight'; Items=$items; EvidenceRoot=$RecoveryBackup.Path; CaptureError=$null }) `
                 -FinalAttempted:$true `
-                -FinalPassed:([bool]$dbRollback.Verified) `
-                -FinalChecks $(if ($dbRollback.Verified) { @('Created databases were removed and verified absent.') } else { @() }) `
+                -FinalPassed:$rollbackVerified `
+                -FinalChecks $(if ($rollbackVerified) { @('Every setup database that may have changed was restored to its verified absent pre-state.') } else { @() }) `
                 -FinalFailedItems $rollbackUnknown `
                 -Rollback $rollback `
-                -ReasonCode $(if ($dbRollback.Verified) { 'POSTGRES_DATABASE_ROLLBACK_VERIFIED' } else { 'POSTGRES_DATABASE_ROLLBACK_UNVERIFIED' }) `
-                -TechnicalDetails ([pscustomobject]@{ Stage='DatabaseCreation'; FailedDatabase=$plan.DbName; DatabaseRollback=$dbRollback }) `
+                -ReasonCode $(if ($rollbackVerified) { 'POSTGRES_DATABASE_ROLLBACK_VERIFIED' } elseif ($preMutationUnknown) { 'POSTGRES_DATABASE_STATE_UNKNOWN' } else { 'POSTGRES_DATABASE_ROLLBACK_UNVERIFIED' }) `
+                -TechnicalDetails ([pscustomobject]@{ Stage='DatabaseCreation'; FailedDatabase=$plan.DbName; DatabaseCreation=$creationResult; DatabaseCreationReceipts=@($databaseCreationReceipts.ToArray()); DatabaseRollback=$dbRollback }) `
                 -Errors $rollbackErrors `
-                -RecoveryActions $(if ($dbRollback.Verified) { @() } else { @(@{ Id='Review'; Label='Open Details and review the preserved recovery evidence.' }) }))
+                -RecoveryActions @(@{ Id='Review'; Label='Open Details and review the preserved PostgreSQL setup evidence.' }))
         }
     }
     } finally {
@@ -18427,7 +18584,7 @@ function Invoke-PostgresGameSetup {
             -FinalPassed:$true `
             -FinalChecks $finalChecks.ToArray() `
             -ReasonCode 'POSTGRES_SETUP_VERIFIED' `
-            -TechnicalDetails ([pscustomobject]@{ Stage='FinalVerification'; Configured=$results.Configured; DbCreated=$results.DbCreated; AlreadyConfigured=$results.AlreadyConfigured }))
+            -TechnicalDetails ([pscustomobject]@{ Stage='FinalVerification'; Configured=$results.Configured; DbCreated=$results.DbCreated; AlreadyConfigured=$results.AlreadyConfigured; DatabaseCreationReceipts=@($databaseCreationReceipts.ToArray()) }))
     } catch {
         $results.Errors++
         $results.RecoveryBlocked = $true
@@ -18475,6 +18632,7 @@ function Invoke-PostgresGameSetup {
             EvidenceRoot = $RecoveryBackup.Path
             FailedItems = @($combinedRollback.FailedItems)
             Errors = @($combinedRollback.Errors)
+            DatabaseReceipts = @($dbRollback.DatabaseReceipts)
         }
         $outcome = if ($combinedRollback.Verified) { 'ROLLED_BACK_VERIFIED' } else { 'ACTION_REQUIRED' }
         $product = if ($combinedRollback.Verified) { 'UNCHANGED' } else { 'UNKNOWN' }
@@ -18499,7 +18657,7 @@ function Invoke-PostgresGameSetup {
             -FinalChecks $(if ($combinedRollback.Verified) { @('Coupled PostgreSQL profile and database rollback was verified.') } else { @() }) `
             -FinalFailedItems @($combinedRollback.FailedItems) `
             -Rollback $rollback `
-            -TechnicalDetails ([pscustomobject]@{ Stage='ProfileWriteOrFinalVerification'; Failure=$profileFailureError; DatabaseRollback=$dbRollback; ProfileRollbackVerified=$profileRollbackVerified }) `
+            -TechnicalDetails ([pscustomobject]@{ Stage='ProfileWriteOrFinalVerification'; Failure=$profileFailureError; DatabaseCreationReceipts=@($databaseCreationReceipts.ToArray()); DatabaseRollback=$dbRollback; ProfileRollbackVerified=$profileRollbackVerified }) `
             -Errors @($combinedRollback.Errors) `
             -RecoveryActions $(if ($combinedRollback.Verified) { @() } else { @(@{ Id='Review'; Label='Open Details and review the preserved recovery evidence.' }) }))
     }
@@ -25941,6 +26099,61 @@ function Invoke-Postgres83RestoreCommandChecked {
     return $command
 }
 
+# PostgreSQL 8.3 has no dropdb --if-exists option. Recheck immediately before
+# the command, skip when verified absent, then verify the absent post-state.
+function Invoke-Postgres83DropDatabaseVerified {
+    param(
+        [Parameter(Mandatory)][string]$DbName,
+        [AllowEmptyString()][string]$SuperPasswordPlain = '',
+        [Parameter(Mandatory)][object]$CommandLog,
+        [switch]$RequirePresent,
+        [bool]$AllowExistingDrop = $true
+    )
+    $commands = New-Object System.Collections.Generic.List[object]
+    $before = $null
+    $after = $null
+    $dropAttempted = $false
+    $dropCommand = $null
+    $verified = $false
+    $failureStage = 'PreDropState'
+    $errorText = $null
+    try {
+        if (-not (Test-SafePostgresDbName $DbName)) { throw 'The PostgreSQL database name is unsafe.' }
+        $before = Get-PostgresDatabaseState -DbName $DbName -SuperPasswordPlain $SuperPasswordPlain
+        if (-not $before.Verified) { throw 'The PostgreSQL database state was not verified before drop.' }
+        if ($RequirePresent -and -not $before.Exists) { throw 'The PostgreSQL database was unexpectedly absent before drop.' }
+        if ($before.Exists -and -not $AllowExistingDrop) {
+            throw 'The PostgreSQL database is present but rollback ownership was not established.'
+        }
+        if ($before.Exists) {
+            $failureStage = 'Drop'
+            $dropAttempted = $true
+            $dropCommand = Invoke-Postgres83RestoreCommandChecked -ToolName 'dropdb.exe' -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432',$DbName) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $commands -DatabaseName $DbName
+        }
+        $failureStage = 'PostDropVerification'
+        $after = Get-PostgresDatabaseState -DbName $DbName -SuperPasswordPlain $SuperPasswordPlain
+        if (-not $after.Verified -or $after.Exists) { throw 'The PostgreSQL database was not verified absent after drop.' }
+        $verified = $true
+        $failureStage = $null
+    } catch {
+        $errorText = ConvertTo-PostgresRedactedText -Text ([string]$_.Exception.Message) -Secrets @($SuperPasswordPlain)
+    }
+    foreach ($command in $commands) { [void]$CommandLog.Add($command) }
+    return [pscustomobject]@{
+        PSTypeName = 'TPM.PostgresDropReceipt.v1'
+        SchemaVersion = 1
+        Database = $DbName
+        BeforeState = $before
+        DropAttempted = $dropAttempted
+        DropCommand = $dropCommand
+        AfterState = $after
+        Verified = $verified
+        FailureStage = $failureStage
+        Error = $errorText
+        Commands = @($commands.ToArray())
+    }
+}
+
 # All five commands are checked before any database state is queried for a
 # mutation. A version string must explicitly identify PostgreSQL 8.3; a
 # PostgreSQL 12 or otherwise ambiguous client set is not a supported target.
@@ -26132,6 +26345,7 @@ function Write-PostgresRestoreReceiptFile {
             RollbackDumpPath = [string]$_.RollbackDumpPath
             PreStateExists = [bool]$_.PreStateExists
             MutationAttempted = [bool]$_.MutationAttempted
+            CreateOwnedForRollback = [bool]$_.CreateOwnedForRollback
             Changed = [bool]$_.Changed
             Succeeded = [bool]$_.Succeeded
             FailureStage = [string]$_.FailureStage
@@ -26139,6 +26353,8 @@ function Write-PostgresRestoreReceiptFile {
             RollbackAttempted = [bool]$_.RollbackAttempted
             RollbackVerified = [bool]$_.RollbackVerified
             RollbackError = [string]$_.RollbackError
+            DropReceipt = $_.DropReceipt
+            RollbackDropReceipt = $_.RollbackDropReceipt
             Commands = @($_.Commands | ForEach-Object {
                 [ordered]@{
                     Tool = [string]$_.Tool
@@ -26183,6 +26399,7 @@ function Invoke-Postgres83RestoreDatabase {
         PreStateExists = [bool]$PreState.Exists
         Encoding = [string]$Item.Encoding
         MutationAttempted = $false
+        CreateOwnedForRollback = $false
         Changed = $false
         Succeeded = $false
         FailureStage = $null
@@ -26190,27 +26407,29 @@ function Invoke-Postgres83RestoreDatabase {
         PostFailureState = $null
         FinalVerification = $null
         Commands = @()
+        DropReceipt = $null
         RollbackAttempted = $false
         RollbackVerified = $false
         RollbackError = $null
         RollbackCommands = @()
+        RollbackDropReceipt = $null
     }
     $stage = 'MutationBoundary'
     try {
         if ($PreState.Exists) {
             $stage = 'Drop'
             $receipt.MutationAttempted = $true
-            $drop = Invoke-Postgres83RestoreCommandChecked -ToolName 'dropdb.exe' -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','--if-exists',$Item.Database) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $commands -DatabaseName $Item.Database
-            $afterDrop = Get-PostgresDatabaseState -DbName $Item.Database -SuperPasswordPlain $SuperPasswordPlain
-            if (-not $afterDrop.Verified -or $afterDrop.Exists) {
-                $receipt.Changed = $true
-                throw 'The PostgreSQL database was not verified absent after drop.'
+            $receipt.DropReceipt = Invoke-Postgres83DropDatabaseVerified -DbName $Item.Database -SuperPasswordPlain $SuperPasswordPlain -CommandLog $commands -RequirePresent
+            if (-not $receipt.DropReceipt.Verified) {
+                if ($receipt.DropReceipt.DropAttempted) { $receipt.Changed = $true }
+                throw [System.InvalidOperationException]::new([string]$receipt.DropReceipt.Error)
             }
             $receipt.Changed = $true
         }
         $stage = 'Create'
         $receipt.MutationAttempted = $true
         [void](Invoke-Postgres83RestoreCommandChecked -ToolName 'createdb.exe' -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','-E',$Item.Encoding,'-T','template0',$Item.Database) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $commands -DatabaseName $Item.Database)
+        $receipt.CreateOwnedForRollback = $true
         $afterCreate = Get-PostgresDatabaseState -DbName $Item.Database -SuperPasswordPlain $SuperPasswordPlain
         if (-not $afterCreate.Verified -or -not $afterCreate.Exists) {
             $receipt.Changed = $true
@@ -26262,10 +26481,9 @@ function Restore-Postgres83DatabaseFromReceipt {
                 throw 'The verified PostgreSQL rollback dump is unavailable or changed.'
             }
         }
-        [void](Invoke-Postgres83RestoreCommandChecked -ToolName 'dropdb.exe' -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','--if-exists',$Receipt.Database) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $rollbackCommands -DatabaseName $Receipt.Database)
-        $afterDrop = Get-PostgresDatabaseState -DbName $Receipt.Database -SuperPasswordPlain $SuperPasswordPlain
-        if (-not $afterDrop.Verified -or $afterDrop.Exists) {
-            throw 'The PostgreSQL database was not verified absent during rollback.'
+        $Receipt.RollbackDropReceipt = Invoke-Postgres83DropDatabaseVerified -DbName $Receipt.Database -SuperPasswordPlain $SuperPasswordPlain -CommandLog $rollbackCommands -AllowExistingDrop ([bool]$Receipt.CreateOwnedForRollback)
+        if (-not $Receipt.RollbackDropReceipt.Verified) {
+            throw [System.InvalidOperationException]::new([string]$Receipt.RollbackDropReceipt.Error)
         }
         if ($Receipt.PreStateExists) {
             [void](Invoke-Postgres83RestoreCommandChecked -ToolName 'createdb.exe' -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','-E',$Receipt.Encoding,'-T','template0',$Receipt.Database) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $rollbackCommands -DatabaseName $Receipt.Database)
@@ -26459,6 +26677,8 @@ function Invoke-PostgresRestoreTransaction {
     $commandLog = New-Object System.Collections.Generic.List[object]
     $transactionRoot = $null
     $mutationStarted = $false
+    $receiptRefreshRequired = $false
+    $receiptPersistenceFailed = $false
     $mutationCompleted = $false
     $preStateCaptured = $false
     $backupAttempted = $false
@@ -26604,17 +26824,28 @@ function Invoke-PostgresRestoreTransaction {
         $technical.Error = $safeError
         [void]$errors.Add($safeError)
         if ($mutationStarted) {
-            $rollbackAttempted = $true
-            $stage = 'Rollback'
-            foreach ($receipt in @($receipts.ToArray() | Where-Object { $_.Changed } | Sort-Object @{ Expression = { $_.Database.ToUpperInvariant() } } -Descending)) {
-                $rolled = Restore-Postgres83DatabaseFromReceipt -Receipt $receipt -SuperPasswordPlain $SuperPasswordPlain
-                if ($rolled.RollbackVerified) {
-                    [void]$rollbackItems.Add($rolled.ItemId)
-                } else {
-                    [void]$failedItems.Remove($rolled.ItemId)
-                    [void]$rollbackFailedItems.Add($rolled.ItemId)
-                    [void]$unknownItems.Add($rolled.ItemId)
-                    [void]$rollbackErrors.Add(("{0}: {1}" -f $rolled.Database,$rolled.RollbackError))
+            $receiptRefreshRequired = $true
+            $rollbackReceipts = @($receipts.ToArray() | Where-Object { $_.Changed -and ($_.PreStateExists -or $_.CreateOwnedForRollback) } | Sort-Object @{ Expression = { $_.Database.ToUpperInvariant() } } -Descending)
+            foreach ($receipt in @($receipts.ToArray() | Where-Object { $_.Changed -and -not $_.PreStateExists -and -not $_.CreateOwnedForRollback })) {
+                [void]$failedItems.Remove($receipt.ItemId)
+                [void]$rollbackFailedItems.Add($receipt.ItemId)
+                [void]$unknownItems.Add($receipt.ItemId)
+                [void]$rollbackErrors.Add(("{0}: createdb did not establish rollback ownership; the observed database was not dropped." -f $receipt.Database))
+            }
+            if ($rollbackReceipts.Count -gt 0) {
+                $rollbackAttempted = $true
+                $stage = 'Rollback'
+                foreach ($receipt in $rollbackReceipts) {
+                    $rolled = Restore-Postgres83DatabaseFromReceipt -Receipt $receipt -SuperPasswordPlain $SuperPasswordPlain
+                    if ($rolled.RollbackVerified) {
+                        [void]$rollbackItems.Add($rolled.ItemId)
+                    } else {
+                        [void]$failedItems.Remove($rolled.ItemId)
+                        [void]$completedItems.Remove($rolled.ItemId)
+                        [void]$rollbackFailedItems.Add($rolled.ItemId)
+                        [void]$unknownItems.Add($rolled.ItemId)
+                        [void]$rollbackErrors.Add(("{0}: {1}" -f $rolled.Database,$rolled.RollbackError))
+                    }
                 }
             }
             $rollbackCompleted = ($rollbackErrors.Count -eq 0)
@@ -26648,14 +26879,15 @@ function Invoke-PostgresRestoreTransaction {
             }
         }
     }
-    if ($transactionRoot -and $receipts.Count -gt 0 -and -not $technical.ReceiptPath) {
+    if ($transactionRoot -and $receipts.Count -gt 0 -and (-not $technical.ReceiptPath -or $receiptRefreshRequired)) {
         try {
             $technical.ReceiptPath = Write-PostgresRestoreReceiptFile -EvidenceRoot $transactionRoot -Receipts $receipts.ToArray()
         } catch {
             $receiptError = ConvertTo-PostgresRedactedText -Text ([string]$_.Exception.Message) -Secrets @($SuperPasswordPlain)
+            $technical.ReceiptPath = $null
+            $receiptPersistenceFailed = $true
             $technical.ReceiptError = $receiptError
             [void]$errors.Add($receiptError)
-            [void]$residuePaths.Add($transactionRoot)
         }
     }
     $technical.Stage = $stage
@@ -26663,8 +26895,9 @@ function Invoke-PostgresRestoreTransaction {
     $technical.SourceChecks = @($sourceChecks.ToArray())
     if ($transactionRoot) {
         $cleanupAttempted = $true
-        if ($outcome -eq 'ACTION_REQUIRED') {
+        if ($outcome -eq 'ACTION_REQUIRED' -or $receiptPersistenceFailed) {
             $cleanupCompleted = $false
+            if ($receiptPersistenceFailed) { $cleanupError = [string]$technical.ReceiptError }
             [void]$residuePaths.Add($transactionRoot)
         } else {
             try {
@@ -26727,6 +26960,7 @@ function Restore-PostgresSetupCreatedDatabases {
     $restored = New-Object System.Collections.Generic.List[string]
     $failed = New-Object System.Collections.Generic.List[string]
     $errors = New-Object System.Collections.Generic.List[string]
+    $receipts = New-Object System.Collections.Generic.List[object]
     $databaseItems = @($Databases | Sort-Object @{ Expression = { $_.DbName.ToUpperInvariant() } } -Descending)
     $started = Get-Date
     $current = 0
@@ -26735,9 +26969,9 @@ function Restore-PostgresSetupCreatedDatabases {
         Write-TpmCompactExtractionProgress -Phase Repairing -Label 'PostgreSQL database rollback' -Current $current -Total $databaseItems.Count -StartedAt $started
         try {
             $log = New-Object System.Collections.Generic.List[object]
-            [void](Invoke-Postgres83RestoreCommandChecked -ToolName 'dropdb.exe' -Arguments @('-U','postgres','-h','127.0.0.1','-p','5432','--if-exists',$database.DbName) -SuperPasswordPlain $SuperPasswordPlain -CommandLog $log -DatabaseName $database.DbName)
-            $state = Get-PostgresDatabaseState -DbName $database.DbName -SuperPasswordPlain $SuperPasswordPlain
-            if (-not $state.Verified -or $state.Exists) { throw 'The setup-created database was not verified absent.' }
+            $dropReceipt = Invoke-Postgres83DropDatabaseVerified -DbName $database.DbName -SuperPasswordPlain $SuperPasswordPlain -CommandLog $log
+            [void]$receipts.Add($dropReceipt)
+            if (-not $dropReceipt.Verified) { throw [System.InvalidOperationException]::new([string]$dropReceipt.Error) }
             [void]$restored.Add($database.DbName)
         } catch {
             [void]$failed.Add($database.DbName)
@@ -26752,6 +26986,7 @@ function Restore-PostgresSetupCreatedDatabases {
         RestoredItems = @($restored.ToArray())
         FailedItems = @($failed.ToArray())
         Errors = @($errors.ToArray())
+        DatabaseReceipts = @($receipts.ToArray())
     }
 }
 
