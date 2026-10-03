@@ -3732,3 +3732,9 @@ hash, a complete executable dependency inventory and digest, and an explicit
 raw Git diff projection and digest. Each generating process records its engine
 version, edition, PSHOME, executable path and hash, timing, parameters, output
 root, and exit result. HEAD alone is not treated as executable-state identity.
+
+## Pester child-process capture
+
+The focused remediation contracts test invokes `Test-TpmPermanentProcedures.ps1` in child `pwsh.exe` processes. Test-only `Invoke-TpmTestChildProcess` starts asynchronous reads on both redirected streams before waiting, bounds child execution at 30 seconds, confirms timeout termination within a further 5 seconds, and bounds stream-drain completion. Sequential end-of-stream reads can deadlock when the other pipe fills.
+
+The child-gate assertions retain their owner-status and certification-only stale-package checks. Output normalization removes ANSI escapes and joins PowerShell's `|`-prefixed wrapped diagnostic continuations; expected status text and exit-code assertions remain unchanged. Regression coverage writes 1 MiB to each stream and verifies timeout termination.

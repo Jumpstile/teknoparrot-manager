@@ -246,6 +246,49 @@ public static class TpmFileIdentityInterop {
         }
         $matched | Should -BeTrue -Because "cleanup error must identify the exact staging directory by filesystem identity"
     }
+    function Invoke-TpmTestChildProcess {
+        param(
+            [Parameter(Mandatory)][System.Diagnostics.ProcessStartInfo]$StartInfo,
+            [ValidateRange(1, 2147483647)][int]$TimeoutMilliseconds = 30000,
+            [ValidateRange(1, 2147483647)][int]$TerminationGraceMilliseconds = 5000
+        )
+        if ($StartInfo.UseShellExecute -or -not $StartInfo.RedirectStandardOutput -or -not $StartInfo.RedirectStandardError) {
+            throw 'Test child processes must use redirected stdout and stderr without shell execution.'
+        }
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $StartInfo
+        try {
+            if (-not $process.Start()) { throw 'Test child process did not start.' }
+            # Both pipes must drain while the child runs; reading either to EOF first can deadlock the other.
+            $standardOutputTask = $process.StandardOutput.ReadToEndAsync()
+            $standardErrorTask = $process.StandardError.ReadToEndAsync()
+            $timedOut = -not $process.WaitForExit($TimeoutMilliseconds)
+            if ($timedOut) {
+                try { $process.Kill() } catch {
+                    if (-not $process.WaitForExit($TerminationGraceMilliseconds)) {
+                        throw "Test child timed out after $TimeoutMilliseconds ms and termination failed: $($_.Exception.Message)"
+                    }
+                }
+                if (-not $process.WaitForExit($TerminationGraceMilliseconds)) {
+                    throw "Test child timed out after $TimeoutMilliseconds ms and did not exit after termination."
+                }
+            }
+            $streamTasks = [System.Threading.Tasks.Task[]]@($standardOutputTask, $standardErrorTask)
+            if (-not [System.Threading.Tasks.Task]::WaitAll($streamTasks, $TerminationGraceMilliseconds)) {
+                throw "Test child output streams did not close within $TerminationGraceMilliseconds ms after process exit."
+            }
+            return [pscustomobject]@{
+                ExitCode = [int]$process.ExitCode
+                HasExited = [bool]$process.HasExited
+                TimedOut = [bool]$timedOut
+                StandardOutput = [string]$standardOutputTask.Result
+                StandardError = [string]$standardErrorTask.Result
+            }
+        } finally {
+            $process.Dispose()
+        }
+    }
+
 }
 
 AfterAll {
@@ -18017,6 +18060,46 @@ Describe "Focused RC8 remediation contracts" {
             (Get-TpmOwnerStatusDisposition -Status $status -AllowedStatuses $allowedStatuses -Dispositions $dispositions) | Should -Be $expected[$status]
         }
     }
+    It "drains large stdout and stderr concurrently" {
+        $pwshPath = (Get-Command pwsh.exe -ErrorAction Stop).Source
+        $floodScriptPath = Join-Path $TestDrive 'large-child-output.ps1'
+        $floodScript = '[Console]::Out.Write((''O'' * 1048576)); [Console]::Error.Write((''E'' * 1048576))'
+        [IO.File]::WriteAllText($floodScriptPath, $floodScript, (New-Object System.Text.UTF8Encoding $false))
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = $pwshPath
+        $startInfo.Arguments = '-NoProfile -File "{0}"' -f $floodScriptPath
+        $startInfo.UseShellExecute = $false
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $startInfo.CreateNoWindow = $true
+        $result = Invoke-TpmTestChildProcess -StartInfo $startInfo
+        $result.TimedOut | Should -BeFalse
+        $result.HasExited | Should -BeTrue
+        $result.ExitCode | Should -Be 0
+        $result.StandardOutput.Length | Should -Be 1048576
+        $result.StandardOutput[0] | Should -Be 'O'
+        $result.StandardOutput[1048575] | Should -Be 'O'
+        $result.StandardError.Length | Should -Be 1048576
+        $result.StandardError[0] | Should -Be 'E'
+        $result.StandardError[1048575] | Should -Be 'E'
+    }
+    It "terminates timed-out child processes and confirms exit" {
+        $pwshPath = (Get-Command pwsh.exe -ErrorAction Stop).Source
+        $sleepScriptPath = Join-Path $TestDrive 'sleeping-child.ps1'
+        [IO.File]::WriteAllText($sleepScriptPath, "Write-Output 'started'; Start-Sleep -Seconds 60", (New-Object System.Text.UTF8Encoding $false))
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = $pwshPath
+        $startInfo.Arguments = '-NoProfile -File "{0}"' -f $sleepScriptPath
+        $startInfo.UseShellExecute = $false
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $startInfo.CreateNoWindow = $true
+        $result = Invoke-TpmTestChildProcess -StartInfo $startInfo -TimeoutMilliseconds 5000
+        $result.TimedOut | Should -BeTrue
+        $result.HasExited | Should -BeTrue
+        $result.StandardOutput | Should -Match 'started'
+    }
+
     It "uses canonical owner statuses and scopes stale-package rejection to certification mode" {
         $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
         $gatePath = Join-Path $repoRoot 'scripts\Test-TpmPermanentProcedures.ps1'
@@ -18045,16 +18128,14 @@ Describe "Focused RC8 remediation contracts" {
             $startInfo.UseShellExecute = $false
             $startInfo.RedirectStandardOutput = $true
             $startInfo.RedirectStandardError = $true
-            $process = New-Object System.Diagnostics.Process
-            $process.StartInfo = $startInfo
-            try {
-                [void]$process.Start()
-                $output = $process.StandardOutput.ReadToEnd() + "`n" + $process.StandardError.ReadToEnd()
-                $output = [regex]::Replace($output, '\x1b\[[0-?]*[ -/]*[@-~]', '')
-
-                $process.WaitForExit()
-                return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $output }
-            } finally { $process.Dispose() }
+            $startInfo.CreateNoWindow = $true
+            $processResult = Invoke-TpmTestChildProcess -StartInfo $startInfo
+            if ($processResult.TimedOut) { throw 'Permanent procedure gate child timed out after 30000 ms.' }
+            $output = $processResult.StandardOutput + "`n" + $processResult.StandardError
+            $output = [regex]::Replace($output, '\x1b\[[0-?]*[ -/]*[@-~]', '')
+            # PowerShell may wrap redirected error records with a visual "|" continuation prefix.
+            $output = [regex]::Replace($output, '\r?\n[ \t]*\|[ \t]*', ' ')
+            return [pscustomobject]@{ ExitCode = $processResult.ExitCode; Output = $output }
         }
         $canonicalResult = & $invokeGate -ProbeReport $scenarioCanonicalUnresolved
         $canonicalResult.ExitCode | Should -Not -Be 0
