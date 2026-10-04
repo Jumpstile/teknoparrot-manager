@@ -22,7 +22,7 @@ Registers your extracted games with TeknoParrot, copies controls between games o
 | AutoSync extraction | Extracts ZIP files from a NAS or local source into a staging folder, skipping unchanged games |
 | Control propagation | Bind one game per control type; the script copies those bindings to every other game of the same type |
 | Crosshair setup | Deploys custom P1/P2 cursor images to all registered lightgun games |
-| ReShade | Installs ReShade post-processing into game folders (sharpening, CRT scanlines, colour) |
+| ReShade | Opens a non-modal preview with twelve canonical profile choices backed by ten unique pinned shader effects; the preview selector and terminal list stay synchronized |
 | dgVoodoo2 | Fixes older games that use DirectX 8, DirectDraw, or Glide |
 | GPU fix | Applies the correct AMD/NVIDIA/Intel fix flag to every registered game that supports one |
 | Force feedback (FFB) | Native FFB Blaster (paid membership) and/or a free third-party plugin, fetched live |

@@ -13,8 +13,8 @@ Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-ma
 > **Current published release: v1.0 RC7** -- read-only readiness and contract-backed compatibility warnings. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Previous published release: v1.0 RC6 (historical).
 
 > **RC8 candidate status:** this source tree prepares v1.0 RC8 with the
-> runtime-recovery, certification-identity, governance, and evidence-boundary
-> corrections described below. RC8 is not published and has no release tag or download asset yet.
+> prior RC8 corrections and direct ReShade profile selection in the preview.
+> RC8 is not published and has no release tag or download asset.
 
 ---
 
@@ -94,7 +94,7 @@ tree is for review, certification, and release preparation only.
 - **Postgres setup** — installs and configures the local PostgreSQL 8.3 database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball). Detects which registered games need it automatically; never reinstalls Postgres or recreates an existing database.
 - **Automatic compatibility warnings** — every run checks for known install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6), pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN), and known GPU-vendor incompatibilities (AMD/Intel), with details in ACTION REQUIRED.
 - **Game-specific setup notes** — every run checks the community compatibility database (eggmansworld.github.io/TeknoParrot) for any registered game with special setup notes — workarounds, known quirks, and the expected executable name — and writes them to the separate `TeknoParrot-Manager-game-notes.txt` report. Raw source notes are not copied into ACTION REQUIRED.
-- **LaunchBox direct integration / HyperSpin 2 plugin guidance** — writes games straight into LaunchBox's own library; the normal RC8 flow does not export HyperSpin files and directs operators to the plugin path.
+- **LaunchBox direct integration / HyperSpin 2 plugin guidance** -- writes games straight into LaunchBox's own library; the normal RC8 flow does not export HyperSpin files and directs operators to the plugin path.
 - **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
 - **Preview / dry-run mode** — see what AutoSync/Register would do (extract, register, repair, propagate) with zero files written, then decide whether to apply it for real.
 - **Download audit logging** -- every shared-pipeline download records its authoritative source URL, filename, version when known, computed SHA-256, and transfer metrics (method, size, elapsed time, average speed). ReShade additionally logs the installer signer/subject, Authenticode status, signer thumbprint, and the status/thumbprint/trust result; its SHA-256 is an audit hash, not a published-digest comparison. BepInEx records its GitHub release source, filename/version, and computed SHA-256; when GitHub supplies an asset digest, the downloader validates it before extraction and logs/fails closed on a mismatch. dgVoodoo2 uses the same digest validation when available. FFBArcadePlugin, Eggman/RomVault dat, the PostgreSQL guide bundle, the TPM update package, and TeknoParrotUI thumbnail downloads receive source/hash/transfer audit entries; unsigned or digest-less sources are not described as cryptographically authenticated.
@@ -498,9 +498,10 @@ Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun g
 
 ReShade adds post-processing effects without changing game data. TPM does not automatically remove unowned or changed hooks; review those through advanced troubleshooting.
 **Beginner visual profiles:** ReShade setup opens an optional non-modal
-comparison gallery and immediately leaves the terminal at the authoritative
-chooser. The terminal remains usable if the gallery is behind another window,
-closed, unavailable, or fails to open:
+comparison gallery with a profile drop-down and the existing view controls.
+The terminal numbered chooser remains available; both inputs select the same
+profile and stay synchronized. The terminal still works if the gallery is
+behind another window, closed, unavailable, or fails to open:
 
 ```text
 [1] Original
@@ -516,16 +517,18 @@ closed, unavailable, or fails to open:
 [11] Sepia Tone
 [12] Vignette
 
-Current selection: none -- choose 1-12 first
+Current selection: Original (when the preview is available)
 Choose: [1-12] Select profile  [U] Use selected profile  [R] Reopen preview  [B] Back  [D] Details
 ```
 
 
-The terminal chooser is the only profile selector. Numbered selection changes
-the selected profile and the optional gallery follows that state; the gallery
-has no second profile-selection control. The chooser and gallery show the
-friendly description first, followed by the approved shader filename and
-technique name:
+Choose a profile directly from the gallery drop-down or use its matching
+number in the terminal. Either choice updates the same selection and preview;
+the view buttons and 0-100 slider remain independent. The gallery and
+terminal list show the friendly description and the approved shader filename
+and technique name for the selected profile:
+The selector lists twelve canonical profiles backed by ten unique pinned
+shader effects.
 
 ```text
 [1] Original
@@ -572,9 +575,9 @@ Shader sources are live-fetched and integrity-checked during deployment; they
 are not bundled in the release ZIP. These labels identify the intended shader
 and technique without exposing internal cache paths.
 
-`U` is the only path toward deployment. `B` cancels without changes, `D`
-shows descriptions, and `R` reopens the optional gallery without taking
-terminal input away from the user. The gallery uses a safe deterministic
+`U` in the terminal is the only path toward deployment. `B` cancels without
+changes, `D` shows descriptions, and `R` reopens the optional gallery without
+taking terminal input away from the user. The gallery uses a safe deterministic
 comparison based on the bundled
 `PreviewAssets\ReShadePreviews\TPM-preview-landscape.png` reference image.
 It does not run the game or execute ReShade shaders. TPM validates the image
@@ -583,9 +586,10 @@ metadata. `Before` is the untouched baseline, `After` is a TPM preview
 approximation of the selected profile, `Split` shows baseline on the left and
 the approximation on the right, and the slider moves that boundary from 0
 (all processed) to 100 (all baseline). The actual in-game result may vary.
-Choosing a profile does not write files; deployment remains behind the
-explicit confirmation. If rendering or display is unavailable, typed
-selection remains available.
+Choosing a profile in either input does not write files; deployment remains
+behind terminal `U` and the existing explicit confirmation. After the chooser
+returns, the preview closes automatically. If rendering or display is
+unavailable, terminal selection remains available.
 
 After deployment, the result states what changed and what did not change. It
 separates newly installed or updated TPM-managed files, adopted replacements,

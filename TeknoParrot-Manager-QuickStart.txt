@@ -346,29 +346,38 @@
   HOW TO SET IT UP
   Before choosing a profile, TPM explains:
     Choose how your game should look.
-    The optional preview window is non-modal; the terminal chooser remains
-    active even if the window is behind, closed, unavailable, or fails.
-    The terminal is the only profile selector. The gallery follows its
-    numbered selection and has no second profile-selection control.
+    The optional preview window is non-modal. Select a profile directly from
+    its drop-down or enter the matching number in the terminal; both inputs
+    update the same selected profile. The terminal remains usable if the
+    preview is behind, closed, unavailable, or fails.
     Nothing will be changed until you choose U and then confirm.
-  The terminal always shows:
+  The gallery and terminal offer the same twelve profiles:
     [1] Original
     [2] Clean & Sharp
     [3] Classic Arcade CRT
     [4] Vivid Arcade
     [5] Enhanced Arcade
-    Choose: [1-5] Select profile  [U] Use selected profile  [R] Reopen preview
-            [B] Back  [D] Details
+    [6] Cartoon
+    [7] Contrast Curves
+    [8] Film Grain
+    [9] Levels
+    [10] Monochrome
+    [11] Sepia Tone
+    [12] Vignette
+  Choose: [1-12] Select profile  [U] Use selected profile  [R] Reopen preview
+          [B] Back  [D] Details
   U is the only path toward deployment; B cancels without changes and D
-  returns after showing details. A terminal-only selection remains available
-  when the preview cannot open.
+  returns after showing details. Selecting a profile does not write files;
+  the existing explicit confirmation still gates deployment. The preview
+  closes automatically when the chooser returns.
     The optional gallery uses a safe approximation based on the bundled and
     validated PreviewAssets\ReShadePreviews\TPM-preview-landscape.png
     reference image. It does not run the game or execute ReShade shaders.
-    Before is the untouched baseline, After is a TPM approximation of the
-    selected profile, and Split/slider compare that approximation with the
-    baseline. Actual in-game results may vary. Its identity and hash are
-    recorded in the preview cache.
+    The selected profile's description and approved shader techniques are
+    shown in the gallery. Before is the untouched baseline, After is a TPM
+    approximation of the selected profile, and Split/slider compare that
+    approximation with the baseline. The slider remains independent of the
+    selected profile; actual in-game results may vary.
   The result states what changed and what did not change. Unsafe or malformed
   paths and ownership metadata are listed with the direct next action to
   repair or review the issue, then rerun ReShade setup with Select. Native

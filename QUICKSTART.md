@@ -1,6 +1,6 @@
 # TeknoParrot Manager — Quick Start
 
-> Current published release: v1.0 RC7 -- test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [RC7 release archive](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7). Previous published release: v1.0 RC6 (historical). v1.0 RC8 is the candidate being prepared and is not published. Final Version 1.0 remains unpublished.
+> Current published release: v1.0 RC7 -- test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [RC7 release archive](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7). Previous published release: v1.0 RC6 (historical). v1.0 RC8 is the candidate under review and is not published. Final Version 1.0 remains unpublished.
 
 Full documentation: [README.md](README.md)
 
@@ -234,6 +234,14 @@ rolled-back, and failed outcomes.
 | CRT_Royale / CRT_Lottes | Classic scanlines and curvature      |
 | Levels / Vibrance       | Vivid colours on modern monitors     |
 | Border                  | Arcade cabinet artwork in black bars |
+
+The optional non-modal preview offers twelve canonical profiles backed by ten
+unique pinned shader effects. Choose a profile from the preview drop-down or
+the terminal numbered chooser; both stay synchronized. The 0-100 comparison
+slider and view mode remain independent of profile choice. The bundled-image
+preview does not run the game or execute ReShade shaders. A preview choice is
+transient: terminal `U` and the existing explicit confirmation are still
+required before deployment, and the preview closes when the chooser returns.
 
 ### Advanced emergency fallback (normal users should use mode 5)
 

@@ -29,7 +29,11 @@ Invoke-GateStep 'ASCII and parse' {
     if ($errors.Count -ne 0) { throw "$($errors.Count) parse error(s) found" }
 }
 Invoke-GateStep 'PSScriptAnalyzer' {
-    Invoke-ScriptAnalyzer -Path $source -Severity Error,Warning -Settings $settings -ErrorAction Stop
+    $analyzerFindings = @(Invoke-ScriptAnalyzer -Path $source -Severity Error,Warning -Settings $settings -ErrorAction Stop)
+    if ($analyzerFindings.Count -gt 0) {
+        $details = @($analyzerFindings | ForEach-Object { '{0} ({1}) at {2}:{3}: {4}' -f $_.RuleName, $_.Severity, $_.ScriptName, $_.Line, $_.Message })
+        throw "PSScriptAnalyzer returned $($analyzerFindings.Count) finding(s): $($details -join '; ')"
+    }
 }
 Invoke-GateStep 'Main Pester' { & pwsh -NoProfile -Command "Invoke-Pester -Path '$tests' -CI" }
 if (Test-Path -LiteralPath $supportTests -PathType Leaf) { Invoke-GateStep 'SupportPackage Pester' { & pwsh -NoProfile -Command "Invoke-Pester -Path '$supportTests' -CI" } }

@@ -21,6 +21,22 @@
 - Publication remains HOLD. No release notes were published externally, and
   no wiki content was pushed.
 
+## v1.0 RC8 (candidate, not published) -- direct ReShade preview selection
+
+- RC7 remains the current published release. RC8 has no public tag, release
+  asset, or Scripts mirror; final Version 1.0 remains unpublished.
+- The ReShade preview gallery adds a direct profile selector for the twelve
+  canonical profiles backed by ten unique pinned shader effects. The preview
+  selector and terminal numbered chooser stay synchronized; slider/view state
+  remains independent. Preview choices remain transient until terminal `U`
+  and the existing explicit confirmation. The gallery closes when the chooser
+  returns.
+- Home and Quick-Start staging content describe the synchronized selector,
+  approximation-only preview, confirmation boundary, and automatic cleanup.
+  This is staging content only; no live wiki page was inspected or changed.
+- No release package, tag, publication, certification, or release action was
+  performed.
+
 ## v1.0 RC8 (candidate, not published) -- runtime recovery and release-integrity preparation
 
 - RC7 remains the current published release. RC8 has no public tag, release

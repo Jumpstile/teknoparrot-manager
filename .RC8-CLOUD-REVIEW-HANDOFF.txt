@@ -1,0 +1,157 @@
+RC8 RELEASE READINESS - CLOUD SOURCE REVIEW HANDOFF
+================================================================
+Generated: 2026-10-04T06:36:22Z
+Worktree: C:\REPOS\teknoparrot-manager\.worktrees\rc8-release-readiness
+Branch: cloud-review/rc8-readiness-20261004 (NEW - review only)
+
+CRITICAL NOTE: Earlier Commit Already Pushed to Existing Branch
+================================================================
+**Commit 54b192f was already pushed to release/rc8-readiness-2026-10-01.**
+New review branch cloud-review/rc8-readiness-20261004 is created fresh
+to ensure clean handoff. The existing branch contains a commit that should
+have been split/staged differently.
+
+EXISTING BRANCH STATUS (release/rc8-readiness-2026-10-01)
+================================================================
+Commit: 54b192fd43f9b1421598a6646809470c71ef666e
+Date: 2026-10-04 (just pushed)
+Message: RC8 readiness: closed-gallery precedence fix + direct ReShade 
+         selector + full RC9->RC8 reconciliation
+Changes: 24 files (source, docs, tests)
+
+Pushed changes were NOT intended for this handoff and should be noted
+as out-of-order local exploration that got committed prematurely.
+
+NEW REVIEW BRANCH (cloud-review/rc8-readiness-20261004)
+================================================================
+Base: 9a9ac19e87bb2da10c33d1d387665f9b87b412bc (4 commits back)
+Staged for commit: 25 files
+  - All 24 from existing branch commit
+  - PLUS: docs/wiki-updates/ReShade.md (omitted from prior commit)
+
+Purpose: Bounded source-only review by Sonnet independent audit
+Git state: No secrets detected (only doc keyword false positives)
+Untracked artifacts excluded: _TPM-RC8-Package-d83aa303-* (321 PNGs, runtime)
+
+STAGED FILE INVENTORY (25 files for review commit)
+================================================================
+Source code changes:
+  - TeknoParrot-Manager.ps1
+  - Tests/TeknoParrot-Manager.Tests.ps1
+  - scripts/Run-TpmQualityGate.ps1
+
+Documentation (architecture, process, evidence):
+  - ARCHITECTURE.md
+  - QUICKSTART.md
+  - README.md
+  - RELEASE-SAFETY-CHECKLIST.md
+  - SECURITY.md
+  - docs/AUTO_UPDATE.md
+  - docs/ENGINEERING-WORKFLOW.md
+  - docs/RC8-REMEDIATION-INVENTORY.md
+  - docs/TPM-CERTIFICATION-SUITE.md
+  - docs/RESHADE-DGVOODOO2-AUTODOWNLOAD-INVARIANT-INVENTORY.md
+  - docs/RESHADE-PROFILE-SELECTION-INVARIANT-INVENTORY.md
+  - docs/remediation/PR-321-control-board.md
+  - docs/remediation/PR-321-reconciliation.md
+  - docs/remediation/slices/PR-321-current-slice.md
+  - docs/remediation/slices/TPM-RESHADE-TEN-EFFECTS-001.md
+
+User-facing release notes:
+  - TeknoParrot-Manager-CHANGELOG.txt
+  - TeknoParrot-Manager-QuickStart.txt
+  - TeknoParrot-Manager-README.txt
+
+Wiki updates:
+  - docs/wiki-updates/Changelog.md
+  - docs/wiki-updates/Home.md
+  - docs/wiki-updates/Quick-Start.md
+  - docs/wiki-updates/ReShade.md [ADDED THIS HANDOFF]
+
+VERIFICATION STATUS
+================================================================
+[OK] Parse check: TeknoParrot-Manager.ps1 valid PowerShell
+[OK] ASCII-only: No Unicode bytes detected
+[OK] Secrets scan: False positives only (doc keywords)
+[OK] Final aggregate gate: 2026-10-04T06:06:41Z-06:16:43Z PASS (exit 0)
+[OK] Pester main suite: 1305/1305 PASS
+[OK] Pester SupportPackage: 42/42 PASS
+[OK] All permanent gates: PASS (freshness confirmed 2026-10-04)
+
+KNOWN GAPS & OPEN ITEMS FOR CLOUD REVIEW
+================================================================
+1. **Sonnet independent re-audit required**
+   - FinalReview3 ran claude-haiku-4-5:high (self-review)
+   - This branch needs independent Sonnet review of source logic
+   - Focus: closed-gallery precedence, direct ReShade selector, RC9->RC8 state
+
+2. **ReShade effects count discrepancy - reconciliation needed**
+   - FinalReview3 reported "17 effects"
+   - TPM-RESHADE-TEN-EFFECTS-001.md spec says 10 unique + 12 profiles
+   - Actual inventory in script: needs independent count/verification
+   - This is a factual mismatch in evidence; cloud review should verify
+
+3. **Report evidence timing note**
+   - Rows 522/523 in PR-321-reconciliation.md were edited AFTER bg_2 gate completed
+   - bg_2 is historical (prior gate run), not current-state proof
+   - Recommend: retrieve actual test receipts from permanent gate artifacts
+
+4. **Tests line 10678 verification**
+   - RC9->RC10 comparator assertion is new
+   - FinalReview3 approved it per permanent procedure
+   - Cloud review should independently assess correctness
+
+LOCAL WORK ONLY (NOT INCLUDED IN THIS REVIEW)
+================================================================
+These remain local/Windows-only and are NOT pushed:
+  - Arcade smoke tests (PostgreSQL, ReShade direct selector, all flows)
+  - Owner runtime smoke (TeknoParrot interaction, backup/restore)
+  - PS5.1 WinForms/installer package testing
+  - Final internal RC8 package build and validation
+  - Desktop Commander and shared terminal hosts
+
+WHAT CLOUD SOURCE REVIEW SHOULD DO
+================================================================
+1. Independent Sonnet audit of 24 changed source/doc/test files
+2. Verify ReShade effects inventory (10 approved + 12 profiles vs claimed 17)
+3. Assess closed-gallery terminal-choice precedence logic
+4. Review direct ReShade profile selector implementation
+5. Check RC9->RC8 reconciliation completeness
+6. Confirm no unrequested feature additions
+7. Flag any missed gaps or remaining SOURCE REMEDIATION items
+
+WHAT CLOUD REVIEW SHOULD NOT DO
+================================================================
+- Do not run Arcade smoke (requires actual TeknoParrot/PostgreSQL)
+- Do not run WinForms tests (requires PS5.1, Windows shell)
+- Do not build/validate package (Windows-only binary packing)
+- Do not commit/push/merge (advisory review only)
+- Do not run live network tests (GitHub auth, online resources)
+
+AFTER CLOUD REVIEW COMPLETES
+================================================================
+1. Cloud review results delivered via GitHub review comment
+2. Local owner addresses any findings
+3. Local full gate re-run (parse, PSScriptAnalyzer, Pester, permanent gate)
+4. Local Arcade smoke + runtime proof collected
+5. Final package built and tested locally
+6. Release authorization decision by owner (not Sonnet)
+
+DO NOT CLAIM READINESS OR RE-RUN BROAD GATES PENDING CLOUD REVIEW
+================================================================
+This handoff pauses further local changes until cloud review completes.
+Do not:
+  - Re-run full Pester, SupportPackage, gates
+  - Claim RC8 is ready for publication
+  - Build release artifacts
+  - Merge or tag
+  - Make additional commits to either branch
+
+STATUS: AWAITING CLOUD SOURCE REVIEW
+================================================================
+Branch: https://github.com/Jumpstile/teknoparrot-manager/tree/cloud-review/rc8-readiness-20261004
+Target: RC8 (unpublished candidate)
+Scope: Source audit only, bounded to staged 25 files
+Deadline: Cloud review turn-around time (no explicit constraint from handoff)
+
+End handoff document.

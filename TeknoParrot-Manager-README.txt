@@ -283,8 +283,11 @@
     approved effect hashes, and intensity variant still match. Missing,
     corrupt, stale, or unsupported history falls back to fresh selection; TPM
     never copies historical file paths.
-    An optional non-modal visual gallery opens before final confirmation, but
-    the terminal chooser is always immediately available and authoritative:
+    An optional non-modal gallery opens before final confirmation. Its profile
+    drop-down lists the twelve canonical profiles backed by ten unique pinned
+    shader effects. The terminal chooser lists the same profiles as numbers
+    1-12; either input updates the same selected profile and preview. The
+    comparison view and 0-100 slider are independent of profile selection.
       [1] Original
       [2] Clean & Sharp
       [3] Classic Arcade CRT
@@ -299,18 +302,20 @@
       [12] Vignette
     Choose: [1-12] Select profile  [U] Use selected profile  [R] Reopen preview
             [B] Back  [D] Details
-    The terminal is the only profile selector. Numbered selection updates the
-    optional preview; the gallery has no second profile-selection control.
     The terminal remains usable if the gallery is behind another window,
     closed, unavailable, or fails. U is the only path toward deployment; B
     cancels without changes and D returns after showing details. The gallery
     is a safe approximation based on the bundled TPM-owned landscape reference
     image from PreviewAssets\ReShadePreviews\TPM-preview-landscape.png. It
-    does not run the game or execute ReShade shaders. Before is the untouched
-    baseline, After is a TPM approximation of the selected profile, Split
-    places baseline left and the approximation right, and the slider moves
-    that boundary from all processed to all baseline. Actual in-game results
-    may vary.
+    does not run the game or execute ReShade shaders. The selected profile's
+    description and approved shader filenames/techniques appear in the
+    preview. Before is the untouched baseline, After is a TPM approximation
+    of the selected profile, Split places baseline left and the approximation
+    right, and the slider moves that boundary from all processed to all
+    baseline. Actual in-game results may vary.
+    Selecting a profile does not write files. Deployment remains behind U and
+    the existing explicit confirmation. The preview closes automatically when
+    the terminal chooser returns.
 
     DLL, generated preset, and approved effect files are staged and promoted
     together. Before replacing a destination, TPM requires a matching

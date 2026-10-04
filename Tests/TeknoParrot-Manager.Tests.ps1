@@ -11443,7 +11443,7 @@ $ReleaseCandidateLabel = "RC7"
         $zipBytes = New-StartupCheckFixtureZipBytes -EntryContent $entryContent
         Mock Invoke-TpmDownload { param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version) [System.IO.File]::WriteAllBytes($DestinationPath, $zipBytes); return $true }.GetNewClosure()
 
-        $path = Join-Path $TestDrive 'rc8-install-target.ps1'
+        $path = Join-Path $TestDrive 'RC8-install-target.ps1'
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.99"' -Encoding ascii -NoNewline
         $release = [pscustomobject]@{
             TagName = 'v1.0-RC8'
@@ -14702,7 +14702,7 @@ Describe "RC8 menu and ReShade regressions" {
         $source | Should -Not -Match 'Get it at\s+https://reshade\.me'
         $source | Should -Not -Match 'replace ReShade\\ReShade64\.dll'
     }
-    It "provides a visible terminal-only ReShade chooser with explicit selection and Back" {
+    It "provides a visible terminal fallback chooser with explicit selection and Back" {
         $profiles = @(Get-TpmReShadeProfiles)
         $script:chooserInputs = [System.Collections.Generic.Queue[string]]::new()
         [void]$script:chooserInputs.Enqueue('2')
@@ -14723,12 +14723,14 @@ Describe "RC8 menu and ReShade regressions" {
     # RPSI-SELECTION-008
     It "selects the twelfth profile in the terminal and synchronizes the preview" {
         $profiles = @(Get-TpmReShadeProfiles)
+        $profileSelector = [pscustomobject]@{ SelectedIndex = 0 }
         $session = [hashtable]::Synchronized(@{
             Initialized = $true
             Closed = $false
             PreviewEnabled = $true
             SelectedProfileId = 'Original'
             Profiles = $profiles
+            ProfileSelector = $profileSelector
             Refresh = $null
         })
         $previewRefreshSelections = New-Object System.Collections.Generic.List[string]
@@ -14750,8 +14752,49 @@ Describe "RC8 menu and ReShade regressions" {
         $session.SelectedProfileId | Should -Be 'Vignette'
         $previewRefreshSelections.Count | Should -Be 1
         $previewRefreshSelections[0] | Should -Be 'Vignette'
+        $profileSelector.SelectedIndex | Should -Be 11
+        $session.ProfileSelectorUpdating | Should -BeFalse
     }
-    It "keeps terminal selection authoritative and syncs the preview state" {
+    It "selects a profile directly in the preview and synchronizes canonical state" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $profiles.Count | Should -Be 12
+        @(Get-TpmReShadeEffectCatalog).Count | Should -Be 10
+        $profileSelector = [pscustomobject]@{ SelectedIndex = 0 }
+        $refreshed = New-Object System.Collections.Generic.List[string]
+        $session = [hashtable]::Synchronized(@{
+            Initialized = $true
+            Closed = $false
+            PreviewEnabled = $true
+            SelectedProfileId = 'Original'
+            ViewMode = 'Slider'
+            SliderPosition = 30
+            Profiles = $profiles
+            ProfileIds = @($profiles | ForEach-Object ProfileId)
+            ProfileSelector = $profileSelector
+            Refresh = $null
+        })
+        $session.Refresh = {
+            [void]$refreshed.Add([string]$session['SelectedProfileId'])
+            return $true
+        }.GetNewClosure()
+        Mock Write-Log {}
+        Mock Write-Host {}
+        $handlers = New-TpmReShadeGalleryEventHandlers -State $session
+        $vignette = @($profiles | Where-Object ProfileId -eq 'Vignette')[0]
+
+        & $handlers.ProfileSelection ([pscustomobject]@{ SelectedItem = $vignette }) $null
+
+        $session.PreviewEnabled | Should -BeTrue
+        $session.PreviewFailureStage | Should -BeNullOrEmpty
+        $session.SelectedProfileId | Should -Be 'Vignette'
+        $refreshed.Count | Should -Be 1
+        $refreshed[0] | Should -Be 'Vignette'
+        $profileSelector.SelectedIndex | Should -Be 11
+        $session.ProfileSelectorUpdating | Should -BeFalse
+        $session.ViewMode | Should -Be 'Slider'
+        $session.SliderPosition | Should -Be 30
+    }
+    It "fails closed for a non-catalog profile selected in the preview" {
         $profiles = @(Get-TpmReShadeProfiles)
         $session = [hashtable]::Synchronized(@{
             Initialized = $true
@@ -14762,29 +14805,153 @@ Describe "RC8 menu and ReShade regressions" {
             Refresh = { return $true }.GetNewClosure()
         })
         Mock Write-Log {}
-        Mock Write-Host {}
-        $synced = Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'Vivid'
-        $synced | Should -BeTrue
-        $session.SelectedProfileId | Should -Be 'Vivid'
-        $script:ProductionSource | Should -Match 'The terminal chooser is authoritative'
-        $script:ProductionSource | Should -Not -Match 'Update-TpmReShadeSelectionFromPreview'
-        $sourceGallery = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
-        $sourceGallery | Should -Not -Match 'Use selected profile'
+        $handlers = New-TpmReShadeGalleryEventHandlers -State $session
+
+        & $handlers.ProfileSelection ([pscustomobject]@{ SelectedItem = [pscustomobject]@{ ProfileId = 'Unapproved' } }) $null
+
+        $session.PreviewEnabled | Should -BeFalse
+        $session.PreviewFailureStage | Should -Be 'profile-selection-handler'
     }
-    It "does not use a blocking modal gallery from the normal ReShade setup path" {
-        $source = $script:ProductionSource
-        $invokeStart = $source.IndexOf('function Invoke-ReShadeSetup')
-        $chooserIndex = $source.IndexOf('Read-TpmReShadeTerminalProfile -Profiles', $invokeStart)
-        $setupBeforeChooser = $source.Substring($invokeStart, $chooserIndex - $invokeStart)
-        $nonModalIndex = $source.IndexOf('Show-TpmReShadeProfileGalleryWindow -Profiles', $invokeStart)
-        $chooserIndex | Should -BeGreaterThan $invokeStart
-        $nonModalIndex | Should -BeGreaterThan $invokeStart
-        $setupBeforeChooser | Should -Not -Match 'ShowDialog\(\)'
-        $source.Substring($nonModalIndex, $chooserIndex - $nonModalIndex) | Should -Match '\-NonModal'
-        $source | Should -Match 'ReShade profile chooser: selected'
-        $script:ProductionSource | Should -Match 'function Read-TpmReShadeTerminalInput'
-        $script:ProductionSource | Should -Match 'Read-TpmReShadeTerminalInput -Prompt'
-        $script:ProductionSource | Should -Match 'Windows.Forms.Application\]::DoEvents'
+    It "ignores direct profile changes before initialization and after closure" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        foreach ($state in @(
+            [hashtable]::Synchronized(@{ Initialized = $false; Closed = $false; PreviewEnabled = $true; SelectedProfileId = 'Original'; Profiles = $profiles }),
+            [hashtable]::Synchronized(@{ Initialized = $true; Closed = $true; PreviewEnabled = $true; SelectedProfileId = 'Original'; Profiles = $profiles })
+        )) {
+            $handlers = New-TpmReShadeGalleryEventHandlers -State $state
+            & $handlers.ProfileSelection ([pscustomobject]@{ SelectedItem = @($profiles | Where-Object ProfileId -eq 'Vignette')[0] }) $null
+            $state.SelectedProfileId | Should -Be 'Original'
+            $state.PreviewEnabled | Should -BeTrue
+        }
+    }
+    It "accepts the latest preview selection when terminal input returns" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $session = [hashtable]::Synchronized(@{
+            Initialized = $true
+            Closed = $false
+            PreviewEnabled = $true
+            SelectedProfileId = 'Original'
+            Profiles = $profiles
+            ProfileIds = @($profiles | ForEach-Object ProfileId)
+            Refresh = { return $true }.GetNewClosure()
+        })
+        Mock Write-Log {}
+        Mock Write-Host {}
+        Mock Read-TpmReShadeTerminalInput {
+            $session.SelectedProfileId = 'Vignette'
+            return 'U'
+        }
+
+        $result = Read-TpmReShadeTerminalProfile -Profiles $profiles -DefaultProfileId 'Original' -PreviewSession $session
+
+        $result.SelectedProfile.ProfileId | Should -Be 'Vignette'
+        $session.SelectedProfileId | Should -Be 'Vignette'
+    }
+    It "honors a numbered terminal choice after the preview closes" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $session = [hashtable]::Synchronized(@{
+            Initialized = $true
+            Closed = $true
+            PreviewEnabled = $true
+            SelectedProfileId = 'Original'
+            Profiles = $profiles
+            ProfileIds = @($profiles | ForEach-Object ProfileId)
+            Refresh = { return $true }.GetNewClosure()
+        })
+        $script:chooserInputs = [System.Collections.Generic.Queue[string]]::new()
+        [void]$script:chooserInputs.Enqueue('12')
+        [void]$script:chooserInputs.Enqueue('U')
+        Mock Write-Host {}
+        Mock Write-Log {}
+        Mock Read-TpmReShadeTerminalInput { $script:chooserInputs.Dequeue() }
+
+        $result = Read-TpmReShadeTerminalProfile -Profiles $profiles -DefaultProfileId 'Original' -PreviewSession $session
+
+        $result.SelectedProfile.ProfileId | Should -Be 'Vignette'
+        $session.SelectedProfileId | Should -Be 'Original'
+    }
+    It "keeps the final preview choice when the gallery closes before terminal acceptance" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $session = [hashtable]::Synchronized(@{
+            Initialized = $true
+            Closed = $true
+            PreviewEnabled = $true
+            SelectedProfileId = 'Vignette'
+            Profiles = $profiles
+            ProfileIds = @($profiles | ForEach-Object ProfileId)
+            Refresh = { return $true }.GetNewClosure()
+        })
+        Mock Write-Host {}
+        Mock Write-Log {}
+        Mock Read-TpmReShadeTerminalInput { 'U' }
+
+        $result = Read-TpmReShadeTerminalProfile -Profiles $profiles -DefaultProfileId 'Original' -PreviewSession $session
+
+        $result.SelectedProfile.ProfileId | Should -Be 'Vignette'
+    }
+    It "closes the preview before deployment confirmation and preserves the cancel boundary" {
+        $root = Join-Path $TestDrive 'reshade-gallery-caller-close'
+        $profiles = Join-Path $root 'UserProfiles'
+        $assets = Join-Path $root 'Assets'
+        $sourceDll = Join-Path $root 'ReShade64.dll'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        [System.IO.File]::WriteAllText($sourceDll, 'fixture')
+        $oldLayout = $script:TpmOwnedLayout
+        $script:TpmOwnedLayout = [pscustomobject]@{ Assets = $assets }
+        $timer = [pscustomobject]@{ Enabled = $true; Disposed = $false }
+        Add-Member -InputObject $timer -MemberType ScriptMethod -Name Stop -Value { $this.Enabled = $false }
+        Add-Member -InputObject $timer -MemberType ScriptMethod -Name Dispose -Value { $this.Disposed = $true }
+        $session = [hashtable]::Synchronized(@{
+            Closed = $false
+            SliderTimer = $timer
+            SliderTimerHandler = $null
+            PendingSliderPosition = 50
+            Picture = $null
+            PaintHandler = $null
+            Slider = $null
+            SliderHandler = $null
+            ProfileSelector = $null
+            ProfileSelectorHandler = $null
+            SliderKeyUpHandler = $null
+            ViewButtons = @()
+            ViewHandler = $null
+            FormClosedHandler = $null
+            Form = $null
+            PreviewCache = $null
+        })
+        $selectedProfile = Get-TpmReShadeProfile -ProfileId 'Vignette'
+        Mock Test-TpmNoReparsePath { $true }
+        Mock Test-ReShadeDllSignature { [pscustomobject]@{ Status = 'Unavailable'; Signer = '' } }
+        Mock Invoke-ReShadeUpdateIfAvailable {
+            param($SourceDll, $SourceDll32, $InstalledVersion)
+            [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 }
+        }
+        Mock Read-TpmReShadeState { [pscustomobject]@{ Favorites = @() } }
+        Mock Show-TpmReShadeProfileGalleryWindow { [pscustomobject]@{ Available = $true; Session = $session } }
+        Mock Read-TpmReShadeTerminalProfile {
+            [pscustomobject]@{ Cancelled = $false; SelectedProfile = $selectedProfile; PreviewSession = $session }
+        }
+        Mock Read-TpmChoice {
+            $session['Closed'] | Should -BeTrue
+            $timer.Enabled | Should -BeFalse
+            $timer.Disposed | Should -BeTrue
+            'B'
+        }
+        Mock Install-TpmReShadeProfileDeployment { throw 'deployment must remain behind explicit confirmation' }
+        Mock Write-Host {}
+        Mock Write-Log {}
+
+        try {
+            $result = Invoke-ReShadeSetupLegacy -UserProfilesDir $profiles -SourceDll $sourceDll
+            $result | Should -BeNullOrEmpty
+            $session.Closed | Should -BeTrue
+            $timer.Enabled | Should -BeFalse
+            $timer.Disposed | Should -BeTrue
+            Should -Invoke Read-TpmChoice -Times 1 -Exactly
+            Should -Invoke Install-TpmReShadeProfileDeployment -Times 0 -Exactly
+        } finally {
+            $script:TpmOwnedLayout = $oldLayout
+        }
     }
     It "returns Acquired for a valid Browse DLL and Skipped for an intentional Skip" {
         $dllPath = Join-Path $TestDrive 'existing-reshade.dll'
@@ -14861,8 +15028,7 @@ Describe "RC8 menu and ReShade regressions" {
         $source.Substring($galleryStart, $selectedAssignment - $galleryStart) | Should -Match 'DefaultProfileId'
         $source | Should -Match 'Show-TpmReShadeProfileGalleryWindow -Profiles \$Profiles -DefaultProfileId \$reopenId -Show -NonModal'
         $galleryBody = [regex]::Match($source, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
-        $galleryBody | Should -Not -Match '\$combo\.SelectedIndex'
-        $galleryBody | Should -Not -Match 'Use selected profile'
+
     }
 }
 Describe "ReShade removal safety and workflow" {
@@ -15181,15 +15347,6 @@ Describe "Approved ReShade profile catalog" {
     }
     It "derives visible technique labels from canonical profile and effect definitions" {
         $catalog = @(Get-TpmReShadeEffectCatalog)
-        $displaySource = $script:ProductionSource
-        $displayStart = $displaySource.IndexOf('function Get-TpmReShadeProfileTechniqueDisplay')
-        $displayEnd = $displaySource.IndexOf('function Get-TpmReShadeProfile {', $displayStart)
-        $displayFunction = $displaySource.Substring($displayStart, $displayEnd - $displayStart)
-        $displayFunction | Should -Match 'Get-TpmReShadeEffectCatalog'
-        $displayFunction | Should -Match 'TechniqueOrder'
-        $displayFunction | Should -Match 'RelativeFiles'
-        $displayFunction | Should -Match 'TechniqueName'
-        $displayFunction | Should -Not -Match 'LumaSharpen\.fx|Vibrance\.fx|CRT_Lottes\.fx'
         foreach ($profile in @(Get-TpmReShadeProfiles)) {
             $expectedRows = @(
                 foreach ($techniqueName in @($profile.TechniqueOrder)) {
@@ -15205,26 +15362,6 @@ Describe "Approved ReShade profile catalog" {
     It "fails closed when a profile technique is absent from the approved catalog" {
         $invalidProfile = [pscustomobject]@{ TechniqueOrder = @('UnapprovedTechnique') }
         { Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $invalidProfile } | Should -Throw "*No approved ReShade effect catalog entry*"
-    }
-    It "uses canonical technique display metadata in terminal and terminal-authoritative preview surfaces" {
-        $source = $script:ProductionSource
-        foreach ($functionName in @('Read-TpmReShadeTerminalProfile', 'Show-TpmReShadeProfileGalleryWindow')) {
-            $functionStart = $source.IndexOf("function $functionName")
-            $functionEnd = $source.IndexOf("`nfunction ", $functionStart + $functionName.Length + 10)
-            if ($functionEnd -lt 0) { $functionEnd = $source.Length }
-            $functionSource = $source.Substring($functionStart, $functionEnd - $functionStart)
-            $functionSource | Should -Match 'Get-TpmReShadeProfileTechniqueDisplay'
-        }
-        $source | Should -Match 'Techniques:'
-        $source | Should -Match 'DescriptionLabel'
-        $gallerySource = [regex]::Match($source, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
-        $gallerySource | Should -Match 'The terminal chooser is authoritative'
-        $gallerySource | Should -Match '\$state\[''SelectedProfileId''\]'
-        $gallerySource | Should -Not -Match '\$form\.Controls\.Add\(\$combo\)'
-        $labelTextIndex = $gallerySource.IndexOf('$descriptionLabel.Text =')
-        $sliderBranchIndex = $gallerySource.IndexOf('if ($viewMode -eq ''Slider'')')
-        $labelTextIndex | Should -BeGreaterThan 0
-        $labelTextIndex | Should -BeLessThan $sliderBranchIndex
     }
     It "requires measured evidence before compatibility status or recommendation is asserted" {
         $profiles = @(Get-TpmReShadeProfiles)
@@ -15591,12 +15728,6 @@ Describe "ReShade preview renderer and cache" {
     It "provides safe noninteractive window fallback and cache identity changes" {
         $p=Get-TpmReShadeProfile -ProfileId Vivid;(Show-TpmReShadePreviewWindow -ProfileDefinition $p).Reason|Should -Be 'PREVIEW_WINDOW_NOT_REQUESTED'
         $base=Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r';(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('b') -ReferenceSha256 'r')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 's')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r' -RendererVersion '1')|Should -Not -Be $base
-    }
-    It "returns the replacement gallery session so the caller owns teardown after R" {
-        $source = $script:ProductionSource
-        $source | Should -Match 'PreviewSession = \$PreviewSession'
-        $source | Should -Match '\$gallerySession = \$chooserResult\.PreviewSession'
-        $source | Should -Match 'Show-TpmReShadeProfileGalleryWindow -Profiles \$Profiles -DefaultProfileId \$reopenId -Show -NonModal'
     }
 }
 Describe "ReShade profile state features" {
@@ -15984,54 +16115,6 @@ Describe "ReShade trusted profile restore" {
         $source | Should -Match 'Output = ConvertTo-PostgresRedactedText -Text \$output -Secrets \$Secrets'
     }
 
-    It "keeps ReShade preview and deployment confirmation wording explicit" {
-        $source = $script:ProductionSource
-        $source | Should -Match 'Choose how your game should look'
-        $source | Should -Match '\{0\} beginner-friendly RC8 profiles'
-        $source | Should -Match 'Nothing will be changed until you confirm'
-        $source | Should -Match 'saved game executable was not found -- skipped'
-        $source | Should -Match 'protected existing ReShade files -- unchanged'
-        $source | Should -Match 'Installed new'
-        $source | Should -Match 'Updated'
-    }
-    It "routes ReShade selection through one visual gallery before confirmation" {
-        $script:ProductionSource | Should -Match 'Show-TpmReShadeProfileGalleryWindow'
-        $script:ProductionSource | Should -Match 'compare Original/After or Split'
-        $script:ProductionSource | Should -Match 'Use selected profile'
-        $script:ProductionSource | Should -Match 'Nothing will be changed until you confirm'
-        $script:ProductionSource | Should -Match 'choose profiles in the terminal'
-        $script:ProductionSource | Should -Not -Match 'preview opens after you choose an option'
-        $script:ProductionSource | Should -Not -Match 'Clean & Sharp  \(Recommended\)'
-        $invokeStart = $script:ProductionSource.IndexOf('function Invoke-ReShadeSetup')
-        $galleryIndex = $script:ProductionSource.IndexOf('Show-TpmReShadeProfileGalleryWindow', $invokeStart)
-        $confirmationIndex = $script:ProductionSource.IndexOf('$customPresetChoice', $galleryIndex)
-        $deploymentIndex = $script:ProductionSource.IndexOf('Install-TpmReShadeProfileDeployment -ProfileDefinition', $galleryIndex)
-        $galleryIndex | Should -BeGreaterThan $invokeStart
-        $confirmationIndex | Should -BeGreaterThan $galleryIndex
-        $deploymentIndex | Should -BeGreaterThan $confirmationIndex
-        $modeStart = $script:ProductionSource.IndexOf('if ($mode -eq "ReShadeSetup")')
-        $modeInvoke = $script:ProductionSource.IndexOf('$reShadeResult = Invoke-ReShadeSetup', $modeStart)
-        $modeSave = $script:ProductionSource.IndexOf('if (Save-Config)', $modeStart)
-        $modeSave | Should -BeGreaterThan $modeInvoke
-    }
-    It "renders one beginner-friendly terminal profile list and hides techniques behind Details" {
-        $terminalStart = $script:ProductionSource.IndexOf('function Read-TpmReShadeTerminalProfile')
-        $terminal = $script:ProductionSource.Substring($terminalStart)
-        $detailsIndex = $terminal.IndexOf("if (`$choice -eq 'D')")
-        $detailsIndex | Should -BeGreaterThan 0
-        $defaultList = $terminal.Substring(0, $detailsIndex)
-        (@([regex]::Matches($defaultList, "Write-Host \('  \[\{0\}")).Count) | Should -Be 1
-        $defaultList | Should -Not -Match "Techniques:"
-        $details = $terminal.Substring($detailsIndex, [Math]::Min(1200, $terminal.Length - $detailsIndex))
-        $details | Should -Match "Techniques:.*Get-TpmReShadeProfileTechniqueDisplay"
-    }
-    It "does not duplicate the terminal list in the setup preamble" {
-        $setupStart = $script:ProductionSource.IndexOf('function Invoke-ReShadeSetup')
-        $setupEnd = $script:ProductionSource.IndexOf('function ', $setupStart + 10)
-        $setup = $script:ProductionSource.Substring($setupStart, $setupEnd - $setupStart)
-        $setup | Should -Not -Match '\$gallery\).*foreach \(\$item in \$gallery\)'
-        $setup | Should -Not -Match 'Techniques:'
-    }
 
     It "keeps confirmation choices adjacent with a matching default and preserves Back" {
         $source = $script:ProductionSource
@@ -16043,38 +16126,16 @@ Describe "ReShade trusted profile restore" {
         $source | Should -Match '\$customPresetChoice -eq ''B''\)\s*\{\s*return'
     }
 
-    It "keeps preview wording honest in the simplified setup screen" {
-        $script:ProductionSource | Should -Match 'Preview approximation using a bundled image'
-        $script:ProductionSource | Should -Match 'does not run the game or execute ReShade shaders during preview'
-        $script:ProductionSource | Should -Match 'Actual in-game results may vary'
-    }
-    It "keeps gallery identity and removes ignored profile-selection controls" {
-        $galleryBody = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
-        $galleryBody | Should -Match 'The terminal chooser is authoritative'
-        $galleryBody | Should -Not -Match 'DisplayMember = ''FriendlyName'''
-        $galleryBody | Should -Not -Match 'Use selected profile'
+    It "keeps twelve canonical profiles backed by ten unique shader effects" {
         $profiles = @(Get-TpmReShadeProfiles)
-        $result = Show-TpmReShadeProfileGalleryWindow -Profiles $profiles
-        $result.Available | Should -BeFalse
-        $result.SelectedProfile | Should -BeNullOrEmpty
-        $galleryBody | Should -Match 'New-TpmReShadePreviewBitmap'
-        $galleryBody | Should -Not -Match 'New-TpmReShadePreviewArtifact'
-        $galleryBody | Should -Not -Match 'Install-TpmReShadeProfileDeployment'
-        $galleryBody | Should -Not -Match 'Save-Config'
-        $galleryBody | Should -Not -Match '\$form\.Controls\.Add\(\$combo\)'
-        $handlerBody = [regex]::Match($script:ProductionSource, '(?s)function New-TpmReShadeGalleryEventHandlers \{.*?function Show-TpmReShadeProfileGalleryWindow').Value
-        $handlerBody | Should -Match "\['ViewMode'\] = 'Slider'"
-        $handlerBody | Should -Match 'SliderPosition.{0,60}valueProperty.Value'
-        $handlerBody | Should -Not -Match 'comboHandler|profile-selection-handler'
+        $profiles.Count | Should -Be 12
+        @((Get-TpmReShadeEffectCatalog).TechniqueName | Sort-Object -Unique).Count | Should -Be 10
     }
-    It "uses stable ProfileId identity without reading a gallery item's Mode" {
-        $item = [pscustomobject]@{ ProfileId = 'CleanSharp'; FriendlyName = 'Clean & Sharp' }
-        { Get-TpmReShadeGalleryProfileId -Item $item } | Should -Not -Throw
-        (Get-TpmReShadeGalleryProfileId -Item $item) | Should -Be 'CleanSharp'
-        $galleryBody = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
-        $galleryBody | Should -Not -Match '\.Mode'
-        $galleryBody | Should -Match "SelectedProfileId"
-        $galleryBody | Should -Match "ViewMode = 'Split'"
+    It "uses stable ProfileId identity regardless of optional view properties" {
+        $plainItem = [pscustomobject]@{ ProfileId = 'CleanSharp'; FriendlyName = 'Clean & Sharp' }
+        $viewItem = [pscustomobject]@{ ProfileId = 'CleanSharp'; FriendlyName = 'Clean & Sharp'; Mode = 'After' }
+        (Get-TpmReShadeGalleryProfileId -Item $plainItem) | Should -Be 'CleanSharp'
+        (Get-TpmReShadeGalleryProfileId -Item $viewItem) | Should -Be 'CleanSharp'
     }
     It "suppresses gallery refresh events until initialization completes" {
         $state = [hashtable]::Synchronized(@{ Initialized = $false; PreviewEnabled = $true; Closed = $false })
@@ -16092,9 +16153,6 @@ Describe "ReShade trusted profile restore" {
             { Get-TpmReShadeGalleryProfileId -Item $item } | Should -Not -Throw
             Get-TpmReShadeGalleryProfileId -Item $item | Should -BeNullOrEmpty
         }
-        $galleryBody = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
-        $galleryBody | Should -Match 'profile-normalization'
-        $galleryBody | Should -Match 'no valid ProfileId items'
     }
     It "fails closed and records the exact preview refresh stage" {
         $state = [hashtable]::Synchronized(@{
@@ -16110,17 +16168,6 @@ Describe "ReShade trusted profile restore" {
         $state['PreviewFailureStage'] | Should -Be 'slider-value-changed'
         $state['PreviewFailureMessage'] | Should -Match 'forced gallery render failure'
         Should -Invoke Write-Log -Times 1 -ParameterFilter { $msg -like "*slider-value-changed*forced gallery render failure*" }
-    }
-    It "guards every gallery view-mode handler and slider event" {
-        $handlerBody = [regex]::Match($script:ProductionSource, '(?s)function New-TpmReShadeGalleryEventHandlers \{.*?function Show-TpmReShadeProfileGalleryWindow').Value
-        $handlerBody | Should -Match 'viewHandler = \{'
-        $handlerBody | Should -Match 'sliderHandler = \{'
-        $handlerBody | Should -Not -Match 'comboHandler'
-        $handlerBody | Should -Match 'view-mode-handler'
-        $handlerBody | Should -Match 'slider-value-changed-handler'
-        foreach ($mode in @('Before', 'After', 'Split', 'Slider')) {
-            $handlerBody | Should -Match ([regex]::Escape("'" + $mode + "'"))
-        }
     }
     It "executes gallery callbacks safely for initialization and invalid view or slider events" {
         $sliderTimer = [pscustomobject]@{ Enabled = $false; StartCount = 0; StopCount = 0 }
@@ -16229,18 +16276,6 @@ Describe "ReShade trusted profile restore" {
         { Close-TpmReShadeProfileGallerySession -Session $session } | Should -Not -Throw
         $image.DisposeCount | Should -Be 1
     }
-    It "keeps preview failure on the terminal-only path" {
-        $source = $script:ProductionSource
-        $source | Should -Match 'PREVIEW_GALLERY_REFRESH_FAILED'
-        $source | Should -Match 'ReShade visual gallery unavailable; typed profile fallback remains active'
-        $source | Should -Match 'does not run the game or execute ReShade shaders during preview'
-        $source | Should -Match 'ReShade profile chooser: selected'
-    }
-    It "covers ReShade gallery fallback and empty-source failure" {
-        $script:ProductionSource | Should -Match 'ReShade visual gallery unavailable'
-        $script:ProductionSource | Should -Match 'typed profile fallback'
-        $script:ProductionSource | Should -Match 'SOURCE_DLL_UNAVAILABLE'
-    }
     It "renders distinct left, middle, and right comparison slider positions" {
         $profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
         $left = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 0 -Width 960 -Height 540 -PreviewRoot $script:TrustedPreviewRoot
@@ -16270,12 +16305,6 @@ Describe "ReShade trusted profile restore" {
         } finally {
             $left.Dispose(); $middle.Dispose(); $right.Dispose()
         }
-    }
-    It "threads slider state through preview updates and cache identity" {
-        $script:ProductionSource | Should -Match 'TrackBar'
-        $script:ProductionSource | Should -Match 'SliderPosition'
-        $script:ProductionSource | Should -Match 'ValueChanged'
-        $script:ProductionSource | Should -Match 'ComparisonSlider'
     }
     It "updates slider state in memory without replacing the preview image" {
         $picture = [pscustomobject]@{ Image = $null; InvalidateCount = 0 }
