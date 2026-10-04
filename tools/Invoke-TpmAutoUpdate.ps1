@@ -48,15 +48,14 @@ if (-not $CheckOnly -and -not $Apply) {
 }
 
 $localVersionText = Get-TpmLocalVersion -Path $ScriptPath
-$localVersion = ConvertTo-TpmVersion -VersionText $localVersionText
 $release = Get-LatestRelease -Owner $Owner -Repository $Repository
-$latestVersionText = ($release.tag_name -replace '^v', '').Trim()
-$latestVersion = ConvertTo-TpmVersion -VersionText $latestVersionText
+$latestVersionText = [string]$release.tag_name
+$versionComparison = Compare-TpmVersions -VersionTextA $localVersionText -VersionTextB $latestVersionText
 
 Write-UpdaterInfo "Installed TPM version: $localVersionText"
 Write-UpdaterInfo "Latest TPM release   : $($release.tag_name)"
 
-if ($latestVersion -le $localVersion) {
+if ($versionComparison -ge 0) {
     Write-UpdaterInfo 'Already current. No update needed.'
     return
 }
@@ -90,8 +89,8 @@ if ($Apply) {
         Expand-TpmReleaseZipEntry -ZipPath $downloadedZipPath -EntryName $ScriptEntryName -DestinationPath $extractedScriptPath | Out-Null
         Write-UpdaterInfo "Extracted      : $extractedScriptPath"
 
-        Test-TpmExtractedScript -Path $extractedScriptPath | Out-Null
-        Write-UpdaterInfo 'Extracted script passed content validation.'
+        Test-TpmExtractedScript -Path $extractedScriptPath -ExpectedVersion $latestVersionText | Out-Null
+        Write-UpdaterInfo 'Extracted script passed content and release-version validation.'
 
         Move-Item -LiteralPath $extractedScriptPath -Destination $ScriptPath -Force -ErrorAction Stop
         if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {

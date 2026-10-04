@@ -848,3 +848,21 @@ replacement for the structured failure that caused it.
 The Pester certification gate remains an exact `5.7.1` pin. Installed
 `5.8.0` or `3.4.0` results are not certification evidence; the environment
 must provide `5.7.1` before a certification run can start.
+
+## PostgreSQL recovery handoff -- normalized backup evidence is not the raw bundle
+
+Guided password recovery had two different backup representations. `New-PostgresRecoveryBackup` returns the raw PostgreSQL bundle with `Path`, `ConfigBackups`, `ProfileBackups`, and `Verified`; the profile-setup consumer directly enumerates both required arrays. `Reset-PostgresPasswordAutomatically` already returned a normalized `TPM.TransactionResult.v1.Backup`, so the wrapper's fallback that attached the raw bundle only when `Backup` was absent never ran. The top-level flow then passed the generic `Backup` to profile setup, losing both collections.
+
+Setup also wrapped profile and config sources in separate nested arrays, so the generic `Items` field appeared populated while scalar source paths were not members of the list. Concatenating the two source arrays keeps `Items` flat without adding PostgreSQL-specific fields to `Backup`.
+
+Keep the representations separate: the normalized `Backup` remains the generic transaction evidence object, while `RecoveryBundle` carries the original raw producer result through the wrapper and top-level setup handoff. Derive `Attempted` from a returned producer result or an actual producer invocation, `Created` from observed evidence-directory existence, and `Verified` from the producer's explicit result; do not infer verification from a path or object being non-null.
+
+Rule: when one workflow hands a domain-specific evidence bundle through a generic transaction result, preserve the original bundle in a distinct sidecar and pass that sidecar to its consumer. Test non-empty required collections through the real wrapper and setup call, and assert both the raw sidecar identity and canonical generic `Backup` shape.
+
+## Pester child-process capture -- pipe deadlock and wrapped diagnostics
+
+**Observed defect.** The owner-status Pester test launched `Test-TpmPermanentProcedures.ps1` with stdout and stderr redirected, read stdout to EOF before stderr, then called unbounded `WaitForExit()`. If the child fills stderr before closing stdout, it waits for the parent to read stderr while the parent waits for stdout EOF. The test also asserted against PowerShell's rendered `Write-Error` text without accounting for line-wrap continuation markers.
+
+**Evidence.** The focused test under Windows PowerShell 5.1 completed in 11.75 seconds rather than hanging, but failed its first semantic assertion because the child `pwsh` diagnostic wrapped at a `|` continuation. A deterministic reproduction of the original read order, with a `pwsh` child writing 1 MiB to stdout followed by 1 MiB to stderr, exceeded a 31-second bound; terminating the parent process tree confirmed both processes exited. This proves the pipe-deadlock defect class, not the exact stalled stack in the cancelled CI run.
+
+**Fix and rule.** `Invoke-TpmTestChildProcess` starts `ReadToEndAsync()` on both streams before a bounded process wait, kills a timed-out child, confirms exit within a bounded grace period, and bounds completion of both readers. The gate test removes only PowerShell's visual `|` continuation prefix before applying the same owner-status, exit-code, and stale-package assertions. Keep the high-volume dual-stream and timeout tests; never replace them with a small-output fixture or sequential `ReadToEnd()` calls.

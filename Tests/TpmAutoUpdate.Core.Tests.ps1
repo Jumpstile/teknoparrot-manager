@@ -79,20 +79,33 @@ Describe 'ConvertTo-TpmVersion' {
         { ConvertTo-TpmVersion -VersionText '' } | Should -Throw
     }
 
-    # Issue #105: the real, published v1.0-RC1 release tag broke this
-    # function -- [version] cannot hold a "-RC1" suffix. Kept in lockstep
-    # with TeknoParrot-Manager.ps1's own ConvertTo-ManagerComparableVersion.
+    # Issue #105: [version] cannot hold the "-RC1" suffix. This helper parses
+    # the numeric base only; Compare-TpmVersions owns ordering and preserves
+    # the candidate suffix as a separate identity.
     It 'strips a release-candidate suffix and parses the numeric base' {
         ConvertTo-TpmVersion -VersionText 'v1.0-RC1' | Should -Be ([version]'1.0')
         ConvertTo-TpmVersion -VersionText 'v1.0-RC2' | Should -Be ([version]'1.0')
     }
 
-    It 'a 0.99.x version compares as older than 1.0-RC2' {
-        $local  = ConvertTo-TpmVersion -VersionText '0.99.44'
-        $latest = ConvertTo-TpmVersion -VersionText 'v1.0-RC2'
-        $latest -gt $local | Should -Be $true -Because "a release candidate for 1.0 must be recognized as newer than any 0.99.x release"
+}
+Describe 'Compare-TpmVersions' {
+    It 'orders numeric base versions before release-candidate labels' {
+        Compare-TpmVersions -VersionTextA '0.99.99' -VersionTextB 'v1.0-RC1' | Should -Be -1
+    }
+
+    It 'orders release candidates numerically and before the final release' {
+        Compare-TpmVersions -VersionTextA 'v1.0-RC7' -VersionTextB 'v1.0-RC8' | Should -Be -1
+        Compare-TpmVersions -VersionTextA 'v1.0-RC9' -VersionTextB 'v1.0-RC10' | Should -Be -1
+        Compare-TpmVersions -VersionTextA 'v1.0-RC8' -VersionTextB 'v1.0' | Should -Be -1
+        Compare-TpmVersions -VersionTextA 'v1.0' -VersionTextB 'v1.0-RC8' | Should -Be 1
+    }
+
+    It 'treats equivalent full identities as equal and malformed labels as invalid' {
+        Compare-TpmVersions -VersionTextA 'v1.0-RC8' -VersionTextB '1.0-RC8' | Should -Be 0
+        { Compare-TpmVersions -VersionTextA '1.0-BETA' -VersionTextB '1.0' } | Should -Throw
     }
 }
+
 
 Describe 'Get-TpmLocalVersion' {
     It 'reads $ScriptVersion from a script file' {
@@ -103,6 +116,156 @@ Describe 'Get-TpmLocalVersion' {
         } finally {
             Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
         }
+    }
+
+    It 'includes the release-candidate label in the local version identity' {
+        $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-version-rc-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        Set-Content -LiteralPath $tempScript -Value ('$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"') -Encoding ascii
+        try {
+            Get-TpmLocalVersion -Path $tempScript | Should -Be '1.0-RC8'
+        } finally {
+            Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'reads the executable identity rather than here-string assignment lookalikes' {
+        $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-version-here-string-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        $content = @'
+$decoy = @"
+$ScriptVersion = "1.0"
+$ReleaseCandidateLabel = "RC8"
+"@
+$ScriptVersion = "1.0"
+$ReleaseCandidateLabel = "RC7"
+'@
+        Set-Content -LiteralPath $tempScript -Value $content -Encoding ascii
+        try {
+            Get-TpmLocalVersion -Path $tempScript | Should -Be '1.0-RC7'
+        } finally {
+            Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'accepts single-quoted local version declarations' {
+        $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-version-single-quoted-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        Set-Content -LiteralPath $tempScript -Value ('$ScriptVersion = ''1.0''' + "`n" + '$ReleaseCandidateLabel = ''RC8''') -Encoding ascii
+        try {
+            Get-TpmLocalVersion -Path $tempScript | Should -Be '1.0-RC8'
+        } finally {
+            Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'rejects duplicate, scoped, nested, compound, nonliteral, and malformed local identity assignments' {
+        $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-version-invalid-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        $invalidContents = @(
+            '$ScriptVersion = "1.0"' + "`n" + '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$script:ScriptVersion = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + 'function Set-Version { $ScriptVersion = "0.99" }' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ScriptVersion += "1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = (Get-VersionBase)' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = Get-CandidateLabel'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "$env:TPM_LABEL"'
+            '$ScriptVersion = "1.0"' + "`n" + 'if ('
+        )
+        try {
+            foreach ($invalidContent in $invalidContents) {
+                Set-Content -LiteralPath $tempScript -Value $invalidContent -Encoding ascii
+                { Get-TpmLocalVersion -Path $tempScript } | Should -Throw
+            }
+        } finally {
+            Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It '[UVO-08] rejects wrapped version and label targets, including sole, duplicate, scoped, and nested assignments' {
+        $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-version-wrapped-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        $invalidContents = @(
+            '[string]$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[string]$ReleaseCandidateLabel = "RC8"'
+            '[string]($ScriptVersion) = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[string]($ReleaseCandidateLabel) = "RC8"'
+            '([string]$ScriptVersion) = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '([string]$ReleaseCandidateLabel) = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[string]$ScriptVersion = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[string]$script:ScriptVersion = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '($script:ScriptVersion) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[string]($script:ScriptVersion) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + 'function Set-Version { [string]$ScriptVersion = "0.99" }' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '([string]($script:ScriptVersion)) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '[string]$script:ReleaseCandidateLabel = "RC7"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '[string]($script:ReleaseCandidateLabel) = "RC7"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '($script:ReleaseCandidateLabel) = "RC7"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + 'function Set-Label { [string]$ReleaseCandidateLabel = "RC7" }',
+            '[ValidateNotNull()]$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[ValidateNotNull()]$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[ValidateNotNull()]$script:ScriptVersion = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '([ValidateNotNull()]$script:ScriptVersion) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '[string]([ValidateNotNull()]$script:ScriptVersion) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '(([string]([ValidateNotNull()]$script:ScriptVersion))) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '([ValidateNotNull()]$script:ReleaseCandidateLabel) = "RC7"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '[ValidateNotNull()]$script:ReleaseCandidateLabel = "RC7"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$script:ScriptVersion++'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '++$script:ScriptVersion'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$script:ScriptVersion--'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '--$script:ScriptVersion'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '($script:ScriptVersion)++'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '--($script:ReleaseCandidateLabel)'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + 'foreach ($script:ScriptVersion in @("1.1")) { }'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + 'foreach ($ReleaseCandidateLabel in @("RC7")) { }'
+            'param($ScriptVersion, $ReleaseCandidateLabel)' + "`n" + '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            'data ScriptVersion { "1.1" }' + "`n" + '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + 'data ReleaseCandidateLabel { "RC7" }'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$script:ScriptVersion[0] = "x"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '($script:ScriptVersion).Length = 1'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$script:ScriptVersion[0].Length = 1'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$script:ReleaseCandidateLabel[0] = "x"'
+            '$ScriptVersion, $other = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '($ScriptVersion, $other) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '(($ScriptVersion, $other)) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ScriptVersion = "1.0"' + "`n" + '(($ScriptVersion), $other) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+            '$ReleaseCandidateLabel = "RC8"' + "`n" + '$other, $ScriptVersion = "1.0"'
+            '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$global:ScriptVersion += "1"'
+        )
+        try {
+            foreach ($invalidContent in $invalidContents) {
+                $tokens = $null
+                $parseErrors = $null
+                [System.Management.Automation.Language.Parser]::ParseInput(
+                    $invalidContent,
+                    [ref]$tokens,
+                    [ref]$parseErrors
+                ) | Out-Null
+                @($parseErrors).Count | Should -Be 0
+                Set-Content -LiteralPath $tempScript -Value $invalidContent -Encoding ascii
+                { Get-TpmLocalVersion -Path $tempScript } | Should -Throw
+            }
+        } finally {
+            Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It '[UVO-08] permits local function parameters and unrelated member/index reads' {
+        $content = '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" +
+            'function Get-ManagerVersionIdentity { param([string]$ScriptVersion, [string]$ReleaseCandidateLabel) }' + "`n" +
+            '& { param([string]$ScriptVersion, [string]$ReleaseCandidateLabel) }' + "`n" +
+            '$text = ''$ScriptVersion = "99"''' + "`n" +
+            '$other[$ScriptVersion] = "x"'
+        $tokens = $null
+        $parseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseInput($content, [ref]$tokens, [ref]$parseErrors) | Out-Null
+        @($parseErrors).Count | Should -Be 0
+        $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-local-identity-near-miss-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        try {
+            Set-Content -LiteralPath $tempScript -Value $content -Encoding ascii
+            Get-TpmLocalVersion -Path $tempScript | Should -Be '1.0-RC8'
+        } finally {
+            Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It '[UVO-08] reads the current manager identity from source without executing it' {
+        $managerScriptPath = Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'
+        Get-TpmLocalVersion -Path $managerScriptPath | Should -Be '1.0-RC8'
     }
 
     It 'throws when the file does not exist' {
@@ -117,6 +280,37 @@ Describe 'Get-TpmLocalVersion' {
         } finally {
             Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
         }
+    }
+}
+
+Describe 'Invoke-TpmAutoUpdate.ps1 version ordering' {
+    It 'offers RC8 when the local script is RC7' {
+        $runnerPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\tools\Invoke-TpmAutoUpdate.ps1')).ProviderPath
+        $localScript = Join-Path $TestDrive 'runner-rc7.ps1'
+        Set-Content -LiteralPath $localScript -Value ('$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC7"') -Encoding ascii
+
+        Mock Get-LatestRelease {
+            New-TpmTestRelease -TagName 'v1.0-RC8' -AssetNames @('TeknoParrot.Manager.v1.0.RC8.zip')
+        }
+
+        $runnerOutput = & $runnerPath -CheckOnly -ScriptPath $localScript 6>&1 | Out-String
+
+        $runnerOutput | Should -Match 'Update available: 1.0-RC7 -> v1.0-RC8'
+        $runnerOutput | Should -Match 'Check only. Re-run with -Apply to update.'
+    }
+
+    It 'does not offer RC8 again when the local script is RC8' {
+        $runnerPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\tools\Invoke-TpmAutoUpdate.ps1')).ProviderPath
+        $localScript = Join-Path $TestDrive 'runner-rc8.ps1'
+        Set-Content -LiteralPath $localScript -Value ('$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"') -Encoding ascii
+
+        Mock Get-LatestRelease {
+            New-TpmTestRelease -TagName 'v1.0-RC8' -AssetNames @('TeknoParrot.Manager.v1.0.RC8.zip')
+        }
+
+        $runnerOutput = & $runnerPath -CheckOnly -ScriptPath $localScript 6>&1 | Out-String
+
+        $runnerOutput | Should -Match 'Already current. No update needed.'
     }
 }
 
@@ -316,21 +510,79 @@ Describe 'Test-TpmExtractedScript' {
         $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-valid-" + [guid]::NewGuid().ToString('N') + '.ps1')
         Set-Content -LiteralPath $path -Value "# TeknoParrot Manager`n`$ScriptVersion = `"0.99.99`"" -Encoding ascii
         try {
-            Test-TpmExtractedScript -Path $path | Should -BeTrue
+            Test-TpmExtractedScript -Path $path -ExpectedVersion 'v0.99.99' | Should -BeTrue
         } finally {
             Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
         }
     }
 
+    It 'accepts an RC candidate whose literal identity matches the release tag' {
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-valid-rc-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        $content = "# TeknoParrot Manager`n" + '$ScriptVersion = ''1.0''' + "`n" + '$ReleaseCandidateLabel = ''RC8'''
+        Set-Content -LiteralPath $path -Value $content -Encoding ascii
+        try {
+            Test-TpmExtractedScript -Path $path -ExpectedVersion 'v1.0-RC8' | Should -BeTrue
+        } finally {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'rejects candidate identity that differs from the release tag' {
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-mismatched-rc-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        Set-Content -LiteralPath $path -Value "# TeknoParrot Manager`n`$ScriptVersion = `"1.0`"`n`$ReleaseCandidateLabel = `"RC7`"" -Encoding ascii
+        try {
+            { Test-TpmExtractedScript -Path $path -ExpectedVersion 'v1.0-RC8' } | Should -Throw '*does not match release tag*'
+        } finally {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'ignores here-string assignment lookalikes when validating the candidate identity' {
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-string-spoof-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        $content = @'
+# TeknoParrot Manager
+$decoy = @"
+$ScriptVersion = "1.0"
+$ReleaseCandidateLabel = "RC8"
+"@
+'@
+        Set-Content -LiteralPath $path -Value $content -Encoding ascii
+        try {
+            { Test-TpmExtractedScript -Path $path -ExpectedVersion 'v1.0-RC8' } | Should -Throw '*ScriptVersion*'
+        } finally {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It 'rejects extracted scripts containing non-ASCII bytes before identity parsing' {
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-non-ascii-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        $prefixText = '# TeknoParrot Manager' + "`n" + '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC8"' + "`n" + '$decoy = "'
+        $prefix = [System.Text.Encoding]::ASCII.GetBytes($prefixText)
+        $suffix = [System.Text.Encoding]::ASCII.GetBytes('"' + "`n")
+        $validUtf8NonAscii = [System.Text.UTF8Encoding]::new($false).GetBytes([string][char]0x2014)
+        $testCases = @(
+            [pscustomobject]@{ Bytes = [byte[]]($prefix + $validUtf8NonAscii + $suffix) }
+            [pscustomobject]@{ Bytes = [byte[]]($prefix + [byte[]](0xFF) + $suffix) }
+        )
+        try {
+            foreach ($testCase in $testCases) {
+                [System.IO.File]::WriteAllBytes($path, $testCase.Bytes)
+                { Test-TpmExtractedScript -Path $path -ExpectedVersion 'v1.0-RC8' } | Should -Throw '*non-ASCII bytes*'
+            }
+        } finally {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+
     It 'throws when the file does not exist' {
-        { Test-TpmExtractedScript -Path (Join-Path ([System.IO.Path]::GetTempPath()) 'nope.ps1') } | Should -Throw
+        { Test-TpmExtractedScript -Path (Join-Path ([System.IO.Path]::GetTempPath()) 'nope.ps1') -ExpectedVersion 'v0.99.99' } | Should -Throw
     }
 
     It 'throws when the file is empty' {
         $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-empty-" + [guid]::NewGuid().ToString('N') + '.ps1')
         New-Item -ItemType File -Path $path -Force | Out-Null
         try {
-            { Test-TpmExtractedScript -Path $path } | Should -Throw
+            { Test-TpmExtractedScript -Path $path -ExpectedVersion 'v0.99.99' } | Should -Throw
         } finally {
             Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
         }
@@ -340,7 +592,7 @@ Describe 'Test-TpmExtractedScript' {
         $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-zipbytes-" + [guid]::NewGuid().ToString('N') + '.ps1')
         [System.IO.File]::WriteAllBytes($path, [byte[]](0x50, 0x4B, 0x03, 0x04, 0x00, 0x00))
         try {
-            { Test-TpmExtractedScript -Path $path } | Should -Throw '*zip signature*'
+            { Test-TpmExtractedScript -Path $path -ExpectedVersion 'v0.99.99' } | Should -Throw '*zip signature*'
         } finally {
             Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
         }
@@ -350,7 +602,7 @@ Describe 'Test-TpmExtractedScript' {
         $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-nomarker-" + [guid]::NewGuid().ToString('N') + '.ps1')
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.99"' -Encoding ascii
         try {
-            { Test-TpmExtractedScript -Path $path } | Should -Throw '*TeknoParrot Manager*'
+            { Test-TpmExtractedScript -Path $path -ExpectedVersion 'v0.99.99' } | Should -Throw '*TeknoParrot Manager*'
         } finally {
             Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
         }
@@ -360,7 +612,33 @@ Describe 'Test-TpmExtractedScript' {
         $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-noscriptversion-" + [guid]::NewGuid().ToString('N') + '.ps1')
         Set-Content -LiteralPath $path -Value '# TeknoParrot Manager' -Encoding ascii
         try {
-            { Test-TpmExtractedScript -Path $path } | Should -Throw '*ScriptVersion*'
+            { Test-TpmExtractedScript -Path $path -ExpectedVersion 'v0.99.99' } | Should -Throw '*ScriptVersion*'
+        } finally {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It '[UVO-08] rejects extracted candidates with a cast-parenthesized scoped version overwrite' {
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-cast-parenthesized-scoped-rc-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        $content = "# TeknoParrot Manager`n" + '$ScriptVersion = "1.0"' + "`n" +
+            '[string]($script:ScriptVersion) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+        Set-Content -LiteralPath $path -Value $content -Encoding ascii
+        try {
+            { Test-TpmExtractedScript -Path $path -ExpectedVersion 'v1.0-RC8' } | Should -Throw
+        } finally {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It '[UVO-08] rejects an attributed scoped version overwrite in an extracted candidate' {
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-attributed-scoped-rc-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        $content = "# TeknoParrot Manager`n" + '$ScriptVersion = "1.0"' + "`n" +
+            '[ValidateNotNull()]$script:ScriptVersion = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+        $tokens = $null
+        $parseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseInput($content, [ref]$tokens, [ref]$parseErrors) | Out-Null
+        @($parseErrors).Count | Should -Be 0
+        Set-Content -LiteralPath $path -Value $content -Encoding ascii
+        try {
+            { Test-TpmExtractedScript -Path $path -ExpectedVersion 'v1.0-RC8' } | Should -Throw
         } finally {
             Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
         }
@@ -395,4 +673,117 @@ Describe 'Invoke-TpmAutoUpdate -Apply -WhatIf' {
             Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
+    It 'does not install a candidate whose only apparent version is inside a here-string' {
+        $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-apply-spoof-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+        $scriptPath = Join-Path $tempRoot 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $scriptPath -Value '$ScriptVersion = "0.99.99"' -Encoding ascii
+        $originalContent = Get-Content -LiteralPath $scriptPath -Raw
+        $candidateZipPath = Join-Path $tempRoot 'candidate.zip'
+        $candidateContent = @'
+# TeknoParrot Manager
+$decoy = @"
+$ScriptVersion = "1.0"
+$ReleaseCandidateLabel = "RC8"
+"@
+'@
+        New-TpmFixtureZip -DestinationPath $candidateZipPath -EntryContent $candidateContent | Out-Null
+        $orchestratorPath = Join-Path $PSScriptRoot '..\tools\Invoke-TpmAutoUpdate.ps1'
+        $saveAssetMock = { return $candidateZipPath }.GetNewClosure()
+
+        try {
+            Mock Get-LatestRelease { New-TpmTestRelease -TagName 'v1.0-RC8' -AssetNames @('TeknoParrot.Manager.v1.0.RC8.zip') }
+            Mock Save-TpmReleaseAsset $saveAssetMock
+
+            { & $orchestratorPath -Apply -Confirm:$false -ScriptPath $scriptPath -Owner 'Jumpstile' -Repository 'teknoparrot-manager' 6>&1 | Out-Null } | Should -Throw '*ScriptVersion*'
+            Should -Invoke Get-LatestRelease -Times 1
+            Should -Invoke Save-TpmReleaseAsset -Times 1
+
+            (Get-Content -LiteralPath $scriptPath -Raw) | Should -Be $originalContent
+        } finally {
+            Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'does not install a candidate whose literal identity differs from the release tag' {
+        $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-apply-mismatch-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+        $scriptPath = Join-Path $tempRoot 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $scriptPath -Value '$ScriptVersion = "0.99.99"' -Encoding ascii
+        $originalContent = Get-Content -LiteralPath $scriptPath -Raw
+        $candidateZipPath = Join-Path $tempRoot 'candidate.zip'
+        $candidateContent = "# TeknoParrot Manager`n" + '$ScriptVersion = "1.0"' + "`n" + '$ReleaseCandidateLabel = "RC7"'
+        New-TpmFixtureZip -DestinationPath $candidateZipPath -EntryContent $candidateContent | Out-Null
+        $orchestratorPath = Join-Path $PSScriptRoot '..\tools\Invoke-TpmAutoUpdate.ps1'
+        $saveAssetMock = { return $candidateZipPath }.GetNewClosure()
+
+        try {
+            Mock Get-LatestRelease { New-TpmTestRelease -TagName 'v1.0-RC8' -AssetNames @('TeknoParrot.Manager.v1.0.RC8.zip') }
+            Mock Save-TpmReleaseAsset $saveAssetMock
+
+            { & $orchestratorPath -Apply -Confirm:$false -ScriptPath $scriptPath -Owner 'Jumpstile' -Repository 'teknoparrot-manager' 6>&1 | Out-Null } | Should -Throw '*does not match release tag*'
+            Should -Invoke Get-LatestRelease -Times 1
+            Should -Invoke Save-TpmReleaseAsset -Times 1
+            (Get-Content -LiteralPath $scriptPath -Raw) | Should -Be $originalContent
+        } finally {
+            Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It '[UVO-08] does not replace the installed script when a cast-parenthesized identity target is present' {
+        $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-apply-cast-parenthesized-target-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+        $scriptPath = Join-Path $tempRoot 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $scriptPath -Value '$ScriptVersion = "0.99.99"' -Encoding ascii
+        $originalContent = Get-Content -LiteralPath $scriptPath -Raw
+        $candidateZipPath = Join-Path $tempRoot 'candidate.zip'
+        $candidateContent = "# TeknoParrot Manager`n" + '$ScriptVersion = "1.0"' + "`n" +
+            '[string]($script:ScriptVersion) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+        New-TpmFixtureZip -DestinationPath $candidateZipPath -EntryContent $candidateContent | Out-Null
+        $orchestratorPath = Join-Path $PSScriptRoot '..\tools\Invoke-TpmAutoUpdate.ps1'
+        $saveAssetMock = { return $candidateZipPath }.GetNewClosure()
+
+        try {
+            Mock Get-LatestRelease { New-TpmTestRelease -TagName 'v1.0-RC8' -AssetNames @('TeknoParrot.Manager.v1.0.RC8.zip') }
+            Mock Save-TpmReleaseAsset $saveAssetMock
+
+            { & $orchestratorPath -Apply -Confirm:$false -ScriptPath $scriptPath -Owner 'Jumpstile' -Repository 'teknoparrot-manager' 6>&1 | Out-Null } | Should -Throw
+            Should -Invoke Get-LatestRelease -Times 1
+            Should -Invoke Save-TpmReleaseAsset -Times 1
+            (Get-Content -LiteralPath $scriptPath -Raw) | Should -Be $originalContent
+        } finally {
+            Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It '[UVO-08] does not replace the installed script when an attributed identity target is present' {
+        $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-apply-attributed-target-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+        $scriptPath = Join-Path $tempRoot 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $scriptPath -Value '$ScriptVersion = "0.99.99"' -Encoding ascii
+        $originalContent = Get-Content -LiteralPath $scriptPath -Raw
+        $candidateZipPath = Join-Path $tempRoot 'candidate.zip'
+        $candidateContent = "# TeknoParrot Manager`n" + '$ScriptVersion = "1.0"' + "`n" +
+            '[ValidateNotNull()]$script:ScriptVersion = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
+        $tokens = $null
+        $parseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseInput($candidateContent, [ref]$tokens, [ref]$parseErrors) | Out-Null
+        @($parseErrors).Count | Should -Be 0
+        New-TpmFixtureZip -DestinationPath $candidateZipPath -EntryName 'TeknoParrot-Manager.ps1' -EntryContent $candidateContent | Out-Null
+        $orchestratorPath = Join-Path $PSScriptRoot '..\tools\Invoke-TpmAutoUpdate.ps1'
+        $saveAssetMock = { return $candidateZipPath }.GetNewClosure()
+
+        try {
+            Mock Get-LatestRelease { New-TpmTestRelease -TagName 'v1.0-RC8' -AssetNames @('TeknoParrot.Manager.v1.0.RC8.zip') }
+            Mock Save-TpmReleaseAsset $saveAssetMock
+            Mock Move-Item { throw 'Replacement must not run for an invalid candidate identity.' }
+
+            { & $orchestratorPath -Apply -Confirm:$false -ScriptPath $scriptPath -Owner 'Jumpstile' -Repository 'teknoparrot-manager' 6>&1 | Out-Null } | Should -Throw
+            Should -Invoke Get-LatestRelease -Times 1
+            Should -Invoke Save-TpmReleaseAsset -Times 1
+            Should -Invoke Move-Item -Times 0 -Exactly
+            (Get-Content -LiteralPath $scriptPath -Raw) | Should -Be $originalContent
+        } finally {
+            Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
 }

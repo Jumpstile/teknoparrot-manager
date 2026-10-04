@@ -336,9 +336,26 @@ function Invoke-TPMCertificationGitReadV1 {
     $repo=[IO.Path]::GetFullPath($RepositoryPath).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
     $scoped=@('-c',("safe.directory={0}"-f$repo),'-C',$repo)
     $commandArguments=@($scoped)+@($Arguments)
-    $output=@(& git @commandArguments 2>$null)
-    $exitCode=$LASTEXITCODE
-    return [pscustomobject]@{Output=$output;ExitCode=$exitCode}
+    $oldErrorActionPreference = $ErrorActionPreference
+    $stderrPath = [IO.Path]::GetTempFileName()
+    $hasNativeErrorPreference = Test-Path variable:PSNativeCommandUseErrorActionPreference
+    $oldNativeErrorPreference = if ($hasNativeErrorPreference) { $PSNativeCommandUseErrorActionPreference } else { $null }
+    try {
+        $ErrorActionPreference = 'Continue'
+        if ($hasNativeErrorPreference) { $PSNativeCommandUseErrorActionPreference = $false }
+        $output = @(& git @commandArguments 2> $stderrPath)
+        $exitCode = $LASTEXITCODE
+        $errorOutput = if (Test-Path -LiteralPath $stderrPath) {
+            @(Get-Content -LiteralPath $stderrPath -ErrorAction SilentlyContinue | ForEach-Object { [string]$_ })
+        } else {
+            @()
+        }
+    } finally {
+        if ($hasNativeErrorPreference) { $PSNativeCommandUseErrorActionPreference = $oldNativeErrorPreference }
+        $ErrorActionPreference = $oldErrorActionPreference
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+    return [pscustomobject]@{Output=$output;ErrorOutput=$errorOutput;ExitCode=$exitCode}
 }
 
 function Get-TPMCertificationGitIdentitySnapshotV1 {

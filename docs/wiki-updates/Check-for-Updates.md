@@ -21,11 +21,29 @@ TeknoParrot Manager includes a manual, backup-first update check.
 
 The replacement script must:
 
-- exist,
-- be non-empty,
+- exist and be non-empty,
 - contain the `TeknoParrot Manager` marker,
-- contain a `$ScriptVersion = "..."` assignment, and
-- not begin with raw ZIP `PK` bytes.
+- not begin with raw ZIP `PK` bytes,
+- contain only ASCII source bytes before AST parsing,
+- declare exactly one bare, unwrapped, unscoped root `$ScriptVersion =`
+  assignment with a direct constant-string value and at most one equivalent
+  `$ReleaseCandidateLabel` assignment,
+- reject every additional statically identified protected write, including
+  attributed/cast or parenthesized targets, scoped/nested/compound or
+  destructured assignments, increment/decrement, `foreach` targets, root
+  parameters, data-statement variables, and member/index lvalue roots; and
+- match the complete release-tag identity before replacement.
+
+Function-local parameters do not bind the root identity. The parser does not
+execute candidate content. Its finite static-write check does not prove that
+indirect mutation is absent: command/provider writes, `-OutVariable`, `[ref]`,
+.NET/session-state APIs, aliases/splatting, dynamic names,
+imports/dot-sourcing, and invoked scriptblocks are outside its guarantee.
+Comments and string data cannot spoof declarations.
+
+The standalone updater requires the candidate identity to match the release
+tag before replacement. The main updater also reads the installed identity
+back and verifies it against the release tag after replacement.
 
 ## Download audit scope
 

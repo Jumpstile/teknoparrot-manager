@@ -21,6 +21,8 @@ scope of `Get-ReShadeSetupDownloadUrl`, `Test-ReShadeSetupTrustedSignature`,
 (`Get-TpmSha256FromDigestField`, `Test-TpmDownloadedFile -ExpectedSha256`,
 `Invoke-TpmDownload -ExpectedSha256`) in `TeknoParrot-Manager.ps1`.
 
+This inventory is limited to installer acquisition and archive extraction. TPM's separately curated, pinned ReShade profile/effect deployment uses the ReShade runtime preset contract and is governed by `RESHADE-PROFILE-SELECTION-SPECIFICATION-INVENTORY.md` and `RESHADE-PROFILE-SELECTION-INVARIANT-INVENTORY.md`; it does not consume the installer `ReShade32.json` / `ReShade64.json` package manifests.
+
 ## In scope
 
 ### RESHADE-URL-001 -- ReShade download source and URL contract
@@ -194,11 +196,13 @@ scope of `Get-ReShadeSetupDownloadUrl`, `Test-ReShadeSetupTrustedSignature`,
   plain build. Belongs to a different trust/feature surface (addon
   support) this project has never offered even in the manual-instructions
   path.
-- **ReShade shader/effect-package auto-download** (`ReShade32.json` /
-  `ReShade64.json`-driven, the official installer's separate step). TPM
-  has never managed shader packages; this round does not start. The
-  self-extracting archive contains these entries but
-  `Expand-ReShadeSelfExtractingArchive` never reads or requires them.
+- **ReShade installer shader-package auto-download** (`ReShade32.json` /
+  `ReShade64.json`-driven, the official installer's separate step). This
+  extractor does not parse or install those package manifests. TPM's
+  separately curated, individually pinned profile assets are covered by
+  `RESHADE-PROFILE-SELECTION-SPECIFICATION-INVENTORY.md`; that distinct
+  deployment path does not make installer shader-package extraction part
+  of this component.
 - **Revocation checking for the ReShade certificate.** The certificate is
   self-signed with no CA chain; there is no revocation authority to check
   against. Not a gap -- there is nothing to check.

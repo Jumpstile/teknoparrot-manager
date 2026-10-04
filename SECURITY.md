@@ -18,6 +18,28 @@ controllable, even though in practice it usually comes from a trusted
 maintainer's repo. The script never assumes a well-formed value just
 because the source is normally trustworthy.
 
+## Update candidate identity boundary
+
+Downloaded manager scripts are parsed with the PowerShell AST; candidate
+content is never executed to determine its version. The only accepted release
+identity is one bare, unwrapped, unscoped root `EndBlock` `$ScriptVersion =`
+assignment with a direct constant-string RHS, and zero or one equivalent
+`$ReleaseCandidateLabel` assignment. The parsers reject other statically
+identifiable writes to either protected name: assignment/destructuring targets,
+attributed or cast targets, transparent parenthesized targets, member/index
+lvalue roots, `++`/`--`, `foreach` variables, root-script parameters, and named
+data-statement variables. They do not misclassify function-local parameters as
+root identity declarations. Parse errors, duplicates, scoped/nested writes,
+and unsupported declaration shapes fail closed.
+
+This is a finite static-write contract, not a PowerShell sandbox or complete
+data-flow proof. It does not detect every possible indirect mutation, including
+`Set-Variable` and variable-provider writes, `-OutVariable`, `[ref]`, .NET or
+session-state APIs, aliases/splatting, dynamic names, imports/dot-sourcing, or
+invoked scriptblocks. The updater's separate confirmation, backup, candidate
+validation, and replacement safeguards remain required; AST identity parsing
+alone does not establish candidate safety.
+
 ## Download pipeline protections
 
 Live downloads use the shared `Invoke-TpmDownload` pipeline where practical.
@@ -345,10 +367,24 @@ ask for confirmation before applying, back up the current script before
 replacement, validate the extracted script, then instruct the user to restart.
 
 Update release assets are limited to the Jumpstile TeknoParrot Manager GitHub
-release path. The downloaded ZIP is extracted to a temporary location, and the
-candidate script is rejected if it is missing, empty, begins with raw ZIP bytes,
-does not contain the TeknoParrot Manager marker, or does not contain a
-`$ScriptVersion = "..."` assignment.
+release path. The downloaded ZIP is extracted to a temporary location. A
+candidate is rejected if it is missing, empty, begins with raw ZIP bytes,
+lacks the TeknoParrot Manager marker, has parser errors, or does not expose
+exactly one bare, unwrapped, unscoped root `EndBlock` constant-string
+`$ScriptVersion =` assignment and at most one equivalent
+`$ReleaseCandidateLabel` assignment. The parsers reject every additional
+statically identifiable protected write, including attribute/cast and
+transparent-parenthesis wrappers, scoped/nested/destructured or compound
+assignments, increment/decrement, foreach variables, root-script parameters,
+data-statement variables, and member/index lvalue roots. Both implementations
+parse source without executing it and require the candidate identity to equal
+the release tag before replacement. Function-local parameters are not treated
+as root identity declarations; indirect runtime mutation is outside the finite
+static-analysis guarantee described above.
+They reject any extracted-script byte above `0x7F` before parsing, preventing
+BOM-less Windows PowerShell 5.1 Windows-1252 decoding from differing from the
+validator's ASCII source interpretation. The main updater also reads the
+installed identity back and verifies it against the release tag.
 
 Current limitation: the TPM menu self-update path computes and logs the ZIP's
 SHA-256 but does not currently consume an optional GitHub asset digest as an
