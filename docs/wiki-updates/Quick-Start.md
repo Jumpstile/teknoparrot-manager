@@ -206,7 +206,7 @@ and ACTION REQUIRED report. None silently proves the others.
 ## Optional features (run any time from the menu)
 
 - **[[Crosshairs]] (mode 4)** — 321 crosshair designs included; pick by number from an HTML preview.
-- **[[ReShade]] (mode 5)** -- sharpening, CRT scanlines, colour. ReShade DLLs are not bundled. Mode 5 can download the official ReShade installer automatically (recommended); manual placement in the `ReShade\` folder is an advanced fallback.
+- **[[ReShade]] (mode 5)** -- sharpening, CRT scanlines, and other post-processing. Its optional non-modal preview offers twelve canonical profiles backed by ten unique pinned shader effects. Choose from the gallery or terminal list; both stay synchronized. The 0-100 slider remains independent. The bundled-image approximation does not run the game or execute shaders; terminal `U` and explicit confirmation are still required before deployment, after which the preview closes automatically. ReShade DLLs are not bundled.
 - **[[dgVoodoo2]] (mode 6)** — only needed for games that crash or show black screens.
 - **[[GPU Fix]] (mode 7)** — safe to run any time; re-run after changing GPU or drivers.
 - **[[FFB Setup]] (mode 8)** — native FFB Blaster (needs a paid membership) and/or a free third-party plugin.

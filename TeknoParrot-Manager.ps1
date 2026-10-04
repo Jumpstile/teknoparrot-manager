@@ -8926,6 +8926,8 @@ function New-TpmReShadeGalleryEventHandlers {
     )
     $refreshSafe = ${function:Invoke-TpmReShadeGalleryRefreshSafe}
     $previewFailure = ${function:Set-TpmReShadeGalleryPreviewFailed}
+    $getProfileId = ${function:Get-TpmReShadeGalleryProfileId}
+    $syncSelection = ${function:Sync-TpmReShadeGallerySelection}
     $viewHandler = {
         param($senderArg, $eventArgsArg)
         try {
@@ -8974,6 +8976,25 @@ function New-TpmReShadeGalleryEventHandlers {
             [void](& $previewFailure -State $State -Stage 'slider-keyboard-handler' -ErrorRecord $_)
         }
     }.GetNewClosure()
+    $profileSelectionHandler = {
+        param($senderArg, $eventArgsArg)
+        try {
+            if (-not [bool]$State['Initialized'] -or -not [bool]$State['PreviewEnabled'] -or [bool]$State['Closed'] -or [bool]$State['ProfileSelectorUpdating']) { return }
+            $eventSender = $senderArg
+            if (-not $eventSender -or -not $eventSender.PSObject.Properties['SelectedItem']) { $eventSender = $this }
+            $itemProperty = if ($eventSender) { $eventSender.PSObject.Properties['SelectedItem'] } else { $null }
+            if (-not $itemProperty) { throw 'Gallery profile-selection event sender has no SelectedItem property.' }
+            $profileId = & $getProfileId -Item $itemProperty.Value
+            if ([string]::IsNullOrWhiteSpace($profileId)) { throw 'Gallery profile-selection item has no valid ProfileId.' }
+            $canonicalProfile = @($State['Profiles'] | Where-Object { [string]$_.ProfileId -eq $profileId })[0]
+            if (-not $canonicalProfile) { throw ("Gallery profile-selection item '{0}' is not in the approved profile catalog." -f $profileId) }
+            if (-not (& $syncSelection -Session $State -ProfileId ([string]$canonicalProfile.ProfileId))) {
+                if ([bool]$State['PreviewEnabled'] -and -not [bool]$State['Closed']) { throw 'Gallery profile selection could not be synchronized.' }
+            }
+        } catch {
+            [void](& $previewFailure -State $State -Stage 'profile-selection-handler' -ErrorRecord $_)
+        }
+    }.GetNewClosure()
     $formClosedHandler = {
         param($senderArg, $eventArgsArg)
         try { $State['Closed'] = $true } catch {}
@@ -8982,6 +9003,7 @@ function New-TpmReShadeGalleryEventHandlers {
         View = $viewHandler
         Slider = $sliderHandler
         KeyUp = $sliderKeyUpHandler
+        ProfileSelection = $profileSelectionHandler
         Closed = $formClosedHandler
     }
 }
@@ -9018,8 +9040,7 @@ function Show-TpmReShadeProfileGalleryWindow {
         $instructionLabel.Height = 58
         $instructionLabel.Padding = New-Object Windows.Forms.Padding(6, 4, 6, 4)
         $instructionLabel.TextAlign = 'TopLeft'
-        $profileCount = @($Profiles).Count
-        $instructionLabel.Text = ("ReShade preview only`r`nThe terminal chooser is authoritative. Select 1-{0} in TeknoParrot Manager; this preview follows that selection. Close this window when finished." -f $profileCount)
+        $instructionLabel.Text = "ReShade preview only`r`nChoose a profile here or in the terminal; both selections stay synchronized. Close this window when finished."
         $instructionLabel.ForeColor = [System.Drawing.Color]::DarkBlue
         $instructionLabel.BackColor = [System.Drawing.Color]::AliceBlue
         $instructionLabel.BorderStyle = 'FixedSingle'
@@ -9053,6 +9074,9 @@ function Show-TpmReShadeProfileGalleryWindow {
             Form = $form
             Picture = $picture
             DescriptionLabel = $descriptionLabel
+            ProfileSelector = $null
+            ProfileSelectorHandler = $null
+            ProfileSelectorUpdating = $false
             Slider = $null
             ViewButtons = @()
             SliderTimer = $null
@@ -9076,9 +9100,9 @@ function Show-TpmReShadeProfileGalleryWindow {
             try {
                 if (-not [bool]$state['Initialized'] -or -not [bool]$state['PreviewEnabled'] -or [bool]$state['Closed']) { return $false }
                 $profileId = [string]$state['SelectedProfileId']
-                if ([string]::IsNullOrWhiteSpace($profileId)) { throw 'Terminal chooser has no selected ProfileId.' }
+                if ([string]::IsNullOrWhiteSpace($profileId)) { throw 'No ReShade profile is selected.' }
                 $canonicalProfile = @($state['Profiles'] | Where-Object { $_.ProfileId -eq $profileId })[0]
-                if (-not $canonicalProfile) { throw ("Terminal-selected ProfileId '{0}' is not available." -f $profileId) }
+                if (-not $canonicalProfile) { throw ("Selected ProfileId '{0}' is not available." -f $profileId) }
                 $descriptionLabel.Text = "Preview approximation using a bundled image. TPM does not run the game or execute ReShade shaders during preview. Actual in-game results may vary.`r`n{0}`r`nTechniques TPM will install/apply: {1}" -f $canonicalProfile.Description, (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $canonicalProfile)
                 $viewMode = [string]$state['ViewMode']
                 if ($viewMode -notin @('Before', 'After', 'Split', 'Slider')) { throw ("Unsupported gallery view mode '{0}'." -f $viewMode) }
@@ -9129,6 +9153,17 @@ function Show-TpmReShadeProfileGalleryWindow {
         $sliderLabel.Text = 'Before / After'
         $sliderLabel.AutoSize = $true
         [void]$toolbar.Controls.Add($sliderLabel)
+        $profileSelectorLabel = New-Object Windows.Forms.Label
+        $profileSelectorLabel.Text = 'Profile:'
+        $profileSelectorLabel.AutoSize = $true
+        [void]$toolbar.Controls.Add($profileSelectorLabel)
+        $profileSelector = New-Object Windows.Forms.ComboBox
+        $profileSelector.Name = 'ProfileSelector'
+        $profileSelector.DropDownStyle = [Windows.Forms.ComboBoxStyle]::DropDownList
+        $profileSelector.DisplayMember = 'FriendlyName'
+        $profileSelector.Width = 230
+        foreach ($profileDefinition in $canonicalProfiles) { [void]$profileSelector.Items.Add($profileDefinition) }
+        $state['ProfileSelector'] = $profileSelector
         $slider = New-Object Windows.Forms.TrackBar
         $slider.Name = 'ComparisonSlider'
         $slider.Minimum = 0
@@ -9150,6 +9185,16 @@ function Show-TpmReShadeProfileGalleryWindow {
         if (-not $defaultProfile) { $defaultProfile = @($canonicalProfiles | Where-Object { [string]$_.ProfileId -eq 'Original' })[0] }
         if (-not $defaultProfile) { $defaultProfile = $canonicalProfiles[0] }
         $state['SelectedProfileId'] = [string]$defaultProfile.ProfileId
+        for ($profileIndex = 0; $profileIndex -lt $canonicalProfiles.Count; $profileIndex++) {
+            if ([string]$canonicalProfiles[$profileIndex].ProfileId -eq [string]$defaultProfile.ProfileId) {
+                $profileSelector.SelectedIndex = $profileIndex
+                break
+            }
+        }
+        $profileSelectionHandler = $handlers.ProfileSelection
+        $state['ProfileSelectorHandler'] = $profileSelectionHandler
+        $profileSelector.Add_SelectedIndexChanged($profileSelectionHandler)
+        [void]$toolbar.Controls.Add($profileSelector)
         $state['Initialized'] = $true
         if (-not (Invoke-TpmReShadeGalleryRefreshSafe -State $state -Refresh $refresh -Stage 'initial-preview')) {
             Close-TpmReShadeProfileGallerySession -Session $state
@@ -9185,7 +9230,8 @@ function Close-TpmReShadeProfileGallerySession {
     } catch {}
     try { if ($Session['Picture'] -and $Session['PaintHandler']) { $Session['Picture'].Remove_Paint($Session['PaintHandler']); $Session['PaintHandler'] = $null } } catch {}
     try { if ($Session['Slider'] -and $Session['SliderHandler']) { $Session['Slider'].Remove_ValueChanged($Session['SliderHandler']) } } catch {}
-    try { if ($Session['Combo'] -and $Session['ComboHandler']) { $Session['Combo'].Remove_SelectedIndexChanged($Session['ComboHandler']) } } catch {}
+    try { if ($Session['ProfileSelector'] -and $Session['ProfileSelectorHandler']) { $Session['ProfileSelector'].Remove_SelectedIndexChanged($Session['ProfileSelectorHandler']) } } catch {}
+    try { $Session['ProfileSelectorHandler'] = $null; $Session['ProfileSelector'] = $null } catch {}
     try { if ($Session['Slider'] -and $Session['SliderKeyUpHandler']) { $Session['Slider'].Remove_KeyUp($Session['SliderKeyUpHandler']); $Session['SliderKeyUpHandler'] = $null } } catch {}
     try { foreach ($button in @($Session['ViewButtons'])) { if ($button -and $Session['ViewHandler']) { $button.Remove_Click($Session['ViewHandler']) } } } catch {}
     try { if ($Session['Form'] -and $Session['FormClosedHandler']) { $Session['Form'].Remove_FormClosed($Session['FormClosedHandler']) } } catch {}
@@ -10665,17 +10711,33 @@ function Sync-TpmReShadeGallerySelection {
         [Parameter(Mandatory)][string]$ProfileId
     )
     if (-not $Session) { return $false }
+    $wasUpdating = [bool]$Session['ProfileSelectorUpdating']
     try {
         if (-not [bool]$Session['Initialized'] -or [bool]$Session['Closed'] -or -not [bool]$Session['PreviewEnabled']) { return $false }
         $canonicalProfile = @($Session['Profiles'] | Where-Object { [string]$_.ProfileId -eq $ProfileId })[0]
         if (-not $canonicalProfile) { throw ("Gallery profile '{0}' is not present." -f $ProfileId) }
         $Session['SelectedProfileId'] = [string]$canonicalProfile.ProfileId
-        if (-not (Invoke-TpmReShadeGalleryRefreshSafe -State $Session -Refresh $Session['Refresh'] -Stage 'terminal-profile-sync')) { return $false }
+        $selector = $Session['ProfileSelector']
+        if ($selector) {
+            $selectorIndex = -1
+            for ($profileIndex = 0; $profileIndex -lt $Session['Profiles'].Count; $profileIndex++) {
+                if ([string]$Session['Profiles'][$profileIndex].ProfileId -eq [string]$canonicalProfile.ProfileId) {
+                    $selectorIndex = $profileIndex
+                    break
+                }
+            }
+            if ($selectorIndex -lt 0) { throw ("Gallery selector does not contain profile '{0}'." -f $canonicalProfile.ProfileId) }
+            $Session['ProfileSelectorUpdating'] = $true
+            $selector.SelectedIndex = $selectorIndex
+        }
+        if (-not (Invoke-TpmReShadeGalleryRefreshSafe -State $Session -Refresh $Session['Refresh'] -Stage 'profile-selection-sync')) { return $false }
         try { [Windows.Forms.Application]::DoEvents() } catch {}
         return $true
     } catch {
-        [void](Set-TpmReShadeGalleryPreviewFailed -State $Session -Stage 'terminal-profile-sync' -ErrorRecord $_)
+        [void](Set-TpmReShadeGalleryPreviewFailed -State $Session -Stage 'profile-selection-sync' -ErrorRecord $_)
         return $false
+    } finally {
+        $Session['ProfileSelectorUpdating'] = $wasUpdating
     }
 }
 
@@ -10737,13 +10799,25 @@ function Read-TpmReShadeTerminalProfile {
     $orderedIds = @($Profiles | ForEach-Object { [string]$_.ProfileId })
     $selected = $null
     if ($DefaultProfileId) { $selected = Get-TpmReShadeProfile -ProfileId $DefaultProfileId }
+    # Snapshot a closed gallery once, then keep later terminal choices authoritative.
+    $previewClosedSelectionImported = $false
     while ($true) {
         if ($PreviewSession) {
             try { [Windows.Forms.Application]::DoEvents() } catch {}
+            $previewSessionClosed = [bool]$PreviewSession['Closed']
+            $canReadPreviewSelection = [bool]$PreviewSession['Initialized'] -and [bool]$PreviewSession['PreviewEnabled'] -and (-not $previewSessionClosed -or -not $previewClosedSelectionImported)
+            if ($canReadPreviewSelection) {
+                $previewProfileId = [string]$PreviewSession['SelectedProfileId']
+                if (-not [string]::IsNullOrWhiteSpace($previewProfileId)) {
+                    $previewSelection = @($Profiles | Where-Object { [string]$_.ProfileId -eq $previewProfileId })[0]
+                    if ($previewSelection) { $selected = $previewSelection }
+                }
+                if ($previewSessionClosed) { $previewClosedSelectionImported = $true }
+            }
         }
         Write-Host ''
-        Write-Host '  Preview uses a bundled image only; the terminal chooser is authoritative and view-only.' -ForegroundColor DarkCyan
-        Write-Host '  Choose a profile number in the terminal. The preview follows it and never selects a profile.' -ForegroundColor DarkCyan
+        Write-Host '  Preview is a bundled-image approximation; choose a profile in the preview window or terminal.' -ForegroundColor DarkCyan
+        Write-Host '  The profile choice stays synchronized between the preview selector and terminal list.' -ForegroundColor DarkCyan
         $profileCount = $orderedIds.Count
         $lastProfileNumber = [Math]::Max(1, $profileCount)
         for ($profileIndex = 0; $profileIndex -lt $orderedIds.Count; $profileIndex++) {
@@ -10754,9 +10828,22 @@ function Read-TpmReShadeTerminalProfile {
             Write-Host ('  [{0}] {1} {2}' -f ($profileIndex + 1), $marker, $profileEntry.FriendlyName) -ForegroundColor $(if ($marker -eq '*') { 'Yellow' } else { 'White' })
             Write-Host ('      {0}' -f $profileEntry.Description) -ForegroundColor DarkGray
         }
-        Write-Host ('  Current selection: {0}' -f $(if ($selected) { $selected.FriendlyName } else { 'none -- choose a profile number in the terminal' })) -ForegroundColor Yellow
+        Write-Host ('  Current selection: {0}' -f $(if ($selected) { $selected.FriendlyName } else { 'none -- choose a profile in the preview or terminal' })) -ForegroundColor Yellow
         Write-Host ('  Choose: [1-{0}] Select profile  [U] Use selected profile  [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back  [D] Details' -f $lastProfileNumber) -ForegroundColor White
         $choice = (Read-TpmReShadeTerminalInput -Prompt '  Choice' -PumpPreviewMessages ([bool]$PreviewSession)).Trim().ToUpperInvariant()
+        if ($PreviewSession) {
+            try { [Windows.Forms.Application]::DoEvents() } catch {}
+            $previewSessionClosed = [bool]$PreviewSession['Closed']
+            $canReadPreviewSelection = [bool]$PreviewSession['Initialized'] -and [bool]$PreviewSession['PreviewEnabled'] -and (-not $previewSessionClosed -or -not $previewClosedSelectionImported)
+            if ($canReadPreviewSelection) {
+                $previewProfileId = [string]$PreviewSession['SelectedProfileId']
+                if (-not [string]::IsNullOrWhiteSpace($previewProfileId)) {
+                    $previewSelection = @($Profiles | Where-Object { [string]$_.ProfileId -eq $previewProfileId })[0]
+                    if ($previewSelection) { $selected = $previewSelection }
+                }
+                if ($previewSessionClosed) { $previewClosedSelectionImported = $true }
+            }
+        }
         $selectedNumber = 0
         if ([int]::TryParse($choice, [ref]$selectedNumber) -and $selectedNumber -ge 1 -and $selectedNumber -le $profileCount) {
             $selectedProfileId = $orderedIds[$selectedNumber - 1]
@@ -10773,7 +10860,7 @@ function Read-TpmReShadeTerminalProfile {
             Write-Host '  TeknoParrot Manager shows a safe preview approximation using a bundled image.' -ForegroundColor DarkCyan
             Write-Host '  It does not run the game or execute ReShade shaders during preview.' -ForegroundColor DarkCyan
             $effectCount = @($Profiles | ForEach-Object { $_.Effects } | Sort-Object -Unique).Count
-            Write-Host ('  RC8 includes {0} beginner-friendly profiles backed by {1} pinned shader effects.' -f $orderedIds.Count, $effectCount) -ForegroundColor DarkCyan
+            Write-Host ('  The catalog contains {0} profiles backed by {1} pinned shader effects.' -f $orderedIds.Count, $effectCount) -ForegroundColor DarkCyan
             Write-Host '  Actual in-game results may vary.' -ForegroundColor DarkCyan
             foreach ($id in $orderedIds) {
                 $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
@@ -10794,6 +10881,7 @@ function Read-TpmReShadeTerminalProfile {
                     }
                     $oldSession = $PreviewSession
                     $PreviewSession = $replacement.Session
+                    $previewClosedSelectionImported = $false
                     Close-TpmReShadeProfileGallerySession -Session $oldSession
                     if ($selected) { [void](Sync-TpmReShadeGallerySelection -Session $PreviewSession -ProfileId ([string]$selected.ProfileId)) }
                     [void][Windows.Forms.Application]::DoEvents()
@@ -11233,10 +11321,9 @@ function Invoke-ReShadeSetupLegacy {
         }
     }
 
-    $profileCount = @(Get-TpmReShadeProfiles).Count
-    Write-Host ("  Choose how your game should look. Use the preview window to compare the {0} beginner-friendly RC8 profiles." -f $profileCount) -ForegroundColor Cyan
-    Write-Host "  The preview is view-only; select the profile in the terminal. Nothing will be changed until you confirm." -ForegroundColor DarkCyan
-    Write-Host "  Preview gallery (bundled landscape; compare Original/After or Split; choose profiles in the terminal)" -ForegroundColor DarkCyan
+    Write-Host ("  Choose how your game should look. Select a profile in the preview or terminal from the {0} beginner-friendly catalog." -f $DisplayVersion) -ForegroundColor Cyan
+    Write-Host "  Preview uses a bundled-image approximation; it does not execute ReShade shaders. Nothing will be changed until you confirm." -ForegroundColor DarkCyan
+    Write-Host "  Preview gallery (compare Original/After or Split; select a profile here or in the terminal)" -ForegroundColor DarkCyan
     $favoriteState = Read-TpmReShadeState
     $favoriteProfiles = @()
     foreach ($favorite in @($favoriteState.Favorites)) {
@@ -11247,15 +11334,13 @@ function Invoke-ReShadeSetupLegacy {
         Write-Host ("  Favorites available in the gallery: " + (($favoriteProfiles | ForEach-Object FriendlyName) -join ', ')) -ForegroundColor DarkCyan
     }
 
-    # Terminal selection is the authoritative path. The old modal gallery
-    # could hide behind Windows Terminal and leave this workflow waiting with
-    # no visible prompt. Preview rendering remains available separately, but
-    # it can never be required to choose a profile or continue safely.
+    # The preview selector and terminal list update the same transient profile
+    # selection. Keep the terminal path usable when WinForms is unavailable.
     $galleryProfiles = @(Get-TpmReShadeProfiles)
     $galleryResult = Show-TpmReShadeProfileGalleryWindow -Profiles $galleryProfiles -DefaultProfileId 'Original' -Show -NonModal
     $gallerySession = if ($galleryResult.Available) { $galleryResult.Session } else { $null }
     if (-not $galleryResult.Available) {
-        Write-Host '  ReShade visual gallery unavailable; typed profile fallback remains active.' -ForegroundColor Yellow
+        Write-Host '  ReShade visual gallery unavailable; choose a profile in the terminal.' -ForegroundColor Yellow
         Write-Log ("ReShade visual gallery unavailable before terminal chooser: {0}" -f $galleryResult.Reason)
     }
     try {

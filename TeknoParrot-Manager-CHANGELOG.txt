@@ -6,6 +6,19 @@
   RC8 is not published and has no tag, release asset, or Scripts mirror.
 
 -------------------------------------------------------------------------------
+  v1.0 RC8  (candidate, not published)  -- ReShade preview selection
+  ----------------------------------------------------------------
+  RC8 adds a profile drop-down to the non-modal ReShade preview gallery. The
+  preview and numbered terminal chooser select from the same twelve canonical
+  profiles, backed by ten unique pinned shader effects, and keep the current
+  preview description synchronized. Profile selection does not change the
+  comparison view or 0-100 drag/keyboard slider. Preview selection stays
+  transient: terminal U and the existing explicit confirmation remain required
+  before deployment. The preview closes automatically when the chooser returns.
+  This source candidate is not a package or release and remains subject to the
+  existing review, quality, certification, and owner-runtime gates.
+
+-------------------------------------------------------------------------------
   v1.0 RC8  (candidate, not published)  -- runtime recovery, certification
   identity, governance, and release-integrity preparation
   ----------------------------------------------------------------

@@ -2,15 +2,15 @@
 
 ## 1. Slice name
 
-- Name: Pinned ten-effect ReShade catalog with terminal-authoritative selection
+- Name: Pinned ten-effect ReShade catalog with direct preview selection
 - Contract ID: `TPM-RESHADE-TEN-EFFECTS-001`
 - Issue/PR: PR #321
-- Authorization: the Desktop high-gear handoff explicitly authorizes a minimum-ten-shader ReShade selection capability during the feature freeze; no other feature scope is authorized.
+- Authorization: the user explicitly authorized direct profile selection in the ReShade preview as a feature-freeze exception in this conversation; no other new capability scope is authorized.
 
 ## 2. Owner report IDs included
 
 - IDs: 1, 9, and 10.
-- Exact handoff requirements: retain safe no-change/Back/cancel behavior; make every catalog effect selectable and deployable through the terminal chooser; keep terminal selection authoritative and reflected by the non-modal preview; wire the gallery's existing comparison slider to its cached preview while preserving Before/After/Split/Slider modes and deterministic close behavior.
+- Exact handoff requirements: retain safe no-change/Back/cancel behavior; keep all twelve canonical profiles backed by at least ten pinned shader effects; allow direct selection in the preview and preserve terminal selection as an alternate route to the same `SelectedProfileId`; keep preview state synchronized; preserve the working comparison slider and Before/After/Split/Slider modes; close the preview automatically on chooser completion and every existing cancel/close path.
 
 ## 3. Explicit exclusions
 
@@ -22,13 +22,16 @@
 
 - Pre-slice baseline: the approved catalog contained three shader effects, the terminal chooser had a fixed five-profile limit, and the preview renderer only approximated those five profiles.
 - Expected behavior: retain the five existing profiles and add seven individually selectable beginner-facing profiles, for twelve profiles total and ten pinned shader effects total. Each new effect has exact repository, immutable commit, source-relative file, SHA-256, byte length, MIT license, attribution, include requirements, and approved raw GitHub host/path metadata. The terminal chooser derives its numbered range from the supplied canonical profile list; choosing any number from 1 through 12 selects that canonical profile and synchronizes the preview. Each profile produces a deterministic TPM-owned approximation from the bundled landscape image; preview sliders and view modes remain functional. At the resolver boundary, repeated approved effect IDs normalize to one copy in first-request order, while unknown IDs are rejected; canonical profile definitions remain duplicate-free. Returning from the chooser closes the manager-owned preview…
+- Direct-selection behavior: the non-modal gallery provides a visible drop-down containing all twelve canonical profile definitions (at least ten choices, with the current catalog exposing twelve profiles backed by ten unique effects). A valid preview choice updates the shared `SelectedProfileId` and refreshes the approximation. Terminal number selection updates the same state; after the input pump processes preview events, `U` returns the latest canonical profile, not a stale terminal-local value. Preview selection remains transient and cannot deploy files, save configuration, or bypass terminal `U` plus the existing explicit confirmation. If the gallery is unavailable or closed, terminal selection remains usable.
 - Forbidden regressions: no unpinned URL, unverified effect or include bytes, missing include closure, missing ReShade effect search paths or preset linkage, duplicate emitted effect-stack or target entries, unknown effect acceptance, ignored gallery selector, hard-coded five-profile limit, false shader-execution claim, changed effect ordering, preset injection, or release bundle of ReShade binaries/effect source files. Repeated approved IDs normalize to their first occurrence. Compatibility stays `ADVISORY_UNMEASURED` and `Recommended` remains false.
 
-- Slider/selection boundary: the non-modal gallery exposes a 0-100 comparison TrackBar wired to its guarded change and keyboard handlers. Slider interaction changes only view mode/position; a numbered terminal choice updates the canonical `SelectedProfileId` and the preview follows it, including while Slider mode is active. The gallery does not select a profile directly.
+- Slider/selection boundary: the non-modal gallery exposes a 0-100 comparison TrackBar whose guarded drag events remain coalesced at 16 ms and whose keyboard KeyUp updates immediately. Choosing any displayed profile in the gallery or terminal updates the same validated `SelectedProfileId`; neither route changes slider position or view mode. Slider input changes only view mode/position. `U` uses the latest selection and `B`/`N` remain non-mutating. Automatic close and disposal of the owned gallery remain intact.
 
 ## 5. Source/function ownership
 
 - Files: `TeknoParrot-Manager.ps1`; `Tests/TeknoParrot-Manager.Tests.ps1`; `scripts/Run-TpmQualityGate.ps1`; `ARCHITECTURE.md`; `LICENSE`; `TeknoParrot-Manager-README.txt`; `README.md`; `TeknoParrot-Manager-CHANGELOG.txt`; `docs/RESHADE-PROFILE-SELECTION-SPECIFICATION-INVENTORY.md`; `docs/RESHADE-PROFILE-SELECTION-INVARIANT-INVENTORY.md`; `docs/RESHADE-DGVOODOO2-AUTODOWNLOAD-SPECIFICATION-INVENTORY.md`; `docs/RESHADE-DGVOODOO2-AUTODOWNLOAD-INVARIANT-INVENTORY.md`; `docs/remediation/PR-321-control-board.md`; `docs/remediation/PR-321-reconciliation.md`; `docs/remediation/slices/PR-321-current-slice.md`.
+- Additional release-state documentation: `QUICKSTART.md`; `SECURITY.md`; `RELEASE-SAFETY-CHECKLIST.md`; `docs/AUTO_UPDATE.md`; `docs/TPM-CERTIFICATION-SUITE.md`; `docs/ENGINEERING-WORKFLOW.md`.
+- Additional coordinated documentation: `TeknoParrot-Manager-QuickStart.txt`; `docs/wiki-updates/Home.md`; `docs/wiki-updates/Quick-Start.md`; `docs/wiki-updates/Changelog.md`; `docs/wiki-updates/ReShade.md` (insert-only staging patch; no live wiki update).
 - Functions/regions: `Get-TpmReShadeProfiles`; `Get-TpmReShadeEffectCatalog`; `Get-TpmReShadeApprovedEffectFiles`; `Acquire-TpmReShadeApprovedEffect`; `Test-TpmReShadePresetContent`; `Update-TpmReShadeTutorialProgressText`; `Install-TpmReShadeProfileDeployment`; `Invoke-TpmReShadePreviewProfilePixels`; `New-TpmReShadePreviewPaintHandler`; `Get-TpmReShadePreviewStateValue`; `New-TpmReShadeGalleryEventHandlers`; `Flush-TpmReShadeGallerySlider`; `Show-TpmReShadeProfileGalleryWindow`; `Sync-TpmReShadeGallerySelection`; `Close-TpmReShadeProfileGallerySession`; `Read-TpmReShadeTerminalProfile`.
 - Gate freshness: `scripts/Run-TpmQualityGate.ps1` includes both profile-selection inventories and the adjacent installer inventory pair in `$freshnessPaths`; `requires the TPM remediation and prompt-slice artifacts` verifies their presence and freshness-list membership.
 - Upstream provenance for the seven added SweetFX effects: `CeeJayDK/SweetFX`, commit `16d1a42247cb5baaf660120ee35c9a33bb94649c`, repository `LICENSE` MIT, copyright `CeeJayDK`.
@@ -47,20 +50,20 @@ Pinned ReShade 6.8.0 runtime source at commit `18deaa52de0c425a78b329e9cb3c49728
 
 Process deviation: the two required inventories were identified after implementation had begun, rather than being built before the governed changes. Their current contents do not retroactively satisfy the standard's timing requirement; independent review must assess this deviation before the slice is called Review Ready.
 
-- Characterization: retain terminal-authority, current profile order, slider boundary, preview close, immutable upstream metadata, and protected deployment behavior.
-- Source research: validate all seven raw pinned files, lengths, SHA-256 values, upstream MIT license, include lists, and actual ReShade technique names before catalog edits. Validate the pinned CC0 header bytes and byte length; document/test the independently authored UI compatibility shim.
+- Characterization: retain canonical profile order, direct preview and terminal selection synchronization, slider boundaries and keyboard behavior, preview close, immutable upstream metadata, and protected deployment behavior.
+- Pre-implementation regressions: replace terminal-authority/no-gallery-control tests with failing behavior checks for the gallery selector, canonical profile identity, both-way synchronization, acceptance of a preview selection after the terminal input pump, and selection/view/slider independence. Capture the current twelve-profile/ten-effect catalog count and automatic close path before changing production source.
 - Behavior: exact catalog/profile counts; all effect `RelativeFiles`, `SHA256`, and `ByteLengths` arrays have matching cardinality; each profile produces a generated preset accepted by the catalog-derived technique allowlist; every selected effect's declared include closure has an approved source or TPM-authored shim. `rejects unknown effects and normalizes repeated approved effects in first-seen order` proves duplicate-ID normalization and rejection behavior.
 - Clean-target deployment: table-driven proof deploys all twelve canonical profiles with no pre-existing shader files. For each profile, exercise transactional staging and verify the complete effect/include closure at expected target paths, canonical `[GENERAL] EffectSearchPaths`, `PresetPath`, and `StartupPresetPath`, and ownership entries for every promoted file. Original must deploy no shader assets.
 - Preset conformance: all twelve generated presets carry canonical `Techniques` and `TechniqueSorting`; sorting divergence is rejected, and Original carries both lists empty.
 - Shared include boundary: identical same-path includes deduplicate once; mismatched hash/byte-length identities fail before target promotion and leave target files and ownership unchanged.
-- Terminal/preview: choosing profile number 12 selects Vignette; refresh observes the updated `SelectedProfileId` at invocation and the gallery renders from that terminal-selected canonical profile. The visible TrackBar changes Slider position and invalidates the cached preview; terminal selection continues to update the profile during slider mode. Each added profile renders a deterministic output distinct from the baseline; slider extremes and terminal-to-preview synchronization remain correct; preview teardown closes the owned window.
+- Selection/preview: exercise every gallery item (twelve canonical profiles backed by ten effects), including the first and twelfth identities. A valid preview selector event updates `SelectedProfileId` and refreshes that canonical profile; invalid/malformed items fail closed. A terminal choice updates the selector; a preview choice made while terminal input pumps messages is the profile returned by `U`, not stale local state. Selection leaves ViewMode and slider position unchanged. Every profile renders a deterministic output distinct from the baseline; slider extremes and automatic teardown after accept/cancel remain correct.
 - Regression suite: full main Pester suite under Pester 5.7.1 in PowerShell 7 and Windows PowerShell 5.1; SupportPackage Pester suite under Pester 5.7.1.
 - Static and procedure gates: PowerShell parse/ASCII, PSScriptAnalyzer, InjectionHunter, `git diff --check`, and `TPM-RESHADE-001`, `TPM-EVIDENCE-001`, `TPM-OWNER-002`, `TPM-OWNER-003`, `TPM-TRACE-001`, and `TPM-AUTH-001`.
 
 - Keep the architecture, README.md, release README, changelog, canonical owner table, and control board synchronized to the twelve-profile/ten-effect behavior and its include/config deployment contract.
 - Add this contract to the current-slice pointer and permanent-gate freshness inputs.
 - Hunk classification: PR #321 / owner IDs 1, 9, and 10 / `TPM-RESHADE-TEN-EFFECTS-001` / `TPM-RESHADE-001` / `TPM-EVIDENCE-001` / `TPM-OWNER-002` / `TPM-OWNER-003` / `TPM-TRACE-001` / `TPM-AUTH-001`.
-- No version bump or live wiki update is authorized; RC8 remains unpublished.
+- Candidate version: bump the unpublished candidate from RC8 to RC8 for this product-behavior change. No package build/validation, tag, publication, live wiki update, certification, or release is authorized; wiki staging may be updated.
 
 ## 9. Permanent procedure IDs affected
 
@@ -72,7 +75,7 @@ Process deviation: the two required inventories were identified after implementa
 
 ## 10. Runtime smoke checklist
 
-- Exact packaged behavior: after a separately authorized package build, select at least the tenth catalog effect in terminal, confirm the preview tracks that profile and slider boundary, apply only after explicit existing confirmation, and verify preview close on chooser completion.
+- Exact packaged behavior, if separately authorized later: directly select at least ten catalog-backed profiles in the preview, exercise mouse/keyboard slider boundaries, verify terminal acceptance uses the same last selection, apply only after the existing confirmation, and verify automatic preview closure. This task authorizes source-level WinForms smoke only.
 - Required source/package identity: reviewed source SHA and rebuilt candidate package SHA must match.
 - Evidence artifacts: terminal selection, preview output/slider state, exact installed pinned file hashes, teardown state, and package/source identity.
 - Owner/runtime authorization: required and not granted by this slice; no package or owner smoke is authorized.

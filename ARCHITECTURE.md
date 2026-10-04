@@ -38,7 +38,7 @@ the new log/config paths or entering normal workflows. Review the migration repo
 and preserved evidence before retry.
 
 ---
-## RC8 runtime recovery and visual selection
+## RC8 runtime recovery and RC8 ReShade visual selection
 ## Beginner-friendly default UX (RC8 release gate)
 
 TPM is written for a user who wants to play games, not administer Windows.
@@ -97,16 +97,26 @@ otherwise the user receives an explicit close instruction. Listener shutdown is
 guaranteed, focus return is attempted with a plain-language fallback, and typed
 numeric selection remains available when preview or browser startup fails.
 
-ReShade profile selection opens an optional non-modal gallery and immediately
-leaves the terminal at the authoritative numbered chooser. The terminal
-chooser remains usable when WinForms is behind another window, closed,
-unavailable, or fails to open. Numbered selection updates the gallery when it
-is available; the gallery has no profile-selection control and only follows
-the terminal's selected profile. `U` is the only path toward deployment, while
-`B` and invalid input remain non-mutating. The gallery changes the displayed
-deterministic, TPM-owned comparison approximation when the terminal selection
-changes, but does not run the game or execute ReShade shaders and does not
-deploy files. Actual in-game results may vary.
+ReShade profile selection opens an optional non-modal gallery with a profile
+selector alongside the existing comparison controls. The selector lists all
+twelve canonical profiles; profiles are backed by ten unique pinned shader
+effects. Choosing a profile updates the shared `SelectedProfileId`, refreshes
+the bundled-image approximation, and updates the terminal chooser. A numbered
+terminal choice updates the same gallery selector and preview. The two inputs
+remain synchronized while `ViewMode` (`Before`, `After`, `Split`, or `Slider`)
+and the 0-100 slider position remain independent of profile identity.
+
+The terminal remains usable if WinForms is behind another window, closed,
+unavailable, or fails to open. While terminal input pumps WinForms events,
+`Read-TpmReShadeTerminalProfile` re-reads the shared selected ID before handling
+`U`, so it accepts the latest preview choice rather than a stale local value.
+`U` is the only chooser path toward deployment; the existing explicit
+confirmation remains required. The preview selector is transient and read-only:
+it does not run the game or execute ReShade shaders and does not deploy files.
+After the chooser returns, the normal setup `finally` closes the gallery and
+disposes its timer, images, and render cache. `B` and invalid input remain
+non-mutating. Actual in-game results may vary.
+
 The reference is the bundled `PreviewAssets\ReShadePreviews\TPM-preview-landscape.png`
 asset, validated by System.Drawing decoding, fixed dimensions, identity
 `TPM-LANDSCAPE-V1`, version `3`, and SHA-256
@@ -118,21 +128,21 @@ bitmaps at the requested boundary. Actual in-game results may vary.
 Deployment remains behind the existing explicit confirmation. The reference
 identity, renderer version, and effect hashes are part of the cache key so
 stale artifacts regenerate.
+
 The gallery keeps a stable internal `SelectedProfileId` separate from the
-`ViewMode` (`Before`, `After`, `Split`, or `Slider`). Profile IDs and canonical
-technique names come from validated profile definitions; the preview surface
-does not expose raw objects, cache paths, or a second chooser. Initialization
+`ViewMode`. Selector items are canonical profile objects carrying validated
+profile IDs; handlers resolve those IDs against the approved catalog. The
+preview surface does not expose raw objects or cache paths. Initialization
 keeps preview events disabled until controls and state are complete. Every
 gallery event is closure-bound, guarded, and fail-closed: renderer or state
-errors are logged with their stage, the optional gallery is closed, and the
-terminal-only chooser remains authoritative. Gallery events, preview refresh,
-and all comparison controls are visual-only; deployment is still unreachable
-until terminal `U` plus the existing explicit confirmation.
-The normal ReShade setup path describes the gallery as view-only and keeps the
-terminal chooser authoritative. RC8 exposes twelve bounded profiles in display
-order: Original, Clean & Sharp, Classic Arcade CRT, Vivid Arcade, Enhanced
-Arcade, Cartoon, Contrast Curves, Film Grain, Levels, Monochrome, Sepia Tone,
-and Vignette.
+errors are logged with their stage and close the optional gallery. Selection,
+preview refresh, and comparison controls remain visual-only; deployment is
+still unreachable until terminal `U` plus the existing explicit confirmation.
+The normal ReShade setup path describes the gallery as a bundled-image
+approximation and explains that it does not execute shaders. RC8 introduced
+twelve bounded profiles in display order: Original, Clean & Sharp, Classic
+Arcade CRT, Vivid Arcade, Enhanced Arcade, Cartoon, Contrast Curves, Film
+Grain, Levels, Monochrome, Sepia Tone, and Vignette.
 The setup summary leads with changed, not-changed, and actual-failure totals;
 unsafe or malformed ownership/path entries remain unchanged and direct the user
 to repair, explicit Adopt for protected content, skip, or Details/support.
@@ -566,16 +576,20 @@ Each generated preset writes both `Techniques` and `TechniqueSorting` from the s
 
 The cache manifest records the subject/mode, slider position when applicable, intensity identity, preset version, approved shader SHA-256 values, reference identity/version/hash, and renderer version. A missing, corrupt, stale, or mismatched manifest/image regenerates safely; cache artifacts are never trust or deployment evidence. Each WinForms preview keeps one decoded `Reference` bitmap and one processed bitmap per profile. Slider Paint reads only those cached bitmaps, clips the two sides, and draws the divider; it never allocates a composite bitmap, replaces `PictureBox.Image`, decodes a file, or runs the profile pixel generator during a drag. Slider changes are coalesced through a short WinForms timer, while keyboard/programmatic updates invalidate the same view immediately. Close detaches handlers, stops and disposes the timer, clears pending state, disposes the picture image and render cache, then disposes the form. `Open-TpmReShadePreviewWindow`, `Update-TpmReShadePreviewWindow`, `Close-TpmReShadePreviewWindow`, and `Show-TpmReShadePreviewWindow` provide the window lifecycle. If a terminal chooser requests `R` after disposal, it creates a fresh gallery session, synchronizes the selected profile, returns that replacement session to the caller, and leaves final teardown with the caller. WinForms is loaded lazily, requires STA for actual display, and returns a text-only fallback in noninteractive hosts.
 
-The visual-first gallery owns a 0-100 `ComparisonSlider` TrackBar. `Get-TpmReShadePreviewStateValue` reads synchronized gallery state; the 16 ms WinForms timer coalesces `ValueChanged` bursts and paints the latest position, while keyboard `KeyUp` applies immediately. Gallery slider input changes only comparison view/position. The terminal chooser remains the sole profile selector, and `Sync-TpmReShadeGallerySelection` refreshes the selected profile even while Slider mode is active.
+The visual-first gallery owns a 0-100 `ComparisonSlider` TrackBar and a profile selector over the twelve canonical profiles. `Get-TpmReShadePreviewStateValue` reads synchronized gallery state; the 16 ms WinForms timer coalesces `ValueChanged` bursts and paints the latest position, while keyboard `KeyUp` applies immediately. Slider input changes only comparison view/position. The profile selector and terminal numbered chooser update the same `SelectedProfileId`; `Sync-TpmReShadeGallerySelection` refreshes the preview and synchronizes the selector without changing Slider mode or position.
 **Full profile deployment and restore (RC8 freeze exception).** Normal ReShade setup and the explicit per-game restore action call `Install-TpmReShadeProfileDeployment`. It stages the architecture-selected ReShade DLL, a canonical generated `ReShade.ini` when a trusted profile is selected, and every approved effect asset, then promotes them with one `Invoke-TpmTransactionalPromote` transaction. The per-game ownership manifest is stored under `ReShade\TPM-State\Deployments\<SHA256(game ID)>.json`; ownership is committed only after the physical promotion and post-promotion hashes succeed. A later profile-history entry is written only after that deployment returns success.
 
 Restore history is a selector, not trust evidence. Restore validates the profile schema, ordered approved effect IDs, ordered catalog hashes, and intensity variant before deployment; it never copies a historical path or arbitrary historical file. Missing, corrupt, stale, or unsupported history produces a friendly fresh-selection path. The chooser requires an explicit `R` restore choice, offers a remembered profile only after explicit confirmation, and exposes catalog-bound favorites through `F`.
-The normal visual-first setup prints the profile descriptions, opens an optional
-non-modal gallery, and immediately presents the terminal chooser for all twelve
-canonical profiles. The numbered terminal path remains authoritative when WinForms is
-unavailable or the gallery closes. It does not block on modal UI or leave the
-workflow without a visible prompt; text selection, `U`, `R`, `B`, and `D` all
-remain available before explicit confirmation.
+The normal visual-first setup prints the profile descriptions, opens the
+non-modal gallery, and leaves the synchronized terminal chooser available.
+Either surface can select one of the twelve canonical profiles. The terminal
+path remains usable when WinForms is unavailable or the gallery closes. While
+open, the terminal imports the latest gallery choice after pumping WinForms
+events. If the gallery closes first, it imports the final preview choice once;
+terminal choices made afterward stay authoritative. Reopening the gallery
+starts a new synchronization session. `U`, `R`, `B`, and `D` remain available
+before explicit confirmation. The gallery closes automatically when the chooser
+returns.
 Before game selection, `Invoke-ReShadeUpdateIfAvailable` compares the installed trusted
 installer version with the official `reshade.me` version, verifies the downloaded installer
 and extracted DLLs, and offers an explicit update/keep choice. It does not deploy to games

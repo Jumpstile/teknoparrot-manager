@@ -5,8 +5,8 @@ Status: canonical current workflow for issue #294.
 This document owns cross-machine handoff, workspace roles, validation identity,
 and the boundary between engineering readiness and release authorization. It
 does not authorize a merge, package, tag, publication, wiki update, or mirror
-copy. The current published release is v1.0 RC7. RC8 is remediation/review
-work only, and final Version 1.0 remains unpublished.
+copy. Current published release is v1.0 RC7. RC8 is the unpublished candidate
+under remediation/review, and final Version 1.0 remains unpublished.
 
 Related policy sources:
 
@@ -155,7 +155,8 @@ source identity in default and constrained terminals, captures screenshots and
 logs, and covers package identity, menu/prompt layout, ReShade, Health Check
 repair, feature routing, failure truthfulness, and support-package clarity.
 Pester remains the pure-logic contract layer; this packaged-runtime gate is the
-last required gate before RC8 release authorization.
+last required gate before RC8 release authorization. No release is authorized
+by this documentation update.
 
 
 Controls readiness, launch observation, registration, and verification are
@@ -238,9 +239,9 @@ release publication.
 
 ## Scope boundaries for the current cycle
 
-- RC8 remains remediation/review work only and is not published. The final
-  candidate incorporates the accepted #292 runtime fixes, but this workflow
-  does not authorize publication.
+- v1.0 RC8 remains candidate source under remediation/review and is not
+  published. RC7 remains the current published release, and final Version 1.0
+  remains unpublished. This workflow does not authorize publication.
 - #279, #280, and #281 remain post-1.0 unless explicitly re-scoped and
   approved.
 - Broad automatic mapping under #200 remains deferred unless explicitly
