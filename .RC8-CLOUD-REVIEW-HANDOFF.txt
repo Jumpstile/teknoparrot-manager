@@ -155,3 +155,47 @@ Scope: Source audit only, bounded to staged 25 files
 Deadline: Cloud review turn-around time (no explicit constraint from handoff)
 
 End handoff document.
+
+================================================================
+POST-REVIEW CORRECTIONS AND STATUS (appended; original text above is preserved)
+================================================================
+Cloud source review: COMPLETED WITH FINDINGS (supersedes "AWAITING CLOUD
+SOURCE REVIEW" above). Reviewed commit: bd5f1cf9ef8df162598abbddd4ef61e9e96ce47e.
+The review's first reads (handoff, changed-file list, part of the script diff)
+ran under the originally configured reviewer; the reviewer changed mid-session,
+the key code was re-read, and findings were verified afterward. Reviewer model
+identifiers are not recorded in repository artifacts. Diffs for the control
+board, current slice, ten-effects slice and dgVoodoo2 inventory were sampled,
+not read in full, during that review; the later repair pass read them.
+
+Corrections to the inventory and counts above:
+  - Changed files: 26 = 3 source/test/gate + 15 docs + 3 release-note files
+    + 4 staged wiki files + 1 handoff. "24 files", "25 files" and "staged 25"
+    above are wrong.
+  - The 4 wiki files are staged documentation only; no live wiki update was
+    made or published.
+  - Base 9a9ac19e87bb2da10c33d1d387665f9b87b412bc is the parent of bd5f1cf
+    (one commit back), not "4 commits back".
+  - "17 effects" has no support in source, tests or docs. The catalog has 10
+    unique pinned effects and 12 canonical profiles.
+  - The RC9-to-RC10 comparator assertion (Tests, Compare-ManagerVersionText)
+    is not new in this change; it already exists at the base.
+  - Report rows 522/523: row 523 (bg_2 PASS) was added after that gate run.
+    That does not by itself invalidate the run, but the recorded Tests hash
+    does not match the reviewed Tests blob, so the run cannot be tied to that
+    exact file. The result is historical evidence, not current-tree proof.
+  - Gate freshness covers only the 20 paths listed in
+    scripts/Run-TpmQualityGate.ps1 ($freshnessPaths); README, changelog,
+    quick-start, security, architecture, workflow, wiki-staging and this
+    handoff are not in that list. "Freshness confirmed on all governance and
+    test files" above overstates it.
+
+Status: an uncommitted repair pass now changes the script, the tests and
+several docs (see the "Cloud source review and repair pass" section in
+docs/remediation/PR-321-reconciliation.md for findings, hashes and checks).
+No gate or test was run under PowerShell for that pass. Fresh applicable
+Windows gates, WinForms smoke, ARCADE/PostgreSQL owner-runtime proof and a
+package are still required. RC8 remains the unpublished release target.
+Nothing here is a readiness claim, commit, push, merge, tag or release.
+
+End post-review corrections.

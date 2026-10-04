@@ -10727,8 +10727,12 @@ function Sync-TpmReShadeGallerySelection {
                 }
             }
             if ($selectorIndex -lt 0) { throw ("Gallery selector does not contain profile '{0}'." -f $canonicalProfile.ProfileId) }
+            # Suppress only the echo of this programmatic assignment. The guard
+            # must not stay set across refresh/DoEvents or a queued user choice
+            # would be dropped.
             $Session['ProfileSelectorUpdating'] = $true
-            $selector.SelectedIndex = $selectorIndex
+            try { $selector.SelectedIndex = $selectorIndex }
+            finally { $Session['ProfileSelectorUpdating'] = $wasUpdating }
         }
         if (-not (Invoke-TpmReShadeGalleryRefreshSafe -State $Session -Refresh $Session['Refresh'] -Stage 'profile-selection-sync')) { return $false }
         try { [Windows.Forms.Application]::DoEvents() } catch {}
@@ -10736,8 +10740,6 @@ function Sync-TpmReShadeGallerySelection {
     } catch {
         [void](Set-TpmReShadeGalleryPreviewFailed -State $Session -Stage 'profile-selection-sync' -ErrorRecord $_)
         return $false
-    } finally {
-        $Session['ProfileSelectorUpdating'] = $wasUpdating
     }
 }
 
@@ -10801,120 +10803,129 @@ function Read-TpmReShadeTerminalProfile {
     if ($DefaultProfileId) { $selected = Get-TpmReShadeProfile -ProfileId $DefaultProfileId }
     # Snapshot a closed gallery once, then keep later terminal choices authoritative.
     $previewClosedSelectionImported = $false
-    while ($true) {
-        if ($PreviewSession) {
-            try { [Windows.Forms.Application]::DoEvents() } catch {}
-            $previewSessionClosed = [bool]$PreviewSession['Closed']
-            $canReadPreviewSelection = [bool]$PreviewSession['Initialized'] -and [bool]$PreviewSession['PreviewEnabled'] -and (-not $previewSessionClosed -or -not $previewClosedSelectionImported)
-            if ($canReadPreviewSelection) {
-                $previewProfileId = [string]$PreviewSession['SelectedProfileId']
-                if (-not [string]::IsNullOrWhiteSpace($previewProfileId)) {
-                    $previewSelection = @($Profiles | Where-Object { [string]$_.ProfileId -eq $previewProfileId })[0]
-                    if ($previewSelection) { $selected = $previewSelection }
-                }
-                if ($previewSessionClosed) { $previewClosedSelectionImported = $true }
-            }
-        }
-        Write-Host ''
-        Write-Host '  Preview is a bundled-image approximation; choose a profile in the preview window or terminal.' -ForegroundColor DarkCyan
-        Write-Host '  The profile choice stays synchronized between the preview selector and terminal list.' -ForegroundColor DarkCyan
-        $profileCount = $orderedIds.Count
-        $lastProfileNumber = [Math]::Max(1, $profileCount)
-        for ($profileIndex = 0; $profileIndex -lt $orderedIds.Count; $profileIndex++) {
-            $id = $orderedIds[$profileIndex]
-            $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
-            if (-not $profileEntry) { continue }
-            $marker = if ($selected -and $selected.ProfileId -eq $id) { '*' } else { ' ' }
-            Write-Host ('  [{0}] {1} {2}' -f ($profileIndex + 1), $marker, $profileEntry.FriendlyName) -ForegroundColor $(if ($marker -eq '*') { 'Yellow' } else { 'White' })
-            Write-Host ('      {0}' -f $profileEntry.Description) -ForegroundColor DarkGray
-        }
-        Write-Host ('  Current selection: {0}' -f $(if ($selected) { $selected.FriendlyName } else { 'none -- choose a profile in the preview or terminal' })) -ForegroundColor Yellow
-        Write-Host ('  Choose: [1-{0}] Select profile  [U] Use selected profile  [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back  [D] Details' -f $lastProfileNumber) -ForegroundColor White
-        $choice = (Read-TpmReShadeTerminalInput -Prompt '  Choice' -PumpPreviewMessages ([bool]$PreviewSession)).Trim().ToUpperInvariant()
-        if ($PreviewSession) {
-            try { [Windows.Forms.Application]::DoEvents() } catch {}
-            $previewSessionClosed = [bool]$PreviewSession['Closed']
-            $canReadPreviewSelection = [bool]$PreviewSession['Initialized'] -and [bool]$PreviewSession['PreviewEnabled'] -and (-not $previewSessionClosed -or -not $previewClosedSelectionImported)
-            if ($canReadPreviewSelection) {
-                $previewProfileId = [string]$PreviewSession['SelectedProfileId']
-                if (-not [string]::IsNullOrWhiteSpace($previewProfileId)) {
-                    $previewSelection = @($Profiles | Where-Object { [string]$_.ProfileId -eq $previewProfileId })[0]
-                    if ($previewSelection) { $selected = $previewSelection }
-                }
-                if ($previewSessionClosed) { $previewClosedSelectionImported = $true }
-            }
-        }
-        $selectedNumber = 0
-        if ([int]::TryParse($choice, [ref]$selectedNumber) -and $selectedNumber -ge 1 -and $selectedNumber -le $profileCount) {
-            $selectedProfileId = $orderedIds[$selectedNumber - 1]
-            $selected = @($Profiles | Where-Object { $_.ProfileId -eq $selectedProfileId })[0]
-            if ($selected) {
-                if ($PreviewSession) {
-                    [void](Sync-TpmReShadeGallerySelection -Session $PreviewSession -ProfileId ([string]$selected.ProfileId))
-                }
-                Write-Host ('  Preview selection changed to: {0}' -f $selected.FriendlyName) -ForegroundColor Green
-            }
-            continue
-        }
-        if ($choice -eq 'D') {
-            Write-Host '  TeknoParrot Manager shows a safe preview approximation using a bundled image.' -ForegroundColor DarkCyan
-            Write-Host '  It does not run the game or execute ReShade shaders during preview.' -ForegroundColor DarkCyan
-            $effectCount = @($Profiles | ForEach-Object { $_.Effects } | Sort-Object -Unique).Count
-            Write-Host ('  The catalog contains {0} profiles backed by {1} pinned shader effects.' -f $orderedIds.Count, $effectCount) -ForegroundColor DarkCyan
-            Write-Host '  Actual in-game results may vary.' -ForegroundColor DarkCyan
-            foreach ($id in $orderedIds) {
-                $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
-                if ($profileEntry) {
-                    Write-Host ('    {0}: {1}' -f $profileEntry.FriendlyName, $profileEntry.Description) -ForegroundColor DarkGray
-                    Write-Host ('      Techniques: {0}' -f (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $profileEntry)) -ForegroundColor DarkCyan
-                }
-            }
-            continue
-        }
-        if ($choice -eq 'R') {
+    $originalPreviewSession = $PreviewSession
+    try {
+        while ($true) {
             if ($PreviewSession) {
-                try {
-                    $reopenId = if ($selected) { [string]$selected.ProfileId } else { 'Original' }
-                    $replacement = Show-TpmReShadeProfileGalleryWindow -Profiles $Profiles -DefaultProfileId $reopenId -Show -NonModal
-                    if (-not $replacement.Available -or -not $replacement.Session) {
-                        throw ("fresh preview window was unavailable ({0})" -f $replacement.Reason)
+                try { [Windows.Forms.Application]::DoEvents() } catch {}
+                $previewSessionClosed = [bool]$PreviewSession['Closed']
+                $canReadPreviewSelection = [bool]$PreviewSession['Initialized'] -and [bool]$PreviewSession['PreviewEnabled'] -and (-not $previewSessionClosed -or -not $previewClosedSelectionImported)
+                if ($canReadPreviewSelection) {
+                    $previewProfileId = [string]$PreviewSession['SelectedProfileId']
+                    if (-not [string]::IsNullOrWhiteSpace($previewProfileId)) {
+                        $previewSelection = @($Profiles | Where-Object { [string]$_.ProfileId -eq $previewProfileId })[0]
+                        if ($previewSelection) { $selected = $previewSelection }
                     }
-                    $oldSession = $PreviewSession
-                    $PreviewSession = $replacement.Session
-                    $previewClosedSelectionImported = $false
-                    Close-TpmReShadeProfileGallerySession -Session $oldSession
-                    if ($selected) { [void](Sync-TpmReShadeGallerySelection -Session $PreviewSession -ProfileId ([string]$selected.ProfileId)) }
-                    [void][Windows.Forms.Application]::DoEvents()
-                    Write-Host ("  Preview window reopened. Your selected profile is still {0}." -f $(if ($selected) { $selected.FriendlyName } else { 'not selected' })) -ForegroundColor DarkCyan
-                } catch {
-                    Write-Host ("  TeknoParrot Manager could not reopen the preview because: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
-                    Write-Host '  You can still continue from the terminal.' -ForegroundColor Yellow
-                    Write-Log ("ReShade profile chooser: preview reopen failed -- {0}" -f $_.Exception.Message)
+                    if ($previewSessionClosed) { $previewClosedSelectionImported = $true }
                 }
-            } else {
-                Write-Host '  TeknoParrot Manager could not reopen the preview because: no preview session was created.' -ForegroundColor Yellow
-                Write-Host '  You can still continue from the terminal.' -ForegroundColor Yellow
-                Write-Log 'ReShade profile chooser: preview reopen requested without a session.'
             }
-            continue
-        }
-        if ($choice -eq 'N') {
-            Write-Host '  ReShade setup skipped. No ReShade files were installed or changed.' -ForegroundColor DarkGray
-            Write-Log 'ReShade profile chooser: skipped by user; no files changed.'
-            return [pscustomobject]@{ SelectedProfile = $null; Cancelled = $true; Skipped = $true; PreviewSession = $PreviewSession }
-        }
-        if ($choice -eq 'B') {
-            Write-Log 'ReShade profile chooser: cancelled before confirmation.'
-            return [pscustomobject]@{ SelectedProfile = $null; Cancelled = $true; PreviewSession = $PreviewSession }
-        }
-        if ($choice -eq 'U') {
-            if ($selected) {
-                return [pscustomobject]@{ SelectedProfile = $selected; Cancelled = $false; PreviewSession = $PreviewSession }
+            Write-Host ''
+            Write-Host '  Preview is a bundled-image approximation; choose a profile in the preview window or terminal.' -ForegroundColor DarkCyan
+            Write-Host '  The profile choice stays synchronized between the preview selector and terminal list.' -ForegroundColor DarkCyan
+            $profileCount = $orderedIds.Count
+            $lastProfileNumber = [Math]::Max(1, $profileCount)
+            for ($profileIndex = 0; $profileIndex -lt $orderedIds.Count; $profileIndex++) {
+                $id = $orderedIds[$profileIndex]
+                $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
+                if (-not $profileEntry) { continue }
+                $marker = if ($selected -and $selected.ProfileId -eq $id) { '*' } else { ' ' }
+                Write-Host ('  [{0}] {1} {2}' -f ($profileIndex + 1), $marker, $profileEntry.FriendlyName) -ForegroundColor $(if ($marker -eq '*') { 'Yellow' } else { 'White' })
+                Write-Host ('      {0}' -f $profileEntry.Description) -ForegroundColor DarkGray
             }
-            Write-Host '  Choose a numbered profile before using it.' -ForegroundColor Yellow
-            continue
+            Write-Host ('  Current selection: {0}' -f $(if ($selected) { $selected.FriendlyName } else { 'none -- choose a profile in the preview or terminal' })) -ForegroundColor Yellow
+            Write-Host ('  Choose: [1-{0}] Select profile  [U] Use selected profile  [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back  [D] Details' -f $lastProfileNumber) -ForegroundColor White
+            $choice = (Read-TpmReShadeTerminalInput -Prompt '  Choice' -PumpPreviewMessages ([bool]$PreviewSession)).Trim().ToUpperInvariant()
+            if ($PreviewSession) {
+                try { [Windows.Forms.Application]::DoEvents() } catch {}
+                $previewSessionClosed = [bool]$PreviewSession['Closed']
+                $canReadPreviewSelection = [bool]$PreviewSession['Initialized'] -and [bool]$PreviewSession['PreviewEnabled'] -and (-not $previewSessionClosed -or -not $previewClosedSelectionImported)
+                if ($canReadPreviewSelection) {
+                    $previewProfileId = [string]$PreviewSession['SelectedProfileId']
+                    if (-not [string]::IsNullOrWhiteSpace($previewProfileId)) {
+                        $previewSelection = @($Profiles | Where-Object { [string]$_.ProfileId -eq $previewProfileId })[0]
+                        if ($previewSelection) { $selected = $previewSelection }
+                    }
+                    if ($previewSessionClosed) { $previewClosedSelectionImported = $true }
+                }
+            }
+            $selectedNumber = 0
+            if ([int]::TryParse($choice, [ref]$selectedNumber) -and $selectedNumber -ge 1 -and $selectedNumber -le $profileCount) {
+                $selectedProfileId = $orderedIds[$selectedNumber - 1]
+                $selected = @($Profiles | Where-Object { $_.ProfileId -eq $selectedProfileId })[0]
+                if ($selected) {
+                    if ($PreviewSession) {
+                        [void](Sync-TpmReShadeGallerySelection -Session $PreviewSession -ProfileId ([string]$selected.ProfileId))
+                    }
+                    Write-Host ('  Preview selection changed to: {0}' -f $selected.FriendlyName) -ForegroundColor Green
+                }
+                continue
+            }
+            if ($choice -eq 'D') {
+                Write-Host '  TeknoParrot Manager shows a safe preview approximation using a bundled image.' -ForegroundColor DarkCyan
+                Write-Host '  It does not run the game or execute ReShade shaders during preview.' -ForegroundColor DarkCyan
+                $effectCount = @($Profiles | ForEach-Object { $_.Effects } | Sort-Object -Unique).Count
+                Write-Host ('  The catalog contains {0} profiles backed by {1} pinned shader effects.' -f $orderedIds.Count, $effectCount) -ForegroundColor DarkCyan
+                Write-Host '  Actual in-game results may vary.' -ForegroundColor DarkCyan
+                foreach ($id in $orderedIds) {
+                    $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
+                    if ($profileEntry) {
+                        Write-Host ('    {0}: {1}' -f $profileEntry.FriendlyName, $profileEntry.Description) -ForegroundColor DarkGray
+                        Write-Host ('      Techniques: {0}' -f (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $profileEntry)) -ForegroundColor DarkCyan
+                    }
+                }
+                continue
+            }
+            if ($choice -eq 'R') {
+                if ($PreviewSession) {
+                    try {
+                        $reopenId = if ($selected) { [string]$selected.ProfileId } else { 'Original' }
+                        $replacement = Show-TpmReShadeProfileGalleryWindow -Profiles $Profiles -DefaultProfileId $reopenId -Show -NonModal
+                        if (-not $replacement.Available -or -not $replacement.Session) {
+                            throw ("fresh preview window was unavailable ({0})" -f $replacement.Reason)
+                        }
+                        $oldSession = $PreviewSession
+                        $PreviewSession = $replacement.Session
+                        $previewClosedSelectionImported = $false
+                        Close-TpmReShadeProfileGallerySession -Session $oldSession
+                        if ($selected) { [void](Sync-TpmReShadeGallerySelection -Session $PreviewSession -ProfileId ([string]$selected.ProfileId)) }
+                        [void][Windows.Forms.Application]::DoEvents()
+                        Write-Host ("  Preview window reopened. Your selected profile is still {0}." -f $(if ($selected) { $selected.FriendlyName } else { 'not selected' })) -ForegroundColor DarkCyan
+                    } catch {
+                        Write-Host ("  TeknoParrot Manager could not reopen the preview because: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+                        Write-Host '  You can still continue from the terminal.' -ForegroundColor Yellow
+                        Write-Log ("ReShade profile chooser: preview reopen failed -- {0}" -f $_.Exception.Message)
+                    }
+                } else {
+                    Write-Host '  TeknoParrot Manager could not reopen the preview because: no preview session was created.' -ForegroundColor Yellow
+                    Write-Host '  You can still continue from the terminal.' -ForegroundColor Yellow
+                    Write-Log 'ReShade profile chooser: preview reopen requested without a session.'
+                }
+                continue
+            }
+            if ($choice -eq 'N') {
+                Write-Host '  ReShade setup skipped. No ReShade files were installed or changed.' -ForegroundColor DarkGray
+                Write-Log 'ReShade profile chooser: skipped by user; no files changed.'
+                return [pscustomobject]@{ SelectedProfile = $null; Cancelled = $true; Skipped = $true; PreviewSession = $PreviewSession }
+            }
+            if ($choice -eq 'B') {
+                Write-Log 'ReShade profile chooser: cancelled before confirmation.'
+                return [pscustomobject]@{ SelectedProfile = $null; Cancelled = $true; PreviewSession = $PreviewSession }
+            }
+            if ($choice -eq 'U') {
+                if ($selected) {
+                    return [pscustomobject]@{ SelectedProfile = $selected; Cancelled = $false; PreviewSession = $PreviewSession }
+                }
+                Write-Host '  Choose a numbered profile before using it.' -ForegroundColor Yellow
+                continue
+            }
+            Write-Host ('  Invalid choice. Use 1-{0}, U, N, R, B, or D.' -f $lastProfileNumber) -ForegroundColor Yellow
         }
-        Write-Host ('  Invalid choice. Use 1-{0}, U, N, R, B, or D.' -f $lastProfileNumber) -ForegroundColor Yellow
+    } catch {
+        # A reopened preview is owned here until the caller receives it; the caller closes the original session.
+        if ($PreviewSession -and -not [object]::ReferenceEquals($PreviewSession, $originalPreviewSession)) {
+            try { Close-TpmReShadeProfileGallerySession -Session $PreviewSession } catch {}
+        }
+        throw
     }
 }
 function Update-TpmReShadeTutorialProgressText {

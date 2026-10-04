@@ -110,11 +110,18 @@ The terminal remains usable if WinForms is behind another window, closed,
 unavailable, or fails to open. While terminal input pumps WinForms events,
 `Read-TpmReShadeTerminalProfile` re-reads the shared selected ID before handling
 `U`, so it accepts the latest preview choice rather than a stale local value.
+The selector's echo guard (`ProfileSelectorUpdating`) covers only the
+programmatic `SelectedIndex` assignment in `Sync-TpmReShadeGallerySelection` and
+is restored immediately, including when the assignment throws, so a user choice
+queued during refresh or event pumping is handled and the latest choice wins.
 `U` is the only chooser path toward deployment; the existing explicit
 confirmation remains required. The preview selector is transient and read-only:
 it does not run the game or execute ReShade shaders and does not deploy files.
 After the chooser returns, the normal setup `finally` closes the gallery and
-disposes its timer, images, and render cache. `B` and invalid input remain
+disposes its timer, images, and render cache. A preview reopened with `R` is
+owned by the chooser until it returns: if the chooser throws, it closes the
+newest replacement session, and the caller's `finally` closes the original;
+closing an already-closed session is idempotent. `B` and invalid input remain
 non-mutating. Actual in-game results may vary.
 
 The reference is the bundled `PreviewAssets\ReShadePreviews\TPM-preview-landscape.png`

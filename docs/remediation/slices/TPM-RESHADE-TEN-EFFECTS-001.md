@@ -63,7 +63,7 @@ Process deviation: the two required inventories were identified after implementa
 - Keep the architecture, README.md, release README, changelog, canonical owner table, and control board synchronized to the twelve-profile/ten-effect behavior and its include/config deployment contract.
 - Add this contract to the current-slice pointer and permanent-gate freshness inputs.
 - Hunk classification: PR #321 / owner IDs 1, 9, and 10 / `TPM-RESHADE-TEN-EFFECTS-001` / `TPM-RESHADE-001` / `TPM-EVIDENCE-001` / `TPM-OWNER-002` / `TPM-OWNER-003` / `TPM-TRACE-001` / `TPM-AUTH-001`.
-- Candidate version: bump the unpublished candidate from RC8 to RC8 for this product-behavior change. No package build/validation, tag, publication, live wiki update, certification, or release is authorized; wiki staging may be updated.
+- Candidate version: the unpublished candidate stays at RC8; this product-behavior change does not advance the candidate label. No package build/validation, tag, publication, live wiki update, certification, or release is authorized; wiki staging may be updated.
 
 ## 9. Permanent procedure IDs affected
 

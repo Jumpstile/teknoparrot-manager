@@ -80,9 +80,9 @@
   wide-layout thresholds. Root cause: a duplicate legacy width-only
   Get-ConsoleLayoutTier definition overrode the conservative compact-default
   selector. The debug renderer now reports the production selector's choice.
-  RC8 ReShade remediation keeps the preview view-only and
-  terminal-authoritative, guards paint events when preview state or assets are
-  unavailable, and explains the twelve beginner-safe profiles. Apply-all
+  RC8 ReShade remediation keeps preview selection transient and synchronized
+  with the terminal chooser, guards paint events when preview state or assets
+  are unavailable, and explains the twelve beginner-safe profiles. Apply-all
   output reports the safely changeable and unchanged counts; result summaries
   distinguish changed, protected, adopted/replaced, unsafe/malformed skipped,
   and actual failure outcomes. Normal trust warnings use beginner-safe

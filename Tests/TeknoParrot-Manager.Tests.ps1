@@ -14953,6 +14953,424 @@ Describe "RC8 menu and ReShade regressions" {
             $script:TpmOwnedLayout = $oldLayout
         }
     }
+    # RPSI-SELECTION-008 selector guard (programmatic assignment only)
+    It "restores the selector guard right after the programmatic assignment and before preview refresh" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $selector = [pscustomobject]@{ Backing = 0; FlagAtAssignment = $null; Owner = $null }
+        Add-Member -InputObject $selector -MemberType ScriptProperty -Name SelectedIndex -Value { $this.Backing } -SecondValue {
+            param($value)
+            $this.FlagAtAssignment = [bool]$this.Owner['ProfileSelectorUpdating']
+            $this.Backing = $value
+        }
+        $session = [hashtable]::Synchronized(@{
+            Initialized = $true
+            Closed = $false
+            PreviewEnabled = $true
+            SelectedProfileId = 'Original'
+            ViewMode = 'Slider'
+            SliderPosition = 30
+            Profiles = $profiles
+            ProfileSelector = $selector
+            ProfileSelectorUpdating = $false
+            Refresh = $null
+        })
+        $selector.Owner = $session
+        $flagDuringRefresh = New-Object System.Collections.Generic.List[bool]
+        $session.Refresh = {
+            [void]$flagDuringRefresh.Add([bool]$session['ProfileSelectorUpdating'])
+            return $true
+        }.GetNewClosure()
+        Mock Write-Log {}
+
+        $result = Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'Sepia'
+
+        $result | Should -BeTrue
+        $selector.FlagAtAssignment | Should -BeTrue
+        $flagDuringRefresh.Count | Should -Be 1
+        $flagDuringRefresh[0] | Should -BeFalse
+        $session['ProfileSelectorUpdating'] | Should -BeFalse
+        $selector.SelectedIndex | Should -Be 10
+        $session['SelectedProfileId'] | Should -Be 'Sepia'
+        $session['ViewMode'] | Should -Be 'Slider'
+        $session['SliderPosition'] | Should -Be 30
+    }
+    It "restores the selector guard when the programmatic assignment throws" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $selector = [pscustomobject]@{ Backing = 0 }
+        Add-Member -InputObject $selector -MemberType ScriptProperty -Name SelectedIndex -Value { $this.Backing } -SecondValue {
+            param($value)
+            throw 'forced selector failure'
+        }
+        $session = [hashtable]::Synchronized(@{
+            Initialized = $true
+            Closed = $false
+            PreviewEnabled = $true
+            SelectedProfileId = 'Original'
+            ViewMode = 'Slider'
+            SliderPosition = 30
+            Profiles = $profiles
+            ProfileSelector = $selector
+            ProfileSelectorUpdating = $false
+            Refresh = { return $true }.GetNewClosure()
+        })
+        Mock Write-Log {}
+
+        $result = Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'Sepia'
+
+        $result | Should -BeFalse
+        $session['ProfileSelectorUpdating'] | Should -BeFalse
+        $session['PreviewEnabled'] | Should -BeFalse
+        $session['PreviewFailureStage'] | Should -Be 'profile-selection-sync'
+        $session['ViewMode'] | Should -Be 'Slider'
+        $session['SliderPosition'] | Should -Be 30
+    }
+    It "preserves an outer programmatic-update guard that was already set" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $selector = [pscustomobject]@{ SelectedIndex = 0 }
+        $session = [hashtable]::Synchronized(@{
+            Initialized = $true
+            Closed = $false
+            PreviewEnabled = $true
+            SelectedProfileId = 'Original'
+            Profiles = $profiles
+            ProfileSelector = $selector
+            ProfileSelectorUpdating = $true
+            Refresh = { return $true }.GetNewClosure()
+        })
+        Mock Write-Log {}
+
+        (Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'Vignette') | Should -BeTrue
+
+        $session['ProfileSelectorUpdating'] | Should -BeTrue
+        $selector.SelectedIndex | Should -Be 11
+    }
+    It "keeps a queued preview selection made while a programmatic sync refreshes" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $selector = [pscustomobject]@{ SelectedIndex = 0 }
+        $session = [hashtable]::Synchronized(@{
+            Initialized = $true
+            Closed = $false
+            PreviewEnabled = $true
+            SelectedProfileId = 'Original'
+            ViewMode = 'Slider'
+            SliderPosition = 30
+            Profiles = $profiles
+            ProfileSelector = $selector
+            ProfileSelectorUpdating = $false
+            Refresh = $null
+        })
+        Mock Write-Log {}
+        Mock Write-Host {}
+        $handlers = New-TpmReShadeGalleryEventHandlers -State $session
+        $cartoon = @($profiles | Where-Object ProfileId -eq 'Cartoon')[0]
+        $queuedFired = New-Object System.Collections.Generic.List[int]
+        $refreshed = New-Object System.Collections.Generic.List[string]
+        $session.Refresh = {
+            if ($queuedFired.Count -eq 0) {
+                [void]$queuedFired.Add(1)
+                & $handlers.ProfileSelection ([pscustomobject]@{ SelectedItem = $cartoon }) $null
+            }
+            [void]$refreshed.Add([string]$session['SelectedProfileId'])
+            return $true
+        }.GetNewClosure()
+
+        (Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'Sepia') | Should -BeTrue
+
+        $queuedFired.Count | Should -Be 1
+        $session['SelectedProfileId'] | Should -Be 'Cartoon'
+        $selector.SelectedIndex | Should -Be 5
+        $session['ProfileSelectorUpdating'] | Should -BeFalse
+        $session['PreviewEnabled'] | Should -BeTrue
+        $session['ViewMode'] | Should -Be 'Slider'
+        $session['SliderPosition'] | Should -Be 30
+        $refreshed[$refreshed.Count - 1] | Should -Be 'Cartoon'
+    }
+    It "accepts the queued preview selection with U after a terminal-driven sync" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $selector = [pscustomobject]@{ SelectedIndex = 0 }
+        $session = [hashtable]::Synchronized(@{
+            Initialized = $true
+            Closed = $false
+            PreviewEnabled = $true
+            SelectedProfileId = 'Original'
+            ViewMode = 'Slider'
+            SliderPosition = 30
+            Profiles = $profiles
+            ProfileSelector = $selector
+            ProfileSelectorUpdating = $false
+            Refresh = $null
+        })
+        Mock Write-Log {}
+        Mock Write-Host {}
+        $handlers = New-TpmReShadeGalleryEventHandlers -State $session
+        $cartoon = @($profiles | Where-Object ProfileId -eq 'Cartoon')[0]
+        $queuedFired = New-Object System.Collections.Generic.List[int]
+        $session.Refresh = {
+            if ($queuedFired.Count -eq 0) {
+                [void]$queuedFired.Add(1)
+                & $handlers.ProfileSelection ([pscustomobject]@{ SelectedItem = $cartoon }) $null
+            }
+            return $true
+        }.GetNewClosure()
+        $script:chooserInputs = [System.Collections.Generic.Queue[string]]::new()
+        [void]$script:chooserInputs.Enqueue('12')
+        [void]$script:chooserInputs.Enqueue('U')
+        Mock Read-TpmReShadeTerminalInput { $script:chooserInputs.Dequeue() }
+
+        $result = Read-TpmReShadeTerminalProfile -Profiles $profiles -PreviewSession $session
+
+        $result.Cancelled | Should -BeFalse
+        $result.SelectedProfile.ProfileId | Should -Be 'Cartoon'
+        $session['SelectedProfileId'] | Should -Be 'Cartoon'
+        $session['ProfileSelectorUpdating'] | Should -BeFalse
+        $session['ViewMode'] | Should -Be 'Slider'
+        $session['SliderPosition'] | Should -Be 30
+    }
+    It "pins the selector guard restore to the programmatic assignment in source" {
+        $syncBody = [regex]::Match($script:ProductionSource, '(?s)function Sync-TpmReShadeGallerySelection \{.*?\r?\n\}\r?\n').Value
+        $syncBody | Should -Match 'try \{ \$selector\.SelectedIndex = \$selectorIndex \}\s*finally \{ \$Session\[''ProfileSelectorUpdating''\] = \$wasUpdating \}'
+        $syncBody | Should -Not -Match '(?s)Invoke-TpmReShadeGalleryRefreshSafe.*finally'
+    }
+    # Replacement-preview ownership after R (reopen)
+    It "closes only the reopened preview owned by the chooser: <Name>" -ForEach @(
+        @{ Name = 'exception after one reopen'; Keys = @('R', 'THROW'); ThrowExpected = $true; ExpectedClosed = 'S1,S2'; ExpectedCancelled = $null; ExpectedSession = $null }
+        @{ Name = 'exception after repeated reopen'; Keys = @('R', 'R', 'THROW'); ThrowExpected = $true; ExpectedClosed = 'S1,S2,S3'; ExpectedCancelled = $null; ExpectedSession = $null }
+        @{ Name = 'exception without any reopen leaves the original to the caller'; Keys = @('THROW'); ThrowExpected = $true; ExpectedClosed = ''; ExpectedCancelled = $null; ExpectedSession = $null }
+        @{ Name = 'acceptance after repeated reopen returns the newest session'; Keys = @('R', 'R', 'U'); ThrowExpected = $false; ExpectedClosed = 'S1,S2'; ExpectedCancelled = $false; ExpectedSession = 'S3' }
+        @{ Name = 'cancel after reopen returns the replacement session'; Keys = @('R', 'B'); ThrowExpected = $false; ExpectedClosed = 'S1'; ExpectedCancelled = $true; ExpectedSession = 'S2' }
+    ) {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $makeSession = {
+            param($sessionName)
+            [hashtable]::Synchronized(@{
+                Name = $sessionName
+                Initialized = $true
+                Closed = $false
+                PreviewEnabled = $true
+                SelectedProfileId = 'Original'
+                Profiles = $profiles
+                Refresh = { return $true }
+            })
+        }.GetNewClosure()
+        $script:closedSessionNames = New-Object System.Collections.Generic.List[string]
+        $script:reopenSessions = [System.Collections.Generic.Queue[object]]::new()
+        $script:terminalKeys = [System.Collections.Generic.Queue[string]]::new()
+        foreach ($sessionName in @('S2', 'S3')) { [void]$script:reopenSessions.Enqueue((& $makeSession $sessionName)) }
+        foreach ($key in $Keys) { [void]$script:terminalKeys.Enqueue($key) }
+        $original = & $makeSession 'S1'
+        Mock Write-Host {}
+        Mock Write-Log {}
+        Mock Close-TpmReShadeProfileGallerySession { [void]$script:closedSessionNames.Add([string]$Session['Name']) }
+        Mock Show-TpmReShadeProfileGalleryWindow { [pscustomobject]@{ Available = $true; Session = $script:reopenSessions.Dequeue() } }
+        Mock Read-TpmReShadeTerminalInput {
+            $key = $script:terminalKeys.Dequeue()
+            if ($key -eq 'THROW') { throw 'forced terminal input failure' }
+            return $key
+        }
+
+        if ($ThrowExpected) {
+            { Read-TpmReShadeTerminalProfile -Profiles $profiles -PreviewSession $original } | Should -Throw '*forced terminal input failure*'
+        } else {
+            $result = Read-TpmReShadeTerminalProfile -Profiles $profiles -PreviewSession $original
+            $result.Cancelled | Should -Be $ExpectedCancelled
+            $result.PreviewSession['Name'] | Should -Be $ExpectedSession
+        }
+
+        ('[' + ($script:closedSessionNames -join ',') + ']') | Should -Be ('[' + $ExpectedClosed + ']')
+        @($script:closedSessionNames | Group-Object | Where-Object { $_.Count -gt 1 }).Count | Should -Be 0
+    }
+    It "closes the gallery session when the chooser throws or cancels before confirmation: <Behavior>" -ForEach @(
+        @{ Behavior = 'throws' }
+        @{ Behavior = 'cancels' }
+    ) {
+        $root = Join-Path $TestDrive 'reshade-gallery-caller-failure'
+        $profiles = Join-Path $root 'UserProfiles'
+        $assets = Join-Path $root 'Assets'
+        $sourceDll = Join-Path $root 'ReShade64.dll'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        [System.IO.File]::WriteAllText($sourceDll, 'fixture')
+        $oldLayout = $script:TpmOwnedLayout
+        $script:TpmOwnedLayout = [pscustomobject]@{ Assets = $assets }
+        $timer = [pscustomobject]@{ Enabled = $true; Disposed = $false }
+        Add-Member -InputObject $timer -MemberType ScriptMethod -Name Stop -Value { $this.Enabled = $false }
+        Add-Member -InputObject $timer -MemberType ScriptMethod -Name Dispose -Value { $this.Disposed = $true }
+        $session = [hashtable]::Synchronized(@{
+            Closed = $false
+            SliderTimer = $timer
+            SliderTimerHandler = $null
+            PendingSliderPosition = 50
+            Picture = $null
+            PaintHandler = $null
+            Slider = $null
+            SliderHandler = $null
+            ProfileSelector = $null
+            ProfileSelectorHandler = $null
+            SliderKeyUpHandler = $null
+            ViewButtons = @()
+            ViewHandler = $null
+            FormClosedHandler = $null
+            Form = $null
+            PreviewCache = $null
+        })
+        Mock Test-TpmNoReparsePath { $true }
+        Mock Test-ReShadeDllSignature { [pscustomobject]@{ Status = 'Unavailable'; Signer = '' } }
+        Mock Invoke-ReShadeUpdateIfAvailable {
+            param($SourceDll, $SourceDll32, $InstalledVersion)
+            [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 }
+        }
+        Mock Read-TpmReShadeState { [pscustomobject]@{ Favorites = @() } }
+        Mock Show-TpmReShadeProfileGalleryWindow { [pscustomobject]@{ Available = $true; Session = $session } }
+        Mock Read-TpmReShadeTerminalProfile {
+            if ($Behavior -eq 'throws') { throw 'forced chooser failure' }
+            [pscustomobject]@{ Cancelled = $true; SelectedProfile = $null; PreviewSession = $session }
+        }
+        Mock Read-TpmChoice { 'Y' }
+        Mock Install-TpmReShadeProfileDeployment { throw 'deployment must remain behind explicit confirmation' }
+        Mock Write-Host {}
+        Mock Write-Log {}
+
+        try {
+            if ($Behavior -eq 'throws') {
+                { Invoke-ReShadeSetupLegacy -UserProfilesDir $profiles -SourceDll $sourceDll } | Should -Throw '*forced chooser failure*'
+            } else {
+                $result = Invoke-ReShadeSetupLegacy -UserProfilesDir $profiles -SourceDll $sourceDll
+                $result.Succeeded | Should -BeFalse
+                $result.Reason | Should -Be 'PROFILE_SELECTION_CANCELLED'
+            }
+            $session['Closed'] | Should -BeTrue
+            $timer.Enabled | Should -BeFalse
+            $timer.Disposed | Should -BeTrue
+            Should -Invoke Read-TpmChoice -Times 0 -Exactly
+            Should -Invoke Install-TpmReShadeProfileDeployment -Times 0 -Exactly
+        } finally {
+            $script:TpmOwnedLayout = $oldLayout
+        }
+    }
+    It "closes an already closed gallery session again without disposing timer or image twice" {
+        $timer = [pscustomobject]@{ Enabled = $true; StopCount = 0; DisposeCount = 0 }
+        Add-Member -InputObject $timer -MemberType ScriptMethod -Name Stop -Value { $this.StopCount = [int]$this.StopCount + 1; $this.Enabled = $false }
+        Add-Member -InputObject $timer -MemberType ScriptMethod -Name Dispose -Value { $this.DisposeCount = [int]$this.DisposeCount + 1 }
+        $image = [pscustomobject]@{ DisposeCount = 0 }
+        Add-Member -InputObject $image -MemberType ScriptMethod -Name Dispose -Value { $this.DisposeCount = [int]$this.DisposeCount + 1 }
+        $picture = [pscustomobject]@{ Image = $image }
+        $session = [hashtable]::Synchronized(@{
+            Form = $null
+            Picture = $picture
+            Closed = $false
+            SliderTimer = $timer
+            SliderTimerHandler = $null
+            ProfileSelector = $null
+            ProfileSelectorHandler = $null
+        })
+
+        { Close-TpmReShadeProfileGallerySession -Session $session } | Should -Not -Throw
+        { Close-TpmReShadeProfileGallerySession -Session $session } | Should -Not -Throw
+
+        $timer.StopCount | Should -Be 1
+        $timer.DisposeCount | Should -Be 1
+        $image.DisposeCount | Should -Be 1
+    }
+    # Failure-path coverage restored without the obsolete terminal-only wording
+    It "keeps the terminal chooser usable after a preview refresh failure during profile sync" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $selector = [pscustomobject]@{ SelectedIndex = 0 }
+        $session = [hashtable]::Synchronized(@{
+            Initialized = $true
+            Closed = $false
+            PreviewEnabled = $true
+            SelectedProfileId = 'Original'
+            Profiles = $profiles
+            ProfileSelector = $selector
+            ProfileSelectorUpdating = $false
+            Refresh = { throw 'forced preview refresh failure' }.GetNewClosure()
+        })
+        $script:chooserInputs = [System.Collections.Generic.Queue[string]]::new()
+        [void]$script:chooserInputs.Enqueue('3')
+        [void]$script:chooserInputs.Enqueue('U')
+        Mock Read-TpmReShadeTerminalInput { $script:chooserInputs.Dequeue() }
+        Mock Write-Host {}
+        Mock Write-Log {}
+
+        $result = Read-TpmReShadeTerminalProfile -Profiles $profiles -PreviewSession $session
+
+        $result.Cancelled | Should -BeFalse
+        $result.SelectedProfile.ProfileId | Should -Be 'ClassicCrt'
+        $session['PreviewEnabled'] | Should -BeFalse
+        $session['PreviewFailureStage'] | Should -Be 'profile-selection-sync'
+        $session['ProfileSelectorUpdating'] | Should -BeFalse
+    }
+    It "continues from the terminal when the gallery reports PREVIEW_GALLERY_REFRESH_FAILED" {
+        $root = Join-Path $TestDrive 'reshade-gallery-refresh-failed'
+        $profiles = Join-Path $root 'UserProfiles'
+        $assets = Join-Path $root 'Assets'
+        $sourceDll = Join-Path $root 'ReShade64.dll'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        [System.IO.File]::WriteAllText($sourceDll, 'fixture')
+        $oldLayout = $script:TpmOwnedLayout
+        $script:TpmOwnedLayout = [pscustomobject]@{ Assets = $assets }
+        Mock Test-TpmNoReparsePath { $true }
+        Mock Test-ReShadeDllSignature { [pscustomobject]@{ Status = 'Unavailable'; Signer = '' } }
+        Mock Invoke-ReShadeUpdateIfAvailable {
+            param($SourceDll, $SourceDll32, $InstalledVersion)
+            [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 }
+        }
+        Mock Read-TpmReShadeState { [pscustomobject]@{ Favorites = @() } }
+        Mock Show-TpmReShadeProfileGalleryWindow {
+            [pscustomobject]@{ Available = $false; SelectedProfile = $null; Closed = $true; Reason = 'PREVIEW_GALLERY_REFRESH_FAILED' }
+        }
+        Mock Read-TpmReShadeTerminalProfile { [pscustomobject]@{ Cancelled = $true; SelectedProfile = $null } }
+        Mock Read-TpmChoice { 'Y' }
+        Mock Install-TpmReShadeProfileDeployment { throw 'deployment must remain behind explicit confirmation' }
+        Mock Write-Host {}
+        Mock Write-Log {}
+
+        try {
+            $result = Invoke-ReShadeSetupLegacy -UserProfilesDir $profiles -SourceDll $sourceDll
+
+            $result.Reason | Should -Be 'PROFILE_SELECTION_CANCELLED'
+            Should -Invoke Read-TpmReShadeTerminalProfile -Times 1 -Exactly -ParameterFilter { $null -eq $PreviewSession }
+            Should -Invoke Write-Log -Times 1 -ParameterFilter { $msg -like '*PREVIEW_GALLERY_REFRESH_FAILED*' }
+            Should -Invoke Read-TpmChoice -Times 0 -Exactly
+            Should -Invoke Install-TpmReShadeProfileDeployment -Times 0 -Exactly
+        } finally {
+            $script:TpmOwnedLayout = $oldLayout
+        }
+    }
+    It "reports PREVIEW_GALLERY_REFRESH_FAILED and closes the session when the initial preview refresh fails" {
+        $galleryBody = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
+        $galleryBody | Should -Match '(?s)-Stage ''initial-preview''\)\)\s*\{\s*Close-TpmReShadeProfileGallerySession -Session \$state\s*return \[pscustomobject\]@\{[^}]*Reason=''PREVIEW_GALLERY_REFRESH_FAILED'''
+    }
+    It "stops before any gallery or deployment work when the ReShade source DLL is unavailable: <Case>" -ForEach @(
+        @{ Case = 'empty path' }
+        @{ Case = 'missing file' }
+        @{ Case = 'directory instead of file' }
+    ) {
+        $root = Join-Path $TestDrive 'reshade-source-dll-unavailable'
+        $profiles = Join-Path $root 'UserProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $sourceDll = switch ($Case) {
+            'empty path' { '' }
+            'missing file' { Join-Path $root 'missing-ReShade64.dll' }
+            default { New-Item -ItemType Directory -Path (Join-Path $root 'directory-ReShade64.dll') -Force | Select-Object -ExpandProperty FullName }
+        }
+        Mock Show-TpmReShadeProfileGalleryWindow { throw 'gallery must not open without a source DLL' }
+        Mock Read-TpmReShadeTerminalProfile { throw 'chooser must not open without a source DLL' }
+        Mock Read-TpmChoice { 'Y' }
+        Mock Install-TpmReShadeProfileDeployment { throw 'deployment must not run without a source DLL' }
+        Mock Write-Host {}
+        Mock Write-Log {}
+
+        $result = Invoke-ReShadeSetupLegacy -UserProfilesDir $profiles -SourceDll $sourceDll
+
+        $result.Succeeded | Should -BeFalse
+        $result.Deployed | Should -Be 0
+        $result.Reason | Should -Be 'SOURCE_DLL_UNAVAILABLE'
+        Should -Invoke Write-Log -Times 1 -ParameterFilter { $msg -like '*SourceDll was empty or did not resolve*' }
+        Should -Invoke Show-TpmReShadeProfileGalleryWindow -Times 0 -Exactly
+        Should -Invoke Read-TpmReShadeTerminalProfile -Times 0 -Exactly
+        Should -Invoke Read-TpmChoice -Times 0 -Exactly
+        Should -Invoke Install-TpmReShadeProfileDeployment -Times 0 -Exactly
+    }
     It "returns Acquired for a valid Browse DLL and Skipped for an intentional Skip" {
         $dllPath = Join-Path $TestDrive 'existing-reshade.dll'
         [System.IO.File]::WriteAllText($dllPath, 'fixture')

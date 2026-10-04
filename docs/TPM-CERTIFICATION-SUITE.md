@@ -237,7 +237,6 @@ The acceptance target is that clipped menus, hidden choosers, misleading
 success screens, broken ReShade slider behavior, incorrect path-repair routing,
 and support-package false-failure wording are caught before a user reports
 them.
-UX gate above is the separate final RC8 pre-release requirement tracked in #323.
 
 Explicitly out of scope through phase 1.7 (tracked in issue #88 for later
 phases, not implemented yet): broad fuzzing, long soak testing, mutation
