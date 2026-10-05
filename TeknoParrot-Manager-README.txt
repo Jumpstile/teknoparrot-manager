@@ -274,33 +274,83 @@
     offers an automatic official download and update. Optional -- your games
     work perfectly without it.
     Beginner profile and restore choices are explicit and per-game. TPM offers
-    the twelve approved profile IDs, catalog-bound favorites, and a remembered
+    the 20 approved effects, 22 profiles in all (Original, the 20
+    single-effect profiles, and the existing Enhanced Arcade combination),
+    catalog-bound favorites, and a remembered
     selection. No profile is marked recommended or validated without measured
     evidence; pinned effect hashes establish catalog integrity, not performance
     validation. It also offers R to restore the previous trusted profile for
     that game. Restore is never automatic: the operator must choose it.
     History is accepted only when the current profile definition, ordered
     approved effect hashes, and intensity variant still match. Missing,
-    corrupt, stale, or unsupported history falls back to fresh selection; TPM
-    never copies historical file paths.
+    corrupt, stale, retired, or unsupported history falls back to fresh
+    selection (a retired profile such as Cartoon is reported, never replaced
+    silently); TPM never copies historical file paths.
     An optional non-modal gallery opens before final confirmation. Its profile
-    drop-down lists the twelve canonical profiles backed by ten unique pinned
-    shader effects. The terminal chooser lists the same profiles as numbers
-    1-12; either input updates the same selected profile and preview. The
-    comparison view and 0-100 slider are independent of profile selection.
+    drop-down and the terminal chooser list the same choices in four groups
+    (Main Catalog, CRT Choices, Advanced Alternatives, and Actual HDR Setups
+    Only); either input updates the same selected profile and preview, and a
+    change made in the gallery while the terminal prompt waits updates the
+    menu marker and the "Current selection" line in place, keeping what you
+    have typed (typing is end-of-line only; if the console cannot be updated
+    safely a one-line announcement is printed instead). The comparison view
+    and 0-100 slider are independent of profile selection, and the slider is
+    aligned to the displayed image. The HDR group appears only when Windows
+    reports HDR-specific support for the evaluated display and HDR is active
+    there; Windows HDR being on does not show that a game renders HDR.
+    LICENCE EVIDENCE: an effect is offered only while its recorded licence
+    evidence is complete and current (pinned files matched upstream, in-file
+    notices or repository licence copies checked, includes resolved). All 20
+    effects are held to the same standard; an effect whose evidence is missing,
+    stale or incomplete is withheld, with the specific reason in the review
+    inventory.
       [1] Original
-      [2] Clean & Sharp
-      [3] Classic Arcade CRT
-      [4] Vivid Arcade
-      [5] Enhanced Arcade
-      [6] Cartoon
-      [7] Contrast Curves
-      [8] Film Grain
-      [9] Levels
-      [10] Monochrome
-      [11] Sepia Tone
-      [12] Vignette
-    Choose: [1-12] Select profile  [U] Use selected profile  [R] Reopen preview
+          No visual processing.
+      Main Catalog
+      [2] Smooth Edges [SMAA]
+          Reduce jagged edges.
+      [3] Clean & Sharp [LumaSharpen]
+          Straightforward sharpening.
+      [4] Adaptive Clarity [CAS]
+          Sharpening that adapts to local detail; not upscaling.
+      [5] Smooth Gradients [Deband]
+          Reduce bands in skies, fog and dark gradients.
+      [6] Vivid Arcade [Vibrance]
+          Restrained color enhancement.
+      [7] Balanced Contrast [Curves]
+          Adjust midtone contrast.
+      [8] Black/White Point Adjustment [Levels]
+          Correct washed-out ranges without changing the image to
+          monochrome.
+      [9] Shadow & Midtone Balance [LiftGammaGain]
+          Adjust shadows, midtones and highlights separately.
+      [10] Exposure & Tint [Tonemap]
+          SDR exposure, gamma and tint correction.
+      [11] Color Balance [prod80 Color Balance]
+          Correct unwanted color casts.
+      [12] Arcade Glow [ArcaneBloom]
+          Restrained glow around bright areas.
+      [13] Enhanced Arcade [LumaSharpen + Vibrance]
+          Combined preset: sharper edges and richer color while preserving
+          the approved effect order.
+      CRT Choices
+      [14] Classic Arcade CRT [CRT Lottes]
+          Lottes, including its downsampling.
+      [15] Detailed Arcade CRT [CRT-Royale]
+          More elaborate phosphor-mask simulation.
+      [16] Lightweight CRT [CRT-Pi]
+          A simpler single-pass alternative.
+      Advanced Alternatives
+      [17] Detail-Preserving Sharpen [AdaptiveSharpen]
+          An alternative sharpening algorithm with overshoot controls.
+      [18] Filmic Sharpen [FilmicAnamorphSharpen]
+          Tunable high-pass sharpening.
+      [19] Colorfulness [Colourfulness]
+          An alternative color-strength adjustment.
+      [20] Fast Game Enhancement [Glamayre Fast Effects]
+          Combining selectable anti-aliasing, sharpening, contrast and
+          lighting effects.
+    Choose: [1-N] Select profile  [U] Use selected profile  [R] Reopen preview
             [B] Back  [D] Details
     The terminal remains usable if the gallery is behind another window,
     closed, unavailable, or fails. U is the only path toward deployment; B
@@ -1241,39 +1291,97 @@
       Use the preview window to compare the options.
       Nothing will be changed until you confirm.
 
-    It then lists twelve bounded visual profiles in this order. The friendly
-    description is followed by the approved shader filename and technique:
+    It then lists the approved visual profiles in four groups (Main Catalog,
+    CRT Choices, Advanced Alternatives, Actual HDR Setups Only). Original is
+    the untouched reference, not an effect; there are 20 effects and 22
+    profiles. The Actual HDR Setups Only group is hidden unless Windows
+    reports an HDR-capable display with HDR on, and it is shown without
+    numbers (unavailable) while HDR is supported but off. The friendly
+    description is followed by the approved shader filename and technique
+    (press D in the terminal for the full list with preview notes):
 
-      Original            No visual processing.
-                          Techniques: (none; no ReShade techniques)
-      Clean & Sharp       Clearer edges and text with very little change to
-                          the original image.
-                          Techniques: LumaSharpen.fx / LumaSharpen
-      Classic Arcade CRT  Traditional scanlines and restrained arcade-monitor
-                          character.
-                          Techniques: CRT_Lottes.fx / CRT_Lottes
-      Vivid Arcade        Richer color for modern displays.
-                          Techniques: Vibrance.fx / Vibrance
-      Enhanced Arcade     Sharper edges and richer color while preserving
-                          the approved effect order.
-                          Techniques: LumaSharpen.fx / LumaSharpen; Vibrance.fx
-                                      / Vibrance
-      Cartoon             Bold edges and fewer colors for a poster-style
-                          arcade look.
-                          Techniques: Cartoon.fx / Cartoon
-      Contrast Curves     Add contrast through the middle tones.
-                          Techniques: Curves.fx / Curves
-      Film Grain          Add a subtle grain-like texture.
-                          Techniques: FilmGrain.fx / FilmGrain
-      Levels              Expand the dark and bright ends of the image.
-                          Techniques: Levels.fx / Levels
-      Monochrome          Remove color while keeping image detail.
-                          Techniques: Monochrome.fx / Monochrome
-      Sepia Tone          Warm the image with a classic brown tone.
-                          Techniques: Sepia.fx / Tint
-      Vignette            Gently darken image edges to focus attention in the
-                          center.
-                          Techniques: Vignette.fx / Vignette
+      Original
+          No visual processing.
+          Techniques: (none; no ReShade techniques)
+      Smooth Edges [SMAA]
+          Reduce jagged edges.
+          Techniques: SMAA.fx / SMAA
+      Clean & Sharp [LumaSharpen]
+          Straightforward sharpening.
+          Techniques: LumaSharpen.fx / LumaSharpen
+      Adaptive Clarity [CAS]
+          Sharpening that adapts to local detail; not upscaling.
+          Techniques: CAS.fx / ContrastAdaptiveSharpen
+      Smooth Gradients [Deband]
+          Reduce bands in skies, fog and dark gradients.
+          Techniques: Deband.fx / Deband
+      Vivid Arcade [Vibrance]
+          Restrained color enhancement.
+          Techniques: Vibrance.fx / Vibrance
+      Balanced Contrast [Curves]
+          Adjust midtone contrast.
+          Techniques: Curves.fx / Curves
+      Black/White Point Adjustment [Levels]
+          Correct washed-out ranges without changing the image to
+          monochrome.
+          Techniques: Levels.fx / Levels
+      Shadow & Midtone Balance [LiftGammaGain]
+          Adjust shadows, midtones and highlights separately.
+          Techniques: LiftGammaGain.fx / LiftGammaGain
+      Exposure & Tint [Tonemap]
+          SDR exposure, gamma and tint correction.
+          Techniques: Tonemap.fx / Tonemap
+      Color Balance [prod80 Color Balance]
+          Correct unwanted color casts.
+          Techniques: PD80_04_Color_Balance.fx / prod80_04_ColorBalance
+      Arcade Glow [ArcaneBloom]
+          Restrained glow around bright areas.
+          Techniques: ArcaneBloom.fx / ArcaneBloom
+      Enhanced Arcade [LumaSharpen + Vibrance]
+          Combined preset: sharper edges and richer color while preserving
+          the approved effect order.
+          Techniques: LumaSharpen.fx / LumaSharpen; Vibrance.fx / Vibrance
+      Classic Arcade CRT [CRT Lottes]
+          Lottes, including its downsampling.
+          Techniques: CRT_Lottes.fx / CRT_Lottes
+      Detailed Arcade CRT [CRT-Royale]
+          More elaborate phosphor-mask simulation.
+          Techniques: crt-royale.fx / CRT_Royale
+      Lightweight CRT [CRT-Pi]
+          A simpler single-pass alternative.
+          Techniques: CRTPi.fx / CRTPi
+      Detail-Preserving Sharpen [AdaptiveSharpen]
+          An alternative sharpening algorithm with overshoot controls.
+          Techniques: AdaptiveSharpen.fx / AdaptiveSharpen
+      Filmic Sharpen [FilmicAnamorphSharpen]
+          Tunable high-pass sharpening.
+          Techniques: FilmicAnamorphSharpen.fx / FilmicAnamorphSharpen
+      Colorfulness [Colourfulness]
+          An alternative color-strength adjustment.
+          Techniques: Colourfulness.fx / Colourfulness
+      Fast Game Enhancement [Glamayre Fast Effects]
+          Combining selectable anti-aliasing, sharpening, contrast and
+          lighting effects.
+          Techniques: Glamayre_Fast_Effects.fx /
+              Glamarye_Fast_Effects_without_Fake_GI
+      HDR Highlight Mapping [Lilium Tone Mapping]
+          Map an actual HDR image into the display's brightness range.
+          Techniques: lilium__tone_mapping.fx / lilium__tone_mapping
+      HDR Black-Level Fix [Lilium HDR Black Floor Fix]
+          Adjust raised HDR blacks.
+          Techniques: lilium__hdr_black_floor_fix.fx /
+              lilium__hdr_black_floor_fix
+
+    Alternatives that do the same job (sharpening, colour strength, CRT
+    looks) are never stacked automatically. Cartoon, Film Grain, Monochrome,
+    Sepia Tone and Vignette are retired from the beginner catalog.
+    Previews are labelled approximations; effects that need real game
+    content or an HDR image show the image unchanged with a note. No
+    performance claim is made. Shader sources are live-fetched from pinned
+    upstream commits and integrity-checked, with each effect's licence text
+    written beside it; they are not bundled in the release ZIP. Fast Game
+    Enhancement's depth features need compatible game depth data and are
+    switched off in its generated preset.
 
     These are approved TPM-generated profile definitions. Shader sources are
     live-fetched and integrity-checked during deployment; they are not bundled

@@ -173,7 +173,9 @@ Describe "Virtual Beta Tester: idempotency / repeat-run safety (issue #88 phase 
 }
 
 Describe "Virtual Beta Tester: repeat-run backup safety (issue #88 phase 1.5 priority 2)" -Tag 'TVD-High' {
-    # New-PropagationBackup: replaces the instinctive "run it again just to
+    # New-TpmVerifiedUserProfilesBackup (the current verified UserProfiles
+    # backup API; the earlier New-PropagationBackup no longer exists):
+    # replaces the instinctive "run it again just to
     # be sure" a human tester does after Propagate Controls, plus the
     # specific defect class this catches -- a backup routine recursively
     # backing up its OWN prior backups (FullBackup\FullBackup\FullBackup\...)
@@ -185,7 +187,7 @@ Describe "Virtual Beta Tester: repeat-run backup safety (issue #88 phase 1.5 pri
     # catches an unbounded-growth defect class that would otherwise only
     # surface after months of real repeated use on a real machine.
 
-    It "running New-PropagationBackup three times in a row never backs up its own previous backups" {
+    It "running New-TpmVerifiedUserProfilesBackup three times in a row never backs up its own previous backups" {
         $userProfilesDir = Join-Path $TestDrive ("propagation-backup-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $userProfilesDir -Force | Out-Null
         New-Item -ItemType File -Path (Join-Path $userProfilesDir 'ALIENS.xml') -Force | Out-Null
@@ -193,12 +195,14 @@ Describe "Virtual Beta Tester: repeat-run backup safety (issue #88 phase 1.5 pri
 
         $results = @()
         for ($i = 1; $i -le 3; $i++) {
-            $results += New-PropagationBackup -UserProfilesDir $userProfilesDir
-            Start-Sleep -Milliseconds 1100  # backup folder names are second-resolution timestamps
+            # Folder names carry a millisecond timestamp plus a GUID, so back-to-back runs need no sleep to stay distinct.
+            $results += New-TpmVerifiedUserProfilesBackup -UserProfilesDir $userProfilesDir -Label 'PropagateControls'
         }
 
         foreach ($result in $results) {
-            $result.ErrorCount | Should -Be 0 -Because "a repeat backup run must not error even once FullBackup itself exists"
+            $result.Succeeded | Should -BeTrue -Because "a repeat backup run must not fail even once FullBackup itself exists (reason: $($result.Reason))"
+            $result.Verified | Should -BeTrue -Because "every repeat backup must pass its own manifest verification"
+            $result.FailureStage | Should -BeNullOrEmpty
         }
 
         $backupRoot = Join-Path $userProfilesDir 'FullBackup'

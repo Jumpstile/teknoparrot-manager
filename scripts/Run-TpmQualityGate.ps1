@@ -55,6 +55,7 @@ $freshnessPaths = @(
     (Join-Path $repo 'docs\remediation\slices\TPM-OWNER-STATUS-GATE-001.md'),
     (Join-Path $repo 'docs\remediation\slices\TPM-LIBRARY-HEALTH-TRANSACTION-001.md'),
     (Join-Path $repo 'docs\remediation\slices\TPM-RESHADE-TEN-EFFECTS-001.md'),
+    (Join-Path $repo 'docs\remediation\slices\TPM-RESHADE-TWENTY-EFFECTS-001.md'),
     (Join-Path $repo 'docs\RESHADE-PROFILE-SELECTION-SPECIFICATION-INVENTORY.md'),
     (Join-Path $repo 'docs\RESHADE-PROFILE-SELECTION-INVARIANT-INVENTORY.md'),
     (Join-Path $repo 'docs\RESHADE-DGVOODOO2-AUTODOWNLOAD-SPECIFICATION-INVENTORY.md'),

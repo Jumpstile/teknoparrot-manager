@@ -197,7 +197,8 @@ function Invoke-VbtUpdateInstall {
 Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
 
     It "startup-calm-current-version: reports already current, no error/warning noise" {
-        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson -TagName $ScriptVersion) })
+        # The release tag must be the RUNNING identity (version plus release-candidate label): a bare $ScriptVersion tag is the later FINAL release, which the product correctly offers as an update.
+        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson -TagName (Get-ManagerVersionIdentity -ScriptVersion $ScriptVersion -ReleaseCandidateLabel $ReleaseCandidateLabel)) })
         Mock Read-Host { throw "Read-Host should not be called when already current" }
 
         $fixturePath = Join-Path $TestDrive 'startup-calm.ps1'
@@ -215,6 +216,17 @@ Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
         # appends); everything else under $TestDrive must be unchanged.
         $unexpectedChanges = Compare-Object $before $after | Where-Object { $_.InputObject -notlike '*vbt-human-workflow.log' }
         $unexpectedChanges | Should -BeNullOrEmpty -Because "scenario declares expectedStateChange: false"
+        # Demonstrate the intended behavior itself, not only the absence of an error: the user was never prompted.
+        Should -Invoke Read-Host -Times 0 -Exactly
+    }
+
+    It "startup-calm-current-version: a bare FINAL tag is offered as a later release, so the prompt IS reached (proves the no-prompt test is live)" {
+        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson -TagName $ScriptVersion) })
+        Mock Read-Host { "N" }
+        $fixturePath = Join-Path $TestDrive 'startup-final-offer.ps1'
+        Set-Content -LiteralPath $fixturePath -Value "`$ScriptVersion = `"$ScriptVersion`"" -Encoding ascii
+        Invoke-CheckForUpdates -ScriptPath $fixturePath 6>$null | Out-Null
+        Should -Invoke Read-Host -Times 1 -Exactly
     }
 
     It "update-available-explains-safety: explains what an update will do before asking" {

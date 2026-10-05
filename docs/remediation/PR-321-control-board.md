@@ -773,3 +773,12 @@ actions remain outside this implementation slice and were not performed.
 
 - Timed `Run-TpmQualityGate.ps1` passed on the source/test contents of commit `4f219a504018f98e816c716424bc5da4928a7cc8` before this report-only evidence amendment: Started `2026-10-04T00:22:22.8702405Z`; finished `2026-10-04T00:33:26.5048085Z`; PowerShell 7.6.6 / Pester 5.7.1; exit 0.
 - Results: main Pester 1311/1311; SupportPackage 42/42; ASCII/parse, configured PSScriptAnalyzer, `git diff --check`, and permanent procedure gate passed. This source gate does not validate the candidate ZIP or owner-runtime state.
+
+
+## Cloud repair batch -- TPM-RESHADE-TWENTY-EFFECTS-001 (uncommitted, 2026-10-05)
+
+- Worktree: cloud session, branch `cloud-review/rc8-readiness-20261004`, HEAD `bb9761adff95f2b7f76c94f0f27076aaa5a5e7d9`. All changes uncommitted; no push, package, install, merge, tag or release. The owner's Windows checkout, the `bb9761a` receipts and the delivered Procedure A/B helpers are untouched.
+- Contract: `docs/remediation/slices/TPM-RESHADE-TWENTY-EFFECTS-001.md`. Scope: the 42 full-folder certification failures, three ReShade preview repairs, and the owner-approved 20-effect catalog (feature-freeze exception limited to exactly this scope).
+- Process deviation (not hidden): product and test edits (catalog, profiles, UI-compatibility bytes, tutorial-progress text, test and harness repairs) were made BEFORE this contract and board entry were written. The required order was not followed for those hunks; they are mapped to the contract after the fact and need independent review.
+- Status: failure repair -- VBT backup tests repaired and Linux-verified; empty per-run Git config implemented, Windows Git proof OPEN; HumanWorkflow case OPEN until it demonstrates no-`Read-Host` behavior; three strict-mode PRODUCT defects held as a separate proposed patch, not applied. Catalog -- data and profile definitions in place, integration (preset sections, HDR gate, preview, tests, licenses/obligations) IN PROGRESS; no new effect is shippable until its dependency and license obligations are complete. Preview repairs -- IN PROGRESS. Overall status: NOT FIXED / SOURCE REMEDIATION REQUIRED until evidence is recorded.
+- Open runtime proof: real Windows Git, WinForms pixels and DPI, real HDR detection, depth data, shader execution, package identity, owner smoke.

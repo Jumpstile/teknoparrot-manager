@@ -6,11 +6,52 @@
   RC8 is not published and has no tag, release asset, or Scripts mirror.
 
 -------------------------------------------------------------------------------
+  v1.0 RC8  (candidate, not published)  -- 20-effect ReShade catalog and
+  preview repairs
+  ----------------------------------------------------------------
+  The ReShade catalog now offers 20 approved effects as 20 single-effect
+  profiles, plus Original (the untouched reference) and the existing Enhanced
+  Arcade combination: 22 profiles in four groups (Main Catalog, CRT Choices,
+  Advanced Alternatives, Actual HDR Setups Only). New effects are SMAA, CAS,
+  Deband, LiftGammaGain, Tonemap, prod80 Color Balance, ArcaneBloom,
+  CRT-Royale, CRT-Pi, AdaptiveSharpen, FilmicAnamorphSharpen, Colourfulness,
+  Glamayre Fast Effects, and two Lilium HDR shaders. Every file is fetched from
+  a pinned upstream commit and verified by SHA-256 and size; each effect's
+  licence text and a TPM notice are written beside it. The HDR group is shown
+  only when Windows reports an HDR-capable display with HDR on, and an HDR
+  profile is refused at deployment otherwise. Cartoon, Film Grain, Monochrome,
+  Sepia Tone and Vignette leave the beginner catalog; saved choices that name
+  them are reported, never replaced or deleted. Alternatives of the same kind
+  are never stacked. Previews are labelled approximations; effects whose result
+  needs real game content or an HDR image show the image unchanged with a note.
+  Preview fixes: the description now paints immediately and is not clipped; the
+  comparison slider is aligned to the displayed image; and a gallery selection
+  made while the terminal prompt is waiting appears at the prompt at once.
+  Test fixes: the certification harness now uses a real empty per-run Git
+  config (Windows Git rejects NUL), the stale VirtualBetaTester backup tests
+  use the current backup API, and strict-mode test defects are repaired.
+  Review follow-ups: an effect is offered or deployable only while its recorded
+  licence evidence (pinned bytes, in-file notices, licence copies, include
+  closure) is complete and current; all 20 effects are held to that one standard
+  and a missing, stale or incomplete record withholds the effect with a specific
+  reason. The terminal rebuilds its layout after a console resize and clears the
+  whole wrapped Current selection region; the description reports overflow
+  instead of clipping silently. The HDR
+  gate now uses HDR-specific support and active state, a real display identity,
+  an optional explicit target display, and fails closed for unknown, stale or
+  ambiguous displays. The terminal updates the menu marker and Current selection
+  in place; the preview description is measured with the real font and re-measured
+  on resize/DPI; the slider reserves room so both end thumbs stay visible, and is
+  measured on a throwaway control. Export-LaunchBoxXml now returns 0 (not null)
+  when nothing is exported.
+  Source candidate only: no package, publication or release.
+
+-------------------------------------------------------------------------------
   v1.0 RC8  (candidate, not published)  -- ReShade preview selection
   ----------------------------------------------------------------
   RC8 adds a profile drop-down to the non-modal ReShade preview gallery. The
-  preview and numbered terminal chooser select from the same twelve canonical
-  profiles, backed by ten unique pinned shader effects, and keep the current
+  preview and numbered terminal chooser select from the same canonical
+  profiles (see the catalog entry above for the current count), and keep the current
   preview description synchronized. Profile selection does not change the
   comparison view or 0-100 drag/keyboard slider. Preview selection stays
   transient: terminal U and the existing explicit confirmation remain required

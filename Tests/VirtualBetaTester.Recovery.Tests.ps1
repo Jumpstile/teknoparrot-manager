@@ -174,9 +174,10 @@ Describe "Virtual Beta Tester: existing-backup recovery (issue #88 phase 1.6)" -
         New-Item -ItemType File -Path (Join-Path $olderBackupDir 'OLDGAME.xml') -Force | Out-Null
         $olderBackupContentBefore = Get-Content -LiteralPath (Join-Path $olderBackupDir 'OLDGAME.xml') -Raw -ErrorAction SilentlyContinue
 
-        $result = New-PropagationBackup -UserProfilesDir $userProfilesDir
+        $result = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $userProfilesDir -Label 'PropagateControls'
 
-        $result.ErrorCount | Should -Be 0 -Because "a pre-existing older backup must not cause the new backup to error"
+        $result.Succeeded | Should -BeTrue -Because "a pre-existing older backup must not cause the new backup to fail (reason: $($result.Reason))"
+        $result.Verified | Should -BeTrue -Because "the new backup must pass its own manifest verification"
         (Test-Path -LiteralPath $olderBackupDir) | Should -Be $true -Because "the older backup must still exist, untouched"
         (Get-Content -LiteralPath (Join-Path $olderBackupDir 'OLDGAME.xml') -Raw -ErrorAction SilentlyContinue) | Should -Be $olderBackupContentBefore -Because "the older backup's own content must be byte-identical after a new backup runs alongside it"
         (Test-Path -LiteralPath (Join-Path $result.Path 'ALIENS.xml')) | Should -Be $true -Because "the new backup must still contain the current real profile"

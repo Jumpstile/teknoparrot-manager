@@ -25,3 +25,19 @@ This inventory covers curated profile selection, live acquisition of approved sh
 ## Review boundary and evidence
 
 The matching external runtime rules are enumerated in `RESHADE-PROFILE-SELECTION-SPECIFICATION-INVENTORY.md`. The inventories are source-review aids, not release authorization. Required independent review, full prescribed gates, candidate-package validation, and separately authorized owner-runtime evidence remain distinct gates.
+
+## Addendum: TPM-RESHADE-TWENTY-EFFECTS-001 invariants
+
+Written after implementation began; see the slice contract's process-deviation note.
+
+| ID | Invariant | Status |
+|---|---|---|
+| `RPSI-TWENTY-001` | 20 effects and 22 profiles are different counts: Original is not an effect and Enhanced Arcade adds none; sharpening, colour-strength and CRT alternatives never stack. | Implemented; Linux-tested |
+| `RPSI-TWENTY-002` | An effect without complete, current licence evidence is never offered or deployed (`Get-TpmReShadeEffectObligationStatus`, `LICENSE_OBLIGATIONS_INCOMPLETE` / `_UNREVIEWED`). Readiness is derived for all 20 effects from one evidence table bound to the pins (`Get-TpmReShadeLicenceEvidenceTable`, `Get-TpmReShadeEffectPinDigest`); no approval label and no fixed list. | Implemented; Linux-tested |
+| `RPSI-TWENTY-003` | Unknown, unsupported or ambiguous HDR capability hides the HDR group; deployment refuses an HDR profile unless HDR is active (`HDR_UNAVAILABLE`). | Implemented; Windows detection proof open |
+| `RPSI-TWENTY-004` | Retired profiles are reported (`RETIRED_PROFILE`), never remapped, rewritten or deleted. | Implemented; Linux-tested |
+| `RPSI-TWENTY-005` | A neutral preview is never forced to differ; previews are labelled approximations. | Implemented; Linux-tested |
+| `RPSI-TWENTY-006` | After a console resize the terminal layout is rebuilt (one block, new width, typed text kept, cursor at end of input); a selection change after a resize still shows in the menu and Current selection before Enter. | Implemented; virtual-console tested; real console open |
+| `RPSI-TWENTY-007` | An in-place rewrite clears the whole previously occupied wrapped region of a line (every row padded to the full width), so shorter text that wraps over the same rows leaves nothing behind (width 60, 70 -> 65 characters). | Implemented; virtual-console tested |
+| `RPSI-TWENTY-008` | Description height limits scale with DPI and window height; text that does not fit is reported (Clipped, tooltip with the full text), never silently cut and never claimed to always fit. | Implemented; seam-tested; real fonts/DPI open |
+| `RPSI-TWENTY-009` | The slider probe is used only when its thumb size and channel edges match the live control (not only its prediction at the current value). | Implemented; seam-tested; real pixels open |

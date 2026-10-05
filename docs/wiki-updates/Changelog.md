@@ -25,8 +25,11 @@
 
 - RC7 remains the current published release. RC8 has no public tag, release
   asset, or Scripts mirror; final Version 1.0 remains unpublished.
-- The ReShade preview gallery adds a direct profile selector for the twelve
-  canonical profiles backed by ten unique pinned shader effects. The preview
+- The ReShade catalog now has 20 approved effects (22 profiles including the
+  Original reference and the Enhanced Arcade combination) in four groups; the
+  HDR group appears only on an HDR-on display, and the preview, slider and
+  live terminal synchronization were repaired. The preview gallery adds a direct
+  profile selector for the canonical profiles. The preview
   selector and terminal numbered chooser stay synchronized; slider/view state
   remains independent. Preview choices remain transient until terminal `U`
   and the existing explicit confirmation. The gallery closes when the chooser

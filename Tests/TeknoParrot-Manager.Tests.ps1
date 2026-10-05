@@ -63,6 +63,17 @@ BeforeAll {
     $script:LocalDriveInfoCache          = $null
     $script:LocalDriveInfoCachePopulated = $false
 
+    # Top-level production constants used by New-LaunchBoxGameEntry. They are
+    # evaluated from the production source itself (never re-typed here) so the
+    # fixture cannot drift from production; without them an unset variable is
+    # silently $null in a non-strict run and an error in a strict one.
+    foreach ($constantName in @('LaunchBoxGameSkeletonFields', 'LaunchBoxGameIdentityFields')) {
+        $constantAssignment = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.AssignmentStatementAst] -and $args[0].Left.Extent.Text -eq ('$script:' + $constantName) }, $true))
+        if ($constantAssignment.Count -ne 1) { throw "Expected exactly one production assignment of `$script:$constantName." }
+        $constantValue = & ([scriptblock]::Create($constantAssignment[0].Right.Extent.Text))
+        if ($constantName -eq 'LaunchBoxGameSkeletonFields') { $script:LaunchBoxGameSkeletonFields = $constantValue } else { $script:LaunchBoxGameIdentityFields = $constantValue }
+    }
+
     # These are top-level production path variables omitted by AST
     # extraction. Keep the test bootstrap strict-mode safe and mirror the
     # production initial state before any fixture supplies concrete paths.
@@ -958,6 +969,23 @@ Describe "Get-SafeLaunchBoxPlatformFileName" {
 }
 
 Describe "LaunchBox profile export" {
+    It 'returns an integer zero (not null) when no profile has a valid game path' {
+        $profiles=Join-Path $TestDrive 'launchbox-export-zero\UserProfiles'
+        $output=Join-Path $TestDrive 'launchbox-export-zero\LaunchBox.xml'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $missing=Join-Path $TestDrive 'launchbox-export-zero\Missing.exe'
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'GameA.xml'),"<GameProfile><Description>Game A</Description><GamePath>$missing</GamePath></GameProfile>")
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'NoPath.xml'),'<GameProfile><Description>No path</Description></GameProfile>')
+        Mock Write-TpmCompactExtractionProgress {}
+        Mock Write-Log {}
+
+        $count=Export-LaunchBoxXml -userProfilesDir $profiles -lbRoot '' -outputPath $output
+
+        $count | Should -Not -BeNullOrEmpty
+        $count | Should -BeOfType [int]
+        $count | Should -Be 0
+        ([xml](Get-Content -LiteralPath $output -Raw)).SelectNodes('/LaunchBox/Game').Count | Should -Be 0
+    }
     It 'reports progress while exporting valid LaunchBox profile entries' {
         $profiles=Join-Path $TestDrive 'launchbox-export-progress\UserProfiles'
         $game=Join-Path $TestDrive 'launchbox-export-progress\Game.exe'
@@ -3737,8 +3765,9 @@ Describe "PR #321 progress scan call-site coverage" {
 
         $result = Get-TeknoParrotProfileSet
 
-        $result.Count | Should -Be 1
-        $result.Contains('Alpha') | Should -BeTrue
+        # A single-element result unrolls to a scalar through the pipeline, so Count/Contains must be asserted on the array form.
+        @($result).Count | Should -Be 1
+        @($result) | Should -Contain 'Alpha'
         @($script:progressCalls | Where-Object { $_.Phase -eq 'Checking' -and $_.Current -eq 1 -and $_.Total -eq 3 -and -not $_.Complete }).Count | Should -Be 1
         @($script:progressCalls | Where-Object { $_.Phase -eq 'Scanning' -and $_.Total -eq 2 -and -not $_.Complete }).Count | Should -Be 2
         @($script:progressCalls | Where-Object Complete).Count | Should -Be 1
@@ -11404,7 +11433,8 @@ $ReleaseCandidateLabel = "RC7"
         $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release $release
 
         $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
-        $result.MutationStarted | Should -BeFalse
+        # The transaction result carries mutation state under .Mutation; the earlier top-level MutationStarted field never existed, so the old assertion tested $null.
+        $result.Mutation.Started | Should -BeFalse
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
         Should -Invoke Move-Item -Times 0 -Exactly
     }
@@ -11434,7 +11464,8 @@ $ReleaseCandidateLabel = "RC7"
         $result = Invoke-ManagerUpdateInstall -ScriptPath $path -Release $release
 
         $result.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
-        $result.MutationStarted | Should -BeFalse
+        # The transaction result carries mutation state under .Mutation; the earlier top-level MutationStarted field never existed, so the old assertion tested $null.
+        $result.Mutation.Started | Should -BeFalse
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
         Should -Invoke Move-Item -Times 0 -Exactly
     }
@@ -14705,7 +14736,7 @@ Describe "RC8 menu and ReShade regressions" {
     It "provides a visible terminal fallback chooser with explicit selection and Back" {
         $profiles = @(Get-TpmReShadeProfiles)
         $script:chooserInputs = [System.Collections.Generic.Queue[string]]::new()
-        [void]$script:chooserInputs.Enqueue('2')
+        [void]$script:chooserInputs.Enqueue('3')
         [void]$script:chooserInputs.Enqueue('U')
         Mock Read-HostSafe { $script:chooserInputs.Dequeue() }
         Mock Write-Host {}
@@ -14748,17 +14779,17 @@ Describe "RC8 menu and ReShade regressions" {
 
         $result = Read-TpmReShadeTerminalProfile -Profiles $profiles -PreviewSession $session
 
-        $result.SelectedProfile.ProfileId | Should -Be 'Vignette'
-        $session.SelectedProfileId | Should -Be 'Vignette'
+        $result.SelectedProfile.ProfileId | Should -Be 'ArcadeGlow'
+        $session.SelectedProfileId | Should -Be 'ArcadeGlow'
         $previewRefreshSelections.Count | Should -Be 1
-        $previewRefreshSelections[0] | Should -Be 'Vignette'
+        $previewRefreshSelections[0] | Should -Be 'ArcadeGlow'
         $profileSelector.SelectedIndex | Should -Be 11
         $session.ProfileSelectorUpdating | Should -BeFalse
     }
     It "selects a profile directly in the preview and synchronizes canonical state" {
         $profiles = @(Get-TpmReShadeProfiles)
-        $profiles.Count | Should -Be 12
-        @(Get-TpmReShadeEffectCatalog).Count | Should -Be 10
+        $profiles.Count | Should -Be 22
+        @(Get-TpmReShadeEffectCatalog).Count | Should -Be 20
         $profileSelector = [pscustomobject]@{ SelectedIndex = 0 }
         $refreshed = New-Object System.Collections.Generic.List[string]
         $session = [hashtable]::Synchronized(@{
@@ -14780,15 +14811,15 @@ Describe "RC8 menu and ReShade regressions" {
         Mock Write-Log {}
         Mock Write-Host {}
         $handlers = New-TpmReShadeGalleryEventHandlers -State $session
-        $vignette = @($profiles | Where-Object ProfileId -eq 'Vignette')[0]
+        $vignette = @($profiles | Where-Object ProfileId -eq 'ArcadeGlow')[0]
 
         & $handlers.ProfileSelection ([pscustomobject]@{ SelectedItem = $vignette }) $null
 
         $session.PreviewEnabled | Should -BeTrue
-        $session.PreviewFailureStage | Should -BeNullOrEmpty
-        $session.SelectedProfileId | Should -Be 'Vignette'
+        $session['PreviewFailureStage'] | Should -BeNullOrEmpty
+        $session.SelectedProfileId | Should -Be 'ArcadeGlow'
         $refreshed.Count | Should -Be 1
-        $refreshed[0] | Should -Be 'Vignette'
+        $refreshed[0] | Should -Be 'ArcadeGlow'
         $profileSelector.SelectedIndex | Should -Be 11
         $session.ProfileSelectorUpdating | Should -BeFalse
         $session.ViewMode | Should -Be 'Slider'
@@ -14819,7 +14850,7 @@ Describe "RC8 menu and ReShade regressions" {
             [hashtable]::Synchronized(@{ Initialized = $true; Closed = $true; PreviewEnabled = $true; SelectedProfileId = 'Original'; Profiles = $profiles })
         )) {
             $handlers = New-TpmReShadeGalleryEventHandlers -State $state
-            & $handlers.ProfileSelection ([pscustomobject]@{ SelectedItem = @($profiles | Where-Object ProfileId -eq 'Vignette')[0] }) $null
+            & $handlers.ProfileSelection ([pscustomobject]@{ SelectedItem = @($profiles | Where-Object ProfileId -eq 'ArcadeGlow')[0] }) $null
             $state.SelectedProfileId | Should -Be 'Original'
             $state.PreviewEnabled | Should -BeTrue
         }
@@ -14838,14 +14869,14 @@ Describe "RC8 menu and ReShade regressions" {
         Mock Write-Log {}
         Mock Write-Host {}
         Mock Read-TpmReShadeTerminalInput {
-            $session.SelectedProfileId = 'Vignette'
+            $session.SelectedProfileId = 'ArcadeGlow'
             return 'U'
         }
 
         $result = Read-TpmReShadeTerminalProfile -Profiles $profiles -DefaultProfileId 'Original' -PreviewSession $session
 
-        $result.SelectedProfile.ProfileId | Should -Be 'Vignette'
-        $session.SelectedProfileId | Should -Be 'Vignette'
+        $result.SelectedProfile.ProfileId | Should -Be 'ArcadeGlow'
+        $session.SelectedProfileId | Should -Be 'ArcadeGlow'
     }
     It "honors a numbered terminal choice after the preview closes" {
         $profiles = @(Get-TpmReShadeProfiles)
@@ -14867,7 +14898,7 @@ Describe "RC8 menu and ReShade regressions" {
 
         $result = Read-TpmReShadeTerminalProfile -Profiles $profiles -DefaultProfileId 'Original' -PreviewSession $session
 
-        $result.SelectedProfile.ProfileId | Should -Be 'Vignette'
+        $result.SelectedProfile.ProfileId | Should -Be 'ArcadeGlow'
         $session.SelectedProfileId | Should -Be 'Original'
     }
     It "keeps the final preview choice when the gallery closes before terminal acceptance" {
@@ -14876,7 +14907,7 @@ Describe "RC8 menu and ReShade regressions" {
             Initialized = $true
             Closed = $true
             PreviewEnabled = $true
-            SelectedProfileId = 'Vignette'
+            SelectedProfileId = 'ArcadeGlow'
             Profiles = $profiles
             ProfileIds = @($profiles | ForEach-Object ProfileId)
             Refresh = { return $true }.GetNewClosure()
@@ -14887,7 +14918,7 @@ Describe "RC8 menu and ReShade regressions" {
 
         $result = Read-TpmReShadeTerminalProfile -Profiles $profiles -DefaultProfileId 'Original' -PreviewSession $session
 
-        $result.SelectedProfile.ProfileId | Should -Be 'Vignette'
+        $result.SelectedProfile.ProfileId | Should -Be 'ArcadeGlow'
     }
     It "closes the preview before deployment confirmation and preserves the cancel boundary" {
         $root = Join-Path $TestDrive 'reshade-gallery-caller-close'
@@ -14919,7 +14950,7 @@ Describe "RC8 menu and ReShade regressions" {
             Form = $null
             PreviewCache = $null
         })
-        $selectedProfile = Get-TpmReShadeProfile -ProfileId 'Vignette'
+        $selectedProfile = Get-TpmReShadeProfile -ProfileId 'ArcadeGlow'
         Mock Test-TpmNoReparsePath { $true }
         Mock Test-ReShadeDllSignature { [pscustomobject]@{ Status = 'Unavailable'; Signer = '' } }
         Mock Invoke-ReShadeUpdateIfAvailable {
@@ -14982,7 +15013,7 @@ Describe "RC8 menu and ReShade regressions" {
         }.GetNewClosure()
         Mock Write-Log {}
 
-        $result = Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'Sepia'
+        $result = Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'ColorBalance'
 
         $result | Should -BeTrue
         $selector.FlagAtAssignment | Should -BeTrue
@@ -14990,7 +15021,7 @@ Describe "RC8 menu and ReShade regressions" {
         $flagDuringRefresh[0] | Should -BeFalse
         $session['ProfileSelectorUpdating'] | Should -BeFalse
         $selector.SelectedIndex | Should -Be 10
-        $session['SelectedProfileId'] | Should -Be 'Sepia'
+        $session['SelectedProfileId'] | Should -Be 'ColorBalance'
         $session['ViewMode'] | Should -Be 'Slider'
         $session['SliderPosition'] | Should -Be 30
     }
@@ -15015,7 +15046,7 @@ Describe "RC8 menu and ReShade regressions" {
         })
         Mock Write-Log {}
 
-        $result = Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'Sepia'
+        $result = Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'ColorBalance'
 
         $result | Should -BeFalse
         $session['ProfileSelectorUpdating'] | Should -BeFalse
@@ -15039,7 +15070,7 @@ Describe "RC8 menu and ReShade regressions" {
         })
         Mock Write-Log {}
 
-        (Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'Vignette') | Should -BeTrue
+        (Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'ArcadeGlow') | Should -BeTrue
 
         $session['ProfileSelectorUpdating'] | Should -BeTrue
         $selector.SelectedIndex | Should -Be 11
@@ -15062,7 +15093,7 @@ Describe "RC8 menu and ReShade regressions" {
         Mock Write-Log {}
         Mock Write-Host {}
         $handlers = New-TpmReShadeGalleryEventHandlers -State $session
-        $cartoon = @($profiles | Where-Object ProfileId -eq 'Cartoon')[0]
+        $cartoon = @($profiles | Where-Object ProfileId -eq 'Vivid')[0]
         $queuedFired = New-Object System.Collections.Generic.List[int]
         $refreshed = New-Object System.Collections.Generic.List[string]
         $session.Refresh = {
@@ -15074,16 +15105,16 @@ Describe "RC8 menu and ReShade regressions" {
             return $true
         }.GetNewClosure()
 
-        (Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'Sepia') | Should -BeTrue
+        (Sync-TpmReShadeGallerySelection -Session $session -ProfileId 'ColorBalance') | Should -BeTrue
 
         $queuedFired.Count | Should -Be 1
-        $session['SelectedProfileId'] | Should -Be 'Cartoon'
+        $session['SelectedProfileId'] | Should -Be 'Vivid'
         $selector.SelectedIndex | Should -Be 5
         $session['ProfileSelectorUpdating'] | Should -BeFalse
         $session['PreviewEnabled'] | Should -BeTrue
         $session['ViewMode'] | Should -Be 'Slider'
         $session['SliderPosition'] | Should -Be 30
-        $refreshed[$refreshed.Count - 1] | Should -Be 'Cartoon'
+        $refreshed[$refreshed.Count - 1] | Should -Be 'Vivid'
     }
     It "accepts the queued preview selection with U after a terminal-driven sync" {
         $profiles = @(Get-TpmReShadeProfiles)
@@ -15103,7 +15134,7 @@ Describe "RC8 menu and ReShade regressions" {
         Mock Write-Log {}
         Mock Write-Host {}
         $handlers = New-TpmReShadeGalleryEventHandlers -State $session
-        $cartoon = @($profiles | Where-Object ProfileId -eq 'Cartoon')[0]
+        $cartoon = @($profiles | Where-Object ProfileId -eq 'Vivid')[0]
         $queuedFired = New-Object System.Collections.Generic.List[int]
         $session.Refresh = {
             if ($queuedFired.Count -eq 0) {
@@ -15120,8 +15151,8 @@ Describe "RC8 menu and ReShade regressions" {
         $result = Read-TpmReShadeTerminalProfile -Profiles $profiles -PreviewSession $session
 
         $result.Cancelled | Should -BeFalse
-        $result.SelectedProfile.ProfileId | Should -Be 'Cartoon'
-        $session['SelectedProfileId'] | Should -Be 'Cartoon'
+        $result.SelectedProfile.ProfileId | Should -Be 'Vivid'
+        $session['SelectedProfileId'] | Should -Be 'Vivid'
         $session['ProfileSelectorUpdating'] | Should -BeFalse
         $session['ViewMode'] | Should -Be 'Slider'
         $session['SliderPosition'] | Should -Be 30
@@ -15294,7 +15325,7 @@ Describe "RC8 menu and ReShade regressions" {
         $result = Read-TpmReShadeTerminalProfile -Profiles $profiles -PreviewSession $session
 
         $result.Cancelled | Should -BeFalse
-        $result.SelectedProfile.ProfileId | Should -Be 'ClassicCrt'
+        $result.SelectedProfile.ProfileId | Should -Be 'CleanSharp'
         $session['PreviewEnabled'] | Should -BeFalse
         $session['PreviewFailureStage'] | Should -Be 'profile-selection-sync'
         $session['ProfileSelectorUpdating'] | Should -BeFalse
@@ -15444,7 +15475,7 @@ Describe "RC8 menu and ReShade regressions" {
         $galleryStart | Should -BeGreaterOrEqual 0
         $selectedAssignment | Should -BeGreaterThan $galleryStart
         $source.Substring($galleryStart, $selectedAssignment - $galleryStart) | Should -Match 'DefaultProfileId'
-        $source | Should -Match 'Show-TpmReShadeProfileGalleryWindow -Profiles \$Profiles -DefaultProfileId \$reopenId -Show -NonModal'
+        $source | Should -Match 'Show-TpmReShadeProfileGalleryWindow -Profiles \$selectable -DefaultProfileId \$reopenId -Show -NonModal'
         $galleryBody = [regex]::Match($source, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
 
     }
@@ -15748,20 +15779,74 @@ Describe "Approved ReShade profile catalog" {
         @($profiles | Where-Object { $_.SchemaVersion -eq 2 }).Count | Should -Be $profiles.Count
     }
     # RSPS-PRESET-002, RSPS-EFFECT-005, RPSI-ORIGINAL-005
-    It "defines twelve canonical profiles and exact effect order" {
+    It "defines 22 canonical profiles over 20 effects and exact effect order" {
         $expected=@{
-            Original=@(); CleanSharp=@('SweetFX.LumaSharpen'); Vivid=@('SweetFX.Vibrance')
-            ClassicCrt=@('FXShaders.CRT_Lottes'); EnhancedArcade=@('SweetFX.LumaSharpen','SweetFX.Vibrance')
-            Cartoon=@('SweetFX.Cartoon'); ContrastCurves=@('SweetFX.Curves')
-            FilmGrain=@('SweetFX.FilmGrain'); Levels=@('SweetFX.Levels')
-            Monochrome=@('SweetFX.Monochrome'); Sepia=@('SweetFX.Sepia')
-            Vignette=@('SweetFX.Vignette')
+            Original=@(); SmoothEdges=@('SweetFX.SMAA'); CleanSharp=@('SweetFX.LumaSharpen'); AdaptiveClarity=@('SweetFX.CAS')
+            SmoothGradients=@('CrosireSlim.Deband'); Vivid=@('SweetFX.Vibrance'); ContrastCurves=@('SweetFX.Curves'); Levels=@('SweetFX.Levels')
+            ShadowMidtoneBalance=@('SweetFX.LiftGammaGain'); ExposureTint=@('SweetFX.Tonemap'); ColorBalance=@('Prod80.ColorBalance')
+            ArcadeGlow=@('FXShaders.ArcaneBloom'); EnhancedArcade=@('SweetFX.LumaSharpen','SweetFX.Vibrance')
+            ClassicCrt=@('FXShaders.CRT_Lottes'); DetailedCrt=@('Akgunter.CRTRoyale'); LightweightCrt=@('RSRetroArch.CRTPi')
+            DetailPreservingSharpen=@('CrosireLegacy.AdaptiveSharpen'); FilmicSharpen=@('Fubax.FilmicAnamorphSharpen')
+            Colorfulness=@('CrosireLegacy.Colourfulness'); FastGameEnhancement=@('Glamarye.FastEffects')
+            HdrHighlightMapping=@('Lilium.ToneMapping'); HdrBlackLevelFix=@('Lilium.HdrBlackFloorFix')
         }
-        $profiles=@(Get-TpmReShadeProfiles);$profiles.Count|Should -Be 12
-        foreach($p in $profiles){(@($p.Effects)-join ',')|Should -Be (@($expected[$p.ProfileId])-join ',');$preset=New-TpmReShadePresetContent -ProfileDefinition $p;$preset|Should -Match '(?m)^Techniques=';$preset|Should -Match '(?m)^TechniqueSorting=';Test-TpmReShadePresetContent -Content $preset -ProfileDefinition $p|Should -BeTrue -Because $p.ProfileId}
+        $profiles=@(Get-TpmReShadeProfiles)
+        $profiles.Count | Should -Be 22
+        @($expected.Keys).Count | Should -Be 22
+        # Effect count and profile count are different numbers: 20 effects; Original is not an effect; Enhanced Arcade adds none.
+        @($profiles | ForEach-Object { $_.Effects } | Sort-Object -Unique).Count | Should -Be 20
+        @(Get-TpmReShadeEffectCatalog).Count | Should -Be 20
+        foreach($p in $profiles){
+            $expected.ContainsKey($p.ProfileId) | Should -BeTrue -Because $p.ProfileId
+            (@($p.Effects)-join ',') | Should -Be (@($expected[$p.ProfileId])-join ',')
+            $preset=New-TpmReShadePresetContent -ProfileDefinition $p
+            $preset | Should -Match '(?m)^Techniques='
+            $preset | Should -Match '(?m)^TechniqueSorting='
+            (Test-TpmReShadePresetContent -Content $preset -ProfileDefinition $p) | Should -BeTrue
+        }
         (New-TpmReShadePresetContent -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'EnhancedArcade'))|Should -Match 'Techniques=LumaSharpen,Vibrance'
         (New-TpmReShadePresetContent -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'EnhancedArcade'))|Should -Match 'TechniqueSorting=LumaSharpen,Vibrance'
         (Get-TpmReShadeProfile -ProfileId 'Original').Effects.Count|Should -Be 0
+    }
+    It "uses the owner-approved friendly names, descriptions, technical names and groups verbatim" {
+        $approved = @(
+            @('SmoothEdges','Smooth Edges','SMAA','Reduce jagged edges.','Main'),
+            @('CleanSharp','Clean & Sharp','LumaSharpen','Straightforward sharpening.','Main'),
+            @('AdaptiveClarity','Adaptive Clarity','CAS','Sharpening that adapts to local detail; not upscaling.','Main'),
+            @('SmoothGradients','Smooth Gradients','Deband','Reduce bands in skies, fog and dark gradients.','Main'),
+            @('Vivid','Vivid Arcade','Vibrance','Restrained color enhancement.','Main'),
+            @('ContrastCurves','Balanced Contrast','Curves','Adjust midtone contrast.','Main'),
+            @('Levels','Black/White Point Adjustment','Levels','Correct washed-out ranges without changing the image to monochrome.','Main'),
+            @('ShadowMidtoneBalance','Shadow & Midtone Balance','LiftGammaGain','Adjust shadows, midtones and highlights separately.','Main'),
+            @('ExposureTint','Exposure & Tint','Tonemap','SDR exposure, gamma and tint correction.','Main'),
+            @('ColorBalance','Color Balance','prod80 Color Balance','Correct unwanted color casts.','Main'),
+            @('ArcadeGlow','Arcade Glow','ArcaneBloom','Restrained glow around bright areas.','Main'),
+            @('ClassicCrt','Classic Arcade CRT','CRT Lottes','Lottes, including its downsampling.','Crt'),
+            @('DetailedCrt','Detailed Arcade CRT','CRT-Royale','More elaborate phosphor-mask simulation.','Crt'),
+            @('LightweightCrt','Lightweight CRT','CRT-Pi','A simpler single-pass alternative.','Crt'),
+            @('DetailPreservingSharpen','Detail-Preserving Sharpen','AdaptiveSharpen','An alternative sharpening algorithm with overshoot controls.','Advanced'),
+            @('FilmicSharpen','Filmic Sharpen','FilmicAnamorphSharpen','Tunable high-pass sharpening.','Advanced'),
+            @('Colorfulness','Colorfulness','Colourfulness','An alternative color-strength adjustment.','Advanced'),
+            @('FastGameEnhancement','Fast Game Enhancement','Glamayre Fast Effects','Combining selectable anti-aliasing, sharpening, contrast and lighting effects.','Advanced'),
+            @('HdrHighlightMapping','HDR Highlight Mapping','Lilium Tone Mapping','Map an actual HDR image into the display''s brightness range.','Hdr'),
+            @('HdrBlackLevelFix','HDR Black-Level Fix','Lilium HDR Black Floor Fix','Adjust raised HDR blacks.','Hdr')
+        )
+        foreach ($row in $approved) {
+            $profile = Get-TpmReShadeProfile -ProfileId $row[0]
+            $profile.FriendlyName | Should -Be $row[1]
+            $profile.TechnicalName | Should -Be $row[2]
+            $profile.Description | Should -Be $row[3]
+            $profile.Group | Should -Be $row[4]
+        }
+        @(Get-TpmReShadeProfileGroups | ForEach-Object Label) | Should -Be @('Main Catalog','CRT Choices','Advanced Alternatives','Actual HDR Setups Only')
+        (Get-TpmReShadeProfile -ProfileId 'EnhancedArcade').FriendlyName | Should -Not -BeNullOrEmpty
+    }
+    It "removes Monochrome, Sepia, Film Grain, Vignette and Cartoon from the beginner catalog without remapping them" {
+        foreach ($id in @('Cartoon','FilmGrain','Monochrome','Sepia','Vignette')) {
+            Get-TpmReShadeProfile -ProfileId $id | Should -BeNullOrEmpty
+            (Get-TpmReShadeRetiredProfile -ProfileId $id).ProfileId | Should -Be $id
+        }
+        @(Get-TpmReShadeEffectCatalog | Where-Object { $_.EffectId -match 'Cartoon|FilmGrain|Monochrome|Sepia|Vignette' }).Count | Should -Be 0
     }
     It "derives visible technique labels from canonical profile and effect definitions" {
         $catalog = @(Get-TpmReShadeEffectCatalog)
@@ -15811,7 +15896,7 @@ Describe "Approved ReShade profile catalog" {
     # RSPS-EFFECT-005, RPSI-SOURCE-001
     It "contains immutable source metadata for every approved effect" {
         $effects = @(Get-TpmReShadeEffectCatalog)
-        $effects.Count | Should -Be 10
+        $effects.Count | Should -Be 20
         foreach ($effect in $effects) {
             $effect.PinnedCommit | Should -Match '^[0-9a-f]{40}$'
             @($effect.RelativeFiles).Count | Should -BeGreaterThan 0
@@ -15844,21 +15929,16 @@ Describe "Approved ReShade profile catalog" {
         $uiText | Should -Match '(?m)^#define __UNIFORM_SLIDER_FLOAT1 ui_type = "slider";\r?$'
         $uiText | Should -Match '(?m)^#define __UNIFORM_COLOR_FLOAT3 ui_type = "color";\r?$'
     }
-    It "routes seven pinned SweetFX shaders through selectable profiles and allowlisted acquisition" {
+    It "routes the retained pinned SweetFX shaders through selectable profiles and allowlisted acquisition" {
         $revision = '16d1a42247cb5baaf660120ee35c9a33bb94649c'
         $expected = @(
-            [pscustomobject]@{ Profile='Cartoon'; Effect='SweetFX.Cartoon'; Technique='Cartoon'; File='Shaders/SweetFX/Cartoon.fx'; Length=1378; Hash='5D90E1C72318A28255D268FF3AC3FCB64D1E9469F5CA1334A50FB7D1B1A005F4' }
             [pscustomobject]@{ Profile='ContrastCurves'; Effect='SweetFX.Curves'; Technique='Curves'; File='Shaders/SweetFX/Curves.fx'; Length=6274; Hash='8368029D2254856505ABF7DD789342024465403DA49434DD776C6D1AF4079A98' }
-            [pscustomobject]@{ Profile='FilmGrain'; Effect='SweetFX.FilmGrain'; Technique='FilmGrain'; File='Shaders/SweetFX/FilmGrain.fx'; Length=3514; Hash='520F0C40247C457A23A8F66A761C71EB43E5CA85DB5F68A92F1FBF0700F37154' }
             [pscustomobject]@{ Profile='Levels'; Effect='SweetFX.Levels'; Technique='Levels'; File='Shaders/SweetFX/Levels.fx'; Length=2976; Hash='C603D3EA12D6D5710F2246BB7DD446D19E561154656F1FA8D579CA7FBBEEF70E' }
-            [pscustomobject]@{ Profile='Monochrome'; Effect='SweetFX.Monochrome'; Technique='Monochrome'; File='Shaders/SweetFX/Monochrome.fx'; Length=3183; Hash='36E0C42CE96F7CA61D44FDEEDBDB2E2B859D3359B29AD1E5DC3F1772D3B2459E' }
-            [pscustomobject]@{ Profile='Sepia'; Effect='SweetFX.Sepia'; Technique='Tint'; File='Shaders/SweetFX/Sepia.fx'; Length=549; Hash='4A4C7B4A3CC6CDF717AA96F0D3586B98C143A5584A29FD3A9D57AECD895B0BC6' }
-            [pscustomobject]@{ Profile='Vignette'; Effect='SweetFX.Vignette'; Technique='Vignette'; File='Shaders/SweetFX/Vignette.fx'; Length=3502; Hash='A7358B592830FA74A0A50A842682C99DB751E35666E49C229567DAF9EA59AFA2' }
         )
         $effects = @(Get-TpmReShadeEffectCatalog)
         $profiles = @(Get-TpmReShadeProfiles)
-        $effects.Count | Should -Be 10
-        $profiles.Count | Should -Be 12
+        $effects.Count | Should -Be 20
+        $profiles.Count | Should -Be 22
         $license = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\LICENSE'))
         $license | Should -Match 'Copyright \(c\) 2014 CeeJayDK'
         $license | Should -Match 'The MIT License'
@@ -15882,7 +15962,7 @@ Describe "Approved ReShade profile catalog" {
             @($profile.TechniqueOrder) | Should -Be @($expectedEffect.Technique)
             (New-TpmReShadePresetContent -ProfileDefinition $profile) | Should -Match ("(?m)^Techniques={0}\r?$" -f [regex]::Escape($expectedEffect.Technique))
             (New-TpmReShadePresetContent -ProfileDefinition $profile) | Should -Match ("(?m)^TechniqueSorting={0}\r?$" -f [regex]::Escape($expectedEffect.Technique))
-            $fileSpec = @(Get-TpmReShadeApprovedEffectFiles -EffectId $expectedEffect.Effect)[0]
+            $fileSpec = @(Get-TpmReShadeApprovedEffectFiles -EffectId $expectedEffect.Effect | Where-Object { $_.Role -eq 'Effect' -or $_.RelativePath -eq $expectedEffect.File })[0]
             $fileSpec.Url | Should -Be "https://raw.githubusercontent.com/CeeJayDK/SweetFX/$revision/$($expectedEffect.File)"
             $fileSpec.SHA256 | Should -Be $expectedEffect.Hash
         }
@@ -15891,12 +15971,12 @@ Describe "Approved ReShade profile catalog" {
     It "provides a complete approved include closure and valid runtime search and preset paths for every profile" {
         $profiles = @(Get-TpmReShadeProfiles)
         foreach ($profile in $profiles) {
-            $required = @(
+            $required = @(@(
                 foreach ($effectId in @($profile.Effects)) {
                     $effect = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq $effectId)[0]
                     foreach ($include in @($effect.RequiredIncludes)) { $include }
                 }
-            ) | Sort-Object -Unique
+            ) | Sort-Object -Unique)
             if ($required.Count -gt 0) {
                 $files = @(
                     foreach ($effectId in @($profile.Effects)) { Get-TpmReShadeApprovedEffectFiles -EffectId $effectId }
@@ -15988,7 +16068,7 @@ Describe "ReShade profile previews" {
     }
     It "reports every canonical profile as available from the bundled landscape renderer" {
         $gallery = @(Get-TpmReShadeProfileGallery -PreviewRoot $script:PreviewFixtureRoot)
-        $gallery.Count | Should -Be 12
+        $gallery.Count | Should -Be 22
         foreach ($item in $gallery) {
             $item.PreviewAvailable | Should -BeTrue
             $item.PreviewPath | Should -Be (Join-Path $script:PreviewFixtureRoot 'TPM-preview-landscape.png')
@@ -16208,7 +16288,7 @@ Describe "ReShade trusted profile restore" {
         [IO.Directory]::CreateDirectory($root)|Out-Null;[IO.Directory]::CreateDirectory($stage)|Out-Null
         $reshadeHeader=Join-Path $stage 'ReShade.fxh';$uiHeader=Join-Path $stage 'ReShadeUI.fxh';[IO.File]::WriteAllText($game,'MZ-test-game');[IO.File]::WriteAllText($dll,'MZ-test-reshade');[IO.File]::WriteAllText($effect,'effect-bytes');[IO.File]::WriteAllText($reshadeHeader,'reshade-header');[IO.File]::WriteAllText($uiHeader,'ui-header')
         $effectHash=(Get-FileHash -LiteralPath $effect -Algorithm SHA256).Hash;$reshadeHeaderHash=(Get-FileHash -LiteralPath $reshadeHeader -Algorithm SHA256).Hash;$uiHeaderHash=(Get-FileHash -LiteralPath $uiHeader -Algorithm SHA256).Hash;$profile=Get-TpmReShadeProfile -ProfileId CleanSharp
-        Mock Install-TpmReShadeApprovedEffect { [pscustomobject]@{Succeeded=$true;State='PREPARED';StagingRoot=$stage;Files=@([pscustomobject]@{RelativePath='Shaders/SweetFX/LumaSharpen.fx';Path=$effect;SHA256=$effectHash},[pscustomobject]@{RelativePath='Shaders/TPM/ReShade.fxh';Path=$reshadeHeader;SHA256=$reshadeHeaderHash},[pscustomobject]@{RelativePath='Shaders/TPM/ReShadeUI.fxh';Path=$uiHeader;SHA256=$uiHeaderHash})} }
+        Mock Install-TpmReShadeApprovedEffect { [pscustomobject]@{Succeeded=$true;State='PREPARED';StagingRoot=$stage;Files=@([pscustomobject]@{RelativePath='Shaders/SweetFX/LumaSharpen.fx';SourceRelativePath='Shaders/SweetFX/LumaSharpen.fx';Path=$effect;SHA256=$effectHash},[pscustomobject]@{RelativePath='Shaders/TPM/ReShade.fxh';SourceRelativePath='Shaders/ReShade.fxh';Path=$reshadeHeader;SHA256=$reshadeHeaderHash},[pscustomobject]@{RelativePath='Shaders/TPM/ReShadeUI.fxh';SourceRelativePath='TPM-authored/ReShadeUI.fxh';Path=$uiHeader;SHA256=$uiHeaderHash})} }
         $result=Install-TpmReShadeProfileDeployment -ProfileDefinition $profile -GamePath $game -Doc ([xml]'<GameProfile><EmulatorType>Default</EmulatorType></GameProfile>') -SourceDll $dll -CacheRoot (Join-Path $root 'cache') -OwnershipPath $ownership -CanonicalPreset
         $assetProgressStarts = @($script:reshadeDeployProgress | Where-Object { $_.Label -eq 'ReShade profile asset staging' -and -not $_.Complete -and $_.Current -eq 0 })
         $assetProgressClosed = @($script:reshadeDeployProgress | Where-Object { $_.Label -eq 'ReShade profile asset staging' -and $_.Complete })
@@ -16271,9 +16351,9 @@ Describe "ReShade trusted profile restore" {
         @($manifest.Files | Where-Object { [string]$_.DestinationPath -ieq (Join-Path $root 'Shaders\TPM\ReShadeUI.fxh') }).Count | Should -Be 1
     }
     # RPSI-CLOSURE-002, RPSI-TRANSACTION-003, RPSI-ORIGINAL-005
-    It "deploys all twelve canonical profiles on clean targets" {
+    It "deploys all twenty-two canonical profiles on clean targets" {
         $profiles = @(Get-TpmReShadeProfiles)
-        $profiles.Count | Should -Be 12
+        $profiles.Count | Should -Be 22
         $script:allProfileDeploymentRoot = Join-Path $TestDrive 'all-profile-deployments'
         [void][IO.Directory]::CreateDirectory($script:allProfileDeploymentRoot)
         Mock Get-ExeArchitecture { 'x64' }
@@ -16544,10 +16624,10 @@ Describe "ReShade trusted profile restore" {
         $source | Should -Match '\$customPresetChoice -eq ''B''\)\s*\{\s*return'
     }
 
-    It "keeps twelve canonical profiles backed by ten unique shader effects" {
+    It "keeps 22 canonical profiles backed by 20 unique shader effects" {
         $profiles = @(Get-TpmReShadeProfiles)
-        $profiles.Count | Should -Be 12
-        @((Get-TpmReShadeEffectCatalog).TechniqueName | Sort-Object -Unique).Count | Should -Be 10
+        $profiles.Count | Should -Be 22
+        @((Get-TpmReShadeEffectCatalog).TechniqueName | Sort-Object -Unique).Count | Should -Be 20
     }
     It "uses stable ProfileId identity regardless of optional view properties" {
         $plainItem = [pscustomobject]@{ ProfileId = 'CleanSharp'; FriendlyName = 'Clean & Sharp' }
@@ -16982,13 +17062,20 @@ Describe "Shared TPM hardware environment evidence" {
 
 Describe "Approved ReShade asset inventory" {
     It "includes the complete approved effect and dependency inventory without bundling assets" {
-        @(Get-TpmReShadeAssetInventory) | Should -Be @(
-            'Shaders/SweetFX/LumaSharpen.fx','Shaders/TPM/ReShade.fxh','Shaders/TPM/ReShadeUI.fxh'
-            'Shaders/SweetFX/Vibrance.fx','Shaders/CRT_Lottes.fx','Shaders/CRT_Lottes.fxh'
-            'Shaders/SweetFX/Cartoon.fx','Shaders/SweetFX/Curves.fx','Shaders/SweetFX/FilmGrain.fx'
-            'Shaders/SweetFX/Levels.fx','Shaders/SweetFX/Monochrome.fx','Shaders/SweetFX/Sepia.fx'
-            'Shaders/SweetFX/Vignette.fx'
-        )
+        $inventory = @(Get-TpmReShadeAssetInventory)
+        @($inventory | Sort-Object -Unique).Count | Should -Be $inventory.Count
+        $inventory | Should -Contain 'Shaders/TPM/ReShade.fxh'
+        $inventory | Should -Contain 'Shaders/TPM/ReShadeUI.fxh'
+        foreach ($effect in @(Get-TpmReShadeEffectCatalog)) {
+            foreach ($file in @(Get-TpmReShadeApprovedEffectFiles -EffectId $effect.EffectId)) {
+                $inventory | Should -Contain ([string]$file.RelativePath) -Because $effect.EffectId
+            }
+            $inventory | Should -Contain ('Shaders/TPM/Notices/{0}/NOTICE.txt' -f $effect.EffectId)
+        }
+        # Textures stay under Textures/, shader sources under Shaders/, and no ReShade runtime binary is part of the inventory.
+        foreach ($path in $inventory) { $path | Should -Match '^(Shaders|Textures)/' }
+        @($inventory | Where-Object { $_ -match '(?i)\.dll$|\.exe$' }).Count | Should -Be 0
+        $inventory | Should -Contain 'Textures/SweetFX/AreaTex.png'
         Test-TpmReShadeAssetInventory -AssetRoot (Join-Path $PSScriptRoot '..\ReShade') | Should -BeFalse
     }
 }
@@ -17058,8 +17145,8 @@ Describe "ReShade approved-effect acquisition progress" {
         [void][IO.Directory]::CreateDirectory($stage)
         $script:effectPayloads = @{ 'https://fixture/one'='asset-one'; 'https://fixture/two'='asset-two' }
         $script:effectSpecs = @(
-            [pscustomobject]@{ RelativePath='Shaders/one.fx'; Url='https://fixture/one'; SHA256=(Get-TpmAutoSyncTextSha256 -Text 'asset-one') }
-            [pscustomobject]@{ RelativePath='SweetFX/two.fxh'; Url='https://fixture/two'; SHA256=(Get-TpmAutoSyncTextSha256 -Text 'asset-two') }
+            [pscustomobject]@{ EffectId='Fixture.Effect'; Role='EffectAsset'; RelativePath='Shaders/one.fx'; SourceRelativePath='Shaders/one.fx'; CacheRelativePath='Fixture.Effect/one.fx'; Url='https://fixture/one'; SHA256=(Get-TpmAutoSyncTextSha256 -Text 'asset-one'); ByteLength=$null; PinnedRevision=('a' * 40); Repository='Fixture/Effect'; License='MIT'; InlineBytes=$null }
+            [pscustomobject]@{ EffectId='Fixture.Effect'; Role='EffectAsset'; RelativePath='SweetFX/two.fxh'; SourceRelativePath='SweetFX/two.fxh'; CacheRelativePath='Fixture.Effect/two.fxh'; Url='https://fixture/two'; SHA256=(Get-TpmAutoSyncTextSha256 -Text 'asset-two'); ByteLength=$null; PinnedRevision=('a' * 40); Repository='Fixture/Effect'; License='MIT'; InlineBytes=$null }
         )
         $script:effectAcquisitionProgress = New-Object System.Collections.Generic.List[object]
         Mock Get-TpmReShadeApprovedEffectFiles { $script:effectSpecs }
@@ -17097,7 +17184,7 @@ Describe "Approved ReShade transactional deployment" {
         Mock Acquire-TpmReShadeApprovedEffect {
             [pscustomobject]@{ EffectId = 'SweetFX.Vibrance'; StagingRoot = $stage; Files = @([pscustomobject]@{ RelativePath = 'Shaders/SweetFX/Vibrance.fx'; Path = $source; SHA256 = $hash }) }
         }
-        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{ EffectId='SweetFX.Vibrance'; PinnedCommit=('a' * 40); RelativeFiles=@('Shaders/SweetFX/Vibrance.fx'); SHA256=@($hash) }) }
+        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{ EffectId='SweetFX.Vibrance'; PinnedCommit=('a' * 40); Repository='CeeJayDK/SweetFX'; License='MIT'; RelativeFiles=@('Shaders/SweetFX/Vibrance.fx'); SHA256=@($hash) }) }
         Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath (Join-Path $root 'ownership.json') | Should -Not -BeNullOrEmpty
         Test-Path -LiteralPath (Join-Path $dest 'Shaders\SweetFX\Vibrance.fx') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $root 'ownership.json') | Should -BeTrue
@@ -17358,19 +17445,19 @@ Describe "ReShade storage role matrix" {
     It "reduces pre-acquisition demand only for an exact-SHA cache" {
         $root=Join-Path $TestDrive 'cache-valid'; $cache=Join-Path $root 'SweetFX.Vibrance'; [void][IO.Directory]::CreateDirectory($cache); $path=Join-Path $cache 'Vibrance.fx'; [IO.File]::WriteAllText($path,'cached')
         $hash=(Get-FileHash $path -Algorithm SHA256).Hash
-        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='SweetFX.Vibrance';ByteLengths=@(99)}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';SHA256=$hash}) }
+        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='SweetFX.Vibrance';ByteLengths=@(99)}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';CacheRelativePath='SweetFX.Vibrance/Vibrance.fx';SHA256=$hash}) }
         $p=Get-TpmReShadePreAcquisitionStoragePlan -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot (Join-Path $root 'ReShade')
         $p.CacheBytes | Should -Be 6; $p.StagingBytes | Should -Be 6; $p.RequiredWorkingBytes | Should -Be 12
     }
     It "uses each pinned file length when cache content is corrupt" {
         $root=Join-Path $TestDrive 'cache-corrupt'; $cache=Join-Path $root 'SweetFX.Vibrance'; [void][IO.Directory]::CreateDirectory($cache); [IO.File]::WriteAllText((Join-Path $cache 'Vibrance.fx'),'bad')
-        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='SweetFX.Vibrance';ByteLengths=@(99)}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';SHA256=('0'*64);ByteLength=[int64]99}) }
+        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='SweetFX.Vibrance';ByteLengths=@(99)}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';CacheRelativePath='SweetFX.Vibrance/Vibrance.fx';SHA256=('0'*64);ByteLength=[int64]99}) }
         $p=Get-TpmReShadePreAcquisitionStoragePlan -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot (Join-Path $root 'ReShade')
         $p.CacheBytes | Should -Be 99; $p.RequiredWorkingBytes | Should -Be 198; $p.CapacityKnown | Should -BeTrue
     }
     It "blocks unknown pre-acquisition size before acquisition or mutation" {
         $root=Join-Path $TestDrive 'unknown-storage'; $ownership=Join-Path $root 'ownership.json'; $dest=Join-Path $root 'ReShade'
-        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='SweetFX.Vibrance';ByteLengths=@()}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';SHA256=('0'*64)}) }
+        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='SweetFX.Vibrance';ByteLengths=@()}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';CacheRelativePath='SweetFX.Vibrance/Vibrance.fx';SHA256=('0'*64)}) }
         Mock Acquire-TpmReShadeApprovedEffect { throw 'ACQUIRE_MUST_NOT_RUN' }
         $e=[pscustomobject]@{Volumes=@([pscustomobject]@{Root='C:\';FreeBytes=999;RequiredBytes=0;Roles=@('CACHE','STAGING','TARGET','ROLLBACK')})}
         {Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership -StoragePreflight $e} | Should -Throw '*UNKNOWN*'
@@ -17389,7 +17476,7 @@ Describe "ReShade storage role matrix" {
             $hash=(Get-FileHash $src -Algorithm SHA256).Hash; $old=(Get-FileHash $path -Algorithm SHA256).Hash; $ownership=Join-Path $root 'ownership.json'
             Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{SchemaVersion=1;EffectId='SweetFX.Vibrance';Files=@([pscustomobject]@{DestinationPath=$path;ExpectedSHA256=$old;ActualSHA256=$old;TPMManaged=$true})}) -Path $ownership
             $pre=[IO.File]::ReadAllBytes($ownership)
-            Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='SweetFX.Vibrance';ByteLengths=@(10)}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';SHA256=$hash;ByteLength=[int64]10}) }; Mock Acquire-TpmReShadeApprovedEffect { throw 'ACQUIRE_MUST_NOT_RUN' }
+            Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='SweetFX.Vibrance';ByteLengths=@(10)}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';CacheRelativePath='SweetFX.Vibrance/Vibrance.fx';SHA256=$hash;ByteLength=[int64]10}) }; Mock Acquire-TpmReShadeApprovedEffect { throw 'ACQUIRE_MUST_NOT_RUN' }
             $e=[pscustomobject]@{Volumes=@([pscustomobject]@{Root='C:\';FreeBytes=([int64]$case.Demand-1);RequiredBytes=0;Roles=@($case.Role)})}
             {Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership -StoragePreflight $e} | Should -Throw '*insufficient*' -Because $case.Role
             Should -Invoke Acquire-TpmReShadeApprovedEffect -Times 0 -Because $case.Role
@@ -17399,7 +17486,7 @@ Describe "ReShade storage role matrix" {
         }
     }
     It "reports the three-file CRT storage plan values including its shared header" {
-        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='FXShaders.CRT_Lottes';ByteLengths=@(5114,21710)}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/CRT_Lottes.fx';SHA256=('0'*64);ByteLength=[int64]5114},[pscustomobject]@{RelativePath='Shaders/CRT_Lottes.fxh';SHA256=('0'*64);ByteLength=[int64]21710},[pscustomobject]@{RelativePath='Shaders/TPM/ReShade.fxh';SHA256=('0'*64);ByteLength=[int64]4250}) }
+        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='FXShaders.CRT_Lottes';ByteLengths=@(5114,21710)}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/CRT_Lottes.fx';CacheRelativePath='FXShaders.CRT_Lottes/CRT_Lottes.fx';SHA256=('0'*64);ByteLength=[int64]5114},[pscustomobject]@{RelativePath='Shaders/CRT_Lottes.fxh';CacheRelativePath='FXShaders.CRT_Lottes/CRT_Lottes.fxh';SHA256=('0'*64);ByteLength=[int64]21710},[pscustomobject]@{RelativePath='Shaders/TPM/ReShade.fxh';CacheRelativePath='Shared/ReShade.fxh';SHA256=('0'*64);ByteLength=[int64]4250}) }
         $p=Get-TpmReShadePreAcquisitionStoragePlan -EffectId 'FXShaders.CRT_Lottes' -CacheRoot (Join-Path $TestDrive 'crt-storage') -DestinationRoot (Join-Path $TestDrive 'crt-target')
         $p.CacheBytes | Should -Be 31074; $p.StagingBytes | Should -Be 31074; $p.TargetBytes | Should -Be 31074; $p.BackupBytes | Should -Be 0; $p.RollbackBytes | Should -Be 0; $p.RequiredWorkingBytes | Should -Be 62148
     }
@@ -18459,6 +18546,7 @@ Describe "Focused RC8 remediation contracts" {
             'docs\remediation\slices\TPM-OWNER-STATUS-GATE-001.md',
             'docs\remediation\slices\TPM-LIBRARY-HEALTH-TRANSACTION-001.md',
             'docs\remediation\slices\TPM-RESHADE-TEN-EFFECTS-001.md',
+            'docs\remediation\slices\TPM-RESHADE-TWENTY-EFFECTS-001.md',
             'docs\RESHADE-PROFILE-SELECTION-SPECIFICATION-INVENTORY.md',
             'docs\RESHADE-PROFILE-SELECTION-INVARIANT-INVENTORY.md',
             'docs\RESHADE-DGVOODOO2-AUTODOWNLOAD-SPECIFICATION-INVENTORY.md',
@@ -18494,6 +18582,7 @@ Describe "Focused RC8 remediation contracts" {
             'docs\remediation\slices\TPM-OWNER-STATUS-GATE-001.md',
             'docs\remediation\slices\TPM-LIBRARY-HEALTH-TRANSACTION-001.md',
             'docs\remediation\slices\TPM-RESHADE-TEN-EFFECTS-001.md',
+            'docs\remediation\slices\TPM-RESHADE-TWENTY-EFFECTS-001.md',
             'docs\RESHADE-PROFILE-SELECTION-SPECIFICATION-INVENTORY.md',
             'docs\RESHADE-PROFILE-SELECTION-INVARIANT-INVENTORY.md',
             'docs\RESHADE-DGVOODOO2-AUTODOWNLOAD-SPECIFICATION-INVENTORY.md',
@@ -21127,5 +21216,1323 @@ Describe 'RC8 owner-smoke transaction regressions' {
         $failureUpdates = @($script:pgCleanupProgress | Where-Object { -not $_.Complete -and $_.Label -eq 'PostgreSQL partial-install cleanup' })
         $failureUpdates.Count | Should -BeGreaterThan 1
         @($script:pgCleanupProgress | Where-Object { $_.Complete -and $_.Label -eq 'PostgreSQL partial-install cleanup' -and $_.Total -eq 0 -and $_.Current -eq $failureUpdates[-1].Current }).Count | Should -Be 1
+    }
+}
+
+# TPM-RESHADE-TWENTY-EFFECTS-001: 20-effect catalog integrity, real-HDR gate classification, retired profiles, honest previews, slider geometry,
+# description redraw, and live terminal/gallery selection sync (changes made AFTER the terminal prompt is already waiting).
+Describe "TPM-RESHADE-TWENTY-EFFECTS-001 catalog integrity" {
+    It "gives every effect a complete pin, host allowlist, safe paths, include/texture closure and licence obligations" {
+        $effects = @(Get-TpmReShadeEffectCatalog)
+        $effects.Count | Should -Be 20
+        @($effects.EffectId | Sort-Object -Unique).Count | Should -Be 20
+        foreach ($effect in $effects) {
+            $id = [string]$effect.EffectId
+            $effect.PinnedCommit | Should -Match '^[0-9a-f]{40}$' -Because $id
+            $effect.AllowedHosts | Should -Be @('raw.githubusercontent.com') -Because $id
+            $effect.AllowedPathPrefix | Should -Be ('/{0}/{1}/' -f $effect.Repository, $effect.PinnedCommit) -Because $id
+            @($effect.RelativeFiles).Count | Should -BeGreaterThan 0
+            @($effect.SHA256).Count | Should -Be @($effect.RelativeFiles).Count -Because $id
+            @($effect.ByteLengths).Count | Should -Be @($effect.RelativeFiles).Count -Because $id
+            foreach ($hash in @($effect.SHA256)) { $hash | Should -Match '^[0-9A-F]{64}$' -Because $id }
+            foreach ($length in @($effect.ByteLengths)) { [int64]$length | Should -BeGreaterThan 0 -Because $id }
+            $specs = @(Get-TpmReShadeApprovedEffectFiles -EffectId $id)
+            $fetched = @($specs | Where-Object { $null -eq $_.InlineBytes })
+            $destinations = @($specs | ForEach-Object { [string]$_.RelativePath })
+            @($destinations | Sort-Object -Unique).Count | Should -Be $destinations.Count -Because "$id destinations must be unique"
+            @($specs | ForEach-Object { [string]$_.CacheRelativePath } | Sort-Object -Unique).Count | Should -Be $specs.Count -Because "$id cache names must be unique"
+            foreach ($spec in $specs) {
+                $spec.RelativePath | Should -Match '^(Shaders|Textures)/' -Because $id
+                $spec.RelativePath | Should -Not -Match '(^|/)\.\.?(/|$)|\\|:' -Because $id
+                if ($null -eq $spec.InlineBytes) {
+                    $spec.Url | Should -Match '^https://raw\.githubusercontent\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/[0-9a-f]{40}/[A-Za-z0-9_./-]+$' -Because $id
+                    $spec.SHA256 | Should -Match '^[0-9A-F]{64}$' -Because $id
+                    [int64]$spec.ByteLength | Should -BeGreaterThan 0 -Because $id
+                }
+            }
+            # Include and texture closure: every named include/texture is a file the effect (or the shared TPM includes) provides.
+            $provided = @($destinations | ForEach-Object { [IO.Path]::GetFileName($_) })
+            foreach ($include in @($effect.RequiredIncludes)) { $provided | Should -Contain $include -Because "$id include $include" }
+            foreach ($texture in @($effect.RequiredTextures)) { $provided | Should -Contain $texture -Because "$id texture $texture" }
+            $notice = @($specs | Where-Object { $_.RelativePath -eq ('Shaders/TPM/Notices/{0}/NOTICE.txt' -f $id) })
+            $notice.Count | Should -Be 1 -Because $id
+            [Text.Encoding]::ASCII.GetString([byte[]]$notice[0].InlineBytes) | Should -Match ([regex]::Escape([string]$effect.License)) -Because $id
+            $status = Get-TpmReShadeEffectObligationStatus -Effect $effect
+            $status.Complete | Should -BeTrue -Because ("$id gaps: " + ($status.Gaps -join ','))
+            $effect.PerformanceClass | Should -Not -Match 'FAST|FASTEST' -Because 'no unverified performance claim'
+        }
+    }
+    It "distinguishes effect count from profile count and keeps Enhanced Arcade as an existing combined preset" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $single = @($profiles | Where-Object { @($_.Effects).Count -eq 1 })
+        $single.Count | Should -Be 20
+        @($profiles | Where-Object { @($_.Effects).Count -eq 0 }).ProfileId | Should -Be @('Original')
+        $combined = @($profiles | Where-Object { @($_.Effects).Count -gt 1 })
+        $combined.ProfileId | Should -Be @('EnhancedArcade')
+        @($combined[0].Effects) | Should -Be @('SweetFX.LumaSharpen', 'SweetFX.Vibrance')
+    }
+    It "reports obligation gaps and withholds an effect that lacks its licence basis" {
+        $good = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq 'Akgunter.CRTRoyale')[0]
+        $bad = $good | Select-Object *
+        $bad.NoticeFiles = @()
+        $bad.FileLicenses = @($bad.FileLicenses | ForEach-Object { 'REPOSITORY-LICENSE' })
+        (Get-TpmReShadeEffectObligationStatus -Effect $bad).Gaps | Should -Contain 'REPOSITORY_LICENSE_TEXT_NOT_COPIED'
+        $bad2 = $good | Select-Object *
+        $bad2.SourceObligations = ''
+        (Get-TpmReShadeEffectObligationStatus -Effect $bad2).Complete | Should -BeFalse
+        Mock Get-TpmReShadeEffectObligationStatus { $ok = ($Effect.EffectId -ne 'Akgunter.CRTRoyale'); [pscustomobject]@{ EffectId = $Effect.EffectId; Complete = $ok; MetadataComplete = $ok; ReviewComplete = $true; Offerable = $ok; Gaps = @('TEST'); OutstandingItems = @() } }
+        $visible = @(Get-TpmReShadeVisibleProfiles -HdrGate ([pscustomobject]@{ Visible = $true; Enabled = $true }) -IncludeUnreviewed)
+        $visible.ProfileId | Should -Not -Contain 'DetailedCrt'
+        $visible.ProfileId | Should -Contain 'ClassicCrt'
+    }
+    It "never stacks sharpening, colour or CRT alternatives and keeps the one compatible pair" {
+        foreach ($pair in @(
+            @('SweetFX.LumaSharpen', 'SweetFX.CAS'), @('SweetFX.CAS', 'CrosireLegacy.AdaptiveSharpen'),
+            @('Fubax.FilmicAnamorphSharpen', 'Glamarye.FastEffects'), @('SweetFX.Vibrance', 'CrosireLegacy.Colourfulness'),
+            @('FXShaders.CRT_Lottes', 'Akgunter.CRTRoyale'), @('Akgunter.CRTRoyale', 'RSRetroArch.CRTPi'),
+            @('FXShaders.CRT_Lottes', 'SweetFX.LumaSharpen'), @('Glamarye.FastEffects', 'SweetFX.SMAA'))) {
+            (Resolve-TpmReShadeEffectStack -EffectIds $pair).Valid | Should -BeFalse -Because ($pair -join ' + ')
+            (Resolve-TpmReShadeEffectStack -EffectIds @($pair[1], $pair[0])).Valid | Should -BeFalse -Because ($pair -join ' + ')
+        }
+        (Resolve-TpmReShadeEffectStack -EffectIds @('SweetFX.LumaSharpen', 'SweetFX.Vibrance')).Valid | Should -BeTrue
+    }
+    It "emits per-effect parameter sections for Fast Game Enhancement and rejects unapproved sections or values" {
+        $profile = Get-TpmReShadeProfile -ProfileId 'FastGameEnhancement'
+        $content = New-TpmReShadePresetContent -ProfileDefinition $profile
+        $content | Should -Match '(?m)^\[Glamayre_Fast_Effects\.fx\]\r?$'
+        $content | Should -Match '(?m)^ao_enabled=0\r?$'
+        $content | Should -Match '(?m)^dof_enabled=0\r?$'
+        # Flat settings come first; the section header follows every flat line.
+        $content.IndexOf('TechniqueSorting=') | Should -BeLessThan $content.IndexOf('[Glamayre_Fast_Effects.fx]')
+        (Test-TpmReShadePresetContent -Content $content -ProfileDefinition $profile) | Should -BeTrue
+        (Test-TpmReShadePresetContent -Content ($content + "[Evil.fx]`r`nx=1`r`n") -ProfileDefinition $profile) | Should -BeFalse
+        (Test-TpmReShadePresetContent -Content ($content + "x=1;calc`r`n") -ProfileDefinition $profile) | Should -BeFalse
+        (Test-TpmReShadePresetContent -Content ($content -replace 'ao_enabled=0', 'ao_enabled=..\x') -ProfileDefinition $profile) | Should -BeFalse
+        $plain = New-TpmReShadePresetContent -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'CleanSharp')
+        $plain | Should -Not -Match '(?m)^\['
+    }
+    It "writes TextureSearchPaths so texture-using effects find their lookup textures" {
+        $config = Update-TpmReShadeTutorialProgressText -Content (New-TpmReShadePresetContent -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'SmoothEdges'))
+        $config | Should -Match '(?m)^TextureSearchPaths=\.\\Textures,\.\\Textures\\SweetFX\r?$'
+        $config | Should -Match '(?m)^EffectSearchPaths=.*\.\\Shaders\\TPM'
+        $user = Update-TpmReShadeTutorialProgressText -Content "[GENERAL]`r`nTextureSearchPaths=C:\evil`r`n"
+        $user | Should -Not -Match 'C:\\evil'
+    }
+}
+
+Describe "TPM-RESHADE-TWENTY-EFFECTS-001 real-HDR gate" {
+    BeforeAll {
+        # display factory: Id, HDR-specific support, HDR-specific active state, policy limit, generic advanced-colour flag (informational only)
+        function New-TpmTestHdrDisplay { param([string]$Id, $Supported, $Active, $Limited = $false, $Generic = $true) [pscustomobject]@{ Id = $Id; IsPrimary = $null; HdrSupported = $Supported; HdrActive = $Active; PolicyLimited = $Limited; GenericAdvancedColor = $Generic; ActiveColorMode = '' } }
+        function New-TpmTestHdrEvidence { param([object[]]$Displays, [bool]$Known = $true) [pscustomobject]@{ Known = $Known; Reason = 'test'; Displays = @($Displays) } }
+    }
+    It "classifies the evidence fail-closed with no explicit target: <Name> -> <State>" -ForEach @(
+        @{ Name = 'unknown evidence'; State = 'HIDDEN'; Make = { New-TpmTestHdrEvidence -Known $false -Displays @() } }
+        @{ Name = 'no displays'; State = 'HIDDEN'; Make = { New-TpmTestHdrEvidence -Displays @() } }
+        @{ Name = 'display without identity'; State = 'HIDDEN'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay '' $true $true)) } }
+        @{ Name = 'two displays with one identity'; State = 'HIDDEN'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true), (New-TpmTestHdrDisplay 'a' $true $true)) } }
+        @{ Name = 'generic advanced colour on but no HDR support (wide-gamut SDR)'; State = 'HIDDEN'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $false $false $false $true)) } }
+        @{ Name = 'generic advanced colour on, HDR answer missing'; State = 'HIDDEN'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $null $null $false $true)) } }
+        @{ Name = 'policy-limited'; State = 'HIDDEN'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true $true)) } }
+        @{ Name = 'single display, HDR supported but not active'; State = 'VISIBLE_UNAVAILABLE'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $false)) } }
+        @{ Name = 'single display, HDR active'; State = 'ENABLED'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true)) } }
+        @{ Name = 'several displays, all HDR active'; State = 'ENABLED'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true), (New-TpmTestHdrDisplay 'B' $true $true)) } }
+        @{ Name = 'several displays, primary HDR but the other is SDR'; State = 'HIDDEN'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true), (New-TpmTestHdrDisplay 'B' $false $false)) } }
+        @{ Name = 'several displays, all support HDR but one is off'; State = 'VISIBLE_UNAVAILABLE'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true), (New-TpmTestHdrDisplay 'B' $true $false)) } }
+    ) {
+        (Get-TpmReShadeHdrGate -Evidence (& $Make)).State | Should -Be $State
+    }
+    It "validates an explicit target even with one display, and fails closed for unknown, stale or ambiguous targets: <Name> -> <State>" -ForEach @(
+        @{ Name = 'single display, matching target, HDR active'; State = 'ENABLED'; Target = 'A'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true)) } }
+        @{ Name = 'single display, target in different case'; State = 'ENABLED'; Target = 'a'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true)) } }
+        @{ Name = 'single HDR-active display, target names another display (stale)'; State = 'HIDDEN'; Target = 'Z'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true)) } }
+        @{ Name = 'several displays, target HDR active while the other is SDR'; State = 'ENABLED'; Target = 'A'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true), (New-TpmTestHdrDisplay 'B' $false $false)) } }
+        @{ Name = 'several displays, target is the SDR one while the other is HDR'; State = 'HIDDEN'; Target = 'B'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true), (New-TpmTestHdrDisplay 'B' $false $false)) } }
+        @{ Name = 'several displays, target supports HDR but it is off'; State = 'VISIBLE_UNAVAILABLE'; Target = 'B'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true), (New-TpmTestHdrDisplay 'B' $true $false)) } }
+        @{ Name = 'target not among the displays'; State = 'HIDDEN'; Target = 'C'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true), (New-TpmTestHdrDisplay 'B' $true $true)) } }
+        @{ Name = 'target identity duplicated (ambiguous)'; State = 'HIDDEN'; Target = 'A'; Make = { New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true), (New-TpmTestHdrDisplay 'A' $true $true)) } }
+        @{ Name = 'target given but evidence unknown'; State = 'HIDDEN'; Target = 'A'; Make = { New-TpmTestHdrEvidence -Known $false -Displays @() } }
+    ) {
+        (Get-TpmReShadeHdrGate -Evidence (& $Make) -TargetDisplayId $Target).State | Should -Be $State
+    }
+    It "names the evaluated displays and fingerprints the evidence so a changed answer is detectable" {
+        $on = New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true), (New-TpmTestHdrDisplay 'B' $true $true))
+        $off = New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true), (New-TpmTestHdrDisplay 'B' $true $true))
+        $changed = New-TpmTestHdrEvidence -Displays @((New-TpmTestHdrDisplay 'A' $true $true), (New-TpmTestHdrDisplay 'B' $true $false))
+        $g1 = Get-TpmReShadeHdrGate -Evidence $on
+        $g1.DisplayIds | Should -Be @('A', 'B')
+        $g1.Fingerprint | Should -Match '^[0-9a-f]{64}$'
+        (Get-TpmReShadeHdrGate -Evidence $off).Fingerprint | Should -Be $g1.Fingerprint
+        (Get-TpmReShadeHdrGate -Evidence $changed).Fingerprint | Should -Not -Be $g1.Fingerprint
+        (Get-TpmReShadeHdrGate -Evidence $on -TargetDisplayId 'A').DisplayIds | Should -Be @('A')
+        $g1.Reason | Should -Match 'does not show that the game itself renders HDR'
+    }
+    It "parses the native rows and treats unanswered HDR fields as unknown, never as HDR" {
+        $ok = ConvertFrom-TpmDisplayHdrRows -Rows @('OK', '\\?\DISPLAY#X#1|1|1|1|0|1|2', 'luid-7|0|?|?|?|1|?')
+        $ok.Known | Should -BeTrue
+        $ok.Displays[0].Id | Should -Be '\\?\DISPLAY#X#1'
+        $ok.Displays[0].HdrSupported | Should -BeTrue
+        $ok.Displays[0].HdrActive | Should -BeTrue
+        $ok.Displays[1].HdrSupported | Should -BeNullOrEmpty
+        (Get-TpmReShadeHdrGate -Evidence $ok).State | Should -Be 'HIDDEN'
+        (Get-TpmReShadeHdrGate -Evidence $ok -TargetDisplayId '\\?\DISPLAY#X#1').State | Should -Be 'ENABLED'
+        (ConvertFrom-TpmDisplayHdrRows -Rows @('ERR:5')).Known | Should -BeFalse
+        (ConvertFrom-TpmDisplayHdrRows -Rows @('OK', 'short|1')).Known | Should -BeFalse
+        (ConvertFrom-TpmDisplayHdrRows -Rows @()).Known | Should -BeFalse
+    }
+    It "hides both HDR profiles and the whole HDR group unless the gate is visible" {
+        $hidden = [pscustomobject]@{ State = 'HIDDEN'; Visible = $false; Enabled = $false; Reason = 'test' }
+        # -IncludeUnreviewed isolates the HDR rule from the licence-evidence rule
+        $visibleIds = @(Get-TpmReShadeVisibleProfiles -HdrGate $hidden -IncludeUnreviewed).ProfileId
+        $visibleIds | Should -Not -Contain 'HdrHighlightMapping'
+        $visibleIds | Should -Not -Contain 'HdrBlackLevelFix'
+        $visibleIds.Count | Should -Be 20
+        @(Get-TpmReShadeVisibleProfiles -HdrGate $hidden -IncludeUnreviewed | Where-Object { $_.Group -eq 'Hdr' }).Count | Should -Be 0
+        $enabled = [pscustomobject]@{ State = 'ENABLED'; Visible = $true; Enabled = $true; Reason = '' }
+        @(Get-TpmReShadeVisibleProfiles -HdrGate $enabled -IncludeUnreviewed | Where-Object { $_.Group -eq 'Hdr' }).Count | Should -Be 2
+        # with HDR on the two HDR effects are offered because their licence evidence is complete (the licence rule is independent of the HDR rule)
+        @(Get-TpmReShadeVisibleProfiles -HdrGate $enabled | Where-Object { $_.Group -eq 'Hdr' }).Count | Should -Be 2
+        # ...and an HDR effect without licence evidence is withheld even with HDR on
+        $real = Get-TpmReShadeLicenceEvidenceTable
+        $script:hdrCaseTable = @{}
+        foreach ($k in $real.Keys) { if ($k -ne 'Lilium.ToneMapping') { $script:hdrCaseTable[$k] = $real[$k] } }
+        Mock Get-TpmReShadeLicenceEvidenceTable { $script:hdrCaseTable }
+        @(Get-TpmReShadeVisibleProfiles -HdrGate $enabled | Where-Object { $_.Group -eq 'Hdr' }).ProfileId | Should -Not -Contain 'HdrHighlightMapping'
+    }
+    It "detection is unavailable (fail closed) when the display cannot be queried" {
+        Mock Initialize-TpmDisplayHdrNative { $false }
+        $evidence = Get-TpmDisplayHdrEvidence
+        $evidence.Known | Should -BeFalse
+        (Get-TpmReShadeHdrGate -Evidence $evidence).Visible | Should -BeFalse
+    }
+    It "refuses an HDR profile at deployment time unless HDR is active, before touching any file; the target identity reaches the gate" {
+        $script:gateTargets = New-Object System.Collections.Generic.List[string]
+        Mock Get-TpmReShadeHdrGate { [void]$script:gateTargets.Add([string]$TargetDisplayId); [pscustomobject]@{ State = 'HIDDEN'; Visible = $false; Enabled = $false; Reason = 'test'; Fingerprint = '' } }
+        Mock New-TpmStagingDirectory { throw 'must not stage' }
+        $result = Install-TpmReShadeProfileDeployment -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'HdrHighlightMapping') -GamePath (Join-Path $TestDrive 'Game.exe') -Doc (New-Object System.Xml.XmlDocument) -SourceDll (Join-Path $TestDrive 'ReShade64.dll') -CacheRoot (Join-Path $TestDrive 'cache') -OwnershipPath (Join-Path $TestDrive 'own.json') -HdrTargetDisplayId 'DISPLAY-7'
+        $result.Succeeded | Should -BeFalse
+        $result.State | Should -Be 'HDR_UNAVAILABLE'
+        $script:gateTargets[0] | Should -Be 'DISPLAY-7'
+        Should -Invoke New-TpmStagingDirectory -Times 0
+    }
+    It "refuses when the HDR evidence changed between selection and deployment, and does not refuse when it matches" {
+        Mock New-TpmStagingDirectory { throw 'must not stage' }
+        Mock Get-TpmReShadeHdrGate { [pscustomobject]@{ State = 'ENABLED'; Visible = $true; Enabled = $true; Reason = ''; Fingerprint = 'bbbb' } }
+        $common = @{ ProfileDefinition = (Get-TpmReShadeProfile -ProfileId 'HdrBlackLevelFix'); GamePath = (Join-Path $TestDrive 'Game.exe'); Doc = (New-Object System.Xml.XmlDocument); SourceDll = (Join-Path $TestDrive 'ReShade64.dll'); CacheRoot = (Join-Path $TestDrive 'cache'); OwnershipPath = (Join-Path $TestDrive 'own.json') }
+        $stale = Install-TpmReShadeProfileDeployment @common -ExpectedHdrFingerprint 'aaaa'
+        $stale.Succeeded | Should -BeFalse
+        $stale.Reason | Should -Be 'HDR_EVIDENCE_CHANGED'
+        $matching = Install-TpmReShadeProfileDeployment @common -ExpectedHdrFingerprint 'bbbb'
+        $matching.Reason | Should -Not -Be 'HDR_EVIDENCE_CHANGED'
+        $matching.Reason | Should -Not -Be 'HDR_UNAVAILABLE'
+    }
+    It "terminal chooser: hidden HDR shows no HDR heading or number; supported-but-off lists them unnumbered; HDR on numbers them" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $script:menuText = New-Object System.Collections.Generic.List[string]
+        Mock Write-Host { if ($null -ne $Object) { [void]$script:menuText.Add([string]$Object) } }
+        Mock Write-Log {}
+        foreach ($case in @(
+            @{ Gate = [pscustomobject]@{ State = 'HIDDEN'; Visible = $false; Enabled = $false; Reason = 'unknown' }; Heading = $false; Unavailable = $false }
+            @{ Gate = [pscustomobject]@{ State = 'VISIBLE_UNAVAILABLE'; Visible = $true; Enabled = $false; Reason = 'Windows HDR is turned off' }; Heading = $true; Unavailable = $true }
+            @{ Gate = [pscustomobject]@{ State = 'ENABLED'; Visible = $true; Enabled = $true; Reason = '' }; Heading = $true; Unavailable = $false }
+        )) {
+            $script:menuText.Clear()
+            Mock Get-TpmReShadeHdrGate { $case.Gate }.GetNewClosure()
+            Mock Read-TpmReShadeTerminalInput { 'B' }
+            $visible = @(Get-TpmReShadeVisibleProfiles -HdrGate $case.Gate -IncludeUnreviewed)
+            $null = Read-TpmReShadeTerminalProfile -Profiles $visible
+            $text = $script:menuText -join "`n"
+            ($text -match 'Actual HDR Setups Only') | Should -Be $case.Heading
+            ($text -match '\(unavailable\)') | Should -Be $case.Unavailable
+            $numberedHdr = [regex]::Matches($text, '(?m)^\s*\[\d+\][^\r\n]*HDR (Highlight|Black)').Count
+            if ($case.Gate.Enabled) { $numberedHdr | Should -Be 2 } else { $numberedHdr | Should -Be 0 }
+        }
+    }
+}
+
+Describe "TPM-RESHADE-TWENTY-EFFECTS-001 retired profiles and honest previews" {
+    It "reports retired profiles distinctly and never remaps or deletes saved choices" {
+        foreach ($id in @('Cartoon', 'FilmGrain', 'Monochrome', 'Sepia', 'Vignette')) {
+            $state = [pscustomobject]@{
+                Profiles = [pscustomobject]@{ 'Game1' = [pscustomobject]@{ ProfileId = $id; DefinitionVersion = '2'; EffectIds = @("SweetFX.$id"); VariantId = 'Default' } }
+                History = [pscustomobject]@{}; Favorites = @()
+            }
+            Mock Read-TpmReShadeState { $state }.GetNewClosure()
+            Mock Write-TpmReShadeState { throw 'a retired saved choice must never be rewritten or deleted' }
+            $remembered = Get-TpmReShadeRememberedProfile -GameId 'Game1'
+            $remembered.Found | Should -BeTrue
+            $remembered.Valid | Should -BeFalse
+            $remembered.Reason | Should -Be 'RETIRED_PROFILE'
+            $state.Profiles.Game1.ProfileId | Should -Be $id
+        }
+    }
+    It "has an approximation only for profiles that declare one; neutral, reference and unavailable previews are not forced to differ" {
+        foreach ($profile in @(Get-TpmReShadeProfiles)) {
+            $settings = Get-TpmReShadePreviewApproximationSettings -ProfileDefinition $profile
+            if ($profile.PreviewApproximation -eq 'APPROXIMATE') { $settings | Should -Not -BeNullOrEmpty -Because $profile.ProfileId }
+            else { $settings | Should -BeNullOrEmpty -Because $profile.ProfileId }
+        }
+        foreach ($id in @('SmoothEdges', 'SmoothGradients', 'ShadowMidtoneBalance', 'ExposureTint', 'ColorBalance')) {
+            (Get-TpmReShadeProfile -ProfileId $id).PreviewApproximation | Should -Be 'NEUTRAL'
+            (Get-TpmReShadeProfile -ProfileId $id).PreviewNote | Should -Match 'unchanged'
+        }
+        foreach ($id in @('HdrHighlightMapping', 'HdrBlackLevelFix')) {
+            (Get-TpmReShadeProfile -ProfileId $id).PreviewApproximation | Should -Be 'UNAVAILABLE'
+            (Get-TpmReShadeProfile -ProfileId $id).PreviewNote | Should -Match 'no honest approximation'
+        }
+        (Get-TpmReShadeProfile -ProfileId 'Original').PreviewApproximation | Should -Be 'REFERENCE'
+    }
+    It "gives the three CRT choices different approximations and labels every approximation as one" {
+        $crt = @('ClassicCrt', 'DetailedCrt', 'LightweightCrt') | ForEach-Object { (Get-TpmReShadePreviewApproximationSettings -ProfileDefinition (Get-TpmReShadeProfile -ProfileId $_)).Crt }
+        $crt | Should -Be @('Lottes', 'Royale', 'Pi')
+        foreach ($profile in @(Get-TpmReShadeProfiles | Where-Object { $_.PreviewApproximation -eq 'APPROXIMATE' })) {
+            (Get-TpmReShadeDescriptionText -ProfileDefinition $profile) | Should -Match 'approximation'
+        }
+        (Get-TpmReShadeDescriptionText -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'HdrBlackLevelFix')) | Should -Match 'Preview:'
+        (Get-TpmReShadeDescriptionText -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'Original')) | Should -Match 'untouched reference'
+    }
+    It "carries the Fast Game Enhancement depth caveat and the HDR requirement as visible notes" {
+        (Get-TpmReShadeProfile -ProfileId 'FastGameEnhancement').CompatibilityNote | Should -Match 'depth'
+        (Get-TpmReShadeProfile -ProfileId 'HdrHighlightMapping').CompatibilityNote | Should -Match 'HDR'
+        (Get-TpmReShadeProfile -ProfileId 'ClassicCrt').CompatibilityNote | Should -Not -Match 'every game'
+    }
+}
+
+Describe "TPM-RESHADE-TWENTY-EFFECTS-001 preview description and slider geometry" {
+    It "sets the description text, sizes the label from a real measurement, and paints it immediately (in that order)" {
+        $script:labelEvents = New-Object System.Collections.Generic.List[string]
+        $label = [pscustomobject]@{ Text = ''; Height = 84; ClientSize = [pscustomobject]@{ Width = 800 }; Padding = [pscustomobject]@{ Horizontal = 12; Vertical = 8 }; Font = [pscustomobject]@{ Size = 10 } }
+        $label | Add-Member -MemberType ScriptMethod -Name Refresh -Value { [void]$script:labelEvents.Add('Refresh:' + $this.Text.Length + ':' + $this.Height) }
+        $measure = { param($text, $font, $width) $perLine = [Math]::Max(1, [int][Math]::Floor($width / ($font.Size * 0.6))); $lines = 0; foreach ($l in ($text -split "`r?`n")) { $lines += [Math]::Max(1, [int][Math]::Ceiling($l.Length / [double]$perLine)) }; [pscustomobject]@{ Height = $lines * ([int]($font.Size * 1.6)) } }
+        $text = Get-TpmReShadeDescriptionText -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'FastGameEnhancement')
+        $state = [hashtable]::Synchronized(@{})
+        Set-TpmReShadeDescriptionLabel -Label $label -Text $text -Measure $measure -State $state
+        $label.Text | Should -Be $text
+        $expected = [int]((& $measure $text $label.Font (800 - 12)).Height) + 8 + 2
+        $label.Height | Should -Be ([Math]::Max(84, [Math]::Min(260, $expected)))
+        $script:labelEvents.Count | Should -Be 1
+        $script:labelEvents[0] | Should -Be ('Refresh:{0}:{1}' -f $text.Length, $label.Height)
+        $state['DescriptionText'] | Should -Be $text
+        $state['DescriptionWidth'] | Should -Be 800
+    }
+    It "follows the measurement (not a character estimate): narrower width and larger font give a taller label, capped" {
+        $long = (1..4 | ForEach-Object { 'word ' * 20 }) -join "`r`n"
+        $measure = { param($text, $font, $width) $perLine = [Math]::Max(1, [int][Math]::Floor($width / ($font.Size * 0.6))); $lines = 0; foreach ($l in ($text -split "`r?`n")) { $lines += [Math]::Max(1, [int][Math]::Ceiling($l.Length / [double]$perLine)) }; [pscustomobject]@{ Height = $lines * ([int]($font.Size * 1.6)) } }
+        $make = { param($w, $size) [pscustomobject]@{ Text = ''; Height = 84; ClientSize = [pscustomobject]@{ Width = $w }; Padding = [pscustomobject]@{ Horizontal = 12; Vertical = 8 }; Font = [pscustomobject]@{ Size = $size } } }
+        $wide = & $make 1200 10; $narrow = & $make 500 10; $big = & $make 1200 20
+        Set-TpmReShadeDescriptionHeight -Label $wide -Text $long -Measure $measure
+        Set-TpmReShadeDescriptionHeight -Label $narrow -Text $long -Measure $measure
+        Set-TpmReShadeDescriptionHeight -Label $big -Text $long -Measure $measure
+        $narrow.Height | Should -BeGreaterThan $wide.Height
+        $big.Height | Should -BeGreaterThan $wide.Height
+        $huge = & $make 100 30
+        Set-TpmReShadeDescriptionHeight -Label $huge -Text $long -Measure $measure
+        $huge.Height | Should -Be 260
+        $short = & $make 1200 10
+        Set-TpmReShadeDescriptionHeight -Label $short -Text 'short' -Measure $measure
+        $short.Height | Should -Be 84
+    }
+    It "keeps the maximum height instead of guessing when the text cannot be measured" {
+        $label = [pscustomobject]@{ Text = ''; Height = 84; ClientSize = [pscustomobject]@{ Width = 800 }; Padding = [pscustomobject]@{ Horizontal = 0; Vertical = 0 }; Font = [pscustomobject]@{ Size = 10 } }
+        Set-TpmReShadeDescriptionHeight -Label $label -Text 'anything' -Measure { $null }
+        $label.Height | Should -Be 260
+        $zero = [pscustomobject]@{ Text = ''; Height = 84; ClientSize = [pscustomobject]@{ Width = 0 }; Padding = [pscustomobject]@{ Horizontal = 0; Vertical = 0 }; Font = [pscustomobject]@{ Size = 10 } }
+        Set-TpmReShadeDescriptionHeight -Label $zero -Text 'anything' -Measure { [pscustomobject]@{ Height = 20 } }
+        $zero.Height | Should -Be 260
+    }
+    It "scales the height limits with DPI and grows the cap with the window: 200% DPI allows twice the baseline, a tall form allows 40% of its height" {
+        $label = [pscustomobject]@{ Text = ''; Height = 84; DeviceDpi = 192; ClientSize = [pscustomobject]@{ Width = 800 }; Padding = [pscustomobject]@{ Horizontal = 0; Vertical = 0 }; Font = [pscustomobject]@{ Size = 10 } }
+        $l = Get-TpmReShadeDescriptionHeightLimits -Label $label
+        $l.Minimum | Should -Be 168
+        $l.Maximum | Should -Be 520
+        $label | Add-Member -NotePropertyName Parent -NotePropertyValue ([pscustomobject]@{ ClientSize = [pscustomobject]@{ Height = 2000 } })
+        (Get-TpmReShadeDescriptionHeightLimits -Label $label).Maximum | Should -Be 800
+        $plain = [pscustomobject]@{ Font = [pscustomobject]@{ Size = 10 } }                          # no DPI / parent information: baseline
+        $b = Get-TpmReShadeDescriptionHeightLimits -Label $plain
+        $b.Minimum | Should -Be 84
+        $b.Maximum | Should -Be 260
+    }
+    It "reports overflow instead of silently clipping: needed height above the limit sets Clipped, the clipped flag and a tooltip with the full text" {
+        $script:tipCalls = New-Object System.Collections.Generic.List[object]
+        $tip = [pscustomobject]@{}
+        $tip | Add-Member -MemberType ScriptMethod -Name SetToolTip -Value { param($c, $t) [void]$script:tipCalls.Add($t) }
+        $state = [hashtable]::Synchronized(@{ DescriptionToolTip = $tip })
+        $label = [pscustomobject]@{ Text = ''; Height = 84; ClientSize = [pscustomobject]@{ Width = 300 }; Padding = [pscustomobject]@{ Horizontal = 0; Vertical = 0 }; Font = [pscustomobject]@{ Size = 10 } }
+        Mock Write-Log {}
+        $text = 'overflowing description text'
+        $over = Set-TpmReShadeDescriptionHeight -Label $label -Text $text -Measure { [pscustomobject]@{ Height = 400 } } -State $state
+        $over.Clipped | Should -BeTrue
+        $label.Height | Should -Be 260
+        $state['DescriptionClipped'] | Should -BeTrue
+        $state['DescriptionNeededHeight'] | Should -Be 402
+        $script:tipCalls[0] | Should -Be $text
+        Should -Invoke Write-Log -Times 1 -Exactly -ParameterFilter { $msg -like '*may not fit*' }
+        # fits: flag cleared, tooltip emptied
+        $fit = Set-TpmReShadeDescriptionHeight -Label $label -Text $text -Measure { [pscustomobject]@{ Height = 100 } } -State $state
+        $fit.Clipped | Should -BeFalse
+        $state['DescriptionClipped'] | Should -BeFalse
+        $script:tipCalls[1] | Should -Be ''
+        # unmeasurable: unknown fit is treated as possibly clipped (never reported as fitting)
+        $unknown = Set-TpmReShadeDescriptionHeight -Label $label -Text $text -Measure { $null } -State $state
+        $unknown.Clipped | Should -BeNullOrEmpty
+        $state['DescriptionClipped'] | Should -BeTrue
+        $script:tipCalls[2] | Should -Be $text
+    }
+    It "does not claim the approved descriptions always fit: every approved description is measured against the limits, and overflow is the handled case" {
+        # The measurement here is a deterministic stand-in (average glyph width), NOT the Windows renderer; it only shows how the decision logic
+        # behaves for every approved profile text across supported-looking widths. Real fit on Windows fonts/DPI stays on the Windows checklist.
+        $measure = { param($text, $font, $width) $perLine = [Math]::Max(1, [int][Math]::Floor($width / 7.0)); $lines = 0; foreach ($l in ($text -split "`r?`n")) { $lines += [Math]::Max(1, [int][Math]::Ceiling($l.Length / [double]$perLine)) }; [pscustomobject]@{ Height = $lines * 17 } }
+        $profiles = @(Get-TpmReShadeProfiles)
+        $profiles.Count | Should -Be 22
+        $worst = 0
+        foreach ($p in $profiles) {
+            $text = Get-TpmReShadeDescriptionText -ProfileDefinition $p
+            foreach ($width in 1000, 640) {
+                $label = [pscustomobject]@{ Text = ''; Height = 84; ClientSize = [pscustomobject]@{ Width = $width }; Padding = [pscustomobject]@{ Horizontal = 12; Vertical = 8 }; Font = [pscustomobject]@{ Size = 9 } }
+                $r = Set-TpmReShadeDescriptionHeight -Label $label -Text $text -Measure $measure
+                $r.Needed | Should -Not -BeNullOrEmpty
+                if ($r.Needed -gt $worst) { $worst = $r.Needed }
+                # the outcome is always one of the two explicit states, never an unreported cut
+                $r.Clipped | Should -Not -BeNullOrEmpty -Because $p.ProfileId
+                ($r.Height -le $r.Maximum) | Should -BeTrue
+                if ($r.Clipped) { $r.Needed | Should -BeGreaterThan $r.Maximum }
+                else { $r.Height | Should -BeGreaterOrEqual ([Math]::Min($r.Needed, $r.Maximum)) }
+            }
+        }
+        $worst | Should -BeGreaterThan 0
+    }
+    It "remeasures on a width change and on a DPI/font change, but not on a height-only change" {
+        $measure = { param($text, $font, $width) $perLine = [Math]::Max(1, [int][Math]::Floor($width / ($font.Size * 0.6))); [pscustomobject]@{ Height = [int][Math]::Ceiling($text.Length / [double]$perLine) * ([int]($font.Size * 1.6)) } }
+        $label = [pscustomobject]@{ Text = ''; Height = 84; ClientSize = [pscustomobject]@{ Width = 900 }; Padding = [pscustomobject]@{ Horizontal = 10; Vertical = 6 }; Font = [pscustomobject]@{ Size = 10 } }
+        $state = [hashtable]::Synchronized(@{ DescriptionLabel = $label; Closed = $false })
+        $text = 'x' * 1500
+        Set-TpmReShadeDescriptionLabel -Label $label -Text $text -Measure $measure -State $state
+        $first = $label.Height
+        (Update-TpmReShadeDescriptionLayout -State $state -Measure $measure) | Should -BeFalse     # same width: nothing to do (and no loop on our own height change)
+        $label.ClientSize = [pscustomobject]@{ Width = 700 }
+        (Update-TpmReShadeDescriptionLayout -State $state -Measure $measure) | Should -BeTrue
+        $label.Height | Should -BeGreaterThan $first
+        $second = $label.Height
+        $label.Font = [pscustomobject]@{ Size = 14 }                                                  # DPI scale change: same width, bigger font
+        (Update-TpmReShadeDescriptionLayout -State $state -Measure $measure) | Should -BeFalse
+        (Update-TpmReShadeDescriptionLayout -State $state -Measure $measure -Force) | Should -BeTrue
+        $label.Height | Should -BeGreaterThan $second
+        $state['Closed'] = $true
+        (Update-TpmReShadeDescriptionLayout -State $state -Measure $measure -Force) | Should -BeFalse
+    }
+    It "has no fixed character or line-count estimate left for the description height" {
+        $script:ProductionSource | Should -Not -Match 'Get-TpmReShadeDescriptionHeight\b'
+        $script:ProductionSource | Should -Not -Match '\$CharWidth|\$LineHeight\s*=\s*17'
+        $script:ProductionSource | Should -Match 'TextRenderer\]::MeasureText'
+        $body = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?\r?\nfunction Close-TpmReShadeProfileGallerySession').Value
+        $body | Should -Match 'DescriptionLabel\.Add_SizeChanged|\$descriptionLabel\.Add_SizeChanged\(\$descriptionLayoutHandler\)'
+        $body | Should -Match 'Add_DpiChanged\(\$descriptionDpiHandler\)'
+    }
+    It "paints the description before the heavy preview render in the gallery refresh (source order)" {
+        $body = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?\r?\nfunction Close-TpmReShadeProfileGallerySession').Value
+        $body.IndexOf('Set-TpmReShadeDescriptionLabel') | Should -BeGreaterThan 0
+        $body.IndexOf('Set-TpmReShadeDescriptionLabel') | Should -BeLessThan $body.IndexOf('Get-TpmReShadePreviewProcessedBitmap')
+        $body | Should -Not -Match '\$descriptionLabel\.Text\s*=\s*"Preview approximation'
+    }
+    It "computes the Zoom letterbox rectangle for wide, tall and exact windows" {
+        $wide = Get-TpmReShadeImageDisplayRectangle -ClientWidth 1600 -ClientHeight 600 -ImageWidth 960 -ImageHeight 540
+        $wide.Height | Should -Be 600
+        $wide.Width | Should -Be 1067
+        $wide.X | Should -Be 266
+        $wide.Y | Should -Be 0
+        $tall = Get-TpmReShadeImageDisplayRectangle -ClientWidth 800 -ClientHeight 900 -ImageWidth 960 -ImageHeight 540
+        $tall.Width | Should -Be 800
+        $tall.Height | Should -Be 450
+        $tall.Y | Should -Be 225
+        $exact = Get-TpmReShadeImageDisplayRectangle -ClientWidth 960 -ClientHeight 540 -ImageWidth 960 -ImageHeight 540
+        @($exact.X, $exact.Y, $exact.Width, $exact.Height) | Should -Be @(0, 0, 960, 540)
+        (Get-TpmReShadeImageDisplayRectangle -ClientWidth 0 -ClientHeight 10 -ImageWidth 960 -ImageHeight 540).Width | Should -Be 0
+    }
+    It "places the slider so the thumb centre spans exactly the displayed image at 0 and 100 (DPI <Scale>)" -ForEach @(
+        @{ Scale = '100%'; Inset = 10; Current = 300 }
+        @{ Scale = '125%'; Inset = 13; Current = 375 }
+        @{ Scale = '150%'; Inset = 15; Current = 450 }
+        @{ Scale = '200%'; Inset = 20; Current = 600 }
+    ) {
+        foreach ($window in @(@(1040, 600), @(1600, 600), @(700, 900))) {
+            $image = Get-TpmReShadeImageDisplayRectangle -ClientWidth $window[0] -ClientHeight $window[1] -ImageWidth 960 -ImageHeight 540
+            $placement = Get-TpmReShadeSliderPlacement -ImageRectangle $image -CurrentWidth $Current -ThumbCenterAtMin $Inset -ThumbCenterAtMax ($Current - $Inset) -HostLeft 0
+            $thumbAtMin = $placement.Left + $Inset
+            $thumbAtMax = $placement.Left + $Inset + ($placement.Width - (2 * $Inset))
+            $thumbAtMin | Should -Be $image.X
+            $thumbAtMax | Should -Be ($image.X + $image.Width)
+            # the 50 percent position is the middle of the drawn image
+            ($thumbAtMin + (($thumbAtMax - $thumbAtMin) / 2.0)) | Should -Be ($image.X + ($image.Width / 2.0))
+        }
+    }
+    It "Update-TpmReShadeSliderPlacement reserves the thumb inset, keeps both endpoint thumbs inside the slider row, and never throws" {
+        $script:padCalls = New-Object System.Collections.Generic.List[string]
+        Mock Set-TpmControlHorizontalPadding { $Control.Padding = [pscustomobject]@{ Left = $Left; Right = $Right }; [void]$script:padCalls.Add("$Left,$Right") }
+        Mock Write-Log {}
+        $thumbs = { param($s) @(10, ([int]$s.Width - 10)) }
+        foreach ($window in @(@(960, 540), @(1600, 600), @(700, 900), @(1040, 600))) {
+            $formWidth = $window[0]
+            $slider = [pscustomobject]@{ Left = 0; Width = 300; Minimum = 0; Maximum = 100; IsHandleCreated = $true }
+            $pictureHostFake = [pscustomobject]@{ Left = 0; Padding = [pscustomobject]@{ Left = 0; Right = 0 } }
+            $picture = [pscustomobject]@{ Left = 0; ClientSize = [pscustomobject]@{ Width = $formWidth; Height = $window[1] }; Parent = $pictureHostFake }
+            $sliderHost = [pscustomobject]@{ ClientSize = [pscustomobject]@{ Width = $formWidth } }
+            $state = [hashtable]::Synchronized(@{ Slider = $slider; Picture = $picture; PictureHost = $pictureHostFake; SliderHost = $sliderHost; PreviewCache = [pscustomobject]@{ Reference = [pscustomobject]@{ Width = 960; Height = 540 } }; Closed = $false })
+            # first pass: padding is reserved (the real layout then narrows the picture); simulate that layout
+            (Update-TpmReShadeSliderPlacement -State $state -MeasureThumb $thumbs) | Should -BeTrue
+            $pictureHostFake.Padding.Left | Should -Be 10
+            $pictureHostFake.Padding.Right | Should -Be 10
+            $picture.Left = 10
+            $picture.ClientSize = [pscustomobject]@{ Width = ($formWidth - 20); Height = $window[1] }
+            (Update-TpmReShadeSliderPlacement -State $state -MeasureThumb $thumbs) | Should -BeTrue
+            $image = Get-TpmReShadeImageDisplayRectangle -ClientWidth ($formWidth - 20) -ClientHeight $window[1] -ImageWidth 960 -ImageHeight 540
+            # thumb centres sit on the image edges (image coordinates are inside the padded picture)
+            ($slider.Left + 10) | Should -Be (10 + $image.X)
+            ($slider.Left + $slider.Width - 10) | Should -Be (10 + $image.X + $image.Width)
+            # both endpoint thumbs (half a thumb either side of the centres) stay inside the slider row
+            $slider.Left | Should -BeGreaterOrEqual 0
+            ($slider.Left + $slider.Width) | Should -BeLessOrEqual $formWidth
+            $state['SliderPlacementClipped'] | Should -BeFalse -Because "window $formWidth"
+        }
+        # closed, no cache, throwing or unusable measurement: false, no exception, nothing moved
+        $slider = [pscustomobject]@{ Left = 5; Width = 300; Minimum = 0; Maximum = 100; IsHandleCreated = $true }
+        $picture = [pscustomobject]@{ Left = 0; ClientSize = [pscustomobject]@{ Width = 800; Height = 450 } }
+        $state = [hashtable]::Synchronized(@{ Slider = $slider; Picture = $picture; PreviewCache = [pscustomobject]@{ Reference = [pscustomobject]@{ Width = 960; Height = 540 } }; Closed = $true })
+        (Update-TpmReShadeSliderPlacement -State $state -MeasureThumb $thumbs) | Should -BeFalse
+        $state['Closed'] = $false
+        { Update-TpmReShadeSliderPlacement -State $state -MeasureThumb { throw 'boom' } } | Should -Not -Throw
+        (Update-TpmReShadeSliderPlacement -State $state -MeasureThumb { throw 'boom' }) | Should -BeFalse
+        (Update-TpmReShadeSliderPlacement -State $state -MeasureThumb { @() }) | Should -BeFalse
+        (Update-TpmReShadeSliderPlacement -State ([hashtable]::Synchronized(@{})) -MeasureThumb $thumbs) | Should -BeFalse
+        $slider.Left | Should -Be 5
+    }
+    It "measures the thumb on a throwaway probe, rejects an inconsistent probe, and never touches the live slider" {
+        $live = [pscustomobject]@{ Minimum = 0; Maximum = 100; Value = 40; Width = 300; Left = 7 }
+        $geometry = @(21, 34, 8, 292)
+        $makeReading = { param($min, $max, $predicted, $now, $probeGeometry, $liveGeometry) [pscustomobject]@{ CenterAtMin = $min; CenterAtMax = $max; PredictedAtCurrent = $predicted; LiveCenterNow = $now; ProbeGeometry = $probeGeometry; LiveGeometry = $liveGeometry } }
+        # probe says min 10, max 290, predicts 122 at value 40; the live thumb really is at 122 -> accepted
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { & $makeReading 10 290 122 123 $geometry $geometry }) | Should -Be @(10, 290)
+        # live thumb at 150 while the probe predicts 122 (for example a DPI mismatch) -> no measurement, caller does not guess
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { & $makeReading 10 290 122 150 $geometry $geometry }) | Should -BeNullOrEmpty
+        # a probe that agrees only at the current value but has a different thumb size or channel (DPI/theme difference) is rejected: the
+        # midpoint match cannot prove the endpoints are the same
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { & $makeReading 10 290 122 123 @(11, 34, 8, 292) $geometry }) | Should -BeNullOrEmpty
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { & $makeReading 10 290 122 123 @(21, 17, 8, 292) $geometry }) | Should -BeNullOrEmpty
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { & $makeReading 10 290 122 123 @(21, 34, 20, 280) $geometry }) | Should -BeNullOrEmpty
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { & $makeReading 10 290 122 123 @(21, 34, 9, 291) $geometry }) | Should -Be @(10, 290)   # one pixel of rounding is tolerated
+        # no geometry from the probe or the live control, or an incomplete reading: nothing is accepted
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { & $makeReading 10 290 122 123 @() $geometry }) | Should -BeNullOrEmpty
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { [pscustomobject]@{ CenterAtMin = 10; CenterAtMax = 290 } }) | Should -BeNullOrEmpty
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { @(10, 290, 122, 123, $geometry, $geometry) }) | Should -BeNullOrEmpty   # the old positional form is not accepted
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { throw 'no handle' }) | Should -BeNullOrEmpty
+        $live.Value | Should -Be 40
+        $live.Left | Should -Be 7
+        # source: only the probe handle is moved (SETPOS without redraw); the live handle only gets read-only queries
+        $script:ProductionSource | Should -Match '\$Native\.ThumbCenters\(\$ProbeHandle'
+        $script:ProductionSource | Should -Not -Match '\$Native\.ThumbCenters\(\$Slider'
+        $script:ProductionSource | Should -Match 'SendMessage\(hwnd, TBM_SETPOS, IntPtr\.Zero'
+        $script:ProductionSource | Should -Not -Match 'SendMessage\(hwnd, TBM_SETPOS, \(IntPtr\)1'
+        $script:ProductionSource | Should -Match '\$Native\.ThumbCenterNow\(\$Slider\.Handle\)'
+        $script:ProductionSource | Should -Match '\$Native\.Geometry\(\$Slider\.Handle\)'
+        $script:ProductionSource | Should -Match 'TBM_GETCHANNELRECT = 0x041A'
+    }
+    It "builds the probe reading from native geometry with the exact production construction (stub native): geometry stays a flat four-element array and is accepted" {
+        # semantics check behind this test: wrapping a Geometry result as (,@($g)) inside @(...) gives a ONE-element nested array
+        $g = @(21, 34, 8, 292)
+        $nested = @(10, 290, 122, 123, (,@($g)), (,@($g)))
+        @($nested[4]).Count | Should -Be 1
+        (Test-TpmTrackBarGeometryMatch -ProbeGeometry $nested[4] -LiveGeometry $nested[5]) | Should -BeFalse -Because 'the nested construction can never match'
+        # the production construction with a stub of the native helper
+        $native = New-Object psobject
+        $native | Add-Member -MemberType ScriptMethod -Name ThumbCenters -Value { param($handle, $minimum, $maximum) @(10, 290) }
+        $native | Add-Member -MemberType ScriptMethod -Name ThumbCenterNow -Value { param($handle) 122 }
+        $native | Add-Member -MemberType ScriptMethod -Name Geometry -Value { param($handle) @(21, 34, 8, 292) }
+        $slider = [pscustomobject]@{ Minimum = 0; Maximum = 100; Value = 40; Handle = 11 }
+        $built = Get-TpmTrackBarProbeReading -Slider $slider -ProbeHandle 22 -Native $native
+        @($built.ProbeGeometry).Count | Should -Be 4
+        @($built.LiveGeometry).Count | Should -Be 4
+        $built.PredictedAtCurrent | Should -Be 122
+        (Test-TpmTrackBarGeometryMatch -ProbeGeometry $built.ProbeGeometry -LiveGeometry $built.LiveGeometry) | Should -BeTrue
+        (Measure-TpmTrackBarThumbCenters -Slider $slider -Probe { Get-TpmTrackBarProbeReading -Slider $slider -ProbeHandle 22 -Native $native }) | Should -Be @(10, 290)
+        # the same path rejects a stub whose live control has a different thumb size (a midpoint-only agreement)
+        $liveDifferent = New-Object psobject
+        $liveDifferent | Add-Member -MemberType ScriptMethod -Name ThumbCenters -Value { param($handle, $minimum, $maximum) @(10, 290) }
+        $liveDifferent | Add-Member -MemberType ScriptMethod -Name ThumbCenterNow -Value { param($handle) 122 }
+        $liveDifferent | Add-Member -MemberType ScriptMethod -Name Geometry -Value { param($handle) if ($handle -eq 11) { @(31, 34, 8, 292) } else { @(21, 34, 8, 292) } }
+        (Measure-TpmTrackBarThumbCenters -Slider $slider -Probe { Get-TpmTrackBarProbeReading -Slider $slider -ProbeHandle 22 -Native $liveDifferent }) | Should -BeNullOrEmpty
+        # the adapter used in production forwards to the static helper and exposes the three methods the reading needs
+        $adapter = New-TpmTrackBarNativeAdapter
+        foreach ($method in 'ThumbCenters', 'ThumbCenterNow', 'Geometry') { ($adapter | Get-Member -MemberType ScriptMethod).Name | Should -Contain $method }
+    }
+    It "reserves exactly the measured thumb inset on each side" {
+        Get-TpmReShadeSliderReserve -ThumbCenterAtMin 10 | Should -Be 10
+        Get-TpmReShadeSliderReserve -ThumbCenterAtMin 0 | Should -Be 0
+        Get-TpmReShadeSliderReserve -ThumbCenterAtMin -3 | Should -Be 0
+    }
+    It "uses one letterbox calculation for both the paint handler and the slider (source)" {
+        $paint = [regex]::Match($script:ProductionSource, '(?s)function New-TpmReShadePreviewPaintHandler \{.*?\r?\n\}\r?\n').Value
+        $paint | Should -Match 'Get-TpmReShadeImageDisplayRectangle'
+        $paint | Should -Not -Match '\[Math\]::Min\(\$canvas\.Width'
+        $body = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?\r?\nfunction Close-TpmReShadeProfileGallerySession').Value
+        $body | Should -Match 'SliderHost'
+        $body | Should -Match 'PictureHost'
+        $body | Should -Match 'Add_SizeChanged\(\$sliderPlacementHandler\)'
+        $body | Should -Match 'Add_DpiChanged\(\$sliderPlacementHandler\)'
+        $body | Should -Not -Match '\[void\]\$toolbar\.Controls\.Add\(\$slider\)'
+    }
+}
+
+Describe "TPM-RESHADE-TWENTY-EFFECTS-001 live terminal and gallery selection sync" {
+    BeforeEach {
+        $script:console = New-Object System.Collections.Generic.List[string]
+        Mock Write-TpmConsoleText { [void]$script:console.Add($Text) }
+        Mock Test-TpmConsoleInputRedirected { $false }
+        Mock Start-Sleep {}
+        Mock Write-Log {}
+        Mock Write-Host {}
+        Mock Get-TpmReShadeHdrGate { [pscustomobject]@{ State = 'HIDDEN'; Visible = $false; Enabled = $false; Reason = 'test' } }
+        $profiles = @(Get-TpmReShadeProfiles)
+        $script:session = [hashtable]::Synchronized(@{
+            Initialized = $true; Closed = $false; PreviewEnabled = $true; SelectedProfileId = 'Original'
+            Profiles = $profiles; ProfileSelector = $null; ProfileSelectorUpdating = $false; Refresh = { $true }
+        })
+    }
+    # A scripted console: each poll consumes one step. A step is $null (no key waiting), a string of keys to type, or a scriptblock to run
+    # (the gallery changing the selection) followed by no key. 'ENTER' completes the line.
+    BeforeAll {
+        function Set-TpmTestConsoleScript {
+            param([object[]]$Steps)
+            $script:steps = New-Object System.Collections.Generic.Queue[object]
+            foreach ($s in $Steps) { $script:steps.Enqueue($s) }
+            $script:pendingKeys = New-Object System.Collections.Generic.Queue[object]
+        }
+    }
+    It "announces a gallery change made while the prompt waits, keeps the partially typed text, and returns the typed line" {
+        $script:steps = New-Object System.Collections.Generic.Queue[object]
+        foreach ($s in @('1', { $script:session['SelectedProfileId'] = 'ClassicCrt' }, $null, '2', 'ENTER')) { $script:steps.Enqueue($s) }
+        $script:pendingKeys = New-Object System.Collections.Generic.Queue[object]
+        Mock Test-TpmConsoleKeyAvailable {
+            if ($script:pendingKeys.Count -gt 0) { return $true }
+            if ($script:steps.Count -eq 0) { return $false }
+            $next = $script:steps.Dequeue()
+            if ($next -is [scriptblock]) { & $next; return $false }
+            if ($null -eq $next) { return $false }
+            if ($next -eq 'ENTER') { [void]$script:pendingKeys.Enqueue([pscustomobject]@{ Key = [ConsoleKey]::Enter; KeyChar = [char]13 }); return $true }
+            foreach ($ch in $next.ToCharArray()) { [void]$script:pendingKeys.Enqueue([pscustomobject]@{ Key = [ConsoleKey]::D1; KeyChar = $ch }) }
+            return $true
+        }
+        Mock Read-TpmConsoleKey { $script:pendingKeys.Dequeue() }
+        $shown = @{ Id = 'Original' }
+        $selectable = @(Get-TpmReShadeProfiles | Where-Object { -not $_.RequiresHdr })
+        $session = $script:session
+        $onIdle = {
+            $live = [string]$session['SelectedProfileId']
+            if ($live -eq $shown.Id) { return $null }
+            $shown.Id = $live
+            return ('  Preview selection changed to {0}.' -f $live)
+        }.GetNewClosure()
+        $line = Read-TpmReShadeTerminalInput -Prompt '  Choice' -PumpPreviewMessages $true -OnIdle $onIdle
+        $line | Should -Be '12'
+        $joined = $script:console -join ''
+        $joined | Should -Match 'Preview selection changed to ClassicCrt'
+        # the prompt was redrawn with the already-typed '1' intact, then the user kept typing
+        $joined | Should -Match '  Choice: 1'
+        @($script:console | Where-Object { $_ -match 'Preview selection changed' }).Count | Should -Be 1
+    }
+    It "terminal chooser follows a gallery change that happens after the prompt is waiting, and U returns the latest choice" {
+        $script:steps = New-Object System.Collections.Generic.Queue[object]
+        foreach ($s in @($null, { $script:session['SelectedProfileId'] = 'ClassicCrt' }, $null, 'U', 'ENTER')) { $script:steps.Enqueue($s) }
+        $script:pendingKeys = New-Object System.Collections.Generic.Queue[object]
+        Mock Test-TpmConsoleKeyAvailable {
+            if ($script:pendingKeys.Count -gt 0) { return $true }
+            if ($script:steps.Count -eq 0) { return $false }
+            $next = $script:steps.Dequeue()
+            if ($next -is [scriptblock]) { & $next; return $false }
+            if ($null -eq $next) { return $false }
+            if ($next -eq 'ENTER') { [void]$script:pendingKeys.Enqueue([pscustomobject]@{ Key = [ConsoleKey]::Enter; KeyChar = [char]13 }); return $true }
+            foreach ($ch in $next.ToCharArray()) { [void]$script:pendingKeys.Enqueue([pscustomobject]@{ Key = [ConsoleKey]::U; KeyChar = $ch }) }
+            return $true
+        }
+        Mock Read-TpmConsoleKey { $script:pendingKeys.Dequeue() }
+        $result = Read-TpmReShadeTerminalProfile -Profiles @(Get-TpmReShadeProfiles) -DefaultProfileId 'Original' -PreviewSession $script:session
+        # displayed notice (display refresh) is asserted separately from the returned value
+        ($script:console -join '') | Should -Match 'Preview selection changed to \[14\] Classic Arcade CRT \[CRT Lottes\]'
+        $result.Cancelled | Should -BeFalse
+        $result.SelectedProfile.ProfileId | Should -Be 'ClassicCrt'
+    }
+    It "returns the latest canonical selection with U even when the display was never refreshed" {
+        Mock Test-TpmConsoleKeyAvailable { $false }
+        Mock Read-TpmReShadeTerminalInput { $script:session['SelectedProfileId'] = 'Levels'; 'U' }
+        $result = Read-TpmReShadeTerminalProfile -Profiles @(Get-TpmReShadeProfiles) -DefaultProfileId 'Original' -PreviewSession $script:session
+        $result.SelectedProfile.ProfileId | Should -Be 'Levels'
+    }
+    It "reports each of several rapid gallery changes at most once and settles on the newest" {
+        $script:steps = New-Object System.Collections.Generic.Queue[object]
+        foreach ($s in @({ $script:session['SelectedProfileId'] = 'Vivid' }, { $script:session['SelectedProfileId'] = 'Levels' }, { $script:session['SelectedProfileId'] = 'Levels' }, 'ENTER')) { $script:steps.Enqueue($s) }
+        $script:pendingKeys = New-Object System.Collections.Generic.Queue[object]
+        Mock Test-TpmConsoleKeyAvailable {
+            if ($script:pendingKeys.Count -gt 0) { return $true }
+            if ($script:steps.Count -eq 0) { return $false }
+            $next = $script:steps.Dequeue()
+            if ($next -is [scriptblock]) { & $next; return $false }
+            [void]$script:pendingKeys.Enqueue([pscustomobject]@{ Key = [ConsoleKey]::Enter; KeyChar = [char]13 }); return $true
+        }
+        Mock Read-TpmConsoleKey { $script:pendingKeys.Dequeue() }
+        $shown = @{ Id = 'Original' }
+        $session = $script:session
+        $onIdle = { $live = [string]$session['SelectedProfileId']; if ($live -eq $shown.Id) { return $null }; $shown.Id = $live; return ('changed to ' + $live) }.GetNewClosure()
+        $null = Read-TpmReShadeTerminalInput -Prompt '  Choice' -PumpPreviewMessages $true -OnIdle $onIdle
+        @($script:console | Where-Object { $_ -match 'changed to' }).Count | Should -Be 2
+        $shown.Id | Should -Be 'Levels'
+    }
+    It "does not poll a closed gallery for idle notices and keeps the final preview choice precedence" {
+        $script:session['Closed'] = $true
+        $script:session['SelectedProfileId'] = 'Vivid'
+        Mock Test-TpmConsoleKeyAvailable { $false }
+        Mock Read-TpmReShadeTerminalInput { param($Prompt, $PumpPreviewMessages, $OnIdle) $script:idleResult = if ($OnIdle) { & $OnIdle } else { 'none' }; 'U' }
+        $result = Read-TpmReShadeTerminalProfile -Profiles @(Get-TpmReShadeProfiles) -DefaultProfileId 'Original' -PreviewSession $script:session
+        $script:idleResult | Should -BeNullOrEmpty
+        $result.SelectedProfile.ProfileId | Should -Be 'Vivid'
+    }
+    It "B and N after a gallery change cancel or skip without writing any file" {
+        $before = @(Get-ChildItem -LiteralPath $TestDrive -Recurse -Force | ForEach-Object FullName)
+        $session = $script:session
+        foreach ($key in @('B', 'N')) {
+            $session['SelectedProfileId'] = 'Original'
+            Mock Read-TpmReShadeTerminalInput { $session['SelectedProfileId'] = 'ClassicCrt'; $key }.GetNewClosure()
+            $result = Read-TpmReShadeTerminalProfile -Profiles @(Get-TpmReShadeProfiles) -DefaultProfileId 'Original' -PreviewSession $script:session
+            $result.Cancelled | Should -BeTrue
+            $result.SelectedProfile | Should -BeNullOrEmpty
+        }
+        @(Get-ChildItem -LiteralPath $TestDrive -Recurse -Force | ForEach-Object FullName) | Should -Be $before
+    }
+    It "an idle-poll failure never breaks the waiting prompt" {
+        $script:steps = New-Object System.Collections.Generic.Queue[object]
+        foreach ($s in @($null, 'ENTER')) { $script:steps.Enqueue($s) }
+        $script:pendingKeys = New-Object System.Collections.Generic.Queue[object]
+        Mock Test-TpmConsoleKeyAvailable {
+            if ($script:pendingKeys.Count -gt 0) { return $true }
+            if ($script:steps.Count -eq 0) { return $false }
+            $next = $script:steps.Dequeue()
+            if ($null -eq $next) { return $false }
+            [void]$script:pendingKeys.Enqueue([pscustomobject]@{ Key = [ConsoleKey]::Enter; KeyChar = [char]13 }); return $true
+        }
+        Mock Read-TpmConsoleKey { $script:pendingKeys.Dequeue() }
+        (Read-TpmReShadeTerminalInput -Prompt '  Choice' -PumpPreviewMessages $true -OnIdle { throw 'poll failed' }) | Should -Be ''
+    }
+}
+
+Describe "TPM-RESHADE-TWENTY-EFFECTS-001 live selection display in the terminal (virtual console)" {
+    BeforeAll {
+        # A small virtual console: rows of text, a cursor, a scrolling window. The real chooser and the real input loop write to it.
+        function New-TpmVirtualConsole {
+            param([int]$Width = 100, [int]$Height = 200)
+            @{ Width = $Width; Height = $Height; Rows = (New-Object System.Collections.Generic.List[string]); Row = 0; Col = 0; Writes = 0; SetCalls = 0; FailSetOnCall = 0; SimulatedWidth = $Width }
+        }
+        function Add-TpmVirtualConsoleText {
+            param($Console, [string]$Text)
+            foreach ($ch in $Text.ToCharArray()) {
+                while ($Console.Rows.Count -le $Console.Row) { [void]$Console.Rows.Add('') }
+                if ($ch -eq "`n") { $Console.Row++; $Console.Col = 0; continue }
+                if ($ch -eq "`r") { $Console.Col = 0; continue }
+                if ($ch -eq "`b") { if ($Console.Col -gt 0) { $Console.Col-- }; continue }
+                if ($Console.Col -ge $Console.Width) { $Console.Row++; $Console.Col = 0; while ($Console.Rows.Count -le $Console.Row) { [void]$Console.Rows.Add('') } }
+                $line = $Console.Rows[$Console.Row].PadRight($Console.Col)
+                $tail = if ($line.Length -gt $Console.Col + 1) { $line.Substring($Console.Col + 1) } else { '' }
+                $Console.Rows[$Console.Row] = $line.Substring(0, $Console.Col) + [string]$ch + $tail
+                $Console.Col++
+            }
+            while ($Console.Rows.Count -le $Console.Row) { [void]$Console.Rows.Add('') }
+        }
+        function Get-TpmVirtualConsoleTop { param($Console) [Math]::Max(0, $Console.Row - $Console.Height + 1) }
+        function Find-TpmVirtualConsoleRow { param($Console, [string]$Pattern) $hits = @(for ($i = 0; $i -lt $Console.Rows.Count; $i++) { if ($Console.Rows[$i] -match $Pattern) { $i } }); $hits }
+        function Install-TpmVirtualConsoleMocks {
+            Mock Write-TpmConsoleText { $script:vc.Writes++; Add-TpmVirtualConsoleText -Console $script:vc -Text $Text }
+            Mock Write-Host { $script:vc.Writes++; Add-TpmVirtualConsoleText -Console $script:vc -Text ([string]$Object + $(if ($NoNewline) { '' } else { "`n" })) }
+            Mock Get-TpmConsoleCursorPosition { [pscustomobject]@{ Left = $script:vc.Col; Top = $script:vc.Row } }
+            Mock Set-TpmConsoleCursorPosition {
+                $script:vc.SetCalls++
+                if ($script:vc.FailSetOnCall -gt 0 -and $script:vc.SetCalls -eq $script:vc.FailSetOnCall) { throw 'simulated cursor failure' }
+                $script:vc.Col = $Left; $script:vc.Row = $Top
+            }
+            Mock Get-TpmConsoleMetrics { [pscustomobject]@{ Width = $script:vc.SimulatedWidth; Top = (Get-TpmVirtualConsoleTop -Console $script:vc); Height = $script:vc.Height; BufferHeight = 100000 } }
+            Mock Test-TpmConsoleInputRedirected { $false }
+            Mock Start-Sleep {}
+            Mock Write-Log {}
+            # If the scripted keys run out the input loop falls back to Read-HostSafe; end the chooser cleanly and let the test see it.
+            Mock Read-HostSafe { $script:exhausted = $true; 'B' }
+            Mock Get-TpmReShadeHdrGate { [pscustomobject]@{ State = 'HIDDEN'; Visible = $false; Enabled = $false; Reason = 'test'; Fingerprint = '' } }
+        }
+        # Script steps: $null = idle poll, 'text' = typed characters, 'ENTER', 'BS' = backspace, scriptblock = run (e.g. the gallery changes
+        # the selection or a snapshot is taken) and then poll.
+        function Set-TpmVirtualConsoleScript {
+            param([object[]]$Steps)
+            $script:steps = New-Object System.Collections.Generic.Queue[object]
+            foreach ($s in $Steps) { $script:steps.Enqueue($s) }
+            $script:pendingKeys = New-Object System.Collections.Generic.Queue[object]
+            Mock Test-TpmConsoleKeyAvailable {
+                if ($script:pendingKeys.Count -gt 0) { return $true }
+                if ($script:steps.Count -eq 0) { throw 'virtual console script exhausted' }
+                $next = $script:steps.Dequeue()
+                if ($next -is [scriptblock]) { & $next; return $false }
+                if ($null -eq $next) { return $false }
+                if ($next -eq 'ENTER') { [void]$script:pendingKeys.Enqueue([pscustomobject]@{ Key = [ConsoleKey]::Enter; KeyChar = [char]13 }); return $true }
+                if ($next -eq 'BS') { [void]$script:pendingKeys.Enqueue([pscustomobject]@{ Key = [ConsoleKey]::Backspace; KeyChar = [char]8 }); return $true }
+                foreach ($ch in $next.ToCharArray()) { [void]$script:pendingKeys.Enqueue([pscustomobject]@{ Key = [ConsoleKey]::D1; KeyChar = $ch }) }
+                return $true
+            }
+            Mock Read-TpmConsoleKey { $script:pendingKeys.Dequeue() }
+        }
+        function New-TpmLiveTestSession {
+            $profiles = @(Get-TpmReShadeProfiles | Where-Object { -not $_.RequiresHdr })
+            [hashtable]::Synchronized(@{ Initialized = $true; Closed = $false; PreviewEnabled = $true; SelectedProfileId = 'Original'; Profiles = $profiles; ProfileSelector = $null; ProfileSelectorUpdating = $false; Refresh = { $true } })
+        }
+        function Get-TpmStarRows { param($Console) @(Find-TpmVirtualConsoleRow -Console $Console -Pattern '^\s*\[\d+\] \*') }
+    }
+    BeforeEach { $script:exhausted = $false; $script:vc = New-TpmVirtualConsole; Install-TpmVirtualConsoleMocks; $script:snap = @{}; $script:session = New-TpmLiveTestSession }
+    AfterEach { $script:exhausted | Should -BeFalse -Because 'the scripted console must not run out of steps' }
+
+    It "updates the menu marker and the Current selection line in place before Enter, with no announcement and no new lines" {
+        $snap = $script:snap
+        Set-TpmVirtualConsoleScript -Steps @($null, '1', { $script:session['SelectedProfileId'] = 'ClassicCrt' }, $null, {
+            $c = $script:vc
+            $script:snap.Stars = @(Get-TpmStarRows -Console $c | ForEach-Object { $c.Rows[$_].TrimEnd() })
+            $script:snap.Current = @(Find-TpmVirtualConsoleRow -Console $c -Pattern '^\s*Current selection:' | ForEach-Object { $c.Rows[$_].TrimEnd() })
+            $script:snap.RowCount = $c.Rows.Count
+            $script:snap.Prompt = $c.Rows[$c.Row].TrimEnd()
+            $script:snap.Cursor = @($c.Col, $c.Row)
+            $script:snap.Announced = @(Find-TpmVirtualConsoleRow -Console $c -Pattern 'Preview selection changed').Count
+        }, 'BS', 'U', 'ENTER')
+        $rowsBefore = $null
+        $result = Read-TpmReShadeTerminalProfile -Profiles @($script:session['Profiles']) -DefaultProfileId 'Original' -PreviewSession $script:session
+        $script:snap.Stars.Count | Should -Be 1
+        $script:snap.Stars[0] | Should -Match '\[14\] \* Classic Arcade CRT \[CRT Lottes\]'
+        $script:snap.Current.Count | Should -Be 1
+        $script:snap.Current[0] | Should -Be '  Current selection: Classic Arcade CRT [CRT Lottes]'
+        $script:snap.Announced | Should -Be 0
+        # partial input is still on the prompt line and the cursor sits right after it (end-of-input; no mid-line cursor)
+        $script:snap.Prompt | Should -Be '  Choice: 1'
+        $script:snap.Cursor[0] | Should -Be ('  Choice: 1'.Length)
+        $result.SelectedProfile.ProfileId | Should -Be 'ClassicCrt'
+    }
+    It "does not print a new menu for a transient change (the screen only grows by the typed input)" {
+        Set-TpmVirtualConsoleScript -Steps @($null, { $script:snap.Before = $script:vc.Rows.Count }, { $script:session['SelectedProfileId'] = 'Levels' }, $null, { $script:snap.After = $script:vc.Rows.Count }, 'U', 'ENTER')
+        $null = Read-TpmReShadeTerminalProfile -Profiles @($script:session['Profiles']) -DefaultProfileId 'Original' -PreviewSession $script:session
+        $script:snap.After | Should -Be $script:snap.Before
+    }
+    It "keeps partial input through backspace and continued typing while the display is updated" {
+        Set-TpmVirtualConsoleScript -Steps @('12', { $script:session['SelectedProfileId'] = 'Vivid' }, $null, 'BS', { $script:session['SelectedProfileId'] = 'Levels' }, $null, '3', {
+            $c = $script:vc
+            $script:snap.Prompt = $c.Rows[$c.Row].TrimEnd()
+            $script:snap.Stars = @(Get-TpmStarRows -Console $c | ForEach-Object { $c.Rows[$_].TrimEnd() })
+            $script:snap.Current = @(Find-TpmVirtualConsoleRow -Console $c -Pattern '^\s*Current selection:' | ForEach-Object { $c.Rows[$_].TrimEnd() })
+        }, 'ENTER', 'B', 'ENTER')
+        $null = Read-TpmReShadeTerminalProfile -Profiles @($script:session['Profiles']) -DefaultProfileId 'Original' -PreviewSession $script:session
+        $script:snap.Prompt | Should -Be '  Choice: 13'
+        $script:snap.Stars.Count | Should -Be 1
+        $script:snap.Stars[0] | Should -Match 'Black/White Point Adjustment \[Levels\]'
+        $script:snap.Current[0] | Should -Be '  Current selection: Black/White Point Adjustment [Levels]'
+    }
+    It "follows rapid selection changes: exactly one marker at a time, the last change wins" {
+        $names = 'Vivid', 'ContrastCurves', 'Levels', 'ClassicCrt', 'FilmicSharpen'
+        $steps = @(); foreach ($n in $names) { $steps += [scriptblock]::Create("`$script:session['SelectedProfileId'] = '$n'"); $steps += $null }
+        $steps += { $c = $script:vc; $script:snap.Stars = @(Get-TpmStarRows -Console $c | ForEach-Object { $c.Rows[$_].TrimEnd() }); $script:snap.Rows = $c.Rows.Count; $script:snap.Writes = $c.Writes }
+        $steps += @('U', 'ENTER')
+        Set-TpmVirtualConsoleScript -Steps $steps
+        $result = Read-TpmReShadeTerminalProfile -Profiles @($script:session['Profiles']) -DefaultProfileId 'Original' -PreviewSession $script:session
+        $script:snap.Stars.Count | Should -Be 1
+        $script:snap.Stars[0] | Should -Match 'Filmic Sharpen'
+        $result.SelectedProfile.ProfileId | Should -Be 'FilmicSharpen'
+    }
+    It "falls back to a single announcement when the in-place update fails, keeps the typed text, and later changes still update in place" {
+        $script:vc.FailSetOnCall = 1
+        Set-TpmVirtualConsoleScript -Steps @('1', { $script:session['SelectedProfileId'] = 'ClassicCrt' }, $null, { $script:snap.Fallback = @(Find-TpmVirtualConsoleRow -Console $script:vc -Pattern 'Preview selection changed to \[14\]').Count; $script:snap.PromptAfterFallback = $script:vc.Rows[$script:vc.Row].TrimEnd() }, { $script:session['SelectedProfileId'] = 'Levels' }, $null, { $c = $script:vc; $script:snap.Stars = @(Get-TpmStarRows -Console $c | ForEach-Object { $c.Rows[$_].TrimEnd() }); $script:snap.Current = @(Find-TpmVirtualConsoleRow -Console $c -Pattern '^\s*Current selection:' | ForEach-Object { $c.Rows[$_].TrimEnd() }); $script:snap.Announcements = @(Find-TpmVirtualConsoleRow -Console $c -Pattern 'Preview selection changed').Count }, 'BS', 'U', 'ENTER')
+        $result = Read-TpmReShadeTerminalProfile -Profiles @($script:session['Profiles']) -DefaultProfileId 'Original' -PreviewSession $script:session
+        $script:snap.Fallback | Should -Be 1
+        $script:snap.PromptAfterFallback | Should -Be '  Choice: 1'
+        # the second change used the in-place path even though an announcement line now sits between the menu and the prompt
+        $script:snap.Announcements | Should -Be 1
+        $script:snap.Stars.Count | Should -Be 1
+        $script:snap.Stars[0] | Should -Match 'Levels'
+        $script:snap.Current[0] | Should -Be '  Current selection: Black/White Point Adjustment [Levels]'
+        $result.SelectedProfile.ProfileId | Should -Be 'Levels'
+    }
+    It "updates only what is on screen when the menu is taller than the window, and never throws" {
+        $script:vc = New-TpmVirtualConsole -Height 24
+        Set-TpmVirtualConsoleScript -Steps @($null, { $script:session['SelectedProfileId'] = 'FastGameEnhancement' }, $null, { $c = $script:vc; $script:snap.Current = @(Find-TpmVirtualConsoleRow -Console $c -Pattern '^\s*Current selection:' | ForEach-Object { $c.Rows[$_].TrimEnd() }); $script:snap.Stars = @(Get-TpmStarRows -Console $c | ForEach-Object { $c.Rows[$_].TrimEnd() }); $script:snap.Rows = $c.Rows.Count }, 'U', 'ENTER')
+        { $null = Read-TpmReShadeTerminalProfile -Profiles @($script:session['Profiles']) -DefaultProfileId 'Original' -PreviewSession $script:session } | Should -Not -Throw
+        $script:snap.Current[0] | Should -Be '  Current selection: Fast Game Enhancement [Glamayre Fast Effects]'
+        # the Original marker is far above the window and was not touched; the on-screen markers are consistent with what was written
+        $script:snap.Stars.Count | Should -BeGreaterOrEqual 1
+    }
+    It "rebuilds the layout after a console resize (no permanent announcement fallback): the new choice shows in the rebuilt menu and Current selection, typed input survives, later changes update in place" {
+        Set-TpmVirtualConsoleScript -Steps @($null, '1', { $script:vc.Width = 60; $script:vc.SimulatedWidth = 60; $script:session['SelectedProfileId'] = 'Levels' }, $null, {
+            $c = $script:vc
+            $script:snap.OldCurrentRow = @(Find-TpmVirtualConsoleRow -Console $c -Pattern '^\s*Current selection:')[0]
+            $script:snap.CurrentRows = @(Find-TpmVirtualConsoleRow -Console $c -Pattern '^\s*Current selection:')
+            $script:snap.Announced = @(Find-TpmVirtualConsoleRow -Console $c -Pattern 'Preview selection changed').Count
+            $script:snap.Prompt = $c.Rows[$c.Row].TrimEnd()
+            $script:snap.Cursor = @($c.Col, $c.Row)
+            $script:snap.RowsAfterRebuild = $c.Rows.Count
+        }, { $script:session['SelectedProfileId'] = 'Vivid' }, $null, {
+            $c = $script:vc
+            $script:snap.RowsAfterSecond = $c.Rows.Count
+            $script:snap.CurrentRows2 = @(Find-TpmVirtualConsoleRow -Console $c -Pattern '^\s*Current selection:')
+            $script:snap.LastCurrent = $c.Rows[$script:snap.CurrentRows2[-1]].TrimEnd()
+            $script:snap.StarsAfterOld = @(Get-TpmStarRows -Console $c | Where-Object { $_ -gt $script:snap.OldCurrentRow } | ForEach-Object { $c.Rows[$_].TrimEnd() })
+            $script:snap.Announced2 = @(Find-TpmVirtualConsoleRow -Console $c -Pattern 'Preview selection changed').Count
+            $script:snap.Prompt2 = $c.Rows[$c.Row].TrimEnd()
+        }, 'BS', 'U', 'ENTER')
+        $result = Read-TpmReShadeTerminalProfile -Profiles @($script:session['Profiles']) -DefaultProfileId 'Original' -PreviewSession $script:session
+        # the rebuild printed one fresh block after the old one (so there are two Current selection rows), no announcement line
+        $script:snap.CurrentRows.Count | Should -Be 2
+        $script:snap.Announced | Should -Be 0
+        $script:snap.Prompt | Should -Be '  Choice: 1'
+        $script:snap.Cursor[0] | Should -Be ('  Choice: 1'.Length)
+        # the second change (Vivid) went in place into the REBUILT block: no new rows, no announcement, one marker, matching Current selection
+        $script:snap.RowsAfterSecond | Should -Be $script:snap.RowsAfterRebuild
+        $script:snap.Announced2 | Should -Be 0
+        $script:snap.LastCurrent | Should -Match '^  Current selection: Vivid'
+        $script:snap.StarsAfterOld.Count | Should -Be 1
+        $script:snap.StarsAfterOld[0] | Should -Match 'Vivid'
+        $script:snap.Prompt2 | Should -Be '  Choice: 1'
+        $result.SelectedProfile.ProfileId | Should -Be 'Vivid'
+    }
+    It "rebuilds the layout when a new selection moves Current selection from one row to two at an unchanged console width" {
+        $script:vc = New-TpmVirtualConsole -Width 40
+        $w = $script:vc.SimulatedWidth
+        Set-TpmVirtualConsoleScript -Steps @($null, '1', { $script:session['SelectedProfileId'] = 'Levels' }, $null, {
+            $c = $script:vc
+            $script:snap.WidthNow = $c.SimulatedWidth
+            $script:snap.Announced = @(Find-TpmVirtualConsoleRow -Console $c -Pattern 'Preview selection changed').Count
+            $script:snap.CurrentRows = @(Find-TpmVirtualConsoleRow -Console $c -Pattern '^\s*Current selection:')
+            $script:snap.LastCurrent = ($c.Rows[$script:snap.CurrentRows[-1]] + $c.Rows[$script:snap.CurrentRows[-1] + 1]).TrimEnd()
+            $script:snap.Prompt = $c.Rows[$c.Row].TrimEnd()
+            $script:snap.Cursor = @($c.Col, $c.Row)
+            $script:snap.OldCurrentRow = $script:snap.CurrentRows[0]
+            $script:snap.StarsAfterOld = @(Get-TpmStarRows -Console $c | Where-Object { $_ -gt $script:snap.OldCurrentRow })
+            $script:snap.Rows = $c.Rows.Count
+        }, 'BS', 'U', 'ENTER')
+        $result = Read-TpmReShadeTerminalProfile -Profiles @($script:session['Profiles']) -DefaultProfileId 'Original' -PreviewSession $script:session
+        # the initial label ("Original", 29 characters) fits one row at width 40; the new one (58 characters) needs two, and the width never changed
+        $script:snap.WidthNow | Should -Be 40
+        $script:snap.Announced | Should -Be 0
+        $script:snap.CurrentRows.Count | Should -Be 2
+        $script:snap.LastCurrent | Should -Be '  Current selection: Black/White Point Adjustment [Levels]'
+        $script:snap.StarsAfterOld.Count | Should -Be 1
+        $script:snap.Prompt | Should -Be '  Choice: 1'
+        $script:snap.Cursor[0] | Should -Be ('  Choice: 1'.Length)
+        $result.SelectedProfile.ProfileId | Should -Be 'Levels'
+    }
+    It "clears the whole previously occupied Current selection region: width 60, old text 70 characters, new text 65 characters (same two rows)" {
+        $script:vc = New-TpmVirtualConsole -Width 60
+        Mock Get-TpmReShadeProfileDisplayLabel { 'N' * 44 }
+        $oldText = '  Current selection: ' + ('O' * 49)
+        $oldText.Length | Should -Be 70
+        $lines = @(
+            [pscustomobject]@{ Text = $oldText; Color = 'Yellow'; ProfileId = ''; Kind = 'Current' },
+            [pscustomobject]@{ Text = '  Choose: x'; Color = 'White'; ProfileId = ''; Kind = 'Choose' }
+        )
+        foreach ($l in $lines) { Add-TpmVirtualConsoleText -Console $script:vc -Text ($l.Text + "`n") }
+        Add-TpmVirtualConsoleText -Console $script:vc -Text '  Choice: '
+        $layout = New-TpmReShadeTerminalLayout -Lines $lines -Width 60
+        $result = Update-TpmReShadeTerminalSelectionInPlace -Layout $layout -NewProfile ([pscustomobject]@{ ProfileId = 'X' }) -Prompt '  Choice' -BufferLength 0
+        $result.Updated | Should -BeTrue
+        $newText = '  Current selection: ' + ('N' * 44)
+        $newText.Length | Should -Be 65
+        $script:vc.Rows[0] | Should -Be $newText.Substring(0, 60)
+        $script:vc.Rows[1].TrimEnd() | Should -Be $newText.Substring(60)
+        $script:vc.Rows[1] | Should -Not -Match 'O'
+        $script:vc.Rows[1].Length | Should -BeLessOrEqual 60
+        # the row below (Choose) was not touched
+        $script:vc.Rows[2].TrimEnd() | Should -Be '  Choose: x'
+    }
+    It "describes the supported cursor behaviour in the source: input is end-of-line only" {
+        $body = [regex]::Match($script:ProductionSource, '(?s)function Read-TpmReShadeTerminalInput \{.*?\r?\n\}\r?\n').Value
+        $body | Should -Match 'cursor to the end of the input'
+        $body | Should -Not -Match 'LeftArrow|RightArrow'
+    }
+}
+
+# TPM-RESHADE-TWENTY-EFFECTS-001: notice and licence-copy bytes through the real acquisition, staging, promotion, repeat-run and rollback path.
+# The shader and licence-copy downloads are replaced by deterministic bytes (the pinned upstream hashes cannot be matched offline); the TPM
+# NOTICE.txt and shared-include bytes are the real inline bytes. Everything else (Acquire, integrity checks, transactional promote,
+# ownership manifest, rollback) is the production code.
+# The five deployment tests below are skipped off Windows: the production containment check (Test-PathInside) and the effect-root checks use
+# Windows path separators, so a real deployment cannot run on Linux. They were exercised on Linux only through a scratch-only separator shim.
+Describe "TPM-RESHADE-TWENTY-EFFECTS-001 notice and licence bytes through deployment" {
+    BeforeAll {
+        function Get-TpmTestDeployedFile {
+            param([string]$Root, [string]$RelativePath)
+            # Windows-style relative paths become file names with backslashes on a non-Windows host; match either spelling.
+            $want = ($RelativePath -replace '\\', '/').ToLowerInvariant()
+            Get-ChildItem -LiteralPath $Root -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object { (($_.FullName.Substring($Root.Length)) -replace '\\', '/').ToLowerInvariant().TrimStart('/') -eq $want } | Select-Object -First 1
+        }
+        function Initialize-TpmNoticeFixture {
+            param([string]$EffectId)
+            $real = @(Get-TpmReShadeApprovedEffectFiles -EffectId $EffectId)
+            $script:fixtureBytes = @{}
+            $synth = foreach ($spec in $real) {
+                $copy = $spec | Select-Object *
+                if ($null -eq $spec.InlineBytes) {
+                    $bytes = [Text.Encoding]::ASCII.GetBytes('FIXTURE-BYTES:' + $spec.Role + ':' + $spec.RelativePath + ':' + ('x' * 17))
+                    $sha = [Security.Cryptography.SHA256]::Create()
+                    try { $copy.SHA256 = ([BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '') } finally { $sha.Dispose() }
+                    $copy.ByteLength = [int64]$bytes.Length
+                    $script:fixtureBytes[[string]$spec.Url] = $bytes
+                }
+                $copy
+            }
+            $script:synthSpecs = @($synth)
+        }
+    }
+    BeforeEach {
+        Mock Write-TpmCompactExtractionProgress {}
+        Mock Write-Log {}
+        Mock Write-Host {}
+        Mock Test-TpmNoReparsePath { $true }
+        $script:downloadLog = New-Object System.Collections.Generic.List[string]
+        $script:dropUrl = ''
+        $script:corruptUrl = ''
+        Mock Invoke-TpmDownloadWebRequest {
+            [void]$script:downloadLog.Add([string]$DownloadUrl)
+            if ($script:dropUrl -and $DownloadUrl -eq $script:dropUrl) { throw 'simulated missing file (404)' }
+            $bytes = $script:fixtureBytes[[string]$DownloadUrl]
+            if ($null -eq $bytes) { throw "no fixture bytes for $DownloadUrl" }
+            if ($script:corruptUrl -and $DownloadUrl -eq $script:corruptUrl) { $bytes = [Text.Encoding]::ASCII.GetBytes('CORRUPTED') }
+            [IO.File]::WriteAllBytes($TempPath, $bytes)
+        }
+    }
+    It "stages the TPM NOTICE.txt and every licence copy with their exact bytes and caches the verified downloads" {
+        Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
+        Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
+        $root = Join-Path $TestDrive 'acq-clean'; $cache = Join-Path $root 'cache'; $stage = Join-Path $root 'stage'
+        $result = Acquire-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -StagingRoot $stage
+        @($result.Files).Count | Should -Be @($script:synthSpecs).Count
+        $notices = @($script:synthSpecs | Where-Object Role -eq 'LicenseNotice')
+        $notices.Count | Should -BeGreaterOrEqual 3
+        foreach ($spec in $script:synthSpecs) {
+            $staged = @($result.Files | Where-Object { $_.RelativePath -eq $spec.RelativePath })
+            $staged.Count | Should -Be 1 -Because $spec.RelativePath
+            $expected = if ($null -ne $spec.InlineBytes) { [byte[]]$spec.InlineBytes } else { [byte[]]$script:fixtureBytes[[string]$spec.Url] }
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($staged[0].Path)) | Should -Be ([Convert]::ToBase64String($expected)) -Because $spec.RelativePath
+        }
+        # the TPM notice carries the effect, licence and obligation text it is generated from
+        $tpmNotice = @($notices | Where-Object { $null -ne $_.InlineBytes -and $_.RelativePath -like '*NOTICE.txt' })[0]
+        $noticeText = [Text.Encoding]::ASCII.GetString([byte[]]$tpmNotice.InlineBytes)
+        $noticeText | Should -Match 'SweetFX.SMAA'
+        $noticeText | Should -Match 'MIT'
+        $noticeText | Should -Match 'LICENSE-SMAA-project|SMAA'
+        @($script:downloadLog).Count | Should -Be @($script:synthSpecs | Where-Object { $null -eq $_.InlineBytes }).Count
+    }
+    It "serves a repeat acquisition from the verified cache with identical bytes and no new downloads" {
+        Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
+        Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
+        $root = Join-Path $TestDrive 'acq-repeat'; $cache = Join-Path $root 'cache'
+        $first = Acquire-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -StagingRoot (Join-Path $root 'stage1')
+        $downloads = @($script:downloadLog).Count
+        $second = Acquire-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -StagingRoot (Join-Path $root 'stage2')
+        @($script:downloadLog).Count | Should -Be $downloads
+        $fetchedPaths = @($script:synthSpecs | Where-Object { $null -eq $_.InlineBytes } | ForEach-Object { [string]$_.RelativePath })
+        foreach ($file in @($second.Files | Where-Object { [string]$_.RelativePath -in $fetchedPaths })) { $file.FromCache | Should -BeTrue -Because $file.RelativePath }
+        foreach ($a in @($first.Files)) {
+            $bFile = @($second.Files | Where-Object { $_.RelativePath -eq $a.RelativePath })[0]
+            (Get-FileHash -LiteralPath $bFile.Path -Algorithm SHA256).Hash | Should -Be (Get-FileHash -LiteralPath $a.Path -Algorithm SHA256).Hash -Because $a.RelativePath
+        }
+    }
+    It "rejects a corrupted cached licence copy and fetches it again" {
+        Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
+        Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
+        $root = Join-Path $TestDrive 'acq-corrupt-cache'; $cache = Join-Path $root 'cache'
+        $null = Acquire-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -StagingRoot (Join-Path $root 'stage1')
+        $licence = @($script:synthSpecs | Where-Object { $_.Role -eq 'LicenseNotice' -and $null -eq $_.InlineBytes })[0]
+        $cached = @(Get-ChildItem -LiteralPath $cache -Recurse -File | Where-Object { $_.Name -like ('Notice-' + [IO.Path]::GetFileName(($licence.RelativePath -replace '\\', '/')) + '*') -or $_.Name -eq ('Notice-' + [IO.Path]::GetFileName(($licence.RelativePath -replace '\\', '/'))) })[0]
+        $cached | Should -Not -BeNullOrEmpty
+        [IO.File]::WriteAllText($cached.FullName, 'tampered cache')
+        $before = @($script:downloadLog | Where-Object { $_ -eq $licence.Url }).Count
+        $again = Acquire-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -StagingRoot (Join-Path $root 'stage2')
+        @($script:downloadLog | Where-Object { $_ -eq $licence.Url }).Count | Should -Be ($before + 1)
+        $stagedLicence = @($again.Files | Where-Object { $_.RelativePath -eq $licence.RelativePath })[0]
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($stagedLicence.Path)) | Should -Be ([Convert]::ToBase64String([byte[]]$script:fixtureBytes[[string]$licence.Url]))
+    }
+    It "fails acquisition when a required licence copy is missing upstream or its bytes are corrupt, delivering nothing" {
+        foreach ($mode in @('missing', 'corrupt')) {
+            Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
+            Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
+            $licence = @($script:synthSpecs | Where-Object { $_.Role -eq 'LicenseNotice' -and $null -eq $_.InlineBytes })[0]
+            if ($mode -eq 'missing') { $script:dropUrl = [string]$licence.Url; $script:corruptUrl = '' } else { $script:corruptUrl = [string]$licence.Url; $script:dropUrl = '' }
+            $root = Join-Path $TestDrive ('acq-fail-' + $mode)
+            $outcome = $null
+            try { $outcome = Acquire-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot (Join-Path $root 'cache') -StagingRoot (Join-Path $root 'stage') } catch { $outcome = $_.Exception.Message }
+            $outcome | Should -BeOfType [string] -Because "$mode must throw, not return a file set"
+            $outcome | Should -Match 'acquisition failed|mismatch' -Because $mode
+        }
+    }
+    It "deploys the TPM NOTICE.txt and every licence copy with their exact bytes, records them as owned, and is a no-op on the repeat run" -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+        Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
+        Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
+        $root = Join-Path $TestDrive 'notice-clean'; $dest = Join-Path $root 'ReShade'; $cache = Join-Path $root 'cache'; $own = Join-Path $root 'ownership.json'
+        $result = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
+        $result.Succeeded | Should -BeTrue
+        $notices = @($script:synthSpecs | Where-Object Role -eq 'LicenseNotice')
+        $notices.Count | Should -BeGreaterOrEqual 3        # SweetFX LICENSE copy, SMAA project LICENSE copy, TPM NOTICE.txt
+        foreach ($spec in $script:synthSpecs) {
+            $file = Get-TpmTestDeployedFile -Root $dest -RelativePath $spec.RelativePath
+            $file | Should -Not -BeNullOrEmpty -Because $spec.RelativePath
+            $expected = if ($null -ne $spec.InlineBytes) { [byte[]]$spec.InlineBytes } else { [byte[]]$script:fixtureBytes[[string]$spec.Url] }
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($file.FullName)) | Should -Be ([Convert]::ToBase64String($expected)) -Because $spec.RelativePath
+        }
+        $noticeText = [Text.Encoding]::ASCII.GetString([byte[]](@($notices | Where-Object { $_.RelativePath -like '*NOTICE.txt' })[0].InlineBytes))
+        $noticeText | Should -Match 'SweetFX.SMAA'
+        $noticeText | Should -Match 'MIT'
+        $manifest = Get-Content -LiteralPath $own -Raw | ConvertFrom-Json
+        foreach ($spec in $notices) { @($manifest.Files | Where-Object { ($_.DestinationPath -replace '\\', '/') -like ('*' + ($spec.RelativePath -replace '\\', '/')) }).Count | Should -Be 1 -Because $spec.RelativePath }
+        # repeat run: nothing to change, bytes identical, no new downloads needed beyond the cache check
+        $before = @($script:synthSpecs | ForEach-Object { (Get-FileHash -LiteralPath (Get-TpmTestDeployedFile -Root $dest -RelativePath $_.RelativePath).FullName -Algorithm SHA256).Hash })
+        $repeat = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
+        $repeat.State | Should -Be 'NO_OP'
+        $after = @($script:synthSpecs | ForEach-Object { (Get-FileHash -LiteralPath (Get-TpmTestDeployedFile -Root $dest -RelativePath $_.RelativePath).FullName -Algorithm SHA256).Hash })
+        $after | Should -Be $before
+    }
+    It "repairs a deleted or altered notice file on the next run" -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+        Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
+        Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
+        $root = Join-Path $TestDrive 'notice-repair'; $dest = Join-Path $root 'ReShade'; $cache = Join-Path $root 'cache'; $own = Join-Path $root 'ownership.json'
+        $null = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
+        $licence = @($script:synthSpecs | Where-Object { $_.Role -eq 'LicenseNotice' -and $null -eq $_.InlineBytes })[0]
+        $tpmNotice = @($script:synthSpecs | Where-Object { $_.Role -eq 'LicenseNotice' -and $null -ne $_.InlineBytes })[0]
+        Remove-Item -LiteralPath (Get-TpmTestDeployedFile -Root $dest -RelativePath $licence.RelativePath).FullName -Force
+        [IO.File]::WriteAllText((Get-TpmTestDeployedFile -Root $dest -RelativePath $tpmNotice.RelativePath).FullName, 'tampered notice')
+        $repair = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
+        $repair.Succeeded | Should -BeTrue
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes((Get-TpmTestDeployedFile -Root $dest -RelativePath $licence.RelativePath).FullName)) | Should -Be ([Convert]::ToBase64String([byte[]]$script:fixtureBytes[[string]$licence.Url]))
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes((Get-TpmTestDeployedFile -Root $dest -RelativePath $tpmNotice.RelativePath).FullName)) | Should -Be ([Convert]::ToBase64String([byte[]]$tpmNotice.InlineBytes))
+    }
+    It "fails before any mutation when a required licence copy is missing upstream, or its bytes are corrupt" -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+        foreach ($mode in @('missing', 'corrupt')) {
+            Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
+            Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
+            $licence = @($script:synthSpecs | Where-Object { $_.Role -eq 'LicenseNotice' -and $null -eq $_.InlineBytes })[0]
+            if ($mode -eq 'missing') { $script:dropUrl = [string]$licence.Url; $script:corruptUrl = '' } else { $script:corruptUrl = [string]$licence.Url; $script:dropUrl = '' }
+            $root = Join-Path $TestDrive ('notice-fail-' + $mode); $dest = Join-Path $root 'ReShade'; $cache = Join-Path $root 'cache'; $own = Join-Path $root 'ownership.json'
+            { Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own } | Should -Throw -Because $mode
+            Test-Path -LiteralPath $dest | Should -BeFalse -Because $mode
+            Test-Path -LiteralPath $own | Should -BeFalse -Because $mode
+        }
+    }
+    It "rolls a fresh install back completely (notice files included) when promotion fails part-way" -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+        Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
+        Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
+        $root = Join-Path $TestDrive 'notice-rollback'; $dest = Join-Path $root 'ReShade'; $cache = Join-Path $root 'cache'; $own = Join-Path $root 'ownership.json'
+        $result = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own -FaultStage 'AfterFirstPromotion'
+        $result.Succeeded | Should -BeFalse
+        foreach ($spec in $script:synthSpecs) {
+            $found = if (Test-Path -LiteralPath $dest) { Get-TpmTestDeployedFile -Root $dest -RelativePath $spec.RelativePath } else { $null }
+            $found | Should -BeNullOrEmpty -Because $spec.RelativePath
+        }
+        Test-Path -LiteralPath $own | Should -BeFalse
+    }
+    It "restores previous notice bytes when a later run fails part-way" -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+        Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
+        Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
+        $root = Join-Path $TestDrive 'notice-restore'; $dest = Join-Path $root 'ReShade'; $cache = Join-Path $root 'cache'; $own = Join-Path $root 'ownership.json'
+        $null = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
+        $tpmNotice = @($script:synthSpecs | Where-Object { $_.Role -eq 'LicenseNotice' -and $null -ne $_.InlineBytes })[0]
+        $noticeFile = (Get-TpmTestDeployedFile -Root $dest -RelativePath $tpmNotice.RelativePath).FullName
+        [IO.File]::WriteAllText($noticeFile, 'older notice')
+        $preOwn = [Convert]::ToBase64String([IO.File]::ReadAllBytes($own))
+        $failed = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own -FaultStage 'AfterFirstPromotion'
+        $failed.Succeeded | Should -BeFalse
+        [IO.File]::ReadAllText($noticeFile) | Should -Be 'older notice'
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($own)) | Should -Be $preOwn
+    }
+    It "derives readiness for all twenty effects from the same verification evidence (no approval label, no fixed list of offerable effects)" {
+        $inventory = @(Get-TpmReShadeObligationReviewInventory)
+        $inventory.Count | Should -Be 20
+        $table = Get-TpmReShadeLicenceEvidenceTable
+        $table.Count | Should -Be 20
+        foreach ($effect in @(Get-TpmReShadeEffectCatalog)) {
+            $row = @($inventory | Where-Object EffectId -eq $effect.EffectId)[0]
+            $row.MetadataComplete | Should -BeTrue -Because $effect.EffectId
+            $evidence = $table[[string]$effect.EffectId]
+            $evidence | Should -Not -BeNullOrEmpty -Because $effect.EffectId
+            # the record is bound to the effect's current pins and covers every pinned row
+            $evidence.PinDigest | Should -Be (Get-TpmReShadeEffectPinDigest -Effect $effect) -Because $effect.EffectId
+            $evidence.PinnedRowsVerified | Should -Be $evidence.PinnedRows -Because $effect.EffectId
+            $evidence.PinnedRows | Should -Be @(Get-TpmReShadeApprovedEffectFiles -EffectId $effect.EffectId).Count -Because $effect.EffectId
+            $evidence.HeaderBasisVerified | Should -Be $evidence.HeaderBasisFiles -Because $effect.EffectId
+            @($evidence.ActiveUnresolvedIncludes).Count | Should -Be 0 -Because $effect.EffectId
+            ($evidence.IncludeStatementsResolved + @($evidence.InactiveIncludes).Count) | Should -Be $evidence.IncludeStatementsChecked -Because $effect.EffectId
+            $effect.ObligationReview.ReviewedBy | Should -Not -Match 'Owner|ten-effect|approval' -Because ($effect.EffectId + ': earlier approval is not licensing evidence')
+            $row.OutstandingItems.Count | Should -Be 0 -Because $effect.EffectId
+            $row.Offerable | Should -BeTrue -Because $effect.EffectId
+        }
+        # the earlier five are held to exactly the same record as the later fifteen
+        foreach ($id in 'SweetFX.LumaSharpen', 'SweetFX.Vibrance', 'FXShaders.CRT_Lottes', 'SweetFX.Curves', 'SweetFX.Levels', 'SweetFX.SMAA') {
+            $effect = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq $id)[0]
+            $effect.ObligationReview.Reference | Should -Be (@(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq 'Prod80.ColorBalance')[0]).ObligationReview.Reference
+        }
+        $hidden = [pscustomobject]@{ State = 'HIDDEN'; Visible = $false; Enabled = $false; Reason = 'test' }
+        @(Get-TpmReShadeVisibleProfiles -HdrGate $hidden).Count | Should -Be 20
+        @(Get-TpmReShadeVisibleProfiles -HdrGate $hidden -IncludeUnreviewed).Count | Should -Be 20
+        $visible = [pscustomobject]@{ State = 'ENABLED'; Visible = $true; Enabled = $true; Reason = 'test' }
+        @(Get-TpmReShadeVisibleProfiles -HdrGate $visible).Count | Should -Be 22
+    }
+    It "withholds an effect whose evidence is missing, stale or incomplete, with a specific reason, and keeps it in the review inventory" {
+        $real = Get-TpmReShadeLicenceEvidenceTable
+        $cases = @(
+            @{ Name = 'missing record'; Id = 'SweetFX.SMAA'; Edit = { param($table) $table.Remove('SweetFX.SMAA') }; Expect = 'NO_EVIDENCE_RECORD' }
+            @{ Name = 'stale digest'; Id = 'SweetFX.CAS'; Edit = { param($table) $table['SweetFX.CAS'] = $table['SweetFX.CAS'] | Select-Object *; $table['SweetFX.CAS'].PinDigest = ('0' * 64) }; Expect = 'EVIDENCE_STALE' }
+            @{ Name = 'unverified bytes'; Id = 'CrosireSlim.Deband'; Edit = { param($table) $table['CrosireSlim.Deband'] = $table['CrosireSlim.Deband'] | Select-Object *; $table['CrosireSlim.Deband'].PinnedRowsVerified = 1 }; Expect = 'PINNED_BYTES_UNVERIFIED' }
+            @{ Name = 'unverified header'; Id = 'Prod80.ColorBalance'; Edit = { param($table) $table['Prod80.ColorBalance'] = $table['Prod80.ColorBalance'] | Select-Object *; $table['Prod80.ColorBalance'].HeaderBasisVerified = 0 }; Expect = 'FILE_NOTICE_UNVERIFIED' }
+            @{ Name = 'unresolved active include'; Id = 'SweetFX.Levels'; Edit = { param($table) $table['SweetFX.Levels'] = $table['SweetFX.Levels'] | Select-Object *; $table['SweetFX.Levels'].ActiveUnresolvedIncludes = @('Shaders/SweetFX/Levels.fx: missing.fxh'); $table['SweetFX.Levels'].IncludeStatementsChecked = 3 }; Expect = 'DEPENDENCY_UNRESOLVED' }
+            @{ Name = 'unaccounted include statements'; Id = 'SweetFX.Levels'; Edit = { param($table) $table['SweetFX.Levels'] = $table['SweetFX.Levels'] | Select-Object *; $table['SweetFX.Levels'].IncludeStatementsChecked = 9 }; Expect = 'INCLUDE_RECORD_INCONSISTENT' }
+            @{ Name = 'inactive include whose condition is not false'; Id = 'Lilium.ToneMapping'; Edit = { param($table) $r = $table['Lilium.ToneMapping'] | Select-Object *; $first = $r.InactiveIncludes[0] | Select-Object *; $first.Conditions = @('#if (SHOW_ADAPTIVE_MAX_NITS == YES) => true (evaluated: 2 == 2)'); $r.InactiveIncludes = @($first, $r.InactiveIncludes[1]); $table['Lilium.ToneMapping'] = $r }; Expect = 'INACTIVE_INCLUDE_RECORD_STALE' }
+            @{ Name = 'inactive include recorded against different bytes'; Id = 'Lilium.ToneMapping'; Edit = { param($table) $r = $table['Lilium.ToneMapping'] | Select-Object *; $first = $r.InactiveIncludes[0] | Select-Object *; $first.IncluderSha256 = ('0' * 64); $r.InactiveIncludes = @($first, $r.InactiveIncludes[1]); $table['Lilium.ToneMapping'] = $r }; Expect = 'INACTIVE_INCLUDE_RECORD_STALE' }
+            @{ Name = 'repository licence copy not verified'; Id = 'SweetFX.Tonemap'; Edit = { param($table) $table['SweetFX.Tonemap'] = $table['SweetFX.Tonemap'] | Select-Object *; $table['SweetFX.Tonemap'].RepositoryLicenseCopyVerified = $false }; Expect = 'REPOSITORY_LICENSE_COPY_UNVERIFIED' }
+        )
+        foreach ($case in $cases) {
+            $script:caseTable = @{}
+            foreach ($k in $real.Keys) { $script:caseTable[$k] = $real[$k] }
+            & $case.Edit $script:caseTable
+            Mock Get-TpmReShadeLicenceEvidenceTable { $script:caseTable }
+            $row = @(Get-TpmReShadeObligationReviewInventory | Where-Object EffectId -eq $case.Id)[0]
+            $row.Offerable | Should -BeFalse -Because $case.Name
+            $row.ReviewStatus | Should -Be 'EVIDENCE_INCOMPLETE' -Because $case.Name
+            ($row.OutstandingItems -join ' ') | Should -Match $case.Expect -Because $case.Name
+            ($row.OutstandingItems -join ' ') | Should -Not -Match 'OWNER' -Because $case.Name
+            @(Get-TpmReShadeObligationReviewInventory).Count | Should -Be 20
+        }
+    }
+    It "does not offer or deploy a profile whose effect evidence is missing" {
+        $real = Get-TpmReShadeLicenceEvidenceTable
+        $script:caseTable = @{}
+        foreach ($k in $real.Keys) { if ($k -ne 'Akgunter.CRTRoyale') { $script:caseTable[$k] = $real[$k] } }
+        Mock Get-TpmReShadeLicenceEvidenceTable { $script:caseTable }
+        $hidden = [pscustomobject]@{ State = 'HIDDEN'; Visible = $false; Enabled = $false; Reason = 'test' }
+        $offered = @(Get-TpmReShadeVisibleProfiles -HdrGate $hidden).ProfileId
+        $offered | Should -Not -Contain 'DetailedCrt'
+        $offered | Should -Contain 'ClassicCrt'
+        @(Get-TpmReShadeVisibleProfiles -HdrGate $hidden -IncludeUnreviewed).Count | Should -Be 20
+        Mock Write-Host {}
+        Mock Write-Log {}
+        Mock New-TpmStagingDirectory { throw 'must not stage' }
+        $result = Install-TpmReShadeProfileDeployment -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'DetailedCrt') -GamePath (Join-Path $TestDrive 'Game.exe') -Doc (New-Object System.Xml.XmlDocument) -SourceDll (Join-Path $TestDrive 'ReShade64.dll') -CacheRoot (Join-Path $TestDrive 'cache2') -OwnershipPath (Join-Path $TestDrive 'own2.json')
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'LICENSE_OBLIGATIONS_UNREVIEWED'
+        Should -Invoke New-TpmStagingDirectory -Times 0
+    }
+    It "does not treat populated metadata as reviewed: a record without a reviewer, reference or with outstanding items is not offerable" {
+        $base = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq 'SweetFX.Levels')[0]
+        foreach ($case in @(
+            @{ Name = 'no review record'; Mutate = { param($e) $e.PSObject.Properties.Remove('ObligationReview') } }
+            @{ Name = 'incomplete status'; Mutate = { param($e) $e.ObligationReview = [pscustomobject]@{ Status = 'EVIDENCE_INCOMPLETE'; ReviewedBy = 'x'; Reference = 'y'; OutstandingItems = @() } } }
+            @{ Name = 'reviewed without reviewer'; Mutate = { param($e) $e.ObligationReview = [pscustomobject]@{ Status = 'REVIEWED'; ReviewedBy = ''; Reference = 'y'; OutstandingItems = @() } } }
+            @{ Name = 'reviewed with an outstanding item'; Mutate = { param($e) $e.ObligationReview = [pscustomobject]@{ Status = 'REVIEWED'; ReviewedBy = 'x'; Reference = 'y'; OutstandingItems = @('open') } } }
+        )) {
+            $copy = $base | Select-Object *
+            & $case.Mutate $copy
+            $status = Get-TpmReShadeEffectObligationStatus -Effect $copy
+            $status.MetadataComplete | Should -BeTrue -Because $case.Name
+            $status.Offerable | Should -BeFalse -Because $case.Name
+        }
+        (Get-TpmReShadeEffectObligationStatus -Effect $base).Offerable | Should -BeTrue
+    }
+    It "records the exact pinned conditions of the two inactive Lilium includes (not an unconditional filename exclusion) and does not claim verified compilation" {
+        $lilium = (Get-TpmReShadeLicenceEvidenceTable)['Lilium.ToneMapping']
+        @($lilium.InactiveIncludes).Count | Should -Be 2
+        $specs = @(Get-TpmReShadeApprovedEffectFiles -EffectId 'Lilium.ToneMapping')
+        $includer = @($specs | Where-Object { $_.RelativePath -eq 'Shaders/lilium__tone_mapping.fx' })[0]
+        $drawText = @($lilium.InactiveIncludes | Where-Object { $_.Include -eq 'lilium__include/draw_text_fix.fxh' })[0]
+        $blackFloor = @($lilium.InactiveIncludes | Where-Object { $_.Include -eq 'lilium__include/HDR_black_floor_fix.fxh' })[0]
+        $drawText.IncludedBy | Should -Be 'Shaders/lilium__tone_mapping.fx'
+        $drawText.Line | Should -Be 9
+        $drawText.IncluderSha256 | Should -Be $includer.SHA256
+        (@($drawText.Conditions) -join ' ') | Should -Match '#if \(SHOW_ADAPTIVE_MAX_NITS == YES\) => false'
+        (@($drawText.Defines) -join ' ') | Should -Match 'SHOW_ADAPTIVE_MAX_NITS = NO at Shaders/lilium__tone_mapping\.fx:4'
+        (@($drawText.Defines) -join ' ') | Should -Match 'YES = 2 at Shaders/lilium__include/reshade_setup\.fxh'
+        $blackFloor.Line | Should -Be 36
+        $blackFloor.IncluderSha256 | Should -Be $includer.SHA256
+        (@($blackFloor.Conditions) -join ' ') | Should -Match '#if 0 => false'
+        # neither inactive include is a shipped file, and no other include is left unresolved
+        @($specs | Where-Object { $_.RelativePath -match 'draw_text_fix|HDR_black_floor_fix' }).Count | Should -Be 0
+        @($lilium.ActiveUnresolvedIncludes).Count | Should -Be 0
+        (@($lilium.Verified) -join ' ') | Should -Not -Match 'compil'
+        $checks = @(Get-TpmReShadeWindowsOnlyLicenceChecks)
+        $checks.Count | Should -Be 4
+        ($checks -join ' ') | Should -Match 'WIN-3 Shader compilation'
+        ($checks -join ' ') | Should -Match 'WIN-1 Install-level notice delivery'
+        $script:ProductionSource | Should -Not -Match 'complete corresponding source'
+        $license = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\LICENSE'))
+        $license | Should -Not -Match 'does not redistribute'
+        $license | Should -Not -Match 'complete corresponding source'
+    }
+    It "treats the ReShade-provided headers explicitly: ReShade.fxh and ReShadeUI.fxh are deployed files on the effect search path" {
+        $paths = Get-TpmReShadeSearchPathDeclaration
+        $paths.EffectSearchPaths | Should -Match 'Shaders\\TPM'
+        $specs = @(Get-TpmReShadeApprovedEffectFiles -EffectId 'SweetFX.Levels')
+        $header = @($specs | Where-Object { $_.RelativePath -eq 'Shaders/TPM/ReShade.fxh' })[0]
+        $ui = @($specs | Where-Object { $_.RelativePath -eq 'Shaders/TPM/ReShadeUI.fxh' })[0]
+        $header.Role | Should -Be 'RuntimeInclude'
+        $header.PinnedRevision | Should -Match '^[0-9a-f]{40}$'
+        $ui.Role | Should -Be 'RuntimeInclude'
+        $ui.PinnedRevision | Should -Be 'TPM'
+        $levels = (Get-TpmReShadeLicenceEvidenceTable)['SweetFX.Levels']
+        (@($levels.NonDefects) -join ' ') | Should -Match 'ReShade-provided headers are explicit deployed files'
+        $levels.IncludeStatementsChecked | Should -Be 2
+        $levels.IncludeStatementsResolved | Should -Be 2
+        # the tutorial ini writer uses the same declaration the evidence is bound to
+        $script:ProductionSource | Should -Match 'EffectSearchPaths=. \+ \$searchPaths\.EffectSearchPaths'
+    }
+    It "invalidates the evidence record when any bound specification changes (repositories, paths, hashes, lengths, dependencies, search paths, licence basis, attribution, generated bytes)" {
+        $baseId = 'SweetFX.SMAA'
+        $base = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq $baseId)[0]
+        $clone = { $c = $base | Select-Object *; foreach ($p in 'RelativeFiles', 'DestinationFiles', 'SHA256', 'ByteLengths', 'FileLicenses', 'RequiredIncludes', 'RequiredTextures', 'AllowedHosts') { $c.$p = @($base.$p) }; $c.NoticeFiles = @($base.NoticeFiles | ForEach-Object { $_ | Select-Object * }); $c }
+        $unchanged = & $clone
+        (Get-TpmReShadeObligationReviewRecord -EffectId $baseId -Effect $unchanged).Status | Should -Be 'REVIEWED'
+        $mutations = @(
+            @{ Name = 'repository'; Edit = { param($c) $c.Repository = 'someone/else' } }
+            @{ Name = 'pinned commit'; Edit = { param($c) $c.PinnedCommit = ('1' * 40) } }
+            @{ Name = 'allowed path prefix'; Edit = { param($c) $c.AllowedPathPrefix = '/someone/else/' + ('1' * 40) + '/' } }
+            @{ Name = 'allowed hosts'; Edit = { param($c) $c.AllowedHosts = @('raw.githubusercontent.com', 'example.org') } }
+            @{ Name = 'source path'; Edit = { param($c) $c.RelativeFiles[1] = 'Shaders/SweetFX/SMAA2.fxh' } }
+            @{ Name = 'destination path'; Edit = { param($c) $c.DestinationFiles[0] = 'Shaders/Other/SMAA.fx' } }
+            @{ Name = 'file hash'; Edit = { param($c) $c.SHA256[0] = ('A' * 64) } }
+            @{ Name = 'byte length'; Edit = { param($c) $c.ByteLengths[0] = [int64]$c.ByteLengths[0] + 1 } }
+            @{ Name = 'per-file licence basis'; Edit = { param($c) $c.FileLicenses[0] = 'GPL-3.0' } }
+            @{ Name = 'licence'; Edit = { param($c) $c.License = 'GPL-3.0' } }
+            @{ Name = 'attribution'; Edit = { param($c) $c.Attribution = 'Someone Else' } }
+            @{ Name = 'source obligations text'; Edit = { param($c) $c.SourceObligations = 'No obligations.' } }
+            @{ Name = 'required include removed'; Edit = { param($c) $c.RequiredIncludes = @('ReShade.fxh') } }
+            @{ Name = 'required texture'; Edit = { param($c) $c.RequiredTextures = @('AreaTex.png') } }
+            @{ Name = 'licence copy source path'; Edit = { param($c) $c.NoticeFiles[0].SourceRelativePath = 'COPYING' } }
+            @{ Name = 'licence copy hash'; Edit = { param($c) $c.NoticeFiles[0].SHA256 = ('B' * 64) } }
+            @{ Name = 'technique'; Edit = { param($c) $c.TechniqueName = 'Other' } }
+        )
+        foreach ($case in $mutations) {
+            $c = & $clone
+            & $case.Edit $c
+            $record = Get-TpmReShadeObligationReviewRecord -EffectId $baseId -Effect $c
+            $record.Status | Should -Be 'EVIDENCE_INCOMPLETE' -Because $case.Name
+            ($record.OutstandingItems -join ' ') | Should -Match '(EVIDENCE_STALE|SPECIFICATION_INVALID)' -Because $case.Name
+        }
+    }
+    It "invalidates the evidence record when the generated notice bytes, the generated include bytes or the search paths change" {
+        $baseId = 'SweetFX.SMAA'
+        $base = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq $baseId)[0]
+        (Get-TpmReShadeObligationReviewRecord -EffectId $baseId -Effect $base).Status | Should -Be 'REVIEWED'
+        Mock Get-TpmReShadeEffectNoticeBytes { , ([Text.Encoding]::ASCII.GetBytes('different notice')) }
+        ((Get-TpmReShadeObligationReviewRecord -EffectId $baseId -Effect $base).OutstandingItems -join ' ') | Should -Match 'EVIDENCE_STALE'
+    }
+    It "invalidates the evidence record when the generated ReShadeUI include bytes change" {
+        $baseId = 'SweetFX.SMAA'
+        $base = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq $baseId)[0]
+        Mock Get-TpmReShadeUICompatibilityBytes { , ([Text.Encoding]::ASCII.GetBytes('different include')) }
+        ((Get-TpmReShadeObligationReviewRecord -EffectId $baseId -Effect $base).OutstandingItems -join ' ') | Should -Match 'EVIDENCE_STALE'
+    }
+    It "invalidates the evidence record when the ReShade search paths change" {
+        $baseId = 'SweetFX.SMAA'
+        $base = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq $baseId)[0]
+        Mock Get-TpmReShadeSearchPathDeclaration { [pscustomobject]@{ EffectSearchPaths = '.\Shaders'; TextureSearchPaths = '.\Textures' } }
+        ((Get-TpmReShadeObligationReviewRecord -EffectId $baseId -Effect $base).OutstandingItems -join ' ') | Should -Match 'EVIDENCE_STALE'
     }
 }

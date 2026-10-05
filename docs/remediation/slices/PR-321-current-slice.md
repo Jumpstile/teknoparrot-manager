@@ -2,7 +2,7 @@
 
 - Slice ID: TPM-PROGRESS-SCAN-COVERAGE-001
 - Supplemental governance slice IDs: `TPM-OWNER-STATUS-GATE-001`.
-- Supplemental behavior slice IDs: `TPM-LIBRARY-HEALTH-TRANSACTION-001`, `TPM-RESHADE-TEN-EFFECTS-001`, `TPM-S1-LEGACY-STATE-TRANSACTIONS-001`, `TPM-S1-SETUP-UPDATE-TRANSACTIONS-001`, `TPM-S1-UPDATE-VERSION-ORDERING-001`, and `TPM-POSTGRES-SETUP-ROLLBACK-001`.
+- Supplemental behavior slice IDs: `TPM-LIBRARY-HEALTH-TRANSACTION-001`, `TPM-RESHADE-TEN-EFFECTS-001`, `TPM-RESHADE-TWENTY-EFFECTS-001` (cloud repair batch, uncommitted), `TPM-S1-LEGACY-STATE-TRANSACTIONS-001`, `TPM-S1-SETUP-UPDATE-TRANSACTIONS-001`, `TPM-S1-UPDATE-VERSION-ORDERING-001`, and `TPM-POSTGRES-SETUP-ROLLBACK-001`.
 - Slice name: RC8 universal progress coverage and truthful permanent-gate status semantics
 - Included owner-report IDs: 3, 4, 5, and 29 for progress/source evidence; ID 3 for supplemental gate-status semantics; ID 21 for Library Health outcomes; IDs 1, 9, and 10 for ReShade; owner ID 34 for migration; owner row 81 for update-version ordering; and owner row 88 for PostgreSQL 8.3 rollback/setup safety.
 - Issues: PR #321, issue #105, and issue #323 exact-package PostgreSQL owner-smoke evidence.

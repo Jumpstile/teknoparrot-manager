@@ -7840,130 +7840,577 @@ function Get-ReShadeTargetInfo {
     return [pscustomobject]@{ TargetDir = $targetDir; DllName = $dllName; ApiDetected = $apiDetected }
 }
 
-function Get-TpmReShadeProfiles {
+# Beginner catalog groups, in display order. The labels are the owner-approved visible group names.
+function Get-TpmReShadeProfileGroups {
     return @(
-        [pscustomobject]@{
-            ProfileId = 'Original'; FriendlyName = 'Original'; Description = 'No visual processing.'
-            Recommended = $false; MeasuredEvidence = $false; Effects = @(); RequiredEffects = @(); TechniqueOrder = @()
-            Parameters = @{}; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'
-            CompatibilityState = 'ADVISORY_UNMEASURED'; CompatibleWith = @(); ConflictsWith = @()
-            OrderConstraints = @(); FallbackProfileId = 'Original'
-            PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
-        }
-        [pscustomobject]@{
-            ProfileId = 'CleanSharp'; FriendlyName = 'Clean & Sharp'; Description = 'Clearer edges and text with very little change to the original image.'
-            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.LumaSharpen'); RequiredEffects = @('LumaSharpen.fx')
-            TechniqueOrder = @('LumaSharpen'); Parameters = @{}; PerformanceClass = 'LOW'
-            ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'
-            CompatibleWith = @(); ConflictsWith = @('CRT_Lottes'); OrderConstraints = @()
-            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
-        }
-        [pscustomobject]@{
-            ProfileId = 'ClassicCrt'; FriendlyName = 'Classic Arcade CRT'; Description = 'Traditional scanlines and restrained arcade-monitor character.'
-            Recommended = $false; MeasuredEvidence = $false; Effects = @('FXShaders.CRT_Lottes'); RequiredEffects = @('CRT_Lottes.fx','CRT_Lottes.fxh')
-            TechniqueOrder = @('CRT_Lottes'); Parameters = @{}; PerformanceClass = 'HIGH'
-            ResolutionSensitivity = 'HIGH'; CompatibilityState = 'ADVISORY_UNMEASURED'
-            CompatibleWith = @(); ConflictsWith = @('LumaSharpen','Vibrance'); OrderConstraints = @()
-            FallbackProfileId = 'CleanSharp'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
-        }
-        [pscustomobject]@{
-            ProfileId = 'Vivid'; FriendlyName = 'Vivid Arcade'; Description = 'Richer color for modern displays.'
-            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Vibrance'); RequiredEffects = @('Vibrance.fx')
-            TechniqueOrder = @('Vibrance'); Parameters = @{}; PerformanceClass = 'LOW'
-            ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
-            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
-            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
-        }
-        [pscustomobject]@{
-            ProfileId = 'EnhancedArcade'; FriendlyName = 'Enhanced Arcade'; Description = 'Sharper edges and richer color while preserving the approved effect order.'
-            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.LumaSharpen','SweetFX.Vibrance'); RequiredEffects = @('LumaSharpen.fx','Vibrance.fx')
-            TechniqueOrder = @('LumaSharpen','Vibrance'); Parameters = @{}; PerformanceClass = 'LOW'
-            ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'
-            CompatibleWith = @(); ConflictsWith = @('CRT_Lottes'); OrderConstraints = @('LumaSharpen before Vibrance')
-            FallbackProfileId = 'CleanSharp'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
-        }
-        [pscustomobject]@{
-            ProfileId = 'Cartoon'; FriendlyName = 'Cartoon'; Description = 'Bold edges and fewer colors for a poster-style arcade look.'
-            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Cartoon'); RequiredEffects = @('Cartoon.fx')
-            TechniqueOrder = @('Cartoon'); Parameters = @{}; PerformanceClass = 'MEDIUM'
-            ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'
-            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
-            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
-        }
-        [pscustomobject]@{
-            ProfileId = 'ContrastCurves'; FriendlyName = 'Contrast Curves'; Description = 'Add contrast through the middle tones.'
-            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Curves'); RequiredEffects = @('Curves.fx')
-            TechniqueOrder = @('Curves'); Parameters = @{}; PerformanceClass = 'MEDIUM'
-            ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
-            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
-            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
-        }
-        [pscustomobject]@{
-            ProfileId = 'FilmGrain'; FriendlyName = 'Film Grain'; Description = 'Add a subtle grain-like texture.'
-            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.FilmGrain'); RequiredEffects = @('FilmGrain.fx')
-            TechniqueOrder = @('FilmGrain'); Parameters = @{}; PerformanceClass = 'HIGH'
-            ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
-            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
-            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
-        }
-        [pscustomobject]@{
-            ProfileId = 'Levels'; FriendlyName = 'Levels'; Description = 'Expand the dark and bright ends of the image.'
-            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Levels'); RequiredEffects = @('Levels.fx')
-            TechniqueOrder = @('Levels'); Parameters = @{}; PerformanceClass = 'LOW'
-            ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
-            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
-            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
-        }
-        [pscustomobject]@{
-            ProfileId = 'Monochrome'; FriendlyName = 'Monochrome'; Description = 'Remove color while keeping image detail.'
-            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Monochrome'); RequiredEffects = @('Monochrome.fx')
-            TechniqueOrder = @('Monochrome'); Parameters = @{}; PerformanceClass = 'LOW'
-            ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
-            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
-            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
-        }
-        [pscustomobject]@{
-            ProfileId = 'Sepia'; FriendlyName = 'Sepia Tone'; Description = 'Warm the image with a classic brown tone.'
-            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Sepia'); RequiredEffects = @('Sepia.fx')
-            TechniqueOrder = @('Tint'); Parameters = @{}; PerformanceClass = 'LOW'
-            ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
-            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
-            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
-        }
-        [pscustomobject]@{
-            ProfileId = 'Vignette'; FriendlyName = 'Vignette'; Description = 'Gently darken image edges to focus attention in the center.'
-            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Vignette'); RequiredEffects = @('Vignette.fx')
-            TechniqueOrder = @('Vignette'); Parameters = @{}; PerformanceClass = 'LOW'
-            ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'
-            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
-            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
-        }
+        [pscustomobject]@{ Group = 'Main'; Label = 'Main Catalog' }
+        [pscustomobject]@{ Group = 'Crt'; Label = 'CRT Choices' }
+        [pscustomobject]@{ Group = 'Advanced'; Label = 'Advanced Alternatives' }
+        [pscustomobject]@{ Group = 'Hdr'; Label = 'Actual HDR Setups Only' }
     )
 }
 
+function Get-TpmReShadeProfileGroupLabel {
+    param([AllowEmptyString()][string]$Group = '')
+    $match = Get-TpmReShadeProfileGroups | Where-Object { $_.Group -eq $Group } | Select-Object -First 1
+    if ($match) { return [string]$match.Label }
+    return ''
+}
+
+# ---- Actual-HDR gate. The HDR choices (and their whole group) are shown only when the display evaluated for the game reports
+# HDR-SPECIFIC support. Generic "advanced colour enabled" is NOT used as HDR evidence: it is also true for wide-colour-gamut SDR.
+# Every display in the evidence carries a real identity (monitor device path, else adapter LUID + target id). A caller that knows
+# the display a game will use passes -TargetDisplayId, which must match exactly one identity (even with a single display); an
+# unknown, stale, duplicated or missing identity fails closed. With no target and several displays, EVERY display must qualify.
+# Windows HDR being active shows only that Windows is composing in HDR on that display; it does not show that the game renders HDR.
+function Initialize-TpmDisplayHdrNative {
+    if ('TpmDisplayHdrNative' -as [type]) { return $true }
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { return $false }
+    try {
+        if (-not ('TpmDisplayHdrNative' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public static class TpmDisplayHdrNative {
+    [DllImport("user32.dll")] static extern int GetDisplayConfigBufferSizes(uint flags, out uint numPaths, out uint numModes);
+    [DllImport("user32.dll")] static extern int QueryDisplayConfig(uint flags, ref uint numPaths, IntPtr paths, ref uint numModes, IntPtr modes, IntPtr topology);
+    [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(IntPtr header);
+    const uint QDC_ONLY_ACTIVE_PATHS = 2;
+    const int PathSize = 72;
+    const int ModeSize = 64;
+    const int TypeGetTargetName = 2;
+    const int TypeGetAdvancedColorInfo = 9;
+    const int TypeGetAdvancedColorInfo2 = 15;   // DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO_2 (sequential enum: 11 + 4)
+    const int TargetNameSize = 420;
+    const int AdvInfo1Size = 32;
+    const int AdvInfo2Size = 36;
+    static void Header(IntPtr buf, int type, int size, IntPtr path) {
+        Marshal.WriteInt32(buf, 0, type);
+        Marshal.WriteInt32(buf, 4, size);
+        Marshal.WriteInt32(buf, 8, Marshal.ReadInt32(path, 20));
+        Marshal.WriteInt32(buf, 12, Marshal.ReadInt32(path, 24));
+        Marshal.WriteInt32(buf, 16, Marshal.ReadInt32(path, 28));
+    }
+    // One string per active display: id|primary|hdrSupported|hdrActive|policyLimited|genericAdvancedColor|activeColorMode
+    // primary: 1/0/-1(unknown). The other fields are 1/0/? ('?' = the OS did not answer, which the gate treats as unknown).
+    public static string[] Query() {
+        List<string> result = new List<string>();
+        uint numPaths, numModes;
+        int rc = GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, out numPaths, out numModes);
+        if (rc != 0) { result.Add("ERR:" + rc); return result.ToArray(); }
+        IntPtr paths = Marshal.AllocHGlobal((int)numPaths * PathSize);
+        IntPtr modes = Marshal.AllocHGlobal((int)Math.Max(1, numModes) * ModeSize);
+        IntPtr buf = Marshal.AllocHGlobal(512);
+        try {
+            rc = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, ref numPaths, paths, ref numModes, modes, IntPtr.Zero);
+            if (rc != 0) { result.Add("ERR:" + rc); return result.ToArray(); }
+            result.Add("OK");
+            for (int i = 0; i < (int)numPaths; i++) {
+                IntPtr path = IntPtr.Add(paths, i * PathSize);
+                int primary = -1;
+                uint srcModeIdx = unchecked((uint)Marshal.ReadInt32(path, 12));
+                if (srcModeIdx != 0xFFFFFFFF && srcModeIdx < numModes) {
+                    IntPtr mode = IntPtr.Add(modes, (int)srcModeIdx * ModeSize);
+                    if (Marshal.ReadInt32(mode, 0) == 1) primary = (Marshal.ReadInt32(mode, 28) == 0 && Marshal.ReadInt32(mode, 32) == 0) ? 1 : 0;
+                }
+                string id = string.Format("{0:x8}{1:x8}-{2}", Marshal.ReadInt32(path, 24), Marshal.ReadInt32(path, 20), Marshal.ReadInt32(path, 28));
+                for (int z = 0; z < 512; z += 4) Marshal.WriteInt32(buf, z, 0);
+                Header(buf, TypeGetTargetName, TargetNameSize, path);
+                if (DisplayConfigGetDeviceInfo(buf) == 0) {
+                    string devicePath = Marshal.PtrToStringUni(IntPtr.Add(buf, 164), 128);
+                    int nul = devicePath.IndexOf('\0'); if (nul >= 0) devicePath = devicePath.Substring(0, nul);
+                    if (devicePath.Length > 0) id = devicePath;
+                }
+                string generic = "?";
+                Header(buf, TypeGetAdvancedColorInfo, AdvInfo1Size, path); Marshal.WriteInt32(buf, 20, 0);
+                if (DisplayConfigGetDeviceInfo(buf) == 0) generic = ((Marshal.ReadInt32(buf, 20) >> 1) & 1).ToString();
+                string supported = "?", active = "?", limited = "?", mode2 = "?";
+                for (int z = 0; z < 512; z += 4) Marshal.WriteInt32(buf, z, 0);
+                Header(buf, TypeGetAdvancedColorInfo2, AdvInfo2Size, path);
+                if (DisplayConfigGetDeviceInfo(buf) == 0) {
+                    int bits = Marshal.ReadInt32(buf, 20);
+                    int colorMode = Marshal.ReadInt32(buf, 32);
+                    supported = ((bits >> 4) & 1).ToString();   // highDynamicRangeSupported
+                    limited = ((bits >> 3) & 1).ToString();     // advancedColorLimitedByPolicy
+                    mode2 = colorMode.ToString();               // 0 SDR, 1 WCG, 2 HDR
+                    active = (colorMode == 2) ? "1" : "0";      // HDR is ACTIVE only when the active colour mode is HDR
+                }
+                result.Add(id + "|" + primary + "|" + supported + "|" + active + "|" + limited + "|" + generic + "|" + mode2);
+            }
+        } finally { Marshal.FreeHGlobal(paths); Marshal.FreeHGlobal(modes); Marshal.FreeHGlobal(buf); }
+        return result.ToArray();
+    }
+}
+'@
+        }
+        return [bool]('TpmDisplayHdrNative' -as [type])
+    } catch { return $false }
+}
+
+# Raw evidence only: { Known; Reason; Displays = @({ Id; IsPrimary; HdrSupported; HdrActive; PolicyLimited; GenericAdvancedColor; ActiveColorMode }) }.
+# Any failure or non-Windows host yields Known=$false (fail closed). Definition source: DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2 (device
+# info type 15), a 36-byte structure with the flag bits at offset 20 (highDynamicRangeSupported bit 4, advancedColorLimitedByPolicy bit 3)
+# and the active colour mode at offset 32 (0 SDR, 1 WCG, 2 HDR), as defined in the Windows SDK header wingdi.h:
+# https://github.com/microsoft/win32metadata/blob/main/generation/WinSDK/RecompiledIdlHeaders/um/wingdi.h#L2983-L3016
+# A reviewer verified these values against that header. What stays OPEN is real Windows detection on actual displays (the query has not
+# been run on a real machine here) and whether a game itself renders HDR; a wrong or rejected query surfaces as an unknown answer, never as HDR.
+function Get-TpmDisplayHdrEvidence {
+    if (-not (Initialize-TpmDisplayHdrNative)) { return [pscustomobject]@{ Known = $false; Reason = 'HDR detection is available only on Windows.'; Displays = @() } }
+    try { return (ConvertFrom-TpmDisplayHdrRows -Rows @([TpmDisplayHdrNative]::Query())) }
+    catch { return [pscustomobject]@{ Known = $false; Reason = ('Display query failed: ' + $_.Exception.Message); Displays = @() } }
+}
+
+# Pure parser for the native rows ("OK" then id|primary|hdrSupported|hdrActive|policyLimited|genericAdvancedColor|activeColorMode).
+function ConvertFrom-TpmDisplayHdrRows {
+    param([string[]]$Rows = @())
+    if (@($Rows).Count -eq 0 -or [string]$Rows[0] -ne 'OK') { return [pscustomobject]@{ Known = $false; Reason = ('Display query failed: ' + (@($Rows) -join ' ')); Displays = @() } }
+    $flag = { param($v) if ($v -eq '1') { $true } elseif ($v -eq '0') { $false } else { $null } }
+    $displays = New-Object System.Collections.Generic.List[object]
+    foreach ($row in @($Rows | Select-Object -Skip 1)) {
+        $f = [string]$row -split '\|'
+        if ($f.Count -lt 7) { return [pscustomobject]@{ Known = $false; Reason = 'Display query returned a malformed record.'; Displays = @() } }
+        [void]$displays.Add([pscustomobject]@{ Id = [string]$f[0]; IsPrimary = (& $flag $f[1]); HdrSupported = (& $flag $f[2]); HdrActive = (& $flag $f[3]); PolicyLimited = (& $flag $f[4]); GenericAdvancedColor = (& $flag $f[5]); ActiveColorMode = [string]$f[6] })
+    }
+    return [pscustomobject]@{ Known = $true; Reason = ''; Displays = @($displays.ToArray()) }
+}
+
+function Get-TpmReShadeHdrFingerprint {
+    param([object[]]$Displays = @())
+    $text = (@($Displays | ForEach-Object { '{0}|{1}|{2}' -f [string]$_.Id, [string]$_.HdrSupported, [string]$_.HdrActive } | Sort-Object) -join ';')
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text))).Replace('-', '')).ToLowerInvariant() } finally { $sha.Dispose() }
+}
+
+# Pure classification of the evidence. State: HIDDEN (unknown, unsupported, unidentified, stale, ambiguous), VISIBLE_UNAVAILABLE (HDR
+# supported, not active) or ENABLED (HDR-specific active state). Fails closed. The result names the evaluated display identities and a
+# fingerprint of the evidence so a later guard can detect that the answer changed.
+function Get-TpmReShadeHdrGate {
+    param($Evidence = $null, [string]$TargetDisplayId = '')
+    if ($null -eq $Evidence) { $Evidence = Get-TpmDisplayHdrEvidence }
+    $hidden = { param($why, $ids = @()) [pscustomobject]@{ State = 'HIDDEN'; Visible = $false; Enabled = $false; Reason = $why; DisplayIds = @($ids); Fingerprint = ''; TargetDisplayId = $TargetDisplayId } }
+    if (-not [bool]$Evidence.Known) { return (& $hidden ('HDR capability is unknown. ' + [string]$Evidence.Reason)) }
+    $displays = @($Evidence.Displays)
+    if ($displays.Count -eq 0) { return (& $hidden 'No active display was reported.') }
+    $blankIds = @($displays | Where-Object { -not $_.PSObject.Properties['Id'] -or [string]::IsNullOrWhiteSpace([string]$_.Id) })
+    if ($blankIds.Count -gt 0) { return (& $hidden 'A display was reported without an identity, so it cannot be evaluated.') }
+    $idGroups = @($displays | Group-Object { ([string]$_.Id).ToLowerInvariant() })
+    $duplicated = @($idGroups | Where-Object { $_.Count -gt 1 })
+    if ($duplicated.Count -gt 0) { return (& $hidden 'Two displays share one identity, so the display cannot be identified.') }
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($TargetDisplayId)) {
+        $candidates = @($displays | Where-Object { ([string]$_.Id).ToLowerInvariant() -eq $TargetDisplayId.ToLowerInvariant() })
+        if ($candidates.Count -ne 1) { return (& $hidden 'The display the game will use is not among the active displays (unknown or stale identity).' @($displays | ForEach-Object { [string]$_.Id })) }
+    } else {
+        $candidates = $displays
+    }
+    $ids = @($candidates | ForEach-Object { [string]$_.Id })
+    foreach ($d in $candidates) {
+        if ($null -eq $d.HdrSupported -or $null -eq $d.HdrActive) { return (& $hidden 'The display did not give an HDR-specific answer.' $ids) }
+        if (-not [bool]$d.HdrSupported) { return (& $hidden 'The display does not report HDR support.' $ids) }
+        if ($d.PSObject.Properties['PolicyLimited'] -and $d.PolicyLimited -eq $true) { return (& $hidden 'Windows policy limits advanced colour on this display.' $ids) }
+    }
+    $fingerprint = Get-TpmReShadeHdrFingerprint -Displays $candidates
+    $scope = if ($candidates.Count -eq 1) { 'the evaluated display' } else { 'every active display (the game''s display is not identified)' }
+    $allActive = (@($candidates | Where-Object { -not [bool]$_.HdrActive }).Count -eq 0)
+    if (-not $allActive) {
+        return [pscustomobject]@{ State = 'VISIBLE_UNAVAILABLE'; Visible = $true; Enabled = $false; Reason = ('HDR is supported but Windows HDR is not active on ' + $scope + '.'); DisplayIds = $ids; Fingerprint = $fingerprint; TargetDisplayId = $TargetDisplayId }
+    }
+    return [pscustomobject]@{ State = 'ENABLED'; Visible = $true; Enabled = $true; Reason = ('Windows reports HDR active on ' + $scope + '. This does not show that the game itself renders HDR.'); DisplayIds = $ids; Fingerprint = $fingerprint; TargetDisplayId = $TargetDisplayId }
+}
+
+# Profiles that may be listed for selection. HDR-only profiles are removed entirely (and the HDR group disappears with them)
+# unless the gate is Visible. When Visible-but-unavailable they stay listed, flagged, so the chooser can show them without a number.
+function Get-TpmReShadeVisibleProfiles {
+    param($HdrGate = $null, [switch]$IncludeUnreviewed)
+    if ($null -eq $HdrGate) { $HdrGate = Get-TpmReShadeHdrGate }
+    $obligationComplete = @{}
+    foreach ($effect in @(Get-TpmReShadeEffectCatalog)) {
+        $status = Get-TpmReShadeEffectObligationStatus -Effect $effect
+        $obligationComplete[[string]$effect.EffectId] = if ($IncludeUnreviewed) { [bool]$status.MetadataComplete } else { [bool]$status.Offerable }
+    }
+    # An effect whose metadata is incomplete OR whose obligations are not reviewed is never offered, whatever else is true of it.
+    return @(Get-TpmReShadeProfiles | Where-Object {
+        $entry = $_
+        (-not (Test-TpmReShadeProfileRequiresHdr -Entry $entry) -or [bool]$HdrGate.Visible) -and
+        (@($(if ($entry.PSObject.Properties['Effects']) { $entry.Effects }) | Where-Object { $null -ne $_ -and (-not $obligationComplete.ContainsKey([string]$_) -or -not $obligationComplete[[string]$_]) }).Count -eq 0)
+    })
+}
+
+# Profile ids removed from the beginner catalog. A saved choice or an installed TPM-owned deployment that refers to one of
+# these is reported, never silently remapped to another profile, and its installed files are never touched by that report.
+function Get-TpmReShadeRetiredProfiles {
+    return @(
+        [pscustomobject]@{ ProfileId = 'Cartoon'; FriendlyName = 'Cartoon' }
+        [pscustomobject]@{ ProfileId = 'FilmGrain'; FriendlyName = 'Film Grain' }
+        [pscustomobject]@{ ProfileId = 'Monochrome'; FriendlyName = 'Monochrome' }
+        [pscustomobject]@{ ProfileId = 'Sepia'; FriendlyName = 'Sepia Tone' }
+        [pscustomobject]@{ ProfileId = 'Vignette'; FriendlyName = 'Vignette' }
+    )
+}
+
+function Get-TpmReShadeRetiredProfile {
+    param([string]$ProfileId)
+    return (Get-TpmReShadeRetiredProfiles | Where-Object { $_.ProfileId -eq $ProfileId } | Select-Object -First 1)
+}
+
+# Twenty approved effects are exposed as one single-effect profile each, plus Original (reference/off, not an effect) and the
+# pre-existing combined Enhanced Arcade preset (LumaSharpen then Vibrance; adds no effect). That is 22 profiles over 20 effects.
+function Get-TpmReShadeProfiles {
+    $new = {
+        param([string]$Id, [string]$Friendly, [string]$Technical, [string]$Description, [string]$Group, [string[]]$Effects, [string[]]$Files, [string[]]$Techniques, [string]$Fallback = 'Original', [string]$Note = '', [bool]$Hdr = $false, [string]$Preview = 'APPROXIMATE', [string]$PreviewNote = '', [hashtable]$Parameters = $null)
+        if ($null -eq $Parameters) { $Parameters = @{} }
+        [pscustomobject]@{
+            ProfileId = $Id; FriendlyName = $Friendly; TechnicalName = $Technical; DisplayLabel = ('{0} [{1}]' -f $Friendly, $Technical); Description = $Description; Group = $Group
+            Recommended = $false; MeasuredEvidence = $false; Effects = @($Effects); RequiredEffects = @($Files)
+            TechniqueOrder = @($Techniques); Parameters = $Parameters; PerformanceClass = 'UNMEASURED'
+            ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'
+            CompatibilityNote = $Note; RequiresHdr = $Hdr; PreviewApproximation = $Preview; PreviewNote = $PreviewNote
+            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
+            FallbackProfileId = $Fallback; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+        }
+    }
+    $neutral = 'At its default settings this effect makes little or no visible change to the bundled still image, so the preview shows the image unchanged. That is not evidence that the effect does anything or nothing in a game.'
+    $hdrNote = 'Needs an actual HDR setup: Windows HDR turned on for the display and the game itself outputting HDR. In an SDR game the shader only shows its own warning. Shown only when Windows reports HDR support for the display; selectable only while Windows HDR is active there. Windows HDR being on does not show that a given game renders HDR. TeknoParrot Manager does not change any Windows HDR setting.'
+    $profiles = New-Object System.Collections.Generic.List[object]
+    [void]$profiles.Add([pscustomobject]@{
+        ProfileId = 'Original'; FriendlyName = 'Original'; TechnicalName = ''; DisplayLabel = 'Original'; Description = 'No visual processing.'; Group = ''
+        Recommended = $false; MeasuredEvidence = $false; Effects = @(); RequiredEffects = @(); TechniqueOrder = @()
+        Parameters = @{}; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'
+        CompatibilityState = 'ADVISORY_UNMEASURED'; CompatibilityNote = ''; RequiresHdr = $false; PreviewApproximation = 'REFERENCE'; PreviewNote = ''
+        CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @(); FallbackProfileId = 'Original'
+        PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+    })
+    # ---- Main Catalog
+    [void]$profiles.Add((& $new 'SmoothEdges' 'Smooth Edges' 'SMAA' 'Reduce jagged edges.' 'Main' @('SweetFX.SMAA') @('SMAA.fx', 'SMAA.fxh') @('SMAA') 'Original' '' $false 'NEUTRAL' 'Edge smoothing needs real game geometry; the bundled still image has no jagged edges to smooth, so the preview shows it unchanged. That is not evidence about any game.'))
+    [void]$profiles.Add([pscustomobject]@{
+        ProfileId = 'CleanSharp'; FriendlyName = 'Clean & Sharp'; TechnicalName = 'LumaSharpen'; DisplayLabel = 'Clean & Sharp [LumaSharpen]'; Description = 'Straightforward sharpening.'; Group = 'Main'
+        Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.LumaSharpen'); RequiredEffects = @('LumaSharpen.fx')
+        TechniqueOrder = @('LumaSharpen'); Parameters = @{}; PerformanceClass = 'LOW'
+        ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'; CompatibilityNote = ''; RequiresHdr = $false; PreviewApproximation = 'APPROXIMATE'; PreviewNote = ''
+        CompatibleWith = @(); ConflictsWith = @('CRT_Lottes'); OrderConstraints = @()
+        FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+    })
+    [void]$profiles.Add((& $new 'AdaptiveClarity' 'Adaptive Clarity' 'CAS' 'Sharpening that adapts to local detail; not upscaling.' 'Main' @('SweetFX.CAS') @('CAS.fx') @('ContrastAdaptiveSharpen')))
+    [void]$profiles.Add((& $new 'SmoothGradients' 'Smooth Gradients' 'Deband' 'Reduce bands in skies, fog and dark gradients.' 'Main' @('CrosireSlim.Deband') @('Deband.fx') @('Deband') 'Original' '' $false 'NEUTRAL' 'Banding needs smooth gradients that the bundled still image does not contain, so the preview shows it unchanged. That is not evidence about any game.'))
+    [void]$profiles.Add([pscustomobject]@{
+        ProfileId = 'Vivid'; FriendlyName = 'Vivid Arcade'; TechnicalName = 'Vibrance'; DisplayLabel = 'Vivid Arcade [Vibrance]'; Description = 'Restrained color enhancement.'; Group = 'Main'
+        Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Vibrance'); RequiredEffects = @('Vibrance.fx')
+        TechniqueOrder = @('Vibrance'); Parameters = @{}; PerformanceClass = 'LOW'
+        ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; CompatibilityNote = ''; RequiresHdr = $false; PreviewApproximation = 'APPROXIMATE'; PreviewNote = ''
+        CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
+        FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+    })
+    [void]$profiles.Add([pscustomobject]@{
+        ProfileId = 'ContrastCurves'; FriendlyName = 'Balanced Contrast'; TechnicalName = 'Curves'; DisplayLabel = 'Balanced Contrast [Curves]'; Description = 'Adjust midtone contrast.'; Group = 'Main'
+        Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Curves'); RequiredEffects = @('Curves.fx')
+        TechniqueOrder = @('Curves'); Parameters = @{}; PerformanceClass = 'MEDIUM'
+        ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; CompatibilityNote = ''; RequiresHdr = $false; PreviewApproximation = 'APPROXIMATE'; PreviewNote = ''
+        CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
+        FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+    })
+    [void]$profiles.Add([pscustomobject]@{
+        ProfileId = 'Levels'; FriendlyName = 'Black/White Point Adjustment'; TechnicalName = 'Levels'; DisplayLabel = 'Black/White Point Adjustment [Levels]'; Description = 'Correct washed-out ranges without changing the image to monochrome.'; Group = 'Main'
+        Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Levels'); RequiredEffects = @('Levels.fx')
+        TechniqueOrder = @('Levels'); Parameters = @{}; PerformanceClass = 'LOW'
+        ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; CompatibilityNote = ''; RequiresHdr = $false; PreviewApproximation = 'APPROXIMATE'; PreviewNote = ''
+        CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
+        FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+    })
+    [void]$profiles.Add((& $new 'ShadowMidtoneBalance' 'Shadow & Midtone Balance' 'LiftGammaGain' 'Adjust shadows, midtones and highlights separately.' 'Main' @('SweetFX.LiftGammaGain') @('LiftGammaGain.fx') @('LiftGammaGain') 'Original' '' $false 'NEUTRAL' $neutral))
+    [void]$profiles.Add((& $new 'ExposureTint' 'Exposure & Tint' 'Tonemap' 'SDR exposure, gamma and tint correction.' 'Main' @('SweetFX.Tonemap') @('Tonemap.fx') @('Tonemap') 'Original' '' $false 'NEUTRAL' $neutral))
+    [void]$profiles.Add((& $new 'ColorBalance' 'Color Balance' 'prod80 Color Balance' 'Correct unwanted color casts.' 'Main' @('Prod80.ColorBalance') @('PD80_04_Color_Balance.fx') @('prod80_04_ColorBalance') 'Original' '' $false 'NEUTRAL' $neutral))
+    [void]$profiles.Add((& $new 'ArcadeGlow' 'Arcade Glow' 'ArcaneBloom' 'Restrained glow around bright areas.' 'Main' @('FXShaders.ArcaneBloom') @('ArcaneBloom.fx', 'ArcaneBloom.fxh') @('ArcaneBloom')))
+    [void]$profiles.Add([pscustomobject]@{
+        ProfileId = 'EnhancedArcade'; FriendlyName = 'Enhanced Arcade'; TechnicalName = 'LumaSharpen + Vibrance'; DisplayLabel = 'Enhanced Arcade [LumaSharpen + Vibrance]'; Description = 'Combined preset: sharper edges and richer color while preserving the approved effect order.'; Group = 'Main'
+        Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.LumaSharpen','SweetFX.Vibrance'); RequiredEffects = @('LumaSharpen.fx','Vibrance.fx')
+        TechniqueOrder = @('LumaSharpen','Vibrance'); Parameters = @{}; PerformanceClass = 'LOW'
+        ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'; CompatibilityNote = 'Existing combined preset kept for saved choices; it is a profile, not an additional effect.'; RequiresHdr = $false; PreviewApproximation = 'APPROXIMATE'; PreviewNote = ''
+        CompatibleWith = @(); ConflictsWith = @('CRT_Lottes'); OrderConstraints = @('LumaSharpen before Vibrance')
+        FallbackProfileId = 'CleanSharp'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+    })
+    # ---- CRT Choices
+    [void]$profiles.Add([pscustomobject]@{
+        ProfileId = 'ClassicCrt'; FriendlyName = 'Classic Arcade CRT'; TechnicalName = 'CRT Lottes'; DisplayLabel = 'Classic Arcade CRT [CRT Lottes]'; Description = 'Lottes, including its downsampling.'; Group = 'Crt'
+        Recommended = $false; MeasuredEvidence = $false; Effects = @('FXShaders.CRT_Lottes'); RequiredEffects = @('CRT_Lottes.fx','CRT_Lottes.fxh')
+        TechniqueOrder = @('CRT_Lottes'); Parameters = @{}; PerformanceClass = 'HIGH'
+        ResolutionSensitivity = 'HIGH'; CompatibilityState = 'ADVISORY_UNMEASURED'; CompatibilityNote = ''; RequiresHdr = $false; PreviewApproximation = 'APPROXIMATE'; PreviewNote = ''
+        CompatibleWith = @(); ConflictsWith = @('LumaSharpen','Vibrance'); OrderConstraints = @()
+        FallbackProfileId = 'CleanSharp'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
+    })
+    [void]$profiles.Add((& $new 'DetailedCrt' 'Detailed Arcade CRT' 'CRT-Royale' 'More elaborate phosphor-mask simulation.' 'Crt' @('Akgunter.CRTRoyale') @('crt-royale.fx') @('CRT_Royale') 'ClassicCrt' '' $false 'APPROXIMATE' 'A generic arcade-monitor look (scanlines and a phosphor-style mask). It is a TeknoParrot Manager approximation, not CRT-Royale executing.'))
+    [void]$profiles.Add((& $new 'LightweightCrt' 'Lightweight CRT' 'CRT-Pi' 'A simpler single-pass alternative.' 'Crt' @('RSRetroArch.CRTPi') @('CRTPi.fx') @('CRTPi') 'Original' '' $false 'APPROXIMATE' 'A generic scanline look. It is a TeknoParrot Manager approximation, not CRT-Pi executing.'))
+    # ---- Advanced Alternatives
+    [void]$profiles.Add((& $new 'DetailPreservingSharpen' 'Detail-Preserving Sharpen' 'AdaptiveSharpen' 'An alternative sharpening algorithm with overshoot controls.' 'Advanced' @('CrosireLegacy.AdaptiveSharpen') @('AdaptiveSharpen.fx') @('AdaptiveSharpen')))
+    [void]$profiles.Add((& $new 'FilmicSharpen' 'Filmic Sharpen' 'FilmicAnamorphSharpen' 'Tunable high-pass sharpening.' 'Advanced' @('Fubax.FilmicAnamorphSharpen') @('FilmicAnamorphSharpen.fx', 'ColorConversion.fxh', 'LinearWorkflow.fxh') @('FilmicAnamorphSharpen')))
+    [void]$profiles.Add((& $new 'Colorfulness' 'Colorfulness' 'Colourfulness' 'An alternative color-strength adjustment.' 'Advanced' @('CrosireLegacy.Colourfulness') @('Colourfulness.fx') @('Colourfulness')))
+    [void]$profiles.Add((& $new 'FastGameEnhancement' 'Fast Game Enhancement' 'Glamayre Fast Effects' 'Combining selectable anti-aliasing, sharpening, contrast and lighting effects.' 'Advanced' @('Glamarye.FastEffects') @('Glamayre_Fast_Effects.fx') @('Glamarye_Fast_Effects_without_Fake_GI') 'Original' 'Its depth-dependent features need compatible game data. TeknoParrot Manager therefore turns its ambient-occlusion and depth-of-field options off in the generated preset; you can turn them on in the ReShade overlay once the game depth buffer is verified.' $false 'APPROXIMATE' 'A mild sharpen and contrast approximation of the non-depth effects only. It is not Glamayre executing.' @{ 'Glamayre_Fast_Effects.fx' = ([ordered]@{ ao_enabled = 0; dof_enabled = 0 }) }))
+    # ---- Actual HDR Setups Only
+    [void]$profiles.Add((& $new 'HdrHighlightMapping' 'HDR Highlight Mapping' 'Lilium Tone Mapping' "Map an actual HDR image into the display's brightness range." 'Hdr' @('Lilium.ToneMapping') @('lilium__tone_mapping.fx') @('lilium__tone_mapping') 'Original' $hdrNote $true 'UNAVAILABLE' 'The preview image is not HDR, so no honest approximation of this effect exists.'))
+    [void]$profiles.Add((& $new 'HdrBlackLevelFix' 'HDR Black-Level Fix' 'Lilium HDR Black Floor Fix' 'Adjust raised HDR blacks.' 'Hdr' @('Lilium.HdrBlackFloorFix') @('lilium__hdr_black_floor_fix.fx') @('lilium__hdr_black_floor_fix') 'Original' $hdrNote $true 'UNAVAILABLE' 'The preview image is not HDR, so no honest approximation of this effect exists.'))
+    return @($profiles.ToArray())
+}
+
 function Get-TpmReShadeEffectCatalog {
+    # Twenty approved effects (counted as EFFECTS, not profiles; Original and the combined Enhanced Arcade preset are
+    # profiles and add no effect). Every file is fetched from an immutable upstream commit and accepted only on its exact
+    # SHA-256 and byte length. FileLicenses records the license basis of each fetched file individually (a repository-wide
+    # license is never assumed to cover a third-party file that carries its own notice).
     $effects = @(
         [pscustomobject]@{ EffectId = 'SweetFX.LumaSharpen'; FriendlyName = 'LumaSharpen'; Category = 'SHARPNESS'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/LumaSharpen.fx'); SHA256 = @('7B358EBBDAA7BC4C44EBF6E9D41AFCB3F21EE3DDE5C5F85BF40201D5C6044680'); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'LumaSharpen'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original' }
         [pscustomobject]@{ EffectId = 'SweetFX.Vibrance'; FriendlyName = 'Vibrance'; Category = 'COLOR'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Vibrance.fx'); SHA256 = @('B9189A28CA4A645A0E188F8396C81889D217E3C706E8900DFE6594D43E7C33EB'); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Vibrance'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original' }
         [pscustomobject]@{ EffectId = 'FXShaders.CRT_Lottes'; FriendlyName = 'CRT Lottes'; Category = 'ARCADE DISPLAY'; Repository = 'luluco250/FXShaders'; PinnedCommit = '76365e35c48e30170985ca371e67d8daf8eb9a98'; RelativeFiles = @('Shaders/CRT_Lottes.fx','Shaders/CRT_Lottes.fxh'); SHA256 = @('6B214F43C97650A34D9848211402B475627092E127258F02BB0C5919451C9B20','FE19870235B2C4C166BD367227366AAE115E9AC9EF60E84774A069D4CFC0B1E6'); RequiredIncludes = @('ReShade.fxh','CRT_Lottes.fxh'); RequiredTextures = @(); License = 'MIT; Unlicense/public domain dedication for Timothy Lottes implementation'; Attribution = 'Lucas Melo; Timothy Lottes'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/luluco250/FXShaders/76365e35c48e30170985ca371e67d8daf8eb9a98/'; TechniqueName = 'CRT_Lottes'; PerformanceClass = 'HIGH'; ResolutionSensitivity = 'HIGH'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'CleanSharp' }
-        [pscustomobject]@{ EffectId = 'SweetFX.Cartoon'; FriendlyName = 'Cartoon'; Category = 'STYLIZED'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Cartoon.fx'); SHA256 = @('5D90E1C72318A28255D268FF3AC3FCB64D1E9469F5CA1334A50FB7D1B1A005F4'); ByteLengths = @([int64]1378); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Cartoon'; PerformanceClass = 'MEDIUM'; ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
         [pscustomobject]@{ EffectId = 'SweetFX.Curves'; FriendlyName = 'Curves'; Category = 'CONTRAST'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Curves.fx'); SHA256 = @('8368029D2254856505ABF7DD789342024465403DA49434DD776C6D1AF4079A98'); ByteLengths = @([int64]6274); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Curves'; PerformanceClass = 'MEDIUM'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
-        [pscustomobject]@{ EffectId = 'SweetFX.FilmGrain'; FriendlyName = 'Film Grain'; Category = 'FILM'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/FilmGrain.fx'); SHA256 = @('520F0C40247C457A23A8F66A761C71EB43E5CA85DB5F68A92F1FBF0700F37154'); ByteLengths = @([int64]3514); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'FilmGrain'; PerformanceClass = 'HIGH'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
         [pscustomobject]@{ EffectId = 'SweetFX.Levels'; FriendlyName = 'Levels'; Category = 'CONTRAST'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Levels.fx'); SHA256 = @('C603D3EA12D6D5710F2246BB7DD446D19E561154656F1FA8D579CA7FBBEEF70E'); ByteLengths = @([int64]2976); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Levels'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
-        [pscustomobject]@{ EffectId = 'SweetFX.Monochrome'; FriendlyName = 'Monochrome'; Category = 'COLOR'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Monochrome.fx'); SHA256 = @('36E0C42CE96F7CA61D44FDEEDBDB2E2B859D3359B29AD1E5DC3F1772D3B2459E'); ByteLengths = @([int64]3183); RequiredIncludes = @('ReShade.fxh','ReShadeUI.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'CeeJay.dk'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Monochrome'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
-        [pscustomobject]@{ EffectId = 'SweetFX.Sepia'; FriendlyName = 'Sepia'; Category = 'COLOR'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Sepia.fx'); SHA256 = @('4A4C7B4A3CC6CDF717AA96F0D3586B98C143A5584A29FD3A9D57AECD895B0BC6'); ByteLengths = @([int64]549); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'CeeJayDK'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Tint'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
-        [pscustomobject]@{ EffectId = 'SweetFX.Vignette'; FriendlyName = 'Vignette'; Category = 'IMAGE'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Vignette.fx'); SHA256 = @('A7358B592830FA74A0A50A842682C99DB751E35666E49C229567DAF9EA59AFA2'); ByteLengths = @([int64]3502); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Vignette'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false }
+        [pscustomobject]@{
+            EffectId = 'SweetFX.SMAA'; FriendlyName = 'SMAA'; Category = 'ANTI-ALIASING'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361'
+            RelativeFiles = @('Shaders/SweetFX/SMAA.fx', 'Shaders/SweetFX/SMAA.fxh', 'Textures/SweetFX/AreaTex.png', 'Textures/SweetFX/SearchTex.png')
+            DestinationFiles = @('Shaders/SweetFX/SMAA.fx', 'Shaders/SweetFX/SMAA.fxh', 'Textures/SweetFX/AreaTex.png', 'Textures/SweetFX/SearchTex.png')
+            SHA256 = @('FD6591EEB70FF584AC4D774ED3C79AF5EFAC34F5DE1A36F8F873E959259C0007', 'EE18B0F376585338CDB477A0900757CEBAC86D3C476EF99955348B55818C8310', '0044E6B420A8D98A9DC6A60BEDBD43F75CD15AC6052FDEDFB2F2F55D3077BEED', '55A97853AB64174245701ACCF315AB63D41776C9CB2AA14C675E653684FD96F3')
+            ByteLengths = @([int64]9523, [int64]57679, [int64]30346, [int64]126)
+            FileLicenses = @('REPOSITORY-LICENSE', 'MIT', 'MIT (SMAA project license, precomputed texture; see LICENSE-SMAA-project.txt)', 'MIT (SMAA project license, precomputed texture; see LICENSE-SMAA-project.txt)')
+            NoticeFiles = @([pscustomobject]@{ Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361'; SourceRelativePath = 'LICENSE'; DestinationRelativePath = 'Shaders/TPM/Notices/SweetFX.SMAA/LICENSE.txt'; SHA256 = '9B2E0B3FF53493F211E39390947716CD16EE559303DAC0713AD4B12228DBCE51'; ByteLength = [int64]1076 }, [pscustomobject]@{ Repository = 'iryoku/smaa'; PinnedCommit = '71c806a838bdd7d517df19192a20f0c61b3ca29d'; SourceRelativePath = 'LICENSE.txt'; DestinationRelativePath = 'Shaders/TPM/Notices/SweetFX.SMAA/LICENSE-SMAA-project.txt'; SHA256 = '2B848B67BA50AC40B53E11CF1CCDAEE2A190CA83B4652CBA695A5F1CE81F52AE'; ByteLength = [int64]1470 })
+            RequiredIncludes = @('ReShadeUI.fxh', 'ReShade.fxh'); RequiredTextures = @('AreaTex.png', 'SearchTex.png')
+            License = 'MIT'; Attribution = 'CeeJayDK (SweetFX port and wrapper); Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro, Diego Gutierrez (SMAA)'
+            SourceObligations = 'MIT: keep the copyright and permission notice with all copies; the upstream files are deployed unmodified. The two SMAA lookup textures are covered by the SMAA project license (MIT, Jimenez et al.; its LICENSE.txt is copied beside them).'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361/'; TechniqueName = 'SMAA'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'SweetFX.CAS'; FriendlyName = 'CAS'; Category = 'SHARPNESS'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361'
+            RelativeFiles = @('Shaders/SweetFX/CAS.fx')
+            DestinationFiles = @('Shaders/SweetFX/CAS.fx')
+            SHA256 = @('5CBF1468B75D0D221067BDC7BCA658F531816C3B24E0EEF8654D9D2A7D1A1C46')
+            ByteLengths = @([int64]7005)
+            FileLicenses = @('MIT')
+            NoticeFiles = @([pscustomobject]@{ Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361'; SourceRelativePath = 'LICENSE'; DestinationRelativePath = 'Shaders/TPM/Notices/SweetFX.CAS/LICENSE.txt'; SHA256 = '9B2E0B3FF53493F211E39390947716CD16EE559303DAC0713AD4B12228DBCE51'; ByteLength = [int64]1076 })
+            RequiredIncludes = @('ReShade.fxh'); RequiredTextures = @()
+            License = 'MIT'; Attribution = 'Advanced Micro Devices, Inc. (CAS); SLSNe and Marty McFly (ReShade port); CeeJayDK (SweetFX repository)'
+            SourceObligations = 'MIT: keep the AMD copyright and permission notice (embedded in the file header); the file is deployed unmodified.'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361/'; TechniqueName = 'ContrastAdaptiveSharpen'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'CrosireSlim.Deband'; FriendlyName = 'Deband'; Category = 'IMAGE QUALITY'; Repository = 'crosire/reshade-shaders'; PinnedCommit = 'fd0022170615ce0d8162d219bff07232fa6dd84f'
+            RelativeFiles = @('Shaders/Deband.fx')
+            DestinationFiles = @('Shaders/Deband.fx')
+            SHA256 = @('8959CA995090BC89762CC0BF4BA3BB1FFCFFDF143E9E0DDAF84F0E004B53DD29')
+            ByteLengths = @([int64]9551)
+            FileLicenses = @('MIT')
+            NoticeFiles = @()
+            RequiredIncludes = @('ReShadeUI.fxh', 'ReShade.fxh'); RequiredTextures = @()
+            License = 'MIT'; Attribution = 'Niklas Haas (haasn, original mpv shader); JPulowski (ReShade port)'
+            SourceObligations = 'MIT with a credit request ("Do not distribute without giving credit to the original author(s)"): the header carrying the credit is deployed unmodified and this notice repeats it.'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/crosire/reshade-shaders/fd0022170615ce0d8162d219bff07232fa6dd84f/'; TechniqueName = 'Deband'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'SweetFX.LiftGammaGain'; FriendlyName = 'Lift Gamma Gain'; Category = 'COLOR'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361'
+            RelativeFiles = @('Shaders/SweetFX/LiftGammaGain.fx')
+            DestinationFiles = @('Shaders/SweetFX/LiftGammaGain.fx')
+            SHA256 = @('5A6B6C85D0E09ED4C507F3B5F1B3B2F4F0F1268E24BB0EC81EDBD431E28566DF')
+            ByteLengths = @([int64]1243)
+            FileLicenses = @('REPOSITORY-LICENSE')
+            NoticeFiles = @([pscustomobject]@{ Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361'; SourceRelativePath = 'LICENSE'; DestinationRelativePath = 'Shaders/TPM/Notices/SweetFX.LiftGammaGain/LICENSE.txt'; SHA256 = '9B2E0B3FF53493F211E39390947716CD16EE559303DAC0713AD4B12228DBCE51'; ByteLength = [int64]1076 })
+            RequiredIncludes = @('ReShadeUI.fxh', 'ReShade.fxh'); RequiredTextures = @()
+            License = 'MIT'; Attribution = '3an and Christian Cann Schuldt Jensen (CeeJay.dk)'
+            SourceObligations = 'MIT: keep the copyright and permission notice with all copies; the upstream file is deployed unmodified.'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361/'; TechniqueName = 'LiftGammaGain'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'SweetFX.Tonemap'; FriendlyName = 'Tonemap'; Category = 'COLOR'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361'
+            RelativeFiles = @('Shaders/SweetFX/Tonemap.fx')
+            DestinationFiles = @('Shaders/SweetFX/Tonemap.fx')
+            SHA256 = @('BBE2E7EB8D6F9FB4316BAD8C85B5BFD1D98F0903D2CD962FD5D4C0EBBDE3C5F3')
+            ByteLengths = @([int64]2000)
+            FileLicenses = @('REPOSITORY-LICENSE')
+            NoticeFiles = @([pscustomobject]@{ Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361'; SourceRelativePath = 'LICENSE'; DestinationRelativePath = 'Shaders/TPM/Notices/SweetFX.Tonemap/LICENSE.txt'; SHA256 = '9B2E0B3FF53493F211E39390947716CD16EE559303DAC0713AD4B12228DBCE51'; ByteLength = [int64]1076 })
+            RequiredIncludes = @('ReShadeUI.fxh', 'ReShade.fxh'); RequiredTextures = @()
+            License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'
+            SourceObligations = 'MIT: keep the copyright and permission notice with all copies; the upstream file is deployed unmodified.'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361/'; TechniqueName = 'Tonemap'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'Prod80.ColorBalance'; FriendlyName = 'PD80 Color Balance'; Category = 'COLOR'; Repository = 'prod80/prod80-ReShade-Repository'; PinnedCommit = '1c2ed5b093b03c558bfa6aea45c2087052e99554'
+            RelativeFiles = @('Shaders/PD80_04_Color_Balance.fx')
+            DestinationFiles = @('Shaders/PD80_04_Color_Balance.fx')
+            SHA256 = @('79AF1590AD63D3B3CF0C1BC91E117D1D86501EB0E26D01D6428307276F903FE3')
+            ByteLengths = @([int64]8548)
+            FileLicenses = @('MIT')
+            NoticeFiles = @([pscustomobject]@{ Repository = 'prod80/prod80-ReShade-Repository'; PinnedCommit = '1c2ed5b093b03c558bfa6aea45c2087052e99554'; SourceRelativePath = 'LICENSE'; DestinationRelativePath = 'Shaders/TPM/Notices/Prod80.ColorBalance/LICENSE.txt'; SHA256 = 'A8E1A2BF58E93886F51CAC62FEFDCF4502EFEF2F6715884B70C61756E3534540'; ByteLength = [int64]1063 })
+            RequiredIncludes = @('ReShadeUI.fxh', 'ReShade.fxh'); RequiredTextures = @()
+            License = 'MIT'; Attribution = 'prod80 (Bas Veth)'
+            SourceObligations = 'MIT: keep the copyright and permission notice with all copies; the upstream file is deployed unmodified.'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/prod80/prod80-ReShade-Repository/1c2ed5b093b03c558bfa6aea45c2087052e99554/'; TechniqueName = 'prod80_04_ColorBalance'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'FXShaders.ArcaneBloom'; FriendlyName = 'Arcane Bloom'; Category = 'LIGHTING'; Repository = 'luluco250/FXShaders'; PinnedCommit = '76365e35c48e30170985ca371e67d8daf8eb9a98'
+            RelativeFiles = @('Shaders/ArcaneBloom.fx', 'Shaders/ArcaneBloom.fxh')
+            DestinationFiles = @('Shaders/ArcaneBloom.fx', 'Shaders/ArcaneBloom.fxh')
+            SHA256 = @('FF50C72030922B213EB8FB003AAC7DE6991AE897A7245816C49DC587C1D301D4', '8E044EAA5F544C304612BAFBD887B3B0F6BC263FC858808932A7FE72C3173C8B')
+            ByteLengths = @([int64]13363, [int64]3567)
+            FileLicenses = @('REPOSITORY-LICENSE', 'REPOSITORY-LICENSE')
+            NoticeFiles = @([pscustomobject]@{ Repository = 'luluco250/FXShaders'; PinnedCommit = '76365e35c48e30170985ca371e67d8daf8eb9a98'; SourceRelativePath = 'LICENSE'; DestinationRelativePath = 'Shaders/TPM/Notices/FXShaders.ArcaneBloom/LICENSE.txt'; SHA256 = '715DFA2CF3EA38AFF207A34EC79611F80BF9189E121F564E42CFF4AEED8541C1'; ByteLength = [int64]1067 })
+            RequiredIncludes = @(); RequiredTextures = @()
+            License = 'MIT'; Attribution = 'Lucas Melo (luluco250)'
+            SourceObligations = 'MIT: keep the copyright and permission notice with all copies; the upstream files are deployed unmodified. The optional dirt texture (ARCANE_BLOOM_USE_DIRT, off by default) is not required and is not deployed.'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/luluco250/FXShaders/76365e35c48e30170985ca371e67d8daf8eb9a98/'; TechniqueName = 'ArcaneBloom'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'Akgunter.CRTRoyale'; FriendlyName = 'CRT-Royale'; Category = 'ARCADE DISPLAY'; Repository = 'akgunter/crt-royale-reshade'; PinnedCommit = '7ca7f7cbb7e7d016ca1756d0855879c3b7d0cc05'
+            RelativeFiles = @('reshade-shaders/Shaders/crt-royale.fx', 'reshade-shaders/Shaders/crt-royale/lib/bind-shader-params.fxh', 'reshade-shaders/Shaders/crt-royale/lib/bloom-functions.fxh', 'reshade-shaders/Shaders/crt-royale/lib/blur-functions.fxh', 'reshade-shaders/Shaders/crt-royale/lib/derived-settings-and-constants.fxh', 'reshade-shaders/Shaders/crt-royale/lib/downsampling-functions.fxh', 'reshade-shaders/Shaders/crt-royale/lib/gamma-management.fxh', 'reshade-shaders/Shaders/crt-royale/lib/geometry-functions.fxh', 'reshade-shaders/Shaders/crt-royale/lib/helper-functions-and-macros.fxh', 'reshade-shaders/Shaders/crt-royale/lib/phosphor-mask-calculations.fxh', 'reshade-shaders/Shaders/crt-royale/lib/quad-pixel-communication.fxh', 'reshade-shaders/Shaders/crt-royale/lib/scanline-functions.fxh', 'reshade-shaders/Shaders/crt-royale/lib/special-functions.fxh', 'reshade-shaders/Shaders/crt-royale/lib/tex2Dantialias.fxh', 'reshade-shaders/Shaders/crt-royale/lib/user-settings.fxh', 'reshade-shaders/Shaders/crt-royale/shaders/bloom.fxh', 'reshade-shaders/Shaders/crt-royale/shaders/blurring.fxh', 'reshade-shaders/Shaders/crt-royale/shaders/brightpass.fxh', 'reshade-shaders/Shaders/crt-royale/shaders/content-box.fxh', 'reshade-shaders/Shaders/crt-royale/shaders/deinterlace.fxh', 'reshade-shaders/Shaders/crt-royale/shaders/electron-beams.fxh', 'reshade-shaders/Shaders/crt-royale/shaders/geometry-aa-last-pass.fxh', 'reshade-shaders/Shaders/crt-royale/shaders/input-blurring.fxh', 'reshade-shaders/Shaders/crt-royale/shaders/phosphor-mask.fxh', 'reshade-shaders/Shaders/crt-royale/shaders/shared-objects.fxh', 'reshade-shaders/Shaders/crt-royale/version-number.fxh')
+            DestinationFiles = @('Shaders/crt-royale.fx', 'Shaders/crt-royale/lib/bind-shader-params.fxh', 'Shaders/crt-royale/lib/bloom-functions.fxh', 'Shaders/crt-royale/lib/blur-functions.fxh', 'Shaders/crt-royale/lib/derived-settings-and-constants.fxh', 'Shaders/crt-royale/lib/downsampling-functions.fxh', 'Shaders/crt-royale/lib/gamma-management.fxh', 'Shaders/crt-royale/lib/geometry-functions.fxh', 'Shaders/crt-royale/lib/helper-functions-and-macros.fxh', 'Shaders/crt-royale/lib/phosphor-mask-calculations.fxh', 'Shaders/crt-royale/lib/quad-pixel-communication.fxh', 'Shaders/crt-royale/lib/scanline-functions.fxh', 'Shaders/crt-royale/lib/special-functions.fxh', 'Shaders/crt-royale/lib/tex2Dantialias.fxh', 'Shaders/crt-royale/lib/user-settings.fxh', 'Shaders/crt-royale/shaders/bloom.fxh', 'Shaders/crt-royale/shaders/blurring.fxh', 'Shaders/crt-royale/shaders/brightpass.fxh', 'Shaders/crt-royale/shaders/content-box.fxh', 'Shaders/crt-royale/shaders/deinterlace.fxh', 'Shaders/crt-royale/shaders/electron-beams.fxh', 'Shaders/crt-royale/shaders/geometry-aa-last-pass.fxh', 'Shaders/crt-royale/shaders/input-blurring.fxh', 'Shaders/crt-royale/shaders/phosphor-mask.fxh', 'Shaders/crt-royale/shaders/shared-objects.fxh', 'Shaders/crt-royale/version-number.fxh')
+            SHA256 = @('DDA1974C96F3DA77E4B0DCA7B8347D915588F8DDF875FBD51A8A7296FDEECBA9', '4DC2E031E4D74BEA3170308B689DD8472E78194BBED5C73F355CD7E80397D0B0', '3BC7F06B2CED054A19C6E8AB2D6E905914E65CAC2B9DF69E5286F979B43A9E23', 'D939DE9DAEF50F2641F527CB85E715C5D50837CECD390F6953BC3EAE37F15758', '483A0CD677C0B560BD070684D33FADD40FBDC1BCE03E4D1DE13EC65AA3736501', '5B2E4EFF44E0909767A909F5EDA5FBEBC364B8F168BB0DD1C6BD2A497A203F94', 'FDF52BB8F8CC98B64A506DE37114CA5C64D2167AC1154AEE9B58C454D1C7855D', '30815AC8183BAEE8952BEACCDB864D85542C36A300E9FE85CE9AB1160BF3510F', '755592F97CED9D045EB27187CDC346D3EEA1B14CB65A8A6EEC3023CF97144DD1', 'E5DA670C63F33A60C22A660DFD2E4E410AAC22C02C4487602B6ED1A369BA4C2B', '24E0CDD2902A21129897CE42212650F09B5C8A44A9A085A150F849EA50D92B3F', '69F23845C9EC1CA8694E33D91E468EDE3F3D309162B99619AF2A7BCC26ED1D82', '25C82FED973D9C484934B9092C08330C32D85066DF51D54AB8B90CF7E743005D', '832B30F707C5B1FA314F119F043128BDC22A836ED4D1E34824E87CC8D4275817', '451C6DD1F5DC9A731FB31956322ED5000271196846E35B2137A84F63296FB22E', 'E5E9E2B1D6EEF2009CF9BB00225FF22AA988046CD6062E2C72EC7A52EF37F7F6', 'C2070CE80C32AB85653AA84F5C8B47C330701F6C42A552D87C344087DCCB9D54', 'F526D7C9FFEFB9DFD5AD0CDC653673E318732AF80C921444AC7C18532138C58C', '0F7C851AD8CAB45815077C968160381DBB1751D4C8B06FE7C1D04C658DCF4856', '903B27FC4351D0005DDCDE037B8EC2C8FF06332C12656B13C80DB87C61852C66', 'B7953B9DF79E4C842C01971712814EA001883F7086A72024176C3C7D957F5EA7', '61726A303BA607156381DFEDAB37F22E503B358B5A74069A942EF4F1FD08D0C2', '22D0B68B328A0D12BDCF0B40FFD301D64FDC89B2BC69A0CAFD39A17548F0765F', '36A1E05C9CB6DD3F01E1063C5DED5CA80056855ECA6F371B5BABBB380C253CAD', 'E6C3A8B1845E8E6E5E5A70D14EF40B59855192032479BF072370FE57AB53E74B', '67092ECA5ADEF657F04D8213DEA9B33977B2E71B1C4B5B7BD03AEE3B28B4FB77')
+            ByteLengths = @([int64]6833, [int64]29390, [int64]16312, [int64]114969, [int64]19106, [int64]3085, [int64]11021, [int64]39441, [int64]3530, [int64]29211, [int64]12511, [int64]24033, [int64]19121, [int64]83833, [int64]24535, [int64]5765, [int64]5730, [int64]4210, [int64]7882, [int64]5695, [int64]15939, [int64]10302, [int64]2633, [int64]7900, [int64]12927, [int64]2191)
+            FileLicenses = @('GPL-2.0-or-later', 'GPL-2.0-or-later', 'GPL-2.0-or-later', 'MIT', 'GPL-2.0-or-later', 'MIT', 'MIT', 'GPL-2.0-or-later', 'MIT', 'MIT', 'MIT', 'GPL-2.0-or-later', 'MIT', 'GPL-2.0-or-later', 'REPOSITORY-LICENSE', 'GPL-2.0-or-later', 'GPL-2.0-or-later', 'GPL-2.0-or-later', 'MIT', 'MIT', 'GPL-2.0-or-later', 'GPL-2.0-or-later', 'MIT', 'MIT', 'GPL-2.0-or-later', 'MIT')
+            NoticeFiles = @([pscustomobject]@{ Repository = 'akgunter/crt-royale-reshade'; PinnedCommit = '7ca7f7cbb7e7d016ca1756d0855879c3b7d0cc05'; SourceRelativePath = 'LICENSE.TXT'; DestinationRelativePath = 'Shaders/TPM/Notices/Akgunter.CRTRoyale/LICENSE.txt'; SHA256 = '186D4B813CCA7C779938DB8FB041D9FE9C132F403045F88C251AF1656358D169'; ByteLength = [int64]15521 })
+            RequiredIncludes = @('ReShade.fxh'); RequiredTextures = @()
+            License = 'GPL-2.0-or-later (project); MIT (individual files, see FileLicenses)'; Attribution = 'TroggleMonkey (crt-royale); Alex Gunter (ReShade port)'
+            SourceObligations = 'GPL-2.0-or-later: the unmodified source files are deployed with their notices and the GPL-2.0 text. Whether that satisfies the source and redistribution conditions of the licence for an application that downloads them for the user is pending legal review. Files marked MIT in FileLicenses are MIT-licensed and keep their own notices.'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/akgunter/crt-royale-reshade/7ca7f7cbb7e7d016ca1756d0855879c3b7d0cc05/'; TechniqueName = 'CRT_Royale'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'RSRetroArch.CRTPi'; FriendlyName = 'CRT-Pi'; Category = 'ARCADE DISPLAY'; Repository = 'Matsilagi/RSRetroArch'; PinnedCommit = '73dc21fcc9f1e1d6e4bf0f1c5c95b882078d474d'
+            RelativeFiles = @('Shaders/CRTPi.fx')
+            DestinationFiles = @('Shaders/CRTPi.fx')
+            SHA256 = @('0A8F7E28C0E84D4DC27BD4D5C36CF3910B0D94E28BDDA12C158E8B1B42F46980')
+            ByteLengths = @([int64]8671)
+            FileLicenses = @('GPL-2.0-or-later')
+            NoticeFiles = @([pscustomobject]@{ Repository = 'akgunter/crt-royale-reshade'; PinnedCommit = '7ca7f7cbb7e7d016ca1756d0855879c3b7d0cc05'; SourceRelativePath = 'LICENSE.TXT'; DestinationRelativePath = 'Shaders/TPM/Notices/RSRetroArch.CRTPi/GPL-2.0.txt'; SHA256 = '186D4B813CCA7C779938DB8FB041D9FE9C132F403045F88C251AF1656358D169'; ByteLength = [int64]15521 })
+            RequiredIncludes = @('ReShade.fxh'); RequiredTextures = @()
+            License = 'GPL-2.0-or-later'; Attribution = 'davej (crt-pi); Matsilagi (ReShade port, RSRetroArch)'
+            SourceObligations = 'GPL-2.0-or-later: the unmodified source file is deployed with its notices and a copy of the GPL-2.0 text. Whether that satisfies the source and redistribution conditions of the licence for an application that downloads it for the user is pending legal review. The port repository carries no LICENSE file; the file-level GPL notice is the license basis.'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/Matsilagi/RSRetroArch/73dc21fcc9f1e1d6e4bf0f1c5c95b882078d474d/'; TechniqueName = 'CRTPi'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'CrosireLegacy.AdaptiveSharpen'; FriendlyName = 'Adaptive Sharpen'; Category = 'SHARPNESS'; Repository = 'crosire/reshade-shaders'; PinnedCommit = 'bcb5ba54199f4455026dd8ba66dc1b74461d3152'
+            RelativeFiles = @('Shaders/AdaptiveSharpen.fx')
+            DestinationFiles = @('Shaders/AdaptiveSharpen.fx')
+            SHA256 = @('FD492A91551B3F40045CE65EA04F86D1632832B8FD8EA077E73606FFEC396808')
+            ByteLengths = @([int64]15949)
+            FileLicenses = @('BSD-2-Clause')
+            NoticeFiles = @()
+            RequiredIncludes = @('ReShadeUI.fxh', 'ReShade.fxh'); RequiredTextures = @()
+            License = 'BSD-2-Clause'; Attribution = 'bacondither'
+            SourceObligations = 'BSD-2-Clause: source redistributions must retain the copyright notice, conditions and disclaimer in place and unchanged; the file is deployed unmodified.'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/crosire/reshade-shaders/bcb5ba54199f4455026dd8ba66dc1b74461d3152/'; TechniqueName = 'AdaptiveSharpen'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'Fubax.FilmicAnamorphSharpen'; FriendlyName = 'Filmic Anamorph Sharpen'; Category = 'SHARPNESS'; Repository = 'Fubaxiusz/fubax-shaders'; PinnedCommit = 'd902cc2e8216f10801019b02b09f7bd55449fd79'
+            RelativeFiles = @('Shaders/FilmicAnamorphSharpen.fx', 'Shaders/ColorConversion.fxh', 'Shaders/LinearWorkflow.fxh')
+            DestinationFiles = @('Shaders/FilmicAnamorphSharpen.fx', 'Shaders/ColorConversion.fxh', 'Shaders/LinearWorkflow.fxh')
+            SHA256 = @('640C5089F35D85DAA662468068FD8683E32BCFC736803B36841AEFDCE1B95535', '4805668A886C335BF929C7AC77B4D75E2B4A72B558FD7D9DEF26B02E0AE3525B', '320D4D8F1D2426A97383DE4751B20EDEC31BC71FED389A1B0D9D3A65AE74992E')
+            ByteLengths = @([int64]7870, [int64]2353, [int64]6284)
+            FileLicenses = @('CC-BY-SA-4.0', 'CC-PDM-1.0', 'CC-PDM-1.0')
+            NoticeFiles = @()
+            RequiredIncludes = @('ReShadeUI.fxh', 'ReShade.fxh'); RequiredTextures = @()
+            License = 'CC-BY-SA-4.0 (shader); CC-PDM-1.0 (ColorConversion.fxh, LinearWorkflow.fxh)'; Attribution = 'Jakub Maximilian Fober; ccritchfield (changes)'
+            SourceObligations = 'CC BY-SA 4.0: attribution is kept in the unmodified file header; any ADAPTATION must be shared under the same license. TPM does not adapt the file. License: https://creativecommons.org/licenses/by-sa/4.0/'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/Fubaxiusz/fubax-shaders/d902cc2e8216f10801019b02b09f7bd55449fd79/'; TechniqueName = 'FilmicAnamorphSharpen'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'CrosireLegacy.Colourfulness'; FriendlyName = 'Colourfulness'; Category = 'COLOR'; Repository = 'crosire/reshade-shaders'; PinnedCommit = 'bcb5ba54199f4455026dd8ba66dc1b74461d3152'
+            RelativeFiles = @('Shaders/Colourfulness.fx')
+            DestinationFiles = @('Shaders/Colourfulness.fx')
+            SHA256 = @('0ADD0A1E22FF62F1BEE8B61D6BBC49D2E162DEDF055BB6D167425706A4725C04')
+            ByteLengths = @([int64]4915)
+            FileLicenses = @('BSD-2-Clause')
+            NoticeFiles = @()
+            RequiredIncludes = @('ReShadeUI.fxh', 'ReShade.fxh'); RequiredTextures = @()
+            License = 'BSD-2-Clause'; Attribution = 'bacondither'
+            SourceObligations = 'BSD-2-Clause: source redistributions must retain the copyright notice, conditions and disclaimer in place and unchanged; the file is deployed unmodified.'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/crosire/reshade-shaders/bcb5ba54199f4455026dd8ba66dc1b74461d3152/'; TechniqueName = 'Colourfulness'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'Glamarye.FastEffects'; FriendlyName = 'Glamarye Fast Effects'; Category = 'ENHANCEMENT'; Repository = 'rj200/Glamarye_Fast_Effects_for_ReShade'; PinnedCommit = '9dd9b826fa2cbea818ef1bc487e5f2e7f427c750'
+            RelativeFiles = @('Shaders/Glamayre_Fast_Effects.fx')
+            DestinationFiles = @('Shaders/Glamayre_Fast_Effects.fx')
+            SHA256 = @('3F36C39B0D4392257D7C26AB2C5C3336FBF7E9118901F3DC9A08E2C3D1639C00')
+            ByteLengths = @([int64]108306)
+            FileLicenses = @('MIT')
+            NoticeFiles = @([pscustomobject]@{ Repository = 'rj200/Glamarye_Fast_Effects_for_ReShade'; PinnedCommit = '9dd9b826fa2cbea818ef1bc487e5f2e7f427c750'; SourceRelativePath = 'LICENSE'; DestinationRelativePath = 'Shaders/TPM/Notices/Glamarye.FastEffects/LICENSE.txt'; SHA256 = 'B635B5028174911D20A33EECFDDD0BE2539C342D4C45D16BAE37011E6930E7B7'; ByteLength = [int64]1115 })
+            RequiredIncludes = @('ReShadeUI.fxh', 'ReShade.fxh'); RequiredTextures = @()
+            License = 'MIT'; Attribution = 'Robert Jessop (main shader); Alex Tuderan (blur functions)'
+            SourceObligations = 'MIT: keep the copyright and permission notice with all copies; the upstream file is deployed unmodified.'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/rj200/Glamarye_Fast_Effects_for_ReShade/9dd9b826fa2cbea818ef1bc487e5f2e7f427c750/'; TechniqueName = 'Glamarye_Fast_Effects_without_Fake_GI'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'Lilium.ToneMapping'; FriendlyName = 'Lilium Tone Mapping'; Category = 'HDR'; Repository = 'EndlesslyFlowering/ReShade_HDR_shaders'; PinnedCommit = 'b1ada21b27666aa0703c6f9b9d83c389e92063a1'
+            RelativeFiles = @('Shaders/lilium__tone_mapping.fx', 'Shaders/lilium__include/include_main.fxh', 'Shaders/lilium__include/reshade_setup.fxh', 'Shaders/lilium__include/math.fxh', 'Shaders/lilium__include/colour_space/sdr_trcs.fxh', 'Shaders/lilium__include/colour_space/hdr_trcs.fxh', 'Shaders/lilium__include/colour_space/ycbcr.fxh', 'Shaders/lilium__include/colour_space/cie_xyz_xy_uv.fxh', 'Shaders/lilium__include/colour_space/matrices.fxh', 'Shaders/lilium__include/colour_space/ipt.fxh', 'Shaders/lilium__include/colour_space/ictcp.fxh', 'Shaders/lilium__include/colour_space/jzazbz.fxh', 'Shaders/lilium__include/colour_space/oklab.fxh', 'Shaders/lilium__include/colour_space/darktable_ucs.fxh', 'Shaders/lilium__include/colour_space/helpers.fxh', 'Shaders/lilium__include/colour_space/hdr10_to_linear_lut.fxh', 'Shaders/lilium__include/colour_space/colour_object.fxh', 'Shaders/lilium__include/tone_mappers.fxh')
+            DestinationFiles = @('Shaders/lilium__tone_mapping.fx', 'Shaders/lilium__include/include_main.fxh', 'Shaders/lilium__include/reshade_setup.fxh', 'Shaders/lilium__include/math.fxh', 'Shaders/lilium__include/colour_space/sdr_trcs.fxh', 'Shaders/lilium__include/colour_space/hdr_trcs.fxh', 'Shaders/lilium__include/colour_space/ycbcr.fxh', 'Shaders/lilium__include/colour_space/cie_xyz_xy_uv.fxh', 'Shaders/lilium__include/colour_space/matrices.fxh', 'Shaders/lilium__include/colour_space/ipt.fxh', 'Shaders/lilium__include/colour_space/ictcp.fxh', 'Shaders/lilium__include/colour_space/jzazbz.fxh', 'Shaders/lilium__include/colour_space/oklab.fxh', 'Shaders/lilium__include/colour_space/darktable_ucs.fxh', 'Shaders/lilium__include/colour_space/helpers.fxh', 'Shaders/lilium__include/colour_space/hdr10_to_linear_lut.fxh', 'Shaders/lilium__include/colour_space/colour_object.fxh', 'Shaders/lilium__include/tone_mappers.fxh')
+            SHA256 = @('0BF538BBC5B250073BE0DDAA3A7F17500EE6D8BEDB9C8B37D4E67BBE5CBF5A0B', '5B3543EE59C82D0E8BD477F4F8D4DFF2E469BD6828C917CF8FF224071FABC11F', '4D7DB86FB16C9F9ED339F4084B0935591AD471B6A34B231A46E505CC91EF8352', 'F4E24157F6CFA37EC37EC533B540649F43EE190910C04891A800ACF2A1E75880', '23A7B7A91219739E16C56CDDC34A2A82A651CFA946542C68ED17709E3C539051', '8674759B781874E5C501A0B1529A70127AAB9B893044167AB1BCE28F1AC34578', 'E3C79A9FD708BC9F80BC2459D80814525B6D466F02394173A5A0DFC1C7D19A98', 'E93B517ED6E901FFDDCCEEB1B51BA9A1911FC027E762F4B4944A3FA3C5E4CAF7', 'FF9EC7AA7757CAFDC3E530C500FFDFCF980CCB87DA5B30FA8CE430FF40C459CE', '190B31F66FB78C58E7F5313D9785D44EA923D5A4F0D5B1433AB9F448D5728A67', '3E09CBBF890FC5C3149218B7D42393DB2DD48774D586625773139D151659D99D', '662392BBA466BAF821BFEEF33CBE9DF169715E4FFA5AB279875C12E74D6EA5CD', '19C3AB49653248F1B9634A5D38251503D0CF86D756F8400B9818049229349468', 'F6B749CDA7666442EDB47224C7F540810E05314332FDF192984C8325899BF020', '64E642D959696F3C12590F0C95CE1989A51A1DDE1641C975C7674063E41C4448', 'EF459A7481A47F91E72C2A47425FBD21BFC92701CF1E27E2A17A659962E91D93', 'CB54F3624ACD5018810B58A7D93F1B37EEB4B204C65EAAA1800F5F9FC6B29BE4', 'C65D0DBC5FE0F895BECBC0B3CE899760B8345F4A28D9D4153532A9F7F24C79F7')
+            ByteLengths = @([int64]29830, [int64]555, [int64]44747, [int64]6414, [int64]16574, [int64]7960, [int64]4280, [int64]3054, [int64]18559, [int64]4525, [int64]7939, [int64]10894, [int64]21371, [int64]11930, [int64]4247, [int64]8452, [int64]20393, [int64]21854)
+            FileLicenses = @('REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'MIT', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE')
+            NoticeFiles = @([pscustomobject]@{ Repository = 'EndlesslyFlowering/ReShade_HDR_shaders'; PinnedCommit = 'b1ada21b27666aa0703c6f9b9d83c389e92063a1'; SourceRelativePath = 'LICENSE'; DestinationRelativePath = 'Shaders/TPM/Notices/Lilium.ToneMapping/LICENSE.txt'; SHA256 = '3972DC9744F6499F0F9B2DBF76696F2AE7AD8AF9B23DDE66D6AF86C9DFB36986'; ByteLength = [int64]35149 })
+            RequiredIncludes = @(); RequiredTextures = @()
+            License = 'GPL-3.0 (project); MIT (oklab.fxh) per FileLicenses'; Attribution = 'EndlesslyFlowering (Lilium); Bjorn Ottosson (Oklab); Aurelien Pierre / darktable project (darktable UCS)'
+            SourceObligations = 'GPL-3.0: the unmodified source files are deployed with their notices and the GPL-3.0 text. Whether that satisfies the source and redistribution conditions of the licence for an application that downloads them for the user is pending legal review.'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/EndlesslyFlowering/ReShade_HDR_shaders/b1ada21b27666aa0703c6f9b9d83c389e92063a1/'; TechniqueName = 'lilium__tone_mapping'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
+        [pscustomobject]@{
+            EffectId = 'Lilium.HdrBlackFloorFix'; FriendlyName = 'Lilium HDR Black Floor Fix'; Category = 'HDR'; Repository = 'EndlesslyFlowering/ReShade_HDR_shaders'; PinnedCommit = 'b1ada21b27666aa0703c6f9b9d83c389e92063a1'
+            RelativeFiles = @('Shaders/lilium__hdr_black_floor_fix.fx', 'Shaders/lilium__include/include_main.fxh', 'Shaders/lilium__include/reshade_setup.fxh', 'Shaders/lilium__include/math.fxh', 'Shaders/lilium__include/colour_space/sdr_trcs.fxh', 'Shaders/lilium__include/colour_space/hdr_trcs.fxh', 'Shaders/lilium__include/colour_space/ycbcr.fxh', 'Shaders/lilium__include/colour_space/cie_xyz_xy_uv.fxh', 'Shaders/lilium__include/colour_space/matrices.fxh', 'Shaders/lilium__include/colour_space/ipt.fxh', 'Shaders/lilium__include/colour_space/ictcp.fxh', 'Shaders/lilium__include/colour_space/jzazbz.fxh', 'Shaders/lilium__include/colour_space/oklab.fxh', 'Shaders/lilium__include/colour_space/darktable_ucs.fxh', 'Shaders/lilium__include/colour_space/helpers.fxh', 'Shaders/lilium__include/colour_space/hdr10_to_linear_lut.fxh', 'Shaders/lilium__include/colour_space/colour_object.fxh', 'Shaders/lilium__include/hdr_black_floor_fix.fxh')
+            DestinationFiles = @('Shaders/lilium__hdr_black_floor_fix.fx', 'Shaders/lilium__include/include_main.fxh', 'Shaders/lilium__include/reshade_setup.fxh', 'Shaders/lilium__include/math.fxh', 'Shaders/lilium__include/colour_space/sdr_trcs.fxh', 'Shaders/lilium__include/colour_space/hdr_trcs.fxh', 'Shaders/lilium__include/colour_space/ycbcr.fxh', 'Shaders/lilium__include/colour_space/cie_xyz_xy_uv.fxh', 'Shaders/lilium__include/colour_space/matrices.fxh', 'Shaders/lilium__include/colour_space/ipt.fxh', 'Shaders/lilium__include/colour_space/ictcp.fxh', 'Shaders/lilium__include/colour_space/jzazbz.fxh', 'Shaders/lilium__include/colour_space/oklab.fxh', 'Shaders/lilium__include/colour_space/darktable_ucs.fxh', 'Shaders/lilium__include/colour_space/helpers.fxh', 'Shaders/lilium__include/colour_space/hdr10_to_linear_lut.fxh', 'Shaders/lilium__include/colour_space/colour_object.fxh', 'Shaders/lilium__include/hdr_black_floor_fix.fxh')
+            SHA256 = @('EC4BD17256714577F41E14587A751B9EC950733343B2F5C7D88F556A6039B625', '5B3543EE59C82D0E8BD477F4F8D4DFF2E469BD6828C917CF8FF224071FABC11F', '4D7DB86FB16C9F9ED339F4084B0935591AD471B6A34B231A46E505CC91EF8352', 'F4E24157F6CFA37EC37EC533B540649F43EE190910C04891A800ACF2A1E75880', '23A7B7A91219739E16C56CDDC34A2A82A651CFA946542C68ED17709E3C539051', '8674759B781874E5C501A0B1529A70127AAB9B893044167AB1BCE28F1AC34578', 'E3C79A9FD708BC9F80BC2459D80814525B6D466F02394173A5A0DFC1C7D19A98', 'E93B517ED6E901FFDDCCEEB1B51BA9A1911FC027E762F4B4944A3FA3C5E4CAF7', 'FF9EC7AA7757CAFDC3E530C500FFDFCF980CCB87DA5B30FA8CE430FF40C459CE', '190B31F66FB78C58E7F5313D9785D44EA923D5A4F0D5B1433AB9F448D5728A67', '3E09CBBF890FC5C3149218B7D42393DB2DD48774D586625773139D151659D99D', '662392BBA466BAF821BFEEF33CBE9DF169715E4FFA5AB279875C12E74D6EA5CD', '19C3AB49653248F1B9634A5D38251503D0CF86D756F8400B9818049229349468', 'F6B749CDA7666442EDB47224C7F540810E05314332FDF192984C8325899BF020', '64E642D959696F3C12590F0C95CE1989A51A1DDE1641C975C7674063E41C4448', 'EF459A7481A47F91E72C2A47425FBD21BFC92701CF1E27E2A17A659962E91D93', 'CB54F3624ACD5018810B58A7D93F1B37EEB4B204C65EAAA1800F5F9FC6B29BE4', '5D49D02BA80B971395C0E669D9CDF8D5CA03F14D4A336EE114DBCAA55E39210F')
+            ByteLengths = @([int64]7019, [int64]555, [int64]44747, [int64]6414, [int64]16574, [int64]7960, [int64]4280, [int64]3054, [int64]18559, [int64]4525, [int64]7939, [int64]10894, [int64]21371, [int64]11930, [int64]4247, [int64]8452, [int64]20393, [int64]16105)
+            FileLicenses = @('REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'MIT', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE', 'REPOSITORY-LICENSE')
+            NoticeFiles = @([pscustomobject]@{ Repository = 'EndlesslyFlowering/ReShade_HDR_shaders'; PinnedCommit = 'b1ada21b27666aa0703c6f9b9d83c389e92063a1'; SourceRelativePath = 'LICENSE'; DestinationRelativePath = 'Shaders/TPM/Notices/Lilium.HdrBlackFloorFix/LICENSE.txt'; SHA256 = '3972DC9744F6499F0F9B2DBF76696F2AE7AD8AF9B23DDE66D6AF86C9DFB36986'; ByteLength = [int64]35149 })
+            RequiredIncludes = @(); RequiredTextures = @()
+            License = 'GPL-3.0 (project); MIT (oklab.fxh) per FileLicenses'; Attribution = 'EndlesslyFlowering (Lilium); Bjorn Ottosson (Oklab); Aurelien Pierre / darktable project (darktable UCS)'
+            SourceObligations = 'GPL-3.0: the unmodified source files are deployed with their notices and the GPL-3.0 text. Whether that satisfies the source and redistribution conditions of the licence for an application that downloads them for the user is pending legal review.'
+            AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/EndlesslyFlowering/ReShade_HDR_shaders/b1ada21b27666aa0703c6f9b9d83c389e92063a1/'; TechniqueName = 'lilium__hdr_black_floor_fix'
+            PerformanceClass = 'UNMEASURED'; ResolutionSensitivity = 'UNMEASURED'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original'
+        }
     )
+    $sharpenIds = @('SweetFX.LumaSharpen', 'SweetFX.CAS', 'CrosireLegacy.AdaptiveSharpen', 'Fubax.FilmicAnamorphSharpen', 'Glamarye.FastEffects')
+    $colorAlternativeIds = @('SweetFX.Vibrance', 'CrosireLegacy.Colourfulness')
+    $crtIds = @('FXShaders.CRT_Lottes', 'Akgunter.CRTRoyale', 'RSRetroArch.CRTPi')
     foreach ($effect in $effects) {
-        if ($effect.EffectId -eq 'SweetFX.LumaSharpen') { $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @('SweetFX.Vibrance') -Force; $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @('FXShaders.CRT_Lottes') -Force }
-        elseif ($effect.EffectId -eq 'SweetFX.Vibrance') { $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @('SweetFX.LumaSharpen') -Force; $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @() -Force }
-        elseif ($effect.EffectId -eq 'FXShaders.CRT_Lottes') { $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @() -Force; $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @('SweetFX.LumaSharpen','SweetFX.Vibrance') -Force }
-        else { $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @() -Force; $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @() -Force }
+        $effectId = [string]$effect.EffectId
+        $compatible = @()
+        $conflicts = @()
+        # LumaSharpen + Vibrance is the only approved multi-effect combination (the existing Enhanced Arcade preset).
+        if ($effectId -eq 'SweetFX.LumaSharpen') { $compatible = @('SweetFX.Vibrance') }
+        elseif ($effectId -eq 'SweetFX.Vibrance') { $compatible = @('SweetFX.LumaSharpen') }
+        # Sharpening algorithms, color-strength algorithms and CRT looks are ALTERNATIVES, never stacked automatically.
+        if ($sharpenIds -contains $effectId) { $conflicts += @($sharpenIds | Where-Object { $_ -ne $effectId }) }
+        if ($colorAlternativeIds -contains $effectId) { $conflicts += @($colorAlternativeIds | Where-Object { $_ -ne $effectId }) }
+        if ($crtIds -contains $effectId) { $conflicts += @($crtIds | Where-Object { $_ -ne $effectId }); $conflicts += $sharpenIds; $conflicts += $colorAlternativeIds }
+        if ($effectId -eq 'Glamarye.FastEffects') { $conflicts += 'SweetFX.SMAA' }
+        if ($effectId -eq 'SweetFX.SMAA') { $conflicts += 'Glamarye.FastEffects' }
+        $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @($compatible) -Force
+        $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @($conflicts | Sort-Object -Unique) -Force
         $effect | Add-Member -NotePropertyName OrderConstraints -NotePropertyValue @() -Force
         if (-not $effect.PSObject.Properties['ByteLengths']) {
-            $lengths = if ($effect.EffectId -eq 'SweetFX.LumaSharpen') { @([int64]8688) } elseif ($effect.EffectId -eq 'SweetFX.Vibrance') { @([int64]2217) } elseif ($effect.EffectId -eq 'FXShaders.CRT_Lottes') { @([int64]5114,[int64]21710) } else { @() }
+            $lengths = @(if ($effectId -eq 'SweetFX.LumaSharpen') { [int64]8688 } elseif ($effectId -eq 'SweetFX.Vibrance') { [int64]2217 } elseif ($effectId -eq 'FXShaders.CRT_Lottes') { [int64]5114,[int64]21710 })
             $effect | Add-Member -NotePropertyName ByteLengths -NotePropertyValue $lengths -Force
         }
+        # Defaults for the pre-existing rows: files deploy at their repository-relative path, with the upstream LICENSE as notice.
+        if (-not $effect.PSObject.Properties['DestinationFiles']) { $effect | Add-Member -NotePropertyName DestinationFiles -NotePropertyValue @($effect.RelativeFiles) -Force }
+        if (-not $effect.PSObject.Properties['NoticeFiles']) {
+            $notice = $null
+            if ($effect.Repository -eq 'CeeJayDK/SweetFX') { $notice = [pscustomobject]@{ Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; SourceRelativePath = 'LICENSE'; DestinationRelativePath = ('Shaders/TPM/Notices/{0}/LICENSE.txt' -f $effectId); SHA256 = '9B2E0B3FF53493F211E39390947716CD16EE559303DAC0713AD4B12228DBCE51'; ByteLength = [int64]1076 } }
+            elseif ($effect.Repository -eq 'luluco250/FXShaders') { $notice = [pscustomobject]@{ Repository = 'luluco250/FXShaders'; PinnedCommit = '76365e35c48e30170985ca371e67d8daf8eb9a98'; SourceRelativePath = 'LICENSE'; DestinationRelativePath = ('Shaders/TPM/Notices/{0}/LICENSE.txt' -f $effectId); SHA256 = '715DFA2CF3EA38AFF207A34EC79611F80BF9189E121F564E42CFF4AEED8541C1'; ByteLength = [int64]1067 } }
+            $effect | Add-Member -NotePropertyName NoticeFiles -NotePropertyValue @($notice | Where-Object { $null -ne $_ }) -Force
+        }
+        if (-not $effect.PSObject.Properties['FileLicenses']) {
+            $fileLicenses = @($effect.RelativeFiles | ForEach-Object { if ($effectId -eq 'FXShaders.CRT_Lottes' -and [IO.Path]::GetFileName($_) -eq 'CRT_Lottes.fxh') { 'CC0-1.0/Unlicense (Timothy Lottes, in-file notice)' } else { 'REPOSITORY-LICENSE' } })
+            $effect | Add-Member -NotePropertyName FileLicenses -NotePropertyValue $fileLicenses -Force
+        }
+        if (-not $effect.PSObject.Properties['SourceObligations']) { $effect | Add-Member -NotePropertyName SourceObligations -NotePropertyValue 'MIT: keep the copyright and permission notice with all copies; the upstream files are deployed unmodified.' -Force }
+        # Last: the review record is bound to the final pins and licence copies, so every default above must already be in place.
+        $effect | Add-Member -NotePropertyName ObligationReview -NotePropertyValue (Get-TpmReShadeObligationReviewRecord -EffectId $effectId -Effect $effect) -Force
     }
     return $effects
 }
@@ -8027,6 +8474,18 @@ function Test-TpmReShadePresetContent {
     }
     $approvedTechniques = @(Get-TpmReShadeEffectCatalog | ForEach-Object { [string]$_.TechniqueName } | Sort-Object -Unique)
     foreach ($technique in $actual) { if ($technique -notin $approvedTechniques) { return $false } }
+    # Per-effect parameter sections ("[File.fx]" followed by key=value) are accepted only for an effect file this profile
+    # requires, with plain identifier keys and plain numeric values, and only after every flat setting line.
+    $allowedSections = @($ProfileDefinition.RequiredEffects | ForEach-Object { [string]$_ })
+    $inSection = $false
+    foreach ($line in $presetLines) {
+        if ($line -match '^\[(?<name>[^\]]*)\]$') {
+            if ($Matches['name'] -notin $allowedSections) { return $false }
+            $inSection = $true
+            continue
+        }
+        if ($inSection -and -not [string]::IsNullOrWhiteSpace($line) -and $line -notmatch '^[A-Za-z_][A-Za-z0-9_]*=-?[0-9]+(?:\.[0-9]+)?$') { return $false }
+    }
     return $true
 }
 
@@ -8042,7 +8501,17 @@ function New-TpmReShadePresetContent {
     [void]$lines.Add('PresetName=' + $ProfileDefinition.FriendlyName)
     [void]$lines.Add('Techniques=' + (@($ProfileDefinition.TechniqueOrder) -join ','))
     [void]$lines.Add('TechniqueSorting=' + (@($ProfileDefinition.TechniqueOrder) -join ','))
-    foreach ($key in @($ProfileDefinition.Parameters.Keys | Sort-Object)) { [void]$lines.Add(('{0}={1}' -f $key, $ProfileDefinition.Parameters[$key])) }
+    # Flat parameters first; nested per-effect tables become "[File.fx]" sections after every flat line.
+    foreach ($key in @($ProfileDefinition.Parameters.Keys | Sort-Object)) {
+        if ($ProfileDefinition.Parameters[$key] -is [System.Collections.IDictionary]) { continue }
+        [void]$lines.Add(('{0}={1}' -f $key, $ProfileDefinition.Parameters[$key]))
+    }
+    foreach ($section in @($ProfileDefinition.Parameters.Keys | Sort-Object)) {
+        $table = $ProfileDefinition.Parameters[$section]
+        if ($table -isnot [System.Collections.IDictionary]) { continue }
+        [void]$lines.Add('[' + $section + ']')
+        foreach ($key in @($table.Keys)) { [void]$lines.Add(('{0}={1}' -f $key, $table[$key])) }
+    }
     $content = ($lines -join "`r`n") + "`r`n"
     if (-not (Test-TpmReShadePresetContent -Content $content -ProfileDefinition $ProfileDefinition)) { throw 'Generated ReShade preset failed validation.' }
     return $content
@@ -8072,6 +8541,14 @@ function Get-TpmReShadeProfileGallery {
             PreviewAvailable = $reference.Available
             PreviewPath = $reference.Path
             PreviewReason = if ($reference.Available) { $null } else { $reference.Reason }
+            TechnicalName = [string]$_.TechnicalName
+            Group = [string]$_.Group
+            GroupLabel = Get-TpmReShadeProfileGroupLabel -Group ([string]$_.Group)
+            DisplayLabel = if ([string]::IsNullOrWhiteSpace([string]$_.TechnicalName)) { [string]$_.FriendlyName } else { ('{0} [{1}]' -f $_.FriendlyName, $_.TechnicalName) }
+            CompatibilityNote = [string]$_.CompatibilityNote
+            RequiresHdr = [bool]$_.RequiresHdr
+            PreviewApproximation = [string]$_.PreviewApproximation
+            PreviewNote = [string]$_.PreviewNote
             Provenance = 'TPM bundled landscape'
             PerformanceClass = $_.PerformanceClass
             ResolutionSensitivity = $_.ResolutionSensitivity
@@ -8148,7 +8625,7 @@ function Get-TpmReShadeRememberedProfile {
     $props=@($state.Profiles.PSObject.Properties|Where-Object { $_.Name -eq $GameId });$entry=if($props.Count -gt 0){$props[0].Value}else{$null}
     if(-not $entry){return [pscustomobject]@{Found=$false}}
     $rememberedProfile=Get-TpmReShadeProfile -ProfileId $entry.ProfileId
-    if(-not $rememberedProfile -or [string]$rememberedProfile.SchemaVersion -ne [string]$entry.DefinitionVersion -or (@($rememberedProfile.Effects)-join ',') -ne (@($entry.EffectIds)-join ',')){return [pscustomobject]@{Found=$true;Valid=$false;Reason='STALE_PROFILE_DEFINITION'}}
+    if(-not $rememberedProfile -or [string]$rememberedProfile.SchemaVersion -ne [string]$entry.DefinitionVersion -or (@($rememberedProfile.Effects)-join ',') -ne (@($entry.EffectIds)-join ',')){return [pscustomobject]@{Found=$true;Valid=$false;Reason=$(if(Get-TpmReShadeRetiredProfile -ProfileId $entry.ProfileId){'RETIRED_PROFILE'}else{'STALE_PROFILE_DEFINITION'})}}
     try { $rememberedVariant=Resolve-TpmReShadeIntensityVariant -ProfileDefinition $rememberedProfile -VariantId $entry.VariantId } catch { return [pscustomobject]@{Found=$true;Valid=$false;Reason='UNSUPPORTED_VARIANT'} }
     return [pscustomobject]@{Found=$true;Valid=$true;Profile=$rememberedProfile;VariantId=$rememberedVariant.VariantId}
 }
@@ -8206,7 +8683,7 @@ function Get-TpmReShadeRestoreCandidate {
         foreach ($propertyName in @('ProfileId','VariantId','DefinitionVersion','EffectIds','EffectSha256','Applied')) { if (-not $entry.PSObject.Properties[$propertyName]) { $complete = $false; break } }
         if (-not $complete -or [string]$entry.Applied -ne 'True') { continue }
         $candidateProfile = Get-TpmReShadeProfile -ProfileId $entry.ProfileId
-        if (-not $candidateProfile -or [string]$candidateProfile.SchemaVersion -ne [string]$entry.DefinitionVersion -or (@($candidateProfile.Effects) -join ',') -ne (@($entry.EffectIds) -join ',')) { $invalidReason = 'STALE_PROFILE_DEFINITION'; continue }
+        if (-not $candidateProfile -or [string]$candidateProfile.SchemaVersion -ne [string]$entry.DefinitionVersion -or (@($candidateProfile.Effects) -join ',') -ne (@($entry.EffectIds) -join ',')) { $invalidReason = $(if (Get-TpmReShadeRetiredProfile -ProfileId $entry.ProfileId) { 'RETIRED_PROFILE' } else { 'STALE_PROFILE_DEFINITION' }); continue }
         try { $candidateVariant = Resolve-TpmReShadeIntensityVariant -ProfileDefinition $candidateProfile -VariantId $entry.VariantId } catch { $invalidReason = 'UNSUPPORTED_VARIANT'; continue }
         try { $candidateHashes = @(Get-TpmReShadeProfileEffectHashes -ProfileDefinition $candidateProfile) } catch { $invalidReason = 'STALE_EFFECT_DEFINITION'; continue }
         if ((@($candidateHashes) -join ',') -ne (@($entry.EffectSha256) -join ',')) { $invalidReason = 'STALE_EFFECT_DEFINITION'; continue }
@@ -8257,7 +8734,7 @@ function Restore-TpmReShadeProfile {
         }
         $restoreProfile = Get-TpmReShadeProfile -ProfileId $HistoryEntry.ProfileId
         if (-not $restoreProfile -or [string]$restoreProfile.SchemaVersion -ne [string]$HistoryEntry.DefinitionVersion -or (@($restoreProfile.Effects) -join ',') -ne (@($HistoryEntry.EffectIds) -join ',')) {
-            return [pscustomobject]@{ Succeeded = $false; Reason = 'STALE_PROFILE_DEFINITION' }
+            return [pscustomobject]@{ Succeeded = $false; Reason = $(if (Get-TpmReShadeRetiredProfile -ProfileId $HistoryEntry.ProfileId) { 'RETIRED_PROFILE' } else { 'STALE_PROFILE_DEFINITION' }) }
         }
         try { $variant = Resolve-TpmReShadeIntensityVariant -ProfileDefinition $restoreProfile -VariantId $HistoryEntry.VariantId } catch { return [pscustomobject]@{ Succeeded = $false; Reason = 'UNSUPPORTED_VARIANT' } }
         try { $currentHashes = @(Get-TpmReShadeProfileEffectHashes -ProfileDefinition $restoreProfile) } catch { return [pscustomobject]@{ Succeeded = $false; Reason = 'STALE_EFFECT_DEFINITION' } }
@@ -8338,21 +8815,44 @@ function New-TpmReShadePreviewReferenceBitmap {
 }
 
 
+# Preview approximation settings per profile. Returns $null when the profile has no honest approximation (REFERENCE, NEUTRAL, UNAVAILABLE):
+# those previews show the unchanged image, and the profile's PreviewNote explains why. Nothing here is forced to differ from the original.
+function Get-TpmReShadePreviewApproximationSettings {
+    param([Parameter(Mandatory)]$ProfileDefinition)
+    if ([string]$ProfileDefinition.PreviewApproximation -ne 'APPROXIMATE') { return $null }
+    $s = [ordered]@{ Sharpen = 0.0; Saturation = 1.0; Contrast = 1.0; CurveContrast = 1.0; LevelsBlack = 0.0; LevelsGain = 1.0; Glow = 0.0; Crt = '' }
+    switch ([string]$ProfileDefinition.ProfileId) {
+        'CleanSharp'              { $s.Sharpen = 1.20 }
+        'AdaptiveClarity'         { $s.Sharpen = 0.60 }
+        'DetailPreservingSharpen' { $s.Sharpen = 0.85 }
+        'FilmicSharpen'           { $s.Sharpen = 0.95 }
+        'EnhancedArcade'          { $s.Sharpen = 0.72; $s.Saturation = 1.16; $s.Contrast = 1.05 }
+        'Vivid'                   { $s.Saturation = 1.48; $s.Contrast = 1.12 }
+        'Colorfulness'            { $s.Saturation = 1.30 }
+        'ContrastCurves'          { $s.CurveContrast = 1.45 }
+        'Levels'                  { $s.LevelsBlack = 12.0; $s.LevelsGain = 1.10 }
+        'ArcadeGlow'              { $s.Glow = 0.50 }
+        'FastGameEnhancement'     { $s.Sharpen = 0.50; $s.CurveContrast = 1.12 }
+        'ClassicCrt'              { $s.Crt = 'Lottes' }
+        'DetailedCrt'             { $s.Crt = 'Royale' }
+        'LightweightCrt'          { $s.Crt = 'Pi' }
+        default { return $null }
+    }
+    return [pscustomobject]$s
+}
+
 function Invoke-TpmReShadePreviewProfilePixels {
     param([Parameter(Mandatory)][Drawing.Bitmap]$Bitmap, [Parameter(Mandatory)]$ProfileDefinition)
-    $profileId = [string]$ProfileDefinition.ProfileId
-    if ($profileId -eq 'Original') { return }
-    $techniques = @($ProfileDefinition.TechniqueOrder)
-    $isSharp = $techniques -contains 'LumaSharpen'
-    $isVivid = $techniques -contains 'Vibrance'
-    $isCrt = $techniques -contains 'CRT_Lottes'
-    $isCartoon = $techniques -contains 'Cartoon'
-    $isCurves = $techniques -contains 'Curves'
-    $isFilmGrain = $techniques -contains 'FilmGrain'
-    $isLevels = $techniques -contains 'Levels'
-    $isMonochrome = $techniques -contains 'Monochrome'
-    $isSepia = $techniques -contains 'Tint'
-    $isVignette = $techniques -contains 'Vignette'
+    $settings = Get-TpmReShadePreviewApproximationSettings -ProfileDefinition $ProfileDefinition
+    if ($null -eq $settings) { return }
+    $sharpenAmount = [double]$settings.Sharpen
+    $saturation = [double]$settings.Saturation
+    $contrast = [double]$settings.Contrast
+    $curveContrast = [double]$settings.CurveContrast
+    $levelsBlack = [double]$settings.LevelsBlack
+    $levelsGain = [double]$settings.LevelsGain
+    $glowAmount = [double]$settings.Glow
+    $crtKind = [string]$settings.Crt
     $rectangle = New-Object Drawing.Rectangle -ArgumentList @(0, 0, $Bitmap.Width, $Bitmap.Height)
     $data = $null
     try {
@@ -8372,25 +8872,37 @@ function Invoke-TpmReShadePreviewProfilePixels {
                 $blue = [double]$source[$index]
                 $green = [double]$source[$index + 1]
                 $red = [double]$source[$index + 2]
-                if ($isSharp) {
+                if ($sharpenAmount -gt 0 -or $glowAmount -gt 0) {
                     $left = if ($x -gt 0) { $index - 4 } else { $index }
                     $right = if ($x -lt ($width - 1)) { $index + 4 } else { $index }
                     $upRow = [Math]::Max(0, $row - 1)
                     $downRow = [Math]::Min($height - 1, $row + 1)
                     $up = $upRow * $stride + ($x * 4)
                     $down = $downRow * $stride + ($x * 4)
-                    $amount = if ($profileId -eq 'CleanSharp') { 1.20 } else { 0.72 }
-                    $blurBlue = (($blue * 4.0) + $source[$left] + $source[$right] + $source[$up] + $source[$down]) / 8.0
-                    $blurGreen = (($green * 4.0) + $source[$left + 1] + $source[$right + 1] + $source[$up + 1] + $source[$down + 1]) / 8.0
-                    $blurRed = (($red * 4.0) + $source[$left + 2] + $source[$right + 2] + $source[$up + 2] + $source[$down + 2]) / 8.0
-                    $blue += ($blue - $blurBlue) * $amount
-                    $green += ($green - $blurGreen) * $amount
-                    $red += ($red - $blurRed) * $amount
+                    if ($sharpenAmount -gt 0) {
+                        $blurBlue = (($blue * 4.0) + $source[$left] + $source[$right] + $source[$up] + $source[$down]) / 8.0
+                        $blurGreen = (($green * 4.0) + $source[$left + 1] + $source[$right + 1] + $source[$up + 1] + $source[$down + 1]) / 8.0
+                        $blurRed = (($red * 4.0) + $source[$left + 2] + $source[$right + 2] + $source[$up + 2] + $source[$down + 2]) / 8.0
+                        $blue += ($blue - $blurBlue) * $sharpenAmount
+                        $green += ($green - $blurGreen) * $sharpenAmount
+                        $red += ($red - $blurRed) * $sharpenAmount
+                    }
+                    if ($glowAmount -gt 0) {
+                        # Soft glow: neighbours 4 pixels away contribute only where they are bright.
+                        $reach = 4
+                        $lx = $index - ([Math]::Min($x, $reach) * 4)
+                        $rx = $index + ([Math]::Min($width - 1 - $x, $reach) * 4)
+                        $uy = ([Math]::Max(0, $row - $reach)) * $stride + ($x * 4)
+                        $dy = ([Math]::Min($height - 1, $row + $reach)) * $stride + ($x * 4)
+                        foreach ($channelOffset in 0, 1, 2) {
+                            $near = ([double]$source[$lx + $channelOffset] + $source[$rx + $channelOffset] + $source[$uy + $channelOffset] + $source[$dy + $channelOffset]) / 4.0
+                            $bloom = [Math]::Max(0.0, $near - 170.0) * $glowAmount
+                            switch ($channelOffset) { 0 { $blue += $bloom } 1 { $green += $bloom } 2 { $red += $bloom } }
+                        }
+                    }
                 }
-                if ($isVivid) {
+                if ($saturation -ne 1.0 -or $contrast -ne 1.0) {
                     $luma = (0.299 * $red) + (0.587 * $green) + (0.114 * $blue)
-                    $saturation = if ($profileId -eq 'Vivid') { 1.48 } else { 1.16 }
-                    $contrast = if ($profileId -eq 'Vivid') { 1.12 } else { 1.05 }
                     $red = $luma + (($red - $luma) * $saturation)
                     $green = $luma + (($green - $luma) * $saturation)
                     $blue = $luma + (($blue - $luma) * $saturation)
@@ -8398,13 +8910,24 @@ function Invoke-TpmReShadePreviewProfilePixels {
                     $green = (($green - 128.0) * $contrast) + 128.0
                     $blue = (($blue - 128.0) * $contrast) + 128.0
                 }
-                if ($isCrt) {
-                    $scanline = if (($y % 3) -eq 1) { 0.58 } elseif (($y % 3) -eq 2) { 0.84 } else { 1.0 }
+                if ($crtKind -ne '') {
                     $maskRed = 1.0; $maskGreen = 1.0; $maskBlue = 1.0
-                    switch ($x % 3) {
-                        0 { $maskRed = 1.08; $maskGreen = 0.96; $maskBlue = 0.96 }
-                        1 { $maskRed = 0.96; $maskGreen = 1.08; $maskBlue = 0.96 }
-                        2 { $maskRed = 0.96; $maskGreen = 0.96; $maskBlue = 1.08 }
+                    if ($crtKind -eq 'Pi') {
+                        $scanline = if (($y % 2) -eq 1) { 0.70 } else { 1.0 }
+                    } elseif ($crtKind -eq 'Royale') {
+                        $scanline = if (($y % 4) -eq 0) { 1.0 } elseif (($y % 4) -eq 1) { 0.86 } elseif (($y % 4) -eq 2) { 0.56 } else { 0.86 }
+                        switch ($x % 3) {
+                            0 { $maskRed = 1.16; $maskGreen = 0.90; $maskBlue = 0.90 }
+                            1 { $maskRed = 0.90; $maskGreen = 1.16; $maskBlue = 0.90 }
+                            2 { $maskRed = 0.90; $maskGreen = 0.90; $maskBlue = 1.16 }
+                        }
+                    } else {
+                        $scanline = if (($y % 3) -eq 1) { 0.58 } elseif (($y % 3) -eq 2) { 0.84 } else { 1.0 }
+                        switch ($x % 3) {
+                            0 { $maskRed = 1.08; $maskGreen = 0.96; $maskBlue = 0.96 }
+                            1 { $maskRed = 0.96; $maskGreen = 1.08; $maskBlue = 0.96 }
+                            2 { $maskRed = 0.96; $maskGreen = 0.96; $maskBlue = 1.08 }
+                        }
                     }
                     $edgeX = [Math]::Abs((2.0 * $x / [Math]::Max(1, $width - 1)) - 1.0)
                     $edgeY = [Math]::Abs((2.0 * $y / [Math]::Max(1, $height - 1)) - 1.0)
@@ -8413,44 +8936,15 @@ function Invoke-TpmReShadePreviewProfilePixels {
                     $green *= $scanline * $maskGreen * $vignette
                     $blue *= $scanline * $maskBlue * $vignette
                 }
-                if ($isCartoon) {
-                    $quantum = 42.5
-                    $red = [Math]::Round($red / $quantum) * $quantum
-                    $green = [Math]::Round($green / $quantum) * $quantum
-                    $blue = [Math]::Round($blue / $quantum) * $quantum
+                if ($curveContrast -ne 1.0) {
+                    $red = (($red / 255.0 - 0.5) * $curveContrast + 0.5) * 255.0
+                    $green = (($green / 255.0 - 0.5) * $curveContrast + 0.5) * 255.0
+                    $blue = (($blue / 255.0 - 0.5) * $curveContrast + 0.5) * 255.0
                 }
-                if ($isCurves) {
-                    $red = (($red / 255.0 - 0.5) * 1.45 + 0.5) * 255.0
-                    $green = (($green / 255.0 - 0.5) * 1.45 + 0.5) * 255.0
-                    $blue = (($blue / 255.0 - 0.5) * 1.45 + 0.5) * 255.0
-                }
-                if ($isFilmGrain) {
-                    $grain = [double]((($x * 73 + $y * 151 + (($x + 1) * ($y + 1) * 19)) % 31) - 15)
-                    $red += $grain
-                    $green += $grain
-                    $blue += $grain
-                }
-                if ($isLevels) {
-                    $red = ($red - 12.0) * 1.10
-                    $green = ($green - 12.0) * 1.10
-                    $blue = ($blue - 12.0) * 1.10
-                }
-                if ($isMonochrome) {
-                    $luma = (0.2126 * $red) + (0.7152 * $green) + (0.0722 * $blue)
-                    $red = $luma; $green = $luma; $blue = $luma
-                }
-                if ($isSepia) {
-                    $sepiaRed = (0.393 * $red) + (0.769 * $green) + (0.189 * $blue)
-                    $sepiaGreen = (0.349 * $red) + (0.686 * $green) + (0.168 * $blue)
-                    $sepiaBlue = (0.272 * $red) + (0.534 * $green) + (0.131 * $blue)
-                    $red = $sepiaRed; $green = $sepiaGreen; $blue = $sepiaBlue
-                }
-                if ($isVignette) {
-                    $vignetteX = (2.0 * $x / [Math]::Max(1, $width - 1)) - 1.0
-                    $vignetteY = (2.0 * $y / [Math]::Max(1, $height - 1)) - 1.0
-                    $radius = [Math]::Min(1.0, [Math]::Sqrt(($vignetteX * $vignetteX) + ($vignetteY * $vignetteY)) / 1.4142135623730951)
-                    $vignetteScale = 1.0 - (0.32 * $radius * $radius)
-                    $red *= $vignetteScale; $green *= $vignetteScale; $blue *= $vignetteScale
+                if ($levelsGain -ne 1.0 -or $levelsBlack -ne 0.0) {
+                    $red = ($red - $levelsBlack) * $levelsGain
+                    $green = ($green - $levelsBlack) * $levelsGain
+                    $blue = ($blue - $levelsBlack) * $levelsGain
                 }
                 if ($red -lt 0) { $red = 0 }; if ($red -gt 255) { $red = 255 }
                 if ($green -lt 0) { $green = 0 }; if ($green -gt 255) { $green = 255 }
@@ -8620,6 +9114,327 @@ function Get-TpmReShadePreviewStateValue {
     return $null
 }
 
+# Where a Zoom-mode picture draws an image inside its client area (letterbox/pillarbox). The paint handler and the slider placement
+# both use this one calculation so the split line and the slider thumb cannot disagree.
+function Get-TpmReShadeImageDisplayRectangle {
+    param([int]$ClientWidth, [int]$ClientHeight, [int]$ImageWidth, [int]$ImageHeight)
+    if ($ClientWidth -le 0 -or $ClientHeight -le 0 -or $ImageWidth -le 0 -or $ImageHeight -le 0) {
+        return [pscustomobject]@{ X = 0; Y = 0; Width = 0; Height = 0 }
+    }
+    $scale = [Math]::Min($ClientWidth / [double]$ImageWidth, $ClientHeight / [double]$ImageHeight)
+    $drawWidth = [Math]::Max(1, [int][Math]::Round($ImageWidth * $scale))
+    $drawHeight = [Math]::Max(1, [int][Math]::Round($ImageHeight * $scale))
+    return [pscustomobject]@{
+        X = [int][Math]::Floor(($ClientWidth - $drawWidth) / 2)
+        Y = [int][Math]::Floor(($ClientHeight - $drawHeight) / 2)
+        Width = $drawWidth
+        Height = $drawHeight
+    }
+}
+
+# Slider placement so the thumb centre travels exactly across the displayed image: the thumb centre at value 0 sits on the image's left
+# edge and at value 100 on its right edge. ThumbCenterAtMin/Max are the thumb-centre x positions (control client coordinates) the native
+# control reports at its minimum and maximum; their difference is the usable travel, and the rest of the width is the fixed inset.
+function Get-TpmReShadeSliderPlacement {
+    param($ImageRectangle, [int]$CurrentWidth, [int]$ThumbCenterAtMin, [int]$ThumbCenterAtMax, [int]$HostLeft = 0)
+    $travel = $ThumbCenterAtMax - $ThumbCenterAtMin
+    if ($ImageRectangle.Width -le 0 -or $travel -le 0 -or $CurrentWidth -le 0) { return $null }
+    $overhead = $CurrentWidth - $travel
+    return [pscustomobject]@{
+        Left = [int]($HostLeft + $ImageRectangle.X - $ThumbCenterAtMin)
+        Width = [int]($ImageRectangle.Width + $overhead)
+    }
+}
+
+function Initialize-TpmTrackBarNative {
+    if ('TpmTrackBarNative' -as [type]) { return $true }
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { return $false }
+    try {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class TpmTrackBarNative {
+    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    const uint TBM_GETPOS = 0x0400;
+    const uint TBM_SETPOS = 0x0405;
+    const uint TBM_GETTHUMBRECT = 0x0419;
+    const uint TBM_GETCHANNELRECT = 0x041A;
+    // Read-only geometry that decides where the endpoint thumbs sit: thumb width and height, channel left and right (client coordinates).
+    // Reading it from the probe AND the live control and comparing proves they share DPI, theme and size, which a single-point check cannot.
+    public static int[] Geometry(IntPtr hwnd) {
+        IntPtr thumb = Marshal.AllocHGlobal(16);
+        IntPtr channel = Marshal.AllocHGlobal(16);
+        try {
+            SendMessage(hwnd, TBM_GETTHUMBRECT, IntPtr.Zero, thumb);
+            SendMessage(hwnd, TBM_GETCHANNELRECT, IntPtr.Zero, channel);
+            return new int[] { Marshal.ReadInt32(thumb, 8) - Marshal.ReadInt32(thumb, 0), Marshal.ReadInt32(thumb, 12) - Marshal.ReadInt32(thumb, 4), Marshal.ReadInt32(channel, 0), Marshal.ReadInt32(channel, 8) };
+        } finally { Marshal.FreeHGlobal(thumb); Marshal.FreeHGlobal(channel); }
+    }
+    // Thumb-centre x (client coordinates) at the minimum and maximum, for a THROWAWAY probe control that is never shown. TBM_SETPOS is
+    // sent with redraw disabled (wParam 0) and the original position is restored; the visible slider is never moved to measure it.
+    public static int[] ThumbCenters(IntPtr hwnd, int minimum, int maximum) {
+        IntPtr rect = Marshal.AllocHGlobal(16);
+        try {
+            int original = (int)SendMessage(hwnd, TBM_GETPOS, IntPtr.Zero, IntPtr.Zero);
+            int[] result = new int[2];
+            SendMessage(hwnd, TBM_SETPOS, IntPtr.Zero, (IntPtr)minimum);
+            SendMessage(hwnd, TBM_GETTHUMBRECT, IntPtr.Zero, rect);
+            result[0] = (Marshal.ReadInt32(rect, 0) + Marshal.ReadInt32(rect, 8)) / 2;
+            SendMessage(hwnd, TBM_SETPOS, IntPtr.Zero, (IntPtr)maximum);
+            SendMessage(hwnd, TBM_GETTHUMBRECT, IntPtr.Zero, rect);
+            result[1] = (Marshal.ReadInt32(rect, 0) + Marshal.ReadInt32(rect, 8)) / 2;
+            SendMessage(hwnd, TBM_SETPOS, IntPtr.Zero, (IntPtr)original);
+            return result;
+        } finally { Marshal.FreeHGlobal(rect); }
+    }
+    // Read-only: thumb-centre x of a live control at its current position (no message that changes state).
+    public static int ThumbCenterNow(IntPtr hwnd) {
+        IntPtr rect = Marshal.AllocHGlobal(16);
+        try {
+            SendMessage(hwnd, TBM_GETTHUMBRECT, IntPtr.Zero, rect);
+            return (Marshal.ReadInt32(rect, 0) + Marshal.ReadInt32(rect, 8)) / 2;
+        } finally { Marshal.FreeHGlobal(rect); }
+    }
+}
+'@
+        return [bool]('TpmTrackBarNative' -as [type])
+    } catch { return $false }
+}
+
+# Probe-vs-live parity. Agreement at one point (the current value) cannot prove the endpoints agree: a different thumb size or channel can
+# cancel out at that point. The probe is accepted only when the geometry that determines the endpoints matches the live control's: thumb
+# width and height exactly, channel left and right within one pixel. Both arrays are @(thumbWidth, thumbHeight, channelLeft, channelRight).
+function Test-TpmTrackBarGeometryMatch {
+    param($ProbeGeometry, $LiveGeometry)
+    try {
+        $probe = @($ProbeGeometry); $live = @($LiveGeometry)
+        if ($probe.Count -lt 4 -or $live.Count -lt 4) { return $false }
+        if ([int]$probe[0] -ne [int]$live[0] -or [int]$probe[1] -ne [int]$live[1]) { return $false }
+        if ([Math]::Abs([int]$probe[2] - [int]$live[2]) -gt 1 -or [Math]::Abs([int]$probe[3] - [int]$live[3]) -gt 1) { return $false }
+        return $true
+    } catch { return $false }
+}
+
+# Thin instance adapter over the static native helper, so the code that builds a probe reading can be exercised with a stub. Each method is
+# a read (or, on the probe handle only, a SETPOS without redraw): see TpmTrackBarNative.
+function New-TpmTrackBarNativeAdapter {
+    $adapter = New-Object psobject
+    $adapter | Add-Member -MemberType ScriptMethod -Name ThumbCenters -Value { param($handle, $minimum, $maximum) [TpmTrackBarNative]::ThumbCenters($handle, [int]$minimum, [int]$maximum) }
+    $adapter | Add-Member -MemberType ScriptMethod -Name ThumbCenterNow -Value { param($handle) [TpmTrackBarNative]::ThumbCenterNow($handle) }
+    $adapter | Add-Member -MemberType ScriptMethod -Name Geometry -Value { param($handle) [TpmTrackBarNative]::Geometry($handle) }
+    return $adapter
+}
+
+# Builds the probe reading used to validate and place the slider. The reading is an object with named members, NOT a positional array:
+# the two geometry values are themselves arrays, and nesting them in a positional array (with unary commas) produced a one-element
+# nested array that the parity check could never accept. Only the probe handle is moved; the live handle only gets read-only queries.
+function Get-TpmTrackBarProbeReading {
+    param([Parameter(Mandatory)]$Slider, [Parameter(Mandatory)]$ProbeHandle, [Parameter(Mandatory)]$Native)
+    $centers = @($Native.ThumbCenters($ProbeHandle, [int]$Slider.Minimum, [int]$Slider.Maximum))
+    $span = [double]([int]$Slider.Maximum - [int]$Slider.Minimum)
+    $predicted = if ($span -gt 0) { $centers[0] + (($centers[1] - $centers[0]) * (([int]$Slider.Value - [int]$Slider.Minimum) / $span)) } else { $centers[0] }
+    $liveNow = $Native.ThumbCenterNow($Slider.Handle)
+    $probeGeometry = @($Native.Geometry($ProbeHandle))
+    $liveGeometry = @($Native.Geometry($Slider.Handle))
+    return [pscustomobject]@{ CenterAtMin = [int]$centers[0]; CenterAtMax = [int]$centers[1]; PredictedAtCurrent = [double]$predicted; LiveCenterNow = [double]$liveNow; ProbeGeometry = $probeGeometry; LiveGeometry = $liveGeometry }
+}
+
+# Thumb-centre positions at the minimum and maximum, measured on a throwaway probe TrackBar (same range, tick style and size, never shown, never
+# parented to the form) so the visible slider is not moved through its endpoints. Two checks must pass or the result is $null (the caller then
+# does not place the slider from a guess): (1) the probe's prediction at the live slider's current value matches a read-only reading of the live
+# thumb, and (2) the probe's endpoint-determining geometry (thumb size, channel edges; see Test-TpmTrackBarGeometryMatch) matches the live
+# control's, so a DPI or theme difference that happens to cancel at one value is still detected.
+# -Probe is a seam for tests: { param($slider) -> object from Get-TpmTrackBarProbeReading }.
+function Measure-TpmTrackBarThumbCenters {
+    param([Parameter(Mandatory)]$Slider, [scriptblock]$Probe = $null)
+    try {
+        $reading = $null
+        if ($Probe) { $reading = & $Probe $Slider }
+        else {
+            if (-not $Slider.IsHandleCreated -or -not (Initialize-TpmTrackBarNative)) { return $null }
+            $probeControl = New-Object Windows.Forms.TrackBar
+            try {
+                $probeControl.AutoSize = $false
+                $probeControl.Minimum = [int]$Slider.Minimum; $probeControl.Maximum = [int]$Slider.Maximum
+                $probeControl.TickStyle = $Slider.TickStyle; $probeControl.TickFrequency = [int]$Slider.TickFrequency
+                $probeControl.Orientation = $Slider.Orientation
+                $probeControl.Width = [int]$Slider.Width; $probeControl.Height = [int]$Slider.Height
+                $probeControl.Value = [int]$Slider.Value
+                [void]$probeControl.Handle
+                $reading = Get-TpmTrackBarProbeReading -Slider $Slider -ProbeHandle $probeControl.Handle -Native (New-TpmTrackBarNativeAdapter)
+            } finally { $probeControl.Dispose() }
+        }
+        if ($null -eq $reading) { return $null }
+        foreach ($member in 'CenterAtMin', 'CenterAtMax', 'PredictedAtCurrent', 'LiveCenterNow', 'ProbeGeometry', 'LiveGeometry') { if (-not $reading.PSObject.Properties[$member]) { return $null } }
+        if ([Math]::Abs([double]$reading.PredictedAtCurrent - [double]$reading.LiveCenterNow) -gt 2.0) { return $null }
+        if (-not (Test-TpmTrackBarGeometryMatch -ProbeGeometry $reading.ProbeGeometry -LiveGeometry $reading.LiveGeometry)) { return $null }
+        return @([int]$reading.CenterAtMin, [int]$reading.CenterAtMax)
+    } catch { return $null }
+}
+
+# Space the picture host must keep free on each side so the endpoint thumbs (centred on the image edges) stay inside the slider row.
+function Get-TpmReShadeSliderReserve {
+    param([int]$ThumbCenterAtMin)
+    return [int][Math]::Max(0, $ThumbCenterAtMin)
+}
+
+function Set-TpmControlHorizontalPadding {
+    param([Parameter(Mandatory)]$Control, [int]$Left, [int]$Right)
+    $Control.Padding = New-Object Windows.Forms.Padding($Left, 0, $Right, 0)
+    try { $Control.PerformLayout() } catch {}
+}
+
+# Aligns the comparison slider with the image the preview actually draws. The picture sits in a host panel whose left/right padding is the
+# thumb inset, so the slider (positioned from the displayed image rectangle) never extends past the form on either side and both endpoint
+# thumbs stay fully visible while their centres travel exactly across the image. Never throws (it runs from layout events); returns $true
+# when the slider was placed. -MeasureThumb is a seam: { param($slider) -> @(centerAtMin, centerAtMax) }.
+function Update-TpmReShadeSliderPlacement {
+    param([Parameter(Mandatory)]$State, [scriptblock]$MeasureThumb = $null)
+    try {
+        $slider = $State['Slider']
+        $picture = $State['Picture']
+        $pictureHost = $State['PictureHost']
+        $cache = $State['PreviewCache']
+        if ($null -eq $slider -or $null -eq $picture -or $null -eq $cache -or $null -eq $cache.Reference) { return $false }
+        if ([bool]$State['Closed']) { return $false }
+        $centers = $null
+        if ($MeasureThumb) { $centers = @(& $MeasureThumb $slider) } else { $centers = @(Measure-TpmTrackBarThumbCenters -Slider $slider) }
+        if ($centers.Count -lt 2) { return $false }
+        $reserve = Get-TpmReShadeSliderReserve -ThumbCenterAtMin ([int]$centers[0])
+        if ($null -ne $pictureHost -and ([int]$pictureHost.Padding.Left -ne $reserve -or [int]$pictureHost.Padding.Right -ne $reserve)) {
+            Set-TpmControlHorizontalPadding -Control $pictureHost -Left $reserve -Right $reserve
+        }
+        $client = $picture.ClientSize
+        $image = Get-TpmReShadeImageDisplayRectangle -ClientWidth ([int]$client.Width) -ClientHeight ([int]$client.Height) -ImageWidth ([int]$cache.Reference.Width) -ImageHeight ([int]$cache.Reference.Height)
+        $hostLeft = [int]$picture.Left
+        if ($null -ne $picture.Parent) { try { $hostLeft += [int]$picture.Parent.Left } catch {} }
+        $placement = Get-TpmReShadeSliderPlacement -ImageRectangle $image -CurrentWidth ([int]$slider.Width) -ThumbCenterAtMin ([int]$centers[0]) -ThumbCenterAtMax ([int]$centers[1]) -HostLeft $hostLeft
+        if ($null -eq $placement) { return $false }
+        $sliderHost = $State['SliderHost']
+        $clipped = $false
+        if ($placement.Left -lt 0) { $clipped = $true }
+        if ($null -ne $sliderHost -and ($placement.Left + $placement.Width) -gt [int]$sliderHost.ClientSize.Width) { $clipped = $true }
+        $slider.Left = [int]$placement.Left
+        $slider.Width = [int]$placement.Width
+        $State['SliderPlacement'] = $placement
+        $State['SliderPlacementClipped'] = $clipped
+        return $true
+    } catch {
+        try { Write-Log ("ReShade slider placement skipped -- {0}" -f $_.Exception.Message) } catch {}
+        return $false
+    }
+}
+
+# Description text for the preview label, with the honest preview status of the selected profile.
+function Get-TpmReShadeDescriptionText {
+    param([Parameter(Mandatory)]$ProfileDefinition)
+    $kind = Get-TpmReShadeProfileTextField -Entry $ProfileDefinition -Name 'PreviewApproximation'
+    $note = Get-TpmReShadeProfileTextField -Entry $ProfileDefinition -Name 'PreviewNote'
+    $head = if ($kind -eq 'REFERENCE') { 'Original is the untouched reference image; it applies no effect.' }
+            elseif ($kind -eq 'APPROXIMATE') { 'Preview approximation using a bundled image. TPM does not run the game or execute ReShade shaders during preview. Actual in-game results may vary.' }
+            elseif ($note) { 'Preview: ' + $note }
+            else { 'Preview approximation using a bundled image. TPM does not run the game or execute ReShade shaders during preview. Actual in-game results may vary.' }
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add($head)
+    if ($kind -eq 'APPROXIMATE' -and $note) { [void]$lines.Add($note) }
+    [void]$lines.Add((Get-TpmReShadeProfileDisplayLabel -Entry $ProfileDefinition) + ': ' + [string]$ProfileDefinition.Description)
+    $compat = Get-TpmReShadeProfileTextField -Entry $ProfileDefinition -Name 'CompatibilityNote'
+    if ($compat) { [void]$lines.Add('Note: ' + $compat) }
+    [void]$lines.Add('Techniques TPM will install/apply: ' + (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $ProfileDefinition))
+    return ($lines -join "`r`n")
+}
+
+# Height the label needs for its text at its CURRENT width, font and padding, measured by the text renderer (real wrapping and font
+# metrics, so it follows DPI and font changes). -Measure is a seam for tests: { param($text, $font, $width) -> object with .Height }.
+# Returns $null when it cannot measure (no usable width or no renderer); the caller then keeps the maximum height rather than guessing.
+function Measure-TpmReShadeDescriptionHeight {
+    param([Parameter(Mandatory)]$Label, [Parameter(Mandatory)][string]$Text, [scriptblock]$Measure = $null)
+    try {
+        $horizontal = 0; $vertical = 0
+        try { $horizontal = [int]$Label.Padding.Horizontal; $vertical = [int]$Label.Padding.Vertical } catch {}
+        $usable = [int]$Label.ClientSize.Width - $horizontal
+        if ($usable -le 0) { return $null }
+        $size = $null
+        if ($Measure) { $size = & $Measure $Text $Label.Font $usable }
+        else {
+            $flags = [Windows.Forms.TextFormatFlags]::WordBreak -bor [Windows.Forms.TextFormatFlags]::NoPadding -bor [Windows.Forms.TextFormatFlags]::TextBoxControl
+            $size = [Windows.Forms.TextRenderer]::MeasureText($Text, $Label.Font, (New-Object Drawing.Size($usable, 0)), $flags)
+        }
+        if ($null -eq $size -or [int]$size.Height -le 0) { return $null }
+        return [int]$size.Height + $vertical + 2
+    } catch { return $null }
+}
+
+# Height limits for the description label. The 84/260 pixel values are 96-DPI baselines and are scaled by the label's DPI (a fixed 260 px is
+# only about seven lines at 200%). When the label is inside a form the cap also grows to 40% of the form's client height, so a tall window
+# shows more text before anything has to be cut.
+function Get-TpmReShadeDescriptionHeightLimits {
+    param([Parameter(Mandatory)]$Label, [int]$MinimumHeight = 84, [int]$MaximumHeight = 260, [double]$Scale = 0)
+    $factor = 1.0
+    if ($Scale -gt 0) { $factor = $Scale }
+    else { try { if ([int]$Label.DeviceDpi -gt 0) { $factor = [double]$Label.DeviceDpi / 96.0 } } catch {} }
+    $minimum = [int][Math]::Round($MinimumHeight * $factor)
+    $maximum = [int][Math]::Round($MaximumHeight * $factor)
+    $available = 0
+    try { $available = [int]$Label.Parent.ClientSize.Height } catch { $available = 0 }
+    if ($available -gt 0) { $maximum = [int][Math]::Max($maximum, [Math]::Floor($available * 0.4)) }
+    return [pscustomobject]@{ Scale = $factor; Minimum = $minimum; Maximum = [int][Math]::Max($minimum, $maximum) }
+}
+
+# Sizes the label from the measurement and reports whether the text still does not fit. Text that does not fit is NEVER silently cut:
+# Clipped is $true (the measured need exceeds the limit) or $null (the text could not be measured, so the limit is used and the fit is
+# unknown); in both cases the full text is placed in the label's tooltip and State['DescriptionClipped'] is set so the condition is visible
+# to the caller and the log. Clipped is $false only when the measurement says the whole text fits.
+function Set-TpmReShadeDescriptionHeight {
+    param([Parameter(Mandatory)]$Label, [Parameter(Mandatory)][string]$Text, [scriptblock]$Measure = $null, [int]$MinimumHeight = 84, [int]$MaximumHeight = 260, $State = $null, [double]$Scale = 0)
+    $limits = Get-TpmReShadeDescriptionHeightLimits -Label $Label -MinimumHeight $MinimumHeight -MaximumHeight $MaximumHeight -Scale $Scale
+    $needed = Measure-TpmReShadeDescriptionHeight -Label $Label -Text $Text -Measure $Measure
+    $clipped = $null
+    if ($null -eq $needed) { $height = $limits.Maximum }
+    else {
+        $height = [int][Math]::Max($limits.Minimum, [Math]::Min($limits.Maximum, $needed))
+        $clipped = ($needed -gt $limits.Maximum)
+    }
+    $Label.Height = $height
+    if ($null -ne $State) {
+        try {
+            $State['DescriptionClipped'] = ($clipped -ne $false)
+            $State['DescriptionNeededHeight'] = $needed
+            $tip = $State['DescriptionToolTip']
+            if ($null -ne $tip) { $tip.SetToolTip($Label, $(if ($clipped -ne $false) { $Text } else { '' })) }
+        } catch {}
+    }
+    if ($clipped -ne $false) {
+        try { Write-Log ('ReShade preview description may not fit: needs {0} px, limit {1} px; the full text is available in the tooltip.' -f $(if ($null -eq $needed) { 'unknown' } else { $needed }), $limits.Maximum) } catch {}
+    }
+    return [pscustomobject]@{ Height = $height; Needed = $needed; Maximum = $limits.Maximum; Clipped = $clipped }
+}
+
+# Sets the description and paints it NOW. The heavy preview render that follows runs on the UI thread, so without the explicit Refresh()
+# the new text only appeared after the render finished (or not until the next event).
+function Set-TpmReShadeDescriptionLabel {
+    param([Parameter(Mandatory)]$Label, [Parameter(Mandatory)][string]$Text, [scriptblock]$Measure = $null, $State = $null)
+    $Label.Text = $Text
+    [void](Set-TpmReShadeDescriptionHeight -Label $Label -Text $Text -Measure $Measure -State $State)
+    if ($null -ne $State) { try { $State['DescriptionText'] = $Text; $State['DescriptionWidth'] = [int]$Label.ClientSize.Width } catch {} }
+    try { $Label.Refresh() } catch {}
+}
+
+# Re-measures the current description when the label's width changed (resize) or the DPI/font changed. A height change alone never
+# re-enters (the width is unchanged), so it cannot loop.
+function Update-TpmReShadeDescriptionLayout {
+    param([Parameter(Mandatory)]$State, [scriptblock]$Measure = $null, [switch]$Force)
+    try {
+        $label = $State['DescriptionLabel']; $text = [string]$State['DescriptionText']
+        if ($null -eq $label -or [string]::IsNullOrEmpty($text) -or [bool]$State['Closed']) { return $false }
+        $width = [int]$label.ClientSize.Width
+        if (-not $Force -and $width -eq [int]$State['DescriptionWidth']) { return $false }
+        [void](Set-TpmReShadeDescriptionHeight -Label $label -Text $text -Measure $Measure -State $State)
+        $State['DescriptionWidth'] = $width
+        return $true
+    } catch { return $false }
+}
+
 function New-TpmReShadePreviewPaintHandler {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)]$Picture)
     $stateRef = $State
@@ -8648,11 +9463,11 @@ function New-TpmReShadePreviewPaintHandler {
             if (-not $reference -or -not $processed) { return }
             $canvas = $pictureRef.ClientRectangle
             if ($canvas.Width -le 0 -or $canvas.Height -le 0) { return }
-            $scale = [Math]::Min($canvas.Width / [double]$reference.Width, $canvas.Height / [double]$reference.Height)
-            $drawWidth = [Math]::Max(1, [int][Math]::Round($reference.Width * $scale))
-            $drawHeight = [Math]::Max(1, [int][Math]::Round($reference.Height * $scale))
-            $drawX = [int][Math]::Floor(($canvas.Width - $drawWidth) / 2)
-            $drawY = [int][Math]::Floor(($canvas.Height - $drawHeight) / 2)
+            $displayRectangle = Get-TpmReShadeImageDisplayRectangle -ClientWidth ([int]$canvas.Width) -ClientHeight ([int]$canvas.Height) -ImageWidth ([int]$reference.Width) -ImageHeight ([int]$reference.Height)
+            $drawWidth = [int]$displayRectangle.Width
+            $drawHeight = [int]$displayRectangle.Height
+            $drawX = [int]$displayRectangle.X
+            $drawY = [int]$displayRectangle.Y
             $destination = New-Object Drawing.Rectangle($drawX, $drawY, $drawWidth, $drawHeight)
             $position = Get-TpmReShadePreviewStateValue -State $stateRef -Name 'SliderPosition'
             if ($null -eq $position) { $position = Get-TpmReShadePreviewStateValue -State $stateRef -Name 'SliderValue' }
@@ -9055,6 +9870,7 @@ function Show-TpmReShadeProfileGalleryWindow {
         $descriptionLabel.TextAlign = 'TopLeft'
         $descriptionLabel.AutoEllipsis = $true
         $descriptionLabel.Text = ''
+        $descriptionToolTip = New-Object Windows.Forms.ToolTip
         $state = [hashtable]::Synchronized(@{
             SelectedProfileId = $null
             ViewMode = 'Split'
@@ -9073,7 +9889,15 @@ function Show-TpmReShadeProfileGalleryWindow {
             Refresh = $null
             Form = $form
             Picture = $picture
+            PictureHost = $null
+            SliderPlacementClipped = $false
+            DescriptionText = ''
+            DescriptionWidth = 0
+            DescriptionLayoutHandler = $null
+            DescriptionDpiHandler = $null
             DescriptionLabel = $descriptionLabel
+            DescriptionToolTip = $descriptionToolTip
+            DescriptionClipped = $false
             ProfileSelector = $null
             ProfileSelectorHandler = $null
             ProfileSelectorUpdating = $false
@@ -9103,7 +9927,7 @@ function Show-TpmReShadeProfileGalleryWindow {
                 if ([string]::IsNullOrWhiteSpace($profileId)) { throw 'No ReShade profile is selected.' }
                 $canonicalProfile = @($state['Profiles'] | Where-Object { $_.ProfileId -eq $profileId })[0]
                 if (-not $canonicalProfile) { throw ("Selected ProfileId '{0}' is not available." -f $profileId) }
-                $descriptionLabel.Text = "Preview approximation using a bundled image. TPM does not run the game or execute ReShade shaders during preview. Actual in-game results may vary.`r`n{0}`r`nTechniques TPM will install/apply: {1}" -f $canonicalProfile.Description, (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $canonicalProfile)
+                Set-TpmReShadeDescriptionLabel -Label $descriptionLabel -Text (Get-TpmReShadeDescriptionText -ProfileDefinition $canonicalProfile) -State $state
                 $viewMode = [string]$state['ViewMode']
                 if ($viewMode -notin @('Before', 'After', 'Split', 'Slider')) { throw ("Unsupported gallery view mode '{0}'." -f $viewMode) }
                 [void](Get-TpmReShadePreviewProcessedBitmap -Cache $state['PreviewCache'] -ProfileDefinition $canonicalProfile)
@@ -9160,7 +9984,7 @@ function Show-TpmReShadeProfileGalleryWindow {
         $profileSelector = New-Object Windows.Forms.ComboBox
         $profileSelector.Name = 'ProfileSelector'
         $profileSelector.DropDownStyle = [Windows.Forms.ComboBoxStyle]::DropDownList
-        $profileSelector.DisplayMember = 'FriendlyName'
+        $profileSelector.DisplayMember = 'DisplayLabel'
         $profileSelector.Width = 230
         foreach ($profileDefinition in $canonicalProfiles) { [void]$profileSelector.Items.Add($profileDefinition) }
         $state['ProfileSelector'] = $profileSelector
@@ -9174,11 +9998,41 @@ function Show-TpmReShadeProfileGalleryWindow {
         $state['Slider'] = $slider
         $slider.Add_ValueChanged($sliderHandler)
         $slider.Add_KeyUp($sliderKeyUpHandler)
-        [void]$toolbar.Controls.Add($slider)
+        # The slider lives in its own full-width row directly above the picture so it can be positioned to span exactly the displayed
+        # image (see Update-TpmReShadeSliderPlacement) instead of sitting at an arbitrary place in the toolbar flow.
+        $sliderHost = New-Object Windows.Forms.Panel
+        $sliderHost.Dock = 'Top'
+        $sliderHost.Height = 48
+        $slider.Anchor = [Windows.Forms.AnchorStyles]::Top
+        [void]$sliderHost.Controls.Add($slider)
+        $state['SliderHost'] = $sliderHost
+        $sliderPlacementHandler = {
+            try { [void](Update-TpmReShadeSliderPlacement -State $state) } catch {}
+        }.GetNewClosure()
+        $state['SliderPlacementHandler'] = $sliderPlacementHandler
         $state['ViewButtons'] = @($toolbar.Controls | Where-Object { $_ -is [Windows.Forms.Button] })
         $form.Add_FormClosed($formClosedHandler)
-        $form.Controls.Add($picture)
+        # The picture lives in a host panel whose side padding (set from the measured thumb inset) keeps the endpoint thumbs inside the slider row.
+        $pictureHost = New-Object Windows.Forms.Panel
+        $pictureHost.Dock = 'Fill'
+        [void]$pictureHost.Controls.Add($picture)
+        $state['PictureHost'] = $pictureHost
+        $form.Controls.Add($pictureHost)
+        $form.Controls.Add($sliderHost)
         $form.Controls.Add($toolbar)
+        $picture.Add_SizeChanged($sliderPlacementHandler)
+        $descriptionLayoutHandler = {
+            try { [void](Update-TpmReShadeDescriptionLayout -State $state) } catch {}
+        }.GetNewClosure()
+        $descriptionDpiHandler = {
+            try { [void](Update-TpmReShadeDescriptionLayout -State $state -Force) } catch {}
+        }.GetNewClosure()
+        $state['DescriptionLayoutHandler'] = $descriptionLayoutHandler
+        $state['DescriptionDpiHandler'] = $descriptionDpiHandler
+        $descriptionLabel.Add_SizeChanged($descriptionLayoutHandler)
+        try { $form.Add_DpiChanged($descriptionDpiHandler) } catch {}
+        $form.Add_Shown($sliderPlacementHandler)
+        try { $form.Add_DpiChanged($sliderPlacementHandler) } catch {}
         $form.Controls.Add($descriptionLabel)
         $form.Controls.Add($instructionLabel)
         $defaultProfile = @($canonicalProfiles | Where-Object { [string]$_.ProfileId -eq $DefaultProfileId })[0]
@@ -9236,6 +10090,18 @@ function Close-TpmReShadeProfileGallerySession {
     try { foreach ($button in @($Session['ViewButtons'])) { if ($button -and $Session['ViewHandler']) { $button.Remove_Click($Session['ViewHandler']) } } } catch {}
     try { if ($Session['Form'] -and $Session['FormClosedHandler']) { $Session['Form'].Remove_FormClosed($Session['FormClosedHandler']) } } catch {}
     try {
+        if ($Session['SliderPlacementHandler']) {
+            if ($Session['Picture']) { $Session['Picture'].Remove_SizeChanged($Session['SliderPlacementHandler']) }
+            if ($Session['Form']) { $Session['Form'].Remove_Shown($Session['SliderPlacementHandler']); try { $Session['Form'].Remove_DpiChanged($Session['SliderPlacementHandler']) } catch {} }
+            $Session['SliderPlacementHandler'] = $null
+        }
+    } catch {}
+    try {
+        if ($Session['DescriptionLayoutHandler'] -and $Session['DescriptionLabel']) { $Session['DescriptionLabel'].Remove_SizeChanged($Session['DescriptionLayoutHandler']); $Session['DescriptionLayoutHandler'] = $null }
+        if ($Session['DescriptionDpiHandler'] -and $Session['Form']) { try { $Session['Form'].Remove_DpiChanged($Session['DescriptionDpiHandler']) } catch {}; $Session['DescriptionDpiHandler'] = $null }
+    } catch {}
+    try { if ($Session['DescriptionToolTip']) { $Session['DescriptionToolTip'].Dispose(); $Session['DescriptionToolTip'] = $null } } catch {}
+    try {
         if ($Session.Form -and -not $Session.Form.IsDisposed) { $Session.Form.Close() }
     } catch {}
     try {
@@ -9279,13 +10145,262 @@ function Test-TpmReShadeAssetInventory {
 }
 
 function Get-TpmReShadeUICompatibilityBytes {
+    # TPM-authored; defines only the UI annotation macros the approved shaders use (no upstream UI header text is copied).
+    # Each macro expands to the single ui_type annotation the shader asks for.
     $lines = @(
         '#pragma once'
         '#define __UNIFORM_SLIDER_FLOAT1 ui_type = "slider";'
         '#define __UNIFORM_SLIDER_FLOAT2 ui_type = "slider";'
+        '#define __UNIFORM_SLIDER_FLOAT3 ui_type = "slider";'
         '#define __UNIFORM_SLIDER_INT1 ui_type = "slider";'
+        '#define __UNIFORM_DRAG_FLOAT1 ui_type = "drag";'
+        '#define __UNIFORM_DRAG_INT1 ui_type = "drag";'
+        '#define __UNIFORM_COMBO_INT1 ui_type = "combo";'
+        '#define __UNIFORM_INPUT_BOOL1 ui_type = "input";'
         '#define __UNIFORM_COLOR_FLOAT3 ui_type = "color";'
     )
+    return ,([Text.Encoding]::ASCII.GetBytes(($lines -join "`r`n") + "`r`n"))
+}
+
+# Deterministic, ASCII-only, TPM-authored notice deployed next to every approved effect's files. It identifies the exact
+# upstream source and license basis; it adds no permission and changes no upstream file.
+# Reviewed obligation status is a SEPARATE fact from metadata completeness. A populated licence record does not make an effect offerable:
+# only a review record derived from verification evidence, with nothing outstanding, does. Every effect -- the five of the earlier
+# ten-effect slice and the fifteen added since -- is held to the same standard: an earlier feature approval is not licensing evidence.
+#
+# The evidence is recorded per effect in Get-TpmReShadeLicenceEvidenceTable (produced by scripted verification against the upstream
+# repositories: pinned bytes, in-file licence headers, repository licence copies, include closure). The record is bound to the effect's
+# pins by a digest, so a catalog change without re-verification makes the record stale and the effect is withheld. Outstanding items are
+# specific facts (a missing record, a stale digest, an unverified file header, an unresolved include), never a generic owner-review item.
+# Checks that can only be run on Windows are not hidden in these records: they are the shared pipeline checks listed by
+# Get-TpmReShadeWindowsOnlyLicenceChecks, identical for every effect.
+function Get-TpmReShadeEffectPinDigest {
+    param([Parameter(Mandatory)]$Effect, $Specs = $null)
+    if ($null -eq $Specs) { $Specs = @(Get-TpmReShadeApprovedEffectFilesForEffect -Effect $Effect) }
+    $join = { param($values) (@($values | ForEach-Object { [string]$_ }) -join ',') }
+    $paths = Get-TpmReShadeSearchPathDeclaration
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add(('effect|{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}' -f $Effect.EffectId, $Effect.Repository, $Effect.PinnedCommit, $Effect.AllowedPathPrefix, (& $join $Effect.AllowedHosts), $Effect.License, $Effect.Attribution, $Effect.SourceObligations, $Effect.TechniqueName))
+    [void]$lines.Add(('files|{0}|{1}|{2}|{3}|{4}' -f (& $join $Effect.RelativeFiles), (& $join $Effect.DestinationFiles), (& $join @($Effect.SHA256 | ForEach-Object { ([string]$_).ToUpperInvariant() })), (& $join $Effect.ByteLengths), (& $join $Effect.FileLicenses)))
+    [void]$lines.Add(('deps|{0}|{1}|{2}|{3}' -f (& $join $Effect.RequiredIncludes), (& $join $Effect.RequiredTextures), $paths.EffectSearchPaths, $paths.TextureSearchPaths))
+    foreach ($notice in @($Effect.NoticeFiles)) {
+        [void]$lines.Add(('notice|{0}|{1}|{2}|{3}|{4}|{5}' -f $notice.Repository, $notice.PinnedCommit, $notice.SourceRelativePath, $notice.DestinationRelativePath, ([string]$notice.SHA256).ToUpperInvariant(), $notice.ByteLength))
+    }
+    # Every acquisition/deployment specification, including the generated bytes (TPM NOTICE.txt and the TPM-authored include), by hash.
+    foreach ($spec in @($Specs)) {
+        $inline = '-'
+        if ($null -ne $spec.InlineBytes) {
+            $hasher = [Security.Cryptography.SHA256]::Create()
+            try { $inline = [BitConverter]::ToString($hasher.ComputeHash([byte[]]$spec.InlineBytes)).Replace('-', '') } finally { $hasher.Dispose() }
+        }
+        [void]$lines.Add(('spec|{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}|{10}' -f $spec.Role, $spec.RelativePath, $spec.SourceRelativePath, $spec.CacheRelativePath, $spec.Url, ([string]$spec.SHA256).ToUpperInvariant(), $spec.ByteLength, $spec.PinnedRevision, $spec.Repository, $spec.License, $inline))
+    }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($lines -join "`n")))).Replace('-', '')) } finally { $sha.Dispose() }
+}
+
+function Get-TpmReShadeWindowsOnlyLicenceChecks {
+    return @(
+        'WIN-1 Install-level notice delivery: the five skipped tests in "notice and licence bytes through deployment" (promotion, repeat run, rollback of notice and licence-copy bytes) run on Windows, where the production containment check applies',
+        'WIN-2 Real acquisition: a real download of one effect set (for example the larger CRT Royale set) through Acquire/Install with the real pins on a Windows target',
+        'WIN-3 Shader compilation: ReShade compiles each approved effect with its shipped includes (this is what confirms the statically dead conditional includes really are unused)',
+        'WIN-4 Package identity: the release package carries the notice and LICENSE text unchanged'
+    )
+}
+
+# Evidence table: produced by scripted verification of the pinned upstream files (see the slice contract, section 17). Not legal advice.
+function Get-TpmReShadeLicenceEvidenceTable {
+    $method = 'Scripted upstream verification, 2026-10-05: every pinned file fetched from raw.githubusercontent.com at its pinned commit and matched on SHA-256 and byte length; in-file licence headers matched against the declared licence; repository licence copies identified; include closure resolved against the shipped set. Evidence verification, not legal advice.'
+    $reference = 'docs/remediation/slices/TPM-RESHADE-TWENTY-EFFECTS-001.md section 17'
+    $table = @{}
+    $table['SweetFX.LumaSharpen'] = [pscustomobject]@{ PinDigest = '97200A129094A82A3F9BA056D1ABCA7B9BFF293BC8F1277045102CD5C3A6A315'; PinnedRows = 5; PinnedRowsVerified = 5; HeaderBasisFiles = 0; HeaderBasisVerified = 0; RepositoryBasisFiles = 1; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 2; IncludeStatementsResolved = 2; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 3 files fetched from their pinned commit matched on SHA-256 and byte length; 2 TPM-authored notice file(s) matched their pinned hash', 'Repository licence copy: 1 file(s) rely on the repository licence; its text copy (MIT) is deployed with pinned bytes', 'Include closure: 2 include statements checked; 2 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh; ReShadeUI.fxh resolves to the TPM-authored compatibility header deployed as Shaders/TPM/ReShadeUI.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['SweetFX.Vibrance'] = [pscustomobject]@{ PinDigest = '86F522B12009DBB9CC244614BFB9984EE51176AB19DE9242637438B5BD898708'; PinnedRows = 5; PinnedRowsVerified = 5; HeaderBasisFiles = 0; HeaderBasisVerified = 0; RepositoryBasisFiles = 1; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 2; IncludeStatementsResolved = 2; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 3 files fetched from their pinned commit matched on SHA-256 and byte length; 2 TPM-authored notice file(s) matched their pinned hash', 'Repository licence copy: 1 file(s) rely on the repository licence; its text copy (MIT) is deployed with pinned bytes', 'Include closure: 2 include statements checked; 2 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh; ReShadeUI.fxh resolves to the TPM-authored compatibility header deployed as Shaders/TPM/ReShadeUI.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['FXShaders.CRT_Lottes'] = [pscustomobject]@{ PinDigest = '1E619D07A364FC0D7C148841AD1CB3614A3B6F869A88088E90F46759F31469F8'; PinnedRows = 5; PinnedRowsVerified = 5; HeaderBasisFiles = 1; HeaderBasisVerified = 1; RepositoryBasisFiles = 1; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 2; IncludeStatementsResolved = 2; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 4 files fetched from their pinned commit matched on SHA-256 and byte length; 1 TPM-authored notice file(s) matched their pinned hash', 'In-file notice: 1 of 1 files that rely on their own notice carry a matching licence notice in the file header', 'Repository licence copy: 1 file(s) rely on the repository licence; its text copy (MIT) is deployed with pinned bytes', 'Include closure: 2 include statements checked; 2 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['SweetFX.Curves'] = [pscustomobject]@{ PinDigest = '9371C4F89A6E9E23BE5B916F7B23A3C26C22B84AECDA993EE6930F2105A3D583'; PinnedRows = 5; PinnedRowsVerified = 5; HeaderBasisFiles = 0; HeaderBasisVerified = 0; RepositoryBasisFiles = 1; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 2; IncludeStatementsResolved = 2; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 3 files fetched from their pinned commit matched on SHA-256 and byte length; 2 TPM-authored notice file(s) matched their pinned hash', 'Repository licence copy: 1 file(s) rely on the repository licence; its text copy (MIT) is deployed with pinned bytes', 'Include closure: 2 include statements checked; 2 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh; ReShadeUI.fxh resolves to the TPM-authored compatibility header deployed as Shaders/TPM/ReShadeUI.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['SweetFX.Levels'] = [pscustomobject]@{ PinDigest = '5A27CD24FD1B5C1C99538563CBD8575F889E77462989C0ECE47B1A456583A268'; PinnedRows = 5; PinnedRowsVerified = 5; HeaderBasisFiles = 0; HeaderBasisVerified = 0; RepositoryBasisFiles = 1; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 2; IncludeStatementsResolved = 2; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 3 files fetched from their pinned commit matched on SHA-256 and byte length; 2 TPM-authored notice file(s) matched their pinned hash', 'Repository licence copy: 1 file(s) rely on the repository licence; its text copy (MIT) is deployed with pinned bytes', 'Include closure: 2 include statements checked; 2 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh; ReShadeUI.fxh resolves to the TPM-authored compatibility header deployed as Shaders/TPM/ReShadeUI.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['SweetFX.SMAA'] = [pscustomobject]@{ PinDigest = 'BA2D8A6DAFC5D15C735E7F372F50638ADBF0B6BC6DBAA184BE5896726912FD44'; PinnedRows = 9; PinnedRowsVerified = 9; HeaderBasisFiles = 1; HeaderBasisVerified = 1; RepositoryBasisFiles = 1; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 3; IncludeStatementsResolved = 3; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 7 files fetched from their pinned commit matched on SHA-256 and byte length; 2 TPM-authored notice file(s) matched their pinned hash', 'In-file notice: 1 of 1 files that rely on their own notice carry a matching licence notice in the file header', 'Repository licence copy: 1 file(s) rely on the repository licence; its text copy (MIT) is deployed with pinned bytes', 'Include closure: 3 include statements checked; 3 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('Texture PNG files carry no embedded notice; the SMAA project MIT licence text is deployed beside them', 'ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh; ReShadeUI.fxh resolves to the TPM-authored compatibility header deployed as Shaders/TPM/ReShadeUI.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['SweetFX.CAS'] = [pscustomobject]@{ PinDigest = 'CADB32F6F70B050C0F601E26E7557F00A7A5088518B3F382FA7BA5A9303E36AE'; PinnedRows = 4; PinnedRowsVerified = 4; HeaderBasisFiles = 1; HeaderBasisVerified = 1; RepositoryBasisFiles = 0; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 1; IncludeStatementsResolved = 1; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 3 files fetched from their pinned commit matched on SHA-256 and byte length; 1 TPM-authored notice file(s) matched their pinned hash', 'In-file notice: 1 of 1 files that rely on their own notice carry a matching licence notice in the file header', 'Include closure: 1 include statements checked; 1 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['CrosireSlim.Deband'] = [pscustomobject]@{ PinDigest = '5E32A6799AC8A2E95CABE6EDED9514929B4B4ABB394E5765C78C2F8AC70BC5D8'; PinnedRows = 4; PinnedRowsVerified = 4; HeaderBasisFiles = 1; HeaderBasisVerified = 1; RepositoryBasisFiles = 0; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 2; IncludeStatementsResolved = 2; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 2 files fetched from their pinned commit matched on SHA-256 and byte length; 2 TPM-authored notice file(s) matched their pinned hash', 'In-file notice: 1 of 1 files that rely on their own notice carry a matching licence notice in the file header', 'Include closure: 2 include statements checked; 2 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('No separate licence text copy: the licence rests on the notice embedded in the file, which is deployed byte for byte (a valid mechanism for MIT and BSD)', 'ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh; ReShadeUI.fxh resolves to the TPM-authored compatibility header deployed as Shaders/TPM/ReShadeUI.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['SweetFX.LiftGammaGain'] = [pscustomobject]@{ PinDigest = 'F30D1C03015E6C13403228F3ECF3CA1C91F846B7C51095270E1DC35C5BD80DF6'; PinnedRows = 5; PinnedRowsVerified = 5; HeaderBasisFiles = 0; HeaderBasisVerified = 0; RepositoryBasisFiles = 1; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 2; IncludeStatementsResolved = 2; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 3 files fetched from their pinned commit matched on SHA-256 and byte length; 2 TPM-authored notice file(s) matched their pinned hash', 'Repository licence copy: 1 file(s) rely on the repository licence; its text copy (MIT) is deployed with pinned bytes', 'Include closure: 2 include statements checked; 2 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh; ReShadeUI.fxh resolves to the TPM-authored compatibility header deployed as Shaders/TPM/ReShadeUI.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['SweetFX.Tonemap'] = [pscustomobject]@{ PinDigest = 'FF13C624029153D3EB88117C9AE3E716F18892F76E5F5C00425B24F7A9C32C66'; PinnedRows = 5; PinnedRowsVerified = 5; HeaderBasisFiles = 0; HeaderBasisVerified = 0; RepositoryBasisFiles = 1; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 2; IncludeStatementsResolved = 2; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 3 files fetched from their pinned commit matched on SHA-256 and byte length; 2 TPM-authored notice file(s) matched their pinned hash', 'Repository licence copy: 1 file(s) rely on the repository licence; its text copy (MIT) is deployed with pinned bytes', 'Include closure: 2 include statements checked; 2 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh; ReShadeUI.fxh resolves to the TPM-authored compatibility header deployed as Shaders/TPM/ReShadeUI.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['Prod80.ColorBalance'] = [pscustomobject]@{ PinDigest = '56CA2518EAD870D96CE108E98E3377B55DD4094DD26FDE97B773E8BC1AFDDB9A'; PinnedRows = 5; PinnedRowsVerified = 5; HeaderBasisFiles = 1; HeaderBasisVerified = 1; RepositoryBasisFiles = 0; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 2; IncludeStatementsResolved = 2; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 3 files fetched from their pinned commit matched on SHA-256 and byte length; 2 TPM-authored notice file(s) matched their pinned hash', 'In-file notice: 1 of 1 files that rely on their own notice carry a matching licence notice in the file header', 'Include closure: 2 include statements checked; 2 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh; ReShadeUI.fxh resolves to the TPM-authored compatibility header deployed as Shaders/TPM/ReShadeUI.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['FXShaders.ArcaneBloom'] = [pscustomobject]@{ PinDigest = '34C97E73C2CF86EB59742F4341CBE48738BA487C0F8CA13BC6ABCBAA2C3BCA8F'; PinnedRows = 4; PinnedRowsVerified = 4; HeaderBasisFiles = 0; HeaderBasisVerified = 0; RepositoryBasisFiles = 2; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 1; IncludeStatementsResolved = 1; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 3 files fetched from their pinned commit matched on SHA-256 and byte length; 1 TPM-authored notice file(s) matched their pinned hash', 'Repository licence copy: 2 file(s) rely on the repository licence; its text copy (MIT) is deployed with pinned bytes', 'Include closure: 1 include statements checked; 1 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @() }
+    $table['Akgunter.CRTRoyale'] = [pscustomobject]@{ PinDigest = '88B253C05BE7B9BA324943819D7B84632AA4174961AEB30EC39EC65EFEBE66B0'; PinnedRows = 29; PinnedRowsVerified = 29; HeaderBasisFiles = 25; HeaderBasisVerified = 25; RepositoryBasisFiles = 1; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 79; IncludeStatementsResolved = 79; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 28 files fetched from their pinned commit matched on SHA-256 and byte length; 1 TPM-authored notice file(s) matched their pinned hash', 'In-file notice: 25 of 25 files that rely on their own notice carry a matching licence notice in the file header', 'Repository licence copy: 1 file(s) rely on the repository licence; its text copy (GPL2) is deployed with pinned bytes', 'Include closure: 79 include statements checked; 79 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh (Shaders/TPM is on the effect search path and in the digest)', 'Source form: the shader files are source and are deployed unmodified with the licence text and the pinned source location (NOTICE.txt); TPM modifies no covered file') }
+    $table['RSRetroArch.CRTPi'] = [pscustomobject]@{ PinDigest = '699D1CC461ED2D91EC386878A3246BE1439D11D949D39F1F3104791E4C884108'; PinnedRows = 4; PinnedRowsVerified = 4; HeaderBasisFiles = 1; HeaderBasisVerified = 1; RepositoryBasisFiles = 0; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 1; IncludeStatementsResolved = 1; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 3 files fetched from their pinned commit matched on SHA-256 and byte length; 1 TPM-authored notice file(s) matched their pinned hash', 'In-file notice: 1 of 1 files that rely on their own notice carry a matching licence notice in the file header', 'Include closure: 1 include statements checked; 1 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('The upstream repository has no licence file; the in-file notice grants GPL version 2 or any later version and the GPL-2.0 text copy is deployed', 'ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh (Shaders/TPM is on the effect search path and in the digest)', 'Source form: the shader files are source and are deployed unmodified with the licence text and the pinned source location (NOTICE.txt); TPM modifies no covered file') }
+    $table['CrosireLegacy.AdaptiveSharpen'] = [pscustomobject]@{ PinDigest = '0BB3402394A3FF8D146B35668C0F1C54ED2C7D5C624FD8CF47A517A9299B9D6A'; PinnedRows = 4; PinnedRowsVerified = 4; HeaderBasisFiles = 1; HeaderBasisVerified = 1; RepositoryBasisFiles = 0; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 2; IncludeStatementsResolved = 2; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 2 files fetched from their pinned commit matched on SHA-256 and byte length; 2 TPM-authored notice file(s) matched their pinned hash', 'In-file notice: 1 of 1 files that rely on their own notice carry a matching licence notice in the file header', 'Include closure: 2 include statements checked; 2 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('No separate licence text copy: the licence rests on the notice embedded in the file, which is deployed byte for byte (a valid mechanism for MIT and BSD)', 'ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh; ReShadeUI.fxh resolves to the TPM-authored compatibility header deployed as Shaders/TPM/ReShadeUI.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['Fubax.FilmicAnamorphSharpen'] = [pscustomobject]@{ PinDigest = 'D1F1C65777D8A70D2BBE46D5FF441ABF0EF7D08DBB62A66B95417C26DC0AFF25'; PinnedRows = 6; PinnedRowsVerified = 6; HeaderBasisFiles = 3; HeaderBasisVerified = 3; RepositoryBasisFiles = 0; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 4; IncludeStatementsResolved = 4; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 4 files fetched from their pinned commit matched on SHA-256 and byte length; 2 TPM-authored notice file(s) matched their pinned hash', 'In-file notice: 3 of 3 files that rely on their own notice carry a matching licence notice in the file header', 'Include closure: 4 include statements checked; 4 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('No separate licence text copy: the licence rests on the notice embedded in the file, which is deployed byte for byte (a valid mechanism for MIT and BSD)', 'The CC licence is identified by the URL in the file header (a valid mechanism); the file is deployed unmodified', 'ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh; ReShadeUI.fxh resolves to the TPM-authored compatibility header deployed as Shaders/TPM/ReShadeUI.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['CrosireLegacy.Colourfulness'] = [pscustomobject]@{ PinDigest = '8E7BB17F476B41C7952DE8451485092F239DDFA365705F068C80572C47C790DB'; PinnedRows = 4; PinnedRowsVerified = 4; HeaderBasisFiles = 1; HeaderBasisVerified = 1; RepositoryBasisFiles = 0; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 2; IncludeStatementsResolved = 2; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 2 files fetched from their pinned commit matched on SHA-256 and byte length; 2 TPM-authored notice file(s) matched their pinned hash', 'In-file notice: 1 of 1 files that rely on their own notice carry a matching licence notice in the file header', 'Include closure: 2 include statements checked; 2 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('No separate licence text copy: the licence rests on the notice embedded in the file, which is deployed byte for byte (a valid mechanism for MIT and BSD)', 'ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh; ReShadeUI.fxh resolves to the TPM-authored compatibility header deployed as Shaders/TPM/ReShadeUI.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['Glamarye.FastEffects'] = [pscustomobject]@{ PinDigest = '1CCB0A1FC503B5051BE2CC0A2E83CC332182EF4048E9613129D053205D165A5F'; PinnedRows = 5; PinnedRowsVerified = 5; HeaderBasisFiles = 1; HeaderBasisVerified = 1; RepositoryBasisFiles = 0; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 2; IncludeStatementsResolved = 2; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 3 files fetched from their pinned commit matched on SHA-256 and byte length; 2 TPM-authored notice file(s) matched their pinned hash', 'In-file notice: 1 of 1 files that rely on their own notice carry a matching licence notice in the file header', 'Include closure: 2 include statements checked; 2 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('ReShade-provided headers are explicit deployed files, not assumed: ReShade.fxh resolves to the pinned crosire/reshade-shaders copy deployed as Shaders/TPM/ReShade.fxh; ReShadeUI.fxh resolves to the TPM-authored compatibility header deployed as Shaders/TPM/ReShadeUI.fxh (Shaders/TPM is on the effect search path and in the digest)') }
+    $table['Lilium.ToneMapping'] = [pscustomobject]@{ PinDigest = '17B7E7749AEE8F49F6785FAD5079F5808ACFAA25EDB5AC2B3403F0F96ED529C4'; PinnedRows = 20; PinnedRowsVerified = 20; HeaderBasisFiles = 1; HeaderBasisVerified = 1; RepositoryBasisFiles = 17; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 19; IncludeStatementsResolved = 17; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @([pscustomobject]@{ IncludedBy = 'Shaders/lilium__tone_mapping.fx'; Line = 9; Include = 'lilium__include/draw_text_fix.fxh'; IncluderSha256 = '0BF538BBC5B250073BE0DDAA3A7F17500EE6D8BEDB9C8B37D4E67BBE5CBF5A0B'; Conditions = @('#if (SHOW_ADAPTIVE_MAX_NITS == YES) => false (evaluated: (((1)) == (2)))'); Defines = @('SHOW_ADAPTIVE_MAX_NITS = NO at Shaders/lilium__tone_mapping.fx:4', 'YES = 2 at Shaders/lilium__include/reshade_setup.fxh:18') }, [pscustomobject]@{ IncludedBy = 'Shaders/lilium__tone_mapping.fx'; Line = 36; Include = 'lilium__include/HDR_black_floor_fix.fxh'; IncluderSha256 = '0BF538BBC5B250073BE0DDAA3A7F17500EE6D8BEDB9C8B37D4E67BBE5CBF5A0B'; Conditions = @('#if (defined(IS_ANALYSIS_CAPABLE_API) && ((ACTUAL_COLOUR_SPACE == CSP_SCRGB || ACTUAL_COLOUR_SPACE == CSP_HDR10) || defined(MANUAL_OVERRIDE_MODE_ENABLE_INTERNAL))) => unknown (evaluated: (0 && ((ACTUAL_COLOUR_SPACE == (2) || ACTUAL_COLOUR_SPACE == (3)) || 0)))', '#if 0 => false (evaluated: 0)'); Defines = @('ACTUAL_COLOUR_SPACE = None at Shaders/lilium__include/reshade_setup.fxh:619', 'CSP_HDR10 = 3 at Shaders/lilium__include/reshade_setup.fxh:163', 'CSP_SCRGB = 2 at Shaders/lilium__include/reshade_setup.fxh:162') });
+        Verified = @('Pinned bytes: 19 files fetched from their pinned commit matched on SHA-256 and byte length; 1 TPM-authored notice file(s) matched their pinned hash', 'In-file notice: 1 of 1 files that rely on their own notice carry a matching licence notice in the file header', 'Repository licence copy: 17 file(s) rely on the repository licence; its text copy (GPL3) is deployed with pinned bytes', 'Include closure: 19 include statements checked; 17 resolve to deployed files (relative to the including file, then the effect search paths); 2 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('darktable_ucs.fxh has a copyright line without its own grant; it sits in a GPL-3.0 repository whose licence text is deployed (same basis as other files without a header)', 'Source form: the shader files are source and are deployed unmodified with the licence text and the pinned source location (NOTICE.txt); TPM modifies no covered file') }
+    $table['Lilium.HdrBlackFloorFix'] = [pscustomobject]@{ PinDigest = 'D284699447AAB1697E215F73C54943517B1E7755E21BC6F746115D76E95BC5CB'; PinnedRows = 20; PinnedRowsVerified = 20; HeaderBasisFiles = 1; HeaderBasisVerified = 1; RepositoryBasisFiles = 17; RepositoryLicenseCopyVerified = $true; IncludeStatementsChecked = 17; IncludeStatementsResolved = 17; ActiveUnresolvedIncludes = @(); Method = $method; Reference = $reference;
+        InactiveIncludes = @();
+        Verified = @('Pinned bytes: 19 files fetched from their pinned commit matched on SHA-256 and byte length; 1 TPM-authored notice file(s) matched their pinned hash', 'In-file notice: 1 of 1 files that rely on their own notice carry a matching licence notice in the file header', 'Repository licence copy: 17 file(s) rely on the repository licence; its text copy (GPL3) is deployed with pinned bytes', 'Include closure: 17 include statements checked; 17 resolve to deployed files (relative to the including file, then the effect search paths); 0 inactive under statically false conditions; 0 active and unresolved');
+        NonDefects = @('darktable_ucs.fxh has a copyright line without its own grant; it sits in a GPL-3.0 repository whose licence text is deployed (same basis as other files without a header)', 'Source form: the shader files are source and are deployed unmodified with the licence text and the pinned source location (NOTICE.txt); TPM modifies no covered file') }
+    return $table
+}
+
+function Get-TpmReShadeObligationReviewRecord {
+    param([Parameter(Mandatory)][string]$EffectId, $Effect = $null)
+    $evidence = (Get-TpmReShadeLicenceEvidenceTable)[$EffectId]
+    $items = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $evidence) {
+        [void]$items.Add('NO_EVIDENCE_RECORD: no upstream verification (pinned bytes, in-file headers, licence copies, include closure) is recorded for this effect')
+    } else {
+        $specs = $null
+        if ($null -ne $Effect) {
+            try {
+                $specs = @(Get-TpmReShadeApprovedEffectFilesForEffect -Effect $Effect)
+                if ([string]$evidence.PinDigest -ne (Get-TpmReShadeEffectPinDigest -Effect $Effect -Specs $specs)) {
+                    [void]$items.Add('EVIDENCE_STALE: the acquisition/deployment specification (repositories, paths, hashes, lengths, dependencies and search paths, licence basis and attribution, generated notice and include bytes) changed after the recorded verification; re-verify against upstream')
+                }
+            } catch { [void]$items.Add(('SPECIFICATION_INVALID: the acquisition specification could not be built ({0})' -f $_.Exception.Message)) }
+        }
+        if ([int]$evidence.PinnedRowsVerified -ne [int]$evidence.PinnedRows) {
+            [void]$items.Add(('PINNED_BYTES_UNVERIFIED: {0} of {1} pinned files matched upstream on SHA-256 and byte length' -f $evidence.PinnedRowsVerified, $evidence.PinnedRows))
+        }
+        if ([int]$evidence.HeaderBasisVerified -ne [int]$evidence.HeaderBasisFiles) {
+            [void]$items.Add(('FILE_NOTICE_UNVERIFIED: {0} of {1} files that rely on their own in-file licence notice carry a matching notice' -f $evidence.HeaderBasisVerified, $evidence.HeaderBasisFiles))
+        }
+        if ([int]$evidence.RepositoryBasisFiles -gt 0 -and -not [bool]$evidence.RepositoryLicenseCopyVerified) {
+            [void]$items.Add('REPOSITORY_LICENSE_COPY_UNVERIFIED: files rely on the repository licence but no matching licence text copy is verified')
+        }
+        if ([int]$evidence.IncludeStatementsResolved + @($evidence.InactiveIncludes).Count + @($evidence.ActiveUnresolvedIncludes).Count -ne [int]$evidence.IncludeStatementsChecked) {
+            [void]$items.Add('INCLUDE_RECORD_INCONSISTENT: the recorded include statements are not fully accounted for as resolved, inactive or unresolved')
+        }
+        if (@($evidence.ActiveUnresolvedIncludes).Count -gt 0) {
+            [void]$items.Add(('DEPENDENCY_UNRESOLVED: active include(s) that resolve to no deployed file: {0}' -f (@($evidence.ActiveUnresolvedIncludes) -join ', ')))
+        }
+        foreach ($inactive in @($evidence.InactiveIncludes)) {
+            $conditionOk = (@($inactive.Conditions | Where-Object { [string]$_ -match '=> false' }).Count -gt 0)
+            $sourceOk = $true
+            if ($null -ne $specs) {
+                $includer = @($specs | Where-Object { [string]$_.RelativePath -ieq [string]$inactive.IncludedBy } | Select-Object -First 1)
+                $sourceOk = ($includer.Count -eq 1 -and ([string]$includer[0].SHA256).ToUpperInvariant() -eq ([string]$inactive.IncluderSha256).ToUpperInvariant())
+            }
+            if (-not $conditionOk -or -not $sourceOk) {
+                [void]$items.Add(('INACTIVE_INCLUDE_RECORD_STALE: {0} (line {1} of {2}) is recorded as inactive but the recorded condition is not statically false or the including file is no longer the verified pinned file' -f $inactive.Include, $inactive.Line, $inactive.IncludedBy))
+            }
+        }
+    }
+    if ($items.Count -eq 0) {
+        return [pscustomobject]@{ Status = 'REVIEWED'; ReviewedBy = [string]$evidence.Method; Reference = [string]$evidence.Reference; OutstandingItems = @(); Verified = @($evidence.Verified); NonDefects = @($evidence.NonDefects) }
+    }
+    return [pscustomobject]@{ Status = 'EVIDENCE_INCOMPLETE'; ReviewedBy = ''; Reference = ''; OutstandingItems = @($items.ToArray()); Verified = @(); NonDefects = @() }
+}
+
+# Structural check that an approved effect carries everything its licence needs before it may be offered: a licence statement, attribution,
+# a stated source/notice obligation, a licence basis for every file, and either an upstream licence text copy or an in-file notice that
+# is deployed unmodified. Gaps are listed; an effect with any gap is not offered.
+function Get-TpmReShadeEffectObligationStatus {
+    param([Parameter(Mandatory)]$Effect)
+    $gaps = New-Object System.Collections.Generic.List[string]
+    if ([string]::IsNullOrWhiteSpace([string]$Effect.License)) { [void]$gaps.Add('MISSING_LICENSE') }
+    if ([string]::IsNullOrWhiteSpace([string]$Effect.Attribution)) { [void]$gaps.Add('MISSING_ATTRIBUTION') }
+    if ([string]::IsNullOrWhiteSpace([string]$Effect.SourceObligations)) { [void]$gaps.Add('MISSING_OBLIGATIONS') }
+    $fileCount = @($Effect.RelativeFiles).Count
+    if (@($Effect.FileLicenses).Count -ne $fileCount) { [void]$gaps.Add('FILE_LICENSE_BASIS_INCOMPLETE') }
+    if (@($Effect.SHA256).Count -ne $fileCount -or @($Effect.ByteLengths).Count -ne $fileCount) { [void]$gaps.Add('FILE_PIN_INCOMPLETE') }
+    $needsRepositoryText = @($Effect.FileLicenses | Where-Object { [string]$_ -eq 'REPOSITORY-LICENSE' }).Count -gt 0
+    if ($needsRepositoryText -and @($Effect.NoticeFiles).Count -eq 0) { [void]$gaps.Add('REPOSITORY_LICENSE_TEXT_NOT_COPIED') }
+    $copyleft = [string]$Effect.License -match 'GPL|CC-BY-SA'
+    if ($copyleft -and [string]$Effect.SourceObligations -notmatch '(?i)source|share|license') { [void]$gaps.Add('COPYLEFT_OBLIGATION_NOT_STATED') }
+    # Metadata completeness is NOT reviewed completeness: Offerable (shown and deployable) additionally needs a REVIEWED record with nothing outstanding.
+    $review = if ($Effect.PSObject.Properties['ObligationReview']) { $Effect.ObligationReview } else { $null }
+    $outstanding = @()
+    if ($review -and $review.PSObject.Properties['OutstandingItems']) { $outstanding = @($review.OutstandingItems | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }) }
+    $reviewComplete = ($null -ne $review -and [string]$review.Status -eq 'REVIEWED' -and -not [string]::IsNullOrWhiteSpace([string]$review.ReviewedBy) -and -not [string]::IsNullOrWhiteSpace([string]$review.Reference) -and $outstanding.Count -eq 0)
+    $metadataComplete = ($gaps.Count -eq 0)
+    return [pscustomobject]@{ EffectId = [string]$Effect.EffectId; Complete = $metadataComplete; MetadataComplete = $metadataComplete; ReviewStatus = $(if ($review) { [string]$review.Status } else { 'NO_REVIEW_RECORD' }); ReviewComplete = $reviewComplete; Offerable = ($metadataComplete -and $reviewComplete); Gaps = @($gaps.ToArray()); OutstandingItems = @($outstanding) }
+}
+
+# Review inventory: all effects stay listed (including those withheld) with their status and every outstanding item.
+function Get-TpmReShadeObligationReviewInventory {
+    return @(Get-TpmReShadeEffectCatalog | ForEach-Object {
+        $status = Get-TpmReShadeEffectObligationStatus -Effect $_
+        [pscustomobject]@{ EffectId = $status.EffectId; License = [string]$_.License; MetadataComplete = $status.MetadataComplete; ReviewStatus = $status.ReviewStatus; Offerable = $status.Offerable; MetadataGaps = @($status.Gaps); OutstandingItems = @($status.OutstandingItems) }
+    })
+}
+
+function Get-TpmReShadeEffectNoticeBytes {
+    param([Parameter(Mandatory)]$Effect)
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add('TeknoParrot Manager - third-party ReShade effect notice')
+    [void]$lines.Add('')
+    [void]$lines.Add(('Effect      : {0} ({1})' -f $Effect.FriendlyName, $Effect.EffectId))
+    [void]$lines.Add(('Source      : https://github.com/{0}/tree/{1}' -f $Effect.Repository, $Effect.PinnedCommit))
+    [void]$lines.Add(('License     : {0}' -f $Effect.License))
+    [void]$lines.Add(('Attribution : {0}' -f $Effect.Attribution))
+    [void]$lines.Add(('Obligations : {0}' -f $Effect.SourceObligations))
+    [void]$lines.Add('')
+    [void]$lines.Add('Files below are verbatim copies fetched from the immutable commit above and accepted only on their exact')
+    [void]$lines.Add('SHA-256 and byte length. TeknoParrot Manager does not modify them. Per-file license basis is listed after each path.')
+    $files = @($Effect.RelativeFiles)
+    $destinations = @($Effect.DestinationFiles)
+    for ($i = 0; $i -lt $files.Count; $i++) {
+        $basis = if (@($Effect.FileLicenses).Count -gt $i) { [string]$Effect.FileLicenses[$i] } else { 'REPOSITORY-LICENSE' }
+        [void]$lines.Add(('  {0}  ->  {1}  [{2}]' -f $files[$i], $destinations[$i], $basis))
+    }
+    foreach ($notice in @($Effect.NoticeFiles)) { [void]$lines.Add(('License text copy: {0} (from {1} {2}, {3})' -f $notice.DestinationRelativePath, $notice.Repository, $notice.PinnedCommit, $notice.SourceRelativePath)) }
+    [void]$lines.Add('')
+    [void]$lines.Add('Where a file carries its own license notice, that notice governs that file. Where it carries none, the license text copy')
+    [void]$lines.Add('above (the upstream repository LICENSE file) is the stated basis. This notice grants no additional rights.')
     return ,([Text.Encoding]::ASCII.GetBytes(($lines -join "`r`n") + "`r`n"))
 }
 
@@ -9293,23 +10408,66 @@ function Get-TpmReShadeApprovedEffectFiles {
     param([Parameter(Mandatory)][string]$EffectId)
     $effect = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq $EffectId)[0]
     if (-not $effect) { throw "Effect is not approved: $EffectId" }
+    return @(Get-TpmReShadeApprovedEffectFilesForEffect -Effect $effect)
+}
+
+# The acquisition/deployment specifications of ONE catalog row (effect files, textures, licence copies, generated NOTICE and shared include
+# bytes). It does not look the catalog up, so the licence evidence record can be bound to these exact specifications while the catalog is
+# still being built.
+function Get-TpmReShadeApprovedEffectFilesForEffect {
+    param([Parameter(Mandatory)]$Effect)
+    $effect = $Effect
     $files = New-Object System.Collections.Generic.List[object]
     $safeEffectCache = $effect.EffectId -replace '[^A-Za-z0-9_.-]', '_'
+    $destinationFiles = @(if ($effect.PSObject.Properties['DestinationFiles'] -and @($effect.DestinationFiles).Count -eq @($effect.RelativeFiles).Count) { $effect.DestinationFiles } else { $effect.RelativeFiles })
+    $destinationNames = @($destinationFiles | ForEach-Object { [IO.Path]::GetFileName([string]$_) })
     for ($i = 0; $i -lt @($effect.RelativeFiles).Count; $i++) {
-        $relative = [string]$effect.RelativeFiles[$i]
-        if ($relative -match '(^|/)\.\.?(/|$)' -or $relative.StartsWith('/') -or $relative -match '%2f|%5c|%2e') { throw 'Approved effect path is unsafe.' }
-        $url = 'https://raw.githubusercontent.com/' + $effect.AllowedPathPrefix.Trim('/') + '/' + $relative
+        $source = [string]$effect.RelativeFiles[$i]
+        $relative = [string]$destinationFiles[$i]
+        foreach ($candidatePath in @($source, $relative)) {
+            if ($candidatePath -match '(^|/)\.\.?(/|$)' -or $candidatePath.StartsWith('/') -or $candidatePath -match '%2f|%5c|%2e|\\') { throw 'Approved effect path is unsafe.' }
+        }
+        # A cache name needs the sub-path only when two files of one effect share a file name.
+        $cacheName = if (@($destinationNames | Where-Object { $_ -ieq $destinationNames[$i] }).Count -gt 1) { $relative } else { [IO.Path]::GetFileName($relative) }
+        $role = if ([IO.Path]::GetExtension($relative) -ieq '.png') { 'EffectTexture' } else { 'EffectAsset' }
+        $url = 'https://raw.githubusercontent.com/' + $effect.AllowedPathPrefix.Trim('/') + '/' + $source
         $uri = $null
         $validUri = [Uri]::TryCreate($url, [UriKind]::Absolute, [ref]$uri)
-        if (-not $validUri -or $uri.Scheme -ne 'https' -or $uri.Host -notin $effect.AllowedHosts -or $uri.Query -or $uri.Fragment -or $uri.AbsolutePath -ne ('/' + $effect.AllowedPathPrefix.Trim('/') + '/' + $relative) -or $uri.AbsolutePath -match '%2f|%5c|%2e' -or -not $uri.AbsolutePath.StartsWith($effect.AllowedPathPrefix, [StringComparison]::Ordinal)) { throw 'Approved effect URL failed allowlist validation.' }
+        if (-not $validUri -or $uri.Scheme -ne 'https' -or $uri.Host -notin $effect.AllowedHosts -or $uri.Query -or $uri.Fragment -or $uri.AbsolutePath -ne ('/' + $effect.AllowedPathPrefix.Trim('/') + '/' + $source) -or $uri.AbsolutePath -match '%2f|%5c|%2e' -or -not $uri.AbsolutePath.StartsWith($effect.AllowedPathPrefix, [StringComparison]::Ordinal)) { throw 'Approved effect URL failed allowlist validation.' }
         $length = if (@($effect.ByteLengths).Count -gt $i) { [int64]$effect.ByteLengths[$i] } else { $null }
         [void]$files.Add([pscustomobject]@{
-            EffectId = $effect.EffectId; Role = 'EffectAsset'; RelativePath = $relative; SourceRelativePath = $relative
-            CacheRelativePath = ($safeEffectCache + '/' + [IO.Path]::GetFileName($relative)); Url = $url
+            EffectId = $effect.EffectId; Role = $role; RelativePath = $relative; SourceRelativePath = $source
+            CacheRelativePath = ($safeEffectCache + '/' + $cacheName); Url = $url
             SHA256 = $effect.SHA256[$i]; ByteLength = $length; PinnedRevision = $effect.PinnedCommit
             Repository = $effect.Repository; License = $effect.License; InlineBytes = $null
         })
     }
+    # Upstream license text copies (each pinned by commit, SHA-256 and byte length) and the TPM-authored notice.
+    foreach ($notice in @($effect.NoticeFiles)) {
+        $noticeSource = [string]$notice.SourceRelativePath
+        $noticeDestination = [string]$notice.DestinationRelativePath
+        foreach ($candidatePath in @($noticeSource, $noticeDestination)) {
+            if ($candidatePath -match '(^|/)\.\.?(/|$)' -or $candidatePath.StartsWith('/') -or $candidatePath -match '%2f|%5c|%2e|\\') { throw 'Approved effect notice path is unsafe.' }
+        }
+        $noticePrefix = '/{0}/{1}/' -f $notice.Repository, $notice.PinnedCommit
+        $noticeUrl = 'https://raw.githubusercontent.com' + $noticePrefix + $noticeSource
+        $noticeUri = $null
+        if (-not [Uri]::TryCreate($noticeUrl, [UriKind]::Absolute, [ref]$noticeUri) -or $noticeUri.Scheme -ne 'https' -or $noticeUri.Host -ne 'raw.githubusercontent.com' -or $noticeUri.AbsolutePath -ne ($noticePrefix + $noticeSource) -or $noticeUri.Query -or $noticeUri.Fragment -or $noticeUri.AbsolutePath -match '%2f|%5c|%2e') { throw 'Approved effect notice URL failed allowlist validation.' }
+        [void]$files.Add([pscustomobject]@{
+            EffectId = $effect.EffectId; Role = 'LicenseNotice'; RelativePath = $noticeDestination; SourceRelativePath = $noticeSource
+            CacheRelativePath = ($safeEffectCache + '/Notice-' + [IO.Path]::GetFileName($noticeDestination)); Url = $noticeUrl
+            SHA256 = [string]$notice.SHA256; ByteLength = [int64]$notice.ByteLength; PinnedRevision = [string]$notice.PinnedCommit
+            Repository = [string]$notice.Repository; License = $effect.License; InlineBytes = $null
+        })
+    }
+    $noticeBytes = [byte[]](Get-TpmReShadeEffectNoticeBytes -Effect $effect)
+    $noticeHasher = [Security.Cryptography.SHA256]::Create()
+    try { $noticeHash = [BitConverter]::ToString($noticeHasher.ComputeHash($noticeBytes)).Replace('-', '') } finally { $noticeHasher.Dispose() }
+    [void]$files.Add([pscustomobject]@{
+        EffectId = $effect.EffectId; Role = 'LicenseNotice'; RelativePath = ('Shaders/TPM/Notices/{0}/NOTICE.txt' -f $effect.EffectId); SourceRelativePath = 'TPM-authored/NOTICE.txt'
+        CacheRelativePath = ($safeEffectCache + '/NOTICE.txt'); Url = $null; SHA256 = $noticeHash; ByteLength = [int64]$noticeBytes.Length
+        PinnedRevision = 'TPM'; Repository = 'TeknoParrot-Manager'; License = 'Project-authored'; InlineBytes = $noticeBytes
+    })
     if (@($effect.RequiredIncludes) -contains 'ReShade.fxh') {
         $revision = 'fd0022170615ce0d8162d219bff07232fa6dd84f'
         $source = 'Shaders/ReShade.fxh'
@@ -10192,6 +11350,8 @@ function Install-TpmReShadeProfileDeployment {
         [string]$SourceVersion = '',
         [switch]$CanonicalPreset,
         [switch]$AllowUserOwnedOverwrite,
+        [string]$HdrTargetDisplayId = '',
+        [string]$ExpectedHdrFingerprint = '',
         [ValidateSet('None','BeforeCommit')][string]$FaultStage = 'None'
     )
     $staging = $null
@@ -10205,6 +11365,27 @@ function Install-TpmReShadeProfileDeployment {
         $approvedProfile = Get-TpmReShadeProfile -ProfileId $ProfileDefinition.ProfileId
         if (-not $approvedProfile -or [string]$approvedProfile.SchemaVersion -ne [string]$ProfileDefinition.SchemaVersion -or (@($approvedProfile.Effects) -join ',') -ne (@($ProfileDefinition.Effects) -join ',')) {
             return [pscustomobject]@{ Succeeded = $false; State = 'STALE_PROFILE_DEFINITION'; Reason = 'STALE_PROFILE_DEFINITION' }
+        }
+        # Deployment-time HDR guard (covers every caller, including restore): an HDR-only profile is refused unless real detection says
+        # the relevant display has HDR active right now. Nothing is written when refused.
+        if (Test-TpmReShadeProfileRequiresHdr -Entry $approvedProfile) {
+            $liveHdrGate = Get-TpmReShadeHdrGate -TargetDisplayId $HdrTargetDisplayId
+            if (-not [bool]$liveHdrGate.Enabled) {
+                return [pscustomobject]@{ Succeeded = $false; State = 'HDR_UNAVAILABLE'; Reason = 'HDR_UNAVAILABLE' }
+            }
+            if (-not [string]::IsNullOrWhiteSpace($ExpectedHdrFingerprint) -and [string]$liveHdrGate.Fingerprint -ne $ExpectedHdrFingerprint) {
+                return [pscustomobject]@{ Succeeded = $false; State = 'HDR_UNAVAILABLE'; Reason = 'HDR_EVIDENCE_CHANGED' }
+            }
+        }
+        foreach ($approvedEffectId in @($approvedProfile.Effects)) {
+            $approvedEffect = Get-TpmReShadeEffectCatalog | Where-Object { [string]$_.EffectId -eq [string]$approvedEffectId } | Select-Object -First 1
+            $obligation = if ($approvedEffect) { Get-TpmReShadeEffectObligationStatus -Effect $approvedEffect } else { $null }
+            if ($null -eq $obligation -or -not $obligation.MetadataComplete) {
+                return [pscustomobject]@{ Succeeded = $false; State = 'LICENSE_OBLIGATIONS_INCOMPLETE'; Reason = 'LICENSE_OBLIGATIONS_INCOMPLETE' }
+            }
+            if (-not $obligation.Offerable) {
+                return [pscustomobject]@{ Succeeded = $false; State = 'LICENSE_OBLIGATIONS_UNREVIEWED'; Reason = 'LICENSE_OBLIGATIONS_UNREVIEWED' }
+            }
         }
         $variant = Resolve-TpmReShadeIntensityVariant -ProfileDefinition $approvedProfile -VariantId $VariantId
         $exeDir = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($GamePath))
@@ -10663,44 +11844,78 @@ function Resolve-ReShadeDllAcquisition {
     }
 }
 
+# Thin console seams so the waiting input loop can be driven by tests without a real console.
+function Test-TpmConsoleInputRedirected { return [Console]::IsInputRedirected }
+function Test-TpmConsoleKeyAvailable { return [Console]::KeyAvailable }
+function Read-TpmConsoleKey { return [Console]::ReadKey($true) }
+function Write-TpmConsoleText {
+    param([AllowEmptyString()][string]$Text, [string]$Color = '')
+    if ($Color) { Write-Host $Text -NoNewline -ForegroundColor $Color } else { Write-Host $Text -NoNewline }
+}
+
+# Waits for a line of input. While waiting, DoEvents keeps the preview window responsive and -OnIdle (polled each cycle) may return a
+# one-line notice, for example that the preview selection changed. The notice is printed on its own line and the prompt is redrawn
+# with the partially typed text intact; the typed buffer and Enter handling are never altered by it.
 function Read-TpmReShadeTerminalInput {
     param(
         [string]$Prompt,
-        [bool]$PumpPreviewMessages
+        [bool]$PumpPreviewMessages,
+        [scriptblock]$OnIdle = $null,
+        [scriptblock]$OnUpdate = $null,
+        [scriptblock]$OnFallback = $null
     )
     if (-not $PumpPreviewMessages) { return Read-HostSafe $Prompt }
     try {
-        if ([Console]::IsInputRedirected) { return Read-HostSafe $Prompt }
+        if (Test-TpmConsoleInputRedirected) { return Read-HostSafe $Prompt }
     } catch {
         return Read-HostSafe $Prompt
     }
-    Write-Host ($Prompt + ': ') -NoNewline
+    Write-TpmConsoleText ($Prompt + ': ')
     $buffer = New-Object System.Text.StringBuilder
     while ($true) {
         try {
-            while ([Console]::KeyAvailable) {
-                $keyInfo = [Console]::ReadKey($true)
+            while (Test-TpmConsoleKeyAvailable) {
+                $keyInfo = Read-TpmConsoleKey
                 if ($keyInfo.Key -eq [ConsoleKey]::Enter) {
-                    Write-Host ''
+                    Write-TpmConsoleText "`n"
                     return $buffer.ToString()
                 }
                 if ($keyInfo.Key -eq [ConsoleKey]::Backspace) {
                     if ($buffer.Length -gt 0) {
                         [void]$buffer.Remove($buffer.Length - 1, 1)
-                        Write-Host "`b `b" -NoNewline
+                        Write-TpmConsoleText "`b `b"
                     }
                     continue
                 }
                 if (-not [char]::IsControl($keyInfo.KeyChar)) {
                     [void]$buffer.Append($keyInfo.KeyChar)
-                    Write-Host $keyInfo.KeyChar -NoNewline
+                    Write-TpmConsoleText ([string]$keyInfo.KeyChar)
                 }
             }
         } catch {
-            Write-Host ''
+            Write-TpmConsoleText "`n"
             return Read-HostSafe $Prompt
         }
         try { [Windows.Forms.Application]::DoEvents() } catch {}
+        if ($OnIdle) {
+            $change = $null
+            try { $change = & $OnIdle } catch { Write-Log ("ReShade terminal idle poll failed -- {0}" -f $_.Exception.Message) }
+            if ($null -ne $change) {
+                $notice = if ($change -is [string]) { [string]$change } else { [string]$change.Notice }
+                # 1) try to update the displayed values in place (no new lines) or, after a console resize, rebuild the layout; the callback restores the cursor to the end of the input
+                $updated = $false
+                if ($OnUpdate -and $change -isnot [string]) {
+                    try { $updated = [bool](& $OnUpdate $change $Prompt $buffer.Length $buffer.ToString()) } catch { Write-Log ("ReShade terminal in-place update failed -- {0}" -f $_.Exception.Message); $updated = $false }
+                }
+                # 2) otherwise announce on its own line and redraw the prompt with the typed text intact
+                if (-not $updated -and -not [string]::IsNullOrWhiteSpace($notice)) {
+                    Write-TpmConsoleText ("`r" + (' ' * ($Prompt.Length + 2 + $buffer.Length + 1)) + "`r")
+                    Write-TpmConsoleText ($notice + "`n")
+                    Write-TpmConsoleText ($Prompt + ': ' + $buffer.ToString())
+                    if ($OnFallback) { try { & $OnFallback $notice } catch { Write-Log ("ReShade terminal fallback bookkeeping failed -- {0}" -f $_.Exception.Message) } }
+                }
+            }
+        }
         Start-Sleep -Milliseconds 25
     }
 }
@@ -10792,6 +12007,195 @@ function Get-TpmReShadeGameLabel {
 }
 
 
+function Get-TpmReShadeProfileTextField {
+    param($Entry, [string]$Name)
+    if ($null -ne $Entry -and $Entry.PSObject.Properties[$Name]) { return [string]$Entry.PSObject.Properties[$Name].Value }
+    return ''
+}
+
+function Test-TpmReShadeProfileRequiresHdr {
+    param($Entry)
+    return ($null -ne $Entry -and $Entry.PSObject.Properties['RequiresHdr'] -and [bool]$Entry.RequiresHdr)
+}
+
+# "Friendly Name [Technical shader]"; Original and test fixtures without a technical name show the friendly name only.
+function Get-TpmReShadeProfileDisplayLabel {
+    param($Entry)
+    $technical = Get-TpmReShadeProfileTextField -Entry $Entry -Name 'TechnicalName'
+    if ([string]::IsNullOrWhiteSpace($technical)) { return [string]$Entry.FriendlyName }
+    return ('{0} [{1}]' -f $Entry.FriendlyName, $technical)
+}
+
+# Numbered menu with the four group headings and continuous numbering. HDR choices that the display cannot use right now are listed
+# without a number so they can never be selected by number. The menu is produced as line records (text, colour, owning profile) so the
+# same records can be printed and later addressed for an in-place update of the selection marker.
+function Get-TpmReShadeTerminalMenuLines {
+    param([object[]]$Selectable = @(), [object[]]$HdrUnavailable = @(), $Selected = $null, [string]$HdrReason = '')
+    $lines = New-Object System.Collections.Generic.List[object]
+    $add = { param($text, $color, $profileId = '', $kind = 'Text') [void]$lines.Add([pscustomobject]@{ Text = [string]$text; Color = [string]$color; ProfileId = [string]$profileId; Kind = [string]$kind }) }
+    $number = 0
+    $lastGroup = ''
+    foreach ($entry in @($Selectable)) {
+        $groupLabel = Get-TpmReShadeProfileGroupLabel -Group (Get-TpmReShadeProfileTextField -Entry $entry -Name 'Group')
+        if ($groupLabel -and $groupLabel -ne $lastGroup) {
+            & $add '' 'Gray'
+            & $add ('  {0}' -f $groupLabel) 'Cyan'
+            $lastGroup = $groupLabel
+        }
+        $number++
+        $marker = if ($Selected -and [string]$Selected.ProfileId -eq [string]$entry.ProfileId) { '*' } else { ' ' }
+        & $add (Format-TpmReShadeMenuTitleLine -Number $number -Marker $marker -Entry $entry) $(if ($marker -eq '*') { 'Yellow' } else { 'White' }) ([string]$entry.ProfileId) 'Title'
+        & $add ('      {0}' -f $entry.Description) 'DarkGray'
+        $note = Get-TpmReShadeProfileTextField -Entry $entry -Name 'CompatibilityNote'
+        if ($note) { & $add ('      Note: {0}' -f $note) 'DarkYellow' }
+    }
+    if (@($HdrUnavailable).Count -gt 0) {
+        & $add '' 'Gray'
+        & $add ('  {0}' -f (Get-TpmReShadeProfileGroupLabel -Group 'Hdr')) 'Cyan'
+        & $add ('      Not available right now: {0}' -f $HdrReason) 'DarkYellow'
+        foreach ($entry in @($HdrUnavailable)) { & $add ('      (unavailable) {0}' -f (Get-TpmReShadeProfileDisplayLabel -Entry $entry)) 'DarkGray' }
+    }
+    return @($lines.ToArray())
+}
+
+function Format-TpmReShadeMenuTitleLine {
+    param([int]$Number, [string]$Marker, $Entry)
+    return ('  [{0}] {1} {2}' -f $Number, $Marker, (Get-TpmReShadeProfileDisplayLabel -Entry $Entry))
+}
+
+function Write-TpmReShadeTerminalLines {
+    param([object[]]$Lines = @())
+    foreach ($line in @($Lines)) { Write-Host $line.Text -ForegroundColor $line.Color }
+}
+
+function Write-TpmReShadeTerminalMenu {
+    param([object[]]$Selectable = @(), [object[]]$HdrUnavailable = @(), $Selected = $null, [string]$HdrReason = '')
+    $lines = @(Get-TpmReShadeTerminalMenuLines -Selectable $Selectable -HdrUnavailable $HdrUnavailable -Selected $Selected -HdrReason $HdrReason)
+    Write-TpmReShadeTerminalLines -Lines $lines
+    return @($lines | Where-Object { $_.Kind -eq 'Title' }).Count
+}
+
+# ---- Live selection display. Console access goes through thin seams so a scripted console can drive the real code.
+function Get-TpmConsoleCursorPosition { return [pscustomobject]@{ Left = [Console]::CursorLeft; Top = [Console]::CursorTop } }
+function Set-TpmConsoleCursorPosition { param([int]$Left, [int]$Top) [Console]::SetCursorPosition($Left, $Top) }
+function Get-TpmConsoleMetrics { return [pscustomobject]@{ Width = [Console]::WindowWidth; Top = [Console]::WindowTop; Height = [Console]::WindowHeight; BufferHeight = [Console]::BufferHeight } }
+
+function New-TpmReShadeTerminalLayout {
+    param([object[]]$Lines = @(), [int]$Width = 0)
+    return @{ Lines = @($Lines); Width = $Width; ExtraRows = 0 }
+}
+
+function Get-TpmConsoleRowCount {
+    param([string]$Text, [int]$Width)
+    if ($Width -le 0) { return 1 }
+    return [int][Math]::Max(1, [Math]::Ceiling($Text.Length / [double]$Width))
+}
+
+# Rewrites, in place, the menu marker of the previously and newly selected profile and the "Current selection" line, then puts the cursor
+# back where it was. Rows are computed relative to the live prompt row from the recorded line layout, so a console that scrolled since the
+# menu was printed is still addressed correctly. Nothing is written unless every needed row is provably on screen and the layout is
+# unchanged (same window width, same number of wrapped rows); in every other case the function returns an object with Updated = $false
+# and has written nothing, and the caller falls back to a one-line announcement. It never throws.
+function Update-TpmReShadeTerminalSelectionInPlace {
+    param([Parameter(Mandatory)]$Layout, [Parameter(Mandatory)]$NewProfile, [string]$Prompt, [int]$BufferLength, [object[]]$Selectable = @())
+    $fail = { param($why) [pscustomobject]@{ Updated = $false; CurrentUpdated = $false; MarkersUpdated = 0; Reason = $why } }
+    $original = $null
+    try {
+        $metrics = Get-TpmConsoleMetrics
+        $width = [int]$metrics.Width
+        if ($width -le 0 -or $width -ne [int]$Layout['Width']) { return (& $fail 'WIDTH_CHANGED') }
+        $lines = @($Layout['Lines'])
+        $currentIndex = -1
+        for ($i = $lines.Count - 1; $i -ge 0; $i--) { if ($lines[$i].Kind -eq 'Current') { $currentIndex = $i; break } }
+        if ($currentIndex -lt 0) { return (& $fail 'NO_CURRENT_LINE') }
+        $original = Get-TpmConsoleCursorPosition
+        $promptChars = $Prompt.Length + 2 + $BufferLength
+        $promptTop = [int]$original.Top - [int][Math]::Floor($promptChars / [double]$width)
+        # rows from each recorded line to the prompt's first row
+        $rowsBelow = New-Object 'int[]' ($lines.Count + 1)
+        $rowsBelow[$lines.Count] = [int]$Layout['ExtraRows']
+        for ($i = $lines.Count - 1; $i -ge 0; $i--) { $rowsBelow[$i] = $rowsBelow[$i + 1] + (Get-TpmConsoleRowCount -Text $lines[$i].Text -Width $width) }
+        $rowOf = { param($index) $promptTop - $rowsBelow[$index] }
+        $isVisible = { param($row) ($row -ge [int]$metrics.Top) -and ($row -ge 0) -and ($row -lt [int]$metrics.BufferHeight) }
+        $newCurrentText = '  Current selection: {0}' -f (Get-TpmReShadeProfileDisplayLabel -Entry $NewProfile)
+        $oldCurrentText = [string]$lines[$currentIndex].Text
+        if ((Get-TpmConsoleRowCount -Text $newCurrentText -Width $width) -ne (Get-TpmConsoleRowCount -Text $oldCurrentText -Width $width)) { return (& $fail 'CURRENT_LINE_WRAPS_DIFFERENTLY') }
+        $currentRow = & $rowOf $currentIndex
+        if (-not (& $isVisible $currentRow)) { return (& $fail 'CURRENT_LINE_NOT_VISIBLE') }
+        # marker edits: clear the star where it is now, set it on the new profile
+        $edits = New-Object System.Collections.Generic.List[object]
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i].Kind -ne 'Title') { continue }
+            $wantStar = ([string]$lines[$i].ProfileId -eq [string]$NewProfile.ProfileId)
+            $hasStar = ($lines[$i].Text -match '^\s*\[\d+\] \*')
+            if ($wantStar -eq $hasStar) { continue }
+            # the marker is one character wide, so the line keeps its length
+            $newText = [regex]::Replace($lines[$i].Text, '^(\s*\[\d+\] )(.)', { param($m) $m.Groups[1].Value + $(if ($wantStar) { '*' } else { ' ' }) })
+            $row = & $rowOf $i
+            if (-not (& $isVisible $row)) { continue }
+            if ((Get-TpmConsoleRowCount -Text $newText -Width $width) -ne (Get-TpmConsoleRowCount -Text $lines[$i].Text -Width $width)) { continue }
+            [void]$edits.Add([pscustomobject]@{ Index = $i; Row = $row; Text = $newText; Color = $(if ($wantStar) { 'Yellow' } else { 'White' }) })
+        }
+        # Every console row of the line's region is rewritten and padded to the full width, so shorter text that still wraps across the same
+        # rows (old 70 -> new 65 characters at width 60) leaves no trailing characters from the old text. The row count is equal for old and
+        # new text here (checked above), and a menu line is never on the last buffer row (the prompt is below it), so filling the last
+        # cell cannot scroll the window.
+        $writeAt = {
+            param($row, $text, $oldLength, $color)
+            $regionRows = Get-TpmConsoleRowCount -Text $text -Width $width
+            $padded = $text.PadRight($regionRows * $width)
+            for ($part = 0; $part -lt $regionRows; $part++) {
+                Set-TpmConsoleCursorPosition -Left 0 -Top ($row + $part)
+                Write-TpmConsoleText $padded.Substring($part * $width, $width) -Color $color
+            }
+        }
+        $markersUpdated = 0
+        foreach ($edit in $edits) {
+            & $writeAt $edit.Row $edit.Text $lines[$edit.Index].Text.Length $edit.Color
+            $lines[$edit.Index].Text = $edit.Text
+            $lines[$edit.Index].Color = $edit.Color
+            $markersUpdated++
+        }
+        & $writeAt $currentRow $newCurrentText $oldCurrentText.Length 'Yellow'
+        $lines[$currentIndex].Text = $newCurrentText
+        Set-TpmConsoleCursorPosition -Left ([int]$original.Left) -Top ([int]$original.Top)
+        return [pscustomobject]@{ Updated = $true; CurrentUpdated = $true; MarkersUpdated = $markersUpdated; Reason = '' }
+    } catch {
+        try { if ($original) { Set-TpmConsoleCursorPosition -Left ([int]$original.Left) -Top ([int]$original.Top) } } catch {}
+        try { Write-Log ('ReShade terminal in-place update failed -- {0}' -f $_.Exception.Message) } catch {}
+        return [pscustomobject]@{ Updated = $false; CurrentUpdated = $false; MarkersUpdated = 0; Reason = 'EXCEPTION' }
+    }
+}
+
+# After a console resize the printed rows can no longer be addressed (the console reflowed them), so the active layout is rebuilt: the
+# menu block (markers for the new selection, the Current selection line and the Choose line) is printed once at the cursor, the layout
+# record is replaced with the new width and rows, and the prompt is redrawn with the typed text intact. Input stays end-of-line only, so
+# the cursor is left right after the typed text. It never throws; $false means nothing could be rebuilt and the caller announces instead.
+function Update-TpmReShadeTerminalLayoutAfterResize {
+    param([Parameter(Mandatory)]$Layout, [Parameter(Mandatory)]$NewProfile, [object[]]$Selectable = @(), [object[]]$HdrUnavailable = @(), [string]$HdrReason = '', [string]$Prompt = '', [string]$InputText = '')
+    try {
+        $width = [int](Get-TpmConsoleMetrics).Width
+        if ($width -le 0) { return $false }
+        $oldLines = @($Layout['Lines'])
+        $currentLine = @($oldLines | Where-Object { $_.Kind -eq 'Current' } | Select-Object -Last 1)
+        $chooseLine = @($oldLines | Where-Object { $_.Kind -eq 'Choose' } | Select-Object -Last 1)
+        if ($currentLine.Count -eq 0 -or $chooseLine.Count -eq 0) { return $false }
+        $menuLines = @(Get-TpmReShadeTerminalMenuLines -Selectable $Selectable -HdrUnavailable $HdrUnavailable -Selected $NewProfile -HdrReason $HdrReason)
+        $newCurrent = [pscustomobject]@{ Text = ('  Current selection: {0}' -f (Get-TpmReShadeProfileDisplayLabel -Entry $NewProfile)); Color = 'Yellow'; ProfileId = ''; Kind = 'Current' }
+        $newLines = @($menuLines) + @($newCurrent, $chooseLine[0])
+        Write-TpmConsoleText "`n"
+        Write-TpmReShadeTerminalLines -Lines $newLines
+        $Layout['Lines'] = @($newLines)
+        $Layout['Width'] = $width
+        $Layout['ExtraRows'] = 0
+        Write-TpmConsoleText ($Prompt + ': ' + $InputText)
+        return $true
+    } catch {
+        try { Write-Log ('ReShade terminal layout rebuild failed -- {0}' -f $_.Exception.Message) } catch {}
+        return $false
+    }
+}
+
 function Read-TpmReShadeTerminalProfile {
     param(
         [Parameter(Mandatory)][object[]]$Profiles,
@@ -10799,6 +12203,7 @@ function Read-TpmReShadeTerminalProfile {
         [object]$PreviewSession = $null
     )
     $orderedIds = @($Profiles | ForEach-Object { [string]$_.ProfileId })
+    $selectable = @($Profiles)
     $selected = $null
     if ($DefaultProfileId) { $selected = Get-TpmReShadeProfile -ProfileId $DefaultProfileId }
     # Snapshot a closed gallery once, then keep later terminal choices authoritative.
@@ -10806,6 +12211,15 @@ function Read-TpmReShadeTerminalProfile {
     $originalPreviewSession = $PreviewSession
     try {
         while ($true) {
+            # Re-evaluate the HDR gate on every pass: HDR choices appear only while real detection allows them.
+            $hdrGate = Get-TpmReShadeHdrGate
+            $selectable = @($Profiles | Where-Object { -not (Test-TpmReShadeProfileRequiresHdr -Entry $_) -or [bool]$hdrGate.Enabled })
+            $hdrUnavailable = @($Profiles | Where-Object { (Test-TpmReShadeProfileRequiresHdr -Entry $_) -and [bool]$hdrGate.Visible -and -not [bool]$hdrGate.Enabled })
+            $orderedIds = @($selectable | ForEach-Object { [string]$_.ProfileId })
+            if ($selected -and [string]$selected.ProfileId -notin $orderedIds) {
+                Write-Host ('  {0} is not available right now, so it is no longer selected.' -f $selected.FriendlyName) -ForegroundColor Yellow
+                $selected = $null
+            }
             if ($PreviewSession) {
                 try { [Windows.Forms.Application]::DoEvents() } catch {}
                 $previewSessionClosed = [bool]$PreviewSession['Closed']
@@ -10813,7 +12227,7 @@ function Read-TpmReShadeTerminalProfile {
                 if ($canReadPreviewSelection) {
                     $previewProfileId = [string]$PreviewSession['SelectedProfileId']
                     if (-not [string]::IsNullOrWhiteSpace($previewProfileId)) {
-                        $previewSelection = @($Profiles | Where-Object { [string]$_.ProfileId -eq $previewProfileId })[0]
+                        $previewSelection = @($selectable | Where-Object { [string]$_.ProfileId -eq $previewProfileId })[0]
                         if ($previewSelection) { $selected = $previewSelection }
                     }
                     if ($previewSessionClosed) { $previewClosedSelectionImported = $true }
@@ -10824,17 +12238,51 @@ function Read-TpmReShadeTerminalProfile {
             Write-Host '  The profile choice stays synchronized between the preview selector and terminal list.' -ForegroundColor DarkCyan
             $profileCount = $orderedIds.Count
             $lastProfileNumber = [Math]::Max(1, $profileCount)
-            for ($profileIndex = 0; $profileIndex -lt $orderedIds.Count; $profileIndex++) {
-                $id = $orderedIds[$profileIndex]
-                $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
-                if (-not $profileEntry) { continue }
-                $marker = if ($selected -and $selected.ProfileId -eq $id) { '*' } else { ' ' }
-                Write-Host ('  [{0}] {1} {2}' -f ($profileIndex + 1), $marker, $profileEntry.FriendlyName) -ForegroundColor $(if ($marker -eq '*') { 'Yellow' } else { 'White' })
-                Write-Host ('      {0}' -f $profileEntry.Description) -ForegroundColor DarkGray
+            $menuLines = @(Get-TpmReShadeTerminalMenuLines -Selectable $selectable -HdrUnavailable $hdrUnavailable -Selected $selected -HdrReason ([string]$hdrGate.Reason))
+            $currentSelectionText = '  Current selection: {0}' -f $(if ($selected) { Get-TpmReShadeProfileDisplayLabel -Entry $selected } else { 'none -- choose a profile in the preview or terminal' })
+            $chooseText = '  Choose: [1-{0}] Select profile  [U] Use selected profile  [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back  [D] Details' -f $lastProfileNumber
+            $blockLines = @($menuLines) + @(
+                [pscustomobject]@{ Text = $currentSelectionText; Color = 'Yellow'; ProfileId = ''; Kind = 'Current' },
+                [pscustomobject]@{ Text = $chooseText; Color = 'White'; ProfileId = ''; Kind = 'Choose' }
+            )
+            Write-TpmReShadeTerminalLines -Lines $blockLines
+            # Console width at print time, needed to address the printed rows later; 0 (in-place updates disabled) when unavailable.
+            $layoutWidth = 0
+            try { $layoutWidth = [int](Get-TpmConsoleMetrics).Width } catch { $layoutWidth = 0 }
+            $layout = New-TpmReShadeTerminalLayout -Lines $blockLines -Width $layoutWidth
+            # While the prompt waits, follow the preview selector. A change is shown by rewriting the menu marker and the "Current
+            # selection" line IN PLACE (no new menu is printed); if that cannot be done safely, a one-line announcement is printed
+            # instead and the prompt is redrawn with the typed text intact. The callbacks are plain scriptblocks (not closures): they
+            # resolve the product functions and this loop's variables dynamically.
+            $shownSelection = @{ Id = $(if ($selected) { [string]$selected.ProfileId } else { '' }) }
+            $idleSession = $PreviewSession
+            $idleSelectable = $selectable
+            $onIdle = {
+                if ($null -eq $idleSession) { return $null }
+                if (-not [bool]$idleSession['Initialized'] -or -not [bool]$idleSession['PreviewEnabled'] -or [bool]$idleSession['Closed']) { return $null }
+                $liveId = [string]$idleSession['SelectedProfileId']
+                if ([string]::IsNullOrWhiteSpace($liveId) -or $liveId -eq $shownSelection.Id) { return $null }
+                $liveProfile = $idleSelectable | Where-Object { [string]$_.ProfileId -eq $liveId } | Select-Object -First 1
+                if (-not $liveProfile) { return $null }
+                $shownSelection.Id = $liveId
+                $liveNumber = 1 + [Array]::IndexOf(@($idleSelectable | ForEach-Object { [string]$_.ProfileId }), $liveId)
+                return [pscustomobject]@{ ProfileId = $liveId; Profile = $liveProfile; Number = $liveNumber; Notice = ('  Preview selection changed to [{0}] {1}. Type U to use it.' -f $liveNumber, (Get-TpmReShadeProfileDisplayLabel -Entry $liveProfile)) }
             }
-            Write-Host ('  Current selection: {0}' -f $(if ($selected) { $selected.FriendlyName } else { 'none -- choose a profile in the preview or terminal' })) -ForegroundColor Yellow
-            Write-Host ('  Choose: [1-{0}] Select profile  [U] Use selected profile  [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back  [D] Details' -f $lastProfileNumber) -ForegroundColor White
-            $choice = (Read-TpmReShadeTerminalInput -Prompt '  Choice' -PumpPreviewMessages ([bool]$PreviewSession)).Trim().ToUpperInvariant()
+            $idleHdrUnavailable = $hdrUnavailable
+            $idleHdrReason = [string]$hdrGate.Reason
+            $onUpdate = {
+                param($change, $inputPrompt, $inputLength, $inputText)
+                $inPlace = Update-TpmReShadeTerminalSelectionInPlace -Layout $layout -NewProfile $change.Profile -Prompt $inputPrompt -BufferLength $inputLength
+                if ([bool]$inPlace.Updated) { return $true }
+                # The printed rows can no longer be addressed after a width change, and a Current selection that now wraps to a different
+                # number of rows (even at the same width) moves every row below it: both rebuild the layout instead of leaving it stale.
+                if ([string]$inPlace.Reason -in @('WIDTH_CHANGED', 'CURRENT_LINE_WRAPS_DIFFERENTLY')) {
+                    return [bool](Update-TpmReShadeTerminalLayoutAfterResize -Layout $layout -NewProfile $change.Profile -Selectable $idleSelectable -HdrUnavailable $idleHdrUnavailable -HdrReason $idleHdrReason -Prompt $inputPrompt -InputText ([string]$inputText))
+                }
+                return $false
+            }
+            $onFallback = { param($noticeText) $layout['ExtraRows'] = [int]$layout['ExtraRows'] + (Get-TpmConsoleRowCount -Text ([string]$noticeText) -Width ([int]$layout['Width'])) }
+            $choice = (Read-TpmReShadeTerminalInput -Prompt '  Choice' -PumpPreviewMessages ([bool]$PreviewSession) -OnIdle $onIdle -OnUpdate $onUpdate -OnFallback $onFallback).Trim().ToUpperInvariant()
             if ($PreviewSession) {
                 try { [Windows.Forms.Application]::DoEvents() } catch {}
                 $previewSessionClosed = [bool]$PreviewSession['Closed']
@@ -10842,7 +12290,7 @@ function Read-TpmReShadeTerminalProfile {
                 if ($canReadPreviewSelection) {
                     $previewProfileId = [string]$PreviewSession['SelectedProfileId']
                     if (-not [string]::IsNullOrWhiteSpace($previewProfileId)) {
-                        $previewSelection = @($Profiles | Where-Object { [string]$_.ProfileId -eq $previewProfileId })[0]
+                        $previewSelection = @($selectable | Where-Object { [string]$_.ProfileId -eq $previewProfileId })[0]
                         if ($previewSelection) { $selected = $previewSelection }
                     }
                     if ($previewSessionClosed) { $previewClosedSelectionImported = $true }
@@ -10851,12 +12299,12 @@ function Read-TpmReShadeTerminalProfile {
             $selectedNumber = 0
             if ([int]::TryParse($choice, [ref]$selectedNumber) -and $selectedNumber -ge 1 -and $selectedNumber -le $profileCount) {
                 $selectedProfileId = $orderedIds[$selectedNumber - 1]
-                $selected = @($Profiles | Where-Object { $_.ProfileId -eq $selectedProfileId })[0]
+                $selected = @($selectable | Where-Object { $_.ProfileId -eq $selectedProfileId })[0]
                 if ($selected) {
                     if ($PreviewSession) {
                         [void](Sync-TpmReShadeGallerySelection -Session $PreviewSession -ProfileId ([string]$selected.ProfileId))
                     }
-                    Write-Host ('  Preview selection changed to: {0}' -f $selected.FriendlyName) -ForegroundColor Green
+                    Write-Host ('  Preview selection changed to: {0}' -f (Get-TpmReShadeProfileDisplayLabel -Entry $selected)) -ForegroundColor Green
                 }
                 continue
             }
@@ -10864,13 +12312,17 @@ function Read-TpmReShadeTerminalProfile {
                 Write-Host '  TeknoParrot Manager shows a safe preview approximation using a bundled image.' -ForegroundColor DarkCyan
                 Write-Host '  It does not run the game or execute ReShade shaders during preview.' -ForegroundColor DarkCyan
                 $effectCount = @($Profiles | ForEach-Object { $_.Effects } | Sort-Object -Unique).Count
-                Write-Host ('  The catalog contains {0} profiles backed by {1} pinned shader effects.' -f $orderedIds.Count, $effectCount) -ForegroundColor DarkCyan
-                Write-Host '  Actual in-game results may vary.' -ForegroundColor DarkCyan
+                Write-Host ('  This list has {0} profiles built from {1} pinned shader effects. Original is the untouched reference, not an effect.' -f @($Profiles).Count, $effectCount) -ForegroundColor DarkCyan
+                Write-Host '  Alternatives that do the same kind of job are never stacked automatically. Actual in-game results may vary.' -ForegroundColor DarkCyan
                 foreach ($id in $orderedIds) {
-                    $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
+                    $profileEntry = @($selectable | Where-Object { $_.ProfileId -eq $id })[0]
                     if ($profileEntry) {
-                        Write-Host ('    {0}: {1}' -f $profileEntry.FriendlyName, $profileEntry.Description) -ForegroundColor DarkGray
+                        Write-Host ('    {0}: {1}' -f (Get-TpmReShadeProfileDisplayLabel -Entry $profileEntry), $profileEntry.Description) -ForegroundColor DarkGray
                         Write-Host ('      Techniques: {0}' -f (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $profileEntry)) -ForegroundColor DarkCyan
+                        $previewKind = Get-TpmReShadeProfileTextField -Entry $profileEntry -Name 'PreviewApproximation'
+                        $previewNote = Get-TpmReShadeProfileTextField -Entry $profileEntry -Name 'PreviewNote'
+                        if ($previewKind -eq 'APPROXIMATE') { Write-Host '      Preview: approximation only, not the shader running.' -ForegroundColor DarkCyan }
+                        elseif ($previewNote) { Write-Host ('      Preview: {0}' -f $previewNote) -ForegroundColor DarkCyan }
                     }
                 }
                 continue
@@ -10879,7 +12331,7 @@ function Read-TpmReShadeTerminalProfile {
                 if ($PreviewSession) {
                     try {
                         $reopenId = if ($selected) { [string]$selected.ProfileId } else { 'Original' }
-                        $replacement = Show-TpmReShadeProfileGalleryWindow -Profiles $Profiles -DefaultProfileId $reopenId -Show -NonModal
+                        $replacement = Show-TpmReShadeProfileGalleryWindow -Profiles $selectable -DefaultProfileId $reopenId -Show -NonModal
                         if (-not $replacement.Available -or -not $replacement.Session) {
                             throw ("fresh preview window was unavailable ({0})" -f $replacement.Reason)
                         }
@@ -10912,7 +12364,7 @@ function Read-TpmReShadeTerminalProfile {
                 return [pscustomobject]@{ SelectedProfile = $null; Cancelled = $true; PreviewSession = $PreviewSession }
             }
             if ($choice -eq 'U') {
-                if ($selected) {
+                if ($selected -and [string]$selected.ProfileId -in $orderedIds) {
                     return [pscustomobject]@{ SelectedProfile = $selected; Cancelled = $false; PreviewSession = $PreviewSession }
                 }
                 Write-Host '  Choose a numbered profile before using it.' -ForegroundColor Yellow
@@ -10928,6 +12380,12 @@ function Read-TpmReShadeTerminalProfile {
         throw
     }
 }
+# The ReShade search paths TPM writes into ReShade.ini. Includes and textures of an approved effect resolve against these (after the
+# including file's own directory), so they are part of what the licence evidence is bound to.
+function Get-TpmReShadeSearchPathDeclaration {
+    return [pscustomobject]@{ EffectSearchPaths = '.\Shaders,.\Shaders\SweetFX,.\Shaders\TPM'; TextureSearchPaths = '.\Textures,.\Textures\SweetFX' }
+}
+
 function Update-TpmReShadeTutorialProgressText {
     param([AllowEmptyString()][string]$Content)
     $lines = @(if ([string]::IsNullOrEmpty($Content)) { @() } else { [regex]::Split($Content, "`r`n|`n|`r") })
@@ -10951,7 +12409,9 @@ function Update-TpmReShadeTutorialProgressText {
             [void]$normalized.Add($line)
             if ($currentSection -ieq 'GENERAL') {
                 if (-not $generalSettingsInserted) {
-                    [void]$normalized.Add('EffectSearchPaths=.\Shaders,.\Shaders\SweetFX,.\Shaders\TPM')
+                    $searchPaths = Get-TpmReShadeSearchPathDeclaration
+                    [void]$normalized.Add('EffectSearchPaths=' + $searchPaths.EffectSearchPaths)
+                    [void]$normalized.Add('TextureSearchPaths=' + $searchPaths.TextureSearchPaths)
                     [void]$normalized.Add('PresetPath=.\ReShade.ini')
                     [void]$normalized.Add('StartupPresetPath=.\ReShade.ini')
                     $generalSettingsInserted = $true
@@ -10959,7 +12419,7 @@ function Update-TpmReShadeTutorialProgressText {
             }
             continue
         }
-        if ($currentSection -ieq 'GENERAL' -and $line -match '^\s*(EffectSearchPaths|PresetPath|StartupPresetPath)\s*=') { continue }
+        if ($currentSection -ieq 'GENERAL' -and $line -match '^\s*(EffectSearchPaths|TextureSearchPaths|PresetPath|StartupPresetPath)\s*=') { continue }
         [void]$normalized.Add($line)
     }
     $lines = $normalized.ToArray()
@@ -11347,8 +12807,12 @@ function Invoke-ReShadeSetupLegacy {
 
     # The preview selector and terminal list update the same transient profile
     # selection. Keep the terminal path usable when WinForms is unavailable.
-    $galleryProfiles = @(Get-TpmReShadeProfiles)
-    $galleryResult = Show-TpmReShadeProfileGalleryWindow -Profiles $galleryProfiles -DefaultProfileId 'Original' -Show -NonModal
+    # HDR choices (and their group) appear only when real display detection allows them; the preview selector lists only choices that
+    # can be selected right now, while the terminal chooser also names HDR choices that are supported but currently unavailable.
+    $startupHdrGate = Get-TpmReShadeHdrGate
+    $galleryProfiles = @(Get-TpmReShadeVisibleProfiles -HdrGate $startupHdrGate)
+    $selectableGalleryProfiles = @($galleryProfiles | Where-Object { -not (Test-TpmReShadeProfileRequiresHdr -Entry $_) -or [bool]$startupHdrGate.Enabled })
+    $galleryResult = Show-TpmReShadeProfileGalleryWindow -Profiles $selectableGalleryProfiles -DefaultProfileId 'Original' -Show -NonModal
     $gallerySession = if ($galleryResult.Available) { $galleryResult.Session } else { $null }
     if (-not $galleryResult.Available) {
         Write-Host '  ReShade visual gallery unavailable; choose a profile in the terminal.' -ForegroundColor Yellow
@@ -11367,6 +12831,18 @@ function Invoke-ReShadeSetupLegacy {
     }
     $selectedProfile = $chooserResult.SelectedProfile
     Write-Log ("ReShade profile chooser: selected {0}; explicit confirmation still required." -f $selectedProfile.ProfileId)
+    # An HDR-only choice is re-checked against live display evidence right now; the evidence fingerprint travels to the deployment guard
+    # so a change between this moment and deployment is detected.
+    $hdrExpectedFingerprint = ''
+    if (Test-TpmReShadeProfileRequiresHdr -Entry $selectedProfile) {
+        $selectionHdrGate = Get-TpmReShadeHdrGate
+        if (-not [bool]$selectionHdrGate.Enabled) {
+            Write-Host ('  {0} needs Windows HDR to be active, and it is not right now: {1}' -f $selectedProfile.FriendlyName, $selectionHdrGate.Reason) -ForegroundColor Yellow
+            Write-Log ('ReShade setup: HDR profile refused at selection -- {0}' -f $selectionHdrGate.Reason)
+            return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'HDR_UNAVAILABLE' }
+        }
+        $hdrExpectedFingerprint = [string]$selectionHdrGate.Fingerprint
+    }
     $customPresetChoice = Read-TpmChoice -Prompt ("  Use the selected ReShade profile?`n  ({0} will be applied. Choose a custom ReShade .ini preset only if you already have one.)`n`n  [Y] Yes, use {0}  [S] Custom preset  [B] Back`n  Choice (default Y)" -f $selectedProfile.FriendlyName) -Choices @('Y', 'S', 'B') -Default 'Y'
     if ($customPresetChoice -eq 'S') {
         $pInp = Read-PathWithBrowse "  Path to your ReShade preset (.ini) file" -Mode File -FileFilter "ReShade preset (*.ini)|*.ini|All files (*.*)|*.*"
@@ -11691,7 +13167,7 @@ function Invoke-ReShadeSetupLegacy {
             $gamePath = [string]$boundaryCheck.ResolvedPath
             $exeDir = [string]$boundaryCheck.GameDirectory
             $hadExistingProfile = Test-Path -LiteralPath $ownershipPath -PathType Leaf
-            $profileDeployment = Install-TpmReShadeProfileDeployment -ProfileDefinition $profileForGame -GamePath $gamePath -Doc $doc -SourceDll $SourceDll -SourceDll32 $SourceDll32 -PresetPath $presetForGame -PerGamePresetPath $perGamePreset -CacheRoot $reShadeCacheRoot -OwnershipPath $ownershipPath -SourceVersion $runtimeVersion -CanonicalPreset:$canonicalForGame -AllowUserOwnedOverwrite:($Action -eq 'Adopt')
+            $profileDeployment = Install-TpmReShadeProfileDeployment -ProfileDefinition $profileForGame -GamePath $gamePath -Doc $doc -SourceDll $SourceDll -SourceDll32 $SourceDll32 -PresetPath $presetForGame -PerGamePresetPath $perGamePreset -CacheRoot $reShadeCacheRoot -OwnershipPath $ownershipPath -SourceVersion $runtimeVersion -CanonicalPreset:$canonicalForGame -AllowUserOwnedOverwrite:($Action -eq 'Adopt') -ExpectedHdrFingerprint $hdrExpectedFingerprint
             if ($profileDeployment.Succeeded -and -not (Test-TpmReShadeDeploymentVerified -DeploymentResult $profileDeployment)) {
                 throw 'Verified ReShade deployment identity did not match the committed files.'
             }
@@ -25833,6 +27309,7 @@ function Export-LaunchBoxXml {
 
     $exportStarted = Get-Date
     $exportCurrent = 0
+    $count = 0
     foreach ($f in $files) {
         $exportCurrent++
         Write-TpmCompactExtractionProgress -Phase Scanning -Label 'LaunchBox profile export' -Current $exportCurrent -Total $files.Count -StartedAt $exportStarted

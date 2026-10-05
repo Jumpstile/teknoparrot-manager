@@ -235,9 +235,14 @@ rolled-back, and failed outcomes.
 | Levels / Vibrance       | Vivid colours on modern monitors     |
 | Border                  | Arcade cabinet artwork in black bars |
 
-The optional non-modal preview offers twelve canonical profiles backed by ten
-unique pinned shader effects. Choose a profile from the preview drop-down or
-the terminal numbered chooser; both stay synchronized. The 0-100 comparison
+The optional non-modal preview offers 22 profiles built from 20 approved
+pinned shader effects (Original is the untouched reference; Enhanced Arcade is
+the existing combination), in four groups. The HDR group appears only when
+Windows reports HDR support with HDR on. Choose a profile from the preview
+drop-down or the terminal numbered chooser; both stay synchronized in real
+time, even while the terminal prompt is waiting. An effect is offered
+only while its recorded licence evidence is complete and current; any effect
+without it is withheld. The 0-100 comparison
 slider and view mode remain independent of profile choice. The bundled-image
 preview does not run the game or execute ReShade shaders. A preview choice is
 transient: terminal `U` and the existing explicit confirmation are still

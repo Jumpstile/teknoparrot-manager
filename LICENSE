@@ -76,3 +76,52 @@ fd0022170615ce0d8162d219bff07232fa6dd84f.
 The upstream file identifies its license as SPDX-License-Identifier: CC0-1.0.
 The header is fetched and integrity-checked during deployment; it is not
 included in the release ZIP.
+
+Third-party ReShade effects fetched on demand (not part of the Materials)
+
+TeknoParrot Manager does not include these shaders in its release ZIP. When a user chooses a
+profile, the program fetches the files below, unmodified, from the pinned upstream commit,
+accepts them only when their SHA-256 and byte length match, and writes them to the user's own
+ReShade folder together with a copy of the upstream license text where the upstream project
+supplies one and a short TeknoParrot notice (Shaders\TPM\Notices\<effect>\). Each effect remains
+under its own license; nothing in this file relicenses it, and the restrictions above apply only to
+the Materials. The files are separate shader files loaded by ReShade; TeknoParrot Manager does not
+edit them. An effect is offered by the program only while its recorded licence evidence (pinned bytes,
+in-file notices or license copies, include closure) is complete and current.
+
+Effect id | Upstream repository @ pinned commit | License | Attribution
+SweetFX.LumaSharpen | CeeJayDK/SweetFX @ 16d1a42247cb5baaf660120ee35c9a33bb94649c | MIT | Christian Cann Schuldt Jensen (CeeJay.dk)
+SweetFX.Vibrance | CeeJayDK/SweetFX @ 16d1a42247cb5baaf660120ee35c9a33bb94649c | MIT | Christian Cann Schuldt Jensen (CeeJay.dk)
+FXShaders.CRT_Lottes | luluco250/FXShaders @ 76365e35c48e30170985ca371e67d8daf8eb9a98 | MIT; Unlicense/public domain dedication for Timothy Lottes implementation | Lucas Melo; Timothy Lottes
+SweetFX.Curves | CeeJayDK/SweetFX @ 16d1a42247cb5baaf660120ee35c9a33bb94649c | MIT | Christian Cann Schuldt Jensen (CeeJay.dk)
+SweetFX.Levels | CeeJayDK/SweetFX @ 16d1a42247cb5baaf660120ee35c9a33bb94649c | MIT | Christian Cann Schuldt Jensen (CeeJay.dk)
+SweetFX.SMAA | CeeJayDK/SweetFX @ 93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361 | MIT | CeeJayDK (SweetFX port and wrapper); Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro, Diego Gutierrez (SMAA)
+SweetFX.CAS | CeeJayDK/SweetFX @ 93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361 | MIT | Advanced Micro Devices, Inc. (CAS); SLSNe and Marty McFly (ReShade port); CeeJayDK (SweetFX repository)
+CrosireSlim.Deband | crosire/reshade-shaders @ fd0022170615ce0d8162d219bff07232fa6dd84f | MIT | Niklas Haas (haasn, original mpv shader); JPulowski (ReShade port)
+SweetFX.LiftGammaGain | CeeJayDK/SweetFX @ 93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361 | MIT | 3an and Christian Cann Schuldt Jensen (CeeJay.dk)
+SweetFX.Tonemap | CeeJayDK/SweetFX @ 93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361 | MIT | Christian Cann Schuldt Jensen (CeeJay.dk)
+Prod80.ColorBalance | prod80/prod80-ReShade-Repository @ 1c2ed5b093b03c558bfa6aea45c2087052e99554 | MIT | prod80 (Bas Veth)
+FXShaders.ArcaneBloom | luluco250/FXShaders @ 76365e35c48e30170985ca371e67d8daf8eb9a98 | MIT | Lucas Melo (luluco250)
+Akgunter.CRTRoyale | akgunter/crt-royale-reshade @ 7ca7f7cbb7e7d016ca1756d0855879c3b7d0cc05 | GPL-2.0-or-later (project); MIT (individual files, see FileLicenses) | TroggleMonkey (crt-royale); Alex Gunter (ReShade port)
+RSRetroArch.CRTPi | Matsilagi/RSRetroArch @ 73dc21fcc9f1e1d6e4bf0f1c5c95b882078d474d | GPL-2.0-or-later | davej (crt-pi); Matsilagi (ReShade port, RSRetroArch)
+CrosireLegacy.AdaptiveSharpen | crosire/reshade-shaders @ bcb5ba54199f4455026dd8ba66dc1b74461d3152 | BSD-2-Clause | bacondither
+Fubax.FilmicAnamorphSharpen | Fubaxiusz/fubax-shaders @ d902cc2e8216f10801019b02b09f7bd55449fd79 | CC-BY-SA-4.0 (shader); CC-PDM-1.0 (ColorConversion.fxh, LinearWorkflow.fxh) | Jakub Maximilian Fober; ccritchfield (changes)
+CrosireLegacy.Colourfulness | crosire/reshade-shaders @ bcb5ba54199f4455026dd8ba66dc1b74461d3152 | BSD-2-Clause | bacondither
+Glamarye.FastEffects | rj200/Glamarye_Fast_Effects_for_ReShade @ 9dd9b826fa2cbea818ef1bc487e5f2e7f427c750 | MIT | Robert Jessop (main shader); Alex Tuderan (blur functions)
+Lilium.ToneMapping | EndlesslyFlowering/ReShade_HDR_shaders @ b1ada21b27666aa0703c6f9b9d83c389e92063a1 | GPL-3.0 (project); MIT (oklab.fxh) per FileLicenses | EndlesslyFlowering (Lilium); Bjorn Ottosson (Oklab); Aurelien Pierre / darktable project (darktable UCS)
+Lilium.HdrBlackFloorFix | EndlesslyFlowering/ReShade_HDR_shaders @ b1ada21b27666aa0703c6f9b9d83c389e92063a1 | GPL-3.0 (project); MIT (oklab.fxh) per FileLicenses | EndlesslyFlowering (Lilium); Bjorn Ottosson (Oklab); Aurelien Pierre / darktable project (darktable UCS)
+
+Licenses that carry conditions beyond keeping the notice:
+- GPL-2.0-or-later: CRT-Royale (akgunter/crt-royale-reshade; several files are MIT per file) and CRT-Pi
+  (Matsilagi/RSRetroArch; the in-file notice names davej, and the GPL text copy is the one distributed
+  with crt-royale). GPL-3.0: the Lilium HDR shaders (oklab.fxh is MIT; darktable_ucs.fxh carries a
+  copyright notice only and is covered by the project license). TeknoParrot Manager deploys these files
+  unmodified, together with the license text and the pinned source location (Shaders/TPM/Notices/<EffectId>/NOTICE.txt),
+  and modifies no covered file. This describes what the application does; it is not a legal opinion.
+- CC BY-SA 4.0: FilmicAnamorphSharpen.fx (Jakub Maximilian Fober). Attribution stays in the unmodified
+  file header; an adaptation must be shared under the same license. https://creativecommons.org/licenses/by-sa/4.0/
+- BSD-2-Clause: AdaptiveSharpen.fx and Colourfulness.fx (bacondither); the license notice in each file is
+  retained unchanged. MIT with a credit request: Deband.fx keeps its credit header unchanged.
+- SMAA lookup textures (AreaTex.png, SearchTex.png) are covered by the SMAA project license (MIT, Jimenez et
+  al.), whose LICENSE.txt (iryoku/smaa @ 71c806a838bdd7d517df19192a20f0c61b3ca29d) is copied beside them.
+- Glamayre Fast Effects: MIT. Its depth-dependent features need compatible game depth data.

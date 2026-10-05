@@ -178,9 +178,12 @@ gate before RC8 release authorization, not post-release hardening or optional po
 
 ### 4. ReShade runtime UX
 
-- Open option 5 from the package and verify all twelve canonical profiles appear
-  in the preview selector and terminal list, backed by ten unique pinned shader
-  effects.
+- Open option 5 from the package and verify the 20 non-HDR profiles (Original,
+  the 18 non-HDR single-effect profiles, and Enhanced Arcade) appear in the preview
+  selector and terminal list in the Main Catalog, CRT Choices and Advanced
+  Alternatives groups, backed by 18 non-HDR pinned shader effects; with Windows HDR
+  on, also verify the two HDR profiles (20 effects in all). On an SDR display
+  verify the HDR group is completely absent.
 - Select profiles directly in the preview and by terminal number; verify both
   inputs synchronize the selected name, description, technique list, and
   bundled-image approximation.

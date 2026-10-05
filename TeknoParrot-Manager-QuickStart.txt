@@ -351,20 +351,57 @@
     update the same selected profile. The terminal remains usable if the
     preview is behind, closed, unavailable, or fails.
     Nothing will be changed until you choose U and then confirm.
-  The gallery and terminal offer the same twelve profiles:
+  (An effect is offered only while its recorded licence evidence is complete
+  and current; any effect without it is withheld.) The gallery and terminal offer the same
+  choices, in four groups
+  (Main Catalog, CRT Choices, Advanced Alternatives, and Actual HDR Setups
+  Only -- the HDR group appears only on a display where Windows HDR is on):
     [1] Original
-    [2] Clean & Sharp
-    [3] Classic Arcade CRT
-    [4] Vivid Arcade
-    [5] Enhanced Arcade
-    [6] Cartoon
-    [7] Contrast Curves
-    [8] Film Grain
-    [9] Levels
-    [10] Monochrome
-    [11] Sepia Tone
-    [12] Vignette
-  Choose: [1-12] Select profile  [U] Use selected profile  [R] Reopen preview
+        No visual processing.
+    Main Catalog
+    [2] Smooth Edges [SMAA]
+        Reduce jagged edges.
+    [3] Clean & Sharp [LumaSharpen]
+        Straightforward sharpening.
+    [4] Adaptive Clarity [CAS]
+        Sharpening that adapts to local detail; not upscaling.
+    [5] Smooth Gradients [Deband]
+        Reduce bands in skies, fog and dark gradients.
+    [6] Vivid Arcade [Vibrance]
+        Restrained color enhancement.
+    [7] Balanced Contrast [Curves]
+        Adjust midtone contrast.
+    [8] Black/White Point Adjustment [Levels]
+        Correct washed-out ranges without changing the image to monochrome.
+    [9] Shadow & Midtone Balance [LiftGammaGain]
+        Adjust shadows, midtones and highlights separately.
+    [10] Exposure & Tint [Tonemap]
+        SDR exposure, gamma and tint correction.
+    [11] Color Balance [prod80 Color Balance]
+        Correct unwanted color casts.
+    [12] Arcade Glow [ArcaneBloom]
+        Restrained glow around bright areas.
+    [13] Enhanced Arcade [LumaSharpen + Vibrance]
+        Combined preset: sharper edges and richer color while preserving the
+        approved effect order.
+    CRT Choices
+    [14] Classic Arcade CRT [CRT Lottes]
+        Lottes, including its downsampling.
+    [15] Detailed Arcade CRT [CRT-Royale]
+        More elaborate phosphor-mask simulation.
+    [16] Lightweight CRT [CRT-Pi]
+        A simpler single-pass alternative.
+    Advanced Alternatives
+    [17] Detail-Preserving Sharpen [AdaptiveSharpen]
+        An alternative sharpening algorithm with overshoot controls.
+    [18] Filmic Sharpen [FilmicAnamorphSharpen]
+        Tunable high-pass sharpening.
+    [19] Colorfulness [Colourfulness]
+        An alternative color-strength adjustment.
+    [20] Fast Game Enhancement [Glamayre Fast Effects]
+        Combining selectable anti-aliasing, sharpening, contrast and
+        lighting effects.
+  Choose: [1-N] Select profile  [U] Use selected profile  [R] Reopen preview
           [B] Back  [D] Details
   U is the only path toward deployment; B cancels without changes and D
   returns after showing details. Selecting a profile does not write files;
