@@ -7727,7 +7727,11 @@ function Expand-ReShadeSelfExtractingArchive {
                     $entryCurrent = 0
                     $entryStarted = Get-Date
                     try {
-                        $candidateEntries = $archive.Entries
+                        # PowerShell hides an exception thrown by a property getter (the result is $null), so a corrupt central directory
+                        # would bypass the InvalidDataException catch below. GetEntry is a method call: it validates the central directory
+                        # and lets the InvalidDataException surface to that catch.
+                        [void]$archive.GetEntry($required[0])
+                        $candidateEntries = @($archive.Entries)
                         $entryTotal = $candidateEntries.Count
                         foreach ($e in $candidateEntries) {
                             $entryCurrent++
@@ -10551,13 +10555,37 @@ function Acquire-TpmReShadeApprovedEffect {
     return [pscustomobject]@{ EffectId = $EffectId; StagingRoot = $stage; Files = $result.ToArray() }
 }
 
+# The deployed path of an acquired file. One definition shared by the ownership manifest and the installer, so the two can never
+# disagree about where a file goes (RelativePath is the DEPLOYED path; SourceRelativePath is the upstream/generator path).
+function Get-TpmReShadeApprovedEffectDestinationPath {
+    param([Parameter(Mandatory)][string]$DestinationRoot, [Parameter(Mandatory)][string]$RelativePath)
+    return (Join-Path $DestinationRoot ($RelativePath -replace '/', '\'))
+}
+
+# Maps each deployed destination path to the acquired (staged) file that must be copied there. Acquired files whose source and
+# destination differ (licence copies, the generated NOTICE.txt, relocated shared headers) are resolved by DESTINATION, never by the
+# upstream source path. Fails closed on an ambiguous destination or on a manifest entry with no acquired file, before anything is changed.
+function Get-TpmReShadeAcquiredFileByDestination {
+    param([Parameter(Mandatory)][string]$DestinationRoot, [Parameter(Mandatory)]$AcquiredFiles, [Parameter(Mandatory)]$Manifest)
+    $map = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($file in @($AcquiredFiles)) {
+        $key = Get-TpmReShadeApprovedEffectDestinationPath -DestinationRoot $DestinationRoot -RelativePath ([string]$file.RelativePath)
+        if ($map.ContainsKey($key)) { throw "INTEGRITY: two acquired files share the destination '$($file.RelativePath)'." }
+        $map[$key] = $file
+    }
+    foreach ($entry in @($Manifest.Files)) {
+        if (-not $map.ContainsKey([string]$entry.DestinationPath)) { throw "INTEGRITY: no acquired file matches the manifest destination '$($entry.DestinationPath)'." }
+    }
+    return $map
+}
+
 function New-TpmReShadeOwnershipManifest {
     param([Parameter(Mandatory)][string]$EffectId, [Parameter(Mandatory)][string]$DestinationRoot, [Parameter(Mandatory)]$AcquiredFiles)
     $effect = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq $EffectId)[0]
     if (-not $effect) { throw "Effect is not approved: $EffectId" }
     $entries = New-Object System.Collections.Generic.List[object]
     foreach ($file in @($AcquiredFiles)) {
-        $destination = Join-Path $DestinationRoot ($file.RelativePath -replace '/', '\')
+        $destination = Get-TpmReShadeApprovedEffectDestinationPath -DestinationRoot $DestinationRoot -RelativePath ([string]$file.RelativePath)
         $actual = $null
         if (Test-Path -LiteralPath $file.Path -PathType Leaf) { try { $actual = (Get-FileHash -LiteralPath $file.Path -Algorithm SHA256 -ErrorAction Stop).Hash } catch {} }
         $revision = if ($file.PSObject.Properties['PinnedRevision'] -and $file.PinnedRevision) { [string]$file.PinnedRevision } else { [string]$effect.PinnedCommit }
@@ -10818,7 +10846,15 @@ function Install-TpmReShadeApprovedEffect {
         if (-not $prior -or [string]$prior.TPMManaged -ne 'True' -or -not (Test-TpmReShadeApprovedEffectFile -FileSpec ([pscustomobject]@{ SHA256 = $entry.ExpectedSHA256 }) -Path $entry.DestinationPath)) { $allExact = $false; break }
     }
     if ($allExact) { return [pscustomobject]@{ Succeeded = $true; State = 'NO_OP'; Manifest = $old } }
+    # Progress state read by the catch block; initialised before anything in the try can throw (strict mode rejects an unset variable).
+    $activeProgressLabel = $null
+    $activeProgressStarted = $null
+    $activeProgressCurrent = 0
+    $activeProgressTotal = 0
     try {
+        # Resolved and validated before target mutation (acquisition and staging have already happened): a mismatch is a clean
+        # ROLLED_BACK result and no destination or ownership file has been touched.
+        $stagedByDestination = Get-TpmReShadeAcquiredFileByDestination -DestinationRoot $DestinationRoot -AcquiredFiles @($acquired.Files) -Manifest $manifest
         $activeProgressLabel = 'ReShade effect deployment'
         $activeProgressStarted = Get-Date
         $activeProgressCurrent = 0
@@ -10854,7 +10890,7 @@ function Install-TpmReShadeApprovedEffect {
                 $wasRepair = $true
             }
             [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($entry.DestinationPath))
-            Copy-Item -LiteralPath ($acquired.Files | Where-Object RelativePath -eq $entry.RelativeSource | Select-Object -ExpandProperty Path) -Destination $entry.DestinationPath -Force -ErrorAction Stop
+            Copy-Item -LiteralPath ([string]$stagedByDestination[[string]$entry.DestinationPath].Path) -Destination $entry.DestinationPath -Force -ErrorAction Stop
             $changed += $entry
             if (($FaultStage -eq 'AfterFirstPromotion' -or $FaultStage -eq 'AfterFirstPromotionRollbackFailure') -and $changed.Count -eq 1) { throw 'TEST: forced promotion failure after first promotion.' }
         }
@@ -13562,7 +13598,7 @@ function Invoke-DgVoodoo2Setup {
             }
             $gamePath = [string]$pathCheck.ResolvedPath
             $exeDir = [string]$pathCheck.GameDirectory
-            $apis = if ($detectedMap.ContainsKey($pf.BaseName)) { @($detectedMap[$pf.BaseName]) } else { @(Get-GameLegacyApi -ExePath $gamePath) }
+            $apis = @(if ($detectedMap.ContainsKey($pf.BaseName)) { $detectedMap[$pf.BaseName] } else { Get-GameLegacyApi -ExePath $gamePath })
             $toDeploy = @()
             if ($apis.Count -eq 0) {
                 $toDeploy = $available

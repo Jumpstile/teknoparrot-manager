@@ -4471,7 +4471,7 @@ Describe "Expand-DgVoodoo2Zip (selective extraction, fail-closed on layout drift
         )
         # This call's own staging directory must be gone -- count must be
         # exactly what it was before this call, not merely "some" residue.
-        (Get-ChildItem -Path $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue).Count | Should -Be $before
+        @(Get-ChildItem -Path $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue).Count | Should -Be $before
     }
     It "Case 1 -- destination absent before the call, promotion fails on the very first required file: destination directory itself is removed again" {
         $zip  = Join-Path $TestDrive "dgv-rollback-first.zip"
@@ -4899,7 +4899,7 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
         New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
         Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
         (Get-ChildItem -LiteralPath $dest -Force).Name | Sort-Object | Should -Be @('ReShade32.dll', 'ReShade64.dll')
-        (Get-ChildItem -Path $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue).Count | Should -Be $before
+        @(Get-ChildItem -Path $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue).Count | Should -Be $before
     }
     It "Case 1 -- destination absent before the call, promotion fails on the very first required file: destination directory itself is removed again" {
         $exe  = Join-Path $TestDrive "rs-rollback-first-setup.exe"
@@ -7178,10 +7178,11 @@ Describe "Skylinekiller executable workflow regressions" {
         $oldLayout = $script:TpmOwnedLayout
         $script:TpmOwnedLayout = [pscustomobject]@{ Assets = $assets }
         $script:dgvDeploymentProgress = New-Object System.Collections.Generic.List[object]
+        $script:dgvDeploymentLog = New-Object System.Collections.Generic.List[string]
         Mock Get-GameLegacyApi { @('D3D8') }
         Mock Read-TpmChoice { 'A' }
         Mock Write-Host {}
-        Mock Write-Log {}
+        Mock Write-Log { [void]$script:dgvDeploymentLog.Add([string]$msg) }
         Mock Write-TpmCompactExtractionProgress {
             [void]$script:dgvDeploymentProgress.Add([pscustomobject]@{
                 Label=$Label; Current=$Current; Total=$Total; Complete=[bool]$Complete
@@ -7189,8 +7190,10 @@ Describe "Skylinekiller executable workflow regressions" {
         }
         try {
             $result = Invoke-DgVoodoo2Setup -UserProfilesDir $profiles -SourceDir $source -TpRoot $tpRoot
+            # a failed deployment must show its own result and the logged reasons, not just "Expected 1, got 0"
+            $diagnostics = 'result=' + ($result | ConvertTo-Json -Depth 4 -Compress) + ' log=[' + (@($script:dgvDeploymentLog) -join ' | ') + ']'
 
-            $result.Deployed | Should -Be 1
+            $result.Deployed | Should -Be 1 -Because $diagnostics
             [System.IO.File]::ReadAllText((Join-Path $gameDir 'D3D8.dll')) | Should -Be 'dll-bytes'
             @($script:dgvDeploymentProgress | Where-Object {
                 $_.Label -eq 'dgVoodoo2 deployment preflight' -and -not $_.Complete -and $_.Current -eq 1 -and $_.Total -eq 1
@@ -16146,7 +16149,24 @@ Describe "ReShade preview renderer and cache" {
         }
     }
     # RPSI-PREVIEW-006
-    It "renders meaningful distinct outputs for every approved profile without changing the baseline" {
+    It "declares a preview class for every profile and gives pixel settings to exactly the APPROXIMATE ones (class contract, no rendering needed)" {
+        $classes = @{}
+        foreach ($previewProfile in @(Get-TpmReShadeProfiles)) {
+            $class = [string]$previewProfile.PreviewApproximation
+            $class | Should -BeIn @('REFERENCE', 'NEUTRAL', 'APPROXIMATE', 'UNAVAILABLE') -Because $previewProfile.ProfileId
+            if (-not $classes.ContainsKey($class)) { $classes[$class] = New-Object System.Collections.Generic.List[string] }
+            [void]$classes[$class].Add([string]$previewProfile.ProfileId)
+            $settings = Get-TpmReShadePreviewApproximationSettings -ProfileDefinition $previewProfile
+            if ($class -eq 'APPROXIMATE') { $settings | Should -Not -BeNullOrEmpty -Because ($previewProfile.ProfileId + ' claims a pixel approximation, so it must have settings') }
+            else { $settings | Should -BeNullOrEmpty -Because ($previewProfile.ProfileId + ' is ' + $class + ' and must not be given pixel settings') }
+            if ($class -in @('NEUTRAL', 'UNAVAILABLE')) { [string]$previewProfile.PreviewNote | Should -Not -BeNullOrEmpty -Because ($previewProfile.ProfileId + ' must say why its preview shows no change') }
+        }
+        @($classes['REFERENCE']) | Should -Be @('Original')
+        @($classes['APPROXIMATE']).Count | Should -BeGreaterThan 0
+        @($classes['NEUTRAL']).Count | Should -BeGreaterThan 0
+        @($classes['UNAVAILABLE']).Count | Should -BeGreaterThan 0
+    }
+    It "renders previews according to each profile's preview class: reference and neutral/unavailable stay at the baseline, approximated effects alter pixels and differ from each other" {
         $baseline = New-TpmReShadePreviewBitmap -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Original) -Mode Before -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
         $outputs = @{}
         $stateRoot = Join-Path $TestDrive 'preview-renderer-state'
@@ -16157,18 +16177,22 @@ Describe "ReShade preview renderer and cache" {
                 $rendered = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode After -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
                 $outputs[[string]$profile.ProfileId] = $rendered
                 $difference = Get-TpmPreviewPixelDiffCount -Left $baseline -Right $rendered
-                if ($profile.ProfileId -eq 'Original') {
-                    $difference | Should -Be 0
+                $class = [string]$profile.PreviewApproximation
+                if ($class -in @('REFERENCE', 'NEUTRAL', 'UNAVAILABLE')) {
+                    # honest classes: the renderer must not manufacture a change (a neutral preview is not evidence about any game)
+                    $difference | Should -Be 0 -Because ($profile.ProfileId + ' is ' + $class)
                 } else {
-                    $difference | Should -BeGreaterThan 1000
+                    $difference | Should -BeGreaterThan 1000 -Because ($profile.ProfileId + ' is APPROXIMATE')
                 }
                 $repeated = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode After -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
                 try { (Get-TpmPreviewPixelDiffCount -Left $rendered -Right $repeated) | Should -Be 0 } finally { $repeated.Dispose() }
             }
-            $ids = @($outputs.Keys)
+            # only effects that claim a pixel approximation must be distinguishable from one another
+            $ids = @(Get-TpmReShadeProfiles | Where-Object { [string]$_.PreviewApproximation -eq 'APPROXIMATE' } | ForEach-Object { [string]$_.ProfileId })
+            $ids.Count | Should -BeGreaterThan 1
             for ($i = 0; $i -lt $ids.Count; $i++) {
                 for ($j = $i + 1; $j -lt $ids.Count; $j++) {
-                    (Get-TpmPreviewPixelDiffCount -Left $outputs[$ids[$i]] -Right $outputs[$ids[$j]]) | Should -BeGreaterThan 100
+                    (Get-TpmPreviewPixelDiffCount -Left $outputs[$ids[$i]] -Right $outputs[$ids[$j]]) | Should -BeGreaterThan 100 -Because ($ids[$i] + ' vs ' + $ids[$j])
                 }
             }
             (Get-Content -LiteralPath (Join-Path $stateRoot 'sentinel.txt') -Raw) | Should -Be 'unchanged'
@@ -16351,12 +16375,30 @@ Describe "ReShade trusted profile restore" {
         @($manifest.Files | Where-Object { [string]$_.DestinationPath -ieq (Join-Path $root 'Shaders\TPM\ReShadeUI.fxh') }).Count | Should -Be 1
     }
     # RPSI-CLOSURE-002, RPSI-TRANSACTION-003, RPSI-ORIGINAL-005
+    It "negative control: the all-profile fixture's HDR evidence is not a bypass -- the same HDR profile is refused when the display reports HDR inactive" {
+        Mock Get-TpmDisplayHdrEvidence {
+            [pscustomobject]@{ Known = $true; Reason = 'fixture'; Displays = @([pscustomobject]@{ Id = 'FIXTURE-DISPLAY-1'; IsPrimary = $true; HdrSupported = $true; HdrActive = $false; PolicyLimited = $false; GenericAdvancedColor = $true; ActiveColorMode = '' }) }
+        }
+        Mock New-TpmStagingDirectory { throw 'must not stage' }
+        $result = Install-TpmReShadeProfileDeployment -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'HdrHighlightMapping') -GamePath (Join-Path $TestDrive 'Game.exe') -Doc (New-Object System.Xml.XmlDocument) -SourceDll (Join-Path $TestDrive 'ReShade64.dll') -CacheRoot (Join-Path $TestDrive 'cache') -OwnershipPath (Join-Path $TestDrive 'own.json')
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'HDR_UNAVAILABLE'
+        Should -Invoke New-TpmStagingDirectory -Times 0
+    }
     It "deploys all twenty-two canonical profiles on clean targets" {
         $profiles = @(Get-TpmReShadeProfiles)
         $profiles.Count | Should -Be 22
         $script:allProfileDeploymentRoot = Join-Path $TestDrive 'all-profile-deployments'
         [void][IO.Directory]::CreateDirectory($script:allProfileDeploymentRoot)
         Mock Get-ExeArchitecture { 'x64' }
+        # Deterministic HDR evidence for this isolated fixture: one display that supports HDR and has it active, so the real, unweakened
+        # deployment-time HDR gate admits the HDR-only profiles. The refusal cases (unsupported, inactive, unknown, target mismatch) are
+        # covered separately in the real-HDR gate Describe and by the negative control below.
+        $script:allProfileHdrQueries = 0
+        Mock Get-TpmDisplayHdrEvidence {
+            $script:allProfileHdrQueries++
+            [pscustomobject]@{ Known = $true; Reason = 'fixture'; Displays = @([pscustomobject]@{ Id = 'FIXTURE-DISPLAY-1'; IsPrimary = $true; HdrSupported = $true; HdrActive = $true; PolicyLimited = $false; GenericAdvancedColor = $true; ActiveColorMode = '' }) }
+        }
         Mock Install-TpmReShadeApprovedEffect {
             param($EffectId)
             $stage = Join-Path $script:allProfileDeploymentRoot ('prepared-' + ($EffectId -replace '[^A-Za-z0-9_.-]', '_'))
@@ -16445,6 +16487,9 @@ Describe "ReShade trusted profile restore" {
                 Test-Path -LiteralPath (Join-Path $root 'Shaders') | Should -BeFalse
             }
         }
+        $hdrProfiles = @($profiles | Where-Object { [string]$_.Group -eq 'Hdr' })
+        $hdrProfiles.Count | Should -BeGreaterThan 0
+        $script:allProfileHdrQueries | Should -BeGreaterOrEqual $hdrProfiles.Count -Because 'every HDR-only profile must have passed through the real deployment-time HDR gate using the fixture evidence'
     }
     # RPSI-CLOSURE-002
     It "rejects conflicting shared include identities before target mutation" {
@@ -22157,8 +22202,10 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 live selection display in the terminal 
 # The shader and licence-copy downloads are replaced by deterministic bytes (the pinned upstream hashes cannot be matched offline); the TPM
 # NOTICE.txt and shared-include bytes are the real inline bytes. Everything else (Acquire, integrity checks, transactional promote,
 # ownership manifest, rollback) is the production code.
-# The five deployment tests below are skipped off Windows: the production containment check (Test-PathInside) and the effect-root checks use
-# Windows path separators, so a real deployment cannot run on Linux. They were exercised on Linux only through a scratch-only separator shim.
+# The deployment tests run on every host. The production containment check (Test-PathInside) compares with a Windows backslash prefix, so on a
+# non-Windows host only that one predicate is replaced by a separator-neutral equivalent (BeforeEach); on Windows the real function is used.
+# The synthetic specs are copies of the real approved-effect specs, so RelativePath (deployed) and SourceRelativePath (upstream/generator)
+# genuinely differ for the licence copies, the generated NOTICE, the relocated shared headers and the generated ReShadeUI.fxh.
 Describe "TPM-RESHADE-TWENTY-EFFECTS-001 notice and licence bytes through deployment" {
     BeforeAll {
         function Get-TpmTestDeployedFile {
@@ -22166,6 +22213,12 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 notice and licence bytes through deploy
             # Windows-style relative paths become file names with backslashes on a non-Windows host; match either spelling.
             $want = ($RelativePath -replace '\\', '/').ToLowerInvariant()
             Get-ChildItem -LiteralPath $Root -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object { (($_.FullName.Substring($Root.Length)) -replace '\\', '/').ToLowerInvariant().TrimStart('/') -eq $want } | Select-Object -First 1
+        }
+        function Get-TpmTestInstallDiagnostics {
+            param($Result)
+            if ($null -eq $Result) { return 'install returned no result' }
+            $read = { param($name) $p = $Result.PSObject.Properties[$name]; if ($null -eq $p) { '<absent>' } else { [string]$p.Value } }
+            return ('State=' + (& $read 'State') + ' Error=' + (& $read 'Error') + ' RollbackError=' + (& $read 'RollbackError'))
         }
         function Initialize-TpmNoticeFixture {
             param([string]$EffectId)
@@ -22190,6 +22243,12 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 notice and licence bytes through deploy
         Mock Write-Log {}
         Mock Write-Host {}
         Mock Test-TpmNoReparsePath { $true }
+        if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+            # non-Windows hosts have no %TEMP%, which New-TpmStagingDirectory requires
+            $script:savedTempForNotice = $env:TEMP
+            $env:TEMP = Join-Path $TestDrive 'tmp'
+            Mock Test-PathInside { param($child, $parent) $c = [IO.Path]::GetFullPath($child).TrimEnd('/', '\'); $p = [IO.Path]::GetFullPath($parent).TrimEnd('/', '\'); ($c -eq $p) -or $c.StartsWith($p + '/') }
+        }
         $script:downloadLog = New-Object System.Collections.Generic.List[string]
         $script:dropUrl = ''
         $script:corruptUrl = ''
@@ -22201,6 +22260,9 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 notice and licence bytes through deploy
             if ($script:corruptUrl -and $DownloadUrl -eq $script:corruptUrl) { $bytes = [Text.Encoding]::ASCII.GetBytes('CORRUPTED') }
             [IO.File]::WriteAllBytes($TempPath, $bytes)
         }
+    }
+    AfterEach {
+        if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { $env:TEMP = $script:savedTempForNotice }
     }
     It "stages the TPM NOTICE.txt and every licence copy with their exact bytes and caches the verified downloads" {
         Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
@@ -22267,12 +22329,12 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 notice and licence bytes through deploy
             $outcome | Should -Match 'acquisition failed|mismatch' -Because $mode
         }
     }
-    It "deploys the TPM NOTICE.txt and every licence copy with their exact bytes, records them as owned, and is a no-op on the repeat run" -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+    It "deploys the TPM NOTICE.txt and every licence copy with their exact bytes, records them as owned, and is a no-op on the repeat run" {
         Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
         Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
         $root = Join-Path $TestDrive 'notice-clean'; $dest = Join-Path $root 'ReShade'; $cache = Join-Path $root 'cache'; $own = Join-Path $root 'ownership.json'
         $result = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
-        $result.Succeeded | Should -BeTrue
+        $result.Succeeded | Should -BeTrue -Because (Get-TpmTestInstallDiagnostics $result)
         $notices = @($script:synthSpecs | Where-Object Role -eq 'LicenseNotice')
         $notices.Count | Should -BeGreaterOrEqual 3        # SweetFX LICENSE copy, SMAA project LICENSE copy, TPM NOTICE.txt
         foreach ($spec in $script:synthSpecs) {
@@ -22293,21 +22355,22 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 notice and licence bytes through deploy
         $after = @($script:synthSpecs | ForEach-Object { (Get-FileHash -LiteralPath (Get-TpmTestDeployedFile -Root $dest -RelativePath $_.RelativePath).FullName -Algorithm SHA256).Hash })
         $after | Should -Be $before
     }
-    It "repairs a deleted or altered notice file on the next run" -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+    It "repairs a deleted or altered notice file on the next run" {
         Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
         Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
         $root = Join-Path $TestDrive 'notice-repair'; $dest = Join-Path $root 'ReShade'; $cache = Join-Path $root 'cache'; $own = Join-Path $root 'ownership.json'
-        $null = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
+        $initial = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
+        $initial.Succeeded | Should -BeTrue -Because (Get-TpmTestInstallDiagnostics $initial)
         $licence = @($script:synthSpecs | Where-Object { $_.Role -eq 'LicenseNotice' -and $null -eq $_.InlineBytes })[0]
         $tpmNotice = @($script:synthSpecs | Where-Object { $_.Role -eq 'LicenseNotice' -and $null -ne $_.InlineBytes })[0]
         Remove-Item -LiteralPath (Get-TpmTestDeployedFile -Root $dest -RelativePath $licence.RelativePath).FullName -Force
         [IO.File]::WriteAllText((Get-TpmTestDeployedFile -Root $dest -RelativePath $tpmNotice.RelativePath).FullName, 'tampered notice')
         $repair = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
-        $repair.Succeeded | Should -BeTrue
+        $repair.Succeeded | Should -BeTrue -Because (Get-TpmTestInstallDiagnostics $repair)
         [Convert]::ToBase64String([IO.File]::ReadAllBytes((Get-TpmTestDeployedFile -Root $dest -RelativePath $licence.RelativePath).FullName)) | Should -Be ([Convert]::ToBase64String([byte[]]$script:fixtureBytes[[string]$licence.Url]))
         [Convert]::ToBase64String([IO.File]::ReadAllBytes((Get-TpmTestDeployedFile -Root $dest -RelativePath $tpmNotice.RelativePath).FullName)) | Should -Be ([Convert]::ToBase64String([byte[]]$tpmNotice.InlineBytes))
     }
-    It "fails before any mutation when a required licence copy is missing upstream, or its bytes are corrupt" -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+    It "fails before any mutation when a required licence copy is missing upstream, or its bytes are corrupt" {
         foreach ($mode in @('missing', 'corrupt')) {
             Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
             Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
@@ -22319,29 +22382,135 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 notice and licence bytes through deploy
             Test-Path -LiteralPath $own | Should -BeFalse -Because $mode
         }
     }
-    It "rolls a fresh install back completely (notice files included) when promotion fails part-way" -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+    It "keeps real containment semantics in this Describe (shimmed off Windows, real helper on Windows): inside and equal pass, outside and sibling-prefix paths are refused" {
+        $root = Join-Path $TestDrive 'contain-root'
+        Test-PathInside (Join-Path $root 'a.txt') $root | Should -BeTrue
+        Test-PathInside (Join-Path (Join-Path $root 'sub') 'b.txt') $root | Should -BeTrue
+        Test-PathInside $root $root | Should -BeTrue
+        Test-PathInside (Join-Path $TestDrive 'elsewhere') $root | Should -BeFalse
+        Test-PathInside ($root + '-sibling') $root | Should -BeFalse -Because 'a sibling sharing the root name prefix is outside the root'
+        Test-PathInside (Join-Path $root '..') $root | Should -BeFalse
+    }
+    It "uses a fixture whose deployed paths genuinely differ from the upstream source paths (licence copies, generated NOTICE, relocated shared headers)" {
+        Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
+        $differing = @($script:synthSpecs | Where-Object { ([string]$_.RelativePath -replace '\\', '/') -ne ([string]$_.SourceRelativePath -replace '\\', '/') })
+        $differing.Count | Should -BeGreaterThan 0
+        @($differing | Where-Object { $_.Role -eq 'LicenseNotice' -and $null -eq $_.InlineBytes }).Count | Should -BeGreaterThan 0 -Because 'upstream licence copies are relocated under the notices folder'
+        @($differing | Where-Object { $_.Role -eq 'LicenseNotice' -and $null -ne $_.InlineBytes }).Count | Should -BeGreaterThan 0 -Because 'the generated NOTICE has no upstream source path'
+        @($differing | Where-Object { [string]$_.RelativePath -match 'ReShade\.fxh$' }).Count | Should -BeGreaterThan 0 -Because 'the shared header is relocated under Shaders/TPM'
+    }
+    It "Get-TpmReShadeAcquiredFileByDestination resolves acquired files by deployed destination, not by upstream path" {
+        $root = Join-Path $TestDrive 'map-root'
+        $files = @(
+            [pscustomobject]@{ RelativePath = 'Shaders/TPM/Notices/X/LICENSE.txt'; SourceRelativePath = 'LICENSE'; Path = 'a' },
+            [pscustomobject]@{ RelativePath = 'Shaders/TPM/Include/ReShade.fxh'; SourceRelativePath = 'Shaders/ReShade.fxh'; Path = 'b' })
+        $manifest = [pscustomobject]@{ Files = @($files | ForEach-Object { [pscustomobject]@{ RelativeSource = $_.SourceRelativePath; DestinationPath = (Get-TpmReShadeApprovedEffectDestinationPath -DestinationRoot $root -RelativePath $_.RelativePath) } }) }
+        $map = Get-TpmReShadeAcquiredFileByDestination -DestinationRoot $root -AcquiredFiles $files -Manifest $manifest
+        foreach ($entry in $manifest.Files) { $map[[string]$entry.DestinationPath].Path | Should -Not -BeNullOrEmpty }
+        $map[[string]$manifest.Files[0].DestinationPath].Path | Should -Be 'a'
+        $map[[string]$manifest.Files[1].DestinationPath].Path | Should -Be 'b'
+    }
+    It "Get-TpmReShadeAcquiredFileByDestination refuses duplicate destinations and manifest entries without an acquired file" {
+        $root = Join-Path $TestDrive 'map-root2'
+        $dup = @(
+            [pscustomobject]@{ RelativePath = 'Shaders/A.fx'; Path = 'a' },
+            [pscustomobject]@{ RelativePath = 'shaders\a.fx'; Path = 'b' })
+        { Get-TpmReShadeAcquiredFileByDestination -DestinationRoot $root -AcquiredFiles $dup -Manifest ([pscustomobject]@{ Files = @() }) } | Should -Throw '*share the destination*'
+        $one = @([pscustomobject]@{ RelativePath = 'Shaders/A.fx'; Path = 'a' })
+        $missing = [pscustomobject]@{ Files = @([pscustomobject]@{ RelativeSource = 'x'; DestinationPath = (Join-Path $root 'Shaders\B.fx') }) }
+        { Get-TpmReShadeAcquiredFileByDestination -DestinationRoot $root -AcquiredFiles $one -Manifest $missing } | Should -Throw '*no acquired file matches*'
+    }
+    It "installer: two acquired files that share one deployed destination are refused (INTEGRITY, ROLLED_BACK) before target mutation, leaving no destination or ownership file" {
+        Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
+        # a second, byte-identical copy of the generated NOTICE spec: same deployed path, so acquisition and per-file hashing succeed and the
+        # rejection can only come from the destination map
+        $notice = @($script:synthSpecs | Where-Object { $_.Role -eq 'LicenseNotice' -and $null -ne $_.InlineBytes })[0]
+        $script:synthSpecs = @($script:synthSpecs) + @($notice | Select-Object *)
+        Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
+        $root = Join-Path $TestDrive 'notice-dup-dest'; $dest = Join-Path $root 'ReShade'; $cache = Join-Path $root 'cache'; $own = Join-Path $root 'ownership.json'
+        $result = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
+        $result.Succeeded | Should -BeFalse -Because (Get-TpmTestInstallDiagnostics $result)
+        $result.State | Should -Be 'ROLLED_BACK' -Because (Get-TpmTestInstallDiagnostics $result)
+        [string]$result.Error | Should -Match 'INTEGRITY: two acquired files share the destination' -Because (Get-TpmTestInstallDiagnostics $result)
+        $result.RollbackVerified | Should -BeTrue -Because (Get-TpmTestInstallDiagnostics $result)
+        [string]$result.RollbackError | Should -BeNullOrEmpty -Because (Get-TpmTestInstallDiagnostics $result)
+        Test-Path -LiteralPath $dest | Should -BeFalse
+        Test-Path -LiteralPath $own | Should -BeFalse
+    }
+    It "installer: a manifest entry with no acquired file is refused (INTEGRITY, ROLLED_BACK) before target mutation, on a fresh target and on an existing owned install" {
+        Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
+        Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
+        $script:realOwnershipManifestFunction = ${function:New-TpmReShadeOwnershipManifest}
+        $script:injectUnmatchedEntry = $false
+        Mock New-TpmReShadeOwnershipManifest {
+            $manifest = & $script:realOwnershipManifestFunction -EffectId $EffectId -DestinationRoot $DestinationRoot -AcquiredFiles $AcquiredFiles
+            if ($script:injectUnmatchedEntry) {
+                $extra = @($manifest.Files)[0] | Select-Object *
+                $extra.DestinationPath = Join-Path $DestinationRoot 'Shaders\TPM\Unacquired\Missing.fx'
+                $manifest.Files = @($manifest.Files) + $extra
+            }
+            $manifest
+        }
+        $root = Join-Path $TestDrive 'notice-unmatched'; $dest = Join-Path $root 'ReShade'; $cache = Join-Path $root 'cache'; $own = Join-Path $root 'ownership.json'
+        # fresh target
+        $script:injectUnmatchedEntry = $true
+        $fresh = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
+        $fresh.Succeeded | Should -BeFalse -Because (Get-TpmTestInstallDiagnostics $fresh)
+        $fresh.State | Should -Be 'ROLLED_BACK' -Because (Get-TpmTestInstallDiagnostics $fresh)
+        [string]$fresh.Error | Should -Match 'INTEGRITY: no acquired file matches the manifest destination' -Because (Get-TpmTestInstallDiagnostics $fresh)
+        $fresh.RollbackVerified | Should -BeTrue -Because (Get-TpmTestInstallDiagnostics $fresh)
+        [string]$fresh.RollbackError | Should -BeNullOrEmpty -Because (Get-TpmTestInstallDiagnostics $fresh)
+        Test-Path -LiteralPath $dest | Should -BeFalse
+        Test-Path -LiteralPath $own | Should -BeFalse
+        # existing owned install: a good install, then a changed notice so the next run has work to do, then the refused run
+        $script:injectUnmatchedEntry = $false
+        $initial = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
+        $initial.Succeeded | Should -BeTrue -Because (Get-TpmTestInstallDiagnostics $initial)
+        $tpmNotice = @($script:synthSpecs | Where-Object { $_.Role -eq 'LicenseNotice' -and $null -ne $_.InlineBytes })[0]
+        [IO.File]::WriteAllText((Get-TpmTestDeployedFile -Root $dest -RelativePath $tpmNotice.RelativePath).FullName, 'owned file edited before the refused run')
+        $snapshot = {
+            $files = @(Get-ChildItem -LiteralPath $dest -Recurse -File -Force | Sort-Object FullName | ForEach-Object { $_.FullName.Substring($dest.Length) + ':' + (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash })
+            ($files -join '|') + '|OWN:' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($own))
+        }
+        $before = & $snapshot
+        $script:injectUnmatchedEntry = $true
+        $refused = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
+        $refused.Succeeded | Should -BeFalse -Because (Get-TpmTestInstallDiagnostics $refused)
+        $refused.State | Should -Be 'ROLLED_BACK' -Because (Get-TpmTestInstallDiagnostics $refused)
+        [string]$refused.Error | Should -Match 'INTEGRITY: no acquired file matches the manifest destination' -Because (Get-TpmTestInstallDiagnostics $refused)
+        $refused.RollbackVerified | Should -BeTrue -Because (Get-TpmTestInstallDiagnostics $refused)
+        [string]$refused.RollbackError | Should -BeNullOrEmpty -Because (Get-TpmTestInstallDiagnostics $refused)
+        (& $snapshot) | Should -Be $before -Because 'no deployed file and no ownership byte may change when the destination map is refused'
+    }
+    It "rolls a fresh install back completely (notice files included) when promotion fails part-way" {
         Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
         Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
         $root = Join-Path $TestDrive 'notice-rollback'; $dest = Join-Path $root 'ReShade'; $cache = Join-Path $root 'cache'; $own = Join-Path $root 'ownership.json'
         $result = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own -FaultStage 'AfterFirstPromotion'
         $result.Succeeded | Should -BeFalse
+        $result.State | Should -Be 'ROLLED_BACK' -Because (Get-TpmTestInstallDiagnostics $result)
+        [string]$result.Error | Should -Match 'forced promotion failure' -Because (Get-TpmTestInstallDiagnostics $result)
+        [string]$result.RollbackError | Should -BeNullOrEmpty -Because (Get-TpmTestInstallDiagnostics $result)
         foreach ($spec in $script:synthSpecs) {
             $found = if (Test-Path -LiteralPath $dest) { Get-TpmTestDeployedFile -Root $dest -RelativePath $spec.RelativePath } else { $null }
             $found | Should -BeNullOrEmpty -Because $spec.RelativePath
         }
         Test-Path -LiteralPath $own | Should -BeFalse
     }
-    It "restores previous notice bytes when a later run fails part-way" -Skip:([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+    It "restores previous notice bytes when a later run fails part-way" {
         Initialize-TpmNoticeFixture -EffectId 'SweetFX.SMAA'
         Mock Get-TpmReShadeApprovedEffectFiles { $script:synthSpecs }
         $root = Join-Path $TestDrive 'notice-restore'; $dest = Join-Path $root 'ReShade'; $cache = Join-Path $root 'cache'; $own = Join-Path $root 'ownership.json'
-        $null = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
+        $initial = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own
+        $initial.Succeeded | Should -BeTrue -Because (Get-TpmTestInstallDiagnostics $initial)
         $tpmNotice = @($script:synthSpecs | Where-Object { $_.Role -eq 'LicenseNotice' -and $null -ne $_.InlineBytes })[0]
         $noticeFile = (Get-TpmTestDeployedFile -Root $dest -RelativePath $tpmNotice.RelativePath).FullName
         [IO.File]::WriteAllText($noticeFile, 'older notice')
         $preOwn = [Convert]::ToBase64String([IO.File]::ReadAllBytes($own))
         $failed = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.SMAA' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath $own -FaultStage 'AfterFirstPromotion'
         $failed.Succeeded | Should -BeFalse
+        $failed.State | Should -Be 'ROLLED_BACK' -Because (Get-TpmTestInstallDiagnostics $failed)
+        [string]$failed.RollbackError | Should -BeNullOrEmpty -Because (Get-TpmTestInstallDiagnostics $failed)
         [IO.File]::ReadAllText($noticeFile) | Should -Be 'older notice'
         [Convert]::ToBase64String([IO.File]::ReadAllBytes($own)) | Should -Be $preOwn
     }
