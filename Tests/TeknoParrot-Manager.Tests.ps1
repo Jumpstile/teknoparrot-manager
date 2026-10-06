@@ -16122,6 +16122,80 @@ Describe "ReShade preview renderer and cache" {
             }
             return $difference
         }
+        # Exact pixel access for the content tests: a compact 32bpp ARGB (BGRA byte order) copy read with LockBits and the signed stride, so row padding and
+        # row order cannot create differences and alpha is always compared.
+        function Get-TpmPreviewBgra {
+            param([Parameter(Mandatory)][Drawing.Bitmap]$Bitmap)
+            $rectangle = New-Object Drawing.Rectangle -ArgumentList @(0, 0, $Bitmap.Width, $Bitmap.Height)
+            $data = $Bitmap.LockBits($rectangle, [Drawing.Imaging.ImageLockMode]::ReadOnly, [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+            try {
+                $stride = [int]$data.Stride
+                $absoluteStride = [Math]::Abs($stride)
+                $length = $absoluteStride * $Bitmap.Height
+                $raw = New-Object byte[] $length
+                $start = if ($stride -lt 0) { [IntPtr]::Add($data.Scan0, (($Bitmap.Height - 1) * $stride)) } else { $data.Scan0 }
+                [Runtime.InteropServices.Marshal]::Copy($start, $raw, 0, $length)
+            } finally { $Bitmap.UnlockBits($data) }
+            $compact = New-Object byte[] ($Bitmap.Width * $Bitmap.Height * 4)
+            for ($y = 0; $y -lt $Bitmap.Height; $y++) {
+                $rowOffset = if ($stride -ge 0) { $y * $absoluteStride } else { ($Bitmap.Height - 1 - $y) * $absoluteStride }
+                [Array]::Copy($raw, $rowOffset, $compact, $y * $Bitmap.Width * 4, $Bitmap.Width * 4)
+            }
+            return , $compact
+        }
+        # Is a bitmap still usable? Probed by an explicit METHOD call. A property read such as .Width is NOT a valid probe: PowerShell suppresses an exception thrown by a
+        # property getter and returns $null, so a disposed bitmap would look usable. Callers must show the probe works (live control usable, hand-disposed control unusable).
+        function Test-TpmPreviewBitmapUsable {
+            param($Candidate)
+            if ($null -eq $Candidate) { return $false }
+            try { [void]$Candidate.GetPixel(0, 0); return $true } catch { return $false }
+        }
+        function Get-TpmPreviewBytesHash {
+            param([Parameter(Mandatory)][byte[]]$Bytes)
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes)) -replace '-', '') } finally { $sha.Dispose() }
+        }
+        # Indices of differing pixels (any of the four bytes differs; zero tolerance). -Limit stops the scan early once enough differences are found.
+        function Get-TpmPreviewDifferingPixels {
+            param([Parameter(Mandatory)][byte[]]$Left, [Parameter(Mandatory)][byte[]]$Right, [int]$Limit = [int]::MaxValue)
+            $found = New-Object System.Collections.Generic.List[int]
+            if ($Left.Length -ne $Right.Length) { throw "buffers differ in size ($($Left.Length) versus $($Right.Length))" }
+            if ((Get-TpmPreviewBytesHash -Bytes $Left) -eq (Get-TpmPreviewBytesHash -Bytes $Right)) { return , $found }
+            for ($i = 0; $i -lt $Left.Length; $i += 4) {
+                if ($Left[$i] -ne $Right[$i] -or $Left[$i + 1] -ne $Right[$i + 1] -or $Left[$i + 2] -ne $Right[$i + 2] -or $Left[$i + 3] -ne $Right[$i + 3]) {
+                    [void]$found.Add($i / 4)
+                    if ($found.Count -ge $Limit) { break }
+                }
+            }
+            return , $found
+        }
+        # Content verdict used for every APPROXIMATE profile: the PROCESSED (undecorated) content must differ from the reference by more than the threshold.
+        function Assert-TpmApproximationChangesContent {
+            param([Parameter(Mandatory)]$Cache, [Parameter(Mandatory)]$ProfileDefinition, [int]$MinimumDifferingPixels = 1000)
+            $bitmap = Get-TpmReShadePreviewProcessedBitmap -Cache $Cache -ProfileDefinition $ProfileDefinition
+            $count = (Get-TpmPreviewDifferingPixels -Left (Get-TpmPreviewBgra -Bitmap $Cache.Reference) -Right (Get-TpmPreviewBgra -Bitmap $bitmap) -Limit ($MinimumDifferingPixels + 1)).Count
+            if ($count -le $MinimumDifferingPixels) { throw "NO_CONTENT_CHANGE: $($ProfileDefinition.ProfileId) changed only $count pixels of the content (more than $MinimumDifferingPixels required)" }
+            return $count
+        }
+        # Ink of a label drawn ALONE (same text, font, brush and position as the product annotation) on a black and on a white canvas. A pixel is ink if the label
+        # changes it on either background, so antialiased edge pixels are included without any bounding-box slack.
+        function Get-TpmPreviewLabelInk {
+            param([Parameter(Mandatory)][string]$Label, [Parameter(Mandatory)][int]$Width, [Parameter(Mandatory)][int]$Height)
+            $ink = New-Object 'System.Collections.Generic.HashSet[int]'
+            foreach ($background in @([Drawing.Color]::Black, [Drawing.Color]::White)) {
+                $blank = New-Object Drawing.Bitmap($Width, $Height)
+                $graphics = [Drawing.Graphics]::FromImage($blank)
+                $font = New-Object Drawing.Font('Consolas', 11, [Drawing.FontStyle]::Bold)
+                $brush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(245, 250, 255))
+                try {
+                    $graphics.Clear($background)
+                    $reference = Get-TpmPreviewBgra -Bitmap $blank
+                    $graphics.DrawString($Label, $font, $brush, 14, 12)
+                    foreach ($index in (Get-TpmPreviewDifferingPixels -Left $reference -Right (Get-TpmPreviewBgra -Bitmap $blank))) { [void]$ink.Add([int]$index) }
+                } finally { $brush.Dispose(); $font.Dispose(); $graphics.Dispose(); $blank.Dispose() }
+            }
+            return , $ink
+        }
     }
     It "renders deterministic Before, After, and Split artifacts from one reference identity" {
         $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
@@ -16137,7 +16211,8 @@ Describe "ReShade preview renderer and cache" {
         $rendererEnd = $source.IndexOf('function Dispose-TpmReShadePreviewRenderCache', $rendererStart)
         $renderer = $source.Substring($rendererStart, $rendererEnd - $rendererStart)
         $renderer | Should -Match 'Get-TpmReShadePreviewProcessedBitmap -Cache \$Cache -ProfileDefinition'
-        $renderer | Should -Match '\$graphics\.DrawImageUnscaled\(\$Cache\.Reference, 0, 0\)'
+        $renderer | Should -Match '\$Cache\.Reference\.Clone\('
+        $renderer | Should -Not -Match 'DrawImageUnscaled'
         $renderer | Should -Match 'Invoke-TpmReShadePreviewProfilePixels'
         $renderer | Should -Not -Match 'drawAfter'
         $reference = New-TpmReShadePreviewReferenceBitmap -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
@@ -16166,41 +16241,157 @@ Describe "ReShade preview renderer and cache" {
         @($classes['NEUTRAL']).Count | Should -BeGreaterThan 0
         @($classes['UNAVAILABLE']).Count | Should -BeGreaterThan 0
     }
-    It "renders previews according to each profile's preview class: reference and neutral/unavailable stay at the baseline, approximated effects alter pixels and differ from each other" {
-        $baseline = New-TpmReShadePreviewBitmap -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Original) -Mode Before -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
-        $outputs = @{}
-        $stateRoot = Join-Path $TestDrive 'preview-renderer-state'
-        [IO.Directory]::CreateDirectory($stateRoot) | Out-Null
-        [IO.File]::WriteAllText((Join-Path $stateRoot 'sentinel.txt'), 'unchanged')
+    It "preview CONTENT (undecorated, shared cache): reference, neutral and unavailable profiles equal the reference exactly; approximations change content and differ from each other" {
+        $cache = New-TpmReShadePreviewRenderCache -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $second = New-TpmReShadePreviewRenderCache -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $filesBefore = @(Get-ChildItem -LiteralPath $script:PreviewFixtureRoot -Recurse -File).Count
         try {
-            foreach ($profile in @(Get-TpmReShadeProfiles)) {
-                $rendered = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode After -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
-                $outputs[[string]$profile.ProfileId] = $rendered
-                $difference = Get-TpmPreviewPixelDiffCount -Left $baseline -Right $rendered
-                $class = [string]$profile.PreviewApproximation
+            $referenceBytes = Get-TpmPreviewBgra -Bitmap $cache.Reference
+            $referenceHash = Get-TpmPreviewBytesHash -Bytes $referenceBytes
+            $contents = @{}
+            foreach ($previewProfile in @(Get-TpmReShadeProfiles)) {
+                $id = [string]$previewProfile.ProfileId
+                $class = [string]$previewProfile.PreviewApproximation
+                $bitmap = Get-TpmReShadePreviewProcessedBitmap -Cache $cache -ProfileDefinition $previewProfile
+                if ($id -eq 'Original') { [object]::ReferenceEquals($bitmap, $cache.Reference) | Should -BeTrue -Because 'Original keeps the cache reference alias' }
+                else { [object]::ReferenceEquals($bitmap, $cache.Reference) | Should -BeFalse -Because ($id + ' needs its own cache-owned bitmap') }
+                [object]::ReferenceEquals((Get-TpmReShadePreviewProcessedBitmap -Cache $cache -ProfileDefinition $previewProfile), $bitmap) | Should -BeTrue -Because ($id + ' must be served from the cache on reuse')
+                $bytes = Get-TpmPreviewBgra -Bitmap $bitmap
+                $contents[$id] = $bytes
+                $differing = Get-TpmPreviewDifferingPixels -Left $referenceBytes -Right $bytes -Limit 1001
                 if ($class -in @('REFERENCE', 'NEUTRAL', 'UNAVAILABLE')) {
-                    # honest classes: the renderer must not manufacture a change (a neutral preview is not evidence about any game)
-                    $difference | Should -Be 0 -Because ($profile.ProfileId + ' is ' + $class)
+                    # exact ARGB equality of the underlying content; nothing is cropped, masked or relaxed
+                    $differing.Count | Should -Be 0 -Because ($id + ' is ' + $class + ' and its content must equal the reference exactly')
                 } else {
-                    $difference | Should -BeGreaterThan 1000 -Because ($profile.ProfileId + ' is APPROXIMATE')
+                    $differing.Count | Should -BeGreaterThan 1000 -Because ($id + ' is APPROXIMATE and must change the content')
                 }
-                $repeated = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode After -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
-                try { (Get-TpmPreviewPixelDiffCount -Left $rendered -Right $repeated) | Should -Be 0 } finally { $repeated.Dispose() }
+                # a fresh cache gives byte-identical content (determinism)
+                (Get-TpmPreviewBytesHash -Bytes (Get-TpmPreviewBgra -Bitmap (Get-TpmReShadePreviewProcessedBitmap -Cache $second -ProfileDefinition $previewProfile))) | Should -Be (Get-TpmPreviewBytesHash -Bytes $bytes) -Because ($id + ' must be deterministic')
             }
-            # only effects that claim a pixel approximation must be distinguishable from one another
-            $ids = @(Get-TpmReShadeProfiles | Where-Object { [string]$_.PreviewApproximation -eq 'APPROXIMATE' } | ForEach-Object { [string]$_.ProfileId })
-            $ids.Count | Should -BeGreaterThan 1
-            for ($i = 0; $i -lt $ids.Count; $i++) {
-                for ($j = $i + 1; $j -lt $ids.Count; $j++) {
-                    (Get-TpmPreviewPixelDiffCount -Left $outputs[$ids[$i]] -Right $outputs[$ids[$j]]) | Should -BeGreaterThan 100 -Because ($ids[$i] + ' vs ' + $ids[$j])
+            $approximations = @(Get-TpmReShadeProfiles | Where-Object { [string]$_.PreviewApproximation -eq 'APPROXIMATE' } | ForEach-Object { [string]$_.ProfileId })
+            $approximations.Count | Should -BeGreaterThan 1
+            for ($i = 0; $i -lt $approximations.Count; $i++) {
+                for ($j = $i + 1; $j -lt $approximations.Count; $j++) {
+                    (Get-TpmPreviewDifferingPixels -Left $contents[$approximations[$i]] -Right $contents[$approximations[$j]] -Limit 101).Count | Should -BeGreaterThan 100 -Because ($approximations[$i] + ' versus ' + $approximations[$j] + ' content')
                 }
             }
-            (Get-Content -LiteralPath (Join-Path $stateRoot 'sentinel.txt') -Raw) | Should -Be 'unchanged'
-            @(Get-ChildItem -LiteralPath $stateRoot -Recurse -File).Count | Should -Be 1
+            # baseline immutability: processing every profile left the reference untouched, and the renderer wrote nothing
+            (Get-TpmPreviewBytesHash -Bytes (Get-TpmPreviewBgra -Bitmap $cache.Reference)) | Should -Be $referenceHash
+            @(Get-ChildItem -LiteralPath $script:PreviewFixtureRoot -Recurse -File).Count | Should -Be $filesBefore
         } finally {
-            foreach ($rendered in @($outputs.Values)) { if ($rendered) { $rendered.Dispose() } }
-            $baseline.Dispose()
+            Dispose-TpmReShadePreviewRenderCache -Cache $cache
+            Dispose-TpmReShadePreviewRenderCache -Cache $second
         }
+    }
+    It "processed copy is bit-exact for opaque, partially transparent and fully transparent pixels, independent of the reference, and cache-owned" {
+        # synthetic reference: every alpha 0..255 across 256 columns, varying RGB per row, written byte-for-byte with LockBits
+        $width = 256; $height = 8
+        $synthetic = New-Object Drawing.Bitmap($width, $height, [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $pattern = New-Object byte[] ($width * $height * 4)
+        for ($y = 0; $y -lt $height; $y++) { for ($x = 0; $x -lt $width; $x++) { $o = ($y * $width + $x) * 4; $pattern[$o] = [byte](($x * 7 + $y * 41) % 256); $pattern[$o + 1] = [byte](($x * 5 + $y * 29) % 256); $pattern[$o + 2] = [byte](($x * 3 + $y * 17) % 256); $pattern[$o + 3] = [byte]$x } }
+        $lock = $synthetic.LockBits((New-Object Drawing.Rectangle -ArgumentList @(0, 0, $width, $height)), [Drawing.Imaging.ImageLockMode]::WriteOnly, [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        try { for ($y = 0; $y -lt $height; $y++) { $row = New-Object byte[] ($width * 4); [Array]::Copy($pattern, $y * $width * 4, $row, 0, $width * 4); [Runtime.InteropServices.Marshal]::Copy($row, 0, [IntPtr]::Add($lock.Scan0, $y * $lock.Stride), $width * 4) } } finally { $synthetic.UnlockBits($lock) }
+        $cache = [pscustomobject]@{ Width = $width; Height = $height; PreviewRoot = ''; Reference = $synthetic; Processed = @{} }
+        $referenceBytes = Get-TpmPreviewBgra -Bitmap $synthetic
+        $alphas = @(for ($i = 3; $i -lt $referenceBytes.Length; $i += 4) { $referenceBytes[$i] })
+        ($alphas -contains 0) | Should -BeTrue; ($alphas -contains 255) | Should -BeTrue
+        @($alphas | Where-Object { $_ -gt 0 -and $_ -lt 255 }).Count | Should -BeGreaterThan 0
+        $referenceHash = Get-TpmPreviewBytesHash -Bytes $referenceBytes
+        $neutral = Get-TpmReShadeProfile -ProfileId SmoothEdges
+        $copy = Get-TpmReShadePreviewProcessedBitmap -Cache $cache -ProfileDefinition $neutral
+        # calibrate the disposal probe BEFORE relying on it: live bitmaps are usable, a bitmap disposed by hand is not, and a retained control stays usable
+        $retained = New-Object Drawing.Bitmap(8, 8)
+        $handDisposed = New-Object Drawing.Bitmap(8, 8); $handDisposed.Dispose()
+        Test-TpmPreviewBitmapUsable $synthetic | Should -BeTrue -Because 'the live reference must be usable before disposal'
+        Test-TpmPreviewBitmapUsable $copy | Should -BeTrue -Because 'the live processed copy must be usable before disposal'
+        Test-TpmPreviewBitmapUsable $retained | Should -BeTrue -Because 'the retained control is live'
+        Test-TpmPreviewBitmapUsable $handDisposed | Should -BeFalse -Because 'the probe must be able to detect a disposed bitmap'
+        try {
+            [object]::ReferenceEquals($copy, $synthetic) | Should -BeFalse
+            $copy.PixelFormat | Should -Be $synthetic.PixelFormat
+            (Get-TpmPreviewDifferingPixels -Left $referenceBytes -Right (Get-TpmPreviewBgra -Bitmap $copy)).Count | Should -Be 0 -Because 'the copy must preserve every ARGB value, alpha included'
+            # independent ownership: changing the copy leaves the reference alone, and the reverse
+            $copy.SetPixel(0, 0, [Drawing.Color]::FromArgb(255, 1, 2, 3))
+            (Get-TpmPreviewBytesHash -Bytes (Get-TpmPreviewBgra -Bitmap $synthetic)) | Should -Be $referenceHash
+            (Get-TpmPreviewBytesHash -Bytes (Get-TpmPreviewBgra -Bitmap $copy)) | Should -Not -Be $referenceHash
+        } finally {
+            Dispose-TpmReShadePreviewRenderCache -Cache $cache
+        }
+        # cache disposal released the reference and the processed copy, once each, without error
+        $cache.Reference | Should -BeNullOrEmpty
+        Test-TpmPreviewBitmapUsable $synthetic | Should -BeFalse -Because 'the cache must dispose the reference'
+        Test-TpmPreviewBitmapUsable $copy | Should -BeFalse -Because 'the cache must dispose the processed copy'
+        # the same check finds a deliberately retained, undisposed bitmap and nothing else
+        $survivors = @(@($synthetic, $copy, $retained) | Where-Object { Test-TpmPreviewBitmapUsable $_ })
+        $survivors.Count | Should -Be 1 -Because 'only the retained control may survive the cache disposal'
+        [object]::ReferenceEquals($survivors[0], $retained) | Should -BeTrue
+        # a copy disposed on its own does not disturb the reference; the later cache disposal tolerates it
+        $second = [pscustomobject]@{ Width = $width; Height = $height; PreviewRoot = ''; Reference = (New-Object Drawing.Bitmap($width, $height, [Drawing.Imaging.PixelFormat]::Format32bppArgb)); Processed = @{} }
+        $secondCopy = Get-TpmReShadePreviewProcessedBitmap -Cache $second -ProfileDefinition $neutral
+        Test-TpmPreviewBitmapUsable $secondCopy | Should -BeTrue -Because 'the second processed copy is live before it is disposed'
+        $secondCopy.Dispose()
+        Test-TpmPreviewBitmapUsable $secondCopy | Should -BeFalse -Because 'a copy disposed on its own must be detected as disposed'
+        Test-TpmPreviewBitmapUsable $second.Reference | Should -BeTrue -Because 'disposing the copy must not disturb the reference'
+        $alias = Get-TpmReShadePreviewProcessedBitmap -Cache $second -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Original)
+        [object]::ReferenceEquals($alias, $second.Reference) | Should -BeTrue
+        $secondReference = $second.Reference
+        { Dispose-TpmReShadePreviewRenderCache -Cache $second } | Should -Not -Throw
+        $second.Reference | Should -BeNullOrEmpty
+        Test-TpmPreviewBitmapUsable $secondReference | Should -BeFalse -Because 'the later cache disposal must release the reference even though the copy was disposed on its own'
+        Test-TpmPreviewBitmapUsable $retained | Should -BeTrue -Because 'the retained control is never touched by either cache'
+        $retained.Dispose()
+    }
+    It "rejects a no-op approximation on CONTENT even though label pixels make its decorated image differ from Original's" {
+        Mock Invoke-TpmReShadePreviewProfilePixels {}
+        $cache = New-TpmReShadePreviewRenderCache -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        try {
+            $approximation = Get-TpmReShadeProfile -ProfileId CleanSharp
+            [string]$approximation.PreviewApproximation | Should -Be 'APPROXIMATE'
+            { Assert-TpmApproximationChangesContent -Cache $cache -ProfileDefinition $approximation } | Should -Throw '*NO_CONTENT_CHANGE*'
+            # the hazard this guards against: the decorated After image still differs from Original's Before image, by labels only
+            $original = New-TpmReShadePreviewBitmapFromCache -Cache $cache -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Original) -Mode Before
+            $decorated = New-TpmReShadePreviewBitmapFromCache -Cache $cache -ProfileDefinition $approximation -Mode After
+            try { (Get-TpmPreviewDifferingPixels -Left (Get-TpmPreviewBgra -Bitmap $original) -Right (Get-TpmPreviewBgra -Bitmap $decorated)).Count | Should -BeGreaterThan 100 -Because 'a decorated comparison alone would have accepted the no-op approximation' } finally { $original.Dispose(); $decorated.Dispose() }
+        } finally { Dispose-TpmReShadePreviewRenderCache -Cache $cache }
+        # the (mocked) transform ran exactly once: the second use of the profile came from the cache
+        Should -Invoke Invoke-TpmReShadePreviewProfilePixels -Times 1 -Exactly
+    }
+    It "real approximations pass the content verdict that the no-op approximation fails" {
+        $cache = New-TpmReShadePreviewRenderCache -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        try { foreach ($id in @('CleanSharp', 'Vivid', 'ClassicCrt')) { (Assert-TpmApproximationChangesContent -Cache $cache -ProfileDefinition (Get-TpmReShadeProfile -ProfileId $id)) | Should -BeGreaterThan 1000 -Because $id } } finally { Dispose-TpmReShadePreviewRenderCache -Cache $cache }
+    }
+    It "ANNOTATIONS: every profile's decorated Before/After image equals that profile's OWN content composited through the product's compositing function, except inside the label ink" {
+        $cache = New-TpmReShadePreviewRenderCache -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $inkByLabel = @{}
+        try {
+            foreach ($label in @('ORIGINAL', 'AFTER')) { $inkByLabel[$label] = Get-TpmPreviewLabelInk -Label $label -Width 320 -Height 180; $inkByLabel[$label].Count | Should -BeGreaterThan 50 -Because ($label + ' must have measurable ink') }
+            $originalBefore = $null; $originalAfter = $null
+            foreach ($previewProfile in @(Get-TpmReShadeProfiles)) {
+                $id = [string]$previewProfile.ProfileId
+                foreach ($mode in @('Before', 'After')) {
+                    $label = if ($mode -eq 'Before' -or $id -eq 'Original') { 'ORIGINAL' } else { 'AFTER' }
+                    $content = if ($mode -eq 'Before') { $cache.Reference } else { Get-TpmReShadePreviewProcessedBitmap -Cache $cache -ProfileDefinition $previewProfile }
+                    # the expected image: this profile's own content through the same compositing path (black canvas, Copy-TpmReShadePreviewBitmapRegion)
+                    $expected = New-Object Drawing.Bitmap(320, 180)
+                    $decorated = $null
+                    try {
+                        $graphics = [Drawing.Graphics]::FromImage($expected); try { $graphics.Clear([Drawing.Color]::Black) } finally { $graphics.Dispose() }
+                        Copy-TpmReShadePreviewBitmapRegion -Source $content -Destination $expected -XStart 0
+                        $decorated = New-TpmReShadePreviewBitmapFromCache -Cache $cache -ProfileDefinition $previewProfile -Mode $mode
+                        $expectedBytes = Get-TpmPreviewBgra -Bitmap $expected
+                        $decoratedBytes = Get-TpmPreviewBgra -Bitmap $decorated
+                        $differing = Get-TpmPreviewDifferingPixels -Left $expectedBytes -Right $decoratedBytes
+                        $outside = @($differing | Where-Object { -not $inkByLabel[$label].Contains([int]$_) })
+                        $outside.Count | Should -Be 0 -Because ("$id/$mode differs from its own composited content at $($outside.Count) pixel(s) outside the $label label ink (first: $(@($outside | Select-Object -First 5) -join ','))")
+                        $differing.Count | Should -BeGreaterThan 0 -Because ("$id/$mode must carry its $label annotation")
+                        if ($id -eq 'Original' -and $mode -eq 'Before') { $originalBefore = $decoratedBytes }
+                        if ($id -eq 'Original' -and $mode -eq 'After') { $originalAfter = $decoratedBytes }
+                    } finally { $expected.Dispose(); if ($decorated) { $decorated.Dispose() } }
+                }
+            }
+            # Original has the same content and label in both modes
+            (Get-TpmPreviewDifferingPixels -Left $originalBefore -Right $originalAfter).Count | Should -Be 0
+        } finally { Dispose-TpmReShadePreviewRenderCache -Cache $cache }
     }
     It "keeps split and slider sides tied to baseline and processed pixels" {
         $profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade

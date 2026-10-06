@@ -9036,9 +9036,9 @@ function Get-TpmReShadePreviewProcessedBitmap {
         $Cache.Processed[$profileId] = $Cache.Reference
         return $Cache.Reference
     }
-    $bitmap = New-Object Drawing.Bitmap($Cache.Width, $Cache.Height)
-    $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try { $graphics.DrawImageUnscaled($Cache.Reference, 0, 0) } finally { $graphics.Dispose() }
+    # Full-image, same-pixel-format clone: an exact, independent pixel copy owned by the cache. A redraw with DrawImageUnscaled is not used here because it
+    # changed pixels (by at most one RGB level) before any profile transform ran.
+    $bitmap = $Cache.Reference.Clone((New-Object Drawing.Rectangle -ArgumentList @(0, 0, $Cache.Reference.Width, $Cache.Reference.Height)), $Cache.Reference.PixelFormat)
     try {
         Invoke-TpmReShadePreviewProfilePixels -Bitmap $bitmap -ProfileDefinition $ProfileDefinition
         $Cache.Processed[$profileId] = $bitmap
