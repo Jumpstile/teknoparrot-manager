@@ -16095,6 +16095,25 @@ Describe "ReShade preview renderer and cache" {
         $script:PreviewFixtureRoot = Join-Path $TestDrive 'renderer-landscape'
         [IO.Directory]::CreateDirectory($script:PreviewFixtureRoot) | Out-Null
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-landscape.png') -Destination (Join-Path $script:PreviewFixtureRoot 'TPM-preview-landscape.png')
+        # Executable-call evidence for the cache copy step. The product function carries an explanatory comment that names the rejected redraw API, so a text
+        # search cannot tell a comment from a call. This inspects the AST of the named function only: method invocations (comments and strings are not calls).
+        function Get-TpmPreviewCopyCallEvidence {
+            param([Parameter(Mandatory)][string]$FunctionText, [string]$FunctionName = 'Get-TpmReShadePreviewProcessedBitmap')
+            $tokens = $null; $parseErrors = $null
+            $parsed = [System.Management.Automation.Language.Parser]::ParseInput($FunctionText, [ref]$tokens, [ref]$parseErrors)
+            $functions = @($parsed.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $FunctionName }, $true))
+            $clone = 0; $redraw = 0; $dynamic = 0
+            foreach ($function in $functions) {
+                $calls = @($function.Body.FindAll({ param($node) $node -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))
+                foreach ($call in $calls) {
+                    if ($call.Member -isnot [System.Management.Automation.Language.StringConstantExpressionAst]) { $dynamic++; continue }
+                    $memberName = [string]$call.Member.Value
+                    if ($memberName -like 'DrawImageUnscaled*') { $redraw++ }
+                    if ($memberName -eq 'Clone' -and $call.Expression.Extent.Text -ceq '$Cache.Reference') { $clone++ }
+                }
+            }
+            return [pscustomobject]@{ ParseErrors = @($parseErrors).Count; FunctionCount = $functions.Count; CloneCalls = $clone; DrawImageUnscaledCalls = $redraw; DynamicMemberCalls = $dynamic }
+        }
         function Get-TpmPreviewPixelDiffCount {
             param([Parameter(Mandatory)][Drawing.Bitmap]$Left, [Parameter(Mandatory)][Drawing.Bitmap]$Right)
             $difference = [long]0
@@ -16205,14 +16224,54 @@ Describe "ReShade preview renderer and cache" {
         $a.CacheKey|Should -Not -Be $b.CacheKey;$b.CacheKey|Should -Not -Be $c.CacheKey;$s0.CacheKey|Should -Not -Be $s50.CacheKey;$s50.CacheKey|Should -Not -Be $s100.CacheKey
         (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $root -CacheRoot $cache).Reused|Should -BeTrue
     }
+    It "validates the cache copy guard against the real function and mutated copies" {
+        $source = $script:ProductionSource
+        $start = $source.IndexOf('function Get-TpmReShadePreviewProcessedBitmap')
+        $end = $source.IndexOf('function New-TpmReShadePreviewBitmapFromCache', $start)
+        $current = $source.Substring($start, $end - $start)
+        $cloneLine = '$bitmap = $Cache.Reference.Clone((New-Object Drawing.Rectangle -ArgumentList @(0, 0, $Cache.Reference.Width, $Cache.Reference.Height)), $Cache.Reference.PixelFormat)'
+        $current.Contains($cloneLine) | Should -BeTrue -Because 'the mutations below replace this exact line'
+        # 1. the current implementation is accepted although its comment names DrawImageUnscaled
+        $current | Should -Match 'DrawImageUnscaled' -Because 'the explanatory comment must stay and must not trip the guard'
+        $accepted = Get-TpmPreviewCopyCallEvidence -FunctionText $current
+        ($accepted.ParseErrors, $accepted.FunctionCount, $accepted.CloneCalls, $accepted.DrawImageUnscaledCalls, $accepted.DynamicMemberCalls) -join ',' | Should -Be '0,1,1,0,0'
+        # 2. an actual DrawImageUnscaled call replacing the Clone is rejected (and the Clone requirement fails too)
+        $redrawText = '$bitmap = New-Object Drawing.Bitmap($Cache.Width, $Cache.Height); $redrawGraphics = [Drawing.Graphics]::FromImage($bitmap); try { $redrawGraphics.DrawImageUnscaled($Cache.Reference, 0, 0) } finally { $redrawGraphics.Dispose() }'
+        $redrawn = $current.Replace($cloneLine, $redrawText)
+        $redrawn | Should -Not -Be $current
+        $redrawEvidence = Get-TpmPreviewCopyCallEvidence -FunctionText $redrawn
+        $redrawEvidence.DrawImageUnscaledCalls | Should -Be 1
+        $redrawEvidence.CloneCalls | Should -Be 0
+        # 3. a redraw added next to the Clone is still rejected
+        $both = $current.Replace($cloneLine, $cloneLine + '; $extraGraphics = [Drawing.Graphics]::FromImage($bitmap); $extraGraphics.DrawImageUnscaled($Cache.Reference, 0, 0)')
+        $both | Should -Not -Be $current
+        (Get-TpmPreviewCopyCallEvidence -FunctionText $both).DrawImageUnscaledCalls | Should -Be 1
+        # 4. removing the Clone call is rejected, also when the call survives only inside a comment or a string
+        $noClone = $current.Replace($cloneLine, '$bitmap = New-Object Drawing.Bitmap($Cache.Width, $Cache.Height)')
+        $noClone | Should -Not -Be $current
+        (Get-TpmPreviewCopyCallEvidence -FunctionText $noClone).CloneCalls | Should -Be 0
+        $commentOnly = $current.Replace($cloneLine, '# $Cache.Reference.Clone() was removed' + "`n" + '    $bitmap = New-Object Drawing.Bitmap($Cache.Width, $Cache.Height); $note = "$Cache.Reference.Clone()"')
+        $commentOnly | Should -Not -Be $current
+        (Get-TpmPreviewCopyCallEvidence -FunctionText $commentOnly).CloneCalls | Should -Be 0
+        # 5. a computed method name is reported, so it cannot hide a redraw
+        $dynamicText = $current.Replace($cloneLine, $cloneLine + '; $methodName = "DrawImageUnscaled"; $dynamicGraphics = [Drawing.Graphics]::FromImage($bitmap); $dynamicGraphics.$methodName($Cache.Reference, 0, 0)')
+        $dynamicText | Should -Not -Be $current
+        (Get-TpmPreviewCopyCallEvidence -FunctionText $dynamicText).DynamicMemberCalls | Should -BeGreaterThan 0
+        # 6. a different function name is not silently accepted
+        (Get-TpmPreviewCopyCallEvidence -FunctionText $current -FunctionName 'Get-TpmNoSuchFunction').FunctionCount | Should -Be 0
+    }
     It "renders the processed side by applying effects to the same reference bitmap" {
         $source = $script:ProductionSource
         $rendererStart = $source.IndexOf('function Get-TpmReShadePreviewProcessedBitmap')
         $rendererEnd = $source.IndexOf('function Dispose-TpmReShadePreviewRenderCache', $rendererStart)
         $renderer = $source.Substring($rendererStart, $rendererEnd - $rendererStart)
         $renderer | Should -Match 'Get-TpmReShadePreviewProcessedBitmap -Cache \$Cache -ProfileDefinition'
-        $renderer | Should -Match '\$Cache\.Reference\.Clone\('
-        $renderer | Should -Not -Match 'DrawImageUnscaled'
+        $copyEvidence = Get-TpmPreviewCopyCallEvidence -FunctionText $renderer
+        $copyEvidence.ParseErrors | Should -Be 0
+        $copyEvidence.FunctionCount | Should -Be 1
+        $copyEvidence.CloneCalls | Should -Be 1 -Because 'the cache copy must be one executable Clone call on $Cache.Reference'
+        $copyEvidence.DrawImageUnscaledCalls | Should -Be 0 -Because 'a DrawImageUnscaled redraw changed pixels; only a comment may name it'
+        $copyEvidence.DynamicMemberCalls | Should -Be 0 -Because 'a computed method name would hide a redraw from this check'
         $renderer | Should -Match 'Invoke-TpmReShadePreviewProfilePixels'
         $renderer | Should -Not -Match 'drawAfter'
         $reference = New-TpmReShadePreviewReferenceBitmap -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
