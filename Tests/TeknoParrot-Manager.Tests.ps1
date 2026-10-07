@@ -16092,6 +16092,43 @@ Describe "ReShade profile previews" {
 Describe "ReShade preview renderer and cache" {
     BeforeAll {
         Add-Type -AssemblyName System.Drawing
+        # The live paint handler is built by New-TpmReShadePreviewPaintHandler with GetNewClosure(), which binds it to a dynamic module whose parent is the
+        # GLOBAL session state. Functions this suite defines in its BeforeAll are not global, so inside the handler they are not recognized, and the
+        # handler's own catch swallows that error: nothing is drawn. This bridge binds the UNCHANGED production function texts into that module (and nothing
+        # else), points the handler's Write-Log at a sink the test can inspect, and leaves the global function inventory untouched.
+        function Get-TpmPaintHandlerDependencyNames {
+            param([Parameter(Mandatory)][string[]]$Roots)
+            $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+            $queue = New-Object System.Collections.Queue
+            foreach ($root in $Roots) { $queue.Enqueue($root) }
+            while ($queue.Count -gt 0) {
+                $name = [string]$queue.Dequeue()
+                if ($name -eq 'Write-Log' -or -not $seen.Add($name)) { continue }
+                $command = Get-Command -Name $name -CommandType Function -ErrorAction SilentlyContinue
+                if (-not $command) { continue }
+                foreach ($call in @($command.ScriptBlock.Ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true))) {
+                    $called = $call.GetCommandName()
+                    if ($called) { $queue.Enqueue($called) }
+                }
+            }
+            @($seen | Where-Object { Get-Command -Name $_ -CommandType Function -ErrorAction SilentlyContinue })
+        }
+        function Connect-TpmPaintHandlerDependencies {
+            param([Parameter(Mandatory)][scriptblock]$Handler)
+            if ($null -eq $Handler.Module) { throw 'the paint handler is not bound to a module; this bridge only applies to a GetNewClosure() handler' }
+            $log = New-Object System.Collections.ArrayList
+            $sinkText = 'param($sink) $script:TpmPaintLogSink = $sink; function script:Write-Log { param([string]$Message) [void]$script:TpmPaintLogSink.Add($Message) }'
+            & ($Handler.Module.NewBoundScriptBlock([scriptblock]::Create($sinkText))) $log
+            foreach ($name in (Get-TpmPaintHandlerDependencyNames -Roots @('Get-TpmReShadePreviewStateValue', 'Get-TpmReShadePreviewProcessedBitmap', 'Get-TpmReShadeImageDisplayRectangle', 'Add-TpmReShadePreviewLabel', 'Get-TpmReShadeProfile'))) {
+                $definition = 'function script:' + $name + ' {' + (Get-Command -Name $name -CommandType Function).ScriptBlock.ToString() + '}'
+                & ($Handler.Module.NewBoundScriptBlock([scriptblock]::Create($definition)))
+            }
+            foreach ($required in @('Get-TpmReShadePreviewStateValue', 'Get-TpmReShadePreviewProcessedBitmap', 'Get-TpmReShadeImageDisplayRectangle', 'Add-TpmReShadePreviewLabel')) {
+                $visible = & $Handler.Module { param($n) [bool](Get-Command -Name $n -CommandType Function -ErrorAction SilentlyContinue) } $required
+                if (-not $visible) { throw "the paint handler cannot resolve $required after the dependency bridge" }
+            }
+            , $log
+        }
         $script:PreviewFixtureRoot = Join-Path $TestDrive 'renderer-landscape'
         [IO.Directory]::CreateDirectory($script:PreviewFixtureRoot) | Out-Null
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-landscape.png') -Destination (Join-Path $script:PreviewFixtureRoot 'TPM-preview-landscape.png')
@@ -16230,6 +16267,34 @@ Describe "ReShade preview renderer and cache" {
             ((($minX + $maxX) / 2.0) - (($Width - 1) / 2.0)) | Should -BeGreaterOrEqual -2.0
         }
     }
+    It "binds the production helpers into the GetNewClosure paint handler module, so a failure is reached and logged instead of silently skipped (no native rendering)" {
+        $inventoryBefore = @(Get-ChildItem Function: | ForEach-Object Name | Sort-Object)
+        $newScenario = {
+            $calls = New-Object System.Collections.ArrayList
+            $cache = [pscustomobject]@{ Reference = [pscustomobject]@{ Width = 320; Height = 180 }; Processed = @{} }
+            $state = [hashtable]::Synchronized(@{ Initialized = $true; PreviewEnabled = $true; ViewMode = 'Slider'; Profile = (Get-TpmReShadeProfile -ProfileId 'Original'); PreviewCache = $cache; SliderPosition = 0 })
+            $picture = [pscustomobject]@{ ClientRectangle = (New-Object Drawing.Rectangle(0, 0, 1200, 500)) }
+            $graphics = [pscustomobject]@{}
+            $graphics | Add-Member -MemberType ScriptMethod -Name Clear -Value { param($color) [void]$calls.Add('Clear'); throw 'TPM-STOP-SENTINEL' }.GetNewClosure()
+            [pscustomobject]@{ Handler = (New-TpmReShadePreviewPaintHandler -State $state -Picture $picture); Graphics = $graphics; Calls = $calls }
+        }
+        # control: WITHOUT the bridge the handler cannot resolve its helpers (this is what the failing Windows run did) and never reaches Clear
+        $without = & $newScenario
+        $silent = New-Object System.Collections.ArrayList
+        & ($without.Handler.Module.NewBoundScriptBlock([scriptblock]::Create('param($sink) $script:TpmPaintLogSink = $sink; function script:Write-Log { param([string]$Message) [void]$script:TpmPaintLogSink.Add($Message) }'))) $silent
+        & $without.Handler $null ([pscustomobject]@{ Graphics = $without.Graphics })
+        $without.Calls.Count | Should -Be 0 -Because 'without the bridge the handler fails before it draws'
+        (@($silent) -join ' ') | Should -Match "not recognized"
+        # with the bridge Clear is reached and only the deliberate sentinel is logged
+        $with = & $newScenario
+        $log = Connect-TpmPaintHandlerDependencies -Handler $with.Handler
+        & $with.Handler $null ([pscustomobject]@{ Graphics = $with.Graphics })
+        $with.Calls.Count | Should -Be 1 -Because 'with the bridge the handler reaches Graphics.Clear'
+        @($log).Count | Should -Be 1
+        (@($log) -join ' ') | Should -Match 'TPM-STOP-SENTINEL'
+        (@($log) -join ' ') | Should -Not -Match 'not recognized'
+        @(Get-ChildItem Function: | ForEach-Object Name | Sort-Object) | Should -Be $inventoryBefore -Because 'the bridge must not leave functions in the global scope'
+    }
     It "centers the live Slider-mode label on the displayed image at every split position and letterbox (GDI+)" -ForEach @(
         @{ Width = 800; Height = 600 }
         @{ Width = 1200; Height = 500 }
@@ -16244,10 +16309,12 @@ Describe "ReShade preview renderer and cache" {
                 $state = [hashtable]::Synchronized(@{ Initialized = $true; PreviewEnabled = $true; ViewMode = 'Slider'; Profile = $previewProfile; PreviewCache = $cache; SliderPosition = $position })
                 $picture = [pscustomobject]@{ ClientRectangle = (New-Object Drawing.Rectangle(0, 0, $Width, $Height)) }
                 $handler = New-TpmReShadePreviewPaintHandler -State $state -Picture $picture
+                $paintLog = Connect-TpmPaintHandlerDependencies -Handler $handler
                 $actual = New-Object Drawing.Bitmap($Width, $Height); $expected = New-Object Drawing.Bitmap($Width, $Height)
                 try {
                     $graphics = [Drawing.Graphics]::FromImage($actual)
                     try { & $handler $null ([pscustomobject]@{ Graphics = $graphics }) } finally { $graphics.Dispose() }
+                    @($paintLog).Count | Should -Be 0 -Because "the paint handler must not log a failure (it swallows exceptions): $(@($paintLog) -join ' | ')"
                     # the same drawing WITHOUT the label: image halves through the same clips, then the divider
                     $reference = [Drawing.Graphics]::FromImage($expected)
                     try {

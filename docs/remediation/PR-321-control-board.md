@@ -849,3 +849,11 @@ actions remain outside this implementation slice and were not performed.
 - Receipt (preserved unchanged): `RC8-E15-14a76ae-20261006T235732154Z.zip`, SHA-256 `483CF20C71DE334A09769B6D670D5FA10E128636EB16FDDFA3565A042413C706`, 15,586 bytes. Candidate 9 of 9 PASS at 96 DPI; the 14a76ae baseline failed its five expected checks; maximum alignment error 1.5 px (2 px tolerance unchanged); worktree unchanged.
 - History kept: Procedure B G7 failure (section 24); E 1.4 COMPLETE report with contaminated candidate placement measurements (wrapper recursion), not evidence.
 - Scope and limits: gallery-free placement fixture only. Full gallery, centered text and label ink, other DPI and Procedure B on the repaired product are open. No release, gate, suite or freshness PASS is claimed; freshness is not reconciled.
+
+
+## Live Slider-label test fixture scope -- TPM-RESHADE-TWENTY-EFFECTS-001 section 29 (2026-10-07)
+
+- Receipt (preserved unchanged): `RC8-Preview-4da33c5-20261007T005921447Z.zip`, SHA-256 `7031D02AD6AAA8DF5C35D00B1D944C57A111CF2A0560FDBF2D8D1A7867FAB427`, 6,337,603 bytes. Procedure B 28/28 self-test and 30/30 Automated PASS; focused Pester 74/77 (FAIL: three live Slider-label GDI+ cases).
+- Cause: test-fixture scope. The GetNewClosure paint handler cannot see functions defined by the suite BeforeAll; its catch swallows the error. Product unchanged.
+- Correction: module-local dependency bridge and log capture, empty-paint-log assertion, Linux no-rendering regression (with an empty-bridge mutant that fails it). Existing pixel/alpha/centering/disposal assertions unchanged.
+- Status: Linux evidence only. The Windows pixel cases are not claimed fixed until rerun. No release, gate, suite or freshness claim.
