@@ -27,6 +27,11 @@
   Preview fixes: the description now paints immediately and is not clipped; the
   comparison slider is aligned to the displayed image; and a gallery selection
   made while the terminal prompt is waiting appears at the prompt at once.
+  Slider placement repair (candidate): the comparison slider is placed only from a
+  valid thumb measurement (a stale probe is refused and reported), the layout is
+  applied all-or-nothing and re-entrant layout is bounded. The preview window's
+  top text and the ORIGINAL / AFTER labels in the picture are now centered; the
+  wording and warnings are unchanged and the text wraps without clipping on resize.
   Test fixes: the certification harness now uses a real empty per-run Git
   config (Windows Git rejects NUL), the stale VirtualBetaTester backup tests
   use the current backup API, and strict-mode test defects are repaired.

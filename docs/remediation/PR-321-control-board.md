@@ -811,3 +811,41 @@ actions remain outside this implementation slice and were not performed.
 - Correction (test file only, uncommitted): the assertion inspects executable AST method calls of `Get-TpmReShadePreviewProcessedBitmap` (requires one Clone on `$Cache.Reference`, rejects any DrawImageUnscaled call, reports computed method names); a new guard test checks it against the real function and mutated copies. Other assertions preserved.
 - Evidence: Linux focused runs, strict and non-strict, pass for the guard test and for the AST assertions of the renderer test (against the current function; failing for a DrawImageUnscaled call and for a removed Clone). GDI+ pixel part not run on Linux.
 - Status: not a full-suite, aggregate-gate, freshness, package or release PASS. Open: full-folder Procedure A rerun on the commit containing this correction, Procedure B GUI/HDR/console checks, Windows PowerShell 5.1, real-game shaders, package identity, ARCADE/PostgreSQL, release approval.
+
+
+## Slider placement defect (Procedure B G7 on 14a76ae) -- TPM-RESHADE-TWENTY-EFFECTS-001 section 24 (uncommitted, 2026-10-06)
+
+- Receipt (historical, recorded as FAIL for the slider): `RC8-WinForms-14a76ae-20261006T203558324Z.zip`, SHA-256 `18E21F0323A2BA18A262DCF7C8AC30E34914E7B2C96EDFB1CEFF6572E8DF685B`, 6280094 bytes. SelfTest 28 PASS; Automated 29 PASS, 1 FAIL (G7); both FINISHED; 100 percent scaling, DPI 96. Window 1040x760: thumb centres 537/674/810 versus image left/middle/right 262/624/986.
+- Cause: hypothesis only (probe moved with redraw FALSE may return stale identical endpoints; the picture padding is applied before the zero travel is rejected). Not reproduced on Windows; the focused check E measures baseline versus candidate.
+- Test finding: an existing text assertion requires the redraw-FALSE `TBM_SETPOS` call in the source and would protect the suspected defect; it is replaced by behavior checks (only the probe moves; the live slider's value, events, view and selection are unchanged).
+- Repair scope: slider helpers only; validate the full proposed layout before applying; transactional apply with restore on failure; measurement validated against the captured measuredWidth and native geometry; bounded re-entry. G7's 2 px tolerance unchanged.
+- Separate evidence issue: Procedure A on 14a76ae passed 2583 of 2583 (0 skips). The aggregate gate's only failure was validation-evidence freshness; kept as FAIL, nothing fabricated or relabeled. Report reconciliation and the Procedure B re-pin are later, separately reviewed steps.
+- Status: planning and tests first; no Windows success claimed. Open: check E, Procedure B G7 on a later checkpoint, real hardware.
+
+
+## Centered preview text -- TPM-RESHADE-TWENTY-EFFECTS-001 section 25 (uncommitted, 2026-10-06)
+
+- Owner addition during the slider repair: the top text of the preview window and the label inside the preview picture are centered; wording and warnings unchanged; wrapping without clipping on resize.
+- Change: instruction and description labels `TopCenter`; measurement flags add `HorizontalCenter`; the in-picture label is drawn centered by `Add-TpmReShadePreviewLabel`; preview renderer version 3 -> 4 so stale cached pictures are not reused.
+- Process note: product and tests were edited before this entry; the contract section 25 and this entry record it afterwards.
+- Evidence: Linux focused tests (pure layout, source shape, golden description text, simulated resize) pass; two GDI+ tests (label ink centering) need a Windows run and are unverified here. No Windows success claimed.
+
+
+## Review HOLD corrections -- TPM-RESHADE-TWENTY-EFFECTS-001 section 26 (uncommitted, 2026-10-06)
+
+- Findings: the live Slider-mode label was not centered; a failing PerformLayout was swallowed so the placement transaction could report success; E 1.0 could finish with exit 0 despite missing measurements and did not check the placement result or isolate variants.
+- Corrections: live label centered through the same routine; layout failure propagated and rolled back (tested through the real helper with a throwing PerformLayout double); E 1.1 separates measured product failures from collection failures, adds a known-good probe control, isolates variants, checks the placement result and the pass bound.
+- Evidence wording: 256 shared failing names between HEAD and the working tree in the full Linux runs; the golden-hash placeholder was test construction; E is a gallery-free placement fixture. No Windows result claimed.
+
+
+## Residual review findings -- TPM-RESHADE-TWENTY-EFFECTS-001 section 27 (uncommitted, 2026-10-06)
+
+- Findings: wrapped `@()` hid the List shape in the live-label GDI+ test; E 1.1 discarded P5 placement results and handler-driven results; manifest self-hash; a tests-first receipt that showed passed=0 failed=0.
+- Corrections: direct assignment plus a Linux shape test; E 1.2 (1.0 and 1.1 preserved) judges P5 results and every completed top-level handler call; manifest excludes itself; README claims limited to the receipts. No product change. No Windows result claimed.
+
+
+## Focused slider evidence (E 1.5) -- TPM-RESHADE-TWENTY-EFFECTS-001 section 28 (2026-10-07)
+
+- Receipt (preserved unchanged): `RC8-E15-14a76ae-20261006T235732154Z.zip`, SHA-256 `483CF20C71DE334A09769B6D670D5FA10E128636EB16FDDFA3565A042413C706`, 15,586 bytes. Candidate 9 of 9 PASS at 96 DPI; the 14a76ae baseline failed its five expected checks; maximum alignment error 1.5 px (2 px tolerance unchanged); worktree unchanged.
+- History kept: Procedure B G7 failure (section 24); E 1.4 COMPLETE report with contaminated candidate placement measurements (wrapper recursion), not evidence.
+- Scope and limits: gallery-free placement fixture only. Full gallery, centered text and label ink, other DPI and Procedure B on the repaired product are open. No release, gate, suite or freshness PASS is claimed; freshness is not reconciled.

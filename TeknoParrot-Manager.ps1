@@ -9049,6 +9049,37 @@ function Get-TpmReShadePreviewProcessedBitmap {
     }
 }
 
+# Where the one-line label of a preview picture is drawn: centered across the whole picture width, 12 px from the top (-OriginX/-OriginY place the
+# picture inside a larger canvas, as the live Slider-mode paint does with the displayed image rectangle). The rectangle is taller
+# than the text so the glyphs are never clipped, and the label never wraps (a wider label than the picture is cut equally on both sides, which
+# cannot happen at the supported preview widths).
+function Get-TpmReShadePreviewLabelLayout {
+    param([Parameter(Mandatory)][int]$ImageWidth, [Parameter(Mandatory)][int]$FontHeight, [int]$OriginX = 0, [int]$OriginY = 0)
+    return [pscustomobject]@{ X = [int]$OriginX; Y = (12 + [int]$OriginY); Width = [int]$ImageWidth; Height = ([int]$FontHeight + 8); Alignment = 'Center'; Wrap = $false }
+}
+
+# Draws the preview label centered at the top of the picture. Used by the renderer and by the tests that measure the label's ink, so both see the
+# same font, colour and position.
+function Add-TpmReShadePreviewLabel {
+    param([Parameter(Mandatory)]$Graphics, [Parameter(Mandatory)][string]$Label, [Parameter(Mandatory)][int]$ImageWidth, [int]$OriginX = 0, [int]$OriginY = 0)
+    $labelFont = New-Object Drawing.Font('Consolas', 11, [Drawing.FontStyle]::Bold)
+    $labelBrush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(245, 250, 255))
+    $labelFormat = New-Object Drawing.StringFormat
+    try {
+        $layout = Get-TpmReShadePreviewLabelLayout -ImageWidth $ImageWidth -FontHeight ([int][Math]::Ceiling($labelFont.GetHeight($Graphics))) -OriginX $OriginX -OriginY $OriginY
+        $labelFormat.Alignment = [Drawing.StringAlignment]::Center
+        $labelFormat.LineAlignment = [Drawing.StringAlignment]::Near
+        $labelFormat.Trimming = [Drawing.StringTrimming]::None
+        $labelFormat.FormatFlags = [Drawing.StringFormatFlags]::NoWrap
+        $rectangle = New-Object Drawing.RectangleF([single]$layout.X, [single]$layout.Y, [single]$layout.Width, [single]$layout.Height)
+        $Graphics.DrawString($Label, $labelFont, $labelBrush, $rectangle, $labelFormat)
+    } finally {
+        $labelFormat.Dispose()
+        $labelBrush.Dispose()
+        $labelFont.Dispose()
+    }
+}
+
 function New-TpmReShadePreviewBitmapFromCache {
     param([Parameter(Mandatory)]$Cache, [Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split','Slider')][string]$Mode = 'Split', [ValidateRange(0,100)][int]$SliderPosition = 50)
     $referenceBitmap = $Cache.Reference
@@ -9060,11 +9091,9 @@ function New-TpmReShadePreviewBitmapFromCache {
         if ($Mode -eq 'Before') {
             Copy-TpmReShadePreviewBitmapRegion -Source $referenceBitmap -Destination $outputBitmap -XStart 0
             $label = 'ORIGINAL'
-            $labelX = 14
         } elseif ($Mode -eq 'After') {
             Copy-TpmReShadePreviewBitmapRegion -Source $processedBitmap -Destination $outputBitmap -XStart 0
             $label = if ($ProfileDefinition.ProfileId -eq 'Original') { 'ORIGINAL' } else { 'AFTER' }
-            $labelX = 14
         } else {
             $splitX = if ($Mode -eq 'Slider') { [int][Math]::Round($Cache.Width * ($SliderPosition / 100.0)) } else { [int][Math]::Round($Cache.Width / 2.0) }
             Copy-TpmReShadePreviewBitmapRegion -Source $referenceBitmap -Destination $outputBitmap -XStart 0 -XEnd $splitX
@@ -9075,13 +9104,8 @@ function New-TpmReShadePreviewBitmapFromCache {
                 $divider.Dispose()
             }
             $label = 'BEFORE  |  AFTER'
-            $labelX = 14
         }
-        $labelFont = New-Object Drawing.Font('Consolas', 11, [Drawing.FontStyle]::Bold)
-        $labelBrush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(245, 250, 255))
-        $outputGraphics.DrawString($label, $labelFont, $labelBrush, $labelX, 12)
-        $labelBrush.Dispose()
-        $labelFont.Dispose()
+        Add-TpmReShadePreviewLabel -Graphics $outputGraphics -Label $label -ImageWidth ([int]$Cache.Width)
         return $outputBitmap
     } catch {
         $outputBitmap.Dispose()
@@ -9175,19 +9199,21 @@ public static class TpmTrackBarNative {
         } finally { Marshal.FreeHGlobal(thumb); Marshal.FreeHGlobal(channel); }
     }
     // Thumb-centre x (client coordinates) at the minimum and maximum, for a THROWAWAY probe control that is never shown. TBM_SETPOS is
-    // sent with redraw disabled (wParam 0) and the original position is restored; the visible slider is never moved to measure it.
+    // sent with redraw enabled (wParam 1) so the control recomputes its thumb rectangle before TBM_GETTHUMBRECT reads it (a move without redraw
+    // can leave the previous rectangle in place and report the same thumb at both ends). The original position is restored; the managed
+    // caller only ever passes the probe handle, so the visible slider is never moved to measure it.
     public static int[] ThumbCenters(IntPtr hwnd, int minimum, int maximum) {
         IntPtr rect = Marshal.AllocHGlobal(16);
         try {
             int original = (int)SendMessage(hwnd, TBM_GETPOS, IntPtr.Zero, IntPtr.Zero);
             int[] result = new int[2];
-            SendMessage(hwnd, TBM_SETPOS, IntPtr.Zero, (IntPtr)minimum);
+            SendMessage(hwnd, TBM_SETPOS, (IntPtr)1, (IntPtr)minimum);
             SendMessage(hwnd, TBM_GETTHUMBRECT, IntPtr.Zero, rect);
             result[0] = (Marshal.ReadInt32(rect, 0) + Marshal.ReadInt32(rect, 8)) / 2;
-            SendMessage(hwnd, TBM_SETPOS, IntPtr.Zero, (IntPtr)maximum);
+            SendMessage(hwnd, TBM_SETPOS, (IntPtr)1, (IntPtr)maximum);
             SendMessage(hwnd, TBM_GETTHUMBRECT, IntPtr.Zero, rect);
             result[1] = (Marshal.ReadInt32(rect, 0) + Marshal.ReadInt32(rect, 8)) / 2;
-            SendMessage(hwnd, TBM_SETPOS, IntPtr.Zero, (IntPtr)original);
+            SendMessage(hwnd, TBM_SETPOS, (IntPtr)1, (IntPtr)original);
             return result;
         } finally { Marshal.FreeHGlobal(rect); }
     }
@@ -9243,19 +9269,41 @@ function Get-TpmTrackBarProbeReading {
     return [pscustomobject]@{ CenterAtMin = [int]$centers[0]; CenterAtMax = [int]$centers[1]; PredictedAtCurrent = [double]$predicted; LiveCenterNow = [double]$liveNow; ProbeGeometry = $probeGeometry; LiveGeometry = $liveGeometry }
 }
 
+# Plausibility of one endpoint measurement, judged ONLY against the width the measurement was taken at (never against the width of the image the
+# slider is about to be fitted to: after a window shrinks, a valid old slider is legitimately wider than the displayed image). Returns $null when the
+# reading is usable, otherwise a short reason. A stale reading (equal or reversed endpoints, for example a probe whose thumb rectangle was not
+# recomputed) has no positive travel and is rejected here.
+function Test-TpmThumbMeasurement {
+    param([int]$CenterAtMin, [int]$CenterAtMax, [int]$MeasuredWidth)
+    if ($MeasuredWidth -le 0) { return 'the measured slider width is not positive' }
+    $travel = $CenterAtMax - $CenterAtMin
+    if ($travel -le 0) { return ('thumb travel is not positive (centre at minimum {0}, at maximum {1})' -f $CenterAtMin, $CenterAtMax) }
+    if ($CenterAtMin -lt 0) { return ('thumb inset is negative (centre at minimum {0})' -f $CenterAtMin) }
+    if ($CenterAtMax -gt $MeasuredWidth) { return ('thumb centre at maximum {0} is beyond the measured width {1}' -f $CenterAtMax, $MeasuredWidth) }
+    $overhead = $MeasuredWidth - $travel
+    if (($overhead * 2) -gt $MeasuredWidth) { return ('thumb inset total {0} exceeds half of the measured width {1}' -f $overhead, $MeasuredWidth) }
+    return $null
+}
+
 # Thumb-centre positions at the minimum and maximum, measured on a throwaway probe TrackBar (same range, tick style and size, never shown, never
-# parented to the form) so the visible slider is not moved through its endpoints. Two checks must pass or the result is $null (the caller then
+# parented to the form) so the visible slider is not moved through its endpoints. The checks must pass or the result is $null (the caller then
 # does not place the slider from a guess): (1) the probe's prediction at the live slider's current value matches a read-only reading of the live
-# thumb, and (2) the probe's endpoint-determining geometry (thumb size, channel edges; see Test-TpmTrackBarGeometryMatch) matches the live
-# control's, so a DPI or theme difference that happens to cancel at one value is still detected.
+# thumb, (2) the probe's endpoint-determining geometry (thumb size, channel edges; see Test-TpmTrackBarGeometryMatch) matches the live
+# control's, so a DPI or theme difference that happens to cancel at one value is still detected, and (3) the endpoints are plausible for the
+# width the probe was built at (see Test-TpmThumbMeasurement), which also rejects a stale probe that reports the same thumb at both ends.
 # -Probe is a seam for tests: { param($slider) -> object from Get-TpmTrackBarProbeReading }.
+# -Result (optional hashtable) receives MeasuredWidth (the slider width the measurement belongs to) and Reason (why the result is $null).
 function Measure-TpmTrackBarThumbCenters {
-    param([Parameter(Mandatory)]$Slider, [scriptblock]$Probe = $null)
+    param([Parameter(Mandatory)]$Slider, [scriptblock]$Probe = $null, [hashtable]$Result = $null)
+    $measuredWidth = 0
+    try { $measuredWidth = [int]$Slider.Width } catch {}
+    if ($null -ne $Result) { $Result['MeasuredWidth'] = $measuredWidth; $Result['Reason'] = $null }
+    $reason = $null
     try {
         $reading = $null
         if ($Probe) { $reading = & $Probe $Slider }
         else {
-            if (-not $Slider.IsHandleCreated -or -not (Initialize-TpmTrackBarNative)) { return $null }
+            if (-not $Slider.IsHandleCreated -or -not (Initialize-TpmTrackBarNative)) { $reason = 'the native slider probe is not available'; return $null }
             $probeControl = New-Object Windows.Forms.TrackBar
             try {
                 $probeControl.AutoSize = $false
@@ -9268,12 +9316,15 @@ function Measure-TpmTrackBarThumbCenters {
                 $reading = Get-TpmTrackBarProbeReading -Slider $Slider -ProbeHandle $probeControl.Handle -Native (New-TpmTrackBarNativeAdapter)
             } finally { $probeControl.Dispose() }
         }
-        if ($null -eq $reading) { return $null }
-        foreach ($member in 'CenterAtMin', 'CenterAtMax', 'PredictedAtCurrent', 'LiveCenterNow', 'ProbeGeometry', 'LiveGeometry') { if (-not $reading.PSObject.Properties[$member]) { return $null } }
-        if ([Math]::Abs([double]$reading.PredictedAtCurrent - [double]$reading.LiveCenterNow) -gt 2.0) { return $null }
-        if (-not (Test-TpmTrackBarGeometryMatch -ProbeGeometry $reading.ProbeGeometry -LiveGeometry $reading.LiveGeometry)) { return $null }
+        if ($null -eq $reading) { $reason = 'the probe returned no reading'; return $null }
+        foreach ($member in 'CenterAtMin', 'CenterAtMax', 'PredictedAtCurrent', 'LiveCenterNow', 'ProbeGeometry', 'LiveGeometry') { if (-not $reading.PSObject.Properties[$member]) { $reason = 'the probe reading is incomplete'; return $null } }
+        if ([Math]::Abs([double]$reading.PredictedAtCurrent - [double]$reading.LiveCenterNow) -gt 2.0) { $reason = 'the probe prediction does not match the live thumb'; return $null }
+        if (-not (Test-TpmTrackBarGeometryMatch -ProbeGeometry $reading.ProbeGeometry -LiveGeometry $reading.LiveGeometry)) { $reason = 'the probe geometry does not match the live slider'; return $null }
+        $invalid = Test-TpmThumbMeasurement -CenterAtMin ([int]$reading.CenterAtMin) -CenterAtMax ([int]$reading.CenterAtMax) -MeasuredWidth $measuredWidth
+        if ($invalid) { $reason = $invalid; return $null }
         return @([int]$reading.CenterAtMin, [int]$reading.CenterAtMax)
-    } catch { return $null }
+    } catch { $reason = 'the probe measurement threw'; return $null }
+    finally { if ($null -ne $Result -and $reason) { $Result['Reason'] = $reason } }
 }
 
 # Space the picture host must keep free on each side so the endpoint thumbs (centred on the image edges) stay inside the slider row.
@@ -9282,38 +9333,88 @@ function Get-TpmReShadeSliderReserve {
     return [int][Math]::Max(0, $ThumbCenterAtMin)
 }
 
-function Set-TpmControlHorizontalPadding {
-    param([Parameter(Mandatory)]$Control, [int]$Left, [int]$Right)
-    $Control.Padding = New-Object Windows.Forms.Padding($Left, 0, $Right, 0)
-    try { $Control.PerformLayout() } catch {}
+# Seam for the Padding value so the helper below can be exercised without WinForms.
+function New-TpmControlPadding {
+    param([int]$Left, [int]$Right)
+    return (New-Object Windows.Forms.Padding($Left, 0, $Right, 0))
 }
 
-# Aligns the comparison slider with the image the preview actually draws. The picture sits in a host panel whose left/right padding is the
-# thumb inset, so the slider (positioned from the displayed image rectangle) never extends past the form on either side and both endpoint
-# thumbs stay fully visible while their centres travel exactly across the image. Never throws (it runs from layout events); returns $true
-# when the slider was placed. -MeasureThumb is a seam: { param($slider) -> @(centerAtMin, centerAtMax) }.
-function Update-TpmReShadeSliderPlacement {
+# Sets the horizontal padding and runs the layout. A failing layout is NOT swallowed: the caller's transaction (see Invoke-TpmReShadeSliderPlacementPass)
+# must see it, restore the original layout and report the failure instead of committing bounds that were computed from a layout that did not complete.
+function Set-TpmControlHorizontalPadding {
+    param([Parameter(Mandatory)]$Control, [int]$Left, [int]$Right)
+    $Control.Padding = New-TpmControlPadding -Left $Left -Right $Right
+    $Control.PerformLayout()
+}
+
+# One bounded, one-line diagnostic for a refused or failed slider placement. The layout is never left half-applied when this is recorded.
+function Set-TpmReShadeSliderPlacementDiagnostic {
+    param([Parameter(Mandatory)]$State, [string]$Reason)
+    $text = if ($Reason) { ([string]$Reason -replace '[\r\n]+', ' ') } else { '' }
+    if ($text.Length -gt 160) { $text = $text.Substring(0, 160) }
+    $State['SliderPlacementDiagnostic'] = $text
+    if ($text -and [string]$State['SliderPlacementLastLoggedReason'] -ne $text) {
+        $State['SliderPlacementLastLoggedReason'] = $text
+        try { Write-Log ('ReShade slider placement not applied -- {0}' -f $text) } catch {}
+    }
+}
+
+# One placement pass: measure, validate everything, then apply transactionally. Returns $true only when the slider was placed. On any refusal or
+# failure the picture-host padding and the slider position and width are exactly what they were before the pass.
+function Invoke-TpmReShadeSliderPlacementPass {
     param([Parameter(Mandatory)]$State, [scriptblock]$MeasureThumb = $null)
+    $slider = $State['Slider']
+    $picture = $State['Picture']
+    $pictureHost = $State['PictureHost']
+    $cache = $State['PreviewCache']
+    # The width this measurement belongs to is captured BEFORE measuring and is the only width used with it afterwards.
+    $measuredWidth = [int]$slider.Width
+    $centers = @()
+    $reason = $null
     try {
-        $slider = $State['Slider']
-        $picture = $State['Picture']
-        $pictureHost = $State['PictureHost']
-        $cache = $State['PreviewCache']
-        if ($null -eq $slider -or $null -eq $picture -or $null -eq $cache -or $null -eq $cache.Reference) { return $false }
-        if ([bool]$State['Closed']) { return $false }
-        $centers = $null
-        if ($MeasureThumb) { $centers = @(& $MeasureThumb $slider) } else { $centers = @(Measure-TpmTrackBarThumbCenters -Slider $slider) }
-        if ($centers.Count -lt 2) { return $false }
-        $reserve = Get-TpmReShadeSliderReserve -ThumbCenterAtMin ([int]$centers[0])
-        if ($null -ne $pictureHost -and ([int]$pictureHost.Padding.Left -ne $reserve -or [int]$pictureHost.Padding.Right -ne $reserve)) {
+        if ($MeasureThumb) { $centers = @(& $MeasureThumb $slider) }
+        else {
+            $measureResult = @{}
+            $centers = @(Measure-TpmTrackBarThumbCenters -Slider $slider -Result $measureResult)
+            if ($centers.Count -lt 2 -and $measureResult['Reason']) { $reason = [string]$measureResult['Reason'] }
+        }
+    } catch { $reason = 'the thumb measurement threw'; $centers = @() }
+    if (-not $reason -and $centers.Count -lt 2) { $reason = 'no thumb measurement is available' }
+    if (-not $reason) { $reason = Test-TpmThumbMeasurement -CenterAtMin ([int]$centers[0]) -CenterAtMax ([int]$centers[1]) -MeasuredWidth $measuredWidth }
+    if ($reason) { Set-TpmReShadeSliderPlacementDiagnostic -State $State -Reason $reason; return $false }
+    $centerAtMin = [int]$centers[0]
+    $centerAtMax = [int]$centers[1]
+    $reserve = Get-TpmReShadeSliderReserve -ThumbCenterAtMin $centerAtMin
+    $originalPadLeft = 0; $originalPadRight = 0
+    if ($null -ne $pictureHost) { $originalPadLeft = [int]$pictureHost.Padding.Left; $originalPadRight = [int]$pictureHost.Padding.Right }
+    $originalLeft = [int]$slider.Left
+    $originalWidth = [int]$slider.Width
+    # Validate the complete proposed layout BEFORE anything is applied. The picture fills its host, so a padding change moves its client width by the
+    # difference in total padding and shifts its left edge to the new left padding.
+    $client = $picture.ClientSize
+    $predictedClientWidth = [int]$client.Width
+    $predictedHostLeft = [int]$picture.Left
+    if ($null -ne $pictureHost) {
+        $predictedClientWidth = [int]$client.Width + ($originalPadLeft + $originalPadRight) - (2 * $reserve)
+        $predictedHostLeft = $reserve
+    }
+    if ($null -ne $picture.Parent -and $null -ne $pictureHost) { try { $predictedHostLeft += [int]$picture.Parent.Left } catch {} }
+    $predictedImage = Get-TpmReShadeImageDisplayRectangle -ClientWidth $predictedClientWidth -ClientHeight ([int]$client.Height) -ImageWidth ([int]$cache.Reference.Width) -ImageHeight ([int]$cache.Reference.Height)
+    $predicted = Get-TpmReShadeSliderPlacement -ImageRectangle $predictedImage -CurrentWidth $measuredWidth -ThumbCenterAtMin $centerAtMin -ThumbCenterAtMax $centerAtMax -HostLeft $predictedHostLeft
+    if ($null -eq $predicted) { Set-TpmReShadeSliderPlacementDiagnostic -State $State -Reason 'the proposed layout is not valid (no displayed image or no thumb travel)'; return $false }
+    # Apply. The padding flag is raised BEFORE the padding is touched, so a layout that throws part-way is also rolled back.
+    $paddingTouched = $false
+    try {
+        if ($null -ne $pictureHost -and ($originalPadLeft -ne $reserve -or $originalPadRight -ne $reserve)) {
+            $paddingTouched = $true
             Set-TpmControlHorizontalPadding -Control $pictureHost -Left $reserve -Right $reserve
         }
-        $client = $picture.ClientSize
-        $image = Get-TpmReShadeImageDisplayRectangle -ClientWidth ([int]$client.Width) -ClientHeight ([int]$client.Height) -ImageWidth ([int]$cache.Reference.Width) -ImageHeight ([int]$cache.Reference.Height)
+        $actualClient = $picture.ClientSize
+        $image = Get-TpmReShadeImageDisplayRectangle -ClientWidth ([int]$actualClient.Width) -ClientHeight ([int]$actualClient.Height) -ImageWidth ([int]$cache.Reference.Width) -ImageHeight ([int]$cache.Reference.Height)
         $hostLeft = [int]$picture.Left
         if ($null -ne $picture.Parent) { try { $hostLeft += [int]$picture.Parent.Left } catch {} }
-        $placement = Get-TpmReShadeSliderPlacement -ImageRectangle $image -CurrentWidth ([int]$slider.Width) -ThumbCenterAtMin ([int]$centers[0]) -ThumbCenterAtMax ([int]$centers[1]) -HostLeft $hostLeft
-        if ($null -eq $placement) { return $false }
+        $placement = Get-TpmReShadeSliderPlacement -ImageRectangle $image -CurrentWidth $measuredWidth -ThumbCenterAtMin $centerAtMin -ThumbCenterAtMax $centerAtMax -HostLeft $hostLeft
+        if ($null -eq $placement) { throw 'the laid-out picture has no displayed image' }
         $sliderHost = $State['SliderHost']
         $clipped = $false
         if ($placement.Left -lt 0) { $clipped = $true }
@@ -9322,8 +9423,54 @@ function Update-TpmReShadeSliderPlacement {
         $slider.Width = [int]$placement.Width
         $State['SliderPlacement'] = $placement
         $State['SliderPlacementClipped'] = $clipped
+        $State['SliderPlacementDiagnostic'] = $null
         return $true
     } catch {
+        $applyMessage = $_.Exception.Message
+        try { $slider.Left = $originalLeft } catch {}
+        try { $slider.Width = $originalWidth } catch {}
+        if ($paddingTouched) { try { Set-TpmControlHorizontalPadding -Control $pictureHost -Left $originalPadLeft -Right $originalPadRight } catch {} }
+        Set-TpmReShadeSliderPlacementDiagnostic -State $State -Reason ('apply failed and the original layout was restored -- ' + $applyMessage)
+        return $false
+    }
+}
+
+# Aligns the comparison slider with the image the preview actually draws. The picture sits in a host panel whose left/right padding is the
+# thumb inset, so the slider (positioned from the displayed image rectangle) never extends past the form on either side and both endpoint
+# thumbs stay fully visible while their centres travel exactly across the image. Never throws (it runs from layout events); returns $true
+# when the slider was placed. -MeasureThumb is a seam: { param($slider) -> @(centerAtMin, centerAtMax) }.
+# The padding change runs a synchronous layout that raises the picture's SizeChanged event, which calls this function again while the first call is
+# still running. That re-entry is not run recursively: it only marks a pending request, and the outer call repeats the pass (at most 3 passes in
+# total) so each measurement is always used with the width it was taken at. The guard state is cleared in a finally block.
+function Update-TpmReShadeSliderPlacement {
+    param([Parameter(Mandatory)]$State, [scriptblock]$MeasureThumb = $null)
+    try {
+        $slider = $State['Slider']
+        $picture = $State['Picture']
+        $cache = $State['PreviewCache']
+        if ($null -eq $slider -or $null -eq $picture -or $null -eq $cache -or $null -eq $cache.Reference) { return $false }
+        if ([bool]$State['Closed']) { return $false }
+        if ([bool]$State['SliderPlacementActive']) { $State['SliderPlacementPending'] = $true; return $false }
+        $State['SliderPlacementActive'] = $true
+        $placed = $false
+        try {
+            $pass = 0
+            do {
+                $State['SliderPlacementPending'] = $false
+                $pass++
+                $placed = Invoke-TpmReShadeSliderPlacementPass -State $State -MeasureThumb $MeasureThumb
+                if ([bool]$State['SliderPlacementPending'] -and $pass -ge 3) {
+                    Set-TpmReShadeSliderPlacementDiagnostic -State $State -Reason 're-entrant layout kept requesting placement; stopped after 3 passes'
+                    break
+                }
+            } while ([bool]$State['SliderPlacementPending'])
+        } finally {
+            $State['SliderPlacementActive'] = $false
+            $State['SliderPlacementPending'] = $false
+        }
+        return $placed
+    } catch {
+        try { $State['SliderPlacementActive'] = $false; $State['SliderPlacementPending'] = $false } catch {}
         try { Write-Log ("ReShade slider placement skipped -- {0}" -f $_.Exception.Message) } catch {}
         return $false
     }
@@ -9361,7 +9508,7 @@ function Measure-TpmReShadeDescriptionHeight {
         $size = $null
         if ($Measure) { $size = & $Measure $Text $Label.Font $usable }
         else {
-            $flags = [Windows.Forms.TextFormatFlags]::WordBreak -bor [Windows.Forms.TextFormatFlags]::NoPadding -bor [Windows.Forms.TextFormatFlags]::TextBoxControl
+            $flags = [Windows.Forms.TextFormatFlags]::WordBreak -bor [Windows.Forms.TextFormatFlags]::HorizontalCenter -bor [Windows.Forms.TextFormatFlags]::NoPadding -bor [Windows.Forms.TextFormatFlags]::TextBoxControl
             $size = [Windows.Forms.TextRenderer]::MeasureText($Text, $Label.Font, (New-Object Drawing.Size($usable, 0)), $flags)
         }
         if ($null -eq $size -or [int]$size.Height -le 0) { return $null }
@@ -9497,9 +9644,7 @@ function New-TpmReShadePreviewPaintHandler {
                 $divider = New-Object Drawing.Pen([Drawing.Color]::White, 3)
                 try { $graphics.DrawLine($divider, $drawX + $splitPixels, $drawY, $drawX + $splitPixels, $drawY + $drawHeight) } finally { $divider.Dispose() }
             }
-            $font = New-Object Drawing.Font('Consolas', 11, [Drawing.FontStyle]::Bold)
-            $brush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(245, 250, 255))
-            try { $graphics.DrawString('BEFORE  |  AFTER', $font, $brush, $drawX + 14, $drawY + 12) } finally { $brush.Dispose(); $font.Dispose() }
+            Add-TpmReShadePreviewLabel -Graphics $graphics -Label 'BEFORE  |  AFTER' -ImageWidth $drawWidth -OriginX $drawX -OriginY $drawY
         } catch {
             try { Write-Log ("ReShade preview paint failed: {0}" -f $_.Exception.Message) } catch {}
         }
@@ -9514,7 +9659,7 @@ function New-TpmReShadePreviewArtifact {
         if (-not $reference.Available) { return [pscustomobject]@{ Available=$false; Reason=$reference.Reason; Mode=$Mode; ProfileId=$ProfileDefinition.ProfileId } }
         $catalog=@(Get-TpmReShadeEffectCatalog);$hashes=@()
         foreach($id in @($ProfileDefinition.Effects)){$effect=@($catalog|Where-Object EffectId -eq $id)[0];if(-not $effect){return [pscustomobject]@{Available=$false;Reason='UNAPPROVED_EFFECT';Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}};$hashes+=@($effect.SHA256)}
-        $key=Get-TpmReShadePreviewCacheKey -SubjectId ($ProfileDefinition.ProfileId+'|'+$Mode+'|'+$SliderPosition) -ShaderSha256 $hashes -IntensityId $IntensityId -PresetVersion ([string]$ProfileDefinition.SchemaVersion) -ReferenceVersion $reference.Version -ReferenceSha256 $reference.Hash -RendererVersion '3'
+        $key=Get-TpmReShadePreviewCacheKey -SubjectId ($ProfileDefinition.ProfileId+'|'+$Mode+'|'+$SliderPosition) -ShaderSha256 $hashes -IntensityId $IntensityId -PresetVersion ([string]$ProfileDefinition.SchemaVersion) -ReferenceVersion $reference.Version -ReferenceSha256 $reference.Hash -RendererVersion '4'
         $sourceRoot=if($PreviewRoot){[IO.Path]::GetFullPath($PreviewRoot)}elseif($script:TpmOwnedLayout){[IO.Path]::GetFullPath((Join-Path $script:TpmOwnedLayout.Cache 'ReShadePreviewCache'))}else{[IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShadePreviewCache'))}
         $root=if($CacheRoot){[IO.Path]::GetFullPath($CacheRoot)}else{[IO.Path]::GetFullPath((Join-Path $sourceRoot 'Cache'))}
         $previewRootFull=$sourceRoot
@@ -9525,7 +9670,7 @@ function New-TpmReShadePreviewArtifact {
         }
         $bitmap=if($RenderCache){New-TpmReShadePreviewBitmapFromCache -Cache $RenderCache -ProfileDefinition $ProfileDefinition -Mode $Mode -SliderPosition $SliderPosition}else{New-TpmReShadePreviewBitmap -ProfileDefinition $ProfileDefinition -Mode $Mode -SliderPosition $SliderPosition -PreviewRoot $PreviewRoot}
         try{$bitmap.Save($imagePath,[Drawing.Imaging.ImageFormat]::Png)}finally{$bitmap.Dispose()}
-        [pscustomobject]@{CacheKey=$key;ProfileId=$ProfileDefinition.ProfileId;Mode=$Mode;ReferenceIdentity=$reference.Identity;ReferenceHash=$reference.Hash;RendererVersion='3';PresetVersion=[string]$ProfileDefinition.SchemaVersion;ShaderSha256=@($hashes);IntensityId=$IntensityId}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $manifestPath -Encoding UTF8
+        [pscustomobject]@{CacheKey=$key;ProfileId=$ProfileDefinition.ProfileId;Mode=$Mode;ReferenceIdentity=$reference.Identity;ReferenceHash=$reference.Hash;RendererVersion='4';PresetVersion=[string]$ProfileDefinition.SchemaVersion;ShaderSha256=@($hashes);IntensityId=$IntensityId}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $manifestPath -Encoding UTF8
         return [pscustomobject]@{Available=$true;Path=$imagePath;CacheKey=$key;Reused=$false;ReferenceIdentity=$reference.Identity;Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}
     } catch { return [pscustomobject]@{Available=$false;Reason='PREVIEW_RENDER_FAILED';Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId;Error=$_.Exception.Message} }
 }
@@ -9858,7 +10003,7 @@ function Show-TpmReShadeProfileGalleryWindow {
         $instructionLabel.AutoSize = $false
         $instructionLabel.Height = 58
         $instructionLabel.Padding = New-Object Windows.Forms.Padding(6, 4, 6, 4)
-        $instructionLabel.TextAlign = 'TopLeft'
+        $instructionLabel.TextAlign = 'TopCenter'
         $instructionLabel.Text = "ReShade preview only`r`nChoose a profile here or in the terminal; both selections stay synchronized. Close this window when finished."
         $instructionLabel.ForeColor = [System.Drawing.Color]::DarkBlue
         $instructionLabel.BackColor = [System.Drawing.Color]::AliceBlue
@@ -9871,7 +10016,7 @@ function Show-TpmReShadeProfileGalleryWindow {
         $descriptionLabel.AutoSize = $false
         $descriptionLabel.Height = 84
         $descriptionLabel.Padding = New-Object Windows.Forms.Padding(6, 4, 6, 4)
-        $descriptionLabel.TextAlign = 'TopLeft'
+        $descriptionLabel.TextAlign = 'TopCenter'
         $descriptionLabel.AutoEllipsis = $true
         $descriptionLabel.Text = ''
         $descriptionToolTip = New-Object Windows.Forms.ToolTip

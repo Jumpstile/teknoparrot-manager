@@ -16204,17 +16204,92 @@ Describe "ReShade preview renderer and cache" {
             foreach ($background in @([Drawing.Color]::Black, [Drawing.Color]::White)) {
                 $blank = New-Object Drawing.Bitmap($Width, $Height)
                 $graphics = [Drawing.Graphics]::FromImage($blank)
-                $font = New-Object Drawing.Font('Consolas', 11, [Drawing.FontStyle]::Bold)
-                $brush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(245, 250, 255))
                 try {
                     $graphics.Clear($background)
                     $reference = Get-TpmPreviewBgra -Bitmap $blank
-                    $graphics.DrawString($Label, $font, $brush, 14, 12)
+                    # the product's own label routine, so the measured ink is exactly what the renderer draws (font, colour, centering)
+                    Add-TpmReShadePreviewLabel -Graphics $graphics -Label $Label -ImageWidth $Width
                     foreach ($index in (Get-TpmPreviewDifferingPixels -Left $reference -Right (Get-TpmPreviewBgra -Bitmap $blank))) { [void]$ink.Add([int]$index) }
-                } finally { $brush.Dispose(); $font.Dispose(); $graphics.Dispose(); $blank.Dispose() }
+                } finally { $graphics.Dispose(); $blank.Dispose() }
             }
             return , $ink
         }
+    }
+    It "draws every preview label horizontally centered and fully inside the image at each width (GDI+)" -ForEach @(
+        @{ Width = 320; Height = 180 }
+        @{ Width = 960; Height = 540 }
+    ) {
+        foreach ($label in @('ORIGINAL', 'AFTER', 'BEFORE  |  AFTER')) {
+            $ink = Get-TpmPreviewLabelInk -Label $label -Width $Width -Height $Height
+            $ink.Count | Should -BeGreaterThan 50
+            $xs = @($ink | ForEach-Object { [int]($_ % $Width) })
+            $minX = ($xs | Measure-Object -Minimum).Minimum; $maxX = ($xs | Measure-Object -Maximum).Maximum
+            $minX | Should -BeGreaterThan 0 -Because "$label at width $Width must not touch the left edge"
+            $maxX | Should -BeLessThan ($Width - 1) -Because "$label at width $Width must not touch the right edge"
+            ((($minX + $maxX) / 2.0) - (($Width - 1) / 2.0)) | Should -BeLessOrEqual 2.0 -Because "$label at width $Width must be centered"
+            ((($minX + $maxX) / 2.0) - (($Width - 1) / 2.0)) | Should -BeGreaterOrEqual -2.0
+        }
+    }
+    It "centers the live Slider-mode label on the displayed image at every split position and letterbox (GDI+)" -ForEach @(
+        @{ Width = 800; Height = 600 }
+        @{ Width = 1200; Height = 500 }
+        @{ Width = 640; Height = 640 }
+    ) {
+        $cache = New-TpmReShadePreviewRenderCache -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        try {
+            $previewProfile = Get-TpmReShadeProfile -ProfileId 'Original'
+            $displayed = Get-TpmReShadeImageDisplayRectangle -ClientWidth $Width -ClientHeight $Height -ImageWidth ([int]$cache.Reference.Width) -ImageHeight ([int]$cache.Reference.Height)
+            $processed = Get-TpmReShadePreviewProcessedBitmap -Cache $cache -ProfileDefinition $previewProfile
+            foreach ($position in @(0, 25, 50, 75, 100)) {
+                $state = [hashtable]::Synchronized(@{ Initialized = $true; PreviewEnabled = $true; ViewMode = 'Slider'; Profile = $previewProfile; PreviewCache = $cache; SliderPosition = $position })
+                $picture = [pscustomobject]@{ ClientRectangle = (New-Object Drawing.Rectangle(0, 0, $Width, $Height)) }
+                $handler = New-TpmReShadePreviewPaintHandler -State $state -Picture $picture
+                $actual = New-Object Drawing.Bitmap($Width, $Height); $expected = New-Object Drawing.Bitmap($Width, $Height)
+                try {
+                    $graphics = [Drawing.Graphics]::FromImage($actual)
+                    try { & $handler $null ([pscustomobject]@{ Graphics = $graphics }) } finally { $graphics.Dispose() }
+                    # the same drawing WITHOUT the label: image halves through the same clips, then the divider
+                    $reference = [Drawing.Graphics]::FromImage($expected)
+                    try {
+                        $reference.Clear([Drawing.Color]::Black)
+                        $destination = New-Object Drawing.Rectangle([int]$displayed.X, [int]$displayed.Y, [int]$displayed.Width, [int]$displayed.Height)
+                        $split = [int][Math]::Round($displayed.Width * ($position / 100.0))
+                        if ($split -gt 0) { $reference.SetClip((New-Object Drawing.Rectangle([int]$displayed.X, [int]$displayed.Y, $split, [int]$displayed.Height))); $reference.DrawImage($cache.Reference, $destination) }
+                        if (($displayed.Width - $split) -gt 0) { $reference.SetClip((New-Object Drawing.Rectangle(([int]$displayed.X + $split), [int]$displayed.Y, ([int]$displayed.Width - $split), [int]$displayed.Height))); $reference.DrawImage($processed, $destination) }
+                        $reference.ResetClip()
+                        if ($split -gt 0 -and $split -lt $displayed.Width) { $divider = New-Object Drawing.Pen([Drawing.Color]::White, 3); try { $reference.DrawLine($divider, [int]$displayed.X + $split, [int]$displayed.Y, [int]$displayed.X + $split, [int]$displayed.Y + [int]$displayed.Height) } finally { $divider.Dispose() } }
+                    } finally { $reference.Dispose() }
+                    $ink = Get-TpmPreviewDifferingPixels -Left (Get-TpmPreviewBgra -Bitmap $expected) -Right (Get-TpmPreviewBgra -Bitmap $actual)   # one List[int]; do NOT wrap in @(): the helper returns the list as a single object
+                    $ink.Count | Should -BeGreaterThan 50 -Because "the label must be drawn (window ${Width}x${Height}, split $position)"
+                    $xs = @($ink | ForEach-Object { [int]($_ % $Width) })
+                    $minX = ($xs | Measure-Object -Minimum).Minimum; $maxX = ($xs | Measure-Object -Maximum).Maximum
+                    $minX | Should -BeGreaterThan ([int]$displayed.X) -Because 'the label stays inside the displayed image'
+                    $maxX | Should -BeLessThan ([int]$displayed.X + [int]$displayed.Width - 1)
+                    $imageCentre = [int]$displayed.X + (([int]$displayed.Width - 1) / 2.0)
+                    ([Math]::Abs((($minX + $maxX) / 2.0) - $imageCentre)) | Should -BeLessOrEqual 2.0 -Because "window ${Width}x${Height}, split ${position}: the label must be centered on the displayed image"
+                } finally { $actual.Dispose(); $expected.Dispose() }
+            }
+        } finally { Dispose-TpmReShadePreviewRenderCache -Cache $cache }
+    }
+    It "returns the differing pixel indices as one List[int], so a caller must assign it directly (collection shape and count)" {
+        $left = New-Object byte[] (8 * 4); $right = New-Object byte[] (8 * 4)
+        for ($i = 0; $i -lt $left.Length; $i++) { $left[$i] = 10; $right[$i] = 10 }
+        $right[(2 * 4) + 1] = 99; $right[(5 * 4) + 3] = 7
+        $found = Get-TpmPreviewDifferingPixels -Left $left -Right $right
+        $found.GetType().FullName | Should -Match '^System\.Collections\.Generic\.List`1\[\[System\.Int32'
+        $found.Count | Should -Be 2
+        @($found[0], $found[1]) | Should -Be @(2, 5)
+        # why direct assignment matters: wrapping the result in @() makes it a ONE-element array holding the list
+        $callTwo = { Get-TpmPreviewDifferingPixels -Left $left -Right $right }
+        @(& $callTwo).Count | Should -Be 1 -Because 'the helper returns the list with a leading comma, so an array wrapper holds exactly one element'
+        $same = Get-TpmPreviewDifferingPixels -Left $left -Right ([byte[]]$left.Clone())
+        $same.Count | Should -Be 0
+        $callSame = { Get-TpmPreviewDifferingPixels -Left $left -Right ([byte[]]$left.Clone()) }
+        @(& $callSame).Count | Should -Be 1 -Because 'an array wrapper would report one element even for NO differing pixels'
+        # no caller of this suite wraps the helper in @(...)
+        $suite = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'TeknoParrot-Manager.Tests.ps1'))
+        $wrapped = '@(' + 'Get-TpmPreviewDifferingPixels'
+        $suite.Contains($wrapped) | Should -BeFalse -Because 'wrapping the single-list result in @() makes .Count equal 1'
     }
     It "renders deterministic Before, After, and Split artifacts from one reference identity" {
         $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
@@ -21794,6 +21869,41 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 retired profiles and honest previews" {
 }
 
 Describe "TPM-RESHADE-TWENTY-EFFECTS-001 preview description and slider geometry" {
+    BeforeAll {
+        # Fixture for the slider placement tests: fake controls with the members Update-TpmReShadeSliderPlacement reads and writes. The picture host
+        # is -HostWidth wide; the picture fills it, so the picture's client width is the host width minus the horizontal padding (what the real
+        # PerformLayout produces). -Layout (called after every padding change) lets a test hook the synchronous SizeChanged chain.
+        function New-TpmSliderFixture {
+            param([int]$SliderWidth = 300, [int]$HostWidth = 960, [int]$HostHeight = 540, [int]$PadLeft = 0, [int]$PadRight = 0, [int]$SliderLeft = 0, [int]$SliderRowWidth = 0)
+            if ($SliderRowWidth -le 0) { $SliderRowWidth = $HostWidth }
+            $slider = [pscustomobject]@{ Left = $SliderLeft; Width = $SliderWidth; Minimum = 0; Maximum = 100; Value = 50; IsHandleCreated = $true }
+            $pictureHost = [pscustomobject]@{ Left = 0; Width = $HostWidth; Padding = [pscustomobject]@{ Left = $PadLeft; Right = $PadRight } }
+            $picture = [pscustomobject]@{ Left = $PadLeft; ClientSize = [pscustomobject]@{ Width = ($HostWidth - $PadLeft - $PadRight); Height = $HostHeight }; Parent = $pictureHost }
+            $sliderHost = [pscustomobject]@{ ClientSize = [pscustomobject]@{ Width = $SliderRowWidth } }
+            $state = [hashtable]::Synchronized(@{ Slider = $slider; Picture = $picture; PictureHost = $pictureHost; SliderHost = $sliderHost; PreviewCache = [pscustomobject]@{ Reference = [pscustomobject]@{ Width = 960; Height = 540 } }; Closed = $false })
+            return [pscustomobject]@{ State = $state; Slider = $slider; Picture = $picture; PictureHost = $pictureHost; HostWidth = $HostWidth; HostHeight = $HostHeight }
+        }
+        # A padding host whose PerformLayout counts its calls and throws on the listed call numbers (1-based). The REAL Set-TpmControlHorizontalPadding is used
+        # with it; only the Padding constructor seam is mocked (Windows.Forms.Padding does not exist on Linux).
+        function New-TpmPaddingHostDouble {
+            param([int]$PadLeft, [int]$PadRight, [int[]]$ThrowOnCalls = @())
+            $double = [pscustomobject]@{ Left = 0; Width = 1040; Padding = [pscustomobject]@{ Left = $PadLeft; Right = $PadRight }; ThrowOnCalls = $ThrowOnCalls; LayoutCalls = 0 }
+            $double | Add-Member -MemberType ScriptMethod -Name PerformLayout -Value { $this.LayoutCalls++; if (@($this.ThrowOnCalls) -contains $this.LayoutCalls) { throw 'layout fault' } }
+            return $double
+        }
+        # What the real layout does after a padding change: the picture shrinks or grows inside its host.
+        function Invoke-TpmSliderFixtureLayout {
+            param($Fixture, [int]$Left, [int]$Right)
+            $Fixture.Picture.Left = $Left
+            $Fixture.Picture.ClientSize = [pscustomobject]@{ Width = ($Fixture.HostWidth - $Left - $Right); Height = $Fixture.HostHeight }
+        }
+        # Expected placement for a fixture after the padding reserve: thumb centres on the displayed image edges.
+        function Get-TpmSliderExpectedPlacement {
+            param([int]$HostWidth, [int]$HostHeight, [int]$Inset, [int]$MeasuredWidth)
+            $image = Get-TpmReShadeImageDisplayRectangle -ClientWidth ($HostWidth - (2 * $Inset)) -ClientHeight $HostHeight -ImageWidth 960 -ImageHeight 540
+            return [pscustomobject]@{ Image = $image; Left = ($Inset + $image.X - $Inset); Width = ($image.Width + (2 * $Inset)); MeasuredWidth = $MeasuredWidth }
+        }
+    }
     It "sets the description text, sizes the label from a real measurement, and paints it immediately (in that order)" {
         $script:labelEvents = New-Object System.Collections.Generic.List[string]
         $label = [pscustomobject]@{ Text = ''; Height = 84; ClientSize = [pscustomobject]@{ Width = 800 }; Padding = [pscustomobject]@{ Horizontal = 12; Vertical = 8 }; Font = [pscustomobject]@{ Size = 10 } }
@@ -22021,11 +22131,10 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 preview description and slider geometry
         (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { throw 'no handle' }) | Should -BeNullOrEmpty
         $live.Value | Should -Be 40
         $live.Left | Should -Be 7
-        # source: only the probe handle is moved (SETPOS without redraw); the live handle only gets read-only queries
+        # source: only the probe handle is moved; the live handle only gets read-only queries. How the probe is redrawn is NOT pinned here (a text
+        # assertion on the SETPOS redraw flag protected a stale-endpoint defect); the safety property is tested by behavior in the probe-only test.
         $script:ProductionSource | Should -Match '\$Native\.ThumbCenters\(\$ProbeHandle'
         $script:ProductionSource | Should -Not -Match '\$Native\.ThumbCenters\(\$Slider'
-        $script:ProductionSource | Should -Match 'SendMessage\(hwnd, TBM_SETPOS, IntPtr\.Zero'
-        $script:ProductionSource | Should -Not -Match 'SendMessage\(hwnd, TBM_SETPOS, \(IntPtr\)1'
         $script:ProductionSource | Should -Match '\$Native\.ThumbCenterNow\(\$Slider\.Handle\)'
         $script:ProductionSource | Should -Match '\$Native\.Geometry\(\$Slider\.Handle\)'
         $script:ProductionSource | Should -Match 'TBM_GETCHANNELRECT = 0x041A'
@@ -22041,7 +22150,7 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 preview description and slider geometry
         $native | Add-Member -MemberType ScriptMethod -Name ThumbCenters -Value { param($handle, $minimum, $maximum) @(10, 290) }
         $native | Add-Member -MemberType ScriptMethod -Name ThumbCenterNow -Value { param($handle) 122 }
         $native | Add-Member -MemberType ScriptMethod -Name Geometry -Value { param($handle) @(21, 34, 8, 292) }
-        $slider = [pscustomobject]@{ Minimum = 0; Maximum = 100; Value = 40; Handle = 11 }
+        $slider = [pscustomobject]@{ Minimum = 0; Maximum = 100; Value = 40; Handle = 11; Width = 300 }   # Width: the measurement is now judged against the width it was taken at
         $built = Get-TpmTrackBarProbeReading -Slider $slider -ProbeHandle 22 -Native $native
         @($built.ProbeGeometry).Count | Should -Be 4
         @($built.LiveGeometry).Count | Should -Be 4
@@ -22058,6 +22167,240 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 preview description and slider geometry
         $adapter = New-TpmTrackBarNativeAdapter
         foreach ($method in 'ThumbCenters', 'ThumbCenterNow', 'Geometry') { ($adapter | Get-Member -MemberType ScriptMethod).Name | Should -Contain $method }
     }
+    # ---- slider placement repair (Procedure B G7 on 14a76ae): defect-specific regressions and retained geometry/safety tests -------------------------
+    It "never mutates padding or slider bounds when the measured endpoints are stale, equal or implausible (diagnostic recorded)" -ForEach @(
+        @{ Name = 'equal endpoints'; Centers = @(10, 10); Pattern = 'travel' }
+        @{ Name = 'maximum below minimum'; Centers = @(20, 10); Pattern = 'travel' }
+        @{ Name = 'both zero (a stale probe)'; Centers = @(0, 0); Pattern = 'travel' }
+        @{ Name = 'maximum beyond the measured width'; Centers = @(10, 400); Pattern = 'width' }
+        @{ Name = 'negative minimum'; Centers = @(-5, 290); Pattern = 'inset' }
+        @{ Name = 'inset larger than half the measured width'; Centers = @(200, 250); Pattern = 'inset' }
+    ) {
+        $script:padCalls = New-Object System.Collections.Generic.List[string]
+        Mock Set-TpmControlHorizontalPadding { [void]$script:padCalls.Add("$Left,$Right"); $Control.Padding = [pscustomobject]@{ Left = $Left; Right = $Right } }
+        Mock Write-Log {}
+        $fixture = New-TpmSliderFixture -SliderWidth 300 -HostWidth 1040 -HostHeight 600 -PadLeft 3 -PadRight 3 -SliderLeft 5
+        (Update-TpmReShadeSliderPlacement -State $fixture.State -MeasureThumb { param($s) $Centers }.GetNewClosure()) | Should -BeFalse -Because $Name
+        $script:padCalls.Count | Should -Be 0 -Because "$Name must not touch the picture padding"
+        $fixture.PictureHost.Padding.Left | Should -Be 3
+        $fixture.PictureHost.Padding.Right | Should -Be 3
+        $fixture.Slider.Left | Should -Be 5
+        $fixture.Slider.Width | Should -Be 300
+        $fixture.State['SliderPlacement'] | Should -BeNullOrEmpty
+        [string]$fixture.State['SliderPlacementDiagnostic'] | Should -Match $Pattern -Because $Name
+        ([string]$fixture.State['SliderPlacementDiagnostic']).Length | Should -BeLessOrEqual 200
+        [bool]$fixture.State['SliderPlacementActive'] | Should -BeFalse
+    }
+    It "reports a bounded reason and keeps the measured width for stale or implausible probe readings" {
+        $live = [pscustomobject]@{ Minimum = 0; Maximum = 100; Value = 40; Width = 300; Left = 7 }
+        $geometry = @(21, 34, 8, 292)
+        $newReading = { param($min, $max) [pscustomobject]@{ CenterAtMin = $min; CenterAtMax = $max; PredictedAtCurrent = 122; LiveCenterNow = 123; ProbeGeometry = $geometry; LiveGeometry = $geometry } }
+        $result = @{}
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { & $newReading 10 290 } -Result $result) | Should -Be @(10, 290)
+        $result['MeasuredWidth'] | Should -Be 300
+        $result['Reason'] | Should -BeNullOrEmpty
+        $result = @{}
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { & $newReading 10 10 } -Result $result) | Should -BeNullOrEmpty
+        [string]$result['Reason'] | Should -Match 'travel'
+        $result['MeasuredWidth'] | Should -Be 300
+        $result = @{}
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { & $newReading 20 10 } -Result $result) | Should -BeNullOrEmpty
+        [string]$result['Reason'] | Should -Match 'travel'
+        $result = @{}
+        (Measure-TpmTrackBarThumbCenters -Slider $live -Probe { & $newReading 10 400 } -Result $result) | Should -BeNullOrEmpty
+        [string]$result['Reason'] | Should -Match 'width'
+    }
+    It "validates the endpoints against the measured width, not the image width: an old slider wider than the shrunken image and a narrow one in a grown window both place" -ForEach @(
+        @{ Name = 'shrunk window, slider wider than the image'; SliderWidth = 600; HostWidth = 420; HostHeight = 300 }
+        @{ Name = 'grown window, slider narrower than the image'; SliderWidth = 300; HostWidth = 1600; HostHeight = 700 }
+        @{ Name = 'tall window (letterboxed top and bottom)'; SliderWidth = 300; HostWidth = 700; HostHeight = 900 }
+    ) {
+        Mock Set-TpmControlHorizontalPadding { $Control.Padding = [pscustomobject]@{ Left = $Left; Right = $Right }; Invoke-TpmSliderFixtureLayout -Fixture $script:fx -Left $Left -Right $Right }
+        Mock Write-Log {}
+        $script:fx = New-TpmSliderFixture -SliderWidth $SliderWidth -HostWidth $HostWidth -HostHeight $HostHeight
+        $inset = 10
+        $thumbs = { param($s) @(10, ([int]$s.Width - 10)) }
+        (Update-TpmReShadeSliderPlacement -State $script:fx.State -MeasureThumb $thumbs) | Should -BeTrue -Because $Name
+        $expected = Get-TpmSliderExpectedPlacement -HostWidth $HostWidth -HostHeight $HostHeight -Inset $inset -MeasuredWidth $SliderWidth
+        $script:fx.PictureHost.Padding.Left | Should -Be $inset
+        $script:fx.Slider.Width | Should -Be $expected.Width -Because $Name
+        # thumb centre at value 0 / 100 / 50 sits on the image left / right / middle (picture left is the padding)
+        ($script:fx.Slider.Left + $inset) | Should -Be ($inset + $expected.Image.X)
+        ($script:fx.Slider.Left + $script:fx.Slider.Width - $inset) | Should -Be ($inset + $expected.Image.X + $expected.Image.Width)
+        $mid = ($script:fx.Slider.Left + $inset) + ((($script:fx.Slider.Left + $script:fx.Slider.Width - $inset) - ($script:fx.Slider.Left + $inset)) / 2.0)
+        $mid | Should -Be ($inset + $expected.Image.X + ($expected.Image.Width / 2.0))
+        [string]$script:fx.State['SliderPlacementDiagnostic'] | Should -BeNullOrEmpty
+    }
+    It "places the thumb on the image edges at display scaling <Scale> for a shrinking and a growing window, and a repeated layout is stable" -ForEach @(
+        @{ Scale = '100%'; Inset = 10; Current = 300 }
+        @{ Scale = '125%'; Inset = 13; Current = 375 }
+        @{ Scale = '150%'; Inset = 15; Current = 450 }
+        @{ Scale = '200%'; Inset = 20; Current = 600 }
+    ) {
+        Mock Set-TpmControlHorizontalPadding { $Control.Padding = [pscustomobject]@{ Left = $Left; Right = $Right }; Invoke-TpmSliderFixtureLayout -Fixture $script:fx -Left $Left -Right $Right }
+        Mock Write-Log {}
+        foreach ($window in @(@(1600, 700), @(500, 400), @(1040, 760))) {
+            $script:fx = New-TpmSliderFixture -SliderWidth $Current -HostWidth $window[0] -HostHeight $window[1]
+            $scaledInset = $Inset
+            $thumbs = { param($s) @($scaledInset, ([int]$s.Width - $scaledInset)) }.GetNewClosure()
+            (Update-TpmReShadeSliderPlacement -State $script:fx.State -MeasureThumb $thumbs) | Should -BeTrue
+            $first = @($script:fx.Slider.Left, $script:fx.Slider.Width, $script:fx.PictureHost.Padding.Left, $script:fx.PictureHost.Padding.Right)
+            $image = Get-TpmReShadeImageDisplayRectangle -ClientWidth ($window[0] - (2 * $Inset)) -ClientHeight $window[1] -ImageWidth 960 -ImageHeight 540
+            ($first[0] + $Inset) | Should -Be ($Inset + $image.X)
+            ($first[0] + $first[1] - $Inset) | Should -Be ($Inset + $image.X + $image.Width)
+            # repeated layout: the same inputs give the same Left, Width and padding
+            foreach ($again in 1..3) {
+                (Update-TpmReShadeSliderPlacement -State $script:fx.State -MeasureThumb $thumbs) | Should -BeTrue
+                @($script:fx.Slider.Left, $script:fx.Slider.Width, $script:fx.PictureHost.Padding.Left, $script:fx.PictureHost.Padding.Right) | Should -Be $first
+            }
+        }
+    }
+    It "pairs the measurement with the width it measured, even if the slider width changes during measurement" {
+        Mock Set-TpmControlHorizontalPadding { $Control.Padding = [pscustomobject]@{ Left = $Left; Right = $Right }; Invoke-TpmSliderFixtureLayout -Fixture $script:fx -Left $Left -Right $Right }
+        Mock Write-Log {}
+        $script:fx = New-TpmSliderFixture -SliderWidth 300 -HostWidth 1040 -HostHeight 600
+        # the probe measured a 300 px slider (centres 10 and 290); something resizes the slider to 650 px before the result is used
+        $thumbs = { param($s) $result = @(10, 290); $s.Width = 650; $result }
+        (Update-TpmReShadeSliderPlacement -State $script:fx.State -MeasureThumb $thumbs) | Should -BeTrue
+        $expected = Get-TpmSliderExpectedPlacement -HostWidth 1040 -HostHeight 600 -Inset 10 -MeasuredWidth 300
+        # overhead is 300 - 280 = 20 (the measured width), never 650 - 280
+        $script:fx.Slider.Width | Should -Be $expected.Width
+    }
+    It "restores the original padding, slider position and width when applying the padding fails part-way" {
+        $script:padCalls = New-Object System.Collections.Generic.List[string]
+        # a layout that sets the padding and then throws (as PerformLayout can) -- only for the new reserve, never for the original values
+        Mock Set-TpmControlHorizontalPadding { [void]$script:padCalls.Add("$Left,$Right"); $Control.Padding = [pscustomobject]@{ Left = $Left; Right = $Right }; if ($Left -eq 10) { throw 'layout fault' } }
+        Mock Write-Log {}
+        $fixture = New-TpmSliderFixture -SliderWidth 300 -HostWidth 1040 -HostHeight 600 -PadLeft 3 -PadRight 3 -SliderLeft 5
+        $thumbs = { param($s) @(10, ([int]$s.Width - 10)) }
+        (Update-TpmReShadeSliderPlacement -State $fixture.State -MeasureThumb $thumbs) | Should -BeFalse
+        $fixture.PictureHost.Padding.Left | Should -Be 3
+        $fixture.PictureHost.Padding.Right | Should -Be 3
+        $fixture.Slider.Left | Should -Be 5
+        $fixture.Slider.Width | Should -Be 300
+        $fixture.State['SliderPlacement'] | Should -BeNullOrEmpty
+        [string]$fixture.State['SliderPlacementDiagnostic'] | Should -Match 'apply'
+        $script:padCalls | Should -Contain '3,3' -Because 'the original padding must be put back through the same helper'
+        [bool]$fixture.State['SliderPlacementActive'] | Should -BeFalse
+    }
+    It "restores the padding and the slider position when assigning the slider bounds fails" {
+        Mock Set-TpmControlHorizontalPadding { $Control.Padding = [pscustomobject]@{ Left = $Left; Right = $Right }; Invoke-TpmSliderFixtureLayout -Fixture $script:fx -Left $Left -Right $Right }
+        Mock Write-Log {}
+        $script:fx = New-TpmSliderFixture -SliderWidth 300 -HostWidth 1040 -HostHeight 600 -PadLeft 3 -PadRight 3 -SliderLeft 5
+        # the position can be assigned, the width assignment throws
+        $slider = $script:fx.Slider
+        $slider | Add-Member -NotePropertyName WidthBacking -NotePropertyValue 300
+        $slider.PSObject.Properties.Remove('Width')
+        $slider | Add-Member -MemberType ScriptProperty -Name Width -Value { $this.WidthBacking } -SecondValue { param($value) if ([int]$value -ne 300) { throw 'width fault' }; $this.WidthBacking = $value }
+        $thumbs = { param($s) @(10, 290) }
+        (Update-TpmReShadeSliderPlacement -State $script:fx.State -MeasureThumb $thumbs) | Should -BeFalse
+        $slider.Left | Should -Be 5
+        $slider.Width | Should -Be 300
+        $script:fx.PictureHost.Padding.Left | Should -Be 3
+        $script:fx.PictureHost.Padding.Right | Should -Be 3
+        $script:fx.State['SliderPlacement'] | Should -BeNullOrEmpty
+        [string]$script:fx.State['SliderPlacementDiagnostic'] | Should -Match 'apply'
+    }
+    It "coalesces re-entry from the synchronous padding layout into bounded passes and clears the guard state" {
+        # the real chain: padding change -> PerformLayout -> picture SizeChanged -> the placement handler runs again, inside the first call
+        $script:seamCalls = New-Object System.Collections.Generic.List[int]
+        Mock Set-TpmControlHorizontalPadding {
+            $Control.Padding = [pscustomobject]@{ Left = $Left; Right = $Right }
+            Invoke-TpmSliderFixtureLayout -Fixture $script:fx -Left $Left -Right $Right
+            [void](Update-TpmReShadeSliderPlacement -State $script:fx.State -MeasureThumb $script:thumbsRecording)
+        }
+        Mock Write-Log {}
+        $script:thumbsRecording = { param($s) [void]$script:seamCalls.Add([int]$s.Width); if ($script:seamCalls.Count -gt 20) { throw 'runaway re-entry' }; @(10, ([int]$s.Width - 10)) }
+        $script:fx = New-TpmSliderFixture -SliderWidth 300 -HostWidth 1040 -HostHeight 600
+        (Update-TpmReShadeSliderPlacement -State $script:fx.State -MeasureThumb $script:thumbsRecording) | Should -BeTrue
+        $script:seamCalls.Count | Should -BeLessOrEqual 3 -Because 'one measurement per pass and at most two coalesced extra passes'
+        # the result equals the single, non-re-entrant call
+        $expected = Get-TpmSliderExpectedPlacement -HostWidth 1040 -HostHeight 600 -Inset 10 -MeasuredWidth 300
+        $script:fx.Slider.Width | Should -Be $expected.Width
+        $script:fx.Slider.Left | Should -Be 0
+        [bool]$script:fx.State['SliderPlacementActive'] | Should -BeFalse
+        [bool]$script:fx.State['SliderPlacementPending'] | Should -BeFalse
+    }
+    It "stops an unstable re-entrant layout after the bounded passes instead of recursing" {
+        $script:seamCalls = New-Object System.Collections.Generic.List[int]
+        $script:inset = 10
+        Mock Set-TpmControlHorizontalPadding {
+            $Control.Padding = [pscustomobject]@{ Left = $Left; Right = $Right }
+            Invoke-TpmSliderFixtureLayout -Fixture $script:fx -Left $Left -Right $Right
+            [void](Update-TpmReShadeSliderPlacement -State $script:fx.State -MeasureThumb $script:unstableThumbs)
+        }
+        Mock Write-Log {}
+        # every measurement reports a different inset, so the padding changes on every pass
+        $script:unstableThumbs = { param($s) [void]$script:seamCalls.Add([int]$s.Width); if ($script:seamCalls.Count -gt 20) { throw 'runaway re-entry' }; $script:inset += 1; @($script:inset, ([int]$s.Width - $script:inset)) }
+        $script:fx = New-TpmSliderFixture -SliderWidth 300 -HostWidth 1040 -HostHeight 600
+        { [void](Update-TpmReShadeSliderPlacement -State $script:fx.State -MeasureThumb $script:unstableThumbs) } | Should -Not -Throw
+        $script:seamCalls.Count | Should -BeLessOrEqual 3
+        [bool]$script:fx.State['SliderPlacementActive'] | Should -BeFalse
+        [bool]$script:fx.State['SliderPlacementPending'] | Should -BeFalse
+    }
+    It "clears the guard state when the measurement or the application throws, so a later call still places the slider" {
+        Mock Set-TpmControlHorizontalPadding { $Control.Padding = [pscustomobject]@{ Left = $Left; Right = $Right }; Invoke-TpmSliderFixtureLayout -Fixture $script:fx -Left $Left -Right $Right }
+        Mock Write-Log {}
+        $script:fx = New-TpmSliderFixture -SliderWidth 300 -HostWidth 1040 -HostHeight 600
+        (Update-TpmReShadeSliderPlacement -State $script:fx.State -MeasureThumb { throw 'no handle' }) | Should -BeFalse
+        [bool]$script:fx.State['SliderPlacementActive'] | Should -BeFalse
+        (Update-TpmReShadeSliderPlacement -State $script:fx.State -MeasureThumb { param($s) @(10, ([int]$s.Width - 10)) }) | Should -BeTrue
+        [bool]$script:fx.State['SliderPlacementActive'] | Should -BeFalse
+    }
+    It "moves only the disposable probe while measuring: the live slider's handle, value, events, view and selection are untouched" {
+        $script:nativeCalls = New-Object System.Collections.Generic.List[string]
+        $native = New-Object psobject
+        $native | Add-Member -MemberType ScriptMethod -Name ThumbCenters -Value { param($handle, $minimum, $maximum) [void]$script:nativeCalls.Add("ThumbCenters:$handle"); @(10, 290) }
+        $native | Add-Member -MemberType ScriptMethod -Name ThumbCenterNow -Value { param($handle) [void]$script:nativeCalls.Add("ThumbCenterNow:$handle"); 122 }
+        $native | Add-Member -MemberType ScriptMethod -Name Geometry -Value { param($handle) [void]$script:nativeCalls.Add("Geometry:$handle"); @(21, 34, 8, 292) }
+        $script:liveWrites = 0
+        $live = [pscustomobject]@{ Minimum = 0; Maximum = 100; ValueBacking = 40; Width = 300; Left = 7; Handle = 11; TickStyle = 'Both'; TickFrequency = 25 }
+        # any write to the live value would raise ValueChanged (and so redraw the preview); count writes
+        $live | Add-Member -MemberType ScriptProperty -Name Value -Value { $this.ValueBacking } -SecondValue { param($newValue) $script:liveWrites++; $this.ValueBacking = $newValue }
+        $session = [hashtable]::Synchronized(@{ ViewMode = 'Slider'; SelectedProfileId = 'Vivid'; SliderPosition = 40 })
+        $before = @($live.Value, $live.Left, $live.Width, $session['ViewMode'], $session['SelectedProfileId'], $session['SliderPosition']) -join '|'
+        $measured = Measure-TpmTrackBarThumbCenters -Slider $live -Probe { Get-TpmTrackBarProbeReading -Slider $live -ProbeHandle 22 -Native $native }
+        $measured | Should -Be @(10, 290)
+        # the state-changing native call (the position move) is only ever made on the probe handle
+        @($script:nativeCalls | Where-Object { $_ -like 'ThumbCenters:*' }) | Should -Be @('ThumbCenters:22')
+        @($script:nativeCalls | Where-Object { $_ -like '*:11' } | ForEach-Object { ($_ -split ':')[0] } | Sort-Object -Unique) | Should -Be @('Geometry', 'ThumbCenterNow')
+        # nothing observable on the live slider or the gallery session changed, and no event fired
+        (@($live.Value, $live.Left, $live.Width, $session['ViewMode'], $session['SelectedProfileId'], $session['SliderPosition']) -join '|') | Should -Be $before
+        $script:liveWrites | Should -Be 0 -Because 'a write to the live value would raise ValueChanged and redraw the preview'
+    }
+    # ---- review correction: a failing layout must reach the transaction (real padding helper, throwing PerformLayout double) -------------------------
+    It "propagates a failing PerformLayout from the real padding helper after assigning the padding" {
+        Mock New-TpmControlPadding { [pscustomobject]@{ Left = $Left; Right = $Right } }
+        $layoutHost = New-TpmPaddingHostDouble -PadLeft 3 -PadRight 3 -ThrowOnCalls @(1)
+        { Set-TpmControlHorizontalPadding -Control $layoutHost -Left 10 -Right 10 } | Should -Throw '*layout fault*'
+        $layoutHost.Padding.Left | Should -Be 10 -Because 'the padding is assigned before the layout runs; undoing it is the transaction''s job'
+        $layoutHost.LayoutCalls | Should -Be 1
+    }
+    It "rolls back through the real padding helper when PerformLayout throws during the apply: no success, original layout, guard cleared" -ForEach @(
+        @{ Name = 'only the apply layout throws'; Throw = @(1); ExpectedCalls = 2 }
+        @{ Name = 'the apply layout and the restore layout both throw'; Throw = @(1, 2); ExpectedCalls = 2 }
+    ) {
+        Mock New-TpmControlPadding { [pscustomobject]@{ Left = $Left; Right = $Right } }
+        Mock Write-Log {}
+        $fixture = New-TpmSliderFixture -SliderWidth 300 -HostWidth 1040 -HostHeight 600 -PadLeft 3 -PadRight 3 -SliderLeft 5
+        $layoutHost = New-TpmPaddingHostDouble -PadLeft 3 -PadRight 3 -ThrowOnCalls $Throw
+        $fixture.State['PictureHost'] = $layoutHost
+        $fixture.Picture.Parent = $layoutHost
+        $thumbs = { param($s) @(10, ([int]$s.Width - 10)) }
+        (Update-TpmReShadeSliderPlacement -State $fixture.State -MeasureThumb $thumbs) | Should -BeFalse -Because $Name
+        $layoutHost.Padding.Left | Should -Be 3 -Because "${Name}: the original left padding is restored"
+        $layoutHost.Padding.Right | Should -Be 3
+        $fixture.Slider.Left | Should -Be 5
+        $fixture.Slider.Width | Should -Be 300
+        $fixture.State['SliderPlacement'] | Should -BeNullOrEmpty
+        [string]$fixture.State['SliderPlacementDiagnostic'] | Should -Match 'apply'
+        $layoutHost.LayoutCalls | Should -Be $ExpectedCalls -Because 'one layout for the apply and one for the restore'
+        [bool]$fixture.State['SliderPlacementActive'] | Should -BeFalse
+        [bool]$fixture.State['SliderPlacementPending'] | Should -BeFalse
+        # the failure is not sticky: with a layout that works, the same state places the slider
+        $layoutHost.ThrowOnCalls = @()
+        (Update-TpmReShadeSliderPlacement -State $fixture.State -MeasureThumb $thumbs) | Should -BeTrue
+    }
     It "reserves exactly the measured thumb inset on each side" {
         Get-TpmReShadeSliderReserve -ThumbCenterAtMin 10 | Should -Be 10
         Get-TpmReShadeSliderReserve -ThumbCenterAtMin 0 | Should -Be 0
@@ -22073,6 +22416,106 @@ Describe "TPM-RESHADE-TWENTY-EFFECTS-001 preview description and slider geometry
         $body | Should -Match 'Add_SizeChanged\(\$sliderPlacementHandler\)'
         $body | Should -Match 'Add_DpiChanged\(\$sliderPlacementHandler\)'
         $body | Should -Not -Match '\[void\]\$toolbar\.Controls\.Add\(\$slider\)'
+    }
+}
+
+Describe "TPM-RESHADE-TWENTY-EFFECTS-001 centered preview text" {
+    It "centers the in-preview label across the full image width at a fixed top offset (pure layout)" -ForEach @(
+        @{ Width = 200 }
+        @{ Width = 320 }
+        @{ Width = 960 }
+        @{ Width = 1920 }
+    ) {
+        $layout = Get-TpmReShadePreviewLabelLayout -ImageWidth $Width -FontHeight 18
+        $layout.X | Should -Be 0
+        $layout.Y | Should -Be 12
+        $layout.Width | Should -Be $Width
+        $layout.Height | Should -BeGreaterThan 18 -Because 'the layout must be taller than the text so the glyphs are never clipped vertically'
+        $layout.Alignment | Should -Be 'Center'
+        $layout.Wrap | Should -BeFalse -Because 'a centered one-line label must never wrap into a second row'
+    }
+    It "labels the live Slider-mode picture through the centered routine, relative to the displayed image rectangle (pure layout and source)" {
+        $layout = Get-TpmReShadePreviewLabelLayout -ImageWidth 600 -FontHeight 18 -OriginX 140 -OriginY 30
+        $layout.X | Should -Be 140
+        $layout.Y | Should -Be 42
+        $layout.Width | Should -Be 600
+        $layout.Alignment | Should -Be 'Center'
+        $default = Get-TpmReShadePreviewLabelLayout -ImageWidth 600 -FontHeight 18
+        @($default.X, $default.Y) | Should -Be @(0, 12) -Because 'the cached-bitmap path keeps its origin'
+        $paint = [regex]::Match($script:ProductionSource, '(?s)function New-TpmReShadePreviewPaintHandler \{.*?\r?\n\}\r?\n').Value
+        $paint | Should -Not -Match 'DrawString' -Because 'a direct DrawString at the left edge plus 14 px would leave the live label left-aligned'
+        $paint | Should -Not -Match '\$drawX \+ 14'
+        $paint | Should -Match "Add-TpmReShadePreviewLabel -Graphics \`$graphics -Label 'BEFORE  \|  AFTER' -ImageWidth \`$drawWidth -OriginX \`$drawX -OriginY \`$drawY"
+        # the split position, clips and divider are unchanged and the label is drawn after the clip reset
+        foreach ($kept in '\$drawX \+ \$splitPixels', '\$leftClip', '\$rightClip', 'ResetClip\(\)', 'New-Object Drawing\.Pen\(\[Drawing\.Color\]::White, 3\)') { $paint | Should -Match $kept }
+        $paint.IndexOf('Add-TpmReShadePreviewLabel') | Should -BeGreaterThan $paint.IndexOf('ResetClip()')
+    }
+    It "draws the label through one centered routine and leaves the label wording unchanged (source)" {
+        $source = $script:ProductionSource
+        $function = [regex]::Match($source, '(?s)function New-TpmReShadePreviewBitmapFromCache \{.*?\r?\n\}\r?\n').Value
+        $function | Should -Match 'Add-TpmReShadePreviewLabel'
+        $function | Should -Not -Match '\$labelX' -Because 'a hard-coded left offset would leave the label left-aligned'
+        $function | Should -Not -Match 'DrawString'
+        foreach ($wording in "'ORIGINAL'", "'AFTER'", "'BEFORE  |  AFTER'") { $function | Should -Match ([regex]::Escape($wording)) }
+        $draw = [regex]::Match($source, '(?s)function Add-TpmReShadePreviewLabel \{.*?\r?\n\}\r?\n').Value
+        $draw | Should -Match 'StringAlignment\]::Center'
+        $draw | Should -Match 'Get-TpmReShadePreviewLabelLayout'
+        $draw | Should -Match 'Dispose'
+    }
+    It "changes the preview renderer version so cached pictures drawn with the old left-aligned label are not reused" {
+        $source = $script:ProductionSource
+        $source | Should -Not -Match "-RendererVersion '3'"
+        $source | Should -Match "-RendererVersion '4'"
+        $source | Should -Match "RendererVersion='4'"
+        $source | Should -Not -Match "RendererVersion='3'"
+    }
+    It "centers the top instruction and description text of the gallery window and keeps the measurement flags in step (source)" {
+        $body = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?\r?\nfunction Close-TpmReShadeProfileGallerySession').Value
+        $body | Should -Match '\$instructionLabel\.TextAlign = ''TopCenter'''
+        $body | Should -Match '\$descriptionLabel\.TextAlign = ''TopCenter'''
+        $body | Should -Not -Match '\$instructionLabel\.TextAlign = ''TopLeft'''
+        $body | Should -Not -Match '\$descriptionLabel\.TextAlign = ''TopLeft'''
+        $measure = [regex]::Match($script:ProductionSource, '(?s)function Measure-TpmReShadeDescriptionHeight \{.*?\r?\n\}\r?\n').Value
+        $measure | Should -Match 'TextFormatFlags\]::HorizontalCenter' -Because 'the measurement must use the same centered format the label is drawn with'
+        $measure | Should -Match 'TextFormatFlags\]::WordBreak'
+    }
+    It "keeps the description wording and every warning exactly as before for all profiles (golden text)" {
+        $joined = (@(Get-TpmReShadeProfiles) | ForEach-Object { '[' + $_.ProfileId + ']' + "`n" + (Get-TpmReShadeDescriptionText -ProfileDefinition $_) }) -join "`n"
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($joined))) -replace '-', '') } finally { $sha.Dispose() }
+        $hash | Should -Be '519C249FFF08F8C18B7F6B29DA0895A6CA554D4B5C148D21543DC2426B0EA9E8'
+        $joined | Should -Match 'TPM does not run the game or execute ReShade shaders during preview'
+        $joined | Should -Match 'Actual in-game results may vary'
+        $label = [pscustomobject]@{ Text = ''; Height = 84; ClientSize = [pscustomobject]@{ Width = 800 }; Padding = [pscustomobject]@{ Horizontal = 12; Vertical = 8 }; Font = $null; DeviceDpi = 96; Parent = $null }
+        $label | Add-Member -MemberType ScriptMethod -Name Refresh -Value {}
+        $text = Get-TpmReShadeDescriptionText -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'Original')
+        Set-TpmReShadeDescriptionLabel -Label $label -Text $text -Measure { param($t, $f, $w) [pscustomobject]@{ Height = 40 } }
+        $label.Text | Should -BeExactly $text -Because 'centering must not insert, trim or reflow any characters'
+    }
+    It "wraps centered text cleanly and never clips it while the window narrows and widens (simulated wrapping)" {
+        # a character-width wrapping model: lines = ceil(text length per usable width), one 16 px line each; centering does not change the usable width
+        $measure = { param($t, $f, $w) $lines = 0; foreach ($paragraph in ($t -split "`r`n")) { $lines += [Math]::Max(1, [int][Math]::Ceiling(($paragraph.Length * 7.0) / [Math]::Max(1, $w))) }; [pscustomobject]@{ Height = ($lines * 16) } }
+        $text = Get-TpmReShadeDescriptionText -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'Original')
+        $label = [pscustomobject]@{ Text = ''; Height = 84; ClientSize = [pscustomobject]@{ Width = 1000 }; Padding = [pscustomobject]@{ Horizontal = 12; Vertical = 8 }; Font = $null; DeviceDpi = 96; Parent = $null }
+        $label | Add-Member -MemberType ScriptMethod -Name Refresh -Value {}
+        $state = [hashtable]::Synchronized(@{ DescriptionLabel = $label; DescriptionToolTip = $null; Closed = $false })
+        Set-TpmReShadeDescriptionLabel -Label $label -Text $text -Measure $measure -State $state
+        $previous = 0
+        $heights = @{}
+        foreach ($width in @(1000, 900, 760, 640, 520, 420, 640, 760, 900, 1000)) {
+            $label.ClientSize = [pscustomobject]@{ Width = $width }
+            [void](Update-TpmReShadeDescriptionLayout -State $state -Measure $measure)
+            $needed = Measure-TpmReShadeDescriptionHeight -Label $label -Text $text -Measure $measure
+            $limits = Get-TpmReShadeDescriptionHeightLimits -Label $label
+            if ($needed -le $limits.Maximum) {
+                $label.Height | Should -BeGreaterOrEqual $needed -Because "width $width must show the whole text"
+                $state['DescriptionClipped'] | Should -BeFalse -Because "width $width"
+            } else {
+                $state['DescriptionClipped'] | Should -BeTrue -Because "width $width needs more than the limit, so it is reported (and the tooltip carries the text)"
+            }
+            if ($heights.ContainsKey($width)) { $label.Height | Should -Be $heights[$width] -Because 'the same width gives the same height after resizing back (no hysteresis)' }
+            $heights[$width] = $label.Height
+        }
     }
 }
 
