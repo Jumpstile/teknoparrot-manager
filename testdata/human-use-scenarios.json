@@ -44,7 +44,7 @@
     "journey": "main-menu",
     "goal": "Invalid menu input does not crash or confuse the user.",
     "requiredPhrases": [
-      "Invalid choice. Enter 1-15."
+      "Invalid choice. Enter 1-16."
     ],
     "forbiddenPhrases": [
       "Exception",
@@ -80,7 +80,7 @@
     ],
     "forbiddenPhrases": [
       "right-click TeknoParrot-Manager.bat",
-      "select PostgreSQL setup (mode 12) again",
+      "select PostgreSQL setup (mode 13) again",
       "SERVICEPASSWORD=",
       "SUPERPASSWORD="
     ],

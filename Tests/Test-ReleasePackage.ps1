@@ -62,6 +62,8 @@ try {
         'PreviewAssets/ReShadePreviews/TPM-preview-vivid.svg',
         'PreviewAssets/ReShadePreviews/TPM-preview-crt.svg',
         'PreviewAssets/ReShadePreviews/TPM-preview-enhanced.svg',
+        'scripts/TpmRequiredPatchEngine.ps1',
+        'scripts/TpmRequiredPatchRecipes.json',
         'scripts/Debug-TPM-MenuLayout.ps1',
         'tools/Invoke-TpmAutoUpdate.ps1',
         'tools/TpmAutoUpdate.Core.psm1',

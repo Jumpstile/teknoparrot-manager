@@ -54,9 +54,10 @@
     GPU COMPATIBILITY FIXES        -- mode 7
     FORCE FEEDBACK (FFB) SETUP     -- mode 8
     BEPINEX SETUP                   -- mode 9
-    POSTGRES SETUP                 -- mode 12
-    CHECK FOR UPDATES              -- mode 13
-    CREATE SUPPORT PACKAGE          -- mode 14
+    REQUIRED GAME PATCHES          -- mode 10
+    POSTGRES SETUP                 -- mode 13
+    CHECK FOR UPDATES              -- mode 14
+    CREATE SUPPORT PACKAGE          -- mode 15
     THUMBNAIL DOWNLOAD
     "NOT IN TEKNOPARROT" REPORT
     CONTROLS STATUS FILE
@@ -274,43 +275,98 @@
     offers an automatic official download and update. Optional -- your games
     work perfectly without it.
     Beginner profile and restore choices are explicit and per-game. TPM offers
-    the twelve approved profile IDs, catalog-bound favorites, and a remembered
+    the 20 approved effects, 22 profiles in all (Original, the 20
+    single-effect profiles, and the existing Enhanced Arcade combination),
+    catalog-bound favorites, and a remembered
     selection. No profile is marked recommended or validated without measured
     evidence; pinned effect hashes establish catalog integrity, not performance
     validation. It also offers R to restore the previous trusted profile for
     that game. Restore is never automatic: the operator must choose it.
     History is accepted only when the current profile definition, ordered
     approved effect hashes, and intensity variant still match. Missing,
-    corrupt, stale, or unsupported history falls back to fresh selection; TPM
-    never copies historical file paths.
-    An optional non-modal visual gallery opens before final confirmation, but
-    the terminal chooser is always immediately available and authoritative:
+    corrupt, stale, retired, or unsupported history falls back to fresh
+    selection (a retired profile such as Cartoon is reported, never replaced
+    silently); TPM never copies historical file paths.
+    An optional non-modal gallery opens before final confirmation. Its profile
+    drop-down and the terminal chooser list the same choices in four groups
+    (Main Catalog, CRT Choices, Advanced Alternatives, and Actual HDR Setups
+    Only); either input updates the same selected profile and preview, and a
+    change made in the gallery while the terminal prompt waits updates the
+    menu marker and the "Current selection" line in place, keeping what you
+    have typed (typing is end-of-line only; if the console cannot be updated
+    safely a one-line announcement is printed instead). The comparison view
+    and 0-100 slider are independent of profile selection, and the slider is
+    aligned to the displayed image. The HDR group appears only when Windows
+    reports HDR-specific support for the evaluated display and HDR is active
+    there; Windows HDR being on does not show that a game renders HDR.
+    LICENCE EVIDENCE: an effect is offered only while its recorded licence
+    evidence is complete and current (pinned files matched upstream, in-file
+    notices or repository licence copies checked, includes resolved). All 20
+    effects are held to the same standard; an effect whose evidence is missing,
+    stale or incomplete is withheld, with the specific reason in the review
+    inventory.
       [1] Original
-      [2] Clean & Sharp
-      [3] Classic Arcade CRT
-      [4] Vivid Arcade
-      [5] Enhanced Arcade
-      [6] Cartoon
-      [7] Contrast Curves
-      [8] Film Grain
-      [9] Levels
-      [10] Monochrome
-      [11] Sepia Tone
-      [12] Vignette
-    Choose: [1-12] Select profile  [U] Use selected profile  [R] Reopen preview
+          No visual processing.
+      Main Catalog
+      [2] Smooth Edges [SMAA]
+          Reduce jagged edges.
+      [3] Clean & Sharp [LumaSharpen]
+          Straightforward sharpening.
+      [4] Adaptive Clarity [CAS]
+          Sharpening that adapts to local detail; not upscaling.
+      [5] Smooth Gradients [Deband]
+          Reduce bands in skies, fog and dark gradients.
+      [6] Vivid Arcade [Vibrance]
+          Restrained color enhancement.
+      [7] Balanced Contrast [Curves]
+          Adjust midtone contrast.
+      [8] Black/White Point Adjustment [Levels]
+          Correct washed-out ranges without changing the image to
+          monochrome.
+      [9] Shadow & Midtone Balance [LiftGammaGain]
+          Adjust shadows, midtones and highlights separately.
+      [10] Exposure & Tint [Tonemap]
+          SDR exposure, gamma and tint correction.
+      [11] Color Balance [prod80 Color Balance]
+          Correct unwanted color casts.
+      [12] Arcade Glow [ArcaneBloom]
+          Restrained glow around bright areas.
+      [13] Enhanced Arcade [LumaSharpen + Vibrance]
+          Combined preset: sharper edges and richer color while preserving
+          the approved effect order.
+      CRT Choices
+      [14] Classic Arcade CRT [CRT Lottes]
+          Lottes, including its downsampling.
+      [15] Detailed Arcade CRT [CRT-Royale]
+          More elaborate phosphor-mask simulation.
+      [16] Lightweight CRT [CRT-Pi]
+          A simpler single-pass alternative.
+      Advanced Alternatives
+      [17] Detail-Preserving Sharpen [AdaptiveSharpen]
+          An alternative sharpening algorithm with overshoot controls.
+      [18] Filmic Sharpen [FilmicAnamorphSharpen]
+          Tunable high-pass sharpening.
+      [19] Colorfulness [Colourfulness]
+          An alternative color-strength adjustment.
+      [20] Fast Game Enhancement [Glamayre Fast Effects]
+          Combining selectable anti-aliasing, sharpening, contrast and
+          lighting effects.
+    Choose: [1-N] Select profile  [U] Use selected profile  [R] Reopen preview
             [B] Back  [D] Details
-    The terminal is the only profile selector. Numbered selection updates the
-    optional preview; the gallery has no second profile-selection control.
     The terminal remains usable if the gallery is behind another window,
     closed, unavailable, or fails. U is the only path toward deployment; B
     cancels without changes and D returns after showing details. The gallery
     is a safe approximation based on the bundled TPM-owned landscape reference
     image from PreviewAssets\ReShadePreviews\TPM-preview-landscape.png. It
-    does not run the game or execute ReShade shaders. Before is the untouched
-    baseline, After is a TPM approximation of the selected profile, Split
-    places baseline left and the approximation right, and the slider moves
-    that boundary from all processed to all baseline. Actual in-game results
-    may vary.
+    does not run the game or execute ReShade shaders. The selected profile's
+    description and approved shader filenames/techniques appear in the
+    preview. Before is the untouched baseline, After is a TPM approximation
+    of the selected profile, Split places baseline left and the approximation
+    right, and the slider moves that boundary from all processed to all
+    baseline. Actual in-game results may vary.
+    Selecting a profile does not write files. Deployment remains behind U and
+    the existing explicit confirmation. The preview closes automatically when
+    the terminal chooser returns.
 
     DLL, generated preset, and approved effect files are staged and promoted
     together. Before replacing a destination, TPM requires a matching
@@ -343,7 +399,7 @@
     TeknoParrot's GameProfiles folder is scanned at runtime so newly added games
     are always covered. Safe to re-run any time you change or update your GPU.
     If a saved game path is missing or unavailable, the result offers a direct
-    handoff to mode 10, Library Health Check. Available as menu option 7 or as
+    handoff to mode 11, Library Health Check. Available as menu option 7 or as
     an optional step at the end of a normal run.
 
   - Force feedback (FFB). Two independent ways to get wheel/stick rumble and
@@ -352,7 +408,7 @@
     needed, fetched live from GitHub each run). Both can be set up at once
     since they cover different games; if a game is covered by both, you are
     asked once which to use for all such games. Missing or unavailable saved
-    paths are reported separately and offer a direct handoff to mode 10,
+    paths are reported separately and offer a direct handoff to mode 11,
     Library Health Check. Unsupported/no-match games remain distinct from
     true deployment errors. See FORCE FEEDBACK (FFB) SETUP below for full
     details. Available as menu option 8.
@@ -362,9 +418,33 @@
     menu). Mode 9 offers a user-approved install, update, or repair-reset for selected
     games using the stable x64 or x86 package matching each validated executable.
     Unsafe roots and failed validation make no changes. Missing or unavailable
-    saved paths offer a conditional H handoff to mode 10, Library Health Check;
+    saved paths offer a conditional H handoff to mode 11, Library Health Check;
     ordinary deployment failures keep their normal retry, Details, and support
     guidance. See BEPINEX SETUP below. Available as menu option 9.
+
+  - Required game patches. Option 10 installs supported fixes for exact game
+    builds. The RC8 local owner-test candidate has thirteen entries across
+    twelve builds: Family Guy Bowling 1.15 Team Play PC; mutually exclusive
+    AMD/NVIDIA Cross Elysion 2.06.00 Ver C shaders; five BlazBlue driver builds
+    (Continuum Shift 2009, Continuum Shift II 2010, Cross Tag Battle
+    1.04.00/2.01.00, Central Fiction 2.01.00, and Chronophantasma 2.03);
+    Rabbids Hollywood (2018); NERF Arcade (1.55); Rainbow BomberGirl
+    2022-12-15; Teenage Mutant Ninja Turtles 1.59; and Silent Hill The Arcade
+    2007-12-20.
+    Four BlazBlue driver recipes, Rabbids' assembly, three exact-build
+    BepInEx plugins, and Silent Hill's `dsound.dll` are absent-only restorations
+    even though their bytes are bundled in corresponding Main ZIPs. BBCP
+    Chronophantasma instead replaces only the exact known BBCP driver hash
+    with the guide-required hash, using the exact member from the named
+    Central Fiction Main ZIP. The recipe refuses an absent, unknown, or other
+    BBCP driver; it is not an absent-file restore or an inferred association.
+    Exact desired bytes are skipped; other target states are refused. Plugin
+    recipes require the exact BepInEx core file, not an inferred config.
+    Silent Hill's Windows codec BAT is separate and is never run. Users provide
+    each recipe's exact named local ZIP; TPM does not host or download payloads.
+    Elysion needs exact build and unambiguous hardware evidence. Family Guy
+    requires its documented BepInEx entrypoint setting. Manual mode does not
+    register games; patch success does not prove controls, launch, or gameplay.
 
   - Postgres setup. Installs and configures the local PostgreSQL 8.3
     database that some Incredible Technologies games need (Golden Tee
@@ -374,14 +454,14 @@
     PostgreSQL install, and never recreates or restores over a database
     that already exists. TPM asks Windows for permission itself when setup
     needs it and continues the same operation. See POSTGRES SETUP below.
-    Available as menu option 12.
+    Available as menu option 13.
 
   - Check for Updates. Manually checks the latest GitHub release against
     the version you're running. Nothing is downloaded or changed without
     your explicit Y/N confirmation. An approved update may temporarily clear
     only the target read-only attribute and restores it after the attempt. See
     CHECK FOR UPDATES below.
-    Available as menu option 13.
+    Available as menu option 14.
 
   - Path-length, file-version, and GPU compatibility warnings (automatic).
     Every AutoSync/Register run automatically checks for known
@@ -668,10 +748,48 @@
        games using the stable package matching each executable's architecture.
        Unsafe roots and failed validation make no changes. See BEPINEX SETUP.
 
+  REQUIRED GAME PATCHES (SUPPORTED EXACT BUILDS ONLY)
+  ---------------------------------------------------
+
+  10) Required game patches
+       Finds required fixes for supported exact game builds. Automatic mode
+       lists applicable recipes for registered games; manual mode installs a
+       selected recipe into an already-installed game folder, registered or
+       not. Both modes require an exact executable/build, a user-supplied local
+       ZIP member with verified hashes, safe target state, closed game, and
+       every listed prerequisite. One confirmation applies the displayed
+       automatic list. TPM keeps verified backup/undo evidence; it skips an
+       exact already-applied target and refuses any other existing bytes.
+
+       RC8's local owner-test candidate enables thirteen entries across twelve
+       exact builds: Family Guy Bowling 1.15 Team Play PC; two mutually
+       exclusive Shining Force -- Cross Elysion 2.06.00 Ver C shaders; BlazBlue
+       Continuum Shift (2009), Continuum Shift II (2010), Cross Tag Battle
+       (1.04.00,2.01.00), Central Fiction (2.01.00), and Chronophantasma
+       (2.03); Rabbids Hollywood (2018); NERF Arcade (1.55); Rainbow BomberGirl
+       (2022-12-15); Teenage Mutant Ninja Turtles (1.59); and Silent Hill The
+       Arcade (2007-12-20).
+       Three BepInEx plugins and Silent Hill's `dsound.dll` are honest
+       absent-file restorations even though their bytes are bundled in the
+       corresponding Main ZIPs. The four original BlazBlue driver recipes and
+       Rabbids are also absent-only. BBCP Chronophantasma instead replaces only
+       the exact known BBCP driver hash with the guide-required hash, using the
+       exact member from the named Central Fiction Main ZIP; absent or unknown
+       BBCP bytes are refused. Exact desired bytes are skipped; other target
+       states are refused. Plugin recipes require the exact BepInEx core file.
+       Silent Hill's codec BAT is not run or installed. Elysion requires exact
+       build, unambiguous hardware evidence, and the exact opposite-vendor
+       shader state; ORIGINAL and other states are refused. Cross Raid is
+       unsupported. Family Guy needs BepInEx and its documented
+       [Preloader.Entrypoint] Type = MonoBehaviour setting. Provide each
+       recipe's exact named ZIP locally. Manual patching does not register the
+       game; controls, launch through TeknoParrotUI, and gameplay need separate
+       verification. Patch success is not readiness or playability evidence.
+
   MAINTENANCE AND RECOVERY
   ------------------------
 
-  10) Library health check
+  11) Library health check
        Read-only. TPM first reports how many registered profiles have a valid,
        broken, or empty GamePath and lists broken profile codes by name. It
        explicitly says that TPM checked your setup and did not change anything.
@@ -694,7 +812,7 @@
        [D] Details shows technical counts and the log path; [B] returns to
        the main menu. No repair or setup begins until you choose an action.
 
-  11) Restore from backup
+  12) Restore from backup
        Choose which backup to restore: (1) your UserProfiles -- rolls back
        to a previous backup without touching File Explorer, lists all
        timestamped backup folders with file counts, you pick one by number,
@@ -702,10 +820,10 @@
        if you have used the direct LaunchBox integration, restores
        Emulators.xml/Platforms.xml/platform file(s) to their state before
        the script last wrote to them; or (3) Postgres databases -- only
-       relevant if you have used Postgres setup (mode 12), restores each
+       relevant if you have used Postgres setup (mode 13), restores each
        database from its pg_dump backup. Returns to the menu when done.
 
-  12) Postgres setup
+  13) Postgres setup
        Installs and configures the local PostgreSQL 8.3 database that some
        Incredible Technologies games need (Golden Tee Live, Power Putt
        Live, Silver Strike Bowling Live, Target Toss Pro, Orange County
@@ -714,19 +832,19 @@
        reinstalled or modified; if a game's database already exists, it is
        never recreated or restored over. When Windows permission is needed,
        TPM asks Windows itself and continues the same operation after approval;
-       you do not need to close TPM or choose mode 12 again. See POSTGRES SETUP
+       you do not need to close TPM or choose mode 13 again. See POSTGRES SETUP
        below for full details.
 
   APPLICATION
   -----------
 
-  13) Check for Updates
+  14) Check for Updates
        Manually checks the latest GitHub release against the version
        you're running. Nothing is downloaded or changed without your
        explicit Y/N confirmation. See CHECK FOR UPDATES below for full
        details.
 
-  14) Create Support Package
+  15) Create Support Package
        Collects safe TPM, TeknoParrot, TeknoParrotUI, and affected-game
        diagnostics into one ZIP, including redacted profile snapshots,
        metadata-only plugin inventories, and per-file ReShade ownership/removal
@@ -744,7 +862,7 @@
        staging-cleanup problem is reported as partial/action required, never
        clean success.
 
-  15) Exit
+  16) Exit
        Exits the script.
 
 
@@ -1099,7 +1217,7 @@
   game records pointing at the same TeknoParrot profile. New games have no
   box art or metadata yet; use LaunchBox Edit... -> Search to fetch it.
 
-  If anything looks wrong afterward, use menu option 11 (Restore backup) and
+  If anything looks wrong afterward, use menu option 12 (Restore backup) and
   choose "LaunchBox library backup" to restore the exact changed files.
 
   PREFER THE MANUAL IMPORT WIZARD INSTEAD?
@@ -1236,39 +1354,97 @@
       Use the preview window to compare the options.
       Nothing will be changed until you confirm.
 
-    It then lists twelve bounded visual profiles in this order. The friendly
-    description is followed by the approved shader filename and technique:
+    It then lists the approved visual profiles in four groups (Main Catalog,
+    CRT Choices, Advanced Alternatives, Actual HDR Setups Only). Original is
+    the untouched reference, not an effect; there are 20 effects and 22
+    profiles. The Actual HDR Setups Only group is hidden unless Windows
+    reports an HDR-capable display with HDR on, and it is shown without
+    numbers (unavailable) while HDR is supported but off. The friendly
+    description is followed by the approved shader filename and technique
+    (press D in the terminal for the full list with preview notes):
 
-      Original            No visual processing.
-                          Techniques: (none; no ReShade techniques)
-      Clean & Sharp       Clearer edges and text with very little change to
-                          the original image.
-                          Techniques: LumaSharpen.fx / LumaSharpen
-      Classic Arcade CRT  Traditional scanlines and restrained arcade-monitor
-                          character.
-                          Techniques: CRT_Lottes.fx / CRT_Lottes
-      Vivid Arcade        Richer color for modern displays.
-                          Techniques: Vibrance.fx / Vibrance
-      Enhanced Arcade     Sharper edges and richer color while preserving
-                          the approved effect order.
-                          Techniques: LumaSharpen.fx / LumaSharpen; Vibrance.fx
-                                      / Vibrance
-      Cartoon             Bold edges and fewer colors for a poster-style
-                          arcade look.
-                          Techniques: Cartoon.fx / Cartoon
-      Contrast Curves     Add contrast through the middle tones.
-                          Techniques: Curves.fx / Curves
-      Film Grain          Add a subtle grain-like texture.
-                          Techniques: FilmGrain.fx / FilmGrain
-      Levels              Expand the dark and bright ends of the image.
-                          Techniques: Levels.fx / Levels
-      Monochrome          Remove color while keeping image detail.
-                          Techniques: Monochrome.fx / Monochrome
-      Sepia Tone          Warm the image with a classic brown tone.
-                          Techniques: Sepia.fx / Tint
-      Vignette            Gently darken image edges to focus attention in the
-                          center.
-                          Techniques: Vignette.fx / Vignette
+      Original
+          No visual processing.
+          Techniques: (none; no ReShade techniques)
+      Smooth Edges [SMAA]
+          Reduce jagged edges.
+          Techniques: SMAA.fx / SMAA
+      Clean & Sharp [LumaSharpen]
+          Straightforward sharpening.
+          Techniques: LumaSharpen.fx / LumaSharpen
+      Adaptive Clarity [CAS]
+          Sharpening that adapts to local detail; not upscaling.
+          Techniques: CAS.fx / ContrastAdaptiveSharpen
+      Smooth Gradients [Deband]
+          Reduce bands in skies, fog and dark gradients.
+          Techniques: Deband.fx / Deband
+      Vivid Arcade [Vibrance]
+          Restrained color enhancement.
+          Techniques: Vibrance.fx / Vibrance
+      Balanced Contrast [Curves]
+          Adjust midtone contrast.
+          Techniques: Curves.fx / Curves
+      Black/White Point Adjustment [Levels]
+          Correct washed-out ranges without changing the image to
+          monochrome.
+          Techniques: Levels.fx / Levels
+      Shadow & Midtone Balance [LiftGammaGain]
+          Adjust shadows, midtones and highlights separately.
+          Techniques: LiftGammaGain.fx / LiftGammaGain
+      Exposure & Tint [Tonemap]
+          SDR exposure, gamma and tint correction.
+          Techniques: Tonemap.fx / Tonemap
+      Color Balance [prod80 Color Balance]
+          Correct unwanted color casts.
+          Techniques: PD80_04_Color_Balance.fx / prod80_04_ColorBalance
+      Arcade Glow [ArcaneBloom]
+          Restrained glow around bright areas.
+          Techniques: ArcaneBloom.fx / ArcaneBloom
+      Enhanced Arcade [LumaSharpen + Vibrance]
+          Combined preset: sharper edges and richer color while preserving
+          the approved effect order.
+          Techniques: LumaSharpen.fx / LumaSharpen; Vibrance.fx / Vibrance
+      Classic Arcade CRT [CRT Lottes]
+          Lottes, including its downsampling.
+          Techniques: CRT_Lottes.fx / CRT_Lottes
+      Detailed Arcade CRT [CRT-Royale]
+          More elaborate phosphor-mask simulation.
+          Techniques: crt-royale.fx / CRT_Royale
+      Lightweight CRT [CRT-Pi]
+          A simpler single-pass alternative.
+          Techniques: CRTPi.fx / CRTPi
+      Detail-Preserving Sharpen [AdaptiveSharpen]
+          An alternative sharpening algorithm with overshoot controls.
+          Techniques: AdaptiveSharpen.fx / AdaptiveSharpen
+      Filmic Sharpen [FilmicAnamorphSharpen]
+          Tunable high-pass sharpening.
+          Techniques: FilmicAnamorphSharpen.fx / FilmicAnamorphSharpen
+      Colorfulness [Colourfulness]
+          An alternative color-strength adjustment.
+          Techniques: Colourfulness.fx / Colourfulness
+      Fast Game Enhancement [Glamayre Fast Effects]
+          Combining selectable anti-aliasing, sharpening, contrast and
+          lighting effects.
+          Techniques: Glamayre_Fast_Effects.fx /
+              Glamarye_Fast_Effects_without_Fake_GI
+      HDR Highlight Mapping [Lilium Tone Mapping]
+          Map an actual HDR image into the display's brightness range.
+          Techniques: lilium__tone_mapping.fx / lilium__tone_mapping
+      HDR Black-Level Fix [Lilium HDR Black Floor Fix]
+          Adjust raised HDR blacks.
+          Techniques: lilium__hdr_black_floor_fix.fx /
+              lilium__hdr_black_floor_fix
+
+    Alternatives that do the same job (sharpening, colour strength, CRT
+    looks) are never stacked automatically. Cartoon, Film Grain, Monochrome,
+    Sepia Tone and Vignette are retired from the beginner catalog.
+    Previews are labelled approximations; effects that need real game
+    content or an HDR image show the image unchanged with a note. No
+    performance claim is made. Shader sources are live-fetched from pinned
+    upstream commits and integrity-checked, with each effect's licence text
+    written beside it; they are not bundled in the release ZIP. Fast Game
+    Enhancement's depth features need compatible game depth data and are
+    switched off in its generated preset.
 
     These are approved TPM-generated profile definitions. Shader sources are
     live-fetched and integrity-checked during deployment; they are not bundled
@@ -1649,7 +1825,7 @@
     d3d9.dll for both). If ReShade already occupies that filename in a
     game's folder, FFB plugin setup skips that game with a warning rather
     than overwriting it. Missing saved paths and unavailable saved devices
-    are reported separately and offer a direct handoff to mode 10, Library
+    are reported separately and offer a direct handoff to mode 11, Library
     Health Check; unsupported/no-match games remain distinct from true
     deployment errors, even when the same run has path-limited games.
 
@@ -1715,15 +1891,15 @@
     Several Incredible Technologies games need a small local PostgreSQL
     8.3 database to store game data: Golden Tee Live (2006-2019), Power
     Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro
-    (Bags / Lawn Darts), and Orange County Choppers Pinball. Mode 12
+    (Bags / Lawn Darts), and Orange County Choppers Pinball. Mode 13
     detects which of your registered games need this automatically -- no
     hardcoded list to keep up to date, so a newly added game is covered
     the moment you register it.
 
-    If none of your registered games need it, mode 12 says so and exits
+    If none of your registered games need it, mode 13 says so and exits
     immediately -- it never installs anything you don't need.
 
-  What mode 12 does
+  What mode 13 does
 
     If PostgreSQL isn't installed yet, the script downloads and installs it
     silently when a registered game needs it. You choose a service-account
@@ -1794,10 +1970,10 @@
   CHECK FOR UPDATES
   -----------------
 
-  What mode 13 does
+  What mode 14 does
 
     Manually checks the latest TeknoParrot Manager release on GitHub
-    against the version you're running. Mode 13 never downloads or changes
+    against the version you're running. Mode 14 never downloads or changes
     anything without your explicit confirmation. A quiet, read-only check
     may also run at startup when enabled; see that section below.
     RC releases compare by numeric version, numeric RC number, then final
@@ -1859,10 +2035,10 @@
     TeknoParrot-Manager.config.json, default true). If you're current,
     nothing is shown. If a newer version exists, you'll see the version
     and a brief release summary, then a choice: Y to update now (same
-    backup-first process as mode 13), N to continue to the menu and be
+    backup-first process as mode 14), N to continue to the menu and be
     asked again next time, or V to read the full release notes first.
     Set CheckForUpdatesOnStartup to false in the config file to disable
-    this and only check manually via mode 13. Never runs in -Unattended
+    this and only check manually via mode 14. Never runs in -Unattended
     mode.
 
 
@@ -2404,7 +2580,7 @@
   cannot be completed, AutoSync does not begin extraction.
 
 
-  To restore from inside the script, choose mode 11) Restore from backup.
+  To restore from inside the script, choose mode 12) Restore from backup.
   The script lists available backups by number; invalid numbers reprompt and
   pressing Enter cancels before any restore begins. Existing backup and
   confirmation checks still apply before files or databases are changed.
@@ -2507,7 +2683,7 @@
     and the correct profile will be used.
 
   A game's controls are wrong after propagation.
-    Use mode 11) Restore from backup to roll back to the backup made at the
+    Use mode 12) Restore from backup to roll back to the backup made at the
     start of that run, or delete the affected game's .xml from UserProfiles
     and re-run propagation after correcting the reference game's bindings in
     TeknoParrotUI.

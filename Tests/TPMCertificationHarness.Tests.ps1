@@ -401,16 +401,62 @@ Describe "Fail-fast root validation runs before any certification gate (issue #1
 
 Describe "NAS Git safe-directory certification boundary (issue #154)" {
     It "builds a Pester-child environment with one exact, process-scoped safe.directory entry" {
-        $environment = New-TPMPesterChildEnvironment -RepositoryPath $TestDrive
+        $emptyConfig = New-TPMEmptyGitConfigFile -Path (Join-Path $TestDrive 'git-empty-global-env.config')
+        $environment = New-TPMPesterChildEnvironment -RepositoryPath $TestDrive -EmptyGlobalConfigPath $emptyConfig
 
         $environment['GIT_CONFIG_COUNT'] | Should -Be '1'
         $environment['GIT_CONFIG_KEY_0'] | Should -Be 'safe.directory'
-        $environment['GIT_CONFIG_GLOBAL'] | Should -Be 'NUL'
+        $environment['GIT_CONFIG_GLOBAL'] | Should -Be $emptyConfig
+        $environment['GIT_CONFIG_GLOBAL'] | Should -Not -Be 'NUL' -Because "the NUL device name made the Windows Git used for the RC8 full-folder run fail every call with 'unable to access NUL'"
         $environment['GIT_CONFIG_NOSYSTEM'] | Should -Be '1'
         $environment['GIT_CONFIG_VALUE_0'] | Should -Be $TestDrive
         @($environment.Keys | Where-Object { $_ -like 'GIT_CONFIG_*' } | Sort-Object) |
             Should -Be @('GIT_CONFIG_COUNT', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_VALUE_0')
         $environment['GIT_CONFIG_VALUE_0'] | Should -Not -Be '*'
+    }
+
+    It "creates the per-run empty Git config as a real zero-byte file and refuses to reuse a path" {
+        $path = Join-Path $TestDrive ('nested-' + [guid]::NewGuid().ToString('N') + '\git-empty-global.config')
+        $created = New-TPMEmptyGitConfigFile -Path $path
+
+        $created | Should -Be ([System.IO.Path]::GetFullPath($path))
+        (Test-Path -LiteralPath $created -PathType Leaf) | Should -BeTrue
+        (Get-Item -LiteralPath $created -Force).Length | Should -Be 0
+        { New-TPMEmptyGitConfigFile -Path $path } | Should -Throw '*EMPTY_GIT_CONFIG_EXISTS*'
+    }
+
+    It "isolates user-global Git configuration with the real empty file while keeping the exact safe.directory entry (real git)" {
+        (Get-Command git -ErrorAction SilentlyContinue) | Should -Not -BeNullOrEmpty -Because "this behavioral proof needs a real Git"
+        $fakeHome = Join-Path $TestDrive ('git-home-' + [guid]::NewGuid().ToString('N'))
+        [void][System.IO.Directory]::CreateDirectory($fakeHome)
+        [System.IO.File]::WriteAllText((Join-Path $fakeHome '.gitconfig'), "[user]`n`tname = LEAKED-GLOBAL-CONFIG`n")
+        $emptyConfig = New-TPMEmptyGitConfigFile -Path (Join-Path $TestDrive ('git-empty-' + [guid]::NewGuid().ToString('N') + '.config'))
+        $environment = New-TPMPesterChildEnvironment -RepositoryPath $TestDrive -EmptyGlobalConfigPath $emptyConfig
+        $names = @('HOME', 'USERPROFILE', 'XDG_CONFIG_HOME') + @($environment.Keys)
+        $saved = @{}
+        foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
+        # [NullString]::Value truly unsets a variable; a PowerShell $null argument would be converted to an EMPTY string, and an empty
+        # GIT_CONFIG_GLOBAL itself disables the global config -- which would make the control run below meaningless.
+        $setEnv = { param($n, $v) [Environment]::SetEnvironmentVariable($n, $(if ($null -eq $v) { [NullString]::Value } else { [string]$v })) }
+        try {
+            & $setEnv 'HOME' $fakeHome
+            & $setEnv 'USERPROFILE' $fakeHome
+            & $setEnv 'XDG_CONFIG_HOME' (Join-Path $fakeHome 'xdg')
+            foreach ($name in @($environment.Keys)) { & $setEnv $name $null }
+            $control = @(& git config --global --get user.name 2>&1)
+            foreach ($name in @($environment.Keys)) { & $setEnv $name $environment[$name] }
+            $isolated = @(& git config --get user.name 2>&1)
+            $isolatedExit = $LASTEXITCODE
+            $safeDirectory = @(& git config --get-all safe.directory 2>&1)
+        } finally {
+            foreach ($name in $names) { & $setEnv $name $saved[$name] }
+        }
+
+        ($control -join '') | Should -Be 'LEAKED-GLOBAL-CONFIG' -Because "the control run proves this fixture can detect a leaking user-global config"
+        $isolatedExit | Should -Be 1 -Because "an absent key (not a fatal config error) is the expected result with an empty global config"
+        ($isolated -join '') | Should -BeNullOrEmpty
+        ($isolated -join '') | Should -Not -Match 'fatal'
+        @($safeDirectory) | Should -Contain $TestDrive
     }
 
     It "uses the FileSystem ProviderPath for both runner Git reads" {

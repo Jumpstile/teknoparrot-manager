@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main, review/rc8-package-runtime-ux-fixes ]
+    branches: [ main, review/rc8-package-runtime-ux-fixes, fix/rc8-release-blockers ]
 
 jobs:
   quality-gates:

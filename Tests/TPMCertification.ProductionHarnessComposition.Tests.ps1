@@ -47,15 +47,15 @@ BeforeAll {
     function New-LegacyResultsFixtureV1([string]$Repo, [string]$Report, [string]$Backup, [bool]$ForceIneligible = $false) {
         New-Item -ItemType Directory -Path $Repo, (Join-Path $Repo 'Tests'), $Report, (Join-Path $Backup 'UserProfiles') -Force | Out-Null
         [IO.File]::WriteAllText((Join-Path $Repo 'Tests\one.ps1'), 'test')
-        # New-TPMProductionFactRecordsV1 resolves the real, fixed 17-entry
+        # New-TPMProductionFactRecordsV1 resolves the real, fixed 20-entry
         # inventory (Get-TPMProductionPowerShellInventoryV1) against
         # -RepositoryPath -- every entry must physically exist for it to
-        # succeed, so this stubs all seventeen the same way
+        # succeed, so this stubs all twenty the same way
         # Tests/TPMCertification.ProductionFacts.Tests.ps1's own
         # New-InventoryFixture does.
         New-Item -ItemType Directory -Path (Join-Path $Repo 'scripts'), (Join-Path $Repo 'tools') -Force | Out-Null
         foreach ($relative in @(
-            'TeknoParrot-Manager.ps1','scripts/Debug-TPM-MenuLayout.ps1','tools/Invoke-TpmAutoUpdate.ps1','tools/TpmAutoUpdate.Core.psm1',
+            'TeknoParrot-Manager.ps1','scripts/TpmRequiredPatchEngine.ps1','scripts/Debug-TPM-MenuLayout.ps1','tools/Invoke-TpmAutoUpdate.ps1','tools/TpmAutoUpdate.Core.psm1',
             'scripts/Invoke-TPM-RealInstanceSmoke.ps1','scripts/Invoke-TPM-InstallHealthCheck.ps1','scripts/Resolve-Pcsx2Directory.ps1','scripts/Run-TPM-Tests.ps1','scripts/TPMCertification.Execution.psm1','scripts/Invoke-TPM-PesterChild.ps1',
             'scripts/TPMCertification.Authority.psm1','scripts/TPMCertification.Production.psm1','scripts/TPMCertification.ProductionCycle.psm1','scripts/TPMCertification.ProductionEvidence.psm1','scripts/TPMCertification.ProductionFacts.psm1',
             'scripts/TPMCertification.Publication.psm1','scripts/TPMCertification.Reports.psm1','scripts/TPMCertification.Shadow.psm1','scripts/Test-TPMParserCheckV1.ps1'

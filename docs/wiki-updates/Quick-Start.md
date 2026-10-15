@@ -133,28 +133,65 @@ After each mode completes you return to this menu. On smaller console windows th
                         using the stable x64/x86 package matching each
                         validated game executable.
 
+  REQUIRED GAME PATCHES (SUPPORTED EXACT BUILDS ONLY)
+  ---------------------------------------------------
+  10) Required game patches -- find exact-build required fixes from ZIPs
+                        that you provide locally. Automatic mode lists
+                        registered games; manual mode supports installed
+                        games that are not registered yet. Apply and undo
+                        use verified backup and target-state checks.
+
   MAINTENANCE AND RECOVERY
   ------------------------
-  10) Library health check -- Read-only: registered/broken/unregistered
+  11) Library health check -- Read-only: registered/broken/unregistered
                         counts plus GPU fix / FFB Blaster / dgVoodoo2
                         coverage. No network access -- just a status check.
-  11) Restore backup -- Roll UserProfiles back to a previous backup.
-  12) Postgres setup -- Installs/configures the local PostgreSQL
+  12) Restore backup -- Roll UserProfiles back to a previous backup.
+  13) Postgres setup -- Installs/configures the local PostgreSQL
                         database that some Incredible Technologies
                         games need (Golden Tee Live, Power Putt Live,
                         Silver Strike Bowling Live, Target Toss Pro).
 
   APPLICATION
   -----------
-  13) Check for Updates -- Manual, backup-first check against the
+  14) Check for Updates -- Manual, backup-first check against the
                         latest GitHub release.
-  14) Create Support Package -- Gather safe logs and reports into one
+  15) Create Support Package -- Gather safe logs and reports into one
                         redacted ZIP to send when asking for help.
-  15) Exit
+  16) Exit
 
-Enter 1-15:
+Enter 1-16:
 ```
 </details>
+
+**Required game patches:** choose option 10 to review supported required
+patches. The RC8 local owner-test candidate enables thirteen entries across
+twelve exact builds: Family Guy Bowling 1.15 Team Play PC; two mutually
+exclusive AMD/NVIDIA shader recipes for Shining Force -- Cross Elysion
+2.06.00 Ver C; BlazBlue Continuum Shift (2009), Continuum Shift II (2010),
+Cross Tag Battle (1.04.00,2.01.00), Central Fiction (2.01.00), and
+Chronophantasma (2.03); Rabbids Hollywood (2018); NERF Arcade (1.55);
+Rainbow BomberGirl (2022-12-15); Teenage Mutant Ninja Turtles (1.59); and
+Silent Hill The Arcade (2007-12-20). Users provide each recipe's exact named
+local ZIP; TPM does not host or download payloads. The three plugin recipes
+require the exact BepInEx core file. Three plugins, Silent Hill's `dsound.dll`
+and the four original BlazBlue drivers are absent-only restores even though
+their matching bytes are bundled in corresponding Main ZIPs. BBCP
+Chronophantasma instead replaces only the exact known driver hash with the
+guide-required hash, sourcing the exact member from the named Central Fiction
+Main ZIP; absent or unknown BBCP bytes are refused. Exact desired bytes are
+skipped; other target states are refused. Silent Hill's Windows codec BAT is
+separate and is not executed or installed. Elysion requires the exact
+build/executable, one unambiguous hardware-evidence result, and the exact
+opposite-vendor target hash. All four original BlazBlue driver recipes and
+Rabbids are missing-file restorations. ORIGINAL or ambiguous/hybrid adapter
+states are refused. TPM cannot establish which adapter a game uses in a
+hybrid system. Cross Raid is unsupported. Family Guy requires BepInEx and the
+guide's `[Preloader.Entrypoint] Type=MonoBehaviour` setting. Automatic mode
+lists eligible registered games for one confirmation; manual mode works on
+an already-installed folder without registering it. Register, configure
+controls, launch through TeknoParrotUI, and verify gameplay separately. Patch
+success does not establish readiness or playability.
 
 **5.** For **AutoSync**, choose a LOCAL staging folder with free space, outside both TeknoParrot and your ZIP source. Not sure yet? Answer Y to "Run in PREVIEW mode first?" to see what would happen with zero files written, then Y when asked whether to perform the operation for real to commit them immediately -- see [[AutoSync#preview--dry-run-mode]]. Then choose what to extract:
 
@@ -206,12 +243,12 @@ and ACTION REQUIRED report. None silently proves the others.
 ## Optional features (run any time from the menu)
 
 - **[[Crosshairs]] (mode 4)** — 321 crosshair designs included; pick by number from an HTML preview.
-- **[[ReShade]] (mode 5)** -- sharpening, CRT scanlines, colour. ReShade DLLs are not bundled. Mode 5 can download the official ReShade installer automatically (recommended); manual placement in the `ReShade\` folder is an advanced fallback.
+- **[[ReShade]] (mode 5)** -- sharpening, CRT scanlines, and other post-processing. Its optional non-modal preview offers 22 profiles built from 20 approved pinned shader effects, in four groups (the HDR group only appears when Windows HDR is on). Choose from the gallery or terminal list; both stay synchronized. The 0-100 slider remains independent. The bundled-image approximation does not run the game or execute shaders; terminal `U` and explicit confirmation are still required before deployment, after which the preview closes automatically. ReShade DLLs are not bundled.
 - **[[dgVoodoo2]] (mode 6)** — only needed for games that crash or show black screens.
 - **[[GPU Fix]] (mode 7)** — safe to run any time; re-run after changing GPU or drivers.
 - **[[FFB Setup]] (mode 8)** — native FFB Blaster (needs a paid membership) and/or a free third-party plugin.
 - **[[BepInEx]] (mode 9)** -- user-approved install, update, or repair-reset with the stable x64/x86 package matched to the validated game executable.
-- **[[Postgres Setup]] (mode 12)** -- installs/configures the local PostgreSQL database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, etc.). Administrator privileges may also be required for automatic recovery when the saved database password is unusable.
+- **[[Postgres Setup]] (mode 13)** -- installs/configures the local PostgreSQL database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Target Toss Pro Live (2012/2013), etc.). Administrator privileges may also be required for automatic recovery when the saved database password is unusable.
 
 ---
 
@@ -223,7 +260,7 @@ AutoSync backs up the current UserProfiles contents before extraction (preview m
 <TeknoParrotRoot>\UserProfiles\FullBackup\<date_time>\
 ```
 
-To restore: choose **mode 11 — Restore backup** from the main menu.
+To restore: choose **mode 12 — Restore backup** from the main menu.
 
 See [[Troubleshooting]] for common problems.
 
@@ -234,7 +271,7 @@ See [[Troubleshooting]] for common problems.
   folder, such as a reachable NAS folder, or explain how to choose one.
 - If PostgreSQL automatic recovery needs elevation, close TPM, right-click
   `TeknoParrot-Manager.bat` (or the PowerShell script), choose **Run as
-  administrator**, and select mode 12 again. The blocked step does not change
+  administrator**, and select mode 13 again. The blocked step does not change
   PostgreSQL data or profiles.
 - If mode 9 refuses an unsafe BepInEx game root, review the affected profile
   path, move the game under the configured games root, or remove the junction or

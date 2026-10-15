@@ -38,7 +38,7 @@ the new log/config paths or entering normal workflows. Review the migration repo
 and preserved evidence before retry.
 
 ---
-## RC8 runtime recovery and visual selection
+## RC8 runtime recovery and RC8 ReShade visual selection
 ## Beginner-friendly default UX (RC8 release gate)
 
 TPM is written for a user who wants to play games, not administer Windows.
@@ -97,16 +97,33 @@ otherwise the user receives an explicit close instruction. Listener shutdown is
 guaranteed, focus return is attempted with a plain-language fallback, and typed
 numeric selection remains available when preview or browser startup fails.
 
-ReShade profile selection opens an optional non-modal gallery and immediately
-leaves the terminal at the authoritative numbered chooser. The terminal
-chooser remains usable when WinForms is behind another window, closed,
-unavailable, or fails to open. Numbered selection updates the gallery when it
-is available; the gallery has no profile-selection control and only follows
-the terminal's selected profile. `U` is the only path toward deployment, while
-`B` and invalid input remain non-mutating. The gallery changes the displayed
-deterministic, TPM-owned comparison approximation when the terminal selection
-changes, but does not run the game or execute ReShade shaders and does not
-deploy files. Actual in-game results may vary.
+ReShade profile selection opens an optional non-modal gallery with a profile
+selector alongside the existing comparison controls. The selector lists every
+selectable canonical profile (22 profiles over 20 unique pinned shader effects;
+the two HDR-only profiles are listed only while the HDR gate allows them). Choosing a profile updates the shared `SelectedProfileId`, refreshes
+the bundled-image approximation, and updates the terminal chooser. A numbered
+terminal choice updates the same gallery selector and preview. The two inputs
+remain synchronized while `ViewMode` (`Before`, `After`, `Split`, or `Slider`)
+and the 0-100 slider position remain independent of profile identity.
+
+The terminal remains usable if WinForms is behind another window, closed,
+unavailable, or fails to open. While terminal input pumps WinForms events,
+`Read-TpmReShadeTerminalProfile` re-reads the shared selected ID before handling
+`U`, so it accepts the latest preview choice rather than a stale local value.
+The selector's echo guard (`ProfileSelectorUpdating`) covers only the
+programmatic `SelectedIndex` assignment in `Sync-TpmReShadeGallerySelection` and
+is restored immediately, including when the assignment throws, so a user choice
+queued during refresh or event pumping is handled and the latest choice wins.
+`U` is the only chooser path toward deployment; the existing explicit
+confirmation remains required. The preview selector is transient and read-only:
+it does not run the game or execute ReShade shaders and does not deploy files.
+After the chooser returns, the normal setup `finally` closes the gallery and
+disposes its timer, images, and render cache. A preview reopened with `R` is
+owned by the chooser until it returns: if the chooser throws, it closes the
+newest replacement session, and the caller's `finally` closes the original;
+closing an already-closed session is idempotent. `B` and invalid input remain
+non-mutating. Actual in-game results may vary.
+
 The reference is the bundled `PreviewAssets\ReShadePreviews\TPM-preview-landscape.png`
 asset, validated by System.Drawing decoding, fixed dimensions, identity
 `TPM-LANDSCAPE-V1`, version `3`, and SHA-256
@@ -118,21 +135,19 @@ bitmaps at the requested boundary. Actual in-game results may vary.
 Deployment remains behind the existing explicit confirmation. The reference
 identity, renderer version, and effect hashes are part of the cache key so
 stale artifacts regenerate.
+
 The gallery keeps a stable internal `SelectedProfileId` separate from the
-`ViewMode` (`Before`, `After`, `Split`, or `Slider`). Profile IDs and canonical
-technique names come from validated profile definitions; the preview surface
-does not expose raw objects, cache paths, or a second chooser. Initialization
+`ViewMode`. Selector items are canonical profile objects carrying validated
+profile IDs; handlers resolve those IDs against the approved catalog. The
+preview surface does not expose raw objects or cache paths. Initialization
 keeps preview events disabled until controls and state are complete. Every
 gallery event is closure-bound, guarded, and fail-closed: renderer or state
-errors are logged with their stage, the optional gallery is closed, and the
-terminal-only chooser remains authoritative. Gallery events, preview refresh,
-and all comparison controls are visual-only; deployment is still unreachable
-until terminal `U` plus the existing explicit confirmation.
-The normal ReShade setup path describes the gallery as view-only and keeps the
-terminal chooser authoritative. RC8 exposes twelve bounded profiles in display
-order: Original, Clean & Sharp, Classic Arcade CRT, Vivid Arcade, Enhanced
-Arcade, Cartoon, Contrast Curves, Film Grain, Levels, Monochrome, Sepia Tone,
-and Vignette.
+errors are logged with their stage and close the optional gallery. Selection,
+preview refresh, and comparison controls remain visual-only; deployment is
+still unreachable until terminal `U` plus the existing explicit confirmation.
+The normal ReShade setup path describes the gallery as a bundled-image
+approximation and explains that it does not execute shaders. RC8 introduced bounded profiles; TPM-RESHADE-TWENTY-EFFECTS-001 replaces the
+first twelve with the 22-profile, 20-effect catalog described below.
 The setup summary leads with changed, not-changed, and actual-failure totals;
 unsafe or malformed ownership/path entries remain unchanged and direct the user
 to repair, explicit Adopt for protected content, skip, or Details/support.
@@ -523,36 +538,37 @@ registered profiles (WRONG NAME warning for typos), never required. Same
 **Read-only multi-monitor suitability evidence (RC8).** `Get-TpmDisplayTopologyClassification` classifies caller-supplied display records without querying or changing monitor configuration. It distinguishes unavailable/zero-usable, single-display, multiple-primary, mixed-resolution/orientation/refresh, mirrored, no-primary, and malformed topologies. It does not assign a separate `EXTENDED` state; an extended desktop is represented by the applicable multiple-display state. Live Windows display acquisition is not wired into the eligibility path, so callers must supply the evidence. `TargetDisplayId` is optional evidence: an explicit target must still be present and connected to be `CONFIDENT`; duplicate matches are `AMBIGUOUS` and no monitor is selected. A missing target is `UNKNOWN` and does not fall back to another display. Without an explicit target, a sole usable display is confident, while multiple usable displays remain `AMBIGUOUS` until the caller identifies the game target.
 
 The result is advisory input to ReShade eligibility only. It may add `DISPLAY_TARGET_AMBIGUOUS` and downgrade suitability to `UNKNOWN`; it never changes the primary monitor, enables or disables displays, changes resolution/refresh/orientation, moves windows, or writes game display settings. Target resolution reuses `Get-TpmResolutionClassification`, so bounded low/normal/high/wide evidence and ReShade effect-sensitivity metadata remain advisory rather than becoming monitor configuration policy. A changed or stale topology invalidates prior target confidence and requires fresh evidence.
-**Canonical visual profiles and generated presets (RC8).** TPM exposes exactly twelve bounded profiles in display order: Original (empty stack), Clean & Sharp (`SweetFX.LumaSharpen`), Classic Arcade CRT (`FXShaders.CRT_Lottes`), Vivid Arcade (`SweetFX.Vibrance`), Enhanced Arcade (`SweetFX.LumaSharpen` followed by `SweetFX.Vibrance`), Cartoon (`SweetFX.Cartoon`), Contrast Curves (`SweetFX.Curves`), Film Grain (`SweetFX.FilmGrain`), Levels (`SweetFX.Levels`), Monochrome (`SweetFX.Monochrome`), Sepia Tone (`SweetFX.Sepia`), and Vignette (`SweetFX.Vignette`). Profile IDs select definitions, but trust remains in the approved effect catalog, pinned revisions, exact hashes and byte lengths, and required include closure. Curated profile and effect metadata remains `ADVISORY_UNMEASURED` with `MeasuredEvidence = $false`; no profile is marked `Recommended` or `VALIDATED_SINGLE` without measured evidence. CRT is isolated from sharpening and vibrance in normal profile mode; the enhanced two-effect order is explicit.
+**Canonical visual profiles and generated presets (RC8; 20-effect catalog, TPM-RESHADE-TWENTY-EFFECTS-001).** `Get-TpmReShadeProfiles` defines 22 profiles: `Original` (empty stack; the reference, not an effect), 20 single-effect profiles with the owner-approved friendly name, technical name and description used verbatim, and the pre-existing `EnhancedArcade` combination (`SweetFX.LumaSharpen` then `SweetFX.Vibrance`, no additional effect). Effect count (20, `Get-TpmReShadeEffectCatalog`) and profile count (22) are therefore different numbers. Each profile carries `Group` (`Main`, `Crt`, `Advanced`, `Hdr`; labels from `Get-TpmReShadeProfileGroups`: Main Catalog, CRT Choices, Advanced Alternatives, Actual HDR Setups Only), `TechnicalName`, `DisplayLabel` ("Friendly [Technical]"), `CompatibilityNote`, `RequiresHdr`, `PreviewApproximation` (`REFERENCE`, `APPROXIMATE`, `NEUTRAL`, `UNAVAILABLE`) and `PreviewNote`. Cartoon, Film Grain, Monochrome, Sepia and Vignette are retired (`Get-TpmReShadeRetiredProfiles`): `Get-TpmReShadeProfile` returns `$null` for them and remembered/history/restore lookups report `RETIRED_PROFILE` without remapping or deleting anything.
 
-The terminal chooser and preview gallery derive their visible `Techniques:`
-line from each profile's canonical `TechniqueOrder` and the approved effect
-catalog's `RelativeFiles` and `TechniqueName` fields. The display keeps
-beginner-friendly names and descriptions first, then shows shader filenames
-and techniques without exposing internal paths:
+The terminal chooser and preview gallery derive their visible `Techniques:` line from each profile's canonical `TechniqueOrder` and the approved effect catalog's `RelativeFiles` and `TechniqueName` fields (`Get-TpmReShadeProfileTechniqueDisplay`), so visible text is never a second hardcoded effect list:
 
 - Original -- `(none; no ReShade techniques)`
-- Clean & Sharp -- `LumaSharpen.fx / LumaSharpen`
-- Classic Arcade CRT -- `CRT_Lottes.fx / CRT_Lottes`
-- Vivid Arcade -- `Vibrance.fx / Vibrance`
-- Enhanced Arcade -- `LumaSharpen.fx / LumaSharpen; Vibrance.fx / Vibrance`
-- Cartoon -- `Cartoon.fx / Cartoon`
-- Contrast Curves -- `Curves.fx / Curves`
-- Film Grain -- `FilmGrain.fx / FilmGrain`
-- Levels -- `Levels.fx / Levels`
-- Monochrome -- `Monochrome.fx / Monochrome`
-- Sepia Tone -- `Sepia.fx / Tint`
-- Vignette -- `Vignette.fx / Vignette`
+- Smooth Edges [SMAA] -- `SMAA.fx / SMAA`
+- Clean & Sharp [LumaSharpen] -- `LumaSharpen.fx / LumaSharpen`
+- Adaptive Clarity [CAS] -- `CAS.fx / ContrastAdaptiveSharpen`
+- Smooth Gradients [Deband] -- `Deband.fx / Deband`
+- Vivid Arcade [Vibrance] -- `Vibrance.fx / Vibrance`
+- Balanced Contrast [Curves] -- `Curves.fx / Curves`
+- Black/White Point Adjustment [Levels] -- `Levels.fx / Levels`
+- Shadow & Midtone Balance [LiftGammaGain] -- `LiftGammaGain.fx / LiftGammaGain`
+- Exposure & Tint [Tonemap] -- `Tonemap.fx / Tonemap`
+- Color Balance [prod80 Color Balance] -- `PD80_04_Color_Balance.fx / prod80_04_ColorBalance`
+- Arcade Glow [ArcaneBloom] -- `ArcaneBloom.fx / ArcaneBloom`
+- Enhanced Arcade [LumaSharpen + Vibrance] -- `LumaSharpen.fx / LumaSharpen; Vibrance.fx / Vibrance`
+- Classic Arcade CRT [CRT Lottes] -- `CRT_Lottes.fx / CRT_Lottes`
+- Detailed Arcade CRT [CRT-Royale] -- `crt-royale.fx / CRT_Royale`
+- Lightweight CRT [CRT-Pi] -- `CRTPi.fx / CRTPi`
+- Detail-Preserving Sharpen [AdaptiveSharpen] -- `AdaptiveSharpen.fx / AdaptiveSharpen`
+- Filmic Sharpen [FilmicAnamorphSharpen] -- `FilmicAnamorphSharpen.fx / FilmicAnamorphSharpen`
+- Colorfulness [Colourfulness] -- `Colourfulness.fx / Colourfulness`
+- Fast Game Enhancement [Glamayre Fast Effects] -- `Glamayre_Fast_Effects.fx / Glamarye_Fast_Effects_without_Fake_GI`
+- HDR Highlight Mapping [Lilium Tone Mapping] -- `lilium__tone_mapping.fx / lilium__tone_mapping`
+- HDR Black-Level Fix [Lilium HDR Black Floor Fix] -- `lilium__hdr_black_floor_fix.fx / lilium__hdr_black_floor_fix`
 
-The new SweetFX sources are fetched only during explicit deployment and
-validated against pinned SHA-256 and byte lengths; they are not bundled.
-Required `ReShade.fxh` is fetched from the pinned ReShade shader repository
-with its CC0-1.0 provenance. The small `ReShadeUI.fxh` compatibility shim is
-TPM-authored and hash-checked from generated bytes. Shared includes are staged
-once per destination when their relative path, hash, and byte length agree.
-Generated `ReShade.ini` restricts shader search paths to the canonical TPM
-roots and sets both `PresetPath` and `StartupPresetPath` to that file,
-preventing an older startup override from superseding the selected profile.
+Catalog rows add `DestinationFiles` (deployed path, e.g. `Shaders/crt-royale/lib/...`, `Textures/SweetFX/AreaTex.png`), `FileLicenses`, `NoticeFiles` (upstream licence text copies pinned by commit, hash and length), `SourceObligations`, `RequiredTextures`, and `ConflictsWith`/`CompatibleWith` (table-driven: sharpeners, colour-strength alternatives and CRT looks conflict with each other; `LumaSharpen`+`Vibrance` is the one compatible pair). `Get-TpmReShadeApprovedEffectFiles` turns a row into acquisition specs (effect files, textures, per-file shared includes, licence text copies and a deterministic TPM `NOTICE.txt`) that flow through the unchanged trusted-acquisition path (raw.githubusercontent.com at an immutable commit, SHA-256 and byte length). `Get-TpmReShadeEffectObligationStatus` separates metadata completeness (a licence statement, attribution, a stated obligation, a per-file licence basis, an upstream licence text or in-file notice) from reviewed completeness (`ObligationReview`, from `Get-TpmReShadeObligationReviewRecord`). The record is DERIVED from per-effect verification evidence (`Get-TpmReShadeLicenceEvidenceTable`: pinned bytes matched upstream, in-file notices matched, repository licence copy identified, include closure resolved by deployed relative path, all bound by `Get-TpmReShadeEffectPinDigest` to the complete acquisition/deployment specification: repositories, source and destination paths, hashes, lengths, dependencies and the ReShade search paths (`Get-TpmReShadeSearchPathDeclaration`), licence basis, attribution, obligations text, and the generated notice and include bytes, taken from `Get-TpmReShadeApprovedEffectFilesForEffect`). All 20 effects use the same table and rules; an earlier feature approval is not evidence. A missing record, a stale digest or an unverified item gives status EVIDENCE_INCOMPLETE with a specific outstanding item (`NO_EVIDENCE_RECORD`, `EVIDENCE_STALE`, `SPECIFICATION_INVALID`, `PINNED_BYTES_UNVERIFIED`, `FILE_NOTICE_UNVERIFIED`, `REPOSITORY_LICENSE_COPY_UNVERIFIED`, `INCLUDE_RECORD_INCONSISTENT`, `DEPENDENCY_UNRESOLVED`, `INACTIVE_INCLUDE_RECORD_STALE`). Includes are resolved against the actual deployed relative paths (the including file's directory, then the effect search paths); ReShade.fxh and ReShadeUI.fxh resolve to the deployed `Shaders/TPM/` files. An include that resolves to no deployed file is accepted only as INACTIVE, with the exact pinned preprocessor conditions, the macro definitions used and the including file's pinned hash recorded (the two Lilium cases: `#if (SHOW_ADAPTIVE_MAX_NITS == YES)` with the shader defining it as `NO`, and a nested `#if 0`); the record is re-checked against the including file's hash in the specification. Only `Offerable` effects are listed (`Get-TpmReShadeVisibleProfiles`, `-IncludeUnreviewed` for inventory use) or deployable (`LICENSE_OBLIGATIONS_INCOMPLETE`, `LICENSE_OBLIGATIONS_UNREVIEWED`), and `Get-TpmReShadeObligationReviewInventory` keeps all 20 visible. Embedded MIT/BSD notices and CC licence URLs are valid mechanisms and are not outstanding items. Checks that need Windows are not hidden in the records: `Get-TpmReShadeWindowsOnlyLicenceChecks` lists them (WIN-1 install-level notice delivery, WIN-2 real acquisition, WIN-3 shader compilation, WIN-4 package identity) and they are release checks shared by every effect. TPM ships no shader bytes.
+
+**Actual-HDR gate.** `Get-TpmDisplayHdrEvidence` queries Windows (`QueryDisplayConfig`, `DisplayConfigGetDeviceInfo` types 2, 9 and 15) for every active display and returns, per display, a real identity (monitor device path, else adapter LUID and target id), the primary flag, and HDR-SPECIFIC support and active state (advanced-colour info 2: `highDynamicRangeSupported`, active colour mode HDR); the generic advanced-colour flag is recorded for information only because it is also true for wide-gamut SDR. Any failure, an unanswered field, a non-Windows host or a malformed row is unknown (`ConvertFrom-TpmDisplayHdrRows`). The struct layout for type 15 (36 bytes, flag bits at offset 20, active colour mode at offset 32) follows `wingdi.h` and was verified against the Windows SDK header (https://github.com/microsoft/win32metadata/blob/main/generation/WinSDK/RecompiledIdlHeaders/um/wingdi.h#L2983-L3016); what is still open is real Windows detection on actual displays and game-pipeline compatibility. A rejected query surfaces as unknown, never as HDR. `Get-TpmReShadeHdrGate` classifies fail-closed: `HIDDEN` (unknown, unsupported, policy-limited, missing/duplicated identity, or an explicit `-TargetDisplayId` that is unknown/stale/ambiguous -- validated even with a single display), `VISIBLE_UNAVAILABLE` (HDR supported, not active) or `ENABLED`. With no target and several displays every display must qualify. The result names the evaluated identities and a fingerprint; `Install-TpmReShadeProfileDeployment` re-evaluates live (optionally for `-HdrTargetDisplayId`), refuses an HDR profile unless it is ENABLED (`HDR_UNAVAILABLE`) and refuses when the fingerprint taken at selection time changed (`HDR_EVIDENCE_CHANGED`). Windows HDR being active does not show that a game renders HDR; no caller currently knows the display a game will use, so the no-target rule applies in practice. TPM never changes a Windows HDR setting.
+
 
 These are approved TPM-generated profile definitions, not claims that
 live-fetched runtime files are bundled. Display order follows the canonical
@@ -561,21 +577,37 @@ effect list.
 
 `New-TpmReShadePresetContent` generates stable TPM-owned preset text from the selected definition, with normalized technique order and no timestamps, randomness, paths, or user code. `Test-TpmReShadePresetContent` validates the generated structure and rejects techniques outside the approved bounded set. Original intentionally generates no effect techniques. Advanced custom `.ini` input remains opt-in and is path/extension/existence validated; its contents do not become approved effect evidence.
 
+A profile `Parameters` entry whose value is a table becomes a `[File.fx]` section after every flat line (Fast Game Enhancement writes `[Glamayre_Fast_Effects.fx]` with `ao_enabled=0` and `dof_enabled=0` because its depth features need compatible game data); `Test-TpmReShadePresetContent` accepts a section only for a file the profile requires, with identifier keys and plain numeric values. Generated `ReShade.ini` also sets `TextureSearchPaths` (`.\Textures,.\Textures\SweetFX`).
+
 Each generated preset writes both `Techniques` and `TechniqueSorting` from the same canonical order. This is required because the pinned ReShade 6.8.0 runtime falls back to `[GENERAL] TechniqueSorting` when the preset key is absent; an older user value could otherwise reorder a multi-effect stack. Preset validation rejects a sorting list that differs from the selected profile. Original leaves both lists empty.
 **Preview renderer and cache (RC8 freeze exception).** `New-TpmReShadePreviewBitmap` decodes the bundled `TPM-preview-landscape.png` reference and renders a safe deterministic approximation for `Before`, `After`, `Split`, and percentage-driven `Slider` output; it does not run a game or execute ReShade shaders. The processed bitmap is derived from the same decoded reference and cached per profile, so actual in-game results may vary. Comparison composition copies bounded pixel regions so the untouched side remains byte-stable. `New-TpmReShadePreviewArtifact` materializes results under `ReShadePreviewCache\`; rendering does not depend on live-fetched ReShade runtime files.
 
 The cache manifest records the subject/mode, slider position when applicable, intensity identity, preset version, approved shader SHA-256 values, reference identity/version/hash, and renderer version. A missing, corrupt, stale, or mismatched manifest/image regenerates safely; cache artifacts are never trust or deployment evidence. Each WinForms preview keeps one decoded `Reference` bitmap and one processed bitmap per profile. Slider Paint reads only those cached bitmaps, clips the two sides, and draws the divider; it never allocates a composite bitmap, replaces `PictureBox.Image`, decodes a file, or runs the profile pixel generator during a drag. Slider changes are coalesced through a short WinForms timer, while keyboard/programmatic updates invalidate the same view immediately. Close detaches handlers, stops and disposes the timer, clears pending state, disposes the picture image and render cache, then disposes the form. `Open-TpmReShadePreviewWindow`, `Update-TpmReShadePreviewWindow`, `Close-TpmReShadePreviewWindow`, and `Show-TpmReShadePreviewWindow` provide the window lifecycle. If a terminal chooser requests `R` after disposal, it creates a fresh gallery session, synchronizes the selected profile, returns that replacement session to the caller, and leaves final teardown with the caller. WinForms is loaded lazily, requires STA for actual display, and returns a text-only fallback in noninteractive hosts.
 
-The visual-first gallery owns a 0-100 `ComparisonSlider` TrackBar. `Get-TpmReShadePreviewStateValue` reads synchronized gallery state; the 16 ms WinForms timer coalesces `ValueChanged` bursts and paints the latest position, while keyboard `KeyUp` applies immediately. Gallery slider input changes only comparison view/position. The terminal chooser remains the sole profile selector, and `Sync-TpmReShadeGallerySelection` refreshes the selected profile even while Slider mode is active.
+The visual-first gallery owns a 0-100 `ComparisonSlider` TrackBar and a profile selector over the selectable canonical profiles. `Get-TpmReShadePreviewStateValue` reads synchronized gallery state; the 16 ms WinForms timer coalesces `ValueChanged` bursts and paints the latest position, while keyboard `KeyUp` applies immediately. Slider input changes only comparison view/position. The profile selector and terminal numbered chooser update the same `SelectedProfileId`; `Sync-TpmReShadeGallerySelection` refreshes the preview and synchronizes the selector without changing Slider mode or position.
 **Full profile deployment and restore (RC8 freeze exception).** Normal ReShade setup and the explicit per-game restore action call `Install-TpmReShadeProfileDeployment`. It stages the architecture-selected ReShade DLL, a canonical generated `ReShade.ini` when a trusted profile is selected, and every approved effect asset, then promotes them with one `Invoke-TpmTransactionalPromote` transaction. The per-game ownership manifest is stored under `ReShade\TPM-State\Deployments\<SHA256(game ID)>.json`; ownership is committed only after the physical promotion and post-promotion hashes succeed. A later profile-history entry is written only after that deployment returns success.
 
 Restore history is a selector, not trust evidence. Restore validates the profile schema, ordered approved effect IDs, ordered catalog hashes, and intensity variant before deployment; it never copies a historical path or arbitrary historical file. Missing, corrupt, stale, or unsupported history produces a friendly fresh-selection path. The chooser requires an explicit `R` restore choice, offers a remembered profile only after explicit confirmation, and exposes catalog-bound favorites through `F`.
-The normal visual-first setup prints the profile descriptions, opens an optional
-non-modal gallery, and immediately presents the terminal chooser for all twelve
-canonical profiles. The numbered terminal path remains authoritative when WinForms is
-unavailable or the gallery closes. It does not block on modal UI or leave the
-workflow without a visible prompt; text selection, `U`, `R`, `B`, and `D` all
-remain available before explicit confirmation.
+The normal visual-first setup prints the profile descriptions, opens the
+non-modal gallery, and leaves the synchronized terminal chooser available.
+Either surface can select any selectable canonical profile. The terminal
+path remains usable when WinForms is unavailable or the gallery closes. While
+open, the terminal imports the latest gallery choice after pumping WinForms
+events. If the gallery closes first, it imports the final preview choice once;
+terminal choices made afterward stay authoritative. While the terminal prompt is
+waiting, `Read-TpmReShadeTerminalInput` polls an idle callback (console access is
+behind the `Test-TpmConsoleKeyAvailable` / `Read-TpmConsoleKey` / `Write-TpmConsoleText` /
+`Get-TpmConsoleCursorPosition` / `Set-TpmConsoleCursorPosition` / `Get-TpmConsoleMetrics`
+seams). The menu is printed from line records (`Get-TpmReShadeTerminalMenuLines`); on a gallery change
+`Update-TpmReShadeTerminalSelectionInPlace` rewrites the two marker lines and the Current selection line
+at rows computed relative to the live prompt row (so a scrolled console still works), only when every row is
+on screen, the width is unchanged and the wrapped row counts match, then restores the cursor to the end of
+the typed input. Otherwise nothing is written in place and a one-line announcement is printed with the prompt
+redrawn; a failed update never breaks the input. Typing is end-of-line only (no caret movement). The returned `U` choice is
+always the latest canonical selection, separately from that display. A closed gallery is never polled.
+Reopening the gallery starts a new synchronization session. `U`, `R`, `B`, and `D` remain available
+before explicit confirmation. The gallery closes automatically when the chooser
+returns.
 Before game selection, `Invoke-ReShadeUpdateIfAvailable` compares the installed trusted
 installer version with the official `reshade.me` version, verifies the downloaded installer
 and extracted DLLs, and offers an explicit update/keep choice. It does not deploy to games
@@ -905,7 +937,7 @@ The adapter does not fabricate an incomplete item to label a fully promoted,
 otherwise-complete update as `PARTIAL_APPLIED`.
 
 Path/device safe skips remain distinct from ordinary BepInEx failures. The main
-result offers `[H] Open 10) Library Health Check` only when missing or
+result offers `[H] Open 11) Library Health Check` only when missing or
 unavailable saved paths were reported; ordinary deployment, rollback, cleanup,
 and update-blocked failures retain their existing retry, Details, and support
 guidance instead of presenting a misleading path-repair action. This routing is
@@ -1333,7 +1365,7 @@ LaunchBox/frontend ideas without asking again.
 - `Backup-LaunchBoxFiles`: backs up every file about to change before any write, aborts
   the whole operation if backup fails. Scoped to the specific files changing only (not the
   whole Data\ folder -- platform files like Arcade.xml run 20+ MB).
-- `Invoke-RestoreLaunchBoxBackup`: surfaced as a sub-choice under mode 11 (Restore Backup),
+- `Invoke-RestoreLaunchBoxBackup`: surfaced as a sub-choice under mode 12 (Restore Backup),
   not a new top-level mode. Mirrors `Invoke-RestoreBackup`'s existing UX (list by
   timestamp, confirm with YES).
 
@@ -1373,7 +1405,7 @@ persistent settings go into `Save-Config` once, not at each call site.
 
 ---
 
-## PostgreSQL setup for Incredible Technologies games (Mode 12, v0.99)
+## PostgreSQL setup for Incredible Technologies games (Mode 13, v0.99)
 
 Feature-freeze exception, explicitly granted by the user.
 
@@ -1456,7 +1488,7 @@ the downloaded/extracted working folder in finally.
   Administrators, and SYSTEM. The UAC child receives only the random state-file
   path, atomically claims it, reserves a marker containing the issuance,
   nonce, and attempt, validates the envelope, decrypts the password, and
-  continues option 12 automatically. Validation failure removes the marker
+  continues option 13 automatically. Validation failure removes the marker
   and restores the encrypted challenge. UAC denial can reuse the untouched
   challenge; a started-child retry always receives a fresh attempt. The
   password is never placed in the child command line, logs, console output, or
@@ -2019,7 +2051,7 @@ Y/N confirmations and "press Enter to continue" prompts untouched).
 
 ---
 
-## Check for Updates (Mode 13, v0.99.39)
+## Check for Updates (Mode 14, v0.99.39)
 
 Feature-freeze exception, explicitly requested by the user as the planned follow-up to the
 standalone `tools/Invoke-TpmAutoUpdate.ps1` helper (PR #51, merged) -- see
@@ -2236,15 +2268,16 @@ widths to select a crowded two-column layout. There is now exactly one productio
 the returned screen is not complete for the actual viewport. In that case it prints resize
 guidance and redraws; no hidden or clipped option can consume input. Once a complete screen
 is available, `Resolve-MainMenuCommand` is the only command allowlist before numeric
-dispatch: exact `1`-`15` selects a mode, `H` opens the distinct help screen, `L` opens the
+dispatch: exact `1`-`16` selects a mode, `H` opens the distinct help screen, `L` opens the
 log/report folder, and `Q` exits. Invalid text is stored as a render notice and shown on
 the next cleared redraw before the prompt; legacy `U`, leading-zero numbers, and blank input
 are rejected before any workflow branch can see them. Help returns on Enter and does not
 alter menu expansion state.
 
-**Unchanged by design:** existing menu numbering (1-13) and every existing mode's own behavior remain
-unchanged; option 14 adds the support-package workflow and Exit is now option 15. The `switch`
-dispatch and adaptive renderer keep the same one-source menu model.
+**Menu extension.** The RC2 menu had options 1-13, the support-package addition extended
+it to 1-15, and the RC8 required-patch owner-test candidate inserts Required game patches
+at option 10. Health Check, Restore, Postgres, Updates, Support Package, and Exit therefore
+move to options 11-16; no other existing action changes behavior.
 
 **Description text sourcing varies by tier -- a real gap found in review (RC3).**
 `Get-MainMenuSectionRows` does not use one shared description field for every tier:
@@ -2256,7 +2289,7 @@ there is no hidden `?` help command or compact-tier hint advertising one.
 
 **Complete-or-block rendering (RC8).** `Render-MainMenuScreen` never presents a partial
 numbered menu. It first computes the visible option set against the caller's actual width
-and height; the prompt is allowed only when every option 1-15 is visible and the layout
+and height; the prompt is allowed only when every option 1-16 is visible and the layout
 fits within the viewport. A too-short or otherwise incomplete render shows resize guidance
 and the main loop consumes no menu choice. This prevents a beginner from selecting a
 different action because the intended item was clipped below the prompt.
@@ -2286,6 +2319,154 @@ extraction marker (which locates the inline if/else block by a distinctive strin
 own source text) was updated from the literal `"Library Management"` header -- which no
 longer appears inline in the if-block, since it now lives inside `Get-MainMenuSections`
 -- to `"Show-MainMenu"`.
+
+
+## Required game patches (RC8 owner-test candidate)
+
+`scripts/TpmRequiredPatchEngine.ps1` is dot-sourced before the interactive menu and is
+dispatched from option 10. `scripts/TpmRequiredPatchRecipes.json` is the schema-3 recipe
+catalog. The engine is shared by automatic discovery for registered games, manual
+installation into an already-installed game folder, and undo; manual mode does not
+register a game.
+
+The owner-approved boundary is user-supplied local payloads only. TPM does not
+host or acquire payloads. A curated metadata-only RomVault DAT is permitted,
+but none is bundled; users provide payloads. Every recipe pins the exact build
+and executable identity, ZIP member path, member size/runtime SHA-256, target
+preconditions, post-patch identity, and setup prerequisites. The catalog has
+thirteen exact-build entries across twelve game builds: Family Guy Bowling
+1.15; two mutually exclusive Shining Force -- Cross Elysion 2.06.00 Ver C
+shader variants; five BlazBlue builds; Rabbids Hollywood; NERF Arcade; Rainbow
+BomberGirl; Teenage Mutant Ninja Turtles; and Silent Hill The Arcade.
+Family Guy pins `bowling.exe` SHA-256
+`3C4B406AA7B353CD416913308B8B714F7E17588D5A091326E0250A71A3407188`; its
+`BepInEx/plugins/FGBTPPlugin.dll` source member is 23,552 bytes, DAT SHA-1
+`228F6C921DCD9472B7A8EC1F2E2F06546B667B37`, runtime SHA-256
+`7FECFC5D0B07DDC68968AE1D92383AB23025DE7E3BE33D2504F71F0196EB4A23`.
+Elysion pins `project_f-ringedge-release.exe`, SHA-256
+`68D7E518CEAE4D411F219C8D11A15F164ED0FDE04B114E8D09FF3C496076529E`;
+its Main members are `rom/shader.farc.AMD` SHA-256
+`9078D9566E082AEE739B89724E0730CC35DA46DEE6EE4F9FFC6E24D22128A8CD` and
+`rom/shader.farc.NVIDIA` SHA-256
+`830163BAAD73FFD15FE8206FE2682D2193D3074874349A487068771FEE0B4C98`.
+BCS2 pins the Main `game.exe` SHA-256
+`DEB3F6265888EBD7303912CB184E12284CDBF9D7D23BD46C4DE1B8237E2057DD` and
+`iDmacDrv32.dll` at 77,824 bytes, SHA-1
+`F34DDF44B5138517D548383E0E672B8AA70F1BC7`, SHA-256
+`2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04`; this
+matches the guide's required CRC `BCB0E7FE` (2011-01-12). The official
+BCS2 profile's `ExecutableName` is blank; the engine instead requires the
+exact registered `BlazBlueContinuumShift2` profile `GamePath` to end in the
+recipe executable path and validates that executable's exact SHA-256.
+BlazBlue Continuum Shift (2009) was verified against profile `BlazBlueContinuumShift`,
+profile SHA-256 `E1970108F607F66E90D8AA516A9F261D0AC2EA5E2514F9296B6D5871D353EE1E`,
+and `game.exe` SHA-256
+`52F22A979460431213BA26C1FA6E59F877CB8B21A5CF466A109A2F1AC5A6C74A`.
+Blazblue Cross Tag Battle was verified against profile `BlazBlueCrossTagBattle`,
+profile SHA-256 `7C82217C1675F24CE133417EF750EB8A3F84CDBD0F8564E1089EA0B283BCB13E`,
+and `Game.exe` SHA-256
+`8994C1E1D89E7363452A04B07748BBA7CF37C52750027B96AC75C38C20E21636`.
+These recorded source-profile hashes are provenance only, not additional
+runtime hash pins. Runtime checks use the exact recipe ProfileId and
+executable; registered-game discovery also validates the registered GamePath.
+Cross Tag's official profile names `Game.exe`; Continuum Shift's `ExecutableName`
+is blank. Both exact Main ZIP members are `iDmacDrv32.dll` at 77,824 bytes,
+SHA-1 `F34DDF44B5138517D548383E0E672B8AA70F1BC7`, SHA-256
+`2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04`,
+matching guide CRC `BCB0E7FE`. These are distinct exact profile/build/executable
+bindings; no generic executable authorization is inferred.
+Rabbids pins `Game.exe` SHA-256
+`979F9736A99745454429908227CDD2F48875F193D439CFA33A9E14B4578DA95D` and its
+`Game_Data/Managed/Assembly-CSharp.dll` member at 1,592,320 bytes, SHA-1
+`624F619F827B9B0EAC0C936B40E7DC8348D48488`, SHA-256
+`BEA584D3EDF5DA73DBFACAFA5E73B1260B3F18CE7E346AB1BEACD8E885559764`.
+Six later exact-build cases extend the same schema and transaction engine.
+BlazBlue Central Fiction (`BBCF`) pins `game.exe` SHA-256
+`839323E068EA1274DEB271A0920BC507B0A75A5D22416F2FB7EEF9671E423A66` and
+its 75,776-byte `iDmacDrv32.dll` with guide CRC `F1FF8CC9`, SHA-256
+`71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939`.
+BBCP Chronophantasma 2.03 pins `game.exe` SHA-256
+`EF5BA5364C6324B9DE7653B146123E8C12BA446A3809BD437CA246B1382C79F6`.
+Its guide requires driver CRC `F1FF8CC9`; exact BBCP Main currently contains
+the 77,824-byte BCB0E7FE driver, SHA-256
+`2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04`.
+The `BBCP` recipe replaces only that exact before-hash with the exact 75,776-byte
+`F1FF8CC9` member from the named BlazBlue Central Fiction Main ZIP, SHA-256
+`71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939`. This
+cross-title source is justified by the BBCP guide's exact CRC pin and the
+verified member bytes, not by title or filename similarity. `SourceSet` names
+the exact local ZIP file and the engine streams only the named member while
+checking its size and hash. The official `GameProfiles/BBCP.xml` hash is
+provenance only; exact registered profile, GamePath and executable SHA-256
+remain the runtime identity binding.
+NERF Arcade (`NERF`) pins `Nerf.exe`
+`AEA588D26939537287125C59994B3F04B70D791343979A137AE7524A88D45B04` and
+`NERFTPPlugin.dll` SHA-256
+`7A7AA72D652704938EBDE6187D89314757F5832C1DBCC28E86B8814F6D0411D8`;
+Rainbow BomberGirl (`RainbowBombergirl`) pins `game.exe`
+`5387423190DDF7D76041C3898C125B33980FE25B7FC7057DA7F0C535DD333ABA` and
+`BBGTPPlugin.dll` SHA-256
+`3D9555B1345EC57DB863126F59BC2F446E22217F31D7A1FE4FB5444E2E64F83B`;
+Teenage Mutant Ninja Turtles (`TMNT`) pins `TMNT.exe`
+`11AEDEEE2136DA3BF69392B5FE76818707BDD8E413AE99F829F394F8B80B295F` and
+`TMNTTPPlugin.dll` SHA-256
+`37E8229921B7B838A452676E70640EE5AC34114DA0923D6F2DE6FE482F0C62C9`.
+The three plugin recipes require the exact Main BepInEx core member
+`BepInEx/core/BepInEx.dll`; they do not infer a configuration-file prerequisite.
+Silent Hill The Arcade (`SilentHill`) pins `KSHG.exe`
+`9B8A6C1BF81F9D690E2BEDB94E3AB2844313A83758923C22704DA3241E492995` and
+`dsound.dll` SHA-256
+`6D57ACF2E79C7F816C70C04A82F264E17C27CA243B3F6AFC1AD3A14445C390AB`.
+Its codec BAT is a separate Windows prerequisite and is never executed.
+The four original BlazBlue driver entries, Rabbids, the plugin restorations,
+and Silent Hill are absent-file restorations only; they create no target unless
+it is absent, skip the exact desired hash, and refuse other bytes. BBCP is the
+single explicit replacement: its exact known before-hash is required, its
+guide-pinned after-hash is skipped, and every other target state is refused.
+These rules do not claim that a correctly bundled source file needs repair.
+Runtime payload validation uses exact member size and SHA-256; DAT SHA-1 is
+provenance only. Source parsing streams only the exact bounded ZIP member.
+Planning validates canonical game roots, the active executable and target
+bytes, registered profile identity when applicable, recipe prerequisites and
+closed-game state.
+Only a recipe-declared before-state is patchable: absent for Family Guy, the
+four original BlazBlue driver restorations, Rabbids, the three exact-build
+BepInEx plugin restorations, and Silent Hill; exact BBCP before-hash for its
+replacement; exact opposite-vendor SHA-256 for Elysion. Exact after-state is
+skipped; all other states are refused.
+Apply creates and verifies the backup before creation/replacement, checks the
+read-back, and records an undo receipt. Undo uses the same receipt and file
+identity checks; for created files it removes only the exact TPM-created file.
+Reapply after undo is a fresh verified transaction. Automatic mode discovers
+eligible registered-game recipes, shows one plain-language per-game list, and
+applies that reviewed list after one user confirmation. Manual mode uses the
+same validation/apply/undo engine for an installed folder that is not
+registered.
+The Elysion guide entry `[809]` requires a shader fix for AMD/NVIDIA and says
+to choose the file that applies to the system. The schema-3 alternatives use
+one existing hardware-evidence snapshot; AMD requires unambiguous AMD evidence
+and the exact NVIDIA target hash, while NVIDIA requires unambiguous NVIDIA
+evidence and the exact AMD target hash. The variants share an exclusive group.
+An exact desired hash is skipped; `.ORIGINAL` (SHA-256
+`69A4CAA802E5CFE31F3610BEBF3045233ABED08EB0882180CE4127D1554A45E7`), unknown
+or other target bytes are refused. The collected `Supplied Shader` archive is
+an original-backup match, not a repair payload. Cross Raid remains unsupported:
+its profile/build comparison has different executable/target hashes, and no
+Cross Raid AMD/NVIDIA alternatives were verified. Hybrid or ambiguous GPU
+evidence is refused; the engine does not infer which adapter a game uses.
+
+BepInEx is a required Family Guy prerequisite; its guide's
+`[Preloader.Entrypoint] Type=MonoBehaviour` setting, TeknoParrot
+registration/controls, launch, and actual gameplay remain separate
+verification steps. Patch success alone is never reported as end-to-end game
+readiness.
+
+No source-dependent recipe is enabled without exact source member hashes and exact-build
+evidence. Unconfirmed Main-root access and installed game state are not treated as
+evidence. Historical engine receipts apply only to their recorded source/base and do not
+certify this integration.
+
+---
 
 ## Shared workflow status and footer (issue #300)
 
@@ -2469,7 +2650,7 @@ contracts retain their specialized validation and are inventoried in
 ## Support package architecture (issue #300)
 
 `New-TpmSupportPackage` is a fixed-scope collector invoked by the top-level
-menu's option 14. It creates a uniquely named ZIP beneath the script's
+menu's option 15. It creates a uniquely named ZIP beneath the script's
 `SupportPackages\` directory and returns a structured result with
 `Succeeded`, `Partial`, `PackagePath`, per-source records, and failures.
 Collection is split into TPM-owned files, the exact TeknoParrotUI
@@ -3764,3 +3945,5 @@ root, and exit result. HEAD alone is not treated as executable-state identity.
 The focused remediation contracts test invokes `Test-TpmPermanentProcedures.ps1` in child `pwsh.exe` processes. Test-only `Invoke-TpmTestChildProcess` starts asynchronous reads on both redirected streams before waiting, bounds child execution at 30 seconds, confirms timeout termination within a further 5 seconds, and bounds stream-drain completion. Sequential end-of-stream reads can deadlock when the other pipe fills.
 
 The child-gate assertions retain their owner-status and certification-only stale-package checks. Output normalization removes ANSI escapes and joins PowerShell's `|`-prefixed wrapped diagnostic continuations; expected status text and exit-code assertions remain unchanged. Regression coverage writes 1 MiB to each stream and verifies timeout termination.
+
+**Preview repairs (TPM-RESHADE-TWENTY-EFFECTS-001).** (1) `Set-TpmReShadeDescriptionLabel` sets the description, sizes the label from `Measure-TpmReShadeDescriptionHeight` (`TextRenderer.MeasureText` with the label's real font, width and padding; the maximum height is kept when measurement is impossible) and calls `Refresh()` before the heavy preview render; `Update-TpmReShadeDescriptionLayout` re-measures on width and DPI changes. (2) `Get-TpmReShadeImageDisplayRectangle` is the single Zoom-letterbox calculation shared by the paint handler and `Update-TpmReShadeSliderPlacement`, which sits the slider in its own full-width host row and aligns the thumb-centre travel with the drawn image on size, layout and DPI events. The thumb inset is measured on a throwaway, never-shown probe TrackBar (`Measure-TpmTrackBarThumbCenters`; the probe is moved with TBM_SETPOS and redraw so its thumb rectangle is recomputed, never the live slider), cross-checked against a read-only reading of the live thumb (a mismatch means no placement); the picture host's side padding reserves that inset so both end thumbs stay fully visible. Placement repair (slider defect measured by Procedure B G7 on 14a76ae): `Test-TpmThumbMeasurement` accepts a reading only if its travel is positive and its inset is sane against the width the reading was taken at (`MeasuredWidth`, never the destination image width), so a stale probe with identical endpoints is refused with a bounded `SliderPlacementDiagnostic` instead of being used. `Invoke-TpmReShadeSliderPlacementPass` validates the whole proposed layout before applying anything, applies it transactionally (original padding, slider Left and Width are restored if padding, layout or slider assignment throws; `Set-TpmControlHorizontalPadding` no longer swallows a failing `PerformLayout`, so that failure reaches the transaction) and pairs each measurement with its own width. `Update-TpmReShadeSliderPlacement` guards against the synchronous re-entry the padding change causes (padding -> layout -> picture SizeChanged -> placement): the re-entrant call only marks `SliderPlacementPending`, the outer call repeats at most 3 passes in total, and the guard is cleared in a finally block. Centered text: the gallery's instruction and description labels are `TopCenter`, `Measure-TpmReShadeDescriptionHeight` adds `HorizontalCenter` to its flags (wrapping width and height unchanged), and the in-picture label (ORIGINAL, AFTER, BEFORE  |  AFTER) is drawn by `Add-TpmReShadePreviewLabel` centered across the picture from `Get-TpmReShadePreviewLabelLayout` (optionally relative to an origin: the live Slider-mode paint handler uses the same routine with the displayed image rectangle); the preview renderer version is '4' so cached pictures with the old left label are not reused. (3) The terminal in-place update described above. Descriptions state the preview status honestly (`Get-TpmReShadeDescriptionText`); `Get-TpmReShadePreviewApproximationSettings` returns settings only for `APPROXIMATE` profiles, and neutral, reference and unavailable previews are left unchanged rather than forced to differ. Real WinForms pixel agreement, DPI behaviour and real HDR detection are Windows-only evidence.

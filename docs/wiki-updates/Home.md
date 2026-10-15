@@ -22,7 +22,7 @@ Registers your extracted games with TeknoParrot, copies controls between games o
 | AutoSync extraction | Extracts ZIP files from a NAS or local source into a staging folder, skipping unchanged games |
 | Control propagation | Bind one game per control type; the script copies those bindings to every other game of the same type |
 | Crosshair setup | Deploys custom P1/P2 cursor images to all registered lightgun games |
-| ReShade | Installs ReShade post-processing into game folders (sharpening, CRT scanlines, colour) |
+| ReShade | Opens a non-modal preview with 22 profile choices built from 20 approved pinned shader effects, in four groups (the HDR group only on an HDR-on display); the preview selector and terminal list stay synchronized |
 | dgVoodoo2 | Fixes older games that use DirectX 8, DirectDraw, or Glide |
 | GPU fix | Applies the correct AMD/NVIDIA/Intel fix flag to every registered game that supports one |
 | Force feedback (FFB) | Native FFB Blaster (paid membership) and/or a free third-party plugin, fetched live |
@@ -122,11 +122,12 @@ features. RC7 remains the current published release.
 - [[GPU Fix]] -- Mode 7: GPU vendor fix flags (AMD / NVIDIA / Intel)
 - [[FFB Setup]] -- Mode 8: native FFB Blaster (membership) and free third-party plugin
 - [[BepInEx]] -- Mode 9: user-approved install, update, or repair-reset using the stable x64/x86 package matching the validated game executable
-- [[Health Check]] -- Mode 10: read-only library status check (registered/broken/empty, optional-feature coverage)
-- [[Restore Backup]] -- Mode 11: roll back UserProfiles, LaunchBox files, or Postgres databases to a previous backup
-- [[Postgres Setup]] -- Mode 12: install/configure PostgreSQL for Incredible Technologies games (Golden Tee Live, Power Putt Live, etc.)
-- [[Check for Updates]] -- Mode 13: manual, backup-first check against the latest GitHub release
-- [[Quick Start#Send a support package]] -- Mode 14: create a safe support ZIP
+- [[Quick Start]] -- Mode 10: exact supported patches from user-supplied local archives
+- [[Health Check]] -- Mode 11: read-only library status check (registered/broken/empty, optional-feature coverage)
+- [[Restore Backup]] -- Mode 12: roll back UserProfiles, LaunchBox files, or Postgres databases to a previous backup
+- [[Postgres Setup]] -- Mode 13: install/configure PostgreSQL for Incredible Technologies games (Golden Tee Live, Power Putt Live, etc.)
+- [[Check for Updates]] -- Mode 14: manual, backup-first check against the latest GitHub release
+- [[Quick Start#Send a support package]] -- Mode 15: create a safe support ZIP
 - [[Troubleshooting]] -- Common problems and fixes
 - [[Changelog]] -- Version history
 

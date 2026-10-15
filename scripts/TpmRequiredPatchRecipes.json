@@ -1,0 +1,400 @@
+{
+  "Schema": 3,
+  "Entries": [
+    {
+      "Id": "family-guy-bowling-bepinex-plugin",
+      "ProfileId": "FamilyGuyBowling",
+      "BuildName": "Family Guy Bowling (1.15)(2017)(USA)[Team Play PC][TP]",
+      "Executable": "bowling.exe",
+      "ExecutableSha256": "3C4B406AA7B353CD416913308B8B714F7E17588D5A091326E0250A71A3407188",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Family Guy Bowling (1.15)(2017)(USA)[Team Play PC][TP].zip",
+      "SourceEntry": "BepInEx/plugins/FGBTPPlugin.dll",
+      "SourceSize": 23552,
+      "SourceSha1": "228F6C921DCD9472B7A8EC1F2E2F06546B667B37",
+      "SourceSha256": "7FECFC5D0B07DDC68968AE1D92383AB23025DE7E3BE33D2504F71F0196EB4A23",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        },
+        {
+          "Id": "bepinex-entrypoint-mode",
+          "Type": "IniValue",
+          "Path": "BepInEx/config/BepInEx.cfg",
+          "Section": "Preloader.Entrypoint",
+          "Key": "Type",
+          "Value": "MonoBehaviour",
+          "Description": "BepInEx must run its preloader as MonoBehaviour."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/FGBTPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "7FECFC5D0B07DDC68968AE1D92383AB23025DE7E3BE33D2504F71F0196EB4A23",
+          "Payload": "payload/FGBTPPlugin.dll",
+          "PayloadSha256": "7FECFC5D0B07DDC68968AE1D92383AB23025DE7E3BE33D2504F71F0196EB4A23"
+        }
+      ]
+    },
+    {
+      "Id": "shining-force-cross-elysion-shader-amd",
+      "ProfileId": "ShiningForceCrossElysion",
+      "BuildName": "Shining Force - Cross Elysion (2.06.00 Ver C)(2012-12-29)(JPN)[Sega RingEdge][TP]",
+      "Executable": "project_f-ringedge-release.exe",
+      "ExecutableSha256": "68D7E518CEAE4D411F219C8D11A15F164ED0FDE04B114E8D09FF3C496076529E",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Shining Force - Cross Elysion (2.06.00 Ver C)(2012-12-29)(JPN)[Sega RingEdge][TP].zip",
+      "SourceEntry": "rom/shader.farc.AMD",
+      "SourceSize": 912224,
+      "SourceSha1": "6B6EA2B1DD4B3A2F583C5455EC29CD8673B7F48A",
+      "SourceSha256": "9078D9566E082AEE739B89724E0730CC35DA46DEE6EE4F9FFC6E24D22128A8CD",
+      "ExclusiveGroup": "shining-force-cross-elysion-shader",
+      "HardwarePredicate": {
+        "Vendor": "AMD"
+      },
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "rom/shader.farc",
+          "BeforeSha256": "830163BAAD73FFD15FE8206FE2682D2193D3074874349A487068771FEE0B4C98",
+          "AfterSha256": "9078D9566E082AEE739B89724E0730CC35DA46DEE6EE4F9FFC6E24D22128A8CD",
+          "Payload": "payload/shader.farc.AMD",
+          "PayloadSha256": "9078D9566E082AEE739B89724E0730CC35DA46DEE6EE4F9FFC6E24D22128A8CD"
+        }
+      ]
+    },
+    {
+      "Id": "shining-force-cross-elysion-shader-nvidia",
+      "ProfileId": "ShiningForceCrossElysion",
+      "BuildName": "Shining Force - Cross Elysion (2.06.00 Ver C)(2012-12-29)(JPN)[Sega RingEdge][TP]",
+      "Executable": "project_f-ringedge-release.exe",
+      "ExecutableSha256": "68D7E518CEAE4D411F219C8D11A15F164ED0FDE04B114E8D09FF3C496076529E",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Shining Force - Cross Elysion (2.06.00 Ver C)(2012-12-29)(JPN)[Sega RingEdge][TP].zip",
+      "SourceEntry": "rom/shader.farc.NVIDIA",
+      "SourceSize": 912160,
+      "SourceSha1": "A485E291C433E5406898E02A925A2FC5776E6704",
+      "SourceSha256": "830163BAAD73FFD15FE8206FE2682D2193D3074874349A487068771FEE0B4C98",
+      "ExclusiveGroup": "shining-force-cross-elysion-shader",
+      "HardwarePredicate": {
+        "Vendor": "NVIDIA"
+      },
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "rom/shader.farc",
+          "BeforeSha256": "9078D9566E082AEE739B89724E0730CC35DA46DEE6EE4F9FFC6E24D22128A8CD",
+          "AfterSha256": "830163BAAD73FFD15FE8206FE2682D2193D3074874349A487068771FEE0B4C98",
+          "Payload": "payload/shader.farc.NVIDIA",
+          "PayloadSha256": "830163BAAD73FFD15FE8206FE2682D2193D3074874349A487068771FEE0B4C98"
+        }
+      ]
+    },
+    {
+      "Id": "blazblue-continuum-shift-ii-idmac-driver-restore",
+      "ProfileId": "BlazBlueContinuumShift2",
+      "BuildName": "BlazBlue Continuum Shift II (2010)[Taito NESiCAxLive][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "DEB3F6265888EBD7303912CB184E12284CDBF9D7D23BD46C4DE1B8237E2057DD",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "BlazBlue Continuum Shift II (2010)[Taito NESiCAxLive][TP].zip",
+      "SourceEntry": "iDmacDrv32.dll",
+      "SourceSize": 77824,
+      "SourceSha1": "F34DDF44B5138517D548383E0E672B8AA70F1BC7",
+      "SourceSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "iDmacDrv32.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+          "Payload": "payload/iDmacDrv32.dll",
+          "PayloadSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04"
+        }
+      ]
+    },
+    {
+      "Id": "rabbids-hollywood-trigger-crosshairs-restore",
+      "ProfileId": "RabbidsHollywood",
+      "BuildName": "Rabbids Hollywood (2018)[Adrenaline PC][TP]",
+      "Executable": "Game.exe",
+      "ExecutableSha256": "979F9736A99745454429908227CDD2F48875F193D439CFA33A9E14B4578DA95D",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Rabbids Hollywood (2018)[Adrenaline PC][TP].zip",
+      "SourceEntry": "Game_Data/Managed/Assembly-CSharp.dll",
+      "SourceSize": 1592320,
+      "SourceSha1": "624F619F827B9B0EAC0C936B40E7DC8348D48488",
+      "SourceSha256": "BEA584D3EDF5DA73DBFACAFA5E73B1260B3F18CE7E346AB1BEACD8E885559764",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "Game_Data/Managed/Assembly-CSharp.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "BEA584D3EDF5DA73DBFACAFA5E73B1260B3F18CE7E346AB1BEACD8E885559764",
+          "Payload": "payload/Assembly-CSharp.dll",
+          "PayloadSha256": "BEA584D3EDF5DA73DBFACAFA5E73B1260B3F18CE7E346AB1BEACD8E885559764"
+        }
+      ]
+    },
+    {
+      "Id": "blazblue-continuum-shift-idmac-driver-restore",
+      "ProfileId": "BlazBlueContinuumShift",
+      "BuildName": "BlazBlue Continuum Shift (2009)[Taito Type X2][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "52F22A979460431213BA26C1FA6E59F877CB8B21A5CF466A109A2F1AC5A6C74A",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "BlazBlue Continuum Shift (2009)[Taito Type X2][TP].zip",
+      "SourceEntry": "iDmacDrv32.dll",
+      "SourceSize": 77824,
+      "SourceSha1": "F34DDF44B5138517D548383E0E672B8AA70F1BC7",
+      "SourceSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "iDmacDrv32.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+          "Payload": "payload/iDmacDrv32.dll",
+          "PayloadSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04"
+        }
+      ]
+    },
+    {
+      "Id": "blazblue-cross-tag-battle-idmac-driver-restore",
+      "ProfileId": "BlazBlueCrossTagBattle",
+      "BuildName": "Blazblue Cross Tag Battle (1.04.00,2.01.00)(2019-12-03)(JPN)[Sega ALLS][TP]",
+      "Executable": "Game.exe",
+      "ExecutableSha256": "8994C1E1D89E7363452A04B07748BBA7CF37C52750027B96AC75C38C20E21636",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Blazblue Cross Tag Battle (1.04.00,2.01.00)(2019-12-03)(JPN)[Sega ALLS][TP].zip",
+      "SourceEntry": "iDmacDrv32.dll",
+      "SourceSize": 77824,
+      "SourceSha1": "F34DDF44B5138517D548383E0E672B8AA70F1BC7",
+      "SourceSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "iDmacDrv32.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+          "Payload": "payload/iDmacDrv32.dll",
+          "PayloadSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04"
+        }
+      ]
+    },
+    {
+      "Id": "blazblue-central-fiction-idmac-driver-restore",
+      "ProfileId": "BBCF",
+      "BuildName": "BlazBlue Central Fiction (2.01.00)(2017-11-08)[Taito NESiCAxLive][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "839323E068EA1274DEB271A0920BC507B0A75A5D22416F2FB7EEF9671E423A66",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "BlazBlue Central Fiction (2.01.00)(2017-11-08)[Taito NESiCAxLive][TP].zip",
+      "SourceEntry": "iDmacDrv32.dll",
+      "SourceSize": 75776,
+      "SourceSha1": "D058D375DAD565A53D4DC821024087853926F775",
+      "SourceSha256": "71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "iDmacDrv32.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939",
+          "Payload": "payload/iDmacDrv32.dll",
+          "PayloadSha256": "71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939"
+        }
+      ]
+    },
+    {
+      "Id": "blazblue-chronophantasma-idmac-driver-repair",
+      "ProfileId": "BBCP",
+      "BuildName": "BlazBlue Chronophantasma (2.03)(2015-06-10)[Taito NESiCAxLive][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "EF5BA5364C6324B9DE7653B146123E8C12BA446A3809BD437CA246B1382C79F6",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "BlazBlue Central Fiction (2.01.00)(2017-11-08)[Taito NESiCAxLive][TP].zip",
+      "SourceEntry": "iDmacDrv32.dll",
+      "SourceSize": 75776,
+      "SourceSha1": "D058D375DAD565A53D4DC821024087853926F775",
+      "SourceSha256": "71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "iDmacDrv32.dll",
+          "BeforeSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+          "AfterSha256": "71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939",
+          "Payload": "payload/iDmacDrv32.dll",
+          "PayloadSha256": "71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939"
+        }
+      ]
+    },
+    {
+      "Id": "nerf-arcade-bepinex-plugin-restore",
+      "ProfileId": "NERF",
+      "BuildName": "NERF Arcade (1.55)(2024-08-23)[Raw Thrills PC][TP]",
+      "Executable": "Nerf.exe",
+      "ExecutableSha256": "AEA588D26939537287125C59994B3F04B70D791343979A137AE7524A88D45B04",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "NERF Arcade (1.55)(2024-08-23)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "BepInEx/plugins/NERFTPPlugin.dll",
+      "SourceSize": 20992,
+      "SourceSha1": "369C677DC5F3D2A2F320E18582B6FEBF967391AF",
+      "SourceSha256": "7A7AA72D652704938EBDE6187D89314757F5832C1DBCC28E86B8814F6D0411D8",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/NERFTPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "7A7AA72D652704938EBDE6187D89314757F5832C1DBCC28E86B8814F6D0411D8",
+          "Payload": "payload/NERFTPPlugin.dll",
+          "PayloadSha256": "7A7AA72D652704938EBDE6187D89314757F5832C1DBCC28E86B8814F6D0411D8"
+        }
+      ]
+    },
+    {
+      "Id": "rainbow-bombergirl-bepinex-plugin-restore",
+      "ProfileId": "RainbowBombergirl",
+      "BuildName": "Rainbow BomberGirl (2022-12-15)(JPN)[Konami PC][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "5387423190DDF7D76041C3898C125B33980FE25B7FC7057DA7F0C535DD333ABA",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Rainbow BomberGirl (2022-12-15)(JPN)[Konami PC][TP].zip",
+      "SourceEntry": "BepInEx/plugins/BBGTPPlugin.dll",
+      "SourceSize": 72192,
+      "SourceSha1": "17199BF42A4DC849ED7D2DE8A8625B1192FCD89B",
+      "SourceSha256": "3D9555B1345EC57DB863126F59BC2F446E22217F31D7A1FE4FB5444E2E64F83B",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/BBGTPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "3D9555B1345EC57DB863126F59BC2F446E22217F31D7A1FE4FB5444E2E64F83B",
+          "Payload": "payload/BBGTPPlugin.dll",
+          "PayloadSha256": "3D9555B1345EC57DB863126F59BC2F446E22217F31D7A1FE4FB5444E2E64F83B"
+        }
+      ]
+    },
+    {
+      "Id": "tmnt-bepinex-plugin-restore",
+      "ProfileId": "TMNT",
+      "BuildName": "Teenage Mutant Ninja Turtles (1.59)(2021-07-26)(USA)[Raw Thrills PC][TP]",
+      "Executable": "TMNT.exe",
+      "ExecutableSha256": "11AEDEEE2136DA3BF69392B5FE76818707BDD8E413AE99F829F394F8B80B295F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Teenage Mutant Ninja Turtles (1.59)(2021-07-26)(USA)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "BepInEx/plugins/TMNTTPPlugin.dll",
+      "SourceSize": 38400,
+      "SourceSha1": "BBB935EA1BB2133A6B0CFA1F54DBAA37D01E825E",
+      "SourceSha256": "37E8229921B7B838A452676E70640EE5AC34114DA0923D6F2DE6FE482F0C62C9",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/TMNTTPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "37E8229921B7B838A452676E70640EE5AC34114DA0923D6F2DE6FE482F0C62C9",
+          "Payload": "payload/TMNTTPPlugin.dll",
+          "PayloadSha256": "37E8229921B7B838A452676E70640EE5AC34114DA0923D6F2DE6FE482F0C62C9"
+        }
+      ]
+    }
+    ,
+    {
+      "Id": "silent-hill-the-arcade-indirectsound-restore",
+      "ProfileId": "SilentHill",
+      "BuildName": "Silent Hill The Arcade (2007-12-20)[Konami PC][TP]",
+      "Executable": "KSHG.exe",
+      "ExecutableSha256": "9B8A6C1BF81F9D690E2BEDB94E3AB2844313A83758923C22704DA3241E492995",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Silent Hill The Arcade (2007-12-20)[Konami PC][TP].zip",
+      "SourceEntry": "dsound.dll",
+      "SourceSize": 633344,
+      "SourceSha1": "ACF53D0D3D1B3C068FBD0F41C62AE91AA565EB7C",
+      "SourceSha256": "6D57ACF2E79C7F816C70C04A82F264E17C27CA243B3F6AFC1AD3A14445C390AB",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "dsound.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "6D57ACF2E79C7F816C70C04A82F264E17C27CA243B3F6AFC1AD3A14445C390AB",
+          "Payload": "payload/dsound.dll",
+          "PayloadSha256": "6D57ACF2E79C7F816C70C04A82F264E17C27CA243B3F6AFC1AD3A14445C390AB"
+        }
+      ]
+    }
+  ]
+}

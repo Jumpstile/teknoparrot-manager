@@ -1337,3 +1337,98 @@ commit, release, certification, or runtime activity.
 - Independent exact-diff review of the final source changes found no actionable findings.
 - No new ZIP was built, changed, or release-validated; no owner-runtime or database action was performed. The staging directory was deleted and then reconstructed from the exact `d83aa303ef97d5ff0f1538c4d77c87288af8fd09` source archive plus the authoritative allowlist and unchanged candidate ZIP. Verification at 2026-10-04T00:03:58.8079033Z–2026-10-04T00:04:00.9382647Z found 355/355 outer files and 355/355 nested payload files with exact path/length/SHA-256 matches and zero extras; candidate ZIP SHA-256 `608E247E6002A4B327A4DE07F458FC5A6D6E84FF8DC84BBE05EC53AA1E75F9E7`. Original filesystem metadata or unrecorded extras are not recoverable from the retained evidence. `DatabaseCatalogVerified=false`; database state remains UNKNOWN. The failed ZIP remains immutable HOLD; package SHA remains NONE. Owner-runtime proof, exact-SHA package validation, and release authorization remain outstanding.
 - Final timed `Run-TpmQualityGate.ps1` passed on the source/test contents of commit `4f219a504018f98e816c716424bc5da4928a7cc8` before this report-only evidence amendment: 2026-10-04T00:22:22.8702405Z–2026-10-04T00:33:26.5048085Z, PowerShell 7.6.6 / Pester 5.7.1, exit 0; Main 1311/1311 and SupportPackage 42/42. ASCII/parse, configured PSScriptAnalyzer, diff check, and permanent procedure gate passed. The gate does not establish package or owner-runtime status.
+## Issue #351 isolated required-patch review slice -- validation record
+
+- Slice contract: `TPM-REQUIRED-PATCHES-REVIEW-001`. The local review branch is
+  based on PR #321 head `9a9ac19`; GitHub handoff follows the required checks
+  and independent review.
+- Before product-file changes, the source and remediation mapping was recorded
+  in the PR #321 control board. The scope is the independently verified
+  13-entry/12-build recipe catalog and the RC8 runtime fixes required to
+  preserve the current candidate. Each outgoing source/test/documentation hunk
+  is mapped to Issue #351, the slice contract, and applicable permanent
+  procedures `TPM-TRACE-001`, `TPM-EVIDENCE-001`, `TPM-UX-001`, and
+  `TPM-TRUTH-001`.
+- The ten-commit ancestry from `9a9ac19` to `18e82a7` is dispositioned in
+  external local evidence `Isolated-Review-Commit-Disposition-20261015.json`
+  (SHA-256 `B5A98969CF206A92F78EBA0AE1058BEAEDA9553EF55F3FE9D98BEE2A215B69DF`).
+  The 44-path source-copy manifest is
+  `Isolated-Review-Source-Copy-Manifest-20261015.json` (SHA-256
+  `F686D30D1E1A75D07140173B2D4A7CA08BDBC44A5C487575840398D055D1A446`);
+  the final comparison is `Isolated-Review-Final-Source-Comparison-20261015.json`
+  (SHA-256 `72E0EEE1DB6077A9F2A0FF05870412F34AFAC2967DE4FC5F3375A7D7DBA53491`).
+  It records three byte differences: Main tests (two contract-path assertions),
+  the patch engine (BOM removed), and quality-gate freshness paths. Required
+  app/runtime fixes and matching tests are retained as source content; private
+  commit history and handoff artifacts are not copied.
+- Isolated current inputs: main script SHA-256
+  `22A38979C8EED589F5948875BED9869B400AE89114CE539BFEF89230F9976A4D`;
+  patch engine SHA-256 `D2F9123C8147E198FF9E8D946AA8C626F0AA364BB9C865249A276BA47A94EE42`
+  (the single source BOM was removed); 13-entry catalog SHA-256
+  `7B190D234667BE3059C7950659421EB810EB80C51C2E4B520B79B9CBC97F934D`;
+  current Main test SHA-256 `6C1A6D17DDDCB04756C32B7C4F5A0FA6B907850701ED9CDE9FEE2305CBD7491A`.
+- Focused required-patch Describe: PS7.6.7 / Pester 5.7.1 passed 13, failed
+  0, skipped 0, not run 1,471 of 1,484; `2026-10-15T04:01:56.811Z` to
+  `2026-10-15T04:03:24.462Z`, with the current test hash above. PS5.1.26100.9549
+  / Pester 5.7.1 passed 13, failed 0, skipped 0, not run 1,471 of 1,484;
+  `2026-10-15T03:58:15.106Z` to `2026-10-15T03:59:15.537Z`; that run used
+  Main test SHA-256 `BAE64805800424CC3CA00161929E4B3FA30014DCB744133B7DBEAC7C56A0F223`,
+  before only the new contract-path freshness assertions were added.
+- PS5.1.26100.9549 static check at `2026-10-15T04:04:37.913Z`--
+  `2026-10-15T04:08:05.283Z`: 11 PowerShell files parsed with 0 errors;
+  main script ASCII count 0; configured PSScriptAnalyzer 1.25.0 had 0
+  Error/Warning findings. Canonical InjectionHunter 1.0.0 ran
+  `2026-10-15T04:04:29.0295571Z`--`2026-10-15T04:06:27.7859131Z` on its
+  20-file production inventory: 41 findings, 0 unresolved.
+- Post-edit input-boundary comparison at `2026-10-15T04:17:26.5148628Z`--
+  `2026-10-15T04:17:26.7010844Z` checked SHA-256 and length for all 47 files
+  against the canonical 04:07 snapshot. Only the control board and this
+  reconciliation report differed; the remaining 45 source/test/gate inputs
+  matched. Record:
+  `Isolated-Review-Post-Edit-Input-Boundary-20261015T0417Z.json`, SHA-256
+  `3F96BDCD213D71341C2B7B8449081E86B13BAEDB80B360A6F2293D76098CA923`.
+  This is a file-boundary check, not a test result, full suite, or formal
+  Procedure A receipt.
+- The earlier standalone preflights are historical only: one used a stale
+  `ChangedAtUtc`; the corrected derived record did not capture start/end
+  times or an exit code. Neither is current standalone-gate evidence.
+- Canonical `Run-TpmQualityGate.ps1` completed in PowerShell 7.6.7 with pinned
+  Pester 5.7.1 from `2026-10-15T04:07:02.6595596Z` to
+  `2026-10-15T04:28:24.3139677Z`, exit 0. Main passed 1,484/1,484 and Support
+  passed 42/42; zero failures, skips, inconclusive, or not-run tests. ASCII/
+  parse, configured PSScriptAnalyzer, `git diff --check`, and the permanent
+  procedure gate passed. Original records:
+  `Isolated-Review-Canonical-20261015T0407Z.raw.txt` SHA-256
+  `2ED1A4D0146CBE4AFFE69048EDCE8464A39A3855F5F1E9F1814D87001B3A099D`;
+  `.stdout.txt` SHA-256
+  `7CF7657F0986F9EBAC8D8936D083E6A644188B7755DBF6B2F686FD7BCD7F0339`.
+  The run used the frozen 47-file input snapshot. Subsequent changes are
+  limited to EOL/CI metadata and public report wording; runtime, catalog,
+  Main tests, and gate scripts remain unchanged.
+- The final metadata diff adds only `.gitattributes` with an explicit LF rule
+  for `scripts/TpmRequiredPatchRecipes.json` and one `pull_request` base-branch
+  filter entry in `.github/workflows/ci.yml`; it changes no permissions,
+  checkout steps, or test commands. A bounded real Git checkout round-trip
+  under `core.autocrlf=true` and `false` preserved Main SHA-256
+  `22A38979C8EED589F5948875BED9869B400AE89114CE539BFEF89230F9976A4D`,
+  engine SHA-256
+  `D2F9123C8147E198FF9E8D946AA8C626F0AA364BB9C865249A276BA47A94EE42`,
+  and catalog SHA-256
+  `7B190D234667BE3059C7950659421EB810EB80C51C2E4B520B79B9CBC97F934D`.
+  The production catalog reader returned 13 entries from both checkouts with
+  no error. The round-trip exited 0 from
+  `2026-10-15T04:39:13.5187151Z` to `2026-10-15T04:39:17.9488006Z`; the
+  immutable result is `Isolated-Review-Catalog-EOL-RoundTrip-Root-20261015T0439Z.jsonl`,
+  SHA-256
+  `5C5C850D352843844A9449DA690AB50E68459293B80474226D6E49F35D534BDD`.
+- The isolated review delta is 49 paths: 44 modified tracked files and five
+  untracked files. The two metadata paths are included in that count.
+- The earlier five-entry full-folder characterization remains FAIL
+  (2,606 passed, 23 failed, 1 skipped, 0 not run; exit 70). It is historical
+  evidence, not a current full-folder pass or formal Procedure A result.
+- Owner/runtime boundaries: no live game/install, collection, DAT, profile,
+  PostgreSQL, service, codec, or driver mutation; no owner GUI/gameplay,
+  full Procedure A/B, Arcade, release, or publication result is claimed.
+- This addendum does not change PR #321 owner-report status. Independent review
+  and GitHub handoff follow required checks. Owner smoke and release
+  authorization remain pending.

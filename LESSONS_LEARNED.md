@@ -569,7 +569,7 @@ truncated that combined list to `Select-Object -First $maxRows` whenever it
 overflowed the viewport height. At a short console height this kept the
 *front* of the render (the banner and the earliest menu sections) and
 silently dropped whatever didn't fit off the *end* -- which, because the
-footer (Quit/Help controls) and the Application section (option 14, Exit)
+footer (Quit/Help controls) and the Application section (then-option 14, Exit)
 are built last, meant exactly the controls a user needs to actually operate
 the menu were the first things to disappear. A pre-existing Pester test even
 asserted this as intentional (`Should -Not -Match 'Exit'` on a short-viewport
@@ -584,7 +584,7 @@ trims from the *front* (keeping the tail) specifically so the last real menu
 item survives -- the opposite truncation direction from before. The Compact
 tier's "Type ? for descriptions." hint (a purely decorative line) was also
 moved from the end of the body to the beginning, because it was winning the
-tail-preservation priority over the actual "14) Exit" line by virtue of
+tail-preservation priority over the then-current "14) Exit" line by virtue of
 render order alone, not by design.
 
 **Rule.** When a render pipeline has to drop content to fit a viewport,
@@ -607,7 +607,7 @@ would always be *some* row budget left for body content. At the documented
 minimum supported viewport, 60x10, that assumption was wrong: the framed
 banner (6 rows) and footer (2 rows) alone consumed the entire 8-row budget,
 leaving zero rows for ANY body content -- not just early items, everything,
-including option 14 (Exit). The packaged diagnostic (`scripts\Debug-TPM-
+including the then-option 14 (Exit). The packaged diagnostic (`scripts\Debug-TPM-
 MenuLayout.ps1`) made this directly visible once its own separate crash
 (below) was fixed: `-Width 60 -Height 10 -Render` rendered only a banner and
 a footer, with nothing in between.
@@ -618,8 +618,8 @@ tighter version of the same layout: single-line banner and footer (no frame,
 no blank separator) free up several rows, and every option's `"N) Label"` is
 flow-packed as densely as the width allows instead of one per row. Tokens are
 packed whole (never split a number from its own label across two lines), and
-if even that doesn't fit, item rows trim from the front so the last item
-(ending in `14) Exit`) and the footer survive over the earliest options.
+if even that doesn't fit, item rows trim from the front so the then-current
+last item (ending in `14) Exit`) and the footer survive over the earliest options.
 
 **What failed, part 2: the packaged diagnostic script drifted from the
 render pipeline it exists to debug.** `scripts\Debug-TPM-MenuLayout.ps1`
