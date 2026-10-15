@@ -100,10 +100,10 @@ Describe 'TMNT 1.59 exact Main component restorations' {
         $script:tmntFragment.BaseCatalog.Sha256 | Should -BeExactly '8F30A2BC8CC8AC6B96A324962F9E12792572E08BE6512B1A1808420D6BDB5195'
         $script:tmntFragment.Entries.Count | Should -Be 2
         $script:tmntCatalog.Schema | Should -Be 3
-        $script:tmntCatalog.Entries.Count | Should -Be 69
-        @($script:tmntCatalog.Entries.Id|Sort-Object -Unique).Count | Should -Be 69
-        @($script:tmntCatalog.Entries.ProfileId|Sort-Object -Unique).Count | Should -Be 25
-        @($script:tmntCatalog.Entries|ForEach-Object{$_.Operations}|Where-Object Type -CEQ 'CreateFile').Count | Should -Be 61
+        $script:tmntCatalog.Entries.Count | Should -Be 72
+        @($script:tmntCatalog.Entries.Id|Sort-Object -Unique).Count | Should -Be 72
+        @($script:tmntCatalog.Entries.ProfileId|Sort-Object -Unique).Count | Should -Be 26
+        @($script:tmntCatalog.Entries|ForEach-Object{$_.Operations}|Where-Object Type -CEQ 'CreateFile').Count | Should -Be 64
         @($script:tmntCatalog.Entries|ForEach-Object{$_.Operations}|Where-Object Type -CEQ 'ReplaceFile').Count | Should -Be 8
         (Get-FileHash -LiteralPath $script:tmntCatalogPath -Algorithm SHA256).Hash | Should -BeExactly $script:TpmRequiredPatchCatalogSha256
         $expected=@{

@@ -1182,3 +1182,7 @@ Issue #351 adds four independently applicable KOF Regulation A Main component re
 ### Root focused verification, 2026-10-15 UTC
 
 The combined source has69entries/25profiles/61CreateFile/eightReplaceFile. All prior64 entries and order, the engine body and product Main are unchanged. Root's independent XML review at2026-10-15T18:14:26Z verified34 specified cases per engine: KOF5, MKDX5, TMNT5, catalog2 and existing required-patch integration17. Initial fixture failures remain preserved. KOF's corrected five cases passed within a batch whose three MKDX fixture failures were subsequently corrected; the final MKDX-only five-case and Main17 workers exited0 in both engines. The focused proof is1826663DB68DC6F63B9CBDB280F9EE5183D5751E7BF058C5D0F8EB0E15B2F03E. This does not claim a new full-suite, package, graphics compatibility or owner-runtime result. Root source commit/push and integration follow the existing authorized workflow; no lane performed publication. No build or ZIP copy is authorized by this source verification.
+
+### Gashaaaan 2 partial candidate status, 2026-10-15 UTC
+
+The candidate catalog now has 72 entries / 26 profiles / 64 CreateFile / 8 ReplaceFile, including three absent-only Jurassic Park 1.08 root DLL restorations for Gashaaaan 2. The prior 69-entry proof boundary is unchanged; the 72-entry candidate is not yet Pester-verified. This is a partial component set, not full dependency completion. Walking Dead `pm/` DLLs remain held. No ABI, gameplay, compatibility, or owner-runtime result is claimed.

@@ -248,7 +248,8 @@ jobs:
             "$PWD\Tests\TpmRequiredPatchCrossRaidBaseLane.Tests.ps1",
             "$PWD\Tests\TpmRequiredPatchTmntNativeMainComponents.Tests.ps1",
             "$PWD\Tests\TpmRequiredPatchKofMainComponents.Tests.ps1",
-            "$PWD\Tests\TpmRequiredPatchMkdxUsa106MainComponent.Tests.ps1"
+            "$PWD\Tests\TpmRequiredPatchMkdxUsa106MainComponent.Tests.ps1",
+            "$PWD\Tests\TpmRequiredPatchGashaaaan2MainDependencies.Tests.ps1"
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'

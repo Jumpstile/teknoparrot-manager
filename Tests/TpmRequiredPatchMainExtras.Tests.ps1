@@ -67,15 +67,15 @@ BeforeAll {
 }
 
 Describe 'MaiMai GreeN and Rabbids Hollywood Main-component restores' {
-    It 'binds three exact source members and the integrated 64-entry catalog' {
+    It 'binds three exact source members and the integrated 72-entry catalog' {
         $script:mainExtrasFragment.BaseCatalog.EntryCount | Should -Be 58
         $script:mainExtrasFragment.BaseCatalog.Sha256 | Should -BeExactly 'F86F09A8BD2749DC9C4531CD1D00A69BF07D85B14A8D281D33767732ED5B720A'
         $script:mainExtrasFragment.Entries.Count | Should -Be 3
         $script:mainExtrasCatalog.Schema | Should -Be 3
-        $script:mainExtrasCatalog.Entries.Count | Should -Be 69
-        @($script:mainExtrasCatalog.Entries.Id | Sort-Object -Unique).Count | Should -Be 69
-        @($script:mainExtrasCatalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 25
-        @($script:mainExtrasCatalog.Entries | Where-Object { $_.Operations[0].Type -ceq 'CreateFile' }).Count | Should -Be 61
+        $script:mainExtrasCatalog.Entries.Count | Should -Be 72
+        @($script:mainExtrasCatalog.Entries.Id | Sort-Object -Unique).Count | Should -Be 72
+        @($script:mainExtrasCatalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 26
+        @($script:mainExtrasCatalog.Entries | Where-Object { $_.Operations[0].Type -ceq 'CreateFile' }).Count | Should -Be 64
         @($script:mainExtrasCatalog.Entries | Where-Object { $_.Operations[0].Type -ceq 'ReplaceFile' }).Count | Should -Be 8
         (Get-FileHash -LiteralPath $script:mainExtrasCatalogPath -Algorithm SHA256).Hash | Should -BeExactly $script:TpmRequiredPatchCatalogSha256
         $expected=@{
@@ -108,6 +108,27 @@ Describe 'MaiMai GreeN and Rabbids Hollywood Main-component restores' {
             $catalogMatches=@($script:mainExtrasCatalog.Entries | Where-Object { $_.Id -ceq $entry.Id })
             $catalogMatches.Count | Should -Be 1
             ($catalogMatches[0] | ConvertTo-Json -Depth 20 -Compress) | Should -BeExactly ($entry | ConvertTo-Json -Depth 20 -Compress)
+        }
+        $gashExpected = @(
+            @{Id='gashaaaan2-jurassic-libogg-create';Member='libogg.dll';Sha256='E6B423A237ED5C1E2503F1B3E48855061A74343BDD8BBDB5DAD004C234513328'}
+            @{Id='gashaaaan2-jurassic-libvorbis-create';Member='libvorbis.dll';Sha256='971A471C5A7710BBFDAAA62D7A31EBC094B359FD374D015B602679E7CFEEAD69'}
+            @{Id='gashaaaan2-jurassic-libvorbisfile-create';Member='libvorbisfile.dll';Sha256='76E8A51A1E2F9FFC42D00A53F1214D4653B13182BDD30A154BBB9AE2853A8B97'}
+        )
+        $gashEntries = @($script:mainExtrasCatalog.Entries | Where-Object ProfileId -CEQ 'Gashaaaan2')
+        $gashEntries.Count | Should -Be 3
+        foreach($pin in $gashExpected){
+            $entry=@($gashEntries | Where-Object Id -CEQ $pin.Id)[0]
+            $entry.ProfileId | Should -BeExactly 'Gashaaaan2'
+            $entry.BuildName | Should -BeExactly 'Gashaaaan Refill! (2009-02-24)(JPN)[Konami PC][TP]'
+            $entry.Executable | Should -BeExactly 'IG2/exec_root/gasya.exe'
+            $entry.ExecutableSha256 | Should -BeExactly '67BDEBF22D64E997A59423EC68A36CF234F0060B4FB32BAFBCE6E5A6C2D5FEB6'
+            $entry.SourceRole | Should -BeExactly 'Main'
+            $entry.SourceSet | Should -BeExactly 'Jurassic Park (1.08)(2015)[Raw Thrills Linux PC][TP].zip'
+            $entry.SourceEntry | Should -BeExactly $pin.Member
+            $entry.SourceSha256 | Should -BeExactly $pin.Sha256
+            $entry.Operations[0].Type | Should -BeExactly 'CreateFile'
+            $entry.Operations[0].Target | Should -BeExactly ('IG2/exec_root/' + $pin.Member)
+            $entry.Operations[0].BeforeState | Should -BeExactly 'Absent'
         }
     }
 

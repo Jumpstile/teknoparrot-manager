@@ -23454,7 +23454,7 @@ Describe 'Required patch engine and local recipes' {
         $script:requiredPatchInputQueue = $null
     }
     AfterEach {
-        $script:TpmRequiredPatchCatalogSha256 = 'A097875B605418D76540A1547235C3F03898D3608300BC017694015FDD76CA12'
+        $script:TpmRequiredPatchCatalogSha256 = 'E79E138BE190940A4CDA3C8581738CFBF52647A5D6D25F9A05DACBC6EA49861C'
         $script:TpmOwnedLayout = $null
         $script:gamesInstallFolder = $null
         $script:requiredPatchInputQueue = $null
@@ -23740,10 +23740,10 @@ Describe 'Required patch engine and local recipes' {
 
     It 'binds all current catalog expansion rows to exact build and source identities' {
         $catalog = Read-TpmRequiredPatchCatalog -ProgramRoot ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')))
-        $catalog.Entries.Count | Should -Be 69
-        @($catalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 25
-        @($catalog.Entries | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProfileId,$_.BuildName,$_.Executable,$_.ExecutableSha256 } | Sort-Object -Unique).Count | Should -Be 25
-        @($catalog.Entries | ForEach-Object { $_.Operations } | Where-Object Type -CEQ 'CreateFile').Count | Should -Be 61
+        $catalog.Entries.Count | Should -Be 72
+        @($catalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 26
+        @($catalog.Entries | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProfileId,$_.BuildName,$_.Executable,$_.ExecutableSha256 } | Sort-Object -Unique).Count | Should -Be 26
+        @($catalog.Entries | ForEach-Object { $_.Operations } | Where-Object Type -CEQ 'CreateFile').Count | Should -Be 64
         @($catalog.Entries | ForEach-Object { $_.Operations } | Where-Object Type -CEQ 'ReplaceFile').Count | Should -Be 8
         $infinityExpectedRows = @(
             [pscustomobject]@{ Id='infinity-blade-fx-matrix32-main-restore'; Target='Binaries/Win32/matrix32.dll'; Size=109056; Sha1='355E6F9557BAFC726694DC2E40820FF8429D61FB'; Sha256='CB25982F65A32E3D29B3F449BD8CCF2E4A4B47CA3096B454B6910341B213D547' }
@@ -23815,6 +23815,9 @@ Describe 'Required patch engine and local recipes' {
             'hummerextreme-main-component-data-global-shader-hdr-vert'
             'primevil-main-component-disk0-data-nnstdshader-nnstdshader-frag'
             'primevil-main-component-disk0-data-nnstdshader-nnstdshader-vert'
+            'gashaaaan2-jurassic-libogg-create'
+            'gashaaaan2-jurassic-libvorbis-create'
+            'gashaaaan2-jurassic-libvorbisfile-create'
         )
         $fmodIds = @('sb3-fmod64-main-restore','sb3-fmodstudio64-main-restore')
         $mainExtrasIds = @('maimai-green-freeglut-main-restore','maimai-green-libcurl-main-restore','rabbids-hollywood-operator-main-restore')
@@ -24447,7 +24450,7 @@ Describe 'Required patch engine and local recipes' {
         [IO.File]::ReadAllText($requiredPatchFixture.PluginTarget) | Should -Be 'synthetic required plugin'
         Test-Path -LiteralPath $userProfile | Should -BeFalse
         Assert-MockCalled Read-PathWithBrowse -Times 1 -Exactly
-        $script:TpmRequiredPatchCatalogSha256 = 'A097875B605418D76540A1547235C3F03898D3608300BC017694015FDD76CA12'
+        $script:TpmRequiredPatchCatalogSha256 = 'E79E138BE190940A4CDA3C8581738CFBF52647A5D6D25F9A05DACBC6EA49861C'
         $script:TpmOwnedLayout = $null
     }
 
@@ -24500,7 +24503,7 @@ Describe 'Required patch engine and local recipes' {
         Invoke-TpmRequiredPatchMenu -TpRoot $tp -UserProfilesDir (Join-Path $tp 'UserProfiles') -ManagerRoot $manager -ProgramRoot $manager -MainSource $source -SupplementarySource ''
         Test-Path -LiteralPath $requiredPatchFixture.PluginTarget | Should -BeFalse
         @(Get-ChildItem -LiteralPath (Join-Path $owned 'Backups\GamePatches') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
-        $script:TpmRequiredPatchCatalogSha256 = 'A097875B605418D76540A1547235C3F03898D3608300BC017694015FDD76CA12'
+        $script:TpmRequiredPatchCatalogSha256 = 'E79E138BE190940A4CDA3C8581738CFBF52647A5D6D25F9A05DACBC6EA49861C'
         $script:TpmOwnedLayout = $null
     }
     It 'selects exact Cross Elysion GPU recipes and refuses a different executable revision' {
