@@ -184,21 +184,28 @@ function Get-PreviewSections {
             )
         }
         [pscustomobject]@{
+            Header = 'REQUIRED GAME PATCHES (SUPPORTED EXACT BUILDS)'
+            Color = 'Green'
+            Items = @(
+                [pscustomobject]@{ Number = 10; Label = 'Required Game Patches'; Desc = 'Find and safely install exact-build required fixes from user-supplied local ZIPs.' }
+            )
+        }
+        [pscustomobject]@{
             Header = 'MAINTENANCE & RECOVERY'
             Color = 'Magenta'
             Items = @(
-                [pscustomobject]@{ Number = 10; Label = 'Library Health Check'; Desc = 'Read-only status for registrations, broken paths, coverage, and installed enhancements.' }
-                [pscustomobject]@{ Number = 11; Label = 'Restore Backup'; Desc = 'Roll UserProfiles, LaunchBox files, or Postgres databases back to a previous backup.' }
-                [pscustomobject]@{ Number = 12; Label = 'Postgres Setup'; Desc = 'Install and configure local PostgreSQL for selected Incredible Technologies games.' }
+                [pscustomobject]@{ Number = 11; Label = 'Library Health Check'; Desc = 'Read-only status for registrations, broken paths, coverage, and installed enhancements.' }
+                [pscustomobject]@{ Number = 12; Label = 'Restore Backup'; Desc = 'Roll UserProfiles, LaunchBox files, or Postgres databases back to a previous backup.' }
+                [pscustomobject]@{ Number = 13; Label = 'Postgres Setup'; Desc = 'Install and configure local PostgreSQL for selected Incredible Technologies games.' }
             )
         }
         [pscustomobject]@{
             Header = 'APPLICATION'
             Color = 'Yellow'
             Items = @(
-                [pscustomobject]@{ Number = 13; Label = 'Check For Updates'; Desc = 'Manual backup-first check against the latest GitHub release.' }
-                [pscustomobject]@{ Number = 14; Label = 'Create Support Package'; Desc = 'Gather safe logs and reports into one ZIP for support.' }
-                [pscustomobject]@{ Number = 15; Label = 'Exit'; Desc = 'Exit TeknoParrot Manager.' }
+                [pscustomobject]@{ Number = 14; Label = 'Check For Updates'; Desc = 'Manual backup-first check against the latest GitHub release.' }
+                [pscustomobject]@{ Number = 15; Label = 'Create Support Package'; Desc = 'Gather safe logs and reports into one ZIP for support.' }
+                [pscustomobject]@{ Number = 16; Label = 'Exit'; Desc = 'Exit TeknoParrot Manager.' }
             )
         }
     )

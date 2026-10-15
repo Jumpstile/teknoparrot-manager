@@ -4,9 +4,9 @@ This file documents this project's threat model and the sanitization
 invariants that follow from it. It is the canonical reference for "why is
 this input treated as untrusted" questions raised in code comments.
 
-Current release state: v1.0 RC7 is the current published release; RC8 is the
-candidate being prepared and is not published; v1.0 RC6 is the previous
-published release (historical); final Version 1.0 remains unpublished.
+Current release state: v1.0 RC7 is the current published release; RC8 is
+the unpublished candidate under review; v1.0 RC6 is the previous published
+release (historical); final Version 1.0 remains unpublished.
 
 ## Threat model: live-fetched and externally-sourced values are untrusted input
 
@@ -430,6 +430,42 @@ in a v0.91 security sweep: `Invoke-FFBPluginSetup`'s `destDll` (from
 `FileName` (both from GitHub Releases API responses). None were exploited,
 but a crafted upstream response could otherwise have written outside the
 intended folder. See LESSONS_LEARNED.md for the full post-mortems.
+
+## Required game-patch source and target boundary (RC8 candidate)
+
+The recipe catalog is pinned by SHA-256 in the runtime, uses a closed field
+schema, and verifies the file hash both before and after its bounded read.
+Patch archives are user-supplied local input, not trusted downloads. TPM opens
+only the recipe-named ZIP and requires exactly one entry with the exact member
+path and bounded declared length. It streams that member into a unique
+TPM-owned staging directory, caps the stream at 64 MiB, and verifies byte
+count and SHA-256 against the recipe before planning a mutation. DAT SHA-1 is
+retained as identity provenance and is not used as the runtime integrity hash.
+It does not extract archive paths or process other entries. Missing, duplicate,
+oversized, malformed, or mismatched members stop before a game write.
+
+The recipe pins the exact executable, target pre-state and desired bytes.
+Paths are canonicalized, validated component-by-component, kept inside the
+game/source/backup roots, and rejected when reparse-backed or overlapping
+protected TPM/TeknoParrot state. A create operation is allowed only when its
+recipe declares an absent target; a replacement is allowed only from its
+exact pinned before-state. An exact post-state is skipped; every other state
+conflicts. Apply verifies the backup before publication, stages and checks the
+desired bytes, revalidates immediately before promotion, then verifies
+read-back. Undo requires the receipt's exact target identity and verified
+backup; unrelated or changed files are preserved and cause a stop.
+
+Automatic selection is restricted to exact registered game/profile/build
+identity; manual mode uses the same engine for an installed folder without
+registering it. Hardware predicates use one existing evidence snapshot and
+refuse ambiguous multi-adapter selection; the highest-memory/first-enumerated
+GPU is not accepted as a game-specific match. This RC8 catalog enables only
+the two mutually exclusive AMD/NVIDIA alternatives for Cross Elysion 2.06.00
+Ver C, each pinned to the exact executable and the exact opposite-vendor
+shader state. `.ORIGINAL` and every unknown target state refuse. Cross Raid
+is not enabled: Elysion hashes do not establish Cross Raid applicability. The
+engine does not host payloads, download them, or mark a game ready after file
+installation alone.
 
 ## Rule: XML reads must disable the XmlResolver (XXE prevention)
 

@@ -2,7 +2,7 @@
 
 This checklist must be completed before every version tag, ZIP build, and GitHub release.
 It is intentionally redundant: each gate catches a different failure class.
-Release state for the current cycle: v1.0 RC7 is the current published release; RC8 is the candidate being prepared and is not published; v1.0 RC6 is the previous published release (historical); final Version 1.0 remains unpublished.
+Release state for the current cycle: v1.0 RC7 is the current published release; RC8 is the unpublished candidate under review; v1.0 RC6 is the previous published release (historical); final Version 1.0 remains unpublished.
 
 Canonical current workflow: `docs/ENGINEERING-WORKFLOW.md`. Desktop ChatGPT and Desktop Codex use `C:\REPOS\teknoparrot-manager`; Arcade ChatGPT and Arcade Codex use `E:\REPOS\teknoparrot-manager`.
 
@@ -289,7 +289,7 @@ writes profiles, verify the following properties are still intact.
   there (preferably a tester report tied to a GitHub issue).
 
 ### Rollback / restore
-- [ ] The Restore Backup flow (mode 11) covers every new file type this
+- [ ] The Restore Backup flow (mode 12) covers every new file type this
   release touches.
 - [ ] A LaunchBox or Postgres backup taken under the previous release can
   still be restored by this release without error.
@@ -395,6 +395,8 @@ the #290 gate.
     helper documented in `docs/AUTO_UPDATE.md` -- omitting this folder was a
     real pre-1.0 packaging gap; the menu-integrated "Check for Updates" option
     does not itself depend on it, but the documented standalone helper does),
+    `scripts\TpmRequiredPatchEngine.ps1` and `scripts\TpmRequiredPatchRecipes.json`
+    (required-patch runtime and exact-build catalog),
     `scripts\Debug-TPM-MenuLayout.ps1` (RC2 menu-layout verification helper),
     `contracts\` (the Emulator Contract Verification Framework's registered
     contracts -- `_schema\`, `pcsx2x6\`, and any future emulator contract
@@ -533,7 +535,8 @@ Certification.
       terminal screenshots, menu and one-letter prompt UX, ReShade
       gallery/slider, Health Check repair routing, feature routing,
       backup-failure truthfulness, and support-package clarity. Record logs,
-      screenshots, runtime path, branch, and exact SHA.
+      screenshots, runtime path, branch, and exact SHA. The gate is required
+      release evidence, not release authorization.
 
 ### Phase 7 -- Report
 

@@ -1,12 +1,14 @@
 # TeknoParrot Manager — Quick Start
 
-> Current published release: v1.0 RC7 -- test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [RC7 release archive](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7). Previous published release: v1.0 RC6 (historical). v1.0 RC8 is the candidate being prepared and is not published. Final Version 1.0 remains unpublished.
+> Current published release: v1.0 RC7 -- test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [RC7 release archive](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7). Previous published release: v1.0 RC6 (historical). v1.0 RC8 is the candidate under review and is not published. Final Version 1.0 remains unpublished.
 
 Full documentation: [README.md](README.md)
 
-![TeknoParrot Manager main menu](images/tpm-main-menu.png)
+![Historical TeknoParrot Manager main menu; numbering predates RC8 required patches](images/tpm-main-menu.png)
 
-The main menu is divided into library management, optional game enhancements, maintenance and recovery, and application tools. Pick a numbered option to begin. Most beginners should confirm the TeknoParrot folder, then choose **1) AutoSync** for ZIP files or **2) Register only** for games that are already extracted.
+The image shows the prior menu layout. In the RC8 candidate, option 10 is Required game patches and Library Health Check is option 11; see the mode list below.
+
+The main menu is a persistent loop divided into library management, optional game enhancements, required game patches, maintenance and recovery, and application tools. Pick a numbered option to begin. Most beginners should confirm the TeknoParrot folder, then choose **1) AutoSync** for ZIP files or **2) Register only** for games that are already extracted.
 
 
 ---
@@ -25,6 +27,7 @@ The main menu is divided into library management, optional game enhancements, ma
 - [GPU Compatibility Fixes](#gpu-compatibility-fixes)
 - [Force Feedback (FFB) Setup](#force-feedback-ffb-setup)
 - [BepInEx update and setup](#bepinex-update-and-setup)
+- [Required game patches](#required-game-patches)
 - [Postgres Setup](#postgres-setup)
 - [LaunchBox Integration](#launchbox-integration)
 - [HyperSpin 2 Export](#hyperspin-2-export)
@@ -129,12 +132,13 @@ cursor-control output.
 | 7   | **GPU fix setup**              | Apply AMD / NVIDIA / Intel vendor fix to registered games                                                                                  |
 | 8   | **Force feedback (FFB) setup** | Native FFB Blaster (membership) + free third-party plugin                                                                                  |
 | 9   | **BepInEx setup**       | User-approved install, update, or repair-reset using stable x64/x86 releases                                                                     |
-| 10  | **Library health check**       | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx install counts    |
-| 11  | **Restore backup**             | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup                                      |
-| 12  | **Postgres setup**             | Installs/configures the local PostgreSQL database some Incredible Technologies games need                                                  |
-| 13  | **Check for Updates**          | Check GitHub for a newer TPM release and install it                                                                                        |
-| 14  | **Create Support Package**     | Gather safe logs and reports into one ZIP to send when asking for help                                                                   |
-| 15  | **Exit**                       | Quit                                                                                                                                       |
+| 10  | **Required game patches**  | Find, validate, back up, install, verify, or undo a required fix for a supported exact game build using your local ZIP |
+| 11  | **Library health check**   | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx install counts |
+| 12  | **Restore backup**         | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup |
+| 13  | **Postgres setup**         | Installs/configures the local PostgreSQL database some Incredible Technologies games need |
+| 14  | **Check for Updates**      | Check GitHub for a newer TPM release and install it |
+| 15  | **Create Support Package** | Gather safe logs and reports into one ZIP to send when asking for help |
+| 16  | **Exit**                   | Quit |
 ## Create Support Package
 
 If you need help, choose **Create Support Package**. TPM collects safe logs and
@@ -235,6 +239,19 @@ rolled-back, and failed outcomes.
 | Levels / Vibrance       | Vivid colours on modern monitors     |
 | Border                  | Arcade cabinet artwork in black bars |
 
+The optional non-modal preview offers 22 profiles built from 20 approved
+pinned shader effects (Original is the untouched reference; Enhanced Arcade is
+the existing combination), in four groups. The HDR group appears only when
+Windows reports HDR support with HDR on. Choose a profile from the preview
+drop-down or the terminal numbered chooser; both stay synchronized in real
+time, even while the terminal prompt is waiting. An effect is offered
+only while its recorded licence evidence is complete and current; any effect
+without it is withheld. The 0-100 comparison
+slider and view mode remain independent of profile choice. The bundled-image
+preview does not run the game or execute ReShade shaders. A preview choice is
+transient: terminal `U` and the existing explicit confirmation are still
+required before deployment, and the preview closes when the chooser returns.
+
 ### Advanced emergency fallback (normal users should use mode 5)
 
 ReShade DLLs are not bundled in the release ZIP because ReShade is not
@@ -307,9 +324,40 @@ the network cannot be reached, TPM explains that no change was made and
 offers the automatic retry path. Manual deletion of BepInEx files is not the
 normal workflow; TPM only removes the fixed files it can verify as part of
 its own approved transaction.
-Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro
-(Bags / Lawn Darts), and Orange County Choppers Pinball -- need a small local
-PostgreSQL 8.3 database. Mode 12 detects which registered games need it.
+
+## Required game patches
+
+Choose **option 10** to find supported required patches. RC8 supports seven
+recipes across six exact builds: Family Guy Bowling 1.15 Team Play PC;
+AMD/NVIDIA shader alternatives for Shining Force -- Cross Elysion 2.06.00 Ver
+C; BlazBlue Continuum Shift (2009), Continuum Shift II (2010), and Cross Tag
+Battle (1.04.00,2.01.00) with their guide-pinned `iDmacDrv32.dll`; and Rabbids
+Hollywood (2018) `Assembly-CSharp.dll`. You provide the matching ZIP locally;
+TPM does not host or download patch files.
+
+Automatic mode lists eligible registered games for one confirmation. Manual
+mode can patch an already-installed game folder without registering it. TPM
+checks the exact build, executable, local ZIP member, prerequisites and target
+bytes. Elysion requires unambiguous AMD/NVIDIA hardware evidence and the exact
+opposite-vendor shader state. All three BlazBlue driver and Rabbids recipes
+create missing files only, skip exact desired bytes, and refuse every other
+existing target state. Elysion refuses `.ORIGINAL`, ambiguous hardware, and
+other target states. Cross Raid is not supported by these recipes.
+
+Family Guy requires BepInEx and the guide's
+`[Preloader.Entrypoint] Type=MonoBehaviour` setting. If manual patching was
+used, register the game and configure controls afterward. Launch through
+TeknoParrotUI and verify controls and gameplay yourself. A successful patch
+does not mean the game is ready or playable.
+
+---
+
+## PostgreSQL setup
+
+Some Incredible Technologies games, including Power Putt Live (2012/2013),
+Silver Strike Bowling Live, Target Toss Pro (Bags / Lawn Darts), and Orange
+County Choppers Pinball, need a local PostgreSQL 8.3 database. Mode 13 detects
+which registered games need it.
 
 - If PostgreSQL is not installed yet, TPM installs it when a registered game
   needs it. You choose the service-account and database passwords through
@@ -331,13 +379,13 @@ PostgreSQL 8.3 database. Mode 12 detects which registered games need it.
   TeknoParrotUI reads it directly; already-correct profiles are skipped.
 - Recovery evidence and database backups are created before profile population.
   Any backup, reset, database, or profile-write failure is reported as blocked.
-  If none of your registered games need Postgres, mode 12 says so and exits immediately without installing anything. The PostgreSQL guide download is logged with source, filename/version, SHA-256, and transfer metrics; this path does not claim Authenticode or published-digest verification.
+  If none of your registered games need Postgres, mode 13 says so and exits immediately without installing anything. The PostgreSQL guide download is logged with source, filename/version, SHA-256, and transfer metrics; this path does not claim Authenticode or published-digest verification.
 
 ---
 
 ## Check for Updates
 
-Mode 13 manually checks the latest GitHub release against the version you are running -- nothing is downloaded or changed without your explicit Y/N confirmation. If an update exists, it backs up the current script, downloads and validates the update, replaces the script, then exits so you can restart cleanly. An approved update may temporarily clear only the target file protection and restores it after the attempt; any failure tells you exactly what went wrong and whether a backup was made. The download log records source, filename/version, SHA-256, and transfer metrics; the manager update path does not consume GitHub optional asset digests, so the hash is audit-only.
+Mode 14 manually checks the latest GitHub release against the version you are running -- nothing is downloaded or changed without your explicit Y/N confirmation. If an update exists, it backs up the current script, downloads and validates the update, replaces the script, then exits so you can restart cleanly. An approved update may temporarily clear only the target file protection and restores it after the attempt; any failure tells you exactly what went wrong and whether a backup was made. The download log records source, filename/version, SHA-256, and transfer metrics; the manager update path does not consume GitHub optional asset digests, so the hash is audit-only.
 
 ---
 
@@ -454,7 +502,7 @@ Answer Y to fetch ProfileCode.png for every registered game not already in <Tekn
 
 ## Restoring a Backup
 
-1. Choose **mode 11 — Restore backup**. TPM keeps the selected backup and
+1. Choose **mode 12 — Restore backup**. TPM keeps the selected backup and
    explains if TeknoParrot or LaunchBox/BigBox must be closed.
 2. Close the named application, then press Enter when TPM asks it to check
    again. TPM resumes the same restore choice; you do not restart the whole
@@ -462,7 +510,7 @@ Answer Y to fetch ProfileCode.png for every registered game not already in <Tekn
 3. Pick which kind to restore:
    - **TeknoParrot UserProfiles backup**
    - **LaunchBox library backup** — only relevant if you've used direct LaunchBox integration
-   - **Postgres database backup** — only relevant if you've used Postgres setup (mode 12); this replaces the _current_ content of each database restored
+   - **Postgres database backup** — only relevant if you've used Postgres setup (mode 13); this replaces the _current_ content of each database restored
 4. The script lists all available backups of that kind (most recent first), pick one by number, type `YES` to confirm
 5. Re-open TeknoParrot (or LaunchBox) to use the restored data
 
@@ -470,7 +518,7 @@ Answer Y to fetch ProfileCode.png for every registered game not already in <Tekn
 
 ## Library Health Check
 
-Mode 10 is a **read-only** status check. It reports valid/broken/empty
+Mode 11 is a **read-only** status check. It reports valid/broken/empty
 `GamePath` counts with affected profile codes, GPU fix / FFB Blaster /
 dgVoodoo2 / Postgres coverage, and informational ReShade / BepInEx counts.
 TPM explicitly says that it checked your setup and did not change anything.
@@ -573,7 +621,7 @@ At the end of every run the script prints — and saves to a text file (default 
 | Game won't launch                          | Open TeknoParrotUI, point the profile to the correct `.exe`. Re-run the script and choose Repair.                                                                                   |
 | Game not in TeknoParrot                    | For an ambiguous shared executable, choose one of TPM's validated candidates or leave it for TeknoParrotUI. If no candidate is safe, extract the game first.                                                                                                |
 | Extraction keeps failing                   | Check the log for the specific error. Verify free space and that the ZIP is not corrupted.                                                                                          |
-| Controls wrong after propagation           | Restore from backup (mode 11), or delete the game's `.xml` and re-run after fixing the reference game's bindings in TeknoParrotUI.                                                  |
+| Controls wrong after propagation           | Restore from backup (mode 12), or delete the game's `.xml` and re-run after fixing the reference game's bindings in TeknoParrotUI.                                                  |
 | Wrong fuzzy match                          | Delete the game's `.xml` from `UserProfiles` and add a `forceArchetype` entry in `overrides.json`.                                                                                  |
 | Game appears twice in TeknoParrotUI        | Delete one of the duplicate `.xml` files from `UserProfiles` — keep the one with the correct path and any bindings already set.                                                     |
 | `[UNLOGGED]` on console                    | Log file is inaccessible — check that the TeknoParrot folder is not read-only and you have write permission.                                                                        |

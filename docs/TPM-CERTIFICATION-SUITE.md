@@ -164,7 +164,7 @@ gate before RC8 release authorization, not post-release hardening or optional po
 - Run the package in default-size Windows Terminal and in a constrained-height
   terminal.
 - Capture screenshots and inspect the rendered output.
-- Verify the title/version, options 1-15, H/L/Q controls, and prompt appear
+- Verify the title/version, options 1-16, H/L/Q controls, and prompt appear
   directly below the choices.
 - Verify there is no giant empty frame, clipped choice, or lost prompt.
 
@@ -178,16 +178,26 @@ gate before RC8 release authorization, not post-release hardening or optional po
 
 ### 4. ReShade runtime UX
 
-- Open option 5 from the package and verify numbered profiles plus shader and
-  technique names.
+- Open option 5 from the package and verify the 20 non-HDR profiles (Original,
+  the 18 non-HDR single-effect profiles, and Enhanced Arcade) appear in the preview
+  selector and terminal list in the Main Catalog, CRT Choices and Advanced
+  Alternatives groups, backed by 18 non-HDR pinned shader effects; with Windows HDR
+  on, also verify the two HDR profiles (20 effects in all). On an SDR display
+  verify the HDR group is completely absent.
+- Select profiles directly in the preview and by terminal number; verify both
+  inputs synchronize the selected name, description, technique list, and
+  bundled-image approximation.
 - Verify the wording identifies a preview approximation using the bundled
   image, says no game or shader execution occurs, and says actual results may
   vary.
-- Verify the gallery opens non-modally while the terminal chooser remains
-  usable.
-- Verify the slider visibly moves the divider; switching profiles preserves
-  slider operation; `R` reopen preserves selection and slider operation; and
-  `U` applies only after confirmation.
+- Verify the gallery opens non-modally. The 0-100 TrackBar remains responsive
+  to drag and keyboard input after profile selection; profile changes do not
+  change its value or view mode.
+- Type `U` after changing the preview selection while terminal input pumps
+  WinForms events; verify the latest preview profile is accepted, deployment
+  still requires explicit confirmation, and the gallery closes automatically
+  when the chooser returns. Verify the terminal remains usable after the
+  gallery is closed or unavailable.
 
 ### 5. Library Health Check path repair
 
@@ -201,8 +211,8 @@ gate before RC8 release authorization, not post-release hardening or optional po
 
 ### 6. Feature workflow routing
 
-- Verify GPU Fix, dgVoodoo2, ReShade, BepInEx, and FFB skip broken paths
-  safely and route to option 10, Library Health Check.
+- Verify GPU Fix, dgVoodoo2, ReShade, BepInEx, FFB, and required patches skip
+  broken paths safely and route to option 11, Library Health Check.
 - Verify those workflows do not expose duplicate feature-specific path-repair
   wizards.
 
@@ -230,7 +240,6 @@ The acceptance target is that clipped menus, hidden choosers, misleading
 success screens, broken ReShade slider behavior, incorrect path-repair routing,
 and support-package false-failure wording are caught before a user reports
 them.
-
 
 Explicitly out of scope through phase 1.7 (tracked in issue #88 for later
 phases, not implemented yet): broad fuzzing, long soak testing, mutation

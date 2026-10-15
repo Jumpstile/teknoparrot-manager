@@ -26,6 +26,7 @@ Set-StrictMode -Version 2.0
 #
 # Included -- release package (ships to end users):
 #   TeknoParrot-Manager.ps1              the certified product itself
+#   scripts/TpmRequiredPatchEngine.ps1   shared required-patch engine
 #   scripts/Debug-TPM-MenuLayout.ps1     ships in the release ZIP (Test-ReleasePackage.ps1)
 #   tools/Invoke-TpmAutoUpdate.ps1       ships in the release ZIP
 #   tools/TpmAutoUpdate.Core.psm1        ships in the release ZIP
@@ -67,6 +68,7 @@ Set-StrictMode -Version 2.0
 # branch) is deliberately not part of this list.
 $script:TpmProductionPowerShellInventoryRelativePathsV1 = @(
     'TeknoParrot-Manager.ps1',
+    'scripts/TpmRequiredPatchEngine.ps1',
     'scripts/Debug-TPM-MenuLayout.ps1',
     'tools/Invoke-TpmAutoUpdate.ps1',
     'tools/TpmAutoUpdate.Core.psm1',

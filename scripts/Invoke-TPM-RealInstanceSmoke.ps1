@@ -273,18 +273,47 @@ function Get-TPMInvalidCertificationEnvironmentMessage {
     return ("INVALID CERTIFICATION ENVIRONMENT: '{0}' is missing required TeknoParrot installation marker(s): {1}. This is not a TPM product failure -- the requested -TeknoParrotRoot does not point at a real TeknoParrot installation, so no certification gates were run against it." -f $TeknoParrotRoot, ($MissingMarkers -join ', '))
 }
 
+# Creates the real, empty, per-run Git "global" configuration file the Pester
+# child points GIT_CONFIG_GLOBAL at. The device name NUL is NOT usable for this:
+# the Windows Git used for the RC8 full-folder run answered every call with
+# "fatal: unable to access 'NUL': Invalid argument", which broke every Git-based
+# test in the child. A real zero-byte file isolates user-global configuration
+# (the file is read as an empty config) without relying on a device name, and
+# removing the variable instead would let the user's own global config leak in.
+function New-TPMEmptyGitConfigFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $parent = [System.IO.Path]::GetDirectoryName($fullPath)
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        [void][System.IO.Directory]::CreateDirectory($parent)
+    }
+    if (Test-Path -LiteralPath $fullPath) {
+        throw "EMPTY_GIT_CONFIG_EXISTS: refusing to reuse '$fullPath'; each run needs its own new empty Git config file."
+    }
+    [System.IO.File]::WriteAllBytes($fullPath, [byte[]]@())
+    if ((Get-Item -LiteralPath $fullPath -Force).Length -ne 0) {
+        throw "EMPTY_GIT_CONFIG_NOT_EMPTY: '$fullPath' is not zero bytes after creation."
+    }
+    return $fullPath
+}
+
 function New-TPMPesterChildEnvironment {
-    param([Parameter(Mandatory = $true)][string]$RepositoryPath)
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryPath,
+        [Parameter(Mandatory = $true)][string]$EmptyGlobalConfigPath
+    )
 
     # GIT_CONFIG_* is inherited only by the isolated child process. It adds
     # one exact safe.directory value without reading or writing persistent
     # Git configuration, so NoAIAttribution can use its existing git ls-files
-    # call on a NAS-owned worktree.
+    # call on a NAS-owned worktree. GIT_CONFIG_GLOBAL names a real empty
+    # per-run file (see New-TPMEmptyGitConfigFile), never the NUL device.
     return @{
         NO_COLOR            = '1'
         TERM                = 'dumb'
         GIT_TERMINAL_PROMPT = '0'
-        GIT_CONFIG_GLOBAL   = 'NUL'
+        GIT_CONFIG_GLOBAL   = $EmptyGlobalConfigPath
         GIT_CONFIG_NOSYSTEM = '1'
         GIT_CONFIG_COUNT    = '1'
         GIT_CONFIG_KEY_0    = 'safe.directory'
@@ -1992,10 +2021,11 @@ try {
     $pesterResultPath = Join-Path $reportDir 'Pester-result-v1.json'
     $pesterNUnitPath = Join-Path $reportDir 'Pester-NUnit.xml'
     $technicalLogDirectory = Join-Path $reportDir 'TechnicalLogs'
+    $emptyGitConfigPath = New-TPMEmptyGitConfigFile -Path (Join-Path $reportDir ('git-empty-global-{0}.config' -f [guid]::NewGuid().ToString('N')))
     $pesterProcess = Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @(
         '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$pesterChild,
         '-RepositoryPath',$RepoPath,'-ResultPath',$pesterResultPath,'-NUnitPath',$pesterNUnitPath
-    ) -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDir -LogDirectory $technicalLogDirectory -Identity 'pester' -TimeoutSeconds $PesterRegressionTimeoutSeconds -Environment (New-TPMPesterChildEnvironment -RepositoryPath $RepoPath)
+    ) -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDir -LogDirectory $technicalLogDirectory -Identity 'pester' -TimeoutSeconds $PesterRegressionTimeoutSeconds -Environment (New-TPMPesterChildEnvironment -RepositoryPath $RepoPath -EmptyGlobalConfigPath $emptyGitConfigPath)
     if ($pesterProcess.TimedOut) { throw "Pester regression suite timed out after $PesterRegressionTimeoutSeconds seconds." }
     $pesterContract = Read-TPMPesterResultV1 -Path $pesterResultPath
     if (($pesterProcess.ExitCode -eq 0) -ne ($pesterContract.Failed -eq 0 -and $pesterContract.FailedContainers -eq 0)) {

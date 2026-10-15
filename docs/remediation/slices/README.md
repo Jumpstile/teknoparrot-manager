@@ -24,4 +24,8 @@ Current slice: `PR-321-current-slice.md`.
 
 The current pointer also carries bounded supplemental behavior contracts for Library Health transaction outcomes, owner-status gate semantics, and the authorized ReShade ten-effect selector. See `PR-321-current-slice.md` for exact owner, procedure, test, and runtime-proof mappings.
 
+Issue #351's required-patch integration is tracked separately in
+`TPM-REQUIRED-PATCHES-REVIEW-001.md`; its source/test evidence does not change
+PR #321 owner-report status or imply owner-runtime acceptance.
+
 Slice 0 current implementation: `TPM-RELEASE-SNAPSHOT-001`.

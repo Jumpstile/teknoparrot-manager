@@ -771,3 +771,47 @@ actions remain outside this implementation slice and were not performed.
 
 - Timed `Run-TpmQualityGate.ps1` passed on the source/test contents of commit `4f219a504018f98e816c716424bc5da4928a7cc8` before this report-only evidence amendment: Started `2026-10-04T00:22:22.8702405Z`; finished `2026-10-04T00:33:26.5048085Z`; PowerShell 7.6.6 / Pester 5.7.1; exit 0.
 - Results: main Pester 1311/1311; SupportPackage 42/42; ASCII/parse, configured PSScriptAnalyzer, `git diff --check`, and permanent procedure gate passed. This source gate does not validate the candidate ZIP or owner-runtime state.
+## Issue #351 isolated required-patch review slice -- in progress
+
+- Slice contract: `TPM-REQUIRED-PATCHES-REVIEW-001`; procedure mapping:
+  `TPM-TRACE-001`, `TPM-EVIDENCE-001`, `TPM-UX-001`, and `TPM-TRUTH-001`.
+- Review base: PR #321 head `9a9ac19`; local branch
+  `review/rc8-required-patches-20261015`. The original source worktree and
+  its candidate artifacts remain preserved.
+- Scope: integrate the verified 13-entry/12-build required-patch catalog with
+  the exact RC8 runtime fixes needed by the candidate. Audit all ten commits
+  from the review base to source HEAD `18e82a7`; do not carry their history or
+  unrelated private material.
+- Hunk mapping: application/runtime and menu integration; engine/catalog and
+  release allowlist; focused and affected tests; user/engineering docs and
+  remediation evidence -> Issue #351 / `TPM-REQUIRED-PATCHES-REVIEW-001` /
+  the procedures above. PR #321 owner-report statuses are unchanged.
+- Current evidence: focused recipe Describe passed 13/13 under PS7.6.7 at
+  `2026-10-15T04:01:56Z`--`2026-10-15T04:03:24Z`; the PS5.1.26100.9549 run
+  passed 13/13 at `2026-10-15T03:58:15Z`--`2026-10-15T03:59:15Z` on the
+  pre-contract-list test hash. PS5.1 parsed 11 changed PowerShell files with
+  zero errors, main ASCII count 0, configured PSScriptAnalyzer 1.25.0 returned
+  0 findings, and canonical InjectionHunter 1.0.0 reported 41 findings / 0
+  unresolved. Receipts and exact input hashes are in the local evidence
+  manifest; they are not copied into the branch.
+- Independent final-input boundary review at `2026-10-15T04:10:09.8954275Z`
+  compared 47 frozen source/test/gate/report inputs; only this control board
+  and the reconciliation report had changed. The other 45 inputs remained
+  unchanged. This is an input-boundary check, not a test result.
+- Canonical `Run-TpmQualityGate.ps1` completed in PowerShell 7.6.7 with pinned
+  Pester 5.7.1, `2026-10-15T04:07:02.6595596Z`--`2026-10-15T04:28:24.3139677Z`,
+  exit 0: Main 1,484/1,484 and Support 42/42 passed; zero failures/skips.
+  ASCII/parse, configured PSScriptAnalyzer, `git diff --check`, and the
+  permanent-procedure gate passed. Original records:
+  `Isolated-Review-Canonical-20261015T0407Z.raw.txt` (SHA-256
+  `2ED1A4D0146CBE4AFFE69048EDCE8464A39A3855F5F1E9F1814D87001B3A099D`) and
+  `.stdout.txt` (SHA-256
+  `7CF7657F0986F9EBAC8D8936D083E6A644188B7755DBF6B2F686FD7BCD7F0339`).
+- That gate covered the frozen 47-input candidate before the catalog EOL and
+  CI pull-request branch-filter metadata fixes. Their checkout round-trip and
+  exact workflow diff are validated separately; runtime, catalog, and tests
+  remain unchanged.
+- Limits: independent review and GitHub handoff follow required checks. No
+  commit, push, PR creation, merge, tag, publication, live install,
+  game/collection/DAT or database mutation, Arcade execution, or owner-runtime
+  acceptance is claimed.

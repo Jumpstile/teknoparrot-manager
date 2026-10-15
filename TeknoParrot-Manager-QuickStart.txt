@@ -134,8 +134,15 @@
        9) BepInEx setup   -- install, update, or repair-reset selected games
                              using the stable x64/x86 package (see below).
 
+     Required game patches (supported exact builds only)
+      10) Required game patches -- find an exact-build required fix from a
+                             local ZIP; automatic mode lists registered games,
+                             manual mode supports installed games, and one
+                             confirmation applies the displayed automatic list.
+                             TPM backs up, verifies, and keeps undo evidence.
+
      Maintenance and Recovery
-      10) Health check    -- read-only library status, safe to run any time.
+      11) Health check    -- read-only library status, safe to run any time.
                           Broken saved paths can be repaired from reviewed
                           candidates. The default search root is the configured
                           games folder; another search folder must be existing,
@@ -143,21 +150,43 @@
                           and both ZIP source folders. C returns to AutoSync
                           with only the broken profile codes selected for
                           re-extraction, never the whole library.
-       11) Restore backup  -- list UserProfiles, LaunchBox, or Postgres
+       12) Restore backup -- list UserProfiles, LaunchBox, or Postgres
                              backups; invalid numbers reprompt and Enter cancels.
-       12) Postgres setup  -- install/configure PostgreSQL for games that
+       13) Postgres setup -- install/configure PostgreSQL for games that
                              need it (Golden Tee Live, Power Putt Live, etc).
 
      Application
-       13) Check updates   -- manually check the latest GitHub release.
+       14) Check updates  -- manually check the latest GitHub release.
                              Nothing is downloaded or changed without your
                              explicit Y/N confirmation.
-       14) Create Support Package
+       15) Create Support Package
                              -- collect safe logs/reports into one ZIP to send
                              when asking for help.
-       15) Exit            -- quit the script.
+       16) Exit            -- quit the script.
 
-   If you need help, choose 14) Create Support Package. First, in TeknoParrotUI
+   **Required game patches:** you provide each recipe's exact named local ZIP;
+   TPM does not host or download patch payloads. The RC8 local owner-test
+   candidate enables thirteen entries across twelve exact builds: Family Guy
+   Bowling 1.15 Team Play PC; two mutually exclusive Shining Force -- Cross
+   Elysion 2.06.00 Ver C shaders; BlazBlue Continuum Shift (2009), Continuum
+   Shift II (2010), Cross Tag Battle (1.04.00/2.01.00), Central Fiction
+   (2.01.00), and Chronophantasma (2.03); Rabbids Hollywood (2018); NERF
+   Arcade (1.55); Rainbow BomberGirl (2022-12-15); Teenage Mutant Ninja
+   Turtles (1.59); and Silent Hill The Arcade (2007-12-20). Four existing
+   BlazBlue driver recipes, three exact-build BepInEx plugins and Silent Hill's
+   `dsound.dll` are absent-only restores. BBCP Chronophantasma instead replaces
+   only the exact known driver hash with the guide-required hash, sourcing the
+   exact member from the named Central Fiction Main ZIP; absent or unknown BBCP
+   bytes are refused. Other absent targets are created; exact desired bytes
+   are skipped; unknown bytes are refused. Plugin recipes require the exact
+   BepInEx core file. Silent Hill's Windows codec BAT is not run or installed.
+   Elysion requires exact build/executable, unambiguous hardware evidence, and
+   the exact opposite-vendor shader state. Cross Raid is unsupported. Family
+   Guy requires BepInEx and its documented entrypoint setting. Manual patching
+   does not register the game. Set controls, launch through TeknoParrotUI, and
+   verify gameplay separately; a file patch does not prove readiness.
+
+   If you need help, choose 15) Create Support Package. First, in TeknoParrotUI
    choose Troubleshooting -> Save information to a text file and save it beside
    this script as TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt. TPM
    accepts only that exact allowlisted intake filename. TPM then collects safe
@@ -252,7 +281,7 @@
   Extraction keeps failing   Check the log for the specific error. Verify
                              free space and that the ZIP is not corrupted.
 
-  Controls wrong after       Restore from backup (mode 11), or delete the
+  Controls wrong after       Restore from backup (mode 12), or delete the
   propagation                game's .xml and re-run after fixing the
                              reference game's bindings in TeknoParrotUI.
 
@@ -346,29 +375,75 @@
   HOW TO SET IT UP
   Before choosing a profile, TPM explains:
     Choose how your game should look.
-    The optional preview window is non-modal; the terminal chooser remains
-    active even if the window is behind, closed, unavailable, or fails.
-    The terminal is the only profile selector. The gallery follows its
-    numbered selection and has no second profile-selection control.
+    The optional preview window is non-modal. Select a profile directly from
+    its drop-down or enter the matching number in the terminal; both inputs
+    update the same selected profile. The terminal remains usable if the
+    preview is behind, closed, unavailable, or fails.
     Nothing will be changed until you choose U and then confirm.
-  The terminal always shows:
+  (An effect is offered only while its recorded licence evidence is complete
+  and current; any effect without it is withheld.) The gallery and terminal offer the same
+  choices, in four groups
+  (Main Catalog, CRT Choices, Advanced Alternatives, and Actual HDR Setups
+  Only -- the HDR group appears only on a display where Windows HDR is on):
     [1] Original
-    [2] Clean & Sharp
-    [3] Classic Arcade CRT
-    [4] Vivid Arcade
-    [5] Enhanced Arcade
-    Choose: [1-5] Select profile  [U] Use selected profile  [R] Reopen preview
-            [B] Back  [D] Details
+        No visual processing.
+    Main Catalog
+    [2] Smooth Edges [SMAA]
+        Reduce jagged edges.
+    [3] Clean & Sharp [LumaSharpen]
+        Straightforward sharpening.
+    [4] Adaptive Clarity [CAS]
+        Sharpening that adapts to local detail; not upscaling.
+    [5] Smooth Gradients [Deband]
+        Reduce bands in skies, fog and dark gradients.
+    [6] Vivid Arcade [Vibrance]
+        Restrained color enhancement.
+    [7] Balanced Contrast [Curves]
+        Adjust midtone contrast.
+    [8] Black/White Point Adjustment [Levels]
+        Correct washed-out ranges without changing the image to monochrome.
+    [9] Shadow & Midtone Balance [LiftGammaGain]
+        Adjust shadows, midtones and highlights separately.
+    [10] Exposure & Tint [Tonemap]
+        SDR exposure, gamma and tint correction.
+    [11] Color Balance [prod80 Color Balance]
+        Correct unwanted color casts.
+    [12] Arcade Glow [ArcaneBloom]
+        Restrained glow around bright areas.
+    [13] Enhanced Arcade [LumaSharpen + Vibrance]
+        Combined preset: sharper edges and richer color while preserving the
+        approved effect order.
+    CRT Choices
+    [14] Classic Arcade CRT [CRT Lottes]
+        Lottes, including its downsampling.
+    [15] Detailed Arcade CRT [CRT-Royale]
+        More elaborate phosphor-mask simulation.
+    [16] Lightweight CRT [CRT-Pi]
+        A simpler single-pass alternative.
+    Advanced Alternatives
+    [17] Detail-Preserving Sharpen [AdaptiveSharpen]
+        An alternative sharpening algorithm with overshoot controls.
+    [18] Filmic Sharpen [FilmicAnamorphSharpen]
+        Tunable high-pass sharpening.
+    [19] Colorfulness [Colourfulness]
+        An alternative color-strength adjustment.
+    [20] Fast Game Enhancement [Glamayre Fast Effects]
+        Combining selectable anti-aliasing, sharpening, contrast and
+        lighting effects.
+  Choose: [1-N] Select profile  [U] Use selected profile  [R] Reopen preview
+          [B] Back  [D] Details
   U is the only path toward deployment; B cancels without changes and D
-  returns after showing details. A terminal-only selection remains available
-  when the preview cannot open.
+  returns after showing details. Selecting a profile does not write files;
+  the existing explicit confirmation still gates deployment. The preview
+  closes automatically when the chooser returns.
     The optional gallery uses a safe approximation based on the bundled and
     validated PreviewAssets\ReShadePreviews\TPM-preview-landscape.png
     reference image. It does not run the game or execute ReShade shaders.
-    Before is the untouched baseline, After is a TPM approximation of the
-    selected profile, and Split/slider compare that approximation with the
-    baseline. Actual in-game results may vary. Its identity and hash are
-    recorded in the preview cache.
+    The selected profile's description and approved shader techniques are
+    shown in the gallery. Before is the untouched baseline, After is a TPM
+    approximation of the selected profile, and Split/slider compare that
+    approximation with the baseline. The slider remains independent of the
+    selected profile; actual in-game results may vary.
   The result states what changed and what did not change. Unsafe or malformed
   paths and ownership metadata are listed with the direct next action to
   repair or review the issue, then rerun ReShade setup with Select. Native
@@ -479,7 +554,7 @@
   If a game is covered by both, you are asked once which to use for all
   such games -- it never silently picks one for you. Missing saved paths and
   unavailable saved devices are reported separately; either result offers
-  the mode 10 Health Check handoff while unsupported/no-match games remain
+  the mode 11 Health Check handoff while unsupported/no-match games remain
   distinct from true deployment errors.
 
   To run:
@@ -620,7 +695,7 @@
   metadata yet -- in LaunchBox, right-click a game and use Edit -> Search
   to fetch it, same as for any manually-imported game.
 
-  If anything looks wrong afterward, use menu option 11 (Restore backup) ->
+  If anything looks wrong afterward, use menu option 12 (Restore backup) ->
   LaunchBox library backup to undo it -- this restores the exact files the
   script changed, from before it changed them.
 
@@ -645,7 +720,7 @@
 
   RESTORING A BACKUP
   ------------------
-  1. Choose mode 11) Restore backup. TPM keeps the selected backup while it
+  1. Choose mode 12) Restore backup. TPM keeps the selected backup while it
      checks whether TeknoParrot or LaunchBox/BigBox is still open.
   2. If an application is open, save your work, close it, and press Enter when
      TPM asks to check again. TPM resumes the same restore choice.

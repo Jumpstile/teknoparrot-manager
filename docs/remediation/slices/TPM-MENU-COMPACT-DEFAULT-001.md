@@ -19,9 +19,9 @@
 ## 4. Behavior contract
 
 - Current failure: the production script defines `Get-ConsoleLayoutTier` twice; its later legacy width-only definition overrides the conservative width-and-height policy and selects two columns for ordinary widths.
-- Expected behavior: ordinary widths select Compact; Ultra requires both policy thresholds. The menu displays title/version, options 1-15 once and ordered, H/L/Q, and a prompt below the choices. Height fallback remains complete. Wide layout is selected only at the centralized safe threshold.
+- Expected behavior: ordinary widths select Compact; Ultra requires both policy thresholds. The menu displays title/version, options 1-16 once and ordered, H/L/Q, and a prompt below the choices. Height fallback remains complete. Wide layout is selected only at the centralized safe threshold.
 - Forbidden regressions: Missing/duplicate/reordered choices, controls or prompt omitted, incomplete constrained-height fallback, debug/production layout disagreement, normal widths selecting two columns, or multiple production selector definitions.
-- Design boundaries and deliberate exclusions: Keep existing explicit render modes and constrained-height behavior; do not alter menu actions or add capabilities.
+- Design boundaries and deliberate exclusions: Keep existing explicit render modes and constrained-height behavior. The owner-authorized Required game patches insertion at option 10 is tracked separately in TPM-REQUIRED-PATCHES-001; no other menu actions change in this layout slice.
 
 ## 5. Source/function ownership
 
@@ -36,7 +36,7 @@
 
 ## 7. Tests required after implementation
 
-- Focused behavior tests: Ordinary dimensions one-column; ordered unique 1-15; H/L/Q and prompt below; no default two-column; constrained-height complete; wide layout only at explicit safe threshold; debug helper matches production.
+- Focused behavior tests: Ordinary dimensions one-column; ordered unique 1-16; H/L/Q and prompt below; no default two-column; constrained-height complete; wide layout only at explicit safe threshold; debug helper matches production.
 - Regression suite: Focused menu/layout tests under PowerShell 7 and Windows PowerShell 5.1.
 - Static and procedure gates: parser, PSScriptAnalyzer Error/Warning, ASCII, `git diff --check`, release consistency, and required TPM quality gate.
 
@@ -53,7 +53,7 @@
 
 ## 10. Runtime smoke checklist
 
-- Exact packaged behavior: Ordinary/default Windows Terminal launch is one column with title/version, exactly ordered options 1-15, H/L/Q, and prompt below; constrained height keeps all choices visible; genuinely wide threshold layout is uncrowded.
+- Exact packaged behavior: Ordinary/default Windows Terminal launch is one column with title/version, exactly ordered options 1-16, H/L/Q, and prompt below; constrained height keeps all choices visible; genuinely wide threshold layout is uncrowded.
 - Required source/package identity: Exact source SHA and rebuilt package SHA recorded by the runtime owner.
 - Evidence artifacts: Terminal screenshots and runtime report tied to source/package identity.
 - Owner/runtime authorization: Arcade runtime proof remains with the owner; no ARCADE access or smoke run in this slice.

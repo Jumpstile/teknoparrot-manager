@@ -349,5 +349,13 @@
             Disposition = 'FalsePositive'
             Reasoning   = 'The regex pattern and replacement are fixed literals; the variable is only the searched value. No attacker-controlled pattern or replacement is evaluated.'
         }
+        @{
+            File        = 'scripts/TpmRequiredPatchEngine.ps1'
+            RuleName    = 'InjectionRisk.AddType'
+            Line        = 1137
+            Extent      = 'Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The framework assembly name is a fixed literal required to read user-supplied ZIP members under Windows PowerShell 5.1. No variable, path, or archive content reaches Add-Type; member selection, size, and SHA256 are independently pinned by the recipe.'
+        }
     )
 }
