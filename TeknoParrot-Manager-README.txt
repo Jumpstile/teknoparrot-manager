@@ -430,7 +430,7 @@
   TeknoParrot.dll path. Compatibility and gameplay remain separate checks.
 
   - Required game patches. Option 10's local RC8 owner-test follow-up
-    candidate contains 62 exact-build recipes across 23 exact
+    candidate contains 64 exact-build recipes across 23 exact
     ProfileId/build/executable identities. It preserves the 13-entry PR #353
     baseline and the 58-entry PR #355 checkpoint, then adds absent-only Main
     restores for MaiMai GreeN `freeglut.dll` and `libcurl.dll`, Rabbids
@@ -441,10 +441,15 @@
     Bikes 3 1.91 x64; five native recipes for Cross Raid 1.05, VF5R 1.001, and
     Sonic Dash Extreme; and 34 Main-component restorations: 14 Hummer,
     14 Hummer Extreme, two Primeval Hunt, two SB3 FMOD, and two Infinity Blade
-    FX 1.02. Fifty-four `CreateFile` operations create only absent targets;
+    FX 1.02. Fifty-six `CreateFile` operations create only absent targets;
     eight `ReplaceFile` operations require an exact before-state. Exact-after
-    and unknown bytes are refused. Full guide coverage, setup readiness,
+    files are skipped; unknown bytes are refused. Full guide coverage, setup readiness,
     controls, launch, and gameplay are not claimed.
+    Two further TMNT 1.59 Main recipes independently restore only absent
+    OrenVid.dll and PK-UnityPlugin.dll under TMNT_Data/Plugins/x86_64/.
+    They do not install BepInEx or change configuration. Setup, controls,
+    launch and gameplay still require separate verification.
+
 
   - Postgres setup. Installs and configures the local PostgreSQL 8.3
     database that some Incredible Technologies games need (Golden Tee
@@ -761,7 +766,7 @@
        automatic list. TPM keeps verified backup/undo evidence; it skips an
        exact already-applied target and refuses any other existing bytes.
 
-       The local RC8 owner-test follow-up candidate has 62 exact-build recipes
+       The local RC8 owner-test follow-up candidate has 64 exact-build recipes
        across 23 exact ProfileId/build/executable identities. It preserves
        the historical 13-entry PR #353 baseline and the 58-entry PR #355
        checkpoint, then adds four absent-only Main restores: MaiMai GreeN
@@ -780,9 +785,14 @@
        the game guide. TPM does not configure keys or run either utility;
        operator setup and game launch remain separate.
 
+       Two further TMNT 1.59 Main recipes independently restore only absent
+       OrenVid.dll and PK-UnityPlugin.dll under TMNT_Data/Plugins/x86_64/.
+       They do not install BepInEx or change configuration. Setup, controls,
+       launch and gameplay still require separate verification.
+
        BBCP Chronophantasma replaces only its exact known driver before-hash
        with the guide-required hash from the named Central Fiction Main ZIP;
-       absent or unknown BBCP bytes are refused. The 54 `CreateFile` operations
+       absent or unknown BBCP bytes are refused. The 56 `CreateFile` operations
        restore only absent targets; eight `ReplaceFile` operations require
        exact before-hashes. Exact desired bytes are skipped, and all other
        states are refused. The four baseline Main-source plugin payloads and

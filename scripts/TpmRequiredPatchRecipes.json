@@ -1777,6 +1777,60 @@
           "PayloadSha256": "66E0CC00E84C01F6E77E6B446A019212EBD27610FDD81CA866648C5E97E80933"
         }
       ]
+    },
+    {
+      "Id": "tmnt-orenvid-main-restore",
+      "ProfileId": "TMNT",
+      "BuildName": "Teenage Mutant Ninja Turtles (1.59)(2021-07-26)(USA)[Raw Thrills PC][TP]",
+      "Executable": "TMNT.exe",
+      "ExecutableSha256": "11AEDEEE2136DA3BF69392B5FE76818707BDD8E413AE99F829F394F8B80B295F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Teenage Mutant Ninja Turtles (1.59)(2021-07-26)(USA)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "TMNT_Data/Plugins/x86_64/OrenVid.dll",
+      "SourceSize": 90112,
+      "SourceSha1": "8219DDE96F5DDD78C2BD0A7656C100426D4F942D",
+      "SourceSha256": "17886C8A04342C254E8666596046D132DB0F63CEB047439F8EB3B5A35902E4AD",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "TMNT_Data/Plugins/x86_64/OrenVid.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "17886C8A04342C254E8666596046D132DB0F63CEB047439F8EB3B5A35902E4AD",
+          "Payload": "payload/OrenVid.dll",
+          "PayloadSha256": "17886C8A04342C254E8666596046D132DB0F63CEB047439F8EB3B5A35902E4AD"
+        }
+      ]
+    },
+    {
+      "Id": "tmnt-pk-unityplugin-main-restore",
+      "ProfileId": "TMNT",
+      "BuildName": "Teenage Mutant Ninja Turtles (1.59)(2021-07-26)(USA)[Raw Thrills PC][TP]",
+      "Executable": "TMNT.exe",
+      "ExecutableSha256": "11AEDEEE2136DA3BF69392B5FE76818707BDD8E413AE99F829F394F8B80B295F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Teenage Mutant Ninja Turtles (1.59)(2021-07-26)(USA)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "TMNT_Data/Plugins/x86_64/PK-UnityPlugin.dll",
+      "SourceSize": 16210432,
+      "SourceSha1": "0254401B2AD3623AA16BF2B2CFD408991084FE80",
+      "SourceSha256": "CDC95711BCF10B097A30D4B09F7A304980DABA5000F3813555A80A71ABF04238",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "TMNT_Data/Plugins/x86_64/PK-UnityPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "CDC95711BCF10B097A30D4B09F7A304980DABA5000F3813555A80A71ABF04238",
+          "Payload": "payload/PK-UnityPlugin.dll",
+          "PayloadSha256": "CDC95711BCF10B097A30D4B09F7A304980DABA5000F3813555A80A71ABF04238"
+        }
+      ]
     }
   ]
 }

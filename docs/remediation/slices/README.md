@@ -54,6 +54,11 @@ passed 7/7 under both engines and the central identity case passed 1/1 under
 both. Root review and combined gates remain pending. It does not adjudicate
 Black Textures, gameplay, or setup completeness.
 
+The separate TMNT 1.59 native Main-component candidate is mapped by
+`TPM-REQUIRED-PATCH-TMNT-NATIVE-MAIN-COMPONENTS-001` and its paired inventory.
+It covers two independent absent-only repairs; no compatibility or setup claim
+is implied.
+
 The user release-package cleanliness and PCSx2x6 source/runtime evidence
 boundary are mapped separately in
 `TPM-RELEASE-PACKAGE-CLEANLINESS-001`, with

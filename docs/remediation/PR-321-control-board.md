@@ -1164,3 +1164,14 @@ historical integration checkpoint and its test receipts remain unchanged.
 ## Clean 62-entry candidate local verification checkpoint
 
 Local verification completed through2026-10-15T14:16:13Z. The complete evidence record and preserved failures are in docs/remediation/PR-321-reconciliation.md under this heading: Main1488 and Support42 passed per engine; corrected MainExtras/Shadow23 and package116 passed per engine with actual exits0. Source/package proofs do not establish owner runtime or release acceptance. Exact-head CI/integration and owner/ARCADE gates remain separate.
+## Issue #351 TMNT 1.59 native Main components -- mapped candidate
+
+- Slice/inventory: `TPM-REQUIRED-PATCH-TMNT-NATIVE-MAIN-COMPONENTS-001` and `TPM-REQUIRED-PATCH-TMNT-NATIVE-MAIN-COMPONENTS-INVENTORY-001`. No numbered PR #321 owner row is assigned.
+- Worktree: `fix/rc8-recipe-followup-20261015`, base `4ee514820e6f4445a592602e2ec992677bf9cef1`. Current catalog remains 62 entries / 23 identities / 54 `CreateFile` / eight `ReplaceFile`, SHA-256 `8F30A2BC8CC8AC6B96A324962F9E12792572E08BE6512B1A1808420D6BDB5195`.
+- The exact TMNT 1.59 Main source proof binds the unique `TMNT.exe` hash to the existing `tmnt-bepinex-plugin-restore` anchor and pins the two unique method-8 members `OrenVid.dll` and `PK-UnityPlugin.dll`. The proposed recipes are independent absent-only `CreateFile` repairs with no hardware or BepInEx prerequisite; the private source path remains outside the repository.
+- The fragment is prepared; catalog integration, the focused portable test, and dual-engine results are pending. No engine body or Main-script change is in scope; only the required catalog hash pin may change.
+- The source proof does not establish installed-target absence, plugin/version compatibility, atomic pair behavior, complete setup, launch readiness, or gameplay. Root combined gates and owner-runtime evidence remain separate.
+
+### Focused verification, 2026-10-15 UTC
+
+Root reviewed five TMNT cases, seventeen existing required-patch cases, and two catalog cases per engine with Pester 5.7.1 on Windows PowerShell 5.1 and PowerShell 7. All selected cases passed. The filtered Main wrapper returned exit 1 solely because 1,471 intentionally excluded cases tripped its generic zero-NotRun condition; the independent XML review confirmed seventeen successes and zero failures in each engine. This is focused evidence, not a new full-suite or runtime result. Both TMNT focused workers exited 0. The original 62 recipe entries and order, engine body, and product Main remain unchanged. Catalog: 64 entries, 56 CreateFile, eight ReplaceFile, 23 profiles. Source integration, owner runtime, and release gates remain separate.

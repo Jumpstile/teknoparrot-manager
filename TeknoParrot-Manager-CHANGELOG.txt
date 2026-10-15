@@ -62,7 +62,7 @@
   installation into existing game folders, with exact build/executable and
   local ZIP-member checks, backup, read-back verification, undo, exact
   already-applied skipping, and refusal of unknown states.
-  The local follow-up candidate has 62 exact recipes across 23 exact
+  The local follow-up candidate has 64 exact recipes across 23 exact
   ProfileId/build/executable identities. It preserves the historical
   13-entry PR #353 baseline and 58-entry PR #355 checkpoint, then adds four
   absent-only Main restores: MaiMai GreeN `freeglut.dll` and `libcurl.dll`,
@@ -75,8 +75,13 @@
   Extreme executable replacement); 30 absent-only Main-component restorations
   (14 Hummer, 14 Hummer Extreme, two Primeval Hunt); two absent-only SB3 FMOD
   Main-component restorations; and two Infinity Blade FX 1.02 restorations.
-  The candidate has 54 `CreateFile` operations and eight exact-before
+  The candidate has 56 `CreateFile` operations and eight exact-before
   `ReplaceFile` operations.
+  Two further TMNT 1.59 Main recipes independently restore only absent
+  OrenVid.dll and PK-UnityPlugin.dll under TMNT_Data/Plugins/x86_64/.
+  They do not install BepInEx or change configuration. Setup, controls,
+  launch and gameplay still require separate verification.
+
 
   The four BlazBlue driver restorations, the original Rabbids Assembly-CSharp
   target, four Main-sourced BepInEx plugin targets, and Silent Hill's

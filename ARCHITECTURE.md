@@ -2364,7 +2364,7 @@ host or acquire payloads. A curated metadata-only RomVault DAT is permitted,
 but none is bundled; users provide payloads. Every recipe pins the exact build
 and executable identity, ZIP member path, member size/runtime SHA-256, target
 preconditions, post-patch identity, and setup prerequisites.
-The current local catalog has 62 exact recipes across 23 exact ProfileId/build/executable
+The current local catalog has 64 exact recipes across 23 exact ProfileId/build/executable
 identities: it preserves the historical 13-entry baseline and adds three
 Taisen Hot Gimmick 5 (2.04) restores, three user-selected plugin restores
 (Mars Sortie 1.46.9, the separate Rabbids Hollywood operator plugin, and
@@ -2374,7 +2374,11 @@ two Primeval Hunt), two SB3 FMOD Main-component restorations, two Infinity
 Blade FX 1.02 Main-component restorations, and four additional absent-only
 Main components (MaiMai GreeN's `freeglut.dll` and `libcurl.dll`, the Rabbids
 Hollywood operator utility, and Cross Raid 1.05 Ver A `rom/shader.farc`).
-The aggregate has 54 absent-only `CreateFile` operations and eight exact-before
+Two further TMNT 1.59 Main recipes independently restore only absent
+OrenVid.dll and PK-UnityPlugin.dll under TMNT_Data/Plugins/x86_64/.
+They do not install BepInEx or change configuration. Setup, controls,
+launch and gameplay still require separate verification.
+The aggregate has 56 absent-only `CreateFile` operations and eight exact-before
 `ReplaceFile` operations. This is exact-component support, not full semantic
 guide coverage.
 Family Guy pins `bowling.exe` SHA-256

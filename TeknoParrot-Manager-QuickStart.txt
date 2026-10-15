@@ -173,7 +173,7 @@
 
    **Required game patches:** TPM uses local, hash-pinned ZIP members; it
    does not host or download patch payloads. This local RC8 owner-test
-   follow-up candidate has 62 exact recipes across 23 exact
+   follow-up candidate has 64 exact recipes across 23 exact
    ProfileId/build/executable identities. It preserves the 13-entry PR #353
    baseline and the 58-entry PR #355 checkpoint, then adds four absent-only
    Main repairs: MaiMai GreeN `freeglut.dll` and `libcurl.dll`, Rabbids
@@ -189,8 +189,13 @@
    with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by the guide.
    TPM does not configure keys or run either utility; setup and launch remain
    separate owner steps.
+   Two further TMNT 1.59 Main recipes independently restore only absent
+   OrenVid.dll and PK-UnityPlugin.dll under TMNT_Data/Plugins/x86_64/.
+   They do not install BepInEx or change configuration. Setup, controls,
+   launch and gameplay still require separate verification.
 
-   Fifty-four `CreateFile` operations create only absent targets; eight
+
+   Fifty-six `CreateFile` operations create only absent targets; eight
    `ReplaceFile` operations require an exact before-hash. Exact desired bytes
    are skipped and other existing bytes are refused. The exact user-selected
    patch ZIP filename is required. The four new Main components are absent-only;

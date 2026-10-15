@@ -335,7 +335,7 @@ rename the original library, edit TPFIX.ini, or choose the first-launch
 TeknoParrot.dll path. Compatibility and gameplay remain separate checks.
 
 Choose **option 10** to find supported required patches. This local RC8
-owner-test follow-up candidate has 62 exact recipes across 23 exact
+owner-test follow-up candidate has 64 exact recipes across 23 exact
 ProfileId/build/executable identities: the historical 13-entry baseline and
 the 58-entry PR #355 checkpoint plus four absent-only Main components:
 MaiMai GreeN `freeglut.dll` and `libcurl.dll`, Rabbids Hollywood
@@ -349,10 +349,15 @@ two Infinity Blade FX 1.02 components.
 The MaiMai DLLs are separate transactions. The Rabbids utility is separate from the existing
 Assembly-CSharp and BepInEx operator-plugin recipes; TPM does not execute it
 or edit registry or `.conf` state.
-Fifty-four `CreateFile` operations create only absent targets; eight
+Fifty-six `CreateFile` operations create only absent targets; eight
 `ReplaceFile` operations require the exact known before-state. Exact-after
 files are skipped; other states are refused. This exact-component scope is
 not full semantic guide coverage.
+Two further TMNT 1.59 Main recipes independently restore only absent
+OrenVid.dll and PK-UnityPlugin.dll under TMNT_Data/Plugins/x86_64/.
+They do not install BepInEx or change configuration. Setup, controls,
+launch and gameplay still require separate verification.
+
 
 The 30 Main restorations do not establish Hummer Extreme frame-count behavior,
 Primeval Hunt `ElfLdr2` copy identity, or its modern NVIDIA fog behavior.

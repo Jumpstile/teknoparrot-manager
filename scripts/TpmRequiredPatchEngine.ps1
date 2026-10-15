@@ -1,4 +1,4 @@
-$script:TpmRequiredPatchCatalogSha256 = '8F30A2BC8CC8AC6B96A324962F9E12792572E08BE6512B1A1808420D6BDB5195'
+$script:TpmRequiredPatchCatalogSha256 = '214415946FBD9C64EE37A673119A43DE9334F54F42E4B7910DF3784F6908D250'
 
 function Get-TpmRegisteredPatchContext {
     param([Parameter(Mandatory)]$Entry,[Parameter(Mandatory)][string]$TpRoot,[Parameter(Mandatory)][string]$UserProfilesDir,[Parameter(Mandatory)][string]$ManagerRoot)
