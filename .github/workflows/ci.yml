@@ -228,7 +228,8 @@ jobs:
             "$PWD\Tests\TpmRequiredPatchSb3Lane.Tests.ps1",
             "$PWD\Tests\TpmRequiredPatchNativeMainComponentRestorations.Tests.ps1",
             "$PWD\Tests\TpmRequiredPatchSb3FmodLane.Tests.ps1",
-            "$PWD\Tests\TpmRequiredPatchInfinityBladeFxLane.Tests.ps1"
+            "$PWD\Tests\TpmRequiredPatchInfinityBladeFxLane.Tests.ps1",
+            "$PWD\Tests\TpmRequiredPatchMainExtras.Tests.ps1"
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'

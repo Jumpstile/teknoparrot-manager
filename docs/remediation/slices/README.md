@@ -33,4 +33,10 @@ Main-component, SB3 FMOD, and Infinity Blade FX additions are mapped by
 `TPM-REQUIRED-PATCHES-INFINITYBLADEFX-001`, with paired inventories under
 `docs/remediation/inventories/`.
 
+The separate local 61-entry follow-up adds three exact Main components
+(MaiMai GreeN `freeglut.dll` and `libcurl.dll`, and the Rabbids Hollywood
+operator utility), mapped by `TPM-REQUIRED-PATCH-MAIN-EXTRAS-20261015`,
+its paired inventory, and corrected boundary note. This candidate does not
+change the 58-entry parent checkpoint or establish owner-runtime acceptance.
+
 Slice 0 current implementation: `TPM-RELEASE-SNAPSHOT-001`.

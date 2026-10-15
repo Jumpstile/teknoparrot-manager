@@ -1015,3 +1015,57 @@ historical integration checkpoint and its test receipts remain unchanged.
 
 - Post-document audit at `2026-10-15T09:02:20.7139906Z` matched all 11 frozen product/focused-test input hashes with zero mismatches. External receipt `Expanded58-PostDoc-Source-Identity-Audit-20261015.json`, SHA-256 `31B07AFE5F19EED13F3F3CD37FFA8DD632B354BB5CC2228B2B81E1D5AEB25660`.
 - Standalone `Test-TpmPermanentProcedures.ps1` rerun completed `2026-10-15T09:02:30.0366625Z`, exit 0, `Permanent procedure gate passed.` This was the permanent gate only; no full suites were rerun. External receipt `Expanded58-Permanent-Gate-Only-PostDoc-20261015.json`, SHA-256 `777B82DCF6CB090E780C1F024C6D7654C774E1CA12DE87C790D169F0A205B7E7`; raw output SHA-256 `BE5D31B73205724FD74E851BE38FC3C683409847DDD4BCF1704D36132742ED35`.
+## Issue #351 -- isolated 61-entry follow-up checkpoint
+
+- Worktree: branch `review/rc8-three-component-followup-20261015`, based on
+  `1447d2d8da2843748157e700df227b6b51b49983`. No commit, push, PR, release,
+  or change to the 58-entry parent tree is claimed.
+- Candidate catalog: 61 unique recipes / 23 exact ProfileId-build-executable
+  identities / 53 `CreateFile` / 8 `ReplaceFile`. Catalog SHA-256
+  `87DF31451B267F89FCD2CB3E3DEA1860972EDD4C7601ACE1998E80BD7E4CAD9E`;
+  engine SHA-256
+  `1DFDE54B9A11D0A54D6A7308E892D1D397D156B8A2C731FBB56D3E175CC14409`
+  (only the catalog pin differs from the 58-entry engine).
+- The three independent Main-source candidates are MaiMai GreeN
+  `freeglut.dll`, MaiMai GreeN `libcurl.dll`, and Rabbids Hollywood
+  `RabbidsHollywood_Operator.exe`. Exact guide `ArrayIndex` and separate
+  `SourcePath` values are recorded in the corrected boundary note. The
+  Rabbids utility is distinct from its Assembly-CSharp and BepInEx operator
+  plugin recipes; it is not executed or used to edit registry/`.conf` state.
+  The MaiMai transactions are separate, not atomic. Existing targets are
+  absent-only; no installed target was inspected.
+- Frozen delta SHA-256 `F08213A3D435E6318825412ECC923BDD15EB6ECA9D01BC78119FAC54C5C6C1FD`;
+  focused test SHA-256
+  `AC8ACD646ABDD4576ECDFF1D38535D1367C02737216384AF60DE7A7EF27D2669`.
+  Manager aggregate-test SHA-256
+  `AA164AA350A6CED091D88CA6EAC77821D6DB6474A7CB87E23EB59360A8EC6B92`;
+  plugin-lane test SHA-256
+  `13BEEF92E991D7141B1BB55D2BF487B8980832011DE6F2B3E421E2616D36B75F`.
+- Corrected focused Pester 5.7.1 receipt on PowerShell 7.6.7 ended
+  `2026-10-15T09:34:35.3112992Z`: 13 selected passed / 0 failed / 0 skipped /
+  0 inconclusive; Main selection 5 passed with 1,483 of 1,488 tests not run,
+  existing plugin lane 6 passed, new Main-extra suite 2 passed. External
+  transcript `ThreeRecipe-PS7-Pester571-20261015T093224Z.txt`, SHA-256
+  `B8982B68EFD4A31525ED27ACB2295E40285410785991AF9328CD8A8120786C39`.
+- Windows PowerShell 5.1.26100.9549 / Pester 5.7.1 ended
+  `2026-10-15T09:38:35.6923290Z`: same 13 selected passed / 0 failed /
+  0 skipped / 0 inconclusive; Main 5 selected, 1,483 not run; plugin lane
+  6; Main-extra suite 2. External transcript
+  `ThreeRecipe-PS51-Pester571-20261015T093650Z.txt`, SHA-256
+  `BB93047C80A1D9BA239F5BCACCE684C2C08A63FB31F8323093F36BEBAFCD85DD`.
+- The first PS7 transcript is preserved as diagnostic, not a product/test
+  failure: its 13 selected tests all passed, but the runner compared 13 passes
+  against Pester's 1,488 discovered count (including 1,483 not-run tests) and
+  returned 1. It is superseded by the corrected PS7 receipt above.
+  Diagnostic transcript SHA-256
+  `F48FF050A3BA0B18D995E37D1BDF3DE296443B608B6B602259461141FB0F9C80`.
+- Fresh exact ZIP-member proof `MaiMai-Rabbids-Main-Exact-Member-Proof-20261015T092737Z.json`,
+  SHA-256 `F19F55F9534AF82EEF679953543FA4DCBDEA795F0053CEFB05A3915DB858F05C`,
+  records one exact central-directory occurrence for each source component and
+  setup executable, ZIP method 8, sizes, and SHA-1/SHA-256. Corrected private
+  guide/source binding receipt `ManagedGuide-Main-Component-Restore-Proof-20261015T092737Z-v3.json`,
+  SHA-256 `7F912B203320D1B4BB0DBE7037DD38DFA6DEEF45E23E5480CA48647497047ACD`.
+  No whole-archive hash, extraction, execution, or live target access.
+- No full Main, Support, canonical, release, or owner-runtime gate was run in
+  this follow-up. Owner install, setup readiness, launch, controls, and
+  gameplay remain unverified. No release or publication claim.

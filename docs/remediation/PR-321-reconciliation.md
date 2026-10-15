@@ -1674,3 +1674,60 @@ Actual validation UTC: 2026-10-15T08:23:29Z. All final v3 test-input hashes matc
 - Standalone `Test-TpmPermanentProcedures.ps1` rerun at `2026-10-15T09:02:30.0366625Z` passed, exit 0; no Main/Support/full suite rerun. External JSON receipt SHA-256 `777B82DCF6CB090E780C1F024C6D7654C774E1CA12DE87C790D169F0A205B7E7`; raw output SHA-256 `BE5D31B73205724FD74E851BE38FC3C683409847DDD4BCF1704D36132742ED35`. The original canonical wrapper exit remains 1 with the child exit uncaptured; the source identity audit is independent evidence, not a reclassification of that result.
 
 - Final source identity audit at `2026-10-15T09:07:42.3021821Z` matched all 11 frozen product/focused-test input hashes with zero mismatches. This is identity evidence only, not a new Pester result. External receipt `Expanded58-PostDoc-Source-Identity-Audit-20261015-v2.json`, SHA-256 `31BE1E329D734DB1CA7CD890DD9AA57090CD58B703BA16CBA7BA0CFBF81F7CE4`.
+
+## Isolated 61-entry required-patch follow-up -- 2026-10-15
+
+- This local branch is based on the 58-entry checkpoint commit
+  `1447d2d8da2843748157e700df227b6b51b49983`; no 58-tree edits, commit, push,
+  PR, merge, release, or owner-runtime acceptance are claimed.
+- Catalog identity: 61 unique recipes / 23 exact identities / 53 `CreateFile`
+  / 8 `ReplaceFile`, SHA-256
+  `87DF31451B267F89FCD2CB3E3DEA1860972EDD4C7601ACE1998E80BD7E4CAD9E`.
+  Engine SHA-256
+  `1DFDE54B9A11D0A54D6A7308E892D1D397D156B8A2C731FBB56D3E175CC14409`;
+  only the catalog pin differs from the 58-entry input.
+- Three independent absent-only Main repairs: MaiMai GreeN `freeglut.dll`,
+  MaiMai GreeN `libcurl.dll`, and Rabbids Hollywood
+  `RabbidsHollywood_Operator.exe`. Their exact guide `ArrayIndex` values
+  (740, 1031) and separate `SourcePath` values ([514], [702]) are recorded
+  in the corrected boundary. The operator executable is not the Rabbids
+  Assembly-CSharp or BepInEx operator-plugin component; no executable,
+  registry, or `.conf` action is part of this recipe.
+- Corrected focused Pester 5.7.1 runs selected 13 tests on each engine:
+  PowerShell 7.6.7 ended `2026-10-15T09:34:35.3112992Z` and passed 13/13;
+  Windows PowerShell 5.1.26100.9549 ended `2026-10-15T09:38:35.6923290Z`
+  and passed 13/13. Each selected five manager catalog/resolver/transaction
+  guards, all six existing plugin-lane tests, and both Main-extra tests.
+  The manager file discovered 1,488 tests; 1,483 were not run. No full Main,
+  Support, or canonical suite was run. PS7 receipt SHA-256
+  `B8982B68EFD4A31525ED27ACB2295E40285410785991AF9328CD8A8120786C39`;
+  PS5.1 receipt SHA-256
+  `BB93047C80A1D9BA239F5BCACCE684C2C08A63FB31F8323093F36BEBAFCD85DD`.
+- The earlier PS7 selection transcript (SHA-256
+  `F48FF050A3BA0B18D995E37D1BDF3DE296443B608B6B602259461141FB0F9C80`)
+  records the same 13 selected passing tests but exits 1 because its first
+  runner incorrectly counted 1,483 not-run manager cases as selected. It is
+  preserved as a runner-accounting diagnostic; the corrected PS7 transcript
+  is the passing receipt.
+- Fresh Main ZIP proof SHA-256
+  `F19F55F9534AF82EEF679953543FA4DCBDEA795F0053CEFB05A3915DB858F05C`
+  records one exact central-directory occurrence, Deflate method 8, exact
+  size and hashes for each of the three members and both guide executables.
+  The corrected profile/ArrayIndex/SourcePath binding proof is
+  `7F912B203320D1B4BB0DBE7037DD38DFA6DEEF45E23E5480CA48647497047ACD`.
+  No whole-archive hash, extraction, payload execution, or installed-target
+  inspection. No dependency, architecture, complete setup, launch, or
+  gameplay claim.
+- The separate 58-entry checkpoint and its historical evidence remain
+  unchanged. The focused source candidate and exact local tests are not a
+  release package or user-runtime acceptance.
+- Post-document source identity audit (identity evidence only; not a Pester
+  run) recorded 21 source/document identities at
+  `2026-10-15T09:42:32Z`; receipt
+  `ThreeRecipe-PostDoc-Source-Identity-Audit-20261015T094232Z.json`,
+  SHA-256 `244FC7DA658FFC0CD8925ADF5134B6BEB60D0B2325CC598B2BF513FA6AE26151`.
+- Production ZIP stage/read-back (staging evidence only; not a Pester run)
+  completed for all three exact Main members at
+  `2026-10-15T09:45:16Z`; receipt
+  `ThreeRecipe-Production-ZIP-Stage-20261015T094513Z.json`, SHA-256
+  `20FD648271CB3878F6FCCF2648B4E051B44F88B7DE80A8FEA659E991C8F0D010`.

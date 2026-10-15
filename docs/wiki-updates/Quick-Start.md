@@ -172,17 +172,22 @@ rename the original library, edit TPFIX.ini, or choose the first-launch
 TeknoParrot.dll path. Compatibility and gameplay remain separate checks.
 
 **Required game patches:** choose option 10 to review supported required
-patches. The current local owner-test catalog has 58 exact recipes across 22
-exact ProfileId/build/executable identities. It preserves the historical
-13-entry baseline and adds three Taisen Hot Gimmick 5 (2.04) single-file
-restores, three exact-build user-selected plugin restores (Mars Sortie 1.46.9,
-the separate Rabbids Hollywood operator plugin, and SB3 1.91 x64), five
-native recipes for Cross Raid 1.05, VF5R 1.001, and Sonic Dash Extreme, and
-34 Main-component restorations: 14 Hummer, 14 Hummer Extreme, two Primeval
-Hunt, two SB3 FMOD, and two Infinity Blade FX 1.02. Fifty `CreateFile` operations create only
-absent targets; eight `ReplaceFile` operations require the exact known
-before-state. Exact-after targets skip; unknown or other states are
-refused. Full semantic guide coverage and gameplay readiness are not claimed.
+patches. This local RC8 owner-test follow-up candidate has 61 exact recipes
+across 23 exact ProfileId/build/executable identities. It preserves the
+historical 13-entry baseline and 58-entry PR #355 checkpoint, then adds
+absent-only MaiMai GreeN `freeglut.dll` and `libcurl.dll` restores plus the
+Rabbids Hollywood `RabbidsHollywood_Operator.exe`. The 58-entry checkpoint
+contains three Taisen Hot Gimmick 5 (2.04) restores, three exact-build
+user-selected plugin restores (Mars Sortie 1.46.9, the separate Rabbids
+Hollywood operator plugin, and SB3 1.91 x64), five native recipes (Cross Raid
+1.05, VF5R 1.001, and Sonic Dash Extreme), 30 Hummer/Hummer Extreme/Primeval
+components, two SB3 FMOD components, and two Infinity Blade FX 1.02
+components. The catalog has 53 `CreateFile` operations and eight
+`ReplaceFile` operations. These are component repairs, not full guide
+coverage or launch-readiness proof.
+MaiMai's DLLs are separate transactions. The Rabbids operator utility is
+distinct from the existing Assembly-CSharp and BepInEx operator-plugin
+recipes; it is not executed and registry or `.conf` state is not edited.
 
 The 30 Main restorations do not establish Hummer Extreme frame-count behavior,
 Primeval Hunt `ElfLdr2` copy identity, or its modern NVIDIA fog behavior.

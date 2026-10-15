@@ -429,19 +429,22 @@
   rename the original library, edit TPFIX.ini, or choose the first-launch
   TeknoParrot.dll path. Compatibility and gameplay remain separate checks.
 
-  - Required game patches. Option 10 supports 58 exact-build recipes across
-    22 exact ProfileId/build/executable identities in the current local RC8
-    owner-test catalog. It retains the historical 13-entry PR #353 baseline
-    and adds three Taisen Hot Gimmick 5 (2.04) single-file restores; three
+  - Required game patches. Option 10's local RC8 owner-test follow-up
+    candidate contains 61 exact-build recipes across 23 exact
+    ProfileId/build/executable identities. It preserves the 13-entry PR #353
+    baseline and the 58-entry PR #355 checkpoint, then adds absent-only Main
+    restores for MaiMai GreeN `freeglut.dll` and `libcurl.dll`, plus the
+    Rabbids Hollywood `RabbidsHollywood_Operator.exe`. The 58-entry checkpoint
+    contains three Taisen Hot Gimmick 5 (2.04) single-file restores; three
     user-selected plugin restores for Mars Sortie, the separate Rabbids
     Hollywood operator plugin, and Super Bikes 3 1.91 x64; five native
     recipes for Cross Raid 1.05, VF5R 1.001, and Sonic Dash Extreme; and
     34 Main-component restorations: 14 Hummer, 14 Hummer Extreme, two
-    Primeval Hunt, two SB3 FMOD, and two Infinity Blade FX 1.02. Fifty `CreateFile` operations
-    create only absent targets; eight `ReplaceFile` operations require an
-    exact before-state. Exact-after targets are skipped and unknown bytes are
-    refused. Full guide coverage, setup readiness, controls, launch, and
-    gameplay are not claimed.
+    Primeval Hunt, two SB3 FMOD, and two Infinity Blade FX 1.02. Fifty-three
+    `CreateFile` operations create only absent targets; eight `ReplaceFile`
+    operations require an exact before-state. Exact-after targets are skipped
+    and unknown bytes are refused. Full guide coverage, setup readiness,
+    controls, launch, and gameplay are not claimed.
 
   - Postgres setup. Installs and configures the local PostgreSQL 8.3
     database that some Incredible Technologies games need (Golden Tee
@@ -758,15 +761,19 @@
        automatic list. TPM keeps verified backup/undo evidence; it skips an
        exact already-applied target and refuses any other existing bytes.
 
-       The current local RC8 owner-test catalog has 58 exact-build recipes
-       across 22 exact ProfileId/build/executable identities. It preserves the
-       historical 13-entry PR #353 baseline and adds three Taisen Hot Gimmick
-       5 (2.04) single-file restores, three local user-selected plugin restores
-       (Mars Sortie 1.46.9, the separate Rabbids Hollywood operator plugin,
-       and SB3 1.91 x64), five native recipes (Cross Raid 1.05 AMD/NVIDIA,
-       VF5R 1.001 AMD/NVIDIA, and Sonic Dash Extreme), 30 Main-component
-       restorations (14 Hummer, 14 Hummer Extreme, two Primeval Hunt), and
-       two SB3 FMOD Main-component restorations, and two Infinity Blade FX 1.02 Main-component restorations.
+       The local RC8 owner-test follow-up candidate has 61 exact-build recipes
+       across 23 exact ProfileId/build/executable identities. It preserves
+       the historical 13-entry PR #353 baseline and the 58-entry PR #355
+       checkpoint, then adds three absent-only Main restores: MaiMai GreeN
+       `freeglut.dll` and `libcurl.dll`, and Rabbids Hollywood
+       `RabbidsHollywood_Operator.exe`. The 58-entry checkpoint contains
+       three Taisen Hot Gimmick 5 (2.04) single-file restores, three local
+       user-selected plugin restores (Mars Sortie 1.46.9, the separate
+       Rabbids Hollywood operator plugin, and SB3 1.91 x64), five native
+       recipes (Cross Raid 1.05 AMD/NVIDIA, VF5R 1.001 AMD/NVIDIA, and Sonic
+       Dash Extreme), 30 Main-component restorations (14 Hummer, 14 Hummer
+       Extreme, two Primeval Hunt), two SB3 FMOD restorations, and two
+       Infinity Blade FX 1.02 restorations.
        The Taisen files are restorations only. Configure and save keyboard
        keys with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by
        the game guide. TPM does not configure keys or run either utility;
@@ -774,14 +781,16 @@
 
        BBCP Chronophantasma replaces only its exact known driver before-hash
        with the guide-required hash from the named Central Fiction Main ZIP;
-       absent or unknown BBCP bytes are refused. The 50 `CreateFile` operations
+       absent or unknown BBCP bytes are refused. The 53 `CreateFile` operations
        restore only absent targets; eight `ReplaceFile` operations require
        exact before-hashes. Exact desired bytes are skipped, and all other
        states are refused. The four baseline Main-source plugin payloads and
-       three added user-selected patch ZIPs are distinct. Rabbids' operator
-       plugin is not the existing `Assembly-CSharp.dll` repair. SB3's Main ZIP
-       already contains the same plugin bytes; that recipe restores only a
-       missing installed target.
+       three added user-selected patch ZIPs are distinct. The Rabbids operator
+       executable is separate from both the existing `Assembly-CSharp.dll`
+       repair and BepInEx operator plugin; it is not executed, and TPM does not
+       change registry or `.conf` state. SB3's Main ZIP already contains its
+       plugin bytes; that recipe restores only a missing installed target.
+       MaiMai's two DLL restores are independent transactions.
        The two FMOD recipes separately restore missing Main-source
        `fmod64.dll` and `fmodstudio64.dll` targets; they are not an atomic
        pair, and DLL version/pair compatibility are unverified. The 30 Hummer,

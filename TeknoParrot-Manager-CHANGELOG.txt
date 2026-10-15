@@ -62,17 +62,20 @@
   installation into existing game folders, with exact build/executable and
   local ZIP-member checks, backup, read-back verification, undo, exact
   already-applied skipping, and refusal of unknown states.
-  The current local catalog has 58 exact recipes across 22 exact
+  The local follow-up candidate has 61 exact recipes across 23 exact
   ProfileId/build/executable identities. It preserves the historical
-  13-entry PR #353 baseline and adds three Taisen Hot Gimmick 5 (2.04)
-  component restores; three local user-selected plugin restores (Mars Sortie
-  1.46.9, the separate Rabbids Hollywood operator plugin, and SB3 1.91 x64);
-  five native exact-build recipes (Cross Raid 1.05 and VF5R 1.001 AMD/NVIDIA
-  shader alternatives, plus the opt-in Sonic Dash Extreme executable
-  replacement); 30 absent-only Main-component restorations (14 Hummer,
-  14 Hummer Extreme, two Primeval Hunt); and two absent-only SB3 FMOD
-  Main-component restorations, plus two Infinity Blade FX 1.02 restorations. The aggregate has 50 `CreateFile` operations
-  and eight exact-before `ReplaceFile` operations.
+  13-entry PR #353 baseline and 58-entry PR #355 checkpoint, then adds
+  absent-only Main restores for MaiMai GreeN `freeglut.dll` and `libcurl.dll`
+  and the Rabbids Hollywood `RabbidsHollywood_Operator.exe`. The 58-entry
+  checkpoint adds three Taisen Hot Gimmick 5 (2.04) component restores; three
+  local user-selected plugin restores (Mars Sortie 1.46.9, the separate
+  Rabbids Hollywood operator plugin, and SB3 1.91 x64); five native exact-
+  build recipes (Cross Raid 1.05 and VF5R 1.001 AMD/NVIDIA shader alternatives,
+  plus the opt-in Sonic Dash Extreme executable replacement); 30 absent-only
+  Main-component restorations (14 Hummer, 14 Hummer Extreme, two Primeval
+  Hunt); two absent-only SB3 FMOD Main-component restorations; and two
+  Infinity Blade FX 1.02 restorations. The candidate has 53 `CreateFile`
+  operations and eight exact-before `ReplaceFile` operations.
 
   The four BlazBlue driver restorations, the original Rabbids Assembly-CSharp
   target, four Main-sourced BepInEx plugin targets, and Silent Hill's
@@ -82,6 +85,12 @@
   installed target. All seven plugin targets require BepInEx core presence;
   Family Guy also requires its documented entrypoint configuration. The
   Rabbids operator plugin is not its Assembly-CSharp recipe.
+  The MaiMai DLLs are separate absent-only transactions. The Rabbids operator
+  executable is separate from both the existing Assembly-CSharp repair and
+  BepInEx operator plugin; it is not executed, and registry or `.conf` state
+  is not edited. No dependency, architecture, complete-setup, or launch claim
+  is added by these component recipes.
+
 
   BBCP Chronophantasma still replaces only its exact known driver before-hash
   with the guide-required hash from the explicitly named Central Fiction Main
