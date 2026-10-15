@@ -13189,11 +13189,18 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
         # ECVF tree beside that extracted file so its $PSScriptRoot-anchored
         # contract lookup consults the real detector and contract.
         New-Item -ItemType Directory -Path (Join-Path $TestDrive 'scripts'), (Join-Path $TestDrive 'contracts\pcsx2x6') -Force | Out-Null
+        $script:compatRuntimeContractsRoot = Join-Path $TestDrive 'scripts\resources\contracts'
+        New-Item -ItemType Directory -Path (Join-Path $script:compatRuntimeContractsRoot 'pcsx2x6'), (Join-Path $script:compatRuntimeContractsRoot 'fixtureemu') -Force | Out-Null
         $script:compatAuthorityModulePath = Join-Path $TestDrive 'scripts\TPMCertification.Authority.psm1'
         $script:compatContractsModulePath = Join-Path $TestDrive 'scripts\TPMCertification.Contracts.psm1'
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Authority.psm1') -Destination $script:compatAuthorityModulePath -Force
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Contracts.psm1') -Destination $script:compatContractsModulePath -Force
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $TestDrive 'contracts\pcsx2x6\contract.json') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\runtime-evidence-index.json') -Destination (Join-Path $TestDrive 'contracts\pcsx2x6\runtime-evidence-index.json') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\evidence.md') -Destination (Join-Path $TestDrive 'contracts\pcsx2x6\evidence.md') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\experiments.md') -Destination (Join-Path $TestDrive 'contracts\pcsx2x6\experiments.md') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $script:compatRuntimeContractsRoot 'pcsx2x6\contract.json') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\runtime-evidence-index.json') -Destination (Join-Path $script:compatRuntimeContractsRoot 'pcsx2x6\runtime-evidence-index.json') -Force
 
         # A synthetic non-pcsx2x6 contract proves the production path is
         # generalized without adding an unsupported real emulator contract to
@@ -13242,6 +13249,14 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
             (Join-Path $fixtureContractDir 'evidence.md'),
             '# fixture`r`n',
             (New-Object System.Text.UTF8Encoding $false))
+        Import-Module $script:compatContractsModulePath -Force
+        $fixtureProjection = Get-TPMSourceEvidenceProjectionV1 -ContractPath (Join-Path $fixtureContractDir 'contract.json') -ContractDirectory $fixtureContractDir
+        [System.IO.File]::WriteAllText(
+            (Join-Path $fixtureContractDir 'runtime-evidence-index.json'),
+            $fixtureProjection.Json,
+            (New-Object System.Text.UTF8Encoding $false))
+        Copy-Item -LiteralPath (Join-Path $fixtureContractDir 'contract.json') -Destination (Join-Path $script:compatRuntimeContractsRoot 'fixtureemu\contract.json') -Force
+        Copy-Item -LiteralPath (Join-Path $fixtureContractDir 'runtime-evidence-index.json') -Destination (Join-Path $script:compatRuntimeContractsRoot 'fixtureemu\runtime-evidence-index.json') -Force
 
         $script:RawThrillsPathLimits = @{}
         $script:FileVersionPins = @{}
@@ -13343,7 +13358,7 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
         New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'FIXTUREONE.xml') -EmulatorType 'FixtureEmu'
         New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'FIXTURETWO.xml') -EmulatorType 'fixtureemu'
         Import-Module $script:compatContractsModulePath -Force
-        $registeredContracts = Get-TPMRegisteredEmulatorContractsV1 -ContractsRoot (Join-Path $TestDrive 'contracts')
+        $registeredContracts = Get-TPMRegisteredEmulatorContractsV1 -ValidationMode Source -ContractsRoot (Join-Path $TestDrive 'contracts')
         @($registeredContracts | ForEach-Object { $_.ContractId }) | Should -Contain 'fixtureemu'
         $directState = Get-ContractBackedMissingComponents -EmulatorType 'FixtureEmu' -TeknoParrotRoot $root -AffectedProfiles @('FIXTUREONE', 'FIXTURETWO')
         $directState.State | Should -Be 'Missing'
@@ -23439,7 +23454,7 @@ Describe 'Required patch engine and local recipes' {
         $script:requiredPatchInputQueue = $null
     }
     AfterEach {
-        $script:TpmRequiredPatchCatalogSha256 = '87DF31451B267F89FCD2CB3E3DEA1860972EDD4C7601ACE1998E80BD7E4CAD9E'
+        $script:TpmRequiredPatchCatalogSha256 = '8F30A2BC8CC8AC6B96A324962F9E12792572E08BE6512B1A1808420D6BDB5195'
         $script:TpmOwnedLayout = $null
         $script:gamesInstallFolder = $null
         $script:requiredPatchInputQueue = $null
@@ -23725,10 +23740,10 @@ Describe 'Required patch engine and local recipes' {
 
     It 'binds all current catalog expansion rows to exact build and source identities' {
         $catalog = Read-TpmRequiredPatchCatalog -ProgramRoot ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')))
-        $catalog.Entries.Count | Should -Be 61
+        $catalog.Entries.Count | Should -Be 62
         @($catalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 23
         @($catalog.Entries | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProfileId,$_.BuildName,$_.Executable,$_.ExecutableSha256 } | Sort-Object -Unique).Count | Should -Be 23
-        @($catalog.Entries | ForEach-Object { $_.Operations } | Where-Object Type -CEQ 'CreateFile').Count | Should -Be 53
+        @($catalog.Entries | ForEach-Object { $_.Operations } | Where-Object Type -CEQ 'CreateFile').Count | Should -Be 54
         @($catalog.Entries | ForEach-Object { $_.Operations } | Where-Object Type -CEQ 'ReplaceFile').Count | Should -Be 8
         $infinityExpectedRows = @(
             [pscustomobject]@{ Id='infinity-blade-fx-matrix32-main-restore'; Target='Binaries/Win32/matrix32.dll'; Size=109056; Sha1='355E6F9557BAFC726694DC2E40820FF8429D61FB'; Sha256='CB25982F65A32E3D29B3F449BD8CCF2E4A4B47CA3096B454B6910341B213D547' }
@@ -24432,7 +24447,7 @@ Describe 'Required patch engine and local recipes' {
         [IO.File]::ReadAllText($requiredPatchFixture.PluginTarget) | Should -Be 'synthetic required plugin'
         Test-Path -LiteralPath $userProfile | Should -BeFalse
         Assert-MockCalled Read-PathWithBrowse -Times 1 -Exactly
-        $script:TpmRequiredPatchCatalogSha256 = '87DF31451B267F89FCD2CB3E3DEA1860972EDD4C7601ACE1998E80BD7E4CAD9E'
+        $script:TpmRequiredPatchCatalogSha256 = '8F30A2BC8CC8AC6B96A324962F9E12792572E08BE6512B1A1808420D6BDB5195'
         $script:TpmOwnedLayout = $null
     }
 
@@ -24485,7 +24500,7 @@ Describe 'Required patch engine and local recipes' {
         Invoke-TpmRequiredPatchMenu -TpRoot $tp -UserProfilesDir (Join-Path $tp 'UserProfiles') -ManagerRoot $manager -ProgramRoot $manager -MainSource $source -SupplementarySource ''
         Test-Path -LiteralPath $requiredPatchFixture.PluginTarget | Should -BeFalse
         @(Get-ChildItem -LiteralPath (Join-Path $owned 'Backups\GamePatches') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
-        $script:TpmRequiredPatchCatalogSha256 = '87DF31451B267F89FCD2CB3E3DEA1860972EDD4C7601ACE1998E80BD7E4CAD9E'
+        $script:TpmRequiredPatchCatalogSha256 = '8F30A2BC8CC8AC6B96A324962F9E12792572E08BE6512B1A1808420D6BDB5195'
         $script:TpmOwnedLayout = $null
     }
     It 'selects exact Cross Elysion GPU recipes and refuses a different executable revision' {

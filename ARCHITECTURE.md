@@ -1024,6 +1024,29 @@ does not claim antivirus or quarantine causality, block registration, download,
 repair, re-extract, reinstall, or write to the TeknoParrot root, profiles,
 configuration, ParrotData, emulator folders, or game folders.
 
+
+**ECVF package boundary.** The user ZIP carries the PCSx2x6 runtime
+`contract.json` and deterministic `runtime-evidence-index.json` under
+`scripts/resources/contracts/pcsx2x6/`; maintainer `contracts/`, its narratives,
+schemas, and snapshots remain source-only. ECVF entry points require an
+explicit `ValidationMode`: `Source` resolves the repository `contracts/`
+tree and rechecks actual Markdown locators/headings and hashes against the
+deterministic index; `Runtime` resolves only `scripts/resources/contracts/`
+and validates the raw contract hash plus strict index mappings. Main always
+passes Runtime and never falls back to source contracts when packaged
+resources are absent. Source mode is explicit in source/build and certification
+callers only; missing selected roots fail closed. The package/source validator
+independently requires maintainer source paths,
+recomputes the projection from original document bytes, and compares its exact
+bytes with the packaged index.
+
+Runtime validation is separate. It verifies the raw packaged contract SHA-256
+against the index and requires complete, unique, shape-valid
+EvidenceId/locator/document/heading mappings. It does not read or claim to
+verify the omitted Markdown bytes, and the unsigned index is not an
+authenticity mechanism. Inline PowerShell contract validators remain
+authoritative; `contracts/_schema` is maintainer reference material, not a
+runtime-loaded dependency.
 **Pcsx2x6 first-run/crosshair prerequisite automation (issue #173).** Before this round,
 `Invoke-CrosshairSetup`'s Pcsx2x6 branch silently skipped ini handling whenever
 `inis\PCSX2.ini` wasn't found, and computed that path as `<Pcsx2Dir>\inis\PCSX2.ini` --
@@ -2341,18 +2364,19 @@ host or acquire payloads. A curated metadata-only RomVault DAT is permitted,
 but none is bundled; users provide payloads. Every recipe pins the exact build
 and executable identity, ZIP member path, member size/runtime SHA-256, target
 preconditions, post-patch identity, and setup prerequisites.
-The current local catalog has 61 exact recipes across 23 exact ProfileId/build/executable
+The current local catalog has 62 exact recipes across 23 exact ProfileId/build/executable
 identities: it preserves the historical 13-entry baseline and adds three
 Taisen Hot Gimmick 5 (2.04) restores, three user-selected plugin restores
 (Mars Sortie 1.46.9, the separate Rabbids Hollywood operator plugin, and
 SB3 1.91 x64), five native recipes (Cross Raid 1.05, VF5R 1.001, and Sonic
 Dash Extreme), 30 Main-component restorations (14 Hummer, 14 Hummer Extreme,
 two Primeval Hunt), two SB3 FMOD Main-component restorations, two Infinity
-Blade FX 1.02 Main-component restorations, and three additional absent-only
-Main components (MaiMai GreeN's `freeglut.dll` and `libcurl.dll`, plus the
-Rabbids Hollywood operator utility). The aggregate has 53 absent-only
-`CreateFile` operations and eight exact-before `ReplaceFile` operations. This
-is exact-component support, not full semantic guide coverage.
+Blade FX 1.02 Main-component restorations, and four additional absent-only
+Main components (MaiMai GreeN's `freeglut.dll` and `libcurl.dll`, the Rabbids
+Hollywood operator utility, and Cross Raid 1.05 Ver A `rom/shader.farc`).
+The aggregate has 54 absent-only `CreateFile` operations and eight exact-before
+`ReplaceFile` operations. This is exact-component support, not full semantic
+guide coverage.
 Family Guy pins `bowling.exe` SHA-256
 `3C4B406AA7B353CD416913308B8B714F7E17588D5A091326E0250A71A3407188`; its
 `BepInEx/plugins/FGBTPPlugin.dll` source member is 23,552 bytes, DAT SHA-1
@@ -2480,7 +2504,11 @@ an original-backup match, not a repair payload. The current Cross Raid
 alternatives are limited to the exact 1.05 ProfileId/build and AMD/NVIDIA
 shader identities. The source documentation names version 1.05, not the
 `Ver A` suffix; that profile/build match is not runtime compatibility proof.
-No other Cross Raid build or separate base-shader restoration is enabled.
+Separately, the exact 1.05 Ver A Main `rom/shader.farc` is an absent-only
+`CreateFile` restoration, not a GPU fix or Black Textures adjudication. Vendor
+undo restores the base bytes into a new file object; the earlier base-create
+receipt refuses undo on changed identity and preserves those bytes. No other
+Cross Raid build is enabled.
 VF5R alternatives are likewise limited to exact build 1.001. Hybrid or
 ambiguous GPU evidence is refused; the engine does not infer which adapter a
 game uses.

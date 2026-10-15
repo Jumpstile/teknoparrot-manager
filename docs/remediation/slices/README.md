@@ -36,12 +36,29 @@ Main-component, SB3 FMOD, and Infinity Blade FX additions are mapped by
 The isolated Cross Raid receipt-composition correctness fix is mapped by
 `TPM-CROSSRAID-COMPOSITION-001` and
 `TPM-CROSSRAID-COMPOSITION-INVARIANTS-001`. It changes receipt validation only;
-the separately held Cross Raid base-shader recipe remains outside the catalog.
+at the composition-fix checkpoint, the separate Cross Raid base-shader recipe
+was held outside the catalog; the mapped 62nd-entry slice below supersedes
+that status.
 
-The separate local 61-entry follow-up adds three exact Main components
+The historical local 61-entry checkpoint added three exact Main components
 (MaiMai GreeN `freeglut.dll` and `libcurl.dll`, and the Rabbids Hollywood
 operator utility), mapped by `TPM-REQUIRED-PATCH-MAIN-EXTRAS-20261015`,
 its paired inventory, and corrected boundary note. This candidate does not
 change the 58-entry parent checkpoint or establish owner-runtime acceptance.
+
+The separate Cross Raid 1.05 Ver A Main base-shader restoration is mapped by
+`TPM-REQUIRED-PATCH-CROSSRAID-BASE-001` and
+`TPM-REQUIRED-PATCH-CROSSRAID-BASE-INVENTORY-001`. Its single absent-only Main
+entry and portable suite are in the isolated 62-entry candidate; the suite
+passed 7/7 under both engines and the central identity case passed 1/1 under
+both. Root review and combined gates remain pending. It does not adjudicate
+Black Textures, gameplay, or setup completeness.
+
+The user release-package cleanliness and PCSx2x6 source/runtime evidence
+boundary are mapped separately in
+`TPM-RELEASE-PACKAGE-CLEANLINESS-001`, with
+`docs/remediation/inventories/TPM-RELEASE-PACKAGE-ALLOWLIST-001.md`.
+Parent-owned Expanded61 ZIP inspection remains outside this local fixture
+lane.
 
 Slice 0 current implementation: `TPM-RELEASE-SNAPSHOT-001`.

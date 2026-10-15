@@ -224,13 +224,21 @@ jobs:
             "$PWD\Tests\SupportPostureCorpus.Tests.ps1",
             "$PWD\Tests\SupportPackage.Tests.ps1",
             "$PWD\Tests\TpmReleaseCatalogSnapshot.Tests.ps1",
+            "$PWD\Tests\TPMCertification.Authority.Tests.ps1",
+            "$PWD\Tests\TPMCertification.Contracts.Tests.ps1",
+            "$PWD\Tests\TPMCertification.ContractRegistry.Tests.ps1",
+            "$PWD\Tests\TPMCertification.ProductionFacts.Tests.ps1",
+            "$PWD\Tests\TPMCertification.ProductionHarnessComposition.Tests.ps1",
+            "$PWD\Tests\TPMCertification.Shadow.Tests.ps1",
+            "$PWD\Tests\TPMReleasePackage.Tests.ps1",
             "$PWD\Tests\TpmRequiredPatchPluginLane.Tests.ps1",
             "$PWD\Tests\TpmRequiredPatchSb3Lane.Tests.ps1",
             "$PWD\Tests\TpmRequiredPatchNativeMainComponentRestorations.Tests.ps1",
             "$PWD\Tests\TpmRequiredPatchSb3FmodLane.Tests.ps1",
             "$PWD\Tests\TpmRequiredPatchInfinityBladeFxLane.Tests.ps1",
             "$PWD\Tests\TpmRequiredPatchMainExtras.Tests.ps1",
-            "$PWD\Tests\TpmRequiredPatchCrossRaidComposition.Tests.ps1"
+            "$PWD\Tests\TpmRequiredPatchCrossRaidComposition.Tests.ps1",
+            "$PWD\Tests\TpmRequiredPatchCrossRaidBaseLane.Tests.ps1"
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'

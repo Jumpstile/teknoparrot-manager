@@ -2,3 +2,7 @@
 scripts/TpmRequiredPatchRecipes.json text eol=lf
 *.ps1 text eol=crlf
 *.txt text eol=crlf
+contracts/pcsx2x6/runtime-evidence-index.json text eol=lf
+contracts/pcsx2x6/contract.json text eol=crlf
+contracts/pcsx2x6/evidence.md text eol=crlf
+contracts/pcsx2x6/experiments.md text eol=crlf

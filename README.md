@@ -92,8 +92,8 @@ tree is for review, certification, and release preparation only.
 - **GPU fixes** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
 - **Force feedback (FFB)** — native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed), covering different games. If a game is covered by both, you're asked once which to use for all such games.
 - **BepInEx setup** — user-approved install, update, or repair-reset for selected games using stable x64/x86 packages with verified backup and rollback.
-- **Required game patches** -- installs 58 evidence-pinned recipes across 22
-  exact ProfileId/build/executable identities from local ZIPs. Fifty
+- **Required game patches** -- installs 62 evidence-pinned recipes across 23
+  exact ProfileId/build/executable identities from local ZIPs. Fifty-four
   operations create only absent files; eight require an exact known
   before-state. Hardware alternatives require unambiguous captured evidence.
   Unknown target bytes are refused; patch success does not prove readiness.
@@ -271,12 +271,13 @@ supports **manual** installation into an already-installed game folder, even
 when that game is not registered yet. Manual install does not register it;
 TPM tells you to register it and configure controls afterward.
 
-The local RC8 owner-test follow-up candidate in this worktree contains 61
+The local RC8 owner-test follow-up candidate in this worktree contains 62
 exact-build recipes across 23 exact ProfileId/build/executable identities.
 It preserves the historical 13-entry PR #353 baseline and the 58-entry
-PR #355 checkpoint, then adds three absent-only Main-component restores:
-MaiMai GreeN `freeglut.dll` and `libcurl.dll`, plus the Rabbids Hollywood
-`RabbidsHollywood_Operator.exe`.
+PR #355 checkpoint, then adds four absent-only Main-component restores:
+MaiMai GreeN `freeglut.dll` and `libcurl.dll`, Rabbids Hollywood
+`RabbidsHollywood_Operator.exe`, and Cross Raid 1.05 Ver A
+`rom/shader.farc`.
 The 58-entry checkpoint comprises three Taisen Hot Gimmick 5 (2.04)
 single-file restores (`TTX-Monitor.dll`, `TTX-Config.exe`, and
 `TTX-Loader.exe`); three exact-build user-selected plugin restores (Mars
@@ -284,7 +285,7 @@ Sortie 1.46.9, the separate Rabbids Hollywood operator plugin, and Super
 Bikes 3 1.91 x64); five native shader/executable recipes (Cross Raid 1.05,
 VF5R 1.001, and Sonic Dash Extreme); 30 Hummer, Hummer Extreme, and Primeval
 Hunt Main-component restores; two SB3 FMOD Main-component restores; and two
-Infinity Blade FX 1.02 Main-component restores. The local candidate has 53
+Infinity Blade FX 1.02 Main-component restores. The local candidate has 54
 absent-only `CreateFile` operations and eight exact-before `ReplaceFile`
 operations. It is not a release or full semantic guide coverage claim.
 
@@ -341,13 +342,15 @@ AMD/NVIDIA shader alternatives. TPM requires the exact registered build and
 executable, unambiguous hardware evidence, and the before-hash declared by
 the selected recipe. Cross Raid's AMD/NVIDIA variants share a common known
 before-state; VF5R's variants also share a common known before-state. Neither
-family starts from the opposite vendor's output hash. Cross Raid source
-documentation identifies version 1.05 but not the `Ver A` suffix; that
-profile/build match is not runtime compatibility or gameplay proof. No other
-Cross Raid build or separate base-shader restoration is enabled. Sonic Dash
-Extreme is an explicit opt-in, exact-before/after executable replacement with
-backup, read-back, and receipt-bound undo; byte identity does not prove a
-60-fps outcome.
+family starts from the opposite vendor's output hash. Cross Raid vendor source
+documentation identifies version 1.05 but not the `Ver A` suffix; the
+profile/build match is not runtime compatibility or gameplay proof. Separately,
+the exact 1.05 Ver A Main `rom/shader.farc` restoration creates only when that
+target is absent. Vendor undo restores the base bytes into a new file object;
+the earlier base-create receipt refuses undo on changed object identity and
+preserves those bytes. No other Cross Raid build is enabled. Sonic Dash Extreme
+is an explicit opt-in, exact-before/after executable replacement with backup,
+read-back, and receipt-bound undo; byte identity does not prove a 60-fps outcome.
 
 Family Guy also requires BepInEx and the guide's `MonoBehaviour` entrypoint setting.
 Every patch transaction backs up before applying, verifies read-back, and keeps

@@ -173,27 +173,28 @@
 
    **Required game patches:** TPM uses local, hash-pinned ZIP members; it
    does not host or download patch payloads. This local RC8 owner-test
-   follow-up candidate has 61 exact recipes across 23 exact
+   follow-up candidate has 62 exact recipes across 23 exact
    ProfileId/build/executable identities. It preserves the 13-entry PR #353
-   baseline and the 58-entry PR #355 checkpoint, then adds absent-only Main
-   repairs for MaiMai GreeN `freeglut.dll` and `libcurl.dll`, and the Rabbids
-   Hollywood `RabbidsHollywood_Operator.exe`. The 58-entry checkpoint also
-   contains three Taisen Hot Gimmick 5 (2.04) restores, three user-selected
-   plugin restores (Mars Sortie, the separate Rabbids Hollywood operator
-   plugin, and SB3 1.91 x64), five native recipes for Cross Raid 1.05, VF5R
-   1.001, and Sonic Dash Extreme, 30 Hummer/Hummer Extreme/Primeval Hunt
-   Main-component restorations, two SB3 FMOD Main-component restorations,
-   and two Infinity Blade FX 1.02 Main-component restorations.
+   baseline and the 58-entry PR #355 checkpoint, then adds four absent-only
+   Main repairs: MaiMai GreeN `freeglut.dll` and `libcurl.dll`, Rabbids
+   Hollywood `RabbidsHollywood_Operator.exe`, and Cross Raid 1.05 Ver A
+   `rom/shader.farc`. The 58-entry checkpoint contains three Taisen Hot
+   Gimmick 5 (2.04) restores, three user-selected plugin restores (Mars Sortie,
+   the separate Rabbids Hollywood operator plugin, and SB3 1.91 x64), five
+   native recipes for Cross Raid 1.05, VF5R 1.001, and Sonic Dash Extreme,
+   30 Hummer/Hummer Extreme/Primeval Hunt Main-component restorations, two
+   SB3 FMOD Main-component restorations, and two Infinity Blade FX 1.02
+   Main-component restorations.
    The Taisen files are restorations only. Configure and save keyboard keys
    with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by the guide.
    TPM does not configure keys or run either utility; setup and launch remain
    separate owner steps.
 
-   Fifty-three `CreateFile` operations create only absent targets; eight
+   Fifty-four `CreateFile` operations create only absent targets; eight
    `ReplaceFile` operations require an exact before-hash. Exact desired bytes
    are skipped and other existing bytes are refused. The exact user-selected
-   patch ZIP filename is required. The three MaiMai/Rabbids Main components
-   are absent-only; the MaiMai DLLs are separate transactions. The Rabbids
+   patch ZIP filename is required. The four new Main components are absent-only;
+   the MaiMai DLLs are separate transactions. The Rabbids
    operator utility is distinct from the existing Assembly-CSharp and
    BepInEx operator-plugin recipes; it is not executed and registry or `.conf`
    settings are not changed. The SB3 Main ZIP already contains its plugin
@@ -207,11 +208,14 @@
    unambiguous AMD/NVIDIA evidence, and the selected recipe's exact before-hash.
    Cross Raid's AMD/NVIDIA variants share a common known before-state; VF5R's
    variants also share a common known before-state, not an opposite-vendor state.
-   Cross Raid source documentation says 1.05 but not the `Ver A` suffix; no
-   compatibility or gameplay result is claimed. No other Cross Raid build or
-   base-shader restoration is enabled. Sonic's exact before/after executable
-   replacement is explicit opt-in and does not prove 60-fps behavior. Silent
-   Hill's Windows codec BAT is not run or installed.
+   Cross Raid vendor source documentation says 1.05 but not the `Ver A`
+   suffix; that profile/build match is not runtime compatibility proof.
+   Separately, the exact 1.05 Ver A Main `rom/shader.farc` restoration creates
+   only when absent. Vendor undo restores base bytes into a new file object;
+   the earlier base-create receipt refuses undo on changed identity and
+   preserves those bytes. No other Cross Raid build is enabled. Sonic's exact
+   before/after executable replacement is explicit opt-in and does not prove
+   60-fps behavior. Silent Hill's Windows codec BAT is not run or installed.
 
    The 30 Hummer, Hummer Extreme, and Primeval Hunt entries restore only
    missing Main components. Hummer Extreme frame-count requirements,

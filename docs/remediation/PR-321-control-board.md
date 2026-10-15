@@ -1077,3 +1077,90 @@ historical integration checkpoint and its test receipts remain unchanged.
 - Implemented only in isolated receipt-validation code. `Test-TpmMultiPatchReceiptChain` is reachable through the exclusive-gate path and accepts a single-operation CreateFile predecessor only when one exact single-operation ReplaceFile chain validates profile/root/catalog/target, SHA-256 and object-identity edges, retained backups, and restored terminal checkpoints. The bounded census caps 256 directories, 262,144 bytes per receipt, and 16 MiB total; it rechecks directory membership and all receipt hashes and reopens the target before accepting the leaf. Multi-operation chain shapes fail closed. Own-undo object identity and unrelated live receipt guards remain active.
 - The retained pre-fix PS7 characterization passed 5/7 and failed both vendor-undo cases; that exact characterization was not run on PS5.1. The expanded 18-case focused suite now passes 18/18 on PowerShell 7.6.7/Pester 5.7.1 and Windows PowerShell 5.1.26100.9549/Pester 5.7.1. It covers AMD/NVIDIA Apply -> vendor Undo -> base Undo refusal on new object identity -> new vendor transaction -> Undo; ambiguity, missing/corrupt/cyclic witnesses, census bounds, root snapshot binding, direct structural-mode refusal, unrelated target tampering, Prepared, backup/checkpoint tamper, foreign same-byte identity, hardware/same-group guards, and legacy schema-2 catalog/schema-1 receipt undo.
 - The Cross Raid base shader recipe remains held and excluded from the catalog. Full Main, SupportPackage and all seven required-patch suites passed 1714/1714 on each engine with actual child exit 0, ending 2026-10-15T12:03:33Z (PS7) and 2026-10-15T12:01:43Z (PS5.1). Static checks passed on both engines; canonical InjectionHunter 41 findings, 0 unresolved, actual exit 0. Permanent procedure gate passed 2026-10-15T12:05:48Z with explicit source freshness. All 580 inputs were unchanged during verification. Final evidence-only corrections require a post-document identity audit and freshness gate before the newly authorized scoped commit/push/exact-head CI/integration. No gameplay, owner-runtime, package, release, main-merge or recipe-promotion claim.
+## Issue #351 Cross Raid 1.05 Ver A base-shader candidate -- mapped before catalog edit
+
+- New slice: `TPM-REQUIRED-PATCH-CROSSRAID-BASE-001`; invariant inventory:
+  `TPM-REQUIRED-PATCH-CROSSRAID-BASE-INVENTORY-001`. No numbered PR #321 owner
+  row is assigned.
+- Worktree is the separate branch `feature/rc8-crossraid-base62-20261015`,
+  based on `cc307092553397c8eb56543e9cb4db1219fb73ef`. This is a new 62nd
+  recipe candidate; the source catalog remains unchanged at 61 entries /
+  23 identities / 53 `CreateFile` / eight `ReplaceFile` pending the mapped
+  contract and focused integration.
+- Exact scope is one absent-only Main `CreateFile` restoring
+  `rom/shader.farc` for Cross Raid 1.05 Ver A. Source/executable pins and the
+  exclusion of the older unversioned RAR are recorded in the slice and
+  inventory. No hardware predicate or gameplay claim is added.
+- Before catalog changes, the frozen seven-case portable held suite passed
+  7/7 under Pester 5.7.1 on PowerShell 7.6.7 and Windows PowerShell
+  5.1.26100.9549; each child exited 0, with zero failures/skips and seven
+  NUnit XML cases. External baseline result receipt SHA-256
+  `4EB6A909B904C16B3FC67EC936481287506F1752EF7BB9B7EEAA80B9D293EFBC`;
+  source-boundary receipt SHA-256
+  `D36A6008ACF7E8ED6B2CF63AEFC0D3961469D99E143A6DCDE84478CDAEF6A0E7`.
+- Frozen source suite and recipe inputs remained at SHA-256
+  `1FE514FAFE3C2502E5EDF1C1D6E9A52B24AC3ED6D8D9368A5EEA4817E250C8EF`
+  and `D65EDF8468DBABD0EC16E2B88EE1257DD985D766D88685D73855086007A3A29C`.
+  The 61-entry catalog, required-patch engine, and manager source match the
+  base commit blobs; no product input was changed for the baseline run.
+- No full Main, Support, canonical, packaging, or runtime test was run for
+  this candidate. Owner runtime, visual compatibility, setup completeness,
+  gameplay, release, and owner acceptance remain unverified.
+## Issue #351 Cross Raid 1.05 Ver A base-shader candidate -- focused result
+
+- The isolated catalog now contains 62 entries, 23 exact profile/build/executable identities, 54 `CreateFile` operations, and eight `ReplaceFile` operations. The new entry restores only the exact Main `rom/shader.farc` when absent.
+- The required-patch engine diff is limited to its catalog SHA-256 pin line; `TeknoParrot-Manager.ps1` remains byte-identical to base `cc307092553397c8eb56543e9cb4db1219fb73ef`.
+- The repo-relative standalone suite passed 7/7 with Pester 5.7.1 on PowerShell 7.6.7 and Windows PowerShell 5.1.26100.9549; both child processes exited 0 with no failures or skips. The targeted central catalog identity test passed 1/1 on each engine; 1,487 other central tests were intentionally filtered out.
+- Final focused receipt SHA-256: `7706F6AA6D23869A400D08A9D033B4E36B80E00F2DD713F3A6C41AAD36778642`. Standalone NUnit XML SHA-256 values: PS7 `E20BC373378F79C825CCD3121407E4FD968F7AB7D50DCA8967B1F829FFD817C6`; PS5.1 `4C1EDC6FF24D65A5315A0098F7BC46360813F1E476DD37C0609A005A996A6BB8`. Central filtered XML: PS7 `6256138544F7310AD6A8D121DA12ADF6BDC2771950D30F688A0B4BBCE7D3948B`; PS5.1 `91D06F9E70C34851D2C7BE5B355A204639744741E0F29FAF468C8EEFD3F71507`.
+- Full Main/Support/canonical suites, remaining lane gates, packaging, owner-runtime testing, gameplay, release, and owner acceptance remain outside this isolated staging result. The requested current summaries are synchronized in `README.md`, `TeknoParrot-Manager-README.txt`, `TeknoParrot-Manager-QuickStart.txt`, `TeknoParrot-Manager-CHANGELOG.txt`, `QUICKSTART.md`, `ARCHITECTURE.md`, and `docs/wiki-updates/Quick-Start.md`; no live wiki write occurred.
+
+## Issue #351 -- user release-package allowlist / ECVF runtime boundary
+
+- Slice: `TPM-RELEASE-PACKAGE-CLEANLINESS-001`; paired
+  `TPM-RELEASE-PACKAGE-ALLOWLIST-001`. Isolated branch
+  `fix/rc8-package-layout-20261015`, based on `b9ac73b2fbae847c1e385a19e66c4fe8fad515a6`.
+- Owner ask: exact minimal user ZIP allowlist; reject unknown archive content;
+  preserve maintainer source; make the PCSx2x6 runtime contract work from a
+  private extracted package without shipping narrative Markdown or schemas.
+- Verified baseline: `Tests/Test-ReleasePackage.ps1` requires a subset and
+  rejects selected names, not every unknown entry. Its old list ships the
+  menu diagnostic, schema JSON, and evidence/experiment Markdown. The 321
+  source crosshair files are exactly `000.png` through `320.png`.
+- Verified ECVF path: Main and certification modules load the registered contract.
+  Source registry validation is explicitly selected by source/certification
+  callers and resolves every `EvidenceReferences` locator to actual Markdown
+  bytes and headings. Packaged Main always selects Runtime: it validates the
+  raw contract SHA-256 and strict index mappings without claiming omitted
+  Markdown was read. Observation collection uses the selected mode. JSON
+  schemas are not runtime-loaded; inline PowerShell validators remain
+  authoritative.
+- Mapped runtime boundary: retain `contract.json` and add a deterministic
+  evidence index under `scripts/resources/contracts/pcsx2x6/`; maintainer
+  contract, narratives, schemas and snapshots remain under source
+  `contracts/`. Source/build validation requires the actual maintainer docs,
+  hashes their bytes, resolves headings and byte-compares the computed index
+  to the packaged projection. Runtime separately checks raw contract SHA-256,
+  index shape, and exact unique EvidenceId/locator/file/heading mappings; it
+  does not claim to verify omitted Markdown bytes or unsigned authenticity.
+- Main never falls back to source contracts when packaged resources are absent;
+  that path returns Unknown.
+- The menu diagnostic is called by the certification smoke harness, not Main
+  runtime; retain it in source and exclude it from the user ZIP.
+- Planned product/test files: `Tests/Test-ReleasePackage.ps1`,
+  `scripts/TPMCertification.Contracts.psm1`, `TeknoParrot-Manager.ps1`,
+  package and ECVF focused tests plus their CI route, and runtime projection
+  `contracts/pcsx2x6/runtime-evidence-index.json`. Update current package
+  contract documentation only; preserve historical snapshots and maintainer
+  artifacts.
+- Verification contract: exact source-to-ZIP path/hash map; reject missing,
+  extra, traversal, rooted, duplicate/case-colliding, or noncanonical paths;
+  test source-document/build validation separately from runtime projection;
+  exercise packaged registry/read-only observation code after extraction to a
+  private path containing spaces and brackets. No game or payload execution.
+- Local synthetic package proof is not the parent-owned Expanded61 ZIP, owner
+  installation, emulator launch, gameplay, or release acceptance. No package
+  builder, ZIP publication, commit or push is authorized by this mapping.
+
+## Clean 62-entry candidate local verification checkpoint
+
+Local verification completed through2026-10-15T14:16:13Z. The complete evidence record and preserved failures are in docs/remediation/PR-321-reconciliation.md under this heading: Main1488 and Support42 passed per engine; corrected MainExtras/Shadow23 and package116 passed per engine with actual exits0. Source/package proofs do not establish owner runtime or release acceptance. Exact-head CI/integration and owner/ARCADE gates remain separate.

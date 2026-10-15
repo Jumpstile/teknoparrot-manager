@@ -15448,7 +15448,7 @@ function Set-Pcsx2CursorPaths {
         $ecvfContractsModule = Join-Path $PSScriptRoot "scripts\TPMCertification.Contracts.psm1"
         if (Test-Path -LiteralPath $ecvfContractsModule -PathType Leaf) {
             Import-Module $ecvfContractsModule -Force -ErrorAction Stop
-            $loadedContract = Get-TPMEmulatorContractV1 -ContractId 'pcsx2x6'
+            $loadedContract = Get-TPMEmulatorContractV1 -ContractId 'pcsx2x6' -ValidationMode Runtime
             try {
                 Assert-TPMOwnershipWriteAllowedV1 -Contract $loadedContract.Contract -SettingPath 'USB1.guncon2_cursor_path[jvsmode=lightgun]' | Out-Null
                 $writeAllowed = $true
@@ -15582,13 +15582,11 @@ function Get-ContractBackedMissingComponents {
         Import-Module $ecvfContractsModule -Force -ErrorAction Stop
 
         $resolvedContractsRoot = if ([string]::IsNullOrWhiteSpace($ContractsRoot)) {
-            Join-Path $PSScriptRoot 'contracts'
+            Get-TPMContractsRootV1 -ValidationMode Runtime
         } else { $ContractsRoot }
-        # Use the ECVF registry loader used by the existing #254 detector.
-        # It validates each discovered contract's machine-readable schema and
-        # fails closed if any contract cannot be loaded; this warning path does
-        # not reinterpret a second contract format of its own.
-        $registeredContracts = Get-TPMRegisteredEmulatorContractsV1 -ContractsRoot $resolvedContractsRoot
+        # Main is the packaged runtime consumer and never falls back to
+        # maintainer source contracts when runtime resources are missing.
+        $registeredContracts = Get-TPMRegisteredEmulatorContractsV1 -ValidationMode Runtime -ContractsRoot $resolvedContractsRoot
         $contractMatches = @($registeredContracts | Where-Object {
             [string]::Equals([string]$_.ContractId, $EmulatorType, [StringComparison]::OrdinalIgnoreCase)
         })
@@ -15738,7 +15736,7 @@ function Get-Pcsx2CrosshairPrerequisiteState {
             return [pscustomobject]$result
         }
         Import-Module $ecvfContractsModule -Force -ErrorAction Stop
-        $loaded = Get-TPMEmulatorContractV1 -ContractId 'pcsx2x6'
+        $loaded = Get-TPMEmulatorContractV1 -ContractId 'pcsx2x6' -ValidationMode Runtime
         $envCap = $loaded.Contract.EnvironmentCapabilities | Where-Object { $_.CapabilityId -eq 'env-init' } | Select-Object -First 1
         if (-not $envCap) {
             $result.State  = 'Unknown'

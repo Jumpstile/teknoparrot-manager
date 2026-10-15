@@ -62,20 +62,21 @@
   installation into existing game folders, with exact build/executable and
   local ZIP-member checks, backup, read-back verification, undo, exact
   already-applied skipping, and refusal of unknown states.
-  The local follow-up candidate has 61 exact recipes across 23 exact
+  The local follow-up candidate has 62 exact recipes across 23 exact
   ProfileId/build/executable identities. It preserves the historical
-  13-entry PR #353 baseline and 58-entry PR #355 checkpoint, then adds
-  absent-only Main restores for MaiMai GreeN `freeglut.dll` and `libcurl.dll`
-  and the Rabbids Hollywood `RabbidsHollywood_Operator.exe`. The 58-entry
-  checkpoint adds three Taisen Hot Gimmick 5 (2.04) component restores; three
-  local user-selected plugin restores (Mars Sortie 1.46.9, the separate
-  Rabbids Hollywood operator plugin, and SB3 1.91 x64); five native exact-
-  build recipes (Cross Raid 1.05 and VF5R 1.001 AMD/NVIDIA shader alternatives,
-  plus the opt-in Sonic Dash Extreme executable replacement); 30 absent-only
-  Main-component restorations (14 Hummer, 14 Hummer Extreme, two Primeval
-  Hunt); two absent-only SB3 FMOD Main-component restorations; and two
-  Infinity Blade FX 1.02 restorations. The candidate has 53 `CreateFile`
-  operations and eight exact-before `ReplaceFile` operations.
+  13-entry PR #353 baseline and 58-entry PR #355 checkpoint, then adds four
+  absent-only Main restores: MaiMai GreeN `freeglut.dll` and `libcurl.dll`,
+  Rabbids Hollywood `RabbidsHollywood_Operator.exe`, and Cross Raid 1.05
+  Ver A `rom/shader.farc`. The 58-entry checkpoint adds three Taisen Hot
+  Gimmick 5 (2.04) component restores; three local user-selected plugin
+  restores (Mars Sortie 1.46.9, the separate Rabbids Hollywood operator
+  plugin, and SB3 1.91 x64); five native exact-build recipes (Cross Raid 1.05
+  and VF5R 1.001 AMD/NVIDIA shader alternatives, plus the opt-in Sonic Dash
+  Extreme executable replacement); 30 absent-only Main-component restorations
+  (14 Hummer, 14 Hummer Extreme, two Primeval Hunt); two absent-only SB3 FMOD
+  Main-component restorations; and two Infinity Blade FX 1.02 restorations.
+  The candidate has 54 `CreateFile` operations and eight exact-before
+  `ReplaceFile` operations.
 
   The four BlazBlue driver restorations, the original Rabbids Assembly-CSharp
   target, four Main-sourced BepInEx plugin targets, and Silent Hill's
@@ -95,9 +96,13 @@
   BBCP Chronophantasma still replaces only its exact known driver before-hash
   with the guide-required hash from the explicitly named Central Fiction Main
   ZIP. Exact-after targets are skipped; unknown states are refused. The
-  Cross Raid author documentation says version 1.05, not the `Ver A` suffix;
-  its exact profile/build alternatives are not compatibility or gameplay
-  proof. No other Cross Raid build or base-shader restoration is enabled.
+  Cross Raid vendor documentation says version 1.05, not the `Ver A` suffix;
+  that profile/build match is not runtime compatibility proof. Separately, the
+  exact 1.05 Ver A Main `rom/shader.farc` is restored only when absent; this
+  is not a GPU fix, Black Textures adjudication, or gameplay result. Vendor
+  undo restores base bytes into a new file object; the earlier base-create
+  receipt refuses undo on changed identity and preserves those bytes. No other
+  Cross Raid build is enabled.
   Sonic requires explicit opt-in and exact executable before/after hashes;
   this does not establish a 60-fps outcome. Hummer Extreme frame-count
   requirements, Primeval Hunt `ElfLdr2` copy identity, and modern NVIDIA fog

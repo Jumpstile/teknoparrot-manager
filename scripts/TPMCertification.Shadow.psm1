@@ -167,10 +167,10 @@ function Get-TPMShadowEmulatorContractVerificationV1 {
     # later -- Authority's envelope construction forces Blocked precisely
     # so an unverified version is never mistaken for a passing one.
     param([Parameter(Mandatory=$true)][string]$TeknoParrotRoot,[object[]]$RuntimeContexts=@(),[string]$ContractsRoot)
-    $integrity=if([string]::IsNullOrWhiteSpace($ContractsRoot)){Test-TPMContractRegistryIntegrityV1}else{Test-TPMContractRegistryIntegrityV1 -ContractsRoot $ContractsRoot}
+    $integrity=if([string]::IsNullOrWhiteSpace($ContractsRoot)){Test-TPMContractRegistryIntegrityV1 -ValidationMode Source}else{Test-TPMContractRegistryIntegrityV1 -ValidationMode Source -ContractsRoot $ContractsRoot}
     if(-not$integrity.Valid){return [pscustomobject]@{RegistryValid=$false;Errors=$integrity.Errors;Records=@()}}
     $contractsById=@{};foreach($entry in $integrity.Contracts){$contractsById[$entry.ContractId]=$entry.Contract}
-    $observed=if([string]::IsNullOrWhiteSpace($ContractsRoot)){Get-TPMEmulatorContractObservationsV1 -InstallRoot $TeknoParrotRoot -RuntimeContexts $RuntimeContexts}else{Get-TPMEmulatorContractObservationsV1 -InstallRoot $TeknoParrotRoot -RuntimeContexts $RuntimeContexts -ContractsRoot $ContractsRoot}
+    $observed=if([string]::IsNullOrWhiteSpace($ContractsRoot)){Get-TPMEmulatorContractObservationsV1 -InstallRoot $TeknoParrotRoot -RuntimeContexts $RuntimeContexts -ValidationMode Source}else{Get-TPMEmulatorContractObservationsV1 -InstallRoot $TeknoParrotRoot -RuntimeContexts $RuntimeContexts -ValidationMode Source -ContractsRoot $ContractsRoot}
     $records=New-Object Collections.Generic.List[object]
     foreach($obs in $observed.Observations){
         $contract=$contractsById[$obs.ContractId]

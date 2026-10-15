@@ -260,7 +260,7 @@ Describe 'ECVF: generic Emulator Contract Verification envelope (no emulator-spe
     It 'round-trips a real, registry-loaded pcsx2x6 contract with no code path referencing pcsx2x6 by name' {
         $contractsModule = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Contracts.psm1'
         Import-Module $contractsModule -Force
-        $loaded = Get-TPMEmulatorContractV1 -ContractId 'pcsx2x6'
+        $loaded = Get-TPMEmulatorContractV1 -ContractId 'pcsx2x6' -ValidationMode Source
         $r = New-TPMEmulatorContractVerificationRecordV1 -Contract $loaded.Contract -CapabilityType 'Environment' -CapabilityId 'env-init' -VersionMatchState 'Matched' -Applicable $true -CapabilityPassed $true -EvidenceReferences @('ev-portable-root')
         $r.ContractId | Should -Be 'pcsx2x6'
         $r.UpstreamCommitUsed | Should -Be 'c6e731ac0b9859011d358c021b7e2c9c95296a93'

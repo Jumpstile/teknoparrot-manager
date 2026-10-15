@@ -132,26 +132,37 @@ Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1
 Candidate ZIP name: `TeknoParrot Manager v1.0 RC8.zip` (staged validation only until publication is authorized).
 
 **Include:** `TeknoParrot-Manager.ps1`, `.bat`, `-README.txt`, `-QuickStart.txt`,
-`-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),
-`PreviewAssets\ReShadePreviews\` (the bundled landscape PNG plus the five TPM-owned SVG preview references),
+`-CHANGELOG.txt`, `LICENSE`, exact `Crosshairs\000.png` through `320.png`,
+`PreviewAssets\ReShadePreviews\` (the landscape PNG and five TPM-owned SVGs),
 `tools\Invoke-TpmAutoUpdate.ps1`, `tools\TpmAutoUpdate.Core.psm1`,
-`scripts\Debug-TPM-MenuLayout.ps1`, `contracts\` (ECVF registered contracts),
-`scripts\TPMCertification.Contracts.psm1` (ECVF loader/validator/evaluator),
-`scripts\TPMCertification.Authority.psm1` (imported by
-`TPMCertification.Contracts.psm1` as its first line -- omitting it breaks
-every ECVF contract load; RC4 shipped without it, see LESSONS_LEARNED.md).
+`scripts\TpmRequiredPatchEngine.ps1`, `scripts\TpmRequiredPatchRecipes.json`,
+`scripts\TPMCertification.Contracts.psm1`,
+`scripts\TPMCertification.Authority.psm1`, and runtime ECVF files
+`scripts\resources\contracts\pcsx2x6\contract.json` plus
+`runtime-evidence-index.json`. The runtime contract/index are relocated from
+the maintainer source `contracts\pcsx2x6\`; source narratives and schemas are
+not user ZIP content. `scripts\Debug-TPM-MenuLayout.ps1` is a certification
+diagnostic, not a user runtime dependency; retain it in source only.
+`TeknoParrot-Manager.ps1` always uses Runtime mode; missing packaged resources
+fail closed and never select maintainer Source mode by fallback. Source mode is
+explicit in source/build and certification callers.
 
 **Exclude:** `ReShade\` (live-fetched from reshade.me on demand, never
 bundled -- see reshade.me's own do-not-redistribute notice), `dgVoodoo2\`
 (live-fetched from the official dege-diosg/dgVoodoo2 GitHub releases on
 demand, never bundled), `FFBPlugin\` and `BepInExCache\` (live-downloaded
-each run, never bundled), `AGENTS.md`, `CHATGPT.md`, `CODEX.md`, `ARCADE-CHATGPT.md`, `ARCADE-CLAUDE.md`, `CLAUDE.md`, `README.md`, `QUICKSTART.md`,
-`ARCHITECTURE.md`, `LESSONS_LEARNED.md`, `RELEASE-SAFETY-CHECKLIST.md`,
-`SECURITY.md`, `CONSTITUTION.md`, `ENGINEERING_GOVERNANCE.md`,
-`CONTRIBUTING.md`, `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`,
-`INVENTORY_STANDARDS.md`, `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`,
-`PSScriptAnalyzerSettings.psd1`, `docs\`, `.github\`,
-`*.zip`, `*.log`, `*.config.json`.
+each run, never bundled), maintainer `contracts\` (including `_schema\`,
+`evidence.md`, `experiments.md`, and snapshots), `scripts\Debug-TPM-MenuLayout.ps1`,
+`Tests\`, `AGENTS.md`, `CHATGPT.md`, `scripts\TPMReleasePackage.Core.psm1`,
+`scripts\New-TPMReleasePackage.ps1`,
+`CODEX.md`, `ARCADE-CHATGPT.md`, `ARCADE-CLAUDE.md`, `CLAUDE.md`, `README.md`,
+`QUICKSTART.md`, `ARCHITECTURE.md`, `LESSONS_LEARNED.md`,
+`RELEASE-SAFETY-CHECKLIST.md`, `SECURITY.md`, `CONSTITUTION.md`,
+`ENGINEERING_GOVERNANCE.md`, `CONTRIBUTING.md`,
+`SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`, `INVENTORY_STANDARDS.md`,
+`ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`,
+`PSScriptAnalyzerSettings.psd1`, `docs\`, `.github\`, `*.zip`, `*.log`,
+`*.config.json`.
 
 Full mechanics and the authoritative version of this list:
 RELEASE-SAFETY-CHECKLIST.md section 4 -- if this list and that section

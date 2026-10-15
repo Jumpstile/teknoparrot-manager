@@ -172,19 +172,19 @@ rename the original library, edit TPFIX.ini, or choose the first-launch
 TeknoParrot.dll path. Compatibility and gameplay remain separate checks.
 
 **Required game patches:** choose option 10 to review supported required
-patches. This local RC8 owner-test follow-up candidate has 61 exact recipes
+patches. This local RC8 owner-test follow-up candidate has 62 exact recipes
 across 23 exact ProfileId/build/executable identities. It preserves the
-historical 13-entry baseline and 58-entry PR #355 checkpoint, then adds
-absent-only MaiMai GreeN `freeglut.dll` and `libcurl.dll` restores plus the
-Rabbids Hollywood `RabbidsHollywood_Operator.exe`. The 58-entry checkpoint
-contains three Taisen Hot Gimmick 5 (2.04) restores, three exact-build
-user-selected plugin restores (Mars Sortie 1.46.9, the separate Rabbids
-Hollywood operator plugin, and SB3 1.91 x64), five native recipes (Cross Raid
-1.05, VF5R 1.001, and Sonic Dash Extreme), 30 Hummer/Hummer Extreme/Primeval
-components, two SB3 FMOD components, and two Infinity Blade FX 1.02
-components. The catalog has 53 `CreateFile` operations and eight
-`ReplaceFile` operations. These are component repairs, not full guide
-coverage or launch-readiness proof.
+historical 13-entry baseline and 58-entry PR #355 checkpoint, then adds four
+absent-only Main restores: MaiMai GreeN `freeglut.dll` and `libcurl.dll`,
+Rabbids Hollywood `RabbidsHollywood_Operator.exe`, and Cross Raid 1.05 Ver A
+`rom/shader.farc`. The 58-entry checkpoint contains three Taisen Hot Gimmick 5
+(2.04) restores, three exact-build user-selected plugin restores (Mars Sortie
+1.46.9, the separate Rabbids Hollywood operator plugin, and SB3 1.91 x64),
+five native recipes (Cross Raid 1.05, VF5R 1.001, and Sonic Dash Extreme),
+30 Hummer/Hummer Extreme/Primeval components, two SB3 FMOD components, and
+two Infinity Blade FX 1.02 components. The catalog has 54 `CreateFile`
+operations and eight `ReplaceFile` operations. These are component repairs,
+not full guide coverage or launch-readiness proof.
 MaiMai's DLLs are separate transactions. The Rabbids operator utility is
 distinct from the existing Assembly-CSharp and BepInEx operator-plugin
 recipes; it is not executed and registry or `.conf` state is not edited.
@@ -219,12 +219,14 @@ Cross Raid 1.05 and VF5R 1.001 require exact build/executable identity,
 unambiguous AMD/NVIDIA evidence, and the selected recipe's exact before-hash.
 Cross Raid's AMD/NVIDIA variants share a common known before-state; VF5R's
 variants also share a common known before-state. Neither family starts from
-the opposite vendor's output hash. Cross Raid source documentation says 1.05,
-not the `Ver A` suffix; the matching profile/build is not runtime compatibility
-proof. No other Cross Raid build or separate base-shader restoration is
-enabled. Sonic is an explicit opt-in, exact-before/after executable replacement
-with guarded transaction identity and receipt-bound undo; it is not a 60-fps
-claim.
+the opposite vendor's output hash. Cross Raid vendor source documentation says
+1.05, not the `Ver A` suffix; the matching profile/build is not runtime
+compatibility proof. Separately, the exact 1.05 Ver A Main `rom/shader.farc`
+restoration creates only when absent. Vendor undo restores base bytes into a
+new file object; the earlier base-create receipt refuses undo on changed
+identity and preserves those bytes. No other Cross Raid build is enabled.
+Sonic is an explicit opt-in, exact-before/after executable replacement with
+guarded transaction identity and receipt-bound undo; it is not a 60-fps claim.
 Automatic mode lists eligible registered games for one confirmation; manual
 mode works on an already-installed folder without registering it. Register,
 configure controls, launch through TeknoParrotUI, and verify gameplay

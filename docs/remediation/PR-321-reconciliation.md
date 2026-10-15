@@ -1739,3 +1739,103 @@ Actual validation UTC: 2026-10-15T08:23:29Z. All final v3 test-input hashes matc
 - The held base CreateFile recipe remains excluded. Schema-3 receipts expose `BeforeSha256`/`AfterSha256`; a Restored ReplaceFile uses `BeforeSha256` with `RestoredFileIdentity`, retained backup, and terminal checkpoint. The narrow exclusive-gate chain proof accepts one unique single-operation ReplaceFile path with exact profile/root/catalog/target/hash/object-identity links. It bounds the snapshot to 256 directories, 262,144 bytes per receipt, and 16 MiB total; rechecks the complete directory/file snapshot and reopens the target leaf. Multi-operation chains fail closed. No global unrelated-receipt bypass or own-undo guard relaxation.
 - The retained pre-fix PS7 characterization passed 5/7 and reproduced both vendor-undo conflicts; PS5.1 was not run for that exact characterization. The expanded 18-case focused Pester 5.7.1 suite ended with 18 passed/0 failed/0 skipped on PowerShell 7.6.7 and 18/0/0 on Windows PowerShell 5.1.26100.9549. Coverage includes complete AMD/NVIDIA Apply -> vendor Undo -> base object-identity refusal -> fresh vendor transaction -> Undo; missing/corrupt/ambiguous/cyclic witness refusals; census/root snapshot guards; direct structural-mode refusal; unrelated target, backup, and checkpoint tampering; Prepared, same-group, hardware mismatch, foreign same-byte object, and legacy schema-2 catalog/schema-1 receipt undo.
 - Full Main, SupportPackage and all seven required-patch suites passed 1714/1714 on each engine, with zero failures/skips/not-run and actual child exits 0. PS7 run ended 2026-10-15T12:03:33Z, XML SHA256 AF4034245297747F020CAE7ED3BA46BE8C6D215E7DCD35CD4AAA454A381897A7; PS5.1 ended 2026-10-15T12:01:43Z, XML SHA256 9B8A618846F89A6FFE08C37EC49E6D584AB6092EC8BEB810074935AE0F4E3E03. Both static checks passed with actual exits 0; InjectionHunter 41 findings, 0 unresolved, actual exit 0. The explicit-freshness permanent gate passed 2026-10-15T12:05:48Z. The post-regression audit found 580 frozen inputs unchanged. Retained private receipts: CrossRaid-Root-Verified-Local-Fix-Summary-20261015.json and CrossRaid-Root-Permanent-Gate-20261015.receipt.json. Final evidence-only corrections require a fresh post-document identity audit/permanent gate before scoped publication and exact-head CI/integration. No catalog promotion, gameplay, owner-runtime, package, main merge or release is claimed.
+
+## Issue #351 Cross Raid 1.05 Ver A base-shader candidate -- mapped before catalog edit
+
+- New slice contract `TPM-REQUIRED-PATCH-CROSSRAID-BASE-001` and required
+  invariant inventory `TPM-REQUIRED-PATCH-CROSSRAID-BASE-INVENTORY-001` bind
+  this exact candidate to Issue #351; no numbered PR #321 owner row is
+  assigned.
+- Worktree branch `feature/rc8-crossraid-base62-20261015` starts at
+  `cc307092553397c8eb56543e9cb4db1219fb73ef`. At this mapping checkpoint the
+  catalog is unchanged: 61 recipes / 23 exact identities / 53 `CreateFile` /
+  eight `ReplaceFile`, SHA-256
+  `87DF31451B267F89FCD2CB3E3DEA1860972EDD4C7601ACE1998E80BD7E4CAD9E`.
+  Manager SHA-256 is
+  `22A38979C8EED589F5948875BED9869B400AE89114CE539BFEF89230F9976A4D`;
+  engine SHA-256 is
+  `8A4AA3621B9E3EC67D3577B88A12D7BC4BB2AA57251A5DC0A39AE271B5C17745`.
+  All three files match their `cc307` Git blobs.
+- The exact Main source candidate is `rom/shader.farc`, 9,173,328 bytes,
+  SHA-1 `04E0DCEC14CCA1B69BF190A7E02F2F0AB56E0231`, SHA-256
+  `66E0CC00E84C01F6E77E6B446A019212EBD27610FDD81CA866648C5E97E80933`;
+  executable identity is pinned in the slice. Existing source-probe and
+  nested-provenance receipts establish the versioned 1.05 Main binding; the
+  older unversioned RAR remains excluded.
+- Before any catalog edit, the frozen held suite completed under explicit
+  Pester 5.7.1. PowerShell 7.6.7 exited 0 with 7 passed, 0 failed, 0 skipped;
+  Windows PowerShell 5.1.26100.9549 exited 0 with the same 7/0/0 counts.
+  Frozen test/fragment inputs were unchanged. External result receipt
+  `baseline-receipt.json` SHA-256
+  `4EB6A909B904C16B3FC67EC936481287506F1752EF7BB9B7EEAA80B9D293EFBC`;
+  source identity receipt `source-baseline.json` SHA-256
+  `D36A6008ACF7E8ED6B2CF63AEFC0D3961469D99E143A6DCDE84478CDAEF6A0E7`.
+- This is a one-recipe absent-only Main restoration candidate, not a GPU
+  shader fix, Black Textures adjudication, complete setup, or gameplay result.
+  The frozen baseline suite includes both AMD and NVIDIA receipt-composition
+  paths; the final standalone candidate suite must retain those checks.
+- No product catalog, engine, or manager source has changed at this checkpoint.
+  Focused recipe integration and the final 62-entry candidate verification
+  remain pending; no full Main/Support/canonical run, package, runtime, release,
+  commit, or publication is claimed.
+## Issue #351 Cross Raid 1.05 Ver A base-shader candidate -- focused result
+
+- The one-entry absent-only Main recipe is now appended to the 61-entry base catalog: 62 entries total, 23 exact profile/build/executable identities, 54 `CreateFile` operations, and eight `ReplaceFile` operations. The prior composition checkpoint remains historical; this recipe is separate from the held GPU-replacement compositions.
+- Required-patch engine changes are limited to the catalog SHA-256 pin line. The Main script remains byte-identical to base `cc307092553397c8eb56543e9cb4db1219fb73ef`; the existing 61 catalog entries remain semantically unchanged.
+- Final standalone suite: Pester 5.7.1, 7/7, zero failures/skips, actual exit 0 on PowerShell 7.6.7 and Windows PowerShell 5.1.26100.9549. Targeted central catalog identity test: 1/1 passed on both engines; the 1,487 unselected central tests did not run.
+- Focused receipt SHA-256 `7706F6AA6D23869A400D08A9D033B4E36B80E00F2DD713F3A6C41AAD36778642` records the exact input hashes and no input drift. Standalone XML hashes: PS7 `E20BC373378F79C825CCD3121407E4FD968F7AB7D50DCA8967B1F829FFD817C6`; PS5.1 `4C1EDC6FF24D65A5315A0098F7BC46360813F1E476DD37C0609A005A996A6BB8`. Filtered central XML hashes: PS7 `6256138544F7310AD6A8D121DA12ADF6BDC2771950D30F688A0B4BBCE7D3948B`; PS5.1 `91D06F9E70C34851D2C7BE5B355A204639744741E0F29FAF468C8EEFD3F71507`.
+- Root-owned combined suites, static/security/procedure gates, CI, and package validation remain pending. The requested current summaries are synchronized in `README.md`, `TeknoParrot-Manager-README.txt`, `TeknoParrot-Manager-QuickStart.txt`, `TeknoParrot-Manager-CHANGELOG.txt`, `QUICKSTART.md`, `ARCHITECTURE.md`, and `docs/wiki-updates/Quick-Start.md`; this repository-only documentation update made no live wiki change. No owner-runtime, compatibility, gameplay, release, or owner-acceptance result is claimed.
+
+## Issue #351 package-cleanliness slice mapping -- 2026-10-15
+
+- This isolated local lane is based on exact commit
+  `b9ac73b2fbae847c1e385a19e66c4fe8fad515a6`; branch
+  `fix/rc8-package-layout-20261015`. Parent owns the Expanded61 delivered ZIP
+  and final package recommendation; this lane does not replace or rescan it.
+- Slice and inventories: `docs/remediation/slices/TPM-RELEASE-PACKAGE-CLEANLINESS-001.md`
+  and `docs/remediation/inventories/TPM-RELEASE-PACKAGE-ALLOWLIST-001.md`.
+  Exact package paths, runtime evidence boundary, tests, stop conditions,
+  source identities, and out-of-scope items are mapped before product-source
+  edits.
+- The existing package test accepts required entries and selected denials,
+  not an exact archive set. Its old contract includes developer diagnostics,
+  source JSON schemas, and narrative evidence/experiment files. The source
+  Crosshairs directory contains exactly 321 three-digit PNG names, 000--320.
+- ECVF source analysis: Main consumers and certification modules load the
+  PCSx2x6 registered contract. Source validation is explicitly selected by
+  source/certification callers and resolves each evidence locator against real
+  Markdown bytes and a real heading. Packaged Main always selects Runtime and
+  validates the strict index against actual contract bytes; it does not read or
+  claim to verify omitted Markdown. Observation collection uses the selected
+  mode. JSON schemas are not runtime-loaded; inline PowerShell validators
+  remain active. The menu diagnostic is called by the certification smoke
+  harness, not Main runtime, so it remains in source but is not user ZIP
+  content.
+- Design boundary: source/build validation must require and read the actual
+  maintainer contract, `evidence.md`, and `experiments.md`; verify raw bytes,
+  hashes and headings; derive a deterministic projection and compare the ZIP
+  index bytes exactly. Runtime projection validation is separate: it checks
+  the raw packaged contract SHA-256 and complete, unique, shape-valid
+  EvidenceId/locator/file/heading mappings. Runtime does not claim it
+  verified Markdown bytes omitted from the package and no unsigned
+  authenticity claim is made. The runtime package location is
+  `scripts/resources/contracts/pcsx2x6/`; source `contracts/` stays intact.
+- Focused proof will use synthetic archives and a private extraction path
+  containing spaces/brackets to exercise packaged module and read-only
+  observation paths. It will not launch PCSx2 or a game and is not parent
+- A private synthetic package fixture may be created only for the mapped
+  focused proof. No final/owner ZIP, source binary, release artifact,
+  publication, or commit is authorized.
+
+## Clean 62-entry candidate local verification checkpoint
+
+- The combined candidate descends from integrated Cross Raid composition fix cc307092553397c8eb56543e9cb4db1219fb73ef. Catalog SHA256 8F30A2BC8CC8AC6B96A324962F9E12792572E08BE6512B1A1808420D6BDB5195 contains62 unique entries across23 profiles,54 CreateFile and8 ReplaceFile; original61 identities/order are preserved. Main SHA256 7EBFDA42854EAA14829F16CBFFCEBC7490F9298471E21C3181D86BBFFD3234AD; engine F0138365ECDC5952866778357E9AA23EF9E055D865D0A43DAB6B33B6D92432C6.
+- The original combined11-suite runs each executed1742 cases:1739 passed and3 failed, actual child exit1. Main1488/1488, Support42/42 and the other unchanged scopes totaling1719 cases passed on each engine. Retained XML: Combined-Pester-PS51-20261015T134912Z.xml, ended2026-10-15T14:09:30Z, SHA256 DF284080D9A16175B8E2CC86D92C50F9DFA8BE8217D6D38AC4A39CD3525B0801; PS7 XML E85089C186166F7221BC92D0C7A615A48BA1D575E16F35D1E1ECD79B3BFECD6E, ended2026-10-15T14:10:53Z. These failed aggregate runs are preserved and are not relabeled as passing.
+- The failures were a stale MainExtras61/53 integrated census and two Shadow fixtures lacking the source evidence projection. Source validation reported SOURCE_EVIDENCE_INDEX_MISSING. Corrected only exact census assertions and actual fixture projection; no production validation was relaxed. The complete MainExtras and Shadow scopes then passed23/23 on each engine with Pester5.7.1, actual exits0, and zero input drift at2026-10-15T14:16:13Z. Receipts: Combined-Delta2-PS51/PS7-20261015T141546Z; Combined-Delta2-Actual-Exits-20261015T141546Z.json. CI now includes the Shadow suite.
+- Final package/Contracts/Registry/Authority proof passed116/116 on each engine with actual exits0 (PackageLane-PS51/PS7-CompressionFix-20261015T135737Z), ending2026-10-15T13:58:54Z and13:58:50Z. Matching input manifest85500EFA8796D01F59658583ADC76DD6A8E49D95F3D85F1D2709F8CBD93CC832. A subsequent EOF-only test correction removes one LF with unchanged AST bodies; no Pester rerun is attributed to that whitespace edit. Original package and fresh-process failures remain preserved.
+- Fresh stock Windows PowerShell exposed missing System.IO.Compression assembly loading in the source-only builder. The fix adds the explicit assembly load; the regression starts a fresh NoProfile stock child. Both replacement static checks and the actual Git-index-materialized PS5.1 build passed with captured exits0 at2026-10-15T14:00:52Z. Standalone fresh PS5.1 validator passed with actual exit0 at2026-10-15T14:02:09Z. No ambient Pester assembly assumption remains.
+- Private materialized ZIP proof: Combined-Materialized-Fixed-Package-Proof-20261015T140044Z.zip SHA256 3E526D6929EF65B608286081BB93DD0CE497AB8867D76CAB4B55848C6CA89D96;341 files,349 entries,321 crosshairs, zero detected path leaks,62 recipes, successful packaged runtime contract load and expected Source-mode refusal without source narratives. All341 paths/hashes match the independent PS7 package proof and current source mapping. Different archive bytes are not claimed identical. Owner ZIPs were not replaced.
+- Dual-engine static checks passed all24 canonical/source-tool files and parsed46 test files; the builder and modified package test have replacement static/parse evidence. Canonical inventory21; InjectionHunter 41 findings, 0 unresolved, actual exit0. The subsequent two fixture files are parsed/executed under both engines in the23-case proof. Runtime index1960 bytes SHA256 809FCE4AA72A1D45A1261F4FA3A28B309C5B1DA6D656909DA99159CD7F3FC8AA is identical across both engines.
+- Four earlier slow certification/recovery scopes have129 successful cases per engine with unchanged test/provider inputs; their original aggregate failed in other scopes. They are retained scope evidence, not fresh final-head runs. The Contracts serializer changed afterward and has fresh dual-engine source/runtime/package coverage; exact-head CI will rerun ProductionFacts and HarnessComposition. Historical58 uncaptured child-exit gap remains explicit.
+- Local source/package evidence does not certify owner GUI, controls, launch, gameplay, Procedure A/B or ARCADE runtime gate323. The owner checklist covers all16 modes, H/L/Q, startup/migration, frontends and generated outputs. Cross Raid base restore is one missing shader component; after vendor undo, base undo refuses a new object identity even if bytes match. Full-guide review does not establish every held recipe or complete setup.
+- Committed-source package proof, scoped publication, exact-head CI and final integration remain separate next gates at this checkpoint. PR321 stays draft/HOLD; no release, tag, main merge, live-game change or owner gameplay pass is authorized or claimed.

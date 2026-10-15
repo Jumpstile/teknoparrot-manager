@@ -430,19 +430,19 @@
   TeknoParrot.dll path. Compatibility and gameplay remain separate checks.
 
   - Required game patches. Option 10's local RC8 owner-test follow-up
-    candidate contains 61 exact-build recipes across 23 exact
+    candidate contains 62 exact-build recipes across 23 exact
     ProfileId/build/executable identities. It preserves the 13-entry PR #353
     baseline and the 58-entry PR #355 checkpoint, then adds absent-only Main
-    restores for MaiMai GreeN `freeglut.dll` and `libcurl.dll`, plus the
-    Rabbids Hollywood `RabbidsHollywood_Operator.exe`. The 58-entry checkpoint
-    contains three Taisen Hot Gimmick 5 (2.04) single-file restores; three
-    user-selected plugin restores for Mars Sortie, the separate Rabbids
-    Hollywood operator plugin, and Super Bikes 3 1.91 x64; five native
-    recipes for Cross Raid 1.05, VF5R 1.001, and Sonic Dash Extreme; and
-    34 Main-component restorations: 14 Hummer, 14 Hummer Extreme, two
-    Primeval Hunt, two SB3 FMOD, and two Infinity Blade FX 1.02. Fifty-three
-    `CreateFile` operations create only absent targets; eight `ReplaceFile`
-    operations require an exact before-state. Exact-after targets are skipped
+    restores for MaiMai GreeN `freeglut.dll` and `libcurl.dll`, Rabbids
+    Hollywood `RabbidsHollywood_Operator.exe`, and Cross Raid 1.05 Ver A
+    `rom/shader.farc`. The 58-entry checkpoint contains three Taisen Hot
+    Gimmick 5 (2.04) single-file restores; three user-selected plugin restores
+    for Mars Sortie, the separate Rabbids Hollywood operator plugin, and Super
+    Bikes 3 1.91 x64; five native recipes for Cross Raid 1.05, VF5R 1.001, and
+    Sonic Dash Extreme; and 34 Main-component restorations: 14 Hummer,
+    14 Hummer Extreme, two Primeval Hunt, two SB3 FMOD, and two Infinity Blade
+    FX 1.02. Fifty-four `CreateFile` operations create only absent targets;
+    eight `ReplaceFile` operations require an exact before-state. Exact-after
     and unknown bytes are refused. Full guide coverage, setup readiness,
     controls, launch, and gameplay are not claimed.
 
@@ -761,19 +761,20 @@
        automatic list. TPM keeps verified backup/undo evidence; it skips an
        exact already-applied target and refuses any other existing bytes.
 
-       The local RC8 owner-test follow-up candidate has 61 exact-build recipes
+       The local RC8 owner-test follow-up candidate has 62 exact-build recipes
        across 23 exact ProfileId/build/executable identities. It preserves
        the historical 13-entry PR #353 baseline and the 58-entry PR #355
-       checkpoint, then adds three absent-only Main restores: MaiMai GreeN
-       `freeglut.dll` and `libcurl.dll`, and Rabbids Hollywood
-       `RabbidsHollywood_Operator.exe`. The 58-entry checkpoint contains
-       three Taisen Hot Gimmick 5 (2.04) single-file restores, three local
-       user-selected plugin restores (Mars Sortie 1.46.9, the separate
-       Rabbids Hollywood operator plugin, and SB3 1.91 x64), five native
-       recipes (Cross Raid 1.05 AMD/NVIDIA, VF5R 1.001 AMD/NVIDIA, and Sonic
-       Dash Extreme), 30 Main-component restorations (14 Hummer, 14 Hummer
-       Extreme, two Primeval Hunt), two SB3 FMOD restorations, and two
-       Infinity Blade FX 1.02 restorations.
+       checkpoint, then adds four absent-only Main restores: MaiMai GreeN
+       `freeglut.dll` and `libcurl.dll`, Rabbids Hollywood
+       `RabbidsHollywood_Operator.exe`, and Cross Raid 1.05 Ver A
+       `rom/shader.farc`. The 58-entry checkpoint contains three Taisen Hot
+       Gimmick 5 (2.04) single-file restores, three local user-selected plugin
+       restores (Mars Sortie 1.46.9, the separate Rabbids Hollywood operator
+       plugin, and SB3 1.91 x64), five native recipes (Cross Raid 1.05
+       AMD/NVIDIA, VF5R 1.001 AMD/NVIDIA, and Sonic Dash Extreme), 30
+       Main-component restorations (14 Hummer, 14 Hummer Extreme, two Primeval
+       Hunt), two SB3 FMOD restorations, and two Infinity Blade FX 1.02
+       restorations.
        The Taisen files are restorations only. Configure and save keyboard
        keys with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by
        the game guide. TPM does not configure keys or run either utility;
@@ -781,7 +782,7 @@
 
        BBCP Chronophantasma replaces only its exact known driver before-hash
        with the guide-required hash from the named Central Fiction Main ZIP;
-       absent or unknown BBCP bytes are refused. The 53 `CreateFile` operations
+       absent or unknown BBCP bytes are refused. The 54 `CreateFile` operations
        restore only absent targets; eight `ReplaceFile` operations require
        exact before-hashes. Exact desired bytes are skipped, and all other
        states are refused. The four baseline Main-source plugin payloads and
@@ -807,13 +808,16 @@
 
        Elysion, Cross Raid 1.05, and VF5R 1.001 each use mutually exclusive
        AMD/NVIDIA shader alternatives with exact executable, hardware, and
-       target-state checks. Cross Raid source documentation identifies 1.05,
-       not the `Ver A` suffix; the matching profile/build is not runtime
-       compatibility proof. No other Cross Raid build or base-shader restore
-       is enabled. Sonic is an explicit opt-in exact-before/after executable
-       replacement with backup and receipt undo; it does not prove a 60-fps
-       outcome. Manual mode does not register games; patch success does not
-       prove readiness, controls, launch, or gameplay.
+       target-state checks. Cross Raid source documentation identifies version
+       1.05 but not the `Ver A` suffix; the matching vendor profile/build is not
+       runtime compatibility proof. Separately, the exact 1.05 Ver A Main
+       `rom/shader.farc` restoration creates only when absent. Vendor undo
+       restores base bytes into a new file object; the earlier base-create
+       receipt refuses undo on changed identity and preserves those bytes.
+       No other Cross Raid build is enabled. Sonic is an explicit opt-in
+       exact-before/after executable replacement with backup and receipt undo;
+       it does not prove a 60-fps outcome. Manual mode does not register games;
+       patch success does not prove readiness, controls, launch, or gameplay.
 
   MAINTENANCE AND RECOVERY
   ------------------------
