@@ -1,0 +1,37 @@
+{
+  "Schema": "TPM.RequiredPatch.ManagedPluginFragment.v1",
+  "BaseCatalog": {
+    "Schema": 3,
+    "EntryCount": 68,
+    "Sha256": "FE4E01861BEFE6C8B13A9185C26FEE4BED62B8D78C59C8353DCAB53448F4DC20"
+  },
+  "Entries": [
+    {
+      "Id": "mkdxusa106-main-d3d11ref-restore",
+      "ProfileId": "MKDXUSA106",
+      "BuildName": "Mario Kart Arcade GP DX (1.06.35-OF)(2022-08-01)(USA)[Namco ES3A][TP]",
+      "Executable": "MK_AGP3_FINAL.exe",
+      "ExecutableSha256": "2E6CF156B30C079F82EF279B8C0D55CC46386A76E52D73F3582062CF820F0076",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Mario Kart Arcade GP DX (1.06.35-OF)(2022-08-01)(USA)[Namco ES3A][TP].zip",
+      "SourceEntry": "D3D11Ref.dll",
+      "SourceSize": 525144,
+      "SourceSha1": "01338F329BFADC339F4A402AABB29DE50521F32F",
+      "SourceSha256": "6335BD1F8A137C6A6696878C67652D1C75551C858E589559DFAFA15A5E54C8C3",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "D3D11Ref.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "6335BD1F8A137C6A6696878C67652D1C75551C858E589559DFAFA15A5E54C8C3",
+          "Payload": "payload/D3D11Ref.dll",
+          "PayloadSha256": "6335BD1F8A137C6A6696878C67652D1C75551C858E589559DFAFA15A5E54C8C3"
+        }
+      ]
+    }
+  ]
+}

@@ -72,10 +72,10 @@ Describe 'MaiMai GreeN and Rabbids Hollywood Main-component restores' {
         $script:mainExtrasFragment.BaseCatalog.Sha256 | Should -BeExactly 'F86F09A8BD2749DC9C4531CD1D00A69BF07D85B14A8D281D33767732ED5B720A'
         $script:mainExtrasFragment.Entries.Count | Should -Be 3
         $script:mainExtrasCatalog.Schema | Should -Be 3
-        $script:mainExtrasCatalog.Entries.Count | Should -Be 64
-        @($script:mainExtrasCatalog.Entries.Id | Sort-Object -Unique).Count | Should -Be 64
-        @($script:mainExtrasCatalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 23
-        @($script:mainExtrasCatalog.Entries | Where-Object { $_.Operations[0].Type -ceq 'CreateFile' }).Count | Should -Be 56
+        $script:mainExtrasCatalog.Entries.Count | Should -Be 69
+        @($script:mainExtrasCatalog.Entries.Id | Sort-Object -Unique).Count | Should -Be 69
+        @($script:mainExtrasCatalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 25
+        @($script:mainExtrasCatalog.Entries | Where-Object { $_.Operations[0].Type -ceq 'CreateFile' }).Count | Should -Be 61
         @($script:mainExtrasCatalog.Entries | Where-Object { $_.Operations[0].Type -ceq 'ReplaceFile' }).Count | Should -Be 8
         (Get-FileHash -LiteralPath $script:mainExtrasCatalogPath -Algorithm SHA256).Hash | Should -BeExactly $script:TpmRequiredPatchCatalogSha256
         $expected=@{

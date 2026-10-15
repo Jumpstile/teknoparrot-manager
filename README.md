@@ -92,8 +92,8 @@ tree is for review, certification, and release preparation only.
 - **GPU fixes** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
 - **Force feedback (FFB)** — native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed), covering different games. If a game is covered by both, you're asked once which to use for all such games.
 - **BepInEx setup** — user-approved install, update, or repair-reset for selected games using stable x64/x86 packages with verified backup and rollback.
-- **Required game patches** -- installs 64 evidence-pinned recipes across 23
-  exact ProfileId/build/executable identities from local ZIPs. Fifty-six
+- **Required game patches** -- installs 69 evidence-pinned recipes across 25
+  exact ProfileId/build/executable identities from local ZIPs. Sixty-one
   operations create only absent files; eight require an exact known
   before-state. Hardware alternatives require unambiguous captured evidence.
   Unknown target bytes are refused; patch success does not prove readiness.
@@ -271,12 +271,18 @@ supports **manual** installation into an already-installed game folder, even
 when that game is not registered yet. Manual install does not register it;
 TPM tells you to register it and configure controls afterward.
 
-The local RC8 owner-test follow-up candidate in this worktree contains 64
-exact-build recipes across 23 exact ProfileId/build/executable identities.
+The local RC8 owner-test follow-up candidate in this worktree contains 69
+exact-build recipes across 25 exact ProfileId/build/executable identities.
 Two further TMNT 1.59 Main recipes independently restore only absent
 OrenVid.dll and PK-UnityPlugin.dll under TMNT_Data/Plugins/x86_64/.
 They do not install BepInEx or change configuration. Setup, controls,
 launch and gameplay still require separate verification.
+The source follow-up also adds four independent KOF Maximum Impact
+Regulation A Main restorations (d3d8.dll, d3d9.dll, ddraw.dll and
+wined3d.dll) and the exact MKDX USA 1.06 Main D3D11Ref.dll restoration.
+Each creates only an absent target and preserves unknown existing bytes.
+These repairs do not prove graphics compatibility, setup or gameplay.
+
 
 It preserves the historical 13-entry PR #353 baseline and the 58-entry
 PR #355 checkpoint, then adds four absent-only Main-component restores:

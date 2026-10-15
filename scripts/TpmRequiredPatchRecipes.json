@@ -1831,6 +1831,141 @@
           "PayloadSha256": "CDC95711BCF10B097A30D4B09F7A304980DABA5000F3813555A80A71ABF04238"
         }
       ]
+    },
+    {
+      "Id": "kof-mi-reg-a-main-d3d8-restore",
+      "ProfileId": "KingofFightersMaximumImpactRegulationA",
+      "BuildName": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "CC40C926E19F17DD373C87A3D83120CB6C22C2F3CA9B492E28A6178813F6256F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP].zip",
+      "SourceEntry": "d3d8.dll",
+      "SourceSize": 286015,
+      "SourceSha1": "55542B7AB1B628FC2D7057A5FBE3B9048383F9A5",
+      "SourceSha256": "33B625B818B450203A4FCA0CC6068B722434535B94615FF3077239079866B115",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "d3d8.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "33B625B818B450203A4FCA0CC6068B722434535B94615FF3077239079866B115",
+          "Payload": "payload/d3d8.dll",
+          "PayloadSha256": "33B625B818B450203A4FCA0CC6068B722434535B94615FF3077239079866B115"
+        }
+      ]
+    },
+    {
+      "Id": "kof-mi-reg-a-main-d3d9-restore",
+      "ProfileId": "KingofFightersMaximumImpactRegulationA",
+      "BuildName": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "CC40C926E19F17DD373C87A3D83120CB6C22C2F3CA9B492E28A6178813F6256F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP].zip",
+      "SourceEntry": "d3d9.dll",
+      "SourceSize": 381363,
+      "SourceSha1": "BB46749FA47DA8A79A21171B1A93E9CA7F06E75C",
+      "SourceSha256": "A7FBE8B9AC236CE657E966925C5C7A8C1F0B5AA19011C1B983508CC07B3D7F13",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "d3d9.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "A7FBE8B9AC236CE657E966925C5C7A8C1F0B5AA19011C1B983508CC07B3D7F13",
+          "Payload": "payload/d3d9.dll",
+          "PayloadSha256": "A7FBE8B9AC236CE657E966925C5C7A8C1F0B5AA19011C1B983508CC07B3D7F13"
+        }
+      ]
+    },
+    {
+      "Id": "kof-mi-reg-a-main-ddraw-restore",
+      "ProfileId": "KingofFightersMaximumImpactRegulationA",
+      "BuildName": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "CC40C926E19F17DD373C87A3D83120CB6C22C2F3CA9B492E28A6178813F6256F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP].zip",
+      "SourceEntry": "ddraw.dll",
+      "SourceSize": 928562,
+      "SourceSha1": "7C6B0D12A06830C184726440AEEBDFA8A3D90F4C",
+      "SourceSha256": "BD7E1717B82E33046C0E2CF9A402E55630F3EE3B3299892FA82684B2F7E8D0B3",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "ddraw.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "BD7E1717B82E33046C0E2CF9A402E55630F3EE3B3299892FA82684B2F7E8D0B3",
+          "Payload": "payload/ddraw.dll",
+          "PayloadSha256": "BD7E1717B82E33046C0E2CF9A402E55630F3EE3B3299892FA82684B2F7E8D0B3"
+        }
+      ]
+    },
+    {
+      "Id": "kof-mi-reg-a-main-wined3d-restore",
+      "ProfileId": "KingofFightersMaximumImpactRegulationA",
+      "BuildName": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "CC40C926E19F17DD373C87A3D83120CB6C22C2F3CA9B492E28A6178813F6256F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP].zip",
+      "SourceEntry": "wined3d.dll",
+      "SourceSize": 4145581,
+      "SourceSha1": "3C592F1C9956709359B50FBAD7C31F88010E7B50",
+      "SourceSha256": "5F74F2BB715BFAA9A94127CD830050FDA15D34C02047633053C35D85D5469926",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "wined3d.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "5F74F2BB715BFAA9A94127CD830050FDA15D34C02047633053C35D85D5469926",
+          "Payload": "payload/wined3d.dll",
+          "PayloadSha256": "5F74F2BB715BFAA9A94127CD830050FDA15D34C02047633053C35D85D5469926"
+        }
+      ]
+    },
+    {
+      "Id": "mkdxusa106-main-d3d11ref-restore",
+      "ProfileId": "MKDXUSA106",
+      "BuildName": "Mario Kart Arcade GP DX (1.06.35-OF)(2022-08-01)(USA)[Namco ES3A][TP]",
+      "Executable": "MK_AGP3_FINAL.exe",
+      "ExecutableSha256": "2E6CF156B30C079F82EF279B8C0D55CC46386A76E52D73F3582062CF820F0076",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Mario Kart Arcade GP DX (1.06.35-OF)(2022-08-01)(USA)[Namco ES3A][TP].zip",
+      "SourceEntry": "D3D11Ref.dll",
+      "SourceSize": 525144,
+      "SourceSha1": "01338F329BFADC339F4A402AABB29DE50521F32F",
+      "SourceSha256": "6335BD1F8A137C6A6696878C67652D1C75551C858E589559DFAFA15A5E54C8C3",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "D3D11Ref.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "6335BD1F8A137C6A6696878C67652D1C75551C858E589559DFAFA15A5E54C8C3",
+          "Payload": "payload/D3D11Ref.dll",
+          "PayloadSha256": "6335BD1F8A137C6A6696878C67652D1C75551C858E589559DFAFA15A5E54C8C3"
+        }
+      ]
     }
   ]
 }
