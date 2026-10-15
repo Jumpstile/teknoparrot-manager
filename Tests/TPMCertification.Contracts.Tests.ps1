@@ -329,6 +329,8 @@ Describe 'ECVF foundation -- Get-TPMEmulatorContractObservationsV1 (shared by Sh
    New-Item -ItemType Directory -Path $dir -Force | Out-Null
    [IO.File]::WriteAllText((Join-Path $dir 'contract.json'), (ConvertTo-FixtureJsonV1 $contract))
    [IO.File]::WriteAllText((Join-Path $dir 'evidence.md'), "# fixture`n`n### ev-1`nfixture citation`n")
+   $projection = Get-TPMSourceEvidenceProjectionV1 -ContractPath (Join-Path $dir 'contract.json') -ContractDirectory $dir
+   [IO.File]::WriteAllText((Join-Path $dir 'runtime-evidence-index.json'), $projection.Json, (New-Object System.Text.UTF8Encoding($false)))
    return $dir
   }
  }
@@ -343,14 +345,46 @@ Describe 'ECVF foundation -- Get-TPMEmulatorContractObservationsV1 (shared by Sh
  It 'reports RegistryValid=false and empty Observations when the registry itself is broken' {
   $dir = New-ContractFixtureOnDiskV1 -ContractsRoot $script:contractsRoot -ContractId 'broken-emu'
   Remove-Item -LiteralPath (Join-Path $dir 'evidence.md') -Force
-  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ContractsRoot $script:contractsRoot
+  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ValidationMode Source -ContractsRoot $script:contractsRoot
   $result.RegistryValid | Should -Be $false
   $result.Observations.Count | Should -Be 0
  }
+ It 'rejects a renamed source heading even when the old runtime projection remains beside the contract' {
+  $dir = New-ContractFixtureOnDiskV1 -ContractsRoot $script:contractsRoot -ContractId 'renamed-heading-emu'
+  $evidencePath = Join-Path $dir 'evidence.md'
+  $evidence = [IO.File]::ReadAllText($evidencePath).Replace('### ev-1','### renamed-ev-1')
+  [IO.File]::WriteAllText($evidencePath, $evidence, (New-Object System.Text.UTF8Encoding($false)))
+  Test-Path -LiteralPath (Join-Path $dir 'runtime-evidence-index.json') -PathType Leaf | Should -BeTrue
+  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ValidationMode Source -ContractsRoot $script:contractsRoot
+  $result.RegistryValid | Should -BeFalse
+  $result.Errors.Message -join ' ' | Should -Match 'SOURCE_EVIDENCE_HEADING_MISSING'
+  $result.Observations.Count | Should -Be 0
+ }
+ It 'serializes source evidence JSON with stable escaping across PowerShell versions' {
+  $dir = New-ContractFixtureOnDiskV1 -ContractsRoot $script:contractsRoot -ContractId 'json-escape-emu'
+  $nonAscii = [char]0x00E9
+  $supplementary = [char]::ConvertFromUtf32(0x1F600)
+  $literalEscape = ([string][char]92) + 'u0027'
+  $heading = "ev-1 apostrophe ' quote `" less < greater > amp & nonascii $nonAscii control $([char]1) tab`t supplementary $supplementary literal $literalEscape"
+  $evidencePath = Join-Path $dir 'evidence.md'
+  [IO.File]::WriteAllText($evidencePath, "# fixture`n`n### $heading`nfixture citation`n", (New-Object System.Text.UTF8Encoding($false)))
+  $projection = Get-TPMSourceEvidenceProjectionV1 -ContractPath (Join-Path $dir 'contract.json') -ContractDirectory $dir
+  $projection.Json.Contains("apostrophe '") | Should -BeTrue
+  $projection.Json.Contains(('quote ' + [string][char]92 + '"')) | Should -BeTrue
+  $projection.Json.Contains('less < greater > amp &') | Should -BeTrue
+  $projection.Json.Contains([string]$nonAscii) | Should -BeTrue
+  $projection.Json.Contains(([string][char]92 + 'u0001')) | Should -BeTrue
+  $projection.Json.Contains(([string][char]92 + 't')) | Should -BeTrue
+  $projection.Json.Contains(([string][char]92 + [string][char]92 + 'u0027')) | Should -BeTrue
+  $projection.Json.Contains([string]$supplementary) | Should -BeTrue
+  $parsed = ConvertFrom-Json -InputObject $projection.Json
+  $parsed.EvidenceReferences[0].Heading | Should -BeExactly $heading
+ }
+
 
  It 'Environment capability: Applicable=false and CapabilityPassed=false when the emulator is absent from InstallRoot' {
   New-ContractFixtureOnDiskV1 -ContractsRoot $script:contractsRoot -ContractId 'absent-emu' | Out-Null
-  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ContractsRoot $script:contractsRoot
+  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ValidationMode Source -ContractsRoot $script:contractsRoot
   $result.RegistryValid | Should -Be $true
   $obs = $result.Observations | Where-Object { $_.CapabilityType -eq 'Environment' } | Select-Object -First 1
   $obs.Applicable | Should -Be $false
@@ -362,7 +396,7 @@ Describe 'ECVF foundation -- Get-TPMEmulatorContractObservationsV1 (shared by Sh
   [IO.File]::WriteAllText((Join-Path $script:installRoot 'fixture.exe'), '')
   New-Item -ItemType Directory -Path (Join-Path $script:installRoot 'Default\inis') -Force | Out-Null
   [IO.File]::WriteAllText((Join-Path $script:installRoot 'Default\inis\Fixture.ini'), "[Section]`r`n")
-  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ContractsRoot $script:contractsRoot
+  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ValidationMode Source -ContractsRoot $script:contractsRoot
   $obs = $result.Observations | Where-Object { $_.CapabilityType -eq 'Environment' } | Select-Object -First 1
   $obs.Applicable | Should -Be $true
   $obs.CapabilityPassed | Should -Be $true
@@ -372,7 +406,7 @@ Describe 'ECVF foundation -- Get-TPMEmulatorContractObservationsV1 (shared by Sh
  It 'Environment capability: Applicable=true and CapabilityPassed=false when present but not yet initialized' {
   New-ContractFixtureOnDiskV1 -ContractsRoot $script:contractsRoot -ContractId 'uninit-emu' | Out-Null
   [IO.File]::WriteAllText((Join-Path $script:installRoot 'fixture.exe'), '')
-  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ContractsRoot $script:contractsRoot
+  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ValidationMode Source -ContractsRoot $script:contractsRoot
   $obs = $result.Observations | Where-Object { $_.CapabilityType -eq 'Environment' } | Select-Object -First 1
   $obs.Applicable | Should -Be $true
   $obs.CapabilityPassed | Should -Be $false
@@ -382,13 +416,13 @@ Describe 'ECVF foundation -- Get-TPMEmulatorContractObservationsV1 (shared by Sh
  It 'never invokes InitializationAction -- absence of the ini is reported, not repaired' {
   New-ContractFixtureOnDiskV1 -ContractsRoot $script:contractsRoot -ContractId 'never-repair-emu' | Out-Null
   [IO.File]::WriteAllText((Join-Path $script:installRoot 'fixture.exe'), '')
-  Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ContractsRoot $script:contractsRoot | Out-Null
+  Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ValidationMode Source -ContractsRoot $script:contractsRoot | Out-Null
   (Test-Path -LiteralPath (Join-Path $script:installRoot 'Default\inis\Fixture.ini')) | Should -Be $false
  }
 
  It 'RuntimeCapability: only applicable contexts produce an observation, each explicitly unresolved (no live launch performed)' {
   New-ContractFixtureOnDiskV1 -ContractsRoot $script:contractsRoot -ContractId 'runtime-emu' | Out-Null
-  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ContractsRoot $script:contractsRoot -RuntimeContexts @(@{ GunGame = $true }, @{ GunGame = $false })
+  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ValidationMode Source -ContractsRoot $script:contractsRoot -RuntimeContexts @(@{ GunGame = $true }, @{ GunGame = $false })
   $runtimeObs = @($result.Observations | Where-Object { $_.CapabilityType -eq 'Runtime' })
   $runtimeObs.Count | Should -Be 1
   $runtimeObs[0].CapabilityPassed | Should -Be $false

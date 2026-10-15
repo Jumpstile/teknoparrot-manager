@@ -186,8 +186,9 @@ Describe "Virtual Beta Tester: interrupted backup creation recovery (issue #88 A
         New-Item -ItemType File -Path (Join-Path $partialBackupDir 'ALIENS.xml') -Force | Out-Null
         # TIMECRS4.xml deliberately absent -- this is the "interrupted" signature.
 
-        $result = New-PropagationBackup -UserProfilesDir $userProfilesDir
-        $result.ErrorCount | Should -Be 0 -Because "a partial backup from a previous interrupted run must not cause a fresh backup to error"
+        $result = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $userProfilesDir -Label 'PropagateControls'
+        $result.Succeeded | Should -BeTrue -Because "a partial backup from a previous interrupted run must not cause a fresh backup to fail (reason: $($result.Reason))"
+        $result.Verified | Should -BeTrue -Because "the fresh backup must pass its own manifest verification"
         (Test-Path -LiteralPath (Join-Path $result.Path 'ALIENS.xml')) | Should -Be $true
         (Test-Path -LiteralPath (Join-Path $result.Path 'TIMECRS4.xml')) | Should -Be $true -Because "the fresh backup must be genuinely complete, unaffected by an earlier interrupted backup's own missing file"
 

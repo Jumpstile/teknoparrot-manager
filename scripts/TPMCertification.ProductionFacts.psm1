@@ -26,47 +26,43 @@ Set-StrictMode -Version 2.0
 #
 # Included -- release package (ships to end users):
 #   TeknoParrot-Manager.ps1              the certified product itself
-#   scripts/Debug-TPM-MenuLayout.ps1     ships in the release ZIP (Test-ReleasePackage.ps1)
-#   tools/Invoke-TpmAutoUpdate.ps1       ships in the release ZIP
-#   tools/TpmAutoUpdate.Core.psm1        ships in the release ZIP
+#   scripts/TpmRequiredPatchEngine.ps1   shared required-patch engine
+#   tools/Invoke-TpmAutoUpdate.ps1       standalone update helper
+#   tools/TpmAutoUpdate.Core.psm1        shared update implementation
+#   scripts/TPMCertification.Contracts.psm1 runtime ECVF contract loader
+#   scripts/TPMCertification.Authority.psm1 ECVF authority dependency
 #
-# Included -- ADR-0155 production certification/harness (drives or is
-# driven by a real certification run; not test specs, not dev-only):
+# Included -- ADR-0155 production certification/harness:
+#   scripts/Debug-TPM-MenuLayout.ps1     certification screenshot diagnostic;
+#                                          called by Invoke-TPM-RealInstanceSmoke.ps1,
+#                                          not by Main runtime and not shipped
 #   scripts/Invoke-TPM-RealInstanceSmoke.ps1      the real-hardware harness itself
 #   scripts/Invoke-TPM-InstallHealthCheck.ps1     real install-health probe the harness consumes
 #   scripts/Resolve-Pcsx2Directory.ps1            shared helper dot-sourced by both of the above
-#   scripts/Run-TPM-Tests.ps1                     the entry point real certification runs actually
+#   scripts/Run-TPM-Tests.ps1                     entry point real certification runs actually
 #                                                  execute (dispatches directly to
 #                                                  Invoke-TPM-RealInstanceSmoke.ps1 -- confirmed by
 #                                                  reading its own source, not assumed)
-#   scripts/TPMCertification.Authority.psm1        Phase 1 authority/schema primitives
-#   scripts/TPMCertification.Production.psm1       Phase 3 production authority (canonical, untouched
-#                                                   by this checkpoint)
-#   scripts/TPMCertification.ProductionCycle.psm1  Phase 3 orchestration (ADR155-0309 Sub-step A)
-#   scripts/TPMCertification.ProductionFacts.psm1  this module
-#   scripts/TPMCertification.Publication.psm1      Phase 3 publication/staging
-#   scripts/TPMCertification.Reports.psm1          Phase 3 report builders
-#   scripts/TPMCertification.Shadow.psm1           Phase 2 shadow authority (its own file content is
-#                                                   certified here; this module still never imports
-#                                                   or calls it as a fact source -- those are separate
-#                                                   concerns)
-#   scripts/Test-TPMParserCheckV1.ps1              the parser-check probe this module launches
+#   scripts/TPMCertification.Execution.psm1       process execution boundary
+#   scripts/Invoke-TPM-PesterChild.ps1            isolated Pester child process
+#   scripts/TPMCertification.Production.psm1      Phase 3 production authority
+#   scripts/TPMCertification.ProductionCycle.psm1 Phase 3 orchestration
+#   scripts/TPMCertification.ProductionFacts.psm1 this module
+#   scripts/TPMCertification.Publication.psm1     Phase 3 publication/staging
+#   scripts/TPMCertification.Reports.psm1         Phase 3 report builders
+#   scripts/TPMCertification.Shadow.psm1          Phase 2 shadow authority
+#   scripts/Test-TPMParserCheckV1.ps1             parser-check probe
 #
 # Excluded -- development-only, never shipped or executed at real
 # certification time:
-#   Tests/*.ps1, Tests/Test-ReleasePackage.ps1     Pester specs and release-ZIP validator; dev-only,
-#                                                   explicitly excluded from the release ZIP itself
-#   scripts/Preview-TPM-ConsoleUx.ps1              a developer console-rendering preview/diagnostic
-#                                                   tool; not part of the certification pipeline (no
-#                                                   facts, no harness invocation, not in the release
-#                                                   ZIP) -- confirmed by reading its source
-#   PSScriptAnalyzerSettings.psd1, *.psd1          data files, not PowerShell script/module source
-#
-# ECVF's scripts/TPMCertification.Contracts.psm1 (a different initiative,
-# out of scope for ADR-0155/this checkpoint, and not present on this
-# branch) is deliberately not part of this list.
+#   Tests/*.ps1, Tests/Test-ReleasePackage.ps1     Pester specs and release-ZIP validator
+#   scripts/TPMReleasePackage.Core.psm1, scripts/New-TPMReleasePackage.ps1 source-only package tooling
+#   scripts/Preview-TPM-ConsoleUx.ps1              developer console preview/diagnostic
+#   PSScriptAnalyzerSettings.psd1, *.psd1          data files, not PowerShell source
 $script:TpmProductionPowerShellInventoryRelativePathsV1 = @(
     'TeknoParrot-Manager.ps1',
+    'scripts/TpmRequiredPatchEngine.ps1',
+    'scripts/TPMCertification.Contracts.psm1',
     'scripts/Debug-TPM-MenuLayout.ps1',
     'tools/Invoke-TpmAutoUpdate.ps1',
     'tools/TpmAutoUpdate.Core.psm1',
@@ -422,7 +418,11 @@ function Test-TPMProductionPSScriptAnalyzerV1 {
     # actually performed the analysis), never by a parent-process
     # Get-Module -ListAvailable discovery -- a version discovered in the
     # parent is not proof of what the job genuinely loaded and ran.
-    param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$SettingsPath,[int]$PerFileTimeoutSeconds=60)
+    # Analysis of a real inventory file can exceed one minute on a slow
+    # Windows PowerShell 5.1 engine. Keep the per-file bound finite, but use
+    # three minutes so the certification gate does not report an unavailable
+    # analyzer on a slow-but-healthy engine.
+    param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$SettingsPath,[int]$PerFileTimeoutSeconds=180)
     $notExecuted=[ordered]@{Executed=$false;FindingCount=0;ToolVersion=$null;Diagnostic=$null}
     # Confirmed by direct reproduction against the real powershell.exe 5.1
     # engine: Test-Path throws System.ArgumentException for a path
@@ -588,7 +588,7 @@ function Test-TPMProductionInjectionHunterV1 {
     # free-form/empty value. A concise, tagged Write-Warning is also emitted
     # at the point of failure so the operator-facing console output points
     # at the underlying cause instead of a bare Executed=False.
-    param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$DispositionRegistryPath,[int]$PerFileTimeoutSeconds=60)
+    param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$DispositionRegistryPath,[int]$PerFileTimeoutSeconds=180)
     $notExecuted=[ordered]@{Executed=$false;FindingCount=0;UnresolvedFindingCount=0;ToolVersion=$null;Dispositions=@();Diagnostic=$null}
     $module=Find-TPMInjectionHunterModuleV1
     if(-not$module){

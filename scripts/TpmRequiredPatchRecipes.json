@@ -1,0 +1,2052 @@
+{
+  "Schema": 3,
+  "Entries": [
+    {
+      "Id": "family-guy-bowling-bepinex-plugin",
+      "ProfileId": "FamilyGuyBowling",
+      "BuildName": "Family Guy Bowling (1.15)(2017)(USA)[Team Play PC][TP]",
+      "Executable": "bowling.exe",
+      "ExecutableSha256": "3C4B406AA7B353CD416913308B8B714F7E17588D5A091326E0250A71A3407188",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Family Guy Bowling (1.15)(2017)(USA)[Team Play PC][TP].zip",
+      "SourceEntry": "BepInEx/plugins/FGBTPPlugin.dll",
+      "SourceSize": 23552,
+      "SourceSha1": "228F6C921DCD9472B7A8EC1F2E2F06546B667B37",
+      "SourceSha256": "7FECFC5D0B07DDC68968AE1D92383AB23025DE7E3BE33D2504F71F0196EB4A23",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        },
+        {
+          "Id": "bepinex-entrypoint-mode",
+          "Type": "IniValue",
+          "Path": "BepInEx/config/BepInEx.cfg",
+          "Section": "Preloader.Entrypoint",
+          "Key": "Type",
+          "Value": "MonoBehaviour",
+          "Description": "BepInEx must run its preloader as MonoBehaviour."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/FGBTPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "7FECFC5D0B07DDC68968AE1D92383AB23025DE7E3BE33D2504F71F0196EB4A23",
+          "Payload": "payload/FGBTPPlugin.dll",
+          "PayloadSha256": "7FECFC5D0B07DDC68968AE1D92383AB23025DE7E3BE33D2504F71F0196EB4A23"
+        }
+      ]
+    },
+    {
+      "Id": "shining-force-cross-elysion-shader-amd",
+      "ProfileId": "ShiningForceCrossElysion",
+      "BuildName": "Shining Force - Cross Elysion (2.06.00 Ver C)(2012-12-29)(JPN)[Sega RingEdge][TP]",
+      "Executable": "project_f-ringedge-release.exe",
+      "ExecutableSha256": "68D7E518CEAE4D411F219C8D11A15F164ED0FDE04B114E8D09FF3C496076529E",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Shining Force - Cross Elysion (2.06.00 Ver C)(2012-12-29)(JPN)[Sega RingEdge][TP].zip",
+      "SourceEntry": "rom/shader.farc.AMD",
+      "SourceSize": 912224,
+      "SourceSha1": "6B6EA2B1DD4B3A2F583C5455EC29CD8673B7F48A",
+      "SourceSha256": "9078D9566E082AEE739B89724E0730CC35DA46DEE6EE4F9FFC6E24D22128A8CD",
+      "ExclusiveGroup": "shining-force-cross-elysion-shader",
+      "HardwarePredicate": {
+        "Vendor": "AMD"
+      },
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "rom/shader.farc",
+          "BeforeSha256": "830163BAAD73FFD15FE8206FE2682D2193D3074874349A487068771FEE0B4C98",
+          "AfterSha256": "9078D9566E082AEE739B89724E0730CC35DA46DEE6EE4F9FFC6E24D22128A8CD",
+          "Payload": "payload/shader.farc.AMD",
+          "PayloadSha256": "9078D9566E082AEE739B89724E0730CC35DA46DEE6EE4F9FFC6E24D22128A8CD"
+        }
+      ]
+    },
+    {
+      "Id": "shining-force-cross-elysion-shader-nvidia",
+      "ProfileId": "ShiningForceCrossElysion",
+      "BuildName": "Shining Force - Cross Elysion (2.06.00 Ver C)(2012-12-29)(JPN)[Sega RingEdge][TP]",
+      "Executable": "project_f-ringedge-release.exe",
+      "ExecutableSha256": "68D7E518CEAE4D411F219C8D11A15F164ED0FDE04B114E8D09FF3C496076529E",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Shining Force - Cross Elysion (2.06.00 Ver C)(2012-12-29)(JPN)[Sega RingEdge][TP].zip",
+      "SourceEntry": "rom/shader.farc.NVIDIA",
+      "SourceSize": 912160,
+      "SourceSha1": "A485E291C433E5406898E02A925A2FC5776E6704",
+      "SourceSha256": "830163BAAD73FFD15FE8206FE2682D2193D3074874349A487068771FEE0B4C98",
+      "ExclusiveGroup": "shining-force-cross-elysion-shader",
+      "HardwarePredicate": {
+        "Vendor": "NVIDIA"
+      },
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "rom/shader.farc",
+          "BeforeSha256": "9078D9566E082AEE739B89724E0730CC35DA46DEE6EE4F9FFC6E24D22128A8CD",
+          "AfterSha256": "830163BAAD73FFD15FE8206FE2682D2193D3074874349A487068771FEE0B4C98",
+          "Payload": "payload/shader.farc.NVIDIA",
+          "PayloadSha256": "830163BAAD73FFD15FE8206FE2682D2193D3074874349A487068771FEE0B4C98"
+        }
+      ]
+    },
+    {
+      "Id": "blazblue-continuum-shift-ii-idmac-driver-restore",
+      "ProfileId": "BlazBlueContinuumShift2",
+      "BuildName": "BlazBlue Continuum Shift II (2010)[Taito NESiCAxLive][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "DEB3F6265888EBD7303912CB184E12284CDBF9D7D23BD46C4DE1B8237E2057DD",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "BlazBlue Continuum Shift II (2010)[Taito NESiCAxLive][TP].zip",
+      "SourceEntry": "iDmacDrv32.dll",
+      "SourceSize": 77824,
+      "SourceSha1": "F34DDF44B5138517D548383E0E672B8AA70F1BC7",
+      "SourceSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "iDmacDrv32.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+          "Payload": "payload/iDmacDrv32.dll",
+          "PayloadSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04"
+        }
+      ]
+    },
+    {
+      "Id": "rabbids-hollywood-trigger-crosshairs-restore",
+      "ProfileId": "RabbidsHollywood",
+      "BuildName": "Rabbids Hollywood (2018)[Adrenaline PC][TP]",
+      "Executable": "Game.exe",
+      "ExecutableSha256": "979F9736A99745454429908227CDD2F48875F193D439CFA33A9E14B4578DA95D",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Rabbids Hollywood (2018)[Adrenaline PC][TP].zip",
+      "SourceEntry": "Game_Data/Managed/Assembly-CSharp.dll",
+      "SourceSize": 1592320,
+      "SourceSha1": "624F619F827B9B0EAC0C936B40E7DC8348D48488",
+      "SourceSha256": "BEA584D3EDF5DA73DBFACAFA5E73B1260B3F18CE7E346AB1BEACD8E885559764",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "Game_Data/Managed/Assembly-CSharp.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "BEA584D3EDF5DA73DBFACAFA5E73B1260B3F18CE7E346AB1BEACD8E885559764",
+          "Payload": "payload/Assembly-CSharp.dll",
+          "PayloadSha256": "BEA584D3EDF5DA73DBFACAFA5E73B1260B3F18CE7E346AB1BEACD8E885559764"
+        }
+      ]
+    },
+    {
+      "Id": "blazblue-continuum-shift-idmac-driver-restore",
+      "ProfileId": "BlazBlueContinuumShift",
+      "BuildName": "BlazBlue Continuum Shift (2009)[Taito Type X2][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "52F22A979460431213BA26C1FA6E59F877CB8B21A5CF466A109A2F1AC5A6C74A",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "BlazBlue Continuum Shift (2009)[Taito Type X2][TP].zip",
+      "SourceEntry": "iDmacDrv32.dll",
+      "SourceSize": 77824,
+      "SourceSha1": "F34DDF44B5138517D548383E0E672B8AA70F1BC7",
+      "SourceSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "iDmacDrv32.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+          "Payload": "payload/iDmacDrv32.dll",
+          "PayloadSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04"
+        }
+      ]
+    },
+    {
+      "Id": "blazblue-cross-tag-battle-idmac-driver-restore",
+      "ProfileId": "BlazBlueCrossTagBattle",
+      "BuildName": "Blazblue Cross Tag Battle (1.04.00,2.01.00)(2019-12-03)(JPN)[Sega ALLS][TP]",
+      "Executable": "Game.exe",
+      "ExecutableSha256": "8994C1E1D89E7363452A04B07748BBA7CF37C52750027B96AC75C38C20E21636",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Blazblue Cross Tag Battle (1.04.00,2.01.00)(2019-12-03)(JPN)[Sega ALLS][TP].zip",
+      "SourceEntry": "iDmacDrv32.dll",
+      "SourceSize": 77824,
+      "SourceSha1": "F34DDF44B5138517D548383E0E672B8AA70F1BC7",
+      "SourceSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "iDmacDrv32.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+          "Payload": "payload/iDmacDrv32.dll",
+          "PayloadSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04"
+        }
+      ]
+    },
+    {
+      "Id": "blazblue-central-fiction-idmac-driver-restore",
+      "ProfileId": "BBCF",
+      "BuildName": "BlazBlue Central Fiction (2.01.00)(2017-11-08)[Taito NESiCAxLive][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "839323E068EA1274DEB271A0920BC507B0A75A5D22416F2FB7EEF9671E423A66",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "BlazBlue Central Fiction (2.01.00)(2017-11-08)[Taito NESiCAxLive][TP].zip",
+      "SourceEntry": "iDmacDrv32.dll",
+      "SourceSize": 75776,
+      "SourceSha1": "D058D375DAD565A53D4DC821024087853926F775",
+      "SourceSha256": "71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "iDmacDrv32.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939",
+          "Payload": "payload/iDmacDrv32.dll",
+          "PayloadSha256": "71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939"
+        }
+      ]
+    },
+    {
+      "Id": "blazblue-chronophantasma-idmac-driver-repair",
+      "ProfileId": "BBCP",
+      "BuildName": "BlazBlue Chronophantasma (2.03)(2015-06-10)[Taito NESiCAxLive][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "EF5BA5364C6324B9DE7653B146123E8C12BA446A3809BD437CA246B1382C79F6",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "BlazBlue Central Fiction (2.01.00)(2017-11-08)[Taito NESiCAxLive][TP].zip",
+      "SourceEntry": "iDmacDrv32.dll",
+      "SourceSize": 75776,
+      "SourceSha1": "D058D375DAD565A53D4DC821024087853926F775",
+      "SourceSha256": "71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "iDmacDrv32.dll",
+          "BeforeSha256": "2911772C6A581BE079CA9AD775DF380BA2D8F796B70DC8BD77384D894FEC8F04",
+          "AfterSha256": "71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939",
+          "Payload": "payload/iDmacDrv32.dll",
+          "PayloadSha256": "71B93FA6F573E6B50200125ACEB1F36AA839E26092FFA992877C414C7167E939"
+        }
+      ]
+    },
+    {
+      "Id": "nerf-arcade-bepinex-plugin-restore",
+      "ProfileId": "NERF",
+      "BuildName": "NERF Arcade (1.55)(2024-08-23)[Raw Thrills PC][TP]",
+      "Executable": "Nerf.exe",
+      "ExecutableSha256": "AEA588D26939537287125C59994B3F04B70D791343979A137AE7524A88D45B04",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "NERF Arcade (1.55)(2024-08-23)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "BepInEx/plugins/NERFTPPlugin.dll",
+      "SourceSize": 20992,
+      "SourceSha1": "369C677DC5F3D2A2F320E18582B6FEBF967391AF",
+      "SourceSha256": "7A7AA72D652704938EBDE6187D89314757F5832C1DBCC28E86B8814F6D0411D8",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/NERFTPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "7A7AA72D652704938EBDE6187D89314757F5832C1DBCC28E86B8814F6D0411D8",
+          "Payload": "payload/NERFTPPlugin.dll",
+          "PayloadSha256": "7A7AA72D652704938EBDE6187D89314757F5832C1DBCC28E86B8814F6D0411D8"
+        }
+      ]
+    },
+    {
+      "Id": "rainbow-bombergirl-bepinex-plugin-restore",
+      "ProfileId": "RainbowBombergirl",
+      "BuildName": "Rainbow BomberGirl (2022-12-15)(JPN)[Konami PC][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "5387423190DDF7D76041C3898C125B33980FE25B7FC7057DA7F0C535DD333ABA",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Rainbow BomberGirl (2022-12-15)(JPN)[Konami PC][TP].zip",
+      "SourceEntry": "BepInEx/plugins/BBGTPPlugin.dll",
+      "SourceSize": 72192,
+      "SourceSha1": "17199BF42A4DC849ED7D2DE8A8625B1192FCD89B",
+      "SourceSha256": "3D9555B1345EC57DB863126F59BC2F446E22217F31D7A1FE4FB5444E2E64F83B",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/BBGTPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "3D9555B1345EC57DB863126F59BC2F446E22217F31D7A1FE4FB5444E2E64F83B",
+          "Payload": "payload/BBGTPPlugin.dll",
+          "PayloadSha256": "3D9555B1345EC57DB863126F59BC2F446E22217F31D7A1FE4FB5444E2E64F83B"
+        }
+      ]
+    },
+    {
+      "Id": "tmnt-bepinex-plugin-restore",
+      "ProfileId": "TMNT",
+      "BuildName": "Teenage Mutant Ninja Turtles (1.59)(2021-07-26)(USA)[Raw Thrills PC][TP]",
+      "Executable": "TMNT.exe",
+      "ExecutableSha256": "11AEDEEE2136DA3BF69392B5FE76818707BDD8E413AE99F829F394F8B80B295F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Teenage Mutant Ninja Turtles (1.59)(2021-07-26)(USA)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "BepInEx/plugins/TMNTTPPlugin.dll",
+      "SourceSize": 38400,
+      "SourceSha1": "BBB935EA1BB2133A6B0CFA1F54DBAA37D01E825E",
+      "SourceSha256": "37E8229921B7B838A452676E70640EE5AC34114DA0923D6F2DE6FE482F0C62C9",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/TMNTTPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "37E8229921B7B838A452676E70640EE5AC34114DA0923D6F2DE6FE482F0C62C9",
+          "Payload": "payload/TMNTTPPlugin.dll",
+          "PayloadSha256": "37E8229921B7B838A452676E70640EE5AC34114DA0923D6F2DE6FE482F0C62C9"
+        }
+      ]
+    },
+    {
+      "Id": "silent-hill-the-arcade-indirectsound-restore",
+      "ProfileId": "SilentHill",
+      "BuildName": "Silent Hill The Arcade (2007-12-20)[Konami PC][TP]",
+      "Executable": "KSHG.exe",
+      "ExecutableSha256": "9B8A6C1BF81F9D690E2BEDB94E3AB2844313A83758923C22704DA3241E492995",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Silent Hill The Arcade (2007-12-20)[Konami PC][TP].zip",
+      "SourceEntry": "dsound.dll",
+      "SourceSize": 633344,
+      "SourceSha1": "ACF53D0D3D1B3C068FBD0F41C62AE91AA565EB7C",
+      "SourceSha256": "6D57ACF2E79C7F816C70C04A82F264E17C27CA243B3F6AFC1AD3A14445C390AB",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "dsound.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "6D57ACF2E79C7F816C70C04A82F264E17C27CA243B3F6AFC1AD3A14445C390AB",
+          "Payload": "payload/dsound.dll",
+          "PayloadSha256": "6D57ACF2E79C7F816C70C04A82F264E17C27CA243B3F6AFC1AD3A14445C390AB"
+        }
+      ]
+    },
+    {
+      "Id": "taisen-hot-gimmick-5-ttx-monitor-dll-restore",
+      "ProfileId": "TaisenHotGimmick5",
+      "BuildName": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "144875cc9d0dc66887cd6292dcb949c0575afb654b0da8bf173fef7047c7d86a",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip",
+      "SourceEntry": "TTX-Monitor.dll",
+      "SourceSize": 147456,
+      "SourceSha1": "201bacc01d57497690d35741e70940237e424f04",
+      "SourceSha256": "a706a9dbebb3e6d4511d47341d4a46d1f9965874adba4354a127797855fdfa44",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "TTX-Monitor.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "a706a9dbebb3e6d4511d47341d4a46d1f9965874adba4354a127797855fdfa44",
+          "Payload": "payload/TTX-Monitor.dll",
+          "PayloadSha256": "a706a9dbebb3e6d4511d47341d4a46d1f9965874adba4354a127797855fdfa44"
+        }
+      ]
+    },
+    {
+      "Id": "taisen-hot-gimmick-5-ttx-config-restore",
+      "ProfileId": "TaisenHotGimmick5",
+      "BuildName": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "144875cc9d0dc66887cd6292dcb949c0575afb654b0da8bf173fef7047c7d86a",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip",
+      "SourceEntry": "TTX-Config.exe",
+      "SourceSize": 270848,
+      "SourceSha1": "00cf036a2456a4bf5bd15128269a5cd64f0ef3d9",
+      "SourceSha256": "f6979167410af3c6ece2420e15205c54eb86663b74c27aa2e1cd05287efb8b64",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "TTX-Config.exe",
+          "BeforeState": "Absent",
+          "AfterSha256": "f6979167410af3c6ece2420e15205c54eb86663b74c27aa2e1cd05287efb8b64",
+          "Payload": "payload/TTX-Config.exe",
+          "PayloadSha256": "f6979167410af3c6ece2420e15205c54eb86663b74c27aa2e1cd05287efb8b64"
+        }
+      ]
+    },
+    {
+      "Id": "taisen-hot-gimmick-5-ttx-loader-restore",
+      "ProfileId": "TaisenHotGimmick5",
+      "BuildName": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "144875cc9d0dc66887cd6292dcb949c0575afb654b0da8bf173fef7047c7d86a",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip",
+      "SourceEntry": "TTX-Loader.exe",
+      "SourceSize": 11264,
+      "SourceSha1": "4b9b7174f46571a49eab6531a7577a062749e51c",
+      "SourceSha256": "2e270dde1ff0f86326a4bfcc84eb359a0231118dc03d9130526750e3d175ca3c",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "TTX-Loader.exe",
+          "BeforeState": "Absent",
+          "AfterSha256": "2e270dde1ff0f86326a4bfcc84eb359a0231118dc03d9130526750e3d175ca3c",
+          "Payload": "payload/TTX-Loader.exe",
+          "PayloadSha256": "2e270dde1ff0f86326a4bfcc84eb359a0231118dc03d9130526750e3d175ca3c"
+        }
+      ]
+    },
+    {
+      "Id": "mars-sortie-bepinex-plugin-restore",
+      "ProfileId": "MarsSortie",
+      "BuildName": "Mars Sortie (1.46.9)(2018)[UDC PC][TP]",
+      "Executable": "Shooter.exe",
+      "ExecutableSha256": "08541DCD067D7BB3BBE42BEAF2F1B5224C762FC347B71FC7A7308D7430384372",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "UserSelected",
+      "SourceSet": "Mars Sortie (1.46.9) - TPPlugin_v1.2.zip",
+      "SourceEntry": "MSTPPlugin.dll",
+      "SourceSize": 21504,
+      "SourceSha1": "0BF44248A5402E51544BDD9493B469BEA3727011",
+      "SourceSha256": "3CCABD105D603EAAA7EE3CD5F7194DEBD179CC30B701113DBC5C6B564FDB1783",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/MSTPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "3CCABD105D603EAAA7EE3CD5F7194DEBD179CC30B701113DBC5C6B564FDB1783",
+          "Payload": "payload/MSTPPlugin.dll",
+          "PayloadSha256": "3CCABD105D603EAAA7EE3CD5F7194DEBD179CC30B701113DBC5C6B564FDB1783"
+        }
+      ]
+    },
+    {
+      "Id": "rabbids-hollywood-bepinex-operator-plugin-restore",
+      "ProfileId": "RabbidsHollywood",
+      "BuildName": "Rabbids Hollywood (2018)[Adrenaline PC][TP]",
+      "Executable": "Game.exe",
+      "ExecutableSha256": "979F9736A99745454429908227CDD2F48875F193D439CFA33A9E14B4578DA95D",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "UserSelected",
+      "SourceSet": "Rabbids Hollywood (2018) - BepInEx Operator Configuration Pack.zip",
+      "SourceEntry": "BepInEx/plugins/UnityPlugin_BepInEx_RHA.dll",
+      "SourceSize": 15360,
+      "SourceSha1": "25F9142BC4CDC364A5D2348606D0C513C86C9610",
+      "SourceSha256": "C3DEDA497E160652A1F0D3D99892A4F534A88D61358DBA5192003FF519D5E8EB",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/UnityPlugin_BepInEx_RHA.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "C3DEDA497E160652A1F0D3D99892A4F534A88D61358DBA5192003FF519D5E8EB",
+          "Payload": "payload/UnityPlugin_BepInEx_RHA.dll",
+          "PayloadSha256": "C3DEDA497E160652A1F0D3D99892A4F534A88D61358DBA5192003FF519D5E8EB"
+        }
+      ]
+    },
+    {
+      "Id": "sb3-bepinex-plugin-restore",
+      "ProfileId": "SB3",
+      "BuildName": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills][TP]",
+      "Executable": "fnfmega.exe",
+      "ExecutableSha256": "7F84AE68A35587EA87312ED59247EB0379F00826B8F2473A09155792A90AEEAD",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "UserSelected",
+      "SourceSet": "Super Bikes 3 (1.91 x64) - TPPlugin_v1.09 x64.zip",
+      "SourceEntry": "SB3TPPlugin.dll",
+      "SourceSize": 121856,
+      "SourceSha1": "E4BCCBCBB32EEE7DCE2E24AAF8990E4812BC81F5",
+      "SourceSha256": "9E8464FD54F272398CDE3E2AACB2D5F6D8508A2F90C3E7D7793166016BFFF3D5",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/SB3TPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "9E8464FD54F272398CDE3E2AACB2D5F6D8508A2F90C3E7D7793166016BFFF3D5",
+          "Payload": "payload/SB3TPPlugin.dll",
+          "PayloadSha256": "9E8464FD54F272398CDE3E2AACB2D5F6D8508A2F90C3E7D7793166016BFFF3D5"
+        }
+      ]
+    },
+    {
+      "Id": "shining-force-cross-raid-105-amd-shader",
+      "ProfileId": "ShiningForceCrossRaid",
+      "BuildName": "Shining Force - Cross Raid (1.05 Ver A)(2011-08-03)(JPN)[Sega RingEdge][TP]",
+      "Executable": "project_f-ringedge-release.exe",
+      "ExecutableSha256": "82E66635A9A91CEC59721DB7BD9258464F70C44377BA707FFCB51EA2D3DB9317",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Supplementary",
+      "SourceSet": "Shining Force - Cross Raid (1.05) - AMD Shader Fix.zip",
+      "SourceEntry": "rom/shader.farc",
+      "SourceSize": 8987472,
+      "SourceSha1": "7520194AB599DB8FF68C0D7277DA9DEE0EEC57C8",
+      "SourceSha256": "B245426428543B89A7A074EDEFD7E72CC437EBED9462F287E646FD8CD4A5A8BB",
+      "ExclusiveGroup": "shining-force-cross-raid-105-shader",
+      "HardwarePredicate": {
+        "Vendor": "AMD"
+      },
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "rom/shader.farc",
+          "BeforeSha256": "66E0CC00E84C01F6E77E6B446A019212EBD27610FDD81CA866648C5E97E80933",
+          "AfterSha256": "B245426428543B89A7A074EDEFD7E72CC437EBED9462F287E646FD8CD4A5A8BB",
+          "Payload": "payload/shader.farc",
+          "PayloadSha256": "B245426428543B89A7A074EDEFD7E72CC437EBED9462F287E646FD8CD4A5A8BB"
+        }
+      ]
+    },
+    {
+      "Id": "shining-force-cross-raid-105-nvidia-shader",
+      "ProfileId": "ShiningForceCrossRaid",
+      "BuildName": "Shining Force - Cross Raid (1.05 Ver A)(2011-08-03)(JPN)[Sega RingEdge][TP]",
+      "Executable": "project_f-ringedge-release.exe",
+      "ExecutableSha256": "82E66635A9A91CEC59721DB7BD9258464F70C44377BA707FFCB51EA2D3DB9317",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Supplementary",
+      "SourceSet": "Shining Force - Cross Raid (1.05) - NVIDIA Shader Fix.zip",
+      "SourceEntry": "rom/shader.farc",
+      "SourceSize": 8987472,
+      "SourceSha1": "FF7DE8DB19ABE7695BCE5617894E41667CBF05E7",
+      "SourceSha256": "DA517CD064CB8B17C8B62DF1783F4D641195B0EB1E90FDD07B8BA72E47511912",
+      "ExclusiveGroup": "shining-force-cross-raid-105-shader",
+      "HardwarePredicate": {
+        "Vendor": "NVIDIA"
+      },
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "rom/shader.farc",
+          "BeforeSha256": "66E0CC00E84C01F6E77E6B446A019212EBD27610FDD81CA866648C5E97E80933",
+          "AfterSha256": "DA517CD064CB8B17C8B62DF1783F4D641195B0EB1E90FDD07B8BA72E47511912",
+          "Payload": "payload/shader.farc",
+          "PayloadSha256": "DA517CD064CB8B17C8B62DF1783F4D641195B0EB1E90FDD07B8BA72E47511912"
+        }
+      ]
+    },
+    {
+      "Id": "sonic-dash-extreme-60fps-60hz-self-executable",
+      "ProfileId": "SonicDashExtreme",
+      "BuildName": "Sonic Dash Extreme (2015)[Sega Nu][TP]",
+      "Executable": "exe/SonicDash_R_Ring.exe",
+      "ExecutableSha256": "47B6F1186C734DD795D1AFC95D070494436502A2B2419ADE9F19A78D7B431A38",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Sonic Dash Extreme (2015)[Sega Nu][TP].zip",
+      "SourceEntry": "exe/SonicDash_R_Ring.exe",
+      "SourceSize": 5947392,
+      "SourceSha1": "E7369EC647CDAAFA9197B5B02D4346AE935C9459",
+      "SourceSha256": "BCA788A62FD32681D049F7AFDE456F6AD12F9030CED4E1C3CFD81C3A925EDD9E",
+      "ExclusiveGroup": "",
+      "AllowExecutableSelfPatch": true,
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "exe/SonicDash_R_Ring.exe",
+          "BeforeSha256": "47B6F1186C734DD795D1AFC95D070494436502A2B2419ADE9F19A78D7B431A38",
+          "AfterSha256": "BCA788A62FD32681D049F7AFDE456F6AD12F9030CED4E1C3CFD81C3A925EDD9E",
+          "Payload": "payload/SonicDash_R_Ring.exe",
+          "PayloadSha256": "BCA788A62FD32681D049F7AFDE456F6AD12F9030CED4E1C3CFD81C3A925EDD9E"
+        }
+      ]
+    },
+    {
+      "Id": "virtua-fighter-5-r-1001-amd-shader",
+      "ProfileId": "VF5R",
+      "BuildName": "Virtua Fighter 5 R (1.001)(2008-06-18)[Sega Lindbergh Yellow][TP]",
+      "Executable": "vf5",
+      "ExecutableSha256": "01198DA768945395C4AACF4CE9460B76F2A8EAEA850E39F52EAEC33D7EECA310",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Supplementary",
+      "SourceSet": "Virtua Fighter 5 R (1.001) - AMD Shader Fix.zip",
+      "SourceEntry": "rom/shader.farc",
+      "SourceSize": 11672624,
+      "SourceSha1": "84E396DF3240AD565E77BF0BCAD6EDD9310535CF",
+      "SourceSha256": "403E9281A1BB73F9CDC73395E3CC614B6AADDA4AEB8D19BA96E17B55F2062419",
+      "ExclusiveGroup": "virtua-fighter-5-r-1001-shader",
+      "HardwarePredicate": {
+        "Vendor": "AMD"
+      },
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "rom/shader.farc",
+          "BeforeSha256": "B0C66A2AF1130E100C0EF72A808362C8D8CF0623D3F8FBD3C82B837EEEA9C247",
+          "AfterSha256": "403E9281A1BB73F9CDC73395E3CC614B6AADDA4AEB8D19BA96E17B55F2062419",
+          "Payload": "payload/shader.farc",
+          "PayloadSha256": "403E9281A1BB73F9CDC73395E3CC614B6AADDA4AEB8D19BA96E17B55F2062419"
+        }
+      ]
+    },
+    {
+      "Id": "virtua-fighter-5-r-1001-nvidia-shader",
+      "ProfileId": "VF5R",
+      "BuildName": "Virtua Fighter 5 R (1.001)(2008-06-18)[Sega Lindbergh Yellow][TP]",
+      "Executable": "vf5",
+      "ExecutableSha256": "01198DA768945395C4AACF4CE9460B76F2A8EAEA850E39F52EAEC33D7EECA310",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Supplementary",
+      "SourceSet": "Virtua Fighter 5 R (1.001) - NVIDIA Shader Fix.zip",
+      "SourceEntry": "rom/shader.farc",
+      "SourceSize": 11418160,
+      "SourceSha1": "457E4C4B0938EE88FD05583F88ECD0138F213866",
+      "SourceSha256": "B32F56FEC6F5FB99DB06C7173BE241AD8DD532444426655015AC1C4B92FC8FA3",
+      "ExclusiveGroup": "virtua-fighter-5-r-1001-shader",
+      "HardwarePredicate": {
+        "Vendor": "NVIDIA"
+      },
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "rom/shader.farc",
+          "BeforeSha256": "B0C66A2AF1130E100C0EF72A808362C8D8CF0623D3F8FBD3C82B837EEEA9C247",
+          "AfterSha256": "B32F56FEC6F5FB99DB06C7173BE241AD8DD532444426655015AC1C4B92FC8FA3",
+          "Payload": "payload/shader.farc",
+          "PayloadSha256": "B32F56FEC6F5FB99DB06C7173BE241AD8DD532444426655015AC1C4B92FC8FA3"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-nnstdshader-nnstdshader-frag",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/nnstdshader/nnstdshader.frag",
+      "SourceSize": 76546,
+      "SourceSha1": "CAA795B3A7B3D0C8151B775A00E115B240752836",
+      "SourceSha256": "5005FA3730D012BF7F189587440CE9A0AEC8D7636CD368293F1F89690DE81026",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/nnstdshader/nnstdshader.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "5005FA3730D012BF7F189587440CE9A0AEC8D7636CD368293F1F89690DE81026",
+          "Payload": "payload/data-global/nnstdshader/nnstdshader.frag",
+          "PayloadSha256": "5005FA3730D012BF7F189587440CE9A0AEC8D7636CD368293F1F89690DE81026"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-nnstdshader-nnstdshader-vert",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/nnstdshader/nnstdshader.vert",
+      "SourceSize": 68868,
+      "SourceSha1": "41FE2ABACE4F64087190662670F473FD7750B998",
+      "SourceSha256": "67C559C4DF7BC440DD8A0B7C7EF1C27E1FC120CB77A320321B787B6779C5EB34",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/nnstdshader/nnstdshader.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "67C559C4DF7BC440DD8A0B7C7EF1C27E1FC120CB77A320321B787B6779C5EB34",
+          "Payload": "payload/data-global/nnstdshader/nnstdshader.vert",
+          "PayloadSha256": "67C559C4DF7BC440DD8A0B7C7EF1C27E1FC120CB77A320321B787B6779C5EB34"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-shader-gauss2-frag",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss2.frag",
+      "SourceSize": 1097,
+      "SourceSha1": "D5978F2E8AF50F7D5E1264F43575E951B89841A1",
+      "SourceSha256": "B6FA51C6E0A8178788F437B656FC13E99ABBDA6BC40A248D6A9EE49825C860AC",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss2.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "B6FA51C6E0A8178788F437B656FC13E99ABBDA6BC40A248D6A9EE49825C860AC",
+          "Payload": "payload/data-global/shader/gauss2.frag",
+          "PayloadSha256": "B6FA51C6E0A8178788F437B656FC13E99ABBDA6BC40A248D6A9EE49825C860AC"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-shader-gauss2-vert",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss2.vert",
+      "SourceSize": 1235,
+      "SourceSha1": "C19BEE0483EE6962CE8A5238DAA0A5F399EE277C",
+      "SourceSha256": "1445CD238A4B88FCAFF29577C023DDF1C500E6BA2C93FF6127589B4B60448F8D",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss2.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "1445CD238A4B88FCAFF29577C023DDF1C500E6BA2C93FF6127589B4B60448F8D",
+          "Payload": "payload/data-global/shader/gauss2.vert",
+          "PayloadSha256": "1445CD238A4B88FCAFF29577C023DDF1C500E6BA2C93FF6127589B4B60448F8D"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-shader-gauss2-a-frag",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss2_a.frag",
+      "SourceSize": 1121,
+      "SourceSha1": "E8F79812530110620E6DEBDFAA9441F4296389C6",
+      "SourceSha256": "AAF803083A9021999F562DDA974CAD866EEE854FDD9102E6216F1AE6B1E9710D",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss2_a.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "AAF803083A9021999F562DDA974CAD866EEE854FDD9102E6216F1AE6B1E9710D",
+          "Payload": "payload/data-global/shader/gauss2_a.frag",
+          "PayloadSha256": "AAF803083A9021999F562DDA974CAD866EEE854FDD9102E6216F1AE6B1E9710D"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-shader-gauss2-a-vert",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss2_a.vert",
+      "SourceSize": 1151,
+      "SourceSha1": "6D90A4845526AC8B73F75799AB933DD093B900B0",
+      "SourceSha256": "3C3C08D76B22B91F2F47EFC717E016661339F79C1EEBD7FA7877C1D0573051EE",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss2_a.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "3C3C08D76B22B91F2F47EFC717E016661339F79C1EEBD7FA7877C1D0573051EE",
+          "Payload": "payload/data-global/shader/gauss2_a.vert",
+          "PayloadSha256": "3C3C08D76B22B91F2F47EFC717E016661339F79C1EEBD7FA7877C1D0573051EE"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-shader-gauss2-a-to-c-frag",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss2_a_to_c.frag",
+      "SourceSize": 1159,
+      "SourceSha1": "49D77896E2EE04216FC3D7A5BF409EC7253AFE05",
+      "SourceSha256": "5A77D4151F36F211AFEB2F5D4B2ADA8AD2376DC4DFBCDBDB9B82229DA2BCE9B6",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss2_a_to_c.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "5A77D4151F36F211AFEB2F5D4B2ADA8AD2376DC4DFBCDBDB9B82229DA2BCE9B6",
+          "Payload": "payload/data-global/shader/gauss2_a_to_c.frag",
+          "PayloadSha256": "5A77D4151F36F211AFEB2F5D4B2ADA8AD2376DC4DFBCDBDB9B82229DA2BCE9B6"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-shader-gauss2-a-to-c-vert",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss2_a_to_c.vert",
+      "SourceSize": 1156,
+      "SourceSha1": "A418842B64B6E95ECF3682A8F4568A5CE84E77F1",
+      "SourceSha256": "1DD4937A13FDBCF0E7EE188899189CB8062DB6A174773558E7C90D18CBCEBD24",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss2_a_to_c.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "1DD4937A13FDBCF0E7EE188899189CB8062DB6A174773558E7C90D18CBCEBD24",
+          "Payload": "payload/data-global/shader/gauss2_a_to_c.vert",
+          "PayloadSha256": "1DD4937A13FDBCF0E7EE188899189CB8062DB6A174773558E7C90D18CBCEBD24"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-shader-gauss-x-frag",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss_x.frag",
+      "SourceSize": 4326,
+      "SourceSha1": "7EA808C1DB5133B1A831FCE29DE0E8525AB15D0F",
+      "SourceSha256": "B3108DC28ED124032BF0445FF56A5DBC0992E814B2608E624C53ECE78D49D4BB",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss_x.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "B3108DC28ED124032BF0445FF56A5DBC0992E814B2608E624C53ECE78D49D4BB",
+          "Payload": "payload/data-global/shader/gauss_x.frag",
+          "PayloadSha256": "B3108DC28ED124032BF0445FF56A5DBC0992E814B2608E624C53ECE78D49D4BB"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-shader-gauss-x-vert",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss_x.vert",
+      "SourceSize": 2765,
+      "SourceSha1": "9E8DFB8A43494C6534BFCD840E795C1E5417F5BF",
+      "SourceSha256": "E41DCE579CC7FFB9455541D4328403445A304E597011E17FB45A46709DDF30FF",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss_x.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "E41DCE579CC7FFB9455541D4328403445A304E597011E17FB45A46709DDF30FF",
+          "Payload": "payload/data-global/shader/gauss_x.vert",
+          "PayloadSha256": "E41DCE579CC7FFB9455541D4328403445A304E597011E17FB45A46709DDF30FF"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-shader-gauss-y-frag",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss_y.frag",
+      "SourceSize": 4316,
+      "SourceSha1": "0193D2821AEEEDDAE4BDAFEA8B73021F49804A6B",
+      "SourceSha256": "0A5789C6E8834A36DDAEBB7595BA50B96C8CEECDDAB0BD488A592867B51C24AF",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss_y.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "0A5789C6E8834A36DDAEBB7595BA50B96C8CEECDDAB0BD488A592867B51C24AF",
+          "Payload": "payload/data-global/shader/gauss_y.frag",
+          "PayloadSha256": "0A5789C6E8834A36DDAEBB7595BA50B96C8CEECDDAB0BD488A592867B51C24AF"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-shader-gauss-y-vert",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss_y.vert",
+      "SourceSize": 2748,
+      "SourceSha1": "42C0517078ACD90835B9ADFD2951BDD7D5B90820",
+      "SourceSha256": "D5EF31EB08CEF024DC485C2D1D835C257C0F824379041BE1938EEA7884BC73B3",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss_y.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "D5EF31EB08CEF024DC485C2D1D835C257C0F824379041BE1938EEA7884BC73B3",
+          "Payload": "payload/data-global/shader/gauss_y.vert",
+          "PayloadSha256": "D5EF31EB08CEF024DC485C2D1D835C257C0F824379041BE1938EEA7884BC73B3"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-shader-hdr-frag",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/hdr.frag",
+      "SourceSize": 2312,
+      "SourceSha1": "29EC3DF4497F17E369591A17A5BF2E5936613A2B",
+      "SourceSha256": "79F7C4C5A624D6596EF2BD2012A8F7EC1421F4FBA107A855CD3FB4A6C3CBEBE9",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/hdr.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "79F7C4C5A624D6596EF2BD2012A8F7EC1421F4FBA107A855CD3FB4A6C3CBEBE9",
+          "Payload": "payload/data-global/shader/hdr.frag",
+          "PayloadSha256": "79F7C4C5A624D6596EF2BD2012A8F7EC1421F4FBA107A855CD3FB4A6C3CBEBE9"
+        }
+      ]
+    },
+    {
+      "Id": "hummer-main-component-data-global-shader-hdr-vert",
+      "ProfileId": "Hummer",
+      "BuildName": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP]",
+      "Executable": "a.elf",
+      "ExecutableSha256": "D8552148793AB3DAC7E24DE802D9B408FEC0C87CA44FBC435B3F4160D9456412",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer (1.0)(2009-06-21)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/hdr.vert",
+      "SourceSize": 668,
+      "SourceSha1": "F7AB41A70D16D3746067DF6F2C38EFEDCBF95E9D",
+      "SourceSha256": "767D9E2EE29A7642DE3904FD5400A52DDAC13299F8721BCEFB6E602F0DB37E3E",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/hdr.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "767D9E2EE29A7642DE3904FD5400A52DDAC13299F8721BCEFB6E602F0DB37E3E",
+          "Payload": "payload/data-global/shader/hdr.vert",
+          "PayloadSha256": "767D9E2EE29A7642DE3904FD5400A52DDAC13299F8721BCEFB6E602F0DB37E3E"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-nnstdshader-nnstdshader-frag",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/nnstdshader/nnstdshader.frag",
+      "SourceSize": 76546,
+      "SourceSha1": "CAA795B3A7B3D0C8151B775A00E115B240752836",
+      "SourceSha256": "5005FA3730D012BF7F189587440CE9A0AEC8D7636CD368293F1F89690DE81026",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/nnstdshader/nnstdshader.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "5005FA3730D012BF7F189587440CE9A0AEC8D7636CD368293F1F89690DE81026",
+          "Payload": "payload/data-global/nnstdshader/nnstdshader.frag",
+          "PayloadSha256": "5005FA3730D012BF7F189587440CE9A0AEC8D7636CD368293F1F89690DE81026"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-nnstdshader-nnstdshader-vert",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/nnstdshader/nnstdshader.vert",
+      "SourceSize": 68868,
+      "SourceSha1": "41FE2ABACE4F64087190662670F473FD7750B998",
+      "SourceSha256": "67C559C4DF7BC440DD8A0B7C7EF1C27E1FC120CB77A320321B787B6779C5EB34",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/nnstdshader/nnstdshader.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "67C559C4DF7BC440DD8A0B7C7EF1C27E1FC120CB77A320321B787B6779C5EB34",
+          "Payload": "payload/data-global/nnstdshader/nnstdshader.vert",
+          "PayloadSha256": "67C559C4DF7BC440DD8A0B7C7EF1C27E1FC120CB77A320321B787B6779C5EB34"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-shader-gauss2-frag",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss2.frag",
+      "SourceSize": 1097,
+      "SourceSha1": "D5978F2E8AF50F7D5E1264F43575E951B89841A1",
+      "SourceSha256": "B6FA51C6E0A8178788F437B656FC13E99ABBDA6BC40A248D6A9EE49825C860AC",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss2.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "B6FA51C6E0A8178788F437B656FC13E99ABBDA6BC40A248D6A9EE49825C860AC",
+          "Payload": "payload/data-global/shader/gauss2.frag",
+          "PayloadSha256": "B6FA51C6E0A8178788F437B656FC13E99ABBDA6BC40A248D6A9EE49825C860AC"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-shader-gauss2-vert",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss2.vert",
+      "SourceSize": 1235,
+      "SourceSha1": "C19BEE0483EE6962CE8A5238DAA0A5F399EE277C",
+      "SourceSha256": "1445CD238A4B88FCAFF29577C023DDF1C500E6BA2C93FF6127589B4B60448F8D",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss2.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "1445CD238A4B88FCAFF29577C023DDF1C500E6BA2C93FF6127589B4B60448F8D",
+          "Payload": "payload/data-global/shader/gauss2.vert",
+          "PayloadSha256": "1445CD238A4B88FCAFF29577C023DDF1C500E6BA2C93FF6127589B4B60448F8D"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-shader-gauss2-a-frag",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss2_a.frag",
+      "SourceSize": 1121,
+      "SourceSha1": "E8F79812530110620E6DEBDFAA9441F4296389C6",
+      "SourceSha256": "AAF803083A9021999F562DDA974CAD866EEE854FDD9102E6216F1AE6B1E9710D",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss2_a.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "AAF803083A9021999F562DDA974CAD866EEE854FDD9102E6216F1AE6B1E9710D",
+          "Payload": "payload/data-global/shader/gauss2_a.frag",
+          "PayloadSha256": "AAF803083A9021999F562DDA974CAD866EEE854FDD9102E6216F1AE6B1E9710D"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-shader-gauss2-a-vert",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss2_a.vert",
+      "SourceSize": 1151,
+      "SourceSha1": "6D90A4845526AC8B73F75799AB933DD093B900B0",
+      "SourceSha256": "3C3C08D76B22B91F2F47EFC717E016661339F79C1EEBD7FA7877C1D0573051EE",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss2_a.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "3C3C08D76B22B91F2F47EFC717E016661339F79C1EEBD7FA7877C1D0573051EE",
+          "Payload": "payload/data-global/shader/gauss2_a.vert",
+          "PayloadSha256": "3C3C08D76B22B91F2F47EFC717E016661339F79C1EEBD7FA7877C1D0573051EE"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-shader-gauss2-a-to-c-frag",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss2_a_to_c.frag",
+      "SourceSize": 1159,
+      "SourceSha1": "49D77896E2EE04216FC3D7A5BF409EC7253AFE05",
+      "SourceSha256": "5A77D4151F36F211AFEB2F5D4B2ADA8AD2376DC4DFBCDBDB9B82229DA2BCE9B6",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss2_a_to_c.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "5A77D4151F36F211AFEB2F5D4B2ADA8AD2376DC4DFBCDBDB9B82229DA2BCE9B6",
+          "Payload": "payload/data-global/shader/gauss2_a_to_c.frag",
+          "PayloadSha256": "5A77D4151F36F211AFEB2F5D4B2ADA8AD2376DC4DFBCDBDB9B82229DA2BCE9B6"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-shader-gauss2-a-to-c-vert",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss2_a_to_c.vert",
+      "SourceSize": 1156,
+      "SourceSha1": "A418842B64B6E95ECF3682A8F4568A5CE84E77F1",
+      "SourceSha256": "1DD4937A13FDBCF0E7EE188899189CB8062DB6A174773558E7C90D18CBCEBD24",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss2_a_to_c.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "1DD4937A13FDBCF0E7EE188899189CB8062DB6A174773558E7C90D18CBCEBD24",
+          "Payload": "payload/data-global/shader/gauss2_a_to_c.vert",
+          "PayloadSha256": "1DD4937A13FDBCF0E7EE188899189CB8062DB6A174773558E7C90D18CBCEBD24"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-shader-gauss-x-frag",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss_x.frag",
+      "SourceSize": 4326,
+      "SourceSha1": "7EA808C1DB5133B1A831FCE29DE0E8525AB15D0F",
+      "SourceSha256": "B3108DC28ED124032BF0445FF56A5DBC0992E814B2608E624C53ECE78D49D4BB",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss_x.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "B3108DC28ED124032BF0445FF56A5DBC0992E814B2608E624C53ECE78D49D4BB",
+          "Payload": "payload/data-global/shader/gauss_x.frag",
+          "PayloadSha256": "B3108DC28ED124032BF0445FF56A5DBC0992E814B2608E624C53ECE78D49D4BB"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-shader-gauss-x-vert",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss_x.vert",
+      "SourceSize": 2765,
+      "SourceSha1": "9E8DFB8A43494C6534BFCD840E795C1E5417F5BF",
+      "SourceSha256": "E41DCE579CC7FFB9455541D4328403445A304E597011E17FB45A46709DDF30FF",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss_x.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "E41DCE579CC7FFB9455541D4328403445A304E597011E17FB45A46709DDF30FF",
+          "Payload": "payload/data-global/shader/gauss_x.vert",
+          "PayloadSha256": "E41DCE579CC7FFB9455541D4328403445A304E597011E17FB45A46709DDF30FF"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-shader-gauss-y-frag",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss_y.frag",
+      "SourceSize": 4316,
+      "SourceSha1": "0193D2821AEEEDDAE4BDAFEA8B73021F49804A6B",
+      "SourceSha256": "0A5789C6E8834A36DDAEBB7595BA50B96C8CEECDDAB0BD488A592867B51C24AF",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss_y.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "0A5789C6E8834A36DDAEBB7595BA50B96C8CEECDDAB0BD488A592867B51C24AF",
+          "Payload": "payload/data-global/shader/gauss_y.frag",
+          "PayloadSha256": "0A5789C6E8834A36DDAEBB7595BA50B96C8CEECDDAB0BD488A592867B51C24AF"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-shader-gauss-y-vert",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/gauss_y.vert",
+      "SourceSize": 2748,
+      "SourceSha1": "42C0517078ACD90835B9ADFD2951BDD7D5B90820",
+      "SourceSha256": "D5EF31EB08CEF024DC485C2D1D835C257C0F824379041BE1938EEA7884BC73B3",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/gauss_y.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "D5EF31EB08CEF024DC485C2D1D835C257C0F824379041BE1938EEA7884BC73B3",
+          "Payload": "payload/data-global/shader/gauss_y.vert",
+          "PayloadSha256": "D5EF31EB08CEF024DC485C2D1D835C257C0F824379041BE1938EEA7884BC73B3"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-shader-hdr-frag",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/hdr.frag",
+      "SourceSize": 2312,
+      "SourceSha1": "29EC3DF4497F17E369591A17A5BF2E5936613A2B",
+      "SourceSha256": "79F7C4C5A624D6596EF2BD2012A8F7EC1421F4FBA107A855CD3FB4A6C3CBEBE9",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/hdr.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "79F7C4C5A624D6596EF2BD2012A8F7EC1421F4FBA107A855CD3FB4A6C3CBEBE9",
+          "Payload": "payload/data-global/shader/hdr.frag",
+          "PayloadSha256": "79F7C4C5A624D6596EF2BD2012A8F7EC1421F4FBA107A855CD3FB4A6C3CBEBE9"
+        }
+      ]
+    },
+    {
+      "Id": "hummerextreme-main-component-data-global-shader-hdr-vert",
+      "ProfileId": "hummerextreme",
+      "BuildName": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP]",
+      "Executable": "hummer_Master.elf",
+      "ExecutableSha256": "7DC6575D94334267020AF90E5D383D2BBE67D5D8DD09DA630F2F3D8B305141D4",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Hummer Extreme Edition (1.0)(2009-10-05)[Sega Lindbergh Yellow][TP].zip",
+      "SourceEntry": "data-global/shader/hdr.vert",
+      "SourceSize": 668,
+      "SourceSha1": "F7AB41A70D16D3746067DF6F2C38EFEDCBF95E9D",
+      "SourceSha256": "767D9E2EE29A7642DE3904FD5400A52DDAC13299F8721BCEFB6E602F0DB37E3E",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "data-global/shader/hdr.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "767D9E2EE29A7642DE3904FD5400A52DDAC13299F8721BCEFB6E602F0DB37E3E",
+          "Payload": "payload/data-global/shader/hdr.vert",
+          "PayloadSha256": "767D9E2EE29A7642DE3904FD5400A52DDAC13299F8721BCEFB6E602F0DB37E3E"
+        }
+      ]
+    },
+    {
+      "Id": "primevil-main-component-disk0-data-nnstdshader-nnstdshader-frag",
+      "ProfileId": "Primevil",
+      "BuildName": "Primeval Hunt (1.0)(2008)[Sega Lindbergh Red][TP]",
+      "Executable": "disk0/prog/main.exe",
+      "ExecutableSha256": "20500ABE11892EA47BB111A667BA0F617CBFF21BD45702D8347B5F4AEEDB7224",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Primeval Hunt (1.0)(2008)[Sega Lindbergh Red][TP].zip",
+      "SourceEntry": "disk0/data/nnstdshader/nnstdshader.frag",
+      "SourceSize": 53935,
+      "SourceSha1": "7939A11608ABC1A0E6F8FC1876D81E727868EC76",
+      "SourceSha256": "2CB5473563E0D74CFED694B712CD9D4A367303DA0A56F187F9979517F2DE3C80",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "disk0/data/nnstdshader/nnstdshader.frag",
+          "BeforeState": "Absent",
+          "AfterSha256": "2CB5473563E0D74CFED694B712CD9D4A367303DA0A56F187F9979517F2DE3C80",
+          "Payload": "payload/disk0/data/nnstdshader/nnstdshader.frag",
+          "PayloadSha256": "2CB5473563E0D74CFED694B712CD9D4A367303DA0A56F187F9979517F2DE3C80"
+        }
+      ]
+    },
+    {
+      "Id": "primevil-main-component-disk0-data-nnstdshader-nnstdshader-vert",
+      "ProfileId": "Primevil",
+      "BuildName": "Primeval Hunt (1.0)(2008)[Sega Lindbergh Red][TP]",
+      "Executable": "disk0/prog/main.exe",
+      "ExecutableSha256": "20500ABE11892EA47BB111A667BA0F617CBFF21BD45702D8347B5F4AEEDB7224",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Primeval Hunt (1.0)(2008)[Sega Lindbergh Red][TP].zip",
+      "SourceEntry": "disk0/data/nnstdshader/nnstdshader.vert",
+      "SourceSize": 65063,
+      "SourceSha1": "B4B867C48268B22E782AB5EDB463E1FA84F149E7",
+      "SourceSha256": "118E2C8D2D1555CDE663CC39421FCE525BB635EB8DE16DCE9CCAB2A5C910AEF8",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "disk0/data/nnstdshader/nnstdshader.vert",
+          "BeforeState": "Absent",
+          "AfterSha256": "118E2C8D2D1555CDE663CC39421FCE525BB635EB8DE16DCE9CCAB2A5C910AEF8",
+          "Payload": "payload/disk0/data/nnstdshader/nnstdshader.vert",
+          "PayloadSha256": "118E2C8D2D1555CDE663CC39421FCE525BB635EB8DE16DCE9CCAB2A5C910AEF8"
+        }
+      ]
+    },
+    {
+      "Id": "sb3-fmod64-main-restore",
+      "ProfileId": "SB3",
+      "BuildName": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills][TP]",
+      "Executable": "fnfmega.exe",
+      "ExecutableSha256": "7F84AE68A35587EA87312ED59247EB0379F00826B8F2473A09155792A90AEEAD",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "fnfmega_Data/Plugins/x86_64/fmod64.dll",
+      "SourceSize": 1755648,
+      "SourceSha1": "F062F4158722FC833D470DAF2BD7333AC003A958",
+      "SourceSha256": "E3508221439C073EC01391680D14125C7B72BB32280BDC0A90D980A2AE143FD2",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "fnfmega_Data/Plugins/x86_64/fmod64.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "E3508221439C073EC01391680D14125C7B72BB32280BDC0A90D980A2AE143FD2",
+          "Payload": "payload/fmod64.dll",
+          "PayloadSha256": "E3508221439C073EC01391680D14125C7B72BB32280BDC0A90D980A2AE143FD2"
+        }
+      ]
+    },
+    {
+      "Id": "sb3-fmodstudio64-main-restore",
+      "ProfileId": "SB3",
+      "BuildName": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills][TP]",
+      "Executable": "fnfmega.exe",
+      "ExecutableSha256": "7F84AE68A35587EA87312ED59247EB0379F00826B8F2473A09155792A90AEEAD",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "fnfmega_Data/Plugins/x86_64/fmodstudio64.dll",
+      "SourceSize": 1419264,
+      "SourceSha1": "A3A614C1EA5891FEEEA06EC86FD7BA1DA441C853",
+      "SourceSha256": "CFE1D74BB4EA8BFD842EE8CBCCB3FDE61F366AD0BB01AF59965CCF304425DBAB",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "fnfmega_Data/Plugins/x86_64/fmodstudio64.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "CFE1D74BB4EA8BFD842EE8CBCCB3FDE61F366AD0BB01AF59965CCF304425DBAB",
+          "Payload": "payload/fmodstudio64.dll",
+          "PayloadSha256": "CFE1D74BB4EA8BFD842EE8CBCCB3FDE61F366AD0BB01AF59965CCF304425DBAB"
+        }
+      ]
+    },
+    {
+      "Id": "infinity-blade-fx-matrix32-main-restore",
+      "ProfileId": "InfinityBladeFX",
+      "BuildName": "Infinity Blade FX (1.02)(2020)[Adrenaline PC][TP]",
+      "Executable": "Binaries/Win32/SwordGame.exe",
+      "ExecutableSha256": "8E605C3748C6D3D45832F40316C1FEC35D2507E31E51A5F85DCB3B664DA72D24",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Infinity Blade FX (1.02)(2020)[Adrenaline PC][TP].zip",
+      "SourceEntry": "Binaries/Win32/matrix32.dll",
+      "SourceSize": 109056,
+      "SourceSha1": "355E6F9557BAFC726694DC2E40820FF8429D61FB",
+      "SourceSha256": "CB25982F65A32E3D29B3F449BD8CCF2E4A4B47CA3096B454B6910341B213D547",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "infinity-original-matrix32",
+          "Type": "File",
+          "Path": "Binaries/Win32/matrix32.TEKNOPARROT.dll",
+          "Description": "Preserved original matrix32 file required by the authored fix procedure."
+        },
+        {
+          "Id": "infinity-tpfix-config",
+          "Type": "File",
+          "Path": "Binaries/Win32/TPFIX.ini",
+          "Description": "TPFIX.ini must be present; first-run path selection remains a user action."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "Binaries/Win32/matrix32.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "CB25982F65A32E3D29B3F449BD8CCF2E4A4B47CA3096B454B6910341B213D547",
+          "Payload": "payload/matrix32.dll",
+          "PayloadSha256": "CB25982F65A32E3D29B3F449BD8CCF2E4A4B47CA3096B454B6910341B213D547"
+        }
+      ]
+    },
+    {
+      "Id": "infinity-blade-fx-dinput8-main-restore",
+      "ProfileId": "InfinityBladeFX",
+      "BuildName": "Infinity Blade FX (1.02)(2020)[Adrenaline PC][TP]",
+      "Executable": "Binaries/Win32/SwordGame.exe",
+      "ExecutableSha256": "8E605C3748C6D3D45832F40316C1FEC35D2507E31E51A5F85DCB3B664DA72D24",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Infinity Blade FX (1.02)(2020)[Adrenaline PC][TP].zip",
+      "SourceEntry": "Binaries/Win32/dinput8.dll",
+      "SourceSize": 2058752,
+      "SourceSha1": "72E6862972409A4685545B21C0C687766F83DADC",
+      "SourceSha256": "E7E149EE9E8B64E23B739E236E5A61CAB7F2F56E632082993A95F05DE7D6CCB1",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "infinity-original-matrix32",
+          "Type": "File",
+          "Path": "Binaries/Win32/matrix32.TEKNOPARROT.dll",
+          "Description": "Preserved original matrix32 file required by the authored fix procedure."
+        },
+        {
+          "Id": "infinity-tpfix-config",
+          "Type": "File",
+          "Path": "Binaries/Win32/TPFIX.ini",
+          "Description": "TPFIX.ini must be present; first-run path selection remains a user action."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "Binaries/Win32/dinput8.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "E7E149EE9E8B64E23B739E236E5A61CAB7F2F56E632082993A95F05DE7D6CCB1",
+          "Payload": "payload/dinput8.dll",
+          "PayloadSha256": "E7E149EE9E8B64E23B739E236E5A61CAB7F2F56E632082993A95F05DE7D6CCB1"
+        }
+      ]
+    },
+    {
+      "Id": "maimai-green-freeglut-main-restore",
+      "ProfileId": "MaiMaiGreen",
+      "BuildName": "maimai GreeN (2013)[Sega RingEdge 2][TP]",
+      "Executable": "maimai/maimai_dump_.exe",
+      "ExecutableSha256": "B2027449C536FEE6853F3B72E28188AB47D36AAF8800FFDA30617B36D0031029",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "maimai GreeN (2013)[Sega RingEdge 2][TP].zip",
+      "SourceEntry": "maimai/freeglut.dll",
+      "SourceSize": 218624,
+      "SourceSha1": "C06C86B2D660C60DD9C57DEF62E7D9DB9960DE27",
+      "SourceSha256": "C0968C2D0D9DB9263304A7E0B86F41125A9642E20EA96741B9F75F15E424298E",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "maimai/freeglut.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "C0968C2D0D9DB9263304A7E0B86F41125A9642E20EA96741B9F75F15E424298E",
+          "Payload": "payload/freeglut.dll",
+          "PayloadSha256": "C0968C2D0D9DB9263304A7E0B86F41125A9642E20EA96741B9F75F15E424298E"
+        }
+      ]
+    },
+    {
+      "Id": "maimai-green-libcurl-main-restore",
+      "ProfileId": "MaiMaiGreen",
+      "BuildName": "maimai GreeN (2013)[Sega RingEdge 2][TP]",
+      "Executable": "maimai/maimai_dump_.exe",
+      "ExecutableSha256": "B2027449C536FEE6853F3B72E28188AB47D36AAF8800FFDA30617B36D0031029",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "maimai GreeN (2013)[Sega RingEdge 2][TP].zip",
+      "SourceEntry": "maimai/libcurl.dll",
+      "SourceSize": 325632,
+      "SourceSha1": "DEAD9B68373A54EF43E63BC10CD651CF8D320264",
+      "SourceSha256": "D86C6E191F0411DE94EA0724DE1C26E7EA58ED1564A6438006B111C07D05BEEE",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "maimai/libcurl.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "D86C6E191F0411DE94EA0724DE1C26E7EA58ED1564A6438006B111C07D05BEEE",
+          "Payload": "payload/libcurl.dll",
+          "PayloadSha256": "D86C6E191F0411DE94EA0724DE1C26E7EA58ED1564A6438006B111C07D05BEEE"
+        }
+      ]
+    },
+    {
+      "Id": "rabbids-hollywood-operator-main-restore",
+      "ProfileId": "RabbidsHollywood",
+      "BuildName": "Rabbids Hollywood (2018)[Adrenaline PC][TP]",
+      "Executable": "Game.exe",
+      "ExecutableSha256": "979F9736A99745454429908227CDD2F48875F193D439CFA33A9E14B4578DA95D",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Rabbids Hollywood (2018)[Adrenaline PC][TP].zip",
+      "SourceEntry": "RabbidsHollywood_Operator.exe",
+      "SourceSize": 503296,
+      "SourceSha1": "5B2046A677A426B56AF20F873305B52826FFD00F",
+      "SourceSha256": "B3622686EF6CE75F17805137857417B6F1B50A2AE962E979B20AAE67E69777B7",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "RabbidsHollywood_Operator.exe",
+          "BeforeState": "Absent",
+          "AfterSha256": "B3622686EF6CE75F17805137857417B6F1B50A2AE962E979B20AAE67E69777B7",
+          "Payload": "payload/RabbidsHollywood_Operator.exe",
+          "PayloadSha256": "B3622686EF6CE75F17805137857417B6F1B50A2AE962E979B20AAE67E69777B7"
+        }
+      ]
+    },
+    {
+      "Id": "shining-force-cross-raid-105-base-shader-restoration",
+      "ProfileId": "ShiningForceCrossRaid",
+      "BuildName": "Shining Force - Cross Raid (1.05 Ver A)(2011-08-03)(JPN)[Sega RingEdge][TP]",
+      "Executable": "project_f-ringedge-release.exe",
+      "ExecutableSha256": "82E66635A9A91CEC59721DB7BD9258464F70C44377BA707FFCB51EA2D3DB9317",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Shining Force - Cross Raid (1.05 Ver A)(2011-08-03)(JPN)[Sega RingEdge][TP].zip",
+      "SourceEntry": "rom/shader.farc",
+      "SourceSize": 9173328,
+      "SourceSha1": "04E0DCEC14CCA1B69BF190A7E02F2F0AB56E0231",
+      "SourceSha256": "66E0CC00E84C01F6E77E6B446A019212EBD27610FDD81CA866648C5E97E80933",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "rom/shader.farc",
+          "BeforeState": "Absent",
+          "AfterSha256": "66E0CC00E84C01F6E77E6B446A019212EBD27610FDD81CA866648C5E97E80933",
+          "Payload": "payload/rom/shader.farc",
+          "PayloadSha256": "66E0CC00E84C01F6E77E6B446A019212EBD27610FDD81CA866648C5E97E80933"
+        }
+      ]
+    },
+    {
+      "Id": "tmnt-orenvid-main-restore",
+      "ProfileId": "TMNT",
+      "BuildName": "Teenage Mutant Ninja Turtles (1.59)(2021-07-26)(USA)[Raw Thrills PC][TP]",
+      "Executable": "TMNT.exe",
+      "ExecutableSha256": "11AEDEEE2136DA3BF69392B5FE76818707BDD8E413AE99F829F394F8B80B295F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Teenage Mutant Ninja Turtles (1.59)(2021-07-26)(USA)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "TMNT_Data/Plugins/x86_64/OrenVid.dll",
+      "SourceSize": 90112,
+      "SourceSha1": "8219DDE96F5DDD78C2BD0A7656C100426D4F942D",
+      "SourceSha256": "17886C8A04342C254E8666596046D132DB0F63CEB047439F8EB3B5A35902E4AD",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "TMNT_Data/Plugins/x86_64/OrenVid.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "17886C8A04342C254E8666596046D132DB0F63CEB047439F8EB3B5A35902E4AD",
+          "Payload": "payload/OrenVid.dll",
+          "PayloadSha256": "17886C8A04342C254E8666596046D132DB0F63CEB047439F8EB3B5A35902E4AD"
+        }
+      ]
+    },
+    {
+      "Id": "tmnt-pk-unityplugin-main-restore",
+      "ProfileId": "TMNT",
+      "BuildName": "Teenage Mutant Ninja Turtles (1.59)(2021-07-26)(USA)[Raw Thrills PC][TP]",
+      "Executable": "TMNT.exe",
+      "ExecutableSha256": "11AEDEEE2136DA3BF69392B5FE76818707BDD8E413AE99F829F394F8B80B295F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Teenage Mutant Ninja Turtles (1.59)(2021-07-26)(USA)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "TMNT_Data/Plugins/x86_64/PK-UnityPlugin.dll",
+      "SourceSize": 16210432,
+      "SourceSha1": "0254401B2AD3623AA16BF2B2CFD408991084FE80",
+      "SourceSha256": "CDC95711BCF10B097A30D4B09F7A304980DABA5000F3813555A80A71ABF04238",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "TMNT_Data/Plugins/x86_64/PK-UnityPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "CDC95711BCF10B097A30D4B09F7A304980DABA5000F3813555A80A71ABF04238",
+          "Payload": "payload/PK-UnityPlugin.dll",
+          "PayloadSha256": "CDC95711BCF10B097A30D4B09F7A304980DABA5000F3813555A80A71ABF04238"
+        }
+      ]
+    },
+    {
+      "Id": "kof-mi-reg-a-main-d3d8-restore",
+      "ProfileId": "KingofFightersMaximumImpactRegulationA",
+      "BuildName": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "CC40C926E19F17DD373C87A3D83120CB6C22C2F3CA9B492E28A6178813F6256F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP].zip",
+      "SourceEntry": "d3d8.dll",
+      "SourceSize": 286015,
+      "SourceSha1": "55542B7AB1B628FC2D7057A5FBE3B9048383F9A5",
+      "SourceSha256": "33B625B818B450203A4FCA0CC6068B722434535B94615FF3077239079866B115",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "d3d8.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "33B625B818B450203A4FCA0CC6068B722434535B94615FF3077239079866B115",
+          "Payload": "payload/d3d8.dll",
+          "PayloadSha256": "33B625B818B450203A4FCA0CC6068B722434535B94615FF3077239079866B115"
+        }
+      ]
+    },
+    {
+      "Id": "kof-mi-reg-a-main-d3d9-restore",
+      "ProfileId": "KingofFightersMaximumImpactRegulationA",
+      "BuildName": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "CC40C926E19F17DD373C87A3D83120CB6C22C2F3CA9B492E28A6178813F6256F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP].zip",
+      "SourceEntry": "d3d9.dll",
+      "SourceSize": 381363,
+      "SourceSha1": "BB46749FA47DA8A79A21171B1A93E9CA7F06E75C",
+      "SourceSha256": "A7FBE8B9AC236CE657E966925C5C7A8C1F0B5AA19011C1B983508CC07B3D7F13",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "d3d9.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "A7FBE8B9AC236CE657E966925C5C7A8C1F0B5AA19011C1B983508CC07B3D7F13",
+          "Payload": "payload/d3d9.dll",
+          "PayloadSha256": "A7FBE8B9AC236CE657E966925C5C7A8C1F0B5AA19011C1B983508CC07B3D7F13"
+        }
+      ]
+    },
+    {
+      "Id": "kof-mi-reg-a-main-ddraw-restore",
+      "ProfileId": "KingofFightersMaximumImpactRegulationA",
+      "BuildName": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "CC40C926E19F17DD373C87A3D83120CB6C22C2F3CA9B492E28A6178813F6256F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP].zip",
+      "SourceEntry": "ddraw.dll",
+      "SourceSize": 928562,
+      "SourceSha1": "7C6B0D12A06830C184726440AEEBDFA8A3D90F4C",
+      "SourceSha256": "BD7E1717B82E33046C0E2CF9A402E55630F3EE3B3299892FA82684B2F7E8D0B3",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "ddraw.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "BD7E1717B82E33046C0E2CF9A402E55630F3EE3B3299892FA82684B2F7E8D0B3",
+          "Payload": "payload/ddraw.dll",
+          "PayloadSha256": "BD7E1717B82E33046C0E2CF9A402E55630F3EE3B3299892FA82684B2F7E8D0B3"
+        }
+      ]
+    },
+    {
+      "Id": "kof-mi-reg-a-main-wined3d-restore",
+      "ProfileId": "KingofFightersMaximumImpactRegulationA",
+      "BuildName": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "CC40C926E19F17DD373C87A3D83120CB6C22C2F3CA9B492E28A6178813F6256F",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "King of Fighters Maximum Impact Regulation A (2007)[Taito Type X2][TP].zip",
+      "SourceEntry": "wined3d.dll",
+      "SourceSize": 4145581,
+      "SourceSha1": "3C592F1C9956709359B50FBAD7C31F88010E7B50",
+      "SourceSha256": "5F74F2BB715BFAA9A94127CD830050FDA15D34C02047633053C35D85D5469926",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "wined3d.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "5F74F2BB715BFAA9A94127CD830050FDA15D34C02047633053C35D85D5469926",
+          "Payload": "payload/wined3d.dll",
+          "PayloadSha256": "5F74F2BB715BFAA9A94127CD830050FDA15D34C02047633053C35D85D5469926"
+        }
+      ]
+    },
+    {
+      "Id": "mkdxusa106-main-d3d11ref-restore",
+      "ProfileId": "MKDXUSA106",
+      "BuildName": "Mario Kart Arcade GP DX (1.06.35-OF)(2022-08-01)(USA)[Namco ES3A][TP]",
+      "Executable": "MK_AGP3_FINAL.exe",
+      "ExecutableSha256": "2E6CF156B30C079F82EF279B8C0D55CC46386A76E52D73F3582062CF820F0076",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Mario Kart Arcade GP DX (1.06.35-OF)(2022-08-01)(USA)[Namco ES3A][TP].zip",
+      "SourceEntry": "D3D11Ref.dll",
+      "SourceSize": 525144,
+      "SourceSha1": "01338F329BFADC339F4A402AABB29DE50521F32F",
+      "SourceSha256": "6335BD1F8A137C6A6696878C67652D1C75551C858E589559DFAFA15A5E54C8C3",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "D3D11Ref.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "6335BD1F8A137C6A6696878C67652D1C75551C858E589559DFAFA15A5E54C8C3",
+          "Payload": "payload/D3D11Ref.dll",
+          "PayloadSha256": "6335BD1F8A137C6A6696878C67652D1C75551C858E589559DFAFA15A5E54C8C3"
+        }
+      ]
+    },
+    {
+      "Id": "gashaaaan2-jurassic-libogg-create",
+      "ProfileId": "Gashaaaan2",
+      "BuildName": "Gashaaaan Refill! (2009-02-24)(JPN)[Konami PC][TP]",
+      "Executable": "IG2/exec_root/gasya.exe",
+      "ExecutableSha256": "67BDEBF22D64E997A59423EC68A36CF234F0060B4FB32BAFBCE6E5A6C2D5FEB6",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Jurassic Park (1.08)(2015)[Raw Thrills Linux PC][TP].zip",
+      "SourceEntry": "libogg.dll",
+      "SourceSize": 21504,
+      "SourceSha1": "DE9DB7F730A0B8273FE2D3ADB3AC6C56510C8972",
+      "SourceSha256": "E6B423A237ED5C1E2503F1B3E48855061A74343BDD8BBDB5DAD004C234513328",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "IG2/exec_root/libogg.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "E6B423A237ED5C1E2503F1B3E48855061A74343BDD8BBDB5DAD004C234513328",
+          "Payload": "payload/libogg.dll",
+          "PayloadSha256": "E6B423A237ED5C1E2503F1B3E48855061A74343BDD8BBDB5DAD004C234513328"
+        }
+      ]
+    },
+    {
+      "Id": "gashaaaan2-jurassic-libvorbis-create",
+      "ProfileId": "Gashaaaan2",
+      "BuildName": "Gashaaaan Refill! (2009-02-24)(JPN)[Konami PC][TP]",
+      "Executable": "IG2/exec_root/gasya.exe",
+      "ExecutableSha256": "67BDEBF22D64E997A59423EC68A36CF234F0060B4FB32BAFBCE6E5A6C2D5FEB6",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Jurassic Park (1.08)(2015)[Raw Thrills Linux PC][TP].zip",
+      "SourceEntry": "libvorbis.dll",
+      "SourceSize": 667648,
+      "SourceSha1": "1537A1D208F2C5DC756B394393C9A3C77E962D95",
+      "SourceSha256": "971A471C5A7710BBFDAAA62D7A31EBC094B359FD374D015B602679E7CFEEAD69",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "IG2/exec_root/libvorbis.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "971A471C5A7710BBFDAAA62D7A31EBC094B359FD374D015B602679E7CFEEAD69",
+          "Payload": "payload/libvorbis.dll",
+          "PayloadSha256": "971A471C5A7710BBFDAAA62D7A31EBC094B359FD374D015B602679E7CFEEAD69"
+        }
+      ]
+    },
+    {
+      "Id": "gashaaaan2-jurassic-libvorbisfile-create",
+      "ProfileId": "Gashaaaan2",
+      "BuildName": "Gashaaaan Refill! (2009-02-24)(JPN)[Konami PC][TP]",
+      "Executable": "IG2/exec_root/gasya.exe",
+      "ExecutableSha256": "67BDEBF22D64E997A59423EC68A36CF234F0060B4FB32BAFBCE6E5A6C2D5FEB6",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Jurassic Park (1.08)(2015)[Raw Thrills Linux PC][TP].zip",
+      "SourceEntry": "libvorbisfile.dll",
+      "SourceSize": 33792,
+      "SourceSha1": "AE4F5F737532CE4774332733889BD62FF71BE596",
+      "SourceSha256": "76E8A51A1E2F9FFC42D00A53F1214D4653B13182BDD30A154BBB9AE2853A8B97",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "IG2/exec_root/libvorbisfile.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "76E8A51A1E2F9FFC42D00A53F1214D4653B13182BDD30A154BBB9AE2853A8B97",
+          "Payload": "payload/libvorbisfile.dll",
+          "PayloadSha256": "76E8A51A1E2F9FFC42D00A53F1214D4653B13182BDD30A154BBB9AE2853A8B97"
+        }
+      ]
+    }
+  ]
+}

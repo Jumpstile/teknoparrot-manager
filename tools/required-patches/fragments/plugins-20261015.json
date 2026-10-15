@@ -1,0 +1,240 @@
+{
+  "Schema": "TPM.RequiredPatch.ManagedPluginFragment.v1",
+  "BaseCatalog": {
+    "Schema": 3,
+    "EntryCount": 13,
+    "Sha256": "7B190D234667BE3059C7950659421EB810EB80C51C2E4B520B79B9CBC97F934D"
+  },
+  "Entries": [
+    {
+      "Id": "mars-sortie-bepinex-plugin-restore",
+      "ProfileId": "MarsSortie",
+      "BuildName": "Mars Sortie (1.46.9)(2018)[UDC PC][TP]",
+      "Executable": "Shooter.exe",
+      "ExecutableSha256": "08541DCD067D7BB3BBE42BEAF2F1B5224C762FC347B71FC7A7308D7430384372",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "UserSelected",
+      "SourceSet": "Mars Sortie (1.46.9) - TPPlugin_v1.2.zip",
+      "SourceEntry": "MSTPPlugin.dll",
+      "SourceSize": 21504,
+      "SourceSha1": "0BF44248A5402E51544BDD9493B469BEA3727011",
+      "SourceSha256": "3CCABD105D603EAAA7EE3CD5F7194DEBD179CC30B701113DBC5C6B564FDB1783",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/MSTPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "3CCABD105D603EAAA7EE3CD5F7194DEBD179CC30B701113DBC5C6B564FDB1783",
+          "Payload": "payload/MSTPPlugin.dll",
+          "PayloadSha256": "3CCABD105D603EAAA7EE3CD5F7194DEBD179CC30B701113DBC5C6B564FDB1783"
+        }
+      ]
+    },
+    {
+      "Id": "rabbids-hollywood-bepinex-operator-plugin-restore",
+      "ProfileId": "RabbidsHollywood",
+      "BuildName": "Rabbids Hollywood (2018)[Adrenaline PC][TP]",
+      "Executable": "Game.exe",
+      "ExecutableSha256": "979F9736A99745454429908227CDD2F48875F193D439CFA33A9E14B4578DA95D",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "UserSelected",
+      "SourceSet": "Rabbids Hollywood (2018) - BepInEx Operator Configuration Pack.zip",
+      "SourceEntry": "BepInEx/plugins/UnityPlugin_BepInEx_RHA.dll",
+      "SourceSize": 15360,
+      "SourceSha1": "25F9142BC4CDC364A5D2348606D0C513C86C9610",
+      "SourceSha256": "C3DEDA497E160652A1F0D3D99892A4F534A88D61358DBA5192003FF519D5E8EB",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/UnityPlugin_BepInEx_RHA.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "C3DEDA497E160652A1F0D3D99892A4F534A88D61358DBA5192003FF519D5E8EB",
+          "Payload": "payload/UnityPlugin_BepInEx_RHA.dll",
+          "PayloadSha256": "C3DEDA497E160652A1F0D3D99892A4F534A88D61358DBA5192003FF519D5E8EB"
+        }
+      ]
+    }
+  ],
+  "Census": [
+    {
+      "ProfileId": "FamilyGuyBowling",
+      "Disposition": "AlreadyImplemented",
+      "GuideBuild": "Family Guy Bowling (1.15)(2017)(USA)[Team Play PC][TP]",
+      "ExistingRecipeId": "family-guy-bowling-bepinex-plugin"
+    },
+    {
+      "ProfileId": "NERF",
+      "Disposition": "AlreadyImplemented",
+      "GuideBuild": "NERF Arcade (1.55)(2024-08-23)[Raw Thrills PC][TP]",
+      "ExistingRecipeId": "nerf-arcade-bepinex-plugin-restore",
+      "SeparateReference": "PK-UnityPlugin.dll is present in the guide Main set and is only required when General - GraphicsFix is enabled; no duplicate recipe added."
+    },
+    {
+      "ProfileId": "RainbowBombergirl",
+      "Disposition": "AlreadyImplemented",
+      "GuideBuild": "Rainbow BomberGirl (2022-12-15)(JPN)[Konami PC][TP]",
+      "ExistingRecipeId": "rainbow-bombergirl-bepinex-plugin-restore"
+    },
+    {
+      "ProfileId": "TMNT",
+      "Disposition": "AlreadyImplemented",
+      "GuideBuild": "Teenage Mutant Ninja Turtles (1.59)(2021-07-26)(USA)[Raw Thrills PC][TP]",
+      "ExistingRecipeId": "tmnt-bepinex-plugin-restore",
+      "SeparateReference": "OrenVid.dll and PK-UnityPlugin.dll are guide Main-set support assemblies for GraphicsFix; no duplicate recipe added."
+    },
+    {
+      "ProfileId": "MarsSortie",
+      "Disposition": "RecipeInFragment",
+      "GuideSourcePath": "[526]",
+      "GuideBuild": "Mars Sortie (1.46.9)(2018)[UDC PC][TP]",
+      "GuideExecutable": "Shooter.exe",
+      "OfficialProfileSha256": "60CC166D72EDB7CF2E7A3B059E44EACC6DBB88693FDA3CAFB6C3D5F5A19F1417",
+      "MainExecutableSha256": "08541DCD067D7BB3BBE42BEAF2F1B5224C762FC347B71FC7A7308D7430384372",
+      "MainMemberState": {
+        "BepInEx/core/BepInEx.dll": {
+          "State": "Present",
+          "Size": 127488,
+          "Sha256": "C65B42034BC8FFB9F0B336E416DC3884E3F99FC5A5A89EB1F2FF7868412322CD"
+        },
+        "BepInEx/plugins/MSTPPlugin.dll": {
+          "State": "Absent"
+        },
+        "BepInEx/config/BepInEx.cfg": {
+          "State": "Absent"
+        }
+      },
+      "OriginalSource": {
+        "Path": "MarsSortie_TPPlugin_v1.2.zip",
+        "Sha256": "A200D0322C78C4B415C2EECE5E14CC200AFD92437B8432D310AFAF9056895FA4",
+        "Size": 8166,
+        "OriginalMemberCompressionMethod": 93
+      },
+      "ConvertedSource": {
+        "Path": "Mars Sortie (1.46.9) - TPPlugin_v1.2.zip",
+        "Sha256": "9572836906659DFCCF07FCDAD373D247FA0967B2A1B6D6A97482B737B472DBC6",
+        "Size": 8792,
+        "Member": "MSTPPlugin.dll",
+        "MemberSize": 21504,
+        "MemberSha256": "3CCABD105D603EAAA7EE3CD5F7194DEBD179CC30B701113DBC5C6B564FDB1783",
+        "IdentityVerifiedAgainstConvertedArchiveReceipt": true
+      },
+      "EvidenceSources": [
+        "Plugin-Exact-Main-And-Profile-20261015.raw.txt",
+        "Plugin-Main-Prerequisite-Members-20261015.raw.txt",
+        "SOURCE-SCOPED-PATCH-INVENTORY.json",
+        "deduplicated-manifest.json"
+      ],
+      "RuntimeStatus": "NotRun; source recipe evidence only."
+    },
+    {
+      "ProfileId": "SB3",
+      "Disposition": "HeldProfileBindingUnresolved",
+      "GuideSourcePath": "[906]",
+      "GuideBuild": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills][TP]",
+      "GuideExecutable": "fnfmega.exe",
+      "MainArchive": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills PC][TP].zip",
+      "MainExecutableSha256": "7F84AE68A35587EA87312ED59247EB0379F00826B8F2473A09155792A90AEEAD",
+      "MainMemberState": {
+        "BepInEx/core/BepInEx.dll": {
+          "State": "Present",
+          "Size": 128000,
+          "Sha256": "9FE4A88D4F949FCDB3222A05C1902FEC94F99655501E5EB60408543492CE9884"
+        },
+        "BepInEx/plugins/SB3TPPlugin.dll": {
+          "State": "Present",
+          "Size": 121856,
+          "Sha256": "9E8464FD54F272398CDE3E2AACB2D5F6D8508A2F90C3E7D7793166016BFFF3D5"
+        },
+        "BepInEx/config/BepInEx.cfg": {
+          "State": "Absent"
+        }
+      },
+      "SourceCandidate": {
+        "OriginalName": "SB3_TPPlugin_v1.09 x64.zip",
+        "OriginalSha256": "618EE8C44BAAF48C58BF01128585F1C2F34B06A7C9309403C30E60A764ADA92B",
+        "ConvertedArchiveName": "Super Bikes 3 (1.91 x64) - TPPlugin_v1.09 x64.zip",
+        "ConvertedArchiveSha256": "1AF61E899DB36F7E96C804CBCFFA0DCB990B5804657F189D885C781C85BC5556",
+        "Member": "SB3TPPlugin.dll",
+        "MemberSize": 121856,
+        "MemberSha256": "9E8464FD54F272398CDE3E2AACB2D5F6D8508A2F90C3E7D7793166016BFFF3D5",
+        "CanonicalGameSetIdentity": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills][TP]"
+      },
+      "OfficialProfileResolution": "No official GameProfiles XML declares fnfmega.exe; no SB3/Super/Bike profile is found. FNFSB.xml declares sdaemon.exe, so it is not evidence for this game. The guide's SB3 code is not inferred as an official profile ID.",
+      "Decision": "Main and source candidate have the same plugin SHA-256, but absence-only restoration still needs exact supported-profile binding. Hold without a recipe until the exact official profile/archive alternative is evidenced."
+    },
+    {
+      "ProfileId": "MIB",
+      "Disposition": "NotARequiredPatch",
+      "GuideSourcePath": "[539]",
+      "HoldReason": "The guide says external BepInEx work might be needed for a currently broken test menu but identifies no plugin, exact target, or established required fix."
+    },
+    {
+      "ProfileId": "RabbidsHollywood",
+      "Disposition": "RecipeInFragment",
+      "GuideSourcePath": "[702]",
+      "GuideBuild": "Rabbids Hollywood (2018)[Adrenaline PC][TP]",
+      "MainArchive": "Rabbids Hollywood (2018)[Adrenaline PC][TP].zip",
+      "MainArchiveSize": 771979251,
+      "MainArchiveSha256": "8C7B17AFA7BBDFE81636269A653F720E45AA0A8D657881883352694C94E4160E",
+      "OfficialProfile": "GameProfiles/RabbidsHollywood.xml",
+      "OfficialProfileSha256": "997AC3E109C564BF2BA196915D050FBCE0D768E648810143C8B4BAB16D95A6CC",
+      "MainExecutable": "Game.exe",
+      "MainExecutableSha256": "979F9736A99745454429908227CDD2F48875F193D439CFA33A9E14B4578DA95D",
+      "MainBepInExCore": {
+        "Member": "BepInEx/core/BepInEx.dll",
+        "Size": 127488,
+        "Sha256": "C65B42034BC8FFB9F0B336E416DC3884E3F99FC5A5A89EB1F2FF7868412322CD"
+      },
+      "Plugin": {
+        "RecipeId": "rabbids-hollywood-bepinex-operator-plugin-restore",
+        "Member": "BepInEx/plugins/UnityPlugin_BepInEx_RHA.dll",
+        "Size": 15360,
+        "Sha1": "25F9142BC4CDC364A5D2348606D0C513C86C9610",
+        "Sha256": "C3DEDA497E160652A1F0D3D99892A4F534A88D61358DBA5192003FF519D5E8EB",
+        "MainState": "Present with identical hash; absent-only recipe restores the supported plugin if missing from the managed install.",
+        "SourceSet": "Rabbids Hollywood (2018) - BepInEx Operator Configuration Pack.zip",
+        "SourceArchiveSha256": "B3050D5E55DE5F52CB9998D91EC6E71878BD4925AB3BE6AADEE77B23B265EA0E"
+      },
+      "TriggerCrosshairsAssembly": {
+        "Member": "Game_Data/Managed/Assembly-CSharp.dll",
+        "Size": 1592320,
+        "Sha256": "BEA584D3EDF5DA73DBFACAFA5E73B1260B3F18CE7E346AB1BEACD8E885559764",
+        "ExistingRecipeId": "rabbids-hollywood-trigger-crosshairs-restore"
+      },
+      "Decision": "The operator plugin is separately restored absent-only. The trigger/crosshairs Assembly-CSharp fix is already covered by the exact-build existing recipe. Do not install the whole operator pack: it includes a registry/config utility and BepInEx core binaries that differ from Main."
+    },
+    {
+      "ProfileId": "FantasySoccer",
+      "Disposition": "NotPluginEvidence",
+      "GuideSourcePath": "[264]",
+      "HoldReason": "Guide notes only an antivirus warning and runtime crash; no managed plugin/support-assembly requirement is named."
+    }
+  ],
+  "CensusSource": {
+    "GuideEntries": "guide-entries.json",
+    "PartialCoverageLedger": "Curated-Guide-95-Component-Coverage-20261015-v4-BBCP-delta.json",
+    "SourceInventory": "SOURCE-SCOPED-PATCH-INVENTORY.json",
+    "SourceIdentityIndex": "all-source-file-identities.json"
+  },
+  "IntegrationBoundary": "Lane fragment only. Do not copy into the central catalog until the parent independently accepts the exact metadata and integration boundary."
+}

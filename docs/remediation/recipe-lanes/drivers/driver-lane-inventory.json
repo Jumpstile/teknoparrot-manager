@@ -1,0 +1,177 @@
+{
+  "InventorySchemaVersion": 1,
+  "OwnerContractId": "TPM-RC8-DRIVERS-LANE-001",
+  "Scope": "Assigned driver component requirements only; global guide coverage remains parent-owned.",
+  "ExistingCovered": [
+    {
+      "ProfileId": "BlazBlueContinuumShift",
+      "Requirement": "iDmacDrv32.dll CRC BCB0E7FE",
+      "Disposition": "existing-recipe-excluded",
+      "RecipeAction": "Do not duplicate or change the existing recipe in this lane."
+    },
+    {
+      "ProfileId": "BlazBlueContinuumShift2",
+      "Requirement": "iDmacDrv32.dll CRC BCB0E7FE",
+      "Disposition": "existing-recipe-excluded",
+      "RecipeAction": "Do not duplicate or change the existing recipe in this lane."
+    },
+    {
+      "ProfileId": "BlazBlueCrossTagBattle",
+      "Requirement": "iDmacDrv32.dll CRC BCB0E7FE",
+      "Disposition": "existing-recipe-excluded",
+      "RecipeAction": "Do not duplicate or change the existing recipe in this lane."
+    },
+    {
+      "ProfileId": "BBCF",
+      "Requirement": "iDmacDrv32.dll CRC F1FF8CC9",
+      "Disposition": "existing-recipe-excluded",
+      "RecipeAction": "Do not duplicate or change the existing recipe in this lane."
+    },
+    {
+      "ProfileId": "BBCP",
+      "Requirement": "iDmacDrv32.dll CRC F1FF8CC9",
+      "Disposition": "existing-replacement-recipe-excluded",
+      "RecipeAction": "Do not duplicate or change the existing replacement recipe in this lane."
+    }
+  ],
+  "SafeAbsentOnlyCandidates": [
+    {
+      "ProfileId": "TaisenHotGimmick5",
+      "GuideBuild": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP]",
+      "GuideExecutable": "game.exe",
+      "ExecutableSha256": "144875cc9d0dc66887cd6292dcb949c0575afb654b0da8bf173fef7047c7d86a",
+      "SourceRole": "Main",
+      "SourceSet": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip",
+      "CreateFileTargets": [
+        {
+          "Name": "TTX-Monitor.dll",
+          "Size": 147456,
+          "Sha1": "201bacc01d57497690d35741e70940237e424f04",
+          "Sha256": "a706a9dbebb3e6d4511d47341d4a46d1f9965874adba4354a127797855fdfa44",
+          "RecipeId": "taisen-hot-gimmick-5-ttx-monitor-dll-restore"
+        },
+        {
+          "Name": "TTX-Config.exe",
+          "Size": 270848,
+          "Sha1": "00cf036a2456a4bf5bd15128269a5cd64f0ef3d9",
+          "Sha256": "f6979167410af3c6ece2420e15205c54eb86663b74c27aa2e1cd05287efb8b64",
+          "RecipeId": "taisen-hot-gimmick-5-ttx-config-restore"
+        },
+        {
+          "Name": "TTX-Loader.exe",
+          "Size": 11264,
+          "Sha1": "4b9b7174f46571a49eab6531a7577a062749e51c",
+          "Sha256": "2e270dde1ff0f86326a4bfcc84eb359a0231118dc03d9130526750e3d175ca3c",
+          "RecipeId": "taisen-hot-gimmick-5-ttx-loader-restore"
+        }
+      ],
+      "BeforeState": "Absent",
+      "SourceSpecificEvidence": [
+        "Exact guide-named Main ZIP game.exe and three loader members were streamed read-only and pinned by SHA-256.",
+        "The three loader/config member hashes match the cached TTX-Monitor v20201014 author release receipt.",
+        "The Main ZIP readme directs the operator to configure/save keyboard keys with TTX-Config.exe, then run TTX-Loader.exe.",
+        "monitor_input.bin and monitor_misc.bin are bundled configuration files; they are not recipe targets, preserving user-selected key configuration.",
+        "The TTX-Monitor v20201014 release notes identify DirectInput libraries as a Linux/Wine requirement; this Windows lane does not add those assemblies."
+      ],
+      "IntegrationNote": "Three separate single-member absent-only CreateFile entries restore bundled TTX programs only. They do not perform keyboard setup, select monitor configuration, start the game, or establish gameplay compatibility."
+    }
+  ],
+  "Held": [
+    {
+      "ProfileId": "DragonDanceNesica",
+      "Requirement": "iDmacDrv32.dll retained beside ddraw.dll in the game folder",
+      "Disposition": "held-guide-executable-does-not-match-main-build",
+      "CheckedSources": [
+        {
+          "Source": "Dragon Dance (2011)[Taito NESiCAxLive][TP].zip",
+          "Member": "game_liong.exe",
+          "Size": 4005376,
+          "Crc32": "E35694FF",
+          "Sha256": "67616b1a816013ee5ff96eeee92f9e3032b3c97fa2907e222c4e116027bc70fc",
+          "Result": "Guide note says the newer executable CRC is B2836DB7; this Main build does not match."
+        },
+        {
+          "Source": "Dragon Dance (2011)[Taito NESiCAxLive][TP].zip",
+          "Member": "iDmacDrv32.dll",
+          "Size": 75776,
+          "Crc32": "55E1A010",
+          "Sha256": "cfd3bf5497348a168d68ecaf297f0387dfd24d8e5259f6e85caff1941a2bcc11",
+          "Result": "Exact Main bytes are pinned but not bound to the guide-named executable build."
+        },
+        {
+          "Source": "Dragon Dance (NESiCA) patch child",
+          "Checked": "dinput8.zip contains dinput8.dll only; no matching executable or iDmac member."
+        }
+      ],
+      "NextAutonomousStep": "Find a trusted read-only archive matching guide CRC B2836DB7, then verify exact executable SHA-256 and matching iDmac member bytes before considering an absent-only recipe."
+    },
+    {
+      "ProfileId": "Primevil",
+      "Requirement": "Two Lindbergh .so loader libraries copied to TeknoParrot/ElfLdr2/libs",
+      "Disposition": "held-source-and-external-target-unresolved",
+      "CheckedSources": [
+        {
+          "Source": "Primeval Hunt (1.0)(2008)[Sega Lindbergh Red][TP].zip",
+          "ExecutableMember": "disk0/prog/main.exe",
+          "ExecutableSha256": "20500abe11892ea47bb111a667ba0f617cbff21bd45702d8347b5f4aeedb7224",
+          "DriverMemberCheck": "No /data/dvr/cri/Lindbergh/libs/*.so member found."
+        }
+      ],
+      "NextAutonomousStep": "Parent/engine owner to identify a trusted exact source for the two loader libraries and decide whether the external TeknoParrot installation target can be supported safely. Do not infer file names or target semantics."
+    }
+  ],
+  "CheckedNoDriverRequirement": [
+    {
+      "ProfileId": "ShiningForceCrossRaid",
+      "GuideBuild": "Shining Force - Cross Raid (1.05 Ver A)(2011-08-03)(JPN)[Sega RingEdge][TP]",
+      "Disposition": "checked-full-guide-card-is-not-driver-requirement",
+      "Evidence": "The full-guide notes cover IC-card save/setup and input remapping. No iDmac, JVS, NESiCA, Taito I/O, or loader package requirement appears. Do not create a Cross Raid recipe based on the word Cross."
+    }
+  ],
+  "OutOfLaneOrNonRecipeNotes": [
+    {
+      "ProfileId": "DragonDanceNesica",
+      "GuideNote": "DDrawCompat/audio startup workaround and window handling are native/audio behavior; only its separate iDmac file mention is counted in this lane.",
+      "Disposition": "native-audio-lane owns non-driver fix"
+    },
+    {
+      "ProfileId": "Akuma",
+      "GuideNote": "I/O board emulation is described as part of the game's existing patch, not a separate driver package.",
+      "Disposition": "game/content behavior; no driver recipe"
+    },
+    {
+      "ProfileId": "Persona4A",
+      "GuideNote": "NESYS availability behavior; no driver payload or byte-level installation requirement.",
+      "Disposition": "behavior note only"
+    },
+    {
+      "ProfileId": "SpaceInvaders",
+      "GuideNote": "MTS/NESYS and monitor behavior; no driver payload or byte-level installation requirement.",
+      "Disposition": "behavior note only"
+    },
+    {
+      "ProfileId": "SuperStreetFighterIVArcadeEdition",
+      "GuideNote": "NESYS/save limitation; no driver payload or byte-level installation requirement.",
+      "Disposition": "behavior note only"
+    },
+    {
+      "ProfileId": "Guide-wide DirectInput settings",
+      "GuideNote": "Ordinary controller/backend choices, not named driver binaries or loader installation requirements.",
+      "Disposition": "not a driver-package recipe"
+    }
+  ],
+  "DriverFamilyCensus": {
+    "FullGuideCardCount": 1888,
+    "DirectRequirementProfileCount": 8,
+    "RequirementProfilesByFamily": {
+      "iDmac": 6,
+      "TTX-JVS-loader": 1,
+      "Lindbergh-loader": 1
+    },
+    "ExistingCoveredProfiles": 5,
+    "NewRecipeEntryCount": 3,
+    "HeldRequirementProfiles": 2,
+    "CrossRaidDriverRequirement": false,
+    "CoverageStatement": "Lane census only; parent owns global guide coverage. Profile, requirement, and recipe-entry counts are distinct and do not imply runtime or gameplay completeness."
+  }
+}

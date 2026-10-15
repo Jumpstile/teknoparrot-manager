@@ -1,5 +1,6 @@
 #Requires -Module Pester
 BeforeAll {
+ Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Contracts.psm1') -Force
  $modulePath=Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Shadow.psm1'
  Import-Module $modulePath -Force
  Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Execution.psm1') -Force
@@ -183,6 +184,8 @@ Describe 'ECVF: Get-TPMShadowEmulatorContractVerificationV1 (informational, gene
    New-Item -ItemType Directory -Path $dir -Force|Out-Null
    [IO.File]::WriteAllText((Join-Path $dir 'contract.json'),($contract|ConvertTo-Json -Depth 12))
    [IO.File]::WriteAllText((Join-Path $dir 'evidence.md'),"# fixture`n`n### ev-1`nfixture`n")
+   $projection=Get-TPMSourceEvidenceProjectionV1 -ContractPath (Join-Path $dir 'contract.json') -ContractDirectory $dir
+   [IO.File]::WriteAllText((Join-Path $dir 'runtime-evidence-index.json'),$projection.Json,(New-Object System.Text.UTF8Encoding($false)))
    return $dir
   }
  }

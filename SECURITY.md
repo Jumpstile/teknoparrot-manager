@@ -4,9 +4,9 @@ This file documents this project's threat model and the sanitization
 invariants that follow from it. It is the canonical reference for "why is
 this input treated as untrusted" questions raised in code comments.
 
-Current release state: v1.0 RC7 is the current published release; RC8 is the
-candidate being prepared and is not published; v1.0 RC6 is the previous
-published release (historical); final Version 1.0 remains unpublished.
+Current release state: v1.0 RC7 is the current published release; RC8 is
+the unpublished candidate under review; v1.0 RC6 is the previous published
+release (historical); final Version 1.0 remains unpublished.
 
 ## Threat model: live-fetched and externally-sourced values are untrusted input
 
@@ -17,6 +17,28 @@ from a third-party file or API response -- is treated as attacker-
 controllable, even though in practice it usually comes from a trusted
 maintainer's repo. The script never assumes a well-formed value just
 because the source is normally trustworthy.
+
+## Update candidate identity boundary
+
+Downloaded manager scripts are parsed with the PowerShell AST; candidate
+content is never executed to determine its version. The only accepted release
+identity is one bare, unwrapped, unscoped root `EndBlock` `$ScriptVersion =`
+assignment with a direct constant-string RHS, and zero or one equivalent
+`$ReleaseCandidateLabel` assignment. The parsers reject other statically
+identifiable writes to either protected name: assignment/destructuring targets,
+attributed or cast targets, transparent parenthesized targets, member/index
+lvalue roots, `++`/`--`, `foreach` variables, root-script parameters, and named
+data-statement variables. They do not misclassify function-local parameters as
+root identity declarations. Parse errors, duplicates, scoped/nested writes,
+and unsupported declaration shapes fail closed.
+
+This is a finite static-write contract, not a PowerShell sandbox or complete
+data-flow proof. It does not detect every possible indirect mutation, including
+`Set-Variable` and variable-provider writes, `-OutVariable`, `[ref]`, .NET or
+session-state APIs, aliases/splatting, dynamic names, imports/dot-sourcing, or
+invoked scriptblocks. The updater's separate confirmation, backup, candidate
+validation, and replacement safeguards remain required; AST identity parsing
+alone does not establish candidate safety.
 
 ## Download pipeline protections
 
@@ -345,10 +367,24 @@ ask for confirmation before applying, back up the current script before
 replacement, validate the extracted script, then instruct the user to restart.
 
 Update release assets are limited to the Jumpstile TeknoParrot Manager GitHub
-release path. The downloaded ZIP is extracted to a temporary location, and the
-candidate script is rejected if it is missing, empty, begins with raw ZIP bytes,
-does not contain the TeknoParrot Manager marker, or does not contain a
-`$ScriptVersion = "..."` assignment.
+release path. The downloaded ZIP is extracted to a temporary location. A
+candidate is rejected if it is missing, empty, begins with raw ZIP bytes,
+lacks the TeknoParrot Manager marker, has parser errors, or does not expose
+exactly one bare, unwrapped, unscoped root `EndBlock` constant-string
+`$ScriptVersion =` assignment and at most one equivalent
+`$ReleaseCandidateLabel` assignment. The parsers reject every additional
+statically identifiable protected write, including attribute/cast and
+transparent-parenthesis wrappers, scoped/nested/destructured or compound
+assignments, increment/decrement, foreach variables, root-script parameters,
+data-statement variables, and member/index lvalue roots. Both implementations
+parse source without executing it and require the candidate identity to equal
+the release tag before replacement. Function-local parameters are not treated
+as root identity declarations; indirect runtime mutation is outside the finite
+static-analysis guarantee described above.
+They reject any extracted-script byte above `0x7F` before parsing, preventing
+BOM-less Windows PowerShell 5.1 Windows-1252 decoding from differing from the
+validator's ASCII source interpretation. The main updater also reads the
+installed identity back and verifies it against the release tag.
 
 Current limitation: the TPM menu self-update path computes and logs the ZIP's
 SHA-256 but does not currently consume an optional GitHub asset digest as an
@@ -394,6 +430,42 @@ in a v0.91 security sweep: `Invoke-FFBPluginSetup`'s `destDll` (from
 `FileName` (both from GitHub Releases API responses). None were exploited,
 but a crafted upstream response could otherwise have written outside the
 intended folder. See LESSONS_LEARNED.md for the full post-mortems.
+
+## Required game-patch source and target boundary (RC8 candidate)
+
+The recipe catalog is pinned by SHA-256 in the runtime, uses a closed field
+schema, and verifies the file hash both before and after its bounded read.
+Patch archives are user-supplied local input, not trusted downloads. TPM opens
+only the recipe-named ZIP and requires exactly one entry with the exact member
+path and bounded declared length. It streams that member into a unique
+TPM-owned staging directory, caps the stream at 64 MiB, and verifies byte
+count and SHA-256 against the recipe before planning a mutation. DAT SHA-1 is
+retained as identity provenance and is not used as the runtime integrity hash.
+It does not extract archive paths or process other entries. Missing, duplicate,
+oversized, malformed, or mismatched members stop before a game write.
+
+The recipe pins the exact executable, target pre-state and desired bytes.
+Paths are canonicalized, validated component-by-component, kept inside the
+game/source/backup roots, and rejected when reparse-backed or overlapping
+protected TPM/TeknoParrot state. A create operation is allowed only when its
+recipe declares an absent target; a replacement is allowed only from its
+exact pinned before-state. An exact post-state is skipped; every other state
+conflicts. Apply verifies the backup before publication, stages and checks the
+desired bytes, revalidates immediately before promotion, then verifies
+read-back. Undo requires the receipt's exact target identity and verified
+backup; unrelated or changed files are preserved and cause a stop.
+
+Automatic selection is restricted to exact registered game/profile/build
+identity; manual mode uses the same engine for an installed folder without
+registering it. Hardware predicates use one existing evidence snapshot and
+refuse ambiguous multi-adapter selection; the highest-memory/first-enumerated
+GPU is not accepted as a game-specific match. This RC8 catalog enables only
+the two mutually exclusive AMD/NVIDIA alternatives for Cross Elysion 2.06.00
+Ver C, each pinned to the exact executable and the exact opposite-vendor
+shader state. `.ORIGINAL` and every unknown target state refuse. Cross Raid
+is not enabled: Elysion hashes do not establish Cross Raid applicability. The
+engine does not host payloads, download them, or mark a game ready after file
+installation alone.
 
 ## Rule: XML reads must disable the XmlResolver (XXE prevention)
 

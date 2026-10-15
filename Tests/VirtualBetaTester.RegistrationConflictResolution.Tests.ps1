@@ -24,6 +24,7 @@ BeforeAll {
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-conflict-resolution-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
     . $extractedFunctionsPath
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
     $script:PostgresRecoveryStatus = $null
@@ -73,7 +74,7 @@ Describe "Virtual Beta Tester: registered-but-moved recovery via Repair-GamePath
         Set-Content -LiteralPath (Join-Path $fx.UserProfilesDir 'ALIENS.xml') -Value $staleProfile -Encoding utf8
 
         $profileIndex = @{ 'aliens.exe' = @('ALIENS') }
-        $reports = Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false
+        $reports = (Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false).Reports
 
         $reports.Count | Should -Be 1
         $reports[0].Status | Should -Be 'fixed'
@@ -103,7 +104,7 @@ Describe "Virtual Beta Tester: registered-but-moved recovery via Repair-GamePath
         $originalContent = Get-Content -LiteralPath (Join-Path $fx.UserProfilesDir 'AMBIGUOUS.xml') -Raw
 
         $profileIndex = @{ 'game.exe' = @('AMBIGUOUS') }
-        $reports = Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false
+        $reports = (Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false).Reports
 
         $reports.Count | Should -Be 1
         $reports[0].Status | Should -Be 'ambiguous' -Because "two candidates on disk for the same exe name must never be auto-resolved by guessing"
@@ -130,7 +131,7 @@ Describe "Virtual Beta Tester: registered-but-moved recovery via Repair-GamePath
         # shared.exe maps to two different profile codes in the library --
         # inherently ambiguous regardless of what's on disk.
         $profileIndex = @{ 'shared.exe' = @('SHAREDA', 'SHAREDB') }
-        $reports = Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false
+        $reports = (Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false).Reports
 
         $reports.Count | Should -Be 1
         $reports[0].Status | Should -Be 'ambiguous'
@@ -154,7 +155,7 @@ Describe "Virtual Beta Tester: registered-but-moved recovery via Repair-GamePath
         $originalContent = Get-Content -LiteralPath (Join-Path $fx.UserProfilesDir 'GONE.xml') -Raw
 
         $profileIndex = @{ 'gone.exe' = @('GONE') }
-        $reports = Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false
+        $reports = (Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false).Reports
 
         $reports.Count | Should -Be 1
         $reports[0].Status | Should -Be 'not-found' -Because "a genuinely missing exe must surface as Action Required, never a fabricated or guessed path"
@@ -181,7 +182,7 @@ Describe "Virtual Beta Tester: registered-but-moved recovery via Repair-GamePath
         Start-Sleep -Milliseconds 50
 
         $profileIndex = @{ 'valid.exe' = @('VALID') }
-        $reports = Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false
+        $reports = (Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false).Reports
 
         $reports.Count | Should -Be 0 -Because "a profile whose GamePath already resolves must never even be reported, let alone rewritten"
         (Get-Item -LiteralPath $profilePath).LastWriteTimeUtc | Should -Be $originalWriteTime -Because "the file must not be touched at all -- proves the valid-path check happens before any write attempt"
@@ -206,10 +207,10 @@ Describe "Virtual Beta Tester: registered-but-moved recovery via Repair-GamePath
         $originalContent = Get-Content -LiteralPath $profilePath -Raw
 
         $profileIndex = @{ 'dryrun.exe' = @('DRYRUN') }
-        $reports = Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $true
+        $reports = (Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $true).Reports
 
         $reports.Count | Should -Be 1
-        $reports[0].Status | Should -Be 'fixed' -Because "DryRun still reports what WOULD happen, so a preview is meaningful"
+        $reports[0].Status | Should -Be 'candidate' -Because "DryRun reports a candidate without writing it"
         (Get-Content -LiteralPath $profilePath -Raw) | Should -Be $originalContent -Because "DryRun must never actually write the fix to disk"
     }
 

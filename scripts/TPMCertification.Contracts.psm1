@@ -9,14 +9,21 @@ Set-StrictMode -Version 2.0
 # source every subsystem (production runtime, certification authority,
 # shadow validation, smoke validation) must load contracts through -- no
 # subsystem is permitted to parse or reinterpret contracts/*/contract.json
-# independently. This module does not itself decide certification outcomes;
-# it loads, validates, and evaluates contracts. Wiring it into Authority,
-# Shadow, Smoke, or the main TPM runtime is a separate, later step.
+#
+# Every public contract-loading, registry, and observation entry point requires
+# an explicit Source or Runtime validation mode. Source validation reads actual
+# maintainer Markdown and compares the deterministic projection; runtime
+# validation reads only the packaged contract/index and does not claim to verify
+# omitted source documents. No mode is inferred from Markdown presence.
 
 function Get-TPMContractsRootV1 {
-    # scripts\ is one level below the repository root, where contracts\ lives
-    # (same root TeknoParrot-Manager.ps1 and Crosshairs\ live under).
-    Join-Path (Split-Path -Parent $PSScriptRoot) 'contracts'
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Source','Runtime')]
+        [string]$ValidationMode
+    )
+    if ($ValidationMode -ceq 'Runtime') { return (Join-Path $PSScriptRoot 'resources\contracts') }
+    return (Join-Path (Split-Path -Parent $PSScriptRoot) 'contracts')
 }
 
 $script:TpmContractStatusValuesV1 = @('Investigating','EvidenceGathered','ExperimentallyVerified','RuntimeVerified','Certified','Deprecated','Superseded')
@@ -289,36 +296,38 @@ function Assert-TPMEmulatorContractV1 {
 }
 
 function Get-TPMRegisteredEmulatorContractsV1 {
-    # Auto-discovers contracts by scanning contracts/*/contract.json -- there is
-    # deliberately no separate maintained index file. A directory-scan registry
-    # has exactly one source of truth (the filesystem); a hand-maintained index
-    # would itself be a second, independently-driftable interpretation of what
-    # is registered. -ContractsRoot exists so tests can point this at an
-    # isolated fixture tree instead of the real contracts\ directory.
-    param([string]$ContractsRoot)
-    $root = if ([string]::IsNullOrWhiteSpace($ContractsRoot)) { Get-TPMContractsRootV1 } else { $ContractsRoot }
-    if (-not (Test-Path -LiteralPath $root -PathType Container)) { return , @() }
+    # Discovers contracts in the selected runtime/source root and verifies
+    # each contract against its adjacent runtime evidence projection.
+    param([Parameter(Mandatory = $true)][ValidateSet('Source','Runtime')][string]$ValidationMode, [string]$ContractsRoot)
+    $root = if ([string]::IsNullOrWhiteSpace($ContractsRoot)) { Get-TPMContractsRootV1 -ValidationMode $ValidationMode } else { $ContractsRoot }
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "CONTRACT_REGISTRY_MISSING: $root" }
     $results = New-Object Collections.Generic.List[object]
-    $dirs = @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne '_schema' } | Sort-Object Name)
+    $dirs = @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction Stop | Where-Object { $_.Name -ne '_schema' } | Sort-Object Name)
     foreach ($dir in $dirs) {
         $contractPath = Join-Path $dir.FullName 'contract.json'
         if (-not (Test-Path -LiteralPath $contractPath -PathType Leaf)) { continue }
         $json = [System.IO.File]::ReadAllText($contractPath)
         $parsed = ConvertFrom-TPMOrderedJsonV1 -Json $json
         $validated = Assert-TPMEmulatorContractV1 -Contract $parsed -ExpectedContractId $dir.Name
+        Assert-TPMSupportedContractSchemaVersionV1 -Contract $validated
+        Assert-TPMContractEvidenceModeV1 -ValidationMode $ValidationMode -ContractPath $contractPath -ContractDirectory $dir.FullName -Contract $validated | Out-Null
         $results.Add([pscustomobject]@{ ContractId = $dir.Name; Path = $contractPath; Contract = $validated })
     }
+    if ($results.Count -eq 0) { throw "CONTRACT_REGISTRY_EMPTY: no contract.json files found under '$root'" }
     return , $results.ToArray()
 }
 
 function Get-TPMEmulatorContractV1 {
-    param([Parameter(Mandatory = $true)][string]$ContractId, [string]$ContractsRoot)
-    $root = if ([string]::IsNullOrWhiteSpace($ContractsRoot)) { Get-TPMContractsRootV1 } else { $ContractsRoot }
-    $contractPath = Join-Path (Join-Path $root $ContractId) 'contract.json'
+    param([Parameter(Mandatory = $true)][string]$ContractId, [Parameter(Mandatory = $true)][ValidateSet('Source','Runtime')][string]$ValidationMode, [string]$ContractsRoot)
+    $root = if ([string]::IsNullOrWhiteSpace($ContractsRoot)) { Get-TPMContractsRootV1 -ValidationMode $ValidationMode } else { $ContractsRoot }
+    $contractDirectory = Join-Path $root $ContractId
+    $contractPath = Join-Path $contractDirectory 'contract.json'
     if (-not (Test-Path -LiteralPath $contractPath -PathType Leaf)) { throw "CONTRACT_NOT_FOUND: no contract.json for '$ContractId'" }
     $json = [System.IO.File]::ReadAllText($contractPath)
     $parsed = ConvertFrom-TPMOrderedJsonV1 -Json $json
     $validated = Assert-TPMEmulatorContractV1 -Contract $parsed -ExpectedContractId $ContractId
+    Assert-TPMSupportedContractSchemaVersionV1 -Contract $validated
+    Assert-TPMContractEvidenceModeV1 -ValidationMode $ValidationMode -ContractPath $contractPath -ContractDirectory $contractDirectory -Contract $validated | Out-Null
     return [pscustomobject]@{ ContractId = $ContractId; Path = $contractPath; Contract = $validated }
 }
 
@@ -339,48 +348,309 @@ function Assert-TPMSupportedContractSchemaVersionV1 {
 }
 
 function Assert-TPMContractLocatorsResolveV1 {
-    # Verifies every EvidenceReference's Locator (the evidence.md / experiments.md
-    # anchor a claim's proof lives at) actually resolves -- both the file and a
-    # heading that starts with the anchor fragment. A contract with a citation
-    # pointing nowhere is exactly as untrustworthy as one with no citation at
-    # all, and this is the only mechanized check that would ever catch it.
+    # Source/build check only: resolve every actual file#fragment locator to
+    # a source Markdown heading. Runtime uses the packaged index instead.
     param([Parameter(Mandatory = $true)]$Contract, [Parameter(Mandatory = $true)][string]$ContractDirectory)
+    $root = [System.IO.Path]::GetFullPath($ContractDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $rootPrefix = $root + [System.IO.Path]::DirectorySeparatorChar
     foreach ($ref in $Contract.EvidenceReferences) {
-        $locator = [string]$ref.Locator
-        if ($locator -notmatch '^([^#]+)#(.+)$') { throw "SCHEMA_INVALID: EvidenceReferences[$($ref.EvidenceId)].Locator '$locator' is not in 'file#fragment' form" }
-        $file = $Matches[1]
-        $fragment = $Matches[2]
-        $filePath = Join-Path $ContractDirectory $file
-        if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) { throw "SCHEMA_INVALID: EvidenceReferences[$($ref.EvidenceId)].Locator points to missing file '$file'" }
-        $lines = [System.IO.File]::ReadAllLines($filePath)
+        $parts = Assert-TPMEvidenceLocatorFormatV1 -Locator ([string]$ref.Locator) -EvidenceId ([string]$ref.EvidenceId)
+        $path = [System.IO.Path]::GetFullPath((Join-Path $root ($parts.File.Replace('/', [System.IO.Path]::DirectorySeparatorChar))))
+        if (-not $path.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "SOURCE_EVIDENCE_LOCATOR_INVALID: EvidenceReferences[$($ref.EvidenceId)] escapes its contract directory"
+        }
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "SOURCE_EVIDENCE_MISSING: EvidenceReferences[$($ref.EvidenceId)] points to missing file '$($parts.File)'"
+        }
+        $lines = [System.IO.File]::ReadAllLines($path, (New-Object System.Text.UTF8Encoding($false, $true)))
         $found = $false
         foreach ($line in $lines) {
-            if ($line.TrimStart() -match '^#{1,6}\s+(.+)$') {
-                if ($Matches[1].StartsWith($fragment, [StringComparison]::Ordinal)) { $found = $true; break }
+            if ($line.TrimStart() -match '^#{1,6}\s+(.+)$' -and
+                $Matches[1].StartsWith($parts.Fragment, [StringComparison]::Ordinal)) {
+                $found = $true
+                break
             }
         }
-        if (-not $found) { throw "SCHEMA_INVALID: EvidenceReferences[$($ref.EvidenceId)].Locator anchor '$fragment' has no matching heading in '$file'" }
+        if (-not $found) { throw "SOURCE_EVIDENCE_HEADING_MISSING: EvidenceReferences[$($ref.EvidenceId)].Locator anchor '$($parts.Fragment)' has no matching heading" }
     }
 }
 
+function Get-TPMFileSha256V1 {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    $bytes = [System.IO.File]::ReadAllBytes($LiteralPath)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToUpperInvariant() }
+    finally { $sha.Dispose() }
+}
+
+function Assert-TPMEvidenceLocatorFormatV1 {
+    param([Parameter(Mandatory = $true)][string]$Locator, [Parameter(Mandatory = $true)][string]$EvidenceId)
+    if ($Locator -notmatch '^([^#]+)#([^#]+)$') {
+        throw "EVIDENCE_LOCATOR_INVALID: EvidenceReferences[$EvidenceId].Locator must be file#fragment"
+    }
+    $file = $Matches[1]
+    $fragment = $Matches[2]
+    if ($file.Contains('\') -or $file.StartsWith('/') -or $file.Contains(':') -or
+        @($file.Split('/')) -contains '' -or @($file.Split('/')) -contains '.' -or @($file.Split('/')) -contains '..' -or
+        [string]::IsNullOrWhiteSpace($fragment)) {
+        throw "EVIDENCE_LOCATOR_INVALID: EvidenceReferences[$EvidenceId].Locator is not a canonical relative locator"
+    }
+    return [pscustomobject]@{ File = $file; Fragment = $fragment }
+}
+
+function ConvertTo-TPMCanonicalJsonStringV1 {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.Append('"')
+    foreach ($character in $Value.ToCharArray()) {
+        $code = [int][char]$character
+        switch ($code) {
+            8  { [void]$builder.Append('\b') }
+            9  { [void]$builder.Append('\t') }
+            10 { [void]$builder.Append('\n') }
+            12 { [void]$builder.Append('\f') }
+            13 { [void]$builder.Append('\r') }
+            34 { [void]$builder.Append('\"') }
+            92 { [void]$builder.Append('\\') }
+            default {
+                if ($code -lt 32) {
+                    [void]$builder.Append('\u')
+                    [void]$builder.Append($code.ToString('x4', [Globalization.CultureInfo]::InvariantCulture))
+                } else {
+                    [void]$builder.Append($character)
+                }
+            }
+        }
+    }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function Get-TPMSourceEvidenceProjectionV1 {
+    # Source/build boundary: requires the original contract and every referenced
+    # Markdown document. The runtime index is never a fallback.
+    param(
+        [Parameter(Mandatory = $true)][string]$ContractPath,
+        [Parameter(Mandatory = $true)][string]$ContractDirectory
+    )
+    if (-not (Test-Path -LiteralPath $ContractPath -PathType Leaf)) { throw 'SOURCE_EVIDENCE_MISSING: contract.json is required' }
+    if (-not (Test-Path -LiteralPath $ContractDirectory -PathType Container)) { throw 'SOURCE_EVIDENCE_MISSING: contract source directory is required' }
+
+    $rawContract = [System.IO.File]::ReadAllBytes($ContractPath)
+    $contractText = (New-Object System.Text.UTF8Encoding($false, $true)).GetString($rawContract)
+    $expectedContractId = Split-Path -Leaf ([System.IO.Path]::GetFullPath($ContractDirectory))
+    $contract = Assert-TPMEmulatorContractV1 -Contract (ConvertFrom-TPMOrderedJsonV1 -Json $contractText) -ExpectedContractId $expectedContractId
+    Assert-TPMSupportedContractSchemaVersionV1 -Contract $contract
+    Assert-TPMContractLocatorsResolveV1 -Contract $contract -ContractDirectory $ContractDirectory
+
+    $root = [System.IO.Path]::GetFullPath($ContractDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $rootPrefix = $root + [System.IO.Path]::DirectorySeparatorChar
+    $documents = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::Ordinal)
+    $references = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+    foreach ($ref in $contract.EvidenceReferences) {
+        $id = [string]$ref.EvidenceId
+        if ($references.ContainsKey($id)) { throw "SOURCE_EVIDENCE_DUPLICATE_ID: $id" }
+        $locator = [string]$ref.Locator
+        $parts = Assert-TPMEvidenceLocatorFormatV1 -Locator $locator -EvidenceId $id
+        $candidate = Join-Path $root ($parts.File.Replace('/', [System.IO.Path]::DirectorySeparatorChar))
+        $fullPath = [System.IO.Path]::GetFullPath($candidate)
+        if (-not $fullPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+            throw "SOURCE_EVIDENCE_MISSING: EvidenceReferences[$id] points outside the contract source or to a missing file"
+        }
+        $lines = [System.IO.File]::ReadAllLines($fullPath, (New-Object System.Text.UTF8Encoding($false, $true)))
+        $heading = $null
+        foreach ($line in $lines) {
+            if ($line.TrimStart() -match '^#{1,6}\s+(.+)$' -and
+                $Matches[1].StartsWith($parts.Fragment, [StringComparison]::Ordinal)) {
+                $heading = $Matches[1]
+                break
+            }
+        }
+        if ($null -eq $heading) { throw "SOURCE_EVIDENCE_HEADING_MISSING: EvidenceReferences[$id] has no heading for '$locator'" }
+        if (-not $documents.ContainsKey($parts.File)) { $documents.Add($parts.File, $fullPath) }
+        $references.Add($id, [ordered]@{
+            EvidenceId = $id
+            Locator = $locator
+            Document = $parts.File
+            Heading = $heading
+        })
+    }
+
+    $documentRows = New-Object Collections.Generic.List[object]
+    $documentNames = [string[]]@($documents.Keys)
+    [Array]::Sort($documentNames, [StringComparer]::Ordinal)
+    foreach ($name in $documentNames) {
+        $documentRows.Add([ordered]@{ Path = $name; Sha256 = Get-TPMFileSha256V1 -LiteralPath $documents[$name] })
+    }
+    $referenceRows = New-Object Collections.Generic.List[object]
+    $referenceIds = [string[]]@($references.Keys)
+    [Array]::Sort($referenceIds, [StringComparer]::Ordinal)
+    foreach ($id in $referenceIds) { $referenceRows.Add($references[$id]) }
+
+    $contractHash = Get-TPMFileSha256V1 -LiteralPath $ContractPath
+    $index = [ordered]@{
+        SchemaVersion = '1.0.0'
+        ContractId = [string]$contract.ContractId
+        ContractSha256 = $contractHash
+        SourceDocuments = $documentRows.ToArray()
+        EvidenceReferences = $referenceRows.ToArray()
+    }
+    $jsonBuilder = New-Object System.Text.StringBuilder
+    [void]$jsonBuilder.Append('{"SchemaVersion":')
+    [void]$jsonBuilder.Append((ConvertTo-TPMCanonicalJsonStringV1 -Value ([string]$index.SchemaVersion)))
+    [void]$jsonBuilder.Append(',"ContractId":')
+    [void]$jsonBuilder.Append((ConvertTo-TPMCanonicalJsonStringV1 -Value ([string]$index.ContractId)))
+    [void]$jsonBuilder.Append(',"ContractSha256":')
+    [void]$jsonBuilder.Append((ConvertTo-TPMCanonicalJsonStringV1 -Value ([string]$index.ContractSha256)))
+    [void]$jsonBuilder.Append(',"SourceDocuments":[')
+    $firstDocument = $true
+    foreach ($document in $index.SourceDocuments) {
+        if (-not $firstDocument) { [void]$jsonBuilder.Append(',') }
+        $firstDocument = $false
+        [void]$jsonBuilder.Append('{"Path":')
+        [void]$jsonBuilder.Append((ConvertTo-TPMCanonicalJsonStringV1 -Value ([string]$document.Path)))
+        [void]$jsonBuilder.Append(',"Sha256":')
+        [void]$jsonBuilder.Append((ConvertTo-TPMCanonicalJsonStringV1 -Value ([string]$document.Sha256)))
+        [void]$jsonBuilder.Append('}')
+    }
+    [void]$jsonBuilder.Append('],"EvidenceReferences":[')
+    $firstReference = $true
+    foreach ($reference in $index.EvidenceReferences) {
+        if (-not $firstReference) { [void]$jsonBuilder.Append(',') }
+        $firstReference = $false
+        [void]$jsonBuilder.Append('{"EvidenceId":')
+        [void]$jsonBuilder.Append((ConvertTo-TPMCanonicalJsonStringV1 -Value ([string]$reference.EvidenceId)))
+        [void]$jsonBuilder.Append(',"Locator":')
+        [void]$jsonBuilder.Append((ConvertTo-TPMCanonicalJsonStringV1 -Value ([string]$reference.Locator)))
+        [void]$jsonBuilder.Append(',"Document":')
+        [void]$jsonBuilder.Append((ConvertTo-TPMCanonicalJsonStringV1 -Value ([string]$reference.Document)))
+        [void]$jsonBuilder.Append(',"Heading":')
+        [void]$jsonBuilder.Append((ConvertTo-TPMCanonicalJsonStringV1 -Value ([string]$reference.Heading)))
+        [void]$jsonBuilder.Append('}')
+    }
+    [void]$jsonBuilder.Append(']}')
+    $json = $jsonBuilder.ToString() + "`n"
+    return [pscustomobject]@{ Contract = $contract; Index = $index; Json = $json }
+}
+
+function Assert-TPMRuntimeEvidenceIndexV1 {
+    # Runtime boundary: validates the shipped contract bytes and the complete
+    # index-to-contract mapping. It cannot authenticate the package or verify
+    # source Markdown omitted from the user distribution.
+    param(
+        [Parameter(Mandatory = $true)][string]$ContractPath,
+        [Parameter(Mandatory = $true)][string]$IndexPath,
+        $Contract
+    )
+    if (-not (Test-Path -LiteralPath $ContractPath -PathType Leaf)) { throw 'RUNTIME_EVIDENCE_CONTRACT_MISSING: contract.json is required' }
+    if (-not (Test-Path -LiteralPath $IndexPath -PathType Leaf)) { throw 'RUNTIME_EVIDENCE_INDEX_MISSING: runtime-evidence-index.json is required' }
+    $contractBytes = [System.IO.File]::ReadAllBytes($ContractPath)
+    $contractHash = Get-TPMFileSha256V1 -LiteralPath $ContractPath
+    $contractText = (New-Object System.Text.UTF8Encoding($false, $true)).GetString($contractBytes)
+    if ($null -eq $Contract) { $Contract = Assert-TPMEmulatorContractV1 -Contract (ConvertFrom-TPMOrderedJsonV1 -Json $contractText) }
+    $indexText = (New-Object System.Text.UTF8Encoding($false, $true)).GetString([System.IO.File]::ReadAllBytes($IndexPath))
+    try { $index = ConvertFrom-Json -InputObject $indexText -ErrorAction Stop } catch { throw "RUNTIME_EVIDENCE_INDEX_INVALID: $_" }
+    if ($null -eq $index -or $index -isnot [System.Management.Automation.PSCustomObject]) { throw 'RUNTIME_EVIDENCE_INDEX_INVALID: root must be an object' }
+    $requiredFields = @('SchemaVersion','ContractId','ContractSha256','SourceDocuments','EvidenceReferences')
+    $actualFields = @($index.PSObject.Properties | ForEach-Object { $_.Name })
+    if ($actualFields.Count -ne $requiredFields.Count -or @($requiredFields | Where-Object { $actualFields -cnotcontains $_ }).Count -ne 0) {
+        throw 'RUNTIME_EVIDENCE_INDEX_INVALID: root fields do not match the runtime index schema'
+    }
+    if ($index.SchemaVersion -cne '1.0.0' -or $index.ContractId -cne [string]$Contract.ContractId) {
+        throw 'RUNTIME_EVIDENCE_INDEX_INVALID: schema version or ContractId mismatch'
+    }
+    if ([string]$index.ContractSha256 -cne $contractHash) { throw 'RUNTIME_EVIDENCE_CONTRACT_HASH_MISMATCH: contract.json bytes differ from the indexed SHA-256' }
+
+    $contractRefs = @($Contract.EvidenceReferences)
+    $indexRefs = @($index.EvidenceReferences)
+    if ($indexRefs.Count -ne $contractRefs.Count) { throw 'RUNTIME_EVIDENCE_INDEX_INVALID: EvidenceReferences are missing or extra' }
+    $expectedIds = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+    $expectedDocuments = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($ref in $contractRefs) {
+        $id = [string]$ref.EvidenceId
+        if ($expectedIds.ContainsKey($id)) { throw "RUNTIME_EVIDENCE_INDEX_INVALID: duplicate contract EvidenceId '$id'" }
+        $parts = Assert-TPMEvidenceLocatorFormatV1 -Locator ([string]$ref.Locator) -EvidenceId $id
+        $expectedDocuments.Add($parts.File) | Out-Null
+        $expectedIds.Add($id, [pscustomobject]@{ Locator = [string]$ref.Locator; File = $parts.File; Fragment = $parts.Fragment })
+    }
+    $seenIds = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($row in $indexRefs) {
+        if ($null -eq $row -or $row -isnot [System.Management.Automation.PSCustomObject]) { throw 'RUNTIME_EVIDENCE_INDEX_INVALID: reference row must be an object' }
+        $fields = @($row.PSObject.Properties | ForEach-Object { $_.Name })
+        if ($fields.Count -ne 4 -or @('EvidenceId','Locator','Document','Heading' | Where-Object { $fields -cnotcontains $_ }).Count -ne 0) {
+            throw 'RUNTIME_EVIDENCE_INDEX_INVALID: reference row fields do not match the schema'
+        }
+        $id = [string]$row.EvidenceId
+        if (-not $seenIds.Add($id) -or -not $expectedIds.ContainsKey($id)) { throw 'RUNTIME_EVIDENCE_INDEX_INVALID: duplicate or unknown EvidenceId' }
+        $expected = $expectedIds[$id]
+        if ([string]$row.Locator -cne $expected.Locator -or [string]$row.Document -cne $expected.File -or
+            [string]::IsNullOrWhiteSpace([string]$row.Heading) -or
+            -not ([string]$row.Heading).StartsWith($expected.Fragment, [StringComparison]::Ordinal)) {
+            throw "RUNTIME_EVIDENCE_INDEX_INVALID: mapping does not match contract EvidenceId '$id'"
+        }
+    }
+
+    $indexDocuments = @($index.SourceDocuments)
+    if ($indexDocuments.Count -ne $expectedDocuments.Count) { throw 'RUNTIME_EVIDENCE_INDEX_INVALID: SourceDocuments are missing or extra' }
+    $seenDocuments = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($row in $indexDocuments) {
+        if ($null -eq $row -or $row -isnot [System.Management.Automation.PSCustomObject]) { throw 'RUNTIME_EVIDENCE_INDEX_INVALID: source document row must be an object' }
+        $fields = @($row.PSObject.Properties | ForEach-Object { $_.Name })
+        if ($fields.Count -ne 2 -or @('Path','Sha256' | Where-Object { $fields -cnotcontains $_ }).Count -ne 0) {
+            throw 'RUNTIME_EVIDENCE_INDEX_INVALID: source document fields do not match the schema'
+        }
+        $path = [string]$row.Path
+        if (-not $expectedDocuments.Contains($path) -or -not $seenDocuments.Add($path) -or [string]$row.Sha256 -notmatch '^[0-9A-F]{64}$') {
+            throw 'RUNTIME_EVIDENCE_INDEX_INVALID: source document row is unknown, duplicated, or malformed'
+        }
+    }
+    return $true
+}
+
+function Assert-TPMContractEvidenceModeV1 {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('Source','Runtime')][string]$ValidationMode,
+        [Parameter(Mandatory = $true)][string]$ContractPath,
+        [Parameter(Mandatory = $true)][string]$ContractDirectory,
+        [Parameter(Mandatory = $true)]$Contract
+    )
+    $indexPath = Join-Path $ContractDirectory 'runtime-evidence-index.json'
+    if ($ValidationMode -ceq 'Runtime') {
+        Assert-TPMRuntimeEvidenceIndexV1 -ContractPath $ContractPath -IndexPath $indexPath -Contract $Contract | Out-Null
+        return $true
+    }
+    if (-not (Test-Path -LiteralPath $indexPath -PathType Leaf)) {
+        throw 'SOURCE_EVIDENCE_INDEX_MISSING: runtime projection is required beside the source contract'
+    }
+    $projection = Get-TPMSourceEvidenceProjectionV1 -ContractPath $ContractPath -ContractDirectory $ContractDirectory
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    $expectedBytes = $encoding.GetBytes([string]$projection.Json)
+    $actualBytes = [System.IO.File]::ReadAllBytes($indexPath)
+    if ($actualBytes.Length -ne $expectedBytes.Length) {
+        throw 'SOURCE_EVIDENCE_INDEX_STALE: runtime projection differs from actual source documents'
+    }
+    for ($i = 0; $i -lt $expectedBytes.Length; $i++) {
+        if ($actualBytes[$i] -ne $expectedBytes[$i]) {
+            throw 'SOURCE_EVIDENCE_INDEX_STALE: runtime projection differs from actual source documents'
+        }
+    }
+    return $true
+}
+
 function Test-TPMContractRegistryIntegrityV1 {
-    # The permanent, fail-closed health check for the whole contract
-    # registry: discovers every contracts/*/contract.json, validates each
-    # (schema shape, unique ownership paths, unique capability IDs -- all
-    # already enforced inside Assert-TPMEmulatorContractV1), verifies every
-    # evidence/experiment Locator resolves, and verifies the schema version
-    # is one this build supports. Collects every failure across every
-    # contract rather than stopping at the first bad one, since a caller
-    # deciding whether the registry as a whole is trustworthy needs the full
-    # picture. This is the function any certification entry point must call
-    # first and fail closed on -- a contract nobody can currently validate
-    # must never be silently treated as though it still applies.
-    param([string]$ContractsRoot)
-    $root = if ([string]::IsNullOrWhiteSpace($ContractsRoot)) { Get-TPMContractsRootV1 } else { $ContractsRoot }
+    # Validation mode is caller-supplied; source verification never falls
+    # back to a runtime-only index when maintainer Markdown is absent.
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('Source','Runtime')][string]$ValidationMode,
+        [string]$ContractsRoot
+    )
+    $root = if ([string]::IsNullOrWhiteSpace($ContractsRoot)) { Get-TPMContractsRootV1 -ValidationMode $ValidationMode } else { $ContractsRoot }
     $errors = New-Object Collections.Generic.List[object]
     $valid = New-Object Collections.Generic.List[object]
     if (-not (Test-Path -LiteralPath $root -PathType Container)) {
-        return [pscustomobject]@{ Valid = $true; ContractCount = 0; Contracts = @(); Errors = @() }
+        $errors.Add([pscustomobject]@{ ContractId = '<registry>'; Message = "CONTRACT_REGISTRY_MISSING: $root" })
+        return [pscustomobject]@{ Valid = $false; ContractCount = 0; Contracts = @(); Errors = $errors.ToArray() }
     }
     $dirs = @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne '_schema' } | Sort-Object Name)
     foreach ($dir in $dirs) {
@@ -391,11 +661,14 @@ function Test-TPMContractRegistryIntegrityV1 {
             $parsed = ConvertFrom-TPMOrderedJsonV1 -Json $json
             $validated = Assert-TPMEmulatorContractV1 -Contract $parsed -ExpectedContractId $dir.Name
             Assert-TPMSupportedContractSchemaVersionV1 -Contract $validated
-            Assert-TPMContractLocatorsResolveV1 -Contract $validated -ContractDirectory $dir.FullName
+            Assert-TPMContractEvidenceModeV1 -ValidationMode $ValidationMode -ContractPath $contractPath -ContractDirectory $dir.FullName -Contract $validated | Out-Null
             $valid.Add([pscustomobject]@{ ContractId = $dir.Name; Path = $contractPath; Contract = $validated })
         } catch {
             $errors.Add([pscustomobject]@{ ContractId = $dir.Name; Message = $_.Exception.Message })
         }
+    }
+    if ($valid.Count -eq 0 -and $errors.Count -eq 0) {
+        $errors.Add([pscustomobject]@{ ContractId = '<registry>'; Message = "CONTRACT_REGISTRY_EMPTY: no contract.json files found under '$root'" })
     }
     return [pscustomobject]@{ Valid = ($errors.Count -eq 0); ContractCount = $valid.Count; Contracts = $valid.ToArray(); Errors = $errors.ToArray() }
 }
@@ -606,8 +879,17 @@ function Get-TPMEmulatorContractObservationsV1 {
     # observations). RuntimeContexts, when supplied, only gets
     # applicability checked here; runtime evidence resolution needs a real
     # launch and is out of scope for this collector.
-    param([Parameter(Mandatory = $true)][string]$InstallRoot, [object[]]$RuntimeContexts = @(), [string]$ContractsRoot)
-    $integrity = if ([string]::IsNullOrWhiteSpace($ContractsRoot)) { Test-TPMContractRegistryIntegrityV1 } else { Test-TPMContractRegistryIntegrityV1 -ContractsRoot $ContractsRoot }
+    param(
+        [Parameter(Mandatory = $true)][string]$InstallRoot,
+        [Parameter(Mandatory = $true)][ValidateSet('Source','Runtime')][string]$ValidationMode,
+        [object[]]$RuntimeContexts = @(),
+        [string]$ContractsRoot
+    )
+    $integrity = if ([string]::IsNullOrWhiteSpace($ContractsRoot)) {
+        Test-TPMContractRegistryIntegrityV1 -ValidationMode $ValidationMode
+    } else {
+        Test-TPMContractRegistryIntegrityV1 -ValidationMode $ValidationMode -ContractsRoot $ContractsRoot
+    }
     if (-not $integrity.Valid) {
         return [pscustomobject]@{ RegistryValid = $false; Errors = $integrity.Errors; Observations = @() }
     }
@@ -640,7 +922,8 @@ function Get-TPMEmulatorContractObservationsV1 {
 Export-ModuleMember -Function Get-TPMContractsRootV1, ConvertFrom-TPMOrderedJsonV1, ConvertTo-TPMOrderedValueV1, `
     Assert-TPMEmulatorContractV1, Get-TPMRegisteredEmulatorContractsV1, Get-TPMEmulatorContractV1, `
     Get-TPMSupportedContractSchemaVersionsV1, Assert-TPMSupportedContractSchemaVersionV1, `
-    Assert-TPMContractLocatorsResolveV1, Test-TPMContractRegistryIntegrityV1, Assert-TPMContractRegistryValidV1, `
+    Assert-TPMContractLocatorsResolveV1, Get-TPMSourceEvidenceProjectionV1, Assert-TPMRuntimeEvidenceIndexV1, `
+    Test-TPMContractRegistryIntegrityV1, Assert-TPMContractRegistryValidV1, `
     Resolve-TPMEmulatorVersionMatchV1, Assert-TPMOwnershipWriteAllowedV1, `
     Resolve-TPMEnvironmentDataRootV1, Invoke-TPMEnvironmentInitializationActionV1, Test-TPMEnvironmentInitializedV1, `
     Test-TPMRuntimeApplicabilityV1, Resolve-TPMObservableEvidenceV1, `

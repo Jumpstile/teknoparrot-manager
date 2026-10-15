@@ -168,10 +168,41 @@ recorded separately. The validation checkout itself must still be local; a
 NAS or SMB Git worktree is not a substitute. Reports may be copied to an
 evidence store after the run.
 
+For final RC8 pre-release validation, Arcade validation also requires the
+**Arcade OMP Packaged Runtime UX Gate** defined in
+`docs\TPM-CERTIFICATION-SUITE.md` and issue #323. It runs the exact packaged
+source identity in default and constrained terminals, captures screenshots and
+logs, and covers package identity, menu/prompt layout, ReShade, Health Check
+repair, feature routing, failure truthfulness, and support-package clarity.
+Pester remains the pure-logic contract layer; this packaged-runtime gate is the
+last required gate before RC8 release authorization.
+
+
 Controls readiness, launch observation, registration, and verification are
 separate dimensions. Static or partial evidence must not be summarized as one
 combined `Ready` state. See the certification suite and architecture docs for
 the individual evidence ceilings.
+### 4a. Permanent remediation procedure gate
+
+Every owner-smoke remediation report must be created from
+`docs/templates/remediation-gate-report.md` and checked with:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Run-TpmQualityGate.ps1 -ReportPath <report>
+```
+
+The gate validates the machine-readable registry, owner-report statuses,
+script-wide progress inventory, prompt/gate consistency, affected-games repair
+scope, support-package evidence, validation freshness, hunk ownership, and
+non-actions. A source/test pass does not provide owner-runtime proof or release
+authorization.
+Every TPM product change also requires a current contract under
+`docs/remediation/slices/` and a matching row in
+`docs/remediation/PR-321-control-board.md`. The contract must identify exact
+owner IDs, exclusions, behavior, focused tests, runtime proof, stop condition,
+and forbidden actions. A source/test result cannot be reported as packaged
+runtime proof.
+
 
 ### 5. Package and release identity
 

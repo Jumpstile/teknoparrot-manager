@@ -8,8 +8,8 @@
 BeforeAll {
  Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Authority.psm1') -Force
  Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Contracts.psm1') -Force
- $script:registered = Get-TPMRegisteredEmulatorContractsV1
- $script:integrity = Test-TPMContractRegistryIntegrityV1
+ $script:registered = Get-TPMRegisteredEmulatorContractsV1 -ValidationMode Source
+ $script:integrity = Test-TPMContractRegistryIntegrityV1 -ValidationMode Source
 }
 
 Describe 'ECVF Contract Stability Regression Suite' {

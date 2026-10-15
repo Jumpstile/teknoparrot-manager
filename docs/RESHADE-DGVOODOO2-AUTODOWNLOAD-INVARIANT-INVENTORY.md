@@ -33,6 +33,14 @@ have been compromised (this component's trust model assumes the
 transport and identity checks it performs are sufficient, per the
 Specification Inventory's `RESHADE-TRUST-002`).
 
+The component boundary also includes the ReShade visual profile gallery
+(`Show-TpmReShadeProfileGalleryWindow`) and its terminal chooser fallback. The
+gallery is a read-only preview surface: it may render in-memory comparison
+images and update transient profile-selection state, but it is not permitted to
+deploy files, save configuration, or claim a profile was applied.
+
+This inventory remains limited to ReShade installer download/extraction and gallery read-only behavior. Curated profile/effect acquisition, include closure, preset configuration, and game-target deployment are governed by `RESHADE-PROFILE-SELECTION-INVARIANT-INVENTORY.md`.
+
 ## Invariants
 
 ### TX-001 -- Destination is never touched until a complete, valid staged set exists
@@ -203,6 +211,69 @@ theoretical property.
   would be treated as trusted and extracted -- this is the literal defect
   an independent review found and P1 #2 closes.
 
+### GALLERY-001 -- Profile identity is independent of visual view mode
+The gallery stores the selected approved profile as a stable `ProfileId` and
+stores `ViewMode` separately (`Before`, `After`, `Split`, or `Slider`). ComboBox
+entries are display-only objects carrying a validated profile ID. No gallery
+handler reads an optional `.Mode` property from a selected item or uses the
+view mode as profile identity.
+- **Verified by:** the "uses stable ProfileId identity without reading a
+  gallery item's Mode" regression, the "keeps gallery object identity and safe
+  cancel behavior" regression, and the complete `Show-TpmReShadeProfileGalleryWindow`
+  source audit.
+- **Failure mode if violated:** a profile item with an absent or conflicting
+  `Mode` property could be mistaken for view state, causing a WinForms event to
+  throw or refresh the wrong profile.
+
+### GALLERY-002 -- Gallery events cannot run against incomplete or malformed state
+Preview refresh is disabled until the gallery controls, selector state, and
+handlers are initialized. View, slider, profile-selector, and close callbacks
+validate their sender/item shape and are guarded so null or mismatched selected
+items cannot escape as unhandled WinForms exceptions. Direct profile selection
+and terminal number selection must update the same canonical ProfileId without
+changing slider/view state.
+- **Verified by:** `selects a profile directly in the preview and synchronizes
+  canonical state`; `selects the twelfth profile in the terminal and
+  synchronizes the preview`; invalid-item and initialization/closure guard
+  regressions; Windows PowerShell 5.1 STA UI smoke with all twelve selector
+  items, ten unique shader effects, direct/terminal synchronization, preserved
+  slider state, and acceptance/cleanup after `U`.
+- **Failure mode if violated:** a selector event fired during setup, or against
+a malformed item, could crash the gallery or leave the preview and accepted
+terminal result showing different profiles.
+
+### GALLERY-003 -- Preview failures fail closed and release gallery resources
+Every gallery refresh failure records the triggering stage, disables further
+preview refresh, logs the failure, and closes the optional form without
+throwing through the WinForms event loop. Gallery cleanup disposes the actual
+`Picture.Image`, clears that reference, safely disposes the form, and is
+idempotent.
+- **Verified by:** the "fails closed and records the exact preview refresh
+  stage" regression, the executable callback regression with forced refresh
+  failure, the "disposes the gallery picture image idempotently" regression,
+  and the native forced-render-failure harness, which exits 0 after reporting
+  `PreviewEnabled=False`, `Closed=True`, and
+  `Stage=slider-value-changed`.
+- **Failure mode if violated:** renderer errors could surface as unhandled JIT
+  exceptions, leave a gallery window open in a broken state, or retain a
+  disposed/undisposed bitmap across repeated close paths.
+
+### GALLERY-004 -- Visual preview cannot mutate deployment or bypass confirmation
+Gallery rendering, selector changes, slider/view events, and terminal profile
+synchronization are transient/read-only operations. They do not deploy ReShade
+files, save configuration, or claim an applied profile. Deployment remains
+behind terminal `U` and the existing explicit confirmation; if the gallery is
+unavailable or closed, terminal selection remains usable.
+- **Verified by:** direct and terminal Pester regressions prove selection only
+  updates transient gallery state; the Windows PowerShell 5.1 STA UI smoke
+  selected from the preview, accepted the latest selection through terminal
+  `U`, then observed the form disposed and timer disabled/cleared. The
+  `Invoke-ReShadeSetup` `finally` closes the gallery before existing explicit
+  confirmation; deployment ordering remains unchanged.
+- **Failure mode if violated:** selecting a preview item could mutate a live
+game installation, become stale before `U`, or make the UI claim deployment
+before the user explicitly confirms it.
+
 ## Status summary
 
 | ID | Status | Implementation pointer | Verification pointer |
@@ -212,6 +283,10 @@ theoretical property.
 | TX-003 | Implemented | `New-TpmStagingDirectory` + conditional `catch`/`finally` in both extractors (staging is preserved on `ROLLBACK FAILED`, `TRANSACTION CLEANUP FAILED`, or ordinary `TPM STAGING CLEANUP FAILED`) | End-to-end wrapper matrix proves no residue on clean success/ordinary rollback, preserved backup on `ROLLBACK FAILED`, preserved rollback residue on `TRANSACTION CLEANUP FAILED`, and the exact staging path plus valid destination on ordinary `TPM STAGING CLEANUP FAILED` |
 | TRUST-004 | Implemented | Menu-handler wiring (`ReShadeSetup`/`DgVoodoo2Setup` mode blocks) + `Test-ReShadeSetupTrustedSignature` + `Invoke-TpmDownload -ExpectedSha256` | Trust-matrix tests; `Test-TpmDownloadedFile -ExpectedSha256` tests |
 | TRUST-005 | Implemented | `Test-ReShadeSetupTrustedSignature` (`$statusAccepted -and $thumbprintMatch`) | "REJECTS a HashMismatch signature even with the exact pinned thumbprint" |
+| GALLERY-001 | Implemented | `Show-TpmReShadeProfileGalleryWindow`, `New-TpmReShadeGalleryEventHandlers`, `Sync-TpmReShadeGallerySelection` | 10-test gallery run; stable-ID/view-mode and object-identity regressions; complete gallery source audit |
+| GALLERY-002 | Implemented; focused regressions and native WinForms smoke passed | `New-TpmReShadeGalleryEventHandlers`, `Show-TpmReShadeProfileGalleryWindow`, `Sync-TpmReShadeGallerySelection`, `Read-TpmReShadeTerminalProfile` | Direct/terminal selector sync, malformed item, initialization/closure guards, slider preservation, acceptance-after-pump; Windows PowerShell 5.1 STA selector/slider/cleanup smoke |
+| GALLERY-003 | Implemented | `Set-TpmReShadeGalleryPreviewFailed`, `Close-TpmReShadeProfileGallerySession` | 10-test gallery run including failure-stage and idempotent-image-disposal regressions; asserted native forced-render-failure harness |
+| GALLERY-004 | Implemented; source and UI path reviewed | Gallery event handlers, `Read-TpmReShadeTerminalProfile`, `Invoke-ReShadeSetup` cleanup/confirmation path | Selection updates transient state only; preview `U` returns latest canonical selection; caller `finally` closes session before explicit deployment confirmation |
 
-No item in this inventory is marked `Missing` or `Intentionally out of
-scope` as of this round.
+GALLERY-002 and GALLERY-004 are implemented and verified by focused regression
+coverage and a Windows PowerShell 5.1 STA WinForms selector/slider/cleanup smoke.

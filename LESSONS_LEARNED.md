@@ -569,7 +569,7 @@ truncated that combined list to `Select-Object -First $maxRows` whenever it
 overflowed the viewport height. At a short console height this kept the
 *front* of the render (the banner and the earliest menu sections) and
 silently dropped whatever didn't fit off the *end* -- which, because the
-footer (Quit/Help controls) and the Application section (option 14, Exit)
+footer (Quit/Help controls) and the Application section (then-option 14, Exit)
 are built last, meant exactly the controls a user needs to actually operate
 the menu were the first things to disappear. A pre-existing Pester test even
 asserted this as intentional (`Should -Not -Match 'Exit'` on a short-viewport
@@ -584,7 +584,7 @@ trims from the *front* (keeping the tail) specifically so the last real menu
 item survives -- the opposite truncation direction from before. The Compact
 tier's "Type ? for descriptions." hint (a purely decorative line) was also
 moved from the end of the body to the beginning, because it was winning the
-tail-preservation priority over the actual "14) Exit" line by virtue of
+tail-preservation priority over the then-current "14) Exit" line by virtue of
 render order alone, not by design.
 
 **Rule.** When a render pipeline has to drop content to fit a viewport,
@@ -607,7 +607,7 @@ would always be *some* row budget left for body content. At the documented
 minimum supported viewport, 60x10, that assumption was wrong: the framed
 banner (6 rows) and footer (2 rows) alone consumed the entire 8-row budget,
 leaving zero rows for ANY body content -- not just early items, everything,
-including option 14 (Exit). The packaged diagnostic (`scripts\Debug-TPM-
+including the then-option 14 (Exit). The packaged diagnostic (`scripts\Debug-TPM-
 MenuLayout.ps1`) made this directly visible once its own separate crash
 (below) was fixed: `-Width 60 -Height 10 -Render` rendered only a banner and
 a footer, with nothing in between.
@@ -618,8 +618,8 @@ tighter version of the same layout: single-line banner and footer (no frame,
 no blank separator) free up several rows, and every option's `"N) Label"` is
 flow-packed as densely as the width allows instead of one per row. Tokens are
 packed whole (never split a number from its own label across two lines), and
-if even that doesn't fit, item rows trim from the front so the last item
-(ending in `14) Exit`) and the footer survive over the earliest options.
+if even that doesn't fit, item rows trim from the front so the then-current
+last item (ending in `14) Exit`) and the footer survive over the earliest options.
 
 **What failed, part 2: the packaged diagnostic script drifted from the
 render pipeline it exists to debug.** `scripts\Debug-TPM-MenuLayout.ps1`
@@ -848,3 +848,21 @@ replacement for the structured failure that caused it.
 The Pester certification gate remains an exact `5.7.1` pin. Installed
 `5.8.0` or `3.4.0` results are not certification evidence; the environment
 must provide `5.7.1` before a certification run can start.
+
+## PostgreSQL recovery handoff -- normalized backup evidence is not the raw bundle
+
+Guided password recovery had two different backup representations. `New-PostgresRecoveryBackup` returns the raw PostgreSQL bundle with `Path`, `ConfigBackups`, `ProfileBackups`, and `Verified`; the profile-setup consumer directly enumerates both required arrays. `Reset-PostgresPasswordAutomatically` already returned a normalized `TPM.TransactionResult.v1.Backup`, so the wrapper's fallback that attached the raw bundle only when `Backup` was absent never ran. The top-level flow then passed the generic `Backup` to profile setup, losing both collections.
+
+Setup also wrapped profile and config sources in separate nested arrays, so the generic `Items` field appeared populated while scalar source paths were not members of the list. Concatenating the two source arrays keeps `Items` flat without adding PostgreSQL-specific fields to `Backup`.
+
+Keep the representations separate: the normalized `Backup` remains the generic transaction evidence object, while `RecoveryBundle` carries the original raw producer result through the wrapper and top-level setup handoff. Derive `Attempted` from a returned producer result or an actual producer invocation, `Created` from observed evidence-directory existence, and `Verified` from the producer's explicit result; do not infer verification from a path or object being non-null.
+
+Rule: when one workflow hands a domain-specific evidence bundle through a generic transaction result, preserve the original bundle in a distinct sidecar and pass that sidecar to its consumer. Test non-empty required collections through the real wrapper and setup call, and assert both the raw sidecar identity and canonical generic `Backup` shape.
+
+## Pester child-process capture -- pipe deadlock and wrapped diagnostics
+
+**Observed defect.** The owner-status Pester test launched `Test-TpmPermanentProcedures.ps1` with stdout and stderr redirected, read stdout to EOF before stderr, then called unbounded `WaitForExit()`. If the child fills stderr before closing stdout, it waits for the parent to read stderr while the parent waits for stdout EOF. The test also asserted against PowerShell's rendered `Write-Error` text without accounting for line-wrap continuation markers.
+
+**Evidence.** The focused test under Windows PowerShell 5.1 completed in 11.75 seconds rather than hanging, but failed its first semantic assertion because the child `pwsh` diagnostic wrapped at a `|` continuation. A deterministic reproduction of the original read order, with a `pwsh` child writing 1 MiB to stdout followed by 1 MiB to stderr, exceeded a 31-second bound; terminating the parent process tree confirmed both processes exited. This proves the pipe-deadlock defect class, not the exact stalled stack in the cancelled CI run.
+
+**Fix and rule.** `Invoke-TpmTestChildProcess` starts `ReadToEndAsync()` on both streams before a bounded process wait, kills a timed-out child, confirms exit within a bounded grace period, and bounds completion of both readers. The gate test removes only PowerShell's visual `|` continuation prefix before applying the same owner-status, exit-code, and stale-package assertions. Keep the high-volume dual-stream and timeout tests; never replace them with a small-output fixture or sequential `ReadToEnd()` calls.

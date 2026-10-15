@@ -137,7 +137,7 @@ BeforeAll {
                         $downloadedZipPath = Save-TpmReleaseAsset -Asset $asset
                         $extractedScriptPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-update-extracted-" + [guid]::NewGuid().ToString('N') + '.ps1')
                         Expand-TpmReleaseZipEntry -ZipPath $downloadedZipPath -EntryName 'TeknoParrot-Manager.ps1' -DestinationPath $extractedScriptPath | Out-Null
-                        Test-TpmExtractedScript -Path $extractedScriptPath | Out-Null
+                        Test-TpmExtractedScript -Path $extractedScriptPath -ExpectedVersion 'v0.99.99' | Out-Null
                         Move-Item -LiteralPath $extractedScriptPath -Destination $TargetScriptPath -Force -ErrorAction Stop
                         if (-not (Test-Path -LiteralPath $TargetScriptPath -PathType Leaf)) {
                             throw "Update replacement did not complete: $TargetScriptPath not found after Move-Item."

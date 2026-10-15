@@ -1,0 +1,165 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Jumpstile/teknoparrot-manager/contracts/_schema/GameSupportContractV1.3.schema.json",
+  "title": "GameSupportContractV1",
+  "description": "Deterministic catalog-only support contract version 1.3.0 with additive external-software prerequisites. Runtime observations remain assessment data.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ContractId", "SchemaVersion", "ProfileCode", "ProfileFileName", "DisplayName", "VariantTitle", "ProfileRevision", "EmulationProfile", "EmulatorType", "SnapshotId", "CapturedAtUtc", "ContractStatus", "StaticEvidenceLevel", "ReleasePosture", "ClassificationReason", "EvidenceGaps", "LaunchExecutables", "MediaRequirements", "ChdRequirements", "RequiredFixes", "RecommendedFixes", "OptionalFixes", "KnownIncompatibleFixes", "UserOwnedContentRequirements", "TeknoParrotUiOwnedSettingRequirements", "RuntimeValidationRequirements", "RequiredPatches", "ShaderFixes", "BepInExRequirements", "DgVoodoo2Requirements", "ReShadeCompatibility", "CrosshairCompatibility", "ForceFeedbackCompatibility", "GpuLimitations", "KnownRuntimeFixes", "Prerequisites", "TeknoParrotUiOwnership", "SetupPolicy", "Evidence"],
+  "properties": {
+    "ContractId": { "$ref": "GameSupportContractV1.2.schema.json#/properties/ContractId" },
+    "SchemaVersion": { "const": "1.3.0" },
+    "ProfileCode": { "$ref": "GameSupportContractV1.2.schema.json#/properties/ProfileCode" },
+    "ProfileFileName": { "$ref": "GameSupportContractV1.2.schema.json#/properties/ProfileFileName" },
+    "DisplayName": { "$ref": "GameSupportContractV1.2.schema.json#/properties/DisplayName" },
+    "VariantTitle": { "$ref": "GameSupportContractV1.2.schema.json#/properties/VariantTitle" },
+    "ProfileRevision": { "$ref": "GameSupportContractV1.2.schema.json#/properties/ProfileRevision" },
+    "EmulationProfile": { "$ref": "GameSupportContractV1.2.schema.json#/properties/EmulationProfile" },
+    "EmulatorType": { "$ref": "GameSupportContractV1.2.schema.json#/properties/EmulatorType" },
+    "SnapshotId": { "$ref": "GameSupportContractV1.2.schema.json#/properties/SnapshotId" },
+    "CapturedAtUtc": { "$ref": "GameSupportContractV1.2.schema.json#/properties/CapturedAtUtc" },
+    "ContractStatus": { "$ref": "GameSupportContractV1.2.schema.json#/properties/ContractStatus" },
+    "StaticEvidenceLevel": { "$ref": "GameSupportContractV1.2.schema.json#/properties/StaticEvidenceLevel" },
+    "ReleasePosture": { "$ref": "GameSupportContractV1.2.schema.json#/properties/ReleasePosture" },
+    "ClassificationReason": { "$ref": "GameSupportContractV1.2.schema.json#/properties/ClassificationReason" },
+    "EvidenceGaps": { "$ref": "GameSupportContractV1.2.schema.json#/properties/EvidenceGaps" },
+    "LaunchExecutables": { "$ref": "GameSupportContractV1.2.schema.json#/properties/LaunchExecutables" },
+    "MediaRequirements": { "$ref": "GameSupportContractV1.2.schema.json#/properties/MediaRequirements" },
+    "ChdRequirements": { "$ref": "GameSupportContractV1.2.schema.json#/properties/ChdRequirements" },
+    "RequiredFixes": { "$ref": "GameSupportContractV1.2.schema.json#/properties/RequiredFixes" },
+    "RecommendedFixes": { "$ref": "GameSupportContractV1.2.schema.json#/properties/RecommendedFixes" },
+    "OptionalFixes": { "$ref": "GameSupportContractV1.2.schema.json#/properties/OptionalFixes" },
+    "KnownIncompatibleFixes": { "$ref": "GameSupportContractV1.2.schema.json#/properties/KnownIncompatibleFixes" },
+    "UserOwnedContentRequirements": { "$ref": "GameSupportContractV1.2.schema.json#/properties/UserOwnedContentRequirements" },
+    "TeknoParrotUiOwnedSettingRequirements": { "$ref": "GameSupportContractV1.2.schema.json#/properties/TeknoParrotUiOwnedSettingRequirements" },
+    "RuntimeValidationRequirements": { "$ref": "GameSupportContractV1.2.schema.json#/properties/RuntimeValidationRequirements" },
+    "RequiredPatches": { "$ref": "GameSupportContractV1.2.schema.json#/properties/RequiredPatches" },
+    "ShaderFixes": { "$ref": "GameSupportContractV1.2.schema.json#/properties/ShaderFixes" },
+    "BepInExRequirements": { "$ref": "GameSupportContractV1.2.schema.json#/properties/BepInExRequirements" },
+    "DgVoodoo2Requirements": { "$ref": "GameSupportContractV1.2.schema.json#/properties/DgVoodoo2Requirements" },
+    "ReShadeCompatibility": { "$ref": "GameSupportContractV1.2.schema.json#/properties/ReShadeCompatibility" },
+    "CrosshairCompatibility": { "$ref": "GameSupportContractV1.2.schema.json#/properties/CrosshairCompatibility" },
+    "ForceFeedbackCompatibility": { "$ref": "GameSupportContractV1.2.schema.json#/properties/ForceFeedbackCompatibility" },
+    "GpuLimitations": { "$ref": "GameSupportContractV1.2.schema.json#/properties/GpuLimitations" },
+    "KnownRuntimeFixes": { "$ref": "GameSupportContractV1.2.schema.json#/properties/KnownRuntimeFixes" },
+    "Prerequisites": { "$ref": "#/definitions/Prerequisites" },
+    "TeknoParrotUiOwnership": { "$ref": "GameSupportContractV1.2.schema.json#/properties/TeknoParrotUiOwnership" },
+    "SetupPolicy": { "$ref": "GameSupportContractV1.2.schema.json#/properties/SetupPolicy" },
+    "Evidence": { "$ref": "#/definitions/Evidence" }
+  },
+  "definitions": {
+    "AppliesWhen": { "$ref": "GameSupportContractV1.2.schema.json#/definitions/AppliesWhen" },
+    "AutomationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["MayDetectInstalled", "MayVerifyVersion", "MayVerifyArchitecture", "MayVerifyHash", "MayLocateLocalInstaller", "MayRunLocalInstaller", "MayDownload", "MayRedistribute", "MayAcceptEulaAutomatically", "MayUseUnverifiedSource"],
+      "properties": {
+        "MayDetectInstalled": { "type": "boolean" },
+        "MayVerifyVersion": { "type": "boolean" },
+        "MayVerifyArchitecture": { "type": "boolean" },
+        "MayVerifyHash": { "type": "boolean" },
+        "MayLocateLocalInstaller": { "type": "boolean" },
+        "MayRunLocalInstaller": { "type": "boolean" },
+        "MayDownload": { "type": "boolean" },
+        "MayRedistribute": { "type": "boolean" },
+        "MayAcceptEulaAutomatically": { "type": "boolean" },
+        "MayUseUnverifiedSource": { "type": "boolean" }
+      }
+    },
+    "InstallerIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["FileName", "Vendor", "Version", "SourceUrl", "Sha256", "LicenseEvidenceRef"],
+      "properties": {
+        "FileName": { "type": ["string", "null"] },
+        "Vendor": { "type": ["string", "null"] },
+        "Version": { "type": ["string", "null"] },
+        "SourceUrl": { "type": ["string", "null"] },
+        "Sha256": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }] },
+        "LicenseEvidenceRef": { "type": ["string", "null"] }
+      }
+    },
+    "ExternalSoftwareItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["DependencyId", "DisplayName", "DependencyType", "RequirementState", "AppliesWhen", "VersionConstraint", "Architecture", "DetectionRule", "VerificationRule", "EvidenceRefs", "InstallerIdentity", "AutomationPolicy"],
+      "properties": {
+        "DependencyId": { "type": "string", "pattern": "^dependency-[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "DisplayName": { "type": "string", "minLength": 1 },
+        "DependencyType": { "enum": ["AUDIO_RUNTIME", "RUNTIME_COMPONENT"] },
+        "RequirementState": { "enum": ["REQUIRED", "CONDITIONAL", "OPTIONAL", "NOT_DECLARED"] },
+        "AppliesWhen": { "$ref": "#/definitions/AppliesWhen" },
+        "VersionConstraint": { "type": ["string", "null"] },
+        "Architecture": { "type": ["string", "null"], "enum": ["X86", "X64", "ARM64", "ANY", "UNKNOWN", null] },
+        "DetectionRule": { "type": "string", "minLength": 1 },
+        "VerificationRule": { "type": "string", "minLength": 1 },
+        "EvidenceRefs": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "InstallerIdentity": { "$ref": "#/definitions/InstallerIdentity" },
+        "AutomationPolicy": { "$ref": "#/definitions/AutomationPolicy" }
+      }
+    },
+    "ExternalSoftware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["DeclarationState", "Items", "EvidenceRefs", "VerificationRule"],
+      "properties": {
+        "DeclarationState": { "enum": ["DECLARED", "NOT_DECLARED", "INCOMPATIBLE"] },
+        "Items": { "type": "array", "items": { "$ref": "#/definitions/ExternalSoftwareItem" } },
+        "EvidenceRefs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "VerificationRule": { "type": "string" }
+      },
+      "allOf": [{ "if": { "properties": { "DeclarationState": { "const": "NOT_DECLARED" } }, "required": ["DeclarationState"] }, "then": { "properties": { "Items": { "maxItems": 0 }, "EvidenceRefs": { "maxItems": 0 } } } }]
+    },
+    "Prerequisites": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["SupportFiles", "Administrator", "Controllers", "ExternalSoftware"],
+      "properties": {
+        "SupportFiles": { "$ref": "GameSupportContractV1.2.schema.json#/definitions/SupportFiles" },
+        "Administrator": { "$ref": "GameSupportContractV1.2.schema.json#/definitions/Administrator" },
+        "Controllers": { "$ref": "GameSupportContractV1.2.schema.json#/definitions/Controllers" },
+        "ExternalSoftware": { "$ref": "#/definitions/ExternalSoftware" }
+      }
+    },
+    "EvidenceEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["EvidenceId", "Kind", "Repository", "Commit", "Path", "Selector", "Sha256", "Claim"],
+      "properties": {
+        "EvidenceId": { "type": "string", "minLength": 1 },
+        "Kind": { "enum": ["PROFILE_DECLARED", "GAMESETUP_DECLARED", "METADATA_DECLARED", "BACKEND_RUNTIME_CODE", "OWNER_REPORT", "GENERATOR_RULE", "CORPUS_MANIFEST", "EGGMAN_REFERENCE", "VENDOR_REFERENCE", "TESTER_REPORT"] },
+        "Repository": { "type": "string" },
+        "Commit": { "type": ["string", "null"] },
+        "Path": { "type": "string", "minLength": 1 },
+        "Selector": { "type": "string" },
+        "Sha256": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }] },
+        "Claim": { "type": "string", "minLength": 1 },
+        "SourceUrl": { "type": ["string", "null"] },
+        "RecordIdentity": { "type": ["string", "null"] },
+        "ProfileCode": { "type": ["string", "null"] },
+        "RetrievedAtUtc": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        { "if": { "properties": { "Kind": { "const": "EGGMAN_REFERENCE" } }, "required": ["Kind"] }, "then": { "required": ["SourceUrl", "RecordIdentity", "ProfileCode", "RetrievedAtUtc"] } },
+        { "if": { "properties": { "Kind": { "const": "VENDOR_REFERENCE" } }, "required": ["Kind"] }, "then": { "required": ["SourceUrl", "RecordIdentity"] } },
+        { "if": { "properties": { "Kind": { "const": "TESTER_REPORT" } }, "required": ["Kind"] }, "then": { "required": ["RecordIdentity"] } }
+      ]
+    },
+    "Evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["Corpus", "Entries", "SourceIds", "ProfileFileName", "ProfileXmlSha256", "ProfileSourcePath", "Setup", "Metadata", "FixtureIds"],
+      "properties": {
+        "Corpus": { "type": "object" },
+        "Entries": { "type": "array", "items": { "$ref": "#/definitions/EvidenceEntry" } },
+        "SourceIds": { "type": "array", "items": { "type": "string" } },
+        "ProfileFileName": { "type": "string", "minLength": 1 },
+        "ProfileXmlSha256": { "type": "string", "minLength": 1 },
+        "ProfileSourcePath": { "type": "string" },
+        "Setup": { "type": "object" },
+        "Metadata": { "type": "object" },
+        "FixtureIds": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

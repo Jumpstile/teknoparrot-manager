@@ -30,6 +30,7 @@ BeforeAll {
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-idempotency-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
     . $extractedFunctionsPath
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
     $script:PostgresRecoveryStatus = $null
@@ -60,9 +61,16 @@ BeforeAll {
         $fixtureRoot = Join-Path $TestDrive ("ecvf-fixture-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'scripts') -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'contracts\pcsx2x6') -Force | Out-Null
+        $runtimeContractDirectory = Join-Path $fixtureRoot 'scripts\resources\contracts\pcsx2x6'
+        New-Item -ItemType Directory -Path $runtimeContractDirectory -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Authority.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Authority.psm1') -Force
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Contracts.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Contracts.psm1') -Force
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $fixtureRoot 'contracts\pcsx2x6\contract.json') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\runtime-evidence-index.json') -Destination (Join-Path $fixtureRoot 'contracts\pcsx2x6\runtime-evidence-index.json') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\evidence.md') -Destination (Join-Path $fixtureRoot 'contracts\pcsx2x6\evidence.md') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\experiments.md') -Destination (Join-Path $fixtureRoot 'contracts\pcsx2x6\experiments.md') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $runtimeContractDirectory 'contract.json') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\runtime-evidence-index.json') -Destination (Join-Path $runtimeContractDirectory 'runtime-evidence-index.json') -Force
 
         $pcsx2Ast = $functionAsts | Where-Object { $_.Name -eq 'Set-Pcsx2CursorPaths' } | Select-Object -First 1
         if (-not $pcsx2Ast) { throw "Set-Pcsx2CursorPaths not found while building the ECVF contract-denial fixture" }
@@ -108,8 +116,20 @@ Describe "Virtual Beta Tester: idempotency / repeat-run safety (issue #88 phase 
         $secondResult = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path $p1 -P2Path $p2
         $afterSecondRun = Get-Content -LiteralPath $iniPath -Raw
 
-        $firstResult | Should -Be $false -Because "USB1/USB2 guncon2_cursor_path is Owner=Emulator, WritePolicy=NeverWrite -- TPM must never write it"
-        $secondResult | Should -Be $false -Because "a repeat call must deny the write identically, not eventually fall back to writing"
+        $firstResult.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $secondResult.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $firstResult.Outcome | Should -Be 'NO_OP'
+        $secondResult.Outcome | Should -Be 'NO_OP'
+        $firstResult.ProductState | Should -Be 'UNCHANGED'
+        $secondResult.ProductState | Should -Be 'UNCHANGED'
+        $firstResult.ReasonCode | Should -Be 'ECVF_DENIED'
+        $secondResult.ReasonCode | Should -Be 'ECVF_DENIED'
+        $firstResult.Mutation.Started | Should -BeFalse
+        $secondResult.Mutation.Started | Should -BeFalse
+        $firstResult.Backup.Attempted | Should -BeFalse
+        $secondResult.Backup.Attempted | Should -BeFalse
+        @($firstResult.Mutation.SkippedItems) | Should -Contain 'USB1.guncon2'
+        @($firstResult.Mutation.SkippedItems) | Should -Contain 'USB2.guncon2'
         $afterFirstRun | Should -Be $originalContent -Because "a denied write must leave emulator-owned INI content byte-identical to what the user had"
         $afterSecondRun | Should -Be $afterFirstRun -Because "repeat denial must not drift the file across runs"
     }
@@ -148,14 +168,21 @@ Describe "Virtual Beta Tester: idempotency / repeat-run safety (issue #88 phase 
 
         $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
 
-        $result | Should -Be $false
+        $result.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
+        $result.Outcome | Should -Be 'NO_OP'
+        $result.ProductState | Should -Be 'UNCHANGED'
+        $result.ReasonCode | Should -Be 'ECVF_DENIED'
+        $result.Mutation.Started | Should -BeFalse
+        $result.Backup.Attempted | Should -BeFalse
         (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "the real pcsx2x6 contract marks cursor_path Owner=Emulator, WritePolicy=NeverWrite -- the write must be denied and the emulator-owned file left untouched"
         Should -Invoke Write-Log -ParameterFilter { $msg -match 'OWNERSHIP_VIOLATION' } -Because "the skip reason must come from the real contract's ownership check, proving this exercised actual contract denial rather than the generic framework-unavailable fallback"
     }
 }
 
 Describe "Virtual Beta Tester: repeat-run backup safety (issue #88 phase 1.5 priority 2)" -Tag 'TVD-High' {
-    # New-PropagationBackup: replaces the instinctive "run it again just to
+    # New-TpmVerifiedUserProfilesBackup (the current verified UserProfiles
+    # backup API; the earlier New-PropagationBackup no longer exists):
+    # replaces the instinctive "run it again just to
     # be sure" a human tester does after Propagate Controls, plus the
     # specific defect class this catches -- a backup routine recursively
     # backing up its OWN prior backups (FullBackup\FullBackup\FullBackup\...)
@@ -167,7 +194,7 @@ Describe "Virtual Beta Tester: repeat-run backup safety (issue #88 phase 1.5 pri
     # catches an unbounded-growth defect class that would otherwise only
     # surface after months of real repeated use on a real machine.
 
-    It "running New-PropagationBackup three times in a row never backs up its own previous backups" {
+    It "running New-TpmVerifiedUserProfilesBackup three times in a row never backs up its own previous backups" {
         $userProfilesDir = Join-Path $TestDrive ("propagation-backup-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $userProfilesDir -Force | Out-Null
         New-Item -ItemType File -Path (Join-Path $userProfilesDir 'ALIENS.xml') -Force | Out-Null
@@ -175,12 +202,14 @@ Describe "Virtual Beta Tester: repeat-run backup safety (issue #88 phase 1.5 pri
 
         $results = @()
         for ($i = 1; $i -le 3; $i++) {
-            $results += New-PropagationBackup -UserProfilesDir $userProfilesDir
-            Start-Sleep -Milliseconds 1100  # backup folder names are second-resolution timestamps
+            # Folder names carry a millisecond timestamp plus a GUID, so back-to-back runs need no sleep to stay distinct.
+            $results += New-TpmVerifiedUserProfilesBackup -UserProfilesDir $userProfilesDir -Label 'PropagateControls'
         }
 
         foreach ($result in $results) {
-            $result.ErrorCount | Should -Be 0 -Because "a repeat backup run must not error even once FullBackup itself exists"
+            $result.Succeeded | Should -BeTrue -Because "a repeat backup run must not fail even once FullBackup itself exists (reason: $($result.Reason))"
+            $result.Verified | Should -BeTrue -Because "every repeat backup must pass its own manifest verification"
+            $result.FailureStage | Should -BeNullOrEmpty
         }
 
         $backupRoot = Join-Path $userProfilesDir 'FullBackup'

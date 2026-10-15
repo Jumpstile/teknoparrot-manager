@@ -126,6 +126,7 @@ function Invoke-VbtUpdateInstall {
 '@
     Set-Content -LiteralPath $extractedFunctionsPath -Value ($functionSource + "`n`n" + $updateBoundarySource) -Encoding utf8
     . $extractedFunctionsPath
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
     $script:PostgresRecoveryStatus = $null
@@ -196,7 +197,8 @@ function Invoke-VbtUpdateInstall {
 Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
 
     It "startup-calm-current-version: reports already current, no error/warning noise" {
-        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson -TagName $ScriptVersion) })
+        # The release tag must be the RUNNING identity (version plus release-candidate label): a bare $ScriptVersion tag is the later FINAL release, which the product correctly offers as an update.
+        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson -TagName (Get-ManagerVersionIdentity -ScriptVersion $ScriptVersion -ReleaseCandidateLabel $ReleaseCandidateLabel)) })
         Mock Read-Host { throw "Read-Host should not be called when already current" }
 
         $fixturePath = Join-Path $TestDrive 'startup-calm.ps1'
@@ -214,6 +216,17 @@ Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
         # appends); everything else under $TestDrive must be unchanged.
         $unexpectedChanges = Compare-Object $before $after | Where-Object { $_.InputObject -notlike '*vbt-human-workflow.log' }
         $unexpectedChanges | Should -BeNullOrEmpty -Because "scenario declares expectedStateChange: false"
+        # Demonstrate the intended behavior itself, not only the absence of an error: the user was never prompted.
+        Should -Invoke Read-Host -Times 0 -Exactly
+    }
+
+    It "startup-calm-current-version: a bare FINAL tag is offered as a later release, so the prompt IS reached (proves the no-prompt test is live)" {
+        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson -TagName $ScriptVersion) })
+        Mock Read-Host { "N" }
+        $fixturePath = Join-Path $TestDrive 'startup-final-offer.ps1'
+        Set-Content -LiteralPath $fixturePath -Value "`$ScriptVersion = `"$ScriptVersion`"" -Encoding ascii
+        Invoke-CheckForUpdates -ScriptPath $fixturePath 6>$null | Out-Null
+        Should -Invoke Read-Host -Times 1 -Exactly
     }
 
     It "update-available-explains-safety: explains what an update will do before asking" {
@@ -240,16 +253,23 @@ Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
         $fixturePath = Join-Path $root 'TeknoParrot-Manager.ps1'
         Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
         Set-ItemProperty -LiteralPath $fixturePath -Name IsReadOnly -Value $true
+        $initialIsReadOnly = (Get-Item -LiteralPath $fixturePath -Force).IsReadOnly
+        $initialIsReadOnly | Should -Be $true -Because "the scenario must begin with a protected fixture"
 
         try {
             Assert-ScenarioOutput -ScenarioId 'read-only-update-failure-actionable' -Action {
                 Invoke-CheckForUpdates -ScriptPath $fixturePath | Out-Null
             }
-            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeTrue -Because "an approved update creates its backup before the network attempt"
+            $postFailureIsReadOnly = (Get-Item -LiteralPath $fixturePath -Force).IsReadOnly
+            $postFailureIsReadOnly | Should -Be $initialIsReadOnly -Because "failed update cleanup must restore the original protection state"
+            $postFailureIsReadOnly | Should -Be $true -Because "the read-only fixture must remain protected after the failed update"
+            $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Filter 'TeknoParrot-Manager.ps1' -File -Recurse -ErrorAction Stop)
+            $backupFiles.Count | Should -Be 1 -Because "the failed update must leave one verified manager-script backup artifact"
         } finally {
             Set-ItemProperty -LiteralPath $fixturePath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
         }
     }
+
 
     It "cancel-path-no-change: declining leaves files unchanged and says so, without destructive-action language" {
         Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson) })
@@ -325,6 +345,8 @@ function Read-MainMenuChoiceResponsive {
     `$script:answerIndex++
     return [pscustomobject]@{ Redraw = `$false; Value = `$answer }
 }
+function Get-ConsoleContentWidth { return 160 }
+function Get-ConsoleContentHeight { return 60 }
 `$script:ActiveTpmWorkflowStatus = `$null
 `$script:TpmWorkflowRendering = `$false
 `$script:PostgresRecoveryStatus = `$null
@@ -333,6 +355,7 @@ function Read-MainMenuChoiceResponsive {
 `$forceRealApply = `$false
 `$Unattended = `$false
 `$menuExpanded = `$false
+`$menuNotice = ''
 `$iterations = 0
 while (`$true) {
     `$iterations++
@@ -350,7 +373,7 @@ $($menuIfAst.Extent.Text)
     }
 
     It "main-menu-invalid-option-recovers: an invalid choice prints a clear message and the menu asks again" {
-        $captured = Invoke-MainMenuHarness -AnswerQueue @('99', '15') 6>&1
+        $captured = Invoke-MainMenuHarness -AnswerQueue @('99', '16') 6>&1
         $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
 
         $scenario = Get-Scenario -Id 'main-menu-invalid-option-recovers'
@@ -368,14 +391,14 @@ $($menuIfAst.Extent.Text)
         $text.Contains('Invalid choice') | Should -Be $false
     }
 
-    It "exiting (choice 15) returns without printing an invalid-choice message" {
-        $captured = Invoke-MainMenuHarness -AnswerQueue @('15') 6>&1
+    It "exiting (choice 16) returns without printing an invalid-choice message" {
+        $captured = Invoke-MainMenuHarness -AnswerQueue @('16') 6>&1
         $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
         $text.Contains('Invalid choice') | Should -Be $false
     }
 
-    It "choice 14 returns the support mode without entering an invalid path" {
-        $captured = Invoke-MainMenuHarness -AnswerQueue @('14') 6>&1
+    It "choice 15 returns the support mode without entering an invalid path" {
+        $captured = Invoke-MainMenuHarness -AnswerQueue @('15') 6>&1
         (($captured | ForEach-Object { $_.ToString() }) -join "`n") | Should -Match 'Support'
     }
 

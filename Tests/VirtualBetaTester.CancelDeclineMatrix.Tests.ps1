@@ -26,6 +26,7 @@ BeforeAll {
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-cancel-decline-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
     . $extractedFunctionsPath
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
     $script:PostgresRecoveryStatus = $null

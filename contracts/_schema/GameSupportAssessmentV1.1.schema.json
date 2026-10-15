@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Jumpstile/teknoparrot-manager/contracts/_schema/GameSupportAssessmentV1.1.schema.json",
+  "title": "GameSupportAssessmentV1",
+  "description": "Read-only machine/runtime observations bound to one immutable GameSupportContractV1 1.3.0 snapshot.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["AssessmentId", "SchemaVersion", "ContractId", "ContractSchemaVersion", "ContractSnapshotId", "EvaluatedAtUtc", "Evaluator", "Target", "SupportFiles", "ExternalSoftware", "Privilege", "Launch", "Controls", "Evidence"],
+  "properties": {
+    "AssessmentId": { "$ref": "GameSupportAssessmentV1.schema.json#/properties/AssessmentId" },
+    "SchemaVersion": { "const": "1.1.0" },
+    "ContractId": { "$ref": "GameSupportAssessmentV1.schema.json#/properties/ContractId" },
+    "ContractSchemaVersion": { "const": "1.3.0" },
+    "ContractSnapshotId": { "$ref": "GameSupportAssessmentV1.schema.json#/properties/ContractSnapshotId" },
+    "EvaluatedAtUtc": { "$ref": "GameSupportAssessmentV1.schema.json#/properties/EvaluatedAtUtc" },
+    "Evaluator": { "$ref": "GameSupportAssessmentV1.schema.json#/properties/Evaluator" },
+    "Target": { "$ref": "GameSupportAssessmentV1.schema.json#/properties/Target" },
+    "SupportFiles": { "$ref": "GameSupportAssessmentV1.schema.json#/properties/SupportFiles" },
+    "ExternalSoftware": { "$ref": "#/definitions/ExternalSoftwareAssessment" },
+    "Privilege": { "$ref": "GameSupportAssessmentV1.schema.json#/properties/Privilege" },
+    "Launch": { "$ref": "GameSupportAssessmentV1.schema.json#/properties/Launch" },
+    "Controls": { "$ref": "GameSupportAssessmentV1.schema.json#/properties/Controls" },
+    "Evidence": { "$ref": "GameSupportAssessmentV1.schema.json#/properties/Evidence" }
+  },
+  "definitions": {
+    "ExternalSoftwareAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["Overall", "Items"],
+      "properties": {
+        "Overall": { "enum": ["SATISFIED", "BLOCKED", "REVIEW", "NOT_EVALUATED"] },
+        "Items": { "type": "array", "items": { "$ref": "#/definitions/ExternalSoftwareAssessmentItem" } }
+      }
+    },
+    "ExternalSoftwareAssessmentItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["DependencyId", "RequirementStatus", "InstalledState", "VersionState", "ArchitectureState", "SourceState", "HashState", "ObservedInstallPath", "ObservedVersion", "ObservedArchitecture", "ObservedSource", "ObservedSha256", "EvidenceRefs"],
+      "properties": {
+        "DependencyId": { "type": "string", "pattern": "^dependency-[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "RequirementStatus": { "enum": ["SATISFIED", "BLOCKED", "REVIEW", "NOT_EVALUATED"] },
+        "InstalledState": { "enum": ["PRESENT", "ABSENT", "UNKNOWN", "NOT_EVALUATED"] },
+        "VersionState": { "enum": ["VERIFIED", "MISMATCHED", "UNKNOWN", "NOT_DECLARED", "NOT_EVALUATED"] },
+        "ArchitectureState": { "enum": ["VERIFIED", "MISMATCHED", "UNKNOWN", "NOT_APPLICABLE", "NOT_EVALUATED"] },
+        "SourceState": { "enum": ["VERIFIED", "UNVERIFIED", "NOT_DECLARED", "NOT_EVALUATED"] },
+        "HashState": { "enum": ["VERIFIED", "MISMATCHED", "NOT_DECLARED", "NOT_EVALUATED"] },
+        "ObservedInstallPath": { "type": ["string", "null"] },
+        "ObservedVersion": { "type": ["string", "null"] },
+        "ObservedArchitecture": { "type": ["string", "null"] },
+        "ObservedSource": { "type": ["string", "null"] },
+        "ObservedSha256": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }] },
+        "EvidenceRefs": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    }
+  }
+}

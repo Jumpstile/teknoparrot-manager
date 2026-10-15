@@ -2,7 +2,7 @@
 
 This checklist must be completed before every version tag, ZIP build, and GitHub release.
 It is intentionally redundant: each gate catches a different failure class.
-Release state for the current cycle: v1.0 RC7 is the current published release; RC8 is the candidate being prepared and is not published; v1.0 RC6 is the previous published release (historical); final Version 1.0 remains unpublished.
+Release state for the current cycle: v1.0 RC7 is the current published release; RC8 is the unpublished candidate under review; v1.0 RC6 is the previous published release (historical); final Version 1.0 remains unpublished.
 
 Canonical current workflow: `docs/ENGINEERING-WORKFLOW.md`. Desktop ChatGPT and Desktop Codex use `C:\REPOS\teknoparrot-manager`; Arcade ChatGPT and Arcade Codex use `E:\REPOS\teknoparrot-manager`.
 
@@ -242,6 +242,16 @@ is inherently unsafe.
   guidance toward superseded RCs, preserves clearly historical references,
   and enforces BepInEx update-check/update-only wording. The normal CI Pester
   run includes `QualitySystem.Tests.ps1`; a red result blocks the release.
+- [ ] Permanent procedure gate -- every remediation report must pass the fail-closed governance gate before commit authorization:
+  ```powershell
+  pwsh -NoProfile -File .\scripts\Run-TpmQualityGate.ps1 -ReportPath <report>
+  ```
+  The report must contain the owner mapping, script-wide progress audit,
+  prompt/gate audit, affected-games repair audit, support-package audit,
+  exact validation timestamps, hunk ownership, permanent procedure compliance,
+  non-actions, and runtime owner-smoke checklist. A passing gate is not release
+  or owner-runtime authorization.
+
 
 ---
 
@@ -279,7 +289,7 @@ writes profiles, verify the following properties are still intact.
   there (preferably a tester report tied to a GitHub issue).
 
 ### Rollback / restore
-- [ ] The Restore Backup flow (mode 11) covers every new file type this
+- [ ] The Restore Backup flow (mode 12) covers every new file type this
   release touches.
 - [ ] A LaunchBox or Postgres backup taken under the previous release can
   still be restored by this release without error.
@@ -374,64 +384,68 @@ the #290 gate.
       package directory. Arcade validation must name the same SHA.
 - [ ] `git tag -a vX.YY.ZZ -m "vX.YY.ZZ"` -- tag created AFTER all docs pass.
 - [ ] `git push origin vX.YY.ZZ` -- push the tag before creating the release.
-- [ ] Release ZIP built from Scripts\ (not a temp folder), following this
-  include/exclude list (ZIP name: "TeknoParrot Manager vX.Y RCn.zip",
-  always versioned):
+- [ ] Build the exact allowlisted user ZIP from a clean source checkout using
+   `scripts\New-TPMReleasePackage.ps1`. Output must be outside the source tree
+   and must not overwrite an existing file:
+   ```powershell
+   $packagePath = Join-Path $env:TEMP "TeknoParrot Manager vX.Y RCn.zip"
+   .\scripts\New-TPMReleasePackage.ps1 -OutputPath $packagePath
+   ```
   - Include: `TeknoParrot-Manager.ps1`, `TeknoParrot-Manager.bat`,
     `TeknoParrot-Manager-README.txt`, `TeknoParrot-Manager-QuickStart.txt`,
-    `TeknoParrot-Manager-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),
-    `tools\` (the standalone `Invoke-TpmAutoUpdate.ps1` / `TpmAutoUpdate.Core.psm1`
-    helper documented in `docs/AUTO_UPDATE.md` -- omitting this folder was a
-    real pre-1.0 packaging gap; the menu-integrated "Check for Updates" option
-    does not itself depend on it, but the documented standalone helper does),
-    `scripts\Debug-TPM-MenuLayout.ps1` (RC2 menu-layout verification helper),
-    `contracts\` (the Emulator Contract Verification Framework's registered
-    contracts -- `_schema\`, `pcsx2x6\`, and any future emulator contract
-    directories, each with its `contract.json`/`evidence.md`/`experiments.md`),
-    `scripts\TPMCertification.Contracts.psm1` (the ECVF loader/validator/
-    evaluator module those contracts are read through), and
-    `scripts\TPMCertification.Authority.psm1` (imported by
-    `TPMCertification.Contracts.psm1` as its very first line -- every ECVF
-    contract load fails without it; the RC4 package shipped without this
-    file even though `TeknoParrot-Manager.ps1` itself imports
-    `TPMCertification.Contracts.psm1` at runtime for pcsx2x6 crosshair setup,
-    silently degrading contract verification to "could not load or evaluate
-    the pcsx2x6 emulator contract" on every affected install -- confirmed
-    2026-08-14, see LESSONS_LEARNED.md). All three are production runtime
-    components, not dev-only tooling -- they ship deliberately rather than
-    being duplicated into `TeknoParrot-Manager.ps1` as a parallel copy, per
-    the architectural decision that packaging should change to fit the
-    framework rather than the framework being reshaped to fit the prior
-    release layout.
+    `TeknoParrot-Manager-CHANGELOG.txt`, `LICENSE`, exactly
+    `Crosshairs\000.png` through `Crosshairs\320.png`, the bundled landscape
+    preview PNG and five TPM-owned preview SVGs,
+    `tools\Invoke-TpmAutoUpdate.ps1`, `tools\TpmAutoUpdate.Core.psm1`,
+    `scripts\TpmRequiredPatchEngine.ps1`,
+    `scripts\TpmRequiredPatchRecipes.json`,
+    `scripts\TPMCertification.Contracts.psm1`,
+    `scripts\TPMCertification.Authority.psm1`,
+    `scripts\resources\contracts\pcsx2x6\contract.json`, and
+    `scripts\resources\contracts\pcsx2x6\runtime-evidence-index.json`.
+    The user ZIP relocates only the runtime contract/index; maintainer source
+    `contracts\pcsx2x6\contract.json`, `evidence.md`, `experiments.md`,
+    `_schema\`, and snapshots stay tracked under source `contracts\` and are
+    not distributed. Source/build validation must read the actual maintainer
+    docs, resolve real headings, recompute the deterministic projection, and
+    compare the ZIP index bytes. Runtime verifies the raw contract SHA-256 and
+    complete index mapping only; it does not claim the omitted Markdown bytes
+    were checked. `scripts\Debug-TPM-MenuLayout.ps1` is a certification
+    diagnostic and is retained in source, not shipped to users. Main always
+    uses Runtime and fails closed if packaged resources are absent; it never
+    selects Source by absence. Source mode is explicit in source/build and
+    certification callers.
   - Exclude: `ReShade\` (live-fetched from reshade.me on demand, never
     bundled -- see reshade.me's own do-not-redistribute notice),
     `dgVoodoo2\` (live-fetched from the official dege-diosg/dgVoodoo2
     GitHub releases on demand, never bundled), `FFBPlugin\` and
-    `BepInExCache\` (auto-downloaded live from GitHub each run, never
-    bundled), `README.md`, `QUICKSTART.md`, `SECURITY.md`,
-    `LESSONS_LEARNED.md`, `ARCHITECTURE.md`, `RELEASE-SAFETY-CHECKLIST.md`,
-    `CLAUDE.md`, `AGENTS.md`, `CHATGPT.md`, `CODEX.md`, `ARCADE-CHATGPT.md`, `ARCADE-CLAUDE.md`, `CONSTITUTION.md`, `ENGINEERING_GOVERNANCE.md`,
-    `CONTRIBUTING.md`, `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`,
-    `INVENTORY_STANDARDS.md`,
+    `BepInExCache\` (auto-downloaded live from GitHub each run, never bundled),
+    maintainer `contracts\`, `scripts\Debug-TPM-MenuLayout.ps1`,
+    `scripts\TPMReleasePackage.Core.psm1`, `scripts\New-TPMReleasePackage.ps1`,
+    `Tests\`, `README.md`,
+    `QUICKSTART.md`, `SECURITY.md`, `LESSONS_LEARNED.md`, `ARCHITECTURE.md`,
+    `RELEASE-SAFETY-CHECKLIST.md`, `CLAUDE.md`, `AGENTS.md`, `CHATGPT.md`,
+    `CODEX.md`, `ARCADE-CHATGPT.md`, `ARCADE-CLAUDE.md`, `CONSTITUTION.md`,
+    `ENGINEERING_GOVERNANCE.md`, `CONTRIBUTING.md`,
+    `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`, `INVENTORY_STANDARDS.md`,
     `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`,
-    `PSScriptAnalyzerSettings.psd1`, `docs\`, `.github\`,
-    `*.zip`, `*.log`, `*.config.json`.
-    This list must match `AGENTS.md`'s "Release ZIP contents" exclude
-    list exactly. This section is the authoritative source; if the two
-    are ever found to disagree, update `AGENTS.md` to match this section,
-    not the other way around -- a governance-doc list that omits a
-    tracked repository-root `.md` file (as this section previously did
-    for `AGENTS.md`, `CONSTITUTION.md`, `ENGINEERING_GOVERNANCE.md`,
-    `CONTRIBUTING.md`, and the three Engineering Standards documents) is
-    a real packaging-correctness gap, not a formatting nitpick.
-- [ ] Validate the local ZIP structure before creating a release:
-  ```powershell
-  .\Tests\Test-ReleasePackage.ps1 -ZipPath "TeknoParrot Manager vX.Y RCn.zip"
-  ```
-  Expected: `CrosshairPngCount = 321`, `RootCrosshairPngs = 0`, and
-  `ForbiddenEntryCount = 0`. A release ZIP with root-level `000.png`--`320.png`
-  is invalid even if all files are present, because the runtime expects the
-  `Crosshairs\` folder next to `TeknoParrot-Manager.ps1`.
+    `PSScriptAnalyzerSettings.psd1`, `docs\`, `.github\`, `*.zip`, `*.log`,
+    `*.config.json`.
+    This list must match `AGENTS.md`'s "Release ZIP contents" include/exclude
+    mapping. This section is authoritative; if the two disagree, update
+    `AGENTS.md` to match this section.
+- [ ] Validate the local ZIP with the exact source-mapped allowlist and byte
+   checks:
+   ```powershell
+   .\Tests\Test-ReleasePackage.ps1 -ZipPath $packagePath
+   ```
+   Expected: `FileCount = 341`, `CrosshairPngCount = 321`,
+   `PathLeakCount = 0`, and `Valid = True`. The validator rejects every
+   unlisted file/directory, missing source file, changed source bytes,
+   noncanonical/rooted/traversal path, duplicate or case collision. It also
+   requires source contract and narrative files to build-check the projected
+   runtime index. A private synthetic extraction with spaces/brackets exercises
+   the packaged registry path separately from this release gate.
 - [ ] GitHub release created as a DRAFT with the ZIP attached in one step:
   ```
   gh release create vX.YY.ZZ "TeknoParrot Manager vX.Y RCn.zip" --title "..." --notes "..." --draft
@@ -516,6 +530,14 @@ Certification.
   release, runtime banner matches the release, script identity matches docs,
   README latest tag matches the release, release ZIP identity validation
   passes, and release metadata can be checked before publication.
+- [ ] Arcade OMP Packaged Runtime UX Gate (#323) completed on the exact
+      packaged source identity as the final gate before RC8 release
+      authorization: package identity/hash/assets, default and constrained
+      terminal screenshots, menu and one-letter prompt UX, ReShade
+      gallery/slider, Health Check repair routing, feature routing,
+      backup-failure truthfulness, and support-package clarity. Record logs,
+      screenshots, runtime path, branch, and exact SHA. The gate is required
+      release evidence, not release authorization.
 
 ### Phase 7 -- Report
 
@@ -757,3 +779,12 @@ silently unchecked box.
 ---
 
 _For the engineering rationale behind each item, see SECURITY.md, LESSONS_LEARNED.md, and ARCHITECTURE.md._
+## 12. Contract-first TPM remediation
+
+- [ ] Every TPM remediation change has a current slice contract under
+  `docs/remediation/slices/`, unless it is a trivial documentation typo.
+- [ ] Included owner IDs, exclusions, behavior contract, focused tests,
+  runtime proof, stop condition, and forbidden actions are recorded.
+- [ ] The control board, remediation report, provenance ledger, and hunk
+  classification agree.
+- [ ] Source, package, and runtime evidence are not conflated.
