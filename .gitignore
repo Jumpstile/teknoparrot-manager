@@ -54,3 +54,7 @@ forum-post-beta-testing.txt
 
 # Local assistant workspace state -- not part of the project, machine-local cache
 .claude/
+/pester-results.xml
+/TestResults.xml
+/TeknoParrot-Manager-game-notes.txt
+/TeknoParrotManager-Support-*.zip
