@@ -33,6 +33,11 @@ Main-component, SB3 FMOD, and Infinity Blade FX additions are mapped by
 `TPM-REQUIRED-PATCHES-INFINITYBLADEFX-001`, with paired inventories under
 `docs/remediation/inventories/`.
 
+The isolated Cross Raid receipt-composition correctness fix is mapped by
+`TPM-CROSSRAID-COMPOSITION-001` and
+`TPM-CROSSRAID-COMPOSITION-INVARIANTS-001`. It changes receipt validation only;
+the separately held Cross Raid base-shader recipe remains outside the catalog.
+
 The separate local 61-entry follow-up adds three exact Main components
 (MaiMai GreeN `freeglut.dll` and `libcurl.dll`, and the Rabbids Hollywood
 operator utility), mapped by `TPM-REQUIRED-PATCH-MAIN-EXTRAS-20261015`,

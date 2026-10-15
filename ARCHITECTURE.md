@@ -2485,6 +2485,20 @@ VF5R alternatives are likewise limited to exact build 1.001. Hybrid or
 ambiguous GPU evidence is refused; the engine does not infer which adapter a
 game uses.
 
+Schema-3 receipt composition permits one narrow exception to live validation:
+inside the exclusive-recipe gate only, an Applied single-operation CreateFile
+predecessor may be validated through a unique same-profile/root/catalog/target
+single-operation ReplaceFile chain whose Before/After SHA-256 values and file
+identities match exactly. A Restored edge ends at the original BeforeSha256 and
+the recorded RestoredFileIdentity; its retained backup and terminal checkpoint
+must validate. The receipt census is bounded to 256 directories, 262,144 bytes
+per receipt, and 16 MiB total; directory membership and receipt hashes are
+rechecked, then the target is reopened before accepting the leaf. Other
+receipts remain live-validated, multi-operation chains fail closed, and the
+chain never authorizes the predecessor's own undo. The original CreateFile
+receipt still refuses deletion when a later Undo restored the same bytes into
+a different file object.
+
 BepInEx is a required Family Guy prerequisite; its guide's
 `[Preloader.Entrypoint] Type=MonoBehaviour` setting, TeknoParrot
 registration/controls, launch, and actual gameplay remain separate

@@ -402,6 +402,129 @@ function Get-TpmPatchPlanOperations {
     return @($Plan)
 }
 
+function Read-TpmMultiPatchReceiptBytes {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][int]$MaximumBytes)
+    $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    $memory=New-Object IO.MemoryStream
+    try{
+        if($stream.Length -gt $MaximumBytes){throw 'Exclusive-group receipt exceeds the supported bound.'}
+        $buffer=New-Object byte[] 8192
+        while(($read=$stream.Read($buffer,0,$buffer.Length)) -gt 0){
+            if($memory.Length+$read -gt $MaximumBytes){throw 'Exclusive-group receipt exceeds the supported bound.'}
+            $memory.Write($buffer,0,$read)
+        }
+        if($memory.Length -ne $stream.Length){throw 'Exclusive-group receipt changed during bounded read.'}
+        return ,$memory.ToArray()
+    }finally{$memory.Dispose();$stream.Dispose()}
+}
+
+function Test-TpmMultiPatchReceiptChain {
+    param([Parameter(Mandatory)]$Plan,[Parameter(Mandatory)]$RootReceipt,[Parameter(Mandatory)][string]$RootDirectory,[Parameter(Mandatory)][string]$CatalogSha256)
+    if($Plan.Operations.Count -ne 1){return $false}
+$planTargets=@($Plan.Operations|ForEach-Object {$_.RelativeTarget});$rootOps=@($RootReceipt.Operations|Where-Object { $_.Target -is [string] -and $_.Target -in $planTargets })
+    if($rootOps.Count -ne 1 -or $RootReceipt.Operations.Count -ne 1 -or $RootReceipt.State -cne 'Applied'){return $false}
+    $targetRelative=$rootOps[0].Target
+    $rootEntry=@($Plan.CatalogEntries|Where-Object {$_.Id -ceq $RootReceipt.PatchId -and $_.ProfileId -ceq $RootReceipt.ProfileId})
+    if($rootEntry.Count -ne 1 -or $rootEntry[0].Operations.Count -ne 1 -or $RootReceipt.ProfileId -cne $Plan.ProfileId -or $RootReceipt.GameRoot -ine $Plan.GameRoot -or $RootReceipt.CatalogSha256 -ine $CatalogSha256){return $false}
+    $rootPlan=Get-TpmMultiPatchPlan -Entry $rootEntry[0] -PatchId $RootReceipt.PatchId -ProfileId $RootReceipt.ProfileId -GameRoot $Plan.GameRoot -PayloadRoot $Plan.PayloadRoot -RecoveryRoot $Plan.RecoveryRoot -CatalogSha256 $CatalogSha256 -CatalogEntries $Plan.CatalogEntries -ForUndo -Probe -ReceiptChainTarget $targetRelative
+    [void](Assert-TpmMultiPatchReceipt -Plan $rootPlan -Receipt $RootReceipt -CatalogSha256 $CatalogSha256 -Directory $RootDirectory -ReceiptChainTarget $targetRelative)
+    $rootOperation=@($rootPlan.Operations|Where-Object RelativeTarget -CEQ $targetRelative)
+    if($rootOperation.Count -ne 1 -or $rootOps[0].Type -cne 'CreateFile' -or $rootOps[0].AfterFileIdentity -cnotmatch '^[A-F0-9]{8}:[A-F0-9]{16}$'){return $false}
+    $targetPath=$rootOperation[0].Target
+    if(-not (Test-TpmNoReparsePath $targetPath)){throw 'Receipt-chain target path is unsafe.'}
+    $leaf=Open-TpmPatchCreationFile $targetPath
+    try{$liveIdentity=[TpmSupportNativeMethods]::PatchFileIdentity($leaf.SafeFileHandle);$liveHash=Get-TpmPatchStreamSha256 $leaf}finally{$leaf.Dispose()}
+    $sourceHash=$rootOps[0].AfterSha256;$sourceIdentity=$rootOps[0].AfterFileIdentity
+    if($sourceHash -ieq $liveHash -and $sourceIdentity -ceq $liveIdentity){return $false}
+    $receiptDirectories=@(Get-ChildItem -LiteralPath $Plan.RecoveryRoot -Directory -ErrorAction Stop)
+    if($receiptDirectories.Count -gt 256){throw 'Exclusive-group receipt census exceeds the 256-directory bound.'}
+    $receiptSnapshot=New-Object System.Collections.ArrayList;$totalReceiptBytes=[long]0
+    foreach($directory in $receiptDirectories){
+        if($directory.Name -notmatch '^[a-f0-9]{32}$'){continue}
+        $path=Join-Path $directory.FullName 'receipt.json'
+        if(-not [IO.File]::Exists($path) -or -not (Test-TpmNoReparsePath $path)){continue}
+        $raw=Read-TpmMultiPatchReceiptBytes -Path $path -MaximumBytes 262144
+        $totalReceiptBytes+=$raw.Length
+        if($totalReceiptBytes -gt 16777216){throw 'Exclusive-group receipt census exceeds the 16 MiB bound.'}
+        $sha=[Security.Cryptography.SHA256]::Create()
+        try{$rawHash=[BitConverter]::ToString($sha.ComputeHash($raw)).Replace('-','')}finally{$sha.Dispose()}
+        $candidate=[Text.Encoding]::UTF8.GetString($raw)|ConvertFrom-Json -ErrorAction Stop
+        [void]$receiptSnapshot.Add([pscustomobject]@{Directory=$directory;Path=$path;Receipt=$candidate;RawSha256=$rawHash})
+    }
+    $receiptDirectoryNames=@($receiptDirectories|ForEach-Object {$_.FullName}|Sort-Object -CaseSensitive)
+    $visited=@{};$visited[[string]$RootReceipt.TransactionId]=$true
+    $visitedStates=@{};$initialStateKey=[string]$sourceHash+'|'+[string]$sourceIdentity;$visitedStates[$initialStateKey]=$true
+    $validatedReceipts=New-Object System.Collections.ArrayList
+    $rootSnapshot=@($receiptSnapshot|Where-Object {$_.Directory.FullName -ieq $RootDirectory})
+    if($rootSnapshot.Count -ne 1 -or
+        (ConvertTo-Json -InputObject $rootSnapshot[0].Receipt -Depth 12 -Compress) -cne
+        (ConvertTo-Json -InputObject $RootReceipt -Depth 12 -Compress)){
+        throw 'Grouped receipt-chain root changed during bounded census.'
+    }
+    [void]$validatedReceipts.Add($rootSnapshot[0])
+    for($step=0;$step -lt 256;$step++){
+        $successorCandidates=@()
+        foreach($snapshot in $receiptSnapshot){
+            $candidate=$snapshot.Receipt
+            if($candidate.Schema -ne 3 -or $candidate.ProfileId -cne $RootReceipt.ProfileId -or $candidate.GameRoot -ine $RootReceipt.GameRoot -or $candidate.CatalogSha256 -ine $CatalogSha256){continue}
+            if($candidate.Operations -isnot [array]){continue}
+            $links=@($candidate.Operations|Where-Object {$_.Type -ceq 'ReplaceFile' -and $_.Target -ceq $targetRelative -and $_.BeforeSha256 -ieq $sourceHash -and $_.BeforeFileIdentity -ceq $sourceIdentity})
+            if($links.Count -eq 0){continue}
+            if($candidate.Operations.Count -ne 1){throw 'Grouped receipt chain operation shape unsupported.'}
+            if($links.Count -ne 1){throw 'Grouped receipt chain is ambiguous.'}
+            if($candidate.State -cnotin @('Applied','Restored')){throw 'Grouped receipt chain successor is unresolved.'}
+            $successorCandidates+=@([pscustomobject]@{Snapshot=$snapshot;Receipt=$candidate;Operation=$links[0]})
+        }
+        if($successorCandidates.Count -eq 0){return $false}
+        if($successorCandidates.Count -ne 1){throw 'Grouped receipt chain is ambiguous.'}
+        $successor=$successorCandidates[0];$candidate=$successor.Receipt
+        if($visited.ContainsKey([string]$candidate.TransactionId)){throw 'Grouped receipt chain contains a cycle.'}
+        $entry=@($Plan.CatalogEntries|Where-Object {$_.Id -ceq $candidate.PatchId -and $_.ProfileId -ceq $candidate.ProfileId})
+        if($entry.Count -ne 1){throw 'Grouped receipt chain recipe binding is invalid.'}
+        $historical=$candidate.State -ceq 'Restored'
+        $candidatePlan=Get-TpmMultiPatchPlan -Entry $entry[0] -PatchId $candidate.PatchId -ProfileId $candidate.ProfileId -GameRoot $Plan.GameRoot -PayloadRoot $Plan.PayloadRoot -RecoveryRoot $Plan.RecoveryRoot -CatalogSha256 $CatalogSha256 -CatalogEntries $Plan.CatalogEntries -ForUndo -Probe -Historical:$historical -ReceiptChainTarget $targetRelative
+        [void](Assert-TpmMultiPatchReceipt -Plan $candidatePlan -Receipt $candidate -CatalogSha256 $CatalogSha256 -Directory $successor.Snapshot.Directory.FullName -Historical:$historical -ReceiptChainTarget $targetRelative)
+        $destinationHash=if($historical){$successor.Operation.BeforeSha256}else{$successor.Operation.AfterSha256}
+        $destinationIdentity=if($historical){$successor.Operation.RestoredFileIdentity}else{$successor.Operation.AfterFileIdentity}
+        if($destinationIdentity -cnotmatch '^[A-F0-9]{8}:[A-F0-9]{16}$'){throw 'Grouped receipt chain object identity is invalid.'}
+        $stateKey=[string]$destinationHash+'|'+[string]$destinationIdentity
+        if($visitedStates.ContainsKey($stateKey)){throw 'Grouped receipt chain contains a cycle.'}
+        $visited[[string]$candidate.TransactionId]=$true;$visitedStates[$stateKey]=$true
+        [void]$validatedReceipts.Add($successor.Snapshot)
+        if($destinationHash -ieq $liveHash -and $destinationIdentity -ceq $liveIdentity){
+            if(-not (Test-TpmNoReparsePath $targetPath)){throw 'Receipt-chain target path is unsafe.'}
+            $currentDirectories=@(Get-ChildItem -LiteralPath $Plan.RecoveryRoot -Directory -ErrorAction Stop)
+            if($currentDirectories.Count -gt 256){throw 'Exclusive-group receipt census exceeds the 256-directory bound.'}
+            $currentDirectoryNames=@($currentDirectories|ForEach-Object {$_.FullName}|Sort-Object -CaseSensitive)
+            if(($currentDirectoryNames -join "`n") -cne ($receiptDirectoryNames -join "`n")){throw 'Grouped receipt census changed while validating receipt chain.'}
+            $currentReceiptHashes=@{};$currentReceiptBytes=[long]0
+            foreach($directory in $currentDirectories){
+                if($directory.Name -notmatch '^[a-f0-9]{32}$'){continue}
+                $path=Join-Path $directory.FullName 'receipt.json'
+                if(-not [IO.File]::Exists($path) -or -not (Test-TpmNoReparsePath $path)){continue}
+                $raw=Read-TpmMultiPatchReceiptBytes -Path $path -MaximumBytes 262144
+                $currentReceiptBytes+=$raw.Length
+                if($currentReceiptBytes -gt 16777216){throw 'Exclusive-group receipt census exceeds the 16 MiB bound.'}
+                $sha=[Security.Cryptography.SHA256]::Create()
+                try{$hash=[BitConverter]::ToString($sha.ComputeHash($raw)).Replace('-','')}finally{$sha.Dispose()}
+                $currentReceiptHashes[$path]=$hash
+            }
+            if($currentReceiptHashes.Count -ne $receiptSnapshot.Count){throw 'Grouped receipt census changed while validating receipt chain.'}
+            foreach($snapshot in $receiptSnapshot){
+                if(-not $currentReceiptHashes.ContainsKey($snapshot.Path) -or $currentReceiptHashes[$snapshot.Path] -ine $snapshot.RawSha256){
+                    throw 'Grouped receipt changed while validating receipt chain.'
+                }
+            }
+            $final=Open-TpmPatchCreationFile $targetPath
+            try{$finalIdentity=[TpmSupportNativeMethods]::PatchFileIdentity($final.SafeFileHandle);$finalHash=Get-TpmPatchStreamSha256 $final}finally{$final.Dispose()}
+            if($finalHash -ine $liveHash -or $finalIdentity -cne $liveIdentity){throw 'Grouped target changed while validating receipt chain.'}
+            return $true
+        }
+        $sourceHash=$destinationHash;$sourceIdentity=$destinationIdentity
+    }
+    throw 'Grouped receipt chain exceeds the supported bound.'
+}
+
 function Assert-TpmMultiPatchExclusive {
     param([Parameter(Mandatory)]$Plan,[Parameter(Mandatory)][string]$CatalogSha256,[switch]$IncludePrepared)
     if(-not $Plan.ExclusiveGroup -or -not [IO.Directory]::Exists($Plan.RecoveryRoot)){return}
@@ -418,8 +541,19 @@ function Assert-TpmMultiPatchExclusive {
         $entry=@($Plan.CatalogEntries|Where-Object Id -CEQ $record.PatchId)
         if($entry.Count -ne 1){throw 'Recorded grouped recipe is absent from the approved catalog; undo it using its retained package first.'}
         $historical=($record.State -cin @('Restored','RolledBack'))
-        $other=Get-TpmMultiPatchPlan -Historical:$historical -Entry $entry[0] -PatchId $entry[0].Id -ProfileId $entry[0].ProfileId -GameRoot $Plan.GameRoot -PayloadRoot $Plan.PayloadRoot -RecoveryRoot $Plan.RecoveryRoot -CatalogSha256 $record.CatalogSha256 -CatalogEntries $Plan.CatalogEntries -ForUndo -Probe
-        [void](Assert-TpmMultiPatchReceipt -Plan $other -Receipt $record -CatalogSha256 $record.CatalogSha256 -Directory $directory.FullName -Historical:$historical)
+        try {
+            $other=Get-TpmMultiPatchPlan -Historical:$historical -Entry $entry[0] -PatchId $entry[0].Id -ProfileId $entry[0].ProfileId -GameRoot $Plan.GameRoot -PayloadRoot $Plan.PayloadRoot -RecoveryRoot $Plan.RecoveryRoot -CatalogSha256 $record.CatalogSha256 -CatalogEntries $Plan.CatalogEntries -ForUndo -Probe
+            [void](Assert-TpmMultiPatchReceipt -Plan $other -Receipt $record -CatalogSha256 $record.CatalogSha256 -Directory $directory.FullName -Historical:$historical)
+        } catch {
+            $failure=$_
+            if($record.State -ceq 'Applied' -and $failure.Exception.Message -cin @('Grouped target conflict.','Grouped target object identity changed.')){
+                if(Test-TpmMultiPatchReceiptChain -Plan $Plan -RootReceipt $record -RootDirectory $directory.FullName -CatalogSha256 $CatalogSha256){
+                    if($record.ExclusiveGroup -ieq $Plan.ExclusiveGroup -and ($record.PatchId -cne $Plan.PatchId -or $record.CatalogSha256 -ine $CatalogSha256)){throw 'An exclusive recipe is active; undo it before selecting another variant.'}
+                    continue
+                }
+            }
+            throw $failure
+        }
         if($record.State -ceq 'Applied' -and $other.ExclusiveGroup -ieq $Plan.ExclusiveGroup -and
             ($record.PatchId -cne $Plan.PatchId -or $record.CatalogSha256 -ine $CatalogSha256)){
             throw 'An exclusive recipe is active; undo it before selecting another variant.'
@@ -430,8 +564,10 @@ function Assert-TpmMultiPatchExclusive {
 function Get-TpmMultiPatchPlan {
     param([Parameter(Mandatory)]$Entry,[Parameter(Mandatory)][string]$PatchId,[Parameter(Mandatory)][string]$ProfileId,
         [Parameter(Mandatory)][string]$GameRoot,[Parameter(Mandatory)][string]$PayloadRoot,[Parameter(Mandatory)][string]$RecoveryRoot,
-        [Parameter(Mandatory)][string]$CatalogSha256,[Parameter(Mandatory)][array]$CatalogEntries,[switch]$ForUndo,[switch]$Probe,[switch]$Historical)
+        [Parameter(Mandatory)][string]$CatalogSha256,[Parameter(Mandatory)][array]$CatalogEntries,[switch]$ForUndo,[switch]$Probe,[switch]$Historical,[string]$ReceiptChainTarget='')
     if($Historical -and (-not $ForUndo -or -not $Probe)){throw 'Historical plans are only valid for completed receipt inspection.'}
+    if($ReceiptChainTarget -and (-not $ForUndo -or -not $Probe -or @($Entry.Operations|Where-Object Target -CEQ $ReceiptChainTarget).Count -ne 1)){throw 'Receipt-chain structural inspection is internal to the exclusive gate.'}
+    if($ReceiptChainTarget -and (Get-PSCallStack)[1].FunctionName -cne 'Test-TpmMultiPatchReceiptChain'){throw 'Receipt-chain structural inspection is internal to the exclusive gate.'}
     if($Entry.Operations -isnot [array] -or $Entry.Operations.Count -lt 1 -or $Entry.Operations.Count -gt 256){throw 'Grouped recipes require 1..256 file operations.'}
     if($Entry.ExclusiveGroup -isnot [string] -or ($Entry.ExclusiveGroup -and $Entry.ExclusiveGroup -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$')){throw 'Invalid exclusive group.'}
     $selfExecutable = $Entry.PSObject.Properties['AllowExecutableSelfPatch'] -and $Entry.AllowExecutableSelfPatch
@@ -471,9 +607,11 @@ function Get-TpmMultiPatchPlan {
             $state=Get-TpmFileState $target
             if(-not $state.Readable -or $state.IsDirectory -or ($state.Exists -and ($state.Attributes -band [int][IO.FileAttributes]::ReadOnly))){throw 'Grouped target is unknown, a directory or read-only.'}
             if($selfExecutable -and $target -ieq $exe -and $state.Sha256 -ine $executableSha256){throw 'Executable changed while planning self-patch.'}
-            $before=($create -and -not $state.Exists) -or (-not $create -and $state.Exists -and $state.Sha256 -ieq $operation.BeforeSha256)
-            $after=$state.Exists -and $state.Sha256 -ieq $operation.AfterSha256
-            if($before){$ready++}elseif($after){$applied++}else{throw 'Grouped target conflict.'}
+            if(-not ($ReceiptChainTarget -and $operation.Target -ceq $ReceiptChainTarget)){
+                $before=($create -and -not $state.Exists) -or (-not $create -and $state.Exists -and $state.Sha256 -ieq $operation.BeforeSha256)
+                $after=$state.Exists -and $state.Sha256 -ieq $operation.AfterSha256
+                if($before){$ready++}elseif($after){$applied++}else{throw 'Grouped target conflict.'}
+            }
         }elseif($selfExecutable){
             $state=Get-TpmFileState $target
             if(-not $state.Readable -or $state.IsDirectory -or $state.Sha256 -ine $executableSha256 -or
@@ -481,8 +619,8 @@ function Get-TpmMultiPatchPlan {
         }
         $operations+=@([pscustomobject]@{Operation=$operation.Type;Target=$target;RelativeTarget=$operation.Target;Payload=$payload;BeforeSha256=$(if($create){''}else{$operation.BeforeSha256});AfterSha256=$operation.AfterSha256})
     }
-    if(-not $Historical -and $ready -ne $operations.Count -and $applied -ne $operations.Count){throw 'Mixed/partially applied target set; no writes are authorized.'}
-    $plan=[pscustomobject]@{Status=$(if($Historical){'Historical'}elseif($ready -eq $operations.Count){'Ready'}else{'AlreadyApplied'});Reason=$null;Operation='MultiFile';Operations=$operations;PatchId=$PatchId;ProfileId=$ProfileId;GameRoot=$GameRoot;PayloadRoot=$PayloadRoot;RecoveryRoot=$RecoveryRoot;Target=[string]::Join(', ',@($operations.RelativeTarget));Executable=$exe;ExecutableSha256=$Entry.ExecutableSha256;ExecutableSelfPatch=[bool]$selfExecutable;SourceUrl=$Entry.SourceUrl;SourceRevision=$Entry.SourceRevision;ExclusiveGroup=$Entry.ExclusiveGroup;CatalogEntries=$CatalogEntries}
+    if(-not $Historical -and -not $ReceiptChainTarget -and $ready -ne $operations.Count -and $applied -ne $operations.Count){throw 'Mixed/partially applied target set; no writes are authorized.'}
+    $plan=[pscustomobject]@{Status=$(if($Historical){'Historical'}elseif($ReceiptChainTarget){'Structural'}elseif($ready -eq $operations.Count){'Ready'}else{'AlreadyApplied'});Reason=$null;Operation='MultiFile';Operations=$operations;PatchId=$PatchId;ProfileId=$ProfileId;GameRoot=$GameRoot;PayloadRoot=$PayloadRoot;RecoveryRoot=$RecoveryRoot;Target=[string]::Join(', ',@($operations.RelativeTarget));Executable=$exe;ExecutableSha256=$Entry.ExecutableSha256;ExecutableSelfPatch=[bool]$selfExecutable;SourceUrl=$Entry.SourceUrl;SourceRevision=$Entry.SourceRevision;ExclusiveGroup=$Entry.ExclusiveGroup;CatalogEntries=$CatalogEntries}
     if(-not $Probe){Assert-TpmMultiPatchExclusive $plan $CatalogSha256}
     if(-not $Probe -and $plan.Status -ceq 'AlreadyApplied'){
         $found=@()
@@ -502,8 +640,10 @@ function Get-TpmMultiPatchPlan {
 }
 
 function Assert-TpmMultiPatchReceipt {
-    param([Parameter(Mandatory)]$Plan,[Parameter(Mandatory)]$Receipt,[Parameter(Mandatory)][string]$CatalogSha256,[Parameter(Mandatory)][string]$Directory,[switch]$Historical)
+    param([Parameter(Mandatory)]$Plan,[Parameter(Mandatory)]$Receipt,[Parameter(Mandatory)][string]$CatalogSha256,[Parameter(Mandatory)][string]$Directory,[switch]$Historical,[string]$ReceiptChainTarget='')
     if($Historical -and ($Plan.Status -cne 'Historical' -or $Receipt.State -cnotin @('Restored','RolledBack'))){throw 'Only completed receipts may use historical validation.'}
+    if($ReceiptChainTarget -and $Plan.Status -notin @('Structural','Historical')){throw 'Receipt-chain validation requires a structural plan.'}
+    if($ReceiptChainTarget -and (Get-PSCallStack)[1].FunctionName -cne 'Test-TpmMultiPatchReceiptChain'){throw 'Receipt-chain validation is internal to the exclusive gate.'}
     Assert-TpmPatchFields $Receipt @('Schema','PatchId','CatalogSha256','ProfileId','GameRoot','TransactionId','ExclusiveGroup','State','Operations')
     foreach($field in @('PatchId','CatalogSha256','ProfileId','GameRoot','TransactionId','ExclusiveGroup','State')){if($Receipt.PSObject.Properties[$field].Value -isnot [string]){throw 'Invalid grouped receipt field.'}}
     if(($Receipt.Schema -isnot [int] -and $Receipt.Schema -isnot [long]) -or $Receipt.Schema -ne 3 -or
@@ -525,6 +665,7 @@ function Assert-TpmMultiPatchReceipt {
             (($Receipt.State -ceq 'Restored' -and $record.RestoredFileIdentity -cnotmatch '^[A-F0-9]{8}:[A-F0-9]{16}$') -or
             ($Receipt.State -ceq 'RolledBack' -and $record.RestoredFileIdentity -cne ''))){throw 'Invalid grouped completed file identity.'}
         if($Historical){continue}
+        if($ReceiptChainTarget -and $record.Target -ceq $ReceiptChainTarget){continue}
         $after=($Receipt.State -ceq 'Applied')
         if(-not (Test-TpmPatchTargetState $expected $after)){throw 'Grouped receipt target state changed.'}
         if($after -or $record.Type -ceq 'ReplaceFile'){
