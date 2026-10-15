@@ -164,17 +164,31 @@ Enter 1-16:
 ```
 </details>
 
+Infinity Blade FX 1.02 has two independent missing-file repairs for
+Binaries/Win32/matrix32.dll and Binaries/Win32/dinput8.dll. Both require
+matrix32.TEKNOPARROT.dll and TPFIX.ini in that directory to be present.
+Presence does not validate their bytes or configuration. TPM does not
+rename the original library, edit TPFIX.ini, or choose the first-launch
+TeknoParrot.dll path. Compatibility and gameplay remain separate checks.
+
 **Required game patches:** choose option 10 to review supported required
-patches. The current local owner-test catalog has 24 exact recipes across 18
+patches. The current local owner-test catalog has 58 exact recipes across 22
 exact ProfileId/build/executable identities. It preserves the historical
 13-entry baseline and adds three Taisen Hot Gimmick 5 (2.04) single-file
 restores, three exact-build user-selected plugin restores (Mars Sortie 1.46.9,
-the separate Rabbids Hollywood operator plugin, and SB3 1.91 x64), and five
-native recipes for Cross Raid 1.05, VF5R 1.001, and Sonic Dash Extreme.
-Sixteen `CreateFile` operations create only absent targets; eight `ReplaceFile`
-operations require the exact known before-state. Exact-after targets skip;
-unknown or other target states are refused. Full semantic guide coverage and
-gameplay readiness are not claimed.
+the separate Rabbids Hollywood operator plugin, and SB3 1.91 x64), five
+native recipes for Cross Raid 1.05, VF5R 1.001, and Sonic Dash Extreme, and
+34 Main-component restorations: 14 Hummer, 14 Hummer Extreme, two Primeval
+Hunt, two SB3 FMOD, and two Infinity Blade FX 1.02. Fifty `CreateFile` operations create only
+absent targets; eight `ReplaceFile` operations require the exact known
+before-state. Exact-after targets skip; unknown or other states are
+refused. Full semantic guide coverage and gameplay readiness are not claimed.
+
+The 30 Main restorations do not establish Hummer Extreme frame-count behavior,
+Primeval Hunt `ElfLdr2` copy identity, or its modern NVIDIA fog behavior.
+SB3's two FMOD restorations are separate absent-only operations, not an atomic
+pair; DLL version, pair compatibility, audio, and full setup readiness remain
+unverified.
 
 The Taisen files are restorations only. Configure and save keyboard keys
 with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by the game
@@ -189,8 +203,10 @@ check. Family Guy also requires its documented
 `[Preloader.Entrypoint] Type=MonoBehaviour` setting. Rabbids' operator plugin
 is separate from the `Assembly-CSharp.dll` restore. SB3's Main archive
 already contains its plugin bytes; the recipe restores only an absent
-installed target. SB3 FMOD placement/version readiness remains unresolved.
-Silent Hill's Windows codec BAT is separate and is not executed or installed.
+installed target. The two FMOD recipes separately restore missing
+`fmod64.dll` and `fmodstudio64.dll` Main members; DLL version and pair
+compatibility remain unverified. Silent Hill's Windows codec BAT is separate
+and is not executed or installed.
 
 BBCP Chronophantasma replaces only its exact known driver before-hash with
 the guide-required hash from the named Central Fiction Main ZIP. Elysion,

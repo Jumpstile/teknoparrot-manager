@@ -1,0 +1,64 @@
+{
+  "Schema": "TPM.RequiredPatch.ManagedPluginFragment.v1",
+  "BaseCatalog": {
+    "Schema": 3,
+    "EntryCount": 24,
+    "Sha256": "283DB40B0A17F3FEF2BC758D8123209B87C07731E433CECFE96DE1E2C69C5CE8"
+  },
+  "Entries": [
+    {
+      "Id": "sb3-fmod64-main-restore",
+      "ProfileId": "SB3",
+      "BuildName": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills][TP]",
+      "Executable": "fnfmega.exe",
+      "ExecutableSha256": "7F84AE68A35587EA87312ED59247EB0379F00826B8F2473A09155792A90AEEAD",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "fnfmega_Data/Plugins/x86_64/fmod64.dll",
+      "SourceSize": 1755648,
+      "SourceSha1": "F062F4158722FC833D470DAF2BD7333AC003A958",
+      "SourceSha256": "E3508221439C073EC01391680D14125C7B72BB32280BDC0A90D980A2AE143FD2",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "fnfmega_Data/Plugins/x86_64/fmod64.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "E3508221439C073EC01391680D14125C7B72BB32280BDC0A90D980A2AE143FD2",
+          "Payload": "payload/fmod64.dll",
+          "PayloadSha256": "E3508221439C073EC01391680D14125C7B72BB32280BDC0A90D980A2AE143FD2"
+        }
+      ]
+    },
+    {
+      "Id": "sb3-fmodstudio64-main-restore",
+      "ProfileId": "SB3",
+      "BuildName": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills][TP]",
+      "Executable": "fnfmega.exe",
+      "ExecutableSha256": "7F84AE68A35587EA87312ED59247EB0379F00826B8F2473A09155792A90AEEAD",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills PC][TP].zip",
+      "SourceEntry": "fnfmega_Data/Plugins/x86_64/fmodstudio64.dll",
+      "SourceSize": 1419264,
+      "SourceSha1": "A3A614C1EA5891FEEEA06EC86FD7BA1DA441C853",
+      "SourceSha256": "CFE1D74BB4EA8BFD842EE8CBCCB3FDE61F366AD0BB01AF59965CCF304425DBAB",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "fnfmega_Data/Plugins/x86_64/fmodstudio64.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "CFE1D74BB4EA8BFD842EE8CBCCB3FDE61F366AD0BB01AF59965CCF304425DBAB",
+          "Payload": "payload/fmodstudio64.dll",
+          "PayloadSha256": "CFE1D74BB4EA8BFD842EE8CBCCB3FDE61F366AD0BB01AF59965CCF304425DBAB"
+        }
+      ]
+    }
+  ]
+}

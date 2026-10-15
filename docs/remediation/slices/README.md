@@ -26,6 +26,11 @@ The current pointer also carries bounded supplemental behavior contracts for Lib
 
 Issue #351's required-patch integration is tracked separately in
 `TPM-REQUIRED-PATCHES-REVIEW-001.md`; its source/test evidence does not change
-PR #321 owner-report status or imply owner-runtime acceptance.
+PR #321 owner-report status or imply owner-runtime acceptance. The current
+Main-component, SB3 FMOD, and Infinity Blade FX additions are mapped by
+`TPM-REQUIRED-PATCHES-MAIN-COMPONENTS-001`,
+`TPM-REQUIRED-PATCHES-SB3-FMOD-001`, and
+`TPM-REQUIRED-PATCHES-INFINITYBLADEFX-001`, with paired inventories under
+`docs/remediation/inventories/`.
 
 Slice 0 current implementation: `TPM-RELEASE-SNAPSHOT-001`.

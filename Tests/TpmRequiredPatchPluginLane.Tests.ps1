@@ -165,7 +165,7 @@ Describe 'Managed plugin recipe fragment' {
             $script:pluginLanePathQueue.Count | Should -Be 0
             @(Get-ChildItem -LiteralPath $temp -Directory -ErrorAction Stop).Count | Should -Be 0
             $script:TpmOwnedLayout=$null
-            $script:TpmRequiredPatchCatalogSha256='283DB40B0A17F3FEF2BC758D8123209B87C07731E433CECFE96DE1E2C69C5CE8'
+            $script:TpmRequiredPatchCatalogSha256='F86F09A8BD2749DC9C4531CD1D00A69BF07D85B14A8D281D33767732ED5B720A'
         }
         Assert-MockCalled Invoke-TpmCatalogPatch -Times 0 -Exactly
     }
@@ -215,7 +215,7 @@ Describe 'Managed plugin recipe fragment' {
             $conflict.Reason | Should -Be 'Grouped target conflict.'
             [IO.File]::ReadAllText($target) | Should -Be 'unknown third-party file; never execute'
             $script:TpmOwnedLayout=$null
-            $script:TpmRequiredPatchCatalogSha256='283DB40B0A17F3FEF2BC758D8123209B87C07731E433CECFE96DE1E2C69C5CE8'
+            $script:TpmRequiredPatchCatalogSha256='F86F09A8BD2749DC9C4531CD1D00A69BF07D85B14A8D281D33767732ED5B720A'
         }
     }
     It 'stages only the exact hash-pinned member from a synthetic ordinary ZIP' {

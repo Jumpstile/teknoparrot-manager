@@ -92,11 +92,11 @@ tree is for review, certification, and release preparation only.
 - **GPU fixes** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
 - **Force feedback (FFB)** — native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed), covering different games. If a game is covered by both, you're asked once which to use for all such games.
 - **BepInEx setup** — user-approved install, update, or repair-reset for selected games using stable x64/x86 packages with verified backup and rollback.
-- **Required game patches** -- installs 24 evidence-pinned recipes across 18
-  exact ProfileId/build/executable identities from local ZIPs. Sixteen recipes
-  create only absent files; eight require an exact known before-state. Hardware
-  alternatives require unambiguous captured evidence. Unknown target bytes are
-  refused; patch success does not prove readiness.
+- **Required game patches** -- installs 58 evidence-pinned recipes across 22
+  exact ProfileId/build/executable identities from local ZIPs. Fifty
+  operations create only absent files; eight require an exact known
+  before-state. Hardware alternatives require unambiguous captured evidence.
+  Unknown target bytes are refused; patch success does not prove readiness.
 - **Postgres setup** — installs and configures the local PostgreSQL 8.3 database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball). Detects which registered games need it automatically; never reinstalls Postgres or recreates an existing database.
 - **Automatic compatibility warnings** — every run checks for known install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6), pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN), and known GPU-vendor incompatibilities (AMD/Intel), with details in ACTION REQUIRED.
 - **Game-specific setup notes** — every run checks the community compatibility database (eggmansworld.github.io/TeknoParrot) for any registered game with special setup notes — workarounds, known quirks, and the expected executable name — and writes them to the separate `TeknoParrot-Manager-game-notes.txt` report. Raw source notes are not copied into ACTION REQUIRED.
@@ -271,18 +271,31 @@ supports **manual** installation into an already-installed game folder, even
 when that game is not registered yet. Manual install does not register it;
 TPM tells you to register it and configure controls afterward.
 
-The current local RC8 owner-test catalog contains 24 exact-build recipes
-across 18 exact ProfileId/build/executable identities. It preserves the
+The current local RC8 owner-test catalog contains 58 exact-build recipes
+across 22 exact ProfileId/build/executable identities. It preserves the
 historical 13-entry PR #353 baseline and adds three Taisen Hot Gimmick 5
 (2.04) single-file restores (`TTX-Monitor.dll`, `TTX-Config.exe`, and
 `TTX-Loader.exe`); three exact-build user-selected plugin restores (Mars
 Sortie 1.46.9, the separate Rabbids Hollywood operator plugin, and Super
-Bikes 3 1.91 x64); and five native recipes (Cross Raid 1.05 AMD/NVIDIA
-shader alternatives, VF5R 1.001 AMD/NVIDIA shader alternatives, and one
-explicitly opted-in Sonic Dash Extreme self-executable replacement). The
-catalog has 16 absent-only `CreateFile` operations and eight exact-before
-`ReplaceFile` operations. This is exact-component support, not full semantic
-guide coverage.
+Bikes 3 1.91 x64); five native shader/executable recipes (Cross Raid 1.05,
+VF5R 1.001, and Sonic Dash Extreme); 30 Hummer, Hummer Extreme, and Primeval
+Hunt Main-component restores; two SB3 FMOD Main-component restores; and two
+Infinity Blade FX 1.02 Main-component restores. The catalog has 50 absent-only
+`CreateFile` operations and eight exact-before `ReplaceFile` operations. This
+is exact-component support, not full semantic guide coverage.
+
+The 30 Hummer, Hummer Extreme, and Primeval Hunt entries restore only absent
+Main-component paths. Hummer Extreme frame-count requirements, Primeval
+Hunt's `ElfLdr2` library-copy identity, and its modern NVIDIA fog caveat
+remain outside these recipes. The two SB3 FMOD files and two Infinity Blade FX
+files are separate absent-only operations, not atomic pairs. Infinity requires
+the presence of the preserved original `matrix32.TEKNOPARROT.dll` and
+`TPFIX.ini`; these paths are presence-only checks, not content or version
+validation. The authored procedure preserves the original `matrix32.dll` as
+`matrix32.TEKNOPARROT.dll`; TPM does not perform that rename, edit `TPFIX.ini`,
+or select the first-launch path. The authored first-launch step selects the
+TeknoParrot installation's `TeknoParrot.dll`. DLL pairing, audio, full setup,
+and gameplay remain unverified.
 
 The Taisen files are restorations only. Configure and save keyboard keys
 with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by the game

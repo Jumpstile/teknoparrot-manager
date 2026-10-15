@@ -23439,7 +23439,7 @@ Describe 'Required patch engine and local recipes' {
         $script:requiredPatchInputQueue = $null
     }
     AfterEach {
-        $script:TpmRequiredPatchCatalogSha256 = '283DB40B0A17F3FEF2BC758D8123209B87C07731E433CECFE96DE1E2C69C5CE8'
+        $script:TpmRequiredPatchCatalogSha256 = 'F86F09A8BD2749DC9C4531CD1D00A69BF07D85B14A8D281D33767732ED5B720A'
         $script:TpmOwnedLayout = $null
         $script:gamesInstallFolder = $null
         $script:requiredPatchInputQueue = $null
@@ -23723,9 +23723,44 @@ Describe 'Required patch engine and local recipes' {
         $script:TpmOwnedLayout = $null
     }
 
-    It 'binds the new native shader and executable recipes to exact build and source identities' {
+    It 'binds all current catalog expansion rows to exact build and source identities' {
         $catalog = Read-TpmRequiredPatchCatalog -ProgramRoot ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')))
-        $catalog.Entries.Count | Should -Be 24
+        $catalog.Entries.Count | Should -Be 58
+        @($catalog.Entries.ProfileId | Sort-Object -Unique).Count | Should -Be 22
+        @($catalog.Entries | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProfileId,$_.BuildName,$_.Executable,$_.ExecutableSha256 } | Sort-Object -Unique).Count | Should -Be 22
+        @($catalog.Entries | ForEach-Object { $_.Operations } | Where-Object Type -CEQ 'CreateFile').Count | Should -Be 50
+        @($catalog.Entries | ForEach-Object { $_.Operations } | Where-Object Type -CEQ 'ReplaceFile').Count | Should -Be 8
+        $infinityExpectedRows = @(
+            [pscustomobject]@{ Id='infinity-blade-fx-matrix32-main-restore'; Target='Binaries/Win32/matrix32.dll'; Size=109056; Sha1='355E6F9557BAFC726694DC2E40820FF8429D61FB'; Sha256='CB25982F65A32E3D29B3F449BD8CCF2E4A4B47CA3096B454B6910341B213D547' }
+            [pscustomobject]@{ Id='infinity-blade-fx-dinput8-main-restore'; Target='Binaries/Win32/dinput8.dll'; Size=2058752; Sha1='72E6862972409A4685545B21C0C687766F83DADC'; Sha256='E7E149EE9E8B64E23B739E236E5A61CAB7F2F56E632082993A95F05DE7D6CCB1' }
+        )
+        foreach ($expected in $infinityExpectedRows) {
+            $entry = @($catalog.Entries | Where-Object Id -CEQ $expected.Id)[0]
+            $entry.ProfileId | Should -BeExactly 'InfinityBladeFX'
+            $entry.BuildName | Should -BeExactly 'Infinity Blade FX (1.02)(2020)[Adrenaline PC][TP]'
+            $entry.Executable | Should -BeExactly 'Binaries/Win32/SwordGame.exe'
+            $entry.ExecutableSha256 | Should -BeExactly '8E605C3748C6D3D45832F40316C1FEC35D2507E31E51A5F85DCB3B664DA72D24'
+            $entry.SourceRole | Should -BeExactly 'Main'
+            $entry.SourceSet | Should -BeExactly 'Infinity Blade FX (1.02)(2020)[Adrenaline PC][TP].zip'
+            $entry.SourceEntry | Should -BeExactly $expected.Target
+            $entry.SourceSize | Should -Be $expected.Size
+            $entry.SourceSha1 | Should -BeExactly $expected.Sha1
+            $entry.SourceSha1.Length | Should -Be 40
+            $entry.SourceSha256 | Should -BeExactly $expected.Sha256
+            $entry.Operations.Count | Should -Be 1
+            $entry.Operations[0].Type | Should -BeExactly 'CreateFile'
+            $entry.Operations[0].Target | Should -BeExactly $expected.Target
+            $entry.Operations[0].BeforeState | Should -BeExactly 'Absent'
+            $entry.Operations[0].AfterSha256 | Should -BeExactly $expected.Sha256
+            $entry.Operations[0].PayloadSha256 | Should -BeExactly $expected.Sha256
+            @($entry.Prerequisites).Count | Should -Be 2
+            @($entry.Prerequisites | Where-Object { $_.Path -ceq 'Binaries/Win32/matrix32.TEKNOPARROT.dll' }).Count | Should -Be 1
+            @($entry.Prerequisites | Where-Object { $_.Path -ceq 'Binaries/Win32/TPFIX.ini' }).Count | Should -Be 1
+            @($entry.Prerequisites | Where-Object { $_.Type -cne 'File' }).Count | Should -Be 0
+            @($entry.Prerequisites | ForEach-Object { $_.PSObject.Properties.Name | Where-Object { $_ -match 'Sha|Version|Section|Key|Value' } }).Count | Should -Be 0
+            $entry.PSObject.Properties['HardwarePredicate'] | Should -BeNullOrEmpty
+            $entry.PSObject.Properties['AllowExecutableSelfPatch'] | Should -BeNullOrEmpty
+        }
         $newIds = @(
             'shining-force-cross-raid-105-amd-shader'
             'shining-force-cross-raid-105-nvidia-shader'
@@ -23734,6 +23769,42 @@ Describe 'Required patch engine and local recipes' {
             'virtua-fighter-5-r-1001-nvidia-shader'
         )
         foreach ($id in $newIds) { @($catalog.Entries | Where-Object Id -CEQ $id).Count | Should -Be 1 }
+        $mainComponentIds = @(
+            'hummer-main-component-data-global-nnstdshader-nnstdshader-frag'
+            'hummer-main-component-data-global-nnstdshader-nnstdshader-vert'
+            'hummer-main-component-data-global-shader-gauss2-frag'
+            'hummer-main-component-data-global-shader-gauss2-vert'
+            'hummer-main-component-data-global-shader-gauss2-a-frag'
+            'hummer-main-component-data-global-shader-gauss2-a-vert'
+            'hummer-main-component-data-global-shader-gauss2-a-to-c-frag'
+            'hummer-main-component-data-global-shader-gauss2-a-to-c-vert'
+            'hummer-main-component-data-global-shader-gauss-x-frag'
+            'hummer-main-component-data-global-shader-gauss-x-vert'
+            'hummer-main-component-data-global-shader-gauss-y-frag'
+            'hummer-main-component-data-global-shader-gauss-y-vert'
+            'hummer-main-component-data-global-shader-hdr-frag'
+            'hummer-main-component-data-global-shader-hdr-vert'
+            'hummerextreme-main-component-data-global-nnstdshader-nnstdshader-frag'
+            'hummerextreme-main-component-data-global-nnstdshader-nnstdshader-vert'
+            'hummerextreme-main-component-data-global-shader-gauss2-frag'
+            'hummerextreme-main-component-data-global-shader-gauss2-vert'
+            'hummerextreme-main-component-data-global-shader-gauss2-a-frag'
+            'hummerextreme-main-component-data-global-shader-gauss2-a-vert'
+            'hummerextreme-main-component-data-global-shader-gauss2-a-to-c-frag'
+            'hummerextreme-main-component-data-global-shader-gauss2-a-to-c-vert'
+            'hummerextreme-main-component-data-global-shader-gauss-x-frag'
+            'hummerextreme-main-component-data-global-shader-gauss-x-vert'
+            'hummerextreme-main-component-data-global-shader-gauss-y-frag'
+            'hummerextreme-main-component-data-global-shader-gauss-y-vert'
+            'hummerextreme-main-component-data-global-shader-hdr-frag'
+            'hummerextreme-main-component-data-global-shader-hdr-vert'
+            'primevil-main-component-disk0-data-nnstdshader-nnstdshader-frag'
+            'primevil-main-component-disk0-data-nnstdshader-nnstdshader-vert'
+        )
+        $fmodIds = @('sb3-fmod64-main-restore','sb3-fmodstudio64-main-restore')
+        foreach ($id in ($mainComponentIds + $fmodIds + @($infinityExpectedRows.Id))) {
+            @($catalog.Entries | Where-Object Id -CEQ $id).Count | Should -Be 1
+        }
         $amd = @($catalog.Entries | Where-Object Id -CEQ $newIds[0])[0]
         $nvidia = @($catalog.Entries | Where-Object Id -CEQ $newIds[1])[0]
         foreach ($entry in @($amd,$nvidia)) {
@@ -24360,7 +24431,7 @@ Describe 'Required patch engine and local recipes' {
         [IO.File]::ReadAllText($requiredPatchFixture.PluginTarget) | Should -Be 'synthetic required plugin'
         Test-Path -LiteralPath $userProfile | Should -BeFalse
         Assert-MockCalled Read-PathWithBrowse -Times 1 -Exactly
-        $script:TpmRequiredPatchCatalogSha256 = '283DB40B0A17F3FEF2BC758D8123209B87C07731E433CECFE96DE1E2C69C5CE8'
+        $script:TpmRequiredPatchCatalogSha256 = 'F86F09A8BD2749DC9C4531CD1D00A69BF07D85B14A8D281D33767732ED5B720A'
         $script:TpmOwnedLayout = $null
     }
 
@@ -24413,7 +24484,7 @@ Describe 'Required patch engine and local recipes' {
         Invoke-TpmRequiredPatchMenu -TpRoot $tp -UserProfilesDir (Join-Path $tp 'UserProfiles') -ManagerRoot $manager -ProgramRoot $manager -MainSource $source -SupplementarySource ''
         Test-Path -LiteralPath $requiredPatchFixture.PluginTarget | Should -BeFalse
         @(Get-ChildItem -LiteralPath (Join-Path $owned 'Backups\GamePatches') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
-        $script:TpmRequiredPatchCatalogSha256 = '283DB40B0A17F3FEF2BC758D8123209B87C07731E433CECFE96DE1E2C69C5CE8'
+        $script:TpmRequiredPatchCatalogSha256 = 'F86F09A8BD2749DC9C4531CD1D00A69BF07D85B14A8D281D33767732ED5B720A'
         $script:TpmOwnedLayout = $null
     }
     It 'selects exact Cross Elysion GPU recipes and refuses a different executable revision' {

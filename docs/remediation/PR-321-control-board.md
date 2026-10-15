@@ -892,9 +892,12 @@ actions remain outside this implementation slice and were not performed.
 - Owner/runtime limits: no binary execution, game launch, owner hardware or
   gameplay acceptance, Arcade, package, or release result is claimed.
 
-## Issue #351 -- frozen expanded 24-entry review batch
+## Issue #351 -- frozen expanded 24-entry review batch (historical checkpoint)
 
-- Current status: `SOURCE FIXED; OWNER RUNTIME NEEDED`. Supersedes the earlier integration-pending driver/native/plugin follow-up notes for this batch; preserve those lane histories and the 13-entry PR353 gate record.
+- Historical status: `SOURCE FIXED; OWNER RUNTIME NEEDED`. This frozen24
+  checkpoint remains separate evidence; the current candidate staging catalog
+  is the authorized 56-entry expansion recorded below. Preserve its earlier
+  integration-pending driver/native/plugin notes and 13-entry PR353 gate record.
 - Review base `b5d6bc568513e1263ab891041083d5083bb4da70`; 24 recipes / 18 exact identities, 16 CreateFile / eight ReplaceFile. The baseline 13 entries and Main bytes are preserved. Detailed hashes, receipt limitations and hunk mappings are in the current reconciliation checkpoint.
 - Raw focused results are 25/25 under each engine with Pester 5.7.1; the helper result-capture exit was 1. Independent aggregate and engine reviews found no confirmed defect. Fresh canonical, broader regression, static and package gates are pending.
 - Current full-guide ledger remains explicitly mechanical; curated subset 19 implemented / one partial / 43 held / 32 separate non-patch references. Further recipes continue independently and do not delay this verified batch's gate/push milestone.
@@ -904,3 +907,111 @@ actions remain outside this implementation slice and were not performed.
 ### Expanded24 review publication gate
 
 Canonical Main 1,488/1,488 and Support 42/42 passed with Pester 5.7.1 on PowerShell 7.6.7; permanent gate passed, exit 0, completed 2026-10-15T06:51:18Z. All 559 frozen inputs were unchanged. Both static engines and InjectionHunter are green as recorded in the reconciliation. The separate 37-file regression run was incomplete and restarted with a distinct receipt; its result and exact-head CI remain pending. Review publication may proceed; integration, owner-package readiness and runtime acceptance remain held. PR321 remains draft/HOLD.
+
+## Issue #351 -- authorized 56-entry staging expansion
+
+- Current staging state: 56 exact recipes across 21 ProfileId/build/executable
+  identities; 48 CreateFile and eight ReplaceFile operations. The first 24
+  catalog entries retain their exact order and semantic content. The catalog
+  SHA-256 is `799524EC69C5F669415D07D88D913258EA8AA922AF78416BDB0D1B9228BE3AE1`;
+  the engine SHA-256 is `914FFBBC25C770F1319FE22381185187CF2832CFDBF44AF9C0A16925179E18F3`.
+- Staging source is exact base `3c93d383f0a8091bf5d6890acb176c285816a82f`,
+  branch `review/rc8-expanded54-20261015`. No commit, push, merge, release, or
+  package is authorized. Root will transplant to its approved integration base.
+- Native contribution: 30 absent-only Main-component restorations (14 Hummer,
+  14 Hummer Extreme, two Primeval Hunt). Frozen fragment SHA-256
+  `54AB378F9F13213F67C47A628DDEFE3AA0F4FEB8BE2E1BCE51B87818E247D38E`;
+  standalone test SHA-256
+  `673D1C434033E1076CA4BE6174D535B5A1C0353651B9EA6D1B63EEF3340C88C7`.
+- SB3 FMOD contribution: two independent absent-only Main component restores.
+  Frozen fragment SHA-256
+  `0CC045CB454D802804E46FC25F049687164F48E55ACACFC3D38BA63AB528E418`;
+  standalone test SHA-256
+  `D288325EB8BAD7D13C80499EB3E45091E99BBB89AA0E09C825C1692B5611FA05`;
+  accepted boundary note SHA-256
+  `EA90F3C8E4EF90061D34E350E65275CCC1557CC49AF7DCF2450A825CDAA2E7A4`.
+- No engine behavior change: only the catalog pin moved from the 24-entry hash
+  `283DB40B0A17F3FEF2BC758D8123209B87C07731E433CECFE96DE1E2C69C5CE8` to
+  the 56-entry hash above. Central count/ID assertions and explicit CI paths
+  include both accepted standalone suites.
+- Mapping: Main entries -> `TPM-REQUIRED-PATCHES-MAIN-COMPONENTS-001` and
+  its inventory; SB3 FMOD entries -> `TPM-REQUIRED-PATCHES-SB3-FMOD-001` and
+  its inventory; all -> Issue #351 and procedures `TPM-TRACE-001`,
+  `TPM-EVIDENCE-001`, `TPM-TRUTH-001`, `TPM-OWNER-001/002/003`; user wording
+  -> `TPM-UX-001/002`. No numbered PR #321 owner row is assigned.
+- Main limits remain: no Hummer Extreme frame-count result, Primeval Hunt
+  `ElfLdr2` copy-identity result, modern NVIDIA fog resolution, shader-set
+  atomicity, game compatibility, or gameplay proof. SB3 FMOD is not an atomic
+  pair; installed DLL version, pair compatibility, and full setup are unknown.
+- Tests use synthetic payloads/archives only; no game, executable, DLL, or
+  source payload was run. Owner runtime, controls, launch/gameplay, and release
+  acceptance remain pending.
+- Sequencing note: the authorized catalog integration was applied before the
+  two new issue-specific slice contracts and inventories were authored. This
+  does not satisfy the repository's preferred pre-change contract ordering;
+  the documents now map the exact staged hunks. Root review disposition is
+  required before any broader integration gate.
+- Focused integrated-catalog tests and bounded static checks: pending at this
+  update. Do not treat this staging record as a full canonical gate or release
+  result.
+
+## Issue #351 -- current 58-entry staging handoff
+
+This records the current staging state; the preceding 56-entry section is the
+historical integration checkpoint and its test receipts remain unchanged.
+
+- Current catalog: 58 exact recipes across 22 ProfileId/build/executable
+  identities; 50 CreateFile and eight ReplaceFile operations. Catalog SHA-256
+  `F86F09A8BD2749DC9C4531CD1D00A69BF07D85B14A8D281D33767732ED5B720A`;
+  engine SHA-256 `7AFAE497F5EFED0BE5F94497D4A7A5C25C073743485B700A7498B1A34681F6E4`
+  (catalog-pin change only; no engine behavior change).
+- The current delta is the separately accepted Infinity Blade FX 1.02 pair:
+  two absent-only Main component restorations with presence-only prerequisites.
+  No automatic rename, TPFIX.ini edit, first-launch path selection, component
+  version/pair compatibility, complete setup, or gameplay claim is made.
+- Historical 56-entry focused checkpoint: PS7 and PS5.1 each passed 161
+  selected tests (native 152, FMOD 2, central aggregate 1, plugin 6), zero
+  failures/skips, input changes 0. Terminal result hashes:
+  PS7 `DBA18C7FE194475456DB2D88D2F1B8B7C9A4A68D5D4B28B3A1BCC199FC862978`;
+  PS5.1 `78FE33AE4148D712C3408720ACF74CAFFF859652364A2B188A556840D79FE952`.
+- Current 58-entry v3 delta verification: PS7 completed
+  `2026-10-15T08:16:41.7586051Z`; PS5.1 completed
+  `2026-10-15T08:17:17.1661187Z`. Each passed Infinity 2/2 plus central
+  aggregate 1/1, zero failures/skips, input changes 0; 1,487 central tests
+  were not run by the intentional name filter. Results:
+  PS7 `D60CBE0CDA3F11B54AB99AAF9384DB3B603F9C4515576C6FCFB095B4537A6C63`;
+  PS5.1 `8B718B8116A7DC0EF69AB42F5DD0EA5733DB4B73831BDD2BD5547804D3D53426`.
+- Current input hashes, full raw-result hashes, frozen source-fragment
+  identities, and byte-preservation evidence are recorded in
+  `PR-321-reconciliation.md`. The 152-case native suite and FMOD suite were
+  not rerun on the 58-entry catalog.
+- This lane did not run full canonical suites or commit/push. Root owns final
+  canonical/static/security gates and any authorized source publication after
+  those gates. Exact-head CI, owner-runtime acceptance, integration, and
+  release readiness remain pending.
+
+## Issue #351 current 58-entry focused checkpoint -- 2026-10-15T08:22:06Z
+
+- Current staging: 58 recipes / 22 exact ProfileId-build-executable identities, 50 CreateFile / 8 ReplaceFile. The original 24 entries are preserved; the 34 additions are 30 native Main components, two SB3 FMOD components, and two Infinity Blade FX Main components.
+- Catalog SHA-256: F86F09A8BD2749DC9C4531CD1D00A69BF07D85B14A8D281D33767732ED5B720A. Engine SHA-256: 7AFAE497F5EFED0BE5F94497D4A7A5C25C073743485B700A7498B1A34681F6E4; engine body is unchanged, only its catalog pin differs from the 24-entry base.
+- Pester 5.7.1 final focused delta: PowerShell 7 completed 08:16:41 UTC and Windows PowerShell 5.1 completed 08:17:17 UTC on 2026-10-15. Each passed the two Infinity lifecycle/metadata cases and one central aggregate case: 3 passed, 0 failed, 0 skipped; 1487 other Main tests were intentionally not run. InputChangedCount was zero.
+- PS7 receipt SHA-256: D60CBE0CDA3F11B54AB99AAF9384DB3B603F9C4515576C6FCFB095B4537A6C63. PS5.1 receipt SHA-256: 8B718B8116A7DC0EF69AB42F5DD0EA5733DB4B73831BDD2BD5547804D3D53426. Both distinct v3 receipts are retained externally. Earlier failed sort-order assertion receipt is preserved; v2 predates the exact-case membership refinement.
+- The earlier 56-entry focused run remains historical: 161 selected passes per engine (native152, FMOD2, aggregate1, plugin6); it is not a full Main or canonical result and is not relabeled as a 58-entry run.
+- Post-document test-input identity audit at 2026-10-15T08:22:06Z: every final v3 input hash matches the current source/test files. Documentation changes do not change those tested inputs.
+- Infinity prerequisite checks establish file presence only, not contents, versions, setup completeness, compatibility, or gameplay. All new Main-component repairs are independent absent-only operations, not atomic installation bundles.
+- Full canonical/static/InjectionHunter/CI gates for this candidate remain pending root execution. Owner GUI, controls, launch, gameplay, and full ARCADE runtime acceptance remain unverified. No release, tag, main merge, or runtime acceptance is claimed.
+## Issue #351 -- 58-entry canonical gate checkpoint
+
+- Expanded58 RDC capture SHA-256 `AC8E42B5F54ACDDBB0AE8522473C40C9D8D61E967799E9BD3C6420AA94CEB659` preserves 846 original child-output lines plus capture metadata. Child results: Main Pester 5.7.1 passed 1,488/1,488; Support Pester 5.7.1 passed 42/42; permanent procedure gate passed; `TPM quality gate passed.` Static receipts also pass on PS5.1 and PS7; InjectionHunter has 41 findings, zero unresolved, exit 0.
+- The outer PS5.1 launcher transcript `Expanded58-Canonical-20261015.raw.txt` SHA-256 `7343EB57B40C801054C7E937818FA9ABFC7F3B0902A92F77EEC5625BD4F2123E` ends with exit 1. The observed failure is a `NativeCommandError` from expected negative-test stderr after the child output completed. The outer wrapper did not capture the child's exit code; do not infer it from the gate's printed pass line.
+- Root's stock-PS5.1 transport proof (`Expanded58-Wrapper-Diagnosis-Root-20261015.json`, external SHA-256 `D07BE1D70FBFCD12843DF7D255D150E0CCDC262B0CDA853CEE6E31E758ECEC1C`) records original wrapper exit 1 for child exit 0 plus stderr, while the helper preserved exits 0 and 7 and both streams. Product change false; the historical canonical child exit remains unknown.
+- Static PS5.1 receipt SHA-256 `1810A1CD96CD5273E3D033D19393FB003A020578681F02014058E92DE1F426C3`; static PS7 receipt SHA-256 `CE97A4B1957B10B048260E0FE161F6B64B00C1672FE27CA6B56B99AF62DF61D8`. Both recorded zero product parse errors/non-ASCII bytes and zero configured analyzer findings.
+- InjectionHunter PS7 receipt SHA-256 `7401BEF5AC4F5052224DA4F8A55539C037EEB4CB97B9A13CAA533B65A0F75F20`: 41 findings, zero unresolved, process exit 0. Findings were individually dispositioned in the receipt.
+- Product and test inputs remained frozen at the 58-entry handoff hashes. The 572-file gate input-boundary receipt SHA-256 is `3953A6715FC11664A8215CE2C8C2405BBE3D183275DDB694B7AD22245C072D25`. A post-document identity audit and permanent-procedure-gate rerun are required before final diff/status review.
+- Existing holds remain: owner runtime and gameplay are unverified; Hummer Extreme frame-count, Primeval Hunt ElfLdr2 identity, NVIDIA fog behavior and shader-set atomicity remain unresolved; SB3 FMOD installed-version/pair compatibility/full setup remain unverified; Infinity Blade FX prerequisites establish file presence only. No release, tag, merge, or source publication is claimed by this staging lane.
+
+
+## 58-entry post-document identity and permanent-gate recheck
+
+- Post-document audit at `2026-10-15T09:02:20.7139906Z` matched all 11 frozen product/focused-test input hashes with zero mismatches. External receipt `Expanded58-PostDoc-Source-Identity-Audit-20261015.json`, SHA-256 `31B07AFE5F19EED13F3F3CD37FFA8DD632B354BB5CC2228B2B81E1D5AEB25660`.
+- Standalone `Test-TpmPermanentProcedures.ps1` rerun completed `2026-10-15T09:02:30.0366625Z`, exit 0, `Permanent procedure gate passed.` This was the permanent gate only; no full suites were rerun. External receipt `Expanded58-Permanent-Gate-Only-PostDoc-20261015.json`, SHA-256 `777B82DCF6CB090E780C1F024C6D7654C774E1CA12DE87C790D169F0A205B7E7`; raw output SHA-256 `BE5D31B73205724FD74E851BE38FC3C683409847DDD4BCF1704D36132742ED35`.

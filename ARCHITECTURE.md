@@ -2329,18 +2329,27 @@ catalog. The engine is shared by automatic discovery for registered games, manua
 installation into an already-installed game folder, and undo; manual mode does not
 register a game.
 
+Infinity Blade FX 1.02 has two independent missing-file repairs for
+Binaries/Win32/matrix32.dll and Binaries/Win32/dinput8.dll. Both require
+matrix32.TEKNOPARROT.dll and TPFIX.ini in that directory to be present.
+Presence does not validate their bytes or configuration. TPM does not
+rename the original library, edit TPFIX.ini, or choose the first-launch
+TeknoParrot.dll path. Compatibility and gameplay remain separate checks.
+
 The owner-approved boundary is user-supplied local payloads only. TPM does not
 host or acquire payloads. A curated metadata-only RomVault DAT is permitted,
 but none is bundled; users provide payloads. Every recipe pins the exact build
 and executable identity, ZIP member path, member size/runtime SHA-256, target
-preconditions, post-patch identity, and setup prerequisites. The current local
-catalog has 24 exact recipes across 18 exact ProfileId/build/executable
+preconditions, post-patch identity, and setup prerequisites. The current local catalog has 58 exact recipes across 22 exact ProfileId/build/executable
 identities: it preserves the historical 13-entry baseline and adds three
 Taisen Hot Gimmick 5 (2.04) restores, three user-selected plugin restores
 (Mars Sortie 1.46.9, the separate Rabbids Hollywood operator plugin, and
-SB3 1.91 x64), and five native recipes for Cross Raid 1.05, VF5R 1.001, and
-Sonic Dash Extreme. This is exact-component support, not full semantic guide
-coverage.
+SB3 1.91 x64), five native recipes (Cross Raid 1.05, VF5R 1.001, and Sonic
+Dash Extreme), 30 Main-component restorations (14 Hummer, 14 Hummer Extreme,
+two Primeval Hunt), and two SB3 FMOD Main-component restorations, and two Infinity Blade FX 1.02 Main-component restorations. The
+aggregate has 50 absent-only `CreateFile` operations and eight exact-before
+`ReplaceFile` operations. This is exact-component support, not full semantic
+guide coverage.
 Family Guy pins `bowling.exe` SHA-256
 `3C4B406AA7B353CD416913308B8B714F7E17588D5A091326E0250A71A3407188`; its
 `BepInEx/plugins/FGBTPPlugin.dll` source member is 23,552 bytes, DAT SHA-1
@@ -2426,14 +2435,23 @@ configuration prerequisite. Family Guy additionally requires its documented
 Its codec BAT is a separate Windows prerequisite and is never executed.
 The four BlazBlue driver entries, Rabbids' `Assembly-CSharp.dll`, the four
 baseline Main-source plugin targets, Silent Hill's `dsound.dll`, the three
-Taisen files, and the three added plugin targets are absent-only restorations.
-The current total is 16 `CreateFile` operations and eight exact-before
-`ReplaceFile` operations. They create no target unless it is absent, skip the
-exact desired hash, and refuse other bytes. BBCP is the explicit known-before
-replacement. Sonic is the sole exact self-executable transition and requires
-the recipe's explicit opt-in, exact executable before/after hashes, guarded
-transaction-time identity, and receipt-bound undo. These rules do not claim
-that a correctly bundled source file needs repair.
+Taisen files, the three added plugin targets, the 30 Hummer/Hummer
+Extreme/Primeval Hunt Main-component targets, and two SB3 FMOD Main-component
+targets, plus two Infinity Blade FX targets, are absent-only restorations. The current total is 50 `CreateFile`
+operations and eight exact-before `ReplaceFile` operations. They create no
+target unless it is absent, skip the exact desired hash, and refuse other
+bytes. BBCP is the explicit known-before replacement. Sonic is the sole exact
+self-executable transition and requires the recipe's explicit opt-in, exact
+executable before/after hashes, guarded transaction-time identity, and
+receipt-bound undo. These rules do not claim that a correctly bundled source
+file needs repair.
+The 30 Main-component entries restore only exact missing Hummer, Hummer
+Extreme, and Primeval Hunt paths; Hummer Extreme frame-count requirements,
+Primeval Hunt `ElfLdr2` library-copy identity, and its modern NVIDIA fog
+caveat remain outside their recipe scope. The two SB3 FMOD entries preserve
+the guide BuildName and exact Main SourceSet spelling, including the source
+ZIP's `Raw Thrills PC` label. Each DLL is a separate absent-only transaction;
+neither is an atomic pair or a version/compatibility check.
 Runtime payload validation uses exact member size and SHA-256; DAT SHA-1 is
 provenance only. Source parsing streams only the exact bounded ZIP member.
 Planning validates canonical game roots, the active executable and target

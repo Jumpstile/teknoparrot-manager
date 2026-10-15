@@ -422,17 +422,26 @@
     ordinary deployment failures keep their normal retry, Details, and support
     guidance. See BEPINEX SETUP below. Available as menu option 9.
 
-  - Required game patches. Option 10 supports 24 exact-build recipes across
-    18 exact ProfileId/build/executable identities in the current local RC8
+  Infinity Blade FX 1.02 has two independent missing-file repairs for
+  Binaries/Win32/matrix32.dll and Binaries/Win32/dinput8.dll. Both require
+  matrix32.TEKNOPARROT.dll and TPFIX.ini in that directory to be present.
+  Presence does not validate their bytes or configuration. TPM does not
+  rename the original library, edit TPFIX.ini, or choose the first-launch
+  TeknoParrot.dll path. Compatibility and gameplay remain separate checks.
+
+  - Required game patches. Option 10 supports 58 exact-build recipes across
+    22 exact ProfileId/build/executable identities in the current local RC8
     owner-test catalog. It retains the historical 13-entry PR #353 baseline
     and adds three Taisen Hot Gimmick 5 (2.04) single-file restores; three
     user-selected plugin restores for Mars Sortie, the separate Rabbids
-    Hollywood operator plugin, and Super Bikes 3 1.91 x64; and five native
-    recipes for Cross Raid 1.05, VF5R 1.001, and Sonic Dash Extreme. Sixteen
-    operations create only absent files; eight require an exact before-state.
-    Exact-after targets are skipped and unknown existing bytes are refused.
-    Full semantic guide coverage, installation readiness, controls, launch,
-    and gameplay are not claimed.
+    Hollywood operator plugin, and Super Bikes 3 1.91 x64; five native
+    recipes for Cross Raid 1.05, VF5R 1.001, and Sonic Dash Extreme; and
+    34 Main-component restorations: 14 Hummer, 14 Hummer Extreme, two
+    Primeval Hunt, two SB3 FMOD, and two Infinity Blade FX 1.02. Fifty `CreateFile` operations
+    create only absent targets; eight `ReplaceFile` operations require an
+    exact before-state. Exact-after targets are skipped and unknown bytes are
+    refused. Full guide coverage, setup readiness, controls, launch, and
+    gameplay are not claimed.
 
   - Postgres setup. Installs and configures the local PostgreSQL 8.3
     database that some Incredible Technologies games need (Golden Tee
@@ -749,13 +758,15 @@
        automatic list. TPM keeps verified backup/undo evidence; it skips an
        exact already-applied target and refuses any other existing bytes.
 
-       The current local RC8 owner-test catalog has 24 exact-build recipes
-       across 18 exact ProfileId/build/executable identities. It preserves the
+       The current local RC8 owner-test catalog has 58 exact-build recipes
+       across 22 exact ProfileId/build/executable identities. It preserves the
        historical 13-entry PR #353 baseline and adds three Taisen Hot Gimmick
        5 (2.04) single-file restores, three local user-selected plugin restores
        (Mars Sortie 1.46.9, the separate Rabbids Hollywood operator plugin,
-       and SB3 1.91 x64), and five native recipes (Cross Raid 1.05 AMD/NVIDIA,
-       VF5R 1.001 AMD/NVIDIA, and Sonic Dash Extreme).
+       and SB3 1.91 x64), five native recipes (Cross Raid 1.05 AMD/NVIDIA,
+       VF5R 1.001 AMD/NVIDIA, and Sonic Dash Extreme), 30 Main-component
+       restorations (14 Hummer, 14 Hummer Extreme, two Primeval Hunt), and
+       two SB3 FMOD Main-component restorations, and two Infinity Blade FX 1.02 Main-component restorations.
        The Taisen files are restorations only. Configure and save keyboard
        keys with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by
        the game guide. TPM does not configure keys or run either utility;
@@ -763,14 +774,20 @@
 
        BBCP Chronophantasma replaces only its exact known driver before-hash
        with the guide-required hash from the named Central Fiction Main ZIP;
-       absent or unknown BBCP bytes are refused. The other 16 `CreateFile`
-       operations restore only absent targets; eight `ReplaceFile` operations
-       require exact before-hashes. Exact desired bytes are skipped, and all
-       other states are refused. The four baseline Main-source plugin payloads
-       and three added user-selected patch ZIPs are distinct. Rabbids' operator
+       absent or unknown BBCP bytes are refused. The 50 `CreateFile` operations
+       restore only absent targets; eight `ReplaceFile` operations require
+       exact before-hashes. Exact desired bytes are skipped, and all other
+       states are refused. The four baseline Main-source plugin payloads and
+       three added user-selected patch ZIPs are distinct. Rabbids' operator
        plugin is not the existing `Assembly-CSharp.dll` repair. SB3's Main ZIP
-       already contains the same plugin bytes; its recipe truthfully restores
-       only an absent installed target.
+       already contains the same plugin bytes; that recipe restores only a
+       missing installed target.
+       The two FMOD recipes separately restore missing Main-source
+       `fmod64.dll` and `fmodstudio64.dll` targets; they are not an atomic
+       pair, and DLL version/pair compatibility are unverified. The 30 Hummer,
+       Hummer Extreme, and Primeval recipes restore missing Main components
+       only; frame-count, `ElfLdr2` copy identity, and modern NVIDIA fog
+       caveats remain outside these recipes.
 
        All seven BepInEx plugin targets require the core file to be present.
        Family Guy additionally requires its documented `[Preloader.Entrypoint]

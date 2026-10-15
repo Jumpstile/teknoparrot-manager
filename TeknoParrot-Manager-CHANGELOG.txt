@@ -50,20 +50,29 @@
   measured on a throwaway control. Export-LaunchBoxXml now returns 0 (not null)
   when nothing is exported.
 
+  Infinity Blade FX 1.02 has two independent missing-file repairs for
+  Binaries/Win32/matrix32.dll and Binaries/Win32/dinput8.dll. Both require
+  matrix32.TEKNOPARROT.dll and TPFIX.ini in that directory to be present.
+  Presence does not validate their bytes or configuration. TPM does not
+  rename the original library, edit TPFIX.ini, or choose the first-launch
+  TeknoParrot.dll path. Compatibility and gameplay remain separate checks.
+
   Required game patches (RC8 owner-test candidate): option 10 uses one shared
   validated engine for automatic discovery on registered games and manual
   installation into existing game folders, with exact build/executable and
   local ZIP-member checks, backup, read-back verification, undo, exact
   already-applied skipping, and refusal of unknown states.
-  The current local catalog has 24 exact recipes across 18 exact
+  The current local catalog has 58 exact recipes across 22 exact
   ProfileId/build/executable identities. It preserves the historical
   13-entry PR #353 baseline and adds three Taisen Hot Gimmick 5 (2.04)
   component restores; three local user-selected plugin restores (Mars Sortie
   1.46.9, the separate Rabbids Hollywood operator plugin, and SB3 1.91 x64);
-  and five native exact-build recipes (Cross Raid 1.05 and VF5R 1.001
-  AMD/NVIDIA shader alternatives, plus the opt-in Sonic Dash Extreme
-  executable replacement). The aggregate has 16 absent-only `CreateFile`
-  operations and eight exact-before `ReplaceFile` operations.
+  five native exact-build recipes (Cross Raid 1.05 and VF5R 1.001 AMD/NVIDIA
+  shader alternatives, plus the opt-in Sonic Dash Extreme executable
+  replacement); 30 absent-only Main-component restorations (14 Hummer,
+  14 Hummer Extreme, two Primeval Hunt); and two absent-only SB3 FMOD
+  Main-component restorations, plus two Infinity Blade FX 1.02 restorations. The aggregate has 50 `CreateFile` operations
+  and eight exact-before `ReplaceFile` operations.
 
   The four BlazBlue driver restorations, the original Rabbids Assembly-CSharp
   target, four Main-sourced BepInEx plugin targets, and Silent Hill's
@@ -81,11 +90,15 @@
   its exact profile/build alternatives are not compatibility or gameplay
   proof. No other Cross Raid build or base-shader restoration is enabled.
   Sonic requires explicit opt-in and exact executable before/after hashes;
-  this does not establish a 60-fps outcome. SB3 FMOD placement/version
-  readiness remains unresolved, and no codec, FMOD, or game payload is
-  installed or executed. Full semantic guide coverage and owner readiness
-  are not claimed; registration, controls, launch, and gameplay remain
-  separate. This candidate is not a package or release.
+  this does not establish a 60-fps outcome. Hummer Extreme frame-count
+  requirements, Primeval Hunt `ElfLdr2` copy identity, and modern NVIDIA fog
+  remain outside the 30 Main-component restorations. SB3's two FMOD Main
+  component restores are separate absent-only operations, not an atomic pair;
+  DLL version and pair compatibility remain unverified. Silent Hill's codec
+  BAT is not run or installed. No game or binary payload is executed by the
+  candidate tests. Full semantic guide coverage and owner readiness are not
+  claimed; registration, controls, launch/gameplay remain separate. This
+  candidate is not a package or release.
 
 -------------------------------------------------------------------------------
   v1.0 RC8  (candidate, not published)  -- ReShade preview selection

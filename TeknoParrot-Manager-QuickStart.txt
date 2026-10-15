@@ -164,27 +164,37 @@
                              when asking for help.
        16) Exit            -- quit the script.
 
+  Infinity Blade FX 1.02 has two independent missing-file repairs for
+  Binaries/Win32/matrix32.dll and Binaries/Win32/dinput8.dll. Both require
+  matrix32.TEKNOPARROT.dll and TPFIX.ini in that directory to be present.
+  Presence does not validate their bytes or configuration. TPM does not
+  rename the original library, edit TPFIX.ini, or choose the first-launch
+  TeknoParrot.dll path. Compatibility and gameplay remain separate checks.
+
    **Required game patches:** TPM uses local, hash-pinned ZIP members; it
    does not host or download patch payloads. The current local RC8 owner-test
-   catalog has 24 exact recipes across 18 exact ProfileId/build/executable
+   catalog has 58 exact recipes across 22 exact ProfileId/build/executable
    identities. It preserves the 13-entry PR #353 baseline and adds three
    Taisen Hot Gimmick 5 (2.04) restores, three user-selected plugin restores
    (Mars Sortie, the separate Rabbids Hollywood operator plugin, and SB3
-   1.91 x64), and five native recipes for Cross Raid 1.05, VF5R 1.001, and
-   Sonic Dash Extreme.
+   1.91 x64), five native recipes for Cross Raid 1.05, VF5R 1.001, and Sonic
+   Dash Extreme, 30 Hummer/Hummer Extreme/Primeval Hunt Main-component
+   restorations, and two SB3 FMOD Main-component restorations, and two Infinity Blade FX 1.02 Main-component restorations.
    The Taisen files are restorations only. Configure and save keyboard keys
    with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by the guide.
-   TPM does not configure keys or run either utility; setup and game launch
-   remain separate owner steps.
+   TPM does not configure keys or run either utility; setup and launch remain
+   separate owner steps.
 
-   Sixteen `CreateFile` operations create only absent targets; eight
+   Fifty `CreateFile` operations create only absent targets; eight
    `ReplaceFile` operations require an exact before-hash. Exact desired bytes
    are skipped and other existing bytes are refused. The exact user-selected
    patch ZIP filename is required. The SB3 Main ZIP already contains its
-   plugin bytes; its recipe restores only a missing installed target. The
+   plugin bytes; that recipe restores only a missing installed target. The
+   two FMOD Main-component recipes are separate absent-only transactions, not
+   an atomic pair; DLL version and pair compatibility remain unverified. The
    Rabbids operator plugin is separate from the existing Assembly-CSharp
-   repair. All seven plugin targets require BepInEx core presence; Family Guy
-   also requires its documented `MonoBehaviour` entrypoint setting.
+   repair. All seven BepInEx plugin targets require BepInEx core presence;
+   Family Guy also requires its documented `MonoBehaviour` entrypoint setting.
 
    Cross Elysion, Cross Raid 1.05, and VF5R 1.001 require the exact executable,
    unambiguous AMD/NVIDIA evidence, and the selected recipe's exact before-hash.
@@ -194,10 +204,15 @@
    compatibility or gameplay result is claimed. No other Cross Raid build or
    base-shader restoration is enabled. Sonic's exact before/after executable
    replacement is explicit opt-in and does not prove 60-fps behavior. Silent
-   Hill's Windows codec BAT is not run or installed; SB3 FMOD placement and
-   version readiness remain unresolved. Manual patching does not register the
-   game. Set controls, launch through TeknoParrotUI, and verify gameplay
-   separately; a file patch does not prove readiness or full-guide coverage.
+   Hill's Windows codec BAT is not run or installed.
+
+   The 30 Hummer, Hummer Extreme, and Primeval Hunt entries restore only
+   missing Main components. Hummer Extreme frame-count requirements,
+   Primeval Hunt `ElfLdr2` copy identity, and its modern NVIDIA fog caveat are
+   outside these recipes. SB3 FMOD DLL version and pair compatibility remain
+   unverified. Manual patching does not register games. Set controls, launch
+   through TeknoParrotUI, and verify gameplay separately; a file repair does
+   not prove readiness or full-guide coverage.
 
    If you need help, choose 15) Create Support Package. First, in TeknoParrotUI
    choose Troubleshooting -> Save information to a text file and save it beside
