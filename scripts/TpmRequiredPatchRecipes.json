@@ -1669,6 +1669,87 @@
           "PayloadSha256": "E7E149EE9E8B64E23B739E236E5A61CAB7F2F56E632082993A95F05DE7D6CCB1"
         }
       ]
+    },
+    {
+      "Id": "maimai-green-freeglut-main-restore",
+      "ProfileId": "MaiMaiGreen",
+      "BuildName": "maimai GreeN (2013)[Sega RingEdge 2][TP]",
+      "Executable": "maimai/maimai_dump_.exe",
+      "ExecutableSha256": "B2027449C536FEE6853F3B72E28188AB47D36AAF8800FFDA30617B36D0031029",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "maimai GreeN (2013)[Sega RingEdge 2][TP].zip",
+      "SourceEntry": "maimai/freeglut.dll",
+      "SourceSize": 218624,
+      "SourceSha1": "C06C86B2D660C60DD9C57DEF62E7D9DB9960DE27",
+      "SourceSha256": "C0968C2D0D9DB9263304A7E0B86F41125A9642E20EA96741B9F75F15E424298E",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "maimai/freeglut.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "C0968C2D0D9DB9263304A7E0B86F41125A9642E20EA96741B9F75F15E424298E",
+          "Payload": "payload/freeglut.dll",
+          "PayloadSha256": "C0968C2D0D9DB9263304A7E0B86F41125A9642E20EA96741B9F75F15E424298E"
+        }
+      ]
+    },
+    {
+      "Id": "maimai-green-libcurl-main-restore",
+      "ProfileId": "MaiMaiGreen",
+      "BuildName": "maimai GreeN (2013)[Sega RingEdge 2][TP]",
+      "Executable": "maimai/maimai_dump_.exe",
+      "ExecutableSha256": "B2027449C536FEE6853F3B72E28188AB47D36AAF8800FFDA30617B36D0031029",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "maimai GreeN (2013)[Sega RingEdge 2][TP].zip",
+      "SourceEntry": "maimai/libcurl.dll",
+      "SourceSize": 325632,
+      "SourceSha1": "DEAD9B68373A54EF43E63BC10CD651CF8D320264",
+      "SourceSha256": "D86C6E191F0411DE94EA0724DE1C26E7EA58ED1564A6438006B111C07D05BEEE",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "maimai/libcurl.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "D86C6E191F0411DE94EA0724DE1C26E7EA58ED1564A6438006B111C07D05BEEE",
+          "Payload": "payload/libcurl.dll",
+          "PayloadSha256": "D86C6E191F0411DE94EA0724DE1C26E7EA58ED1564A6438006B111C07D05BEEE"
+        }
+      ]
+    },
+    {
+      "Id": "rabbids-hollywood-operator-main-restore",
+      "ProfileId": "RabbidsHollywood",
+      "BuildName": "Rabbids Hollywood (2018)[Adrenaline PC][TP]",
+      "Executable": "Game.exe",
+      "ExecutableSha256": "979F9736A99745454429908227CDD2F48875F193D439CFA33A9E14B4578DA95D",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Rabbids Hollywood (2018)[Adrenaline PC][TP].zip",
+      "SourceEntry": "RabbidsHollywood_Operator.exe",
+      "SourceSize": 503296,
+      "SourceSha1": "5B2046A677A426B56AF20F873305B52826FFD00F",
+      "SourceSha256": "B3622686EF6CE75F17805137857417B6F1B50A2AE962E979B20AAE67E69777B7",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "RabbidsHollywood_Operator.exe",
+          "BeforeState": "Absent",
+          "AfterSha256": "B3622686EF6CE75F17805137857417B6F1B50A2AE962E979B20AAE67E69777B7",
+          "Payload": "payload/RabbidsHollywood_Operator.exe",
+          "PayloadSha256": "B3622686EF6CE75F17805137857417B6F1B50A2AE962E979B20AAE67E69777B7"
+        }
+      ]
     }
   ]
 }

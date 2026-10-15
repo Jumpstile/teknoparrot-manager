@@ -172,29 +172,36 @@
   TeknoParrot.dll path. Compatibility and gameplay remain separate checks.
 
    **Required game patches:** TPM uses local, hash-pinned ZIP members; it
-   does not host or download patch payloads. The current local RC8 owner-test
-   catalog has 58 exact recipes across 22 exact ProfileId/build/executable
-   identities. It preserves the 13-entry PR #353 baseline and adds three
-   Taisen Hot Gimmick 5 (2.04) restores, three user-selected plugin restores
-   (Mars Sortie, the separate Rabbids Hollywood operator plugin, and SB3
-   1.91 x64), five native recipes for Cross Raid 1.05, VF5R 1.001, and Sonic
-   Dash Extreme, 30 Hummer/Hummer Extreme/Primeval Hunt Main-component
-   restorations, and two SB3 FMOD Main-component restorations, and two Infinity Blade FX 1.02 Main-component restorations.
+   does not host or download patch payloads. This local RC8 owner-test
+   follow-up candidate has 61 exact recipes across 23 exact
+   ProfileId/build/executable identities. It preserves the 13-entry PR #353
+   baseline and the 58-entry PR #355 checkpoint, then adds absent-only Main
+   repairs for MaiMai GreeN `freeglut.dll` and `libcurl.dll`, and the Rabbids
+   Hollywood `RabbidsHollywood_Operator.exe`. The 58-entry checkpoint also
+   contains three Taisen Hot Gimmick 5 (2.04) restores, three user-selected
+   plugin restores (Mars Sortie, the separate Rabbids Hollywood operator
+   plugin, and SB3 1.91 x64), five native recipes for Cross Raid 1.05, VF5R
+   1.001, and Sonic Dash Extreme, 30 Hummer/Hummer Extreme/Primeval Hunt
+   Main-component restorations, two SB3 FMOD Main-component restorations,
+   and two Infinity Blade FX 1.02 Main-component restorations.
    The Taisen files are restorations only. Configure and save keyboard keys
    with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by the guide.
    TPM does not configure keys or run either utility; setup and launch remain
    separate owner steps.
 
-   Fifty `CreateFile` operations create only absent targets; eight
+   Fifty-three `CreateFile` operations create only absent targets; eight
    `ReplaceFile` operations require an exact before-hash. Exact desired bytes
    are skipped and other existing bytes are refused. The exact user-selected
-   patch ZIP filename is required. The SB3 Main ZIP already contains its
-   plugin bytes; that recipe restores only a missing installed target. The
-   two FMOD Main-component recipes are separate absent-only transactions, not
-   an atomic pair; DLL version and pair compatibility remain unverified. The
-   Rabbids operator plugin is separate from the existing Assembly-CSharp
-   repair. All seven BepInEx plugin targets require BepInEx core presence;
-   Family Guy also requires its documented `MonoBehaviour` entrypoint setting.
+   patch ZIP filename is required. The three MaiMai/Rabbids Main components
+   are absent-only; the MaiMai DLLs are separate transactions. The Rabbids
+   operator utility is distinct from the existing Assembly-CSharp and
+   BepInEx operator-plugin recipes; it is not executed and registry or `.conf`
+   settings are not changed. The SB3 Main ZIP already contains its plugin
+   bytes; that recipe restores only a missing installed target. The two FMOD
+   Main-component recipes are separate absent-only transactions, not an
+   atomic pair; DLL version and pair compatibility remain unverified. All
+   seven BepInEx plugin targets require BepInEx core presence; Family Guy also
+   requires its documented `MonoBehaviour` entrypoint setting.
 
    Cross Elysion, Cross Raid 1.05, and VF5R 1.001 require the exact executable,
    unambiguous AMD/NVIDIA evidence, and the selected recipe's exact before-hash.

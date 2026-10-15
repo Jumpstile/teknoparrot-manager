@@ -2340,16 +2340,19 @@ The owner-approved boundary is user-supplied local payloads only. TPM does not
 host or acquire payloads. A curated metadata-only RomVault DAT is permitted,
 but none is bundled; users provide payloads. Every recipe pins the exact build
 and executable identity, ZIP member path, member size/runtime SHA-256, target
-preconditions, post-patch identity, and setup prerequisites. The current local catalog has 58 exact recipes across 22 exact ProfileId/build/executable
+preconditions, post-patch identity, and setup prerequisites.
+The current local catalog has 61 exact recipes across 23 exact ProfileId/build/executable
 identities: it preserves the historical 13-entry baseline and adds three
 Taisen Hot Gimmick 5 (2.04) restores, three user-selected plugin restores
 (Mars Sortie 1.46.9, the separate Rabbids Hollywood operator plugin, and
 SB3 1.91 x64), five native recipes (Cross Raid 1.05, VF5R 1.001, and Sonic
 Dash Extreme), 30 Main-component restorations (14 Hummer, 14 Hummer Extreme,
-two Primeval Hunt), and two SB3 FMOD Main-component restorations, and two Infinity Blade FX 1.02 Main-component restorations. The
-aggregate has 50 absent-only `CreateFile` operations and eight exact-before
-`ReplaceFile` operations. This is exact-component support, not full semantic
-guide coverage.
+two Primeval Hunt), two SB3 FMOD Main-component restorations, two Infinity
+Blade FX 1.02 Main-component restorations, and three additional absent-only
+Main components (MaiMai GreeN's `freeglut.dll` and `libcurl.dll`, plus the
+Rabbids Hollywood operator utility). The aggregate has 53 absent-only
+`CreateFile` operations and eight exact-before `ReplaceFile` operations. This
+is exact-component support, not full semantic guide coverage.
 Family Guy pins `bowling.exe` SHA-256
 `3C4B406AA7B353CD416913308B8B714F7E17588D5A091326E0250A71A3407188`; its
 `BepInEx/plugins/FGBTPPlugin.dll` source member is 23,552 bytes, DAT SHA-1

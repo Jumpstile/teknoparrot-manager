@@ -271,18 +271,27 @@ supports **manual** installation into an already-installed game folder, even
 when that game is not registered yet. Manual install does not register it;
 TPM tells you to register it and configure controls afterward.
 
-The current local RC8 owner-test catalog contains 58 exact-build recipes
-across 22 exact ProfileId/build/executable identities. It preserves the
-historical 13-entry PR #353 baseline and adds three Taisen Hot Gimmick 5
-(2.04) single-file restores (`TTX-Monitor.dll`, `TTX-Config.exe`, and
+The local RC8 owner-test follow-up candidate in this worktree contains 61
+exact-build recipes across 23 exact ProfileId/build/executable identities.
+It preserves the historical 13-entry PR #353 baseline and the 58-entry
+PR #355 checkpoint, then adds three absent-only Main-component restores:
+MaiMai GreeN `freeglut.dll` and `libcurl.dll`, plus the Rabbids Hollywood
+`RabbidsHollywood_Operator.exe`.
+The 58-entry checkpoint comprises three Taisen Hot Gimmick 5 (2.04)
+single-file restores (`TTX-Monitor.dll`, `TTX-Config.exe`, and
 `TTX-Loader.exe`); three exact-build user-selected plugin restores (Mars
 Sortie 1.46.9, the separate Rabbids Hollywood operator plugin, and Super
 Bikes 3 1.91 x64); five native shader/executable recipes (Cross Raid 1.05,
 VF5R 1.001, and Sonic Dash Extreme); 30 Hummer, Hummer Extreme, and Primeval
 Hunt Main-component restores; two SB3 FMOD Main-component restores; and two
-Infinity Blade FX 1.02 Main-component restores. The catalog has 50 absent-only
-`CreateFile` operations and eight exact-before `ReplaceFile` operations. This
-is exact-component support, not full semantic guide coverage.
+Infinity Blade FX 1.02 Main-component restores. The local candidate has 53
+absent-only `CreateFile` operations and eight exact-before `ReplaceFile`
+operations. It is not a release or full semantic guide coverage claim.
+
+The MaiMai DLLs are separate transactions. The Rabbids operator executable is
+distinct from the existing `Assembly-CSharp.dll` repair and BepInEx
+operator-plugin recipe; it is not executed, and TPM does not edit registry or
+`.conf` state.
 
 The 30 Hummer, Hummer Extreme, and Primeval Hunt entries restore only absent
 Main-component paths. Hummer Extreme frame-count requirements, Primeval

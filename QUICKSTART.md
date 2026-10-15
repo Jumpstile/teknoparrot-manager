@@ -334,15 +334,21 @@ Presence does not validate their bytes or configuration. TPM does not
 rename the original library, edit TPFIX.ini, or choose the first-launch
 TeknoParrot.dll path. Compatibility and gameplay remain separate checks.
 
-Choose **option 10** to find supported required patches. The current local
-owner-test catalog has 58 exact recipes across 22 exact
-ProfileId/build/executable identities: the historical 13-entry baseline plus
-three Taisen Hot Gimmick 5 (2.04) single-file restores; three user-selected
-plugin restores for Mars Sortie 1.46.9, the separate Rabbids Hollywood
-operator plugin, and SB3 1.91 x64; five native recipes for Cross Raid 1.05,
-VF5R 1.001, and Sonic Dash Extreme; and 34 Main-component restorations:
-14 Hummer, 14 Hummer Extreme, two Primeval Hunt, two SB3 FMOD, and two Infinity Blade FX 1.02.
-Fifty `CreateFile` operations create only absent targets; eight
+Choose **option 10** to find supported required patches. This local RC8
+owner-test follow-up candidate has 61 exact recipes across 23 exact
+ProfileId/build/executable identities: the historical 13-entry baseline and
+the 58-entry PR #355 checkpoint plus three absent-only Main components:
+MaiMai GreeN `freeglut.dll` and `libcurl.dll`, and the Rabbids Hollywood
+`RabbidsHollywood_Operator.exe`. The existing catalog includes three Taisen
+Hot Gimmick 5 (2.04) restores; three user-selected plugin restores (Mars
+Sortie 1.46.9, the separate Rabbids Hollywood operator plugin, and SB3 1.91
+x64); five native recipes (Cross Raid 1.05, VF5R 1.001, and Sonic Dash
+Extreme); 30 Hummer/Hummer Extreme/Primeval Hunt components; two SB3 FMOD
+components; and two Infinity Blade FX 1.02 components. The MaiMai DLLs are
+separate transactions. The Rabbids utility is separate from the existing
+Assembly-CSharp and BepInEx operator-plugin recipes; TPM does not execute it
+or edit registry or `.conf` state.
+Fifty-three `CreateFile` operations create only absent targets; eight
 `ReplaceFile` operations require the exact known before-state. Exact-after
 files are skipped; other states are refused. This exact-component scope is
 not full semantic guide coverage.
