@@ -815,3 +815,92 @@ actions remain outside this implementation slice and were not performed.
   commit, push, PR creation, merge, tag, publication, live install,
   game/collection/DAT or database mutation, Arcade execution, or owner-runtime
   acceptance is claimed.
+## Issue #351 Taisen driver follow-up -- integration in progress
+
+- Slice contract: `TPM-REQUIRED-PATCHES-DRIVERS-001`; owner report:
+  `DRIVERS-LANE-RC8`; procedures: `TPM-TRACE-001`, `TPM-EVIDENCE-001`,
+  `TPM-TRUTH-001`, and `TPM-OWNER-001`.
+- This is a follow-up to the historical PR #353 13-entry/12-build candidate;
+  that earlier gate record remains unchanged. The current local integration
+  branch is based on `046a114`. Its six-file frozen driver-lane snapshot and
+  manifest are present under `docs/remediation/recipe-lanes/drivers/`.
+- The full-guide driver lane identified three exact-build, absent-only Taisen
+  Hot Gimmick 5 (2.04) Main-source restorations: `TTX-Monitor.dll`,
+  `TTX-Config.exe`, and `TTX-Loader.exe`. Each is pinned to the exact
+  `game.exe` SHA-256 and its own source-member SHA-256. Operator key setup and
+  loader use remain separate; no generated monitor configuration, payload
+  execution, game launch, or gameplay is included.
+- Hunk mapping before implementation: central catalog entries, the existing
+  isolated single-file recipe test ID list, frozen driver-lane evidence, and
+  this follow-up contract/report -> Issue #351 / `DRIVERS-LANE-RC8` /
+  `TPM-REQUIRED-PATCHES-DRIVERS-001` / the procedures above.
+- Status at opening: source integration and focused current-catalog proof are
+  pending. Driver-lane synthetic production-engine checks passed under both
+  PowerShell engines before integration; those lane receipts do not replace
+  the central-catalog test or owner/runtime acceptance.
+- Limits: Dragon Dance and Primevil remain held by the driver lane. Owner
+  configuration, hardware, gameplay, package acceptance, Arcade, and release
+  status are not established by this source-only slice.
+## Issue #351 managed-plugin follow-up -- integration pending
+
+- Slice contract: `TPM-REQUIRED-PATCHES-PLUGIN-INTEGRATION-001`; lane
+  evidence contract: `TPM-REQUIRED-PATCH-PLUGINS-20261015`; procedures:
+  `TPM-TRACE-001`, `TPM-EVIDENCE-001`, `TPM-UX-001`, and `TPM-TRUTH-001`.
+- The frozen lane contributes only two recipe `Entries`: exact-build
+  Mars Sortie 1.46.9 and the separate Rabbids Hollywood operator plugin.
+  Its `Census`, base-catalog metadata, and fragment-level fields are not
+  central-catalog entries. The Rabbids operator assembly remains distinct
+  from the existing trigger/crosshairs assembly recipe.
+- Hunk mapping before implementation: two managed-plugin catalog entries,
+  the central exact-metadata/lifecycle tests, and the `UserSelected` local
+  ZIP source-selection label/prompt -> Issue #351 / plugin lane contract /
+  `TPM-REQUIRED-PATCHES-PLUGIN-INTEGRATION-001` / the procedures above.
+- The lane reports six focused synthetic Pester tests passed under PS7 and
+  Windows PowerShell 5.1 with Pester 5.7.1. Central-catalog integration and
+  the selected-source prompt correction remain pending; lane receipts do not
+  establish owner/runtime behavior.
+- Limits: the exact BepInEx core prerequisite is checked but not installed;
+  no plugin is executed. SB3 remains held on exact official profile/build
+  binding. No owner install, gameplay, package, or release status is inferred.
+## Issue #351 native single-file follow-up -- integration ready
+
+- Slice contract: `TPM-REQUIRED-PATCHES-NATIVE-001`; source
+  fragment: `Native-SingleFile-Batch-20261015-v2`; procedures:
+  `TPM-TRACE-001`, `TPM-EVIDENCE-001`, `TPM-TRUTH-001`, and
+  `TPM-OWNER-001`.
+- The corrected v2 patch is restricted to `scripts/TpmRequiredPatchEngine.ps1`
+  and `Tests/TeknoParrot-Manager.Tests.ps1`, SHA-256
+  `61F20333518AE8231BEBC187A06A6F9349C982CA67FC567DD679C74AA6611C98`.
+  Its disposable apply proof against `046a114` exited 0 and matched the
+  tested engine `DEAC3B66DA44EEEC357223D4940A4AB7BE54259535FD6DBF72ECDCB1FD67B2EC`
+  and test file `D01818CFE60F3E969B25B7278C31150B2E1C2DDB2A586651A4ABF65083D6B647`.
+- The five-entry fragment contains AMD/NVIDIA shader replacements for exact
+  Cross Raid 1.05 and VF5R 1.001 builds plus one exact Sonic Dash Extreme
+  executable replacement. The Sonic opt-in is constrained to one
+  `ReplaceFile` on the declared executable, exact original before hash, exact
+  after hash, transaction-time object identity, and receipt-bound undo. The
+  three hardware variants remain exact-build and mutually exclusive.
+- Integration sequence: current local catalog has the three Taisen entries;
+  add only the two frozen plugin entries and these five native entries, then
+  set the native test's old 18-entry expectation to the final verified
+  aggregate count. The one full canonical quality gate is reserved for the
+  frozen aggregate; no intermediate 16/18-entry full suite is authorized.
+- Hunk mapping: five recipe entries, narrow engine self-executable safeguards,
+  native catalog/transaction tests, and this slice/report -> Issue #351 /
+  native v2 / `TPM-REQUIRED-PATCHES-NATIVE-001` / procedures
+  above.
+- Owner/runtime limits: no binary execution, game launch, owner hardware or
+  gameplay acceptance, Arcade, package, or release result is claimed.
+
+## Issue #351 -- frozen expanded 24-entry review batch
+
+- Current status: `SOURCE FIXED; OWNER RUNTIME NEEDED`. Supersedes the earlier integration-pending driver/native/plugin follow-up notes for this batch; preserve those lane histories and the 13-entry PR353 gate record.
+- Review base `b5d6bc568513e1263ab891041083d5083bb4da70`; 24 recipes / 18 exact identities, 16 CreateFile / eight ReplaceFile. The baseline 13 entries and Main bytes are preserved. Detailed hashes, receipt limitations and hunk mappings are in the current reconciliation checkpoint.
+- Raw focused results are 25/25 under each engine with Pester 5.7.1; the helper result-capture exit was 1. Independent aggregate and engine reviews found no confirmed defect. Fresh canonical, broader regression, static and package gates are pending.
+- Current full-guide ledger remains explicitly mechanical; curated subset 19 implemented / one partial / 43 held / 32 separate non-patch references. Further recipes continue independently and do not delay this verified batch's gate/push milestone.
+- Exclude the additional Cross Raid base-restoration proposal: vendor undo composition is unresolved. Frozen24 has no CreateFile-to-ReplaceFile same-target overlap. No receipt or exclusive-group guard is weakened.
+- Owner setup, GUI, controls, launch/gameplay, Procedure A/B and ARCADE #323 are not passed. Preserve delivered owner ZIPs. PR321 remains draft/HOLD; no release/tag/main merge.
+
+### Expanded24 review publication gate
+
+Canonical Main 1,488/1,488 and Support 42/42 passed with Pester 5.7.1 on PowerShell 7.6.7; permanent gate passed, exit 0, completed 2026-10-15T06:51:18Z. All 559 frozen inputs were unchanged. Both static engines and InjectionHunter are green as recorded in the reconciliation. The separate 37-file regression run was incomplete and restarted with a distinct receipt; its result and exact-head CI remain pending. Review publication may proceed; integration, owner-package readiness and runtime acceptance remain held. PR321 remains draft/HOLD.

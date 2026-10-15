@@ -165,33 +165,49 @@ Enter 1-16:
 </details>
 
 **Required game patches:** choose option 10 to review supported required
-patches. The RC8 local owner-test candidate enables thirteen entries across
-twelve exact builds: Family Guy Bowling 1.15 Team Play PC; two mutually
-exclusive AMD/NVIDIA shader recipes for Shining Force -- Cross Elysion
-2.06.00 Ver C; BlazBlue Continuum Shift (2009), Continuum Shift II (2010),
-Cross Tag Battle (1.04.00,2.01.00), Central Fiction (2.01.00), and
-Chronophantasma (2.03); Rabbids Hollywood (2018); NERF Arcade (1.55);
-Rainbow BomberGirl (2022-12-15); Teenage Mutant Ninja Turtles (1.59); and
-Silent Hill The Arcade (2007-12-20). Users provide each recipe's exact named
-local ZIP; TPM does not host or download payloads. The three plugin recipes
-require the exact BepInEx core file. Three plugins, Silent Hill's `dsound.dll`
-and the four original BlazBlue drivers are absent-only restores even though
-their matching bytes are bundled in corresponding Main ZIPs. BBCP
-Chronophantasma instead replaces only the exact known driver hash with the
-guide-required hash, sourcing the exact member from the named Central Fiction
-Main ZIP; absent or unknown BBCP bytes are refused. Exact desired bytes are
-skipped; other target states are refused. Silent Hill's Windows codec BAT is
-separate and is not executed or installed. Elysion requires the exact
-build/executable, one unambiguous hardware-evidence result, and the exact
-opposite-vendor target hash. All four original BlazBlue driver recipes and
-Rabbids are missing-file restorations. ORIGINAL or ambiguous/hybrid adapter
-states are refused. TPM cannot establish which adapter a game uses in a
-hybrid system. Cross Raid is unsupported. Family Guy requires BepInEx and the
-guide's `[Preloader.Entrypoint] Type=MonoBehaviour` setting. Automatic mode
-lists eligible registered games for one confirmation; manual mode works on
-an already-installed folder without registering it. Register, configure
-controls, launch through TeknoParrotUI, and verify gameplay separately. Patch
-success does not establish readiness or playability.
+patches. The current local owner-test catalog has 24 exact recipes across 18
+exact ProfileId/build/executable identities. It preserves the historical
+13-entry baseline and adds three Taisen Hot Gimmick 5 (2.04) single-file
+restores, three exact-build user-selected plugin restores (Mars Sortie 1.46.9,
+the separate Rabbids Hollywood operator plugin, and SB3 1.91 x64), and five
+native recipes for Cross Raid 1.05, VF5R 1.001, and Sonic Dash Extreme.
+Sixteen `CreateFile` operations create only absent targets; eight `ReplaceFile`
+operations require the exact known before-state. Exact-after targets skip;
+unknown or other target states are refused. Full semantic guide coverage and
+gameplay readiness are not claimed.
+
+The Taisen files are restorations only. Configure and save keyboard keys
+with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by the game
+guide. TPM does not configure keys or run either utility; setup and launch
+remain separate owner steps.
+
+The four baseline Main-source BepInEx plugins and three added patch-ZIP
+plugins are distinct. The exact named local ZIP is required for each added
+plugin; the user-selected source prompt says local patch ZIP, not Main game
+ZIP. All seven plugin targets require BepInEx core presence, not a version
+check. Family Guy also requires its documented
+`[Preloader.Entrypoint] Type=MonoBehaviour` setting. Rabbids' operator plugin
+is separate from the `Assembly-CSharp.dll` restore. SB3's Main archive
+already contains its plugin bytes; the recipe restores only an absent
+installed target. SB3 FMOD placement/version readiness remains unresolved.
+Silent Hill's Windows codec BAT is separate and is not executed or installed.
+
+BBCP Chronophantasma replaces only its exact known driver before-hash with
+the guide-required hash from the named Central Fiction Main ZIP. Elysion,
+Cross Raid 1.05 and VF5R 1.001 require exact build/executable identity,
+unambiguous AMD/NVIDIA evidence, and the selected recipe's exact before-hash.
+Cross Raid's AMD/NVIDIA variants share a common known before-state; VF5R's
+variants also share a common known before-state. Neither family starts from
+the opposite vendor's output hash. Cross Raid source documentation says 1.05,
+not the `Ver A` suffix; the matching profile/build is not runtime compatibility
+proof. No other Cross Raid build or separate base-shader restoration is
+enabled. Sonic is an explicit opt-in, exact-before/after executable replacement
+with guarded transaction identity and receipt-bound undo; it is not a 60-fps
+claim.
+Automatic mode lists eligible registered games for one confirmation; manual
+mode works on an already-installed folder without registering it. Register,
+configure controls, launch through TeknoParrotUI, and verify gameplay
+separately. Patch success does not establish readiness or playability.
 
 **5.** For **AutoSync**, choose a LOCAL staging folder with free space, outside both TeknoParrot and your ZIP source. Not sure yet? Answer Y to "Run in PREVIEW mode first?" to see what would happen with zero files written, then Y when asked whether to perform the operation for real to commit them immediately -- see [[AutoSync#preview--dry-run-mode]]. Then choose what to extract:
 

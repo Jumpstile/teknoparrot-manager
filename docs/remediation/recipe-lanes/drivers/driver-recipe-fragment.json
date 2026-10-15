@@ -1,0 +1,89 @@
+{
+  "FragmentSchemaVersion": 1,
+  "OwnerContractId": "TPM-RC8-DRIVERS-LANE-001",
+  "Lane": "iDmac-JVS-NESiCA-TaitoIO-loader-drivers",
+  "Entries": [
+    {
+      "Id": "taisen-hot-gimmick-5-ttx-monitor-dll-restore",
+      "ProfileId": "TaisenHotGimmick5",
+      "BuildName": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "144875cc9d0dc66887cd6292dcb949c0575afb654b0da8bf173fef7047c7d86a",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip",
+      "SourceEntry": "TTX-Monitor.dll",
+      "SourceSize": 147456,
+      "SourceSha1": "201bacc01d57497690d35741e70940237e424f04",
+      "SourceSha256": "a706a9dbebb3e6d4511d47341d4a46d1f9965874adba4354a127797855fdfa44",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "TTX-Monitor.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "a706a9dbebb3e6d4511d47341d4a46d1f9965874adba4354a127797855fdfa44",
+          "Payload": "payload/TTX-Monitor.dll",
+          "PayloadSha256": "a706a9dbebb3e6d4511d47341d4a46d1f9965874adba4354a127797855fdfa44"
+        }
+      ]
+    },
+    {
+      "Id": "taisen-hot-gimmick-5-ttx-config-restore",
+      "ProfileId": "TaisenHotGimmick5",
+      "BuildName": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "144875cc9d0dc66887cd6292dcb949c0575afb654b0da8bf173fef7047c7d86a",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip",
+      "SourceEntry": "TTX-Config.exe",
+      "SourceSize": 270848,
+      "SourceSha1": "00cf036a2456a4bf5bd15128269a5cd64f0ef3d9",
+      "SourceSha256": "f6979167410af3c6ece2420e15205c54eb86663b74c27aa2e1cd05287efb8b64",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "TTX-Config.exe",
+          "BeforeState": "Absent",
+          "AfterSha256": "f6979167410af3c6ece2420e15205c54eb86663b74c27aa2e1cd05287efb8b64",
+          "Payload": "payload/TTX-Config.exe",
+          "PayloadSha256": "f6979167410af3c6ece2420e15205c54eb86663b74c27aa2e1cd05287efb8b64"
+        }
+      ]
+    },
+    {
+      "Id": "taisen-hot-gimmick-5-ttx-loader-restore",
+      "ProfileId": "TaisenHotGimmick5",
+      "BuildName": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "144875cc9d0dc66887cd6292dcb949c0575afb654b0da8bf173fef7047c7d86a",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip",
+      "SourceEntry": "TTX-Loader.exe",
+      "SourceSize": 11264,
+      "SourceSha1": "4b9b7174f46571a49eab6531a7577a062749e51c",
+      "SourceSha256": "2e270dde1ff0f86326a4bfcc84eb359a0231118dc03d9130526750e3d175ca3c",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "TTX-Loader.exe",
+          "BeforeState": "Absent",
+          "AfterSha256": "2e270dde1ff0f86326a4bfcc84eb359a0231118dc03d9130526750e3d175ca3c",
+          "Payload": "payload/TTX-Loader.exe",
+          "PayloadSha256": "2e270dde1ff0f86326a4bfcc84eb359a0231118dc03d9130526750e3d175ca3c"
+        }
+      ]
+    }
+  ],
+  "EntryDecision": "Three separate one-member Main-source CreateFile recipes are deliberately used; each is bound to the exact guide-build game.exe and creates only an absent target. No existing file is overwritten."
+}

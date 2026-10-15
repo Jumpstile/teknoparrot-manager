@@ -327,28 +327,45 @@ its own approved transaction.
 
 ## Required game patches
 
-Choose **option 10** to find supported required patches. RC8 supports seven
-recipes across six exact builds: Family Guy Bowling 1.15 Team Play PC;
-AMD/NVIDIA shader alternatives for Shining Force -- Cross Elysion 2.06.00 Ver
-C; BlazBlue Continuum Shift (2009), Continuum Shift II (2010), and Cross Tag
-Battle (1.04.00,2.01.00) with their guide-pinned `iDmacDrv32.dll`; and Rabbids
-Hollywood (2018) `Assembly-CSharp.dll`. You provide the matching ZIP locally;
-TPM does not host or download patch files.
+Choose **option 10** to find supported required patches. The current local
+owner-test catalog has 24 exact recipes across 18 exact
+ProfileId/build/executable identities: the historical 13-entry baseline plus
+three Taisen Hot Gimmick 5 (2.04) single-file restores; three user-selected
+plugin restores for Mars Sortie 1.46.9, the separate Rabbids Hollywood
+operator plugin, and SB3 1.91 x64; and five native recipes for Cross Raid
+1.05, VF5R 1.001, and Sonic Dash Extreme. Sixteen `CreateFile` operations
+create only absent targets; eight `ReplaceFile` operations require the exact
+known before-state. Exact-after files are skipped; other states are refused.
+This exact-component scope is not full semantic guide coverage.
+
+The Taisen files are restored only when absent. Configure and save keyboard
+keys with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by the
+guide. TPM does not configure keys or run either utility; setup and game
+launch remain separate.
 
 Automatic mode lists eligible registered games for one confirmation. Manual
 mode can patch an already-installed game folder without registering it. TPM
 checks the exact build, executable, local ZIP member, prerequisites and target
-bytes. Elysion requires unambiguous AMD/NVIDIA hardware evidence and the exact
-opposite-vendor shader state. All three BlazBlue driver and Rabbids recipes
-create missing files only, skip exact desired bytes, and refuse every other
-existing target state. Elysion refuses `.ORIGINAL`, ambiguous hardware, and
-other target states. Cross Raid is not supported by these recipes.
+bytes. The three added plugin recipes require exact-named local patch ZIPs;
+the prompt identifies them as patch ZIPs, not Main game ZIPs. All seven
+BepInEx plugin targets require core-file presence, not a BepInEx version
+check. Family Guy additionally requires the documented
+`[Preloader.Entrypoint] Type=MonoBehaviour` setting. SB3's Main ZIP already
+contains the plugin bytes; its recipe restores only an absent installed
+target. Its separate FMOD placement/version readiness remains unresolved.
 
-Family Guy requires BepInEx and the guide's
-`[Preloader.Entrypoint] Type=MonoBehaviour` setting. If manual patching was
-used, register the game and configure controls afterward. Launch through
-TeknoParrotUI and verify controls and gameplay yourself. A successful patch
-does not mean the game is ready or playable.
+Elysion, Cross Raid 1.05, and VF5R 1.001 each require exact build/executable,
+unambiguous AMD/NVIDIA evidence, and the selected recipe's exact before-hash.
+Cross Raid's AMD/NVIDIA variants share a common known before-state; VF5R's
+variants also share a common known before-state, not an opposite-vendor state.
+Cross Raid's source documentation says 1.05, not the `Ver A` suffix; the
+matching profile/build is not runtime compatibility proof. No other Cross
+Raid build or separate base-shader restoration is enabled. Sonic is an
+explicit opt-in, exact-before/after self-executable replacement with guarded
+transaction identity and receipt-bound undo; it does not prove a 60-fps
+outcome. Silent Hill's codec BAT is not run or installed. Register, configure
+controls, launch through TeknoParrotUI, and verify gameplay separately. A
+successful patch does not prove readiness.
 
 ---
 

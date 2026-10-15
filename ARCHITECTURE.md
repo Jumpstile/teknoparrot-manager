@@ -2333,11 +2333,14 @@ The owner-approved boundary is user-supplied local payloads only. TPM does not
 host or acquire payloads. A curated metadata-only RomVault DAT is permitted,
 but none is bundled; users provide payloads. Every recipe pins the exact build
 and executable identity, ZIP member path, member size/runtime SHA-256, target
-preconditions, post-patch identity, and setup prerequisites. The catalog has
-thirteen exact-build entries across twelve game builds: Family Guy Bowling
-1.15; two mutually exclusive Shining Force -- Cross Elysion 2.06.00 Ver C
-shader variants; five BlazBlue builds; Rabbids Hollywood; NERF Arcade; Rainbow
-BomberGirl; Teenage Mutant Ninja Turtles; and Silent Hill The Arcade.
+preconditions, post-patch identity, and setup prerequisites. The current local
+catalog has 24 exact recipes across 18 exact ProfileId/build/executable
+identities: it preserves the historical 13-entry baseline and adds three
+Taisen Hot Gimmick 5 (2.04) restores, three user-selected plugin restores
+(Mars Sortie 1.46.9, the separate Rabbids Hollywood operator plugin, and
+SB3 1.91 x64), and five native recipes for Cross Raid 1.05, VF5R 1.001, and
+Sonic Dash Extreme. This is exact-component support, not full semantic guide
+coverage.
 Family Guy pins `bowling.exe` SHA-256
 `3C4B406AA7B353CD416913308B8B714F7E17588D5A091326E0250A71A3407188`; its
 `BepInEx/plugins/FGBTPPlugin.dll` source member is 23,552 bytes, DAT SHA-1
@@ -2380,7 +2383,8 @@ Rabbids pins `Game.exe` SHA-256
 `Game_Data/Managed/Assembly-CSharp.dll` member at 1,592,320 bytes, SHA-1
 `624F619F827B9B0EAC0C936B40E7DC8348D48488`, SHA-256
 `BEA584D3EDF5DA73DBFACAFA5E73B1260B3F18CE7E346AB1BEACD8E885559764`.
-Six later exact-build cases extend the same schema and transaction engine.
+Six later exact-build cases extended the original seven-entry schema and
+transaction-engine snapshot.
 BlazBlue Central Fiction (`BBCF`) pins `game.exe` SHA-256
 `839323E068EA1274DEB271A0920BC507B0A75A5D22416F2FB7EEF9671E423A66` and
 its 75,776-byte `iDmacDrv32.dll` with guide CRC `F1FF8CC9`, SHA-256
@@ -2411,29 +2415,30 @@ Teenage Mutant Ninja Turtles (`TMNT`) pins `TMNT.exe`
 `11AEDEEE2136DA3BF69392B5FE76818707BDD8E413AE99F829F394F8B80B295F` and
 `TMNTTPPlugin.dll` SHA-256
 `37E8229921B7B838A452676E70640EE5AC34114DA0923D6F2DE6FE482F0C62C9`.
-The three plugin recipes require the exact Main BepInEx core member
-`BepInEx/core/BepInEx.dll`; they do not infer a configuration-file prerequisite.
-Silent Hill The Arcade (`SilentHill`) pins `KSHG.exe`
+All seven plugin recipes require the exact Main or selected-source
+`BepInEx/core/BepInEx.dll` member; the six added plugin cases do not infer a
+configuration prerequisite. Family Guy additionally requires its documented
+`[Preloader.Entrypoint] Type=MonoBehaviour` setting. Silent Hill The Arcade
+(`SilentHill`) pins `KSHG.exe`
 `9B8A6C1BF81F9D690E2BEDB94E3AB2844313A83758923C22704DA3241E492995` and
 `dsound.dll` SHA-256
 `6D57ACF2E79C7F816C70C04A82F264E17C27CA243B3F6AFC1AD3A14445C390AB`.
 Its codec BAT is a separate Windows prerequisite and is never executed.
-The four original BlazBlue driver entries, Rabbids, the plugin restorations,
-and Silent Hill are absent-file restorations only; they create no target unless
-it is absent, skip the exact desired hash, and refuse other bytes. BBCP is the
-single explicit replacement: its exact known before-hash is required, its
-guide-pinned after-hash is skipped, and every other target state is refused.
-These rules do not claim that a correctly bundled source file needs repair.
+The four BlazBlue driver entries, Rabbids' `Assembly-CSharp.dll`, the four
+baseline Main-source plugin targets, Silent Hill's `dsound.dll`, the three
+Taisen files, and the three added plugin targets are absent-only restorations.
+The current total is 16 `CreateFile` operations and eight exact-before
+`ReplaceFile` operations. They create no target unless it is absent, skip the
+exact desired hash, and refuse other bytes. BBCP is the explicit known-before
+replacement. Sonic is the sole exact self-executable transition and requires
+the recipe's explicit opt-in, exact executable before/after hashes, guarded
+transaction-time identity, and receipt-bound undo. These rules do not claim
+that a correctly bundled source file needs repair.
 Runtime payload validation uses exact member size and SHA-256; DAT SHA-1 is
 provenance only. Source parsing streams only the exact bounded ZIP member.
 Planning validates canonical game roots, the active executable and target
 bytes, registered profile identity when applicable, recipe prerequisites and
 closed-game state.
-Only a recipe-declared before-state is patchable: absent for Family Guy, the
-four original BlazBlue driver restorations, Rabbids, the three exact-build
-BepInEx plugin restorations, and Silent Hill; exact BBCP before-hash for its
-replacement; exact opposite-vendor SHA-256 for Elysion. Exact after-state is
-skipped; all other states are refused.
 Apply creates and verifies the backup before creation/replacement, checks the
 read-back, and records an undo receipt. Undo uses the same receipt and file
 identity checks; for created files it removes only the exact TPM-created file.
@@ -2450,10 +2455,14 @@ evidence and the exact AMD target hash. The variants share an exclusive group.
 An exact desired hash is skipped; `.ORIGINAL` (SHA-256
 `69A4CAA802E5CFE31F3610BEBF3045233ABED08EB0882180CE4127D1554A45E7`), unknown
 or other target bytes are refused. The collected `Supplied Shader` archive is
-an original-backup match, not a repair payload. Cross Raid remains unsupported:
-its profile/build comparison has different executable/target hashes, and no
-Cross Raid AMD/NVIDIA alternatives were verified. Hybrid or ambiguous GPU
-evidence is refused; the engine does not infer which adapter a game uses.
+an original-backup match, not a repair payload. The current Cross Raid
+alternatives are limited to the exact 1.05 ProfileId/build and AMD/NVIDIA
+shader identities. The source documentation names version 1.05, not the
+`Ver A` suffix; that profile/build match is not runtime compatibility proof.
+No other Cross Raid build or separate base-shader restoration is enabled.
+VF5R alternatives are likewise limited to exact build 1.001. Hybrid or
+ambiguous GPU evidence is refused; the engine does not infer which adapter a
+game uses.
 
 BepInEx is a required Family Guy prerequisite; its guide's
 `[Preloader.Entrypoint] Type=MonoBehaviour` setting, TeknoParrot

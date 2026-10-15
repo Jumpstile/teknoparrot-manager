@@ -396,5 +396,340 @@
         }
       ]
     }
+    ,
+    {
+      "Id": "taisen-hot-gimmick-5-ttx-monitor-dll-restore",
+      "ProfileId": "TaisenHotGimmick5",
+      "BuildName": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "144875cc9d0dc66887cd6292dcb949c0575afb654b0da8bf173fef7047c7d86a",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip",
+      "SourceEntry": "TTX-Monitor.dll",
+      "SourceSize": 147456,
+      "SourceSha1": "201bacc01d57497690d35741e70940237e424f04",
+      "SourceSha256": "a706a9dbebb3e6d4511d47341d4a46d1f9965874adba4354a127797855fdfa44",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "TTX-Monitor.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "a706a9dbebb3e6d4511d47341d4a46d1f9965874adba4354a127797855fdfa44",
+          "Payload": "payload/TTX-Monitor.dll",
+          "PayloadSha256": "a706a9dbebb3e6d4511d47341d4a46d1f9965874adba4354a127797855fdfa44"
+        }
+      ]
+    },
+    {
+      "Id": "taisen-hot-gimmick-5-ttx-config-restore",
+      "ProfileId": "TaisenHotGimmick5",
+      "BuildName": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "144875cc9d0dc66887cd6292dcb949c0575afb654b0da8bf173fef7047c7d86a",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip",
+      "SourceEntry": "TTX-Config.exe",
+      "SourceSize": 270848,
+      "SourceSha1": "00cf036a2456a4bf5bd15128269a5cd64f0ef3d9",
+      "SourceSha256": "f6979167410af3c6ece2420e15205c54eb86663b74c27aa2e1cd05287efb8b64",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "TTX-Config.exe",
+          "BeforeState": "Absent",
+          "AfterSha256": "f6979167410af3c6ece2420e15205c54eb86663b74c27aa2e1cd05287efb8b64",
+          "Payload": "payload/TTX-Config.exe",
+          "PayloadSha256": "f6979167410af3c6ece2420e15205c54eb86663b74c27aa2e1cd05287efb8b64"
+        }
+      ]
+    },
+    {
+      "Id": "taisen-hot-gimmick-5-ttx-loader-restore",
+      "ProfileId": "TaisenHotGimmick5",
+      "BuildName": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP]",
+      "Executable": "game.exe",
+      "ExecutableSha256": "144875cc9d0dc66887cd6292dcb949c0575afb654b0da8bf173fef7047c7d86a",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip",
+      "SourceEntry": "TTX-Loader.exe",
+      "SourceSize": 11264,
+      "SourceSha1": "4b9b7174f46571a49eab6531a7577a062749e51c",
+      "SourceSha256": "2e270dde1ff0f86326a4bfcc84eb359a0231118dc03d9130526750e3d175ca3c",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "TTX-Loader.exe",
+          "BeforeState": "Absent",
+          "AfterSha256": "2e270dde1ff0f86326a4bfcc84eb359a0231118dc03d9130526750e3d175ca3c",
+          "Payload": "payload/TTX-Loader.exe",
+          "PayloadSha256": "2e270dde1ff0f86326a4bfcc84eb359a0231118dc03d9130526750e3d175ca3c"
+        }
+      ]
+    }
+    ,
+    {
+      "Id": "mars-sortie-bepinex-plugin-restore",
+      "ProfileId": "MarsSortie",
+      "BuildName": "Mars Sortie (1.46.9)(2018)[UDC PC][TP]",
+      "Executable": "Shooter.exe",
+      "ExecutableSha256": "08541DCD067D7BB3BBE42BEAF2F1B5224C762FC347B71FC7A7308D7430384372",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "UserSelected",
+      "SourceSet": "Mars Sortie (1.46.9) - TPPlugin_v1.2.zip",
+      "SourceEntry": "MSTPPlugin.dll",
+      "SourceSize": 21504,
+      "SourceSha1": "0BF44248A5402E51544BDD9493B469BEA3727011",
+      "SourceSha256": "3CCABD105D603EAAA7EE3CD5F7194DEBD179CC30B701113DBC5C6B564FDB1783",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/MSTPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "3CCABD105D603EAAA7EE3CD5F7194DEBD179CC30B701113DBC5C6B564FDB1783",
+          "Payload": "payload/MSTPPlugin.dll",
+          "PayloadSha256": "3CCABD105D603EAAA7EE3CD5F7194DEBD179CC30B701113DBC5C6B564FDB1783"
+        }
+      ]
+    },
+    {
+      "Id": "rabbids-hollywood-bepinex-operator-plugin-restore",
+      "ProfileId": "RabbidsHollywood",
+      "BuildName": "Rabbids Hollywood (2018)[Adrenaline PC][TP]",
+      "Executable": "Game.exe",
+      "ExecutableSha256": "979F9736A99745454429908227CDD2F48875F193D439CFA33A9E14B4578DA95D",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "UserSelected",
+      "SourceSet": "Rabbids Hollywood (2018) - BepInEx Operator Configuration Pack.zip",
+      "SourceEntry": "BepInEx/plugins/UnityPlugin_BepInEx_RHA.dll",
+      "SourceSize": 15360,
+      "SourceSha1": "25F9142BC4CDC364A5D2348606D0C513C86C9610",
+      "SourceSha256": "C3DEDA497E160652A1F0D3D99892A4F534A88D61358DBA5192003FF519D5E8EB",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/UnityPlugin_BepInEx_RHA.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "C3DEDA497E160652A1F0D3D99892A4F534A88D61358DBA5192003FF519D5E8EB",
+          "Payload": "payload/UnityPlugin_BepInEx_RHA.dll",
+          "PayloadSha256": "C3DEDA497E160652A1F0D3D99892A4F534A88D61358DBA5192003FF519D5E8EB"
+        }
+      ]
+    }
+    ,
+    {
+      "Id": "sb3-bepinex-plugin-restore",
+      "ProfileId": "SB3",
+      "BuildName": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills][TP]",
+      "Executable": "fnfmega.exe",
+      "ExecutableSha256": "7F84AE68A35587EA87312ED59247EB0379F00826B8F2473A09155792A90AEEAD",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "UserSelected",
+      "SourceSet": "Super Bikes 3 (1.91 x64) - TPPlugin_v1.09 x64.zip",
+      "SourceEntry": "SB3TPPlugin.dll",
+      "SourceSize": 121856,
+      "SourceSha1": "E4BCCBCBB32EEE7DCE2E24AAF8990E4812BC81F5",
+      "SourceSha256": "9E8464FD54F272398CDE3E2AACB2D5F6D8508A2F90C3E7D7793166016BFFF3D5",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/SB3TPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "9E8464FD54F272398CDE3E2AACB2D5F6D8508A2F90C3E7D7793166016BFFF3D5",
+          "Payload": "payload/SB3TPPlugin.dll",
+          "PayloadSha256": "9E8464FD54F272398CDE3E2AACB2D5F6D8508A2F90C3E7D7793166016BFFF3D5"
+        }
+      ]
+    }
+    ,
+    {
+      "Id": "shining-force-cross-raid-105-amd-shader",
+      "ProfileId": "ShiningForceCrossRaid",
+      "BuildName": "Shining Force - Cross Raid (1.05 Ver A)(2011-08-03)(JPN)[Sega RingEdge][TP]",
+      "Executable": "project_f-ringedge-release.exe",
+      "ExecutableSha256": "82E66635A9A91CEC59721DB7BD9258464F70C44377BA707FFCB51EA2D3DB9317",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Supplementary",
+      "SourceSet": "Shining Force - Cross Raid (1.05) - AMD Shader Fix.zip",
+      "SourceEntry": "rom/shader.farc",
+      "SourceSize": 8987472,
+      "SourceSha1": "7520194AB599DB8FF68C0D7277DA9DEE0EEC57C8",
+      "SourceSha256": "B245426428543B89A7A074EDEFD7E72CC437EBED9462F287E646FD8CD4A5A8BB",
+      "ExclusiveGroup": "shining-force-cross-raid-105-shader",
+      "HardwarePredicate": {
+        "Vendor": "AMD"
+      },
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "rom/shader.farc",
+          "BeforeSha256": "66E0CC00E84C01F6E77E6B446A019212EBD27610FDD81CA866648C5E97E80933",
+          "AfterSha256": "B245426428543B89A7A074EDEFD7E72CC437EBED9462F287E646FD8CD4A5A8BB",
+          "Payload": "payload/shader.farc",
+          "PayloadSha256": "B245426428543B89A7A074EDEFD7E72CC437EBED9462F287E646FD8CD4A5A8BB"
+        }
+      ]
+    },
+    {
+      "Id": "shining-force-cross-raid-105-nvidia-shader",
+      "ProfileId": "ShiningForceCrossRaid",
+      "BuildName": "Shining Force - Cross Raid (1.05 Ver A)(2011-08-03)(JPN)[Sega RingEdge][TP]",
+      "Executable": "project_f-ringedge-release.exe",
+      "ExecutableSha256": "82E66635A9A91CEC59721DB7BD9258464F70C44377BA707FFCB51EA2D3DB9317",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Supplementary",
+      "SourceSet": "Shining Force - Cross Raid (1.05) - NVIDIA Shader Fix.zip",
+      "SourceEntry": "rom/shader.farc",
+      "SourceSize": 8987472,
+      "SourceSha1": "FF7DE8DB19ABE7695BCE5617894E41667CBF05E7",
+      "SourceSha256": "DA517CD064CB8B17C8B62DF1783F4D641195B0EB1E90FDD07B8BA72E47511912",
+      "ExclusiveGroup": "shining-force-cross-raid-105-shader",
+      "HardwarePredicate": {
+        "Vendor": "NVIDIA"
+      },
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "rom/shader.farc",
+          "BeforeSha256": "66E0CC00E84C01F6E77E6B446A019212EBD27610FDD81CA866648C5E97E80933",
+          "AfterSha256": "DA517CD064CB8B17C8B62DF1783F4D641195B0EB1E90FDD07B8BA72E47511912",
+          "Payload": "payload/shader.farc",
+          "PayloadSha256": "DA517CD064CB8B17C8B62DF1783F4D641195B0EB1E90FDD07B8BA72E47511912"
+        }
+      ]
+    },
+    {
+      "Id": "sonic-dash-extreme-60fps-60hz-self-executable",
+      "ProfileId": "SonicDashExtreme",
+      "BuildName": "Sonic Dash Extreme (2015)[Sega Nu][TP]",
+      "Executable": "exe/SonicDash_R_Ring.exe",
+      "ExecutableSha256": "47B6F1186C734DD795D1AFC95D070494436502A2B2419ADE9F19A78D7B431A38",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Sonic Dash Extreme (2015)[Sega Nu][TP].zip",
+      "SourceEntry": "exe/SonicDash_R_Ring.exe",
+      "SourceSize": 5947392,
+      "SourceSha1": "E7369EC647CDAAFA9197B5B02D4346AE935C9459",
+      "SourceSha256": "BCA788A62FD32681D049F7AFDE456F6AD12F9030CED4E1C3CFD81C3A925EDD9E",
+      "ExclusiveGroup": "",
+      "AllowExecutableSelfPatch": true,
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "exe/SonicDash_R_Ring.exe",
+          "BeforeSha256": "47B6F1186C734DD795D1AFC95D070494436502A2B2419ADE9F19A78D7B431A38",
+          "AfterSha256": "BCA788A62FD32681D049F7AFDE456F6AD12F9030CED4E1C3CFD81C3A925EDD9E",
+          "Payload": "payload/SonicDash_R_Ring.exe",
+          "PayloadSha256": "BCA788A62FD32681D049F7AFDE456F6AD12F9030CED4E1C3CFD81C3A925EDD9E"
+        }
+      ]
+    },
+    {
+      "Id": "virtua-fighter-5-r-1001-amd-shader",
+      "ProfileId": "VF5R",
+      "BuildName": "Virtua Fighter 5 R (1.001)(2008-06-18)[Sega Lindbergh Yellow][TP]",
+      "Executable": "vf5",
+      "ExecutableSha256": "01198DA768945395C4AACF4CE9460B76F2A8EAEA850E39F52EAEC33D7EECA310",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Supplementary",
+      "SourceSet": "Virtua Fighter 5 R (1.001) - AMD Shader Fix.zip",
+      "SourceEntry": "rom/shader.farc",
+      "SourceSize": 11672624,
+      "SourceSha1": "84E396DF3240AD565E77BF0BCAD6EDD9310535CF",
+      "SourceSha256": "403E9281A1BB73F9CDC73395E3CC614B6AADDA4AEB8D19BA96E17B55F2062419",
+      "ExclusiveGroup": "virtua-fighter-5-r-1001-shader",
+      "HardwarePredicate": {
+        "Vendor": "AMD"
+      },
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "rom/shader.farc",
+          "BeforeSha256": "B0C66A2AF1130E100C0EF72A808362C8D8CF0623D3F8FBD3C82B837EEEA9C247",
+          "AfterSha256": "403E9281A1BB73F9CDC73395E3CC614B6AADDA4AEB8D19BA96E17B55F2062419",
+          "Payload": "payload/shader.farc",
+          "PayloadSha256": "403E9281A1BB73F9CDC73395E3CC614B6AADDA4AEB8D19BA96E17B55F2062419"
+        }
+      ]
+    },
+    {
+      "Id": "virtua-fighter-5-r-1001-nvidia-shader",
+      "ProfileId": "VF5R",
+      "BuildName": "Virtua Fighter 5 R (1.001)(2008-06-18)[Sega Lindbergh Yellow][TP]",
+      "Executable": "vf5",
+      "ExecutableSha256": "01198DA768945395C4AACF4CE9460B76F2A8EAEA850E39F52EAEC33D7EECA310",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Supplementary",
+      "SourceSet": "Virtua Fighter 5 R (1.001) - NVIDIA Shader Fix.zip",
+      "SourceEntry": "rom/shader.farc",
+      "SourceSize": 11418160,
+      "SourceSha1": "457E4C4B0938EE88FD05583F88ECD0138F213866",
+      "SourceSha256": "B32F56FEC6F5FB99DB06C7173BE241AD8DD532444426655015AC1C4B92FC8FA3",
+      "ExclusiveGroup": "virtua-fighter-5-r-1001-shader",
+      "HardwarePredicate": {
+        "Vendor": "NVIDIA"
+      },
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "ReplaceFile",
+          "Target": "rom/shader.farc",
+          "BeforeSha256": "B0C66A2AF1130E100C0EF72A808362C8D8CF0623D3F8FBD3C82B837EEEA9C247",
+          "AfterSha256": "B32F56FEC6F5FB99DB06C7173BE241AD8DD532444426655015AC1C4B92FC8FA3",
+          "Payload": "payload/shader.farc",
+          "PayloadSha256": "B32F56FEC6F5FB99DB06C7173BE241AD8DD532444426655015AC1C4B92FC8FA3"
+        }
+      ]
+    }
   ]
 }

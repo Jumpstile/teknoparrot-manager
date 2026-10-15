@@ -92,13 +92,11 @@ tree is for review, certification, and release preparation only.
 - **GPU fixes** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
 - **Force feedback (FFB)** — native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed), covering different games. If a game is covered by both, you're asked once which to use for all such games.
 - **BepInEx setup** — user-approved install, update, or repair-reset for selected games using stable x64/x86 packages with verified backup and rollback.
-- **Required game patches** -- installs evidence-pinned recipes from ZIPs you
-  provide locally. RC8 has thirteen exact-build entries across twelve builds,
-  including five BlazBlue drivers. Four BlazBlue recipes restore only absent
-  files; BBCP Chronophantasma replaces only its exact known driver hash with
-  the guide-required hash from the explicitly named Central Fiction Main ZIP.
-  Exact build/executable and target states must match; unknown bytes are
-  refused. Patch success does not prove gameplay readiness.
+- **Required game patches** -- installs 24 evidence-pinned recipes across 18
+  exact ProfileId/build/executable identities from local ZIPs. Sixteen recipes
+  create only absent files; eight require an exact known before-state. Hardware
+  alternatives require unambiguous captured evidence. Unknown target bytes are
+  refused; patch success does not prove readiness.
 - **Postgres setup** — installs and configures the local PostgreSQL 8.3 database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball). Detects which registered games need it automatically; never reinstalls Postgres or recreates an existing database.
 - **Automatic compatibility warnings** — every run checks for known install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6), pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN), and known GPU-vendor incompatibilities (AMD/Intel), with details in ACTION REQUIRED.
 - **Game-specific setup notes** — every run checks the community compatibility database (eggmansworld.github.io/TeknoParrot) for any registered game with special setup notes — workarounds, known quirks, and the expected executable name — and writes them to the separate `TeknoParrot-Manager-game-notes.txt` report. Raw source notes are not copied into ACTION REQUIRED.
@@ -273,35 +271,61 @@ supports **manual** installation into an already-installed game folder, even
 when that game is not registered yet. Manual install does not register it;
 TPM tells you to register it and configure controls afterward.
 
-RC8's local owner-test candidate enables thirteen entries across twelve exact
-builds: Family Guy Bowling 1.15 Team Play PC; two mutually exclusive Shining
-Force -- Cross Elysion 2.06.00 Ver C shader alternatives; BlazBlue Continuum
-Shift (2009), Continuum Shift II (2010), Cross Tag Battle (1.04.00,2.01.00),
-Central Fiction (2.01.00), and Chronophantasma (2.03); Rabbids Hollywood
-(2018); NERF Arcade (1.55); Rainbow BomberGirl (2022-12-15); Teenage Mutant
-Ninja Turtles (1.59); and Silent Hill The Arcade (2007-12-20). The exact Main
-members for the four absent-only `iDmacDrv32.dll` restores, Rabbids'
-`Assembly-CSharp.dll`, all three BepInEx plugins, and Silent Hill's `dsound.dll`
-are in their corresponding Main ZIPs. BBCP Chronophantasma is different: its
-recipe replaces only the exact known BBCP driver hash with the guide-required
-hash, sourcing that exact member from the named Central Fiction Main ZIP.
-Absent, unknown, or other BBCP bytes are refused; this is not a missing-file
-restore or an inferred title association. For other absent-only recipes, an
-absent target is created; exact desired hashes are skipped; all other existing
-bytes are refused. The three plugin recipes require the pinned BepInEx core
-file, not a guessed configuration file. Silent Hill's separate Windows codec
-BAT is not run or installed. Provide each recipe's exact named source ZIP
-locally. TPM does not host or download patch payloads. It streams only the
-exact named member and checks its size and SHA-256; SHA-1 is retained as DAT
-identity metadata, not used as the runtime integrity check.
+The current local RC8 owner-test catalog contains 24 exact-build recipes
+across 18 exact ProfileId/build/executable identities. It preserves the
+historical 13-entry PR #353 baseline and adds three Taisen Hot Gimmick 5
+(2.04) single-file restores (`TTX-Monitor.dll`, `TTX-Config.exe`, and
+`TTX-Loader.exe`); three exact-build user-selected plugin restores (Mars
+Sortie 1.46.9, the separate Rabbids Hollywood operator plugin, and Super
+Bikes 3 1.91 x64); and five native recipes (Cross Raid 1.05 AMD/NVIDIA
+shader alternatives, VF5R 1.001 AMD/NVIDIA shader alternatives, and one
+explicitly opted-in Sonic Dash Extreme self-executable replacement). The
+catalog has 16 absent-only `CreateFile` operations and eight exact-before
+`ReplaceFile` operations. This is exact-component support, not full semantic
+guide coverage.
 
-For Cross Elysion, TPM checks the exact executable/build and selects a variant
-only when one captured hardware-evidence snapshot unambiguously identifies
-AMD or NVIDIA. It replaces `rom/shader.farc` only from the exact opposite-
-vendor hash. An exact desired hash is skipped; `.ORIGINAL`, unknown bytes, or
-any other target state is refused. Multiple or hybrid GPU evidence is not
-guessed; this candidate cannot identify which adapter a game uses in that
-case. Cross Raid is not supported by these recipes.
+The Taisen files are restorations only. Configure and save keyboard keys
+with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by the game
+guide. TPM does not configure keys or run either utility; setup and launch
+remain separate owner steps.
+
+The earlier 13-entry baseline includes Family Guy Bowling 1.15 Team Play PC;
+two mutually exclusive Shining Force -- Cross Elysion 2.06.00 Ver C shader
+alternatives; five BlazBlue builds; Rabbids Hollywood (2018); NERF Arcade
+(1.55); Rainbow BomberGirl (2022-12-15); Teenage Mutant Ninja Turtles
+(1.59); and Silent Hill The Arcade (2007-12-20). The four baseline BlazBlue
+absent-only `iDmacDrv32.dll` restores, Rabbids' `Assembly-CSharp.dll`, four
+Main-sourced BepInEx plugin targets, and Silent Hill's `dsound.dll` use
+members from their corresponding Main ZIPs. The three added plugin recipes
+use exact-named local patch ZIPs; the selected-source prompt identifies a
+local patch ZIP, not a Main game ZIP. The SB3 Main archive already contains
+the exact plugin bytes, so its absent-only recipe repairs a missing installed
+target rather than claiming the source patch is absent. The Rabbids operator
+plugin remains distinct from its Assembly-CSharp recipe.
+
+BBCP Chronophantasma is the sole `ReplaceFile` repair in the baseline's
+BlazBlue group: it replaces only the exact known BBCP driver hash with the
+guide-required hash, sourcing that exact member from the named Central
+Fiction Main ZIP. Absent, unknown, or other BBCP bytes are refused. For
+absent-only recipes, an absent target is created; exact desired hashes are
+skipped; all other existing bytes are refused. All seven BepInEx plugin
+targets require the core file; Family Guy additionally requires its documented
+`MonoBehaviour` configuration value. Core presence does not establish a
+BepInEx version. Silent Hill's separate Windows codec BAT is not run or
+installed. TPM does not host or download patch payloads.
+
+Cross Elysion, Cross Raid 1.05, and VF5R 1.001 each have mutually exclusive
+AMD/NVIDIA shader alternatives. TPM requires the exact registered build and
+executable, unambiguous hardware evidence, and the before-hash declared by
+the selected recipe. Cross Raid's AMD/NVIDIA variants share a common known
+before-state; VF5R's variants also share a common known before-state. Neither
+family starts from the opposite vendor's output hash. Cross Raid source
+documentation identifies version 1.05 but not the `Ver A` suffix; that
+profile/build match is not runtime compatibility or gameplay proof. No other
+Cross Raid build or separate base-shader restoration is enabled. Sonic Dash
+Extreme is an explicit opt-in, exact-before/after executable replacement with
+backup, read-back, and receipt-bound undo; byte identity does not prove a
+60-fps outcome.
 
 Family Guy also requires BepInEx and the guide's `MonoBehaviour` entrypoint setting.
 Every patch transaction backs up before applying, verifies read-back, and keeps

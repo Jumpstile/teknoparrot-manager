@@ -1,0 +1,44 @@
+{
+  "Schema": "TPM.RequiredPatch.ManagedPluginFragment.v1",
+  "BaseCatalog": {
+    "Schema": 3,
+    "EntryCount": 13,
+    "Sha256": "7B190D234667BE3059C7950659421EB810EB80C51C2E4B520B79B9CBC97F934D"
+  },
+  "Entries": [
+    {
+      "Id": "sb3-bepinex-plugin-restore",
+      "ProfileId": "SB3",
+      "BuildName": "Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills][TP]",
+      "Executable": "fnfmega.exe",
+      "ExecutableSha256": "7F84AE68A35587EA87312ED59247EB0379F00826B8F2473A09155792A90AEEAD",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "UserSelected",
+      "SourceSet": "Super Bikes 3 (1.91 x64) - TPPlugin_v1.09 x64.zip",
+      "SourceEntry": "SB3TPPlugin.dll",
+      "SourceSize": 121856,
+      "SourceSha1": "E4BCCBCBB32EEE7DCE2E24AAF8990E4812BC81F5",
+      "SourceSha256": "9E8464FD54F272398CDE3E2AACB2D5F6D8508A2F90C3E7D7793166016BFFF3D5",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "bepinex-core",
+          "Type": "File",
+          "Path": "BepInEx/core/BepInEx.dll",
+          "Description": "BepInEx must be installed for this game."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "BepInEx/plugins/SB3TPPlugin.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "9E8464FD54F272398CDE3E2AACB2D5F6D8508A2F90C3E7D7793166016BFFF3D5",
+          "Payload": "payload/SB3TPPlugin.dll",
+          "PayloadSha256": "9E8464FD54F272398CDE3E2AACB2D5F6D8508A2F90C3E7D7793166016BFFF3D5"
+        }
+      ]
+    }
+  ]
+}

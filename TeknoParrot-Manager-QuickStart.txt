@@ -164,27 +164,40 @@
                              when asking for help.
        16) Exit            -- quit the script.
 
-   **Required game patches:** you provide each recipe's exact named local ZIP;
-   TPM does not host or download patch payloads. The RC8 local owner-test
-   candidate enables thirteen entries across twelve exact builds: Family Guy
-   Bowling 1.15 Team Play PC; two mutually exclusive Shining Force -- Cross
-   Elysion 2.06.00 Ver C shaders; BlazBlue Continuum Shift (2009), Continuum
-   Shift II (2010), Cross Tag Battle (1.04.00/2.01.00), Central Fiction
-   (2.01.00), and Chronophantasma (2.03); Rabbids Hollywood (2018); NERF
-   Arcade (1.55); Rainbow BomberGirl (2022-12-15); Teenage Mutant Ninja
-   Turtles (1.59); and Silent Hill The Arcade (2007-12-20). Four existing
-   BlazBlue driver recipes, three exact-build BepInEx plugins and Silent Hill's
-   `dsound.dll` are absent-only restores. BBCP Chronophantasma instead replaces
-   only the exact known driver hash with the guide-required hash, sourcing the
-   exact member from the named Central Fiction Main ZIP; absent or unknown BBCP
-   bytes are refused. Other absent targets are created; exact desired bytes
-   are skipped; unknown bytes are refused. Plugin recipes require the exact
-   BepInEx core file. Silent Hill's Windows codec BAT is not run or installed.
-   Elysion requires exact build/executable, unambiguous hardware evidence, and
-   the exact opposite-vendor shader state. Cross Raid is unsupported. Family
-   Guy requires BepInEx and its documented entrypoint setting. Manual patching
-   does not register the game. Set controls, launch through TeknoParrotUI, and
-   verify gameplay separately; a file patch does not prove readiness.
+   **Required game patches:** TPM uses local, hash-pinned ZIP members; it
+   does not host or download patch payloads. The current local RC8 owner-test
+   catalog has 24 exact recipes across 18 exact ProfileId/build/executable
+   identities. It preserves the 13-entry PR #353 baseline and adds three
+   Taisen Hot Gimmick 5 (2.04) restores, three user-selected plugin restores
+   (Mars Sortie, the separate Rabbids Hollywood operator plugin, and SB3
+   1.91 x64), and five native recipes for Cross Raid 1.05, VF5R 1.001, and
+   Sonic Dash Extreme.
+   The Taisen files are restorations only. Configure and save keyboard keys
+   with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by the guide.
+   TPM does not configure keys or run either utility; setup and game launch
+   remain separate owner steps.
+
+   Sixteen `CreateFile` operations create only absent targets; eight
+   `ReplaceFile` operations require an exact before-hash. Exact desired bytes
+   are skipped and other existing bytes are refused. The exact user-selected
+   patch ZIP filename is required. The SB3 Main ZIP already contains its
+   plugin bytes; its recipe restores only a missing installed target. The
+   Rabbids operator plugin is separate from the existing Assembly-CSharp
+   repair. All seven plugin targets require BepInEx core presence; Family Guy
+   also requires its documented `MonoBehaviour` entrypoint setting.
+
+   Cross Elysion, Cross Raid 1.05, and VF5R 1.001 require the exact executable,
+   unambiguous AMD/NVIDIA evidence, and the selected recipe's exact before-hash.
+   Cross Raid's AMD/NVIDIA variants share a common known before-state; VF5R's
+   variants also share a common known before-state, not an opposite-vendor state.
+   Cross Raid source documentation says 1.05 but not the `Ver A` suffix; no
+   compatibility or gameplay result is claimed. No other Cross Raid build or
+   base-shader restoration is enabled. Sonic's exact before/after executable
+   replacement is explicit opt-in and does not prove 60-fps behavior. Silent
+   Hill's Windows codec BAT is not run or installed; SB3 FMOD placement and
+   version readiness remain unresolved. Manual patching does not register the
+   game. Set controls, launch through TeknoParrotUI, and verify gameplay
+   separately; a file patch does not prove readiness or full-guide coverage.
 
    If you need help, choose 15) Create Support Package. First, in TeknoParrotUI
    choose Troubleshooting -> Save information to a text file and save it beside

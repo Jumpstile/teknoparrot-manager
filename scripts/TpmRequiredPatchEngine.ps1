@@ -1,4 +1,4 @@
-$script:TpmRequiredPatchCatalogSha256 = '7B190D234667BE3059C7950659421EB810EB80C51C2E4B520B79B9CBC97F934D'
+$script:TpmRequiredPatchCatalogSha256 = '283DB40B0A17F3FEF2BC758D8123209B87C07731E433CECFE96DE1E2C69C5CE8'
 
 function Get-TpmRegisteredPatchContext {
     param([Parameter(Mandatory)]$Entry,[Parameter(Mandatory)][string]$TpRoot,[Parameter(Mandatory)][string]$UserProfilesDir,[Parameter(Mandatory)][string]$ManagerRoot)
@@ -311,7 +311,7 @@ function Get-TpmPatchPlan {
             $fields = @('Id','ProfileId','Executable','ExecutableSha256','SourceUrl','SourceRevision','Operations')
             if ($catalog.Schema -eq 3) {
                 $fields += @('ExclusiveGroup')
-                $optional = @('BuildName','SourceRole','SourceSet','SourceEntry','SourceSize','SourceSha1','SourceSha256','Prerequisites','HardwarePredicate')
+                $optional = @('BuildName','SourceRole','SourceSet','SourceEntry','SourceSize','SourceSha1','SourceSha256','Prerequisites','HardwarePredicate','AllowExecutableSelfPatch')
                 $entryNames = @($entry.PSObject.Properties.Name)
                 $unknown = @($entryNames | Where-Object { $_ -notin ($fields + $optional) })
                 $missing = @($fields | Where-Object { $_ -notin $entryNames })
@@ -325,6 +325,7 @@ function Get-TpmPatchPlan {
                 if ($entry.PSObject.Properties['Prerequisites'] -and $entry.Prerequisites -isnot [array]) { throw 'Invalid prerequisite list.' }
                 if ($entry.PSObject.Properties['SourceSha1'] -and [string]$entry.SourceSha1 -notmatch '^[a-fA-F0-9]{40}$') { throw 'Invalid source SHA-1 pin.' }
                 if ($entry.PSObject.Properties['SourceSha256'] -and [string]$entry.SourceSha256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'Invalid source SHA-256 pin.' }
+                if ($entry.PSObject.Properties['AllowExecutableSelfPatch'] -and $entry.AllowExecutableSelfPatch -isnot [bool]) { throw 'Invalid executable self-patch opt-in.' }
             } else {
                 Assert-TpmPatchFields $entry $fields
             }
@@ -433,8 +434,13 @@ function Get-TpmMultiPatchPlan {
     if($Historical -and (-not $ForUndo -or -not $Probe)){throw 'Historical plans are only valid for completed receipt inspection.'}
     if($Entry.Operations -isnot [array] -or $Entry.Operations.Count -lt 1 -or $Entry.Operations.Count -gt 256){throw 'Grouped recipes require 1..256 file operations.'}
     if($Entry.ExclusiveGroup -isnot [string] -or ($Entry.ExclusiveGroup -and $Entry.ExclusiveGroup -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$')){throw 'Invalid exclusive group.'}
+    $selfExecutable = $Entry.PSObject.Properties['AllowExecutableSelfPatch'] -and $Entry.AllowExecutableSelfPatch
     $exe=Resolve-TpmPatchPath $GameRoot $Entry.Executable
-    if($Entry.ExecutableSha256 -notmatch '^[a-fA-F0-9]{64}$' -or (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ine $Entry.ExecutableSha256){throw 'Executable revision mismatch.'}
+    if($Entry.ExecutableSha256 -notmatch '^[a-fA-F0-9]{64}$'){throw 'Executable revision mismatch.'}
+    $executableSha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+    if(-not $selfExecutable -and $executableSha256 -ine $Entry.ExecutableSha256){throw 'Executable revision mismatch.'}
+    if($selfExecutable -and ($Entry.Operations.Count -ne 1 -or $Entry.Operations[0].Type -cne 'ReplaceFile' -or
+        $Entry.Operations[0].BeforeSha256 -ine $Entry.ExecutableSha256)){throw 'Executable self-patch requires one exact ReplaceFile before-state.'}
     $targets=@{};$payloads=@{};$operations=@();$ready=0;$applied=0;$total=0L
     foreach($operation in $Entry.Operations){
         $create=($operation.Type -ceq 'CreateFile')
@@ -447,7 +453,11 @@ function Get-TpmMultiPatchPlan {
         if($operation.AfterSha256 -ine $operation.PayloadSha256 -or (-not $create -and $operation.BeforeSha256 -ieq $operation.AfterSha256)){throw 'Conflicting/no-op grouped pins.'}
         $target=Resolve-TpmPatchPath $GameRoot $operation.Target
         $payload=Resolve-TpmPatchPath $PayloadRoot $operation.Payload
-        if($target -ieq $exe -or $targets.ContainsKey($target) -or $payloads.ContainsKey($payload)){throw 'Duplicate target/payload or executable self-patch.'}
+        if($target -ieq $exe){
+            if(-not $selfExecutable -or $Entry.Operations.Count -ne 1 -or $operation.Type -cne 'ReplaceFile' -or
+                $operation.BeforeSha256 -ine $Entry.ExecutableSha256){throw 'Executable self-patch requires explicit single-file opt-in and the exact executable before-state.'}
+        }elseif($selfExecutable){throw 'Executable self-patch must target the exact declared executable.'}
+        if($targets.ContainsKey($target) -or $payloads.ContainsKey($payload)){throw 'Duplicate target/payload.'}
         foreach($other in $targets.Keys){if(Test-TpmPathOverlap $target $other){throw 'Overlapping grouped target paths.'}}
         $targets[$target]=$true;$payloads[$payload]=$true
         if(-not [IO.Directory]::Exists([IO.Path]::GetDirectoryName($target))){throw 'Grouped targets require existing safe parents.'}
@@ -460,14 +470,19 @@ function Get-TpmMultiPatchPlan {
         if(-not $Historical){
             $state=Get-TpmFileState $target
             if(-not $state.Readable -or $state.IsDirectory -or ($state.Exists -and ($state.Attributes -band [int][IO.FileAttributes]::ReadOnly))){throw 'Grouped target is unknown, a directory or read-only.'}
+            if($selfExecutable -and $target -ieq $exe -and $state.Sha256 -ine $executableSha256){throw 'Executable changed while planning self-patch.'}
             $before=($create -and -not $state.Exists) -or (-not $create -and $state.Exists -and $state.Sha256 -ieq $operation.BeforeSha256)
             $after=$state.Exists -and $state.Sha256 -ieq $operation.AfterSha256
             if($before){$ready++}elseif($after){$applied++}else{throw 'Grouped target conflict.'}
+        }elseif($selfExecutable){
+            $state=Get-TpmFileState $target
+            if(-not $state.Readable -or $state.IsDirectory -or $state.Sha256 -ine $executableSha256 -or
+                $state.Sha256 -notin @($operation.BeforeSha256,$operation.AfterSha256)){throw 'Historical self-executable receipt is not bound to an exact current state.'}
         }
         $operations+=@([pscustomobject]@{Operation=$operation.Type;Target=$target;RelativeTarget=$operation.Target;Payload=$payload;BeforeSha256=$(if($create){''}else{$operation.BeforeSha256});AfterSha256=$operation.AfterSha256})
     }
     if(-not $Historical -and $ready -ne $operations.Count -and $applied -ne $operations.Count){throw 'Mixed/partially applied target set; no writes are authorized.'}
-    $plan=[pscustomobject]@{Status=$(if($Historical){'Historical'}elseif($ready -eq $operations.Count){'Ready'}else{'AlreadyApplied'});Reason=$null;Operation='MultiFile';Operations=$operations;PatchId=$PatchId;ProfileId=$ProfileId;GameRoot=$GameRoot;PayloadRoot=$PayloadRoot;RecoveryRoot=$RecoveryRoot;Target=[string]::Join(', ',@($operations.RelativeTarget));Executable=$exe;ExecutableSha256=$Entry.ExecutableSha256;SourceUrl=$Entry.SourceUrl;SourceRevision=$Entry.SourceRevision;ExclusiveGroup=$Entry.ExclusiveGroup;CatalogEntries=$CatalogEntries}
+    $plan=[pscustomobject]@{Status=$(if($Historical){'Historical'}elseif($ready -eq $operations.Count){'Ready'}else{'AlreadyApplied'});Reason=$null;Operation='MultiFile';Operations=$operations;PatchId=$PatchId;ProfileId=$ProfileId;GameRoot=$GameRoot;PayloadRoot=$PayloadRoot;RecoveryRoot=$RecoveryRoot;Target=[string]::Join(', ',@($operations.RelativeTarget));Executable=$exe;ExecutableSha256=$Entry.ExecutableSha256;ExecutableSelfPatch=[bool]$selfExecutable;SourceUrl=$Entry.SourceUrl;SourceRevision=$Entry.SourceRevision;ExclusiveGroup=$Entry.ExclusiveGroup;CatalogEntries=$CatalogEntries}
     if(-not $Probe){Assert-TpmMultiPatchExclusive $plan $CatalogSha256}
     if(-not $Probe -and $plan.Status -ceq 'AlreadyApplied'){
         $found=@()
@@ -568,7 +583,8 @@ function Invoke-TpmPatchFileBatch {
             $locks+=@(Open-TpmPatchDirectoryBoundary $parent)
         }
         $exeGuard=Open-TpmPatchCreationFile $Plan.Executable -MaximumBytes ([int64]::MaxValue)
-        if((Get-TpmPatchStreamSha256 $exeGuard) -ine $Plan.ExecutableSha256){throw 'Grouped executable identity changed.'}
+        $exePin=if($Plan.ExecutableSelfPatch){if($apply){$Plan.Operations[0].BeforeSha256}else{$Plan.Operations[0].AfterSha256}}else{$Plan.ExecutableSha256}
+        if((Get-TpmPatchStreamSha256 $exeGuard) -ine $exePin){throw 'Grouped executable identity changed.'}
         $sourceTotal=0L;$beforeTotal=0L
         for($i=0;$i -lt $Plan.Operations.Count;$i++){
             $operation=$Plan.Operations[$i]
@@ -581,6 +597,7 @@ function Invoke-TpmPatchFileBatch {
                 $record.BeforeIdentity=[TpmSupportNativeMethods]::PatchFileIdentity($record.Before.SafeFileHandle)
                 $pin=if($apply){$operation.BeforeSha256}else{$operation.AfterSha256}
                 if((Get-TpmPatchStreamSha256 $record.Before) -ine $pin){throw 'Grouped current bytes changed before any write.'}
+                if($Plan.ExecutableSelfPatch -and [TpmSupportNativeMethods]::PatchFileIdentity($exeGuard.SafeFileHandle) -cne $record.BeforeIdentity){throw 'Self-executable object identity changed before any write.'}
                 if(-not $apply -and $record.BeforeIdentity -cne $Receipt.Operations[$i].AfterFileIdentity){throw 'Grouped undo object changed before any write.'}
                 $beforeTotal+=$record.Before.Length
             }elseif(-not (Test-TpmPatchTargetState $operation $false)){throw 'Grouped create target is no longer absent.'}
@@ -1102,17 +1119,22 @@ function Resolve-TpmRequiredPatchSourceRoot {
             (Test-TpmNoReparsePath $archivePath)
     }
     if ($validRoot) { return [IO.Path]::GetFullPath($root) }
-    $sourceLabel = if ($Entry.SourceRole -eq 'Supplementary') { 'Supplementary' } else { 'Main' }
+    $sourceLabel = switch ([string]$Entry.SourceRole) {
+        'Main' { 'Main' }
+        'Supplementary' { 'Supplementary' }
+        'UserSelected' { 'patch' }
+        default { 'required patch' }
+    }
     Write-Host ("  Select the local {0} ZIP folder containing this exact file: {1}" -f $sourceLabel,$Entry.SourceSet) -ForegroundColor Cyan
     Write-Host '  TPM reads only the named ZIP member. It does not download or extract the collection.' -ForegroundColor DarkGray
-    $selected = Read-PathWithBrowse -Prompt 'Folder containing the user-supplied game ZIP' -Mode Folder -InitialDirectory $root
+    $selected = Read-PathWithBrowse -Prompt 'Folder containing the exact required local ZIP' -Mode Folder -InitialDirectory $root
     if ([string]::IsNullOrWhiteSpace($selected) -or
         -not (Test-Path -LiteralPath $selected -PathType Container -ErrorAction SilentlyContinue) -or
         -not (Test-TpmNoReparsePath $selected)) { throw 'No safe local source folder was selected.' }
     $selected = [IO.Path]::GetFullPath($selected)
     $archivePath = Join-Path $selected ([string]$Entry.SourceSet)
     if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf -ErrorAction SilentlyContinue) -or
-        -not (Test-TpmNoReparsePath $archivePath)) { throw 'The selected folder does not contain the exact required game ZIP.' }
+        -not (Test-TpmNoReparsePath $archivePath)) { throw 'The selected folder does not contain the exact required ZIP.' }
     return $selected
 }
 
@@ -1438,8 +1460,13 @@ function Invoke-TpmRequiredPatchMenu {
                         }
                         & $assertGameClosed $context.GamePath
                         $validation = {
+                            param($validationState)
                             & $assertGameClosed $context.GamePath
-                            if ((Get-FileHash -LiteralPath $context.GamePath -Algorithm SHA256 -ErrorAction Stop).Hash -ine $entry.ExecutableSha256) { throw 'The exact game executable changed before undo.' }
+                            $expectedExecutable = [string]$entry.ExecutableSha256
+                            if ($plan.PSObject.Properties['ExecutableSelfPatch'] -and $plan.ExecutableSelfPatch) {
+                                $expectedExecutable = if ($validationState -ceq 'published') { [string]$entry.Operations[0].BeforeSha256 } else { [string]$entry.Operations[0].AfterSha256 }
+                            }
+                            if ((Get-FileHash -LiteralPath $context.GamePath -Algorithm SHA256 -ErrorAction Stop).Hash -ine $expectedExecutable) { throw 'The exact game executable changed before undo.' }
                         }
                         $result = Undo-TpmCatalogPatch -CatalogContent $catalog.Content -CatalogSha256 $catalog.CatalogSha256 -PatchId $entry.Id -ProfileId $entry.ProfileId -GameRoot $context.GameRoot -PayloadRoot $emptyStage -RecoveryRoot $context.RecoveryRoot -ProtectedRoots $context.ProtectedRoots -RecoveryDirectory $validReceipts[0] -ValidationAction $validation -Confirm:$false
                         Write-Host ("  Undo result: {0}. The receipt and current target state were verified." -f $result.Status) -ForegroundColor Green
@@ -1451,9 +1478,12 @@ function Invoke-TpmRequiredPatchMenu {
             }
             if ($choice -eq 'U') { continue }
             try {
-                if ((Get-FileHash -LiteralPath $context.GamePath -Algorithm SHA256 -ErrorAction Stop).Hash -ine $entry.ExecutableSha256) {
-                    throw 'The installed executable is not the exact supported build.'
+                $currentExecutableHash = (Get-FileHash -LiteralPath $context.GamePath -Algorithm SHA256 -ErrorAction Stop).Hash
+                $allowedExecutableHashes = @([string]$entry.ExecutableSha256)
+                if ($entry.PSObject.Properties['AllowExecutableSelfPatch'] -and $entry.AllowExecutableSelfPatch) {
+                    $allowedExecutableHashes += [string]$entry.Operations[0].AfterSha256
                 }
+                if ($currentExecutableHash -notin $allowedExecutableHashes) { throw 'The installed executable is not in an exact supported before/after state.' }
                 $plan = Get-TpmPatchPlan -CatalogContent $catalog.Content -CatalogSha256 $catalog.CatalogSha256 -PatchId $entry.Id -ProfileId $entry.ProfileId -GameRoot $context.GameRoot -PayloadRoot $stageInfo.Root -RecoveryRoot $context.RecoveryRoot -ProtectedRoots $context.ProtectedRoots -HardwareEvidence $hardwareEvidence
                 if ($plan.Status -eq 'Unavailable') { throw $plan.Reason }
                 if ($plan.Status -eq 'AlreadyApplied') {
@@ -1499,8 +1529,13 @@ function Invoke-TpmRequiredPatchMenu {
             try {
                 & $assertGameClosed $candidate.Context.GamePath
                 $validation = {
+                    param($validationState)
                     & $assertGameClosed $candidate.Context.GamePath
-                    if ((Get-FileHash -LiteralPath $candidate.Context.GamePath -Algorithm SHA256 -ErrorAction Stop).Hash -ine $candidate.Entry.ExecutableSha256) {
+                    $expectedExecutable = [string]$candidate.Entry.ExecutableSha256
+                    if ($candidate.Plan.PSObject.Properties['ExecutableSelfPatch'] -and $candidate.Plan.ExecutableSelfPatch) {
+                        $expectedExecutable = if ($validationState -ceq 'published') { [string]$candidate.Entry.Operations[0].AfterSha256 } else { [string]$candidate.Entry.Operations[0].BeforeSha256 }
+                    }
+                    if ((Get-FileHash -LiteralPath $candidate.Context.GamePath -Algorithm SHA256 -ErrorAction Stop).Hash -ine $expectedExecutable) {
                         throw 'The exact game executable changed before publication.'
                     }
                     $check = Test-TpmRequiredPatchPrerequisites -Entry $candidate.Entry -GameRoot $candidate.Context.GameRoot

@@ -422,29 +422,17 @@
     ordinary deployment failures keep their normal retry, Details, and support
     guidance. See BEPINEX SETUP below. Available as menu option 9.
 
-  - Required game patches. Option 10 installs supported fixes for exact game
-    builds. The RC8 local owner-test candidate has thirteen entries across
-    twelve builds: Family Guy Bowling 1.15 Team Play PC; mutually exclusive
-    AMD/NVIDIA Cross Elysion 2.06.00 Ver C shaders; five BlazBlue driver builds
-    (Continuum Shift 2009, Continuum Shift II 2010, Cross Tag Battle
-    1.04.00/2.01.00, Central Fiction 2.01.00, and Chronophantasma 2.03);
-    Rabbids Hollywood (2018); NERF Arcade (1.55); Rainbow BomberGirl
-    2022-12-15; Teenage Mutant Ninja Turtles 1.59; and Silent Hill The Arcade
-    2007-12-20.
-    Four BlazBlue driver recipes, Rabbids' assembly, three exact-build
-    BepInEx plugins, and Silent Hill's `dsound.dll` are absent-only restorations
-    even though their bytes are bundled in corresponding Main ZIPs. BBCP
-    Chronophantasma instead replaces only the exact known BBCP driver hash
-    with the guide-required hash, using the exact member from the named
-    Central Fiction Main ZIP. The recipe refuses an absent, unknown, or other
-    BBCP driver; it is not an absent-file restore or an inferred association.
-    Exact desired bytes are skipped; other target states are refused. Plugin
-    recipes require the exact BepInEx core file, not an inferred config.
-    Silent Hill's Windows codec BAT is separate and is never run. Users provide
-    each recipe's exact named local ZIP; TPM does not host or download payloads.
-    Elysion needs exact build and unambiguous hardware evidence. Family Guy
-    requires its documented BepInEx entrypoint setting. Manual mode does not
-    register games; patch success does not prove controls, launch, or gameplay.
+  - Required game patches. Option 10 supports 24 exact-build recipes across
+    18 exact ProfileId/build/executable identities in the current local RC8
+    owner-test catalog. It retains the historical 13-entry PR #353 baseline
+    and adds three Taisen Hot Gimmick 5 (2.04) single-file restores; three
+    user-selected plugin restores for Mars Sortie, the separate Rabbids
+    Hollywood operator plugin, and Super Bikes 3 1.91 x64; and five native
+    recipes for Cross Raid 1.05, VF5R 1.001, and Sonic Dash Extreme. Sixteen
+    operations create only absent files; eight require an exact before-state.
+    Exact-after targets are skipped and unknown existing bytes are refused.
+    Full semantic guide coverage, installation readiness, controls, launch,
+    and gameplay are not claimed.
 
   - Postgres setup. Installs and configures the local PostgreSQL 8.3
     database that some Incredible Technologies games need (Golden Tee
@@ -761,30 +749,45 @@
        automatic list. TPM keeps verified backup/undo evidence; it skips an
        exact already-applied target and refuses any other existing bytes.
 
-       RC8's local owner-test candidate enables thirteen entries across twelve
-       exact builds: Family Guy Bowling 1.15 Team Play PC; two mutually
-       exclusive Shining Force -- Cross Elysion 2.06.00 Ver C shaders; BlazBlue
-       Continuum Shift (2009), Continuum Shift II (2010), Cross Tag Battle
-       (1.04.00,2.01.00), Central Fiction (2.01.00), and Chronophantasma
-       (2.03); Rabbids Hollywood (2018); NERF Arcade (1.55); Rainbow BomberGirl
-       (2022-12-15); Teenage Mutant Ninja Turtles (1.59); and Silent Hill The
-       Arcade (2007-12-20).
-       Three BepInEx plugins and Silent Hill's `dsound.dll` are honest
-       absent-file restorations even though their bytes are bundled in the
-       corresponding Main ZIPs. The four original BlazBlue driver recipes and
-       Rabbids are also absent-only. BBCP Chronophantasma instead replaces only
-       the exact known BBCP driver hash with the guide-required hash, using the
-       exact member from the named Central Fiction Main ZIP; absent or unknown
-       BBCP bytes are refused. Exact desired bytes are skipped; other target
-       states are refused. Plugin recipes require the exact BepInEx core file.
-       Silent Hill's codec BAT is not run or installed. Elysion requires exact
-       build, unambiguous hardware evidence, and the exact opposite-vendor
-       shader state; ORIGINAL and other states are refused. Cross Raid is
-       unsupported. Family Guy needs BepInEx and its documented
-       [Preloader.Entrypoint] Type = MonoBehaviour setting. Provide each
-       recipe's exact named ZIP locally. Manual patching does not register the
-       game; controls, launch through TeknoParrotUI, and gameplay need separate
-       verification. Patch success is not readiness or playability evidence.
+       The current local RC8 owner-test catalog has 24 exact-build recipes
+       across 18 exact ProfileId/build/executable identities. It preserves the
+       historical 13-entry PR #353 baseline and adds three Taisen Hot Gimmick
+       5 (2.04) single-file restores, three local user-selected plugin restores
+       (Mars Sortie 1.46.9, the separate Rabbids Hollywood operator plugin,
+       and SB3 1.91 x64), and five native recipes (Cross Raid 1.05 AMD/NVIDIA,
+       VF5R 1.001 AMD/NVIDIA, and Sonic Dash Extreme).
+       The Taisen files are restorations only. Configure and save keyboard
+       keys with `TTX-Config.exe`, then use `TTX-Loader.exe` as directed by
+       the game guide. TPM does not configure keys or run either utility;
+       operator setup and game launch remain separate.
+
+       BBCP Chronophantasma replaces only its exact known driver before-hash
+       with the guide-required hash from the named Central Fiction Main ZIP;
+       absent or unknown BBCP bytes are refused. The other 16 `CreateFile`
+       operations restore only absent targets; eight `ReplaceFile` operations
+       require exact before-hashes. Exact desired bytes are skipped, and all
+       other states are refused. The four baseline Main-source plugin payloads
+       and three added user-selected patch ZIPs are distinct. Rabbids' operator
+       plugin is not the existing `Assembly-CSharp.dll` repair. SB3's Main ZIP
+       already contains the same plugin bytes; its recipe truthfully restores
+       only an absent installed target.
+
+       All seven BepInEx plugin targets require the core file to be present.
+       Family Guy additionally requires its documented `[Preloader.Entrypoint]
+       Type = MonoBehaviour` configuration value; core-file presence is not a
+       BepInEx version check. Silent Hill's codec BAT is separate and is never
+       run or installed. Users provide exact named local ZIPs; TPM does not
+       host or download payloads.
+
+       Elysion, Cross Raid 1.05, and VF5R 1.001 each use mutually exclusive
+       AMD/NVIDIA shader alternatives with exact executable, hardware, and
+       target-state checks. Cross Raid source documentation identifies 1.05,
+       not the `Ver A` suffix; the matching profile/build is not runtime
+       compatibility proof. No other Cross Raid build or base-shader restore
+       is enabled. Sonic is an explicit opt-in exact-before/after executable
+       replacement with backup and receipt undo; it does not prove a 60-fps
+       outcome. Manual mode does not register games; patch success does not
+       prove readiness, controls, launch, or gameplay.
 
   MAINTENANCE AND RECOVERY
   ------------------------

@@ -23439,10 +23439,50 @@ Describe 'Required patch engine and local recipes' {
         $script:requiredPatchInputQueue = $null
     }
     AfterEach {
-        $script:TpmRequiredPatchCatalogSha256 = '7B190D234667BE3059C7950659421EB810EB80C51C2E4B520B79B9CBC97F934D'
+        $script:TpmRequiredPatchCatalogSha256 = '283DB40B0A17F3FEF2BC758D8123209B87C07731E433CECFE96DE1E2C69C5CE8'
         $script:TpmOwnedLayout = $null
         $script:gamesInstallFolder = $null
         $script:requiredPatchInputQueue = $null
+        $script:requiredPatchHostMessages = $null
+        $script:requiredPatchBrowsePrompts = $null
+    }
+
+    It 'resolves UserSelected patches only from a local folder containing the exact ZIP filename' {
+        Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+        $exactSourceRoot = Join-Path $requiredPatchFixture.Root 'user-patch-exact'
+        $wrongSourceRoot = Join-Path $requiredPatchFixture.Root 'user-patch-wrong-name'
+        [void][IO.Directory]::CreateDirectory($exactSourceRoot)
+        [void][IO.Directory]::CreateDirectory($wrongSourceRoot)
+        $sourceSet = 'Exact Local Plugin Patch.zip'
+        foreach ($zipPath in @((Join-Path $exactSourceRoot $sourceSet),(Join-Path $wrongSourceRoot 'Different Patch.zip'))) {
+            $archive = [IO.Compression.ZipFile]::Open($zipPath,[IO.Compression.ZipArchiveMode]::Create)
+            try { $null = $archive.CreateEntry('payload/plugin.dll') } finally { $archive.Dispose() }
+        }
+        $script:requiredPatchInputQueue = New-Object 'System.Collections.Generic.Queue[string]'
+        $script:requiredPatchHostMessages = New-Object 'System.Collections.Generic.List[string]'
+        $script:requiredPatchBrowsePrompts = New-Object 'System.Collections.Generic.List[string]'
+        $script:requiredPatchInputQueue.Enqueue($exactSourceRoot)
+        $script:requiredPatchInputQueue.Enqueue($wrongSourceRoot)
+        Mock Write-Host { if ($null -ne $Object) { [void]$script:requiredPatchHostMessages.Add([string]$Object) } }
+        Mock Read-PathWithBrowse {
+            if ($null -ne $Prompt) { [void]$script:requiredPatchBrowsePrompts.Add([string]$Prompt) }
+            if (-not $script:requiredPatchInputQueue -or $script:requiredPatchInputQueue.Count -eq 0) {
+                throw 'Unexpected local ZIP browse.'
+            }
+            return $script:requiredPatchInputQueue.Dequeue()
+        }
+        $entry = [pscustomobject]@{ SourceRole='UserSelected'; SourceSet=$sourceSet }
+        $resolved = Resolve-TpmRequiredPatchSourceRoot -Entry $entry -MainSource '' -SupplementarySource ''
+        $resolved | Should -Be ([IO.Path]::GetFullPath($exactSourceRoot))
+        {
+            Resolve-TpmRequiredPatchSourceRoot -Entry $entry -MainSource '' -SupplementarySource ''
+        } | Should -Throw '*does not contain the exact required ZIP*'
+        $script:requiredPatchInputQueue.Count | Should -Be 0
+        ($script:requiredPatchHostMessages -join "`n") | Should -Match 'local patch ZIP'
+        ($script:requiredPatchHostMessages -join "`n") | Should -Not -Match 'Main ZIP|game ZIP'
+        ($script:requiredPatchBrowsePrompts -join "`n") | Should -Match 'exact required local ZIP'
+        ($script:requiredPatchBrowsePrompts -join "`n") | Should -Not -Match 'game ZIP'
     }
 
     It 'loads the repository-pinned recipe and streams only the exact user ZIP member' {
@@ -23557,6 +23597,60 @@ Describe 'Required patch engine and local recipes' {
                 SourceSha256='6D57ACF2E79C7F816C70C04A82F264E17C27CA243B3F6AFC1AD3A14445C390AB'
                 Target='dsound.dll';PrerequisitePath=''
             }
+            [pscustomobject]@{
+                Id='taisen-hot-gimmick-5-ttx-monitor-dll-restore';ProfileId='TaisenHotGimmick5'
+                BuildName='Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP]';SourceRole='Main'
+                Executable='game.exe';ExecutableSha256='144875cc9d0dc66887cd6292dcb949c0575afb654b0da8bf173fef7047c7d86a'
+                SourceSet='Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip'
+                SourceEntry='TTX-Monitor.dll';SourceSize=147456;SourceSha1='201bacc01d57497690d35741e70940237e424f04'
+                SourceSha256='a706a9dbebb3e6d4511d47341d4a46d1f9965874adba4354a127797855fdfa44'
+                Target='TTX-Monitor.dll';PrerequisitePath=''
+            }
+            [pscustomobject]@{
+                Id='taisen-hot-gimmick-5-ttx-config-restore';ProfileId='TaisenHotGimmick5'
+                BuildName='Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP]';SourceRole='Main'
+                Executable='game.exe';ExecutableSha256='144875cc9d0dc66887cd6292dcb949c0575afb654b0da8bf173fef7047c7d86a'
+                SourceSet='Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip'
+                SourceEntry='TTX-Config.exe';SourceSize=270848;SourceSha1='00cf036a2456a4bf5bd15128269a5cd64f0ef3d9'
+                SourceSha256='f6979167410af3c6ece2420e15205c54eb86663b74c27aa2e1cd05287efb8b64'
+                Target='TTX-Config.exe';PrerequisitePath=''
+            }
+            [pscustomobject]@{
+                Id='taisen-hot-gimmick-5-ttx-loader-restore';ProfileId='TaisenHotGimmick5'
+                BuildName='Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP]';SourceRole='Main'
+                Executable='game.exe';ExecutableSha256='144875cc9d0dc66887cd6292dcb949c0575afb654b0da8bf173fef7047c7d86a'
+                SourceSet='Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip'
+                SourceEntry='TTX-Loader.exe';SourceSize=11264;SourceSha1='4b9b7174f46571a49eab6531a7577a062749e51c'
+                SourceSha256='2e270dde1ff0f86326a4bfcc84eb359a0231118dc03d9130526750e3d175ca3c'
+                Target='TTX-Loader.exe';PrerequisitePath=''
+            }
+            [pscustomobject]@{
+                Id='mars-sortie-bepinex-plugin-restore';ProfileId='MarsSortie'
+                BuildName='Mars Sortie (1.46.9)(2018)[UDC PC][TP]';SourceRole='UserSelected'
+                Executable='Shooter.exe';ExecutableSha256='08541DCD067D7BB3BBE42BEAF2F1B5224C762FC347B71FC7A7308D7430384372'
+                SourceSet='Mars Sortie (1.46.9) - TPPlugin_v1.2.zip'
+                SourceEntry='MSTPPlugin.dll';SourceSize=21504;SourceSha1='0BF44248A5402E51544BDD9493B469BEA3727011'
+                SourceSha256='3CCABD105D603EAAA7EE3CD5F7194DEBD179CC30B701113DBC5C6B564FDB1783'
+                Target='BepInEx/plugins/MSTPPlugin.dll';PrerequisitePath='BepInEx/core/BepInEx.dll'
+            }
+            [pscustomobject]@{
+                Id='rabbids-hollywood-bepinex-operator-plugin-restore';ProfileId='RabbidsHollywood'
+                BuildName='Rabbids Hollywood (2018)[Adrenaline PC][TP]';SourceRole='UserSelected'
+                Executable='Game.exe';ExecutableSha256='979F9736A99745454429908227CDD2F48875F193D439CFA33A9E14B4578DA95D'
+                SourceSet='Rabbids Hollywood (2018) - BepInEx Operator Configuration Pack.zip'
+                SourceEntry='BepInEx/plugins/UnityPlugin_BepInEx_RHA.dll';SourceSize=15360;SourceSha1='25F9142BC4CDC364A5D2348606D0C513C86C9610'
+                SourceSha256='C3DEDA497E160652A1F0D3D99892A4F534A88D61358DBA5192003FF519D5E8EB'
+                Target='BepInEx/plugins/UnityPlugin_BepInEx_RHA.dll';PrerequisitePath='BepInEx/core/BepInEx.dll'
+            }
+            [pscustomobject]@{
+                Id='sb3-bepinex-plugin-restore';ProfileId='SB3'
+                BuildName='Super Bikes 3 (1.91 x64)(2021-10-01)[Raw Thrills][TP]';SourceRole='UserSelected'
+                Executable='fnfmega.exe';ExecutableSha256='7F84AE68A35587EA87312ED59247EB0379F00826B8F2473A09155792A90AEEAD'
+                SourceSet='Super Bikes 3 (1.91 x64) - TPPlugin_v1.09 x64.zip'
+                SourceEntry='SB3TPPlugin.dll';SourceSize=121856;SourceSha1='E4BCCBCBB32EEE7DCE2E24AAF8990E4812BC81F5'
+                SourceSha256='9E8464FD54F272398CDE3E2AACB2D5F6D8508A2F90C3E7D7793166016BFFF3D5'
+                Target='BepInEx/plugins/SB3TPPlugin.dll';PrerequisitePath='BepInEx/core/BepInEx.dll'
+            }
         )
         foreach ($expected in $newRestorations) {
             $entry = @($catalog.Entries | Where-Object Id -CEQ $expected.Id)
@@ -23565,7 +23659,7 @@ Describe 'Required patch engine and local recipes' {
             foreach ($field in @('ProfileId','BuildName','Executable','ExecutableSha256','SourceRole','SourceSet','SourceEntry','SourceSize','SourceSha1','SourceSha256')) {
                 $entry.$field | Should -Be $expected.$field
             }
-            $entry.SourceRole | Should -Be 'Main'
+            $entry.SourceRole | Should -Be $expected.SourceRole
             $entry.Operations.Count | Should -Be 1
             $entry.Operations[0].Type | Should -Be 'CreateFile'
             $entry.Operations[0].Target | Should -Be $expected.Target
@@ -23627,6 +23721,83 @@ Describe 'Required patch engine and local recipes' {
         $stage.Size | Should -Be $bytes.Length
         Remove-Item -LiteralPath $stage.Root -Recurse -Force
         $script:TpmOwnedLayout = $null
+    }
+
+    It 'binds the new native shader and executable recipes to exact build and source identities' {
+        $catalog = Read-TpmRequiredPatchCatalog -ProgramRoot ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')))
+        $catalog.Entries.Count | Should -Be 24
+        $newIds = @(
+            'shining-force-cross-raid-105-amd-shader'
+            'shining-force-cross-raid-105-nvidia-shader'
+            'sonic-dash-extreme-60fps-60hz-self-executable'
+            'virtua-fighter-5-r-1001-amd-shader'
+            'virtua-fighter-5-r-1001-nvidia-shader'
+        )
+        foreach ($id in $newIds) { @($catalog.Entries | Where-Object Id -CEQ $id).Count | Should -Be 1 }
+        $amd = @($catalog.Entries | Where-Object Id -CEQ $newIds[0])[0]
+        $nvidia = @($catalog.Entries | Where-Object Id -CEQ $newIds[1])[0]
+        foreach ($entry in @($amd,$nvidia)) {
+            $entry.ProfileId | Should -Be 'ShiningForceCrossRaid'
+            $entry.Executable | Should -Be 'project_f-ringedge-release.exe'
+            $entry.ExecutableSha256 | Should -Be '82E66635A9A91CEC59721DB7BD9258464F70C44377BA707FFCB51EA2D3DB9317'
+            $entry.SourceRole | Should -Be 'Supplementary'
+            $entry.SourceEntry | Should -Be 'rom/shader.farc'
+            $entry.SourceSize | Should -Be 8987472
+            $entry.ExclusiveGroup | Should -Be 'shining-force-cross-raid-105-shader'
+            $entry.Operations.Count | Should -Be 1
+            $entry.Operations[0].Target | Should -Be 'rom/shader.farc'
+            $entry.Operations[0].BeforeSha256 | Should -Be '66E0CC00E84C01F6E77E6B446A019212EBD27610FDD81CA866648C5E97E80933'
+            $entry.Operations[0].AfterSha256 | Should -Be $entry.SourceSha256
+            $entry.Operations[0].PayloadSha256 | Should -Be $entry.SourceSha256
+            $entry.PSObject.Properties['AllowExecutableSelfPatch'] | Should -BeNullOrEmpty
+        }
+        $amd.SourceSet | Should -Be 'Shining Force - Cross Raid (1.05) - AMD Shader Fix.zip'
+        $amd.SourceSha1 | Should -Be '7520194AB599DB8FF68C0D7277DA9DEE0EEC57C8'
+        $amd.SourceSha256 | Should -Be 'B245426428543B89A7A074EDEFD7E72CC437EBED9462F287E646FD8CD4A5A8BB'
+        $amd.HardwarePredicate.Vendor | Should -Be 'AMD'
+        $nvidia.SourceSet | Should -Be 'Shining Force - Cross Raid (1.05) - NVIDIA Shader Fix.zip'
+        $nvidia.SourceSha1 | Should -Be 'FF7DE8DB19ABE7695BCE5617894E41667CBF05E7'
+        $nvidia.SourceSha256 | Should -Be 'DA517CD064CB8B17C8B62DF1783F4D641195B0EB1E90FDD07B8BA72E47511912'
+        $nvidia.HardwarePredicate.Vendor | Should -Be 'NVIDIA'
+        $vf5Amd = @($catalog.Entries | Where-Object Id -CEQ $newIds[3])[0]
+        $vf5Nvidia = @($catalog.Entries | Where-Object Id -CEQ $newIds[4])[0]
+        foreach ($entry in @($vf5Amd,$vf5Nvidia)) {
+            $entry.ProfileId | Should -Be 'VF5R'
+            $entry.BuildName | Should -Be 'Virtua Fighter 5 R (1.001)(2008-06-18)[Sega Lindbergh Yellow][TP]'
+            $entry.Executable | Should -Be 'vf5'
+            $entry.ExecutableSha256 | Should -Be '01198DA768945395C4AACF4CE9460B76F2A8EAEA850E39F52EAEC33D7EECA310'
+            $entry.SourceRole | Should -Be 'Supplementary'
+            $entry.SourceEntry | Should -Be 'rom/shader.farc'
+            $entry.ExclusiveGroup | Should -Be 'virtua-fighter-5-r-1001-shader'
+            $entry.Operations[0].Target | Should -Be 'rom/shader.farc'
+            $entry.Operations[0].BeforeSha256 | Should -Be 'B0C66A2AF1130E100C0EF72A808362C8D8CF0623D3F8FBD3C82B837EEEA9C247'
+            $entry.Operations[0].AfterSha256 | Should -Be $entry.SourceSha256
+        }
+        $vf5Amd.SourceSet | Should -Be 'Virtua Fighter 5 R (1.001) - AMD Shader Fix.zip'
+        $vf5Amd.SourceSize | Should -Be 11672624
+        $vf5Amd.SourceSha1 | Should -Be '84E396DF3240AD565E77BF0BCAD6EDD9310535CF'
+        $vf5Amd.SourceSha256 | Should -Be '403E9281A1BB73F9CDC73395E3CC614B6AADDA4AEB8D19BA96E17B55F2062419'
+        $vf5Amd.HardwarePredicate.Vendor | Should -Be 'AMD'
+        $vf5Nvidia.SourceSet | Should -Be 'Virtua Fighter 5 R (1.001) - NVIDIA Shader Fix.zip'
+        $vf5Nvidia.SourceSize | Should -Be 11418160
+        $vf5Nvidia.SourceSha1 | Should -Be '457E4C4B0938EE88FD05583F88ECD0138F213866'
+        $vf5Nvidia.SourceSha256 | Should -Be 'B32F56FEC6F5FB99DB06C7173BE241AD8DD532444426655015AC1C4B92FC8FA3'
+        $vf5Nvidia.HardwarePredicate.Vendor | Should -Be 'NVIDIA'
+        $sonic = @($catalog.Entries | Where-Object Id -CEQ $newIds[2])[0]
+        $sonic.ProfileId | Should -Be 'SonicDashExtreme'
+        $sonic.Executable | Should -Be 'exe/SonicDash_R_Ring.exe'
+        $sonic.ExecutableSha256 | Should -Be '47B6F1186C734DD795D1AFC95D070494436502A2B2419ADE9F19A78D7B431A38'
+        $sonic.AllowExecutableSelfPatch | Should -BeTrue
+        $sonic.SourceRole | Should -Be 'Main'
+        $sonic.SourceSet | Should -Be 'Sonic Dash Extreme (2015)[Sega Nu][TP].zip'
+        $sonic.SourceEntry | Should -Be 'exe/SonicDash_R_Ring.exe'
+        $sonic.SourceSize | Should -Be 5947392
+        $sonic.SourceSha1 | Should -Be 'E7369EC647CDAAFA9197B5B02D4346AE935C9459'
+        $sonic.SourceSha256 | Should -Be 'BCA788A62FD32681D049F7AFDE456F6AD12F9030CED4E1C3CFD81C3A925EDD9E'
+        $sonic.Operations.Count | Should -Be 1
+        $sonic.Operations[0].Target | Should -Be $sonic.Executable
+        $sonic.Operations[0].BeforeSha256 | Should -Be $sonic.ExecutableSha256
+        $sonic.Operations[0].AfterSha256 | Should -Be $sonic.SourceSha256
     }
 
     It 'requires only the observed BepInEx core for the exact Main plugin restorations' {
@@ -23803,6 +23974,12 @@ Describe 'Required patch engine and local recipes' {
             'blazblue-continuum-shift-idmac-driver-restore'
             'blazblue-continuum-shift-ii-idmac-driver-restore'
             'blazblue-cross-tag-battle-idmac-driver-restore'
+            'taisen-hot-gimmick-5-ttx-monitor-dll-restore'
+            'taisen-hot-gimmick-5-ttx-config-restore'
+            'taisen-hot-gimmick-5-ttx-loader-restore'
+            'mars-sortie-bepinex-plugin-restore'
+            'rabbids-hollywood-bepinex-operator-plugin-restore'
+            'sb3-bepinex-plugin-restore'
             'rabbids-hollywood-trigger-crosshairs-restore'
             'blazblue-central-fiction-idmac-driver-restore'
             'nerf-arcade-bepinex-plugin-restore'
@@ -23985,6 +24162,129 @@ Describe 'Required patch engine and local recipes' {
         (Get-FileHash -LiteralPath $requiredPatchFixture.Executable -Algorithm SHA256).Hash | Should -Be $beforeHash
     }
 
+    It 'applies and receipt-undoes one explicitly opted-in exact self-executable patch' {
+        $operation = [pscustomobject]@{
+            Type='ReplaceFile';Target='synthetic.exe';BeforeSha256=$requiredPatchFixture.ExecutableSha256
+            AfterSha256=$requiredPatchFixture.SettingsAfterSha256;Payload='settings.new'
+            PayloadSha256=$requiredPatchFixture.SettingsAfterSha256
+        }
+        $entry = [pscustomobject]@{
+            Id='fixture.sonic-self-patch';ProfileId='SyntheticFixture';Executable='synthetic.exe'
+            ExecutableSha256=$requiredPatchFixture.ExecutableSha256;SourceUrl='https://example.invalid/self-patch'
+            SourceRevision=('A' * 40);ExclusiveGroup='';AllowExecutableSelfPatch=$true;Operations=@($operation)
+        }
+        $content = [pscustomobject]@{Schema=3;Entries=@($entry)} | ConvertTo-Json -Depth 10
+        $inputs = @{
+            CatalogContent=$content;CatalogSha256=(Get-TpmPatchTextSha256 $content)
+            PatchId=$entry.Id;ProfileId=$entry.ProfileId;GameRoot=$requiredPatchFixture.GameRoot
+            PayloadRoot=$requiredPatchFixture.PayloadRoot;RecoveryRoot=$requiredPatchFixture.RecoveryRoot
+            ProtectedRoots=@($requiredPatchFixture.ProtectedRoot)
+        }
+        $executableBytes = [IO.File]::ReadAllBytes($requiredPatchFixture.Executable)
+        $sourceBytes = [IO.File]::ReadAllBytes($requiredPatchFixture.SettingsPayload)
+        Remove-Item -LiteralPath $requiredPatchFixture.Executable -Force
+        $missingExecutable = Get-TpmPatchPlan @inputs
+        $missingExecutable.Status | Should -Be 'Unavailable'
+        Test-Path -LiteralPath $requiredPatchFixture.Executable | Should -BeFalse
+        [IO.File]::WriteAllBytes($requiredPatchFixture.Executable,$executableBytes)
+        Remove-Item -LiteralPath $requiredPatchFixture.SettingsPayload -Force
+        $missingSource = Get-TpmPatchPlan @inputs
+        $missingSource.Status | Should -Be 'Unavailable'
+        (Get-FileHash -LiteralPath $requiredPatchFixture.Executable -Algorithm SHA256).Hash | Should -Be $requiredPatchFixture.ExecutableSha256
+        [IO.File]::WriteAllBytes($requiredPatchFixture.SettingsPayload,$sourceBytes)
+
+        $plan = Get-TpmPatchPlan @inputs
+        $plan.Status | Should -Be 'Ready'
+        $plan.ExecutableSelfPatch | Should -BeTrue
+        $applied = Invoke-TpmCatalogPatch @inputs -Confirm:$false
+        $applied.Status | Should -Be 'Applied'
+        (Get-FileHash -LiteralPath $requiredPatchFixture.Executable -Algorithm SHA256).Hash | Should -Be $requiredPatchFixture.SettingsAfterSha256
+        $receiptPath = Join-Path $applied.RecoveryDirectory 'receipt.json'
+        $receiptBytes = [IO.File]::ReadAllBytes($receiptPath)
+        $appliedReceipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json
+        $backupPath = [string]$appliedReceipt.Operations[0].Backup
+        $backupBytes = [IO.File]::ReadAllBytes($backupPath)
+        [IO.File]::WriteAllText($receiptPath,'{"Schema":3}')
+        { Undo-TpmCatalogPatch @inputs -RecoveryDirectory $applied.RecoveryDirectory -Confirm:$false } | Should -Throw
+        (Get-FileHash -LiteralPath $requiredPatchFixture.Executable -Algorithm SHA256).Hash | Should -Be $requiredPatchFixture.SettingsAfterSha256
+        [IO.File]::WriteAllBytes($receiptPath,$receiptBytes)
+        (Get-TpmPatchPlan @inputs).Status | Should -Be 'AlreadyApplied'
+        (Invoke-TpmCatalogPatch @inputs -Confirm:$false).Status | Should -Be 'AlreadyApplied'
+        Remove-Item -LiteralPath $requiredPatchFixture.SettingsPayload -Force
+        Remove-Item -LiteralPath $backupPath -Force
+        { Undo-TpmCatalogPatch @inputs -RecoveryDirectory $applied.RecoveryDirectory -Confirm:$false } | Should -Throw
+        (Get-FileHash -LiteralPath $requiredPatchFixture.Executable -Algorithm SHA256).Hash | Should -Be $requiredPatchFixture.SettingsAfterSha256
+        [IO.File]::WriteAllBytes($backupPath,$backupBytes)
+        (Get-TpmPatchPlan @inputs -ForUndo).Status | Should -Be 'AlreadyApplied'
+        (Get-TpmPatchPlan @inputs).Status | Should -Be 'Unavailable'
+        $undo = Undo-TpmCatalogPatch @inputs -RecoveryDirectory $applied.RecoveryDirectory -Confirm:$false
+        $undo.Status | Should -Be 'Restored'
+        (Get-FileHash -LiteralPath $requiredPatchFixture.Executable -Algorithm SHA256).Hash | Should -Be $requiredPatchFixture.ExecutableSha256
+        [IO.File]::WriteAllBytes($requiredPatchFixture.SettingsPayload,$sourceBytes)
+        $restoredReceipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json
+        $restoredReceipt.State | Should -Be 'Restored'
+        $restoredReceipt.Operations[0].RestoredFileIdentity | Should -Not -BeNullOrEmpty
+        $restoredReceipt.Operations[0].RestoredFileIdentity | Should -Not -Be $restoredReceipt.Operations[0].AfterFileIdentity
+        $reopened = Open-TpmPatchCreationFile $requiredPatchFixture.Executable
+        try { [TpmSupportNativeMethods]::PatchFileIdentity($reopened.SafeFileHandle) | Should -Be $restoredReceipt.Operations[0].RestoredFileIdentity } finally { $reopened.Dispose() }
+        (Get-TpmPatchPlan @inputs).Status | Should -Be 'Ready'
+        (Invoke-TpmCatalogPatch @inputs -Confirm:$false).Status | Should -Be 'Applied'
+
+        $wrongProfile = @{} + $inputs
+        $wrongProfile.ProfileId = 'OtherSyntheticProfile'
+        (Get-TpmPatchPlan @wrongProfile).Status | Should -Be 'Unavailable'
+        [IO.File]::WriteAllText($requiredPatchFixture.Executable,'unknown third-party executable bytes; never launch')
+        $unknown = Get-TpmPatchPlan @inputs
+        $unknown.Status | Should -Be 'Unavailable'
+        $unknown.Reason | Should -Match 'Grouped target conflict'
+        [IO.File]::ReadAllText($requiredPatchFixture.Executable) | Should -Be 'unknown third-party executable bytes; never launch'
+
+        $invalidEntry = $entry | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+        $invalidEntry.Operations += @($invalidEntry.Operations[0])
+        $invalidContent = [pscustomobject]@{Schema=3;Entries=@($invalidEntry)} | ConvertTo-Json -Depth 10
+        $invalidInputs = @{} + $inputs
+        $invalidInputs.CatalogContent = $invalidContent
+        $invalidInputs.CatalogSha256 = Get-TpmPatchTextSha256 $invalidContent
+        $invalidPlan = Get-TpmPatchPlan @invalidInputs
+        $invalidPlan.Status | Should -Be 'Unavailable'
+        $invalidPlan.Reason | Should -Match 'one exact ReplaceFile'
+    }
+
+    It 'preserves a third-party self-executable replacement at the independent publication reopen boundary' {
+        $operation = [pscustomobject]@{
+            Type='ReplaceFile';Target='synthetic.exe';BeforeSha256=$requiredPatchFixture.ExecutableSha256
+            AfterSha256=$requiredPatchFixture.SettingsAfterSha256;Payload='settings.new'
+            PayloadSha256=$requiredPatchFixture.SettingsAfterSha256
+        }
+        $entry = [pscustomobject]@{
+            Id='fixture.self-patch-publication-race';ProfileId='SyntheticFixture';Executable='synthetic.exe'
+            ExecutableSha256=$requiredPatchFixture.ExecutableSha256;SourceUrl='https://example.invalid/self-race'
+            SourceRevision=('B' * 40);ExclusiveGroup='';AllowExecutableSelfPatch=$true;Operations=@($operation)
+        }
+        $content = [pscustomobject]@{Schema=3;Entries=@($entry)} | ConvertTo-Json -Depth 10
+        $inputs = @{
+            CatalogContent=$content;CatalogSha256=(Get-TpmPatchTextSha256 $content)
+            PatchId=$entry.Id;ProfileId=$entry.ProfileId;GameRoot=$requiredPatchFixture.GameRoot
+            PayloadRoot=$requiredPatchFixture.PayloadRoot;RecoveryRoot=$requiredPatchFixture.RecoveryRoot
+            ProtectedRoots=@($requiredPatchFixture.ProtectedRoot)
+        }
+        $exe = $requiredPatchFixture.Executable
+        $aside = Join-Path $requiredPatchFixture.GameRoot 'third-party-original.exe'
+        $race = [pscustomobject]@{Calls=0;Executable=$exe;Aside=$aside}
+        $validation = {
+            $race.Calls++
+            if ($race.Calls -eq 3) {
+                Move-Item -LiteralPath $race.Executable -Destination $race.Aside
+                [IO.File]::WriteAllText($race.Executable,'third-party replacement; never launch')
+            }
+        }.GetNewClosure()
+
+        { Invoke-TpmCatalogPatch @inputs -ValidationAction $validation -Confirm:$false } | Should -Throw
+        $race.Calls | Should -Be 3
+        [IO.File]::ReadAllText($exe) | Should -Be 'third-party replacement; never launch'
+        (Get-FileHash -LiteralPath $race.Aside -Algorithm SHA256).Hash | Should -Be $requiredPatchFixture.ExecutableSha256
+    }
+
     It 'runs automatic mode only for registered exact-build games and manual mode without silently registering' {
         $manager = Join-Path $requiredPatchFixture.Root 'manager'
         $owned = Join-Path $manager 'owned'
@@ -24060,7 +24360,7 @@ Describe 'Required patch engine and local recipes' {
         [IO.File]::ReadAllText($requiredPatchFixture.PluginTarget) | Should -Be 'synthetic required plugin'
         Test-Path -LiteralPath $userProfile | Should -BeFalse
         Assert-MockCalled Read-PathWithBrowse -Times 1 -Exactly
-        $script:TpmRequiredPatchCatalogSha256 = '7B190D234667BE3059C7950659421EB810EB80C51C2E4B520B79B9CBC97F934D'
+        $script:TpmRequiredPatchCatalogSha256 = '283DB40B0A17F3FEF2BC758D8123209B87C07731E433CECFE96DE1E2C69C5CE8'
         $script:TpmOwnedLayout = $null
     }
 
@@ -24113,7 +24413,7 @@ Describe 'Required patch engine and local recipes' {
         Invoke-TpmRequiredPatchMenu -TpRoot $tp -UserProfilesDir (Join-Path $tp 'UserProfiles') -ManagerRoot $manager -ProgramRoot $manager -MainSource $source -SupplementarySource ''
         Test-Path -LiteralPath $requiredPatchFixture.PluginTarget | Should -BeFalse
         @(Get-ChildItem -LiteralPath (Join-Path $owned 'Backups\GamePatches') -Directory -ErrorAction SilentlyContinue).Count | Should -Be 0
-        $script:TpmRequiredPatchCatalogSha256 = '7B190D234667BE3059C7950659421EB810EB80C51C2E4B520B79B9CBC97F934D'
+        $script:TpmRequiredPatchCatalogSha256 = '283DB40B0A17F3FEF2BC758D8123209B87C07731E433CECFE96DE1E2C69C5CE8'
         $script:TpmOwnedLayout = $null
     }
     It 'selects exact Cross Elysion GPU recipes and refuses a different executable revision' {

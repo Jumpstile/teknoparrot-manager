@@ -55,30 +55,37 @@
   installation into existing game folders, with exact build/executable and
   local ZIP-member checks, backup, read-back verification, undo, exact
   already-applied skipping, and refusal of unknown states.
-  Thirteen entries cover twelve exact builds: Family Guy Bowling 1.15 Team
-  Play PC; two exclusive Shining Force -- Cross Elysion 2.06.00 Ver C shader
-  alternatives; BlazBlue Continuum Shift (2009), Continuum Shift II (2010),
-  Cross Tag Battle (1.04.00,2.01.00), Central Fiction (2.01.00), and
-  Chronophantasma (2.03); Rabbids Hollywood (2018); NERF Arcade (1.55);
-  Rainbow BomberGirl (2022-12-15); Teenage Mutant Ninja Turtles (1.59); and
-  Silent Hill The Arcade (2007-12-20).
-  Three BepInEx plugin files and Silent Hill's `dsound.dll` are absent-only
-  restorations even though their exact bytes are bundled in corresponding
-  Main ZIPs; the four existing BlazBlue driver restorations and Rabbids are
-  also absent-only. BBCP Chronophantasma instead replaces only the exact known
-  BBCP driver hash with the guide-required hash from the explicitly named
-  Central Fiction Main ZIP member. It refuses absent/unknown BBCP bytes.
-  Plugin recipes require the exact BepInEx core file; Silent Hill's separate
-  Windows codec BAT is not run or installed. Exact desired bytes are skipped,
-  and all other target states are refused. Elysion requires unambiguous AMD or
-  NVIDIA hardware evidence and the exact opposite-vendor target hash; ORIGINAL
-  and other states are refused. Cross Raid remains unsupported. Users provide
-  each recipe's named local ZIP; TPM does not host or acquire payloads. Family
-  Guy still requires BepInEx and its documented configuration. Patch success
-  does not prove registration, controls, launch, or gameplay readiness. The
-  distinct full RC8 application ZIP remains an unpublished local owner-test
-  candidate, not a release; owner runtime, controls, launch and gameplay remain
-  pending.
+  The current local catalog has 24 exact recipes across 18 exact
+  ProfileId/build/executable identities. It preserves the historical
+  13-entry PR #353 baseline and adds three Taisen Hot Gimmick 5 (2.04)
+  component restores; three local user-selected plugin restores (Mars Sortie
+  1.46.9, the separate Rabbids Hollywood operator plugin, and SB3 1.91 x64);
+  and five native exact-build recipes (Cross Raid 1.05 and VF5R 1.001
+  AMD/NVIDIA shader alternatives, plus the opt-in Sonic Dash Extreme
+  executable replacement). The aggregate has 16 absent-only `CreateFile`
+  operations and eight exact-before `ReplaceFile` operations.
+
+  The four BlazBlue driver restorations, the original Rabbids Assembly-CSharp
+  target, four Main-sourced BepInEx plugin targets, and Silent Hill's
+  `dsound.dll` remain separate components. The three added plugin recipes
+  require their exact named local patch ZIPs; the SB3 Main ZIP already
+  contains identical plugin bytes, so the recipe restores only a missing
+  installed target. All seven plugin targets require BepInEx core presence;
+  Family Guy also requires its documented entrypoint configuration. The
+  Rabbids operator plugin is not its Assembly-CSharp recipe.
+
+  BBCP Chronophantasma still replaces only its exact known driver before-hash
+  with the guide-required hash from the explicitly named Central Fiction Main
+  ZIP. Exact-after targets are skipped; unknown states are refused. The
+  Cross Raid author documentation says version 1.05, not the `Ver A` suffix;
+  its exact profile/build alternatives are not compatibility or gameplay
+  proof. No other Cross Raid build or base-shader restoration is enabled.
+  Sonic requires explicit opt-in and exact executable before/after hashes;
+  this does not establish a 60-fps outcome. SB3 FMOD placement/version
+  readiness remains unresolved, and no codec, FMOD, or game payload is
+  installed or executed. Full semantic guide coverage and owner readiness
+  are not claimed; registration, controls, launch, and gameplay remain
+  separate. This candidate is not a package or release.
 
 -------------------------------------------------------------------------------
   v1.0 RC8  (candidate, not published)  -- ReShade preview selection
