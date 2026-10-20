@@ -848,3 +848,35 @@ replacement for the structured failure that caused it.
 The Pester certification gate remains an exact `5.7.1` pin. Installed
 `5.8.0` or `3.4.0` results are not certification evidence; the environment
 must provide `5.7.1` before a certification run can start.
+
+## Issue #370 and ZIP preflight -- three PowerShell output/exception behaviors that silently change results
+
+**What happened.** (1) `Test-PostgresPassword` returned `($false, $true)` for a
+wrong password: the `$true` came from `Remove-PostgresPgPassFile` in a
+`finally` block, and PowerShell returns every statement's output, including
+`finally` output. `if` treats a two-item array as true, so failed
+authentication, database creation, and restore could look like success. The
+existing tests mocked these helpers, so they never saw the real output.
+(2) `Expand-ZipFileSafe` iterated `$archive.Entries`. On Windows PowerShell
+5.1, the .NET Framework reader throws for an entry name with path-illegal
+characters, but a PowerShell property read swallows that exception and
+returns nothing, so such an archive "extracted" zero files with no error.
+(3) Restoring an unset `PGPASSFILE` with `$null` left it defined as `''`
+under PowerShell 7, because PowerShell passes `$null` to a .NET string
+argument as `''`.
+
+**How it was diagnosed.** Synthetic scenarios were checked on both engines,
+with engine-specific outcomes: exception swallowing on PS5.1 and
+empty-environment restoration on PS7. Fixtures included compiled fake `psql.exe`/`createdb.exe`/
+`pg_restore.exe`/`pg_dump.exe` whose exit codes are set per test, raw ZIPs with
+byte-patched entry names, and a direct `get_Entries()` versus `.Entries`
+comparison (`ArgumentException` versus zero iterations).
+
+**Rule.** Wrap any call whose value is not the function's result in
+`[void](...)`, especially inside `finally`; test the real helper's output
+count and type, not a mock. Read archive entries with `get_Entries()` so a
+reader exception cannot become an empty list. Remove an environment variable
+with `[NullString]::Value`, not `$null`, and only when the prior value was
+truly null -- an explicit empty prior value is restored, not removed.
+Validate ZIP entry names raw, before
+any normalization, and validate the whole archive before the first write.
