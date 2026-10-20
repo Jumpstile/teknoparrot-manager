@@ -97,6 +97,60 @@ promotion)") for the full rationale and the regression tests that force a
 failure during extraction and a separate failure during promotion for
 both extractors.
 
+## ZIP extraction entry validation (Expand-ZipFileSafe)
+
+`Expand-ZipFileSafe` (AutoSync game ZIPs, the PostgreSQL installer bundle,
+and BepInEx staging) validates the whole archive before it writes anything.
+Inventory rows: ZIP-S01..ZIP-S05 and INV-ZIP-01..INV-ZIP-03 in
+`docs/RC8-REMEDIATION-INVENTORY.md`.
+
+- **Raw-name rules first.** `ConvertTo-SafeZipEntryRelativePath` checks the
+  entry name exactly as stored, before `/` is converted to `\`. PKWARE
+  APPNOTE.TXT 6.3.10 section 4.4.17.1 says a stored path must not contain a
+  drive or device letter or a leading slash. A leading `/` or `\` (including
+  `//server` and `\\server` UNC forms), any `:` (drive letter, drive-relative
+  `C:x`, NTFS stream), and an empty name are rejected. The earlier code
+  trimmed leading separators before its rooted check, so `/x` and `\\server\x`
+  were silently re-rooted under the destination.
+- **Segment rules.** Each segment must be non-empty, must not be `.` or `..`,
+  must not end in `.` or space, must not contain invalid file-name
+  characters, and must not be a reserved device name (`CON`, `PRN`, `AUX`,
+  `NUL`, `COM1-9`, `LPT1-9`, and `COM`/`LPT` with superscript 1, 2 or 3,
+  with or without an extension; `COM0`, `LPT0` and `COM10` stay allowed, per
+  Microsoft's "Naming Files, Paths, and Namespaces"). Writes use `\\?\`
+  paths, which bypass Win32 normalization, so such names would otherwise
+  create files or folders ordinary tools (including Pester's TestDrive
+  cleanup) cannot open or delete.
+- **Deliberately not enforced:** APPNOTE's "all slashes MUST be forward
+  slashes". Interior backslashes remain separators because real
+  Windows-produced archives use them and the previous code accepted them.
+- **Collisions.** Duplicate paths (case-insensitive, after separator
+  normalization), a file entry that is also a directory of another entry, and
+  destination shape conflicts (a file where a folder is needed or the
+  reverse) are rejected. Duplicate explicit directory entries are allowed. An
+  existing file at a file target is replaced, unchanged from before.
+- **Order and limits.** Preflight runs over every entry before any
+  `CreateDirectory` or file open, so an archive rejected by preflight (bad
+  name, collision, or destination shape conflict) leaves an existing
+  destination byte-for-byte unchanged and does not create a missing one.
+  The checks are lexical entry-name, namespace and path-shape checks only.
+  They do not pin filesystem identities: an existing junction or other alias
+  already inside the destination is followed by the write phase, as before
+  (an independent review reproduced this on both baseline and changed source
+  with a valid archive). Concurrent changes, payload or decompression errors,
+  and other write-phase I/O failures can still leave a partial extraction;
+  preflight is not a rollback transaction. Callers needing rollback stage
+  first (BepInEx).
+- **`get_Entries()`, not `.Entries`.** On Windows PowerShell 5.1 the .NET
+  Framework reader throws `ArgumentException` for an entry name containing
+  path-illegal characters, and a PowerShell property read swallows that
+  exception and yields nothing -- the archive would "extract" zero files
+  without an error (reproduced; see LESSONS_LEARNED.md). The method call lets
+  the exception surface. The other `.Entries` readers in the script (DAT
+  index, game notes, Eggman validation, dgVoodoo2, update asset, ReShade)
+  look for specific entries and write nothing when the list is empty; they
+  were reviewed by reading only and were not changed in this round.
+
 ## ReShade deployment (Mode 5)
 
 **Source DLLs.** Not bundled in the release ZIP (not redistributable -- reshade.me's
@@ -868,6 +922,17 @@ the prior value is restored after each helper, and the file is deleted in
 finally. Cleanup failure blocks the operation. Passwords and native output
 are redacted before diagnostic text is returned; no command-line argument
 or log entry contains the password.
+**Exactly one result per helper (#370).** Every `Remove-PostgresPgPassFile`
+call inside a `finally` block is wrapped in `[void](...)`. PowerShell returns
+every statement's output, including output from `finally`, so the cleanup's
+`$true` used to turn `Test-PostgresPassword`'s `$false` into `($false, $true)`,
+which `if` treats as success. `Get-PostgresDatabaseState.Exists` is a strict
+Boolean. `Restore-PostgresPgPassFileEnvironment` removes PGPASSFILE with
+`[NullString]::Value` only when the prior value was truly null (unset):
+PowerShell passes `$null` to a .NET string argument as `''`, and PowerShell 7
+would otherwise keep an empty PGPASSFILE defined. An explicit empty prior
+value (possible under PowerShell 7) is restored as empty. Regression coverage:
+`Tests/PostgresHelperResultContract.Tests.ps1` (synthetic native tools).
 **Scope split.** If a profile's `Automatically create Database` field is present and `1`
 (TPUI's "Express Database Install", GT2018+), this script only fills in connection fields
 and leaves database creation/restore to TPUI's first-launch flow. Only for older

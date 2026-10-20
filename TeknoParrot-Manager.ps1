@@ -6079,8 +6079,17 @@ function Set-PostgresPgPassFileEnvironment {
 }
 
 function Restore-PostgresPgPassFileEnvironment {
-    param([string]$PreviousValue)
-    [Environment]::SetEnvironmentVariable('PGPASSFILE', $PreviousValue, 'Process')
+    # Untyped on purpose: a [string] parameter turns an originally-unset
+    # variable ($null) into ''. Only a truly null prior value removes the
+    # variable, via [NullString]::Value (PowerShell passes $null to a .NET
+    # string argument as ''). An explicit empty prior value, which PowerShell 7
+    # can hold, is restored as empty.
+    param($PreviousValue)
+    if ($null -eq $PreviousValue) {
+        [Environment]::SetEnvironmentVariable('PGPASSFILE', [NullString]::Value, 'Process')
+    } else {
+        [Environment]::SetEnvironmentVariable('PGPASSFILE', [string]$PreviousValue, 'Process')
+    }
 }
 
 function Wait-PostgresServiceState {
@@ -6116,10 +6125,15 @@ function Get-PostgresDatabaseState {
         $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
         $result = & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -tAc "SELECT 1 FROM pg_database WHERE datname='$DbName'" 2>$null
         if ($LASTEXITCODE -ne 0) { throw 'Postgres: database existence query failed.' }
-        return [pscustomobject]@{ Exists = ($result -match '^\s*1\s*$'); Verified = $true }
+        # Exists must be a strict Boolean: -match against a collection (or an
+        # empty result) yields matched elements, not a Boolean (issue #370).
+        $exists = (@($result | Where-Object { [string]$_ -match '^\s*1\s*$' }).Count -gt 0)
+        return [pscustomobject]@{ Exists = $exists; Verified = $true }
     } finally {
         Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile
-        Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure
+        # Cleanup output must not join the helper's result (issue #370); a
+        # cleanup failure still throws.
+        [void](Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure)
     }
 }
 
@@ -6144,7 +6158,7 @@ function Test-PostgresPassword {
         return ($LASTEXITCODE -eq 0)
     } finally {
         Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile
-        Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure
+        [void](Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure)
     }
 }
 
@@ -7275,10 +7289,59 @@ function Invoke-CursorHideSetup {
 }
 
 # =============================================================================
+# Validates one RAW ZIP entry name and returns its normalized relative path.
+# Governing source: PKWARE APPNOTE.TXT 6.3.10 section 4.4.17.1 -- a stored
+# path MUST NOT contain a drive or device letter or a leading slash. The raw
+# name is checked BEFORE separator normalization, so '/x', '\x', '//server/x'
+# and '\\server\x' are rejected instead of being silently re-rooted under the
+# destination. Interior backslashes are still accepted as separators (real
+# Windows-produced archives contain them; APPNOTE's forward-slash-only rule is
+# deliberately not enforced -- see ARCHITECTURE.md). Pure: no filesystem access.
+function ConvertTo-SafeZipEntryRelativePath {
+    param([string]$EntryName)
+    if ([string]::IsNullOrEmpty($EntryName)) { throw 'ZIP entry has an empty name.' }
+    if ($EntryName[0] -eq [char]'/' -or $EntryName[0] -eq [char]'\') {
+        throw "ZIP entry escapes destination folder (rooted or UNC name): $EntryName"
+    }
+    # A colon can only mean a drive letter, a drive-relative path (C:x), or an
+    # NTFS alternate data stream (file:stream) -- never a plain file name.
+    if ($EntryName.IndexOf([char]':') -ge 0) {
+        throw "ZIP entry escapes destination folder (drive, device, or stream name): $EntryName"
+    }
+    $normalized = $EntryName.Replace('/', '\')
+    $isDirectory = $normalized.EndsWith('\')
+    if ($isDirectory) { $normalized = $normalized.Substring(0, $normalized.Length - 1) }
+    if ($normalized.Length -eq 0) { throw "ZIP entry has an empty path: $EntryName" }
+    $invalid = [System.IO.Path]::GetInvalidFileNameChars()
+    foreach ($segment in $normalized.Split([char]'\')) {
+        if ($segment.Length -eq 0) { throw "ZIP entry contains an empty path segment: $EntryName" }
+        if ($segment -eq '.' -or $segment -eq '..') { throw "ZIP entry escapes destination folder (dot segment): $EntryName" }
+        # \\?\ paths bypass Win32 normalization, so a trailing dot or space
+        # would create a name ordinary Windows tools cannot open or delete.
+        if ($segment.EndsWith('.') -or $segment.EndsWith(' ')) { throw "ZIP entry has a segment ending in a dot or space: $EntryName" }
+        if ($segment.IndexOfAny($invalid) -ge 0) { throw "ZIP entry contains characters that are invalid in Windows file names: $EntryName" }
+        # Reserved device names per Microsoft "Naming Files, Paths, and
+        # Namespaces": CON, PRN, AUX, NUL, COM1-9, LPT1-9, and COM/LPT with
+        # superscript 1/2/3 (U+00B9, U+00B2, U+00B3), also when followed by
+        # an extension. COM0, LPT0 and COM10 are not reserved. Through \\?\
+        # these would become real files ordinary tools cannot open or delete.
+        if ($segment.Split([char]'.')[0] -match '^(?i:CON|PRN|AUX|NUL|COM[1-9\u00B9\u00B2\u00B3]|LPT[1-9\u00B9\u00B2\u00B3])$') { throw "ZIP entry uses a reserved Windows device name: $EntryName" }
+    }
+    if ([System.IO.Path]::IsPathRooted($normalized)) { throw "ZIP entry escapes destination folder: $EntryName" }
+    return [pscustomobject]@{ RelativePath = $normalized; IsDirectory = $isDirectory }
+}
+
 # Extracts a ZIP to a destination directory using \\?\ extended-length paths on
 # every file write, bypassing Windows' 260-character MAX_PATH limit. Replaces
 # ZipFile::ExtractToDirectory which throws PathTooLongException for games with
-# deeply-nested internal paths. Includes a zip-slip guard.
+# deeply-nested internal paths. Every entry name, every archive-internal
+# collision, and every destination file/directory shape conflict is validated
+# BEFORE any directory is created or any file is written, so an archive
+# rejected by this preflight leaves the destination unchanged. The checks are
+# lexical and path-shape only: they do not pin filesystem identities or reject
+# existing junctions/aliases inside the destination, and they are not a
+# transaction -- an I/O failure during the write phase can still leave a
+# partial extraction.
 function Expand-ZipFileSafe {
     param([string]$ZipPath, [string]$DestDir, [string]$GameName = '')
 
@@ -7301,21 +7364,58 @@ function Expand-ZipFileSafe {
     $archive   = $null
     try {
         $archive   = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
-        $fileCount = @($archive.Entries | Where-Object { $_.Name -ne '' }).Count
-        $current   = 0
-        foreach ($entry in $archive.Entries) {
-            $rel = $entry.FullName.Replace('/', '\').TrimStart('\')
 
-            # Zip-slip guard: reject traversal (..) and absolute paths.
-            # String-level check avoids the 260-char limit of GetFullPath on
-            # .NET 4.x. Rooted check blocks entries like C:\evil\path.exe.
-            if ($rel -match '(^|\\)\.\.($|\\)' -or [System.IO.Path]::IsPathRooted($rel)) {
-                throw "ZIP entry escapes destination folder: $($entry.FullName)"
+        # ---- Preflight: validate the whole archive before touching disk ----
+        $comparer = [System.StringComparer]::OrdinalIgnoreCase
+        $fileTargets = New-Object 'System.Collections.Generic.Dictionary[string,string]' ($comparer)
+        $directories = New-Object 'System.Collections.Generic.Dictionary[string,string]' ($comparer)
+        $plan = New-Object System.Collections.Generic.List[object]
+        # get_Entries() instead of .Entries: on Windows PowerShell 5.1 the
+        # .NET Framework reader throws for an entry name with characters that
+        # are illegal in paths, and a PowerShell property read swallows that
+        # exception and yields nothing -- the archive would "extract" zero
+        # files without any error. The method call lets the exception surface.
+        $entries = $archive.get_Entries()
+        foreach ($entry in $entries) {
+            $info = ConvertTo-SafeZipEntryRelativePath -EntryName $entry.FullName
+            $rel = $info.RelativePath
+            if ($info.IsDirectory) {
+                if ($fileTargets.ContainsKey($rel)) { throw "ZIP entry collides with a file entry of the same path: $($entry.FullName)" }
+                $directories[$rel] = $entry.FullName
+            } else {
+                if ($fileTargets.ContainsKey($rel)) { throw "ZIP contains duplicate file entries for the same path: $($entry.FullName)" }
+                if ($directories.ContainsKey($rel)) { throw "ZIP file entry collides with a directory of the same path: $($entry.FullName)" }
+                $fileTargets[$rel] = $entry.FullName
             }
+            # Every ancestor of an entry is a directory and must not be a file.
+            $cut = $rel.LastIndexOf([char]'\')
+            while ($cut -gt 0) {
+                $ancestor = $rel.Substring(0, $cut)
+                if ($fileTargets.ContainsKey($ancestor)) { throw "ZIP entry is nested under a file entry: $($entry.FullName)" }
+                $directories[$ancestor] = $entry.FullName
+                $cut = $ancestor.LastIndexOf([char]'\')
+            }
+            [void]$plan.Add([pscustomobject]@{ Entry = $entry; RelativePath = $rel; IsDirectory = $info.IsDirectory })
+        }
+        if ([System.IO.File]::Exists($longPrefixBase)) { throw "ZIP destination is an existing file, not a folder: $destFull" }
+        foreach ($dirRel in $directories.Keys) {
+            if ([System.IO.File]::Exists($longPrefixBase + '\' + $dirRel)) {
+                throw "ZIP needs a folder where a file already exists in the destination: $dirRel"
+            }
+        }
+        foreach ($fileRel in $fileTargets.Keys) {
+            if ([System.IO.Directory]::Exists($longPrefixBase + '\' + $fileRel)) {
+                throw "ZIP needs a file where a folder already exists in the destination: $fileRel"
+            }
+        }
 
-            # Directory entry: Name is empty string when FullName ends with /
-            if ($entry.Name -eq '' -or $rel.EndsWith('\')) {
-                [void][System.IO.Directory]::CreateDirectory($longPrefixBase + '\' + $rel.TrimEnd('\'))
+        # ---- Write phase: only reached when the whole archive is valid ----
+        $fileCount = $fileTargets.Count
+        $current   = 0
+        foreach ($item in $plan) {
+            $longTarget = $longPrefixBase + '\' + $item.RelativePath
+            if ($item.IsDirectory) {
+                [void][System.IO.Directory]::CreateDirectory($longTarget)
                 continue
             }
 
@@ -7327,11 +7427,12 @@ function Expand-ZipFileSafe {
                                -PercentComplete $pct
             }
 
-            $longTarget = $longPrefixBase + '\' + $rel
             # CreateDirectory is idempotent; no Exists check needed (also avoids TOCTOU).
-            [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($longTarget))
+            $parentCut = $item.RelativePath.LastIndexOf([char]'\')
+            $parent = if ($parentCut -gt 0) { $longPrefixBase + '\' + $item.RelativePath.Substring(0, $parentCut) } else { $longPrefixBase }
+            [void][System.IO.Directory]::CreateDirectory($parent)
 
-            $src = $entry.Open()
+            $src = $item.Entry.Open()
             try {
                 $dst = [System.IO.File]::Open($longTarget, [System.IO.FileMode]::Create,
                            [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
@@ -9621,7 +9722,7 @@ function New-PostgresDatabaseFromBackup {
     } catch { return $false }
     finally {
         Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile
-        Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure
+        [void](Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure)
     }
 }
 # Main per-game Postgres setup pass. All profiles are preflighted and all
@@ -14601,7 +14702,7 @@ function Backup-PostgresDatabases {
         $result.FailedDatabaseCount++
     } finally {
         if ($previousPgPassFile -ne $null -or $pgpassFile) { Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile }
-        if ($pgpassFile) { Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure }
+        if ($pgpassFile) { [void](Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure) }
     }
     return [pscustomobject]$result
 }
@@ -14704,7 +14805,7 @@ function Invoke-RestorePostgresBackup {
                 & $dropdbExe -U postgres -h 127.0.0.1 -p 5432 --if-exists $dbName 2>&1 | Out-Null
             } finally {
                 Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile
-                Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure
+                [void](Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure)
             }
             $encoding = if ($dbName -eq 'GameDB06') { 'UTF8' } else { 'SQL_ASCII' }
             if (New-PostgresDatabaseFromBackup -DbName $dbName -Encoding $encoding -BackupFile $bf.FullName -SuperPasswordPlain $superPwPlain) {

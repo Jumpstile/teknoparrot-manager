@@ -30,6 +30,25 @@
   setup can install/update selected x64 or x86 games with rollback-safe
   validation.
 
+  Fix (#370): a PostgreSQL password check, database check, database
+  creation, or database restore that failed could still be treated as
+  success, because the temporary credential cleanup added an extra "true"
+  result. Each check now returns exactly one result; a wrong password is
+  rejected and a failed database creation or restore is reported as failed.
+  Credential cleanup failures still stop the operation, and the PGPASSFILE
+  setting is restored exactly (not set, empty, or a path).
+
+  Fix: game and installer ZIP extraction now checks every file name in the
+  archive before writing anything. Names that start with / or \, network
+  (\\server) names, drive letters, ":" streams, ".." steps, and names
+  Windows cannot use are rejected, as are duplicate entries and file/folder
+  clashes. An archive rejected by these checks leaves the destination folder
+  exactly as it was instead of half-extracted. On Windows PowerShell 5.1 an
+  archive whose
+  file names the system cannot read is now reported as an error instead of
+  silently extracting nothing. Nested and empty folders, long paths, and
+  backslash-separated names extract as before.
+
   UX: restore, crosshair, first-run, optional-download, update, recovery, and
   support-package paths keep beginner-readable status/retry guidance visible.
   Create Support Package collects allowlisted TPM/TeknoParrot/game text logs

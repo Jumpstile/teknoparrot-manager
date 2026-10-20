@@ -416,6 +416,24 @@ write from leaving a corrupt file if the process is interrupted mid-save.
 folder is a literal UNC path rather than a mapped drive letter; fixed in
 v0.91.
 
+## Rule: ZIP entry names are untrusted and checked raw, before any write
+
+Archive entry names come from third-party ZIPs and are treated as
+attacker-controlled. `Expand-ZipFileSafe` validates every raw name before
+separator normalization (no leading `/` or `\`, no UNC form, no `:`, no
+empty, `.`, `..`, trailing-dot/space, invalid-character, or reserved
+device-name segment) and
+rejects duplicate paths and file/folder clashes, all before creating any
+directory or writing any file. An archive rejected by these checks leaves
+the destination unchanged. The checks are lexical and path-shape only: they
+do not pin filesystem identities or reject an existing junction/alias inside
+the destination, and they are preflight, not a rollback transaction
+(concurrent changes and write-phase I/O errors can still leave a partial
+extraction). Governing source:
+PKWARE APPNOTE.TXT 6.3.10 section 4.4.17.1. Details and the deliberately
+accepted interior-backslash case: ARCHITECTURE.md ("ZIP extraction entry
+validation").
+
 ## ADR-0155 production fact adapter trust boundaries (Checkpoint B1)
 
 `scripts/TPMCertification.ProductionFacts.psm1` introduced several new
