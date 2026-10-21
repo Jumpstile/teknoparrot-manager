@@ -62,7 +62,8 @@ BeforeAll {
     }
 
     function New-ZipCase {
-        $root = Join-Path $TestDrive ('zip-' + [guid]::NewGuid().ToString('N'))
+        param([string]$BaseRoot = $TestDrive)
+        $root = Join-Path $BaseRoot ('zip-' + [guid]::NewGuid().ToString('N'))
         $dest = Join-Path $root 'dest'
         [void][IO.Directory]::CreateDirectory($dest)
         # Pre-existing content proves "unchanged" rather than merely "empty".
@@ -257,14 +258,26 @@ Describe 'Expand-ZipFileSafe preserved compatibility' {
     }
 
     It 'extracts a path longer than MAX_PATH' {
-        $c = New-ZipCase
-        $segment = 'd' * 60
-        $name = (@($segment) * 5 -join '/') + '/long-file-name.txt'
-        New-RawZip -Path $c.Zip -Names @($name)
-        Expand-ZipFileSafe -ZipPath $c.Zip -DestDir $c.Dest
-        $long = '\\?\' + (Join-Path $c.Dest ($name.Replace('/', '\')))
-        $long.Length | Should -BeGreaterThan 260
-        [IO.File]::ReadAllText($long) | Should -Be "payload:$name"
+        # Keep this long tree outside TestDrive. Pester's recursive cleanup uses
+        # ordinary paths and fails after the test has created a MAX_PATH-exceeding entry.
+        # This test owns the short temporary root and removes it through the extended API.
+        $shortRoot = Join-Path ([IO.Path]::GetFullPath($env:TEMP)) ('tpm-zip-maxpath-' + [guid]::NewGuid().ToString('N'))
+        if ($shortRoot.Length -gt 120) { throw "Temporary fixture root is not short enough: $shortRoot" }
+        [void][IO.Directory]::CreateDirectory($shortRoot)
+        $extendedPrefix = ([string][char]92) + ([string][char]92) + '?' + [char]92
+        try {
+            $c = New-ZipCase -BaseRoot $shortRoot
+            $segment = 'd' * 60
+            $name = (@($segment) * 5 -join '/') + '/long-file-name.txt'
+            New-RawZip -Path $c.Zip -Names @($name)
+            Expand-ZipFileSafe -ZipPath $c.Zip -DestDir $c.Dest
+            $long = $extendedPrefix + (Join-Path $c.Dest ($name.Replace('/', [string][char]92)))
+            $long.Length | Should -BeGreaterThan 260
+            [IO.File]::ReadAllText($long) | Should -Be "payload:$name"
+        } finally {
+            $longRoot = $extendedPrefix + $shortRoot
+            if ([IO.Directory]::Exists($longRoot)) { [IO.Directory]::Delete($longRoot, $true) }
+        }
     }
 
     It 'still rejects a corrupt archive' {
