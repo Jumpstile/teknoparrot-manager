@@ -1317,6 +1317,12 @@ separately reviewed under that issue's "Acceptance and safety" section.
 
 ## Game registration (Register-Games)
 
+### Register-only discovery progress (owner follow-up)
+
+During Register-only discovery, `Register-Games` prints a start, the first visited count, then count-only updates no more often than every five seconds while the total remains explicitly unknown. Its completion line reports candidate and visited counts. Discovery output contains no percentage, file path, or file name.
+
+`Get-GameFiles` accepts an optional progress callback. It calls back on the first enumerated entry and then every 256 entries or five seconds, whichever occurs first after the previous callback. If successful enumeration ends with unreported trailing entries, it sends a final count-only callback with a null file and exact total. The recursive `Get-ChildItem -LiteralPath $folder -Recurse -File -ErrorAction SilentlyContinue` call and existing candidate predicate and order are preserved. Callback exceptions propagate; `Register-Games` closes discovery status in `finally` and reports the last reported count on interruption. An interrupted enumeration does not return partial candidates. Dry-run and profile-write behavior are unchanged.
+
 ### Two-executable profiles (v0.99.6)
 
 Profiles with `HasTwoExecutables=true` (Initial D Arcade Stage Zero/Ver. 2/The Arcade --
