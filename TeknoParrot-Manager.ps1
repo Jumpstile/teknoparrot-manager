@@ -3087,24 +3087,52 @@ function Resolve-BestFuzzyMatch {
 # .dll files are included because some Konami arcade games (DDR, Steel Chronicle,
 # Silent Scope, etc.) specify a game-specific DLL as their ExecutableName.
 function Get-GameFiles {
-    param([string]$folder)
+    param([string]$folder, [scriptblock]$ProgressScript = $null)
     $exts       = @('.exe', '.elf', '.iso', '.gcm', '.gcz', '.bin', '.e4', '.zip', '.xbe', '.dll')
     $normalized = $folder -replace '/', '\'
     $baseDepth  = $normalized.TrimEnd('\').Split('\').Count
-    return @(Get-ChildItem -LiteralPath $folder -Recurse -File -ErrorAction SilentlyContinue |
-                 Where-Object {
-                     $ext = $_.Extension.ToLower()
-                     if ($exts -contains $ext) { return $true }
-                     if ($ext -eq '') {
-                         # Extension-less Linux binaries: allow up to 6 levels below the
-                         # games root. Some Lindbergh titles place executables 5-6 levels
-                         # deep inside their filesystem image. System files (X11 layouts,
-                         # shared libraries, etc.) live 7-10 levels deep and are excluded.
-                         $normFull = $_.FullName -replace '/', '\'
-                         return ($normFull.Split('\').Count - $baseDepth) -le 6
-                     }
-                     return $false
-                 })
+    $progressState = $null
+    if ($null -ne $ProgressScript) {
+        $progressState = [pscustomobject]@{
+            Seen = 0
+            LastMilliseconds = -5000
+            LastReportedCount = 0
+            NextCount = 256
+            Watch = [System.Diagnostics.Stopwatch]::StartNew()
+        }
+    }
+    $gameFileFilter = {
+        if ($null -ne $ProgressScript) {
+            $progressState.Seen++
+            $elapsedMilliseconds = $progressState.Watch.ElapsedMilliseconds
+            if ($progressState.Seen -eq 1 -or $progressState.Seen -ge $progressState.NextCount -or
+                (($elapsedMilliseconds - $progressState.LastMilliseconds) -ge 5000)) {
+                $progressState.LastMilliseconds = $elapsedMilliseconds
+                $progressState.NextCount = $progressState.Seen + 256
+                $progressState.LastReportedCount = $progressState.Seen
+                [void](& $ProgressScript $_ $progressState.Seen)
+            }
+        }
+        $ext = $_.Extension.ToLower()
+        if ($exts -contains $ext) { return $true }
+        if ($ext -eq '') {
+            # Extension-less Linux binaries: allow up to 6 levels below the
+            # games root. Some Lindbergh titles place executables 5-6 levels
+            # deep inside their filesystem image. System files (X11 layouts,
+            # shared libraries, etc.) live 7-10 levels deep and are excluded.
+            $normFull = $_.FullName -replace '/', '\'
+            return ($normFull.Split('\').Count - $baseDepth) -le 6
+        }
+        return $false
+    }
+
+    $candidates = @(Get-ChildItem -LiteralPath $folder -Recurse -File -ErrorAction SilentlyContinue |
+                        Where-Object $gameFileFilter)
+    if ($null -ne $ProgressScript -and $progressState.Seen -gt $progressState.LastReportedCount) {
+        # Null file denotes a final count-only notification after successful enumeration.
+        [void](& $ProgressScript $null $progressState.Seen)
+    }
+    return $candidates
 }
 
 # Parses a number/range string (e.g. "1,3,5-7") into a sorted list of integers
@@ -11946,7 +11974,29 @@ function Register-Games {
 
     if ($null -eq $datIndex) { $datIndex = @{} }
 
-    $exeFiles       = @(Get-GameFiles $installFolder)
+    $discoveryWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $discoveryState = [pscustomobject]@{ EntriesVisited = 0; LastReportMilliseconds = -5000 }
+    $discoveryProgress = {
+        param($file, $seen)
+        $discoveryState.EntriesVisited = [int]$seen
+        $elapsedMilliseconds = $discoveryWatch.ElapsedMilliseconds
+        if ($seen -eq 1 -or (($elapsedMilliseconds - $discoveryState.LastReportMilliseconds) -ge 5000)) {
+            Write-Host ("Game-file discovery: visited={0:N0}; total=unknown." -f $seen) -ForegroundColor DarkGray
+            $discoveryState.LastReportMilliseconds = $elapsedMilliseconds
+        }
+    }
+    Write-Host "Game-file discovery: starting; total=unknown." -ForegroundColor DarkGray
+    $discoveryCompleted = $false
+    try {
+        $exeFiles = @(Get-GameFiles -folder $installFolder -ProgressScript $discoveryProgress)
+        $discoveryCompleted = $true
+    } finally {
+        if ($discoveryCompleted) {
+            Write-Host ("Game-file discovery: ended; candidates={0:N0}; visited={1:N0}." -f $exeFiles.Count, $discoveryState.EntriesVisited) -ForegroundColor Green
+        } else {
+            Write-Host ("Game-file discovery: interrupted; last-reported-visited={0:N0}." -f $discoveryState.EntriesVisited) -ForegroundColor Yellow
+        }
+    }
     $registered     = New-Object System.Collections.ArrayList
     $already        = New-Object System.Collections.ArrayList
     $ambiguous      = New-Object System.Collections.ArrayList
