@@ -2958,6 +2958,7 @@ function Redact-TpmSupportText {
         '(?im)(postgres(?:ql)?://)[^\s"''<>]+',
         '(?im)((?:--?|/)password\s+)[^\s]+',
         '(?i)[A-Z]:\\Users\\[^\\"''<>|:*?\r\n]+(?:\\[^\\"''<>|:*?\r\n]+)*',
+        '(?i)[A-Z]:/Users/[^/"''<>|:*?\r\n]+(?:/[^/"''<>|:*?\r\n]+)*',
         '(?i)\\\\[^\\"''<>|:*?\r\n]+\\[^\\"''<>|:*?\r\n]+(?:\\[^\\"''<>|:*?\r\n]+)*'
     )
     foreach ($pattern in $patterns) {
@@ -4408,7 +4409,7 @@ function Invoke-TpmSupportPackageFollowUp {
 function Write-TpmSupportPackageIntro {
     Write-Host ''
     Write-TpmText -Text 'This makes one ZIP file that you can send to support.'
-    Write-TpmText -Text 'It has your logs and reports. It never has game files or passwords.' -Color DarkCyan
+    Write-TpmText -Text 'It has your logs and reports. It leaves out game files, and we hide passwords and your Windows user name.' -Color DarkCyan
     Write-TpmText -Text 'Optional: if TeknoParrotUI is the problem, save its info file first. Press D to see how.' -Color DarkCyan -BlankBefore
     Write-Host ''
     Write-TpmText -Text '1) Create Support Package'
@@ -37682,7 +37683,7 @@ function Get-TpmLibraryHealthSummaryLines {
         ([string]$Result.PostgresInventoryStatus -ne 'Complete') -or
         ([bool](Get-TpmTransactionField -Object $Result -Name 'PostgresServiceUnverified' -Default $false)) -or
         [string]::IsNullOrWhiteSpace([string](Get-TpmTransactionField -Object $Result -Name 'DetectedGpuVendor' -Default ''))
-    $attention = (@($Rows | Where-Object { ([string]$_.Text).StartsWith('Needs attention') }).Count -gt 0)
+    $attention = (@($Rows | Where-Object { ([string]$_.Text).StartsWith('Needs attention') -or ([string]$_.Text).StartsWith('Problem') }).Count -gt 0)
     $lines = New-Object System.Collections.Generic.List[object]
     if ($attention) {
         [void]$lines.Add(@{ Text = 'Some things need attention.'; Color = 'Yellow' })
