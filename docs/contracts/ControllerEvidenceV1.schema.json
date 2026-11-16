@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ControllerEvidenceV1",
+  "title": "Controller evidence, version 1",
+  "description": "Read-only evidence about which controller classes are connected. It suggests; it never verifies and never writes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ContractVersion", "Provider", "ProviderVersion", "Status", "ObservedAtUtc", "Devices", "SensitiveIdentifiersIncluded"],
+  "properties": {
+    "ContractVersion": { "const": "ControllerEvidenceV1" },
+    "Provider": { "enum": ["TpmLocalDetection", "Hip"] },
+    "ProviderVersion": { "type": "string", "minLength": 1 },
+    "Status": { "enum": ["OK", "PARTIAL", "UNKNOWN", "FAILED"] },
+    "ObservedAtUtc": { "type": "string", "format": "date-time" },
+    "SensitiveIdentifiersIncluded": { "const": false },
+    "Notes": { "type": "array", "items": { "type": "string" } },
+    "Devices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["Class", "Confidence", "Basis", "Count"],
+        "properties": {
+          "Class": { "enum": ["XboxStylePad", "OtherGamePad", "Wheel", "LightGun", "ArcadeEncoder", "Keyboard", "PointerOrTrackball", "Unknown"] },
+          "Confidence": { "enum": ["High", "Medium", "Low"] },
+          "Basis": { "enum": ["XInputSlotActive", "HidUsage", "WindowsDeviceClass", "NameHint"] },
+          "Count": { "type": "integer", "minimum": 1 }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "Basis": { "const": "NameHint" } }, "required": ["Basis"] },
+            "then": { "properties": { "Confidence": { "const": "Low" } } }
+          },
+          {
+            "if": { "properties": { "Confidence": { "const": "High" } }, "required": ["Confidence"] },
+            "then": { "properties": { "Basis": { "const": "XInputSlotActive" }, "Class": { "const": "XboxStylePad" } } }
+          }
+        ]
+      }
+    }
+  }
+}
