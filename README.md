@@ -22,6 +22,44 @@ TeknoParrot Manager does not install TeknoParrot. Install TeknoParrot first. [St
 
 Using RC7 or RC8? Those builds cannot update themselves. Install RC8.1 by hand once. After that, the **Check for Updates** menu item does it for you.
 
+## What it does
+
+These are the main things TeknoParrot Manager can do:
+
+**Set up your games**
+
+- **AutoSync (menu 1).** Unpacks your game ZIPs and adds the games to TeknoParrot in one run. It works from a network drive or a local folder and leaves unchanged games alone. It backs up your TeknoParrot settings (UserProfiles) first.
+- **Register only (menu 2).** Adds games you already extracted. It finds each game, picks the right game path, and never overwrites a game that is already added.
+- **Matches hard-to-name games.** It uses folder names, game codes and an optional community game list to work out which game is which.
+- **LaunchBox export.** Writes your games straight into the LaunchBox library.
+
+**Controls, picture and fixes**
+
+- **Propagate Controls (menu 3).** Set up one game of each control type. TeknoParrot Manager copies those controls to similar games that have none. It never invents a binding.
+- **Crosshair setup (menu 4).** Gives lightgun games custom player 1 and player 2 crosshairs.
+- **ReShade setup (menu 5).** Adds picture effects (shaders) to the games you pick.
+- **dgVoodoo2 setup (menu 6).** Fixes older games that crash or show a black screen on old graphics settings.
+- **GPU fix setup (menu 7).** Detects AMD, NVIDIA or Intel and applies the matching fix.
+- **Force feedback setup (menu 8).** Sets up the native FFB Blaster (membership) or a free third-party plugin for wheel games.
+- **BepInEx setup (menu 9).** Installs or updates BepInEx for the games that need it, after you approve.
+- **Region setup (menu 10).** Pick the country your games start in, choose which games, confirm, and switch back to automatic any time.
+- **Postgres setup (menu 11).** Sets up the local PostgreSQL database that some Incredible Technologies games need.
+- **Required game patches (menu 12).** Finds a required fix, checks it against your own ZIP, backs up first, installs it, verifies it, and can undo it.
+
+**Check, protect and update**
+
+- **Library health check (menu 13).** Reports what is registered, broken or missing, without changing anything.
+- **Restore backup (menu 14).** Puts profiles, LaunchBox library files or Postgres databases back from an earlier copy.
+- **Check for Updates (menu 15).** Downloads a new release, checks it, installs it, and puts everything back if something goes wrong. Available from RC8.1.
+- **Create Support Package (menu 16).** Gathers safe logs and reports into one ZIP to attach to a bug report.
+
+**For beginners**
+
+- **Plain-language screens.** Short messages and one clear next step. Press **D** on a screen for the technical details.
+- **Preview mode.** Shows the planned changes without making them.
+
+The [full user guide](docs/USER-GUIDE.md) describes every feature step by step.
+
 ## Quick start
 
 **Before you start:**
@@ -62,22 +100,6 @@ The normal backup protects UserProfiles (TeknoParrot's saved game settings) only
 | 17 | **Exit** | Quit |
 
 The [Quick Start guide](QUICKSTART.md) has more detail on each step, and [Start Here](docs/START-HERE.md) covers the very first setup.
-## What it does
-
-- **Adds your games to TeknoParrot.** It finds your extracted games and registers them with the right game path. It does not overwrite a game that is already added.
-- **Unpacks game ZIPs for you (AutoSync).** It works from a network drive or a local folder and leaves unchanged games alone.
-- **Matches hard-to-name games.** It uses folder names, game codes and an optional community game list to work out which game is which.
-- **Copies controls.** Set up one game of each control type. TeknoParrot Manager copies those controls to similar games that have none.
-- **Lightgun crosshairs.** It gives lightgun games custom player 1 and player 2 cursors.
-- **ReShade and dgVoodoo2.** It adds picture effects and fixes older games that crash on old graphics settings.
-- **Graphics card fixes.** It detects AMD, NVIDIA or Intel and applies the matching fix.
-- **Force feedback, BepInEx, region and PostgreSQL setup.** Each one asks you first and explains what it will do.
-- **LaunchBox export.** It writes your games straight into the LaunchBox library.
-- **Health check and repair.** It finds broken or empty game paths and points them back to the right place.
-- **Check for Updates.** It downloads a new release, checks it, installs it, and puts everything back if something goes wrong.
-- **Plain-language screens.** Short messages for beginners. Press **D** on a screen for the technical details.
-
-The [full user guide](docs/USER-GUIDE.md) describes every feature step by step.
 
 ## Built to be safe
 
