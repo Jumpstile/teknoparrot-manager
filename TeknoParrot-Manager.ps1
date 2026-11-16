@@ -40534,13 +40534,25 @@ function Invoke-DeviceSurvey {
     Write-Host " (Answer Y or N. This only prints a plan; it changes nothing.)" -ForegroundColor DarkCyan
     Write-Host ""
 
-    $hasXbox      = & $readYesNo "Xbox / XInput controller?" 'XboxStylePad'
-    $hasArcade    = & $readYesNo "Arcade joystick + buttons?" 'ArcadeEncoder'
-    $hasTrackball = & $readYesNo "Trackball?" 'PointerOrTrackball'
-    $hasSpinner   = & $readYesNo "Spinner (single-axis dial)?"
-    $hasWheel     = & $readYesNo "Steering wheel + pedals?" 'Wheel'
-    $hasGun       = & $readYesNo "Lightgun?" 'LightGun'
-    $hasKeyboard  = & $readYesNo "Keyboard (no game controller)?"
+    # One-screen shortcut: when a controller is clearly connected (High confidence),
+    # offer to use just that, so the user answers one question instead of seven.
+    $sure = @($evidence.DeviceObservations | Where-Object { $_.Confidence -eq 'High' } | ForEach-Object { $_.DeviceClass })
+    $hasXbox = $hasArcade = $hasTrackball = $hasSpinner = $hasWheel = $hasGun = $hasKeyboard = $false
+    $quick = $false
+    if ($sure -contains 'XboxStylePad') {
+        Write-Host " Found: an Xbox-style controller." -ForegroundColor Green
+        $quick = ((Read-TpmYesNo -Prompt "   Use the Xbox controller for all games? (Y = yes, N = answer the questions)" -Default 'Y') -eq 'Y')
+        if ($quick) { $hasXbox = $true }
+    }
+    if (-not $quick) {
+        $hasXbox      = & $readYesNo "Xbox / XInput controller?" 'XboxStylePad'
+        $hasArcade    = & $readYesNo "Arcade joystick + buttons?" 'ArcadeEncoder'
+        $hasTrackball = & $readYesNo "Trackball?" 'PointerOrTrackball'
+        $hasSpinner   = & $readYesNo "Spinner (single-axis dial)?"
+        $hasWheel     = & $readYesNo "Steering wheel + pedals?" 'Wheel'
+        $hasGun       = & $readYesNo "Lightgun?" 'LightGun'
+        $hasKeyboard  = & $readYesNo "Keyboard (no game controller)?"
+    }
 
     # Resolve one device per game family from what the user has, preferring the
     # purpose-built control and falling back to the most versatile available.
