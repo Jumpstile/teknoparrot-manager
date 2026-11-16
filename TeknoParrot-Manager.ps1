@@ -16208,6 +16208,13 @@ function Get-TpmControllerEvidence {
                 $n = @($devices | Where-Object { [string]$_.Name -match $hints[$class] }).Count
                 if ($n -gt 0) { & $add $class 'Low' 'NameHint' $n }
             }
+            # A small list of makers that only build arcade boards. The maker code is used here and never kept in the result.
+            # A match is Medium at most: it says a board of that maker is plugged in, not what the buttons do.
+            $knownVendors = [ordered]@{ 'D209' = 'ArcadeEncoder' }
+            foreach ($vendor in $knownVendors.Keys) {
+                $boards = @($devices | ForEach-Object { if ([string]$_.DeviceID -match ('VID_' + $vendor + '&PID_([0-9A-F]{4})')) { $Matches[1] } } | Select-Object -Unique).Count
+                if ($boards -gt 0) { & $add $knownVendors[$vendor] 'Medium' 'KnownVendor' $boards }
+            }
             $pads = @($devices | Where-Object { [string]$_.Name -match 'game controller' -and [string]$_.DeviceID -notmatch 'IG_' -and [string]$_.Name -notmatch ($hints.Values -join '|') }).Count
             if ($pads -gt 0) { & $add 'OtherGamePad' 'Medium' 'WindowsDeviceClass' $pads }
         } catch { [void]$reasons.Add('DeviceListUnavailable') }

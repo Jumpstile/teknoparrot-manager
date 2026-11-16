@@ -88,7 +88,7 @@
         },
         "Confidence": { "enum": ["High", "Medium", "Low"] },
         "Basis": {
-          "enum": ["XInputSlotActive", "HidUsage", "WindowsDeviceClass", "NameHint"]
+          "enum": ["XInputSlotActive", "HidUsage", "WindowsDeviceClass", "NameHint", "KnownVendor"]
         },
         "Count": { "type": "integer", "minimum": 1 },
         "ReasonCodes": {
@@ -107,6 +107,13 @@
             "required": ["Basis"]
           },
           "then": { "properties": { "Confidence": { "const": "Low" } } }
+        },
+        {
+          "if": {
+            "properties": { "Basis": { "const": "KnownVendor" } },
+            "required": ["Basis"]
+          },
+          "then": { "properties": { "Confidence": { "const": "Medium" } } }
         },
         {
           "if": {
