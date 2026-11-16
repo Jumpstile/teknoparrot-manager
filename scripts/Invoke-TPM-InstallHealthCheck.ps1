@@ -71,6 +71,7 @@ function Test-XmlFolder {
                 # on BOM-less UserProfile XML that production reads fine --
                 # confirmed as a false-WARN source in issue #77.
                 $doc = [System.Xml.XmlDocument]::new()
+                $doc.XmlResolver = $null
                 $doc.Load($file.FullName)
             }
             catch {
@@ -112,7 +113,7 @@ $pcsx2Dir = Resolve-Pcsx2Directory -TeknoParrotRoot $TeknoParrotRoot
 if (-not $pcsx2Dir) {
     Add-Check 'pcsx2x6 crosshair folder exists' $true 'not applicable -- no pcsx2x6 folder in this install'
 } else {
-    $crosshairPath = Join-Path $pcsx2Dir 'TeknoParrot\crosshairs'
+    $crosshairPath = Join-Path $pcsx2Dir (Join-Path $(if ((Test-Path -LiteralPath (Join-Path $pcsx2Dir 'portable.txt') -PathType Leaf) -and -not [string]::IsNullOrWhiteSpace([IO.File]::ReadAllText((Join-Path $pcsx2Dir 'portable.txt')))) { [IO.File]::ReadAllText((Join-Path $pcsx2Dir 'portable.txt')).Trim() } else { 'TeknoParrot' }) 'crosshairs')
     Add-Check 'pcsx2x6 crosshair folder exists' (Test-Path -LiteralPath $crosshairPath -PathType Container) $crosshairPath
 }
 
@@ -121,15 +122,6 @@ $userXml = Test-XmlFolder 'UserProfiles XML' $userProfilesPath
 
 Add-Check 'GameProfiles XML parse' ($gameXml.InvalidCount -eq 0 -and $gameXml.FileCount -gt 0) "files=$($gameXml.FileCount) invalid=$($gameXml.InvalidCount)"
 Add-Check 'UserProfiles XML parse' ($userXml.InvalidCount -eq 0) "files=$($userXml.FileCount) invalid=$($userXml.InvalidCount)"
-
-$gameProfileFiles = @()
-if (Test-Path -LiteralPath $gameProfilesPath -PathType Container) {
-    $gameProfileFiles = @(Get-ChildItem -LiteralPath $gameProfilesPath -File -Filter '*.xml' -ErrorAction SilentlyContinue)
-}
-$duplicateNames = @($gameProfileFiles | Group-Object Name | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name })
-Add-Check 'No duplicate GameProfiles filenames' ($duplicateNames.Count -eq 0) "duplicates=$($duplicateNames.Count)"
-
-$profileCodeCandidates = @($gameProfileFiles | Where-Object { $_.BaseName -match 'centipede|chaos|zoids|timecrs|tekken' } | Select-Object -ExpandProperty Name)
 
 $finished = Get-Date
 $result = [ordered]@{
@@ -140,8 +132,6 @@ $result = [ordered]@{
     Checks = $checks
     GameProfiles = $gameXml
     UserProfiles = $userXml
-    DuplicateGameProfileNames = $duplicateNames
-    InterestingProfileCandidates = $profileCodeCandidates
     Status = if (@($checks | Where-Object { -not $_.Passed }).Count -eq 0) { 'PASS' } else { 'WARN' }
 }
 

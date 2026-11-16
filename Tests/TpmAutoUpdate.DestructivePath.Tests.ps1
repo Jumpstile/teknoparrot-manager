@@ -102,18 +102,28 @@ BeforeAll {
         param(
             [Parameter(Mandatory)][string]$ScriptPath,
             [Parameter(Mandatory)][scriptblock]$WebRequestMock,
+            [Parameter(Mandatory)][byte[]]$FixtureBytes,
             [switch]$WhatIf
         )
 
-        Mock -ModuleName TpmAutoUpdate.Core Get-LatestRelease {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $fixtureDigest = 'sha256:' + ([BitConverter]::ToString($sha256.ComputeHash($FixtureBytes))).Replace('-', '')
+        } finally {
+            $sha256.Dispose()
+        }
+        # The release lookup is replaced where the real orchestrator calls it (script-visible mock, no -ModuleName); the download
+        # is replaced inside the module, where Save-TpmReleaseAsset calls it. Everything else is the real orchestrator and module.
+        Mock Get-LatestRelease {
             [pscustomobject]@{
                 tag_name = 'v0.99.99'
                 assets   = @([pscustomobject]@{
                     name                 = 'TeknoParrot.Manager.v0.99.99.BETA.zip'
                     browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/TeknoParrot.Manager.v0.99.99.BETA.zip'
+                    digest               = $fixtureDigest
                 })
             }
-        }
+        }.GetNewClosure()
         Mock -ModuleName TpmAutoUpdate.Core Invoke-TpmDownload {
             param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label)
             & $WebRequestMock -Uri $DownloadUrl -OutFile $DestinationPath
@@ -122,37 +132,7 @@ BeforeAll {
         $errorOutput = $null
         $stdout = $null
         try {
-            if (-not $WhatIf) {
-                $stdout = InModuleScope TpmAutoUpdate.Core {
-                    param($TargetScriptPath)
-
-                    $release = Get-LatestRelease -Owner 'Jumpstile' -Repository 'teknoparrot-manager'
-                    $asset = Select-TpmUpdateAsset -Release $release -Pattern '^TeknoParrot\.Manager\.v.*\.zip$' -Owner 'Jumpstile' -Repository 'teknoparrot-manager'
-                    Assert-TpmWritableTarget -Path $TargetScriptPath
-
-                    $downloadedZipPath = $null
-                    $extractedScriptPath = $null
-                    try {
-                        New-TpmUpdateBackup -Path $TargetScriptPath | Out-Null
-                        $downloadedZipPath = Save-TpmReleaseAsset -Asset $asset
-                        $extractedScriptPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-update-extracted-" + [guid]::NewGuid().ToString('N') + '.ps1')
-                        Expand-TpmReleaseZipEntry -ZipPath $downloadedZipPath -EntryName 'TeknoParrot-Manager.ps1' -DestinationPath $extractedScriptPath | Out-Null
-                        Test-TpmExtractedScript -Path $extractedScriptPath | Out-Null
-                        Move-Item -LiteralPath $extractedScriptPath -Destination $TargetScriptPath -Force -ErrorAction Stop
-                        if (-not (Test-Path -LiteralPath $TargetScriptPath -PathType Leaf)) {
-                            throw "Update replacement did not complete: $TargetScriptPath not found after Move-Item."
-                        }
-                        $extractedScriptPath = $null
-                    } finally {
-                        if ($downloadedZipPath -and (Test-Path -LiteralPath $downloadedZipPath -PathType Leaf)) {
-                            Remove-Item -LiteralPath $downloadedZipPath -Force -ErrorAction SilentlyContinue
-                        }
-                        if ($extractedScriptPath -and (Test-Path -LiteralPath $extractedScriptPath -PathType Leaf)) {
-                            Remove-Item -LiteralPath $extractedScriptPath -Force -ErrorAction SilentlyContinue
-                        }
-                    }
-                } -ArgumentList $ScriptPath 2>&1
-            }
+            $stdout = & $script:OrchestratorPath -Apply -Confirm:$false -WhatIf:$WhatIf -ScriptPath $ScriptPath -Owner 'Jumpstile' -Repository 'teknoparrot-manager' *>&1
         } catch {
             $errorOutput = $_
         }
@@ -162,33 +142,47 @@ BeforeAll {
             Error  = $errorOutput
         }
     }
-}
 
+    # Private TEMP/TMP for every scenario: the leak checks look at the temporary folder, so another run's files must never be in it.
+    function Use-DestructivePrivateTemp {
+        $script:destructiveSavedTemp = $env:TEMP
+        $script:destructiveSavedTmp = $env:TMP
+        $env:TEMP = Join-Path $TestDrive ('own-temp-' + [guid]::NewGuid().ToString('N'))
+        [void][System.IO.Directory]::CreateDirectory($env:TEMP)
+        $env:TMP = $env:TEMP
+    }
+    function Restore-DestructiveTemp {
+        $env:TEMP = $script:destructiveSavedTemp
+        $env:TMP = $script:destructiveSavedTmp
+    }
+}
 AfterAll {
     Get-Module TpmAutoUpdate.Core -All | Remove-Module -Force
 }
 
 Describe '1. Corrupt ZIP download' {
+    BeforeEach { Use-DestructivePrivateTemp }
+    AfterEach { Restore-DestructiveTemp }
     It 'leaves the original script intact, preserves the backup, and reports a clear error' {
         $root = New-DestructiveTestRoot
         try {
             $scriptPath = New-OldScript -Root $root
             $originalContent = Get-Content -LiteralPath $scriptPath -Raw
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $corruptBytes = [byte[]](1..64)
+            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -FixtureBytes $corruptBytes -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
-                [System.IO.File]::WriteAllBytes($OutFile, [byte[]](1..64 | ForEach-Object { Get-Random -Maximum 255 }))
-            }
+                [System.IO.File]::WriteAllBytes($OutFile, $corruptBytes)
+            }.GetNewClosure()
 
             $result.Error | Should -BeOfType ([System.Management.Automation.ErrorRecord])
             $result.Error.Exception.Message | Should -Match 'zip|central|end of'
 
             (Get-Content -LiteralPath $scriptPath -Raw) | Should -Be $originalContent
 
-            $backupRoot = Join-Path $root 'UpdateBackups'
-            $backupFiles = @(Get-ChildItem -LiteralPath $backupRoot -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
-            $backupFiles.Count | Should -Be 1
-            (Get-Content -LiteralPath $backupFiles[0].FullName -Raw) | Should -Be $originalContent
+            # The real orchestrator opens the package before it probes the target or makes a backup, so nothing is written at all.
+            $result.Error.Exception.Message | Should -Match 'could not be opened as a ZIP archive'
+            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
 
             # No leaked temp download or extraction artifacts.
             @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-*.zip' -ErrorAction SilentlyContinue).Count | Should -Be 0
@@ -200,26 +194,52 @@ Describe '1. Corrupt ZIP download' {
 }
 
 Describe '2. ZIP missing TeknoParrot-Manager.ps1' {
-    It 'leaves the original script intact, preserves the backup, and reports a clear error' {
+    BeforeEach { Use-DestructivePrivateTemp }
+    AfterEach { Restore-DestructiveTemp }
+    It 'leaves the original script intact, preserves the backup, and reports a clear error for a ZIP with no files' {
+        $root = New-DestructiveTestRoot
+        try {
+            $scriptPath = New-OldScript -Root $root
+            $originalContent = Get-Content -LiteralPath $scriptPath -Raw
+            # A valid ZIP that holds no files: only the 22-byte end-of-central-directory record.
+            $emptyZipBytes = [byte[]](@(0x50, 0x4B, 0x05, 0x06) + (@(0) * 18))
+
+            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -FixtureBytes $emptyZipBytes -WebRequestMock {
+                param($Uri, $Headers, $OutFile, $UseBasicParsing)
+                [System.IO.File]::WriteAllBytes($OutFile, $emptyZipBytes)
+            }.GetNewClosure()
+
+            $result.Error | Should -BeOfType ([System.Management.Automation.ErrorRecord])
+            $result.Error.Exception.Message | Should -Match 'does not contain TeknoParrot-Manager\.ps1'
+
+            (Get-Content -LiteralPath $scriptPath -Raw) | Should -Be $originalContent
+
+            # An empty package is refused before any backup is made.
+            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
+
+            @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-*.zip' -ErrorAction SilentlyContinue).Count | Should -Be 0
+        } finally {
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'refuses a ZIP that holds a different file instead of the script, before any backup is made' {
+        # Mutation: remove the one-file package check from the orchestrator -> a backup is made and the error is the extraction error instead of the refusal.
         $root = New-DestructiveTestRoot
         try {
             $scriptPath = New-OldScript -Root $root
             $originalContent = Get-Content -LiteralPath $scriptPath -Raw
             $wrongEntryBytes = New-ValidFixtureZipBytes -EntryName 'SomethingElse.ps1'
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -FixtureBytes $wrongEntryBytes -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
                 [System.IO.File]::WriteAllBytes($OutFile, $wrongEntryBytes)
             }.GetNewClosure()
 
             $result.Error | Should -BeOfType ([System.Management.Automation.ErrorRecord])
-            $result.Error.Exception.Message | Should -Match 'does not contain expected entry'
-
+            $result.Error.Exception.Message | Should -Match 'multi-file package'
             (Get-Content -LiteralPath $scriptPath -Raw) | Should -Be $originalContent
-
-            $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
-            $backupFiles.Count | Should -Be 1
-
+            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
             @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-*.zip' -ErrorAction SilentlyContinue).Count | Should -Be 0
         } finally {
             Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
@@ -228,6 +248,8 @@ Describe '2. ZIP missing TeknoParrot-Manager.ps1' {
 }
 
 Describe '3. Script fails content validation' {
+    BeforeEach { Use-DestructivePrivateTemp }
+    AfterEach { Restore-DestructiveTemp }
     It 'rejects an extracted script missing the ScriptVersion assignment and leaves the original intact' {
         $root = New-DestructiveTestRoot
         try {
@@ -235,7 +257,7 @@ Describe '3. Script fails content validation' {
             $originalContent = Get-Content -LiteralPath $scriptPath -Raw
             $badContentBytes = New-ValidFixtureZipBytes -EntryContent "# TeknoParrot Manager`nsome unrelated content, no version here`n"
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -FixtureBytes $badContentBytes -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
                 [System.IO.File]::WriteAllBytes($OutFile, $badContentBytes)
             }.GetNewClosure()
@@ -278,7 +300,7 @@ Describe '3. Script fails content validation' {
                 Remove-Item -LiteralPath $outerZipPath -Force -ErrorAction SilentlyContinue
             }
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -FixtureBytes $outerBytes -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
                 [System.IO.File]::WriteAllBytes($OutFile, $outerBytes)
             }.GetNewClosure()
@@ -295,6 +317,8 @@ Describe '3. Script fails content validation' {
 }
 
 Describe '4. Download interrupted / partial file' {
+    BeforeEach { Use-DestructivePrivateTemp }
+    AfterEach { Restore-DestructiveTemp }
     It 'treats a truncated zip as corrupt, leaves the original intact, and cleans up' {
         $root = New-DestructiveTestRoot
         try {
@@ -303,7 +327,7 @@ Describe '4. Download interrupted / partial file' {
             $fullBytes = New-ValidFixtureZipBytes
             $truncatedBytes = $fullBytes[0..([int]($fullBytes.Length / 2))]
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -FixtureBytes $truncatedBytes -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
                 [System.IO.File]::WriteAllBytes($OutFile, $truncatedBytes)
             }.GetNewClosure()
@@ -312,8 +336,9 @@ Describe '4. Download interrupted / partial file' {
 
             (Get-Content -LiteralPath $scriptPath -Raw) | Should -Be $originalContent
 
-            $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
-            $backupFiles.Count | Should -Be 1
+            # The real orchestrator opens the package before it probes the target or makes a backup, so nothing is written at all.
+            $result.Error.Exception.Message | Should -Match 'could not be opened as a ZIP archive'
+            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
 
             @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-*.zip' -ErrorAction SilentlyContinue).Count | Should -Be 0
         } finally {
@@ -323,11 +348,11 @@ Describe '4. Download interrupted / partial file' {
 }
 
 Describe '5. Read-only destination' {
+    BeforeEach { Use-DestructivePrivateTemp }
+    AfterEach { Restore-DestructiveTemp }
     It 'refuses the update with a clear error instead of letting Move-Item -Force clear ReadOnly' {
-        # Assert-TpmWritableTarget checks the target explicitly before any
-        # backup/download work happens, rather than relying on Move-Item
-        # -Force -- which was previously found (empirically) to silently
-        # clear the ReadOnly attribute and replace the file anyway.
+        # A verified download precedes the writable-target check; ReadOnly
+        # must still be refused rather than silently cleared by Move-Item.
         $root = New-DestructiveTestRoot
         try {
             $scriptPath = New-OldScript -Root $root
@@ -336,7 +361,7 @@ Describe '5. Read-only destination' {
 
             Set-ItemProperty -LiteralPath $scriptPath -Name IsReadOnly -Value $true
             try {
-                $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+                $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -FixtureBytes $validBytes -WebRequestMock {
                     param($Uri, $Headers, $OutFile, $UseBasicParsing)
                     [System.IO.File]::WriteAllBytes($OutFile, $validBytes)
                 }.GetNewClosure()
@@ -350,10 +375,9 @@ Describe '5. Read-only destination' {
                 Set-ItemProperty -LiteralPath $scriptPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
             }
 
-            # The check happens before backup/download, so neither should
-            # have been attempted at all.
+            # The writable-target check runs after download but before backup.
             Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
-            Assert-MockCalled -ModuleName TpmAutoUpdate.Core Invoke-TpmDownload -Times 0
+            Should -Invoke -ModuleName TpmAutoUpdate.Core Invoke-TpmDownload -Times 1 -Exactly
 
             @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-*.zip' -ErrorAction SilentlyContinue).Count | Should -Be 0
             @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-extracted-*.ps1' -ErrorAction SilentlyContinue).Count | Should -Be 0
@@ -365,20 +389,23 @@ Describe '5. Read-only destination' {
 }
 
 Describe '6. Backup creation failure' {
-    It 'aborts before any download when the backup cannot be created, leaving the original script untouched' {
+    BeforeEach { Use-DestructivePrivateTemp }
+    AfterEach { Restore-DestructiveTemp }
+    It 'aborts after verified download when the backup cannot be created, leaving the original script untouched' {
         $root = New-DestructiveTestRoot
         try {
             $scriptPath = New-OldScript -Root $root
             $originalContent = Get-Content -LiteralPath $scriptPath -Raw
+            $validBytes = New-ValidFixtureZipBytes
 
             Mock -ModuleName TpmAutoUpdate.Core New-Item {
                 throw 'Access to the path is denied (simulated backup failure).'
             } -ParameterFilter { $ItemType -eq 'Directory' }
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -FixtureBytes $validBytes -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
-                throw 'download should never be called when backup fails first.'
-            }
+                [System.IO.File]::WriteAllBytes($OutFile, $validBytes)
+            }.GetNewClosure()
 
             $result.Error | Should -BeOfType ([System.Management.Automation.ErrorRecord])
             $result.Error.Exception.Message | Should -Match 'denied'
@@ -393,6 +420,8 @@ Describe '6. Backup creation failure' {
 }
 
 Describe '7. Extraction failure (corrupted entry payload, valid central directory)' {
+    BeforeEach { Use-DestructivePrivateTemp }
+    AfterEach { Restore-DestructiveTemp }
     It 'reports the extraction failure, leaves the original intact, and preserves the backup' {
         $root = New-DestructiveTestRoot
         try {
@@ -400,7 +429,7 @@ Describe '7. Extraction failure (corrupted entry payload, valid central director
             $originalContent = Get-Content -LiteralPath $scriptPath -Raw
             $corruptedEntryBytes = Get-CorruptedEntryZipBytes
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -FixtureBytes $corruptedEntryBytes -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
                 [System.IO.File]::WriteAllBytes($OutFile, $corruptedEntryBytes)
             }.GetNewClosure()
@@ -420,6 +449,8 @@ Describe '7. Extraction failure (corrupted entry payload, valid central director
 }
 
 Describe '8. Replacement failure after successful backup (locked destination)' {
+    BeforeEach { Use-DestructivePrivateTemp }
+    AfterEach { Restore-DestructiveTemp }
     It 'preserves the backup and the (locked, unmodified) original when Move-Item cannot replace it' {
         $root = New-DestructiveTestRoot
         $lockHandle = $null
@@ -434,7 +465,7 @@ Describe '8. Replacement failure after successful backup (locked destination)' {
             # process holding the file open would look like in practice.
             $lockHandle = [System.IO.File]::Open($scriptPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -FixtureBytes $validBytes -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
                 [System.IO.File]::WriteAllBytes($OutFile, $validBytes)
             }.GetNewClosure()
@@ -456,6 +487,34 @@ Describe '8. Replacement failure after successful backup (locked destination)' {
             # leak in temp once Move-Item fails.
             @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-extracted-*.ps1' -ErrorAction SilentlyContinue).Count | Should -Be 0
             @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-*.zip' -ErrorAction SilentlyContinue).Count | Should -Be 0
+        } finally {
+            if ($lockHandle) { $lockHandle.Dispose() }
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe '8b. Replacement did not match the release' {
+    BeforeEach { Use-DestructivePrivateTemp }
+    AfterEach { Restore-DestructiveTemp }
+    It 'says the old version was put back only when it was, and points to the backup when it was not' -ForEach @(
+        @{ Locked = $false; Expected = 'previous version was restored' },
+        @{ Locked = $true;  Expected = 'could not be put back' }
+    ) {
+        $root = New-DestructiveTestRoot
+        $lockHandle = $null
+        try {
+            $scriptPath = New-OldScript -Root $root
+            $validBytes = New-ValidFixtureZipBytes
+            # The replacement step silently does nothing, so the installed file never matches the release.
+            Mock Move-Item { }
+            if ($Locked) { $lockHandle = [System.IO.File]::Open($scriptPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read) }
+            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -FixtureBytes $validBytes -WebRequestMock {
+                param($Uri, $Headers, $OutFile, $UseBasicParsing)
+                [System.IO.File]::WriteAllBytes($OutFile, $validBytes)
+            }.GetNewClosure()
+            $result.Error.Exception.Message | Should -Match $Expected
+            if ($Locked) { $result.Error.Exception.Message | Should -Match 'UpdateBackups' }
         } finally {
             if ($lockHandle) { $lockHandle.Dispose() }
             Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
@@ -486,6 +545,41 @@ Describe '9. Module-scope error-action regression guard' {
         # actually confirms the fix is in place.
         InModuleScope TpmAutoUpdate.Core {
             $ErrorActionPreference | Should -Be 'Stop'
+        }
+    }
+}
+
+Describe '18. A relative script path' {
+    BeforeEach { Use-DestructivePrivateTemp }
+    AfterEach { Restore-DestructiveTemp }
+    It 'stages the new copy beside the script, not in the process folder, so the replace stays one rename' {
+        # Who gets hurt: someone who runs the updater from another folder with Set-Location and a relative -ScriptPath. The new copy was
+        # extracted into the process folder (which Set-Location does not change), so the final move crossed folders or volumes.
+        $root = New-DestructiveTestRoot
+        $processFolder = Join-Path $root 'process-folder'
+        $scriptFolder = Join-Path $root 'script-folder'
+        [void][System.IO.Directory]::CreateDirectory($processFolder)
+        [void][System.IO.Directory]::CreateDirectory($scriptFolder)
+        $savedProcessFolder = [System.Environment]::CurrentDirectory
+        try {
+            $scriptPath = New-OldScript -Root $scriptFolder
+            $validBytes = New-ValidFixtureZipBytes
+            [System.Environment]::CurrentDirectory = $processFolder
+            Push-Location -LiteralPath $scriptFolder
+            try {
+                $result = Invoke-TpmApplyWithMockedRelease -ScriptPath '.\TeknoParrot-Manager.ps1' -FixtureBytes $validBytes -WebRequestMock {
+                    param($Uri, $Headers, $OutFile, $UseBasicParsing)
+                    [System.IO.File]::WriteAllBytes($OutFile, $validBytes)
+                }.GetNewClosure()
+            } finally { Pop-Location }
+            $result.Error | Should -BeNullOrEmpty
+            $extractedLine = @($result.StdOut | ForEach-Object { [string]$_ } | Where-Object { $_ -like '*Extracted      :*' })
+            $extractedLine.Count | Should -Be 1
+            $extractedLine[0] | Should -BeLike ('*' + $scriptFolder + '\tpm-update-extracted-*')
+            (Get-Content -LiteralPath $scriptPath -Raw) | Should -Match '0\.99\.99'
+        } finally {
+            [System.Environment]::CurrentDirectory = $savedProcessFolder
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }

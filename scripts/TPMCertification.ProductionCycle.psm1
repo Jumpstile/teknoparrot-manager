@@ -42,7 +42,6 @@ function Complete-TPMProductionCertificationCycleV1 {
         [void](Assert-TPMProductionIdentityGuardV1 -IdentityGuard $IdentityGuard -Stage 'AfterFinalProjection')
         return [pscustomobject]@{
             Eligibility=$eligibility
-            FinalOutcomeCandidateReport=(New-TPMFinalOutcomeCandidateReportV1 -Eligibility $eligibility)
             FinalOutcomeReport=(New-TPMFinalOutcomeReportV1 -FinalOutcome $finalOutcome -CertificationOnly)
             PublicationCandidate=$null
             Manifest=$null

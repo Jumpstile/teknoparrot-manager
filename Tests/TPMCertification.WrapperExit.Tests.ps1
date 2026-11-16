@@ -10,6 +10,9 @@ Describe 'certification launcher exit propagation' {
   $settingsSource=Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'
   $registrySource=Join-Path $repoRoot 'scripts\InjectionHunterDispositions.psd1'
   $sentinel=37
+  # The wrapper now refuses to start without the real-data opt-in. Everything here is a synthetic fixture with a fake harness, so the opt-in is set for this block only.
+  $script:wrapperExitSavedOptIn=$env:TPM_REAL_DATA_TESTS
+  $env:TPM_REAL_DATA_TESTS='1'
   $fakeRepo=Join-Path $TestDrive 'fake-repo'
   $fakeScripts=Join-Path $fakeRepo 'scripts'
   $fakeRoot=Join-Path $TestDrive 'fake-install'
@@ -116,6 +119,10 @@ exit $ExitCode
   }
  }
 
+ AfterAll {
+  $env:TPM_REAL_DATA_TESTS=$script:wrapperExitSavedOptIn
+ }
+
  It 'returns the fake harness sentinel through the direct pwsh path' {
   Set-FakeHarnessExit
   & pwsh -NoProfile -NonInteractive -File (Join-Path $fakeScripts 'Run-TPM-Tests.ps1') -RepoPath $fakeRepo -TeknoParrotRoot $fakeRoot -NoPwshRelaunch
@@ -126,6 +133,33 @@ exit $ExitCode
   Set-FakeHarnessExit
   & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $fakeScripts 'Run-TPM-Tests.ps1') -RepoPath $fakeRepo -TeknoParrotRoot $fakeRoot
   $LASTEXITCODE|Should -Be $sentinel
+ }
+
+ It 'keeps one report folder and shows the final status through the Windows PowerShell relaunch path' {
+  # Mutation: let the relaunched child start its own report folder -> the run is split over two folders and its live status cannot be followed.
+  @'
+param(
+ [string]$RepoPath,
+ [Parameter(Mandatory=$true)][string]$TeknoParrotRoot,
+ [string]$HarnessRoot,
+ [string]$ReportDirectory,
+ [string]$OperatorStatusPath,
+ [switch]$RunUnattendedTPM,
+ [string]$VerbosityLevel,
+ [int]$PesterRegressionTimeoutSeconds
+)
+Add-Content -LiteralPath $OperatorStatusPath -Value '[1/8] fake step -- running' -Encoding utf8
+Add-Content -LiteralPath $OperatorStatusPath -Value 'FINAL STATUS: FAKE PASS' -Encoding utf8
+exit 0
+'@|Set-Content -LiteralPath (Join-Path $fakeScripts 'Invoke-TPM-RealInstanceSmoke.ps1') -Encoding ascii
+  $reports=Join-Path (Split-Path $fakeRepo -Parent) 'TPM-TestHarness\Reports'
+  $before=@(Get-ChildItem -LiteralPath $reports -Directory -ErrorAction SilentlyContinue).Count
+  $runner=Join-Path $fakeScripts 'Run-TPM-Tests.ps1'
+  $run=Invoke-CapturedPowerShell -FilePath 'powershell.exe' -Name 'relay-status' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$runner,'-RepoPath',$fakeRepo,'-TeknoParrotRoot',$fakeRoot)
+  $run.ExitCode|Should -Be 0
+  $run.StdOut|Should -Match 'FINAL STATUS: FAKE PASS'
+  ([regex]::Matches($run.StdOut,'\[1/8\] fake step')).Count|Should -BeLessOrEqual 1
+  @(Get-ChildItem -LiteralPath $reports -Directory).Count|Should -Be ($before+1)
  }
 
  It 'returns saved RUN_EXIT after batch presentation and cleanup' {
@@ -141,11 +175,13 @@ exit $ExitCode
   $return|Should -BeGreaterThan $popd
 
   $inputFile=Join-Path $TestDrive 'batch-input.txt'
-  [IO.File]::WriteAllText($inputFile,"$fakeRoot`r`n`r`n")
+  # FIX107: the launcher has no default folder and no prompt; the folder is its second argument. The input file only answers the final pause.
+  [IO.File]::WriteAllText($inputFile,"`r`n")
   $quotedBatch='"'+(Join-Path $fakeScripts 'Run-TPM-Certification-Suite.bat')+'"'
   $quotedRepo='"'+$fakeRepo+'"'
+  $quotedRoot='"'+$fakeRoot+'"'
   $quotedInput='"'+$inputFile+'"'
-  & cmd.exe /d /c "$quotedBatch $quotedRepo < $quotedInput"
+  & cmd.exe /d /c "$quotedBatch $quotedRepo $quotedRoot < $quotedInput"
   $LASTEXITCODE|Should -Be $sentinel
  }
 
@@ -167,7 +203,7 @@ exit $ExitCode
   $repoLiteral=ConvertTo-PowerShellLiteral -Value $fakeRepo
   $rootLiteral=ConvertTo-PowerShellLiteral -Value $fakeRoot
   $command="function Get-Command { [CmdletBinding()]param([Parameter(Position=0)]`$Name) if(`$Name -ceq 'pwsh'){return}; Microsoft.PowerShell.Core\Get-Command @PSBoundParameters }; & $runnerLiteral -RepoPath $repoLiteral -TeknoParrotRoot $rootLiteral"
-  $result=Invoke-CapturedPowerShell -FilePath 'powershell.exe' -Name 'missing-pwsh' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',$command)
+  $result=Invoke-CapturedPowerShell -FilePath 'powershell.exe' -Name 'missing-pwsh' -ArgumentList @('-NoProfile','-NonInteractive','-Command',$command)
   $result.ExitCode|Should -Not -Be 0
   ($result.StdOut+"`n"+$result.StdErr)|Should -Match 'PowerShell 7 \(pwsh\) is required'
  }
@@ -181,16 +217,17 @@ exit $ExitCode
   Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\where.exe') -Destination (Join-Path $fakeBin 'explorer.exe')
 
   $inputFile=Join-Path $TestDrive 'batch-report-input.txt'
-  [IO.File]::WriteAllText($inputFile,"$fakeRoot`r`n`r`n")
+  [IO.File]::WriteAllText($inputFile,"`r`n")
   $batchPath='"'+(Join-Path $fakeScripts 'Run-TPM-Certification-Suite.bat')+'"'
   $repoPath='"'+$fakeRepo+'"'
+  $rootPath='"'+$fakeRoot+'"'
   $inputPath='"'+$inputFile+'"'
   $savedPath=$env:PATH
   $savedPresentation=$env:TPM_PRESENT_RESULTS
   try{
    $env:PATH=$fakeBin+';'+$savedPath
    $env:TPM_PRESENT_RESULTS='1'
-   $output=@(& cmd.exe /d /c "$batchPath $repoPath < $inputPath" 2>&1)
+   $output=@(& cmd.exe /d /c "$batchPath $repoPath $rootPath < $inputPath" 2>&1)
    $exitCode=$LASTEXITCODE
   }finally{
    $env:PATH=$savedPath

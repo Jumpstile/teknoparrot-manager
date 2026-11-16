@@ -23,7 +23,11 @@ BeforeAll {
     $functionAsts = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-conflict-resolution-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
+    $progressModuleDirectory = Join-Path $TestDrive 'scripts'
+    [void][IO.Directory]::CreateDirectory($progressModuleDirectory)
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TpmProgress.psm1') -Destination (Join-Path $progressModuleDirectory 'TpmProgress.psm1') -Force
     . $extractedFunctionsPath
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
     $script:PostgresRecoveryStatus = $null
@@ -73,7 +77,7 @@ Describe "Virtual Beta Tester: registered-but-moved recovery via Repair-GamePath
         Set-Content -LiteralPath (Join-Path $fx.UserProfilesDir 'ALIENS.xml') -Value $staleProfile -Encoding utf8
 
         $profileIndex = @{ 'aliens.exe' = @('ALIENS') }
-        $reports = Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false
+        $reports = (Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false).Reports
 
         $reports.Count | Should -Be 1
         $reports[0].Status | Should -Be 'fixed'
@@ -103,7 +107,7 @@ Describe "Virtual Beta Tester: registered-but-moved recovery via Repair-GamePath
         $originalContent = Get-Content -LiteralPath (Join-Path $fx.UserProfilesDir 'AMBIGUOUS.xml') -Raw
 
         $profileIndex = @{ 'game.exe' = @('AMBIGUOUS') }
-        $reports = Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false
+        $reports = (Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false).Reports
 
         $reports.Count | Should -Be 1
         $reports[0].Status | Should -Be 'ambiguous' -Because "two candidates on disk for the same exe name must never be auto-resolved by guessing"
@@ -130,7 +134,7 @@ Describe "Virtual Beta Tester: registered-but-moved recovery via Repair-GamePath
         # shared.exe maps to two different profile codes in the library --
         # inherently ambiguous regardless of what's on disk.
         $profileIndex = @{ 'shared.exe' = @('SHAREDA', 'SHAREDB') }
-        $reports = Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false
+        $reports = (Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false).Reports
 
         $reports.Count | Should -Be 1
         $reports[0].Status | Should -Be 'ambiguous'
@@ -154,7 +158,7 @@ Describe "Virtual Beta Tester: registered-but-moved recovery via Repair-GamePath
         $originalContent = Get-Content -LiteralPath (Join-Path $fx.UserProfilesDir 'GONE.xml') -Raw
 
         $profileIndex = @{ 'gone.exe' = @('GONE') }
-        $reports = Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false
+        $reports = (Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false).Reports
 
         $reports.Count | Should -Be 1
         $reports[0].Status | Should -Be 'not-found' -Because "a genuinely missing exe must surface as Action Required, never a fabricated or guessed path"
@@ -181,7 +185,7 @@ Describe "Virtual Beta Tester: registered-but-moved recovery via Repair-GamePath
         Start-Sleep -Milliseconds 50
 
         $profileIndex = @{ 'valid.exe' = @('VALID') }
-        $reports = Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false
+        $reports = (Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $false).Reports
 
         $reports.Count | Should -Be 0 -Because "a profile whose GamePath already resolves must never even be reported, let alone rewritten"
         (Get-Item -LiteralPath $profilePath).LastWriteTimeUtc | Should -Be $originalWriteTime -Because "the file must not be touched at all -- proves the valid-path check happens before any write attempt"
@@ -206,10 +210,10 @@ Describe "Virtual Beta Tester: registered-but-moved recovery via Repair-GamePath
         $originalContent = Get-Content -LiteralPath $profilePath -Raw
 
         $profileIndex = @{ 'dryrun.exe' = @('DRYRUN') }
-        $reports = Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $true
+        $reports = (Repair-GamePaths -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex $profileIndex -DryRun $true).Reports
 
         $reports.Count | Should -Be 1
-        $reports[0].Status | Should -Be 'fixed' -Because "DryRun still reports what WOULD happen, so a preview is meaningful"
+        $reports[0].Status | Should -Be 'candidate' -Because "DryRun reports a candidate without writing it"
         (Get-Content -LiteralPath $profilePath -Raw) | Should -Be $originalContent -Because "DryRun must never actually write the fix to disk"
     }
 
@@ -228,11 +232,13 @@ Describe "Virtual Beta Tester: manual registration candidate choice" -Tag 'TVD-H
         Set-Content -LiteralPath (Join-Path $fx.GameProfilesDir 'PROFILEA.xml') -Value $template -Encoding utf8
         Set-Content -LiteralPath (Join-Path $fx.GameProfilesDir 'PROFILEB.xml') -Value $template -Encoding utf8
         $manual = @{ 'Shared Game' = @{ Exe = $exePath; Profiles = 'PROFILEA, PROFILEB' } }
-        $result = [pscustomobject]@{ Registered = New-Object System.Collections.ArrayList }
+        $result = Register-Games -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex @{} -gameProfilesDir $fx.GameProfilesDir -GameFolders @('missing-fixture-folder')
         Mock Read-Host { return '2' }
 
-        Invoke-ManualRegistrationChoices -ManualRegData $manual -UserProfilesDir $fx.UserProfilesDir `
+        $result = Invoke-ManualRegistrationChoices -ManualRegData $manual -UserProfilesDir $fx.UserProfilesDir `
             -GameProfilesDir $fx.GameProfilesDir -InstallFolder $fx.InstallFolder -Result $result
+        $result.Outcome | Should -BeExactly 'SUCCEEDED'
+        $result.Registered.Code | Should -Contain 'PROFILEB'
 
         (Test-Path -LiteralPath (Join-Path $fx.UserProfilesDir 'PROFILEB.xml')) | Should -Be $true
         (Test-Path -LiteralPath (Join-Path $fx.UserProfilesDir 'PROFILEA.xml')) | Should -Be $false
@@ -247,11 +253,12 @@ Describe "Virtual Beta Tester: manual registration candidate choice" -Tag 'TVD-H
         $exePath = Join-Path $gameFolder 'shared.exe'
         New-Item -ItemType File -Path $exePath -Force | Out-Null
         $manual = @{ 'Shared Game' = @{ Exe = $exePath; Profiles = 'PROFILEA, PROFILEB' } }
-        $result = [pscustomobject]@{ Registered = New-Object System.Collections.ArrayList }
+        $result = Register-Games -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex @{} -gameProfilesDir $fx.GameProfilesDir -GameFolders @('missing-fixture-folder')
         Mock Read-Host { return '' }
 
-        Invoke-ManualRegistrationChoices -ManualRegData $manual -UserProfilesDir $fx.UserProfilesDir `
+        $result = Invoke-ManualRegistrationChoices -ManualRegData $manual -UserProfilesDir $fx.UserProfilesDir `
             -GameProfilesDir $fx.GameProfilesDir -InstallFolder $fx.InstallFolder -Result $result
+        $result.Outcome | Should -BeExactly 'ACTION_REQUIRED'
 
         $manual.Count | Should -Be 1
         $result.Registered.Count | Should -Be 0

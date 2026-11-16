@@ -10,15 +10,13 @@
 #
 # This fixture combines, in one $TestDrive tree:
 #   - some games "already extracted" (a real folder with an exe)
-#   - some missing/incomplete profile data (a GameProfile XML missing
-#     required top-level elements)
 #   - a duplicate/oddly-named folder for the same title
 #   - an alternate PCSX2 folder naming (PCSX2x6 instead of pcsx2x6)
 #   - legacy-root and canonical-subfolder crosshair files coexisting
 #     (the exact issue #79 scenario -- both present at once)
 #
 # All functions exercised here are read-only scans/checks (Get-GameFiles,
-# Resolve-Pcsx2Directory, Get-GameProfileSchemaDrift) -- the assertion is
+# Resolve-Pcsx2Directory) -- the assertion is
 # that they run to completion without throwing and produce sane output
 # against a messy tree, and that nothing under $TestDrive changes as a
 # side effect of merely inspecting it.
@@ -46,18 +44,6 @@ BeforeAll {
     . $resolvePcsx2Path
 
     $script:logPath = Join-Path $TestDrive "vbt-messy.log"
-    $script:KnownGameProfileTopLevel = @(
-        'GamePath','GamePath2','TestMenuParameter','TestMenuIsExecutable',
-        'ExtraParameters','TestMenuExtraParameters','EmulationProfile',
-        'GameProfileRevision','HasSeparateTestMode','ExecutableName',
-        'ExecutableName2','HasTwoExecutables','LaunchSecondExecutableFirst',
-        'HasTpoSupport','EmulatorType','Is64Bit','ValidMd5','ConfigValues',
-        'GameName','GameGenreInternal','IconName','HasModeForSquare',
-        'RequiresAdmin','InvokeFullscreenOnStartup','LaunchedFromUsb',
-        'CamberWindowState'
-    )
-    $script:RequiredGameProfileTopLevel = @('EmulationProfile','ConfigValues')
-    $script:KnownFieldTypes = @('Bool','Dropdown','Text','Slider')
 
     function New-MessyTeknoParrotFixture {
         $root = Join-Path $TestDrive ("messy-install-" + [guid]::NewGuid().ToString('N'))
@@ -82,28 +68,6 @@ BeforeAll {
         $incomplete = Join-Path $installFolder 'Time Crisis 4 (incomplete)'
         New-Item -ItemType Directory -Path $incomplete -Force | Out-Null
         New-Item -ItemType File -Path (Join-Path $incomplete 'readme.txt') -Force | Out-Null
-
-        # GameProfiles: one complete, one missing required top-level elements
-        # (a real upstream schema-drift scenario, not a crash-inducing
-        # malformed XML).
-        $gameProfilesDir = Join-Path $root 'GameProfiles'
-        New-Item -ItemType Directory -Path $gameProfilesDir -Force | Out-Null
-        $completeXml = [xml]@'
-<?xml version="1.0" encoding="utf-8"?>
-<GameProfile>
-  <EmulationProfile>RawThrills</EmulationProfile>
-  <ConfigValues></ConfigValues>
-</GameProfile>
-'@
-        $completeXml.Save((Join-Path $gameProfilesDir 'ALIENS.xml'))
-
-        $incompleteXml = [xml]@'
-<?xml version="1.0" encoding="utf-8"?>
-<GameProfile>
-  <EmulationProfile>RawThrills</EmulationProfile>
-</GameProfile>
-'@
-        $incompleteXml.Save((Join-Path $gameProfilesDir 'TIMECRS4.xml'))
 
         # Alternate PCSX2 folder naming -- "PCSX2x6" instead of the more
         # common lowercase "pcsx2x6".
@@ -139,9 +103,6 @@ BeforeAll {
         return [pscustomobject]@{
             Root              = $root
             InstallFolder     = $installFolder
-            GameProfilesDir   = $gameProfilesDir
-            CompleteXmlPath   = Join-Path $gameProfilesDir 'ALIENS.xml'
-            IncompleteXmlPath = Join-Path $gameProfilesDir 'TIMECRS4.xml'
             Pcsx2Dir          = $pcsx2Dir
             EmptyFolder       = $emptyFolder
             RetroBatFolder    = $retroBatFolder
@@ -174,20 +135,6 @@ Describe "Virtual Beta Tester: real-world messy environment simulation (issue #8
         @($wholeLibraryResult | Where-Object { $_.Name -eq 'ALIENS.exe' }).Count | Should -Be 2
     }
 
-    It "flags the incomplete GameProfile's missing required elements without crashing, and does not flag the complete one" {
-        $fixture = New-MessyTeknoParrotFixture
-
-        $completeDoc = [xml](Get-Content -LiteralPath $fixture.CompleteXmlPath -Raw)
-        $incompleteDoc = [xml](Get-Content -LiteralPath $fixture.IncompleteXmlPath -Raw)
-
-        { $script:completeDrift = Get-GameProfileSchemaDrift -Doc $completeDoc } | Should -Not -Throw
-        { $script:incompleteDrift = Get-GameProfileSchemaDrift -Doc $incompleteDoc } | Should -Not -Throw
-
-        $script:completeDrift.HasDrift | Should -Be $false
-        $script:incompleteDrift.HasDrift | Should -Be $true
-        $script:incompleteDrift.MissingRequired | Should -Contain 'ConfigValues'
-    }
-
     It "resolves the alternate-cased PCSX2x6 folder name without requiring the exact lowercase 'pcsx2x6'" {
         $fixture = New-MessyTeknoParrotFixture
 
@@ -210,8 +157,6 @@ Describe "Virtual Beta Tester: real-world messy environment simulation (issue #8
 
         Get-GameFiles -folder $fixture.InstallFolder | Out-Null
         Resolve-Pcsx2Directory -TeknoParrotRoot $fixture.Root | Out-Null
-        Get-GameProfileSchemaDrift -Doc ([xml](Get-Content -LiteralPath $fixture.CompleteXmlPath -Raw)) | Out-Null
-        Get-GameProfileSchemaDrift -Doc ([xml](Get-Content -LiteralPath $fixture.IncompleteXmlPath -Raw)) | Out-Null
 
         $after = Get-ChildItem -LiteralPath $fixture.Root -Recurse | Select-Object -ExpandProperty FullName | Sort-Object
         Compare-Object $before $after | Should -BeNullOrEmpty -Because "inspecting a messy library must never itself change it"

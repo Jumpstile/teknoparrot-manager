@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Jumpstile/teknoparrot-manager/contracts/_schema/TpmReleaseCatalogSnapshotV1.schema.json",
+  "title": "TPM Release Catalog Snapshot V1",
+  "description": "Immutable provenance and content manifest for a captured TeknoParrotUI catalog asset.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["SnapshotSchemaVersion", "SnapshotId", "CapturedAtUtc", "SnapshotKind", "Release", "SourceProof", "CatalogCounts", "CatalogRoots", "SemanticRootDigests", "Files", "SemanticComparison", "DeltaManifest", "ReleaseEvidence", "MutabilityRecord", "ParserVersion", "ProvenanceDiscrepancy"],
+  "properties": {
+    "SnapshotSchemaVersion": { "const": "1.0.0" },
+    "SnapshotId": { "type": "string", "pattern": "^TPM-GAME-SUPPORT-RELEASE-1\\.0\\.0\\.2128-ASSET-[0-9A-F]{8}$" },
+    "CapturedAtUtc": { "type": "string", "minLength": 1 },
+    "SnapshotKind": { "const": "TPM_CURRENT_RELEASE_CATALOG" },
+    "Release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["Version", "Tag", "ReleaseId", "AssetName", "AssetUrl", "AssetSize", "AssetSha256", "AssetUpdatedAt"],
+      "properties": {
+        "Version": { "const": "1.0.0.2128" },
+        "Tag": { "const": "TeknoParrotUI" },
+        "ReleaseId": { "const": 16543041 },
+        "AssetName": { "const": "TeknoParrotUi.zip" },
+        "AssetUrl": { "format": "uri", "type": "string" },
+        "AssetSize": { "const": 153159505 },
+        "AssetSha256": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
+        "AssetUpdatedAt": { "type": "string", "minLength": 1 }
+      }
+    },
+    "SourceProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["Repository", "Commit", "Tree", "Role"],
+      "properties": {
+        "Repository": { "const": "teknogods/TeknoParrotUI" },
+        "Commit": { "const": "dc998e374608abbda373bb3c236db5b26b5afca7" },
+        "Tree": { "const": "7266c43c829bfd2147247b2fae0167ec44116fc5" },
+        "Role": { "const": "Immutable semantic content proof; not official release provenance" }
+      }
+    },
+    "CatalogCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["GameProfiles", "GameSetup", "Metadata", "TotalFiles"],
+      "properties": {
+        "GameProfiles": { "const": 925 },
+        "GameSetup": { "const": 383 },
+        "Metadata": { "const": 923 },
+        "TotalFiles": { "const": 2231 }
+      }
+    },
+    "CatalogRoots": { "const": ["GameProfiles", "GameSetup", "Metadata"] },
+    "SemanticRootDigests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["GameProfiles", "GameSetup", "Metadata"],
+      "properties": {
+        "GameProfiles": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
+        "GameSetup": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
+        "Metadata": { "pattern": "^[0-9a-f]{64}$", "type": "string" }
+      }
+    },
+    "Files": {
+      "type": "array",
+      "minItems": 2231,
+      "maxItems": 2231,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["RelativePath", "Root", "FileName", "Length", "Sha256", "SemanticSha256"],
+        "properties": {
+          "RelativePath": { "type": "string", "pattern": "^(GameProfiles|GameSetup|Metadata)/[^/]+\\.(xml|json)$" },
+          "Root": { "enum": ["GameProfiles", "GameSetup", "Metadata"] },
+          "FileName": { "type": "string", "minLength": 1 },
+          "ProfileCode": { "type": ["string", "null"] },
+          "Length": { "type": "integer", "minimum": 0 },
+          "Sha256": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
+          "SemanticSha256": { "pattern": "^[0-9a-f]{64}$", "type": "string" }
+        }
+      }
+    },
+    "SemanticComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["Valid", "ComparedFileCount", "MismatchCount", "ProofCommit"],
+      "properties": {
+        "Valid": { "const": true },
+        "ComparedFileCount": { "const": 2231 },
+        "MismatchCount": { "const": 0 },
+        "ProofCommit": { "const": "dc998e374608abbda373bb3c236db5b26b5afca7" }
+      }
+    },
+    "DeltaManifest": { "const": "delta.json" },
+    "ReleaseEvidence": { "const": "release-evidence.json" },
+    "MutabilityRecord": { "const": "asset-mutability.json" },
+    "ParserVersion": { "const": "TPM-RELEASE-SNAPSHOT-PARSER-1" },
+    "ProvenanceDiscrepancy": { "type": "string", "minLength": 1 }
+  }
+}

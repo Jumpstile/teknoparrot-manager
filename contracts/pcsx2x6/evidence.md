@@ -63,9 +63,10 @@ return si.GetStringValue(GetConfigSection(port).c_str(), real_key.c_str(), defau
 ```
 For the GunCon2 device (`TypeName()` returns `"guncon2"`), the real key is
 `guncon2_cursor_path` under section `[USB1]` or `[USB2]` -- not
-`[USB Port N guncon2]` / `cursor_path`, which is what TPM's existing
-`Set-Pcsx2CursorPaths` (TeknoParrot-Manager.ps1) and the certification
-harness's ini parser both assumed.
+`[USB Port N guncon2]` / `cursor_path`, which an earlier TPM write routine (since
+removed) and the certification smoke script's ini parser (since corrected) assumed.
+TPM does not write the cursor path; it only reads `guncon2_cursor_path`
+(`Get-Pcsx2CursorPathReport`; the smoke script reads the same keys).
 
 ### ev-guncon2-clear: `cursor_path` cleared in JVS lightgun mode
 File: `pcsx2/USB/usb-lightgun/guncon2.cpp`, `GunCon2Device::UpdateSettings()`

@@ -10,7 +10,7 @@ function New-TestFacts([string]$Root,[string]$Mode='Smoke'){
   $hash='a'*64;$repo=[IO.Path]::GetFullPath((Join-Path $Root 'repo'));$report=[IO.Path]::GetFullPath((Join-Path $Root 'report'));$backup=[IO.Path]::GetFullPath((Join-Path $Root 'backup'))
   @(
    [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath=$repo;RepositoryAvailable=$true;RepositoryClean=$true;GitStatus='(clean)';CertificationIdentity=(New-TestCertificationIdentity)}}
-   [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=$true;Total=2;Passed=2;Failed=0;Skipped=0;NotRun=0;Engine='Pester 5.7.1 / pwsh 7.6.3';SuiteSha256=$hash}}
+   [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=$true;Total=2;Passed=2;Failed=0;Skipped=0;NotRun=0;FailedContainers=0;Engine='Pester 5.7.1 / pwsh 7.6.3';SuiteSha256=$hash}}
    [ordered]@{Identifier='Static Analysis';Applicable=$true;Data=[ordered]@{Parser=@([ordered]@{Identifier='WindowsPowerShell51';Executed=$true;ErrorCount=0;ToolVersion='5.1'},[ordered]@{Identifier='Pwsh';Executed=$true;ErrorCount=0;ToolVersion='7.6.3'});Encoding=[ordered]@{Executed=$true;NonAsciiByteCount=0;Files=@('TeknoParrot-Manager.ps1')};PSScriptAnalyzer=[ordered]@{Executed=$true;FindingCount=0;ToolVersion='1.24.0'};InjectionHunter=[ordered]@{Executed=$true;FindingCount=0;UnresolvedFindingCount=0;ToolVersion='1.0.0';Dispositions=@()}}}
    [ordered]@{Identifier='Real Install Health';Applicable=$true;Data=[ordered]@{ReportPath=(Join-Path $report 'InstallHealth.json');LoadState='Loaded';LoadError=$null;Checks=@([ordered]@{Name='TeknoParrotUi.exe exists';Passed=$true},[ordered]@{Name='GameProfiles folder exists';Passed=$true},[ordered]@{Name='UserProfiles folder exists';Passed=$true})}}
    [ordered]@{Identifier='Backups';Applicable=$true;Data=[ordered]@{UserProfilesBackupCreated=$true;UserProfilesBackupPath=$backup;UserProfilesBackupVerified=$true;UserProfilesBackupSha256=$hash;GameProfilesBackupCreated=$false;GameProfilesBackupPath=$null;GameProfilesBackupVerified=$false;GameProfilesBackupSha256=$null;BackupVerificationExecuted=$true}}
@@ -195,7 +195,7 @@ Describe 'ADR-0155 Phase 3 eligibility payload derivation' {
   $nineEvidence=@(0..8|ForEach-Object{[ordered]@{Identifier="e$_";Status='Captured';FailureCode=$null;FailureMessage=$null}})
   $facts=@(
    [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryAvailable=$true;RepositoryClean=$true;CertificationIdentity=(New-TestCertificationIdentity)}}
-   [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=$true;Total=1;Passed=0;Failed=1;Skipped=0;NotRun=0}}
+   [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=$true;Total=1;Passed=0;Failed=1;Skipped=0;NotRun=0;FailedContainers=0}}
    [ordered]@{Identifier='Backups';Applicable=$true;Data=[ordered]@{UserProfilesBackupCreated=$true;GameProfilesBackupCreated=$false;BackupVerificationExecuted=$true;UserProfilesBackupVerified=$true;GameProfilesBackupVerified=$false}}
   )
   $payload=Get-TPMEligibilityPayloadV1 -RunIdentity 'x' -Mode Smoke -Facts $facts -Evidence $nineEvidence -FactSetSha256 ('a'*64) -EvidenceSetSha256 ('a'*64) -SealedRunSha256 ('a'*64)
@@ -208,35 +208,5 @@ Describe 'ADR-0155 Phase 3 eligibility payload derivation' {
   $facts=@([ordered]@{Identifier='Repository';Applicable=$false;Data=[ordered]@{}})
   $nineEvidence=@(0..8|ForEach-Object{[ordered]@{Identifier="e$_";Status='Captured';FailureCode=$null;FailureMessage=$null}})
   {Get-TPMEligibilityPayloadV1 -RunIdentity 'x' -Mode Smoke -Facts $facts -Evidence $nineEvidence -FactSetSha256 ('a'*64) -EvidenceSetSha256 ('a'*64) -SealedRunSha256 ('a'*64)}|Should -Throw '*ApplicableCount*'
- }
-}
-
-Describe 'ADR-0155 Phase 1/2/3 module coexistence' {
- It 'keeps all three workflow-authority factories independently discoverable regardless of import order' {
-  $authorityModule=Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Authority.psm1'
-  $shadowModule=Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Shadow.psm1'
-  $productionModule=Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Production.psm1'
-  $engine=if($PSVersionTable.PSEdition-ceq'Core'){(Get-Command pwsh).Source}else{(Get-Command powershell).Source}
-  $orders=@(
-   ,@($authorityModule,$shadowModule,$productionModule)
-   ,@($productionModule,$shadowModule,$authorityModule)
-   ,@($shadowModule,$productionModule,$authorityModule)
-  )
-  foreach($order in $orders){
-   $probe=Join-Path $TestDrive (([guid]::NewGuid().ToString('N'))+'.ps1')
-   $lines=New-Object Collections.Generic.List[string]
-   foreach($module in $order){[void]$lines.Add("Import-Module '$module' -Force")}
-   [void]$lines.Add('$result = [ordered]@{}')
-   [void]$lines.Add('$result.AuthorityModule = (Get-Command New-TPMWorkflowAuthorityV1).ModuleName')
-   [void]$lines.Add('$result.ShadowModule = (Get-Command New-TPMShadowWorkflowAuthorityV1).ModuleName')
-   [void]$lines.Add('$result.ProductionModule = (Get-Command New-TPMProductionWorkflowAuthorityV1).ModuleName')
-   [void]$lines.Add('$result | ConvertTo-Json -Compress')
-   [IO.File]::WriteAllText($probe,($lines.ToArray()-join"`n"),(New-Object Text.UTF8Encoding $false))
-   $json=& $engine -NoProfile -File $probe
-   $result=$json|ConvertFrom-Json
-   $result.AuthorityModule|Should -Be 'TPMCertification.Authority'
-   $result.ShadowModule|Should -Be 'TPMCertification.Shadow'
-   $result.ProductionModule|Should -Be 'TPMCertification.Production'
-  }
  }
 }

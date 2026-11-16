@@ -24,15 +24,15 @@ The roadmap follows the rule:
 > Build the platform foundations first. Add intelligence second. Add automation last.
 
 No item in this document authorizes product code, UI implementation, tests,
-issue creation or updates, updater work, release-package changes, or an RC7
+issue creation or updates, updater work, release-package changes, or an RC8
 or Version 1.0 scope change.
 
 ## TPM 1.0 completion boundary
 
 The current commitment is to complete and support the existing TPM 1.0 release
-path. v1.0 RC7 is the current published release; RC8 is the candidate being
-prepared and is not published; v1.0 RC6 is the previous published release
-(historical), and final Version 1.0 remains unpublished.
+path. v1.0 RC7 is the latest published release today; v1.0 RC8.1
+is the interim tester build about to ship (RC8 was a tester build and was never published; the final
+v1.0 RC9 comes later).
 Release safety,
 certification, and any remaining work required for the existing feature set
 take precedence over every phase in this document.
@@ -40,7 +40,7 @@ take precedence over every phase in this document.
 TPM 1.0 is the boundary between the current product and the post-1.0
 evolution roadmap. No post-1.0 capability should enter implementation until:
 
-1. The RC7 stabilization, validation, and release-safety path is complete.
+1. The RC8 stabilization, validation, and release-safety path is complete.
 2. The TPM 1.0 release decision is explicitly authorized.
 3. The current baseline is recorded so future work can be compared against a
    known release state.
@@ -48,7 +48,7 @@ evolution roadmap. No post-1.0 capability should enter implementation until:
    acceptance criteria, and review path.
 
 
-This boundary does not redefine the RC7 release criteria and does not authorize
+This boundary does not redefine the RC8 release criteria and does not authorize
 new features during the active freeze.
 
 ## Version 1.0 backlog before final release
@@ -120,7 +120,7 @@ Each boundary must eventually define its owner, inputs, outputs, dependencies,
 failure states, and verification responsibilities. Shared behavior belongs
 behind stable contracts rather than being reimplemented at each call site.
 
-Modularization is not permission to rewrite the product during the RC7-era
+Modularization is not permission to rewrite the product during the RC8-era
 completion path. The work begins only after the TPM 1.0 completion boundary and
 is staged so every intermediate state remains understandable and recoverable.
 
@@ -161,7 +161,7 @@ The plugin must not bypass those gates or silently mutate LaunchBox, Big Box,
 TeknoParrot, or TPM-owned state.
 
 This roadmap entry is planning guidance only. It does not authorize merging
-PR #245, changing RC7 or final Version 1.0 scope, changing a package or tag,
+PR #245, changing RC8 or final Version 1.0 scope, changing a package or tag,
 publishing a release, or publishing wiki changes.
 
 ### Glanceable first
@@ -328,7 +328,7 @@ validation establishes otherwise.
 export](https://github.com/Jumpstile/teknoparrot-manager/issues/267) remains a
 post-1.0 design/research item. Any LEDBlinky integration depends on identity
 mapping research and front-end-specific behavior across the supported browsing
-and launch ecosystems. It is not RC7 or final Version 1.0 release scope.
+and launch ecosystems. It is not RC8 or final Version 1.0 release scope.
 
 ## Phase 5 -- Deterministic configuration profiles
 
@@ -471,7 +471,7 @@ work is a planning group for that gap. It is not an RC8 scope expansion.
 
 ### #200 controls and readiness design record (post-1.0 only)
 
-RC8 does not implement broad automatic controller or context-aware mapping.
+RC8.1 does not implement broad automatic controller or context-aware mapping.
 The standing simplicity rule remains: the eventual product should configure
 each game automatically, not make a beginner understand TeknoParrot mapping
 internals or manually reproduce raw mapping decisions.
@@ -495,7 +495,7 @@ Before any #200 implementation is authorized, the post-1.0 design must define:
   become TPM authority without independent source, version, ownership, and
   compatibility validation.
 
-RC8 user-facing status must remain beginner-readable: use `Controls not tested
+RC8.1 user-facing status must remain beginner-readable: use `Controls not tested
 yet` or `Some controls are configured, but TPM has not verified this game yet`
 when positive verification evidence is absent. Registration, launch
 observation, controls readiness, and verification remain separate.
@@ -546,7 +546,7 @@ This roadmap does not authorize:
 - product-code, UI implementation, schema, menu, configuration, or test changes;
 - issue creation, issue updates, or tracker churn;
 - updater expansion or updater implementation;
-- RC7 scope changes or release-package changes;
+- RC8 scope changes or release-package changes;
 - silent writes to emulator, runtime, user, hardware, provider, or HIP-owned
   state;
 - firmware, driver, licensing, calibration, third-party device-software, or

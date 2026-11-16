@@ -109,6 +109,7 @@ function Get-VbtUpdateRelease {
         AssetName   = $asset.name
         DownloadUrl = $asset.browser_download_url
         SizeBytes   = $sizeBytes
+        Digest      = if ($asset.PSObject.Properties.Name -contains 'digest') { [string]$asset.digest } else { '' }
     }
 }
 
@@ -125,7 +126,11 @@ function Invoke-VbtUpdateInstall {
 }
 '@
     Set-Content -LiteralPath $extractedFunctionsPath -Value ($functionSource + "`n`n" + $updateBoundarySource) -Encoding utf8
+    $progressModuleDirectory = Join-Path $TestDrive 'scripts'
+    [void][IO.Directory]::CreateDirectory($progressModuleDirectory)
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TpmProgress.psm1') -Destination (Join-Path $progressModuleDirectory 'TpmProgress.psm1') -Force
     . $extractedFunctionsPath
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
     $script:PostgresRecoveryStatus = $null
@@ -138,7 +143,7 @@ function Invoke-VbtUpdateInstall {
     # unqualified; without it here, the main-menu Describe below fails with
     # "$DisplayVersion cannot be retrieved" the moment the menu renders.
     $ScriptVersion = "1.0"
-    $ReleaseCandidateLabel = "RC8"
+    $ReleaseCandidateLabel = "RC8.1"
     $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
     $script:logPath = Join-Path $TestDrive "vbt-human-workflow.log"
 
@@ -179,7 +184,7 @@ function Invoke-VbtUpdateInstall {
     }
 
     function New-UpdateCheckReleaseJson {
-        param([string]$TagName = 'v1.1', [string]$AssetName = 'TeknoParrot.Manager.v1.1.zip')
+        param([string]$TagName = 'v1.1', [string]$AssetName = 'TeknoParrot.Manager.v1.1.zip', [string]$Digest = ('sha256:' + ('0' * 64)), [int64]$Size = 1)
         return (@{
             tag_name = $TagName
             name     = $TagName
@@ -187,7 +192,8 @@ function Invoke-VbtUpdateInstall {
             assets   = @(@{
                 name                  = $AssetName
                 browser_download_url = "https://github.com/Jumpstile/teknoparrot-manager/releases/download/$TagName/$AssetName"
-                size                  = 1
+                size                  = $Size
+                digest                = $Digest
             })
         } | ConvertTo-Json -Depth 5)
     }
@@ -196,7 +202,8 @@ function Invoke-VbtUpdateInstall {
 Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
 
     It "startup-calm-current-version: reports already current, no error/warning noise" {
-        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson -TagName $ScriptVersion) })
+        # The release tag must be the RUNNING identity (version plus release-candidate label): a bare $ScriptVersion tag is the later FINAL release, which the product correctly offers as an update.
+        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson -TagName (Get-ManagerVersionIdentity -ScriptVersion $ScriptVersion -ReleaseCandidateLabel $ReleaseCandidateLabel)) })
         Mock Read-Host { throw "Read-Host should not be called when already current" }
 
         $fixturePath = Join-Path $TestDrive 'startup-calm.ps1'
@@ -214,6 +221,17 @@ Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
         # appends); everything else under $TestDrive must be unchanged.
         $unexpectedChanges = Compare-Object $before $after | Where-Object { $_.InputObject -notlike '*vbt-human-workflow.log' }
         $unexpectedChanges | Should -BeNullOrEmpty -Because "scenario declares expectedStateChange: false"
+        # Demonstrate the intended behavior itself, not only the absence of an error: the user was never prompted.
+        Should -Invoke Read-Host -Times 0 -Exactly
+    }
+
+    It "startup-calm-current-version: a bare FINAL tag is offered as a later release, so the prompt IS reached (proves the no-prompt test is live)" {
+        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson -TagName $ScriptVersion) })
+        Mock Read-Host { "N" }
+        $fixturePath = Join-Path $TestDrive 'startup-final-offer.ps1'
+        Set-Content -LiteralPath $fixturePath -Value "`$ScriptVersion = `"$ScriptVersion`"" -Encoding ascii
+        Invoke-CheckForUpdates -ScriptPath $fixturePath 6>$null | Out-Null
+        Should -Invoke Read-Host -Times 1 -Exactly
     }
 
     It "update-available-explains-safety: explains what an update will do before asking" {
@@ -224,15 +242,42 @@ Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
         Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
         $originalContent = Get-Content -LiteralPath $fixturePath -Raw
 
-        Assert-ScenarioOutput -ScenarioId 'update-available-explains-safety' -Action {
+        $text = Assert-ScenarioOutput -ScenarioId 'update-available-explains-safety' -Action {
             Invoke-CheckForUpdates -ScriptPath $fixturePath | Out-Null
         }
+        # Order: download and check, look inside, back up, then install. Nothing is installed before the backup is listed.
+        # Mutation: put "SHA-256" (or any other hash term) back into the update explanation -> a novice reads an implementation term on the main screen.
+        $text | Should -Not -Match 'SHA-?256|digest|hash'
+        $text | Should -Not -Match 'multi-file|extract'
+        $downloadAt = $text.IndexOf('Download the update and check that it is the real file')
+        $insideAt = $text.IndexOf('Check what is inside it')
+        $backupAt = $text.IndexOf('Back up every file it replaces')
+        $installAt = $text.IndexOf('Install it and check it')
+        $downloadAt | Should -BeGreaterOrEqual 0 -Because "the explanation must say the download is checked`n--- actual output ---`n$text"
+        $insideAt | Should -BeGreaterThan $downloadAt -Because "what is inside must be checked after the download check`n--- actual output ---`n$text"
+        $backupAt | Should -BeGreaterThan $insideAt -Because "the package must be checked before anything is backed up`n--- actual output ---`n$text"
+        $installAt | Should -BeGreaterThan $backupAt -Because "the update explanation must put the backup before the install`n--- actual output ---`n$text"
 
         (Get-Content -LiteralPath $fixturePath -Raw) | Should -Be $originalContent
     }
 
     It "read-only-update-failure-actionable: read-only failure tells the user how to recover" {
-        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson) })
+        # The ZIP holds only the script, so it passes the package check (that now comes first); the SHA-256 check passes too.
+        # The script inside is not a real manager script, so the update fails after the read-only flag was cleared and
+        # the backup was made, and it is the read-only handling and the failure cleanup that are exercised.
+        Add-Type -AssemblyName System.IO.Compression -ErrorAction SilentlyContinue
+        $stubStream = New-Object System.IO.MemoryStream
+        $stubArchive = New-Object System.IO.Compression.ZipArchive($stubStream, [System.IO.Compression.ZipArchiveMode]::Create, $true)
+        $stubEntryStream = $stubArchive.CreateEntry('TeknoParrot-Manager.ps1').Open()
+        $stubEntryBytes = [Text.Encoding]::ASCII.GetBytes('not a manager script')
+        $stubEntryStream.Write($stubEntryBytes, 0, $stubEntryBytes.Length)
+        $stubEntryStream.Dispose()
+        $stubArchive.Dispose()
+        $script:vbtStubZip = $stubStream.ToArray()
+        $stubStream.Dispose()
+        $stubHash = (Get-FileHash -InputStream ([IO.MemoryStream]::new($script:vbtStubZip)) -Algorithm SHA256).Hash
+        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson -Digest ('sha256:' + $stubHash) -Size $script:vbtStubZip.Length) })
+        Mock Invoke-TpmDownload { [IO.File]::WriteAllBytes($DestinationPath, $script:vbtStubZip); return $true }
         Mock Read-Host { "Y" }
 
         $root = Join-Path $TestDrive ("readonly-scenario-" + [guid]::NewGuid().ToString('N'))
@@ -240,16 +285,23 @@ Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
         $fixturePath = Join-Path $root 'TeknoParrot-Manager.ps1'
         Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
         Set-ItemProperty -LiteralPath $fixturePath -Name IsReadOnly -Value $true
+        $initialIsReadOnly = (Get-Item -LiteralPath $fixturePath -Force).IsReadOnly
+        $initialIsReadOnly | Should -Be $true -Because "the scenario must begin with a protected fixture"
 
         try {
             Assert-ScenarioOutput -ScenarioId 'read-only-update-failure-actionable' -Action {
                 Invoke-CheckForUpdates -ScriptPath $fixturePath | Out-Null
             }
-            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeTrue -Because "an approved update creates its backup before the network attempt"
+            $postFailureIsReadOnly = (Get-Item -LiteralPath $fixturePath -Force).IsReadOnly
+            $postFailureIsReadOnly | Should -Be $initialIsReadOnly -Because "failed update cleanup must restore the original protection state"
+            $postFailureIsReadOnly | Should -Be $true -Because "the read-only fixture must remain protected after the failed update"
+            $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Filter 'TeknoParrot-Manager.ps1' -File -Recurse -ErrorAction Stop)
+            $backupFiles.Count | Should -Be 1 -Because "the failed update must leave one verified manager-script backup artifact"
         } finally {
             Set-ItemProperty -LiteralPath $fixturePath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
         }
     }
+
 
     It "cancel-path-no-change: declining leaves files unchanged and says so, without destructive-action language" {
         Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson) })
@@ -325,6 +377,8 @@ function Read-MainMenuChoiceResponsive {
     `$script:answerIndex++
     return [pscustomobject]@{ Redraw = `$false; Value = `$answer }
 }
+function Get-ConsoleContentWidth { return 160 }
+function Get-ConsoleContentHeight { return 60 }
 `$script:ActiveTpmWorkflowStatus = `$null
 `$script:TpmWorkflowRendering = `$false
 `$script:PostgresRecoveryStatus = `$null
@@ -332,7 +386,7 @@ function Read-MainMenuChoiceResponsive {
 `$pendingApplyMode = `$null
 `$forceRealApply = `$false
 `$Unattended = `$false
-`$menuExpanded = `$false
+`$menuNotice = ''
 `$iterations = 0
 while (`$true) {
     `$iterations++
@@ -350,7 +404,7 @@ $($menuIfAst.Extent.Text)
     }
 
     It "main-menu-invalid-option-recovers: an invalid choice prints a clear message and the menu asks again" {
-        $captured = Invoke-MainMenuHarness -AnswerQueue @('99', '15') 6>&1
+        $captured = Invoke-MainMenuHarness -AnswerQueue @('99', '17') 6>&1
         $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
 
         $scenario = Get-Scenario -Id 'main-menu-invalid-option-recovers'
@@ -368,14 +422,14 @@ $($menuIfAst.Extent.Text)
         $text.Contains('Invalid choice') | Should -Be $false
     }
 
-    It "exiting (choice 15) returns without printing an invalid-choice message" {
-        $captured = Invoke-MainMenuHarness -AnswerQueue @('15') 6>&1
+    It "exiting (choice 17) returns without printing an invalid-choice message" {
+        $captured = Invoke-MainMenuHarness -AnswerQueue @('17') 6>&1
         $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
         $text.Contains('Invalid choice') | Should -Be $false
     }
 
-    It "choice 14 returns the support mode without entering an invalid path" {
-        $captured = Invoke-MainMenuHarness -AnswerQueue @('14') 6>&1
+    It "choice 16 returns the support mode without entering an invalid path" {
+        $captured = Invoke-MainMenuHarness -AnswerQueue @('16') 6>&1
         (($captured | ForEach-Object { $_.ToString() }) -join "`n") | Should -Match 'Support'
     }
 

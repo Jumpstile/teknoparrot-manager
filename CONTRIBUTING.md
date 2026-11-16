@@ -3,8 +3,7 @@
 Thanks for taking the time to report an issue, suggest something, or send
 a fix. This document covers how work is tracked in this repository; for
 what the project actually does and how it's built, start with
-`README.md` and `ARCHITECTURE.md`. For cross-machine workflow, exact-SHA
-handoffs, and release boundaries, read `docs/ENGINEERING-WORKFLOW.md`.
+`README.md` and `ARCHITECTURE.md`.
 
 ## Filing an issue
 
@@ -16,7 +15,7 @@ handoffs, and release boundaries, read `docs/ENGINEERING-WORKFLOW.md`.
   its actual goal than against a specific proposed implementation.
 - Check `LESSONS_LEARNED.md` and existing closed issues first if your
   report might be a known, already-documented case.
-- During a feature freeze (see `AGENTS.md`), new feature requests are
+- During a feature freeze, new feature requests are
   still welcome -- they'll be labeled `release:post-1.0` and considered
   once the freeze lifts, rather than declined outright.
 
@@ -34,25 +33,20 @@ lifecycle from filed to closed.
 
 ## Submitting a change
 
-- Read `RELEASE-SAFETY-CHECKLIST.md` section 1 (pre-commit checks) before
-  opening a PR -- ASCII purity, parse check, PSScriptAnalyzer, and the
-  Pester suite are all required and are what CI checks.
-- This project is pure ASCII (`TeknoParrot-Manager.ps1` specifically) --
-  see the "Key conventions" section of `AGENTS.md` for why, and how to
-  verify.
+- Read `RELEASE-SAFETY-CHECKLIST.md` before opening a PR -- ASCII purity,
+  parse check, PSScriptAnalyzer, and the Pester suite are all required and
+  are what CI checks.
+- This project is pure ASCII (`TeknoParrot-Manager.ps1` specifically).
 - Small, focused changes are easier to review and land faster than large
   ones bundling unrelated work.
-- Desktop ChatGPT and Desktop Codex work from `C:\REPOS\teknoparrot-manager`;
-  Arcade ChatGPT and Arcade Codex work from `E:\REPOS\teknoparrot-manager`.
-  Every handoff records the GitHub branch and exact commit SHA.
+- Every handoff records the GitHub branch and exact commit SHA.
 - If your change affects documented behavior (menu wording, a prompt, a
-  workflow), update the relevant docs in the same change -- see
-  `RELEASE-SAFETY-CHECKLIST.md` section 3 for what "the docs" means here
-  (it's more than just `README.md`).
+  workflow), update the relevant docs in the same change (that is more
+  than just `README.md`).
 
 ## Worktree and runtime-path policy
 
-GitHub is authoritative for handoff between computers and agents. Work from
+GitHub is authoritative for handoff between computers. Work from
 your own local clone or disposable local worktree, and hand off a pushed
 branch/ref plus the exact commit SHA. Do not treat a shared SMB/NAS checkout
 as the active or authoritative Git worktree.
@@ -66,8 +60,7 @@ remain blocked. Revalidate a permitted destination immediately before writing.
 ## Release governance
 
 This project follows the Jumpstile Release Standard -- see
-`docs/ENGINEERING-WORKFLOW.md` for the canonical current handoff workflow,
-`RELEASE-SAFETY-CHECKLIST.md` section 0 for the full release order, and
+`RELEASE-SAFETY-CHECKLIST.md` for the release order and
 `CONSTITUTION.md` for the governing principle that technical readiness
 (passing tests, passing certification) is evidence a release is *ready*,
 not authorization to *publish* one. Only the repository owner (Release

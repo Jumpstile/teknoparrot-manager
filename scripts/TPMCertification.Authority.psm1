@@ -51,36 +51,11 @@ function ConvertTo-TPMJcsV1([Parameter(Mandatory=$true)][AllowNull()][AllowEmpty
     throw 'unsupported JCS value'
 }
 function ConvertTo-TPMFailureMessageBase64UrlV1([AllowEmptyString()][string]$Message){$u=New-Object Text.UTF8Encoding($false,$true);[Convert]::ToBase64String($u.GetBytes((ConvertTo-TPMJcsStringV1 $Message))).TrimEnd('=').Replace('+','-').Replace('/','_')}
-function ConvertFrom-TPMFailureMessageBase64UrlV1([string]$Value){
- if(!$Value-or$Value-cnotmatch'^[A-Za-z0-9_-]+$'-or$Value.Length%4-eq1){throw 'malformed base64url'}
- $p=$Value.Replace('-','+').Replace('_','/');if($p.Length%4-eq2){$p+='=='}elseif($p.Length%4-eq3){$p+='='}
- try{$b=[Convert]::FromBase64String($p);$t=(New-Object Text.UTF8Encoding($false,$true)).GetString($b)}catch{throw 'malformed transport'}
- try{$m=ConvertFrom-Json -InputObject $t -ErrorAction Stop}catch{throw 'invalid JSON string'}
- if($m-isnot[string]-or(ConvertTo-TPMJcsStringV1 $m)-cne$t){throw 'noncanonical JSON string'}
- return $m
-}
 function ConvertTo-TPMJcsBase64UrlV1([Parameter(Mandatory=$true)][string]$CanonicalJson){$u=New-Object Text.UTF8Encoding($false,$true);[Convert]::ToBase64String($u.GetBytes($CanonicalJson)).TrimEnd('=').Replace('+','-').Replace('/','_')}
 function ConvertFrom-TPMJcsBase64UrlV1([string]$Value){
  if(!$Value-or$Value-cnotmatch'^[A-Za-z0-9_-]+$'-or$Value.Length%4-eq1){throw 'malformed base64url'}
  $p=$Value.Replace('-','+').Replace('_','/');if($p.Length%4-eq2){$p+='=='}elseif($p.Length%4-eq3){$p+='='}
  try{$b=[Convert]::FromBase64String($p);return (New-Object Text.UTF8Encoding($false,$true)).GetString($b)}catch{throw 'malformed transport'}
-}
-
-function New-TPMWorkflowAuthorityV1 {
- Initialize-TPMCertificationTypesV1|Out-Null
- $state=[pscustomobject]@{Phase='Collecting';RunIdentity=[guid]::NewGuid().ToString('N');Records=(New-Object Collections.Generic.List[string]);Issued=$null}
- $dispatch={
-  param([string]$Operation,$Value)
-  switch -CaseSensitive($Operation){
-   'GetPhase'{return $state.Phase}
-   'GetRunIdentity'{return $state.RunIdentity}
-   'Record'{if($state.Phase-cne'Collecting'){throw "recording forbidden in $($state.Phase)"};$state.Records.Add((ConvertTo-TPMJcsV1 $Value));return}
-   'Seal'{if($state.Phase-cne'Collecting'){throw "sealing forbidden in $($state.Phase)"};$json='['+(@($state.Records)-join',')+']';$state.Records.Clear();$type=('Jumpstile.TPM.Certification.V1.TPMSealedRunReaderV1'-as[type]);$ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0];$state.Issued=$ctor.Invoke(@($state.RunIdentity,$json));$state.Phase='Sealed';return $state.Issued}
-   'ValidateIssued'{return [object]::ReferenceEquals($state.Issued,$Value)}
-   default{throw 'unsupported authority operation'}
-  }
- }.GetNewClosure()
- return $dispatch
 }
 
 function Get-TPMSha256HexV1 {
@@ -90,20 +65,40 @@ function Get-TPMSha256HexV1 {
     finally { $sha.Dispose() }
 }
 
+# Only drive-qualified ('C:\...') and UNC ('\\server\share...') forms are absolute. A drive-relative ('C:x') or
+# root-relative ('\x') path is rooted but resolves against the process's current drive or directory, so it is refused.
+function Test-TPMFullyQualifiedPathV1 {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    if ([IO.Path]::DirectorySeparatorChar -ne [char]'\') { return $Value.StartsWith('/') }
+    return ($Value -match '^[A-Za-z]:[\\/]' -or $Value -match '^[\\/]{2}[^\\/]+[\\/][^\\/]+')
+}
+
+# Full path with one separator style and no trailing separator, except that the volume root keeps its own separator:
+# 'C:\' stays 'C:\' (trimmed to 'C:' it would name the drive's current directory, not its root).
+function ConvertTo-TPMCanonicalPathV1 {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    $full = [IO.Path]::GetFullPath($Value).Replace([IO.Path]::AltDirectorySeparatorChar, [IO.Path]::DirectorySeparatorChar)
+    $volume = [IO.Path]::GetPathRoot($full)
+    $trimmed = $full.TrimEnd([IO.Path]::DirectorySeparatorChar)
+    if ($trimmed.Length -lt $volume.Length) { return $volume }
+    return $trimmed
+}
+
 function Resolve-TPMContainedPathV1 {
     param([Parameter(Mandatory = $true)][string]$Root, [Parameter(Mandatory = $true)][string]$Path)
     if ([string]::IsNullOrWhiteSpace($Root) -or [string]::IsNullOrWhiteSpace($Path)) { throw 'PATH_INVALID: root and path are required' }
     foreach ($value in @($Root, $Path)) {
         if ($value.IndexOf([char]0) -ge 0 -or $value -match '^[A-Za-z][A-Za-z0-9+.-]*://') { throw 'PATH_INVALID: NUL and non-file URI syntax are forbidden' }
-        if ($value -match '^(\\\\[?.]\\|\\[?][?]\\)') { throw 'PATH_INVALID: device paths are forbidden' }
+        if ($value -match '^([\\/]{2}[?.][\\/]|[\\/][?][?][\\/])') { throw 'PATH_INVALID: device paths are forbidden' }
         $withoutDrive = if ($value.Length -ge 2 -and $value[1] -eq ':') { $value.Substring(2) } else { $value }
         if ($withoutDrive.Contains(':')) { throw 'PATH_INVALID: alternate data streams are forbidden' }
         if (@($value -split '[\\/]' | Where-Object { $_ -eq '.' -or $_ -eq '..' }).Count -gt 0) { throw 'PATH_INVALID: dot segments are forbidden' }
     }
-    if (-not [IO.Path]::IsPathRooted($Root)) { throw 'PATH_INVALID: root must be absolute' }
-    $canonicalRoot = [IO.Path]::GetFullPath($Root).Replace([IO.Path]::AltDirectorySeparatorChar, [IO.Path]::DirectorySeparatorChar).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    if (-not (Test-TPMFullyQualifiedPathV1 -Value $Root)) { throw 'PATH_INVALID: root must be absolute' }
+    if ([IO.Path]::IsPathRooted($Path) -and -not (Test-TPMFullyQualifiedPathV1 -Value $Path)) { throw 'PATH_INVALID: drive-relative and root-relative paths are forbidden' }
+    $canonicalRoot = ConvertTo-TPMCanonicalPathV1 -Value $Root
     $candidateInput = if ([IO.Path]::IsPathRooted($Path)) { $Path } else { [IO.Path]::Combine($canonicalRoot, $Path) }
-    $canonicalPath = [IO.Path]::GetFullPath($candidateInput).Replace([IO.Path]::AltDirectorySeparatorChar, [IO.Path]::DirectorySeparatorChar).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    $canonicalPath = ConvertTo-TPMCanonicalPathV1 -Value $candidateInput
     $rootVolume = [IO.Path]::GetPathRoot($canonicalRoot)
     $pathVolume = [IO.Path]::GetPathRoot($canonicalPath)
     if (-not $rootVolume.Equals($pathVolume, [StringComparison]::OrdinalIgnoreCase)) { throw 'PATH_OUTSIDE_ROOT: volume differs' }
@@ -153,7 +148,7 @@ $script:TpmEvidenceFailureCodesV1 = @(
 )
 $script:TpmFactFailureCodesV1 = @(
     'REPOSITORY_UNAVAILABLE','REPOSITORY_DIRTY','REPOSITORY_IDENTITY_INVALID',
-    'PESTER_NOT_EXECUTED','PESTER_EMPTY','PESTER_FAILURES','PESTER_NOT_RUN','PESTER_COUNTS_INVALID',
+    'PESTER_NOT_EXECUTED','PESTER_EMPTY','PESTER_FAILURES','PESTER_CONTAINER_FAILURES','PESTER_NOT_RUN','PESTER_COUNTS_INVALID',
     'PARSER_NOT_EXECUTED','PARSER_ERRORS','ENCODING_NOT_EXECUTED','ENCODING_NON_ASCII',
     'ANALYZER_NOT_EXECUTED','PSSCRIPTANALYZER_FINDINGS','INJECTION_FINDING_UNRESOLVED',
     'HEALTH_REPORT_MISSING','HEALTH_REPORT_INVALID','HEALTH_CHECK_FAILED',
@@ -163,7 +158,7 @@ $script:TpmFactFailureCodesV1 = @(
     'PUBLISHER_UNAVAILABLE','PACKAGE_VALIDATION_NOT_EXECUTED','PACKAGE_VALIDATION_FAILED',
     'PCSX2_FILES_MISSING','PCSX2_INI_MISSING','PCSX2_PATH_NONCANONICAL','PCSX2_LEGACY_ROOT_PRESENT',
     'VBT_NOT_EXECUTED','VBT_EMPTY','VBT_FAILURES','VBT_COUNTS_INVALID',
-    'EFFECTIVE_ROOT_MISSING','EFFECTIVE_ROOT_INVALID','EFFECTIVE_ROOT_MISMATCH',
+    'EFFECTIVE_ROOT_MISSING','EFFECTIVE_ROOT_MISMATCH',
     'RESTORE_NOT_ATTEMPTED','RESTORE_FAILED','RESTORE_VERIFICATION_FAILED','RESTORE_SNAPSHOT_INVALID',
     'TEMP_CONFIG_NOT_REMOVED'
 )
@@ -261,7 +256,7 @@ function Assert-TPMFactRecordV1 {
     if($script:TpmFactIdentifiersV1-cnotcontains$identifier){throw "FACT_IDENTIFIER_INVALID: $identifier"}
     switch -CaseSensitive($identifier){
       'Repository' {$d=Assert-TPMExactFieldsV1 $data @('RepositoryPath','RepositoryAvailable','RepositoryClean','GitStatus','CertificationIdentity') $identifier;Assert-TPMNormalizedPathV1 $d.RepositoryPath 'RepositoryPath';Assert-TPMBooleanV1 $d.RepositoryAvailable 'RepositoryAvailable';Assert-TPMBooleanV1 $d.RepositoryClean 'RepositoryClean';Assert-TPMStringV1 $d.GitStatus 'GitStatus';Assert-TPMCertificationGitIdentityV1 $d.CertificationIdentity 'CertificationIdentity'|Out-Null}
-      'Pester' {$d=Assert-TPMExactFieldsV1 $data @('Executed','Total','Passed','Failed','Skipped','NotRun','Engine','SuiteSha256') $identifier;Assert-TPMBooleanV1 $d.Executed 'Executed';foreach($n in @('Total','Passed','Failed','Skipped','NotRun')){Assert-TPMIntegerV1 $d[$n] $n};if(([long]$d.Passed+[long]$d.Failed+[long]$d.Skipped+[long]$d.NotRun)-ne[long]$d.Total){throw 'SCHEMA_INVALID: Pester counts'};if($d.Executed){Assert-TPMStringV1 $d.Engine 'Engine';Assert-TPMNullableHashV1 $d.SuiteSha256 'SuiteSha256';if($null-eq$d.SuiteSha256){throw 'SCHEMA_INVALID: SuiteSha256 required'}}elseif($null-ne$d.Engine-or$null-ne$d.SuiteSha256){throw 'SCHEMA_INVALID: unexecuted Pester metadata must be null'}}
+      'Pester' {$d=Assert-TPMExactFieldsV1 $data @('Executed','Total','Passed','Failed','Skipped','NotRun','FailedContainers','Engine','SuiteSha256') $identifier;Assert-TPMBooleanV1 $d.Executed 'Executed';foreach($n in @('Total','Passed','Failed','Skipped','NotRun','FailedContainers')){Assert-TPMIntegerV1 $d[$n] $n};if(([long]$d.Passed+[long]$d.Failed+[long]$d.Skipped+[long]$d.NotRun)-ne[long]$d.Total){throw 'SCHEMA_INVALID: Pester counts'};if($d.Executed){Assert-TPMStringV1 $d.Engine 'Engine';Assert-TPMNullableHashV1 $d.SuiteSha256 'SuiteSha256';if($null-eq$d.SuiteSha256){throw 'SCHEMA_INVALID: SuiteSha256 required'}}elseif($null-ne$d.Engine-or$null-ne$d.SuiteSha256){throw 'SCHEMA_INVALID: unexecuted Pester metadata must be null'}}
       'Static Analysis' {$d=Assert-TPMExactFieldsV1 $data @('Parser','Encoding','PSScriptAnalyzer','InjectionHunter') $identifier;$parser=@($d.Parser);if($parser.Count-ne2){throw 'SCHEMA_INVALID: Parser count'};foreach($i in 0..1){$p=Assert-TPMExactFieldsV1 $parser[$i] @('Identifier','Executed','ErrorCount','ToolVersion') 'Parser';$expected=@('WindowsPowerShell51','Pwsh')[$i];if($p.Identifier-cne$expected){throw 'SCHEMA_INVALID: Parser order'};Assert-TPMBooleanV1 $p.Executed 'Parser Executed';Assert-TPMIntegerV1 $p.ErrorCount 'Parser ErrorCount';if($p.Executed){Assert-TPMStringV1 $p.ToolVersion 'Parser ToolVersion'}elseif($null-ne$p.ToolVersion){throw 'SCHEMA_INVALID: Parser ToolVersion'}};$e=Assert-TPMExactFieldsV1 $d.Encoding @('Executed','NonAsciiByteCount','Files') 'Encoding';Assert-TPMBooleanV1 $e.Executed 'Encoding Executed';Assert-TPMIntegerV1 $e.NonAsciiByteCount 'NonAsciiByteCount';if(@($e.Files).Count-eq0){throw 'SCHEMA_INVALID: Encoding Files'};foreach($f in @($e.Files)){Assert-TPMStringV1 $f 'Encoding file';if([IO.Path]::IsPathRooted($f)-or$f.Contains('\')-or@($f-split'[\\/]'|Where-Object{$_-eq'.'-or$_-eq'..'}).Count-gt0){throw 'SCHEMA_INVALID: Encoding file must be normalized repository-relative'}};$a=Assert-TPMExactFieldsV1 $d.PSScriptAnalyzer @('Executed','FindingCount','ToolVersion') 'PSScriptAnalyzer';Assert-TPMBooleanV1 $a.Executed 'Analyzer Executed';Assert-TPMIntegerV1 $a.FindingCount 'FindingCount';if($a.Executed){Assert-TPMStringV1 $a.ToolVersion 'Analyzer ToolVersion'}elseif($null-ne$a.ToolVersion){throw 'SCHEMA_INVALID: Analyzer ToolVersion'};$h=Assert-TPMExactFieldsV1 $d.InjectionHunter @('Executed','FindingCount','UnresolvedFindingCount','ToolVersion','Dispositions') 'InjectionHunter';Assert-TPMBooleanV1 $h.Executed 'InjectionHunter Executed';Assert-TPMIntegerV1 $h.FindingCount 'IH FindingCount';Assert-TPMIntegerV1 $h.UnresolvedFindingCount 'IH unresolved';if(@($h.Dispositions).Count-ne[long]$h.FindingCount){throw 'SCHEMA_INVALID: disposition count'};foreach($x in @($h.Dispositions)){$m=Assert-TPMExactFieldsV1 $x @('FindingIdentifier','Disposition') 'Disposition';Assert-TPMStringV1 $m.FindingIdentifier 'FindingIdentifier';if(@('Confirmed','Mitigated','FalsePositive')-cnotcontains$m.Disposition){throw 'SCHEMA_INVALID: Disposition'}};if([long]$h.UnresolvedFindingCount-ne@($h.Dispositions|Where-Object{$_.Disposition-ceq'Confirmed'}).Count){throw 'SCHEMA_INVALID: IH unresolved count'};if($h.Executed){Assert-TPMStringV1 $h.ToolVersion 'IH ToolVersion'}elseif($null-ne$h.ToolVersion){throw 'SCHEMA_INVALID: IH ToolVersion'}}
       'Real Install Health' {$d=Assert-TPMExactFieldsV1 $data @('ReportPath','LoadState','LoadError','Checks') $identifier;if(@('Loaded','Missing','InvalidJson')-cnotcontains$d.LoadState){throw 'SCHEMA_INVALID: health LoadState'};Assert-TPMNormalizedPathV1 $d.ReportPath 'ReportPath' -Nullable;if($d.LoadState-ceq'Loaded'){if($null-ne$d.LoadError){throw 'SCHEMA_INVALID: loaded health error'};$checks=@($d.Checks);if($checks.Count-ne3){throw 'SCHEMA_INVALID: health check count'};for($i=0;$i-lt3;$i++){$c=Assert-TPMExactFieldsV1 $checks[$i] @('Name','Passed') 'health check';if($c.Name-cne@('TeknoParrotUi.exe exists','GameProfiles folder exists','UserProfiles folder exists')[$i]){throw 'SCHEMA_INVALID: health check order'};Assert-TPMBooleanV1 $c.Passed 'health Passed'}}else{Assert-TPMStringV1 $d.LoadError 'LoadError';if(@($d.Checks).Count-ne0){throw 'SCHEMA_INVALID: unloaded health checks'}}}
       'Backups' {$fields=@('UserProfilesBackupCreated','UserProfilesBackupPath','UserProfilesBackupVerified','UserProfilesBackupSha256','GameProfilesBackupCreated','GameProfilesBackupPath','GameProfilesBackupVerified','GameProfilesBackupSha256','BackupVerificationExecuted');$d=Assert-TPMExactFieldsV1 $data $fields $identifier;foreach($n in @('UserProfilesBackupCreated','UserProfilesBackupVerified','GameProfilesBackupCreated','GameProfilesBackupVerified','BackupVerificationExecuted')){Assert-TPMBooleanV1 $d[$n] $n};foreach($prefix in @('UserProfiles','GameProfiles')){$created=$d[$prefix+'BackupCreated'];Assert-TPMNormalizedPathV1 $d[$prefix+'BackupPath'] ($prefix+'BackupPath') -Nullable;Assert-TPMNullableHashV1 $d[$prefix+'BackupSha256'] ($prefix+'BackupSha256');if($created-and($null-eq$d[$prefix+'BackupPath']-or$null-eq$d[$prefix+'BackupSha256'])){throw 'SCHEMA_INVALID: created backup metadata'};if(-not$created-and($null-ne$d[$prefix+'BackupPath']-or$null-ne$d[$prefix+'BackupSha256'])){throw 'SCHEMA_INVALID: absent backup metadata'}}}
@@ -269,7 +264,7 @@ function Assert-TPMFactRecordV1 {
       'Artifacts' {$d=Assert-TPMExactFieldsV1 $data @('ReportDirectory','ReportDirectoryReserved','StagingDirectoryReady','RequiredArtifactManifestConfigured','PublisherAvailable','PackageValidationExecuted','PackageValidationPassed','PackageValidationErrorCount','PackageValidationDiagnostics') $identifier;Assert-TPMNormalizedPathV1 $d.ReportDirectory 'ReportDirectory';try{$containedReport=Resolve-TPMContainedPathV1 -Root $ReportRoot -Path $d.ReportDirectory}catch{throw 'SCHEMA_INVALID: ReportDirectory is not contained'};if($containedReport-cne$d.ReportDirectory){throw 'SCHEMA_INVALID: ReportDirectory is not contained'};foreach($n in @('ReportDirectoryReserved','StagingDirectoryReady','RequiredArtifactManifestConfigured','PublisherAvailable','PackageValidationExecuted','PackageValidationPassed')){Assert-TPMBooleanV1 $d[$n] $n};Assert-TPMIntegerV1 $d.PackageValidationErrorCount 'PackageValidationErrorCount';if($null-eq$d.PackageValidationDiagnostics){throw 'SCHEMA_INVALID: PackageValidationDiagnostics is required'};$diagnostics=@($d.PackageValidationDiagnostics);for($i=0;$i-lt$diagnostics.Count;$i++){Assert-TPMPublisherDiagnosticRecordV1 $diagnostics[$i] ("$identifier PackageValidationDiagnostics[$i]")|Out-Null}}
       'pcsx2x6 crosshair path (issue #79)' {$d=Assert-TPMExactFieldsV1 $data @('Present','CanonicalFilesDeployed','LegacyRootPresent','IniFound','CursorPathPointsCanonical','Pcsx2Directory') $identifier;foreach($n in @('Present','CanonicalFilesDeployed','LegacyRootPresent','IniFound','CursorPathPointsCanonical')){Assert-TPMBooleanV1 $d[$n] $n};Assert-TPMNormalizedPathV1 $d.Pcsx2Directory 'Pcsx2Directory' -Nullable;if(-not$d.Present-and($recordMap.Applicable-or$null-ne$d.Pcsx2Directory-or$d.CanonicalFilesDeployed-or$d.LegacyRootPresent-or$d.IniFound-or$d.CursorPathPointsCanonical)){throw 'SCHEMA_INVALID: absent pcsx2'};if($d.Present-ne$recordMap.Applicable){throw 'SCHEMA_INVALID: pcsx2 applicability'}}
       'Behavioral Certification (Virtual Beta Tester)' {$d=Assert-TPMExactFieldsV1 $data @('Executed','Total','Passed','Failed','HumanBehaviors','IdempotencyChecks','RecoveryBehaviors','EnvironmentVariations','HighTvdBehaviors') $identifier;Assert-TPMBooleanV1 $d.Executed 'VBT Executed';foreach($n in @('Total','Passed','Failed','HumanBehaviors','IdempotencyChecks','RecoveryBehaviors','EnvironmentVariations','HighTvdBehaviors')){Assert-TPMIntegerV1 $d[$n] $n};if(([long]$d.Passed+[long]$d.Failed)-ne[long]$d.Total){throw 'SCHEMA_INVALID: VBT counts'}}
-      'Unattended TPM root binding' {$d=Assert-TPMExactFieldsV1 $data @('RequestedRoot','EffectiveRoot','EffectiveRootParseState') $identifier;Assert-TPMNormalizedPathV1 $d.RequestedRoot 'RequestedRoot';Assert-TPMNormalizedPathV1 $d.EffectiveRoot 'EffectiveRoot' -Nullable;if(@('Parsed','Missing','Invalid')-cnotcontains$d.EffectiveRootParseState){throw 'SCHEMA_INVALID: EffectiveRootParseState'};if($Mode-ceq'Smoke'){if($recordMap.Applicable-or$null-ne$d.EffectiveRoot-or$d.EffectiveRootParseState-cne'Missing'){throw 'SCHEMA_INVALID: smoke root binding'}}elseif(-not$recordMap.Applicable){throw 'SCHEMA_INVALID: unattended root applicability'}}
+      'Unattended TPM root binding' {$d=Assert-TPMExactFieldsV1 $data @('RequestedRoot','EffectiveRoot','EffectiveRootParseState') $identifier;Assert-TPMNormalizedPathV1 $d.RequestedRoot 'RequestedRoot';Assert-TPMNormalizedPathV1 $d.EffectiveRoot 'EffectiveRoot' -Nullable;if(@('Parsed','Missing')-cnotcontains$d.EffectiveRootParseState){throw 'SCHEMA_INVALID: EffectiveRootParseState'};if($Mode-ceq'Smoke'){if($recordMap.Applicable-or$null-ne$d.EffectiveRoot-or$d.EffectiveRootParseState-cne'Missing'){throw 'SCHEMA_INVALID: smoke root binding'}}elseif(-not$recordMap.Applicable){throw 'SCHEMA_INVALID: unattended root applicability'}}
       'Unattended TPM config restoration' {if($Mode-ceq'Smoke'){if($recordMap.Applicable-or$data.Count-ne0){throw 'SCHEMA_INVALID: smoke restoration'}}else{if(-not$recordMap.Applicable){throw 'SCHEMA_INVALID: restoration applicability'};$d=Assert-TPMExactFieldsV1 $data @('PriorConfigExisted','TemporaryConfigCreated','RestoreAttempted','RestoreSucceeded','VerificationSucceeded','SnapshotSha256','FailureReason') $identifier;foreach($n in @('PriorConfigExisted','TemporaryConfigCreated','RestoreAttempted','RestoreSucceeded','VerificationSucceeded')){Assert-TPMBooleanV1 $d[$n] $n};Assert-TPMNullableHashV1 $d.SnapshotSha256 'SnapshotSha256';if($d.PriorConfigExisted-and$null-eq$d.SnapshotSha256){throw 'SCHEMA_INVALID: restoration snapshot required'};if(-not$d.PriorConfigExisted-and$null-ne$d.SnapshotSha256){throw 'SCHEMA_INVALID: restoration snapshot forbidden'};if($null-ne$d.FailureReason){Assert-TPMStringV1 $d.FailureReason 'FailureReason'}}}
     }
     if($identifier-notin@('Smoke File Safety','pcsx2x6 crosshair path (issue #79)','Unattended TPM root binding','Unattended TPM config restoration')-and-not$recordMap.Applicable){throw 'SCHEMA_INVALID: category is never N/A'}
@@ -282,7 +277,7 @@ function Get-TPMFactDecisionV1 {
     if(-not$Record.Applicable){return [ordered]@{Identifier=$identifier;Status='NotApplicable';Passed=$null;Details=(Copy-TPMClosedValueV1 $data);FailureReasons=@()}}
     switch -CaseSensitive($identifier){
       'Repository' {if(-not$data.RepositoryAvailable){Add-Reason 'REPOSITORY_UNAVAILABLE'};if($data.RepositoryAvailable-and-not$data.RepositoryClean){Add-Reason 'REPOSITORY_DIRTY'};if(-not$data.CertificationIdentity.IdentityValid){Add-Reason 'REPOSITORY_IDENTITY_INVALID'}}
-      'Pester' {if(-not$data.Executed){Add-Reason 'PESTER_NOT_EXECUTED'};if($data.Executed-and$data.Total-eq0){Add-Reason 'PESTER_EMPTY'};if($data.Failed-gt0){Add-Reason 'PESTER_FAILURES'};if($data.NotRun-gt0){Add-Reason 'PESTER_NOT_RUN'};if(($data.Passed+$data.Failed+$data.Skipped+$data.NotRun)-ne$data.Total){Add-Reason 'PESTER_COUNTS_INVALID'}}
+      'Pester' {if(-not$data.Executed){Add-Reason 'PESTER_NOT_EXECUTED'};if($data.Executed-and$data.Total-eq0){Add-Reason 'PESTER_EMPTY'};if($data.Failed-gt0){Add-Reason 'PESTER_FAILURES'};if($data.FailedContainers-gt0){Add-Reason 'PESTER_CONTAINER_FAILURES'};if($data.NotRun-gt0){Add-Reason 'PESTER_NOT_RUN'};if(($data.Passed+$data.Failed+$data.Skipped+$data.NotRun)-ne$data.Total){Add-Reason 'PESTER_COUNTS_INVALID'}}
       'Static Analysis' {if(@($data.Parser|Where-Object{-not$_.Executed}).Count-gt0){Add-Reason 'PARSER_NOT_EXECUTED'};if(@($data.Parser|Where-Object{$_.ErrorCount-gt0}).Count-gt0){Add-Reason 'PARSER_ERRORS'};if(-not$data.Encoding.Executed){Add-Reason 'ENCODING_NOT_EXECUTED'};if($data.Encoding.NonAsciiByteCount-gt0){Add-Reason 'ENCODING_NON_ASCII'};if(-not$data.PSScriptAnalyzer.Executed-or-not$data.InjectionHunter.Executed){Add-Reason 'ANALYZER_NOT_EXECUTED'};if($data.PSScriptAnalyzer.FindingCount-gt0){Add-Reason 'PSSCRIPTANALYZER_FINDINGS'};if($data.InjectionHunter.UnresolvedFindingCount-gt0){Add-Reason 'INJECTION_FINDING_UNRESOLVED'}}
       'Real Install Health' {if($data.LoadState-ceq'Missing'){Add-Reason 'HEALTH_REPORT_MISSING'}elseif($data.LoadState-ceq'InvalidJson'){Add-Reason 'HEALTH_REPORT_INVALID'}else{foreach($c in $data.Checks){if(-not$c.Passed){Add-Reason 'HEALTH_CHECK_FAILED'}}}}
       'Backups' {if(-not$data.UserProfilesBackupCreated-and-not$data.GameProfilesBackupCreated){Add-Reason 'BACKUP_NONE_CREATED'};if(-not$data.BackupVerificationExecuted){Add-Reason 'BACKUP_VERIFICATION_NOT_EXECUTED'};if(($data.UserProfilesBackupCreated-and-not$data.UserProfilesBackupVerified)-or($data.GameProfilesBackupCreated-and-not$data.GameProfilesBackupVerified)){Add-Reason 'BACKUP_VERIFICATION_FAILED'}}
@@ -290,7 +285,7 @@ function Get-TPMFactDecisionV1 {
       'Artifacts' {$artifactDiagnosticMessage=Get-TPMArtifactDiagnosticMessageV1 $data.PackageValidationDiagnostics;if(-not$data.ReportDirectoryReserved){Add-Reason 'REPORT_DIRECTORY_UNAVAILABLE'};if(-not$data.StagingDirectoryReady){Add-Reason 'STAGING_UNAVAILABLE'};if(-not$data.RequiredArtifactManifestConfigured){Add-Reason 'ARTIFACT_MANIFEST_UNCONFIGURED'};if(-not$data.PublisherAvailable){if($artifactDiagnosticMessage){Add-Reason 'PUBLISHER_UNAVAILABLE' ("publisher diagnostic: $artifactDiagnosticMessage")}else{Add-Reason 'PUBLISHER_UNAVAILABLE'}};if(-not$data.PackageValidationExecuted){Add-Reason 'PACKAGE_VALIDATION_NOT_EXECUTED'};if(-not$data.PackageValidationPassed-or$data.PackageValidationErrorCount-gt0){if($artifactDiagnosticMessage){Add-Reason 'PACKAGE_VALIDATION_FAILED' ("package validation diagnostic: $artifactDiagnosticMessage")}else{Add-Reason 'PACKAGE_VALIDATION_FAILED'}}}
       'pcsx2x6 crosshair path (issue #79)' {if(-not$data.CanonicalFilesDeployed){Add-Reason 'PCSX2_FILES_MISSING'};if(-not$data.IniFound){Add-Reason 'PCSX2_INI_MISSING'};if(-not$data.CursorPathPointsCanonical){Add-Reason 'PCSX2_PATH_NONCANONICAL'};if($data.LegacyRootPresent){Add-Reason 'PCSX2_LEGACY_ROOT_PRESENT'}}
       'Behavioral Certification (Virtual Beta Tester)' {if(-not$data.Executed){Add-Reason 'VBT_NOT_EXECUTED'};if($data.Executed-and$data.Total-eq0){Add-Reason 'VBT_EMPTY'};if($data.Failed-gt0){Add-Reason 'VBT_FAILURES'};if(($data.Passed+$data.Failed)-ne$data.Total){Add-Reason 'VBT_COUNTS_INVALID'}}
-      'Unattended TPM root binding' {if($data.EffectiveRootParseState-ceq'Missing'){Add-Reason 'EFFECTIVE_ROOT_MISSING'}elseif($data.EffectiveRootParseState-ceq'Invalid'){Add-Reason 'EFFECTIVE_ROOT_INVALID'}elseif(-not$data.RequestedRoot.Equals($data.EffectiveRoot,[StringComparison]::OrdinalIgnoreCase)){Add-Reason 'EFFECTIVE_ROOT_MISMATCH'}}
+      'Unattended TPM root binding' {if($data.EffectiveRootParseState-ceq'Missing'){Add-Reason 'EFFECTIVE_ROOT_MISSING'}elseif(-not$data.RequestedRoot.Equals($data.EffectiveRoot,[StringComparison]::OrdinalIgnoreCase)){Add-Reason 'EFFECTIVE_ROOT_MISMATCH'}}
       'Unattended TPM config restoration' {if(-not$data.RestoreAttempted){Add-Reason 'RESTORE_NOT_ATTEMPTED'};if($data.RestoreAttempted-and-not$data.RestoreSucceeded){Add-Reason 'RESTORE_FAILED'};if($data.RestoreSucceeded-and-not$data.VerificationSucceeded){Add-Reason 'RESTORE_VERIFICATION_FAILED'};if($data.PriorConfigExisted-and$null-eq$data.SnapshotSha256){Add-Reason 'RESTORE_SNAPSHOT_INVALID'};if(-not$data.PriorConfigExisted-and(-not$data.TemporaryConfigCreated-or-not$data.VerificationSucceeded)){Add-Reason 'TEMP_CONFIG_NOT_REMOVED'}}
     }
     $passed=$reasons.Count-eq0
@@ -338,75 +333,4 @@ function Get-TPMScoreAggregateV1 {
     return [ordered]@{ApplicableCount=$applicableCount;PassedCount=$passedCount;PercentageBasisPoints=$percentageBasisPoints;ThresholdBasisPoints=$thresholdBasisPoints;ScoreEligible=$scoreEligible}
 }
 
-# --- Emulator Contract Verification Framework (ECVF) integration ---
-#
-# Authority consumes the generic EmulatorContractVerificationResult envelope
-# shape (see contracts/_schema/CertificationEnvelopeV1.schema.json) as data,
-# the same way it already consumes every other Section 5.x fact's Data
-# shape -- it does not import TPMCertification.Contracts.psm1 (that would
-# create a circular module dependency, since Contracts.psm1 already imports
-# this file for its own validation primitives), and it contains no
-# ContractId- or CapabilityId-specific branching anywhere. A caller that has
-# already loaded and evaluated a contract via Contracts.psm1 passes the
-# result in; Authority only ever validates the shape and derives Status.
-$script:TpmEcvfVersionMatchStateValuesV1=@('Matched','Compatible','Unknown','Diverged','Unsupported')
-$script:TpmEcvfCapabilityTypeValuesV1=@('Environment','Runtime')
-$script:TpmEcvfStatusValuesV1=@('Pass','Fail','NotApplicable','Blocked')
-
-function Assert-TPMEmulatorContractVerificationRecordV1 {
-    param($Record)
-    $d=Assert-TPMExactFieldsV1 $Record @('ContractId','ContractSchemaVersion','UpstreamCommitUsed','VersionMatchState','CapabilityType','CapabilityId','Applicable','Status','Codes','EvidenceReferences') 'EmulatorContractVerificationResult'
-    Assert-TPMStringV1 $d.ContractId 'ContractId'
-    Assert-TPMStringV1 $d.ContractSchemaVersion 'ContractSchemaVersion'
-    if($d.UpstreamCommitUsed-cnotmatch'^[0-9a-f]{40}$'){throw 'SCHEMA_INVALID: UpstreamCommitUsed must be a lowercase 40-hex SHA'}
-    if($script:TpmEcvfVersionMatchStateValuesV1-cnotcontains$d.VersionMatchState){throw 'SCHEMA_INVALID: VersionMatchState'}
-    if($script:TpmEcvfCapabilityTypeValuesV1-cnotcontains$d.CapabilityType){throw 'SCHEMA_INVALID: CapabilityType'}
-    Assert-TPMStringV1 $d.CapabilityId 'CapabilityId'
-    Assert-TPMBooleanV1 $d.Applicable 'Applicable'
-    if($script:TpmEcvfStatusValuesV1-cnotcontains$d.Status){throw 'SCHEMA_INVALID: Status'}
-    $codes=@($d.Codes);foreach($c in $codes){Assert-TPMStringV1 $c 'Codes entry'}
-    $refs=@($d.EvidenceReferences);foreach($r in $refs){Assert-TPMStringV1 $r 'EvidenceReferences entry'}
-    if(($d.VersionMatchState-ceq'Unknown'-or$d.VersionMatchState-ceq'Diverged'-or$d.VersionMatchState-ceq'Unsupported')-and$d.Status-cne'Blocked'){throw 'SCHEMA_INVALID: untrusted VersionMatchState must yield Status=Blocked'}
-    if(-not$d.Applicable-and$d.Status-cne'NotApplicable'){throw 'SCHEMA_INVALID: a non-applicable capability must yield Status=NotApplicable'}
-    return $d
-}
-
-function New-TPMEmulatorContractVerificationRecordV1 {
-    # Builds a validated generic envelope from a loaded contract object
-    # (anything with ContractId/SchemaVersion/UpstreamPinnedCommit -- the
-    # shape Contracts.psm1's Get-TPMEmulatorContractV1 returns, but this
-    # function never calls into that module, it only reads properties) plus
-    # a pre-computed classification. Status is derived here, uniformly,
-    # from VersionMatchState/Applicable/CapabilityPassed -- never from
-    # which contract or capability it is.
-    param(
-        [Parameter(Mandatory=$true)]$Contract,
-        [Parameter(Mandatory=$true)][ValidateSet('Environment','Runtime')][string]$CapabilityType,
-        [Parameter(Mandatory=$true)][string]$CapabilityId,
-        [Parameter(Mandatory=$true)][ValidateSet('Matched','Compatible','Unknown','Diverged','Unsupported')][string]$VersionMatchState,
-        [Parameter(Mandatory=$true)][bool]$Applicable,
-        [bool]$CapabilityPassed=$false,
-        [string[]]$Codes=@(),
-        [string[]]$EvidenceReferences=@()
-    )
-    $status=
-        if($VersionMatchState-ceq'Unknown'-or$VersionMatchState-ceq'Diverged'-or$VersionMatchState-ceq'Unsupported'){'Blocked'}
-        elseif(-not$Applicable){'NotApplicable'}
-        elseif($CapabilityPassed){'Pass'}
-        else{'Fail'}
-    $record=[ordered]@{
-        ContractId=[string]$Contract.ContractId
-        ContractSchemaVersion=[string]$Contract.SchemaVersion
-        UpstreamCommitUsed=[string]$Contract.UpstreamPinnedCommit
-        VersionMatchState=$VersionMatchState
-        CapabilityType=$CapabilityType
-        CapabilityId=$CapabilityId
-        Applicable=$Applicable
-        Status=$status
-        Codes=@($Codes)
-        EvidenceReferences=@($EvidenceReferences)
-    }
-    return Assert-TPMEmulatorContractVerificationRecordV1 $record
-}
-
-Export-ModuleMember -Function Initialize-TPMCertificationTypesV1,ConvertTo-TPMJcsV1,ConvertTo-TPMFailureMessageBase64UrlV1,ConvertFrom-TPMFailureMessageBase64UrlV1,New-TPMWorkflowAuthorityV1,Get-TPMSha256HexV1,Resolve-TPMContainedPathV1,Get-TPMFactIdentifiersV1,Get-TPMEvidenceManifestV1,Get-TPMEvidenceFailureCodesV1,Assert-TPMFactRecordV1,Get-TPMFactDecisionV1,Assert-TPMEvidenceRecordV1,Copy-TPMClosedValueV1,Assert-TPMExactFieldsV1,Assert-TPMStringV1,Get-TPMScoreAggregateV1,ConvertTo-TPMJcsBase64UrlV1,ConvertFrom-TPMJcsBase64UrlV1,Get-TPMFactFailureCodesV1,Assert-TPMDiagnosticRecordV1,Assert-TPMBooleanV1,Assert-TPMIntegerV1,Get-TPMValueMapV1,Assert-TPMEmulatorContractVerificationRecordV1,New-TPMEmulatorContractVerificationRecordV1
+Export-ModuleMember -Function Initialize-TPMCertificationTypesV1,ConvertTo-TPMJcsV1,ConvertTo-TPMFailureMessageBase64UrlV1,Get-TPMSha256HexV1,Resolve-TPMContainedPathV1,Get-TPMFactIdentifiersV1,Get-TPMEvidenceManifestV1,Get-TPMEvidenceFailureCodesV1,Assert-TPMFactRecordV1,Get-TPMFactDecisionV1,Assert-TPMEvidenceRecordV1,Copy-TPMClosedValueV1,Assert-TPMExactFieldsV1,Assert-TPMStringV1,Get-TPMScoreAggregateV1,ConvertTo-TPMJcsBase64UrlV1,ConvertFrom-TPMJcsBase64UrlV1,Get-TPMFactFailureCodesV1,Assert-TPMDiagnosticRecordV1,Assert-TPMBooleanV1,Assert-TPMIntegerV1,Get-TPMValueMapV1

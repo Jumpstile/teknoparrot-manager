@@ -1,6 +1,6 @@
 # ReShade / dgVoodoo2 Auto-Download Specification Inventory
 Release context: this inventory documents the published v1.0 RC7 release and the
-unpublished RC8 candidate source. The v1.0 RC6 release is the previous published
+unpublished RC8.1 source. The v1.0 RC6 release is the previous published
 release (historical); final Version 1.0 remains unpublished.
 
 Governing sources (multiple, one per external contract this component
@@ -20,6 +20,8 @@ scope of `Get-ReShadeSetupDownloadUrl`, `Test-ReShadeSetupTrustedSignature`,
 `Expand-DgVoodoo2Zip`, and the shared SHA-256 digest verification path
 (`Get-TpmSha256FromDigestField`, `Test-TpmDownloadedFile -ExpectedSha256`,
 `Invoke-TpmDownload -ExpectedSha256`) in `TeknoParrot-Manager.ps1`.
+
+This inventory is limited to installer acquisition and archive extraction. TPM's separately curated, pinned ReShade profile/effect deployment uses the ReShade runtime preset contract and is governed by `RESHADE-PROFILE-SELECTION-SPECIFICATION-INVENTORY.md` and `RESHADE-PROFILE-SELECTION-INVARIANT-INVENTORY.md`; it does not consume the installer `ReShade32.json` / `ReShade64.json` package manifests.
 
 ## In scope
 
@@ -89,16 +91,16 @@ scope of `Get-ReShadeSetupDownloadUrl`, `Test-ReShadeSetupTrustedSignature`,
   0x04`), and try each candidate offset, in file order, as the start of a
   ZIP archive.
 - A candidate qualifies only if it opens as a valid `ZipArchive` AND
-  contains entries named exactly `ReShade32.dll` and `ReShade64.dll`. The
+  contains an entry named exactly `ReShade64.dll`. The
   first raw `PK\x03\x04` match is NOT assumed to be the real archive start
   -- confirmed live during implementation that the PE stub's own
   icon/resource data can independently produce an earlier
   `PK\x03\x04`-prefixed region that opens as a technically-valid but empty
   `ZipArchive` (observed at file offset 127840 in `ReShade_Setup_6.8.0.exe`,
-  with the real archive's required entries actually starting at offset
+  with the real archive's required entry actually starting at offset
   152576).
-- No PK signature anywhere in the file, or no candidate containing both
-  required entries, fails closed.
+- No PK signature anywhere in the file, or no candidate containing the
+  required entry, fails closed.
 - Shader/effect-package files (`ReShade32.json`/`ReShade64.json` and
   similar) are present in the real archive but are never required or
   extracted -- out of scope, see below.
@@ -194,11 +196,13 @@ scope of `Get-ReShadeSetupDownloadUrl`, `Test-ReShadeSetupTrustedSignature`,
   plain build. Belongs to a different trust/feature surface (addon
   support) this project has never offered even in the manual-instructions
   path.
-- **ReShade shader/effect-package auto-download** (`ReShade32.json` /
-  `ReShade64.json`-driven, the official installer's separate step). TPM
-  has never managed shader packages; this round does not start. The
-  self-extracting archive contains these entries but
-  `Expand-ReShadeSelfExtractingArchive` never reads or requires them.
+- **ReShade installer shader-package auto-download** (`ReShade32.json` /
+  `ReShade64.json`-driven, the official installer's separate step). This
+  extractor does not parse or install those package manifests. TPM's
+  separately curated, individually pinned profile assets are covered by
+  `RESHADE-PROFILE-SELECTION-SPECIFICATION-INVENTORY.md`; that distinct
+  deployment path does not make installer shader-package extraction part
+  of this component.
 - **Revocation checking for the ReShade certificate.** The certificate is
   self-signed with no CA chain; there is no revocation authority to check
   against. Not a gap -- there is nothing to check.

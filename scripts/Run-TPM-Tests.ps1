@@ -7,6 +7,7 @@ param(
     [string]$ExpectedBranch,
     [string]$ExpectedCommit,
     [switch]$NoPwshRelaunch,
+    [string]$ReportDirectory,
     [ValidateSet('Summary', 'Detailed', 'Diagnostic')]
     [string]$VerbosityLevel = 'Summary',
     [int]$PesterRegressionTimeoutSeconds = 1800
@@ -14,6 +15,17 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
+# This run reads a real TeknoParrot folder and copies profile files from it for the report, so it starts only when the operator opted in
+# for this run with TPM_REAL_DATA_TESTS=1 (exactly 1). The same rule is in Invoke-TPM-RealInstanceSmoke.ps1. It is checked here first,
+# before any module is loaded, any path is probed or any report folder is created.
+if($env:TPM_REAL_DATA_TESTS-cne'1'){
+    Write-Host 'This run reads a real TeknoParrot folder and copies profile files from it for the report. It did not start.'
+    Write-Host ''
+    Write-Host 'To allow it for this run only, set TPM_REAL_DATA_TESTS=1 and point -TeknoParrotRoot at the folder you want checked.'
+    Write-Host ''
+    Write-Host 'Nothing was read or changed.'
+    exit 2
+}
 $executionModule=Join-Path $PSScriptRoot 'TPMCertification.Execution.psm1'
 if(-not(Test-Path -LiteralPath $executionModule -PathType Leaf)){throw "Certification execution module not found: $executionModule"}
 Import-Module $executionModule -Force
@@ -30,26 +42,33 @@ function Stop-TPMPreflightV1 {
     exit 2
 }
 
+function Stop-TPMTimedOutV1 {
+    param([Parameter(Mandatory=$true)][int]$TimeoutSeconds,[Parameter(Mandatory=$true)][string]$ReportDirectory,[Parameter(Mandatory=$true)][string]$LogDirectory)
+    Write-Host 'FINAL STATUS: PIPELINE ABORTED'
+    Write-Host ("Reason: certification ran out of time after {0} seconds. It was stopped, together with every program it started."-f$TimeoutSeconds)
+    Write-Host 'Next step: read the technical log. If the PC is just slow, run it again with a bigger -PesterRegressionTimeoutSeconds.'
+    Write-Host ("Report: {0}"-f$ReportDirectory)
+    Write-Host ("Technical log: {0}"-f$LogDirectory)
+    exit 71
+}
+
 if([string]::IsNullOrWhiteSpace($RepoPath)){$RepoPath=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))}
+else{
+    # A relative -RepoPath is relative to where the caller is, and the relaunched child starts inside the repository, so it gets the plain full path.
+    # A folder that is not there is left as typed; the preflight below reports it.
+    $resolvedRepoPath=Resolve-Path -LiteralPath $RepoPath -ErrorAction SilentlyContinue
+    if($resolvedRepoPath){$RepoPath=$resolvedRepoPath.ProviderPath}
+}
 if([string]::IsNullOrWhiteSpace($HarnessRoot)){
     $HarnessRoot=Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($RepoPath))) 'TPM-TestHarness'
 }
 $stamp=Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'
-$reportDirectory=Join-Path $HarnessRoot "Reports\$stamp"
+$reportDirectory=if([string]::IsNullOrWhiteSpace($ReportDirectory)){Join-Path $HarnessRoot "Reports\$stamp"}else{[IO.Path]::GetFullPath($ReportDirectory)}
 $logDirectory=Join-Path $reportDirectory 'TechnicalLogs'
 $statusPath=Join-Path $reportDirectory 'OperatorStatus.txt'
-# ADR155-0309 round 3: HarnessRoot is this tool's own top-level trusted
-# boundary, but Assert-TPMOwnedDirectoryV1 requires a trusted ROOT to
-# already exist -- HarnessRoot itself may not exist yet on a first run, so
-# it cannot be its own bootstrap root. The genuinely already-existing
-# anchor one level further up is HarnessRoot's own parent directory (in
-# the default case this is the same directory containing the resolved
-# repository checkout, which must already exist for $RepoPath itself to
-# have resolved). Everything from there down through
-# TechnicalLogs is brought into existence one authorized level at a time
-# via New-TPMOwnedDirectoryChainV1, not via a raw New-Item -Force that
-# would silently create (and never reparse-check) untracked intermediate
-# levels.
+# The report folder and its TechnicalLogs folder are created here one authorized level at a time with
+# New-TPMOwnedDirectoryChainV1, which checks every level for reparse points. The anchor is HarnessRoot's own parent
+# (it must already exist, and HarnessRoot itself may not exist yet on a first run). A raw New-Item is not used for them.
 $harnessRootParent=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($HarnessRoot))
 if([string]::IsNullOrEmpty($harnessRootParent)){throw "PROCESS_DIRECTORY_INVALID: HarnessRoot has no resolvable parent directory to anchor trust in: $HarnessRoot"}
 [void](New-TPMOwnedDirectoryChainV1 -Root $harnessRootParent -Path $reportDirectory)
@@ -64,7 +83,7 @@ if (-not $NoPwshRelaunch -and $PSVersionTable.PSEdition -ne 'Core') {
         '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass',
         '-File', $PSCommandPath,
         '-NoPwshRelaunch','-RepoPath',$RepoPath,'-TeknoParrotRoot',$TeknoParrotRoot,
-        '-HarnessRoot',$HarnessRoot,'-VerbosityLevel',$VerbosityLevel,
+        '-HarnessRoot',$HarnessRoot,'-ReportDirectory',$reportDirectory,'-VerbosityLevel',$VerbosityLevel,
         '-PesterRegressionTimeoutSeconds',[string]$PesterRegressionTimeoutSeconds
     )
     if($RunUnattendedTPM){$argsList+='-RunUnattendedTPM'}
@@ -76,9 +95,14 @@ if (-not $NoPwshRelaunch -and $PSVersionTable.PSEdition -ne 'Core') {
     # deliberately supported degenerate case, see Assert-TPMOwnedDirectoryV1).
     # LogDirectory's trust anchor is $reportDirectory, already established
     # above via New-TPMOwnedDirectoryChainV1.
-    $result=Invoke-TPMIsolatedProcessV1 -FilePath $pwshCommand.Source -ArgumentList $argsList -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDirectory -LogDirectory $logDirectory -Identity 'pwsh-relaunch' -TimeoutSeconds ($PesterRegressionTimeoutSeconds+1800)
-    $safeOutput=Get-Content -LiteralPath $result.StdOutPath -Raw -ErrorAction SilentlyContinue
-    if($safeOutput){Write-Host $safeOutput.TrimEnd()}
+    # The PowerShell 7 child below runs the harness with a timeout of Pester + 1800 seconds. This outer wait is longer by 600 seconds so
+    # the inner run can stop its own children and write its report first; only then can this outer timeout fire.
+    $relaunchTimeoutSeconds=$PesterRegressionTimeoutSeconds+2400
+    $result=Invoke-TPMIsolatedProcessV1 -FilePath $pwshCommand.Source -ArgumentList $argsList -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDirectory -LogDirectory $logDirectory -Identity 'pwsh-relaunch' -TimeoutSeconds $relaunchTimeoutSeconds -OperatorStatusPath $statusPath -RelayOperatorStatus
+    # The step lines and the "still running" lines were shown while the run went on, so only the rest of the child's text is shown now (the final status is in it).
+    $safeOutput=Get-Content -LiteralPath $result.StdOutPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+    if($safeOutput){foreach($line in ($safeOutput.TrimEnd() -split "`r?`n")){if($line -notmatch '^(\[\d+/\d+\] |Pester totals:|Certification is still running)'){Write-Host $line}}}
+    if($result.TimedOut){Stop-TPMTimedOutV1 -TimeoutSeconds $relaunchTimeoutSeconds -ReportDirectory $reportDirectory -LogDirectory $logDirectory}
     exit [int]$result.ExitCode
 }
 $harness = Join-Path $PSScriptRoot "Invoke-TPM-RealInstanceSmoke.ps1"
@@ -132,6 +156,8 @@ try{
     if(-not[string]::IsNullOrWhiteSpace($ExpectedCommit)-and[string]$identity.Commit-ne$ExpectedCommit){[void]$failures.Add("Expected HEAD '$ExpectedCommit' but found '$($identity.Commit)'.")}
     if(-not[string]::IsNullOrWhiteSpace($ExpectedCommit)-and[string]$identity.RemoteCommit-ne$ExpectedCommit){[void]$failures.Add("Expected remote SHA '$ExpectedCommit' but found '$($identity.RemoteCommit)'.")}
 }catch{[void]$failures.Add("Repository is not readable: $($_.Exception.Message)")}
+# The report and log folders already exist (made above). Only HarnessRoot can be missing here, when -ReportDirectory is not
+# inside it; the line below then creates it with a plain New-Item and no reparse check, and the probe only proves it is writable.
 foreach($directory in @($HarnessRoot,$reportDirectory,$logDirectory)){
     try{
         if(-not(Test-Path -LiteralPath $directory -PathType Container)){[void](New-Item -ItemType Directory -Path $directory -Force)}
@@ -182,8 +208,9 @@ try{
     Write-Host ("Technical log: {0}"-f$logDirectory)
     exit 70
 }
-$statusText=if(Test-Path -LiteralPath $statusPath){Get-Content -LiteralPath $statusPath -Raw}else{''}
-$finalSummaryLines=@($statusText -split "`r?`n"|Where-Object{$_ -match '^(FINAL STATUS:|Reason:|Total elapsed:|Report:|Technical log:)'})
+if($harnessResult.TimedOut){Stop-TPMTimedOutV1 -TimeoutSeconds ($PesterRegressionTimeoutSeconds+1800) -ReportDirectory $reportDirectory -LogDirectory $logDirectory}
+$statusText=if(Test-Path -LiteralPath $statusPath){Get-Content -LiteralPath $statusPath -Raw -Encoding UTF8}else{''}
+$finalSummaryLines=@($statusText -split "`r?`n"|Where-Object{$_ -match '^(FINAL STATUS:|Reason:|Warning:|Total elapsed:|Report:|Technical log:)'})
 foreach($line in $finalSummaryLines){Write-Host $line}
 if($statusText-notmatch'(?m)^FINAL STATUS:'){
     Write-Host 'FINAL STATUS: PIPELINE ABORTED'

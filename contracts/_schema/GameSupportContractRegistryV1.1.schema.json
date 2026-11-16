@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Jumpstile/teknoparrot-manager/contracts/_schema/GameSupportContractRegistryV1.1.schema.json",
+  "title": "GameSupportContractRegistryV1",
+  "description": "Immutable registry schema version 1.1.0.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["RegistryId", "SchemaVersion", "SnapshotId", "CapturedAtUtc", "Source", "ExpectedProfileCount", "ContractCount", "ClassificationTotals", "ReleaseGate", "Contracts"],
+  "properties": {
+    "RegistryId": { "const": "TPM-GAME-SUPPORT-CONTRACTS" },
+    "SchemaVersion": { "const": "1.1.0" },
+    "SnapshotId": { "type": "string", "minLength": 1 },
+    "CapturedAtUtc": { "type": "string", "minLength": 1 },
+    "Source": { "type": "object" },
+    "ExpectedProfileCount": { "type": ["integer", "null"] },
+    "ContractCount": { "type": "integer", "minimum": 0 },
+    "ClassificationTotals": { "type": "object" },
+    "ReleaseGate": { "type": "object" },
+    "Contracts": { "type": "array", "items": { "$ref": "GameSupportContractV1.1.schema.json" } }
+  }
+}

@@ -1,45 +1,81 @@
 # Advanced users
 
-TeknoParrot Manager is designed to be beginner-friendly by default, but it is not only a beginner wizard.
+TeknoParrot Manager is designed to be beginner-friendly by default.
 
-Advanced users can use TPM as a repeatable, evidence-backed operations tool for TeknoParrot libraries, cabinet setups, and frontend workflows. The goal is to hide unnecessary complexity, not capability.
+It is not only a beginner wizard.
 
-## Why TPM still matters when you already know TeknoParrot
+Advanced users can use TeknoParrot Manager as a repeatable, evidence-backed operations tool. It works for TeknoParrot libraries, cabinet setups, and frontend workflows.
 
-Advanced users usually know how to make a single game work. TPM is useful because it makes the larger workflow safer, faster, and easier to audit:
+The goal is to hide unnecessary complexity, not capability.
+
+## Why TeknoParrot Manager still matters when you already know TeknoParrot
+
+Advanced users usually know how to make a single game work.
+
+TeknoParrot Manager makes the larger workflow safer, faster, and easier to audit (check later).
+
+**Safer day-to-day work:**
 
 - repeatable registration and AutoSync workflows instead of one-off manual edits;
 - bulk operations with previews, logs, and action summaries;
 - backups before supported writes and clear recovery paths;
+- read-only warnings for known compatibility problems and missing required components (they report problems but change nothing).
+
+**Clear evidence:**
+
 - separation between detection, registration, launch success, controls readiness, and actual verification;
-- read-only warnings for known compatibility problems and missing required components;
-- contract-backed checks where TPM has verified evidence;
-- technical detail when needed without forcing every user through raw diagnostics;
+- contract-backed checks (checks against a written rule) where TeknoParrot Manager has verified evidence;
+- technical detail when needed without forcing every user through raw diagnostics.
+
+**Works with the rest of your setup:**
+
 - consistent handling across direct TeknoParrot usage and supported frontend workflows;
-- safer foundations for future cabinet, controller, lightgun, LEDBlinky, LaunchBox, Big Box, HyperSpin, and RetroBat integration.
+- safer foundations for future cabinet, controller, lightgun, LEDBlinky, LaunchBox, Big Box, and RetroBat integration; any optional HyperSpin plugin
+  work is deferred until after TeknoParrot Manager 1.0.
 
-## What TPM gives a power user
+## What TeknoParrot Manager gives a power user
 
-TPM is most valuable when you care about repeatability and evidence.
+TeknoParrot Manager is most valuable when you care about repeatable results and evidence.
 
-It can help answer questions such as:
+It can help answer these questions.
+
+**About one run:**
 
 - What did this run detect?
 - What did it change?
 - What did it deliberately refuse to change?
 - What still needs manual review?
-- Which files were backed up before a supported write?
-- Which profile, path, hash, contract, or warning produced this result?
-- Was a game merely registered, or was launch/control readiness actually verified?
-- Is this issue owned by TPM, TeknoParrot, a frontend, Windows, device software, an emulator, or the user?
 
-That distinction matters. TPM should not turn expert setups into opaque automation. It should make expert workflows easier to repeat and safer to review.
+**About the evidence:**
+
+- Which files were backed up before a supported write?
+- Which game setup file (profile), path, file fingerprint (hash), contract, or warning produced this result?
+- Was a game merely registered, or was launch/control readiness actually verified?
+- Who owns this issue: TeknoParrot Manager, TeknoParrot, a frontend, Windows, device software, an emulator, or the user?
+
+That difference matters.
+
+TeknoParrot Manager should not turn expert setups into opaque automation. It should make expert workflows easier to repeat and safer to review.
+
+### More detail
+
+- A "profile" is a game setup file.
+- A "hash" is a file fingerprint (SHA-256) that shows a file has not changed.
+- A "contract" is a written rule that a check is made against.
 
 ## Beginner-first does not mean expert-limited
 
-TPM's normal wording is plain language so first-time users do not get lost. Advanced detail remains important and should stay available through logs, summaries, dry runs, evidence sections, compatibility notes, and issue/diagnostic output.
+TeknoParrot Manager's normal wording is plain language, so first-time users do not get lost.
 
-The intended model is layered:
+Advanced detail remains important. It stays available through these places:
+
+- logs and summaries;
+- dry runs (previews that change nothing);
+- evidence sections;
+- compatibility notes;
+- issue/diagnostic output.
+
+The intended model has three layers:
 
 | Layer | Purpose |
 |---|---|
@@ -49,17 +85,24 @@ The intended model is layered:
 
 ## Boundaries still apply
 
-TPM is not supposed to guess its way through an advanced setup.
+TeknoParrot Manager is not supposed to guess its way through an advanced setup.
 
-It must not silently change TeknoParrot, emulator, frontend, Windows, driver, firmware, device-software, or user-owned state unless a supported TPM-owned path exists with the required safety gates.
+It must not silently change things that belong to someone else. That includes TeknoParrot, emulator, frontend, Windows, driver, firmware, device-software, or user-owned state.
 
-Future advanced workflows must preserve the same rule:
+The only exception is a supported change that TeknoParrot Manager owns, with the required safety gates in place.
+
+Future advanced workflows must keep the same rule.
+
+**First, look and plan:**
 
 1. detect the observed state;
 2. classify the evidence;
 3. identify the owner;
 4. preview any supported change;
 5. back up first;
+
+**Then, change and check:**
+
 6. request approval when needed;
 7. apply only owned, bounded changes;
 8. verify the effective result;
@@ -67,9 +110,11 @@ Future advanced workflows must preserve the same rule:
 
 ## Message for final 1.0
 
-For final Version 1.0 messaging, TPM should be described as useful for both groups:
+For final Version 1.0 messaging, TeknoParrot Manager should be described as useful for both groups:
 
 - beginners who need safe guidance and fewer confusing choices;
 - advanced users who want repeatable operations, technical evidence, controlled automation, safer bulk changes, and better release-quality validation.
 
-The product promise is not magic. The product promise is safer, clearer, repeatable TeknoParrot management.
+The product promise is not magic.
+
+The product promise is safer, clearer, repeatable TeknoParrot management.

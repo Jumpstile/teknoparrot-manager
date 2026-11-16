@@ -38,7 +38,7 @@ if (-not $loadedModule) {
 
 function Write-UpdaterInfo {
     param([string]$Message)
-    Write-Host "[TPM updater] $Message"
+    Write-Host "[TeknoParrot Manager updater] $Message"
 }
 
 Enable-TpmTls12
@@ -48,15 +48,14 @@ if (-not $CheckOnly -and -not $Apply) {
 }
 
 $localVersionText = Get-TpmLocalVersion -Path $ScriptPath
-$localVersion = ConvertTo-TpmVersion -VersionText $localVersionText
 $release = Get-LatestRelease -Owner $Owner -Repository $Repository
-$latestVersionText = ($release.tag_name -replace '^v', '').Trim()
-$latestVersion = ConvertTo-TpmVersion -VersionText $latestVersionText
+$latestVersionText = [string]$release.tag_name
+$versionComparison = Compare-TpmVersions -VersionTextA $localVersionText -VersionTextB $latestVersionText
 
-Write-UpdaterInfo "Installed TPM version: $localVersionText"
-Write-UpdaterInfo "Latest TPM release   : $($release.tag_name)"
+Write-UpdaterInfo "Installed TeknoParrot Manager version: $localVersionText"
+Write-UpdaterInfo "Latest TeknoParrot Manager release   : $($release.tag_name)"
 
-if ($latestVersion -le $localVersion) {
+if ($versionComparison -ge 0) {
     Write-UpdaterInfo 'Already current. No update needed.'
     return
 }
@@ -66,7 +65,8 @@ Write-UpdaterInfo "Update available: $localVersionText -> $($release.tag_name)"
 Write-UpdaterInfo "Selected asset  : $($asset.name)"
 
 if ($CheckOnly -and -not $Apply) {
-    Write-UpdaterInfo 'Check only. Re-run with -Apply to update.'
+    Write-UpdaterInfo 'Check only. -Apply replaces only TeknoParrot-Manager.ps1 and refuses release packages that contain other files.'
+    Write-UpdaterInfo "To install a complete release, download its ZIP from https://github.com/$Owner/$Repository/releases and extract all of its files over your TeknoParrot Manager folder."
     return
 }
 
@@ -75,27 +75,54 @@ if ($Apply) {
         return
     }
 
-    Assert-TpmWritableTarget -Path $ScriptPath
-
     $downloadedZipPath = $null
     $extractedScriptPath = $null
     try {
-        $backupPath = New-TpmUpdateBackup -Path $ScriptPath
-        Write-UpdaterInfo "Backup created : $backupPath"
-
         $downloadedZipPath = Save-TpmReleaseAsset -Asset $asset
         Write-UpdaterInfo "Downloaded     : $downloadedZipPath"
 
-        $extractedScriptPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-update-extracted-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        # The in-place updater can only replace the main script. Refuse a
+        # multi-file release package before anything is probed, backed up,
+        # extracted or replaced, so a refusal changes nothing on disk.
+        $packageCheck = Test-TpmUpdatePackageIsSingleScript -ZipPath $downloadedZipPath -EntryName $ScriptEntryName
+        if (-not $packageCheck.SingleScript -and $packageCheck.ExtraEntryCount -eq 0) {
+            $emptyMessage = "This release does not contain $ScriptEntryName, so nothing was installed. Download the complete release ZIP from https://github.com/$Owner/$Repository/releases and extract all of its files over your TeknoParrot Manager folder."
+            Write-UpdaterInfo $emptyMessage
+            throw $emptyMessage
+        }
+        if (-not $packageCheck.SingleScript) {
+            $refusalMessage = "This release is a multi-file package. The in-place updater replaces only TeknoParrot-Manager.ps1 and cannot update the scripts and tools that ship with it, so nothing was installed. Download the complete release ZIP from https://github.com/$Owner/$Repository/releases and extract all of its files over your TeknoParrot Manager folder."
+            Write-UpdaterInfo $refusalMessage
+            Write-UpdaterInfo ("Package contains {0} other file(s), for example: {1}" -f $packageCheck.ExtraEntryCount, (@($packageCheck.ExtraEntrySample) -join ', '))
+            throw $refusalMessage
+        }
+
+        Assert-TpmWritableTarget -Path $ScriptPath
+        $backupPath = New-TpmUpdateBackup -Path $ScriptPath
+        Write-UpdaterInfo "Backup created : $backupPath"
+
+        # Stage beside the script (same volume) so the final Move-Item is one rename, never a copy-then-delete.
+        # Resolve against the PowerShell location: .NET GetFullPath would use the process folder, which Set-Location does not change.
+        $scriptFolder = Split-Path -Parent (Resolve-Path -LiteralPath $ScriptPath).ProviderPath
+        $extractedScriptPath = Join-Path $scriptFolder ("tpm-update-extracted-" + [guid]::NewGuid().ToString('N') + '.ps1')
         Expand-TpmReleaseZipEntry -ZipPath $downloadedZipPath -EntryName $ScriptEntryName -DestinationPath $extractedScriptPath | Out-Null
         Write-UpdaterInfo "Extracted      : $extractedScriptPath"
 
-        Test-TpmExtractedScript -Path $extractedScriptPath | Out-Null
-        Write-UpdaterInfo 'Extracted script passed content validation.'
+        Test-TpmExtractedScript -Path $extractedScriptPath -ExpectedVersion $latestVersionText | Out-Null
+        Write-UpdaterInfo 'Extracted script passed content and release-version validation.'
 
+        $expectedHash = (Get-FileHash -LiteralPath $extractedScriptPath -Algorithm SHA256 -ErrorAction Stop).Hash
         Move-Item -LiteralPath $extractedScriptPath -Destination $ScriptPath -Force -ErrorAction Stop
-        if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
-            throw "Update replacement did not complete: $ScriptPath not found after Move-Item."
+        $installedHash = if (Test-Path -LiteralPath $ScriptPath -PathType Leaf) { (Get-FileHash -LiteralPath $ScriptPath -Algorithm SHA256 -ErrorAction SilentlyContinue).Hash } else { $null }
+        if ($installedHash -cne $expectedHash) {
+            # The old file is still there or the copy is incomplete: put the backup back, check it, and say what really happened.
+            $restored = $false
+            try {
+                Copy-Item -LiteralPath $backupPath -Destination $ScriptPath -Force -ErrorAction Stop
+                $restored = ((Get-FileHash -LiteralPath $ScriptPath -Algorithm SHA256 -ErrorAction Stop).Hash -ceq (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256 -ErrorAction Stop).Hash)
+            } catch { $restored = $false }
+            if ($restored) { throw "Update replacement did not complete: $ScriptPath does not match the downloaded release. The previous version was restored from $backupPath." }
+            throw "Update replacement did not complete: $ScriptPath does not match the downloaded release, and the previous version could not be put back. Copy $backupPath over $ScriptPath to get it back."
         }
         $extractedScriptPath = $null
 

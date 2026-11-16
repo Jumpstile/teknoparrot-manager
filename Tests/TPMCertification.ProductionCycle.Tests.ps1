@@ -18,7 +18,7 @@ function New-TestFacts([string]$Root,[bool]$ForcePesterFailure=$false){
   $hash='a'*64;$repo=[IO.Path]::GetFullPath((Join-Path $Root 'repo'));$report=[IO.Path]::GetFullPath((Join-Path $Root 'report'));$backup=[IO.Path]::GetFullPath((Join-Path $Root 'backup'))
   @(
    [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath=$repo;RepositoryAvailable=$true;RepositoryClean=$true;GitStatus='(clean)';CertificationIdentity=(New-TestCertificationIdentity)}}
-   [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=$true;Total=2;Passed=$(if($ForcePesterFailure){1}else{2});Failed=$(if($ForcePesterFailure){1}else{0});Skipped=0;NotRun=0;Engine='Pester 5.7.1 / pwsh 7.6.3';SuiteSha256=$hash}}
+   [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=$true;Total=2;Passed=$(if($ForcePesterFailure){1}else{2});Failed=$(if($ForcePesterFailure){1}else{0});Skipped=0;NotRun=0;FailedContainers=0;Engine='Pester 5.7.1 / pwsh 7.6.3';SuiteSha256=$hash}}
    [ordered]@{Identifier='Static Analysis';Applicable=$true;Data=[ordered]@{Parser=@([ordered]@{Identifier='WindowsPowerShell51';Executed=$true;ErrorCount=0;ToolVersion='5.1'},[ordered]@{Identifier='Pwsh';Executed=$true;ErrorCount=0;ToolVersion='7.6.3'});Encoding=[ordered]@{Executed=$true;NonAsciiByteCount=0;Files=@('TeknoParrot-Manager.ps1')};PSScriptAnalyzer=[ordered]@{Executed=$true;FindingCount=0;ToolVersion='1.24.0'};InjectionHunter=[ordered]@{Executed=$true;FindingCount=0;UnresolvedFindingCount=0;ToolVersion='1.0.0';Dispositions=@()}}}
    [ordered]@{Identifier='Real Install Health';Applicable=$true;Data=[ordered]@{ReportPath=(Join-Path $report 'InstallHealth.json');LoadState='Loaded';LoadError=$null;Checks=@([ordered]@{Name='TeknoParrotUi.exe exists';Passed=$true},[ordered]@{Name='GameProfiles folder exists';Passed=$true},[ordered]@{Name='UserProfiles folder exists';Passed=$true})}}
    [ordered]@{Identifier='Backups';Applicable=$true;Data=[ordered]@{UserProfilesBackupCreated=$true;UserProfilesBackupPath=$backup;UserProfilesBackupVerified=$true;UserProfilesBackupSha256=$hash;GameProfilesBackupCreated=$false;GameProfilesBackupPath=$null;GameProfilesBackupVerified=$false;GameProfilesBackupSha256=$null;BackupVerificationExecuted=$true}}
@@ -360,6 +360,26 @@ Describe 'ADR-0155 Phase 3 post-commit exception safety (ADR155-0309 Checkpoint 
   ($succeededMessage -like 'POST_COMMIT_ROLLBACK_FAILED:*')|Should -Be $false
   ($failedMessage -like 'POST_COMMIT_ROLLBACK_FAILED:*')|Should -Be $true
   ($ordinaryAbortMessage -like 'POST_COMMIT_ROLLBACK_FAILED:*')|Should -Be $false
+ }
+
+ It 'a production abort always writes FINAL STATUS: PIPELINE ABORTED with its reason, and adds a warning when the publication rollback did not finish (runs the real abort block, no install)' {
+  $harnessPath=Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\Invoke-TPM-RealInstanceSmoke.ps1'
+  $parsed=[System.Management.Automation.Language.Parser]::ParseFile($harnessPath,[ref]$null,[ref]$null)
+  $abortBlock=@($parsed.FindAll({param($n)$n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -ceq '$productionAborted'},$true))
+  $abortBlock.Count|Should -Be 1
+  $hostPath=[Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+  foreach($case in @(@{Message='POST_COMMIT_ROLLBACK_FAILED: rollback did not fully succeed (MarkerRemoved=False)';Warn=$true},@{Message='PRODUCTION_EVIDENCE_COUNT_INVALID: expected 9 harness evidence records, found 3';Warn=$false})){
+   $statusPath=Join-Path $TestDrive ([guid]::NewGuid().ToString('N')+'.status')
+   $scriptPath=Join-Path $TestDrive ([guid]::NewGuid().ToString('N')+'.ps1')
+   $lines=@("`$script:OperatorStatusPath='$statusPath'","`$productionAborted=`$true","`$productionAbortMessage='$($case.Message)'","`$productionDestinationRoot='dest-root'","`$certificationRepositoryLock=`$null",'function ConvertTo-TPMSafeTechnicalTextV1 { param($Text) $Text }','function Exit-TPMCertificationRepositoryLockV1 { param($Lock) }','function Clear-TPMConsoleStatus {}',$abortBlock[0].Extent.Text)
+   [IO.File]::WriteAllText($scriptPath,($lines -join "`r`n"))
+   $null=& $hostPath -NoProfile -NonInteractive -File $scriptPath 2>&1
+   $LASTEXITCODE|Should -Not -Be 0
+   $status=[IO.File]::ReadAllText($statusPath)
+   $status|Should -Match '(?m)^FINAL STATUS: PIPELINE ABORTED'
+   $status|Should -Match ('(?m)^Reason: '+[regex]::Escape($case.Message))
+   if($case.Warn){$status|Should -Match '(?m)^Warning: .*dest-root'}else{$status|Should -Not -Match '(?m)^Warning:'}
+  }
  }
 Describe 'Certification-only publication boundary' {
  BeforeEach {

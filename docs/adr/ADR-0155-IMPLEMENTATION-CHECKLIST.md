@@ -116,7 +116,7 @@ have passed. Stable identifiers are retained across revisions.
 - [x] ADR155-Q006 -- PSScriptAnalyzer passes with repository settings.
 - [x] ADR155-Q007 -- InjectionHunter findings are individually dispositioned.
 - [ ] ADR155-Q008 -- Independent code review returns MERGE-READY.
-- [ ] ADR155-Q009 -- Final arcade-machine certification passes on the exact
+- [ ] ADR155-Q009 -- Final test-PC certification passes on the exact
   merged commit before PR #155 may be treated as release-ready.
 
 ## Phase 1 implementation evidence -- 2026-07-19
@@ -1488,7 +1488,7 @@ spec material and never merged or cherry-picked):**
      spaces or Win32 command-line metacharacters on this environment's
      PowerShell/Windows build -- a path like `a file (with) [odd] chars.ps1`
      arrived at the child process split into multiple separate argv tokens,
-     silently corrupting it. Fixed with `ConvertTo-TPMWin32QuotedArgumentV1`,
+     silently corrupting it. Fixed with `ConvertTo-TPMWin32ArgumentV1`,
      a CommandLineToArgvW-compatible quoting function applied to every
      argument before `Start-Process` joins them; proven with a dedicated
      regression test using a path containing both spaces and metacharacters.
@@ -1676,7 +1676,7 @@ unchecked and partial.
 
 ## Phase 3 ADR155-0309 Checkpoint B2: atomic production-harness cutover -- 2026-07-22
 
-Base: `codex/issue-154-evidence-finalization` at
+Base: `issue-154-evidence-finalization` at
 `17c3c2e8c67d2acd504a2b31e1517a11d1547966` (Checkpoint B1, approved, pushed,
 CI-green). `scripts/Invoke-TPM-RealInstanceSmoke.ps1` is rewired end-to-end
 onto the Phase 3 production authority; every competing legacy certification
@@ -2460,8 +2460,8 @@ clean.
 ## Issue #154 real-hardware certification blockers -- unattended Mode config and Pester 5.8.0 regression -- 2026-07-27
 
 Two independently confirmed blockers from a real-hardware certification run
-at `2405a59` (historical evidence retained for provenance only:
-`W:\Emulators\TeknoParrot\TPM-TestHarness\Reports\2026-07-27_19-33-01`).
+at `2405a59` (historical evidence retained for provenance only, kept on the
+test PC; the folder path is not published).
 
 **Blocker 1 -- `[Unattended] Mode must be set before starting.` (exit 1).**
 Root cause: `-Unattended` had no CLI or config mechanism to select an

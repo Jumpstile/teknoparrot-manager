@@ -45,7 +45,9 @@ BeforeAll {
 
 Describe 'certification noninteractive execution boundary' {
  It 'sanitizes ANSI and control characters without corrupting ordinary text' {
-  ConvertTo-TPMSafeTechnicalTextV1 -Text ("ok`e[31mred`e[0m`b")|Should -Be 'okred\x08'
+  # ESC is built from its character code: Windows PowerShell 5.1 has no `e escape (it reads as the letter e), so the old literal made this test fail only there.
+  $esc=[string][char]27
+  ConvertTo-TPMSafeTechnicalTextV1 -Text ("ok${esc}[31mred${esc}[0m`b")|Should -Be 'okred\x08'
  }
  It 'runs a child with closed stdin, separate logs, exact exit, and termination proof' {
   $engine=if($PSVersionTable.PSEdition-eq'Core'){(Get-Command pwsh).Source}else{(Get-Command powershell.exe).Source}
@@ -462,7 +464,8 @@ Describe 'log sanitization fails closed on persistent retry exhaustion' {
  Context 'Write-TPMSafeTechnicalFileV1 end-to-end fail-closed behavior (genuine OS-level file locks)' {
   It 'a genuine transient sharing violation that clears within the retry bound succeeds and sanitizes the file' {
    $path=Join-Path $TestDrive 'clears-in-time.log'
-   [IO.File]::WriteAllText($path,"before`e[31mred`e[0m",(New-Object Text.UTF8Encoding $false))
+   $esc=[string][char]27
+   [IO.File]::WriteAllText($path,"before${esc}[31mred${esc}[0m",(New-Object Text.UTF8Encoding $false))
    $blocker=New-Object IO.FileStream($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
    # A background PowerShell instance (its own runspace, via
    # BeginInvoke/EndInvoke) releases the lock partway through the retry
@@ -482,7 +485,8 @@ Describe 'log sanitization fails closed on persistent retry exhaustion' {
   }
   It 'a persistent read-blocking lock (failed read scenario) throws the deliberate exception and preserves the unsanitized evidence file untouched' {
    $path=Join-Path $TestDrive 'persistent-read-block.log'
-   $original="before`e[31mred`e[0m"
+   $esc=[string][char]27
+   $original="before${esc}[31mred${esc}[0m"
    [IO.File]::WriteAllText($path,$original,(New-Object Text.UTF8Encoding $false))
    $blocker=New-Object IO.FileStream($path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
    try{
@@ -494,7 +498,8 @@ Describe 'log sanitization fails closed on persistent retry exhaustion' {
   }
   It 'a persistent write-blocking lock (failed write scenario, read succeeds) throws the deliberate exception and preserves the unsanitized evidence file untouched' {
    $path=Join-Path $TestDrive 'persistent-write-block.log'
-   $original="before`e[31mred`e[0m"
+   $esc=[string][char]27
+   $original="before${esc}[31mred${esc}[0m"
    [IO.File]::WriteAllText($path,$original,(New-Object Text.UTF8Encoding $false))
    # FileShare.Read still permits File.ReadAllText's own Read-shared open to
    # succeed, but denies any handle that requests Write access -- isolating
@@ -509,7 +514,8 @@ Describe 'log sanitization fails closed on persistent retry exhaustion' {
   }
   It 'never writes raw unsanitized content to the operator console (Write-Host) during a failure path' {
    $path=Join-Path $TestDrive 'console-safety.log'
-   $original="before`e[31mSECRET-MARKER-TOKEN`e[0m"
+   $esc=[string][char]27
+   $original="before${esc}[31mSECRET-MARKER-TOKEN${esc}[0m"
    [IO.File]::WriteAllText($path,$original,(New-Object Text.UTF8Encoding $false))
    $blocker=New-Object IO.FileStream($path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
    Mock -ModuleName TPMCertification.Execution -CommandName Write-Host -MockWith {}

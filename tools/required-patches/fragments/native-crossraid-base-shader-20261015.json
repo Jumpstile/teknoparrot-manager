@@ -1,0 +1,32 @@
+{
+  "Schema": 3,
+  "Entries": [
+    {
+      "Id": "shining-force-cross-raid-105-base-shader-restoration",
+      "ProfileId": "ShiningForceCrossRaid",
+      "BuildName": "Shining Force - Cross Raid (1.05 Ver A)(2011-08-03)(JPN)[Sega RingEdge][TP]",
+      "Executable": "project_f-ringedge-release.exe",
+      "ExecutableSha256": "82E66635A9A91CEC59721DB7BD9258464F70C44377BA707FFCB51EA2D3DB9317",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Shining Force - Cross Raid (1.05 Ver A)(2011-08-03)(JPN)[Sega RingEdge][TP].zip",
+      "SourceEntry": "rom/shader.farc",
+      "SourceSize": 9173328,
+      "SourceSha1": "04E0DCEC14CCA1B69BF190A7E02F2F0AB56E0231",
+      "SourceSha256": "66E0CC00E84C01F6E77E6B446A019212EBD27610FDD81CA866648C5E97E80933",
+      "ExclusiveGroup": "",
+      "Prerequisites": [],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "rom/shader.farc",
+          "BeforeState": "Absent",
+          "AfterSha256": "66E0CC00E84C01F6E77E6B446A019212EBD27610FDD81CA866648C5E97E80933",
+          "Payload": "payload/rom/shader.farc",
+          "PayloadSha256": "66E0CC00E84C01F6E77E6B446A019212EBD27610FDD81CA866648C5E97E80933"
+        }
+      ]
+    }
+  ]
+}

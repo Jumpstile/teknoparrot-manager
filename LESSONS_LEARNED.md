@@ -29,7 +29,7 @@ new test coverage), not a production-release action under the Release
 Governance Standard, so it did not require Release Manager sign-off on *what*
 to merge -- only the *mechanism* (admin override instead of a genuine
 independent review) was an exception to the standing workflow.
-Real-arcade-machine certification was run after each merge against the exact
+Real test-PC certification was run after each merge against the exact
 merged commit and returned CERTIFIED every time: 8/8 (100%) for PR #87/#89's
 commit (`a85aa269`), 9/9 (100%) for PR #91's commit (`aa99b945`, including the
 new Virtual Beta Tester gate) -- strong evidence the bypassed review didn't let
@@ -63,7 +63,7 @@ in the review pipeline that should be fixed before a fourth instance, not
 documented again.
 
 **Resolution.** The independent-reviewer account this entry called for
-was configured (Regular Codex, used as the documented external review
+was configured (an external AI reviewer, used as the documented external review
 workflow across this session and since). `CONSTITUTION.md`'s
 "Single-Maintainer Governance" section formalizes the underlying policy
 this entry's recommendation implied: Independent Review Required is
@@ -78,7 +78,7 @@ this condition is handled by.
 
 ## TPM Certification Suite (commit bb2a160): [scriptblock]::Create() dot-sourcing breaks cross-file Pester module mocking
 
-**What happened.** A real arcade-machine certification run reported 10 Pester
+**What happened.** A real test-PC certification run reported 10 Pester
 failures, all in `Tests/TpmAutoUpdate.DestructivePath.Tests.ps1`, all with the
 same shape: `Response status code does not indicate success: 403 (rate limit
 exceeded)`. That file's `Mock -ModuleName TpmAutoUpdate.Core Get-LatestRelease`
@@ -175,8 +175,8 @@ later Pester invocation in that session inherited the type for free. The CI
 runner starts a pristine process every run; no prior activity loads anything.
 
 **Why independent verification mattered.** The CI failure was caught via an
-independent audit (Codex) against the committed code, not via local
-re-running. The Codex review surfaced the failures at a point where local
+independent audit (an external reviewer) against the committed code, not via local
+re-running. The external review surfaced the failures at a point where local
 tests showed all-green, providing objective evidence that the code in
 the repository was broken even though the development machine was not
 reporting it.
@@ -242,10 +242,6 @@ written without any platform check.
   (`$script:FFBBlasterUnsupportedPlatforms`) is checked FIRST -- field presence
   cannot override it. An FFB-Blaster-shaped field with a non-Bool FieldType
   returns `Unknown`, not `Supported`, and `WouldWrite = $false`.
-- `Get-GameProfileSchemaDrift`: a pure, read-only diagnostic that classifies a
-  profile's structure against a known baseline. Unknown top-level nodes and
-  unknown FieldTypes are reported but never acted on; `WouldWrite` is always
-  `$false`.
 
 **Rule.** Capability detection must answer TWO questions independently:
 "does this profile have the right field?" AND "is this platform one where
@@ -285,7 +281,7 @@ catch the type-deserialization failure.
 
 ## v0.99.24 / v0.99.25: Subagent and external review findings require independent verification
 
-**What happened (twice).** A subagent review and an external (DeepSeek) review
+**What happened (twice).** A subagent review and an external review
 both claimed that `New-PostgresPgPassFile`'s backslash-escaping
 (`-replace '\\', '\\'`) was a no-op. In both cases, an empirical check
 (input `p:a\ss` -> output `p\:a\\ss`, verified via raw char codes) proved
@@ -434,11 +430,11 @@ with all path parameter variants.
 different strings. The backfill was never queried by anything -- it silently did
 nothing for the real-world case where ZIP filenames include version and date suffixes.
 The v0.99.16 follow-up fixed a separate call site but the same root cause: 18 games
-in rgecko's collection (the exact size of `$RawThrillsPathLimits`) still showed as
+in a tester's collection (the exact size of `$RawThrillsPathLimits`) still showed as
 "available to extract" on v0.99.16 despite all 18 being already registered and bound.
 
 **Fix.** `Resolve-RegisteredGameFolder` resolves a ZIP to its real folder via the
-collection dat: dat maps the ZIP's normalised name -> `ProfileCode` ->
+collection dat: dat maps the ZIP's normalized name -> `ProfileCode` ->
 `UserProfiles\<Code>.xml` -> `GamePath` -> containing folder. Independent of folder
 name -- correct as long as the game is already registered.
 
@@ -569,7 +565,7 @@ truncated that combined list to `Select-Object -First $maxRows` whenever it
 overflowed the viewport height. At a short console height this kept the
 *front* of the render (the banner and the earliest menu sections) and
 silently dropped whatever didn't fit off the *end* -- which, because the
-footer (Quit/Help controls) and the Application section (option 14, Exit)
+footer (Quit/Help controls) and the Application section (then-option 14, Exit)
 are built last, meant exactly the controls a user needs to actually operate
 the menu were the first things to disappear. A pre-existing Pester test even
 asserted this as intentional (`Should -Not -Match 'Exit'` on a short-viewport
@@ -584,7 +580,7 @@ trims from the *front* (keeping the tail) specifically so the last real menu
 item survives -- the opposite truncation direction from before. The Compact
 tier's "Type ? for descriptions." hint (a purely decorative line) was also
 moved from the end of the body to the beginning, because it was winning the
-tail-preservation priority over the actual "14) Exit" line by virtue of
+tail-preservation priority over the then-current "14) Exit" line by virtue of
 render order alone, not by design.
 
 **Rule.** When a render pipeline has to drop content to fit a viewport,
@@ -607,7 +603,7 @@ would always be *some* row budget left for body content. At the documented
 minimum supported viewport, 60x10, that assumption was wrong: the framed
 banner (6 rows) and footer (2 rows) alone consumed the entire 8-row budget,
 leaving zero rows for ANY body content -- not just early items, everything,
-including option 14 (Exit). The packaged diagnostic (`scripts\Debug-TPM-
+including the then-option 14 (Exit). The packaged diagnostic (`scripts\Debug-TPM-
 MenuLayout.ps1`) made this directly visible once its own separate crash
 (below) was fixed: `-Width 60 -Height 10 -Render` rendered only a banner and
 a footer, with nothing in between.
@@ -618,8 +614,8 @@ tighter version of the same layout: single-line banner and footer (no frame,
 no blank separator) free up several rows, and every option's `"N) Label"` is
 flow-packed as densely as the width allows instead of one per row. Tokens are
 packed whole (never split a number from its own label across two lines), and
-if even that doesn't fit, item rows trim from the front so the last item
-(ending in `14) Exit`) and the footer survive over the earliest options.
+if even that doesn't fit, item rows trim from the front so the then-current
+last item (ending in `14) Exit`) and the footer survive over the earliest options.
 
 **What failed, part 2: the packaged diagnostic script drifted from the
 render pipeline it exists to debug.** `scripts\Debug-TPM-MenuLayout.ps1`
@@ -684,7 +680,7 @@ correct) is not evidence the body executed correctly.
 
 ## Issue #154 -- parameter validation can bypass controlled failure paths
 
-A wrapper forwarded an omitted optional EvidenceType as an explicit empty string. ValidateSet rejected it before the callee body could return its intended Skipped/Failed record, aborting arcade certification during evidence finalization. For internal transaction metadata, validate inside the function and return structured failure evidence; wrappers must not forward capture-only parameters on skip paths. A required final artifact may remain outside numeric scoring, but failure must still force the overall certification outcome to NOT CERTIFIED.
+A wrapper forwarded an omitted optional EvidenceType as an explicit empty string. ValidateSet rejected it before the callee body could return its intended Skipped/Failed record, aborting test-PC certification during evidence finalization. For internal transaction metadata, validate inside the function and return structured failure evidence; wrappers must not forward capture-only parameters on skip paths. A required final artifact may remain outside numeric scoring, but failure must still force the overall certification outcome to NOT CERTIFIED.
 
 
 ## Issue #154 follow-up -- finalization must be one transaction
@@ -713,7 +709,7 @@ A `Start-Process -ArgumentList ... -PassThru` object's `.ExitCode` property read
 
 ## ADR155-0309 Checkpoint B1 -- Start-Process -ArgumentList does not quote elements containing spaces/metacharacters
 
-An array passed to `Start-Process -ArgumentList` is joined with plain spaces before being handed to the child process on this environment's build -- an element like `a file (with) [odd] chars.ps1` arrived at the child process split into several separate argv tokens (`a`, `file`, `(with)`, `[odd]`, `chars.ps1`), not one path. This is not the auto-quoting behavior some PowerShell documentation/folklore assumes. Fix: quote every argument yourself with a CommandLineToArgvW-compatible algorithm (`ConvertTo-TPMWin32QuotedArgumentV1` in `TPMCertification.ProductionFacts.psm1`) before building the `-ArgumentList` array. Rule: never assume `Start-Process -ArgumentList` will safely handle an argument containing a space or Win32 command-line metacharacter (`"`, and by extension anything a human might type into a file/folder name) without testing it directly against a path built from real-world messy input; add a dedicated regression test with such a path whenever a new external-process invocation is introduced.
+An array passed to `Start-Process -ArgumentList` is joined with plain spaces before being handed to the child process on this environment's build -- an element like `a file (with) [odd] chars.ps1` arrived at the child process split into several separate argv tokens (`a`, `file`, `(with)`, `[odd]`, `chars.ps1`), not one path. This is not the auto-quoting behavior some PowerShell documentation/folklore assumes. Fix: quote every argument yourself with a CommandLineToArgvW-compatible algorithm (`ConvertTo-TPMWin32ArgumentV1` in `TPMCertification.Execution.psm1`) before building the `-ArgumentList` array. Rule: never assume `Start-Process -ArgumentList` will safely handle an argument containing a space or Win32 command-line metacharacter (`"`, and by extension anything a human might type into a file/folder name) without testing it directly against a path built from real-world messy input; add a dedicated regression test with such a path whenever a new external-process invocation is introduced.
 
 ## ADR155-0309 Checkpoint B1 -- @() directly around a Collections.Generic.List[object] can silently corrupt data
 
@@ -735,9 +731,9 @@ Large-scale legacy-function removal from `Invoke-TPM-RealInstanceSmoke.ps1` was 
 
 `Test-TPMProductionInjectionHunterV1`'s pairing loop used `$orderedEntries=if($registry.ByMatchKey.ContainsKey($key)){Sort-TPMByLineV1 $registry.ByMatchKey[$key]}else{@()}` -- when a current finding's match key had no corresponding registry entry at all (as opposed to a stale registry entry with no matching finding), the `else{@()}` branch was taken, and `$orderedEntries` came out `$null`, not an empty array, crashing the very next line's `$orderedEntries.Count` with `PropertyNotFoundException`, silently absorbed by the surrounding `try`/`catch` as `Executed=$false`. This is the exact same "`return @()` unwraps to `$null`" class already documented above (General section) and already worked around elsewhere in this same function via `Sort-TPMByLineV1`'s `return ,$arr` -- but the bare `else{@()}` branch was never comma-wrapped, so it hit the bug. This had never been exercised before (every prior finding always matched an existing registry entry), so it stayed latent through three B1 review rounds and was only exposed when Checkpoint B2's large-scale legacy-function deletion shifted enough code that at least one match key briefly had no registry counterpart. One test (`does not cross-match an identical extent in a different file`) had been asserting `Executed | Should -BeFalse` for this exact scenario -- that assertion happened to pass only because of the crash, not because it verified the intended behavior (a safe `Confirmed`/unresolved fallthrough); fixed the test to assert the real contract (`Executed=$true`, `UnresolvedFindingCount=1`, the unmatched finding disposed `Confirmed`) once the underlying bug was fixed. Rule: any `if(...){X}else{@()}` (or any bare empty-array literal as one branch of a value-producing `if/else`) is exactly as unsafe as a bare `return @()` and must be comma-wrapped (`else{,@()}`); a passing test that asserts a "fails closed"/`$false` outcome for an edge case is not proof the edge case is handled correctly -- verify what specifically caused the assertion to pass before trusting it as intentional-design coverage.
 
-## Issue #172 -- the "return @() unwraps to $null" class reproduced on a real arcade certification run, three layers deep
+## Issue #172 -- the "return @() unwraps to $null" class reproduced on a real test-PC certification run, three layers deep
 
-Real certification (`RunIdentity 2e045f369a2240adb8eaaaed4d9496a0`) against an arcade machine whose pcsx2x6 crosshair setup was never completed (the canonical `Pcsx2x6Crosshairs` directory does not exist on that machine) reported `BeforeSkipped=1`/`AfterSkipped=1` for that tree even though nothing was ever unreadable -- the folder simply is not there. Confirmed root cause, three layers of the exact same class already documented above (General section; ADR155-0309 Checkpoint B2 entries), none of which had been connected to each other before this issue: (1) `Get-TreeHash`'s `if (!(Test-Path ...)) { return @() }` collapses to `$null` at the caller, same as every other bare-`return @()` case in this codebase; (2) `Compare-TreeSnapshot`'s own `foreach ($item in @($Before))` then wraps that `$null` into a ONE-element array containing a single `$null` (`@($null)` has `Count -eq 1` on this environment), which its per-item loop counted as a real skipped entry; (3) a caller-side `$preCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { @() }` has the identical un-wrapped-empty-branch bug documented in the B2 `if/else` entry above, so even a caller who never touches `Get-TreeHash`'s own bug could independently manufacture the same phantom skip. Fixed all three: `Get-TreeHash` now `return ,@()`; `Compare-TreeSnapshot` now explicitly normalizes a `$null` argument to a real empty array (`if ($null -eq $Before) { ,@() } else { ,@($Before) }` -- both branches comma-wrapped, confirmed by direct reproduction that the non-null branch alone still collapses to `$null` when its own array happens to be empty) before its per-item loop runs, so it is no longer only as safe as its caller; and both caller-side `else { @() }` branches comma-wrapped too. Rule: this exact defect class (a bare `@()` -- as a `return`, as one branch of an `if/else`, as a function-call fallback -- collapsing to `$null` under this environment's assignment/capture semantics) has now independently bitten three unrelated subsystems in this codebase (InjectionHunter fact-adapter pairing, ProductionCycle rollback bookkeeping, and this pre-existing tree-snapshot diffing code that predates ADR-0155 entirely). Treat it as a standing audit item, not a one-off: grep for `else *{ *@\(\) *}` and bare `return @()` across the whole script whenever touching adjacent code, not only when a symptom already points at it. A producer-side fix alone is not sufficient when a consumer's own defense against `$null` is what a reviewer explicitly required -- fix the producer, the consumer's own defensive normalization, and every caller-side fallback independently, since any one of the three can reintroduce the same symptom on its own.
+Real certification (`RunIdentity 2e045f369a2240adb8eaaaed4d9496a0`) against an test PC whose pcsx2x6 crosshair setup was never completed (the canonical `Pcsx2x6Crosshairs` directory does not exist on that machine) reported `BeforeSkipped=1`/`AfterSkipped=1` for that tree even though nothing was ever unreadable -- the folder simply is not there. Confirmed root cause, three layers of the exact same class already documented above (General section; ADR155-0309 Checkpoint B2 entries), none of which had been connected to each other before this issue: (1) `Get-TreeHash`'s `if (!(Test-Path ...)) { return @() }` collapses to `$null` at the caller, same as every other bare-`return @()` case in this codebase; (2) `Compare-TreeSnapshot`'s own `foreach ($item in @($Before))` then wraps that `$null` into a ONE-element array containing a single `$null` (`@($null)` has `Count -eq 1` on this environment), which its per-item loop counted as a real skipped entry; (3) a caller-side `$preCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { @() }` has the identical un-wrapped-empty-branch bug documented in the B2 `if/else` entry above, so even a caller who never touches `Get-TreeHash`'s own bug could independently manufacture the same phantom skip. Fixed all three: `Get-TreeHash` now `return ,@()`; `Compare-TreeSnapshot` now explicitly normalizes a `$null` argument to a real empty array (`if ($null -eq $Before) { ,@() } else { ,@($Before) }` -- both branches comma-wrapped, confirmed by direct reproduction that the non-null branch alone still collapses to `$null` when its own array happens to be empty) before its per-item loop runs, so it is no longer only as safe as its caller; and both caller-side `else { @() }` branches comma-wrapped too. Rule: this exact defect class (a bare `@()` -- as a `return`, as one branch of an `if/else`, as a function-call fallback -- collapsing to `$null` under this environment's assignment/capture semantics) has now independently bitten three unrelated subsystems in this codebase (InjectionHunter fact-adapter pairing, ProductionCycle rollback bookkeeping, and this pre-existing tree-snapshot diffing code that predates ADR-0155 entirely). Treat it as a standing audit item, not a one-off: grep for `else *{ *@\(\) *}` and bare `return @()` across the whole script whenever touching adjacent code, not only when a symptom already points at it. A producer-side fix alone is not sufficient when a consumer's own defense against `$null` is what a reviewer explicitly required -- fix the producer, the consumer's own defensive normalization, and every caller-side fallback independently, since any one of the three can reintroduce the same symptom on its own.
 
 ## ADR155-0309 / Issue #172 -- `finally` is not permission to finalize incomplete input
 
@@ -814,7 +810,7 @@ Rule: a defensive fix for a strict-mode/property-existence class of bug is corre
 
 ## RC4 -- a release-ZIP include list that names a module's dependents but not the dependency itself ships a module that cannot load
 
-The RC4 packaging list (RELEASE-SAFETY-CHECKLIST.md section 4, mirrored in AGENTS.md) included `scripts\TPMCertification.Contracts.psm1` -- the ECVF loader/validator/evaluator module `TeknoParrot-Manager.ps1` itself imports at runtime for pcsx2x6 crosshair setup -- but not `scripts\TPMCertification.Authority.psm1`. `TPMCertification.Contracts.psm1`'s very first line is `Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Authority.psm1')`: a hard, unconditional dependency. Every real install of the already-published RC4 ZIP that reaches the pcsx2x6 crosshair code path therefore has `Import-Module $ecvfContractsModule` throw immediately (the sibling file it tries to import next to itself does not exist in the package), which every call site's own try/catch design correctly catches and fails closed on -- "could not load or evaluate the pcsx2x6 emulator contract," ECVF state `Unknown`, cursor_path write skipped -- so nothing crashes, but the ECVF safety layer silently never actually runs for any RC4 pcsx2x6 user. Found 2026-08-14 via a dependency read of `TPMCertification.Contracts.psm1` itself (`Import-Module` at line 1), not by any packaging test -- `Tests\Test-ReleasePackage.ps1`'s required-entry list had the same gap as the checklist it was validated against, so it could not have caught this either. Both the checklist/AGENTS.md include lists and the validator's required-entry list were corrected in the same pass to require `TPMCertification.Authority.psm1`. The already-published RC4 asset itself was NOT modified (out of scope for the task that found this); it needs a separate patch release.
+The RC4 packaging list (RELEASE-SAFETY-CHECKLIST.md section 4) included `scripts\TPMCertification.Contracts.psm1` -- the ECVF loader/validator/evaluator module `TeknoParrot-Manager.ps1` itself imports at runtime for pcsx2x6 crosshair setup -- but not `scripts\TPMCertification.Authority.psm1`. `TPMCertification.Contracts.psm1`'s very first line is `Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Authority.psm1')`: a hard, unconditional dependency. Every real install of the already-published RC4 ZIP that reaches the pcsx2x6 crosshair code path therefore has `Import-Module $ecvfContractsModule` throw immediately (the sibling file it tries to import next to itself does not exist in the package), which every call site's own try/catch design correctly catches and fails closed on -- "could not load or evaluate the pcsx2x6 emulator contract," ECVF state `Unknown`, cursor_path write skipped -- so nothing crashes, but the ECVF safety layer silently never actually runs for any RC4 pcsx2x6 user. Found 2026-08-14 via a dependency read of `TPMCertification.Contracts.psm1` itself (`Import-Module` at line 1), not by any packaging test -- `Tests\Test-ReleasePackage.ps1`'s required-entry list had the same gap as the checklist it was validated against, so it could not have caught this either. Both the checklist/AGENTS.md include lists and the validator's required-entry list were corrected in the same pass to require `TPMCertification.Authority.psm1`. The already-published RC4 asset itself was NOT modified (out of scope for the task that found this); it needs a separate patch release.
 
 Rule: when a release-ZIP include list names a module, grep that module's own source for `Import-Module`/`. $PSScriptRoot\...` and confirm every sibling file it loads at runtime is also on the include list -- a module "included in the ZIP" that cannot actually load once extracted is indistinguishable, to every downstream fail-closed try/catch, from a module that was never imported at all, which means the gap produces no crash and no obviously-wrong error message, only a silently-disabled safety feature. A packaging validator that enumerates required entries by hand alongside the checklist it mirrors will silently inherit the checklist's own omissions; neither one is a substitute for actually reading the shipped module's own dependency imports.
 
@@ -848,3 +844,75 @@ replacement for the structured failure that caused it.
 The Pester certification gate remains an exact `5.7.1` pin. Installed
 `5.8.0` or `3.4.0` results are not certification evidence; the environment
 must provide `5.7.1` before a certification run can start.
+
+## PostgreSQL recovery handoff -- normalized backup evidence is not the raw bundle
+
+Guided password recovery had two different backup representations. `New-PostgresRecoveryBackup` returns the raw PostgreSQL bundle with `Path`, `ConfigBackups`, `ProfileBackups`, and `Verified`; the profile-setup consumer directly enumerates both required arrays. `Reset-PostgresPasswordAutomatically` already returned a normalized `TPM.TransactionResult.v1.Backup`, so the wrapper's fallback that attached the raw bundle only when `Backup` was absent never ran. The top-level flow then passed the generic `Backup` to profile setup, losing both collections.
+
+Setup also wrapped profile and config sources in separate nested arrays, so the generic `Items` field appeared populated while scalar source paths were not members of the list. Concatenating the two source arrays keeps `Items` flat without adding PostgreSQL-specific fields to `Backup`.
+
+Keep the representations separate: the normalized `Backup` remains the generic transaction evidence object, while `RecoveryBundle` carries the original raw producer result through the wrapper and top-level setup handoff. Derive `Attempted` from a returned producer result or an actual producer invocation, `Created` from observed evidence-directory existence, and `Verified` from the producer's explicit result; do not infer verification from a path or object being non-null.
+
+Rule: when one workflow hands a domain-specific evidence bundle through a generic transaction result, preserve the original bundle in a distinct sidecar and pass that sidecar to its consumer. Test non-empty required collections through the real wrapper and setup call, and assert both the raw sidecar identity and canonical generic `Backup` shape.
+
+## Pester child-process capture -- pipe deadlock and wrapped diagnostics
+
+**Observed defect.** The owner-status Pester test launched `Test-TpmPermanentProcedures.ps1` with stdout and stderr redirected, read stdout to EOF before stderr, then called unbounded `WaitForExit()`. If the child fills stderr before closing stdout, it waits for the parent to read stderr while the parent waits for stdout EOF. The test also asserted against PowerShell's rendered `Write-Error` text without accounting for line-wrap continuation markers.
+
+**Evidence.** The focused test under Windows PowerShell 5.1 completed in 11.75 seconds rather than hanging, but failed its first semantic assertion because the child `pwsh` diagnostic wrapped at a `|` continuation. A deterministic reproduction of the original read order, with a `pwsh` child writing 1 MiB to stdout followed by 1 MiB to stderr, exceeded a 31-second bound; terminating the parent process tree confirmed both processes exited. This proves the pipe-deadlock defect class, not the exact stalled stack in the canceled CI run.
+
+**Fix and rule.** `Invoke-TpmTestChildProcess` starts `ReadToEndAsync()` on both streams before a bounded process wait, kills a timed-out child, confirms exit within a bounded grace period, and bounds completion of both readers. The gate test removes only PowerShell's visual `|` continuation prefix before applying the same owner-status, exit-code, and stale-package assertions. Keep the high-volume dual-stream and timeout tests; never replace them with a small-output fixture or sequential `ReadToEnd()` calls.
+
+## Issue #370 and ZIP preflight -- three PowerShell output/exception behaviors that silently change results
+
+**What happened.** (1) `Test-PostgresPassword` returned `($false, $true)` for a
+wrong password: the `$true` came from `Remove-PostgresPgPassFile` in a
+`finally` block, and PowerShell returns every statement's output, including
+`finally` output. `if` treats a two-item array as true, so failed
+authentication, database creation, and restore could look like success. The
+existing tests mocked these helpers, so they never saw the real output.
+(2) `Expand-ZipFileSafe` iterated `$archive.Entries`. On Windows PowerShell
+5.1, the .NET Framework reader throws for an entry name with path-illegal
+characters, but a PowerShell property read swallows that exception and
+returns nothing, so such an archive "extracted" zero files with no error.
+(3) Restoring an unset `PGPASSFILE` with `$null` left it defined as `''`
+under PowerShell 7, because PowerShell passes `$null` to a .NET string
+argument as `''`.
+
+**How it was diagnosed.** Synthetic scenarios were checked on both engines,
+with engine-specific outcomes: exception swallowing on PS5.1 and
+empty-environment restoration on PS7. Fixtures included compiled fake `psql.exe`/`createdb.exe`/
+`pg_restore.exe`/`pg_dump.exe` whose exit codes are set per test, raw ZIPs with
+byte-patched entry names, and a direct `get_Entries()` versus `.Entries`
+comparison (`ArgumentException` versus zero iterations).
+
+**Rule.** Wrap any call whose value is not the function's result in
+`[void](...)`, especially inside `finally`; test the real helper's output
+count and type, not a mock. Read archive entries with `get_Entries()` so a
+reader exception cannot become an empty list. Remove an environment variable
+with `[NullString]::Value`, not `$null`, and only when the prior value was
+truly null -- an explicit empty prior value is restored, not removed.
+Validate ZIP entry names raw, before
+any normalization, and validate the whole archive before the first write.
+
+## RC8 qualification -- finite consoles and native worker environments
+
+An attached 30-row console is not an unbounded output buffer: absolute row
+increments failed at row 30, while native newline scrolling retained all 32
+probe rows on both engines. Layout dimensions belong to the draw's starting
+geometry; a post-draw sample must not bless output rendered across a resize.
+Capture-only input/console fixtures must declare redirected or unsupported
+geometry when asserting those fallbacks, not inherit the maintainer's window.
+
+On PS5.1 a PS7-first module path selected incompatible Utility/Security exports.
+Parent inbox imports repaired the private Pester harness but did not initialize
+a Start-Job child; the IH worker required its own absolute inbox Utility import.
+Do not remove TypeData or change global module paths to hide that boundary.
+The certification publisher's nested scratch still exceeded legacy MAX_PATH
+under a moderately shortened harness root: the observed failing leaf was 268
+characters; a genuinely minimal private root passed without a product change.
+Keep heavy analyzer runs serial and the fail-closed 180-second bound intact.
+
+New regression authorship after a candidate edit is a process deviation, even
+when an exact pre-edit backup reproduces the failure. Preserve that chronology;
+red/green backup evidence is useful proof, not retroactive compliance.

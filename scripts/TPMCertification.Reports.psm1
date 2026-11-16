@@ -18,25 +18,6 @@ function New-TPMEligibilityReportV1 {
     }
 }
 
-$script:TpmFinalEvidenceEligibleStatusV1='ELIGIBLE'
-$script:TpmFinalEvidenceNotEligibleStatusV1='NOT ELIGIBLE PENDING EVIDENCE AND PUBLICATION'
-
-function Get-TPMFinalEvidenceStatusV1 {
-    param([Parameter(Mandatory=$true)]$ScorePreview)
-    if($null-eq$ScorePreview-or$ScorePreview.GetType().FullName-cne'Jumpstile.TPM.Certification.V1.TPMScorePreviewV1'){throw 'REPORT_INVALID: ScorePreview must be an issued TPMScorePreviewV1'}
-    try{$parsed=ConvertFrom-Json -InputObject $ScorePreview.CanonicalJson -ErrorAction Stop}catch{throw 'REPORT_INVALID: ScorePreview.CanonicalJson did not parse as JSON'}
-    if($null-eq$parsed-or$null-eq$parsed.ScoreItems){throw 'REPORT_INVALID: ScorePreview is missing ScoreItems'}
-    $aggregate=Get-TPMScoreAggregateV1 -ScoreItems $parsed.ScoreItems
-    $status=if($aggregate.ScoreEligible){$script:TpmFinalEvidenceEligibleStatusV1}else{$script:TpmFinalEvidenceNotEligibleStatusV1}
-    return [pscustomobject]@{
-        Status=$status
-        ScoreEligible=$aggregate.ScoreEligible
-        ApplicableCount=$aggregate.ApplicableCount
-        PassedCount=$aggregate.PassedCount
-        PercentageBasisPoints=$aggregate.PercentageBasisPoints
-    }
-}
-
 function New-TPMPublicationReportV1 {
     param([Parameter(Mandatory=$true)]$PublicationCandidate)
     if($null-eq$PublicationCandidate-or$PublicationCandidate.GetType().FullName-cne'Jumpstile.TPM.Certification.V1.TPMPublicationCandidateV1'){throw 'REPORT_INVALID: PublicationCandidate must be an issued TPMPublicationCandidateV1'}
@@ -372,4 +353,4 @@ function New-TPMCommitMarkerReportV1 {
     }
 }
 
-Export-ModuleMember -Function New-TPMEligibilityReportV1,Get-TPMFinalEvidenceStatusV1,New-TPMPublicationReportV1,New-TPMFinalOutcomeReportV1,New-TPMFinalOutcomeCandidateReportV1,New-TPMFinalOutcomeProjectionV1,New-TPMScorecardReportV1,New-TPMValidationReportV1,New-TPMManifestReportV1,New-TPMCommitMarkerReportV1,Assert-TPMMarkdownRunIdentityV1,Assert-TPMMarkdownSha256V1
+Export-ModuleMember -Function New-TPMEligibilityReportV1,New-TPMPublicationReportV1,New-TPMFinalOutcomeReportV1,New-TPMFinalOutcomeCandidateReportV1,New-TPMFinalOutcomeProjectionV1,New-TPMScorecardReportV1,New-TPMValidationReportV1,New-TPMManifestReportV1,New-TPMCommitMarkerReportV1,Assert-TPMMarkdownRunIdentityV1,Assert-TPMMarkdownSha256V1

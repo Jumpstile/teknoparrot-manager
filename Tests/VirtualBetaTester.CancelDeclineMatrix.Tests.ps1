@@ -25,7 +25,11 @@ BeforeAll {
     $functionAsts = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-cancel-decline-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
+    $progressModuleDirectory = Join-Path $TestDrive 'scripts'
+    [void][IO.Directory]::CreateDirectory($progressModuleDirectory)
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TpmProgress.psm1') -Destination (Join-Path $progressModuleDirectory 'TpmProgress.psm1') -Force
     . $extractedFunctionsPath
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
     $script:PostgresRecoveryStatus = $null
@@ -56,7 +60,7 @@ Describe "Virtual Beta Tester: GPU fix setup safe cancel (issue #88 A4)" -Tag 'T
         $originalContent = Get-Content -LiteralPath (Join-Path $userProfilesDir 'ALIENS.xml') -Raw
 
         Mock Get-DetectedGpuVendor { return [pscustomobject]@{ Vendor = $null; Name = $null } }
-        Mock Read-Host { return "" } -ParameterFilter { $Prompt -like "*Enter GPU vendor*" }
+        Mock Read-Host { return "" } -ParameterFilter { $Prompt -like "*Which graphics card*" }
 
         Invoke-GpuFixSetup -UserProfilesDir $userProfilesDir -TpRoot (Join-Path $TestDrive "no-tp-root")
 
@@ -71,7 +75,7 @@ Describe "Virtual Beta Tester: GPU fix setup safe cancel (issue #88 A4)" -Tag 'T
         $originalContent = Get-Content -LiteralPath (Join-Path $userProfilesDir 'ALIENS.xml') -Raw
 
         Mock Get-DetectedGpuVendor { return [pscustomobject]@{ Vendor = $null; Name = $null } }
-        Mock Read-Host { return "PowerVR" } -ParameterFilter { $Prompt -like "*Enter GPU vendor*" }
+        Mock Read-Host { return "PowerVR" } -ParameterFilter { $Prompt -like "*Which graphics card*" }
 
         Invoke-GpuFixSetup -UserProfilesDir $userProfilesDir -TpRoot (Join-Path $TestDrive "no-tp-root")
 

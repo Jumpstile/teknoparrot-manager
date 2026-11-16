@@ -1,53 +1,117 @@
-# AutoSync
+# AutoSync (menu 1)
 
-AutoSync compares the Eggman/RomVault DAT list with local folders and helps register or extract TeknoParrot games.
+AutoSync unzips your game ZIP files into your games folder, then registers the games with TeknoParrot. Use it when your games are stored as ZIP files, for example on a NAS or a big drive.
 
-## Extracted-Folder Detection
+If your games are already unzipped, use [[Register]] (menu 2) instead.
 
-AutoSync now uses the shared `Resolve-ExtractedGameFolder` resolver before showing a game as available to extract.
+---
 
-Match order:
+## How to run it
 
-1. Exact and normalized folder name.
-2. RetroBat suffix-aware matches: `.teknoparrot`, `.parrot`, `.game`.
-3. DAT/profile-code identity when available.
-4. Known short-name aliases for Raw Thrills and path-length-sensitive games.
-5. Already registered profile paths.
-6. Date/version/region-normalized exact match using the same normalized-key mechanism, not a separate fuzzy similarity tier.
+1. Start TeknoParrot Manager and type `1` at the main menu.
+2. Choose `P` (preview, the default), `R` (run now) or `B` (back). See "Preview / dry-run mode" below.
+3. If AutoSync does not know your game ZIP folder yet, it asks for it. Pick the folder that holds your `.zip` files directly, not a folder above it.
+4. Choose the games to unzip (see "Choosing games").
+5. AutoSync backs up your `UserProfiles` folder, unzips the games, then registers them. See [[Register]] for what happens next.
 
-## Safety Rules
+---
 
-- On first setup, TPM derives a staging-folder default from the configured
-  TeknoParrot location. Enter accepts it; B opens the browser for another path.
-- A staging path must not be inside or contain TeknoParrot, either ZIP source,
-  or the TPM program/package folder. Typed and browsed recovery choices use the
-  same symmetric containment check before they are saved or used.
-- TPM creates a missing staging directory only after a real AutoSync run is
-  selected. Preview/Dry Run does not create it.
-- Existing folders are never deleted, renamed, or moved automatically.
-- The resolver is used only to suppress duplicate extraction prompts.
-- A folder is treated as already extracted only when it exists and contains files.
-- Existing backup and path-safety behavior remains unchanged.
+## Preview / dry-run mode
 
-## Readiness handoff
+Every run starts with this choice:
 
-The ACTION REQUIRED summary reports controls readiness separately from
-registration, launch observation, and TeknoParrot wizard state. A registered
-or successfully launched game can still be **Missing**, **Not verified**,
-**Unsupported**, or **Unknown** for controls. When that happens, open
-TeknoParrot controls configuration and map/test controls before treating the
-game as ready. TPM does not turn registration, launch success, wizard
-completion, bound counts, or stored device references into verified controls.
+```
+  [P] Preview (default) -- show what would change; no game or profile changes
+  [R] Run now -- back up UserProfiles first, then make the changes
+  [B] Back
+```
 
-The controls status file is a propagation inventory, not verification evidence.
-TPM does not write mappings as part of this readiness handoff.
+A preview shows which games would be unzipped and why (new, changed ZIP, and so on). It writes nothing: no backup, no folders, no profiles.
 
-## Issue #66 Coverage
+When the preview ends, you are asked if you want to make the changes for real. Answer `Y` and TeknoParrot Manager scans again first, so nothing is out of date. Answer `N` and nothing changes.
 
-Regression coverage includes:
+---
 
-- `ALIENS.teknoparrot` recognized for Aliens Armageddon.
-- `Battle Gear 3 (2.08J)(2003-04-11)[Namco System 246][TP].teknoparrot` matched against the DAT/list entry `Battle Gear 3 (2.08J)(2002)[Namco System 246][TP]`.
-- Negative cases where similarly named games must not be confused.
+## What AutoSync does to games you already unzipped
 
-The full reported 25-title list still requires reporter confirmation against local data.
+- **ZIP did not change:** the game folder is left alone. Your saves and settings stay as they are. You see `Already extracted (ZIP unchanged)`.
+- **ZIP changed:** the game folder is replaced with the new one. Before that, every file in the old folder that is extra or different from the ZIP (saves, settings, ReShade files) is copied to `<your TeknoParrot folder>\TeknoParrotManager\Backups\AutoSyncReplaced\<game>_<date and time>\`.
+- **Those files cannot be saved, or no Backups folder is set up:** that game is not updated, and nothing is changed for it. You see `This game was not updated`. Other games continue. Fix the Backups folder or free some space, then run AutoSync again.
+
+<details><summary>Details</summary>
+
+- A game is unzipped again if its ZIP changed, the folder is missing, or an earlier unzip was cut short (a `.extracting` marker file stays next to the folder until the unzip is finished).
+- Files whose names start with `!TeknoParrot Collection` (notes, changelog) are never unzipped.
+- A ZIP with unsafe file paths is refused before anything is written.
+- If two ZIPs in one run would write to the same game folder, only the first one is used.
+- The list of what was unzipped is kept in `TeknoParrot-Manager.syncstate.json` in your games folder.
+- In the overrides file (`TeknoParrot-Manager.overrides.json`, next to the script), `noSync` skips games and `onlySync` limits AutoSync to the games you list.
+
+</details>
+
+---
+
+## Games folder rules
+
+Your games folder (also called the staging folder) must:
+
+- Be outside your TeknoParrot folder, outside the TeknoParrot Manager folder, and outside every ZIP folder.
+- Have enough free space. AutoSync warns you if the drive has less than about 1.5 times the size of your ZIPs, and asks before it goes on.
+
+A local drive is best, for example `D:\TeknoParrotGames`. A network drive is allowed. TeknoParrot Manager then measures its write speed, warns you if it is slow, and asks if you want to continue.
+
+On first setup TeknoParrot Manager suggests a safe folder. Press Enter to take it, or `B` to browse.
+
+---
+
+## Second ZIP folder (optional)
+
+If you keep some games apart from your main collection, you can add a second ZIP folder. AutoSync asks for it (`Path (or press Enter to skip)`) until you set one. Point it directly at the folder with the `.zip` files. Both folders are shown in one list, and games from the second one are marked `[+]`. A game that is in both folders is listed once.
+
+Both folders unzip into the same games folder. If the second folder overlaps the games folder, or is inside your TeknoParrot folder, AutoSync skips it and says why.
+
+To change or remove a folder, answer `N` to `Use these settings?` when TeknoParrot Manager starts, then run AutoSync again.
+
+---
+
+## Choosing games
+
+AutoSync hides games that are already unzipped and shows how many are left. Then it asks you to choose:
+
+| Key | What it does |
+|---|---|
+| `A` | All games that are not unzipped yet |
+| `L` | Browse the list (A to Z, 20 at a time) |
+| `S` | Search by part of a name |
+| `D` | Done -- go on with the games you picked |
+| `B` | Back -- cancel, nothing is changed |
+
+`D` with nothing picked does nothing (`No games are queued`). In the list, type numbers or ranges such as `1,3,5-7`; `N` and `P` change page. Picked games show a `*`.
+
+---
+
+## Progress and interrupted unzips
+
+A progress bar shows each game while it unzips. If a run stops in the middle (power loss, disk error, Ctrl+C), the next run notices and unzips that game again from the start.
+
+---
+
+## RetroBat / Batocera folder names
+
+During first setup you are asked `Use RetroBat folder naming? (Y/N, default N)`. With `Y`, new game folders are named `GameName.teknoparrot`. Folders you already have are recognized (including `.parrot` and `.game` endings) and are not unzipped a second time.
+
+<details><summary>Details</summary>
+
+To decide that a ZIP is already unzipped, AutoSync tries these in order: the exact or cleaned-up folder name, the RetroBat endings, the game code from the Eggman DAT list or an existing profile, known short names (Raw Thrills games and other games with path limits), and finally a match on name with date, version and region ignored. This only stops duplicate unzipping. It never deletes, renames or moves a folder.
+
+</details>
+
+---
+
+## After unzipping
+
+AutoSync goes straight on to registration. See [[Register]].
+
+When new games were unzipped, you are asked `Choice (N/A/B)`. `N` (the default) checks only the new games and skips the whole-library steps. `A` goes on to the repair, pictures and controls steps for all your games. `B` goes back to the menu.
+
+At the end, the ACTION REQUIRED list tells you if a game's controls are missing, not verified, unsupported or unknown. A game can be registered and still need its controls set up. Open TeknoParrot's controls screen, map the controls and test them before you call the game ready. TeknoParrot Manager does not write any control mappings in this step. See [[Propagate Controls]] to copy controls from a game you already set up.

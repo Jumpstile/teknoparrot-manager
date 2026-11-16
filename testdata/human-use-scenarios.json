@@ -4,7 +4,7 @@
     "journey": "update-check",
     "goal": "User sees that TPM is current and understands no action is needed.",
     "requiredPhrases": [
-      "You're already running the latest version",
+      "You have the newest version",
       "No update needed"
     ],
     "forbiddenPhrases": [
@@ -20,10 +20,11 @@
     "goal": "User understands what update will do before agreeing.",
     "requiredPhrases": [
       "An update is available",
-      "Back up the current script",
-      "Download the update",
-      "Validate the downloaded script",
-      "Require you to restart"
+      "Download the update and check that it is the real file",
+      "Check what is inside it",
+      "Back up every file it replaces",
+      "Install it and check it",
+      "restart TeknoParrot Manager yourself"
     ],
     "forbiddenPhrases": [],
     "expectedStateChange": false
@@ -33,9 +34,7 @@
     "journey": "update-check",
     "goal": "Read-only update failure is handled automatically and protection is restored.",
     "requiredPhrases": [
-      "temporarily cleared the file protection",
-      "restore it after this attempt",
-      "Backup created"
+      "temporarily cleared file protection"
     ],
     "forbiddenPhrases": [
       "Update installed"
@@ -47,7 +46,7 @@
     "journey": "main-menu",
     "goal": "Invalid menu input does not crash or confuse the user.",
     "requiredPhrases": [
-      "Invalid choice. Enter 1-15."
+      "Invalid choice. Enter 1-"
     ],
     "forbiddenPhrases": [
       "Exception",
@@ -73,17 +72,17 @@
   {
     "id": "postgres-guided-recovery",
     "journey": "postgres-recovery",
-    "goal": "A beginner can repair an unusable saved PostgreSQL password without manual administrator steps or losing the setup flow.",
+    "goal": "A beginner whose saved PostgreSQL password does not work is told nothing was changed and can type the existing password twice. TeknoParrot Manager never resets the PostgreSQL password itself.",
     "requiredPhrases": [
-      "Fix it now?",
-      "enter it twice",
-      "Windows will ask you to approve this",
-      "continue the same setup automatically",
-      "protected repair information"
+      "PostgreSQL needs attention: the saved PostgreSQL password cannot be used right now.",
+      "Existing PostgreSQL data is preserved in every choice below.",
+      "Enter the existing PostgreSQL password (recommended)",
+      "Re-enter the same password to confirm",
+      "cannot reset the PostgreSQL password for you"
     ],
     "forbiddenPhrases": [
       "right-click TeknoParrot-Manager.bat",
-      "select PostgreSQL setup (mode 12) again",
+      "select PostgreSQL setup (mode 14) again",
       "SERVICEPASSWORD=",
       "SUPERPASSWORD="
     ],
@@ -95,7 +94,7 @@
     "goal": "A beginner can create one safe ZIP to send when asking for help.",
     "requiredPhrases": [
       "Create Support Package",
-      "This is the file to send when asking for help"
+      "This makes one ZIP file that you can send to support."
     ],
     "forbiddenPhrases": [
       "password=",

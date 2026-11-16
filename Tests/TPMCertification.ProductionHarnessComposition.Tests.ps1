@@ -47,18 +47,18 @@ BeforeAll {
     function New-LegacyResultsFixtureV1([string]$Repo, [string]$Report, [string]$Backup, [bool]$ForceIneligible = $false) {
         New-Item -ItemType Directory -Path $Repo, (Join-Path $Repo 'Tests'), $Report, (Join-Path $Backup 'UserProfiles') -Force | Out-Null
         [IO.File]::WriteAllText((Join-Path $Repo 'Tests\one.ps1'), 'test')
-        # New-TPMProductionFactRecordsV1 resolves the real, fixed 17-entry
+        # New-TPMProductionFactRecordsV1 resolves the real, fixed 21-entry
         # inventory (Get-TPMProductionPowerShellInventoryV1) against
         # -RepositoryPath -- every entry must physically exist for it to
-        # succeed, so this stubs all seventeen the same way
+        # succeed, so this stubs all twenty-one the same way
         # Tests/TPMCertification.ProductionFacts.Tests.ps1's own
         # New-InventoryFixture does.
         New-Item -ItemType Directory -Path (Join-Path $Repo 'scripts'), (Join-Path $Repo 'tools') -Force | Out-Null
         foreach ($relative in @(
-            'TeknoParrot-Manager.ps1','scripts/Debug-TPM-MenuLayout.ps1','tools/Invoke-TpmAutoUpdate.ps1','tools/TpmAutoUpdate.Core.psm1',
+            'TeknoParrot-Manager.ps1','scripts/TpmRequiredPatchEngine.ps1','scripts/TPMCertification.Contracts.psm1','scripts/Debug-TPM-MenuLayout.ps1','tools/Invoke-TpmAutoUpdate.ps1','tools/TpmAutoUpdate.Core.psm1','scripts/TpmProgress.psm1',
             'scripts/Invoke-TPM-RealInstanceSmoke.ps1','scripts/Invoke-TPM-InstallHealthCheck.ps1','scripts/Resolve-Pcsx2Directory.ps1','scripts/Run-TPM-Tests.ps1','scripts/TPMCertification.Execution.psm1','scripts/Invoke-TPM-PesterChild.ps1',
             'scripts/TPMCertification.Authority.psm1','scripts/TPMCertification.Production.psm1','scripts/TPMCertification.ProductionCycle.psm1','scripts/TPMCertification.ProductionEvidence.psm1','scripts/TPMCertification.ProductionFacts.psm1',
-            'scripts/TPMCertification.Publication.psm1','scripts/TPMCertification.Reports.psm1','scripts/TPMCertification.Shadow.psm1','scripts/Test-TPMParserCheckV1.ps1'
+            'scripts/TPMCertification.Publication.psm1','scripts/TPMCertification.Reports.psm1','scripts/Test-TPMParserCheckV1.ps1'
         )) {
             $full = Join-Path $Repo ($relative -replace '/', '\')
             [IO.File]::WriteAllText($full, "Write-Output '$relative'")
@@ -76,9 +76,9 @@ BeforeAll {
         $health = [pscustomobject]@{ Checks = @([pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }, [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }, [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }) }
         $results = [pscustomobject]@{
             SmokeMode = $true; Checks = @([pscustomobject]@{ Name = 'Repository available'; Passed = $true; Details = 'fixture repository is available' }); GitStatus = '(clean)'; CertificationIdentity = (New-TestCertificationIdentity)
-            Pester = [pscustomobject]@{ Total = 2; Passed = $(if ($ForceIneligible) { 1 } else { 2 }); Failed = $(if ($ForceIneligible) { 1 } else { 0 }); Skipped = 0; NotRun = 0 }; PesterVersion = '5.7.1'; PowerShellVersion = '7.6.3'
+            Pester = [pscustomobject]@{ Total = 2; Passed = $(if ($ForceIneligible) { 1 } else { 2 }); Failed = $(if ($ForceIneligible) { 1 } else { 0 }); Skipped = 0; NotRun = 0; FailedContainers = 0 }; PesterVersion = '5.7.1'; PowerShellVersion = '7.6.3'
             PSScriptAnalyzerFindings = 999; PSScriptAnalyzerVersion = 'decoy-legacy-value'
-            Backup = [pscustomobject]@{ UserProfiles = $true; GameProfiles = $false }
+            Backup = [pscustomobject]@{ UserProfiles = $true; GameProfiles = $null }
             Snapshots = [ordered]@{ UserProfiles = [pscustomobject]@{Added=0;Removed=0;Changed=0;BeforeSkipped=0;AfterSkipped=0}; GameProfiles = [pscustomobject]@{Added=0;Removed=0;Changed=0;BeforeSkipped=0;AfterSkipped=0}; Pcsx2x6Crosshairs = [pscustomobject]@{Added=0;Removed=0;Changed=0;BeforeSkipped=0;AfterSkipped=0} }
             Pcsx2x6 = [pscustomobject]@{ Present = $false }
             VirtualBetaTester = [pscustomobject]@{ Total = 1; Passed = 1; Failed = 0; HumanBehaviors = 1; IdempotencyChecks = 0; RecoveryBehaviors = 0; EnvironmentVariations = 0; HighTvdBehaviors = 1 }
@@ -176,7 +176,8 @@ BeforeAll {
 
 Describe 'ADR-0155 production harness composition seam (ADR155-0309 Checkpoint B2)' {
     BeforeEach {
-        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        # The certification fixture adds nested GUID paths; keep its root below legacy MAX_PATH.
+        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N').Substring(0,12))
         New-Item -ItemType Directory -Path $root | Out-Null
         # The analyzer/parser adapters have their own full real-tool coverage
         # in TPMCertification.ProductionFacts.Tests.ps1. Keep this composition

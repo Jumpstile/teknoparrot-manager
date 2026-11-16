@@ -33,9 +33,9 @@ BeforeAll {
   $health=[pscustomobject]@{Checks=@([pscustomobject]@{Name='TeknoParrotUi.exe exists';Passed=$true},[pscustomobject]@{Name='GameProfiles folder exists';Passed=$true},[pscustomobject]@{Name='UserProfiles folder exists';Passed=$true})}
   $results=[pscustomobject]@{
    SmokeMode=$true;Checks=@([pscustomobject]@{Name='Repository available';Passed=$true;Details='fixture repository is available'});GitStatus='(clean)';CertificationIdentity=(New-TestCertificationIdentity)
-   Pester=[pscustomobject]@{Total=2;Passed=2;Failed=0;Skipped=0;NotRun=0};PesterVersion='5.7.1';PowerShellVersion='7.6.3'
+   Pester=[pscustomobject]@{Total=2;Passed=2;Failed=0;Skipped=0;NotRun=0;FailedContainers=0};PesterVersion='Pester 5.7.1 / pwsh 7.6.3';PowerShellVersion='7.6.3'
    PSScriptAnalyzerFindings=999;PSScriptAnalyzerVersion='decoy-legacy-value'
-   Backup=[pscustomobject]@{UserProfiles=$true;GameProfiles=$false}
+   Backup=[pscustomobject]@{UserProfiles=$true;GameProfiles=$null}
    Snapshots=[ordered]@{UserProfiles=$zero;GameProfiles=$zero;Pcsx2x6Crosshairs=$zero}
    Pcsx2x6=[pscustomobject]@{Present=$false}
    VirtualBetaTester=[pscustomobject]@{Total=1;Passed=1;Failed=0;HumanBehaviors=1;IdempotencyChecks=0;RecoveryBehaviors=0;EnvironmentVariations=0;HighTvdBehaviors=1}
@@ -45,7 +45,7 @@ BeforeAll {
  }
 
  function New-InventoryFixture([string]$Root){
-  # Creates stub content for ALL SEVENTEEN entries in the real, fixed
+  # Creates stub content for ALL TWENTY-ONE entries in the real, fixed
   # authoritative inventory -- Get-TPMProductionPowerShellInventoryV1 no
   # longer accepts a reduced/overridden file set, so any test driving it
   # through the real (non-InModuleScope) entry point needs every entry
@@ -53,10 +53,11 @@ BeforeAll {
   $repo=Join-Path $Root 'repo'
   New-Item -ItemType Directory -Path $repo,(Join-Path $repo 'scripts'),(Join-Path $repo 'tools') -Force|Out-Null
   $relativePaths=@(
-   'TeknoParrot-Manager.ps1','scripts/Debug-TPM-MenuLayout.ps1','tools/Invoke-TpmAutoUpdate.ps1','tools/TpmAutoUpdate.Core.psm1',
+   'TeknoParrot-Manager.ps1','scripts/TpmRequiredPatchEngine.ps1','scripts/TPMCertification.Contracts.psm1',
+   'scripts/Debug-TPM-MenuLayout.ps1','tools/Invoke-TpmAutoUpdate.ps1','tools/TpmAutoUpdate.Core.psm1','scripts/TpmProgress.psm1',
    'scripts/Invoke-TPM-RealInstanceSmoke.ps1','scripts/Invoke-TPM-InstallHealthCheck.ps1','scripts/Resolve-Pcsx2Directory.ps1','scripts/Run-TPM-Tests.ps1','scripts/TPMCertification.Execution.psm1','scripts/Invoke-TPM-PesterChild.ps1',
    'scripts/TPMCertification.Authority.psm1','scripts/TPMCertification.Production.psm1','scripts/TPMCertification.ProductionCycle.psm1','scripts/TPMCertification.ProductionEvidence.psm1','scripts/TPMCertification.ProductionFacts.psm1',
-   'scripts/TPMCertification.Publication.psm1','scripts/TPMCertification.Reports.psm1','scripts/TPMCertification.Shadow.psm1','scripts/Test-TPMParserCheckV1.ps1'
+   'scripts/TPMCertification.Publication.psm1','scripts/TPMCertification.Reports.psm1','scripts/Test-TPMParserCheckV1.ps1'
   )
   foreach($relative in $relativePaths){
    $full=Join-Path $repo ($relative-replace'/','\')
@@ -116,14 +117,15 @@ Describe 'TPMCertification.ProductionFacts public API surface' {
 }
 
 Describe 'Get-TPMProductionPowerShellInventoryV1 (production entry point)' {
- It 'resolves the complete, real, 19-file authoritative inventory in deterministic order' {
+ It 'resolves the complete, real, 21-file authoritative inventory in deterministic order' {
   $inv=Get-TPMProductionPowerShellInventoryV1 -RepositoryPath $repoRoot
-  $inv.Count|Should -Be 19
+  $inv.Count|Should -Be 21
+  $inv.RelativePath|Should -Contain 'scripts/TpmRequiredPatchEngine.ps1'
   @($inv.RelativePath)|Should -Be @(
-   'TeknoParrot-Manager.ps1','scripts/Debug-TPM-MenuLayout.ps1','tools/Invoke-TpmAutoUpdate.ps1','tools/TpmAutoUpdate.Core.psm1',
+   'TeknoParrot-Manager.ps1','scripts/TpmRequiredPatchEngine.ps1','scripts/TPMCertification.Contracts.psm1','scripts/Debug-TPM-MenuLayout.ps1','tools/Invoke-TpmAutoUpdate.ps1','tools/TpmAutoUpdate.Core.psm1','scripts/TpmProgress.psm1',
    'scripts/Invoke-TPM-RealInstanceSmoke.ps1','scripts/Invoke-TPM-InstallHealthCheck.ps1','scripts/Resolve-Pcsx2Directory.ps1','scripts/Run-TPM-Tests.ps1','scripts/TPMCertification.Execution.psm1','scripts/Invoke-TPM-PesterChild.ps1',
    'scripts/TPMCertification.Authority.psm1','scripts/TPMCertification.Production.psm1','scripts/TPMCertification.ProductionCycle.psm1','scripts/TPMCertification.ProductionEvidence.psm1','scripts/TPMCertification.ProductionFacts.psm1',
-   'scripts/TPMCertification.Publication.psm1','scripts/TPMCertification.Reports.psm1','scripts/TPMCertification.Shadow.psm1','scripts/Test-TPMParserCheckV1.ps1'
+   'scripts/TPMCertification.Publication.psm1','scripts/TPMCertification.Reports.psm1','scripts/Test-TPMParserCheckV1.ps1'
   )
   foreach($item in $inv){Test-Path -LiteralPath $item.FullPath -PathType Leaf|Should -BeTrue}
  }
@@ -404,6 +406,38 @@ Describe 'Test-TPMProductionPSScriptAnalyzerV1 (private, InModuleScope only)' {
   }
   $result.Executed|Should -BeTrue
   $result.FindingCount|Should -Be 0
+  $result.ToolVersion|Should -Be $expectedVersion
+ }
+ It 'runs PSReservedCmdletChar separately, reports its finding, and aggregates findings from other files' {
+  # This exact basename exercises the production split; keep the reserved exported function isolated in this test fixture.
+  $reservedFixture=Join-Path $TestDrive 'TPMCertification.Contracts.psm1'
+  @'
+function Get-Thing? {
+    [CmdletBinding()]
+    param()
+}
+Export-ModuleMember -Function 'Get-Thing?'
+'@|Set-Content -LiteralPath $reservedFixture -Encoding ASCII
+  $otherFixture=Join-Path $TestDrive 'PSSA-AutomaticVariable.ps1'
+  @'
+$profile = 'fixture'
+$profile
+'@|Set-Content -LiteralPath $otherFixture -Encoding ASCII
+  $expectedVersion=(Get-Module -ListAvailable PSScriptAnalyzer|Select-Object -First 1).Version.ToString()
+  Import-Module PSScriptAnalyzer -RequiredVersion $expectedVersion -Force
+  $settings=Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'
+  $directReserved=@(Invoke-ScriptAnalyzer -Path $reservedFixture -Settings $settings -Severity Error,Warning -IncludeRule 'PSReservedCmdletChar')
+  $directReserved.Count|Should -Be 1
+  $directReserved[0].RuleName|Should -Be 'PSReservedCmdletChar'
+  $inv=@(
+   [pscustomobject]@{FullPath=$reservedFixture;RelativePath='fixtures/TPMCertification.Contracts.psm1'}
+   [pscustomobject]@{FullPath=$otherFixture;RelativePath='fixtures/PSSA-AutomaticVariable.ps1'}
+  )
+  $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Settings=$settings} {
+   Test-TPMProductionPSScriptAnalyzerV1 -Inventory $Inv -SettingsPath $Settings -PerFileTimeoutSeconds 180
+  }
+  $result.Executed|Should -BeTrue
+  $result.FindingCount|Should -Be 2 -Because 'one isolated PSReservedCmdletChar finding plus one independent Error/Warning finding from another inventory file must both be counted'
   $result.ToolVersion|Should -Be $expectedVersion
  }
  It 'reports Executed=false when the settings file is missing' {
@@ -1368,7 +1402,8 @@ Describe 'Get-TPMProductionPowerShellInventoryV1 self-scan (the complete real in
 
 Describe 'New-TPMProductionFactRecordsV1' {
  It 'emits all eleven fact identifiers, validates through the real dispatcher, and never reuses the legacy PSScriptAnalyzer count' {
-  $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+  # Nested fixture directories add multiple GUIDs; keep this root below legacy MAX_PATH.
+  $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N').Substring(0,12))
   $repo=New-InventoryFixture $root
   $report=Join-Path $root 'report';$backup=Join-Path $root 'backup'
   $fixture=New-LegacyResultsFixture $repo $report $backup
@@ -1387,12 +1422,16 @@ Describe 'New-TPMProductionFactRecordsV1' {
   $staticAnalysis=($facts|Where-Object{$_.Identifier -eq 'Static Analysis'}).Data
   $staticAnalysis.PSScriptAnalyzer.FindingCount|Should -Be 0
   $staticAnalysis.PSScriptAnalyzer.FindingCount|Should -Not -Be 999
-  $staticAnalysis.Encoding.Files.Count|Should -Be 19
+  $staticAnalysis.Encoding.Files.Count|Should -Be 21
   $staticAnalysis.InjectionHunter.Executed|Should -BeTrue
+
+  # The harness already records the full engine text ("Pester x / pwsh y"); the fact must carry it once, not wrapped again.
+  ($facts|Where-Object{$_.Identifier -eq 'Pester'}).Data.Engine|Should -BeExactly 'Pester 5.7.1 / pwsh 7.6.3'
 
   $artifacts=($facts|Where-Object{$_.Identifier -eq 'Artifacts'}).Data
   $artifacts.PublisherAvailable|Should -BeTrue
   $artifacts.PackageValidationPassed|Should -BeTrue
+  ($facts|Where-Object{$_.Identifier -eq 'Backups'}).Data.BackupVerificationExecuted|Should -BeTrue
 
   $health=($facts|Where-Object Identifier -eq 'Real Install Health').Data
   @($health.Checks).Count|Should -Be 3
@@ -1400,6 +1439,21 @@ Describe 'New-TPMProductionFactRecordsV1' {
 
   $mode='Smoke'
   foreach($fact in $facts){ { Assert-TPMFactRecordV1 $fact $mode $report } | Should -Not -Throw }
+ }
+
+ It 'clears BackupVerificationExecuted when the backup of a folder that exists could not be made' {
+  $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N').Substring(0,12))
+  $repo=New-InventoryFixture $root
+  $report=Join-Path $root 'report';$backup=Join-Path $root 'backup'
+  $fixture=New-LegacyResultsFixture $repo $report $backup
+  $fixture.Results.Backup=[pscustomobject]@{UserProfiles=$true;GameProfiles=$false}
+  $emptyRegistry=Join-Path $root 'empty-dispositions.psd1'
+  [IO.File]::WriteAllText($emptyRegistry,'@{ SchemaVersion = 1; Dispositions = @() }')
+  $facts=@(New-TPMProductionFactRecordsV1 -Results $fixture.Results -RepositoryPath $repo -ReportDirectory $report -BackupDirectory $backup -HealthResult $fixture.Health -StagingParentRoot (Join-Path $root 'staging') -DestinationRoot (Join-Path $root 'destination') -WorkingDirectoryRoot $root -WorkingDirectory (Join-Path $root 'work') -DispositionRegistryPath $emptyRegistry -PSScriptAnalyzerSettingsPath (Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'))
+  $data=($facts|Where-Object{$_.Identifier -eq 'Backups'}).Data
+  $data.UserProfilesBackupCreated|Should -BeTrue
+  $data.GameProfilesBackupCreated|Should -BeFalse
+  $data.BackupVerificationExecuted|Should -BeFalse
  }
 
  It 'fails closed via Assert-TPMDiagnosticRecordV1 when a tool reports Executed=false with a malformed Diagnostic (Item 3 audit: schema validation)' {

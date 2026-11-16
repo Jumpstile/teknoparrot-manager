@@ -3,7 +3,6 @@
 param(
     [int]$Width = 0,
     [int]$Height = 0,
-    [ValidateSet('Auto', 'UltraTwoColumn', 'UltraCentered')][string]$UltraLayoutMode = 'Auto',
     [switch]$Render
 )
 
@@ -11,7 +10,6 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $mainScript = Join-Path $repoRoot 'TeknoParrot-Manager.ps1'
-$mainContent = Get-Content -LiteralPath $mainScript -Raw
 
 $tokens = $null
 $parseErrors = $null
@@ -39,13 +37,6 @@ foreach ($fn in $functionAsts) {
 $script:ActiveTpmWorkflowStatus = $null
 $script:TpmWorkflowRendering = $false
 
-if ($mainContent -match '\$ScriptVersion\s*=\s*"([^"]+)"') {
-    $ScriptVersion = $Matches[1]
-}
-if ($mainContent -match '\$ReleaseCandidateLabel\s*=\s*"([^"]+)"') {
-    $ReleaseCandidateLabel = $Matches[1]
-}
-$DisplayVersion = if ($ReleaseCandidateLabel) { "v$ScriptVersion $ReleaseCandidateLabel" } else { "v$ScriptVersion" }
 
 $rawWindowWidth = $null
 $rawWindowHeight = $null
@@ -76,8 +67,11 @@ $fullTierLineCount = 4 + (@(Get-MainMenuSections | ForEach-Object {
     3 + ($_.Items | ForEach-Object { 1 + $_.FullDesc.Count } | Measure-Object -Sum).Sum
 }) | Measure-Object -Sum).Sum
 
-$tier = Get-ConsoleLayoutTier -Width $detectedWidth -Height $detectedHeight -RequiredFullLines $fullTierLineCount
-$metrics = Get-MainMenuRenderMetrics -Tier $tier -Width $detectedWidth -Height $detectedHeight -RequiredFullLines $fullTierLineCount -UltraLayoutMode $UltraLayoutMode
+$tier = Get-ConsoleLayoutTier -Width $detectedWidth -Height $detectedHeight
+$geometry = Get-MainMenuGeometry -Tier $tier -ViewportWidth $detectedWidth -ViewportHeight $detectedHeight
+$heightConstrained = ($detectedHeight -gt 0 -and $fullTierLineCount -gt 0 -and $detectedHeight -lt $fullTierLineCount)
+$widthConstrained = ($tier -ne 'Ultra')
+$constrainedBy = if ($widthConstrained -and $heightConstrained) { 'width,height' } elseif ($widthConstrained) { 'width' } elseif ($heightConstrained) { 'height' } else { 'none' }
 
 Write-Host "TPM menu layout debug"
 Write-Host "---------------------"
@@ -92,16 +86,15 @@ Write-Host ("Console.WindowHeight         : {0}" -f $consoleHeight)
 Write-Host ("Selected viewport width      : {0}" -f $detectedWidth)
 Write-Host ("Selected viewport height     : {0}" -f $detectedHeight)
 Write-Host ("Required full lines          : {0}" -f $fullTierLineCount)
-Write-Host ("Selected layout tier         : {0}" -f $metrics.SelectedTier)
-Write-Host ("Selected layout mode         : {0}" -f $metrics.Layout)
-Write-Host ("Requested ultra mode         : {0}" -f $UltraLayoutMode)
-Write-Host ("Label width                  : {0}" -f $metrics.LabelWidth)
-Write-Host ("Description width            : {0}" -f $metrics.DescriptionWidth)
-Write-Host ("Total render width           : {0}" -f $metrics.TotalRenderWidth)
-Write-Host ("Constrained by               : {0}" -f $metrics.ConstrainedBy)
+Write-Host ("Selected layout tier         : {0}" -f $geometry.Tier)
+Write-Host ("Selected layout mode         : {0}" -f $geometry.Layout)
+Write-Host ("Column width                 : {0}" -f $geometry.ColumnWidth)
+Write-Host ("Description wrap width       : {0}" -f $geometry.WrapWidth)
+Write-Host ("Total render width           : {0}" -f $geometry.MenuWidth)
+Write-Host ("Constrained by               : {0}" -f $constrainedBy)
 
 if ($Render) {
     Write-Host ""
-    $screen = Render-MainMenuScreen -Tier $tier -Width $detectedWidth -Height $detectedHeight -UltraLayoutMode $UltraLayoutMode
+    $screen = Render-MainMenuScreen -Tier $tier -Width $detectedWidth -Height $detectedHeight
     Write-ConsoleRenderRows -Rows $screen.Rows
 }

@@ -24,7 +24,11 @@ BeforeAll {
     $functionAsts = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-recovery-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
+    $progressModuleDirectory = Join-Path $TestDrive 'scripts'
+    [void][IO.Directory]::CreateDirectory($progressModuleDirectory)
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TpmProgress.psm1') -Destination (Join-Path $progressModuleDirectory 'TpmProgress.psm1') -Force
     . $extractedFunctionsPath
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
     $script:PostgresRecoveryStatus = $null
@@ -43,37 +47,8 @@ BeforeAll {
         [string[]]@('the', 'of', 'a', 'an', 'and', 'vs', 'vs.', 'in', 'for', 'to'),
         [System.StringComparer]::OrdinalIgnoreCase)
 
-    # ECVF (issue #182 follow-up): file-backed fixture used only by the
-    # cursor-path denial tests below. Copies the real, currently-shipped
-    # Authority/Contracts modules and the real pcsx2x6 contract.json into a
-    # $TestDrive tree shaped like the repo (scripts\, contracts\pcsx2x6\),
-    # then re-extracts and dot-sources ONLY Set-Pcsx2CursorPaths from
-    # inside that tree so its $PSScriptRoot resolves there. This makes the
-    # function actually import the module and consult the real contract,
-    # exercising the genuine OWNERSHIP_VIOLATION denial path -- not just
-    # the generic "framework unavailable" fallback that fires elsewhere in
-    # this file because the plain extracted-functions file has no scripts\
-    # folder beside it. Dot-sourcing the returned path inside a single It
-    # block only redefines Set-Pcsx2CursorPaths for that It's own scope; it
-    # does not affect the other extracted functions or any other test.
-    function New-Pcsx2ContractDenialFixture {
-        $fixtureRoot = Join-Path $TestDrive ("ecvf-fixture-" + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'scripts') -Force | Out-Null
-        New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'contracts\pcsx2x6') -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Authority.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Authority.psm1') -Force
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Contracts.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Contracts.psm1') -Force
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $fixtureRoot 'contracts\pcsx2x6\contract.json') -Force
-
-        $pcsx2Ast = $functionAsts | Where-Object { $_.Name -eq 'Set-Pcsx2CursorPaths' } | Select-Object -First 1
-        if (-not $pcsx2Ast) { throw "Set-Pcsx2CursorPaths not found while building the ECVF contract-denial fixture" }
-        $pcsx2FixturePath = Join-Path $fixtureRoot 'Set-Pcsx2CursorPaths.ps1'
-        $pcsx2Ast.Extent.Text | Set-Content -LiteralPath $pcsx2FixturePath -Encoding utf8
-        return $pcsx2FixturePath
-    }
-
-    # ECVF (issue #173): same $PSScriptRoot-anchored fixture-tree pattern as
-    # New-Pcsx2ContractDenialFixture above, extended to the new pcsx2x6
-    # first-run-automation functions so they too actually import the real
+    # ECVF (issue #173): a $PSScriptRoot-anchored fixture tree for the pcsx2x6
+    # first-run-automation functions so they actually import the real
     # Contracts module and consult the real contract rather than falling
     # back to "framework unavailable". Write-Log is not included -- it is
     # already dot-sourced into this file's top-level scope from the full
@@ -84,11 +59,18 @@ BeforeAll {
         $fixtureRoot = Join-Path $TestDrive ("ecvf-automation-fixture-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'scripts') -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'contracts\pcsx2x6') -Force | Out-Null
+        $runtimeContractDirectory = Join-Path $fixtureRoot 'scripts\resources\contracts\pcsx2x6'
+        New-Item -ItemType Directory -Path $runtimeContractDirectory -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Authority.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Authority.psm1') -Force
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Contracts.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Contracts.psm1') -Force
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $fixtureRoot 'contracts\pcsx2x6\contract.json') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\runtime-evidence-index.json') -Destination (Join-Path $fixtureRoot 'contracts\pcsx2x6\runtime-evidence-index.json') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\evidence.md') -Destination (Join-Path $fixtureRoot 'contracts\pcsx2x6\evidence.md') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\experiments.md') -Destination (Join-Path $fixtureRoot 'contracts\pcsx2x6\experiments.md') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $runtimeContractDirectory 'contract.json') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\runtime-evidence-index.json') -Destination (Join-Path $runtimeContractDirectory 'runtime-evidence-index.json') -Force
 
-        $names = @('Get-Pcsx2CrosshairPrerequisiteState', 'Invoke-Pcsx2FirstRunSetup', 'Get-Pcsx2CursorPathReport', 'Test-Pcsx2ProcessRunning')
+        $names = @('Get-Pcsx2CrosshairPrerequisiteState', 'Invoke-Pcsx2FirstRunSetup', 'Get-Pcsx2CursorPathReport')
         $wanted = @($functionAsts | Where-Object { $names -contains $_.Name })
         if ($wanted.Count -lt $names.Count) { throw "One or more required functions were not found while building the ECVF automation fixture (found: $(@($wanted.Name) -join ', '))" }
         $fixturePath = Join-Path $fixtureRoot 'Pcsx2Automation.ps1'
@@ -173,82 +155,13 @@ Describe "Virtual Beta Tester: existing-backup recovery (issue #88 phase 1.6)" -
         New-Item -ItemType File -Path (Join-Path $olderBackupDir 'OLDGAME.xml') -Force | Out-Null
         $olderBackupContentBefore = Get-Content -LiteralPath (Join-Path $olderBackupDir 'OLDGAME.xml') -Raw -ErrorAction SilentlyContinue
 
-        $result = New-PropagationBackup -UserProfilesDir $userProfilesDir
+        $result = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $userProfilesDir -Label 'PropagateControls'
 
-        $result.ErrorCount | Should -Be 0 -Because "a pre-existing older backup must not cause the new backup to error"
+        $result.Succeeded | Should -BeTrue -Because "a pre-existing older backup must not cause the new backup to fail (reason: $($result.Reason))"
+        $result.Verified | Should -BeTrue -Because "the new backup must pass its own manifest verification"
         (Test-Path -LiteralPath $olderBackupDir) | Should -Be $true -Because "the older backup must still exist, untouched"
         (Get-Content -LiteralPath (Join-Path $olderBackupDir 'OLDGAME.xml') -Raw -ErrorAction SilentlyContinue) | Should -Be $olderBackupContentBefore -Because "the older backup's own content must be byte-identical after a new backup runs alongside it"
         (Test-Path -LiteralPath (Join-Path $result.Path 'ALIENS.xml')) | Should -Be $true -Because "the new backup must still contain the current real profile"
-    }
-}
-
-Describe "Virtual Beta Tester: partial/malformed state recovery (issue #88 phase 1.6)" -Tag 'TVD-High' {
-    # Human behavior replaced: a tester whose PCSX2.ini is missing sections
-    # entirely (a fresh PCSX2 install that's never had a controller
-    # configured) checks that crosshair setup does not crash and, per the
-    # ECVF contract (issue #182), correctly leaves emulator-owned state
-    # alone rather than guessing at a repair.
-    # Defect class detectable: an INI writer that throws on partial/missing
-    # state, or one that "recovers" by writing into a setting the contract
-    # marks Owner=Emulator/NeverWrite -- USB1/USB2 guncon2_cursor_path is
-    # contract-owned by the emulator (the emulator clears it in memory
-    # whenever JVS mode is LIGHTGUN regardless of INI contents), so the
-    # correct recovery behavior for missing/partial guncon2 sections is to
-    # deny the write and leave the file exactly as found, not to append or
-    # repair sections TPM does not own.
-    # Why existing certification wouldn't already catch it: phase 1's
-    # idempotency test always starts from an INI that already has both
-    # sections present; this test starts from an INI with neither/one
-    # section, which is where a naive "always deny" implementation could
-    # still accidentally special-case a repair path.
-    # Tester Value Density: High -- a fresh/partial PCSX2 install missing
-    # guncon2 sections is a realistic, likely first-time-setup condition,
-    # not a contrived edge case.
-
-    It "Set-Pcsx2CursorPaths denies the write and leaves an INI with neither guncon2 section untouched" {
-        $iniPath = Join-Path $TestDrive ("pcsx2-missing-sections-" + [guid]::NewGuid().ToString('N') + '.ini')
-        @('[Frame]', 'GS = 1') -join "`r`n" | Set-Content -LiteralPath $iniPath -Encoding utf8
-        $originalContent = Get-Content -LiteralPath $iniPath -Raw
-
-        $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
-
-        $result | Should -Be $false -Because "USB1/USB2 guncon2_cursor_path is Owner=Emulator, WritePolicy=NeverWrite -- missing sections must not be appended by TPM"
-        (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "a denied write must leave an INI with neither guncon2 section exactly as found, not partially repaired"
-    }
-
-    It "Set-Pcsx2CursorPaths denies the write and leaves an INI with only one existing guncon2 section untouched" {
-        $iniPath = Join-Path $TestDrive ("pcsx2-one-section-" + [guid]::NewGuid().ToString('N') + '.ini')
-        @('[USB Port 1 guncon2]', 'cursor_path = old.png') -join "`r`n" | Set-Content -LiteralPath $iniPath -Encoding utf8
-        $originalContent = Get-Content -LiteralPath $iniPath -Raw
-
-        $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
-
-        $result | Should -Be $false -Because "a partially-present pair of emulator-owned sections must still be denied, not repaired by adding the missing one"
-        (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "the existing section's own emulator-owned cursor_path value must also remain untouched, not just the missing section left absent"
-    }
-
-    It "denies the write for the real reason even on partial/malformed state -- the contract's OWNERSHIP_VIOLATION, not just an unreachable framework (file-backed ECVF fixture)" {
-        # The two tests above run Set-Pcsx2CursorPaths as extracted into the
-        # plain $TestDrive functions file, which has no scripts\ folder
-        # beside it -- that exercises the generic "framework unavailable"
-        # fallback, not the contract itself. This test dot-sources a
-        # fixture-scoped copy of just this one function (see
-        # New-Pcsx2ContractDenialFixture in BeforeAll above) so it actually
-        # loads the real Contracts module and the real pcsx2x6 contract,
-        # proving the denial comes from the contract's own ownership rule
-        # even when the INI is missing sections, not merely from the
-        # framework being unreachable.
-        . (New-Pcsx2ContractDenialFixture)
-        $iniPath = Join-Path $TestDrive ("pcsx2-real-contract-partial-" + [guid]::NewGuid().ToString('N') + '.ini')
-        @('[Frame]', 'GS = 1') -join "`r`n" | Set-Content -LiteralPath $iniPath -Encoding utf8
-        $originalContent = Get-Content -LiteralPath $iniPath -Raw
-        Mock Write-Log {}
-
-        $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
-
-        $result | Should -Be $false
-        (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "the real pcsx2x6 contract denies the write regardless of how incomplete the existing INI is"
-        Should -Invoke Write-Log -ParameterFilter { $msg -match 'OWNERSHIP_VIOLATION' } -Because "the skip reason must come from the real contract's ownership check even on partial/malformed state, proving this exercised actual contract denial rather than the generic framework-unavailable fallback"
     }
 }
 
@@ -300,7 +213,7 @@ Describe "Virtual Beta Tester: missing emulator firmware/BIOS recovery (issue #8
 
     BeforeAll {
         $script:EmulatorBiosRequirements = @{
-            'Pcsx2x6' = @{ RelativeDir = 'TeknoParrot\bios'; RequiredFiles = @('27v1602T.d', '27v1602F.bg') }
+            'Pcsx2x6' = @{ RelativeDir = 'TeknoParrot\bios'; RequiredFiles = @('r27v1602f.7d', 'r27v1602f.8g') }
         }
     }
 
@@ -400,9 +313,8 @@ Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medi
     # than silently copying PNGs next to a config file that doesn't exist
     # and leaving the operator to work out why nothing changed. Also proves
     # the new detection/first-run-trigger/report functions never write to
-    # the emulator-owned USB1/USB2 guncon2_cursor_path keys, extending the
-    # existing Set-Pcsx2CursorPaths denial coverage to the new code paths
-    # #173 adds around it.
+    # the emulator-owned USB1/USB2 guncon2_cursor_path keys, covering the new
+    # code paths #173 adds around it.
 
     It "Get-Pcsx2CrosshairPrerequisiteState: classifies NotInstalled when the folder does not exist" {
         . (New-Pcsx2AutomationFixture)
@@ -482,25 +394,6 @@ Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medi
         $report.USB2CursorPath | Should -BeNullOrEmpty
     }
 
-    It "Test-Pcsx2ProcessRunning: returns false when no matching process is running" {
-        Test-Pcsx2ProcessRunning | Should -Be $false
-    }
-
-    It "Test-Pcsx2ProcessRunning: returns true when a process named pcsx2-qtx64 is running" {
-        $exeDir = Join-Path $TestDrive ("fake-pcsx2-proc-" + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $exeDir -Force | Out-Null
-        $fakeExe = Join-Path $exeDir 'pcsx2-qtx64.exe'
-        Copy-Item -LiteralPath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -Destination $fakeExe -Force
-        $proc = Start-Process -FilePath $fakeExe -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 20') -PassThru
-        try {
-            Start-Sleep -Milliseconds 500
-            Test-Pcsx2ProcessRunning | Should -Be $true
-        } finally {
-            try { $proc.Kill() } catch { }
-            try { $proc.WaitForExit(5000) } catch { }
-        }
-    }
-
     It "Invoke-Pcsx2FirstRunSetup: refuses when the state is not StockUninitialized" {
         . (New-Pcsx2AutomationFixture)
         $state = [pscustomobject]@{ State = 'Canonical'; Pcsx2Dir = $TestDrive; DataRoot = $TestDrive; IniPath = $null; EnvironmentCapability = $null }
@@ -561,9 +454,26 @@ Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medi
     It "Invoke-CrosshairSetup: Unknown ECVF state performs zero crosshair PNG writes" {
         $fixture = New-Pcsx2CrosshairSetupFixture
         . $fixture.FixturePath
-        Mock Read-HostSafe { '0' }
+        $script:crosshairGuardLog = New-Object System.Collections.Generic.List[string]
+        Mock Write-Log { [void]$script:crosshairGuardLog.Add([string]$msg) }
+        Mock Read-Host {
+            param([string]$Prompt)
+            if ($Prompt -match 'Apply these crosshairs') { 'Y' }
+            elseif ($Prompt -match 'Also hide the Windows cursor') { 'N' }
+            else { '0' }
+        }
         Mock Start-Process {}
-        Mock Export-CrosshairPreview {}
+        Mock Show-TpmCrosshairPreviewWindow {
+            [pscustomobject]@{
+                Available = $false
+                Cancelled = $false
+                P1Index = $null
+                P2Index = $null
+                TimedOut = $false
+                Reason = 'FIXTURE_PREVIEW_UNAVAILABLE'
+                Error = $null
+            }
+        }
         Mock Get-Pcsx2CrosshairPrerequisiteState {
             [pscustomobject]@{
                 State = 'Unknown'
@@ -574,12 +484,14 @@ Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medi
             }
         }
 
-        Invoke-CrosshairSetup -UserProfilesDir $fixture.ProfilesRoot -GamesInstallFolder $fixture.Root -TpRoot $fixture.Root | Out-Null
+        Invoke-CrosshairSetup -UserProfilesDir $fixture.ProfilesRoot -TpRoot $fixture.Root | Out-Null
 
         $destination = Join-Path $fixture.Pcsx2Root 'TeknoParrot\crosshairs'
         (Test-Path -LiteralPath (Join-Path $destination 'P1.png')) | Should -Be $false
         (Test-Path -LiteralPath (Join-Path $destination 'P2.png')) | Should -Be $false
         @(Get-ChildItem -LiteralPath $fixture.Pcsx2Root -Recurse -Filter '*.png' -File -ErrorAction SilentlyContinue).Count | Should -Be 0
+        # Mutation: remove the Unknown-state guard (or decline consent before it) -> this log line is never written because the guard is not what stopped the write.
+        ($script:crosshairGuardLog -join "`n") | Should -Match 'skipped .*; PCSX2: prerequisite state Unknown'
     }
 
     It "Invoke-CrosshairSetup: unavailable ECVF contract performs zero crosshair PNG writes" {
@@ -588,16 +500,35 @@ Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medi
         $state = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $fixture.Pcsx2Root
         $state.State | Should -Be 'Unknown'
         $state.Reason | Should -Match 'framework was not available'
-        Mock Read-HostSafe { '0' }
+        $script:crosshairGuardLog = New-Object System.Collections.Generic.List[string]
+        Mock Write-Log { [void]$script:crosshairGuardLog.Add([string]$msg) }
+        Mock Read-Host {
+            param([string]$Prompt)
+            if ($Prompt -match 'Apply these crosshairs') { 'Y' }
+            elseif ($Prompt -match 'Also hide the Windows cursor') { 'N' }
+            else { '0' }
+        }
         Mock Start-Process {}
-        Mock Export-CrosshairPreview {}
+        Mock Show-TpmCrosshairPreviewWindow {
+            [pscustomobject]@{
+                Available = $false
+                Cancelled = $false
+                P1Index = $null
+                P2Index = $null
+                TimedOut = $false
+                Reason = 'FIXTURE_PREVIEW_UNAVAILABLE'
+                Error = $null
+            }
+        }
 
-        Invoke-CrosshairSetup -UserProfilesDir $fixture.ProfilesRoot -GamesInstallFolder $fixture.Root -TpRoot $fixture.Root | Out-Null
+        Invoke-CrosshairSetup -UserProfilesDir $fixture.ProfilesRoot -TpRoot $fixture.Root | Out-Null
 
         $destination = Join-Path $fixture.Pcsx2Root 'TeknoParrot\crosshairs'
         (Test-Path -LiteralPath (Join-Path $destination 'P1.png')) | Should -Be $false
         (Test-Path -LiteralPath (Join-Path $destination 'P2.png')) | Should -Be $false
         @(Get-ChildItem -LiteralPath $fixture.Pcsx2Root -Recurse -Filter '*.png' -File -ErrorAction SilentlyContinue).Count | Should -Be 0
+        # Mutation: remove the Unknown-state guard (or decline consent before it) -> this log line is never written because the guard is not what stopped the write.
+        ($script:crosshairGuardLog -join "`n") | Should -Match 'skipped .*; PCSX2: prerequisite state Unknown'
     }
 
     It "Invoke-CrosshairSetup: uses the contract-resolved non-default DataRoot for PNG placement" {
@@ -605,9 +536,23 @@ Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medi
         $customRoot = Join-Path $fixture.Pcsx2Root 'PortableData'
         New-Item -ItemType Directory -Path $customRoot -Force | Out-Null
         . $fixture.FixturePath
-        Mock Read-HostSafe { '0' }
-        Mock Start-Process {}
-        Mock Export-CrosshairPreview {}
+        Mock Read-Host {
+            param([string]$Prompt)
+            if ($Prompt -match 'Apply these crosshairs') { 'Y' }
+            elseif ($Prompt -match 'Also hide the Windows cursor') { 'N' }
+            else { '0' }
+        }
+        Mock Show-TpmCrosshairPreviewWindow {
+            [pscustomobject]@{
+                Available = $false
+                Cancelled = $false
+                P1Index = $null
+                P2Index = $null
+                TimedOut = $false
+                Reason = 'FIXTURE_PREVIEW_UNAVAILABLE'
+                Error = $null
+            }
+        }
         Mock Get-Pcsx2CrosshairPrerequisiteState {
             [pscustomobject]@{
                 State = 'Incomplete'
@@ -618,7 +563,7 @@ Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medi
             }
         }
 
-        Invoke-CrosshairSetup -UserProfilesDir $fixture.ProfilesRoot -GamesInstallFolder $fixture.Root -TpRoot $fixture.Root | Out-Null
+        Invoke-CrosshairSetup -UserProfilesDir $fixture.ProfilesRoot -TpRoot $fixture.Root | Out-Null
 
         (Test-Path -LiteralPath (Join-Path $customRoot 'crosshairs\P1.png')) | Should -Be $true
         (Test-Path -LiteralPath (Join-Path $customRoot 'crosshairs\P2.png')) | Should -Be $true

@@ -30,6 +30,9 @@ BeforeAll {
     $functionAsts = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-interrupted-write-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
+    $progressModuleDirectory = Join-Path $TestDrive 'scripts'
+    [void][IO.Directory]::CreateDirectory($progressModuleDirectory)
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TpmProgress.psm1') -Destination (Join-Path $progressModuleDirectory 'TpmProgress.psm1') -Force
     . $extractedFunctionsPath
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
@@ -91,31 +94,20 @@ Describe "Virtual Beta Tester: leftover .tmp files are structurally invisible to
 }
 
 Describe "Virtual Beta Tester: Save-Xml recovers cleanly from a prior interrupted write (issue #88 A1)" -Tag 'TVD-High' {
-    # Human behavior replaced: a tester whose previous run left a stale
-    # .tmp file (interrupted mid-write) runs TPM again and checks the next
-    # write completes correctly instead of being confused or blocked by
-    # the leftover.
-    # Defect class detectable: a temp-file-based atomic writer that errors
-    # out or produces corrupt output when its own .tmp path is already
-    # occupied by a stale leftover from a previous incomplete run.
-    # Why existing certification wouldn't already catch it: no existing
-    # test calls Save-Xml (or any function that calls it) with a
-    # pre-existing stale .tmp file already sitting at the target path --
-    # every existing write-path test starts from a clean target.
-
-    It "Save-Xml overwrites a stale leftover .tmp and produces exactly the requested final content" {
+    # The reviewed writer uses a unique sibling .tmp path for each write.
+    # A stale fixed-name sidecar from an older interrupted write must not
+    # block the new write or be consumed as current transaction state.
+    It "Save-Xml writes the requested XML without altering a stale fixed-name .tmp sidecar" {
         $path = Join-Path $TestDrive ("save-xml-recovery-" + [guid]::NewGuid().ToString('N') + '.xml')
         $tmpPath = $path + '.tmp'
-
-        # Simulate the leftover from a previous interrupted run: garbage
-        # content at the .tmp path, no real file at the final path yet
-        # (the kill happened before the very first successful write).
         Set-Content -LiteralPath $tmpPath -Value 'garbage from an interrupted run' -Encoding ascii
+        $staleContent = Get-Content -LiteralPath $tmpPath -Raw
 
         $doc = [xml]'<?xml version="1.0" encoding="utf-8"?><GameProfile><EmulationProfile>Test</EmulationProfile></GameProfile>'
         { Save-Xml -doc $doc -path $path } | Should -Not -Throw
 
-        (Test-Path -LiteralPath $tmpPath) | Should -Be $false -Because "the temp file must be consumed (renamed away), not left behind, once the write completes"
+        (Test-Path -LiteralPath $tmpPath) | Should -Be $true -Because "the unique staging path must not consume legacy residue"
+        (Get-Content -LiteralPath $tmpPath -Raw) | Should -BeExactly $staleContent
         (Test-Path -LiteralPath $path) | Should -Be $true
         (Get-Content -LiteralPath $path -Raw) | Should -Match 'EmulationProfile>Test<' -Because "the final content must be exactly what was requested, not the stale leftover garbage"
     }
@@ -138,24 +130,23 @@ Describe "Virtual Beta Tester: Save-Xml recovers cleanly from a prior interrupte
         (Get-Content -LiteralPath $path -Raw) | Should -Match 'EmulationProfile>Second<' -Because "the second write must fully supersede both the first write and the stale leftover, not merge or get confused by either"
     }
 
-    It "a failed temp-file write never touches or corrupts the existing good file (atomicity)" {
+    It "an XML serialization failure never touches or corrupts the existing good file (atomicity)" {
         $path = Join-Path $TestDrive ("save-xml-atomicity-" + [guid]::NewGuid().ToString('N') + '.xml')
         $doc1 = [xml]'<?xml version="1.0" encoding="utf-8"?><GameProfile><EmulationProfile>Original</EmulationProfile></GameProfile>'
         Save-Xml -doc $doc1 -path $path
         $originalContent = Get-Content -LiteralPath $path -Raw
 
-        # Force the temp-file write to fail by making its target path
-        # itself a directory (an XmlWriter cannot create a file where a
-        # directory of the same name exists) -- a deterministic, real way
-        # to simulate a temp-file write failure without needing to
-        # literally kill a process mid-write.
-        $tmpPath = $path + '.tmp'
-        New-Item -ItemType Directory -Path $tmpPath -Force | Out-Null
+        # An XML 1.0 control character fails after the writer opens its unique
+        # staging file, exercising cleanup without depending on a fixed name.
+        $doc2 = New-Object System.Xml.XmlDocument
+        $root = $doc2.CreateElement('GameProfile')
+        [void]$doc2.AppendChild($root)
+        [void]$root.AppendChild($doc2.CreateTextNode('prefix' + [char]1))
+        { Save-Xml -doc $doc2 -path $path } | Should -Throw -Because "serialization failure must surface as a real error, not silently replace the existing file"
 
-        $doc2 = [xml]'<?xml version="1.0" encoding="utf-8"?><GameProfile><EmulationProfile>ShouldNeverLand</EmulationProfile></GameProfile>'
-        { Save-Xml -doc $doc2 -path $path } | Should -Throw -Because "a temp-file write failure must surface as a real error, not silently succeed with wrong content"
-
-        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent -Because "the existing good file must be completely untouched when the temp-file write itself fails -- this is the entire point of the write-to-temp-then-atomic-rename pattern"
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent -Because "the existing good file must remain byte-identical after a failed staged write"
+        $stagingPattern = [IO.Path]::GetFileName($path) + '.*.tmp'
+        @(Get-ChildItem -LiteralPath (Split-Path -Parent $path) -Filter $stagingPattern -File -ErrorAction SilentlyContinue).Count | Should -Be 0 -Because "failed serialization must not leave a partial staging file behind"
     }
 }
 
@@ -186,8 +177,9 @@ Describe "Virtual Beta Tester: interrupted backup creation recovery (issue #88 A
         New-Item -ItemType File -Path (Join-Path $partialBackupDir 'ALIENS.xml') -Force | Out-Null
         # TIMECRS4.xml deliberately absent -- this is the "interrupted" signature.
 
-        $result = New-PropagationBackup -UserProfilesDir $userProfilesDir
-        $result.ErrorCount | Should -Be 0 -Because "a partial backup from a previous interrupted run must not cause a fresh backup to error"
+        $result = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $userProfilesDir -Label 'PropagateControls'
+        $result.Succeeded | Should -BeTrue -Because "a partial backup from a previous interrupted run must not cause a fresh backup to fail (reason: $($result.Reason))"
+        $result.Verified | Should -BeTrue -Because "the fresh backup must pass its own manifest verification"
         (Test-Path -LiteralPath (Join-Path $result.Path 'ALIENS.xml')) | Should -Be $true
         (Test-Path -LiteralPath (Join-Path $result.Path 'TIMECRS4.xml')) | Should -Be $true -Because "the fresh backup must be genuinely complete, unaffected by an earlier interrupted backup's own missing file"
 

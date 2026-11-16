@@ -24,4 +24,6 @@ pwsh -ExecutionPolicy Bypass -File .\scripts\Run-TPM-Tests.ps1 -TeknoParrotRoot 
 `-TeknoParrotRoot` is mandatory and has no default -- see
 `scripts/Run-TPM-Tests.ps1`'s own comment for why a prior default silently
 pointed at a location that was never a real TeknoParrot install on any
-machine this was run from.
+machine this was run from. The run also needs `TPM_REAL_DATA_TESTS=1` (see
+"Real-data runs are opt-in" in `docs/TPM-CERTIFICATION-SUITE.md`); without it
+the harness stops before it reads anything.

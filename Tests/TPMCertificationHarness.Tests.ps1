@@ -39,7 +39,7 @@ BeforeAll {
     # invocation, that file's "Mock -ModuleName TpmAutoUpdate.Core
     # Get-LatestRelease" stopped intercepting calls, hitting the real GitHub
     # API and failing on rate limits (10 failures reproduced on a real
-    # arcade-machine certification run). Reproduced with a single trivial
+    # test-PC certification run). Reproduced with a single trivial
     # unrelated function -- not specific to anything this file's own functions
     # do -- and confirmed the fix: extracting to an actual .ps1 file and
     # dot-sourcing that file removes the interference entirely.
@@ -93,7 +93,7 @@ BeforeAll {
         }
         @{
             GitStatus = '(clean)'
-            Pester = [pscustomobject]@{ Total = 10; Passed = 10; Failed = 0 }
+            Pester = [pscustomobject]@{ Total = 10; Passed = 10; Failed = 0; FailedContainers = 0 }
             PSScriptAnalyzerFindings = 0
             InstallHealthReport = 'fake-install-health.md'
             Backup = @{ UserProfiles = $true; GameProfiles = $true }
@@ -185,6 +185,81 @@ Describe "New-CertificationScorecard" {
         $result = New-CertificationScorecard -Results $fake
         $result.WorkingTreeClean | Should -Be $false
     }
+
+    It "fails the Backups item when a folder that exists could not be backed up, even if the other folder was" {
+        foreach ($case in @(@{ User = $false; Game = $true }, @{ User = $true; Game = $false }, @{ User = $false; Game = $false })) {
+            $fake = New-FakeResults -Pcsx2Present $true
+            $fake.Backup = @{ UserProfiles = $case.User; GameProfiles = $case.Game }
+            $result = New-CertificationScorecard -Results $fake
+            ($result.Items | Where-Object { $_.Area -eq 'Backups' }).Passed | Should -BeFalse
+            $result.Overall | Should -Not -Be 'CERTIFIED'
+        }
+    }
+
+    It "passes the Backups item when the folder that is missing was simply not there and the other one was backed up" {
+        $fake = New-FakeResults -Pcsx2Present $true
+        $fake.Backup = @{ UserProfiles = $true; GameProfiles = $null }
+        $item = (New-CertificationScorecard -Results $fake).Items | Where-Object { $_.Area -eq 'Backups' }
+        $item.Passed | Should -BeTrue
+        $item.Details | Should -Match 'GameProfiles=no folder'
+    }
+
+    It "fails the Backups item when no folder was backed up at all" {
+        $fake = New-FakeResults -Pcsx2Present $true
+        $fake.Backup = @{ UserProfiles = $null; GameProfiles = $null }
+        ((New-CertificationScorecard -Results $fake).Items | Where-Object { $_.Area -eq 'Backups' }).Passed | Should -BeFalse
+    }
+
+    It "never prints the path of a scorecard file that this harness does not write" {
+        $joins = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Join-Path' -and $node.Extent.Text -match 'TPM-Certification-Scorecard' }, $true))
+        $joins.Count | Should -Be 0
+    }
+}
+
+Describe "Get-TPMPcsx2UsbCursorPaths" {
+    It "reads guncon2_cursor_path from [USB1] and [USB2]" {
+        $ini = Join-Path $TestDrive 'cursor-real.ini'
+        [IO.File]::WriteAllText($ini, "[USB1]`r`nType = guncon2`r`nguncon2_cursor_path = C:\x\P1.png`r`n[USB2]`r`nType = guncon2`r`nguncon2_cursor_path = C:\x\P2.png`r`n")
+        $r = Get-TPMPcsx2UsbCursorPaths -IniPath $ini
+        $r.P1 | Should -Be 'C:\x\P1.png'
+        $r.P2 | Should -Be 'C:\x\P2.png'
+    }
+
+    It "reports no cursor paths when the ini has none, and leaves the file unchanged" {
+        $ini = Join-Path $TestDrive 'cursor-none.ini'
+        [IO.File]::WriteAllText($ini, "[USB1]`r`nType = None`r`n[USB2]`r`nType = None`r`n[Other]`r`nguncon2_cursor_path = C:\wrong.png`r`n")
+        $before = [IO.File]::ReadAllText($ini)
+        $r = Get-TPMPcsx2UsbCursorPaths -IniPath $ini
+        $r.P1 | Should -BeNullOrEmpty
+        $r.P2 | Should -BeNullOrEmpty
+        [IO.File]::ReadAllText($ini) | Should -BeExactly $before
+    }
+}
+
+Describe "pcsx2x6 data folder and cursor path check" {
+    It "uses TeknoParrot when portable.txt is missing or blank, and the name inside it otherwise" {
+        $dir = Join-Path $TestDrive 'pcsx2x6-a'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Get-TPMPcsx2DataRoot -Pcsx2Dir $dir | Should -Be (Join-Path $dir 'TeknoParrot')
+        [IO.File]::WriteAllText((Join-Path $dir 'portable.txt'), "  `r`n")
+        Get-TPMPcsx2DataRoot -Pcsx2Dir $dir | Should -Be (Join-Path $dir 'TeknoParrot')
+        [IO.File]::WriteAllText((Join-Path $dir 'portable.txt'), "MyData`r`n")
+        Get-TPMPcsx2DataRoot -Pcsx2Dir $dir | Should -Be (Join-Path $dir 'MyData')
+    }
+
+    It "passes when the cursor keys are not set, or point at the crosshair files in any slash style or relative form" {
+        $root = Join-Path $TestDrive 'pcsx2x6-b\TeknoParrot'
+        $canon = @((Join-Path $root 'crosshairs\P1.png'), (Join-Path $root 'crosshairs\P2.png'))
+        Test-TPMPcsx2CursorPathsCanonical -DataRoot $root -CursorPaths @($null, $null) -CanonicalPaths $canon | Should -BeTrue
+        Test-TPMPcsx2CursorPathsCanonical -DataRoot $root -CursorPaths @(($canon[0] -replace '\\', '/'), $canon[1]) -CanonicalPaths $canon | Should -BeTrue
+        Test-TPMPcsx2CursorPathsCanonical -DataRoot $root -CursorPaths @('crosshairs\P1.png', 'crosshairs/P2.png') -CanonicalPaths $canon | Should -BeTrue
+    }
+
+    It "fails when a cursor key points at some other file" {
+        $root = Join-Path $TestDrive 'pcsx2x6-c\TeknoParrot'
+        $canon = @((Join-Path $root 'crosshairs\P1.png'), (Join-Path $root 'crosshairs\P2.png'))
+        Test-TPMPcsx2CursorPathsCanonical -DataRoot $root -CursorPaths @($canon[0], 'C:\elsewhere\P2.png') -CanonicalPaths $canon | Should -BeFalse
+    }
 }
 
 Describe "Write-TPMGateHeader / Set-TPMConsoleStatus (issue #122)" {
@@ -232,69 +307,6 @@ Describe "Harness source-level guard against the hashtable-literal if/else defec
         # unrelated "=" on one line and an unrelated "if (" many lines later
         # falsely pair up across a multi-hundred-line Raw string.
         $source | Should -Not -Match '=[ \t]*\([ \t]*if[ \t]*\('
-    }
-}
-
-Describe "Pester regression gate hang/timeout detection (issue #136)" {
-    # These four functions back the runspace-polling loop that replaced a
-    # single blocking Invoke-Pester call. A genuinely hung Pester test and a
-    # merely slow real-hardware run looked identical before this fix (process
-    # alive, report folder created, nothing ever updating) -- kept as pure,
-    # side-effect-free functions specifically so this behavior is testable
-    # without needing to run actual Pester-in-Pester or spin up a real
-    # runspace, which would be slow and fragile to assert against reliably.
-
-    Context "Test-TPMPesterHeartbeatDue" {
-        It "is not due before the interval has elapsed" {
-            Test-TPMPesterHeartbeatDue -ElapsedSeconds 5 -LastHeartbeatSeconds 0 -HeartbeatIntervalSeconds 15 | Should -Be $false
-        }
-        It "is due once the interval has elapsed" {
-            Test-TPMPesterHeartbeatDue -ElapsedSeconds 15 -LastHeartbeatSeconds 0 -HeartbeatIntervalSeconds 15 | Should -Be $true
-        }
-        It "measures from the last heartbeat, not from zero" {
-            Test-TPMPesterHeartbeatDue -ElapsedSeconds 20 -LastHeartbeatSeconds 15 -HeartbeatIntervalSeconds 15 | Should -Be $false
-            Test-TPMPesterHeartbeatDue -ElapsedSeconds 30 -LastHeartbeatSeconds 15 -HeartbeatIntervalSeconds 15 | Should -Be $true
-        }
-    }
-
-    Context "Test-TPMPesterTimedOut" {
-        It "is not timed out before the limit" {
-            Test-TPMPesterTimedOut -ElapsedSeconds 1799 -TimeoutSeconds 1800 | Should -Be $false
-        }
-        It "is timed out once the limit is reached" {
-            Test-TPMPesterTimedOut -ElapsedSeconds 1800 -TimeoutSeconds 1800 | Should -Be $true
-        }
-        It "is timed out immediately with a near-zero timeout (used to exercise this path quickly in tests)" {
-            Test-TPMPesterTimedOut -ElapsedSeconds 0.1 -TimeoutSeconds 0 | Should -Be $true
-        }
-    }
-
-    Context "Get-TPMPesterHeartbeatMessage" {
-        It "includes the elapsed time and the last output line" {
-            $msg = Get-TPMPesterHeartbeatMessage -ElapsedSeconds 42 -LastOutputLine "Describing Foo"
-            $msg | Should -Match '42s elapsed'
-            $msg | Should -Match 'Describing Foo'
-        }
-        It "omits the trailing dash when there is no output line yet" {
-            $msg = Get-TPMPesterHeartbeatMessage -ElapsedSeconds 3 -LastOutputLine ''
-            $msg | Should -Match '3s elapsed'
-            $msg | Should -Not -Match '--'
-        }
-    }
-
-    Context "Get-TPMPesterTimeoutMessage" {
-        It "reports elapsed time, the limit, the last output, and where to find the diagnostic files" {
-            $msg = Get-TPMPesterTimeoutMessage -ElapsedSeconds 1800 -TimeoutSeconds 1800 -LastOutputLine "Describing Foo" -OutputPath "C:\out.txt" -ProgressPath "C:\progress.txt"
-            $msg | Should -Match 'timed out after 1800s'
-            $msg | Should -Match 'limit 1800s'
-            $msg | Should -Match 'Describing Foo'
-            $msg | Should -Match 'C:\\out\.txt'
-            $msg | Should -Match 'C:\\progress\.txt'
-        }
-        It "reports a placeholder when no output was captured at all" {
-            $msg = Get-TPMPesterTimeoutMessage -ElapsedSeconds 5 -TimeoutSeconds 5 -LastOutputLine '' -OutputPath "C:\out.txt" -ProgressPath "C:\progress.txt"
-            $msg | Should -Match 'no output captured'
-        }
     }
 }
 
@@ -401,16 +413,62 @@ Describe "Fail-fast root validation runs before any certification gate (issue #1
 
 Describe "NAS Git safe-directory certification boundary (issue #154)" {
     It "builds a Pester-child environment with one exact, process-scoped safe.directory entry" {
-        $environment = New-TPMPesterChildEnvironment -RepositoryPath $TestDrive
+        $emptyConfig = New-TPMEmptyGitConfigFile -Path (Join-Path $TestDrive 'git-empty-global-env.config')
+        $environment = New-TPMPesterChildEnvironment -RepositoryPath $TestDrive -EmptyGlobalConfigPath $emptyConfig
 
         $environment['GIT_CONFIG_COUNT'] | Should -Be '1'
         $environment['GIT_CONFIG_KEY_0'] | Should -Be 'safe.directory'
-        $environment['GIT_CONFIG_GLOBAL'] | Should -Be 'NUL'
+        $environment['GIT_CONFIG_GLOBAL'] | Should -Be $emptyConfig
+        $environment['GIT_CONFIG_GLOBAL'] | Should -Not -Be 'NUL' -Because "the NUL device name made the Windows Git used for the RC8 full-folder run fail every call with 'unable to access NUL'"
         $environment['GIT_CONFIG_NOSYSTEM'] | Should -Be '1'
         $environment['GIT_CONFIG_VALUE_0'] | Should -Be $TestDrive
         @($environment.Keys | Where-Object { $_ -like 'GIT_CONFIG_*' } | Sort-Object) |
             Should -Be @('GIT_CONFIG_COUNT', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_VALUE_0')
         $environment['GIT_CONFIG_VALUE_0'] | Should -Not -Be '*'
+    }
+
+    It "creates the per-run empty Git config as a real zero-byte file and refuses to reuse a path" {
+        $path = Join-Path $TestDrive ('nested-' + [guid]::NewGuid().ToString('N') + '\git-empty-global.config')
+        $created = New-TPMEmptyGitConfigFile -Path $path
+
+        $created | Should -Be ([System.IO.Path]::GetFullPath($path))
+        (Test-Path -LiteralPath $created -PathType Leaf) | Should -BeTrue
+        (Get-Item -LiteralPath $created -Force).Length | Should -Be 0
+        { New-TPMEmptyGitConfigFile -Path $path } | Should -Throw '*EMPTY_GIT_CONFIG_EXISTS*'
+    }
+
+    It "isolates user-global Git configuration with the real empty file while keeping the exact safe.directory entry (real git)" {
+        (Get-Command git -ErrorAction SilentlyContinue) | Should -Not -BeNullOrEmpty -Because "this behavioral proof needs a real Git"
+        $fakeHome = Join-Path $TestDrive ('git-home-' + [guid]::NewGuid().ToString('N'))
+        [void][System.IO.Directory]::CreateDirectory($fakeHome)
+        [System.IO.File]::WriteAllText((Join-Path $fakeHome '.gitconfig'), "[user]`n`tname = LEAKED-GLOBAL-CONFIG`n")
+        $emptyConfig = New-TPMEmptyGitConfigFile -Path (Join-Path $TestDrive ('git-empty-' + [guid]::NewGuid().ToString('N') + '.config'))
+        $environment = New-TPMPesterChildEnvironment -RepositoryPath $TestDrive -EmptyGlobalConfigPath $emptyConfig
+        $names = @('HOME', 'USERPROFILE', 'XDG_CONFIG_HOME') + @($environment.Keys)
+        $saved = @{}
+        foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
+        # [NullString]::Value truly unsets a variable; a PowerShell $null argument would be converted to an EMPTY string, and an empty
+        # GIT_CONFIG_GLOBAL itself disables the global config -- which would make the control run below meaningless.
+        $setEnv = { param($n, $v) [Environment]::SetEnvironmentVariable($n, $(if ($null -eq $v) { [NullString]::Value } else { [string]$v })) }
+        try {
+            & $setEnv 'HOME' $fakeHome
+            & $setEnv 'USERPROFILE' $fakeHome
+            & $setEnv 'XDG_CONFIG_HOME' (Join-Path $fakeHome 'xdg')
+            foreach ($name in @($environment.Keys)) { & $setEnv $name $null }
+            $control = @(& git config --global --get user.name 2>&1)
+            foreach ($name in @($environment.Keys)) { & $setEnv $name $environment[$name] }
+            $isolated = @(& git config --get user.name 2>&1)
+            $isolatedExit = $LASTEXITCODE
+            $safeDirectory = @(& git config --get-all safe.directory 2>&1)
+        } finally {
+            foreach ($name in $names) { & $setEnv $name $saved[$name] }
+        }
+
+        ($control -join '') | Should -Be 'LEAKED-GLOBAL-CONFIG' -Because "the control run proves this fixture can detect a leaking user-global config"
+        $isolatedExit | Should -Be 1 -Because "an absent key (not a fatal config error) is the expected result with an empty global config"
+        ($isolated -join '') | Should -BeNullOrEmpty
+        ($isolated -join '') | Should -Not -Match 'fatal'
+        @($safeDirectory) | Should -Contain $TestDrive
     }
 
     It "uses the FileSystem ProviderPath for both runner Git reads" {
@@ -536,24 +594,11 @@ Describe "TPM config JSON snapshot/override/restore (issue #146)" {
         Test-Path -LiteralPath $configPath | Should -Be $false
     }
 
-    It "restores the exact original content after an override, so a developer's real saved settings are never left corrupted" {
-        $configPath = Join-Path $TestDrive ("restore-config-" + [guid]::NewGuid().ToString('N') + '.json')
-        $originalContent = '{"TeknoParrotRoot":"C:\\Users\\Someone\\LaunchBox\\Emulators\\TeknoParrot","ZipSourceFolder":"W:\\ROMS\\TeknoParrot Collection"}'
-        Set-Content -LiteralPath $configPath -Value $originalContent -Encoding utf8 -NoNewline
-
-        $snapshot = Get-TPMConfigJsonSnapshot -ConfigPath $configPath
-        [void](Set-TPMConfigJsonRoot -ConfigPath $configPath -TeknoParrotRoot 'W:\Emulators\TeknoParrot')
-        (Get-Content -LiteralPath $configPath -Raw) | Should -Not -Be $originalContent
-
-        Restore-TPMConfigJsonSnapshot -ConfigPath $configPath -Snapshot $snapshot
-        (Get-Content -LiteralPath $configPath -Raw) | Should -Be $originalContent
-    }
-
     It "removes the config file on restore when the snapshot was null (no config existed before the override)" {
         $configPath = Join-Path $TestDrive ("restore-null-" + [guid]::NewGuid().ToString('N') + '.json')
         Set-Content -LiteralPath $configPath -Value '{"TeknoParrotRoot":"W:\\Emulators\\TeknoParrot"}' -Encoding utf8 -NoNewline
 
-        Restore-TPMConfigJsonSnapshot -ConfigPath $configPath -Snapshot $null
+        Restore-TPMConfigJsonSnapshot -ConfigPath $configPath
 
         Test-Path -LiteralPath $configPath | Should -Be $false
     }
@@ -576,15 +621,13 @@ Describe "TPM config JSON snapshot/override/restore (issue #146)" {
         @($cfg.PSObject.Properties.Name | Sort-Object) | Should -Be @('GamesInstallFolder','TeknoParrotRoot','UnattendedMode') -Because 'this must remain the complete minimal config -- no untested extra fields'
     }
 
-    It "New-TPMTemporaryUnattendedConfig's output is removed cleanly by Restore-TPMConfigJsonSnapshot with a null snapshot (the same cleanup path as the existing-config case)" {
+    It "New-TPMTemporaryUnattendedConfig's output is removed cleanly by Restore-TPMConfigJsonSnapshot (the cleanup path when no config existed before the run)" {
         $configPath = Join-Path $TestDrive ("temp-config-cleanup-" + [guid]::NewGuid().ToString('N') + '.json')
-        $snapshot = Get-TPMConfigJsonSnapshot -ConfigPath $configPath
-        $snapshot | Should -Be $null
 
         [void](New-TPMTemporaryUnattendedConfig -ConfigPath $configPath -TeknoParrotRoot 'W:\Emulators\TeknoParrot')
         Test-Path -LiteralPath $configPath | Should -Be $true
 
-        Restore-TPMConfigJsonSnapshot -ConfigPath $configPath -Snapshot $snapshot
+        Restore-TPMConfigJsonSnapshot -ConfigPath $configPath
 
         Test-Path -LiteralPath $configPath | Should -Be $false
     }
@@ -593,34 +636,14 @@ Describe "TPM config JSON snapshot/override/restore (issue #146)" {
     # verified, never assumed just because it did not throw.
     It "Test-TPMConfigRestored reports true when the file was correctly removed for a null (no-prior-config) snapshot" {
         $configPath = Join-Path $TestDrive ("verify-null-ok-" + [guid]::NewGuid().ToString('N') + '.json')
-        Test-TPMConfigRestored -ConfigPath $configPath -ExpectedSnapshot $null | Should -Be $true
+        Test-TPMConfigRestored -ConfigPath $configPath | Should -Be $true
     }
 
     It "Test-TPMConfigRestored reports false when a file is still present after restore expected it removed (simulated failed delete)" {
         $configPath = Join-Path $TestDrive ("verify-null-fail-" + [guid]::NewGuid().ToString('N') + '.json')
         Set-Content -LiteralPath $configPath -Value '{"TeknoParrotRoot":"W:\\Emulators\\TeknoParrot"}' -Encoding utf8 -NoNewline
 
-        Test-TPMConfigRestored -ConfigPath $configPath -ExpectedSnapshot $null | Should -Be $false
-    }
-
-    It "Test-TPMConfigRestored reports true when the file content exactly matches the expected snapshot" {
-        $configPath = Join-Path $TestDrive ("verify-match-" + [guid]::NewGuid().ToString('N') + '.json')
-        $content = '{"TeknoParrotRoot":"C:\\SavedPath\\TeknoParrot"}'
-        Set-Content -LiteralPath $configPath -Value $content -Encoding utf8 -NoNewline
-
-        Test-TPMConfigRestored -ConfigPath $configPath -ExpectedSnapshot $content | Should -Be $true
-    }
-
-    It "Test-TPMConfigRestored reports false when a snapshot was expected but the file is missing (simulated failed write-back)" {
-        $configPath = Join-Path $TestDrive ("verify-missing-" + [guid]::NewGuid().ToString('N') + '.json')
-        Test-TPMConfigRestored -ConfigPath $configPath -ExpectedSnapshot '{"TeknoParrotRoot":"C:\\SavedPath\\TeknoParrot"}' | Should -Be $false
-    }
-
-    It "Test-TPMConfigRestored reports false when the file content differs from the expected snapshot (simulated corrupted restore)" {
-        $configPath = Join-Path $TestDrive ("verify-mismatch-" + [guid]::NewGuid().ToString('N') + '.json')
-        Set-Content -LiteralPath $configPath -Value '{"TeknoParrotRoot":"W:\\Emulators\\TeknoParrot"}' -Encoding utf8 -NoNewline
-
-        Test-TPMConfigRestored -ConfigPath $configPath -ExpectedSnapshot '{"TeknoParrotRoot":"C:\\SavedPath\\TeknoParrot"}' | Should -Be $false
+        Test-TPMConfigRestored -ConfigPath $configPath | Should -Be $false
     }
 }
 
@@ -680,13 +703,13 @@ Describe "Get-TPMEffectiveRootFromUnattendedLog / Test-TPMUnattendedRootMatch (i
         # The exact real-world shape confirmed on issue #146: saved root
         # (stale, from a previous interactive run) differs from what this
         # harness intended to bind for this run.
-        New-FakeUnattendedLog -SavedRoot 'C:\Users\EliSi\LaunchBox\Emulators\TeknoParrot' -EffectiveRoot 'W:\Emulators\TeknoParrot' |
+        New-FakeUnattendedLog -SavedRoot 'C:\Users\Example\LaunchBox\Emulators\TeknoParrot' -EffectiveRoot 'W:\Emulators\TeknoParrot' |
             Set-Content -LiteralPath $logPath -Encoding utf8
 
         $effective = Get-TPMEffectiveRootFromUnattendedLog -LogPath $logPath
 
         $effective | Should -Be 'W:\Emulators\TeknoParrot'
-        $effective | Should -Not -Be 'C:\Users\EliSi\LaunchBox\Emulators\TeknoParrot'
+        $effective | Should -Not -Be 'C:\Users\Example\LaunchBox\Emulators\TeknoParrot'
     }
 
     It "returns null when the log file does not exist" {
@@ -710,7 +733,7 @@ Describe "Get-TPMEffectiveRootFromUnattendedLog / Test-TPMUnattendedRootMatch (i
     }
 
     It "fails the match -- this is the actual issue #146 defect -- when unattended TPM used its saved path instead of the requested certification root" {
-        Test-TPMUnattendedRootMatch -RequestedRoot 'W:\Emulators\TeknoParrot' -EffectiveRoot 'C:\Users\EliSi\LaunchBox\Emulators\TeknoParrot' | Should -Be $false
+        Test-TPMUnattendedRootMatch -RequestedRoot 'W:\Emulators\TeknoParrot' -EffectiveRoot 'C:\Users\Example\LaunchBox\Emulators\TeknoParrot' | Should -Be $false
     }
 
     It "fails the match (does not silently pass) when the effective root could not be determined at all" {
@@ -745,7 +768,6 @@ Describe "Test-TPMInstallHealthGate (issue #146)" {
                 [pscustomobject]@{ Name = 'pcsx2x6 crosshair folder exists'; Passed = $true; Details = 'not applicable -- no pcsx2x6 folder in this install' }
                 [pscustomobject]@{ Name = 'GameProfiles XML parse'; Passed = $false; Details = 'files=0 invalid=0' }
                 [pscustomobject]@{ Name = 'UserProfiles XML parse'; Passed = $true; Details = 'files=0 invalid=0' }
-                [pscustomobject]@{ Name = 'No duplicate GameProfiles filenames'; Passed = $true; Details = 'duplicates=0' }
             )
         }
 
@@ -791,7 +813,7 @@ Describe "Test-TPMInstallHealthGate (issue #146)" {
     }
 
     # Review round 2 (finding #1): absent/incomplete/malformed data must
-    # never read as success -- these cover every case the second Codex
+    # never read as success -- these cover every case the second external
     # review explicitly called out, none of which the first version of this
     # gate handled correctly (it only looked for present-and-failed named
     # checks, so anything simply missing or malformed matched nothing and
@@ -1042,7 +1064,7 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
 
     It "fails certification (NOT CERTIFIED) when the requested and effective roots do not match, even though every other gate passed" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
-        $fake.EffectiveTeknoParrotRoot = 'C:\Users\EliSi\LaunchBox\Emulators\TeknoParrot'
+        $fake.EffectiveTeknoParrotRoot = 'C:\Users\Example\LaunchBox\Emulators\TeknoParrot'
         $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $false; Details = 'fixture requested root binding failed' }
 
         $result = New-CertificationScorecard -Results $fake
@@ -1063,7 +1085,8 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
 
         $result.Overall | Should -Be 'CERTIFIED'
         $rootItem = $result.Items | Where-Object { $_.Area -eq 'Unattended TPM root binding' }
-        $rootItem.Passed | Should -Be $true
+        $rootItem.Status | Should -Be 'NotApplicable'
+        $rootItem.Passed | Should -BeNullOrEmpty
         $rootItem.Details | Should -Match 'not applicable -- smoke mode'
     }
 
@@ -1076,6 +1099,38 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
         $result.Overall | Should -Be 'NOT CERTIFIED'
         $healthItem = $result.Items | Where-Object { $_.Area -eq 'Real Install Health' }
         $healthItem.Passed | Should -Be $false
+    }
+
+    It "fails certification when a Pester container failed to run even though no test failed (FIX112 B5)" {
+        $fake = New-FakeResults -Pcsx2Present $true
+        $fake.Pester.FailedContainers = 1
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $result.Overall | Should -Be 'NOT CERTIFIED'
+        $pesterItem = $result.Items | Where-Object { $_.Area -eq 'Pester' }
+        $pesterItem.Passed | Should -Be $false
+        $pesterItem.Details | Should -Match 'failedContainers=1'
+    }
+
+    It "shows how many Pester tests were skipped, and still certifies a run that only skipped by design" {
+        $fake = New-FakeResults -Pcsx2Present $true
+        $fake.Pester | Add-Member -NotePropertyName Skipped -NotePropertyValue 4 -Force
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $pesterItem = $result.Items | Where-Object { $_.Area -eq 'Pester' }
+        $pesterItem.Details | Should -Match 'skipped=4'
+        $pesterItem.Passed | Should -Be $true
+    }
+
+    It "fails certification when the Pester result carries no FailedContainers count at all (FIX112 B5)" {
+        $fake = New-FakeResults -Pcsx2Present $true
+        $fake.Pester = [pscustomobject]@{ Total = 10; Passed = 10; Failed = 0 }
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $result.Overall | Should -Be 'NOT CERTIFIED'
     }
 
     # Review round 3: "Unattended TPM config restoration" was recorded by
@@ -1182,7 +1237,7 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
                 } else {
                     'FAIL'
                 }
-                if ($item.Area -eq 'Unattended TPM config restoration' -and $smoke) {
+                if (@('Unattended TPM config restoration', 'Unattended TPM root binding') -contains $item.Area -and $smoke) {
                     $mark | Should -Be 'N/A'
                 } elseif ($item.Area -eq 'Smoke File Safety' -and -not $smoke) {
                     $mark | Should -Be 'N/A'
@@ -1193,22 +1248,17 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
         }
     }
 
-    It "excludes the N/A restoration item from both sides of the score (does not increase or decrease it)" {
+    It "excludes the N/A restoration and root-binding items from both sides of the score (does not increase or decrease it)" {
         $smokeFake = New-FakeResults -Pcsx2Present $true -SmokeMode $true
         $smokeResult = New-CertificationScorecard -Results $smokeFake
 
-        # 11 score items exist in total (10 applicable + the 1 N/A
-        # restoration item in smoke mode); Total must reflect only the 10
-        # applicable ones -- if the N/A item were still counted (as it was
-        # before this fix, via Passed = $true), Total would be 11 instead.
+        # 11 score items exist in total (9 applicable + the 2 N/A items in
+        # smoke mode: root binding and restoration); Total must reflect
+        # only the 9 applicable ones.
         $smokeResult.Items.Count | Should -Be 11
-        $smokeResult.Total | Should -Be 10
-
-        # Every other score item in the smoke-mode fixture passes, so with
-        # the restoration item correctly excluded (not counted as either
-        # passed or total), Passed must equal Total.
+        $smokeResult.Total | Should -Be 9
         $smokeResult.Passed | Should -Be $smokeResult.Total
-        $smokeResult.Passed | Should -Be 10
+        $smokeResult.Passed | Should -Be 9
     }
 
     It "still certifies (CERTIFIED) for a smoke-mode run -- the N/A item does not force NOT CERTIFIED" {
@@ -1252,7 +1302,7 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
         # (issue #149) are the two items that intentionally carry a Status
         # property -- every item besides those two must remain exactly as
         # it was before either fix.
-        $itemsWithStatus = @('Unattended TPM config restoration', 'Smoke File Safety')
+        $itemsWithStatus = @('Unattended TPM config restoration', 'Unattended TPM root binding', 'Smoke File Safety')
         $otherItems = $result.Items | Where-Object { $itemsWithStatus -notcontains $_.Area }
         foreach ($item in $otherItems) {
             $item.PSObject.Properties.Name | Should -Not -Contain 'Status'
@@ -1262,7 +1312,7 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
 }
 
 Describe "Smoke File Safety Not Applicable during unattended mode (issue #149)" {
-    # A real RC3 arcade certification run using -RunUnattendedTPM scored
+    # A real RC3 test-PC certification run using -RunUnattendedTPM scored
     # [PASS] Smoke File Safety with the literal wording "no unexpected
     # changes in smoke mode" -- true only in the narrow sense that the
     # (unconditionally-collected) pre/post diff happened to show no
@@ -1307,6 +1357,21 @@ Describe "Smoke File Safety Not Applicable during unattended mode (issue #149)" 
         $item.Status | Should -Be 'Fail'
         $item.Passed | Should -Be $false
         $result.Overall | Should -Be 'NOT CERTIFIED'
+    }
+
+    It "fails Smoke File Safety in smoke mode when a folder could not be read, even though nothing was seen to change" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $true
+        $fake.Snapshots = [ordered]@{
+            UserProfiles      = [pscustomobject]@{ Added = 0; Removed = 0; Changed = 0; BeforeSkipped = 1; AfterSkipped = 1 }
+            GameProfiles      = [pscustomobject]@{ Added = 0; Removed = 0; Changed = 0; BeforeSkipped = 0; AfterSkipped = 0 }
+            Pcsx2x6Crosshairs = [pscustomobject]@{ Added = 0; Removed = 0; Changed = 0; BeforeSkipped = 0; AfterSkipped = 0 }
+        }
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $item = $result.Items | Where-Object { $_.Area -eq 'Smoke File Safety' }
+        $item.Status | Should -Be 'Fail'
+        $item.Passed | Should -Be $false
     }
 
     It "marks Smoke File Safety Status = 'NotApplicable' during unattended mode, even when the (unconditionally-collected) diff shows no changes" {
@@ -1594,8 +1659,8 @@ Describe "Invoke-TPMUnattendedRootBinding integration (issue #146 review round 3
 }
 
 Describe "New-TPMCertificationScreenshot (issue #151)" {
-    # RC3 arcade certification of a fully-passing merged commit still
-    # returned ARCADE CERTIFICATION FAIL because the required screenshot
+    # RC3 test-PC certification of a fully-passing merged commit still
+    # returned a certification FAIL because the required screenshot
     # evidence did not exist and had to be captured manually. This function
     # is the core, independently testable piece of automatic capture --
     # $CaptureAction is injectable specifically so these tests never touch
@@ -2137,16 +2202,19 @@ Describe "New-TPMCertificationScreenshot (issue #151)" {
     # than incidentally working because some prior test already primed
     # $script:tpmScreenshotSequence / $script:tpmEvidenceWorkflowId to a
     # workable value. This test explicitly resets that state to the same
-    # known-fresh values the real harness starts a run with (via
-    # Reset-TPMEvidenceLedger, a real production function, not a test-only
-    # shortcut), then proves New-TPMScreenshotReservedPath and
+    # known-fresh values the real harness starts a run with (the same four
+    # assignments as its script-scope initializers), then proves
+    # New-TPMScreenshotReservedPath and
     # New-TPMCertificationScreenshot both work from that known baseline,
     # under this test's own explicit strict mode -- independent of whatever
     # state leaked in from any other It.
     It "New-TPMScreenshotReservedPath and New-TPMCertificationScreenshot work from a freshly-reset sequence/workflow state, under strict mode, independent of any other test" {
         Set-StrictMode -Version Latest
         try {
-            Reset-TPMEvidenceLedger
+            $script:tpmEvidenceLedger = New-Object System.Collections.Generic.List[object]
+            $script:tpmEvidenceLedgerSealed = $false
+            $script:tpmEvidenceWorkflowId = [guid]::NewGuid().ToString('N')
+            $script:tpmScreenshotSequence = 0
             $script:tpmScreenshotSequence | Should -Be 0
 
             $dir = Join-Path $TestDrive ("shots-isolated-" + [guid]::NewGuid().ToString('N'))
@@ -2357,19 +2425,13 @@ Describe "Screenshot privacy disclosure and capture-scope safeguard (issue #151 
     }
 
     It "Save-TPMScreenCapture returns a CaptureScope of 'Window' or 'FullDesktop', never anything else" {
-        # Review round 2 (Luna Max): this exercises the real GDI+ capture
-        # path (not the deterministic rasterized-text stand-in every other
-        # test in this file uses), so it depends on a genuinely usable
-        # interactive display -- something a remote/headless dev session can
-        # transiently lack. Test-TPMInteractiveDisplayAvailable proves that
-        # capability live, right now, the same way production would fail:
-        # only when it deterministically confirms no display is available
-        # does this skip (Set-ItResult -Skipped, a real, visible Pester skip
-        # -- never a silent pass or a NotApplicable substitute). Any other
-        # failure -- including a real capture failure with a display
-        # present -- still fails this test exactly as before.
-        if (-not (Test-TPMInteractiveDisplayAvailable)) {
-            Set-ItResult -Skipped -Because 'this session has no usable interactive display right now (confirmed via a live GDI+ CopyFromScreen probe, ERROR_INVALID_HANDLE) -- a real certification run on real hardware must still fail this evidence requirement, not skip it'
+        # This exercises the real GDI+ capture path (not the deterministic
+        # rasterized-text stand-in every other test in this file uses), so it
+        # needs a genuinely usable interactive display.
+        # Real desktop capture is opt-in: it captures whatever is on the tester's screen, so ordinary runs stay synthetic and never reach it.
+        # Mutation: remove this gate -> an ordinary run captures the real window/desktop again (the next line would not skip without TPM_REAL_DATA_TESTS=1).
+        if ([Environment]::GetEnvironmentVariable('TPM_REAL_DATA_TESTS') -cne '1') {
+            Set-ItResult -Skipped -Because 'a real window/desktop capture runs only when the tester sets TPM_REAL_DATA_TESTS=1 on purpose; ordinary runs use synthetic captures'
             return
         }
 
@@ -2381,42 +2443,6 @@ Describe "Screenshot privacy disclosure and capture-scope safeguard (issue #151 
 
         $scope | Should -BeIn @('Window', 'FullDesktop')
         Test-Path -LiteralPath $path -PathType Leaf | Should -Be $true
-    }
-
-    Context "Test-TPMWin32ErrorIndicatesNoDisplay (the no-display classification, independent of any real display)" {
-        It "treats ERROR_INVALID_HANDLE (6) as the no-display signal" {
-            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode 6 | Should -Be $true
-        }
-        It "does not treat other native error codes as a no-display signal" {
-            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode 5 | Should -Be $false   # ERROR_ACCESS_DENIED
-            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode 0 | Should -Be $false
-            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode 1450 | Should -Be $false   # ERROR_NO_SYSTEM_RESOURCES
-        }
-    }
-
-    Context "Test-TPMInteractiveDisplayAvailable (the live capability probe)" {
-        It "returns a boolean without throwing, regardless of what this particular session's display state happens to be" {
-            # Called directly, not via "{ $x = ... } | Should -Not -Throw" --
-            # Should -Not -Throw invokes its scriptblock via the call
-            # operator, which creates its own child scope, so an assignment
-            # made inside it never leaks back out to $result here. An
-            # uncaught exception from the direct call below fails this It
-            # exactly the same way Should -Not -Throw would.
-            $result = Test-TPMInteractiveDisplayAvailable
-            $result | Should -BeOfType [bool]
-        }
-
-        It "propagates a Win32Exception whose native error code is not the no-display signal, rather than swallowing it" {
-            # Regression guard for the "do not convert a real capture failure
-            # into NotApplicable" requirement: fabricate a distinctly
-            # different native error (ERROR_ACCESS_DENIED) via the same
-            # exception-unwrapping shape Test-TPMInteractiveDisplayAvailable
-            # inspects, and confirm the underlying classification would NOT
-            # treat it as "no display" -- a real, different failure must
-            # still be visible, never silently absorbed.
-            $fakeWin32 = New-Object System.ComponentModel.Win32Exception(5)   # ERROR_ACCESS_DENIED
-            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode $fakeWin32.NativeErrorCode | Should -Be $false
-        }
     }
 
     It "classifies a full-desktop fallback explicitly on the screenshot record, never silently as a narrow capture" {
@@ -2446,7 +2472,7 @@ Describe "Screenshot privacy disclosure and capture-scope safeguard (issue #151 
 }
 
 Describe "Test-TPMPngStructure PNG specification conformance (issue #151 review round 4)" {
-    # Codex found a CRC-valid PNG containing a duplicate IHDR chunk passed
+    # A reviewer found a CRC-valid PNG containing a duplicate IHDR chunk passed
     # round 3's validator -- CRC validation alone is not spec conformance,
     # since a byte-for-byte duplicate chunk is individually CRC-valid.
     # This block hand-builds CRC-VALID PNG fixtures (every chunk's CRC is
@@ -2788,7 +2814,7 @@ Describe "Test-TPMPngStructure PNG specification conformance (issue #151 review 
         $r.Reason | Should -Match 'CRC'
     }
 
-    # --- end-to-end: the exact regressed scenario Codex found, through the
+    # --- end-to-end: the exact regressed scenario a reviewer found, through the
     # full New-TPMCertificationScreenshot flow, proving Status never
     # becomes 'Captured' for it ---
     It "New-TPMCertificationScreenshot never reports Status = 'Captured' for a CRC-valid PNG with a duplicate IHDR chunk" {
@@ -3066,9 +3092,12 @@ $ReleaseCandidateLabel = "Synthetic"
             $pesterMarker=Join-Path $root 'pester-invoked.txt'
             $savedCompositionMarker=$env:TPM_TEST_COMPOSITION_MARKER
             $savedPesterMarker=$env:TPM_TEST_PESTER_INVOKED_MARKER
+            $savedRealData=$env:TPM_REAL_DATA_TESTS
             try{
                 $env:TPM_TEST_COMPOSITION_MARKER=$compositionMarker
                 $env:TPM_TEST_PESTER_INVOKED_MARKER=$pesterMarker
+                # The install above is synthetic; this is the explicit opt-in the real-instance harness requires before it reads any folder.
+                $env:TPM_REAL_DATA_TESTS='1'
                 # Uses the real, hardened Invoke-TPMIsolatedProcessV1 primitive
                 # -- closed/empty stdin, bounded timeout with confirmed
                 # termination, separate stdout/stderr streams -- to launch the
@@ -3081,6 +3110,7 @@ $ReleaseCandidateLabel = "Synthetic"
             }finally{
                 $env:TPM_TEST_COMPOSITION_MARKER=$savedCompositionMarker
                 $env:TPM_TEST_PESTER_INVOKED_MARKER=$savedPesterMarker
+                $env:TPM_REAL_DATA_TESTS=$savedRealData
             }
             $invocation.TimedOut|Should -BeFalse -Because 'the pre-Pester throw must abort long before any timeout could matter'
             $invocation.TerminationConfirmed|Should -BeTrue
@@ -3204,14 +3234,18 @@ $ReleaseCandidateLabel = "Synthetic"
             '<GameProfile />'|Set-Content -LiteralPath (Join-Path $install 'GameProfiles\one.xml') -Encoding ascii
             $marker=Join-Path $root 'composition-entered.txt'
             $savedMarker=$env:TPM_TEST_COMPOSITION_MARKER
+            $savedRealData=$env:TPM_REAL_DATA_TESTS
             try{
                 $env:TPM_TEST_COMPOSITION_MARKER=$marker
+                # The install above is synthetic; this is the explicit opt-in the real-instance harness requires before it reads any folder.
+                $env:TPM_REAL_DATA_TESTS='1'
                 $arguments=@('-NoProfile','-File',(Join-Path $repo 'scripts\Invoke-TPM-RealInstanceSmoke.ps1'),'-RepoPath',$repo,'-TeknoParrotRoot',$install,'-HarnessRoot',$harnessRoot)
                 if($Unattended){$arguments+='-RunUnattendedTPM'}
                 $output=@(& pwsh @arguments 2>&1)
                 $exitCode=$LASTEXITCODE
             }finally{
                 $env:TPM_TEST_COMPOSITION_MARKER=$savedMarker
+                $env:TPM_REAL_DATA_TESTS=$savedRealData
             }
             return [pscustomobject]@{Root=$root;Repo=$repo;Install=$install;HarnessRoot=$harnessRoot;Marker=$marker;Output=($output-join"`n");ExitCode=$exitCode}
         }
@@ -3332,7 +3366,7 @@ $ReleaseCandidateLabel = "Synthetic"
         if(`$env:TPM_TEST_BOOTSTRAP_STATUS_TEXT){[IO.File]::WriteAllText(`$statusPath,`$env:TPM_TEST_BOOTSTRAP_STATUS_TEXT,(New-Object Text.UTF8Encoding `$false))}
         `$tpmTestParsedExitCode=0
         if(`$env:TPM_TEST_BOOTSTRAP_EXIT_CODE){[void][int]::TryParse(`$env:TPM_TEST_BOOTSTRAP_EXIT_CODE,[ref]`$tpmTestParsedExitCode)}
-        `$harnessResult=[pscustomobject]@{ExitCode=`$tpmTestParsedExitCode}
+        `$harnessResult=[pscustomobject]@{ExitCode=`$tpmTestParsedExitCode;TimedOut=`$false}
     }else{
 $needle
     }
@@ -3361,10 +3395,11 @@ $needle
                 [string]$ExitCode,
                 [int]$TimeoutSeconds=60,
                 [switch]$OmitMarker,
-                [switch]$ProviderQualifiedRepoPath
+                [switch]$ProviderQualifiedRepoPath,
+                [switch]$RelativeRepoPath
             )
             $fixture=New-TPMBootstrapFixtureRepository -Root $Root
-            $requestedRepoPath=if($ProviderQualifiedRepoPath){('Microsoft.PowerShell.Core'+[IO.Path]::DirectorySeparatorChar+'FileSystem::'+$fixture.Repo)}else{$fixture.Repo}
+            $requestedRepoPath=if($ProviderQualifiedRepoPath){('Microsoft.PowerShell.Core'+[IO.Path]::DirectorySeparatorChar+'FileSystem::'+$fixture.Repo)}elseif($RelativeRepoPath){Split-Path -Leaf $fixture.Repo}else{$fixture.Repo}
             $install=Join-Path $Root 'install'
             New-Item -ItemType Directory -Path $install -Force|Out-Null
             $logRoot=Join-Path $Root 'invoke-log'
@@ -3380,9 +3415,13 @@ $needle
                 $arguments=@(
                     '-NoProfile','-NonInteractive',
                     '-File',(Join-Path $fixture.Repo 'scripts\Run-TPM-Tests.ps1'),
-                    '-RepoPath',$requestedRepoPath,'-TeknoParrotRoot',$install,'-HarnessRoot',$HarnessRoot,'-NoPwshRelaunch'
+                    '-RepoPath',$requestedRepoPath,'-TeknoParrotRoot',$install,'-HarnessRoot',$HarnessRoot
                 )
-                $invocation=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList $arguments -WorkingDirectoryRoot $fixture.Repo -WorkingDirectory $fixture.Repo -LogDirectoryRoot $logRoot -LogDirectory $logRoot -Identity 'bootstrap-probe' -TimeoutSeconds $TimeoutSeconds -Environment @{GIT_TERMINAL_PROMPT='0'}
+                # A relative -RepoPath is only used by the relaunch from Windows PowerShell 5.1, so that mode starts there, one folder above the repository.
+                $startExe=if($RelativeRepoPath){(Get-Command powershell.exe).Source}else{$arguments+='-NoPwshRelaunch';(Get-Command pwsh).Source}
+                $startDirectory=if($RelativeRepoPath){$Root}else{$fixture.Repo}
+                # The wrapper refuses to start without the real-data opt-in; this fixture is synthetic and its harness launch is replaced by the marker above.
+                $invocation=Invoke-TPMIsolatedProcessV1 -FilePath $startExe -ArgumentList $arguments -WorkingDirectoryRoot $startDirectory -WorkingDirectory $startDirectory -LogDirectoryRoot $logRoot -LogDirectory $logRoot -Identity 'bootstrap-probe' -TimeoutSeconds $TimeoutSeconds -Environment @{GIT_TERMINAL_PROMPT='0';TPM_REAL_DATA_TESTS='1'}
             }finally{
                 $env:TPM_TEST_BOOTSTRAP_MARKER=$savedMarker
                 $env:TPM_TEST_BOOTSTRAP_STATUS_TEXT=$savedStatus
@@ -3406,7 +3445,9 @@ $needle
         $harnessRoot=Join-Path $parent 'TPM-TestHarness'
         Test-Path -LiteralPath $harnessRoot|Should -BeFalse -Because 'HarnessRoot must not exist before this test begins'
 
-        $preGitStatus=& git -c ("safe.directory={0}" -f $sourceRepo) -C $sourceRepo status --porcelain
+        # A file snapshot of the product folders (not `git status`) so the proof does not depend on this tree being a Git checkout.
+        $takeSourceSnapshot={ @(foreach($dir in 'scripts','tools'){ Get-ChildItem -LiteralPath (Join-Path $sourceRepo $dir) -File -Recurse -ErrorAction SilentlyContinue }; Get-ChildItem -LiteralPath $sourceRepo -File -Filter '*.ps1') | Sort-Object FullName | ForEach-Object { '{0}|{1}|{2}' -f $_.FullName,$_.Length,$_.LastWriteTimeUtc.Ticks } }
+        $preGitStatus=@(& $takeSourceSnapshot)
         $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
 
         $result.TerminationConfirmed|Should -BeTrue
@@ -3448,7 +3489,7 @@ $needle
 
         # The real repository checkout (this worktree) is completely
         # unaffected by this invocation.
-        $postGitStatus=& git -c ("safe.directory={0}" -f $sourceRepo) -C $sourceRepo status --porcelain
+        $postGitStatus=@(& $takeSourceSnapshot)
         ($postGitStatus-join "`n")|Should -Be ($preGitStatus-join "`n") -Because 'this worktree must remain untouched by any bootstrap test'
 
         # Captured stdout is concise (the wrapper's own numbered narrative
@@ -3503,6 +3544,17 @@ $needle
         $repoPathIndex=[array]::IndexOf($harnessParameters,'-RepoPath')
         $repoPathIndex | Should -BeGreaterThan -1
         $harnessParameters[$repoPathIndex+1] | Should -Be $result.Repo -Because 'the isolated harness working-directory path must be FileSystem-native'
+    }
+
+    It 'accepts a relative -RepoPath when it is started from Windows PowerShell and relaunches in PowerShell 7' {
+        # Mutation: pass the -RepoPath exactly as typed to the relaunched child -> the child starts inside the repository and cannot find the relative folder ("Repository is not readable").
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $root 'parent') -Force|Out-Null
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot (Join-Path $root 'parent\TPM-TestHarness') -RelativeRepoPath -TimeoutSeconds 180
+        $result.RequestedRepoPath | Should -Not -Match '[\\/]'
+        $result.TimedOut | Should -BeFalse
+        $result.Marker | Should -Not -BeNullOrEmpty -Because 'the relaunched runner must find the repository and reach its fixture stop-point'
+        $result.Marker.RepoPath | Should -Be $result.Repo
     }
     It 'never launches Explorer, never prompts, and closes stdin -- verified by grepping the real entry-point source for reachable interactive calls' {
         $entryText=[IO.File]::ReadAllText((Join-Path $sourceRepo 'scripts\Run-TPM-Tests.ps1'))

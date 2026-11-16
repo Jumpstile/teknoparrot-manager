@@ -33,7 +33,6 @@ Describe 'ADR-0155 Phase 1 compiled authority primitives' {
    }
   }
  }
- It 'separates capability and rejects synthetic provenance and post-seal writes' {$a=New-TPMWorkflowAuthorityV1;&$a Record ([ordered]@{b=2;a=1});$r=&$a Seal;(&$a ValidateIssued $r)|Should -BeTrue;$t='Jumpstile.TPM.Certification.V1.TPMSealedRunReaderV1'-as[type];$ctor=$t.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0];$fake=$ctor.Invoke(@($r.RunIdentity,$r.CanonicalJson));(&$a ValidateIssued $fake)|Should -BeFalse;{&$a Record @{x=1}}|Should -Throw;$r.PSObject.Properties.Name|Should -Not -Contain Record}
 }
 Describe 'ADR-0155 Phase 1 JCS and whole-message transport' {
  It 'matches the RFC 8785 UTF-16 property-order vector for the supported schema subset' {
@@ -43,8 +42,7 @@ Describe 'ADR-0155 Phase 1 JCS and whole-message transport' {
  }
  It 'sorts object properties and preserves arrays' {ConvertTo-TPMJcsV1 ([ordered]@{z=@(3,2,1);a=$true})|Should -Be '{"a":true,"z":[3,2,1]}'}
  It 'rejects unsafe integers fractions and unpaired surrogates' {{ConvertTo-TPMJcsV1 ([long]9007199254740992)}|Should -Throw;{ConvertTo-TPMJcsV1 ([double]1.5)}|Should -Throw;{ConvertTo-TPMJcsV1 ([string][char]0xD800)}|Should -Throw}
- It 'round trips the entire JCS string as unpadded base64url' {$m='line'+[char]10+'| heading fence / '+[char]0x263A;$e=ConvertTo-TPMFailureMessageBase64UrlV1 $m;$e|Should -Match '^[A-Za-z0-9_-]+$';$e|Should -Not -Match '=';ConvertFrom-TPMFailureMessageBase64UrlV1 $e|Should -Be $m}
- It 'rejects malformed invalid UTF8 non-string and noncanonical inputs' {{ConvertFrom-TPMFailureMessageBase64UrlV1 'a'}|Should -Throw;{ConvertFrom-TPMFailureMessageBase64UrlV1 '!!!!'}|Should -Throw;$valid=ConvertTo-TPMFailureMessageBase64UrlV1 'padded';{ConvertFrom-TPMFailureMessageBase64UrlV1 ($valid+'=')}|Should -Throw;$bad=[Convert]::ToBase64String([byte[]](0xC3,0x28)).TrimEnd('=').Replace('+','-').Replace('/','_');{ConvertFrom-TPMFailureMessageBase64UrlV1 $bad}|Should -Throw;$u=New-Object Text.UTF8Encoding($false);$number=[Convert]::ToBase64String($u.GetBytes('1')).TrimEnd('=');{ConvertFrom-TPMFailureMessageBase64UrlV1 $number}|Should -Throw;$slash=[Convert]::ToBase64String($u.GetBytes('"a\/b"')).TrimEnd('=').Replace('+','-').Replace('/','_');{ConvertFrom-TPMFailureMessageBase64UrlV1 $slash}|Should -Throw}
+ It 'encodes the entire JCS string as unpadded base64url' {$m='line'+[char]10+'| heading fence / '+[char]0x263A;$e=ConvertTo-TPMFailureMessageBase64UrlV1 $m;$e|Should -Match '^[A-Za-z0-9_-]+$';$e|Should -Not -Match '='}
 }
 Describe 'ADR-0155 Phase 3 prerequisite: shared fact/evidence primitives extracted from Shadow' {
  BeforeAll {
@@ -144,6 +142,122 @@ Describe 'ADR-0155 Phase 1 hashing and containment' {
         catch { Set-ItResult -Skipped -Because 'junction creation is unavailable'; return }
         { Resolve-TPMContainedPathV1 -Root $root -Path (Join-Path $link 'capture.png') } | Should -Throw '*PATH_REPARSE_POINT*'
     }
+
+    It 'contains a descendant of a drive root and resolves relative children from that root (ASTRA-11)' -Skip:$script:tpmAuthorityNonWindowsPwsh {
+        $drive = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($TestDrive))
+        $driveName = $drive.Substring(0, 2)
+        $leaf = 'tpm-astra11-' + [guid]::NewGuid().ToString('N')
+        $expected = $drive + $leaf + '\reports\result.json'
+        foreach ($rootSpelling in @($drive, ($driveName + '/'), ($driveName + '\\'), $drive.ToLowerInvariant())) {
+            Resolve-TPMContainedPathV1 -Root $rootSpelling -Path $expected | Should -BeExactly $expected
+            Resolve-TPMContainedPathV1 -Root $rootSpelling -Path ($driveName + '/' + $leaf + '/reports/result.json') | Should -BeExactly $expected
+        }
+        # Relative children resolve from the drive root, not from the process's current directory on that drive.
+        $savedDirectory = [Environment]::CurrentDirectory
+        $elsewhere = Join-Path $TestDrive 'astra11-current-directory'
+        New-Item -ItemType Directory -Path $elsewhere -Force | Out-Null
+        try {
+            [Environment]::CurrentDirectory = $elsewhere
+            Resolve-TPMContainedPathV1 -Root $drive -Path ($leaf + '\reports\result.json') | Should -BeExactly $expected
+            Resolve-TPMContainedPathV1 -Root $drive -Path ($leaf + '/reports/result.json') | Should -BeExactly $expected
+        } finally {
+            [Environment]::CurrentDirectory = $savedDirectory
+        }
+    }
+
+    It 'keeps a normal root contained with trailing and alternate separators' -Skip:$script:tpmAuthorityNonWindowsPwsh {
+        $root = Join-Path $TestDrive 'normal-root'
+        $child = Join-Path $root 'evidence\capture.png'
+        New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($child)) -Force | Out-Null
+        [IO.File]::WriteAllText($child, 'png')
+        $expected = [IO.Path]::GetFullPath($child)
+        foreach ($rootSpelling in @($root, ($root + '\'), ($root + '\\'), ($root.Replace('\', '/') + '/'))) {
+            Resolve-TPMContainedPathV1 -Root $rootSpelling -Path $child | Should -BeExactly $expected
+            Resolve-TPMContainedPathV1 -Root $rootSpelling -Path $child.Replace('\', '/') | Should -BeExactly $expected
+            Resolve-TPMContainedPathV1 -Root $rootSpelling -Path 'evidence\capture.png' | Should -BeExactly $expected
+            Resolve-TPMContainedPathV1 -Root $rootSpelling -Path 'evidence/capture.png' | Should -BeExactly $expected
+        }
+        { Resolve-TPMContainedPathV1 -Root ($root + '\') -Path ($root + '-escape\x') } | Should -Throw '*PATH_OUTSIDE_ROOT*'
+    }
+
+    It 'contains a descendant of a UNC share root with or without a trailing separator' -Skip:$script:tpmAuthorityNonWindowsPwsh {
+        $localRoot = Join-Path $TestDrive 'unc-root'
+        $child = Join-Path $localRoot 'evidence\capture.png'
+        New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($child)) -Force | Out-Null
+        [IO.File]::WriteAllText($child, 'png')
+        $localRootFull = [IO.Path]::GetFullPath($localRoot)
+        $share = '\\localhost\' + $localRootFull.Substring(0, 1) + '$'
+        if (-not (Test-Path -LiteralPath $localRootFull.Replace($localRootFull.Substring(0, 2), $share))) { Set-ItResult -Skipped -Because 'the local administrative share is unavailable'; return }
+        $shareChild = $share + '\tpm-astra11-' + [guid]::NewGuid().ToString('N') + '\result.json'
+        Resolve-TPMContainedPathV1 -Root $share -Path $shareChild | Should -BeExactly $shareChild
+        Resolve-TPMContainedPathV1 -Root ($share + '\') -Path $shareChild | Should -BeExactly $shareChild
+        $uncRoot = $share + $localRootFull.Substring(2)
+        $uncChild = $share + [IO.Path]::GetFullPath($child).Substring(2)
+        Resolve-TPMContainedPathV1 -Root ($uncRoot + '\') -Path $uncChild | Should -BeExactly $uncChild
+        Resolve-TPMContainedPathV1 -Root ($uncRoot + '\') -Path 'evidence\capture.png' | Should -BeExactly $uncChild
+        Resolve-TPMContainedPathV1 -Root $uncRoot.Replace('\', '/') -Path $uncChild.Replace('\', '/') | Should -BeExactly $uncChild
+    }
+
+    It 'refuses other UNC shares, other hosts, drive paths and incomplete UNC roots' -Skip:$script:tpmAuthorityNonWindowsPwsh {
+        $shareRoot = '\\tpm-astra11.invalid\share'
+        { Resolve-TPMContainedPathV1 -Root $shareRoot -Path '\\tpm-astra11.invalid\share2\x.json' } | Should -Throw '*PATH_OUTSIDE_ROOT*'
+        { Resolve-TPMContainedPathV1 -Root ($shareRoot + '\') -Path '\\tpm-astra11.invalid\shareX\x.json' } | Should -Throw '*PATH_OUTSIDE_ROOT*'
+        { Resolve-TPMContainedPathV1 -Root $shareRoot -Path '\\other-astra11.invalid\share\x.json' } | Should -Throw '*PATH_OUTSIDE_ROOT*'
+        { Resolve-TPMContainedPathV1 -Root $shareRoot -Path 'C:\share\x.json' } | Should -Throw '*PATH_OUTSIDE_ROOT*'
+        { Resolve-TPMContainedPathV1 -Root ($shareRoot + '\inner') -Path ($shareRoot + '\inner-escape\x.json') } | Should -Throw '*PATH_OUTSIDE_ROOT*'
+        { Resolve-TPMContainedPathV1 -Root '\\tpm-astra11.invalid' -Path ($shareRoot + '\x.json') } | Should -Throw '*root must be absolute*'
+        { Resolve-TPMContainedPathV1 -Root '\\tpm-astra11.invalid\' -Path ($shareRoot + '\x.json') } | Should -Throw '*root must be absolute*'
+    }
+
+    It 'fails closed for traversal, drive mismatch, drive- or root-relative input, device paths and streams' -Skip:$script:tpmAuthorityNonWindowsPwsh {
+        $drive = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($TestDrive))
+        $driveName = $drive.Substring(0, 2)
+        $otherDrive = if ($driveName -ieq 'Z:') { 'Y:' } else { 'Z:' }
+        $root = Join-Path $TestDrive 'closed-root'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        { Resolve-TPMContainedPathV1 -Root $drive -Path ($drive + 'reports\..\..\escape.json') } | Should -Throw '*dot segments*'
+        { Resolve-TPMContainedPathV1 -Root $drive -Path '..\escape.json' } | Should -Throw '*dot segments*'
+        { Resolve-TPMContainedPathV1 -Root $root -Path '../escape.json' } | Should -Throw '*dot segments*'
+        { Resolve-TPMContainedPathV1 -Root ($root + '\..') -Path ($root + '\x.json') } | Should -Throw '*dot segments*'
+        { Resolve-TPMContainedPathV1 -Root $drive -Path ($otherDrive + '\reports\result.json') } | Should -Throw '*PATH_OUTSIDE_ROOT*'
+        { Resolve-TPMContainedPathV1 -Root ($otherDrive + '\') -Path ($drive + 'reports\result.json') } | Should -Throw '*PATH_OUTSIDE_ROOT*'
+        { Resolve-TPMContainedPathV1 -Root $root -Path ($otherDrive + $root.Substring(2) + '\x.json') } | Should -Throw '*PATH_OUTSIDE_ROOT*'
+        { Resolve-TPMContainedPathV1 -Root $drive -Path ($driveName + 'reports\result.json') } | Should -Throw '*drive-relative and root-relative*'
+        { Resolve-TPMContainedPathV1 -Root $drive -Path '\reports\result.json' } | Should -Throw '*drive-relative and root-relative*'
+        { Resolve-TPMContainedPathV1 -Root $drive -Path '/reports/result.json' } | Should -Throw '*drive-relative and root-relative*'
+        { Resolve-TPMContainedPathV1 -Root $driveName -Path ($drive + 'reports\result.json') } | Should -Throw '*root must be absolute*'
+        { Resolve-TPMContainedPathV1 -Root ($driveName + 'reports') -Path ($drive + 'reports\result.json') } | Should -Throw '*root must be absolute*'
+        { Resolve-TPMContainedPathV1 -Root '\reports' -Path ($drive + 'reports\result.json') } | Should -Throw '*root must be absolute*'
+        { Resolve-TPMContainedPathV1 -Root $drive -Path ('//?/' + $driveName + '/escape.png') } | Should -Throw '*device*'
+        { Resolve-TPMContainedPathV1 -Root $drive -Path ('//./' + $driveName + '/escape.png') } | Should -Throw '*device*'
+        { Resolve-TPMContainedPathV1 -Root ('//?/' + $driveName + '/') -Path ($drive + 'x.png') } | Should -Throw '*device*'
+        { Resolve-TPMContainedPathV1 -Root $drive -Path ($drive + 'reports\result.json:stream') } | Should -Throw '*alternate data*'
+    }
+
+    It 'resolves 8.3 short-name spellings to the long path or fails closed, never outside the root' -Skip:$script:tpmAuthorityNonWindowsPwsh {
+        $parent = Join-Path $TestDrive 'short-names'
+        $long = Join-Path $parent 'LongDirectoryName12345'
+        $sibling = Join-Path $parent 'LongDirectoryNameSibling'
+        New-Item -ItemType Directory -Path $long,$sibling -Force | Out-Null
+        $existing = Join-Path $long 'existing.txt'
+        [IO.File]::WriteAllText($existing, 'x')
+        try {
+            $fso = New-Object -ComObject Scripting.FileSystemObject
+            $short = [string]$fso.GetFolder($long).ShortPath
+            $siblingShort = [string]$fso.GetFolder($sibling).ShortPath
+        } catch { Set-ItResult -Skipped -Because 'short-name lookup is unavailable'; return }
+        if ([IO.Path]::GetFileName($short) -ieq [IO.Path]::GetFileName($long)) { Set-ItResult -Skipped -Because '8.3 short names are disabled on this volume'; return }
+        $expectedExisting = [IO.Path]::GetFullPath($existing)
+        Resolve-TPMContainedPathV1 -Root $short -Path $existing | Should -BeExactly $expectedExisting
+        Resolve-TPMContainedPathV1 -Root $long -Path (Join-Path $short 'existing.txt') | Should -BeExactly $expectedExisting
+        # A short spelling of a path that does not exist yet is expanded by PowerShell 7 and left partly short by
+        # Windows PowerShell 5.1; either way it must come back as the long path inside the root or be refused.
+        $expectedNew = Join-Path ([IO.Path]::GetFullPath($long)) 'sub\new.txt'
+        $outcome = try { Resolve-TPMContainedPathV1 -Root $long -Path (Join-Path $short 'sub\new.txt') } catch { $_.Exception.Message }
+        ($outcome -ceq $expectedNew -or $outcome -like 'PATH_OUTSIDE_ROOT*') | Should -BeTrue -Because "got '$outcome'"
+        { Resolve-TPMContainedPathV1 -Root $long -Path (Join-Path $siblingShort 'x.txt') } | Should -Throw '*PATH_OUTSIDE_ROOT*'
+        { Resolve-TPMContainedPathV1 -Root $siblingShort -Path $existing } | Should -Throw '*PATH_OUTSIDE_ROOT*'
+    }
 }
 
 Describe 'Assert-TPMDiagnosticRecordV1 (Item 3 audit, ADR155-0309 follow-up round)' {
@@ -201,69 +315,5 @@ Describe 'Artifacts publisher diagnostics (issue #296)' {
         $bad=[ordered]@{Stage='PublicationCommit';FailureCode='PROMOTION_FAILED';FailureMessage='';ExceptionType=$null}
         $record=[ordered]@{Identifier='Artifacts';Applicable=$true;Data=[ordered]@{ReportDirectory=$report;ReportDirectoryReserved=$true;StagingDirectoryReady=$true;RequiredArtifactManifestConfigured=$true;PublisherAvailable=$false;PackageValidationExecuted=$true;PackageValidationPassed=$false;PackageValidationErrorCount=1;PackageValidationDiagnostics=@($bad)}}
         {Assert-TPMFactRecordV1 $record Smoke $report}|Should -Throw '*PackageValidationDiagnostics*'
-    }
-}
-
-Describe 'ECVF: generic Emulator Contract Verification envelope (no emulator-specific logic)' {
-    BeforeAll {
-        $script:fakeContract = [pscustomobject]@{ ContractId = 'fixture-emu'; SchemaVersion = '1.0.0'; UpstreamPinnedCommit = ('a' * 40) }
-    }
-
-    It 'Matched + Applicable + Passed yields Status=Pass' {
-        $r = New-TPMEmulatorContractVerificationRecordV1 -Contract $script:fakeContract -CapabilityType 'Environment' -CapabilityId 'env-init' -VersionMatchState 'Matched' -Applicable $true -CapabilityPassed $true
-        $r.Status | Should -Be 'Pass'
-    }
-
-    It 'Matched + Applicable + not-Passed yields Status=Fail' {
-        $r = New-TPMEmulatorContractVerificationRecordV1 -Contract $script:fakeContract -CapabilityType 'Environment' -CapabilityId 'env-init' -VersionMatchState 'Matched' -Applicable $true -CapabilityPassed $false
-        $r.Status | Should -Be 'Fail'
-    }
-
-    It 'not Applicable yields Status=NotApplicable regardless of CapabilityPassed' {
-        $r = New-TPMEmulatorContractVerificationRecordV1 -Contract $script:fakeContract -CapabilityType 'Runtime' -CapabilityId 'jvs-lightgun' -VersionMatchState 'Matched' -Applicable $false -CapabilityPassed $true
-        $r.Status | Should -Be 'NotApplicable'
-    }
-
-    It 'Unknown/Diverged/Unsupported VersionMatchState always yields Status=Blocked, even when CapabilityPassed is true' {
-        foreach ($state in @('Unknown', 'Diverged', 'Unsupported')) {
-            $r = New-TPMEmulatorContractVerificationRecordV1 -Contract $script:fakeContract -CapabilityType 'Runtime' -CapabilityId 'jvs-lightgun' -VersionMatchState $state -Applicable $true -CapabilityPassed $true
-            $r.Status | Should -Be 'Blocked' -Because "VersionMatchState=$state must never be silently trusted"
-        }
-    }
-
-    It 'carries ContractId/SchemaVersion/UpstreamPinnedCommit through from the caller-supplied contract object unmodified' {
-        $r = New-TPMEmulatorContractVerificationRecordV1 -Contract $script:fakeContract -CapabilityType 'Environment' -CapabilityId 'env-init' -VersionMatchState 'Matched' -Applicable $true -CapabilityPassed $true
-        $r.ContractId | Should -Be 'fixture-emu'
-        $r.ContractSchemaVersion | Should -Be '1.0.0'
-        $r.UpstreamCommitUsed | Should -Be ('a' * 40)
-    }
-
-    It 'Assert-TPMEmulatorContractVerificationRecordV1 rejects a record missing fields' {
-        { Assert-TPMEmulatorContractVerificationRecordV1 -Record ([ordered]@{ ContractId = 'x'; ContractSchemaVersion = '1.0.0' }) } | Should -Throw '*field count*'
-    }
-
-    It 'Assert-TPMEmulatorContractVerificationRecordV1 rejects Status=Pass paired with an untrusted VersionMatchState' {
-        $bad = [ordered]@{ ContractId = 'x'; ContractSchemaVersion = '1.0.0'; UpstreamCommitUsed = ('a' * 40); VersionMatchState = 'Diverged'; CapabilityType = 'Environment'; CapabilityId = 'env-init'; Applicable = $true; Status = 'Pass'; Codes = @(); EvidenceReferences = @() }
-        { Assert-TPMEmulatorContractVerificationRecordV1 -Record $bad } | Should -Throw '*Blocked*'
-    }
-
-    It 'Assert-TPMEmulatorContractVerificationRecordV1 rejects Status other than NotApplicable when Applicable=false' {
-        $bad = [ordered]@{ ContractId = 'x'; ContractSchemaVersion = '1.0.0'; UpstreamCommitUsed = ('a' * 40); VersionMatchState = 'Matched'; CapabilityType = 'Environment'; CapabilityId = 'env-init'; Applicable = $false; Status = 'Pass'; Codes = @(); EvidenceReferences = @() }
-        { Assert-TPMEmulatorContractVerificationRecordV1 -Record $bad } | Should -Throw '*NotApplicable*'
-    }
-
-    It 'Assert-TPMEmulatorContractVerificationRecordV1 rejects an unrecognized CapabilityType' {
-        $bad = [ordered]@{ ContractId = 'x'; ContractSchemaVersion = '1.0.0'; UpstreamCommitUsed = ('a' * 40); VersionMatchState = 'Matched'; CapabilityType = 'SomethingElse'; CapabilityId = 'env-init'; Applicable = $true; Status = 'Fail'; Codes = @(); EvidenceReferences = @() }
-        { Assert-TPMEmulatorContractVerificationRecordV1 -Record $bad } | Should -Throw '*CapabilityType*'
-    }
-
-    It 'round-trips a real, registry-loaded pcsx2x6 contract with no code path referencing pcsx2x6 by name' {
-        $contractsModule = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Contracts.psm1'
-        Import-Module $contractsModule -Force
-        $loaded = Get-TPMEmulatorContractV1 -ContractId 'pcsx2x6'
-        $r = New-TPMEmulatorContractVerificationRecordV1 -Contract $loaded.Contract -CapabilityType 'Environment' -CapabilityId 'env-init' -VersionMatchState 'Matched' -Applicable $true -CapabilityPassed $true -EvidenceReferences @('ev-portable-root')
-        $r.ContractId | Should -Be 'pcsx2x6'
-        $r.UpstreamCommitUsed | Should -Be 'c6e731ac0b9859011d358c021b7e2c9c95296a93'
-        { Assert-TPMEmulatorContractVerificationRecordV1 -Record $r } | Should -Not -Throw
     }
 }

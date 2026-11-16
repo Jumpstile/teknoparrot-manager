@@ -179,14 +179,17 @@ REPOSITORY_UNAVAILABLE and REPOSITORY_DIRTY.
 
 ### 5.2 Pester
 
-Data: Executed Boolean; Total, Passed, Failed, Skipped, NotRun integers >= 0;
+Data: Executed Boolean; Total, Passed, Failed, Skipped, NotRun, FailedContainers
+integers >= 0 (FailedContainers is the number of Pester containers that failed
+to run, for example a discovery or BeforeAll error, and sits after NotRun);
 Engine non-empty string and SuiteSha256 64-hex when Executed=true, otherwise
 both null. Counts must satisfy
 Passed + Failed + Skipped + NotRun = Total.
 
-Pass: Executed, Total > 0, Failed = 0, NotRun = 0, and consistent counts.
-Fail otherwise. Never N/A. Codes: PESTER_NOT_EXECUTED, PESTER_EMPTY,
-PESTER_FAILURES, PESTER_NOT_RUN, PESTER_COUNTS_INVALID.
+Pass: Executed, Total > 0, Failed = 0, FailedContainers = 0, NotRun = 0, and
+consistent counts. Fail otherwise. Never N/A. Codes: PESTER_NOT_EXECUTED,
+PESTER_EMPTY, PESTER_FAILURES, PESTER_CONTAINER_FAILURES, PESTER_NOT_RUN,
+PESTER_COUNTS_INVALID.
 
 ### 5.3 Static Analysis
 
@@ -275,6 +278,8 @@ reducing the failure to a Boolean and count.
 
 Data: Present, CanonicalFilesDeployed, LegacyRootPresent, IniFound, and
 CursorPathPointsCanonical Booleans; Pcsx2Directory normalized or null.
+CursorPathPointsCanonical is true when each cursor path that PCSX2 has set
+points at the canonical crosshair file (a path that is not set counts as true).
 
 When Present=false: N/A, directory null, all other Booleans false. When present:
 Pass only when CanonicalFilesDeployed, IniFound, and CursorPathPointsCanonical
@@ -294,11 +299,11 @@ N/A. Codes: VBT_NOT_EXECUTED, VBT_EMPTY, VBT_FAILURES, VBT_COUNTS_INVALID.
 ### 5.10 Unattended TPM root binding
 
 Data: RequestedRoot normalized; EffectiveRoot normalized or null;
-EffectiveRootParseState Parsed, Missing, or Invalid.
+EffectiveRootParseState Parsed or Missing.
 
 Unattended: Pass only when Parsed and requested/effective roots are component-
 equal under Section 10. Fail otherwise. Smoke: N/A with EffectiveRoot null and
-state Missing. Codes: EFFECTIVE_ROOT_MISSING, EFFECTIVE_ROOT_INVALID,
+state Missing. Codes: EFFECTIVE_ROOT_MISSING,
 EFFECTIVE_ROOT_MISMATCH.
 
 ### 5.11 Unattended TPM config restoration

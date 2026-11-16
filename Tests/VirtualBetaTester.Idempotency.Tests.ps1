@@ -8,13 +8,9 @@
 # writes) would be exactly the kind of bug a scripted single-run test never
 # catches.
 #
-# Set-Pcsx2CursorPaths is the target: a real, already-shipped production
-# function (the issue #79 pcsx2x6 fix) that rewrites PCSX2.ini's cursor_path
-# entries. It is deterministic, has no network dependency, and operates on a
-# single file under $TestDrive -- a clean, safe subject for this pattern.
-# Tester Value Density: High -- exactly the "run it again" check a tester
-# does after any crosshair/emulator-config setup step, and this specific
-# function was written this session, so no prior regression coverage exists.
+# New-TpmVerifiedUserProfilesBackup is the target: a real production function
+# that is deterministic, has no network dependency, and works on a folder under
+# $TestDrive -- a clean, safe subject for this pattern.
 #
 # Run with: Invoke-Pester -Path .\Tests\VirtualBetaTester.Idempotency.Tests.ps1
 
@@ -29,7 +25,11 @@ BeforeAll {
     $functionAsts = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-idempotency-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
+    $progressModuleDirectory = Join-Path $TestDrive 'scripts'
+    [void][IO.Directory]::CreateDirectory($progressModuleDirectory)
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TpmProgress.psm1') -Destination (Join-Path $progressModuleDirectory 'TpmProgress.psm1') -Force
     . $extractedFunctionsPath
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     $script:ActiveTpmWorkflowStatus = $null
     $script:TpmWorkflowRendering = $false
     $script:PostgresRecoveryStatus = $null
@@ -42,120 +42,12 @@ BeforeAll {
     $script:TitleTokenStopWords = [System.Collections.Generic.HashSet[string]]::new(
         [string[]]@('the', 'of', 'a', 'an', 'and', 'vs', 'vs.', 'in', 'for', 'to'),
         [System.StringComparer]::OrdinalIgnoreCase)
-
-    # ECVF (issue #182 follow-up): file-backed fixture used only by the
-    # cursor-path denial tests below. Copies the real, currently-shipped
-    # Authority/Contracts modules and the real pcsx2x6 contract.json into a
-    # $TestDrive tree shaped like the repo (scripts\, contracts\pcsx2x6\),
-    # then re-extracts and dot-sources ONLY Set-Pcsx2CursorPaths from
-    # inside that tree so its $PSScriptRoot resolves there. This makes the
-    # function actually import the module and consult the real contract,
-    # exercising the genuine OWNERSHIP_VIOLATION denial path -- not just
-    # the generic "framework unavailable" fallback that fires elsewhere in
-    # this file because the plain extracted-functions file has no scripts\
-    # folder beside it. Dot-sourcing the returned path inside a single It
-    # block only redefines Set-Pcsx2CursorPaths for that It's own scope; it
-    # does not affect the other extracted functions or any other test.
-    function New-Pcsx2ContractDenialFixture {
-        $fixtureRoot = Join-Path $TestDrive ("ecvf-fixture-" + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'scripts') -Force | Out-Null
-        New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'contracts\pcsx2x6') -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Authority.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Authority.psm1') -Force
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Contracts.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Contracts.psm1') -Force
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $fixtureRoot 'contracts\pcsx2x6\contract.json') -Force
-
-        $pcsx2Ast = $functionAsts | Where-Object { $_.Name -eq 'Set-Pcsx2CursorPaths' } | Select-Object -First 1
-        if (-not $pcsx2Ast) { throw "Set-Pcsx2CursorPaths not found while building the ECVF contract-denial fixture" }
-        $pcsx2FixturePath = Join-Path $fixtureRoot 'Set-Pcsx2CursorPaths.ps1'
-        $pcsx2Ast.Extent.Text | Set-Content -LiteralPath $pcsx2FixturePath -Encoding utf8
-        return $pcsx2FixturePath
-    }
-}
-
-Describe "Virtual Beta Tester: idempotency / repeat-run safety (issue #88 phase 1)" -Tag 'TVD-High' {
-    # ECVF (issue #182): cursor_path under [USB1]/[USB2] guncon2 sections is
-    # contract-owned by the emulator (Owner=Emulator, WritePolicy=NeverWrite
-    # in contracts\pcsx2x6\contract.json) -- the emulator clears it in
-    # memory whenever JVS mode is LIGHTGUN regardless of INI contents, so
-    # Set-Pcsx2CursorPaths now consults the contract and denies the write
-    # every time rather than the pre-ECVF behavior of writing it
-    # unconditionally. The idempotency question this Describe block exists
-    # to answer is therefore no longer "does a repeat write stay
-    # byte-identical" but "does a repeat DENIAL stay byte-identical and
-    # backup-free" -- the same repeat-run safety property, applied to the
-    # correct (denied) outcome.
-
-    It "Set-Pcsx2CursorPaths denies the write on every repeat call and never drifts the emulator-owned INI" {
-        $iniPath = Join-Path $TestDrive ("pcsx2-idempotent-" + [guid]::NewGuid().ToString('N') + '.ini')
-        @(
-            '[Frame]',
-            'GS = 1',
-            '',
-            '[USB Port 1 guncon2]',
-            'cursor_path = C:\Old\Legacy\Path\P1.png',
-            '',
-            '[USB Port 2 guncon2]',
-            'cursor_path = C:\Old\Legacy\Path\P2.png'
-        ) -join "`r`n" | Set-Content -LiteralPath $iniPath -Encoding utf8
-        $originalContent = Get-Content -LiteralPath $iniPath -Raw
-
-        $p1 = 'C:\TeknoParrot\pcsx2x6\TeknoParrot\crosshairs\P1.png'
-        $p2 = 'C:\TeknoParrot\pcsx2x6\TeknoParrot\crosshairs\P2.png'
-
-        $firstResult = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path $p1 -P2Path $p2
-        $afterFirstRun = Get-Content -LiteralPath $iniPath -Raw
-
-        $secondResult = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path $p1 -P2Path $p2
-        $afterSecondRun = Get-Content -LiteralPath $iniPath -Raw
-
-        $firstResult | Should -Be $false -Because "USB1/USB2 guncon2_cursor_path is Owner=Emulator, WritePolicy=NeverWrite -- TPM must never write it"
-        $secondResult | Should -Be $false -Because "a repeat call must deny the write identically, not eventually fall back to writing"
-        $afterFirstRun | Should -Be $originalContent -Because "a denied write must leave emulator-owned INI content byte-identical to what the user had"
-        $afterSecondRun | Should -Be $afterFirstRun -Because "repeat denial must not drift the file across runs"
-    }
-
-    It "a denied write creates no backup, on the first call or any repeat call" {
-        $iniPath = Join-Path $TestDrive ("pcsx2-backup-check-" + [guid]::NewGuid().ToString('N') + '.ini')
-        @('[USB Port 1 guncon2]', 'cursor_path = old.png') -join "`r`n" | Set-Content -LiteralPath $iniPath -Encoding utf8
-        $originalContent = Get-Content -LiteralPath $iniPath -Raw
-        $iniDir = [System.IO.Path]::GetDirectoryName($iniPath)
-        $iniName = [System.IO.Path]::GetFileName($iniPath)
-
-        Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png' | Out-Null
-        Start-Sleep -Milliseconds 1100  # backup filenames would be second-resolution timestamps if any were created
-        Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png' | Out-Null
-
-        $backups = @(Get-ChildItem -LiteralPath $iniDir -Filter "$iniName.bak_*")
-        $backups.Count | Should -Be 0 -Because "backup-before-write only applies to a write that actually happens -- a denied write (emulator-owned, NeverWrite) must create zero backups, on the first call or any repeat"
-        (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "emulator-owned state must remain untouched across repeat denied calls"
-    }
-
-    It "denies the write for the real reason -- the contract's OWNERSHIP_VIOLATION, not just an unreachable framework (file-backed ECVF fixture)" {
-        # Every other test in this Describe block runs Set-Pcsx2CursorPaths
-        # as extracted into the plain $TestDrive functions file, which has
-        # no scripts\ folder beside it -- that exercises the generic
-        # "framework unavailable" fallback, not the contract itself. This
-        # test dot-sources a fixture-scoped copy of just this one function
-        # (see New-Pcsx2ContractDenialFixture in BeforeAll above) so it
-        # actually loads the real Contracts module and the real pcsx2x6
-        # contract, proving the denial comes from the contract's own
-        # ownership rule.
-        . (New-Pcsx2ContractDenialFixture)
-        $iniPath = Join-Path $TestDrive ("pcsx2-real-contract-" + [guid]::NewGuid().ToString('N') + '.ini')
-        @('[USB Port 1 guncon2]', 'cursor_path = old.png') -join "`r`n" | Set-Content -LiteralPath $iniPath -Encoding utf8
-        $originalContent = Get-Content -LiteralPath $iniPath -Raw
-        Mock Write-Log {}
-
-        $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
-
-        $result | Should -Be $false
-        (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "the real pcsx2x6 contract marks cursor_path Owner=Emulator, WritePolicy=NeverWrite -- the write must be denied and the emulator-owned file left untouched"
-        Should -Invoke Write-Log -ParameterFilter { $msg -match 'OWNERSHIP_VIOLATION' } -Because "the skip reason must come from the real contract's ownership check, proving this exercised actual contract denial rather than the generic framework-unavailable fallback"
-    }
 }
 
 Describe "Virtual Beta Tester: repeat-run backup safety (issue #88 phase 1.5 priority 2)" -Tag 'TVD-High' {
-    # New-PropagationBackup: replaces the instinctive "run it again just to
+    # New-TpmVerifiedUserProfilesBackup (the current verified UserProfiles
+    # backup API; the earlier New-PropagationBackup no longer exists):
+    # replaces the instinctive "run it again just to
     # be sure" a human tester does after Propagate Controls, plus the
     # specific defect class this catches -- a backup routine recursively
     # backing up its OWN prior backups (FullBackup\FullBackup\FullBackup\...)
@@ -167,7 +59,7 @@ Describe "Virtual Beta Tester: repeat-run backup safety (issue #88 phase 1.5 pri
     # catches an unbounded-growth defect class that would otherwise only
     # surface after months of real repeated use on a real machine.
 
-    It "running New-PropagationBackup three times in a row never backs up its own previous backups" {
+    It "running New-TpmVerifiedUserProfilesBackup three times in a row never backs up its own previous backups" {
         $userProfilesDir = Join-Path $TestDrive ("propagation-backup-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $userProfilesDir -Force | Out-Null
         New-Item -ItemType File -Path (Join-Path $userProfilesDir 'ALIENS.xml') -Force | Out-Null
@@ -175,12 +67,14 @@ Describe "Virtual Beta Tester: repeat-run backup safety (issue #88 phase 1.5 pri
 
         $results = @()
         for ($i = 1; $i -le 3; $i++) {
-            $results += New-PropagationBackup -UserProfilesDir $userProfilesDir
-            Start-Sleep -Milliseconds 1100  # backup folder names are second-resolution timestamps
+            # Folder names carry a millisecond timestamp plus a GUID, so back-to-back runs need no sleep to stay distinct.
+            $results += New-TpmVerifiedUserProfilesBackup -UserProfilesDir $userProfilesDir -Label 'PropagateControls'
         }
 
         foreach ($result in $results) {
-            $result.ErrorCount | Should -Be 0 -Because "a repeat backup run must not error even once FullBackup itself exists"
+            $result.Succeeded | Should -BeTrue -Because "a repeat backup run must not fail even once FullBackup itself exists (reason: $($result.Reason))"
+            $result.Verified | Should -BeTrue -Because "every repeat backup must pass its own manifest verification"
+            $result.FailureStage | Should -BeNullOrEmpty
         }
 
         $backupRoot = Join-Path $userProfilesDir 'FullBackup'

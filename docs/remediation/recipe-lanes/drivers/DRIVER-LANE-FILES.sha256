@@ -1,0 +1,14 @@
+Driver recipe lane SHA-256 inventory.
+Hashes cover the exact source-controlled lane files at freeze. This index excludes itself.
+
+9131f679b5abe911a9db9cbb01df90611cb7997097968428bf1c047ebf14aa8d  docs/remediation/recipe-lanes/drivers/DRIVER-LANE-CONTRACT.md
+c75513c8efa7f223d2923916870cd26b8441ea6d2d0c1c4e17de68477f9a57d4  docs/remediation/recipe-lanes/drivers/DRIVER-LANE-EVIDENCE.md
+b1ccb28f16b6df21980454545d1ac841b450bf21ccd8d1ca17af844545221bb7  docs/remediation/recipe-lanes/drivers/driver-lane-inventory.json
+56c0ee62e2eba8c952846c95b40f92e48dcee7bde2d9bab2153aa1487eb444f1  docs/remediation/recipe-lanes/drivers/driver-recipe-fragment.json
+a38563b563e306d866be514bf9b910345087a4cfdaa39b52c81cbee0e8f01703  docs/remediation/recipe-lanes/drivers/Test-DriverRecipeLane.ps1
+
+Unchanged reference pins used by this lane's test:
+22a38979c8eed589f5948875bed9869b400ae89114ce539bfef89230f9976a4d  TeknoParrot-Manager.ps1
+D2F9123C8147E198FF9E8D946AA8C626F0AA364BB9C865249A276BA47A94EE42  scripts/TpmRequiredPatchEngine.ps1
+7B190D234667BE3059C7950659421EB810EB80C51C2E4B520B79B9CBC97F934D  scripts/TpmRequiredPatchRecipes.json
+60C2D3381A74CDC7FE63AC67D172EFF39987E0E602D16DE4C685276850CE08A7  Taisen Hot Gimmick 5 - Mirai Eigou (2.04)(2005-12-08)(JPN)[Taito Type X][TP].zip (Main source)

@@ -12,7 +12,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$script:DisplayVersion = 'v1.0 RC8'
+$script:DisplayVersion = 'v1.0 RC8.1'
 
 function Get-ViewportInfo {
     $rawWindowWidth = $null
@@ -76,11 +76,7 @@ function Invoke-PrototypeMaximize {
             Start-Sleep -Milliseconds 150
             $afterProbe = Get-ViewportInfo
             $succeeded = ($afterProbe.Width -ge ([Math]::Max(1, $max.Width - 2)))
-            if ($succeeded) {
-                $message = ("requested {0}x{1}; measured {2}x{3}" -f $max.Width, $max.Height, $afterProbe.Width, $afterProbe.Height)
-            } else {
-                $message = ("requested {0}x{1}; measured {2}x{3}" -f $max.Width, $max.Height, $afterProbe.Width, $afterProbe.Height)
-            }
+            $message = ("requested {0}x{1}; measured {2}x{3}" -f $max.Width, $max.Height, $afterProbe.Width, $afterProbe.Height)
         }
     } catch {
         $skipped = $true
@@ -117,6 +113,17 @@ function Write-Rule {
         [string]$Char = '-'
     )
     Write-Host ($Char * [Math]::Max(1, $Width)) -ForegroundColor $Color
+}
+
+# The wide layouts are designed for a window of at least this many columns. In a narrower window they used to be drawn
+# 100 columns wide anyway, so every line wrapped and the preview showed something nobody would really see. Say so instead.
+function Test-PreviewFits {
+    param([string]$Name, [int]$Width, [int]$MinimumColumns)
+    if ($Width -ge $MinimumColumns) { return $true }
+    Write-Host ("The {0} layout needs a window {1} columns wide or more." -f $Name, $MinimumColumns) -ForegroundColor Yellow
+    Write-Host ("This window is {0} columns wide, so it would only wrap." -f $Width) -ForegroundColor Yellow
+    Write-Host 'Make the window wider, use -AttemptMaximize, or try -Variant CompactReadable.' -ForegroundColor Yellow
+    return $false
 }
 
 function Write-BoxLine {
@@ -176,29 +183,37 @@ function Get-PreviewSections {
             Color = 'Green'
             Items = @(
                 [pscustomobject]@{ Number = 4; Label = 'Crosshair Setup'; Desc = 'Pick and deploy custom crosshairs to registered lightgun games.' }
-                [pscustomobject]@{ Number = 5; Label = 'ReShade Setup'; Desc = 'Add visual enhancements such as sharper image, better colours, scanlines, and borders.' }
+                [pscustomobject]@{ Number = 5; Label = 'ReShade Setup'; Desc = 'Add visual enhancements such as sharper image, better colors, scanlines, and borders.' }
                 [pscustomobject]@{ Number = 6; Label = 'dgVoodoo2 Setup'; Desc = 'Fix old DX8, DirectDraw, and Glide games that crash to black screens.' }
                 [pscustomobject]@{ Number = 7; Label = 'GPU Fix Setup'; Desc = 'Auto-detect AMD, NVIDIA, or Intel GPU and apply matching compatibility fixes.' }
                 [pscustomobject]@{ Number = 8; Label = 'Force Feedback Setup'; Desc = 'Wheel and stick rumble plus force feedback through TeknoParrot or a third-party plugin.' }
                 [pscustomobject]@{ Number = 9; Label = 'BepInEx Setup'; Desc = 'Install, update, or repair BepInEx with the matching stable x64/x86 package.' }
+                [pscustomobject]@{ Number = 10; Label = 'Region Setup'; Desc = 'Pick the country your games start in (like USA or Europe) and set it on the games that offer it.' }
+            )
+        }
+        [pscustomobject]@{
+            Header = 'GAME REQUIREMENTS (ONLY FOR SOME GAMES)'
+            Color = 'Green'
+            Items = @(
+                [pscustomobject]@{ Number = 11; Label = 'Postgres Setup'; Desc = 'Install and configure local PostgreSQL for selected Incredible Technologies games.' }
+                [pscustomobject]@{ Number = 12; Label = 'Required Game Patches'; Desc = 'Find and safely install exact-build required fixes from user-supplied local ZIPs.' }
             )
         }
         [pscustomobject]@{
             Header = 'MAINTENANCE & RECOVERY'
             Color = 'Magenta'
             Items = @(
-                [pscustomobject]@{ Number = 10; Label = 'Library Health Check'; Desc = 'Read-only status for registrations, broken paths, coverage, and installed enhancements.' }
-                [pscustomobject]@{ Number = 11; Label = 'Restore Backup'; Desc = 'Roll UserProfiles, LaunchBox files, or Postgres databases back to a previous backup.' }
-                [pscustomobject]@{ Number = 12; Label = 'Postgres Setup'; Desc = 'Install and configure local PostgreSQL for selected Incredible Technologies games.' }
+                [pscustomobject]@{ Number = 13; Label = 'Library Health Check'; Desc = 'Read-only status for registrations, broken paths, coverage, and installed enhancements.' }
+                [pscustomobject]@{ Number = 14; Label = 'Restore Backup'; Desc = 'Roll UserProfiles, LaunchBox files, or Postgres databases back to a previous backup.' }
             )
         }
         [pscustomobject]@{
             Header = 'APPLICATION'
             Color = 'Yellow'
             Items = @(
-                [pscustomobject]@{ Number = 13; Label = 'Check For Updates'; Desc = 'Manual backup-first check against the latest GitHub release.' }
-                [pscustomobject]@{ Number = 14; Label = 'Create Support Package'; Desc = 'Gather safe logs and reports into one ZIP for support.' }
-                [pscustomobject]@{ Number = 15; Label = 'Exit'; Desc = 'Exit TeknoParrot Manager.' }
+                [pscustomobject]@{ Number = 15; Label = 'Check For Updates'; Desc = 'Manual check against the latest GitHub release.' }
+                [pscustomobject]@{ Number = 16; Label = 'Create Support Package'; Desc = 'Gather safe logs and reports into one ZIP for support.' }
+                [pscustomobject]@{ Number = 17; Label = 'Exit'; Desc = 'Exit TeknoParrot Manager.' }
             )
         }
     )
@@ -303,7 +318,9 @@ function Write-Footer {
     param([int]$Width)
     $text = 'Enter number and press Enter  |  H = Help  |  U = Unattended Mode  |  L = View Log  |  Q = Quit'
     Write-Rule -Width $Width -Color 'DarkCyan'
-    Write-Centered -Text $text -Width $Width -Color 'White'
+    # A window narrower than the line gets it on several lines instead of wrapping in the middle of a word.
+    $lines = if ($text.Length -le $Width) { @($text) } else { @(Split-PreviewText -Text $text -Width $Width) }
+    foreach ($line in $lines) { Write-Centered -Text $line -Width $Width -Color 'White' }
 }
 
 function Clear-PreviewHost {
@@ -321,7 +338,8 @@ function Clear-PreviewHost {
 }
 
 function Write-ReferenceNeon {
-    param([int]$Width, [int]$Height)
+    param([int]$Width)
+    if (-not (Test-PreviewFits -Name 'ReferenceNeon' -Width $Width -MinimumColumns 117)) { return }
     $renderWidth = [Math]::Min($Width - 2, 176)
     $renderWidth = [Math]::Max(100, $renderWidth)
     Write-Rule -Width $renderWidth -Color 'DarkCyan' -Char '='
@@ -343,7 +361,8 @@ function Write-ReferenceNeon {
 }
 
 function Write-BlockMarquee {
-    param([int]$Width, [int]$Height)
+    param([int]$Width)
+    if (-not (Test-PreviewFits -Name 'BlockMarquee' -Width $Width -MinimumColumns 104)) { return }
     $renderWidth = [Math]::Min($Width - 4, 150)
     $renderWidth = [Math]::Max(100, $renderWidth)
     Write-Rule -Width $renderWidth -Color 'Cyan' -Char '#'
@@ -360,7 +379,8 @@ function Write-BlockMarquee {
 }
 
 function Write-ArcadeFrame {
-    param([int]$Width, [int]$Height)
+    param([int]$Width)
+    if (-not (Test-PreviewFits -Name 'ArcadeFrame' -Width $Width -MinimumColumns 111)) { return }
     $renderWidth = [Math]::Min($Width - 2, 170)
     $renderWidth = [Math]::Max(100, $renderWidth)
     Write-Host ('+' + ('=' * ($renderWidth - 2)) + '+') -ForegroundColor 'DarkCyan'
@@ -381,7 +401,8 @@ function Write-ArcadeFrame {
 }
 
 function Write-CenteredTerminal {
-    param([int]$Width, [int]$Height)
+    param([int]$Width)
+    if (-not (Test-PreviewFits -Name 'CenteredTerminal' -Width $Width -MinimumColumns 107)) { return }
     $renderWidth = [Math]::Min($Width - 2, 132)
     $renderWidth = [Math]::Max(96, $renderWidth)
     $pad = [Math]::Max(0, [Math]::Floor(($Width - $renderWidth) / 2))
@@ -393,7 +414,8 @@ function Write-CenteredTerminal {
         Write-Padded ((' ' * $left) + $line) 'Cyan'
     }
     Write-Padded ((' ' * [Math]::Max(0, [Math]::Floor(($renderWidth - 36) / 2))) + 'Developed and maintained by Jumpstile') 'White'
-    Write-Padded ((' ' * [Math]::Max(0, [Math]::Floor(($renderWidth - 15) / 2))) + 'Version 1.0 RC2') 'Yellow'
+    $versionText = 'Version ' + ($script:DisplayVersion -replace '^v', '')
+    Write-Padded ((' ' * [Math]::Max(0, [Math]::Floor(($renderWidth - $versionText.Length) / 2))) + $versionText) 'Yellow'
     Write-Padded ('=' * $renderWidth) 'DarkCyan'
     $sections = @(Get-PreviewSections)
     foreach ($section in $sections) {
@@ -406,7 +428,7 @@ function Write-CenteredTerminal {
 }
 
 function Write-CompactReadable {
-    param([int]$Width, [int]$Height)
+    param([int]$Width)
     $renderWidth = [Math]::Max(60, [Math]::Min($Width - 2, 100))
     Write-Rule -Width $renderWidth -Color 'DarkCyan'
     Write-Centered -Text ("TeknoParrot Manager  {0}" -f $script:DisplayVersion) -Width $renderWidth -Color 'Cyan'
@@ -452,11 +474,11 @@ function Show-Prototype {
     Clear-PreviewHost
     if ($Diagnostics) { Write-PrototypeDiagnostics -Info $info -MaximizeStatus $script:MaximizeStatus -VariantName $Name }
     switch ($Name) {
-        'ReferenceNeon' { Write-ReferenceNeon -Width $info.Width -Height $info.Height }
-        'BlockMarquee' { Write-BlockMarquee -Width $info.Width -Height $info.Height }
-        'ArcadeFrame' { Write-ArcadeFrame -Width $info.Width -Height $info.Height }
-        'CenteredTerminal' { Write-CenteredTerminal -Width $info.Width -Height $info.Height }
-        'CompactReadable' { Write-CompactReadable -Width $info.Width -Height $info.Height }
+        'ReferenceNeon' { Write-ReferenceNeon -Width $info.Width }
+        'BlockMarquee' { Write-BlockMarquee -Width $info.Width }
+        'ArcadeFrame' { Write-ArcadeFrame -Width $info.Width }
+        'CenteredTerminal' { Write-CenteredTerminal -Width $info.Width }
+        'CompactReadable' { Write-CompactReadable -Width $info.Width }
     }
 }
 

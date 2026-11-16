@@ -47,7 +47,7 @@ Human-use simulation should catch issues like:
 
 ### Support package
 
-- User can choose the clearly labelled Create Support Package action without
+- User can choose the clearly labeled Create Support Package action without
   knowing where logs or reports live.
 - TPM explains each collection step in plain language through the persistent
   status area.
@@ -97,11 +97,13 @@ Human-use simulation should catch issues like:
 ### PostgreSQL guided recovery
 
 - TPM explains that the saved password no longer works in plain language.
-- The user can choose and confirm a new password through masked prompts.
-- TPM asks Windows for permission itself when a reset or install needs it.
+- The user can type the existing password through a masked prompt (`F`/`P`).
+- Choosing `X` ("I do not know the password") changes nothing. TPM explains
+  why it cannot reset the password and shows manual steps under Details.
+- TPM asks Windows for permission itself when an install needs it.
 - The same setup resumes after approval; the user does not close TPM or choose
   the menu option again.
-- Backup, reset, verification, and configuration-save failures remain visible
+- Backup, verification, and configuration-save failures remain visible
   until acknowledged and offer a retry or a safe stop.
 - No password appears in the visible transcript, arguments, logs, or reports.
 

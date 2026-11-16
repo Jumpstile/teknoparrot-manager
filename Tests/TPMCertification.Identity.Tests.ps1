@@ -84,6 +84,12 @@ Describe 'Certification checkout identity and serialization guard' {
         $repo=Join-Path $TestDrive 'not-a-git-repository'
         New-Item -ItemType Directory -Path $repo -Force|Out-Null
         $snapshot=Get-TPMCertificationGitIdentitySnapshotV1 -RepositoryPath $repo
+        $gitRead=InModuleScope TPMCertification.Execution -Parameters @{Repository=$repo} {
+            Invoke-TPMCertificationGitReadV1 -RepositoryPath $Repository -Arguments @('rev-parse','HEAD')
+        }
+        $gitRead.ExitCode|Should -Not -Be 0
+        @($gitRead.ErrorOutput).Count|Should -BeGreaterThan 0
+        ($gitRead.ErrorOutput -join ' ')|Should -Match 'fatal: not a git repository'
 
         $snapshot.Branch|Should -BeNullOrEmpty
         $snapshot.Commit|Should -BeNullOrEmpty

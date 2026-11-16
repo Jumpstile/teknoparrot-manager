@@ -43,15 +43,25 @@ param(
     [int]$PesterRegressionTimeoutSeconds = 1800
 )
 
+# FIX107: this run reads the TeknoParrot folder it is given and copies profile files from it for the report. It starts only when the
+# operator opted in for this run with TPM_REAL_DATA_TESTS=1 (exactly 1; any other value does not count).
+# Nothing has been read, created or changed when it stops here. Fixture-only test runs never come here.
+if ($env:TPM_REAL_DATA_TESTS -cne '1') {
+    Write-Host 'This run reads a real TeknoParrot folder and copies profile files from it for the report. It did not start.'
+    Write-Host ''
+    Write-Host 'To allow it for this run only, set TPM_REAL_DATA_TESTS=1 and point -TeknoParrotRoot at the folder you want checked.'
+    Write-Host ''
+    Write-Host 'Nothing was read or changed.'
+    exit 2
+}
+
 $ErrorActionPreference = "Stop"
 $runTimer = [System.Diagnostics.Stopwatch]::StartNew()
 
 . (Join-Path $PSScriptRoot 'Resolve-Pcsx2Directory.ps1')
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Execution.psm1') -Force
 # ADR155-0309 Checkpoint B2: the production authority is the sole
-# certification decision/publication path. TPMCertification.Shadow.psm1 is
-# deliberately not imported here -- Phase 2's shadow adapter is
-# placeholder-tolerant and never-authoritative; production facts/evidence
+# certification decision/publication path; production facts/evidence
 # come from TPMCertification.ProductionFacts.psm1 and
 # TPMCertification.ProductionEvidence.psm1 instead. Each module is imported
 # directly here rather than assumed to already be loaded transitively by
@@ -59,6 +69,7 @@ Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Execution.psm1') -Force
 # call from within one module does not reliably expose that module's own
 # exports to a sibling module's Get-Command calls.
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Authority.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Contracts.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Production.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Reports.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Publication.psm1') -Force
@@ -135,10 +146,89 @@ $productionWorkingDirectory = Join-Path $HarnessRoot "ProductionWork\$stamp"
 function Copy-IfExists {
     param([string]$Path, [string]$DestName)
     if (Test-Path -LiteralPath $Path) {
-        Copy-Item -LiteralPath $Path -Destination (Join-Path $backupDir $DestName) -Recurse -Force
+        $destination = Join-Path $backupDir $DestName
+        $blanked = 0
+        $leftOut = 0
+        $failure = $null
+        try {
+            if ($DestName -ceq 'UserProfiles') {
+                # FIX131 N10: the UserProfiles copy must never hold a saved PostgreSQL password (the Pass field). Each XML
+                # file is written to the copy already blanked, straight from the live file, so even a copy that stops half way (or
+                # cannot be deleted afterwards) holds no password. An XML file that cannot be read cannot be shown to be free of
+                # passwords, so it is left out of the copy.
+                $base = (Resolve-Path -LiteralPath $Path).ProviderPath.TrimEnd('\')
+                [void][System.IO.Directory]::CreateDirectory($destination)
+                foreach ($folder in @(Get-ChildItem -LiteralPath $base -Recurse -Directory -Force -ErrorAction Stop)) {
+                    [void][System.IO.Directory]::CreateDirectory((Join-Path $destination $folder.FullName.Substring($base.Length + 1)))
+                }
+                foreach ($file in @(Get-ChildItem -LiteralPath $base -Recurse -File -Force -ErrorAction Stop)) {
+                    $target = Join-Path $destination $file.FullName.Substring($base.Length + 1)
+                    if ($file.Extension -ieq '.xml') {
+                        $count = Copy-TPMXmlWithoutPass -Source $file.FullName -Destination $target
+                        if ($null -eq $count) { $leftOut++ } else { $blanked += $count }
+                    } else {
+                        Copy-Item -LiteralPath $file.FullName -Destination $target -Force -ErrorAction Stop
+                    }
+                }
+                # Believe the blanking only after the saved copy is read back from disk and shows no password. A file that cannot be
+                # read back cannot be shown to be free of passwords, so it counts as one that is not.
+                $stillThere = 0
+                foreach ($copied in @(Get-ChildItem -LiteralPath $destination -Recurse -File -Force | Where-Object { $_.Extension -ieq '.xml' })) {
+                    try {
+                        $readBack = New-Object System.Xml.XmlDocument
+                        $readBack.Load($copied.FullName)
+                        $stillThere += @($readBack.SelectNodes("//FieldInformation[FieldName='Pass']/FieldValue") | Where-Object { $_.InnerText.Length -gt 0 }).Count
+                    } catch { $stillThere++ }
+                }
+                if ($stillThere -gt 0) { throw 'a saved password was still in the copy after blanking' }
+                Write-Host ('  UserProfiles copy: {0} saved password value(s) blanked, {1} unreadable file(s) left out.' -f $blanked, $leftOut)
+            } else {
+                Copy-Item -LiteralPath $Path -Destination $destination -Recurse -Force -ErrorAction Stop
+            }
+        } catch {
+            $failure = $_.Exception.Message
+        }
+        if ($null -ne $failure) {
+            # A copy that failed is deleted, and the delete is checked: a copy that is still on disk is reported with its path and
+            # stops the run, never described as "not made".
+            Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $destination) {
+                throw ('The incomplete {0} copy could not be deleted and is still at {1}. Delete that folder by hand before anything else; it may hold saved data. Reason the copy stopped: {2}' -f $DestName, $destination, $failure)
+            }
+            Write-Host ('  {0} copy was not made: {1}' -f $DestName, $failure)
+            return $false
+        }
         return $true
     }
-    return $false
+    # A folder that is not there needs no backup: $null, so it is never mistaken for a copy that failed ($false).
+    return $null
+}
+
+# Writes one profile XML file to $Destination with the value of every <FieldInformation><FieldName>Pass</FieldName> field
+# blanked. The unblanked text is never written. Returns how many values were blanked, or $null when the file cannot be read as XML
+# (nothing is written then). A failure to write the destination is thrown.
+function Copy-TPMXmlWithoutPass {
+    param([Parameter(Mandatory = $true)][string]$Source, [Parameter(Mandatory = $true)][string]$Destination)
+    $document = New-Object System.Xml.XmlDocument
+    $document.PreserveWhitespace = $true
+    try {
+        $settings = New-Object System.Xml.XmlReaderSettings
+        $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+        $settings.XmlResolver = $null
+        $reader = [System.Xml.XmlReader]::Create($Source, $settings)
+        try { $document.Load($reader) } finally { $reader.Dispose() }
+    } catch {
+        return $null
+    }
+    $blanked = 0
+    foreach ($node in @($document.SelectNodes("//FieldInformation[FieldName='Pass']/FieldValue"))) {
+        if ($node.InnerText.Length -gt 0) {
+            $node.InnerText = ''
+            $blanked++
+        }
+    }
+    if ($blanked -gt 0) { $document.Save($Destination) } else { [System.IO.File]::Copy($Source, $Destination, $true) }
+    return $blanked
 }
 
 function Get-TreeHash {
@@ -155,7 +245,8 @@ function Get-TreeHash {
     if (!(Test-Path -LiteralPath $Path)) { return ,@() }
     $resolved = (Resolve-Path -LiteralPath $Path).Path
     $base = $resolved.TrimEnd('\')
-    Get-ChildItem -LiteralPath $resolved -Recurse -File -ErrorAction SilentlyContinue |
+    # A folder that cannot be listed is reported as one entry with no name, which Compare-TreeSnapshot counts as skipped.
+    Get-ChildItem -LiteralPath $resolved -Recurse -File -ErrorAction SilentlyContinue -ErrorVariable listErrors |
         Sort-Object FullName |
         ForEach-Object {
             $relative = $_.FullName
@@ -173,6 +264,9 @@ function Get-TreeHash {
                 Length = $_.Length
             }
         }
+    foreach ($listError in @($listErrors)) {
+        [pscustomobject]@{ RelativePath = ''; Path = [string]$listError.TargetObject; Hash = ''; Length = 0 }
+    }
 }
 
 function Compare-TreeSnapshot {
@@ -273,22 +367,58 @@ function Get-TPMInvalidCertificationEnvironmentMessage {
     return ("INVALID CERTIFICATION ENVIRONMENT: '{0}' is missing required TeknoParrot installation marker(s): {1}. This is not a TPM product failure -- the requested -TeknoParrotRoot does not point at a real TeknoParrot installation, so no certification gates were run against it." -f $TeknoParrotRoot, ($MissingMarkers -join ', '))
 }
 
+# Creates the real, empty, per-run Git "global" configuration file the Pester
+# child points GIT_CONFIG_GLOBAL at. The device name NUL is NOT usable for this:
+# the Windows Git used for the RC8 full-folder run answered every call with
+# "fatal: unable to access 'NUL': Invalid argument", which broke every Git-based
+# test in the child. A real zero-byte file isolates user-global configuration
+# (the file is read as an empty config) without relying on a device name, and
+# removing the variable instead would let the user's own global config leak in.
+function New-TPMEmptyGitConfigFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $parent = [System.IO.Path]::GetDirectoryName($fullPath)
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        [void][System.IO.Directory]::CreateDirectory($parent)
+    }
+    if (Test-Path -LiteralPath $fullPath) {
+        throw "EMPTY_GIT_CONFIG_EXISTS: refusing to reuse '$fullPath'; each run needs its own new empty Git config file."
+    }
+    [System.IO.File]::WriteAllBytes($fullPath, [byte[]]@())
+    if ((Get-Item -LiteralPath $fullPath -Force).Length -ne 0) {
+        throw "EMPTY_GIT_CONFIG_NOT_EMPTY: '$fullPath' is not zero bytes after creation."
+    }
+    return $fullPath
+}
+
 function New-TPMPesterChildEnvironment {
-    param([Parameter(Mandatory = $true)][string]$RepositoryPath)
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryPath,
+        [Parameter(Mandatory = $true)][string]$EmptyGlobalConfigPath
+    )
 
     # GIT_CONFIG_* is inherited only by the isolated child process. It adds
     # one exact safe.directory value without reading or writing persistent
     # Git configuration, so NoAIAttribution can use its existing git ls-files
-    # call on a NAS-owned worktree.
+    # call on a NAS-owned worktree. GIT_CONFIG_GLOBAL names a real empty
+    # per-run file (see New-TPMEmptyGitConfigFile), never the NUL device.
+    # The Pester child runs fixture-only tests. TPM_REAL_DATA_TESTS (the opt-in that started this certification run) and the real-source
+    # variables are cleared in the child so nothing inherited from this shell can switch on a test that reads data the tester owns. An
+    # empty value removes the variable from the child's environment. Any optional real-source test needs its own separate opt-in
+    # (TPM_REAL_SOURCE_TESTS=1, see Tests\TpmRealDataOptIn.ps1) that is not passed on from here either.
     return @{
-        NO_COLOR            = '1'
-        TERM                = 'dumb'
-        GIT_TERMINAL_PROMPT = '0'
-        GIT_CONFIG_GLOBAL   = 'NUL'
-        GIT_CONFIG_NOSYSTEM = '1'
-        GIT_CONFIG_COUNT    = '1'
-        GIT_CONFIG_KEY_0    = 'safe.directory'
-        GIT_CONFIG_VALUE_0  = $RepositoryPath
+        NO_COLOR              = '1'
+        TERM                  = 'dumb'
+        GIT_TERMINAL_PROMPT   = '0'
+        GIT_CONFIG_GLOBAL     = $EmptyGlobalConfigPath
+        GIT_CONFIG_NOSYSTEM   = '1'
+        GIT_CONFIG_COUNT      = '1'
+        GIT_CONFIG_KEY_0      = 'safe.directory'
+        GIT_CONFIG_VALUE_0    = $RepositoryPath
+        TPM_REAL_DATA_TESTS   = ''
+        TPM_REAL_SOURCE_TESTS = ''
+        TPM_CPS3_REAL_SOURCE  = ''
     }
 }
 
@@ -307,6 +437,49 @@ function Get-TPMConfigJsonSnapshot {
         return Get-Content -LiteralPath $ConfigPath -Raw
     }
     return $null
+}
+
+# FIX131 N10: a file is written by making a complete temporary copy beside it and swapping it in, so a crash, a closed window or a
+# power cut leaves either the old file or the new file, never a half-written one. The bytes are written exactly (no BOM is added).
+function Write-TPMBytesAtomic {
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][AllowEmptyCollection()][byte[]]$Bytes)
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $temporary = Join-Path ([System.IO.Path]::GetDirectoryName($full)) ('.{0}.{1}.tmp' -f [System.IO.Path]::GetFileName($full), [guid]::NewGuid().ToString('N'))
+    try {
+        [System.IO.File]::WriteAllBytes($temporary, $Bytes)
+        if (Test-Path -LiteralPath $full -PathType Leaf) {
+            [System.IO.File]::Replace($temporary, $full, [NullString]::Value)
+        } else {
+            [System.IO.File]::Move($temporary, $full)
+        }
+    } finally {
+        if (Test-Path -LiteralPath $temporary -PathType Leaf) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Write-TPMTextAtomic {
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text)
+    Write-TPMBytesAtomic -Path $Path -Bytes ((New-Object System.Text.UTF8Encoding $false).GetBytes($Text))
+}
+
+# The text Set-TPMConfigJsonRoot writes: the saved settings with TeknoParrotRoot and UnattendedMode set; every other field is kept.
+function Get-TPMConfigJsonWithRootText {
+    param([Parameter(Mandatory = $true)][string]$Text, [string]$TeknoParrotRoot, [string]$UnattendedMode = 'HealthCheck')
+    $cfg = $Text | ConvertFrom-Json
+    $cfg | Add-Member -MemberType NoteProperty -Name TeknoParrotRoot -Value $TeknoParrotRoot -Force
+    $cfg | Add-Member -MemberType NoteProperty -Name UnattendedMode -Value $UnattendedMode -Force
+    return ($cfg | ConvertTo-Json -Depth 10)
+}
+
+# The text New-TPMTemporaryUnattendedConfig writes: the smallest settings file the unattended run accepts.
+function Get-TPMTemporaryUnattendedConfigText {
+    param([string]$TeknoParrotRoot, [string]$UnattendedMode = 'HealthCheck')
+    $cfg = [ordered]@{
+        TeknoParrotRoot    = $TeknoParrotRoot
+        GamesInstallFolder = $TeknoParrotRoot
+        UnattendedMode     = $UnattendedMode
+    }
+    return ($cfg | ConvertTo-Json -Depth 10)
 }
 
 function Set-TPMConfigJsonRoot {
@@ -331,10 +504,7 @@ function Set-TPMConfigJsonRoot {
     param([string]$ConfigPath, [string]$TeknoParrotRoot, [string]$UnattendedMode = 'HealthCheck')
     if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { return $false }
     $raw = Get-Content -LiteralPath $ConfigPath -Raw
-    $cfg = $raw | ConvertFrom-Json
-    $cfg | Add-Member -MemberType NoteProperty -Name TeknoParrotRoot -Value $TeknoParrotRoot -Force
-    $cfg | Add-Member -MemberType NoteProperty -Name UnattendedMode -Value $UnattendedMode -Force
-    [System.IO.File]::WriteAllText($ConfigPath, ($cfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+    Write-TPMTextAtomic -Path $ConfigPath -Text (Get-TPMConfigJsonWithRootText -Text $raw -TeknoParrotRoot $TeknoParrotRoot -UnattendedMode $UnattendedMode)
     return $true
 }
 
@@ -350,10 +520,8 @@ function Set-TPMConfigJsonRoot {
 # for it is a safe, always-valid placeholder that needs no extra folder to
 # be created or cleaned up. This is intentionally the minimal config
 # TeknoParrot-Manager.ps1 requires, not a full settings file. The caller
-# treats the resulting file exactly like any other override -- it is
-# removed afterward by the same Restore-TPMConfigJsonSnapshot call used for
-# the existing-config path, because the pre-run snapshot for a config that
-# did not exist yet is $null.
+# treats the resulting file as an override -- it is removed afterward by
+# Restore-TPMConfigJsonSnapshot, because no config existed before the run.
 function New-TPMTemporaryUnattendedConfig {
     # See Set-TPMConfigJsonRoot's comment for why UnattendedMode is required
     # and why HealthCheck is the correct value for this harness's own
@@ -363,50 +531,111 @@ function New-TPMTemporaryUnattendedConfig {
     # GamesInstallFolder (pre-existing requirement) plus UnattendedMode
     # (this fix).
     param([string]$ConfigPath, [string]$TeknoParrotRoot, [string]$UnattendedMode = 'HealthCheck')
-    $cfg = [ordered]@{
-        TeknoParrotRoot    = $TeknoParrotRoot
-        GamesInstallFolder = $TeknoParrotRoot
-        UnattendedMode     = $UnattendedMode
-    }
-    [System.IO.File]::WriteAllText($ConfigPath, ($cfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+    Write-TPMTextAtomic -Path $ConfigPath -Text (Get-TPMTemporaryUnattendedConfigText -TeknoParrotRoot $TeknoParrotRoot -UnattendedMode $UnattendedMode)
     return $true
 }
 
+# Undoes the override when no settings file existed before the run: the file
+# this run created is removed. (An existing file is put back byte for byte
+# by Write-TPMBytesAtomic at the call site instead.)
 function Restore-TPMConfigJsonSnapshot {
-    # $Snapshot is deliberately untyped, not [string] -- a [string]-typed
-    # parameter coerces a $null argument to an empty string during binding,
-    # which would make the $null-eq check below never match a real "no
-    # config existed before this override" case, and instead overwrite the
-    # config path with an empty file rather than removing it. Confirmed by
-    # a failing test before this fix: Restore-TPMConfigJsonSnapshot -Snapshot
-    # $null left a zero-byte file in place instead of deleting it.
-    param([string]$ConfigPath, $Snapshot)
-    if ($null -eq $Snapshot) {
-        if (Test-Path -LiteralPath $ConfigPath -PathType Leaf) {
-            Remove-Item -LiteralPath $ConfigPath -Force -ErrorAction SilentlyContinue
-        }
-        return
+    param([string]$ConfigPath)
+    if (Test-Path -LiteralPath $ConfigPath -PathType Leaf) {
+        Remove-Item -LiteralPath $ConfigPath -Force -ErrorAction SilentlyContinue
     }
-    [System.IO.File]::WriteAllText($ConfigPath, [string]$Snapshot, (New-Object System.Text.UTF8Encoding $false))
 }
 
-# Issue #146 review round 2 (finding #3): Restore-TPMConfigJsonSnapshot's
-# own success was never verified -- a locked file that silently survived
-# Remove-Item's -ErrorAction SilentlyContinue, or any other restore failure,
-# left the developer's real saved config permanently overwritten with the
-# certification's temporary override with no failure signal anywhere. This
-# reads the config path back after a restore attempt and compares it
-# against what the pre-run snapshot says should be there, so a failed
-# restore is always caught and reported, never assumed to have worked
-# because the call itself didn't throw.
+# The restore call's own success is never assumed: after a restore the
+# path is read back, so a locked file that survived the delete is reported
+# as a failed restore, never as a clean one.
 function Test-TPMConfigRestored {
-    param([string]$ConfigPath, $ExpectedSnapshot)
-    if ($null -eq $ExpectedSnapshot) {
-        return -not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)
+    param([string]$ConfigPath)
+    return -not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)
+}
+
+# FIX131 N10: crash-safe restore of the settings override. The in-memory snapshot is lost when this process is killed, so before the
+# settings file is changed a small restore record is written beside it (an atomic write): the original bytes, their SHA-256 and the SHA-256
+# of the override about to be written. The record is deleted only after the restore was read back and matched.
+# If a run dies in between, the next run finds the record and puts the original back, but ONLY when the file is still exactly the
+# override or already the original; a settings file that someone changed since is never overwritten (the run is then refused).
+function Get-TPMConfigRestoreRecordPath {
+    param([Parameter(Mandatory = $true)][string]$ConfigPath)
+    return ([System.IO.Path]::GetFullPath($ConfigPath) + '.smoke-restore.json')
+}
+
+function Get-TPMBytesSha256 {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][byte[]]$Bytes)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { return (-join ($sha.ComputeHash($Bytes) | ForEach-Object { $_.ToString('X2') })) } finally { $sha.Dispose() }
+}
+
+function Write-TPMConfigRestoreRecord {
+    param([Parameter(Mandatory = $true)][string]$ConfigPath, [Parameter(Mandatory = $true)][string]$OverrideText)
+    $full = [System.IO.Path]::GetFullPath($ConfigPath)
+    $existed = Test-Path -LiteralPath $full -PathType Leaf
+    $original = if ($existed) { [System.IO.File]::ReadAllBytes($full) } else { $null }
+    $record = [ordered]@{
+        Schema             = 1
+        ConfigPath         = $full
+        PriorConfigExisted = [bool]$existed
+        OriginalBase64     = $(if ($existed) { [Convert]::ToBase64String($original) } else { $null })
+        OriginalSha256     = $(if ($existed) { Get-TPMBytesSha256 -Bytes $original } else { $null })
+        OverrideSha256     = (Get-TPMBytesSha256 -Bytes ((New-Object System.Text.UTF8Encoding $false).GetBytes($OverrideText)))
     }
-    if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { return $false }
-    $current = Get-Content -LiteralPath $ConfigPath -Raw
-    return ($current -eq [string]$ExpectedSnapshot)
+    Write-TPMTextAtomic -Path (Get-TPMConfigRestoreRecordPath -ConfigPath $full) -Text ($record | ConvertTo-Json -Depth 4)
+}
+
+function Remove-TPMConfigRestoreRecord {
+    param([Parameter(Mandatory = $true)][string]$ConfigPath)
+    $recordPath = Get-TPMConfigRestoreRecordPath -ConfigPath $ConfigPath
+    if (Test-Path -LiteralPath $recordPath -PathType Leaf) { Remove-Item -LiteralPath $recordPath -Force -ErrorAction Stop }
+}
+
+# Returns State NoRecord (nothing was left), AlreadyOriginal (the file is already as it was before; the record is removed), Restored
+# (the original was put back and read back; the record is removed) or Refused (nothing was changed, the record is kept, Reason says why).
+function Restore-TPMInterruptedConfigOverride {
+    param([Parameter(Mandatory = $true)][string]$ConfigPath)
+    $full = [System.IO.Path]::GetFullPath($ConfigPath)
+    $recordPath = Get-TPMConfigRestoreRecordPath -ConfigPath $full
+    if (-not (Test-Path -LiteralPath $recordPath -PathType Leaf)) { return [pscustomobject]@{ State = 'NoRecord'; Reason = $null } }
+    try {
+        $record = [System.IO.File]::ReadAllText($recordPath) | ConvertFrom-Json
+        if ([int]$record.Schema -ne 1 -or -not [string]::Equals([string]$record.ConfigPath, $full, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'it does not describe this settings file' }
+        $existedBefore = [bool]$record.PriorConfigExisted
+        $overrideSha = [string]$record.OverrideSha256
+        $originalSha = [string]$record.OriginalSha256
+        $originalBytes = $null
+        if ($existedBefore) {
+            $originalBytes = [Convert]::FromBase64String([string]$record.OriginalBase64)
+            if ((Get-TPMBytesSha256 -Bytes $originalBytes) -cne $originalSha) { throw 'the saved copy of the original settings does not match its checksum' }
+        }
+    } catch {
+        return [pscustomobject]@{ State = 'Refused'; Reason = ('the restore record cannot be used: ' + $_.Exception.Message) }
+    }
+    $currentSha = $null
+    if (Test-Path -LiteralPath $full -PathType Leaf) { $currentSha = Get-TPMBytesSha256 -Bytes ([System.IO.File]::ReadAllBytes($full)) }
+    $isOriginal = if ($existedBefore) { ($null -ne $currentSha -and $currentSha -ceq $originalSha) } else { ($null -eq $currentSha) }
+    if ($isOriginal) {
+        Remove-TPMConfigRestoreRecord -ConfigPath $full
+        return [pscustomobject]@{ State = 'AlreadyOriginal'; Reason = $null }
+    }
+    if ($null -ne $currentSha -and $currentSha -cne $overrideSha) {
+        return [pscustomobject]@{ State = 'Refused'; Reason = 'the settings file was changed after the interrupted run, so it was not overwritten' }
+    }
+    try {
+        if ($existedBefore) {
+            Write-TPMBytesAtomic -Path $full -Bytes $originalBytes
+            $backNow = (Test-Path -LiteralPath $full -PathType Leaf) -and ((Get-TPMBytesSha256 -Bytes ([System.IO.File]::ReadAllBytes($full))) -ceq $originalSha)
+        } else {
+            Remove-Item -LiteralPath $full -Force -ErrorAction Stop
+            $backNow = -not (Test-Path -LiteralPath $full -PathType Leaf)
+        }
+        if (-not $backNow) { throw 'the file did not read back as the original' }
+        Remove-TPMConfigRestoreRecord -ConfigPath $full
+    } catch {
+        return [pscustomobject]@{ State = 'Refused'; Reason = ('the original settings could not be put back: ' + $_.Exception.Message) }
+    }
+    return [pscustomobject]@{ State = 'Restored'; Reason = $null }
 }
 
 # Issue #146 review round 3: extracts the full snapshot -> override/create ->
@@ -433,16 +662,56 @@ function Invoke-TPMUnattendedRootBinding {
 
     $checkResults = New-Object System.Collections.Generic.List[object]
     $effectiveRoot = $null
+    $overrideWritten = $false
+    $restoreError = $null
+    $restoreVerified = $false
+
+    # FIX131 N10: a run that was killed after it changed the settings file left a restore record. Put the original back first, and
+    # refuse this run (change nothing) when that cannot be done safely.
+    $interrupted = Restore-TPMInterruptedConfigOverride -ConfigPath $ConfigPath
+    if ($interrupted.State -ceq 'Refused') {
+        $refusal = "an earlier run's temporary change to the settings file at $ConfigPath could not be undone: $($interrupted.Reason)"
+        $checkResults.Add([pscustomobject]@{ Name = 'TPM unattended run'; Passed = $false; Details = "did not run -- $refusal" })
+        $checkResults.Add([pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $false; Details = "no config available to bind to the requested root at $ConfigPath" })
+        $checkResults.Add([pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $false; Details = $refusal })
+        return [pscustomobject]@{
+            PriorConfigExisted = $false
+            TemporaryConfigCreated = $false
+            RestoreAttempted = $false
+            RestoreSucceeded = $false
+            VerificationSucceeded = $false
+            SnapshotSha256 = $null
+            RestorationFailureReason = $refusal
+            Checks = $checkResults.ToArray()
+            EffectiveTeknoParrotRoot = $null
+        }
+    }
 
     $configSnapshot = Get-TPMConfigJsonSnapshot -ConfigPath $ConfigPath
+    # The text snapshot builds the override; the exact bytes are what goes back (a BOM or a non-UTF-8 file must not change).
+    $originalBytes = if (Test-Path -LiteralPath $ConfigPath -PathType Leaf) { [System.IO.File]::ReadAllBytes($ConfigPath) } else { $null }
+    # TPM's own state folder for this root; a settings copy that appears there during the run was made from the override.
+    $migratedConfigPath = if ([string]::IsNullOrWhiteSpace($TeknoParrotRoot)) { $null } else { Join-Path $TeknoParrotRoot 'TeknoParrotManager\State\TeknoParrot-Manager.config.json' }
+    $migratedExistedBefore = [bool]($migratedConfigPath -and (Test-Path -LiteralPath $migratedConfigPath))
+    $migratedBackupsRoot = if ([string]::IsNullOrWhiteSpace($TeknoParrotRoot)) { $null } else { Join-Path $TeknoParrotRoot 'TeknoParrotManager\Backups' }
+    $backupsBefore = @(if ($migratedBackupsRoot -and (Test-Path -LiteralPath $migratedBackupsRoot -PathType Container)) { Get-ChildItem -LiteralPath $migratedBackupsRoot -Directory -Filter 'LegacyMigration_*' -Force | ForEach-Object { $_.Name } })
+    $overrideSha = $null
     try {
-        if ($null -eq $configSnapshot) {
+        $overrideText = if ($null -eq $configSnapshot) { Get-TPMTemporaryUnattendedConfigText -TeknoParrotRoot $TeknoParrotRoot } else { Get-TPMConfigJsonWithRootText -Text $configSnapshot -TeknoParrotRoot $TeknoParrotRoot }
+        $recordError = $null
+        try { Write-TPMConfigRestoreRecord -ConfigPath $ConfigPath -OverrideText $overrideText } catch { $recordError = $_.Exception.Message }
+        if ($recordError) {
+            $overrideWritten = $false
+        } elseif ($null -eq $configSnapshot) {
             $overrideWritten = New-TPMTemporaryUnattendedConfig -ConfigPath $ConfigPath -TeknoParrotRoot $TeknoParrotRoot
         } else {
             $overrideWritten = Set-TPMConfigJsonRoot -ConfigPath $ConfigPath -TeknoParrotRoot $TeknoParrotRoot
         }
+        if ($overrideWritten) { $overrideSha = Get-TPMBytesSha256 -Bytes ((New-Object System.Text.UTF8Encoding $false).GetBytes($overrideText)) }
         if (-not $overrideWritten) {
-            $checkResults.Add([pscustomobject]@{ Name = 'TPM unattended run'; Passed = $false; Details = "could not prepare TeknoParrot-Manager.config.json at $ConfigPath for the unattended run" })
+            $prepareDetail = "could not prepare TeknoParrot-Manager.config.json at $ConfigPath for the unattended run"
+            if ($recordError) { $prepareDetail += " (the restore record could not be written, so the settings file was not changed: $recordError)" }
+            $checkResults.Add([pscustomobject]@{ Name = 'TPM unattended run'; Passed = $false; Details = $prepareDetail })
             $checkResults.Add([pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $false; Details = "no config available to bind to the requested root at $ConfigPath" })
         } else {
             & $InvokeUnattended
@@ -466,31 +735,59 @@ function Invoke-TPMUnattendedRootBinding {
         # path back, and a failed restore fails certification with an
         # explicit reason rather than continuing silently.
         $restoreError = $null
-        try {
-            Restore-TPMConfigJsonSnapshot -ConfigPath $ConfigPath -Snapshot $configSnapshot
-        } catch {
-            $restoreError = $_.Exception.Message
+        # FIX131 N10: never restore over a settings file that is no longer exactly the override this run wrote (someone edited it
+        # during the run). Then nothing is overwritten, the restore record is kept and the restoration check fails with that reason.
+        $changedDuringRun = $false
+        if ($overrideWritten -and $overrideSha) {
+            $nowSha = $null
+            if (Test-Path -LiteralPath $ConfigPath -PathType Leaf) { $nowSha = Get-TPMBytesSha256 -Bytes ([System.IO.File]::ReadAllBytes($ConfigPath)) }
+            # A file that is gone has nothing to lose; the normal restore then runs (and reports its own failure when it cannot write).
+            $changedDuringRun = ($null -ne $nowSha -and $nowSha -cne $overrideSha)
         }
-        $restoreVerified = Test-TPMConfigRestored -ConfigPath $ConfigPath -ExpectedSnapshot $configSnapshot
-        if ($restoreError) {
-            $checkResults.Add([pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $false; Details = "restore threw: $restoreError" })
-        } elseif (-not $restoreVerified) {
-            $checkResults.Add([pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $false; Details = "config file state at $ConfigPath does not match its pre-run snapshot after restore" })
+        if ($changedDuringRun) {
+            $restoreError = 'the settings file was changed while the run was in progress'
+            $restoreVerified = $false
+            $checkResults.Add([pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $false; Details = "not restored: the config file at $ConfigPath was changed while the run was in progress, so it was not overwritten (the restore record is kept)" })
         } else {
-            $checkResults.Add([pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = "config file at $ConfigPath restored to its pre-run state" })
+            try {
+                # An unattended TPM start moves a program-folder settings file into the TeknoParrot folder's own State folder without asking.
+                # That copy did not exist before this run and the program-folder file is gone, so it is the override this run wrote: remove it.
+                if ($overrideWritten -and $migratedConfigPath -and -not $migratedExistedBefore -and (Test-Path -LiteralPath $migratedConfigPath -PathType Leaf) -and -not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
+                    Remove-Item -LiteralPath $migratedConfigPath -Force -ErrorAction Stop
+                }
+                # The migration also keeps a backup copy of what it moved. A copy in a backup folder made during this run, with exactly the
+                # override's bytes, is the harness's own settings: remove that one file (the rest of the backup is left alone).
+                if ($overrideWritten -and $overrideSha -and $migratedBackupsRoot -and (Test-Path -LiteralPath $migratedBackupsRoot -PathType Container)) {
+                    foreach ($backupDir in @(Get-ChildItem -LiteralPath $migratedBackupsRoot -Directory -Filter 'LegacyMigration_*' -Force)) {
+                        if ($backupsBefore -contains $backupDir.Name) { continue }
+                        $backupCopy = Join-Path $backupDir.FullName 'TeknoParrot-Manager.config.json'
+                        if ((Test-Path -LiteralPath $backupCopy -PathType Leaf) -and ((Get-TPMBytesSha256 -Bytes ([System.IO.File]::ReadAllBytes($backupCopy))) -ceq $overrideSha)) { Remove-Item -LiteralPath $backupCopy -Force -ErrorAction Stop }
+                    }
+                }
+                if ($null -ne $originalBytes) { Write-TPMBytesAtomic -Path $ConfigPath -Bytes $originalBytes } else { Restore-TPMConfigJsonSnapshot -ConfigPath $ConfigPath }
+            } catch {
+                $restoreError = $_.Exception.Message
+            }
+            $restoreVerified = if ($null -eq $originalBytes) {
+                Test-TPMConfigRestored -ConfigPath $ConfigPath
+            } else {
+                try { (Test-Path -LiteralPath $ConfigPath -PathType Leaf) -and ((Get-TPMBytesSha256 -Bytes ([System.IO.File]::ReadAllBytes($ConfigPath))) -ceq (Get-TPMBytesSha256 -Bytes $originalBytes)) } catch { $false }
+            }
+            if ($restoreError) {
+                $checkResults.Add([pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $false; Details = "restore threw: $restoreError" })
+            } elseif (-not $restoreVerified) {
+                $checkResults.Add([pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $false; Details = "config file state at $ConfigPath does not match its pre-run snapshot after restore" })
+            } else {
+                $checkResults.Add([pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = "config file at $ConfigPath restored to its pre-run state" })
+                # The restore was read back and matched, so the record is no longer needed; a record that cannot be deleted is harmless
+                # (the next run finds the file already original and deletes it).
+                try { Remove-TPMConfigRestoreRecord -ConfigPath $ConfigPath } catch { $null = $_ }
+            }
         }
     }
 
     $snapshotHash = $null
-    if ($null -ne $configSnapshot) {
-        $sha256 = [System.Security.Cryptography.SHA256]::Create()
-        try {
-            $snapshotBytes = (New-Object System.Text.UTF8Encoding $false).GetBytes([string]$configSnapshot)
-            $snapshotHash = -join ($sha256.ComputeHash($snapshotBytes) | ForEach-Object { $_.ToString('x2') })
-        } finally {
-            $sha256.Dispose()
-        }
-    }
+    if ($null -ne $originalBytes) { $snapshotHash = (Get-TPMBytesSha256 -Bytes $originalBytes).ToLowerInvariant() }
     $restorationCheck = @($checkResults.ToArray() | Where-Object { $_.Name -ceq 'Unattended TPM config restoration' }) | Select-Object -Last 1
 
     return [pscustomobject]@{
@@ -553,6 +850,54 @@ function Test-TPMUnattendedRootMatch {
     param([string]$RequestedRoot, [string]$EffectiveRoot)
     if ([string]::IsNullOrWhiteSpace($EffectiveRoot)) { return $false }
     return ($RequestedRoot.TrimEnd('\') -eq $EffectiveRoot.TrimEnd('\'))
+}
+
+# Read-only parse of the real PCSX2.ini cursor path format ([USB1]/[USB2] sections, guncon2_cursor_path key; see
+# contracts\pcsx2x6\evidence.md, ev-usb-ini-contract). This script never loads the manager, so it keeps its own small
+# reader instead of calling Get-Pcsx2CursorPathReport; the Pester tests pin the same results.
+# The data folder is the same one the manager uses: the name in portable.txt, else TeknoParrot.
+function Get-TPMPcsx2DataRoot {
+    param([Parameter(Mandatory = $true)][string]$Pcsx2Dir)
+    $portableFile = Join-Path $Pcsx2Dir 'portable.txt'
+    $name = 'TeknoParrot'
+    if (Test-Path -LiteralPath $portableFile -PathType Leaf) {
+        $text = [IO.File]::ReadAllText($portableFile)
+        if (-not [string]::IsNullOrWhiteSpace($text)) { $name = $text.Trim() }
+    }
+    return (Join-Path $Pcsx2Dir $name)
+}
+
+# PCSX2 owns the cursor keys (the manager only reports them). A missing key is a normal fresh install and passes;
+# a key that is set must point at the canonical file. '/' and relative values are resolved against the data folder first.
+function Test-TPMPcsx2CursorPathsCanonical {
+    param([Parameter(Mandatory = $true)][string]$DataRoot, [string[]]$CursorPaths, [string[]]$CanonicalPaths)
+    for ($i = 0; $i -lt $CanonicalPaths.Count; $i++) {
+        $value = $CursorPaths[$i]
+        if ([string]::IsNullOrWhiteSpace($value)) { continue }
+        try {
+            $actual = if ([IO.Path]::IsPathRooted($value)) { [IO.Path]::GetFullPath($value) } else { [IO.Path]::GetFullPath((Join-Path $DataRoot $value)) }
+            if ($actual.TrimEnd('\') -ine [IO.Path]::GetFullPath($CanonicalPaths[$i]).TrimEnd('\')) { return $false }
+        } catch { return $false }
+    }
+    return $true
+}
+
+# A missing file or a missing key gives $null for that player. Nothing is written.
+function Get-TPMPcsx2UsbCursorPaths {
+    param([Parameter(Mandatory = $true)][string]$IniPath)
+    $p1 = $null
+    $p2 = $null
+    if (Test-Path -LiteralPath $IniPath -PathType Leaf) {
+        $sect = ''
+        foreach ($ln in [System.IO.File]::ReadAllLines($IniPath)) {
+            $t = $ln.Trim()
+            if ($t -match '^\[(.+)\]$') { $sect = $matches[1].ToLowerInvariant(); continue }
+            if (($sect -eq 'usb1' -or $sect -eq 'usb2') -and $t -match '^guncon2_cursor_path\s*=\s*(.*)$') {
+                if ($sect -eq 'usb1') { $p1 = $matches[1].Trim() } else { $p2 = $matches[1].Trim() }
+            }
+        }
+    }
+    return [pscustomobject]@{ P1 = $p1; P2 = $p2 }
 }
 
 # Issue #146: the health gate previously passed as soon as
@@ -669,107 +1014,8 @@ function Test-TPMInstallHealthGate {
     return [pscustomobject]@{ Passed = $true; Reason = 'all installation-critical checks present and passed' }
 }
 
-# Issue #136: the Pester regression gate previously ran synchronously with
-# no visibility into progress and no way to distinguish "still running" from
-# "hung forever" -- both looked identical to an operator watching the
-# console (process alive, report folder created, nothing updating). These
-# two pure decision functions back the runspace-polling loop below; kept
-# separate and side-effect-free so they can be unit tested directly without
-# needing to run actual Pester-in-Pester or spin up a real runspace.
-function Test-TPMPesterHeartbeatDue {
-    param(
-        [double]$ElapsedSeconds,
-        [double]$LastHeartbeatSeconds,
-        [double]$HeartbeatIntervalSeconds
-    )
-    return (($ElapsedSeconds - $LastHeartbeatSeconds) -ge $HeartbeatIntervalSeconds)
-}
-
-function Test-TPMPesterTimedOut {
-    param(
-        [double]$ElapsedSeconds,
-        [double]$TimeoutSeconds
-    )
-    return ($ElapsedSeconds -ge $TimeoutSeconds)
-}
-
-function Get-TPMPesterHeartbeatMessage {
-    param(
-        [double]$ElapsedSeconds,
-        [string]$LastOutputLine
-    )
-    $suffix = if ([string]::IsNullOrWhiteSpace($LastOutputLine)) { '' } else { " -- last: $LastOutputLine" }
-    return ("  ... still running ({0:n0}s elapsed){1}" -f $ElapsedSeconds, $suffix)
-}
-
-function Get-TPMPesterTimeoutMessage {
-    param(
-        [double]$ElapsedSeconds,
-        [double]$TimeoutSeconds,
-        [string]$LastOutputLine,
-        [string]$OutputPath,
-        [string]$ProgressPath
-    )
-    $lastText = if ([string]::IsNullOrWhiteSpace($LastOutputLine)) { '(no output captured)' } else { $LastOutputLine }
-    return ("Pester regression suite timed out after {0}s (limit {1}s). Last known output: {2}. See {3} and {4} for details." -f `
-        [int]$ElapsedSeconds, [int]$TimeoutSeconds, $lastText, $OutputPath, $ProgressPath)
-}
-
-function Get-PesterSummary {
-    param([Parameter(Mandatory=$true)]$PesterResult)
-    $candidate = $PesterResult
-    if ($PesterResult -is [array]) {
-        $candidate = @($PesterResult) | Where-Object {
-            $_ -and ($_.PSObject.Properties.Name -contains 'PassedCount' -or $_.PSObject.Properties.Name -contains 'Passed') -and ($_.PSObject.Properties.Name -contains 'FailedCount' -or $_.PSObject.Properties.Name -contains 'Failed')
-        } | Select-Object -Last 1
-    }
-    $summary = [ordered]@{
-        Passed = $null
-        Failed = $null
-        Skipped = $null
-        Inconclusive = $null
-        NotRun = $null
-        Total = $null
-        Duration = $null
-        Result = 'Unknown'
-    }
-    if (-not $candidate) { return [pscustomobject]$summary }
-    $fields = @(
-        @('Passed','PassedCount','Passed'),
-        @('Failed','FailedCount','Failed'),
-        @('Skipped','SkippedCount','Skipped'),
-        @('Inconclusive','InconclusiveCount','Inconclusive'),
-        @('NotRun','NotRunCount','NotRun'),
-        @('Total','TotalCount','Total')
-    )
-    foreach ($pair in $fields) {
-        foreach ($name in $pair[1..($pair.Count-1)]) {
-            if ($candidate.PSObject.Properties.Name -contains $name) {
-                $summary[$pair[0]] = $candidate.$name
-                break
-            }
-        }
-    }
-    foreach ($name in @('Duration','Time')) {
-        if ($candidate.PSObject.Properties.Name -contains $name) {
-            $summary.Duration = [string]$candidate.$name
-            break
-        }
-    }
-    if ($candidate.PSObject.Properties.Name -contains 'Result') { $summary.Result = [string]$candidate.Result }
-    if ($null -eq $summary.Total -and $null -ne $summary.Passed -and $null -ne $summary.Failed) {
-        $total = 0
-        foreach ($key in @('Passed','Failed','Skipped','Inconclusive','NotRun')) {
-            if ($null -ne $summary[$key]) { $total += [int]$summary[$key] }
-        }
-        $summary.Total = $total
-    }
-    if ($summary.Result -eq 'Unknown' -and $summary.Failed -eq 0) { $summary.Result = 'Passed' }
-    [pscustomobject]$summary
-}
-
-# Issue #151: RC3 arcade certification of a fully-passing merged commit
-# still returned ARCADE CERTIFICATION FAIL because the required
+# Issue #151: RC3 test-PC certification of a fully-passing merged commit
+# still returned a certification FAIL because the required
 # certification evidence (screenshots of the run itself) did not exist and
 # had to be captured manually. This function is the core, independently
 # testable piece of automatic screenshot capture: it never touches the
@@ -887,18 +1133,6 @@ $script:tpmEvidenceLedger = New-Object System.Collections.Generic.List[object]
 # code path left that can grow the ledger once this is set, independent of
 # any check the transaction later performs.
 $script:tpmEvidenceLedgerSealed = $false
-
-function Reset-TPMEvidenceLedger {
-    # Real production flow never calls this (the script-scope initializers
-    # above already establish a fresh ledger once per run) -- it exists so
-    # Pester fixtures can start each It block with an empty, unsealed ledger
-    # and a fresh workflow identity, the same way the harness starts each
-    # real run, instead of accumulating state across tests.
-    $script:tpmEvidenceLedger = New-Object System.Collections.Generic.List[object]
-    $script:tpmEvidenceLedgerSealed = $false
-    $script:tpmEvidenceWorkflowId = [guid]::NewGuid().ToString('N')
-    $script:tpmScreenshotSequence = 0
-}
 
 function New-TPMScreenshotReservedPath {
     param([string]$ScreenshotDir, [string]$Name)
@@ -1356,62 +1590,6 @@ function Get-TPMConsoleWindowRect {
     }
 }
 
-# Review round 2 (Luna Max): distinguishes "this native error IS the signal
-# for no usable interactive display" from every other Win32Exception, as its
-# own pure, independently-testable decision -- kept separate from the actual
-# GDI+ probe below so the classification itself can be exercised with a
-# fabricated exception, without needing a real (or genuinely absent) display
-# to hit either branch. ERROR_INVALID_HANDLE (6) is exactly the native error
-# CopyFromScreen raises when there is no capturable desktop/window station
-# (confirmed by direct reproduction in a non-interactive session). Any other
-# native error code is a different, real problem and must not be classified
-# as "no display".
-function Test-TPMWin32ErrorIndicatesNoDisplay {
-    param([int]$NativeErrorCode)
-    return ($NativeErrorCode -eq 6)   # ERROR_INVALID_HANDLE
-}
-
-# Deterministically proves whether THIS session currently has a usable
-# interactive display, by attempting the exact real primitive
-# Save-TPMScreenCapture depends on (GDI+ Graphics.CopyFromScreen), at the
-# smallest possible size. This is a live capability probe, not a static
-# assumption -- a remote/headless session's desktop can transiently gain or
-# lose screen-capture capability (confirmed: the same probe that failed with
-# "The handle is invalid" in one run of this environment succeeded moments
-# later in another), so a one-time environment check taken once and cached
-# would go stale.
-#
-# Only the specific ERROR_INVALID_HANDLE signal (via
-# Test-TPMWin32ErrorIndicatesNoDisplay) is treated as "no display, safe to
-# skip" -- PowerShell wraps a thrown .NET exception from a method call in a
-# MethodInvocationException, so the real Win32Exception is unwrapped from
-# .InnerException before classifying it. Any other exception (a different
-# Win32 error, or an unrelated failure entirely) is NOT a "no display"
-# signal and is allowed to propagate -- a real certification run whose
-# display access fails for some other, genuine reason must still fail
-# loudly, never be silently absorbed as "environment doesn't support this".
-function Test-TPMInteractiveDisplayAvailable {
-    Add-Type -AssemblyName System.Drawing
-    $bitmap = New-Object System.Drawing.Bitmap 1, 1
-    try {
-        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-        try {
-            $graphics.CopyFromScreen(0, 0, 0, 0, (New-Object System.Drawing.Size 1, 1))
-            return $true
-        } catch {
-            $inner = $_.Exception.InnerException
-            if ($inner -is [System.ComponentModel.Win32Exception] -and (Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode $inner.NativeErrorCode)) {
-                return $false
-            }
-            throw
-        } finally {
-            $graphics.Dispose()
-        }
-    } finally {
-        $bitmap.Dispose()
-    }
-}
-
 # Real capture action for an on-screen console moment (certification suite
 # running, final result, requested/effective root evidence) -- grabs the
 # certification console's own window when Get-TPMConsoleWindowRect can
@@ -1421,8 +1599,7 @@ function Test-TPMInteractiveDisplayAvailable {
 # can record which one actually happened -- never silently reported as a
 # narrow capture when it was not. In production this must keep failing
 # loudly (never NotApplicable) when a real certification run cannot capture
-# required evidence -- Test-TPMInteractiveDisplayAvailable above exists for
-# the *test's* own runtime skip decision, and is never consulted here.
+# required evidence.
 function Save-TPMScreenCapture {
     param([string]$Path)
     Add-Type -AssemblyName System.Windows.Forms
@@ -1521,7 +1698,8 @@ function New-CertificationScorecard {
     if ($Results.Snapshots) {
         foreach ($name in $Results.Snapshots.Keys) {
             $s = $Results.Snapshots[$name]
-            if (($s.Added + $s.Removed + $s.Changed) -ne 0) { $snapshotClean = $false }
+            # A folder that could not be read (skipped) is not "no change": it is unproven.
+            if ((($s.Added + $s.Removed + $s.Changed) -ne 0) -or (($s.BeforeSkipped + $s.AfterSkipped) -ne 0)) { $snapshotClean = $false }
         }
     }
 
@@ -1532,7 +1710,7 @@ function New-CertificationScorecard {
     # scorecard reads via $checkMap are themselves only ever added when NOT
     # running unattended (see the `if (-not $RunUnattendedTPM)` gate around
     # those Add-CheckResult calls in the main flow below). A real RC3
-    # arcade certification run using -RunUnattendedTPM still scored this
+    # test-PC certification run using -RunUnattendedTPM still scored this
     # item [PASS] with the literal text "no unexpected changes in smoke
     # mode" -- true in the sense that $snapshotClean happened to be true,
     # but a materially misleading claim: the run was not smoke mode, and
@@ -1584,7 +1762,8 @@ function New-CertificationScorecard {
     } else {
         ("requested={0} effective={1}" -f $Results.RequestedTeknoParrotRoot, $effectiveRootDisplay)
     }
-    $unattendedRootPassed = if ($Results.SmokeMode) { $true } else { [bool]$checkMap['Unattended TPM used requested root'] }
+    $unattendedRootPassed = if ($Results.SmokeMode) { $null } else { [bool]$checkMap['Unattended TPM used requested root'] }
+    $unattendedRootStatus = if ($Results.SmokeMode) { 'NotApplicable' } elseif ($unattendedRootPassed) { 'Pass' } else { 'Fail' }
 
     # Issue #146 review round 3: the "Unattended TPM config restoration"
     # check (added round 2 to catch a silently-failed config restore) was
@@ -1621,10 +1800,10 @@ function New-CertificationScorecard {
 
     $scoreItems = @(
         [pscustomobject]@{Area='Repository'; Passed=($checkMap['Repository available'] -and $checkMap['Repository clean']); Details=$Results.GitStatus},
-        [pscustomobject]@{Area='Pester'; Passed=($Results.Pester -and $Results.Pester.Failed -eq 0); Details=("total={0} passed={1} failed={2}" -f $Results.Pester.Total, $Results.Pester.Passed, $Results.Pester.Failed)},
+        [pscustomobject]@{Area='Pester'; Passed=($Results.Pester -and $Results.Pester.Failed -eq 0 -and $Results.Pester.FailedContainers -eq 0); Details=("total={0} passed={1} failed={2} skipped={3} failedContainers={4}" -f $Results.Pester.Total, $Results.Pester.Passed, $Results.Pester.Failed, $Results.Pester.Skipped, $Results.Pester.FailedContainers)},
         [pscustomobject]@{Area='Static Analysis'; Passed=($Results.PSScriptAnalyzerFindings -eq 0); Details=("findings={0}" -f $Results.PSScriptAnalyzerFindings)},
         [pscustomobject]@{Area='Real Install Health'; Passed=[bool]$checkMap['Real install health check']; Details=$Results.InstallHealthReport},
-        [pscustomobject]@{Area='Backups'; Passed=($Results.Backup.UserProfiles -or $Results.Backup.GameProfiles); Details=("UserProfiles={0} GameProfiles={1}" -f $Results.Backup.UserProfiles, $Results.Backup.GameProfiles)},
+        [pscustomobject]@{Area='Backups'; Passed=(($Results.Backup.UserProfiles -or $Results.Backup.GameProfiles) -and $Results.Backup.UserProfiles -ne $false -and $Results.Backup.GameProfiles -ne $false); Details=("UserProfiles={0} GameProfiles={1}" -f $(if ($null -eq $Results.Backup.UserProfiles) { 'no folder' } else { $Results.Backup.UserProfiles }), $(if ($null -eq $Results.Backup.GameProfiles) { 'no folder' } else { $Results.Backup.GameProfiles }))},
         [pscustomobject]@{Area='Smoke File Safety'; Passed=$smokeFileSafetyPassed; Status=$smokeFileSafetyStatus; Details=$smokeFileSafetyDetails},
         # ADR155-0309 Checkpoint B2: this is the informational/provisional
         # preview only -- the real Artifacts readiness signal (staging,
@@ -1635,7 +1814,7 @@ function New-CertificationScorecard {
         [pscustomobject]@{Area='Artifacts'; Passed=(Test-Path -LiteralPath $reportDir -PathType Container); Details=$reportDir},
         [pscustomobject]@{Area='pcsx2x6 crosshair path (issue #79)'; Passed=[bool]$checkMap['pcsx2x6 crosshair path (issue #79)']; Details=$pcsx2x6Details},
         [pscustomobject]@{Area='Behavioral Certification (Virtual Beta Tester)'; Passed=($Results.VirtualBetaTester -and $Results.VirtualBetaTester.Total -gt 0 -and $Results.VirtualBetaTester.Failed -eq 0); Details=$vbtDetails},
-        [pscustomobject]@{Area='Unattended TPM root binding'; Passed=$unattendedRootPassed; Details=$unattendedRootDetails},
+        [pscustomobject]@{Area='Unattended TPM root binding'; Passed=$unattendedRootPassed; Status=$unattendedRootStatus; Details=$unattendedRootDetails},
         [pscustomobject]@{Area='Unattended TPM config restoration'; Passed=$restorePassed; Status=$restoreStatus; Details=$restoreDetails}
     )
 
@@ -1836,7 +2015,7 @@ function Write-TPMGateHeader {
     Set-TPMConsoleStatus -Gate $Gate -Purpose $Purpose -Expected $Expected
     Write-Host ""
     $script:tpmOperatorPhase++
-    $line = ("[{0}/8] {1} -- {2}" -f $script:tpmOperatorPhase,$Gate,$Expected)
+    $line = ("[{0}/{1}] {2} -- {3}" -f $script:tpmOperatorPhase,$script:tpmOperatorTotal,$Gate,$Expected)
     if (-not [string]::IsNullOrWhiteSpace($script:OperatorStatusPath)) { Add-Content -LiteralPath $script:OperatorStatusPath -Value $line -Encoding utf8 }
     Write-Host $line
     Write-Host ("    Purpose : {0}" -f $Purpose) -ForegroundColor DarkGray
@@ -1908,6 +2087,8 @@ if (-not $rootValidation.IsValid) {
 
 $script:OperatorStatusPath=$OperatorStatusPath
 $script:tpmOperatorPhase=0
+# Nine gates always run; the unattended root-binding gate is the tenth when -RunUnattendedTPM is set.
+$script:tpmOperatorTotal=$(if($RunUnattendedTPM){10}else{9})
 try {
     Push-Location $RepoPath
     $collectionLocationPushed = $true
@@ -1962,15 +2143,15 @@ try {
     # while the #79 block below did a proper candidate search, so an install
     # where the real folder wasn't literally named "pcsx2x6" would silently
     # skip backup/snapshot coverage while the #79 check still found it
-    # correctly. Flagged by Codex review as a required-before-1.0 fix.
+    # correctly. Flagged in review as a required-before-1.0 fix.
     $pcsx2Dir = Resolve-Pcsx2Directory -TeknoParrotRoot $TeknoParrotRoot
-    $crosshairPath = if ($pcsx2Dir) { Join-Path $pcsx2Dir 'TeknoParrot\crosshairs' } else { '' }
+    $crosshairPath = if ($pcsx2Dir) { Join-Path $pcsx2Dir (Join-Path $(if ((Test-Path -LiteralPath (Join-Path $pcsx2Dir 'portable.txt') -PathType Leaf) -and -not [string]::IsNullOrWhiteSpace([IO.File]::ReadAllText((Join-Path $pcsx2Dir 'portable.txt')))) { [IO.File]::ReadAllText((Join-Path $pcsx2Dir 'portable.txt')).Trim() } else { 'TeknoParrot' }) 'crosshairs') } else { '' }
 
-    Write-TPMGateHeader -Gate 'Backups' -Purpose 'Snapshots UserProfiles/GameProfiles/config before any test runs' -Expected 'backup created for every folder present'
+    Write-TPMGateHeader -Gate 'Backups' -Purpose 'Snapshots UserProfiles/GameProfiles/config before any test runs' -Expected 'a backup of UserProfiles and of GameProfiles, for each of them that exists'
     $backupItems = [ordered]@{}
     $backupItems.UserProfiles = Copy-IfExists (Join-Path $TeknoParrotRoot 'UserProfiles') 'UserProfiles'
     $backupItems.GameProfiles = Copy-IfExists (Join-Path $TeknoParrotRoot 'GameProfiles') 'GameProfiles'
-    $backupItems.Pcsx2x6Crosshairs = if ($crosshairPath) { Copy-IfExists $crosshairPath 'pcsx2x6-crosshairs' } else { $false }
+    $backupItems.Pcsx2x6Crosshairs = if ($crosshairPath) { Copy-IfExists $crosshairPath 'pcsx2x6-crosshairs' } else { $null }
     $backupItems.Config = Copy-IfExists (Join-Path $RepoPath 'TeknoParrot-Manager.config.json') 'TeknoParrot-Manager.config.json'
     $results.Backup = $backupItems
 
@@ -1992,10 +2173,11 @@ try {
     $pesterResultPath = Join-Path $reportDir 'Pester-result-v1.json'
     $pesterNUnitPath = Join-Path $reportDir 'Pester-NUnit.xml'
     $technicalLogDirectory = Join-Path $reportDir 'TechnicalLogs'
+    $emptyGitConfigPath = New-TPMEmptyGitConfigFile -Path (Join-Path $reportDir ('git-empty-global-{0}.config' -f [guid]::NewGuid().ToString('N')))
     $pesterProcess = Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @(
         '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$pesterChild,
-        '-RepositoryPath',$RepoPath,'-ResultPath',$pesterResultPath,'-NUnitPath',$pesterNUnitPath
-    ) -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDir -LogDirectory $technicalLogDirectory -Identity 'pester' -TimeoutSeconds $PesterRegressionTimeoutSeconds -Environment (New-TPMPesterChildEnvironment -RepositoryPath $RepoPath)
+        '-RepositoryPath',$RepoPath,'-ResultPath',$pesterResultPath,'-NUnitPath',$pesterNUnitPath,'-VerbosityLevel',$VerbosityLevel
+    ) -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDir -LogDirectory $technicalLogDirectory -Identity 'pester' -TimeoutSeconds $PesterRegressionTimeoutSeconds -Environment (New-TPMPesterChildEnvironment -RepositoryPath $RepoPath -EmptyGlobalConfigPath $emptyGitConfigPath)
     if ($pesterProcess.TimedOut) { throw "Pester regression suite timed out after $PesterRegressionTimeoutSeconds seconds." }
     $pesterContract = Read-TPMPesterResultV1 -Path $pesterResultPath
     if (($pesterProcess.ExitCode -eq 0) -ne ($pesterContract.Failed -eq 0 -and $pesterContract.FailedContainers -eq 0)) {
@@ -2004,11 +2186,13 @@ try {
     $results.PesterVersion = $pesterContract.Engine
     $results.Pester = [pscustomobject]@{
         Passed=$pesterContract.Passed;Failed=$pesterContract.Failed;Skipped=$pesterContract.Skipped
-        Inconclusive=0;NotRun=$pesterContract.NotRun;Total=$pesterContract.Discovered
-        Duration=[timespan]::FromMilliseconds($pesterContract.DurationMilliseconds);Result=$(if($pesterContract.Failed -eq 0){'Passed'}else{'Failed'})
+        Inconclusive=0;NotRun=$pesterContract.NotRun;Total=$pesterContract.Discovered;FailedContainers=$pesterContract.FailedContainers
+        Duration=[timespan]::FromMilliseconds($pesterContract.DurationMilliseconds);Result=$(if($pesterContract.Failed -eq 0 -and $pesterContract.FailedContainers -eq 0){'Passed'}else{'Failed'})
     }
     $results.Pester | ConvertTo-Json -Depth 4 | Out-File (Join-Path $reportDir 'Pester-summary.json') -Encoding utf8
-    Add-CheckResult 'Pester tests' ($pesterContract.Failed -eq 0) "total=$($pesterContract.Discovered) passed=$($pesterContract.Passed) failed=$($pesterContract.Failed)"
+    Add-CheckResult 'Pester tests' ($pesterContract.Failed -eq 0 -and $pesterContract.FailedContainers -eq 0) "total=$($pesterContract.Discovered) passed=$($pesterContract.Passed) failed=$($pesterContract.Failed) skipped=$($pesterContract.Skipped) failedContainers=$($pesterContract.FailedContainers)"
+    # Some tests skip on purpose (they need an opt-in or an optional tool), so a skip does not fail the run. It is shown so nobody reads "no failures" as "everything ran".
+    if ($pesterContract.Skipped -gt 0) { Write-Host ("    {0} test(s) were skipped, not run. A skipped test does not fail certification. The list is in the Pester-NUnit.xml report." -f $pesterContract.Skipped) -ForegroundColor Yellow }
     if(-not[string]::IsNullOrWhiteSpace($script:OperatorStatusPath)){Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Pester totals: total={0} passed={1} failed={2} skipped={3} containers={4}" -f $pesterContract.Discovered,$pesterContract.Passed,$pesterContract.Failed,$pesterContract.Skipped,$pesterContract.Containers) -Encoding utf8}
     $categories=$pesterContract.Categories
     $results.VirtualBetaTester=[pscustomobject]@{
@@ -2068,36 +2252,23 @@ try {
         $results.Pcsx2x6 = [pscustomobject]@{ Present = $false }
         Add-CheckResult 'pcsx2x6 crosshair path (issue #79)' $true 'not applicable -- no pcsx2x6 folder in this install'
     } else {
-        $canonicalDir  = Join-Path $pcsx2Dir 'TeknoParrot\crosshairs'
+        $dataRoot      = Get-TPMPcsx2DataRoot -Pcsx2Dir $pcsx2Dir
+        $canonicalDir  = Join-Path $dataRoot 'crosshairs'
         $legacyP1      = Join-Path $pcsx2Dir 'P1.png'
         $legacyP2      = Join-Path $pcsx2Dir 'P2.png'
         $canonicalP1   = Join-Path $canonicalDir 'P1.png'
         $canonicalP2   = Join-Path $canonicalDir 'P2.png'
-        $iniPath       = Join-Path $pcsx2Dir 'inis\PCSX2.ini'
+        $iniPath       = Join-Path $dataRoot 'inis\PCSX2.ini'
 
         $canonicalDeployed = (Test-Path -LiteralPath $canonicalP1 -PathType Leaf) -and (Test-Path -LiteralPath $canonicalP2 -PathType Leaf)
         $legacyPresent     = (Test-Path -LiteralPath $legacyP1 -PathType Leaf) -or (Test-Path -LiteralPath $legacyP2 -PathType Leaf)
 
-        $cursorPathP1 = $null
-        $cursorPathP2 = $null
         $iniFound = Test-Path -LiteralPath $iniPath -PathType Leaf
-        if ($iniFound) {
-            # Read-only parse -- mirrors Set-Pcsx2CursorPaths' own section
-            # tracking without writing anything back.
-            $lines = [System.IO.File]::ReadAllLines($iniPath)
-            $sect = ''
-            foreach ($ln in $lines) {
-                $t = $ln.Trim()
-                if ($t -match '^\[(.+)\]$') { $sect = $matches[1].ToLower(); continue }
-                if ($t -match '^cursor_path\s*=\s*(.*)$') {
-                    if ($sect -eq 'usb port 1 guncon2') { $cursorPathP1 = $matches[1].Trim() }
-                    elseif ($sect -eq 'usb port 2 guncon2') { $cursorPathP2 = $matches[1].Trim() }
-                }
-            }
-        }
+        $cursorPaths = Get-TPMPcsx2UsbCursorPaths -IniPath $iniPath
+        $cursorPathP1 = $cursorPaths.P1
+        $cursorPathP2 = $cursorPaths.P2
 
-        $cursorPointsCanonical = ($cursorPathP1 -and $cursorPathP1.TrimEnd('\') -eq $canonicalP1.TrimEnd('\')) -and
-                                  ($cursorPathP2 -and $cursorPathP2.TrimEnd('\') -eq $canonicalP2.TrimEnd('\'))
+        $cursorPointsCanonical = Test-TPMPcsx2CursorPathsCanonical -DataRoot $dataRoot -CursorPaths @($cursorPathP1, $cursorPathP2) -CanonicalPaths @($canonicalP1, $canonicalP2)
 
         $results.Pcsx2x6 = [pscustomobject]@{
             Present                = $true
@@ -2111,31 +2282,21 @@ try {
             CursorPathPointsCanonical = $cursorPointsCanonical
         }
 
-        # Informational, not a hard requirement: the canonical files/ini only
-        # reflect the new location once crosshair setup has actually been run
-        # since the #79 fix shipped. What this DOES assert is that the check
-        # itself ran and could inspect the real install without modifying it.
-        Add-CheckResult 'pcsx2x6 crosshair path (issue #79)' $true `
+        # The check passes only when the crosshair files, the ini and its cursor paths are all in place and no old root files remain,
+        # so it agrees with the final decision.
+        Add-CheckResult 'pcsx2x6 crosshair path (issue #79)' ([bool]($canonicalDeployed -and $iniFound -and $cursorPointsCanonical -and -not $legacyPresent)) `
             ("pcsx2Dir={0} canonicalDeployed={1} legacyRootPresent={2} iniFound={3} cursorPathCanonical={4}" -f `
                 $pcsx2Dir, $canonicalDeployed, $legacyPresent, $iniFound, $cursorPointsCanonical)
-
-        if ($iniFound -and (-not $cursorPathP1 -or -not $cursorPathP2)) {
-            Add-CheckResult 'pcsx2x6 PCSX2.ini has cursor_path for both USB ports' $false `
-                ("P1={0} P2={1}" -f $cursorPathP1, $cursorPathP2)
-        } elseif ($iniFound) {
-            Add-CheckResult 'pcsx2x6 PCSX2.ini has cursor_path for both USB ports' $true `
-                ("P1={0} P2={1}" -f $cursorPathP1, $cursorPathP2)
-        }
     }
 
     # ECVF: generic Emulator Contract Verification, informational and
     # side-by-side with the legacy pcsx2x6-specific block above -- not yet
-    # authoritative (see TPMCertification.Shadow.psm1's
-    # Get-TPMShadowEmulatorContractVerificationV1 doc comment for why: no
-    # new mandatory Section 9 fact identifier has been registered, and
-    # cutting the live gate over is a separate, later, explicitly-approved
-    # step gated on the jvs-lightgun RuntimeCapability no longer being
-    # Unconfirmed). $pcsx2Dir here is the already-resolved pcsx2x6 folder
+    # authoritative (no new mandatory Section 9 fact identifier has been
+    # registered, and cutting the live gate over is a separate, later,
+    # explicitly-approved step gated on the jvs-lightgun RuntimeCapability
+    # no longer being Unconfirmed). This reads the shared read-only
+    # collector in Contracts.psm1 directly.
+    # $pcsx2Dir here is the already-resolved pcsx2x6 folder
     # itself, matching the contract's PresenceDetector, which expects
     # InstallRoot to be the emulator's own folder, not the overall
     # TeknoParrot root -- a second contract with a different subfolder
@@ -2143,12 +2304,12 @@ try {
     Write-TPMGateHeader -Gate 'Emulator Contract Verification (ECVF, informational)' -Purpose 'Generic, contract-driven verification alongside the legacy pcsx2x6 block -- reports only, never blocks' -Expected 'pass, or not-applicable if no pcsx2x6 folder exists'
     if ($pcsx2Dir) {
         try {
-            $ecvf = Get-TPMShadowEmulatorContractVerificationV1 -TeknoParrotRoot $pcsx2Dir
+            $ecvf = Get-TPMEmulatorContractObservationsV1 -InstallRoot $pcsx2Dir -ValidationMode Source
             if (-not $ecvf.RegistryValid) {
                 $errorSummary = ($ecvf.Errors | ForEach-Object { "$($_.ContractId): $($_.Message)" }) -join '; '
                 Add-CheckResult 'Emulator Contract Verification (ECVF, informational)' $false "registry invalid -- $errorSummary"
             } else {
-                $summary = ($ecvf.Records | ForEach-Object { "$($_.ContractId)/$($_.CapabilityType)/$($_.CapabilityId)=$($_.Status)" }) -join ', '
+                $summary = (@($ecvf.Observations | Where-Object { $_.Applicable }) | ForEach-Object { "$($_.ContractId)/$($_.CapabilityType)/$($_.CapabilityId)=$(if ($_.CapabilityPassed) { 'ready' } else { 'not ready' })" }) -join ', '
                 Add-CheckResult 'Emulator Contract Verification (ECVF, informational)' $true $(if ($summary) { $summary } else { 'no applicable capabilities' })
             }
         } catch {
@@ -2191,20 +2352,7 @@ try {
 
     $profiles = @()
     if (Test-Path -LiteralPath $gameProfilesPath) { $profiles = @(Get-ChildItem -LiteralPath $gameProfilesPath -File -ErrorAction SilentlyContinue) }
-    $userProfiles = @()
-    if (Test-Path -LiteralPath $userProfilesPath) { $userProfiles = @(Get-ChildItem -LiteralPath $userProfilesPath -File -ErrorAction SilentlyContinue) }
-    $centipede = @($profiles | Where-Object { $_.Name -match 'centipede|chaos' })
-    $results.GameProfilesCount = $profiles.Count
-    $results.UserProfilesCount = $userProfiles.Count
-    $results.CentipedeChaosCandidates = @($centipede | Select-Object -ExpandProperty Name)
     Add-CheckResult 'GameProfiles count' ($profiles.Count -gt 0) "count=$($profiles.Count)"
-    Add-CheckResult 'UserProfiles count' ($userProfiles.Count -ge 0) "count=$($userProfiles.Count)"
-    if ($centipede.Count -gt 0) {
-        $centipedeDetails = $centipede.Name -join ', '
-    } else {
-        $centipedeDetails = 'none found'
-    }
-    Add-CheckResult 'Centipede Chaos profile scan' $true $centipedeDetails
 
     if ($RunUnattendedTPM) {
         Write-TPMGateHeader -Gate 'Unattended TPM root binding' -Purpose 'Confirms unattended TPM actually ran against the requested certification root' -Expected 'effective root (from the run log) equals the requested -TeknoParrotRoot'
@@ -2273,7 +2421,7 @@ try {
     if (-not $RunUnattendedTPM) {
         foreach ($name in $results.Snapshots.Keys) {
             $s = $results.Snapshots[$name]
-            Add-CheckResult "Smoke mode no change: $name" (($s.Added + $s.Removed + $s.Changed) -eq 0) "added=$($s.Added) removed=$($s.Removed) changed=$($s.Changed) skipped=$($s.BeforeSkipped + $s.AfterSkipped)"
+            Add-CheckResult "Smoke mode no change: $name" ((($s.Added + $s.Removed + $s.Changed) -eq 0) -and (($s.BeforeSkipped + $s.AfterSkipped) -eq 0)) "added=$($s.Added) removed=$($s.Removed) changed=$($s.Changed) skipped=$($s.BeforeSkipped + $s.AfterSkipped)"
         }
     }
 
@@ -2439,7 +2587,6 @@ finally {
     Write-Host "============================================"
     Write-Host (" Pending : final evidence validation (gate result: {0})" -f $certification.Overall)
     Write-Host (" Score   : {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
-    Write-Host (" Report  : {0}" -f (Join-Path $reportDir 'TPM-Certification-Scorecard.md'))
     Write-Host "============================================"
     [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'final-certification-result' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
 
@@ -2583,11 +2730,12 @@ finally {
         Write-Host "============================================" -ForegroundColor Red
         Write-Host (" REASON       : {0}" -f $productionAbortMessage) -ForegroundColor Red
         Write-Host (" STATUS       : NOT DETERMINED -- no certification decision was reached") -ForegroundColor Red
+        if(-not[string]::IsNullOrWhiteSpace($script:OperatorStatusPath)){Add-Content -LiteralPath $script:OperatorStatusPath -Value 'FINAL STATUS: PIPELINE ABORTED' -Encoding utf8;Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Reason: {0}" -f (ConvertTo-TPMSafeTechnicalTextV1 -Text $productionAbortMessage)) -Encoding utf8}
         if ($rollbackDidNotFullyComplete) {
             Write-Host (" PUBLISHED    : UNKNOWN -- publication rollback did not fully complete; a bundle may still be present at {0} and requires manual verification" -f $productionDestinationRoot) -ForegroundColor Red
+            if(-not[string]::IsNullOrWhiteSpace($script:OperatorStatusPath)){Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Warning: a published bundle may still be present at {0} and needs manual checking." -f $productionDestinationRoot) -Encoding utf8}
         } else {
             Write-Host (" PUBLISHED    : false -- no authoritative marker or bundle was written") -ForegroundColor Red
-            if(-not[string]::IsNullOrWhiteSpace($script:OperatorStatusPath)){Add-Content -LiteralPath $script:OperatorStatusPath -Value 'FINAL STATUS: PIPELINE ABORTED' -Encoding utf8;Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Reason: {0}" -f (ConvertTo-TPMSafeTechnicalTextV1 -Text $productionAbortMessage)) -Encoding utf8}
         }
         Exit-TPMCertificationRepositoryLockV1 -Lock $certificationRepositoryLock
         exit 1

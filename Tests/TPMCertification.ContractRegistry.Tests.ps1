@@ -8,8 +8,8 @@
 BeforeAll {
  Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Authority.psm1') -Force
  Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Contracts.psm1') -Force
- $script:registered = Get-TPMRegisteredEmulatorContractsV1
- $script:integrity = Test-TPMContractRegistryIntegrityV1
+ $script:registered = Get-TPMRegisteredEmulatorContractsV1 -ValidationMode Source
+ $script:integrity = Test-TPMContractRegistryIntegrityV1 -ValidationMode Source
 }
 
 Describe 'ECVF Contract Stability Regression Suite' {
@@ -39,7 +39,7 @@ Describe 'ECVF Contract Stability Regression Suite' {
 
  It 'every contract declares a supported SchemaVersion' {
   foreach ($entry in $script:registered) {
-   { Assert-TPMSupportedContractSchemaVersionV1 -Contract $entry.Contract } | Should -Not -Throw -Because "contracts/$($entry.ContractId)/contract.json SchemaVersion must be in Get-TPMSupportedContractSchemaVersionsV1"
+  { Assert-TPMSupportedContractSchemaVersionV1 -Contract $entry.Contract } | Should -Not -Throw -Because "contracts/$($entry.ContractId)/contract.json SchemaVersion must be a supported contract schema version"
   }
  }
 

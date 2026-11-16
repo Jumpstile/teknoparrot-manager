@@ -8,7 +8,11 @@ BeforeAll {
     if ($parseErrors.Count -gt 0) { throw 'Support package test bootstrap could not parse the production script.' }
     $functionFile = Join-Path $TestDrive 'tpm-support-functions.ps1'
     ($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n" | Set-Content -LiteralPath $functionFile -Encoding utf8
+    $progressModuleDirectory = Join-Path $TestDrive 'scripts'
+    [void][IO.Directory]::CreateDirectory($progressModuleDirectory)
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TpmProgress.psm1') -Destination (Join-Path $progressModuleDirectory 'TpmProgress.psm1') -Force
     . $functionFile
+    . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $script:DisplayVersion = 'v1.0 RC8'
     $script:ScriptVersion = '1.0'
@@ -18,7 +22,6 @@ BeforeAll {
     $script:TpmWorkflowRendering = $false
     $script:logPath = Join-Path $TestDrive 'test.log'
     $script:logWarnShown = $false
-    $script:logFailedCount = 0
 
     function New-SupportFixture {
         $root = Join-Path $TestDrive ('support-' + [guid]::NewGuid().ToString('N'))
@@ -78,6 +81,36 @@ Describe 'New-TpmSupportPackage' {
         $entries | Should -Contain 'MANIFEST.txt'
         @($entries | Where-Object { ($_ -replace '\\','/') -like 'diagnostics/tpm-*' }).Count | Should -BeGreaterThan 0
     }
+    It 'packages FFB provenance evidence with the support diagnostics' {
+        $f = New-SupportFixture
+        $evidencePath = Join-Path $f.Script 'Reports\TPM-FFB-Plugin-Evidence.json'
+        Write-SupportText $evidencePath '{"SourceRevision":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","SourceFiles":[{"FileName":"MAME64.dll","Sha256":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}],"SelectedGames":["FixtureGame"]}'
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $entry = @((Get-SupportZipEntries $r.PackagePath) | Where-Object { $_ -like '*TPM-FFB-Plugin-Evidence*' })
+        $entry | Should -HaveCount 1
+        $text = Get-SupportZipText $r.PackagePath $entry[0]
+        $text | Should -Match 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+        $text | Should -Match 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
+        $text | Should -Match 'FixtureGame'
+    }
+    It 'records Action Required freshness in the packaged manifest' {
+        $f = New-SupportFixture
+        $actionPath = Join-Path $f.Script 'TeknoParrot-Manager-ActionItems.txt'
+        $logPath = Join-Path $f.Script 'TeknoParrot-Manager.log'
+        Write-SupportText $actionPath 'Action item from an earlier run'
+        Write-SupportText $logPath 'Current TPM run'
+        # "Older than this run" means older than the time this process started, so the old report is dated before that (not a fixed 10 minutes ago, which a long test run overtakes).
+        $now = [DateTime]::UtcNow
+        [System.IO.File]::SetLastWriteTimeUtc($actionPath, (Get-Process -Id $PID).StartTime.ToUniversalTime().AddMinutes(-10))
+        [System.IO.File]::SetLastWriteTimeUtc($logPath, $now)
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'Action Required evidence status: stale'
+        $manifest | Should -Match 'Action Required report is older than the latest TPM run'
+        $manifest | Should -Match 'Action Required remediation: rerun the affected workflow'
+    }
 
     It 'collects allowlisted TeknoParrot diagnostics including ParrotPatcher_Log.txt' {
         $f = New-SupportFixture
@@ -103,6 +136,10 @@ Describe 'New-TpmSupportPackage' {
         New-Item -ItemType Directory -Path (Join-Path $game 'BepInEx\plugins'),(Join-Path $game 'TMNT_Data\Plugins\x86_64') -Force | Out-Null
         [System.IO.File]::WriteAllBytes((Join-Path $game 'BepInEx\plugins\TMNTTPPlugin.dll'),[byte[]](1,2,3))
         [System.IO.File]::WriteAllBytes((Join-Path $game 'TMNT_Data\Plugins\x86_64\OrenVid.dll'),[byte[]](4,5,6))
+        $script:supportProgressCalls = New-Object System.Collections.Generic.List[object]
+        Mock Write-TpmCompactExtractionProgress {
+            [void]$script:supportProgressCalls.Add([pscustomobject]@{ Label=$Label; Current=$Current; Total=$Total; Complete=[bool]$Complete })
+        }
         $r = New-TpmSupportPackage -ScriptRoot $f.Script -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
         $r.Succeeded | Should -BeTrue
         $entries = Get-SupportZipEntries $r.PackagePath
@@ -110,7 +147,17 @@ Describe 'New-TpmSupportPackage' {
         $inventory = Get-SupportZipText $r.PackagePath $inventoryEntry[0]
         $inventory | Should -Match 'TMNTTPPlugin.dll'
         $inventory | Should -Match 'OrenVid.dll'
+        $inventoryRows = @($inventory -split "`r?`n" | Where-Object { $_ -match '\.dll\t' })
+        @($inventoryRows | Where-Object { $_ -like 'BepInEx/plugins/TMNTTPPlugin.dll*' }).Count | Should -Be 1
+        @($inventoryRows | Where-Object { $_ -like 'TMNT_Data/Plugins/x86_64/OrenVid.dll*' }).Count | Should -Be 1
         $entries | Where-Object { $_ -match '\.(dll|exe)$' } | Should -BeNullOrEmpty
+        @($script:supportProgressCalls | Where-Object { $_.Label -eq 'Support profile scan' -and $_.Total -eq 1 -and -not $_.Complete }).Count | Should -Be 1
+        @($script:supportProgressCalls | Where-Object { $_.Label -eq 'Support profile scan' -and $_.Complete }).Count | Should -Be 1
+        $pluginProgress = @($script:supportProgressCalls | Where-Object { $_.Label -eq 'Support plugin inventory' -and $_.Current -gt 0 -and -not $_.Complete })
+        (@($pluginProgress | ForEach-Object Current) -join ',') | Should -Be '1,2,3'
+        @($pluginProgress | Where-Object Total -ne 0).Count | Should -Be 0
+        @($script:supportProgressCalls | Where-Object { $_.Label -eq 'Support plugin inventory' -and $_.Complete }).Count | Should -Be 1
+        @($script:supportProgressCalls | Where-Object { $_.Label -eq 'Support package ZIP' -and $_.Complete }).Count | Should -Be 1
     }
 
     It 'does not collect forbidden binaries or arbitrary game content' {
@@ -137,7 +184,7 @@ Describe 'New-TpmSupportPackage' {
 
     It 'redacts common credentials and user-profile paths from text' {
         $f = New-SupportFixture
-        $secret = 'password=topsecret token=abc123 postgres://user:pw@host/db C:\Users\EliSi\private'
+        $secret = 'password=topsecret token=abc123 postgres://user:pw@host/db C:\Users\PrivateUser\private'
         Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager.log') $secret
         $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
         $r.Succeeded | Should -BeTrue
@@ -147,7 +194,7 @@ Describe 'New-TpmSupportPackage' {
         $text = Get-SupportZipText $r.PackagePath $entries[0]
         $text | Should -Match 'password=<redacted>'
         $text | Should -Match '<user-profile>'
-        $text | Should -Not -Match 'topsecret|abc123|user:pw|EliSi'
+        $text | Should -Not -Match 'topsecret|abc123|user:pw|PrivateUser'
         $r.RedactionCount | Should -BeGreaterThan 0
     }
 
@@ -224,13 +271,21 @@ Describe 'New-TpmSupportPackage' {
         (Get-SupportZipText $r.PackagePath 'MANIFEST.txt') | Should -Not -Match 'outside secret'
     }
 
-    It 'excludes oversized optional text diagnostics' {
+    It 'keeps the newest part of a main log that is over the size limit' {
         $f = New-SupportFixture
-        $large = New-Object byte[] 5242881
-        [System.IO.File]::WriteAllBytes((Join-Path $f.Script 'TeknoParrot-Manager.log'),$large)
+        $filler = ('x' * 98) + "`r`n"
+        $text = 'OLDEST-MARKER' + "`r`n" + ($filler * 56000) + 'NEWEST-MARKER' + "`r`n"
+        $text.Length | Should -BeGreaterThan 5242880
+        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager.log') $text
         $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
         $r.Succeeded | Should -BeTrue
-        $r.Records | Where-Object Source -eq 'TPM:TeknoParrot-Manager.log' | Select-Object -ExpandProperty Status | Should -Be 'IntentionallyExcluded'
+        $r.Records | Where-Object Source -eq 'TPM:TeknoParrot-Manager.log' | Select-Object -ExpandProperty Status | Should -Be 'Collected'
+        $entry = @(Get-SupportZipEntries $r.PackagePath | Where-Object { $_ -like 'diagnostics/tpm-*' })
+        $entry | Should -HaveCount 1
+        $logText = Get-SupportZipText $r.PackagePath $entry[0]
+        $logText | Should -Match 'NEWEST-MARKER'
+        $logText | Should -Not -Match 'OLDEST-MARKER'
+        $logText | Should -Match 'Older lines were left out'
     }
 
     It 'uses the structured no-render fallback for redirected, unattended, and certification facts' {
@@ -243,19 +298,70 @@ Describe 'New-TpmSupportPackage' {
 
     It 'keeps the support manifest free of absolute development paths' {
         $f = New-SupportFixture
-        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager.log') 'path=C:\Users\EliSi\private W:\ROMS\secret'
+        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager.log') 'path=C:\Users\PrivateUser\private W:\ROMS\secret'
         $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
         $r.Succeeded | Should -BeTrue
         $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
-        $manifest | Should -Not -Match 'C:\\Users\\EliSi|W:\\ROMS'
+        $manifest | Should -Not -Match 'C:\\Users\\PrivateUser|W:\\ROMS'
     }
 
-    It 'opens the TPM logs folder through the normal Windows shell boundary' {
-        $f = New-SupportFixture
-        Mock Start-Process {}
-        $r = Open-TpmLogsAndReports -ScriptRoot $f.Script
+    It 'opens both the logs folder and the reports folder, so the saved action list can be found' {
+        # Mutation: open only the logs folder -> the report TPM just said it saved is never shown.
+        $logs = Join-Path $TestDrive 'open-logs'; $reports = Join-Path $TestDrive 'open-reports'
+        [void](New-Item -ItemType Directory -Path $logs, $reports -Force)
+        $script:m2Opened = New-Object System.Collections.Generic.List[string]
+        Mock Start-Process { [void]$script:m2Opened.Add([string]$ArgumentList) }
+        $r = Open-TpmLogsAndReports -LogsPath $logs -ReportsPath $reports
         $r.Succeeded | Should -BeTrue
-        Should -Invoke Start-Process -Times 1 -Exactly
+        @($script:m2Opened) | Should -Be @(('"' + $logs + '"'), ('"' + $reports + '"'))
+    }
+    It 'gives Explorer the folder path in quotes so a folder name with a space opens the right folder (audit 24)' {
+        # Mutation: pass the bare path -> Windows PowerShell 5.1 splits "My Reports" into two arguments and Explorer opens another folder.
+        $folder = Join-Path $TestDrive 'folder with spaces'
+        [void](New-Item -ItemType Directory -Path $folder -Force)
+        $script:m2OpenArgs = $null
+        Mock Start-Process { $script:m2OpenArgs = $ArgumentList }
+        $r = Open-TpmOwnedFolder -Path $folder
+        $r.Succeeded | Should -BeTrue
+        ($script:m2OpenArgs -join ' ') | Should -BeExactly ('"' + $folder + '"')
+    }
+    It 'labels a report older than this run and older than the log Stale (audit 25)' {
+        # Mutation: hard-code Current for every report -> a weeks-old health report is shown as current evidence.
+        $f = New-SupportFixture
+        $reportPath = Join-Path $f.Script 'TeknoParrot-Manager-HealthCheck.txt'
+        $logPath = Join-Path $f.Script 'TeknoParrot-Manager.log'
+        Write-SupportText $reportPath 'Health check from long ago'
+        Write-SupportText $logPath 'Current TPM run'
+        [System.IO.File]::SetLastWriteTimeUtc($reportPath, [DateTime]::UtcNow.AddDays(-10))
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        (Get-SupportZipText $r.PackagePath 'MANIFEST.txt') | Should -Match 'Evidence class counts: Current=\d+; Stale=1;'
+    }
+    It 'keeps a report written in this run Current even when the log is written after it (audit 25)' {
+        # Mutation: call a report Stale just because the log is newer -> a report made seconds ago in this run is labeled old.
+        $f = New-SupportFixture
+        $reportPath = Join-Path $f.Script 'TeknoParrot-Manager-HealthCheck.txt'
+        $logPath = Join-Path $f.Script 'TeknoParrot-Manager.log'
+        Write-SupportText $reportPath 'Health check made in this run'
+        Write-SupportText $logPath 'Log lines written after the report'
+        [System.IO.File]::SetLastWriteTimeUtc($logPath, [DateTime]::UtcNow.AddMinutes(1))
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        (Get-SupportZipText $r.PackagePath 'MANIFEST.txt') | Should -Match 'Evidence class counts: Current=\d+; Stale=0;'
+    }
+    It 'does not print the stale Action Required warning for a report written in this run (FIXM2B)' {
+        # Mutation: bring back the log-only rule for the manifest line -> the package says stale and tells the user to rerun a workflow that just ran.
+        $f = New-SupportFixture
+        $reportPath = Join-Path $f.Script 'TeknoParrot-Manager-ActionItems.txt'
+        $logPath = Join-Path $f.Script 'TeknoParrot-Manager.log'
+        Write-SupportText $reportPath 'Action items made in this run'
+        Write-SupportText $logPath 'Log lines written after the report'
+        [System.IO.File]::SetLastWriteTimeUtc($logPath, [DateTime]::UtcNow.AddMinutes(1))
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'Action Required evidence status: current'
+        $manifest | Should -Not -Match 'WARNING: Action Required report is older'
     }
     It 'rejects executable and archive signatures but accepts valid UTF-8 and BOM text' {
         foreach ($bytes in @(
@@ -268,6 +374,8 @@ Describe 'New-TpmSupportPackage' {
         )) {
             (Test-TpmSupportTextContent -Bytes $bytes).Safe | Should -BeFalse
         }
+        # An empty log file is valid (not a failure to read it).
+        (Test-TpmSupportTextContent -Bytes (New-Object byte[] 0)).Safe | Should -BeTrue
         $utf8 = New-Object System.Text.UTF8Encoding($true)
         (Test-TpmSupportTextContent -Bytes ([byte[]]($utf8.GetPreamble() + $utf8.GetBytes('valid text')))).Safe | Should -BeTrue
         $utf16 = New-Object System.Text.UnicodeEncoding($false,$true,$true)
@@ -289,11 +397,11 @@ Describe 'New-TpmSupportPackage' {
 
     It 'redacts every dynamic manifest field before insertion' {
         $records = New-Object System.Collections.Generic.List[object]
-        [void]$records.Add([pscustomobject]@{Source='Authorization: Bearer abc';Status='CollectionFailed';Destination='C:\Users\EliSi\secret';Detail='api_key=one'})
+        [void]$records.Add([pscustomobject]@{Source='Authorization: Bearer abc';Status='CollectionFailed';Destination='C:\Users\PrivateUser\secret';Detail='api_key=one';EvidenceClass='Current'})
         $errors = New-Object System.Collections.Generic.List[string]
         [void]$errors.Add('postgresql://user:pw@host/db token=two')
         $manifest = Get-TpmSupportManifestText -Records $records -Errors $errors -GameCodes ([string[]]@()) -AffectedGameSummary 'password=leaked-secret UNC=\\server\share'
-        $manifest | Should -Not -Match '\babc\b|\bone\b|pw@host|\btwo\b|leaked-secret|EliSi|server\\share'
+        $manifest | Should -Not -Match '\babc\b|\bone\b|pw@host|\btwo\b|leaked-secret|PrivateUser|server\\share'
         $manifest | Should -Match 'Affected game scope:'
         $manifest | Should -Match 'Collection or packaging failures:'
     }
@@ -327,28 +435,96 @@ Describe 'New-TpmSupportPackage' {
         }
     }
 
-    It 'reports staging cleanup failure as partial without clean success' {
+    It 'reports staging cleanup failure without clean success and without calling the evidence partial' {
         $f = New-SupportFixture
         Mock Remove-TpmSupportStageDirectory { return $false }
         $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
         $r.Succeeded | Should -BeFalse
-        $r.Partial | Should -BeTrue
+        $r.Partial | Should -BeFalse
         $r.PackagePath | Should -Not -BeNullOrEmpty
         if ($r.PackagePath) { Remove-Item -LiteralPath $r.PackagePath -Force -ErrorAction SilentlyContinue }
     }
 
-    It 'emits support workflow events in phase order and closes ownership' {
+    It 'shows the temporary-folder result, not the partial one, when only the temporary ZIP could not be removed' {
+        # Mutation: set Partial when the temporary ZIP cannot be deleted -> a complete package is shown as "partial - some information could not be collected".
         $f = New-SupportFixture
-        $events = New-Object System.Collections.Generic.List[string]
-        $sink = { param($event) [void]$events.Add([string]$event.EventKind) }.GetNewClosure()
+        $script:SupportRealHandle = Get-Command Open-TpmSupportOwnedHandle -CommandType Function
+        Mock Open-TpmSupportOwnedHandle { & $script:SupportRealHandle @PesterBoundParameters }
+        Mock Open-TpmSupportOwnedHandle { throw 'simulated: the temporary ZIP is locked' } -ParameterFilter { $Path -like '*tpm-support-*.zip' }
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        try {
+            $r.PackagePath | Should -Not -BeNullOrEmpty
+            $r.Partial | Should -BeFalse
+            $r.Succeeded | Should -BeFalse
+            @($r.LeftoverTempPaths) | Should -BeLike '*tpm-support-*.zip'
+            Mock Write-TpmOutcome { $script:supportOutcomeTitle = $Title; $script:supportOutcomeNext = $Next }
+            Write-TpmSupportPackageResult -Result $r -Unattended
+            $script:supportOutcomeTitle | Should -Be 'The support ZIP is ready, but a temporary folder could not be removed.'
+            $script:supportOutcomeTitle | Should -Not -Match 'partial'
+        } finally {
+            if ($r.PackagePath) { Remove-Item -LiteralPath $r.PackagePath -Force -ErrorAction SilentlyContinue }
+            foreach ($left in @($r.LeftoverTempPaths)) { Remove-Item -LiteralPath $left -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It 'publishes workflow completion only after the support ZIP is promoted' {
+        $f = New-SupportFixture
+        $events = New-Object System.Collections.Generic.List[object]
+        $sink = {
+            param($event)
+            $packageExists = (Get-ChildItem -LiteralPath $f.Output -Filter '*.zip' -File -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
+            [void]$events.Add([pscustomobject]@{ EventKind=[string]$event.EventKind; PackageExists=$packageExists })
+        }.GetNewClosure()
         $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output -EventSink $sink
         $r.Succeeded | Should -BeTrue
-        @($events | Where-Object { $_ -eq 'WorkflowStarted' }).Count | Should -Be 1
-        $steps = @($events | Where-Object { $_ -eq 'StepStarted' })
-        $steps.Count | Should -Be 5
-        $steps | Should -Be @('StepStarted','StepStarted','StepStarted','StepStarted','StepStarted')
-        $events[$events.Count - 1] | Should -Be 'WorkflowClosed'
+        @($events | Where-Object { $_.EventKind -eq 'WorkflowStarted' }).Count | Should -Be 1
+        @($events | Where-Object { $_.EventKind -eq 'StepStarted' }).Count | Should -Be 5
+        $finished = @($events | Where-Object { $_.EventKind -eq 'WorkflowCompleted' })
+        $finished | Should -HaveCount 1
+        $finished[0].PackageExists | Should -BeTrue
+        $events[$events.Count - 1].EventKind | Should -Be 'WorkflowClosed'
+        $r.SupportWorkflowResult.Lifecycle | Should -Be 'Finished'
         $r.StatusContext.Closed | Should -BeTrue
+    }
+    It 'links collected evidence and workflow results to one session RunId' {
+        $f = New-SupportFixture
+        $runId = '11111111111111111111111111111111'
+        $script:TpmSessionRunId = $runId
+        $script:LatestTpmWorkflowResult = [pscustomobject]@{
+            WorkflowId = '22222222222222222222222222222222'
+            RunId = $runId
+            WorkflowKey = 'AutoSync'
+            Lifecycle = 'Finished'
+            State = 'Finished'
+            Sequence = 9
+        }
+        (New-TpmActionRequiredReportText -RunId $runId) | Should -Match ("Run ID: " + $runId)
+        $controlsPath = Join-Path $f.Script 'controls-generated.txt'
+        Write-ControlsStatus -userProfilesDir $f.Profiles -pool @() -propagationReports @() -outputPath $controlsPath -RunId $runId | Should -Be 0
+        [System.IO.File]::ReadAllText($controlsPath) | Should -Match ("Run ID    : " + $runId)
+        Write-Log 'session linkage check'
+        [System.IO.File]::ReadAllText($script:logPath) | Should -Match ("RunId=" + $runId)
+        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager.log') "[2026-09-04 12:00:00] [RunId=$runId] workflow complete"
+        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager-ActionItems.txt') "Action Required`r`nRun ID: $runId"
+        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager-controls.txt') "Controls Status`r`nRun ID    : $runId"
+        $events = New-Object System.Collections.Generic.List[object]
+        $sink = { param($event) [void]$events.Add($event) }.GetNewClosure()
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output -EventSink $sink
+        $r.Succeeded | Should -BeTrue
+        $r.RunId | Should -Be $runId
+        @($events | Where-Object { $_.RunId -ne $runId }).Count | Should -Be 0
+        (Get-SupportZipText $r.PackagePath 'MANIFEST.txt') | Should -Match ("Run ID: " + $runId)
+        (Get-SupportZipText $r.PackagePath 'diagnostics/tpm-01-TeknoParrot-Manager.log.txt') | Should -Match $runId
+        (Get-SupportZipText $r.PackagePath 'diagnostics/tpm-02-TeknoParrot-Manager-controls.txt') | Should -Match $runId
+        (Get-SupportZipText $r.PackagePath 'diagnostics/tpm-03-TeknoParrot-Manager-ActionItems.txt') | Should -Match $runId
+        $workflowEvidence = Get-SupportZipText $r.PackagePath 'metadata/workflow-result.json' | ConvertFrom-Json
+        $workflowEvidence.RunId | Should -Be $runId
+        $workflowEvidence.LatestWorkflow.RunId | Should -Be $runId
+        $workflowEvidence.SupportWorkflowAtArchiveSnapshot.RunId | Should -Be $runId
+        $workflowEvidence.SupportWorkflowAtArchiveSnapshot.Lifecycle | Should -Be 'Running'
+        $workflowEvidence.SupportWorkflowAtArchiveSnapshot.State | Should -Be 'Working'
+        $r.SupportWorkflowResult.Lifecycle | Should -Be 'Finished'
+        (Get-SupportZipText $r.PackagePath 'MANIFEST.txt') | Should -Match 'Support workflow snapshot at archive creation: SupportPackage / Working'
     }
     It 'writes only relative safe ZIP entry names' {
         $f = New-SupportFixture
@@ -448,6 +624,22 @@ Describe 'New-TpmSupportPackage' {
         $script:pluginSafetyCalls | Should -BeGreaterOrEqual 3
     }
 
+    It 'keeps both plugin inventories when two game codes have the same safe name' {
+        # Mutation: write every inventory to metadata\inventory-<safe name>.tsv without checking for an existing file -> the second game replaces the first game's evidence.
+        $f = New-SupportFixture
+        $stage = Join-Path $f.Root 'stage-twin'
+        New-Item -ItemType Directory -Path (Join-Path $stage 'metadata') -Force | Out-Null
+        $records = New-Object System.Collections.Generic.List[object]
+        foreach ($code in @('Akai Katana', 'Akai_Katana')) {
+            $game = Join-Path $f.Root ('twin-' + $code.Length + '-' + $code.Replace(' ', '-'))
+            New-Item -ItemType Directory -Path (Join-Path $game 'BepInEx\plugins') -Force | Out-Null
+            [IO.File]::WriteAllBytes((Join-Path $game 'BepInEx\plugins\Only.dll'), [byte[]](1, 2, 3))
+            Get-TpmSupportPluginInventory -GameRoot $game -GameCode $code -Records $records -StageDirectory $stage
+        }
+        @(Get-ChildItem -LiteralPath (Join-Path $stage 'metadata') -Filter 'inventory-*.tsv').Count | Should -Be 2
+        @($records | Where-Object { $_.Status -eq 'Collected' } | ForEach-Object Destination | Select-Object -Unique).Count | Should -Be 2
+    }
+
     It 'rejects destination substitution between authorization and promotion' {
         $f = New-SupportFixture
         $outside = Join-Path $f.Root 'outside-destination'
@@ -471,6 +663,33 @@ Describe 'New-TpmSupportPackage' {
         @((Get-ChildItem -LiteralPath $outside -Filter '*.zip' -File -ErrorAction SilentlyContinue)).Count | Should -Be 0
     }
 
+    It 'reports per-entry discovery and removal while cleaning a nested owned support stage' {
+        $f = New-SupportFixture
+        $stage = Join-Path $f.Root 'owned-stage-progress'
+        New-Item -ItemType Directory -Path (Join-Path $stage 'diagnostics\nested'),(Join-Path $stage 'metadata') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $stage 'diagnostics\one.log'), 'one')
+        [IO.File]::WriteAllText((Join-Path $stage 'diagnostics\nested\two.log'), 'two')
+        [IO.File]::WriteAllText((Join-Path $stage 'metadata\report.txt'), 'report')
+        [IO.File]::WriteAllText((Join-Path $stage 'MANIFEST.txt'), 'manifest')
+        [IO.File]::WriteAllText((Join-Path $stage 'README.txt'), 'readme')
+        $script:supportCleanupProgress = New-Object System.Collections.Generic.List[object]
+        Mock Write-TpmCompactExtractionProgress {
+            [void]$script:supportCleanupProgress.Add([pscustomobject]@{
+                Label=$Label; Current=$Current; Total=$Total; Complete=[bool]$Complete
+            })
+        }
+
+        Remove-TpmSupportStageDirectory -Path $stage | Should -BeTrue
+
+        Test-Path -LiteralPath $stage | Should -BeFalse
+        $discovery = @($script:supportCleanupProgress | Where-Object { $_.Label -eq 'Support staging cleanup discovery' })
+        @($discovery | Where-Object { -not $_.Complete -and $_.Total -eq 0 }).Count | Should -Be 4
+        @($discovery | Where-Object { $_.Complete -and $_.Current -eq 4 -and $_.Total -eq 0 }).Count | Should -Be 1
+        $removal = @($script:supportCleanupProgress | Where-Object { $_.Label -eq 'Support staging cleanup removal' })
+        @($removal | Where-Object { -not $_.Complete -and $_.Total -eq 0 }).Count | Should -Be 8
+        @($removal | Where-Object { $_.Complete -and $_.Current -eq 8 -and $_.Total -eq 0 }).Count | Should -Be 1
+    }
+
     It 'preserves residue when a staging child becomes a real junction' {
         $f = New-SupportFixture
         $stage = Join-Path $f.Root 'owned-stage'
@@ -478,10 +697,29 @@ Describe 'New-TpmSupportPackage' {
         New-Item -ItemType Directory -Path (Join-Path $stage 'diagnostics'),(Join-Path $stage 'metadata'),$outside -Force | Out-Null
         Write-SupportText (Join-Path $stage 'MANIFEST.txt') 'manifest'
         New-Item -ItemType Junction -Path (Join-Path $stage 'diagnostics') -Target $outside -ErrorAction Stop | Out-Null
+        $script:supportCleanupFailureProgress = New-Object System.Collections.Generic.List[object]
+        Mock Write-TpmCompactExtractionProgress {
+            [void]$script:supportCleanupFailureProgress.Add([pscustomobject]@{
+                Label=$Label; Current=$Current; Total=$Total; Complete=[bool]$Complete
+            })
+        }
         $removed = Remove-TpmSupportStageDirectory -Path $stage
         $removed | Should -BeFalse
         Test-Path -LiteralPath $stage | Should -BeTrue
         Test-Path -LiteralPath $outside | Should -BeTrue
+        @($script:supportCleanupFailureProgress | Where-Object { $_.Label -eq 'Support staging cleanup discovery' -and $_.Complete -and $_.Current -eq 0 -and $_.Total -eq 0 }).Count | Should -Be 1
+        @($script:supportCleanupFailureProgress | Where-Object { $_.Label -eq 'Support staging cleanup removal' -and $_.Complete -and $_.Current -eq 1 -and $_.Total -eq 0 }).Count | Should -Be 1
+    }
+
+    It 'returns false instead of throwing when the staging folder cannot be opened for cleanup' {
+        # Mutation: open the folder outside the guarded block -> the error escapes New-TpmSupportPackage's finally and the result is never returned.
+        $f = New-SupportFixture
+        $stage = Join-Path $f.Root 'stage-open-fails'
+        New-Item -ItemType Directory -Path $stage -Force | Out-Null
+        Mock Open-TpmSupportOwnedHandle { throw 'simulated: access denied' }
+        { Remove-TpmSupportStageDirectory -Path $stage } | Should -Not -Throw
+        Remove-TpmSupportStageDirectory -Path $stage | Should -BeFalse
+        Test-Path -LiteralPath $stage | Should -BeTrue
     }
     It 'includes explanatory README and concise manifest summary without duplicate extensions' {
         $f = New-SupportFixture
@@ -519,5 +757,106 @@ Describe 'New-TpmSupportPackage' {
         $collected.Destination | Should -Contain 'first_.txt'
         $collected.Destination | Should -Contain 'first_-02.txt'
         $collected.Destination | ForEach-Object { $_ | Should -Not -Match '(^|[\\/])\.\.([\\/]|$)' }
+    }
+    It 'collects redacted affected-game profile snapshots with diagnostic fields' {
+        $f = New-SupportFixture
+        $game = Add-SupportGame $f
+        $profile = '<GameProfile>' +
+            '<GameName>TMNT</GameName>' +
+            '<GamePath>' + (Join-Path $game 'TMNT.exe') + '</GamePath>' +
+            '<EmulationProfile>RawThrills</EmulationProfile>' +
+            '<ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldType>String</FieldType><FieldValue>GameDB01</FieldValue></FieldInformation>' +
+            '<FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldType>String</FieldType><FieldValue>do-not-share</FieldValue></FieldInformation></ConfigValues>' +
+            '<JoystickButtons><JoystickButtons><ButtonName>Start</ButtonName><InputMapping>JOY1_BUTTON1</InputMapping><AnalogType>Digital</AnalogType></JoystickButtons>' +
+            '<JoystickButtons><ButtonName>Coin</ButtonName><InputMapping>JOY1_BUTTON2</InputMapping><AnalogType>Digital</AnalogType></JoystickButtons></JoystickButtons>' +
+            '</GameProfile>'
+        Write-SupportText (Join-Path $f.Profiles 'TMNT.xml') $profile
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $snapshot = Get-SupportZipText $r.PackagePath 'metadata/profile-TMNT.txt'
+        $snapshot | Should -Match 'GameName = TMNT'
+        $snapshot | Should -Match 'GameDB01'
+        $snapshot | Should -Match 'Button=Start; Mapping=JOY1_BUTTON1'
+        $snapshot | Should -Match 'Button=Coin; Mapping=JOY1_BUTTON2'
+        $snapshot | Should -Not -Match 'Button=; Mapping='
+        $snapshot | Should -Match 'Value=<redacted-field>'
+        $snapshot | Should -Not -Match 'do-not-share|<GameProfile>'
+        ($r.Records | Where-Object Source -eq 'Game:TMNT:redacted profile snapshot').EvidenceClass | Should -Be 'Current'
+        # Mutation: count every metadata\ file as a plugin inventory -> the profile snapshot above is reported as a collected plugin inventory although the game has no plugin folder.
+        $r.Summary.PluginInventoriesCollected | Should -Be 0
+        (Get-SupportZipText $r.PackagePath 'MANIFEST.txt') | Should -Match 'Plugin inventory files: 0'
+    }
+
+    It 'names the leftover temporary folder under Details when its cleanup fails' {
+        # Mutation: leave the staging folder out of the result -> the screen says "press D to see which one" and Details never names it.
+        $f = New-SupportFixture
+        Add-SupportGame $f | Out-Null
+        Mock Remove-TpmSupportStageDirectory { $false }
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
+        try {
+            $r.Succeeded | Should -BeFalse
+            [string]::IsNullOrWhiteSpace([string]$r.PackagePath) | Should -BeFalse
+            @($r.LeftoverTempPaths).Count | Should -Be 1
+            @($r.LeftoverTempPaths)[0] | Should -BeLike '*tpm-support-stage-*'
+            Mock Write-TpmOutcome { $script:supportOutcomeBlocks = $DetailBlocks }
+            Write-TpmSupportPackageResult -Result $r -Unattended
+            (@($script:supportOutcomeBlocks | ForEach-Object { $_.Lines }) -join "`n") | Should -Match ([regex]::Escape([string]@($r.LeftoverTempPaths)[0]))
+        } finally {
+            foreach ($left in @($r.LeftoverTempPaths)) { Remove-Item -LiteralPath $left -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It 'labels current, stale, and ambient evidence in manifest order' {
+        $f = New-SupportFixture
+        Add-SupportGame $f | Out-Null
+        $actionPath = Join-Path $f.Script 'TeknoParrot-Manager-ActionItems.txt'
+        $logPath = Join-Path $f.Script 'TeknoParrot-Manager.log'
+        Write-SupportText $actionPath 'older action'
+        Write-SupportText $logPath 'current manager run'
+        Write-SupportText (Join-Path $f.Tp 'TeknoParrotUI.log') 'ambient TPUI diagnostic'
+        # Older than this process's start (see the Action Required freshness test above), not a fixed 10 minutes before now.
+        $now = [DateTime]::UtcNow
+        [IO.File]::SetLastWriteTimeUtc($actionPath, (Get-Process -Id $PID).StartTime.ToUniversalTime().AddMinutes(-10))
+        [IO.File]::SetLastWriteTimeUtc($logPath, $now)
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -TeknoParrotRoot $f.Tp -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        ($r.Records | Where-Object Source -eq 'TPM:TeknoParrot-Manager-ActionItems.txt').EvidenceClass | Should -Be 'Stale'
+        ($r.Records | Where-Object Source -eq 'TeknoParrot:TeknoParrotUI.log').EvidenceClass | Should -Be 'Ambient'
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'Evidence classes: Current'
+        $currentIndex = $manifest.IndexOf('[Collected/Current]')
+        $staleIndex = $manifest.IndexOf('[Collected/Stale]')
+        $ambientIndex = $manifest.IndexOf('[Collected/Ambient]')
+        $currentIndex | Should -BeGreaterOrEqual 0
+        $staleIndex | Should -BeGreaterThan $currentIndex
+        $ambientIndex | Should -BeGreaterThan $staleIndex
+    }
+    It 'marks game-local plugin evidence as ambient metadata and preserves current-run separation' {
+        $f = New-SupportFixture
+        $game = Add-SupportGame $f
+        New-Item -ItemType Directory -Path (Join-Path $game 'BepInEx\plugins') -Force | Out-Null
+        [System.IO.File]::WriteAllBytes((Join-Path $game 'BepInEx\plugins\GamePlugin.dll'), [byte[]](1,2,3))
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        ($r.Records | Where-Object Source -eq 'Game:TMNT:plugin inventory').EvidenceClass | Should -Be 'Ambient'
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'Ambient = supplied or discovered without current-run provenance'
+        $manifest | Should -Match 'Game:TMNT:plugin inventory'
+        $manifest | Should -Not -Match 'GamePlugin\.dll'
+    }
+
+    It 'collects the exact TeknoParrotUI troubleshooting intake file safely' {
+        $f = New-SupportFixture
+        $intakeName = 'TeknoParrot-Manager-TeknoParrotUI-Troubleshooting.txt'
+        # FIX110 (S-20): the one supported location is the managed Reports folder; the package README names it.
+        Write-SupportText (Join-Path $f.Script ('Reports\' + $intakeName)) 'TPUI diagnostic password=secret'
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $intake = Get-SupportZipText $r.PackagePath 'diagnostics/tpui-troubleshooting.txt'
+        $intake | Should -Match 'password=<redacted>'
+        $intake | Should -Not -Match 'secret'
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'TeknoParrotUI:Troubleshooting intake'
+        (Get-SupportZipText $r.PackagePath 'README.txt') | Should -Match $intakeName
     }
 }

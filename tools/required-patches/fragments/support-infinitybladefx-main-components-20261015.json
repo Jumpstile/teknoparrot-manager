@@ -1,0 +1,90 @@
+{
+  "Schema": "TPM.RequiredPatch.ManagedPluginFragment.v1",
+  "BaseCatalog": {
+    "Schema": 3,
+    "EntryCount": 24,
+    "Sha256": "283DB40B0A17F3FEF2BC758D8123209B87C07731E433CECFE96DE1E2C69C5CE8"
+  },
+  "Entries": [
+    {
+      "Id": "infinity-blade-fx-matrix32-main-restore",
+      "ProfileId": "InfinityBladeFX",
+      "BuildName": "Infinity Blade FX (1.02)(2020)[Adrenaline PC][TP]",
+      "Executable": "Binaries/Win32/SwordGame.exe",
+      "ExecutableSha256": "8E605C3748C6D3D45832F40316C1FEC35D2507E31E51A5F85DCB3B664DA72D24",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Infinity Blade FX (1.02)(2020)[Adrenaline PC][TP].zip",
+      "SourceEntry": "Binaries/Win32/matrix32.dll",
+      "SourceSize": 109056,
+      "SourceSha1": "355E6F9557BAFC726694DC2E40820FF8429D61FB",
+      "SourceSha256": "CB25982F65A32E3D29B3F449BD8CCF2E4A4B47CA3096B454B6910341B213D547",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "infinity-original-matrix32",
+          "Type": "File",
+          "Path": "Binaries/Win32/matrix32.TEKNOPARROT.dll",
+          "Description": "Preserved original matrix32 file required by the authored fix procedure."
+        },
+        {
+          "Id": "infinity-tpfix-config",
+          "Type": "File",
+          "Path": "Binaries/Win32/TPFIX.ini",
+          "Description": "TPFIX.ini must be present; first-run path selection remains a user action."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "Binaries/Win32/matrix32.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "CB25982F65A32E3D29B3F449BD8CCF2E4A4B47CA3096B454B6910341B213D547",
+          "Payload": "payload/matrix32.dll",
+          "PayloadSha256": "CB25982F65A32E3D29B3F449BD8CCF2E4A4B47CA3096B454B6910341B213D547"
+        }
+      ]
+    },
+    {
+      "Id": "infinity-blade-fx-dinput8-main-restore",
+      "ProfileId": "InfinityBladeFX",
+      "BuildName": "Infinity Blade FX (1.02)(2020)[Adrenaline PC][TP]",
+      "Executable": "Binaries/Win32/SwordGame.exe",
+      "ExecutableSha256": "8E605C3748C6D3D45832F40316C1FEC35D2507E31E51A5F85DCB3B664DA72D24",
+      "SourceUrl": "",
+      "SourceRevision": "",
+      "SourceRole": "Main",
+      "SourceSet": "Infinity Blade FX (1.02)(2020)[Adrenaline PC][TP].zip",
+      "SourceEntry": "Binaries/Win32/dinput8.dll",
+      "SourceSize": 2058752,
+      "SourceSha1": "72E6862972409A4685545B21C0C687766F83DADC",
+      "SourceSha256": "E7E149EE9E8B64E23B739E236E5A61CAB7F2F56E632082993A95F05DE7D6CCB1",
+      "ExclusiveGroup": "",
+      "Prerequisites": [
+        {
+          "Id": "infinity-original-matrix32",
+          "Type": "File",
+          "Path": "Binaries/Win32/matrix32.TEKNOPARROT.dll",
+          "Description": "Preserved original matrix32 file required by the authored fix procedure."
+        },
+        {
+          "Id": "infinity-tpfix-config",
+          "Type": "File",
+          "Path": "Binaries/Win32/TPFIX.ini",
+          "Description": "TPFIX.ini must be present; first-run path selection remains a user action."
+        }
+      ],
+      "Operations": [
+        {
+          "Type": "CreateFile",
+          "Target": "Binaries/Win32/dinput8.dll",
+          "BeforeState": "Absent",
+          "AfterSha256": "E7E149EE9E8B64E23B739E236E5A61CAB7F2F56E632082993A95F05DE7D6CCB1",
+          "Payload": "payload/dinput8.dll",
+          "PayloadSha256": "E7E149EE9E8B64E23B739E236E5A61CAB7F2F56E632082993A95F05DE7D6CCB1"
+        }
+      ]
+    }
+  ]
+}

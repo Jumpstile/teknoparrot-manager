@@ -7,7 +7,7 @@
 # Test-XmlFolder function body in this session, mirroring the pattern already
 # used by Tests\TeknoParrot-Manager.Tests.ps1.
 #
-# ASCII-only source, per CLAUDE.md: PS 5.1 reads a BOM-less UTF-8 file as
+# ASCII-only source, per the project rules: PS 5.1 reads a BOM-less UTF-8 file as
 # Windows-1252, so any literal multi-byte character in this file's own source
 # (not file content built at runtime) risks a parse error under the project's
 # target interpreter. Every non-ASCII test value below is built from [char]

@@ -38,6 +38,6 @@ Paste key excerpts from:
 
 ## AI Review
 
-- Claude review completed: yes/no
-- Codex review completed: yes/no
-- ChatGPT final review completed: yes/no
+- First independent review completed: yes/no
+- Second independent review completed: yes/no
+- Final review completed: yes/no

@@ -1,12 +1,20 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
 title TPM: Sync main and run
 
-cd /d "%~dp0"
+rem pushd, not cd: cd cannot enter a network share (UNC) path, pushd maps it to a temporary drive letter.
+pushd "%~dp0"
+if errorlevel 1 (
+    echo ERROR: Could not open the folder this launcher is in:
+    echo   "%~dp0"
+    echo If it is on a network share, check that the share is reachable, then run this again.
+    pause
+    exit /b 1
+)
 
 if not exist ".git" (
     echo ERROR: This folder is not a git repository. Expected to find .git here:
-    echo   %~dp0
+    echo   "%~dp0"
     echo This launcher must be run from inside the TeknoParrot Manager repo clone.
     pause
     exit /b 1
@@ -59,21 +67,21 @@ if errorlevel 1 (
     echo.
     echo WARNING: git fetch failed -- check your network connection.
     echo Continuing with whatever local main you already have.
-    goto :run
+    goto :runold
 )
 
 echo Updating local main ^(fast-forward only -- never force resets^)...
-git merge --ff-only origin/main
-if errorlevel 1 (
-    echo.
-    echo ERROR: main could not be fast-forwarded to origin/main.
-    echo This usually means local main has commits origin doesn't have,
-    echo or origin/main moved in a way that isn't a simple fast-forward.
-    echo Resolve this manually ^(git status, git log^) before re-running --
-    echo this launcher will not force-reset or discard anything for you.
-    pause
-    exit /b 1
-)
+rem The merge can replace this very file, and cmd reads a batch file while it runs it. So the jump to :run is on the
+rem same line as the merge: nothing is read from the old file position afterwards.
+git merge --ff-only origin/main && goto :run
+echo.
+echo ERROR: main could not be fast-forwarded to origin/main.
+echo This usually means local main has commits origin doesn't have,
+echo or origin/main moved in a way that isn't a simple fast-forward.
+echo Resolve this manually ^(git status, git log^) before re-running --
+echo this launcher will not force-reset or discard anything for you.
+pause
+exit /b 1
 
 :run
 echo.
@@ -81,9 +89,24 @@ echo ===============================================================
 echo  main is up to date. Running TeknoParrot-Manager.ps1
 echo ===============================================================
 echo.
+goto :launch
+
+:runold
+echo.
+echo ===============================================================
+echo  Could not check for updates. This may NOT be the newest copy.
+echo  Running TeknoParrot-Manager.ps1 from what you already have.
+echo ===============================================================
+echo.
+
+:launch
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0TeknoParrot-Manager.ps1" %*
-if %errorlevel% neq 0 (
+set "TPM_EXIT=%errorlevel%"
+if not "%TPM_EXIT%"=="0" (
     echo.
-    echo Script exited with an error. Check TeknoParrot-Manager.log for details.
+    echo Script exited with an error. Read the message above this line.
+    echo The log is TeknoParrot-Manager.log, in the TeknoParrotManager\Logs folder inside your TeknoParrot folder.
+    echo If that folder is not set up yet, the log is next to this launcher.
 )
 pause
+exit /b %TPM_EXIT%

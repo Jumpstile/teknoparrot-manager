@@ -26,7 +26,10 @@ function ConvertTo-TPMWin32ArgumentV1 {
 function ConvertTo-TPMSafeTechnicalTextV1 {
     param([AllowNull()][string]$Text)
     if($null-eq$Text){return ''}
-    $withoutAnsi=[regex]::Replace($Text,"`e(?:\[[0-?]*[ -/]*[@-~]|\][^`a]*(?:`a|`e\\))",'')
+    # Windows PowerShell 5.1 has no `e escape (it would drop the backtick and match the letter e), so ESC and BEL are built from character codes.
+    $esc=[regex]::Escape([string][char]27)
+    $bel=[regex]::Escape([string][char]7)
+    $withoutAnsi=[regex]::Replace($Text,($esc+'(?:\[[0-?]*[ -/]*[@-~]|\][^'+$bel+']*(?:'+$bel+'|'+$esc+'\\))'),'')
     $builder=New-Object Text.StringBuilder
     foreach($character in $withoutAnsi.ToCharArray()){
         $code=[int][char]$character
@@ -134,9 +137,20 @@ function Write-TPMSafeTechnicalFileV1 {
     # circumstance, including this failure path.
     param([Parameter(Mandatory=$true)][string]$Path)
     if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return}
-    $raw=Invoke-TPMSafeFileRetryV1 -Operation 'read-technical-log' -TargetIdentity $Path -Action { [IO.File]::ReadAllText($Path) }
+    # The child wrote its text in the console code page (not UTF-8), so a folder name with an accent or other non-ASCII letter must be read that way.
+    $raw=Invoke-TPMSafeFileRetryV1 -Operation 'read-technical-log' -TargetIdentity $Path -Action { [IO.File]::ReadAllText($Path,[Console]::OutputEncoding) }
     $safe=ConvertTo-TPMSafeTechnicalTextV1 -Text $raw
     [void](Invoke-TPMSafeFileRetryV1 -Operation 'write-technical-log' -TargetIdentity $Path -Action { [IO.File]::WriteAllText($Path,$safe,(New-Object Text.UTF8Encoding $false)) })
+}
+
+function Get-TPMTrimmedFullPathV1 {
+    # Full path without a trailing separator, except that a drive or share root keeps its own ("C:\" stays "C:\", never the
+    # drive-relative "C:"), so a root one level above a harness folder still compares and walks correctly.
+    param([Parameter(Mandatory=$true)][string]$Path)
+    $full=[IO.Path]::GetFullPath($Path)
+    $pathRoot=[IO.Path]::GetPathRoot($full)
+    if($full.Length-le$pathRoot.Length){return $pathRoot}
+    return $full.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
 }
 
 function Get-TPMPathComponentsV1 {
@@ -149,7 +163,8 @@ function Get-TPMPathComponentsV1 {
     # as being "under" "C:\Owned").
     param([Parameter(Mandatory=$true)][string]$FullPath)
     $trimmed=$FullPath.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
-    return @($trimmed-split'[\\/]'|Where-Object{$_.Length-gt0})
+    # The leading comma keeps a one-component path (a drive root) an array, so .Count works under strict mode.
+    return ,@($trimmed-split'[\\/]'|Where-Object{$_.Length-gt0})
 }
 
 function Test-TPMPathIsContainedV1 {
@@ -188,13 +203,16 @@ function Assert-TPMNoReparseInChainV1 {
     # chain -- including any missing intermediate ancestor -- is rejected;
     # only the single authorized leaf may be absent.
     param([Parameter(Mandatory=$true)][string]$Root,[Parameter(Mandatory=$true)][string]$Target,[switch]$AllowMissingLeaf)
-    $rootFull=[IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
-    $targetFull=[IO.Path]::GetFullPath($Target).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    $rootFull=Get-TPMTrimmedFullPathV1 -Path $Root
+    $targetFull=Get-TPMTrimmedFullPathV1 -Path $Target
     if(-not(Test-TPMPathIsContainedV1 -Root $rootFull -Target $targetFull)){throw "PROCESS_PATH_OUTSIDE_OWNED_ROOT: $targetFull is not a component-boundary descendant of owned root $rootFull"}
     $rootParts=Get-TPMPathComponentsV1 -FullPath $rootFull
     $targetParts=Get-TPMPathComponentsV1 -FullPath $targetFull
-    $current=$targetParts[0]+[IO.Path]::DirectorySeparatorChar
-    for($i=1;$i-lt$targetParts.Count;$i++){
+    # A UNC path's first two components (server, share) are its root; a drive path's first component is the drive.
+    $pathRoot=[IO.Path]::GetPathRoot($targetFull)
+    $current=$pathRoot
+    $firstChild=if($pathRoot.StartsWith('\\')){2}else{1}
+    for($i=$firstChild;$i-lt$targetParts.Count;$i++){
         $current=Join-Path $current $targetParts[$i]
         if($i-lt($rootParts.Count-1)){continue}
         $isLeaf=($i-eq($targetParts.Count-1))
@@ -262,11 +280,11 @@ function Assert-TPMOwnedDirectoryV1 {
     # If a substitution IS observed at any validation point, this fails
     # closed (throws) rather than proceeding.
     param([Parameter(Mandatory=$true)][string]$Root,[Parameter(Mandatory=$true)][string]$Path,[switch]$CreateIfMissing)
-    $rootFull=[IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    $rootFull=Get-TPMTrimmedFullPathV1 -Path $Root
     if(-not(Test-Path -LiteralPath $rootFull -PathType Container)){throw "PROCESS_DIRECTORY_INVALID: trusted root does not exist: $rootFull"}
     $rootItem=Get-Item -LiteralPath $rootFull -Force
     if(($rootItem.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){throw "PROCESS_DIRECTORY_INVALID: reparse point rejected at trusted root: $rootFull"}
-    $full=[IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    $full=Get-TPMTrimmedFullPathV1 -Path $Path
     if(-not[IO.Path]::GetPathRoot($rootFull).Equals([IO.Path]::GetPathRoot($full),[StringComparison]::OrdinalIgnoreCase)){throw "PROCESS_PATH_OUTSIDE_OWNED_ROOT: $full is on a different drive/root than owned root $rootFull"}
     Assert-TPMNoReparseInChainV1 -Root $rootFull -Target $full -AllowMissingLeaf:$CreateIfMissing
     if(-not(Test-Path -LiteralPath $full -PathType Container)){
@@ -292,8 +310,8 @@ function New-TPMOwnedDirectoryChainV1 {
     # underlying Assert-TPMOwnedDirectoryV1 call for that level. Returns
     # the fully validated final path.
     param([Parameter(Mandatory=$true)][string]$Root,[Parameter(Mandatory=$true)][string]$Path)
-    $rootFull=[IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
-    $targetFull=[IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    $rootFull=Get-TPMTrimmedFullPathV1 -Path $Root
+    $targetFull=Get-TPMTrimmedFullPathV1 -Path $Path
     if(-not(Test-TPMPathIsContainedV1 -Root $rootFull -Target $targetFull)){throw "PROCESS_PATH_OUTSIDE_OWNED_ROOT: $targetFull is not a component-boundary descendant of owned root $rootFull"}
     $rootParts=Get-TPMPathComponentsV1 -FullPath $rootFull
     $targetParts=Get-TPMPathComponentsV1 -FullPath $targetFull
@@ -336,9 +354,26 @@ function Invoke-TPMCertificationGitReadV1 {
     $repo=[IO.Path]::GetFullPath($RepositoryPath).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
     $scoped=@('-c',("safe.directory={0}"-f$repo),'-C',$repo)
     $commandArguments=@($scoped)+@($Arguments)
-    $output=@(& git @commandArguments 2>$null)
-    $exitCode=$LASTEXITCODE
-    return [pscustomobject]@{Output=$output;ExitCode=$exitCode}
+    $oldErrorActionPreference = $ErrorActionPreference
+    $stderrPath = [IO.Path]::GetTempFileName()
+    $hasNativeErrorPreference = Test-Path variable:PSNativeCommandUseErrorActionPreference
+    $oldNativeErrorPreference = if ($hasNativeErrorPreference) { $PSNativeCommandUseErrorActionPreference } else { $null }
+    try {
+        $ErrorActionPreference = 'Continue'
+        if ($hasNativeErrorPreference) { $PSNativeCommandUseErrorActionPreference = $false }
+        $output = @(& git @commandArguments 2> $stderrPath)
+        $exitCode = $LASTEXITCODE
+        $errorOutput = if (Test-Path -LiteralPath $stderrPath) {
+            @(Get-Content -LiteralPath $stderrPath -ErrorAction SilentlyContinue | ForEach-Object { [string]$_ })
+        } else {
+            @()
+        }
+    } finally {
+        if ($hasNativeErrorPreference) { $PSNativeCommandUseErrorActionPreference = $oldNativeErrorPreference }
+        $ErrorActionPreference = $oldErrorActionPreference
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+    return [pscustomobject]@{Output=$output;ErrorOutput=$errorOutput;ExitCode=$exitCode}
 }
 
 function Get-TPMCertificationGitIdentitySnapshotV1 {
@@ -477,6 +512,81 @@ function Exit-TPMCertificationRepositoryLockV1 {
     try{if([bool]$Lock.Acquired){$Lock.Mutex.ReleaseMutex()}}finally{$Lock.Mutex.Dispose()}
 }
 
+function Get-TPMProcessTreeIdsV1 {
+    # Pure helper: given a process snapshot (ProcessId, ParentProcessId, CreationDate), returns the ids of the live processes that belong
+    # to the tree of -RootProcessId (and of any -KnownProcessIds seen on an earlier pass), children before parents. A child counts only
+    # when it was created at or after its parent, so a reused parent id cannot pull in unrelated processes. The caller's own process,
+    # id 0 and id 4 are never returned.
+    param(
+        [Parameter(Mandatory=$true)][int]$RootProcessId,
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$Snapshot,
+        [int[]]$KnownProcessIds=@(),
+        [Nullable[datetime]]$RootStartTime=$null
+    )
+    $byId=@{}
+    $children=@{}
+    foreach($entry in @($Snapshot)){
+        $byId[[int]$entry.ProcessId]=$entry
+        $parentId=[int]$entry.ParentProcessId
+        if(-not$children.ContainsKey($parentId)){$children[$parentId]=New-Object Collections.Generic.List[object]}
+        $children[$parentId].Add($entry)
+    }
+    $discovered=New-Object Collections.Generic.List[int]
+    $visited=New-Object Collections.Generic.HashSet[int]
+    foreach($seed in @(@($RootProcessId)+@($KnownProcessIds))){if($visited.Add([int]$seed)){$discovered.Add([int]$seed)}}
+    for($index=0;$index-lt$discovered.Count;$index++){
+        $parentId=$discovered[$index]
+        if(-not$children.ContainsKey($parentId)){continue}
+        $parentEntry=if($byId.ContainsKey($parentId)){$byId[$parentId]}else{$null}
+        foreach($child in $children[$parentId]){
+            if($null-eq$parentEntry-and$parentId-eq$RootProcessId-and$null-ne$RootStartTime-and$null-ne$child.CreationDate-and$child.CreationDate-lt$RootStartTime){continue}
+            if($null-ne$parentEntry-and$null-ne$parentEntry.CreationDate-and$null-ne$child.CreationDate-and$child.CreationDate-lt$parentEntry.CreationDate){continue}
+            if($visited.Add([int]$child.ProcessId)){$discovered.Add([int]$child.ProcessId)}
+        }
+    }
+    $discovered.Reverse()
+    return @($discovered.ToArray()|Where-Object{$byId.ContainsKey($_)-and$_-ne$PID-and$_-gt4})
+}
+
+function Get-TPMProcessSnapshotV1 {
+    # A foreach statement, not a ForEach-Object script block: InjectionHunter's ForeachObjectInjection rule matches "Process" anywhere in
+    # the script block text (here ProcessId) and then reads the next command element as a dynamic member name.
+    $snapshot=New-Object Collections.Generic.List[object]
+    foreach($cimProcess in @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)){
+        [void]$snapshot.Add([pscustomobject]@{ProcessId=[int]$cimProcess.ProcessId;ParentProcessId=[int]$cimProcess.ParentProcessId;CreationDate=$cimProcess.CreationDate})
+    }
+    return @($snapshot.ToArray())
+}
+
+function Stop-TPMProcessTreeV1 {
+    # Stops -ProcessId and every process it started (children first), then checks again for late children until none are left or the
+    # wait runs out. Works in Windows PowerShell 5.1 and PowerShell 7. Returns $true only when nothing from the tree is still running;
+    # $false when a process could not be stopped or the snapshot could not be read (the caller must treat that as unconfirmed).
+    # -RootStartTime (the root's own start time, from the caller) lets the children of a root that already exited be found without
+    # trusting a reused id: only processes created after that start time count. Without it, a root that is already gone is left alone.
+    param([Parameter(Mandatory=$true)][int]$ProcessId,[int]$WaitMilliseconds=10000,[Nullable[datetime]]$RootStartTime=$null)
+    $known=New-Object Collections.Generic.HashSet[int]
+    $deadline=[DateTime]::UtcNow.AddMilliseconds($WaitMilliseconds)
+    $firstPass=$true
+    while($true){
+        try{$snapshot=@(Get-TPMProcessSnapshotV1)}catch{[Diagnostics.Debug]::WriteLine($_.Exception.Message);return $false}
+        $rootAlive=@($snapshot|Where-Object{[int]$_.ProcessId-eq$ProcessId}).Count-gt0
+        if($firstPass-and-not$rootAlive-and$null-eq$RootStartTime){return $true}
+        $firstPass=$false
+        $targets=@(Get-TPMProcessTreeIdsV1 -RootProcessId $ProcessId -Snapshot $snapshot -KnownProcessIds @($known) -RootStartTime $RootStartTime)
+        if($targets.Count-eq0){return $true}
+        foreach($id in $targets){
+            [void]$known.Add($id)
+            try{Stop-Process -Id $id -Force -ErrorAction Stop}catch{[Diagnostics.Debug]::WriteLine($_.Exception.Message)}
+        }
+        if([DateTime]::UtcNow-ge$deadline){
+            try{$snapshot=@(Get-TPMProcessSnapshotV1)}catch{return $false}
+            return (@(Get-TPMProcessTreeIdsV1 -RootProcessId $ProcessId -Snapshot $snapshot -KnownProcessIds @($known) -RootStartTime $RootStartTime).Count-eq0)
+        }
+        Start-Sleep -Milliseconds 200
+    }
+}
+
 function Invoke-TPMIsolatedProcessV1 {
     param(
         [Parameter(Mandatory=$true)][string]$FilePath,
@@ -509,8 +619,10 @@ function Invoke-TPMIsolatedProcessV1 {
     $process=$null
     $timedOut=$false
     $terminationConfirmed=$false
+    $treeStopped=$true
     $exitCode=$null
     $processId=$null
+    $rootStartTime=$null
     $statusOffset=0L
     $lastHeartbeat=[DateTime]::UtcNow
     try{
@@ -518,15 +630,16 @@ function Invoke-TPMIsolatedProcessV1 {
         if($Environment){
             foreach($key in $Environment.Keys){
                 $savedEnvironment[$key]=[Environment]::GetEnvironmentVariable([string]$key,'Process')
-                [Environment]::SetEnvironmentVariable([string]$key,[string]$Environment[$key],'Process')
+                [Environment]::SetEnvironmentVariable([string]$key,$(if([string]$Environment[$key] -ceq ''){[NullString]::Value}else{[string]$Environment[$key]}),'Process')
             }
         }
         try{
             $process=Start-Process -FilePath $FilePath -ArgumentList $quoted -WorkingDirectory $workingRoot -NoNewWindow -PassThru -RedirectStandardInput $stdinPath -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
             [void]$process.Handle
             $processId=$process.Id
+            try{$rootStartTime=$process.StartTime}catch{$rootStartTime=$null}
         }finally{
-            if($Environment){foreach($key in $Environment.Keys){[Environment]::SetEnvironmentVariable([string]$key,$savedEnvironment[$key],'Process')}}
+            if($Environment){foreach($key in $Environment.Keys){[Environment]::SetEnvironmentVariable([string]$key,$(if($null-eq$savedEnvironment[$key]){[NullString]::Value}else{[string]$savedEnvironment[$key]}),'Process')}}
         }
         while(-not$process.HasExited){
             if($RelayOperatorStatus-and-not[string]::IsNullOrWhiteSpace($OperatorStatusPath)-and(Test-Path -LiteralPath $OperatorStatusPath)){
@@ -537,7 +650,7 @@ function Invoke-TPMIsolatedProcessV1 {
                     try{
                         while(-not$reader.EndOfStream){
                             $line=$reader.ReadLine()
-                            if($line-match '^(\[[1-8]/8\] |Pester totals:|FINAL STATUS:|Reason:|Total elapsed:|Report:|Technical log:)'){Write-Host $line}
+                            if($line-match '^(\[\d+/\d+\] |Pester totals:|FINAL STATUS:|Reason:|Total elapsed:|Report:|Technical log:)'){Write-Host $line}
                         }
                         $statusOffset=$stream.Position
                     }finally{$reader.Dispose()}
@@ -547,27 +660,38 @@ function Invoke-TPMIsolatedProcessV1 {
                 $lastHeartbeat=[DateTime]::UtcNow
                 Write-Host ("Certification is still running - {0:hh\:mm\:ss} elapsed" -f ([DateTime]::UtcNow-$started))
             }
-            if($TimeoutSeconds-gt0-and([DateTime]::UtcNow-$started).TotalSeconds-ge$TimeoutSeconds){$timedOut=$true;break}
+            if($TimeoutSeconds-gt0-and([DateTime]::UtcNow-$started).TotalSeconds-ge$TimeoutSeconds){if(-not$process.HasExited){$timedOut=$true};break}
             Start-Sleep -Milliseconds 250
         }
         if($timedOut-and-not$process.HasExited){
-            try{Stop-Process -Id $process.Id -Force -ErrorAction Stop}catch{[Diagnostics.Debug]::WriteLine($_.Exception.Message)}
+            $treeStopped=Stop-TPMProcessTreeV1 -ProcessId $process.Id -RootStartTime $rootStartTime
             try{[void]$process.WaitForExit(5000)}catch{[Diagnostics.Debug]::WriteLine($_.Exception.Message)}
         }
         $process.Refresh()
-        $terminationConfirmed=$process.HasExited
-        if($terminationConfirmed){$exitCode=$process.ExitCode}
+        $terminationConfirmed=($process.HasExited-and$treeStopped)
+        if($process.HasExited){$exitCode=$process.ExitCode}
     }finally{
-        if($null-ne$process-and-not$process.HasExited){
-            try{Stop-Process -Id $process.Id -Force -ErrorAction Stop}catch{[Diagnostics.Debug]::WriteLine($_.Exception.Message)}
+        if($null-ne$process-and-not$terminationConfirmed-and-not$process.HasExited){
+            $treeStopped=Stop-TPMProcessTreeV1 -ProcessId $process.Id -RootStartTime $rootStartTime
             try{[void]$process.WaitForExit(5000)}catch{[Diagnostics.Debug]::WriteLine($_.Exception.Message)}
-            $terminationConfirmed=$process.HasExited
+            $terminationConfirmed=($process.HasExited-and$treeStopped)
         }
         if($null-ne$process){$process.Dispose()}
     }
-    if(-not$terminationConfirmed){throw "PROCESS_TERMINATION_UNCONFIRMED: $Identity; logs preserved at $LogDirectory"}
-    Write-TPMSafeTechnicalFileV1 -Path $stdoutPath
-    Write-TPMSafeTechnicalFileV1 -Path $stderrPath
+    # Logs are cleaned before any failure is raised: a process that could not be confirmed stopped is the likeliest to have written raw
+    # control bytes, and the operator is told to read these files.
+    $sanitizeFailure=$null
+    try{
+        Write-TPMSafeTechnicalFileV1 -Path $stdoutPath
+        Write-TPMSafeTechnicalFileV1 -Path $stderrPath
+    }catch{
+        if($terminationConfirmed){throw}
+        $sanitizeFailure=$_.Exception.Message
+    }
+    if(-not$terminationConfirmed){
+        $note=if($sanitizeFailure){"; the logs could not be cleaned of control characters ($sanitizeFailure), do not display them as they are"}else{''}
+        throw "PROCESS_TERMINATION_UNCONFIRMED: $Identity; logs preserved at $LogDirectory$note"
+    }
     $ended=[DateTime]::UtcNow
     $metadata=[ordered]@{
         SchemaVersion=1;Identity=$Identity;FilePath=[IO.Path]::GetFileName($FilePath);ArgumentCount=@($ArgumentList).Count
@@ -658,4 +782,4 @@ function Read-TPMPesterResultV1 {
         Stop-TPMPesterSchemaV1 'unexpected validation failure'
     }
 }
-Export-ModuleMember -Function ConvertTo-TPMWin32ArgumentV1,ConvertTo-TPMSafeTechnicalTextV1,Write-TPMSafeTechnicalFileV1,Invoke-TPMIsolatedProcessV1,Read-TPMPesterResultV1,Test-TPMTransientIOHResultV1,Invoke-TPMSafeFileRetryV1,New-TPMSanitizationExhaustedExceptionV1,Assert-TPMOwnedDirectoryV1,New-TPMOwnedDirectoryChainV1,New-TPMCreateNewFileV1,Test-TPMPathIsContainedV1,Assert-TPMNoReparseInChainV1,Get-TPMPathComponentsV1,Get-TPMCertificationGitIdentitySnapshotV1,New-TPMCertificationGitIdentityV1,Get-TPMCertificationRepositoryLockNameV1,Enter-TPMCertificationRepositoryLockV1,Exit-TPMCertificationRepositoryLockV1
+Export-ModuleMember -Function ConvertTo-TPMWin32ArgumentV1,ConvertTo-TPMSafeTechnicalTextV1,Write-TPMSafeTechnicalFileV1,Invoke-TPMIsolatedProcessV1,Read-TPMPesterResultV1,Test-TPMTransientIOHResultV1,Invoke-TPMSafeFileRetryV1,New-TPMSanitizationExhaustedExceptionV1,Assert-TPMOwnedDirectoryV1,New-TPMOwnedDirectoryChainV1,New-TPMCreateNewFileV1,Test-TPMPathIsContainedV1,Assert-TPMNoReparseInChainV1,Get-TPMPathComponentsV1,Get-TPMCertificationGitIdentitySnapshotV1,New-TPMCertificationGitIdentityV1,Get-TPMCertificationRepositoryLockNameV1,Enter-TPMCertificationRepositoryLockV1,Exit-TPMCertificationRepositoryLockV1,Get-TPMProcessTreeIdsV1,Stop-TPMProcessTreeV1

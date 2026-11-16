@@ -1,12 +1,15 @@
 param(
     [Parameter(Mandatory=$true)][string]$RepositoryPath,
     [Parameter(Mandatory=$true)][string]$ResultPath,
-    [Parameter(Mandatory=$true)][string]$NUnitPath
+    [Parameter(Mandatory=$true)][string]$NUnitPath,
+    [ValidateSet('Summary','Detailed','Diagnostic')][string]$VerbosityLevel='Summary'
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 try{
+    # A report file that is already there is refused before the suite runs, not after a run of tens of minutes.
+    if(Test-Path -LiteralPath $ResultPath){throw "The Pester result file already exists: $ResultPath. Nothing was run. Use a new report folder."}
     # Issue #154 real-hardware certification finding: an open-ended
     # -MinimumVersion 5.0 let this harness silently pick up whatever the
     # newest installed Pester happened to be. A real certification run
@@ -29,7 +32,8 @@ try{
     $configuration=New-PesterConfiguration
     $configuration.Run.Path=Join-Path $RepositoryPath 'Tests'
     $configuration.Run.PassThru=$true
-    $configuration.Output.Verbosity='Detailed'
+    # Diagnostic shows Pester's full trace (to find a stuck test); Summary and Detailed keep the per-test lines.
+    $configuration.Output.Verbosity=if($VerbosityLevel-ceq'Diagnostic'){'Diagnostic'}else{'Detailed'}
     $configuration.Output.CIFormat='None'
     $configuration.Output.RenderMode='Plaintext'
     $configuration.Output.StackTraceVerbosity='Filtered'
@@ -80,7 +84,6 @@ try{
         }
         Engine=("Pester {0} / pwsh {1}"-f(Get-Module Pester).Version,$PSVersionTable.PSVersion)
     }
-    if(Test-Path -LiteralPath $ResultPath){throw 'PESTER_RESULT_DESTINATION_EXISTS'}
     $temp=$ResultPath+'.'+[guid]::NewGuid().ToString('N')+'.partial'
     $stream=New-Object IO.FileStream($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
     try{$bytes=(New-Object Text.UTF8Encoding $false).GetBytes(($contract|ConvertTo-Json -Depth 8));$stream.Write($bytes,0,$bytes.Length)}finally{$stream.Dispose()}

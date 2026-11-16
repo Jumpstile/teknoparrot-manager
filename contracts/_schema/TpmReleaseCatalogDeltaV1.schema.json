@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Jumpstile/teknoparrot-manager/contracts/_schema/TpmReleaseCatalogDeltaV1.schema.json",
+  "title": "TPM Release Catalog Delta V1",
+  "description": "Machine-generated old/current profile identity delta for the immutable current-release snapshot.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["HistoricalSourceCommit", "HistoricalProfileCount", "CurrentProfileCount", "AddedProfileCount", "RemovedProfileCount", "SemanticChangedProfileCount", "SemanticUnchangedProfileCount", "RawByteDifferentProfileCount", "FormattingOnlyChangedProfileCount", "Added", "Removed", "Changed", "Unchanged"],
+  "properties": {
+    "HistoricalSourceCommit": { "const": "5880e019016c5c3a0576e97a6c2a7f14bf54e3d1" },
+    "HistoricalProfileCount": { "const": 695 },
+    "CurrentProfileCount": { "const": 925 },
+    "AddedProfileCount": { "const": 230 },
+    "RemovedProfileCount": { "const": 0 },
+    "SemanticChangedProfileCount": { "const": 38 },
+    "SemanticUnchangedProfileCount": { "const": 657 },
+    "RawByteDifferentProfileCount": { "const": 681 },
+    "FormattingOnlyChangedProfileCount": { "const": 643 },
+    "Added": { "type": "array", "minItems": 230, "maxItems": 230, "items": { "type": "string", "minLength": 1 } },
+    "Removed": { "const": [] },
+    "Changed": { "type": "array", "minItems": 38, "maxItems": 38, "items": { "type": "string", "minLength": 1 } },
+    "Unchanged": { "type": "array", "minItems": 657, "maxItems": 657, "items": { "type": "string", "minLength": 1 } }
+  }
+}

@@ -9,11 +9,7 @@ Set-StrictMode -Version 2.0
 # Assert-TPMEvidenceRecordV1: Identifier, Status, EvidenceType, Required,
 # Path, CaptureScope, FileSha256, Width, Height, FailureCode, FailureMessage).
 #
-# This module deliberately does not import or call
-# TPMCertification.Shadow.psm1 -- it is a fresh, independent implementation
-# against the authoritative schema Authority.psm1 defines, not a reuse of
-# Shadow's Phase 2 shadow-only adapter. Its public surface is exactly one
-# function.
+# Its public surface is exactly one function.
 
 function New-TPMProductionEvidenceRecordV1 {
     param(

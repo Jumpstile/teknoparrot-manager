@@ -70,7 +70,7 @@ text is refreshed, use this exact concise update rather than adding a backlink:
 
 > TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot
 > arcade libraries, including game registration, controls, lightgun crosshairs,
-> ReShade/dgVoodoo2 compatibility setup, and LaunchBox or HyperSpin exports.
+> ReShade/dgVoodoo2 compatibility setup, and LaunchBox integration.
 > Canonical project: https://github.com/Jumpstile/teknoparrot-manager
 > Current downloads: https://github.com/Jumpstile/teknoparrot-manager/releases
 
@@ -114,3 +114,14 @@ GitHub-search checks all passed at this timestamp. Google/Bing indexing and
 ranking remain asynchronous observations; repeat the web-search observation
 after indexing time has elapsed, and do not treat a delayed result as a code
 failure or claim a ranking guarantee.
+
+## Current TPM 1.0 scope note — 2026-10-26
+
+The baseline and live-state records above are historical evidence from
+2026-08-16, not the current product contract. The previously unposted external
+reference draft above now names only supported core features. HyperSpin is
+excluded from TPM 1.0 core, UI, configuration, metadata, issue categories, and
+release gating. Any standalone optional plugin is deferred until after TPM 1.0.
+
+This source-only update does not alter or verify live GitHub settings.
+

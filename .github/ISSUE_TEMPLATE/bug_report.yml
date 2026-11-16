@@ -66,7 +66,7 @@ body:
         - Thumbnails (component:thumbnails)
         - Self-update (component:updater)
         - PostgreSQL or another installer (component:installer)
-        - LaunchBox, HyperSpin, or RetroBat export (component:export)
+        - LaunchBox export (component:export)
         - Network, downloads, or connectivity (component:networking)
         - Certification or diagnostics (component:certification)
         - Testing or test tooling (component:testing)

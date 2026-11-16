@@ -19,6 +19,228 @@
 # the same reason, since New-TpmUpdateBackup's Copy-Item has the same shape.)
 $ErrorActionPreference = 'Stop'
 
+# No-progress window for update downloads, kept equal to the 120-second BITS
+# guard in TeknoParrot-Manager.ps1. A stalled transfer is abandoned after this
+# many seconds without new bytes so the next download tier can run.
+$script:TpmDownloadNoProgressTimeoutSeconds = 120
+
+function Get-TpmIdentityWriteTargetInfo {
+    param(
+        [Parameter(Mandatory)]
+        [System.Management.Automation.Language.ExpressionAst]$Target,
+        [bool]$WasWrapped = $false,
+        [bool]$IsMemberOrIndex = $false,
+        [bool]$IsDestructuring = $false
+    )
+
+    $pendingTargets = [System.Collections.Stack]::new()
+    $targetInfos = [System.Collections.ArrayList]::new()
+    $pendingTargets.Push([pscustomobject]@{
+            Target = $Target
+            WasWrapped = $WasWrapped
+            IsMemberOrIndex = $IsMemberOrIndex
+            IsDestructuring = $IsDestructuring
+        })
+    while ($pendingTargets.Count -gt 0) {
+        $pendingTarget = $pendingTargets.Pop()
+        $currentTarget = $pendingTarget.Target
+        $wasWrapped = [bool]$pendingTarget.WasWrapped
+        $isMemberOrIndex = [bool]$pendingTarget.IsMemberOrIndex
+        $isDestructuring = [bool]$pendingTarget.IsDestructuring
+        while ($null -ne $currentTarget) {
+            if ($currentTarget -is [System.Management.Automation.Language.AttributedExpressionAst]) {
+                $currentTarget = $currentTarget.Child
+                $wasWrapped = $true
+                continue
+            }
+            if ($currentTarget -is [System.Management.Automation.Language.ParenExpressionAst]) {
+                $pipeline = $currentTarget.Pipeline
+                if ($pipeline -isnot [System.Management.Automation.Language.PipelineAst] -or
+                    $pipeline.PipelineElements.Count -ne 1 -or
+                    $pipeline.PipelineElements[0] -isnot [System.Management.Automation.Language.CommandExpressionAst]) {
+                    break
+                }
+                $currentTarget = $pipeline.PipelineElements[0].Expression
+                $wasWrapped = $true
+                continue
+            }
+            if ($currentTarget -is [System.Management.Automation.Language.ArrayLiteralAst]) {
+                for ($index = $currentTarget.Elements.Count - 1; $index -ge 0; $index--) {
+                    $pendingTargets.Push([pscustomobject]@{
+                            Target = $currentTarget.Elements[$index]
+                            WasWrapped = $wasWrapped
+                            IsMemberOrIndex = $isMemberOrIndex
+                            IsDestructuring = $true
+                        })
+                }
+                break
+            }
+            if ($currentTarget -is [System.Management.Automation.Language.MemberExpressionAst]) {
+                $currentTarget = $currentTarget.Expression
+                $isMemberOrIndex = $true
+                continue
+            }
+            if ($currentTarget -is [System.Management.Automation.Language.IndexExpressionAst]) {
+                $currentTarget = $currentTarget.Target
+                $isMemberOrIndex = $true
+                continue
+            }
+            if ($currentTarget -is [System.Management.Automation.Language.VariableExpressionAst]) {
+                [void]$targetInfos.Add([pscustomobject]@{
+                        Variable = $currentTarget
+                        WasWrapped = $wasWrapped
+                        IsMemberOrIndex = $isMemberOrIndex
+                        IsDestructuring = $isDestructuring
+                    })
+            }
+            break
+        }
+    }
+    return $targetInfos.ToArray()
+}
+
+function Get-TpmIdentityTargetName {
+    param([AllowEmptyString()][string]$Path)
+
+    $scopeSeparator = $Path.LastIndexOf(':')
+    if ($scopeSeparator -ge 0) {
+        return $Path.Substring($scopeSeparator + 1)
+    }
+    return $Path
+}
+
+function Get-TpmScriptVersionIdentityFromContent {
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$Content)
+
+    # Parse only. Candidate content is never executed to determine its identity.
+    $tokens = $null
+    $parseErrors = $null
+    $scriptAst = [System.Management.Automation.Language.Parser]::ParseInput($Content, [ref]$tokens, [ref]$parseErrors)
+    if (@($parseErrors).Count -gt 0) {
+        throw "Candidate script cannot be parsed to verify its version identity."
+    }
+
+    $assignmentStatements = @($scriptAst.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.AssignmentStatementAst]
+            }, $true))
+    $identityAssignments = @(
+        foreach ($assignment in $assignmentStatements) {
+            foreach ($target in $assignment.GetAssignmentTargets()) {
+                $targetInfos = @(Get-TpmIdentityWriteTargetInfo -Target $target)
+                foreach ($targetInfo in $targetInfos) {
+                    $targetVariable = $targetInfo.Variable
+                    $targetPath = [string]$targetVariable.VariablePath.UserPath
+                    $targetName = Get-TpmIdentityTargetName -Path $targetPath
+                    if ($targetName -ieq 'ScriptVersion' -or $targetName -ieq 'ReleaseCandidateLabel') {
+                        if ($assignment.Left -isnot [System.Management.Automation.Language.VariableExpressionAst] -or
+                            $targetInfo.WasWrapped -or
+                            $targetInfo.IsMemberOrIndex -or
+                            $targetInfo.IsDestructuring) {
+                            throw "Candidate script identity assignments must target a bare variable, not a wrapper, destructuring, member, or index."
+                        }
+                        [pscustomobject]@{
+                            Assignment = $assignment
+                            Name = $targetName
+                            Path = $targetPath
+                        }
+                    }
+                }
+            }
+        }
+    )
+
+    $identityUnaryOperators = @(
+        [System.Management.Automation.Language.TokenKind]::PlusPlus
+        [System.Management.Automation.Language.TokenKind]::PostfixPlusPlus
+        [System.Management.Automation.Language.TokenKind]::MinusMinus
+        [System.Management.Automation.Language.TokenKind]::PostfixMinusMinus
+    )
+    $unaryExpressions = @($scriptAst.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.UnaryExpressionAst]
+            }, $true))
+    foreach ($unaryExpression in $unaryExpressions) {
+        if ($identityUnaryOperators -notcontains $unaryExpression.TokenKind) {
+            continue
+        }
+        foreach ($targetInfo in @(Get-TpmIdentityWriteTargetInfo -Target $unaryExpression.Child)) {
+            $targetPath = [string]$targetInfo.Variable.VariablePath.UserPath
+            $targetName = Get-TpmIdentityTargetName -Path $targetPath
+            if ($targetName -ieq 'ScriptVersion' -or $targetName -ieq 'ReleaseCandidateLabel') {
+                throw "Candidate script identity variables cannot be incremented or decremented."
+            }
+        }
+    }
+
+    foreach ($forEachStatement in @($scriptAst.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.ForEachStatementAst]
+            }, $true))) {
+        $targetPath = [string]$forEachStatement.Variable.VariablePath.UserPath
+        $targetName = Get-TpmIdentityTargetName -Path $targetPath
+        if ($targetName -ieq 'ScriptVersion' -or $targetName -ieq 'ReleaseCandidateLabel') {
+            throw "Candidate script identity variables cannot be foreach loop variables."
+        }
+    }
+
+    if ($null -ne $scriptAst.ParamBlock) {
+        foreach ($parameter in $scriptAst.ParamBlock.Parameters) {
+            $targetPath = [string]$parameter.Name.VariablePath.UserPath
+            $targetName = Get-TpmIdentityTargetName -Path $targetPath
+            if ($targetName -ieq 'ScriptVersion' -or $targetName -ieq 'ReleaseCandidateLabel') {
+                throw "Candidate script identity variables cannot be root script parameters."
+            }
+        }
+    }
+
+    foreach ($dataStatement in @($scriptAst.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.DataStatementAst]
+            }, $true))) {
+        if ($null -eq $dataStatement.Variable) {
+            continue
+        }
+        $targetName = Get-TpmIdentityTargetName -Path ([string]$dataStatement.Variable)
+        if ($targetName -ieq 'ScriptVersion' -or $targetName -ieq 'ReleaseCandidateLabel') {
+            throw "Candidate script identity variables cannot be data-statement variables."
+        }
+    }
+
+    $versionAssignments = @($identityAssignments | Where-Object { $_.Name -ieq 'ScriptVersion' })
+    $labelAssignments = @($identityAssignments | Where-Object { $_.Name -ieq 'ReleaseCandidateLabel' })
+    if ($versionAssignments.Count -gt 1 -or $labelAssignments.Count -gt 1) {
+        throw "Candidate script contains duplicate version identity assignments."
+    }
+
+    foreach ($identityAssignment in $identityAssignments) {
+        $assignment = $identityAssignment.Assignment
+        if (-not [object]::ReferenceEquals($assignment.Parent, $scriptAst.EndBlock) -or
+            $identityAssignment.Path -ine $identityAssignment.Name) {
+            throw "Candidate version identity assignments must be direct, unscoped top-level declarations."
+        }
+        if ($assignment.Operator -ne [System.Management.Automation.Language.TokenKind]::Equals -or
+            $assignment.Right -isnot [System.Management.Automation.Language.CommandExpressionAst] -or
+            $assignment.Right.Expression -isnot [System.Management.Automation.Language.StringConstantExpressionAst]) {
+            throw "Candidate version identity assignments must use constant string literals."
+        }
+    }
+
+    if ($versionAssignments.Count -eq 0) {
+        return $null
+    }
+    $version = $versionAssignments[0].Assignment.Right.Expression.Value
+    $label = if ($labelAssignments.Count -eq 1) {
+        $labelAssignments[0].Assignment.Right.Expression.Value
+    } else {
+        ''
+    }
+    $identity = if ($label) { "$version-$label" } else { $version }
+    [void](Compare-TpmVersions -VersionTextA $identity -VersionTextB $identity)
+    return $identity
+}
+
 function Get-TpmLocalVersion {
     [CmdletBinding()]
     param(
@@ -30,18 +252,18 @@ function Get-TpmLocalVersion {
         throw "TeknoParrot Manager script not found: $Path"
     }
 
-    $match = Select-String -LiteralPath $Path -Pattern '^\s*\$ScriptVersion\s*=\s*"(?<version>[^"]+)"' -ErrorAction Stop | Select-Object -First 1
-    if (-not $match) {
+    # .NET resolves relative paths against the process folder, not the PowerShell location.
+    $content = [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $Path).ProviderPath)
+    $identity = Get-TpmScriptVersionIdentityFromContent -Content $content
+    if (-not $identity) {
         throw "Could not find `$ScriptVersion in $Path"
     }
-
-    return $match.Matches[0].Groups['version'].Value
+    return $identity
 }
 
 function ConvertTo-TpmVersion {
-    # Kept in lockstep with TeknoParrot-Manager.ps1's own
-    # ConvertTo-ManagerComparableVersion -- see that function's comment
-    # (issue #105) for why the "-RC#" suffix is stripped before parsing.
+# Parses the numeric base only. Release ordering must use Compare-TpmVersions
+# so RC ordinals and the final-release precedence are preserved.
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -55,6 +277,53 @@ function ConvertTo-TpmVersion {
     } catch {
         throw "Version '$VersionText' is not a valid System.Version value after normalization."
     }
+}
+function Compare-TpmVersions {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$VersionTextA,
+
+        [Parameter(Mandatory)]
+        [string]$VersionTextB
+    )
+
+    $pattern = '^(?i:v)?(?<base>[0-9]+(?:\.[0-9]+){1,3})(?:-(?i:RC)(?<candidate>[1-9][0-9]*)(?:\.(?<minor>[0-9]+))?)?$'
+    $matchA = [regex]::Match($VersionTextA.Trim(), $pattern)
+    $matchB = [regex]::Match($VersionTextB.Trim(), $pattern)
+    if (-not $matchA.Success) {
+        throw "Version '$VersionTextA' is not a supported manager version identity."
+    }
+    if (-not $matchB.Success) {
+        throw "Version '$VersionTextB' is not a supported manager version identity."
+    }
+
+    $baseA = ConvertTo-TpmVersion -VersionText $matchA.Groups['base'].Value
+    $baseB = ConvertTo-TpmVersion -VersionText $matchB.Groups['base'].Value
+    $baseComparison = $baseA.CompareTo($baseB)
+    if ($baseComparison -ne 0) {
+        return $baseComparison
+    }
+
+    $candidateA = if ($matchA.Groups['candidate'].Success) { [int64]::Parse($matchA.Groups['candidate'].Value, [System.Globalization.CultureInfo]::InvariantCulture) } else { $null }
+    $candidateB = if ($matchB.Groups['candidate'].Success) { [int64]::Parse($matchB.Groups['candidate'].Value, [System.Globalization.CultureInfo]::InvariantCulture) } else { $null }
+    $minorA = if ($matchA.Groups['minor'].Success) { [int64]::Parse($matchA.Groups['minor'].Value, [System.Globalization.CultureInfo]::InvariantCulture) } else { [int64]0 }
+    $minorB = if ($matchB.Groups['minor'].Success) { [int64]::Parse($matchB.Groups['minor'].Value, [System.Globalization.CultureInfo]::InvariantCulture) } else { [int64]0 }
+    if ($null -eq $candidateA -and $null -eq $candidateB) {
+        return 0
+    }
+    if ($null -eq $candidateA) {
+        return 1
+    }
+    if ($null -eq $candidateB) {
+        return -1
+    }
+    $candidateComparison = [int]$candidateA.CompareTo($candidateB)
+    if ($candidateComparison -ne 0) {
+        return $candidateComparison
+    }
+    # A dotted label such as RC8.1 is a later build of RC8 (no minor part counts as .0).
+    return [int]$minorA.CompareTo($minorB)
 }
 
 function Test-TpmReleaseAssetUrl {
@@ -109,7 +378,8 @@ function Invoke-GitHubJsonRequest {
     )
 
     $headers = @{ 'User-Agent' = 'TeknoParrot-Manager-Updater' }
-    return Invoke-RestMethod -Uri $Uri -Headers $headers -UseBasicParsing
+    # Same 20-second limit as the main script's own update check, so -CheckOnly cannot sit silent for minutes.
+    return Invoke-RestMethod -Uri $Uri -Headers $headers -UseBasicParsing -TimeoutSec 20
 }
 
 function Get-LatestRelease {
@@ -176,6 +446,12 @@ function Assert-TpmWritableTarget {
     }
 }
 
+function New-TpmUpdateBackupDirectoryName {
+    # Timestamp keeps backups sortable; the GUID makes every name unique so two
+    # backups taken in the same second never share or reuse a directory.
+    return ('{0}_{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), [guid]::NewGuid().ToString('N'))
+}
+
 function New-TpmUpdateBackup {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Helper is called from the updater apply path after the orchestrator has already made the user-facing confirmation decision.')]
     [CmdletBinding()]
@@ -184,16 +460,76 @@ function New-TpmUpdateBackup {
         [string]$Path
     )
 
-    $repoRoot = Split-Path -Parent $Path
-    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $backupDir = Join-Path (Join-Path $repoRoot 'UpdateBackups') $stamp
-    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Backup creation failed: source file not found: $Path"
+    }
+    # .NET file APIs resolve relative paths against the process directory, not
+    # the PowerShell location, so work with the resolved provider path.
+    $sourcePath = (Resolve-Path -LiteralPath $Path).ProviderPath
 
-    $backupPath = Join-Path $backupDir (Split-Path -Leaf $Path)
-    Copy-Item -LiteralPath $Path -Destination $backupPath -Force
+    $repoRoot = Split-Path -Parent $sourcePath
+    $backupRoot = Join-Path $repoRoot 'UpdateBackups'
+    $backupDir = Join-Path $backupRoot (New-TpmUpdateBackupDirectoryName)
+    # Existing reparse points in the backup path are refused before anything is
+    # created or copied, so a junction cannot redirect the backup outside the repo.
+    foreach ($checkPath in @($backupRoot, $backupDir)) {
+        if (Test-Path -LiteralPath $checkPath) {
+            $checkItem = Get-Item -LiteralPath $checkPath -Force
+            if ($checkItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                throw "Refusing update backup under '$checkPath': it is a reparse point."
+            }
+        }
+    }
+    # Walk every ancestor from the backup directory up to the filesystem root.
+    # Nonexistent ancestors are skipped; the walk ends at a drive root (Split-Path
+    # returns empty) or when the path stops changing.
+    $ancestor = $backupDir
+    while ($ancestor) {
+        if (Test-Path -LiteralPath $ancestor) {
+            $ancestorItem = Get-Item -LiteralPath $ancestor -Force
+            if ($ancestorItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                throw "Refusing update backup under '$ancestor': it is a reparse point."
+            }
+        }
+        $parentPath = Split-Path -Parent $ancestor
+        if (-not $parentPath -or $parentPath -eq $ancestor) {
+            break
+        }
+        $ancestor = $parentPath
+    }
+
+    # Every backup gets its own new directory. An existing directory with the
+    # generated name is a collision, never a directory to reuse or write into.
+    if (Test-Path -LiteralPath $backupDir) {
+        throw "Refusing update backup: '$backupDir' already exists. Existing backups are never reused or overwritten."
+    }
+    if (-not (Test-Path -LiteralPath $backupRoot -PathType Container)) {
+        New-Item -ItemType Directory -Path $backupRoot | Out-Null
+    }
+    [void][System.IO.Directory]::CreateDirectory($backupDir)
+    $createdDirItem = Get-Item -LiteralPath $backupDir -Force
+    if ($createdDirItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        throw "Refusing update backup under '$backupDir': it is a reparse point."
+    }
+
+    $backupPath = Join-Path $backupDir (Split-Path -Leaf $sourcePath)
+    if (Test-Path -LiteralPath $backupPath) {
+        $existingBackup = Get-Item -LiteralPath $backupPath -Force
+        if ($existingBackup.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            throw "Refusing update backup to '$backupPath': the target is a reparse point."
+        }
+        throw "Refusing update backup to '$backupPath': a file already exists there."
+    }
+    $sourceHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash
+    # Non-overwriting copy: fails instead of replacing anything at the target.
+    [System.IO.File]::Copy($sourcePath, $backupPath, $false)
 
     if (-not (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
         throw "Backup creation failed: $backupPath"
+    }
+    $backupHash = (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256).Hash
+    if ($backupHash -ne $sourceHash) {
+        throw "Backup verification failed: the SHA-256 of '$backupPath' does not match '$sourcePath'."
     }
 
     return $backupPath
@@ -212,7 +548,7 @@ function Write-TpmDownloadProgress {
 
     $activity = "Downloading $Label"
     if ($Complete) {
-        Write-Progress -Id 42 -Activity $activity -Completed
+        [Console]::Write(("`r[{0}] complete.                    `n" -f $activity))
         return
     }
 
@@ -229,9 +565,9 @@ function Write-TpmDownloadProgress {
                 $etaText = " ETA {0}" -f ([TimeSpan]::FromSeconds($remainingSeconds).ToString("mm\:ss"))
             }
         }
-        Write-Progress -Id 42 -Activity $activity -Status ("{0}: {1}%  {2}/{3} MB  {4} MB/s{5}" -f $Method, $percent, $downloadedMb, $totalMb, $mbps, $etaText) -PercentComplete $percent
+        [Console]::Write(("`r[{0}] {1}: {2}%  {3}/{4} MB  {5} MB/s{6}" -f $activity, $Method, $percent, $downloadedMb, $totalMb, $mbps, $etaText))
     } else {
-        Write-Progress -Id 42 -Activity $activity -Status ("{0}: {1} MB downloaded  {2} MB/s" -f $Method, $downloadedMb, $mbps)
+        [Console]::Write(("`r[{0}] {1}: {2} MB downloaded  {3} MB/s" -f $activity, $Method, $downloadedMb, $mbps))
     }
 }
 
@@ -261,8 +597,17 @@ function Invoke-TpmDownloadBitTransfer {
             -DisplayName "Downloading $Label..." `
             -Asynchronous `
             -ErrorAction Stop
+        $lastProgressBytes = [int64]-1
+        $lastProgressAt = [DateTime]::UtcNow
         while ($job.JobState -in @('Connecting', 'Transferring', 'Queued', 'TransientError')) {
-            Write-TpmDownloadProgress -Label $Label -Method 'BITS' -DownloadedBytes ([int64]$job.BytesTransferred) -TotalBytes ([int64]$job.BytesTotal) -Elapsed $progressWatch.Elapsed
+            # Without a bound, an offline host can sit in TransientError forever and the HttpClient/web fallbacks are never reached.
+            $currentBytes = [int64]$job.BytesTransferred
+            if ($currentBytes -ne $lastProgressBytes) { $lastProgressBytes = $currentBytes; $lastProgressAt = [DateTime]::UtcNow }
+            elseif (([DateTime]::UtcNow - $lastProgressAt).TotalSeconds -ge $script:TpmDownloadNoProgressTimeoutSeconds) { throw "BITS transfer made no progress for $($script:TpmDownloadNoProgressTimeoutSeconds) seconds." }
+            # BITS reports an unknown total as UInt64.MaxValue, which [int64] cannot hold: treat anything above Int64.MaxValue as unknown (0).
+            $rawBitsTotal = $job.BytesTotal
+            $bitsTotalBytes = if ($rawBitsTotal -is [uint64]) { if ($rawBitsTotal -gt [uint64][int64]::MaxValue) { [int64]0 } else { [int64]$rawBitsTotal } } elseif ([int64]$rawBitsTotal -lt 0) { [int64]0 } else { [int64]$rawBitsTotal }
+            Write-TpmDownloadProgress -Label $Label -Method 'BITS' -DownloadedBytes $currentBytes -TotalBytes $bitsTotalBytes -Elapsed $progressWatch.Elapsed
             Start-Sleep -Milliseconds 500
             $job = Get-BitsTransfer -JobId $job.JobId -ErrorAction Stop
         }
@@ -284,6 +629,21 @@ function Invoke-TpmDownloadBitTransfer {
     }
 }
 
+function Get-TpmResponseContentLength {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        $Response
+    )
+
+    # PowerShell unwraps Nullable[long] to [long] or $null, so .HasValue/.Value
+    # are not reliable here; test the unwrapped value for $null instead.
+    $total = [int64]0
+    $length = $Response.Content.Headers.ContentLength
+    if ($null -ne $length) { $total = [int64]$length }
+    return $total
+}
+
 function Invoke-TpmDownloadHttpClient {
     [CmdletBinding()]
     param(
@@ -300,18 +660,43 @@ function Invoke-TpmDownloadHttpClient {
     $response = $null
     $inputStream = $null
     $outputStream = $null
+    $noProgressTimeout = [TimeSpan]::FromSeconds($script:TpmDownloadNoProgressTimeoutSeconds)
     try {
         $client = New-Object System.Net.Http.HttpClient
         $client.Timeout = [TimeSpan]::FromMinutes(30)
         $response = $client.GetAsync($DownloadUrl, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
         [void]$response.EnsureSuccessStatusCode()
-        $totalBytes = if ($response.Content.Headers.ContentLength.HasValue) { [int64]$response.Content.Headers.ContentLength.Value } else { [int64]0 }
+        $totalBytes = Get-TpmResponseContentLength -Response $response
         $inputStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
         $outputStream = [System.IO.File]::Create($TempPath)
         $buffer = New-Object byte[] 1048576
         $downloadedBytes = [int64]0
         $progressWatch = [System.Diagnostics.Stopwatch]::StartNew()
-        while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+        while ($true) {
+            # With ResponseHeadersRead the client timeout does not reliably cover
+            # body reads, so every read gets its own no-progress window. On
+            # timeout the finally block disposes the stream and response, which
+            # aborts the pending read, and the throw hands over to the next tier.
+            $readCts = New-Object System.Threading.CancellationTokenSource
+            try {
+                $readCts.CancelAfter($noProgressTimeout)
+                $readTask = $inputStream.ReadAsync($buffer, 0, $buffer.Length, $readCts.Token)
+                $completedIndex = [System.Threading.Tasks.Task]::WaitAny([System.Threading.Tasks.Task[]]@($readTask), $noProgressTimeout)
+                if ($completedIndex -lt 0) {
+                    $readCts.Cancel()
+                    throw "HttpClient download made no progress for $($script:TpmDownloadNoProgressTimeoutSeconds) seconds."
+                }
+                try {
+                    $read = $readTask.GetAwaiter().GetResult()
+                } catch [System.OperationCanceledException] {
+                    throw "HttpClient download made no progress for $($script:TpmDownloadNoProgressTimeoutSeconds) seconds."
+                }
+            } finally {
+                $readCts.Dispose()
+            }
+            if ($read -le 0) {
+                break
+            }
             $outputStream.Write($buffer, 0, $read)
             $downloadedBytes += $read
             Write-TpmDownloadProgress -Label $Label -Method 'HttpClient' -DownloadedBytes $downloadedBytes -TotalBytes $totalBytes -Elapsed $progressWatch.Elapsed
@@ -334,7 +719,13 @@ function Invoke-TpmDownloadWebRequest {
     )
 
     Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes 0 -TotalBytes 0 -Elapsed ([TimeSpan]::Zero)
-    Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempPath -UseBasicParsing -ErrorAction Stop
+    $previousProgressPreference = $ProgressPreference
+    try {
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempPath -UseBasicParsing -ErrorAction Stop
+    } finally {
+        $ProgressPreference = $previousProgressPreference
+    }
     $bytes = (Get-Item -LiteralPath $TempPath -ErrorAction Stop).Length
     Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes $bytes -TotalBytes $bytes -Elapsed ([TimeSpan]::Zero) -Complete
 }
@@ -360,8 +751,14 @@ function Get-TpmHttpStatusCodeFromError {
         $ErrorRecord
     )
 
-    if ($ErrorRecord.Exception.Response -and $ErrorRecord.Exception.Response.StatusCode) {
-        try { return [int]$ErrorRecord.Exception.Response.StatusCode } catch {}
+    # Not every exception type declares a Response property (or a StatusCode on it); read them
+    # through PSObject so strict mode cannot throw before the message-based fallback below runs.
+    $responseProperty = $ErrorRecord.Exception.PSObject.Properties['Response']
+    if ($responseProperty -and $responseProperty.Value) {
+        $statusCodeProperty = $responseProperty.Value.PSObject.Properties['StatusCode']
+        if ($statusCodeProperty -and $null -ne $statusCodeProperty.Value) {
+            try { return [int]$statusCodeProperty.Value } catch {}
+        }
     }
     if ($ErrorRecord.Exception.Message -match '\((\d{3})\)') { return [int]$Matches[1] }
     if ($ErrorRecord.Exception.Message -match ':\s*(\d{3})\s') { return [int]$Matches[1] }
@@ -486,19 +883,47 @@ function Save-TpmReleaseAsset {
         $Asset
     )
 
+    # GitHub API metadata is the trust root; freeze it before any transfer.
+    $rawDigest = if ($Asset.PSObject.Properties.Name -contains 'digest') { [string]$Asset.digest } else { '' }
+    if ($rawDigest.Length -ne 71 -or $rawDigest -notmatch '\Asha256:[0-9a-f]{64}\z') {
+        throw "Update digest is missing or invalid. Download the complete ZIP manually from the GitHub release page."
+    }
+    $expectedHash = $rawDigest.Substring(7)
+    $downloadUrl = [string]$Asset.browser_download_url
+    $releaseUri = $null
+    if (-not [System.Uri]::TryCreate($downloadUrl, [System.UriKind]::Absolute, [ref]$releaseUri)) {
+        throw "Refusing invalid release asset URL. Download manually from the GitHub release page."
+    }
+    $segments = $releaseUri.AbsolutePath.Split('/')
+    if ($segments.Length -lt 6 -or -not (Test-TpmReleaseAssetUrl -Url $downloadUrl -Owner $segments[1] -Repository $segments[2])) {
+        throw "Refusing non-release GitHub asset URL. Download manually from the GitHub release page."
+    }
+
     $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-update-" + [guid]::NewGuid().ToString('N') + '.zip')
-    $expectedBytes = 0
-    if ($Asset.PSObject.Properties.Name -contains 'size') {
-        $expectedBytes = [int64]$Asset.size
+    try {
+        $expectedBytes = 0
+        if ($Asset.PSObject.Properties.Name -contains 'size') {
+            $expectedBytes = [int64]$Asset.size
+        }
+        [void](Invoke-TpmDownload -DownloadUrl $downloadUrl -DestinationPath $tempPath -ExpectedBytes $expectedBytes -Label 'TPM update package')
+        if (-not (Test-TpmDownloadedFile -Path $tempPath -ExpectedBytes $expectedBytes)) {
+            throw "Downloaded update asset is incomplete or empty. Download manually from the GitHub release page."
+        }
+        $actualHash = (Get-FileHash -LiteralPath $tempPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($actualHash -ine $expectedHash) {
+            throw "Update digest mismatch (expected $($expectedHash.Substring(0, 12)), actual $($actualHash.Substring(0, 12))). Download the complete ZIP manually from the GitHub release page."
+        }
+        return $tempPath
+    } catch {
+        # This unique path is owned by this call. A cleanup failure (for example a scanner still holding the file) must not
+        # replace the real download/digest error the user needs to read.
+        try {
+            [System.IO.File]::Delete($tempPath)
+        } catch {
+            Write-Verbose "Cleanup of the rejected update download failed: $_"
+        }
+        throw
     }
-    [void](Invoke-TpmDownload -DownloadUrl $Asset.browser_download_url -DestinationPath $tempPath -ExpectedBytes $expectedBytes -Label 'TPM update package')
-
-    $downloaded = Get-Item -LiteralPath $tempPath -ErrorAction Stop
-    if ($downloaded.Length -le 0) {
-        throw "Downloaded update asset is empty: $tempPath"
-    }
-
-    return $tempPath
 }
 
 function Expand-TpmReleaseZipEntry {
@@ -535,11 +960,68 @@ function Expand-TpmReleaseZipEntry {
     return $DestinationPath
 }
 
+function Test-TpmUpdatePackageIsSingleScript {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$ZipPath,
+
+        [string]$EntryName = 'TeknoParrot-Manager.ps1'
+    )
+
+    # The in-place updater installs exactly one file. A release ZIP that also
+    # carries modules, tools, or data must be refused before anything is
+    # extracted, because replacing only the main script would leave the
+    # installation half-updated. Directory entries carry no content and are
+    # ignored; every other file entry, including a nested copy of the script
+    # or a second entry with exactly the script's name, counts as extra.
+    if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
+        throw "Downloaded release asset not found: $ZipPath"
+    }
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+
+    $zip = $null
+    try {
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    } catch {
+        throw "Release asset '$ZipPath' could not be opened as a ZIP archive: $($_.Exception.Message)"
+    }
+
+    $extraEntries = New-Object System.Collections.Generic.List[string]
+    $scriptEntrySeen = $false
+    try {
+        foreach ($entry in @($zip.Entries)) {
+            $fullName = [string]$entry.FullName
+            if ([string]::IsNullOrEmpty([string]$entry.Name) -and ($fullName.EndsWith('/') -or $fullName.EndsWith('\'))) {
+                continue
+            }
+            if (-not $scriptEntrySeen -and [string]::Equals($fullName, $EntryName, [System.StringComparison]::Ordinal)) {
+                $scriptEntrySeen = $true
+                continue
+            }
+            $extraEntries.Add($fullName)
+        }
+    } finally {
+        $zip.Dispose()
+    }
+
+    $sample = @($extraEntries | Select-Object -First 5)
+    return [pscustomobject]@{
+        SingleScript     = ($scriptEntrySeen -and $extraEntries.Count -eq 0)
+        ExtraEntryCount  = [int]$extraEntries.Count
+        ExtraEntrySample = [string[]]$sample
+    }
+}
+
 function Test-TpmExtractedScript {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string]$Path
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedVersion
     )
 
     # Defense-in-depth before the extracted file ever replaces the live
@@ -551,7 +1033,7 @@ function Test-TpmExtractedScript {
         throw "Extracted script not found: $Path"
     }
 
-    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Path).ProviderPath)
     if ($bytes.Length -eq 0) {
         throw "Extracted script is empty: $Path"
     }
@@ -560,14 +1042,25 @@ function Test-TpmExtractedScript {
         throw "Extracted script begins with a zip signature (PK) -- refusing to install: $Path"
     }
 
-    $content = [System.Text.Encoding]::UTF8.GetString($bytes)
+    # Windows PowerShell 5.1 interprets BOM-less script bytes as Windows-1252.
+    # Require ASCII so AST validation and installed-source interpretation agree.
+    foreach ($byte in $bytes) {
+        if ($byte -gt 0x7F) {
+            throw "Extracted script contains non-ASCII bytes -- refusing to install: $Path"
+        }
+    }
+    $content = [System.Text.Encoding]::ASCII.GetString($bytes)
 
     if ($content -notmatch 'TeknoParrot Manager') {
         throw "Extracted script does not contain the expected 'TeknoParrot Manager' marker: $Path"
     }
 
-    if ($content -notmatch '\$ScriptVersion\s*=\s*"[^"]+"') {
-        throw "Extracted script does not contain a `$ScriptVersion assignment: $Path"
+    $identity = Get-TpmScriptVersionIdentityFromContent -Content $content
+    if (-not $identity) {
+        throw "Extracted script does not contain a top-level `$ScriptVersion assignment: $Path"
+    }
+    if ((Compare-TpmVersions -VersionTextA $identity -VersionTextB $ExpectedVersion) -ne 0) {
+        throw "Extracted script identity '$identity' does not match release tag '$ExpectedVersion'."
     }
 
     return $true
@@ -595,6 +1088,7 @@ function Enable-TpmTls12 {
 Export-ModuleMember -Function @(
     'Get-TpmLocalVersion',
     'ConvertTo-TpmVersion',
+    'Compare-TpmVersions',
     'Test-TpmReleaseAssetUrl',
     'Invoke-GitHubJsonRequest',
     'Get-LatestRelease',
@@ -603,6 +1097,7 @@ Export-ModuleMember -Function @(
     'New-TpmUpdateBackup',
     'Save-TpmReleaseAsset',
     'Expand-TpmReleaseZipEntry',
+    'Test-TpmUpdatePackageIsSingleScript',
     'Test-TpmExtractedScript',
     'Enable-TpmTls12'
 )

@@ -5,13 +5,6 @@ TeknoParrot.Manager*.zip
 # Third-party DLLs -- proprietary, user provides; see README.md's ReShade
 # Visual Enhancements / dgVoodoo2 Legacy Compatibility sections for bundling notes
 ReShade/*
-!ReShade/Previews/
-ReShade/Previews/*
-!ReShade/Previews/TPM-preview-original.svg
-!ReShade/Previews/TPM-preview-clean.svg
-!ReShade/Previews/TPM-preview-vivid.svg
-!ReShade/Previews/TPM-preview-crt.svg
-!ReShade/Previews/TPM-preview-enhanced.svg
 dgVoodoo2/
 
 # FFB plugin DLL cache -- auto-downloaded live from GitHub each run, never bundled
@@ -61,3 +54,20 @@ forum-post-beta-testing.txt
 
 # Local assistant workspace state -- not part of the project, machine-local cache
 .claude/
+/pester-results.xml
+/TestResults.xml
+# Quality gate Pester result files (one per test run, written beside the gate report)
+pester-*-results.xml
+/TeknoParrot-Manager-game-notes.txt
+/TeknoParrotManager-Support-*.zip
+
+# Lane and fix-run artifacts -- task notes, result reports and hash lists name work-tree paths and belong in the lane folder, never in the repo
+/FIX*-RESULT.md
+/FIX*-HASHES.json
+/FIX*-TASK.md
+/FIX*.diff
+
+# Certification smoke harness: settings-file restore record and its temporary files (user-specific, deleted after a verified restore)
+TeknoParrot-Manager.config.json.smoke-restore.json
+.TeknoParrot-Manager.config.json.*.tmp
+.TeknoParrot-Manager.config.json.smoke-restore.json.*.tmp

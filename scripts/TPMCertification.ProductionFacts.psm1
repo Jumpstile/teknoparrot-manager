@@ -7,11 +7,7 @@ Set-StrictMode -Version 2.0
 
 # ADR-0155 Section 5.3/5.7 production fact collection (ADR155-0309
 # Checkpoint B1). This module builds every one of the eleven raw facts the
-# production authority (TPMCertification.Production.psm1) consumes. It does
-# not import or call TPMCertification.Shadow.psm1 -- Phase 2's shadow
-# adapter is a placeholder-tolerant, never-authoritative construct; reusing
-# it here silently carried Static Analysis/Artifacts placeholders into
-# Phase 3 eligibility (the defect this checkpoint exists to fix). Every
+# production authority (TPMCertification.Production.psm1) consumes. Every
 # value this module reports is a real, freshly observed result: an
 # unavailable tool, a process timeout, malformed diagnostic output, or an
 # unwritable path is reported honestly as Executed=$false / not-ready, which
@@ -26,50 +22,47 @@ Set-StrictMode -Version 2.0
 #
 # Included -- release package (ships to end users):
 #   TeknoParrot-Manager.ps1              the certified product itself
-#   scripts/Debug-TPM-MenuLayout.ps1     ships in the release ZIP (Test-ReleasePackage.ps1)
-#   tools/Invoke-TpmAutoUpdate.ps1       ships in the release ZIP
-#   tools/TpmAutoUpdate.Core.psm1        ships in the release ZIP
+#   scripts/TpmRequiredPatchEngine.ps1   shared required-patch engine
+#   tools/Invoke-TpmAutoUpdate.ps1       standalone update helper
+#   tools/TpmAutoUpdate.Core.psm1        shared update implementation
+#   scripts/TPMCertification.Contracts.psm1 runtime ECVF contract loader
+#   scripts/TPMCertification.Authority.psm1 ECVF authority dependency
+#   scripts/TpmProgress.psm1             progress renderer imported by the product
 #
-# Included -- ADR-0155 production certification/harness (drives or is
-# driven by a real certification run; not test specs, not dev-only):
+# Included -- ADR-0155 production certification/harness:
+#   scripts/Debug-TPM-MenuLayout.ps1     certification screenshot diagnostic;
+#                                          called by Invoke-TPM-RealInstanceSmoke.ps1,
+#                                          not by Main runtime and not shipped
 #   scripts/Invoke-TPM-RealInstanceSmoke.ps1      the real-hardware harness itself
 #   scripts/Invoke-TPM-InstallHealthCheck.ps1     real install-health probe the harness consumes
 #   scripts/Resolve-Pcsx2Directory.ps1            shared helper dot-sourced by both of the above
-#   scripts/Run-TPM-Tests.ps1                     the entry point real certification runs actually
+#   scripts/Run-TPM-Tests.ps1                     entry point real certification runs actually
 #                                                  execute (dispatches directly to
 #                                                  Invoke-TPM-RealInstanceSmoke.ps1 -- confirmed by
 #                                                  reading its own source, not assumed)
-#   scripts/TPMCertification.Authority.psm1        Phase 1 authority/schema primitives
-#   scripts/TPMCertification.Production.psm1       Phase 3 production authority (canonical, untouched
-#                                                   by this checkpoint)
-#   scripts/TPMCertification.ProductionCycle.psm1  Phase 3 orchestration (ADR155-0309 Sub-step A)
-#   scripts/TPMCertification.ProductionFacts.psm1  this module
-#   scripts/TPMCertification.Publication.psm1      Phase 3 publication/staging
-#   scripts/TPMCertification.Reports.psm1          Phase 3 report builders
-#   scripts/TPMCertification.Shadow.psm1           Phase 2 shadow authority (its own file content is
-#                                                   certified here; this module still never imports
-#                                                   or calls it as a fact source -- those are separate
-#                                                   concerns)
-#   scripts/Test-TPMParserCheckV1.ps1              the parser-check probe this module launches
+#   scripts/TPMCertification.Execution.psm1       process execution boundary
+#   scripts/Invoke-TPM-PesterChild.ps1            isolated Pester child process
+#   scripts/TPMCertification.Production.psm1      Phase 3 production authority
+#   scripts/TPMCertification.ProductionCycle.psm1 Phase 3 orchestration
+#   scripts/TPMCertification.ProductionFacts.psm1 this module
+#   scripts/TPMCertification.Publication.psm1     Phase 3 publication/staging
+#   scripts/TPMCertification.Reports.psm1         Phase 3 report builders
+#   scripts/Test-TPMParserCheckV1.ps1             parser-check probe
 #
 # Excluded -- development-only, never shipped or executed at real
 # certification time:
-#   Tests/*.ps1, Tests/Test-ReleasePackage.ps1     Pester specs and release-ZIP validator; dev-only,
-#                                                   explicitly excluded from the release ZIP itself
-#   scripts/Preview-TPM-ConsoleUx.ps1              a developer console-rendering preview/diagnostic
-#                                                   tool; not part of the certification pipeline (no
-#                                                   facts, no harness invocation, not in the release
-#                                                   ZIP) -- confirmed by reading its source
-#   PSScriptAnalyzerSettings.psd1, *.psd1          data files, not PowerShell script/module source
-#
-# ECVF's scripts/TPMCertification.Contracts.psm1 (a different initiative,
-# out of scope for ADR-0155/this checkpoint, and not present on this
-# branch) is deliberately not part of this list.
+#   Tests/*.ps1, Tests/Test-ReleasePackage.ps1     Pester specs and release-ZIP validator
+#   scripts/TPMReleasePackage.Core.psm1, scripts/New-TPMReleasePackage.ps1 source-only package tooling
+#   scripts/Preview-TPM-ConsoleUx.ps1              developer console preview/diagnostic
+#   PSScriptAnalyzerSettings.psd1, *.psd1          data files, not PowerShell source
 $script:TpmProductionPowerShellInventoryRelativePathsV1 = @(
     'TeknoParrot-Manager.ps1',
+    'scripts/TpmRequiredPatchEngine.ps1',
+    'scripts/TPMCertification.Contracts.psm1',
     'scripts/Debug-TPM-MenuLayout.ps1',
     'tools/Invoke-TpmAutoUpdate.ps1',
     'tools/TpmAutoUpdate.Core.psm1',
+    'scripts/TpmProgress.psm1',
     'scripts/Invoke-TPM-RealInstanceSmoke.ps1',
     'scripts/Invoke-TPM-InstallHealthCheck.ps1',
     'scripts/Resolve-Pcsx2Directory.ps1',
@@ -83,7 +76,6 @@ $script:TpmProductionPowerShellInventoryRelativePathsV1 = @(
     'scripts/TPMCertification.ProductionFacts.psm1',
     'scripts/TPMCertification.Publication.psm1',
     'scripts/TPMCertification.Reports.psm1',
-    'scripts/TPMCertification.Shadow.psm1',
     'scripts/Test-TPMParserCheckV1.ps1'
 )
 
@@ -168,40 +160,6 @@ function Find-TPMInjectionHunterModuleV1 {
         }
     }
     return $null
-}
-
-function ConvertTo-TPMWin32QuotedArgumentV1 {
-    # Confirmed by direct reproduction that Start-Process -ArgumentList does
-    # NOT quote array elements containing spaces on this environment's
-    # PowerShell/Windows build -- "a file (with) [odd] chars.ps1" arrived at
-    # the child process split into multiple separate argv tokens, silently
-    # corrupting the path. Each argument must be pre-quoted here using the
-    # standard Win32 CommandLineToArgvW-compatible algorithm (the same
-    # convention powershell.exe/pwsh use to parse their own argv) before
-    # Start-Process joins the array elements with plain spaces.
-    param([Parameter(Mandatory=$true)][string]$Value)
-    if($Value.Length-gt0-and$Value.IndexOfAny([char[]](' ',"`t",'"'))-lt0){return $Value}
-    $sb=New-Object Text.StringBuilder
-    [void]$sb.Append('"')
-    $i=0
-    while($i-lt$Value.Length){
-        $numBackslashes=0
-        while($i-lt$Value.Length-and$Value[$i]-eq'\'){$numBackslashes++;$i++}
-        if($i-eq$Value.Length){
-            [void]$sb.Append('\'*($numBackslashes*2))
-            break
-        }elseif($Value[$i]-eq'"'){
-            [void]$sb.Append('\'*($numBackslashes*2+1))
-            [void]$sb.Append('"')
-            $i++
-        }else{
-            [void]$sb.Append('\'*$numBackslashes)
-            [void]$sb.Append($Value[$i])
-            $i++
-        }
-    }
-    [void]$sb.Append('"')
-    return $sb.ToString()
 }
 
 function Invoke-TPMExternalProcessWithTimeoutV1 {
@@ -422,7 +380,15 @@ function Test-TPMProductionPSScriptAnalyzerV1 {
     # actually performed the analysis), never by a parent-process
     # Get-Module -ListAvailable discovery -- a version discovered in the
     # parent is not proof of what the job genuinely loaded and ran.
-    param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$SettingsPath,[int]$PerFileTimeoutSeconds=60)
+    # Analysis of a real inventory file can exceed one minute on a slow
+    # Windows PowerShell 5.1 engine, and the real inventory exceeded the
+    # previous three-minute bound on a slow test host
+    # (PSSCRIPTANALYZER_JOB_TIMED_OUT, then INJECTIONHUNTER_JOB_EXECUTION_FAILED;
+    # the file was not identified; TeknoParrot-Manager.ps1 is several MB).
+    # Keep the per-file bound finite, but use fifteen
+    # minutes so the certification gate does not report an unavailable
+    # analyzer on a slow-but-healthy engine; a timeout still fails closed.
+    param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$SettingsPath,[int]$PerFileTimeoutSeconds=900)
     $notExecuted=[ordered]@{Executed=$false;FindingCount=0;ToolVersion=$null;Diagnostic=$null}
     # Confirmed by direct reproduction against the real powershell.exe 5.1
     # engine: Test-Path throws System.ArgumentException for a path
@@ -458,7 +424,20 @@ function Test-TPMProductionPSScriptAnalyzerV1 {
     foreach($item in $Inventory){
         $bounded=Invoke-TPMBoundedScriptBlockV1 -ScriptBlock {
             param($Path,$Settings)
-            $findings=@(Invoke-ScriptAnalyzer -Path $Path -Severity Error,Warning -Settings $Settings)
+            # PSScriptAnalyzer 1.25.0 can race while its PSReservedCmdletChar
+            # rule resolves exported-function metadata on Windows PowerShell 5.1
+            # (PowerShell/PowerShell#27842). This reproduced in the contracts
+            # module. Split that rule only for this module; other files retain one
+            # full pass, preserving the same rules, settings, and bounded job.
+            # Any analyzer error from either pass remains in the job error stream
+            # and is still treated as a failed analysis by Invoke-TPMBoundedScriptBlockV1.
+            if([string]::Equals([IO.Path]::GetFileName($Path),'TPMCertification.Contracts.psm1',[StringComparison]::OrdinalIgnoreCase)){
+                $otherFindings=@(Invoke-ScriptAnalyzer -Path $Path -Severity Error,Warning -Settings $Settings -ExcludeRule 'PSReservedCmdletChar')
+                $reservedCmdletFindings=@(Invoke-ScriptAnalyzer -Path $Path -Severity Error,Warning -Settings $Settings -IncludeRule 'PSReservedCmdletChar')
+                $findings=@($otherFindings)+@($reservedCmdletFindings)
+            }else{
+                $findings=@(Invoke-ScriptAnalyzer -Path $Path -Severity Error,Warning -Settings $Settings)
+            }
             $loaded=Get-Module PSScriptAnalyzer|Select-Object -First 1
             [pscustomobject]@{Path=$Path;FindingCount=$findings.Count;ToolVersion=$(if($loaded){$loaded.Version.ToString()}else{$null})}
         } -Parameters ([ordered]@{Path=$item.FullPath;Settings=$SettingsPath}) -TimeoutSeconds $PerFileTimeoutSeconds
@@ -588,7 +567,7 @@ function Test-TPMProductionInjectionHunterV1 {
     # free-form/empty value. A concise, tagged Write-Warning is also emitted
     # at the point of failure so the operator-facing console output points
     # at the underlying cause instead of a bare Executed=False.
-    param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$DispositionRegistryPath,[int]$PerFileTimeoutSeconds=60)
+    param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$DispositionRegistryPath,[int]$PerFileTimeoutSeconds=900)
     $notExecuted=[ordered]@{Executed=$false;FindingCount=0;UnresolvedFindingCount=0;ToolVersion=$null;Dispositions=@();Diagnostic=$null}
     $module=Find-TPMInjectionHunterModuleV1
     if(-not$module){
@@ -634,6 +613,10 @@ function Test-TPMProductionInjectionHunterV1 {
             # reported version is proof of what the job genuinely loaded.
             $bounded=Invoke-TPMBoundedScriptBlockV1 -ScriptBlock {
                 param($Path,$RulePath)
+                # Start-Job has fresh module state; PS5.1 must not select a PS7 Utility manifest.
+                if($PSVersionTable.PSVersion.Major-eq5){
+                    Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop
+                }
                 $findings=@(Invoke-ScriptAnalyzer -Path $Path -CustomRulePath $RulePath|ForEach-Object{[pscustomobject]@{RuleName=[string]$_.RuleName;Line=[int]$_.Extent.StartLineNumber;Extent=[string]$_.Extent.Text}})
                 $manifestVersion=$null;$manifestErrorType=$null;$manifestErrorMessage=$null;$manifestErrorHResult=$null
                 try{
@@ -799,7 +782,7 @@ function New-TPMPreflightSyntheticFactsV1 {
     $identity=[ordered]@{ExpectedBranch='preflight';ExpectedCommit=$commit;Start=$identitySnapshot;End=$identitySnapshot;RefMutationDetected=$false;RefMutationReason=$null;IdentityValid=$true}
     @(
         [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath='C:\preflight';RepositoryAvailable=$true;RepositoryClean=$true;GitStatus='(clean)';CertificationIdentity=$identity}}
-        [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=$true;Total=1;Passed=1;Failed=0;Skipped=0;NotRun=0;Engine='preflight';SuiteSha256=$hash}}
+        [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=$true;Total=1;Passed=1;Failed=0;Skipped=0;NotRun=0;FailedContainers=0;Engine='preflight';SuiteSha256=$hash}}
         [ordered]@{Identifier='Static Analysis';Applicable=$true;Data=[ordered]@{Parser=@([ordered]@{Identifier='WindowsPowerShell51';Executed=$true;ErrorCount=0;ToolVersion='preflight'},[ordered]@{Identifier='Pwsh';Executed=$true;ErrorCount=0;ToolVersion='preflight'});Encoding=[ordered]@{Executed=$true;NonAsciiByteCount=0;Files=@('preflight.ps1')};PSScriptAnalyzer=[ordered]@{Executed=$true;FindingCount=0;ToolVersion='preflight'};InjectionHunter=[ordered]@{Executed=$true;FindingCount=0;UnresolvedFindingCount=0;ToolVersion='preflight';Dispositions=@()}}}
         [ordered]@{Identifier='Real Install Health';Applicable=$true;Data=[ordered]@{ReportPath=$null;LoadState='Missing';LoadError='preflight synthetic run: no real install health report';Checks=@()}}
         [ordered]@{Identifier='Backups';Applicable=$true;Data=[ordered]@{UserProfilesBackupCreated=$false;UserProfilesBackupPath=$null;UserProfilesBackupVerified=$false;UserProfilesBackupSha256=$null;GameProfilesBackupCreated=$false;GameProfilesBackupPath=$null;GameProfilesBackupVerified=$false;GameProfilesBackupSha256=$null;BackupVerificationExecuted=$true}}
@@ -963,7 +946,7 @@ function Test-TPMProductionPackagePreflightV1 {
     # Cleanup failure must never be masked by an otherwise-successful
     # pipeline proof -- PackageValidationPassed folds it in explicitly.
     $passed=$stagingReady-and$destinationReady-and$publisherAvailable-and$cleanupSucceeded
-    return [ordered]@{StagingDirectoryReady=$stagingReady;PublisherAvailable=$publisherAvailable;PackageValidationExecuted=$true;PackageValidationPassed=$passed;PackageValidationErrorCount=$errorCount;PackageValidationDiagnostics=@($diagnostics.ToArray())}
+    return [ordered]@{StagingDirectoryReady=$stagingReady;CanonicalArtifactSetMatches=$canonicalNamesMatch;PublisherAvailable=$publisherAvailable;PackageValidationExecuted=$true;PackageValidationPassed=$passed;PackageValidationErrorCount=$errorCount;PackageValidationDiagnostics=@($diagnostics.ToArray())}
 }
 
 function Get-TPMProductionTreeSha256V1 {
@@ -1069,6 +1052,8 @@ function New-TPMProductionFactRecordsV1 {
 
     $userBackup=Join-Path $BackupDirectory 'UserProfiles';$gameBackup=Join-Path $BackupDirectory 'GameProfiles'
     $userCreated=[bool]$Results.Backup.UserProfiles;$gameCreated=[bool]$Results.Backup.GameProfiles
+    # The harness records $null for a folder that does not exist and $false for a copy that failed. A failed copy of a folder that exists must stop certification, so it clears BackupVerificationExecuted (BACKUP_VERIFICATION_NOT_EXECUTED).
+    $backupCopyFailed=(($null-ne$Results.Backup.UserProfiles-and-not$userCreated)-or($null-ne$Results.Backup.GameProfiles-and-not$gameCreated))
     $userHash=if($userCreated){Get-TPMProductionTreeSha256V1 $userBackup}else{$null}
     $gameHash=if($gameCreated){Get-TPMProductionTreeSha256V1 $gameBackup}else{$null}
 
@@ -1115,10 +1100,10 @@ function New-TPMProductionFactRecordsV1 {
     $reportDirectoryReserved=Test-Path -LiteralPath $ReportDirectory -PathType Container
     $artifactsFact=[ordered]@{
         Identifier='Artifacts';Applicable=$true;Data=[ordered]@{
-            ReportDirectory=[IO.Path]::GetFullPath($ReportDirectory)
+            ReportDirectory=[IO.Path]::GetFullPath($ReportDirectory).TrimEnd([char]92,[char]47).PadRight(3,[char]92)
             ReportDirectoryReserved=$reportDirectoryReserved
             StagingDirectoryReady=$artifactsPreflight.StagingDirectoryReady
-            RequiredArtifactManifestConfigured=$true
+            RequiredArtifactManifestConfigured=[bool]$artifactsPreflight.CanonicalArtifactSetMatches
             PublisherAvailable=$artifactsPreflight.PublisherAvailable
             PackageValidationExecuted=$artifactsPreflight.PackageValidationExecuted
             PackageValidationPassed=$artifactsPreflight.PackageValidationPassed
@@ -1129,10 +1114,10 @@ function New-TPMProductionFactRecordsV1 {
 
     return @(
         [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath=[IO.Path]::GetFullPath($RepositoryPath);RepositoryAvailable=[bool]$checks['Repository available'];RepositoryClean=($Results.GitStatus-ceq'(clean)');GitStatus=[string]$Results.GitStatus;CertificationIdentity=$certificationIdentity}}
-        [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=($null-ne$Results.Pester);Total=[int]$Results.Pester.Total;Passed=[int]$Results.Pester.Passed;Failed=[int]$Results.Pester.Failed;Skipped=[int]$Results.Pester.Skipped;NotRun=[int]$Results.Pester.NotRun;Engine=("Pester {0} / PowerShell {1}"-f$Results.PesterVersion,$Results.PowerShellVersion);SuiteSha256=$testDigest}}
+        [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=($null-ne$Results.Pester);Total=[int]$Results.Pester.Total;Passed=[int]$Results.Pester.Passed;Failed=[int]$Results.Pester.Failed;Skipped=[int]$Results.Pester.Skipped;NotRun=[int]$Results.Pester.NotRun;FailedContainers=$(if($null-eq$Results.Pester){0}else{$Results.Pester.FailedContainers});Engine=$(if($null-eq$Results.Pester){$null}else{[string]$Results.PesterVersion});SuiteSha256=$(if($null-eq$Results.Pester){$null}else{$testDigest})}}
         $staticAnalysisFact
         [ordered]@{Identifier='Real Install Health';Applicable=$true;Data=[ordered]@{ReportPath=$(if(Test-Path -LiteralPath $healthPath -PathType Leaf){[IO.Path]::GetFullPath($healthPath)}else{$null});LoadState=$healthState;LoadError=$(if($healthState-ceq'Loaded'){$null}else{[string]$HealthLoadError});Checks=$healthChecks}}
-        [ordered]@{Identifier='Backups';Applicable=$true;Data=[ordered]@{UserProfilesBackupCreated=$userCreated;UserProfilesBackupPath=$(if($userCreated){[IO.Path]::GetFullPath($userBackup)}else{$null});UserProfilesBackupVerified=($userCreated-and$null-ne$userHash);UserProfilesBackupSha256=$userHash;GameProfilesBackupCreated=$gameCreated;GameProfilesBackupPath=$(if($gameCreated){[IO.Path]::GetFullPath($gameBackup)}else{$null});GameProfilesBackupVerified=($gameCreated-and$null-ne$gameHash);GameProfilesBackupSha256=$gameHash;BackupVerificationExecuted=$true}}
+        [ordered]@{Identifier='Backups';Applicable=$true;Data=[ordered]@{UserProfilesBackupCreated=$userCreated;UserProfilesBackupPath=$(if($userCreated){[IO.Path]::GetFullPath($userBackup)}else{$null});UserProfilesBackupVerified=($userCreated-and$null-ne$userHash);UserProfilesBackupSha256=$userHash;GameProfilesBackupCreated=$gameCreated;GameProfilesBackupPath=$(if($gameCreated){[IO.Path]::GetFullPath($gameBackup)}else{$null});GameProfilesBackupVerified=($gameCreated-and$null-ne$gameHash);GameProfilesBackupSha256=$gameHash;BackupVerificationExecuted=(($null-ne$userHash-or$null-ne$gameHash)-and-not$backupCopyFailed)}}
         $(if($mode-ceq'Smoke'){[ordered]@{Identifier='Smoke File Safety';Applicable=$true;Data=[ordered]@{UserProfiles=[ordered]@{Added=[int]$snapshots.UserProfiles.Added;Removed=[int]$snapshots.UserProfiles.Removed;Changed=[int]$snapshots.UserProfiles.Changed;BeforeSkipped=[int]$snapshots.UserProfiles.BeforeSkipped;AfterSkipped=[int]$snapshots.UserProfiles.AfterSkipped};GameProfiles=[ordered]@{Added=[int]$snapshots.GameProfiles.Added;Removed=[int]$snapshots.GameProfiles.Removed;Changed=[int]$snapshots.GameProfiles.Changed;BeforeSkipped=[int]$snapshots.GameProfiles.BeforeSkipped;AfterSkipped=[int]$snapshots.GameProfiles.AfterSkipped};Pcsx2x6Crosshairs=[ordered]@{Added=[int]$snapshots.Pcsx2x6Crosshairs.Added;Removed=[int]$snapshots.Pcsx2x6Crosshairs.Removed;Changed=[int]$snapshots.Pcsx2x6Crosshairs.Changed;BeforeSkipped=[int]$snapshots.Pcsx2x6Crosshairs.BeforeSkipped;AfterSkipped=[int]$snapshots.Pcsx2x6Crosshairs.AfterSkipped}}}}else{[ordered]@{Identifier='Smoke File Safety';Applicable=$false;Data=[ordered]@{}}})
         $artifactsFact
         [ordered]@{Identifier='pcsx2x6 crosshair path (issue #79)';Applicable=$pcsxPresent;Data=[ordered]@{Present=$pcsxPresent;CanonicalFilesDeployed=$pcsxCanonical;LegacyRootPresent=$pcsxLegacy;IniFound=$pcsxIni;CursorPathPointsCanonical=$pcsxCursor;Pcsx2Directory=$(if($pcsxPresent){[IO.Path]::GetFullPath([string]$pcsx.Pcsx2Dir)}else{$null})}}
