@@ -41157,6 +41157,14 @@ function Invoke-DeviceSurvey {
         if ($quick) { $hasXbox = $true }
     }
     if (-not $quick) {
+        # An arcade board looks like a keyboard to Windows, so say what we found and let the player confirm below.
+        if (@($evidence.DeviceObservations | Where-Object { $_.DeviceClass -eq 'ArcadeEncoder' }).Count) {
+            Write-Host " Found: what looks like an arcade controls board." -ForegroundColor Green
+            $keyMap = Get-TpmLedBlinkyKeyMap
+            if ($keyMap.Found -and @($keyMap.Controls).Count) {
+                Write-TpmText "   Your lighting setup lists $(@($keyMap.Controls).Count) controls with their keys. You can confirm below." -Color DarkCyan
+            }
+        }
         $hasXbox      = & $readYesNo "Xbox / XInput controller?" 'XboxStylePad'
         $hasArcade    = & $readYesNo "Arcade joystick + buttons?" 'ArcadeEncoder'
         $hasTrackball = & $readYesNo "Trackball?" 'PointerOrTrackball'
