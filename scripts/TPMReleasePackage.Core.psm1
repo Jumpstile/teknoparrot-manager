@@ -53,6 +53,18 @@ function Get-TPMReleasePackageDocumentationFileMapV1 {
         [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/09-tpm-welcome.png'; SourcePath = 'docs/images/09-tpm-welcome.png' }
         [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/10-tpm-register-only-menu.png'; SourcePath = 'docs/images/10-tpm-register-only-menu.png' }
         [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/11-tpm-action-required.png'; SourcePath = 'docs/images/11-tpm-action-required.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/12-tpm-first-run-questions.png'; SourcePath = 'docs/images/12-tpm-first-run-questions.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/13-tpm-main-menu.png'; SourcePath = 'docs/images/13-tpm-main-menu.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/14-tpm-help.png'; SourcePath = 'docs/images/14-tpm-help.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/15-tpm-health-check.png'; SourcePath = 'docs/images/15-tpm-health-check.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/16-tpm-support-package.png'; SourcePath = 'docs/images/16-tpm-support-package.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/17-tpm-required-patches.png'; SourcePath = 'docs/images/17-tpm-required-patches.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/18-tpm-register-only.png'; SourcePath = 'docs/images/18-tpm-register-only.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/19-tpm-propagate-controls.png'; SourcePath = 'docs/images/19-tpm-propagate-controls.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/20-tpm-crosshair-picker.png'; SourcePath = 'docs/images/20-tpm-crosshair-picker.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/21-tpm-crosshair-apply.png'; SourcePath = 'docs/images/21-tpm-crosshair-apply.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/22-tpm-reshade-setup.png'; SourcePath = 'docs/images/22-tpm-reshade-setup.png' }
+        [pscustomobject]@{ AssetType = 'Guide'; ZipPath = 'TeknoParrot-Manager-User-Guide.pdf'; SourcePath = 'TeknoParrot-Manager-User-Guide.pdf' }
     )
 }
 
