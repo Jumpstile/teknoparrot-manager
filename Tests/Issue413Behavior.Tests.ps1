@@ -196,6 +196,23 @@ Describe 'AutoSync with a profile that has no game file yet (#413)' {
         Test-Path -LiteralPath (Split-Path -Parent $old) | Should -BeFalse
     }
 
+    It 'extracts a game whose saved game file is on a drive letter that no longer exists (#412)' {
+        $unused = [char[]]'QRSTUVWXYZ' | Where-Object { -not (Test-Path -LiteralPath ($_ + ':\')) } | Select-Object -First 1
+        if (-not $unused) { Set-ItResult -Skipped -Because 'every drive letter from Q to Z is in use on this PC'; return }
+        $fx = New-Fix41Fixture
+        $name = 'Ridge Game (1.0)[TP]'
+        [void](New-Fix41GameZip -Fixture $fx -Name $name)
+        $dat = @{ (Get-NormalizedGameKey $name) = [pscustomobject]@{ ProfileCode = 'RIDGE'; OriginalName = $name; Executable = 'game.exe' } }
+        $old = $unused + ':\Games\Ridge Game\game.exe'
+        [IO.File]::WriteAllText((Join-Path $fx.Profiles 'RIDGE.xml'), ('<GameProfile><GamePath>' + $old + '</GamePath></GameProfile>'), (New-Object Text.UTF8Encoding($false)))
+
+        $result = Invoke-Fix41AutoSync -Fixture $fx -DatIndex $dat
+
+        $result.Synced | Should -Be 1 -Because (Get-Fix41Diagnostic $result)
+        $result.UnsafePathSkipped | Should -Be 0
+        Test-Path -LiteralPath (Join-Path (Join-Path $fx.Games $name) 'game.exe') -PathType Leaf | Should -BeTrue
+    }
+
     It 'still refuses a game that is already installed at another place, and changes nothing' {
         $fx = New-Fix41Fixture
         $name = 'Quartz Game (1.0)[TP]'
