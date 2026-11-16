@@ -74,9 +74,11 @@
     too long and changes nothing.
   - A game whose 32-bit or 64-bit type cannot be read is not counted as
     ready, and force feedback does not give it a 64-bit plugin.
-  - ReShade works with 64-bit games only. 32-bit games are skipped and the
-    guides do not ask for a 32-bit ReShade file. ReShade does not show its
-    welcome window, counters or messages when a game starts.
+  - ReShade is set up for 64-bit games only. A 32-bit game is skipped and
+    nothing in its folder changes. Press D on the result to see why.
+    TeknoParrot Manager turns off ReShade's welcome window, counters and
+    messages in every ReShade.ini it writes. A short ReShade version
+    banner may still show for a moment when a game starts.
   - Registering games and repairing paths keep a second executable path that
     points at a file that exists. A manual path repair checks its safety
     copy first and leaves a profile TeknoParrot changed meanwhile alone.
