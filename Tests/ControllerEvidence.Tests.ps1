@@ -101,6 +101,19 @@ Describe 'Invoke-DeviceSurvey with detection' {
     It 'lets the user answer N even when a pad was detected' {
         Mock Get-TpmControllerEvidence { New-FakeEvidence -Observations @([pscustomobject]@{ DeviceClass = 'XboxStylePad'; Confidence = 'High'; Basis = 'XInputSlotActive'; Count = 1 }) }
         { Invoke-DeviceSurvey } | Should -Not -Throw
-        Should -Invoke Read-TpmYesNo -Times 7 -Exactly
+        Should -Invoke Read-TpmYesNo -Times 8 -Exactly
+    }
+
+    It 'asks one question and skips the other six when the user accepts the detected pad' {
+        Mock Get-TpmControllerEvidence { New-FakeEvidence -Observations @([pscustomobject]@{ DeviceClass = 'XboxStylePad'; Confidence = 'High'; Basis = 'XInputSlotActive'; Count = 1 }) }
+        Mock Read-TpmYesNo { [void]$script:asked.Add([pscustomobject]@{ Prompt = $Prompt; Default = $Default }); 'Y' }
+        Invoke-DeviceSurvey
+        $script:asked.Count | Should -Be 1
+    }
+
+    It 'never offers the shortcut for Low-confidence name hints' {
+        Mock Get-TpmControllerEvidence { New-FakeEvidence -Observations @([pscustomobject]@{ DeviceClass = 'Wheel'; Confidence = 'Low'; Basis = 'NameHint'; Count = 1 }) }
+        Invoke-DeviceSurvey
+        $script:asked.Count | Should -Be 7
     }
 }
