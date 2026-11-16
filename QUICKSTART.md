@@ -2,7 +2,7 @@
 
 > This guide describes v1.0 RC8.1. RC8.1 is the interim build for testers. Latest published release: v1.0 RC8.1 ([RC8.1 release page](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1)). The previous published release is v1.0 RC7. The final v1.0 RC9 comes later. RC8 was a tester build and was never published. RC8.1 is the first version that can update itself in place. Final Version 1.0 remains unpublished. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
-Full documentation: [README.md](README.md)
+Full documentation: [User guide](docs/USER-GUIDE.md) (project home page: [README.md](README.md))
 
 ## New here? Start with one game
 
@@ -1522,4 +1522,4 @@ The table below lists each file, where it lives, and what it is for:
 
 ---
 
-> Full documentation: [README.md](README.md)
+> Full documentation: [User guide](docs/USER-GUIDE.md) (project home page: [README.md](README.md))
