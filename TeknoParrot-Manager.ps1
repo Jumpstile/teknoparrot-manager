@@ -24533,9 +24533,13 @@ function Invoke-AutoSync {
                 if (Test-Path -LiteralPath $registeredProfilePath -ErrorAction Stop) {
                     $registeredDoc = Read-Xml $registeredProfilePath
                     $registeredPathNode = $registeredDoc.GameProfile.SelectSingleNode('GamePath')
-                    if ($null -eq $registeredPathNode -or [string]::IsNullOrWhiteSpace($registeredPathNode.InnerText)) { throw 'Registered executable path is missing.' }
-                    $registeredGamePath = [System.IO.Path]::GetFullPath($registeredPathNode.InnerText.Trim())
-                    if (-not (Test-Path -LiteralPath $registeredGamePath -PathType Leaf -ErrorAction Stop)) {
+                    if ($null -eq $registeredPathNode -or [string]::IsNullOrWhiteSpace($registeredPathNode.InnerText)) {
+                        # The profile exists but is not linked to a game file yet (TeknoParrot keeps a profile for games that are not set up).
+                        # Nothing is registered, so there is nothing to bind to the archive.
+                        $registeredPathNode = $null
+                    }
+                    if ($null -ne $registeredPathNode) { $registeredGamePath = [System.IO.Path]::GetFullPath($registeredPathNode.InnerText.Trim()) }
+                    if ($registeredGamePath -and -not (Test-Path -LiteralPath $registeredGamePath -PathType Leaf -ErrorAction Stop)) {
                         # A new game folder may restore a registered game whose folder is gone, but only when the
                         # registered executable lies inside that new folder; the transaction then binds it to the
                         # matching ZIP entry before anything is written.
@@ -24545,7 +24549,7 @@ function Invoke-AutoSync {
                     }
                 }
             } catch {
-                $rootRefusalReason = 'registered executable could not be bound to archive-root verification'
+                $rootRefusalReason = 'registered executable could not be bound to archive-root verification (' + $_.Exception.Message + ')'
             }
         }
         if (-not $rootRefusalReason -and $newGameFolder -and -not [string]::IsNullOrWhiteSpace($registeredGamePath) -and
