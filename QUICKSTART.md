@@ -339,6 +339,9 @@ You can mix Browse and Search sessions. Press D when you are ready to confirm.
 
 ## Copy Your Controls
 
+![Propagate Controls: copies controls to your other games of the same type and reports when no game needed a change](docs/images/19-tpm-propagate-controls.png)
+
+
 TeknoParrot Manager can copy controls from one game to other games of the same type. You set up ONE game of each type first.
 
 Setting up controls in TeknoParrotUI is called binding. A bound game has its buttons and axes assigned.
@@ -377,6 +380,11 @@ This is a bounded reference-copy aid. It is not universal controller or gun dete
 ---
 
 ## Crosshair Setup
+
+![The crosshair picker: click a design for Player 1, then one for Player 2](docs/images/20-tpm-crosshair-picker.png)
+
+![Crosshair Setup asks you to confirm your two choices before it changes anything](docs/images/21-tpm-crosshair-apply.png)
+
 
 Mode 4 puts custom crosshair cursor images into all your registered lightgun games.
 
@@ -423,6 +431,9 @@ For Pcsx2x6 games, `cursor_path` stays emulator-owned under the current contract
 ---
 
 ## ReShade Visual Enhancements
+
+![ReShade setup: choose Set up, Remove, or Undo](docs/images/22-tpm-reshade-setup.png)
+
 
 ReShade adds picture effects on top of a game: a sharper image, CRT-style scanlines, borders. It does not change game data.
 

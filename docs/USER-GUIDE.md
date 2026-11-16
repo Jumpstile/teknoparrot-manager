@@ -1013,6 +1013,9 @@ Do not delete an `.extracting` marker just to make the warning disappear. Removi
 
 ## Registration
 
+![Register only: choose Preview first, then Run now, or go Back](images/18-tpm-register-only.png)
+
+
 For each game folder, TeknoParrot Manager shows one of these results.
 
 TeknoParrot keeps one small setup file, called a profile, for each game. "Registered" means TeknoParrot has a profile for the game.
@@ -1170,6 +1173,9 @@ If anything goes wrong, restore from the backup made at the start of the run.
 
 ## Propagate Controls (standalone menu option)
 
+![Propagate Controls: copies controls to your other games of the same type and reports when no game needed a change](images/19-tpm-propagate-controls.png)
+
+
 Mode 3 does only the control-copying step described above. You do not need to run AutoSync or Register first.
 
 It does not extract or register any games.
@@ -1204,6 +1210,11 @@ It reads nothing and changes nothing.
 
 ## Crosshair Setup
 
+![The crosshair picker: click a design for Player 1, then one for Player 2](images/20-tpm-crosshair-picker.png)
+
+![Crosshair Setup asks you to confirm your two choices before it changes anything](images/21-tpm-crosshair-apply.png)
+
+
 Mode 4 copies custom P1/P2 crosshair cursor images to all registered lightgun games. You can also run it on its own at any time from the main menu.
 
 **How to use it:**
@@ -1236,6 +1247,9 @@ Mode 4 copies custom P1/P2 crosshair cursor images to all registered lightgun ga
 ---
 
 ## ReShade Visual Enhancements
+
+![ReShade setup: choose Set up, Remove, or Undo](images/22-tpm-reshade-setup.png)
+
 
 ReShade is a free add-on that changes how a game looks.
 For example, it can add scanlines like an old arcade screen.
