@@ -16226,6 +16226,43 @@ function Get-TpmControllerEvidence {
         ReasonCodes = @($reasons.ToArray()); RedactedFields = @(); SensitiveIdentifiersIncluded = $false; ReadOnly = $true
     }
 }
+# Read-only look at the key map LEDBlinky keeps for the arcade buttons (LEDBlinkyInputMap.xml): which key each control sends.
+# It is a source of information only. It never writes, never starts LEDBlinky and never touches the lights. Any problem gives an
+# empty result with a reason, and the player can still be asked instead.
+function Get-TpmLedBlinkyKeyMap {
+    param([string[]]$Root = @())
+    $result = [ordered]@{ Found = $false; Reason = 'NotInstalled'; MapSHA256 = ''; Controls = @() }
+    try {
+        $mapPath = ''
+        foreach ($folder in @(@($Root) + @('C:\LEDBlinky'))) {
+            if ([string]::IsNullOrWhiteSpace($folder)) { continue }
+            $candidate = Join-Path $folder 'LEDBlinkyInputMap.xml'
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { $mapPath = $candidate; break }
+        }
+        if (-not $mapPath) { return [pscustomobject]$result }
+        $settings = New-Object System.Xml.XmlReaderSettings
+        $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+        $settings.XmlResolver = $null
+        $reader = [System.Xml.XmlReader]::Create($mapPath, $settings)
+        try { $xml = New-Object System.Xml.XmlDocument; $xml.XmlResolver = $null; $xml.Load($reader) } finally { $reader.Dispose() }
+        $controls = New-Object System.Collections.Generic.List[object]
+        $seen = @{}
+        foreach ($port in @($xml.SelectNodes('//ledController/port'))) {
+            $label = [string]$port.GetAttribute('label')
+            $codes = @(([string]$port.GetAttribute('inputCodes')).Split('|') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            if (-not $label -or $codes.Count -eq 0 -or $seen.ContainsKey($label)) { continue }
+            $seen[$label] = $true
+            [void]$controls.Add([pscustomobject][ordered]@{ Control = $label; InputCodes = $codes })
+        }
+        $result.Found = ($controls.Count -gt 0)
+        $result.Reason = if ($controls.Count -gt 0) { 'Read' } else { 'MapEmpty' }
+        $result.MapSHA256 = (Get-FileHash -LiteralPath $mapPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+        $result.Controls = @($controls.ToArray())
+    } catch {
+        $result.Found = $false; $result.Reason = 'MapUnreadable'; $result.MapSHA256 = ''; $result.Controls = @()
+    }
+    return [pscustomobject]$result
+}
 function Get-TpmHardwareEnvironmentEvidence {
     param([switch]$RefreshDynamic, [string[]]$VolumePaths = @())
     $cpu = $null; $os = $null; $ram = $null; $gpus = @(); $battery = $null
