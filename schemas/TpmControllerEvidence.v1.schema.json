@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Jumpstile/teknoparrot-manager/schemas/TpmControllerEvidence-v1.schema.json",
+  "title": "TpmControllerEvidence/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ContractVersion",
+    "EvidenceId",
+    "EvidenceStatus",
+    "ProviderId",
+    "ProviderVersion",
+    "SourceFamily",
+    "EvidenceClass",
+    "DeviceObservations",
+    "ObservationTimeUtc",
+    "InputArtifactFingerprint",
+    "ReasonCodes",
+    "RedactedFields",
+    "SensitiveIdentifiersIncluded",
+    "ReadOnly"
+  ],
+  "properties": {
+    "ContractVersion": {
+      "const": "TpmControllerEvidence/v1"
+    },
+    "EvidenceId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "EvidenceStatus": {
+      "enum": ["Observed", "SourceUnavailable", "Rejected"]
+    },
+    "ProviderId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "ProviderVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "SourceFamily": {
+      "enum": ["LocalXInput", "LocalHid", "LocalWindowsDeviceClass", "Hip", "Other"]
+    },
+    "EvidenceClass": {
+      "enum": ["LocalProbe", "HipAssertion", "Heuristic", "Other"]
+    },
+    "DeviceObservations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/deviceObservation" },
+      "uniqueItems": true
+    },
+    "ObservationTimeUtc": { "type": ["string", "null"], "format": "date-time" },
+    "InputArtifactFingerprint": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "ReasonCodes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+      },
+      "uniqueItems": true
+    },
+    "RedactedFields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+      },
+      "uniqueItems": true
+    },
+    "SensitiveIdentifiersIncluded": { "const": false },
+    "ReadOnly": { "const": true }
+  },
+  "$defs": {
+    "deviceObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["DeviceClass", "Confidence", "Basis", "Count", "ReasonCodes"],
+      "properties": {
+        "DeviceClass": {
+          "enum": [
+            "XboxStylePad",
+            "OtherGamePad",
+            "Wheel",
+            "LightGun",
+            "ArcadeEncoder",
+            "Keyboard",
+            "PointerOrTrackball",
+            "Unknown"
+          ]
+        },
+        "Confidence": { "enum": ["High", "Medium", "Low"] },
+        "Basis": {
+          "enum": ["XInputSlotActive", "HidUsage", "WindowsDeviceClass", "NameHint"]
+        },
+        "Count": { "type": "integer", "minimum": 1 },
+        "ReasonCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+          },
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "Basis": { "const": "NameHint" } },
+            "required": ["Basis"]
+          },
+          "then": { "properties": { "Confidence": { "const": "Low" } } }
+        },
+        {
+          "if": {
+            "properties": { "Confidence": { "const": "High" } },
+            "required": ["Confidence"]
+          },
+          "then": {
+            "properties": {
+              "Basis": { "const": "XInputSlotActive" },
+              "DeviceClass": { "const": "XboxStylePad" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
