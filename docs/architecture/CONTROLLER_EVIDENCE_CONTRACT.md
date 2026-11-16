@@ -24,7 +24,7 @@ The #307 verification model owns the Verified status. Device presence is never p
 
 - `Observed`: the provider ran. `DeviceObservations` may still be empty.
 - `SourceUnavailable`: the provider is missing, timed out, or failed. `DeviceObservations` is empty and `ReasonCodes` says why.
-- `Rejected`: the provider output failed validation against this contract and was discarded.
+- `Rejected`: reserved for a future provider (such as HIP) whose output fails validation against this contract. The 1.0 local provider builds its own result and never returns it.
 
 Every status is a normal result. None of them blocks the Device Survey or Propagate Controls. With any status other than `Observed`, TPM behaves exactly as RC8.1 and asks the user.
 
@@ -32,7 +32,7 @@ Every status is a normal result. None of them blocks the Device Survey or Propag
 
 `Confidence` is `High`, `Medium`, or `Low`. `Basis` is `XInputSlotActive`, `HidUsage`, `WindowsDeviceClass`, or `NameHint`.
 
-In 1.0 only an active XInput slot with class `XboxStylePad` may be `High`. Every other basis is at most `Medium`. `NameHint` is always `Low`, because Windows often gives arcade hardware generic names. Only `High` may pre-fill an answer. `Medium` and `Low` may only be shown as "possible". Two sources that disagree lower the observation to `Low` with reason code `SourcesDisagree`.
+In 1.0 only an active XInput slot with class `XboxStylePad` may be `High`. Every other basis is at most `Medium`. `NameHint` is always `Low`, because Windows often gives arcade hardware generic names. Only `High` may pre-fill an answer. `Medium` and `Low` may only be shown as "possible".
 
 ## Time facts
 
@@ -42,7 +42,7 @@ In 1.0 only an active XInput slot with class `XboxStylePad` may be `High`. Every
 
 `EvidenceId` is deterministic: the SHA-256 of a canonical projection of the provider identity and the sorted `DeviceObservations`, excluding `ObservationTimeUtc`. The same connected controllers always give the same `EvidenceId`.
 
-Serial numbers, device instance IDs, device paths, MAC addresses, user names, machine names, and vendor or product numbers are never read, stored, logged, or reported. `SensitiveIdentifiersIncluded` is always false and `ReadOnly` is always true. A provider that cannot meet this must return `SourceUnavailable`. Detection writes no file, changes no setting, and starts no program. It is bounded to 5 seconds and returns `SourceUnavailable` with reason `Timeout` on expiry.
+Serial numbers, device instance IDs, device paths, MAC addresses, user names, machine names, and vendor or product numbers are never read, stored, logged, or reported. `SensitiveIdentifiersIncluded` is always false and `ReadOnly` is always true. A provider that cannot meet this must return `SourceUnavailable`. Detection writes no file, changes no setting, and starts no program. Each Windows query is limited to 3 seconds. If both probes (XInput and the device list) fail, the result is `SourceUnavailable`. If only one fails, the result is still `Observed` with a reason code for the failed probe.
 
 The schema is intentionally generic about the device list: `DeviceClass` is `XboxStylePad`, `OtherGamePad`, `Wheel`, `LightGun`, `ArcadeEncoder`, `Keyboard`, `PointerOrTrackball`, or `Unknown`. Per-game, per-emulator, and per-brand fields are not v1 fields.
 
@@ -75,6 +75,6 @@ All TPM code calls `Get-TpmControllerEvidence` and receives `TpmControllerEviden
 5. No identifier appears in the result (deny list of field names and patterns).
 6. Detection creates and changes no file (file listing before and after).
 7. The user's answer overrides a pre-filled value.
-8. The 5-second bound returns `SourceUnavailable` with reason `Timeout`.
-9. The result validates against the schema, and a result that does not validate is `Rejected`.
+8. When both probes fail, the result is `SourceUnavailable` and callers behave as in RC8.1.
+9. The result validates against the schema.
 10. The same controllers give the same `EvidenceId`, and changing `ObservationTimeUtc` does not change it.
