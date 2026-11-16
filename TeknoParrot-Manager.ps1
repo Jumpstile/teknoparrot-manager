@@ -16506,7 +16506,7 @@ function Request-TpmReShadeSourceDll {
         $rsAcquisition = Resolve-ReShadeDllAcquisition -Choice $rsGetChoice -InputPath $inp
         if ($rsAcquisition.State -eq 'Invalid') {
             if ($rsAcquisition.Reason -eq 'FileType') {
-                Write-Host "  That file does not appear to be a DLL. Cancelled." -ForegroundColor Red
+                Write-Host "  That file does not appear to be a DLL. Canceled." -ForegroundColor Red
                 Write-Log "ReShade setup: aborted -- file is not a .dll."
             } else {
                 Write-Host "  File not found. ReShade setup canceled." -ForegroundColor Red
@@ -27504,7 +27504,7 @@ function Start-PostgresRecoveryAsAdministrator {
                 [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
                 $adminHint = 'If your Windows account is not an administrator, close TeknoParrot Manager and start it again with "Run as administrator".'
                 if ($lastRoundCancelled) {
-                    $stopCause = 'the last Windows permission box was cancelled'
+                    $stopCause = 'the last Windows permission box was canceled'
                     $stopText = 'PostgreSQL setup did not start because the Windows permission box was canceled. Nothing was changed. Choose PostgreSQL setup again and click Yes when Windows asks. '
                 } elseif ($handoff -and $handoff.Valid -and $handoff.Result.Outcome -ne 'Completed') {
                     $stopCause = 'the administrator window reported a result and put the request back'

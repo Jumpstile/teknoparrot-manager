@@ -778,7 +778,7 @@ For shared-executable games (Raw Thrills' `sdaemon.exe` and similar), a folder w
 
 **Bug fix: AutoSync supplementary source prompt now shown correctly**
 
-- The supplementary ZIP folder prompt was being suppressed when the user accepted a saved configuration that predated the supplementary feature. Users with an existing config that had no supplementary folder set would never be asked to configure one. Fixed so the prompt now appears whenever the supplementary source is not configured, mirroring the behaviour of the main collection prompt. In Unattended mode the prompt is still skipped (configure it interactively first).
+- The supplementary ZIP folder prompt was being suppressed when the user accepted a saved configuration that predated the supplementary feature. Users with an existing config that had no supplementary folder set would never be asked to configure one. Fixed so the prompt now appears whenever the supplementary source is not configured, mirroring the behavior of the main collection prompt. In Unattended mode the prompt is still skipped (configure it interactively first).
 
 ---
 
