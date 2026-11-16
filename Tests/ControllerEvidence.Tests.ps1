@@ -56,7 +56,7 @@ Describe 'Get-TpmControllerEvidence' {
         @($result.DeviceObservations | Where-Object { $_.Confidence -eq 'High' -and $_.Basis -ne 'XInputSlotActive' }).Count | Should -Be 0
     }
 
-    It 'recognizes a board from a maker that only builds arcade boards, at Medium at most, without keeping the maker code' {
+    It 'recognizes a device from a maker that only builds arcade keyboard encoders, at Medium at most, without keeping the maker code' {
         Mock Get-CimInstance {
             @([pscustomobject]@{ Name = 'HID Keyboard Device'; DeviceID = 'HID\VID_D209&PID_0301&MI_00\7&1' },
               [pscustomobject]@{ Name = 'HID-compliant mouse'; DeviceID = 'HID\VID_D209&PID_0301&MI_01\7&2' },

@@ -16208,7 +16208,7 @@ function Get-TpmControllerEvidence {
                 $n = @($devices | Where-Object { [string]$_.Name -match $hints[$class] }).Count
                 if ($n -gt 0) { & $add $class 'Low' 'NameHint' $n }
             }
-            # A small list of makers that only build arcade boards. The maker code is used here and never kept in the result.
+            # A small list of makers that only build arcade keyboard encoders. The maker code is used here and never kept in the result.
             # A match is Medium at most: it says a board of that maker is plugged in, not what the buttons do.
             $knownVendors = [ordered]@{ 'D209' = 'ArcadeEncoder' }
             foreach ($vendor in $knownVendors.Keys) {
@@ -41157,9 +41157,9 @@ function Invoke-DeviceSurvey {
         if ($quick) { $hasXbox = $true }
     }
     if (-not $quick) {
-        # An arcade board looks like a keyboard to Windows, so say what we found and let the player confirm below.
+        # An arcade keyboard encoder looks like a keyboard to Windows, so say what we found and let the player confirm below.
         if (@($evidence.DeviceObservations | Where-Object { $_.DeviceClass -eq 'ArcadeEncoder' }).Count) {
-            Write-Host " Found: what looks like an arcade controls board." -ForegroundColor Green
+            Write-TpmText ' Found: what looks like an arcade keyboard encoder (the box your arcade buttons plug into).' -Color Green
             $keyMap = Get-TpmLedBlinkyKeyMap
             if ($keyMap.Found -and @($keyMap.Controls).Count) {
                 Write-TpmText "   Your lighting setup lists $(@($keyMap.Controls).Count) controls with their keys. You can confirm below." -Color DarkCyan
