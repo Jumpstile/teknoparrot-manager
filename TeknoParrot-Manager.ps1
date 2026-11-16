@@ -3722,6 +3722,7 @@ function Get-TpmSupportPluginInventory {
             }
         }
     } catch {
+        Write-Log ('Support plugin inventory for {0} failed: {1}' -f $GameCode, $_.Exception.Message)
         Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status CollectionFailed -Detail 'Plugin directories could not be inspected safely.' -EvidenceClass Ambient
         return
     }
@@ -4458,7 +4459,7 @@ function Write-TpmSupportPackageResult {
     if ($Result.Succeeded) {
         if ([bool](Get-TpmTransactionField -Object $Result -Name 'Partial' -Default $false)) {
             foreach ($partialReason in @(Get-TpmTransactionField -Object $Result -Name 'PartialReasons' -Default @())) { if (-not [string]::IsNullOrWhiteSpace([string]$partialReason)) { [void]$detailLines.Add(('Missing: {0}' -f $partialReason)) } }
-            foreach ($failedRecord in @(@(Get-TpmTransactionField -Object $Result -Name 'Records' -Default @()) | Where-Object { [string]$_.Status -eq 'CollectionFailed' })) { [void]$detailLines.Add(('Could not collect: {0}' -f [string]$failedRecord.Source)) }
+            foreach ($failedRecord in @(@(Get-TpmTransactionField -Object $Result -Name 'Records' -Default @()) | Where-Object { [string]$_.Status -eq 'CollectionFailed' })) { [void]$detailLines.Add(('Could not collect: {0}' -f [string]$failedRecord.Source)); if ([string]$failedRecord.Detail) { [void]$detailLines.Add(('  Why: {0}' -f [string]$failedRecord.Detail)) } }
             $blocks = @(@{ Heading = 'Support package'; Lines = $detailLines.ToArray() })
             Write-TpmOutcome -Title 'Support package created, but it is partial.' -Status Attention -Done @(('Saved as {0}.' -f $fileName), 'Some of the information could not be collected.') -Next 'You can still send this ZIP to support. Tell them it is marked partial, and which game and step failed. Press D to see what is missing.' -DetailBlocks $blocks -Unattended:$Unattended
             return
@@ -50926,7 +50927,15 @@ $mode = $null
             Write-Log "PropagateControls: unattended -- propagation = Y."
             $goCtl = "Y"
         } else {
-            $goCtl = Read-TpmControlCopyApproval -Pool @($pool) -BackupNote 'A saved copy of your game settings is made when you approve. Its folder is shown afterwards.'
+            # Show exactly what would change first (same code as the real run, nothing saved), then ask.
+            $previewTx = Invoke-TpmProgressGroup -Title 'Control propagation preview' -Action { Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap -canonicalArchetype $canonicalArchetypeMap -DryRun $true }
+            $previewCounts = Write-ControlPropagationResults -Reports @($previewTx.Reports) -DryRun $true -Outcome ([string]$previewTx.Outcome)
+            Write-Log ("PropagateControls: preview shown. controls={0} api={1} settings-only={2}" -f $previewCounts.ControlsCopiedCount, $previewCounts.ApiFixedCount, $previewCounts.SettingsOnlyCount)
+            if (($previewCounts.ControlsCopiedCount + $previewCounts.ApiFixedCount + $previewCounts.SettingsOnlyCount) -eq 0) {
+                $goCtl = 'N'
+            } else {
+                $goCtl = Read-TpmControlCopyApproval -Pool @($pool) -BackupNote 'A saved copy of your game settings is made when you approve. Its folder is shown afterwards.'
+            }
         }
         if ($goCtl.ToUpperInvariant() -eq "Y") {
             $propTransaction = Invoke-TpmProgressGroup -Title 'Control propagation' -Action { Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap -canonicalArchetype $canonicalArchetypeMap -DryRun $false }
@@ -50935,6 +50944,17 @@ $mode = $null
                 Write-Log "PropagateControls: completed. Controls/API corrected=$($propResult.BoundCount); settings-only=$($propResult.SettingsOnlyCount)"
             } elseif ($propTransaction.Outcome -eq 'NO_OP') {
                 Write-Log "PropagateControls: no profile writes were applied."
+            }
+            # One-step undo: the saved copy was made just before the first change, so it can be put back right here.
+            $undoFolder = [string]$propTransaction.Backup.RootPath
+            if (-not $Unattended -and $propTransaction.Outcome -in @('SUCCEEDED','PARTIAL_APPLIED') -and $undoFolder) {
+                Write-Host ""
+                if ((Read-TpmYesNo -Prompt "  Undo these changes and put your game settings back as they were? (Y/N)" -Default 'N') -eq 'Y') {
+                    $undoResult = Invoke-TpmProgressGroup -Title 'Undo control changes' -Action { Invoke-RestoreBackup -userProfilesDir $userProfilesDir -SelectedBackupPath $undoFolder -AlreadyConfirmed }
+                    Write-Log ("PropagateControls: undo requested; restore reported {0} ({1})" -f [string]$undoResult.Outcome, [string]$undoResult.ReasonCode)
+                    $undoColor = if ($undoResult.Outcome -eq 'SUCCEEDED') { 'Green' } else { 'Yellow' }
+                    Write-Host ("  " + [string]$undoResult.Summary) -ForegroundColor $undoColor
+                }
             }
         } else {
             Write-Host " Skipped control propagation." -ForegroundColor DarkGray
@@ -51517,7 +51537,26 @@ $mode = $null
         Write-Host "  Choose the folder directly containing your original .zip files, not a folder above it." -ForegroundColor DarkCyan
         Write-Host ("  This must be DIFFERENT from your games folder (staging folder): {0}" -f $gamesInstallFolder) -ForegroundColor Yellow
         Write-Host "  Example: <ROM folder>\TeknoParrot Collection" -ForegroundColor DarkCyan
-        $zipSource = Read-PathWithBrowse "  Path"
+        # Ask again after a closed browse window, an empty answer or a folder that does not exist; Q goes back to the menu.
+        $zipSource = ''
+        while ($true) {
+            $zipAnswer = ([string](Read-PathWithBrowse "  Path (Q to go back)")).Trim().Trim('"')
+            if ($zipAnswer.ToUpperInvariant() -eq 'Q') { break }
+            if ($zipAnswer -eq '') {
+                Write-Host "  No folder was chosen. Type the path again, type B to browse again, or Q to go back." -ForegroundColor Yellow
+                Write-Log ('AutoSync: no ZIP folder chosen (browse canceled: {0}); asking again.' -f [bool]$script:TpmPathBrowseCancelled)
+                if ($Unattended) { break }
+                continue
+            }
+            if (-not (Test-Path -LiteralPath $zipAnswer -PathType Container)) {
+                Write-Host "  That folder was not found. Check the spelling, type B to browse, or Q to go back." -ForegroundColor Yellow
+                Write-Log "AutoSync: ZIP folder not found: $zipAnswer; asking again."
+                if ($Unattended) { break }
+                continue
+            }
+            $zipSource = $zipAnswer
+            break
+        }
         if ([string]::IsNullOrWhiteSpace($zipSource)) {
             Write-Host "  No ZIP folder chosen. Nothing was changed." -ForegroundColor Yellow
             Write-Log "AutoSync: no ZIP folder chosen; returned to menu."; if (-not $Unattended) { [void](Read-HostSafe "  Press Enter to return to menu") }; continue
