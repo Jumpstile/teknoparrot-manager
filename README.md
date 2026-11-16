@@ -103,6 +103,9 @@ The [Quick Start guide](QUICKSTART.md) has more detail on each step, and [Start 
 
 ## Built to be safe
 
+![The Library Health Check result: a read-only report that changed nothing](docs/images/15-tpm-health-check.png)
+
+
 - Backups before anything is changed, and a one-step restore.
 - A preview mode that shows the planned changes without making them.
 - A free-space check and a full log of every run.

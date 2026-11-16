@@ -139,6 +139,11 @@ Expert workflows still detect first, preview supported changes, back up before w
 
 ## Run It
 
+![The TeknoParrot Manager welcome screen](docs/images/09-tpm-welcome.png)
+
+![The first-run questions: your TeknoParrot folder, your games folder and the folder naming choice](docs/images/12-tpm-first-run-questions.png)
+
+
 1. Double-click **`TeknoParrot-Manager.bat`**.
 
    You will see: a text window opens. This is the normal way to start TeknoParrot Manager, and it opens the menu for you.
@@ -235,6 +240,11 @@ Redirected, unattended, and certification runs use structured status events with
 
 ## Mode List
 
+![The TeknoParrot Manager main menu with 17 numbered choices](docs/images/13-tpm-main-menu.png)
+
+![The Help screen that explains each menu number](docs/images/14-tpm-help.png)
+
+
 This is the full menu. Type a number at `Enter 1-17:`.
 
 | # | Mode | What it does |
@@ -260,6 +270,9 @@ This is the full menu. Type a number at `Enter 1-17:`.
 ---
 
 ## Create Support Package
+
+![The Create Support Package screen with three choices](docs/images/16-tpm-support-package.png)
+
 
 If you need help, make a support package. It is one ZIP file with safe logs and reports.
 
@@ -724,6 +737,9 @@ TeknoParrot Manager chooses the stable x64 or x86 package from the game's execut
 Manual deletion of BepInEx files is not the normal workflow. TeknoParrot Manager only removes the fixed files it can verify as part of its own approved transaction.
 
 ## Required game patches
+
+![The Required game patches menu: install for all, install for one game, undo, or go back](docs/images/17-tpm-required-patches.png)
+
 
 Menu 12 fixes a missing file in certain game builds.
 
@@ -1286,6 +1302,9 @@ Keep any current settings you still need somewhere outside the folders being res
 ---
 
 ## Library Health Check
+
+![The Library Health Check result: a read-only report that changed nothing](docs/images/15-tpm-health-check.png)
+
 
 Mode 13 begins with a **read-only** assessment. It looks at your setup and does not change anything.
 

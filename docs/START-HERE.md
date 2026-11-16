@@ -269,6 +269,9 @@ Stuck? See [PowerShell is blocked](TROUBLESHOOTING.md#7-powershell-is-blocked).
 
 ## 5. Answer TeknoParrot Manager's first-run questions
 
+![The first-run questions: your TeknoParrot folder, your games folder and the folder naming choice](images/12-tpm-first-run-questions.png)
+
+
 TeknoParrot Manager asks a few questions the first time. Your answers are saved, so you do not answer them again.
 
 A [staging folder](#staging-folder) is simply your extracted-games folder. It must be a separate folder. It must not contain TeknoParrot, TeknoParrot Manager, or your ZIP folders.
@@ -386,6 +389,9 @@ Stuck? See [Nothing found](TROUBLESHOOTING.md#1-nothing-is-found) or [Network dr
 - If the DAT download fails, select an existing index or press **Enter** to skip.
 
 ## 6. Register your first game
+
+![The TeknoParrot Manager main menu with 17 numbered choices](images/13-tpm-main-menu.png)
+
 
 [Registration](#registration) tells TeknoParrot where your game is. It adds the game's settings file and its executable path to TeknoParrot.
 

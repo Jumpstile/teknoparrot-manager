@@ -508,6 +508,11 @@ Optional tools (ReShade, dgVoodoo2) are set up separately. See their sections be
 
 ## Running the Script
 
+![The TeknoParrot Manager welcome screen](images/09-tpm-welcome.png)
+
+![The first-run questions: your TeknoParrot folder, your games folder and the folder naming choice](images/12-tpm-first-run-questions.png)
+
+
 **Option A -- Double-click launcher (easiest):**
 
 ```
@@ -653,6 +658,11 @@ A very narrow window truncates the line.
 ---
 
 ## Modes
+
+![The TeknoParrot Manager main menu with 17 numbered choices](images/13-tpm-main-menu.png)
+
+![The Help screen that explains each menu number](images/14-tpm-help.png)
+
 
 The main menu repeats. After each mode finishes, you come back to the menu.
 
@@ -837,6 +847,9 @@ You can resize the window at any time. The menu, progress bars and the ReShade c
 ---
 
 ## Library Health Check
+
+![The Library Health Check result: a read-only report that changed nothing](images/15-tpm-health-check.png)
+
 
 Library Health Check looks over your games and tells you what it found.
 
@@ -3452,6 +3465,9 @@ See [Registration Evidence Ledger](#registration-evidence-ledger).
 ---
 
 ## Create Support Package
+
+![The Create Support Package screen with three choices](images/16-tpm-support-package.png)
+
 
 If something goes wrong, you can send the helpers a support package.
 It is one ZIP file with safe diagnostics inside.
