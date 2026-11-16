@@ -47,7 +47,7 @@ Fix:
 
    Next: continue with the preview.
 
-4. If your archives are `.rar` or `.7z` files, extract them yourself first. Then use Register only.
+4. If your archives are `.rar` or `.7z` files, extract them yourself first. Then use Register only. AutoSync tells you when it skips one.
 
    You will see: your extracted game folders.
 
@@ -67,9 +67,9 @@ Expected result: the game you want is listed for extraction or registration. Or 
 
 ## 2. A game is not matched
 
-Symptom: TeknoParrot Manager does not recognize a game folder. You may see this message: `3 game folder(s) not recognized by TeknoParrot (no matching profile) -- see the ACTION REQUIRED list saved below.`
+Symptom: TeknoParrot Manager does not recognize a game folder. You may see this message: `3 game folder(s) not matched to a TeknoParrot profile -- see the ACTION REQUIRED list saved below.`
 
-The report may show `GAME FOLDERS NOT RECOGNIZED BY TEKNOPARROT` or `REGISTER THESE GAMES IN TEKNOPARROTUI`. The end-of-run summary may show `3 game folders were not recognized by TeknoParrot.` (for one game: `1 game folder was not recognized by TeknoParrot.`).
+The report may show `GAME FOLDERS NOT MATCHED TO A TEKNOPARROT PROFILE` or `REGISTER THESE GAMES IN TEKNOPARROTUI`. The end-of-run summary may show `3 game folders were not recognized by TeknoParrot.` (for one game: `1 game folder was not recognized by TeknoParrot.`).
 
 Cause: TeknoParrot Manager found no ready-made game setup file (a profile) that fits the game's program file. This does not mean TeknoParrot will never support the game.
 
@@ -448,12 +448,13 @@ Expected result: the source can be reached and extraction goes where you intende
 
 Symptom: you need your earlier controls or settings back after a change.
 
-Choose **14) Restore backup** from the main menu. It shows four choices:
+Choose **14) Restore backup** from the main menu. It shows five choices:
 
 - `TeknoParrot UserProfiles backup`
 - `Postgres database backup`
 - `LaunchBox library backup (verified current-state backup first)`
 - `Reset and Restore: put back one game or all games from a restore point saved when TeknoParrot Manager started`
+- `Rebuild one game from its ZIP: put one game folder back to exactly what its ZIP holds (your old folder is kept)`
 
 Cause: the current settings are no longer what you want. These are separate kinds of saved copy.
 
@@ -639,7 +640,7 @@ Check these things first:
 - The required runtimes are installed.
 - Startup files are present. Some games need them from your own collection: PlayStation 3 firmware for RPCS3 games, four files for Chihiro games, or firmware for PCSX2x6 games. If one is missing, the Action Required list names the games that will not start and the next step. Put the matching file in your game collection and run TeknoParrot Manager again. It never downloads these files.
 - AutoSync said a game was not updated. It could not save the extra files in the old folder (saves, settings, ReShade files), or no Backups folder is set up. Nothing was changed for that game. Fix the Backups folder or free some space, then run AutoSync again.
-- Check for Updates cannot install in place (you run a build before RC8.1, such as RC8 or RC7). Install RC8.1 by hand once: after RC8.1 comes out, download its ZIP from the Releases page and extract all of its files over your TeknoParrot Manager folder. RC8.1 and later can update themselves.
+- Check for Updates cannot install in place (you run a build before RC9, such as RC8 or RC7). Install RC9 by hand once: when RC9 comes out, download its ZIP from the Releases page and extract all of its files over your TeknoParrot Manager folder. RC9 and later can update themselves.
 
 Then read that game's official compatibility information and TeknoParrot Manager's Game Notes documentation. Do this before you try any game-specific fix.
 

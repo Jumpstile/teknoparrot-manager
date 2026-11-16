@@ -2,12 +2,11 @@
   TeknoParrot Manager  --  CHANGELOG
   Author: Jumpstile
 ===============================================================================
-  Newest version first. RC7 is the latest published version. RC8.1 is the
-  interim build for testers and is not published yet. RC8 was a tester build
-  and was never published. The final RC9 comes later.
+  Newest version first. RC7 is the latest published version. RC9 is not
+  published yet. RC8 was a tester build and was never published.
 
 
-  v1.0 RC8.1 (changes since RC7)
+  v1.0 RC9 (changes since RC7)
   ----------------------------------------------------------------
 
   Updates
@@ -18,7 +17,10 @@
     back. It says so when there is not enough free space. Your own files
     and older files the release no longer has are never deleted. Then you
     start TeknoParrot Manager again yourself.
-  - Older builds cannot do this. Install RC8.1 by hand once: after RC8.1 is
+  - If an update was cut off (power loss or a closed window), the next
+    start says so and tells you how to get the old files back from the
+    UpdateBackups folder. It never deletes anything for you.
+  - Older builds cannot do this. Install RC9 by hand once: after RC9 is
     published, download the ZIP from the Releases page and extract it over
     your old folder.
   - A ZIP without the script, or a CPS3 ZIP that cannot be read, is
@@ -53,11 +55,28 @@
     D:\. Canceling the staging-folder picker asks again. Back in Reset and
     Restore returns to its menu.
 
+  Testing
+  - A new read-only validation report (-ValidationReport) checks a copy
+    and one TeknoParrot folder without any questions. It shows the version,
+    your games, which games still need PostgreSQL settings, how many
+    profiles support RawInput or RawInputTrackball, and any warnings. It
+    changes nothing and can save the result as one JSON file you name. See
+    the README for the exit codes.
+  - After you register a game that needs PostgreSQL, TeknoParrot Manager
+    asks once if you want to set it up now. Saying no changes nothing.
+
   Games and folders
+  - Registering now finds PCSX2x6 games: their .acgame files were never
+    looked at before, so those games did not register by name.
+  - Library Health Check has a Game support row. It says when a game
+    needs you (game file missing, second game file not chosen, PostgreSQL
+    settings missing). Details show the counts for each emulator.
   - AutoSync no longer stops when all your game ZIPs together are bigger
     than your free space. It tells you that is OK, and you pick only some
     games. Run it again later for the rest. Space is still checked before
     each game, and a game that does not fit is skipped with nothing changed.
+  - AutoSync says when it skips a .7z or .rar archive (it only unpacks
+    .zip files) and tells you to unpack it yourself, then use Register only.
   - AutoSync leaves a game folder alone when its ZIP did not change, so
     saves and settings you made are not replaced. When a changed ZIP does
     replace a folder, every file in it that is extra or different from the
@@ -74,9 +93,9 @@
     too long and changes nothing.
   - A game whose 32-bit or 64-bit type cannot be read is not counted as
     ready, and force feedback does not give it a 64-bit plugin.
-  - ReShade works with 64-bit games only. 32-bit games are skipped and the
-    guides do not ask for a 32-bit ReShade file. ReShade does not show its
-    welcome window, counters or messages when a game starts.
+  - ReShade works with both 32-bit and 64-bit games. Games that run through
+    BudgieLoader (a Linux-style game format) are skipped for now. ReShade does
+    not show its welcome window, counters or messages when a game starts.
   - Registering games and repairing paths keep a second executable path that
     points at a file that exists. A manual path repair checks its safety
     copy first and leaves a profile TeknoParrot changed meanwhile alone.
@@ -179,6 +198,11 @@
   - Restore points are made at start-up. A Reset and Restore menu keeps
     working after TeknoParrot is moved, and Restore all brings back
     TeknoParrot Manager's own settings, even after the tidy-up moved them.
+  - Restore backup has a new choice, Rebuild one game from its ZIP. It puts
+    a broken game folder back to exactly what its ZIP holds. The ZIP is
+    unpacked and checked first (and checked against the DAT list when the
+    game is in it). Your old folder is not deleted: it is kept aside, and
+    you can put it back or delete it from the same menu.
   - LaunchBox: games can be added directly. It asks first, waits for
     LaunchBox to close (it never closes it) and saves a checked copy of each
     file before writing. Restore lists UserProfiles, Postgres and LaunchBox
@@ -217,12 +241,27 @@
     counts a profile snapshot only if it is inside. A complete ZIP that
     left a temporary folder behind says it is ready to send and names the
     folder under Details.
+  - The package now says how the last finished job ended, such as a
+    setup that stopped, even after you restarted. It keeps the last few
+    step results with personal folder names removed.
 
   Other
   - Missing startup files are not listed under ACTION REQUIRED after they
     were copied. The run recap counts a DAT list you picked at start-up.
+  - If the only thing left is a game type that has no example game for
+    copying controls, the next step is still shown and saved.
+  - Game folders that match no TeknoParrot profile are now described
+    more carefully: the main file may just have a different name.
   - Release packages hold only the files users need. On a slow PC, a late
     drive check does not show a wrong "could not tell" warning.
+  - The game notes file now also lists the guide's setup steps, graphics
+    card notes and extra files for your registered games, not only the
+    free-text notes. It also names the extra archives a game needs (you
+    bring your own copy; none is downloaded), a linked profile, and a
+    game the guide lists as broken or only partly working. Nothing in it
+    is applied for you.
+  - The graphics card warning list has five more games that do not work
+    on an Intel graphics card.
 
 
   v1.0 RC7  (2026-08-22)

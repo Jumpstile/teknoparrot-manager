@@ -50,4 +50,17 @@ Before anything changes, a new restore point of your current settings is saved a
 
 </details>
 
+---
+
+## Rebuild one game from its ZIP
+
+This is option **5** in **14) Restore backup**. Use it when one game is broken and you do not know why. It puts the game folder back to exactly what is in the game's original ZIP.
+
+- You need the game's ZIP in the ZIP folder you use for AutoSync. If the DAT list knows the game, the ZIP is checked against it too.
+- You pick the game, read a short preview, and type **YES**. Any other answer cancels and nothing changes.
+- The ZIP is unpacked and checked in a temporary folder on the same drive. Your current folder is then renamed and kept in `TPM-old-game-folders`, beside your games folder. Nothing is copied twice and nothing is deleted. Saves and your own settings that are not in the ZIP stay in the old folder.
+- If anything goes wrong, your old folder is put back. The TeknoParrot settings for the game are not changed.
+- If the ZIP is not found, there is not enough free space, the ZIP does not match the DAT list, or the game is running, it says so and changes nothing.
+- In the same menu, **2** puts the old folder back (the rebuilt folder is kept instead) and **3** deletes an old folder after you type **YES**. Old folders use disk space until you delete them.
+
 Back to [[Home]].

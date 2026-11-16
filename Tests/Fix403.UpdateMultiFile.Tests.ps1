@@ -350,4 +350,78 @@ Describe 'Check for Updates installs a multi-file release (FIX403)' {
         Get-F403Text (Join-Path $app 'my notes.txt') | Should -BeExactly 'the user wrote this'
         Get-F403Text (Join-Path ([string]$result.TechnicalDetails.MultiFile.BackupFolder) 'TeknoParrot-Manager.ps1') | Should -BeExactly $oldMain
     }
+
+    It 'a file damaged on its way to disk is not installed and nothing changes' {
+        $program = New-F403Program
+        $script:f403ZipToServe = New-F403Zip -Path (Join-Path $TestDrive ('rel-' + [guid]::NewGuid().ToString('N') + '.zip')) -Entries (New-F403PackageEntries)
+        $before = Get-F403Tree -App $program.App
+        $script:f403RealExpand = ${function:Expand-ZipFileSafe}
+        # The real extraction runs, then one staged file is changed to other bytes of the same size (a bad write).
+        Mock Expand-ZipFileSafe {
+            & $script:f403RealExpand @PesterBoundParameters
+            [System.IO.File]::WriteAllText((Join-Path $DestDir 'scripts\Module.psm1'), 'NEW MODULE')
+        }
+
+        $result = Invoke-ManagerUpdateInstall -ScriptPath $program.Script -Release (New-F403Release)
+
+        $result.Outcome | Should -BeExactly 'FAILED_BEFORE_MUTATION'
+        $result.Installed | Should -BeFalse
+        Get-F403Tree -App $program.App | Should -BeExactly $before
+        Test-Path -LiteralPath (Join-Path $program.App 'UpdateBackups') | Should -BeFalse
+        @(Get-ChildItem -LiteralPath $program.App -Force -Filter 'tpm-update-staging-*').Count | Should -Be 0
+    }
+}
+
+Describe 'An update that was cut off is noticed at the next start (FIX403)' {
+    BeforeEach {
+        $script:f403Notice = New-Object System.Collections.Generic.List[string]
+        $script:f403NoticeLog = New-Object System.Collections.Generic.List[string]
+        Mock Write-Host { [void]$script:f403Notice.Add([string]$Object) }
+        Mock Write-Log { [void]$script:f403NoticeLog.Add([string]$msg) }
+        $script:Unattended = $false
+        $script:f403Prog = Join-Path $TestDrive ('np' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        [void][System.IO.Directory]::CreateDirectory((Join-Path $script:f403Prog 'UpdateBackups\TeknoParrotManager_2026-01-01_10-00-00'))
+    }
+
+    It 'says an update did not finish, how to get the old files back, logs it, and removes nothing' {
+        $staging = Join-Path $script:f403Prog 'tpm-update-staging-aaaa'
+        [void][System.IO.Directory]::CreateDirectory($staging)
+        [System.IO.File]::WriteAllText((Join-Path $staging '.tpm-update-running'), '')
+        [System.IO.File]::WriteAllText((Join-Path $staging 'moved-aside.txt'), 'the only copy')
+
+        Write-TpmInterruptedUpdateNotice -ProgramDir $script:f403Prog
+
+        $text = $script:f403Notice -join "`n"
+        $text | Should -Match 'An earlier update of TeknoParrot Manager did not finish\.'
+        $text | Should -Match 'UpdateBackups'
+        $text | Should -Match 'TeknoParrotManager_2026-01-01_10-00-00'
+        $text | Should -Match 'choose 15 \(Check for Updates\)'
+        @($script:f403NoticeLog | Where-Object { $_ -like 'Interrupted update:*tpm-update-staging-aaaa*' }).Count | Should -Be 1
+        Get-F403Text (Join-Path $staging 'moved-aside.txt') | Should -BeExactly 'the only copy'
+    }
+
+    It 'says nothing while another window is running an update (its marker is held open)' {
+        $staging = Join-Path $script:f403Prog 'tpm-update-staging-bbbb'
+        [void][System.IO.Directory]::CreateDirectory($staging)
+        $held = [System.IO.File]::Open((Join-Path $staging '.tpm-update-running'), [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        try {
+            Write-TpmInterruptedUpdateNotice -ProgramDir $script:f403Prog
+        } finally { $held.Dispose() }
+
+        $script:f403Notice.Count | Should -Be 0
+        $script:f403NoticeLog.Count | Should -Be 0
+    }
+
+    It 'says nothing when there is no unfinished update, and only logs it in an unattended run' {
+        Write-TpmInterruptedUpdateNotice -ProgramDir $script:f403Prog
+        $script:f403Notice.Count | Should -Be 0
+
+        $staging = Join-Path $script:f403Prog 'tpm-update-staging-cccc'
+        [void][System.IO.Directory]::CreateDirectory($staging)
+        [System.IO.File]::WriteAllText((Join-Path $staging '.tpm-update-running'), '')
+        $script:Unattended = $true
+        Write-TpmInterruptedUpdateNotice -ProgramDir $script:f403Prog
+        $script:f403Notice.Count | Should -Be 0
+        @($script:f403NoticeLog | Where-Object { $_ -like 'Interrupted update:*' }).Count | Should -Be 1
+    }
 }

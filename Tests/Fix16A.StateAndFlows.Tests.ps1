@@ -21,7 +21,7 @@ BeforeAll {
     $script:fix16SourceText = [System.IO.File]::ReadAllText($script:fix16SourcePath)
 
     $wanted = @(
-        'Test-TpmAutoSyncStateFile', 'Save-TpmInvalidAutoSyncStateCopy', 'Invoke-AutoSync',
+        'Test-TpmAutoSyncStateFile', 'Save-TpmInvalidAutoSyncStateCopy', 'Invoke-AutoSync', 'Write-TpmSkippedArchiveNotice',
         'Test-TpmNoReparsePath', 'Assert-TpmNoReparseWriteTarget', 'Test-PathInside',
         'Get-TpmTransactionOutcomeNames', 'Get-TpmTransactionProductStateNames', 'Get-TpmTransactionField',
         'Get-TpmTransactionItemKey', 'Get-TpmTransactionItemKeys', 'Test-TpmTransactionUserSafeSummary',

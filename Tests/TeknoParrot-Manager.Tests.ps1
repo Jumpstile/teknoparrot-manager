@@ -4778,7 +4778,7 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
     AfterEach {
         $env:TEMP = $script:rsSavedTemp
     }
-    It "locates and extracts only ReShade64.dll from a valid embedded archive with scan progress" {
+    It "locates and extracts ReShade64.dll and ReShade32.dll (but nothing else) from a valid embedded archive with scan progress" {
         $exe  = Join-Path $TestDrive "valid-setup.exe"
         $dest = Join-Path $TestDrive "valid-setup-out"
         New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64'; 'ReShade64.json' = '{}' }
@@ -4792,7 +4792,8 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
 
         Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
 
-        Test-Path -LiteralPath (Join-Path $dest "ReShade32.dll") | Should -BeFalse -Because 'ReShade works with 64-bit games only'
+        (Get-Content -LiteralPath (Join-Path $dest "ReShade32.dll") -Raw) | Should -Be 'r32'
+        Test-Path -LiteralPath (Join-Path $dest "ReShade64.json") | Should -BeFalse -Because 'only the two ReShade DLLs are kept'
         (Get-Content -LiteralPath (Join-Path $dest "ReShade64.dll") -Raw) | Should -Be 'r64'
         $signature = @($script:reshadeSfxProgress | Where-Object { $_.Label -eq 'ReShade installer signature scan' })
         @($signature | Where-Object { -not $_.Complete -and $_.Total -eq $expectedSignatureTotal }).Count | Should -BeGreaterThan 0
@@ -4808,7 +4809,7 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
         $exe=Join-Path $TestDrive 'setup-680-runtime-defaults.exe'; $dest=Join-Path $TestDrive 'setup-680-runtime-defaults-out'
         New-TestSelfExtractingExe $exe @{ 'ReShade32.dll'='r32'; 'ReShade64.dll'='r64'; 'ReShade.ini'="[PROXY]`r`nEnableProxyLibrary=0`r`n[INPUT]`r`nKeyOverlay=145`r`nMinimumWidth=160`r`nMinimumHeight=120" }
         Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
-        Test-Path -LiteralPath (Join-Path $dest 'ReShade32.dll') | Should -BeFalse
+        (Get-Content -LiteralPath (Join-Path $dest 'ReShade32.dll') -Raw) | Should -Be 'r32'
         (Get-Content -LiteralPath (Join-Path $dest 'ReShade64.dll') -Raw) | Should -Be 'r64'
         Test-Path -LiteralPath (Join-Path $dest 'ReShade.ini') | Should -BeFalse
     }
@@ -4901,7 +4902,7 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
         $before = @(Get-ChildItem -Path $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue).Count
         New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
         Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
-        (Get-ChildItem -LiteralPath $dest -Force).Name | Should -Be @('ReShade64.dll')
+        (Get-ChildItem -LiteralPath $dest -Force).Name | Should -Be @('ReShade32.dll', 'ReShade64.dll')
         @(Get-ChildItem -Path $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue).Count | Should -Be $before
     }
     It "Case 1 -- destination absent before the call, promotion fails on the very first required file: destination directory itself is removed again" {
@@ -5095,7 +5096,7 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
             Test-Path -LiteralPath $newStages[0].FullName -PathType Container | Should -BeTrue
             @(Get-ChildItem -LiteralPath $newStages[0].FullName -Force -Recurse -ErrorAction SilentlyContinue).Count | Should -Be 0
             Test-Path -LiteralPath (Join-Path $newStages[0].FullName '.tpm-rollback-backup') | Should -BeFalse
-            (Get-ChildItem -LiteralPath $dest -Force | Select-Object -ExpandProperty Name | Sort-Object) | Should -Be @('ReShade64.dll')
+            (Get-ChildItem -LiteralPath $dest -Force | Select-Object -ExpandProperty Name | Sort-Object) | Should -Be @('ReShade32.dll', 'ReShade64.dll')
             (Get-Content -LiteralPath (Join-Path $dest 'ReShade64.dll') -Raw) | Should -Be 'r64'
         } finally {
             # $stagingRoot lives under this test's private TEMP (BeforeEach); delete only that root.
@@ -11066,7 +11067,7 @@ Describe "Manager script version identity" {
     }
 
     It "extracts the current script's literal identity from its full source" {
-        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC8.1'
+        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC9'
     }
 
     It "ignores assignment-looking lines inside a here-string" {

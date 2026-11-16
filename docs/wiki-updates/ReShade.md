@@ -2,7 +2,7 @@
 
 ReShade adds visual filters on top of a game: CRT-style scanlines, a soft glow, deeper blacks and brighter whites. It is optional. Your games run fine without it. It is main menu item 5, **ReShade setup**.
 
-ReShade works with **64-bit games only**. 32-bit games are skipped and nothing in their folder changes.
+ReShade works with **both 32-bit and 64-bit games**. Games that run through BudgieLoader (a Linux-style game format) are skipped for now, and nothing in their folder changes.
 
 ---
 

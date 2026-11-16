@@ -143,7 +143,7 @@ function Invoke-VbtUpdateInstall {
     # unqualified; without it here, the main-menu Describe below fails with
     # "$DisplayVersion cannot be retrieved" the moment the menu renders.
     $ScriptVersion = "1.0"
-    $ReleaseCandidateLabel = "RC8.1"
+    $ReleaseCandidateLabel = "RC9"
     $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
     $script:logPath = Join-Path $TestDrive "vbt-human-workflow.log"
 

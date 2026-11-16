@@ -6,7 +6,7 @@ It is not TeknoParrot. It does not install or set up TeknoParrot itself.
 
 Allow about 10 minutes for TeknoParrot Manager setup and your first small game, once the downloads are ready. Installing TeknoParrot, downloading updates, extracting large games, and setting up a wheel or lightgun can take longer.
 
-This guide describes v1.0 RC8.1. If your menu looks different, follow the menu names.
+This guide describes v1.0 RC9. If your menu looks different, follow the menu names.
 
 Each step below has one action. "You will see" tells you what should appear. "Next" tells you what to do after that.
 
@@ -491,7 +491,7 @@ Pick the route that matches your game. Use route A if the game is already extrac
 
     Next: go to "Finish either route" below.
 
-AutoSync does not extract `.rar` or `.7z` game archives. Extract those yourself first, then use Register only.
+AutoSync does not extract `.rar` or `.7z` game archives. Extract those yourself first, then use Register only. AutoSync tells you when it skips one.
 
 Keep the original game files and ZIPs. Never delete leftover marker files just to clear an error.
 
@@ -642,7 +642,7 @@ Stuck? Start with [Troubleshooting](TROUBLESHOOTING.md), the game's official com
 - ReShade, change the look for all games: choose **5) ReShade setup**, then **S**. Pick the new look, choose **[U]** to use it, then **[Y]** to confirm. Then choose **A) All** registered games and **[Y] Yes**.
 - ReShade, change the look for one game: follow the same steps, but choose **L) Browse and select specific games**. Type that game's number, then type **D** (here **D** means "done").
 - ReShade, undo: choose **5**, then **U) Undo ReShade changes**. The games are listed newest first. Pick one game's number and type **YES**, or choose **[A] Undo all** and type **ALL**. Any other answer cancels, and nothing is changed.
-- ReShade works with 64-bit games only. 32-bit games are skipped and nothing in their folder changes.
+- ReShade works with both 32-bit and 64-bit games. Games that run through BudgieLoader (a Linux-style game format) are skipped for now, and nothing in their folder changes.
 - ReShade shows no welcome window, counters or messages when a game starts, and the key that opens it still works. A short ReShade version banner may still show for a moment at game start. ReShade has no setting to hide it.
 - After ReShade is applied, the result screen says `To turn the effect on or off, start a game and press the Home key.` It also says `Next: You can undo this in ReShade > Undo ReShade changes.`
 - If some games already have ReShade files that TeknoParrot Manager did not install, they are listed under `Not changed:` and left alone. You may then see the choices **A**, **S**, **B** and **D**.

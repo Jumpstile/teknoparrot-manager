@@ -509,5 +509,29 @@
             Disposition = 'FalsePositive'
             Reasoning   = '$name is drawn only from the fixed, hardcoded array of geometry field names (Width, Height, BufferWidth, BufferHeight) in the ReShade chooser resize check (FIX52). The geometry objects hold console size integers; no external value can select the property name used by this access.'
         }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 2346
+            Extent      = '$Snapshot.$name'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'In ConvertTo-TpmWorkflowEvidenceRecord $name iterates only over the fixed literal list WorkflowId, RunId, WorkflowKey, Lifecycle, State, Sequence. The snapshot is a TPM-owned workflow status object, and the access only reads a property after checking that it exists. No outside value can pick the property name.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 39720
+            Extent      = '$Row.$Name'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'In Get-TpmGuideText every caller passes a fixed literal field name, or a fixed vendor key (amd, nvidia, intel) joined to _issues or _status, or an item from the fixed list supp_archives, additional_archives. The row is parsed guide data, the access only reads a field after checking that it exists, and nothing is executed or written from it.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 54019
+            Extent      = '$Item.$Name'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The textOf helper in the game setup notes report is called only with fixed literal field names (BaseGame, GuideStatus, SecondFile, TestProgram, GeneralIssues, LinkedProfile and similar). The item is a TPM-built notes object, the access only reads a property after checking that it exists, and no outside value can pick the name.'
+        }
     )
 }

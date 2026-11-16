@@ -1,6 +1,6 @@
 # TeknoParrot Manager - Quick Start
 
-> This guide describes v1.0 RC8.1. RC8.1 is the interim build for testers and is not published yet. The final v1.0 RC9 comes later. The latest published release is v1.0 RC7 ([RC7 release page](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7)). The previous published release is v1.0 RC6. RC8 was a tester build and was never published. RC8.1 is the first version that can update itself in place. Final Version 1.0 remains unpublished. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
+> This guide describes v1.0 RC9. RC9 is not published yet. The latest published release is v1.0 RC7 ([RC7 release page](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7)). The previous published release is v1.0 RC6. RC8 was a tester build and was never published. RC9 is the first version that can update itself in place. Final Version 1.0 remains unpublished. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Full documentation: [README.md](README.md)
 
@@ -253,7 +253,7 @@ This is the full menu. Type a number at `Enter 1-17:`.
 | 12 | **Required game patches** | Find, validate, back up, install, verify, or undo a required fix for a supported exact game build, using your local ZIP |
 | 13 | **Library health check** | Reports registered/broken/unregistered games, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx counts, without changing anything. Any repair it suggests is a separate choice that you confirm first |
 | 14 | **Restore backup** | Put TeknoParrot game setup files (profiles), LaunchBox's library files, or Postgres databases back from an earlier saved copy. Saved copies are listed newest first |
-| 15 | **Check for Updates** | Check GitHub for a newer TeknoParrot Manager release and install it (RC8.1 and later) |
+| 15 | **Check for Updates** | Check GitHub for a newer TeknoParrot Manager release and install it (RC9 and later) |
 | 16 | **Create Support Package** | Gather safe logs and reports into one ZIP to send when asking for help |
 | 17 | **Exit** | Quit |
 
@@ -413,7 +413,7 @@ For Pcsx2x6 games, `cursor_path` stays emulator-owned under the current contract
 
 ReShade adds picture effects on top of a game: a sharper image, CRT-style scanlines, borders. It does not change game data.
 
-ReShade works with 64-bit games only. 32-bit games are skipped and nothing in their folder changes.
+ReShade works with both 32-bit and 64-bit games. Games that run through BudgieLoader (a Linux-style game format) are skipped for now, and nothing in their folder changes.
 
 **Popular effects:**
 
@@ -777,7 +777,7 @@ A successful patch does not prove the game is ready. Register the game, set up i
 
 **What this release contains**
 
-- RC8.1 has 120 exact recipes across 71 exact ProfileId/build/executable identities (54 game profiles).
+- RC9 has 120 exact recipes across 71 exact ProfileId/build/executable identities (54 game profiles).
 
 - The list started as the historical 13-entry baseline and the 58-entry PR #355 checkpoint, and has grown since.
 
@@ -1025,7 +1025,7 @@ Nothing is downloaded or changed unless you say Y.
 
 Your own files, `UserProfiles` and backups are never touched or deleted. If any file cannot be replaced, every file is put back and nothing changes. If the drive is too full, it says `There is not enough free space for the update` and installs nothing.
 
-**Using a build before RC8.1 (for example RC8 or RC7)?** Those builds cannot update in place. Install RC8.1 by hand once: after RC8.1 comes out, download the complete ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) and extract all of its files over your TeknoParrot Manager folder. Do the same if the check is unavailable.
+**Using a build before RC9 (for example RC8 or RC7)?** Those builds cannot update in place. Install RC9 by hand once: when RC9 comes out, download the complete ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) and extract all of its files over your TeknoParrot Manager folder. Do the same if the check is unavailable.
 
 The separate tool `tools\Invoke-TpmAutoUpdate.ps1 -Apply` still refuses a release with many files and changes nothing.
 
@@ -1118,6 +1118,15 @@ The answer is saved and never asked again.
 - Preserve configuration, extraction state and game backups before advanced changes.
 - Existing-folder detection may retain old names.
 - Do not delete state to force a populated-library conversion.
+
+### Already have games set up? Who does what
+
+- **Can TeknoParrot Manager still help if my games are already unzipped and partly set up?** Yes. You do not have to delete, move or reset anything first. Pick your TeknoParrot folder and the folder that holds your games, then choose **Register only** (2). It adds the games TeknoParrot does not know yet, and it asks before it fixes a broken game path. It does not delete your game folders.
+- **What does RetroBat mode change?** Only the names of the folders TeknoParrot Manager unpacks (`GameName.teknoparrot`). It does not change RetroBat, its settings or its game list.
+- **Who does what:** TeknoParrot Manager adds games to TeknoParrot, copies controls between games of the same type (after you say yes, with a backup first) and names the folders. TeknoParrot runs the games and keeps each game's controls and input type. RetroBat keeps its own game list and starts games its own way.
+- **Before you change controls, check:** the game shows up in TeknoParrotUI, it starts from TeknoParrotUI, and you set up one example game of that type yourself.
+- **Only a mouse and keyboard for now?** TeknoParrot Manager does not set up mouse or keyboard input. Set one game's controls in TeknoParrotUI (RawInput is the mouse and keyboard type), start it from TeknoParrot first, then use Propagate Controls (3) for the others and test one game. Starting from TeknoParrot and from RetroBat are two different ways to start a game. TeknoParrot Manager does not change how RetroBat starts a game and cannot tell you why one way works and the other does not.
+- **Later, with Sinden lightguns:** TeknoParrot Manager does not detect or set up lightguns. That happens in TeknoParrot and in the gun's own software.
 
 ---
 
@@ -1240,6 +1249,7 @@ Files already present are never overwritten.
    - **2) Postgres database backup** -- only relevant if you've used Postgres setup (mode 11); this replaces the _current_ content of each database restored
    - **3) LaunchBox library backup** -- only relevant if you've used direct LaunchBox integration
    - **4) Reset and Restore** -- put back one game or all games from a restore point saved when TeknoParrot Manager started
+   - **5) Rebuild one game from its ZIP** -- put one game folder back to exactly what its ZIP holds. It needs the game's ZIP in your ZIP folder, shows a preview, and asks for `YES`. Your old folder is not deleted: it is kept in `TPM-old-game-folders` beside your games folder. The same menu can put it back or delete it.
 
 3. Pick the backup you want by its number.
    You will see: the list of backups, **newest first**.
@@ -1404,12 +1414,12 @@ Each section below has a name and a plain meaning:
 
 | Section                          | Meaning                                                                                                                                                                                                                                                                                                          |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **GAME FOLDERS NOT RECOGNIZED BY TEKNOPARROT** | Folders whose executables matched no profile in the TeknoParrot GameProfiles folder, so they were not registered -- make sure TeknoParrot is up to date and TeknoParrotUI has been opened once (TeknoParrot Manager does not update or open it), then run Register only again; if still unmatched, they may be unsupported games or utilities/launchers |
+| **GAME FOLDERS NOT MATCHED TO A TEKNOPARROT PROFILE** | Folders whose executables matched no profile in the TeknoParrot GameProfiles folder, so they were not registered -- make sure TeknoParrot is up to date and TeknoParrotUI has been opened once (TeknoParrot Manager does not update or open it), then run Register only again; if still unmatched, they may be unsupported games, utilities/launchers, or games whose main file is named differently from what TeknoParrot expects (if you are sure TeknoParrot supports the game, add it in TeknoParrotUI yourself) |
 | **REGISTER THESE GAMES IN TEKNOPARROTUI** | Shared-exe games below confidence threshold -- choose a validated candidate in TeknoParrot Manager, or leave it unresolved for TeknoParrotUI |
 | **FIX THESE GAME PATHS IN TEKNOPARROTUI** | Profiles with broken paths that couldn't be auto-repaired -- open TeknoParrotUI and point each to the correct folder |
 | **EXTRACT THESE GAMES FIRST, THEN RE-RUN REPAIR** | Profiles pointing at unextracted games -- extract, then re-run and answer Y to the path repair question |
 | **CONTROLS NOT READY : (game code)** | Registered games whose catalog-backed controls are **Missing**, **Not verified**, **Unsupported**, or **Unknown**. Registration, a successful launch, and TeknoParrot wizard completion do not verify controls. Open TeknoParrot controls configuration and map/test controls before treating the game as ready. |
-| **Additional informational game notes** | Special setup notes from the community compatibility database are written to a separate notes file. The report names its path |
+| **Additional informational game notes** | Special setup notes from the community compatibility database are written to a separate notes file. For registered games it also lists the guide's setup steps, graphics card notes, extra files, the extra archives a game needs (bring your own copy; none is downloaded), a linked profile, and a game the guide lists as broken or only partly working. Nothing in it is applied for you. The report names its path |
 | **FILE VERSION MISMATCH -- THESE GAMES NEED A SPECIFIC OLDER FILE** | A game needs a specific older version of a file; the screen says which file |
 | **PATH TOO LONG -- THESE GAMES MAY FAIL TO LAUNCH** | The game folder path is too long; shorten it yourself |
 | **(EMULATOR NAME) FIRMWARE NOT INSTALLED** | Registered games whose emulator (PCSX2x6, Chihiro/CxbxR, RPCS3 for PlayStation 3) needs startup files TeknoParrot itself doesn't provide -- says which games will not start and gives one next step. If the files are in your own collection (the "[EMU]" archive, for example the PlayStation 3 firmware ZIP), it offers to copy or install them after checking them against the Eggman DAT list; it never downloads or redistributes them and never replaces a different file without asking. Play! games are also checked for their own settings file |
@@ -1480,7 +1490,7 @@ When a game is not recognized, make sure TeknoParrot is up to date and TeknoParr
 | Controls wrong after propagation | Review the mode 14 backup and later settings it would replace. Preserve needed current settings and fix the reference; do not delete XML merely to retry. |
 | Wrong fuzzy match | Preserve the UserProfile, confirm the correct official profile/GamePath, and use validated candidate/manual setup. forceArchetype is controls-only. |
 | Game appears twice in TeknoParrotUI | Confirm both profiles refer to the same game and preserve backups of both before removing a verified duplicate. Keep needed paths, bindings and settings. |
-| `[UNLOGGED]` on console                    | Log file is inaccessible -- check the shown log path and its folder permissions; the normal RC8.1 log is under TeknoParrotManager\Logs.                                                                        |
+| `[UNLOGGED]` on console                    | Log file is inaccessible -- check the shown log path and its folder permissions; the normal RC9 log is under TeknoParrotManager\Logs.                                                                        |
 | ReShade text or a window shows at game start | Run **5** (ReShade setup) for that game and pick a look again. TeknoParrot Manager writes `ReShade.ini` with the welcome window, counters and messages off. If it says the game was left alone, press **D** to read why. A short version banner at game start is normal. |
 | Postgres setup needs Windows permission | TeknoParrot Manager asks Windows automatically and resumes the same setup. Approve the Windows prompt; if you decline it, choose the automatic repair retry when TeknoParrot Manager offers it. |
 
@@ -1490,7 +1500,7 @@ When a game is not recognized, make sure TeknoParrot is up to date and TeknoParr
 
 `<ProgramFolder>` means the folder containing TeknoParrot-Manager.ps1.
 
-RC8.1 places its normal configuration and log under `<TeknoParrotRoot>\TeknoParrotManager\State\` and `Logs\`.
+RC9 places its normal configuration and log under `<TeknoParrotRoot>\TeknoParrotManager\State\` and `Logs\`.
 
 The table below lists each file, where it lives, and what it is for:
 
