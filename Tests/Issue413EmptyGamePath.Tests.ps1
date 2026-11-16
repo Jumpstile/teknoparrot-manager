@@ -5,7 +5,7 @@ Describe 'AutoSync registered-executable check (#413)' {
     BeforeAll {
         $text = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'))
         $s = $text.IndexOf('$registeredGamePath = ''''')
-        $script:block = $text.Substring($s, 2600)
+        $script:block = $text.Substring($s, 3800)
     }
 
     It 'treats an empty or missing game path as "nothing registered", not as an error' {
@@ -18,7 +18,8 @@ Describe 'AutoSync registered-executable check (#413)' {
         $script:block | Should -Match 'if \(\$registeredGamePath -and -not \(Test-Path'
     }
 
-    It 'still refuses a registered file that is missing and not inside the new folder' {
+    It 'ignores a saved game file that is missing at an old location only when a new folder is being made' {
+        $script:block | Should -Match 'missing at its old location'
         $script:block | Should -Match "throw 'Registered executable path could not be verified\.'"
     }
 

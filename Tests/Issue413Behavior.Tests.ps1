@@ -180,18 +180,37 @@ Describe 'AutoSync with a profile that has no game file yet (#413)' {
         $result.UnsafePathSkipped | Should -Be 0
     }
 
-    It 'still refuses a profile that points to a missing file outside the new folder, and changes nothing' {
+    It 'extracts a game whose saved game file is missing at an old location (library moved to another drive)' {
         $fx = New-Fix41Fixture
         $name = 'Pixel Game (1.0)[TP]'
         [void](New-Fix41GameZip -Fixture $fx -Name $name)
         $dat = @{ (Get-NormalizedGameKey $name) = [pscustomobject]@{ ProfileCode = 'PIXEL'; OriginalName = $name; Executable = 'game.exe' } }
-        $elsewhere = Join-Path (Join-Path $fx.Root 'Moved') 'game.exe'
-        [IO.File]::WriteAllText((Join-Path $fx.Profiles 'PIXEL.xml'), ('<GameProfile><GamePath>' + $elsewhere + '</GamePath></GameProfile>'), (New-Object Text.UTF8Encoding($false)))
+        $old = Join-Path (Join-Path $fx.Root 'OldDrive') 'game.exe'
+        [IO.File]::WriteAllText((Join-Path $fx.Profiles 'PIXEL.xml'), ('<GameProfile><GamePath>' + $old + '</GamePath></GameProfile>'), (New-Object Text.UTF8Encoding($false)))
+
+        $result = Invoke-Fix41AutoSync -Fixture $fx -DatIndex $dat
+
+        $result.Synced | Should -Be 1 -Because (Get-Fix41Diagnostic $result)
+        $result.UnsafePathSkipped | Should -Be 0
+        Test-Path -LiteralPath (Join-Path (Join-Path $fx.Games $name) 'game.exe') -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath (Split-Path -Parent $old) | Should -BeFalse
+    }
+
+    It 'still refuses a game that is already installed at another place, and changes nothing' {
+        $fx = New-Fix41Fixture
+        $name = 'Quartz Game (1.0)[TP]'
+        [void](New-Fix41GameZip -Fixture $fx -Name $name)
+        $dat = @{ (Get-NormalizedGameKey $name) = [pscustomobject]@{ ProfileCode = 'QUARTZ'; OriginalName = $name; Executable = 'game.exe' } }
+        $elsewhere = Join-Path (Join-Path $fx.Root 'Installed') 'game.exe'
+        [void][IO.Directory]::CreateDirectory((Split-Path -Parent $elsewhere))
+        [IO.File]::WriteAllText($elsewhere, 'installed elsewhere')
+        [IO.File]::WriteAllText((Join-Path $fx.Profiles 'QUARTZ.xml'), ('<GameProfile><GamePath>' + $elsewhere + '</GamePath></GameProfile>'), (New-Object Text.UTF8Encoding($false)))
 
         $result = Invoke-Fix41AutoSync -Fixture $fx -DatIndex $dat
 
         $result.Synced | Should -Be 0
         $result.UnsafePathSkipped | Should -Be 1
         Test-Path -LiteralPath (Join-Path $fx.Games $name) | Should -BeFalse
+        [IO.File]::ReadAllText($elsewhere) | Should -BeExactly 'installed elsewhere'
     }
 }

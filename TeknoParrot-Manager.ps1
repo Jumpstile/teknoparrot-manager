@@ -24587,7 +24587,14 @@ function Invoke-AutoSync {
                         # registered executable lies inside that new folder; the transaction then binds it to the
                         # matching ZIP entry before anything is written.
                         if (-not ($newGameFolder -and (Test-PathInside -child $registeredGamePath -parent $targetDir))) {
-                            throw 'Registered executable path could not be verified.'
+                            if ($newGameFolder) {
+                                # The saved game file is missing at an old location (for example the library moved to another drive).
+                                # Nothing is installed there, so extract into the new folder; registration points the profile at it afterwards.
+                                Write-Log ('AutoSync: the saved game file for ''{0}'' is missing at its old location; the game will be set up again in the new folder.' -f $rawName)
+                                $registeredGamePath = ''
+                            } else {
+                                throw 'Registered executable path could not be verified.'
+                            }
                         }
                     }
                 }
