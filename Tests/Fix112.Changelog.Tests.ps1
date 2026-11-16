@@ -55,7 +55,7 @@ Describe 'changelog format' {
         @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC8\.2 \(changes since RC8\.1\)\s*$' }).Count | Should -Be 1
     }
 
-    It 'is short (a page or two for RC8.1, not the long technical history)' {
+    It 'is short (a page or two for RC9, not the long technical history)' {
         # Mutation: paste the long technical history back into the shipped changelog.
         $script:F112Lines.Count | Should -BeLessThan 400
     }

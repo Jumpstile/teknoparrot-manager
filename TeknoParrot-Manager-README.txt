@@ -1,11 +1,16 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC8.2
+  TeknoParrot Manager  |  v1.0 RC9
   Author: Jumpstile
 ===============================================================================
 
   Registers your extracted games with TeknoParrot so they appear and launch
   automatically, copies your controls between games of the same type, and
   keeps your game library organized. Windows / PowerShell 5.1+.
+
+  Made for beginners, and useful if you already know TeknoParrot. It hides
+  complexity, not detail: repeatable bulk steps save manual work, it backs
+  up your game settings before it changes them, and Details and the log
+  show what was done. See docs\ADVANCED-USERS.md.
 
   This is v1.0 RC8.2, a fix-up release for RC8.1. It fixes problems that
   testers found. RC8.1 is the latest published release before it. If you
@@ -1826,6 +1831,8 @@
          4) Reset and Restore: put back one game or all games from a
             restore point saved when TeknoParrot Manager started
             Puts one game or all games back to a restore point.
+         5) Rebuild one game from its ZIP: put one game folder back to
+            exactly what its ZIP holds (your old folder is kept)
 
        Lists of saved copies show the newest one first:
 
@@ -1862,8 +1869,35 @@
          5) Remove older restore points
          B) Back
 
-       Next: for a single game, you confirm with YES. For all games, you
-       type YES and then ALL. Nothing changes before you confirm.
+       Next (choice 4): for a single game, you confirm with YES. For all
+       games, you type YES and then ALL. Nothing changes before you confirm.
+
+       Choice 5 (Rebuild one game from its ZIP) is for a game that is
+       broken for no clear reason. It puts the game folder back to
+       exactly what is in the game's original ZIP. You need that ZIP in
+       your ZIP folder. TeknoParrot Manager finds it by the names
+       AutoSync uses and, when the DAT list knows the game, checks the
+       ZIP against it. Its menu:
+
+         1) Rebuild one game from its ZIP
+         2) Put an old folder back (undo a rebuild)
+         3) Delete an old folder I no longer need
+         B) Back
+
+       Choice 1: pick a game, read the preview (files, size, where your
+       old folder will be kept) and type YES. The ZIP is unpacked and
+       checked in a temporary folder on the same drive. Your current
+       folder is then renamed and kept in TPM-old-game-folders, beside
+       your games folder. Nothing is copied twice or deleted. Saves and
+       your own settings that are not in the ZIP stay in the old folder.
+       If anything goes wrong, the old folder is put back. The TeknoParrot
+       settings for the game are not changed. If the ZIP is missing, the
+       disk is too full, the ZIP does not match the DAT list or the game
+       is running, it says so and changes nothing.
+       Choice 2 puts the old folder back. Choice 3 deletes an old folder
+       for good, after you type YES. Old folders use disk space until you
+       delete them.
+
 
   APPLICATION
   -----------
@@ -3677,6 +3711,14 @@
   It is not flagged as something to fix. ReShade is a per-game cosmetic
   choice, not a clear right-or-wrong answer like a GPU fix.
 
+  Library Health Check also has a Game support row. It says OK when nothing
+  is missing, or "Needs attention" when some games need you: a game file is
+  missing, a second game file (for example a CHD) is not chosen, or
+  PostgreSQL settings are missing. Choose D to see, for each emulator, how
+  many games are registered, have their game file and have setup steps in
+  your Game Notes file. The steps come from the copy of the Game Notes page
+  that TeknoParrot Manager saved earlier; this check never goes online.
+
   The health result screen offers direct [5] ReShade setup after the
   read-only report.
 
@@ -4588,11 +4630,11 @@
     If a newer version exists, it first explains what updating will do. Then
     it asks one Y/N question.
 
-  Installing the update (RC8.1 and later)
+  Installing the update (RC9 and later)
 
-    RC8.1 is the first version that can update itself in place. Builds before
-    RC8.1 (for example RC8 or RC7) cannot. If you have one of those, install
-    RC8.1 by hand once (see "To update by hand" below). After that, mode 15
+    RC9 is the first version that can update itself in place. Builds before
+    RC9 (for example RC8 or RC7) cannot. If you have one of those, install
+    RC9 by hand once (see "To update by hand" below). After that, mode 15
     does the work.
 
     When you say Y, TeknoParrot Manager does these things:
@@ -4623,7 +4665,7 @@
     tools\Invoke-TpmAutoUpdate.ps1 -Apply still refuses a release with
     many files and changes nothing.
 
-    To update by hand (needed once if you run a build before RC8.1):
+    To update by hand (needed once if you run a build before RC9):
 
       1. Download the complete release ZIP from
          https://github.com/Jumpstile/teknoparrot-manager/releases
@@ -4708,8 +4750,7 @@
   ------------------------------
 
   Version order: RC releases compare by numeric version, numeric RC number,
-  then final release -- for example, v1.0-RC7 < v1.0-RC8 < v1.0-RC8.1 <
-  v1.0-RC9 < 1.0. A label such as RC8.1 is a later build of RC8.
+  then final release -- for example, v1.0-RC7 < v1.0-RC9 < 1.0.
 
   Source check before replacement: both updater paths parse candidate source
   without executing it. They accept exactly one bare, unwrapped, unscoped
@@ -4832,6 +4873,69 @@
   The standard-mode prompt reads "Use RetroBat folder naming? (Y/N, default
   N)". Y means game folders are named GameName.teknoparrot instead of
   GameName.
+
+  ALREADY HAVE GAMES SET UP? WHO DOES WHAT
+  ----------------------------------------
+
+  Can TeknoParrot Manager still help if your games are already unzipped
+  and partly set up? Yes. You do not have to delete, move or reset
+  anything first. Pick your TeknoParrot folder and the folder that holds
+  your games, then choose Register only (2). It adds the games TeknoParrot
+  does not know yet, and it asks before it fixes a broken game path. It
+  does not delete your game folders.
+
+  What does RetroBat mode change? Only the names of the folders
+  TeknoParrot Manager unpacks: GameName.teknoparrot instead of GameName.
+  It does not change RetroBat, its settings or its game list.
+
+  Who does what:
+    TeknoParrot Manager  Adds your games to TeknoParrot, copies controls
+                         from a game you set up to games of the same type
+                         (after you say yes, with a backup first), applies
+                         the optional fixes you choose, names the folders.
+    TeknoParrot          Runs the games. Keeps each game's controls and
+                         input type (for example mouse and keyboard, a
+                         controller or a lightgun). Has its own first-time
+                         setup window.
+    RetroBat             Keeps its own game list and starts games its own
+                         way.
+
+  Before you change any controls, check three things: the game shows up
+  in TeknoParrotUI, it starts from TeknoParrotUI, and you set up one
+  example game of that type yourself.
+
+  Only a mouse and keyboard for now? TeknoParrot Manager does not set up
+  mouse or keyboard input and does not test your devices. Set the controls
+  for one game in TeknoParrotUI and choose its input type there (RawInput
+  is the mouse and keyboard type). Start that game from TeknoParrot first.
+  Then use Propagate Controls (3) to copy the setup to other games of the
+  same type, and test one game before you trust the rest. Starting a game
+  from TeknoParrot and starting it from RetroBat are two different ways to
+  start it. TeknoParrot Manager does not change how RetroBat starts a game
+  and cannot tell you why one way works and the other does not. If a game
+  works in TeknoParrot but not from RetroBat, look at RetroBat's
+  TeknoParrot settings or ask the RetroBat community.
+
+  Later, with Sinden lightguns: TeknoParrot Manager does not detect or set
+  up lightguns. That setup happens in TeknoParrot and in the gun's own
+  software. The crosshair option (4) only copies crosshair pictures to
+  lightgun games.
+
+  THE FIRST-TIME QUESTIONS IN PLAIN WORDS
+  ---------------------------------------
+
+  TeknoParrot folder: the folder with TeknoParrotUi.exe. TeknoParrot
+  Manager never installs TeknoParrot.
+  ZIP source folder (AutoSync only): where your game ZIPs are. TeknoParrot
+  Manager only reads from it.
+  Games folder (also called the staging folder): AutoSync unpacks games
+  here. For Register only, it is the parent folder of games you already
+  unpacked. It must not overlap either program or any ZIP source folder.
+  Eggman DAT (optional): a list of game names that helps match folders to
+  games. It is not a game download.
+  TeknoParrotUI's own first-time window: it belongs to TeknoParrot.
+  TeknoParrot Manager does not open or finish it. Open TeknoParrotUI once
+  yourself before you register.
 
 
 -------------------------------------------------------------------------------
@@ -4979,7 +5083,7 @@
   After scanning your staging folder (the folder where your games are
   extracted) and registering, the script may show a message like this:
 
-      1 game folder(s) not recognized by TeknoParrot (no matching profile) --
+      1 game folder(s) not matched to a TeknoParrot profile --
       see the ACTION REQUIRED list saved below.
 
   It means TeknoParrot did not recognize that game folder. The folder was
@@ -5005,7 +5109,7 @@
   Where to find the list:
 
     - The ACTION REQUIRED section at the end of the run lists the folder
-      names under GAME FOLDERS NOT RECOGNIZED BY TEKNOPARROT.
+      names under GAME FOLDERS NOT MATCHED TO A TEKNOPARROT PROFILE.
     - The end-of-run summary says "1 game folder was not recognized by
       TeknoParrot." (or "N game folders were not recognized by
       TeknoParrot.").
@@ -5271,8 +5375,8 @@
                               the DAT file, let it scan for games, and set
                               up controls.
 
-    GAME FOLDERS NOT RECOGNIZED BY TEKNOPARROT
-                              (no matching profile; not registered)
+    GAME FOLDERS NOT MATCHED TO A TEKNOPARROT PROFILE
+                              (not registered)
                               Game folders that TeknoParrot did not
                               recognize, so they were not registered.
                               Next: update TeknoParrot, open TeknoParrotUI
@@ -5364,8 +5468,13 @@
   line "Additional informational game notes were written separately to:"
   and the path of TeknoParrot-Manager-game-notes.txt. The notes come
   from the community compatibility database
-  (eggmansworld.github.io/TeknoParrot). They can be workarounds or known
-  quirks. Information only.
+  (eggmansworld.github.io/TeknoParrot). They can be workarounds, known
+  quirks, setup steps (such as which ZIP or disc file to select),
+  graphics card notes, extra files, the extra archives a game needs (use
+  your own copy; none is downloaded), a linked profile (the same game
+  with another setup) and a game the guide lists as broken or only
+  partly working. Information only: nothing in the file is applied for
+  you.
 
   The checks run on their own on every AutoSync/Register run. You do not
   need to choose a special mode.
@@ -5494,6 +5603,26 @@
   Exit codes: 0 means the check finished, even if it found problems in
   your library. 2 means some checks could not finish. 1 means no mode was
   set.
+
+  VALIDATION REPORT (FOR RELEASE AND TEST PCs)
+
+  To check a copy without any questions, run:
+
+      .\TeknoParrot-Manager.ps1 -ValidationReport -ValidationRoot "D:\TeknoParrot" -ValidationJsonPath "D:\report.json"
+
+  It prints the version and script checksum, the PowerShell and Windows
+  versions, your TeknoParrot folder and saved settings (the saved
+  PostgreSQL password is only shown as yes or no), how many games are
+  registered, which games still need PostgreSQL settings, how many profiles
+  support, do not support or do not say whether they support RawInput and
+  RawInputTrackball, the files that ship with TeknoParrot Manager and the
+  compatibility warnings. -ValidationRoot is optional when your settings
+  are saved. -ValidationJsonPath is optional and is the only file it
+  writes. It never changes TeknoParrot, your game profiles, your saved
+  settings or the log.
+
+  Exit codes: 0 pass, 3 action required, 4 failed (for example no
+  TeknoParrot folder), 1 the report could not be made.
 
   SCHEDULING WITH WINDOWS TASK SCHEDULER
 
@@ -6068,7 +6197,7 @@
 
 
 ===============================================================================
-  v1.0 RC8.1 (not published yet). The latest published release is v1.0 RC7.
+  v1.0 RC9 (not published yet). The latest published release is v1.0 RC7.
   Test one game after every run. AutoSync backs up UserProfiles before
   extraction; preview mode skips the backup.
 ===============================================================================

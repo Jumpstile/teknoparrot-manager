@@ -28,6 +28,7 @@ One line per area. Each line starts with `OK`, `Needs attention`, `Not checked` 
 | [[dgVoodoo2]] | Games that need dgVoodoo2 but do not have it yet. |
 | [[Postgres Setup]] | Whether PostgreSQL is installed and running, whether games still need setup, and whether each game database is there and opens. A database that is not ready shows as `Problem - <game>`. |
 | Game startup files | Games whose emulator is missing files it needs to start. See below. |
+| Game support | Whether games need you: a game file is missing, a second game file (for example a CHD) is not chosen, or PostgreSQL settings are missing. Press `D` for counts per emulator. The setup steps come from the saved copy of the Game Notes page; this check never goes online. |
 
 The last lines give the verdict: `Everything looks fine.` or `Some things need attention.` If a check could not finish, you see `Some checks could not finish, so this is not an all-clear.` A game in a very long folder path counts as not fully checked.
 
@@ -72,5 +73,7 @@ Windows Task Scheduler can run the health check without anyone at the keyboard. 
 3. In Task Scheduler, create a task that starts `powershell.exe` with the arguments `-ExecutionPolicy Bypass -NonInteractive -File "C:\path\to\TeknoParrot-Manager.ps1" -Unattended`.
 
 An unattended run never asks questions and never starts a follow-up action. Exit code 0 means the check finished, even if it found problems. Exit code 2 means some checks could not finish. Without saved settings you see `ERROR: Unattended mode requires saved settings.` Without `UnattendedMode` you see `[Unattended] Mode must be set before starting.` Look in `TeknoParrot-Manager.log` after each run.
+
+To check a copy before a release or on a test PC without any questions, run `.\TeknoParrot-Manager.ps1 -ValidationReport` (optional: `-ValidationRoot "<your TeknoParrot folder>"` and `-ValidationJsonPath "<report file>"`). It is read-only; the JSON file is the only thing it writes. Exit code 0 means pass, 3 action required, 4 failed (for example no TeknoParrot folder), 1 the report could not be made.
 
 </details>

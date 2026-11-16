@@ -2,14 +2,14 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-RC7 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. RC8.1 is the interim build for testers and is not published yet. The final v1.0 RC9 comes later. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
+RC7 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. RC9 is not published yet. RC9 is the first version that can update itself in place. RC8 was a tester build and was never published.
 The previous published release was v1.0 RC6. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
 ---
 
-## v1.0 RC8.1 (changes since RC7)
+## v1.0 RC9 (changes since RC7)
 
 ### Updates
 - Check for Updates installs the whole release (scripts, data and tools),
@@ -19,7 +19,7 @@ The previous published release was v1.0 RC6. RC4 and RC5 are historical; RC4 is 
   back. It says so when there is not enough free space. Your own files
   and older files the release no longer has are never deleted. Then you
   start TeknoParrot Manager again yourself.
-- Older builds cannot do this. Install RC8.1 by hand once: after RC8.1 is
+- Older builds cannot do this. Install RC9 by hand once: after RC9 is
   published, download the ZIP from the Releases page and extract it over
   your old folder.
 - A ZIP without the script, or a CPS3 ZIP that cannot be read, is
@@ -55,6 +55,13 @@ The previous published release was v1.0 RC6. RC4 and RC5 are historical; RC4 is 
   Restore returns to its menu.
 
 ### Games and folders
+- Registering now finds PCSX2x6 games: their .acgame files were never
+  looked at before, so those games did not register by name.
+- Library Health Check has a Game support row. It says when a game
+  needs you (game file missing, second game file not chosen, PostgreSQL
+  settings missing). Details show the counts for each emulator.
+- AutoSync says when it skips a .7z or .rar archive (it only unpacks
+  .zip files) and tells you to unpack it yourself, then use Register only.
 - AutoSync leaves a game folder alone when its ZIP did not change, so
   saves and settings you made are not replaced. When a changed ZIP does
   replace a folder, every file in it that is extra or different from the
@@ -71,9 +78,9 @@ The previous published release was v1.0 RC6. RC4 and RC5 are historical; RC4 is 
   too long and changes nothing.
 - A game whose 32-bit or 64-bit type cannot be read is not counted as
   ready, and force feedback does not give it a 64-bit plugin.
-- ReShade works with 64-bit games only. 32-bit games are skipped and the
-  guides do not ask for a 32-bit ReShade file. ReShade does not show its
-  welcome window, counters or messages when a game starts.
+- ReShade works with both 32-bit and 64-bit games. Games that run through
+  BudgieLoader (a Linux-style game format) are skipped for now. ReShade does
+  not show its welcome window, counters or messages when a game starts.
 - Registering games and repairing paths keep a second executable path that
   points at a file that exists. A manual path repair checks its safety
   copy first and leaves a profile TeknoParrot changed meanwhile alone.
@@ -176,6 +183,11 @@ The previous published release was v1.0 RC6. RC4 and RC5 are historical; RC4 is 
 - Restore points are made at start-up. A Reset and Restore menu keeps
   working after TeknoParrot is moved, and Restore all brings back
   TeknoParrot Manager's own settings, even after the tidy-up moved them.
+- Restore backup has a new choice, Rebuild one game from its ZIP. It puts
+  a broken game folder back to exactly what its ZIP holds. The ZIP is
+  unpacked and checked first (and checked against the DAT list when the
+  game is in it). Your old folder is not deleted: it is kept aside, and
+  you can put it back or delete it from the same menu.
 - LaunchBox: games can be added directly. It asks first, waits for
   LaunchBox to close (it never closes it) and saves a checked copy of each
   file before writing. Restore lists UserProfiles, Postgres and LaunchBox

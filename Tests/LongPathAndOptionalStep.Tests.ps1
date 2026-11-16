@@ -301,7 +301,7 @@ Describe 'ReShade readiness for a game in a path over 259 characters' {
         @($summary.Records | Where-Object Game -eq 'Lp-x64')[0].Status | Should -BeExactly 'Ready'
         $x86 = @($summary.Records | Where-Object Game -eq 'Lp-x86')[0]
         $x86.Status | Should -BeExactly 'Unsafe'
-        $x86.Detail | Should -BeExactly '32-bit game: ReShade works with 64-bit games only.'
+        $x86.Detail | Should -BeExactly '32-bit game: the 32-bit ReShade file (ReShade32.dll) was not found.'
         @($summary.Records | Where-Object Game -eq 'Lp-junk')[0].Detail | Should -Match 'could not tell whether this game is 32-bit or 64-bit'
         $summary.Ready | Should -Be 1
     }

@@ -471,7 +471,7 @@ work is a planning group for that gap. It is not an RC8 scope expansion.
 
 ### #200 controls and readiness design record (post-1.0 only)
 
-RC8.1 does not implement broad automatic controller or context-aware mapping.
+RC9 does not implement broad automatic controller or context-aware mapping.
 The standing simplicity rule remains: the eventual product should configure
 each game automatically, not make a beginner understand TeknoParrot mapping
 internals or manually reproduce raw mapping decisions.
@@ -495,7 +495,7 @@ Before any #200 implementation is authorized, the post-1.0 design must define:
   become TPM authority without independent source, version, ownership, and
   compatibility validation.
 
-RC8.1 user-facing status must remain beginner-readable: use `Controls not tested
+RC9 user-facing status must remain beginner-readable: use `Controls not tested
 yet` or `Some controls are configured, but TPM has not verified this game yet`
 when positive verification evidence is absent. Registration, launch
 observation, controls readiness, and verification remain separate.

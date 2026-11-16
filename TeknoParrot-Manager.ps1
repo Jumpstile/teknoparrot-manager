@@ -1,4 +1,4 @@
-# TeknoParrot Manager  |  v1.0 RC8.2
+# TeknoParrot Manager  |  v1.0 RC9
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,10 @@
 param(
     [switch]$Unattended,
     [switch]$DryRun,
-    [string]$PostgresRecoveryResumeToken = ''
+    [string]$PostgresRecoveryResumeToken = '',
+    [switch]$ValidationReport,
+    [string]$ValidationRoot = '',
+    [string]$ValidationJsonPath = ''
 )
 
 # TPM draws every progress bar itself (scripts\TpmProgress.psm1). Silence the PowerShell native progress display for the
@@ -84,7 +87,7 @@ $script:TpmIndependentProgressTasks = @{}
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
 $ScriptVersion = "1.0"
-$ReleaseCandidateLabel = "RC8.2"
+$ReleaseCandidateLabel = "RC9"
 $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
 
 function Get-ManagerDisplayVersion {
@@ -1170,6 +1173,7 @@ function Get-TpmSessionRunId {
 
 function Write-Log {
     param([string]$msg)
+    if (Get-Variable -Name TpmValidationReportActive -Scope Script -ValueOnly -ErrorAction SilentlyContinue) { return }   # the read-only validation report writes no log
     $line = "[{0}] [RunId={1}] {2}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture), (Get-TpmSessionRunId), $msg
     if ([string]::IsNullOrWhiteSpace($logPath)) {
         Write-Host ("  [UNLOGGED] {0}" -f $msg) -ForegroundColor DarkGray
@@ -2324,6 +2328,65 @@ function Get-TpmWorkflowStatusSnapshot {
         TransactionPresentationRequired = [bool]$Context.TransactionPresentationRequired
     }
 }
+# Small redacted record of the last finished workflow (what it did and how it ended). It is kept in State so a support
+# package made after a restart still shows it. Best effort: it never stops or changes the workflow itself.
+function ConvertTo-TpmWorkflowEvidenceRecord {
+    param([Parameter(Mandatory)]$Snapshot)
+    $text = { param($value) if ($null -eq $value) { $null } else { (Redact-TpmSupportText -Text ([string]$value)).Text } }
+    $has = { param($name) [bool]$Snapshot.PSObject.Properties[$name] }
+    $completed = @()
+    if (& $has 'Completed') {
+        $completed = @(@($Snapshot.Completed) | Where-Object { $null -ne $_ } | ForEach-Object {
+            [ordered]@{ Summary = (& $text $_.Summary); Outcome = (& $text $_.Outcome) }
+        })
+    }
+    $record = [ordered]@{ SchemaVersion = 1 }
+    $record['SavedUtc'] = if (& $has 'SavedUtc') { [string]$Snapshot.SavedUtc } else { (Get-Date).ToUniversalTime().ToString('o') }
+    foreach ($name in @('WorkflowId', 'RunId', 'WorkflowKey', 'Lifecycle', 'State', 'Sequence')) {
+        $record[$name] = if (& $has $name) { $Snapshot.$name } else { $null }
+    }
+    foreach ($name in @('Title', 'Activity', 'NextStep')) {
+        $record[$name] = if (& $has $name) { & $text $Snapshot.$name } else { $null }
+    }
+    $record['Completed'] = $completed
+    $failure = $null
+    if ((& $has 'Failure') -and $null -ne $Snapshot.Failure) {
+        $failureHas = { param($name) [bool]$Snapshot.Failure.PSObject.Properties[$name] }
+        $failure = [ordered]@{
+            FailureId = if (& $failureHas 'FailureId') { [string]$Snapshot.Failure.FailureId } else { $null }
+            Message = if (& $failureHas 'Message') { & $text $Snapshot.Failure.Message } else { $null }
+            DataSafety = if (& $failureHas 'DataSafety') { & $text $Snapshot.Failure.DataSafety } else { $null }
+        }
+    }
+    $record['Failure'] = $failure
+    return $record
+}
+function Save-TpmLastWorkflowRecord {
+    param([Parameter(Mandatory)]$Snapshot)
+    try {
+        if (-not ($script:TpmOwnedLayout -and $script:TpmOwnedLayout.State)) { return }
+        $stateDir = [string]$script:TpmOwnedLayout.State
+        [void][System.IO.Directory]::CreateDirectory($stateDir)
+        $json = (ConvertTo-TpmWorkflowEvidenceRecord -Snapshot $Snapshot | ConvertTo-Json -Depth 5) + "`r`n"
+        Write-TpmAtomicTextFile -Path (Join-Path $stateDir 'TPM-LastWorkflow.json') -Text $json -Operation 'last workflow record write'
+    } catch {
+        Write-Log "Last workflow record: could not be saved -- $($_.Exception.Message)"
+    }
+}
+function Read-TpmLastWorkflowRecord {
+    param([Parameter(Mandatory)][string]$StateDirectory)
+    try {
+        $path = Join-Path $StateDirectory 'TPM-LastWorkflow.json'
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+        if ((Get-Item -LiteralPath $path -ErrorAction Stop).Length -gt 65536) { return $null }
+        $record = [System.IO.File]::ReadAllText($path) | ConvertFrom-Json -ErrorAction Stop
+        if ($null -eq $record -or -not $record.PSObject.Properties['WorkflowKey']) { return $null }
+        return $record
+    } catch {
+        Write-Log "Last workflow record: could not be read -- $($_.Exception.Message)"
+        return $null
+    }
+}
 function Publish-TpmWorkflowStatusEvent {
     param(
         [Parameter(Mandatory)]$Context,
@@ -2347,6 +2410,7 @@ function Publish-TpmWorkflowStatusEvent {
     $statusEvent.StateAfter = $Context.State
     if ($EventKind -in @('WorkflowCompleted','WorkflowAborted')) {
         $script:LatestTpmWorkflowResult = Get-TpmWorkflowStatusSnapshot -Context $Context
+        if ([string]$Context.WorkflowKey -ne 'SupportPackage') { Save-TpmLastWorkflowRecord -Snapshot $script:LatestTpmWorkflowResult }
     }
     if ($Context.EventSink) { [void](& $Context.EventSink $statusEvent) }
     Write-Log ("Workflow event: {0} workflow={1} step={2} state={3} summary={4}" -f $EventKind, $Context.WorkflowKey, $statusEvent.StepId, $statusEvent.StateAfter, $statusEvent.Summary)
@@ -3983,6 +4047,12 @@ function New-TpmSupportPackage {
     $ledgerProjection = $null
     $runId = Get-TpmSessionRunId
     $latestWorkflowResult = $script:LatestTpmWorkflowResult
+    $latestWorkflowFromEarlierRun = $false
+    if (-not $latestWorkflowResult) {
+        # After a restart the in-memory result is gone; use the small record the last workflow left behind (#365).
+        $latestWorkflowResult = Read-TpmLastWorkflowRecord -StateDirectory (Join-Path $ScriptRoot 'State')
+        if ($latestWorkflowResult) { $latestWorkflowFromEarlierRun = ([string]$latestWorkflowResult.RunId -ne [string]$runId) }
+    }
     $status = New-TpmWorkflowStatusContext -WorkflowKey 'SupportPackage' -Title 'Create support package' -Steps @(
         @{ Id = 'tpm'; Label = 'Collect TPM diagnostics' }
         @{ Id = 'tekno'; Label = 'Collect TeknoParrot diagnostics' }
@@ -4200,14 +4270,9 @@ function New-TpmSupportPackage {
             SchemaVersion = 1
             RunId = $runId
             LatestWorkflow = if ($latestWorkflowResult) {
-                [ordered]@{
-                    WorkflowId = $latestWorkflowResult.WorkflowId
-                    RunId = $latestWorkflowResult.RunId
-                    WorkflowKey = $latestWorkflowResult.WorkflowKey
-                    Lifecycle = $latestWorkflowResult.Lifecycle
-                    State = $latestWorkflowResult.State
-                    Sequence = $latestWorkflowResult.Sequence
-                }
+                $latestWorkflowRecord = ConvertTo-TpmWorkflowEvidenceRecord -Snapshot $latestWorkflowResult
+                $latestWorkflowRecord['FromEarlierRun'] = $latestWorkflowFromEarlierRun
+                $latestWorkflowRecord
             } else { $null }
             SupportWorkflowAtArchiveSnapshot = [ordered]@{
                 WorkflowId = $supportWorkflowSnapshot.WorkflowId
@@ -6687,6 +6752,59 @@ function Test-TpmDirectoryAgainstZipInventory {
     }
 }
 
+# 'Enough', 'Short' or 'Unknown': is there room for RequiredBytes on the drive of Path? A network share (no drive letter)
+# cannot be sized here, so it counts as 'Enough'; a write that runs out of room there is rolled back by the transaction.
+function Get-TpmAutoSyncStagingSpaceState {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][int64]$RequiredBytes)
+    try {
+        $driveRoot = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($Path))
+        if ($driveRoot.StartsWith('\\')) { return 'Enough' }
+        $drive = New-Object System.IO.DriveInfo($driveRoot)
+        if ([int64]$drive.AvailableFreeSpace -lt $RequiredBytes) { return 'Short' }
+        return 'Enough'
+    } catch { return 'Unknown' }
+}
+
+# Does a ZIP hold the files the DAT lists for its game? Every DAT file must be in the ZIP with the DAT size and,
+# when Sha1ByPath is given (relative path, lower case -> SHA-1 taken while the file was written), the DAT SHA-1.
+# Extra files in the ZIP are not a mismatch. Returns @{ Matches; Summary; Checked; Hashed }.
+function Test-TpmZipFilesAgainstDatList {
+    param([Parameter(Mandatory)][object[]]$DatFiles, [Parameter(Mandatory)]$Inventory, [hashtable]$Sha1ByPath = $null)
+    $zipFiles = @{}
+    foreach ($entry in @($Inventory.Entries)) {
+        if (-not [bool](Get-TpmTransactionField -Object $entry -Name 'IsDirectory')) { $zipFiles[([string]$entry.RelativePath).ToLowerInvariant()] = $entry }
+    }
+    $problems = New-Object System.Collections.Generic.List[string]
+    $checked = 0
+    $hashed = 0
+    foreach ($datFile in @($DatFiles)) {
+        $rawName = [string]$datFile.Name
+        if ([string]::IsNullOrWhiteSpace($rawName) -or $rawName.EndsWith('/') -or $rawName.EndsWith('\')) { continue }
+        $key = $rawName.Replace('/', '\').Trim('\').ToLowerInvariant()
+        $checked++
+        if (-not $zipFiles.ContainsKey($key)) { [void]$problems.Add(('missing from the ZIP: ' + $rawName)); continue }
+        [int64]$datSize = -1
+        if ([int64]::TryParse([string]$datFile.Size, [ref]$datSize) -and $datSize -ge 0 -and [int64]$zipFiles[$key].Length -ne $datSize) {
+            [void]$problems.Add(('size differs: ' + $rawName))
+            continue
+        }
+        $datSha1 = ([string]$datFile.Sha1).Trim()
+        if ($null -ne $Sha1ByPath -and $datSha1) {
+            $haveSha1 = [string]$Sha1ByPath[$key]
+            if ([string]::IsNullOrWhiteSpace($haveSha1)) { [void]$problems.Add(('could not be checked: ' + $rawName)) }
+            elseif ($haveSha1 -ine $datSha1) { [void]$problems.Add(('checksum differs: ' + $rawName)) }
+            else { $hashed++ }
+        }
+    }
+    $summary = if ($problems.Count -gt 0) {
+        $shown = @($problems | Select-Object -First 3) -join '; '
+        if ($problems.Count -gt 3) { $shown + (' (and {0} more)' -f ($problems.Count - 3)) } else { $shown }
+    } else {
+        '{0} listed files match the DAT ({1} with checksums).' -f $checked, $hashed
+    }
+    return [pscustomobject]@{ Matches = ($problems.Count -eq 0); Summary = $summary; Checked = $checked; Hashed = $hashed }
+}
+
 function New-TpmAutoSyncTransactionRoot {
     param([Parameter(Mandatory)][string]$InstallFolder)
     $root = [System.IO.Path]::GetFullPath($InstallFolder).TrimEnd([char[]]"\/")
@@ -8985,9 +9103,12 @@ function Resolve-BestFuzzyMatch {
 # layout files like "tr") live 7-10 levels deep and are excluded by this limit.
 # .dll files are included because some Konami arcade games (DDR, Steel Chronicle,
 # Silent Scope, etc.) specify a game-specific DLL as their ExecutableName.
+# .acgame files are the arcade games run by PCSX2x6: each of its profiles names one (for example NM00047.acgame), so without
+# this extension those games were never found by name (issue #389).
+# Silent Scope, etc.) specify a game-specific DLL as their ExecutableName.
 function Get-GameFiles {
     param([string]$folder, [scriptblock]$ProgressScript = $null)
-    $exts       = @('.exe', '.elf', '.iso', '.gcm', '.gcz', '.bin', '.e4', '.zip', '.xbe', '.dll')
+    $exts       = @('.exe', '.elf', '.iso', '.gcm', '.gcz', '.bin', '.e4', '.zip', '.xbe', '.dll', '.acgame')
     $normalized = $folder -replace '/', '\'
     $baseDepth  = $normalized.TrimEnd('\').Split('\').Count
     $files = New-Object System.Collections.Generic.List[object]
@@ -9910,6 +10031,21 @@ function Get-GameLegacyApi {
     } catch { throw "Legacy API inspection failed for '$ExePath': $($_.Exception.Message)" }
 }
 
+# True when the file starts with the Linux program marker (0x7F 'E' 'L' 'F'). Lindbergh and ElfLdr2 games point at such a file,
+# not at a Windows .exe, so they are not "32-bit" or "64-bit" Windows programs and need their own plain wording.
+function Test-TpmFileIsElf {
+    param([string]$Path)
+    try {
+        if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+        $fs = [System.IO.File]::OpenRead((ConvertTo-TpmAutoSyncLongPath -Path $Path))
+        try {
+            $buf = New-Object byte[] 4
+            $read = $fs.Read($buf, 0, 4)
+            return ($read -eq 4 -and $buf[0] -eq 0x7F -and $buf[1] -eq 0x45 -and $buf[2] -eq 0x4C -and $buf[3] -eq 0x46)
+        } finally { $fs.Dispose() }
+    } catch { return $false }
+}
+
 # Reads the PE Optional Header to determine whether an exe is 32-bit or 64-bit.
 # Returns 'x86', 'x64', or $null on error or unrecognized format.
 function Get-ExeArchitecture {
@@ -10246,7 +10382,7 @@ function Get-ReShadeSetupDownloadUrl {
 # (setup/MainWindow.xaml.cs, InstallStep_InstallReShadeModule): scan forward
 # for the ZIP local-file-header signature (PK\x03\x04), open everything from
 # that offset onward as a ZipArchive, and require an entry named exactly
-# ReShade64.dll (ReShade works with 64-bit games only). Narrowly scoped to this confirmed format
+# ReShade64.dll (ReShade32.dll is kept too when present, for 32-bit games). Narrowly scoped to this confirmed format
 # -- not a generic "try to parse whatever" extractor.
 #
 # Transactional (P1 #1 remediation): everything is extracted into an
@@ -10301,6 +10437,10 @@ function Expand-ReShadeSelfExtractingArchive {
     }
 
     $required   = @('ReShade64.dll')
+    # The official installer carries ReShade32.dll beside ReShade64.dll. The 64-bit file is required; the 32-bit file is kept when it is there,
+    # so 32-bit games can use it (checked on the real 6.8.0 installer: both files are present).
+    $optionalNames = @('ReShade32.dll')
+    $stageNames    = @($required)
     $stagingDir = New-TpmStagingDirectory -Label 'ReShade'
     $rollbackFailurePreserved = $false
     $operationError = $null
@@ -10368,7 +10508,8 @@ function Expand-ReShadeSelfExtractingArchive {
                     # entries into the STAGING directory only, entirely inside
                     # this loop iteration, so nothing here is ever used after
                     # disposal. $DestDir is not touched at all in this phase.
-                    foreach ($name in $required) {
+                    $stageNames = @($required) + @($optionalNames | Where-Object { $entries.ContainsKey($_) })
+                    foreach ($name in $stageNames) {
                         $stagePath = Join-Path $stagingDir $name
                         if (-not (Test-PathInside $stagePath $stagingDir)) {
                             throw "SECURITY: refused to stage ReShade entry outside staging folder ($name)."
@@ -10396,7 +10537,7 @@ function Expand-ReShadeSelfExtractingArchive {
         # must actually exist in staging with non-zero length. A failure
         # here (e.g. Copy-TpmZipEntryToFile silently produced a truncated
         # file) fails closed before anything is promoted.
-        foreach ($name in $required) {
+        foreach ($name in $stageNames) {
             $stagePath = Join-Path $stagingDir $name
             if (-not (Test-Path -LiteralPath $stagePath -PathType Leaf) -or (Get-Item -LiteralPath $stagePath).Length -le 0) {
                 throw "ReShade installer: staged entry '$name' is missing or empty after extraction -- aborting before any destination change."
@@ -10405,7 +10546,7 @@ function Expand-ReShadeSelfExtractingArchive {
 
         # Only now, with a complete and valid staged set, touch the real
         # destination -- rollback-safe promotion.
-        [void](Invoke-TpmTransactionalPromote -StagingDir $stagingDir -DestDir $DestDir -FileNames $required)
+        [void](Invoke-TpmTransactionalPromote -StagingDir $stagingDir -DestDir $DestDir -FileNames $stageNames)
     } catch {
         $operationError = $_
         # If Invoke-TpmTransactionalPromote reports a rollback or cleanup
@@ -10432,6 +10573,43 @@ function Expand-ReShadeSelfExtractingArchive {
                 throw $cleanupMessage
             }
         }
+    }
+}
+
+# ReShade comes as one DLL per game bit-ness: ReShade64.dll for 64-bit games and ReShade32.dll for 32-bit games. The setup keeps both
+# in the same folder, so the 32-bit file is looked for next to the 64-bit one. Returns the DLL that matches the game, or $null when
+# that DLL is not there or is not really a 32-bit file. The caller then skips the game and says why; nothing is guessed.
+function Get-TpmReShadeSourceDllForArchitecture {
+    param([string]$SourceDll, [Parameter(Mandatory)][string]$Architecture)
+    if ([string]::IsNullOrWhiteSpace($SourceDll)) { return $null }
+    if ($Architecture -eq 'x64') { return $SourceDll }
+    if ($Architecture -ne 'x86') { return $null }
+    $sourceFolder = [System.IO.Path]::GetDirectoryName($SourceDll)
+    if ([string]::IsNullOrWhiteSpace($sourceFolder)) { return $null }
+    $sibling = Join-Path $sourceFolder 'ReShade32.dll'
+    if (-not (Test-Path -LiteralPath $sibling -PathType Leaf)) { return $null }
+    if ((Get-ExeArchitecture -ExePath $sibling) -ne 'x86') { return $null }
+    return $sibling
+}
+
+# An earlier version only kept ReShade64.dll. When the saved ReShade installer is still next to it, open it again (after the same
+# signature check as a fresh download) so ReShade32.dll is there too. Nothing is downloaded and nothing else changes; if anything
+# is off, the 32-bit games are simply skipped with a plain message.
+function Add-TpmMissingReShade32FromSavedSetup {
+    param([string]$SourceDll)
+    if ([string]::IsNullOrWhiteSpace($SourceDll) -or -not (Test-Path -LiteralPath $SourceDll -PathType Leaf)) { return }
+    if (Get-TpmReShadeSourceDllForArchitecture -SourceDll $SourceDll -Architecture 'x86') { return }
+    try {
+        $folder = [System.IO.Path]::GetDirectoryName($SourceDll)
+        $setup = @(Get-ChildItem -LiteralPath $folder -Filter 'ReShade_Setup_*.exe' -File -ErrorAction Stop | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+        if ($setup.Count -eq 0) { return }
+        $signature = Test-ReShadeSetupTrustedSignature -Path $setup[0].FullName
+        if (-not $signature.Trusted) { Write-Log 'ReShade 32-bit file: the saved installer did not pass the signature check; not used.'; return }
+        try { Expand-ReShadeSelfExtractingArchive -SetupExePath $setup[0].FullName -DestDir $folder }
+        catch { if ($_.Exception.Message -notmatch 'CLEANUP FAILED AFTER VERIFIED PROMOTION') { throw }; Write-Log "ReShade 32-bit file: files verified, temporary-file cleanup failed -- $($_.Exception.Message)" }
+        Write-Log 'ReShade 32-bit file: added from the saved installer.'
+    } catch {
+        Write-Log ("ReShade 32-bit file: could not be added from the saved installer -- {0}" -f $_.Exception.Message)
     }
 }
 
@@ -14151,6 +14329,7 @@ function Show-TpmReShadeSetupResult {
         MissingPath = $missingPathCount
         MissingDevice = $missingDeviceCount
         Unsupported = [int](Get-TpmTransactionField -Object $Result -Name 'Unsupported' -Default 0)
+        LinuxStyle = [int](Get-TpmTransactionField -Object $Result -Name 'LinuxStyle' -Default 0)
         KeptPrevious = [int](Get-TpmTransactionField -Object $Result -Name 'KeptPrevious' -Default 0)
         ErrorCount = [int](Get-TpmTransactionField -Object $Result -Name 'ErrorCount' -Default 0)
         UnverifiedCount = [Math]::Max(0, (@((Get-TpmTransactionField -Object $Result -Name 'UnverifiedItems' -Default @()) | Where-Object { $_ }).Count - $nativeRestoreCount))
@@ -14159,7 +14338,7 @@ function Show-TpmReShadeSetupResult {
     $profileName = [string](Get-TpmTransactionField -Object $Result -Name 'SelectedProfileName' -Default '')
     if ([string]::IsNullOrWhiteSpace($profileName)) { $profileName = 'the new look' }
     $missingTotal = $reShadeResult.MissingPath + $reShadeResult.MissingDevice
-    $notChangedTotal = $reShadeResult.Protected + $reShadeResult.Unsafe + $missingTotal + $reShadeResult.Unsupported + $reShadeResult.KeptPrevious
+    $notChangedTotal = $reShadeResult.Protected + $reShadeResult.Unsafe + $missingTotal + $reShadeResult.Unsupported + $reShadeResult.LinuxStyle + $reShadeResult.KeptPrevious
     $reShadeActionModel = Get-TpmReShadeResultActionModel -Result $reShadeResult
     $reShadePathIssue = $reShadeResult -and ($reShadeResult.MissingPath -gt 0 -or $reShadeResult.MissingDevice -gt 0)
 
@@ -14184,7 +14363,8 @@ function Show-TpmReShadeSetupResult {
     if ($reShadeResult.SourceFolder -gt 0) { [void]$notChanged.Add(('{0} {1} inside your source folder (where your game collection is kept).' -f (Format-TpmGameCount -Count $reShadeResult.SourceFolder), $(if ($reShadeResult.SourceFolder -eq 1) { 'is' } else { 'are' }))) }
     if ($otherUnsafe -gt 0) { [void]$notChanged.Add(('{0} could not be checked safely.' -f (Format-TpmGameCount -Count $otherUnsafe))) }
     if ($missingTotal -gt 0) { [void]$notChanged.Add(('{0} could not be found. The game file is missing or its drive is not connected.' -f (Format-TpmGameCount -Count $missingTotal))) }
-    if ($reShadeResult.Unsupported -gt 0) { [void]$notChanged.Add(('{0} {1} skipped. ReShade works with 64-bit games only.' -f (Format-TpmCountNoun -Count $reShadeResult.Unsupported -Singular 'game' -Modifier '32-bit'), $(if ($reShadeResult.Unsupported -eq 1) { 'was' } else { 'were' }))) }
+    if ($reShadeResult.Unsupported -gt 0) { [void]$notChanged.Add(('{0} {1} skipped. The 32-bit ReShade file was not found. Download ReShade again to get it.' -f (Format-TpmCountNoun -Count $reShadeResult.Unsupported -Singular 'game' -Modifier '32-bit'), $(if ($reShadeResult.Unsupported -eq 1) { 'was' } else { 'were' }))) }
+    if ($reShadeResult.LinuxStyle -gt 0) { [void]$notChanged.Add(('{0} {1} skipped. {2} run through BudgieLoader, and ReShade is not set up for those games yet.' -f (Format-TpmCountNoun -Count $reShadeResult.LinuxStyle -Singular 'game' -Modifier 'Linux-style'), $(if ($reShadeResult.LinuxStyle -eq 1) { 'was' } else { 'were' }), $(if ($reShadeResult.LinuxStyle -eq 1) { 'It runs' } else { 'They' }))) }
     if ($reShadeResult.KeptPrevious -gt 0) { [void]$notChanged.Add(('{0} kept the look you chose before.' -f (Format-TpmGameCount -Count $reShadeResult.KeptPrevious))) }
     $leftAloneText = if ($reShadeResult.Protected -gt 0 -and $reShadeResult.Protected -eq $notChangedTotal) {
         if ($notChangedTotal -eq 1) { 'It was left alone to protect your own setup.' } else { 'They were left alone to protect your own setup.' }
@@ -15859,10 +16039,10 @@ function Install-TpmReShadeProfileDeployment {
         $exeDir = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($GamePath))
         if ([string]::IsNullOrWhiteSpace($exeDir)) { return [pscustomobject]@{ Succeeded = $false; State = 'INVALID_GAME_PATH'; Reason = 'INVALID_GAME_PATH' } }
         $architecture = Get-ExeArchitecture -ExePath $GamePath
-        $activeDll = $SourceDll
-        # ReShade works with 64-bit games only. A 32-bit game is refused; so is an unreadable or unrecognized executable (guessing the 64-bit DLL could install one that never loads).
-        if ($architecture -eq 'x86') { return [pscustomobject]@{ Succeeded = $false; State = 'GAME_32BIT'; Reason = 'GAME_32BIT' } }
-        if ($architecture -ne 'x64') { return [pscustomobject]@{ Succeeded = $false; State = 'UNSUPPORTED_ARCHITECTURE'; Reason = 'UNSUPPORTED_ARCHITECTURE' } }
+        # A 64-bit game gets ReShade64.dll and a 32-bit game gets ReShade32.dll. An unreadable or unrecognized executable is refused (guessing a DLL could install one that never loads).
+        if ($architecture -ne 'x64' -and $architecture -ne 'x86') { return [pscustomobject]@{ Succeeded = $false; State = 'UNSUPPORTED_ARCHITECTURE'; Reason = 'UNSUPPORTED_ARCHITECTURE' } }
+        $activeDll = Get-TpmReShadeSourceDllForArchitecture -SourceDll $SourceDll -Architecture $architecture
+        if (-not $activeDll) { return [pscustomobject]@{ Succeeded = $false; State = 'DLL_32BIT_MISSING'; Reason = 'DLL_32BIT_MISSING' } }
         if (-not $activeDll -or -not (Test-Path -LiteralPath $activeDll -PathType Leaf) -or -not (Test-TpmNoReparsePath -Path $activeDll)) { return [pscustomobject]@{ Succeeded = $false; State = 'UNSAFE_PATH'; Reason = 'UNSAFE_PATH' } }
         $runtimeHash = (Get-FileHash -LiteralPath $activeDll -Algorithm SHA256 -ErrorAction Stop).Hash
         if (-not (Test-Path -LiteralPath $GamePath -PathType Leaf) -or -not (Test-TpmNoReparsePath -Path $GamePath)) { return [pscustomobject]@{ Succeeded = $false; State = 'INVALID_GAME_PATH'; Reason = 'INVALID_GAME_PATH' } }
@@ -17509,14 +17689,15 @@ function Get-TpmReShadeApplyPreflight {
                 }
             }
             $architecture = Get-ExeArchitecture -ExePath $resolvedPath
-            if ($architecture -ne 'x64') {
-                # Installing refuses these games (ReShade works with 64-bit games only, or the bit-ness cannot be read), so they are not counted as ready.
-                $record.Detail = if ($architecture -eq 'x86') { '32-bit game: ReShade works with 64-bit games only.' } else { 'TeknoParrot Manager could not tell whether this game is 32-bit or 64-bit.' }
+            $has32BitDllForScan = ($architecture -eq 'x86') -and [bool](Get-TpmReShadeSourceDllForArchitecture -SourceDll $SourceDll -Architecture 'x86')
+            if ($architecture -ne 'x64' -and -not $has32BitDllForScan) {
+                # Installing refuses these games (32-bit file not available, or the bit-ness cannot be read), so they are not counted as ready.
+                $record.Detail = if ($architecture -eq 'x86') { '32-bit game: the 32-bit ReShade file (ReShade32.dll) was not found.' } elseif (Test-TpmFileIsElf -Path $resolvedPath) { 'This game runs through BudgieLoader (a Linux-style game). TeknoParrot Manager does not set up ReShade for these games yet.' } else { 'TeknoParrot Manager could not tell whether this game is 32-bit or 64-bit.' }
                 $unsafe++
                 [void]$records.Add([pscustomobject]$record)
                 continue
             }
-            $runtimeSource = $SourceDll
+            $runtimeSource = Get-TpmReShadeSourceDllForArchitecture -SourceDll $SourceDll -Architecture $architecture
             $currentRuntimeHash = if ($runtimeSource -and (Test-Path -LiteralPath $runtimeSource -PathType Leaf)) {
                 (Get-FileHash -LiteralPath $runtimeSource -Algorithm SHA256 -ErrorAction SilentlyContinue).Hash
             } else { '' }
@@ -17989,7 +18170,7 @@ function Invoke-ReShadeSetupLegacy {
         }
     }
     $bulkApply = $false
-    $deployed = 0; $installed = 0; $updated = 0; $reapplied = 0; $changedProfile = 0; $keptProfile = 0; $skipped = 0; $missingPath = 0; $missingDevice = 0; $unsupported = 0; $protected = 0; $adopted = 0; $unsafe = 0; $errors = 0; $presetOverrides = 0; $tutorialProgressFixed = 0
+    $deployed = 0; $installed = 0; $updated = 0; $reapplied = 0; $changedProfile = 0; $keptProfile = 0; $skipped = 0; $missingPath = 0; $missingDevice = 0; $unsupported = 0; $linuxStyle = 0; $protected = 0; $adopted = 0; $unsafe = 0; $errors = 0; $presetOverrides = 0; $tutorialProgressFixed = 0
     $changedGameIds = New-Object 'System.Collections.Generic.List[string]'
     $skippedGameIds = New-Object 'System.Collections.Generic.List[string]'
     $failedGameIds = New-Object 'System.Collections.Generic.List[string]'
@@ -18109,7 +18290,7 @@ function Invoke-ReShadeSetupLegacy {
     Exit-TpmReShadeInteractiveProgressHold -Stage 'Installing the selected profile'
     Write-Host ""
     Write-Host ("  Installing ReShade into {0}..." -f (Format-TpmGameCount -Count $selectedGames.Count)) -ForegroundColor Cyan
-    $deployed = 0; $installed = 0; $updated = 0; $reapplied = 0; $changedProfile = 0; $keptProfile = 0; $skipped = 0; $missingPath = 0; $missingDevice = 0; $unsupported = 0; $protected = 0; $adopted = 0; $unsafe = 0; $errors = 0; $presetOverrides = 0; $tutorialProgressFixed = 0
+    $deployed = 0; $installed = 0; $updated = 0; $reapplied = 0; $changedProfile = 0; $keptProfile = 0; $skipped = 0; $missingPath = 0; $missingDevice = 0; $unsupported = 0; $linuxStyle = 0; $protected = 0; $adopted = 0; $unsafe = 0; $errors = 0; $presetOverrides = 0; $tutorialProgressFixed = 0
     $protectedDetails = New-Object System.Collections.Generic.List[string]
     $unsafeDetails = New-Object System.Collections.Generic.List[string]
     $sourceFolderGames = New-Object System.Collections.Generic.List[string]
@@ -18191,14 +18372,19 @@ function Invoke-ReShadeSetupLegacy {
             }
             $gamePath = [string]$pathCheck.ResolvedPath
             $exeDir = [string]$pathCheck.GameDirectory
-            # ReShade works with 64-bit games only: a 32-bit game is skipped and nothing in its folder changes. A game whose bit-ness cannot be read is not changed either.
+            # A 64-bit game uses ReShade64.dll and a 32-bit game uses ReShade32.dll. A 32-bit game is skipped (nothing in its folder changes) only when the 32-bit file is not available. A game whose bit-ness cannot be read is not changed either.
             $gameArchitecture = Get-ExeArchitecture -ExePath $gamePath
-            if ($gameArchitecture -ne 'x64') {
+            $has32BitDll = ($gameArchitecture -eq 'x86') -and [bool](Get-TpmReShadeSourceDllForArchitecture -SourceDll $SourceDll -Architecture 'x86')
+            if ($gameArchitecture -ne 'x64' -and -not $has32BitDll) {
                 $skipped++; [void]$skippedGameIds.Add($pf.BaseName)
                 if ($gameArchitecture -eq 'x86') {
                     $unsupported++
-                    [void]$detailNotes.Add(('{0}: 32-bit game -- ReShade works with 64-bit games only -- skipped' -f $gameLabel))
-                    Write-Log ("ReShade: skipped {0}; 32-bit game, ReShade works with 64-bit games only" -f $pf.BaseName)
+                    [void]$detailNotes.Add(('{0}: 32-bit game -- the 32-bit ReShade file (ReShade32.dll) was not found -- skipped' -f $gameLabel))
+                    Write-Log ("ReShade: skipped {0}; 32-bit game and ReShade32.dll was not found next to ReShade64.dll" -f $pf.BaseName)
+                } elseif (Test-TpmFileIsElf -Path $gamePath) {
+                    $linuxStyle++
+                    [void]$detailNotes.Add(('{0}: runs through BudgieLoader (a Linux-style game); ReShade is not set up for these games yet -- skipped' -f $gameLabel))
+                    Write-Log ("ReShade: skipped {0}; Linux-style game that runs through BudgieLoader (not supported yet)" -f $pf.BaseName)
                 } else {
                     $unsafe++
                     [void]$unsafeDetails.Add(('{0}: TeknoParrot Manager could not tell whether this game is 32-bit or 64-bit.' -f $gameLabel))
@@ -18432,7 +18618,8 @@ function Invoke-ReShadeSetupLegacy {
         [void]$summaryDetails.Add('Review the listed ownership/path issue, then run ReShade setup again. TeknoParrot Manager did not guess or overwrite it.')
         [void]$summaryDetails.Add('Next safe action: repair the saved path or ownership metadata, use explicit Adopt only for protected installs, skip the game, or open Details/support for the exact path.')
     }
-    if ($unsupported -gt 0) { [void]$summaryDetails.Add(('Skipped 32-bit games (ReShade works with 64-bit games only): {0}' -f (Format-TpmGameCount -Count $unsupported))) }
+    if ($unsupported -gt 0) { [void]$summaryDetails.Add(('Skipped 32-bit games (the 32-bit ReShade file was not found): {0}' -f (Format-TpmGameCount -Count $unsupported))) }
+    if ($linuxStyle -gt 0) { [void]$summaryDetails.Add(('Skipped Linux-style games that run through BudgieLoader (not supported yet): {0}' -f (Format-TpmGameCount -Count $linuxStyle))) }
     if ($protected -gt 0) { [void]$summaryDetails.Add(('Protected: {0} already had ReShade files, so TeknoParrot Manager left them unchanged.' -f (Format-TpmGameCount -Count $protected))) }
     if ($tutorialProgressFixed -gt 0) { [void]$summaryDetails.Add('TeknoParrot Manager marks the ReShade first-run tutorial as completed for manager-managed installs. ReShade may still show a brief normal startup/loading overlay.') }
     if ($errors -gt 0) { [void]$summaryDetails.Add(('Errors: {0} -- see TeknoParrot-Manager.log for details' -f $errors)) }
@@ -18442,7 +18629,7 @@ function Invoke-ReShadeSetupLegacy {
         Remove-Item -LiteralPath $generatedPresetPath -Force -ErrorAction SilentlyContinue
     }
     return [pscustomobject]@{
-        Succeeded = ($deployed -gt 0 -and $errors -eq 0 -and $skipped -eq 0 -and $missingPath -eq 0 -and $missingDevice -eq 0 -and $unsupported -eq 0 -and $protected -eq 0)
+        Succeeded = ($deployed -gt 0 -and $errors -eq 0 -and $skipped -eq 0 -and $missingPath -eq 0 -and $missingDevice -eq 0 -and $unsupported -eq 0 -and $linuxStyle -eq 0 -and $protected -eq 0)
         Deployed = $deployed
         SelectedItems = @($selectedGames | ForEach-Object BaseName)
         ChangedItems = $changedGameIds.ToArray()
@@ -18473,6 +18660,7 @@ function Invoke-ReShadeSetupLegacy {
         MissingPath = $missingPath
         MissingDevice = $missingDevice
         Unsupported = $unsupported
+        LinuxStyle = $linuxStyle
         Errors = $errors
         TutorialProgressFixed = $tutorialProgressFixed
         Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } elseif ($deployed -eq 0) { 'NO_GAMES_DEPLOYED' } else { $null }
@@ -19423,6 +19611,49 @@ function Test-GameNeedsPostgres {
     param([System.Xml.XmlDocument]$Doc)
     $node = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[CategoryName='Postgres']")
     return ($null -ne $node)
+}
+
+# True when every Postgres setting a game needs is filled in (Library Health and the registration offer use the same rule).
+function Test-TpmPostgresSettingsComplete {
+    param([System.Xml.XmlDocument]$Doc)
+    foreach ($fieldName in @('DbName','Path','Address','Port','User','Pass')) {
+        if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $Doc $fieldName))) { return $false }
+    }
+    return $true
+}
+
+# After a registration (issue #131): offer the existing PostgreSQL setup when a game that was just registered needs
+# PostgreSQL and has no settings yet. Returns $true only when the user says yes; the caller then opens PostgreSQL setup.
+# Asks nothing in unattended or preview runs, and changes nothing itself.
+function Invoke-TpmPostgresRegistrationOffer {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [string[]]$RegisteredCodes = @(), [switch]$Unattended, [switch]$DryRun)
+    if ($Unattended -or $DryRun -or @($RegisteredCodes).Count -eq 0) { return $false }
+    $newGames = New-Object System.Collections.Generic.List[string]
+    $otherCount = 0
+    foreach ($pf in @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue)) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc) -or (Test-TpmPostgresSettingsComplete -Doc $doc)) { continue }
+        } catch { continue }
+        if ($RegisteredCodes -contains $pf.BaseName) { [void]$newGames.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)) } else { $otherCount++ }
+    }
+    if ($newGames.Count -eq 0) { return $false }
+    Write-Host ''
+    Write-Host ('  {0} you just added need{1} PostgreSQL: {2}.' -f $(if ($newGames.Count -eq 1) { 'A game' } else { 'Games' }), $(if ($newGames.Count -eq 1) { 's' } else { '' }), ($newGames -join ', ')) -ForegroundColor Cyan
+    Write-Host '  PostgreSQL is a small database program. These games keep their data in it' -ForegroundColor DarkCyan
+    Write-Host '  and will not start without it.' -ForegroundColor DarkCyan
+    if (Test-PostgresInstalled) { Write-Host '  PostgreSQL is already on this PC.' -ForegroundColor DarkCyan; Write-Host '  TeknoParrot Manager can set up the game now.' -ForegroundColor DarkCyan }
+    else { Write-Host '  PostgreSQL is not on this PC yet.' -ForegroundColor DarkCyan; Write-Host '  TeknoParrot Manager can install it and set up the game now.' -ForegroundColor DarkCyan }
+    if ($otherCount -gt 0) { Write-Host ('  {0} other game(s) already registered also still need PostgreSQL settings.' -f $otherCount) -ForegroundColor DarkCyan }
+    Write-Host '  Nothing changes unless you say yes.' -ForegroundColor DarkCyan
+    $accepted = ((Read-TpmYesNo -Prompt '  Set up PostgreSQL now? (Y/N)') -eq 'Y')
+    Write-Log ('Registration offer: PostgreSQL setup for {0} new game(s): {1}.' -f $newGames.Count, $(if ($accepted) { 'accepted' } else { 'declined' }))
+    if (-not $accepted) {
+        Write-Host '  Nothing was changed. These games will not start until PostgreSQL is set up.' -ForegroundColor Yellow
+        Write-Host "  When you are ready, choose 'Postgres setup' in the main menu." -ForegroundColor DarkCyan
+        Write-Host '  Library Health also lists games that still need it.' -ForegroundColor DarkCyan
+    }
+    return $accepted
 }
 
 function Get-TpmPostgresRequirementScan {
@@ -23228,7 +23459,11 @@ function Invoke-TpmAutoSyncDirectoryTransaction {
         [string]$LegacySentinelPath = '',
         [string]$RegisteredGamePath = '',
         # First-time extraction into a new game folder: the target must be absent or an empty folder.
-        [switch]$NewTarget
+        [switch]$NewTarget,
+        # Rebuild: keep the old folder here (a new place on the same drive) instead of deleting it, and do not copy extra files out of it.
+        [string]$KeepOldTargetAt = '',
+        # Rebuild: what the DAT lists for this game (Name, Size, Sha1). The ZIP must match it before anything is replaced.
+        [object[]]$ExpectedDatFiles = @()
     )
 
     $transactionId = [guid]::NewGuid().ToString('N')
@@ -23294,6 +23529,8 @@ function Invoke-TpmAutoSyncDirectoryTransaction {
         CleanupError = $null
         ExtraFileCount = 0
         ExtraFilesSavedTo = ''
+        OldFolderKeptAt = ''
+        DatCheck = ''
     }
     $preStateItems = New-Object System.Collections.Generic.List[object]
     $backupItems = New-Object System.Collections.Generic.List[object]
@@ -23376,6 +23613,15 @@ function Invoke-TpmAutoSyncDirectoryTransaction {
         }
         if (-not (Test-TpmNoReparsePath -Path $targetParent)) {
             throw "AutoSync target parent failed the path safety check: $targetParent"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($KeepOldTargetAt)) {
+            if (-not (Test-TpmNoReparsePath -Path ([System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($KeepOldTargetAt))))) {
+                throw "AutoSync cannot keep the old folder in an unsafe place: $KeepOldTargetAt"
+            }
+            if ([System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($KeepOldTargetAt)) -ine [System.IO.Path]::GetPathRoot($targetFull)) {
+                throw "AutoSync can only keep the old folder on the same drive: $KeepOldTargetAt"
+            }
+            if (Test-Path -LiteralPath $KeepOldTargetAt) { throw "AutoSync cannot keep the old folder: that place is already used: $KeepOldTargetAt" }
         }
 
         $sourceBefore = Get-TpmAutoSyncSourceIdentity -Path $ZipPath
@@ -23695,22 +23941,14 @@ function Invoke-TpmAutoSyncDirectoryTransaction {
             -not (Test-TpmNoReparsePath -Path $rollbackRoot)) {
             throw 'AutoSync transaction directories failed the path safety check.'
         }
-        try {
-            $driveRoot = [System.IO.Path]::GetPathRoot($txRoot)
-            # A network (UNC) staging folder has no drive letter, so DriveInfo cannot size it; extraction
-            # failing on a full share is rolled back by this transaction.
-            if (-not $driveRoot.StartsWith('\\')) {
-                $drive = New-Object System.IO.DriveInfo($driveRoot)
-                if ([int64]$drive.AvailableFreeSpace -lt [int64]$inventory.TotalBytes) {
-                    throw 'INSUFFICIENT_STAGING_SPACE'
-                }
-            }
-        } catch {
-            if ($_.Exception.Message -eq 'INSUFFICIENT_STAGING_SPACE') { throw }
-            throw 'STAGING_SPACE_UNAVAILABLE'
-        }
+        $spaceState = Get-TpmAutoSyncStagingSpaceState -Path $txRoot -RequiredBytes ([int64]$inventory.TotalBytes)
+        if ($spaceState -eq 'Short') { throw 'INSUFFICIENT_STAGING_SPACE' }
+        if ($spaceState -eq 'Unknown') { throw 'STAGING_SPACE_UNAVAILABLE' }
         $stageHashes = @{}
-        Expand-ZipFileSafe -ZipPath $ZipPath -DestDir $stageDir -GameName $RawName -EntryHashes $stageHashes
+        $stageSha1 = @{}
+        $expandArguments = @{ ZipPath = $ZipPath; DestDir = $stageDir; GameName = $RawName; EntryHashes = $stageHashes }
+        if (@($ExpectedDatFiles).Count -gt 0) { $expandArguments['EntrySha1'] = $stageSha1 }
+        Expand-ZipFileSafe @expandArguments
         # The ZIP was read once: every file's checksum was taken from the same bytes that were written to the staging folder.
         foreach ($zipRecord in @($inventory.Entries | Where-Object { -not $_.IsDirectory })) {
             $streamHash = [string]$stageHashes[([string]$zipRecord.RelativePath).ToLowerInvariant()]
@@ -23721,6 +23959,15 @@ function Invoke-TpmAutoSyncDirectoryTransaction {
         $stageManifest = Get-TpmDirectoryManifest -Path $stageDir
         if (-not (Test-TpmDirectoryAgainstZipInventory -Manifest $stageManifest -Inventory $inventory)) {
             throw 'AutoSync staged directory did not match the complete ZIP inventory.'
+        }
+        if (@($ExpectedDatFiles).Count -gt 0) {
+            # The staged files are checked against the DAT list (size and SHA-1, taken in the same pass) before the live folder is touched.
+            $datCheck = Test-TpmZipFilesAgainstDatList -DatFiles $ExpectedDatFiles -Inventory $inventory -Sha1ByPath $stageSha1
+            $technical.DatCheck = $datCheck.Summary
+            if (-not $datCheck.Matches) {
+                $requestedReason = 'DAT_MISMATCH'
+                throw ('The files in the ZIP do not match the DAT list: ' + $datCheck.Summary)
+            }
         }
         $sourceAfterStage = Get-TpmAutoSyncSourceIdentity -Path $ZipPath
         if (-not (Test-TpmAutoSyncSourceIdentityMatch -Expected $sourceBefore -Actual $sourceAfterStage)) {
@@ -23798,7 +24045,7 @@ function Invoke-TpmAutoSyncDirectoryTransaction {
 
         # Files in the old folder that the ZIP does not contain (ReShade, dgVoodoo, saves) or that differ from the ZIP copy (changed settings, saves) are copied to Backups before anything is committed.
         # If they cannot be kept, this game stops here and the catch below puts the old folder back.
-        if ($targetPre.Exists -and $targetPre.IsDirectory) {
+        if ($targetPre.Exists -and $targetPre.IsDirectory -and [string]::IsNullOrWhiteSpace($KeepOldTargetAt)) {
             $zipHashes = @{}
             foreach ($zipEntry in @($inventory.Entries)) { if (-not $zipEntry.IsDirectory) { $zipHashes[([string]$zipEntry.RelativePath).ToLowerInvariant()] = [string]$zipEntry.Sha256 } }
             $extraFiles = @($targetPre.Items | Where-Object {
@@ -23900,6 +24147,19 @@ function Invoke-TpmAutoSyncDirectoryTransaction {
                 throw 'AutoSync transaction failed post-cleanup verification.'
             }
             $finalChecks.Add('Promoted directory and sync-state remained verified after sentinel cleanup.')
+        }
+        # Rebuild: the old folder is not deleted. It is renamed to its own place on the same drive (no copy) before cleanup.
+        if (-not $residuePresent -and $targetMovedAside -and -not [string]::IsNullOrWhiteSpace($KeepOldTargetAt)) {
+            try {
+                [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($KeepOldTargetAt))
+                Invoke-TpmAutoSyncMovePath -Source $oldTarget -Destination $KeepOldTargetAt
+                $technical.OldFolderKeptAt = $KeepOldTargetAt
+            } catch {
+                $cleanupCompleted = $false
+                $residuePresent = $true
+                $technical.CleanupError = $_.Exception.Message
+                $residuePaths.Add($txRoot)
+            }
         }
         if (-not $residuePresent) {
             try {
@@ -24156,7 +24416,7 @@ function Invoke-TpmAutoSyncDirectoryTransaction {
 }
 
 function Expand-ZipFileSafe {
-    param([string]$ZipPath, [string]$DestDir, [string]$GameName = '', [hashtable]$EntryHashes = $null)
+    param([string]$ZipPath, [string]$DestDir, [string]$GameName = '', [hashtable]$EntryHashes = $null, [hashtable]$EntrySha1 = $null)
 
     # GetFullPath on the (short) base is safe. We deliberately avoid calling
     # GetFullPath on the combined base+entry path: on .NET 4.x (PS 5.1) that
@@ -24257,15 +24517,24 @@ function Expand-ZipFileSafe {
                     if ($null -ne $EntryHashes) {
                         # Hash the file while it is written, so the ZIP data is read once (1 MB at a time) and not again just to check it.
                         $entrySha = [System.Security.Cryptography.SHA256]::Create()
+                        # The DAT lists SHA-1, so it can be taken in the same pass when asked for (only together with EntryHashes).
+                        # (The hasher must not be named entrySha1: PowerShell names are not case-sensitive, so that would overwrite the EntrySha1 parameter.)
+                        $sha1Hasher = $null
+                        if ($null -ne $EntrySha1) { $sha1Hasher = [System.Security.Cryptography.SHA1]::Create() }
                         try {
                             if ($null -eq $copyBuffer) { $copyBuffer = New-Object byte[] 1048576 }
                             while (($copyRead = $src.Read($copyBuffer, 0, $copyBuffer.Length)) -gt 0) {
                                 $dst.Write($copyBuffer, 0, $copyRead)
                                 [void]$entrySha.TransformBlock($copyBuffer, 0, $copyRead, $null, 0)
+                                if ($null -ne $sha1Hasher) { [void]$sha1Hasher.TransformBlock($copyBuffer, 0, $copyRead, $null, 0) }
                             }
                             [void]$entrySha.TransformFinalBlock($copyBuffer, 0, 0)
                             $EntryHashes[([string]$item.RelativePath).ToLowerInvariant()] = ((-join ($entrySha.Hash | ForEach-Object { $_.ToString('x2') })).ToUpperInvariant())
-                        } finally { $entrySha.Dispose() }
+                            if ($null -ne $sha1Hasher) {
+                                [void]$sha1Hasher.TransformFinalBlock($copyBuffer, 0, 0)
+                                $EntrySha1[([string]$item.RelativePath).ToLowerInvariant()] = ((-join ($sha1Hasher.Hash | ForEach-Object { $_.ToString('x2') })).ToUpperInvariant())
+                            }
+                        } finally { $entrySha.Dispose(); if ($null -ne $sha1Hasher) { $sha1Hasher.Dispose() } }
                     } else {
                         $src.CopyTo($dst, 1048576)
                     }
@@ -24374,6 +24643,20 @@ function Save-TpmInvalidAutoSyncStateCopy {
     }
 }
 
+# AutoSync only unpacks .zip files (issue #301). A .7z or .rar archive in the source folder used to be skipped without a word.
+# Says so once, plainly, and returns how many were skipped. Read-only: it lists the folder and changes nothing.
+function Write-TpmSkippedArchiveNotice {
+    param([string]$SourceFolder)
+    $skipped = @(Get-ChildItem -LiteralPath $SourceFolder -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -imatch '\.(7z|rar)(\.\d{3})?$' })
+    if ($skipped.Count -eq 0) { return 0 }
+    Write-Host ''
+    Write-Host ('  {0} archive(s) in this folder are .7z or .rar files. AutoSync cannot unpack them, so it skipped them.' -f $skipped.Count) -ForegroundColor Yellow
+    Write-Host '  To use them: unpack each one into your games folder yourself,' -ForegroundColor DarkCyan
+    Write-Host '  then choose Register only from the main menu.' -ForegroundColor DarkCyan
+    Write-Log ('AutoSync: skipped {0} .7z/.rar archive(s) in {1} (only .zip is unpacked): {2}' -f $skipped.Count, $SourceFolder, (($skipped | Select-Object -First 20 | ForEach-Object { $_.Name }) -join ', '))
+    return $skipped.Count
+}
+
 # Extracts NAS ZIPs through a verified directory transaction. Existing target
 # folders are preserved until staging and pre-state verification are complete.
 # ZIP base names listed in $noSync are skipped.
@@ -24408,6 +24691,7 @@ function Invoke-AutoSync {
     }
 
     $zipFiles = @(Get-TpmTopLevelZipSourceFiles -ZipSource $zipSource -ProgressLabel 'AutoSync source ZIP discovery')
+    [void](Write-TpmSkippedArchiveNotice -SourceFolder $zipSource)
     if (-not $zipFiles -or $zipFiles.Count -eq 0) {
         Write-Host "  No ZIP files found in source. Skipping extraction." -ForegroundColor Yellow
         $subdirHits = @(Get-TpmImmediateZipSubdirectorySummary -ZipSource $zipSource)
@@ -24809,7 +25093,11 @@ function Build-DatIndexFromStream {
         [System.IO.Stream]$stream,
         # FIX132: when given, the files (name, size, hashes) of every "[EMU]" set are also collected here,
         # game name -> list of files. The set lists are how a prerequisite file is found and checked.
-        [hashtable]$EmuRomSink = $null
+        [hashtable]$EmuRomSink = $null,
+        # Rebuild: names of games whose files are collected into EmuRomSink as well (exact name, any case); with StopWhenCaptured
+        # the read ends as soon as all of them are collected.
+        [string[]]$CaptureGameNames = @(),
+        [switch]$StopWhenCaptured
     )
     $index    = @{}
     $settings = New-Object System.Xml.XmlReaderSettings
@@ -24827,6 +25115,11 @@ function Build-DatIndexFromStream {
         $exePath     = ''
         $insideGame  = $false
         $captureRoms = $false
+        $captureNames = $null
+        if ($null -ne $EmuRomSink -and @($CaptureGameNames).Count -gt 0) {
+            $captureNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($captureName in @($CaptureGameNames)) { [void]$captureNames.Add([string]$captureName) }
+        }
         $currentElem = ''
         # Skip() already advances the reader onto the next sibling node (the
         # following <rom>, or the </game> EndElement if that was the last
@@ -24854,6 +25147,10 @@ function Build-DatIndexFromStream {
                     $insideGame  = $true
                     $captureRoms = $false
                     if ($null -ne $EmuRomSink -and $gameName -and $gameName.StartsWith('[EMU]', [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $captureRoms = $true
+                        if (-not $EmuRomSink.ContainsKey($gameName)) { $EmuRomSink[$gameName] = New-Object System.Collections.Generic.List[object] }
+                    }
+                    elseif ($null -ne $captureNames -and $gameName -and $captureNames.Contains($gameName)) {
                         $captureRoms = $true
                         if (-not $EmuRomSink.ContainsKey($gameName)) { $EmuRomSink[$gameName] = New-Object System.Collections.Generic.List[object] }
                     }
@@ -24891,6 +25188,8 @@ function Build-DatIndexFromStream {
                         }
                     }
                 }
+                # Rebuild: once every wanted game's files are collected there is no need to read the rest of a very large DAT.
+                if ($null -ne $captureNames -and $gameName -and $captureNames.Remove($gameName) -and $StopWhenCaptured -and $captureNames.Count -eq 0) { break }
                 $progressCurrent++
                 if (($progressCurrent - $lastProgressCurrent) -ge 100) {
                     Write-TpmCompactExtractionProgress -Phase Scanning -Label 'DAT index parsing' -Current $progressCurrent -Total 0 -StartedAt $progressStarted
@@ -24911,7 +25210,7 @@ function Build-DatIndexFromStream {
 # ZipArchive is opened, the matching entry stream is passed to Build-DatIndexFromStream,
 # and the archive is disposed in the finally block regardless of outcome.
 function Build-DatIndexFromZip {
-    param([string]$zipPath, [string]$entryPattern = '*Collection*_RomVault*.dat', [hashtable]$EmuRomSink = $null, [switch]$Quiet)
+    param([string]$zipPath, [string]$entryPattern = '*Collection*_RomVault*.dat', [hashtable]$EmuRomSink = $null, [switch]$Quiet, [string[]]$CaptureGameNames = @(), [switch]$StopWhenCaptured)
     $za = $null
     try {
         $za    = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
@@ -24923,7 +25222,7 @@ function Build-DatIndexFromZip {
         }
         if (-not $Quiet) { Write-Host ("    Reading: {0}" -f $entry.Name) -ForegroundColor DarkGray }
         $stream = $entry.Open()
-        try   { return Build-DatIndexFromStream $stream -EmuRomSink $EmuRomSink }
+        try   { return Build-DatIndexFromStream $stream -EmuRomSink $EmuRomSink -CaptureGameNames $CaptureGameNames -StopWhenCaptured:$StopWhenCaptured }
         finally { if ($stream) { $stream.Close() } }
     } catch {
         if (-not $Quiet) { Write-Host ("  WARNING: Could not read dat from ZIP -- {0}" -f $_) -ForegroundColor Yellow }
@@ -24939,10 +25238,10 @@ function Build-DatIndexFromZip {
 # Replaces the old DOM-based approach which could not handle the 584 MB collection dat.
 # Returns normalized-name -> { ProfileCode, Executable } hashtable.
 function Build-DatIndex {
-    param([string]$datPath, [hashtable]$EmuRomSink = $null, [switch]$Quiet)
+    param([string]$datPath, [hashtable]$EmuRomSink = $null, [switch]$Quiet, [string[]]$CaptureGameNames = @(), [switch]$StopWhenCaptured)
     try {
         $fs = [System.IO.File]::OpenRead($datPath)
-        try   { return Build-DatIndexFromStream $fs -EmuRomSink $EmuRomSink }
+        try   { return Build-DatIndexFromStream $fs -EmuRomSink $EmuRomSink -CaptureGameNames $CaptureGameNames -StopWhenCaptured:$StopWhenCaptured }
         finally { if ($fs) { $fs.Close() } }
     } catch {
         if (-not $Quiet) { Write-Host ("  WARNING: Could not parse dat file -- {0}" -f $_) -ForegroundColor Yellow }
@@ -33890,6 +34189,50 @@ function Get-ManagerUpdateLeftInPlace {
     }
 }
 
+# Staging folders of updates that did not finish. A running update holds a marker file open inside its folder, so a folder whose
+# marker can be opened (or that has no marker and is more than a minute old) belongs to an update that was cut off.
+function Get-TpmInterruptedUpdateFolders {
+    param([Parameter(Mandatory)][string]$ProgramDir)
+    foreach ($folder in @(Get-ChildItem -LiteralPath $ProgramDir -Directory -Filter 'tpm-update-staging-*' -Force -ErrorAction SilentlyContinue)) {
+        $marker = Join-Path $folder.FullName '.tpm-update-running'
+        $running = $false
+        if (Test-Path -LiteralPath $marker -PathType Leaf) {
+            $handle = $null
+            try { $handle = [System.IO.File]::Open($marker, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None) }
+            catch [System.IO.IOException] { $running = $true }
+            catch { }
+            finally { if ($handle) { $handle.Dispose() } }
+        } elseif ($folder.CreationTimeUtc -gt (Get-Date).ToUniversalTime().AddMinutes(-1)) {
+            $running = $true
+        }
+        if (-not $running) { $folder.FullName }
+    }
+}
+
+# At start: one short notice when an earlier update was cut off. Notice only: the folder is never removed here, because it can hold
+# the only copy of files that were moved aside. The log names the folders and the newest backup.
+function Write-TpmInterruptedUpdateNotice {
+    param([Parameter(Mandatory)][string]$ProgramDir)
+    $folders = @(Get-TpmInterruptedUpdateFolders -ProgramDir $ProgramDir)
+    if ($folders.Count -eq 0) { return }
+    $newest = @(Get-ChildItem -LiteralPath (Join-Path $ProgramDir 'UpdateBackups') -Directory -Filter 'TeknoParrotManager_*' -ErrorAction SilentlyContinue | Sort-Object -Property Name -Descending | Select-Object -First 1)
+    $newestPath = if ($newest.Count -gt 0) { [string]$newest[0].FullName } else { '' }
+    Write-Log ("Interrupted update: found {0} unfinished update folder(s): {1}. Newest backup: {2}" -f $folders.Count, ($folders -join '; '), $(if ($newestPath) { $newestPath } else { 'none' }))
+    if ($Unattended) { return }
+    Write-Host ''
+    Write-Host '  An earlier update of TeknoParrot Manager did not finish.' -ForegroundColor Yellow
+    Write-Host '  Some files may be a mix of old and new versions.' -ForegroundColor Yellow
+    Write-Host '  If the program works, you can keep using it.' -ForegroundColor Yellow
+    Write-Host '  To go back to the old files: open the UpdateBackups folder next to this' -ForegroundColor Cyan
+    Write-Host '  program, open the newest TeknoParrotManager_ folder, and copy its files' -ForegroundColor Cyan
+    Write-Host '  back over the program folder (same folder names).' -ForegroundColor Cyan
+    if ($newestPath) { Write-Host ('  Newest backup: {0}' -f $newestPath) -ForegroundColor DarkGray }
+    Write-Host '  Or run the update again: choose 15 (Check for Updates).' -ForegroundColor Cyan
+    Write-Host ('  TeknoParrot Manager keeps the folder {0} on purpose and never deletes it: it can hold your old files.' -f (Split-Path -Leaf $folders[0])) -ForegroundColor DarkGray
+    Write-Host '  After you have put the old files back (or are sure you do not need them),' -ForegroundColor DarkGray
+    Write-Host '  you can delete that folder yourself. This notice then stops.' -ForegroundColor DarkGray
+}
+
 function Get-ManagerUpdatePreState {
     param([Parameter(Mandatory)][string]$Path)
     try {
@@ -34019,6 +34362,7 @@ function Invoke-ManagerUpdateInstall {
     $plan = $null
     $stagingDir = $null
     $stagingCreated = $false
+    $stagingLock = $null
     $stagingPreserved = $false
     $promoteCalled = $false
     $backupDir = $null
@@ -34108,7 +34452,11 @@ function Invoke-ManagerUpdateInstall {
             Assert-TpmNoReparseWriteTarget -Path $stagingDir -Operation 'manager update staging'
             [void][System.IO.Directory]::CreateDirectory($stagingDir)
             $stagingCreated = $true
-            Expand-ZipFileSafe -ZipPath $downloadedZipPath -DestDir $stagingDir -GameName 'TeknoParrot Manager update'
+            # While this update runs, the staging folder holds this marker open. A second window or the next start can then tell
+            # a running update from one that was cut off (the marker of a cut-off update is no longer held open).
+            $stagingLock = [System.IO.File]::Open((Join-Path $stagingDir '.tpm-update-running'), [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            $entryHashes = @{}
+            Expand-ZipFileSafe -ZipPath $downloadedZipPath -DestDir $stagingDir -GameName 'TeknoParrot Manager update' -EntryHashes $entryHashes
             foreach ($packageFile in $packageFiles) {
                 $stagedFile = Join-Path $stagingDir $packageFile.Path
                 if (-not (Test-Path -LiteralPath $stagedFile -PathType Leaf) -or (Get-Item -LiteralPath $stagedFile -Force).Length -ne $packageFile.Length) {
@@ -34132,6 +34480,14 @@ function Invoke-ManagerUpdateInstall {
             }
             $plan = Get-ManagerUpdateInstallPlan -ProgramDir $programDir -StagingDir $stagingDir -Files $packageFiles
             Assert-TpmWritePathsShortEnough -Paths @($plan.Install | ForEach-Object { Join-Path $programDir $_.Path })
+            # The checksums taken while each file was written to staging must equal the staged files: a file damaged on its way to
+            # disk (a bad write, a scanner touching it) is never installed.
+            foreach ($planned in $plan.Install) {
+                $readHash = [string]$entryHashes[([string]$planned.Path).ToLowerInvariant()]
+                if ([string]::IsNullOrEmpty($readHash) -or $readHash -ine [string]$planned.NewHash) {
+                    throw "The unpacked file '$($planned.Path)' is not the same as the data read from the update."
+                }
+            }
             $candidateHash = @($plan.Install | Where-Object { $_.Path -ieq 'TeknoParrot-Manager.ps1' })[0].NewHash
             $leftInPlace = @(Get-ManagerUpdateLeftInPlace -ProgramDir $programDir -Files $packageFiles)
             $multiDetails = [pscustomobject]@{
@@ -34372,6 +34728,8 @@ function Invoke-ManagerUpdateInstall {
                 [void]$cleanupErrors.Add([string]$_.Exception.Message)
             }
         }
+        # Let go of the "update is running" marker first: a folder whose marker is still held open would not be removed.
+        if ($stagingLock) { try { $stagingLock.Dispose() } catch { } }
         # The staging folder is this run's own (unique name, created above). It holds the only copy of the original
         # files when a rollback failed, so it stays then and is listed as residue.
         if ($stagingCreated -and (Test-Path -LiteralPath $stagingDir)) {
@@ -37298,12 +37656,7 @@ function Invoke-LibraryHealthCheck {
             try {
                 if (Test-GameNeedsPostgres $doc) {
                     $label = Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
-                    $configurationComplete = $true
-                    foreach ($fieldName in @('DbName','Path','Address','Port','User','Pass')) {
-                        if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc $fieldName))) {
-                            $configurationComplete = $false
-                        }
-                    }
+                    $configurationComplete = Test-TpmPostgresSettingsComplete -Doc $doc
                     if (-not $configurationComplete) {
                         [void]$postgresNeeded.Add($pf.BaseName)
                         [void]$postgresNeededLabels.Add($label)
@@ -37512,6 +37865,12 @@ function Invoke-LibraryHealthCheck {
     }
     Write-Log ("HealthCheck: inventory={0} total={1} valid={2} broken={3} empty={4} gpuFixNeeded={5} ffbBlasterNeeded={6} dgVoodoo2Needed={7} reShadeCount={8} bepInExCount={9}" -f `
         $postgresInventoryStatus, $profiles.Count, $valid.Count, $broken.Count, $empty.Count, $gpuFixNeeded.Count, $ffbBlasterNeeded.Count, $dgVoodoo2Needed.Count, $reShadeCount, $bepInExCount)
+    # Game support view (issues #351 and #389): read-only, offline (saved guide copy only); a failure leaves it out, never the check.
+    $gameSupport = $null
+    if (-not $discoveryFailed -and $profiles.Count -gt 0) {
+        try { $gameSupport = Get-TpmGameSupportSummary -ProfileFiles $profiles -ValidCodes @($valid.ToArray()) -PostgresNeededCodes @($postgresNeeded.ToArray()) -GuideRows (Read-TpmSavedGuideRows) }
+        catch { Write-Log "HealthCheck: the game support view could not be made -- $_" }
+    }
     $result = [pscustomobject]@{
         Outcome = $healthOutcome
         ReasonCode = $(if ($healthOutcome -eq 'ACTION_REQUIRED') { 'HEALTH_COVERAGE_INCOMPLETE' } else { 'HEALTH_CHECK_COMPLETED' })
@@ -37553,6 +37912,7 @@ function Invoke-LibraryHealthCheck {
         PrerequisiteCheckFailed = $prerequisiteCheckFailed
         LastFullRun = $lastFullRun
         LogPath = $LogPath
+        GameSupport = $gameSupport
     }
     Write-TpmLibraryHealthReport -Result $result
     return $result
@@ -37621,6 +37981,15 @@ function Get-TpmLibraryHealthRows {
     if ($null -ne $postgresRow) { [void]$rows.Add($postgresRow) }
     $prerequisiteRow = Get-TpmLibraryHealthPrerequisiteRow -Result $Result
     if ($null -ne $prerequisiteRow) { [void]$rows.Add($prerequisiteRow) }
+    $gameSupport = Get-TpmTransactionField -Object $Result -Name 'GameSupport' -Default $null
+    if ($null -ne $gameSupport -and [int]$Result.Registered -gt 0) {
+        $needsYou = @($gameSupport.NeedsYouNames).Count
+        if ($needsYou -gt 0) {
+            [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game support' -Text ('Needs attention - {0} {1} you. Choose D for the list' -f (Format-TpmGameCount -Count $needsYou), $(if ($needsYou -eq 1) { 'needs' } else { 'need' })) -Color 'Yellow'))
+        } else {
+            [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game support' -Text ('OK - nothing is missing for {0}' -f (Format-TpmGameCount -Count ([int]$Result.Registered))) -Color 'Green'))
+        }
+    }
     return $rows.ToArray()
 }
 
@@ -37837,6 +38206,9 @@ function Get-TpmLibraryHealthDetailBlocks {
         [void]$lines.Add('Status: Not assessed.')
     }
     [void]$blocks.Add(@{ Heading = 'ReShade and BepInEx'; Lines = $lines.ToArray() })
+
+    $gameSupport = Get-TpmTransactionField -Object $Result -Name 'GameSupport' -Default $null
+    if ($null -ne $gameSupport) { [void]$blocks.Add(@{ Heading = 'Game support by emulator'; Lines = @(Get-TpmGameSupportLines -Summary $gameSupport) }) }
 
     $lines = New-Object System.Collections.Generic.List[string]
     $failedGames = [int](Get-TpmTransactionField -Object $Result -Name 'OptionalCheckFailed' -Default 0)
@@ -38370,11 +38742,11 @@ $GpuIncompatibleGames = @{
         'ProjectDiva', 'SonicDashExtreme', 'TargetTossProLawndarts', 'WonderlandWars'
     )
     'Intel' = @(
-        'abc', 'abcELF2', 'BorderBreakScramble', 'ChronoRegalia', 'Drakons', 'FrenzyExpress',
+        'abc', 'abcELF2', 'ActionDeka', 'BorderBreakScramble', 'ChronoRegalia', 'CSNEO', 'Drakons', 'FGO', 'FrenzyExpress',
         'GoldenTeeLive2011', 'GoldenTeeLive2012', 'GoldenTeeLive2013', 'GoldenTeeLive2014',
         'GoldenTeeLive2015', 'GoldenTeeLive2016', 'GoldenTeeLive2017', 'GoldenTeeLive2018',
-        'GoldenTeeLive2019', 'HydroThunder', 'IDZTP', 'IDZv2TP', 'LGJS', 'LGJSElf2', 'LGJ',
-        'SegaOlympic2016', 'SegaOlympic2020', 'MIB', 'OffroadThunder', 'OCCPinball',
+        'GoldenTeeLive2019', 'GoldenTeeLive2020', 'HydroThunder', 'IDZTP', 'IDZv2TP', 'LGJS', 'LGJSElf2', 'LGJ',
+        'SegaOlympic2016', 'SegaOlympic2020', 'SoulReverse', 'MIB', 'OffroadThunder', 'OCCPinball',
         'PowerPuttLive2012', 'PowerPuttLive2013', 'ProjectDiva', 'PullTheTrigger',
         'ShiningForceCross', 'ShiningForceCrossElysion', 'ShiningForceCrossRaid',
         'ShiningForceCrossExlesia', 'SkyCurser', 'SonicBlastHeroes', 'SonicDashExtreme',
@@ -39482,13 +39854,35 @@ function Format-NoteLines {
     return $out
 }
 
-# Returns per-game special setup notes + the executable TeknoParrot expects,
-# for every CURRENTLY REGISTERED profile whose eggmansworld.github.io entry
-# has a non-empty notes field. Joined on profile_name == ProfileCode (the
-# profile XML's own basename) -- the same key already used to drive the
-# hardcoded compatibility tables above. Network fetch, same convention as
-# Get-BepInExRequiredGames: returns an empty array (never a hardcoded
-# fallback) if the fetch fails, caller just sees nothing to report.
+# One guide text field as a trimmed string ('' when the field is missing or empty).
+function Get-TpmGuideText {
+    param([object]$Row, [string]$Name)
+    if ($null -eq $Row -or -not $Row.PSObject.Properties[$Name] -or $null -eq $Row.$Name) { return '' }
+    return ([string]$Row.$Name).Trim()
+}
+
+# The guide's graphics-card notes for one game, as plain lines ("AMD (does not work): ..."). Empty when the guide says nothing.
+function Get-TpmGuideGpuLines {
+    param([object]$Source)
+    $gpuLines = New-Object System.Collections.Generic.List[string]
+    foreach ($vendor in @(@{ Key = 'amd'; Label = 'AMD' }, @{ Key = 'nvidia'; Label = 'NVIDIA' }, @{ Key = 'intel'; Label = 'Intel' })) {
+        $issue = Get-TpmGuideText -Row $Source -Name ($vendor.Key + '_issues')
+        $status = (Get-TpmGuideText -Row $Source -Name ($vendor.Key + '_status')).ToUpperInvariant()
+        $statusText = switch ($status) { 'NO' { 'does not work' } 'WITH_FIX' { 'works with a fix' } default { '' } }
+        if (-not $issue -and -not $statusText) { continue }
+        $label = if ($statusText) { '{0} ({1})' -f $vendor.Label, $statusText } else { $vendor.Label }
+        [void]$gpuLines.Add($(if ($issue) { '{0}: {1}' -f $label, $issue } else { '{0}.' -f $label }))
+    }
+    return ,$gpuLines
+}
+
+# Returns per-game guide text for every CURRENTLY REGISTERED profile (or registered variant) of the
+# eggmansworld.github.io guide that has something to show: notes, general_issues (setup steps), graphics
+# card notes, a second game file or a test program. Joined on profile_name == ProfileCode (the profile XML's
+# own basename), the same key that drives the hardcoded compatibility tables above. A variant also shows its
+# base game's general_issues and graphics notes, labeled as such (information only; nothing is applied from
+# them). Network fetch, same convention as Get-BepInExRequiredGames: returns an empty array (never a
+# hardcoded fallback) if the fetch fails, caller just sees nothing to report.
 function Get-GameSetupNotes {
     param([string]$UserProfilesDir)
 
@@ -39497,16 +39891,149 @@ function Get-GameSetupNotes {
 
     $registeredCodes = Get-TpmRegisteredProfileCodes -UserProfilesDir $UserProfilesDir -ProgressLabel 'Game setup notes profile-code scan'
 
-    return @($games | Where-Object { $_.notes -and $registeredCodes.Contains($_.profile_name) } |
-              ForEach-Object {
-                  [pscustomobject]@{
-                      Code     = $_.profile_name
-                      GameName = $_.game_name
-                      SetupExe = $_.setup_exe
-                      Notes    = $_.notes
-                      Needs    = (Get-TpmGameNeedsLine -ProfilePath (Join-Path $UserProfilesDir ([string]$_.profile_name + '.xml')) -SetupExe ([string]$_.setup_exe))
-                  }
-              })
+    $entries = New-Object System.Collections.Generic.List[object]
+    foreach ($game in @($games)) {
+        [void]$entries.Add([pscustomobject]@{ Row = $game; Parent = $null })
+        if ($game.PSObject.Properties['variants']) {
+            foreach ($variant in @($game.variants)) { if ($variant) { [void]$entries.Add([pscustomobject]@{ Row = $variant; Parent = $game }) } }
+        }
+    }
+    # Guide name for each profile, to name a linked profile.
+    $gameNameByCode = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in $entries) {
+        $entryCode = Get-TpmGuideText -Row $entry.Row -Name 'profile_name'
+        if ($entryCode) { $gameNameByCode[$entryCode] = Get-TpmGuideText -Row $entry.Row -Name 'game_name' }
+    }
+    $found = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in $entries) {
+        $row = $entry.Row
+        $code = Get-TpmGuideText -Row $row -Name 'profile_name'
+        if (-not $code -or -not $registeredCodes.Contains($code)) { continue }
+        # A version shares its base game's steps. They are listed once under the base game when that is registered too.
+        $source = if ($entry.Parent) { $entry.Parent } else { $row }
+        $baseListed = ($entry.Parent -and $registeredCodes.Contains((Get-TpmGuideText -Row $entry.Parent -Name 'profile_name')))
+        if ($baseListed) { $source = $null }
+        $notes = Get-TpmGuideText -Row $row -Name 'notes'
+        $general = Get-TpmGuideText -Row $source -Name 'general_issues'
+        $gpuLines = Get-TpmGuideGpuLines -Source $source
+        $secondFile = Get-TpmGuideText -Row $row -Name 'setup_exe2'
+        $testProgram = Get-TpmGuideText -Row $row -Name 'test_exe'
+        # Archives the player must already own (the guide names them; TeknoParrot Manager never downloads them) and a linked profile (the same game with another setup).
+        $extraArchives = @(foreach ($archiveField in @('supp_archives', 'additional_archives')) {
+            foreach ($archiveName in @((Get-TpmGuideText -Row $row -Name $archiveField) -split ';')) { if ($archiveName.Trim()) { $archiveName.Trim() } }
+        })
+        $linkedText = ''
+        $linkedCode = Get-TpmGuideText -Row $row -Name 'linked_profile'
+        if ($linkedCode) {
+            $linkedName = if ($gameNameByCode.ContainsKey($linkedCode) -and $gameNameByCode[$linkedCode]) { $gameNameByCode[$linkedCode] } else { $linkedCode }
+            $linkedText = '{0} ({1}), {2}' -f $linkedName, $linkedCode, $(if ($registeredCodes.Contains($linkedCode)) { 'registered here' } else { 'not registered here' })
+        }
+        # A game the guide lists as broken, partly working or untested is named, not hidden.
+        $guideStatus = switch ((Get-TpmGuideText -Row $row -Name 'status').ToUpperInvariant()) {
+            'BROKEN'   { 'Broken. It does not work yet.' }
+            'PARTIAL'  { 'Partial. It works only in part.' }
+            'UNTESTED' { 'Untested. Nobody has confirmed that it works.' }
+            default    { '' }
+        }
+        if (-not $notes -and -not $general -and $gpuLines.Count -eq 0 -and -not $secondFile -and -not $testProgram -and $extraArchives.Count -eq 0 -and -not $linkedText -and -not $guideStatus) { continue }
+        # The run-once setup program line only fits games that have source notes; a ROM-based game's first file is a game archive.
+        $setupExe = if ($notes) { Get-TpmGuideText -Row $row -Name 'setup_exe' } else { '' }
+        [void]$found.Add([pscustomobject]@{
+            Code          = $code
+            GameName      = Get-TpmGuideText -Row $row -Name 'game_name'
+            SetupExe      = $setupExe
+            Notes         = $notes
+            Needs         = (Get-TpmGameNeedsLine -ProfilePath (Join-Path $UserProfilesDir ($code + '.xml')) -SetupExe $setupExe)
+            GeneralIssues = $general
+            GpuIssues     = @($gpuLines)
+            SecondFile    = $secondFile
+            TestProgram   = $testProgram
+            ExtraArchives = @($extraArchives)
+            LinkedProfile = $linkedText
+            GuideStatus   = $guideStatus
+            BaseGame      = $(if ($entry.Parent) { Get-TpmGuideText -Row $entry.Parent -Name 'game_name' } else { '' })
+        })
+    }
+    return $found.ToArray()
+}
+
+# The saved copy of the guide's game list, or $null when there is none. Never uses the network, so Library Health stays offline.
+function Read-TpmSavedGuideRows {
+    $path = Get-TpmEggmanGameDataCachePath
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try {
+        $parsed = @(@([System.IO.File]::ReadAllText($path) | ConvertFrom-Json) | ForEach-Object { $_ })
+        if ($parsed.Count -gt 0 -and $null -ne $parsed[0].PSObject.Properties['profile_name']) { return $parsed }
+    } catch { Write-Log "GameSupport: the saved Game Notes copy could not be read -- $_" }
+    return $null
+}
+
+# Library Health "Game support" (issues #351 and #389). Per emulator: how many registered games there are, how many have their
+# game file, how many have setup steps in the Game Notes file, and how many need the player (game file missing, a second game
+# file that is not chosen, or PostgreSQL settings missing). Read-only. GuideRows is the saved guide copy, or $null.
+function Get-TpmGameSupportSummary {
+    param([object[]]$ProfileFiles = @(), [string[]]$ValidCodes = @(), [string[]]$PostgresNeededCodes = @(), [object[]]$GuideRows = $null)
+    $steps = @{}
+    foreach ($game in @($GuideRows)) {
+        if ($null -eq $game) { continue }
+        $entries = New-Object System.Collections.Generic.List[object]
+        [void]$entries.Add(@{ Row = $game; Parent = $null })
+        if ($game.PSObject.Properties['variants']) {
+            foreach ($variant in @($game.variants)) { if ($variant) { [void]$entries.Add(@{ Row = $variant; Parent = $game }) } }
+        }
+        foreach ($entry in $entries) {
+            $code = Get-TpmGuideText -Row $entry.Row -Name 'profile_name'
+            if (-not $code) { continue }
+            $source = if ($entry.Parent) { $entry.Parent } else { $entry.Row }
+            if ((Get-TpmGuideText -Row $entry.Row -Name 'notes') -or (Get-TpmGuideText -Row $source -Name 'general_issues') -or
+                (Get-TpmGuideGpuLines -Source $source).Count -gt 0 -or (Get-TpmGuideText -Row $entry.Row -Name 'setup_exe2') -or
+                (Get-TpmGuideText -Row $entry.Row -Name 'test_exe')) { $steps[$code] = $true }
+        }
+    }
+    $emulators = @{}
+    $needsYou = New-Object System.Collections.Generic.List[string]
+    foreach ($pf in @($ProfileFiles)) {
+        try { $doc = Read-Xml $pf.FullName } catch { continue }
+        if (-not $doc.GameProfile) { continue }
+        $code = $pf.BaseName
+        $emulatorNode = $doc.GameProfile.SelectSingleNode('EmulatorType')
+        $emulator = $(if ($null -ne $emulatorNode) { $emulatorNode.InnerText.Trim() } else { '' })
+        if (-not $emulator) { $emulator = 'Unknown' }
+        if (-not $emulators.ContainsKey($emulator)) { $emulators[$emulator] = [pscustomobject]@{ Emulator = $emulator; Registered = 0; FilesFound = 0; StepsShown = 0; NeedsYou = 0 } }
+        $row = $emulators[$emulator]
+        $row.Registered++
+        $fileFound = ($ValidCodes -contains $code)
+        if ($fileFound) { $row.FilesFound++ }
+        if ($steps.ContainsKey($code)) { $row.StepsShown++ }
+        $secondMissing = $false
+        $twoNode = $doc.GameProfile.SelectSingleNode('HasTwoExecutables')
+        if ($fileFound -and $null -ne $twoNode -and $twoNode.InnerText.Trim() -eq 'true') {
+            $secondNode = $doc.GameProfile.SelectSingleNode('GamePath2')
+            $secondPath = $(if ($null -ne $secondNode) { $secondNode.InnerText.Trim() } else { '' })
+            $secondMissing = ([string]::IsNullOrWhiteSpace($secondPath) -or -not (Test-Path -LiteralPath $secondPath -PathType Leaf))
+        }
+        if (-not $fileFound -or $secondMissing -or ($PostgresNeededCodes -contains $code)) {
+            $row.NeedsYou++
+            [void]$needsYou.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $code))
+        }
+    }
+    return [pscustomobject]@{ GuideAvailable = ($null -ne $GuideRows); Rows = @($emulators.Values | Sort-Object Emulator); NeedsYouNames = @($needsYou.ToArray()) }
+}
+
+# The Details lines for the Game support view (beginner words; the numbers are per emulator).
+function Get-TpmGameSupportLines {
+    param([Parameter(Mandatory)]$Summary)
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add('Per emulator: registered games / game file found / setup steps in the Game Notes file / games that need you.')
+    foreach ($row in @($Summary.Rows)) {
+        [void]$lines.Add(('{0}: {1} / {2} / {3} / {4}' -f $row.Emulator, $row.Registered, $row.FilesFound, $row.StepsShown, $row.NeedsYou))
+    }
+    [void]$lines.Add(('Needs you: {0}' -f (Format-TpmNameList -Names @($Summary.NeedsYouNames) -Max 1000 -WhenEmpty 'none')))
+    [void]$lines.Add('A game needs you when its game file is missing, its second game file is not chosen, or it still needs PostgreSQL settings.')
+    if (-not [bool]$Summary.GuideAvailable) {
+        [void]$lines.Add('Setup steps were not counted: there is no saved copy of the Game Notes page yet. Run AutoSync or Register once with an internet connection to save one.')
+    }
+    return $lines.ToArray()
 }
 
 # Read-only scan for all compatibility checks above. Returns
@@ -39745,6 +40272,34 @@ function Get-ProfileInputApi {
     $v = $f.SelectSingleNode("FieldValue")
     if ($null -eq $v) { return $null }
     return $v.InnerText.Trim()
+}
+
+# What a profile itself says about RawInput (issue #42). Read-only; nothing is ever written from this.
+# RawInput: Supported = a button already has a RawInput binding or the Input API field lists RawInput; Unsupported = the
+# Input API field lists other options only; Unknown = the profile says nothing about it.
+# RawInputTrackball: Supported only when the profile names RawInputTrackball exactly (as an element, a field name or an option);
+# Unsupported when RawInput itself is Unsupported; anything else is Unknown. Unfamiliar names are never treated as support.
+function Get-ProfileRawInputCapability {
+    param($Doc)
+    $raw = 'Unknown'
+    $trackball = 'Unknown'
+    if ($null -ne $Doc -and $null -ne $Doc.SelectSingleNode('/GameProfile')) {
+        $hasBinding = $false
+        foreach ($button in @(Get-ButtonNodes $Doc)) {
+            if ($null -ne $button.SelectSingleNode('RawInputButton')) { $hasBinding = $true; break }
+        }
+        $apiField = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral 'Input API')]")
+        $options = @()
+        if ($null -ne $apiField) { $options = @($apiField.SelectNodes('FieldOptions/string') | ForEach-Object { $_.InnerText.Trim() }) }
+        if ($hasBinding -or $options -contains 'RawInput') { $raw = 'Supported' }
+        elseif ($options.Count -gt 0) { $raw = 'Unsupported' }
+        $namesTrackball = ($null -ne $Doc.SelectSingleNode('//RawInputTrackball')) -or
+            ($null -ne $Doc.SelectSingleNode("//FieldName[normalize-space(.)='RawInputTrackball']")) -or
+            ($null -ne $Doc.SelectSingleNode("//FieldOptions/string[normalize-space(.)='RawInputTrackball']"))
+        if ($namesTrackball) { $trackball = 'Supported' }
+        elseif ($raw -eq 'Unsupported') { $trackball = 'Unsupported' }
+    }
+    return [pscustomobject]@{ RawInput = $raw; RawInputTrackball = $trackball }
 }
 
 # Sets the "Input API" FieldValue, but only if the field exists AND lists the
@@ -42720,6 +43275,27 @@ function Get-TpmPlainReasonTable {
         'GAME_PATH_NOT_SAVED' = 'This game has no saved game file path yet.'
         'POSTGRES_BUSY' = 'Another TeknoParrot Manager window is changing PostgreSQL, so nothing was changed.'
         'DATABASE_REINITIALIZE_FAILED' = 'The database could not be set up again, so nothing was changed.'
+        'REBUILT' = 'The game was rebuilt from its ZIP and checked. Your old folder was kept.'
+        'ROLLED_BACK' = 'The rebuild could not finish, so your game was put back as it was.'
+        'UNDONE' = 'The rebuild was undone and your old folder is back.'
+        'UNDO_UNVERIFIED' = 'The undo stopped and TeknoParrot Manager could not confirm your game folder was put back. Your files are safe.'
+        'KEPT_FOLDER_DELETED' = 'The kept old folder was deleted.'
+        'DELETE_INCOMPLETE' = 'Some of the kept old folder could not be deleted.'
+        'NOTHING_KEPT' = 'There are no kept old folders.'
+        'NOT_A_KEPT_FOLDER' = 'That folder is not one TeknoParrot Manager kept, so nothing was changed.'
+        'NO_RECORD' = 'TeknoParrot Manager has no saved record of this, so nothing was changed.'
+        'NO_GAMES' = 'No games were found.'
+        'NO_ZIP_FOLDER' = 'No ZIP folder is set up yet, so nothing was changed.'
+        'SYNC_STATE_UNUSABLE' = 'The AutoSync record could not be read, so nothing was changed.'
+        'UNSAFE_PATH' = 'A folder path was not safe to use, so nothing was changed.'
+        'GAME_RUNNING' = 'The game is running. Close it and try again.'
+        'STOPPED_BEFORE_CHANGE' = 'A safety check stopped this before anything was changed.'
+        'NEEDS_ATTENTION' = 'This needs your attention. Details have the technical reason.'
+        'ZIP_NOT_FOUND' = 'The ZIP for this game could not be found, so nothing was changed.'
+        'ZIP_UNREADABLE' = 'The ZIP could not be read, so it was not used.'
+        'DAT_MISMATCH' = 'The ZIP does not match the DAT list, so nothing was changed.'
+        'INSUFFICIENT_STAGING_SPACE' = 'There is not enough free space, so nothing was changed.'
+        'STAGING_SPACE_UNAVAILABLE' = 'Free space could not be checked, so nothing was changed.'
     }
     Set-Variable -Name TpmPlainReasonTable -Scope Script -Value $table
     return $table
@@ -43591,6 +44167,470 @@ function Invoke-TpmResetRestoreMenu {
     Write-TpmResetRestoreResult -Result $menuResult.Result
     $menuResult.RestartRequired = [bool]$menuResult.Result.RestartRequired
     return $menuResult
+}
+
+# =============================================================================
+# REBUILD ONE GAME FROM ITS ZIP  (#348)
+# =============================================================================
+# Puts one game folder back to exactly what its own ZIP holds. The ZIP is unpacked and checked in a staging folder on
+# the same drive (Invoke-TpmAutoSyncDirectoryTransaction); the old folder is never deleted: it is RENAMED to a kept place
+# on the same drive (no copy) and stays there until the player puts it back or deletes it. The TeknoParrot profile is
+# not touched: the game folder keeps its name and the transaction proves the ZIP holds the registered program.
+
+function Format-TpmRebuildSize {
+    param([int64]$Bytes)
+    $invariant = [System.Globalization.CultureInfo]::InvariantCulture
+    if ($Bytes -ge 1073741824) { return ((([double]$Bytes) / 1073741824).ToString('N1', $invariant) + ' GB') }
+    if ($Bytes -ge 1048576) { return ((([double]$Bytes) / 1048576).ToString('N0', $invariant) + ' MB') }
+    return (([Math]::Max([double]1, [Math]::Ceiling(([double]$Bytes) / 1024))).ToString('N0', $invariant) + ' KB')
+}
+
+# Where old game folders are kept: beside the games folder, so a rename stays on the same drive.
+function Get-TpmRebuildKeptRoot {
+    param([Parameter(Mandatory)][string]$InstallFolder)
+    $root = [System.IO.Path]::GetFullPath($InstallFolder).TrimEnd([char[]]"\/")
+    $parent = [System.IO.Path]::GetDirectoryName($root)
+    if ([string]::IsNullOrWhiteSpace($parent)) { $parent = $root }
+    return (Join-Path $parent 'TPM-old-game-folders')
+}
+
+function Test-TpmSameFolderPath {
+    param([string]$First, [string]$Second)
+    try { return ([System.IO.Path]::GetFullPath($First).TrimEnd([char[]]"\/") -ieq [System.IO.Path]::GetFullPath($Second).TrimEnd([char[]]"\/")) } catch { return $false }
+}
+
+# Names of programs running from inside a folder (a game that is open keeps its files locked).
+function Get-TpmFolderProcesses {
+    param([Parameter(Mandatory)][string]$Folder)
+    $found = New-Object System.Collections.Generic.List[string]
+    try {
+        foreach ($process in @(Get-Process -ErrorAction Stop)) {
+            try { if ($process.Path -and (Test-PathInside -child ([string]$process.Path) -parent $Folder)) { [void]$found.Add([string]$process.ProcessName) } } catch { }
+        }
+    } catch { Write-Log ('Rebuild: the running programs could not be listed -- ' + $_.Exception.Message) }
+    return $found.ToArray()
+}
+
+# Registered games whose program lives in a folder directly inside the games folder.
+function Get-TpmRebuildGames {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$InstallFolder)
+    $games = New-Object System.Collections.Generic.List[object]
+    $installFull = [System.IO.Path]::GetFullPath($InstallFolder).TrimEnd([char[]]"\/")
+    foreach ($file in @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue)) {
+        try {
+            $doc = Read-Xml $file.FullName
+            $pathNode = if ($doc.GameProfile) { $doc.GameProfile.SelectSingleNode('GamePath') } else { $null }
+            if ($null -eq $pathNode -or [string]::IsNullOrWhiteSpace($pathNode.InnerText)) { continue }
+            $gamePath = [System.IO.Path]::GetFullPath($pathNode.InnerText.Trim())
+            if (-not (Test-PathInside -child $gamePath -parent $installFull)) { continue }
+            $relative = $gamePath.Substring($installFull.Length).TrimStart([char[]]"\/")
+            if ($relative -notmatch '[\\/]') { continue }
+            $firstPart = ($relative -split '[\\/]')[0]
+            $folder = Join-Path $installFull $firstPart
+            if (-not (Test-Path -LiteralPath $folder -PathType Container)) { continue }
+            [void]$games.Add([pscustomobject]@{
+                Code = $file.BaseName
+                Name = (Get-TpmGameDisplayLabel -ProfilePath $file.FullName -Fallback $file.BaseName)
+                Folder = $folder
+                GamePath = $gamePath
+            })
+        } catch { Write-Log ('Rebuild: a game settings file could not be read ({0}) -- {1}' -f $file.Name, $_.Exception.Message) }
+    }
+    return @($games | Sort-Object -Property Name, Code)
+}
+
+# The ZIPs of the player's own ZIP folders that belong to this game folder, found the way AutoSync finds the folder of a ZIP.
+function Find-TpmRebuildZips {
+    param([Parameter(Mandatory)][string]$GameFolder, [Parameter(Mandatory)][string]$InstallFolder, [string[]]$ZipSources = @(), [hashtable]$DatIndex = $null, [string]$UserProfilesDir = '')
+    $found = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $folderMap = Get-StagingFolderMap $InstallFolder
+    foreach ($source in @($ZipSources | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $source -PathType Container)) { continue }
+        foreach ($zip in @(Get-TpmTopLevelZipSourceFiles -ZipSource $source -ProgressLabel 'Rebuild ZIP search')) {
+            $rawName = [System.IO.Path]::GetFileNameWithoutExtension($zip.Name)
+            if ($rawName -like '!TeknoParrot Collection*') { continue }
+            $resolved = Resolve-ExtractedGameFolder -RawZipName $rawName -InstallFolder $InstallFolder -FolderMap $folderMap -DatIndex $DatIndex -UserProfilesDir $UserProfilesDir
+            if ($resolved -and (Test-TpmSameFolderPath -First $resolved -Second $GameFolder) -and $seen.Add([string]$zip.FullName)) { [void]$found.Add($zip) }
+        }
+    }
+    return $found.ToArray()
+}
+
+# What the DAT lists for one game (named like its ZIP): file name, size and hashes. $null when no DAT can be read or the
+# game is not in it; the DAT check is then skipped and the screen says so.
+function Get-TpmDatFilesForGame {
+    param([Parameter(Mandatory)][string]$GameName, [string]$EggmanDatZip = '', [string]$DatFilePath = '', [string]$SupplementaryDatPath = '')
+    $sources = @(
+        @{ Kind = 'File'; Path = $DatFilePath }
+        @{ Kind = 'Zip'; Path = $EggmanDatZip; Pattern = '*Collection*_RomVault*.dat' }
+        @{ Kind = 'File'; Path = $SupplementaryDatPath }
+        @{ Kind = 'Zip'; Path = $EggmanDatZip; Pattern = '*Supplementary*_RomVault*.dat' }
+    )
+    foreach ($source in $sources) {
+        if ([string]::IsNullOrWhiteSpace([string]$source.Path) -or -not (Test-Path -LiteralPath ([string]$source.Path) -PathType Leaf)) { continue }
+        $sink = @{}
+        try {
+            if ($source.Kind -eq 'File') { [void](Build-DatIndex ([string]$source.Path) -EmuRomSink $sink -Quiet -CaptureGameNames @($GameName) -StopWhenCaptured) }
+            else { [void](Build-DatIndexFromZip ([string]$source.Path) ([string]$source.Pattern) -EmuRomSink $sink -Quiet -CaptureGameNames @($GameName) -StopWhenCaptured) }
+        } catch { Write-Log ('Rebuild: the DAT could not be read -- ' + $_.Exception.Message) }
+        foreach ($key in @($sink.Keys)) {
+            if ([string]$key -ieq $GameName) { return ,($sink[$key].ToArray()) }
+        }
+    }
+    return $null
+}
+
+# Read-only look at what a rebuild would do. Never hashes the game folder (it can be many gigabytes).
+function Get-TpmRebuildPreview {
+    param([Parameter(Mandatory)][string]$ZipPath, [Parameter(Mandatory)][string]$GameFolder, [Parameter(Mandatory)][string]$InstallFolder, [object[]]$DatFiles = @())
+    $inventory = Get-TpmAutoSyncZipInventory -ZipPath $ZipPath -SkipHash
+    $zipFiles = @{}
+    foreach ($entry in @($inventory.Entries)) {
+        if (-not [bool](Get-TpmTransactionField -Object $entry -Name 'IsDirectory')) { $zipFiles[([string]$entry.RelativePath).ToLowerInvariant()] = [int64]$entry.Length }
+    }
+    $folderFull = [System.IO.Path]::GetFullPath($GameFolder).TrimEnd([char[]]"\/")
+    $sameCount = 0; $differentCount = 0; $extraCount = 0; $folderCount = 0
+    $folderKeys = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($file in @(Get-ChildItem -LiteralPath $folderFull -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+        $folderCount++
+        $key = $file.FullName.Substring($folderFull.Length).TrimStart([char[]]"\/").ToLowerInvariant()
+        [void]$folderKeys.Add($key)
+        if (-not $zipFiles.ContainsKey($key)) { $extraCount++ }
+        elseif ([int64]$zipFiles[$key] -eq [int64]$file.Length) { $sameCount++ }
+        else { $differentCount++ }
+    }
+    $missingCount = @($zipFiles.Keys | Where-Object { -not $folderKeys.Contains([string]$_) }).Count
+    $keptRoot = Get-TpmRebuildKeptRoot -InstallFolder $InstallFolder
+    $transactionParent = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($InstallFolder).TrimEnd([char[]]"\/"))
+    if ([string]::IsNullOrWhiteSpace($transactionParent)) { $transactionParent = [System.IO.Path]::GetFullPath($InstallFolder) }
+    $datState = 'NotChecked'
+    $datSummary = 'The DAT list was not used (it is not loaded, or it does not list this game).'
+    if (@($DatFiles).Count -gt 0) {
+        $datCheck = Test-TpmZipFilesAgainstDatList -DatFiles $DatFiles -Inventory $inventory
+        $datState = if ($datCheck.Matches) { 'Match' } else { 'Mismatch' }
+        $datSummary = [string]$datCheck.Summary
+    }
+    return [pscustomobject]@{
+        ZipFileCount = [int]$inventory.FileCount
+        ZipBytes = [int64]$inventory.TotalBytes
+        FolderFileCount = $folderCount
+        SameCount = $sameCount
+        DifferentCount = $differentCount
+        MissingCount = $missingCount
+        ExtraCount = $extraCount
+        KeptRoot = $keptRoot
+        SpaceState = (Get-TpmAutoSyncStagingSpaceState -Path $transactionParent -RequiredBytes ([int64]$inventory.TotalBytes))
+        DatState = $datState
+        DatSummary = $datSummary
+    }
+}
+
+# The checked rebuild itself (no questions). One transaction: stage and check the ZIP, rename the old folder to a kept
+# place, rename the new one into its place, commit the AutoSync record, verify. Any failure puts the old folder back.
+function Invoke-TpmRebuildGame {
+    param(
+        [Parameter(Mandatory)]$Game,
+        [Parameter(Mandatory)][string]$ZipPath,
+        [Parameter(Mandatory)][string]$InstallFolder,
+        [Parameter(Mandatory)][string]$SyncStatePath,
+        [object[]]$DatFiles = @()
+    )
+    $rawName = [System.IO.Path]::GetFileNameWithoutExtension($ZipPath)
+    $stateCheck = Test-TpmAutoSyncStateFile -Path $SyncStatePath
+    if ($stateCheck.Status -eq 'Invalid') {
+        Write-Log ('Rebuild: stopped before any change; the AutoSync record is unusable -- ' + [string]$stateCheck.Reason)
+        return (New-TpmResetRestoreResult -Outcome 'FAILED_BEFORE_MUTATION' -ReasonCode 'SYNC_STATE_UNUSABLE' -Summary 'Nothing was changed. The file where AutoSync keeps its records could not be read. Run AutoSync once from the main menu, and it will tell you what to do.')
+    }
+    $syncState = $stateCheck.State
+    $stamp = (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss', [System.Globalization.CultureInfo]::InvariantCulture)
+    $keptRoot = Get-TpmRebuildKeptRoot -InstallFolder $InstallFolder
+    $keptPath = Join-Path $keptRoot ([System.IO.Path]::GetFileName(([string]$Game.Folder).TrimEnd([char[]]"\/")) + '_' + $stamp)
+    Write-Log ('Rebuild: starting for {0} ({1}) from {2}; the old folder will be kept at {3}.' -f $Game.Name, $Game.Code, $ZipPath, $keptPath)
+    $tx = Invoke-TpmAutoSyncDirectoryTransaction -ZipPath $ZipPath -InstallFolder $InstallFolder -TargetDir ([string]$Game.Folder) `
+        -RawName $rawName -SyncStatePath $SyncStatePath -SyncState $syncState -StoredState $syncState[$rawName] `
+        -RegisteredGamePath ([string]$Game.GamePath) -KeepOldTargetAt $keptPath -ExpectedDatFiles $DatFiles
+    $txResult = $tx.TransactionResult
+    $details = Get-TpmTransactionField -Object $txResult -Name 'TechnicalDetails'
+    $keptAt = [string](Get-TpmTransactionField -Object $details -Name 'OldFolderKeptAt' -Default '')
+    $outcome = [string]$txResult.Outcome
+    $reason = [string]$txResult.ReasonCode
+    Write-Log ('Rebuild: {0} finished with {1} ({2}). Old folder kept at: {3}. DAT check: {4}.' -f $Game.Name, $outcome, $reason, $(if ($keptAt) { $keptAt } else { 'not kept' }), [string](Get-TpmTransactionField -Object $details -Name 'DatCheck' -Default 'not used'))
+    # A finished transaction whose cleanup left something behind still decided the files: judge it by what it decided.
+    $effective = $outcome
+    if ($outcome -eq 'CLEANUP_RESIDUE') {
+        $underlying = [string](Get-TpmTransactionField -Object $txResult -Name 'UnderlyingOutcome' -Default '')
+        if ($underlying) { $effective = $underlying }
+    }
+    if ($effective -in @('SUCCEEDED', 'NO_OP') -and -not [bool]$tx.FilesystemChanged) {
+        return (New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'ALREADY_MATCHES' -Summary 'Nothing was changed. The game folder already has exactly the files that are in the ZIP.')
+    }
+    if ($effective -eq 'SUCCEEDED') {
+        if ($keptAt) {
+            try {
+                $record = [ordered]@{ SchemaVersion = 1; CreatedUtc = (Get-Date).ToUniversalTime().ToString('o'); GameFolder = [string]$Game.Folder; KeptFolder = $keptAt; Code = [string]$Game.Code; Name = [string]$Game.Name; Zip = $ZipPath }
+                Write-TpmAtomicTextFile -Path ($keptAt + '.tpm.json') -Text (($record | ConvertTo-Json -Depth 4) + "`r`n") -Operation 'rebuild record write'
+            } catch { Write-Log ('Rebuild: the record of the kept folder could not be saved (the folder is still there) -- ' + $_.Exception.Message) }
+        } else {
+            # The rename to the kept place did not finish; the old folder is still inside the transaction folder.
+            $residue = Get-TpmTransactionField -Object $txResult -Name 'Cleanup'
+            $residuePaths = @(Get-TpmTransactionField -Object $residue -Name 'ResiduePaths' -Default @())
+            if ($residuePaths.Count -gt 0 -and $residuePaths[0]) { $keptAt = Join-Path ([string]$residuePaths[0]) 'rollback\old-target' }
+        }
+        return (New-TpmResetRestoreResult -Outcome 'SUCCEEDED' -ReasonCode 'REBUILT' -Summary ('Done. {0} was rebuilt from its ZIP and checked. Your old folder was not deleted. It is kept here: {1}' -f $Game.Name, $keptAt) -ChangedItems @([string]$Game.Folder))
+    }
+    if ($effective -eq 'ROLLED_BACK_VERIFIED') {
+        return (New-TpmResetRestoreResult -Outcome 'ROLLED_BACK_VERIFIED' -ReasonCode 'ROLLED_BACK' -Summary 'The rebuild did not finish. Your old folder was put back exactly as it was.')
+    }
+    if ($effective -eq 'FAILED_BEFORE_MUTATION') {
+        $plain = switch ($reason) {
+            'INSUFFICIENT_STAGING_SPACE' { 'There is not enough free space for the rebuild. Free some space on the drive of your games folder and try again. Nothing was changed.' }
+            'STAGING_SPACE_UNAVAILABLE' { 'TeknoParrot Manager could not tell how much free space there is, so it did not start. Nothing was changed.' }
+            'DAT_MISMATCH' { 'This ZIP does not match the DAT list, so it may be damaged or a different version. Nothing was changed.' }
+            'AMBIGUOUS_EXTRACTION_ROOT' { 'This ZIP does not hold the game program that TeknoParrot has for this game, so it was not used. Nothing was changed.' }
+            default { 'The rebuild stopped before anything was replaced. Nothing was changed.' }
+        }
+        return (New-TpmResetRestoreResult -Outcome 'FAILED_BEFORE_MUTATION' -ReasonCode $(if ($reason) { $reason } else { 'STOPPED_BEFORE_CHANGE' }) -Summary $plain)
+    }
+    return (New-TpmResetRestoreResult -Outcome 'ACTION_REQUIRED' -ReasonCode $(if ($reason) { $reason } else { 'NEEDS_ATTENTION' }) -Summary 'The rebuild stopped and TeknoParrot Manager could not prove the final state. Do not run it again yet. Open the log from the main menu (L) and see Details.')
+}
+
+# Old folders kept by rebuilds (the folders in the kept place, with the record of each rebuild when there is one).
+function Get-TpmRebuildKeptFolders {
+    param([Parameter(Mandatory)][string]$InstallFolder)
+    $keptRoot = Get-TpmRebuildKeptRoot -InstallFolder $InstallFolder
+    $kept = New-Object System.Collections.Generic.List[object]
+    if (-not (Test-Path -LiteralPath $keptRoot -PathType Container)) { return @() }
+    foreach ($dir in @(Get-ChildItem -LiteralPath $keptRoot -Directory -ErrorAction SilentlyContinue | Sort-Object -Property LastWriteTime -Descending)) {
+        $recordPath = $dir.FullName + '.tpm.json'
+        $record = $null
+        if (Test-Path -LiteralPath $recordPath -PathType Leaf) {
+            try { $record = [System.IO.File]::ReadAllText($recordPath) | ConvertFrom-Json -ErrorAction Stop } catch { $record = $null }
+        }
+        # Only a folder TeknoParrot Manager can show it kept (its own record names this exact folder) is offered.
+        if ($null -eq $record -or -not $record.PSObject.Properties['KeptFolder'] -or -not (Test-TpmSameFolderPath -First ([string]$record.KeptFolder) -Second $dir.FullName)) { continue }
+        [void]$kept.Add([pscustomobject]@{ Name = [string]$dir.Name; Path = [string]$dir.FullName; RecordPath = $recordPath; Record = $record })
+    }
+    return $kept.ToArray()
+}
+
+# Undo: the rebuilt folder is renamed aside (kept too) and the old folder is renamed back. No copying. If the second
+# rename fails, the first is undone, so the game folder is never left missing.
+function Restore-TpmRebuildKeptFolder {
+    param([Parameter(Mandatory)]$Kept, [Parameter(Mandatory)][string]$InstallFolder)
+    $record = $Kept.Record
+    $gameFolder = if ($null -ne $record -and $record.PSObject.Properties['GameFolder']) { [string]$record.GameFolder } else { '' }
+    if ([string]::IsNullOrWhiteSpace($gameFolder) -or -not (Test-TpmAutoSyncDirectChildTarget -TargetDir $gameFolder -InstallFolder $InstallFolder)) {
+        return (New-TpmResetRestoreResult -Outcome 'FAILED_BEFORE_MUTATION' -ReasonCode 'NO_RECORD' -Summary 'Nothing was changed. TeknoParrot Manager does not know which game this old folder belongs to, so it cannot put it back. You can move it back yourself.')
+    }
+    if (-not (Test-TpmNoReparsePath -Path $gameFolder) -or -not (Test-TpmNoReparsePath -Path ([string]$Kept.Path))) {
+        return (New-TpmResetRestoreResult -Outcome 'FAILED_BEFORE_MUTATION' -ReasonCode 'UNSAFE_PATH' -Summary 'Nothing was changed. One of the folders is a link, which is not safe to swap.')
+    }
+    $running = @(Get-TpmFolderProcesses -Folder $gameFolder)
+    if ($running.Count -gt 0) {
+        return (New-TpmResetRestoreResult -Outcome 'FAILED_BEFORE_MUTATION' -ReasonCode 'GAME_RUNNING' -Summary 'Nothing was changed. The game is running. Close it and try again.')
+    }
+    $keptRoot = Get-TpmRebuildKeptRoot -InstallFolder $InstallFolder
+    $aside = Join-Path $keptRoot (([System.IO.Path]::GetFileName($gameFolder.TrimEnd([char[]]"\/"))) + '_rebuilt_' + (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss', [System.Globalization.CultureInfo]::InvariantCulture))
+    $movedAside = $false
+    try {
+        if (Test-Path -LiteralPath $gameFolder) {
+            Invoke-TpmAutoSyncMovePath -Source $gameFolder -Destination $aside
+            $movedAside = $true
+        }
+        Invoke-TpmAutoSyncMovePath -Source ([string]$Kept.Path) -Destination $gameFolder
+    } catch {
+        Write-Log ('Rebuild undo: failed -- ' + $_.Exception.Message)
+        if ($movedAside -and -not (Test-Path -LiteralPath $gameFolder)) {
+            try { Invoke-TpmAutoSyncMovePath -Source $aside -Destination $gameFolder }
+            catch { return (New-TpmResetRestoreResult -Outcome 'ACTION_REQUIRED' -ReasonCode 'UNDO_UNVERIFIED' -Summary ('The undo stopped and the game folder could not be put back. The files are safe in: {0} and {1}' -f $aside, [string]$Kept.Path)) }
+        }
+        return (New-TpmResetRestoreResult -Outcome 'ROLLED_BACK_VERIFIED' -ReasonCode 'UNDO_ROLLED_BACK' -Summary 'The undo did not finish. The game folder is as it was before.')
+    }
+    try { if (Test-Path -LiteralPath ([string]$Kept.RecordPath)) { Remove-Item -LiteralPath ([string]$Kept.RecordPath) -Force -ErrorAction Stop } } catch { Write-Log ('Rebuild undo: the record could not be removed -- ' + $_.Exception.Message) }
+    # The rebuilt folder is kept now, with its own record, so it can be put back or deleted later like any other kept folder.
+    try {
+        $asideRecord = [ordered]@{ SchemaVersion = 1; CreatedUtc = (Get-Date).ToUniversalTime().ToString('o'); GameFolder = $gameFolder; KeptFolder = $aside; Code = [string]$record.Code; Name = ([string]$record.Name + ' (rebuilt copy)'); Zip = [string]$record.Zip }
+        if ($movedAside) { Write-TpmAtomicTextFile -Path ($aside + '.tpm.json') -Text (($asideRecord | ConvertTo-Json -Depth 4) + "`r`n") -Operation 'rebuild record write' }
+    } catch { Write-Log ('Rebuild undo: the record of the kept rebuilt folder could not be saved -- ' + $_.Exception.Message) }
+    Write-Log ('Rebuild undo: {0} was put back from {1}; the rebuilt folder is kept at {2}.' -f $gameFolder, $Kept.Path, $aside)
+    return (New-TpmResetRestoreResult -Outcome 'SUCCEEDED' -ReasonCode 'UNDONE' -Summary ('Your old folder is back. The rebuilt folder was not deleted. It is kept here: {0}' -f $aside) -ChangedItems @($gameFolder))
+}
+
+# The player's decision to throw an old folder away (only ever called after YES).
+function Remove-TpmRebuildKeptFolder {
+    param([Parameter(Mandatory)]$Kept, [Parameter(Mandatory)][string]$InstallFolder)
+    $keptRoot = Get-TpmRebuildKeptRoot -InstallFolder $InstallFolder
+    if ($null -eq $Kept.Record -or -not (Test-PathInside -child ([string]$Kept.Path) -parent $keptRoot) -or (Test-TpmSameFolderPath -First ([string]$Kept.Path) -Second $keptRoot)) {
+        return (New-TpmResetRestoreResult -Outcome 'FAILED_BEFORE_MUTATION' -ReasonCode 'NOT_A_KEPT_FOLDER' -Summary 'Nothing was deleted. TeknoParrot Manager cannot show that it kept that folder.')
+    }
+    try {
+        Invoke-TpmAutoSyncRemovePath -Path ([string]$Kept.Path)
+        if (Test-Path -LiteralPath ([string]$Kept.RecordPath)) { Remove-Item -LiteralPath ([string]$Kept.RecordPath) -Force -ErrorAction SilentlyContinue }
+    } catch {
+        Write-Log ('Rebuild: deleting a kept folder failed -- ' + $_.Exception.Message)
+        return (New-TpmResetRestoreResult -Outcome 'ACTION_REQUIRED' -ReasonCode 'DELETE_INCOMPLETE' -Summary ('The old folder could not be deleted completely. You can delete it yourself: {0}' -f [string]$Kept.Path))
+    }
+    Write-Log ('Rebuild: the kept old folder {0} was deleted at the player''s request.' -f $Kept.Path)
+    return (New-TpmResetRestoreResult -Outcome 'SUCCEEDED' -ReasonCode 'KEPT_FOLDER_DELETED' -Summary 'The old folder was deleted.')
+}
+
+# Rebuild one chosen game: find the ZIP, show what will happen, ask, then rebuild.
+function Invoke-TpmRebuildOneGame {
+    param(
+        [Parameter(Mandatory)]$Game,
+        [Parameter(Mandatory)][string]$InstallFolder,
+        [string[]]$ZipSources = @(),
+        [Parameter(Mandatory)][string]$SyncStatePath,
+        [hashtable]$DatIndex = $null,
+        [string]$UserProfilesDir = '',
+        [string]$EggmanDatZip = '',
+        [string]$DatFilePath = '',
+        [string]$SupplementaryDatPath = ''
+    )
+    $nothingChanged = { param($Reason, $Text) return (New-TpmResetRestoreResult -Outcome 'FAILED_BEFORE_MUTATION' -ReasonCode $Reason -Summary $Text) }
+    $running = @(Get-TpmFolderProcesses -Folder ([string]$Game.Folder))
+    if ($running.Count -gt 0) {
+        return (& $nothingChanged 'GAME_RUNNING' ('{0} is running. Close it and try again. Nothing was changed.' -f $Game.Name))
+    }
+    $zips = @(Find-TpmRebuildZips -GameFolder ([string]$Game.Folder) -InstallFolder $InstallFolder -ZipSources $ZipSources -DatIndex $DatIndex -UserProfilesDir $UserProfilesDir)
+    if ($zips.Count -eq 0) {
+        Write-Log ('Rebuild: no ZIP found for {0} ({1}) in: {2}' -f $Game.Name, $Game.Code, (@($ZipSources | Where-Object { $_ }) -join '; '))
+        return (& $nothingChanged 'ZIP_NOT_FOUND' ('TeknoParrot Manager could not find the ZIP for {0}. Nothing was changed. Put the game''s ZIP in the ZIP folder you use for AutoSync, then try again.' -f $Game.Name))
+    }
+    $zip = $zips[0]
+    if ($zips.Count -gt 1) {
+        $rows = @($zips | ForEach-Object { '{0} ({1})' -f $_.Name, (Format-TpmRebuildSize -Bytes ([int64]$_.Length)) })
+        $picked = Read-TpmNumberedListChoice -Rows $rows -Prompt '  Choose a number, or B to go back' -Heading 'More than one ZIP fits this game. Which one do you want to use?'
+        if ($picked -lt 0) { return (New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'USER_CANCELLED' -Summary 'Canceled. Nothing was changed.') }
+        $zip = $zips[$picked]
+    }
+    $rawName = [System.IO.Path]::GetFileNameWithoutExtension([string]$zip.Name)
+    Write-TpmResetRestoreText -Text 'Looking at the ZIP...' -Color DarkGray
+    $datFiles = Get-TpmDatFilesForGame -GameName $rawName -EggmanDatZip $EggmanDatZip -DatFilePath $DatFilePath -SupplementaryDatPath $SupplementaryDatPath
+    if ($null -eq $datFiles) { $datFiles = @() } else { $datFiles = @($datFiles) }
+    try {
+        $preview = Get-TpmRebuildPreview -ZipPath ([string]$zip.FullName) -GameFolder ([string]$Game.Folder) -InstallFolder $InstallFolder -DatFiles $datFiles
+    } catch {
+        Write-Log ('Rebuild: the ZIP could not be read -- ' + $_.Exception.Message)
+        return (& $nothingChanged 'ZIP_UNREADABLE' ('The ZIP for {0} could not be read, so it was not used. Nothing was changed.' -f $Game.Name))
+    }
+    if ($preview.SpaceState -eq 'Short') {
+        return (& $nothingChanged 'INSUFFICIENT_STAGING_SPACE' ('There is not enough free space for the rebuild. It needs about {0} free on the drive of your games folder. Free some space and try again. Nothing was changed.' -f (Format-TpmRebuildSize -Bytes $preview.ZipBytes)))
+    }
+    if ($preview.DatState -eq 'Mismatch') {
+        Write-Log ('Rebuild: the ZIP does not match the DAT list -- ' + $preview.DatSummary)
+        return (& $nothingChanged 'DAT_MISMATCH' 'This ZIP does not match the DAT list, so it may be damaged or a different version. Nothing was changed.')
+    }
+    Write-Host ''
+    Write-TpmResetRestoreText -Text ('Game: {0}' -f $Game.Name) -Color Yellow
+    Write-TpmResetRestoreText -Text ('ZIP: {0}' -f $zip.Name)
+    Write-Host ''
+    Write-TpmResetRestoreText -Text ('The new folder will hold exactly the {0} in the ZIP ({1}).' -f (Format-TpmCountNoun -Count $preview.ZipFileCount -Singular 'file'), (Format-TpmRebuildSize -Bytes $preview.ZipBytes))
+    if ($preview.ExtraCount -gt 0) {
+        Write-TpmResetRestoreText -Text ('{0} in your current folder are not in the ZIP (for example saves or your own settings). They stay in the old folder, which is kept.' -f (Format-TpmCountNoun -Count $preview.ExtraCount -Singular 'file'))
+    }
+    Write-Host ''
+    Write-TpmResetRestoreText -Text 'What happens:'
+    Write-TpmResetRestoreText -Text '1. The ZIP is unpacked and checked in a temporary folder on the same drive.' -Indent 4 -HangingIndent 3
+    Write-TpmResetRestoreText -Text '2. Your current folder is renamed and kept. Nothing is copied or deleted.' -Indent 4 -HangingIndent 3
+    Write-TpmResetRestoreText -Text '3. The new folder takes its place.' -Indent 4 -HangingIndent 3
+    Write-TpmResetRestoreText -Text ('Your old folder will be kept in: {0}' -f $preview.KeptRoot)
+    Write-TpmResetRestoreText -Text 'If anything goes wrong, your old folder is put back. The TeknoParrot settings for this game are not changed.' -Color DarkGray
+    $datLine = if ($preview.DatState -eq 'Match') { 'The ZIP matches the DAT list.' } else { 'The DAT list does not cover this game, so the ZIP was checked against itself only.' }
+    Write-TpmResetRestoreText -Text $datLine -Color DarkGray
+    $blocks = @(@{ Heading = 'Technical details'; Lines = @(
+        ('ZIP: {0}' -f $zip.FullName),
+        ('Game folder: {0}' -f $Game.Folder),
+        ('Profile: {0}' -f $Game.Code),
+        ('Files in your folder: {0} ({1} look the same, {2} differ, {3} are not in the ZIP)' -f $preview.FolderFileCount, $preview.SameCount, $preview.DifferentCount, $preview.ExtraCount),
+        ('Files in the ZIP that are missing in your folder: {0}' -f $preview.MissingCount),
+        ('DAT: {0}' -f $preview.DatSummary),
+        ('Old folder will be kept in: {0}' -f $preview.KeptRoot)
+    ) })
+    Write-Host ''
+    $confirm = Read-TpmResetRestoreAnswer -Intro 'Any answer other than YES cancels, and nothing is changed.' -Prompt 'Type YES to rebuild this game' -DetailBlocks $blocks
+    if ($confirm.Trim().ToUpperInvariant() -ne 'YES') { return (New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'USER_DECLINED' -Summary 'Canceled. Nothing was changed.') }
+    return (Invoke-TpmRebuildGame -Game $Game -ZipPath ([string]$zip.FullName) -InstallFolder $InstallFolder -SyncStatePath $SyncStatePath -DatFiles $datFiles)
+}
+
+# The menu: rebuild one game, put an old folder back, or delete a kept old folder.
+function Invoke-TpmRebuildMenu {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [AllowEmptyString()][string]$InstallFolder = '',
+        [string[]]$ZipSources = @(),
+        [hashtable]$DatIndex = $null,
+        [string]$EggmanDatZip = '',
+        [string]$DatFilePath = '',
+        [string]$SupplementaryDatPath = ''
+    )
+    Write-TpmResetRestoreHeader -Title 'Rebuild a game from its ZIP'
+    Write-Host ''
+    Write-TpmResetRestoreText -Text 'This puts one game folder back to exactly what is in its original ZIP. Use it when a game is broken and you do not know why.'
+    Write-TpmResetRestoreText -Text 'Your old folder is not deleted. It is kept aside, so you can put it back.'
+    if ([string]::IsNullOrWhiteSpace($InstallFolder) -or -not (Test-Path -LiteralPath $InstallFolder -PathType Container)) {
+        Write-TpmResetRestoreText -Text 'There is no games folder set up yet, so there is nothing to rebuild. Run AutoSync or Register only once from the main menu first.' -Color Yellow
+        return
+    }
+    $syncStatePath = Join-Path $InstallFolder 'TeknoParrot-Manager.syncstate.json'
+    while ($true) {
+        Write-Host ''
+        Write-TpmResetRestoreText -Text '1) Rebuild one game from its ZIP' -HangingIndent 3
+        Write-TpmResetRestoreText -Text '2) Put an old folder back (undo a rebuild)' -HangingIndent 3
+        Write-TpmResetRestoreText -Text '3) Delete an old folder I no longer need' -HangingIndent 3
+        Write-Host ''
+        Write-TpmResetRestoreText -Text 'B) Back' -HangingIndent 3
+        $choice = Read-TpmChoice -Prompt '  Choose 1-3, or B to go back' -Choices @('1', '2', '3', 'B') -Default 'B'
+        if ($choice -eq 'B') { return }
+        $result = $null
+        try {
+            if ($choice -eq '1') {
+                if (@($ZipSources | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -eq 0) {
+                    $result = New-TpmResetRestoreResult -Outcome 'FAILED_BEFORE_MUTATION' -ReasonCode 'NO_ZIP_FOLDER' -Summary 'There is no ZIP folder set up, so there is no ZIP to rebuild from. Nothing was changed. Run AutoSync once from the main menu and choose your ZIP folder.'
+                } else {
+                    $games = @(Get-TpmRebuildGames -UserProfilesDir $UserProfilesDir -InstallFolder $InstallFolder)
+                    if ($games.Count -eq 0) {
+                        $result = New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'NO_GAMES' -Summary 'No registered game was found in your games folder. Nothing was changed.'
+                    } else {
+                        $rows = @($games | ForEach-Object { $name = $_.Name; if (@($games | Where-Object { $_.Name -ieq $name }).Count -gt 1) { '{0} ({1})' -f $name, [System.IO.Path]::GetFileName([string]$_.Folder) } else { [string]$name } })
+                        $picked = Read-TpmNumberedListChoice -Rows $rows -Prompt '  Choose a number, or B to go back' -Heading 'Which game do you want to rebuild?'
+                        if ($picked -ge 0) {
+                            $result = Invoke-TpmRebuildOneGame -Game $games[$picked] -InstallFolder $InstallFolder -ZipSources $ZipSources -SyncStatePath $syncStatePath -DatIndex $DatIndex -UserProfilesDir $UserProfilesDir -EggmanDatZip $EggmanDatZip -DatFilePath $DatFilePath -SupplementaryDatPath $SupplementaryDatPath
+                        }
+                    }
+                }
+            } else {
+                $keptList = @(Get-TpmRebuildKeptFolders -InstallFolder $InstallFolder)
+                if ($keptList.Count -eq 0) {
+                    $result = New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'NOTHING_KEPT' -Summary 'There are no old folders kept from a rebuild.'
+                } else {
+                    $rows = @($keptList | ForEach-Object {
+                        $label = if ($null -ne $_.Record -and $_.Record.PSObject.Properties['Name']) { [string]$_.Record.Name } else { [string]$_.Name }
+                        '{0} - {1}' -f $label, $_.Name
+                    })
+                    $picked = Read-TpmNumberedListChoice -Rows $rows -Prompt '  Choose a number, or B to go back' -Heading 'Old folders that were kept:'
+                    if ($picked -ge 0) {
+                        $kept = $keptList[$picked]
+                        Write-Host ''
+                        Write-TpmResetRestoreText -Text ('Folder: {0}' -f $kept.Path) -Color Yellow
+                        $confirm = Read-TpmResetRestoreAnswer -Intro 'Any answer other than YES cancels, and nothing is changed.' -Prompt ('Type YES to {0}' -f $(if ($choice -eq '2') { 'put it back' } else { 'delete it for good' }))
+                        if ($confirm.Trim().ToUpperInvariant() -ne 'YES') {
+                            $result = New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'USER_DECLINED' -Summary 'Canceled. Nothing was changed.'
+                        } elseif ($choice -eq '2') {
+                            $result = Restore-TpmRebuildKeptFolder -Kept $kept -InstallFolder $InstallFolder
+                        } else {
+                            $result = Remove-TpmRebuildKeptFolder -Kept $kept -InstallFolder $InstallFolder
+                        }
+                    }
+                }
+            }
+        } catch {
+            Write-Log ('Rebuild: stopped unexpectedly -- ' + $_.Exception.Message)
+            $result = New-TpmResetRestoreResult -Outcome 'ACTION_REQUIRED' -ReasonCode 'STOPPED_UNEXPECTEDLY' -Summary 'The rebuild stopped unexpectedly. Open the log from the main menu (L) to see why. Check your game folder before you try again.'
+        }
+        if ($null -ne $result) { Write-TpmResetRestoreResult -Result $result }
+    }
 }
 
 # PS5.1-compatible relative paths; retain an absolute path across volumes.
@@ -46639,6 +47679,7 @@ function New-TpmActionRequiredReportText {
         [object[]]$ControlReadinessItems = @(),
         [string]$GameNotesPath = '',
         [string]$RunId = '',
+        [switch]$DesignOnly,
         [string[]]$OnboardingFollowUp = @()
     )
     $unmatched = @()
@@ -46656,11 +47697,15 @@ function New-TpmActionRequiredReportText {
         $exeMissing = @($CompatibilityWarnings.ExeMissing)
     }
     $builder = New-Object System.Text.StringBuilder
-    [void]$builder.AppendLine("TeknoParrot Manager - Action Required")
+    [void]$builder.AppendLine($(if ($DesignOnly) { 'TeknoParrot Manager - Controls: One More Step' } else { 'TeknoParrot Manager - Action Required' }))
     [void]$builder.AppendLine("Generated: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture))")
     [void]$builder.AppendLine("Run ID: $(if ([string]::IsNullOrWhiteSpace($RunId)) { Get-TpmSessionRunId } else { $RunId })")
     [void]$builder.AppendLine("============================================================")
-    foreach ($plainLine in @(Get-TpmActionRequiredPlainLines -For File)) { [void]$builder.AppendLine($plainLine) }
+    if ($DesignOnly) {
+        foreach ($plainLine in @('', 'WHAT THIS IS', 'Nothing failed. Some games were skipped on purpose, because no game of their control type has controls you set yourself yet. The next step is listed below.')) { [void]$builder.AppendLine($plainLine) }
+    } else {
+        foreach ($plainLine in @(Get-TpmActionRequiredPlainLines -For File)) { [void]$builder.AppendLine($plainLine) }
+    }
     if (@($OnboardingFollowUp).Count -gt 0) {
         [void]$builder.AppendLine("")
         [void]$builder.AppendLine("REGISTRATION / OPTIONAL SETUP NEEDS ATTENTION")
@@ -46722,9 +47767,10 @@ function New-TpmActionRequiredReportText {
         }
     }
     if (@($unmatched).Count -gt 0) {
-        [void]$builder.AppendLine(""); [void]$builder.AppendLine("GAME FOLDERS NOT RECOGNIZED BY TEKNOPARROT (no matching profile; not registered)")
+        [void]$builder.AppendLine(""); [void]$builder.AppendLine("GAME FOLDERS NOT MATCHED TO A TEKNOPARROT PROFILE (not registered)")
         [void]$builder.AppendLine("Make sure TeknoParrot is up to date and TeknoParrotUI has been opened once (TPM does not update or open it), then run Register only again.")
-        [void]$builder.AppendLine("If they still do not match, they may be games TeknoParrot does not support yet, or utilities/launchers.")
+        [void]$builder.AppendLine("If they still do not match, they may be games TeknoParrot does not support yet, utilities/launchers, or games whose main file is named differently from what TeknoParrot expects.")
+        [void]$builder.AppendLine("If you are sure TeknoParrot supports a game, add it in TeknoParrotUI yourself.")
         [void]$builder.AppendLine("----------------------------------------------------------")
         foreach ($folder in ($unmatched | Sort-Object)) { [void]$builder.AppendLine("  $folder") }
     }
@@ -46822,10 +47868,11 @@ function Write-TpmActionRequiredReport {
         [string]$GameNotesPath = '',
         [string]$RunId = '',
         [switch]$Quiet,
+        [switch]$DesignOnly,
         [string[]]$OnboardingFollowUp = @()
     )
     try {
-        $text = New-TpmActionRequiredReportText -ManualRegData $ManualRegData -AmbiguousPaths $AmbiguousPaths -NotFound $NotFound -DesignSkippedItems $DesignSkippedItems -Result $Result -CompatibilityWarnings $CompatibilityWarnings -ControlReadinessItems $ControlReadinessItems -GameNotesPath $GameNotesPath -RunId $RunId -OnboardingFollowUp $OnboardingFollowUp
+        $text = New-TpmActionRequiredReportText -ManualRegData $ManualRegData -AmbiguousPaths $AmbiguousPaths -NotFound $NotFound -DesignSkippedItems $DesignSkippedItems -Result $Result -CompatibilityWarnings $CompatibilityWarnings -ControlReadinessItems $ControlReadinessItems -GameNotesPath $GameNotesPath -RunId $RunId -OnboardingFollowUp $OnboardingFollowUp -DesignOnly:$DesignOnly
         # Same-folder unique temp + flush + replace: a failed or interrupted write leaves the previous report intact.
         Write-TpmAtomicTextFile -Path $ActionPath -Text $text -Operation 'ACTION REQUIRED report write'
         if (-not $Quiet) {
@@ -47762,6 +48809,192 @@ function Get-ControlReadinessActionItems {
     return @($items)
 }
 
+# =============================================================================
+# VALIDATION REPORT (read-only, no questions; issue #276)
+# =============================================================================
+# -ValidationReport prints what a release or arcade test needs to know about this copy and one TeknoParrot folder. It never
+# asks a question and never changes TeknoParrot, game profiles, saved settings or the log. The only file it can write is the
+# JSON file the caller names with -ValidationJsonPath. Exit code: 0 pass, 3 action required, 4 validation failed, 1 the report
+# itself could not be made.
+
+function Get-TpmValidationShippedFiles {
+    param([Parameter(Mandatory)][string]$ScriptRoot)
+    $names = @('scripts\TpmProgress.psm1', 'scripts\TpmRequiredPatchEngine.ps1', 'scripts\TpmRequiredPatchRecipes.json', 'tools\TpmAutoUpdate.Core.psm1', 'tools\Invoke-TpmAutoUpdate.ps1', 'TeknoParrot-Manager-CHANGELOG.txt', 'TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt')
+    $missing = @($names | Where-Object { -not (Test-Path -LiteralPath (Join-Path $ScriptRoot $_) -PathType Leaf) })
+    return [pscustomobject]@{ Checked = $names.Count; Missing = $missing }
+}
+
+function Get-TpmValidationReport {
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$ScriptRoot,
+        [string]$TeknoParrotRoot = '',
+        [string]$JsonPath = ''
+    )
+    $failures = New-Object System.Collections.Generic.List[string]
+    $actions = New-Object System.Collections.Generic.List[string]
+
+    $scriptHash = ''
+    try { $scriptHash = (Get-FileHash -LiteralPath $ScriptPath -Algorithm SHA256 -ErrorAction Stop).Hash } catch { [void]$actions.Add('This script file could not be hashed.') }
+
+    # Saved settings: read only. The saved PostgreSQL password is reported as yes or no, never shown.
+    $configPath = ''
+    $configState = 'None'
+    $savedConfig = $null
+    try {
+        $configPath = [string](Get-TpmOwnedConfigPathForRoot -TeknoParrotRoot $TeknoParrotRoot)
+        if (-not $configPath -or -not (Test-Path -LiteralPath $configPath -PathType Leaf)) { $configPath = [string](Find-TpmSavedConfigPath -ScriptRoot $ScriptRoot) }
+        if ($configPath -and (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+            try {
+                $savedConfig = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                $configState = if ($null -eq $savedConfig) { 'Unreadable' } else { 'Readable' }
+            } catch { $configState = 'Unreadable' }
+        }
+    } catch { $configState = 'Unreadable' }
+    if ($configState -eq 'Unreadable') { [void]$actions.Add('The saved settings file could not be read.') }
+    elseif ($configState -eq 'None') { [void]$actions.Add('No saved settings file was found; unattended runs need one.') }
+    $hasSavedPassword = ($configState -eq 'Readable' -and $null -ne $savedConfig.PSObject.Properties['PostgresSuperPasswordEncrypted'] -and -not [string]::IsNullOrWhiteSpace([string]$savedConfig.PostgresSuperPasswordEncrypted))
+
+    $root = $TeknoParrotRoot
+    $rootSource = 'Parameter'
+    if ([string]::IsNullOrWhiteSpace($root)) {
+        $rootSource = 'None'
+        if ($configState -eq 'Readable' -and $savedConfig.TeknoParrotRoot) {
+            $root = if ($savedConfig.TeknoParrotRoot -is [array]) { [string]$savedConfig.TeknoParrotRoot[0] } else { [string]$savedConfig.TeknoParrotRoot }
+            $rootSource = 'Saved settings'
+        }
+    }
+    $rootProblem = Get-TpmTeknoParrotRootProblem -Path $root
+    if ($rootProblem -eq 'NoFolder') { [void]$failures.Add($(if ($rootSource -eq 'None') { 'No TeknoParrot folder was given and none is saved. Use -ValidationRoot.' } else { 'The TeknoParrot folder was not found: ' + $root })) }
+    elseif ($rootProblem -eq 'NoExe') { [void]$failures.Add('TeknoParrotUi.exe is not in the TeknoParrot folder: ' + $root) }
+
+    $shipped = Get-TpmValidationShippedFiles -ScriptRoot $ScriptRoot
+    foreach ($missingName in @($shipped.Missing)) { [void]$failures.Add('A file that ships with TeknoParrot Manager is missing: ' + $missingName) }
+    $crosshairDir = Join-Path $ScriptRoot 'Crosshairs'
+    $crosshairCount = if (Test-Path -LiteralPath $crosshairDir -PathType Container) { @(Get-ChildItem -LiteralPath $crosshairDir -Filter '*.png' -File -ErrorAction SilentlyContinue).Count } else { 0 }
+
+    $templateCount = 0; $registered = 0; $unreadable = 0; $emptyPath = 0; $missingPath = 0
+    $itGames = 0; $itNotSetUp = 0
+    $rawInput = [ordered]@{ Supported = 0; Unsupported = 0; Unknown = 0 }
+    $rawTrackball = [ordered]@{ Supported = 0; Unsupported = 0; Unknown = 0 }
+    $wizardState = 'NotChecked'
+    $warnings = $null
+    if ($rootProblem -eq '') {
+        $gameProfilesDir = Join-Path $root 'GameProfiles'
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        if (Test-Path -LiteralPath $gameProfilesDir -PathType Container) {
+            $templateCount = @(Get-ChildItem -LiteralPath $gameProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue).Count
+        } else { [void]$failures.Add('The GameProfiles folder is missing from the TeknoParrot folder.') }
+        $wizardState = [string](Get-TeknoParrotWizardState -TeknoParrotRoot $root).State
+        if ($wizardState -ne 'Complete') { [void]$actions.Add('TeknoParrot first-time setup is not marked complete (' + $wizardState + ').') }
+        if (Test-Path -LiteralPath $userProfilesDir -PathType Container) {
+            foreach ($pf in @(Get-ChildItem -LiteralPath $userProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue)) {
+                $registered++
+                try {
+                    $doc = Read-Xml $pf.FullName
+                    if (-not $doc.GameProfile) { $unreadable++; continue }
+                } catch { $unreadable++; continue }
+                $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
+                $gamePath = if ($gamePathNode) { ([string]$gamePathNode.InnerText).Trim() } else { '' }
+                if ([string]::IsNullOrWhiteSpace($gamePath)) { $emptyPath++ }
+                elseif (-not (Test-Path -LiteralPath $gamePath -PathType Leaf)) { $missingPath++ }
+                if (Test-GameNeedsPostgres $doc) {
+                    $itGames++
+                    if (-not (Test-TpmPostgresSettingsComplete -Doc $doc)) { $itNotSetUp++ }
+                }
+                $capability = Get-ProfileRawInputCapability -Doc $doc
+                $rawInput[[string]$capability.RawInput]++
+                $rawTrackball[[string]$capability.RawInputTrackball]++
+            }
+            try { $warnings = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root }
+            catch { [void]$actions.Add('The compatibility check could not finish: ' + $_.Exception.Message) }
+        }
+        if ($unreadable -gt 0) { [void]$actions.Add(('{0} registered profile(s) could not be read.' -f $unreadable)) }
+        if ($emptyPath + $missingPath -gt 0) { [void]$actions.Add(('{0} registered game(s) have no game file at the saved path.' -f ($emptyPath + $missingPath))) }
+        if ($itNotSetUp -gt 0) { [void]$actions.Add(('{0} game(s) still need PostgreSQL settings.' -f $itNotSetUp)) }
+    }
+    $warningCounts = [ordered]@{ PathTooLong = 0; DllMismatch = 0; GpuIncompatible = 0; BiosMissing = 0; ComponentMissing = 0 }
+    if ($null -ne $warnings) {
+        $warningCounts.PathTooLong = @($warnings.PathTooLong).Count
+        $warningCounts.DllMismatch = @($warnings.DllMismatch).Count
+        $warningCounts.GpuIncompatible = @($warnings.GpuIncompatible).Count
+        $warningCounts.BiosMissing = @($warnings.BiosMissing).Count
+        $warningCounts.ComponentMissing = @($warnings.ExeMissing).Count
+        $warningTotal = $warningCounts.PathTooLong + $warningCounts.DllMismatch + $warningCounts.GpuIncompatible + $warningCounts.BiosMissing + $warningCounts.ComponentMissing
+        if ($warningTotal -gt 0) { [void]$actions.Add(('{0} compatibility warning(s) were found.' -f $warningTotal)) }
+    }
+
+    $status = if ($failures.Count -gt 0) { 'Failed' } elseif ($actions.Count -gt 0) { 'ActionRequired' } else { 'Pass' }
+    $exitCode = switch ($status) { 'Failed' { 4 } 'ActionRequired' { 3 } default { 0 } }
+    return [ordered]@{
+        Schema = 'TPM.ValidationReport.v1'
+        GeneratedUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+        Result = $status
+        ExitCode = $exitCode
+        Manager = [ordered]@{ Version = $ScriptVersion; Label = $ReleaseCandidateLabel; Display = (Get-ManagerDisplayVersion); ScriptSha256 = $scriptHash }
+        Environment = [ordered]@{ PowerShell = $PSVersionTable.PSVersion.ToString(); Edition = [string]$PSVersionTable.PSEdition; Os = [System.Environment]::OSVersion.VersionString; Administrator = [bool](Test-RunningAsAdministrator) }
+        TeknoParrot = [ordered]@{ Root = $root; RootSource = $rootSource; RootProblem = $rootProblem; WizardState = $wizardState; GameTemplates = $templateCount }
+        Settings = [ordered]@{ Path = $configPath; State = $configState; SavedPostgresPassword = $hasSavedPassword }
+        Package = [ordered]@{ ShippedFilesChecked = $shipped.Checked; ShippedFilesMissing = @($shipped.Missing); Crosshairs = $crosshairCount }
+        Library = [ordered]@{ Registered = $registered; Unreadable = $unreadable; NoGameFile = ($emptyPath + $missingPath); PostgresGames = $itGames; PostgresNotSetUp = $itNotSetUp }
+        RawInput = [ordered]@{ RawInput = $rawInput; RawInputTrackball = $rawTrackball }
+        CompatibilityWarnings = $warningCounts
+        ActionRequired = @($actions)
+        Failures = @($failures)
+        FilesWritten = @(if ($JsonPath) { $JsonPath })
+    }
+}
+
+function Format-TpmValidationReportText {
+    param([Parameter(Mandatory)]$Report)
+    $label = switch ([string]$Report.Result) { 'Pass' { 'PASS' } 'ActionRequired' { 'ACTION REQUIRED' } default { 'FAILED' } }
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add('TeknoParrot Manager validation report')
+    [void]$lines.Add(('Result: {0} (exit code {1})' -f $label, $Report.ExitCode))
+    [void]$lines.Add(('Version: {0}   Script SHA-256: {1}' -f $Report.Manager.Display, $Report.Manager.ScriptSha256))
+    [void]$lines.Add(('PowerShell {0} ({1}) on {2}; administrator: {3}' -f $Report.Environment.PowerShell, $Report.Environment.Edition, $Report.Environment.Os, $(if ($Report.Environment.Administrator) { 'yes' } else { 'no' })))
+    [void]$lines.Add(('TeknoParrot folder: {0} (from {1}){2}' -f $Report.TeknoParrot.Root, $Report.TeknoParrot.RootSource, $(if ($Report.TeknoParrot.RootProblem) { ' - problem: ' + $Report.TeknoParrot.RootProblem } else { '' })))
+    [void]$lines.Add(('Saved settings: {0} ({1}); saved PostgreSQL password: {2}' -f $Report.Settings.Path, $Report.Settings.State, $(if ($Report.Settings.SavedPostgresPassword) { 'yes' } else { 'no' })))
+    [void]$lines.Add(('TeknoParrot first-time setup: {0}; game templates: {1}' -f $Report.TeknoParrot.WizardState, $Report.TeknoParrot.GameTemplates))
+    [void]$lines.Add(('Registered games: {0}; unreadable: {1}; no game file: {2}; PostgreSQL games: {3} ({4} not set up)' -f $Report.Library.Registered, $Report.Library.Unreadable, $Report.Library.NoGameFile, $Report.Library.PostgresGames, $Report.Library.PostgresNotSetUp))
+    [void]$lines.Add(('RawInput: {0} supported, {1} unsupported, {2} unknown. RawInputTrackball: {3} supported, {4} unsupported, {5} unknown.' -f $Report.RawInput.RawInput.Supported, $Report.RawInput.RawInput.Unsupported, $Report.RawInput.RawInput.Unknown, $Report.RawInput.RawInputTrackball.Supported, $Report.RawInput.RawInputTrackball.Unsupported, $Report.RawInput.RawInputTrackball.Unknown))
+    [void]$lines.Add(('Shipped files checked: {0}; missing: {1}; crosshair images: {2}' -f $Report.Package.ShippedFilesChecked, @($Report.Package.ShippedFilesMissing).Count, $Report.Package.Crosshairs))
+    $warn = $Report.CompatibilityWarnings
+    [void]$lines.Add(('Compatibility warnings: path too long {0}, wrong DLL {1}, graphics card {2}, missing BIOS {3}, missing component {4}' -f $warn.PathTooLong, $warn.DllMismatch, $warn.GpuIncompatible, $warn.BiosMissing, $warn.ComponentMissing))
+    foreach ($item in @($Report.Failures)) { [void]$lines.Add('FAILED: ' + $item) }
+    foreach ($item in @($Report.ActionRequired)) { [void]$lines.Add('Action required: ' + $item) }
+    [void]$lines.Add($(if (@($Report.FilesWritten).Count -gt 0) { 'Files written by this report: ' + (@($Report.FilesWritten) -join ', ') } else { 'Files written by this report: none' }))
+    return @($lines)
+}
+
+function Invoke-TpmValidationReport {
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$ScriptRoot,
+        [string]$TeknoParrotRoot = '',
+        [string]$JsonPath = ''
+    )
+    $script:TpmValidationReportActive = $true   # Write-Log writes nothing while this is set
+    try {
+        if ($JsonPath) {
+            # Only a new file or an older copy of this report may be replaced, and the folder must already exist.
+            if (-not (Test-Path -LiteralPath (Split-Path -Parent ([System.IO.Path]::GetFullPath($JsonPath))) -PathType Container)) { throw 'The folder for -ValidationJsonPath does not exist.' }
+            if ((Test-Path -LiteralPath $JsonPath) -and ((Get-Content -LiteralPath $JsonPath -Raw -ErrorAction Stop) -notmatch 'TPM\.ValidationReport\.v1')) { throw 'The -ValidationJsonPath file already exists and is not a validation report; it was left unchanged.' }
+        }
+        $report = @(Get-TpmValidationReport -ScriptPath $ScriptPath -ScriptRoot $ScriptRoot -TeknoParrotRoot $TeknoParrotRoot -JsonPath $JsonPath)[-1]
+        if ($JsonPath) { [System.IO.File]::WriteAllText($JsonPath, ($report | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding $false)) }
+        foreach ($line in @(Format-TpmValidationReportText -Report $report)) { Write-Host $line }
+        return [int]$report.ExitCode
+    } catch {
+        Write-Host ('The validation report could not be made: ' + $_.Exception.Message) -ForegroundColor Red
+        return 1
+    }
+}
+
+if ($ValidationReport) {
+    exit (Invoke-TpmValidationReport -ScriptPath $PSCommandPath -ScriptRoot $PSScriptRoot -TeknoParrotRoot $ValidationRoot -JsonPath $ValidationJsonPath)
+}
+
 $script:ActiveTpmWorkflowStatus = $null
 $script:TpmWorkflowRendering = $false
 Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }))."
@@ -47975,6 +49208,8 @@ if (Test-Path -LiteralPath $configPath) {
 $cfg = $null   # the settings file as read (if any) is baseline for detecting another window's later save
 . $tpmOfferSavedConfig
 Set-TpmConfigBaseline -Path ([string]$configPath) -OnDisk $cfg -Document (Get-TpmConfigDocument)
+# An update that was cut off (power loss, window closed) leaves its staging folder here: say so once, in plain words.
+if (-not $isPostgresRecoveryResume) { Write-TpmInterruptedUpdateNotice -ProgramDir $PSScriptRoot }
 
 # Quiet, opt-out startup update check (CheckForUpdatesOnStartup, default
 # true). Never runs in -Unattended mode -- there is no way to show an
@@ -49215,7 +50450,7 @@ function Limit-MainMenuBodyRowsToBudget {
     return @($BodyRows[$start..($BodyRows.Count - 1)])
 }
 
-# Single-line banner ("TeknoParrot Manager v1.0 RC8.1") with no frame and no
+# Single-line banner ("TeknoParrot Manager v1.0 RC9") with no frame and no
 # blank separator, for viewports too short for the normal framed banner (5-6
 # rows) to leave any room for menu content -- see
 # Get-MainMenuEmergencyCompactRows.
@@ -49984,15 +51219,25 @@ $mode = $null
         Write-Host "  3) LaunchBox library backup (verified current-state backup first)"
         Write-Host "  4) Reset and Restore: put back one game or all games from a"
         Write-Host "     restore point saved when TeknoParrot Manager started"
+        Write-Host "  5) Rebuild one game from its ZIP: put one game folder back to"
+        Write-Host "     exactly what its ZIP holds (your old folder is kept)"
         $restoreStatus = New-TpmWorkflowStatusContext -WorkflowKey 'Restore' -Title 'Restore from backup' -Steps @(
             @{ Id = 'select'; Label = 'Select the backup to restore' }
         )
         [void](Start-TpmWorkflowStatus -Context $restoreStatus)
         [void](Start-TpmWorkflowStep -Context $restoreStatus -StepId 'select' -Activity 'Choosing a backup')
         [void](Set-TpmWorkflowWaiting -Context $restoreStatus -Message 'Choose which backup to restore.' -UserAction 'Enter a backup choice')
-        $restoreChoice = Read-TpmChoice -Prompt "  Enter 1-4" -Choices @('1', '2', '3', '4')
+        $restoreChoice = Read-TpmChoice -Prompt "  Enter 1-5" -Choices @('1', '2', '3', '4', '5')
         $restoreResult = $null
         [void](Clear-TpmWorkflowFooter -Context $restoreStatus)
+        if ($restoreChoice -eq '5') {
+            # #348: rebuild one game from its ZIP shows its own preview, confirmation and result.
+            [void](Stop-TpmWorkflowStatus -Context $restoreStatus -Reason 'Rebuild opened')
+            [void](Close-TpmWorkflowStatus -Context $restoreStatus)
+            Invoke-TpmRebuildMenu -UserProfilesDir $userProfilesDir -InstallFolder ([string]$gamesInstallFolder) -ZipSources @([string]$zipSource, [string]$zipSourceSupplementary) -DatIndex $datIndex -EggmanDatZip ([string]$eggmanDatZip) -DatFilePath ([string]$datFilePath) -SupplementaryDatPath ([string]$supplementaryDatPath)
+            [void](Read-HostSafe '  Press Enter to return to menu')
+            continue
+        }
         if ($restoreChoice -eq '4') {
             # FIX58 (#348): Reset and Restore shows its own preview, confirmation and result.
             [void](Stop-TpmWorkflowStatus -Context $restoreStatus -Reason 'Reset and Restore opened')
@@ -51105,6 +52350,7 @@ $mode = $null
                 }
             }
         }
+        Add-TpmMissingReShade32FromSavedSetup -SourceDll $rsSourceDll
         try {
             [void](Clear-TpmWorkflowFooter -Context $reShadeStatus)
             $reShadeResult = Invoke-TpmProgressGroup -Title 'ReShade setup' -Action { Invoke-ReShadeSetup -UserProfilesDir $userProfilesDir `
@@ -52301,7 +53547,7 @@ if ($manualRegData.Count -gt 0) {
     Write-Host ("  {0} game(s) still need registration -- {1}." -f $manualRegData.Count, $actionListNote) -ForegroundColor Yellow
 }
 if ($result.Unmatched.Count -gt 0) {
-    Write-Host ("  {0} game folder(s) not recognized by TeknoParrot (no matching profile) -- {1}." -f $result.Unmatched.Count, $actionListNote) -ForegroundColor Yellow
+    Write-Host ("  {0} game folder(s) not matched to a TeknoParrot profile -- {1}." -f $result.Unmatched.Count, $actionListNote) -ForegroundColor Yellow
 }
 
 if (-not $dryRunActive -and ($registrationFollowUp.Count -gt 0 -or $manualRegData.Count -gt 0 -or $result.Unmatched.Count -gt 0)) {
@@ -52313,9 +53559,10 @@ if (-not $dryRunActive -and ($registrationFollowUp.Count -gt 0 -or $manualRegDat
 if ($registrationFolders.Count -gt 0 -and -not $dryRunActive) {
     $extractedText = if ($registrationFolders.Count -eq 1) { ('{0} was extracted.' -f [System.IO.Path]::GetFileName($registrationFolders[0])) } else { ('{0} games were extracted.' -f $registrationFolders.Count) }
     Write-Host ""
-    Write-Host ("{0} Being extracted does not mean registered: check the registration result above and any unresolved games." -f $extractedText) -ForegroundColor DarkCyan
-    Write-Host "  [N] New game only (default) -- skip the whole-library checks" -ForegroundColor Cyan
-    Write-Host "  [A] Check all games -- continue to the whole-library repair and controls steps" -ForegroundColor Cyan
+    Write-Host ("{0} That only means the files were unpacked. It does not mean the game is ready in TeknoParrot. Check the registration result above." -f $extractedText) -ForegroundColor DarkCyan
+    Write-Host "  What should I do next?" -ForegroundColor Cyan
+    Write-Host "  [N] New game only (default) -- stop here, skip the rest of your games" -ForegroundColor Cyan
+    Write-Host "  [A] Check all games -- also repair your whole library, then set up controls" -ForegroundColor Cyan
     Write-Host "  [B] Back" -ForegroundColor Cyan
     $maintenanceChoice = Read-TpmChoice -Prompt "  Choice (N/A/B)" -Choices @('N', 'A', 'B') -Default 'N'
     if ($maintenanceChoice -eq 'N') {
@@ -52784,6 +54031,7 @@ if ($doReShade -eq "Y") {
         }
     }
     if ($doReShade -eq "Y") {
+        Add-TpmMissingReShade32FromSavedSetup -SourceDll $rsSourceDll
         Write-Host ""
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " ReShade Visual Enhancements Setup" -ForegroundColor Cyan
@@ -52971,16 +54219,37 @@ function New-TpmGameNotesReportText {
     $builder = New-Object System.Text.StringBuilder
     [void]$builder.AppendLine("TeknoParrot Manager - Game Notes")
     [void]$builder.AppendLine("These imported notes are informational; complete required actions in the separate Action Required report.")
-    foreach ($sn in @($SetupNotes | Sort-Object Code)) {
-        [void]$builder.AppendLine("")
-        [void]$builder.AppendLine(("Game: {0} ({1})" -f $sn.Code, $sn.GameName))
-        if ($sn.PSObject.Properties['Needs'] -and $sn.Needs) { [void]$builder.AppendLine([string]$sn.Needs) }
-        if ($sn.SetupExe) { [void]$builder.AppendLine(("Run: {0}" -f $sn.SetupExe)) }
-        [void]$builder.AppendLine("Source notes:")
-        foreach ($line in (Format-NoteLines -Text $sn.Notes)) {
+    $writeSection = {
+        param([string]$Heading, [string]$Text)
+        if ([string]::IsNullOrWhiteSpace($Text)) { return }
+        [void]$builder.AppendLine($Heading)
+        foreach ($line in (Format-NoteLines -Text $Text)) {
             $safeLine = $line -replace '(?i)fuck\w*', '[language removed]' -replace '(?i)\bsucks?\b', '[insult removed]' -replace '(?i)\b(useless users|sensitive snowflake)\b', '[insult removed]'
             [void]$builder.AppendLine($safeLine)
         }
+    }
+    $textOf = { param($Item, [string]$Name) if ($Item.PSObject.Properties[$Name] -and $Item.$Name) { [string]$Item.$Name } else { '' } }
+    foreach ($sn in @($SetupNotes | Sort-Object Code)) {
+        [void]$builder.AppendLine("")
+        [void]$builder.AppendLine(("Game: {0} ({1})" -f $sn.Code, $sn.GameName))
+        $baseGame = & $textOf $sn 'BaseGame'
+        if ($baseGame) { [void]$builder.AppendLine(("This is a version of: {0}. Notes for the base game are marked." -f $baseGame)) }
+        $guideStatus = & $textOf $sn 'GuideStatus'
+        if ($guideStatus) { [void]$builder.AppendLine(("Guide status: {0}" -f $guideStatus)) }
+        if ($sn.PSObject.Properties['Needs'] -and $sn.Needs) { [void]$builder.AppendLine([string]$sn.Needs) }
+        if ($sn.SetupExe) { [void]$builder.AppendLine(("Run: {0}" -f $sn.SetupExe)) }
+        $secondFile = & $textOf $sn 'SecondFile'
+        if ($secondFile) { [void]$builder.AppendLine(("Second file: {0}" -f $secondFile)) }
+        $testProgram = & $textOf $sn 'TestProgram'
+        if ($testProgram) { [void]$builder.AppendLine(("Test program: {0}" -f $testProgram)) }
+        & $writeSection 'Source notes:' ([string]$sn.Notes)
+        & $writeSection $(if ($baseGame) { 'Setup steps and known issues (base game):' } else { 'Setup steps and known issues:' }) (& $textOf $sn 'GeneralIssues')
+        $gpuLines = @(); if ($sn.PSObject.Properties['GpuIssues']) { $gpuLines = @($sn.GpuIssues) }
+        if ($gpuLines.Count -gt 0) { & $writeSection 'Graphics card notes:' ($gpuLines -join "`n") }
+        $linkedProfile = & $textOf $sn 'LinkedProfile'
+        if ($linkedProfile) { [void]$builder.AppendLine(("Linked profile (the same game with another setup): {0}." -f $linkedProfile)) }
+        $extraArchives = @(); if ($sn.PSObject.Properties['ExtraArchives']) { $extraArchives = @($sn.ExtraArchives) }
+        if ($extraArchives.Count -gt 0) { & $writeSection 'Extra archives you need. Use your own copy; none is downloaded for you:' ($extraArchives -join "`n") }
     }
     return $builder.ToString()
 }
@@ -53018,7 +54287,7 @@ function Write-TpmActionRequiredReports {
         [string]$RunId = '',
         [string[]]$OnboardingFollowUp = @()
     )
-    if (-not $HasAnyAction) { return $false }
+    if (-not $HasAnyAction -and @($DesignSkippedItems).Count -eq 0) { return $false }
     return (Write-TpmActionRequiredReport `
         -ActionPath $ActionPath `
         -ManualRegData $ManualRegData `
@@ -53030,6 +54299,7 @@ function Write-TpmActionRequiredReports {
         -ControlReadinessItems $ControlReadinessItems `
         -GameNotesPath $GameNotesPath `
         -OnboardingFollowUp $OnboardingFollowUp `
+        -DesignOnly:(-not $HasAnyAction) `
         -RunId $RunId)
 }
 
@@ -53054,12 +54324,18 @@ $hasAnyAction = [bool](& $testAnyAction)
 $notesPath = Join-Path $script:TpmOwnedLayout.Reports "TeknoParrot-Manager-game-notes.txt"
 $gameNotesWritten = $false
 if (-not $dryRunActive) { $gameNotesWritten = Write-TpmGameNotesReport -SetupNotes $setupNotes -NotesPath $notesPath -Quiet }
-if ($hasAnyAction) {
+# A control family with no reference game is only informational ("skipped by design"), so it never turns on ACTION REQUIRED. But when it is
+# the only open item its hint is still shown and saved, so the next step is not lost.
+if ($hasAnyAction -or $designSkippedItems.Count -gt 0) {
     Write-Host ""
     Write-Host "============================================" -ForegroundColor Yellow
-    Write-Host "   ACTION REQUIRED" -ForegroundColor Yellow
+    Write-Host $(if ($hasAnyAction) { '   ACTION REQUIRED' } else { '   CONTROLS: ONE MORE STEP' }) -ForegroundColor Yellow
     Write-Host "============================================" -ForegroundColor Yellow
-    foreach ($plainLine in @(Get-TpmActionRequiredPlainLines -For Screen -SavePath ([string]$script:TpmOwnedLayout.ActionItemsPath) -Preview:$dryRunActive)) { Write-TpmText -Text $plainLine -Color Cyan -BreakLongWords }
+    if ($hasAnyAction) {
+        foreach ($plainLine in @(Get-TpmActionRequiredPlainLines -For Screen -SavePath ([string]$script:TpmOwnedLayout.ActionItemsPath) -Preview:$dryRunActive)) { Write-TpmText -Text $plainLine -Color Cyan -BreakLongWords }
+    } else {
+        Write-TpmText -Text 'Nothing failed. Some games were skipped on purpose, because no game of their control type has controls you set yourself yet. The next step is listed below.' -Color Cyan -BreakLongWords
+    }
     Write-Host ""
     foreach ($followUp in $onboardingFollowUp) { Write-Host ('  ' + $followUp) -ForegroundColor Yellow }
 
@@ -53154,14 +54430,16 @@ if ($hasAnyAction) {
     # -- 5. Game folders not recognized by TeknoParrot ------------------------
     if ($result.Unmatched.Count -gt 0) {
         Write-Host ""
-        Write-Host "  GAME FOLDERS NOT RECOGNIZED BY TEKNOPARROT" -ForegroundColor Yellow
+        Write-Host "  GAME FOLDERS NOT MATCHED TO A TEKNOPARROT PROFILE" -ForegroundColor Yellow
         Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
         Write-Host "  These folders contain game files, but none of their executables" -ForegroundColor DarkCyan
         Write-Host "  matched a profile in your TeknoParrot GameProfiles folder, so they" -ForegroundColor DarkCyan
         Write-Host "  were not registered. First make sure TeknoParrot is up to date and" -ForegroundColor DarkCyan
         Write-Host "  TeknoParrotUI has been opened once (this tool does not do that for you)," -ForegroundColor DarkCyan
         Write-Host "  then run Register only again. If they still do not match, they may be" -ForegroundColor DarkCyan
-        Write-Host "  games TeknoParrot does not support yet, or utilities/launchers." -ForegroundColor DarkCyan
+        Write-Host "  games TeknoParrot does not support yet, utilities/launchers, or games whose" -ForegroundColor DarkCyan
+        Write-Host "  main file is named differently from what TeknoParrot expects. If you are" -ForegroundColor DarkCyan
+        Write-Host "  sure TeknoParrot supports a game, add it in TeknoParrotUI yourself." -ForegroundColor DarkCyan
         Write-Host ""
         $lineLen = 70; $line = "  "; $firstU = $true
         foreach ($folder in $result.Unmatched) {
@@ -53257,7 +54535,7 @@ if ($hasAnyAction) {
             # The saved action report must not list files that were just put in place.
             $compatWarnings = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $tpRoot
             $hasAnyAction = [bool](& $testAnyAction)
-            if (-not $hasAnyAction) { Write-TpmText -Text 'Nothing is left on this list now, so no list was saved.' -Color Green -BlankBefore }
+            if (-not $hasAnyAction -and $designSkippedItems.Count -eq 0) { Write-TpmText -Text 'Nothing is left on this list now, so no list was saved.' -Color Green -BlankBefore }
         }
         Write-Host ""
     }
@@ -53349,6 +54627,13 @@ if ($hasAnyAction) {
 
 $registrationNextSteps = Get-TpmRegistrationNextSteps -HasActionRequired ([bool]$hasAnyAction) -ReShadeDone ([bool]$rsSetupDone) -DgVoodoo2Done ([bool]$dgSetupDone) -CrosshairsFolder (Join-Path $PSScriptRoot "Crosshairs\")
 Write-TpmOutcome -Title '' -Next $registrationNextSteps.Next -DetailBlocks $registrationNextSteps.DetailBlocks -DetailsNote 'More help for the next steps.' -Unattended:$Unattended -DeferDetails
+
+    # A newly registered Incredible Technologies game has no PostgreSQL settings yet: offer the existing PostgreSQL setup (issue #131).
+    if (Invoke-TpmPostgresRegistrationOffer -UserProfilesDir $userProfilesDir -RegisteredCodes @($result.Registered | ForEach-Object { [string]$_.Code }) -Unattended:$Unattended -DryRun:$dryRunActive) {
+        $pendingApplyMode = 'PostgresSetup'
+        $pendingApplyForce = $false
+        continue
+    }
 
     if ($dryRunActive -and -not $Unattended) {
         Write-Host "  Preview finished. Read the results above, including any unresolved games." -ForegroundColor DarkCyan

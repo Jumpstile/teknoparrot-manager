@@ -31,7 +31,7 @@ TeknoParrot Manager compares the complete version name, not just the numbers.
 
 A release candidate (RC) always comes before the final release.
 
-So `1.0-RC7 < 1.0-RC8 < 1.0-RC8.1 < 1.0-RC9 < 1.0`. A label such as RC8.1 is a later build of RC8.
+So `1.0-RC7 < 1.0-RC9 < 1.0`.
 
 The same rule is used by the menu check, the startup check, and the standalone updater.
 
@@ -196,7 +196,7 @@ In every case the original script must stay safe.
 2. **Backup before replacement**
    - The current script is copied to a new backup folder under `UpdateBackups` before replacement.
    - Backup folders are never reused or overwritten.
-   - The standalone `tools/Invoke-TpmAutoUpdate.ps1 -Apply` refuses a multi-file release ZIP and changes nothing. The menu flow installs it whole (see Menu integration below).
+   - The standalone `tools/Invoke-TpmAutoUpdate.ps1 -Apply` refuses a multi-file release ZIP and changes nothing, and tells the user to use menu 15. The menu flow installs it whole (see Menu integration below).
    - If backup creation fails, the update is aborted.
 
 3. **GitHub Releases only**
@@ -299,7 +299,7 @@ It follows the flow originally planned here.
 5. If you type N, you will see `Skipped -- no changes made.` Nothing changes.
 6. If you type Y on a single-file release ZIP, the update runs and the manager asks you to restart. You will see `Restart TeknoParrot Manager now to run the verified update.` Next: press Enter to exit, then start TeknoParrot Manager again.
 
-**If the new release is a multi-file package (RC8.1 and later):**
+**If the new release is a multi-file package (RC9 and later):**
 
 The update installs the whole package. It backs up every file it replaces first, and puts every file back if anything goes wrong. If the drive is too full, it says so and installs nothing. When it is done, you see `Update installed and verified. Restart TeknoParrot Manager to use it.` Start it again yourself.
 
@@ -322,7 +322,7 @@ It also states whether a backup was created, and returns safely to the main menu
 - The logic (asset pattern, content validation, read-only pre-check) is deliberately kept in lockstep with the standalone module.
 - `tools/Invoke-TpmAutoUpdate.ps1` remains available separately for scripted/manual use outside the interactive menu.
 
-**Multi-file release (RC8.1 and later), menu flow only:**
+**Multi-file release (RC9 and later), menu flow only:**
 
 - TeknoParrot Manager is not a single-file runtime. It ships required modules (for example `scripts/TpmRequiredPatchEngine.ps1`, `scripts/TpmProgress.psm1`, the certification modules, and `tools/`) and packaged data alongside `TeknoParrot-Manager.ps1`, so the menu flow installs the whole package.
 - `Get-ManagerUpdatePackageFiles` checks every entry name before anything is extracted (no rooted or drive names, no `..`, no reserved names, no names that differ only by letter case). Reason code `UPDATE_PACKAGE_BAD_ENTRY`.
@@ -334,7 +334,9 @@ It also states whether a backup was created, and returns safely to the main menu
 - Read-only flags on replaced files are cleared for the install and set again afterward.
 - Nothing is deleted. Files from an older version that the new package no longer has, inside the folders the package uses, are left in place and listed in Details (`TechnicalDetails.MultiFile.LeftInPlace`).
 - The staging folder (created by this run) and the downloaded ZIP are removed at the end, success or failure.
-- `tools/Invoke-TpmAutoUpdate.ps1 -Apply` still refuses a multi-file ZIP and changes nothing.
+- `tools/Invoke-TpmAutoUpdate.ps1 -Apply` still refuses a multi-file ZIP and changes nothing. Its message now says to use menu 15 (Check for Updates) or the startup update, which install the whole release through the verified code above (there is no second implementation).
+- While an update runs, the staging folder holds an open marker file (`.tpm-update-running`). Each file's checksum is taken while it is written to staging and must equal the staged file before anything is installed, so a file damaged on its way to disk is never installed. The ZIP's SHA-256 from GitHub already covers every byte of every file in the ZIP; a list of per-file checksums inside the same ZIP would have the same trust root and add no protection, so none is shipped.
+- If an update is cut off (power loss, window closed), the staging folder is left behind. At the next start `Write-TpmInterruptedUpdateNotice` says so in plain words, names the newest `UpdateBackups` folder and how to copy the old files back, and logs it. A folder whose marker is still held open belongs to a running update (for example in a second window) and gets no notice. The folder is never deleted automatically, because it can hold the only copy of files that were moved aside; a guided restore is not offered because it cannot be verified.
 
 **Actual flow (single-file ZIP), checking and confirming:**
 
@@ -347,7 +349,7 @@ It also states whether a backup was created, and returns safely to the main menu
 **Actual flow, downloading and backing up:**
 
 6. Require valid GitHub digest metadata, download the asset, and verify its SHA-256. Stop on missing or failed verification without changing the installed script or creating a backup.
-7. Inspect the package first. A ZIP with only `TeknoParrot-Manager.ps1` takes the single-script path (steps 8-9 and the replace step below). Any other ZIP (RC8.1 and later) is installed whole, see "Multi-file release" above. A ZIP without the script is refused before anything changes. The standalone helper still refuses a multi-file ZIP.
+7. Inspect the package first. A ZIP with only `TeknoParrot-Manager.ps1` takes the single-script path (steps 8-9 and the replace step below). Any other ZIP (RC9 and later) is installed whole, see "Multi-file release" above. A ZIP without the script is refused before anything changes. The standalone helper still refuses a multi-file ZIP.
 8. If the target is read-only, the approved main-menu flow temporarily clears only that target attribute; cleanup restores it. The standalone helper stops and tells the operator how to unlock it manually.
 9. Back up the current script before replacement, then extract the single-script candidate and validate its content.
 
