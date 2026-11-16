@@ -7,12 +7,12 @@
   automatically, copies your controls between games of the same type, and
   keeps your game library organized. Windows / PowerShell 5.1+.
 
-  This is v1.0 RC8.1, the interim build for testers. It is not published
-  yet. The final v1.0 RC9 comes later.
-  The latest published release is v1.0 RC7:
-  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
-  The previous published release is v1.0 RC6. RC8 was a tester build and
-  was never published. Final Version 1.0 remains unpublished.
+  This is v1.0 RC8.1, the interim build for testers. It is the latest
+  published release (v1.0 RC8.1).
+  Release page:
+  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1
+  The previous published release is v1.0 RC7. The final v1.0 RC9 comes
+  later. RC8 was a tester build and was never published. Final Version 1.0 remains unpublished.
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after each run. AutoSync backs up UserProfiles before
@@ -6053,7 +6053,7 @@
 
 
 ===============================================================================
-  v1.0 RC8.1 (not published yet). The latest published release is v1.0 RC7.
+  v1.0 RC8.1 (the latest published release).
   Test one game after every run. AutoSync backs up UserProfiles before
   extraction; preview mode skips the backup.
 ===============================================================================

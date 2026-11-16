@@ -2,8 +2,8 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-RC7 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. RC8.1 is the interim build for testers and is not published yet. The final v1.0 RC9 comes later. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
-The previous published release was v1.0 RC6. RC4 and RC5 are historical; RC4 is superseded.
+RC8.1 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1. RC8.1 is the interim build for testers and the first version that can update itself in place. RC8 was a tester build and was never published.
+The previous published release was v1.0 RC7. RC4, RC5 and RC6 are historical; RC4 is superseded. The final v1.0 RC9 comes later.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
@@ -19,8 +19,7 @@ The previous published release was v1.0 RC6. RC4 and RC5 are historical; RC4 is 
   back. It says so when there is not enough free space. Your own files
   and older files the release no longer has are never deleted. Then you
   start TeknoParrot Manager again yourself.
-- Older builds cannot do this. Install RC8.1 by hand once: after RC8.1 is
-  published, download the ZIP from the Releases page and extract it over
+- Older builds cannot do this. Install RC8.1 by hand once: download the ZIP from the Releases page and extract it over
   your old folder.
 - A ZIP without the script, or a CPS3 ZIP that cannot be read, is
   refused. If the Eggman page has no DAT file, it says so.

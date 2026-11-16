@@ -2,9 +2,9 @@
   TeknoParrot Manager  --  CHANGELOG
   Author: Jumpstile
 ===============================================================================
-  Newest version first. RC7 is the latest published version. RC8.1 is the
-  interim build for testers and is not published yet. RC8 was a tester build
-  and was never published. The final RC9 comes later.
+  Newest version first. RC8.1 is the latest published version (the interim
+  build for testers). RC7 is the one before it. RC8 was a tester build and
+  was never published. The final RC9 comes later.
 
 
   v1.0 RC8.1 (changes since RC7)
