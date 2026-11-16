@@ -162,7 +162,9 @@ Describe 'FIX90 the end of a registration run adds no question of its own' {
         $calls = @($script:F90Ast.FindAll({
             param($node)
             if ($node -isnot [System.Management.Automation.Language.CommandAst] -or $node.GetCommandName() -cne 'Write-ControlPropagationResults') { return $false }
-            return (@($node.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.CommandParameterAst] -and $_.ParameterName -ceq 'DryRun' }).Count -eq 1)
+            # The menu preview of Propagate Controls (#411) passes a fixed "-DryRun $true" and is a menu screen, not part of the registration run.
+            $dry = @($node.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.CommandParameterAst] -and $_.ParameterName -ceq 'DryRun' })
+            return ($dry.Count -eq 1 -and $null -ne $dry[0].Argument -and $dry[0].Argument.Extent.Text -cne '$true')
         }, $true))
         $calls.Count | Should -Be 2
         foreach ($call in $calls) {

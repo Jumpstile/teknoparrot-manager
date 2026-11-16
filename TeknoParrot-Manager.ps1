@@ -3701,7 +3701,8 @@ function Get-TpmSupportPluginInventory {
     $bepPlugins = Join-Path $GameRoot 'BepInEx\plugins'
     if (Test-Path -LiteralPath $bepPlugins -PathType Container) { [void]$pluginRoots.Add($bepPlugins) }
     try {
-        foreach ($dataDir in @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $GameRoot -ProgressLabel 'Support plugin data-directory discovery' -Filter '*' -EnumerationErrorAction Stop -DirectoriesOnly -Force | Where-Object { $_.Name -match '_Data$' })) {
+        # One unreadable entry must not throw away the whole inventory: look at what can be read (the helper logs what it could not read).
+        foreach ($dataDir in @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $GameRoot -ProgressLabel 'Support plugin data-directory discovery' -Filter '*' -EnumerationErrorAction SilentlyContinue -DirectoriesOnly -Force | Where-Object { $_.Name -match '_Data$' })) {
             if (($dataDir.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
             foreach ($relative in @('Plugins','Plugins\x86_64','Plugins\x86')) {
                 $candidate = Join-Path $dataDir.FullName $relative

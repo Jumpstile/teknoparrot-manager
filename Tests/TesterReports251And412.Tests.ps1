@@ -34,6 +34,14 @@ Describe 'Support package says why an item could not be collected (#412)' {
         $script:text | Should -Match 'Support plugin inventory for \{0\} failed: \{1\}'
     }
 
+    It 'keeps going when one entry in a game folder cannot be read, instead of dropping the whole plugin inventory' {
+        # Who gets hurt: a user whose game folder has one unreadable entry. Their support package lost the whole plugin list for that game.
+        # Mutation: put -EnumerationErrorAction Stop back on the plugin data-directory discovery.
+        $m = [regex]::Match($script:text, "-ProgressLabel 'Support plugin data-directory discovery'[^\r\n]*")
+        $m.Success | Should -BeTrue
+        $m.Value | Should -Match '-EnumerationErrorAction SilentlyContinue'
+        $m.Value | Should -Not -Match '-EnumerationErrorAction Stop'
+    }
     It 'shows a Why line under each item that could not be collected' {
         $script:text | Should -Match "'  Why: \{0\}'"
     }
