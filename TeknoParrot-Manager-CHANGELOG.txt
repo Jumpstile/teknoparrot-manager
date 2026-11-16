@@ -7,6 +7,19 @@
   and was never published. The final RC9 comes later.
 
 
+  v1.0 RC8.2 (changes since RC8.1)
+  ----------------------------------------------------------------
+
+  Fixes
+  - Propagate Controls now shows a preview first. It lists what would change
+    and saves nothing until you say yes.
+  - After Propagate Controls saves, you can undo it in one step. Your game
+    settings are backed up first, every time.
+  - If the Game ZIP folder window is closed without picking a folder, the
+    question is asked again. You can type Q to go back.
+  - When a support package cannot list a game plugin, it now says why.
+
+
   v1.0 RC8.1 (changes since RC7)
   ----------------------------------------------------------------
 
