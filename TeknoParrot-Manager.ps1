@@ -16002,6 +16002,49 @@ function Install-TpmReShadeProfileDeployment {
         if ($staging -and -not $preserveStaging -and (Test-Path -LiteralPath $staging)) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
+# Read-only look at which controller types are connected (contract: docs/architecture/CONTROLLER_EVIDENCE_CONTRACT.md).
+# It only suggests: the Device Survey uses a clear match as the default answer and the user can always change it.
+# It never writes a file, never reads serial numbers or device paths, and any failure gives an empty "SourceUnavailable" result.
+function Get-TpmControllerEvidence {
+    $found = New-Object System.Collections.Generic.List[object]
+    $reasons = New-Object System.Collections.Generic.List[string]
+    $add = { param($Class, $Confidence, $Basis, $Count) [void]$found.Add([pscustomobject][ordered]@{ DeviceClass = $Class; Confidence = $Confidence; Basis = $Basis; Count = [int]$Count; ReasonCodes = @() }) }
+    $status = 'Observed'
+    try {
+        # Xbox-style pads: ask Windows which of the four XInput slots are in use.
+        try {
+            if (-not ('TpmXInputProbe' -as [type])) {
+                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class TpmXInputProbe { [DllImport("xinput1_4.dll")] static extern int XInputGetState(int i, byte[] s); public static int Count() { int c = 0; for (int i = 0; i < 4; i++) { if (XInputGetState(i, new byte[16]) == 0) c++; } return c; } }'
+            }
+            $xinputCount = [TpmXInputProbe]::Count()
+            if ($xinputCount -gt 0) { & $add 'XboxStylePad' 'High' 'XInputSlotActive' $xinputCount }
+        } catch { [void]$reasons.Add('XInputUnavailable') }
+        # Everything else comes from Windows device names and classes. Only the type is kept, never the name.
+        try {
+            $devices = @(Get-CimInstance Win32_PnPEntity -Filter "PNPClass='HIDClass' OR PNPClass='Mouse'" -OperationTimeoutSec 3 -ErrorAction Stop)
+            $hints = [ordered]@{ Wheel = 'wheel|steering|racing'; LightGun = 'gun|sinden|aimtrak'; ArcadeEncoder = 'i-pac|ipac|encoder|ultrastik|zero delay|xin-mo|brook'; PointerOrTrackball = 'trackball|spinner' }
+            foreach ($class in $hints.Keys) {
+                $n = @($devices | Where-Object { [string]$_.Name -match $hints[$class] }).Count
+                if ($n -gt 0) { & $add $class 'Low' 'NameHint' $n }
+            }
+            $pads = @($devices | Where-Object { [string]$_.Name -match 'game controller' -and [string]$_.DeviceID -notmatch 'IG_' -and [string]$_.Name -notmatch ($hints.Values -join '|') }).Count
+            if ($pads -gt 0) { & $add 'OtherGamePad' 'Medium' 'WindowsDeviceClass' $pads }
+        } catch { [void]$reasons.Add('DeviceListUnavailable') }
+        if ($reasons.Count -eq 2) { $status = 'SourceUnavailable' }
+    } catch {
+        $found.Clear(); $status = 'SourceUnavailable'; [void]$reasons.Add('ProbeFailed')
+    }
+    $observations = @($found.ToArray() | Sort-Object DeviceClass, Basis)
+    $canonical = 'TpmLocalDetection|1|' + ((@($observations | ForEach-Object { '{0}/{1}/{2}/{3}' -f $_.DeviceClass, $_.Confidence, $_.Basis, $_.Count })) -join ';')
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $id = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical))) -replace '-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+    return [pscustomobject][ordered]@{
+        ContractVersion = 'TpmControllerEvidence/v1'; EvidenceId = $id; EvidenceStatus = $status
+        ProviderId = 'TpmLocalDetection'; ProviderVersion = '1'; SourceFamily = 'LocalWindowsDeviceClass'; EvidenceClass = 'LocalProbe'
+        DeviceObservations = $observations; ObservationTimeUtc = (Get-Date).ToUniversalTime().ToString('o'); InputArtifactFingerprint = $null
+        ReasonCodes = @($reasons.ToArray()); RedactedFields = @(); SensitiveIdentifiersIncluded = $false; ReadOnly = $true
+    }
+}
 function Get-TpmHardwareEnvironmentEvidence {
     param([switch]$RefreshDynamic, [string[]]$VolumePaths = @())
     $cpu = $null; $os = $null; $ram = $null; $gpus = @(); $battery = $null
@@ -40479,19 +40522,29 @@ function Invoke-DeviceSurvey {
     # Scriptblock instead of a nested function: PowerShell nested functions
     # escape into session scope after the first call, polluting the environment
     # for the rest of the session. A scriptblock stays local to this function.
-    $readYesNo = { param([string]$q) return ((Read-TpmYesNo -Prompt "   $q (Y/N)") -eq "Y") }
+    # What is connected right now (read-only). A clear match becomes the default answer; the user can always change it.
+    $evidence = Get-TpmControllerEvidence
+    $readYesNo = {
+        param([string]$q, [string]$class = '')
+        $match = @($evidence.DeviceObservations | Where-Object { $class -and $_.DeviceClass -eq $class } | Select-Object -First 1)
+        $default = ''
+        $note = ''
+        if ($match.Count -and $match[0].Confidence -eq 'High') { $default = 'Y'; $note = ' - one is connected, press Enter for Y' }
+        elseif ($match.Count) { $note = ' - may be connected' }
+        return ((Read-TpmYesNo -Prompt "   $q$note (Y/N)" -Default $default) -eq "Y")
+    }
 
     Write-Host ""
     Write-Host " Which controls do you have and want to use?" -ForegroundColor Cyan
     Write-Host " (Answer Y or N. This only prints a plan; it changes nothing.)" -ForegroundColor DarkCyan
     Write-Host ""
 
-    $hasXbox      = & $readYesNo "Xbox / XInput controller?"
-    $hasArcade    = & $readYesNo "Arcade joystick + buttons?"
-    $hasTrackball = & $readYesNo "Trackball?"
+    $hasXbox      = & $readYesNo "Xbox / XInput controller?" 'XboxStylePad'
+    $hasArcade    = & $readYesNo "Arcade joystick + buttons?" 'ArcadeEncoder'
+    $hasTrackball = & $readYesNo "Trackball?" 'PointerOrTrackball'
     $hasSpinner   = & $readYesNo "Spinner (single-axis dial)?"
-    $hasWheel     = & $readYesNo "Steering wheel + pedals?"
-    $hasGun       = & $readYesNo "Lightgun?"
+    $hasWheel     = & $readYesNo "Steering wheel + pedals?" 'Wheel'
+    $hasGun       = & $readYesNo "Lightgun?" 'LightGun'
     $hasKeyboard  = & $readYesNo "Keyboard (no game controller)?"
 
     # Resolve one device per game family from what the user has, preferring the
@@ -40558,6 +40611,7 @@ function Invoke-DeviceSurvey {
         Write-Host " match your bound game's settings. If one still aims oddly, check that" -ForegroundColor Yellow
         Write-Host " game's own settings in the TeknoParrot UI." -ForegroundColor Yellow
     }
+    Write-Log ("Device survey: detected classes={0} status={1}" -f ((@($evidence.DeviceObservations | ForEach-Object { "$($_.DeviceClass)/$($_.Confidence)" })) -join ","), $evidence.EvidenceStatus)
     Write-Log "Device survey: plan=$($plan.Count) items; xbox=$hasXbox arcade=$hasArcade trackball=$hasTrackball spinner=$hasSpinner wheel=$hasWheel gun=$hasGun keyboard=$hasKeyboard"
 }
 
