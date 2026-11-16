@@ -49215,7 +49215,7 @@ function Limit-MainMenuBodyRowsToBudget {
     return @($BodyRows[$start..($BodyRows.Count - 1)])
 }
 
-# Single-line banner ("TeknoParrot Manager v1.0 RC8.1") with no frame and no
+# Single-line banner ("TeknoParrot Manager v1.0 RC8.2") with no frame and no
 # blank separator, for viewports too short for the normal framed banner (5-6
 # rows) to leave any room for menu content -- see
 # Get-MainMenuEmergencyCompactRows.

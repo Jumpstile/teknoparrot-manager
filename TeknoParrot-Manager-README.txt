@@ -8,8 +8,9 @@
   keeps your game library organized. Windows / PowerShell 5.1+.
 
   This is v1.0 RC8.2, a fix-up release for RC8.1. It fixes problems that
-  testers found. RC8.1 is the latest published release before it. If you
-  use RC8.1, choose 15) Check for Updates to get RC8.2.
+  testers found. The latest published release before it is v1.0 RC8.1:
+  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1
+  If you use RC8.1, choose 15) Check for Updates to get RC8.2.
   The previous published releases are v1.0 RC7 and RC6. RC8 was a tester
   build and was never published. The final v1.0 RC9 comes later.
   Final Version 1.0 remains unpublished.
@@ -6068,7 +6069,7 @@
 
 
 ===============================================================================
-  v1.0 RC8.1 (not published yet). The latest published release is v1.0 RC7.
+  v1.0 RC8.2 (not published yet). The latest published release is v1.0 RC8.1.
   Test one game after every run. AutoSync backs up UserProfiles before
   extraction; preview mode skips the backup.
 ===============================================================================

@@ -5,7 +5,7 @@ param(
     [string]$OutputPath,
 
     [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot),
-    [string]$ExpectedDisplayVersion = 'v1.0 RC8.1'
+    [string]$ExpectedDisplayVersion = 'v1.0 RC8.2'
 )
 
 Set-StrictMode -Version Latest

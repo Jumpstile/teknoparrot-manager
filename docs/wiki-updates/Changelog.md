@@ -2,8 +2,8 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-RC7 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. RC8.1 is the interim build for testers and is not published yet. The final v1.0 RC9 comes later. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
-The previous published release was v1.0 RC6. RC4 and RC5 are historical; RC4 is superseded.
+RC8.1 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1. v1.0 RC8.2 is a fix-up release for RC8.1 and is not published yet. The final v1.0 RC9 comes later. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
+The previous published release was v1.0 RC7. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
