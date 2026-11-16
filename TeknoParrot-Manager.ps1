@@ -52801,13 +52801,13 @@ $mode = $null
             $zipAnswer = ([string](Read-PathWithBrowse "  Path (Q to go back)")).Trim().Trim('"')
             if ($zipAnswer.ToUpperInvariant() -eq 'Q') { break }
             if ($zipAnswer -eq '') {
-                Write-Host "  No folder was chosen. Type the path again, type B to browse again, or Q to go back." -ForegroundColor Yellow
+                Write-TpmText 'No folder was chosen. Type the path again, type B to browse again, or Q to go back.' -Color Yellow
                 Write-Log ('AutoSync: no ZIP folder chosen (browse canceled: {0}); asking again.' -f [bool]$script:TpmPathBrowseCancelled)
                 if ($Unattended) { break }
                 continue
             }
             if (-not (Test-Path -LiteralPath $zipAnswer -PathType Container)) {
-                Write-Host "  That folder was not found. Check the spelling, type B to browse, or Q to go back." -ForegroundColor Yellow
+                Write-TpmText 'That folder was not found. Check the spelling, type B to browse, or Q to go back.' -Color Yellow
                 Write-Log "AutoSync: ZIP folder not found: $zipAnswer; asking again."
                 if ($Unattended) { break }
                 continue
