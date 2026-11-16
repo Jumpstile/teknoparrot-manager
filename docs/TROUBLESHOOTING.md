@@ -629,6 +629,23 @@ Only countries a game really offers are listed. A game never gets a region it do
 
 Expected result: the game starts in the country you chose.
 
+## AutoSync skipped games and said it could not confirm the game folder
+
+Symptom: AutoSync says `TeknoParrot Manager skipped '<game>': it could not confirm the game folder.`
+
+Cause: this happens when a game is already registered, and its saved game file is somewhere TeknoParrot Manager cannot safely use. The log line that starts with `AutoSync: refused unproven extraction root` says which case it was.
+
+Fix:
+
+1. If you moved your games to a new folder or drive, update to v1.0 RC8.2 or later. When the saved game file is missing at the old place, AutoSync now extracts the game into the new folder and carries on.
+
+   Next: run **1) AutoSync** again.
+
+2. If the log says the game is already installed at another place, AutoSync is protecting your working copy. It does not make a second copy.
+
+   Next: delete or move the old copy yourself, or run **2) Register only** on the folder that works.
+
+Expected result: the games are unpacked once, into the games folder you chose, and appear once in TeknoParrot.
 ## Still stuck, or the game will not launch?
 
 Check these things first:

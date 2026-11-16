@@ -272,12 +272,12 @@ These tests try the fixes in RC8.2. Do them first if you are short on time.
 3. You passed if the program asks again and does not go back to the menu by itself. Type Q to go back on purpose. Also try typing a folder that does not exist. It should say the folder was not found and ask again.
 4. Write down what it said.
 
-### Test 33: Games TeknoParrot lists but you have not set up
+### Test 33: Games saved at an old place
 
-1. Use a PC where TeknoParrot already lists games that have no game file set yet. Have the zip files for some of them.
-2. At the main menu, type 1 and press Enter (AutoSync). Choose to extract those games.
-3. You passed if the games are unpacked and set up. It failed if many games were skipped with the words "could not confirm the game folder". If that happens, make a support package (menu 16) right away and attach it to your issue.
-
+1. Use a PC where TeknoParrot already lists games, but the game files are missing because you moved your games to a new folder or drive (for example from L: to G:). Have the zip files for some of them.
+2. At the main menu, type 1 and press Enter (AutoSync). Choose to extract those games into the new folder.
+3. You passed if the games are unpacked into the new folder and set up. It failed if many games were skipped with the words "could not confirm the game folder". If that happens, make a support package (menu 16) right away and attach it to your issue.
+4. After AutoSync, open TeknoParrot and start one of those games. You passed that part if it starts from the NEW folder. Tell us if it still points to the old place.
 ### Test 34: Support package that explains itself
 
 1. At the main menu, type 16 and press Enter (Create Support Package).

@@ -2,23 +2,33 @@
   TeknoParrot Manager  --  CHANGELOG
   Author: Jumpstile
 ===============================================================================
-  Newest version first. RC7 is the latest published version. RC8.1 is the
-  interim build for testers and is not published yet. RC8 was a tester build
-  and was never published. The final RC9 comes later.
+  Newest version first. RC8.2 is a fix-up release for RC8.1. RC8.1 is the
+  latest published version before it. RC8 was a tester build and was never
+  published. The final RC9 comes later.
 
 
   v1.0 RC8.2 (changes since RC8.1)
   ----------------------------------------------------------------
 
-  Fixes
-  - Propagate Controls now shows a preview first. It lists what would change
-    and saves nothing until you say yes.
-  - After Propagate Controls saves, you can undo it in one step. Your game
-    settings are backed up first, every time.
-  - If the Game ZIP folder window is closed without picking a folder, the
-    question is asked again. You can type Q to go back.
-  - When a support package cannot list a game plugin, it now says why.
+  Controls
+  - Propagate Controls (menu 3) now shows a preview first. It lists what
+    would change and saves nothing until you say yes.
+  - Your game settings are backed up and the backup is checked before the
+    first change. After the copy you can undo it in one step.
+  - The controls question looks for connected controllers. It only reads,
+    and it changes nothing. If it finds an Xbox-style controller, it asks
+    one question instead of seven.
 
+  Fixes
+  - AutoSync extracts a game even when its TeknoParrot profile points to a
+    game file that is missing at an old place (for example after you moved
+    your games to another drive). It still refuses a game that is already
+    installed at another place, so it never makes a second copy of a
+    working game. When it refuses a game, the log says why.
+  - If you close the Game ZIP folder window without picking a folder, the
+    question is asked again. Type Q to go back.
+  - When a support package cannot list the plugins of a game, it now says
+    why.
 
   v1.0 RC8.1 (changes since RC7)
   ----------------------------------------------------------------

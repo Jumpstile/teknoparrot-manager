@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC8.1  --  QUICK START
+  TeknoParrot Manager  |  v1.0 RC8.2  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -9,11 +9,12 @@
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  This guide is for v1.0 RC8.1, the interim build for testers. It is not
-  published yet. The final v1.0 RC9 comes later.
-  The latest published release is v1.0 RC7:
-  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
-  The previous published release is v1.0 RC6. RC8 was never published.
+  This guide is for v1.0 RC8.2, a fix-up release for RC8.1. It fixes
+  problems that testers found. RC8.1 is the latest published release
+  before it. If you use RC8.1, choose 15) Check for Updates to get RC8.2.
+  The final v1.0 RC9 comes later.
+  The previous published releases are v1.0 RC7 and RC6. RC8 was never
+  published.
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
   Final Version 1.0 remains unpublished.
 
@@ -818,9 +819,10 @@
   7. In TeknoParrot Manager, choose 3) Propagate Controls. ("Propagate" means
      copy to your other games.)
 
-     You will see: how many games have their controls set up, and the
-     question "Copy controls from N games to your other games of the same
-     type? (Y/N, D = details)".
+     You will see: how many games have their controls set up, then a
+     preview of what would change ("Preview only. Nothing was saved."),
+     and the question "Copy controls from N games to your other games of
+     the same type? (Y/N, D = details)".
 
      Next: press D to see each example game and the settings it will copy.
 
@@ -828,6 +830,9 @@
      hardware.
 
      You will see: the copy result and any controls left for manual setup.
+     Then the program asks if you want to undo the copy ("Undo these
+     changes and put your game settings back as they were? (Y/N)"). Answer
+     Y to put everything back at once, or N to keep the copy.
      Existing button bindings are kept, but the input-system setting may
      change.
 

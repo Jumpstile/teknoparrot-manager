@@ -6,7 +6,7 @@ TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-> **This guide describes v1.0 RC8.1.** RC8.1 is the interim build for testers and is not published yet. The final v1.0 RC9 comes later. The latest published release is v1.0 RC7. The previous published release is v1.0 RC6. RC8 was a tester build and was never published. RC8.1 is the first version that can update itself in place (see Check for Updates). The changes since RC7 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 remains unpublished. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
+> **This guide describes v1.0 RC8.2.** RC8.2 is a fix-up release for RC8.1. It fixes problems that testers found. RC8.1 is the latest published release before it, and it is the first version that can update itself in place (see Check for Updates). If you use RC8.1, choose Check for Updates (menu 15) to get RC8.2. The previous published releases are v1.0 RC7 and RC6. RC8 was a tester build and was never published. The changes since RC8.1 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. The final v1.0 RC9 comes later. Final Version 1.0 remains unpublished. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
 
 
 ## Start here: your first game in about 10 minutes
@@ -1161,7 +1161,9 @@ It does not extract or register any games.
 
 Use it when your library is already registered and you just set up a new or updated reference game in TeknoParrotUI. Run it right away instead of sitting through a full AutoSync/Register pass.
 
-You will see: `You have 2 games with their controls set up.` and then `Copy controls from 2 games to your other games of the same type? (Y/N, D = details)`. Press **D** to see each example game and the settings that will be copied. Check them against your real hardware, then press **Y** or **N**.
+You will see: `You have 2 games with their controls set up.` Then you see a preview of what would change. It ends with `Preview only. Nothing was saved.` After that comes the question `Copy controls from 2 games to your other games of the same type? (Y/N, D = details)`. Press **D** to see each example game and the settings that will be copied. Check them against your real hardware, then press **Y** or **N**. If you press **N**, nothing changes.
+
+If you press **Y**, a saved copy of your game settings is made first, and its folder is shown. After the copy, you are asked `Undo these changes and put your game settings back as they were? (Y/N)`. Press **Y** to undo everything at once. You can also undo later with **14) Restore backup**.
 
 ### More detail: Propagate Controls
 
@@ -1169,7 +1171,7 @@ You will see: `You have 2 games with their controls set up.` and then `Copy cont
 
 - It uses the same reference-game pool, one approval after reference review and the same hardware-check warnings.
 
-- It has the same backup-before-write safety net (UserProfiles are backed up before anything is changed), and the same results reporting.
+- It has the same backup-before-write safety net (UserProfiles are backed up and the backup is checked before anything is changed), and the same results reporting. Unlike the step at the end of AutoSync/Register, mode 3 shows a preview first and offers a one-step undo after saving.
 
 - This option is a thin entry point into that existing pipeline, not a different implementation of it.
 
@@ -1183,7 +1185,7 @@ On first run (or when you ask), the script asks which controls you have: Xbox pa
 
 It then prints a plan that says which game to set up with which device.
 
-It reads nothing and changes nothing.
+It only reads. It changes nothing. If a controller is connected, it looks for it first. When it finds an Xbox-style controller, it asks one question (`Use the Xbox controller for all games?`) instead of seven.
 
 ---
 

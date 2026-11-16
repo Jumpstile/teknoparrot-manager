@@ -1,6 +1,6 @@
 # TeknoParrot Manager - Quick Start
 
-> This guide describes v1.0 RC8.1. RC8.1 is the interim build for testers and is not published yet. The final v1.0 RC9 comes later. The latest published release is v1.0 RC7 ([RC7 release page](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7)). The previous published release is v1.0 RC6. RC8 was a tester build and was never published. RC8.1 is the first version that can update itself in place. Final Version 1.0 remains unpublished. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
+> This guide describes v1.0 RC8.2. RC8.2 is a fix-up release for RC8.1. It fixes problems that testers found. RC8.1 is the latest published release before it. If you use RC8.1, choose **15) Check for Updates** to get RC8.2. The previous published releases are v1.0 RC7 and RC6. RC8 was a tester build and was never published. The final v1.0 RC9 comes later. Final Version 1.0 remains unpublished. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Full documentation: [README.md](README.md)
 
@@ -347,9 +347,11 @@ Setting up controls in TeknoParrotUI is called binding. A bound game has its but
 
 To copy right away, choose **3) Propagate Controls** at the main menu.
 
-You will see: `You have 2 games with their controls set up.` Then you see the question `Copy controls from 2 games to your other games of the same type? (Y/N, D = details)`.
+You will see: `You have 2 games with their controls set up.` Then you see a preview of what would change. It ends with `Preview only. Nothing was saved.` Then you see the question `Copy controls from 2 games to your other games of the same type? (Y/N, D = details)`.
 
-Next: press **D** to see each example game and the settings that will be copied. Check them against your real hardware. Then press **Y** to copy, or **N** to cancel. A saved copy of your game settings is made when you approve.
+Next: press **D** to see each example game and the settings that will be copied. Check them against your real hardware. Then press **Y** to copy, or **N** to cancel. If you press **N**, nothing changes. A saved copy of your game settings is made when you approve.
+
+After the copy, the program asks `Undo these changes and put your game settings back as they were? (Y/N)`. Press **Y** to put everything back at once. You can also undo later with **14) Restore backup**.
 
 If a copied setting looks wrong, you also see a yellow line: `Check first: 1 game may have settings that do not match your real controller. Press D to see them.` Answer **N**, fix that game in TeknoParrotUI, then run this again.
 
