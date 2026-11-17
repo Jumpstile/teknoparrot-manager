@@ -694,7 +694,7 @@ function Invoke-TPMUnattendedRootBinding {
     $migratedConfigPath = if ([string]::IsNullOrWhiteSpace($TeknoParrotRoot)) { $null } else { Join-Path $TeknoParrotRoot 'TeknoParrotManager\State\TeknoParrot-Manager.config.json' }
     $migratedExistedBefore = [bool]($migratedConfigPath -and (Test-Path -LiteralPath $migratedConfigPath))
     $migratedBackupsRoot = if ([string]::IsNullOrWhiteSpace($TeknoParrotRoot)) { $null } else { Join-Path $TeknoParrotRoot 'TeknoParrotManager\Backups' }
-    $backupsBefore = @(if ($migratedBackupsRoot -and (Test-Path -LiteralPath $migratedBackupsRoot -PathType Container)) { Get-ChildItem -LiteralPath $migratedBackupsRoot -Directory -Filter 'LegacyMigration_*' -Force | ForEach-Object { $_.Name } })
+    $backupsBefore = @(if ($migratedBackupsRoot -and (Test-Path -LiteralPath $migratedBackupsRoot -PathType Container)) { Get-ChildItem -LiteralPath $migratedBackupsRoot -Directory -Filter 'LegacyMig_*' -Force | ForEach-Object { $_.Name } })
     $overrideSha = $null
     try {
         $overrideText = if ($null -eq $configSnapshot) { Get-TPMTemporaryUnattendedConfigText -TeknoParrotRoot $TeknoParrotRoot } else { Get-TPMConfigJsonWithRootText -Text $configSnapshot -TeknoParrotRoot $TeknoParrotRoot }
@@ -758,7 +758,7 @@ function Invoke-TPMUnattendedRootBinding {
                 # The migration also keeps a backup copy of what it moved. A copy in a backup folder made during this run, with exactly the
                 # override's bytes, is the harness's own settings: remove that one file (the rest of the backup is left alone).
                 if ($overrideWritten -and $overrideSha -and $migratedBackupsRoot -and (Test-Path -LiteralPath $migratedBackupsRoot -PathType Container)) {
-                    foreach ($backupDir in @(Get-ChildItem -LiteralPath $migratedBackupsRoot -Directory -Filter 'LegacyMigration_*' -Force)) {
+                    foreach ($backupDir in @(Get-ChildItem -LiteralPath $migratedBackupsRoot -Directory -Filter 'LegacyMig_*' -Force)) {
                         if ($backupsBefore -contains $backupDir.Name) { continue }
                         $backupCopy = Join-Path $backupDir.FullName 'TeknoParrot-Manager.config.json'
                         if ((Test-Path -LiteralPath $backupCopy -PathType Leaf) -and ((Get-TPMBytesSha256 -Bytes ([System.IO.File]::ReadAllBytes($backupCopy))) -ceq $overrideSha)) { Remove-Item -LiteralPath $backupCopy -Force -ErrorAction Stop }

@@ -761,7 +761,9 @@ function Invoke-TpmOwnedMigration {
     try {
     $progressStarted=Get-Date
     $backupProgressCurrent=0
-    $backupRoot=Join-Path ([string]$Layout.Backups) ('LegacyMigration_{0}' -f [guid]::NewGuid().ToString('N'))
+    # Short name on purpose: the copied tree adds ReShade\TPM-State\Deployments\<64 hex>.json below it, and a long name
+    # pushed the backup past the 260-character Windows limit on deep install folders.
+    $backupRoot=Join-Path ([string]$Layout.Backups) ('LegacyMig_{0}' -f [guid]::NewGuid().ToString('N').Substring(0, 8))
     $backupEntries=New-Object System.Collections.Generic.List[object]
     try {
         [void](Assert-TpmNoReparseWriteTarget -Path $backupRoot -Operation 'create owned-state migration backup root')
