@@ -1,12 +1,12 @@
-# TeknoParrot Manager RC8.2 - Tester Guide
+# TeknoParrot Manager RC8.3 - Tester Guide
 
-Updated Nov 16, 2026
+Updated Nov 17, 2026
 
 Thank you for helping! You will try a program that sets up arcade games on a PC. We want to find out if every game starts and plays with no extra work.
 
 Follow the steps in order. Take your time. If you get stuck, stop and send a screenshot to the person who gave you this guide. If something goes wrong, your backup lets us fix it.
 
-**What is new in RC8.2?** RC8.2 is a fix-up release for RC8.1. It fixes problems that testers found. Tests 1 to 28 are the same as before. **Tests 29 to 35 are new. If you only have a little time, do tests 29 to 35 first.**
+**What is new in RC8.3?** RC8.3 is a fix-up release for RC8.2. It fixes problems that testers found. Tests 1 to 35 are the same as before. **Tests 36 to 40 are new. If you only have a little time, do tests 36 to 40 first.**
 
 Words you will see:
 
@@ -23,7 +23,7 @@ Do all of these before you test. Tick each box when you are done.
 
 - [ ] Use a PC that has TeknoParrot and at least 3 games on it. Different kinds of games are best.
 - [ ] Make a backup. Find your TeknoParrot folder. Inside it is a folder named UserProfiles. Copy that folder and paste the copy on your desktop.
-- [ ] Get the file TeknoParrot.Manager.v1.0.RC8.2.zip from the release page: https://github.com/Jumpstile/teknoparrot-manager/releases (or get it from the person who sent you this guide). The release page shows a SHA-256 check value for the file. To see yours, open PowerShell and run: `Get-FileHash -Algorithm SHA256 "C:\path\to\the\zip"`. The two values must match. If they do not, download the file again.
+- [ ] Get the file TeknoParrot.Manager.v1.0.RC8.3.zip from the release page: https://github.com/Jumpstile/teknoparrot-manager/releases (or get it from the person who sent you this guide). The release page shows a SHA-256 check value for the file. To see yours, open PowerShell and run: `Get-FileHash -Algorithm SHA256 "C:\path\to\the\zip"`. The two values must match. If they do not, download the file again.
 - [ ] Right-click the zip file and choose Extract All. Pick a NEW empty folder. Do not pick an old folder.
 - [ ] Learn how to take a screenshot: press the Windows key + Shift + S.
 
@@ -105,7 +105,7 @@ Tests 9 to 28 try the rest of the program. Do the ones that fit your games and y
 
 1. First set up the controls in one game, the way you like them.
 2. At the main menu, type 3 and press Enter (Propagate Controls).
-3. In RC8.2 it first shows a PREVIEW of what it would copy. Read it. Then answer the question. Type Y to say yes.
+3. In RC8.2 and later it first shows a PREVIEW of what it would copy. Read it. Then answer the question. Type Y to say yes.
 4. Open a game that got the controls in TeknoParrot and look at its controls.
 5. You passed if the new game got the controls and your first game did not change. (Tests 30 and 31 try the preview and the undo.)
 
@@ -184,8 +184,8 @@ Tests 9 to 28 try the rest of the program. Do the ones that fit your games and y
 
 ### Test 21: Move up from an older version (RC7 or RC8)
 
-1. Do this only if you used RC7 or RC8 before. Do not delete the old folder. (If you use RC8.1, do Test 29 instead.)
-2. Extract the RC8.2 zip into a NEW empty folder.
+1. Do this only if you used RC7 or RC8 before. Do not delete the old folder. (If you use RC8.1 or RC8.2, do Test 29 instead.)
+2. Extract the RC8.3 zip into a NEW empty folder.
 3. Start TeknoParrot Manager from the new folder. Answer the first questions the same way you did before.
 4. At the main menu, type 13 and press Enter (Library health check).
 5. You passed if your games and settings are all still there and the health check ends in plain words with no failure.
@@ -237,17 +237,17 @@ Tests 9 to 28 try the rest of the program. Do the ones that fit your games and y
 3. Now open the normal TeknoParrot program and leave it open. Run AutoSync (menu 1) again.
 4. You passed if the program tells you what to do, or works with no damaged files and no red error words.
 
-## New in RC8.2: tests 29 to 35
+## Tests added in RC8.2: tests 29 to 35
 
-These tests try the fixes in RC8.2. Do them first if you are short on time.
+These tests try the fixes made in RC8.2.
 
-### Test 29: Update from RC8.1 (menu 15)
+### Test 29: Update from RC8.1 or RC8.2 (menu 15)
 
-1. Do this only if you use RC8.1 and RC8.2 is on the release page. Do not delete anything first.
-2. In RC8.1, at the main menu, type 15 and press Enter (Check for Updates).
+1. Do this only if you use RC8.1 or RC8.2 and RC8.3 is on the release page. Do not delete anything first.
+2. In your old version, at the main menu, type 15 and press Enter (Check for Updates).
 3. It should tell you a newer version is ready. It must ASK before it installs. Say yes.
 4. Wait until it says it is done. Close the program and start it again yourself.
-5. You passed if the title at the top now says v1.0 RC8.2, and your games and settings are all still there. Write down any message that did not make sense.
+5. You passed if the title at the top now says v1.0 RC8.3, and your games and settings are all still there. Write down any message that did not make sense.
 
 ### Test 30: Preview before copying controls
 
@@ -295,6 +295,46 @@ These tests try the fixes in RC8.2. Do them first if you are short on time.
 4. Now close the program, unplug the controller, and start it again. Answer the control questions.
 5. You passed if step 3 asked one question, and step 4 asked the full list of questions like before. Tell us what controller you have.
 
+## New in RC8.3: tests 36 to 40
+
+These tests try the fixes in RC8.3. Do them first if you are short on time.
+
+### Test 36: BepInEx tells you why
+
+1. Use this only if a game needs BepInEx and the program says it cannot replace a file. Skip this test if that never happens to you.
+2. At the main menu, type 9 and press Enter (BepInEx setup).
+3. If the program says it cannot replace a file, read the message.
+4. You passed if the message gives the exact reason in plain words (for example, the file is shared with another folder, it is a folder, it is a link, or it cannot be read). It failed if it only gives one general sentence with no reason. It must also ASK before it installs anything.
+
+### Test 37: ReShade one game at a time, with Back
+
+1. At the main menu, type 5 and press Enter (ReShade setup).
+2. Choose to pick games one by one (not all at once).
+3. Look at each question. It should say something like "game 1 of 4". It should NOT ask about a game that cannot be changed.
+4. At the second game, type B and press Enter. You should go back to the first game. At the first game, type B and press Enter.
+5. You passed if B went back one game each time, and B on the first game cancelled and nothing was changed. Write down anything that was hard to understand.
+
+### Test 38: dgVoodoo2 result lists every game
+
+1. Pick 3 games. Make sure at least one of them already has dgVoodoo2 set up from an earlier run.
+2. At the main menu, type 6 and press Enter (dgVoodoo2 setup). Pick those 3 games. Say yes.
+3. Read the result screen when it finishes.
+4. You passed if all 3 games are named on the result screen, including the one that already had every file. It failed if a game you picked is missing from the result.
+5. Now add one new game with Register only (menu 2). When it asks the optional dgVoodoo2 question or the graphics card question, type B and press Enter. You passed that part if it went back one step, and you could still do the step you skipped.
+
+### Test 39: Games that share one zip file
+
+1. Use this only if you have game folders that each hold a zip file with the same name (for example, several folders that each have naomigd.zip). Skip this test if you do not have these.
+2. At the main menu, type 2 and press Enter (Register only). Pick those folders.
+3. You passed if it does NOT ask a "keep or switch" question that offers only the wrong game. A folder it cannot tell is listed as not identified instead.
+4. Open TeknoParrot. You passed if no game shows up twice and each game has the right name.
+
+### Test 40: A very deep folder, or a folder that ends in [TP]
+
+1. Use this only if you have a game folder whose name ends in [TP], or your TeknoParrot folder is inside many folders (a very long path). Skip this test if you have neither.
+2. Install a game patch from the menu on a game in that folder. Then undo the patch.
+3. You passed if neither step stops with a "could not be checked" error.
+4. If your TeknoParrot folder is very deep, also start TeknoParrot Manager and let it tidy up its own files. You passed if it finishes with no error about a path that is too long.
 ## How to report a problem
 
 **Very important: the support report.** Every bug report needs a support report. Without it we often cannot find the cause. Make one every time something goes wrong. Never skip it.

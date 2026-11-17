@@ -3146,7 +3146,7 @@ It first asks `Tidy up now? (Y/N, D = show the list)` (default N; nothing is mov
 
 For recovery evidence the move works like this:
 
-1. A private copy goes to `Backups\LegacyMigration_<id>\`.
+1. A private copy goes to `Backups\LegacyMig_<id>\`.
 2. The folder is then copied into its new place.
 3. TeknoParrot Manager checks the copy matches byte for byte and is private.
 4. It re-checks that the original did not change.

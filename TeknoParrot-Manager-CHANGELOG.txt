@@ -2,11 +2,38 @@
   TeknoParrot Manager  --  CHANGELOG
   Author: Jumpstile
 ===============================================================================
-  Newest version first. RC8.2 is a fix-up release for RC8.1. RC8.1 is the
+  Newest version first. RC8.3 is a fix-up release for RC8.2. RC8.2 is the
   latest published version before it. RC8 was a tester build and was never
   published. The final RC9 comes later.
 
 
+  v1.0 RC8.3 (changes since RC8.2)
+  ----------------------------------------------------------------
+
+  Setup
+  - When BepInEx cannot replace a file, it now says exactly why (for
+    example, the file is shared with another folder, it is a folder, it
+    is a link, or it cannot be read).
+  - Setting up ReShade one game at a time now asks only about games that
+    can be changed. It shows "game 2 of 5" and has a Back choice.
+  - The optional setup questions after you add games (dgVoodoo2 and the
+    graphics card fix) can walk back one step, so a step you skipped by
+    accident can be done.
+  - The dgVoodoo2 result now names every game that already had all of its
+    files, so every game you picked is listed.
+
+  Fixes
+  - A crash on the PostgreSQL setup screen is fixed.
+  - A shared .zip file no longer causes false questions about duplicate
+    profiles when you add games.
+  - Game folders are matched by their game title when notes follow it,
+    such as (Landscape,Bezel).
+  - Installing or undoing a game patch no longer stops with a "could not
+    be checked" error when the file it needs to check is simply not there
+    yet in a game folder ending in [TP].
+  - The safety backup made before TeknoParrot Manager tidies up its own
+    files now uses a shorter folder name, so tidying up no longer fails
+    on very deep install folders.
   v1.0 RC8.2 (changes since RC8.1)
   ----------------------------------------------------------------
 

@@ -35,10 +35,10 @@ Describe 'changelog format' {
         [regex]::Matches($script:F112Text, "`r(?!`n)").Count | Should -Be 0
     }
 
-    It 'lists each version once, newest first: RC8.2, RC8.1, RC7, RC6, RC5, RC4, RC3, RC2.1, RC2' {
+    It 'lists each version once, newest first: RC8.3, RC8.2, RC8.1, RC7, RC6, RC5, RC4, RC3, RC2.1, RC2' {
         # Mutation: move the RC8.1 block below RC7, or add a second RC7 heading.
         $previous = -1
-        foreach ($tag in @('RC8.2', 'RC8.1', 'RC7', 'RC6', 'RC5', 'RC4', 'RC3', 'RC2.1', 'RC2')) {
+        foreach ($tag in @('RC8.3', 'RC8.2', 'RC8.1', 'RC7', 'RC6', 'RC5', 'RC4', 'RC3', 'RC2.1', 'RC2')) {
             $pattern = '^  v1\.0 ' + [regex]::Escape($tag) + '(\s|$)'
             $hits = @(for ($i = 0; $i -lt $script:F112Lines.Count; $i++) { if ($script:F112Lines[$i] -match $pattern) { $i } })
             $hits.Count | Should -Be 1 -Because "$tag must have exactly one heading"
@@ -53,6 +53,7 @@ Describe 'changelog format' {
         @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC(8|9)(\s|$)' }).Count | Should -Be 0
         @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC8\.1 \(changes since RC7\)\s*$' }).Count | Should -Be 1
         @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC8\.2 \(changes since RC8\.1\)\s*$' }).Count | Should -Be 1
+        @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC8\.3 \(changes since RC8\.2\)\s*$' }).Count | Should -Be 1
     }
 
     It 'is short (a page or two for RC8.1, not the long technical history)' {
