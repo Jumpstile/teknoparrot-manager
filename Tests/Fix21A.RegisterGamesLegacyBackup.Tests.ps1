@@ -50,7 +50,7 @@ BeforeAll {
         'Get-PrimaryExecutableName',
         'Get-NormalizedGameKey',
         'Get-DiceSimilarity',
-        'Resolve-BestFuzzyMatch',
+        'Get-TpmBaseTitleKey', 'Resolve-BestFuzzyMatch',
         'Resolve-ProfileCode',
         'Get-GameFiles',
         'Save-XmlMaybe', 'Get-TpmProfileWriteFingerprint', 'Resolve-TpmRegistrationSaveFailure',

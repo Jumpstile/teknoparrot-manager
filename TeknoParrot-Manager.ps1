@@ -9038,6 +9038,17 @@ function Get-DiceSimilarity {
     return [double](2 * $inter) / ($totalA + $totalB)
 }
 
+# The normalized game title in a folder or ZIP name, without the notes that follow it in parentheses or brackets
+# (for example "Raiden IV (1.03J)(Landscape,Bezel)[Taito NESiCAxLive]" gives the key of "Raiden IV").
+# Returns '' when nothing is left. Used only as an extra score next to the full-name score, never in place of it.
+function Get-TpmBaseTitleKey {
+    param([AllowNull()][string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return '' }
+    $title = [regex]::Replace($Name, '\s*[\(\[].*$', '')
+    if ([string]::IsNullOrWhiteSpace($title)) { return '' }
+    return (Get-NormalizedGameKey $title)
+}
+
 # Minimum Dice similarity required to auto-register a fuzzy match. Anything at
 # or above this score is registered automatically; anything below appears in
 # ACTION REQUIRED with the best-guess profile name shown.
@@ -9064,11 +9075,18 @@ $FuzzyTieMargin = 0.1
 # (dat lookup, then manual-registration ACTION REQUIRED) for both. See
 # issue #15.
 function Resolve-BestFuzzyMatch {
-    param([string]$NormFolder, [array]$MatchList, [hashtable]$RawThrillsAliases)
+    param([string]$NormFolder, [array]$MatchList, [hashtable]$RawThrillsAliases, [string]$NormBaseTitle = '')
     $best = $null; $bestScore = 0.0; $secondScore = 0.0
     foreach ($cand in $MatchList) {
         $normCode = Get-NormalizedGameKey $cand.Code
         $score    = Get-DiceSimilarity $NormFolder $normCode
+        # A folder name often carries notes in parentheses or brackets after the title, for example "(Landscape,Bezel)" or "(fixed video)".
+        # They are not part of the game's name and pull the score down, so the title before the first note is scored as well.
+        # The better of the two scores is used; the same tie rule below still applies.
+        if ($NormBaseTitle) {
+            $baseScore = Get-DiceSimilarity $NormBaseTitle $normCode
+            if ($baseScore -gt $score) { $score = $baseScore }
+        }
         if ($RawThrillsAliases.ContainsKey($cand.Code)) {
             $normAlias  = Get-NormalizedGameKey $RawThrillsAliases[$cand.Code].Suggested
             $aliasScore = Get-DiceSimilarity $NormFolder $normAlias
@@ -36415,7 +36433,7 @@ function Register-GamesLegacy {
             # see issue #13) is handled inside Resolve-BestFuzzyMatch.
             $normFolder  = Get-NormalizedGameKey $folderKey
 
-            $fuzzyResult    = Resolve-BestFuzzyMatch -NormFolder $normFolder -MatchList $matchList -RawThrillsAliases $RawThrillsPathLimits
+            $fuzzyResult    = Resolve-BestFuzzyMatch -NormFolder $normFolder -MatchList $matchList -RawThrillsAliases $RawThrillsPathLimits -NormBaseTitle (Get-TpmBaseTitleKey $folderKey)
             $bestFuzzy      = $fuzzyResult.Best
             $bestFuzzyScore = $fuzzyResult.BestScore
 
@@ -36862,12 +36880,25 @@ function Register-GamesLegacy {
             if (-not $normFolder) { continue }
 
             $bestScore = 0.0
+            $secondScore = 0.0
             $bestCode  = $null
+            $bestViaBaseTitle = $false
+            # Notes in parentheses after the title ("(Landscape,Bezel)", "(fixed video)") are not part of the game's name; the title alone is scored too.
+            $normBaseTitle = Get-TpmBaseTitleKey $folderKey
             foreach ($nc in $normCodeList) {
                 $score = Get-DiceSimilarity $normFolder $nc.Norm
-                if ($score -gt $bestScore) { $bestScore = $score; $bestCode = $nc.Code }
+                $viaBase = $false
+                if ($normBaseTitle) {
+                    $baseScore = Get-DiceSimilarity $normBaseTitle $nc.Norm
+                    if ($baseScore -gt $score) { $score = $baseScore; $viaBase = $true }
+                }
+                if ($score -gt $bestScore) { $secondScore = $bestScore; $bestScore = $score; $bestCode = $nc.Code; $bestViaBaseTitle = $viaBase }
+                elseif ($score -gt $secondScore) { $secondScore = $score }
             }
             if ($bestScore -lt $FuzzyAutoThreshold -or -not $bestCode) { continue }
+            # A match that only exists because of the title-only score must be clearly ahead of the next profile, the same rule the shared-name matcher uses.
+            # Otherwise the folder is left for the user to choose, never guessed.
+            if ($bestViaBaseTitle -and (($bestScore - $secondScore) -lt $FuzzyTieMargin)) { continue }
 
             $matchedFolders[$folderKey] = $true
 
