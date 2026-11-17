@@ -14,15 +14,13 @@ Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-ma
 
 ## Download
 
-Release page of the latest published release: [v1.0 RC8.1](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1).
+Release page of the latest published release: [v1.0 RC8.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2).
 
 1. Download the ZIP file from the release page.
 2. Extract the whole package to a short folder outside Program Files, for example `C:\TPM`. Keep all the folders.
 3. Double-click **`TeknoParrot-Manager.bat`**.
 
 TeknoParrot Manager does not install TeknoParrot. Install TeknoParrot first. [Start Here](docs/START-HERE.md) shows how.
-
-Release page of the latest published release: [v1.0 RC8.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2).
 
 ## What it does
 
@@ -2071,7 +2069,7 @@ Nothing is downloaded or changed unless you say Y. Before anything is installed,
 
 ### Installing the update
 
-RC9 is the first version that can update itself in place. When you say Y, it does four things:
+RC8.1 is the first version that can update itself in place. When you say Y, it does four things:
 
 1. It downloads the update and checks that it is the real file.
 2. It looks inside it.
@@ -2085,7 +2083,7 @@ Then you start TeknoParrot Manager again yourself. It does not restart on its ow
 - If any file cannot be replaced, every file is put back and nothing changes.
 - If the drive is too full, it says `There is not enough free space for the update` and installs nothing. Free some space and try again.
 
-**Using a build before RC9 (for example RC8 or RC7)?** Those builds cannot update in place. Install RC9 by hand once: when RC9 comes out, download its ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases), then extract all of its files over your TeknoParrot Manager folder. After that, menu 15 does the updating.
+**Using a build before RC8.1 (for example RC8 or RC7)?** Those builds cannot update in place. Install the newest release by hand once: download its ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases), then extract all of its files over your TeknoParrot Manager folder. After that, menu 15 does the updating.
 
 The separate tool `tools\Invoke-TpmAutoUpdate.ps1 -Apply` still refuses a release with many files. It changes nothing.
 

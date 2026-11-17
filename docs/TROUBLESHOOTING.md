@@ -657,7 +657,7 @@ Check these things first:
 - The required runtimes are installed.
 - Startup files are present. Some games need them from your own collection: PlayStation 3 firmware for RPCS3 games, four files for Chihiro games, or firmware for PCSX2x6 games. If one is missing, the Action Required list names the games that will not start and the next step. Put the matching file in your game collection and run TeknoParrot Manager again. It never downloads these files.
 - AutoSync said a game was not updated. It could not save the extra files in the old folder (saves, settings, ReShade files), or no Backups folder is set up. Nothing was changed for that game. Fix the Backups folder or free some space, then run AutoSync again.
-- Check for Updates cannot install in place (you run a build before RC9, such as RC8 or RC7). Install RC9 by hand once: when RC9 comes out, download its ZIP from the Releases page and extract all of its files over your TeknoParrot Manager folder. RC9 and later can update themselves.
+- Check for Updates cannot install in place (you run a build before RC8.1, such as RC8 or RC7). Install the newest release by hand once: download its ZIP from the Releases page and extract all of its files over your TeknoParrot Manager folder. RC8.1 and later can update themselves.
 
 Then read that game's official compatibility information and TeknoParrot Manager's Game Notes documentation. Do this before you try any game-specific fix.
 

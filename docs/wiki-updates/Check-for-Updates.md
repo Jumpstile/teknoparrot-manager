@@ -22,7 +22,7 @@ If GitHub cannot be reached, you see `Could not check for updates`. Your copy is
 
 ## What happens after you answer Y
 
-RC9 is the first version that can update itself like this. If you run a build before RC9 (for example RC8 or RC7), see "Updating from a build before RC9" below.
+RC8.1 is the first version that can update itself like this. If you run a build before RC8.1 (for example RC8 or RC7), see "Updating from a build before RC8.1" below.
 
 1. It downloads the update and checks that it is the real file. GitHub's own SHA-256 checksum for that file is required. If it is missing or does not match, nothing is installed and the download is removed.
 2. It looks inside the ZIP before it changes anything.
@@ -43,11 +43,11 @@ If the drive is too full, you see `There is not enough free space for the update
 
 ---
 
-## Updating from a build before RC9
+## Updating from a build before RC8.1
 
-Builds before RC9 (for example RC8 or RC7) cannot install a whole release. Do this once, when RC9 comes out:
+Builds before RC8.1 (for example RC8 or RC7) cannot install a whole release. Do this once:
 
-1. Download the RC9 ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
+1. Download the newest release ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 2. Extract all of its files over your TeknoParrot Manager folder (or into a new folder).
 3. Start `TeknoParrot-Manager.bat` again.
 

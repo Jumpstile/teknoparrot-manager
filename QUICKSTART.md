@@ -263,7 +263,7 @@ This is the full menu. Type a number at `Enter 1-17:`.
 | 12 | **Required game patches** | Find, validate, back up, install, verify, or undo a required fix for a supported exact game build, using your local ZIP |
 | 13 | **Library health check** | Reports registered/broken/unregistered games, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx counts, without changing anything. Any repair it suggests is a separate choice that you confirm first |
 | 14 | **Restore backup** | Put TeknoParrot game setup files (profiles), LaunchBox's library files, or Postgres databases back from an earlier saved copy. Saved copies are listed newest first |
-| 15 | **Check for Updates** | Check GitHub for a newer TeknoParrot Manager release and install it (RC9 and later) |
+| 15 | **Check for Updates** | Check GitHub for a newer TeknoParrot Manager release and install it (RC8.1 and later) |
 | 16 | **Create Support Package** | Gather safe logs and reports into one ZIP to send when asking for help |
 | 17 | **Exit** | Quit |
 
@@ -1054,7 +1054,7 @@ Nothing is downloaded or changed unless you say Y.
 
 Your own files, `UserProfiles` and backups are never touched or deleted. If any file cannot be replaced, every file is put back and nothing changes. If the drive is too full, it says `There is not enough free space for the update` and installs nothing.
 
-**Using a build before RC9 (for example RC8 or RC7)?** Those builds cannot update in place. Install RC9 by hand once: when RC9 comes out, download the complete ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) and extract all of its files over your TeknoParrot Manager folder. Do the same if the check is unavailable.
+**Using a build before RC8.1 (for example RC8 or RC7)?** Those builds cannot update in place. Install the newest release by hand once: download the complete ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) and extract all of its files over your TeknoParrot Manager folder. Do the same if the check is unavailable.
 
 The separate tool `tools\Invoke-TpmAutoUpdate.ps1 -Apply` still refuses a release with many files and changes nothing.
 

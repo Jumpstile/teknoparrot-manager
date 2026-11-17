@@ -4633,12 +4633,12 @@
     If a newer version exists, it first explains what updating will do. Then
     it asks one Y/N question.
 
-  Installing the update (RC9 and later)
+  Installing the update (RC8.1 and later)
 
-    RC9 is the first version that can update itself in place. Builds before
-    RC9 (for example RC8 or RC7) cannot. If you have one of those, install
-    RC9 by hand once (see "To update by hand" below). After that, mode 15
-    does the work.
+    RC8.1 is the first version that can update itself in place. Builds
+    before RC8.1 (for example RC8 or RC7) cannot. If you have one of those,
+    install the newest release by hand once (see "To update by hand"
+    below). After that, mode 15 does the work.
 
     When you say Y, TeknoParrot Manager does these things:
 
@@ -4668,7 +4668,7 @@
     tools\Invoke-TpmAutoUpdate.ps1 -Apply still refuses a release with
     many files and changes nothing.
 
-    To update by hand (needed once if you run a build before RC9):
+    To update by hand (needed once if you run a build before RC8.1):
 
       1. Download the complete release ZIP from
          https://github.com/Jumpstile/teknoparrot-manager/releases

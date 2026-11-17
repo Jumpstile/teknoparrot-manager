@@ -1,5 +1,5 @@
 # TPM Release Gate
-STATUS: v1.0 RC8.1 (the interim build for testers) is published. Every later release (RC9 and Version 1.0) must pass this gate first.
+STATUS: v1.0 RC8.2 is the latest published release (v1.0 RC8.1 is the previous one). Every later release (RC9 and Version 1.0) must pass this gate first.
 - [ ] Complete source engineering: all applicable universal progress UI operations, final/cancel/stall lifecycle, PostgreSQL safety, exact-candidate reconciliation of release:rc-required issues.
 - [ ] Preserve proof of source SHA, changed files, dispositions, required runtime assets and private backup ref.
 - [ ] Owner approves the real final progress-UI screenshot (not a mockup).

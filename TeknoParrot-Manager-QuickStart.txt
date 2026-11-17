@@ -2067,13 +2067,13 @@
      Application
 
      15) Check for Updates -- look for a newer release on GitHub and
-                             install it (RC9 and later). It checks the
+                             install it (RC8.1 and later). It checks the
                              download, looks inside the ZIP, backs up
                              every file it replaces and installs it. You
                              start the program again yourself. Nothing
-                             changes without your Y. Builds before RC9
-                             (RC8, RC7): install RC9 by hand once from
-                             the Releases page.
+                             changes without your Y. Builds before RC8.1
+                             (RC8, RC7): install the newest release by
+                             hand once from the Releases page.
 
       16) Create Support Package
                           -- collect safe logs/reports into one ZIP to

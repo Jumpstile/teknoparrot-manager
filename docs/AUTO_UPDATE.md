@@ -299,7 +299,7 @@ It follows the flow originally planned here.
 5. If you type N, you will see `Skipped -- no changes made.` Nothing changes.
 6. If you type Y on a single-file release ZIP, the update runs and the manager asks you to restart. You will see `Restart TeknoParrot Manager now to run the verified update.` Next: press Enter to exit, then start TeknoParrot Manager again.
 
-**If the new release is a multi-file package (RC9 and later):**
+**If the new release is a multi-file package (RC8.1 and later):**
 
 The update installs the whole package. It backs up every file it replaces first, and puts every file back if anything goes wrong. If the drive is too full, it says so and installs nothing. When it is done, you see `Update installed and verified. Restart TeknoParrot Manager to use it.` Start it again yourself.
 
@@ -322,7 +322,7 @@ It also states whether a backup was created, and returns safely to the main menu
 - The logic (asset pattern, content validation, read-only pre-check) is deliberately kept in lockstep with the standalone module.
 - `tools/Invoke-TpmAutoUpdate.ps1` remains available separately for scripted/manual use outside the interactive menu.
 
-**Multi-file release (RC9 and later), menu flow only:**
+**Multi-file release (RC8.1 and later), menu flow only:**
 
 - TeknoParrot Manager is not a single-file runtime. It ships required modules (for example `scripts/TpmRequiredPatchEngine.ps1`, `scripts/TpmProgress.psm1`, the certification modules, and `tools/`) and packaged data alongside `TeknoParrot-Manager.ps1`, so the menu flow installs the whole package.
 - `Get-ManagerUpdatePackageFiles` checks every entry name before anything is extracted (no rooted or drive names, no `..`, no reserved names, no names that differ only by letter case). Reason code `UPDATE_PACKAGE_BAD_ENTRY`.
@@ -349,7 +349,7 @@ It also states whether a backup was created, and returns safely to the main menu
 **Actual flow, downloading and backing up:**
 
 6. Require valid GitHub digest metadata, download the asset, and verify its SHA-256. Stop on missing or failed verification without changing the installed script or creating a backup.
-7. Inspect the package first. A ZIP with only `TeknoParrot-Manager.ps1` takes the single-script path (steps 8-9 and the replace step below). Any other ZIP (RC9 and later) is installed whole, see "Multi-file release" above. A ZIP without the script is refused before anything changes. The standalone helper still refuses a multi-file ZIP.
+7. Inspect the package first. A ZIP with only `TeknoParrot-Manager.ps1` takes the single-script path (steps 8-9 and the replace step below). Any other ZIP (RC8.1 and later) is installed whole, see "Multi-file release" above. A ZIP without the script is refused before anything changes. The standalone helper still refuses a multi-file ZIP.
 8. If the target is read-only, the approved main-menu flow temporarily clears only that target attribute; cleanup restores it. The standalone helper stops and tells the operator how to unlock it manually.
 9. Back up the current script before replacement, then extract the single-script candidate and validate its content.
 
