@@ -2,14 +2,22 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-RC7 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. RC9 is not published yet. RC9 is the first version that can update itself in place. RC8 was a tester build and was never published.
-The previous published release was v1.0 RC6. RC4 and RC5 are historical; RC4 is superseded.
+v1.0 RC8.2 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2. RC9 is not published yet. RC8 was a tester build and was never published.
+The previous published release was v1.0 RC8.1: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1. RC7 and RC6 are earlier published releases. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
 ---
 
-## v1.0 RC9 (changes since RC7)
+## v1.0 RC9 (changes since RC8.2)
+
+- A game folder whose name has a note in brackets after the title is matched by its title alone. Two equal matches are listed for you instead of guessed.
+- BepInEx refusals say exactly why a file cannot be replaced safely.
+- PostgreSQL setup shows a second problem and returns to the menu instead of stopping with an error.
+- ReShade one-by-one asks only about games that can be changed, and B goes back. B also works at the dgVoodoo2 and graphics card fix questions after registration.
+- The dgVoodoo2 result names any selected game that already had every file.
+
+## v1.0 RC8.1 (changes since RC7)
 
 ### Updates
 - Check for Updates installs the whole release (scripts, data and tools),
@@ -19,9 +27,9 @@ The previous published release was v1.0 RC6. RC4 and RC5 are historical; RC4 is 
   back. It says so when there is not enough free space. Your own files
   and older files the release no longer has are never deleted. Then you
   start TeknoParrot Manager again yourself.
-- Older builds cannot do this. Install RC9 by hand once: after RC9 is
-  published, download the ZIP from the Releases page and extract it over
-  your old folder.
+- Older builds cannot do this. Install RC8.1 or newer by hand once:
+  download the ZIP from the Releases page and extract it over your old
+  folder.
 - A ZIP without the script, or a CPS3 ZIP that cannot be read, is
   refused. If the Eggman page has no DAT file, it says so.
 - The updater says the old version was put back only when it checked that

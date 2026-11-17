@@ -65,19 +65,19 @@ Describe "Quality engineering system metadata" {
 
 Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
     # The running source identity and the last published release are tracked
-    # separately. RC9 is the current source and is not published yet; RC7 is the latest published release;
-    # RC6 is the previous published release. RC8 was a tester-only build and was never published.
+    # separately. RC9 is the current source and is not published yet; RC8.2 is the latest published release;
+    # RC8.1 is the previous published release. RC8 was a tester-only build and was never published.
     BeforeAll {
         $script:RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
         $script:CurrentSourceVersion = 'v1.0 RC9'
         $script:CurrentSourceRcLabel = 'RC9'
         $script:CurrentSourceState = 'unpublished'
-        $script:LastPublishedVersion = 'v1.0 RC7'
-        $script:LastPublishedRcLabel = 'RC7'
-        $script:LastPublishedTag     = 'v1.0-RC7'
-        $script:LastPublishedZipName = 'TeknoParrot Manager v1.0 RC7.zip'
-        $script:PreviousPublishedVersion = 'v1.0 RC6'
-        $script:PreviousPublishedVersionPattern = 'v1\.0[- ]RC6'
+        $script:LastPublishedVersion = 'v1.0 RC8.2'
+        $script:LastPublishedRcLabel = 'RC8.2'
+        $script:LastPublishedTag     = 'v1.0-RC8.2'
+        $script:LastPublishedZipName = 'TeknoParrot Manager v1.0 RC8.2.zip'
+        $script:PreviousPublishedVersion = 'v1.0 RC8.1'
+        $script:PreviousPublishedVersionPattern = 'v1\.0[- ]RC8\.1'
     }
 
     It "keeps the production script header, runtime label, banner, and console preview on the RC9 candidate identity" {
@@ -93,7 +93,7 @@ Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
         $preview = Get-Content -LiteralPath $previewPath -Raw
         $preview | Should -Match ([regex]::Escape($script:CurrentSourceVersion))
     }
-    It "keeps published-release documentation truthful with RC9 as the current build and RC7 as the latest published release" {
+    It "keeps published-release documentation truthful with RC9 as the current build and RC8.2 as the latest published release" {
         $readme = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'README.md') -Raw
         $topReadme = ($readme -split "`r?`n" | Select-Object -First 40) -join "`n"
 
@@ -101,9 +101,9 @@ Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
         $topReadme | Should -Match ([regex]::Escape($script:LastPublishedTag))
         $topReadme | Should -Match ('(?i)latest(?:(?!RC\d)[\s\S]){0,60}(?:published|download)(?:(?!RC\d)[\s\S]){0,80}' + [regex]::Escape($script:LastPublishedVersion))
         $topReadme | Should -Match ([regex]::Escape($script:CurrentSourceVersion))
-        $topReadme | Should -Not -Match '(?i)RC8[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC8\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC8'
+        $topReadme | Should -Not -Match '(?i)RC8[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC8\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC8(?![.\d])'
         $topReadme | Should -Not -Match '(?i)RC9[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC9\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC9'
-        $topReadme | Should -Match 'releases/(?:tag|download)/v1\.0-RC7'
+        $topReadme | Should -Match 'releases/(?:tag|download)/v1\.0-RC8\.2'
         $topReadme | Should -Match ('(?i)(?:previous|historical) published release.{0,80}' + $script:PreviousPublishedVersionPattern)
         $topReadme | Should -Not -Match '\[Download v1\.0 RC5\]'
         $topReadme | Should -Not -Match 'v1\.0 RC1|v1\.0-RC1|v1\.0\.RC1'
@@ -117,15 +117,15 @@ Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
 
         $releasePackage | Should -Match ([regex]::Escape($script:CurrentSourceVersion))
     }
-    It "keeps the wiki changelog staging doc aligned with RC9 as current and RC7 as the latest published release" {
+    It "keeps the wiki changelog staging doc aligned with RC9 as current and RC8.2 as the latest published release" {
         # wiki-updates\Changelog.md tracks the live GitHub wiki content.
         $wikiChangelog = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'docs\wiki-updates\Changelog.md') -Raw
         $wikiChangelog | Should -Not -Match 'Unreleased'
         $wikiChangelog | Should -Match ([regex]::Escape($script:CurrentSourceVersion))
         $wikiChangelog | Should -Match ([regex]::Escape($script:LastPublishedVersion))
-        $wikiChangelog | Should -Match 'releases/tag/v1\.0-RC7'
-        $wikiChangelog | Should -Match '(?i)RC7 is the latest published'
-        $wikiChangelog | Should -Not -Match '(?i)RC8[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC8\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC8'
+        $wikiChangelog | Should -Match 'releases/tag/v1\.0-RC8\.2'
+        $wikiChangelog | Should -Match '(?i)RC8\.2 is the latest published'
+        $wikiChangelog | Should -Not -Match '(?i)RC8[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC8\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC8(?![.\d])'
         $wikiChangelog | Should -Match ('(?i)(?:previous|historical) published release.{0,80}' + $script:PreviousPublishedVersionPattern)
     }
     It "records the current RC8 release gate and owner authorization prerequisite" {
@@ -203,13 +203,13 @@ Describe "Active release-facing documentation" -Tag 'ReleaseConsistency' {
         $script:ActiveReleaseDocs = @(
             [pscustomobject]@{ RelativePath = 'README.md'; PrefixLines = 25 }
             [pscustomobject]@{ RelativePath = 'QUICKSTART.md'; PrefixLines = 5 }
-            [pscustomobject]@{ RelativePath = 'TeknoParrot-Manager-README.txt'; PrefixLines = 21 }
-            [pscustomobject]@{ RelativePath = 'TeknoParrot-Manager-QuickStart.txt'; PrefixLines = 17 }
+            [pscustomobject]@{ RelativePath = 'TeknoParrot-Manager-README.txt'; PrefixLines = 23 }
+            [pscustomobject]@{ RelativePath = 'TeknoParrot-Manager-QuickStart.txt'; PrefixLines = 19 }
             [pscustomobject]@{ RelativePath = 'docs\AUTO_UPDATE.md'; PrefixLines = 11 }
         )
     }
 
-    It "keeps active release-facing prefixes on RC9 as the current build and RC7 as the latest published release" {
+    It "keeps active release-facing prefixes on RC9 as the current build and RC8.2 as the latest published release" {
         foreach ($entry in $script:ActiveReleaseDocs) {
             $path = Join-Path $script:RepoRoot $entry.RelativePath
             $content = Get-Content -LiteralPath $path -Raw
@@ -217,14 +217,14 @@ Describe "Active release-facing documentation" -Tag 'ReleaseConsistency' {
             $active = ($lines | Select-Object -First $entry.PrefixLines) -join ([string][char]10)
 
             $active | Should -Match 'v1\.0[- ]RC9'
-            $active | Should -Match 'v1\.0[- ]RC7'
-            $active | Should -Match '(?i)latest(?:(?!RC\d)[\s\S]){0,60}(?:published|download)(?:(?!RC\d)[\s\S]){0,80}v1\.0[- ]RC7'
+            $active | Should -Match 'v1\.0[- ]RC8\.2'
+            $active | Should -Match '(?i)latest(?:(?!RC\d)[\s\S]){0,60}(?:published|download)(?:(?!RC\d)[\s\S]){0,80}v1\.0[- ]RC8\.2'
             $active | Should -Match ('(?i)(?:previous|historical) published[\s\S]{0,80}' + $script:PreviousPublishedVersionPattern)
             # RC8 was a tester-only build and may be mentioned as such, but never as published or as the latest release.
-            $active | Should -Not -Match '(?i)latest(?:(?!RC\d)[\s\S]){0,60}(?:published|download)(?:(?!RC\d)[\s\S]){0,80}v1\.0[- ]RC8|RC8[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC8\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC8'
+            $active | Should -Not -Match '(?i)latest(?:(?!RC\d)[\s\S]){0,60}(?:published|download)(?:(?!RC\d)[\s\S]){0,80}v1\.0[- ]RC8(?![.\d])|RC8[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC8\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC8(?![.\d])'
             # RC9 is the current build and is not published yet.
             $active | Should -Not -Match '(?i)latest(?:(?!RC\d)[\s\S]){0,60}(?:published|download)(?:(?!RC\d)[\s\S]){0,80}v1\.0[- ]RC9|RC9[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC9\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC9'
-            $active | Should -Match 'releases/(?:tag|download)/v1\.0-RC7'
+            $active | Should -Match 'releases/(?:tag|download)/v1\.0-RC8\.2'
             $active | Should -Match 'github\.com/Jumpstile/teknoparrot-manager/releases(?![\w/-])'
             $active | Should -Not -Match '(?i)(download|use|install)\s+(?:the\s+)?(?:(?:current|latest)\s+)?(?:release\s+)?(?:v1\.0[- ]?)?RC[0-6]\b'
         }
@@ -255,13 +255,13 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
         $script:ReleaseDocumentContract = [pscustomobject]@{
             CurrentVersionLabel = 'v1.0 RC9'
             CurrentVersionPattern = 'v1\.0[- ]RC9'
-            Rc8PublishedClaimPattern = '(?i)latest(?:(?!RC\d)[\s\S]){0,60}(?:published|download)(?:(?!RC\d)[\s\S]){0,80}v1\.0[- ]RC8|RC8[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC8\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC8'
+            Rc8PublishedClaimPattern = '(?i)latest(?:(?!RC\d)[\s\S]){0,60}(?:published|download)(?:(?!RC\d)[\s\S]){0,80}v1\.0[- ]RC8(?![.\d])|RC8[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC8\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC8(?![.\d])'
             Rc9PublishedClaimPattern = '(?i)latest(?:(?!RC\d)[\s\S]){0,60}(?:published|download)(?:(?!RC\d)[\s\S]){0,80}v1\.0[- ]RC9|RC9[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC9\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC9'
-            LastPublishedVersionLabel = 'v1.0 RC7'
-            LastPublishedVersionPattern = 'v1\.0[- ]RC7'
-            PreviousPublishedVersionLabel = 'v1.0 RC6'
-            PreviousPublishedVersionPattern = 'v1\.0[- ]RC6'
-            LastPublishedUrlPattern = 'releases/(?:tag|download)/v1\.0-RC7'
+            LastPublishedVersionLabel = 'v1.0 RC8.2'
+            LastPublishedVersionPattern = 'v1\.0[- ]RC8\.2'
+            PreviousPublishedVersionLabel = 'v1.0 RC8.1'
+            PreviousPublishedVersionPattern = 'v1\.0[- ]RC8\.1'
+            LastPublishedUrlPattern = 'releases/(?:tag|download)/v1\.0-RC8\.2'
             GeneralReleasesUrlPattern = 'github\.com/Jumpstile/teknoparrot-manager/releases(?![\w/-])'
         }
 
@@ -354,9 +354,9 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
             return $findings.ToArray()
         }
 
-        # RC9 is the current build and is not published yet; RC7 is the latest published release; RC6 is the one before it.
+        # RC9 is the current build and is not published yet; RC8.2 is the latest published release; RC8.1 is the one before it.
         # RC8 was a tester-only build and was never published.
-        $script:ReleaseIdentityGoodText = 'This guide describes v1.0 RC9, which is not published yet. Latest published release: v1.0 RC7. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. Previous published release: v1.0 RC6 (historical). All releases: https://github.com/Jumpstile/teknoparrot-manager/releases. Final Version 1.0 remains unpublished.'
+        $script:ReleaseIdentityGoodText = 'This guide describes v1.0 RC9, which is not published yet. Latest published release: v1.0 RC8.2. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2. Previous published release: v1.0 RC8.1 (historical). All releases: https://github.com/Jumpstile/teknoparrot-manager/releases. Final Version 1.0 remains unpublished.'
 
         $script:ReleaseIdentityDocuments = @(
             [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = $script:ReleaseIdentityGoodText }

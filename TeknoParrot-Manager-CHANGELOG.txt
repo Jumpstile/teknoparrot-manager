@@ -2,9 +2,40 @@
   TeknoParrot Manager  --  CHANGELOG
   Author: Jumpstile
 ===============================================================================
-  Newest version first. RC8.2 is a fix-up release for RC8.1. RC8.1 is the
-  latest published version before it. RC8 was a tester build and was never
-  published. The final RC9 comes later.
+  Newest version first. RC9 is the current build and is not published yet.
+  RC8.2 is the latest published version and RC8.1 is the one before it.
+  RC8 was a tester build and was never published.
+
+
+  v1.0 RC9 (changes since RC8.2)
+  ----------------------------------------------------------------
+
+  Game matching
+  - A game folder whose name has a note in brackets after the title, such
+    as "(Landscape,Bezel)", is now matched by its title alone, so the note
+    no longer lowers the match. If two games match equally well, the
+    Manager does not guess; it lists the game for you to add by hand.
+
+  BepInEx
+  - When BepInEx cannot be installed in a game folder because a file is
+    already there and cannot be replaced safely, the message now says
+    exactly why: the file is shared with another folder, it is a link, it
+    is a folder, or it cannot be read.
+
+  PostgreSQL
+  - If a second problem is found after you acknowledged the first result
+    (for example PostgreSQL could not be put back the way it was), setup
+    shows it and returns to the menu instead of stopping with an error.
+
+  Screens
+  - ReShade, choosing games one by one: you are asked only about games
+    that can be changed, the screen shows which game you are on, and B
+    goes back one game.
+  - Optional setup after registration: B at the dgVoodoo2 and graphics
+    card fix questions goes back one step, so a step you skipped by
+    accident can still be done.
+  - The dgVoodoo2 result names any selected game that already had every
+    file, so every selected game is accounted for.
 
 
   v1.0 RC8.2 (changes since RC8.1)
@@ -44,9 +75,9 @@
   - If an update was cut off (power loss or a closed window), the next
     start says so and tells you how to get the old files back from the
     UpdateBackups folder. It never deletes anything for you.
-  - Older builds cannot do this. Install RC9 by hand once: after RC9 is
-    published, download the ZIP from the Releases page and extract it over
-    your old folder.
+  - Older builds cannot do this. Install RC8.1 or newer by hand once:
+    download the ZIP from the Releases page and extract it over your old
+    folder.
   - A ZIP without the script, or a CPS3 ZIP that cannot be read, is
     refused. If the Eggman page has no DAT file, it says so.
   - The updater says the old version was put back only when it checked that

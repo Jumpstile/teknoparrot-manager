@@ -8,7 +8,7 @@ TeknoParrot Manager is made for beginners and is also useful if you already know
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-> **This guide describes v1.0 RC8.2.** RC8.2 is a fix-up release for RC8.1. It fixes problems that testers found. RC8.1 is the latest published release before it, and it is the first version that can update itself in place (see Check for Updates). If you use RC8.1, choose Check for Updates (menu 15) to get RC8.2. The previous published releases are v1.0 RC7 and RC6. RC8 was a tester build and was never published. The changes since RC8.1 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. The final v1.0 RC9 comes later. Final Version 1.0 remains unpublished. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
+> **This guide describes v1.0 RC9.** RC9 is the current build and is not published yet. The latest published release is v1.0 RC8.2, a fix-up release for RC8.1. The previous published release is v1.0 RC8.1, the first version that can update itself in place (see Check for Updates). If you use RC8.1 or RC8.2, choose Check for Updates (menu 15) when RC9 comes out. Earlier published releases are v1.0 RC7 and RC6. RC8 was a tester build and was never published. The changes since RC8.2 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 remains unpublished. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
 
 
 ## Start here: your first game in about 10 minutes
@@ -19,7 +19,7 @@ Allow about 10 minutes once your downloads are ready.
 
 Installing TeknoParrot, updates, large games, and special controllers take longer.
 
-Release page of the latest published release: [v1.0 RC7](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7).
+Release page of the latest published release: [v1.0 RC8.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2).
 
 You need:
 

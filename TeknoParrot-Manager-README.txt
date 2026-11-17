@@ -12,13 +12,16 @@
   up your game settings before it changes them, and Details and the log
   show what was done. See docs\ADVANCED-USERS.md.
 
-  This is v1.0 RC8.2, a fix-up release for RC8.1. It fixes problems that
-  testers found. RC8.1 is the latest published release before it. If you
-  use RC8.1, choose 15) Check for Updates to get RC8.2.
-  The previous published releases are v1.0 RC7 and RC6. RC8 was a tester
-  build and was never published. The final v1.0 RC9 comes later.
+  This is v1.0 RC9, the current build. It is not published yet.
+  The latest published release is v1.0 RC8.2, a fix-up release for RC8.1.
+  Release page: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2
+  All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
+  The previous published release is v1.0 RC8.1. If you use RC8.1 or
+  RC8.2, choose 15) Check for Updates when RC9 comes out.
+  Earlier published releases are v1.0 RC7 and RC6. RC8 was a tester
+  build and was never published.
   Final Version 1.0 remains unpublished.
-  The changes since RC8.1 are in TeknoParrot-Manager-CHANGELOG.txt.
+  The changes since RC8.2 are in TeknoParrot-Manager-CHANGELOG.txt.
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after each run. AutoSync backs up UserProfiles before
