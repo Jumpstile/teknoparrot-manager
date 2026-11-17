@@ -18324,16 +18324,39 @@ function Invoke-ReShadeSetupLegacy {
             if ($conflictChoice -eq 'K') { foreach ($conflict in $conflicts) { $keepSelections[$conflict.Game.BaseName] = $conflict.Previous } }
         }
     }
+    $askableNames = $null
     if (-not $bulkApply) {
         if ($selectedGames.Count -gt 1) {
-            $chosenGames = @()
-            foreach ($pf in $selectedGames) {
-                if ((Read-TpmYesNo -Prompt ("  Install for {0}? (Y/N, default Y)" -f $pf.BaseName) -Default 'Y') -match '^(Y|y)$') { $chosenGames += $pf }
+            # Ask only about games that can be changed now. ($askableNames holds the games that cannot be: it is a skip list.) The others stay in the list and are reported as left alone, as before.
+            $askableNames = @{}
+            foreach ($leftRecord in @($preflightSummary.Records)) {
+                $isAskable = ($leftRecord.Status -eq 'Ready') -or ($Action -eq 'Adopt' -and $leftRecord.Status -eq 'Protected')
+                if (-not $isAskable) { $askableNames[([string]$leftRecord.Game).ToLowerInvariant()] = $false }
             }
+            $askGames = @($selectedGames | Where-Object { -not $askableNames.ContainsKey(([string]$_.BaseName).ToLowerInvariant()) })
+            $notAskedGames = @($selectedGames | Where-Object { $askableNames.ContainsKey(([string]$_.BaseName).ToLowerInvariant()) })
+            if ($notAskedGames.Count -gt 0) { Write-TpmText -Text ('Asking only about the {0} that can be changed. The other {1} will be left alone.' -f (Format-TpmGameCount -Count $askGames.Count), $notAskedGames.Count) -Color Yellow -BlankBefore }
+            $answers = @{}
+            $askIndex = 0
+            $backedOut = $false
+            while ($askIndex -lt $askGames.Count) {
+                $pf = $askGames[$askIndex]
+                $askAnswer = Read-TpmChoice -Prompt ("  Install for {0}? [Y] Yes  [N] No  [B] Back  (game {1} of {2}, default Y)" -f $pf.BaseName, ($askIndex + 1), $askGames.Count) -Choices @('Y', 'N', 'B') -Default 'Y'
+                if ($askAnswer -eq 'B') {
+                    if ($askIndex -eq 0) { $backedOut = $true; break }
+                    $askIndex--
+                    continue
+                }
+                $answers[$pf.BaseName] = ($askAnswer -eq 'Y')
+                $askIndex++
+            }
+            if ($backedOut) { Write-Host '  ReShade setup canceled. No files were changed.' -ForegroundColor Yellow; Write-Log 'ReShade setup: canceled at the first one-by-one question.'; return [pscustomobject]@{ Succeeded = $false; Cancelled = $true; Deployed = 0; Errors = 0; Reason = 'USER_CANCELLED' } }
+            $chosenGames = @($askGames | Where-Object { $answers[$_.BaseName] })
             if ($chosenGames.Count -eq 0) { Write-Host '  ReShade setup canceled. No files were changed.' -ForegroundColor Yellow; Write-Log 'ReShade setup: canceled -- no game was chosen one by one.'; return [pscustomobject]@{ Succeeded = $false; Cancelled = $true; Deployed = 0; Errors = 0; Reason = 'USER_CANCELLED' } }
-            $selectedGames = @($chosenGames)
+            $selectedGames = @($chosenGames) + @($notAskedGames)
         }
         foreach ($pf in $selectedGames) {
+            if ($null -ne $askableNames -and $askableNames.ContainsKey(([string]$pf.BaseName).ToLowerInvariant())) { continue }
             $options = Get-TpmReShadeChooserOptions -GameId $pf.BaseName
             if ($options.Restore.Found -and $options.Restore.Valid) {
                 Write-Host ("  R) Reapply previous trusted profile for {0}: {1}" -f $pf.BaseName, $options.Restore.Profile.FriendlyName) -ForegroundColor DarkCyan
@@ -19312,9 +19335,12 @@ function Invoke-DgVoodoo2Setup {
     Write-Log "dgVoodoo2 setup: TeknoParrot Manager does not remove an unowned dgVoodoo2 hook automatically. Existing or changed files must be removed by hand."
     Write-Log ("dgVoodoo2 setup: deployed={0} skipped={1} missingDevice={2} missingPath={3} errors={4} presetOverrides={5}" -f $deployed, $skipped, $missingDevice, $missingPath, $errors, $presetOverrides)
     $legacySucceeded = ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP') -and $plannedProfiles.Count -gt 0 -and $errors -eq 0 -and $skipped -eq 0 -and $missingDevice -eq 0 -and $missingPath -eq 0)
+    # Selected games that already had every file: named on the result screen so every selected game is accounted for.
+    $alreadyConfiguredGames = @(if ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP')) { @($plannedProfiles | Where-Object { -not $_.Written } | ForEach-Object { [string]$_.Game }) })
     return [pscustomobject]@{
         Succeeded = $legacySucceeded
         NoOp = [bool]$noOp
+        AlreadyConfigured = $alreadyConfiguredGames
         Deployed = $deployed
         Skipped = $skipped
         MissingDevice = $missingDevice
@@ -19353,6 +19379,11 @@ function Get-TpmDgVoodoo2ResultView {
     $nothingInstalled = ([bool](Get-TpmTransactionField -Object $Result -Name 'NoOp' -Default $false) -or $installed.Count -eq 0)
     $title = 'No game needed a new dgVoodoo2 file. Nothing was changed.'
     if (-not $nothingInstalled) { $title = ('dgVoodoo2 was added to {0}.' -f (Format-TpmGameCount -Count $installed.Count)) }
+    $alreadyHad = @(Get-TpmTransactionField -Object $Result -Name 'AlreadyConfigured' -Default @() | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($alreadyHad.Count -gt 0) {
+        $alreadyText = ('{0} already had every dgVoodoo2 file, so nothing was changed there: {1}.' -f (Format-TpmGameCount -Count $alreadyHad.Count), ($alreadyHad -join ', '))
+        if ($nothingInstalled) { $title = ('No game needed a new dgVoodoo2 file. Nothing was changed. ' + $alreadyText) } else { $title = ($title + ' ' + $alreadyText) }
+    }
     $needs = @($skippedGames | Group-Object -Property { [string](Get-TpmTransactionField -Object $_ -Name 'Reason' -Default '') } | ForEach-Object { '{0} skipped. {1}' -f (Format-TpmGameCount -Count $_.Count), $_.Name })
     $next = 'Try a game. If it looks wrong or crashes, send a support package and the log.'
     if ($nothingInstalled) { $next = 'Nothing else to do. Press B to go back.' }
@@ -48166,11 +48197,21 @@ function Get-TpmOptionalStepHelpBlocks {
 # The one-line question for an optional follow-up step. Y and N keep their meaning; D shows what the step is and
 # asks again. Returns 'Y' or 'N'.
 function Read-TpmOptionalStepChoice {
-    param([Parameter(Mandatory)][ValidateSet('ReShade', 'DgVoodoo2', 'GpuFix')][string]$Step, [string]$Default = 'N')
+    param([Parameter(Mandatory)][ValidateSet('ReShade', 'DgVoodoo2', 'GpuFix')][string]$Step, [string]$Default = 'N', [switch]$AllowBack)
     $helpBlocks = Get-TpmOptionalStepHelpBlocks -Step $Step
     $verb = if ($Step -eq 'GpuFix') { 'Apply now?' } else { 'Set up now?' }
     $defaultText = if ($Default) { (', default {0}' -f $Default) } else { '' }
     Write-Host ''
+    if ($AllowBack) {
+        # B goes back to the step before this one, so a step that was skipped by accident can be done after all. Returns 'Y', 'N' or 'B'.
+        $backPrompt = 'Optional: {0}. {1} (Y/N, B = go back one step, D = what is this{2})' -f (Get-TpmOptionalStepName -Step $Step), $verb, $defaultText
+        while ($true) {
+            $backAnswer = ([string](Read-HostSafe $backPrompt -Default $Default)).Trim().ToUpperInvariant()
+            if ($backAnswer -eq 'D') { Show-TpmDetailBlocks -Blocks $helpBlocks; continue }
+            if ($backAnswer -in @('Y', 'N', 'B')) { return $backAnswer }
+            Write-Host '  Please choose Y, N or B.' -ForegroundColor Yellow
+        }
+    }
     return (Read-TpmYesNo -Prompt ('Optional: {0}. {1} (Y/N, D = what is this{2})' -f (Get-TpmOptionalStepName -Step $Step), $verb, $defaultText) -Default $Default -DetailsAction { Show-TpmDetailBlocks -Blocks $helpBlocks })
 }
 
@@ -54098,7 +54139,18 @@ if ($doCrosshairs -ne 'Y') {
 # RESHADE SETUP  (optional, runs after crosshair setup)
 # =============================================================================
 
-if ($dryRunActive) {
+# The three optional questions (ReShade, dgVoodoo2, graphics card fixes) can be walked back with B, so a step skipped by accident can still be done.
+# $optionalStepFrom is the first step to ask on this pass: 1 = ReShade, 2 = dgVoodoo2.
+$optionalStepFrom = 1
+$optionalMarkReShade = @($onboardingSummaries.Count, $onboardingFollowUp.Count)
+$optionalMarkDgVoodoo = $optionalMarkReShade
+$rsSetupDone = $false
+$dgSetupDone = $false
+do {
+$optionalGoBack = $false
+if ($optionalStepFrom -gt 1) {
+    $doReShade = "N"
+} elseif ($dryRunActive) {
     $doReShade = "N"
     Write-Log "PreviewMode: ReShade setup offer skipped."
 } elseif ($Unattended) {
@@ -54111,7 +54163,7 @@ if ($dryRunActive) {
 } else {
     $doReShade = Read-TpmOptionalStepChoice -Step ReShade -Default 'N'
 }
-$rsSetupDone = $false
+if ($optionalStepFrom -le 1) { $rsSetupDone = $false }
 if ($doReShade -eq "Y") {
     # Locate the 64-bit DLL: bundled copy first, then config. If this PC has none yet, run the same
     # download-or-use-my-copy step as the main-menu "ReShade setup" right here (Request-TpmReShadeSourceDll),
@@ -54173,6 +54225,7 @@ if ($doReShade -eq "Y") {
 # =============================================================================
 # DGVOODOO2 SETUP  (optional, runs after ReShade setup)
 # =============================================================================
+$optionalMarkDgVoodoo = @($onboardingSummaries.Count, $onboardingFollowUp.Count)
 if ($dryRunActive) {
     $doDgVoodoo = "N"
     Write-Log "PreviewMode: dgVoodoo2 setup offer skipped."
@@ -54184,7 +54237,17 @@ if ($dryRunActive) {
     Write-TpmOptionalStepBlocked -Step DgVoodoo2
     Write-Log 'dgVoodoo2 offer suppressed: crosshair setup did not finish.'
 } else {
-    $doDgVoodoo = Read-TpmOptionalStepChoice -Step DgVoodoo2 -Default 'N'
+    $doDgVoodoo = Read-TpmOptionalStepChoice -Step DgVoodoo2 -Default 'N' -AllowBack
+    if ($doDgVoodoo -eq 'B') {
+        # Back to the ReShade question: drop what this pass added to the summaries, then ask again from ReShade.
+        Write-Log 'Optional setup: the user went back from the dgVoodoo2 question to the ReShade question.'
+        if ($onboardingSummaries.Count -gt $optionalMarkReShade[0]) { $onboardingSummaries.RemoveRange($optionalMarkReShade[0], $onboardingSummaries.Count - $optionalMarkReShade[0]) }
+        if ($onboardingFollowUp.Count -gt $optionalMarkReShade[1]) { $onboardingFollowUp.RemoveRange($optionalMarkReShade[1], $onboardingFollowUp.Count - $optionalMarkReShade[1]) }
+        $rsSetupDone = $false
+        $optionalStepFrom = 1
+        $optionalGoBack = $true
+        continue
+    }
 }
 if ($doDgVoodoo -eq "Y") {
     # Nothing on this PC yet: the same download-or-use-my-folder step as the main-menu "dgVoodoo2 setup" runs right here,
@@ -54254,7 +54317,17 @@ if ($dryRunActive) {
     Write-TpmOptionalStepBlocked -Step GpuFix
     Write-Log 'GPU fix offer suppressed: crosshair setup did not finish.'
 } else {
-    $doGpuFix = Read-TpmOptionalStepChoice -Step GpuFix -Default ''
+    $doGpuFix = Read-TpmOptionalStepChoice -Step GpuFix -Default '' -AllowBack
+    if ($doGpuFix -eq 'B') {
+        # Back to the dgVoodoo2 question (the crosshair-or-CPS3 offer in between is asked again too).
+        Write-Log 'Optional setup: the user went back from the graphics card fixes question to the dgVoodoo2 question.'
+        if ($onboardingSummaries.Count -gt $optionalMarkDgVoodoo[0]) { $onboardingSummaries.RemoveRange($optionalMarkDgVoodoo[0], $onboardingSummaries.Count - $optionalMarkDgVoodoo[0]) }
+        if ($onboardingFollowUp.Count -gt $optionalMarkDgVoodoo[1]) { $onboardingFollowUp.RemoveRange($optionalMarkDgVoodoo[1], $onboardingFollowUp.Count - $optionalMarkDgVoodoo[1]) }
+        $dgSetupDone = $false
+        $optionalStepFrom = 2
+        $optionalGoBack = $true
+        continue
+    }
 }
 $autoGpuResult = $null
 if ($doGpuFix -eq "Y") {
@@ -54289,6 +54362,7 @@ if ($doGpuFix -ne 'Y') {
     $onboardingGpuSummary = 'GPU compatibility: profile writes were reported complete. Saved fields were not independently read back by this step; game launch and display output were not verified.'
 }
 [void]$onboardingSummaries.Add($onboardingGpuSummary)
+} while ($optionalGoBack)
 Write-Host ''
 Write-Host '  Optional setup results:' -ForegroundColor Cyan
 foreach ($onboardingSummary in $onboardingSummaries) {
