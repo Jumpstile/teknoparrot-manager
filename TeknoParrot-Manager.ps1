@@ -36309,6 +36309,15 @@ function Register-GamesLegacy {
             }
         }
 
+        # A shared .zip (such as naomigd.zip) that another folder already claimed this run is not
+        # proof of a second copy of the same game. Do not ask a keep/switch question about it and do
+        # not mark the folder done: the folder-name passes below can still match the folder's own
+        # game, and if none does the folder is listed as one we could not identify. See issue #404.
+        if ($exe.Extension -ieq '.zip' -and $seenCodes.ContainsKey($code) -and -not $preExistingCodes.Contains($code)) {
+            Write-Log ("Shared file name: '{0}' in folder '{1}' did not claim {2} again -- folder '{3}' already has it; matching '{1}' by its name instead" -f $exe.Name, $folderName, $code, $codeClaimedBy[$code])
+            continue
+        }
+
         # Otherwise a single candidate for this exe name is a confident,
         # unambiguous identification (unlike the $matchList.Count -gt 1
         # branch above, this never falls through to an unresolved "shared"
