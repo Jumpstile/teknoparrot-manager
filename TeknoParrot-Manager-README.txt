@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC8.2
+  TeknoParrot Manager  |  v1.0 RC8.3
   Author: Jumpstile
 ===============================================================================
 
@@ -7,14 +7,14 @@
   automatically, copies your controls between games of the same type, and
   keeps your game library organized. Windows / PowerShell 5.1+.
 
-  This is v1.0 RC8.2, a fix-up release for RC8.1. It fixes problems that
-  testers found. The latest published release before it is v1.0 RC8.1:
-  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1
-  If you use RC8.1, choose 15) Check for Updates to get RC8.2.
-  The previous published releases are v1.0 RC7 and RC6. RC8 was a tester
+  This is v1.0 RC8.3, a fix-up release for RC8.2. It fixes problems that
+  testers found. The latest published release before it is v1.0 RC8.2:
+  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2
+  If you use RC8.2, choose 15) Check for Updates to get RC8.3.
+  The previous published releases are v1.0 RC8.1 and RC7. RC8 was a tester
   build and was never published. The final v1.0 RC9 comes later.
   Final Version 1.0 remains unpublished.
-  The changes since RC8.1 are in TeknoParrot-Manager-CHANGELOG.txt.
+  The changes since RC8.2 are in TeknoParrot-Manager-CHANGELOG.txt.
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after each run. AutoSync backs up UserProfiles before
@@ -6069,7 +6069,7 @@
 
 
 ===============================================================================
-  v1.0 RC8.2 (not published yet). The latest published release is v1.0 RC8.1.
+  v1.0 RC8.3 (not published yet). The latest published release is v1.0 RC8.2.
   Test one game after every run. AutoSync backs up UserProfiles before
   extraction; preview mode skips the backup.
 ===============================================================================

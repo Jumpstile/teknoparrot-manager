@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC8.2  --  QUICK START
+  TeknoParrot Manager  |  v1.0 RC8.3  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -9,11 +9,11 @@
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  This guide is for v1.0 RC8.2, a fix-up release for RC8.1. It fixes
+  This guide is for v1.0 RC8.3, a fix-up release for RC8.2. It fixes
   problems that testers found. The latest published release before it is
-  v1.0 RC8.1: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1
-  If you use RC8.1, choose 15) Check for Updates. The final v1.0 RC9 comes later.
-  The previous published releases are v1.0 RC7 and RC6. RC8 was never published.
+  v1.0 RC8.2: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2
+  If you use RC8.2, choose 15) Check for Updates. The final v1.0 RC9 comes later.
+  The previous published releases are v1.0 RC8.1 and RC7. RC8 was never published.
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
   Final Version 1.0 remains unpublished.
 

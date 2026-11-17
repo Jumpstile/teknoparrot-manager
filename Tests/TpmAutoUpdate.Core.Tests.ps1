@@ -283,7 +283,7 @@ $ReleaseCandidateLabel = "RC7"
 
     It '[UVO-08] reads the current manager identity from source without executing it' {
         $managerScriptPath = Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'
-        Get-TpmLocalVersion -Path $managerScriptPath | Should -Be '1.0-RC8.2'
+        Get-TpmLocalVersion -Path $managerScriptPath | Should -Be '1.0-RC8.3'
     }
 
     It 'throws when the file does not exist' {
