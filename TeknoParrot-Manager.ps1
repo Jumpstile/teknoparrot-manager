@@ -2789,6 +2789,18 @@ function Resolve-TpmWorkflowFailure {
         [object[]]$DetailBlocks = @(),
         [switch]$Acknowledge
     )
+    if ($Context.Closed) {
+        # A second problem found after the first result was already acknowledged and the status was closed (for example PostgreSQL
+        # could not be put back the way it was). The status channel cannot take new events, so show the result directly and log it.
+        Write-Log "Workflow already closed; showing failure [$FailureId] directly: $Message | $DataSafety"
+        Write-Host ''
+        Write-Host "  $Message" -ForegroundColor Yellow
+        if (-not [string]::IsNullOrWhiteSpace($DataSafety)) { Write-Host "  $DataSafety" }
+        foreach ($action in @($RecoveryActions | Where-Object { $null -ne $_ -and $_.Id -eq 'Retry' })) { Write-Host ("  Next: " + $action.Label) }
+        if (@($DetailBlocks | Where-Object { $null -ne $_ }).Count -gt 0) { Write-TpmDetailBlocksLog -Blocks $DetailBlocks -Prefix ('Failure detail [{0}]' -f $FailureId) }
+        if ($Acknowledge) { [void](Read-HostSafe '  Press Enter to continue') }
+        return
+    }
     if (-not $Context.Failure) {
         [void](Set-TpmWorkflowFailure -Context $Context -FailureId $FailureId -Message $Message -DataSafety $DataSafety -RecoveryActions $RecoveryActions)
     }
@@ -32341,20 +32353,25 @@ function New-BepInExUpdateBackup {
 function Get-TpmTreeFileState {
     param([Parameter(Mandatory)][string]$Path)
     $null = Get-TpmSupportNativeType
-    $state = [pscustomobject]@{ Kind='Absent'; Identity=$null; Sha256=$null; Length=$null; Attributes=0 }
+    $state = [pscustomobject]@{ Kind='Absent'; Identity=$null; Sha256=$null; Length=$null; Attributes=0; Reason='' }
     $share = [TpmSupportNativeMethods]::ShareRead -bor [TpmSupportNativeMethods]::ShareWrite -bor [TpmSupportNativeMethods]::ShareDelete
     $handle = [TpmSupportNativeMethods]::CreateFile($Path, [TpmSupportNativeMethods]::GenericRead, $share, [IntPtr]::Zero, [TpmSupportNativeMethods]::OpenExisting, [TpmSupportNativeMethods]::FileFlagOpenReparsePoint, [IntPtr]::Zero)
     if ($handle.IsInvalid) {
         $handle.Dispose()
-        try { $null = Get-Item -LiteralPath $Path -Force -ErrorAction Stop; $state.Kind = 'Other' }
+        try {
+            $existing = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+            $state.Kind = 'Other'
+            $state.Reason = if ($existing.PSIsContainer) { 'it is a folder, not a file' } else { 'it exists but Windows would not let the Manager read it (it may be in use or protected)' }
+        }
         catch [System.Management.Automation.ItemNotFoundException] { }
-        catch { $state.Kind = 'Other' }
+        catch { $state.Kind = 'Other'; $state.Reason = 'it could not be checked: ' + $_.Exception.Message }
         return $state
     }
     $stream = $null
     try {
         $attributes = [int][TpmSupportNativeMethods]::PatchAttributes($handle)
-        if (($attributes -band 0x410) -ne 0) { $state.Kind = 'Other'; return $state }
+        if (($attributes -band 0x400) -ne 0) { $state.Kind = 'Other'; $state.Reason = 'it is a shortcut or link to somewhere else'; return $state }
+        if (($attributes -band 0x10) -ne 0) { $state.Kind = 'Other'; $state.Reason = 'it is a folder, not a file'; return $state }
         $identity = [TpmSupportNativeMethods]::PatchFileIdentity($handle)
         $stream = New-Object System.IO.FileStream($handle, [System.IO.FileAccess]::Read)
         $state.Attributes = $attributes -band 0x27
@@ -32364,6 +32381,8 @@ function Get-TpmTreeFileState {
         $state.Kind = 'File'
     } catch {
         $state.Kind = 'Other'; $state.Identity = $null; $state.Sha256 = $null
+        if ($_.Exception.Message -like '*without hard links*') { $state.Reason = 'the same file is shared with another folder (a hard link), so changing it here would also change the other copy' }
+        else { $state.Reason = 'it could not be read safely: ' + $_.Exception.Message }
     } finally {
         if ($null -ne $stream) { $stream.Dispose() } else { $handle.Dispose() }
     }
@@ -32518,7 +32537,7 @@ function Invoke-TpmTransactionalTreePromote {
             $seen[$key] = $true
             if (-not (Test-BepInExNoReparsePath -Root $DestDir -Path $destination)) { throw "BepInEx destination path is unsafe: $relative" }
             $destinationState = Get-TpmTreeFileState -Path $destination
-            if ($destinationState.Kind -eq 'Other') { throw "BepInEx destination is not a plain readable single-link file: $relative" }
+            if ($destinationState.Kind -eq 'Other') { throw "BepInEx was not installed because '$relative' already exists in the game folder and cannot be replaced safely: $($destinationState.Reason)." }
             if ($destinationState.Kind -eq 'File') {
                 $rollbackFile = Join-Path $rollbackDir $relative
                 [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($rollbackFile))
