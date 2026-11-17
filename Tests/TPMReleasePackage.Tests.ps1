@@ -241,7 +241,7 @@ Describe 'Strict user release package contents' {
     It 'accepts the complete source-mapped allowlist and byte-identical files' {
         $result = Test-TPMReleasePackageArchiveV1 -ZipPath $script:validZip -SourceRoot $script:fixtureSource
         $result.Valid | Should -BeTrue
-        $result.FileCount | Should -Be 356
+        $result.FileCount | Should -Be 357
         $result.CrosshairPngCount | Should -Be 321
         $result.PathLeakCount | Should -Be 0
         { & (Join-Path $script:fixtureSource 'Tests/Test-ReleasePackage.ps1') -ZipPath $script:validZip } | Should -Not -Throw
@@ -477,7 +477,7 @@ Describe 'RC8 documentation and screenshot package contract' {
         }
 
         $fileMap = @(Get-TPMReleasePackageFileMapV1 -SourceRoot $script:repoRoot)
-        $fileMap.Count | Should -Be 356
+        $fileMap.Count | Should -Be 357
         foreach ($path in @($script:expectedGuidePaths) + @($script:expectedScreenshotPaths)) {
             @($fileMap | Where-Object ZipPath -ceq $path).Count | Should -Be 1
             @($fileMap | Where-Object SourcePath -ceq $path).Count | Should -Be 1
@@ -715,7 +715,7 @@ Describe 'Packaged PCSx2x6 runtime projection' {
         $actualZip = Join-Path $TestDrive 'actual source package [private build].zip'
         $buildResult = & (Join-Path $script:repoRoot 'scripts/New-TPMReleasePackage.ps1') -OutputPath $actualZip -SourceRoot $script:fixtureSource
         $buildResult.Valid | Should -BeTrue
-        $buildResult.FileCount | Should -Be 356
+        $buildResult.FileCount | Should -Be 357
         $buildResult.CrosshairPngCount | Should -Be 321
         $stage = Join-Path $TestDrive 'private extracted package [runtime path]'
         New-Item -ItemType Directory -Path $stage -Force | Out-Null
