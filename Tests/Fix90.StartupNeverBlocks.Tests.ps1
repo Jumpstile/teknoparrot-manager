@@ -164,7 +164,14 @@ Describe 'FIX90 the end of a registration run adds no question of its own' {
             if ($node -isnot [System.Management.Automation.Language.CommandAst] -or $node.GetCommandName() -cne 'Write-ControlPropagationResults') { return $false }
             # The menu preview of Propagate Controls (#411) passes a fixed "-DryRun $true" and is a menu screen, not part of the registration run.
             $dry = @($node.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.CommandParameterAst] -and $_.ParameterName -ceq 'DryRun' })
-            return ($dry.Count -eq 1 -and $null -ne $dry[0].Argument -and $dry[0].Argument.Extent.Text -cne '$true')
+            if ($dry.Count -ne 1) { return $false }
+            # A value written with a space ("-DryRun $x") is the next word; a value written with a colon ("-DryRun:$x") is the parameter's own argument.
+            $dryValue = $dry[0].Argument
+            if ($null -eq $dryValue) {
+                $at = [array]::IndexOf(@($node.CommandElements), $dry[0])
+                if ($at -ge 0 -and ($at + 1) -lt @($node.CommandElements).Count -and $node.CommandElements[$at + 1] -isnot [System.Management.Automation.Language.CommandParameterAst]) { $dryValue = $node.CommandElements[$at + 1] }
+            }
+            return ($null -ne $dryValue -and $dryValue.Extent.Text -cne '$true')
         }, $true))
         $calls.Count | Should -Be 2
         foreach ($call in $calls) {
