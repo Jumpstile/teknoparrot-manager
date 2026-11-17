@@ -19591,7 +19591,7 @@ Describe 'TPM-owned layout and legacy migration' {
         Get-Content -LiteralPath (Join-Path $managedReport 'a.ini') -Raw | Should -Match 'new'
         Get-Content -LiteralPath (Join-Path $scriptRoot 'TeknoParrot-Manager.log') -Raw | Should -Match 'legacy log'
         Get-Content -LiteralPath (Join-Path $layout.Logs 'TeknoParrot-Manager.log') -Raw | Should -Match 'managed log'
-        @(Get-ChildItem -LiteralPath $layout.Backups -Directory -Filter 'LegacyMigration_*').Count | Should -Be 0
+        @(Get-ChildItem -LiteralPath $layout.Backups -Directory -Filter 'LegacyMig_*').Count | Should -Be 0
         $report = Get-ChildItem -LiteralPath $layout.Reports -Filter 'TPM-migration-*.md' -File | Select-Object -First 1
         Test-Path -LiteralPath $report.FullName -PathType Leaf | Should -BeTrue
         @($result.TechnicalDetails.Occupied).Count | Should -Be 1
