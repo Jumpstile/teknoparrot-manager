@@ -16039,7 +16039,7 @@ function Get-TpmControllerEvidence {
     $observations = @($found.ToArray() | Sort-Object DeviceClass, Basis)
     $canonical = 'TpmLocalDetection|1|' + ((@($observations | ForEach-Object { '{0}/{1}/{2}/{3}' -f $_.DeviceClass, $_.Confidence, $_.Basis, $_.Count })) -join ';')
     $sha = [System.Security.Cryptography.SHA256]::Create()
-    try { $id = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical))) -replace '-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+    try { $id = (@($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)) | ForEach-Object { $_.ToString('x2') }) -join '') } finally { $sha.Dispose() }
     return [pscustomobject][ordered]@{
         ContractVersion = 'TpmControllerEvidence/v1'; EvidenceId = $id; EvidenceStatus = $status
         ProviderId = 'TpmLocalDetection'; ProviderVersion = '1'; SourceFamily = 'LocalWindowsDeviceClass'; EvidenceClass = 'LocalProbe'
