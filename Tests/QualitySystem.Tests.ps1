@@ -131,8 +131,8 @@ Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
     It "records the current RC8 release gate and owner authorization prerequisite" {
         $checklist = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'RELEASE-SAFETY-CHECKLIST.md') -Raw
 
-        $checklist | Should -Match '(?m)^# TPM RC8 -- Release Gate \(\d{4}-\d{2}-\d{2}\)$'
-        $checklist | Should -Match '(?m)^STATUS: HOLD\. RC8 remains unqualified\.$'
+        $checklist | Should -Match '(?m)^# TPM RC8 -- Release Gate \(\d{4}-\d{2}-\d{2}\)\r?$'
+        $checklist | Should -Match '(?m)^STATUS: HOLD\. RC8 remains unqualified\.\r?$'
         $checklist | Should -Match 'OWNER explicitly authorizes testing after source engineering and screenshot approval'
     }
 }
@@ -226,7 +226,7 @@ Describe "Active release-facing documentation" -Tag 'ReleaseConsistency' {
             $active | Should -Not -Match '(?i)latest(?:(?!RC\d)[\s\S]){0,60}(?:published|download)(?:(?!RC\d)[\s\S]){0,80}v1\.0[- ]RC9|RC9[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC9\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC9'
             $active | Should -Match 'releases/(?:tag|download)/v1\.0-RC8\.2'
             $active | Should -Match 'github\.com/Jumpstile/teknoparrot-manager/releases(?![\w/-])'
-            $active | Should -Not -Match '(?i)(download|use|install)\s+(?:the\s+)?(?:(?:current|latest)\s+)?(?:release\s+)?(?:v1\.0[- ]?)?RC[0-6]\b'
+            $active | Should -Not -Match '(?i)(download|use|install)\s+(?:the\s+)?(?:(?:current|latest)\s+)?(?:release\s+)?(?:v1\.0[- ]?)?RC[0-7]\b'
         }
     }
 
@@ -237,7 +237,7 @@ Describe "Active release-facing documentation" -Tag 'ReleaseConsistency' {
             $lines = [regex]::Split($content, '\r\n|\n')
             $active = ($lines | Select-Object -First $entry.PrefixLines) -join ([string][char]10)
 
-            $active | Should -Not -Match '(?i)(download|use|install)\s+(?:the\s+)?(?:(?:current|latest)\s+)?(?:release\s+)?(?:v1\.0[- ]?)?RC[0-6]\b'
+            $active | Should -Not -Match '(?i)(download|use|install)\s+(?:the\s+)?(?:(?:current|latest)\s+)?(?:release\s+)?(?:v1\.0[- ]?)?RC[0-7]\b'
         }
     }
 
@@ -275,7 +275,7 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
             )
 
             $findings = New-Object 'System.Collections.Generic.List[string]'
-            $staleReleasePattern = '(?i)\b(?:download|use|install)\s+(?:the\s+)?(?:(?:current|latest)\s+)?(?:release\s+)?(?:v1\.0[- ]?)?RC[0-6]\b|\b(?:current|latest)\s+(?:release|release candidate|candidate)\s*(?:is|:)\s*(?:v1\.0[- ]?)?RC[0-6]\b'
+            $staleReleasePattern = '(?i)\b(?:download|use|install)\s+(?:the\s+)?(?:(?:current|latest)\s+)?(?:release\s+)?(?:v1\.0[- ]?)?RC[0-7]\b|\b(?:current|latest)\s+(?:release|release candidate|candidate)\s*(?:is|:)\s*(?:v1\.0[- ]?)?RC[0-7]\b'
 
             foreach ($document in $Documents) {
                 if ($document.Scope -eq 'Historical') {
@@ -368,7 +368,7 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
     It "fails a fixture where active documents identify different current RCs" {
             $contradictory = @(
             $script:ReleaseIdentityDocuments[0]
-            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC6. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC6. Previous published release: v1.0 RC6 (historical).' }
+            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC7. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. Previous published release: v1.0 RC7 (historical).' }
         )
 
         $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $contradictory -Contract $script:ReleaseDocumentContract)
@@ -379,7 +379,7 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
     It "fails a fixture with superseded RC installation guidance" {
         $stale = @(
             [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = $script:ReleaseIdentityGoodText }
-            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = ($script:ReleaseIdentityGoodText + ' Download v1.0-RC6 here.') }
+            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = ($script:ReleaseIdentityGoodText + ' Download v1.0-RC7 here.') }
         )
 
         $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $stale -Contract $script:ReleaseDocumentContract)

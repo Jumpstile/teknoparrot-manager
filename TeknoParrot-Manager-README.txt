@@ -6200,7 +6200,7 @@
 
 
 ===============================================================================
-  v1.0 RC9 (not published yet). The latest published release is v1.0 RC7.
+  v1.0 RC9 (not published yet). The latest published release is v1.0 RC8.2.
   Test one game after every run. AutoSync backs up UserProfiles before
   extraction; preview mode skips the backup.
 ===============================================================================

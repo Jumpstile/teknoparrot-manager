@@ -278,12 +278,14 @@ These tests try the fixes in RC8.2. Do them first if you are short on time.
 2. At the main menu, type 1 and press Enter (AutoSync). Choose to extract those games into the new folder.
 3. You passed if the games are unpacked into the new folder and set up. It failed if many games were skipped with the words "could not confirm the game folder". If that happens, make a support package (menu 16) right away and attach it to your issue.
 4. After AutoSync, open TeknoParrot and start one of those games. You passed that part if it starts from the NEW folder. Tell us if it still points to the old place.
+
 ### Test 34: Support package that explains itself
 
 1. At the main menu, type 16 and press Enter (Create Support Package).
 2. Wait for it to finish. Type D and press Enter to see the details.
 3. You passed if the ZIP file was made. If an item was left out, the details should say "Why:" and give a reason in plain words.
 4. Tell us if the screen says it FAILED even though the ZIP file was made.
+5. Open the ZIP and look inside its text files (use the search in Notepad). Search for your Windows user name. You passed if it does not show up anywhere. Tell us if you find it, but do NOT paste the line into your issue.
 
 ### Test 35: Your controller is found
 
