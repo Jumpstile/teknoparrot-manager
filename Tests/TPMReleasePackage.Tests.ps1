@@ -8,7 +8,7 @@ BeforeAll {
     $script:repoRoot = Split-Path -Parent $PSScriptRoot
     $script:requiredRc8ScreenshotRelativePath = 'images/release/RC8-MainMenu.png'
     $script:packageTestDriveRoot = [IO.Path]::GetFullPath($TestDrive)
-    $script:expectedGuidePaths = @('TeknoParrot-Manager-README.txt','TeknoParrot-Manager-QuickStart.txt','docs/START-HERE.md','docs/TROUBLESHOOTING.md')
+    $script:expectedGuidePaths = @('TeknoParrot-Manager-README.txt','TeknoParrot-Manager-QuickStart.txt','docs/START-HERE.md','docs/TROUBLESHOOTING.md','TeknoParrot-Manager-User-Guide.pdf')
     $script:expectedScreenshotPaths = @(
         $script:requiredRc8ScreenshotRelativePath
         'docs/images/01-installer-window.png'
@@ -22,6 +22,17 @@ BeforeAll {
         'docs/images/09-tpm-welcome.png'
         'docs/images/10-tpm-register-only-menu.png'
         'docs/images/11-tpm-action-required.png'
+        'docs/images/12-tpm-first-run-questions.png'
+        'docs/images/13-tpm-main-menu.png'
+        'docs/images/14-tpm-help.png'
+        'docs/images/15-tpm-health-check.png'
+        'docs/images/16-tpm-support-package.png'
+        'docs/images/17-tpm-required-patches.png'
+        'docs/images/18-tpm-register-only.png'
+        'docs/images/19-tpm-propagate-controls.png'
+        'docs/images/20-tpm-crosshair-picker.png'
+        'docs/images/21-tpm-crosshair-apply.png'
+        'docs/images/22-tpm-reshade-setup.png'
     )
     $script:syntheticPackagePngBytes = @{}
 
@@ -457,11 +468,11 @@ Describe 'Strict user release package contents' {
 }
 
 Describe 'RC8 documentation and screenshot package contract' {
-    It 'maps exactly four linked guides and twelve screenshot paths' {
+    It 'maps exactly five linked guides and twenty-three screenshot paths' {
         $documentationMap = @(Get-TPMReleasePackageDocumentationFileMapV1)
-        $documentationMap.Count | Should -Be 16
-        @($documentationMap | Where-Object AssetType -ceq 'Guide').Count | Should -Be 4
-        @($documentationMap | Where-Object AssetType -ceq 'Screenshot').Count | Should -Be 12
+        $documentationMap.Count | Should -Be 28
+        @($documentationMap | Where-Object AssetType -ceq 'Guide').Count | Should -Be 5
+        @($documentationMap | Where-Object AssetType -ceq 'Screenshot').Count | Should -Be 23
         (@($documentationMap | Where-Object AssetType -ceq 'Guide' | ForEach-Object ZipPath | Sort-Object) -join '|') |
             Should -Be (($script:expectedGuidePaths | Sort-Object) -join '|')
         (@($documentationMap | Where-Object AssetType -ceq 'Screenshot' | ForEach-Object ZipPath | Sort-Object) -join '|') |
@@ -485,7 +496,7 @@ Describe 'RC8 documentation and screenshot package contract' {
             @($fileMap | Where-Object { $_.ZipPath -ceq $path -and $_.SourcePath -ceq $path -and $_.AssetType -ceq $assetType }).Count | Should -Be 1
         }
         @($fileMap | Where-Object { $_.ZipPath -like 'images/*' }).Count | Should -Be 1
-        @($fileMap | Where-Object { $_.ZipPath -like 'docs/images/*' }).Count | Should -Be 11
+        @($fileMap | Where-Object { $_.ZipPath -like 'docs/images/*' }).Count | Should -Be 22
         @($fileMap | Where-Object ZipPath -in @('images/tpm-main-menu.png','images/banner.png','README.md','QUICKSTART.md')).Count | Should -Be 0
         $expectedCrosshairNames = @(0..320 | ForEach-Object { '{0:D3}.png' -f $_ })
         $mappedCrosshairNames = @($fileMap | Where-Object { $_.ZipPath -like 'Crosshairs/*' } | ForEach-Object { [IO.Path]::GetFileName($_.ZipPath) } | Sort-Object)

@@ -2,7 +2,7 @@
 
 > This guide describes v1.0 RC9. RC9 is the current build and is not published yet. The latest published release is v1.0 RC8.2 (https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2), a fix-up release for RC8.1. The previous published release is v1.0 RC8.1. If you use RC8.1 or RC8.2, choose **15) Check for Updates** when RC9 comes out. Earlier published releases are v1.0 RC7 and RC6. RC8 was a tester build and was never published. Final Version 1.0 remains unpublished. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
-Full documentation: [README.md](README.md)
+Full documentation: [User guide](docs/USER-GUIDE.md) (project home page: [README.md](README.md))
 
 ## New here? Start with one game
 
@@ -139,6 +139,11 @@ Expert workflows still detect first, preview supported changes, back up before w
 
 ## Run It
 
+![The TeknoParrot Manager welcome screen](docs/images/09-tpm-welcome.png)
+
+![The first-run questions: your TeknoParrot folder, your games folder and the folder naming choice](docs/images/12-tpm-first-run-questions.png)
+
+
 1. Double-click **`TeknoParrot-Manager.bat`**.
 
    You will see: a text window opens. This is the normal way to start TeknoParrot Manager, and it opens the menu for you.
@@ -235,6 +240,11 @@ Redirected, unattended, and certification runs use structured status events with
 
 ## Mode List
 
+![The TeknoParrot Manager main menu with 17 numbered choices](docs/images/13-tpm-main-menu.png)
+
+![The Help screen that explains each menu number](docs/images/14-tpm-help.png)
+
+
 This is the full menu. Type a number at `Enter 1-17:`.
 
 | # | Mode | What it does |
@@ -260,6 +270,9 @@ This is the full menu. Type a number at `Enter 1-17:`.
 ---
 
 ## Create Support Package
+
+![The Create Support Package screen with three choices](docs/images/16-tpm-support-package.png)
+
 
 If you need help, make a support package. It is one ZIP file with safe logs and reports.
 
@@ -326,6 +339,9 @@ You can mix Browse and Search sessions. Press D when you are ready to confirm.
 
 ## Copy Your Controls
 
+![Propagate Controls: copies controls to your other games of the same type and reports when no game needed a change](docs/images/19-tpm-propagate-controls.png)
+
+
 TeknoParrot Manager can copy controls from one game to other games of the same type. You set up ONE game of each type first.
 
 Setting up controls in TeknoParrotUI is called binding. A bound game has its buttons and axes assigned.
@@ -366,6 +382,11 @@ This is a bounded reference-copy aid. It is not universal controller or gun dete
 ---
 
 ## Crosshair Setup
+
+![The crosshair picker: click a design for Player 1, then one for Player 2](docs/images/20-tpm-crosshair-picker.png)
+
+![Crosshair Setup asks you to confirm your two choices before it changes anything](docs/images/21-tpm-crosshair-apply.png)
+
 
 Mode 4 puts custom crosshair cursor images into all your registered lightgun games.
 
@@ -412,6 +433,9 @@ For Pcsx2x6 games, `cursor_path` stays emulator-owned under the current contract
 ---
 
 ## ReShade Visual Enhancements
+
+![ReShade setup: choose Set up, Remove, or Undo](docs/images/22-tpm-reshade-setup.png)
+
 
 ReShade adds picture effects on top of a game: a sharper image, CRT-style scanlines, borders. It does not change game data.
 
@@ -726,6 +750,9 @@ TeknoParrot Manager chooses the stable x64 or x86 package from the game's execut
 Manual deletion of BepInEx files is not the normal workflow. TeknoParrot Manager only removes the fixed files it can verify as part of its own approved transaction.
 
 ## Required game patches
+
+![The Required game patches menu: install for all, install for one game, undo, or go back](docs/images/17-tpm-required-patches.png)
+
 
 Menu 12 fixes a missing file in certain game builds.
 
@@ -1299,6 +1326,9 @@ Keep any current settings you still need somewhere outside the folders being res
 
 ## Library Health Check
 
+![The Library Health Check result: a read-only report that changed nothing](docs/images/15-tpm-health-check.png)
+
+
 Mode 13 begins with a **read-only** assessment. It looks at your setup and does not change anything.
 
 It explicitly says that it checked your setup and did not change anything. Confirmed follow-up actions may write changes.
@@ -1534,4 +1564,4 @@ The table below lists each file, where it lives, and what it is for:
 
 ---
 
-> Full documentation: [README.md](README.md)
+> Full documentation: [User guide](docs/USER-GUIDE.md) (project home page: [README.md](README.md))

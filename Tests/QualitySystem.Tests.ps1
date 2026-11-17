@@ -469,7 +469,7 @@ Register manually with the best-guess profile.
             $documents += [pscustomobject]@{ Path = $entry.RelativePath; Scope = 'ActiveIdentity'; Text = $content }
         }
 
-        foreach ($relativePath in @('README.md', 'QUICKSTART.md', 'TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt')) {
+        foreach ($relativePath in @('docs\USER-GUIDE.md', 'QUICKSTART.md', 'TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt')) {
             $documents += [pscustomobject]@{
                 Path = $relativePath
                 Scope = 'ActiveBepInEx'

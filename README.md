@@ -10,487 +10,136 @@ Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-ma
 
 > **This guide describes v1.0 RC9.** RC9 is the current build and is not published yet. The latest published release is v1.0 RC8.2, a fix-up release for RC8.1. The previous published release is v1.0 RC8.1, the first version that can update itself in place (see Check for Updates). If you use RC8.1 or RC8.2, choose Check for Updates (menu 15) when RC9 comes out. Earlier published releases are v1.0 RC7 and RC6. RC8 was a tester build and was never published. The changes since RC8.2 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 remains unpublished. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
 
+**Jump to:** [Quick Start](QUICKSTART.md) | [Full user guide](docs/USER-GUIDE.md) | [Changelog](TeknoParrot-Manager-CHANGELOG.txt) | [Troubleshooting](docs/TROUBLESHOOTING.md) | [Start Here (first game in 10 minutes)](docs/START-HERE.md)
 
-## Start here: your first game in about 10 minutes
+## Download
 
-TeknoParrot Manager adds games you own to TeknoParrot and helps copy controls and apply supported fixes. It is a separate tool, not TeknoParrot, and does not install or set up TeknoParrot itself.
+Release page of the latest published release: [v1.0 RC8.1](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1).
 
-Allow about 10 minutes once your downloads are ready.
+1. Download the ZIP file from the release page.
+2. Extract the whole package to a short folder outside Program Files, for example `C:\TPM`. Keep all the folders.
+3. Double-click **`TeknoParrot-Manager.bat`**.
 
-Installing TeknoParrot, updates, large games, and special controllers take longer.
+TeknoParrot Manager does not install TeknoParrot. Install TeknoParrot first. [Start Here](docs/START-HERE.md) shows how.
 
 Release page of the latest published release: [v1.0 RC8.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2).
 
-You need:
+## What it does
 
-- A Windows PC with PowerShell 5.1.
-- Internet access.
-- Enough disk space.
-- Your own legally obtained games.
+These are the main things TeknoParrot Manager can do:
 
-TeknoParrot Manager never provides, downloads, or links to games, ROMs, or patch files.
+**Set up your games**
 
-[Full step-by-step Start Here guide](docs/START-HERE.md) | [Ten beginner problems](docs/TROUBLESHOOTING.md) | [Plain-language glossary](docs/START-HERE.md#glossary)
+- **AutoSync (menu 1).** Unpacks your game ZIPs and adds the games to TeknoParrot in one run. It works from a network drive or a local folder and leaves unchanged games alone. It backs up your TeknoParrot settings (UserProfiles) first.
+- **Register only (menu 2).** Adds games you already extracted. It finds each game, picks the right game path, and never overwrites a game that is already added.
+- **Matches hard-to-name games.** It uses folder names, game codes and an optional community game list to work out which game is which.
+- **LaunchBox export.** Writes your games straight into the LaunchBox library.
 
-If the menu numbers on your screen differ from this guide, use the names instead.
+**Controls, picture and fixes**
 
-Each step below says what you will see. Do the steps in order.
+- **Propagate Controls (menu 3).** Set up one game of each control type. TeknoParrot Manager copies those controls to similar games that have none. It never invents a binding.
+- **Crosshair setup (menu 4).** Gives lightgun games custom player 1 and player 2 crosshairs.
+- **ReShade setup (menu 5).** Adds picture effects (shaders) to the games you pick.
+- **dgVoodoo2 setup (menu 6).** Fixes older games that crash or show a black screen on old graphics settings.
+- **GPU fix setup (menu 7).** Detects AMD, NVIDIA or Intel and applies the matching fix.
+- **Force feedback setup (menu 8).** Sets up the native FFB Blaster (membership) or a free third-party plugin for wheel games.
+- **BepInEx setup (menu 9).** Installs or updates BepInEx for the games that need it, after you approve.
+- **Region setup (menu 10).** Pick the country your games start in, choose which games, confirm, and switch back to automatic any time.
+- **Postgres setup (menu 11).** Sets up the local PostgreSQL database that some Incredible Technologies games need.
+- **Required game patches (menu 12).** Finds a required fix, checks it against your own ZIP, backs up first, installs it, verifies it, and can undo it.
 
-**Part 1 -- Install TeknoParrot by hand**
+**Check, protect and update**
 
-1. Open the [official TeknoParrot download page](https://teknoparrot.com/en/Home/Download).
+- **Library health check (menu 13).** Reports what is registered, broken or missing, without changing anything.
+- **Restore backup (menu 14).** Puts profiles, LaunchBox library files or Postgres databases back from an earlier copy.
+- **Check for Updates (menu 15).** Downloads a new release, checks it, installs it, and puts everything back if something goes wrong. Available from RC8.1.
+- **Create Support Package (menu 16).** Gathers safe logs and reports into one ZIP to attach to a bug report.
 
-   You will see: the recommended stable installer and a separate experimental UI offer.
+**For beginners**
 
-2. Click **Download TeknoParrot Installer**.
+- **Plain-language screens.** Short messages and one clear next step. Press **D** on a screen for the technical details.
+- **Preview mode.** Shows the planned changes without making them.
 
-   You will see: the installer ZIP in your download folder.
+The [full user guide](docs/USER-GUIDE.md) describes every feature step by step.
 
-3. In File Explorer, use **Extract All** to unpack that ZIP into a short folder you can write to.
+## Quick start
 
-   Extract first. Do not run the installer from inside the ZIP.
+**Before you start:**
 
-   You will see: `TeknoParrotInstaller.exe`, outside the ZIP.
+1. Install TeknoParrot into its own folder, such as `C:\TeknoParrot`. Never use the installer's default `C:\Windows\system32`.
+2. Open `TeknoParrotUi.exe` yourself, one time. Click OK, OK, and Accept and Continue on the pop-up windows. You may use Skip Setup.
+3. Keep your games as ZIP files (for AutoSync) or already extracted into folders.
 
-4. Run **TeknoParrotInstaller.exe**.
+**Your first run:**
 
-   You will see: a folder box that starts as `C:\Windows\system32`.
+1. Double-click **`TeknoParrot-Manager.bat`** and answer each first-run question. If you are not sure, pick the first choice.
+2. At the main menu, type **1** (AutoSync) and press Enter. It unpacks your games and adds them to TeknoParrot.
+3. Open TeknoParrot and start one game. Test one game after each run.
+4. Stuck? Type **16** to make a support package, or see [Troubleshooting](docs/TROUBLESHOOTING.md).
 
-   **Warning:** never install there.
+The normal backup protects UserProfiles (TeknoParrot's saved game settings) only. It is not a whole-game backup.
 
-5. Click **Browse...**, then **New folder**. Make a new empty folder with a short path and no spaces, such as `C:\TeknoParrot` (files go directly into it).
+**The main menu** (type a number and press Enter):
 
-   You will see: your new folder in the path box.
+| # | Mode | What it does |
+| --- | --- | --- |
+| 1 | **AutoSync** | Extract your game ZIPs, then register the games |
+| 2 | **Register only** | Register games you already extracted |
+| 3 | **Propagate Controls** | Copy known controls from a game you set up to similar games that have none |
+| 4 | **Crosshair setup** | Pick and deploy custom crosshairs to lightgun games |
+| 5 | **ReShade setup** | Add visual post-processing to game folders |
+| 6 | **dgVoodoo2 setup** | Fix some old DX8, DirectDraw, and Glide game crashes or black screens |
+| 7 | **GPU fix setup** | Apply the AMD / NVIDIA / Intel fix to registered games |
+| 8 | **Force feedback (FFB) setup** | Native FFB Blaster (membership) or a free third-party plugin |
+| 9 | **BepInEx setup** | Install or update after you approve, using stable x64/x86 releases |
+| 10 | **Region setup** | Pick the country your games start in, choose which games, confirm |
+| 11 | **Postgres setup** | Set up the local PostgreSQL database some Incredible Technologies games need |
+| 12 | **Required game patches** | Find, check, back up, install, verify, or undo a required fix from your local ZIP |
+| 13 | **Library health check** | Report what is registered, broken, or missing, without changing anything |
+| 14 | **Restore backup** | Put profiles, LaunchBox library files, or Postgres databases back from an earlier copy |
+| 15 | **Check for Updates** | Check GitHub for a newer release and install it (RC8.1 and later) |
+| 16 | **Create Support Package** | Gather safe logs and reports into one ZIP to send when asking for help |
+| 17 | **Exit** | Quit |
 
-6. Click the **TeknoParrotUI (v...) [REQUIRED]** row so it turns blue.
+The [Quick Start guide](QUICKSTART.md) has more detail on each step, and [Start Here](docs/START-HERE.md) covers the very first setup.
 
-   You will see: the row turns blue.
+## Built to be safe
 
-7. Click **Download Selected**. Wait for `TeknoParrotUI: 100%`.
+![The Library Health Check result: a read-only report that changed nothing](docs/images/15-tpm-health-check.png)
 
-   **Full Install (Download All)** is optional. It downloads all 45 cores (size not measured).
 
-   You will see: `TeknoParrotUi.exe` and `GameProfiles` directly in your folder.
-
-8. Install **DirectX End-User Runtimes (June 2010)** from the official page's Recommended Software links.
-
-   Runtimes are helper programs that many games need.
-
-9. Install **Visual C++ Redistributable Runtimes All-in-One** from the same links.
-
-   You will see: each runtime installer's result. (No runtime request appeared during the 2026-10-31 check, but the official page recommends both.)
-
-10. Open **TeknoParrotUi.exe** yourself.
-
-    You will see: the **Information** window.
-
-11. Click **OK** on **Information**, then **OK** on **Privacy Notice**.
-
-    Then click **Accept and Continue** on **Updated Policies**. (**Quit** closes the program instead.)
-
-    You will see: a 6-step setup wizard.
-
-12. Click **Skip Setup** (or skip wizard steps 2 to 5) if you will add games with TeknoParrot Manager.
-
-    Next: go to the last wizard step.
-
-13. Click **Finish** on the last step.
-
-    You will see: TeknoParrotUI's main window with an empty game list.
-
-    Next: close it before running TeknoParrot Manager. [How TeknoParrot Manager relates to the wizard](docs/START-HERE.md#3-open-teknoparrotui-once).
-
-**Part 2 -- Get and start TeknoParrot Manager**
-
-14. Download the complete latest published TeknoParrot Manager release ZIP from [TeknoParrot Manager releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
-
-    Or use the complete package supplied for testing.
-
-    You will see: one package ZIP, not just a `.ps1` file.
-
-15. Extract the whole package to a short writable folder such as `C:\TPM`, outside Program Files.
-
-    You will see: `TeknoParrot-Manager.bat`, the script, and all supplied folders together.
-
-16. Double-click **TeknoParrot-Manager.bat**.
-
-    On a first run you will see: `Welcome to TeknoParrot Manager` and `Press Enter to continue`.
-
-    If you saved settings before, you will see: `TeknoParrot Manager found your saved settings.` and the question `Use these settings? (Y/N, D = show them)`.
-
-17. First run: press **Enter** at `Press Enter to continue`.
-
-    You will see: the first-time questions.
-
-    If you saw the saved-settings question, type **Y** to keep them.
-
-    You will see: `Using your saved settings.`
-
-    Next: skip steps 18 to 20. The folder questions are not asked again.
-
-    Type **N** to use the first-time questions instead. Type **D** to show the saved settings and be asked again.
-
-**Part 3 -- Answer the first-time questions**
-
-18. Find the TeknoParrot folder question.
-
-    You will see: `Auto-detected TeknoParrot at: ...` followed by `Use this path? (Y/N)`.
-
-    Other things you might see: `Found TeknoParrot in multiple locations:` (pick one from the list), or `Type the path of your TeknoParrot folder, the one with TeknoParrotUi.exe in it, or Q to quit (or type B to browse)`.
-
-19. Type **Y** only if the detected path is correct. Otherwise type **N**, then type **B** to browse, or type the folder yourself. Type **Q** to quit. Nothing is changed if you quit.
-
-    Select the TeknoParrot folder that contains `TeknoParrotUi.exe`.
-
-    You will see: the games-folder question, unless you kept your saved settings.
-
-20. At the `Games folder (also called the staging folder)` question, choose the separate [staging folder](docs/START-HERE.md#staging-folder).
-
-    Register only: use the parent folder of your extracted games. AutoSync: use the folder the ZIPs will be extracted into.
-
-    You will see: the accepted folder, or a reason to choose another.
-
-    It must not overlap either program or any ZIP source folder.
-
-21. Press **Enter** at **Use RetroBat folder naming? (Y/N, default N)** for ordinary names.
-
-    Choose **Y** only if you need RetroBat/Batocera's `.teknoparrot` names.
-
-    You will see: the optional [DAT](docs/START-HERE.md#dat) question.
-
-22. At the DAT question, choose **D** (default) for the optional community matching index. Choose **B** to import one you have. Choose **N** to skip.
-
-    The index contains names, not games.
-
-    You will see: the result of your choice, for example `Saved: ...` after a download.
-
-**Part 4 -- Register your first game**
-
-23. Choose **2) Register only** for extracted games, or **1) AutoSync** for your own ZIPs.
-
-    You will see: **P** preview (default), **R** run now, **B** back.
-
-    [The guide walks through source folders and selecting one ZIP](docs/START-HERE.md#6-register-your-first-game).
-
-24. Press **Enter** for **P** to preview first.
-
-    You will see: the proposed work, with no changes to games or setup files. Scans and logging still occur.
-
-25. Choose **Y** at the end-of-preview apply question only if the proposed game and paths are correct.
-
-    You will see: a fresh scan and the real results, after any repeated game selection.
-
-    If something went wrong, you will see an error or an unresolved item rather than success.
-
-    After new games are registered, you are asked once which country they should start in. Type **0** to leave them as they are. You can change it later with **10) Region setup**.
-
-26. After a successful [registration](docs/START-HERE.md#registration), open **TeknoParrotUi.exe** yourself.
-
-    You will see: your game in its list.
-
-    TeknoParrot Manager never opens the UI. It also does not check whether the game setup files ([profiles](docs/START-HERE.md#profile)) are current.
-
-27. Set and save that game's controls in TeknoParrotUI before using its launch action.
-
-    You will see: saved button/axis bindings.
-
-    Next: [test one game before copying controls](docs/START-HERE.md#7-make-one-game-work-well-then-copy-what-is-safe).
-
-Next: [launch and test the game, then add only the fixes you need](docs/START-HERE.md#7-make-one-game-work-well-then-copy-what-is-safe).
-
-GPU fixes, crosshairs, required patches, dgVoodoo2, ReShade, and FFB are explained there in priority order.
-
-[LaunchBox](docs/START-HERE.md#launchbox) is optional. Choose **B** to skip it, or [preview before approving its library changes](docs/START-HERE.md#9-launchbox-is-optional).
-
-**What the backup covers**
-
-TeknoParrot Manager's normal [backup](docs/START-HERE.md#backup) saves a copy of TeknoParrot's saved game settings folder ([UserProfiles](docs/START-HERE.md#userprofiles)) only.
-
-It does not cover game folders. It also does not cover game-side NVRAM, test-menu settings, or calibration files outside UserProfiles ([issue 378](https://github.com/Jumpstile/teknoparrot-manager/issues/378)).
-
-Back up that game-side state yourself.
-
-Optional library, database, and patch jobs make their own scoped backups. These are not whole-game protection.
-
-**Where things are saved**
-
-- Saved game-settings copies: `<TeknoParrotFolder>\UserProfiles\FullBackup\`
-- Normal logs: `<TeknoParrotFolder>\TeknoParrotManager\Logs\`
-- Reports: `<TeknoParrotFolder>\TeknoParrotManager\Reports\`
-
-[Recovery instructions](docs/TROUBLESHOOTING.md#10-restore-a-backup).
-
-Stuck? Use [Troubleshooting](docs/TROUBLESHOOTING.md) before changing more files.
-
-### More detail: Start here
-
-Official install sources were checked on 2026-10-31:
-
-- [current download page](https://teknoparrot.com/en/Home/Download)
-- [legacy guide](https://teknoparrot.com/wiki/getstarted.html) (it describes an older install flow)
-
-The installer and first-run steps above were checked on 2026-10-31 with `TeknoParrotInstaller_2.0.0.11.zip` and TeknoParrotUI 1.0.0.2276. Later versions may differ.
-
-The current page does not specify a .NET version or minimum Windows version.
-
-[Install details and antivirus precautions](docs/START-HERE.md#2-install-teknoparrot-by-hand-first).
-
----
-
-
-## Table of Contents
-
-- [Start here](#start-here-your-first-game-in-about-10-minutes)
-- [Beginner troubleshooting](docs/TROUBLESHOOTING.md)
-- [Features](#features)
-- [Glossary](#glossary)
-- [How It Works](#how-it-works)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Running the Script](#running-the-script)
-- [Progress bars](#progress-bars)
-- [Modes](#modes)
-- [Create Support Package](#create-support-package)
-- [Game Selection (AutoSync)](#game-selection-autosync)
-- [The Staging Folder](#the-staging-folder)
-- [Registration](#registration)
-- [How Fuzzy Matching Works](#how-fuzzy-matching-works)
-- [Dat File Integration](#dat-file-integration)
-- [Control Propagation](#control-propagation)
-- [Propagate Controls (standalone menu option)](#propagate-controls-standalone-menu-option)
-- [Device Survey](#device-survey)
-- [Crosshair Setup](#crosshair-setup)
-- [ReShade Visual Enhancements](#reshade-visual-enhancements)
-- [dgVoodoo2 Legacy Compatibility](#dgvoodoo2-legacy-compatibility)
-- [GPU Compatibility Fixes](#gpu-compatibility-fixes)
-- [Force Feedback (FFB) Setup](#force-feedback-ffb-setup)
-- [BepInEx update and setup](#bepinex-update-and-setup)
-- [Required game patches](#required-game-patches)
-- [Region Setup](#region-setup)
-- [Postgres Setup](#postgres-setup)
-- [Check for Updates](#check-for-updates)
-- [LaunchBox Integration](#launchbox-integration)
-- [Optional CPS3 first-boot files](#optional-cps3-first-boot-files)
-- [Post-1.0 optional plugin scope](#post-10-optional-plugin-scope)
-- [RetroBat / Batocera](#retrobat--batocera)
-- [Thumbnail Download](#thumbnail-download)
-- [Controls Status File](#controls-status-file)
-- [Per-Game Overrides](#per-game-overrides)
-- [Action Required Summary](#action-required-summary)
-- [Unattended / Scheduled Mode](#unattended--scheduled-mode)
-- [Preview / Dry-Run Mode](#preview--dry-run-mode)
-- [Game Repair](#game-repair)
-- [Safety, Backup and Log](#safety-backup-and-log)
-- [Registration Evidence Ledger](#registration-evidence-ledger)
-- [Resetting](#resetting)
-- [Uninstalling / Removing the Manager](#uninstalling--removing-the-manager)
-- [Troubleshooting](#troubleshooting)
-- [What It Does Not Do](#what-it-does-not-do)
-- [Files Reference](#files-reference)
-- [Support / Contributing](#support--contributing)
-- [License](#license)
-
----
-
-## Features
-
-This is a short list of what TeknoParrot Manager can do. Technical details are in the "More detail" part at the end of this section.
-
-A "profile" is a small setup file for one game. TeknoParrot ships one for every game it supports.
-
-- **Auto-registration** -- finds your extracted games and adds them to TeknoParrot with the right game path. It does not overwrite a game that is already added. The one exception is a duplicate that you choose to switch yourself: you are asked first, and a backup is made first.
-
-- **Fuzzy name matching** -- works out the right game when several games share one program file. It compares folder names with game codes and adds the best match when it is sure enough.
-
-- **Dat file integration** -- uses an optional community list of game names to recognize hard-to-match games, including games with no known program file and wrongly named folders.
-
-- **Profile code matching** -- a third matching pass. It compares folder names directly with TeknoParrot's game codes.
-
-- **GitHub profile resolution** -- tries to look up TeknoParrot's full game list online when it starts. If the online list is not available (it is not today), it uses the game setup files in your own TeknoParrot `GameProfiles` folder instead. This helps when a dat code does not exactly match a local game setup file.
-
-- **Control propagation** -- set up the controls for one game of each control type. TeknoParrot Manager can then copy those controls to similar games that have none. It is a limited helper, not a universal device or shooter mapping.
-
-- **AutoSync extraction** -- copies and unpacks game ZIPs from a NAS (a network drive) or a local folder. It leaves a game folder alone when its ZIP did not change. When a changed ZIP replaces a folder, the old folder's extra files (saves, settings, ReShade files) are saved first. If they cannot be saved, the game is skipped.
-
-- **Game repair** -- finds broken or empty game paths and points them to the right place again.
-
-- **Crosshair setup** -- gives lightgun games custom P1/P2 cursor images. A built-in preview of the included designs works with the keyboard.
-
-- **ReShade** -- adds picture effects to game folders. From the ReShade menu you can also turn off TeknoParrot's own (native) CRT effect. You can change or undo your ReShade look for all games or for one game.
-
-- **dgVoodoo2** -- fixes older games that crash on DirectX 8, DirectDraw, or Glide.
-
-- **GPU fixes** -- detects your graphics card (AMD / NVIDIA / Intel). It applies the matching fix to every registered game that has one.
-
-- **Force feedback (FFB)** -- two options that cover different games: native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed). If a game is covered by both, you're asked once which to use for all such games.
-
-- **BepInEx setup** -- installs or updates BepInEx for the games you choose, after you approve. It makes a private, checked backup first. The backup is deleted after the update is verified, and kept if something goes wrong. It never removes an existing installation.
-
-- **Region setup** -- lets you pick the country your games start in (like USA or Europe). It shows the games that offer that country, lets you choose all or some of them, asks you to confirm, saves a backup, and then changes them. It can also put games back to Auto. After registration you are also asked once about new games.
-
-- **Required game patches** -- installs patches from your local ZIPs for known games. Success of a patch does not prove the game is ready.
-
-- **Postgres setup** -- sets up the local PostgreSQL 8.3 database that some Incredible Technologies games need. It detects which registered games need it. It does not reinstall Postgres, and it does not recreate a game's database that already exists, unless you choose a restore (mode 14) or the `[I]` rebuild and then type `YES`. The one other case is a database that TeknoParrot Manager's own note says an earlier setup was still building when it stopped: that unfinished copy is removed and built again. The result screen is short; press D for details. Every game database is tested with the game's own settings before setup says it is ready, so you do not need any extra step in TeknoParrot or on the first start. A game with no starting database file (`pg_backup`) is left out and named. The other games are still set up.
-
-- **Automatic compatibility warnings** -- every run checks for known problems and lists the details in ACTION REQUIRED.
-
-- **Game-specific setup notes** -- every run checks the community compatibility database (eggmansworld.github.io/TeknoParrot) for registered games with special setup notes. The notes go to the separate `TeknoParrot-Manager-game-notes.txt` report. Raw source notes are not copied into ACTION REQUIRED.
-
-- **LaunchBox direct integration** -- writes games straight into LaunchBox's own library.
-
-- **Unattended mode** -- `-Unattended` flag for scheduled runs of the read-only Library Health Check (not AutoSync).
-
-- **Preview / dry-run mode** -- shows the proposed AutoSync/Register changes without applying game/profile file changes. Choosing Apply reruns the operation and rescans before making changes.
-
-- **Download audit logging** -- the log records where every download came from, the file name, and how the transfer went.
-
-- **Safe by design** -- backups before destructive changes, free-space check, full log, one-click restore. Restore backup lists your saved copies newest first.
-
-### More detail: Features
-
-Auto-registration details:
-
-- It scans `.exe`, `.elf`, `.iso`, `.xbe` (Sega Chihiro/cxbxr games such as Virtua Cop 3 and OutRun 2), `.dll` (Konami PC arcade games such as DanceDanceRevolution 2013 and Steel Chronicle), and more.
-
-Matching details:
-
-- Fuzzy name matching handles shared-executable platforms (NESiCAxLive, etc.). It compares folder names to profile codes and auto-registers the best match above a confidence threshold.
-
-- Dat file integration downloads or reads the Eggman/RomVault dat ZIP. It resolves shared executables, registers games with no known exe (pcsx2x6, ELF-based Lindbergh titles), and handles misnamed folders.
-
-- Profile code matching Dice-matches folder names directly against TeknoParrot profile code names. It resolves games whose profile has an empty `ExecutableName` (BladeStrangers, LuigisMansion, MaiMaiGreen, PokkenTournament, and others) without needing a dat entry.
-
-- GitHub profile resolution tries to fetch the full GameProfile list from the TeknoParrot repo at launch. When that list is not available, it uses your local `GameProfiles` folder instead. It uses the list to resolve dat codes that don't exactly match a local template.
-
-Control propagation details:
-
-- It copies known bindings to compatible unbound games in the same detected control family. This is a bounded reference-copy aid, not universal device or shooter mapping.
-
-ReShade, BepInEx and download details:
-
-- ReShade works with 64-bit games. 32-bit games are skipped.
-
-- The official installer downloaded by TeknoParrot Manager must pass a pinned Authenticode trust check before extraction. Checks on manually supplied DLLs are advisory.
-
-- BepInEx setup uses stable x64/x86 packages. It makes a private verified backup and a journaled rollback.
-
-Required game patches details:
-
-- It installs 120 evidence-pinned recipes across 71 exact ProfileId/build/executable identities (54 game profiles) from local ZIPs.
-
-- One hundred eight operations create only absent files. Twelve require an exact known before-state.
-
-- Hardware alternatives require unambiguous captured evidence.
-
-- Unknown target bytes are refused.
-
-Postgres setup details:
-
-- The games it covers are Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, and Orange County Choppers Pinball.
-
-- Every game database is tested at the end of setup with the game's own saved settings. A game with no starting database file (`pg_backup`) cannot be made ready: it is left out, named on the result screen, and every other game is still set up.
-
-Automatic compatibility warnings details:
-
-- Install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6).
-
-- Pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN).
-
-- Known GPU-vendor incompatibilities (AMD/Intel).
-
-Game-specific setup notes details:
-
-- The notes cover workarounds, known quirks, and the expected executable name.
-
-Preview / dry-run details:
-
-- The preview covers extract, register, repair, and propagate.
-
-- TeknoParrot Manager still records run activity in its log.
-
-Download audit logging details:
-
-- Every shared-pipeline download records its authoritative source URL, filename, version when known, computed SHA-256, and transfer metrics (method, size, elapsed time, average speed).
-
-- ReShade additionally logs the installer signer/subject, Authenticode status, signer thumbprint, and the status/thumbprint/trust result. Its SHA-256 is an audit hash, not a published-digest comparison.
-
-- BepInEx records its GitHub release source, filename/version, and computed SHA-256. When GitHub supplies an asset digest, the downloader validates it before extraction and logs/fails closed on a mismatch.
-
-- dgVoodoo2 uses the same digest validation when available.
-
-- FFBArcadePlugin, Eggman/RomVault dat, the PostgreSQL guide bundle, the TeknoParrot Manager update package, and TeknoParrotUI thumbnail downloads receive source/hash/transfer audit entries.
-
-- Unsigned or digest-less sources are not described as cryptographically authenticated.
-
----
-
-## Glossary
-
-Terms used throughout this README, in the order you're likely to need them.
-
-Short version: a "profile" is a small setup file for one game. There are two kinds, the GameProfile and the UserProfile.
-
-| Term                             | Meaning                                                                                                                                                                                                                                                             |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **GameProfile**                  | The setup file TeknoParrot ships for one game, for example `StreetFighterIII3rdStrike.xml`. It lives in TeknoParrot's `GameProfiles\` folder. It lists the buttons and settings that game has. It does not yet point at your copy of the game. |
-| **UserProfile**                  | Your own copy of a GameProfile. It is made when a game is registered. It lives in `UserProfiles\`, one file per registered game. It holds your actual `GamePath`, your control bindings, and your per-game settings. |
-| **Profile Code**                 | The file name (without `.xml`) that a GameProfile and its UserProfile share, for example `StreetFighterIII3rdStrike`. The script and its logs use it to name one specific game. |
-| **GamePath**                     | The field inside a UserProfile that points to the game's program file (its executable, or exe) on disk. Registration is mostly finding the right exe and writing it here. `GamePath2` is the same idea for games that need a second exe (see `HasTwoExecutables`). |
-| **Registration**                 | Matching an extracted game folder to the correct GameProfile. Then creating or updating its UserProfile with the right GamePath. See [Registration](#registration). |
-| **AutoSync**                     | This script's combined extract-and-register mode (mode 1). It pulls ZIPs from your NAS (network drive) or local source into a staging folder. Then it registers what it extracted. See [Game Selection (AutoSync)](#game-selection-autosync). |
-| **Staging folder**               | The local folder AutoSync extracts ZIPs into before registration. See [The Staging Folder](#the-staging-folder). |
-| **Fuzzy matching**               | How this script works out which GameProfile an extracted folder belongs to when the exe name alone is unclear. It compares the folder name with each candidate profile's code. See [How Fuzzy Matching Works](#how-fuzzy-matching-works). |
-| **Dat file**                     | An optional community-made list (Eggmansworld TeknoParrot collection). It maps exact ZIP names to the right profile code. It is used instead of fuzzy matching for unclear games when available, because it is exact rather than a best guess. |
-| **Control propagation**          | Set up the controls for ONE game per control type in TeknoParrot's own UI. TeknoParrot Manager can then copy known bindings to compatible unbound games in the same detected family. This is not universal device or shooter mapping. See [Control Propagation](#control-propagation). |
-| **Archetype / reference game**   | A game where you have already bound enough buttons for it to be the source for copying controls to its control family. Its button bindings are kept. An explicit canonical reference can correct its InputAPI without rebinding. |
-| **Family**                       | Which kind of controls a game uses: button / driving / lightgun / trackball / analog. It is found automatically per game. You can override it in `TeknoParrot-Manager.overrides.json`. |
-| **ACTION REQUIRED**              | The end-of-run list of everything that still needs your attention in TeknoParrotUI. Examples: unclear registration choices, paths to fix, missing bindings. See [Action Required Summary](#action-required-summary). |
-| **Dry-run / preview mode**       | Shows proposed AutoSync or Register changes without applying game/profile changes. Scanning, configuration handling, and logging still occur. |
-| **Overrides (`TeknoParrot-Manager.overrides.json`)** | An optional file next to this script. It overrides automatic choices per game: skip syncing one, pin a game to a specific archetype, override its detected family, and a few other exceptions. See [Per-Game Overrides](#per-game-overrides). |
-| **HasTwoExecutables**            | A GameProfile property (for example Initial D: Arcade Stage games). It means the game needs a second companion executable launched alongside the main one. It is handled automatically via `GamePath2`. |
-
----
-
-## How It Works
-
-TeknoParrot keeps two folders of game setup files in its main folder (its root):
-
-| Folder         | Purpose                                                                                                                                           |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GameProfiles` | Ready-made setup files that ship with TeknoParrot, one per supported game. Each names the program file it expects. Each also carries that game's settings and controls. |
-| `UserProfiles` | Your games. A game appears and launches once its setup file is copied here with the path to your program file filled in. |
-
-This script automates the copy-and-fill step.
-
-1. It scans your games.
-2. It matches each program file to the right setup file.
-3. It copies that setup file to `UserProfiles` and sets the path.
-
-TeknoParrot picks the games up the next time it starts.
-
-**Profile updates:** TeknoParrotUI keeps the `GameProfiles` folder current. TeknoParrot Manager downloads no profiles. It does not open TeknoParrotUI for you.
-
-Games it cannot match are listed in the ACTION REQUIRED report.
-
----
+- Backups before anything is changed, and a one-step restore.
+- A preview mode that shows the planned changes without making them.
+- A free-space check and a full log of every run.
+- Downloads are checked before they are used.
+- A **Create Support Package** menu item that makes a safe ZIP for bug reports.
 
 ## Requirements
 
-- A Windows PC with PowerShell 5.1 available for TeknoParrot Manager; follow the current official requirements for TeknoParrot
-- PowerShell 5.1 (built into Windows -- no install needed)
-- TeknoParrot installed with `TeknoParrotUi.exe`
-- Your games as ZIP files (for AutoSync) or already extracted into subfolders
+- A Windows PC with PowerShell 5.1 (built into Windows, no install needed).
+- TeknoParrot installed with `TeknoParrotUi.exe`.
+- Your own legally obtained games, as ZIP files (for AutoSync) or already extracted.
 
----
+## Documentation
 
-## Installation
+| Read this | When you want to |
+|---|---|
+| [Start Here](docs/START-HERE.md) | Add your first game in about 10 minutes |
+| [Quick Start](QUICKSTART.md) | See the main menu and the usual steps on one page |
+| [Full user guide](docs/USER-GUIDE.md) | Look up any feature, menu option or setting |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Fix the ten most common beginner problems |
+| [Changelog](TeknoParrot-Manager-CHANGELOG.txt) | See what changed in each release |
+| [Check for Updates](docs/AUTO_UPDATE.md) | Learn how in-place updating works |
+| [Compatibility checklist](docs/Compatibility.md) | Use the short checklist for tester notes |
+| [Advanced users](docs/ADVANCED-USERS.md) | Use TeknoParrot Manager as a repeatable tool for cabinets and frontends |
+| [Roadmap](ROADMAP.md) | See what is planned |
+| [Wiki](https://github.com/Jumpstile/teknoparrot-manager/wiki) | Read the short guides for each feature |
 
-1. Download the current official release asset from
-   [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
+## Getting help
 
-   You will see: a ZIP file in your download folder.
+Found a problem? Choose **Create Support Package** in TeknoParrot Manager and attach the ZIP it makes to a new issue on the [issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues). It collects safe diagnostics automatically. See [Contributing](CONTRIBUTING.md) and [Security](SECURITY.md).
 
-2. Extract the complete package to a short writable folder outside Program Files (e.g. `C:\TPM`). Keep all supplied subfolders.
+## What it does not do
 
    You will see: `TeknoParrot-Manager.bat` with the other supplied folders beside it.
 
