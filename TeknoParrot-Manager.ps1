@@ -32220,7 +32220,16 @@ function Get-BepInExRecoveryInventory {
             Write-TpmCompactExtractionProgress -Phase 'Checking' -Label $ProgressLabel -Current $scanCurrent -Total 0 -StartedAt $scanStarted
             $path = [System.IO.Path]::GetFullPath((Join-Path $Root $relative))
             $item = $null
-            try { $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop }
+            # A missing path inside a bracketed game folder ("[TP]") is not reported as missing by Get-Item in
+            # Windows PowerShell 5.1, so ask .NET first (GetAttributes still sees a dangling link).
+            $pathMissing = $false
+            try { [void][System.IO.File]::GetAttributes($path) }
+            catch [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] { $pathMissing = $true }
+            catch { }
+            try {
+                if ($pathMissing) { throw (New-Object System.IO.FileNotFoundException) }
+                $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+            }
             catch {
                 if ($_.Exception -isnot [System.Management.Automation.ItemNotFoundException] -and $_.Exception -isnot [System.IO.FileNotFoundException] -and $_.Exception -isnot [System.IO.DirectoryNotFoundException]) { throw }
                 if ($relative -match '[\\/]') { throw "BepInEx inventory changed at '$relative'." }
@@ -32389,6 +32398,12 @@ function Get-TpmTreeFileState {
     $handle = [TpmSupportNativeMethods]::CreateFile($Path, [TpmSupportNativeMethods]::GenericRead, $share, [IntPtr]::Zero, [TpmSupportNativeMethods]::OpenExisting, [TpmSupportNativeMethods]::FileFlagOpenReparsePoint, [IntPtr]::Zero)
     if ($handle.IsInvalid) {
         $handle.Dispose()
+        # Windows PowerShell 5.1 Get-Item does not report a MISSING path inside a bracketed folder
+        # (every game folder ends in "[TP]") as missing, so ask .NET first. GetAttributes still sees a
+        # dangling link, so an unsafe link is never mistaken for an absent file.
+        try { [void][System.IO.File]::GetAttributes($Path) }
+        catch [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] { return $state }
+        catch { }
         try {
             $existing = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
             $state.Kind = 'Other'
@@ -32432,6 +32447,10 @@ function Remove-TpmTreeOwnedFile {
     $handle = [TpmSupportNativeMethods]::CreateFile($Path, $access, $share, [IntPtr]::Zero, [TpmSupportNativeMethods]::OpenExisting, [TpmSupportNativeMethods]::FileFlagOpenReparsePoint, [IntPtr]::Zero)
     if ($handle.IsInvalid) {
         $handle.Dispose()
+        # Same bracketed-path hazard as Get-TpmTreeFileState: ask .NET first whether the path is missing.
+        try { [void][System.IO.File]::GetAttributes($Path) }
+        catch [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] { return 'Absent' }
+        catch { }
         try { $null = Get-Item -LiteralPath $Path -Force -ErrorAction Stop }
         catch [System.Management.Automation.ItemNotFoundException] { return 'Absent' }
         catch { }
