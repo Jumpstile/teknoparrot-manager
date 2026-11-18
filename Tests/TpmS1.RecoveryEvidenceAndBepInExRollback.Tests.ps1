@@ -26,7 +26,7 @@ BeforeAll {
         try { return (Get-TpmSupportFinalPathFromHandle -Handle $handle).TrimEnd('\') } finally { $handle.Dispose() }
     }
     function New-S1Directory {
-        # Short name: the migration backup tree appends LegacyMigration_<32 hex>\PostgresRecoveryBackups\evidence-1\..., and Windows PowerShell 5.1 fails above 259 characters on a deep sandbox temp root.
+        # Short name: the migration backup tree appends LegacyMig_<8 hex>\PostgresRecoveryBackups\evidence-1\..., and Windows PowerShell 5.1 fails above 259 characters on a deep sandbox temp root.
         $path = Join-Path $script:S1Evidence ('s1-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         [void][IO.Directory]::CreateDirectory($path)
         return (Resolve-S1FinalPath -Path $path)
@@ -86,7 +86,7 @@ Describe '#332 PostgreSQL recovery evidence stays private through owned-state mi
         Test-Path -LiteralPath $f.Legacy | Should -BeFalse
         (Get-TpmDirectoryManifest -Path $f.Managed).ManifestHash | Should -BeExactly $f.ManifestHash
         Get-S1ForeignAceCount -Path $f.Managed | Should -Be 0
-        $backupRoot = @(Get-ChildItem -LiteralPath $f.Layout.Backups -Directory -Filter 'LegacyMigration_*')
+        $backupRoot = @(Get-ChildItem -LiteralPath $f.Layout.Backups -Directory -Filter 'LegacyMig_*')
         $backupRoot.Count | Should -Be 1
         $backupCopy = Join-Path $backupRoot[0].FullName 'PostgresRecoveryBackups'
         (Get-TpmDirectoryManifest -Path $backupCopy).ManifestHash | Should -BeExactly $f.ManifestHash
@@ -104,7 +104,7 @@ Describe '#332 PostgreSQL recovery evidence stays private through owned-state mi
         $migration = Invoke-TpmOwnedMigration -ScriptRoot $f.Program -Layout $f.Layout
         $migration.Outcome | Should -Not -BeExactly 'SUCCEEDED'
         Test-Path -LiteralPath $f.Managed | Should -BeFalse
-        foreach ($backupRoot in @(Get-ChildItem -LiteralPath $f.Layout.Backups -Directory -Filter 'LegacyMigration_*')) {
+        foreach ($backupRoot in @(Get-ChildItem -LiteralPath $f.Layout.Backups -Directory -Filter 'LegacyMig_*')) {
             Test-Path -LiteralPath (Join-Path $backupRoot.FullName 'PostgresRecoveryBackups') | Should -BeFalse
         }
         Get-S1Snapshot -Dir $f.Legacy | Should -Be $before
@@ -124,7 +124,7 @@ Describe '#332 PostgreSQL recovery evidence stays private through owned-state mi
         Get-S1Snapshot -Dir $f.Managed | Should -Be $before
         Get-S1ForeignAceCount -Path $f.Legacy | Should -Be 0
         Get-S1ForeignAceCount -Path $f.Managed | Should -Be 0
-        $backupCopy = Join-Path (@(Get-ChildItem -LiteralPath $f.Layout.Backups -Directory -Filter 'LegacyMigration_*')[0]).FullName 'PostgresRecoveryBackups'
+        $backupCopy = Join-Path (@(Get-ChildItem -LiteralPath $f.Layout.Backups -Directory -Filter 'LegacyMig_*')[0]).FullName 'PostgresRecoveryBackups'
         Get-S1Snapshot -Dir $backupCopy | Should -Be $before
         Get-S1ForeignAceCount -Path $backupCopy | Should -Be 0
     }

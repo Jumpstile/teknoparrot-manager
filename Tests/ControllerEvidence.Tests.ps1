@@ -27,7 +27,11 @@ BeforeAll {
 Describe 'Get-TpmControllerEvidence' {
     It 'returns a result that matches the contract schema and carries no identifiers' {
         $result = Get-TpmControllerEvidence
-        Test-Json -Json ($result | ConvertTo-Json -Depth 6) -SchemaFile $script:schemaPath | Should -BeTrue
+        # The schema check needs PowerShell 7 (Windows PowerShell 5.1 has no Test-Json); every other check below runs in both.
+        $testJson = Get-Command Test-Json -ErrorAction SilentlyContinue
+        if ($testJson -and $testJson.Parameters.ContainsKey('SchemaFile')) {
+            Test-Json -Json ($result | ConvertTo-Json -Depth 6) -SchemaFile $script:schemaPath | Should -BeTrue
+        }
         $result.ReadOnly | Should -BeTrue
         $result.SensitiveIdentifiersIncluded | Should -BeFalse
         ($result | ConvertTo-Json -Depth 6) | Should -Not -Match '(?i)serial|VID_|PID_|HID\\\\|MAC'

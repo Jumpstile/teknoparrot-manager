@@ -8,6 +8,16 @@ function Get-TPMReleasePackageFileMapV1 {
         'TeknoParrot-Manager.ps1','TeknoParrot-Manager.bat','TeknoParrot-Manager-CHANGELOG.txt','LICENSE'
     )
     foreach ($name in $rootFiles) { $map.Add([pscustomobject]@{ ZipPath = $name; SourcePath = $name }) }
+    # The tester guide ships only in release candidate builds (label starts with RC), never in version 1.0.
+    $candidateLabel = ''
+    $mainScript = Join-Path $SourceRoot 'TeknoParrot-Manager.ps1'
+    if (Test-Path -LiteralPath $mainScript -PathType Leaf) {
+        $labelLine = Select-String -LiteralPath $mainScript -Pattern '^\s*\$ReleaseCandidateLabel\s*=\s*"([^"]*)"' -List
+        if ($labelLine) { $candidateLabel = [string]$labelLine.Matches[0].Groups[1].Value }
+    }
+    if ($candidateLabel -like 'RC*') {
+        $map.Add([pscustomobject]@{ ZipPath = 'TeknoParrot-Manager-Tester-Guide.pdf'; SourcePath = 'TeknoParrot-Manager-Tester-Guide.pdf'; AssetType = 'Guide' })
+    }
     foreach ($item in (Get-TPMReleasePackageDocumentationFileMapV1)) {
         $map.Add([pscustomobject]@{ ZipPath = $item.ZipPath; SourcePath = $item.SourcePath; AssetType = $item.AssetType })
     }
@@ -176,7 +186,7 @@ function Test-TPMReleasePackageArchiveV1 {
     param(
         [Parameter(Mandatory = $true)][string]$ZipPath,
         [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot),
-        [string]$ExpectedDisplayVersion = 'v1.0 RC8.1'
+        [string]$ExpectedDisplayVersion = 'v1.0 RC8.3'
     )
     Set-StrictMode -Version Latest
     $sourceRootFull = [System.IO.Path]::GetFullPath($SourceRoot)

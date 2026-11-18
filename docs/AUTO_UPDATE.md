@@ -1,8 +1,8 @@
 # Auto-Update System
 
-Status: the standalone helper and the Check for Updates menu item (15) are part of v1.0 RC8.1. RC8.1 is the interim build for testers and is the latest published release: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1. The previous published release is v1.0 RC7. The final v1.0 RC9 comes later. RC8 was a tester build and was never published. Final Version 1.0 remains unpublished. All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
+Status: the standalone helper and the Check for Updates menu item (15) are part of v1.0 RC8.1, v1.0 RC8.2 and v1.0 RC8.3. RC8.3 is a fix-up release for RC8.2. The latest published release is v1.0 RC8.3: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3. The previous published release is v1.0 RC8.2. Earlier published releases are v1.0 RC8.1 and RC7. RC8 was a tester build and was never published. The final v1.0 RC9 comes later. Final Version 1.0 remains unpublished. All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
-RC8.1 is the first build that can update itself in place with Check for Updates, including a release with many files. Builds before RC8.1 (for example RC8 or RC7) cannot. If you run one of those, install RC8.1 by hand once: when RC8.1 comes out, download its ZIP from the Releases page and extract it over your old folder. After that, Check for Updates does the work.
+RC8.1 is the first build that can update itself in place with Check for Updates, including a release with many files. If you run RC8.1 or RC8.2, Check for Updates offers the newer release when there is one. Builds before RC8.1 (for example RC8 or RC7) cannot update themselves. If you run one of those, install RC8.2 by hand once: download its ZIP from the Releases page and extract it over your old folder. After that, Check for Updates does the work.
 
 The v0.99.38 and v1.0-RC3 live-verification references below are historical.
 They are not current download instructions.

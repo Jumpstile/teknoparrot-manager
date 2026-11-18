@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC8.1
+  TeknoParrot Manager  |  v1.0 RC8.3
   Author: Jumpstile
 ===============================================================================
 
@@ -7,12 +7,15 @@
   automatically, copies your controls between games of the same type, and
   keeps your game library organized. Windows / PowerShell 5.1+.
 
-  This is v1.0 RC8.1, the interim build for testers. It is the latest
-  published release (v1.0 RC8.1).
-  Release page:
-  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1
-  The previous published release is v1.0 RC7. The final v1.0 RC9 comes
-  later. RC8 was a tester build and was never published. Final Version 1.0 remains unpublished.
+  This is v1.0 RC8.3, a fix-up release for RC8.2. It fixes problems that
+  testers found. RC8.3 is the latest published release:
+  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3
+  The previous published release is v1.0 RC8.2. If you use RC8.2, choose
+  15) Check for Updates to get RC8.3. Earlier published releases are
+  v1.0 RC8.1 and RC7. RC8 was a tester
+  build and was never published. The final v1.0 RC9 comes later.
+  Final Version 1.0 remains unpublished.
+  The changes since RC8.2 are in TeknoParrot-Manager-CHANGELOG.txt.
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after each run. AutoSync backs up UserProfiles before
@@ -2300,8 +2303,10 @@
        If it has not asked before, it first asks about your devices.
 
     4. Read the line about your example games.
-       You will see: "You have N games with their controls set up." If a
-       copied setting looks wrong, a yellow "Check first" line also appears.
+       You will see: "You have N games with their controls set up." Then a
+       preview lists what would change. It ends with "Preview only. Nothing
+       was saved." If a copied setting looks wrong, a yellow "Check first"
+       line also appears.
 
        Next: press D to see each reference game, with the aim settings the
        script will copy: relative input, sensitivity, hide-cursor and "Use
@@ -2311,8 +2316,13 @@
     5. Answer the question "Copy controls from N games to your other games
        of the same type? (Y/N, D = details)".
        Answer Y if the settings match your hardware.
-       Answer N if they do not. Then fix the reference game in
-       TeknoParrotUI and run the script again.
+       Answer N if they do not. Nothing changes. Then fix the reference
+       game in TeknoParrotUI and run the script again.
+
+       After a copy, the program asks: "Undo these changes and put your
+       game settings back as they were? (Y/N)". Answer Y to put everything
+       back at once. You can also undo later with main menu option 14
+       (Restore backup).
 
     6. Start ONE updated game and test it before you trust the rest.
        Next: if anything is wrong, restore from the saved copy made at the
@@ -2429,6 +2439,9 @@
 
   It skips AutoSync and Register. It does not extract or register any games.
 
+  Unlike the copy step at the end of AutoSync and Register, mode 3 shows a
+  preview first and offers a one-step undo after it saves.
+
   Use it when your library is already registered and you have just set up a
   new or updated reference game in TeknoParrotUi.exe. You can copy the
   controls right away. You do not have to wait for a full AutoSync or
@@ -2442,6 +2455,10 @@
   On a first run (or when you ask), the script asks which controls you
   have: Xbox pad, arcade stick, trackball, spinner, wheel, lightgun, or
   keyboard.
+
+  If a controller is connected, it looks for it first. When it finds an
+  Xbox-style controller, it asks one question ("Use the Xbox controller
+  for all games?") instead of seven.
 
   It then prints a plan of which game to bind with which device.
 
@@ -6053,7 +6070,7 @@
 
 
 ===============================================================================
-  v1.0 RC8.1 (the latest published release).
+  v1.0 RC8.3 (the latest published release). The previous published release is v1.0 RC8.2.
   Test one game after every run. AutoSync backs up UserProfiles before
   extraction; preview mode skips the backup.
 ===============================================================================

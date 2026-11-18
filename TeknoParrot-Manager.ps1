@@ -1,4 +1,4 @@
-# TeknoParrot Manager  |  v1.0 RC8.1
+# TeknoParrot Manager  |  v1.0 RC8.3
 # Author: Jumpstile
 # =============================================================================
 #
@@ -84,7 +84,7 @@ $script:TpmIndependentProgressTasks = @{}
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
 $ScriptVersion = "1.0"
-$ReleaseCandidateLabel = "RC8.1"
+$ReleaseCandidateLabel = "RC8.3"
 $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
 
 function Get-ManagerDisplayVersion {
@@ -758,7 +758,9 @@ function Invoke-TpmOwnedMigration {
     try {
     $progressStarted=Get-Date
     $backupProgressCurrent=0
-    $backupRoot=Join-Path ([string]$Layout.Backups) ('LegacyMigration_{0}' -f [guid]::NewGuid().ToString('N'))
+    # Short name on purpose: the copied tree adds ReShade\TPM-State\Deployments\<64 hex>.json below it, and a long name
+    # pushed the backup past the 260-character Windows limit on deep install folders.
+    $backupRoot=Join-Path ([string]$Layout.Backups) ('LegacyMig_{0}' -f [guid]::NewGuid().ToString('N').Substring(0, 8))
     $backupEntries=New-Object System.Collections.Generic.List[object]
     try {
         [void](Assert-TpmNoReparseWriteTarget -Path $backupRoot -Operation 'create owned-state migration backup root')
@@ -2789,6 +2791,18 @@ function Resolve-TpmWorkflowFailure {
         [object[]]$DetailBlocks = @(),
         [switch]$Acknowledge
     )
+    if ($Context.Closed) {
+        # A second problem found after the first result was already acknowledged and the status was closed (for example PostgreSQL
+        # could not be put back the way it was). The status channel cannot take new events, so show the result directly and log it.
+        Write-Log "Workflow already closed; showing failure [$FailureId] directly: $Message | $DataSafety"
+        Write-Host ''
+        Write-Host "  $Message" -ForegroundColor Yellow
+        if (-not [string]::IsNullOrWhiteSpace($DataSafety)) { Write-Host "  $DataSafety" }
+        foreach ($action in @($RecoveryActions | Where-Object { $null -ne $_ -and $_.Id -eq 'Retry' })) { Write-Host ("  Next: " + $action.Label) }
+        if (@($DetailBlocks | Where-Object { $null -ne $_ }).Count -gt 0) { Write-TpmDetailBlocksLog -Blocks $DetailBlocks -Prefix ('Failure detail [{0}]' -f $FailureId) }
+        if ($Acknowledge) { [void](Read-HostSafe '  Press Enter to continue') }
+        return
+    }
     if (-not $Context.Failure) {
         [void](Set-TpmWorkflowFailure -Context $Context -FailureId $FailureId -Message $Message -DataSafety $DataSafety -RecoveryActions $RecoveryActions)
     }
@@ -2958,6 +2972,7 @@ function Redact-TpmSupportText {
         '(?im)(postgres(?:ql)?://)[^\s"''<>]+',
         '(?im)((?:--?|/)password\s+)[^\s]+',
         '(?i)[A-Z]:\\Users\\[^\\"''<>|:*?\r\n]+(?:\\[^\\"''<>|:*?\r\n]+)*',
+        '(?i)[A-Z]:/Users/[^/"''<>|:*?\r\n]+(?:/[^/"''<>|:*?\r\n]+)*',
         '(?i)\\\\[^\\"''<>|:*?\r\n]+\\[^\\"''<>|:*?\r\n]+(?:\\[^\\"''<>|:*?\r\n]+)*'
     )
     foreach ($pattern in $patterns) {
@@ -3701,7 +3716,8 @@ function Get-TpmSupportPluginInventory {
     $bepPlugins = Join-Path $GameRoot 'BepInEx\plugins'
     if (Test-Path -LiteralPath $bepPlugins -PathType Container) { [void]$pluginRoots.Add($bepPlugins) }
     try {
-        foreach ($dataDir in @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $GameRoot -ProgressLabel 'Support plugin data-directory discovery' -Filter '*' -EnumerationErrorAction Stop -DirectoriesOnly -Force | Where-Object { $_.Name -match '_Data$' })) {
+        # One unreadable entry must not throw away the whole inventory: look at what can be read (the helper logs what it could not read).
+        foreach ($dataDir in @(Get-TpmDirectoryEntriesWithDiscoveryProgress -DirectoryPath $GameRoot -ProgressLabel 'Support plugin data-directory discovery' -Filter '*' -EnumerationErrorAction SilentlyContinue -DirectoriesOnly -Force | Where-Object { $_.Name -match '_Data$' })) {
             if (($dataDir.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
             foreach ($relative in @('Plugins','Plugins\x86_64','Plugins\x86')) {
                 $candidate = Join-Path $dataDir.FullName $relative
@@ -4407,7 +4423,7 @@ function Invoke-TpmSupportPackageFollowUp {
 function Write-TpmSupportPackageIntro {
     Write-Host ''
     Write-TpmText -Text 'This makes one ZIP file that you can send to support.'
-    Write-TpmText -Text 'It has your logs and reports. It never has game files or passwords.' -Color DarkCyan
+    Write-TpmText -Text 'It has your logs and reports. It leaves out game files, and we hide passwords and your Windows user name.' -Color DarkCyan
     Write-TpmText -Text 'Optional: if TeknoParrotUI is the problem, save its info file first. Press D to see how.' -Color DarkCyan -BlankBefore
     Write-Host ''
     Write-TpmText -Text '1) Create Support Package'
@@ -8919,6 +8935,17 @@ function Get-DiceSimilarity {
     return [double](2 * $inter) / ($totalA + $totalB)
 }
 
+# The normalized game title in a folder or ZIP name, without the notes that follow it in parentheses or brackets
+# (for example "Raiden IV (1.03J)(Landscape,Bezel)[Taito NESiCAxLive]" gives the key of "Raiden IV").
+# Returns '' when nothing is left. Used only as an extra score next to the full-name score, never in place of it.
+function Get-TpmBaseTitleKey {
+    param([AllowNull()][string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return '' }
+    $title = [regex]::Replace($Name, '\s*[\(\[].*$', '')
+    if ([string]::IsNullOrWhiteSpace($title)) { return '' }
+    return (Get-NormalizedGameKey $title)
+}
+
 # Minimum Dice similarity required to auto-register a fuzzy match. Anything at
 # or above this score is registered automatically; anything below appears in
 # ACTION REQUIRED with the best-guess profile name shown.
@@ -8945,11 +8972,18 @@ $FuzzyTieMargin = 0.1
 # (dat lookup, then manual-registration ACTION REQUIRED) for both. See
 # issue #15.
 function Resolve-BestFuzzyMatch {
-    param([string]$NormFolder, [array]$MatchList, [hashtable]$RawThrillsAliases)
+    param([string]$NormFolder, [array]$MatchList, [hashtable]$RawThrillsAliases, [string]$NormBaseTitle = '')
     $best = $null; $bestScore = 0.0; $secondScore = 0.0
     foreach ($cand in $MatchList) {
         $normCode = Get-NormalizedGameKey $cand.Code
         $score    = Get-DiceSimilarity $NormFolder $normCode
+        # A folder name often carries notes in parentheses or brackets after the title, for example "(Landscape,Bezel)" or "(fixed video)".
+        # They are not part of the game's name and pull the score down, so the title before the first note is scored as well.
+        # The better of the two scores is used; the same tie rule below still applies.
+        if ($NormBaseTitle) {
+            $baseScore = Get-DiceSimilarity $NormBaseTitle $normCode
+            if ($baseScore -gt $score) { $score = $baseScore }
+        }
         if ($RawThrillsAliases.ContainsKey($cand.Code)) {
             $normAlias  = Get-NormalizedGameKey $RawThrillsAliases[$cand.Code].Suggested
             $aliasScore = Get-DiceSimilarity $NormFolder $normAlias
@@ -16037,7 +16071,7 @@ function Get-TpmControllerEvidence {
     $observations = @($found.ToArray() | Sort-Object DeviceClass, Basis)
     $canonical = 'TpmLocalDetection|1|' + ((@($observations | ForEach-Object { '{0}/{1}/{2}/{3}' -f $_.DeviceClass, $_.Confidence, $_.Basis, $_.Count })) -join ';')
     $sha = [System.Security.Cryptography.SHA256]::Create()
-    try { $id = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical))) -replace '-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+    try { $id = (@($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)) | ForEach-Object { $_.ToString('x2') }) -join '') } finally { $sha.Dispose() }
     return [pscustomobject][ordered]@{
         ContractVersion = 'TpmControllerEvidence/v1'; EvidenceId = $id; EvidenceStatus = $status
         ProviderId = 'TpmLocalDetection'; ProviderVersion = '1'; SourceFamily = 'LocalWindowsDeviceClass'; EvidenceClass = 'LocalProbe'
@@ -18067,16 +18101,39 @@ function Invoke-ReShadeSetupLegacy {
             if ($conflictChoice -eq 'K') { foreach ($conflict in $conflicts) { $keepSelections[$conflict.Game.BaseName] = $conflict.Previous } }
         }
     }
+    $askableNames = $null
     if (-not $bulkApply) {
         if ($selectedGames.Count -gt 1) {
-            $chosenGames = @()
-            foreach ($pf in $selectedGames) {
-                if ((Read-TpmYesNo -Prompt ("  Install for {0}? (Y/N, default Y)" -f $pf.BaseName) -Default 'Y') -match '^(Y|y)$') { $chosenGames += $pf }
+            # Ask only about games that can be changed now. ($askableNames holds the games that cannot be: it is a skip list.) The others stay in the list and are reported as left alone, as before.
+            $askableNames = @{}
+            foreach ($leftRecord in @($preflightSummary.Records)) {
+                $isAskable = ($leftRecord.Status -eq 'Ready') -or ($Action -eq 'Adopt' -and $leftRecord.Status -eq 'Protected')
+                if (-not $isAskable) { $askableNames[([string]$leftRecord.Game).ToLowerInvariant()] = $false }
             }
+            $askGames = @($selectedGames | Where-Object { -not $askableNames.ContainsKey(([string]$_.BaseName).ToLowerInvariant()) })
+            $notAskedGames = @($selectedGames | Where-Object { $askableNames.ContainsKey(([string]$_.BaseName).ToLowerInvariant()) })
+            if ($notAskedGames.Count -gt 0) { Write-TpmText -Text ('Asking only about the {0} that can be changed. The other {1} will be left alone.' -f (Format-TpmGameCount -Count $askGames.Count), $notAskedGames.Count) -Color Yellow -BlankBefore }
+            $answers = @{}
+            $askIndex = 0
+            $backedOut = $false
+            while ($askIndex -lt $askGames.Count) {
+                $pf = $askGames[$askIndex]
+                $askAnswer = Read-TpmChoice -Prompt ("  Install for {0}? [Y] Yes  [N] No  [B] Back  (game {1} of {2}, default Y)" -f $pf.BaseName, ($askIndex + 1), $askGames.Count) -Choices @('Y', 'N', 'B') -Default 'Y'
+                if ($askAnswer -eq 'B') {
+                    if ($askIndex -eq 0) { $backedOut = $true; break }
+                    $askIndex--
+                    continue
+                }
+                $answers[$pf.BaseName] = ($askAnswer -eq 'Y')
+                $askIndex++
+            }
+            if ($backedOut) { Write-Host '  ReShade setup canceled. No files were changed.' -ForegroundColor Yellow; Write-Log 'ReShade setup: canceled at the first one-by-one question.'; return [pscustomobject]@{ Succeeded = $false; Cancelled = $true; Deployed = 0; Errors = 0; Reason = 'USER_CANCELLED' } }
+            $chosenGames = @($askGames | Where-Object { $answers[$_.BaseName] })
             if ($chosenGames.Count -eq 0) { Write-Host '  ReShade setup canceled. No files were changed.' -ForegroundColor Yellow; Write-Log 'ReShade setup: canceled -- no game was chosen one by one.'; return [pscustomobject]@{ Succeeded = $false; Cancelled = $true; Deployed = 0; Errors = 0; Reason = 'USER_CANCELLED' } }
-            $selectedGames = @($chosenGames)
+            $selectedGames = @($chosenGames) + @($notAskedGames)
         }
         foreach ($pf in $selectedGames) {
+            if ($null -ne $askableNames -and $askableNames.ContainsKey(([string]$pf.BaseName).ToLowerInvariant())) { continue }
             $options = Get-TpmReShadeChooserOptions -GameId $pf.BaseName
             if ($options.Restore.Found -and $options.Restore.Valid) {
                 Write-Host ("  R) Reapply previous trusted profile for {0}: {1}" -f $pf.BaseName, $options.Restore.Profile.FriendlyName) -ForegroundColor DarkCyan
@@ -19048,9 +19105,12 @@ function Invoke-DgVoodoo2Setup {
     Write-Log "dgVoodoo2 setup: TeknoParrot Manager does not remove an unowned dgVoodoo2 hook automatically. Existing or changed files must be removed by hand."
     Write-Log ("dgVoodoo2 setup: deployed={0} skipped={1} missingDevice={2} missingPath={3} errors={4} presetOverrides={5}" -f $deployed, $skipped, $missingDevice, $missingPath, $errors, $presetOverrides)
     $legacySucceeded = ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP') -and $plannedProfiles.Count -gt 0 -and $errors -eq 0 -and $skipped -eq 0 -and $missingDevice -eq 0 -and $missingPath -eq 0)
+    # Selected games that already had every file: named on the result screen so every selected game is accounted for.
+    $alreadyConfiguredGames = @(if ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP')) { @($plannedProfiles | Where-Object { -not $_.Written } | ForEach-Object { [string]$_.Game }) })
     return [pscustomobject]@{
         Succeeded = $legacySucceeded
         NoOp = [bool]$noOp
+        AlreadyConfigured = $alreadyConfiguredGames
         Deployed = $deployed
         Skipped = $skipped
         MissingDevice = $missingDevice
@@ -19089,6 +19149,11 @@ function Get-TpmDgVoodoo2ResultView {
     $nothingInstalled = ([bool](Get-TpmTransactionField -Object $Result -Name 'NoOp' -Default $false) -or $installed.Count -eq 0)
     $title = 'No game needed a new dgVoodoo2 file. Nothing was changed.'
     if (-not $nothingInstalled) { $title = ('dgVoodoo2 was added to {0}.' -f (Format-TpmGameCount -Count $installed.Count)) }
+    $alreadyHad = @(Get-TpmTransactionField -Object $Result -Name 'AlreadyConfigured' -Default @() | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($alreadyHad.Count -gt 0) {
+        $alreadyText = ('{0} already had every dgVoodoo2 file, so nothing was changed there: {1}.' -f (Format-TpmGameCount -Count $alreadyHad.Count), ($alreadyHad -join ', '))
+        if ($nothingInstalled) { $title = ('No game needed a new dgVoodoo2 file. Nothing was changed. ' + $alreadyText) } else { $title = ($title + ' ' + $alreadyText) }
+    }
     $needs = @($skippedGames | Group-Object -Property { [string](Get-TpmTransactionField -Object $_ -Name 'Reason' -Default '') } | ForEach-Object { '{0} skipped. {1}' -f (Format-TpmGameCount -Count $_.Count), $_.Name })
     $next = 'Try a game. If it looks wrong or crashes, send a support package and the log.'
     if ($nothingInstalled) { $next = 'Nothing else to do. Press B to go back.' }
@@ -24576,19 +24641,30 @@ function Invoke-AutoSync {
                 if (Test-Path -LiteralPath $registeredProfilePath -ErrorAction Stop) {
                     $registeredDoc = Read-Xml $registeredProfilePath
                     $registeredPathNode = $registeredDoc.GameProfile.SelectSingleNode('GamePath')
-                    if ($null -eq $registeredPathNode -or [string]::IsNullOrWhiteSpace($registeredPathNode.InnerText)) { throw 'Registered executable path is missing.' }
-                    $registeredGamePath = [System.IO.Path]::GetFullPath($registeredPathNode.InnerText.Trim())
-                    if (-not (Test-Path -LiteralPath $registeredGamePath -PathType Leaf -ErrorAction Stop)) {
+                    if ($null -eq $registeredPathNode -or [string]::IsNullOrWhiteSpace($registeredPathNode.InnerText)) {
+                        # The profile exists but is not linked to a game file yet (TeknoParrot keeps a profile for games that are not set up).
+                        # Nothing is registered, so there is nothing to bind to the archive.
+                        $registeredPathNode = $null
+                    }
+                    if ($null -ne $registeredPathNode) { $registeredGamePath = [System.IO.Path]::GetFullPath($registeredPathNode.InnerText.Trim()) }
+                    if ($registeredGamePath -and -not (Test-Path -LiteralPath $registeredGamePath -PathType Leaf -ErrorAction Stop)) {
                         # A new game folder may restore a registered game whose folder is gone, but only when the
                         # registered executable lies inside that new folder; the transaction then binds it to the
                         # matching ZIP entry before anything is written.
                         if (-not ($newGameFolder -and (Test-PathInside -child $registeredGamePath -parent $targetDir))) {
-                            throw 'Registered executable path could not be verified.'
+                            if ($newGameFolder) {
+                                # The saved game file is missing at an old location (for example the library moved to another drive).
+                                # Nothing is installed there, so extract into the new folder; registration points the profile at it afterwards.
+                                Write-Log ('AutoSync: the saved game file for ''{0}'' is missing at its old location; the game will be set up again in the new folder.' -f $rawName)
+                                $registeredGamePath = ''
+                            } else {
+                                throw 'Registered executable path could not be verified.'
+                            }
                         }
                     }
                 }
             } catch {
-                $rootRefusalReason = 'registered executable could not be bound to archive-root verification'
+                $rootRefusalReason = 'registered executable could not be bound to archive-root verification (' + $_.Exception.Message + ')'
             }
         }
         if (-not $rootRefusalReason -and $newGameFolder -and -not [string]::IsNullOrWhiteSpace($registeredGamePath) -and
@@ -32146,7 +32222,16 @@ function Get-BepInExRecoveryInventory {
             Write-TpmCompactExtractionProgress -Phase 'Checking' -Label $ProgressLabel -Current $scanCurrent -Total 0 -StartedAt $scanStarted
             $path = [System.IO.Path]::GetFullPath((Join-Path $Root $relative))
             $item = $null
-            try { $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop }
+            # A missing path inside a bracketed game folder ("[TP]") is not reported as missing by Get-Item in
+            # Windows PowerShell 5.1, so ask .NET first (GetAttributes still sees a dangling link).
+            $pathMissing = $false
+            try { [void][System.IO.File]::GetAttributes($path) }
+            catch [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] { $pathMissing = $true }
+            catch { }
+            try {
+                if ($pathMissing) { throw (New-Object System.IO.FileNotFoundException) }
+                $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+            }
             catch {
                 if ($_.Exception -isnot [System.Management.Automation.ItemNotFoundException] -and $_.Exception -isnot [System.IO.FileNotFoundException] -and $_.Exception -isnot [System.IO.DirectoryNotFoundException]) { throw }
                 if ($relative -match '[\\/]') { throw "BepInEx inventory changed at '$relative'." }
@@ -32310,20 +32395,31 @@ function New-BepInExUpdateBackup {
 function Get-TpmTreeFileState {
     param([Parameter(Mandatory)][string]$Path)
     $null = Get-TpmSupportNativeType
-    $state = [pscustomobject]@{ Kind='Absent'; Identity=$null; Sha256=$null; Length=$null; Attributes=0 }
+    $state = [pscustomobject]@{ Kind='Absent'; Identity=$null; Sha256=$null; Length=$null; Attributes=0; Reason='' }
     $share = [TpmSupportNativeMethods]::ShareRead -bor [TpmSupportNativeMethods]::ShareWrite -bor [TpmSupportNativeMethods]::ShareDelete
     $handle = [TpmSupportNativeMethods]::CreateFile($Path, [TpmSupportNativeMethods]::GenericRead, $share, [IntPtr]::Zero, [TpmSupportNativeMethods]::OpenExisting, [TpmSupportNativeMethods]::FileFlagOpenReparsePoint, [IntPtr]::Zero)
     if ($handle.IsInvalid) {
         $handle.Dispose()
-        try { $null = Get-Item -LiteralPath $Path -Force -ErrorAction Stop; $state.Kind = 'Other' }
+        # Windows PowerShell 5.1 Get-Item does not report a MISSING path inside a bracketed folder
+        # (every game folder ends in "[TP]") as missing, so ask .NET first. GetAttributes still sees a
+        # dangling link, so an unsafe link is never mistaken for an absent file.
+        try { [void][System.IO.File]::GetAttributes($Path) }
+        catch [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] { return $state }
+        catch { }
+        try {
+            $existing = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+            $state.Kind = 'Other'
+            $state.Reason = if ($existing.PSIsContainer) { 'it is a folder, not a file' } else { 'it exists but Windows would not let the Manager read it (it may be in use or protected)' }
+        }
         catch [System.Management.Automation.ItemNotFoundException] { }
-        catch { $state.Kind = 'Other' }
+        catch { $state.Kind = 'Other'; $state.Reason = 'it could not be checked: ' + $_.Exception.Message }
         return $state
     }
     $stream = $null
     try {
         $attributes = [int][TpmSupportNativeMethods]::PatchAttributes($handle)
-        if (($attributes -band 0x410) -ne 0) { $state.Kind = 'Other'; return $state }
+        if (($attributes -band 0x400) -ne 0) { $state.Kind = 'Other'; $state.Reason = 'it is a shortcut or link to somewhere else'; return $state }
+        if (($attributes -band 0x10) -ne 0) { $state.Kind = 'Other'; $state.Reason = 'it is a folder, not a file'; return $state }
         $identity = [TpmSupportNativeMethods]::PatchFileIdentity($handle)
         $stream = New-Object System.IO.FileStream($handle, [System.IO.FileAccess]::Read)
         $state.Attributes = $attributes -band 0x27
@@ -32333,6 +32429,8 @@ function Get-TpmTreeFileState {
         $state.Kind = 'File'
     } catch {
         $state.Kind = 'Other'; $state.Identity = $null; $state.Sha256 = $null
+        if ($_.Exception.Message -like '*without hard links*') { $state.Reason = 'the same file is shared with another folder (a hard link), so changing it here would also change the other copy' }
+        else { $state.Reason = 'it could not be read safely: ' + $_.Exception.Message }
     } finally {
         if ($null -ne $stream) { $stream.Dispose() } else { $handle.Dispose() }
     }
@@ -32351,6 +32449,10 @@ function Remove-TpmTreeOwnedFile {
     $handle = [TpmSupportNativeMethods]::CreateFile($Path, $access, $share, [IntPtr]::Zero, [TpmSupportNativeMethods]::OpenExisting, [TpmSupportNativeMethods]::FileFlagOpenReparsePoint, [IntPtr]::Zero)
     if ($handle.IsInvalid) {
         $handle.Dispose()
+        # Same bracketed-path hazard as Get-TpmTreeFileState: ask .NET first whether the path is missing.
+        try { [void][System.IO.File]::GetAttributes($Path) }
+        catch [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] { return 'Absent' }
+        catch { }
         try { $null = Get-Item -LiteralPath $Path -Force -ErrorAction Stop }
         catch [System.Management.Automation.ItemNotFoundException] { return 'Absent' }
         catch { }
@@ -32487,7 +32589,7 @@ function Invoke-TpmTransactionalTreePromote {
             $seen[$key] = $true
             if (-not (Test-BepInExNoReparsePath -Root $DestDir -Path $destination)) { throw "BepInEx destination path is unsafe: $relative" }
             $destinationState = Get-TpmTreeFileState -Path $destination
-            if ($destinationState.Kind -eq 'Other') { throw "BepInEx destination is not a plain readable single-link file: $relative" }
+            if ($destinationState.Kind -eq 'Other') { throw "BepInEx was not installed because '$relative' already exists in the game folder and cannot be replaced safely: $($destinationState.Reason)." }
             if ($destinationState.Kind -eq 'File') {
                 $rollbackFile = Join-Path $rollbackDir $relative
                 [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($rollbackFile))
@@ -36001,7 +36103,7 @@ function Register-GamesLegacy {
             # see issue #13) is handled inside Resolve-BestFuzzyMatch.
             $normFolder  = Get-NormalizedGameKey $folderKey
 
-            $fuzzyResult    = Resolve-BestFuzzyMatch -NormFolder $normFolder -MatchList $matchList -RawThrillsAliases $RawThrillsPathLimits
+            $fuzzyResult    = Resolve-BestFuzzyMatch -NormFolder $normFolder -MatchList $matchList -RawThrillsAliases $RawThrillsPathLimits -NormBaseTitle (Get-TpmBaseTitleKey $folderKey)
             $bestFuzzy      = $fuzzyResult.Best
             $bestFuzzyScore = $fuzzyResult.BestScore
 
@@ -36228,6 +36330,15 @@ function Register-GamesLegacy {
             }
         }
 
+        # A shared .zip (such as naomigd.zip) that another folder already claimed this run is not
+        # proof of a second copy of the same game. Do not ask a keep/switch question about it and do
+        # not mark the folder done: the folder-name passes below can still match the folder's own
+        # game, and if none does the folder is listed as one we could not identify. See issue #404.
+        if ($exe.Extension -ieq '.zip' -and $seenCodes.ContainsKey($code) -and -not $preExistingCodes.Contains($code)) {
+            Write-Log ("Shared file name: '{0}' in folder '{1}' did not claim {2} again -- folder '{3}' already has it; matching '{1}' by its name instead" -f $exe.Name, $folderName, $code, $codeClaimedBy[$code])
+            continue
+        }
+
         # Otherwise a single candidate for this exe name is a confident,
         # unambiguous identification (unlike the $matchList.Count -gt 1
         # branch above, this never falls through to an unresolved "shared"
@@ -36448,12 +36559,25 @@ function Register-GamesLegacy {
             if (-not $normFolder) { continue }
 
             $bestScore = 0.0
+            $secondScore = 0.0
             $bestCode  = $null
+            $bestViaBaseTitle = $false
+            # Notes in parentheses after the title ("(Landscape,Bezel)", "(fixed video)") are not part of the game's name; the title alone is scored too.
+            $normBaseTitle = Get-TpmBaseTitleKey $folderKey
             foreach ($nc in $normCodeList) {
                 $score = Get-DiceSimilarity $normFolder $nc.Norm
-                if ($score -gt $bestScore) { $bestScore = $score; $bestCode = $nc.Code }
+                $viaBase = $false
+                if ($normBaseTitle) {
+                    $baseScore = Get-DiceSimilarity $normBaseTitle $nc.Norm
+                    if ($baseScore -gt $score) { $score = $baseScore; $viaBase = $true }
+                }
+                if ($score -gt $bestScore) { $secondScore = $bestScore; $bestScore = $score; $bestCode = $nc.Code; $bestViaBaseTitle = $viaBase }
+                elseif ($score -gt $secondScore) { $secondScore = $score }
             }
             if ($bestScore -lt $FuzzyAutoThreshold -or -not $bestCode) { continue }
+            # A match that only exists because of the title-only score must be clearly ahead of the next profile, the same rule the shared-name matcher uses.
+            # Otherwise the folder is left for the user to choose, never guessed.
+            if ($bestViaBaseTitle -and (($bestScore - $secondScore) -lt $FuzzyTieMargin)) { continue }
 
             $matchedFolders[$folderKey] = $true
 
@@ -37670,7 +37794,7 @@ function Get-TpmLibraryHealthSummaryLines {
         ([string]$Result.PostgresInventoryStatus -ne 'Complete') -or
         ([bool](Get-TpmTransactionField -Object $Result -Name 'PostgresServiceUnverified' -Default $false)) -or
         [string]::IsNullOrWhiteSpace([string](Get-TpmTransactionField -Object $Result -Name 'DetectedGpuVendor' -Default ''))
-    $attention = (@($Rows | Where-Object { ([string]$_.Text).StartsWith('Needs attention') }).Count -gt 0)
+    $attention = (@($Rows | Where-Object { ([string]$_.Text).StartsWith('Needs attention') -or ([string]$_.Text).StartsWith('Problem') }).Count -gt 0)
     $lines = New-Object System.Collections.Generic.List[object]
     if ($attention) {
         [void]$lines.Add(@{ Text = 'Some things need attention.'; Color = 'Yellow' })
@@ -44606,6 +44730,141 @@ function Write-TpmLaunchBoxOffer {
     Write-TpmText -Text '[B] Skip this step.' -Color White
 }
 
+# The whole optional LaunchBox step (offer, preview, add games, or save a reference file).
+# It is used after the whole-library checks and after "New game only".
+function Invoke-TpmLaunchBoxStep {
+    Write-Host ""
+    $doLB = "N"
+    $lbChoice = $null
+    if ($dryRunActive) {
+        Write-Log "PreviewMode: LaunchBox reference export skipped."
+    } elseif ($Unattended) {
+        Write-Log "Unattended: LaunchBox reference export skipped."
+    } else {
+        Write-TpmLaunchBoxOffer
+        # Answers given for [P] Preview become the defaults for [A] (Enter
+        # reuses them); [A] still plans read-only and asks before any write.
+        $lbPreviewRoot = $null
+        $lbPreviewChoice = $null
+        $lbPreviewShownSummary = ''
+        do {
+            $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'F', 'B') -Default 'P'
+            if ($lbChoice -eq 'P') {
+                Write-TpmText -Text 'Preview: TeknoParrot Manager only reads your LaunchBox files.' -Color DarkCyan
+                $previewRoot = $lbRoot
+                if (-not $previewRoot) { $previewRoot = Read-HostSafe '  LaunchBox install folder (Enter to go back)' }
+                if ($previewRoot) {
+                    $previewChoice = Read-TpmChoice -Prompt '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, B back' -Choices @('1','2','3','B') -Default '2'
+                    if ($previewChoice -ne 'B') {
+                        $lbPreviewRoot = $previewRoot
+                        $lbPreviewChoice = $previewChoice
+                        $previewPlatforms = switch ($previewChoice) { '1' { @('Arcade') } '2' { @('TeknoParrot') } '3' { @('Arcade','TeknoParrot') } }
+                        $lbPreviewResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $previewRoot -platformNames $previewPlatforms -PlanOnly
+                        Write-TpmLaunchBoxResult -Result $lbPreviewResult -Unattended:$Unattended
+                        $lbPreviewShownSummary = [string]$lbPreviewResult.Summary
+                    }
+                }
+            }
+        } while ($lbChoice -eq 'P')
+        if ($lbChoice -eq 'A') {
+            Write-TpmLaunchBoxWriteNotice
+            $lbWriteNoticeBlocks = Get-TpmLaunchBoxWriteNoticeBlocks
+            if ((Read-TpmYesNo -Prompt 'Add the missing games to LaunchBox now? (Y/N, D = about the risks)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $lbWriteNoticeBlocks }) -eq 'Y') {
+                $writeRoot = $lbRoot
+                if (-not $writeRoot) {
+                    if ($lbPreviewRoot) {
+                        $writeRoot = Read-HostSafe ("  LaunchBox install folder (Enter = previewed folder {0})" -f $lbPreviewRoot) -Default $lbPreviewRoot
+                    } else {
+                        $writeRoot = Read-HostSafe '  LaunchBox install folder'
+                    }
+                }
+                $platformDefault = if ($lbPreviewChoice -in @('1','2','3')) { [string]$lbPreviewChoice } else { '2' }
+                $platformPrompt = if ($lbPreviewChoice -in @('1','2','3')) { "  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel (Enter = previewed choice $platformDefault)" } else { '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel' }
+                $platformChoice = Read-TpmChoice -Prompt $platformPrompt -Choices @('1','2','3','4','B') -Default $platformDefault
+                if ($platformChoice -ne 'B') {
+                    $targetPlatforms = switch ($platformChoice) {
+                        '1' { @('Arcade') }
+                        '2' { @('TeknoParrot') }
+                        '3' { @('Arcade','TeknoParrot') }
+                        '4' { @(Read-HostSafe '  Custom platform name (must be a safe filename)') }
+                    }
+                    # Show exactly what would change, then ask for consent to that plan (read-only preview first).
+                    $lbPlanResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms -PlanOnly
+                    Write-TpmLaunchBoxPlan -Result $lbPlanResult -AlreadyShownSummary $lbPreviewShownSummary -Unattended:$Unattended
+                    if ($lbPlanResult.Reason -eq 'PREVIEW' -and [int]$lbPlanResult.WouldChangeFiles -gt 0) {
+                        if ((Read-TpmYesNo -Prompt 'Write exactly these changes after a verified backup? (Y/N)' -Default 'N') -eq 'Y') {
+                            $lbWriteResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms
+                            Write-TpmLaunchBoxResult -Result $lbWriteResult
+                        } else {
+                            Write-Host '  LaunchBox write canceled; nothing was changed.' -ForegroundColor DarkGray
+                        }
+                    }
+                }
+            }
+        } elseif ($lbChoice -eq 'F') {
+            $doLB = "Y"
+        }
+    }
+
+
+    if ($doLB -eq "Y") {
+        $lbPath  = Join-Path $script:TpmOwnedLayout.Reports "TeknoParrot-LaunchBox-Import.xml"
+        $lbCount = Export-LaunchBoxXml -userProfilesDir $userProfilesDir -outputPath $lbPath
+        if ($lbCount -eq -2) {
+            Write-Host "  Existing LaunchBox reference was preserved; TeknoParrot Manager did not overwrite it." -ForegroundColor Yellow
+            Write-Host ("  Existing file: {0}" -f $lbPath) -ForegroundColor DarkCyan
+            Write-Host "  No new reference was exported. Keep this file, or move it after making a copy before exporting again." -ForegroundColor DarkGray
+        } elseif ($lbCount -lt 0) {
+            Write-Host "  LaunchBox reference export failed; existing files are never overwritten. See TeknoParrot-Manager.log." -ForegroundColor Red
+        } elseif ($lbCount -eq 0) {
+            # An empty reference would block the next export (existing files are never overwritten), so remove the one this call just created.
+            try { if (Test-Path -LiteralPath $lbPath -PathType Leaf) { Remove-Item -LiteralPath $lbPath -Force -ErrorAction Stop } } catch { Write-Log "LaunchBox export: could not remove the empty reference -- $_" }
+            Write-Host "  No reference file was kept: none of the registered profiles has an existing game path." -ForegroundColor Yellow
+            Write-Host "  Register games first (or repair their saved paths in Library Health Check), then export again." -ForegroundColor DarkGray
+        } else {
+            Write-Host ("  Exported : {0} game(s)" -f $lbCount) -ForegroundColor Green
+            Write-Host "  File     : $lbPath" -ForegroundColor DarkCyan
+            Write-Host ""
+            Write-Host "  HOW TO IMPORT INTO LAUNCHBOX" -ForegroundColor Cyan
+            Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+            Write-Host "  Important: LaunchBox must be fully CLOSED before importing." -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "  Step 1.  Close LaunchBox completely." -ForegroundColor White
+            Write-Host "  Step 2.  Open LaunchBox." -ForegroundColor White
+            Write-Host "  Step 3.  Go to  Tools -> Import -> Emulated Games." -ForegroundColor White
+            Write-Host "  Step 4.  On the first screen:" -ForegroundColor White
+            Write-Host "             - Emulator: select TeknoParrot (or add it first -- see below)." -ForegroundColor DarkGray
+            Write-Host "             - Import type: 'Import ROM files'." -ForegroundColor DarkGray
+            Write-Host ("             - Folder: {0}" -f (Join-Path $tpRoot "UserProfiles")) -ForegroundColor DarkGray
+            Write-Host "             - File types: *.xml  (import the profile files themselves," -ForegroundColor DarkGray
+            Write-Host "               not the game executables -- TeknoParrot launches games" -ForegroundColor DarkGray
+            Write-Host "               by profile, so the profile XML is what LaunchBox treats" -ForegroundColor DarkGray
+            Write-Host "               as the 'rom' for each game)." -ForegroundColor DarkGray
+            Write-Host "  Step 5.  Follow the wizard. LaunchBox will assign game names," -ForegroundColor White
+            Write-Host "             metadata, and box art automatically." -ForegroundColor DarkGray
+            Write-Host ""
+            Write-Host "  If TeknoParrot is not yet in LaunchBox's emulator list:" -ForegroundColor Cyan
+            Write-Host "    a. Go to  Tools -> Manage -> Emulators -> Add." -ForegroundColor DarkGray
+            Write-Host "    b. Name: TeknoParrot" -ForegroundColor DarkGray
+            Write-Host ("    c. Emulator path: {0}" -f (Join-Path $tpRoot "TeknoParrotUi.exe")) -ForegroundColor DarkGray
+            Write-Host "    d. Command-line parameters: --profile=%romfile%.xml" -ForegroundColor DarkGray
+            Write-Host "    e. Exit Script tab: add a script so Escape cleanly quits" -ForegroundColor DarkGray
+            Write-Host "       TeknoParrot back to LaunchBox (without one, Escape may not" -ForegroundColor DarkGray
+            Write-Host "       exit the game properly)." -ForegroundColor DarkGray
+            Write-Host "    f. Save, then re-run the import wizard." -ForegroundColor DarkGray
+            Write-Host ""
+            Write-Host "  Seeing full-screen issues only when launching through LaunchBox?" -ForegroundColor Cyan
+            Write-Host "    Go to  Tools -> Manage -> Emulators -> TeknoParrot -> Edit ->" -ForegroundColor DarkGray
+            Write-Host "    Startup Screen tab, and disable 'Enable Game Startup Screen'." -ForegroundColor DarkGray
+            Write-Host ""
+            Write-Host "  The exported XML file ($lbPath)" -ForegroundColor DarkCyan
+            Write-Host "  is a reference showing all registered games, their profile codes," -ForegroundColor DarkCyan
+            Write-Host "  and executable paths. You do not need to import it directly." -ForegroundColor DarkCyan
+            Write-Log "LaunchBox export: exported $lbCount games to $lbPath"
+        }
+    }
+}
+
 # Before a LaunchBox write: two short lines. The small risk that an app can reopen is the Details view.
 function Write-TpmLaunchBoxWriteNotice {
     Write-TpmText -Text 'Close LaunchBox and BigBox first. TeknoParrot Manager will not close them for you.' -Color Yellow -BlankBefore
@@ -47004,11 +47263,21 @@ function Get-TpmOptionalStepHelpBlocks {
 # The one-line question for an optional follow-up step. Y and N keep their meaning; D shows what the step is and
 # asks again. Returns 'Y' or 'N'.
 function Read-TpmOptionalStepChoice {
-    param([Parameter(Mandatory)][ValidateSet('ReShade', 'DgVoodoo2', 'GpuFix')][string]$Step, [string]$Default = 'N')
+    param([Parameter(Mandatory)][ValidateSet('ReShade', 'DgVoodoo2', 'GpuFix')][string]$Step, [string]$Default = 'N', [switch]$AllowBack)
     $helpBlocks = Get-TpmOptionalStepHelpBlocks -Step $Step
     $verb = if ($Step -eq 'GpuFix') { 'Apply now?' } else { 'Set up now?' }
     $defaultText = if ($Default) { (', default {0}' -f $Default) } else { '' }
     Write-Host ''
+    if ($AllowBack) {
+        # B goes back to the step before this one, so a step that was skipped by accident can be done after all. Returns 'Y', 'N' or 'B'.
+        $backPrompt = 'Optional: {0}. {1} (Y/N, B = go back one step, D = what is this{2})' -f (Get-TpmOptionalStepName -Step $Step), $verb, $defaultText
+        while ($true) {
+            $backAnswer = ([string](Read-HostSafe $backPrompt -Default $Default)).Trim().ToUpperInvariant()
+            if ($backAnswer -eq 'D') { Show-TpmDetailBlocks -Blocks $helpBlocks; continue }
+            if ($backAnswer -in @('Y', 'N', 'B')) { return $backAnswer }
+            Write-Host '  Please choose Y, N or B.' -ForegroundColor Yellow
+        }
+    }
     return (Read-TpmYesNo -Prompt ('Optional: {0}. {1} (Y/N, D = what is this{2})' -f (Get-TpmOptionalStepName -Step $Step), $verb, $defaultText) -Default $Default -DetailsAction { Show-TpmDetailBlocks -Blocks $helpBlocks })
 }
 
@@ -49203,7 +49472,7 @@ function Limit-MainMenuBodyRowsToBudget {
     return @($BodyRows[$start..($BodyRows.Count - 1)])
 }
 
-# Single-line banner ("TeknoParrot Manager v1.0 RC8.1") with no frame and no
+# Single-line banner ("TeknoParrot Manager v1.0 RC8.3") with no frame and no
 # blank separator, for viewports too short for the normal framed banner (5-6
 # rows) to leave any room for menu content -- see
 # Get-MainMenuEmergencyCompactRows.
@@ -52310,6 +52579,7 @@ if ($registrationFolders.Count -gt 0 -and -not $dryRunActive) {
         Write-Log "AutoSync: one-game maintenance scope = New game only."
         Write-Host "  Only the games extracted in this run were checked. The whole-library checks were skipped." -ForegroundColor Green
         Write-Host ('  Registration result: ' + $result.Summary) -ForegroundColor $(if ($result.Outcome -in @('SUCCEEDED','NO_OP')) { 'DarkGray' } else { 'Yellow' })
+        Invoke-TpmLaunchBoxStep
         if (-not $Unattended) { [void](Read-HostSafe "  Press Enter to return to the menu") }
         continue
     }
@@ -52556,136 +52826,7 @@ if ($result.Registered.Count -gt 0 -and $notesIndex.Count -gt 0) {
 # OPTIONAL LAUNCHBOX INTEGRATION OR SEPARATE REFERENCE EXPORT
 # =============================================================================
 
-Write-Host ""
-$doLB = "N"
-$lbChoice = $null
-if ($dryRunActive) {
-    Write-Log "PreviewMode: LaunchBox reference export skipped."
-} elseif ($Unattended) {
-    Write-Log "Unattended: LaunchBox reference export skipped."
-} else {
-    Write-TpmLaunchBoxOffer
-    # Answers given for [P] Preview become the defaults for [A] (Enter
-    # reuses them); [A] still plans read-only and asks before any write.
-    $lbPreviewRoot = $null
-    $lbPreviewChoice = $null
-    $lbPreviewShownSummary = ''
-    do {
-        $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'F', 'B') -Default 'P'
-        if ($lbChoice -eq 'P') {
-            Write-TpmText -Text 'Preview: TeknoParrot Manager only reads your LaunchBox files.' -Color DarkCyan
-            $previewRoot = $lbRoot
-            if (-not $previewRoot) { $previewRoot = Read-HostSafe '  LaunchBox install folder (Enter to go back)' }
-            if ($previewRoot) {
-                $previewChoice = Read-TpmChoice -Prompt '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, B back' -Choices @('1','2','3','B') -Default '2'
-                if ($previewChoice -ne 'B') {
-                    $lbPreviewRoot = $previewRoot
-                    $lbPreviewChoice = $previewChoice
-                    $previewPlatforms = switch ($previewChoice) { '1' { @('Arcade') } '2' { @('TeknoParrot') } '3' { @('Arcade','TeknoParrot') } }
-                    $lbPreviewResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $previewRoot -platformNames $previewPlatforms -PlanOnly
-                    Write-TpmLaunchBoxResult -Result $lbPreviewResult -Unattended:$Unattended
-                    $lbPreviewShownSummary = [string]$lbPreviewResult.Summary
-                }
-            }
-        }
-    } while ($lbChoice -eq 'P')
-    if ($lbChoice -eq 'A') {
-        Write-TpmLaunchBoxWriteNotice
-        $lbWriteNoticeBlocks = Get-TpmLaunchBoxWriteNoticeBlocks
-        if ((Read-TpmYesNo -Prompt 'Add the missing games to LaunchBox now? (Y/N, D = about the risks)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $lbWriteNoticeBlocks }) -eq 'Y') {
-            $writeRoot = $lbRoot
-            if (-not $writeRoot) {
-                if ($lbPreviewRoot) {
-                    $writeRoot = Read-HostSafe ("  LaunchBox install folder (Enter = previewed folder {0})" -f $lbPreviewRoot) -Default $lbPreviewRoot
-                } else {
-                    $writeRoot = Read-HostSafe '  LaunchBox install folder'
-                }
-            }
-            $platformDefault = if ($lbPreviewChoice -in @('1','2','3')) { [string]$lbPreviewChoice } else { '2' }
-            $platformPrompt = if ($lbPreviewChoice -in @('1','2','3')) { "  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel (Enter = previewed choice $platformDefault)" } else { '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel' }
-            $platformChoice = Read-TpmChoice -Prompt $platformPrompt -Choices @('1','2','3','4','B') -Default $platformDefault
-            if ($platformChoice -ne 'B') {
-                $targetPlatforms = switch ($platformChoice) {
-                    '1' { @('Arcade') }
-                    '2' { @('TeknoParrot') }
-                    '3' { @('Arcade','TeknoParrot') }
-                    '4' { @(Read-HostSafe '  Custom platform name (must be a safe filename)') }
-                }
-                # Show exactly what would change, then ask for consent to that plan (read-only preview first).
-                $lbPlanResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms -PlanOnly
-                Write-TpmLaunchBoxPlan -Result $lbPlanResult -AlreadyShownSummary $lbPreviewShownSummary -Unattended:$Unattended
-                if ($lbPlanResult.Reason -eq 'PREVIEW' -and [int]$lbPlanResult.WouldChangeFiles -gt 0) {
-                    if ((Read-TpmYesNo -Prompt 'Write exactly these changes after a verified backup? (Y/N)' -Default 'N') -eq 'Y') {
-                        $lbWriteResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms
-                        Write-TpmLaunchBoxResult -Result $lbWriteResult
-                    } else {
-                        Write-Host '  LaunchBox write canceled; nothing was changed.' -ForegroundColor DarkGray
-                    }
-                }
-            }
-        }
-    } elseif ($lbChoice -eq 'F') {
-        $doLB = "Y"
-    }
-}
-
-
-if ($doLB -eq "Y") {
-    $lbPath  = Join-Path $script:TpmOwnedLayout.Reports "TeknoParrot-LaunchBox-Import.xml"
-    $lbCount = Export-LaunchBoxXml -userProfilesDir $userProfilesDir -outputPath $lbPath
-    if ($lbCount -eq -2) {
-        Write-Host "  Existing LaunchBox reference was preserved; TeknoParrot Manager did not overwrite it." -ForegroundColor Yellow
-        Write-Host ("  Existing file: {0}" -f $lbPath) -ForegroundColor DarkCyan
-        Write-Host "  No new reference was exported. Keep this file, or move it after making a copy before exporting again." -ForegroundColor DarkGray
-    } elseif ($lbCount -lt 0) {
-        Write-Host "  LaunchBox reference export failed; existing files are never overwritten. See TeknoParrot-Manager.log." -ForegroundColor Red
-    } elseif ($lbCount -eq 0) {
-        # An empty reference would block the next export (existing files are never overwritten), so remove the one this call just created.
-        try { if (Test-Path -LiteralPath $lbPath -PathType Leaf) { Remove-Item -LiteralPath $lbPath -Force -ErrorAction Stop } } catch { Write-Log "LaunchBox export: could not remove the empty reference -- $_" }
-        Write-Host "  No reference file was kept: none of the registered profiles has an existing game path." -ForegroundColor Yellow
-        Write-Host "  Register games first (or repair their saved paths in Library Health Check), then export again." -ForegroundColor DarkGray
-    } else {
-        Write-Host ("  Exported : {0} game(s)" -f $lbCount) -ForegroundColor Green
-        Write-Host "  File     : $lbPath" -ForegroundColor DarkCyan
-        Write-Host ""
-        Write-Host "  HOW TO IMPORT INTO LAUNCHBOX" -ForegroundColor Cyan
-        Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
-        Write-Host "  Important: LaunchBox must be fully CLOSED before importing." -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "  Step 1.  Close LaunchBox completely." -ForegroundColor White
-        Write-Host "  Step 2.  Open LaunchBox." -ForegroundColor White
-        Write-Host "  Step 3.  Go to  Tools -> Import -> Emulated Games." -ForegroundColor White
-        Write-Host "  Step 4.  On the first screen:" -ForegroundColor White
-        Write-Host "             - Emulator: select TeknoParrot (or add it first -- see below)." -ForegroundColor DarkGray
-        Write-Host "             - Import type: 'Import ROM files'." -ForegroundColor DarkGray
-        Write-Host ("             - Folder: {0}" -f (Join-Path $tpRoot "UserProfiles")) -ForegroundColor DarkGray
-        Write-Host "             - File types: *.xml  (import the profile files themselves," -ForegroundColor DarkGray
-        Write-Host "               not the game executables -- TeknoParrot launches games" -ForegroundColor DarkGray
-        Write-Host "               by profile, so the profile XML is what LaunchBox treats" -ForegroundColor DarkGray
-        Write-Host "               as the 'rom' for each game)." -ForegroundColor DarkGray
-        Write-Host "  Step 5.  Follow the wizard. LaunchBox will assign game names," -ForegroundColor White
-        Write-Host "             metadata, and box art automatically." -ForegroundColor DarkGray
-        Write-Host ""
-        Write-Host "  If TeknoParrot is not yet in LaunchBox's emulator list:" -ForegroundColor Cyan
-        Write-Host "    a. Go to  Tools -> Manage -> Emulators -> Add." -ForegroundColor DarkGray
-        Write-Host "    b. Name: TeknoParrot" -ForegroundColor DarkGray
-        Write-Host ("    c. Emulator path: {0}" -f (Join-Path $tpRoot "TeknoParrotUi.exe")) -ForegroundColor DarkGray
-        Write-Host "    d. Command-line parameters: --profile=%romfile%.xml" -ForegroundColor DarkGray
-        Write-Host "    e. Exit Script tab: add a script so Escape cleanly quits" -ForegroundColor DarkGray
-        Write-Host "       TeknoParrot back to LaunchBox (without one, Escape may not" -ForegroundColor DarkGray
-        Write-Host "       exit the game properly)." -ForegroundColor DarkGray
-        Write-Host "    f. Save, then re-run the import wizard." -ForegroundColor DarkGray
-        Write-Host ""
-        Write-Host "  Seeing full-screen issues only when launching through LaunchBox?" -ForegroundColor Cyan
-        Write-Host "    Go to  Tools -> Manage -> Emulators -> TeknoParrot -> Edit ->" -ForegroundColor DarkGray
-        Write-Host "    Startup Screen tab, and disable 'Enable Game Startup Screen'." -ForegroundColor DarkGray
-        Write-Host ""
-        Write-Host "  The exported XML file ($lbPath)" -ForegroundColor DarkCyan
-        Write-Host "  is a reference showing all registered games, their profile codes," -ForegroundColor DarkCyan
-        Write-Host "  and executable paths. You do not need to import it directly." -ForegroundColor DarkCyan
-        Write-Log "LaunchBox export: exported $lbCount games to $lbPath"
-    }
-}
+Invoke-TpmLaunchBoxStep
 
 # =============================================================================
 # CROSSHAIR SETUP  (optional)
@@ -52736,7 +52877,18 @@ if ($doCrosshairs -ne 'Y') {
 # RESHADE SETUP  (optional, runs after crosshair setup)
 # =============================================================================
 
-if ($dryRunActive) {
+# The three optional questions (ReShade, dgVoodoo2, graphics card fixes) can be walked back with B, so a step skipped by accident can still be done.
+# $optionalStepFrom is the first step to ask on this pass: 1 = ReShade, 2 = dgVoodoo2.
+$optionalStepFrom = 1
+$optionalMarkReShade = @($onboardingSummaries.Count, $onboardingFollowUp.Count)
+$optionalMarkDgVoodoo = $optionalMarkReShade
+$rsSetupDone = $false
+$dgSetupDone = $false
+do {
+$optionalGoBack = $false
+if ($optionalStepFrom -gt 1) {
+    $doReShade = "N"
+} elseif ($dryRunActive) {
     $doReShade = "N"
     Write-Log "PreviewMode: ReShade setup offer skipped."
 } elseif ($Unattended) {
@@ -52749,7 +52901,7 @@ if ($dryRunActive) {
 } else {
     $doReShade = Read-TpmOptionalStepChoice -Step ReShade -Default 'N'
 }
-$rsSetupDone = $false
+if ($optionalStepFrom -le 1) { $rsSetupDone = $false }
 if ($doReShade -eq "Y") {
     # Locate the 64-bit DLL: bundled copy first, then config. If this PC has none yet, run the same
     # download-or-use-my-copy step as the main-menu "ReShade setup" right here (Request-TpmReShadeSourceDll),
@@ -52810,6 +52962,7 @@ if ($doReShade -eq "Y") {
 # =============================================================================
 # DGVOODOO2 SETUP  (optional, runs after ReShade setup)
 # =============================================================================
+$optionalMarkDgVoodoo = @($onboardingSummaries.Count, $onboardingFollowUp.Count)
 if ($dryRunActive) {
     $doDgVoodoo = "N"
     Write-Log "PreviewMode: dgVoodoo2 setup offer skipped."
@@ -52821,7 +52974,17 @@ if ($dryRunActive) {
     Write-TpmOptionalStepBlocked -Step DgVoodoo2
     Write-Log 'dgVoodoo2 offer suppressed: crosshair setup did not finish.'
 } else {
-    $doDgVoodoo = Read-TpmOptionalStepChoice -Step DgVoodoo2 -Default 'N'
+    $doDgVoodoo = Read-TpmOptionalStepChoice -Step DgVoodoo2 -Default 'N' -AllowBack
+    if ($doDgVoodoo -eq 'B') {
+        # Back to the ReShade question: drop what this pass added to the summaries, then ask again from ReShade.
+        Write-Log 'Optional setup: the user went back from the dgVoodoo2 question to the ReShade question.'
+        if ($onboardingSummaries.Count -gt $optionalMarkReShade[0]) { $onboardingSummaries.RemoveRange($optionalMarkReShade[0], $onboardingSummaries.Count - $optionalMarkReShade[0]) }
+        if ($onboardingFollowUp.Count -gt $optionalMarkReShade[1]) { $onboardingFollowUp.RemoveRange($optionalMarkReShade[1], $onboardingFollowUp.Count - $optionalMarkReShade[1]) }
+        $rsSetupDone = $false
+        $optionalStepFrom = 1
+        $optionalGoBack = $true
+        continue
+    }
 }
 if ($doDgVoodoo -eq "Y") {
     # Nothing on this PC yet: the same download-or-use-my-folder step as the main-menu "dgVoodoo2 setup" runs right here,
@@ -52891,7 +53054,17 @@ if ($dryRunActive) {
     Write-TpmOptionalStepBlocked -Step GpuFix
     Write-Log 'GPU fix offer suppressed: crosshair setup did not finish.'
 } else {
-    $doGpuFix = Read-TpmOptionalStepChoice -Step GpuFix -Default ''
+    $doGpuFix = Read-TpmOptionalStepChoice -Step GpuFix -Default '' -AllowBack
+    if ($doGpuFix -eq 'B') {
+        # Back to the dgVoodoo2 question (the crosshair-or-CPS3 offer in between is asked again too).
+        Write-Log 'Optional setup: the user went back from the graphics card fixes question to the dgVoodoo2 question.'
+        if ($onboardingSummaries.Count -gt $optionalMarkDgVoodoo[0]) { $onboardingSummaries.RemoveRange($optionalMarkDgVoodoo[0], $onboardingSummaries.Count - $optionalMarkDgVoodoo[0]) }
+        if ($onboardingFollowUp.Count -gt $optionalMarkDgVoodoo[1]) { $onboardingFollowUp.RemoveRange($optionalMarkDgVoodoo[1], $onboardingFollowUp.Count - $optionalMarkDgVoodoo[1]) }
+        $dgSetupDone = $false
+        $optionalStepFrom = 2
+        $optionalGoBack = $true
+        continue
+    }
 }
 $autoGpuResult = $null
 if ($doGpuFix -eq "Y") {
@@ -52926,6 +53099,7 @@ if ($doGpuFix -ne 'Y') {
     $onboardingGpuSummary = 'GPU compatibility: profile writes were reported complete. Saved fields were not independently read back by this step; game launch and display output were not verified.'
 }
 [void]$onboardingSummaries.Add($onboardingGpuSummary)
+} while ($optionalGoBack)
 Write-Host ''
 Write-Host '  Optional setup results:' -ForegroundColor Cyan
 foreach ($onboardingSummary in $onboardingSummaries) {
