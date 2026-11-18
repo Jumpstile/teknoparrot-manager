@@ -10,6 +10,12 @@
   v1.0 RC9 (changes since RC8.2)
   ----------------------------------------------------------------
 
+  LEDBlinky lighting (optional)
+  - If LEDBlinky is on this PC, you can now add lighting info for your
+    games to it. You see a preview first. Nothing is changed until you say
+    yes, a saved copy is made first, and you can undo it later. Only the
+    entries the Manager adds are ever removed.
+
   Game matching
   - A game folder whose name has a note in brackets after the title, such
     as "(Landscape,Bezel)", is now matched by its title alone, so the note
