@@ -25221,6 +25221,10 @@ function Build-DatIndexFromStream {
         $gameName    = ''
         $profCode    = ''
         $exePath     = ''
+        # Newer dat fields (TPUISchemaVersion 1, issue #382); empty when a game does not have them.
+        $profCode2   = ''
+        $exePath2    = ''
+        $testMenuExe = ''
         $insideGame  = $false
         $captureRoms = $false
         $captureNames = $null
@@ -25252,6 +25256,9 @@ function Build-DatIndexFromStream {
                     $gameName    = $reader.GetAttribute('name')
                     $profCode    = ''
                     $exePath     = ''
+                    $profCode2   = ''
+                    $exePath2    = ''
+                    $testMenuExe = ''
                     $insideGame  = $true
                     $captureRoms = $false
                     if ($null -ne $EmuRomSink -and $gameName -and $gameName.StartsWith('[EMU]', [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -25280,6 +25287,9 @@ function Build-DatIndexFromStream {
             } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::Text -and $insideGame) {
                 if     ($currentElem -eq 'GameProfile')                           { $profCode = $reader.Value }
                 elseif ($currentElem -eq 'Executable' -and -not $exePath) { $exePath  = $reader.Value }
+                elseif ($currentElem -eq 'GameProfile2')                    { $profCode2   = $reader.Value }
+                elseif ($currentElem -eq 'Executable2' -and -not $exePath2) { $exePath2    = $reader.Value }
+                elseif ($currentElem -eq 'TestMenuExecutable')              { $testMenuExe = $reader.Value }
             } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::EndElement -and $reader.Name -eq 'game') {
                 $insideGame = $false
                 $captureRoms = $false
@@ -25293,6 +25303,9 @@ function Build-DatIndexFromStream {
                             # Pass-2 fuzzy fallback can compare meaningful title words
                             # against the folder's own name -- see issue #84.
                             OriginalName = $gameName.Trim()
+                            ProfileCode2       = $profCode2.Trim()
+                            Executable2        = $exePath2.Trim()
+                            TestMenuExecutable = $testMenuExe.Trim()
                         }
                     }
                 }

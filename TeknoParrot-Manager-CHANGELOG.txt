@@ -53,6 +53,8 @@
   - Games that need PlayStation 3 firmware (RPCS3) or a Play! game file are
     now checked before they start, and the Manager tells you what is
     missing.
+  - The game list now also reads a second program and a test menu program
+    for games that list them. Games without them work as before.
 
 
   v1.0 RC8.2 (changes since RC8.1)
