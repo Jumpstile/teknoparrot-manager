@@ -119,9 +119,9 @@ Describe 'LEDBlinky lighting export' {
         Get-LedHash $result.BackupPath | Should -Be $plan.SourceHash
         $new = [System.IO.File]::ReadAllText($fx.Controls)
         $new.Remove($plan.InsertAt, $plan.BlockText.Length) | Should -BeExactly $original
-        $span = Get-TpmLedEmulatorSpan -Text $new
-        $span.Body | Should -Match 'groupName="AkaiKatana"'
-        $span.Body | Should -Match 'groupName="MyOwnGame"'
+        $tekno = $new.Substring($new.IndexOf('emuname="TeknoParrot"'))
+        $tekno | Should -Match 'groupName="AkaiKatana"'
+        $tekno | Should -Match 'groupName="MyOwnGame"'
         $new.Substring(0, $new.IndexOf('emuname="TeknoParrot"')) | Should -Not -Match 'AkaiKatana'
         ($new | Select-String -Pattern '[^\x00-\x7F]').Count | Should -Be 0
         { $x = New-Object System.Xml.XmlDocument; $x.LoadXml($new) } | Should -Not -Throw
