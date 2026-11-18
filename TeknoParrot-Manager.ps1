@@ -55220,8 +55220,9 @@ function Get-TpmLedGameMatch {
     $heldNames = @($Cabinet.Held | ForEach-Object { $_.Name })
     $alias = @{ Service = '(?i)SERVICE'; Test = '(?i)(^|_)TEST'; Spinner = '(?i)DIAL|SPINNER'; Pedal = '(?i)PEDAL|GAS|BRAKE|ACCEL'; Trackball = '(?i)TRACKBALL' }
     $add = {
-        param($name, $voice)
-        if (@($written | Where-Object { $_.Cab.Name -eq $name }).Count -eq 0) { [void]$written.Add([pscustomobject]@{ Cab = $Cabinet.Controls[$name]; Voice = $voice }) }
+        param($name, $voice, $cab)
+        $use = if ($null -ne $cab) { $cab } else { $Cabinet.Controls[$name] }
+        if (@($written | Where-Object { $_.Cab.Name -eq $name }).Count -eq 0) { [void]$written.Add([pscustomobject]@{ Cab = $use; Voice = $voice }) }
     }
     foreach ($control in @($ProfileControls.Controls)) {
         if ($control.Exact) {
@@ -55238,7 +55239,12 @@ function Get-TpmLedGameMatch {
             }
             if ($candidates.Count -eq 0) {
                 $heldHere = @($heldNames | Where-Object { $_ -match $alias[$control.Kind] })
-                if ($heldHere.Count -gt 0) { [void]$choice.Add([pscustomobject]@{ Label = $control.Label; Candidates = $heldHere }) } else { [void]$notOn.Add($control.Label) }
+                if ($heldHere.Count -gt 0) { [void]$choice.Add([pscustomobject]@{ Label = $control.Label; Candidates = $heldHere }) }
+                elseif ($control.Kind -eq 'Trackball') {
+                    # The cabinet's trackball has a light, but the user's default entry does not list it. Add the standard trackball control.
+                    & $add 'CONTROL_TRACKBALL' 'Trackball' ([pscustomobject]@{ Name = 'CONTROL_TRACKBALL'; Voice = 'Trackball'; IsPrimary = $true; Color = 'White'; InputCodes = $null; Player = 0 })
+                }
+                else { [void]$notOn.Add($control.Label) }
             }
             elseif ($candidates.Count -eq 1) { & $add $candidates[0] '' }
             else { [void]$choice.Add([pscustomobject]@{ Label = $control.Label; Candidates = $candidates }) }
@@ -55257,8 +55263,17 @@ function Get-TpmLedGameMatch {
     return [pscustomobject]@{ Written = $written.ToArray(); NotOnCabinet = $notOn.ToArray(); NeedsChoice = $choice.ToArray() }
 }
 
-# One game's entry, built only from cabinet controls (name, color and input codes are the user's own). The game's own
-# label is used as the spoken word for a button when it has one.
+# The usual arcade button colors, as already used across the user's LEDBlinky games: buttons 1 to 4 are red, yellow, green
+# and blue; other buttons, Start, Coin and the trackball are white. Returns nothing for any other control (keeps its own color).
+function Get-TpmLedSchemeColor {
+    param([Parameter(Mandatory)][string]$Name)
+    if ($Name -match '^P[1-4]_BUTTON([1-7])$') { return @('Red', 'Yellow', 'Green', 'Blue', 'White', 'White', 'White')[[int]$Matches[1] - 1] }
+    if ($Name -match '^(START|COIN)[1-4]$' -or $Name -eq 'CONTROL_TRACKBALL') { return 'White' }
+    return $null
+}
+
+# One game's entry, built only from cabinet controls (name and input codes are the user's own; color follows the usual
+# arcade scheme above). The game's own label is used as the spoken word for a button when it has one.
 function New-TpmLedGroupText {
     param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)][object[]]$Written, [Parameter(Mandatory)][string]$Newline)
     $line = {
@@ -55266,7 +55281,9 @@ function New-TpmLedGroupText {
         $voice = if ($entry.Voice) { $entry.Voice } else { $entry.Cab.Voice }
         $text = '        <control name="{0}" voice="{1}"' -f (ConvertTo-TpmLedXmlText $entry.Cab.Name), (ConvertTo-TpmLedXmlText $voice)
         if ($entry.Cab.IsPrimary) { $text += ' primaryControl="1"' }
-        if ($null -ne $entry.Cab.Color) { $text += (' color="{0}"' -f (ConvertTo-TpmLedXmlText $entry.Cab.Color)) }
+        $schemeColor = Get-TpmLedSchemeColor -Name ([string]$entry.Cab.Name)
+        $useColor = if ($schemeColor) { $schemeColor } else { $entry.Cab.Color }
+        if ($null -ne $useColor) { $text += (' color="{0}"' -f (ConvertTo-TpmLedXmlText $useColor)) }
         if ($null -ne $entry.Cab.InputCodes) { $text += (' inputCodes="{0}"' -f (ConvertTo-TpmLedXmlText $entry.Cab.InputCodes)) }
         return ($text + ' />')
     }

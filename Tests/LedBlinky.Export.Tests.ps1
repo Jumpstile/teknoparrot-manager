@@ -348,6 +348,31 @@ Describe 'LEDBlinky lighting export' {
         $after | Should -Not -Match 'AkaiKatana'
     }
 
+    It 'new entries use the usual arcade colors: buttons 1 to 4 red, yellow, green, blue; other buttons, Start, Coin and the trackball white; other controls keep their own color' {
+        (Get-TpmLedSchemeColor -Name 'P1_BUTTON1') | Should -Be 'Red'
+        (Get-TpmLedSchemeColor -Name 'P1_BUTTON2') | Should -Be 'Yellow'
+        (Get-TpmLedSchemeColor -Name 'P2_BUTTON3') | Should -Be 'Green'
+        (Get-TpmLedSchemeColor -Name 'P2_BUTTON4') | Should -Be 'Blue'
+        foreach ($n in 'P1_BUTTON5', 'P1_BUTTON6', 'P1_BUTTON7', 'START1', 'COIN2', 'CONTROL_TRACKBALL') { (Get-TpmLedSchemeColor -Name $n) | Should -Be 'White' }
+        (Get-TpmLedSchemeColor -Name 'P1_JOYSTICK_UP') | Should -BeNullOrEmpty
+        (Get-TpmLedSchemeColor -Name 'CONTROL_JOY8WAY') | Should -BeNullOrEmpty
+        $written = @(
+            [pscustomobject]@{ Cab = [pscustomobject]@{ Name = 'P1_BUTTON1'; Voice = ''; IsPrimary = $false; Color = 'White'; InputCodes = 'KEYCODE_X'; Player = 1 }; Voice = '' },
+            [pscustomobject]@{ Cab = [pscustomobject]@{ Name = 'CONTROL_JOY8WAY'; Voice = ''; IsPrimary = $true; Color = 'Black'; InputCodes = ''; Player = 0 }; Voice = '' }
+        )
+        $text = New-TpmLedGroupText -Key 'Demo' -Title 'Demo' -Written $written -Newline "`r`n"
+        $text | Should -Match 'name="P1_BUTTON1"[^>]*color="Red"'
+        $text | Should -Match 'name="CONTROL_JOY8WAY"[^>]*color="Black"'
+    }
+
+    It 'a trackball game gets a trackball light even when the user''s default entry has no trackball control' {
+        $cabinet = [pscustomobject]@{ Held = @(); Controls = @{}; Names = @() }
+        $profile = [pscustomobject]@{ Family = 'trackball'; Controls = @([pscustomobject]@{ Kind = 'Trackball'; Label = 'Trackball'; Player = 0; Exact = $null; Voice = '' }) }
+        $match = Get-TpmLedGameMatch -ProfileControls $profile -Cabinet $cabinet
+        @($match.Written | ForEach-Object { $_.Cab.Name }) | Should -Contain 'CONTROL_TRACKBALL'
+        @($match.NotOnCabinet) | Should -Not -Contain 'Trackball'
+    }
+
     It 'undo refuses to guess when the added entries were changed' {
         $fx = New-LedFixture
         New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana'
