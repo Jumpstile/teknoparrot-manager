@@ -37,13 +37,15 @@ BeforeAll {
             (& $game 'Ghost Squad Evolution' $emuId (Join-Path $profiles 'gse.xml')),
             (& $game 'Mario Kart GP' $emuId (Join-Path $profiles 'mkgp.xml')),
             (& $game 'Hand Added Game' $otherEmu 'D:\Roms\hand.exe'),
-            (& $game 'Outside Profile Game' $emuId 'D:\Elsewhere\other.xml')
+            (& $game 'Outside Profile Game' $emuId 'D:\Elsewhere\other.xml'),
+            (& $game 'Other Emulator Game' $otherEmu (Join-Path $profiles 'other.xml'))
         ) -join ''
         [System.IO.File]::WriteAllText((Join-Path $lb 'Data\Platforms\TeknoParrot.xml'), "<LaunchBox>$games</LaunchBox>")
         [System.IO.File]::WriteAllBytes((Join-Path $pics 'time-crisis_4.png'), [byte[]](1, 2, 3, 4))
         [System.IO.File]::WriteAllBytes((Join-Path $pics 'sub\Ghost Squad Evolutiom.png'), [byte[]](5, 6, 7, 8))
         [System.IO.File]::WriteAllBytes((Join-Path $pics 'Hand Added Game.png'), [byte[]](9, 9, 9))
         [System.IO.File]::WriteAllBytes((Join-Path $pics 'Outside Profile Game.png'), [byte[]](8, 8, 8))
+        [System.IO.File]::WriteAllBytes((Join-Path $pics 'Other Emulator Game.png'), [byte[]](6, 6, 6))
         [System.IO.File]::WriteAllText((Join-Path $pics 'notes.txt'), 'not a picture')
         return [pscustomobject]@{ Root = $root; Lb = $lb; Profiles = $profiles; Pics = $pics; Backups = (Join-Path $root 'Backups\LaunchBoxBackups') }
     }
@@ -71,14 +73,15 @@ Describe 'LB424: matching and preview' {
     }
 
     It 'sorts games into exact matches, near matches and no picture, and skips games the Manager did not add' {
-        # Mutation: treat every LaunchBox game as ours -> Hand Added Game and Outside Profile Game show up as matches.
+        # Mutation: treat every LaunchBox game as ours (drop the emulator check) -> Other Emulator Game shows up as a match.
+        # Mutation: drop the profile-folder check -> Outside Profile Game shows up as a match.
         $fx = New-Lb424Fixture
         $plan = Get-Lb424Plan $fx
         @($plan.Exact | ForEach-Object { $_.Game.Title }) | Should -Be @('Time Crisis 4')
         @($plan.Near | ForEach-Object { $_.Game.Title }) | Should -Be @('Ghost Squad Evolution')
         @($plan.NoImage | ForEach-Object { $_.Game.Title }) | Should -Be @('Mario Kart GP')
         $plan.GameCount | Should -Be 3
-        $plan.ImageCount | Should -Be 4
+        $plan.ImageCount | Should -Be 5
         $plan.Exact[0].Dest | Should -BeExactly (Join-Path $fx.Lb 'Images\TeknoParrot\Clear Logo\Time Crisis 4-01.png')
     }
 
