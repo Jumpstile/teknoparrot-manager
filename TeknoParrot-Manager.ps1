@@ -46708,6 +46708,7 @@ function Invoke-TpmLaunchBoxStep {
         } elseif ($lbChoice -eq 'F') {
             $doLB = "Y"
         }
+        if ($lbChoice -ne 'B') { Invoke-TpmLaunchBoxMediaStep -lbRoot $lbRoot -userProfilesDir $userProfilesDir -Unattended:$Unattended -DryRun:$dryRunActive }
     }
 
 
@@ -54930,6 +54931,406 @@ if ($result.Registered.Count -gt 0 -and $notesIndex.Count -gt 0) {
             }
         }
         Write-Host ""
+    }
+}
+
+# =============================================================================
+# LAUNCHBOX IMAGE IMPORT  (clear logos / box art from a folder the user picks)
+# =============================================================================
+# Nothing is downloaded: every picture comes from a folder the user chooses. Only games the Manager added are
+# considered (their emulator is the TeknoParrot emulator and their profile is in the user profiles folder).
+# Pictures are copied to <LaunchBox>\Images\<Platform>\<Clear Logo | Box - Front>\<Title>-01.<ext>.
+# A picture that is already there is kept unless the user chooses to replace it (the old one is saved first).
+# Every import writes a small record outside the library so Undo can remove exactly what was added.
+#
+# MODULE-READY SECTION (meant to be lifted into a .psm1 after 1.0; nothing outside this section calls its private helpers).
+#   Public, pure data/logic (no prompts, no screen output; only Write-Log for the log file):
+#     Get-TpmLaunchBoxMediaPlan       read-only preview: exact matches, near matches, games with no picture, games kept
+#     Invoke-TpmLaunchBoxMediaImport  the only writer: copies the selected pictures and writes the undo record
+#     Invoke-TpmLaunchBoxMediaUndo    removes exactly what one import added (restores replaced pictures)
+#   Public, screen (calls only the three functions above plus the shared prompt/screen helpers):
+#     Invoke-TpmLaunchBoxMediaStep    the optional step shown after the LaunchBox choices
+#   Private helpers: Get-TpmLbMedia*, ConvertTo-TpmLbMediaKey, Undo-TpmLbMediaRecords, Write-TpmLbMediaOutcome
+#   Depends on (outside this section): Resolve-TpmLaunchBoxRoot, Read-TpmLaunchBoxXml, Get-TpmLaunchBoxPath,
+#     Get-SafeLaunchBoxPlatformFileName, Get-TpmLaunchBoxBackupRoot, Get-XmlChildText, Get-RelativePath, Test-PathInside,
+#     Test-TpmNoReparsePath, Assert-TpmNoReparseWriteTarget, Get-NormalizedGameKey (same name clean-up the DAT matching uses),
+#     Write-Log; screen only: Read-TpmChoice, Read-TpmYesNo, Read-HostSafe, Write-TpmText, Write-TpmOutcome,
+#     Show-TpmDetailBlocks, Format-TpmGameCount.
+#   No script-level variables are used: all state goes through parameters and returned objects.
+#   The Eggman DAT lists game folder names, not pictures, so it has no media data; its name clean-up is reused for file names.
+
+function Get-TpmLbMediaFolderName {
+    param([string]$Kind)
+    switch ($Kind) {
+        'ClearLogo' { return 'Clear Logo' }
+        'BoxFront' { return 'Box - Front' }
+        default { throw 'Unknown picture type.' }
+    }
+}
+
+# File-name form of a game title (characters Windows does not allow become underscores).
+function Get-TpmLbMediaSafeName {
+    param([string]$Title)
+    $name = [string]$Title
+    foreach ($ch in @([System.IO.Path]::GetInvalidFileNameChars() + [char]"'")) { $name = $name.Replace([string]$ch, '_') }
+    return $name.TrimEnd('.', ' ')
+}
+
+# Lower-case words without accents or punctuation; a trailing LaunchBox "-01" counter is dropped.
+function ConvertTo-TpmLbMediaKey {
+    param([string]$Text)
+    $t = [regex]::Replace([string]$Text, '-\d{2}$', '')
+    # Same clean-up the DAT matching uses: drops [tags], (World)/(JPN) style region marks and version notes.
+    $t = Get-NormalizedGameKey $t
+    $decomposed = $t.Normalize([System.Text.NormalizationForm]::FormD)
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($c in $decomposed.ToCharArray()) {
+        if ([System.Globalization.CharUnicodeInfo]::GetUnicodeCategory($c) -ne [System.Globalization.UnicodeCategory]::NonSpacingMark) { [void]$sb.Append($c) }
+    }
+    $t = $sb.ToString().ToLowerInvariant().Replace('&', ' and ')
+    return ([regex]::Replace($t, '[^a-z0-9]+', ' ').Trim())
+}
+
+function Get-TpmLbMediaLooseKey {
+    param([string]$Key)
+    $words = @(([string]$Key -split ' ') | Where-Object { $_ -and $_ -notin @('the', 'a', 'an', 'and') })
+    return ($words -join '')
+}
+
+function Get-TpmLbMediaSimilarity {
+    param([string]$Left, [string]$Right)
+    $max = [Math]::Max($Left.Length, $Right.Length)
+    if ($max -eq 0) { return 0.0 }
+    $prev = New-Object 'int[]' ($Right.Length + 1)
+    for ($j = 0; $j -le $Right.Length; $j++) { $prev[$j] = $j }
+    for ($i = 1; $i -le $Left.Length; $i++) {
+        $cur = New-Object 'int[]' ($Right.Length + 1)
+        $cur[0] = $i
+        for ($j = 1; $j -le $Right.Length; $j++) {
+            $cost = if ($Left[$i - 1] -ceq $Right[$j - 1]) { 0 } else { 1 }
+            $cur[$j] = [Math]::Min([Math]::Min($cur[$j - 1] + 1, $prev[$j] + 1), $prev[$j - 1] + $cost)
+        }
+        $prev = $cur
+    }
+    return (1.0 - ($prev[$Right.Length] / $max))
+}
+
+# Games the Manager added to LaunchBox: emulator is TeknoParrot's and the profile lives in the user profiles folder.
+function Get-TpmLbMediaGames {
+    param([string]$lbRoot, [string]$userProfilesDir, [string[]]$platformNames)
+    $emulatorsDoc = Read-TpmLaunchBoxXml (Get-TpmLaunchBoxPath $lbRoot 'Data\Emulators.xml')
+    $emulatorIds = @($emulatorsDoc.SelectNodes('/LaunchBox/Emulator') | Where-Object { (Get-XmlChildText $_ 'Title') -eq 'TeknoParrot' } | ForEach-Object { Get-XmlChildText $_ 'ID' })
+    $games = New-Object System.Collections.Generic.List[object]
+    if ($emulatorIds.Count -eq 0) { return ,@() }
+    foreach ($name in $platformNames) {
+        $safe = Get-SafeLaunchBoxPlatformFileName $name
+        if ($safe -cne $name -or $name -in @('.', '..')) { throw 'Platform name must be a safe, unambiguous filename.' }
+        $path = Get-TpmLaunchBoxPath $lbRoot ("Data\Platforms\$safe.xml")
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $doc = Read-TpmLaunchBoxXml $path
+        foreach ($node in @($doc.SelectNodes('/LaunchBox/Game'))) {
+            if ((Get-XmlChildText $node 'Emulator') -notin $emulatorIds) { continue }
+            $appPath = Get-XmlChildText $node 'ApplicationPath'
+            $title = Get-XmlChildText $node 'Title'
+            if (-not $appPath -or -not $title) { continue }
+            $full = if ([System.IO.Path]::IsPathRooted($appPath)) { $appPath } else { Join-Path $lbRoot $appPath }
+            if (-not (Test-PathInside -child $full -parent $userProfilesDir)) { continue }
+            [void]$games.Add([pscustomobject]@{ Platform = $name; Title = $title })
+        }
+    }
+    return ,@($games.ToArray())
+}
+
+# READ-ONLY preview. Exact = same name (ignoring case, accents, spaces and punctuation), one picture only.
+# Near = a close name, or several pictures with the same name; the user must confirm each one.
+function Get-TpmLaunchBoxMediaPlan {
+    param([string]$lbRoot, [string]$userProfilesDir, [string]$imageFolder, [string[]]$platformNames, [ValidateSet('ClearLogo', 'BoxFront')][string]$Kind = 'ClearLogo', [switch]$ReplaceExisting)
+    $lbRoot = Resolve-TpmLaunchBoxRoot $lbRoot
+    if (-not (Test-Path -LiteralPath $lbRoot -PathType Container) -or -not (Test-TpmNoReparsePath $lbRoot)) { throw 'Choose a safe existing LaunchBox folder.' }
+    if ([string]::IsNullOrWhiteSpace($imageFolder) -or -not (Test-Path -LiteralPath $imageFolder -PathType Container) -or -not (Test-TpmNoReparsePath $imageFolder)) { throw 'Choose a folder that exists and holds your pictures.' }
+    if (@($platformNames).Count -eq 0) { throw 'Choose at least one LaunchBox platform.' }
+    $kindFolder = Get-TpmLbMediaFolderName $Kind
+    $index = @(Get-ChildItem -LiteralPath $imageFolder -Recurse -File -ErrorAction Stop |
+        Where-Object { @('.png', '.jpg', '.jpeg') -contains $_.Extension.ToLowerInvariant() -and -not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) } |
+        Sort-Object FullName | ForEach-Object {
+            $key = ConvertTo-TpmLbMediaKey ([System.IO.Path]::GetFileNameWithoutExtension($_.Name))
+            [pscustomobject]@{ File = $_; Compact = $key.Replace(' ', ''); Loose = (Get-TpmLbMediaLooseKey $key) }
+        })
+    $exact = New-Object System.Collections.Generic.List[object]
+    $near = New-Object System.Collections.Generic.List[object]
+    $noImage = New-Object System.Collections.Generic.List[object]
+    $existing = New-Object System.Collections.Generic.List[object]
+    $games = Get-TpmLbMediaGames -lbRoot $lbRoot -userProfilesDir $userProfilesDir -platformNames $platformNames
+    foreach ($game in $games) {
+        $safe = Get-TpmLbMediaSafeName $game.Title
+        $destDir = Join-Path (Join-Path (Join-Path $lbRoot 'Images') $game.Platform) $kindFolder
+        $have = @()
+        if (Test-Path -LiteralPath $destDir -PathType Container) { $have = @(Get-ChildItem -LiteralPath $destDir -File -Filter ($safe + '-01.*') -ErrorAction Stop) }
+        if ($have.Count -gt 0 -and -not $ReplaceExisting) { [void]$existing.Add([pscustomobject]@{ Game = $game; Existing = $have[0].FullName }); continue }
+        $key = ConvertTo-TpmLbMediaKey $game.Title
+        $compact = $key.Replace(' ', ''); $loose = Get-TpmLbMediaLooseKey $key
+        $same = @(); $close = @()
+        if ($compact) {
+            $same = @($index | Where-Object { $_.Compact -ceq $compact })
+            if ($same.Count -eq 0) {
+                $close = @($index | ForEach-Object {
+                    $sim = Get-TpmLbMediaSimilarity $compact $_.Compact
+                    if ($_.Loose -ceq $loose -or ($compact.Length -ge 6 -and $sim -ge 0.9)) { [pscustomobject]@{ Item = $_; Sim = $sim } }
+                } | Sort-Object @{ Expression = 'Sim'; Descending = $true } | Select-Object -First 3)
+            }
+        }
+        $replaces = if ($have.Count -gt 0) { $have[0].FullName } else { $null }
+        if ($same.Count -eq 1) {
+            $dest = Join-Path $destDir ($safe + '-01' + $same[0].File.Extension.ToLowerInvariant())
+            [void]$exact.Add([pscustomobject]@{ Game = $game; Image = $same[0].File.FullName; Dest = $dest; Replaces = $replaces })
+        } elseif ($same.Count -gt 1 -or $close.Count -gt 0) {
+            $cands = if ($same.Count -gt 1) { @($same | ForEach-Object { $_.File }) } else { @($close | ForEach-Object { $_.Item.File }) }
+            $why = if ($same.Count -gt 1) { 'More than one picture has this name.' } else { 'The name is close, not the same.' }
+            [void]$near.Add([pscustomobject]@{ Game = $game; Candidates = @($cands | ForEach-Object { [pscustomobject]@{ Image = $_.FullName; Dest = (Join-Path $destDir ($safe + '-01' + $_.Extension.ToLowerInvariant())) } }); Reason = $why; Replaces = $replaces })
+        } else {
+            [void]$noImage.Add([pscustomobject]@{ Game = $game })
+        }
+    }
+    return [pscustomobject]@{ LaunchBoxRoot = $lbRoot; ImageFolder = $imageFolder; Kind = $Kind; KindFolder = $kindFolder; ImageCount = $index.Count; GameCount = @($games).Count
+        Exact = @($exact.ToArray()); Near = @($near.ToArray()); NoImage = @($noImage.ToArray()); Existing = @($existing.ToArray()); ReplaceExisting = [bool]$ReplaceExisting }
+}
+
+function Get-TpmLbMediaImportsRoot {
+    param([string]$lbRoot, [string]$BackupRoot)
+    $base = Get-TpmLaunchBoxBackupRoot -BackupRoot $BackupRoot -LaunchBoxRoot $lbRoot
+    $root = Join-Path (Split-Path -Parent $base) 'LaunchBoxMediaImports'
+    if (Test-PathInside -child $root -parent $lbRoot) { throw 'Picture import records must be kept outside the LaunchBox folder.' }
+    return $root
+}
+
+# Full path of a recorded picture; refuses anything that is not a picture path inside <LaunchBox>\Images.
+function Get-TpmLbMediaRecordedPath {
+    param([string]$lbRoot, [string]$RelativePath)
+    if ($RelativePath -notmatch '^Images\\[^\\/:*?"<>|]+\\(?:Clear Logo|Box - Front)\\[^\\/:*?"<>|]+$' -or $RelativePath -match '(^|\\)\.\.(\\|$)') { throw 'Invalid recorded picture path.' }
+    $full = [System.IO.Path]::GetFullPath((Join-Path $lbRoot $RelativePath))
+    if (-not (Test-PathInside -child $full -parent (Join-Path $lbRoot 'Images')) -or -not (Test-TpmNoReparsePath -Path $full)) { throw 'Unsafe picture path.' }
+    return $full
+}
+
+function Undo-TpmLbMediaRecords {
+    param([string]$lbRoot, [object[]]$Added, [object[]]$Replaced, [string[]]$CreatedDirs, [string]$ImportDir)
+    $kept = New-Object System.Collections.Generic.List[string]
+    $removed = 0; $restored = 0
+    foreach ($a in @($Added)) {
+        $full = Get-TpmLbMediaRecordedPath $lbRoot $a.Path
+        if (-not [System.IO.File]::Exists($full)) { continue }
+        if ((Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash -ne $a.Hash) { [void]$kept.Add([string]$a.Path); continue }
+        [System.IO.File]::Delete($full); $removed++
+    }
+    foreach ($r in @($Replaced)) {
+        $full = Get-TpmLbMediaRecordedPath $lbRoot $r.Path
+        $saved = Join-Path $ImportDir $r.Saved
+        if ([System.IO.File]::Exists($full)) { [void]$kept.Add([string]$r.Path); continue }
+        if (-not [System.IO.File]::Exists($saved)) { [void]$kept.Add([string]$r.Path); continue }
+        [System.IO.File]::Move($saved, $full); $restored++
+    }
+    foreach ($d in @($CreatedDirs | Sort-Object { $_.Length } -Descending)) {
+        try {
+            $full = [System.IO.Path]::GetFullPath((Join-Path $lbRoot $d))
+            if ((Test-PathInside -child $full -parent (Join-Path $lbRoot 'Images')) -and (Test-Path -LiteralPath $full -PathType Container) -and @(Get-ChildItem -LiteralPath $full -Force).Count -eq 0) { [System.IO.Directory]::Delete($full, $false) }
+        } catch { Write-Log ('LaunchBox pictures: could not remove the empty folder {0}: {1}' -f $d, $_.Exception.Message) }
+    }
+    return [pscustomobject]@{ Removed = $removed; Restored = $restored; Kept = @($kept.ToArray()) }
+}
+
+# WRITES. $Selected = items with Game, Image, Dest, Replaces (exact matches plus the near matches the user confirmed).
+function Invoke-TpmLaunchBoxMediaImport {
+    param([string]$lbRoot, [object[]]$Selected, [string]$BackupRoot, [switch]$ReplaceExisting)
+    $result = [pscustomobject]@{ Outcome = 'FAILED'; Summary = 'No pictures were copied.'; AddedCount = 0; ReplacedCount = 0; SkippedCount = 0; ImportPath = $null; Errors = @() }
+    $added = New-Object System.Collections.Generic.List[object]
+    $replaced = New-Object System.Collections.Generic.List[object]
+    $createdDirs = New-Object System.Collections.Generic.List[string]
+    $importDir = $null
+    try {
+        $lbRoot = Resolve-TpmLaunchBoxRoot $lbRoot
+        if (@($Selected).Count -eq 0) { $result.Outcome = 'NO_CHANGES'; $result.Summary = 'There was nothing to copy.'; return $result }
+        $importsRoot = Get-TpmLbMediaImportsRoot -lbRoot $lbRoot -BackupRoot $BackupRoot
+        $importDir = Join-Path $importsRoot ((Get-Date).ToString('yyyy-MM-dd_HH-mm-ss', [System.Globalization.CultureInfo]::InvariantCulture) + '-' + [guid]::NewGuid().ToString('N'))
+        Assert-TpmNoReparseWriteTarget -Path $importDir -Operation 'LaunchBox picture record'
+        [void][System.IO.Directory]::CreateDirectory($importDir)
+        $result.ImportPath = $importDir
+        $n = 0
+        foreach ($item in $Selected) {
+            $rel = Get-RelativePath $lbRoot $item.Dest
+            $dest = Get-TpmLbMediaRecordedPath $lbRoot $rel
+            if (-not (Test-Path -LiteralPath $item.Image -PathType Leaf) -or -not (Test-TpmNoReparsePath -Path $item.Image)) { throw ('The picture is gone or not safe to read: ' + $item.Image) }
+            $dir = [System.IO.Path]::GetDirectoryName($dest)
+            $walk = $dir; $toMake = @()
+            while (-not (Test-Path -LiteralPath $walk)) { $toMake = @($walk) + $toMake; $walk = [System.IO.Path]::GetDirectoryName($walk) }
+            foreach ($m in $toMake) { Assert-TpmNoReparseWriteTarget -Path $m -Operation 'LaunchBox picture folder'; [void][System.IO.Directory]::CreateDirectory($m); [void]$createdDirs.Add((Get-RelativePath $lbRoot $m)) }
+            $safe = [System.IO.Path]::GetFileNameWithoutExtension($dest)
+            $current = @(Get-ChildItem -LiteralPath $dir -File -Filter ($safe + '.*') -ErrorAction Stop)
+            if ($current.Count -gt 0) {
+                if (-not $ReplaceExisting) { $result.SkippedCount++; continue }
+                foreach ($old in $current) {
+                    $n++
+                    $savedName = ('replaced-{0}.bin' -f $n)
+                    $oldHash = (Get-FileHash -LiteralPath $old.FullName -Algorithm SHA256).Hash
+                    Copy-Item -LiteralPath $old.FullName -Destination (Join-Path $importDir $savedName) -ErrorAction Stop
+                    if ((Get-FileHash -LiteralPath (Join-Path $importDir $savedName) -Algorithm SHA256).Hash -ne $oldHash) { throw 'The saved copy of an old picture could not be verified.' }
+                    [void]$replaced.Add([pscustomobject]@{ Path = (Get-RelativePath $lbRoot $old.FullName); Saved = $savedName; Hash = $oldHash })
+                    [System.IO.File]::Delete($old.FullName)
+                }
+            }
+            Assert-TpmNoReparseWriteTarget -Path $dest -Operation 'LaunchBox picture copy'
+            $tmp = $dest + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+            Copy-Item -LiteralPath $item.Image -Destination $tmp -ErrorAction Stop
+            $srcHash = (Get-FileHash -LiteralPath $item.Image -Algorithm SHA256).Hash
+            if ((Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash -ne $srcHash) { [System.IO.File]::Delete($tmp); throw 'A copied picture did not match its source.' }
+            [System.IO.File]::Move($tmp, $dest)
+            [void]$added.Add([pscustomobject]@{ Path = $rel; Hash = $srcHash })
+        }
+        $manifestPath = Join-Path $importDir 'manifest.json'
+        $text = [pscustomobject]@{ Schema = 1; LaunchBoxRoot = $lbRoot; Added = @($added.ToArray()); Replaced = @($replaced.ToArray()); CreatedDirs = @($createdDirs.ToArray()) } | ConvertTo-Json -Depth 5
+        [System.IO.File]::WriteAllText($manifestPath, $text, (New-Object System.Text.UTF8Encoding $false))
+        if ([System.IO.File]::ReadAllText($manifestPath) -cne $text) { throw 'The undo record could not be verified.' }
+        $result.AddedCount = $added.Count; $result.ReplacedCount = $replaced.Count
+        if ($added.Count -eq 0) {
+            [System.IO.Directory]::Delete($importDir, $true); $result.ImportPath = $null
+            $result.Outcome = 'NO_CHANGES'; $result.Summary = 'Nothing was copied.'
+        } else {
+            $result.Outcome = 'SAVED'; $result.Summary = 'Copied {0} picture(s).' -f $added.Count
+        }
+        Write-Log ('LaunchBox pictures: outcome={0}; added={1}; replaced={2}; record={3}' -f $result.Outcome, $result.AddedCount, $result.ReplacedCount, $result.ImportPath)
+    } catch {
+        $result.Errors += [string]$_.Exception.Message
+        Write-Log ('LaunchBox pictures: failed, undoing what was copied -- {0}' -f $_.Exception.Message)
+        try {
+            if ($importDir) {
+                $undo = Undo-TpmLbMediaRecords -lbRoot $lbRoot -Added @($added.ToArray()) -Replaced @($replaced.ToArray()) -CreatedDirs @($createdDirs.ToArray()) -ImportDir $importDir
+                if ($undo.Kept.Count -eq 0) { [System.IO.Directory]::Delete($importDir, $true); $result.ImportPath = $null; $result.Summary = 'Something went wrong. Everything that was copied has been removed again.' }
+                else { $result.Outcome = 'PARTIAL'; $result.Summary = 'Something went wrong and some pictures could not be removed again.'; $result.Errors += ('Left in place: ' + ($undo.Kept -join ', ')) }
+            }
+        } catch { $result.Outcome = 'PARTIAL'; $result.Errors += ('Undo after the failure also failed: ' + $_.Exception.Message) }
+        $result.AddedCount = 0
+    }
+    return $result
+}
+
+# Undo the newest picture import (or the one at ImportPath). Removes only files whose bytes are still the ones that were added.
+function Invoke-TpmLaunchBoxMediaUndo {
+    param([string]$lbRoot, [string]$BackupRoot, [string]$ImportPath)
+    $result = [pscustomobject]@{ Outcome = 'FAILED'; Summary = ''; Removed = 0; Restored = 0; Kept = @(); Errors = @() }
+    try {
+        $lbRoot = Resolve-TpmLaunchBoxRoot $lbRoot
+        if (-not $ImportPath) {
+            $importsRoot = Get-TpmLbMediaImportsRoot -lbRoot $lbRoot -BackupRoot $BackupRoot
+            $latest = $null
+            if (Test-Path -LiteralPath $importsRoot -PathType Container) {
+                $latest = @(Get-ChildItem -LiteralPath $importsRoot -Directory -ErrorAction Stop | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'manifest.json') } | Sort-Object Name -Descending) | Select-Object -First 1
+            }
+            if (-not $latest) { $result.Outcome = 'NO_CHANGES'; $result.Summary = 'There is no picture import to undo.'; return $result }
+            $ImportPath = $latest.FullName
+        }
+        $manifest = [System.IO.File]::ReadAllText((Join-Path $ImportPath 'manifest.json')) | ConvertFrom-Json -ErrorAction Stop
+        if ($manifest.Schema -ne 1 -or [string]$manifest.LaunchBoxRoot -ine $lbRoot) { throw 'This import record belongs to a different LaunchBox folder, so it was not used.' }
+        $undo = Undo-TpmLbMediaRecords -lbRoot $lbRoot -Added @($manifest.Added) -Replaced @($manifest.Replaced) -CreatedDirs @($manifest.CreatedDirs) -ImportDir $ImportPath
+        $result.Removed = $undo.Removed; $result.Restored = $undo.Restored; $result.Kept = @($undo.Kept)
+        if ($undo.Kept.Count -eq 0) {
+            [System.IO.Directory]::Delete($ImportPath, $true)
+            $result.Outcome = 'SAVED'; $result.Summary = 'Removed {0} picture(s) that were added.' -f $undo.Removed
+        } else {
+            $result.Outcome = 'PARTIAL'; $result.Summary = 'Removed {0} picture(s). {1} could not be removed because they changed after the import.' -f $undo.Removed, $undo.Kept.Count
+        }
+        Write-Log ('LaunchBox pictures undo: outcome={0}; removed={1}; restored={2}; kept={3}' -f $result.Outcome, $undo.Removed, $undo.Restored, ($undo.Kept -join ','))
+    } catch {
+        $result.Errors += [string]$_.Exception.Message
+        $result.Summary = 'The undo was stopped before anything else was changed.'
+    }
+    return $result
+}
+
+function Write-TpmLbMediaOutcome {
+    param($Result, [string]$Title)
+    $status = switch ([string]$Result.Outcome) { 'FAILED' { 'Problem' } 'PARTIAL' { 'Attention' } default { 'Ok' } }
+    $lines = @($Result.Errors | ForEach-Object { 'Reason: ' + $_ })
+    if ($Result.PSObject.Properties['Kept'] -and @($Result.Kept).Count -gt 0) { $lines += @($Result.Kept | ForEach-Object { 'Left in place: ' + $_ }) }
+    $blocks = if ($lines.Count -gt 0) { @(@{ Heading = 'Picture details'; Lines = $lines }) } else { @() }
+    $next = if ($lines.Count -gt 0) { 'Press D to see what happened.' } else { '' }
+    Write-TpmOutcome -Title $Title -Status $status -Next $next -DetailBlocks $blocks
+}
+
+# The optional step shown after the LaunchBox choices. Skipped in Unattended and preview runs.
+function Invoke-TpmLaunchBoxMediaStep {
+    param([string]$lbRoot, [string]$userProfilesDir, [switch]$Unattended, [switch]$DryRun)
+    if ($DryRun) { Write-Log 'PreviewMode: LaunchBox picture import skipped.'; return }
+    if ($Unattended) { Write-Log 'Unattended: LaunchBox picture import skipped.'; return }
+    Write-TpmText -Text 'Optional: add logos or box art to LaunchBox from a folder you pick.' -Color Cyan -BlankBefore
+    Write-TpmText -Text '[I] Add pictures from a folder. You see a preview first.' -Color White
+    Write-TpmText -Text '[U] Undo the last picture import.' -Color White
+    Write-TpmText -Text '[S] Skip this step.' -Color White
+    $choice = Read-TpmChoice -Prompt '  Choice, default S' -Choices @('I', 'U', 'S') -Default 'S'
+    if ($choice -eq 'S') { return }
+    $root = $lbRoot
+    if (-not $root) { $root = Read-HostSafe '  LaunchBox install folder (Enter to go back)' }
+    if (-not $root) { return }
+    if ($choice -eq 'U') {
+        $undoResult = Invoke-TpmLaunchBoxMediaUndo -lbRoot $root
+        Write-TpmLbMediaOutcome -Result $undoResult -Title $undoResult.Summary
+        return
+    }
+    Write-TpmText -Text 'Nothing is downloaded. Pictures are only copied from the folder you pick.' -Color DarkCyan
+    $folder = Read-HostSafe '  Folder with your pictures (Enter to go back)'
+    if (-not $folder) { return }
+    $kindChoice = Read-TpmChoice -Prompt '  Picture type: 1 Clear logos, 2 Box front, B back' -Choices @('1', '2', 'B') -Default '1'
+    if ($kindChoice -eq 'B') { return }
+    $kind = if ($kindChoice -eq '2') { 'BoxFront' } else { 'ClearLogo' }
+    $platChoice = Read-TpmChoice -Prompt '  Platform: 1 TeknoParrot, 2 Arcade, 3 Both, B back' -Choices @('1', '2', '3', 'B') -Default '1'
+    if ($platChoice -eq 'B') { return }
+    $platforms = switch ($platChoice) { '1' { @('TeknoParrot') } '2' { @('Arcade') } '3' { @('Arcade', 'TeknoParrot') } }
+    try {
+        $plan = Get-TpmLaunchBoxMediaPlan -lbRoot $root -userProfilesDir $userProfilesDir -imageFolder $folder -platformNames $platforms -Kind $kind
+        $replace = $false
+        if ($plan.Existing.Count -gt 0) {
+            Write-TpmText -Text ('{0} already have a picture.' -f (Format-TpmGameCount -Count $plan.Existing.Count)) -Color Yellow -BlankBefore
+            if ((Read-TpmYesNo -Prompt 'Keep the pictures you already have? (Y = keep, N = replace them; old ones are saved so Undo can bring them back)' -Default 'Y') -eq 'N') {
+                $replace = $true
+                $plan = Get-TpmLaunchBoxMediaPlan -lbRoot $root -userProfilesDir $userProfilesDir -imageFolder $folder -platformNames $platforms -Kind $kind -ReplaceExisting
+            }
+        }
+        $detailLines = New-Object System.Collections.Generic.List[string]
+        foreach ($m in $plan.Exact) { [void]$detailLines.Add(('Match: {0} [{1}] <- {2}' -f $m.Game.Title, $m.Game.Platform, $m.Image)) }
+        foreach ($m in $plan.Near) { [void]$detailLines.Add(('Close match to check: {0} [{1}] ({2})' -f $m.Game.Title, $m.Game.Platform, $m.Reason)) }
+        foreach ($m in $plan.NoImage) { [void]$detailLines.Add(('No picture: {0} [{1}]' -f $m.Game.Title, $m.Game.Platform)) }
+        foreach ($m in $plan.Existing) { [void]$detailLines.Add(('Kept, already has one: {0} [{1}]' -f $m.Game.Title, $m.Game.Platform)) }
+        $detailBlocks = @(@{ Heading = 'Picture preview details'; Lines = @($detailLines.ToArray()) })
+        Write-Log ('LaunchBox pictures plan: images={0}; games={1}; exact={2}; near={3}; none={4}; existing={5}' -f $plan.ImageCount, $plan.GameCount, $plan.Exact.Count, $plan.Near.Count, $plan.NoImage.Count, $plan.Existing.Count)
+        foreach ($l in $detailLines) { Write-Log ('LaunchBox pictures plan: ' + $l) }
+        Write-TpmText -Text 'Preview. Nothing has been changed yet.' -Color Cyan -BlankBefore
+        Write-TpmText -Text ('Sure matches: {0}' -f $plan.Exact.Count) -Color White
+        Write-TpmText -Text ('Close matches to check: {0}' -f $plan.Near.Count) -Color White
+        Write-TpmText -Text ('Games with no picture: {0}' -f $plan.NoImage.Count) -Color White
+        if ($plan.Existing.Count -gt 0) { Write-TpmText -Text ('Games kept as they are: {0}' -f $plan.Existing.Count) -Color White }
+        $selected = New-Object System.Collections.Generic.List[object]
+        foreach ($m in $plan.Exact) { [void]$selected.Add($m) }
+        foreach ($m in $plan.Near) {
+            foreach ($cand in $m.Candidates) {
+                Write-TpmText -Text ('Game: {0}' -f $m.Game.Title) -Color White -BlankBefore
+                Write-TpmText -Text ('Picture: {0}' -f [System.IO.Path]::GetFileName($cand.Image)) -Color White
+                Write-TpmText -Text $m.Reason -Color DarkGray
+                if ((Read-TpmYesNo -Prompt 'Is this the right picture for this game? (Y/N, D = details)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $detailBlocks }) -eq 'Y') {
+                    [void]$selected.Add([pscustomobject]@{ Game = $m.Game; Image = $cand.Image; Dest = $cand.Dest; Replaces = $m.Replaces })
+                    break
+                }
+            }
+        }
+        if ($selected.Count -eq 0) { Write-TpmText -Text 'No pictures to copy. Nothing was changed.' -Color DarkGray -BlankBefore; return }
+        Write-TpmText -Text ('Ready to copy {0} picture(s) into LaunchBox.' -f $selected.Count) -Color Cyan -BlankBefore
+        if ((Read-TpmYesNo -Prompt 'Copy exactly these pictures now? (Y/N, D = details)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $detailBlocks }) -ne 'Y') {
+            Write-TpmText -Text 'Canceled. Nothing was changed.' -Color DarkGray; return
+        }
+        $importResult = Invoke-TpmLaunchBoxMediaImport -lbRoot $root -Selected @($selected.ToArray()) -ReplaceExisting:$replace
+        $title = if ($importResult.Outcome -eq 'SAVED') { 'Copied {0} picture(s) into LaunchBox. Use the Undo choice here to remove them.' -f $importResult.AddedCount } else { $importResult.Summary }
+        Write-TpmLbMediaOutcome -Result $importResult -Title $title
+    } catch {
+        Write-Log ('LaunchBox pictures: stopped before any change -- {0}' -f $_.Exception.Message)
+        Write-TpmText -Text 'The picture import was stopped. Nothing was changed.' -Color Yellow -BlankBefore
+        Write-TpmText -Text ('Reason: ' + $_.Exception.Message) -Color DarkGray
     }
 }
 

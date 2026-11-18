@@ -41,6 +41,11 @@
     made itself. Your own playlists are never touched.
   - You see exactly what will change first, a saved copy is made before
     anything is written, and Restore puts it all back.
+  - New optional step: add clear logos or box art to LaunchBox from a
+    folder you pick. You see a preview first: sure matches, close matches
+    and games with no picture. Close matches are only used if you say yes.
+    Pictures LaunchBox already has are kept unless you choose to replace
+    them. Nothing is downloaded. Undo removes the pictures that were added.
 
   BepInEx
   - When BepInEx cannot be installed in a game folder because a file is
