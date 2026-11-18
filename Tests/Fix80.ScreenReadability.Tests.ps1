@@ -685,10 +685,16 @@ Describe 'FIX80 LaunchBox step (audit item 16)' {
 
     It 'passes the previewed summary to the plan in the main flow and keeps the exact consent question' {
         # Mutation: call Write-TpmLaunchBoxResult for the plan again.
-        $planCalls = @(Get-F80Calls -Name 'Write-TpmLaunchBoxPlan')
+        # The LaunchBox step is its own function now, so look inside Invoke-TpmLaunchBoxStep. The summary of the
+        # preview that was shown reaches the plan through $lbShownBefore, and is cleared when the plan has official
+        # game names (the plan then differs from the preview).
+        $stepAst = @($script:F80Ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq 'Invoke-TpmLaunchBoxStep' }, $true))[0]
+        $stepCalls = @($stepAst.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true))
+        $planCalls = @($stepCalls | Where-Object { $_.GetCommandName() -eq 'Write-TpmLaunchBoxPlan' })
         $planCalls.Count | Should -Be 1
-        Get-F80NamedArgument -Command $planCalls[0] -Name 'AlreadyShownSummary' | Should -BeExactly '$lbPreviewShownSummary'
-        @(Get-F80Calls -Name 'Read-TpmYesNo' | Where-Object { (Get-F80NamedArgument -Command $_ -Name 'Prompt') -eq "'Write exactly these changes after a verified backup? (Y/N)'" }).Count | Should -Be 1
+        Get-F80NamedArgument -Command $planCalls[0] -Name 'AlreadyShownSummary' | Should -BeExactly '$lbShownBefore'
+        $stepAst.Extent.Text | Should -Match ([regex]::Escape('$lbShownBefore = $lbPreviewShownSummary'))
+        @($stepCalls | Where-Object { $_.GetCommandName() -eq 'Read-TpmYesNo' -and (Get-F80NamedArgument -Command $_ -Name 'Prompt') -eq "'Write exactly these changes after a verified backup? (Y/N)'" }).Count | Should -Be 1
     }
 }
 

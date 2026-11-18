@@ -46643,7 +46643,7 @@ function Write-TpmLaunchBoxOffer {
     Write-TpmText -Text '[P] Preview first. No changes.' -Color White
     Write-TpmText -Text '[A] Add missing games (backed up).' -Color White
     Write-TpmText -Text '[G] Fill in game details and make playlists (backed up).' -Color White
-    Write-TpmText -Text '[F] Import file only. No changes.' -Color White
+    Write-TpmText -Text '[F] Import file only. No changes.' -Color White -BlankBefore
     Write-TpmText -Text '[B] Skip this step.' -Color White
 }
 
@@ -55106,7 +55106,7 @@ function Get-TpmLedCabinet {
     $source = 'the TeknoParrot defaults'
     if ($defaults.Count -eq 0) { $defaults = @($doc.SelectNodes('/dat/emulator/controlGroup[@groupName="DEFAULT"]')); $source = 'the defaults of your other emulators' }
     $others = @($teknoGroups | Where-Object { $_.GetAttribute('groupName') -ne 'DEFAULT' })
-    $controls = New-Object System.Collections.Hashtable ([System.StringComparer]::OrdinalIgnoreCase)
+    $controls = @{}   # a hashtable literal ignores letter case in its keys, as control names need
     $names = New-Object System.Collections.Generic.List[string]
     foreach ($group in (@($defaults) + @($others))) {
         foreach ($playerNode in @($group.SelectNodes('player'))) {
@@ -55142,7 +55142,7 @@ function Get-TpmLedCabinet {
 function Get-TpmLedControlPairing {
     param([Parameter(Mandatory)]$Cabinet, $KeyMap = $null, $Evidence = $null)
     $keyMapFound = ($null -ne $KeyMap -and [bool]$KeyMap.Found)
-    $labelsByCode = New-Object System.Collections.Hashtable ([System.StringComparer]::OrdinalIgnoreCase)
+    $labelsByCode = @{}   # a hashtable literal ignores letter case in its keys, as input codes need
     $allLabels = New-Object System.Collections.Generic.List[string]
     if ($keyMapFound) {
         foreach ($led in @($KeyMap.Controls)) {
@@ -55199,7 +55199,7 @@ function Get-TpmLedControlPairing {
             }
         }
     }
-    $usableControls = New-Object System.Collections.Hashtable ([System.StringComparer]::OrdinalIgnoreCase)
+    $usableControls = @{}
     foreach ($name in $keep) { $usableControls[$name] = $Cabinet.Controls[$name] }
     $usable = [pscustomobject]@{ Controls = $usableControls; Names = $keep.ToArray(); Players = $Cabinet.Players; Source = $Cabinet.Source; Held = $held.ToArray() }
     return [pscustomobject]@{ Usable = $usable; Pairs = $pairs.ToArray(); Held = $held.ToArray(); LedsWithoutControl = $ledsWithoutControl; Families = $families.ToArray(); KeyMapFound = $keyMapFound; DevicesChecked = ($families.Count -gt 0 -or ($null -ne $Evidence -and [string]$Evidence.EvidenceStatus -eq 'Observed')) }
