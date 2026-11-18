@@ -47,10 +47,11 @@ Describe 'changelog format' {
         }
     }
 
-    It 'lists RC8.1 as the changes since the last published release, RC7, and gives RC8 and RC9 no heading of their own' {
+    It 'lists RC8.1 as the changes since RC7, RC8.2 since RC8.1, RC9 as the current build, and gives RC8 no heading of its own' {
         # RC8 was a tester-only build that was never published; its changes belong to RC8.1. The final RC9 comes later.
-        # Mutation: add a "v1.0 RC8" or "v1.0 RC9" heading, or say RC8.1 changed "since RC8".
-        @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC(8|9)(\s|$)' }).Count | Should -Be 0
+        # Mutation: add a "v1.0 RC8" heading, drop the RC9 heading, or say RC8.1 changed "since RC8".
+        @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC8(\s|$)' }).Count | Should -Be 0
+        @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC9 \(changes since RC8\.2\)\s*$' }).Count | Should -Be 1
         @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC8\.1 \(changes since RC7\)\s*$' }).Count | Should -Be 1
         @($script:F112Lines | Where-Object { $_ -match '^  v1\.0 RC8\.2 \(changes since RC8\.1\)\s*$' }).Count | Should -Be 1
     }

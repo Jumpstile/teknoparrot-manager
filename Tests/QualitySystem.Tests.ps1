@@ -128,11 +128,11 @@ Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
         $wikiChangelog | Should -Not -Match '(?i)RC8[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC8\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC8(?![.\d])'
         $wikiChangelog | Should -Match ('(?i)(?:previous|historical) published release.{0,80}' + $script:PreviousPublishedVersionPattern)
     }
-    It "records the current RC8 release gate and owner authorization prerequisite" {
+    It "records the release gate for RC9 and later and the owner authorization prerequisite" {
         $checklist = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'RELEASE-SAFETY-CHECKLIST.md') -Raw
 
-        $checklist | Should -Match '(?m)^# TPM RC8 -- Release Gate \(\d{4}-\d{2}-\d{2}\)\r?$'
-        $checklist | Should -Match '(?m)^STATUS: HOLD\. RC8 remains unqualified\.\r?$'
+        $checklist | Should -Match '(?m)^# TPM Release Gate\r?$'
+        $checklist | Should -Match '(?m)^STATUS: v1\.0 RC8\.2 is the latest published release .*Every later release \(RC9 and Version 1\.0\) must pass this gate first\.\r?$'
         $checklist | Should -Match 'OWNER explicitly authorizes testing after source engineering and screenshot approval'
     }
 }
