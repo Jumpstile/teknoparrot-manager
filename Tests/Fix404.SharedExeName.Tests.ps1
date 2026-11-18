@@ -18,7 +18,7 @@ BeforeAll {
         'Register-GamesLegacy', 'Backfill-SecondaryExecutablePath', 'Confirm-TpmRegistrationSafetyBackup',
         'Set-SecondaryExecutablePath', 'Test-TpmGameMutationPath', 'Add-TpmUnavailableDriveGame',
         'Get-TpmTransactionField', 'Read-Xml', 'Get-PrimaryExecutableName', 'Get-NormalizedGameKey',
-        'Get-DiceSimilarity', 'Resolve-BestFuzzyMatch', 'Resolve-ProfileCode', 'Get-GameFiles',
+        'Get-DiceSimilarity', 'Get-TpmBaseTitleKey', 'Resolve-BestFuzzyMatch', 'Resolve-ProfileCode', 'Get-GameFiles',
         'Save-XmlMaybe', 'Get-TpmProfileWriteFingerprint', 'Resolve-TpmRegistrationSaveFailure',
         'New-TpmVerifiedUserProfilesBackup', 'Assert-TpmRegisteredGamePath', 'Set-TpmRegistrationGamePath',
         'Test-PathInside'

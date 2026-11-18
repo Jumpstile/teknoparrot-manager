@@ -17,7 +17,7 @@
 # A full module conversion (so this and the harness's other helper
 # functions become properly importable rather than dot-sourced/AST-
 # extracted) is tracked as post-1.0 technical debt -- this file is
-# intentionally the minimal fix for the specific 
+# intentionally the minimal fix for the specific
 
 # flagged as required before 1.0, not that larger refactor.
 
