@@ -426,6 +426,33 @@ Describe 'LEDBlinky lighting export' {
         $unknown.Usable.Controls['P1_BUTTON2'].Rgb | Should -BeNullOrEmpty
     }
 
+    It 'a one-button cabinet and a 32-button cabinet both get only the buttons they have' {
+        $small = New-LedFixture -Buttons 1
+        New-LedProfile -Dir $small.Profiles -Name 'TinyGame' -Mappings @('P1Button1', 'P1Button2', 'P1Button3')
+        $smallPlan = Get-TpmLedExportPlan -UserProfilesDir $small.Profiles -ControlsPath $small.Controls
+        $smallPlan.BlockText | Should -Match 'name="P1_BUTTON1"'
+        $smallPlan.BlockText | Should -Not -Match 'P1_BUTTON2'
+        $smallPlan.BlockText | Should -Not -Match 'P1_BUTTON3'
+        $big = New-LedFixture -Buttons 32
+        New-LedProfile -Dir $big.Profiles -Name 'BigGame' -Mappings @('P1Button1', 'P1Button17', 'P1Button32')
+        $bigPlan = Get-TpmLedExportPlan -UserProfilesDir $big.Profiles -ControlsPath $big.Controls
+        $bigPlan.BlockText | Should -Match 'name="P1_BUTTON32"'
+        $bigPlan.BlockText | Should -Match 'name="P1_BUTTON17"'
+        $bigPlan.BlockText | Should -Not -Match 'P1_BUTTON18'
+    }
+
+    It 'keeping the user''s own colors writes the cabinet colors, not the usual scheme or the picture color' {
+        $button = [pscustomobject]@{ Name = 'P1_BUTTON1'; Player = 1; Voice = ''; IsPrimary = $false; InputCodes = 'KEYCODE_X'; Color = 'Cyan'; Rgb = $true }
+        $ball = [pscustomobject]@{ Name = 'CONTROL_TRACKBALL'; Player = 0; Voice = 'Trackball'; IsPrimary = $true; InputCodes = $null; Color = 'Purple'; Rgb = $true }
+        $written = @([pscustomobject]@{ Cab = $button; Voice = '' }, [pscustomobject]@{ Cab = $ball; Voice = 'Trackball'; Color = 'Blue' })
+        $usual = New-TpmLedGroupText -Key 'x' -Title 'X' -Written $written -Newline "`n"
+        $usual | Should -Match 'P1_BUTTON1" voice="" color="Red"'
+        $usual | Should -Match 'CONTROL_TRACKBALL" voice="Trackball" primaryControl="1" color="Blue"'
+        $own = New-TpmLedGroupText -Key 'x' -Title 'X' -Written $written -Newline "`n" -KeepOwnColors
+        $own | Should -Match 'P1_BUTTON1" voice="" color="Cyan"'
+        $own | Should -Match 'CONTROL_TRACKBALL" voice="Trackball" primaryControl="1" color="Purple"'
+    }
+
     It 'undo refuses to guess when the added entries were changed' {
         $fx = New-LedFixture
         New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana'

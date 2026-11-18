@@ -55354,14 +55354,15 @@ function Get-TpmLedArtworkColor {
 # One game's entry, built only from cabinet controls (name and input codes are the user's own; color follows the usual
 # arcade scheme above). The game's own label is used as the spoken word for a button when it has one.
 function New-TpmLedGroupText {
-    param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)][object[]]$Written, [Parameter(Mandatory)][string]$Newline)
+    param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)][object[]]$Written, [Parameter(Mandatory)][string]$Newline, [switch]$KeepOwnColors)
     $line = {
         param($entry)
         $voice = if ($entry.Voice) { $entry.Voice } else { $entry.Cab.Voice }
         $text = '        <control name="{0}" voice="{1}"' -f (ConvertTo-TpmLedXmlText $entry.Cab.Name), (ConvertTo-TpmLedXmlText $voice)
         if ($entry.Cab.IsPrimary) { $text += ' primaryControl="1"' }
-        $schemeColor = Get-TpmLedSchemeColor -Name ([string]$entry.Cab.Name)
-        $artColor = if ($entry.PSObject.Properties['Color']) { [string]$entry.Color } else { '' }
+        # With KeepOwnColors the user's own colors are written as they are (no usual scheme, no picture color).
+        $schemeColor = if ($KeepOwnColors) { $null } else { Get-TpmLedSchemeColor -Name ([string]$entry.Cab.Name) }
+        $artColor = if (-not $KeepOwnColors -and $entry.PSObject.Properties['Color']) { [string]$entry.Color } else { '' }
         $useColor = if ($artColor) { $artColor } elseif ($schemeColor) { $schemeColor } else { $entry.Cab.Color }
         # A single-color light cannot show a color, so none is written for it.
         $singleColor = ($entry.Cab.PSObject.Properties['Rgb'] -and $entry.Cab.Rgb -eq $false)
@@ -55409,7 +55410,7 @@ function Get-TpmLedEmulatorSpan {
 # from controls that the profile uses and the user's own LEDBlinky setup has (and can pair with an LED).
 # Evidence: the controller evidence object (Get-TpmControllerEvidence), or $null when no device check is wanted.
 function Get-TpmLedExportPlan {
-    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$ControlsPath, $Evidence = $null, [string[]]$ImageFolders = @())
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$ControlsPath, $Evidence = $null, [string[]]$ImageFolders = @(), [switch]$KeepOwnColors)
     $text = Read-TpmLedControlsText -Path $ControlsPath
     $newline = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
     $plan = [pscustomobject]@{
@@ -55441,14 +55442,14 @@ function Get-TpmLedExportPlan {
             if ($match.Written.Count -eq 0) { [void]$plan.SkippedNoControls.Add($file.BaseName); continue }
             $title = Get-TpmProfileFriendlyTitle -Doc $doc -BaseName $file.BaseName
             # A trackball light takes the main color of the game's own picture, when the user's LaunchBox has one.
-            if ($ImageFolders.Count -gt 0) {
+            if ($ImageFolders.Count -gt 0 -and -not $KeepOwnColors) {
                 $trackball = @($match.Written | Where-Object { $_.Cab.Name -eq 'CONTROL_TRACKBALL' })
                 if ($trackball.Count -gt 0) {
                     $artColor = Get-TpmLedArtworkColor -ImageFolders $ImageFolders -Title $title
                     if ($artColor) { foreach ($t in $trackball) { Add-Member -InputObject $t -NotePropertyName Color -NotePropertyValue $artColor -Force } }
                 }
             }
-            [void]$blocks.Add((New-TpmLedGroupText -Key $file.BaseName -Title $title -Written $match.Written -Newline $newline))
+            [void]$blocks.Add((New-TpmLedGroupText -Key $file.BaseName -Title $title -Written $match.Written -Newline $newline -KeepOwnColors:$KeepOwnColors))
             $primary = @($match.Written | Where-Object { $_.Cab.IsPrimary } | ForEach-Object { $_.Cab.Name } | Select-Object -First 1)
             [void]$plan.Groups.Add([pscustomobject]@{ Key = $file.BaseName; Title = $title; Buttons = @($match.Written | Where-Object { -not $_.Cab.IsPrimary }).Count; Primary = ($primary -join ''); NotOnCabinet = $match.NotOnCabinet; NeedsChoice = $match.NeedsChoice })
         } catch {
@@ -55676,12 +55677,18 @@ function Invoke-TpmLedBlinkyStep {
     Write-TpmText -Text '[A] Add lighting info to LEDBlinky (backed up, can be undone).' -Color White
     Write-TpmText -Text '[U] Undo the last add.' -Color White
     Write-TpmText -Text '[C] Use a different LEDBlinky folder.' -Color White
+    Write-TpmText -Text '[O] Switch between the usual arcade colors and your own colors. Now: the usual arcade colors.' -Color White
     Write-TpmText -Text '[B] Skip this step.' -Color White
     $plan = $null
+    $keepOwnColors = $false
     do {
-        $choice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'U', 'C', 'B') -Default 'P'
+        $choice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'U', 'C', 'O', 'B') -Default 'P'
+        if ($choice -eq 'O') {
+            $keepOwnColors = -not $keepOwnColors
+            Write-TpmText -Text $(if ($keepOwnColors) { 'Now using your own colors.' } else { 'Now using the usual arcade colors.' }) -Color DarkCyan
+        }
         if ($choice -eq 'P') {
-            try { $plan = Get-TpmLedExportPlan -UserProfilesDir $UserProfilesDir -ControlsPath $Install.ControlsPath -Evidence $evidence -ImageFolders $ImageFolders; Write-TpmLedPreview -Plan $plan -Layout $Layout }
+            try { $plan = Get-TpmLedExportPlan -UserProfilesDir $UserProfilesDir -ControlsPath $Install.ControlsPath -Evidence $evidence -ImageFolders $ImageFolders -KeepOwnColors:$keepOwnColors; Write-TpmLedPreview -Plan $plan -Layout $Layout }
             catch { Write-Log "LEDBlinky preview failed -- $_"; Write-TpmText -Text ('LEDBlinky preview stopped. Nothing was changed. {0}' -f $_.Exception.Message) -Color Yellow }
         }
         if ($choice -eq 'C') {
@@ -55692,9 +55699,9 @@ function Invoke-TpmLedBlinkyStep {
                 Write-TpmText -Text 'Now using that LEDBlinky folder.' -Color DarkCyan
             }
         }
-    } while ($choice -in @('P', 'C'))
+    } while ($choice -in @('P', 'C', 'O'))
     if ($choice -eq 'A') {
-        try { $plan = Get-TpmLedExportPlan -UserProfilesDir $UserProfilesDir -ControlsPath $Install.ControlsPath -Evidence $evidence -ImageFolders $ImageFolders } catch { Write-Log "LEDBlinky plan failed -- $_"; Write-TpmText -Text ('LEDBlinky could not be read. Nothing was changed. {0}' -f $_.Exception.Message) -Color Yellow; return }
+        try { $plan = Get-TpmLedExportPlan -UserProfilesDir $UserProfilesDir -ControlsPath $Install.ControlsPath -Evidence $evidence -ImageFolders $ImageFolders -KeepOwnColors:$keepOwnColors } catch { Write-Log "LEDBlinky plan failed -- $_"; Write-TpmText -Text ('LEDBlinky could not be read. Nothing was changed. {0}' -f $_.Exception.Message) -Color Yellow; return }
         Write-TpmLedPreview -Plan $plan -Layout $Layout
         if ($plan.HasEmulator -and $plan.Groups.Count -gt 0) {
             Write-TpmText -Text 'Close LEDBlinky and its editor first. TeknoParrot Manager will not close them for you.' -Color Yellow -BlankBefore
