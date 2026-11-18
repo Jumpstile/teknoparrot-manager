@@ -90,7 +90,7 @@ See [[Check for Updates]].
 Your copy is unchanged. Try again later.
 
 **I run a build before RC8.1 (such as RC8 or RC7) and the update does not install.**
-Builds before RC8.1 cannot install a whole release. This is a one-time step. After RC8.1 comes out, download its ZIP from the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases) and extract all of it over your TeknoParrot Manager folder. After that, Check for Updates installs releases for you.
+Builds before RC8.1 cannot install a whole release. This is a one-time step. Download the ZIP of the latest release from the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases) and extract all of it over your TeknoParrot Manager folder. After that, Check for Updates installs releases for you.
 
 **"There is not enough free space for the update."**
 Nothing was installed. Free some space on the drive that holds TeknoParrot Manager and try again.

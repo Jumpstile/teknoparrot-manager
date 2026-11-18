@@ -8,7 +8,7 @@ TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-> **This guide describes v1.0 RC8.1.** RC8.1 is the interim build for testers and is the latest published release. The previous published release is v1.0 RC7. The final v1.0 RC9 comes later. RC8 was a tester build and was never published. RC8.1 is the first version that can update itself in place (see Check for Updates). The changes since RC7 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 remains unpublished. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
+> **This guide describes v1.0 RC8.3.** RC8.3 is the latest published release. It is a fix-up release for RC8.2, the previous published release. If you use RC8.2, choose Check for Updates (menu 15) to get RC8.3. Earlier published releases are v1.0 RC8.1 and RC7. The final v1.0 RC9 comes later. RC8 was a tester build and was never published. RC8.1 is the first version that can update itself in place (see Check for Updates). The changes since RC8.2 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 remains unpublished. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
 
 
 ## Start here: your first game in about 10 minutes
@@ -19,7 +19,7 @@ Allow about 10 minutes once your downloads are ready.
 
 Installing TeknoParrot, updates, large games, and special controllers take longer.
 
-Release page of the latest published release: [v1.0 RC8.1](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1).
+Release page of the latest published release: [v1.0 RC8.3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3). The previous published release is [v1.0 RC8.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2).
 
 You need:
 
@@ -2458,7 +2458,7 @@ Then you start TeknoParrot Manager again yourself. It does not restart on its ow
 - If any file cannot be replaced, every file is put back and nothing changes.
 - If the drive is too full, it says `There is not enough free space for the update` and installs nothing. Free some space and try again.
 
-**Using a build before RC8.1 (for example RC8 or RC7)?** Those builds cannot update in place. Install RC8.1 by hand once: after RC8.1 comes out, download its ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases), then extract all of its files over your TeknoParrot Manager folder. After that, menu 15 does the updating.
+**Using a build before RC8.1 (for example RC8 or RC7)?** Those builds cannot update in place. Install the latest release by hand once: download its ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases), then extract all of its files over your TeknoParrot Manager folder. After that, menu 15 does the updating.
 
 The separate tool `tools\Invoke-TpmAutoUpdate.ps1 -Apply` still refuses a release with many files. It changes nothing.
 
@@ -3625,5 +3625,5 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> TeknoParrot Manager v1.0 RC8.1 (the latest published release). Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
+> TeknoParrot Manager v1.0 RC8.3 (the latest published release). The previous published release is v1.0 RC8.2. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
 

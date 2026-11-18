@@ -1,6 +1,6 @@
 # TeknoParrot Manager - Quick Start
 
-> This guide describes v1.0 RC8.1. RC8.1 is the interim build for testers. Latest published release: v1.0 RC8.1 ([RC8.1 release page](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1)). The previous published release is v1.0 RC7. The final v1.0 RC9 comes later. RC8 was a tester build and was never published. RC8.1 is the first version that can update itself in place. Final Version 1.0 remains unpublished. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
+> This guide describes v1.0 RC8.3. RC8.3 is a fix-up release for RC8.2. It fixes problems that testers found. The latest published release is [v1.0 RC8.3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3). The previous published release is v1.0 RC8.2. If you use RC8.2, choose **15) Check for Updates** to get RC8.3. Earlier published releases are v1.0 RC8.1 and RC7. RC8 was a tester build and was never published. The final v1.0 RC9 comes later. Final Version 1.0 remains unpublished. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Full documentation: [User guide](docs/USER-GUIDE.md) (project home page: [README.md](README.md))
 
@@ -363,9 +363,11 @@ Setting up controls in TeknoParrotUI is called binding. A bound game has its but
 
 To copy right away, choose **3) Propagate Controls** at the main menu.
 
-You will see: `You have 2 games with their controls set up.` Then you see the question `Copy controls from 2 games to your other games of the same type? (Y/N, D = details)`.
+You will see: `You have 2 games with their controls set up.` Then you see a preview of what would change. It ends with `Preview only. Nothing was saved.` Then you see the question `Copy controls from 2 games to your other games of the same type? (Y/N, D = details)`.
 
-Next: press **D** to see each example game and the settings that will be copied. Check them against your real hardware. Then press **Y** to copy, or **N** to cancel. A saved copy of your game settings is made when you approve.
+Next: press **D** to see each example game and the settings that will be copied. Check them against your real hardware. Then press **Y** to copy, or **N** to cancel. If you press **N**, nothing changes. A saved copy of your game settings is made when you approve.
+
+After the copy, the program asks `Undo these changes and put your game settings back as they were? (Y/N)`. Press **Y** to put everything back at once. You can also undo later with **14) Restore backup**.
 
 If a copied setting looks wrong, you also see a yellow line: `Check first: 1 game may have settings that do not match your real controller. Press D to see them.` Answer **N**, fix that game in TeknoParrotUI, then run this again.
 
@@ -379,12 +381,12 @@ This is a bounded reference-copy aid. It is not universal controller or gun dete
 
 ---
 
-## Crosshair Setup
-
 ![The crosshair picker: click a design for Player 1, then one for Player 2](docs/images/20-tpm-crosshair-picker.png)
 
 ![Crosshair Setup asks you to confirm your two choices before it changes anything](docs/images/21-tpm-crosshair-apply.png)
 
+
+## Crosshair Setup
 
 Mode 4 puts custom crosshair cursor images into all your registered lightgun games.
 
@@ -430,10 +432,10 @@ For Pcsx2x6 games, `cursor_path` stays emulator-owned under the current contract
 
 ---
 
-## ReShade Visual Enhancements
-
 ![ReShade setup: choose Set up, Remove, or Undo](docs/images/22-tpm-reshade-setup.png)
 
+
+## ReShade Visual Enhancements
 
 ReShade adds picture effects on top of a game: a sharper image, CRT-style scanlines, borders. It does not change game data.
 
@@ -747,10 +749,10 @@ TeknoParrot Manager chooses the stable x64 or x86 package from the game's execut
 
 Manual deletion of BepInEx files is not the normal workflow. TeknoParrot Manager only removes the fixed files it can verify as part of its own approved transaction.
 
-## Required game patches
-
 ![The Required game patches menu: install for all, install for one game, undo, or go back](docs/images/17-tpm-required-patches.png)
 
+
+## Required game patches
 
 Menu 12 fixes a missing file in certain game builds.
 
@@ -1052,7 +1054,7 @@ Nothing is downloaded or changed unless you say Y.
 
 Your own files, `UserProfiles` and backups are never touched or deleted. If any file cannot be replaced, every file is put back and nothing changes. If the drive is too full, it says `There is not enough free space for the update` and installs nothing.
 
-**Using a build before RC8.1 (for example RC8 or RC7)?** Those builds cannot update in place. Install RC8.1 by hand once: after RC8.1 comes out, download the complete ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) and extract all of its files over your TeknoParrot Manager folder. Do the same if the check is unavailable.
+**Using a build before RC8.1 (for example RC8 or RC7)?** Those builds cannot update in place. Install the latest release by hand once: download the complete ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) and extract all of its files over your TeknoParrot Manager folder. Do the same if the check is unavailable.
 
 The separate tool `tools\Invoke-TpmAutoUpdate.ps1 -Apply` still refuses a release with many files and changes nothing.
 
@@ -1312,10 +1314,10 @@ Keep any current settings you still need somewhere outside the folders being res
 
 ---
 
-## Library Health Check
-
 ![The Library Health Check result: a read-only report that changed nothing](docs/images/15-tpm-health-check.png)
 
+
+## Library Health Check
 
 Mode 13 begins with a **read-only** assessment. It looks at your setup and does not change anything.
 

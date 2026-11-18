@@ -2,13 +2,63 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-RC8.1 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1. RC8.1 is the interim build for testers and the first version that can update itself in place. RC8 was a tester build and was never published.
-The previous published release was v1.0 RC7. RC4, RC5 and RC6 are historical; RC4 is superseded. The final v1.0 RC9 comes later.
+RC8.3 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3. It is a fix-up release for RC8.2. The final v1.0 RC9 comes later. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
+The previous published release was v1.0 RC8.2. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
 ---
 
+## v1.0 RC8.3 (changes since RC8.2)
+
+### Setup
+- When BepInEx cannot replace a file, it now says exactly why (for
+  example, the file is shared with another folder, it is a folder, it is
+  a link, or it cannot be read).
+- Setting up ReShade one game at a time now asks only about games that
+  can be changed. It shows "game 2 of 5" and has a Back choice.
+- The optional setup questions after you add games (dgVoodoo2 and the
+  graphics card fix) can walk back one step, so a step you skipped by
+  accident can be done.
+- The dgVoodoo2 result now names every game that already had all of its
+  files, so every game you picked is listed.
+- After registering new games, the Manager now offers to add them to
+  LaunchBox even when you pick New game only.
+
+### Fixes
+- A crash on the PostgreSQL setup screen is fixed.
+- A shared .zip file no longer causes false questions about duplicate
+  profiles when you add games.
+- Game folders are matched by their game title when notes follow it,
+  such as (Landscape,Bezel).
+- Installing or undoing a game patch no longer stops with a "could not
+  be checked" error when the file it needs to check is simply not there
+  yet in a game folder ending in [TP].
+- The safety backup made before TeknoParrot Manager tidies up its own
+  files now uses a shorter folder name, so tidying up no longer fails
+  on very deep install folders.
+
+## v1.0 RC8.2 (changes since RC8.1)
+
+### Controls
+- Propagate Controls (menu 3) now shows a preview first. It lists what
+  would change and saves nothing until you say yes.
+- Your game settings are backed up and the backup is checked before the
+  first change. After the copy you can undo it in one step.
+- The controls question looks for connected controllers. It only reads,
+  and it changes nothing. If it finds an Xbox-style controller, it asks
+  one question instead of seven.
+
+### Fixes
+- AutoSync extracts a game even when its TeknoParrot profile points to a
+  game file that is missing at an old place (for example after you moved
+  your games to another drive). It still refuses a game that is already
+  installed at another place, so it never makes a second copy of a
+  working game. When it refuses a game, the log says why.
+- If you close the Game ZIP folder window without picking a folder, the
+  question is asked again. Type Q to go back.
+- When a support package cannot list the plugins of a game, it now says
+  why.
 ## v1.0 RC8.1 (changes since RC7)
 
 ### Updates
@@ -19,7 +69,8 @@ The previous published release was v1.0 RC7. RC4, RC5 and RC6 are historical; RC
   back. It says so when there is not enough free space. Your own files
   and older files the release no longer has are never deleted. Then you
   start TeknoParrot Manager again yourself.
-- Older builds cannot do this. Install RC8.1 by hand once: download the ZIP from the Releases page and extract it over
+- Older builds cannot do this. Install RC8.1 by hand once: after RC8.1 is
+  published, download the ZIP from the Releases page and extract it over
   your old folder.
 - A ZIP without the script, or a CPS3 ZIP that cannot be read, is
   refused. If the Eggman page has no DAT file, it says so.
@@ -70,11 +121,9 @@ The previous published release was v1.0 RC7. RC4, RC5 and RC6 are historical; RC
   too long and changes nothing.
 - A game whose 32-bit or 64-bit type cannot be read is not counted as
   ready, and force feedback does not give it a 64-bit plugin.
-- ReShade is set up for 64-bit games only. A 32-bit game is skipped and
-  nothing in its folder changes. Press D on the result to see why.
-  TeknoParrot Manager turns off ReShade's welcome window, counters and
-  messages in every ReShade.ini it writes. A short ReShade version
-  banner may still show for a moment when a game starts.
+- ReShade works with 64-bit games only. 32-bit games are skipped and the
+  guides do not ask for a 32-bit ReShade file. ReShade does not show its
+  welcome window, counters or messages when a game starts.
 - Registering games and repairing paths keep a second executable path that
   points at a file that exists. A manual path repair checks its safety
   copy first and leaves a profile TeknoParrot changed meanwhile alone.

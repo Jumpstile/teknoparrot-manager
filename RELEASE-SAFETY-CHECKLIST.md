@@ -1,5 +1,5 @@
 # TPM Release Gate
-STATUS: v1.0 RC8.1 (the interim build for testers) is published. Every later release (RC9 and Version 1.0) must pass this gate first.
+STATUS: v1.0 RC8.3 (a fix-up release for RC8.2) is the latest published release. RC8.2 is the previous published release. Every later release (RC9 and Version 1.0) must pass this gate first.
 - [ ] Complete source engineering: all applicable universal progress UI operations, final/cancel/stall lifecycle, PostgreSQL safety, exact-candidate reconciliation of release:rc-required issues.
 - [ ] Preserve proof of source SHA, changed files, dispositions, required runtime assets and private backup ref.
 - [ ] Owner approves the real final progress-UI screenshot (not a mockup).
@@ -8,4 +8,5 @@ STATUS: v1.0 RC8.1 (the interim build for testers) is published. Every later rel
 - [ ] Verify exact package filename, manifest, assets, and SHA256 only after qualified packaging is authorized.
 - [ ] Owner makes final release decision. Never auto-merge, tag, publish, push public WIP, or alter live TeknoParrot.
 - [ ] Publish README/use instructions and release notes with each owner-approved version; omit AI attribution/coauthor trailers.
+- [ ] Update the docs on main in the same step as every release.
 A PRE-TEST HOLD does not stop source coding. See the scoped docs/remediation contracts for implementation details.

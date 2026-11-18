@@ -6,13 +6,13 @@ TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-> **This page describes v1.0 RC8.1.** RC8.1 is the interim build for testers and is the latest published release. The previous published release is v1.0 RC7. The final v1.0 RC9 comes later. RC8 was a tester build and was never published. RC8.1 is the first version that can update itself in place (see Check for Updates). The changes since RC7 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 remains unpublished. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
+> **This page describes v1.0 RC8.3.** RC8.3 is the latest published release. It is a fix-up release for RC8.2, the previous published release. If you use RC8.2, choose Check for Updates (menu 15) to get RC8.3. Earlier published releases are v1.0 RC8.1 and RC7. The final v1.0 RC9 comes later. RC8 was a tester build and was never published. RC8.1 is the first version that can update itself in place (see Check for Updates). The changes since RC8.2 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 remains unpublished. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
 
 **Jump to:** [Quick Start](QUICKSTART.md) | [Full user guide](docs/USER-GUIDE.md) | [Changelog](TeknoParrot-Manager-CHANGELOG.txt) | [Troubleshooting](docs/TROUBLESHOOTING.md) | [Start Here (first game in 10 minutes)](docs/START-HERE.md)
 
 ## Download
 
-Release page of the latest published release: [v1.0 RC8.1](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1).
+Release page of the latest published release: [v1.0 RC8.3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3). The previous published release is [v1.0 RC8.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2).
 
 1. Download the ZIP file from the release page.
 2. Extract the whole package to a short folder outside Program Files, for example `C:\TPM`. Keep all the folders.
@@ -20,7 +20,7 @@ Release page of the latest published release: [v1.0 RC8.1](https://github.com/Ju
 
 TeknoParrot Manager does not install TeknoParrot. Install TeknoParrot first. [Start Here](docs/START-HERE.md) shows how.
 
-Using RC7 or RC8? Those builds cannot update themselves. Install RC8.1 by hand once. After that, the **Check for Updates** menu item does it for you.
+Using RC7 or RC8? Those builds cannot update themselves. Install the latest release by hand once. After that, the **Check for Updates** menu item does it for you.
 
 ## What it does
 

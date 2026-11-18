@@ -6,7 +6,7 @@ It is not TeknoParrot. It does not install or set up TeknoParrot itself.
 
 Allow about 10 minutes for TeknoParrot Manager setup and your first small game, once the downloads are ready. Installing TeknoParrot, downloading updates, extracting large games, and setting up a wheel or lightgun can take longer.
 
-This guide describes v1.0 RC8.1. If your menu looks different, follow the menu names.
+This guide describes v1.0 RC8.3. If your menu looks different, follow the menu names.
 
 Each step below has one action. "You will see" tells you what should appear. "Next" tells you what to do after that.
 
