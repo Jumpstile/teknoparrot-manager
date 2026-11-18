@@ -25222,6 +25222,10 @@ function Build-DatIndexFromStream {
         $gameName    = ''
         $profCode    = ''
         $exePath     = ''
+        # Newer dat fields (TPUISchemaVersion 1, issue #382); empty when a game does not have them.
+        $profCode2   = ''
+        $exePath2    = ''
+        $testMenuExe = ''
         $insideGame  = $false
         $captureRoms = $false
         $captureNames = $null
@@ -25253,6 +25257,9 @@ function Build-DatIndexFromStream {
                     $gameName    = $reader.GetAttribute('name')
                     $profCode    = ''
                     $exePath     = ''
+                    $profCode2   = ''
+                    $exePath2    = ''
+                    $testMenuExe = ''
                     $insideGame  = $true
                     $captureRoms = $false
                     if ($null -ne $EmuRomSink -and $gameName -and $gameName.StartsWith('[EMU]', [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -25281,6 +25288,9 @@ function Build-DatIndexFromStream {
             } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::Text -and $insideGame) {
                 if     ($currentElem -eq 'GameProfile')                           { $profCode = $reader.Value }
                 elseif ($currentElem -eq 'Executable' -and -not $exePath) { $exePath  = $reader.Value }
+                elseif ($currentElem -eq 'GameProfile2')                    { $profCode2   = $reader.Value }
+                elseif ($currentElem -eq 'Executable2' -and -not $exePath2) { $exePath2    = $reader.Value }
+                elseif ($currentElem -eq 'TestMenuExecutable')              { $testMenuExe = $reader.Value }
             } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::EndElement -and $reader.Name -eq 'game') {
                 $insideGame = $false
                 $captureRoms = $false
@@ -25294,6 +25304,9 @@ function Build-DatIndexFromStream {
                             # Pass-2 fuzzy fallback can compare meaningful title words
                             # against the folder's own name -- see issue #84.
                             OriginalName = $gameName.Trim()
+                            ProfileCode2       = $profCode2.Trim()
+                            Executable2        = $exePath2.Trim()
+                            TestMenuExecutable = $testMenuExe.Trim()
                         }
                     }
                 }
@@ -47022,7 +47035,7 @@ function Get-PostgresKnownConstraintRestoreWarnings {
     return $names.ToArray()
 }
 
-# FIX125: the ONE judgement of a pg_restore result for a database that TeknoParrot Manager has just created from a game's
+# FIX125: the ONE judgment of a pg_restore result for a database that TeknoParrot Manager has just created from a game's
 # bundled backup. Pure function: no I/O, no logging. Accepted is true only when
 #   - the process did not time out, and
 #   - the exit code is 0 (plain success, KnownWarningCount 0), or
@@ -47032,7 +47045,7 @@ function Get-PostgresKnownConstraintRestoreWarnings {
 # Any other exit code, any other error text, a count mismatch, empty output with exit 1, a timeout, or a database that was
 # not created is Accepted = $false, so the caller fails and rolls back exactly as for any other failed restore.
 # FIX129: Output is the RAW standard-error text of pg_restore (Invoke-Postgres83RestoreCommandChecked passes it in memory through
-# -Interpret): pg_restore reports every error on standard error, so text on standard output is never part of the judgement and
+# -Interpret): pg_restore reports every error on standard error, so text on standard output is never part of the judgment and
 # can never make a restore look finished. The redacted text must never be judged. There is no database-name input and there
 # must never be one.
 function Get-PostgresRestoreJudgement {
@@ -47068,7 +47081,7 @@ function Invoke-Postgres83RestoreCommandChecked {
     # guided rebuild, which call this after createdb succeeded) opts in. Restores of the user's own backups, the rollback dump
     # and every other tool stay strict. Get-PostgresRestoreJudgement decides.
     # FIX129: it decides on the RAW standard-error text, in memory, through -Interpret; only the redacted text and the small
-    # judgement (names redacted too) are kept in the command that goes to the log and the receipts.
+    # judgment (names redacted too) are kept in the command that goes to the log and the receipts.
     $judgeRestore = ($AcceptConstraintOnlyRestoreWarnings -and $ToolName -eq 'pg_restore.exe')
     $commandParameters = @{ ToolName = $ToolName; Arguments = @($Arguments); SuperPasswordPlain = $SuperPasswordPlain }
     if ($judgeRestore) {
@@ -47086,13 +47099,13 @@ function Invoke-Postgres83RestoreCommandChecked {
     }
     $command = Invoke-Postgres83RestoreCommand @commandParameters
     if ($judgeRestore -and -not $command.Succeeded) {
-        $judgement = Get-TpmTransactionField -Object $command -Name 'Interpretation' -Default $null
-        if ($null -ne $judgement -and $judgement.Accepted -and $judgement.KnownWarningCount -gt 0) {
+        $judgment = Get-TpmTransactionField -Object $command -Name 'Interpretation' -Default $null
+        if ($null -ne $judgment -and $judgment.Accepted -and $judgment.KnownWarningCount -gt 0) {
             $command | Add-Member -NotePropertyName Succeeded -NotePropertyValue $true -Force
             # FIX130 (N6): only what was checked is claimed. The restore tool reported no other error; the tables and rows are not counted here.
-            $command | Add-Member -NotePropertyName AcceptedWarnings -NotePropertyValue ('Finished with a known limitation: {0} in the game''s own backup could not be made. This is a known problem with that backup. The restore tool reported no other problem.' -f (Format-TpmCountNoun -Count $judgement.KnownWarningCount -Singular 'link between tables' -Plural 'links between tables')) -Force
-            $command | Add-Member -NotePropertyName AcceptedWarningCount -NotePropertyValue ([int]$judgement.KnownWarningCount) -Force
-            $command | Add-Member -NotePropertyName AcceptedConstraintNames -NotePropertyValue @($judgement.ConstraintNames) -Force
+            $command | Add-Member -NotePropertyName AcceptedWarnings -NotePropertyValue ('Finished with a known limitation: {0} in the game''s own backup could not be made. This is a known problem with that backup. The restore tool reported no other problem.' -f (Format-TpmCountNoun -Count $judgment.KnownWarningCount -Singular 'link between tables' -Plural 'links between tables')) -Force
+            $command | Add-Member -NotePropertyName AcceptedWarningCount -NotePropertyValue ([int]$judgment.KnownWarningCount) -Force
+            $command | Add-Member -NotePropertyName AcceptedConstraintNames -NotePropertyValue @($judgment.ConstraintNames) -Force
         }
     }
     [void]$CommandLog.Add($command)
