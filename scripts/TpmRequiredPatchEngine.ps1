@@ -216,7 +216,10 @@ function Resolve-TpmPatchPath {
     foreach ($part in ($Relative -split '[\\/]')) {
         if ([string]::IsNullOrWhiteSpace($part) -or $part -match '[<>:"|?*\p{Cc}]' -or $part -match '[. ]$|^(CON|PRN|AUX|NUL|CLOCK\$|CONIN\$|CONOUT\$|COM[1-9\u00B9\u00B2\u00B3]|LPT[1-9\u00B9\u00B2\u00B3])(\.|$)' -or $part -in @('.', '..')) { throw 'Unsafe patch path component.' }
     }
-    $joined = Join-Path $Root $Relative
+    # A game saved on a drive that is not connected stops here with one plain reason. Join-Path would print a raw red "Cannot find drive" error for every game.
+    $driveRoot = try { [IO.Path]::GetPathRoot($Root) } catch { '' }
+    if ($driveRoot -match '^[A-Za-z]:\\$' -and -not [IO.Directory]::Exists($driveRoot)) { throw ('The drive {0} is not connected.' -f $driveRoot.Substring(0, 2)) }
+    $joined = [IO.Path]::Combine($Root, $Relative)
     $tooLong = 'A file path is too long for Windows to patch safely ({0} characters). Move TeknoParrot or the game to a folder with a shorter path.'
     if (-not $Staging -and -not $ForUndo -and -not (Test-TpmPathLengthAllowed -Length $joined.Length)) { throw ($tooLong -f $joined.Length) }
     try { $path = [IO.Path]::GetFullPath($joined) } catch [IO.PathTooLongException] { throw ($tooLong -f $joined.Length) }
@@ -1220,6 +1223,7 @@ function Resolve-TpmRequiredPatchSourceRoot {
     }
     Write-Host ("  Select the local {0} ZIP folder containing this exact file: {1}" -f $sourceLabel,$Entry.SourceSet) -ForegroundColor Cyan
     Write-Host '  TeknoParrot Manager reads only the named file inside the ZIP. It does not download or unpack the whole ZIP.' -ForegroundColor DarkGray
+    Write-Host '  Do not have it? Press Enter with nothing typed to skip this patch. Nothing is changed, and you go on to the next one.' -ForegroundColor Yellow
     $selected = Read-PathWithBrowse -Prompt 'Folder containing the exact required local ZIP' -Mode Folder -InitialDirectory $root
     if ([string]::IsNullOrWhiteSpace($selected) -or
         -not (Test-Path -LiteralPath $selected -PathType Container -ErrorAction SilentlyContinue) -or
@@ -1707,6 +1711,7 @@ function Get-TpmRequiredPatchPlainReason {
     $rules = @(
         @('No game folder was selected', 'You did not choose a game folder, so nothing was changed.'),
         @('Undo was not confirmed', 'You chose not to undo it, so nothing was changed.'),
+        @('The drive [A-Za-z]: is not connected', 'The drive for this game is not connected, so nothing was changed. Connect it, or point the game at its new folder in 13) Library health check.'),
         @('^ACTION REQUIRED', 'An earlier patch install stopped part way, so some game files may already be changed. Check Details before you try again. This run changed nothing.'),
         @('Close the game', 'The game is running. Close it and try again.'),
         @('BepInEx is not installed|BepInEx must be installed', 'BepInEx is not installed for this game. Set it up first with BepInEx setup in the main menu.'),
