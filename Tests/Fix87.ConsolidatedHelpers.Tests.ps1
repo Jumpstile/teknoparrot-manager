@@ -59,6 +59,12 @@ Describe 'FIX87 Format-TpmNameList is one function with every caller signature' 
         (Format-TpmNameList -Names @()) | Should -BeExactly ''
     }
 
+    It 'never says "and 1 more": one name over the limit is shown by name' {
+        # Mutation: go back to "A, B, C and 1 more" -> a game is hidden behind a count that saves no space.
+        (Format-TpmNameList -Names @('A', 'B', 'C', 'D') -Limit 3) | Should -BeExactly 'A, B, C and D'
+        (Format-TpmNameList -Names @('A', 'B', 'C', 'D', 'E') -Limit 3) | Should -BeExactly 'A, B, C and 2 more'
+    }
+
     It 'ignores blank names when it counts' {
         # Mutation: count the blank names -> the list is longer than the limit and prints "A, , B and 2 more".
         (Format-TpmNameList -Names @('A', '', 'B', ' ', 'C') -Limit 3) | Should -BeExactly 'A, B and C'

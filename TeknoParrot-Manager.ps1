@@ -42502,7 +42502,8 @@ function Format-TpmNameList {
     param([string[]]$Names, [Alias('Max')][int]$Limit = 5, [string]$WhenEmpty = '')
     $list = @($Names | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($list.Count -eq 0) { return $WhenEmpty }
-    if ($list.Count -le $Limit) { return (Join-TpmPostgresSetupNames -Names $list) }
+    # "and 1 more" saves no space and hides a game, so one extra name is shown.
+    if ($list.Count -le ($Limit + 1)) { return (Join-TpmPostgresSetupNames -Names $list) }
     return ('{0} and {1} more' -f (@($list | Select-Object -First $Limit) -join ', '), ($list.Count - $Limit))
 }
 
