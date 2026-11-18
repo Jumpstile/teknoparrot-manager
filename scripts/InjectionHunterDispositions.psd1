@@ -533,5 +533,37 @@
             Disposition = 'FalsePositive'
             Reasoning   = 'The textOf helper in the game setup notes report is called only with fixed literal field names (BaseGame, GuideStatus, SecondFile, TestProgram, GeneralIssues, LinkedProfile and similar). The item is a TPM-built notes object, the access only reads a property after checking that it exists, and no outside value can pick the name.'
         }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 45459
+            Extent      = '$_ -replace "''", "''''"'
+            Disposition = 'Mitigated'
+            Reasoning   = 'In Get-TpmGamesDbIndex the platform names are doubled single quotes before they are put in the quoted list of a read-only SELECT on the LaunchBox game list. The names come from the script (Arcade, Taito Type X), not from a user or a file, and the query only reads.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 45556
+            Extent      = '$InternalName -replace ''\s*\([^()]*\)\s*$'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (a trailing bracketed note is cut from a game name). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 46095
+            Extent      = '$facts.Dat.$fact'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The loop that fills in LaunchBox game details only takes $fact from the fixed list Year, Developer, Hardware. The facts object is TPM-built, the access only reads a property, and nothing is executed or written from the name.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 55165
+            Extent      = '$name -replace ''^CONTROL_'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (the CONTROL_ prefix is cut from a LEDBlinky control name). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
     )
 }
