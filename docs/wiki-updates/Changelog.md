@@ -22,6 +22,8 @@ The previous published release was v1.0 RC8.1. RC4 and RC5 are historical; RC4 i
   accident can be done.
 - The dgVoodoo2 result now names every game that already had all of its
   files, so every game you picked is listed.
+- After registering new games, the Manager now offers to add them to
+  LaunchBox even when you pick New game only.
 
 ### Fixes
 - A crash on the PostgreSQL setup screen is fixed.
