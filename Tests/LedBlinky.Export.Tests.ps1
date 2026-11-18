@@ -86,7 +86,7 @@ BeforeAll {
 
     function Get-LedHash { param([string]$Path) (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }
     function Get-LedBlock { param($Plan) return [string]$Plan.BlockText }
-    function Get-LedDetailText { param($Plan) return ((Get-TpmLedPlanDetailBlocks -Plan $Plan | ForEach-Object { $_.Lines }) -join "`n") }
+    function Get-LedDetailText { param($Plan) return ((Get-TpmLedPlanDetailBlocks -Plan $Plan | ForEach-Object { $_.Heading; $_.Lines }) -join "`n") }
 }
 
 Describe 'LEDBlinky lighting export' {

@@ -54424,10 +54424,10 @@ function New-TpmLedPreviewFile {
 
 function Get-TpmLedNeedsChoiceCount {
     param([Parameter(Mandatory)]$Plan)
-    $count = 0
-    if ($Plan.Pairing) { $count += @($Plan.Pairing.Held).Count + @($Plan.Pairing.LedsWithoutControl).Count + @($Plan.Pairing.Families).Count }
-    foreach ($group in @($Plan.Groups)) { $count += @($group.NeedsChoice).Count }
-    return $count
+    $total = 0
+    if ($null -ne $Plan.Pairing) { $total += @($Plan.Pairing.Held).Count + @($Plan.Pairing.LedsWithoutControl).Count + @($Plan.Pairing.Families).Count }
+    foreach ($group in $Plan.Groups) { $total += ([object[]]@($group.NeedsChoice)).Length }
+    return $total
 }
 
 function Get-TpmLedPlanDetailBlocks {

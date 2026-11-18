@@ -11,13 +11,15 @@
   ----------------------------------------------------------------
 
   LEDBlinky lighting (optional)
-  - If you use LEDBlinky, you can now add lighting info for your games
-    to it. The Manager looks for LEDBlinky on all your drives and in
-    Program Files. If it cannot find it, it asks where it is (type the
-    folder or browse) and remembers your answer. You can pick a different
-    folder later. You see a preview first. Nothing is changed until you
-    say yes, a saved copy is made first, and you can undo it later. Only
-    the entries the Manager adds are ever removed.
+  - If you use LEDBlinky, the Manager can add lighting info for your
+    games. It looks for LEDBlinky on your drives and in Program Files.
+    If it cannot find it, it asks where it is and remembers the folder.
+  - It reads your own LEDBlinky setup. A game gets only the controls it
+    uses that your cabinet has. Controls your cabinet lacks, and anything
+    it cannot match for sure, are listed in Details and left out.
+  - You see a preview first. Nothing changes until you say yes. A saved
+    copy is made first, and you can undo it. Only entries the Manager
+    added are ever removed.
 
   Game matching
   - A game folder whose name has a note in brackets after the title, such
