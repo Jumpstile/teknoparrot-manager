@@ -10,6 +10,17 @@
   v1.0 RC9 (changes since RC8.2)
   ----------------------------------------------------------------
 
+  LEDBlinky lighting (optional)
+  - If you use LEDBlinky, the Manager can add lighting info for your
+    games. It looks for LEDBlinky on your drives and in Program Files.
+    If it cannot find it, it asks where it is and remembers the folder.
+  - It reads your own LEDBlinky setup. A game gets only the controls it
+    uses that your cabinet has. Controls your cabinet lacks, and anything
+    it cannot match for sure, are listed in Details and left out.
+  - You see a preview first. Nothing changes until you say yes. A saved
+    copy is made first, and you can undo it. Only entries the Manager
+    added are ever removed.
+
   Game matching
   - A game folder whose name has a note in brackets after the title, such
     as "(Landscape,Bezel)", is now matched by its title alone, so the note

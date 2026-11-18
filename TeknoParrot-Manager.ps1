@@ -4962,6 +4962,7 @@ function Get-TpmConfigDocument {
         SupplementaryDatPath         = $supplementaryDatPath
         IncludeSupplementary         = $includeSupplementary
         LaunchBoxRoot                = $lbRoot
+        LedBlinkyRoot                = $ledBlinkyRoot
         PostgresSuperPasswordEncrypted = $postgresSuperPasswordEncrypted
         CheckForUpdatesOnStartup     = $checkForUpdatesOnStartup
     }
@@ -46821,14 +46822,7 @@ function Export-LaunchBoxXml {
             $gamePath = if ($gpNode) { $gpNode.InnerText } else { "" }
             if (-not $gamePath -or -not ([System.IO.File]::Exists((ConvertTo-TpmAutoSyncLongPath -Path $gamePath)) -or [System.IO.Directory]::Exists((ConvertTo-TpmAutoSyncLongPath -Path $gamePath)))) { continue }
 
-            # Friendly title: try the Description field; fall back to
-            # CamelCase-split profile code ("AkaiKatanaShinNesica" -> "Akai Katana Shin Nesica")
-            $descNode = $doc.GameProfile.SelectSingleNode("Description")
-            if ($descNode -and -not [string]::IsNullOrWhiteSpace($descNode.InnerText)) {
-                $title = $descNode.InnerText.Trim()
-            } else {
-                $title = [regex]::Replace($f.BaseName, '(?<=[a-z])(?=[A-Z])', ' ')
-            }
+            $title = Get-TpmProfileFriendlyTitle -Doc $doc -BaseName $f.BaseName
 
             $appPath = $f.FullName
 
@@ -50156,6 +50150,7 @@ $eggmanDatZip         = ''      # path to Eggman ZIP (contains both dats + notes
 $supplementaryDatPath = ''      # supplementary .dat path (when using separate files)
 $includeSupplementary = $false  # whether to build the supplementary index
 $lbRoot                     = $null   # LaunchBox install root (containing LaunchBox.exe), if found/entered
+$ledBlinkyRoot              = ''      # LEDBlinky folder the user chose (holds LEDBlinkyControls.xml); empty = not chosen
 $postgresSuperPasswordEncrypted = $null   # DPAPI-encrypted (ConvertFrom-SecureString, current user+machine) Postgres superuser password
 $checkForUpdatesOnStartup = $true   # default true; independent of $configAccepted below -- read even if the
                                      # rest of a saved config is otherwise treated as corrupt/incomplete
@@ -50283,6 +50278,7 @@ if (Test-Path -LiteralPath $configPath) {
             if ($cfg.SupplementaryDatPath) { $supplementaryDatPath  = $cfg.SupplementaryDatPath  }
             if ($null -ne $cfg.IncludeSupplementary) { $includeSupplementary = [bool]$cfg.IncludeSupplementary }
             if ($cfg.LaunchBoxRoot)               { $lbRoot               = $cfg.LaunchBoxRoot }
+            if ($cfg.LedBlinkyRoot)               { $ledBlinkyRoot        = [string]$cfg.LedBlinkyRoot }
             # -Unattended has no CLI or config mechanism to pick which mode to
             # run automatically -- every mode's own body already auto-answers
             # its internal prompts under -Unattended (see the many
@@ -54934,6 +54930,649 @@ if ($result.Registered.Count -gt 0 -and $notesIndex.Count -gt 0) {
     }
 }
 
+function Get-TpmProfileFriendlyTitle {
+    param([Parameter(Mandatory)]$Doc, [Parameter(Mandatory)][string]$BaseName)
+    $descNode = $Doc.GameProfile.SelectSingleNode('Description')
+    if ($descNode -and -not [string]::IsNullOrWhiteSpace($descNode.InnerText)) { return $descNode.InnerText.Trim() }
+    return [regex]::Replace($BaseName, '(?<=[a-z])(?=[A-Z])', ' ')
+}
+
+# =============================================================================
+# TpmLed MODULE SECTION: LEDBlinky lighting export  (optional; only offered when LEDBlinky is found)
+# =============================================================================
+# Written so it can be lifted into a .psm1 after 1.0. Everything between this header and the "END TpmLed" marker
+# belongs to it. It holds no script-level variables: all state travels in parameters and returned objects.
+#
+# Public functions (the only ones other code or tests may call):
+#   Core, no screen output:  Get-TpmLedBlinkyCandidateFolders, Get-TpmLedBlinkyFolderProblem, Find-TpmLedBlinky,
+#                            Test-TpmLedBlinkyRunning, Get-TpmLedCabinet, Get-TpmLedControlPairing,
+#                            Get-TpmLedExportPlan, New-TpmLedPreviewFile,
+#                            Invoke-TpmLedBlinkyAdd, Invoke-TpmLedBlinkyUndo
+#   Screens:                 Write-TpmLedPreview, Get-TpmLedPlanDetailBlocks, Invoke-TpmLedBlinkyLocate, Read-TpmLedBlinkyFolder, Get-TpmLedLocalDriveRoots,
+#                            Invoke-TpmLedBlinkyStep
+# Everything else in the section (Get-TpmLed*, New-TpmLedGroupText, Read-TpmLedControlsText, ConvertTo-TpmLedXmlText,
+# Write-TpmLedResult) is private.
+#
+# Dependencies outside the section (must travel with it or be provided):
+#   Core:    Get-TpmLedBlinkyKeyMap (the existing LED key map reader), Get-TpmProfileFriendlyTitle (defined just above, also used by the LaunchBox export), Get-ButtonNodes,
+#            Get-ProfileFamily, Read-Xml, Get-TpmRegisteredProfileFilesWithDiscoveryProgress, Get-TpmAutoSyncSha256,
+#            Write-TpmAtomicTextFile, Test-TpmNoReparsePath, Write-Log
+#   Screens: Write-TpmOutcome, Write-TpmText, Read-TpmChoice, Read-TpmYesNo, Format-TpmGameCount, Get-TpmControllerEvidence (the existing
+#            device check), Read-PathWithBrowse (the
+#            folder picker), Get-LocalDriveInfoSafe, Test-IsNetworkPath (local drive check)
+# The folder the user chose is kept by the caller in the Manager settings file (LedBlinkyRoot); the section only receives it
+# as a parameter and reports a changed choice through the State object it is given.
+#
+# What it does: adds one lighting entry per registered game to LEDBlinky's own control file (LEDBlinkyControls.xml),
+# under the "TeknoParrot" emulator group that LEDBlinky already has. Safety rules, all enforced below:
+#   - LEDBlinky is only ever read until the user answers Yes to an exact preview.
+#   - Nothing is written while LEDBlinky or its editor is open, or if the file changed after the preview.
+#   - A verified copy of the file is saved first, and every add can be undone.
+#   - Only entries this tool adds are ever removed. Entries LEDBlinky or the user made are never touched.
+#   - TeknoParrot profiles are only read. LEDs are never driven. Nothing is downloaded.
+# Game key: the profile file name without ".xml". That is the ROM name LaunchBox hands to LEDBlinky for a TeknoParrot
+# game (the profile is the "ROM"). The controls are the ones each profile lists, not a verified requirement list.
+
+# Pure: the usual places LEDBlinky lives, in the order to look. Nothing is touched.
+function Get-TpmLedBlinkyCandidateFolders {
+    param([string]$SavedFolder = '', [string]$LaunchBoxRoot = '', [string[]]$DriveRoots = @(), [string[]]$ProgramFilesFolders = @())
+    $list = New-Object System.Collections.Generic.List[string]
+    if ($SavedFolder) { [void]$list.Add($SavedFolder) }
+    if ($LaunchBoxRoot) {
+        $beside = Split-Path -Parent ($LaunchBoxRoot.TrimEnd('\', '/'))
+        if ($beside) { [void]$list.Add((Join-Path $beside 'LEDBlinky')) }
+    }
+    foreach ($root in @($DriveRoots | Where-Object { $_ })) { [void]$list.Add($root.TrimEnd('\') + '\LEDBlinky') }
+    foreach ($folder in @($ProgramFilesFolders | Where-Object { $_ })) { [void]$list.Add((Join-Path $folder 'LEDBlinky')) }
+    return ,@($list | Select-Object -Unique)
+}
+
+# The one rule for "this is the LEDBlinky folder": it exists and holds LEDBlinkyControls.xml.
+# Returns '' when fine, 'NoFolder' or 'NoControls' otherwise.
+function Get-TpmLedBlinkyFolderProblem {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Container)) { return 'NoFolder' }
+    if (-not (Test-Path -LiteralPath (Join-Path $Path 'LEDBlinkyControls.xml') -PathType Leaf)) { return 'NoControls' }
+    return ''
+}
+
+# Read-only: the first candidate folder that is a real LEDBlinky folder, or $null when none is.
+function Find-TpmLedBlinky {
+    param([string[]]$Candidates = @())
+    foreach ($folder in @($Candidates | Where-Object { $_ })) {
+        if ((Get-TpmLedBlinkyFolderProblem -Path $folder) -eq '') { return [pscustomobject]@{ Root = $folder; ControlsPath = (Join-Path $folder 'LEDBlinkyControls.xml') } }
+    }
+    return $null
+}
+function Test-TpmLedBlinkyRunning {
+    return (@(Get-Process -Name 'LEDBlinky', 'LEDBlinkyControlsEditor', 'LEDBlinkyConfig' -ErrorAction SilentlyContinue).Count -gt 0)
+}
+
+# Text safe inside an XML attribute and plain ASCII (the control file may be read as ANSI by LEDBlinky).
+function ConvertTo-TpmLedXmlText {
+    param([AllowEmptyString()][string]$Text)
+    $escaped = [System.Security.SecurityElement]::Escape(($Text -replace '[\x00-\x1F]', ' '))
+    $builder = New-Object System.Text.StringBuilder
+    for ($i = 0; $i -lt $escaped.Length; $i++) {
+        $c = $escaped[$i]
+        if ([int]$c -lt 128) { [void]$builder.Append($c) }
+        elseif ([char]::IsHighSurrogate($c) -and ($i + 1) -lt $escaped.Length -and [char]::IsLowSurrogate($escaped[$i + 1])) {
+            [void]$builder.Append(('&#{0};' -f [char]::ConvertToUtf32($c, $escaped[$i + 1]))); $i++
+        } else { [void]$builder.Append(('&#{0};' -f [int]$c)) }
+    }
+    return $builder.ToString()
+}
+
+# --- Profile side (read-only): the controls a TeknoParrot profile lists, sorted by what they are.
+# Exact is the LEDBlinky name for the standard controls (buttons, directions, Start, Coin). Everything else is matched
+# against the user's own setup by Kind (see Get-TpmLedGameMatch). Analog axes (wheel, gun aim) have no LED and are skipped.
+function Get-TpmLedProfileControls {
+    param([Parameter(Mandatory)]$Doc)
+    $seen = @{}
+    $controls = New-Object System.Collections.Generic.List[object]
+    foreach ($button in @(Get-ButtonNodes $Doc)) {
+        $mappingNode = $button.SelectSingleNode('InputMapping')
+        if ($null -eq $mappingNode) { continue }
+        $mapping = $mappingNode.InnerText.Trim()
+        if (-not $mapping -or $seen.ContainsKey($mapping)) { continue }
+        $seen[$mapping] = $true
+        $labelNode = $button.SelectSingleNode('ButtonName')
+        $label = if ($labelNode) { $labelNode.InnerText.Trim() } else { '' }
+        $analogNode = $button.SelectSingleNode('AnalogType')
+        $analog = if ($analogNode -and $analogNode.InnerText.Trim()) { $analogNode.InnerText.Trim() } else { 'None' }
+        $player = 0
+        if ($mapping -match '^P(\d)') { $player = [int]$Matches[1] }
+        $control = [pscustomobject]@{ Mapping = $mapping; Label = $(if ($label) { $label } else { $mapping }); Voice = ''; Player = $player; Kind = 'Other'; Number = 0; Exact = '' }
+        if ($mapping -match '(?i)trackball') { $control.Kind = 'Trackball' }
+        elseif ($mapping -match '(?i)spinner|dial' -or $label -match '(?i)spinner') { $control.Kind = 'Spinner' }
+        elseif ($analog -in @('Gas', 'Brake')) { $control.Kind = 'Pedal' }
+        elseif ($analog -ne 'None') { continue }
+        elseif ($mapping -match '^P(\d)Button(\d+)$') {
+            $control.Kind = 'Button'; $control.Number = [int]$Matches[2]; $control.Exact = ('P{0}_BUTTON{1}' -f $Matches[1], [int]$Matches[2])
+            if ($label -and $label.Length -le 30 -and $label -notmatch '(?i)^(p\d\s*)?button\s*\d+$') { $control.Voice = $label }
+        }
+        elseif ($mapping -match '^P(\d)Button(Up|Down|Left|Right)$') { $control.Kind = 'Direction'; $control.Exact = ('P{0}_JOYSTICK_{1}' -f $Matches[1], $Matches[2].ToUpperInvariant()) }
+        elseif ($mapping -match '^P(\d)ButtonStart$' -or $mapping -match '^Start(\d)$') { $control.Kind = 'Start'; $control.Player = [int]$Matches[1]; $control.Exact = ('START{0}' -f $Matches[1]) }
+        elseif ($mapping -match '^(?:P(\d))?Coin(\d)?$') {
+            $n = if ($Matches[1]) { [int]$Matches[1] } elseif ($Matches[2]) { [int]$Matches[2] } else { 1 }
+            $control.Kind = 'Coin'; $control.Player = $n; $control.Exact = ('COIN{0}' -f $n)
+        }
+        elseif ($mapping -match '(?i)service') { $control.Kind = 'Service' }
+        elseif ($mapping -match '(?i)^(p\d)?test') { $control.Kind = 'Test' }
+        [void]$controls.Add($control)
+    }
+    return [pscustomobject]@{ Controls = @($controls | Sort-Object Player, Kind, Number); Family = (Get-ProfileFamily $Doc) }
+}
+
+# --- Cabinet side (read-only): what the user's own LEDBlinky setup defines.
+# The controls the user's LEDBlinky knows, read from LEDBlinkyControls.xml text: the TeknoParrot default group first, then
+# the TeknoParrot games, and the other emulators' default groups only when TeknoParrot has no default group of its own.
+# Names are taken exactly as written (any name the user's file uses is kept). Controls that name a main control
+# (CONTROL_...) are IsPrimary.
+function Get-TpmLedCabinet {
+    param([Parameter(Mandatory)][string]$ControlsText)
+    $doc = New-Object System.Xml.XmlDocument
+    $doc.XmlResolver = $null
+    try { $doc.LoadXml($ControlsText) } catch { throw 'The LEDBlinky control file could not be read as XML, so it was left alone.' }
+    $teknoGroups = @($doc.SelectNodes('/dat/emulator[@emuname="TeknoParrot"]/controlGroup'))
+    $defaults = @($teknoGroups | Where-Object { $_.GetAttribute('groupName') -eq 'DEFAULT' })
+    $source = 'the TeknoParrot defaults'
+    if ($defaults.Count -eq 0) { $defaults = @($doc.SelectNodes('/dat/emulator/controlGroup[@groupName="DEFAULT"]')); $source = 'the defaults of your other emulators' }
+    $others = @($teknoGroups | Where-Object { $_.GetAttribute('groupName') -ne 'DEFAULT' })
+    $controls = New-Object System.Collections.Hashtable ([System.StringComparer]::OrdinalIgnoreCase)
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($group in (@($defaults) + @($others))) {
+        foreach ($playerNode in @($group.SelectNodes('player'))) {
+            $player = 0
+            [void][int]::TryParse($playerNode.GetAttribute('number'), [ref]$player)
+            foreach ($node in @($playerNode.SelectNodes('control'))) {
+                $name = $node.GetAttribute('name')
+                if (-not $name -or $controls.ContainsKey($name)) { continue }
+                $controls[$name] = [pscustomobject]@{
+                    Name = $name; Player = $player; Voice = $node.GetAttribute('voice')
+                    IsPrimary = (($name -like 'CONTROL_*') -or ($node.GetAttribute('primaryControl') -eq '1'))
+                    InputCodes = $(if ($node.HasAttribute('inputCodes')) { $node.GetAttribute('inputCodes') } else { $null })
+                    Color = $(if ($node.HasAttribute('color')) { $node.GetAttribute('color') } else { $null })
+                }
+                [void]$names.Add($name)
+            }
+        }
+    }
+    $players = @($names | ForEach-Object { $controls[$_].Player } | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
+    return [pscustomobject]@{ Controls = $controls; Names = $names.ToArray(); Players = $players; Source = $source; Held = @() }
+}
+
+# Pure pairing of the cabinet's controls with LEDs. Inputs: the cabinet (Get-TpmLedCabinet), the LED key map
+# (Get-TpmLedBlinkyKeyMap, existing reader of LEDBlinkyInputMap.xml; $null or Found=$false means it was not available) and
+# the controller evidence (Get-TpmControllerEvidence, TpmControllerEvidence/v1; $null or not 'Observed' means no device check).
+# A control is paired when its input codes match exactly one LED label in the key map. Nothing is guessed:
+#   - no LED matches, or more than one fits -> the control is held back (Held) and shown as needing the user's choice;
+#   - a LED no control uses -> LedsWithoutControl;
+#   - a kind of control the devices show but LEDBlinky does not have, or the other way round -> Families (held back too).
+# The device check only looks at the families named below (the evidence today says which kinds of device are connected,
+# not button counts), so richer evidence can be added there later without changing the callers.
+# Returns Usable (a cabinet holding only the controls that may be written, plus Held) and the lists above.
+function Get-TpmLedControlPairing {
+    param([Parameter(Mandatory)]$Cabinet, $KeyMap = $null, $Evidence = $null)
+    $keyMapFound = ($null -ne $KeyMap -and [bool]$KeyMap.Found)
+    $labelsByCode = New-Object System.Collections.Hashtable ([System.StringComparer]::OrdinalIgnoreCase)
+    $allLabels = New-Object System.Collections.Generic.List[string]
+    if ($keyMapFound) {
+        foreach ($led in @($KeyMap.Controls)) {
+            [void]$allLabels.Add([string]$led.Control)
+            foreach ($code in @($led.InputCodes)) {
+                if (-not $labelsByCode.ContainsKey($code)) { $labelsByCode[$code] = New-Object System.Collections.Generic.List[string] }
+                if (-not $labelsByCode[$code].Contains([string]$led.Control)) { [void]$labelsByCode[$code].Add([string]$led.Control) }
+            }
+        }
+    }
+    $used = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $keep = New-Object System.Collections.Generic.List[string]
+    $held = New-Object System.Collections.Generic.List[object]
+    $pairs = New-Object System.Collections.Generic.List[object]
+    foreach ($name in @($Cabinet.Names)) {
+        $cab = $Cabinet.Controls[$name]
+        $status = 'Unchecked'; $labels = @()
+        if ($keyMapFound) {
+            if ($cab.IsPrimary) {
+                $suffix = $name -replace '^CONTROL_', ''
+                $labels = @($KeyMap.Controls | Where-Object { $_.Control -ieq $suffix -or @($_.InputCodes) -contains $suffix } | ForEach-Object { [string]$_.Control })
+                $status = 'Primary'
+            } else {
+                $codes = @(([string]$cab.InputCodes).Split('|') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                if ($codes.Count -eq 0) { $status = 'NoInputCode' }
+                else {
+                    $labels = @($codes | ForEach-Object { if ($labelsByCode.ContainsKey($_)) { $labelsByCode[$_] } } | ForEach-Object { $_ } | Select-Object -Unique)
+                    if ($labels.Count -eq 1) { $status = 'Paired' }
+                    elseif ($labels.Count -eq 0) { $status = 'NoLed' }
+                    else { $status = 'Several' }
+                }
+            }
+        }
+        foreach ($label in $labels) { [void]$used.Add($label) }
+        [void]$pairs.Add([pscustomobject]@{ Name = $name; Status = $status; Leds = @($labels) })
+        if ($status -in @('NoLed', 'Several')) { [void]$held.Add([pscustomobject]@{ Name = $name; Reason = $status; Candidates = @($labels) }) }
+        else { [void]$keep.Add($name) }
+    }
+    $ledsWithoutControl = @($allLabels | Where-Object { -not $used.Contains($_) })
+    $families = New-Object System.Collections.Generic.List[object]
+    if ($null -ne $Evidence -and [string]$Evidence.EvidenceStatus -eq 'Observed') {
+        $kinds = @(
+            @{ Name = 'Trackball or spinner'; Classes = @('PointerOrTrackball'); Pattern = '(?i)TRACKBALL|DIAL|SPINNER' },
+            @{ Name = 'Light gun'; Classes = @('LightGun'); Pattern = '(?i)LIGHTGUN' },
+            @{ Name = 'Wheel or pedals'; Classes = @('Wheel'); Pattern = '(?i)WHEEL|PEDAL' }
+        )
+        foreach ($kind in $kinds) {
+            $detected = [int](@($Evidence.DeviceObservations | Where-Object { $_.DeviceClass -in $kind.Classes } | Measure-Object -Property Count -Sum).Sum)
+            $mine = @($keep | Where-Object { $_ -match $kind.Pattern })
+            if ($detected -gt 0 -and $mine.Count -eq 0) { [void]$families.Add([pscustomobject]@{ Family = $kind.Name; Status = 'DetectedNoControl'; Controls = @() }) }
+            elseif ($detected -eq 0 -and $mine.Count -gt 0) {
+                [void]$families.Add([pscustomobject]@{ Family = $kind.Name; Status = 'ControlNotDetected'; Controls = $mine })
+                foreach ($m in $mine) { [void]$held.Add([pscustomobject]@{ Name = $m; Reason = 'NotDetected'; Candidates = @() }); [void]$keep.Remove($m) }
+            }
+        }
+    }
+    $usableControls = New-Object System.Collections.Hashtable ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in $keep) { $usableControls[$name] = $Cabinet.Controls[$name] }
+    $usable = [pscustomobject]@{ Controls = $usableControls; Names = $keep.ToArray(); Players = $Cabinet.Players; Source = $Cabinet.Source; Held = $held.ToArray() }
+    return [pscustomobject]@{ Usable = $usable; Pairs = $pairs.ToArray(); Held = $held.ToArray(); LedsWithoutControl = $ledsWithoutControl; Families = $families.ToArray(); KeyMapFound = $keyMapFound; DevicesChecked = ($families.Count -gt 0 -or ($null -ne $Evidence -and [string]$Evidence.EvidenceStatus -eq 'Observed')) }
+}
+
+# Matches one profile's controls against the usable cabinet. Only controls that are on the cabinet are written. A control
+# the cabinet does not have is NotOnCabinet. A control that cannot be matched with confidence (several possible cabinet
+# controls, a cabinet control held back by the pairing, or no known kind) is NeedsChoice and is not written.
+function Get-TpmLedGameMatch {
+    param([Parameter(Mandatory)]$ProfileControls, [Parameter(Mandatory)]$Cabinet)
+    $written = New-Object System.Collections.Generic.List[object]
+    $notOn = New-Object System.Collections.Generic.List[string]
+    $choice = New-Object System.Collections.Generic.List[object]
+    $heldNames = @($Cabinet.Held | ForEach-Object { $_.Name })
+    $alias = @{ Service = '(?i)SERVICE'; Test = '(?i)(^|_)TEST'; Spinner = '(?i)DIAL|SPINNER'; Pedal = '(?i)PEDAL|GAS|BRAKE|ACCEL'; Trackball = '(?i)TRACKBALL' }
+    $add = {
+        param($name, $voice)
+        if (@($written | Where-Object { $_.Cab.Name -eq $name }).Count -eq 0) { [void]$written.Add([pscustomobject]@{ Cab = $Cabinet.Controls[$name]; Voice = $voice }) }
+    }
+    foreach ($control in @($ProfileControls.Controls)) {
+        if ($control.Exact) {
+            if ($Cabinet.Controls.ContainsKey($control.Exact)) { & $add $control.Exact $control.Voice }
+            elseif ($heldNames -contains $control.Exact) { [void]$choice.Add([pscustomobject]@{ Label = $control.Label; Candidates = @($control.Exact) }) }
+            else { [void]$notOn.Add($control.Label) }
+            continue
+        }
+        if ($alias.ContainsKey($control.Kind)) {
+            $candidates = @($Cabinet.Names | Where-Object { $_ -match $alias[$control.Kind] })
+            if ($control.Player -gt 0) {
+                $mine = @($candidates | Where-Object { $_ -like ('P{0}_*' -f $control.Player) })
+                if ($mine.Count -gt 0) { $candidates = $mine }
+            }
+            if ($candidates.Count -eq 0) {
+                $heldHere = @($heldNames | Where-Object { $_ -match $alias[$control.Kind] })
+                if ($heldHere.Count -gt 0) { [void]$choice.Add([pscustomobject]@{ Label = $control.Label; Candidates = $heldHere }) } else { [void]$notOn.Add($control.Label) }
+            }
+            elseif ($candidates.Count -eq 1) { & $add $candidates[0] '' }
+            else { [void]$choice.Add([pscustomobject]@{ Label = $control.Label; Candidates = $candidates }) }
+            continue
+        }
+        [void]$choice.Add([pscustomobject]@{ Label = $control.Label; Candidates = @() })
+    }
+    if ($ProfileControls.Family -eq 'lightgun') {
+        if ($Cabinet.Controls.ContainsKey('CONTROL_LIGHTGUN')) { & $add 'CONTROL_LIGHTGUN' '' }
+        elseif ($heldNames -contains 'CONTROL_LIGHTGUN') { [void]$choice.Add([pscustomobject]@{ Label = 'Light gun'; Candidates = @('CONTROL_LIGHTGUN') }) }
+        else { [void]$notOn.Add('Light gun') }
+    } elseif (@($ProfileControls.Controls | Where-Object { $_.Kind -eq 'Direction' }).Count -gt 0) {
+        $joystick = @($Cabinet.Names | Where-Object { $_ -match '^CONTROL_(DOUBLE|V)?(JOY|STICK)' }) | Select-Object -First 1
+        if ($joystick) { & $add $joystick '' }
+    }
+    return [pscustomobject]@{ Written = $written.ToArray(); NotOnCabinet = $notOn.ToArray(); NeedsChoice = $choice.ToArray() }
+}
+
+# One game's entry, built only from cabinet controls (name, color and input codes are the user's own). The game's own
+# label is used as the spoken word for a button when it has one.
+function New-TpmLedGroupText {
+    param([Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)][object[]]$Written, [Parameter(Mandatory)][string]$Newline)
+    $line = {
+        param($entry)
+        $voice = if ($entry.Voice) { $entry.Voice } else { $entry.Cab.Voice }
+        $text = '        <control name="{0}" voice="{1}"' -f (ConvertTo-TpmLedXmlText $entry.Cab.Name), (ConvertTo-TpmLedXmlText $voice)
+        if ($entry.Cab.IsPrimary) { $text += ' primaryControl="1"' }
+        if ($null -ne $entry.Cab.Color) { $text += (' color="{0}"' -f (ConvertTo-TpmLedXmlText $entry.Cab.Color)) }
+        if ($null -ne $entry.Cab.InputCodes) { $text += (' inputCodes="{0}"' -f (ConvertTo-TpmLedXmlText $entry.Cab.InputCodes)) }
+        return ($text + ' />')
+    }
+    $primaries = @($Written | Where-Object { $_.Cab.IsPrimary })
+    $normal = @($Written | Where-Object { -not $_.Cab.IsPrimary } | Sort-Object { $_.Cab.Player })
+    $maxPlayer = [Math]::Max(1, [int](@($normal | ForEach-Object { $_.Cab.Player } | Measure-Object -Maximum).Maximum))
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add(('    <controlGroup groupName="{0}" voice="{1}" numPlayers="{2}" alternating="0" jukebox="0">' -f (ConvertTo-TpmLedXmlText $Key), (ConvertTo-TpmLedXmlText $Title), $maxPlayer))
+    if ($primaries.Count -gt 0) {
+        [void]$lines.Add('      <player number="0">')
+        foreach ($entry in $primaries) { [void]$lines.Add((& $line $entry)) }
+        [void]$lines.Add('      </player>')
+    }
+    foreach ($player in @($normal | ForEach-Object { $_.Cab.Player } | Sort-Object -Unique)) {
+        [void]$lines.Add(('      <player number="{0}">' -f $player))
+        foreach ($entry in @($normal | Where-Object { $_.Cab.Player -eq $player })) { [void]$lines.Add((& $line $entry)) }
+        [void]$lines.Add('      </player>')
+    }
+    [void]$lines.Add('    </controlGroup>')
+    return ($lines -join $Newline)
+}
+
+# Reads LEDBlinky's control file as text. Refuses a file that would not survive a text round trip byte for byte.
+function Read-TpmLedControlsText {
+    param([Parameter(Mandatory)][string]$Path)
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { throw 'The LEDBlinky control file starts with a byte-order mark, so it was left alone.' }
+    $strict = New-Object System.Text.UTF8Encoding($false, $true)
+    try { return $strict.GetString($bytes) } catch { throw 'The LEDBlinky control file is not plain UTF-8 text, so it was left alone.' }
+}
+
+# Where the TeknoParrot emulator group ends inside the control file text. $null when LEDBlinky has no such group.
+function Get-TpmLedEmulatorSpan {
+    param([Parameter(Mandatory)][string]$Text, [string]$Name = 'TeknoParrot')
+    $m = [regex]::Match($Text, ('(?s)<emulator\s+emuname="{0}"[^>/]*>(?<body>.*?)</emulator>' -f [regex]::Escape($Name)))
+    if (-not $m.Success) { return $null }
+    return [pscustomobject]@{ InsertAt = $m.Groups['body'].Index + $m.Groups['body'].Length; Body = $m.Groups['body'].Value }
+}
+
+# Read-only plan: which games would get a new entry, and the exact text that would be added. The entries are built only
+# from controls that the profile uses and the user's own LEDBlinky setup has (and can pair with an LED).
+# Evidence: the controller evidence object (Get-TpmControllerEvidence), or $null when no device check is wanted.
+function Get-TpmLedExportPlan {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$ControlsPath, $Evidence = $null)
+    $text = Read-TpmLedControlsText -Path $ControlsPath
+    $newline = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $plan = [pscustomobject]@{
+        HasEmulator = $false; HasCabinet = $false; Cabinet = $null; Pairing = $null; Newline = $newline; InsertAt = 0
+        SourceHash = (Get-TpmAutoSyncSha256 -Path $ControlsPath)
+        Groups = (New-Object System.Collections.Generic.List[object]); SkippedExisting = (New-Object System.Collections.Generic.List[string])
+        SkippedNoControls = (New-Object System.Collections.Generic.List[string]); Unreadable = (New-Object System.Collections.Generic.List[string]); BlockText = ''
+    }
+    $span = Get-TpmLedEmulatorSpan -Text $text
+    if ($null -eq $span) { return $plan }
+    $plan.HasEmulator = $true
+    $plan.InsertAt = $span.InsertAt
+    $folder = Split-Path -Parent $ControlsPath
+    $keyMap = if (Test-Path -LiteralPath (Join-Path $folder 'LEDBlinkyInputMap.xml') -PathType Leaf) { Get-TpmLedBlinkyKeyMap -Root @($folder) } else { $null }
+    $plan.Cabinet = Get-TpmLedCabinet -ControlsText $text
+    $plan.Pairing = Get-TpmLedControlPairing -Cabinet $plan.Cabinet -KeyMap $keyMap -Evidence $Evidence
+    if ($plan.Pairing.Usable.Names.Count -eq 0) { return $plan }
+    $plan.HasCabinet = $true
+    $existing = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($m in [regex]::Matches($span.Body, '<controlGroup\s+groupName="([^"]*)"')) { [void]$existing.Add([System.Net.WebUtility]::HtmlDecode($m.Groups[1].Value)) }
+    $files = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'LEDBlinky preview' -EnumerationErrorAction SilentlyContinue | Sort-Object Name)
+    $blocks = New-Object System.Collections.Generic.List[string]
+    foreach ($file in $files) {
+        try {
+            $doc = Read-Xml $file.FullName
+            if ($null -eq $doc.GameProfile) { continue }
+            if ($existing.Contains($file.BaseName) -or $file.BaseName -ieq 'DEFAULT') { [void]$plan.SkippedExisting.Add($file.BaseName); continue }
+            $match = Get-TpmLedGameMatch -ProfileControls (Get-TpmLedProfileControls -Doc $doc) -Cabinet $plan.Pairing.Usable
+            if ($match.Written.Count -eq 0) { [void]$plan.SkippedNoControls.Add($file.BaseName); continue }
+            $title = Get-TpmProfileFriendlyTitle -Doc $doc -BaseName $file.BaseName
+            [void]$blocks.Add((New-TpmLedGroupText -Key $file.BaseName -Title $title -Written $match.Written -Newline $newline))
+            $primary = @($match.Written | Where-Object { $_.Cab.IsPrimary } | ForEach-Object { $_.Cab.Name } | Select-Object -First 1)
+            [void]$plan.Groups.Add([pscustomobject]@{ Key = $file.BaseName; Title = $title; Buttons = @($match.Written | Where-Object { -not $_.Cab.IsPrimary }).Count; Primary = ($primary -join ''); NotOnCabinet = $match.NotOnCabinet; NeedsChoice = $match.NeedsChoice })
+        } catch {
+            [void]$plan.Unreadable.Add($file.BaseName)
+            Write-Log "LEDBlinky plan: skipped $($file.Name) -- $_"
+        }
+    }
+    if ($blocks.Count -gt 0) { $plan.BlockText = $newline + ($blocks -join $newline) }
+    return $plan
+}
+
+# Adds the planned entries. Read first, exact plan checked against the file, verified copy, validated atomic write, undo receipt.
+function Invoke-TpmLedBlinkyAdd {
+    param([Parameter(Mandatory)]$Install, [Parameter(Mandatory)]$Plan, [Parameter(Mandatory)]$Layout)
+    $fail = { param($reason) [pscustomobject]@{ Outcome = 'FAILED'; Added = 0; Summary = $reason; BackupPath = ''; ReceiptPath = '' } }
+    try {
+        if (-not $Plan.HasEmulator -or $Plan.Groups.Count -eq 0) { return (& $fail 'There is nothing to add.') }
+        if (Test-TpmLedBlinkyRunning) { return (& $fail 'LEDBlinky is open. Close LEDBlinky and its editor, then try again. Nothing was changed.') }
+        $path = $Install.ControlsPath
+        if ((Get-TpmAutoSyncSha256 -Path $path) -ne $Plan.SourceHash) { return (& $fail 'The LEDBlinky file changed after the preview. Run the preview again. Nothing was changed.') }
+        $original = Read-TpmLedControlsText -Path $path
+        $backupDir = Join-Path $Layout.Backups ('LEDBlinky-{0}' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+        [void][System.IO.Directory]::CreateDirectory($backupDir)
+        if (-not (Test-TpmNoReparsePath -Path $backupDir)) { return (& $fail 'The backup folder is not safe to use. Nothing was changed.') }
+        $backupPath = Join-Path $backupDir 'LEDBlinkyControls.xml'
+        [System.IO.File]::Copy($path, $backupPath, $false)
+        if ((Get-TpmAutoSyncSha256 -Path $backupPath) -ne $Plan.SourceHash) { return (& $fail 'The saved copy could not be verified. Nothing was changed.') }
+        $newText = $original.Insert($Plan.InsertAt, $Plan.BlockText)
+        $insertAt = $Plan.InsertAt; $blockText = $Plan.BlockText
+        $validate = {
+            param($written)
+            $check = New-Object System.Xml.XmlDocument
+            $check.XmlResolver = $null
+            $check.LoadXml($written)
+            return ($written.Length -eq ($original.Length + $blockText.Length) -and $written.Remove($insertAt, $blockText.Length) -ceq $original)
+        }.GetNewClosure()
+        Write-TpmAtomicTextFile -Path $path -Text $newText -Validate $validate -Operation 'LEDBlinky control file write'
+        $afterHash = Get-TpmAutoSyncSha256 -Path $path
+        $receiptPath = Join-Path $Layout.State ('LEDBlinky-Undo-{0}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+        $receipt = [ordered]@{ Path = $path; BackupPath = $backupPath; BeforeSha256 = $Plan.SourceHash; AfterSha256 = $afterHash; Keys = @($Plan.Groups | ForEach-Object { $_.Key }); Inserted = $blockText }
+        Write-TpmAtomicTextFile -Path $receiptPath -Text ($receipt | ConvertTo-Json -Depth 4) -Operation 'LEDBlinky undo record'
+        Write-Log ('LEDBlinky add: added={0}; backup={1}; receipt={2}' -f $Plan.Groups.Count, $backupPath, $receiptPath)
+        return [pscustomobject]@{ Outcome = 'SAVED'; Added = $Plan.Groups.Count; Summary = ('Added lighting info for {0} to LEDBlinky.' -f (Format-TpmGameCount -Count $Plan.Groups.Count)); BackupPath = $backupPath; ReceiptPath = $receiptPath }
+    } catch {
+        Write-Log "LEDBlinky add failed -- $_"
+        return (& $fail ('The add stopped and LEDBlinky was left as it was. ' + $_.Exception.Message))
+    }
+}
+
+# Undo: removes exactly the text the last add inserted (and nothing else), after saving the current file.
+function Invoke-TpmLedBlinkyUndo {
+    param([Parameter(Mandatory)]$Install, [Parameter(Mandatory)]$Layout)
+    $result = { param($outcome, $summary) [pscustomobject]@{ Outcome = $outcome; Summary = $summary } }
+    try {
+        $receiptFile = @(Get-ChildItem -LiteralPath $Layout.State -Filter 'LEDBlinky-Undo-*.json' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike '*.undone.json' } | Sort-Object Name -Descending | Select-Object -First 1)
+        if ($receiptFile.Count -eq 0) { return (& $result 'NONE' 'There is nothing to undo.') }
+        if (Test-TpmLedBlinkyRunning) { return (& $result 'FAILED' 'LEDBlinky is open. Close LEDBlinky and its editor, then try again. Nothing was changed.') }
+        $receipt = [System.IO.File]::ReadAllText($receiptFile[0].FullName) | ConvertFrom-Json
+        $path = $Install.ControlsPath
+        $current = Read-TpmLedControlsText -Path $path
+        $inserted = [string]$receipt.Inserted
+        $at = $current.IndexOf($inserted, [System.StringComparison]::Ordinal)
+        if ($at -lt 0 -or $current.IndexOf($inserted, $at + 1, [System.StringComparison]::Ordinal) -ge 0) { return (& $result 'FAILED' 'The entries this tool added are no longer there as one block, so nothing was removed.') }
+        $restored = $current.Remove($at, $inserted.Length)
+        $beforeUndo = Join-Path (Split-Path -Parent ([string]$receipt.BackupPath)) 'LEDBlinkyControls.before-undo.xml'
+        [System.IO.File]::Copy($path, $beforeUndo, $true)
+        $validate = { param($written) $check = New-Object System.Xml.XmlDocument; $check.XmlResolver = $null; $check.LoadXml($written); return ($written -ceq $restored) }.GetNewClosure()
+        Write-TpmAtomicTextFile -Path $path -Text $restored -Validate $validate -Operation 'LEDBlinky undo'
+        Move-Item -LiteralPath $receiptFile[0].FullName -Destination ($receiptFile[0].FullName -replace '\.json$', '.undone.json')
+        Write-Log ('LEDBlinky undo: removed {0} entries' -f @($receipt.Keys).Count)
+        return (& $result 'SAVED' ('Removed the {0} LEDBlinky entries this tool added. Everything else was kept.' -f @($receipt.Keys).Count))
+    } catch {
+        Write-Log "LEDBlinky undo failed -- $_"
+        return (& $result 'FAILED' ('The undo stopped and LEDBlinky was left as it was. ' + $_.Exception.Message))
+    }
+}
+
+# Saves the exact new entries as a separate preview file (never overwrites, never touches LEDBlinky).
+# Returns the file path, or '' when it could not be saved.
+function New-TpmLedPreviewFile {
+    param([Parameter(Mandatory)]$Plan, [Parameter(Mandatory)][string]$ReportsFolder)
+    $reportPath = Join-Path $ReportsFolder ('TeknoParrot-LEDBlinky-Preview-{0}.xml' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    try {
+        $body = '<?xml version="1.0"?>' + $Plan.Newline + '<dat>' + $Plan.Newline + '  <emulator emuname="TeknoParrot" emuDesc="">' + $Plan.BlockText + $Plan.Newline + '  </emulator>' + $Plan.Newline + '</dat>' + $Plan.Newline
+        Write-TpmAtomicTextFile -Path $reportPath -Text $body -Operation 'LEDBlinky preview file'
+        return $reportPath
+    } catch { Write-Log "LEDBlinky preview file not saved -- $_"; return '' }
+}
+# --- Screens: everything below prints or asks; the core above never does. ---
+
+function Get-TpmLedNeedsChoiceCount {
+    param([Parameter(Mandatory)]$Plan)
+    $total = 0
+    if ($null -ne $Plan.Pairing) { $total += @($Plan.Pairing.Held).Count + @($Plan.Pairing.LedsWithoutControl).Count + @($Plan.Pairing.Families).Count }
+    foreach ($group in $Plan.Groups) { $total += ([object[]]@($group.NeedsChoice)).Length }
+    return $total
+}
+
+function Get-TpmLedPlanDetailBlocks {
+    param([Parameter(Mandatory)]$Plan)
+    $blocks = New-Object System.Collections.Generic.List[object]
+    if ($Plan.Pairing) {
+        $pairing = $Plan.Pairing
+        $paired = @($pairing.Pairs | Where-Object { $_.Status -in @('Paired', 'Primary') }).Count
+        $cabinetLines = @(
+            ('Controls found in your LEDBlinky setup: {0} (from {1}).' -f @($Plan.Cabinet.Names).Count, $Plan.Cabinet.Source),
+            $(if ($pairing.KeyMapFound) { ('LED map: found. Controls paired to an LED: {0}.' -f $paired) } else { 'LED map: not found, so controls were not checked against your LEDs.' }),
+            $(if ($pairing.DevicesChecked) { 'Controller check: done (it tells the kinds of devices, not button counts).' } else { 'Controller check: not available, so controls were not checked against your devices.' })
+        )
+        [void]$blocks.Add(@{ Heading = 'Your cabinet'; Lines = $cabinetLines })
+        $choiceLines = New-Object System.Collections.Generic.List[string]
+        foreach ($held in @($pairing.Held)) {
+            $why = switch ($held.Reason) {
+                'NoLed' { 'no LED in your LED map uses it' }
+                'Several' { 'more than one LED fits (' + (@($held.Candidates) -join ', ') + ')' }
+                default { 'no matching controller was found' }
+            }
+            [void]$choiceLines.Add(('{0}: {1}. Not written.' -f $held.Name, $why))
+        }
+        foreach ($label in @($pairing.LedsWithoutControl)) { [void]$choiceLines.Add(('LED {0}: no control in your LEDBlinky setup uses it.' -f $label)) }
+        foreach ($family in @($pairing.Families | Where-Object { $_.Status -eq 'DetectedNoControl' })) { [void]$choiceLines.Add(('{0}: a controller was found, but LEDBlinky has no matching control.' -f $family.Family)) }
+        if ($choiceLines.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'Needs your choice (cabinet)'; Lines = $choiceLines.ToArray() }) }
+    }
+    [void]$blocks.Add(@{ Heading = 'What gets added'; Lines = @(
+        'Where: the TeknoParrot group in LEDBlinkyControls.xml.',
+        'Each game gets one entry named after its profile file. It lists only controls the game uses that your LEDBlinky setup has.',
+        'Names, colors and input codes are copied from your own setup. Nothing is lit by this tool.') })
+    $games = @($Plan.Groups | Select-Object -First 40 | ForEach-Object { '{0} ({1}): {2} lit controls{3}' -f $_.Title, $_.Key, $_.Buttons, $(if ($_.Primary) { ', ' + $_.Primary } else { '' }) })
+    if ($Plan.Groups.Count -gt 40) { $games += ('... and {0} more' -f ($Plan.Groups.Count - 40)) }
+    if ($games.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'Games'; Lines = $games }) }
+    $gameChoice = @($Plan.Groups | ForEach-Object { $g = $_; @($g.NeedsChoice) | ForEach-Object { if (@($_.Candidates).Count -gt 0) { '{0}: {1} (could be {2})' -f $g.Title, $_.Label, (@($_.Candidates) -join ', ') } else { '{0}: {1} (no known match)' -f $g.Title, $_.Label } } } | Select-Object -First 40)
+    if ($gameChoice.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'Needs your choice (games)'; Lines = $gameChoice }) }
+    $notOn = @($Plan.Groups | ForEach-Object { @($_.NotOnCabinet) } | Group-Object | Sort-Object Count -Descending | Select-Object -First 30 | ForEach-Object { '{0} ({1})' -f $_.Name, (Format-TpmGameCount -Count $_.Count) })
+    if ($notOn.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'Not on your cabinet (not written)'; Lines = $notOn }) }
+    $skipLines = @()
+    if ($Plan.SkippedExisting.Count -gt 0) { $skipLines += ('Already in LEDBlinky, left alone: ' + ($Plan.SkippedExisting -join ', ')) }
+    if ($Plan.SkippedNoControls.Count -gt 0) { $skipLines += ('No control on your cabinet matched: ' + ($Plan.SkippedNoControls -join ', ')) }
+    if ($Plan.Unreadable.Count -gt 0) { $skipLines += ('Profile could not be read: ' + ($Plan.Unreadable -join ', ')) }
+    if ($skipLines.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'Left out'; Lines = $skipLines }) }
+    [void]$blocks.Add(@{ Heading = 'What is not proven'; Lines = @(
+        'The controls are the ones each profile lists, not a checked list of what the game needs.',
+        'The game key matches what LaunchBox passes for TeknoParrot games; it has not been tried with a live LEDBlinky.') })
+    return ,@($blocks.ToArray())
+}
+
+# Preview: no write to LEDBlinky. Saves the exact new entries as a separate file (never overwrites) and shows the result.
+function Write-TpmLedPreview {
+    param([Parameter(Mandatory)]$Plan, [Parameter(Mandatory)]$Layout, [switch]$Unattended)
+    Write-Log ('LEDBlinky preview: games={0}; existing={1}; noControls={2}; unreadable={3}' -f $Plan.Groups.Count, $Plan.SkippedExisting.Count, $Plan.SkippedNoControls.Count, $Plan.Unreadable.Count)
+    $done = New-Object System.Collections.Generic.List[string]
+    $needs = New-Object System.Collections.Generic.List[string]
+    if (-not $Plan.HasEmulator) {
+        [void]$needs.Add('LEDBlinky has no TeknoParrot group yet. Open the LEDBlinky Controls Editor, add TeknoParrot as an emulator, then try again.')
+        Write-TpmOutcome -Title 'LEDBlinky is not ready for TeknoParrot yet. Nothing was changed.' -Status Attention -Needs $needs.ToArray() -Unattended:$Unattended
+        return
+    }
+    if (-not $Plan.HasCabinet) {
+        [void]$needs.Add('None of your LEDBlinky controls could be matched yet. Press D to see why. You may need to set up your controls in the LEDBlinky Controls Editor.')
+        Write-TpmOutcome -Title 'LEDBlinky has no controls to match yet. Nothing was changed.' -Status Attention -Needs $needs.ToArray() -DetailBlocks (Get-TpmLedPlanDetailBlocks -Plan $Plan) -Unattended:$Unattended
+        return
+    }
+    if ($Plan.Groups.Count -gt 0) {
+        $reportPath = New-TpmLedPreviewFile -Plan $Plan -ReportsFolder $Layout.Reports
+        if ($reportPath) { [void]$done.Add(('A copy of the new entries was saved: {0}' -f [System.IO.Path]::GetFileName($reportPath))) }
+        else { [void]$needs.Add('The preview file could not be saved. The preview is still correct.') }
+    }
+    if ($Plan.SkippedExisting.Count -gt 0) { [void]$done.Add(('{0} already in LEDBlinky and left alone.' -f (Format-TpmGameCount -Count $Plan.SkippedExisting.Count))) }
+    $choiceCount = Get-TpmLedNeedsChoiceCount -Plan $Plan
+    if ($choiceCount -gt 0) { [void]$needs.Add($(if ($choiceCount -eq 1) { '1 item needs your choice and was not written. Press D to see it.' } else { ('{0} items need your choice and were not written. Press D to see them.' -f $choiceCount) })) }
+    $title = if ($Plan.Groups.Count -eq 0) { 'Preview: LEDBlinky already has everything. Nothing would change.' } else { ('Preview: LEDBlinky would get lighting info for {0}. Nothing was changed.' -f (Format-TpmGameCount -Count $Plan.Groups.Count)) }
+    $next = if ($Plan.Groups.Count -gt 0) { 'Choose A to add them, or press D first to see the games.' } else { '' }
+    Write-TpmOutcome -Title $title -Status Ok -Done $done.ToArray() -NotChanged 'Your LEDBlinky files were not touched.' -Needs $needs.ToArray() -Next $next -DetailBlocks (Get-TpmLedPlanDetailBlocks -Plan $Plan) -Unattended:$Unattended
+}
+
+function Write-TpmLedResult {
+    param([Parameter(Mandatory)]$Result, [switch]$Unattended)
+    $status = if ($Result.Outcome -eq 'FAILED') { 'Problem' } else { 'Ok' }
+    $done = @()
+    if ($Result.PSObject.Properties['BackupPath'] -and $Result.BackupPath) { $done += ('A saved copy of the LEDBlinky file was made first: {0}' -f (Split-Path -Leaf (Split-Path -Parent $Result.BackupPath))) }
+    $next = if ($Result.Outcome -eq 'SAVED' -and $Result.PSObject.Properties['Added']) { 'To go back, run this step again and choose U.' } else { '' }
+    Write-TpmOutcome -Title $Result.Summary -Status $status -Done $done -Next $next -Unattended:$Unattended
+}
+
+# Local drive roots such as "C:" and "E:" (network drives are left out), using the Manager's existing drive check.
+function Get-TpmLedLocalDriveRoots {
+    $info = Get-LocalDriveInfoSafe
+    if ($null -eq $info) { return @() }
+    return @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
+        Where-Object { $_.Root -and (Test-IsNetworkPath $_.Root -Drives $info) -eq $false -and (Test-Path -LiteralPath $_.Root) } |
+        ForEach-Object { $_.Root.TrimEnd('\') })
+}
+
+# Asks for the LEDBlinky folder (typed, pasted, or B to browse) until it is a real one. Empty answer or closed browser = skip.
+function Read-TpmLedBlinkyFolder {
+    while ($true) {
+        $answer = ([string](Read-PathWithBrowse -Prompt '  LEDBlinky folder (Enter to skip)' -Mode Folder)).Trim().Trim('"')
+        if (-not $answer) { return $null }
+        $problem = Get-TpmLedBlinkyFolderProblem -Path $answer
+        if (-not $problem) { return (Find-TpmLedBlinky -Candidates @($answer)) }
+        if ($problem -eq 'NoFolder') { Write-TpmText -Text 'That folder was not found. Check the path and try again.' -Color Yellow }
+        else { Write-TpmText -Text 'That folder does not have the LEDBlinky control file (LEDBlinkyControls.xml). Pick the folder where LEDBlinky is installed.' -Color Yellow }
+    }
+}
+
+# Finds LEDBlinky quietly in the usual places. If it is not there, asks once in plain words. Returns the install or $null.
+function Invoke-TpmLedBlinkyLocate {
+    param([string]$SavedFolder = '', [string]$LaunchBoxRoot = '')
+    Write-TpmText -Text 'Optional: lighting for your arcade buttons.' -Color Cyan -BlankBefore
+    $candidates = Get-TpmLedBlinkyCandidateFolders -SavedFolder $SavedFolder -LaunchBoxRoot $LaunchBoxRoot -DriveRoots @(Get-TpmLedLocalDriveRoots) -ProgramFilesFolders @($env:ProgramFiles, ${env:ProgramFiles(x86)})
+    $found = Find-TpmLedBlinky -Candidates $candidates
+    if ($found) { return $found }
+    Write-TpmText -Text 'Do you use LEDBlinky? Show me where it is.' -Color White
+    Write-TpmText -Text '[F] Show the LEDBlinky folder.' -Color White
+    Write-TpmText -Text '[S] Skip this step.' -Color White
+    if ((Read-TpmChoice -Prompt '  Choice, default S' -Choices @('F', 'S') -Default 'S') -eq 'S') { return $null }
+    return (Read-TpmLedBlinkyFolder)
+}
+# The optional step shown after LaunchBox: short choices, preview first.
+function Invoke-TpmLedBlinkyStep {
+    param([Parameter(Mandatory)]$Install, [Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)]$Layout, $State = $null)
+    $evidence = $null
+    try { $evidence = Get-TpmControllerEvidence } catch { Write-Log "LEDBlinky: the controller check could not run -- $_" }
+    Write-TpmText -Text 'LEDBlinky was found on this PC.' -Color White
+    Write-TpmText -Text '[P] Preview first. No changes.' -Color White
+    Write-TpmText -Text '[A] Add lighting info to LEDBlinky (backed up, can be undone).' -Color White
+    Write-TpmText -Text '[U] Undo the last add.' -Color White
+    Write-TpmText -Text '[C] Use a different LEDBlinky folder.' -Color White
+    Write-TpmText -Text '[B] Skip this step.' -Color White
+    $plan = $null
+    do {
+        $choice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'U', 'C', 'B') -Default 'P'
+        if ($choice -eq 'P') {
+            try { $plan = Get-TpmLedExportPlan -UserProfilesDir $UserProfilesDir -ControlsPath $Install.ControlsPath -Evidence $evidence; Write-TpmLedPreview -Plan $plan -Layout $Layout }
+            catch { Write-Log "LEDBlinky preview failed -- $_"; Write-TpmText -Text ('LEDBlinky preview stopped. Nothing was changed. {0}' -f $_.Exception.Message) -Color Yellow }
+        }
+        if ($choice -eq 'C') {
+            $newInstall = Read-TpmLedBlinkyFolder
+            if ($newInstall) {
+                $Install = $newInstall
+                if ($null -ne $State) { $State.Folder = $newInstall.Root }
+                Write-TpmText -Text 'Now using that LEDBlinky folder.' -Color DarkCyan
+            }
+        }
+    } while ($choice -in @('P', 'C'))
+    if ($choice -eq 'A') {
+        try { $plan = Get-TpmLedExportPlan -UserProfilesDir $UserProfilesDir -ControlsPath $Install.ControlsPath -Evidence $evidence } catch { Write-Log "LEDBlinky plan failed -- $_"; Write-TpmText -Text ('LEDBlinky could not be read. Nothing was changed. {0}' -f $_.Exception.Message) -Color Yellow; return }
+        Write-TpmLedPreview -Plan $plan -Layout $Layout
+        if ($plan.HasEmulator -and $plan.Groups.Count -gt 0) {
+            Write-TpmText -Text 'Close LEDBlinky and its editor first. TeknoParrot Manager will not close them for you.' -Color Yellow -BlankBefore
+            if ((Read-TpmYesNo -Prompt 'Add exactly these entries after saving a copy? (Y/N)' -Default 'N') -eq 'Y') {
+                Write-TpmLedResult -Result (Invoke-TpmLedBlinkyAdd -Install $Install -Plan $plan -Layout $Layout)
+            } else { Write-TpmText -Text 'Nothing was changed.' -Color DarkGray }
+        }
+    } elseif ($choice -eq 'U') {
+        if ((Read-TpmYesNo -Prompt 'Remove the entries this tool added to LEDBlinky last time? (Y/N)' -Default 'N') -eq 'Y') {
+            Write-TpmLedResult -Result (Invoke-TpmLedBlinkyUndo -Install $Install -Layout $Layout)
+        } else { Write-TpmText -Text 'Nothing was changed.' -Color DarkGray }
+    }
+}
+
+# END TpmLed MODULE SECTION
+
 # =============================================================================
 # LAUNCHBOX IMAGE IMPORT  (clear logos / box art from a folder the user picks)
 # =============================================================================
@@ -55340,6 +55979,25 @@ function Invoke-TpmLaunchBoxMediaStep {
 
 Invoke-TpmLaunchBoxStep
 
+# =============================================================================
+# OPTIONAL LEDBLINKY LIGHTING  (only when LEDBlinky is found; read-only until the user agrees)
+# =============================================================================
+if ($dryRunActive) {
+    Write-Log "PreviewMode: LEDBlinky step skipped."
+} elseif ($Unattended) {
+    Write-Log "Unattended: LEDBlinky step skipped."
+} else {
+    $ledState = [pscustomobject]@{ Folder = [string]$ledBlinkyRoot }
+    $ledInstall = Invoke-TpmLedBlinkyLocate -SavedFolder $ledState.Folder -LaunchBoxRoot $lbRoot
+    if ($ledInstall) {
+        $ledState.Folder = $ledInstall.Root
+        Invoke-TpmLedBlinkyStep -Install $ledInstall -UserProfilesDir $userProfilesDir -Layout $script:TpmOwnedLayout -State $ledState
+    } else { Write-Log "LEDBlinky not found or skipped; the lighting step was not run." }
+    if ([string]$ledState.Folder -cne [string]$ledBlinkyRoot) {
+        $ledBlinkyRoot = [string]$ledState.Folder
+        if (-not (Save-Config)) { Write-Log "LEDBlinky folder choice could not be saved to the settings file." }
+    }
+}
 # =============================================================================
 # CROSSHAIR SETUP  (optional)
 # =============================================================================
