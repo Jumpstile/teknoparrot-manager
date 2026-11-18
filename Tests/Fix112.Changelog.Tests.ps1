@@ -58,6 +58,7 @@ Describe 'changelog format' {
 
     It 'is short (a page or two for RC9, not the long technical history)' {
         # Mutation: paste the long technical history back into the shipped changelog.
-        $script:F112Lines.Count | Should -BeLessThan 400
+        # The cap was 400 while the file was about 395 lines; the four RC9 LaunchBox/LEDBlinky features add about 50 plain-words lines. 500 still catches the long history.
+        $script:F112Lines.Count | Should -BeLessThan 500
     }
 }

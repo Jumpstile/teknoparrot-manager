@@ -1253,7 +1253,10 @@ Describe 'Top-level FIX16A flows' {
     }
 
     It 'Finding E: LaunchBox [A] reuses the previewed folder and platform as defaults and still requires the exact-write Y/N (structural)' {
-        $aBranches = @(Get-Fix16TopLevelNodes -Type ([System.Management.Automation.Language.IfStatementAst]) | Where-Object {
+        # The LaunchBox step lives in Invoke-TpmLaunchBoxStep (it is called from two menu paths), so the [A] branch is searched there.
+        $lbStep = @(Get-Fix16Nodes -Root $script:fix16Ast -Type ([System.Management.Automation.Language.FunctionDefinitionAst]) | Where-Object { $_.Name -eq 'Invoke-TpmLaunchBoxStep' })
+        $lbStep.Count | Should -Be 1
+        $aBranches = @(Get-Fix16Nodes -Root $lbStep[0] -Type ([System.Management.Automation.Language.IfStatementAst]) | Where-Object {
             $_.Clauses[0].Item1.Extent.Text -eq "`$lbChoice -eq 'A'"
         })
         $aBranches.Count | Should -Be 1
