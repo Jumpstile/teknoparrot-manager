@@ -187,7 +187,7 @@ Describe 'LEDBlinky lighting export' {
         New-LedProfile -Dir $fx.Profiles -Name 'SpinGame' -Mappings @('P1Button1', 'P1Button14', 'P1Spinner', 'P1ButtonStart')
         $plan = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls
         $plan.BlockText | Should -Match 'name="P1_BUTTON14"'
-        $plan.BlockText | Should -Match 'name="P1_SPINNER" voice="" color="White" inputCodes="MOUSECODE_1_ANALOG_X"'
+        $plan.BlockText | Should -Match 'name="P1_SPINNER" voice="" inputCodes="MOUSECODE_1_ANALOG_X"'
         $plan.BlockText | Should -Not -Match 'P1_BUTTON15'
     }
 
@@ -392,6 +392,38 @@ Describe 'LEDBlinky lighting export' {
         Get-TpmLedArtworkColor -ImageFolders @((Join-Path $TestDrive 'no-such-folder')) -Title 'Sample Racer' | Should -BeNullOrEmpty
         $entry = [pscustomobject]@{ Cab = [pscustomobject]@{ Name = 'CONTROL_TRACKBALL'; Voice = 'Trackball'; IsPrimary = $true; Color = 'White'; InputCodes = $null; Player = 0 }; Voice = 'Trackball'; Color = 'Blue' }
         (New-TpmLedGroupText -Key 'x' -Title 'X' -Written @($entry) -Newline "`n") | Should -Match 'CONTROL_TRACKBALL" voice="Trackball" primaryControl="1" color="Blue"'
+    }
+
+    It 'a single-color light gets no color, an RGB light does, and the map decides which is which' {
+        $dir = Join-Path $TestDrive ('rgbmap-' + [guid]::NewGuid().ToString('N'))
+        [void][System.IO.Directory]::CreateDirectory($dir)
+        $xml = @'
+<?xml version="1.0" encoding="UTF-8"?>
+<dat><ledController type="1" id="1" name="LEDWiz">
+<port number="1" label="P1B1" type="R" inputCodes="KEYCODE_X"/>
+<port number="2" label="P1B1" type="G" inputCodes="KEYCODE_X"/>
+<port number="3" label="P1B1" type="B" inputCodes="KEYCODE_X"/>
+<port number="4" label="P1B2" type="S" inputCodes="KEYCODE_C"/>
+</ledController></dat>
+'@
+        [System.IO.File]::WriteAllText((Join-Path $dir 'LEDBlinkyInputMap.xml'), $xml, (New-Object System.Text.UTF8Encoding $false))
+        $map = Get-TpmLedBlinkyKeyMap -Root @($dir)
+        ($map.Controls | Where-Object { $_.Control -eq 'P1B1' }).IsRgb | Should -BeTrue
+        ($map.Controls | Where-Object { $_.Control -eq 'P1B2' }).IsRgb | Should -BeFalse
+        $cab = [pscustomobject]@{ Names = @('P1_BUTTON1', 'P1_BUTTON2'); Players = @(1); Source = 'test'; Held = @(); Controls = @{
+            P1_BUTTON1 = [pscustomobject]@{ Name = 'P1_BUTTON1'; Player = 1; Voice = ''; IsPrimary = $false; InputCodes = 'KEYCODE_X'; Color = $null }
+            P1_BUTTON2 = [pscustomobject]@{ Name = 'P1_BUTTON2'; Player = 1; Voice = ''; IsPrimary = $false; InputCodes = 'KEYCODE_C'; Color = $null } } }
+        $pairing = Get-TpmLedControlPairing -Cabinet $cab -KeyMap $map
+        $pairing.Usable.Controls['P1_BUTTON1'].Rgb | Should -BeTrue
+        $pairing.Usable.Controls['P1_BUTTON2'].Rgb | Should -BeFalse
+        $written = @($pairing.Usable.Names | ForEach-Object { [pscustomobject]@{ Cab = $pairing.Usable.Controls[$_]; Voice = '' } })
+        $text = New-TpmLedGroupText -Key 'x' -Title 'X' -Written $written -Newline "`n"
+        $text | Should -Match 'P1_BUTTON1" voice="" color="Red"'
+        $text | Should -Match 'P1_BUTTON2" voice="" inputCodes="KEYCODE_C"'
+        $text | Should -Not -Match 'P1_BUTTON2[^>]*color='
+        # No map at all: the light is unknown and the usual color is still written.
+        $unknown = Get-TpmLedControlPairing -Cabinet $cab -KeyMap $null
+        $unknown.Usable.Controls['P1_BUTTON2'].Rgb | Should -BeNullOrEmpty
     }
 
     It 'undo refuses to guess when the added entries were changed' {

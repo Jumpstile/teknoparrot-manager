@@ -16288,12 +16288,22 @@ function Get-TpmLedBlinkyKeyMap {
         try { $xml = New-Object System.Xml.XmlDocument; $xml.XmlResolver = $null; $xml.Load($reader) } finally { $reader.Dispose() }
         $controls = New-Object System.Collections.Generic.List[object]
         $seen = @{}
+        # A light is RGB (any color) when the map gives it red, green and blue ports; one port means a single-color light.
+        $portTypes = @{}
+        foreach ($port in @($xml.SelectNodes('//ledController/port'))) {
+            $portLabel = [string]$port.GetAttribute('label')
+            if (-not $portLabel) { continue }
+            if (-not $portTypes.ContainsKey($portLabel)) { $portTypes[$portLabel] = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase) }
+            [void]$portTypes[$portLabel].Add([string]$port.GetAttribute('type'))
+        }
         foreach ($port in @($xml.SelectNodes('//ledController/port'))) {
             $label = [string]$port.GetAttribute('label')
             $codes = @(([string]$port.GetAttribute('inputCodes')).Split('|') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
             if (-not $label -or $codes.Count -eq 0 -or $seen.ContainsKey($label)) { continue }
             $seen[$label] = $true
-            [void]$controls.Add([pscustomobject][ordered]@{ Control = $label; InputCodes = $codes })
+            $types = $portTypes[$label]
+            $isRgb = ($types.Contains('R') -and $types.Contains('G') -and $types.Contains('B'))
+            [void]$controls.Add([pscustomobject][ordered]@{ Control = $label; InputCodes = $codes; IsRgb = $isRgb })
         }
         $result.Found = ($controls.Count -gt 0)
         $result.Reason = if ($controls.Count -gt 0) { 'Read' } else { 'MapEmpty' }
@@ -55204,8 +55214,20 @@ function Get-TpmLedControlPairing {
         }
     }
     $usableControls = @{}
-    foreach ($name in $keep) { $usableControls[$name] = $Cabinet.Controls[$name] }
-    $usable = [pscustomobject]@{ Controls = $usableControls; Names = $keep.ToArray(); Players = $Cabinet.Players; Source = $Cabinet.Source; Held = $held.ToArray() }
+    # Rgb says whether the paired light can show colors: $true, $false (single-color light), or $null when unknown (no map).
+    $rgbByLabel = @{}
+    if ($keyMapFound) { foreach ($led in @($KeyMap.Controls)) { $rgbByLabel[[string]$led.Control] = if ($led.PSObject.Properties['IsRgb']) { [bool]$led.IsRgb } else { $null } } }
+    foreach ($name in $keep) {
+        $copy = $Cabinet.Controls[$name] | Select-Object *
+        $pairLeds = @(($pairs | Where-Object { $_.Name -eq $name } | Select-Object -First 1).Leds)
+        $rgb = $null
+        if ($pairLeds.Count -gt 0 -and @($pairLeds | Where-Object { $null -eq $rgbByLabel[[string]$_] }).Count -eq 0) {
+            $rgb = (@($pairLeds | Where-Object { -not $rgbByLabel[[string]$_] }).Count -eq 0)
+        }
+        Add-Member -InputObject $copy -NotePropertyName Rgb -NotePropertyValue $rgb -Force
+        $usableControls[$name] = $copy
+    }
+    $usable = [pscustomobject]@{ Controls = $usableControls; Names = $keep.ToArray(); Players = $Cabinet.Players; Source = $Cabinet.Source; Held = $held.ToArray(); LightIsRgb = $rgbByLabel }
     return [pscustomobject]@{ Usable = $usable; Pairs = $pairs.ToArray(); Held = $held.ToArray(); LedsWithoutControl = $ledsWithoutControl; Families = $families.ToArray(); KeyMapFound = $keyMapFound; DevicesChecked = ($families.Count -gt 0 -or ($null -ne $Evidence -and [string]$Evidence.EvidenceStatus -eq 'Observed')) }
 }
 
@@ -55242,7 +55264,10 @@ function Get-TpmLedGameMatch {
                 if ($heldHere.Count -gt 0) { [void]$choice.Add([pscustomobject]@{ Label = $control.Label; Candidates = $heldHere }) }
                 elseif ($control.Kind -eq 'Trackball') {
                     # The cabinet's trackball has a light, but the user's default entry does not list it. Add the standard trackball control.
-                    & $add 'CONTROL_TRACKBALL' 'Trackball' ([pscustomobject]@{ Name = 'CONTROL_TRACKBALL'; Voice = 'Trackball'; IsPrimary = $true; Color = 'White'; InputCodes = $null; Player = 0 })
+                    # Rgb stays unknown ($null) when the LED map has no trackball light; a single-color trackball light gets no color.
+                    $trackRgb = $null
+                    if ($Cabinet.PSObject.Properties['LightIsRgb'] -and $Cabinet.LightIsRgb.ContainsKey('TRACKBALL')) { $trackRgb = $Cabinet.LightIsRgb['TRACKBALL'] }
+                    & $add 'CONTROL_TRACKBALL' 'Trackball' ([pscustomobject]@{ Name = 'CONTROL_TRACKBALL'; Voice = 'Trackball'; IsPrimary = $true; Color = 'White'; InputCodes = $null; Player = 0; Rgb = $trackRgb })
                 }
                 else { [void]$notOn.Add($control.Label) }
             }
@@ -55338,7 +55363,9 @@ function New-TpmLedGroupText {
         $schemeColor = Get-TpmLedSchemeColor -Name ([string]$entry.Cab.Name)
         $artColor = if ($entry.PSObject.Properties['Color']) { [string]$entry.Color } else { '' }
         $useColor = if ($artColor) { $artColor } elseif ($schemeColor) { $schemeColor } else { $entry.Cab.Color }
-        if ($null -ne $useColor) { $text += (' color="{0}"' -f (ConvertTo-TpmLedXmlText $useColor)) }
+        # A single-color light cannot show a color, so none is written for it.
+        $singleColor = ($entry.Cab.PSObject.Properties['Rgb'] -and $entry.Cab.Rgb -eq $false)
+        if ($null -ne $useColor -and -not $singleColor) { $text += (' color="{0}"' -f (ConvertTo-TpmLedXmlText $useColor)) }
         if ($null -ne $entry.Cab.InputCodes) { $text += (' inputCodes="{0}"' -f (ConvertTo-TpmLedXmlText $entry.Cab.InputCodes)) }
         return ($text + ' />')
     }
