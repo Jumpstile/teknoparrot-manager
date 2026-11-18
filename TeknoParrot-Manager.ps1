@@ -50307,7 +50307,9 @@ if (Test-Path -LiteralPath $configPath) {
             if ($cfg.SupplementaryDatPath) { $supplementaryDatPath  = $cfg.SupplementaryDatPath  }
             if ($null -ne $cfg.IncludeSupplementary) { $includeSupplementary = [bool]$cfg.IncludeSupplementary }
             if ($cfg.LaunchBoxRoot)               { $lbRoot               = $cfg.LaunchBoxRoot }
-            if ($cfg.LedBlinkyRoot)               { $ledBlinkyRoot        = [string]$cfg.LedBlinkyRoot }
+            # LedBlinkyRoot is newer than older saved files, so read it only if present (a missing field must not trip a strict caller).
+            $cfgLedBlinkyRootProp = $cfg.PSObject.Properties['LedBlinkyRoot']
+            if ($cfgLedBlinkyRootProp -and $cfgLedBlinkyRootProp.Value) { $ledBlinkyRoot = [string]$cfgLedBlinkyRootProp.Value }
             # -Unattended has no CLI or config mechanism to pick which mode to
             # run automatically -- every mode's own body already auto-answers
             # its internal prompts under -Unattended (see the many
