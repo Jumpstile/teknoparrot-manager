@@ -37,6 +37,16 @@
   - The dgVoodoo2 result names any selected game that already had every
     file, so every selected game is accounted for.
 
+  More fixes
+  - After registering new games, the Manager now offers to add them to
+    LaunchBox even when you pick New game only.
+  - A .zip file shared by several games no longer causes false questions
+    about duplicate profiles.
+  - A missing file inside a game folder with a bracketed name such as
+    [TP] is now reported as missing.
+  - The backup folder made when ReShade settings are moved to the new
+    format now has a shorter name.
+
 
   v1.0 RC8.2 (changes since RC8.1)
   ----------------------------------------------------------------

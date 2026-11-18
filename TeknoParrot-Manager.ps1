@@ -45822,6 +45822,141 @@ function Write-TpmLaunchBoxOffer {
     Write-TpmText -Text '[B] Skip this step.' -Color White
 }
 
+# The whole optional LaunchBox step (offer, preview, add games, or save a reference file).
+# It is used after the whole-library checks and after "New game only".
+function Invoke-TpmLaunchBoxStep {
+    Write-Host ""
+    $doLB = "N"
+    $lbChoice = $null
+    if ($dryRunActive) {
+        Write-Log "PreviewMode: LaunchBox reference export skipped."
+    } elseif ($Unattended) {
+        Write-Log "Unattended: LaunchBox reference export skipped."
+    } else {
+        Write-TpmLaunchBoxOffer
+        # Answers given for [P] Preview become the defaults for [A] (Enter
+        # reuses them); [A] still plans read-only and asks before any write.
+        $lbPreviewRoot = $null
+        $lbPreviewChoice = $null
+        $lbPreviewShownSummary = ''
+        do {
+            $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'F', 'B') -Default 'P'
+            if ($lbChoice -eq 'P') {
+                Write-TpmText -Text 'Preview: TeknoParrot Manager only reads your LaunchBox files.' -Color DarkCyan
+                $previewRoot = $lbRoot
+                if (-not $previewRoot) { $previewRoot = Read-HostSafe '  LaunchBox install folder (Enter to go back)' }
+                if ($previewRoot) {
+                    $previewChoice = Read-TpmChoice -Prompt '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, B back' -Choices @('1','2','3','B') -Default '2'
+                    if ($previewChoice -ne 'B') {
+                        $lbPreviewRoot = $previewRoot
+                        $lbPreviewChoice = $previewChoice
+                        $previewPlatforms = switch ($previewChoice) { '1' { @('Arcade') } '2' { @('TeknoParrot') } '3' { @('Arcade','TeknoParrot') } }
+                        $lbPreviewResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $previewRoot -platformNames $previewPlatforms -PlanOnly
+                        Write-TpmLaunchBoxResult -Result $lbPreviewResult -Unattended:$Unattended
+                        $lbPreviewShownSummary = [string]$lbPreviewResult.Summary
+                    }
+                }
+            }
+        } while ($lbChoice -eq 'P')
+        if ($lbChoice -eq 'A') {
+            Write-TpmLaunchBoxWriteNotice
+            $lbWriteNoticeBlocks = Get-TpmLaunchBoxWriteNoticeBlocks
+            if ((Read-TpmYesNo -Prompt 'Add the missing games to LaunchBox now? (Y/N, D = about the risks)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $lbWriteNoticeBlocks }) -eq 'Y') {
+                $writeRoot = $lbRoot
+                if (-not $writeRoot) {
+                    if ($lbPreviewRoot) {
+                        $writeRoot = Read-HostSafe ("  LaunchBox install folder (Enter = previewed folder {0})" -f $lbPreviewRoot) -Default $lbPreviewRoot
+                    } else {
+                        $writeRoot = Read-HostSafe '  LaunchBox install folder'
+                    }
+                }
+                $platformDefault = if ($lbPreviewChoice -in @('1','2','3')) { [string]$lbPreviewChoice } else { '2' }
+                $platformPrompt = if ($lbPreviewChoice -in @('1','2','3')) { "  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel (Enter = previewed choice $platformDefault)" } else { '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel' }
+                $platformChoice = Read-TpmChoice -Prompt $platformPrompt -Choices @('1','2','3','4','B') -Default $platformDefault
+                if ($platformChoice -ne 'B') {
+                    $targetPlatforms = switch ($platformChoice) {
+                        '1' { @('Arcade') }
+                        '2' { @('TeknoParrot') }
+                        '3' { @('Arcade','TeknoParrot') }
+                        '4' { @(Read-HostSafe '  Custom platform name (must be a safe filename)') }
+                    }
+                    # Show exactly what would change, then ask for consent to that plan (read-only preview first).
+                    $lbPlanResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms -PlanOnly
+                    Write-TpmLaunchBoxPlan -Result $lbPlanResult -AlreadyShownSummary $lbPreviewShownSummary -Unattended:$Unattended
+                    if ($lbPlanResult.Reason -eq 'PREVIEW' -and [int]$lbPlanResult.WouldChangeFiles -gt 0) {
+                        if ((Read-TpmYesNo -Prompt 'Write exactly these changes after a verified backup? (Y/N)' -Default 'N') -eq 'Y') {
+                            $lbWriteResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms
+                            Write-TpmLaunchBoxResult -Result $lbWriteResult
+                        } else {
+                            Write-Host '  LaunchBox write canceled; nothing was changed.' -ForegroundColor DarkGray
+                        }
+                    }
+                }
+            }
+        } elseif ($lbChoice -eq 'F') {
+            $doLB = "Y"
+        }
+    }
+
+
+    if ($doLB -eq "Y") {
+        $lbPath  = Join-Path $script:TpmOwnedLayout.Reports "TeknoParrot-LaunchBox-Import.xml"
+        $lbCount = Export-LaunchBoxXml -userProfilesDir $userProfilesDir -outputPath $lbPath
+        if ($lbCount -eq -2) {
+            Write-Host "  Existing LaunchBox reference was preserved; TeknoParrot Manager did not overwrite it." -ForegroundColor Yellow
+            Write-Host ("  Existing file: {0}" -f $lbPath) -ForegroundColor DarkCyan
+            Write-Host "  No new reference was exported. Keep this file, or move it after making a copy before exporting again." -ForegroundColor DarkGray
+        } elseif ($lbCount -lt 0) {
+            Write-Host "  LaunchBox reference export failed; existing files are never overwritten. See TeknoParrot-Manager.log." -ForegroundColor Red
+        } elseif ($lbCount -eq 0) {
+            # An empty reference would block the next export (existing files are never overwritten), so remove the one this call just created.
+            try { if (Test-Path -LiteralPath $lbPath -PathType Leaf) { Remove-Item -LiteralPath $lbPath -Force -ErrorAction Stop } } catch { Write-Log "LaunchBox export: could not remove the empty reference -- $_" }
+            Write-Host "  No reference file was kept: none of the registered profiles has an existing game path." -ForegroundColor Yellow
+            Write-Host "  Register games first (or repair their saved paths in Library Health Check), then export again." -ForegroundColor DarkGray
+        } else {
+            Write-Host ("  Exported : {0} game(s)" -f $lbCount) -ForegroundColor Green
+            Write-Host "  File     : $lbPath" -ForegroundColor DarkCyan
+            Write-Host ""
+            Write-Host "  HOW TO IMPORT INTO LAUNCHBOX" -ForegroundColor Cyan
+            Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+            Write-Host "  Important: LaunchBox must be fully CLOSED before importing." -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "  Step 1.  Close LaunchBox completely." -ForegroundColor White
+            Write-Host "  Step 2.  Open LaunchBox." -ForegroundColor White
+            Write-Host "  Step 3.  Go to  Tools -> Import -> Emulated Games." -ForegroundColor White
+            Write-Host "  Step 4.  On the first screen:" -ForegroundColor White
+            Write-Host "             - Emulator: select TeknoParrot (or add it first -- see below)." -ForegroundColor DarkGray
+            Write-Host "             - Import type: 'Import ROM files'." -ForegroundColor DarkGray
+            Write-Host ("             - Folder: {0}" -f (Join-Path $tpRoot "UserProfiles")) -ForegroundColor DarkGray
+            Write-Host "             - File types: *.xml  (import the profile files themselves," -ForegroundColor DarkGray
+            Write-Host "               not the game executables -- TeknoParrot launches games" -ForegroundColor DarkGray
+            Write-Host "               by profile, so the profile XML is what LaunchBox treats" -ForegroundColor DarkGray
+            Write-Host "               as the 'rom' for each game)." -ForegroundColor DarkGray
+            Write-Host "  Step 5.  Follow the wizard. LaunchBox will assign game names," -ForegroundColor White
+            Write-Host "             metadata, and box art automatically." -ForegroundColor DarkGray
+            Write-Host ""
+            Write-Host "  If TeknoParrot is not yet in LaunchBox's emulator list:" -ForegroundColor Cyan
+            Write-Host "    a. Go to  Tools -> Manage -> Emulators -> Add." -ForegroundColor DarkGray
+            Write-Host "    b. Name: TeknoParrot" -ForegroundColor DarkGray
+            Write-Host ("    c. Emulator path: {0}" -f (Join-Path $tpRoot "TeknoParrotUi.exe")) -ForegroundColor DarkGray
+            Write-Host "    d. Command-line parameters: --profile=%romfile%.xml" -ForegroundColor DarkGray
+            Write-Host "    e. Exit Script tab: add a script so Escape cleanly quits" -ForegroundColor DarkGray
+            Write-Host "       TeknoParrot back to LaunchBox (without one, Escape may not" -ForegroundColor DarkGray
+            Write-Host "       exit the game properly)." -ForegroundColor DarkGray
+            Write-Host "    f. Save, then re-run the import wizard." -ForegroundColor DarkGray
+            Write-Host ""
+            Write-Host "  Seeing full-screen issues only when launching through LaunchBox?" -ForegroundColor Cyan
+            Write-Host "    Go to  Tools -> Manage -> Emulators -> TeknoParrot -> Edit ->" -ForegroundColor DarkGray
+            Write-Host "    Startup Screen tab, and disable 'Enable Game Startup Screen'." -ForegroundColor DarkGray
+            Write-Host ""
+            Write-Host "  The exported XML file ($lbPath)" -ForegroundColor DarkCyan
+            Write-Host "  is a reference showing all registered games, their profile codes," -ForegroundColor DarkCyan
+            Write-Host "  and executable paths. You do not need to import it directly." -ForegroundColor DarkCyan
+            Write-Log "LaunchBox export: exported $lbCount games to $lbPath"
+        }
+    }
+}
+
 # Before a LaunchBox write: two short lines. The small risk that an app can reopen is the Details view.
 function Write-TpmLaunchBoxWriteNotice {
     Write-TpmText -Text 'Close LaunchBox and BigBox first. TeknoParrot Manager will not close them for you.' -Color Yellow -BlankBefore
@@ -53743,6 +53878,7 @@ if ($registrationFolders.Count -gt 0 -and -not $dryRunActive) {
         Write-Log "AutoSync: one-game maintenance scope = New game only."
         Write-Host "  Only the games extracted in this run were checked. The whole-library checks were skipped." -ForegroundColor Green
         Write-Host ('  Registration result: ' + $result.Summary) -ForegroundColor $(if ($result.Outcome -in @('SUCCEEDED','NO_OP')) { 'DarkGray' } else { 'Yellow' })
+        Invoke-TpmLaunchBoxStep
         if (-not $Unattended) { [void](Read-HostSafe "  Press Enter to return to the menu") }
         continue
     }
@@ -53989,136 +54125,7 @@ if ($result.Registered.Count -gt 0 -and $notesIndex.Count -gt 0) {
 # OPTIONAL LAUNCHBOX INTEGRATION OR SEPARATE REFERENCE EXPORT
 # =============================================================================
 
-Write-Host ""
-$doLB = "N"
-$lbChoice = $null
-if ($dryRunActive) {
-    Write-Log "PreviewMode: LaunchBox reference export skipped."
-} elseif ($Unattended) {
-    Write-Log "Unattended: LaunchBox reference export skipped."
-} else {
-    Write-TpmLaunchBoxOffer
-    # Answers given for [P] Preview become the defaults for [A] (Enter
-    # reuses them); [A] still plans read-only and asks before any write.
-    $lbPreviewRoot = $null
-    $lbPreviewChoice = $null
-    $lbPreviewShownSummary = ''
-    do {
-        $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'F', 'B') -Default 'P'
-        if ($lbChoice -eq 'P') {
-            Write-TpmText -Text 'Preview: TeknoParrot Manager only reads your LaunchBox files.' -Color DarkCyan
-            $previewRoot = $lbRoot
-            if (-not $previewRoot) { $previewRoot = Read-HostSafe '  LaunchBox install folder (Enter to go back)' }
-            if ($previewRoot) {
-                $previewChoice = Read-TpmChoice -Prompt '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, B back' -Choices @('1','2','3','B') -Default '2'
-                if ($previewChoice -ne 'B') {
-                    $lbPreviewRoot = $previewRoot
-                    $lbPreviewChoice = $previewChoice
-                    $previewPlatforms = switch ($previewChoice) { '1' { @('Arcade') } '2' { @('TeknoParrot') } '3' { @('Arcade','TeknoParrot') } }
-                    $lbPreviewResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $previewRoot -platformNames $previewPlatforms -PlanOnly
-                    Write-TpmLaunchBoxResult -Result $lbPreviewResult -Unattended:$Unattended
-                    $lbPreviewShownSummary = [string]$lbPreviewResult.Summary
-                }
-            }
-        }
-    } while ($lbChoice -eq 'P')
-    if ($lbChoice -eq 'A') {
-        Write-TpmLaunchBoxWriteNotice
-        $lbWriteNoticeBlocks = Get-TpmLaunchBoxWriteNoticeBlocks
-        if ((Read-TpmYesNo -Prompt 'Add the missing games to LaunchBox now? (Y/N, D = about the risks)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $lbWriteNoticeBlocks }) -eq 'Y') {
-            $writeRoot = $lbRoot
-            if (-not $writeRoot) {
-                if ($lbPreviewRoot) {
-                    $writeRoot = Read-HostSafe ("  LaunchBox install folder (Enter = previewed folder {0})" -f $lbPreviewRoot) -Default $lbPreviewRoot
-                } else {
-                    $writeRoot = Read-HostSafe '  LaunchBox install folder'
-                }
-            }
-            $platformDefault = if ($lbPreviewChoice -in @('1','2','3')) { [string]$lbPreviewChoice } else { '2' }
-            $platformPrompt = if ($lbPreviewChoice -in @('1','2','3')) { "  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel (Enter = previewed choice $platformDefault)" } else { '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel' }
-            $platformChoice = Read-TpmChoice -Prompt $platformPrompt -Choices @('1','2','3','4','B') -Default $platformDefault
-            if ($platformChoice -ne 'B') {
-                $targetPlatforms = switch ($platformChoice) {
-                    '1' { @('Arcade') }
-                    '2' { @('TeknoParrot') }
-                    '3' { @('Arcade','TeknoParrot') }
-                    '4' { @(Read-HostSafe '  Custom platform name (must be a safe filename)') }
-                }
-                # Show exactly what would change, then ask for consent to that plan (read-only preview first).
-                $lbPlanResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms -PlanOnly
-                Write-TpmLaunchBoxPlan -Result $lbPlanResult -AlreadyShownSummary $lbPreviewShownSummary -Unattended:$Unattended
-                if ($lbPlanResult.Reason -eq 'PREVIEW' -and [int]$lbPlanResult.WouldChangeFiles -gt 0) {
-                    if ((Read-TpmYesNo -Prompt 'Write exactly these changes after a verified backup? (Y/N)' -Default 'N') -eq 'Y') {
-                        $lbWriteResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms
-                        Write-TpmLaunchBoxResult -Result $lbWriteResult
-                    } else {
-                        Write-Host '  LaunchBox write canceled; nothing was changed.' -ForegroundColor DarkGray
-                    }
-                }
-            }
-        }
-    } elseif ($lbChoice -eq 'F') {
-        $doLB = "Y"
-    }
-}
-
-
-if ($doLB -eq "Y") {
-    $lbPath  = Join-Path $script:TpmOwnedLayout.Reports "TeknoParrot-LaunchBox-Import.xml"
-    $lbCount = Export-LaunchBoxXml -userProfilesDir $userProfilesDir -outputPath $lbPath
-    if ($lbCount -eq -2) {
-        Write-Host "  Existing LaunchBox reference was preserved; TeknoParrot Manager did not overwrite it." -ForegroundColor Yellow
-        Write-Host ("  Existing file: {0}" -f $lbPath) -ForegroundColor DarkCyan
-        Write-Host "  No new reference was exported. Keep this file, or move it after making a copy before exporting again." -ForegroundColor DarkGray
-    } elseif ($lbCount -lt 0) {
-        Write-Host "  LaunchBox reference export failed; existing files are never overwritten. See TeknoParrot-Manager.log." -ForegroundColor Red
-    } elseif ($lbCount -eq 0) {
-        # An empty reference would block the next export (existing files are never overwritten), so remove the one this call just created.
-        try { if (Test-Path -LiteralPath $lbPath -PathType Leaf) { Remove-Item -LiteralPath $lbPath -Force -ErrorAction Stop } } catch { Write-Log "LaunchBox export: could not remove the empty reference -- $_" }
-        Write-Host "  No reference file was kept: none of the registered profiles has an existing game path." -ForegroundColor Yellow
-        Write-Host "  Register games first (or repair their saved paths in Library Health Check), then export again." -ForegroundColor DarkGray
-    } else {
-        Write-Host ("  Exported : {0} game(s)" -f $lbCount) -ForegroundColor Green
-        Write-Host "  File     : $lbPath" -ForegroundColor DarkCyan
-        Write-Host ""
-        Write-Host "  HOW TO IMPORT INTO LAUNCHBOX" -ForegroundColor Cyan
-        Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
-        Write-Host "  Important: LaunchBox must be fully CLOSED before importing." -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "  Step 1.  Close LaunchBox completely." -ForegroundColor White
-        Write-Host "  Step 2.  Open LaunchBox." -ForegroundColor White
-        Write-Host "  Step 3.  Go to  Tools -> Import -> Emulated Games." -ForegroundColor White
-        Write-Host "  Step 4.  On the first screen:" -ForegroundColor White
-        Write-Host "             - Emulator: select TeknoParrot (or add it first -- see below)." -ForegroundColor DarkGray
-        Write-Host "             - Import type: 'Import ROM files'." -ForegroundColor DarkGray
-        Write-Host ("             - Folder: {0}" -f (Join-Path $tpRoot "UserProfiles")) -ForegroundColor DarkGray
-        Write-Host "             - File types: *.xml  (import the profile files themselves," -ForegroundColor DarkGray
-        Write-Host "               not the game executables -- TeknoParrot launches games" -ForegroundColor DarkGray
-        Write-Host "               by profile, so the profile XML is what LaunchBox treats" -ForegroundColor DarkGray
-        Write-Host "               as the 'rom' for each game)." -ForegroundColor DarkGray
-        Write-Host "  Step 5.  Follow the wizard. LaunchBox will assign game names," -ForegroundColor White
-        Write-Host "             metadata, and box art automatically." -ForegroundColor DarkGray
-        Write-Host ""
-        Write-Host "  If TeknoParrot is not yet in LaunchBox's emulator list:" -ForegroundColor Cyan
-        Write-Host "    a. Go to  Tools -> Manage -> Emulators -> Add." -ForegroundColor DarkGray
-        Write-Host "    b. Name: TeknoParrot" -ForegroundColor DarkGray
-        Write-Host ("    c. Emulator path: {0}" -f (Join-Path $tpRoot "TeknoParrotUi.exe")) -ForegroundColor DarkGray
-        Write-Host "    d. Command-line parameters: --profile=%romfile%.xml" -ForegroundColor DarkGray
-        Write-Host "    e. Exit Script tab: add a script so Escape cleanly quits" -ForegroundColor DarkGray
-        Write-Host "       TeknoParrot back to LaunchBox (without one, Escape may not" -ForegroundColor DarkGray
-        Write-Host "       exit the game properly)." -ForegroundColor DarkGray
-        Write-Host "    f. Save, then re-run the import wizard." -ForegroundColor DarkGray
-        Write-Host ""
-        Write-Host "  Seeing full-screen issues only when launching through LaunchBox?" -ForegroundColor Cyan
-        Write-Host "    Go to  Tools -> Manage -> Emulators -> TeknoParrot -> Edit ->" -ForegroundColor DarkGray
-        Write-Host "    Startup Screen tab, and disable 'Enable Game Startup Screen'." -ForegroundColor DarkGray
-        Write-Host ""
-        Write-Host "  The exported XML file ($lbPath)" -ForegroundColor DarkCyan
-        Write-Host "  is a reference showing all registered games, their profile codes," -ForegroundColor DarkCyan
-        Write-Host "  and executable paths. You do not need to import it directly." -ForegroundColor DarkCyan
-        Write-Log "LaunchBox export: exported $lbCount games to $lbPath"
-    }
-}
+Invoke-TpmLaunchBoxStep
 
 # =============================================================================
 # CROSSHAIR SETUP  (optional)

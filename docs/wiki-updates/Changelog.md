@@ -16,6 +16,11 @@ The previous published release was v1.0 RC8.1: https://github.com/Jumpstile/tekn
 - PostgreSQL setup shows a second problem and returns to the menu instead of stopping with an error.
 - ReShade one-by-one asks only about games that can be changed, and B goes back. B also works at the dgVoodoo2 and graphics card fix questions after registration.
 - The dgVoodoo2 result names any selected game that already had every file.
+- After registering new games, the Manager offers to add them to LaunchBox even when you pick New game only.
+- A .zip file shared by several games no longer causes false questions about duplicate profiles.
+- A missing file inside a game folder with a bracketed name such as [TP] is now reported as missing.
+- The backup folder made when ReShade settings are moved to the new format has a shorter name.
+
 
 ## v1.0 RC8.1 (changes since RC7)
 
