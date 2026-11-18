@@ -50,6 +50,9 @@
     quote or a pipe, no longer stops the Manager with "Illegal characters
     in path". The name is shown as written and the other games are still
     listed.
+  - Games that need PlayStation 3 firmware (RPCS3) or a Play! game file are
+    now checked before they start, and the Manager tells you what is
+    missing.
 
 
   v1.0 RC8.2 (changes since RC8.1)

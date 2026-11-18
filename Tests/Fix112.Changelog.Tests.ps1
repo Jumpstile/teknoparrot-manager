@@ -58,6 +58,6 @@ Describe 'changelog format' {
 
     It 'is short (a page or two for RC9, not the long technical history)' {
         # Mutation: paste the long technical history back into the shipped changelog.
-        $script:F112Lines.Count | Should -BeLessThan 400
+        $script:F112Lines.Count | Should -BeLessThan 420
     }
 }

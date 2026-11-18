@@ -21,6 +21,7 @@ The previous published release was v1.0 RC8.1: https://github.com/Jumpstile/tekn
 - A missing file inside a game folder with a bracketed name such as [TP] is now reported as missing.
 - The backup folder made when ReShade settings are moved to the new format has a shorter name.
 - A game profile with odd characters in its program name no longer stops the Manager with "Illegal characters in path".
+- Games that need PlayStation 3 firmware (RPCS3) or a Play! game file are checked before they start, and you are told what is missing.
 
 
 ## v1.0 RC8.1 (changes since RC7)
