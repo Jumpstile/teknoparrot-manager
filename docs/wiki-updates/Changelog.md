@@ -16,6 +16,7 @@ The previous published release was v1.0 RC8.1: https://github.com/Jumpstile/tekn
 - PostgreSQL setup shows a second problem and returns to the menu instead of stopping with an error.
 - ReShade one-by-one asks only about games that can be changed, and B goes back. B also works at the dgVoodoo2 and graphics card fix questions after registration.
 - The dgVoodoo2 result names any selected game that already had every file.
+- LaunchBox: a new choice fills in the release year and developer (only where they are empty) and makes playlists by hardware, light gun games and driving games. You see the changes first, a saved copy is made, and Restore undoes it. Your own entries and playlists are never changed.
 
 ## v1.0 RC8.1 (changes since RC7)
 

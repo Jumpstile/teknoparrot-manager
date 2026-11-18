@@ -37,6 +37,16 @@
   - The dgVoodoo2 result names any selected game that already had every
     file, so every selected game is accounted for.
 
+  LaunchBox
+  - New LaunchBox choice "Fill in game details and make playlists". It
+    fills in the release year and developer from the game folder name, but
+    only where LaunchBox has nothing yet. Anything you typed yourself is
+    left alone.
+  - It also makes playlists for each arcade hardware family, plus "Light
+    gun games" and "Driving games". The Manager only changes playlists it
+    made itself. Your own playlists are never touched.
+  - You see exactly what will change first, a saved copy is made before
+    anything is written, and Restore puts it all back.
 
   v1.0 RC8.2 (changes since RC8.1)
   ----------------------------------------------------------------
