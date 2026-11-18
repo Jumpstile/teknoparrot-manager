@@ -373,6 +373,27 @@ Describe 'LEDBlinky lighting export' {
         @($match.NotOnCabinet) | Should -Not -Contain 'Trackball'
     }
 
+    It 'the trackball light takes the main color of the game picture, and a game with no picture keeps white' {
+        Add-Type -AssemblyName System.Drawing
+        $images = Join-Path $TestDrive 'art-images'
+        $marquee = Join-Path $images 'Arcade - Marquee'
+        [void][System.IO.Directory]::CreateDirectory($marquee)
+        $make = {
+            param($file, $color)
+            $bmp = New-Object System.Drawing.Bitmap 40, 40
+            $g = [System.Drawing.Graphics]::FromImage($bmp); $g.Clear($color); $g.Dispose()
+            $bmp.Save($file, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+        }
+        & $make (Join-Path $marquee 'Sample Racer-01.png') ([System.Drawing.Color]::FromArgb(30, 60, 220))
+        & $make (Join-Path $marquee 'Gray Game-01.png') ([System.Drawing.Color]::FromArgb(128, 128, 128))
+        Get-TpmLedArtworkColor -ImageFolders @($images) -Title 'Sample Racer' | Should -Be 'Blue'
+        Get-TpmLedArtworkColor -ImageFolders @($images) -Title 'Gray Game' | Should -Be 'White'
+        Get-TpmLedArtworkColor -ImageFolders @($images) -Title 'Totally Different Title' | Should -BeNullOrEmpty
+        Get-TpmLedArtworkColor -ImageFolders @((Join-Path $TestDrive 'no-such-folder')) -Title 'Sample Racer' | Should -BeNullOrEmpty
+        $entry = [pscustomobject]@{ Cab = [pscustomobject]@{ Name = 'CONTROL_TRACKBALL'; Voice = 'Trackball'; IsPrimary = $true; Color = 'White'; InputCodes = $null; Player = 0 }; Voice = 'Trackball'; Color = 'Blue' }
+        (New-TpmLedGroupText -Key 'x' -Title 'X' -Written @($entry) -Newline "`n") | Should -Match 'CONTROL_TRACKBALL" voice="Trackball" primaryControl="1" color="Blue"'
+    }
+
     It 'undo refuses to guess when the added entries were changed' {
         $fx = New-LedFixture
         New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana'

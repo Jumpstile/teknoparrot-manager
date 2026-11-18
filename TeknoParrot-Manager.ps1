@@ -55272,6 +55272,60 @@ function Get-TpmLedSchemeColor {
     return $null
 }
 
+# The main color of one picture, as the closest LEDBlinky color name. Grays, near-black and near-white pictures give White.
+function Get-TpmLedColorNameFromImage {
+    param([Parameter(Mandatory)][string]$Path)
+    Add-Type -AssemblyName System.Drawing
+    $stream = $null; $image = $null; $small = $null
+    try {
+        $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        $image = [System.Drawing.Image]::FromStream($stream)
+        $small = New-Object System.Drawing.Bitmap $image, 24, 24
+        $weights = @{}
+        $total = 0.0
+        foreach ($x in 0..23) {
+            foreach ($y in 0..23) {
+                $pixel = $small.GetPixel($x, $y)
+                $sat = [double]$pixel.GetSaturation(); $light = [double]$pixel.GetBrightness()
+                if ($sat -lt 0.35 -or $light -lt 0.2 -or $light -gt 0.9) { continue }
+                $hue = [double]$pixel.GetHue()
+                $name = if ($hue -lt 15 -or $hue -ge 345) { 'Red' } elseif ($hue -lt 40) { 'Orange' } elseif ($hue -lt 70) { 'Yellow' } elseif ($hue -lt 100) { 'Lime' } elseif ($hue -lt 170) { 'Green' } elseif ($hue -lt 200) { 'Cyan' } elseif ($hue -lt 260) { 'Blue' } elseif ($hue -lt 300) { 'Purple' } else { 'Magenta' }
+                $weights[$name] = [double]$weights[$name] + $sat
+                $total += $sat
+            }
+        }
+        if ($total -lt 20) { return 'White' }
+        return (@($weights.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 1)[0].Key)
+    } finally {
+        if ($small) { $small.Dispose() }
+        if ($image) { $image.Dispose() }
+        if ($stream) { $stream.Dispose() }
+    }
+}
+
+# The main color of a game's picture in the user's LaunchBox pictures (marquee first). Pictures are only read, never changed
+# or downloaded. Returns nothing when no picture matches the game's name closely enough.
+function Get-TpmLedArtworkColor {
+    param([string[]]$ImageFolders = @(), [Parameter(Mandatory)][string]$Title)
+    $wanted = ConvertTo-TpmLbMediaKey -Text $Title
+    if (-not $wanted) { return $null }
+    foreach ($type in @('Arcade - Marquee', 'Box - Front', 'Screenshot - Game Title', 'Fanart - Background')) {
+        foreach ($folder in $ImageFolders) {
+            $dir = Join-Path $folder $type
+            if (-not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
+            $best = $null; $bestScore = 0.0
+            foreach ($file in @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '^\.(png|jpe?g)$' })) {
+                $score = Get-TpmLbMediaSimilarity -Left $wanted -Right (ConvertTo-TpmLbMediaKey -Text $file.BaseName)
+                if ($score -gt $bestScore) { $bestScore = $score; $best = $file }
+            }
+            if ($best -and $bestScore -ge 0.9) {
+                try { return (Get-TpmLedColorNameFromImage -Path $best.FullName) } catch { Write-Log "LEDBlinky: could not read the picture $($best.Name) -- $_" }
+            }
+        }
+    }
+    return $null
+}
+
 # One game's entry, built only from cabinet controls (name and input codes are the user's own; color follows the usual
 # arcade scheme above). The game's own label is used as the spoken word for a button when it has one.
 function New-TpmLedGroupText {
@@ -55282,7 +55336,8 @@ function New-TpmLedGroupText {
         $text = '        <control name="{0}" voice="{1}"' -f (ConvertTo-TpmLedXmlText $entry.Cab.Name), (ConvertTo-TpmLedXmlText $voice)
         if ($entry.Cab.IsPrimary) { $text += ' primaryControl="1"' }
         $schemeColor = Get-TpmLedSchemeColor -Name ([string]$entry.Cab.Name)
-        $useColor = if ($schemeColor) { $schemeColor } else { $entry.Cab.Color }
+        $artColor = if ($entry.PSObject.Properties['Color']) { [string]$entry.Color } else { '' }
+        $useColor = if ($artColor) { $artColor } elseif ($schemeColor) { $schemeColor } else { $entry.Cab.Color }
         if ($null -ne $useColor) { $text += (' color="{0}"' -f (ConvertTo-TpmLedXmlText $useColor)) }
         if ($null -ne $entry.Cab.InputCodes) { $text += (' inputCodes="{0}"' -f (ConvertTo-TpmLedXmlText $entry.Cab.InputCodes)) }
         return ($text + ' />')
@@ -55327,7 +55382,7 @@ function Get-TpmLedEmulatorSpan {
 # from controls that the profile uses and the user's own LEDBlinky setup has (and can pair with an LED).
 # Evidence: the controller evidence object (Get-TpmControllerEvidence), or $null when no device check is wanted.
 function Get-TpmLedExportPlan {
-    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$ControlsPath, $Evidence = $null)
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$ControlsPath, $Evidence = $null, [string[]]$ImageFolders = @())
     $text = Read-TpmLedControlsText -Path $ControlsPath
     $newline = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
     $plan = [pscustomobject]@{
@@ -55358,6 +55413,14 @@ function Get-TpmLedExportPlan {
             $match = Get-TpmLedGameMatch -ProfileControls (Get-TpmLedProfileControls -Doc $doc) -Cabinet $plan.Pairing.Usable
             if ($match.Written.Count -eq 0) { [void]$plan.SkippedNoControls.Add($file.BaseName); continue }
             $title = Get-TpmProfileFriendlyTitle -Doc $doc -BaseName $file.BaseName
+            # A trackball light takes the main color of the game's own picture, when the user's LaunchBox has one.
+            if ($ImageFolders.Count -gt 0) {
+                $trackball = @($match.Written | Where-Object { $_.Cab.Name -eq 'CONTROL_TRACKBALL' })
+                if ($trackball.Count -gt 0) {
+                    $artColor = Get-TpmLedArtworkColor -ImageFolders $ImageFolders -Title $title
+                    if ($artColor) { foreach ($t in $trackball) { Add-Member -InputObject $t -NotePropertyName Color -NotePropertyValue $artColor -Force } }
+                }
+            }
             [void]$blocks.Add((New-TpmLedGroupText -Key $file.BaseName -Title $title -Written $match.Written -Newline $newline))
             $primary = @($match.Written | Where-Object { $_.Cab.IsPrimary } | ForEach-Object { $_.Cab.Name } | Select-Object -First 1)
             [void]$plan.Groups.Add([pscustomobject]@{ Key = $file.BaseName; Title = $title; Buttons = @($match.Written | Where-Object { -not $_.Cab.IsPrimary }).Count; Primary = ($primary -join ''); NotOnCabinet = $match.NotOnCabinet; NeedsChoice = $match.NeedsChoice })
@@ -55578,7 +55641,7 @@ function Invoke-TpmLedBlinkyLocate {
 }
 # The optional step shown after LaunchBox: short choices, preview first.
 function Invoke-TpmLedBlinkyStep {
-    param([Parameter(Mandatory)]$Install, [Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)]$Layout, $State = $null)
+    param([Parameter(Mandatory)]$Install, [Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)]$Layout, $State = $null, [string[]]$ImageFolders = @())
     $evidence = $null
     try { $evidence = Get-TpmControllerEvidence } catch { Write-Log "LEDBlinky: the controller check could not run -- $_" }
     Write-TpmText -Text 'LEDBlinky was found on this PC.' -Color White
@@ -55591,7 +55654,7 @@ function Invoke-TpmLedBlinkyStep {
     do {
         $choice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'U', 'C', 'B') -Default 'P'
         if ($choice -eq 'P') {
-            try { $plan = Get-TpmLedExportPlan -UserProfilesDir $UserProfilesDir -ControlsPath $Install.ControlsPath -Evidence $evidence; Write-TpmLedPreview -Plan $plan -Layout $Layout }
+            try { $plan = Get-TpmLedExportPlan -UserProfilesDir $UserProfilesDir -ControlsPath $Install.ControlsPath -Evidence $evidence -ImageFolders $ImageFolders; Write-TpmLedPreview -Plan $plan -Layout $Layout }
             catch { Write-Log "LEDBlinky preview failed -- $_"; Write-TpmText -Text ('LEDBlinky preview stopped. Nothing was changed. {0}' -f $_.Exception.Message) -Color Yellow }
         }
         if ($choice -eq 'C') {
@@ -55604,7 +55667,7 @@ function Invoke-TpmLedBlinkyStep {
         }
     } while ($choice -in @('P', 'C'))
     if ($choice -eq 'A') {
-        try { $plan = Get-TpmLedExportPlan -UserProfilesDir $UserProfilesDir -ControlsPath $Install.ControlsPath -Evidence $evidence } catch { Write-Log "LEDBlinky plan failed -- $_"; Write-TpmText -Text ('LEDBlinky could not be read. Nothing was changed. {0}' -f $_.Exception.Message) -Color Yellow; return }
+        try { $plan = Get-TpmLedExportPlan -UserProfilesDir $UserProfilesDir -ControlsPath $Install.ControlsPath -Evidence $evidence -ImageFolders $ImageFolders } catch { Write-Log "LEDBlinky plan failed -- $_"; Write-TpmText -Text ('LEDBlinky could not be read. Nothing was changed. {0}' -f $_.Exception.Message) -Color Yellow; return }
         Write-TpmLedPreview -Plan $plan -Layout $Layout
         if ($plan.HasEmulator -and $plan.Groups.Count -gt 0) {
             Write-TpmText -Text 'Close LEDBlinky and its editor first. TeknoParrot Manager will not close them for you.' -Color Yellow -BlankBefore
@@ -56039,7 +56102,9 @@ if ($dryRunActive) {
     $ledInstall = Invoke-TpmLedBlinkyLocate -SavedFolder $ledState.Folder -LaunchBoxRoot $lbRoot
     if ($ledInstall) {
         $ledState.Folder = $ledInstall.Root
-        Invoke-TpmLedBlinkyStep -Install $ledInstall -UserProfilesDir $userProfilesDir -Layout $script:TpmOwnedLayout -State $ledState
+        $ledImageFolders = @()
+        if ($lbRoot) { $ledImageFolders = @('TeknoParrot', 'Arcade') | ForEach-Object { Join-Path (Join-Path $lbRoot 'Images') $_ } }
+        Invoke-TpmLedBlinkyStep -Install $ledInstall -UserProfilesDir $userProfilesDir -Layout $script:TpmOwnedLayout -State $ledState -ImageFolders $ledImageFolders
     } else { Write-Log "LEDBlinky not found or skipped; the lighting step was not run." }
     if ([string]$ledState.Folder -cne [string]$ledBlinkyRoot) {
         $ledBlinkyRoot = [string]$ledState.Folder
