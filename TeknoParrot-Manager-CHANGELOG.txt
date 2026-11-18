@@ -55,6 +55,7 @@
     missing.
   - The game list now also reads a second program and a test menu program
     for games that list them. Games without them work as before.
+  - All screens and guides use American spelling.
 
 
   v1.0 RC8.2 (changes since RC8.1)

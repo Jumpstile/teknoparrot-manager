@@ -23,6 +23,7 @@ The previous published release was v1.0 RC8.1: https://github.com/Jumpstile/tekn
 - A game profile with odd characters in its program name no longer stops the Manager with "Illegal characters in path".
 - Games that need PlayStation 3 firmware (RPCS3) or a Play! game file are checked before they start, and you are told what is missing.
 - The game list also reads a second program and a test menu program for games that list them.
+- All screens and guides use American spelling.
 
 
 ## v1.0 RC8.1 (changes since RC7)
@@ -383,7 +384,7 @@ Promoted to RC1 for the upcoming 1.0 release. No new functional changes beyond w
 
 ## v0.99.25 BETA (2026-06-24)
 
-- **Fix:** the FFB plugin setup summary lumped two different situations together under "Skipped (no match)" -- a game the plugin's table doesn't know about, vs. a game it knows about but whose DLL isn't downloaded locally (fixable). These now get separate, clearly labelled counts.
+- **Fix:** the FFB plugin setup summary lumped two different situations together under "Skipped (no match)" -- a game the plugin's table doesn't know about, vs. a game it knows about but whose DLL isn't downloaded locally (fixable). These now get separate, clearly labeled counts.
 - **Docs fix:** the README and QuickStart .txt files told you to choose "mode 5" for ReShade setup in several places -- that's dgVoodoo2's number; ReShade is mode 4. Corrected (this wiki and README.md already had it right).
 
 ## v0.99.24 BETA (2026-06-24)
@@ -424,7 +425,7 @@ Promoted to RC1 for the upcoming 1.0 release. No new functional changes beyond w
 
 ## v0.99.15 BETA (2026-06-22)
 
-- **Fix:** AutoSync and the extraction pickers (modes 1/2) could report a game as "available to extract" even though it was already extracted, if its staging folder had been manually renamed to the short name recommended by a PATH TOO LONG warning in ACTION REQUIRED (e.g. `AliensArmageddon` -> `ALIENS`). The folder-matching logic only compared normalised names, and a renamed folder no longer matched the ZIP's original name. Already-synced games are now also self-healed: AutoSync recognises the renamed folder and updates its stored path automatically.
+- **Fix:** AutoSync and the extraction pickers (modes 1/2) could report a game as "available to extract" even though it was already extracted, if its staging folder had been manually renamed to the short name recommended by a PATH TOO LONG warning in ACTION REQUIRED (e.g. `AliensArmageddon` -> `ALIENS`). The folder-matching logic only compared normalized names, and a renamed folder no longer matched the ZIP's original name. Already-synced games are now also self-healed: AutoSync recognizes the renamed folder and updates its stored path automatically.
 
 ## v0.99.14 BETA (2026-06-22)
 
@@ -803,7 +804,7 @@ For shared-executable games (Raw Thrills' `sdaemon.exe` and similar), a folder w
 **Registration improvements: .xbe/.dll scanning and profile code fuzzy pass**
 
 - `.xbe` and `.dll` files are now included when scanning for game executables. Sega Chihiro games emulated via cxbxr (Virtua Cop 3, OutRun 2, Ollie King, etc.) use `.xbe` files; Konami PC arcade games (DanceDanceRevolution 2013, Steel Chronicle, Silent Scope Bone Eater, Metal Gear Arcade, Love Plus Arcade) use a game-specific `.dll`. Both were previously invisible to the scanner.
-- A third registration pass now Dice-matches normalised folder names against normalised GameProfile code names. This catches games with an empty `<ExecutableName>` in their profile (BladeStrangers, LuigisMansion, MaiMaiGreen, PokkenTournament, ProjectDiva, SonicDashExtreme, StreetFighterVTypeArcade, HydroThunder, and others) that fell through the exe-index and dat passes.
+- A third registration pass now Dice-matches normalized folder names against normalized GameProfile code names. This catches games with an empty `<ExecutableName>` in their profile (BladeStrangers, LuigisMansion, MaiMaiGreen, PokkenTournament, ProjectDiva, SonicDashExtreme, StreetFighterVTypeArcade, HydroThunder, and others) that fell through the exe-index and dat passes.
 
 **Security / reliability**
 
