@@ -45470,7 +45470,7 @@ function Get-TpmGamesDbPath {
 
 # Accents removed, then the script's existing name normalizer (years, versions and brackets dropped, lowercase letters and digits only).
 function ConvertTo-TpmGamesDbKey {
-    [CmdletBinding()] param([string]$Title)
+    [CmdletBinding()] [OutputType([string])] param([string]$Title)
     if ([string]::IsNullOrWhiteSpace($Title)) { return '' }
     $plain = New-Object System.Text.StringBuilder
     foreach ($ch in $Title.Normalize([System.Text.NormalizationForm]::FormD).ToCharArray()) {
@@ -45528,7 +45528,7 @@ function Find-TpmGamesDbMatch {
 
 # Suggestions only, never a match: names that share a meaningful word with the title, ranked by the script's Dice similarity.
 function Find-TpmGamesDbCandidate {
-    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title, [int]$Top = 3, [double]$MinimumScore = 0.6)
+    [CmdletBinding()] [OutputType([object[]])] param([Parameter(Mandatory)]$Index, [string]$Title, [int]$Top = 3, [double]$MinimumScore = 0.6)
     $titleKey = ConvertTo-TpmGamesDbKey $Title
     if (-not $titleKey) { return @() }
     $keys = New-Object System.Collections.Generic.HashSet[string]
