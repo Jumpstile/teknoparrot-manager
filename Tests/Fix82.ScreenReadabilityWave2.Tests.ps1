@@ -218,6 +218,17 @@ Describe 'FIX82 BepInEx result: one line per kind of problem, no counters, no co
         @($script:fix82Rows | Where-Object { $_.Text -eq '  BepInEx could not finish for every game.' })[0].Color | Should -BeExactly 'Red'
     }
 
+    It 'does not call the run a failure when every picked game worked and only other games were skipped' {
+        # Mutation: keep the "could not finish" title, or the red Problem status, when nothing the person picked failed.
+        $counts = @{ 'UNKNOWN_ARCHITECTURE' = 3; 'DEVICE_UNAVAILABLE' = 2 }
+        $view = Get-TpmBepInExFailureView -Result (New-Fix82BepResult -Counts $counts -Updated 4 -Skipped 5 -MissingDevice 2 -UnknownArchitecture 3 -Failed 0 -Errors 0 -Records @())
+        $view.Title | Should -BeExactly 'BepInEx is set up for 4 games you picked. Other games in your library were left alone.'
+        $view.Status | Should -BeExactly 'Attention'
+        $view.Needs.Count | Should -BeGreaterThan 0
+        # A real failure keeps the old wording.
+        (Get-TpmBepInExFailureView -Result (New-Fix82BepResult -Counts @{} -Updated 4 -Skipped 0 -Failed 1 -Records @())).Title | Should -BeExactly 'BepInEx could not finish for every game.'
+    }
+
     It 'never claims success when there is no result at all' {
         # Mutation: treat a missing result as done (no Problem status), or print nothing.
         $view = Get-TpmBepInExFailureView -Result $null
