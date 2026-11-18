@@ -85,6 +85,15 @@ Describe 'LB424: matching and preview' {
         $plan.Exact[0].Dest | Should -BeExactly (Join-Path $fx.Lb 'Images\TeknoParrot\Clear Logo\Time Crisis 4-01.png')
     }
 
+    It 'ignores region marks and tags in picture file names, the same way the DAT matching does' {
+        # Mutation: compare raw file names -> "Time Crisis 4 (World) [TP]" is no longer an exact match.
+        $fx = New-Lb424Fixture
+        Remove-Item -LiteralPath (Join-Path $fx.Pics 'time-crisis_4.png')
+        [System.IO.File]::WriteAllBytes((Join-Path $fx.Pics 'Time Crisis 4 (World) [TP]-01.png'), [byte[]](1, 1))
+        $plan = Get-Lb424Plan $fx
+        @($plan.Exact | ForEach-Object { $_.Game.Title }) | Should -Be @('Time Crisis 4')
+    }
+
     It 'never puts a near match in the sure list, even when it is the only candidate' {
         # Mutation: auto-accept the best near candidate -> Near becomes empty and Exact has two items.
         $fx = New-Lb424Fixture

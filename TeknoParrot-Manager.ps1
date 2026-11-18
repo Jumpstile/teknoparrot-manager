@@ -53963,6 +53963,22 @@ if ($result.Registered.Count -gt 0 -and $notesIndex.Count -gt 0) {
 # Pictures are copied to <LaunchBox>\Images\<Platform>\<Clear Logo | Box - Front>\<Title>-01.<ext>.
 # A picture that is already there is kept unless the user chooses to replace it (the old one is saved first).
 # Every import writes a small record outside the library so Undo can remove exactly what was added.
+#
+# MODULE-READY SECTION (meant to be lifted into a .psm1 after 1.0; nothing outside this section calls its private helpers).
+#   Public, pure data/logic (no prompts, no screen output; only Write-Log for the log file):
+#     Get-TpmLaunchBoxMediaPlan       read-only preview: exact matches, near matches, games with no picture, games kept
+#     Invoke-TpmLaunchBoxMediaImport  the only writer: copies the selected pictures and writes the undo record
+#     Invoke-TpmLaunchBoxMediaUndo    removes exactly what one import added (restores replaced pictures)
+#   Public, screen (calls only the three functions above plus the shared prompt/screen helpers):
+#     Invoke-TpmLaunchBoxMediaStep    the optional step shown after the LaunchBox choices
+#   Private helpers: Get-TpmLbMedia*, ConvertTo-TpmLbMediaKey, Undo-TpmLbMediaRecords, Write-TpmLbMediaOutcome
+#   Depends on (outside this section): Resolve-TpmLaunchBoxRoot, Read-TpmLaunchBoxXml, Get-TpmLaunchBoxPath,
+#     Get-SafeLaunchBoxPlatformFileName, Get-TpmLaunchBoxBackupRoot, Get-XmlChildText, Get-RelativePath, Test-PathInside,
+#     Test-TpmNoReparsePath, Assert-TpmNoReparseWriteTarget, Get-NormalizedGameKey (same name clean-up the DAT matching uses),
+#     Write-Log; screen only: Read-TpmChoice, Read-TpmYesNo, Read-HostSafe, Write-TpmText, Write-TpmOutcome,
+#     Show-TpmDetailBlocks, Format-TpmGameCount.
+#   No script-level variables are used: all state goes through parameters and returned objects.
+#   The Eggman DAT lists game folder names, not pictures, so it has no media data; its name clean-up is reused for file names.
 
 function Get-TpmLbMediaFolderName {
     param([string]$Kind)
@@ -53985,6 +54001,8 @@ function Get-TpmLbMediaSafeName {
 function ConvertTo-TpmLbMediaKey {
     param([string]$Text)
     $t = [regex]::Replace([string]$Text, '-\d{2}$', '')
+    # Same clean-up the DAT matching uses: drops [tags], (World)/(JPN) style region marks and version notes.
+    $t = Get-NormalizedGameKey $t
     $decomposed = $t.Normalize([System.Text.NormalizationForm]::FormD)
     $sb = New-Object System.Text.StringBuilder
     foreach ($c in $decomposed.ToCharArray()) {
