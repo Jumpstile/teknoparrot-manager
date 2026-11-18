@@ -10166,8 +10166,8 @@ function Select-RegisteredGamesInteractive {
         $start = $page * $pageSize
         $end   = [Math]::Min($start + $pageSize - 1, $profiles.Count - 1)
         Write-Host ""
-        Write-Host ("    Page {0}/{1}   (games {2}-{3} of {4})   * = selected" -f `
-            ($page + 1), $pages, ($start + 1), ($end + 1), $profiles.Count) -ForegroundColor Cyan
+        Write-Host ("    Page {0}/{1}   (games {2}-{3} of {4})   * = selected   Selected so far: {5}" -f `
+            ($page + 1), $pages, ($start + 1), ($end + 1), $profiles.Count, $selected.Count) -ForegroundColor Cyan
         for ($i = $start; $i -le $end; $i++) {
             $mark = if ($selected -contains $profiles[$i]) { '*' } else { ' ' }
             Write-Host ("    {0,3}) {1} {2}{3}" -f ($i + 1), $mark, (Get-TpmGameDisplayLabel -ProfilePath $profiles[$i].FullName -Fallback $profiles[$i].BaseName), $(if ($LabelSuffix.ContainsKey($profiles[$i].FullName)) { [string]$LabelSuffix[$profiles[$i].FullName] } else { '' }))
