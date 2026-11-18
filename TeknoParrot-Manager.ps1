@@ -31915,6 +31915,11 @@ function Get-TpmBepInExFailureView {
         DetailsNote = $note
     }
     if ($updated -gt 0) { $view.Done = @(('BepInEx was set up for {0}.' -f (Format-TpmGameCount -Count $updated))) }
+    # Every game the user picked worked. What is left over are games they did not pick (a drive that is not connected, a game this setup cannot read), so this is not a failure.
+    if ($updated -gt 0 -and $failed -eq 0 -and $unattempted -eq 0 -and -not $rollbackIssue) {
+        $view.Title = ('BepInEx is set up for {0} you picked. Other games in your library were left alone.' -f (Format-TpmGameCount -Count $updated))
+        $view.Status = 'Attention'
+    }
     return $view
 }
 
