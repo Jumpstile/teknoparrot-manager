@@ -29,6 +29,18 @@
     sure match keep their name unless you pick one. If the game list is not
     found or cannot be read, games are added the way they were before.
     Nothing is downloaded.
+  - New LaunchBox choice "Fill in game details and make playlists". It
+    fills in the release year and developer from the game folder name, but
+    only where LaunchBox has nothing yet. Anything you typed yourself is
+    left alone.
+  - The Eggman list is checked too. If it and the folder name disagree
+    about a detail, you see both and pick which to use. Nothing is
+    filled in for that detail until you pick.
+  - It also makes playlists for each arcade hardware family, plus "Light
+    gun games" and "Driving games". The Manager only changes playlists it
+    made itself. Your own playlists are never touched.
+  - You see exactly what will change first, a saved copy is made before
+    anything is written, and Restore puts it all back.
 
   BepInEx
   - When BepInEx cannot be installed in a game folder because a file is
@@ -60,7 +72,6 @@
     [TP] is now reported as missing.
   - The backup folder made when ReShade settings are moved to the new
     format now has a shorter name.
-
 
   v1.0 RC8.2 (changes since RC8.1)
   ----------------------------------------------------------------

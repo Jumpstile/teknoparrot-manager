@@ -20,7 +20,7 @@ The previous published release was v1.0 RC8.1: https://github.com/Jumpstile/tekn
 - A .zip file shared by several games no longer causes false questions about duplicate profiles.
 - A missing file inside a game folder with a bracketed name such as [TP] is now reported as missing.
 - The backup folder made when ReShade settings are moved to the new format has a shorter name.
-
+- LaunchBox: a new choice fills in the release year and developer from the folder name and the Eggman list (only where they are empty; if the two disagree you choose) and makes playlists by hardware, light gun games and driving games. You see the changes first, a saved copy is made, and Restore undoes it. Your own entries and playlists are never changed.
 
 ## v1.0 RC8.1 (changes since RC7)
 
