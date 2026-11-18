@@ -27,6 +27,13 @@
     (for example PostgreSQL could not be put back the way it was), setup
     shows it and returns to the menu instead of stopping with an error.
 
+  LaunchBox
+  - New optional step: add clear logos or box art to LaunchBox from a
+    folder you pick. You see a preview first: sure matches, close matches
+    and games with no picture. Close matches are only used if you say yes.
+    Pictures LaunchBox already has are kept unless you choose to replace
+    them. Nothing is downloaded. Undo removes the pictures that were added.
+
   Screens
   - ReShade, choosing games one by one: you are asked only about games
     that can be changed, the screen shows which game you are on, and B

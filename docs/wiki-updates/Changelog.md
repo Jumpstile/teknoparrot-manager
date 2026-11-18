@@ -16,6 +16,7 @@ The previous published release was v1.0 RC8.1: https://github.com/Jumpstile/tekn
 - PostgreSQL setup shows a second problem and returns to the menu instead of stopping with an error.
 - ReShade one-by-one asks only about games that can be changed, and B goes back. B also works at the dgVoodoo2 and graphics card fix questions after registration.
 - The dgVoodoo2 result names any selected game that already had every file.
+- LaunchBox: add clear logos or box art from a folder you pick. You see a preview first, close matches need your yes, pictures you already have are kept unless you choose to replace them, nothing is downloaded, and Undo removes what was added.
 
 ## v1.0 RC8.1 (changes since RC7)
 
