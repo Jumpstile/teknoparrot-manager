@@ -16,6 +16,20 @@
     no longer lowers the match. If two games match equally well, the
     Manager does not guess; it lists the game for you to add by hand.
 
+  LaunchBox
+  - When you add games to LaunchBox, the Manager can now look each game up
+    in LaunchBox's own game list on your PC and use the official name and
+    the Games Database ID, so LaunchBox can find info and artwork for it.
+    You see every old name, new name and ID first and approve before
+    anything is saved. A copy of your LaunchBox files is saved first, so
+    you can undo. Names you changed yourself are never replaced, and only
+    exact matches are used on their own. When two sources point at
+    different games, the best guess is shown with how sure it is (high,
+    medium or low) and the other candidate; low guesses and games with no
+    sure match keep their name unless you pick one. If the game list is not
+    found or cannot be read, games are added the way they were before.
+    Nothing is downloaded.
+
   BepInEx
   - When BepInEx cannot be installed in a game folder because a file is
     already there and cannot be replaced safely, the message now says
