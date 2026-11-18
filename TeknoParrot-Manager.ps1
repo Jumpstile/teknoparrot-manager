@@ -18772,7 +18772,12 @@ function Invoke-DgVoodoo2Setup {
         Write-Host ("  Preflight skipped {0} game(s): {1}" -f $scanPathReasons[$reasonCode], (Get-TpmPlainReason -Code $reasonCode).Text) -ForegroundColor Yellow
     }
 
-    Write-Host ("  Scanned {0} game(s)." -f $profiles.Count) -ForegroundColor DarkGray
+    $scanLeftOut = [int](($scanPathReasons.Values | Measure-Object -Sum).Sum)
+    if ($scanLeftOut -gt 0 -and $scanLeftOut -lt $profiles.Count) {
+        Write-Host ("  Checked {0} of {1} game(s). The other {2} were skipped (see above)." -f ($profiles.Count - $scanLeftOut), $profiles.Count, $scanLeftOut) -ForegroundColor DarkGray
+    } else {
+        Write-Host ("  Scanned {0} game(s)." -f $profiles.Count) -ForegroundColor DarkGray
+    }
     if ($detectedMap.Count -gt 0) {
         Write-Host ("  Auto-detected {0} game(s) using legacy APIs:" -f $detectedMap.Count) -ForegroundColor Cyan
         foreach ($name in ($detectedMap.Keys | Sort-Object)) {
