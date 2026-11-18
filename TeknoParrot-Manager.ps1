@@ -45110,6 +45110,8 @@ function New-TpmLaunchBoxStage {
             $settings.Indent = $false
             $settings.NewLineHandling = [System.Xml.NewLineHandling]::Entitize
             $settings.CloseOutput = $false
+            # Line breaks outside the root element (after the XML declaration) would be written as &#xD; and make the file unreadable, so drop them first.
+            foreach ($top in @($Document.ChildNodes)) { if ($top.NodeType -in @([System.Xml.XmlNodeType]::Whitespace, [System.Xml.XmlNodeType]::SignificantWhitespace)) { [void]$Document.RemoveChild($top) } }
             $writer = [System.Xml.XmlWriter]::Create($stream,$settings)
             try { $Document.Save($writer); $writer.Flush() } finally { $writer.Dispose() }
         }

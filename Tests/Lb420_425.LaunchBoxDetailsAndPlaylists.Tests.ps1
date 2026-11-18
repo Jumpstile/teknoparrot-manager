@@ -290,6 +290,17 @@ Describe 'LB420/421: the real LaunchBox file format' {
         (@(Format-TpmLaunchBoxEnrichLine -Plan (Invoke-Lb420 -Fixture (New-Lb420Fixture) -PlanOnly).EnrichPlan) -join "`n") | Should -Not -Match '01-01'
     }
 
+    It 'saves a platform file that starts with the XML header and a Windows line break, as a real LaunchBox library does' {
+        # Mutation: write the line break after the XML header as &#xD; (NewLineHandling Entitize on the whole document) -> the staged file cannot be read back and the write is refused.
+        $fx = New-Lb420Fixture
+        $plain = [System.IO.File]::ReadAllText($fx.Platform)
+        [System.IO.File]::WriteAllText($fx.Platform, ('<?xml version="1.0" encoding="utf-8"?>' + "`r`n" + $plain), (New-Object System.Text.UTF8Encoding $false))
+        $w = Invoke-Lb420 -Fixture $fx
+        $w.Outcome | Should -BeExactly 'SAVED'
+        (Get-Lb420Game $fx 'g1').ReleaseDate | Should -BeExactly '2004-01-01'
+        [System.IO.File]::ReadAllText($fx.Platform) | Should -Not -Match '&#xD;<'
+    }
+
     It 'keeps a release date the user or LaunchBox already has, even a full one' {
         # Mutation: overwrite a filled ReleaseDate with yyyy-01-01 -> the exact day is lost.
         $extra = New-Lb420Game 'g5' 'Full date' 'Tekken' -Extra '<ReleaseDate>2006-02-03</ReleaseDate>'
