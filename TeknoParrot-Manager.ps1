@@ -18400,7 +18400,12 @@ function Invoke-ReShadeSetupLegacy {
 # Deploy only after the explicit profile confirmation above.
     Exit-TpmReShadeInteractiveProgressHold -Stage 'Installing the selected profile'
     Write-Host ""
-    Write-Host ("  Installing ReShade into {0}..." -f (Format-TpmGameCount -Count $selectedGames.Count)) -ForegroundColor Cyan
+    $readyNow = @(@($preflightSummary.Records) | Where-Object { $_.Status -eq 'Ready' -or ($Action -eq 'Adopt' -and $_.Status -eq 'Protected') }).Count
+    if ($readyNow -gt 0 -and $readyNow -lt $selectedGames.Count) {
+        Write-Host ("  Installing ReShade into {0}. The other {1} cannot be changed right now and will be left alone..." -f (Format-TpmGameCount -Count $readyNow), ($selectedGames.Count - $readyNow)) -ForegroundColor Cyan
+    } else {
+        Write-Host ("  Installing ReShade into {0}..." -f (Format-TpmGameCount -Count $selectedGames.Count)) -ForegroundColor Cyan
+    }
     $deployed = 0; $installed = 0; $updated = 0; $reapplied = 0; $changedProfile = 0; $keptProfile = 0; $skipped = 0; $missingPath = 0; $missingDevice = 0; $unsupported = 0; $linuxStyle = 0; $protected = 0; $adopted = 0; $unsafe = 0; $errors = 0; $presetOverrides = 0; $tutorialProgressFixed = 0
     $protectedDetails = New-Object System.Collections.Generic.List[string]
     $unsafeDetails = New-Object System.Collections.Generic.List[string]
@@ -18518,7 +18523,7 @@ function Invoke-ReShadeSetupLegacy {
                 $skipped++; [void]$skippedGameIds.Add($pf.BaseName)
                 $unsafe++
                 [void]$unsafeDetails.Add(('{0}: ReShade target could not be resolved safely.' -f $pf.BaseName))
-                [void]$detailNotes.Add(('{0}: ReShade target could not be resolved safely -- unsafe/malformed, unchanged' -f $pf.BaseName))
+                [void]$detailNotes.Add(('{0}: ReShade target could not be resolved safely -- could not tell which ReShade file this game needs (the game is not damaged), left unchanged' -f $pf.BaseName))
                 Write-Log ("ReShade: {0} classified MalformedNeedsReview; target resolution failed." -f $pf.BaseName)
                 continue
             }
