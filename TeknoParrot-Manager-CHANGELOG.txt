@@ -42,6 +42,9 @@
     fills in the release year and developer from the game folder name, but
     only where LaunchBox has nothing yet. Anything you typed yourself is
     left alone.
+  - The Eggman list is checked too. If it and the folder name disagree
+    about a detail, you see both and pick which to use. Nothing is
+    filled in for that detail until you pick.
   - It also makes playlists for each arcade hardware family, plus "Light
     gun games" and "Driving games". The Manager only changes playlists it
     made itself. Your own playlists are never touched.

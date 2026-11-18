@@ -13,9 +13,8 @@ BeforeAll {
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($productionPath, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { throw 'LB420 tests could not parse the production script.' }
     $functionText = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n"
-    $stateText = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.AssignmentStatementAst] -and $args[0].Left.Extent.Text -match '^\$script:(TpmPlaylistMarker|TpmGameMakerNames)$' }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n"
     $script:Lb420File = Join-Path $TestDrive 'tpm-lb420-functions.ps1'
-    [System.IO.File]::WriteAllText($script:Lb420File, ($stateText + "`r`n" + $functionText), (New-Object System.Text.UTF8Encoding $false))
+    [System.IO.File]::WriteAllText($script:Lb420File, $functionText, (New-Object System.Text.UTF8Encoding $false))
     . $script:Lb420File
     . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
 
@@ -57,12 +56,18 @@ BeforeAll {
     }
 
     function Invoke-Lb420 {
-        param($Fixture, [switch]$PlanOnly)
-        $result = Invoke-LaunchBoxEnrich -userProfilesDir $Fixture.Profiles -tpRoot 'C:\TP' -lbRoot $Fixture.Root -platformNames @('TeknoParrot') -BackupRoot $Fixture.Backups -PlanOnly:$PlanOnly
+        param($Fixture, [switch]$PlanOnly, [hashtable]$DatIndex = $null, [hashtable]$Choices = @{}, [string]$Default = 'Skip')
+        $result = Invoke-TpmLaunchBoxEnrich -UserProfilesDir $Fixture.Profiles -LbRoot $Fixture.Root -PlatformNames @('TeknoParrot') -BackupRoot $Fixture.Backups -DatIndex $DatIndex -ConflictChoices $Choices -ConflictDefault $Default -PlanOnly:$PlanOnly
         if ($result.Outcome -eq 'FAILED') { throw ('LaunchBox step failed: ' + ($result.Errors -join '; ')) }
         return $result
     }
 
+    function New-Lb420Dat {
+        param([object[]]$Entries)
+        $dat = @{}
+        foreach ($e in $Entries) { $dat[(Get-NormalizedGameKey $e.Name)] = [pscustomobject]@{ ProfileCode = $e.Code; Executable = 'game.exe'; OriginalName = $e.Name } }
+        return $dat
+    }
     function Get-Lb420Game {
         param($Fixture, [string]$Id)
         $doc = [xml][System.IO.File]::ReadAllText($Fixture.Platform)
@@ -70,19 +75,19 @@ BeforeAll {
     }
 }
 
-Describe 'LB420/421: facts from the folder name' {
+Describe 'LB420/421: facts from a game name' {
     It 'reads year, hardware and developer from the folder name' {
         # Mutation: drop the year pattern or the maker list -> year or developer comes back empty.
-        $f = Get-TpmGameFolderFacts -GamePath 'D:\Games\Tekken 6 (1998)(JPN, AG1 Ver.A)[Namco Super System 23][TP]\bin\game.exe'
+        $f = Get-TpmLaunchBoxNameFacts -Name 'Tekken 6 (1998)(JPN, AG1 Ver.A)[Namco Super System 23][TP]'
         $f.Year | Should -BeExactly '1998'
         $f.Hardware | Should -BeExactly 'Namco Super System 23'
         $f.Developer | Should -BeExactly 'Namco'
     }
     It 'invents nothing when the folder is not a TeknoParrot game folder or the maker is unknown' {
         # Mutation: fall back to the first word of the label as developer -> "Mystery" would be written.
-        $none = Get-TpmGameFolderFacts -GamePath 'D:\Games\Some Folder\game.exe'
+        $none = Get-TpmLaunchBoxNameFacts -Name 'Some Folder'
         "$($none.Year)$($none.Hardware)$($none.Developer)" | Should -BeExactly ''
-        $unknown = Get-TpmGameFolderFacts -GamePath 'D:\Games\X (2010)[Mystery Board][TP]\game.exe'
+        $unknown = Get-TpmLaunchBoxNameFacts -Name 'X (2010)[Mystery Board][TP]'
         $unknown.Hardware | Should -BeExactly 'Mystery Board'
         $unknown.Developer | Should -BeExactly ''
     }
@@ -103,8 +108,8 @@ Describe 'LB420/421: details and playlists' {
         $r = Invoke-Lb420 -Fixture $fx -PlanOnly
         $r.Reason | Should -BeExactly 'PREVIEW'
         $r.WouldChangeFiles | Should -BeGreaterThan 0
-        $r.PlainTitle | Should -BeLike '*Nothing was changed*'
-        (@($r.EnrichLines) -join "`n") | Should -Match 'Ghost Squad: will fill in year 2004, developer Sega'
+        (Format-TpmLaunchBoxEnrichTitle -Plan $r.EnrichPlan -Preview) | Should -BeLike '*Nothing was changed*'
+        (@(Format-TpmLaunchBoxEnrichLine -Plan $r.EnrichPlan) -join "`n") | Should -Match 'Ghost Squad: will fill in year 2004, developer Sega'
         $after = Get-Lb420Hashes -Root $fx.Root
         ($after.Keys -join '|') | Should -BeExactly ($before.Keys -join '|')
         ($after.Values -join '|') | Should -BeExactly ($before.Values -join '|')
@@ -119,7 +124,7 @@ Describe 'LB420/421: details and playlists' {
         $r = Invoke-Lb420 -Fixture $fx
         $r.Outcome | Should -BeExactly 'SAVED'
         @($r.ChangedPaths).Count | Should -Be $preview.WouldChangeFiles
-        (@($r.EnrichLines) -join "`n") | Should -BeExactly (@($preview.EnrichLines) -join "`n")
+        (@(Format-TpmLaunchBoxEnrichLine -Plan $r.EnrichPlan) -join "`n") | Should -BeExactly (@(Format-TpmLaunchBoxEnrichLine -Plan $preview.EnrichPlan) -join "`n")
         $r.BackupVerified | Should -BeTrue
         (Get-Lb420Game $fx 'g1').ReleaseYear | Should -BeExactly '2004'
         (Get-Lb420Game $fx 'g1').Developer | Should -BeExactly 'Sega'
@@ -167,7 +172,7 @@ Describe 'LB420/421: details and playlists' {
         $r = Invoke-Lb420 -Fixture $fx
         $r.Outcome | Should -BeExactly 'SAVED'
         (Get-FileHash -LiteralPath $mine).Hash | Should -BeExactly $hashBefore
-        (@($r.EnrichLines) -join "`n") | Should -Match 'Light gun games: left alone'
+        (@(Format-TpmLaunchBoxEnrichLine -Plan $r.EnrichPlan) -join "`n") | Should -Match 'Light gun games: left alone'
         # One of its own playlists follows a new game; the other lists stay.
         $platform = [System.IO.File]::ReadAllText($fx.Platform).Replace('</LaunchBox>', ((New-Lb420Game 'g7' 'Ghost Squad 2' 'GhostSquad') + '</LaunchBox>'))
         [System.IO.File]::WriteAllText($fx.Platform, $platform)
@@ -192,5 +197,69 @@ Describe 'LB420/421: details and playlists' {
         $after = Get-Lb420Hashes -Root $fx.Root
         foreach ($key in $before.Keys) { $after[$key] | Should -BeExactly $before[$key] }
         @($after.Keys | Where-Object { $_ -like '*Playlists*' }).Count | Should -Be 0
+    }
+}
+
+Describe 'LB420/421: Eggman DAT as a second source' {
+    BeforeEach {
+        Mock Write-Log {}
+        Mock Test-LaunchBoxRunning { $false }
+        Mock Wait-TpmForProcessClose { $true }
+        Mock Write-TpmCompactExtractionProgress {}
+    }
+
+
+
+    It 'fills a detail from the DAT when the folder name has none, and stays quiet when both agree' {
+        # Mutation: ignore the DAT -> the bare folder gets no year; or flag equal values as a conflict.
+        $fx = New-Lb420Fixture
+        New-Lb420Profile -Dir $fx.Profiles -Code 'Bare' -GameFolder 'Bare Game[TP]'
+        [System.IO.File]::WriteAllText($fx.Platform, [System.IO.File]::ReadAllText($fx.Platform).Replace('</LaunchBox>', ((New-Lb420Game 'g8' 'Bare Game' 'Bare') + '</LaunchBox>')))
+        $dat = New-Lb420Dat @(
+            @{ Code = 'Bare'; Name = 'Bare Game (2010)(USA)[Sega Lindbergh][TP]' },
+            @{ Code = 'GhostSquad'; Name = 'Ghost Squad (2004)(JPN)[Sega Lindbergh][TP]' })
+        $r = Invoke-Lb420 -Fixture $fx -PlanOnly -DatIndex $dat
+        @($r.EnrichPlan.Conflicts).Count | Should -Be 0
+        $w = Invoke-Lb420 -Fixture $fx -DatIndex $dat
+        $w.Outcome | Should -BeExactly 'SAVED'
+        (Get-Lb420Game $fx 'g8').ReleaseYear | Should -BeExactly '2010'
+        (Get-Lb420Game $fx 'g8').Developer | Should -BeExactly 'Sega'
+        (Get-Lb420Game $fx 'g1').ReleaseYear | Should -BeExactly '2004'
+    }
+
+    It 'shows both values when the sources disagree and writes nothing for that detail unless chosen' {
+        # Mutation: pick one source silently -> the year is written without a choice, or the preview hides one value.
+        $fx = New-Lb420Fixture
+        $dat = New-Lb420Dat @(@{ Code = 'Outrun2'; Name = 'OutRun 2 (2007)(USA)[Sega Lindbergh][TP]' })
+        $r = Invoke-Lb420 -Fixture $fx -PlanOnly -DatIndex $dat
+        @($r.EnrichPlan.Conflicts).Count | Should -Be 1
+        $line = (@(Format-TpmLaunchBoxEnrichLine -Plan $r.EnrichPlan) -join "`n")
+        $line | Should -Match 'Folder name says 2008'
+        $line | Should -Match 'Eggman list says 2007'
+        $w = Invoke-Lb420 -Fixture $fx -DatIndex $dat
+        $w.Outcome | Should -BeExactly 'SAVED'
+        (Get-Lb420Game $fx 'g2').SelectSingleNode('ReleaseYear') | Should -BeNullOrEmpty
+        (Get-Lb420Game $fx 'g2').Developer | Should -BeExactly 'Sega'
+    }
+
+    It 'uses the source the user chose, for one detail or for all' {
+        # Mutation: ignore the choice -> the year stays empty or the wrong source wins.
+        $fx = New-Lb420Fixture
+        $dat = New-Lb420Dat @(@{ Code = 'Outrun2'; Name = 'OutRun 2 (2007)(USA)[Sega Lindbergh][TP]' })
+        $one = Invoke-Lb420 -Fixture $fx -PlanOnly -DatIndex $dat -Choices @{ 'g2|Year' = 'Dat' }
+        @($one.EnrichPlan.Conflicts)[0].Applied | Should -BeExactly '2007'
+        [void](Invoke-Lb420 -Fixture $fx -DatIndex $dat -Default 'Folder')
+        (Get-Lb420Game $fx 'g2').ReleaseYear | Should -BeExactly '2008'
+        $fx2 = New-Lb420Fixture
+        [void](Invoke-Lb420 -Fixture $fx2 -DatIndex $dat -Default 'Dat')
+        (Get-Lb420Game $fx2 'g2').ReleaseYear | Should -BeExactly '2007'
+    }
+
+    It 'ignores a DAT entry that belongs to a different profile' {
+        # Mutation: match by name only -> another game's year lands on this one.
+        $fx = New-Lb420Fixture
+        $dat = New-Lb420Dat @(@{ Code = 'SomethingElse'; Name = 'OutRun 2 (2007)(USA)[Sega Lindbergh][TP]' })
+        $r = Invoke-Lb420 -Fixture $fx -PlanOnly -DatIndex $dat
+        @($r.EnrichPlan.Conflicts).Count | Should -Be 0
     }
 }

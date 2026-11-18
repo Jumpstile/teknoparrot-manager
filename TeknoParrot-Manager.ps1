@@ -45523,50 +45523,129 @@ function Invoke-LaunchBoxDirectWrite {
 # =============================================================================
 # LAUNCHBOX GAME DETAILS AND PLAYLISTS  (issues #420 and #421)
 # =============================================================================
-# One extra LaunchBox action: fill empty year and developer fields from the game folder name, and keep playlists by
-# hardware family, light gun and driving. It reuses the file transaction above (backup, read-back, rollback), so the
-# existing Restore menu is its undo. A field that already has a value is never changed. A playlist is only touched when
-# it carries the marker below; the user's own playlists are never edited.
-$script:TpmPlaylistMarker = 'Made by TeknoParrot Manager. It keeps this playlist up to date. Your own playlists are never changed.'
-# Companies named at the start of a hardware label such as [Namco Super System 23]. Longest names first.
-$script:TpmGameMakerNames = @('Bandai Namco', 'Raw Thrills', 'Incredible Technologies', 'Namco', 'Sega', 'Taito', 'Konami', 'Capcom', 'Examu', 'Atari', 'Midway')
+# MODULE-READY SECTION. Everything between the START and END markers can be lifted into a .psm1 as it is.
+#
+# What it does: fills EMPTY release-year and developer fields from the game folder name and the Eggman DAT, and keeps
+# the Manager's playlists (one per hardware family, plus Light gun games and Driving games). A field that already has
+# a value is never changed. A playlist is only touched when it carries the marker note; the user's own playlists are
+# never edited. When the folder name and the DAT disagree, nothing is written for that detail unless the caller passes
+# a choice. Backup, read-back and rollback come from the existing LaunchBox file transaction; Restore is the undo.
+#
+# Public functions
+#   Data layer (no screens, no prompts, no console output):
+#     Get-TpmLaunchBoxNameFacts          year, hardware family and developer that one name says
+#     Get-TpmLaunchBoxGameFacts          what the folder name, the DAT and the profile say about one game
+#     Resolve-TpmLaunchBoxFact           one value from the two sources, or a conflict
+#     Set-TpmLaunchBoxFieldIfEmpty       sets a LaunchBox field only when it is empty
+#     Update-TpmLaunchBoxPlaylistDocument  makes or updates one Manager playlist document
+#     New-TpmLaunchBoxEnrichPlan         reads everything and builds the planned changes (writes nothing)
+#     Invoke-TpmLaunchBoxEnrich          preview (-PlanOnly) or write, through the file transaction
+#   Text layer (pure: objects in, strings out):
+#     Format-TpmLaunchBoxEnrichLine      the preview lines (Details view and log)
+#     Format-TpmLaunchBoxEnrichTitle     the one plain title line
+# Screen layer (not part of the module, listed after the END marker): Invoke-TpmLaunchBoxEnrichStep
+#
+# Depends on (existing script functions): Read-Xml, Get-XmlChildText, Set-XmlChildText, Get-ProfileFamily,
+#   Get-DatEntryForZipName, Resolve-TpmLaunchBoxRoot, Test-TpmNoReparsePath, Get-TpmLaunchBoxPath,
+#   Get-TpmLaunchBoxFileState, Assert-TpmLaunchBoxState, Read-TpmLaunchBoxXml, Get-SafeLaunchBoxPlatformFileName,
+#   New-TpmLaunchBoxResult, Invoke-TpmLaunchBoxFileTransaction, Format-TpmGameCount, Write-Log.
+# State: none. No script-level variables; everything is passed in parameters or returned in objects.
+# START MODULE-READY SECTION: LaunchBox game details and playlists
 
-# Year, hardware family and developer that the game folder name says, e.g. "Name (1998)(JPN, AG1 Ver.A)[Namco Super System 23][TP]".
-# Looks at the folder of the game file and the folders above it, and uses the first one that ends in [TP].
-function Get-TpmGameFolderFacts {
-    param([string]$GamePath)
+# The note that marks a playlist as the Manager's own.
+function Get-TpmLaunchBoxPlaylistMarker {
+    return 'Made by TeknoParrot Manager. It keeps this playlist up to date. Your own playlists are never changed.'
+}
+
+# Companies named at the start of a hardware label such as [Namco Super System 23]. Longest names first.
+function Get-TpmLaunchBoxMakerNames {
+    return @('Bandai Namco', 'Raw Thrills', 'Incredible Technologies', 'Namco', 'Sega', 'Taito', 'Konami', 'Capcom', 'Examu', 'Atari', 'Midway')
+}
+
+# Year, hardware family and developer that one game name says, e.g. "Name (1998)(JPN, AG1 Ver.A)[Namco Super System 23][TP]".
+# Used for a folder name and for a DAT game name alike. A name without a [TP] label says nothing.
+function Get-TpmLaunchBoxNameFacts {
+    param([string]$Name)
     $facts = [pscustomobject]@{ Year = ''; Hardware = ''; Developer = '' }
-    $name = ''
-    try {
-        $dir = [System.IO.Path]::GetDirectoryName($GamePath)
-        while ($dir) {
-            $leaf = [System.IO.Path]::GetFileName($dir)
-            if ($leaf -match '\[TP\]\s*$') { $name = $leaf; break }
-            $dir = [System.IO.Path]::GetDirectoryName($dir)
-        }
-    } catch { return $facts }
-    if (-not $name) { return $facts }
-    $year = [regex]::Match($name, '\(((?:19|20)\d{2})\)')
+    if ([string]::IsNullOrWhiteSpace($Name) -or $Name -notmatch '\[TP\]\s*$') { return $facts }
+    $year = [regex]::Match($Name, '\(((?:19|20)\d{2})\)')
     if ($year.Success) { $facts.Year = $year.Groups[1].Value }
-    $labels = @([regex]::Matches($name, '\[([^\]]+)\]') | ForEach-Object { $_.Groups[1].Value.Trim() } | Where-Object { $_ -and $_ -ine 'TP' })
+    $labels = @([regex]::Matches($Name, '\[([^\]]+)\]') | ForEach-Object { $_.Groups[1].Value.Trim() } | Where-Object { $_ -and $_ -ine 'TP' })
     if ($labels.Count -gt 0) {
         $facts.Hardware = [string]$labels[0]
-        foreach ($maker in $script:TpmGameMakerNames) {
+        foreach ($maker in (Get-TpmLaunchBoxMakerNames)) {
             if ($facts.Hardware -match ('^' + [regex]::Escape($maker) + '\b')) { $facts.Developer = $maker; break }
         }
     }
     return $facts
 }
 
-# What one profile file says: folder facts plus the light gun and driving tags the script already knows (GunGame, wheel buttons).
-function Get-TpmLaunchBoxProfileFacts {
-    param([Parameter(Mandatory)][string]$ProfilePath)
+# The name of the game folder that ends in [TP]: the folder of the game file or the first one above it. '' when there is none.
+function Get-TpmLaunchBoxFolderName {
+    param([string]$GamePath)
+    try {
+        $dir = [System.IO.Path]::GetDirectoryName($GamePath)
+        while ($dir) {
+            $leaf = [System.IO.Path]::GetFileName($dir)
+            if ($leaf -match '\[TP\]\s*$') { return $leaf }
+            $dir = [System.IO.Path]::GetDirectoryName($dir)
+        }
+    } catch { return '' }
+    return ''
+}
+
+# DAT index entries by profile code (lower case): code -> list of entries. Built once per plan.
+function Get-TpmLaunchBoxDatByCode {
+    param([hashtable]$DatIndex)
+    $byCode = @{}
+    if ($null -eq $DatIndex) { return $byCode }
+    foreach ($entry in $DatIndex.Values) {
+        $code = ([string]$entry.ProfileCode).Trim().ToLowerInvariant()
+        if (-not $code) { continue }
+        if (-not $byCode.ContainsKey($code)) { $byCode[$code] = New-Object System.Collections.Generic.List[object] }
+        [void]$byCode[$code].Add($entry)
+    }
+    return $byCode
+}
+
+# What the sources say about one game: Folder (facts from the folder name), Dat (facts from the DAT game name, or $null when
+# the DAT has no entry for this profile), LightGun and Driving (only from what the profile already says: GunGame and wheel buttons).
+# A DAT entry counts only when its profile code is this profile's code; a name match to another profile is ignored.
+function Get-TpmLaunchBoxGameFacts {
+    param([Parameter(Mandatory)][string]$ProfilePath, [hashtable]$DatIndex = $null, [hashtable]$DatByCode = $null)
     $doc = Read-Xml $ProfilePath
     if ($null -eq $doc.GameProfile) { throw 'This is not a TeknoParrot game profile.' }
-    $facts = Get-TpmGameFolderFacts -GamePath ((Get-XmlChildText $doc.GameProfile 'GamePath').Trim())
-    $gun = (Get-XmlChildText $doc.GameProfile 'GunGame').Trim() -ieq 'true'
-    $driving = ((Get-ProfileFamily $doc) -eq 'driving')
-    return [pscustomobject]@{ Year = $facts.Year; Hardware = $facts.Hardware; Developer = $facts.Developer; LightGun = $gun; Driving = $driving }
+    $code = [System.IO.Path]::GetFileNameWithoutExtension($ProfilePath)
+    $folderName = Get-TpmLaunchBoxFolderName -GamePath ((Get-XmlChildText $doc.GameProfile 'GamePath').Trim())
+    $datFacts = $null
+    $datName = ''
+    if ($null -ne $DatIndex -and $DatIndex.Count -gt 0) {
+        $entry = $null
+        if ($folderName) { $entry = Get-DatEntryForZipName -RawZipName $folderName -DatIndex $DatIndex }
+        if ($null -ne $entry -and ([string]$entry.ProfileCode).Trim() -ine $code) { $entry = $null }
+        if ($null -eq $entry -and $null -ne $DatByCode -and $DatByCode.ContainsKey($code.ToLowerInvariant()) -and $DatByCode[$code.ToLowerInvariant()].Count -eq 1) { $entry = $DatByCode[$code.ToLowerInvariant()][0] }
+        if ($null -ne $entry) { $datName = [string]$entry.OriginalName; $datFacts = Get-TpmLaunchBoxNameFacts -Name $datName }
+    }
+    return [pscustomobject]@{
+        Code = $code
+        Folder = (Get-TpmLaunchBoxNameFacts -Name $folderName)
+        Dat = $datFacts
+        DatName = $datName
+        LightGun = ((Get-XmlChildText $doc.GameProfile 'GunGame').Trim() -ieq 'true')
+        Driving = ((Get-ProfileFamily $doc) -eq 'driving')
+    }
+}
+
+# One value from the two sources. Only one says something: that value. Both agree (letter case ignored): that value.
+# They differ: Conflict is true and Value is the folder value, the DAT value, or '' (nothing) as Choice says.
+function Resolve-TpmLaunchBoxFact {
+    param([string]$FolderValue, [string]$DatValue, [ValidateSet('Folder', 'Dat', 'Skip')][string]$Choice = 'Skip')
+    $folder = ([string]$FolderValue).Trim(); $dat = ([string]$DatValue).Trim()
+    if (-not $folder -and -not $dat) { return [pscustomobject]@{ Value = ''; Conflict = $false } }
+    if (-not $dat) { return [pscustomobject]@{ Value = $folder; Conflict = $false } }
+    if (-not $folder -or $folder -ieq $dat) { return [pscustomobject]@{ Value = $dat; Conflict = $false } }
+    $value = switch ($Choice) { 'Folder' { $folder } 'Dat' { $dat } default { $dat } }
+    return [pscustomobject]@{ Value = $value; Conflict = $true }
 }
 
 # Sets a LaunchBox field only when it is empty. Returns true when it set it.
@@ -45584,12 +45663,13 @@ function Set-TpmLaunchBoxFieldIfEmpty {
 # Makes or updates one Manager playlist document. Returns Skipped (a playlist of the user's with this name), New and Changed.
 function Update-TpmLaunchBoxPlaylistDocument {
     param([System.Xml.XmlDocument]$Doc, [string]$Name, [object[]]$Games, [bool]$Exists)
+    $marker = Get-TpmLaunchBoxPlaylistMarker
     $node = $Doc.SelectSingleNode('/LaunchBox/Playlist')
     if ($Exists) {
-        if ($null -eq $node -or (Get-XmlChildText $node 'Notes') -cne $script:TpmPlaylistMarker) { return [pscustomobject]@{ Skipped = $true; New = $false; Changed = $false } }
+        if ($null -eq $node -or (Get-XmlChildText $node 'Notes') -cne $marker) { return [pscustomobject]@{ Skipped = $true; New = $false; Changed = $false } }
     } else {
         $node = $Doc.CreateElement('Playlist')
-        foreach ($field in ([ordered]@{ PlaylistId = [guid]::NewGuid().ToString(); Name = $Name; NestedName = $Name; Notes = $script:TpmPlaylistMarker }).GetEnumerator()) { Set-XmlChildText $node $field.Key $field.Value }
+        foreach ($field in ([ordered]@{ PlaylistId = [guid]::NewGuid().ToString(); Name = $Name; NestedName = $Name; Notes = $marker }).GetEnumerator()) { Set-XmlChildText $node $field.Key $field.Value }
         [void]$Doc.DocumentElement.AppendChild($node)
     }
     $have = @($node.SelectNodes('PlaylistGame') | ForEach-Object { Get-XmlChildText $_ 'GameId' } | Sort-Object)
@@ -45606,122 +45686,176 @@ function Update-TpmLaunchBoxPlaylistDocument {
     return [pscustomobject]@{ Skipped = $false; New = (-not $Exists); Changed = $true }
 }
 
-# Fills empty year and developer fields and keeps the Manager's playlists. -PlanOnly reads everything and changes nothing.
-# Returns the same kind of result as Invoke-LaunchBoxDirectWrite, plus PlainTitle and EnrichLines for the screens.
-function Invoke-LaunchBoxEnrich {
-    param([string]$userProfilesDir, [string]$tpRoot, [string]$lbRoot, [string[]]$platformNames, [string]$BackupRoot, [switch]$PlanOnly, [switch]$SkipDetails, [switch]$SkipPlaylists)
-    try {
-        $lbRoot = Resolve-TpmLaunchBoxRoot $lbRoot
-        if (-not (Test-Path -LiteralPath $lbRoot -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $lbRoot)) { throw 'Choose a safe existing LaunchBox root.' }
-        if (@($platformNames).Count -eq 0) { throw 'Choose at least one LaunchBox platform.' }
-        if (-not $PlanOnly -and -not (Wait-TpmForProcessClose -ProcessNames @('LaunchBox','BigBox') -FriendlyName 'LaunchBox or BigBox')) {
-            $stillOpen = New-TpmLaunchBoxResult NO_CHANGES 'LaunchBox or BigBox is still open and the operation was canceled. No library writes were attempted.'
-            $stillOpen.Cancelled = $true; $stillOpen.Reason = 'APPLICATION_RUNNING'
-            return $stillOpen
+# Reads the LaunchBox library and the profiles and builds the planned changes. Writes nothing.
+# ConflictChoices: "<game id>|<Year, Developer or Hardware>" -> Folder, Dat or Skip; ConflictDefault covers the rest.
+# Returns Plans (file plans for the file transaction), Changes, Conflicts and the counts.
+function New-TpmLaunchBoxEnrichPlan {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$LbRoot, [Parameter(Mandatory)][string]$EmulatorId,
+        [Parameter(Mandatory)][string[]]$PlatformNames, [hashtable]$DatIndex = $null,
+        [hashtable]$ConflictChoices = @{}, [ValidateSet('Folder', 'Dat', 'Skip')][string]$ConflictDefault = 'Skip',
+        [switch]$SkipDetails, [switch]$SkipPlaylists
+    )
+    $plans = New-Object System.Collections.Generic.List[object]
+    $changes = New-Object System.Collections.Generic.List[object]
+    $conflicts = New-Object System.Collections.Generic.List[object]
+    $groups = [ordered]@{}
+    $factCache = @{}
+    $datByCode = Get-TpmLaunchBoxDatByCode -DatIndex $DatIndex
+    $filledGames = 0
+    foreach ($name in $PlatformNames) {
+        $safe = Get-SafeLaunchBoxPlatformFileName $name
+        if ($safe -cne $name -or $name -in @('.', '..')) { throw 'Platform name must be a safe, unambiguous filename.' }
+        $rel = "Data\Platforms\$safe.xml"
+        $path = Get-TpmLaunchBoxPath $LbRoot $rel
+        $state = Get-TpmLaunchBoxFileState $path
+        if (-not $state.Exists) { continue }
+        $doc = Read-TpmLaunchBoxXml $path
+        Assert-TpmLaunchBoxState $path $state
+        $filePlan = [pscustomobject]@{ RelativePath = $rel; Before = $state; Document = $doc; OriginalXml = $doc.OuterXml; BaseChildCount = $doc.DocumentElement.ChildNodes.Count; Source = $null; SourceHash = $null; Changed = $false; Delete = $false; AfterHash = $null; FullRewrite = $true }
+        foreach ($game in @($doc.SelectNodes('/LaunchBox/Game'))) {
+            if ((Get-XmlChildText $game 'Emulator') -ne $EmulatorId) { continue }
+            $profilePath = Join-Path $UserProfilesDir ([System.IO.Path]::GetFileName((Get-XmlChildText $game 'ApplicationPath')))
+            if (-not $factCache.ContainsKey($profilePath)) {
+                $factCache[$profilePath] = $null
+                try { if (Test-Path -LiteralPath $profilePath -PathType Leaf) { $factCache[$profilePath] = Get-TpmLaunchBoxGameFacts -ProfilePath $profilePath -DatIndex $DatIndex -DatByCode $datByCode } }
+                catch { Write-Log ('LaunchBox details: could not read the profile {0}: {1}' -f $profilePath, $_.Exception.Message) }
+            }
+            $facts = $factCache[$profilePath]
+            if ($null -eq $facts) { continue }
+            $gameId = Get-XmlChildText $game 'ID'
+            $title = Get-XmlChildText $game 'Title'
+            $resolved = @{}
+            foreach ($fact in @('Year', 'Developer', 'Hardware')) {
+                $datValue = if ($null -ne $facts.Dat) { [string]$facts.Dat.$fact } else { '' }
+                $key = '{0}|{1}' -f $gameId, $fact
+                $choice = if ($ConflictChoices.ContainsKey($key)) { [string]$ConflictChoices[$key] } else { $ConflictDefault }
+                $one = Resolve-TpmLaunchBoxFact -FolderValue ([string]$facts.Folder.$fact) -DatValue $datValue -Choice $choice
+                $resolved[$fact] = $one.Value
+                if ($one.Conflict) { [void]$conflicts.Add([pscustomobject]@{ Key = $key; GameId = $gameId; Title = $title; Field = $fact; Folder = [string]$facts.Folder.$fact; Dat = $datValue; Applied = $one.Value }) }
+            }
+            if (-not $SkipDetails) {
+                $set = New-Object System.Collections.Generic.List[object]
+                if (Set-TpmLaunchBoxFieldIfEmpty -Node $game -Field 'ReleaseYear' -Value $resolved['Year']) { [void]$set.Add([pscustomobject]@{ Field = 'ReleaseYear'; Value = $resolved['Year'] }) }
+                if (Set-TpmLaunchBoxFieldIfEmpty -Node $game -Field 'Developer' -Value $resolved['Developer']) { [void]$set.Add([pscustomobject]@{ Field = 'Developer'; Value = $resolved['Developer'] }) }
+                if ($set.Count -gt 0) { $filledGames++; [void]$changes.Add([pscustomobject]@{ Kind = 'Fields'; Title = $title; Name = ''; Count = 0; Fields = $set.ToArray() }) }
+            }
+            $entry = [pscustomobject]@{ Id = $gameId; Title = $title; Platform = (Get-XmlChildText $game 'Platform') }
+            $listNames = @()
+            if ($resolved['Hardware']) { $listNames += $resolved['Hardware'] }
+            if ($facts.LightGun) { $listNames += 'Light gun games' }
+            if ($facts.Driving) { $listNames += 'Driving games' }
+            foreach ($listName in $listNames) {
+                if (-not $groups.Contains($listName)) { $groups[$listName] = New-Object System.Collections.Generic.List[object] }
+                [void]$groups[$listName].Add($entry)
+            }
         }
-        $emulatorsPath = Get-TpmLaunchBoxPath $lbRoot 'Data\Emulators.xml'
+        $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
+        [void]$plans.Add($filePlan)
+    }
+    $playlistsNew = 0; $playlistsUpdated = 0
+    if (-not $SkipPlaylists) {
+        foreach ($listName in @($groups.Keys)) {
+            $safe = (Get-SafeLaunchBoxPlatformFileName $listName).TrimEnd('.', ' ')
+            $rel = "Data\Playlists\$safe.xml"
+            $path = Get-TpmLaunchBoxPath $LbRoot $rel
+            $state = Get-TpmLaunchBoxFileState $path
+            # Plain assignments: an if-expression would unroll the XML document into its child nodes.
+            if ($state.Exists) { $doc = Read-TpmLaunchBoxXml $path; Assert-TpmLaunchBoxState $path $state } else { $doc = New-Object System.Xml.XmlDocument; $doc.LoadXml('<LaunchBox />') }
+            $filePlan = [pscustomobject]@{ RelativePath = $rel; Before = $state; Document = $doc; OriginalXml = $doc.OuterXml; BaseChildCount = $doc.DocumentElement.ChildNodes.Count; Source = $null; SourceHash = $null; Changed = $false; Delete = $false; AfterHash = $null; FullRewrite = $true }
+            $outcome = Update-TpmLaunchBoxPlaylistDocument -Doc $doc -Name $listName -Games $groups[$listName].ToArray() -Exists $state.Exists
+            if ($outcome.Skipped) { [void]$changes.Add([pscustomobject]@{ Kind = 'PlaylistSkipped'; Title = ''; Name = $listName; Count = $groups[$listName].Count; Fields = @() }); continue }
+            $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
+            if ($filePlan.Changed) {
+                if ($outcome.New) { $playlistsNew++ } else { $playlistsUpdated++ }
+                [void]$changes.Add([pscustomobject]@{ Kind = $(if ($outcome.New) { 'PlaylistNew' } else { 'PlaylistUpdated' }); Title = ''; Name = $listName; Count = $groups[$listName].Count; Fields = @() })
+            }
+            [void]$plans.Add($filePlan)
+        }
+    }
+    return [pscustomobject]@{
+        Plans = $plans.ToArray(); Changes = $changes.ToArray(); Conflicts = $conflicts.ToArray()
+        FilledGames = $filledGames; PlaylistsNew = $playlistsNew; PlaylistsUpdated = $playlistsUpdated
+    }
+}
+
+# The preview lines for the Details view and the log. Pure: plan in, strings out.
+function Format-TpmLaunchBoxEnrichLine {
+    param([Parameter(Mandatory)]$Plan)
+    $words = @{ ReleaseYear = 'year'; Developer = 'developer'; Year = 'year'; Hardware = 'hardware name' }
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($change in @($Plan.Changes)) {
+        switch ($change.Kind) {
+            'Fields' { [void]$lines.Add(('{0}: will fill in {1}' -f $change.Title, ((@($change.Fields) | ForEach-Object { '{0} {1}' -f $words[$_.Field], $_.Value }) -join ', '))) }
+            'PlaylistNew' { [void]$lines.Add(('Playlist {0}: will be made with {1}' -f $change.Name, (Format-TpmGameCount -Count ([int]$change.Count)))) }
+            'PlaylistUpdated' { [void]$lines.Add(('Playlist {0}: will be updated to {1}' -f $change.Name, (Format-TpmGameCount -Count ([int]$change.Count)))) }
+            'PlaylistSkipped' { [void]$lines.Add(('Playlist {0}: left alone, because it is not one TeknoParrot Manager made' -f $change.Name)) }
+        }
+    }
+    foreach ($conflict in @($Plan.Conflicts)) {
+        $outcome = if ($conflict.Applied) { 'Will use ' + $conflict.Applied + '.' } else { 'Not filled in unless you choose.' }
+        [void]$lines.Add(('{0}: the {1} differs. Folder name says {2}. Eggman list says {3}. {4}' -f $conflict.Title, $words[$conflict.Field], $conflict.Folder, $conflict.Dat, $outcome))
+    }
+    return $lines.ToArray()
+}
+
+# The one plain title line. -Preview words it as a preview; otherwise it says what was filled in.
+function Format-TpmLaunchBoxEnrichTitle {
+    param([Parameter(Mandatory)]$Plan, [switch]$Preview)
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($Plan.FilledGames -gt 0) { [void]$parts.Add(('details for {0}' -f (Format-TpmGameCount -Count ([int]$Plan.FilledGames)))) }
+    $playlistTotal = [int]$Plan.PlaylistsNew + [int]$Plan.PlaylistsUpdated
+    if ($playlistTotal -gt 0) { [void]$parts.Add(('{0} {1}' -f $playlistTotal, $(if ($playlistTotal -eq 1) { 'playlist' } else { 'playlists' }))) }
+    $differ = @($Plan.Conflicts).Count
+    $note = if ($differ -gt 0) { ' {0} {1} differ between the folder name and the Eggman list.' -f $differ, $(if ($differ -eq 1) { 'detail' } else { 'details' }) } else { '' }
+    if ($Preview) {
+        if ($parts.Count -eq 0) { return ('Preview: nothing to fill in or update. Nothing would change.' + $note) }
+        return ('Preview: LaunchBox would get {0}. Nothing was changed.{1}' -f ($parts -join ' and '), $note)
+    }
+    if ($parts.Count -eq 0) { return ('Nothing to fill in or update.' + $note) }
+    return ('Filled in {0}.{1}' -f ($parts -join ' and '), $note)
+}
+
+# Fills empty year and developer fields and keeps the Manager's playlists. -PlanOnly reads everything and changes nothing.
+# Returns the same kind of result as Invoke-LaunchBoxDirectWrite plus EnrichPlan (the plan this run used).
+# The caller makes sure LaunchBox and BigBox are closed before a write; the transaction also checks and refuses while they run.
+function Invoke-TpmLaunchBoxEnrich {
+    param(
+        [string]$UserProfilesDir, [string]$LbRoot, [string[]]$PlatformNames, [string]$BackupRoot, [hashtable]$DatIndex = $null,
+        [hashtable]$ConflictChoices = @{}, [ValidateSet('Folder', 'Dat', 'Skip')][string]$ConflictDefault = 'Skip',
+        [switch]$PlanOnly, [switch]$SkipDetails, [switch]$SkipPlaylists
+    )
+    try {
+        $root = Resolve-TpmLaunchBoxRoot $LbRoot
+        if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $root)) { throw 'Choose a safe existing LaunchBox root.' }
+        if (@($PlatformNames).Count -eq 0) { throw 'Choose at least one LaunchBox platform.' }
+        $emulatorsPath = Get-TpmLaunchBoxPath $root 'Data\Emulators.xml'
         $emulatorsState = Get-TpmLaunchBoxFileState $emulatorsPath
         if (-not $emulatorsState.Exists) { throw 'LaunchBox has not made Data\Emulators.xml yet. Open LaunchBox once, close it, then try again. Nothing was changed.' }
         $emulatorsDoc = Read-TpmLaunchBoxXml $emulatorsPath
         $emulatorNode = @($emulatorsDoc.SelectNodes('/LaunchBox/Emulator') | Where-Object { (Get-XmlChildText $_ 'Title') -eq 'TeknoParrot' } | Select-Object -First 1)
         if ($emulatorNode.Count -eq 0) {
             $none = New-TpmLaunchBoxResult NO_CHANGES 'No TeknoParrot games are in LaunchBox yet. Add them first.'
-            $none.Reason = if ($PlanOnly) { 'PREVIEW' } else { '' }
-            $none | Add-Member -NotePropertyName PlainTitle -NotePropertyValue 'No TeknoParrot games are in LaunchBox yet. Add them first, then try again.' -Force
-            $none | Add-Member -NotePropertyName EnrichLines -NotePropertyValue @() -Force
+            if ($PlanOnly) { $none.Reason = 'PREVIEW' }
             return $none
         }
-        $emulatorId = Get-XmlChildText $emulatorNode[0] 'ID'
-
-        $plans = New-Object System.Collections.Generic.List[object]
-        $lines = New-Object System.Collections.Generic.List[string]
-        $groups = [ordered]@{}
-        $factCache = @{}
-        $filledGames = 0
-        foreach ($name in $platformNames) {
-            $safe = Get-SafeLaunchBoxPlatformFileName $name
-            if ($safe -cne $name -or $name -in @('.','..')) { throw 'Platform name must be a safe, unambiguous filename.' }
-            $rel = "Data\Platforms\$safe.xml"
-            $path = Get-TpmLaunchBoxPath $lbRoot $rel
-            $state = Get-TpmLaunchBoxFileState $path
-            if (-not $state.Exists) { continue }
-            $doc = Read-TpmLaunchBoxXml $path
-            Assert-TpmLaunchBoxState $path $state
-            $plan = [pscustomobject]@{ RelativePath=$rel; Before=$state; Document=$doc; OriginalXml=$doc.OuterXml; BaseChildCount=$doc.DocumentElement.ChildNodes.Count; Source=$null; SourceHash=$null; Changed=$false; Delete=$false; AfterHash=$null; FullRewrite=$true }
-            foreach ($game in @($doc.SelectNodes('/LaunchBox/Game'))) {
-                if ((Get-XmlChildText $game 'Emulator') -ne $emulatorId) { continue }
-                $profilePath = Join-Path $userProfilesDir ([System.IO.Path]::GetFileName((Get-XmlChildText $game 'ApplicationPath')))
-                if (-not $factCache.ContainsKey($profilePath)) {
-                    $factCache[$profilePath] = $null
-                    try { if (Test-Path -LiteralPath $profilePath -PathType Leaf) { $factCache[$profilePath] = Get-TpmLaunchBoxProfileFacts -ProfilePath $profilePath } }
-                    catch { Write-Log ('LaunchBox details: could not read the profile {0}: {1}' -f $profilePath, $_.Exception.Message) }
-                }
-                $facts = $factCache[$profilePath]
-                if ($null -eq $facts) { continue }
-                $title = Get-XmlChildText $game 'Title'
-                if (-not $SkipDetails) {
-                    $set = New-Object System.Collections.Generic.List[string]
-                    if (Set-TpmLaunchBoxFieldIfEmpty -Node $game -Field 'ReleaseYear' -Value $facts.Year) { [void]$set.Add('year ' + $facts.Year) }
-                    if (Set-TpmLaunchBoxFieldIfEmpty -Node $game -Field 'Developer' -Value $facts.Developer) { [void]$set.Add('developer ' + $facts.Developer) }
-                    if ($set.Count -gt 0) { $filledGames++; [void]$lines.Add(('{0}: will fill in {1}' -f $title, ($set -join ', '))) }
-                }
-                $entry = [pscustomobject]@{ Id = (Get-XmlChildText $game 'ID'); Title = $title; Platform = (Get-XmlChildText $game 'Platform') }
-                $listNames = @()
-                if ($facts.Hardware) { $listNames += $facts.Hardware }
-                if ($facts.LightGun) { $listNames += 'Light gun games' }
-                if ($facts.Driving) { $listNames += 'Driving games' }
-                foreach ($listName in $listNames) {
-                    if (-not $groups.Contains($listName)) { $groups[$listName] = New-Object System.Collections.Generic.List[object] }
-                    [void]$groups[$listName].Add($entry)
-                }
-            }
-            $plan.Changed = $plan.OriginalXml -cne $plan.Document.OuterXml
-            [void]$plans.Add($plan)
-        }
-        $playlistsNew = 0; $playlistsUpdated = 0
-        if (-not $SkipPlaylists) {
-            foreach ($listName in @($groups.Keys)) {
-                $safe = (Get-SafeLaunchBoxPlatformFileName $listName).TrimEnd('.', ' ')
-                $rel = "Data\Playlists\$safe.xml"
-                $path = Get-TpmLaunchBoxPath $lbRoot $rel
-                $state = Get-TpmLaunchBoxFileState $path
-                # Plain assignments: an if-expression would unroll the XML document into its child nodes.
-                if ($state.Exists) { $doc = Read-TpmLaunchBoxXml $path; Assert-TpmLaunchBoxState $path $state } else { $doc = New-Object System.Xml.XmlDocument; $doc.LoadXml('<LaunchBox />') }
-                $plan = [pscustomobject]@{ RelativePath=$rel; Before=$state; Document=$doc; OriginalXml=$doc.OuterXml; BaseChildCount=$doc.DocumentElement.ChildNodes.Count; Source=$null; SourceHash=$null; Changed=$false; Delete=$false; AfterHash=$null; FullRewrite=$true }
-                $outcome = Update-TpmLaunchBoxPlaylistDocument -Doc $doc -Name $listName -Games $groups[$listName].ToArray() -Exists $state.Exists
-                if ($outcome.Skipped) { [void]$lines.Add(('Playlist {0}: left alone, because it is not one TeknoParrot Manager made' -f $listName)); continue }
-                $plan.Changed = $plan.OriginalXml -cne $plan.Document.OuterXml
-                if ($plan.Changed) {
-                    if ($outcome.New) { $playlistsNew++; [void]$lines.Add(('Playlist {0}: will be made with {1}' -f $listName, (Format-TpmGameCount -Count $groups[$listName].Count))) }
-                    else { $playlistsUpdated++; [void]$lines.Add(('Playlist {0}: will be updated to {1}' -f $listName, (Format-TpmGameCount -Count $groups[$listName].Count))) }
-                }
-                [void]$plans.Add($plan)
-            }
-        }
-        $changedPlans = @($plans | Where-Object { $_.Changed })
-        $parts = New-Object System.Collections.Generic.List[string]
-        if ($filledGames -gt 0) { [void]$parts.Add(('details for {0}' -f (Format-TpmGameCount -Count $filledGames))) }
-        $playlistTotal = $playlistsNew + $playlistsUpdated
-        if ($playlistTotal -gt 0) { [void]$parts.Add(('{0} {1}' -f $playlistTotal, $(if ($playlistTotal -eq 1) { 'playlist' } else { 'playlists' }))) }
-        foreach ($line in $lines) { Write-Log ('LaunchBox details and playlists: ' + $line) }
+        $plan = New-TpmLaunchBoxEnrichPlan -UserProfilesDir $UserProfilesDir -LbRoot $root -EmulatorId (Get-XmlChildText $emulatorNode[0] 'ID') -PlatformNames $PlatformNames -DatIndex $DatIndex -ConflictChoices $ConflictChoices -ConflictDefault $ConflictDefault -SkipDetails:$SkipDetails -SkipPlaylists:$SkipPlaylists
+        foreach ($line in (Format-TpmLaunchBoxEnrichLine -Plan $plan)) { Write-Log ('LaunchBox details and playlists: ' + $line) }
+        $changedPlans = @($plan.Plans | Where-Object { $_.Changed })
         if ($PlanOnly) {
-            $title = if ($parts.Count -eq 0) { 'Preview: nothing to fill in or update. Nothing would change.' } else { 'Preview: LaunchBox would get {0}. Nothing was changed.' -f ($parts -join ' and ') }
-            $preview = New-TpmLaunchBoxResult NO_CHANGES ('Preview only, nothing was written. ' + $(if ($parts.Count -eq 0) { 'Nothing to fill in or update.' } else { 'A write would add ' + ($parts -join ' and ') + ' and change ' + $changedPlans.Count + ' file(s).' }))
+            $preview = New-TpmLaunchBoxResult NO_CHANGES ('Preview only, nothing was written. A write would change {0} file(s).' -f $changedPlans.Count)
             $preview.Reason = 'PREVIEW'
             $preview | Add-Member -NotePropertyName WouldChangeFiles -NotePropertyValue $changedPlans.Count -Force
-            $preview | Add-Member -NotePropertyName PlainTitle -NotePropertyValue $title -Force
-            $preview | Add-Member -NotePropertyName EnrichLines -NotePropertyValue @($lines.ToArray()) -Force
+            $preview | Add-Member -NotePropertyName EnrichPlan -NotePropertyValue $plan -Force
             return $preview
         }
-        if ($changedPlans.Count -gt 0 -and @($changedPlans | Where-Object { $_.RelativePath -like 'Data\Playlists\*' }).Count -gt 0) {
-            $playlistFolder = Join-Path $lbRoot 'Data\Playlists'
+        if (@($changedPlans | Where-Object { $_.RelativePath -like 'Data\Playlists\*' }).Count -gt 0) {
+            $playlistFolder = Join-Path $root 'Data\Playlists'
             if (-not (Test-TpmNoReparsePath $playlistFolder)) { throw 'The LaunchBox Playlists folder is not a normal folder.' }
             [void][System.IO.Directory]::CreateDirectory($playlistFolder)
         }
-        $result = Invoke-TpmLaunchBoxFileTransaction -lbRoot $lbRoot -Plans @($plans.ToArray()) -BackupRoot $BackupRoot
-        $title = if ($result.Outcome -eq 'SAVED') { 'Filled in {0}.' -f ($parts -join ' and ') } elseif ($result.Outcome -eq 'NO_CHANGES') { 'Nothing to fill in or update.' } else { [string]$result.Summary }
-        $result | Add-Member -NotePropertyName PlainTitle -NotePropertyValue $title -Force
-        $result | Add-Member -NotePropertyName EnrichLines -NotePropertyValue @($lines.ToArray()) -Force
+        $result = Invoke-TpmLaunchBoxFileTransaction -lbRoot $root -Plans $plan.Plans -BackupRoot $BackupRoot
+        $result | Add-Member -NotePropertyName EnrichPlan -NotePropertyValue $plan -Force
         return $result
     } catch {
         $result = New-TpmLaunchBoxResult FAILED 'LaunchBox details and playlists were refused before library writes.'
@@ -45729,19 +45863,56 @@ function Invoke-LaunchBoxEnrich {
         return $result
     }
 }
+# END MODULE-READY SECTION: LaunchBox game details and playlists
 
-# The menu step: preview, ask, then write. Returns nothing; every screen is printed here.
+# Screen layer for the section above (not part of the module): asks, shows, calls the functions above.
+# The screens print the text the Format functions return and hand every decision to the data layer through parameters.
+function Write-TpmLaunchBoxEnrichResult {
+    param([Parameter(Mandatory)]$Result, [switch]$Preview)
+    if ($Result.PSObject.Properties['EnrichPlan']) {
+        $Result | Add-Member -NotePropertyName PlainTitle -NotePropertyValue (Format-TpmLaunchBoxEnrichTitle -Plan $Result.EnrichPlan -Preview:$Preview) -Force
+        $Result | Add-Member -NotePropertyName EnrichLines -NotePropertyValue @(Format-TpmLaunchBoxEnrichLine -Plan $Result.EnrichPlan) -Force
+    }
+    Write-TpmLaunchBoxResult -Result $Result
+}
+
+# Asks what to do about details the folder name and the Eggman list disagree on. Returns the choices hashtable and the default.
+function Read-TpmLaunchBoxEnrichConflictChoice {
+    param([Parameter(Mandatory)][object[]]$Conflicts)
+    $words = @{ Year = 'year'; Developer = 'developer'; Hardware = 'hardware name' }
+    Write-TpmText -Text ('{0} {1} differ between the game folder name and the Eggman list.' -f $Conflicts.Count, $(if ($Conflicts.Count -eq 1) { 'detail' } else { 'details' })) -Color Yellow -BlankBefore
+    Write-TpmText -Text '[F] Use the folder names.   [D] Use the Eggman list.   [O] Choose one by one.   [S] Skip these.' -Color White
+    $answer = Read-TpmChoice -Prompt '  Choice, default S' -Choices @('F', 'D', 'O', 'S') -Default 'S'
+    $choices = @{}
+    $default = switch ($answer) { 'F' { 'Folder' } 'D' { 'Dat' } default { 'Skip' } }
+    if ($answer -eq 'O') {
+        foreach ($conflict in $Conflicts) {
+            Write-TpmText -Text ('{0}: {1}. Folder name says {2}. Eggman list says {3}.' -f $conflict.Title, $words[$conflict.Field], $conflict.Folder, $conflict.Dat) -Color White
+            $one = Read-TpmChoice -Prompt '  [F] folder name, [D] Eggman list, [S] skip, default S' -Choices @('F', 'D', 'S') -Default 'S'
+            $choices[$conflict.Key] = switch ($one) { 'F' { 'Folder' } 'D' { 'Dat' } default { 'Skip' } }
+        }
+    }
+    return [pscustomobject]@{ Choices = $choices; Default = $default }
+}
+
+# The menu step: preview, ask about differences, ask, then write.
 function Invoke-TpmLaunchBoxEnrichStep {
-    param([string]$UserProfilesDir, [string]$TpRoot, [string]$LbRoot)
+    param([string]$UserProfilesDir, [string]$LbRoot, [hashtable]$DatIndex = $null)
     $root = $LbRoot
     if (-not $root) { $root = Read-HostSafe '  LaunchBox install folder (Enter to go back)' }
     if (-not $root) { return }
-    $platformChoice = Read-TpmChoice -Prompt '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, B back' -Choices @('1','2','3','B') -Default '2'
+    $platformChoice = Read-TpmChoice -Prompt '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, B back' -Choices @('1', '2', '3', 'B') -Default '2'
     if ($platformChoice -eq 'B') { return }
-    $platforms = switch ($platformChoice) { '1' { @('Arcade') } '2' { @('TeknoParrot') } '3' { @('Arcade','TeknoParrot') } }
-    Write-TpmText -Text 'First TeknoParrot Manager only reads your LaunchBox files. Empty year and developer boxes get filled in. Boxes you filled in are never changed. It also keeps playlists by hardware, light gun and driving games.' -Color DarkCyan
-    $plan = Invoke-LaunchBoxEnrich -userProfilesDir $UserProfilesDir -tpRoot $TpRoot -lbRoot $root -platformNames $platforms -PlanOnly
-    Write-TpmLaunchBoxResult -Result $plan
+    $platforms = switch ($platformChoice) { '1' { @('Arcade') } '2' { @('TeknoParrot') } '3' { @('Arcade', 'TeknoParrot') } }
+    Write-TpmText -Text 'First TeknoParrot Manager only reads your LaunchBox files. Empty year and developer boxes get filled in from the game folder names and the Eggman list. Boxes you filled in are never changed. It also keeps playlists by hardware, light gun and driving games.' -Color DarkCyan
+    $choices = @{}; $default = 'Skip'
+    $plan = Invoke-TpmLaunchBoxEnrich -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -DatIndex $DatIndex -PlanOnly
+    if ($plan.PSObject.Properties['EnrichPlan'] -and @($plan.EnrichPlan.Conflicts).Count -gt 0) {
+        $asked = Read-TpmLaunchBoxEnrichConflictChoice -Conflicts @($plan.EnrichPlan.Conflicts)
+        $choices = $asked.Choices; $default = $asked.Default
+        $plan = Invoke-TpmLaunchBoxEnrich -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -DatIndex $DatIndex -ConflictChoices $choices -ConflictDefault $default -PlanOnly
+    }
+    Write-TpmLaunchBoxEnrichResult -Result $plan -Preview
     if ($plan.Reason -ne 'PREVIEW' -or [int]$plan.WouldChangeFiles -eq 0) { return }
     Write-TpmLaunchBoxWriteNotice
     $notice = Get-TpmLaunchBoxWriteNoticeBlocks
@@ -45749,8 +45920,12 @@ function Invoke-TpmLaunchBoxEnrichStep {
         Write-Host '  LaunchBox write canceled; nothing was changed.' -ForegroundColor DarkGray
         return
     }
-    $written = Invoke-LaunchBoxEnrich -userProfilesDir $UserProfilesDir -tpRoot $TpRoot -lbRoot $root -platformNames $platforms
-    Write-TpmLaunchBoxResult -Result $written
+    if (-not (Wait-TpmForProcessClose -ProcessNames @('LaunchBox', 'BigBox') -FriendlyName 'LaunchBox or BigBox')) {
+        Write-Host '  LaunchBox or BigBox is still open, so nothing was changed.' -ForegroundColor DarkGray
+        return
+    }
+    $written = Invoke-TpmLaunchBoxEnrich -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -DatIndex $DatIndex -ConflictChoices $choices -ConflictDefault $default
+    Write-TpmLaunchBoxEnrichResult -Result $written
     if ($written.BackupPath) { Write-TpmText -Text 'To undo, open Restore in the main menu and choose the LaunchBox backup.' -Color DarkCyan }
 }
 
@@ -54265,7 +54440,7 @@ if ($dryRunActive) {
             }
         }
     } elseif ($lbChoice -eq 'G') {
-        Invoke-TpmLaunchBoxEnrichStep -UserProfilesDir $userProfilesDir -TpRoot $tpRoot -LbRoot $lbRoot
+        Invoke-TpmLaunchBoxEnrichStep -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -DatIndex $datIndex
     } elseif ($lbChoice -eq 'F') {
         $doLB = "Y"
     }
