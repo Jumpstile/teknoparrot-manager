@@ -187,6 +187,9 @@ INSERT INTO Games VALUES (51, 'Initial D Arcade Stage Ver. 2', 'Arcade', 2003, '
 INSERT INTO Games VALUES (52, 'Nitroplus Blasterz: Heroines Infinite Duel', 'Arcade', 2015, 'Examu', 'Examu');
 INSERT INTO Games VALUES (53, 'Marvel Vs Capcom 2', 'Arcade', 2000, 'Capcom', 'Capcom');
 INSERT INTO Games VALUES (54, 'GP World', 'Arcade', 1984, 'Sega', 'Sega');
+INSERT INTO Games VALUES (55, 'Virtua Fighter 5', 'Arcade', 2006, 'Sega', 'Sega');
+INSERT INTO Games VALUES (56, 'Golden Tee 2020', 'Arcade', 2019, 'Incredible Technologies', 'Incredible Technologies');
+
 "@)
         $script:WideIndex = Get-TpmGamesDbIndex -DbPath $wideDb
         $script:WideTp = Join-Path $TestDrive 'TeknoParrotWide'
@@ -211,6 +214,25 @@ INSERT INTO Games VALUES (54, 'GP World', 'Arcade', 1984, 'Sega', 'Sega');
         Get-TpmMatchCleanTitle 'Homura for NESiCAxLive' | Should -Be 'Homura'
         Get-TpmMatchCleanTitle 'Beastorizer (USA, Sep 22 1997)' | Should -Be 'Beastorizer'
         Get-TpmMatchCleanTitle 'Some Game v1.2.3' | Should -Be 'Some Game'
+    }
+
+    It 'tells Golden Tee Live 2020 from 2022 by the whole name, and ignores the word Live only when the year matches' {
+        $r20 = Resolve-TpmGamesDbMatch -Index $script:WideIndex -Names @([pscustomobject]@{ Source = 'TeknoParrot'; Name = 'Golden Tee Live 2020' }) -Year 2020
+        $r20.Status | Should -Be 'Sure'
+        $r20.Match.Id | Should -Be '56'
+        $r22 = Resolve-TpmGamesDbMatch -Index $script:WideIndex -Names @([pscustomobject]@{ Source = 'TeknoParrot'; Name = 'Golden Tee Live 2022' }) -Year 2022
+        $r22.Status | Should -Be 'Sure'
+        $r22.Match.Id | Should -Be '37'
+        (Resolve-TpmGamesDbMatch -Index $script:WideIndex -Names @([pscustomobject]@{ Source = 'TeknoParrot'; Name = 'Golden Tee Live 2021' }) -Year 2021).Status | Should -Not -Be 'Sure'
+    }
+
+    It 'ignores the emulator name in a title, with or without brackets' {
+        Get-TpmMatchCleanTitle 'Virtua Fighter 5 (Version C) ElfLoader 2' | Should -Be 'Virtua Fighter 5'
+        Get-TpmMatchCleanTitle 'Too Spicy (ElfLoader 2)' | Should -Be 'Too Spicy'
+        Get-TpmMatchCleanTitle 'Initial D: Arcade Stage 4 (Export) (ElfLoader 2)' | Should -Be 'Initial D: Arcade Stage 4'
+        $result = Resolve-TpmGamesDbMatch -Index $script:WideIndex -Names @([pscustomobject]@{ Source = 'TeknoParrot'; Name = 'Virtua Fighter 5 (Version C) ElfLoader 2' }) -Year 2006
+        $result.Status | Should -Be 'Sure'
+        $result.Match.Id | Should -Be '55'
     }
 
     It 'tells Big Buck Hunter from Big Buck World: one close name is still counted as a close match, not dropped' {
@@ -334,8 +356,8 @@ INSERT INTO Games VALUES (54, 'GP World', 'Arcade', 1984, 'Sega', 'Sega');
         $hint.Match.Id | Should -Be '35'
     }
 
-    It 'never offers a game with a different number or year: Golden Tee Live 2020 is not 2022, but 2022 is 2022' {
-        $missing = Resolve-TpmGamesDbMatch -Index $script:WideIndex -Names @([pscustomobject]@{ Source = 'TeknoParrot'; Name = 'Golden Tee Live 2020' }, [pscustomobject]@{ Source = 'Eggman list'; Name = 'Golden Tee Live 2020' }) -Year 2020
+    It 'never offers a game with a different number or year: Golden Tee Live 2021 is not 2022, but 2022 is 2022' {
+        $missing = Resolve-TpmGamesDbMatch -Index $script:WideIndex -Names @([pscustomobject]@{ Source = 'TeknoParrot'; Name = 'Golden Tee Live 2021' }, [pscustomobject]@{ Source = 'Eggman list'; Name = 'Golden Tee Live 2021' }) -Year 2021
         $missing.Status | Should -Be 'None'
         $found = Resolve-TpmGamesDbMatch -Index $script:WideIndex -Names @([pscustomobject]@{ Source = 'TeknoParrot'; Name = 'Golden Tee Live 2022' }) -Year 2022
         $found.Status | Should -Be 'Sure'

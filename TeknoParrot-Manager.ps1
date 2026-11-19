@@ -46345,7 +46345,10 @@ function Find-TpmLaunchBoxIdLinkPrefixCandidate {
 function Get-TpmMatchCleanTitle {
     [CmdletBinding()] [OutputType([string])] param([string]$Title)
     if ([string]::IsNullOrWhiteSpace($Title)) { return '' }
-    $clean = [regex]::Replace($Title, '(\s*\([^()]*\))+\s*$', '')
+    # The emulator that runs the game is not part of the game: "ElfLoader 2", "Elfloader2", "(ElfLdr2)", with or without brackets.
+    $named = [regex]::Replace($Title, '\s*\(?\s*elf\s*(loader|ldr)\s*\d*\s*\)?', ' ', 'IgnoreCase')
+    $named = [regex]::Replace($named, '\s+', ' ').Trim()
+    $clean = [regex]::Replace($named, '(\s*\([^()]*\))+\s*$', '')
     $clean = [regex]::Replace($clean, '\s+(v|ver\.?|version)\s*\d[\d\.]*(\s*/\s*\d[\d\.]*)*\s*$', '', 'IgnoreCase')
     $clean = [regex]::Replace($clean, '\s+for\s+NESiCAxLive\s*$', '', 'IgnoreCase')
     # A version is not part of the game, anywhere in the name: "Ver. 2", "Version 3".
@@ -46587,12 +46590,35 @@ function Find-TpmGamesDbContained {
     return $null
 }
 
+# True when two titles are the same except for one brand word in the middle ("Golden Tee Live 2020" and "Golden Tee 2020").
+# Only the word "Live" counts, only in the middle, and only when the title has a number (a year or an edition) that matches.
+function Test-TpmMatchOnlyFillerDiffers {
+    [CmdletBinding()] [OutputType([bool])] param([string]$Title, [string]$Other)
+    $a = @(Get-TpmMatchWords (Get-TpmMatchCleanTitle $Title))
+    $b = @(Get-TpmMatchWords (Get-TpmMatchCleanTitle $Other))
+    if ($a.Count -eq $b.Count) { return $false }
+    if ($a.Count -gt $b.Count) { $long = $a; $short = $b } else { $long = $b; $short = $a }
+    if (($long.Count - $short.Count) -ne 1 -or $short.Count -lt 3) { return $false }
+    if (@($short | Where-Object { $_ -match '^\d+$' }).Count -eq 0) { return $false }
+    for ($i = 1; $i -lt ($long.Count - 1); $i++) {
+        if ($long[$i] -ne 'live') { continue }
+        $rest = @($long[0..($i - 1)]) + @($long[($i + 1)..($long.Count - 1)])
+        if (($rest -join ' ') -eq ($short -join ' ')) { return $true }
+    }
+    return $false
+}
+
 # One name against the game list, by exact name, close name, or one name containing the other (a question for the user).
 function Get-TpmGamesDbPick {
     [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title, [int]$Year = 0, [string]$Maker = '')
     $pick = Get-TpmGamesDbPickByScore -Index $Index -Title $Title -Year $Year -Maker $Maker
-    if ($pick.Kind -eq 'Exact' -or $pick.Kind -eq 'NearSure') { return $pick }
+    if ($pick.Kind -eq 'Exact') { return $pick }
     $contained = Find-TpmGamesDbContained -Index $Index -Title $Title
+    # The same name except for one brand word ("Golden Tee Live 2020" and "Golden Tee 2020") is the same game.
+    if ($contained -and (Test-TpmMatchOnlyFillerDiffers -Title $Title -Other ([string]$contained.Name))) {
+        return [pscustomobject]@{ Kind = 'Exact'; Id = [string]$contained.Id; Name = [string]$contained.Name; Platform = [string]$contained.Platform; Score = 1.0; Gap = 0.0; QueryName = $Title }
+    }
+    if ($pick.Kind -eq 'NearSure') { return $pick }
     if ($contained -and [string]$contained.Id -ne [string]$pick.Id) {
         return [pscustomobject]@{ Kind = 'NearAsk'; Id = [string]$contained.Id; Name = [string]$contained.Name; Platform = [string]$contained.Platform; Score = 0.85; Gap = 0.0; QueryName = $Title }
     }
