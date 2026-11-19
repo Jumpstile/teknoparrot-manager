@@ -26,6 +26,14 @@
     TeknoParrot, the message now says so. The "unpacked only" warning
     shows only when a game still needs your attention.
 
+  LaunchBox
+  - New choice [L] in the LaunchBox step: games that have no Games
+    Database ID are matched to LaunchBox's own game list, so LaunchBox
+    finds the right art and details. You see a preview first, and a
+    backup is made before anything is saved. Exact name matches are used
+    right away. Close matches are shown and used only if you approve each
+    one. Names you typed yourself are kept.
+
   Game matching
   - A game folder whose name has a note in brackets after the title, such
     as "(Landscape,Bezel)", is now matched by its title alone, so the note

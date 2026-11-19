@@ -46258,6 +46258,167 @@ function Invoke-TpmLaunchBoxEnrich {
 }
 # END MODULE-READY SECTION: LaunchBox game details and playlists
 
+# BEGIN MODULE-READY SECTION: LaunchBox Games Database links for TeknoParrot games
+# Links LaunchBox games that have no Games Database ID to their entry in LaunchBox's own game list, so LaunchBox finds the right
+# art and details. The game name comes from TeknoParrot's own metadata for the game (Metadata\<profile>.json), so it works for games
+# that have no user profile yet. An exact name match is "Sure". A close but not exact match is "Check" and is applied only when the
+# caller lists that game as approved. Titles a user changed by hand are kept. Prefix: TpmLaunchBoxIdLink / TpmTeknoParrotGameName.
+# Needs from the rest of the script: the Games Database functions above, the LaunchBox XML/file helpers and Invoke-TpmLaunchBoxFileTransaction.
+# This section has no script-level variables and no screens; the screen step is below.
+function Get-TpmTeknoParrotGameName {
+    [CmdletBinding()] [OutputType([string])] param([Parameter(Mandatory)][string]$TpRoot, [Parameter(Mandatory)][string]$ProfileCode)
+    # The code becomes part of a file name, so only plain file-name characters are allowed.
+    if ($ProfileCode -notmatch '^[A-Za-z0-9_.\-]+$' -or $ProfileCode -match '^\.+$') { return '' }
+    $path = Join-Path (Join-Path $TpRoot 'Metadata') ($ProfileCode + '.json')
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return '' }
+    try {
+        $data = [System.IO.File]::ReadAllText($path) | ConvertFrom-Json -ErrorAction Stop
+        if ($null -ne $data -and $data.PSObject.Properties['game_name']) { return ([string]$data.game_name).Trim() }
+    } catch { Write-Log ('LaunchBox links: could not read the game name for {0}: {1}' -f $ProfileCode, $_.Exception.Message) }
+    return ''
+}
+
+# Suggestion for a name written as one run-together word ("PowerPuttLive"), which shares no whole word with the list's name
+# ("PowerPutt Home Edition"): list names that start with the same first letters, ranked by the script's Dice similarity.
+function Find-TpmLaunchBoxIdLinkPrefixCandidate {
+    [CmdletBinding()] [OutputType([object[]])] param([Parameter(Mandatory)]$Index, [string]$Title, [double]$MinimumScore = 0.4)
+    $titleKey = ConvertTo-TpmGamesDbKey $Title
+    if ($titleKey.Length -lt 6) { return @() }
+    $start = $titleKey.Substring(0, 6)
+    $best = $null; $bestScore = 0.0
+    foreach ($k in $Index.ByName.Keys) {
+        if (-not $k.StartsWith($start, [System.StringComparison]::Ordinal)) { continue }
+        $score = Get-DiceSimilarity $titleKey $k
+        if ($score -ge $MinimumScore -and $score -gt $bestScore) { $best = $k; $bestScore = $score }
+    }
+    if ($null -eq $best) { return @() }
+    $first = $Index.ByName.Item($best)[0]
+    return @([pscustomobject]@{ Id = $first.Id; Name = $first.Name; Platform = $first.Platform; Score = [math]::Round($bestScore, 2) })
+}
+
+function New-TpmLaunchBoxIdLinkPlan {
+    param(
+        [Parameter(Mandatory)][string]$LbRoot, [Parameter(Mandatory)][string]$TpRoot, [Parameter(Mandatory)][string]$EmulatorId,
+        [Parameter(Mandatory)][string[]]$PlatformNames, [Parameter(Mandatory)]$Index, [string[]]$ApprovedGameIds = @()
+    )
+    $plans = New-Object System.Collections.Generic.List[object]
+    $items = New-Object System.Collections.Generic.List[object]
+    foreach ($name in $PlatformNames) {
+        $safe = Get-SafeLaunchBoxPlatformFileName $name
+        if ($safe -cne $name -or $name -in @('.', '..')) { throw 'Platform name must be a safe, unambiguous filename.' }
+        $rel = "Data\Platforms\$safe.xml"
+        $path = Get-TpmLaunchBoxPath $LbRoot $rel
+        $state = Get-TpmLaunchBoxFileState $path
+        if (-not $state.Exists) { continue }
+        $doc = Read-TpmLaunchBoxXml $path
+        Assert-TpmLaunchBoxState $path $state
+        $filePlan = [pscustomobject]@{ RelativePath = $rel; Before = $state; Document = $doc; OriginalXml = $doc.OuterXml; BaseChildCount = $doc.DocumentElement.ChildNodes.Count; Source = $null; SourceHash = $null; Changed = $false; Delete = $false; AfterHash = $null; FullRewrite = $true }
+        foreach ($game in @($doc.SelectNodes('/LaunchBox/Game'))) {
+            if ((Get-XmlChildText $game 'Emulator') -ne $EmulatorId) { continue }
+            $currentId = (Get-XmlChildText $game 'DatabaseID').Trim()
+            if ($currentId -and $currentId -ne '0') { continue }
+            $gameId = Get-XmlChildText $game 'ID'
+            $title = Get-XmlChildText $game 'Title'
+            $code = [System.IO.Path]::GetFileNameWithoutExtension((Get-XmlChildText $game 'ApplicationPath'))
+            $tpName = if ($code) { Get-TpmTeknoParrotGameName -TpRoot $TpRoot -ProfileCode $code } else { '' }
+            $match = $null; $status = 'None'; $usedName = $tpName
+            if ($tpName) { $match = Find-TpmGamesDbMatch -Index $Index -Title $tpName }
+            if (-not $match -and $title) { $match = Find-TpmGamesDbMatch -Index $Index -Title $title; if ($match) { $usedName = $title } }
+            if ($match) { $status = 'Sure' }
+            else {
+                $lookFor = if ($tpName) { $tpName } else { $title }
+                $near = if ($lookFor) { @(Find-TpmGamesDbCandidate -Index $Index -Title $lookFor -Top 1) } else { @() }
+                if ($near.Count -eq 0 -and $lookFor) { $near = @(Find-TpmLaunchBoxIdLinkPrefixCandidate -Index $Index -Title $lookFor) }
+                if ($near.Count -gt 0) { $match = $near[0]; $status = 'Check'; $usedName = $lookFor }
+            }
+            $applied = $false; $titleChanged = $false
+            if ($match -and ($status -eq 'Sure' -or $gameId -in $ApprovedGameIds)) {
+                Set-XmlChildText $game 'DatabaseID' ([string]$match.Id)
+                # Only a title that is still the TeknoParrot name (or already the official one) is replaced; a name the user typed stays.
+                if (-not $title -or $title -ceq $tpName -or $title -ceq [string]$match.Name) {
+                    if ($title -cne [string]$match.Name) { Set-XmlChildText $game 'Title' ([string]$match.Name); $titleChanged = $true }
+                }
+                Set-XmlChildText $game 'DateModified' (Get-Date).ToString('o')
+                $applied = $true
+            }
+            [void]$items.Add([pscustomobject]@{ GameId = $gameId; Title = $title; Code = $code; TeknoParrotName = $tpName; UsedName = $usedName; Status = $status; MatchName = $(if ($match) { [string]$match.Name } else { '' }); MatchId = $(if ($match) { [string]$match.Id } else { '' }); Score = $(if ($status -eq 'Check') { [double]$match.Score } else { 1.0 }); Applied = $applied; TitleChanged = $titleChanged })
+        }
+        $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
+        [void]$plans.Add($filePlan)
+    }
+    return [pscustomobject]@{ Plans = $plans.ToArray(); Items = $items.ToArray() }
+}
+
+# Plain preview lines. Pure: plan in, strings out.
+function Format-TpmLaunchBoxIdLinkLine {
+    param([Parameter(Mandatory)]$Plan)
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Plan.Items)) {
+        switch ($item.Status) {
+            'Sure' { [void]$lines.Add(('{0}: will be linked to {1}.' -f $item.Title, $item.MatchName)) }
+            'Check' { [void]$lines.Add(('{0}: close match is {1}. {2}' -f $item.Title, $item.MatchName, $(if ($item.Applied) { 'You approved it.' } else { 'Waiting for your approval.' }))) }
+            default { [void]$lines.Add(('{0}: no match found in the LaunchBox game list. Left alone.' -f $item.Title)) }
+        }
+    }
+    return $lines.ToArray()
+}
+
+function Format-TpmLaunchBoxIdLinkTitle {
+    param([Parameter(Mandatory)]$Plan, [switch]$Preview)
+    $items = @($Plan.Items)
+    $sure = @($items | Where-Object { $_.Status -eq 'Sure' }).Count
+    $check = @($items | Where-Object { $_.Status -eq 'Check' }).Count
+    $approved = @($items | Where-Object { $_.Status -eq 'Check' -and $_.Applied }).Count
+    $none = @($items | Where-Object { $_.Status -eq 'None' }).Count
+    if ($items.Count -eq 0) { return 'Every TeknoParrot game in LaunchBox already has a Games Database ID. Nothing to do.' }
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($sure -gt 0) { [void]$parts.Add(('{0} sure {1}' -f $sure, $(if ($sure -eq 1) { 'match' } else { 'matches' }))) }
+    if ($check -gt 0) { [void]$parts.Add(('{0} close {1} to check' -f $check, $(if ($check -eq 1) { 'match' } else { 'matches' }))) }
+    if ($none -gt 0) { [void]$parts.Add(('{0} with no match' -f $none)) }
+    if ($Preview) { return ('Preview: {0}. Nothing was changed.' -f ($parts -join ', ')) }
+    return ('Linked {0} {1} to the LaunchBox game list.' -f ($sure + $approved), $(if (($sure + $approved) -eq 1) { 'game' } else { 'games' }))
+}
+
+# -PlanOnly reads everything and changes nothing. ApprovedGameIds lists the close matches the user approved.
+# The caller makes sure LaunchBox and BigBox are closed before a write; the transaction also checks and refuses while they run.
+function Invoke-TpmLaunchBoxIdLink {
+    param([string]$LbRoot, [string]$TpRoot, [string[]]$PlatformNames = @('TeknoParrot'), [string]$BackupRoot, [string[]]$ApprovedGameIds = @(), [switch]$PlanOnly)
+    try {
+        $root = Resolve-TpmLaunchBoxRoot $LbRoot
+        if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $root)) { throw 'Choose a safe existing LaunchBox root.' }
+        $dbPath = Get-TpmGamesDbPath -LaunchBoxRoot $root
+        if (-not (Test-Path -LiteralPath $dbPath -PathType Leaf)) { throw 'The LaunchBox game list was not found, so nothing can be linked. Nothing was changed.' }
+        $emulatorsPath = Get-TpmLaunchBoxPath $root 'Data\Emulators.xml'
+        if (-not (Get-TpmLaunchBoxFileState $emulatorsPath).Exists) { throw 'LaunchBox has not made Data\Emulators.xml yet. Open LaunchBox once, close it, then try again. Nothing was changed.' }
+        $emulatorsDoc = Read-TpmLaunchBoxXml $emulatorsPath
+        $emulatorNode = @($emulatorsDoc.SelectNodes('/LaunchBox/Emulator') | Where-Object { (Get-XmlChildText $_ 'Title') -eq 'TeknoParrot' } | Select-Object -First 1)
+        if ($emulatorNode.Count -eq 0) {
+            $none = New-TpmLaunchBoxResult NO_CHANGES 'No TeknoParrot games are in LaunchBox yet. Add them first.'
+            if ($PlanOnly) { $none.Reason = 'PREVIEW' }
+            return $none
+        }
+        $index = Get-TpmGamesDbIndex -DbPath $dbPath
+        $plan = New-TpmLaunchBoxIdLinkPlan -LbRoot $root -TpRoot $TpRoot -EmulatorId (Get-XmlChildText $emulatorNode[0] 'ID') -PlatformNames $PlatformNames -Index $index -ApprovedGameIds $ApprovedGameIds
+        foreach ($line in (Format-TpmLaunchBoxIdLinkLine -Plan $plan)) { Write-Log ('LaunchBox links: ' + $line) }
+        $changedPlans = @($plan.Plans | Where-Object { $_.Changed })
+        if ($PlanOnly) {
+            $preview = New-TpmLaunchBoxResult NO_CHANGES ('Preview only, nothing was written. A write would change {0} file(s).' -f $changedPlans.Count)
+            $preview.Reason = 'PREVIEW'
+            $preview | Add-Member -NotePropertyName WouldChangeFiles -NotePropertyValue $changedPlans.Count -Force
+            $preview | Add-Member -NotePropertyName LinkPlan -NotePropertyValue $plan -Force
+            return $preview
+        }
+        $result = Invoke-TpmLaunchBoxFileTransaction -lbRoot $root -Plans $plan.Plans -BackupRoot $BackupRoot
+        $result | Add-Member -NotePropertyName LinkPlan -NotePropertyValue $plan -Force
+        return $result
+    } catch {
+        $result = New-TpmLaunchBoxResult FAILED 'LaunchBox game links were refused before library writes.'
+        $result.Errors = @([string]$_.Exception.Message)
+        return $result
+    }
+}
+# END MODULE-READY SECTION: LaunchBox Games Database links for TeknoParrot games
+
 # Screen layer for the section above (not part of the module): asks, shows, calls the functions above.
 # The screens print the text the Format functions return and hand every decision to the data layer through parameters.
 function Write-TpmLaunchBoxEnrichResult {
@@ -46319,6 +46480,52 @@ function Invoke-TpmLaunchBoxEnrichStep {
     }
     $written = Invoke-TpmLaunchBoxEnrich -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -DatIndex $DatIndex -ConflictChoices $choices -ConflictDefault $default
     Write-TpmLaunchBoxEnrichResult -Result $written
+    if ($written.BackupPath) { Write-TpmText -Text 'To undo, open Restore in the main menu and choose the LaunchBox backup.' -Color DarkCyan }
+}
+
+# Screen for the Games Database links section: preview, ask about each close match, ask, then write.
+function Write-TpmLaunchBoxIdLinkResult {
+    param([Parameter(Mandatory)]$Result, [switch]$Preview)
+    if ($Result.PSObject.Properties['LinkPlan']) {
+        $Result | Add-Member -NotePropertyName PlainTitle -NotePropertyValue (Format-TpmLaunchBoxIdLinkTitle -Plan $Result.LinkPlan -Preview:$Preview) -Force
+        $Result | Add-Member -NotePropertyName EnrichLines -NotePropertyValue @(Format-TpmLaunchBoxIdLinkLine -Plan $Result.LinkPlan) -Force
+    }
+    Write-TpmLaunchBoxResult -Result $Result
+}
+
+function Invoke-TpmLaunchBoxIdLinkStep {
+    param([string]$LbRoot, [string]$TpRoot)
+    $root = $LbRoot
+    if (-not $root) { $root = Read-HostSafe '  LaunchBox install folder (Enter to go back)' }
+    if (-not $root) { return }
+    Write-TpmText -Text 'First TeknoParrot Manager only reads your LaunchBox files. Games with no Games Database ID are matched to LaunchBox''s own game list, so LaunchBox finds the right art and details. Names you typed yourself are kept.' -Color DarkCyan
+    $plan = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -PlanOnly
+    Write-TpmLaunchBoxIdLinkResult -Result $plan -Preview
+    if (-not $plan.PSObject.Properties['LinkPlan']) { return }
+    $approved = New-Object System.Collections.Generic.List[string]
+    $checks = @($plan.LinkPlan.Items | Where-Object { $_.Status -eq 'Check' })
+    if ($checks.Count -gt 0) {
+        Write-TpmText -Text ('{0} {1} only a close match. You decide each one.' -f $checks.Count, $(if ($checks.Count -eq 1) { 'game has' } else { 'games have' })) -Color Yellow -BlankBefore
+        foreach ($item in $checks) {
+            Write-TpmText -Text ('{0} -> {1} (ID {2})' -f $item.Title, $item.MatchName, $item.MatchId) -Color White
+            if ((Read-TpmYesNo -Prompt '  Is this the same game? (Y/N)' -Default 'N') -eq 'Y') { [void]$approved.Add([string]$item.GameId) }
+        }
+        $plan = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -ApprovedGameIds $approved.ToArray() -PlanOnly
+        Write-TpmLaunchBoxIdLinkResult -Result $plan -Preview
+    }
+    if ($plan.Reason -ne 'PREVIEW' -or [int]$plan.WouldChangeFiles -eq 0) { return }
+    Write-TpmLaunchBoxWriteNotice
+    $notice = Get-TpmLaunchBoxWriteNoticeBlocks
+    if ((Read-TpmYesNo -Prompt 'Make exactly these changes after a verified backup? (Y/N, D = about the risks)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $notice }) -ne 'Y') {
+        Write-Host '  LaunchBox write canceled; nothing was changed.' -ForegroundColor DarkGray
+        return
+    }
+    if (-not (Wait-TpmForProcessClose -ProcessNames @('LaunchBox', 'BigBox') -FriendlyName 'LaunchBox or BigBox')) {
+        Write-Host '  LaunchBox or BigBox is still open, so nothing was changed.' -ForegroundColor DarkGray
+        return
+    }
+    $written = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -ApprovedGameIds $approved.ToArray()
+    Write-TpmLaunchBoxIdLinkResult -Result $written
     if ($written.BackupPath) { Write-TpmText -Text 'To undo, open Restore in the main menu and choose the LaunchBox backup.' -Color DarkCyan }
 }
 
@@ -46671,6 +46878,7 @@ function Write-TpmLaunchBoxOffer {
     Write-TpmText -Text '[P] Preview first. No changes.' -Color White
     Write-TpmText -Text '[A] Add missing games (backed up).' -Color White
     Write-TpmText -Text '[G] Fill in game details and make playlists (backed up).' -Color White
+    Write-TpmText -Text '[L] Link games for art and details (backed up).' -Color White -BlankBefore
     Write-TpmText -Text '[F] Import file only. No changes.' -Color White -BlankBefore
     Write-TpmText -Text '[B] Skip this step.' -Color White
 }
@@ -46693,7 +46901,7 @@ function Invoke-TpmLaunchBoxStep {
         $lbPreviewChoice = $null
         $lbPreviewShownSummary = ''
         do {
-            $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'G', 'F', 'B') -Default 'P'
+            $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'G', 'L', 'F', 'B') -Default 'P'
             if ($lbChoice -eq 'P') {
                 Write-TpmText -Text 'Preview: TeknoParrot Manager only reads your LaunchBox files.' -Color DarkCyan
                 $previewRoot = $lbRoot
@@ -46761,6 +46969,8 @@ function Invoke-TpmLaunchBoxStep {
             }
         } elseif ($lbChoice -eq 'G') {
             Invoke-TpmLaunchBoxEnrichStep -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -DatIndex $datIndex
+        } elseif ($lbChoice -eq 'L') {
+            Invoke-TpmLaunchBoxIdLinkStep -LbRoot $lbRoot -TpRoot $tpRoot
         } elseif ($lbChoice -eq 'F') {
             $doLB = "Y"
         }
