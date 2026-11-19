@@ -46334,8 +46334,11 @@ function New-TpmLaunchBoxIdLinkPlan {
             $applied = $false; $titleChanged = $false
             if ($match -and ($status -eq 'Sure' -or $gameId -in $ApprovedGameIds)) {
                 Set-XmlChildText $game 'DatabaseID' ([string]$match.Id)
-                # Only a title that is still the TeknoParrot name (or already the official one) is replaced; a name the user typed stays.
-                if (-not $title -or $title -ceq $tpName -or $title -ceq [string]$match.Name) {
+                # Only a title that is empty, still the profile code, the TeknoParrot name or the official name (also when only capitals, spaces
+                # or punctuation differ) is replaced; any other name, such as one the user typed, stays.
+                $titleKey = ConvertTo-TpmGamesDbKey $title
+                $sameName = $titleKey -and ($titleKey -ceq (ConvertTo-TpmGamesDbKey $tpName) -or $titleKey -ceq (ConvertTo-TpmGamesDbKey ([string]$match.Name)))
+                if (-not $title -or $title -ceq $tpName -or $title -ceq [string]$match.Name -or $title -ieq $code -or $sameName) {
                     if ($title -cne [string]$match.Name) { Set-XmlChildText $game 'Title' ([string]$match.Name); $titleChanged = $true }
                 }
                 Set-XmlChildText $game 'DateModified' (Get-Date).ToString('o')
@@ -46355,7 +46358,10 @@ function Format-TpmLaunchBoxIdLinkLine {
     $lines = New-Object System.Collections.Generic.List[string]
     foreach ($item in @($Plan.Items)) {
         switch ($item.Status) {
-            'Sure' { [void]$lines.Add(('{0}: will be linked to {1}.' -f $item.Title, $item.MatchName)) }
+            'Sure' {
+                $keepNote = if (-not $item.TitleChanged -and $item.Title -cne $item.MatchName) { ' The name in LaunchBox stays as it is.' } else { '' }
+                [void]$lines.Add(('{0}: will be linked to {1}.{2}' -f $item.Title, $item.MatchName, $keepNote))
+            }
             'Check' { [void]$lines.Add(('{0}: close match is {1}. {2}' -f $item.Title, $item.MatchName, $(if ($item.Applied) { 'You approved it.' } else { 'Waiting for your approval.' }))) }
             default { [void]$lines.Add(('{0}: no match found in the LaunchBox game list. Left alone.' -f $item.Title)) }
         }

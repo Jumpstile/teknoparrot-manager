@@ -74,7 +74,9 @@ INSERT INTO Games VALUES (13, 'Harley Davidson King of the Road', 'Arcade');
         (New-IdlGame 'g3' 'Harley-Davidson: King of the Road' 'Harley' -DbId '99'),
         (New-IdlGame 'g4' 'My Own Name' 'Handmade'),
         (New-IdlGame 'g5' 'Too Spicy' 'TooSpicy' -Emulator 'emu-other'),
-        (New-IdlGame 'g6' 'Totally Unknown' 'NoSuchCode')
+        (New-IdlGame 'g6' 'Totally Unknown' 'NoSuchCode'),
+        (New-IdlGame 'g7' 'tooSPICY' 'TooSpicy'),
+        (New-IdlGame 'g8' 'handmade' 'Handmade')
     ) -join ''
     $script:IdlPlatformPath = Join-Path $script:IdlLb 'Data\Platforms\TeknoParrot.xml'
     [System.IO.File]::WriteAllText($script:IdlPlatformPath, ('<?xml version="1.0" standalone="yes"?><LaunchBox>{0}</LaunchBox>' -f $games), (New-Object System.Text.UTF8Encoding $false))
@@ -93,7 +95,7 @@ Describe 'LaunchBox Games Database links for TeknoParrot games' {
     It 'links an exact name without asking, and leaves close matches, ID-holders, other emulators and unknowns alone until approved' {
         $plan = New-TpmLaunchBoxIdLinkPlan -LbRoot $script:IdlLb -TpRoot $script:IdlTp -EmulatorId 'emu-tp' -PlatformNames @('TeknoParrot') -Index $script:IdlIndex
         $byId = @{}; foreach ($item in $plan.Items) { $byId[$item.GameId] = $item }
-        $byId.Keys.Count | Should -Be 4
+        $byId.Keys.Count | Should -Be 6
         $byId['g1'].Status | Should -Be 'Sure'
         $byId['g1'].Applied | Should -BeTrue
         $byId['g1'].MatchId | Should -Be '11'
@@ -114,8 +116,8 @@ Describe 'LaunchBox Games Database links for TeknoParrot games' {
         $plan = New-TpmLaunchBoxIdLinkPlan -LbRoot $script:IdlLb -TpRoot $script:IdlTp -EmulatorId 'emu-tp' -PlatformNames @('TeknoParrot') -Index $script:IdlIndex -ApprovedGameIds @('g2')
         $xml = $plan.Plans[0].Document
         $xml.SelectSingleNode('/LaunchBox/Game[ID="g2"]/DatabaseID').InnerText | Should -Be '12'
-        # The title there was the title of the entry, not the TeknoParrot name, so it stays.
-        $xml.SelectSingleNode('/LaunchBox/Game[ID="g2"]/Title').InnerText | Should -Be 'PowerPuttLive2013'
+        # The title there was only the profile code, so the approved official name replaces it.
+        $xml.SelectSingleNode('/LaunchBox/Game[ID="g2"]/Title').InnerText | Should -Be 'PowerPutt Home Edition'
         # A hand-typed title keeps its name even when the ID is linked.
         $xml.SelectSingleNode('/LaunchBox/Game[ID="g4"]/Title').InnerText | Should -Be 'My Own Name'
         $xml.SelectSingleNode('/LaunchBox/Game[ID="g4"]/DatabaseID').InnerText | Should -Be '11'
@@ -127,7 +129,16 @@ Describe 'LaunchBox Games Database links for TeknoParrot games' {
         $lines = @(Format-TpmLaunchBoxIdLinkLine -Plan $plan)
         ($lines -join "`n") | Should -Match 'Waiting for your approval'
         ($lines -join "`n") | Should -Match 'no match found'
-        (Format-TpmLaunchBoxIdLinkTitle -Plan $plan -Preview) | Should -Match '^Preview: 2 sure matches'
+        (Format-TpmLaunchBoxIdLinkTitle -Plan $plan -Preview) | Should -Match '^Preview: 4 sure matches'
+        ($lines -join "`n") | Should -Match 'My Own Name: will be linked to Too Spicy\. The name in LaunchBox stays as it is\.'
+    }
+
+    It 'replaces a title that is empty, the profile code, or the same name with other capitals, but keeps any other name' {
+        $plan = New-TpmLaunchBoxIdLinkPlan -LbRoot $script:IdlLb -TpRoot $script:IdlTp -EmulatorId 'emu-tp' -PlatformNames @('TeknoParrot') -Index $script:IdlIndex
+        $xml = $plan.Plans[0].Document
+        $xml.SelectSingleNode('/LaunchBox/Game[ID="g7"]/Title').InnerText | Should -Be 'Too Spicy'
+        $xml.SelectSingleNode('/LaunchBox/Game[ID="g8"]/Title').InnerText | Should -Be 'Too Spicy'
+        $xml.SelectSingleNode('/LaunchBox/Game[ID="g4"]/Title').InnerText | Should -Be 'My Own Name'
     }
 
     It 'says so when there is nothing to link' {
