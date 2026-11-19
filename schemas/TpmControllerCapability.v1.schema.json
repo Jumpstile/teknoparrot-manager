@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Jumpstile/teknoparrot-manager/schemas/TpmControllerCapability-v1.schema.json",
+  "title": "TpmControllerCapability/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ContractVersion",
+    "MinReaderVersion",
+    "ProfileId",
+    "ProfileRevision",
+    "ControllerContext",
+    "SemanticControls",
+    "Evidence",
+    "GameContracts"
+  ],
+  "properties": {
+    "ContractVersion": { "const": "TpmControllerCapability/v1" },
+    "MinReaderVersion": { "type": "integer", "minimum": 1 },
+    "MigratedFromVersion": { "type": ["string", "null"], "pattern": "^TpmControllerCapability/v[0-9]+$" },
+    "ProfileId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "ProfileRevision": { "type": "integer", "minimum": 1 },
+    "ControllerContext": { "$ref": "#/$defs/controllerContext" },
+    "SemanticControls": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/semanticControl" }
+    },
+    "Evidence": { "$ref": "#/$defs/evidenceMetadata" },
+    "GameContracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/gameContractIdentity" }
+    }
+  },
+  "$defs": {
+    "controllerContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["DeviceClass", "PlayerSlot", "SelectionSource"],
+      "properties": {
+        "DeviceClass": {
+          "enum": ["XboxStylePad", "OtherGamePad", "Wheel", "LightGun", "ArcadeEncoder", "Keyboard", "PointerOrTrackball", "Unknown"]
+        },
+        "PlayerSlot": { "enum": ["P1", "P2", "P3", "P4", "P5", "P6", "Cabinet"] },
+        "SelectionSource": { "enum": ["UserSelected", "SuggestedByEvidence", "Unset"] },
+        "SuggestedFromEvidenceId": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "SelectionSource": { "const": "SuggestedByEvidence" } }, "required": ["SelectionSource"] },
+          "then": { "required": ["SuggestedFromEvidenceId"], "properties": { "SuggestedFromEvidenceId": { "type": "string" } } }
+        }
+      ]
+    },
+    "semanticControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ControlId", "Kind", "Meaning", "Requirement", "Bindable", "Scope"],
+      "properties": {
+        "ControlId": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$" },
+        "Kind": { "enum": ["Button", "Axis", "Trigger", "Pointer", "Switch"] },
+        "Meaning": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "Requirement": { "enum": ["Required", "Optional"] },
+        "Bindable": { "type": "boolean" },
+        "Scope": { "enum": ["Player", "Cabinet"] }
+      }
+    },
+    "evidenceMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["Origin", "ReviewState", "ReviewedUtc"],
+      "properties": {
+        "Origin": { "enum": ["TpmReviewed", "ExternalImport", "UserProvided"] },
+        "ReviewState": { "enum": ["Reviewed", "PendingReview", "Rejected"] },
+        "ReviewedUtc": { "type": ["string", "null"], "format": "date-time" },
+        "SourceNote": { "type": ["string", "null"], "maxLength": 200 }
+      }
+    },
+    "gameContractIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["GameProfileId", "GameProfileHash", "ContractRevision"],
+      "properties": {
+        "GameProfileId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$" },
+        "GameProfileHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "ContractRevision": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "structuralStatus": {
+      "enum": ["Complete", "Partial", "Missing", "Unknown", "Unsupported"]
+    },
+    "setupStatus": {
+      "enum": ["NotRequired", "CalibrationRequired", "FirstRunRequired", "Unknown"]
+    },
+    "verificationStatus": {
+      "enum": ["NotVerified", "Verified"]
+    },
+    "controlState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ControlId", "Structural", "Setup", "Verification"],
+      "properties": {
+        "ControlId": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$" },
+        "Structural": { "$ref": "#/$defs/structuralStatus" },
+        "Setup": { "$ref": "#/$defs/setupStatus" },
+        "Verification": { "$ref": "#/$defs/verificationStatus" },
+        "VerificationEvidenceId": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "Verification": { "const": "Verified" } }, "required": ["Verification"] },
+          "then": { "required": ["VerificationEvidenceId"], "properties": { "VerificationEvidenceId": { "type": "string" } } }
+        }
+      ]
+    }
+  }
+}
