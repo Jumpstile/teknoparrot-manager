@@ -46497,6 +46497,12 @@ function Get-TpmGamesDbPickByScore {
         # name. A plain "Big Buck Hunter World" has no release note and is a game of its own.
         $regionTail = [regex]::Match($clean, '^(.+?)\s+(World|Japan|USA|Asia|Export|Korea|Europe|Euro|China|Taiwan)$', 'IgnoreCase')
         if ($regionTail.Success -and $clean -ne $Title -and @($regionTail.Groups[1].Value -split '\s+').Count -ge 2) { [void]$alternates.Add($regionTail.Groups[1].Value.Trim()) }
+        # A trailing "1" is the first game of a series ("Quiz Magic Academy 1" is "Quiz Magic Academy"), and a point revision is a version of
+        # the game before it ("Tekken 5.1" is "Tekken 5"). The name as written is tried first, so a list that has its own "... 1" or "... 5.1" wins.
+        $firstOfSeries = [regex]::Match($clean, '^(.+?)\s+1$')
+        if ($firstOfSeries.Success -and @($firstOfSeries.Groups[1].Value -split '\s+').Count -ge 2) { [void]$alternates.Add($firstOfSeries.Groups[1].Value.Trim()) }
+        $pointRevision = [regex]::Match($clean, '^(.+\s\d+)\.\d+$')
+        if ($pointRevision.Success -and @($pointRevision.Groups[1].Value -split '\s+').Count -ge 2) { [void]$alternates.Add($pointRevision.Groups[1].Value.Trim()) }
         # Well-known regional names of one game: Capcom's "Street Fighter Zero" is the first "Street Fighter Alpha".
         $regional = @{ 'streetfighterzero' = "Street Fighter Alpha: Warriors' Dreams" }
         $regionalKey = Get-TpmMatchCanonKey $clean

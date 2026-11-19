@@ -188,6 +188,7 @@ INSERT INTO Games VALUES (52, 'Nitroplus Blasterz: Heroines Infinite Duel', 'Arc
 INSERT INTO Games VALUES (53, 'Marvel Vs Capcom 2', 'Arcade', 2000, 'Capcom', 'Capcom');
 INSERT INTO Games VALUES (54, 'GP World', 'Arcade', 1984, 'Sega', 'Sega');
 INSERT INTO Games VALUES (55, 'Virtua Fighter 5', 'Arcade', 2006, 'Sega', 'Sega');
+INSERT INTO Games VALUES (58, 'Quiz Magic Academy', 'Arcade', 2003, 'Konami', 'Konami');
 INSERT INTO Games VALUES (56, 'Golden Tee 2020', 'Arcade', 2019, 'Incredible Technologies', 'Incredible Technologies');
 
 "@)
@@ -224,6 +225,16 @@ INSERT INTO Games VALUES (56, 'Golden Tee 2020', 'Arcade', 2019, 'Incredible Tec
         $r22.Status | Should -Be 'Sure'
         $r22.Match.Id | Should -Be '37'
         (Resolve-TpmGamesDbMatch -Index $script:WideIndex -Names @([pscustomobject]@{ Source = 'TeknoParrot'; Name = 'Golden Tee Live 2021' }) -Year 2021).Status | Should -Not -Be 'Sure'
+    }
+
+    It 'reads a trailing 1 as the first game of a series and a point revision as a version, but never a different number' {
+        $first = Resolve-TpmGamesDbMatch -Index $script:WideIndex -Names @([pscustomobject]@{ Source = 'TeknoParrot'; Name = 'Quiz Magic Academy 1' })
+        $first.Status | Should -Be 'Sure'
+        $first.Match.Id | Should -Be '58'
+        $point = Resolve-TpmGamesDbMatch -Index $script:WideIndex -Names @([pscustomobject]@{ Source = 'TeknoParrot'; Name = 'Tekken 5.1' })
+        $point.Status | Should -Be 'Sure'
+        $point.Match.Id | Should -Be '50'
+        (Resolve-TpmGamesDbMatch -Index $script:WideIndex -Names @([pscustomobject]@{ Source = 'TeknoParrot'; Name = 'Tekken 6.1' })).Status | Should -Not -Be 'Sure'
     }
 
     It 'ignores the emulator name in a title, with or without brackets' {
@@ -402,7 +413,7 @@ INSERT INTO Games VALUES (56, 'Golden Tee 2020', 'Arcade', 2019, 'Incredible Tec
         $striker = Get-TpmGamesDbPick -Index $script:WideIndex -Title 'Virtua Striker 4'
         $striker.Kind | Should -Be 'Exact'
         $striker.Id | Should -Be '49'
-        (Get-TpmGamesDbPick -Index $script:WideIndex -Title 'Tekken 5.1').Id | Should -Not -Be '50'
+        (Get-TpmGamesDbPick -Index $script:WideIndex -Title 'Tekken 5.1').Id | Should -Be '50'
     }
 
     It 'reads a plus sign as plus and Vs. as versus, and ignores a source whose whole name is a region' {
