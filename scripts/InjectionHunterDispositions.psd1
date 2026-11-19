@@ -272,6 +272,14 @@
         @{
             File        = 'TeknoParrot-Manager.ps1'
             RuleName    = 'InjectionRisk.AddType'
+            Line        = 55319
+            Extent      = 'Add-Type -AssemblyName System.Drawing'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The assembly name is a fixed framework literal used to read one local picture and find its main color for the LED export. No external or attacker-controlled value reaches Add-Type.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.AddType'
             Line        = 5248
             Extent      = 'Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop'
             Disposition = 'FalsePositive'
