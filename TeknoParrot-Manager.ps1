@@ -45486,7 +45486,11 @@ function Get-TpmGamesDbIndex {
     Initialize-TpmGamesDbReader
     $platformList = "'" + (($Platforms | ForEach-Object { $_ -replace "'", "''" }) -join "','") + "'"
     $index = @{ ByName = @{}; ByAlternate = @{}; ByWord = @{}; Platforms = @($Platforms) }
-    foreach ($row in [TpmGamesDbSql]::Query($DbPath, "SELECT DatabaseID, Name, Platform FROM Games WHERE Platform IN ($platformList)")) {
+    $gameRows = $null; $hasFacts = $true
+    try { $gameRows = @([TpmGamesDbSql]::Query($DbPath, "SELECT DatabaseID, Name, Platform, ReleaseYear, Developer, Publisher FROM Games WHERE Platform IN ($platformList)")) }
+    catch { $hasFacts = $false }
+    if (-not $hasFacts) { $gameRows = @([TpmGamesDbSql]::Query($DbPath, "SELECT DatabaseID, Name, Platform FROM Games WHERE Platform IN ($platformList)")) }
+    foreach ($row in $gameRows) {
         $key = ConvertTo-TpmGamesDbKey $row[1]
         if (-not $key) { continue }
         if (-not $index.ByName.ContainsKey($key)) {
@@ -45496,7 +45500,9 @@ function Get-TpmGamesDbIndex {
                 [void]$index.ByWord[$word].Add($key)
             }
         }
-        [void]$index.ByName[$key].Add([pscustomobject]@{ Id = [string]$row[0]; Name = [string]$row[1]; Platform = [string]$row[2] })
+        $year = 0
+        if ($hasFacts) { [void][int]::TryParse([string]$row[3], [ref]$year) }
+        [void]$index.ByName[$key].Add([pscustomobject]@{ Id = [string]$row[0]; Name = [string]$row[1]; Platform = [string]$row[2]; Year = $year; Developer = $(if ($hasFacts) { [string]$row[4] } else { '' }); Publisher = $(if ($hasFacts) { [string]$row[5] } else { '' }) })
     }
     foreach ($row in [TpmGamesDbSql]::Query($DbPath, "SELECT g.DatabaseID, g.Name, g.Platform, a.AlternateName FROM GameAlternateTitles a JOIN Games g ON g.DatabaseID = a.DatabaseID WHERE g.Platform IN ($platformList)")) {
         $key = ConvertTo-TpmGamesDbKey $row[3]
@@ -45542,7 +45548,7 @@ function Find-TpmGamesDbCandidate {
         if ($score -ge $MinimumScore) { [void]$scored.Add([pscustomobject]@{ Key = $k; Score = $score }) }
     }
     $best = @($scored | Sort-Object Score -Descending | Select-Object -First $Top)
-    return @($best | ForEach-Object { $first = $Index.ByName.Item($_.Key)[0]; [pscustomobject]@{ Id = $first.Id; Name = $first.Name; Platform = $first.Platform; Score = [math]::Round($_.Score, 2) } })
+    return @($best | ForEach-Object { $first = $Index.ByName.Item($_.Key)[0]; [pscustomobject]@{ Id = $first.Id; Name = $first.Name; Platform = $first.Platform; Year = [int]$first.Year; Developer = [string]$first.Developer; Publisher = [string]$first.Publisher; Score = [math]::Round($_.Score, 2) } })
 }
 
 # Eggman's collection names every game folder "SHORTCODE (Title)(version)(date)[hardware][TP]" or "Title (version)(date)[hardware][TP]".
@@ -45569,48 +45575,68 @@ function Get-TpmEggmanGameName {
     return $result
 }
 
-# Combines the Games Database with the Eggman game name. Only exact (normalized) matches are ever called Matched.
+# Decides the Games Database game for one profile by asking the layered matching engine (Resolve-TpmGamesDbMatch) with every name
+# the profile gives: TeknoParrot's metadata name, the profile's own title, the Eggman folder name and the MAME list name. The
+# profile's internal name is a hint of last resort. Only an exact name that every source agrees on is ever called Matched.
 #   Matched     one sure match (Match)
-#   Suggested   the two sources point at different games; the one closer to the profile's own names is picked (Match),
-#               Confidence is High or Medium, the other game is in Options. Shown in the preview; applied only after the user approves it.
-#   Disagree    the two sources differ and the pick is not clear (Confidence Low); Options holds both; nothing is applied
+#   Suggested   the sources name different games; the one closer to the profile's own names is picked (Match),
+#               Confidence is High or Medium, the other games are in Options. Shown in the preview; applied only after the user approves it.
+#   Disagree    the sources differ and the pick is not clear (Confidence Low); Options holds the games; nothing is applied
 #   NeedsChoice no sure match; Options holds the closest names (suggestions); nothing is applied
 #   NoMatch     nothing close enough
-# Title is the name the Manager would use today. InternalName is the profile's own game name (tried when Title has no match).
-# EggmanName and EggmanFolder come from Get-TpmEggmanGameName. High: score 0.90 or more and 0.10 ahead of the other game.
-# Medium: 0.72 (the script's fuzzy-match threshold) or more and 0.10 ahead (its tie margin).
+# High: score 0.90 or more and 0.10 ahead of the other game. Medium: 0.72 or more and 0.10 ahead.
 function Resolve-TpmGameTitle {
-    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title, [string]$InternalName = '', [string]$EggmanName = '', [string]$EggmanFolder = '', [double]$MediumScore = 0.72, [double]$HighScore = 0.90, [double]$TieMargin = 0.1)
+    [CmdletBinding()] param(
+        [Parameter(Mandatory)]$Index, [string]$Title, [string]$InternalName = '', [string]$EggmanName = '', [string]$EggmanFolder = '',
+        [string]$MetadataName = '', [string]$MameName = '', [int]$Year = 0, [string]$Maker = '',
+        [double]$MediumScore = 0.72, [double]$HighScore = 0.90, [double]$TieMargin = 0.1
+    )
     $internalShort = ($InternalName -replace '\s*\([^()]*\)\s*$', '')
-    $fromTitle = Find-TpmGamesDbMatch -Index $Index -Title $Title
-    if (-not $fromTitle -and $InternalName) {
-        $fromTitle = Find-TpmGamesDbMatch -Index $Index -Title $InternalName
-        if (-not $fromTitle -and $internalShort) { $fromTitle = Find-TpmGamesDbMatch -Index $Index -Title $internalShort }
+    $names = New-Object System.Collections.Generic.List[object]
+    if ($MetadataName) { [void]$names.Add([pscustomobject]@{ Source = 'TeknoParrot'; Name = $MetadataName }) }
+    if ($Title) { [void]$names.Add([pscustomobject]@{ Source = 'TeknoParrot profile'; Name = $Title }) }
+    if ($EggmanName) { [void]$names.Add([pscustomobject]@{ Source = 'Eggman list'; Name = $EggmanName }) }
+    if ($MameName) { [void]$names.Add([pscustomobject]@{ Source = 'MAME list'; Name = $MameName }) }
+    foreach ($hint in @($InternalName, $internalShort | Select-Object -Unique)) {
+        if ($hint) { [void]$names.Add([pscustomobject]@{ Source = 'Profile internal name'; Name = $hint; Fallback = $true }) }
     }
-    $fromEggman = if ($EggmanName) { Find-TpmGamesDbMatch -Index $Index -Title $EggmanName } else { $null }
     $result = [pscustomobject]@{ Status = 'NoMatch'; Title = $Title; EggmanTitle = $EggmanName; Match = $null; Source = ''; Confidence = ''; Options = @() }
-    if ($fromTitle -and $fromEggman -and $fromTitle.Id -ne $fromEggman.Id) {
-        # Each game is scored by how close its name is to the profile's own full names; the closer one is the suggestion.
-        $references = @($InternalName, $EggmanFolder) | Where-Object { $_ } | ForEach-Object { ConvertTo-TpmGamesDbKey $_ }
-        $scores = @(@($fromTitle, $fromEggman) | ForEach-Object { $optionKey = ConvertTo-TpmGamesDbKey $_.Name; $best = 0.0; foreach ($r in $references) { $s = Get-DiceSimilarity $optionKey $r; if ($s -gt $best) { $best = $s } }; $best })
-        $pickIndex = if ($scores[1] -gt $scores[0]) { 1 } else { 0 }
-        $pick = @($fromTitle, $fromEggman)[$pickIndex]; $other = @($fromTitle, $fromEggman)[1 - $pickIndex]
-        $gap = $scores[$pickIndex] - $scores[1 - $pickIndex]
-        $result.Options = @($pick, $other)
-        if ($gap -ge $TieMargin -and $scores[$pickIndex] -ge $HighScore) { $result.Status = 'Suggested'; $result.Confidence = 'High'; $result.Match = $pick }
-        elseif ($gap -ge $TieMargin -and $scores[$pickIndex] -ge $MediumScore) { $result.Status = 'Suggested'; $result.Confidence = 'Medium'; $result.Match = $pick }
-        else { $result.Status = 'Disagree'; $result.Confidence = 'Low' }
-        $result.Source = 'The Games Database and the Eggman name point at different games'
-    } elseif ($fromTitle) {
-        $result.Status = 'Matched'; $result.Match = $fromTitle; $result.Source = $(if ($fromEggman) { 'Games Database and Eggman agree' } else { 'Games Database' })
-    } elseif ($fromEggman) {
-        $result.Status = 'Matched'; $result.Match = $fromEggman; $result.Source = 'Eggman name, found in the Games Database'
-    } else {
-        $options = @(Find-TpmGamesDbCandidate -Index $Index -Title $Title)
-        if ($options.Count -eq 0 -and $internalShort) { $options = @(Find-TpmGamesDbCandidate -Index $Index -Title $internalShort) }
-        if ($options.Count -eq 0 -and $EggmanName) { $options = @(Find-TpmGamesDbCandidate -Index $Index -Title $EggmanName) }
-        if ($options.Count -gt 0) { $result.Status = 'NeedsChoice'; $result.Confidence = 'Low'; $result.Options = $options }
+    $engine = Resolve-TpmGamesDbMatch -Index $Index -Names $names.ToArray() -Year $Year -Maker $Maker
+    if ($engine.Status -eq 'Sure') {
+        $result.Status = 'Matched'; $result.Match = $engine.Match; $result.Source = 'Games Database: ' + $engine.Evidence
+        return $result
     }
+    # Sources that each name an exact game, but not the same one: the game closer to the profile's own full names is suggested.
+    $exactPicks = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in $names) {
+        if ($entry.Fallback) { continue }
+        $pick = Get-TpmGamesDbPick -Index $Index -Title ([string]$entry.Name) -Year $Year -Maker $Maker
+        if ($pick.Id -and $pick.Kind -eq 'Exact') { [void]$exactPicks.Add($pick) }
+    }
+    $distinct = @($exactPicks | Group-Object Id | ForEach-Object { $_.Group[0] })
+    if ($distinct.Count -ge 2) {
+        $references = @($InternalName, $EggmanFolder) | Where-Object { $_ } | ForEach-Object { ConvertTo-TpmGamesDbKey $_ }
+        $scored = @($distinct | ForEach-Object {
+            $optionKey = ConvertTo-TpmGamesDbKey $_.Name; $best = 0.0
+            foreach ($r in $references) { $s = Get-DiceSimilarity $optionKey $r; if ($s -gt $best) { $best = $s } }
+            [pscustomobject]@{ Pick = $_; Score = $best }
+        } | Sort-Object Score -Descending)
+        $gap = $scored[0].Score - $scored[1].Score
+        $result.Options = @($scored | ForEach-Object { $_.Pick })
+        if ($gap -ge $TieMargin -and $scored[0].Score -ge $HighScore) { $result.Status = 'Suggested'; $result.Confidence = 'High'; $result.Match = $scored[0].Pick }
+        elseif ($gap -ge $TieMargin -and $scored[0].Score -ge $MediumScore) { $result.Status = 'Suggested'; $result.Confidence = 'Medium'; $result.Match = $scored[0].Pick }
+        else { $result.Status = 'Disagree'; $result.Confidence = 'Low' }
+        $result.Source = 'The sources point at different games'
+        return $result
+    }
+    # No sure match: the engine's best candidate first, then the script's other suggestions. Nothing is applied.
+    $options = New-Object System.Collections.Generic.List[object]
+    if ($engine.Match) { [void]$options.Add([pscustomobject]@{ Id = [string]$engine.Match.Id; Name = [string]$engine.Match.Name; Platform = [string]$engine.Match.Platform; Score = [double]$engine.Match.Score }) }
+    $more = @(Find-TpmGamesDbCandidate -Index $Index -Title $Title)
+    if ($more.Count -eq 0 -and $internalShort) { $more = @(Find-TpmGamesDbCandidate -Index $Index -Title $internalShort) }
+    if ($more.Count -eq 0 -and $EggmanName) { $more = @(Find-TpmGamesDbCandidate -Index $Index -Title $EggmanName) }
+    foreach ($candidate in $more) { if ($options.Count -lt 3 -and -not (@($options | Where-Object { $_.Id -eq [string]$candidate.Id }).Count)) { [void]$options.Add($candidate) } }
+    if ($options.Count -gt 0) { $result.Status = 'NeedsChoice'; $result.Confidence = 'Low'; $result.Options = $options.ToArray() }
     return $result
 }
 # ===== end of TPM GAME TITLE MATCHING (module-ready block) =====
@@ -45753,6 +45779,7 @@ function Invoke-LaunchBoxDirectWrite {
         $emulatorId = Get-OrCreateLaunchBoxEmulator $docs['Data\Emulators.xml'] $tpRoot $lbRoot
         # Official titles and Games Database IDs (read only). Any problem means games keep today's titles, with a plain note.
         $gamesDb = $null
+        $mameMapForAdd = $null
         $titleChanges = New-Object System.Collections.Generic.List[object]
         $titleReview = New-Object System.Collections.Generic.List[object]
         $resolvedByFile = @{}
@@ -45802,12 +45829,24 @@ function Invoke-LaunchBoxDirectWrite {
                     if (-not $gameFileFound) { if ($name -eq @($platformFiles.Values)[0]) { $skippedMissingGame++ }; continue }
                     $title = Get-XmlChildText $profileDoc.GameProfile 'Description'
                     if (-not $title) { $title = $file.BaseName }
+                    if (Test-TpmNonGameTitle -Title $title) {
+                        if ($name -eq @($platformFiles.Values)[0]) { Write-Log ('LaunchBox: skipped {0} because it is not a game (firmware updater, drive checker or board).' -f $title) }
+                        continue
+                    }
                     $resolution = $null
                     if ($gamesDb -and $gamesDb.State -eq 'Used') {
                         if (-not $resolvedByFile.ContainsKey($file.Name)) {
                             $eggmanName = Get-TpmEggmanGameName -GamePath $gamePath
                             $internalName = Get-XmlChildText $profileDoc.GameProfile 'GameNameInternal'
-                            $resolvedByFile[$file.Name] = Resolve-TpmGameTitle -Index $gamesDb.Index -Title $title -InternalName $internalName -EggmanName $eggmanName.Title -EggmanFolder $eggmanName.Folder
+                            $metaFacts = [pscustomobject]@{ Name = ''; Year = 0; Platform = '' }
+                            $mameName = ''
+                            if ($tpRoot) {
+                                $metaFacts = Get-TpmTeknoParrotMetadataFacts -TpRoot $tpRoot -ProfileCode $file.BaseName
+                                if ($null -eq $mameMapForAdd) { $mameMapForAdd = Get-TpmMameNameMap -MamePath (Join-Path $lbRoot 'Metadata\MAME.xml') }
+                                $romKey = Get-TpmMatchRomKey -TpRoot $tpRoot -Code $file.BaseName
+                                if ($romKey -and $mameMapForAdd.ContainsKey($romKey)) { $mameName = [string]$mameMapForAdd[$romKey] }
+                            }
+                            $resolvedByFile[$file.Name] = Resolve-TpmGameTitle -Index $gamesDb.Index -Title $title -InternalName $internalName -EggmanName $eggmanName.Title -EggmanFolder $eggmanName.Folder -MetadataName $metaFacts.Name -MameName $mameName -Year $metaFacts.Year -Maker $metaFacts.Platform
                         }
                         $resolution = $resolvedByFile[$file.Name]
                     }
@@ -46296,13 +46335,445 @@ function Find-TpmLaunchBoxIdLinkPrefixCandidate {
     return @([pscustomobject]@{ Id = $first.Id; Name = $first.Name; Platform = $first.Platform; Score = [math]::Round($bestScore, 2) })
 }
 
+# ---- Layered matching of one TeknoParrot game to the LaunchBox game list ----
+# Every source the Manager already has is used as a hint, and each one is named in the result:
+#   TeknoParrot's own metadata (name, year, hardware), the Eggman list name (only when the game folder is confirmed by the list),
+#   the MAME romset name, and the title in LaunchBox. An exact name wins over a close one. Two sources that point to different
+#   games are never settled by guessing: the user decides. Pure functions: nothing here writes anything.
+
+# Removes what is not part of a title: a trailing "(...)" note, a trailing version, and "for NESiCAxLive".
+function Get-TpmMatchCleanTitle {
+    [CmdletBinding()] [OutputType([string])] param([string]$Title)
+    if ([string]::IsNullOrWhiteSpace($Title)) { return '' }
+    $clean = [regex]::Replace($Title, '(\s*\([^()]*\))+\s*$', '')
+    $clean = [regex]::Replace($clean, '\s+(v|ver\.?|version)\s*\d[\d\.]*(\s*/\s*\d[\d\.]*)*\s*$', '', 'IgnoreCase')
+    $clean = [regex]::Replace($clean, '\s+for\s+NESiCAxLive\s*$', '', 'IgnoreCase')
+    # A version is not part of the game, anywhere in the name: "Ver. 2", "Version 3".
+    $clean = [regex]::Replace($clean, '\s+(ver\.?|version)\s*\d[\d\.]*(\s*/\s*\d[\d\.]*)*(?=\s|$)', '', 'IgnoreCase')
+    # A dotted number at the end ("... DX 1.18") is a version when at least three words come before it and the last of them is not a number ("Tekken 5.1" is not).
+    $dotted = [regex]::Match($clean, '^(.+?)\s+\d+\.\d+(\.\d+)*$')
+    if ($dotted.Success) {
+        $before = @($dotted.Groups[1].Value -split '\s+')
+        if ($before.Count -ge 3 -and $before[-1] -notmatch '^\d+$') { $clean = $dotted.Groups[1].Value }
+    }
+    return $clean.Trim()
+}
+
+# Lowercase words of a title. Numbers count (a different number is a different game); Roman numerals become numbers.
+function Get-TpmMatchWords {
+    [CmdletBinding()] [OutputType([string[]])] param([string]$Title)
+    $roman = @{ ii = '2'; iii = '3'; iv = '4'; v = '5'; vi = '6'; vii = '7'; viii = '8'; ix = '9'; x = '10' }
+    $skip = @('the', 'of', 'a', 'an', 'and', 'for', 'in', 'to', 'de', 'no')
+    $words = @([regex]::Matches(([string]$Title).ToLowerInvariant().Replace("'", ''), '[a-z0-9]+') | ForEach-Object { $_.Value })
+    return @($words | Where-Object { $_ -notin $skip } | ForEach-Object { if ($roman.ContainsKey($_)) { $roman[$_] } else { $_ } })
+}
+
+# True for items that appear as TeknoParrot profiles but are not games: firmware updaters, drive checkers, controller and
+# development boards. They are never added to LaunchBox and never matched.
+function Test-TpmNonGameTitle {
+    [CmdletBinding()] [OutputType([bool])] param([string]$Title)
+    if ([string]::IsNullOrWhiteSpace($Title)) { return $false }
+    return [bool]($Title -match '(?i)firmware\s+updat|DIMM\s+FIRM|drive\s+checker|^AS-1\s+Controller|Hopper\s+Board|development\s+board')
+}
+
+# A looser spelling of a title, for comparing with the game list: no accents, "&" as "and", Roman numerals as numbers,
+# no "the / of / and ...", no "Ver." / "Version", and long vowels folded ("Gouketsuji" and "Goketsuji" with a long o become one word).
+function Get-TpmMatchCanonKey {
+    [CmdletBinding()] [OutputType([string])] param([string]$Title)
+    if ([string]::IsNullOrWhiteSpace($Title)) { return '' }
+    $plain = New-Object System.Text.StringBuilder
+    foreach ($ch in $Title.Normalize([System.Text.NormalizationForm]::FormD).ToCharArray()) {
+        if ([System.Globalization.CharUnicodeInfo]::GetUnicodeCategory($ch) -ne [System.Globalization.UnicodeCategory]::NonSpacingMark) { [void]$plain.Append($ch) }
+    }
+    $roman = @{ ii = '2'; iii = '3'; iv = '4'; v = '5'; vi = '6'; vii = '7'; viii = '8'; ix = '9' }
+    $skip = @('the', 'of', 'a', 'an', 'and', 'for', 'in', 'to', 'de', 'no', 'ver', 'version')
+    $text = $plain.ToString().ToLowerInvariant().Replace('&', ' and ').Replace('+', ' plus ').Replace("'", '')
+    $text = [regex]::Replace($text, '\bvs\b', ' versus ')
+    # A version is not part of the game: "Ver. 2", "Version 2006".
+    $text = [regex]::Replace($text, '\b(ver|version)\.?\s*\d[\d\.]*', ' ')
+    $kept = New-Object System.Collections.Generic.List[string]
+    foreach ($found in [regex]::Matches($text, '[a-z0-9]+')) {
+        $word = $found.Value
+        if ($skip -contains $word) { continue }
+        if ($roman.ContainsKey($word)) { $word = $roman[$word] } else { $word = $word.Replace('ou', 'o').Replace('oo', 'o').Replace('uu', 'u') }
+        [void]$kept.Add($word)
+    }
+    return ($kept -join '')
+}
+
+# The game list keyed by the looser spelling. Built once per list and kept on it.
+function Get-TpmGamesDbCanonMap {
+    [CmdletBinding()] param([Parameter(Mandatory)]$Index)
+    if ($Index.ContainsKey('ByCanon')) { return $Index['ByCanon'] }
+    $map = @{}
+    foreach ($key in $Index.ByName.Keys) {
+        foreach ($entry in $Index.ByName[$key]) {
+            $canon = Get-TpmMatchCanonKey ([string]$entry.Name)
+            if (-not $canon) { continue }
+            if (-not $map.ContainsKey($canon)) { $map[$canon] = New-Object System.Collections.Generic.List[object] }
+            [void]$map[$canon].Add($entry)
+        }
+    }
+    $Index['ByCanon'] = $map
+    return $map
+}
+
+# One entry out of the games that share a name, or $null when it cannot be told. The first searched platform that has the name wins.
+# Two games with one name are told apart by a "(year)" in the list's own title, then by the release year, then by exact spelling.
+function Select-TpmGamesDbHit {
+    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [object[]]$Hits = @(), [string]$Title, [int]$Year = 0)
+    $pool = @()
+    foreach ($platformName in $Index.Platforms) {
+        $pool = @($Hits | Where-Object { $_.Platform -eq $platformName })
+        if ($pool.Count -gt 0) { break }
+    }
+    if ($pool.Count -eq 0) { return $null }
+    if (@($pool | Group-Object Id).Count -eq 1) { return $pool[0] }
+    if ($Year -gt 0) {
+        $suffixed = @($pool | Where-Object { $_.Name -ieq ('{0} ({1})' -f $Title, $Year) } | Group-Object Id)
+        if ($suffixed.Count -eq 1) { return $suffixed[0].Group[0] }
+        $sameYear = @($pool | Where-Object { $_.PSObject.Properties['Year'] -and [int]$_.Year -eq $Year } | Group-Object Id)
+        if ($sameYear.Count -eq 1) { return $sameYear[0].Group[0] }
+    }
+    $spelled = @($pool | Where-Object { $_.Name -ieq $Title } | Group-Object Id)
+    if ($spelled.Count -eq 1) { return $spelled[0].Group[0] }
+    return $null
+}
+
+# The one game that has this name (or the same name spelled a little differently), or $null.
+function Find-TpmGamesDbExact {
+    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title, [int]$Year = 0)
+    $key = ConvertTo-TpmGamesDbKey $Title
+    if (-not $key) { return $null }
+    foreach ($mapName in @('ByName', 'ByAlternate')) {
+        if (-not $Index[$mapName].ContainsKey($key)) { continue }
+        $hit = Select-TpmGamesDbHit -Index $Index -Hits $Index[$mapName][$key].ToArray() -Title $Title -Year $Year
+        if ($hit) { return $hit }
+    }
+    $canon = Get-TpmMatchCanonKey $Title
+    if ($canon) {
+        $map = Get-TpmGamesDbCanonMap -Index $Index
+        if ($map.ContainsKey($canon)) { return (Select-TpmGamesDbHit -Index $Index -Hits $map[$canon].ToArray() -Title $Title -Year $Year) }
+        # The list often adds "Arcade" / "Arcade Edition" / "Edition" to a title; one side may have it and the other not.
+        foreach ($tail in @('arcadeedition', 'arcadegame', 'arcade', 'edition')) {
+            $longer = $canon + $tail
+            if ($map.ContainsKey($longer)) { $hit = Select-TpmGamesDbHit -Index $Index -Hits $map[$longer].ToArray() -Title $Title -Year $Year; if ($hit) { return $hit } }
+            if ($canon.Length -gt ($tail.Length + 3) -and $canon.EndsWith($tail)) {
+                $shorter = $canon.Substring(0, $canon.Length - $tail.Length)
+                if ($map.ContainsKey($shorter)) { $hit = Select-TpmGamesDbHit -Index $Index -Hits $map[$shorter].ToArray() -Title $Title -Year $Year; if ($hit) { return $hit } }
+            }
+        }
+    }
+    return $null
+}
+
+# One name against the game list: Kind is Exact, NearSure, NearAsk or None. Exact also covers the same name spelled a little
+# differently (see Get-TpmMatchCanonKey). Near names are scored on how many words differ, the year (when both sides have one) and
+# the maker; NearSure needs a clear lead over the next best name and the same numbers. A near name that is clearly a different
+# game is None, so nobody is asked about it.
+function Get-TpmGamesDbPickByScore {
+    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title, [int]$Year = 0, [string]$Maker = '')
+    $none = [pscustomobject]@{ Kind = 'None'; Id = ''; Name = ''; Platform = ''; Score = 0.0; Gap = 0.0; QueryName = $Title }
+    $clean = Get-TpmMatchCleanTitle $Title
+    if (-not $clean) { return $none }
+    $exact = Find-TpmGamesDbExact -Index $Index -Title $Title -Year $Year
+    # The list may name the version as its own game ("Initial D Arcade Stage Ver. 2"): the name as written, without its release note, wins
+    # before a version is ignored.
+    if (-not $exact) {
+        $noNote = [regex]::Replace($Title, '(\s*\([^()]*\))+\s*$', '').Trim()
+        if ($noNote -and $noNote -ne $Title) { $exact = Find-TpmGamesDbExact -Index $Index -Title $noNote -Year $Year }
+    }
+    if (-not $exact -and $clean -ne $Title) { $exact = Find-TpmGamesDbExact -Index $Index -Title $clean -Year $Year }
+    if (-not $exact) {
+        $alternates = New-Object System.Collections.Generic.List[string]
+        $codeMatch = [regex]::Match($clean, '^([A-Za-z0-9]{2,6})\s*[:\-]\s+(.+)$')
+        if ($codeMatch.Success -and $codeMatch.Groups[1].Value -match '\d' -and $codeMatch.Groups[1].Value -match '[A-Za-z]') { [void]$alternates.Add($codeMatch.Groups[2].Value) }
+        # One side of "A / B" counts only when it has two or more words: a single word ("Hero") is too easy to match to another game.
+        if ($clean -match '\s/\s') { foreach ($side in ($clean -split '\s/\s')) { if (@($side.Trim() -split '\s+').Count -ge 2) { [void]$alternates.Add($side.Trim()) } } }
+        # In a ROM-set name, a region just before the release note ("Cobra: The Arcade World (CBR2 Ver. B)") is not part of the game's
+        # name. A plain "Big Buck Hunter World" has no release note and is a game of its own.
+        $regionTail = [regex]::Match($clean, '^(.+?)\s+(World|Japan|USA|Asia|Export|Korea|Europe|Euro|China|Taiwan)$', 'IgnoreCase')
+        if ($regionTail.Success -and $clean -ne $Title -and @($regionTail.Groups[1].Value -split '\s+').Count -ge 2) { [void]$alternates.Add($regionTail.Groups[1].Value.Trim()) }
+        # Well-known regional names of one game: Capcom's "Street Fighter Zero" is the first "Street Fighter Alpha".
+        $regional = @{ 'streetfighterzero' = "Street Fighter Alpha: Warriors' Dreams" }
+        $regionalKey = Get-TpmMatchCanonKey $clean
+        if ($regional.ContainsKey($regionalKey)) { [void]$alternates.Add([string]$regional[$regionalKey]) }
+        $sideHits = New-Object System.Collections.Generic.List[object]
+        foreach ($alternate in $alternates) { $hit = Find-TpmGamesDbExact -Index $Index -Title $alternate -Year $Year; if ($hit) { [void]$sideHits.Add($hit) } }
+        # "A / B" where both sides are different games in the list is a question for the user, not an exact match.
+        if (@($sideHits | ForEach-Object { [string]$_.Id } | Select-Object -Unique).Count -gt 1) {
+            return [pscustomobject]@{ Kind = 'NearAsk'; Id = [string]$sideHits[0].Id; Name = [string]$sideHits[0].Name; Platform = [string]$sideHits[0].Platform; Score = 0.8; Gap = 0.0; QueryName = $Title }
+        }
+        if ($sideHits.Count -gt 0) { $exact = $sideHits[0] }
+    }
+    if ($exact) { return [pscustomobject]@{ Kind = 'Exact'; Id = [string]$exact.Id; Name = [string]$exact.Name; Platform = [string]$exact.Platform; Score = 1.0; Gap = 1.0; QueryName = $Title } }
+    $queryWords = @(Get-TpmMatchWords $clean)
+    $queryNumbers = (@($queryWords | Where-Object { $_ -match '^\d+$' } | Sort-Object)) -join ','
+    $cands = @(Find-TpmGamesDbCandidate -Index $Index -Title $clean -Top 8 -MinimumScore 0.5)
+    if ($cands.Count -eq 0) {
+        # A name written as one run-together word shares no whole word with the list's name.
+        $prefix = @(Find-TpmLaunchBoxIdLinkPrefixCandidate -Index $Index -Title $clean)
+        if ($prefix.Count -eq 0) { return $none }
+        return [pscustomobject]@{ Kind = 'NearAsk'; Id = [string]$prefix[0].Id; Name = [string]$prefix[0].Name; Platform = [string]$prefix[0].Platform; Score = [double]$prefix[0].Score; Gap = 0.0; QueryName = $Title }
+    }
+    $scored = @(foreach ($cand in $cands) {
+        $candWords = @(Get-TpmMatchWords (Get-TpmMatchCleanTitle ([string]$cand.Name)))
+        $extra = @($queryWords | Where-Object { $_ -notin $candWords }).Count
+        $missing = @($candWords | Where-Object { $_ -notin $queryWords }).Count
+        $adjust = -0.25 * ($extra + $missing)
+        $candYear = [int]$cand.Year
+        if ($Year -gt 0 -and $candYear -gt 0) {
+            $apart = [Math]::Abs($Year - $candYear)
+            if ($apart -eq 0) { $adjust += 0.3 } elseif ($apart -eq 1) { $adjust += 0.15 } elseif ($apart -ge 3) { $adjust -= 0.3 }
+        }
+        if ($Maker) {
+            foreach ($company in @([string]$cand.Developer, [string]$cand.Publisher)) {
+                if ($company.Length -ge 4 -and $Maker.IndexOf($company, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $adjust += 0.1; break }
+            }
+        }
+        $candNumbers = (@($candWords | Where-Object { $_ -match '^\d+$' } | Sort-Object)) -join ','
+        [pscustomobject]@{ Cand = $cand; Score = ([double]$cand.Score + $adjust); Miss = ($extra + $missing); Subset = (($extra -eq 0) -or ($missing -eq 0)); YearEq = ($Year -gt 0 -and $candYear -eq $Year); SameNumbers = ($candNumbers -eq $queryNumbers) }
+    })
+    # A number, year or version in the name is part of the game: "2020" is not "2022" and "4" is not "5". A name whose numbers differ
+    # from the query's is a different game and is dropped, however alike the words are.
+    $scored = @($scored | Where-Object { $_.SameNumbers } | Sort-Object Score -Descending)
+    if ($scored.Count -eq 0) { return $none }
+    $top = $scored[0]
+    if ([double]$top.Cand.Score -lt 0.7 -and $top.Score -lt 0.5) { return $none }
+    $gap = if ($scored.Count -gt 1) { $top.Score - $scored[1].Score } else { 1.0 }
+    $firm = $top.SameNumbers -and (($top.Score -ge 0.9 -and $top.Miss -eq 0 -and $gap -ge 0.15) -or ($top.Subset -and $top.YearEq -and $gap -ge 0.15))
+    return [pscustomobject]@{ Kind = $(if ($firm) { 'NearSure' } else { 'NearAsk' }); Id = [string]$top.Cand.Id; Name = [string]$top.Cand.Name; Platform = [string]$top.Cand.Platform; Score = [Math]::Round($top.Score, 2); Gap = [Math]::Round($gap, 2); QueryName = $Title }
+}
+
+# A name that contains the other one word for word: the list has "Dino King Battle" and the game is "Dino King Battle: King of
+# Jurassic" (or the other way round). Only whole words count, in the same order, with the same numbers; one name has to be the
+# other's start (two or more words) or share three or more words with it in order. It must be one game on the first platform
+# that has any. The result is only ever a question for the user, never an automatic match.
+function Find-TpmGamesDbContained {
+    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title)
+    $fix = { param($w) @($w | ForEach-Object { if ($_ -eq 'vs') { 'versus' } else { $_ } }) }
+    $queryWords = @(& $fix @(Get-TpmMatchWords (Get-TpmMatchCleanTitle $Title)))
+    if ($queryWords.Count -lt 2) { return $null }
+    $queryNumbers = (@($queryWords | Where-Object { $_ -match '^\d+$' } | Sort-Object)) -join ','
+    # Only names that share a meaningful word with the title can contain it, so only those are looked at.
+    $keys = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($token in (Get-MeaningfulTitleTokens $Title)) {
+        if (-not $Index.ByWord.ContainsKey($token) -or $Index.ByWord[$token].Count -gt 3000) { continue }
+        foreach ($k in $Index.ByWord[$token]) { [void]$keys.Add($k) }
+    }
+    foreach ($platformName in $Index.Platforms) {
+        $found = @{}
+        foreach ($key in $keys) {
+            $list = $Index.ByName[$key]
+            foreach ($entry in $list) {
+                if ([string]$entry.Platform -ne $platformName) { continue }
+                $entryWords = @(& $fix @(Get-TpmMatchWords (Get-TpmMatchCleanTitle ([string]$entry.Name))))
+                if ($entryWords.Count -lt 2 -or $entryWords.Count -eq $queryWords.Count) { continue }
+                if ((@($entryWords | Where-Object { $_ -match '^\d+$' } | Sort-Object)) -join ',' -ne $queryNumbers) { continue }
+                if ($entryWords.Count -lt $queryWords.Count) { $short = $entryWords; $long = $queryWords } else { $short = $queryWords; $long = $entryWords }
+                if (($long.Count - $short.Count) -gt 4) { continue }
+                $isStart = $true
+                for ($i = 0; $i -lt $short.Count; $i++) { if ($short[$i] -ne $long[$i]) { $isStart = $false; break } }
+                $at = 0; $inOrder = $true
+                foreach ($word in $short) { $hit = [Array]::IndexOf($long, $word, $at); if ($hit -lt 0) { $inOrder = $false; break }; $at = $hit + 1 }
+                if (($isStart -and $short.Count -ge 2) -or ($inOrder -and $short.Count -ge 3)) { $found[[string]$entry.Id] = [pscustomobject]@{ Entry = $entry; Extra = ($long.Count - $short.Count) } }
+            }
+        }
+        if ($found.Count -eq 0) { continue }
+        $best = @($found.Values | Sort-Object Extra)
+        if ($best.Count -gt 1 -and $best[0].Extra -eq $best[1].Extra) { return $null }
+        return $best[0].Entry
+    }
+    return $null
+}
+
+# One name against the game list, by exact name, close name, or one name containing the other (a question for the user).
+function Get-TpmGamesDbPick {
+    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title, [int]$Year = 0, [string]$Maker = '')
+    $pick = Get-TpmGamesDbPickByScore -Index $Index -Title $Title -Year $Year -Maker $Maker
+    if ($pick.Kind -eq 'Exact' -or $pick.Kind -eq 'NearSure') { return $pick }
+    $contained = Find-TpmGamesDbContained -Index $Index -Title $Title
+    if ($contained -and [string]$contained.Id -ne [string]$pick.Id) {
+        return [pscustomobject]@{ Kind = 'NearAsk'; Id = [string]$contained.Id; Name = [string]$contained.Name; Platform = [string]$contained.Platform; Score = 0.85; Gap = 0.0; QueryName = $Title }
+    }
+    return $pick
+}
+
+# The decision. Names: objects with Source and Name, most trusted first. Status is Sure (exact name from every source that has
+# one, no source pointing elsewhere), Check (the user decides) or None. Level 1 = exact and agreed, 2 = a firm close name that all
+# sources agree on, 3 = anything else that still has a candidate. A close name is never Sure: it always waits for approval.
+function Resolve-TpmGamesDbMatch {
+    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [object[]]$Names = @(), [int]$Year = 0, [string]$Maker = '')
+    $picks = New-Object System.Collections.Generic.List[object]
+    # A name marked Fallback (the title typed in LaunchBox) is only a hint of last resort: it is used when no other source gave a
+    # candidate, and it never argues against the sources that did.
+    foreach ($pass in 1, 2) {
+        if ($pass -eq 2 -and $picks.Count -gt 0) { break }
+        foreach ($entry in @($Names)) {
+            if ($null -eq $entry -or [string]::IsNullOrWhiteSpace([string]$entry.Name)) { continue }
+            # A source whose whole "name" is a region ("World") has no game name in it.
+            if ([string]$entry.Name -match '^\s*(World|Japan|USA|Asia|Export|Korea|Europe|Euro|China|Taiwan)\s*$') { continue }
+            if (($pass -eq 1) -eq [bool]$entry.Fallback) { continue }
+            $pick = Get-TpmGamesDbPick -Index $Index -Title ([string]$entry.Name) -Year $Year -Maker $Maker
+            if (-not $pick.Id) { continue }
+            $pick | Add-Member -NotePropertyName Source -NotePropertyValue ([string]$entry.Source) -Force
+            [void]$picks.Add($pick)
+        }
+    }
+    $result = [pscustomobject]@{ Status = 'None'; Match = $null; Level = 0; Evidence = ''; UsedName = '' }
+    if ($picks.Count -eq 0) { return $result }
+    $exact = @($picks | Where-Object { $_.Kind -eq 'Exact' })
+    $exactIds = @($exact | ForEach-Object { [string]$_.Id } | Select-Object -Unique)
+    $allIds = @($picks | ForEach-Object { [string]$_.Id } | Select-Object -Unique)
+    $firm = @($picks | Where-Object { $_.Kind -eq 'NearSure' })
+    $firmElsewhere = @($firm | Where-Object { $exactIds -notcontains [string]$_.Id })
+    # Majority: when two or more sources give the same exact game and no other game has as many, the odd source is set aside.
+    # A tie (one against one) is never settled by guessing.
+    $setAside = @(); $setAsideWhy = 'the others agree'; $forceCheck = $false
+    $voteGroups = @($exact | Group-Object Id | Sort-Object Count -Descending)
+    if ($voteGroups.Count -ge 1 -and $voteGroups[0].Count -ge 2 -and ($voteGroups.Count -eq 1 -or $voteGroups[0].Count -gt $voteGroups[1].Count)) {
+        $winnerId = [string]$voteGroups[0].Name
+        $setAside = @($picks | Where-Object { [string]$_.Id -ne $winnerId })
+        $exact = @($exact | Where-Object { [string]$_.Id -eq $winnerId })
+        $exactIds = @($winnerId)
+        $firmElsewhere = @()
+    }
+    # Specific beats generic: when one source's name is another source's name plus extra words, and its game's name is the other
+    # game's name plus the same extra words, the more specific pick wins. Only the "for NESiCAxLive" ending is Sure; others are asked.
+    if ($setAside.Count -eq 0 -and $exactIds.Count -gt 1) {
+        $keyed = @($exact | ForEach-Object { [pscustomobject]@{ Pick = $_; Q = (Get-TpmMatchCanonKey ([string]$_.QueryName)); L = (Get-TpmMatchCanonKey ([string]$_.Name)) } })
+        foreach ($candidate in $keyed) {
+            $others = @($keyed | Where-Object { [string]$_.Pick.Id -ne [string]$candidate.Pick.Id })
+            $beatsAll = $others.Count -gt 0
+            foreach ($other in $others) {
+                $tailText = if ($candidate.Q.Length -gt $other.Q.Length -and $candidate.Q.StartsWith($other.Q)) { $candidate.Q.Substring($other.Q.Length) } else { $null }
+                $longerGame = ($candidate.L.Length -gt $other.L.Length -and $candidate.L.StartsWith($other.L))
+                if ($null -eq $tailText -or -not ($longerGame -or $tailText -eq 'nesicaxlive')) { $beatsAll = $false; break }
+            }
+            if (-not $beatsAll) { continue }
+            $tail = $candidate.Q.Substring($others[0].Q.Length)
+            $winnerId = [string]$candidate.Pick.Id
+            $setAside = @($picks | Where-Object { [string]$_.Id -ne $winnerId })
+            $exact = @($exact | Where-Object { [string]$_.Id -eq $winnerId })
+            $exactIds = @($winnerId); $firmElsewhere = @()
+            $setAsideWhy = 'the other name is less specific'
+            if ($tail -ne 'nesicaxlive') { $forceCheck = $true }
+            break
+        }
+    }
+    $best = if ($exact.Count -gt 0) { $exact[0] } else { @($picks | Sort-Object @{ Expression = { if ($_.Kind -eq 'NearSure') { 1 } else { 0 } }; Descending = $true }, @{ Expression = 'Score'; Descending = $true })[0] }
+    $status = 'Check'; $level = 3
+    if ($exact.Count -ge 1 -and $exactIds.Count -eq 1 -and $firmElsewhere.Count -eq 0 -and -not $forceCheck) { $status = 'Sure'; $level = 1 }
+    elseif ($exact.Count -eq 0 -and $allIds.Count -eq 1 -and $firm.Count -ge 1) { $level = 2 }
+    $notes = @($picks | ForEach-Object { '{0} "{1}" -> {2} ({3})' -f $_.Source, $_.QueryName, $_.Name, $_.Kind })
+    $result.Status = $status; $result.Match = $best; $result.Level = $level; $result.UsedName = [string]$best.QueryName
+    $result.Evidence = 'Level {0}: {1}' -f $level, ($notes -join '; ')
+    if ($setAside.Count -gt 0) { $result.Evidence += (' Set aside (' + $setAsideWhy + '): ') + ((@($setAside | ForEach-Object { '{0} "{1}"' -f $_.Source, $_.QueryName })) -join ', ') }
+    return $result
+}
+
+# TeknoParrot's own facts for a profile code: name, year and hardware/maker text. Empty for a missing file or unsafe code.
+function Get-TpmTeknoParrotMetadataFacts {
+    [CmdletBinding()] param([Parameter(Mandatory)][string]$TpRoot, [Parameter(Mandatory)][string]$ProfileCode)
+    $facts = [pscustomobject]@{ Name = (Get-TpmTeknoParrotGameName -TpRoot $TpRoot -ProfileCode $ProfileCode); Year = 0; Platform = '' }
+    if ($ProfileCode -notmatch '^[A-Za-z0-9_.\-]+$' -or $ProfileCode -match '^\.+$') { return $facts }
+    $path = Join-Path (Join-Path $TpRoot 'Metadata') ($ProfileCode + '.json')
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $facts }
+    try {
+        $data = [System.IO.File]::ReadAllText($path) | ConvertFrom-Json -ErrorAction Stop
+        $year = 0
+        if ($null -ne $data -and $data.PSObject.Properties['release_year'] -and [int]::TryParse([string]$data.release_year, [ref]$year) -and $year -gt 1900) { $facts.Year = $year }
+        if ($null -ne $data -and $data.PSObject.Properties['platform']) { $facts.Platform = [string]$data.platform }
+    } catch { Write-Log ('LaunchBox links: could not read the year for {0}: {1}' -f $ProfileCode, $_.Exception.Message) }
+    return $facts
+}
+
+# LaunchBox's MAME list as FileName (romset) -> game name. Empty when the file is missing or unreadable.
+function Get-TpmMameNameMap {
+    [CmdletBinding()] param([string]$MamePath)
+    $map = @{}
+    if ([string]::IsNullOrWhiteSpace($MamePath) -or -not (Test-Path -LiteralPath $MamePath -PathType Leaf)) { return $map }
+    $reader = $null
+    try {
+        $settings = New-Object System.Xml.XmlReaderSettings
+        $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+        $settings.XmlResolver = $null
+        $reader = [System.Xml.XmlReader]::Create($MamePath, $settings)
+        $inFile = $false; $fileName = ''; $gameName = ''
+        $more = $reader.Read()
+        while ($more) {
+            $advanced = $false
+            if ($reader.NodeType -eq [System.Xml.XmlNodeType]::Element) {
+                if ($reader.Name -eq 'MameFile') { $inFile = $true; $fileName = ''; $gameName = '' }
+                elseif ($inFile -and $reader.Name -eq 'FileName') { $fileName = $reader.ReadElementContentAsString(); $advanced = $true }
+                elseif ($inFile -and $reader.Name -eq 'Name') { $gameName = $reader.ReadElementContentAsString(); $advanced = $true }
+            } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::EndElement -and $reader.Name -eq 'MameFile') {
+                if ($inFile -and $fileName) { $map[$fileName] = $gameName }
+                $inFile = $false
+            }
+            if (-not $advanced) { $more = $reader.Read() }
+        }
+    } catch { Write-Log ('LaunchBox links: could not read the MAME list: {0}' -f $_.Exception.Message) }
+    finally { if ($null -ne $reader) { $reader.Dispose() } }
+    return $map
+}
+
+# The MAME romset name of a TeknoParrot profile: the zip in ExecutableName, else the part of the code after "mvs_" or "cps_".
+function Get-TpmMatchRomKey {
+    [CmdletBinding()] [OutputType([string])] param([Parameter(Mandatory)][string]$TpRoot, [Parameter(Mandatory)][string]$Code)
+    if ($Code -notmatch '^[A-Za-z0-9_.\-]+$' -or $Code -match '^\.+$') { return '' }
+    foreach ($folder in @('GameProfiles', 'UserProfiles')) {
+        $path = Join-Path (Join-Path $TpRoot $folder) ($Code + '.xml')
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        try {
+            $found = [regex]::Match([System.IO.File]::ReadAllText($path), '<ExecutableName>([^<]*)</ExecutableName>')
+            if ($found.Success -and $found.Groups[1].Value -match '^(.+)\.zip$') { return $Matches[1] }
+        } catch { Write-Log ('LaunchBox links: could not read the profile {0}: {1}' -f $Code, $_.Exception.Message) }
+    }
+    if ($Code -match '^[a-z0-9]+_(.+)$') { return $Matches[1] }
+    return ''
+}
+
+# Gathers the names (and the DAT year, when TeknoParrot has none) that each source gives for one game.
+# The Eggman list name counts only through Get-TpmLaunchBoxGameFacts, which accepts a list entry only for this profile's own code.
+function Get-TpmLinkEvidence {
+    [CmdletBinding()] param(
+        [Parameter(Mandatory)][string]$TpRoot, [string]$Code, [string]$TpName, [string]$Title,
+        [hashtable]$DatIndex = $null, [hashtable]$DatByCode = $null, [hashtable]$MameMap = $null
+    )
+    $names = New-Object System.Collections.Generic.List[object]
+    $datYear = 0
+    if ($TpName) { [void]$names.Add([pscustomobject]@{ Source = 'TeknoParrot'; Name = $TpName }) }
+    if ($Code -and $null -ne $DatIndex -and $DatIndex.Count -gt 0 -and $Code -match '^[A-Za-z0-9_.\-]+$') {
+        $profilePath = Join-Path (Join-Path $TpRoot 'UserProfiles') ($Code + '.xml')
+        if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
+            try {
+                $facts = Get-TpmLaunchBoxGameFacts -ProfilePath $profilePath -DatIndex $DatIndex -DatByCode $DatByCode
+                if ($facts.DatName) {
+                    $eggmanTitle = (Get-TpmEggmanGameName -GamePath $facts.DatName).Title
+                    if ($eggmanTitle) { [void]$names.Add([pscustomobject]@{ Source = 'Eggman list'; Name = $eggmanTitle }) }
+                    if ($null -ne $facts.Dat) { [void][int]::TryParse([string]$facts.Dat.Year, [ref]$datYear) }
+                }
+            } catch { Write-Log ('LaunchBox links: could not read the Eggman list facts for {0}: {1}' -f $Code, $_.Exception.Message) }
+        }
+    }
+    if ($Code -and $null -ne $MameMap) {
+        $romKey = Get-TpmMatchRomKey -TpRoot $TpRoot -Code $Code
+        if ($romKey -and $MameMap.ContainsKey($romKey) -and $MameMap[$romKey]) { [void]$names.Add([pscustomobject]@{ Source = 'MAME list'; Name = [string]$MameMap[$romKey] }) }
+    }
+    if ($Title) { [void]$names.Add([pscustomobject]@{ Source = 'LaunchBox title'; Name = $Title; Fallback = $true }) }
+    return [pscustomobject]@{ Names = $names.ToArray(); DatYear = $datYear }
+}
+
 function New-TpmLaunchBoxIdLinkPlan {
     param(
         [Parameter(Mandatory)][string]$LbRoot, [Parameter(Mandatory)][string]$TpRoot, [Parameter(Mandatory)][string]$EmulatorId,
-        [Parameter(Mandatory)][string[]]$PlatformNames, [Parameter(Mandatory)]$Index, [string[]]$ApprovedGameIds = @()
+        [Parameter(Mandatory)][string[]]$PlatformNames, [Parameter(Mandatory)]$Index, [string[]]$ApprovedGameIds = @(), [hashtable]$DatIndex = $null
     )
     $plans = New-Object System.Collections.Generic.List[object]
     $items = New-Object System.Collections.Generic.List[object]
+    $datByCode = Get-TpmLaunchBoxDatByCode -DatIndex $DatIndex
+    $mameMap = $null
     foreach ($name in $PlatformNames) {
         $safe = Get-SafeLaunchBoxPlatformFileName $name
         if ($safe -cne $name -or $name -in @('.', '..')) { throw 'Platform name must be a safe, unambiguous filename.' }
@@ -46321,16 +46792,12 @@ function New-TpmLaunchBoxIdLinkPlan {
             $title = Get-XmlChildText $game 'Title'
             $code = [System.IO.Path]::GetFileNameWithoutExtension((Get-XmlChildText $game 'ApplicationPath'))
             $tpName = if ($code) { Get-TpmTeknoParrotGameName -TpRoot $TpRoot -ProfileCode $code } else { '' }
-            $match = $null; $status = 'None'; $usedName = $tpName
-            if ($tpName) { $match = Find-TpmGamesDbMatch -Index $Index -Title $tpName }
-            if (-not $match -and $title) { $match = Find-TpmGamesDbMatch -Index $Index -Title $title; if ($match) { $usedName = $title } }
-            if ($match) { $status = 'Sure' }
-            else {
-                $lookFor = if ($tpName) { $tpName } else { $title }
-                $near = if ($lookFor) { @(Find-TpmGamesDbCandidate -Index $Index -Title $lookFor -Top 1) } else { @() }
-                if ($near.Count -eq 0 -and $lookFor) { $near = @(Find-TpmLaunchBoxIdLinkPrefixCandidate -Index $Index -Title $lookFor) }
-                if ($near.Count -gt 0) { $match = $near[0]; $status = 'Check'; $usedName = $lookFor }
-            }
+            if ($null -eq $mameMap) { $mameMap = Get-TpmMameNameMap -MamePath (Join-Path $LbRoot 'Metadata\MAME.xml') }
+            $facts = if ($code) { Get-TpmTeknoParrotMetadataFacts -TpRoot $TpRoot -ProfileCode $code } else { $null }
+            $evidence = Get-TpmLinkEvidence -TpRoot $TpRoot -Code $code -TpName $tpName -Title $title -DatIndex $DatIndex -DatByCode $datByCode -MameMap $mameMap
+            $year = if ($null -ne $facts -and $facts.Year -gt 0) { [int]$facts.Year } else { [int]$evidence.DatYear }
+            $resolved = Resolve-TpmGamesDbMatch -Index $Index -Names $evidence.Names -Year $year -Maker $(if ($null -ne $facts) { [string]$facts.Platform } else { '' })
+            $match = $resolved.Match; $status = $resolved.Status; $usedName = $resolved.UsedName
             $applied = $false; $titleChanged = $false
             if ($match -and ($status -eq 'Sure' -or $gameId -in $ApprovedGameIds)) {
                 Set-XmlChildText $game 'DatabaseID' ([string]$match.Id)
@@ -46344,7 +46811,7 @@ function New-TpmLaunchBoxIdLinkPlan {
                 Set-XmlChildText $game 'DateModified' (Get-Date).ToString('o')
                 $applied = $true
             }
-            [void]$items.Add([pscustomobject]@{ GameId = $gameId; Title = $title; Code = $code; TeknoParrotName = $tpName; UsedName = $usedName; Status = $status; MatchName = $(if ($match) { [string]$match.Name } else { '' }); MatchId = $(if ($match) { [string]$match.Id } else { '' }); Score = $(if ($status -eq 'Check') { [double]$match.Score } else { 1.0 }); Applied = $applied; TitleChanged = $titleChanged })
+            [void]$items.Add([pscustomobject]@{ GameId = $gameId; Title = $title; Code = $code; TeknoParrotName = $tpName; UsedName = $usedName; Status = $status; MatchName = $(if ($match) { [string]$match.Name } else { '' }); MatchId = $(if ($match) { [string]$match.Id } else { '' }); Score = $(if ($status -eq 'Check') { [double]$match.Score } else { 1.0 }); Applied = $applied; TitleChanged = $titleChanged; Level = $resolved.Level; Evidence = $resolved.Evidence })
         }
         $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
         [void]$plans.Add($filePlan)
@@ -46388,7 +46855,7 @@ function Format-TpmLaunchBoxIdLinkTitle {
 # -PlanOnly reads everything and changes nothing. ApprovedGameIds lists the close matches the user approved.
 # The caller makes sure LaunchBox and BigBox are closed before a write; the transaction also checks and refuses while they run.
 function Invoke-TpmLaunchBoxIdLink {
-    param([string]$LbRoot, [string]$TpRoot, [string[]]$PlatformNames = @('TeknoParrot'), [string]$BackupRoot, [string[]]$ApprovedGameIds = @(), [switch]$PlanOnly)
+    param([string]$LbRoot, [string]$TpRoot, [string[]]$PlatformNames = @('TeknoParrot'), [string]$BackupRoot, [string[]]$ApprovedGameIds = @(), [hashtable]$DatIndex = $null, [switch]$PlanOnly)
     try {
         $root = Resolve-TpmLaunchBoxRoot $LbRoot
         if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $root)) { throw 'Choose a safe existing LaunchBox root.' }
@@ -46404,8 +46871,9 @@ function Invoke-TpmLaunchBoxIdLink {
             return $none
         }
         $index = Get-TpmGamesDbIndex -DbPath $dbPath
-        $plan = New-TpmLaunchBoxIdLinkPlan -LbRoot $root -TpRoot $TpRoot -EmulatorId (Get-XmlChildText $emulatorNode[0] 'ID') -PlatformNames $PlatformNames -Index $index -ApprovedGameIds $ApprovedGameIds
+        $plan = New-TpmLaunchBoxIdLinkPlan -LbRoot $root -TpRoot $TpRoot -EmulatorId (Get-XmlChildText $emulatorNode[0] 'ID') -PlatformNames $PlatformNames -Index $index -ApprovedGameIds $ApprovedGameIds -DatIndex $DatIndex
         foreach ($line in (Format-TpmLaunchBoxIdLinkLine -Plan $plan)) { Write-Log ('LaunchBox links: ' + $line) }
+        foreach ($item in @($plan.Items)) { if ($item.Evidence) { Write-Log ('LaunchBox links: {0} -> {1}. {2}' -f $item.Code, $item.MatchName, $item.Evidence) } }
         $changedPlans = @($plan.Plans | Where-Object { $_.Changed })
         if ($PlanOnly) {
             $preview = New-TpmLaunchBoxResult NO_CHANGES ('Preview only, nothing was written. A write would change {0} file(s).' -f $changedPlans.Count)
@@ -46500,12 +46968,12 @@ function Write-TpmLaunchBoxIdLinkResult {
 }
 
 function Invoke-TpmLaunchBoxIdLinkStep {
-    param([string]$LbRoot, [string]$TpRoot)
+    param([string]$LbRoot, [string]$TpRoot, [hashtable]$DatIndex = $null)
     $root = $LbRoot
     if (-not $root) { $root = Read-HostSafe '  LaunchBox install folder (Enter to go back)' }
     if (-not $root) { return }
     Write-TpmText -Text 'First TeknoParrot Manager only reads your LaunchBox files. Games with no Games Database ID are matched to LaunchBox''s own game list, so LaunchBox finds the right art and details. Names you typed yourself are kept.' -Color DarkCyan
-    $plan = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -PlanOnly
+    $plan = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -DatIndex $DatIndex -PlanOnly
     Write-TpmLaunchBoxIdLinkResult -Result $plan -Preview
     if (-not $plan.PSObject.Properties['LinkPlan']) { return }
     $approved = New-Object System.Collections.Generic.List[string]
@@ -46516,7 +46984,7 @@ function Invoke-TpmLaunchBoxIdLinkStep {
             Write-TpmText -Text ('{0} -> {1} (ID {2})' -f $item.Title, $item.MatchName, $item.MatchId) -Color White
             if ((Read-TpmYesNo -Prompt '  Is this the same game? (Y/N)' -Default 'N') -eq 'Y') { [void]$approved.Add([string]$item.GameId) }
         }
-        $plan = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -ApprovedGameIds $approved.ToArray() -PlanOnly
+        $plan = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -DatIndex $DatIndex -ApprovedGameIds $approved.ToArray() -PlanOnly
         Write-TpmLaunchBoxIdLinkResult -Result $plan -Preview
     }
     if ($plan.Reason -ne 'PREVIEW' -or [int]$plan.WouldChangeFiles -eq 0) { return }
@@ -46530,7 +46998,7 @@ function Invoke-TpmLaunchBoxIdLinkStep {
         Write-Host '  LaunchBox or BigBox is still open, so nothing was changed.' -ForegroundColor DarkGray
         return
     }
-    $written = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -ApprovedGameIds $approved.ToArray()
+    $written = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -DatIndex $DatIndex -ApprovedGameIds $approved.ToArray()
     Write-TpmLaunchBoxIdLinkResult -Result $written
     if ($written.BackupPath) { Write-TpmText -Text 'To undo, open Restore in the main menu and choose the LaunchBox backup.' -Color DarkCyan }
 }
@@ -46976,7 +47444,7 @@ function Invoke-TpmLaunchBoxStep {
         } elseif ($lbChoice -eq 'G') {
             Invoke-TpmLaunchBoxEnrichStep -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -DatIndex $datIndex
         } elseif ($lbChoice -eq 'L') {
-            Invoke-TpmLaunchBoxIdLinkStep -LbRoot $lbRoot -TpRoot $tpRoot
+            Invoke-TpmLaunchBoxIdLinkStep -LbRoot $lbRoot -TpRoot $tpRoot -DatIndex $datIndex
         } elseif ($lbChoice -eq 'F') {
             $doLB = "Y"
         }
