@@ -21,6 +21,11 @@
     copy is made first, and you can undo it. Only entries the Manager
     added are ever removed.
 
+  AutoSync
+  - After unpacking, when every new game was also registered in
+    TeknoParrot, the message now says so. The "unpacked only" warning
+    shows only when a game still needs your attention.
+
   Game matching
   - A game folder whose name has a note in brackets after the title, such
     as "(Landscape,Bezel)", is now matched by its title alone, so the note

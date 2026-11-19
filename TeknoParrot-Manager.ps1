@@ -54734,7 +54734,14 @@ if (-not $dryRunActive -and ($registrationFollowUp.Count -gt 0 -or $manualRegDat
 if ($registrationFolders.Count -gt 0 -and -not $dryRunActive) {
     $extractedText = if ($registrationFolders.Count -eq 1) { ('{0} was extracted.' -f [System.IO.Path]::GetFileName($registrationFolders[0])) } else { ('{0} games were extracted.' -f $registrationFolders.Count) }
     Write-Host ""
-    Write-Host ("{0} That only means the files were unpacked. It does not mean the game is ready in TeknoParrot. Check the registration result above." -f $extractedText) -ForegroundColor DarkCyan
+    $registeredCleanly = ($result.Outcome -in @('SUCCEEDED','NO_OP')) -and $registrationFollowUp.Count -eq 0 -and $manualRegData.Count -eq 0 -and $result.Unmatched.Count -eq 0
+    if ($registeredCleanly) {
+        $registeredText = if ($registrationFolders.Count -eq 1) { ('{0} was extracted and registered in TeknoParrot.' -f [System.IO.Path]::GetFileName($registrationFolders[0])) } else { ('{0} games were extracted and registered in TeknoParrot.' -f $registrationFolders.Count) }
+        Write-Host ("{0} See the Registered lines above." -f $registeredText) -ForegroundColor DarkCyan
+    }
+    else {
+        Write-Host ("{0} That only means the files were unpacked. At least one game still needs your attention. Check the registration result above." -f $extractedText) -ForegroundColor Yellow
+    }
     Write-Host "  What should I do next?" -ForegroundColor Cyan
     Write-Host "  [N] New game only (default) -- stop here, skip the rest of your games" -ForegroundColor Cyan
     Write-Host "  [A] Check all games -- also repair your whole library, then set up controls" -ForegroundColor Cyan
