@@ -19128,6 +19128,9 @@ function Invoke-DgVoodoo2Setup {
     # Games with their own preset are planned first: when two profiles share a game folder, the preset claims dgVoodoo.conf before a game without one can claim it with the shared config.
     $presetProfiles = @($targetProfiles | Where-Object { Test-Path -LiteralPath (Join-Path $dgVoodoo2PresetsDir ($_.BaseName + '.conf')) -PathType Leaf -ErrorAction SilentlyContinue })
     $targetProfiles = @($presetProfiles) + @($targetProfiles | Where-Object { $presetProfiles -notcontains $_ })
+    # Every game picked is accounted for on the result screen: changed, already set up, skipped, failed or not finished.
+    $pickedGames = @($targetProfiles | ForEach-Object { [string]$_.BaseName })
+    $failedDetails = New-Object System.Collections.Generic.List[object]
 
     $preflightStarted = Get-Date
     $preflightCurrent = 0
@@ -19299,6 +19302,7 @@ function Invoke-DgVoodoo2Setup {
             } else {
                 Write-Host ("  ERROR {0} -- {1}" -f $pf.BaseName,$_) -ForegroundColor Red
                 Write-Log "dgVoodoo2: preflight error on $($pf.BaseName) -- $_"
+                [void]$failedDetails.Add([pscustomobject]@{ Game = [string]$pf.BaseName; Reason = 'Something went wrong while checking this game, so it was not changed.'; Technical = [string]$_.Exception.Message })
                 $errors++
             }
         }
@@ -19351,6 +19355,9 @@ function Invoke-DgVoodoo2Setup {
         }
     } else {
         $errors++
+        foreach ($plan in @($plannedProfiles | Where-Object { $_.Written })) {
+            [void]$failedDetails.Add([pscustomobject]@{ Game = [string]$plan.Game; Reason = 'The files could not be copied and checked. Details and the log say whether this game was changed.'; Technical = [string]$transactionResult.ReasonCode })
+        }
         Write-Host ("  ERROR: dgVoodoo2 file transaction did not complete ({0}). Review Details before retrying." -f $transactionResult.Outcome) -ForegroundColor Red
         Write-Log ("dgVoodoo2: direct file transaction outcome={0} reason={1}" -f $transactionResult.Outcome,$transactionResult.ReasonCode)
     }
@@ -19359,7 +19366,7 @@ function Invoke-DgVoodoo2Setup {
     Write-Log ("dgVoodoo2 setup: deployed={0} skipped={1} missingDevice={2} missingPath={3} errors={4} presetOverrides={5}" -f $deployed, $skipped, $missingDevice, $missingPath, $errors, $presetOverrides)
     $legacySucceeded = ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP') -and $plannedProfiles.Count -gt 0 -and $errors -eq 0 -and $skipped -eq 0 -and $missingDevice -eq 0 -and $missingPath -eq 0)
     # Selected games that already had every file: named on the result screen so every selected game is accounted for.
-    $alreadyConfiguredGames = @(if ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP')) { @($plannedProfiles | Where-Object { -not $_.Written } | ForEach-Object { [string]$_.Game }) })
+    $alreadyConfiguredGames = @($plannedProfiles | Where-Object { -not $_.Written } | ForEach-Object { [string]$_.Game })
     return [pscustomobject]@{
         Succeeded = $legacySucceeded
         NoOp = [bool]$noOp
@@ -19373,6 +19380,8 @@ function Invoke-DgVoodoo2Setup {
         DeploymentDetails = $deploymentDetails.ToArray()
         SkipDetails = $skipDetails.ToArray()
         PresetOverrides = [int]$presetOverrides
+        PickedGames = @($pickedGames)
+        FailedDetails = $failedDetails.ToArray()
         TransactionResult = $transactionResult
     }
 }
@@ -19395,30 +19404,80 @@ function Get-DgVoodoo2FailureGuidance {
 # FIX82: the dgVoodoo2 result screen (menu 6): one result line, one "not changed" line and one next step. The full report (what was
 # installed where, why, what was not changed, skipped games) is the Details view (key D) and the log. The cleanest result block of
 # the older screens was the template: nothing is said twice.
+# What happened to each game the user selected: @{ Game; Outcome = changed | already | skipped | failed | notfinished; Reason }.
+# A selected game is in exactly one row, so the counts on the result screen add up to the games selected and no game disappears.
+function Get-TpmDgVoodoo2GameOutcomes {
+    param([Parameter(Mandatory)]$Result)
+    $rows = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $picked = @(Get-TpmTransactionField -Object $Result -Name 'PickedGames' -Default @() | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { [string]$_ })
+    $add = {
+        param($Game, $Outcome, $Reason)
+        $name = [string]$Game
+        if ([string]::IsNullOrWhiteSpace($name)) { return }
+        if ($picked.Count -gt 0 -and $name -notin $picked) { return }
+        if ($seen.Add($name)) { [void]$rows.Add([pscustomobject]@{ Game = $name; Outcome = $Outcome; Reason = [string]$Reason }) }
+    }
+    foreach ($detail in @(Get-TpmTransactionField -Object $Result -Name 'FailedDetails' -Default @() | Where-Object { $null -ne $_ })) { & $add (Get-TpmTransactionField -Object $detail -Name 'Game' -Default '') 'failed' (Get-TpmTransactionField -Object $detail -Name 'Reason' -Default '') }
+    foreach ($detail in @(Get-TpmTransactionField -Object $Result -Name 'DeploymentDetails' -Default @() | Where-Object { $null -ne $_ })) { & $add (Get-TpmTransactionField -Object $detail -Name 'Game' -Default '') 'changed' '' }
+    foreach ($game in @(Get-TpmTransactionField -Object $Result -Name 'AlreadyConfigured' -Default @())) { & $add $game 'already' 'It already had every dgVoodoo2 file, so nothing was changed.' }
+    foreach ($detail in @(Get-TpmTransactionField -Object $Result -Name 'SkipDetails' -Default @() | Where-Object { $null -ne $_ })) { & $add (Get-TpmTransactionField -Object $detail -Name 'Game' -Default '') 'skipped' (Get-TpmTransactionField -Object $detail -Name 'Reason' -Default '') }
+    foreach ($game in $picked) { & $add $game 'notfinished' 'It was not reached, because the setup stopped before it got to this game.' }
+    return $rows.ToArray()
+}
+
 function Get-TpmDgVoodoo2ResultView {
     param([Parameter(Mandatory)]$Result)
     $installed = @(Get-TpmTransactionField -Object $Result -Name 'DeploymentDetails' -Default @() | Where-Object { $null -ne $_ })
     $skippedGames = @(Get-TpmTransactionField -Object $Result -Name 'SkipDetails' -Default @() | Where-Object { $null -ne $_ })
+    $outcomes = @(Get-TpmDgVoodoo2GameOutcomes -Result $Result)
+    $changedRows = @($outcomes | Where-Object { $_.Outcome -eq 'changed' })
+    $alreadyRows = @($outcomes | Where-Object { $_.Outcome -eq 'already' })
+    $skippedRows = @($outcomes | Where-Object { $_.Outcome -eq 'skipped' })
+    $failedRows = @($outcomes | Where-Object { $_.Outcome -eq 'failed' })
+    $notFinishedRows = @($outcomes | Where-Object { $_.Outcome -eq 'notfinished' })
     $nothingInstalled = ([bool](Get-TpmTransactionField -Object $Result -Name 'NoOp' -Default $false) -or $installed.Count -eq 0)
-    $title = 'No game needed a new dgVoodoo2 file. Nothing was changed.'
+    $noneAdded = 'No game needed a new dgVoodoo2 file. Nothing was changed.'
+    if ($nothingInstalled -and ($failedRows.Count + $notFinishedRows.Count) -gt 0) { $noneAdded = 'dgVoodoo2 could not finish for every game you selected.' }
+    $title = $noneAdded
     if (-not $nothingInstalled) { $title = ('dgVoodoo2 was added to {0}.' -f (Format-TpmGameCount -Count $installed.Count)) }
     $alreadyHad = @(Get-TpmTransactionField -Object $Result -Name 'AlreadyConfigured' -Default @() | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
     if ($alreadyHad.Count -gt 0) {
         $alreadyText = ('{0} already had every dgVoodoo2 file, so nothing was changed there: {1}.' -f (Format-TpmGameCount -Count $alreadyHad.Count), ($alreadyHad -join ', '))
-        if ($nothingInstalled) { $title = ('No game needed a new dgVoodoo2 file. Nothing was changed. ' + $alreadyText) } else { $title = ($title + ' ' + $alreadyText) }
+        if ($nothingInstalled) { $title = ($noneAdded + ' ' + $alreadyText) } else { $title = ($title + ' ' + $alreadyText) }
     }
-    $needs = @($skippedGames | Group-Object -Property { [string](Get-TpmTransactionField -Object $_ -Name 'Reason' -Default '') } | ForEach-Object { '{0} skipped. {1}' -f (Format-TpmGameCount -Count $_.Count), $_.Name })
+    # One line per reason, with the names of the games it applies to, so no skipped or failed game is left out.
+    $needs = New-Object System.Collections.Generic.List[string]
+    $addNeeds = {
+        param($Rows, [string]$Word)
+        foreach ($group in @($Rows | Group-Object -Property Reason)) {
+            [void]$needs.Add(('{0} {1} ({2}). {3}' -f (Format-TpmGameCount -Count $group.Count), $Word, (Format-TpmNameList -Names @($group.Group | ForEach-Object { $_.Game })), ([string]$group.Name).Trim()).Trim())
+        }
+    }
+    & $addNeeds $failedRows 'failed'
+    & $addNeeds $notFinishedRows 'not finished'
+    & $addNeeds $skippedRows 'skipped'
+    $skippedNames = @($skippedRows | ForEach-Object { $_.Game })
+    $driveSkips = @($skippedGames | Where-Object { [string](Get-TpmTransactionField -Object $_ -Name 'ReasonCode' -Default '') -eq 'DEVICE_UNAVAILABLE' -and $skippedNames -contains [string](Get-TpmTransactionField -Object $_ -Name 'Game' -Default '') })
     $next = 'Try a game. If it looks wrong or crashes, send a support package and the log.'
     if ($nothingInstalled) { $next = 'Nothing else to do. Press B to go back.' }
+    if ($driveSkips.Count -gt 0) { $next = Get-TpmDriveSkipNext }
+    elseif (($failedRows.Count + $notFinishedRows.Count) -gt 0) { $next = 'Press D to see why, then run dgVoodoo2 setup again.' }
     # FIX110 (S-9): the DLLs are added only when missing, but a per-game dgVoodoo.conf preset replaces the one in the game folder.
     $notChanged = 'Existing dgVoodoo2 files were not replaced or removed.'
     $presetOverrides = [int](Get-TpmTransactionField -Object $Result -Name 'PresetOverrides' -Default 0)
     if (-not $nothingInstalled -and $presetOverrides -gt 0) {
         $notChanged = ('Existing dgVoodoo2 DLL files were not replaced or removed. The only exception is dgVoodoo.conf: it was replaced for {0} with a preset file of their own.' -f (Format-TpmGameCount -Count $presetOverrides))
     }
+    $done = New-Object System.Collections.Generic.List[string]
+    $countsLine = Get-TpmStepCountsLine -Picked @(Get-TpmTransactionField -Object $Result -Name 'PickedGames' -Default @()).Count -Changed $changedRows.Count -AlreadySetUp $alreadyRows.Count -Skipped $skippedRows.Count -Failed $failedRows.Count
+    if ($countsLine) { [void]$done.Add($countsLine) }
+    $backupLine = Get-TpmBackupFolderLine -Result $Result -What 'the files it replaced'
+    if ($backupLine) { [void]$done.Add($backupLine) }
     return @{
         Title = $title
-        Status = $(if ($needs.Count -gt 0) { 'Attention' } else { 'Ok' })
+        Status = $(if (($failedRows.Count + $notFinishedRows.Count) -gt 0) { 'Problem' } elseif ($needs.Count -gt 0) { 'Attention' } else { 'Ok' })
+        Done = $done.ToArray()
         NotChanged = $notChanged
         Needs = $needs
         Next = $next
@@ -19442,6 +19501,11 @@ function Get-TpmDgVoodoo2DetailBlocks {
     if ($overrides -gt 0) { [void]$about.Add(('Config overrides: {0} per-game config override(s) found' -f $overrides)) }
     $blocks = New-Object System.Collections.Generic.List[object]
     [void]$blocks.Add(@{ Heading = 'About this change'; Lines = $about.ToArray() })
+    $everyGame = @(Get-TpmDgVoodoo2GameOutcomes -Result $Result)
+    if ($everyGame.Count -gt 0) {
+        $wording = @{ changed = 'Changed.'; already = 'Already set up.'; skipped = 'Skipped.'; failed = 'Failed.'; notfinished = 'Not finished.' }
+        [void]$blocks.Add(@{ Heading = 'Every game you selected'; Lines = @($everyGame | ForEach-Object { ('{0}: {1} {2}' -f $_.Game, $wording[[string]$_.Outcome], $_.Reason).Trim() }) })
+    }
     foreach ($detail in $installed) {
         $lines = New-Object System.Collections.Generic.List[string]
         $apis = @(Get-TpmTransactionField -Object $detail -Name 'LegacyApis' -Default @())
@@ -22268,11 +22332,13 @@ function Get-TpmGpuFixResultView {
     if ($cancelled -or $outcome -in @('SUCCEEDED', 'NO_OP')) { $status = 'Ok' }
     elseif ($outcome -eq 'PARTIAL_APPLIED' -or ($failed -eq 0 -and $unknown -eq 0 -and $count.Errors -eq 0)) { $status = 'Attention' }
     $done = New-Object System.Collections.Generic.List[string]
-    if ($isFinished -and $count.Unchanged -gt 0) { [void]$done.Add(('{0} already had the fix.' -f (Format-TpmGameCount -Count $count.Unchanged))) }
-    if ($isFinished -and $count.NotApplicable -gt 0) { [void]$done.Add(('No GPU fix exists for {0}.' -f (Format-TpmGameCount -Count $count.NotApplicable))) }
+    $countsLine = Get-TpmResultCountsLine -Result $Result -Picked @(Get-TpmTransactionField -Object $Result -Name 'SelectedItems' -Default @()) -AlreadyWord 'already set up or needed no fix'
+    if ($countsLine) { [void]$done.Add($countsLine) }
+    $backupLine = Get-TpmBackupFolderLine -Result $Result -What 'your game settings'
+    if ($backupLine) { [void]$done.Add($backupLine) }
     $next = 'Press B to go back.'
     if ($needs.Count -gt 0 -and $count.MissingPath -gt 0) { $next = 'Press H to fix the saved game paths, then press R to run it again.' }
-    elseif ($needs.Count -gt 0 -and $count.MissingDevice -gt 0) { $next = 'Plug in the drive for the game, then press R to run it again.' }
+    elseif ($needs.Count -gt 0 -and $count.MissingDevice -gt 0) { $next = 'Plug in the drive for the game, then press R to run it again. Or choose 13 (Library health check) in the main menu to repair these games.' }
     elseif ($needs.Count -gt 0) { $next = 'Press D to see why, or R to run it again.' }
     elseif ($outcome -eq 'SUCCEEDED') { $next = 'Start a game to try it. Press B to go back.' }
     return @{
@@ -32007,6 +32073,7 @@ function Get-BepInExPeArchitectureEvidence {
     $stream=$null
     try {
         if (-not (Test-Path -LiteralPath $Path -PathType Leaf -ErrorAction SilentlyContinue)) {
+            $result.State='UNREADABLE'
             $result.Reason='The executable is missing or unreadable.'
             return $result
         }
@@ -32052,6 +32119,7 @@ function Get-BepInExPeArchitectureEvidence {
         if ($machine -eq 0x8664) { return [pscustomobject]@{ State='SUPPORTED'; Architecture='x64'; Machine=$machine; Reason='The PE machine type is supported.' } }
         return [pscustomobject]@{ State='UNSUPPORTED'; Architecture=$null; Machine=$machine; Reason='The valid PE machine type is not supported by the available x86/x64 packages.' }
     } catch {
+        $result.State='UNREADABLE'
         $result.Reason='The executable architecture could not be read.'
         return $result
     } finally {
@@ -32120,7 +32188,7 @@ function Write-BepInExUnsafeRootGuidance {
 function Get-BepInExInspectionFailure {
     param(
         [Parameter(Mandatory)][object]$ErrorRecord,
-        [ValidateSet('UNKNOWN','UNSUPPORTED')][string]$ArchitectureState=''
+        [ValidateSet('UNKNOWN','UNSUPPORTED','UNREADABLE')][string]$ArchitectureState=''
     )
     $detail = [string]$ErrorRecord
     $exceptionMessage = if ($ErrorRecord -is [System.Management.Automation.ErrorRecord]) {
@@ -32137,6 +32205,10 @@ function Get-BepInExInspectionFailure {
         $code = 'UNSUPPORTED_ARCHITECTURE'
         $summary = 'This game uses an architecture that TeknoParrot Manager cannot update automatically.'
         $nextAction = 'Use a BepInEx package that supports this game architecture, or verify the game executable with its vendor.'
+    } elseif ($ArchitectureState -eq 'UNREADABLE') {
+        $code = 'UNREADABLE_FILE'
+        $summary = 'TeknoParrot Manager could not read the game file.'
+        $nextAction = 'Check that the game file is there and can be opened, then run setup again.'
     } elseif ($ArchitectureState -eq 'UNKNOWN' -or $detail -match '(?i)architecture|x86|x64|native bootstrap') {
         $code = 'UNKNOWN_ARCHITECTURE'
         $summary = 'TeknoParrot Manager could not read this game architecture safely.'
@@ -32168,6 +32240,7 @@ function Get-TpmBepInExSkipWords {
     param([Parameter(Mandatory)][string]$Code)
     $words = @{
         'UNKNOWN_ARCHITECTURE' = @('Could not tell if this game is 32-bit or 64-bit', 'Could not tell if these games are 32-bit or 64-bit')
+        'UNREADABLE_FILE' = @('Could not read the game file', 'Could not read these game files')
         'UNSUPPORTED_ARCHITECTURE' = @('BepInEx cannot be set up automatically for this kind of game', 'BepInEx cannot be set up automatically for these kinds of games')
         'DEVICE_UNAVAILABLE' = @('The drive for this game is not connected', 'The drives for these games are not connected')
         'GAME_PATH_MISSING' = @('The game file was not found', 'The game files were not found')
@@ -32238,6 +32311,18 @@ function Get-TpmBepInExDetailBlocks {
     return $blocks.ToArray()
 }
 
+# The lines every BepInEx result shows: how the selected games came out, and where a kept backup is.
+function Get-TpmBepInExDoneLines {
+    param($Result)
+    $lines = New-Object System.Collections.Generic.List[string]
+    $counts = Get-TpmResultCountsLine -Result $Result -Picked @(Get-TpmTransactionField -Object $Result -Name 'PickedItems' -Default @())
+    if ($counts) { [void]$lines.Add($counts) }
+    $kept = @(Get-TpmTransactionField -Object $Result -Name 'FailureRecords' -Default @() | ForEach-Object { [string](Get-TpmTransactionField -Object $_ -Name 'BackupPath' -Default '') } | Where-Object { $_ })
+    $backup = Get-TpmBackupFolderLine -Result $Result -ExtraPaths $kept -What 'the game files'
+    if ($backup) { [void]$lines.Add($backup) }
+    return $lines.ToArray()
+}
+
 # The screen as data: the parameters of Write-TpmOutcome. A missing result is shown honestly, never as success.
 function Get-TpmBepInExFailureView {
     param($Result, [string]$LogPath = '')
@@ -32268,7 +32353,7 @@ function Get-TpmBepInExFailureView {
     $next = 'Press D to see why, or R to try again.'
     if ($rollbackIssue) { $next = 'Do not try again yet. Press D for details, or O for help.' }
     elseif ($pathIssue) { $next = 'Press H to fix the saved game paths, then press R to try again.' }
-    elseif ($driveIssue) { $next = 'Plug in the drive for the game, then press R to try again.' }
+    elseif ($driveIssue) { $next = 'Plug in the drive for the game, then press R to try again. Or choose 13 (Library health check) in the main menu to repair these games.' }
     elseif ($counts.ContainsKey('SOURCE_COLLECTION')) { $next = 'Move the game out of your source folder, or fix the game folder in its profile. Then run BepInEx setup again.' }
     $view = @{
         Title = 'BepInEx could not finish for every game.'
@@ -32279,6 +32364,8 @@ function Get-TpmBepInExFailureView {
         DetailsNote = $note
     }
     if ($updated -gt 0) { $view.Done = @(('BepInEx was set up for {0}.' -f (Format-TpmGameCount -Count $updated))) }
+    $doneLines = @(Get-TpmBepInExDoneLines -Result $Result)
+    if ($doneLines.Count -gt 0) { $view.Done = @(@($view['Done']) + $doneLines | Where-Object { $_ }) }
     # Every game the user picked worked. What is left over are games they did not pick (a drive that is not connected, a game this setup cannot read), so this is not a failure.
     if ($updated -gt 0 -and $failed -eq 0 -and $unattempted -eq 0 -and -not $rollbackIssue) {
         $view.Title = ('BepInEx is set up for {0} you picked. Other games in your library were left alone.' -f (Format-TpmGameCount -Count $updated))
@@ -33172,7 +33259,8 @@ function Test-BepInExRollbackBatchStop {
 
 function Invoke-BepInExUpdateCheck {
     param([string]$UserProfilesDir,[string]$CacheDir,[string]$ApprovedGamesRoot='',[string[]]$ProtectedRoots=@())
-    $legacy=Invoke-BepInExUpdateCheckLegacy -UserProfilesDir $UserProfilesDir -CacheDir $CacheDir -ApprovedGamesRoot $ApprovedGamesRoot -ProtectedRoots $ProtectedRoots
+    $pickedOut = New-Object System.Collections.Generic.List[string]
+    $legacy=Invoke-BepInExUpdateCheckLegacy -UserProfilesDir $UserProfilesDir -CacheDir $CacheDir -ApprovedGamesRoot $ApprovedGamesRoot -ProtectedRoots $ProtectedRoots -PickedOut $pickedOut
     $items=@(Get-TpmTransactionField -Object $legacy -Name 'SelectedItems' -Default @())
     $changed=@(Get-TpmTransactionField -Object $legacy -Name 'ChangedItems' -Default @() | Where-Object { $_ -in $items } | Select-Object -Unique)
     $legacyReason=Get-TpmTransactionField -Object $legacy -Name 'Reason' -Default $null
@@ -33208,11 +33296,12 @@ $completed=@(@($completed)+@($changed) | Where-Object { $_ -in $items -and $_ -n
     if ($cancelled) { $tx | Add-Member -NotePropertyName Cancelled -NotePropertyValue $true -Force }
     if ($tx.PSObject.Properties.Name -notcontains 'Updated') { $tx | Add-Member -NotePropertyName Updated -NotePropertyValue 0 -Force }
     $tx | Add-Member -NotePropertyName Errors -NotePropertyValue ([int](Get-TpmTransactionField -Object $legacy -Name 'Errors' -Default 0)) -Force
+    $tx | Add-Member -NotePropertyName PickedItems -NotePropertyValue @($pickedOut.ToArray()) -Force
     return $tx
 }
 function Invoke-BepInExUpdateCheckLegacy {
     # Owner rule R6: ProtectedRoots are the configured source collection folders; a game folder inside one is refused before anything is staged, backed up or written.
-    param([string]$UserProfilesDir, [string]$CacheDir, [string]$ApprovedGamesRoot = '', [string[]]$ProtectedRoots = @())
+    param([string]$UserProfilesDir, [string]$CacheDir, [string]$ApprovedGamesRoot = '', [string[]]$ProtectedRoots = @(), [System.Collections.Generic.List[string]]$PickedOut = $null)
     if ([string]::IsNullOrWhiteSpace($ApprovedGamesRoot)) { $ApprovedGamesRoot = $gamesInstallFolder }
     $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'BepInEx profile discovery' -EnumerationErrorAction SilentlyContinue | Sort-Object Name)
     if ($profiles.Count -eq 0) { Write-Host '  No registered games found.' -ForegroundColor Yellow; Write-Log 'BepInEx update check: aborted -- no registered profiles.'; return [pscustomobject]@{ Succeeded=$true; Reason='NO_REGISTERED_GAMES'; Updated=0; Errors=0; MissingDevice=0; MissingPath=0; Protected=0; Skipped=0; UnsupportedArchitecture=0; UnknownArchitecture=0; PathReasonCounts=@{}; FailureRecords=@(); SelectedItems=@(); ChangedItems=@(); CompletedItems=@(); FailedItems=@(); SkippedItems=@(); UnattemptedItems=@(); BatchStopped=$false } }
@@ -33349,7 +33438,7 @@ function Invoke-BepInExUpdateCheckLegacy {
             }
             foreach ($candidate in @($candidates | Where-Object { -not $requiredArchitectureByCode.ContainsKey([string]$_.Code) })) {
                 $evidence = $architectureEvidenceByCode[[string]$candidate.Code]
-                $architectureState = if ($evidence.ExeEvidence.State -eq 'UNSUPPORTED') { 'UNSUPPORTED' } else { 'UNKNOWN' }
+                $architectureState = if ($evidence.ExeEvidence.State -eq 'UNSUPPORTED') { 'UNSUPPORTED' } elseif ($evidence.ExeEvidence.State -eq 'UNREADABLE') { 'UNREADABLE' } else { 'UNKNOWN' }
                 $classification = Get-BepInExInspectionFailure -ErrorRecord ([System.Exception]::new([string]$evidence.ExeEvidence.Reason)) -ArchitectureState $architectureState
                 if ($architectureState -eq 'UNSUPPORTED') { $unsupportedArchitecture++ } else { $unknownArchitecture++ }
                 if ($candidate.Code -notin $skippedItems) { [void]$skippedItems.Add([string]$candidate.Code) }
@@ -33396,7 +33485,7 @@ function Invoke-BepInExUpdateCheckLegacy {
             }
             $arch = if ($installedArch -in @('x64','x86') -and ($exeArch -notin @('x64','x86') -or $exeArch -eq $installedArch)) { $installedArch } else { $exeArch }
             if ($arch -notin @('x64','x86')) {
-                $classification = Get-BepInExInspectionFailure -ErrorRecord ([System.Exception]::new($exeEvidence.Reason)) -ArchitectureState 'UNKNOWN'
+                $classification = Get-BepInExInspectionFailure -ErrorRecord ([System.Exception]::new($exeEvidence.Reason)) -ArchitectureState $(if ($exeEvidence.State -eq 'UNREADABLE') { 'UNREADABLE' } else { 'UNKNOWN' })
                 $unknownArchitecture++
                 [void]$skippedItems.Add($candidate.Code)
                 if (-not $pathReasonCounts.ContainsKey($classification.Code)) { $pathReasonCounts[$classification.Code] = 0 }
@@ -33436,21 +33525,19 @@ function Invoke-BepInExUpdateCheckLegacy {
     }
     if ($inspectionProgressTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'BepInEx installation inspection' -Current $inspectionProgressCurrent -Total $inspectionProgressTotal -StartedAt $inspectionProgressStarted -Complete }
     # Only a few games need BepInEx. A game that has none is never offered in the bulk question below; the user has to pick it.
+    $offeredCount = $outdated.Count
     $freshGames = @($outdated | Where-Object { [string]$_.Installed -eq 'Not installed' })
     if ($freshGames.Count -gt 0) {
         foreach ($freshGame in $freshGames) { [void]$outdated.Remove($freshGame) }
         Write-Host ("  {0} game(s) do not have BepInEx. Only a few games need it, so they are left alone unless you pick them." -f $freshGames.Count) -ForegroundColor Cyan
-        $freshLeft = New-Object System.Collections.Generic.List[object]
-        foreach ($freshGame in @($freshGames | Sort-Object Label)) { [void]$freshLeft.Add($freshGame) }
-        while ($freshLeft.Count -gt 0) {
-            $freshRows = @($freshLeft | ForEach-Object { '{0} ({1})' -f $_.Label, $_.Architecture })
-            $freshIndex = Read-TpmNumberedListChoice -Rows $freshRows -Prompt '  Pick a game to add BepInEx to (B when you are done)' -Heading 'Games without BepInEx:'
-            if ($freshIndex -lt 0) { break }
-            [void]$outdated.Add($freshLeft[$freshIndex])
-            Write-Log ("BepInEx update check: the user chose to install BepInEx for {0}." -f $freshLeft[$freshIndex].Code)
-            $freshLeft.RemoveAt($freshIndex)
+        $freshSorted = @($freshGames | Sort-Object Label)
+        $freshRows = @($freshSorted | ForEach-Object { '{0} ({1})' -f $_.Label, $_.Architecture })
+        foreach ($freshIndex in @(Read-TpmMultiGameChoice -Rows $freshRows -Heading 'Games without BepInEx:' -Prompt '  Type the numbers of the games to add BepInEx to (like 1,3,6 or 1-8), A for all, or B for none')) {
+            [void]$outdated.Add($freshSorted[[int]$freshIndex])
+            Write-Log ("BepInEx update check: the user chose to install BepInEx for {0}." -f $freshSorted[[int]$freshIndex].Code)
         }
     }
+    if ($null -ne $PickedOut) { foreach ($selectedGame in $outdated) { [void]$PickedOut.Add([string]$selectedGame.Code) } }
     if ($outdated.Count -eq 0) {
         Write-Host ("  Up to date: {0} game(s)" -f $upToDate) -ForegroundColor Green
         if ($unsupportedArchitecture -gt 0) { Write-Host ("  Unsupported architecture: {0} game(s) -- left unchanged" -f $unsupportedArchitecture) -ForegroundColor Yellow }
@@ -33459,7 +33546,7 @@ function Invoke-BepInExUpdateCheckLegacy {
         if ($errors -gt 0) { Write-Host ("  Inspection issues: {0} -- see Details or the support log" -f $errors) -ForegroundColor Red }
         return [pscustomobject]@{ Succeeded = ($errors -eq 0 -and $skippedItems.Count -eq 0); Reason = if ($errors) { 'INSPECTION_FAILED' } elseif ($skippedItems.Count -gt 0) { 'ACTION_REQUIRED' } else { $null }; Errors=$errors; MissingDevice=$missingDevice; MissingPath=$missingPath; FailureRecords = @($failureRecords.ToArray()); PathReasonCounts = $pathReasonCounts; Protected=$protected; Skipped=$skippedItems.Count; UnsupportedArchitecture = $unsupportedArchitecture; UnknownArchitecture=$unknownArchitecture; SelectedItems = @($selectedItems.ToArray()); ChangedItems = @(); CompletedItems=@($upToDateItems.ToArray()); FailedItems = @($failedItems.ToArray()); SkippedItems = @($skippedItems.ToArray()); UnattemptedItems=@(); BatchStopped = $false }
     }
-    Write-Host ("  {0} game(s) need BepInEx installation or update:" -f $outdated.Count) -ForegroundColor Cyan
+    Write-Host ("  Selected: {0} of {1} games to install or update BepInEx:" -f $outdated.Count, $offeredCount) -ForegroundColor Cyan
     foreach ($o in @($outdated | Sort-Object Label)) { Write-Host ("    - {0}: {1} -> {2} ({3})" -f $o.Label, $o.Installed, $o.Latest.Version, $o.Architecture) -ForegroundColor DarkGray }
     # FIX110 (S-10): repair-reset is not offered; it was always refused after the download and staging.
     $installChoice = Read-TpmChoice -Prompt ("  [Y] Install/update  [B] Back  [N] Cancel  -- {0} game(s)" -f $outdated.Count) -Choices @('Y', 'B', 'N') -Default 'B'
@@ -37904,6 +37991,7 @@ function Invoke-LibraryHealthCheck {
     $dgVoodoo2Needed  = New-Object System.Collections.ArrayList
     $reShadeCount     = 0
     $bepInExCount     = 0
+    $bepInExNeeded    = New-Object System.Collections.ArrayList
     $detected         = Get-DetectedGpuVendor
     $optionalCoverageError = ''
     try {
@@ -37960,6 +38048,11 @@ function Invoke-LibraryHealthCheck {
             if ([System.IO.File]::Exists((ConvertTo-TpmAutoSyncLongPath -Path (Join-Path $rsInfo.TargetDir $rsInfo.DllName)))) { $reShadeCount++ }
 
             if (Get-BepInExInstalledVersion -ExeDir $exeDir) { $bepInExCount++ }
+            else {
+                # A game whose profile says it needs BepInEx and has none: listed by its plain game name.
+                $bepNeedNode = $doc.GameProfile.SelectSingleNode('RequiresBepInEx')
+                if ($bepNeedNode -and $bepNeedNode.InnerText.Trim() -ieq 'true') { [void]$bepInExNeeded.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)) }
+            }
         } catch {
             $optionalCheckFailed++
         Write-Log "HealthCheck: coverage check could not parse $($pf.Name) -- $_"
@@ -38095,6 +38188,7 @@ function Invoke-LibraryHealthCheck {
         PostgresServiceStatus = $postgresStatus
         ReShadeCount = $reShadeCount
         BepInExCount = $bepInExCount
+        BepInExNeeded = @($bepInExNeeded.ToArray())
         DetectedGpuVendor = $detected.Vendor
         PostgresNeededLabels = $postgresNeededLabelsResult
         PostgresConfiguredLabels = $postgresConfiguredLabelsResult
@@ -38171,6 +38265,10 @@ function Get-TpmLibraryHealthRows {
             $row = New-TpmLibraryHealthRow -Area $area.Area -Text 'OK' -Color 'Green'
         }
         [void]$rows.Add($row)
+    }
+    $bepNeeded = @(Get-TpmTransactionField -Object $Result -Name 'BepInExNeeded' -Default @())
+    if (-not $unavailable -and $bepNeeded.Count -gt 0) {
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'BepInEx' -Text ('Needs attention - {0} {1} BepInEx and {2} no BepInEx set up. Run BepInEx setup (menu 9)' -f (Format-TpmGameCount -Count $bepNeeded.Count), $(if ($bepNeeded.Count -eq 1) { 'needs' } else { 'need' }), $(if ($bepNeeded.Count -eq 1) { 'has' } else { 'have' })) -Color 'Yellow'))
     }
     $postgresRow = Get-TpmLibraryHealthPostgresRow -Result $Result
     if ($null -ne $postgresRow) { [void]$rows.Add($postgresRow) }
@@ -38395,8 +38493,10 @@ function Get-TpmLibraryHealthDetailBlocks {
         } else {
             [void]$lines.Add(('ReShade installed: {0} of {1} valid games' -f $Result.ReShadeCount, @($Result.Valid).Count))
             [void]$lines.Add(('BepInEx installed: {0} of {1} valid games' -f $Result.BepInExCount, @($Result.Valid).Count))
+            $bepNeededNames = @(Get-TpmTransactionField -Object $Result -Name 'BepInExNeeded' -Default @())
+            if ($bepNeededNames.Count -gt 0) { [void]$lines.Add(('Games that need BepInEx and do not have it set up: {0}' -f (Format-TpmNameList -Names $bepNeededNames -Max 1000))) }
         }
-        [void]$lines.Add('Note: ReShade and BepInEx are your choice for each game, so they are not flagged.')
+        [void]$lines.Add('Note: ReShade is your choice for each game, so it is not flagged. BepInEx is flagged only for games whose profile says they need it.')
     } else {
         [void]$lines.Add('Status: Not assessed.')
     }
@@ -38513,7 +38613,9 @@ function Write-TpmLibraryHealthActionMenu {
         $gpuCount = @($Result.GpuFixNeeded).Count
         $coverageMissing = [bool](Get-TpmTransactionField -Object $Result -Name 'OptionalCoverageUnavailable' -Default $false)
         $reShadeText = if ($validCount -gt 0 -and -not $coverageMissing) { ' ({0} of {1} have it)' -f $Result.ReShadeCount, (Format-TpmGameCount -Count $validCount) } else { '' }
+        $bepNeededCount = @(Get-TpmTransactionField -Object $Result -Name 'BepInExNeeded' -Default @()).Count
         $bepInExText = if ($validCount -gt 0 -and -not $coverageMissing) { ' ({0} of {1} have it)' -f $Result.BepInExCount, (Format-TpmGameCount -Count $validCount) } else { '' }
+        if ($bepNeededCount -gt 0 -and -not $coverageMissing) { $bepInExText += (' ({0} still {1} it)' -f (Format-TpmGameCount -Count $bepNeededCount), $(if ($bepNeededCount -eq 1) { 'needs' } else { 'need' })) }
         $dgText = if ($dgCount -gt 0) { ' ({0} still {1} it)' -f (Format-TpmGameCount -Count $dgCount), $(if ($dgCount -eq 1) { 'needs' } else { 'need' }) } else { '' }
         $gpuText = if ($gpuCount -gt 0) { ' ({0} still {1} it)' -f (Format-TpmGameCount -Count $gpuCount), $(if ($gpuCount -eq 1) { 'needs' } else { 'need' }) } else { '' }
         Write-Host ''
@@ -43172,6 +43274,118 @@ function Add-TpmPlainReasonLine {
     if ($reason.Known -or $Lines.Count -eq 0) { [void]$Lines.Add($reason.Text) }
 }
 
+# End-of-step result lines that every setup step shares (patches, dgVoodoo2, BepInEx, GPU fix).
+# "You selected 4 games: 3 changed, 1 skipped." Only the counts that apply are shown. A game that is in none of the counts is
+# shown as "not finished", so the parts always add up to the games selected.
+function Get-TpmStepCountsLine {
+    param([int]$Picked, [int]$Changed = 0, [int]$AlreadySetUp = 0, [int]$Skipped = 0, [int]$Failed = 0, [string]$ChangedWord = 'changed', [string]$AlreadyWord = 'already set up')
+    if ($Picked -le 0) { return '' }
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($Changed -gt 0) { [void]$parts.Add(('{0} {1}' -f $Changed, $ChangedWord)) }
+    if ($AlreadySetUp -gt 0) { [void]$parts.Add(('{0} {1}' -f $AlreadySetUp, $AlreadyWord)) }
+    if ($Skipped -gt 0) { [void]$parts.Add(('{0} skipped' -f $Skipped)) }
+    if ($Failed -gt 0) { [void]$parts.Add(('{0} failed' -f $Failed)) }
+    $left = $Picked - $Changed - $AlreadySetUp - $Skipped - $Failed
+    if ($left -gt 0) { [void]$parts.Add(('{0} not finished' -f $left)) }
+    return ('You selected {0}: {1}.' -f (Format-TpmGameCount -Count $Picked), ($parts -join ', '))
+}
+
+# The same line, counted from the item lists of a step result. Each selected game is counted once: changed, then skipped, then failed
+# (a game whose state could not be checked counts as failed), then already set up.
+function Get-TpmResultCountsLine {
+    param($Result, [string[]]$Picked = @(), [string]$ChangedWord = 'changed', [string]$AlreadyWord = 'already set up')
+    $pickedList = @($Picked | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+    if ($pickedList.Count -eq 0) { return '' }
+    $take = {
+        param([string]$Name, [string[]]$Exclude)
+        @(Get-TpmTransactionField -Object $Result -Name $Name -Default @() | Where-Object { $_ -in $pickedList -and $_ -notin $Exclude } | Select-Object -Unique)
+    }
+    $changed = @(& $take 'ChangedItems' @())
+    $skipped = @(& $take 'SkippedItems' $changed)
+    $failed = @(& $take 'FailedItems' (@($changed) + @($skipped)))
+    $failed = @($failed) + @(& $take 'UnknownItems' (@($changed) + @($skipped) + @($failed)))
+    $already = @(& $take 'CompletedItems' (@($changed) + @($skipped) + @($failed)))
+    return (Get-TpmStepCountsLine -Picked $pickedList.Count -Changed $changed.Count -AlreadySetUp $already.Count -Skipped $skipped.Count -Failed $failed.Count -ChangedWord $ChangedWord -AlreadyWord $AlreadyWord)
+}
+
+# Where the backup of a step is: the full path of the folder, in plain words. The backup folder of a transaction result is read from it;
+# folders a step knows about itself are added with -ExtraPaths. Returns '' when the step made no backup (nothing is claimed then).
+function Get-TpmBackupFolderLine {
+    param($Result = $null, [string[]]$ExtraPaths = @(), [string]$What = 'your files')
+    $paths = New-Object System.Collections.Generic.List[string]
+    $own = [string](Get-TpmTransactionField -Object (Get-TpmTransactionField -Object $Result -Name 'Backup') -Name 'RootPath' -Default '')
+    $nested = [string](Get-TpmTransactionField -Object (Get-TpmTransactionField -Object (Get-TpmTransactionField -Object $Result -Name 'TransactionResult') -Name 'Backup') -Name 'RootPath' -Default '')
+    foreach ($candidate in (@($own, $nested) + @($ExtraPaths))) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        if (-not $paths.Contains($candidate.Trim())) { [void]$paths.Add($candidate.Trim()) }
+    }
+    if ($paths.Count -eq 0) { return '' }
+    if ($paths.Count -eq 1) { return ('A backup of {0} is saved in this folder: {1}' -f $What, $paths[0]) }
+    return ('Backups of {0} are saved in these folders: {1}' -f $What, (Format-TpmNameList -Names $paths.ToArray() -Limit 3))
+}
+
+# The one plain line at the end of a step that skipped games because their drive is not connected.
+function Get-TpmDriveSkipNext {
+    return 'Connect the drive, or choose 13 (Library health check) in the main menu to repair these games.'
+}
+
+# Which games from a numbered list: typed numbers (1,3,6), ranges (1-8) or A for all of them. Returns the chosen 0-based row numbers, or
+# nothing for B or Enter. An answer that cannot be read is told so and asked again.
+function Read-TpmMultiGameChoice {
+    param([Parameter(Mandatory)][string[]]$Rows, [string]$Heading = '', [string]$Prompt = '  Type numbers like 1,3,6 or a range like 1-8, A for all, or B for none')
+    $rowList = @($Rows)
+    if ($rowList.Count -eq 0) { return @() }
+    Write-Host ''
+    if ($Heading) { Write-TpmText -Text $Heading -Color Cyan }
+    for ($index = 0; $index -lt $rowList.Count; $index++) {
+        $prefix = '{0}) ' -f ($index + 1)
+        Write-TpmText -Text ($prefix + $rowList[$index]) -Indent 4 -HangingIndent $prefix.Length
+    }
+    while ($true) {
+        $answer = ([string](Read-HostSafe $Prompt)).Trim().ToUpperInvariant()
+        if ($answer -eq '' -or $answer -eq 'B') { return @() }
+        if ($answer -eq 'A') { return @(0..($rowList.Count - 1)) }
+        # Expand-NumberList returns its list as one array object; it is read without @() so an empty answer counts as no numbers.
+        $numbers = Expand-NumberList -str $answer -max $rowList.Count
+        if ($numbers.Count -gt 0) { return @($numbers | Sort-Object -Unique | ForEach-Object { $_ - 1 }) }
+        Write-TpmText -Text 'That is not a number in the list.' -Color Yellow
+    }
+}
+
+# The Action Required follow-up lines of a run, put under one short heading per feature, so a long list is not one mixed pile.
+# A line that starts with a feature name opens that feature's group; any other line (for example the steps of a numbered list) stays with the line before it.
+function Get-TpmActionRequiredGroups {
+    param([string[]]$Lines = @())
+    $features = @(
+        @('Drive not connected', '^Drive not connected'),
+        @('Registration and unpacking', '^(Registration|AutoSync)\b'),
+        @('Patches', '^(Patch|Patches|Required patch|Required patches)\b'),
+        @('BepInEx', '^BepInEx\b'),
+        @('dgVoodoo2', '^dgVoodoo2\b'),
+        @('ReShade', '^ReShade\b'),
+        @('Crosshairs', '^Crosshairs?\b'),
+        @('GPU fix', '^GPU\b'),
+        @('TeknoParrot first-time setup', '^TeknoParrot has its own first-time setup')
+    )
+    $buckets = [ordered]@{}
+    foreach ($feature in $features) { $buckets[[string]$feature[0]] = New-Object System.Collections.Generic.List[string] }
+    $buckets['Other'] = New-Object System.Collections.Generic.List[string]
+    $current = ''
+    foreach ($line in @($Lines)) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        foreach ($feature in $features) {
+            if ([regex]::IsMatch($line, [string]$feature[1])) { $current = [string]$feature[0]; break }
+        }
+        if ($current -eq '') { $current = 'Other' }
+        [void]$buckets[$current].Add($line)
+    }
+    $groups = New-Object System.Collections.Generic.List[object]
+    foreach ($heading in $buckets.Keys) {
+        if ($buckets[$heading].Count -gt 0) { [void]$groups.Add([pscustomobject]@{ Heading = [string]$heading; Lines = $buckets[$heading].ToArray() }) }
+    }
+    return $groups.ToArray()
+}
+
 
 # One question with a Details key. D shows the detail blocks and asks again; any other answer is returned
 # trimmed and in upper case. With no blocks a D is an ordinary answer. The question is always asked (one
@@ -43338,13 +43552,13 @@ function Write-TpmOutcome {
     Write-Host ''
     if ($hasTitle) { Write-TpmText -Text $Title -Color $statusColor -Indent 2 }
     # Spaced puts a blank line before every item, so no run of text lines is longer than one item (also on a narrow console).
-    foreach ($item in @($doneItems | Select-Object -First $maxDone)) { Write-TpmText -Text ('- ' + $item) -Indent 4 -HangingIndent 2 -BlankBefore:$Spaced }
+    foreach ($item in @($doneItems | Select-Object -First $maxDone)) { Write-TpmText -Text ('- ' + $item) -Indent 4 -HangingIndent 2 -BlankBefore:$Spaced -BreakLongWords }
     if ($doneItems.Count -gt $maxDone) { Write-TpmText -Text ('... and {0} more' -f ($doneItems.Count - $maxDone)) -Indent 4 -Color DarkGray -BlankBefore:$Spaced }
     if (-not [string]::IsNullOrWhiteSpace($NotChanged)) { Write-TpmText -Text ('Not changed: ' + $NotChanged) -Indent 2 -HangingIndent 4 -Color DarkGray -BlankBefore:$Spaced }
     if ($needItems.Count -gt 0) {
         if ($hasTitle -or $doneItems.Count -gt 0 -or -not [string]::IsNullOrWhiteSpace($NotChanged)) { Write-Host '' }
         Write-TpmText -Text 'Needs your attention:' -Indent 2 -Color Yellow -BlankBefore:$Spaced
-        foreach ($item in @($needItems | Select-Object -First $maxNeeds)) { Write-TpmText -Text ('- ' + $item) -Indent 4 -HangingIndent 2 -Color Yellow -BlankBefore:$Spaced }
+        foreach ($item in @($needItems | Select-Object -First $maxNeeds)) { Write-TpmText -Text ('- ' + $item) -Indent 4 -HangingIndent 2 -Color Yellow -BlankBefore:$Spaced -BreakLongWords }
         if ($needItems.Count -gt $maxNeeds) { Write-TpmText -Text ('... and {0} more' -f ($needItems.Count - $maxNeeds)) -Indent 4 -Color DarkGray -BlankBefore:$Spaced }
     }
     if (-not [string]::IsNullOrWhiteSpace($Next)) {
@@ -43381,6 +43595,7 @@ function Get-TpmPlainReasonTable {
         'ALREADY_APPLIED' = 'This was already set up, so nothing needed to change.'
         'ALREADY_MATCHES' = 'This already matches the restore point, so nothing needed to change.'
         'UNKNOWN_ARCHITECTURE' = 'TeknoParrot Manager could not tell if this game is 32-bit or 64-bit.'
+        'UNREADABLE_FILE' = 'TeknoParrot Manager could not read this game file.'
         'UNSUPPORTED_ARCHITECTURE' = 'This step does not support this kind of game.'
         'CHANGED_SINCE_PREVIEW' = 'Your game settings changed after the preview, so nothing was changed.'
         'FAILED_BEFORE_MUTATION' = 'Something stopped this before any change was made.'
@@ -48868,9 +49083,11 @@ function New-TpmActionRequiredReportText {
         foreach ($plainLine in @(Get-TpmActionRequiredPlainLines -For File)) { [void]$builder.AppendLine($plainLine) }
     }
     if (@($OnboardingFollowUp).Count -gt 0) {
-        [void]$builder.AppendLine("")
-        [void]$builder.AppendLine("REGISTRATION / OPTIONAL SETUP NEEDS ATTENTION")
-        foreach ($followUp in $OnboardingFollowUp) { [void]$builder.AppendLine("  $followUp") }
+        foreach ($group in @(Get-TpmActionRequiredGroups -Lines @($OnboardingFollowUp))) {
+            [void]$builder.AppendLine("")
+            [void]$builder.AppendLine($group.Heading.ToUpperInvariant())
+            foreach ($followUp in $group.Lines) { [void]$builder.AppendLine("  $followUp") }
+        }
     }
     if ($ManualRegData.Count -gt 0) {
         [void]$builder.AppendLine(""); [void]$builder.AppendLine("REGISTER THESE GAMES IN TEKNOPARROTUI")
@@ -53651,17 +53868,24 @@ $mode = $null
                 'dgVoodoo2 setup did not return a verified result.'
             }
             [void](Set-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-deployment-failed' -Message $dgSummary -DataSafety 'TPM did not claim a complete dgVoodoo2 deployment. Review the transaction result and log before retrying; do not assume failed operations were rolled back.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
-            Write-Host ("  {0}" -f $dgSummary) -ForegroundColor Yellow
-            if ($dgResult) { Write-Host ("  Reason: {0}" -f $dgResult.Reason) -ForegroundColor Yellow }
-            if ($dgResult -and $dgResult.TransactionResult) {
-                Write-Host ("  Transaction: {0}; state: {1}. {2}" -f $dgResult.TransactionResult.Outcome, $dgResult.TransactionResult.ProductState, $dgResult.TransactionResult.Summary) -ForegroundColor Yellow
-            }
             $dgGuidance = Get-DgVoodoo2FailureGuidance -Result $dgResult
-            if ($dgGuidance.DeviceMessage) {
-                Write-Host ("  {0}" -f $dgGuidance.DeviceMessage) -ForegroundColor Yellow
-            }
-            if ($dgGuidance.MissingPathMessage) {
-                Write-Host ("  {0}" -f $dgGuidance.MissingPathMessage) -ForegroundColor Yellow
+            if ($dgResult -and $dgResult.PSObject.Properties['PickedGames']) {
+                # The result screen names every game that was selected and how it came out; the technical lines go to the log.
+                Write-Log ('dgVoodoo2 result: {0} Reason: {1}' -f $dgSummary, $dgResult.Reason)
+                $dgFailureView = Get-TpmDgVoodoo2ResultView -Result $dgResult
+                Write-TpmOutcome @dgFailureView
+            } else {
+                Write-Host ("  {0}" -f $dgSummary) -ForegroundColor Yellow
+                if ($dgResult) { Write-Host ("  Reason: {0}" -f $dgResult.Reason) -ForegroundColor Yellow }
+                if ($dgResult -and $dgResult.TransactionResult) {
+                    Write-Host ("  Transaction: {0}; state: {1}. {2}" -f $dgResult.TransactionResult.Outcome, $dgResult.TransactionResult.ProductState, $dgResult.TransactionResult.Summary) -ForegroundColor Yellow
+                }
+                if ($dgGuidance.DeviceMessage) {
+                    Write-Host ("  {0}" -f $dgGuidance.DeviceMessage) -ForegroundColor Yellow
+                }
+                if ($dgGuidance.MissingPathMessage) {
+                    Write-Host ("  {0}" -f $dgGuidance.MissingPathMessage) -ForegroundColor Yellow
+                }
             }
             if ($dgGuidance.OfferHealthCheck) {
                 Write-Host "  [H] Open 13) Library Health Check for missing paths" -ForegroundColor White
@@ -53855,6 +54079,7 @@ $mode = $null
             [void](Complete-TpmWorkflowStatus -Context $bepStatus -Summary 'BepInEx setup finished')
             [void](Close-TpmWorkflowStatus -Context $bepStatus)
             Write-Host "BepInEx setup finished and was verified." -ForegroundColor Green
+            foreach ($bepDoneLine in @(Get-TpmBepInExDoneLines -Result $bepResult)) { Write-TpmText -Text $bepDoneLine -Indent 2 }
             if ($bepResult.Outcome -eq 'CLEANUP_RESIDUE') { Write-Host '  Your games are updated. TeknoParrot Manager could not remove its temporary files; open View Log to see where they are.' -ForegroundColor Yellow }
             Write-Log "BepInEx update check complete."
             [void](Read-HostSafe '  Press Enter to return to menu')
@@ -56362,6 +56587,9 @@ if ($doDgVoodoo -eq "Y") {
         [void]$onboardingSummaries.Add($dgOutcome.FollowUp)
         [void]$onboardingFollowUp.Add($dgOutcome.FollowUp)
     }
+    if ($postDgResult -and [int](Get-TpmTransactionField -Object $postDgResult -Name 'MissingDevice' -Default 0) -gt 0) {
+        [void]$onboardingFollowUp.Add('Drive not connected: dgVoodoo2 skipped games on a drive that is not connected. ' + (Get-TpmDriveSkipNext))
+    }
 }
 # =============================================================================
 # CPS3 SUPPLEMENTARY FILES  (optional, only when CPS3 games are registered)
@@ -56416,6 +56644,7 @@ if ($doGpuFix -eq "Y") {
         Write-Host "GPU Compatibility Fix did not complete for every game. No success was claimed; review the per-game results above." -ForegroundColor Yellow
         if ([int](Get-TpmTransactionField -Object $autoGpuResult -Name 'MissingDevice' -Default 0) -gt 0) {
             Write-Host "  A drive that holds some of your games is not connected. Connect it, then run GPU Compatibility Fix again from the main menu." -ForegroundColor Yellow
+            [void]$onboardingFollowUp.Add('Drive not connected: the GPU fix skipped games on a drive that is not connected. ' + (Get-TpmDriveSkipNext))
         }
     }
 }
@@ -56585,7 +56814,10 @@ if ($hasAnyAction -or $designSkippedItems.Count -gt 0) {
         Write-TpmText -Text 'Nothing failed. Some games were skipped on purpose, because no game of their control type has controls you set yourself yet. The next step is listed below.' -Color Cyan -BreakLongWords
     }
     Write-Host ""
-    foreach ($followUp in $onboardingFollowUp) { Write-Host ('  ' + $followUp) -ForegroundColor Yellow }
+    foreach ($actionGroup in @(Get-TpmActionRequiredGroups -Lines $onboardingFollowUp.ToArray())) {
+        Write-Host ('  ' + $actionGroup.Heading) -ForegroundColor Cyan
+        foreach ($followUp in $actionGroup.Lines) { Write-Host ('    ' + $followUp) -ForegroundColor Yellow }
+    }
 
     # -- 1. Games needing manual registration ---------------------------------
     if ($manualRegData.Count -gt 0) {

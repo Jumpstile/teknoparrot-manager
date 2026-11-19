@@ -63,6 +63,13 @@
     already there and cannot be replaced safely, the message now says
     exactly why: the file is shared with another folder, it is a link, it
     is a folder, or it cannot be read.
+  - The game picker has an A choice for all games, and the screen says
+    "Selected N of M games" before you confirm. Typed numbers like 1,3,6
+    and 1-8 still work.
+  - Library health check lists the games that need BepInEx and do not
+    have it set up.
+  - A game file that cannot be read is now told apart from a game whose
+    32-bit or 64-bit type could not be worked out.
 
   PostgreSQL
   - If a second problem is found after you acknowledged the first result
@@ -78,6 +85,16 @@
     accident can still be done.
   - The dgVoodoo2 result names any selected game that already had every
     file, so every selected game is accounted for.
+  - The result screens of patches, dgVoodoo2, BepInEx and the GPU fix say
+    how many games you selected and how many were changed, already set
+    up, skipped or failed, so the numbers add up. They also say where the
+    backup is.
+  - dgVoodoo2 names the result of every game you selected, with the
+    reason for each skipped or failed game.
+  - The Action Required list is grouped by feature, with a short heading
+    for each group.
+  - A step that skipped games on a drive that is not connected now points
+    to Library health check (menu 13) to repair them.
 
   More fixes
   - After registering new games, the Manager now offers to add them to
