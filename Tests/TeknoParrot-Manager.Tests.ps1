@@ -8949,7 +8949,7 @@ It "preserves accumulated item outcomes and skip totals on each package acquisit
         }
         Mock Get-BepInExInstallationHealth { [pscustomobject]@{ Installed=$false; Complete=$false; Version=$null; Reason='not installed' } }
         Mock Read-TpmChoice { 'Y' }
-        Mock Read-TpmNumberedListChoice { 0 }
+        Mock Read-TpmMultiGameChoice { @(0, 1) }
         Mock Invoke-TpmDownload { return ($Failure -ne 'download failure') }
 
         $result = Invoke-BepInExUpdateCheck -UserProfilesDir $profiles -CacheDir (Join-Path $TestDrive 'AcquisitionCache') -ApprovedGamesRoot $approved

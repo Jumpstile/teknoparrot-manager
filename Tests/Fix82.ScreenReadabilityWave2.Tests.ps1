@@ -375,12 +375,14 @@ Describe 'FIX82 GPU fix: the vendor is typed, as before' {
 Describe 'FIX82 GPU fix result: one plain sentence, the names and paths under Details' {
     BeforeEach { Install-Fix82Console }
 
-    It 'says "Applied the Intel fix to 3 games." and hides the internal names, the backup folder and the zero counts' {
-        # Mutation: print the profile names (GpuBoolOn ...), the backup folder, or the Updated/Skipped/Errors rows with zeros on the default screen again.
+    It 'says "Applied the Intel fix to 3 games.", shows where the backup is, and hides the internal names and the zero counts' {
+        # Mutation: print the profile names (GpuBoolOn ...), drop the backup folder, or print the Updated/Skipped/Errors rows with zeros on the default screen again.
         $null = Show-TpmGpuFixResult -Result (New-Fix82GpuResult)
         $texts = Get-Fix82RowTexts
-        $texts | Should -Be @('', '  Applied the Intel fix to 3 games.', '', '  Next: Start a game to try it. Press B to go back.', '')
-        (Get-Fix82Text -Rows $script:fix82Rows) | Should -Not -Match 'GpuBoolOn|GpuDiscovered|GpuDropdown|FullBackup|Errors|Skipped|game\(s\)|\bTPM\b'
+        $texts | Should -Contain '  Applied the Intel fix to 3 games.'
+        $texts | Should -Contain '  Next: Start a game to try it. Press B to go back.'
+        (Get-Fix82Text -Rows $script:fix82Rows) | Should -Match ([regex]::Escape('A backup of your game settings is saved in this folder: D:\TP\UserProfiles\FullBackup\GpuFix_1'))
+        (Get-Fix82Text -Rows $script:fix82Rows) | Should -Not -Match 'GpuBoolOn|GpuDiscovered|GpuDropdown|Errors|Skipped|game\(s\)|\bTPM\b'
         @($script:fix82Rows | Where-Object { $_.Text -like '*Applied the Intel fix*' })[0].Color | Should -BeExactly 'Green'
         $script:fix82Prompts.Count | Should -Be 0
     }
@@ -433,7 +435,7 @@ Describe 'FIX82 GPU fix result: one plain sentence, the names and paths under De
     }
 
     It 'words each other outcome in plain language: <Case>' -ForEach @(
-        @{ Case = 'nothing needed'; Params = @{ Outcome = 'NO_OP'; Updated = 0; Unchanged = 4; Changed = @() }; Title = '  No game needed a GPU fix. Nothing was changed.'; Extra = '    - 4 games already had the fix.'; Next = 'Next: Press B to go back.' }
+        @{ Case = 'nothing needed'; Params = @{ Outcome = 'NO_OP'; Updated = 0; Unchanged = 4; Changed = @() }; Title = '  No game needed a GPU fix. Nothing was changed.'; Extra = ''; Next = 'Next: Press B to go back.' }
         @{ Case = 'cancelled'; Params = @{ Outcome = 'FAILED_BEFORE_MUTATION'; Cancelled = $true; Updated = 0; Changed = @() }; Title = '  GPU fix canceled. No game was changed.'; Extra = ''; Next = 'Next: Press B to go back.' }
         @{ Case = 'partly done'; Params = @{ Outcome = 'PARTIAL_APPLIED'; Updated = 2; Failed = 1; Errors = 1; Changed = @('A', 'B') }; Title = '  Applied the Intel fix to 2 games, but some games need attention.'; Extra = '    - 1 game could not be updated.'; Next = 'Next: Press D to see why, or R to run it again.' }
         @{ Case = 'safety copy failed'; Params = @{ Outcome = 'FAILED_BEFORE_MUTATION'; Updated = 0; Errors = 1; Failed = 1; Reason = 'PROFILE_BACKUP_FAILED'; Changed = @() }; Title = '  The GPU fix could not finish.'; Extra = '    - A safety copy of your game settings could not be made, so nothing was changed.'; Next = 'Next: Press D to see why, or R to run it again.' }
@@ -606,8 +608,8 @@ Describe 'FIX82 dgVoodoo2 result: one result line, one not-changed line, one nex
         $null = Show-TpmDgVoodoo2Result -Result (New-Fix82DgResult -Installed @((New-Fix82DgDetail)) -Skipped $skip -MissingPath 2)
         $texts = Get-Fix82RowTexts
         $texts | Should -Contain '  dgVoodoo2 was added to 1 game.'
-        $texts | Should -Contain '    - 2 games skipped. TeknoParrot Manager could not find the saved game executable.'
-        @($texts | Where-Object { $_ -like '*GameS1*' -or $_ -like '*Z:\*' }).Count | Should -Be 0
+        (Get-Fix82Text -Rows $script:fix82Rows) | Should -Match ([regex]::Escape('2 games skipped (GameS1 and GameS2). TeknoParrot Manager could not find the saved game executable.'))
+        @($texts | Where-Object { $_ -like '*Z:\*' }).Count | Should -Be 0
         @($script:fix82Rows | Where-Object { $_.Text -like '*was added to*' })[0].Color | Should -BeExactly 'Yellow'
     }
 

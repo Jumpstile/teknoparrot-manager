@@ -3,7 +3,7 @@ Describe 'Setup screens account for every game and offer a way back' {
         $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'TeknoParrot-Manager.ps1'
         $script:SourceText = Get-Content -LiteralPath $src -Raw
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($src, [ref]$null, [ref]$null)
-        $want = @('Get-TpmDgVoodoo2ResultView', 'Read-TpmOptionalStepChoice', 'Get-TpmOptionalStepName', 'Get-TpmOptionalStepHelpBlocks')
+        $want = @('Get-TpmDgVoodoo2ResultView', 'Get-TpmDgVoodoo2GameOutcomes', 'Get-TpmStepCountsLine', 'Get-TpmBackupFolderLine', 'Get-TpmDriveSkipNext', 'Format-TpmNameList', 'Join-TpmPostgresSetupNames', 'Read-TpmOptionalStepChoice', 'Get-TpmOptionalStepName', 'Get-TpmOptionalStepHelpBlocks')
         $funcs = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $want -contains $n.Name }, $true)
         foreach ($f in $funcs) { . ([scriptblock]::Create($f.Extent.Text)) }
         function Get-TpmTransactionField { param($Object, $Name, $Default) if ($null -ne $Object -and $Object.PSObject.Properties[$Name]) { return $Object.$Name } return $Default }
