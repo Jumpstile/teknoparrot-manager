@@ -49717,6 +49717,16 @@ function Get-ControlReadinessKnownRequirements {
             RequiredButtons = @('P1ButtonStart', 'P1Button1', 'P1Button2', 'P1Button3')
             # InputMapping values for Joystick Analog X/Y and Throttle Lever.
             RequiredAnalogs = @('Analog0', 'Analog2', 'Analog4')
+            # Plain names for each control, in the order the entry above lists them (Joystick X, Joystick Y, Throttle Lever).
+            ControlMeanings = @{
+                'P1ButtonStart' = 'Start button'
+                'P1Button1'     = 'Gun trigger'
+                'P1Button2'     = 'Missile trigger'
+                'P1Button3'     = 'Climax switch'
+                'Analog0'       = 'Joystick left and right'
+                'Analog2'       = 'Joystick up and down'
+                'Analog4'       = 'Throttle lever'
+            }
         }
     }
 
@@ -49770,14 +49780,14 @@ function Test-ControlReadinessAnalogMappingUsable {
     return ($null -ne $atNode) -and -not [string]::IsNullOrWhiteSpace($atNode.InnerText)
 }
 
-function Get-ControlReadinessControlsState {
-    param(
-        [Parameter(Position = 0)]$doc = $null,
-        [Parameter(Position = 1)][string]$Code = ''
-    )
+# Checks that a loaded profile document really is the one a requirements entry describes, and that it does not
+# select an Input API its own options rule out. Returns 'Ok', 'Unknown' (identity cannot be confirmed) or 'Unsupported'.
+# Read-only. Shared by the controls state check and the controls coverage inventory.
+function Get-ControlReadinessDocumentFit {
+    param($Doc, $Requirements)
 
-    $requirements = Get-ControlReadinessKnownRequirements -Code $Code
-    if ($null -eq $requirements) { return 'Unknown' }
+    $doc = $Doc
+    $requirements = $Requirements
     if ($null -eq $doc -or $null -eq $doc.GameProfile) { return 'Unknown' }
 
     # Ambiguous/unverifiable profile contract: the code matched the catalog,
@@ -49817,40 +49827,26 @@ function Get-ControlReadinessControlsState {
         }
     }
 
-    $btns = @(Get-ButtonNodes $doc)
-    $byMapping = @{}
-    foreach ($b in $btns) {
-        $imNode = $b.SelectSingleNode('InputMapping')
-        if ($imNode -and -not [string]::IsNullOrWhiteSpace($imNode.InnerText)) {
-            $byMapping[$imNode.InnerText.Trim()] = $b
-        }
-    }
+    return 'Ok'
+}
 
-    foreach ($required in $requirements.RequiredButtons) {
-        if (-not $byMapping.ContainsKey($required)) { return 'Missing' }
-        if (-not (Test-ControlReadinessButtonBindingUsable $byMapping[$required])) { return 'Missing' }
-    }
-    foreach ($required in $requirements.RequiredAnalogs) {
-        # There is no established "analog is bound" signal anywhere in this
-        # codebase (Test-ButtonIsBound only covers digital Raw/DirectInput/
-        # XInputButton nodes) -- whether an analog axis is actually wired to
-        # a working physical device is a real-evidence question this static
-        # pass cannot answer. Presence of the required mapping slot is the
-        # only authoritative structural fact available, but presence alone
-        # is not enough: a slot with an empty/missing AnalogType is not a
-        # structurally complete analog mapping either.
-        if (-not $byMapping.ContainsKey($required)) { return 'Missing' }
-        if (-not (Test-ControlReadinessAnalogMappingUsable $byMapping[$required])) { return 'Missing' }
-    }
+function Get-ControlReadinessControlsState {
+    param(
+        [Parameter(Position = 0)]$doc = $null,
+        [Parameter(Position = 1)][string]$Code = ''
+    )
 
-    # Every known-required control is present and (for digital buttons)
-    # bound. That is usable static evidence, but it is not a successful
-    # bounded control test or a verification record -- see
-    # Test-ControlReadinessVerificationEvidence. Stored device references
-    # (e.g. a DirectInputDeviceGuid) or a fully-bound-beyond-requirements
-    # profile do not change this outcome; there is no threshold that
-    # promotes structural completeness to Verified.
-    return 'NotVerified'
+    # Every outcome comes from the controls coverage inventory. Complete structure is still only 'NotVerified':
+    # no threshold of bound buttons promotes it to Verified.
+    $contract = Get-TpmControlCoverageContract -Code $Code
+    if ($null -eq $contract -or $null -eq $doc -or $null -eq $doc.GameProfile) { return 'Unknown' }
+    $inventory = Get-TpmControlCoverageInventory -Contract $contract -Facts (Get-TpmControlBindingFacts -Doc $doc -Contract $contract -Code $Code)
+    switch ($inventory.Structural) {
+        'Unknown'     { return 'Unknown' }
+        'Unsupported' { return 'Unsupported' }
+        'Complete'    { return 'NotVerified' }
+        default       { return 'Missing' }
+    }
 }
 
 # Classifies launch-observation state for one profile code. TPM does not
@@ -49862,6 +49858,35 @@ function Get-ControlReadinessControlsState {
 function Get-ControlReadinessLaunchState {
     param([string]$Code)
     return 'NotTestedByTpm'
+}
+
+# Reads the profile document for one code: the real UserProfile when there is one, otherwise the GameProfiles
+# template. Returns $null when neither exists, the code is not a safe name, or the file cannot be read. Never writes.
+function Read-ControlReadinessProfileDocument {
+    param(
+        [Parameter(Mandatory)][string]$Code,
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [string]$GameProfilesDir = ''
+    )
+
+    # Same code-shape guard as Get-ControlReadinessRegistrationState -- do not
+    # join an unvalidated $Code into either directory's path.
+    $sourcePath = $null
+    if ($Code -match '^[\w]+$') {
+        $userProfilePath = Join-Path $UserProfilesDir "$Code.xml"
+        $templatePath    = if ($GameProfilesDir) { Join-Path $GameProfilesDir "$Code.xml" } else { '' }
+        $sourcePath =
+            if (Test-Path -LiteralPath $userProfilePath -PathType Leaf) { $userProfilePath }
+            elseif ($templatePath -and (Test-Path -LiteralPath $templatePath -PathType Leaf)) { $templatePath }
+            else { $null }
+    }
+
+    $doc = $null
+    if ($sourcePath) {
+        try { $doc = Read-Xml $sourcePath } catch { $doc = $null }
+    }
+
+    return $doc
 }
 
 # Combines the three independent dimensions for one profile code into a
@@ -49880,22 +49905,7 @@ function Get-ControlReadinessAssessment {
 
     $registration = Get-ControlReadinessRegistrationState -Code $Code -UserProfilesDir $UserProfilesDir
 
-    # Same code-shape guard as Get-ControlReadinessRegistrationState -- do not
-    # join an unvalidated $Code into either directory's path.
-    $sourcePath = $null
-    if ($Code -match '^[\w]+$') {
-        $userProfilePath = Join-Path $UserProfilesDir "$Code.xml"
-        $templatePath    = if ($GameProfilesDir) { Join-Path $GameProfilesDir "$Code.xml" } else { '' }
-        $sourcePath =
-            if (Test-Path -LiteralPath $userProfilePath -PathType Leaf) { $userProfilePath }
-            elseif ($templatePath -and (Test-Path -LiteralPath $templatePath -PathType Leaf)) { $templatePath }
-            else { $null }
-    }
-
-    $doc = $null
-    if ($sourcePath) {
-        try { $doc = Read-Xml $sourcePath } catch { $doc = $null }
-    }
+    $doc = Read-ControlReadinessProfileDocument -Code $Code -UserProfilesDir $UserProfilesDir -GameProfilesDir $GameProfilesDir
 
     return [pscustomobject]@{
         Code         = $Code
@@ -50195,6 +50205,188 @@ function Get-ControlReadinessActionItems {
     Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'Control readiness profile scan' -Current $profileTotal -Total $profileTotal -Complete
     return @($items)
 }
+
+# =============================================================================
+# BEGIN MODULE-READY SECTION: Controls coverage inventory
+# =============================================================================
+# Read-only inventory of which controls a game needs and which of them TPM can see as usable (issue #305).
+# It reads facts about a profile and reports. It never writes a profile, never starts a game, and never says "ready".
+# Structural completeness is kept apart from verification: nothing in this section can produce Verified.
+# The contract it follows is shaped like docs/architecture/CONTROLLER_CAPABILITY_CONTRACT.md (issue #303). Reading the
+# profile file is a separate step (Get-TpmControlBindingFacts) from deciding what the facts mean (Get-TpmControlCoverageInventory),
+# so another device or storage layout only needs a new fact reader.
+# Depends on: Get-ControlReadinessKnownRequirements, Get-ControlReadinessDocumentFit, Read-ControlReadinessProfileDocument,
+# Get-ButtonNodes, Test-ControlReadinessButtonBindingUsable, Test-ControlReadinessAnalogMappingUsable.
+
+# Builds the reviewed controls contract for one profile code from the known-requirements list. Returns $null for a code
+# that has no reviewed entry, so an unknown game is never described from a guess.
+function Get-TpmControlCoverageContract {
+    param([string]$Code)
+
+    if ([string]::IsNullOrWhiteSpace($Code) -or $Code -notmatch '^[\w]+$') { return $null }
+    $requirements = Get-ControlReadinessKnownRequirements -Code $Code
+    if ($null -eq $requirements) { return $null }
+
+    $controls = New-Object System.Collections.ArrayList
+    foreach ($entry in @(
+            @($requirements.RequiredButtons | ForEach-Object { [pscustomobject]@{ Id = $_; Kind = 'Button' } }),
+            @($requirements.RequiredAnalogs | ForEach-Object { [pscustomobject]@{ Id = $_; Kind = 'Axis' } })
+        )) {
+        foreach ($item in @($entry)) {
+            $meaning = [string]$requirements.ControlMeanings[$item.Id]
+            if ([string]::IsNullOrWhiteSpace($meaning)) { $meaning = [string]$item.Id }
+            [void]$controls.Add([pscustomobject]@{
+                ControlId   = [string]$item.Id
+                Kind        = $item.Kind
+                Meaning     = $meaning
+                Requirement = 'Required'
+                Bindable    = $true
+                Scope       = 'Player'
+            })
+        }
+    }
+
+    return [pscustomobject]@{
+        ContractVersion   = 'TpmControllerCapability/v1'
+        MinReaderVersion  = 1
+        ProfileId         = ($Code.ToLowerInvariant() + '-reviewed')
+        ProfileRevision   = 1
+        ControllerContext = [pscustomobject]@{ DeviceClass = 'Unknown'; PlayerSlot = 'P1'; SelectionSource = 'Unset' }
+        SemanticControls  = @($controls)
+        Evidence          = [pscustomobject]@{ Origin = 'TpmReviewed'; ReviewState = 'Reviewed'; ReviewedUtc = $null }
+        GameContracts     = @()
+    }
+}
+
+# Reads one loaded profile document and reports, for the controls in the contract, which ones have a usable binding.
+# Fit is 'Ok', 'Unknown' (the document is not the one the contract describes) or 'Unsupported' (the document's own
+# Input API options rule it out). Read-only.
+function Get-TpmControlBindingFacts {
+    param(
+        $Doc,
+        [Parameter(Mandatory)]$Contract,
+        [Parameter(Mandatory)][string]$Code
+    )
+
+    $requirements = Get-ControlReadinessKnownRequirements -Code $Code
+    if ($null -eq $requirements -or $null -eq $Doc -or $null -eq $Doc.GameProfile) {
+        return [pscustomobject]@{ Fit = 'Unknown'; UsableControlIds = @() }
+    }
+    $fit = Get-ControlReadinessDocumentFit -Doc $Doc -Requirements $requirements
+    if ($fit -ne 'Ok') { return [pscustomobject]@{ Fit = $fit; UsableControlIds = @() } }
+
+    $byMapping = @{}
+    foreach ($button in @(Get-ButtonNodes $Doc)) {
+        $mappingNode = $button.SelectSingleNode('InputMapping')
+        if ($mappingNode -and -not [string]::IsNullOrWhiteSpace($mappingNode.InnerText)) {
+            $byMapping[$mappingNode.InnerText.Trim()] = $button
+        }
+    }
+
+    $usable = New-Object System.Collections.ArrayList
+    foreach ($control in @($Contract.SemanticControls)) {
+        if (-not $byMapping.ContainsKey($control.ControlId)) { continue }
+        $node = $byMapping[$control.ControlId]
+        $isUsable = if ($control.Kind -eq 'Axis') { Test-ControlReadinessAnalogMappingUsable $node } else { Test-ControlReadinessButtonBindingUsable $node }
+        if ($isUsable) { [void]$usable.Add([string]$control.ControlId) }
+    }
+    return [pscustomobject]@{ Fit = 'Ok'; UsableControlIds = @($usable) }
+}
+
+# Turns a contract and the facts about one profile into one row per control plus an overall state. Pure: the same inputs
+# always give the same output, in the contract's order. Verification is always NotVerified here, because this section has
+# no gameplay evidence and a launch, a registration or a bound-button count is never evidence.
+function Get-TpmControlCoverageInventory {
+    param(
+        [Parameter(Mandatory)]$Contract,
+        [Parameter(Mandatory)]$Facts
+    )
+
+    $fit = [string]$Facts.Fit
+    $usable = @($Facts.UsableControlIds)
+    $rows = New-Object System.Collections.ArrayList
+    foreach ($control in @($Contract.SemanticControls)) {
+        $structural = 'Unknown'
+        if ($fit -eq 'Ok') { $structural = if ($usable -contains $control.ControlId) { 'Complete' } else { 'Missing' } }
+        elseif ($fit -eq 'Unsupported') { $structural = 'Unsupported' }
+
+        $setup = 'Unknown'
+        $setupProperty = $control.PSObject.Properties['SetupRequirement']
+        if ($setupProperty -and -not [string]::IsNullOrWhiteSpace([string]$setupProperty.Value)) { $setup = [string]$setupProperty.Value }
+
+        [void]$rows.Add([pscustomobject]@{
+            ControlId    = [string]$control.ControlId
+            Meaning      = [string]$control.Meaning
+            Requirement  = [string]$control.Requirement
+            Scope        = [string]$control.Scope
+            Structural   = $structural
+            Setup        = $setup
+            Verification = 'NotVerified'
+        })
+    }
+
+    $required = @($rows | Where-Object { $_.Requirement -eq 'Required' })
+    $completeRequired = @($required | Where-Object { $_.Structural -eq 'Complete' })
+    $overall = 'Unknown'
+    if ($fit -eq 'Unsupported') { $overall = 'Unsupported' }
+    elseif ($fit -eq 'Ok' -and $required.Count -gt 0) {
+        if ($completeRequired.Count -eq $required.Count) { $overall = 'Complete' }
+        elseif ($completeRequired.Count -eq 0) { $overall = 'Missing' }
+        else { $overall = 'Partial' }
+    }
+
+    $setupOverall = 'Unknown'
+    if (@($rows | Where-Object { $_.Setup -eq 'CalibrationRequired' }).Count -gt 0) { $setupOverall = 'CalibrationRequired' }
+    elseif (@($rows | Where-Object { $_.Setup -eq 'FirstRunRequired' }).Count -gt 0) { $setupOverall = 'FirstRunRequired' }
+    elseif ($rows.Count -gt 0 -and @($rows | Where-Object { $_.Setup -ne 'NotRequired' }).Count -eq 0) { $setupOverall = 'NotRequired' }
+
+    return [pscustomobject]@{
+        ProfileId       = [string]$Contract.ProfileId
+        Structural      = $overall
+        Setup           = $setupOverall
+        Verification    = 'NotVerified'
+        Controls        = @($rows)
+        MissingControls = @($required | Where-Object { $_.Structural -eq 'Missing' } | ForEach-Object { $_.Meaning })
+        ReadOnly        = $true
+    }
+}
+
+# Plain-language lines for one inventory. Names the controls that are still needed and never calls the game ready.
+function Get-TpmControlCoverageLines {
+    param([Parameter(Mandatory)]$Inventory)
+
+    $lines = New-Object System.Collections.ArrayList
+    switch ([string]$Inventory.Structural) {
+        'Complete'    { [void]$lines.Add('Every control this game needs is set up.') }
+        'Partial'     { [void]$lines.Add('Some controls this game needs are not set up yet.') }
+        'Missing'     { [void]$lines.Add('The controls this game needs are not set up yet.') }
+        'Unsupported' { [void]$lines.Add('This game uses an input type TPM cannot check.') }
+        default       { [void]$lines.Add('TPM cannot tell which controls this game needs.') }
+    }
+    $missing = @($Inventory.MissingControls)
+    if ($missing.Count -gt 0) { [void]$lines.Add('Still needed: ' + ($missing -join ', ') + '.') }
+    [void]$lines.Add('TPM has not tested them in a game, so it cannot say the game is ready.')
+    return @($lines)
+}
+
+# Reads the profile for one code (the real UserProfile, otherwise the GameProfiles template) and returns its inventory,
+# or $null when the code has no reviewed contract. Read-only.
+function Get-TpmControlCoverage {
+    param(
+        [Parameter(Mandatory)][string]$Code,
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [string]$GameProfilesDir = ''
+    )
+
+    $contract = Get-TpmControlCoverageContract -Code $Code
+    if ($null -eq $contract) { return $null }
+    $doc = Read-ControlReadinessProfileDocument -Code $Code -UserProfilesDir $UserProfilesDir -GameProfilesDir $GameProfilesDir
+    $facts = Get-TpmControlBindingFacts -Doc $doc -Contract $contract -Code $Code
+    return Get-TpmControlCoverageInventory -Contract $contract -Facts $facts
+}
+# =============================================================================
+# END MODULE-READY SECTION: Controls coverage inventory
+# =============================================================================
 
 # =============================================================================
 # VALIDATION REPORT (read-only, no questions; issue #276)

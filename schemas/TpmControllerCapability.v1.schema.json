@@ -62,7 +62,8 @@
         "Meaning": { "type": "string", "minLength": 1, "maxLength": 120 },
         "Requirement": { "enum": ["Required", "Optional"] },
         "Bindable": { "type": "boolean" },
-        "Scope": { "enum": ["Player", "Cabinet"] }
+        "Scope": { "enum": ["Player", "Cabinet"] },
+        "SetupRequirement": { "enum": ["NotRequired", "CalibrationRequired", "FirstRunRequired"] }
       }
     },
     "evidenceMetadata": {

@@ -10,7 +10,7 @@ Related: #200 (controller mapping), #410 (controller evidence, `docs/architectur
 
 - **Profile identity.** `ProfileId` names the capability profile. `ProfileRevision` goes up by one on every reviewed change.
 - **Controller context.** `DeviceClass` (the same classes as the evidence contract), `PlayerSlot` (`P1` to `P6`, or `Cabinet`), and `SelectionSource`. The first target is `XboxStylePad` with `P1`.
-- **Semantic controls.** Each control has a `ControlId` such as `Coin1` or `P1Button1`, a `Kind`, a plain `Meaning`, whether it is `Required` or `Optional`, whether it is `Bindable`, and its `Scope` (`Player` or `Cabinet`). Cabinet controls such as Test and Service are optional by default and are listed only when a reviewed contract requires them.
+- **Semantic controls.** Each control has a `ControlId` such as `Coin1` or `P1Button1`, a `Kind`, a plain `Meaning`, whether it is `Required` or `Optional`, whether it is `Bindable`, its `Scope` (`Player` or `Cabinet`), and an optional `SetupRequirement` (`NotRequired`, `CalibrationRequired`, or `FirstRunRequired`). When a contract does not say, the setup state stays `Unknown`. Cabinet controls such as Test and Service are optional by default and are listed only when a reviewed contract requires them.
 - **Evidence.** `Origin` (`TpmReviewed`, `ExternalImport`, `UserProvided`), `ReviewState`, and `ReviewedUtc` say where the contract came from and whether a person reviewed it.
 - **Game contracts.** Each reviewed game contract is keyed by `GameProfileId` plus `GameProfileHash` plus `ContractRevision`. A file name alone is never an identity.
 
