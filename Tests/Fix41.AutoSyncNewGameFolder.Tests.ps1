@@ -442,6 +442,42 @@ Describe 'FIX41 P02 AutoSync first-time extraction into a new game folder' {
         @(Get-ChildItem -LiteralPath $fx.Games -Directory).Count | Should -Be 1
     }
 
+    It 'creates a folder for each of two different games whose names read the same without the year and tags, in preview and for real' {
+        # Mutation: claim the lossy normalized name instead of the profile code (Get-TpmAutoSyncClaimKeys) -> the second game is refused.
+        # Mutation: drop the Alternates lookup in Get-DatEntryForZipName -> the second ZIP is given the first game's profile code.
+        $a = 'Oscar Game (2004)[Taito Type X][TP]'
+        $b = 'Oscar Game (2011)[Taito NESICAxLive][TP]'
+        $alternates = New-Object System.Collections.Generic.List[object]
+        [void]$alternates.Add([pscustomobject]@{ ProfileCode = 'OSCARB'; OriginalName = $b; Executable = 'game.exe' })
+        $dat = @{ (Get-NormalizedGameKey $a) = [pscustomobject]@{ ProfileCode = 'OSCARA'; OriginalName = $a; Executable = 'game.exe'; Alternates = $alternates } }
+
+        $previewFx = New-Fix41Fixture
+        foreach ($n in @($a, $b)) { [void](New-Fix41GameZip -Fixture $previewFx -Name $n) }
+        $preview = Invoke-Fix41AutoSync -Fixture $previewFx -DryRun $true -DatIndex $dat
+        $preview.WouldSync | Should -Be 2
+        $preview.UnsafePathSkipped | Should -Be 0
+
+        $script:TpmOwnedLayout = $null
+        $fx = New-Fix41Fixture
+        foreach ($n in @($a, $b)) { [void](New-Fix41GameZip -Fixture $fx -Name $n) }
+        $result = Invoke-Fix41AutoSync -Fixture $fx -DatIndex $dat
+
+        $result.Synced | Should -Be 2 -Because (Get-Fix41Diagnostic $result)
+        $result.UnsafePathSkipped | Should -Be 0
+        @(Get-ChildItem -LiteralPath $fx.Games -Directory).Count | Should -Be 2
+    }
+
+    It 'the exact lookup gives each ZIP its own profile code' {
+        $a = 'Oscar Game (2004)[Taito Type X][TP]'
+        $b = 'Oscar Game (2011)[Taito NESICAxLive][TP]'
+        $alternates = New-Object System.Collections.Generic.List[object]
+        [void]$alternates.Add([pscustomobject]@{ ProfileCode = 'OSCARB'; OriginalName = $b })
+        $dat = @{ (Get-NormalizedGameKey $a) = [pscustomobject]@{ ProfileCode = 'OSCARA'; OriginalName = $a; Alternates = $alternates } }
+        (Get-DatEntryForZipName -RawZipName $a -DatIndex $dat).ProfileCode | Should -Be 'OSCARA'
+        (Get-DatEntryForZipName -RawZipName $b -DatIndex $dat).ProfileCode | Should -Be 'OSCARB'
+        (Get-DatEntryForZipName -RawZipName 'Oscar Game (2020)[Other][TP]' -DatIndex $dat).ProfileCode | Should -Be 'OSCARA'
+    }
+
     It 'leaves a played game folder alone when the ZIP did not change' {
         # Mutation: remove the "-not $needsSync" skip in Invoke-AutoSync -> the folder is swapped for a fresh copy and the player's save and changed settings are gone.
         $fx = New-Fix41Fixture
