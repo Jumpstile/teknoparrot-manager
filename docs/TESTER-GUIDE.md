@@ -1,12 +1,12 @@
-# TeknoParrot Manager RC8.3 - Tester Guide
+# TeknoParrot Manager RC8.4 - Tester Guide
 
-Updated Nov 17, 2026
+Updated Nov 20, 2026
 
 Thank you for helping! You will try a program that sets up arcade games on a PC. We want to find out if every game starts and plays with no extra work.
 
 Follow the steps in order. Take your time. If you get stuck, stop and send a screenshot to the person who gave you this guide. If something goes wrong, your backup lets us fix it.
 
-**What is new in RC8.3?** RC8.3 is a fix-up release for RC8.2. It fixes problems that testers found. Tests 1 to 35 are the same as before. **Tests 36 to 40 are new. If you only have a little time, do tests 36 to 40 first.**
+**What is new in RC8.4?** RC8.4 is a fix-up release for RC8.3. It fixes a problem that testers found. Tests 1 to 40 are the same as before. **Test 41 is new. If you only have a little time, do test 41 first.**
 
 Words you will see:
 
@@ -23,7 +23,7 @@ Do all of these before you test. Tick each box when you are done.
 
 - [ ] Use a PC that has TeknoParrot and at least 3 games on it. Different kinds of games are best.
 - [ ] Make a backup. Find your TeknoParrot folder. Inside it is a folder named UserProfiles. Copy that folder and paste the copy on your desktop.
-- [ ] Get the file TeknoParrot.Manager.v1.0.RC8.3.zip from the release page: https://github.com/Jumpstile/teknoparrot-manager/releases (or get it from the person who sent you this guide). The release page shows a SHA-256 check value for the file. To see yours, open PowerShell and run: `Get-FileHash -Algorithm SHA256 "C:\path\to\the\zip"`. The two values must match. If they do not, download the file again.
+- [ ] Get the file TeknoParrot.Manager.v1.0.RC8.4.zip from the release page: https://github.com/Jumpstile/teknoparrot-manager/releases (or get it from the person who sent you this guide). The release page shows a SHA-256 check value for the file. To see yours, open PowerShell and run: `Get-FileHash -Algorithm SHA256 "C:\path\to\the\zip"`. The two values must match. If they do not, download the file again.
 - [ ] Right-click the zip file and choose Extract All. Pick a NEW empty folder. Do not pick an old folder.
 - [ ] Learn how to take a screenshot: press the Windows key + Shift + S.
 
@@ -184,8 +184,8 @@ Tests 9 to 28 try the rest of the program. Do the ones that fit your games and y
 
 ### Test 21: Move up from an older version (RC7 or RC8)
 
-1. Do this only if you used RC7 or RC8 before. Do not delete the old folder. (If you use RC8.1 or RC8.2, do Test 29 instead.)
-2. Extract the RC8.3 zip into a NEW empty folder.
+1. Do this only if you used RC7 or RC8 before. Do not delete the old folder. (If you use RC8.1, RC8.2 or RC8.3, do Test 29 instead.)
+2. Extract the RC8.4 zip into a NEW empty folder.
 3. Start TeknoParrot Manager from the new folder. Answer the first questions the same way you did before.
 4. At the main menu, type 13 and press Enter (Library health check).
 5. You passed if your games and settings are all still there and the health check ends in plain words with no failure.
@@ -241,13 +241,13 @@ Tests 9 to 28 try the rest of the program. Do the ones that fit your games and y
 
 These tests try the fixes made in RC8.2.
 
-### Test 29: Update from RC8.1 or RC8.2 (menu 15)
+### Test 29: Update from RC8.1, RC8.2 or RC8.3 (menu 15)
 
-1. Do this only if you use RC8.1 or RC8.2 and RC8.3 is on the release page. Do not delete anything first.
+1. Do this only if you use RC8.1, RC8.2 or RC8.3 and RC8.4 is on the release page. Do not delete anything first.
 2. In your old version, at the main menu, type 15 and press Enter (Check for Updates).
 3. It should tell you a newer version is ready. It must ASK before it installs. Say yes.
 4. Wait until it says it is done. Close the program and start it again yourself.
-5. You passed if the title at the top now says v1.0 RC8.3, and your games and settings are all still there. Write down any message that did not make sense.
+5. You passed if the title at the top now says v1.0 RC8.4, and your games and settings are all still there. Write down any message that did not make sense.
 
 ### Test 30: Preview before copying controls
 
@@ -335,6 +335,17 @@ These tests try the fixes in RC8.3. Do them first if you are short on time.
 2. Install a game patch from the menu on a game in that folder. Then undo the patch.
 3. You passed if neither step stops with a "could not be checked" error.
 4. If your TeknoParrot folder is very deep, also start TeknoParrot Manager and let it tidy up its own files. You passed if it finishes with no error about a path that is too long.
+## New in RC8.4: test 41
+
+This test tries the fix in RC8.4. Do it first if you are short on time.
+
+### Test 41: Two games with almost the same name
+
+1. Use this only if you have zip files for two different games whose names start the same way (for example "Chaos Breaker" and "Chaos Breaker for NESICAxLive", or two versions of "Chaos Code"). Skip this test if you do not have these.
+2. Put both zip files in your Game ZIP folder. At the main menu, type 1 and press Enter (AutoSync).
+3. Read the preview, then say yes.
+4. You passed if BOTH games were unpacked into their own folders and set up. It failed if one of them was skipped with a message that another zip "already created a new folder for the same game".
+5. Open TeknoParrot. You passed that part if each game is listed once with its own name. If one game's zip exists in two regions (for example Japan and USA), they should still share ONE folder. That is correct.
 ## How to report a problem
 
 **Very important: the support report.** Every bug report needs a support report. Without it we often cannot find the cause. Make one every time something goes wrong. Never skip it.
