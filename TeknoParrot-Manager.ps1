@@ -40529,6 +40529,109 @@ function Set-ProfileInputApi {
     return $true
 }
 
+# ===== TpmController: Xbox starter layout (player 1) =====
+# Fills the Xbox (XInput) slots of a game profile with a standard starter layout.
+# Never overwrites an Xbox binding that is already there, never touches the
+# keyboard, arcade-encoder or other bindings, and only changes the game's Input API
+# field when the game lists that choice. Test and Service stay unbound on purpose:
+# they are cabinet controls and a stick click should not open a test menu.
+# The codes are the standard Microsoft XInput button flags.
+function Get-TpmXboxStarterLayout {
+    return @(
+        [pscustomobject]@{ Mapping = 'Coin1';         Code = 0x0020; Label = 'Back' }
+        [pscustomobject]@{ Mapping = 'P1ButtonStart'; Code = 0x0010; Label = 'Start' }
+        [pscustomobject]@{ Mapping = 'P1ButtonUp';    Code = 0x0001; Label = 'D-pad Up' }
+        [pscustomobject]@{ Mapping = 'P1ButtonDown';  Code = 0x0002; Label = 'D-pad Down' }
+        [pscustomobject]@{ Mapping = 'P1ButtonLeft';  Code = 0x0004; Label = 'D-pad Left' }
+        [pscustomobject]@{ Mapping = 'P1ButtonRight'; Code = 0x0008; Label = 'D-pad Right' }
+        [pscustomobject]@{ Mapping = 'P1Button1';     Code = 0x1000; Label = 'A' }
+        [pscustomobject]@{ Mapping = 'P1Button2';     Code = 0x2000; Label = 'B' }
+        [pscustomobject]@{ Mapping = 'P1Button3';     Code = 0x8000; Label = 'Y' }
+        [pscustomobject]@{ Mapping = 'P1Button4';     Code = 0x4000; Label = 'X' }
+        [pscustomobject]@{ Mapping = 'P1Button5';     Code = 0x0100; Label = 'LB' }
+        [pscustomobject]@{ Mapping = 'P1Button6';     Code = 0x0200; Label = 'RB' }
+    )
+}
+
+# Read-only. Says what the starter layout would do to one profile document.
+# Row actions: Add (slot is free), Keep (an Xbox binding is already there), NotInGame (the game has no such control).
+function Get-TpmXboxStarterPlan {
+    param([Parameter(Mandatory)]$Doc)
+    $rows = New-Object System.Collections.ArrayList
+    $byMapping = @{}
+    foreach ($btn in @(Get-ButtonNodes $Doc)) {
+        $key = Get-ButtonKey $btn
+        if ($key -and $key -like '*|None' -and -not $byMapping.ContainsKey($key)) { $byMapping[$key] = $btn }
+    }
+    foreach ($item in (Get-TpmXboxStarterLayout)) {
+        $btn = $byMapping[($item.Mapping + '|None')]
+        $action = if ($null -eq $btn) { 'NotInGame' } elseif ($null -ne $btn.SelectSingleNode('XInputButton')) { 'Keep' } else { 'Add' }
+        [void]$rows.Add([pscustomobject]@{ Mapping = $item.Mapping; Label = $item.Label; Code = $item.Code; Action = $action; Node = $btn })
+    }
+    $apiField = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral 'Input API')]")
+    $apiOptions = @()
+    if ($null -ne $apiField) { $apiOptions = @($apiField.SelectNodes('FieldOptions/string') | ForEach-Object { $_.InnerText.Trim() }) }
+    $currentApi = Get-ProfileInputApi $Doc
+    $addCount = @($rows | Where-Object Action -eq 'Add').Count
+    return [pscustomobject]@{
+        Rows         = @($rows)
+        AddCount     = $addCount
+        KeepCount    = @($rows | Where-Object Action -eq 'Keep').Count
+        MissingCount = @($rows | Where-Object Action -eq 'NotInGame').Count
+        CurrentApi   = $currentApi
+        XInputListed = ($apiOptions -contains 'XInput')
+        NeedsApiChange = ($currentApi -ne 'XInput')
+    }
+}
+
+# Adds one Xbox binding to a button node, in the order TeknoParrot writes its children.
+function Add-TpmXInputBinding {
+    param([Parameter(Mandatory)]$Doc, [Parameter(Mandatory)]$ButtonNode, [Parameter(Mandatory)][int]$Code)
+    $xi = $Doc.CreateElement('XInputButton')
+    foreach ($pair in @(
+        @('IsLeftThumbX','false'), @('IsRightThumbX','false'), @('IsLeftThumbY','false'), @('IsRightThumbY','false'),
+        @('IsAxisMinus','false'), @('IsLeftTrigger','false'), @('IsRightTrigger','false'),
+        @('ButtonCode',[string]$Code), @('IsButton','true'), @('ButtonIndex','0'), @('XInputIndex','0'))) {
+        $e = $Doc.CreateElement($pair[0]); $e.InnerText = $pair[1]; [void]$xi.AppendChild($e)
+    }
+    $raw = $ButtonNode.SelectSingleNode('RawInputButton')
+    $dir = $ButtonNode.SelectSingleNode('DirectInputButton')
+    if ($null -ne $raw) { [void]$ButtonNode.InsertBefore($xi, $raw) }
+    elseif ($null -ne $dir) { [void]$ButtonNode.InsertAfter($xi, $dir) }
+    else { [void]$ButtonNode.InsertAfter($xi, $ButtonNode.SelectSingleNode('ButtonName')) }
+}
+
+# Applies the starter layout to one profile file. With -DryRun nothing is written.
+# Order: read, plan, verified backup, write, read back and check, put the old file back if the check fails.
+function Invoke-TpmXboxStarterApply {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$ProfilePath, [bool]$DryRun = $true)
+    $result = [pscustomobject]@{ Path = $ProfilePath; Status = 'NoChange'; Added = 0; Kept = 0; Missing = 0; ApiChanged = $false; Backup = $null; Reason = '' }
+    try { $doc = Read-Xml $ProfilePath } catch { $result.Status = 'Unreadable'; $result.Reason = 'The profile could not be read.'; return $result }
+    $plan = Get-TpmXboxStarterPlan -Doc $doc
+    $result.Kept = $plan.KeepCount; $result.Missing = $plan.MissingCount
+    if (-not $plan.XInputListed -and $plan.NeedsApiChange) { $result.Status = 'Unsupported'; $result.Reason = 'This game does not offer the Xbox controller setting.'; return $result }
+    if ($plan.AddCount -eq 0 -and -not $plan.NeedsApiChange) { return $result }
+    $result.Added = $plan.AddCount
+    $result.ApiChanged = $plan.NeedsApiChange
+    if ($DryRun) { $result.Status = 'WouldChange'; return $result }
+    $original = [System.IO.File]::ReadAllBytes($ProfilePath)
+    try {
+        $result.Backup = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $UserProfilesDir -Label 'XboxStarter'
+        if (-not $result.Backup.Verified) { throw 'The safety backup could not be verified.' }
+        foreach ($row in @($plan.Rows | Where-Object Action -eq 'Add')) { Add-TpmXInputBinding -Doc $doc -ButtonNode $row.Node -Code $row.Code }
+        if ($plan.NeedsApiChange -and -not (Set-ProfileInputApi $doc 'XInput')) { throw 'The Input API could not be set.' }
+        Save-XmlMaybe $doc $ProfilePath $false
+        $check = Get-TpmXboxStarterPlan -Doc (Read-Xml $ProfilePath)
+        if ($check.AddCount -ne 0 -or $check.NeedsApiChange) { throw 'The saved profile did not read back correctly.' }
+        $result.Status = 'Changed'
+    } catch {
+        [System.IO.File]::WriteAllBytes($ProfilePath, $original)
+        $result.Status = 'Failed'; $result.Reason = $_.Exception.Message; $result.Added = 0; $result.ApiChanged = $false
+    }
+    return $result
+}
+# ===== end TpmController =====
+
 # Longest common prefix of a list of strings. Used to turn a device's bind
 # names into a single device name. Returns "" for an empty list.
 function Get-LongestCommonPrefix {
