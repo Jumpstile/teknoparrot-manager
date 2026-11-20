@@ -142,6 +142,8 @@ Describe 'FIX90 the end of a registration run adds no question of its own' {
             for ($parent = $node.Parent; $null -ne $parent; $parent = $parent.Parent) {
                 if ($parent -is [System.Management.Automation.Language.FunctionDefinitionAst]) { return $false }
             }
+            # The dgVoodoo2 menu screen (a splatted view, shown from the menu loop) is not part of the registration run.
+            if (@($node.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.VariableExpressionAst] -and $_.Splatted }).Count -gt 0) { return $false }
             return $true
         }, $true))
         $calls.Count | Should -Be 2
