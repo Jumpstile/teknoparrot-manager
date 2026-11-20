@@ -16,6 +16,17 @@ The previous published release was v1.0 RC8.2. RC4 and RC5 are historical; RC4 i
   games that have almost the same name, such as the Type X and
   NESiCAxLive versions of one game, or two versions of the same game.
   Each one now gets its own folder.
+- The BepInEx result no longer says "failed" when every game you picked
+  worked.
+- If a game is on a drive that is not connected, installing or undoing a
+  game patch gives one plain message about it.
+- ReShade tells you how many games it can change and that it leaves the
+  others alone. A game it cannot check is no longer called unsafe or
+  damaged.
+- The dgVoodoo2 scan line says how many games were checked and how many
+  were skipped.
+- Lists of games show the game name instead of "and 1 more".
+- The game picker shows how many games you have picked so far.
 
 ## v1.0 RC8.3 (changes since RC8.2)
 
