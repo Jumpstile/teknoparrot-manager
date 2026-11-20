@@ -40580,7 +40580,8 @@ function Get-TpmXboxStarterPlan {
         MissingCount = @($rows | Where-Object Action -eq 'NotInGame').Count
         CurrentApi   = $currentApi
         XInputListed = ($apiOptions -contains 'XInput')
-        NeedsApiChange = ($currentApi -ne 'XInput')
+        # A game the user already put on MergedInput keeps it: that choice is theirs, and only free Xbox slots are filled.
+        NeedsApiChange = ($currentApi -ne 'XInput' -and $currentApi -ne 'MergedInput')
     }
 }
 
@@ -40695,7 +40696,7 @@ function Invoke-TpmXboxStarterScreen {
     Write-Host ''
     Write-TpmText -Text ('How will you play {0}?' -f $title) -Color Cyan
     Write-TpmText -Text 'A = arcade controls (nothing changes)' -Indent 4
-    Write-TpmText -Text 'X = Xbox controller (turns off the arcade encoder for this game only)' -Indent 4
+    Write-TpmText -Text 'X = Xbox controller (this game may stop using the arcade encoder)' -Indent 4
     if ((Read-TpmChoice -Prompt '  Choose A or X' -Choices @('A', 'X') -Default 'A') -ne 'X') {
         Write-TpmText -Text 'Nothing changed. This game keeps its arcade controls.' -Color Green
         Write-Log ('XboxStarter: {0}: arcade chosen, no change.' -f $title)

@@ -21,12 +21,12 @@ BeforeAll {
     function Write-TpmCompactExtractionProgress { param([Parameter(ValueFromRemainingArguments)]$Ignored) }
 
     function script:New-CtlProfile {
-        param([string]$Dir, [string]$Name, [string]$Options = '<string>DirectInput</string><string>XInput</string>')
+        param([string]$Dir, [string]$Name, [string]$Options = '<string>DirectInput</string><string>XInput</string>', [string]$Api = 'DirectInput')
         $xml = @"
 <?xml version="1.0" encoding="utf-8"?>
 <GameProfile>
   <ConfigValues>
-    <FieldInformation><CategoryName>General</CategoryName><FieldName>Input API</FieldName><FieldValue>DirectInput</FieldValue><FieldOptions>$Options</FieldOptions></FieldInformation>
+    <FieldInformation><CategoryName>General</CategoryName><FieldName>Input API</FieldName><FieldValue>$Api</FieldValue><FieldOptions>$Options</FieldOptions></FieldInformation>
   </ConfigValues>
   <JoystickButtons>
     <JoystickButtons><ButtonName>Coin</ButtonName><XInputButton><IsLeftThumbX>false</IsLeftThumbX><IsRightThumbX>false</IsRightThumbX><IsLeftThumbY>false</IsLeftThumbY><IsRightThumbY>false</IsRightThumbY><IsAxisMinus>false</IsAxisMinus><IsLeftTrigger>false</IsLeftTrigger><IsRightTrigger>false</IsRightTrigger><ButtonCode>99</ButtonCode><IsButton>true</IsButton><ButtonIndex>0</ButtonIndex><XInputIndex>0</XInputIndex></XInputButton><RawInputButton><DevicePath>kbd</DevicePath><DeviceType>Keyboard</DeviceType><KeyboardKey>D5</KeyboardKey></RawInputButton><InputMapping>Coin1</InputMapping><AnalogType>None</AnalogType></JoystickButtons>
@@ -85,6 +85,16 @@ Describe 'Xbox starter layout' {
         $b1.DirectInputButton.Button | Should -Be '7'
         $coin = @(Get-ButtonNodes $doc | Where-Object { $_.InputMapping -eq 'Coin1' })[0]
         $coin.XInputButton.ButtonCode | Should -Be '99'
+        (Get-TpmXboxStarterPlan -Doc $doc).AddCount | Should -Be 0
+    }
+
+    It 'keeps MergedInput when the game already uses it and still fills free Xbox slots' {
+        $path = New-CtlProfile -Dir $script:Dir -Name 'GameM' -Options '<string>DirectInput</string><string>XInput</string><string>MergedInput</string>' -Api 'MergedInput'
+        $r = Invoke-TpmXboxStarterApply -UserProfilesDir $script:Dir -ProfilePath $path -DryRun $false
+        $r.Status | Should -Be 'Changed'
+        $r.ApiChanged | Should -BeFalse
+        $doc = Read-Xml $path
+        Get-ProfileInputApi $doc | Should -Be 'MergedInput'
         (Get-TpmXboxStarterPlan -Doc $doc).AddCount | Should -Be 0
     }
 
