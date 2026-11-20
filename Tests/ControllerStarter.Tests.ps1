@@ -95,6 +95,26 @@ Describe 'Xbox starter layout' {
         $r.Status | Should -Be 'NoChange'
     }
 
+    It 'a batch makes one backup for many games' {
+        $a = New-CtlProfile -Dir $script:Dir -Name 'GameA'
+        $b = New-CtlProfile -Dir $script:Dir -Name 'GameB'
+        $r = Invoke-TpmXboxStarterBatch -UserProfilesDir $script:Dir -ProfilePaths @($a, $b) -DryRun $false
+        $r.Changed | Should -Be 2
+        $r.Failed | Should -Be 0
+        @(Get-ChildItem (Join-Path $script:Dir 'FullBackup') -Directory).Count | Should -Be 1
+    }
+
+    It 'a batch preview writes nothing and makes no backup' {
+        $a = New-CtlProfile -Dir $script:Dir -Name 'GameA'
+        $r = Invoke-TpmXboxStarterBatch -UserProfilesDir $script:Dir -ProfilePaths @($a) -DryRun $true
+        $r.Changed | Should -Be 1
+        Test-Path (Join-Path $script:Dir 'FullBackup') | Should -BeFalse
+    }
+
+    It 'the power reminder names wireless controllers' {
+        ((Get-TpmControllerPowerReminder) -join ' ') | Should -Match 'Wireless Xbox'
+    }
+
     It 'leaves a game alone when it has no Xbox setting' {
         $path = New-CtlProfile -Dir $script:Dir -Name 'Game2' -Options '<string>DirectInput</string>'
         $before = [System.IO.File]::ReadAllBytes($path)

@@ -40604,7 +40604,7 @@ function Add-TpmXInputBinding {
 # Applies the starter layout to one profile file. With -DryRun nothing is written.
 # Order: read, plan, verified backup, write, read back and check, put the old file back if the check fails.
 function Invoke-TpmXboxStarterApply {
-    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$ProfilePath, [bool]$DryRun = $true)
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$ProfilePath, [bool]$DryRun = $true, [hashtable]$BackupState = $null)
     $result = [pscustomobject]@{ Path = $ProfilePath; Status = 'NoChange'; Added = 0; Kept = 0; Missing = 0; ApiChanged = $false; Backup = $null; Reason = '' }
     try { $doc = Read-Xml $ProfilePath } catch { $result.Status = 'Unreadable'; $result.Reason = 'The profile could not be read.'; return $result }
     $plan = Get-TpmXboxStarterPlan -Doc $doc
@@ -40616,7 +40616,12 @@ function Invoke-TpmXboxStarterApply {
     if ($DryRun) { $result.Status = 'WouldChange'; return $result }
     $original = [System.IO.File]::ReadAllBytes($ProfilePath)
     try {
-        $result.Backup = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $UserProfilesDir -Label 'XboxStarter'
+        # One backup covers a whole batch: the first write makes it, later writes reuse it.
+        if ($null -ne $BackupState -and $null -ne $BackupState.Backup) { $result.Backup = $BackupState.Backup }
+        else {
+            $result.Backup = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $UserProfilesDir -Label 'XboxStarter'
+            if ($null -ne $BackupState) { $BackupState.Backup = $result.Backup }
+        }
         if (-not $result.Backup.Verified) { throw 'The safety backup could not be verified.' }
         foreach ($row in @($plan.Rows | Where-Object Action -eq 'Add')) { Add-TpmXInputBinding -Doc $doc -ButtonNode $row.Node -Code $row.Code }
         if ($plan.NeedsApiChange -and -not (Set-ProfileInputApi $doc 'XInput')) { throw 'The Input API could not be set.' }
@@ -40629,6 +40634,94 @@ function Invoke-TpmXboxStarterApply {
         $result.Status = 'Failed'; $result.Reason = $_.Exception.Message; $result.Added = 0; $result.ApiChanged = $false
     }
     return $result
+}
+# Applies the starter layout to many profile files with ONE backup. A failed backup stops every later write.
+function Invoke-TpmXboxStarterBatch {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string[]]$ProfilePaths, [bool]$DryRun = $true)
+    $state = @{ Backup = $null }
+    $results = New-Object System.Collections.ArrayList
+    foreach ($p in $ProfilePaths) {
+        if (-not $DryRun -and $null -ne $state.Backup -and -not $state.Backup.Verified) {
+            [void]$results.Add([pscustomobject]@{ Path = $p; Status = 'Failed'; Added = 0; Kept = 0; Missing = 0; ApiChanged = $false; Backup = $state.Backup; Reason = 'The safety backup could not be verified.' })
+            continue
+        }
+        [void]$results.Add((Invoke-TpmXboxStarterApply -UserProfilesDir $UserProfilesDir -ProfilePath $p -DryRun $DryRun -BackupState $state))
+    }
+    $all = @($results)
+    return [pscustomobject]@{
+        Results     = $all
+        Changed     = @($all | Where-Object Status -in @('Changed', 'WouldChange')).Count
+        Unchanged   = @($all | Where-Object Status -eq 'NoChange').Count
+        Unsupported = @($all | Where-Object Status -eq 'Unsupported').Count
+        Failed      = @($all | Where-Object Status -in @('Failed', 'Unreadable')).Count
+        Backup      = $state.Backup
+    }
+}
+
+# Plain words shown before any Xbox layout is applied or tested. Data only; the screen prints it.
+function Get-TpmControllerPowerReminder {
+    return @(
+        'Before you start, turn on your controllers.'
+        'Wireless Xbox controllers and any other controller that needs power must be on and connected now.'
+        'If a controller is off, it cannot be found and its buttons cannot be tested.'
+        'Wired controllers only need to be plugged in.'
+    )
+}
+# Finds profile files whose name contains the typed words (spaces and case ignored). Core, no screen output.
+function Find-TpmXboxStarterProfiles {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$Text, [int]$Max = 8)
+    $needle = ([regex]::Replace($Text, '\s+', '')).ToLowerInvariant()
+    if ($needle.Length -lt 2) { return @() }
+    $files = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Game search' -EnumerationErrorAction SilentlyContinue)
+    return @($files | Where-Object { $_.BaseName.ToLowerInvariant().Contains($needle) } | Sort-Object BaseName | Select-Object -First $Max)
+}
+
+# The screen: one game at a time, because an Xbox setup turns off that game's arcade encoder. Arcade is the default.
+function Invoke-TpmXboxStarterScreen {
+    param([Parameter(Mandatory)][string]$UserProfilesDir)
+    Write-Host ''
+    Write-TpmText -Text 'Set up one game for an Xbox controller' -Color Cyan
+    foreach ($line in (Get-TpmControllerPowerReminder)) { Write-TpmText -Text $line -Color DarkCyan }
+    Write-Host ''
+    $typed = [string](Read-HostSafe '  Type part of the game name (or press Enter to go back)')
+    if ([string]::IsNullOrWhiteSpace($typed)) { return }
+    $found = @(Find-TpmXboxStarterProfiles -UserProfilesDir $UserProfilesDir -Text $typed)
+    if ($found.Count -eq 0) { Write-TpmText -Text 'No game matched that. Try fewer letters.' -Color Yellow; return }
+    $titles = @($found | ForEach-Object { try { Get-TpmProfileFriendlyTitle -Doc (Read-Xml $_.FullName) -BaseName $_.BaseName } catch { $_.BaseName } })
+    $index = Read-TpmNumberedListChoice -Rows $titles -Prompt '  Which game? (number, or B to go back)' -Heading 'These games matched:'
+    if ($index -lt 0) { return }
+    $profilePath = $found[$index].FullName
+    $title = $titles[$index]
+    Write-Host ''
+    Write-TpmText -Text ('How will you play {0}?' -f $title) -Color Cyan
+    Write-TpmText -Text 'A = arcade controls (nothing changes)' -Indent 4
+    Write-TpmText -Text 'X = Xbox controller (turns off the arcade encoder for this game only)' -Indent 4
+    if ((Read-TpmChoice -Prompt '  Choose A or X' -Choices @('A', 'X') -Default 'A') -ne 'X') {
+        Write-TpmText -Text 'Nothing changed. This game keeps its arcade controls.' -Color Green
+        Write-Log ('XboxStarter: {0}: arcade chosen, no change.' -f $title)
+        return
+    }
+    $preview = Invoke-TpmXboxStarterBatch -UserProfilesDir $UserProfilesDir -ProfilePaths @($profilePath) -DryRun $true
+    $r = $preview.Results[0]
+    Write-Log ('XboxStarter preview: {0}: status={1} add={2} keep={3} missing={4} api={5}' -f $title, $r.Status, $r.Added, $r.Kept, $r.Missing, $r.ApiChanged)
+    if ($r.Status -eq 'Unsupported') { Write-TpmText -Text 'This game does not have an Xbox controller setting, so nothing was changed.' -Color Yellow; return }
+    if ($r.Status -eq 'Unreadable') { Write-TpmText -Text 'The settings file for this game could not be read, so nothing was changed.' -Color Yellow; return }
+    if ($r.Status -eq 'NoChange') { Write-TpmText -Text 'This game is already set up for an Xbox controller.' -Color Green; return }
+    Write-TpmText -Text ('Ready to set up {0} buttons for an Xbox controller.' -f $r.Added) -Color DarkCyan
+    if ($r.Kept -gt 0) { Write-TpmText -Text ('{0} buttons already had an Xbox setting and stay as they are.' -f $r.Kept) -Color DarkCyan }
+    Write-TpmText -Text 'A saved copy of your game settings is made first.' -Color DarkCyan
+    if ((Read-TpmYesNo -Prompt '  Set this up now? (Y/N)' -Default 'N') -ne 'Y') { Write-TpmText -Text 'Skipped. Nothing changed.' -Color DarkGray; return }
+    $done = Invoke-TpmXboxStarterBatch -UserProfilesDir $UserProfilesDir -ProfilePaths @($profilePath) -DryRun $false
+    $d = $done.Results[0]
+    Write-Log ('XboxStarter: {0}: status={1} add={2} api={3} backup={4}' -f $title, $d.Status, $d.Added, $d.ApiChanged, [string]$done.Backup.RootPath)
+    if ($d.Status -ne 'Changed') { Write-TpmText -Text 'The change could not be made, so your game settings were left as they were.' -Color Yellow; return }
+    Write-TpmText -Text ('Done. {0} is ready for an Xbox controller. Next: make sure the controller is on, then start the game.' -f $title) -Color Green
+    $undoFolder = [string]$done.Backup.RootPath
+    if ($undoFolder -and (Read-TpmYesNo -Prompt '  Undo this and put your game settings back as they were? (Y/N)' -Default 'N') -eq 'Y') {
+        $undo = Invoke-TpmProgressGroup -Title 'Undo controller change' -Action { Invoke-RestoreBackup -userProfilesDir $UserProfilesDir -SelectedBackupPath $undoFolder -AlreadyConfirmed }
+        Write-Log ('XboxStarter: undo requested; restore reported {0}' -f [string]$undo.Outcome)
+        Write-TpmText -Text ([string]$undo.Summary) -Color $(if ($undo.Outcome -eq 'SUCCEEDED') { 'Green' } else { 'Yellow' })
+    }
 }
 # ===== end TpmController =====
 
@@ -54349,6 +54442,16 @@ $mode = $null
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-TpmText -Text 'This copies the controls of games you already set up to your other games of the same type.' -Color DarkCyan
         Write-TpmText -Text 'No game is registered or extracted.' -Color DarkCyan
+        if (-not $Unattended) {
+            Write-Host ''
+            Write-TpmText -Text '1 = copy controls to games of the same type' -Indent 4
+            Write-TpmText -Text '2 = set up one game for an Xbox controller' -Indent 4
+            if ((Read-TpmChoice -Prompt '  Choose 1 or 2' -Choices @('1', '2') -Default '1') -eq '2') {
+                Invoke-TpmXboxStarterScreen -UserProfilesDir $userProfilesDir
+                [void](Read-HostSafe "  Press Enter to return to menu")
+                continue
+            }
+        }
 
         # Invoke-ControlPropagation owns the verified backup and returns the
         # authoritative transaction result. No backup is created before the
