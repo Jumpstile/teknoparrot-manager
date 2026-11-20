@@ -38787,6 +38787,13 @@ function Test-ExtractedFolderHasContent {
     return ($null -ne $firstChild)
 }
 
+# A ZIP name without its .teknoparrot, .parrot or .game suffix. One shared helper so every
+# lookup strips the suffix the same way.
+function Get-TpmZipBaseName {
+    param([string]$RawZipName)
+    return ($RawZipName -replace '\.(teknoparrot|parrot|game)$', '')
+}
+
 # Exact-key lookup only (no fuzzy/Dice fallback): the dat's own game names
 # already normalize identically to well-formed ZIP names in practice (both
 # follow the same RomVault/Eggman convention), which is why
@@ -38805,7 +38812,7 @@ function Get-DatEntryForZipName {
     # Games whose names differ only by year or bracket tags share one key. The one whose full name equals the ZIP name wins.
     $alternatesProperty = $primary.PSObject.Properties['Alternates']
     if ($null -ne $alternatesProperty -and $null -ne $alternatesProperty.Value -and $alternatesProperty.Value.Count -gt 0) {
-        $baseName = $RawZipName -replace '\.(teknoparrot|parrot|game)$', ''
+        $baseName = Get-TpmZipBaseName $RawZipName
         if ([string]$primary.OriginalName -ieq $baseName) { return $primary }
         foreach ($alternate in $alternatesProperty.Value) {
             if ([string]$alternate.OriginalName -ieq $baseName) { return $alternate }
@@ -38826,7 +38833,7 @@ function Get-TpmAutoSyncClaimKeys {
         $alternatesProperty = if ($null -ne $primary) { $primary.PSObject.Properties['Alternates'] } else { $null }
         if ($null -ne $alternatesProperty -and $null -ne $alternatesProperty.Value -and $alternatesProperty.Value.Count -gt 0) {
             $entry = Get-DatEntryForZipName -RawZipName $RawZipName -DatIndex $DatIndex
-            $baseName = $RawZipName -replace '\.(teknoparrot|parrot|game)$', ''
+            $baseName = Get-TpmZipBaseName $RawZipName
             if ($entry -and [string]$entry.OriginalName -ieq $baseName -and [string]$entry.ProfileCode -match '^[\w]+$') {
                 return @([string]$entry.ProfileCode, (Get-NormalizedGameKey ([string]$entry.ProfileCode)))
             }
@@ -38844,11 +38851,11 @@ function Get-TpmExtractedGameFolderCandidateKeys {
     param([string]$RawZipName, [hashtable]$DatIndex = $null)
     $candidateKeys = New-Object System.Collections.Generic.List[string]
     if ([string]::IsNullOrWhiteSpace($RawZipName)) { return @() }
-    $baseName = $RawZipName -replace '\.(teknoparrot|parrot|game)$', ''
+    $baseName = Get-TpmZipBaseName $RawZipName
     foreach ($key in @(
         $RawZipName,
         $baseName,
-        ($baseName -replace ' (?=[\[\(])', ''),
+        ($baseName -replace ' (?=[\[\(])'),
         (Get-NormalizedGameKey $baseName)
     )) {
         if (-not [string]::IsNullOrWhiteSpace($key) -and -not $candidateKeys.Contains($key)) { [void]$candidateKeys.Add($key) }
