@@ -1,4 +1,4 @@
-# TeknoParrot Manager  |  v1.0 RC8.3
+# TeknoParrot Manager  |  v1.0 RC8.4
 # Author: Jumpstile
 # =============================================================================
 #
@@ -84,7 +84,7 @@ $script:TpmIndependentProgressTasks = @{}
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
 $ScriptVersion = "1.0"
-$ReleaseCandidateLabel = "RC8.3"
+$ReleaseCandidateLabel = "RC8.4"
 $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
 
 function Get-ManagerDisplayVersion {
@@ -49516,7 +49516,7 @@ function Limit-MainMenuBodyRowsToBudget {
     return @($BodyRows[$start..($BodyRows.Count - 1)])
 }
 
-# Single-line banner ("TeknoParrot Manager v1.0 RC8.3") with no frame and no
+# Single-line banner ("TeknoParrot Manager v1.0 RC8.4") with no frame and no
 # blank separator, for viewports too short for the normal framed banner (5-6
 # rows) to leave any room for menu content -- see
 # Get-MainMenuEmergencyCompactRows.

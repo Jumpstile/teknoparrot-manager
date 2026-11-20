@@ -2,9 +2,19 @@
   TeknoParrot Manager  --  CHANGELOG
   Author: Jumpstile
 ===============================================================================
-  Newest version first. RC8.3 is a fix-up release for RC8.2. RC8.2 is the
+  Newest version first. RC8.4 is a fix-up release for RC8.3. RC8.3 is the
   latest published version before it. RC8 was a tester build and was never
   published. The final RC9 comes later.
+
+
+  v1.0 RC8.4 (changes since RC8.3)
+  ----------------------------------------------------------------
+
+  Fixes
+  - Adding games with AutoSync no longer skips the second of two different
+    games that have almost the same name, such as the Type X and
+    NESiCAxLive versions of one game, or two versions of the same game.
+    Each one now gets its own folder.
 
 
   v1.0 RC8.3 (changes since RC8.2)

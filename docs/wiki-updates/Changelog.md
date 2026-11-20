@@ -2,12 +2,20 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-RC8.2 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2. v1.0 RC8.3 is a fix-up release for RC8.2 and is not published yet. The final v1.0 RC9 comes later. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
-The previous published release was v1.0 RC8.1. RC4 and RC5 are historical; RC4 is superseded.
+RC8.3 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3. v1.0 RC8.4 is a fix-up release for RC8.3 and is not published yet. The final v1.0 RC9 comes later. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
+The previous published release was v1.0 RC8.2. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
 ---
+
+## v1.0 RC8.4 (changes since RC8.3)
+
+### Fixes
+- Adding games with AutoSync no longer skips the second of two different
+  games that have almost the same name, such as the Type X and
+  NESiCAxLive versions of one game, or two versions of the same game.
+  Each one now gets its own folder.
 
 ## v1.0 RC8.3 (changes since RC8.2)
 

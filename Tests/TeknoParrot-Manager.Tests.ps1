@@ -11066,7 +11066,7 @@ Describe "Manager script version identity" {
     }
 
     It "extracts the current script's literal identity from its full source" {
-        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC8.3'
+        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC8.4'
     }
 
     It "ignores assignment-looking lines inside a here-string" {

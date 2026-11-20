@@ -1,6 +1,6 @@
 # TeknoParrot Manager - Quick Start
 
-> This guide describes v1.0 RC8.3. RC8.3 is a fix-up release for RC8.2. It fixes problems that testers found. The latest published release before it is [v1.0 RC8.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2). If you use RC8.2, choose **15) Check for Updates** to get RC8.3. The previous published releases are v1.0 RC8.1 and RC7. RC8 was a tester build and was never published. The final v1.0 RC9 comes later. Final Version 1.0 remains unpublished. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
+> This guide describes v1.0 RC8.4. RC8.4 is a fix-up release for RC8.3. It fixes problems that testers found. The latest published release before it is [v1.0 RC8.3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3). If you use RC8.3, choose **15) Check for Updates** to get RC8.4. The previous published releases are v1.0 RC8.2, RC8.1 and RC7. RC8 was a tester build and was never published. The final v1.0 RC9 comes later. Final Version 1.0 remains unpublished. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Full documentation: [README.md](README.md)
 
