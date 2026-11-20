@@ -25057,7 +25057,7 @@ function Invoke-AutoSync {
         if ($newGameFolder) {
             # An empty folder with a stale sync-state entry still needs its first extraction.
             if (-not $needsSync) { $needsSync = $true; $reason = 'not extracted' }
-            foreach ($claimKey in @(Get-TpmExtractedGameFolderCandidateKeys -RawZipName $rawName -DatIndex $datIndex)) { [void]$claimedNewFolderKeys.Add([string]$claimKey) }
+            foreach ($claimKey in @(Get-TpmAutoSyncClaimKeys -RawZipName $rawName -DatIndex $datIndex)) { [void]$claimedNewFolderKeys.Add([string]$claimKey) }
         }
 
         # Two ZIPs that write to the same existing folder in one run would replace each other's files: only the first writing ZIP is processed.
@@ -25316,8 +25316,21 @@ function Build-DatIndexFromStream {
                 $captureRoms = $false
                 if ($profCode -and $gameName) {
                     $normName = Get-NormalizedGameKey $gameName
+                    if ($normName -and $index.ContainsKey($normName)) {
+                        # Another game whose name reads the same once the year and the bracket tags are removed (other hardware or version).
+                        # It is kept next to the first one so a lookup by the exact name can tell them apart; the index size does not change.
+                        [void]$index[$normName].Alternates.Add([pscustomobject]@{
+                            ProfileCode        = $profCode.Trim()
+                            Executable         = $exePath.Trim()
+                            OriginalName       = $gameName.Trim()
+                            ProfileCode2       = $profCode2.Trim()
+                            Executable2        = $exePath2.Trim()
+                            TestMenuExecutable = $testMenuExe.Trim()
+                        })
+                    }
                     if ($normName -and -not $index.ContainsKey($normName)) {
                         $index[$normName] = [pscustomobject]@{
+                            Alternates   = (New-Object System.Collections.Generic.List[object])
                             ProfileCode  = $profCode.Trim()
                             Executable   = $exePath.Trim()
                             # Retained (not just the normalized key) so Register-Games'
@@ -38681,8 +38694,39 @@ function Get-DatEntryForZipName {
     param([string]$RawZipName, [hashtable]$DatIndex)
     if (-not $DatIndex -or $DatIndex.Count -eq 0) { return $null }
     $normZip = Get-NormalizedGameKey $RawZipName
-    if ($DatIndex.ContainsKey($normZip)) { return $DatIndex[$normZip] }
-    return $null
+    if (-not $DatIndex.ContainsKey($normZip)) { return $null }
+    $primary = $DatIndex[$normZip]
+    # Games whose names differ only by year or bracket tags share one key. The one whose full name equals the ZIP name wins.
+    $alternatesProperty = $primary.PSObject.Properties['Alternates']
+    if ($null -ne $alternatesProperty -and $null -ne $alternatesProperty.Value -and $alternatesProperty.Value.Count -gt 0) {
+        $baseName = $RawZipName -replace '\.(teknoparrot|parrot|game)$', ''
+        if ([string]$primary.OriginalName -ieq $baseName) { return $primary }
+        foreach ($alternate in $alternatesProperty.Value) {
+            if ([string]$alternate.OriginalName -ieq $baseName) { return $alternate }
+        }
+    }
+    return $primary
+}
+
+# The names one ZIP claims for its NEW folder in a run. Two ZIPs of the same game (same profile code) must not both create
+# a folder. Two games that only read the same after the year and tags are removed (other hardware or version) each have
+# their own profile code, so only the profile code is claimed when the ZIP name picks out exactly one of them.
+function Get-TpmAutoSyncClaimKeys {
+    param([string]$RawZipName, [hashtable]$DatIndex = $null)
+    if ($DatIndex -and $DatIndex.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($RawZipName)) {
+        $primary = $null
+        $normZip = Get-NormalizedGameKey $RawZipName
+        if ($DatIndex.ContainsKey($normZip)) { $primary = $DatIndex[$normZip] }
+        $alternatesProperty = if ($null -ne $primary) { $primary.PSObject.Properties['Alternates'] } else { $null }
+        if ($null -ne $alternatesProperty -and $null -ne $alternatesProperty.Value -and $alternatesProperty.Value.Count -gt 0) {
+            $entry = Get-DatEntryForZipName -RawZipName $RawZipName -DatIndex $DatIndex
+            $baseName = $RawZipName -replace '\.(teknoparrot|parrot|game)$', ''
+            if ($entry -and [string]$entry.OriginalName -ieq $baseName -and [string]$entry.ProfileCode -match '^[\w]+$') {
+                return @([string]$entry.ProfileCode, (Get-NormalizedGameKey ([string]$entry.ProfileCode)))
+            }
+        }
+    }
+    return @(Get-TpmExtractedGameFolderCandidateKeys -RawZipName $RawZipName -DatIndex $DatIndex)
 }
 
 # Folder-map keys that identify a ZIP's game folder: the ZIP name, the name
@@ -38826,7 +38870,7 @@ function Resolve-TpmAutoSyncNewGameFolder {
     if (-not $FolderMap) { $FolderMap = Get-StagingFolderMap $installFull }
     $candidateKeys = @(Get-TpmExtractedGameFolderCandidateKeys -RawZipName $RawZipName -DatIndex $DatIndex)
     if ($ClaimedKeys) {
-        foreach ($key in $candidateKeys) {
+        foreach ($key in @(Get-TpmAutoSyncClaimKeys -RawZipName $RawZipName -DatIndex $DatIndex)) {
             if ($ClaimedKeys.Contains([string]$key)) {
                 return (& $refuse 'another ZIP in this run already created a new folder for the same game')
             }
