@@ -40553,6 +40553,11 @@ function Get-TpmXboxStarterLayout {
     )
 }
 
+# Where the starter layout comes from, in plain words. Shown behind Details and written to the log.
+function Get-TpmXboxStarterLayoutSource {
+    return 'The Manager''s built-in starter layout. Buttons use the standard Xbox button codes. Coin on Back, Start on Start, and the six action buttons follow the common arcade-to-gamepad layout used by public emulator guides. No data was copied from another program.'
+}
+
 # Read-only. Says what the starter layout would do to one profile document.
 # Row actions: Add (slot is free), Keep (an Xbox binding is already there), NotInGame (the game has no such control).
 function Get-TpmXboxStarterPlan {
@@ -40715,6 +40720,7 @@ function Invoke-TpmXboxStarterScreen {
     $done = Invoke-TpmXboxStarterBatch -UserProfilesDir $UserProfilesDir -ProfilePaths @($profilePath) -DryRun $false
     $d = $done.Results[0]
     Write-Log ('XboxStarter: {0}: status={1} add={2} api={3} backup={4}' -f $title, $d.Status, $d.Added, $d.ApiChanged, [string]$done.Backup.RootPath)
+    Write-Log ('XboxStarter: layout source: ' + (Get-TpmXboxStarterLayoutSource))
     if ($d.Status -ne 'Changed') { Write-TpmText -Text 'The change could not be made, so your game settings were left as they were.' -Color Yellow; return }
     Write-TpmText -Text ('Done. {0} is ready for an Xbox controller. Next: make sure the controller is on, then start the game.' -f $title) -Color Green
     $undoFolder = [string]$done.Backup.RootPath

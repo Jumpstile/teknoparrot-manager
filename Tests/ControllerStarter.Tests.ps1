@@ -121,6 +121,12 @@ Describe 'Xbox starter layout' {
         Test-Path (Join-Path $script:Dir 'FullBackup') | Should -BeFalse
     }
 
+    It 'the layout source is plain words and names no machine or personal data' {
+        $s = Get-TpmXboxStarterLayoutSource
+        $s | Should -Match 'built-in starter layout'
+        $s | Should -Not -Match '(?i)arcade\b.*pc|megatron'
+    }
+
     It 'the power reminder names wireless controllers' {
         ((Get-TpmControllerPowerReminder) -join ' ') | Should -Match 'Wireless Xbox'
     }
