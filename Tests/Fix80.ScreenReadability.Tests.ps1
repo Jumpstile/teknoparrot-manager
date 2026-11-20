@@ -86,11 +86,12 @@ BeforeAll {
     }
 
     function Get-F80Calls {
-        param([string]$Name)
+        param([string]$Name, [switch]$AnyScope)
         return @($script:F80Ast.FindAll({
             param($node)
             $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq $Name
         }, $true) | Where-Object {
+            if ($AnyScope) { return $true }
             $parent = $_.Parent
             while ($null -ne $parent -and $parent -isnot [System.Management.Automation.Language.FunctionDefinitionAst]) { $parent = $parent.Parent }
             $null -eq $parent
@@ -685,10 +686,11 @@ Describe 'FIX80 LaunchBox step (audit item 16)' {
 
     It 'passes the previewed summary to the plan in the main flow and keeps the exact consent question' {
         # Mutation: call Write-TpmLaunchBoxResult for the plan again.
-        $planCalls = @(Get-F80Calls -Name 'Write-TpmLaunchBoxPlan')
+        # The LaunchBox step now lives in its own function, so look in every scope.
+        $planCalls = @(Get-F80Calls -Name 'Write-TpmLaunchBoxPlan' -AnyScope)
         $planCalls.Count | Should -Be 1
         Get-F80NamedArgument -Command $planCalls[0] -Name 'AlreadyShownSummary' | Should -BeExactly '$lbPreviewShownSummary'
-        @(Get-F80Calls -Name 'Read-TpmYesNo' | Where-Object { (Get-F80NamedArgument -Command $_ -Name 'Prompt') -eq "'Write exactly these changes after a verified backup? (Y/N)'" }).Count | Should -Be 1
+        @(Get-F80Calls -Name 'Read-TpmYesNo' -AnyScope | Where-Object { (Get-F80NamedArgument -Command $_ -Name 'Prompt') -eq "'Write exactly these changes after a verified backup? (Y/N)'" }).Count | Should -Be 1
     }
 }
 

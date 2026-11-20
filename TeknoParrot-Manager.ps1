@@ -24541,16 +24541,19 @@ function Invoke-AutoSync {
         $rawName    = [System.IO.Path]::GetFileNameWithoutExtension($zip.Name)
         if ($noSync -contains $rawName) {
             Write-Host "  Skipped (override) : $rawName" -ForegroundColor DarkGray
+            Write-Log "AutoSync: skipped '$rawName' -- it is on your skip list."
             $skipped++; continue
         }
         # Skip collection metadata files (changelog, game notes, readme).
         # These start with "!TeknoParrot Collection" regardless of date suffix.
         if ($rawName -like '!TeknoParrot Collection*') {
             Write-Host "  Skipped (metadata)  : $rawName" -ForegroundColor DarkGray
+            Write-Log "AutoSync: skipped '$rawName' -- collection information file, not a game."
             $skipped++; continue
         }
         # If a raw-name whitelist is active, skip anything not on it.
         if ($onlySync.Count -gt 0 -and $onlySync -notcontains $rawName) {
+            Write-Log "AutoSync: skipped '$rawName' -- it is not on your only-these-games list."
             $skipped++
             continue
         }
@@ -24772,6 +24775,7 @@ function Invoke-AutoSync {
         switch ($txResult.Outcome) {
             'NO_OP' {
                 Write-Host "    Already extracted (no ZIP work; GamePath repair is separate): $rawName" -ForegroundColor DarkGray
+                Write-Log "AutoSync: '$rawName' counted as already extracted; no ZIP work. Folder used: $targetDir ($reason)"
                 $upToDate++
             }
             'SUCCEEDED' {

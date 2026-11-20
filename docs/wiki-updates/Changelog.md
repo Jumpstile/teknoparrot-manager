@@ -27,6 +27,8 @@ The previous published release was v1.0 RC8.2. RC4 and RC5 are historical; RC4 i
   were skipped.
 - Lists of games show the game name instead of "and 1 more".
 - The game picker shows how many games you have picked so far.
+- AutoSync now writes a line to the log for every ZIP it skips and says
+  why, so a game that did not get unpacked can be traced.
 
 ## v1.0 RC8.3 (changes since RC8.2)
 
