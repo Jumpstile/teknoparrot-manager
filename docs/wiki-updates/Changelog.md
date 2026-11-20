@@ -29,6 +29,9 @@ The previous published release was v1.0 RC8.2. RC4 and RC5 are historical; RC4 i
 - The game picker shows how many games you have picked so far.
 - AutoSync now writes a line to the log for every ZIP it skips and says
   why, so a game that did not get unpacked can be traced.
+- The Propagate Controls result names every control family that has no
+  game with your controls yet. It also lists games that are already set
+  up and games skipped by your own rules on separate lines.
 
 ### Also new in this release
 - LEDBlinky lighting (optional): if you use LEDBlinky, the Manager can

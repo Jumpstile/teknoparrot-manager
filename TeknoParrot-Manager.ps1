@@ -41420,6 +41420,7 @@ function Get-TpmControlPropagationSummary {
             Report = $report
             Code = [string](Get-TpmTransactionField -Object $report -Name 'Code' -Default '')
             Status = [string](Get-TpmTransactionField -Object $report -Name 'Status' -Default '')
+            Family = [string](Get-TpmTransactionField -Object $report -Name 'Family' -Default '')
             Manual = @(Get-TpmTransactionField -Object $report -Name 'Manual' -Default @())
             Carried = @(Get-TpmTransactionField -Object $report -Name 'ConfigCarried' -Default @())
             Forced = [bool](Get-TpmTransactionField -Object $report -Name 'Forced' -Default $false)
@@ -41443,12 +41444,21 @@ function Get-TpmControlPropagationSummary {
     if ($apiFixed.Count -gt 0) { [void]$done.Add(($(if ($DryRun) { 'Would correct the Input API of {0}.' } else { 'Input API corrected for {0}.' }) -f (Format-TpmGameCount -Count $apiFixed.Count))) }
     $ordinarySkipped = $skipped.Count - $designSkipped.Count
     $notChangedParts = New-Object System.Collections.Generic.List[string]
-    if ($ordinarySkipped -gt 0) { [void]$notChangedParts.Add(('{0} already set up or skipped by your rules.' -f (Format-TpmGameCount -Count $ordinarySkipped))) }
-    if ($designSkipped.Count -gt 0) { [void]$notChangedParts.Add(('{0} skipped by design because their control family has no usable reference game.' -f (Format-TpmGameCount -Count $designSkipped.Count))) }
+    $alreadySet = @($rows | Where-Object { $_.Status -in @('skipped-bound', 'skipped-unchanged') })
+    $byRules = @($rows | Where-Object { $_.Status -eq 'skipped-override' })
+    $otherLeft = $ordinarySkipped - $alreadySet.Count - $byRules.Count
+    if ($alreadySet.Count -gt 0) { [void]$notChangedParts.Add(('{0} already set up.' -f (Format-TpmGameCount -Count $alreadySet.Count))) }
+    if ($byRules.Count -gt 0) { [void]$notChangedParts.Add(('{0} skipped by your own rules.' -f (Format-TpmGameCount -Count $byRules.Count))) }
+    if ($otherLeft -gt 0) { [void]$notChangedParts.Add(('{0} left as they were.' -f (Format-TpmGameCount -Count $otherLeft))) }
+    if ($designSkipped.Count -gt 0) {
+        $noRefFamilies = @($designSkipped | ForEach-Object { $_.Family } | Where-Object { $_ } | Sort-Object -Unique)
+        $familyText = if ($noRefFamilies.Count -gt 0) { ' ({0}).' -f ($noRefFamilies -join ', ') } else { '' }
+        [void]$notChangedParts.Add(('{0} skipped: no game of their family has your controls yet{1}' -f (Format-TpmGameCount -Count $designSkipped.Count), $familyText))
+    }
     $notChanged = $notChangedParts -join ' '
 
     $needs = New-Object System.Collections.Generic.List[string]
-    if ($needManual.Count -gt 0) { [void]$needs.Add(('{0}: set up the controls yourself in TeknoParrotUI.' -f (Format-TpmNameList -Limit 3 -Names @($needManual | ForEach-Object { $_.Code })))) }
+    if ($needManual.Count -gt 0) { [void]$needs.Add(('{0}: set up the controls yourself in TeknoParrotUI.' -f (Format-TpmNameList -Limit 8 -Names @($needManual | ForEach-Object { $_.Code })))) }
     if ($mismatched.Count -gt 0) { [void]$needs.Add(('{0}: some buttons do the wrong thing. Set them again in TeknoParrotUI.' -f (Format-TpmNameList -Limit 3 -Names @($mismatched | ForEach-Object { $_.Code })))) }
     if ($failed.Count -gt 0) { [void]$needs.Add(('{0}: could not be saved. See the log.' -f (Format-TpmNameList -Limit 3 -Names @($failed | ForEach-Object { $_.Code })))) }
     if ($unreadable.Count -gt 0) { [void]$needs.Add(('{0}: could not be read, so it was left as it is. See the log.' -f (Format-TpmNameList -Limit 3 -Names @($unreadable | ForEach-Object { $_.Code })))) }
@@ -41465,7 +41475,7 @@ function Get-TpmControlPropagationSummary {
     if (-not $DryRun -and $updated -gt 0) { $next = 'Start one updated game in TeknoParrotUI and test its controls. If something is wrong, use Restore backup.' }
     elseif (-not $DryRun -and $unreadable.Count -gt 0 -and $needManual.Count -eq 0 -and $mismatched.Count -eq 0 -and $failed.Count -eq 0) { $next = 'Check the game that could not be read in TeknoParrotUI, or use Restore backup, then run this again.' }
     elseif (-not $DryRun -and $needs.Count -gt 0) { $next = 'Set up the controls above in TeknoParrotUI, then run this again.' }
-    elseif (-not $DryRun -and $designSkipped.Count -gt 0) { $next = 'Add one game of this family with your own controls, then run this again.' }
+    elseif (-not $DryRun -and $designSkipped.Count -gt 0) { $next = 'In TeknoParrotUI, set up the controls of one game in each family listed above. Then run Propagate Controls (menu 3) again.' }
 
     $blocks = New-Object System.Collections.Generic.List[object]
     $leftAlone = New-Object System.Collections.Generic.List[string]
