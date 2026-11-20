@@ -4,7 +4,9 @@
 
 TeknoParrot Manager sets up your extracted TeknoParrot games for you. It registers them, copies controls between games of the same type, and keeps your library tidy. It backs up your game settings before it changes them.
 
-The latest published release is v1.0 RC7: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. This page matches v1.0 RC8.1, the interim build for testers, which is not published yet. The final v1.0 RC9 comes later. RC8.1 is the first version that can update itself in place.
+It is made for beginners and is also useful if you already know TeknoParrot. It hides complexity, not detail: repeatable bulk steps save manual work, and Details and the log show what was done.
+
+The latest published release is v1.0 RC8.3: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3. This page matches v1.0 RC8.4, which is not published yet. Versions from RC8.1 on can update themselves in place with Check for Updates.
 What is new in v1.0 is listed at the top of the [[Changelog]].
 
 Test one game after each run before you trust the rest.

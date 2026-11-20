@@ -2,7 +2,7 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-RC8.3 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3. v1.0 RC8.4 is a fix-up release for RC8.3 and is not published yet. The final v1.0 RC9 comes later. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
+RC8.3 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3. v1.0 RC8.4 is a fix-up release for RC8.3 and is not published yet. Final Version 1.0 comes later. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
 The previous published release was v1.0 RC8.2. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
@@ -29,6 +29,44 @@ The previous published release was v1.0 RC8.2. RC4 and RC5 are historical; RC4 i
 - The game picker shows how many games you have picked so far.
 - AutoSync now writes a line to the log for every ZIP it skips and says
   why, so a game that did not get unpacked can be traced.
+
+### Also new in this release
+- LEDBlinky lighting (optional): if you use LEDBlinky, the Manager can
+  add lighting info for your games. It looks for LEDBlinky on your
+  drives and in Program Files, or asks where it is and remembers the
+  folder. A game gets only the controls it uses that your cabinet has.
+  You see a preview first, a saved copy is made, and you can undo it.
+  Only entries the Manager added are ever removed.
+- LaunchBox: the Manager can look each game up in LaunchBox's own game
+  list on your PC and use the official name and the Games Database ID,
+  so LaunchBox can find info and artwork. Choose [L] in the LaunchBox
+  step to do this for games that have no ID yet. You see every old
+  name, new name and ID first and approve before anything is saved.
+  Names you typed yourself are never replaced. Nothing is downloaded.
+- LaunchBox: "Fill in game details and make playlists" fills in the
+  release year and developer where LaunchBox has nothing yet, and makes
+  playlists for each arcade hardware family, plus "Light gun games" and
+  "Driving games". Your own playlists and details are never touched.
+  Restore puts everything back.
+- LaunchBox: a new optional step adds clear logos or box art from a
+  folder you pick. You see a preview first, close matches are used only
+  if you say yes, and Undo removes the pictures that were added.
+- Games that need PlayStation 3 firmware (RPCS3) or a Play! game file
+  are now checked before they start, and the Manager tells you what is
+  missing.
+- The game list now also reads a second program and a test menu program
+  for games that list them.
+
+### Other fixes
+- After unpacking, when every new game was also registered in
+  TeknoParrot, the message now says so. The "unpacked only" warning
+  shows only when a game still needs your attention.
+- A game profile with odd characters in its program name, such as a
+  quote or a pipe, no longer stops the Manager with "Illegal
+  characters in path".
+- If a second problem is found on the PostgreSQL setup screen, it is
+  shown and you return to the menu instead of the Manager stopping.
+- All screens and guides use American spelling.
 
 ## v1.0 RC8.3 (changes since RC8.2)
 
@@ -90,9 +128,9 @@ The previous published release was v1.0 RC8.2. RC4 and RC5 are historical; RC4 i
   back. It says so when there is not enough free space. Your own files
   and older files the release no longer has are never deleted. Then you
   start TeknoParrot Manager again yourself.
-- Older builds cannot do this. Install RC8.1 by hand once: after RC8.1 is
-  published, download the ZIP from the Releases page and extract it over
-  your old folder.
+- Older builds cannot do this. Install RC8.1 or newer by hand once:
+  download the ZIP from the Releases page and extract it over your old
+  folder.
 - A ZIP without the script, or a CPS3 ZIP that cannot be read, is
   refused. If the Eggman page has no DAT file, it says so.
 - The updater says the old version was put back only when it checked that
@@ -126,6 +164,13 @@ The previous published release was v1.0 RC8.2. RC4 and RC5 are historical; RC4 i
   Restore returns to its menu.
 
 ### Games and folders
+- Registering now finds PCSX2x6 games: their .acgame files were never
+  looked at before, so those games did not register by name.
+- Library Health Check has a Game support row. It says when a game
+  needs you (game file missing, second game file not chosen, PostgreSQL
+  settings missing). Details show the counts for each emulator.
+- AutoSync says when it skips a .7z or .rar archive (it only unpacks
+  .zip files) and tells you to unpack it yourself, then use Register only.
 - AutoSync leaves a game folder alone when its ZIP did not change, so
   saves and settings you made are not replaced. When a changed ZIP does
   replace a folder, every file in it that is extra or different from the
@@ -142,9 +187,9 @@ The previous published release was v1.0 RC8.2. RC4 and RC5 are historical; RC4 i
   too long and changes nothing.
 - A game whose 32-bit or 64-bit type cannot be read is not counted as
   ready, and force feedback does not give it a 64-bit plugin.
-- ReShade works with 64-bit games only. 32-bit games are skipped and the
-  guides do not ask for a 32-bit ReShade file. ReShade does not show its
-  welcome window, counters or messages when a game starts.
+- ReShade works with both 32-bit and 64-bit games. Games that run through
+  BudgieLoader (a Linux-style game format) are skipped for now. ReShade does
+  not show its welcome window, counters or messages when a game starts.
 - Registering games and repairing paths keep a second executable path that
   points at a file that exists. A manual path repair checks its safety
   copy first and leaves a profile TeknoParrot changed meanwhile alone.
@@ -247,6 +292,11 @@ The previous published release was v1.0 RC8.2. RC4 and RC5 are historical; RC4 i
 - Restore points are made at start-up. A Reset and Restore menu keeps
   working after TeknoParrot is moved, and Restore all brings back
   TeknoParrot Manager's own settings, even after the tidy-up moved them.
+- Restore backup has a new choice, Rebuild one game from its ZIP. It puts
+  a broken game folder back to exactly what its ZIP holds. The ZIP is
+  unpacked and checked first (and checked against the DAT list when the
+  game is in it). Your old folder is not deleted: it is kept aside, and
+  you can put it back or delete it from the same menu.
 - LaunchBox: games can be added directly. It asks first, waits for
   LaunchBox to close (it never closes it) and saves a checked copy of each
   file before writing. Restore lists UserProfiles, Postgres and LaunchBox
@@ -426,7 +476,7 @@ Promoted to RC1 for the upcoming 1.0 release. No new functional changes beyond w
 
 ## v0.99.25 BETA (2026-06-24)
 
-- **Fix:** the FFB plugin setup summary lumped two different situations together under "Skipped (no match)" -- a game the plugin's table doesn't know about, vs. a game it knows about but whose DLL isn't downloaded locally (fixable). These now get separate, clearly labelled counts.
+- **Fix:** the FFB plugin setup summary lumped two different situations together under "Skipped (no match)" -- a game the plugin's table doesn't know about, vs. a game it knows about but whose DLL isn't downloaded locally (fixable). These now get separate, clearly labeled counts.
 - **Docs fix:** the README and QuickStart .txt files told you to choose "mode 5" for ReShade setup in several places -- that's dgVoodoo2's number; ReShade is mode 4. Corrected (this wiki and README.md already had it right).
 
 ## v0.99.24 BETA (2026-06-24)
@@ -467,7 +517,7 @@ Promoted to RC1 for the upcoming 1.0 release. No new functional changes beyond w
 
 ## v0.99.15 BETA (2026-06-22)
 
-- **Fix:** AutoSync and the extraction pickers (modes 1/2) could report a game as "available to extract" even though it was already extracted, if its staging folder had been manually renamed to the short name recommended by a PATH TOO LONG warning in ACTION REQUIRED (e.g. `AliensArmageddon` -> `ALIENS`). The folder-matching logic only compared normalised names, and a renamed folder no longer matched the ZIP's original name. Already-synced games are now also self-healed: AutoSync recognises the renamed folder and updates its stored path automatically.
+- **Fix:** AutoSync and the extraction pickers (modes 1/2) could report a game as "available to extract" even though it was already extracted, if its staging folder had been manually renamed to the short name recommended by a PATH TOO LONG warning in ACTION REQUIRED (e.g. `AliensArmageddon` -> `ALIENS`). The folder-matching logic only compared normalized names, and a renamed folder no longer matched the ZIP's original name. Already-synced games are now also self-healed: AutoSync recognizes the renamed folder and updates its stored path automatically.
 
 ## v0.99.14 BETA (2026-06-22)
 
@@ -837,7 +887,7 @@ For shared-executable games (Raw Thrills' `sdaemon.exe` and similar), a folder w
 
 **Bug fix: AutoSync supplementary source prompt now shown correctly**
 
-- The supplementary ZIP folder prompt was being suppressed when the user accepted a saved configuration that predated the supplementary feature. Users with an existing config that had no supplementary folder set would never be asked to configure one. Fixed so the prompt now appears whenever the supplementary source is not configured, mirroring the behaviour of the main collection prompt. In Unattended mode the prompt is still skipped (configure it interactively first).
+- The supplementary ZIP folder prompt was being suppressed when the user accepted a saved configuration that predated the supplementary feature. Users with an existing config that had no supplementary folder set would never be asked to configure one. Fixed so the prompt now appears whenever the supplementary source is not configured, mirroring the behavior of the main collection prompt. In Unattended mode the prompt is still skipped (configure it interactively first).
 
 ---
 
@@ -846,7 +896,7 @@ For shared-executable games (Raw Thrills' `sdaemon.exe` and similar), a folder w
 **Registration improvements: .xbe/.dll scanning and profile code fuzzy pass**
 
 - `.xbe` and `.dll` files are now included when scanning for game executables. Sega Chihiro games emulated via cxbxr (Virtua Cop 3, OutRun 2, Ollie King, etc.) use `.xbe` files; Konami PC arcade games (DanceDanceRevolution 2013, Steel Chronicle, Silent Scope Bone Eater, Metal Gear Arcade, Love Plus Arcade) use a game-specific `.dll`. Both were previously invisible to the scanner.
-- A third registration pass now Dice-matches normalised folder names against normalised GameProfile code names. This catches games with an empty `<ExecutableName>` in their profile (BladeStrangers, LuigisMansion, MaiMaiGreen, PokkenTournament, ProjectDiva, SonicDashExtreme, StreetFighterVTypeArcade, HydroThunder, and others) that fell through the exe-index and dat passes.
+- A third registration pass now Dice-matches normalized folder names against normalized GameProfile code names. This catches games with an empty `<ExecutableName>` in their profile (BladeStrangers, LuigisMansion, MaiMaiGreen, PokkenTournament, ProjectDiva, SonicDashExtreme, StreetFighterVTypeArcade, HydroThunder, and others) that fell through the exe-index and dat passes.
 
 **Security / reliability**
 

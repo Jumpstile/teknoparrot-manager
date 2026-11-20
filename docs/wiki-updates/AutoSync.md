@@ -108,6 +108,16 @@ To decide that a ZIP is already unzipped, AutoSync tries these in order: the exa
 
 ---
 
+## Already have games, or use RetroBat with a mouse and keyboard?
+
+You do not have to delete, move or reset anything first. Pick your TeknoParrot folder and the folder that holds your games, then run **Register only**. It adds the games TeknoParrot does not know yet and asks before it fixes a broken game path. It does not delete your game folders.
+
+RetroBat mode only changes the folder names TeknoParrot Manager makes. It does not change RetroBat. TeknoParrot runs the games and keeps each game's controls and input type; RetroBat keeps its own list and starts games its own way.
+
+TeknoParrot Manager does not set up mouse or keyboard input. Set one game's controls in TeknoParrotUI (RawInput is the mouse and keyboard type), start it from TeknoParrot first, then use [[Propagate Controls]] for the others and test one game. Starting from TeknoParrot and from RetroBat are two different ways to start a game, and TeknoParrot Manager cannot tell you why one works and the other does not. It does not detect or set up Sinden lightguns.
+
+---
+
 ## After unzipping
 
 AutoSync goes straight on to registration. See [[Register]].

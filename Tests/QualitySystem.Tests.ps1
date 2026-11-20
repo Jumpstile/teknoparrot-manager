@@ -129,11 +129,11 @@ Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
         $wikiChangelog | Should -Not -Match '(?i)RC8[^.\n]{0,40}\b(?:is|was)\s+(?:now\s+)?(?:published|released)\b|RC8\s+(?:is|was)\s+(?:the\s+)?(?:latest|current)\s+published\b|releases/(?:tag|download)/v1\.0-RC8(?![.\d])'
         $wikiChangelog | Should -Match ('(?i)(?:previous|historical) published release.{0,80}' + $script:PreviousPublishedVersionPattern)
     }
-    It "records the current RC8 release gate and owner authorization prerequisite" {
+    It "records the release gate for RC9 and later and the owner authorization prerequisite" {
         $checklist = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'RELEASE-SAFETY-CHECKLIST.md') -Raw
 
-        $checklist | Should -Match '(?m)^# TPM RC8 -- Release Gate \(\d{4}-\d{2}-\d{2}\)\r?$'
-        $checklist | Should -Match '(?m)^STATUS: HOLD\. RC8 remains unqualified\.\r?$'
+        $checklist | Should -Match '(?m)^# TPM Release Gate\r?$'
+        $checklist | Should -Match '(?m)^STATUS: v1\.0 RC8\.2 is the latest published release .*Every later release \(RC9 and Version 1\.0\) must pass this gate first\.\r?$'
         $checklist | Should -Match 'OWNER explicitly authorizes testing after source engineering and screenshot approval'
     }
 }
@@ -204,8 +204,8 @@ Describe "Active release-facing documentation" -Tag 'ReleaseConsistency' {
         $script:ActiveReleaseDocs = @(
             [pscustomobject]@{ RelativePath = 'README.md'; PrefixLines = 25 }
             [pscustomobject]@{ RelativePath = 'QUICKSTART.md'; PrefixLines = 5 }
-            [pscustomobject]@{ RelativePath = 'TeknoParrot-Manager-README.txt'; PrefixLines = 18 }
-            [pscustomobject]@{ RelativePath = 'TeknoParrot-Manager-QuickStart.txt'; PrefixLines = 17 }
+            [pscustomobject]@{ RelativePath = 'TeknoParrot-Manager-README.txt'; PrefixLines = 23 }
+            [pscustomobject]@{ RelativePath = 'TeknoParrot-Manager-QuickStart.txt'; PrefixLines = 19 }
             [pscustomobject]@{ RelativePath = 'docs\AUTO_UPDATE.md'; PrefixLines = 11 }
         )
     }
@@ -300,7 +300,7 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
                     }
 
                     if ($text -match $Contract.Rc9PublishedClaimPattern) {
-                        [void]$findings.Add("$($document.Path): active text calls RC9 published (the final RC9 comes later and is not published yet).")
+                        [void]$findings.Add("$($document.Path): active text calls RC9 published (it is the current build and is not published yet).")
                     }
 
                     if ($text -notmatch ('(?i)latest(?:(?!RC\d)[\s\S]){0,60}(?:published|download)(?:(?!RC\d)[\s\S]){0,80}' + $Contract.LastPublishedVersionPattern)) {
@@ -493,7 +493,7 @@ Register manually with the best-guess profile.
             $documents += [pscustomobject]@{ Path = $entry.RelativePath; Scope = 'ActiveIdentity'; Text = $content }
         }
 
-        foreach ($relativePath in @('README.md', 'QUICKSTART.md', 'TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt')) {
+        foreach ($relativePath in @('docs\USER-GUIDE.md', 'QUICKSTART.md', 'TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt')) {
             $documents += [pscustomobject]@{
                 Path = $relativePath
                 Scope = 'ActiveBepInEx'

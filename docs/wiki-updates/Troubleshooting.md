@@ -90,7 +90,7 @@ See [[Check for Updates]].
 Your copy is unchanged. Try again later.
 
 **I run a build before RC8.1 (such as RC8 or RC7) and the update does not install.**
-Builds before RC8.1 cannot install a whole release. This is a one-time step. After RC8.1 comes out, download its ZIP from the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases) and extract all of it over your TeknoParrot Manager folder. After that, Check for Updates installs releases for you.
+Builds before RC8.1 cannot install a whole release. This is a one-time step. Download the newest release ZIP from the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases) and extract all of it over your TeknoParrot Manager folder. After that, Check for Updates installs releases for you.
 
 **"There is not enough free space for the update."**
 Nothing was installed. Free some space on the drive that holds TeknoParrot Manager and try again.
@@ -123,7 +123,7 @@ The screen says what happened to your data. Press `D` for why, and open View Log
 See [[ReShade]].
 
 **ReShade does not work on a game.**
-ReShade works with 64-bit games only. 32-bit games are skipped and nothing in their folder changes. Press `D` on the result to see why a game was left alone.
+ReShade works with both 32-bit and 64-bit games. Games that run through BudgieLoader (a Linux-style game format) are skipped for now, and nothing in their folder changes. Press `D` on the result to see why a game was left alone.
 
 **The Home key does not open ReShade.**
 ReShade may not be installed for that game, or the game uses Home for something else. Change `KeyOverlay=` in the game's `ReShade.ini`.

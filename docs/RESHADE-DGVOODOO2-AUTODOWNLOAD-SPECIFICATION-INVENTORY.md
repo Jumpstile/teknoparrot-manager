@@ -1,6 +1,6 @@
 # ReShade / dgVoodoo2 Auto-Download Specification Inventory
 Release context: this inventory documents the published v1.0 RC7 release and the
-unpublished RC8.1 source. The v1.0 RC6 release is the previous published
+unpublished RC8.4 source. The v1.0 RC6 release is the previous published
 release (historical); final Version 1.0 remains unpublished.
 
 Governing sources (multiple, one per external contract this component

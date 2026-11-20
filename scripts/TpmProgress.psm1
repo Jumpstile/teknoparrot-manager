@@ -13,7 +13,7 @@
 #
 # Honesty rules:
 #   - Percent and counts show FINISHED work. A running operation never shows 100% (capped at 99%); only a
-#     Final close with every unit finished shows 100%. A failed/cancelled/stalled close never shows 100%.
+#     Final close with every unit finished shows 100%. A failed/canceled/stalled close never shows 100%.
 #   - Unknown total (Total <= 0): animated pulse, no percent or ETA; optional count is measured work only.
 #   - A step that is ONE long external job (an installer that reports nothing while it runs) is marked with
 #     Set-TpmProgressStage -LongStep. Long silence there is normal, so it reads "still working" in the running color
@@ -869,7 +869,7 @@ function Format-TpmProgressCount {
 function Get-TpmProgressPercent {
     # Whole percent of FINISHED work, or -1 when the total is unknown. 100 is returned only for a Final/No-op
     # state with Current >= Total; every other state is capped at 99 (running work is not complete until the
-    # owner closes it, and failed/cancelled/stalled work is never 100%).
+    # owner closes it, and failed/canceled/stalled work is never 100%).
     param([long]$Current = 0, [long]$Total = 0, [string]$State = 'Running')
     if ($Total -le 0) { return -1 }
     $finished = [Math]::Max([long]0, [Math]::Min([long]$Current, [long]$Total))

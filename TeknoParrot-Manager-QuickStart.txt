@@ -12,7 +12,7 @@
   This guide is for v1.0 RC8.4, a fix-up release for RC8.3. It fixes
   problems that testers found. The latest published release before it is
   v1.0 RC8.3: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3
-  If you use RC8.3, choose 15) Check for Updates. The final v1.0 RC9 comes later.
+  If you use RC8.3, choose 15) Check for Updates. Final Version 1.0 comes later.
   The previous published releases are v1.0 RC8.2, RC8.1 and RC7. RC8 was never published.
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
   Final Version 1.0 remains unpublished.
@@ -678,6 +678,7 @@
 
   AutoSync does not extract .rar or .7z game archives. Extract those yourself
   first, then use Register only.
+  AutoSync tells you when it skips one.
 
   Keep the original game files and ZIPs. Never delete leftover marker files
   just to clear an error.
@@ -899,8 +900,9 @@
   - ReShade, undo: choose 5, then U) Undo ReShade changes. The games are listed
     newest first. Pick one game's number and type YES, or choose [A] Undo all
     and type ALL. Any other answer cancels, and nothing is changed.
-  - ReShade works with 64-bit games only. 32-bit games are skipped and
-    nothing in their folder changes.
+  - ReShade works with both 32-bit and 64-bit games. Games that run through
+    BudgieLoader (a Linux-style game format) are skipped for now, and nothing
+    in their folder changes.
   - ReShade shows no welcome window, counters or messages when a game starts,
     and the key that opens it still works. A short ReShade version banner may
     still show for a moment at game start. ReShade has no setting to hide it.
@@ -1264,10 +1266,10 @@
   ------------------------
 
   Symptom: TeknoParrot Manager does not recognize a game folder. You may see
-  this message: game folder(s) not recognized by TeknoParrot (no matching
-  profile) -- see ACTION REQUIRED at the end of this run.
+  this message: game folder(s) not matched to a TeknoParrot profile --
+  see ACTION REQUIRED at the end of this run.
 
-  The report may show GAME FOLDERS NOT RECOGNIZED BY TEKNOPARROT or REGISTER
+  The report may show GAME FOLDERS NOT MATCHED TO A TEKNOPARROT PROFILE or REGISTER
   THESE GAMES IN TEKNOPARROTUI. The end-of-run summary may show "1 game
   folder was not recognized by TeknoParrot." (or "3 game folders were not
   recognized by TeknoParrot.").
@@ -2067,8 +2069,8 @@
                              every file it replaces and installs it. You
                              start the program again yourself. Nothing
                              changes without your Y. Builds before RC8.1
-                             (RC8, RC7): install RC8.1 by hand once from
-                             the Releases page.
+                             (RC8, RC7): install the newest release by
+                             hand once from the Releases page.
 
       16) Create Support Package
                           -- collect safe logs/reports into one ZIP to
@@ -3427,6 +3429,41 @@
   advanced changes. Existing-folder detection may retain old names; do not
   delete state to force a populated-library conversion.
 
+  ALREADY HAVE GAMES SET UP? WHO DOES WHAT
+  ----------------------------------------
+
+  Can TeknoParrot Manager still help if your games are already unzipped
+  and partly set up? Yes. You do not have to delete, move or reset
+  anything first. Pick your TeknoParrot folder and the folder that holds
+  your games, then choose Register only (2). It adds the games TeknoParrot
+  does not know yet, and it asks before it fixes a broken game path. It
+  does not delete your game folders.
+
+  What does RetroBat mode change? Only the names of the folders
+  TeknoParrot Manager unpacks (GameName.teknoparrot). It does not change
+  RetroBat, its settings or its game list.
+
+  Who does what: TeknoParrot Manager adds games to TeknoParrot, copies
+  controls between games of the same type (after you say yes, with a
+  backup first) and names the folders. TeknoParrot runs the games and
+  keeps each game's controls and input type. RetroBat keeps its own game
+  list and starts games its own way.
+
+  Before you change controls, check: the game shows up in TeknoParrotUI,
+  it starts from TeknoParrotUI, and you set up one example game of that
+  type yourself.
+
+  Only a mouse and keyboard for now? TeknoParrot Manager does not set up
+  mouse or keyboard input. Set one game's controls in TeknoParrotUI
+  (RawInput is the mouse and keyboard type), start it from TeknoParrot
+  first, then use Propagate Controls (3) for the others and test one game.
+  Starting from TeknoParrot and from RetroBat are two different ways to
+  start a game. TeknoParrot Manager does not change how RetroBat starts a
+  game and cannot tell you why one way works and the other does not.
+
+  Later, with Sinden lightguns: TeknoParrot Manager does not detect or set
+  up lightguns. That happens in TeknoParrot and in the gun's own software.
+
 
   UNATTENDED MODE
   ---------------
@@ -3656,6 +3693,8 @@
          3) LaunchBox library backup (verified current-state backup first)
          4) Reset and Restore: put back one game or all games from a
             restore point saved when TeknoParrot Manager started
+         5) Rebuild one game from its ZIP: put one game folder back to
+            exactly what its ZIP holds (your old folder is kept)
 
        Next: go to step 2. (UserProfiles is TeknoParrot's saved game
        settings folder.)
@@ -3719,6 +3758,16 @@
 
   Choosing 2 or 4 shows "Restore points, newest first:". Pick one by
   number, or press B to go back.
+
+  Choice 5 (Rebuild one game from its ZIP) is for a game that is broken
+  for no clear reason. It puts the game folder back to exactly what is in
+  its original ZIP (you need the ZIP in your ZIP folder). You pick a
+  game, read the preview and type YES. The ZIP is checked in a temporary
+  folder first. Then your current folder is renamed and kept in
+  TPM-old-game-folders, beside your games folder, so nothing is deleted
+  or copied twice. If anything goes wrong, the old folder is put back.
+  Its menu can also put an old folder back, or delete one you no longer
+  need (after you type YES).
 
   If a restore does not finish, read the message on the screen. For
   details, see MORE DETAIL below.
@@ -3908,8 +3957,7 @@
                             and the steps left: choose the DAT file, let it
                             scan for games, set up controls.
 
-    GAME FOLDERS NOT RECOGNIZED BY TEKNOPARROT (no matching profile; not
-    registered)
+    GAME FOLDERS NOT MATCHED TO A TEKNOPARROT PROFILE (not registered)
                             These folders were not registered. Their
                             executables matched no profile in the
                             TeknoParrot GameProfiles folder.

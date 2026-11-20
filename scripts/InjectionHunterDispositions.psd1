@@ -272,6 +272,14 @@
         @{
             File        = 'TeknoParrot-Manager.ps1'
             RuleName    = 'InjectionRisk.AddType'
+            Line        = 55319
+            Extent      = 'Add-Type -AssemblyName System.Drawing'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The assembly name is a fixed framework literal used to read one local picture and find its main color for the LED export. No external or attacker-controlled value reaches Add-Type.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.AddType'
             Line        = 5248
             Extent      = 'Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop'
             Disposition = 'FalsePositive'
@@ -508,6 +516,62 @@
             Extent      = "`$change.Geometry.`$name"
             Disposition = 'FalsePositive'
             Reasoning   = '$name is drawn only from the fixed, hardcoded array of geometry field names (Width, Height, BufferWidth, BufferHeight) in the ReShade chooser resize check (FIX52). The geometry objects hold console size integers; no external value can select the property name used by this access.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 2346
+            Extent      = '$Snapshot.$name'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'In ConvertTo-TpmWorkflowEvidenceRecord $name iterates only over the fixed literal list WorkflowId, RunId, WorkflowKey, Lifecycle, State, Sequence. The snapshot is a TPM-owned workflow status object, and the access only reads a property after checking that it exists. No outside value can pick the property name.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 39720
+            Extent      = '$Row.$Name'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'In Get-TpmGuideText every caller passes a fixed literal field name, or a fixed vendor key (amd, nvidia, intel) joined to _issues or _status, or an item from the fixed list supp_archives, additional_archives. The row is parsed guide data, the access only reads a field after checking that it exists, and nothing is executed or written from it.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 54019
+            Extent      = '$Item.$Name'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The textOf helper in the game setup notes report is called only with fixed literal field names (BaseGame, GuideStatus, SecondFile, TestProgram, GeneralIssues, LinkedProfile and similar). The item is a TPM-built notes object, the access only reads a property after checking that it exists, and no outside value can pick the name.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 45459
+            Extent      = '$_ -replace "''", "''''"'
+            Disposition = 'Mitigated'
+            Reasoning   = 'In Get-TpmGamesDbIndex the platform names are doubled single quotes before they are put in the quoted list of a read-only SELECT on the LaunchBox game list. The names come from the script (Arcade, Taito Type X), not from a user or a file, and the query only reads.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 45556
+            Extent      = '$InternalName -replace ''\s*\([^()]*\)\s*$'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (a trailing bracketed note is cut from a game name). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 46095
+            Extent      = '$facts.Dat.$fact'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The loop that fills in LaunchBox game details only takes $fact from the fixed list Year, Developer, Hardware. The facts object is TPM-built, the access only reads a property, and nothing is executed or written from the name.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 55165
+            Extent      = '$name -replace ''^CONTROL_'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (the CONTROL_ prefix is cut from a LEDBlinky control name). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
         }
     )
 }

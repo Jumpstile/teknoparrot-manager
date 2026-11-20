@@ -39,6 +39,7 @@ You can add its info file first. At the menu, press **D** to see the steps:
 - Included: logs and reports from the current run, plus clearly labeled background information about TeknoParrot Manager, TeknoParrot, and your games.
 - Never included: game files, passwords and other credentials, or folders picked at random.
 - The registration record is included in a cleaned form. See [[Registration Ledger]].
+- It also says how the last finished job ended (for example a setup that stopped), even if you restarted TeknoParrot Manager since then. Personal folder names are removed.
 - If the ZIP is ready but a temporary folder could not be removed, the result says so. You can delete that folder yourself. Its path is under Details.
 - If no package was made, check the TeknoParrot Manager log, then try again. See [[Troubleshooting]].
 

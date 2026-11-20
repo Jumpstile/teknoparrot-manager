@@ -514,7 +514,7 @@ Describe 'FIX110B S-20 one place for the TeknoParrotUI troubleshooting file: the
 
     It 'the guides say the same, and the developer note no longer has the intake file name' {
         # Mutation: leave one guide saying "beside this script" -> users save the file where the package does not look.
-        foreach ($guide in @('TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt', 'README.md')) {
+        foreach ($guide in @('TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt', 'docs\USER-GUIDE.md')) {
             $guideText = [System.IO.File]::ReadAllText((Join-Path $script:F110Root $guide))
             $at = $guideText.IndexOf($script:F110IntakeName)
             $at | Should -BeGreaterThan 0 -Because $guide

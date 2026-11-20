@@ -1,6 +1,6 @@
 # Quick Start
 
-Get TeknoParrot Manager (TPM) running in a few minutes. This page matches v1.0 RC8.1, the interim build for testers, which is not published yet. The final v1.0 RC9 comes later. The latest published release today is RC7: see the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases).
+Get TeknoParrot Manager (TPM) running in a few minutes. This page matches v1.0 RC8.4, which is not published yet. The latest published release is RC8.3 (the previous one is RC8.2): see the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Test one game after each run.
 
