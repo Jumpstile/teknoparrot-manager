@@ -6,7 +6,7 @@ Thank you for helping! You will try a program that sets up arcade games on a PC.
 
 Follow the steps in order. Take your time. If you get stuck, stop and send a screenshot to the person who gave you this guide. If something goes wrong, your backup lets us fix it.
 
-**What is new in RC8.4?** RC8.4 is a fix-up release for RC8.3. It fixes a problem that testers found. Tests 1 to 40 are the same as before. **Test 41 is new. If you only have a little time, do test 41 first.**
+**What is new in RC8.4?** RC8.4 is a fix-up release for RC8.3. It fixes problems that testers found and adds new features. Tests 1 to 40 are the same as before. **Tests 41 to 46 are new. If you only have a little time, do tests 41 to 46 first.**
 
 Words you will see:
 
@@ -335,9 +335,9 @@ These tests try the fixes in RC8.3. Do them first if you are short on time.
 2. Install a game patch from the menu on a game in that folder. Then undo the patch.
 3. You passed if neither step stops with a "could not be checked" error.
 4. If your TeknoParrot folder is very deep, also start TeknoParrot Manager and let it tidy up its own files. You passed if it finishes with no error about a path that is too long.
-## New in RC8.4: test 41
+## New in RC8.4: tests 41 to 46
 
-This test tries the fix in RC8.4. Do it first if you are short on time.
+These tests try the new parts of RC8.4. Do them first if you are short on time.
 
 ### Test 41: Two games with almost the same name
 
@@ -346,6 +346,42 @@ This test tries the fix in RC8.4. Do it first if you are short on time.
 3. Read the preview, then say yes.
 4. You passed if BOTH games were unpacked into their own folders and set up. It failed if one of them was skipped with a message that another zip "already created a new folder for the same game".
 5. Open TeknoParrot. You passed that part if each game is listed once with its own name. If one game's zip exists in two regions (for example Japan and USA), they should still share ONE folder. That is correct.
+
+### Test 42: The control setup result is easy to read
+
+1. Use this only if some of your games have no controls set up in TeknoParrotUI. Skip this test if every game already has controls.
+2. At the main menu, type 3 and press Enter (Propagate Controls). Say yes when it asks.
+3. Read the result screen.
+4. You passed if games that were already set up and games skipped by your own rules are on separate lines, and every control family that has no game with your controls yet is named. You also pass if the next step tells you what to do in TeknoParrotUI and then which menu to run again. Write down anything that was hard to understand.
+
+### Test 43: LaunchBox official names and details
+
+1. Use this only if you use LaunchBox. Skip this test if you do not.
+2. Start the LaunchBox step the way you did in Test 22. Choose L (match games to the LaunchBox game list).
+3. Look at the preview. Nothing should change until you say yes.
+4. You passed if you see each old name, new name and ID first, and a backup is made before anything is saved. Games you named yourself must keep your name.
+5. Now choose "Fill in game details and make playlists". You passed if it shows what will change first, makes playlists such as "Light gun games" and "Driving games", and leaves your own playlists alone.
+6. Use the restore choice. You passed if everything goes back the way it was.
+
+### Test 44: Logos and box art from a folder
+
+1. Use this only if you use LaunchBox and have a folder with pictures for your games. Skip this test if not.
+2. Choose the optional step that adds logos or box art. Pick your folder.
+3. You passed if it shows a preview with sure matches, close matches and games with no picture, and uses a close match only if you say yes. Pictures LaunchBox already has must stay unless you choose to replace them.
+4. Choose Undo. You passed if only the pictures that were added are removed.
+
+### Test 45: LEDBlinky lighting
+
+1. Use this only if you use LEDBlinky. Skip this test if you do not.
+2. Choose the LEDBlinky option in the menu.
+3. You passed if it finds LEDBlinky on its own or asks where it is, shows a preview first, and changes nothing until you say yes.
+4. After you say yes, you passed if a saved copy was made first. Use Undo. You passed if only the entries the Manager added are removed.
+
+### Test 46: Games that need firmware or a game file
+
+1. Use this only if you have a PlayStation 3 game (RPCS3) or a Play! game. Skip this test if you have neither.
+2. Start the game from the Manager, or run Health check (Test 4).
+3. You passed if the Manager tells you in plain words what is missing (the firmware or the game file) before the game starts. It failed if the game just closes with no explanation.
 ## How to report a problem
 
 **Very important: the support report.** Every bug report needs a support report. Without it we often cannot find the cause. Make one every time something goes wrong. Never skip it.
