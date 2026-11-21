@@ -67,3 +67,47 @@ Describe 'The dat reader keeps the newer game fields (issue 382)' {
         $index.Count | Should -Be 2
     }
 }
+
+Describe 'The dat reader and the format version, missing elements and romzip/romnest (issue 382)' {
+    BeforeEach { Mock Write-Log { } ; Mock Write-Host { } }
+
+    It 'warns once in plain words about an unknown format version and still reads every game' {
+        # Mutation: remove the check -> no warning; make it throw or return early -> the games are not read.
+        $index = Read-F382Dat -Xml ($script:F382Dat -replace '<TPUISchemaVersion>1<', '<TPUISchemaVersion>7<')
+        Should -Invoke Write-Host -Times 2 -Exactly -ParameterFilter { $Object -match 'version 7|Check for a newer Manager' }
+        Should -Invoke Write-Log -Times 1 -Exactly -ParameterFilter { $msg -match 'TPUISchemaVersion 7' }
+        $index.Count | Should -Be 2
+        $index[(Get-NormalizedGameKey 'Two Part Game')].Executable2 | Should -Be 'second.exe'
+    }
+
+    It 'says nothing for version 1 and for a dat with no version at all' {
+        $null = Read-F382Dat -Xml $script:F382Dat
+        $null = Read-F382Dat -Xml ($script:F382Dat -replace '<header>.*</header>', '')
+        Should -Invoke Write-Host -Times 0 -Exactly
+    }
+
+    It 'reads a game with missing elements as empty values, skips a game with no profile, and passes over romzip and romnest' {
+        $xml = @'
+<?xml version="1.0"?>
+<datafile>
+  <header><TPUISchemaVersion>1</TPUISchemaVersion></header>
+  <game name="Only Profile"><GameProfile>ONLYPROF</GameProfile></game>
+  <game name="No Profile"><Executable>none.exe</Executable></game>
+  <game name="Mame Style">
+    <GameProfile>MAMESTYLE</GameProfile><Executable>mame.exe</Executable>
+    <romzip archive="mame.zip" mode="members" count="2" format="storezip"/>
+    <romnest archive="mame.zip" name="a.bin" size="1" crc="00000001" sha1="00"/>
+    <romnest archive="mame.zip" name="b.bin" size="1" crc="00000002" sha1="01"/>
+  </game>
+  <game name="After Mame"><GameProfile>AFTER</GameProfile><Executable>after.exe</Executable></game>
+</datafile>
+'@
+        $index = Read-F382Dat -Xml $xml
+        $index.Count | Should -Be 3
+        $index[(Get-NormalizedGameKey 'Only Profile')].Executable | Should -BeExactly ''
+        $index[(Get-NormalizedGameKey 'Only Profile')].ProfileCode2 | Should -BeExactly ''
+        $index.ContainsKey((Get-NormalizedGameKey 'No Profile')) | Should -BeFalse
+        $index[(Get-NormalizedGameKey 'Mame Style')].Executable | Should -Be 'mame.exe'
+        $index[(Get-NormalizedGameKey 'After Mame')].ProfileCode | Should -Be 'AFTER'
+    }
+}

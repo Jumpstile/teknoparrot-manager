@@ -440,10 +440,10 @@ Describe 'FIX58 Reset and Restore for all games' {
         $result.RestartRequired | Should -BeFalse
     }
 
-    It 'menu: all games needs YES and then ALL; a missing second confirmation changes nothing' {
-        # Mutation: remove the second (ALL) confirmation in Invoke-TpmResetRestoreAllGames -> every file changes after one YES.
+    It 'menu: all games needs one typed YES and asks nothing more; any other answer changes nothing' {
+        # Mutation: ask a second (ALL) confirmation again in Invoke-TpmResetRestoreAllGames, or restore without the YES.
         $fx = New-F58Fixture -Name 'menuall'
-        Install-F58Mocks -Fixture $fx -Answers @('4', '1', 'YES', 'no')
+        Install-F58Mocks -Fixture $fx -Answers @('4', '1', 'no')
         $null = New-F58Baseline -Fixture $fx
         Set-F58File -Path (Join-Path $fx.Profiles 'GameA.xml') -Text 'a-new'
 
@@ -452,7 +452,8 @@ Describe 'FIX58 Reset and Restore for all games' {
         $menu.Result.ReasonCode | Should -BeExactly 'USER_DECLINED'
         Get-F58Text -Path (Join-Path $fx.Profiles 'GameA.xml') | Should -BeExactly 'a-new'
         @(Get-TpmRestorePoints -RestorePointsRoot $fx.Points).Count | Should -Be 1
-        @($fx.State.Prompts | Where-Object { $_ -like '*Type ALL*' }).Count | Should -Be 1
+        @($fx.State.Prompts | Where-Object { $_ -like '*Type YES*' }).Count | Should -Be 1
+        @($fx.State.Prompts | Where-Object { $_ -like '*Type ALL*' }).Count | Should -Be 0
     }
 
     It 'the UserProfiles restore refuses a preselected folder outside FullBackup and still asks YES without -AlreadyConfirmed' {

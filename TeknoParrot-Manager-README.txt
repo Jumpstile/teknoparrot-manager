@@ -2516,7 +2516,7 @@
   saved file that cannot be read is set aside, never overwritten, and the
   last good copy is kept next to the new one as a .bak file.
 
-  MY CONTROLS (Propagate Controls, choice 3)
+  MY CONTROLS (Propagate Controls, choice 5)
 
     Nothing here changes a TeknoParrot game file.
 
@@ -3448,11 +3448,10 @@
     The prompt is Press A, S, B or D (the letters match the keys shown; for
     example Press A, S, M, B or D). The default is B.
 
-      A    Asks: Replace the old ReShade files in (that game or those
-           games)? You will choose the look again. A copy of the old files
-           is saved, so you can undo it. Press Y to replace them, or N to
-           leave them. (Y/N). Press Y to replace. N says: Nothing was
-           replaced. No files were changed.
+      A    Goes straight into ReShade setup to replace the old ReShade
+           files of those games, with no separate "Replace the old files?"
+           question. You still choose the look and confirm it in setup. A
+           copy of the old files is saved first, so you can undo it.
 
       S    Goes back into ReShade setup so you can choose games one by one.
 
@@ -4215,7 +4214,9 @@
     It installs or updates BepInEx for the games you choose.
     Nothing happens until you approve it.
 
-    The prompt is [Y] Install/update, [B] Back, [N] Cancel. There is no
+    The prompt is [Y] Install/update, [B] Back, [N] Cancel. It is skipped
+    when the only games are ones you picked by number from the "do not
+    have BepInEx" list, because picking them was your answer. There is no
     repair-reset choice. After a successful or no-change run, the screen
     waits for one Enter.
 

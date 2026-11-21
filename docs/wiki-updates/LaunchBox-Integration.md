@@ -22,9 +22,8 @@ You can press **P** as many times as you like. What you answered there becomes t
 ## Add games (A)
 
 1. Close LaunchBox and BigBox. TeknoParrot Manager never closes them for you.
-2. Answer `Add the missing games to LaunchBox now? (Y/N, D = about the risks)`.
-3. Give the LaunchBox folder if you are asked, and pick a platform: Arcade, TeknoParrot, both, or a custom name.
-4. Read the plan. Then answer `Write exactly these changes after a verified backup? (Y/N)`.
+2. Give the LaunchBox folder if you are asked, and pick a platform: Arcade, TeknoParrot, both, or a custom name.
+3. Read the plan. Then answer `Write exactly these changes after a verified backup? (Y/N, D = about the risks)`. This is the only approval.
 
 Only missing games are added. Your own entries are kept.
 

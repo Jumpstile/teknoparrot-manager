@@ -833,7 +833,7 @@ Describe 'FIX69 Library Health lists only the games TeknoParrot still has to cre
         @($result.PostgresAutoCreateProfiles).Count | Should -Be 1
         @($result.PostgresAutoCreateProfiles | Sort-Object) | Should -Be @('No Backup Game')
         # The default screen is short; the list of games with no starting database file is behind D (the detail blocks) and in the log.
-        $firstRun = @((Get-F69HealthPostgresDetail -Result $result) -split "`n" | Where-Object { $_ -like 'Games with no starting database file:*' })
+        $firstRun = @((Get-F69HealthPostgresDetail -Result $result) -split "`n" | Where-Object { $_ -like 'Profile ready; the database is created the first time the game starts:*' })
         $firstRun.Count | Should -Be 1
         $firstRun[0] | Should -Match 'No Backup Game'
         $firstRun[0] | Should -Not -Match 'Golden Tee Live 2019'
@@ -850,8 +850,8 @@ Describe 'FIX69 Library Health lists only the games TeknoParrot still has to cre
 
         $result.PostgresConfigured | Should -Be 1
         @($result.PostgresAutoCreateProfiles).Count | Should -Be 0
-        (Get-F69HealthPostgresDetail -Result $result) | Should -Not -Match 'Games with no starting database file:'
-        ($script:logLines -join "`n") | Should -Not -Match 'Games with no starting database file:'
+        (Get-F69HealthPostgresDetail -Result $result) | Should -Not -Match 'Profile ready; the database is created'
+        ($script:logLines -join "`n") | Should -Not -Match 'Profile ready; the database is created'
     }
 
     # Mutation: plain Test-Path / Get-Item on the game folder -> a game in a path over 259 characters is skipped or counted as not checked, and its dgVoodoo2, ReShade and BepInEx state is missed.

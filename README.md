@@ -509,8 +509,8 @@ The check also has a **Game support** row. It says `OK` when nothing is missing,
 
 **To use automatic repair (R):**
 
-1. Type R and press Enter. You will see "TeknoParrot Manager will search" your games folder "for matching executables." with `[Y] Search for repair candidates` and `[N] Cancel`.
-2. Type Y and press Enter. You will see "Candidate paths found (no profile changes made):" with a "before" path and an "after" path for each game.
+1. Type R and press Enter. You will see "TeknoParrot Manager will search" your games folder "for matching executables." The search starts right away. It only reads, and it changes nothing.
+2. Wait for "Candidate paths found (no profile changes made):" with a "before" path and an "after" path for each game.
 3. Check that the new paths look right. Next: type Y to choose `[Y] Apply only these reviewed candidates`, or N to choose `[N] Leave them unchanged`.
 4. If you chose Y, you will see "Repair result:" with the number FIXED and STILL BROKEN, and a "Safety backup:" line.
 5. Next: press Enter at "Press Enter to return to the main menu".
@@ -835,6 +835,24 @@ If you press **Y**, a saved copy of your game settings is made first, and its fo
 
 - A `familyOverride` in `TeknoParrot-Manager.overrides.json` also applies to the games controls are copied from. A game set to `spinner` finds a reference game of that type.
 
+### Your controller layout and the controls check
+
+Mode 3 opens a small menu. Choice 1 is the copy described above. The other choices are new:
+
+- **2 = set up games with my controller layout.** The first time, you choose a layout once: Xbox, PlayStation, Nintendo or arcade stick. You can change any single button, and Test and Service start empty so a stick click cannot open a test menu. After that, pick one game, all your games at once (you see a preview and approve once), or game by game (you confirm each game).
+- **3 = choose or change my controller layout.** Your choice is saved in TeknoParrot Manager's own settings folder. A connected Xbox-style controller only pre-selects the Xbox choice. The answer is always yours.
+- **4 = check which games have all their controls.** It reads every registered game and sorts it into: every control set up, some set up, none set up, or "TPM cannot tell". It changes nothing. Details name the games and the controls still missing. The same counts show as a Controls line in the Library health check (menu 13).
+
+### More detail: your controller layout
+
+- TPM only sets controls that TeknoParrot's own game file lists for that game, and only when your saved settings for the game are the same revision as that file. If they are not, the game is left alone and the screen says to open it once in TeknoParrotUI.
+- A button that already has an Xbox setting is never replaced. Keyboard and arcade-encoder bindings are never touched. If an Xbox button the layout wants is already used by another control in that game, the game is left alone.
+- TPM does not set triggers or analog sticks (steering, aim, throttle). Those stay manual, and the preview names them.
+- PlayStation and Nintendo controllers work with the Xbox (XInput) setting only when something shows them to Windows as an Xbox controller. An arcade stick must be switched to its Xbox mode. TPM does not check this.
+- Setting a game to Xbox may stop that game from using an arcade encoder. Choose game by game if you are not sure.
+- A saved copy of your game settings is made and checked before the first change. Each changed game is saved, read back and compared. If the check fails, the old file is put back exactly. After the run you can undo the whole run in one step.
+- For most games the list of controls comes from TeknoParrot's own game file and no person has checked it, so the check says so. "Every control set up" never means the game works. TPM has not tested any game with a real controller.
+
 ---
 
 ## Device Survey
@@ -847,9 +865,9 @@ It changes no game file. If a controller is connected, it looks for it first. Wh
 
 Your answers are saved in TeknoParrot Manager's own settings folder (`State\Controls`), so you are not asked the same thing twice. Next time it shows your answers and asks one question: `Keep these answers?` It asks again if a controller turns up that you said you do not have. A saved file that cannot be read is set aside, never overwritten, and the last good copy is kept next to the new one as a `.bak` file.
 
-### My controls (Propagate Controls, choice 3)
+### My controls (Propagate Controls, choice 5)
 
-Choose **3** under Propagate Controls to open **My controls**. Nothing here changes a TeknoParrot game file.
+Choose **5** under Propagate Controls to open **My controls**. Nothing here changes a TeknoParrot game file.
 
 - **Learn my arcade buttons.** You say how many players and buttons your cabinet has. If LEDBlinky is installed, TeknoParrot Manager first offers the keys its own key list names (one Y/N). Then it asks you to press each control ("Press Player 1 Start") and remembers the key it sends. Esc skips a control your cabinet does not have. A key already given to another control is refused. At the end one question, `Save this?`, keeps the answers. Other encoder brands' own setup files are not read yet; pressing the buttons works for any encoder.
 - **Show or print the controls of one game.** Lists each control the game has, what it does, your key for it, and whether the game has it set up. One question saves the list as a page in `Reports\Control Guides` and opens it so you can print it.
@@ -1135,7 +1153,7 @@ The default is B. If you only press Enter, nothing is replaced.
 
 | Key | What happens |
 | --- | --- |
-| `A` | Asks `Replace the old ReShade files in {that game\|those N games}? You will choose the look again. A copy of the old files is saved, so you can undo it. Press Y to replace them, or N to leave them. (Y/N)` |
+| `A` | Goes straight into ReShade setup to replace the old ReShade files of those games, with no separate "Replace the old files?" question. You still choose the look and confirm it in setup. A copy of the old files is saved first, so you can undo it. |
 | `S` | Goes back into ReShade setup so you can choose games one by one. After games that were not safe, the line reads `[S] Choose games one by one and try again`. |
 | `M` | Opens the Library health check (main menu 13) so you can repair missing game paths. |
 | `B` or Enter | Leaves the games as they are. Without protected games the line reads `[B] Back to the main menu`. |
@@ -1674,7 +1692,7 @@ The undo preview says what happens in plain words:
 - `Its ReShade files are put back exactly as they were.`
 - `TeknoParrot's own CRT look is turned back on.`
 
-**Result screen details:** the `D` view of the ReShade result screen shows the note `Press A to replace protected ReShade files. TeknoParrot Manager asks you to confirm before it changes anything.`
+**Result screen details:** the `D` view of the ReShade result screen shows the note `Press A to replace protected ReShade files. TeknoParrot Manager saves a copy of the old files first, so you can undo it.`
 It then shows these blocks: `What happened` (`Summary:`, `Changed:`, `Protected existing:`, `Missing paths:`, `Failed:`, `Unsafe/malformed:`), `What TeknoParrot Manager did`, one block per protected game (`What happened:`, `Reason code:`, `Technical detail:`), `Counts and notes from the run`, `Notes for each game`, and `Undo` (`Saved for undo:`, `Where: ReShade > Undo ReShade changes`).
 
 **Automatic download and the installer check:** DLLs are never bundled in the release ZIP.
@@ -1886,7 +1904,7 @@ TeknoParrot Manager never removes an existing BepInEx installation (see "Rollbac
 3. Choose `Y` to install or update, `B` to go back, or `N` to cancel. Next: nothing changes until you approve the listed operation.
 4. Read the result. It says how many games you selected and how many were changed, already set up, skipped or failed (for example `You selected 4 games: 3 changed, 1 skipped.`), and where the backup is.
 
-The prompt is `[Y] Install/update  [B] Back  [N] Cancel`. There is no repair-reset choice. After a successful or no-change run, the screen waits for one Enter before it goes back.
+The prompt is `[Y] Install/update  [B] Back  [N] Cancel`. It is skipped when the only games are ones you picked by number from the "do not have BepInEx" list, because picking them was your answer. There is no repair-reset choice. After a successful or no-change run, the screen waits for one Enter before it goes back.
 
 The result reports these groups:
 
@@ -2215,10 +2233,10 @@ If no LaunchBox folder is saved in your settings, TeknoParrot Manager asks for t
 ### Choosing A: add the games
 
 1. TeknoParrot Manager tells you to close LaunchBox and BigBox (`Close LaunchBox and BigBox first. TeknoParrot Manager will not close them for you.`).
-   It asks `Add the missing games to LaunchBox now? (Y/N, D = about the risks)` (default N). Next: answer Y to go on, or press D to read about the risks first.
+   You already chose `A`, so there is no extra "now?" question.
 2. Choose the platform for this action (see below). The choice is not saved.
 3. TeknoParrot Manager shows a read-only plan. Then it asks `Write exactly these changes after a
-   verified backup? (Y/N)` (default N). If nothing would change, it says so and
+   verified backup? (Y/N, D = about the risks)` (default N). This is the only approval. If nothing would change, it says so and
    stops.
 4. If LaunchBox or BigBox is still open, TeknoParrot Manager tells you and waits. Close it, then
    press Enter to check again, or type `N` to cancel with nothing written. It
@@ -2293,8 +2311,8 @@ A game gets only the controls it uses that your cabinet has. You see a preview f
 
 The questions are:
 
-- If the snapshot came from a different LaunchBox folder than the one you are restoring into, TeknoParrot Manager asks a separate `Y/N` (default N) before going on.
-- A final `Y/N` (default N) confirms the restore into the named folder. Then the same guided wait for LaunchBox and BigBox to be closed applies.
+- If the snapshot came from a different LaunchBox folder than the one you are restoring into, the question says so: `This snapshot belongs to a different LaunchBox folder. Restore it into the target folder anyway, after a verified backup of its current state? (Y/N)` (default N). It is the only question.
+- Otherwise one `Y/N` (default N) confirms the restore into the named folder. A file that TeknoParrot Manager added earlier and you have not changed gets its own `Remove the file ...? (Y/N)` question, because removing it deletes it. That is the only approval for that removal. Then the same guided wait for LaunchBox and BigBox to be closed applies.
 
 If the restore fails and every attempted file is verified back to its prior state, the result is `FAILED`. If recovery cannot be verified, it is `PARTIAL`.
 

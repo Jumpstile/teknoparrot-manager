@@ -418,16 +418,33 @@ Describe 'FIX59 Library Health separates TeknoParrot-created databases from the 
         @($result.PostgresAutoCreateProfiles)[0] | Should -BeExactly 'Golden Tee Live 2020'
         # The default screen is short; the first-run list and its explanation are behind D (the detail blocks) and in the log.
         $details = Get-F59HealthPostgresDetail -Result $result
-        $firstRun = @($details -split "`n" | Where-Object { $_ -like 'Games with no starting database file:*' })
+        $firstRun = @($details -split "`n" | Where-Object { $_ -like 'Profile ready; the database is created the first time the game starts:*' })
         $firstRun.Count | Should -Be 1
-        $firstRun[0] | Should -BeExactly 'Games with no starting database file: Golden Tee Live 2020'
-        $details | Should -Match 'PostgreSQL setup cannot make the database of these games ready without it'
-        $details | Should -Not -Match '(?i)expected until the first launch|does not create it'
+        $firstRun[0] | Should -BeExactly 'Profile ready; the database is created the first time the game starts: Golden Tee Live 2020'
+        $details | Should -Match 'These games make their own database'
+        $details | Should -Not -Match '(?i)expected until the first launch|does not create it|cannot make the database'
         $logged = $script:logLines -join "`n"
-        $logged | Should -Match ([regex]::Escape('Library health detail [PostgreSQL]: Games with no starting database file: Golden Tee Live 2020'))
-        $logged | Should -Match 'PostgreSQL setup cannot make the database of these games ready'
+        $logged | Should -Match ([regex]::Escape('Library health detail [PostgreSQL]: Profile ready; the database is created the first time the game starts: Golden Tee Live 2020'))
         Should -Invoke Start-Service -Times 0 -Exactly
         Should -Invoke Stop-Service -Times 0 -Exactly
+    }
+
+    # Mutation: report a missing database of an auto-create game with no starting file as a problem again -> the health check says
+    # "its database is missing" and ACTION_REQUIRED for a game that is ready and makes its own database on first start.
+    It 'does not call a missing database a problem for an auto-create game with no starting file' {
+        $fx = [pscustomobject]@{ Root = $script:healthRoot; Profiles = $script:profiles }
+        $null = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2020' -GameName 'Golden Tee Live 2020' -DbName 'GameDB20' -Pass 'synthetic-pass' -AutoCreate '1' -Complete
+        [System.IO.File]::WriteAllText((Join-Path $script:PostgresBinDir 'psql.exe'), 'x')
+        Mock Get-Service { [pscustomobject]@{ Status = 'Running' } }
+        Mock Get-PostgresGameDatabaseReadiness { [pscustomobject]@{ Ready = $false; TableCount = 0; Error = 'Could not connect with the settings saved in the game profile: FATAL: database "GameDB20" does not exist' } }
+
+        $result = Invoke-LibraryHealthCheck -UserProfilesDir $script:profiles -TpRoot $script:healthRoot
+
+        @($result.PostgresDatabaseProblems).Count | Should -Be 0
+        $result.Outcome | Should -Not -BeExactly 'ACTION_REQUIRED'
+        $details = Get-F59HealthPostgresDetail -Result $result
+        $details | Should -Match ([regex]::Escape('Profile ready; the database is created the first time the game starts: Golden Tee Live 2020'))
+        $details | Should -Not -Match 'Problem - |every game database is there'
     }
 
     # Mutation: classify by the auto-create flag before the profile is complete -> a profile
@@ -441,8 +458,8 @@ Describe 'FIX59 Library Health separates TeknoParrot-created databases from the 
         @($result.PostgresNeeded) | Should -Be @('GoldenTeeLive2020')
         $result.PostgresConfigured | Should -Be 0
         @($result.PostgresAutoCreateProfiles).Count | Should -Be 0
-        (Get-F59HealthPostgresDetail -Result $result) | Should -Not -Match 'Games with no starting database file:'
-        ($script:logLines -join "`n") | Should -Not -Match 'Games with no starting database file:'
+        (Get-F59HealthPostgresDetail -Result $result) | Should -Not -Match 'Profile ready; the database is created'
+        ($script:logLines -join "`n") | Should -Not -Match 'Profile ready; the database is created'
     }
 
     # Mutation: report the auto-create list when profile coverage is incomplete -> the
@@ -456,8 +473,8 @@ Describe 'FIX59 Library Health separates TeknoParrot-created databases from the 
 
         $result.PostgresInventoryStatus | Should -BeExactly 'Unknown'
         @($result.PostgresAutoCreateProfiles).Count | Should -Be 0
-        (Get-F59HealthPostgresDetail -Result $result) | Should -Not -Match 'Games with no starting database file:'
-        ($script:logLines -join "`n") | Should -Not -Match 'Games with no starting database file:'
+        (Get-F59HealthPostgresDetail -Result $result) | Should -Not -Match 'Profile ready; the database is created'
+        ($script:logLines -join "`n") | Should -Not -Match 'Profile ready; the database is created'
     }
 
     # Mutation: leave the database check out of the health scan -> a missing database is reported OK.

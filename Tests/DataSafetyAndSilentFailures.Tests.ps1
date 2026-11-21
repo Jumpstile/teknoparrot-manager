@@ -358,6 +358,49 @@ Describe 'A startup update that was rolled back says so' {
     }
 }
 
+Describe 'The startup update check comes first and its choices are labeled one by one' {
+    It 'runs before the saved-settings question, so the update screen is not hidden behind it' {
+        # Mutation: move the startup update check back below the saved-settings question -> the user answers "use saved settings?" before ever hearing about an update.
+        $updateIf = @($script:DsAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -ceq '$checkForUpdatesOnStartup -and -not $Unattended -and -not $isPostgresRecoveryResume' }, $true))
+        $savedAsk = @($script:DsAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.Extent.Text -ceq '. $tpmOfferSavedConfig' }, $true))
+        $updateIf.Count | Should -Be 1
+        $savedAsk.Count | Should -BeGreaterThan 0
+        $updateIf[0].Extent.StartOffset | Should -BeLessThan $savedAsk[0].Extent.StartOffset
+    }
+
+    It 'says what Y, N and V each do, and does not tell the user to open Check for Updates' {
+        # Mutation: restore the single "Update now, remind me later, or view release notes?" line -> the choices are not explained and the screen conflicts with itself.
+        $script:DsShown = New-Object System.Collections.Generic.List[string]
+        Mock Write-Host { param($Object) [void]$script:DsShown.Add([string]$Object) }
+        Mock Write-Log {}
+        Mock Get-ManagerUpdateRelease { [pscustomobject]@{ TagName = 'v99.0'; Name = 'v99.0'; Body = 'Notes.'; AssetName = 'x.zip'; DownloadUrl = 'https://example.invalid/x.zip'; Digest = '' } }
+        Mock Read-Host { 'N' }
+        $ScriptVersion = '0.0.1'
+        $ReleaseCandidateLabel = ''
+        $path = Join-Path $TestDrive 'startup-labels.ps1'
+        Write-DsText -Path $path -Text '$ScriptVersion = "0.0.1"'
+        $null = Invoke-StartupUpdateCheck -ScriptPath $path
+        $shown = $script:DsShown -join "`n"
+        $shown | Should -Match 'Y = Update now'
+        $shown | Should -Match 'N = Remind me later'
+        $shown | Should -Match 'V = View release notes'
+        $shown | Should -Not -Match 'Check for Updates'
+    }
+}
+
+Describe 'Nothing new to extract is not an ACTION REQUIRED item' {
+    It 'registration skipped because nothing new was extracted is informational (NO_OP), not ACTION_REQUIRED' {
+        # Mutation: make the skip result ACTION_REQUIRED again -> the run ends with "ACTION REQUIRED" and a to-do file although everything was already extracted.
+        # The helper's own $result would hide the block's $result, so the block's value is copied first.
+        $text = (Get-DsTopLevelIf -ConditionText '$skipAutoSyncRegistration') + "`n`$dsSkipResult = `$result"
+        Mock Close-TpmRegistrationLedgerOperations {}
+        $out = Invoke-DsBlock -Text $text -Variables @{ dryRunActive = $false; skipAutoSyncRegistration = $true } -Outputs @('dsSkipResult')
+        $out.dsSkipResult.Outcome | Should -Be 'NO_OP'
+        $out.dsSkipResult.Summary | Should -Match 'Nothing new was extracted'
+        $out.dsSkipResult.Summary | Should -Match 'Register only'
+    }
+}
+
 Describe 'An empty newest pg_backup date folder does not hide an older backup' {
     It 'uses the newest date folder that has files' {
         # Mutation: take the newest date folder even when it is empty -> "no backup of its own" and an empty database is created.

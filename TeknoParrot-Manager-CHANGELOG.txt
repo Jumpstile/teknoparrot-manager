@@ -11,6 +11,19 @@
   ----------------------------------------------------------------
 
   Fixes
+  - The update check now runs right after the program starts, before the
+    "use saved settings?" question. The "Update Available" screen lists
+    each choice: Y = Update now, N = Remind me later, V = View release
+    notes. It no longer also tells you to open Check for Updates.
+  - You are never asked to approve the same thing twice. Update: one Y
+    starts the update. Restore all, restoring an old backup that cannot
+    be checked, the LaunchBox restore and add, the Library Health path
+    search, ReShade "Replace old files" and "Undo only the files that did
+    not change", and the BepInEx install now ask once. Every backup and
+    undo is kept.
+  - AutoSync no longer says "ACTION REQUIRED" or sends you to a saved list
+    when all your games were already extracted. Skipping registration
+    because nothing new was extracted is now just a short note.
   - Adding games with AutoSync no longer skips the second of two different
     games that have almost the same name, such as the Type X and
     NESiCAxLive versions of one game, or two versions of the same game.
@@ -54,15 +67,56 @@
   - Before the Windows permission window opens for PostgreSQL setup or
     repair, the Manager waits for you to press Enter, so you can read what
     it is about to ask for.
+  - Startup files for Chihiro, PlayStation 3 and the other game systems
+    that need them now work like the CPS3 step. If the Manager cannot find
+    them, it asks once for your Supplementary folder and remembers it. It
+    checks what it finds against the list of known files, then one Y
+    installs everything. The result names what was installed, already
+    matching, missing (by file name) or invalid, and the folders searched.
+  - The GPU fix at the end of first-time setup now shows the same result as
+    the menu: how many games you selected, changed, skipped and failed. A
+    game on a drive that is not connected is called skipped, not failed,
+    the drive letter is named, and it points to Library health check
+    (menu 13) to repair the game paths.
+  - ReShade progress now counts the games being changed ("Applying ReShade:
+    1 of 34"), not your whole library ("72 of 330"). Checking all your
+    games first is shown as its own step.
+  - Library health check: a Golden Tee Live 2020 game (or any game with
+    TeknoParrot's "Automatically create Database" option) that has no
+    starting database file now says "Profile ready; the database is
+    created the first time the game starts". A missing database is no
+    longer called a problem for it.
+  - The PostgreSQL setup screen and the menu text name Golden Tee Live
+    2020.
+  - If the DAT game list says it uses a format version the Manager does
+    not know, the Manager now tells you in plain words and still reads it.
+    A DAT with no version is read as before.
 
   Also new in this release
+  - Controller layout (Propagate Controls, menu 3): choose your layout once
+    (Xbox, PlayStation, Nintendo or arcade stick) and change any button.
+    Then set up one game, all your games at once, or game by game. You
+    always see a preview first and approve once. A saved copy is made and
+    checked first, every changed game is read back, a game that does not
+    read back correctly is put back exactly, and you can undo the whole
+    run in one step. A game is left alone, with a plain reason, when its
+    saved settings are for another version than TeknoParrot's own game
+    file, when a control is missing, or when an Xbox button is already
+    used. Triggers and analog sticks are never set. Test and Service stay
+    empty unless you give them a button.
+  - Controls check (Propagate Controls choice 4, and a Controls line in
+    Library health check): every registered game is sorted into every
+    control set up, some, none, or "cannot tell", with the missing
+    controls named. For most games the list comes from TeknoParrot's own
+    game file and says that no person has checked it. It changes nothing
+    and never says a game is ready.
   - Controls: the Manager now remembers which controls you have. The
     Device Survey saves your answers in the Manager's own settings
     folder, shows them next time and asks one question ("Keep these
     answers?"). It asks again only if a controller turns up that you said
     you do not have. A damaged answers file is set aside, never
     overwritten, and the last good copy is kept.
-  - Controls: "My controls" (Propagate Controls, choice 3) can learn your
+  - Controls: "My controls" (Propagate Controls, choice 5) can learn your
     arcade buttons. It asks you to press each control ("Press Player 1
     Start") and remembers the key it sends. If LEDBlinky is installed it
     offers its own key list first. Nothing in your game files changes.

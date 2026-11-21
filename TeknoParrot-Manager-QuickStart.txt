@@ -1036,19 +1036,19 @@
 
   5. Choose A from the LaunchBox action menu when the preview is correct.
 
-     You will see: "Add the missing games to LaunchBox now? (Y/N, D = about
-     the risks)". B skips instead. F creates a
-     manual-import reference file without writing the library.
+     You will see: the close-LaunchBox warning. There is no extra "now?"
+     question. B skips instead. F creates a manual-import reference file
+     without writing the library.
 
-     Next: confirm with LaunchBox closed.
+     Next: choose the folder and platform with LaunchBox closed.
 
-  6. Answer Y to continue, only with LaunchBox and BigBox still closed.
+  6. Choose the folder and platform.
 
-     You will see: the folder and platform questions again, with your previewed
-     choices offered as defaults when available. 4 now allows a custom platform
-     name.
+     You will see: the folder and platform questions, with your previewed
+     choices offered as defaults when available. 4 now allows a custom
+     platform name.
 
-     Next: confirm the folder and platform.
+     Next: read the plan.
 
   7. Confirm the folder and platform choices.
 
@@ -1843,9 +1843,12 @@
 
   6. Read the warning. A row ending "older copy, cannot be fully checked" has
      no completion record, so TeknoParrot Manager cannot prove it is complete.
-     It asks you to type UNVERIFIED to use this copy anyway.
+     It asks you to type UNVERIFIED to use this copy anyway. That one word
+     is the only confirmation. You are not asked to type YES as well.
 
-     You will see: the warning, then the prompt Type YES to confirm.
+     You will see: the warning, then the prompt Type UNVERIFIED to use this
+     copy anyway. A copy that can be checked shows the prompt Type YES to
+     confirm instead.
 
      Next: confirm only if you are sure.
 
@@ -2880,17 +2883,16 @@
 
   Only the keys that apply are shown. B is the default.
 
-  A asks: "Replace the old ReShade files in {that game|those N games}? You
-  will choose the look again. A copy of the old files is saved, so you can
-  undo it. Press Y to replace them, or N to leave them. (Y/N)".
-
-  Choose N and you will see "Nothing was replaced. No files were changed."
+  A goes straight into ReShade setup to replace the old ReShade files of
+  those games, with no separate "Replace the old files?" question. You
+  still choose the look and confirm it in setup. A copy of the old files
+  is saved first, so you can undo it.
 
   M opens the Library health check (mode 13) to repair missing game paths.
 
   D shows details and then asks again. It says: "Press A to replace
-  protected ReShade files. TeknoParrot Manager asks you to confirm before
-  it changes anything."
+  protected ReShade files. TeknoParrot Manager saves a copy of the old
+  files first, so you can undo it."
 
 
   CHANGING OR UNDOING YOUR RESHADE LOOK
@@ -3370,8 +3372,9 @@
        Next: read the list.
 
     2. Choose Y to continue, B to go back, or N to cancel.
-       You will see: [Y] Install/update  [B] Back  [N] Cancel. There is
-       no repair-reset choice.
+       You will see: [Y] Install/update  [B] Back  [N] Cancel. It is skipped
+       when the only games are ones you picked by number from the "do not
+       have BepInEx" list. There is no repair-reset choice.
        Next: choose Y to go on.
 
     3. Read the result for each game.
@@ -3777,7 +3780,8 @@
 
        You will see (choice 3): the question "Restore these files into
        <folder> after a verified backup of their current state? (Y/N)"
-       (default N).
+       (default N). For a backup from another LaunchBox folder, the same
+       single question says so and asks whether to restore it anyway.
        Next: type Y to go on.
 
     6. If TeknoParrot (or LaunchBox or BigBox) is open, you will see

@@ -609,6 +609,7 @@ Describe 'FIX132 what the player reads' {
         $script:offered = $null
         $script:answers = New-Object System.Collections.Generic.Queue[string]
         foreach ($a in @('O', 'N')) { $script:answers.Enqueue($a) }
+        Mock Read-PathWithBrowse { '' }
         Mock Read-TpmChoice { $script:offered = @($Choices); $script:answers.Dequeue() }
         Mock Open-TpmOwnedFolder { [pscustomobject]@{ Succeeded = $true; Path = $Path; Error = $null } }
         [void](Invoke-TpmPrerequisiteReview -Warnings $warnings -TpRoot $fixture.Root -Interactive)
@@ -701,5 +702,139 @@ Describe 'FIX132 the DAT and Game Notes sources fall back to a saved copy with a
         Mock Write-Host { [void]$hostLines.Add([string]$Object) }
         Get-EggmanGameData -CacheRoot $root | Should -BeNullOrEmpty
         ($hostLines -join ' ') | Should -Match 'no saved copy'
+    }
+}
+
+# Issue #387: Chihiro and PlayStation 3 startup files must work from one clear step, like the CPS3 offer: ask once for the
+# Supplementary folder, scan it, check against the DAT, install, and report per package. Synthetic files and TestDrive only.
+Describe 'Startup files: one folder question, one Y, and a plain report per package (issue 387)' {
+    BeforeAll {
+        $script:F387Zip = '[EMU] CxbxR BIOS Firmware for Sega Chihiro [TP]'
+        $script:F387Names = @('ic10_g24lc64.bin', 'pc20_g24lc64.bin', 'ic11_24lc024.bin', 'fpr21042_m29w160et.bin')
+        function Get-F387Bytes { param([string]$Name, [switch]$Wrong) $text = 'synthetic chihiro file ' + $Name; if ($Wrong) { $text = $text.ToUpperInvariant() }; return [System.Text.Encoding]::ASCII.GetBytes($text) }
+
+        # A collection with the Chihiro archive (some files left out or changed) and, with -WithPcsx2, the PCSX2x6 archive too. One DAT lists everything.
+        function New-F387Collection {
+            param([string[]]$LeaveOut = @(), [string[]]$Change = @(), [switch]$WithPcsx2)
+            $folder = Join-Path $TestDrive ('f387-coll-' + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $folder -Force | Out-Null
+            $entries = [ordered]@{}
+            foreach ($name in $script:F387Names) {
+                if ($LeaveOut -contains $name) { continue }
+                $entries['cxbxr/TeknoParrot/' + $name] = Get-F387Bytes -Name $name -Wrong:($Change -contains $name)
+            }
+            New-F132Zip -Path (Join-Path $folder ($script:F387Zip + '.zip')) -Entries $entries
+            $games = @(@{ Name = $script:F387Zip; Roms = @($script:F387Names | ForEach-Object { @{ Name = $_; Bytes = (Get-F387Bytes -Name $_) } }) })
+            if ($WithPcsx2) {
+                New-F132Zip -Path (Join-Path $folder ($script:F132ZipName + '.zip')) -Entries ([ordered]@{ 'PCSX2x6/TeknoParrot/bios/r27v1602f.7d' = $script:F132Bytes7d; 'PCSX2x6/TeknoParrot/bios/r27v1602f.8g' = $script:F132Bytes8g })
+                $games += @{ Name = $script:F132ZipName; Roms = @(@{ Name = 'r27v1602f.7d'; Bytes = $script:F132Bytes7d }, @{ Name = 'r27v1602f.8g'; Bytes = $script:F132Bytes8g }) }
+            }
+            $dat = Join-Path $folder 'Supplementary.dat'
+            [System.IO.File]::WriteAllText($dat, (New-F132DatText -Games $games), (New-Object System.Text.UTF8Encoding $false))
+            return [pscustomobject]@{ Folder = $folder; Dat = $dat }
+        }
+
+        # A root with a Chihiro game (and, with -WithPcsx2, a PCSX2x6 game too), both emulator folders present, both missing their files.
+        function New-F387Root {
+            param([switch]$WithPcsx2)
+            $fixture = New-F132Root -EmulatorType 'cxbxr' -Games @('VIRTUACOP3')
+            if ($WithPcsx2) {
+                [System.IO.File]::WriteAllText((Join-Path $fixture.Profiles 'BLOODYROAR3.xml'), '<?xml version="1.0" encoding="utf-8"?><GameProfile><EmulatorType>Pcsx2x6</EmulatorType><GamePath>C:\Games\game.exe</GamePath></GameProfile>')
+                New-Item -ItemType Directory -Path (Join-Path $fixture.Root 'pcsx2x6') -Force | Out-Null
+            }
+            return $fixture
+        }
+    }
+    BeforeEach {
+        Install-F132Mocks
+        $script:zipSourceSupplementary = $null
+        $script:TpmSupplementaryFolderAsked = $false
+        $script:hostLines = New-Object System.Collections.Generic.List[string]
+        Mock Write-Host { [void]$script:hostLines.Add([string]$Object) }
+        Mock Save-Config { $true }
+    }
+
+    It 'asks once for the folder, saves it, installs Chihiro and PCSX2x6 with ONE Y, and never asks again' {
+        # Mutation: no question, a question per package, a second Y per package, or the folder not saved -> this fails.
+        $fixture = New-F387Root -WithPcsx2
+        $collection = New-F387Collection -WithPcsx2
+        $warnings = @(Get-F132Warning -Fixture $fixture)
+        $warnings.Count | Should -Be 2
+        Mock Read-PathWithBrowse { $collection.Folder }
+        Mock Read-TpmChoice { 'Y' }
+        Mock Read-TpmYesNo { throw 'must not ask a second time' }
+        $review = Invoke-TpmPrerequisiteReview -Warnings $warnings -TpRoot $fixture.Root -SupplementaryDatPath $collection.Dat -Interactive
+        $review.FixedAny | Should -BeTrue
+        Should -Invoke Read-PathWithBrowse -Times 1 -Exactly
+        Should -Invoke Read-TpmChoice -Times 1 -Exactly
+        Should -Invoke Save-Config -Times 1 -Exactly
+        $script:zipSourceSupplementary | Should -Be $collection.Folder
+        foreach ($name in $script:F387Names) {
+            $dir = if ($name -like 'fpr*') { 'cxbxr\TeknoParrot\EmuMediaBoard' } else { 'cxbxr\TeknoParrot\EmuMediaBoard\Chihiro' }
+            [System.IO.File]::ReadAllBytes((Join-Path $fixture.Root (Join-Path $dir $name))) | Should -Be (Get-F387Bytes -Name $name)
+        }
+        [System.IO.File]::ReadAllBytes((Join-Path $fixture.Bios 'r27v1602f.7d')) | Should -Be $script:F132Bytes7d
+        ($script:screen -join "`n") | Should -Match 'Installed: .*ic10_g24lc64\.bin'
+        # A later run with the same saved folder never asks again.
+        Remove-Item -LiteralPath (Join-Path $fixture.Root 'cxbxr\TeknoParrot') -Recurse -Force
+        [void](Invoke-TpmPrerequisiteReview -Warnings @(Get-F132Warning -Fixture $fixture) -TpRoot $fixture.Root -SearchFolders @($script:zipSourceSupplementary) -SupplementaryDatPath $collection.Dat -Interactive)
+        Should -Invoke Read-PathWithBrowse -Times 1 -Exactly
+    }
+
+    It 'names the exact missing Chihiro files, where they belong and the folders searched, and offers no install; a skip changes and saves nothing' {
+        # Mutation: leave the names, the destination or the searched folders out of the screen, or save a skipped answer -> this fails.
+        $fixture = New-F387Root
+        $collection = New-F387Collection -LeaveOut @('pc20_g24lc64.bin', 'fpr21042_m29w160et.bin')
+        $warnings = @(Get-F132Warning -Fixture $fixture)
+        Mock Read-PathWithBrowse { '' }
+        $script:offered = $null
+        Mock Read-TpmChoice { $script:offered = @($Choices); 'N' }
+        $review = Invoke-TpmPrerequisiteReview -Warnings $warnings -TpRoot $fixture.Root -SearchFolders @($collection.Folder) -SupplementaryDatPath $collection.Dat -Interactive
+        $review.FixedAny | Should -BeFalse
+        $script:offered | Should -Not -Contain 'Y'
+        $screenText = $script:screen -join "`n"
+        $screenText | Should -Match ('Folders searched: ' + [regex]::Escape($collection.Folder))
+        $screenText | Should -Match 'Missing: pc20_g24lc64\.bin \(not found in those folders; goes in .*EmuMediaBoard\\Chihiro\)'
+        $screenText | Should -Match 'Missing: fpr21042_m29w160et\.bin'
+        $screenText | Should -Not -Match 'Missing: ic10_g24lc64\.bin'
+        Should -Invoke Save-Config -Times 0 -Exactly
+        $script:zipSourceSupplementary | Should -BeNullOrEmpty
+        (Test-Path -LiteralPath (Join-Path $fixture.Root 'cxbxr\TeknoParrot\EmuMediaBoard\Chihiro\ic10_g24lc64.bin')) | Should -BeFalse
+    }
+
+    It 'reports a file that is not the file the DAT lists as invalid by name, and still installs the good ones' {
+        # Mutation: copy the changed file, or hide it in the report -> the file exists or the line is missing.
+        $fixture = New-F387Root
+        $collection = New-F387Collection -Change @('ic11_24lc024.bin')
+        $warnings = @(Get-F132Warning -Fixture $fixture)
+        Mock Read-PathWithBrowse { $collection.Folder }
+        Mock Read-TpmChoice { 'Y' }
+        Mock Read-TpmYesNo { 'N' }
+        [void](Invoke-TpmPrerequisiteReview -Warnings $warnings -TpRoot $fixture.Root -SupplementaryDatPath $collection.Dat -Interactive)
+        ($script:screen -join "`n") | Should -Match 'Invalid \(.*\): ic11_24lc024\.bin'
+        (Test-Path -LiteralPath (Join-Path $fixture.Root 'cxbxr\TeknoParrot\EmuMediaBoard\Chihiro\ic11_24lc024.bin')) | Should -BeFalse
+        (Test-Path -LiteralPath (Join-Path $fixture.Root 'cxbxr\TeknoParrot\EmuMediaBoard\Chihiro\ic10_g24lc64.bin')) | Should -BeTrue
+    }
+
+    It 'asks again when the saved Supplementary folder is gone, and says so' {
+        # Mutation: trust a saved folder that does not exist -> no question and nothing found.
+        $fixture = New-F387Root
+        $collection = New-F387Collection
+        $script:zipSourceSupplementary = Join-Path $TestDrive 'a-drive-that-is-not-there'
+        Mock Read-PathWithBrowse { $collection.Folder }
+        Mock Read-TpmChoice { 'Y' }
+        $review = Invoke-TpmPrerequisiteReview -Warnings @(Get-F132Warning -Fixture $fixture) -TpRoot $fixture.Root -SearchFolders @($script:zipSourceSupplementary) -SupplementaryDatPath $collection.Dat -Interactive
+        $review.FixedAny | Should -BeTrue
+        ($script:screen -join "`n") | Should -Match 'saved Supplementary folder was not found'
+        Should -Invoke Read-PathWithBrowse -Times 1 -Exactly
+    }
+
+    It 'never asks for a folder when the run is not interactive' {
+        # Mutation: prompt without -Interactive (an unattended run would wait) -> the mock throws.
+        $fixture = New-F387Root
+        Mock Read-PathWithBrowse { throw 'must not prompt' }
+        $review = Invoke-TpmPrerequisiteReview -Warnings @(Get-F132Warning -Fixture $fixture) -TpRoot $fixture.Root
+        $review.Reviewed | Should -Be 1
+        ($script:screen -join "`n") | Should -Match 'Folders searched: none'
     }
 }

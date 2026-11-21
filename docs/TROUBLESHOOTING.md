@@ -494,9 +494,9 @@ Fix:
 
    Next: read the warning.
 
-6. Read the warning. A saved copy shown as `older copy, cannot be fully checked` has no completion record, so TeknoParrot Manager cannot prove it is complete. It says games missing from it will be removed and asks you to type **UNVERIFIED**.
+6. Read the warning. A saved copy shown as `older copy, cannot be fully checked` has no completion record, so TeknoParrot Manager cannot prove it is complete. It says games missing from it will be removed and asks you to type **UNVERIFIED**. That one word is the only confirmation. You are not asked to type YES as well.
 
-   You will see: the warning, then the prompt **Type YES to confirm**.
+   You will see: the warning, then the prompt **Type UNVERIFIED to use this copy anyway**. A copy that can be checked shows the prompt **Type YES to confirm** instead.
 
    Next: confirm only if you are sure.
 
