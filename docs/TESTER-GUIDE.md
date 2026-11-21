@@ -153,13 +153,13 @@ Tests 9 to 28 try the rest of the program. Do the ones that fit your games and y
 4. Start that game.
 5. You passed if it asked first, finished with no red error words, and the game starts.
 
-### Test 17: Postgres database
+### Test 17: Game database (Internal or Existing PostgreSQL)
 
-1. Do this only if you have Incredible Technologies games, such as Golden Tee.
-2. At the main menu, type 11 and press Enter (Postgres setup).
-3. Read each screen and say yes when it asks.
-4. Start one of those games.
-5. You passed if the setup ended with a plain done message and the game starts. Skip this test if you have none of those games.
+1. Do this only if you have games that save progress in a database, such as Golden Tee. Newer TeknoParrot profiles have a Storage box under Database in the game's settings.
+2. Look at the Storage box. Internal is the new default and needs no database install. Existing PostgreSQL is for keeping an existing server and its saved progress. Do not change it for this test.
+3. If a game says Internal: run Library health check (menu 13). You passed this part if the game is not called missing a database, and the screen says no database install is needed and the game must be started once. Then start the game once.
+4. If a game says Existing PostgreSQL (or has no Storage box): at the main menu, type 11 and press Enter (Postgres setup). Read each screen and say yes when it asks. Then start the game.
+5. You passed if the program never switched the choice for you and, for Existing PostgreSQL, the setup ended with a plain done message and the game starts. Skip this test if you have none of those games.
 
 ### Test 18: Required game patches
 

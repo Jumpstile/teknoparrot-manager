@@ -928,8 +928,13 @@
     to return.
   - Postgres setup makes each game database from the game's own backup file
     and tests it with the game's own settings before it says the game is
-    ready. You do not need any extra step in TeknoParrot or on the first
-    start.
+    ready. For a game set to Existing PostgreSQL you do not need any extra
+    step in TeknoParrot or on the first start.
+  - Games whose Storage box says Internal (the new default) need no database
+    install. Postgres setup and Library health check skip them. Start the
+    game once so it makes its own database. Existing PostgreSQL is for
+    keeping an existing server and its saved progress. The Manager never
+    switches a game from one choice to the other.
   - Library health check (main menu 13) also checks every game database. A
     database that is not ready shows as "Problem - <game>". Run 11) Postgres
     setup to fix it.
