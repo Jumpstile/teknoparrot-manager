@@ -2,12 +2,109 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-RC8.4 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4. v1.0 RC8.4 is a fix-up release for RC8.3. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
+RC8.4 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4. v1.0 RC9 is the next release after RC8.4 and is not published yet. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
 The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
 ---
+
+## v1.0 RC9 (changes since RC8.4)
+
+### New
+- Golden Tee Live and PGA Tour, PowerPutt Live, Silver Strike Bowling
+  Live, Target Toss Pro and OCC Pinball: newer TeknoParrot profiles let
+  you choose where the game keeps its database. Internal is the new
+  default. It needs no database install, and you start the game once so
+  it makes its own database. Existing PostgreSQL is for keeping an
+  existing server and its saved progress. The Manager reads your choice.
+  For Internal games it skips every PostgreSQL check, install offer and
+  "database missing" warning. For games set to Existing PostgreSQL,
+  nothing changes: the same checks, setup, backups and restores, still
+  with PostgreSQL 8.3. The Manager never switches a game from one choice
+  to the other and never touches saved progress without a backup first.
+  Older profiles with no choice work as before.
+- ReShade setup has a new choice, B: use your own bezel folder. A bezel
+  is a picture that frames the game, like the edge of an arcade cabinet.
+  The Manager matches your .png pictures to your games, shows how sure
+  each match is, and copies nothing until you say yes. A match that is
+  not sure, or a picture for a different sequel number, is never used
+  unless you pick it. A bezel you placed yourself is kept unless you say
+  to replace it, and a copy is saved first. Undo puts everything back.
+  Nothing is downloaded.
+- System 11 games: when a game names two ZIPs (child and parent), both
+  must be in the same folder, or the game is not registered. The disc
+  image (CHD) is chosen for you when there is only one, and is never
+  guessed when there are several. If you have your own System 11 saved
+  files set, the Manager can copy the files for your games. It never
+  replaces a file that is already there and says which games the set
+  has no files for.
+- The Library health check names game types it does not know, games
+  TeknoParrot has not released yet (development only), emulators that
+  are missing from your TeknoParrot folder, and games that need you to
+  pick the game file by hand.
+- A check of a controller list from outside (for example RetroBat's
+  teknoparrot.yml) that only reads. You run it from the command line
+  with -MappingEvidenceFile and -ValidationRoot. It compares the list
+  with your game profiles and prints plain counts. It trusts nothing,
+  applies nothing and changes no profile. It holds back a game and says
+  why when the list names it twice, sets a control twice, sets a control
+  the game does not have, uses an unknown button name, or puts two game
+  actions on one button.
+
+### LaunchBox
+- One shared way to match games is now used everywhere in the LaunchBox
+  step. Games you add get their real game name, not the file name (for
+  example "Too Spicy", not "2Spicy"). A game is linked by itself only
+  when the Eggman list, TeknoParrot and LaunchBox's own game list agree.
+  A different year or number is never the same game. Region, version
+  and board tags in a name are ignored. When the Manager is not sure,
+  you choose from the possible games. Firmware updaters, drive checkers
+  and test boards are never added. Nothing is downloaded.
+- New games get their release year and developer when they are added.
+  "Fill in game details and make playlists" does the same for games
+  already in LaunchBox where a box is still empty.
+- A game that cannot start yet (its game file is missing, firmware is
+  missing, or it needs BepInEx) gets a plain "Needs setup" note that
+  says what to do, and goes into a "Needs setup" playlist. The note and
+  the playlist entry go away by themselves when the problem is fixed.
+  What you wrote in the notes stays.
+- New choice V groups the regions and versions of one game into one
+  LaunchBox game with a version picker. Only games that are certainly
+  the same game are grouped, and the default version follows the region
+  you chose in Region setup. You see the groups first. Restore puts the
+  separate games back.
+- New choice S keeps LaunchBox in step with your library. Games you
+  removed from TeknoParrot are removed, games whose folder moved get the
+  new location, and old Manager names become the clean game title. A
+  missing game file (an unplugged drive) never removes a game, names you
+  typed stay, and nothing is removed if most games would go at once. You
+  see everything first. Restore undoes it.
+- Pictures from a folder are matched by the game itself when LaunchBox's
+  game list is there: another name of the same game is a sure match, and
+  a picture of a different game with the same name is never used. Close
+  names still need your yes.
+- The platform the Manager makes is called TeknoParrot and is scraped as
+  Arcade, which is where LaunchBox's own game list keeps arcade games.
+  Nothing changes for you; it was checked, not renamed.
+
+### Fixes
+- A game that belongs to a game set (a child game that needs a parent
+  ZIP) is no longer registered just because the parent ZIP is in the
+  folder.
+- When Propagate Controls skips games because no game of their type has
+  your controls yet, it names one game of each type to set up first in
+  TeknoParrotUI, and says that choosing a device in the plan does not
+  set up a game. The registration screen now ends with "Registration run
+  finished", which does not mean every game's controls are set up.
+- Before the Windows permission window opens for PostgreSQL setup or
+  repair, the Manager waits for you to press Enter, so you can read what
+  it is about to ask for.
+- Backups, database moves and saved proof files no longer stop on PCs
+  that use older-style folder permissions. If one still fails, the log
+  names the reason.
+- A step name and a line of the Tester Guide now use the American
+  spelling of canceled, like the screens.
 
 ## v1.0 RC8.4 (changes since RC8.3)
 
@@ -81,18 +178,6 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   missing.
 - The game list now also reads a second program and a test menu program
   for games that list them.
-- Golden Tee Live and PGA Tour, PowerPutt Live, Silver Strike Bowling
-  Live, Target Toss Pro and OCC Pinball: newer TeknoParrot profiles let
-  you choose where the game keeps its database. Internal is the new
-  default. It needs no database install, and you start the game once so
-  it makes its own database. Existing PostgreSQL is for keeping an
-  existing server and its saved progress. The Manager reads your choice.
-  For Internal games it skips every PostgreSQL check, install offer and
-  "database missing" warning. For games set to Existing PostgreSQL,
-  nothing changes: the same checks, setup, backups and restores, still
-  with PostgreSQL 8.3. The Manager never switches a game from one choice
-  to the other and never touches saved progress without a backup first.
-  Older profiles with no choice work as before.
 
 ### Other fixes
 - After unpacking, when every new game was also registered in
