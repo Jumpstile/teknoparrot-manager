@@ -899,7 +899,7 @@ Its short text is "Visual filters: sharper image, CRT-style scanlines, borders."
 
 1. At `Enter 1-17:` type `5` and press Enter.
 
-   You will see: `ReShade Visual Enhancements Setup` and three choices.
+   You will see: `ReShade Visual Enhancements Setup` and four choices.
 
    Next: press Enter to set up ReShade. Enter picks the default, S.
 
@@ -907,7 +907,8 @@ Its short text is "Visual filters: sharper image, CRT-style scanlines, borders."
   S) Set up ReShade visual enhancements
   R) Remove verified TeknoParrot Manager-managed ReShade files
   U) Undo ReShade changes
-  Action (S/R/U, default S):
+  B) Use my bezel folder (bezels you already have)
+  Action (S/R/U/B, default S):
 ```
 
 2. If ReShade has not been downloaded yet, you will see `ReShade 64-bit DLL not found.`
@@ -1206,7 +1207,7 @@ Each change makes a saved copy first, so you can undo it.
 
 1. Type `5` at the main menu and press Enter.
 
-   You will see: the three choices S, R and U.
+   You will see: the four choices S, R, U and B.
 
    Next: press Enter for S.
 
@@ -1322,7 +1323,7 @@ Games with ReShade files that TeknoParrot Manager did not install are left alone
 
 1. Type `5` at the main menu and press Enter.
 
-   You will see the three choices S, R and U.
+   You will see the four choices S, R, U and B.
    Next: type `R` and press Enter.
 
 2. You will see how many files can be removed, then a game list.
@@ -1342,6 +1343,37 @@ Games with ReShade files that TeknoParrot Manager did not install are left alone
 If you cancel at the chooser, the preview or the confirmation, every file stays unchanged.
 If you do not need removal, you see `No ReShade games need review or safe removal.`
 After removal you see `Next: You can undo this in ReShade > Undo ReShade changes.`
+
+### Use my bezel folder
+
+A bezel is a picture that frames the game on a wide screen, like the edge of an arcade cabinet.
+TeknoParrot Manager does not come with bezels and never downloads them. This step only uses bezel pictures you already have in a folder.
+It needs ReShade to be set up for the game first (see above). A game that does not have ReShade yet is listed and left alone.
+
+1. Type `5` at the main menu, then type `B` and press Enter.
+
+   You will see: `F) Pick bezels from my folder`, `U) Undo bezels I applied` and `X) Back`.
+   Next: press Enter to pick bezels from your folder.
+
+2. Type or browse to your bezel folder.
+
+   Only `.png` pictures are used. Names like `House_of_the_Dead_4_bezel.png` are fine: underscores, the words bezel and overlay, and region or version tags are ignored when matching.
+
+3. You will see: `Bezel preview. Nothing has been changed yet.`
+
+   Each game shows the bezel TeknoParrot Manager would use and how sure it is: High, Medium or Low.
+   A Low match, or a bezel for a different sequel number (a "4" picture for a "3" game), says `needs your choice` and is not applied unless you pick it.
+   Games with no matching bezel are counted, not guessed.
+   Next: type a game's number to pick a different bezel (or no bezel) for it. Your pick is remembered. Type `D` for Details, `A` to apply, or press Enter to cancel.
+
+4. Type `A` to apply.
+
+   The bezels are copied to each game's `reshade-shaders\Textures` folder as `bezel.png` and checked. A bezel you placed there yourself is kept unless you say yes to replacing it, and a copy of it is saved first.
+   A game that shares its folder with other games is skipped, because one bezel would show on all of them.
+
+To undo, type `5`, `B`, then `U`. Each bezel TeknoParrot Manager copied is removed, and a bezel you had before is put back. A file you changed since is left alone.
+
+Good to know: TeknoParrot Manager puts the file where ReShade looks for it. It has not been confirmed that every game shows it. Games that run in exclusive fullscreen, or start through a loader program, may not show it. Press `D` at the preview for Details.
 
 ### Popular effects for arcade games
 
