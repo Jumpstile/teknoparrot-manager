@@ -110,7 +110,9 @@
   - If the DAT game list uses a format version the Manager does not know,
     it says so in plain words and still reads it.
   - docs\GAME-SUPPORT.md lists every game, built from the current guide
-    and the 2,541 current TeknoParrot profiles.
+    and the 2,541 current TeknoParrot profiles. It also names four games
+    (House of the Dead 4, Raiden III, Raiden IV, Densha de GO) whose second
+    profile the list does not explain, so none is written for them.
 
   Incredible Technologies games and PostgreSQL
   - Golden Tee Live and PGA Tour, PowerPutt Live, Silver Strike Bowling
