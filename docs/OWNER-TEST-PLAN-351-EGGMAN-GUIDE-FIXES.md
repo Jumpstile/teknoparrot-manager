@@ -9,7 +9,7 @@ A check of the current guide page against the program found nothing that needed 
 - The Game Notes step reads the live guide on Windows PowerShell 5.1 and PowerShell 7 with the same result.
 - With every guide game registered, 1,425 of the 2,465 guide IDs have something to show (notes, setup steps, graphics card notes, a second file, a linked profile or a status).
 
-The `docs\GAME-SUPPORT.md` totals come from an older copy of the guide (1,510 games and 832 versions). The live guide now has 1,607 games and 858 versions. Make that page again only after you decide which game list to pin. See the last item under Details.
+`docs\GAME-SUPPORT.md` is now made again from the live guide (1,607 games and 858 versions) and the current TeknoParrot profiles (2,541). It has 9 Gap rows. They are extra archives that TeknoParrot has no profile for (see Details). The full game-by-game check of registration is in `docs\RC9-OWNER-TEST-PLAN.md` (issue 389).
 
 ## Test
 
@@ -20,13 +20,14 @@ You need the test PC and your own copies of the games.
 3. Wrong build. Point menu 12 at a build it does not list (for example another Family Guy Bowling version). Pass: nothing is changed and the screen says so.
 4. Game Notes. Register one game from each group: a ROM game with a second (CHD) file, a game with a version (variant), a game whose guide row says an AMD, NVIDIA or Intel card works only with a fix, and a game the guide marks Broken. Open the Game Notes file. Pass: each game's steps match what the guide page says for that game, and the Broken game is named as broken.
 5. Do the steps in the notes for two of those games. Pass: the game starts and the steps were enough.
-6. Write the result on issue 351: game, build, card, what the screen said, and whether the game started.
+6. BepInEx first start. Register a BepInEx game (for example Family Guy Bowling) and run BepInEx setup (menu 9). Pass: the result tells you to start the game and close it twice the first time, and the game then starts.
+7. Write the result on issue 351: game, build, card, what the screen said, and whether the game started.
 
 ## Details
 
 - The recipes are in `scripts\TpmRequiredPatchRecipes.json` (120 entries for 54 profiles). `docs\GAME-SUPPORT.md` counts them as Applied (54).
 - Game Notes comes from `Get-GameSetupNotes` and `Get-TpmGuideGpuLines`. It shows text only. It applies nothing from the guide.
-- The guide now has an `is_unsupported` flag on 9 rows (for example `EFMM` and the `SR3_3B` to `SR3_3G` track mods). TeknoParrot Manager does not read it. It was left alone because its meaning is not written down in the guide, so please tell us what it should say to the player.
+- The guide has an `is_unsupported` flag on 9 rows (the `SR3_3B` to `SR3_3G` track mods, `EFMM`, `batlgr37` and `wg3dhfe`). The Eggman index file marks the same entries "unsupported". They are extra archives that have no TeknoParrot profile of their own. TeknoParrot Manager now lists such a folder as "not in TeknoParrot" instead of a failed profile. Two of them name a linked profile in the guide (`batlgr37` names `batlgr3`, `wg3dhfe` names `wg3dh`); on the fake collection `wg3dhfe` registered with `wg3dh`.
 - The live guide only uses the statuses Working and Broken. The code still handles Partial and Untested.
 - Fake-file tests that cover this area: `Tests\Fix410.GuideFieldsInGameNotes.Tests.ps1` (3), `Tests\Fix412.GameSupportDecisions.Tests.ps1` (13) and `Tests\GameSupport.Tests.ps1` (9). All passed on this branch.
-- Not done here, because it needs your decision: make `docs\GAME-SUPPORT.md` again from the live guide and a pinned TeknoParrot profile list, and decide the 1,470 Gap rows (games with no TeknoParrot profile, mostly ROM games).
+- Guide steps that TeknoParrot Manager tells you instead of doing, with the reason: deleting or replacing a game file from a note, Windows compatibility mode (Windows XP SP2), the movie codecs from the TeknoParrot Discord, and a 60 FPS limiter. Each needs a file or a Windows setting that the guide text does not pin to an exact, checkable file, so they stay in Game Notes. The steps TeknoParrot Manager does itself (exact-build fixes, graphics card choice, BepInEx, administrator and BepInEx needs from the profile) are listed above.

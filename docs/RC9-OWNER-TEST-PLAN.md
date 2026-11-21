@@ -77,3 +77,23 @@ Use a copy of your settings or a test TeknoParrot folder. Do not use a folder yo
    First look at the commit messages on the branch you are about to merge: any "Co-authored-by" line that names
    someone other than the owner can add that name to the list when the branch reaches the main branch.
 3. Decide whether to keep or remove those lines before merging. Refresh can take up to 24 hours.
+
+## #389 and #351 Every TeknoParrot game and the Eggman guide steps
+
+Use your real Eggman collection on the test PC. Copy it first or use a test TeknoParrot folder.
+
+1. Run Register only (or AutoSync) on the whole collection. Pass: every game folder ends as Registered, Already set, a duplicate with a
+   reason, or "not in TeknoParrot". No folder disappears without a line in the result or the log.
+2. Pick two versions of one game that read almost the same (Chaos Code - New Sign of Catastrophe 1.03.00 and 2.11.00).
+   Pass: both are registered.
+3. Pick The King of Fighters XII and The King of Fighters XIV, and Total Vice (AAB) and Total Vice (EBA).
+   Pass: each gets its own profile (the XII folder is not given the XIV profile).
+4. Pick DrumMania (GQ881) and Dance Dance Revolution 2nd Mix - Link Ver. Pass: both are registered with the parent ZIP (pcnfrk.zip, ddr2m.zip).
+5. Pick After Burner Climax, Virtua Fighter 5 (1.001 Ver B) and R-Tuned. Pass: TeknoParrot shows the Lindbergh profile and the ElfLdr2 profile
+   of each. Start one ElfLdr2 game from TeknoParrot. Write down whether it starts.
+6. Pick Minecraft Dungeons Arcade and Golden Tee Fore! 2004. Pass: both are registered.
+7. Run a BepInEx install on one BepInEx game. Pass: the result tells you to start the game and close it twice the first time.
+8. Open the Sega Rally 3 track mod folders. Pass: they are listed as "not in TeknoParrot", not as a failed profile.
+9. Open `docs\GAME-SUPPORT.md`. Pass: the totals read 2550 game IDs, 9 Gap rows, and the 9 Gap rows are the extra archives named in step 8
+   and Escape from Monster Manor.
+10. Write on issue 389 what you saw for steps 1 to 9, and which games you could not test.

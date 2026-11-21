@@ -1041,6 +1041,22 @@ TeknoParrot keeps one small setup file, called a profile, for each game. "Regist
 
 After new games are registered, you are asked once which country they should start in. See [Region Setup](#region-setup). You can answer `0` to leave every game as it is.
 
+### Every TeknoParrot game
+
+TeknoParrot Manager is checked against every game that TeknoParrot lists as released (2,466 game profiles in TeknoParrot 1.0.0.2325), and against the Eggman game list and guide. [docs/GAME-SUPPORT.md](GAME-SUPPORT.md) lists every game and what the Manager does for it. These cases work with no extra steps:
+
+- **Two versions of a game.** Each version is registered. If TeknoParrot has only one profile for both, the second one is reported as a duplicate. It is never dropped without a message.
+- **A game with two profiles.** The Eggman list sometimes names a second profile for the same folder. For the Lindbergh games it is the newer ElfLdr2 profile. Both are registered. If the second one needs a game file that is not in the folder, it is left out and the log says why.
+- **Games TeknoParrot has no profile for,** such as the Sega Rally 3 track mods and Escape from Monster Manor, are listed as "not in TeknoParrot". That is not a failure.
+- **Unusual file names,** such as `.exec` and `.chd` game files and profile names with a hyphen (R-Tuned), are recognized.
+
+#### More detail: Every TeknoParrot game
+
+- The registration was run on a fake collection with one folder for each of the 1,585 games in the Eggman list of 2026-11-20 (empty files, the real profiles, the real list). 1,568 games got the profile the list names. 16 share one profile with other versions (one is registered, the rest are reported as duplicates). 1 has a second profile that needs a file the folder does not have.
+- A game whose profile names a child ZIP and a parent ZIP (`ddr2ml.zip;ddr2m.zip`) is registered when the list names the parent ZIP, which is the only ZIP in its folder.
+- The other revisions of a merged ROM set (CPS, Neo Geo MVS, System 32 and similar; about 740 profiles) are chosen with the Game Revision setting inside TeknoParrot, so the one registered profile covers them.
+- The file types come from the profiles, so a new game with a new kind of file needs no new Manager version.
+
 ---
 
 ## How Fuzzy Matching Works

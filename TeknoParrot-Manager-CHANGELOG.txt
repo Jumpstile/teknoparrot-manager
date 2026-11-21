@@ -220,6 +220,42 @@
     with PostgreSQL 8.3. The Manager never switches a game from one choice
     to the other and never touches saved progress without a backup first.
     Older profiles with no choice work as before.
+  - Every game in the Eggman list was run through the real registration
+    on a fake collection (1,585 games). The gaps it found are fixed in
+    the next lines.
+  - A second version of a game is no longer dropped. When the first
+    version had just been registered, a second version with a similar
+    name was skipped without a word. Each version is now registered, or
+    reported as a duplicate when TeknoParrot has only one profile for
+    both.
+  - A game gets the profile the Eggman list names for it, not the profile
+    with the most alike name. The King of Fighters XII was registered as
+    XIV, and Total Vice (Asia) as Total Vice (Europe).
+  - Games whose profile names a child ZIP and a parent ZIP (17 games,
+    for example Dance Dance Revolution 2nd Mix Link and DrumMania) are
+    registered when the list names the parent ZIP, which is the only ZIP
+    in their folder.
+  - The second profile the Eggman list names is registered too: the
+    ElfLdr2 profile next to each Lindbergh game, and the second profile
+    of Raiden III, Raiden IV and Densha de GO. If that profile needs a
+    game file that is not in the folder, it is left out and the log says
+    why.
+  - Game files that end in .exec or .chd, and profile names with a
+    hyphen (R-Tuned), are recognized. The Manager reads the file types
+    from the TeknoParrot profiles, so a new kind of file needs no new
+    Manager version.
+  - A folder for a game TeknoParrot has no profile for (the Sega Rally 3
+    track mods, Escape from Monster Manor) is listed as "not in
+    TeknoParrot" and not as a failed profile.
+  - After a BepInEx install or update, the result tells you to start the
+    game and close it twice the first time, and how to reset BepInEx, as
+    the Eggman guide says.
+  - The graphics card warning also reads TeknoParrot's own game
+    information. A game that TeknoParrot says does not work on your AMD
+    or Intel card is warned about even when the Manager's own list does
+    not name it yet.
+  - docs\GAME-SUPPORT.md is rebuilt from the current guide and the 2,541
+    current TeknoParrot profiles, game by game.
 
   Other fixes
   - After unpacking, when every new game was also registered in

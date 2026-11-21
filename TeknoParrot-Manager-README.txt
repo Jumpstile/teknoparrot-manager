@@ -2213,6 +2213,32 @@
   was unsure about. Any case you leave open stays in ACTION REQUIRED. There
   you can finish it in TeknoParrotUI.
 
+  EVERY TEKNOPARROT GAME
+
+  The Manager is checked against every game that TeknoParrot lists as
+  released (2,466 game setup files in TeknoParrot 1.0.0.2325), and against
+  the Eggman game list and guide. docs\GAME-SUPPORT.md lists every game
+  and what the Manager does for it. These cases work with no extra steps:
+
+    Two versions of a game   Each version is registered. If TeknoParrot has
+                             only one setup file for both, the second one is
+                             reported as a duplicate. It is never dropped
+                             without a message.
+
+    A game with two setup    The Eggman list sometimes names a second setup
+    files                    file for the same folder. For the Lindbergh
+                             games it is the newer ElfLdr2 one. Both are
+                             registered. If the second one needs a game file
+                             that is not in the folder, it is left out and
+                             the log says why.
+
+    A game TeknoParrot has   Listed as "not in TeknoParrot" (for example the
+    no setup file for        Sega Rally 3 track mods and Escape from Monster
+                             Manor). That is not a failure.
+
+    Unusual file names       Game files that end in .exec or .chd, and names
+                             with a hyphen (R-Tuned), are recognized.
+
 
   MORE DETAIL: REGISTRATION
   -------------------------
