@@ -839,7 +839,7 @@ A successful patch does not prove the game is ready. Register the game, set up i
 
 **What this release contains**
 
-- RC8.4 has 120 exact recipes across 71 exact ProfileId/build/executable identities (54 game profiles).
+- RC9 has 120 exact recipes across 71 exact ProfileId/build/executable identities (54 game profiles).
 
 - The list started as the historical 13-entry baseline and the 58-entry PR #355 checkpoint, and has grown since.
 
@@ -1584,7 +1584,7 @@ When a game is not recognized, make sure TeknoParrot is up to date and TeknoParr
 
 `<ProgramFolder>` means the folder containing TeknoParrot-Manager.ps1.
 
-RC8.4 places its normal configuration and log under `<TeknoParrotRoot>\TeknoParrotManager\State\` and `Logs\`.
+TeknoParrot Manager places its normal configuration and log under `<TeknoParrotRoot>\TeknoParrotManager\State\` and `Logs\`.
 
 The table below lists each file, where it lives, and what it is for:
 
