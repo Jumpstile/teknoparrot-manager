@@ -81,7 +81,7 @@ The catalog used is TeknoParrot 1.0.0.2325 with 2541 game profiles. 9 guide IDs 
 
 - **PC games and other emulators**: register with TeknoParrot Manager, read your Game Notes file, then set up the controls in TeknoParrot.
 - **ROM games (marked ROM)**: the guide asks you to pick the exact ZIP it names, keep the BIOS ZIP in the same folder, pick the matching game revision, and for some games pick a CHD file as a second game file. TeknoParrot Manager sets the game file when a catalog profile exists, shows these steps in the Game Notes file, and reports in Library Health (Game support) when a second game file is missing.
-- **Gap rows**: extra archives in the guide that TeknoParrot has no profile for (the Sega Rally 3 track mods and Escape from Monster Manor, for example). TeknoParrot Manager lists their folders as "not in TeknoParrot" and does not call that a failure.
+- **Gap rows**: guide entries that have no TeknoParrot profile of their own. Seven are extra archives that TeknoParrot has no profile for at all (the Sega Rally 3 track mods and Escape from Monster Manor); TeknoParrot Manager lists their folders as "not in TeknoParrot" and does not call that a failure. Two (Battle Gear 3 and Wayne Gretzky's 3D Hockey Fatality Edition) run through a linked profile.
 
 ## Details (for testers)
 

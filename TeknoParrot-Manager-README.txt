@@ -2225,10 +2225,10 @@
                              reported as a duplicate. It is never dropped
                              without a message.
 
-    A game with two setup    The Eggman list sometimes names a second setup
-    files                    file for the same folder. For the Lindbergh
-                             games it is the newer ElfLdr2 one. Both are
-                             registered. If the second one needs a game file
+    A Lindbergh game         TeknoParrot has retired its Lindbergh setup file
+                             and replaced it with a newer ElfLdr2 one. The
+                             Eggman list names both, and both are
+                             registered. If the ElfLdr2 one needs a game file
                              that is not in the folder, it is left out and
                              the log says why.
 

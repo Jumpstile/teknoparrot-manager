@@ -39442,9 +39442,10 @@ function Get-TpmProfileFileExtensions {
 }
 
 # Registers the SECOND profile the Eggman list names for a game folder (GameProfile2), once the folder's first profile was registered
-# or found. Both profiles are valid for the same files; before this the second one was never registered, so a Lindbergh game got only
-# the retired Lindbergh profile and never its ElfLdr2 one. The game file is one of the file names the second profile itself lists
-# (or, when it lists none, the file the list names); when neither is in the folder nothing is guessed and the log says so.
+# or found, but only when TeknoParrot has retired the first profile (IsDeprecated): then a Lindbergh game got only the retired Lindbergh
+# profile and never its ElfLdr2 one. For other games the meaning of a second profile is not documented, so none is written. The game
+# file is one of the file names the second profile itself lists (or, when it lists none, the file the list names); when neither is in
+# the folder nothing is guessed and the log says so.
 function Register-TpmDatSecondProfiles {
     param(
         [Parameter(Mandatory)]$Registered, [Parameter(Mandatory)]$Already, [Parameter(Mandatory)][hashtable]$SeenCodes, [Parameter(Mandatory)][hashtable]$ClaimedBy,
@@ -39468,6 +39469,13 @@ function Register-TpmDatSecondProfiles {
         $second = [string]$codes[1]
         if ($second -ieq $first -or -not $SeenCodes.ContainsKey($first) -or $SeenCodes.ContainsKey($second)) { continue }
         if ([string]$ClaimedBy[$first] -ine $folderName) { continue }
+        $firstTemplate = Join-Path $GameProfilesDir ($first + '.xml')
+        $retired = $false
+        try {
+            $retiredNode = (Read-Xml $firstTemplate).GameProfile.SelectSingleNode('IsDeprecated')
+            $retired = ($null -ne $retiredNode -and $retiredNode.InnerText.Trim() -ieq 'true')
+        } catch { $retired = $false }
+        if (-not $retired) { continue }
         $templatePath = Join-Path $GameProfilesDir ($second + '.xml')
         if (-not (Test-Path -LiteralPath $templatePath -PathType Leaf)) { Write-Log ("DatIndex (second profile): no GameProfiles template for '{0}' -- folder {1}" -f $second, $folderKey); continue }
         $folderFull = Join-Path $InstallBase $folderName

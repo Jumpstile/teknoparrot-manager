@@ -8,7 +8,7 @@
 #   - a second version of a game was dropped without a word because the first version had just been registered in the same run;
 #   - a game whose name looks like another game's (The King of Fighters XII and XIV, Total Vice AAB and EBA) got the wrong profile;
 #   - games whose profile names a child and a parent ZIP ("ddr2ml.zip;ddr2m.zip") were skipped although the list names the parent ZIP;
-#   - the second profile the list names (ElfLdr2 for a Lindbergh game, the other profile of Raiden IV) was never registered;
+#   - the second profile the list names (ElfLdr2 for a Lindbergh game, whose own Lindbergh profile TeknoParrot has retired) was never registered;
 #   - a profile code with a hyphen (R-Tuned) was refused as unsafe;
 #   - a game file that ends in .exec or .chd was not seen as a game file;
 #   - a game TeknoParrot has no profile for was shown as a failed profile code instead of "not in TeknoParrot".
@@ -110,12 +110,12 @@ Describe 'Every game of the real profile and game lists registers (issues 389 an
         }
     }
 
-    It 'registers the second profile the list names (ElfLdr2 next to a Lindbergh game, the other profile of Raiden IV) for the same folder' {
+    It 'registers the ElfLdr2 profile the list names next to a retired Lindbergh profile, and no second profile for other games' {
         (Get-F389Codes 'After Burner Climax') | Should -Contain 'abc'
         (Get-F389Codes 'After Burner Climax') | Should -Contain 'abcELF2'
         (Get-F389Codes '2SPICY') | Should -Contain '2SpicyElf2'
         (Get-F389Codes 'Virtua Fighter 5') | Should -Contain 'VF5BElf2'
-        (Get-F389Codes 'Raiden IV') | Should -Contain 'RaidenIVNesica'
+        (Get-F389Codes 'Raiden IV') | Should -Not -Contain 'RaidenIVNesica'
         (Get-F389Codes 'Rambo') | Should -Contain 'RamboElf2'
     }
 

@@ -196,9 +196,11 @@
     are now checked before they start, and the Manager tells you what is
     missing.
   - System 11 games: when a game names two ZIPs (child and parent), both
-    must be in the same folder, or the game is not registered. The disc
-    image (CHD) is chosen for you when there is only one, and is never
-    guessed when there are several. If you have your own System 11 saved
+    must be in the same folder, or the game is not registered. The one
+    exception is a game for which the Eggman list names the parent ZIP:
+    the parent alone is enough. The disc image (CHD) is chosen for you
+    when there is only one, and is never guessed when there are several.
+    If you have your own System 11 saved
     files set, the Manager can copy the files for your games. It never
     replaces a file that is already there and says which games the set
     has no files for.
@@ -235,11 +237,10 @@
     for example Dance Dance Revolution 2nd Mix Link and DrumMania) are
     registered when the list names the parent ZIP, which is the only ZIP
     in their folder.
-  - The second profile the Eggman list names is registered too: the
-    ElfLdr2 profile next to each Lindbergh game, and the second profile
-    of Raiden III, Raiden IV and Densha de GO. If that profile needs a
-    game file that is not in the folder, it is left out and the log says
-    why.
+  - The second profile the Eggman list names is registered too when
+    TeknoParrot has retired the first one: the ElfLdr2 profile next to
+    each Lindbergh game. If that profile needs a game file that is not
+    in the folder, it is left out and the log says why.
   - Game files that end in .exec or .chd, and profile names with a
     hyphen (R-Tuned), are recognized. The Manager reads the file types
     from the TeknoParrot profiles, so a new kind of file needs no new

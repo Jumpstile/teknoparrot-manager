@@ -94,6 +94,7 @@ Use your real Eggman collection on the test PC. Copy it first or use a test Tekn
 6. Pick Minecraft Dungeons Arcade and Golden Tee Fore! 2004. Pass: both are registered.
 7. Run a BepInEx install on one BepInEx game. Pass: the result tells you to start the game and close it twice the first time.
 8. Open the Sega Rally 3 track mod folders. Pass: they are listed as "not in TeknoParrot", not as a failed profile.
-9. Open `docs\GAME-SUPPORT.md`. Pass: the totals read 2550 game IDs, 9 Gap rows, and the 9 Gap rows are the extra archives named in step 8
-   and Escape from Monster Manor.
+9. Open `docs\GAME-SUPPORT.md`. Pass: the totals read 2550 game IDs and 9 Gap rows. Seven of the Gap rows are the Sega Rally 3 track
+   mods (6) and Escape from Monster Manor: TeknoParrot has no profile for them. The other two (Battle Gear 3 and Wayne Gretzky's 3D
+   Hockey Fatality Edition) run through a linked profile.
 10. Write on issue 389 what you saw for steps 1 to 9, and which games you could not test.
