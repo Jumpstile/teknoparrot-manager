@@ -1,12 +1,12 @@
-# TeknoParrot Manager RC8.4 - Tester Guide
+# TeknoParrot Manager RC9 - Tester Guide
 
-Updated Nov 20, 2026
+Updated Nov 21, 2026
 
 Thank you for helping! You will try a program that sets up arcade games on a PC. We want to find out if every game starts and plays with no extra work.
 
 Follow the steps in order. Take your time. If you get stuck, stop and send a screenshot to the person who gave you this guide. If something goes wrong, your backup lets us fix it.
 
-**What is new in RC8.4?** RC8.4 is a fix-up release for RC8.3. It fixes problems that testers found and adds new features. Tests 1 to 40 are the same as before. **Tests 41 to 52 are new. If you only have a little time, do tests 41 to 52 first.**
+**What is new in RC9?** RC9 is the next release after RC8.4. It adds new choices and fixes problems that testers found. Tests 1 to 51 are the same as before, except Test 17 (the database choice for games like Golden Tee) and Test 43 (LaunchBox). **Tests 52 to 66 are new. If you only have a little time, do tests 52 to 66 first.**
 
 Words you will see:
 
@@ -23,7 +23,7 @@ Do all of these before you test. Tick each box when you are done.
 
 - [ ] Use a PC that has TeknoParrot and at least 3 games on it. Different kinds of games are best.
 - [ ] Make a backup. Find your TeknoParrot folder. Inside it is a folder named UserProfiles. Copy that folder and paste the copy on your desktop.
-- [ ] Get the file TeknoParrot.Manager.v1.0.RC8.4.zip from the release page: https://github.com/Jumpstile/teknoparrot-manager/releases (or get it from the person who sent you this guide). The release page shows a SHA-256 check value for the file. To see yours, open PowerShell and run: `Get-FileHash -Algorithm SHA256 "C:\path\to\the\zip"`. The two values must match. If they do not, download the file again.
+- [ ] Get the file TeknoParrot.Manager.v1.0.RC9.zip from the person who sent you this guide, or from the release page: https://github.com/Jumpstile/teknoparrot-manager/releases. The release page shows a SHA-256 check value for the file. To see yours, open PowerShell and run: `Get-FileHash -Algorithm SHA256 "C:\path\to\the\zip"`. The two values must match. If they do not, download the file again.
 - [ ] Right-click the zip file and choose Extract All. Pick a NEW empty folder. Do not pick an old folder.
 - [ ] Learn how to take a screenshot: press the Windows key + Shift + S.
 
@@ -184,8 +184,8 @@ Tests 9 to 28 try the rest of the program. Do the ones that fit your games and y
 
 ### Test 21: Move up from an older version (RC7 or RC8)
 
-1. Do this only if you used RC7 or RC8 before. Do not delete the old folder. (If you use RC8.1, RC8.2 or RC8.3, do Test 29 instead.)
-2. Extract the RC8.4 zip into a NEW empty folder.
+1. Do this only if you used RC7 or RC8 before. Do not delete the old folder. (If you use RC8.1, RC8.2, RC8.3 or RC8.4, do Test 29 instead.)
+2. Extract the RC9 zip into a NEW empty folder.
 3. Start TeknoParrot Manager from the new folder. Answer the first questions the same way you did before.
 4. At the main menu, type 13 and press Enter (Library health check).
 5. You passed if your games and settings are all still there and the health check ends in plain words with no failure.
@@ -241,13 +241,13 @@ Tests 9 to 28 try the rest of the program. Do the ones that fit your games and y
 
 These tests try the fixes made in RC8.2.
 
-### Test 29: Update from RC8.1, RC8.2 or RC8.3 (menu 15)
+### Test 29: Update from RC8.1, RC8.2, RC8.3 or RC8.4 (menu 15)
 
-1. Do this only if you use RC8.1, RC8.2 or RC8.3. Do not delete anything first.
+1. Do this only if you use RC8.1, RC8.2, RC8.3 or RC8.4 and RC9 is on the release page. Do not delete anything first.
 2. In your old version, at the main menu, type 15 and press Enter (Check for Updates).
 3. It should tell you a newer version is ready. It must ASK before it installs. Say yes.
 4. Wait until it says it is done. Close the program and start it again yourself.
-5. You passed if the title at the top now says v1.0 RC8.4, and your games and settings are all still there. Write down any message that did not make sense.
+5. You passed if the title at the top now says v1.0 RC9, and your games and settings are all still there. Write down any message that did not make sense.
 
 ### Test 30: Preview before copying controls
 
@@ -337,7 +337,7 @@ These tests try the fixes in RC8.3. Do them first if you are short on time.
 3. You passed if neither step stops with a "could not be checked" error.
 4. If your TeknoParrot folder is very deep, also start TeknoParrot Manager and let it tidy up its own files. You passed if it finishes with no error about a path that is too long.
 
-## New in RC8.4: tests 41 to 52
+## New in RC8.4: tests 41 to 51
 
 These tests try the new parts of RC8.4. Do them first if you are short on time.
 
@@ -362,11 +362,8 @@ These tests try the new parts of RC8.4. Do them first if you are short on time.
 2. Start the LaunchBox step the way you did in Test 22. Choose [L] Link games for art and details.
 3. Look at the preview. Nothing should change until you say yes.
 4. You passed if you see each old name, new name and ID first, and a backup is made before anything is saved. Games you named yourself must keep your name.
-5. Run the LaunchBox step again. Choose [G] Fill in game details and make playlists. You passed if it shows what will change first, makes playlists such as "Light gun games" and "Driving games", and leaves your own playlists alone. A game whose game file is missing must show a "Needs setup" note in its Notes box and sit in the "Needs setup" playlist.
-6. Run the LaunchBox step again. Choose [V] Group regions and versions. You passed if every game that has a Japan and a USA copy shows up once, with the other copy under "Play ... version", and the copy for the region you chose in Region setup starts by default.
-7. Run the LaunchBox step again. Choose [S] Keep LaunchBox in step. Remove one game from TeknoParrot first. You passed if the preview names that game as removed, nothing else disappears, and a game you renamed yourself in LaunchBox keeps your name.
-8. Check the platform name. In LaunchBox open the platform list: the platform must be called TeknoParrot, and its "Scrape as" setting must be Arcade (LaunchBox's own game list keeps all arcade games under Arcade). Select a few of the games the Manager added, right-click, and search for metadata. You passed if LaunchBox finds the game by its name and fills in artwork or details, and none of the games ends up under a different platform name.
-9. Undo it: choose 14 (Restore backup) in the main menu, then the LaunchBox backup. You passed if everything goes back the way it was.
+5. Run the LaunchBox step again. Choose [G] Fill in game details and make playlists. You passed if it shows what will change first, makes playlists such as "Light gun games" and "Driving games", and leaves your own playlists alone.
+6. Undo it: choose 14 (Restore backup) in the main menu, then the LaunchBox backup. You passed if everything goes back the way it was.
 
 ### Test 44: Logos and box art from a folder
 
@@ -420,13 +417,119 @@ These tests try the new parts of RC8.4. Do them first if you are short on time.
 2. Find the lines "ReShade installed" and "BepInEx installed".
 3. You passed if a game whose profile says it needs BepInEx, and does not have it, is listed under "Games that need BepInEx and do not have it set up". ReShade is your choice for each game, so it must not be flagged.
 
-### Test 52: A game with two versions, or two profiles
+## New in RC9: tests 52 to 66
+
+These tests try the new parts of RC9. Do them first if you are short on time.
+
+### Test 52: Health check names game types it cannot check
+
+1. At the main menu, type 13 and press Enter (Library health check). Press D if you do not see the details.
+2. Find the line that starts with "Game types". There may also be a line that starts with "Game files".
+3. You passed if the line says OK, or if it says "Needs attention" and the details name each game and say what to do. The details can say "Unknown game type", "Not available yet" (TeknoParrot lists the game as development only), "Emulator for type ... is not in your TeknoParrot folder", or "Pick the game file by hand".
+4. You failed if a game you can play is called unknown, or if the screen stops with an error.
+
+### Test 53: System 11 games
+
+1. Use this only if you have System 11 games. Skip this test if you do not.
+2. Pick a System 11 game that needs two ZIP files (a child and a parent). Put only the child ZIP in your Game ZIP folder, then run AutoSync (menu 1). You passed if that game is not registered. Then put the parent ZIP in the same folder and run AutoSync again. You passed that part if the game is now registered.
+3. If you have the System 11 saved-files set, look for the screen "OPTIONAL: System 11 saved game files". Say yes. You passed if it says it copied and checked the files, and says which games the set has no files for.
+4. Run AutoSync again. You passed if no file that was already there was replaced, and the screen does not ask you again when the set has nothing new.
+
+### Test 54: A game set with only its parent ZIP
+
+1. Use this only if you have a game that needs a parent ZIP (a game set). Skip this test if you do not.
+2. Make a new folder that holds ONLY the parent ZIP, not the game's own ZIP. At the main menu, type 2 and press Enter (Register only). Pick that folder.
+3. You passed if no game is registered from that folder. Open TeknoParrot. You passed that part if the game does not show up from that folder.
+
+### Test 55: LaunchBox names, details and Needs setup
+
+1. Use this only if you use LaunchBox. Skip this test if you do not.
+2. Run AutoSync (menu 1) with a new game and say yes at the LaunchBox question. Open LaunchBox.
+3. You passed if the new game has its real game name, not its file name (for example "Too Spicy", not "2Spicy"), and, where LaunchBox knows the game, its release year and developer.
+4. Run the LaunchBox step again. Choose [G] Fill in game details and make playlists. Make sure one game cannot start yet (for example its game file is missing). You passed if that game has a "Needs setup" note in its Notes box and is in the "Needs setup" playlist. Fix the problem, run [G] again, and you passed that part if the note and the playlist entry go away and what you wrote in the Notes box stays.
+5. Check that a firmware updater or a test board was NOT added to LaunchBox.
+
+### Test 56: LaunchBox groups regions and versions
+
+1. Use this only if you use LaunchBox and have a game with more than one region or version (for example a Japan copy and a USA copy). Skip this test if not.
+2. Run the LaunchBox step. Choose [V] Group regions and versions of a game into one.
+3. Look at the groups it shows. Nothing should change until you say yes.
+4. You passed if each of those games shows up once in LaunchBox, the other copies are under "Play ... version", and the copy for the region you chose in Region setup starts by default. Games that are not certainly the same game must stay separate.
+5. Undo it: choose 14 (Restore backup), then the LaunchBox backup. You passed if the separate games are back.
+
+### Test 57: LaunchBox stays in step with TeknoParrot
+
+1. Use this only if you use LaunchBox. Skip this test if you do not.
+2. Remove one game from TeknoParrot. Rename one game in LaunchBox yourself.
+3. Run the LaunchBox step. Choose [S] Keep LaunchBox in step with TeknoParrot.
+4. You passed if the preview names the game you removed, nothing else disappears, and the game you renamed keeps your name. Say yes and check LaunchBox.
+5. Unplug the drive that holds some of your game files and run [S] again. You passed if no game is removed only because its file is missing.
+6. Undo it: choose 14 (Restore backup), then the LaunchBox backup. You passed if everything goes back the way it was.
+
+### Test 58: LaunchBox platform name
+
+1. Use this only if you use LaunchBox. Skip this test if you do not.
+2. In LaunchBox open the platform list. You passed if the platform the Manager made is called TeknoParrot and its "Scrape as" setting is Arcade.
+3. Select a few of the games the Manager added, right-click, and search for metadata. You passed if LaunchBox finds the game by its name and fills in artwork or details, and none of the games ends up under a different platform name.
+
+### Test 59: Pictures from a folder match the right game
+
+1. Use this only if you use LaunchBox and have a folder with pictures. Skip this test if not.
+2. Choose the optional step that adds logos or box art. Pick your folder. Include a picture that uses another name of one of your games, and a picture of a different game that has the same name.
+3. You passed if the other-name picture is listed as a sure match, the picture of the different game is NOT used, and close names are used only if you say yes.
+4. Choose Undo. You passed if only the pictures that were added are removed.
+
+### Test 60: Bezels from your own folder
+
+1. Use this only if you have a folder with bezel pictures (.png). TeknoParrot Manager does not come with bezels. Skip this test if you have none.
+2. Set up ReShade for one game first (Test 12). At the main menu, type 5 and press Enter. Type B (Use my bezel folder) and press Enter. Then choose the pick-bezels choice and give your folder.
+3. Read "Bezel preview. Nothing has been changed yet." You passed if each game shows a bezel and how sure the match is (High, Medium or Low), a Low match says "needs your choice", and a picture for a different sequel number is not picked for you.
+4. Apply it for one game. You passed if the bezel is copied and checked. If you placed a bezel yourself earlier, it must be kept unless you said to replace it.
+5. Start that game. Write down if the bezel shows. It may not show in games that run in exclusive fullscreen.
+6. Type 5, then B, then the undo choice. You passed if the bezel the Manager copied is removed and your own bezel is back.
+
+### Test 61: Controls result names a game to set up first
+
+1. Use this only if some kinds of games (for example light gun or driving games) have no game with your controls yet. Skip this test if every kind has one.
+2. At the main menu, type 3 and press Enter (Propagate Controls). Read the result.
+3. You passed if, for each kind with no example game, it names one game to set up first in TeknoParrotUI, and says that choosing a device in the plan does not set up a game.
+4. Run AutoSync or Register only. You passed if the registration screen ends with "Registration run finished" (not "Done.").
+
+### Test 62: PostgreSQL setup waits for you
+
+1. Use a test PC only. Use this only if you have a game set to Existing PostgreSQL, and start the Manager without administrator rights.
+2. At the main menu, type 11 and press Enter (Postgres setup).
+3. You passed if the Manager explains what the Windows permission window will ask for and waits for you to press Enter. The Windows window must open only after you press Enter.
+
+### Test 63: Check an outside controller list (advanced)
+
+1. Use this only if you are comfortable with PowerShell and you have a controller list such as RetroBat's teknoparrot.yml. Skip this test if not.
+2. In PowerShell, in the Manager folder, run: `.\TeknoParrot-Manager.ps1 -MappingEvidenceFile "C:\path\to\teknoparrot.yml" -ValidationRoot "C:\path\to\TeknoParrot" -ValidationJsonPath "C:\path\to\new-details.json"`.
+3. You passed if it says nothing was changed and prints plain counts, and the only new file is the one you named. Check that no file in GameProfiles or UserProfiles changed.
+4. Run it again with the same names. You passed if the two details files are identical.
+
+### Test 64: Startup files for Chihiro or PlayStation 3 (ask once, one Y)
+
+1. Use this only if you have a registered Chihiro or PlayStation 3 game and your own Supplementary game collection. Skip this test if not.
+2. Run Register only (menu 2), or choose F in the Library health check (menu 13), while the startup files are missing.
+3. If the Manager does not find the files, it asks for your Supplementary folder. Choose your real folder. You passed if it asks only once in this run and does not ask again on the next run. (If you press Enter to skip, nothing is saved and it asks again next time.)
+4. Read the list. It should say what it found, what is already in place, what is missing (by file name) and the folders it searched. Press Y once.
+5. You passed if one Y installed everything it found, and the result names what was installed, already matching, missing or invalid. It failed if it asked you to approve each game or each file one by one.
+
+### Test 65: Update screen at start (one Y)
+
+1. Do this only on a PC that still runs an older version while RC9 is on the release page. Skip this test if not.
+2. Start the Manager. You passed if the Update Available screen shows before the "use saved settings?" question, with the choices Y = Update now, N = Remind me later and V = View release notes.
+3. Press V, read the notes, then choose again. Press Y. You passed if the update starts right away and it does not ask a second Y/N question.
+
+### Test 66: A game with two versions, or two profiles
 
 1. Use games from the Eggman collection. Good ones: two versions of Chaos Code - New Sign of Catastrophe, and After Burner Climax (a Lindbergh game). Skip this test if you do not have them.
 2. Register the games (AutoSync or Register only).
 3. You passed if both versions of the first game were registered or one was reported as a duplicate with a reason. It failed if one version is missing and nothing says why.
 4. Open TeknoParrot. You passed if After Burner Climax shows both its Lindbergh profile and its ElfLdr2 profile. If the ElfLdr2 one is missing, open the log and look for "was left alone because none of its game files is in folder".
 5. If you have a folder for a game that TeknoParrot has no profile for (a Sega Rally 3 track mod), you passed if it is listed as "not in TeknoParrot".
+
 ## How to report a problem
 
 **Very important: the support report.** Every bug report needs a support report. Without it we often cannot find the cause. Make one every time something goes wrong. Never skip it.
