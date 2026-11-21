@@ -54936,11 +54936,11 @@ $mode = $null
                 if ($rsAcq.State -eq 'Acquired') {
                     $rsSourceDll = $rsAcq.Path
                 } else {
-                    [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-acquisition-cancelled' -Message 'ReShade setup was canceled.' -DataSafety 'No unverified ReShade file was used.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+                    [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-acquisition-canceled' -Message 'ReShade setup was canceled.' -DataSafety 'No unverified ReShade file was used.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
                     Write-Host '  ReShade setup canceled. No unverified DLL was used.' -ForegroundColor Yellow
                     Write-Log 'ReShade setup: canceled after automatic acquisition failed.'
                     [void](Read-HostSafe '  Press Enter to acknowledge the ReShade result')
-                    [void](Acknowledge-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-acquisition-cancelled')
+                    [void](Acknowledge-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-acquisition-canceled')
                     [void](Stop-TpmWorkflowStatus -Context $reShadeStatus -Reason 'ReShade setup stopped')
                     [void](Close-TpmWorkflowStatus -Context $reShadeStatus)
                     [void](Read-HostSafe '  Press Enter to return to menu')
@@ -55041,11 +55041,11 @@ $mode = $null
                     [void](Close-TpmWorkflowStatus -Context $dgStatus)
                     continue
                 } else {
-                    [void](Set-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-acquisition-cancelled' -Message 'dgVoodoo2 setup was canceled.' -DataSafety 'No unverified dgVoodoo2 files were used.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+                    [void](Set-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-acquisition-canceled' -Message 'dgVoodoo2 setup was canceled.' -DataSafety 'No unverified dgVoodoo2 files were used.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
                     Write-Host '  dgVoodoo2 setup canceled. No unverified files were used.' -ForegroundColor Yellow
                     Write-Log 'dgVoodoo2 setup: canceled after automatic acquisition failed.'
                     [void](Read-HostSafe '  Press Enter to acknowledge the dgVoodoo2 result')
-                    [void](Acknowledge-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-acquisition-cancelled')
+                    [void](Acknowledge-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-acquisition-canceled')
                     [void](Stop-TpmWorkflowStatus -Context $dgStatus -Reason 'dgVoodoo2 setup stopped')
                     [void](Close-TpmWorkflowStatus -Context $dgStatus)
                     [void](Read-HostSafe '  Press Enter to return to menu')

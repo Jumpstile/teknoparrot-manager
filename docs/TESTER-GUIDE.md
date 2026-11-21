@@ -312,7 +312,7 @@ These tests try the fixes in RC8.3. Do them first if you are short on time.
 2. Choose to pick games one by one (not all at once).
 3. Look at each question. It should say something like "game 1 of 4". It should NOT ask about a game that cannot be changed.
 4. At the second game, type B and press Enter. You should go back to the first game. At the first game, type B and press Enter.
-5. You passed if B went back one game each time, and B on the first game cancelled and nothing was changed. Write down anything that was hard to understand.
+5. You passed if B went back one game each time, and B on the first game canceled and nothing was changed. Write down anything that was hard to understand.
 
 ### Test 38: dgVoodoo2 result lists every game
 
