@@ -8,7 +8,7 @@ TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-> **This guide describes v1.0 RC8.4.** RC8.4 is the current build and is not published yet. The latest published release is v1.0 RC8.3. RC8.4 fixes problems that testers found and adds new features. If you use RC8.1 or newer, choose Check for Updates (menu 15) when RC8.4 comes out. Earlier published releases are v1.0 RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. The changes since RC8.3 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 remains unpublished. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
+> **This guide describes v1.0 RC8.4.** RC8.4 is the latest published release. It fixes problems that testers found and adds new features. If you use RC8.1 or newer, choose Check for Updates (menu 15) to get RC8.4. Earlier published releases are v1.0 RC8.3, RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. The changes since RC8.3 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 remains unpublished. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
 
 
 ## Start here: your first game in about 10 minutes
