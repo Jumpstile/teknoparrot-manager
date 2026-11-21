@@ -18,7 +18,7 @@
     "ContractVersion": { "const": "TpmControllerCapability/v1" },
     "MinReaderVersion": { "type": "integer", "minimum": 1 },
     "MigratedFromVersion": { "type": ["string", "null"], "pattern": "^TpmControllerCapability/v[0-9]+$" },
-    "ProfileId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$" },
+    "ProfileId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
     "ProfileRevision": { "type": "integer", "minimum": 1 },
     "ControllerContext": { "$ref": "#/$defs/controllerContext" },
     "SemanticControls": {
@@ -82,7 +82,7 @@
       "additionalProperties": false,
       "required": ["GameProfileId", "GameProfileHash", "ContractRevision"],
       "properties": {
-        "GameProfileId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_. -]{0,127}$" },
+        "GameProfileId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$" },
         "GameProfileHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "ContractRevision": { "type": "integer", "minimum": 1 }
       }
