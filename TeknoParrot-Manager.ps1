@@ -21268,16 +21268,28 @@ function Set-PostgresOwnerOnlyAcl {
     try { $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { $sid = $null }
     if ([string]::IsNullOrWhiteSpace($sid)) { return [pscustomobject]@{ Outcome = 'Unknown'; Detail = 'The current Windows account SID could not be read.' } }
     $permission = if ($Directory) { '(OI)(CI)(F)' } else { '(F)' }
-    $exitCode = $null
-    try {
-        & icacls $Path /inheritance:r /grant:r ('*{0}:{1}' -f $sid, $permission) 1>$null 2>$null
-        $exitCode = $LASTEXITCODE
-    } catch {
-        return [pscustomobject]@{ Outcome = 'Unknown'; Detail = 'The Windows ACL tool could not be run or reported an error.' }
+    $state = $null
+    foreach ($attempt in 1, 2) {
+        $exitCode = $null
+        try {
+            if ($attempt -eq 2) {
+                # A folder whose parent has an old-style access list gets copies of the parent's entries (SYSTEM, Administrators, Users)
+                # that Windows does not mark as inherited, so removing inheritance leaves them in place. Reset the list to the
+                # inherited defaults once, then remove inheritance again.
+                & icacls $Path /reset 1>$null 2>$null
+                if ($LASTEXITCODE -ne 0) { return $state }
+            }
+            & icacls $Path /inheritance:r /grant:r ('*{0}:{1}' -f $sid, $permission) 1>$null 2>$null
+            $exitCode = $LASTEXITCODE
+        } catch {
+            return [pscustomobject]@{ Outcome = 'Unknown'; Detail = 'The Windows ACL tool could not be run or reported an error.' }
+        }
+        if ($null -eq $exitCode) { return [pscustomobject]@{ Outcome = 'Unknown'; Detail = 'The Windows ACL tool returned no exit code.' } }
+        if ([int]$exitCode -ne 0) { return [pscustomobject]@{ Outcome = 'Failed'; Detail = ('The Windows ACL tool reported exit code {0}.' -f $exitCode) } }
+        $state = Get-PostgresOwnerOnlyAclState -Path $Path
+        if ([string]$state.Outcome -ne 'Failed') { return $state }
     }
-    if ($null -eq $exitCode) { return [pscustomobject]@{ Outcome = 'Unknown'; Detail = 'The Windows ACL tool returned no exit code.' } }
-    if ([int]$exitCode -ne 0) { return [pscustomobject]@{ Outcome = 'Failed'; Detail = ('The Windows ACL tool reported exit code {0}.' -f $exitCode) } }
-    return (Get-PostgresOwnerOnlyAclState -Path $Path)
+    return $state
 }
 
 function Assert-PostgresRecoveryDirectoryAcl {
