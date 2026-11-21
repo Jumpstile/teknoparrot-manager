@@ -9140,8 +9140,8 @@ function Resolve-BestFuzzyMatch {
         }
     }
     # Two years of one game ("Golden Tee Live 2020" and "Golden Tee Live 2021") score within the tie margin of each other, so a folder
-    # that names one of them exactly would never be trusted. When exactly one candidate has the folder's whole name, that candidate wins.
-    $isTie = ($secondScore -gt 0) -and (($bestScore - $secondScore) -lt $FuzzyTieMargin) -and -not ($bestIsExact -and $exactCount -eq 1)
+    # that names one of them exactly would never be trusted. When exactly one candidate has the folder's whole name and it also scores strictly higher than every other, it wins.
+    $isTie = ($secondScore -gt 0) -and (($bestScore - $secondScore) -lt $FuzzyTieMargin) -and -not ($bestIsExact -and $exactCount -eq 1 -and $bestScore -gt $secondScore)
     return [pscustomobject]@{
         Best             = $best
         BestScore        = $bestScore
