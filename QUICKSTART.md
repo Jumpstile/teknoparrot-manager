@@ -936,6 +936,8 @@ Some Incredible Technologies games need a local PostgreSQL 8.3 database. A datab
 
 These games include Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro (Bags / Lawn Darts), and Orange County Choppers Pinball.
 
+Newer profiles have a Storage box. **Internal** is the new default: no database install is needed, and you start the game once so it makes its own database. Mode 11 skips these games. **Existing PostgreSQL** is for keeping an existing server and its saved progress. TeknoParrot Manager never switches a game from one to the other.
+
 Mode 11 finds which of your registered games need it. If none do, mode 11 says so and exits at once without installing anything.
 
 **What mode 11 does for you:**

@@ -322,7 +322,7 @@ Modes 1 and 2 offer a preview/dry-run option first (a practice run that changes 
 | 9 | **BepInEx setup** | BepInEx is an add-on some games use. TeknoParrot Manager can install or update it after you approve. Unsafe folders and failed downloads make no changes |
 | 10                                                            | **Region setup**               | Pick the country your games start in (like USA or Europe). TeknoParrot Manager shows the games that offer it, lets you choose all or some of them, asks you to confirm, saves a backup, then changes them. You can also put games back to Auto. |
 | **Game Requirements** (only for some games)                   |                                |                                                                                                                                                                                                               |
-| 11                                                            | **Postgres setup**             | Installs/configures the local PostgreSQL database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball). Ends with a short result screen; press D for details |
+| 11                                                            | **Postgres setup**             | Installs/configures the local PostgreSQL 8.3 database for games set to Existing PostgreSQL (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball). Games set to Internal storage, the new default, need no install and are skipped. Ends with a short result screen; press D for details |
 | 12                                                            | **Required game patches**      | Find, check, back up, install, verify, and undo required fixes for supported exact game builds using your local ZIPs                                                                                          |
 | **Maintenance and Recovery**                                  |                                |                                                                                                                                                                                                               |
 | 13                                                            | **Library health check**       | Reports registered/broken/unregistered games plus GPU fix / FFB Blaster / dgVoodoo2 coverage, ReShade and BepInEx counts, and the games that need BepInEx but do not have it, without changing anything. Any repair it suggests is a separate choice that you confirm first |
@@ -535,6 +535,8 @@ You will see "No broken saved paths were found." Then the screen offers extra se
 Health Check never installs, deploys, or rewrites anything until you pick one of these actions.
 
 **Game databases (PostgreSQL):** the check also looks at every game database. If one is missing, cannot be opened with the game's own settings, or has no tables, the PostgreSQL row says `Problem` and Details lists `Problem - <game>` for each one. Next: run Postgres setup (menu 11). It makes and checks those databases. The health check itself only looks and changes nothing.
+
+**Games on Internal storage:** a game whose Storage box says Internal needs no PostgreSQL. The check skips it, never calls its database missing, and shows `Game database: OK` with a plain note. It says no database install is needed and that you start the game once so it makes its own database. Existing PostgreSQL is for keeping an existing server and its saved progress. TeknoParrot Manager never switches a game from one to the other.
 
 **ReShade and BepInEx:** the check counts the valid games that have ReShade and BepInEx (`ReShade installed: N of M valid games`, `BepInEx installed: N of M valid games`). ReShade is your choice for each game, so it is not flagged. BepInEx is flagged only for games whose profile says they need it. For those, you see `Games that need BepInEx and do not have it set up: <names>`. Next: choose `9) BepInEx setup`.
 
@@ -1936,17 +1938,23 @@ If a game could not be changed, the result says `Could not be changed` and tells
 
 ## Postgres Setup
 
-Several Incredible Technologies games need a small local PostgreSQL 8.3 database. PostgreSQL is a free program that stores data for a game.
+Several Incredible Technologies games keep their saved progress in a database. Newer TeknoParrot profiles let you choose where that database lives. You choose in TeknoParrot, in the game's settings, under Database, in the Storage box:
 
-The games are:
+- **Internal** is the new default. Nothing needs to be installed. Start the game once and it makes its own database. TeknoParrot Manager skips these games in Postgres setup and in Library health check. It never says a database is missing for them, and it never offers to install PostgreSQL for them.
+- **Existing PostgreSQL** is for people who want to keep an existing PostgreSQL server and the progress saved in it. For these games TeknoParrot Manager keeps all of its PostgreSQL checks, setup steps, backups and restores exactly as before. The database is PostgreSQL 8.3, a free program that stores data for a game.
 
-- Golden Tee Live (2006-2020)
+TeknoParrot Manager only reads your choice. It never switches a game from one to the other, and it never touches saved progress without making a backup first. A game profile with no Storage box (an older profile) works exactly as before.
+
+The games that offer the choice are:
+
+- Golden Tee Live (2006-2023, 2025, 2026)
+- Golden Tee PGA Tour (2021-2023, 2025, 2026)
 - Power Putt Live (2012/2013)
 - Silver Strike Bowling Live
 - Target Toss Pro (Bags / Lawn Darts)
 - Orange County Choppers Pinball
 
-Mode 11 detects which registered games need it automatically.
+Mode 11 reads the choice of each registered game. The rest of this section is about the games that use PostgreSQL.
 
 ### Running Postgres setup
 
