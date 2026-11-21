@@ -683,7 +683,7 @@ After new games are registered, you are asked once which country they should sta
 
 ### Every TeknoParrot game
 
-TeknoParrot Manager is checked against every game that TeknoParrot lists as released (2,466 game profiles in TeknoParrot 1.0.0.2325), and against the Eggman game list and guide. [docs/GAME-SUPPORT.md](docs/GAME-SUPPORT.md) lists every game and what the Manager does for it. These cases work with no extra steps:
+TeknoParrot Manager is checked against every game profile in TeknoParrot 1.0.0.2325 (2,541 profiles), and against the Eggman game list and guide. [docs/GAME-SUPPORT.md](docs/GAME-SUPPORT.md) lists every game and what the Manager does for it. These cases work with no extra steps:
 
 - **Two versions of a game.** Each version is registered. If TeknoParrot has only one profile for both, the second one is reported as a duplicate. It is never dropped without a message.
 - **A Lindbergh game.** TeknoParrot has retired its Lindbergh profile and replaced it with a newer ElfLdr2 profile. The Eggman list names both, and both are registered. If the ElfLdr2 profile needs a game file that is not in the folder, it is left out and the log says why.

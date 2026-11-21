@@ -2258,9 +2258,8 @@
 
   EVERY TEKNOPARROT GAME
 
-  The Manager is checked against every game that TeknoParrot lists as
-  released (2,466 game setup files in TeknoParrot 1.0.0.2325), and against
-  the Eggman game list and guide. docs\GAME-SUPPORT.md lists every game
+  The Manager is checked against every game setup file in TeknoParrot
+  1.0.0.2325 (2,541 of them), and against the Eggman game list and guide. docs\GAME-SUPPORT.md lists every game
   and what the Manager does for it. These cases work with no extra steps:
 
     Two versions of a game   Each version is registered. If TeknoParrot has
