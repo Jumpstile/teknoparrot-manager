@@ -53,6 +53,17 @@ function Get-TpmCoverageCheckTables {
         return $assign.Right.Find({ param($n) $n -is [System.Management.Automation.Language.HashtableAst] }, $true)
     }
     $keys = { param($name) $h = & $table $name; if ($null -eq $h) { return @() }; return @($h.KeyValuePairs | ForEach-Object { [string]$_.Item1.Value }) }
+    # Only the table rows that name startup files count as "checked"; the other rows only say which folder an emulator runs from.
+    $startupFileKeys = {
+        param($name)
+        $h = & $table $name
+        if ($null -eq $h) { return @() }
+        $needs = @('Files', 'RequiredFiles', 'FilesFromProfile', 'InstallVia')
+        return @($h.KeyValuePairs | Where-Object {
+                $row = $_.Item2.Find({ param($n) $n -is [System.Management.Automation.Language.HashtableAst] }, $true)
+                $null -ne $row -and @($row.KeyValuePairs | Where-Object { $needs -contains [string]$_.Item1.Value }).Count -gt 0
+            } | ForEach-Object { [string]$_.Item1.Value })
+    }
     $gpu = @{}
     $gpuTable = & $table 'GpuIncompatibleGames'
     if ($null -ne $gpuTable) {
@@ -64,7 +75,7 @@ function Get-TpmCoverageCheckTables {
         PathLimits        = @(& $keys 'RawThrillsPathLimits')
         VersionPins       = @(& $keys 'FileVersionPins')
         GpuIncompatible   = $gpu
-        FirmwareEmulators = @(& $keys 'EmulatorBiosRequirements')
+        FirmwareEmulators = @(& $startupFileKeys 'EmulatorBiosRequirements')
     }
 }
 
