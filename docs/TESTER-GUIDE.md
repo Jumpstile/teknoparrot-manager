@@ -6,7 +6,7 @@ Thank you for helping! You will try a program that sets up arcade games on a PC.
 
 Follow the steps in order. Take your time. If you get stuck, stop and send a screenshot to the person who gave you this guide. If something goes wrong, your backup lets us fix it.
 
-**What is new in RC8.4?** RC8.4 is a fix-up release for RC8.3. It fixes problems that testers found and adds new features. Tests 1 to 40 are the same as before. **Tests 41 to 46 are new. If you only have a little time, do tests 41 to 46 first.**
+**What is new in RC8.4?** RC8.4 is a fix-up release for RC8.3. It fixes problems that testers found and adds new features. Tests 1 to 40 are the same as before. **Tests 41 to 51 are new. If you only have a little time, do tests 41 to 51 first.**
 
 Words you will see:
 
@@ -243,7 +243,7 @@ These tests try the fixes made in RC8.2.
 
 ### Test 29: Update from RC8.1, RC8.2 or RC8.3 (menu 15)
 
-1. Do this only if you use RC8.1, RC8.2 or RC8.3 and RC8.4 is on the release page. Do not delete anything first.
+1. Do this only if you use RC8.1, RC8.2 or RC8.3. Do not delete anything first.
 2. In your old version, at the main menu, type 15 and press Enter (Check for Updates).
 3. It should tell you a newer version is ready. It must ASK before it installs. Say yes.
 4. Wait until it says it is done. Close the program and start it again yourself.

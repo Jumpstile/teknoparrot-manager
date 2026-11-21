@@ -19,7 +19,7 @@ Allow about 10 minutes once your downloads are ready.
 
 Installing TeknoParrot, updates, large games, and special controllers take longer.
 
-Release page of the latest published release: [v1.0 RC8.3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3).
+Release page of the latest published release: [v1.0 RC8.4](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4).
 
 You need:
 
@@ -3676,5 +3676,5 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> TeknoParrot Manager v1.0 RC8.4 (not published yet). The latest published release is v1.0 RC8.3. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
+> TeknoParrot Manager v1.0 RC8.4 is the latest published release. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
 
