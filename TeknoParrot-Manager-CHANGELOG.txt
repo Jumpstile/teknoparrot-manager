@@ -47,6 +47,10 @@
     have it set up.
   - A game file that cannot be read is now told apart from a game whose
     32-bit or 64-bit type could not be worked out.
+  - When Propagate Controls skips games because no game of their type has
+    your controls yet, it names one game of each type to set up first in
+    TeknoParrotUI. The registration screen now ends with "Registration run
+    finished", which does not mean every game's controls are set up.
 
   Also new in this release
   - LEDBlinky lighting (optional): if you use LEDBlinky, the Manager can
