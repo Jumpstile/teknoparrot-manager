@@ -660,9 +660,10 @@ Describe 'FIX36 PostgreSQL password safety' {
             $script:Fix36Blank = Join-Path $script:Fix36Profiles 'BlankLocal.xml'
             $script:Fix36Different = Join-Path $script:Fix36Profiles 'DifferentPass.xml'
             $script:Fix36Custom = Join-Path $script:Fix36Profiles 'CustomUser.xml'
-            Set-Content -LiteralPath $script:Fix36Blank -Value ($template -f 'Blank Local', '127.0.0.1', 'postgres', '')
-            Set-Content -LiteralPath $script:Fix36Different -Value ($template -f 'Different Pass', '127.0.0.1', 'postgres', 'their-own-pw')
-            Set-Content -LiteralPath $script:Fix36Custom -Value ($template -f 'Custom User', '127.0.0.1', 'gtuser', '')
+            # Each profile names its own database; two profiles that name the same one are a separate case (setup gives the second its own database).
+            Set-Content -LiteralPath $script:Fix36Blank -Value (($template -f 'Blank Local', '127.0.0.1', 'postgres', '') -replace 'GameDB01', 'GameDB01Blank')
+            Set-Content -LiteralPath $script:Fix36Different -Value (($template -f 'Different Pass', '127.0.0.1', 'postgres', 'their-own-pw') -replace 'GameDB01', 'GameDB01Different')
+            Set-Content -LiteralPath $script:Fix36Custom -Value (($template -f 'Custom User', '127.0.0.1', 'gtuser', '') -replace 'GameDB01', 'GameDB01Custom')
             $script:Fix36SavedProfiles = New-Object System.Collections.Generic.List[string]
             Mock Get-PostgresDatabaseState { [pscustomobject]@{ Exists = $true; Verified = $true } }
             Mock Get-PostgresGameDatabaseReadiness { [pscustomobject]@{ Ready = $true; TableCount = 24; Error = $null } }

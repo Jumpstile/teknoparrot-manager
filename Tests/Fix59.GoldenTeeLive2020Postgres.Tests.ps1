@@ -405,25 +405,6 @@ Describe 'FIX59 Golden Tee Live 2020 setup creates GameDB20 from the bundled bac
         $fx.State.Events.Contains('backup') | Should -BeFalse
         @(Get-F59Calls -Tool 'createdb.exe').Count | Should -Be 0
     }
-
-    # Mutation: let an auto-create profile and another profile share one absent database although they resolve to different
-    # bundled backups -> one of them would be created from the other's backup.
-    It 'refuses to guess when another profile names the same absent GameDB20 and creates nothing' {
-        $fx = New-F59Fixture -Name 'shared'
-        $null = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2020' -GameName 'Golden Tee Live 2020' -DbName 'GameDB20' -AutoCreate '1' -Backup
-        $null = New-F59Profile -Fixture $fx -ProfileName 'ZSharedGame' -GameName 'Shared Game' -DbName 'GameDB20' -AutoCreate '' -Backup
-        Install-F59SetupMocks -Fixture $fx
-
-        $result = Invoke-F59Setup -Fixture $fx
-
-        $result.Outcome | Should -BeExactly 'FAILED_BEFORE_MUTATION'
-        $reasons = @(Get-PostgresSetupFailureReasonLines -TransactionResult $result)
-        $reasons.Count | Should -Be 2
-        foreach ($reason in $reasons) { $reason | Should -Match 'shared by profiles GoldenTeeLive2020, ZSharedGame' }
-        $reasons[0] | Should -Match '^Golden Tee Live 2020 \[GoldenTeeLive2020\]:'
-        @(Get-F59Calls -Tool 'createdb.exe').Count | Should -Be 0
-        $fx.State.Events.Contains('backup') | Should -BeFalse
-    }
 }
 
 Describe 'FIX59 Library Health separates TeknoParrot-created databases from the other profiles' {
@@ -511,6 +492,24 @@ Describe 'FIX59 Library Health separates TeknoParrot-created databases from the 
             $details | Should -Match 'every game database is there'
         }
         Should -Invoke New-PostgresDatabaseFromBackup -Times 0 -Exactly
+    }
+
+    # Mutation: leave the shared name out of the health scan -> two games on one database are reported as fine.
+    It 'says two games that use the same database share it, needs attention, and says setup keeps both sets of progress' {
+        $fx = [pscustomobject]@{ Root = $script:healthRoot; Profiles = $script:profiles }
+        $null = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2006' -GameName 'Golden Tee Live 2006' -DbName 'GameDB06' -Pass 'synthetic-pass' -AutoCreate '' -Complete
+        $null = New-F59Profile -Fixture $fx -ProfileName 'OCCPinball' -GameName 'Orange County Choppers Pinball' -DbName 'GameDB06' -Pass 'synthetic-pass' -AutoCreate '' -Complete
+        $null = New-F59Profile -Fixture $fx -ProfileName 'PowerPuttLive2013' -GameName 'Power Putt Live 2013' -DbName 'GameDBPPL13' -Pass 'synthetic-pass' -AutoCreate '' -Complete
+
+        $result = Invoke-LibraryHealthCheck -UserProfilesDir $script:profiles -TpRoot $script:healthRoot
+
+        @($result.PostgresSharedDatabases).Count | Should -Be 1
+        $result.PostgresSharedDatabases[0] | Should -BeExactly 'Golden Tee Live 2006 and Orange County Choppers Pinball use the same database, GameDB06'
+        $result.Outcome | Should -BeExactly 'ACTION_REQUIRED'
+        (Get-TpmLibraryHealthPostgresRow -Result $result).Text | Should -Match '^Needs attention - some games use the same database\. Run Postgres setup \(menu 11\)'
+        $details = Get-F59HealthPostgresDetail -Result $result
+        $details | Should -Match 'Problem - Golden Tee Live 2006 and Orange County Choppers Pinball use the same database, GameDB06'
+        $details | Should -Match 'deletes nothing and keeps both sets of progress'
     }
 
     # Mutation: classify by the auto-create flag before the profile is complete -> a profile
@@ -739,5 +738,167 @@ Describe 'FIX59 reinitialize never offers a Golden Tee Live 2020 reset without a
         Should -Invoke Read-HostSafe -Times 1 -Exactly
         Should -Invoke Start-PostgresRecoveryAsAdministrator -Times 0 -Exactly
         ($fx.State.Screen -join "`n") | Should -Match 'Reinitialize canceled because YES was not typed exactly\. Nothing was changed\.'
+    }
+}
+
+# Golden Tee Live 2006 and Orange County Choppers Pinball both ship with the database name GameDB06. Real backups of the Golden Tee Live games
+# show the same 24 tables for every game, so one database cannot hold the progress of two games. The first profile keeps the name, the other
+# gets its own database, and nothing is deleted from the shared one.
+Describe 'FIX59 two games that name the same database each get their own, and nothing is lost' {
+    BeforeAll {
+        # A profile that already holds every value setup would write, so only a database name change can make setup save it.
+        function Set-F59ProfileFullySetUp {
+            param([Parameter(Mandatory)]$Fixture, [Parameter(Mandatory)][string]$File)
+            $doc = Read-Xml $File
+            [void](Set-PostgresFieldValue $doc 'Path' ($Fixture.Bin.TrimEnd('\') + '\'))
+            [void](Set-PostgresFieldValue $doc 'Address' '127.0.0.1')
+            [void](Set-PostgresFieldValue $doc 'Port' '5432')
+            [void](Set-PostgresFieldValue $doc 'User' 'postgres')
+            [void](Set-PostgresFieldValue $doc 'Pass' 'fixture-password')
+            Save-Xml $doc $File
+        }
+        function Get-F59BackupPath {
+            param([Parameter(Mandatory)]$Fixture, [Parameter(Mandatory)][string]$ProfileName)
+            return (Join-Path (Join-Path (Join-Path $Fixture.Root ('Game-' + $ProfileName)) 'pg_backup') '0001.backup')
+        }
+        # A TAR backup the way pg_dump writes it: one toc.dat and one numbered .dat file per table.
+        function New-F59TarBackup {
+            param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][byte[]]$DataBytes)
+            $stream = New-Object System.IO.MemoryStream
+            foreach ($entry in @(@{ Name = 'toc.dat'; Bytes = [System.Text.Encoding]::ASCII.GetBytes('toc') }, @{ Name = '1001.dat'; Bytes = $DataBytes })) {
+                $header = New-Object byte[] 512
+                [System.Text.Encoding]::ASCII.GetBytes($entry.Name).CopyTo($header, 0)
+                [System.Text.Encoding]::ASCII.GetBytes(([Convert]::ToString([int64]$entry.Bytes.Length, 8)).PadLeft(11, '0')).CopyTo($header, 124)
+                $header[156] = [byte][char]'0'
+                [System.Text.Encoding]::ASCII.GetBytes('ustar').CopyTo($header, 257)
+                $stream.Write($header, 0, 512)
+                $stream.Write($entry.Bytes, 0, $entry.Bytes.Length)
+                $padding = (512 - ($entry.Bytes.Length % 512)) % 512
+                if ($padding -gt 0) { $stream.Write((New-Object byte[] $padding), 0, $padding) }
+            }
+            $stream.Write((New-Object byte[] 1024), 0, 1024)
+            [System.IO.File]::WriteAllBytes($Path, $stream.ToArray())
+        }
+    }
+
+    # Mutation: restore both backups into the one shared database -> a single createdb, and the second game's data lands on top of the first.
+    It 'creates GameDB06 for the first game and a separate database for the second, each restored from its own backup, and keeps the shared name for the first' {
+        $fx = New-F59Fixture -Name 'shared-both'
+        $gt = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2006' -GameName 'Golden Tee Live 2006' -DbName 'GameDB06' -AutoCreate '' -Backup
+        $occ = New-F59Profile -Fixture $fx -ProfileName 'OCCPinball' -GameName 'Orange County Choppers Pinball' -DbName 'GameDB06' -AutoCreate '' -Backup
+        [System.IO.File]::WriteAllText((Get-F59BackupPath -Fixture $fx -ProfileName 'GoldenTeeLive2006'), 'golden tee backup', (New-Object System.Text.UTF8Encoding $false))
+        [System.IO.File]::WriteAllText((Get-F59BackupPath -Fixture $fx -ProfileName 'OCCPinball'), 'orange county choppers backup', (New-Object System.Text.UTF8Encoding $false))
+        Install-F59SetupMocks -Fixture $fx
+
+        $result = Invoke-F59Setup -Fixture $fx
+
+        $result.Outcome | Should -BeExactly 'SUCCEEDED'
+        $result.DbCreated | Should -Be 2
+        @(Get-F59Calls -Tool 'createdb.exe' | ForEach-Object { $_.Database } | Sort-Object) | Should -Be @('GameDB06', 'GameDB06OCCPinball')
+        @(Get-F59Calls -Tool 'dropdb.exe').Count | Should -Be 0
+        $restores = @(Get-F59RestoreCalls)
+        $restores.Count | Should -Be 2
+        ($restores | Where-Object { $_.Database -ceq 'GameDB06' }).Arguments[-1] | Should -BeExactly (Get-F59BackupPath -Fixture $fx -ProfileName 'GoldenTeeLive2006')
+        ($restores | Where-Object { $_.Database -ceq 'GameDB06OCCPinball' }).Arguments[-1] | Should -BeExactly (Get-F59BackupPath -Fixture $fx -ProfileName 'OCCPinball')
+        (Get-F59Value -File $gt -Field 'DbName') | Should -BeExactly 'GameDB06'
+        (Get-F59Value -File $occ -Field 'DbName') | Should -BeExactly 'GameDB06OCCPinball'
+        $occOutcome = @($result.GameOutcomes | Where-Object { $_.Key -eq 'OCCPinball' })[0]
+        $occOutcome.RenamedFrom | Should -BeExactly 'GameDB06'
+        $occOutcome.SharesWith | Should -BeExactly 'Golden Tee Live 2006'
+        @($result.GameOutcomes | Where-Object { $_.Key -eq 'GoldenTeeLive2006' })[0].RenamedFrom | Should -BeExactly ''
+        (@($result.Warnings) -join ' | ') | Should -Match 'Own database for Orange County Choppers Pinball: it and Golden Tee Live 2006 both used the database name GameDB06\..*GameDB06 was not changed and nothing was deleted or overwritten'
+
+        # A repeat run changes nothing: the names are now different.
+        $second = Invoke-F59Setup -Fixture $fx
+        $second.Outcome | Should -BeExactly 'NO_OP'
+        @(Get-F59Calls -Tool 'createdb.exe').Count | Should -Be 2
+    }
+
+    # Mutation: rename a game that has no partner -> a lone Orange County Choppers Pinball would be moved off its own database name.
+    It 'does not change the database name of a game when no other game uses it' {
+        $fx = New-F59Fixture -Name 'shared-one'
+        $occ = New-F59Profile -Fixture $fx -ProfileName 'OCCPinball' -GameName 'Orange County Choppers Pinball' -DbName 'GameDB06' -AutoCreate '' -Backup
+        Install-F59SetupMocks -Fixture $fx
+
+        $result = Invoke-F59Setup -Fixture $fx
+
+        $result.Outcome | Should -BeExactly 'SUCCEEDED'
+        @(Get-F59Calls -Tool 'createdb.exe' | ForEach-Object { $_.Database }) | Should -Be @('GameDB06')
+        (Get-F59Value -File $occ -Field 'DbName') | Should -BeExactly 'GameDB06'
+        @($result.GameOutcomes)[0].RenamedFrom | Should -BeExactly ''
+    }
+
+    # Mutation: touch or restore over the existing shared database when the second game is added later -> GameDB06 is dropped, restored again, or its profile rewritten.
+    It 'leaves an existing GameDB06 and the first game untouched, and saves the second game with its own new database even when nothing else about its profile changed' {
+        $fx = New-F59Fixture -Name 'shared-existing'
+        $fx.State.Exists['GameDB06'] = $true
+        $gt = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2006' -GameName 'Golden Tee Live 2006' -DbName 'GameDB06' -AutoCreate '' -Backup
+        $occ = New-F59Profile -Fixture $fx -ProfileName 'OCCPinball' -GameName 'Orange County Choppers Pinball' -DbName 'GameDB06' -AutoCreate '' -Backup
+        Set-F59ProfileFullySetUp -Fixture $fx -File $gt
+        Set-F59ProfileFullySetUp -Fixture $fx -File $occ
+        $gtBefore = [System.IO.File]::ReadAllBytes($gt)
+        Install-F59SetupMocks -Fixture $fx
+
+        $result = Invoke-F59Setup -Fixture $fx
+
+        $result.Outcome | Should -BeExactly 'SUCCEEDED'
+        @(Get-F59Calls -Tool 'createdb.exe' | ForEach-Object { $_.Database }) | Should -Be @('GameDB06OCCPinball')
+        @(Get-F59RestoreCalls | ForEach-Object { $_.Database }) | Should -Be @('GameDB06OCCPinball')
+        @(Get-F59Calls -Tool 'dropdb.exe').Count | Should -Be 0
+        $fx.State.Exists['GameDB06'] | Should -BeTrue
+        [System.IO.File]::ReadAllBytes($gt) | Should -Be $gtBefore
+        (Get-F59Value -File $occ -Field 'DbName') | Should -BeExactly 'GameDB06OCCPinball'
+    }
+
+    # Mutation: give the second game its own name but leave it with the shared one in the profile (or the reverse) -> the game opens the wrong database.
+    It 'gives games with no starting file separate names too, so TeknoParrot makes two databases' {
+        $fx = New-F59Fixture -Name 'shared-auto'
+        $gt = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2006' -GameName 'Golden Tee Live 2006' -DbName 'GameDB06' -AutoCreate '1'
+        $occ = New-F59Profile -Fixture $fx -ProfileName 'OCCPinball' -GameName 'Orange County Choppers Pinball' -DbName 'GameDB06' -AutoCreate '1'
+        Install-F59SetupMocks -Fixture $fx
+        Mock Get-PostgresGameDatabaseReadiness { [pscustomobject]@{ Ready = $false; TableCount = 0; Error = 'Could not connect with the settings saved in the game profile: FATAL: database "x" does not exist' } }
+
+        $result = Invoke-F59Setup -Fixture $fx
+
+        $result.Outcome | Should -BeExactly 'SUCCEEDED'
+        @(Get-F59Calls -Tool 'createdb.exe').Count | Should -Be 0
+        (Get-F59Value -File $gt -Field 'DbName') | Should -BeExactly 'GameDB06'
+        (Get-F59Value -File $occ -Field 'DbName') | Should -BeExactly 'GameDB06OCCPinball'
+        @($result.GameOutcomes | ForEach-Object { $_.Outcome } | Select-Object -Unique) | Should -Be @('WaitingForFirstStart')
+    }
+
+    # Mutation: rename a profile whose own settings the owner chose to keep -> the owner's own settings are rewritten without being asked.
+    It 'stops before changing anything when the second game keeps its own PostgreSQL settings and cannot be given its own database' {
+        $fx = New-F59Fixture -Name 'shared-kept'
+        $gt = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2006' -GameName 'Golden Tee Live 2006' -DbName 'GameDB06' -AutoCreate '' -Backup
+        $occ = New-F59Profile -Fixture $fx -ProfileName 'OCCPinball' -GameName 'Orange County Choppers Pinball' -DbName 'GameDB06' -Pass 'owner-own-password' -AutoCreate '' -Backup -Complete
+        $before = [System.IO.File]::ReadAllBytes($occ)
+        Install-F59SetupMocks -Fixture $fx
+
+        $result = Invoke-F59Setup -Fixture $fx
+
+        $result.Outcome | Should -BeExactly 'FAILED_BEFORE_MUTATION'
+        @(Get-F59Calls -Tool 'createdb.exe').Count | Should -Be 0
+        [System.IO.File]::ReadAllBytes($occ) | Should -Be $before
+        (@(Get-PostgresSetupFailureReasonLines -TransactionResult $result) -join ' | ') | Should -Match 'OCCPinball.*GameDB06 is also used by the profile GoldenTeeLive2006.*cannot be given its own database'
+    }
+
+    # Mutation: pick UTF8 by name alone -> a backup whose data is not valid UTF-8 loses a whole table (the real Golden Tee Live 2006 backup does).
+    It 'restores into SQL_ASCII when the backup data is not valid UTF-8, and keeps the rule by name otherwise' {
+        $valid = Join-Path $TestDrive 'valid-utf8.backup'
+        $invalid = Join-Path $TestDrive 'invalid-utf8.backup'
+        $notTar = Join-Path $TestDrive 'not-a-tar.backup'
+        New-F59TarBackup -Path $valid -DataBytes ([System.Text.Encoding]::UTF8.GetBytes("1`tcaf" + [char]0x00E9 + "`n"))
+        New-F59TarBackup -Path $invalid -DataBytes ([byte[]](0x31, 0x09, 0x63, 0x61, 0x66, 0xBF, 0x0A))
+        [System.IO.File]::WriteAllText($notTar, 'plain text, not a TAR archive')
+
+        (Test-PostgresBackupDataIsUtf8 -BackupFile $valid) | Should -BeTrue
+        (Test-PostgresBackupDataIsUtf8 -BackupFile $invalid) | Should -BeFalse
+        (Test-PostgresBackupDataIsUtf8 -BackupFile $notTar) | Should -BeNullOrEmpty
+        Get-PostgresRestoreEncoding -DbName 'GameDB06' -BackupFile $valid | Should -BeExactly 'UTF8'
+        Get-PostgresRestoreEncoding -DbName 'GameDB06' -BackupFile $invalid | Should -BeExactly 'SQL_ASCII'
+        Get-PostgresRestoreEncoding -DbName 'GameDB06' -BackupFile $notTar | Should -BeExactly 'UTF8'
+        Get-PostgresRestoreEncoding -DbName 'GameDB06' | Should -BeExactly 'UTF8'
+        Get-PostgresRestoreEncoding -DbName 'GameDB19' -BackupFile $invalid | Should -BeExactly 'SQL_ASCII'
     }
 }

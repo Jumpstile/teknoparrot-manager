@@ -555,12 +555,13 @@ Describe 'FIX69 auto-create = 1 uses the game''s own backup, and a game with non
         (@(Get-PostgresSetupFailureReasonLines -TransactionResult $result) -join ' | ') | Should -Match 'GameDB19 is in a folder path longer than 259 characters.*shorter folder path'
     }
 
-    # Mutation: group a profile with a backup and another profile with none by database name -> the shared
-    # absent database is created for both, or the block reason is lost.
-    It 'refuses to go on when a profile with a backup and another profile without one share one absent database' {
+    # Mutation: let the sharing game that has no starting file be left behind pointing at the other game's database -> launching it writes
+    # into the other game's saved progress; or call the run a success.
+    It 'stops and changes nothing when a game with no starting file shares a database name with a game that has a backup, and says why in plain words' {
         $fx = New-F69Fixture -Name 'shared'
-        $null = New-F69Profile -Fixture $fx -Name 'GoldenTeeLive2020' -GameName 'Golden Tee Live 2020' -DbName 'GameDB20' -AutoCreate '1' -BackupFiles @('0001.backup', '0002.backup')
-        $null = New-F69Profile -Fixture $fx -Name 'ZSharedGame' -GameName 'Shared Game' -DbName 'GameDB20' -AutoCreate ''
+        $gt = New-F69Profile -Fixture $fx -Name 'GoldenTeeLive2020' -GameName 'Golden Tee Live 2020' -DbName 'GameDB20' -AutoCreate '1' -BackupFiles @('0001.backup', '0002.backup')
+        $other = New-F69Profile -Fixture $fx -Name 'ZSharedGame' -GameName 'Shared Game' -DbName 'GameDB20' -AutoCreate ''
+        $before = @([System.IO.File]::ReadAllBytes($gt), [System.IO.File]::ReadAllBytes($other))
         Install-F69Mocks -Fixture $fx
 
         $result = Invoke-F69Setup -Fixture $fx
@@ -568,6 +569,9 @@ Describe 'FIX69 auto-create = 1 uses the game''s own backup, and a game with non
         $result.Outcome | Should -BeExactly 'FAILED_BEFORE_MUTATION'
         @(Get-F69Calls -Tool 'createdb.exe').Count | Should -Be 0
         $fx.State.Events.Contains('backup') | Should -BeFalse
+        [System.IO.File]::ReadAllBytes($gt) | Should -Be $before[0]
+        [System.IO.File]::ReadAllBytes($other) | Should -Be $before[1]
+        (@(Get-PostgresSetupFailureReasonLines -TransactionResult $result) -join ' | ') | Should -Match 'Shared Game \[ZSharedGame\]: The database GameDB20 is also used by Golden Tee Live 2020.*no starting database file.*must not run on the other game''s data\. Nothing was changed'
     }
 }
 

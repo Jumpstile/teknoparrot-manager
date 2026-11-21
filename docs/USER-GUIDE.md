@@ -1158,9 +1158,9 @@ If you use the Eggman DAT ZIP, TeknoParrot Manager asks `Check for a newer Eggma
 
 - A third registration pass (independent of the dat) Dice-matches normalized folder names against normalized profile code names. This resolves games whose GameProfile has an empty `<ExecutableName>` -- they never enter the exe-name index and may not be in the dat either. Examples: BladeStrangers, LuigisMansion, MaiMaiGreen, PokkenTournament, ProjectDiva, SonicDashExtreme, HydroThunder.
 
-- The script also tries to fetch the full list of `GameProfile` filenames from the `teknogods/TeknoParrotUI` GitHub repo at launch to resolve dat codes that don't exactly match a local template filename (e.g. `BladeArcusFromShining` -> `BladeArcus.xml`).
+- To resolve dat codes that don't exactly match a local template filename (e.g. `BladeArcusFromShining` -> `BladeArcus.xml`), the script asks the `teknogods/TeknoParrotUI` GitHub repository for its list of `GameProfile` filenames, but only when that repository can be reached. TeknoParrot Manager does not need that list to work.
 
-- When that online list is not available (the repository currently answers HTTP 404, and the same happens when you are offline), it uses your local `GameProfiles` folder instead. When it loads the list, TeknoParrot Manager prints which one it used.
+- When the online list is not available (the repository currently answers HTTP 404 because it is not public, and the same happens when you are offline), it uses the `GameProfiles` folder of your own TeknoParrot install instead. If that folder has no profiles either, it uses the codes exactly as the dat lists them. TeknoParrot Manager prints which one it used.
 
 ---
 
@@ -2433,6 +2433,8 @@ The prompt at the bottom reads `Press Enter to return to menu, or D for details`
 - **Ready** -- the database is there, and TeknoParrot Manager connected to it with the game's own settings and found its tables. The line also says whether the database was created from the game's own backup or was already there.
 
 - **Profile ready** -- the game has no starting database file, and its profile says TeknoParrot creates the database itself (`Automatically create Database`). Setup saved the connection settings and checked that the game can reach PostgreSQL. Start the game once and TeknoParrot makes the database.
+
+- **Own database** -- two of your games used the same database name (Golden Tee Live 2006 and Orange County Choppers Pinball both ship with `GameDB06`). Both games keep their saved progress in the same tables, so one database cannot hold both. The first game keeps the name. The other game gets its own database, named after the shared name and the game (for example `GameDB06OCCPinball`), made from that game's own backup. The old database is not changed and nothing is deleted. The second game's profile is saved with the new name. If a game that shares the name has no starting database file, setup stops before changing anything and says so, because that game would otherwise run on the other game's data.
 
 If a game has no starting database file and its profile does not say TeknoParrot creates the database, it is named under `Could NOT be made ready`, and the other games are still set up. If a database cannot be opened with the game's own settings, setup does not say Ready. When it had already created databases, it puts everything back the way it was and checks that.
 
