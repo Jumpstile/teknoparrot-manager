@@ -13790,6 +13790,8 @@ Describe "TeknoParrot-Manager.ps1 -Unattended real child-process fixture (issue 
         $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { '' }
         $stdout | Should -Not -Match 'Mode must be set before starting' -Because 'this is the exact error text the real certification run hit'
         $stdout | Should -Match 'Library Health Check' -Because 'HealthCheck must have actually run, not merely avoided the error'
+        $expectedFooter = if ($expectedExitCode -eq 0) { 'Read-only report complete' } else { 'Report finished. Some checks could not finish' }
+        $stdout | Should -Match ([regex]::Escape($expectedFooter)) -Because 'the exit code must come from the finished health report, not from a crash'
         $stdout | Should -Match 'Unattended.*Using saved settings' -Because 'confirms the config path was genuinely exercised, not bypassed'
 
         # No real install was ever touched: this is a synthetic fixture, and
