@@ -7720,6 +7720,18 @@ function Exit-PostgresRecoveryResume {
         $script:postgresGuidanceMessages = @()
         Mock Write-Host { $script:postgresGuidanceMessages += [string]$Object }
         Mock Write-Log {}
+        Mock Test-TpmInteractiveInput { $false }
+        Mock Read-HostSafe { '' }
+    }
+
+    It "waits for Enter before the Windows permission window, but only when someone can answer (#385)" {
+        # Mutation: drop the pause -> the permission window opens over the text before it can be read.
+        Mock Test-TpmInteractiveInput { $true }
+        Write-PostgresAdministratorGuidance -Operation Install
+        Should -Invoke Read-HostSafe -Times 1 -Exactly -ParameterFilter { $Prompt -match 'Press Enter to open the Windows permission window' }
+        Mock Test-TpmInteractiveInput { $false }
+        Write-PostgresAdministratorGuidance -Operation Install
+        Should -Invoke Read-HostSafe -Times 1 -Exactly
     }
 
     It "explains temporary administrator access and the complete UAC recovery handoff" {
@@ -14914,7 +14926,7 @@ Describe "Issue #300 workflow ownership and transition guards" {
     }
 
     It "routes reviewed PostgreSQL and optional-flow failures through lifecycle cleanup" {
-        foreach ($failureId in @('postgres-service-state','postgres-install-failed','postgres-backup-unverified','postgres-profile-recovery','postgres-profile-errors','postgres-service-restore','reshade-file-missing','reshade-file-type','dgv-acquisition-cancelled','dgv-deployment-failed')) {
+        foreach ($failureId in @('postgres-service-state','postgres-install-failed','postgres-backup-unverified','postgres-profile-recovery','postgres-profile-errors','postgres-service-restore','reshade-file-missing','reshade-file-type','dgv-acquisition-canceled','dgv-deployment-failed')) {
             $script:ProductionSource | Should -Match ([regex]::Escape("Resolve-TpmWorkflowFailure -Context"))
             $script:ProductionSource | Should -Match ([regex]::Escape("-FailureId '$failureId'"))
         }
