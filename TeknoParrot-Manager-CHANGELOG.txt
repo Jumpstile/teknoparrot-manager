@@ -93,6 +93,9 @@
   - LaunchBox: a new optional step adds clear logos or box art from a
     folder you pick. You see a preview first, close matches are used only
     if you say yes, and Undo removes the pictures that were added.
+    When LaunchBox's game list is there, pictures are matched by the
+    game itself: another name of the same game is a sure match, and a
+    picture of a different game with the same name is never used.
   - Games that need PlayStation 3 firmware (RPCS3) or a Play! game file
     are now checked before they start, and the Manager tells you what is
     missing.

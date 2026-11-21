@@ -19,8 +19,9 @@ Describe 'LaunchBox offer after New game only' {
         function Read-TpmChoice { param($Prompt, $Choices, $Default) $script:Calls.Add('choice'); return $script:NextChoice }
         function Export-LaunchBoxXml { param($userProfilesDir, $outputPath) $script:Calls.Add('export'); return -1 }
 # The details/playlists and picture steps are separate screens with their own tests; here they only need to exist.
-function Invoke-TpmLaunchBoxEnrichStep { param($UserProfilesDir, $LbRoot, $DatIndex) }
-function Invoke-TpmLaunchBoxMediaStep { param($lbRoot, $userProfilesDir, [switch]$Unattended, [switch]$DryRun) }
+function Invoke-TpmLaunchBoxEnrichStep { param($UserProfilesDir, $LbRoot, $TpRoot, $DatIndex) }
+function Invoke-TpmLaunchBoxChangeStep { param($Kind, $UserProfilesDir, $LbRoot, $TpRoot, $DatIndex) }
+function Invoke-TpmLaunchBoxMediaStep { param($lbRoot, $userProfilesDir, [switch]$Unattended, [switch]$DryRun, $TpRoot, $DatIndex) }
         $script:TpmOwnedLayout = @{ Reports = $TestDrive }
         $script:NextChoice = 'B'
     }

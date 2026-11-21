@@ -48450,7 +48450,7 @@ function Invoke-TpmLaunchBoxStep {
         } elseif ($lbChoice -eq 'F') {
             $doLB = "Y"
         }
-        if ($lbChoice -ne 'B') { Invoke-TpmLaunchBoxMediaStep -lbRoot $lbRoot -userProfilesDir $userProfilesDir -Unattended:$Unattended -DryRun:$dryRunActive }
+        if ($lbChoice -ne 'B') { Invoke-TpmLaunchBoxMediaStep -lbRoot $lbRoot -userProfilesDir $userProfilesDir -Unattended:$Unattended -DryRun:$dryRunActive -TpRoot $tpRoot -DatIndex $datIndex }
     }
 
 
@@ -57740,16 +57740,18 @@ function Get-TpmLbMediaGames {
             if (-not $appPath -or -not $title) { continue }
             $full = if ([System.IO.Path]::IsPathRooted($appPath)) { $appPath } else { Join-Path $lbRoot $appPath }
             if (-not (Test-PathInside -child $full -parent $userProfilesDir)) { continue }
-            [void]$games.Add([pscustomobject]@{ Platform = $name; Title = $title })
+            [void]$games.Add([pscustomobject]@{ Platform = $name; Title = $title; Code = [System.IO.Path]::GetFileNameWithoutExtension($full); ProfilePath = $full; DatabaseId = (Get-XmlChildText $node 'DatabaseID').Trim() })
         }
     }
     return ,@($games.ToArray())
 }
 
-# READ-ONLY preview. Exact = same name (ignoring case, accents, spaces and punctuation), one picture only.
-# Near = a close name, or several pictures with the same name; the user must confirm each one.
+# READ-ONLY preview. Exact = the same game, one picture only. The same game means: the same name (ignoring case, accents, spaces and
+# punctuation) or, when the game list is given, one of the official or other names of the game's Games Database ID. A picture whose
+# name the shared matching engine reads as a different game (a different ID) is never used. Near = a close name, or several pictures
+# for the game; the user must confirm each one.
 function Get-TpmLaunchBoxMediaPlan {
-    param([string]$lbRoot, [string]$userProfilesDir, [string]$imageFolder, [string[]]$platformNames, [ValidateSet('ClearLogo', 'BoxFront')][string]$Kind = 'ClearLogo', [switch]$ReplaceExisting)
+    param([string]$lbRoot, [string]$userProfilesDir, [string]$imageFolder, [string[]]$platformNames, [ValidateSet('ClearLogo', 'BoxFront')][string]$Kind = 'ClearLogo', [switch]$ReplaceExisting, [string]$TpRoot = '', [hashtable]$DatIndex = $null, $GameList = $null)
     $lbRoot = Resolve-TpmLaunchBoxRoot $lbRoot
     if (-not (Test-Path -LiteralPath $lbRoot -PathType Container) -or -not (Test-TpmNoReparsePath $lbRoot)) { throw 'Choose a safe existing LaunchBox folder.' }
     if ([string]::IsNullOrWhiteSpace($imageFolder) -or -not (Test-Path -LiteralPath $imageFolder -PathType Container) -or -not (Test-TpmNoReparsePath $imageFolder)) { throw 'Choose a folder that exists and holds your pictures.' }
@@ -57766,6 +57768,29 @@ function Get-TpmLaunchBoxMediaPlan {
     $noImage = New-Object System.Collections.Generic.List[object]
     $existing = New-Object System.Collections.Generic.List[object]
     $games = Get-TpmLbMediaGames -lbRoot $lbRoot -userProfilesDir $userProfilesDir -platformNames $platformNames
+    # With the game list: the ID of each game (the one LaunchBox holds, else a certain engine match) and of each picture name, and every
+    # name a game ID is known by. Without it the plan works by name only.
+    $datByCode = if ($null -ne $GameList) { Get-TpmDatEntriesByCode -DatIndex $DatIndex } else { $null }
+    $altNames = @{}
+    if ($null -ne $GameList) {
+        foreach ($altKey in $GameList.ByAlternate.Keys) {
+            foreach ($entry in $GameList.ByAlternate[$altKey]) {
+                if (-not $altNames.ContainsKey($entry.Id)) { $altNames[$entry.Id] = New-Object System.Collections.Generic.List[string] }
+                [void]$altNames[$entry.Id].Add(([regex]::Replace([string]$altKey, '[^a-z0-9]', '')))
+            }
+        }
+    }
+    $imageIds = @{}
+    $getImageId = {
+        param($item)
+        if ($null -eq $GameList) { return '' }
+        if (-not $imageIds.ContainsKey($item.File.FullName)) {
+            $base = [regex]::Replace([System.IO.Path]::GetFileNameWithoutExtension($item.File.Name), '-\d{2}$', '')
+            $found = Resolve-TpmGameMatch -Index $GameList -Subject (New-TpmMatchSubject -MetadataName $base)
+            $imageIds[$item.File.FullName] = $(if ($found.Status -eq 'Certain') { [string]$found.Match.Id } else { '' })
+        }
+        return $imageIds[$item.File.FullName]
+    }
     foreach ($game in $games) {
         $safe = Get-TpmLbMediaSafeName $game.Title
         $destDir = Join-Path (Join-Path (Join-Path $lbRoot 'Images') $game.Platform) $kindFolder
@@ -57774,14 +57799,29 @@ function Get-TpmLaunchBoxMediaPlan {
         if ($have.Count -gt 0 -and -not $ReplaceExisting) { [void]$existing.Add([pscustomobject]@{ Game = $game; Existing = $have[0].FullName }); continue }
         $key = ConvertTo-TpmLbMediaKey $game.Title
         $compact = $key.Replace(' ', ''); $loose = Get-TpmLbMediaLooseKey $key
+        $gameId = ''
+        if ($null -ne $GameList) {
+            $gameId = [string]$game.DatabaseId
+            if (-not $gameId -or $gameId -eq '0') {
+                $gameId = ''
+                $subject = if (Test-Path -LiteralPath $game.ProfilePath -PathType Leaf) { Get-TpmProfileMatchSubject -Code $game.Code -ProfilePath $game.ProfilePath -TpRoot $TpRoot -HintName $game.Title -DatIndex $DatIndex -DatByCode $datByCode } else { New-TpmMatchSubject -Code $game.Code -HintName $game.Title }
+                if (-not $subject.NotGame) { $found = Resolve-TpmGameMatch -Index $GameList -Subject $subject; if ($found.Status -eq 'Certain') { $gameId = [string]$found.Match.Id } }
+            }
+        }
+        # Names of this game's ID, and the pictures that are not a different game.
+        $nameKeys = New-Object System.Collections.Generic.List[string]
+        if ($compact) { [void]$nameKeys.Add($compact) }
+        if ($gameId -and $GameList.ById.ContainsKey($gameId)) { [void]$nameKeys.Add((ConvertTo-TpmLbMediaKey $GameList.ById[$gameId].Name).Replace(' ', '')) }
+        if ($gameId -and $altNames.ContainsKey($gameId)) { foreach ($altCompact in $altNames[$gameId]) { [void]$nameKeys.Add($altCompact) } }
+        $notOther = { param($item) if (-not $gameId) { return $true }; $imageId = & $getImageId $item; return (-not $imageId -or $imageId -eq $gameId) }
         $same = @(); $close = @()
         if ($compact) {
-            $same = @($index | Where-Object { $_.Compact -ceq $compact })
+            $same = @($index | Where-Object { $nameKeys -ccontains $_.Compact } | Where-Object { & $notOther $_ })
             if ($same.Count -eq 0) {
                 $close = @($index | ForEach-Object {
                     $sim = Get-TpmLbMediaSimilarity $compact $_.Compact
                     if ($_.Loose -ceq $loose -or ($compact.Length -ge 6 -and $sim -ge 0.9)) { [pscustomobject]@{ Item = $_; Sim = $sim } }
-                } | Sort-Object @{ Expression = 'Sim'; Descending = $true } | Select-Object -First 3)
+                } | Where-Object { & $notOther $_.Item } | Sort-Object @{ Expression = 'Sim'; Descending = $true } | Select-Object -First 3)
             }
         }
         $replaces = if ($have.Count -gt 0) { $have[0].FullName } else { $null }
@@ -57962,7 +58002,7 @@ function Write-TpmLbMediaOutcome {
 
 # The optional step shown after the LaunchBox choices. Skipped in Unattended and preview runs.
 function Invoke-TpmLaunchBoxMediaStep {
-    param([string]$lbRoot, [string]$userProfilesDir, [switch]$Unattended, [switch]$DryRun)
+    param([string]$lbRoot, [string]$userProfilesDir, [switch]$Unattended, [switch]$DryRun, [string]$TpRoot = '', [hashtable]$DatIndex = $null)
     if ($DryRun) { Write-Log 'PreviewMode: LaunchBox picture import skipped.'; return }
     if ($Unattended) { Write-Log 'Unattended: LaunchBox picture import skipped.'; return }
     Write-TpmText -Text 'Optional: add logos or box art to LaunchBox from a folder you pick.' -Color Cyan -BlankBefore
@@ -57989,13 +58029,16 @@ function Invoke-TpmLaunchBoxMediaStep {
     if ($platChoice -eq 'B') { return }
     $platforms = switch ($platChoice) { '1' { @('TeknoParrot') } '2' { @('Arcade') } '3' { @('Arcade', 'TeknoParrot') } }
     try {
-        $plan = Get-TpmLaunchBoxMediaPlan -lbRoot $root -userProfilesDir $userProfilesDir -imageFolder $folder -platformNames $platforms -Kind $kind
+        # The game list (when LaunchBox has it) lets the shared matching engine tell games apart by ID; without it, names alone are used.
+        $gamesDb = Get-TpmGamesDbForLaunchBox -LaunchBoxRoot $root
+        $engine = @{ TpRoot = $TpRoot; DatIndex = $DatIndex; GameList = $gamesDb.Index }
+        $plan = Get-TpmLaunchBoxMediaPlan -lbRoot $root -userProfilesDir $userProfilesDir -imageFolder $folder -platformNames $platforms -Kind $kind @engine
         $replace = $false
         if ($plan.Existing.Count -gt 0) {
             Write-TpmText -Text ('{0} already have a picture.' -f (Format-TpmGameCount -Count $plan.Existing.Count)) -Color Yellow -BlankBefore
             if ((Read-TpmYesNo -Prompt 'Keep the pictures you already have? (Y = keep, N = replace them; old ones are saved so Undo can bring them back)' -Default 'Y') -eq 'N') {
                 $replace = $true
-                $plan = Get-TpmLaunchBoxMediaPlan -lbRoot $root -userProfilesDir $userProfilesDir -imageFolder $folder -platformNames $platforms -Kind $kind -ReplaceExisting
+                $plan = Get-TpmLaunchBoxMediaPlan -lbRoot $root -userProfilesDir $userProfilesDir -imageFolder $folder -platformNames $platforms -Kind $kind -ReplaceExisting @engine
             }
         }
         $detailLines = New-Object System.Collections.Generic.List[string]
