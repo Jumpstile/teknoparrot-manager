@@ -46833,7 +46833,8 @@ $script:LaunchBoxGameIdentityFields = @('ID','Title','Platform','Emulator','Appl
 
 function New-LaunchBoxGameEntry {
     param([System.Xml.XmlDocument]$platformGamesDoc, [string]$relProfilePath, [string]$title, [string]$platformName, [string]$emulatorId, [string]$lbRoot, $GamesDbMatch = $null, $Facts = $null)
-    foreach ($existing in @($platformGamesDoc.SelectNodes('/LaunchBox/Game'))) {
+    # Versions grouped into one game (AdditionalApplication) count as already added, so adding games never splits a group again.
+    foreach ($existing in @($platformGamesDoc.SelectNodes('/LaunchBox/Game | /LaunchBox/AdditionalApplication'))) {
         $existingPath = Get-XmlChildText $existing 'ApplicationPath'
         if ($existingPath -and (Test-TpmLaunchBoxSamePath -Root $lbRoot -Left $existingPath -Right $relProfilePath)) { return $false }
     }
@@ -47571,14 +47572,16 @@ function Invoke-TpmLaunchBoxIdLink {
 }
 # END MODULE-READY SECTION: LaunchBox Games Database links for TeknoParrot games
 
-# BEGIN MODULE-READY SECTION: LaunchBox game versions (issue #422)
-# Several regions or versions of one game become ONE LaunchBox game with a version picker. LaunchBox keeps the extra versions as
+# BEGIN MODULE-READY SECTION: LaunchBox game versions and keeping in step (issues #422 and #423)
+# Versions: several regions or versions of one game become ONE LaunchBox game with a version picker. LaunchBox keeps the extra versions as
 # AdditionalApplication entries of the game (the "Play ... version" choices). Two games are the same game only when they have the same
 # Games Database ID: the ID LaunchBox already holds for the entry, or a certain match of the shared matching engine. The default version
-# follows the region the user chose in Region setup. Only games the Manager added (the TeknoParrot emulator) are touched. Backup,
-# read-back and rollback come from the existing LaunchBox file transaction; Restore is the undo and puts the separate games back.
+# follows the region the user chose in Region setup. Keeping in step: entries whose profile is gone are removed, moved ones get their new
+# path, old Manager titles are made clean. Both touch only games the Manager added (the TeknoParrot emulator). Backup, read-back and
+# rollback come from the existing LaunchBox file transaction; Restore is the undo.
 # Public functions: ConvertTo-TpmRegionKey, Get-TpmPreferredRegion, New-TpmLaunchBoxGroupPlan, Format-TpmLaunchBoxGroupLine,
-#   Format-TpmLaunchBoxGroupTitle, Invoke-TpmLaunchBoxGroup. Screen layer after the END marker: Invoke-TpmLaunchBoxGroupStep.
+#   Format-TpmLaunchBoxGroupTitle, New-TpmLaunchBoxSyncPlan, Format-TpmLaunchBoxSyncLine, Format-TpmLaunchBoxSyncTitle,
+#   Invoke-TpmLaunchBoxLibraryChange. Screen layer after the END marker: Invoke-TpmLaunchBoxChangeStep.
 # Depends on: the matching engine, Get-TpmRegionGames, the LaunchBox file helpers listed for the details section.
 
 # One word for a region note: Japan, USA, Europe, Asia, Korea, Export (also World), or '' when there is none.
@@ -47701,10 +47704,127 @@ function Format-TpmLaunchBoxGroupTitle {
     return ('Grouped the versions of {0}.{1}' -f (Format-TpmGameCount -Count $groups), $note)
 }
 
-# Groups the versions of the same game. -PlanOnly reads everything and changes nothing. Returns the same kind of result as
-# Invoke-LaunchBoxDirectWrite plus GroupPlan. The caller makes sure LaunchBox and BigBox are closed before a write.
-function Invoke-TpmLaunchBoxGroup {
-    param([string]$UserProfilesDir, [string]$LbRoot, [string[]]$PlatformNames, [string]$BackupRoot, [string]$TpRoot = '', [hashtable]$DatIndex = $null, [switch]$PlanOnly)
+# Issue #423: keep LaunchBox in step with the library. Looks only at games the Manager added. Reads the LaunchBox library and the
+# TeknoParrot profiles and plans: remove entries whose profile is gone (never for a missing game file: that is a disconnected drive),
+# fix the profile path of entries whose TeknoParrot folder moved, and give back the clean title where the title is still one of the
+# Manager's own earlier names. A title the owner typed, or one that carries a Games Database ID, is never touched. Writes nothing.
+function New-TpmLaunchBoxSyncPlan {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$LbRoot, [Parameter(Mandatory)][string]$EmulatorId,
+        [Parameter(Mandatory)][string[]]$PlatformNames, [string]$TpRoot = '', [hashtable]$DatIndex = $null
+    )
+    $profileFiles = @{}
+    foreach ($file in @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop)) { $profileFiles[$file.Name.ToLowerInvariant()] = $file.FullName }
+    if ($profileFiles.Count -eq 0) { throw 'No game profiles were found in the TeknoParrot folder, so nothing can be compared. Nothing was changed.' }
+    $plans = New-Object System.Collections.Generic.List[object]
+    $removed = New-Object System.Collections.Generic.List[object]
+    $moved = New-Object System.Collections.Generic.List[object]
+    $renamed = New-Object System.Collections.Generic.List[object]
+    $blocked = ''
+    $datByCode = Get-TpmDatEntriesByCode -DatIndex $DatIndex
+    foreach ($name in $PlatformNames) {
+        $safe = Get-SafeLaunchBoxPlatformFileName $name
+        if ($safe -cne $name -or $name -in @('.', '..')) { throw 'Platform name must be a safe, unambiguous filename.' }
+        $rel = "Data\Platforms\$safe.xml"
+        $path = Get-TpmLaunchBoxPath $LbRoot $rel
+        $state = Get-TpmLaunchBoxFileState $path
+        if (-not $state.Exists) { continue }
+        $doc = Read-TpmLaunchBoxXml $path
+        Assert-TpmLaunchBoxState $path $state
+        $filePlan = [pscustomobject]@{ RelativePath = $rel; Before = $state; Document = $doc; OriginalXml = $doc.OuterXml; BaseChildCount = $doc.DocumentElement.ChildNodes.Count; Source = $null; SourceHash = $null; Changed = $false; Delete = $false; AfterHash = $null; FullRewrite = $true }
+        $managed = @($doc.SelectNodes('/LaunchBox/Game') | Where-Object { (Get-XmlChildText $_ 'Emulator') -eq $EmulatorId })
+        $goneGames = New-Object System.Collections.Generic.List[object]
+        # Most games with no profile at all looks like a wrong or half-restored folder. Then nothing in this file is touched (no removal,
+        # no moved path, no rename), because every comparison would be against the wrong folder.
+        $missingProfile = @($managed | Where-Object { $f = [System.IO.Path]::GetFileName((Get-XmlChildText $_ 'ApplicationPath')); $f -and $f -like '*.xml' -and -not $profileFiles.ContainsKey($f.ToLowerInvariant()) })
+        if ($missingProfile.Count -gt 0 -and $managed.Count -ge 6 -and ($missingProfile.Count * 2) -gt $managed.Count) {
+            $blocked = 'Most of the games in LaunchBox have no profile in this TeknoParrot folder. That looks like the wrong folder, so nothing was changed.'
+            [void]$plans.Add($filePlan)
+            continue
+        }
+        foreach ($game in $managed) {
+            $application = Get-XmlChildText $game 'ApplicationPath'
+            $fileName = [System.IO.Path]::GetFileName($application)
+            if (-not $fileName -or $fileName -notlike '*.xml') { continue }
+            $title = Get-XmlChildText $game 'Title'
+            $profile = $profileFiles[$fileName.ToLowerInvariant()]
+            if (-not $profile) { [void]$goneGames.Add($game); continue }
+            $expected = Get-RelativePath $LbRoot $profile
+            if (-not (Test-TpmLaunchBoxSamePath -Root $LbRoot -Left $application -Right $expected)) {
+                Set-XmlChildText $game 'ApplicationPath' $expected
+                Set-XmlChildText $game 'DateModified' (Get-Date).ToString('o')
+                [void]$moved.Add([pscustomobject]@{ Title = $title; Old = $application; New = $expected })
+            }
+            $databaseId = (Get-XmlChildText $game 'DatabaseID').Trim()
+            if ($databaseId -and $databaseId -ne '0') { continue }
+            $code = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
+            $subject = Get-TpmProfileMatchSubject -Code $code -ProfilePath $profile -TpRoot $TpRoot -HintName $title -DatIndex $DatIndex -DatByCode $datByCode
+            if ($subject.NotGame) { continue }
+            $currentKey = ConvertTo-TpmGamesDbKey $title
+            $knownKeys = @($subject.KnownTitles | ForEach-Object { ConvertTo-TpmGamesDbKey $_ })
+            if ($currentKey -and ($knownKeys -contains $currentKey) -and $title -cne $subject.DisplayTitle) {
+                Set-XmlChildText $game 'Title' $subject.DisplayTitle
+                Set-XmlChildText $game 'DateModified' (Get-Date).ToString('o')
+                [void]$renamed.Add([pscustomobject]@{ Old = $title; New = $subject.DisplayTitle })
+            }
+        }
+        # Versions of grouped games: a version whose profile is gone is removed; one whose folder moved gets its path fixed.
+        foreach ($app in @($doc.SelectNodes('/LaunchBox/AdditionalApplication') | Where-Object { (Get-XmlChildText $_ 'EmulatorId') -eq $EmulatorId })) {
+            $application = Get-XmlChildText $app 'ApplicationPath'
+            $fileName = [System.IO.Path]::GetFileName($application)
+            if (-not $fileName -or $fileName -notlike '*.xml') { continue }
+            $profile = $profileFiles[$fileName.ToLowerInvariant()]
+            if (-not $profile) {
+                [void]$removed.Add([pscustomobject]@{ Title = (Get-XmlChildText $app 'Name'); Kind = 'Version' })
+                [void]$doc.DocumentElement.RemoveChild($app)
+                continue
+            }
+            $expected = Get-RelativePath $LbRoot $profile
+            if (-not (Test-TpmLaunchBoxSamePath -Root $LbRoot -Left $application -Right $expected)) {
+                Set-XmlChildText $app 'ApplicationPath' $expected
+                [void]$moved.Add([pscustomobject]@{ Title = (Get-XmlChildText $app 'Name'); Old = $application; New = $expected })
+            }
+        }
+        # A game whose profile is gone is removed, unless it still has working versions.
+        foreach ($game in $goneGames) {
+            $id = Get-XmlChildText $game 'ID'
+            if (@($doc.SelectNodes('/LaunchBox/AdditionalApplication') | Where-Object { (Get-XmlChildText $_ 'GameID') -eq $id }).Count -gt 0) { continue }
+            [void]$removed.Add([pscustomobject]@{ Title = (Get-XmlChildText $game 'Title'); Kind = 'Game' })
+            [void]$doc.DocumentElement.RemoveChild($game)
+        }
+        $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
+        [void]$plans.Add($filePlan)
+    }
+    return [pscustomobject]@{ Plans = $plans.ToArray(); Removed = $removed.ToArray(); Moved = $moved.ToArray(); Renamed = $renamed.ToArray(); Blocked = $blocked }
+}
+
+# The preview lines for the Details view and the log. Pure: plan in, strings out.
+function Format-TpmLaunchBoxSyncLine {
+    param([Parameter(Mandatory)]$Plan)
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Plan.Removed)) { [void]$lines.Add(('Remove {0}: its TeknoParrot profile is gone.' -f $item.Title)) }
+    foreach ($item in @($Plan.Moved)) { [void]$lines.Add(('Move {0}: the profile is now at {1}.' -f $item.Title, $item.New)) }
+    foreach ($item in @($Plan.Renamed)) { [void]$lines.Add(('Rename {0} to {1}.' -f $item.Old, $item.New)) }
+    if ($Plan.Blocked) { [void]$lines.Add([string]$Plan.Blocked) }
+    return $lines.ToArray()
+}
+
+# The one plain title line.
+function Format-TpmLaunchBoxSyncTitle {
+    param([Parameter(Mandatory)]$Plan, [switch]$Preview)
+    $removed = @($Plan.Removed).Count; $moved = @($Plan.Moved).Count; $renamed = @($Plan.Renamed).Count
+    $held = if ($Plan.Blocked) { ' ' + $Plan.Blocked } else { '' }
+    if (($removed + $moved + $renamed) -eq 0) { return ('LaunchBox already matches your library. Nothing to change.' + $held) }
+    $parts = '{0} removed, {1} moved, {2} renamed' -f $removed, $moved, $renamed
+    if ($Preview) { return ('Preview: {0}. Nothing was changed.{1}' -f $parts, $held) }
+    return ('LaunchBox now matches your library: {0}.{1}' -f $parts, $held)
+}
+
+# One run of a library change ('Group' or 'Sync'): -PlanOnly reads everything and changes nothing; otherwise the files are written
+# through the LaunchBox file transaction (verified backup, read-back, rollback). Returns the same kind of result as
+# Invoke-LaunchBoxDirectWrite plus ChangePlan. The caller makes sure LaunchBox and BigBox are closed before a write.
+function Invoke-TpmLaunchBoxLibraryChange {
+    param([Parameter(Mandatory)][ValidateSet('Group', 'Sync')][string]$Kind, [string]$UserProfilesDir, [string]$LbRoot, [string[]]$PlatformNames, [string]$BackupRoot, [string]$TpRoot = '', [hashtable]$DatIndex = $null, [switch]$PlanOnly)
     try {
         $root = Resolve-TpmLaunchBoxRoot $LbRoot
         if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $root)) { throw 'Choose a safe existing LaunchBox root.' }
@@ -47717,45 +47837,59 @@ function Invoke-TpmLaunchBoxGroup {
             if ($PlanOnly) { $none.Reason = 'PREVIEW' }
             return $none
         }
-        $gamesDb = Get-TpmGamesDbForLaunchBox -LaunchBoxRoot $root
-        $preferred = Get-TpmPreferredRegion -ProfilePaths @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | ForEach-Object { $_.FullName })
-        $plan = New-TpmLaunchBoxGroupPlan -UserProfilesDir $UserProfilesDir -LbRoot $root -EmulatorId (Get-XmlChildText $emulatorNode[0] 'ID') -PlatformNames $PlatformNames -TpRoot $TpRoot -DatIndex $DatIndex -Index $gamesDb.Index -PreferredRegion $preferred
-        foreach ($line in (Format-TpmLaunchBoxGroupLine -Plan $plan)) { Write-Log ('LaunchBox versions: ' + $line) }
+        $emulatorId = Get-XmlChildText $emulatorNode[0] 'ID'
+        if ($Kind -eq 'Group') {
+            $gamesDb = Get-TpmGamesDbForLaunchBox -LaunchBoxRoot $root
+            $preferred = Get-TpmPreferredRegion -ProfilePaths @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | ForEach-Object { $_.FullName })
+            $plan = New-TpmLaunchBoxGroupPlan -UserProfilesDir $UserProfilesDir -LbRoot $root -EmulatorId $emulatorId -PlatformNames $PlatformNames -TpRoot $TpRoot -DatIndex $DatIndex -Index $gamesDb.Index -PreferredRegion $preferred
+            $lines = @(Format-TpmLaunchBoxGroupLine -Plan $plan)
+        } else {
+            $plan = New-TpmLaunchBoxSyncPlan -UserProfilesDir $UserProfilesDir -LbRoot $root -EmulatorId $emulatorId -PlatformNames $PlatformNames -TpRoot $TpRoot -DatIndex $DatIndex
+            $lines = @(Format-TpmLaunchBoxSyncLine -Plan $plan)
+        }
+        foreach ($line in $lines) { Write-Log ('LaunchBox {0}: {1}' -f $Kind.ToLowerInvariant(), $line) }
         $changedPlans = @($plan.Plans | Where-Object { $_.Changed })
         if ($PlanOnly) {
             $preview = New-TpmLaunchBoxResult NO_CHANGES ('Preview only, nothing was written. A write would change {0} file(s).' -f $changedPlans.Count)
             $preview.Reason = 'PREVIEW'
             $preview | Add-Member -NotePropertyName WouldChangeFiles -NotePropertyValue $changedPlans.Count -Force
-            $preview | Add-Member -NotePropertyName GroupPlan -NotePropertyValue $plan -Force
+            $preview | Add-Member -NotePropertyName ChangePlan -NotePropertyValue $plan -Force
             return $preview
         }
         $result = Invoke-TpmLaunchBoxFileTransaction -lbRoot $root -Plans $plan.Plans -BackupRoot $BackupRoot
-        $result | Add-Member -NotePropertyName GroupPlan -NotePropertyValue $plan -Force
+        $result | Add-Member -NotePropertyName ChangePlan -NotePropertyValue $plan -Force
         return $result
     } catch {
-        $result = New-TpmLaunchBoxResult FAILED 'LaunchBox versions were refused before library writes.'
+        $result = New-TpmLaunchBoxResult FAILED 'The LaunchBox change was refused before library writes.'
         $result.Errors = @([string]$_.Exception.Message)
         return $result
     }
 }
-# END MODULE-READY SECTION: LaunchBox game versions
+# END MODULE-READY SECTION: LaunchBox game versions and keeping in step
 
-# Screen layer for the section above (not part of the module): preview, ask, then write.
-function Invoke-TpmLaunchBoxGroupStep {
-    param([string]$UserProfilesDir, [string]$LbRoot, [string]$TpRoot = '', [hashtable]$DatIndex = $null)
+# Screen layer for the section above (not part of the module): preview, ask, then write. Kind is 'Group' or 'Sync'.
+function Invoke-TpmLaunchBoxChangeStep {
+    param([Parameter(Mandatory)][ValidateSet('Group', 'Sync')][string]$Kind, [string]$UserProfilesDir, [string]$LbRoot, [string]$TpRoot = '', [hashtable]$DatIndex = $null)
     $root = $LbRoot
     if (-not $root) { $root = Read-HostSafe '  LaunchBox install folder (Enter to go back)' }
     if (-not $root) { return }
     $platformChoice = Read-TpmChoice -Prompt '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, B back' -Choices @('1', '2', '3', 'B') -Default '2'
     if ($platformChoice -eq 'B') { return }
     $platforms = switch ($platformChoice) { '1' { @('Arcade') } '2' { @('TeknoParrot') } '3' { @('Arcade', 'TeknoParrot') } }
-    Write-TpmText -Text 'First TeknoParrot Manager only reads your LaunchBox files. Regions and versions of the same game become one game with a version picker. The default version follows the region you chose in Region setup.' -Color DarkCyan
-    $plan = Invoke-TpmLaunchBoxGroup -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -TpRoot $TpRoot -DatIndex $DatIndex -PlanOnly
-    if ($plan.PSObject.Properties['GroupPlan']) {
-        $plan | Add-Member -NotePropertyName PlainTitle -NotePropertyValue (Format-TpmLaunchBoxGroupTitle -Plan $plan.GroupPlan -Preview) -Force
-        $plan | Add-Member -NotePropertyName EnrichLines -NotePropertyValue @(Format-TpmLaunchBoxGroupLine -Plan $plan.GroupPlan) -Force
+    $intro = if ($Kind -eq 'Group') { 'Regions and versions of the same game become one game with a version picker. The default version follows the region you chose in Region setup.' } else { 'Games you removed from TeknoParrot are removed from LaunchBox, moved games get their new location, and old Manager names are made clean. A game whose game file is only missing (for example an unplugged drive) is never removed.' }
+    Write-TpmText -Text ('First TeknoParrot Manager only reads your LaunchBox files. ' + $intro) -Color DarkCyan
+    $plan = Invoke-TpmLaunchBoxLibraryChange -Kind $Kind -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -TpRoot $TpRoot -DatIndex $DatIndex -PlanOnly
+    $show = {
+        param($result, [bool]$preview)
+        if ($result.PSObject.Properties['ChangePlan']) {
+            $title = if ($Kind -eq 'Group') { Format-TpmLaunchBoxGroupTitle -Plan $result.ChangePlan -Preview:$preview } else { Format-TpmLaunchBoxSyncTitle -Plan $result.ChangePlan -Preview:$preview }
+            $lines = if ($Kind -eq 'Group') { @(Format-TpmLaunchBoxGroupLine -Plan $result.ChangePlan) } else { @(Format-TpmLaunchBoxSyncLine -Plan $result.ChangePlan) }
+            $result | Add-Member -NotePropertyName PlainTitle -NotePropertyValue $title -Force
+            $result | Add-Member -NotePropertyName EnrichLines -NotePropertyValue $lines -Force
+        }
+        Write-TpmLaunchBoxResult -Result $result
     }
-    Write-TpmLaunchBoxResult -Result $plan
+    & $show $plan $true
     if ($plan.Reason -ne 'PREVIEW' -or [int]$plan.WouldChangeFiles -eq 0) { return }
     Write-TpmLaunchBoxWriteNotice
     $notice = Get-TpmLaunchBoxWriteNoticeBlocks
@@ -47767,13 +47901,9 @@ function Invoke-TpmLaunchBoxGroupStep {
         Write-Host '  LaunchBox or BigBox is still open, so nothing was changed.' -ForegroundColor DarkGray
         return
     }
-    $written = Invoke-TpmLaunchBoxGroup -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -TpRoot $TpRoot -DatIndex $DatIndex
-    if ($written.PSObject.Properties['GroupPlan']) {
-        $written | Add-Member -NotePropertyName PlainTitle -NotePropertyValue (Format-TpmLaunchBoxGroupTitle -Plan $written.GroupPlan) -Force
-        $written | Add-Member -NotePropertyName EnrichLines -NotePropertyValue @(Format-TpmLaunchBoxGroupLine -Plan $written.GroupPlan) -Force
-    }
-    Write-TpmLaunchBoxResult -Result $written
-    if ($written.BackupPath) { Write-TpmText -Text 'To undo and ungroup them, open Restore in the main menu and choose the LaunchBox backup.' -Color DarkCyan }
+    $written = Invoke-TpmLaunchBoxLibraryChange -Kind $Kind -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -TpRoot $TpRoot -DatIndex $DatIndex
+    & $show $written $false
+    if ($written.BackupPath) { Write-TpmText -Text 'To undo this, open Restore in the main menu and choose the LaunchBox backup.' -Color DarkCyan }
 }
 
 # Screen layer for the section above (not part of the module): asks, shows, calls the functions above.
@@ -48219,6 +48349,7 @@ function Write-TpmLaunchBoxOffer {
     Write-TpmText -Text '[A] Add missing games (backed up).' -Color White
     Write-TpmText -Text '[G] Fill in game details and make playlists (backed up).' -Color White
     Write-TpmText -Text '[V] Group regions and versions of a game into one (backed up).' -Color White
+    Write-TpmText -Text '[S] Keep LaunchBox in step with TeknoParrot: removed, moved, renamed games (backed up).' -Color White
     Write-TpmText -Text '[L] Link games for art and details (backed up).' -Color White -BlankBefore
     Write-TpmText -Text '[F] Import file only. No changes.' -Color White -BlankBefore
     Write-TpmText -Text '[B] Skip this step.' -Color White
@@ -48242,7 +48373,7 @@ function Invoke-TpmLaunchBoxStep {
         $lbPreviewChoice = $null
         $lbPreviewShownSummary = ''
         do {
-            $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'G', 'V', 'L', 'F', 'B') -Default 'P'
+            $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'G', 'V', 'S', 'L', 'F', 'B') -Default 'P'
             if ($lbChoice -eq 'P') {
                 Write-TpmText -Text 'Preview: TeknoParrot Manager only reads your LaunchBox files.' -Color DarkCyan
                 $previewRoot = $lbRoot
@@ -48311,7 +48442,9 @@ function Invoke-TpmLaunchBoxStep {
         } elseif ($lbChoice -eq 'G') {
             Invoke-TpmLaunchBoxEnrichStep -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -TpRoot $tpRoot -DatIndex $datIndex
         } elseif ($lbChoice -eq 'V') {
-            Invoke-TpmLaunchBoxGroupStep -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -TpRoot $tpRoot -DatIndex $datIndex
+            Invoke-TpmLaunchBoxChangeStep -Kind Group -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -TpRoot $tpRoot -DatIndex $datIndex
+        } elseif ($lbChoice -eq 'S') {
+            Invoke-TpmLaunchBoxChangeStep -Kind Sync -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -TpRoot $tpRoot -DatIndex $datIndex
         } elseif ($lbChoice -eq 'L') {
             Invoke-TpmLaunchBoxIdLinkStep -LbRoot $lbRoot -TpRoot $tpRoot -DatIndex $datIndex
         } elseif ($lbChoice -eq 'F') {

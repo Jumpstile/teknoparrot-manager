@@ -101,13 +101,13 @@ Describe 'Issue 422: group the versions of one game' {
         # Mutation: ignore -PlanOnly (files change), pick the first entry whatever the region, or lose the version.
         $fx = New-VerFixture
         $hash = (Get-FileHash -LiteralPath $fx.Platform).Hash
-        $preview = Invoke-TpmLaunchBoxGroup -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -PlatformNames @('TeknoParrot') -TpRoot $fx.Tp -PlanOnly
+        $preview = Invoke-TpmLaunchBoxLibraryChange -Kind Group -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -PlatformNames @('TeknoParrot') -TpRoot $fx.Tp -PlanOnly
         $preview.Reason | Should -BeExactly 'PREVIEW'
         (Get-FileHash -LiteralPath $fx.Platform).Hash | Should -BeExactly $hash
-        (@(Format-TpmLaunchBoxGroupLine -Plan $preview.GroupPlan) -join "`n") | Should -Match '2 entries become one game. The default version is TooSpicyU \(USA\)'
-        @($preview.GroupPlan.Groups).Count | Should -Be 1
+        (@(Format-TpmLaunchBoxGroupLine -Plan $preview.ChangePlan) -join "`n") | Should -Match '2 entries become one game. The default version is TooSpicyU \(USA\)'
+        @($preview.ChangePlan.Groups).Count | Should -Be 1
         # With no region chosen, the Japan version is not the default.
-        $written = Invoke-TpmLaunchBoxGroup -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -PlatformNames @('TeknoParrot') -BackupRoot $fx.Backups -TpRoot $fx.Tp
+        $written = Invoke-TpmLaunchBoxLibraryChange -Kind Group -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -PlatformNames @('TeknoParrot') -BackupRoot $fx.Backups -TpRoot $fx.Tp
         $written.Outcome | Should -BeExactly 'SAVED'
         $written.BackupVerified | Should -BeTrue
         $doc = Read-VerPlatform $fx
@@ -123,7 +123,10 @@ Describe 'Issue 422: group the versions of one game' {
         $app.PlayCount | Should -BeExactly '3'
         $doc.SelectSingleNode('/LaunchBox/Game[ID="g3"]') | Should -Not -BeNullOrEmpty
         # Running it again has nothing left to group.
-        (Invoke-TpmLaunchBoxGroup -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -PlatformNames @('TeknoParrot') -BackupRoot $fx.Backups -TpRoot $fx.Tp).Outcome | Should -BeExactly 'NO_CHANGES'
+        (Invoke-TpmLaunchBoxLibraryChange -Kind Group -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -PlatformNames @('TeknoParrot') -BackupRoot $fx.Backups -TpRoot $fx.Tp).Outcome | Should -BeExactly 'NO_CHANGES'
+        # Adding missing games later does not split the group again (the grouped version still counts as added).
+        $doc = Read-VerPlatform $fx
+        New-LaunchBoxGameEntry -platformGamesDoc $doc -relProfilePath '..\TP\UserProfiles\TooSpicyJ.xml' -title 'Too Spicy' -platformName 'TeknoParrot' -emulatorId 'emu-1' -lbRoot $fx.Root | Should -BeFalse
     }
 
     It 'the chosen region picks the default version' {
@@ -153,5 +156,95 @@ Describe 'Issue 422: group the versions of one game' {
         $xml = [System.IO.File]::ReadAllText($fx.Platform).Replace('<Title>TooSpicyJ</Title>', '<Title>TooSpicyJ</Title><DatabaseID>77</DatabaseID>').Replace('<Title>TooSpicyU</Title>', '<Title>TooSpicyU</Title><DatabaseID>77</DatabaseID>')
         [System.IO.File]::WriteAllText($fx.Platform, $xml)
         @((New-TpmLaunchBoxGroupPlan -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -EmulatorId 'emu-1' -PlatformNames @('TeknoParrot') -TpRoot $fx.Tp).Groups).Count | Should -Be 1
+    }
+}
+
+# Issue #423: keep LaunchBox in step with the TeknoParrot library.
+# What a user sees or loses: only the Manager's own entries change, an entry is removed only when its profile is gone (never for a
+# missing game file), a title the owner typed is kept, and the preview changes nothing.
+Describe 'Issue 423: keep LaunchBox in step with the library' {
+    BeforeEach {
+        Mock Write-Log {}
+        Mock Test-LaunchBoxRunning { $false }
+        Mock Write-TpmCompactExtractionProgress {}
+    }
+
+    It 'a preview changes nothing; a write removes the game whose profile is gone, keeps the rest and keeps another emulator untouched' {
+        # Mutation: remove by game file, remove other emulators' entries, or ignore -PlanOnly.
+        $fx = New-VerFixture -ExtraGameXml '<Game><ID>g9</ID><Title>Other</Title><Platform>TeknoParrot</Platform><Emulator>emu-other</Emulator><ApplicationPath>..\TP\UserProfiles\Gone.xml</ApplicationPath></Game>'
+        Remove-Item -LiteralPath (Join-Path $fx.Profiles 'Fantasy.xml')
+        $hash = (Get-FileHash -LiteralPath $fx.Platform).Hash
+        $preview = Invoke-TpmLaunchBoxLibraryChange -Kind Sync -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -PlatformNames @('TeknoParrot') -TpRoot $fx.Tp -PlanOnly
+        $preview.Reason | Should -BeExactly 'PREVIEW'
+        (Get-FileHash -LiteralPath $fx.Platform).Hash | Should -BeExactly $hash
+        (Format-TpmLaunchBoxSyncTitle -Plan $preview.ChangePlan -Preview) | Should -Match '1 removed'
+        $written = Invoke-TpmLaunchBoxLibraryChange -Kind Sync -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -PlatformNames @('TeknoParrot') -BackupRoot $fx.Backups -TpRoot $fx.Tp
+        $written.Outcome | Should -BeExactly 'SAVED'
+        $written.BackupVerified | Should -BeTrue
+        $doc = Read-VerPlatform $fx
+        $doc.SelectSingleNode('/LaunchBox/Game[ID="g3"]') | Should -BeNullOrEmpty
+        $doc.SelectSingleNode('/LaunchBox/Game[ID="g1"]') | Should -Not -BeNullOrEmpty
+        $doc.SelectSingleNode('/LaunchBox/Game[ID="g9"]') | Should -Not -BeNullOrEmpty
+    }
+
+    It 'a game whose game file is missing is not removed (a disconnected drive is not a removed game)' {
+        $fx = New-VerFixture
+        $plan = New-TpmLaunchBoxSyncPlan -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -EmulatorId 'emu-1' -PlatformNames @('TeknoParrot') -TpRoot $fx.Tp
+        @($plan.Removed).Count | Should -Be 0
+    }
+
+    It 'a moved TeknoParrot folder gives the entry its new path' {
+        $fx = New-VerFixture
+        $xml = [System.IO.File]::ReadAllText($fx.Platform).Replace('..\TP\UserProfiles\Fantasy.xml', '..\OldTP\UserProfiles\Fantasy.xml')
+        [System.IO.File]::WriteAllText($fx.Platform, $xml)
+        $written = Invoke-TpmLaunchBoxLibraryChange -Kind Sync -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -PlatformNames @('TeknoParrot') -BackupRoot $fx.Backups -TpRoot $fx.Tp
+        $written.Outcome | Should -BeExactly 'SAVED'
+        (Read-VerPlatform $fx).SelectSingleNode('/LaunchBox/Game[ID="g3"]').ApplicationPath | Should -Be '..\TP\UserProfiles\Fantasy.xml'
+    }
+
+    It 'an old Manager title becomes the clean title; a title the owner typed and a linked game keep theirs' {
+        # Mutation: rename every title -> the owner's own name is lost.
+        $fx = New-VerFixture
+        $xml = [System.IO.File]::ReadAllText($fx.Platform).Replace('<Title>TooSpicyU</Title>', '<Title>My Spicy Game</Title>').Replace('<Title>Fantasy</Title>', '<Title>Fantasy</Title><DatabaseID>12</DatabaseID>')
+        [System.IO.File]::WriteAllText($fx.Platform, $xml)
+        $written = Invoke-TpmLaunchBoxLibraryChange -Kind Sync -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -PlatformNames @('TeknoParrot') -BackupRoot $fx.Backups -TpRoot $fx.Tp
+        $written.Outcome | Should -BeExactly 'SAVED'
+        $doc = Read-VerPlatform $fx
+        $doc.SelectSingleNode('/LaunchBox/Game[ID="g1"]').Title | Should -BeExactly 'Too Spicy'
+        $doc.SelectSingleNode('/LaunchBox/Game[ID="g2"]').Title | Should -BeExactly 'My Spicy Game'
+        $doc.SelectSingleNode('/LaunchBox/Game[ID="g3"]').Title | Should -BeExactly 'Fantasy'
+    }
+
+    It 'a version of a grouped game whose profile is gone is removed, and the game stays' {
+        $fx = New-VerFixture
+        $null = Invoke-TpmLaunchBoxLibraryChange -Kind Group -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -PlatformNames @('TeknoParrot') -BackupRoot $fx.Backups -TpRoot $fx.Tp
+        Remove-Item -LiteralPath (Join-Path $fx.Profiles 'TooSpicyJ.xml')
+        $written = Invoke-TpmLaunchBoxLibraryChange -Kind Sync -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -PlatformNames @('TeknoParrot') -BackupRoot $fx.Backups -TpRoot $fx.Tp
+        $written.Outcome | Should -BeExactly 'SAVED'
+        $doc = Read-VerPlatform $fx
+        @($doc.SelectNodes('/LaunchBox/AdditionalApplication')).Count | Should -Be 0
+        $doc.SelectSingleNode('/LaunchBox/Game[ID="g2"]') | Should -Not -BeNullOrEmpty
+    }
+
+    It 'holds removals back when most games have no profile (a wrong or half-restored folder)' {
+        # Mutation: no hold-back -> pointing the Manager at the wrong folder wipes the library.
+        $extra = ''
+        foreach ($n in 1..4) { $extra += ('<Game><ID>x{0}</ID><Title>Gone {0}</Title><Platform>TeknoParrot</Platform><Emulator>emu-1</Emulator><ApplicationPath>..\TP\UserProfiles\Gone{0}.xml</ApplicationPath></Game>' -f $n) }
+        $fx = New-VerFixture -ExtraGameXml $extra
+        $plan = New-TpmLaunchBoxSyncPlan -UserProfilesDir $fx.Profiles -LbRoot $fx.Root -EmulatorId 'emu-1' -PlatformNames @('TeknoParrot') -TpRoot $fx.Tp
+        @($plan.Removed).Count | Should -Be 0
+        @($plan.Renamed).Count | Should -Be 0
+        $plan.Plans[0].Changed | Should -BeFalse
+        $plan.Blocked | Should -Match 'wrong folder'
+    }
+
+    It 'an empty or missing profile folder changes nothing' {
+        $fx = New-VerFixture
+        $empty = Join-Path $TestDrive ('empty-' + [guid]::NewGuid().ToString('N'))
+        [void][System.IO.Directory]::CreateDirectory($empty)
+        $hash = (Get-FileHash -LiteralPath $fx.Platform).Hash
+        $result = Invoke-TpmLaunchBoxLibraryChange -Kind Sync -UserProfilesDir $empty -LbRoot $fx.Root -PlatformNames @('TeknoParrot') -BackupRoot $fx.Backups -TpRoot $fx.Tp
+        $result.Outcome | Should -BeExactly 'FAILED'
+        (Get-FileHash -LiteralPath $fx.Platform).Hash | Should -BeExactly $hash
     }
 }

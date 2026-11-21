@@ -363,7 +363,8 @@ These tests try the new parts of RC8.4. Do them first if you are short on time.
 4. You passed if you see each old name, new name and ID first, and a backup is made before anything is saved. Games you named yourself must keep your name.
 5. Run the LaunchBox step again. Choose [G] Fill in game details and make playlists. You passed if it shows what will change first, makes playlists such as "Light gun games" and "Driving games", and leaves your own playlists alone. A game whose game file is missing must show a "Needs setup" note in its Notes box and sit in the "Needs setup" playlist.
 6. Run the LaunchBox step again. Choose [V] Group regions and versions. You passed if every game that has a Japan and a USA copy shows up once, with the other copy under "Play ... version", and the copy for the region you chose in Region setup starts by default.
-7. Undo it: choose 14 (Restore backup) in the main menu, then the LaunchBox backup. You passed if everything goes back the way it was.
+7. Run the LaunchBox step again. Choose [S] Keep LaunchBox in step. Remove one game from TeknoParrot first. You passed if the preview names that game as removed, nothing else disappears, and a game you renamed yourself in LaunchBox keeps your name.
+8. Undo it: choose 14 (Restore backup) in the main menu, then the LaunchBox backup. You passed if everything goes back the way it was.
 
 ### Test 44: Logos and box art from a folder
 
