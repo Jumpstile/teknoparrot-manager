@@ -91,6 +91,24 @@ Use a test PC or a test TeknoParrot folder. Do not use a PC that holds PostgreSQ
    game and every PGA Tour game is named as not working on Intel graphics. Write down whether the game starts.
 9. Write down any game of this kind that did not register, did not reach `Ready` or `Profile ready`, or did not start.
 
+## #350 / #131 Games that share one database name (Golden Tee Live 2006 and Orange County Choppers Pinball)
+
+This needs the real games (or at least both games' `pg_backup` folders) and a real PostgreSQL 8.3. Use a test PC.
+A full copy of every PostgreSQL database is the first step; keep it until you are done.
+
+1. Make a full backup first. In a Command Prompt on the test PC run `pg_dumpall -U postgres -f gameDbBackup.sql` from the PostgreSQL 8.3 `bin` folder. Check the file is not empty.
+2. Register Golden Tee Live 2006 and Orange County Choppers Pinball in TeknoParrot. Set Storage to Existing PostgreSQL for both. Check that both profiles show the database name `GameDB06`.
+3. Run Library health check. Pass: the PostgreSQL row says some games use the same database, and Details names both games and `GameDB06`.
+4. Run Postgres setup (menu 11). Pass: the result says `Own database` for Orange County Choppers Pinball, names `GameDB06OCCPinball`, and says nothing was deleted or overwritten.
+   Open the Orange County Choppers Pinball profile in TeknoParrot. Pass: its database name is `GameDB06OCCPinball`; the Golden Tee Live 2006 profile still says `GameDB06`.
+5. Run Library health check again. Pass: no game is called sharing a database, and the PostgreSQL row says `OK`.
+6. Start Golden Tee Live 2006, play a short game, and quit. Start Orange County Choppers Pinball, play a short game, and quit. Pass: both start and each shows only its own saved scores and settings.
+   Write down any message that mentions a database or a missing table.
+7. Run Postgres setup a second time. Pass: it says nothing needed changing, and no database was created.
+8. Repeat steps 2 to 5 with only one of the two games registered. Pass: its database name is not changed.
+9. If you already had a `GameDB06` with saved progress, register Orange County Choppers Pinball later. Pass: `GameDB06` is left as it is (check its scores), and Orange County Choppers Pinball gets its own new database.
+10. Write down whether either game does not accept the new database name. If it does not, restore the `pg_dumpall` file from step 1 and tell the developer.
+
 ## #375 Contributor list on GitHub
 
 1. Open the repository page and look at the Contributors list. Write down every name shown.

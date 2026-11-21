@@ -334,9 +334,9 @@ Describe 'FIX44 absent database with unknown auto-create capability is created, 
     }
 
     Context 'two profiles that name the same absent database' {
-        # Mutation: remove the sibling update after a creation (second createdb call), or
-        # keep the old group rule that blocks every shared absent non-TeknoParrot database.
-        It 'creates a shared absent database once and configures both profiles' {
+        # Mutation: restore both profiles into the one shared database (a single createdb), or give the second profile a new name in the log only
+        # and leave the shared name in its profile -> the second game opens the first game's database.
+        It 'gives each profile its own database, created from the backup that profile resolves to, and configures both profiles' {
             $fx = New-F44Fixture -Name 'shared'
             $one = New-F44Profile -Fixture $fx -Name 'SharedOne' -DbName 'GameDBShared' -BackupFolderName 'Game-Shared'
             $two = New-F44Profile -Fixture $fx -Name 'SharedTwo' -DbName 'GameDBShared' -BackupFolderName 'Game-Shared'
@@ -345,16 +345,18 @@ Describe 'FIX44 absent database with unknown auto-create capability is created, 
             $result = Invoke-F44Setup -Fixture $fx
 
             $result.Outcome | Should -BeExactly 'SUCCEEDED'
-            $result.DbCreated | Should -Be 1
+            $result.DbCreated | Should -Be 2
             $result.Configured | Should -Be 2
-            @(Get-F44Calls -Tool 'createdb.exe').Count | Should -Be 1
+            @(Get-F44Calls -Tool 'createdb.exe' | ForEach-Object { $_.Database } | Sort-Object) | Should -Be @('GameDBShared', 'GameDBSharedSharedTwo')
+            (Get-F44Value -File $one -Field 'DbName') | Should -BeExactly 'GameDBShared'
+            (Get-F44Value -File $two -Field 'DbName') | Should -BeExactly 'GameDBSharedSharedTwo'
             (Get-F44Value -File $one -Field 'Pass') | Should -BeExactly 'fixture-password'
             (Get-F44Value -File $two -Field 'Pass') | Should -BeExactly 'fixture-password'
             { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
         }
 
-        # Mutation: drop the same-backup comparison (create from one of two different backups).
-        It 'blocks, naming both profiles, when the two profiles resolve to different bundled backups' {
+        # Mutation: bring back the stop for two different backups -> nothing is created and both games stay without a database.
+        It 'creates both databases, with no stop, when the two profiles resolve to different bundled backups' {
             $fx = New-F44Fixture -Name 'shared-different'
             $null = New-F44Profile -Fixture $fx -Name 'SharedOne' -DbName 'GameDBShared'
             $null = New-F44Profile -Fixture $fx -Name 'SharedTwo' -DbName 'GameDBShared'
@@ -362,14 +364,10 @@ Describe 'FIX44 absent database with unknown auto-create capability is created, 
 
             $result = Invoke-F44Setup -Fixture $fx
 
-            $result.Outcome | Should -BeExactly 'FAILED_BEFORE_MUTATION'
-            $result.ReasonCode | Should -BeExactly 'POSTGRES_PREFLIGHT_FAILED'
-            @(Get-F44Calls -Tool 'createdb.exe').Count | Should -Be 0
-            $reasons = @(Get-PostgresSetupFailureReasonLines -TransactionResult $result)
-            $reasons.Count | Should -Be 2
-            ($reasons -join ' | ') | Should -Match 'SharedOne'
-            ($reasons -join ' | ') | Should -Match 'SharedTwo'
-            ($reasons -join ' | ') | Should -Match 'GameDBShared'
+            $result.Outcome | Should -BeExactly 'SUCCEEDED'
+            @(Get-F44Calls -Tool 'createdb.exe').Count | Should -Be 2
+            @(Get-F44Calls -Tool 'dropdb.exe').Count | Should -Be 0
+            (@($result.Warnings) -join ' | ') | Should -Match 'Own database for .*both used the database name GameDBShared'
         }
     }
 

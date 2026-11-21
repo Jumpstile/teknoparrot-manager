@@ -2037,6 +2037,8 @@ The prompt at the bottom reads `Press Enter to return to menu, or D for details`
 
 - **Profile ready** -- the game has no starting database file, and its profile says TeknoParrot creates the database itself (`Automatically create Database`). Setup saved the connection settings and checked that the game can reach PostgreSQL. Start the game once and TeknoParrot makes the database.
 
+- **Own database** -- two of your games used the same database name (Golden Tee Live 2006 and Orange County Choppers Pinball both ship with `GameDB06`). Both games keep their saved progress in the same tables, so one database cannot hold both. The first game keeps the name. The other game gets its own database, named after the shared name and the game (for example `GameDB06OCCPinball`), made from that game's own backup. The old database is not changed and nothing is deleted. The second game's profile is saved with the new name. If a game that shares the name has no starting database file, setup stops before changing anything and says so, because that game would otherwise run on the other game's data.
+
 If a game has no starting database file and its profile does not say TeknoParrot creates the database, it is named under `Could NOT be made ready`, and the other games are still set up. If a database cannot be opened with the game's own settings, setup does not say Ready. When it had already created databases, it puts everything back the way it was and checks that.
 
 Games that share the same result are shown together on one line.

@@ -108,6 +108,20 @@
     does not decide.
   - The graphics card warning for Intel now names Golden Tee Live 2021 to
     2026 and the PGA Tour games, as TeknoParrot's own game notes say.
+  - Two games that name the same database (Golden Tee Live 2006 and
+    Orange County Choppers Pinball both use GameDB06) can now be set up
+    together. They keep their saved progress in the same tables, so one
+    database cannot hold both. The first game keeps the name, the other
+    gets its own database made from its own backup, and its profile is
+    saved with the new name. The old database is not changed and nothing
+    is deleted. Library health check names games that still share one
+    database. If a game that shares the name has no starting file, setup
+    stops before changing anything.
+  - Golden Tee Live 2006: its own backup could not be restored into the
+    UTF8 database that was used for it (one table, category2_attr, came
+    back empty and setup stopped). When a backup has data that is not
+    valid UTF8, the Manager now restores it into a database that keeps
+    every byte, so nothing is lost.
   - The README and User Guide now say the online list of TeknoParrot game
     profiles is used only when it can be reached (it currently cannot,
     because the repository is not public). Otherwise the Manager uses the

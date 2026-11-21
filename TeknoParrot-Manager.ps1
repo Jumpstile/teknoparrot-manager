@@ -20469,7 +20469,7 @@ function Get-PostgresReinitializePlansFromProfiles {
             # (a rebuild replaces data, so it must not start from a file that is only a spare).
             $backupSelection = Get-PostgresBackupSelection -GamePath $gamePath
             $backupFile = [string]$backupSelection.Newest
-            $encoding = Get-PostgresRestoreEncoding -DbName $db
+            $encoding = Get-PostgresRestoreEncoding -DbName $db -BackupFile $backupFile
             $autoCreate = Get-PostgresAutoCreateCapability -Doc $doc
             [void]$plans.Add([pscustomobject]@{ GameLabel = $label; ProfileName = $metadata.ProfileKey; Database = $db; BackupFile = $backupFile; Encoding = $encoding; AutoCreate = $autoCreate; BackupCandidateCount = [int]$backupSelection.CandidateCount; BackupNewestHasTime = [bool]$backupSelection.NewestHasTime; BackupPathTooLong = [bool]$backupSelection.PathTooLong })
         }
@@ -29477,6 +29477,9 @@ function Write-TpmPostgresSetupResult {
         $names = @($games | Where-Object { $_.Outcome -eq $kind } | ForEach-Object { Get-TpmPostgresSetupGameName -Game $_ })
         if ($names.Count -gt 0) { [void]$entries.Add(@{ Text = (Get-TpmPostgresSetupOutcomeLine -Outcome $kind -Names $names); Color = ''; Indent = 4; Hanging = 2 }) }
     }
+    foreach ($sharedGame in @($games | Where-Object { $null -ne $_.PSObject.Properties['RenamedFrom'] -and -not [string]::IsNullOrWhiteSpace([string]$_.RenamedFrom) })) {
+        [void]$entries.Add(@{ Text = ('Own database: {0} and {1} both used the database name {2}. They keep their saved progress in the same tables, so {0} now has its own database, {3}. Nothing was deleted or overwritten.' -f (Get-TpmPostgresSetupGameName -Game $sharedGame), $sharedGame.SharesWith, $sharedGame.RenamedFrom, $sharedGame.DbName); Color = 'Cyan'; Indent = 4; Hanging = 2 })
+    }
     if ($notReadyGames.Count -gt 0) {
         $notReadyList = Join-TpmPostgresSetupNames -Names @($notReadyGames | ForEach-Object { Get-TpmPostgresSetupGameName -Game $_ })
         $notReadyReason = if ($notReadyGames.Count -gt 1) { 'No starting database file came with these games, so their databases cannot be built.' } else { 'No starting database file came with this game, so its database cannot be built.' }
@@ -29710,7 +29713,10 @@ function Invoke-PostgresGameSetupLocked {
                 $gameOutcome = if ($plan.CreateMode -eq 'RestoreBundledBackup') { 'CreatedFromBackup' } elseif ($plan.PSObject.Properties['AwaitingFirstStart'] -and [bool]$plan.AwaitingFirstStart) { 'WaitingForFirstStart' } else { 'AlreadyExisted' }
                 $tableCount = if ($plan.PSObject.Properties['VerifiedTableCount']) { [int]$plan.VerifiedTableCount } else { 0 }
                 $constraintNames = if ($plan.PSObject.Properties['KnownRestoreConstraintNames']) { @($plan.KnownRestoreConstraintNames) } else { @() }
-                [void]$gameOutcomes.Add([pscustomobject]@{ Key = [string]$plan.Profile.BaseName; Name = [string]$label; DbName = [string]$plan.DbName; Outcome = $gameOutcome; AutoCreateUnknown = ($null -eq $plan.AutoCreate); TableCount = $tableCount; KnownConstraintNames = $constraintNames; KnownWarningCount = $(if ($plan.PSObject.Properties['KnownRestoreWarningCount']) { [int]$plan.KnownRestoreWarningCount } else { 0 }) })
+                [void]$gameOutcomes.Add([pscustomobject]@{ Key = [string]$plan.Profile.BaseName; Name = [string]$label; DbName = [string]$plan.DbName; Outcome = $gameOutcome; AutoCreateUnknown = ($null -eq $plan.AutoCreate); TableCount = $tableCount; KnownConstraintNames = $constraintNames; KnownWarningCount = $(if ($plan.PSObject.Properties['KnownRestoreWarningCount']) { [int]$plan.KnownRestoreWarningCount } else { 0 }); RenamedFrom = $(if ($plan.PSObject.Properties['SharesWithLabel'] -and $plan.SharesWithLabel) { [string]$plan.OriginalDbName } else { '' }); SharesWith = $(if ($plan.PSObject.Properties['SharesWithLabel'] -and $plan.SharesWithLabel) { [string]$plan.SharesWithLabel } else { '' }) })
+                if ($plan.PSObject.Properties['SharesWithLabel'] -and $plan.SharesWithLabel) {
+                    $Warnings += ('Own database for {0}: it and {1} both used the database name {2}. The two games keep their saved progress in the same tables, so one database cannot hold both. {0} now has its own database, {3}. {2} was not changed and nothing was deleted or overwritten.' -f $label, $plan.SharesWithLabel, $plan.OriginalDbName, $plan.DbName)
+                }
                 $capabilityNote = if ($null -eq $plan.AutoCreate) { ' This TeknoParrot build does not say whether it creates the database automatically.' } else { '' }
                 if ($plan.CreateMode -eq 'RestoreBundledBackup') {
                     $limitationNote = if ($plan.PSObject.Properties['KnownRestoreLimitation']) { ' ' + [string]$plan.KnownRestoreLimitation } else { '' }
@@ -29910,6 +29916,21 @@ function Invoke-PostgresGameSetupLocked {
         $profileSetupStarted = Get-Date
         $profileSetupTotal = $profiles.Count
         $profileSetupCurrent = 0
+        # Two profiles can name the same database (Golden Tee Live 2006 and Orange County Choppers Pinball both ship with one name). The two games
+        # keep their saved progress in the same tables, so one database cannot hold both. The first profile (by name) keeps the name; every other
+        # profile that uses it gets its own database below. Nothing is deleted from the shared one.
+        $dbNameOwners = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::Ordinal)
+        $usedDbNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+        foreach ($scanProfile in $profiles) {
+            try {
+                $scanDoc = Read-Xml $scanProfile.FullName
+                if (-not $scanDoc.GameProfile -or -not (Test-GameNeedsPostgres $scanDoc)) { continue }
+                $scanName = [string](Get-PostgresFieldValue $scanDoc 'DbName')
+                if ([string]::IsNullOrWhiteSpace($scanName) -or -not (Test-SafePostgresDbName $scanName)) { continue }
+                [void]$usedDbNames.Add($scanName)
+                if (-not $dbNameOwners.ContainsKey($scanName)) { $dbNameOwners[$scanName] = [string]$scanProfile.BaseName }
+            } catch { continue }
+        }
         foreach ($pf in $profiles) {
             try {
                 $profileSetupCurrent++
@@ -29924,6 +29945,21 @@ function Invoke-PostgresGameSetupLocked {
                 $changed = $false
                 # A profile the user chose to keep (K) is left exactly as it is: no field is filled, normalized or written.
                 $keepAsIs = ($passDecision.Decision -eq 'NeedsApproval' -and -not $approvedPassPaths.Contains([System.IO.Path]::GetFullPath($pf.FullName)))
+                $originalDbName = $dbName
+                $sharesWithLabel = $null
+                if ($dbNameOwners.ContainsKey($dbName) -and $dbNameOwners[$dbName] -cne [string]$pf.BaseName) {
+                    $otherProfileName = $dbNameOwners[$dbName]
+                    if ($keepAsIs) { throw ('The database name {0} is also used by the profile {1}, and this profile keeps its own PostgreSQL settings, so it cannot be given its own database. Change its database name in TeknoParrot, or let setup replace its settings.' -f $dbName, $otherProfileName) }
+                    $ownDbName = $dbName + ($pf.BaseName -replace '[^A-Za-z0-9]', '')
+                    if ($ownDbName.Length -gt 63) { $ownDbName = $ownDbName.Substring(0, 63) }
+                    if (-not (Test-SafePostgresDbName $ownDbName) -or $usedDbNames.Contains($ownDbName)) { throw ('The database name {0} is also used by the profile {1}, and no free name could be made for this game.' -f $dbName, $otherProfileName) }
+                    if (-not (Set-PostgresFieldValue $doc 'DbName' $ownDbName)) { throw 'The profile has no PostgreSQL DbName field.' }
+                    $changed = $true
+                    [void]$usedDbNames.Add($ownDbName)
+                    $sharesWithLabel = Get-TpmGameDisplayLabel -ProfilePath (Join-Path $UserProfilesDir ($otherProfileName + '.xml')) -Fallback $otherProfileName
+                    Write-Log ('Postgres setup: {0} and {1} both name the database {2}. They keep their progress in the same tables, so {0} gets its own database {3}; {2} is not changed.' -f $pf.BaseName, $otherProfileName, $dbName, $ownDbName)
+                    $dbName = $ownDbName
+                }
                 foreach ($field in @(@('Path', $relBinPath), @('Address', '127.0.0.1'), @('Port', '5432'), @('User', 'postgres'))) {
                     if ($keepAsIs) { break }
                     # Blank fields are filled. A profile must also hold the exact local values the final verification demands (a profile with
@@ -30016,14 +30052,14 @@ function Invoke-PostgresGameSetupLocked {
                                 # FIXDB27: one game with no starting file must not stop the others. It is left out of this run (nothing is created or
                                 # changed for it) and reported as not ready; every other game is set up and checked as usual.
                                 $excludedLabel = Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
-                                [void]$excludedGames.Add([pscustomobject]@{ Key = [string]$pf.BaseName; Name = [string]$excludedLabel; DbName = [string]$dbName })
+                                [void]$excludedGames.Add([pscustomobject]@{ Key = [string]$pf.BaseName; Name = [string]$excludedLabel; DbName = [string]$dbName; OriginalDbName = [string]$originalDbName })
                                 Write-Log ('Postgres setup: {0} [{1}] ({2}) was left out: the database does not exist and no starting database file came with the game.' -f $excludedLabel, $pf.BaseName, $dbName)
                                 continue
                             }
                         }
                         if ($createMode -eq 'None') {
                             $createMode = 'RestoreBundledBackup'
-                            $encoding = Get-PostgresRestoreEncoding -DbName $dbName
+                            $encoding = Get-PostgresRestoreEncoding -DbName $originalDbName -BackupFile $backupFile
                         }
                     }
                 }
@@ -30042,6 +30078,8 @@ function Invoke-PostgresGameSetupLocked {
                     CreateMode = $createMode
                     BackupFile = $backupFile
                     Encoding = $encoding
+                    OriginalDbName = $originalDbName
+                    SharesWithLabel = $sharesWithLabel
                     Changed = $changed
                     # FIX36 S4: profiles the user had to decide on (NeedsApproval) are
                     # verified against their own connection values; every other profile
@@ -30082,12 +30120,14 @@ function Invoke-PostgresGameSetupLocked {
                 & $addPreflightReason ([string]$member.Profile.BaseName) ([string]$memberLabel) ('The database {0} does not exist yet and is shared by profiles {1}. TeknoParrot Manager cannot tell which bundled backup or tables the shared database must hold, so it will not create it.' -f $group.Name, $profileKeys)
             }
         }
-        # A left-out game whose database name another game is about to create cannot be judged: that database would be built from the other game's file.
+        # A left-out game keeps the database name in its profile. When another game in this run uses that name, the left-out game would open (and write
+        # into) the other game's database. It cannot be given its own database (it has no starting file), so setup stops here and changes nothing.
         foreach ($excludedGame in @($excludedGames.ToArray())) {
-            if (@($preflightPlans | Where-Object { [string]$_.DbName -ceq [string]$excludedGame.DbName -and -not $_.DbExists }).Count -gt 0) {
+            $sharingPlans = @($preflightPlans | Where-Object { [string]$_.DbName -ceq [string]$excludedGame.OriginalDbName })
+            if ($sharingPlans.Count -gt 0) {
                 $preflightBlocked = $true
                 $results.Errors++
-                & $addPreflightReason ([string]$excludedGame.Key) ([string]$excludedGame.Name) ('The database {0} does not exist yet and is shared with a game that has a starting database file, but this game has none, so TeknoParrot Manager will not create it.' -f $excludedGame.DbName)
+                & $addPreflightReason ([string]$excludedGame.Key) ([string]$excludedGame.Name) ('The database {0} is also used by {1}, which is ready to be set up. This game has no starting database file, so TeknoParrot Manager cannot give it its own database, and it must not run on the other game''s data. Nothing was changed. Put this game''s pg_backup folder back, then run PostgreSQL setup again.' -f $excludedGame.OriginalDbName, ((@($sharingPlans | ForEach-Object { Get-TpmGameDisplayLabel -ProfilePath $_.Profile.FullName -Fallback $_.Profile.BaseName })) -join ' and '))
             }
         }
         if ($profiles.Count -gt 0) {
@@ -30650,6 +30690,7 @@ function Invoke-PostgresGameSetupLocked {
                 # Every profile not kept by the user must now hold the verified password.
                 $expectedPass = if ($plan.PassKept) { [string]$plan.PlannedFields['Pass'] } else { $SuperPasswordPlain }
                 if (-not [string]::Equals([string](Get-PostgresFieldValue $doc 'Pass'), $expectedPass, [System.StringComparison]::Ordinal)) { throw "PostgreSQL profile password verification failed for $($plan.Profile.BaseName)." }
+                if (-not [string]::Equals([string](Get-PostgresFieldValue $doc 'DbName'), [string]$plan.DbName, [System.StringComparison]::Ordinal)) { throw "PostgreSQL profile database name verification failed for $($plan.Profile.BaseName)." }
                 # FIX69: a database created by this run is verified whatever the profile's auto-create value.
                 if ($plan.DbExists -and ($plan.AutoCreate -ne $true -or $creationModes -contains $plan.CreateMode)) {
                     $finalDb = Get-PostgresDatabaseState -DbName $plan.DbName -SuperPasswordPlain $SuperPasswordPlain
@@ -38550,6 +38591,7 @@ function Invoke-LibraryHealthCheck {
     $postgresAutoCreateLabels = New-Object System.Collections.Generic.List[string]
     $internalDatabaseLabels = New-Object System.Collections.Generic.List[string]
     $postgresConfiguredChecks = New-Object System.Collections.Generic.List[object]
+    $postgresDbUsers = New-Object System.Collections.Generic.List[object]
 
     $profileCurrent = 0
     $profileStarted = Get-Date
@@ -38568,6 +38610,7 @@ function Invoke-LibraryHealthCheck {
                 if ((Get-TpmGameDatabaseStorage -Doc $doc) -eq 'Internal') { [void]$internalDatabaseLabels.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)) }
                 if (Test-GameNeedsPostgres $doc) {
                     $label = Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
+                    [void]$postgresDbUsers.Add([pscustomobject]@{ Label = $label; DbName = [string](Get-PostgresFieldValue $doc 'DbName'); Key = ('{0}|{1}|{2}' -f ([string](Get-PostgresFieldValue $doc 'Address')).Trim(), ([string](Get-PostgresFieldValue $doc 'Port')).Trim(), [string](Get-PostgresFieldValue $doc 'DbName')) })
                     $configurationComplete = Test-TpmPostgresSettingsComplete -Doc $doc
                     if (-not $configurationComplete) {
                         [void]$postgresNeeded.Add($pf.BaseName)
@@ -38788,7 +38831,13 @@ function Invoke-LibraryHealthCheck {
     $postgresInventoryComplete = ($postgresInventoryStatus -eq 'Complete')
     $postgresServiceUnverified = ($postgresInventoryComplete -and $postgresConfigured -gt 0 -and $null -eq $postgresServiceExists)
     $gameTypeFailed = ($null -ne $gameTypeReport -and [int]$gameTypeReport.Failed -gt 0)
-    $healthOutcome = if ($discoveryFailed -or -not $optionalCoverageComplete -or -not $postgresInventoryComplete -or $postgresServiceUnverified -or $postgresDatabaseProblems.Count -gt 0 -or $postgresDatabaseSkipped.Count -gt 0 -or $postgresDatabaseCheck -eq 'SkippedNoClient' -or $prerequisiteCheckFailed -or $gameTypeFailed -or [string]::IsNullOrWhiteSpace([string]$detected.Vendor)) { 'ACTION_REQUIRED' } else { 'SUCCEEDED' }
+    # Two games that name the same database keep their saved progress in the same tables; one database cannot hold both (Postgres setup gives each its own).
+    $postgresSharedDatabases = New-Object System.Collections.Generic.List[string]
+    foreach ($sharedGroup in @($postgresDbUsers | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.DbName) } | Group-Object -Property Key | Where-Object { $_.Count -gt 1 })) {
+        [void]$postgresSharedDatabases.Add(('{0} use the same database, {1}' -f (@($sharedGroup.Group | ForEach-Object { [string]$_.Label }) -join ' and '), [string]$sharedGroup.Group[0].DbName))
+        Write-Log ('HealthCheck: {0} use the same database {1}; Postgres setup (menu 11) gives each its own.' -f (@($sharedGroup.Group | ForEach-Object { [string]$_.Label }) -join ' and '), [string]$sharedGroup.Group[0].DbName)
+    }
+    $healthOutcome = if ($discoveryFailed -or -not $optionalCoverageComplete -or -not $postgresInventoryComplete -or $postgresServiceUnverified -or $postgresDatabaseProblems.Count -gt 0 -or $postgresSharedDatabases.Count -gt 0 -or $postgresDatabaseSkipped.Count -gt 0 -or $postgresDatabaseCheck -eq 'SkippedNoClient' -or $prerequisiteCheckFailed -or $gameTypeFailed -or [string]::IsNullOrWhiteSpace([string]$detected.Vendor)) { 'ACTION_REQUIRED' } else { 'SUCCEEDED' }
     $postgresDatabaseProblemsResult = @()
     $postgresNeededResult = @()
     $postgresNeededLabelsResult = @()
@@ -38835,6 +38884,7 @@ function Invoke-LibraryHealthCheck {
         PostgresConfigured = $postgresConfiguredResult
         PostgresAutoCreateProfiles = $postgresAutoCreateResult
         PostgresAwaitingFirstStart = $postgresAwaitingFirstStartResult
+        PostgresSharedDatabases = @($postgresSharedDatabases.ToArray())
         InternalDatabaseLabels = @($internalDatabaseLabels.ToArray())
         PostgresDatabaseProblems = $postgresDatabaseProblemsResult
         PostgresDatabaseCheck = $postgresDatabaseCheck
@@ -38986,6 +39036,9 @@ function Get-TpmLibraryHealthPostgresRow {
     if (@(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseProblems' -Default @()).Count -gt 0) {
         $problemCount = @($Result.PostgresDatabaseProblems).Count
         return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text ('Problem - {0} {1} database that is not ready. Run Postgres setup (menu 11)' -f (Format-TpmGameCount -Count $problemCount), $(if ($problemCount -eq 1) { 'has a' } else { 'have a' })) -Color 'Yellow')
+    }
+    if (@(Get-TpmTransactionField -Object $Result -Name 'PostgresSharedDatabases' -Default @()).Count -gt 0) {
+        return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - some games use the same database. Run Postgres setup (menu 11)' -Color 'Yellow')
     }
     if ($configured -le 0) { return $null }
     if ([bool](Get-TpmTransactionField -Object $Result -Name 'PostgresServiceUnverified' -Default $false)) { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Could not check' -Color 'Yellow') }
@@ -39145,6 +39198,10 @@ function Get-TpmLibraryHealthDetailBlocks {
     if ($internalDatabaseLabels.Count -gt 0) {
         [void]$lines.Add(('Games using Internal storage (no PostgreSQL needed): {0}' -f (Format-TpmNameList -Names $internalDatabaseLabels -Max 1000)))
         foreach ($choiceLine in (Get-TpmDatabaseChoiceLines)) { [void]$lines.Add($choiceLine) }
+    }
+    foreach ($sharedText in @(Get-TpmTransactionField -Object $Result -Name 'PostgresSharedDatabases' -Default @())) {
+        [void]$lines.Add(('Problem - {0}. Two games keep their saved progress in the same tables, so one database cannot hold both.' -f $sharedText))
+        [void]$lines.Add('Postgres setup (menu 11) gives each game its own database. It deletes nothing and keeps both sets of progress.')
     }
     [void]$blocks.Add(@{ Heading = 'PostgreSQL'; Lines = $lines.ToArray() })
 
@@ -51399,12 +51456,61 @@ function Export-LaunchBoxXml {
 # profile. A query failure is not treated as an absent database. The result
 # is explicit so the caller cannot proceed to profile writes after a partial
 # backup.
+# Tells whether every data file inside a TAR-format game backup is valid UTF-8: $true yes, $false some bytes are not (a UTF8 database
+# would refuse that table and it would come back empty), $null the file is not a readable TAR backup so nothing is known.
+# Only reads the file.
+function Test-PostgresBackupDataIsUtf8 {
+    param([Parameter(Mandatory)][string]$BackupFile)
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($BackupFile)
+        $strict = New-Object System.Text.UTF8Encoding($false, $true)
+        $header = New-Object byte[] 512
+        $buffer = New-Object byte[] 1048576
+        $firstBlock = $true
+        while ($stream.Read($header, 0, 512) -eq 512) {
+            if ($firstBlock) {
+                if ([System.Text.Encoding]::ASCII.GetString($header, 257, 5) -cne 'ustar') { return $null }
+                $firstBlock = $false
+            }
+            if ($header[0] -eq 0) { break }
+            $entryName = [System.Text.Encoding]::ASCII.GetString($header, 0, 100).TrimEnd([char]0)
+            $size = [Convert]::ToInt64([System.Text.Encoding]::ASCII.GetString($header, 124, 12).Trim([char]0, ' '), 8)
+            $isData = ($entryName -like '*.dat' -and $entryName -ne 'toc.dat')
+            $decoder = $strict.GetDecoder()
+            $left = $size
+            while ($left -gt 0) {
+                $read = $stream.Read($buffer, 0, [int][Math]::Min($left, $buffer.Length))
+                if ($read -le 0) { return $null }
+                if ($isData) { [void]$decoder.GetCharCount($buffer, 0, $read, $false) }
+                $left -= $read
+            }
+            if ($isData) { [void]$decoder.GetCharCount($buffer, 0, 0, $true) }
+            $padding = (512 - ($size % 512)) % 512
+            if ($padding -gt 0) { [void]$stream.Seek($padding, [System.IO.SeekOrigin]::Current) }
+        }
+        if ($firstBlock) { return $null }
+        return $true
+    } catch [System.Text.DecoderFallbackException] {
+        return $false
+    } catch {
+        return $null
+    } finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
 # Returns the encoding used by the shipped PostgreSQL game backups. The
 # PostgreSQL restore contract is deliberately limited to the installed 8.3
 # client tools; no newer client or compatibility path is accepted.
+# A caller that knows the backup file passes it: for the one UTF8 database, a backup whose data is not valid UTF-8 is restored into
+# SQL_ASCII (which keeps every byte as it is) so that no table comes back empty. Without the file the rule is by name only.
 function Get-PostgresRestoreEncoding {
-    param([Parameter(Mandatory)][string]$DbName)
-    if ($DbName -ieq 'GameDB06') { return 'UTF8' }
+    param([Parameter(Mandatory)][string]$DbName, [string]$BackupFile = '')
+    if ($DbName -ieq 'GameDB06') {
+        if (-not [string]::IsNullOrWhiteSpace($BackupFile) -and ((Test-PostgresBackupDataIsUtf8 -BackupFile $BackupFile) -eq $false)) { return 'SQL_ASCII' }
+        return 'UTF8'
+    }
     return 'SQL_ASCII'
 }
 

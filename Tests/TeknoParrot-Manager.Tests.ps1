@@ -6603,7 +6603,7 @@ __BRANCH__
             # Mutation: saving the already-configured profile B, or dropping the recovery-bundle evidence from the setup result, fails this test.
             $xml = '<GameProfile><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Path</FieldName><FieldValue>C:\\PostgreSQL\\bin\\</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Address</FieldName><FieldValue>127.0.0.1</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Port</FieldName><FieldValue>5432</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>User</FieldName><FieldValue>postgres</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldValue>old</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Automatically create Database</FieldName><FieldValue>1</FieldValue></FieldInformation></ConfigValues></GameProfile>'
             Set-Content -LiteralPath (Join-Path $script:pgProfiles 'A.xml') -Value $xml
-            Set-Content -LiteralPath (Join-Path $script:pgProfiles 'B.xml') -Value ($xml.Replace('<FieldValue>old</FieldValue>', '<FieldValue>approved</FieldValue>'))
+            Set-Content -LiteralPath (Join-Path $script:pgProfiles 'B.xml') -Value ($xml.Replace('<FieldValue>old</FieldValue>', '<FieldValue>approved</FieldValue>').Replace('GameDB01', 'GameDB02'))
             # FIX36 S4: A has a different non-blank Pass; the user approved replacing it.
             $result = Invoke-PostgresGameSetup -UserProfilesDir $script:pgProfiles -SuperPasswordPlain 'approved' -RecoveryBackup $script:pgRecovery -ApprovedPassReplacements @((Join-Path $script:pgProfiles 'A.xml'))
             (Test-TpmTransactionResult -Result $result) | Should -BeTrue
@@ -6629,7 +6629,7 @@ __BRANCH__
                 ('<FieldInformation><CategoryName>Postgres</CategoryName><FieldName>{0}</FieldName><FieldValue>{1}</FieldValue></FieldInformation>' -f $pair[0], $pair[1])
             }
             $xml = '<GameProfile><ConfigValues>' + ($fields -join '') + '</ConfigValues></GameProfile>'
-            foreach ($name in @('A', 'B')) { Set-Content -LiteralPath (Join-Path $script:pgProfiles ($name + '.xml')) -Value $xml }
+            foreach ($name in @('A', 'B')) { Set-Content -LiteralPath (Join-Path $script:pgProfiles ($name + '.xml')) -Value $xml.Replace('GameDB01', 'GameDB01' + $name) }
             $result = Invoke-PostgresGameSetup -UserProfilesDir $script:pgProfiles -SuperPasswordPlain 'approved' -RecoveryBackup $script:pgRecovery
             $result.Outcome | Should -Be 'NO_OP'
             $result.Configured | Should -Be 0
