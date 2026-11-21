@@ -114,16 +114,22 @@ Describe 'FIX110A S-23 manual path repair names the games that were really saved
     It 'accepts the real executable of a game in a path over 259 characters' {
         # Mutation: plain Test-Path "is it a file" before the path check -> a game TPM extracted into a long folder is refused as "not an existing file" (host with long paths off).
         $fixture = New-F110aRepairFixture -Codes @('LGAME')
-        $deep = Join-Path $fixture.Games 'LGAME'
+        $gameRoot = Join-Path $fixture.Games 'LGAME'
+        $deep = $gameRoot
         while ($deep.Length -lt 280) { $deep = Join-Path $deep 'a-long-folder-name-for-testing' }
-        [void][System.IO.Directory]::CreateDirectory('\\?\' + $deep)
-        $longExe = Join-Path $deep 'game.exe'
-        [System.IO.File]::WriteAllText('\\?\' + $longExe, 'game')
-        $script:f110aLong = $longExe
-        Mock Read-PathWithBrowse { $script:f110aLong }
-        $result = Invoke-LibraryHealthManualPathRepair -UserProfilesDir $fixture.Profiles -GamesInstallFolder $fixture.Games -BrokenGames @('LGAME')
-        $result.Outcome | Should -BeExactly 'SUCCEEDED'
-        @($result.Mutation.ChangedItems) | Should -Be @('LGAME')
+        try {
+            [void][System.IO.Directory]::CreateDirectory('\\?\' + $deep)
+            $longExe = Join-Path $deep 'game.exe'
+            [System.IO.File]::WriteAllText('\\?\' + $longExe, 'game')
+            $script:f110aLong = $longExe
+            Mock Read-PathWithBrowse { $script:f110aLong }
+            $result = Invoke-LibraryHealthManualPathRepair -UserProfilesDir $fixture.Profiles -GamesInstallFolder $fixture.Games -BrokenGames @('LGAME')
+            $result.Outcome | Should -BeExactly 'SUCCEEDED'
+            @($result.Mutation.ChangedItems) | Should -Be @('LGAME')
+        } finally {
+            # Windows PowerShell 5.1 cannot delete this folder through a normal path, so Pester's TestDrive cleanup would fail on it.
+            if ([System.IO.Directory]::Exists('\\?\' + $gameRoot)) { [System.IO.Directory]::Delete('\\?\' + $gameRoot, $true) }
+        }
     }
 
     It 'says partial, with the exact saved and failed games, when one was saved and one was refused' {
