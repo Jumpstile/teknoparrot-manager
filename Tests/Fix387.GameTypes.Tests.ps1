@@ -481,3 +481,14 @@ Describe 'Registering a game that names two ZIPs (issue 387)' {
         @($result.Registered | ForEach-Object { $_.Code }) | Should -Contain 'ddr2ml'
     }
 }
+
+Describe 'A set is never registered by its parent ZIP (issue 387)' {
+    It 'reports the game ZIP as missing when the file given is the parent ZIP' {
+        # Mutation: drop the leaf check -> the parent ZIP alone passes and becomes the game path.
+        $folder = Join-Path $TestDrive ('parent-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+        $parent = Join-Path $folder 'ddr2m.zip'
+        [System.IO.File]::WriteAllText($parent, 'x')
+        @(Get-TpmMissingGameSetFiles -GamePath $parent -ExecutableName 'ddr2ml.zip;ddr2m.zip') | Should -Be @('ddr2ml.zip')
+    }
+}

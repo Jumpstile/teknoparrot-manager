@@ -40304,13 +40304,15 @@ function Get-TpmGameFileSet {
     return [pscustomobject]@{ IsSet = $false; Choices = @(Get-ExeAlternatives $text); Partners = @() }
 }
 
-# The ZIPs of a set that are not beside the game file (an empty list when all are there, or when the name is not a set).
+# The ZIPs of a set that are not beside the game file (an empty list when all are there, or when the name is not a set). When the file
+# given is not the set's own game ZIP (for example its parent ZIP), the game ZIP is what is missing.
 function Get-TpmMissingGameSetFiles {
     param([string]$GamePath, [string]$ExecutableName)
     $set = Get-TpmGameFileSet -ExecutableName $ExecutableName
     if (-not $set.IsSet -or [string]::IsNullOrWhiteSpace($GamePath)) { return @() }
-    try { $folder = [System.IO.Path]::GetDirectoryName($GamePath.Trim()) } catch { return @() }
+    try { $folder = [System.IO.Path]::GetDirectoryName($GamePath.Trim()); $leaf = [System.IO.Path]::GetFileName($GamePath.Trim()) } catch { return @() }
     if ([string]::IsNullOrEmpty($folder)) { return @() }
+    if (@($set.Choices | Where-Object { $_ -ieq $leaf }).Count -eq 0) { return @($set.Choices) }
     return @($set.Partners | Where-Object { -not (Test-Path -LiteralPath ([System.IO.Path]::Combine($folder, $_)) -PathType Leaf -ErrorAction SilentlyContinue) })
 }
 
