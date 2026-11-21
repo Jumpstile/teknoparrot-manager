@@ -6,7 +6,7 @@ Thank you for helping! You will try a program that sets up arcade games on a PC.
 
 Follow the steps in order. Take your time. If you get stuck, stop and send a screenshot to the person who gave you this guide. If something goes wrong, your backup lets us fix it.
 
-**What is new in RC8.4?** RC8.4 is a fix-up release for RC8.3. It fixes problems that testers found and adds new features. Tests 1 to 40 are the same as before. **Tests 41 to 51 are new. If you only have a little time, do tests 41 to 51 first.**
+**What is new in RC8.4?** RC8.4 is a fix-up release for RC8.3. It fixes problems that testers found and adds new features. Tests 1 to 40 are the same as before. **Tests 41 to 52 are new. If you only have a little time, do tests 41 to 52 first.**
 
 Words you will see:
 
@@ -337,7 +337,7 @@ These tests try the fixes in RC8.3. Do them first if you are short on time.
 3. You passed if neither step stops with a "could not be checked" error.
 4. If your TeknoParrot folder is very deep, also start TeknoParrot Manager and let it tidy up its own files. You passed if it finishes with no error about a path that is too long.
 
-## New in RC8.4: tests 41 to 51
+## New in RC8.4: tests 41 to 52
 
 These tests try the new parts of RC8.4. Do them first if you are short on time.
 
@@ -419,6 +419,14 @@ These tests try the new parts of RC8.4. Do them first if you are short on time.
 1. At the main menu, type 13 and press Enter (Library health check). Press D if you do not see the details.
 2. Find the lines "ReShade installed" and "BepInEx installed".
 3. You passed if a game whose profile says it needs BepInEx, and does not have it, is listed under "Games that need BepInEx and do not have it set up". ReShade is your choice for each game, so it must not be flagged.
+
+### Test 52: A game with two versions, or two profiles
+
+1. Use games from the Eggman collection. Good ones: two versions of Chaos Code - New Sign of Catastrophe, and After Burner Climax (a Lindbergh game). Skip this test if you do not have them.
+2. Register the games (AutoSync or Register only).
+3. You passed if both versions of the first game were registered or one was reported as a duplicate with a reason. It failed if one version is missing and nothing says why.
+4. Open TeknoParrot. You passed if After Burner Climax shows both its Lindbergh profile and its ElfLdr2 profile. If the ElfLdr2 one is missing, open the log and look for "was left alone because none of its game files is in folder".
+5. If you have a folder for a game that TeknoParrot has no profile for (a Sega Rally 3 track mod), you passed if it is listed as "not in TeknoParrot".
 ## How to report a problem
 
 **Very important: the support report.** Every bug report needs a support report. Without it we often cannot find the cause. Make one every time something goes wrong. Never skip it.

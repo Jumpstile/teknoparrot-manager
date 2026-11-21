@@ -51,7 +51,7 @@ BeforeAll {
     function Get-ManagerDisplayVersion { return 'FIX37 fixture' }
     function Get-TpmSessionRunId { return $script:fix37RunId }
     function Get-GameFiles {
-        param([string]$folder, [scriptblock]$ProgressScript)
+        param([string]$folder, [scriptblock]$ProgressScript, [string[]]$ExtraExtensions)
         Get-ChildItem -LiteralPath $folder -File -Filter '*.exe' -Recurse | Sort-Object FullName
     }
     function Get-TpmRegisteredProfileFilesWithDiscoveryProgress {

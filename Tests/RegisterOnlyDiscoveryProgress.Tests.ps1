@@ -20,11 +20,11 @@ BeforeAll {
         $ast.FindAll({
             param($node)
             $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-                $node.Name -in @('Get-GameFiles', 'Register-GamesLegacy')
+                $node.Name -in @('Get-GameFiles', 'Register-GamesLegacy', 'Get-TpmProfileFileExtensions', 'Get-TpmDatNamedProfileCodes', 'Register-TpmDatSecondProfiles')
         }, $true)
     )
-    if ($functions.Count -ne 2) {
-        throw "Expected Get-GameFiles and Register-GamesLegacy definitions; found $($functions.Count)."
+    if ($functions.Count -ne 5) {
+        throw "Expected the Get-GameFiles, Register-GamesLegacy and registration helper definitions; found $($functions.Count)."
     }
 
     $functionPath = Join-Path $TestDrive ('register-discovery-functions-' + [guid]::NewGuid().ToString('N') + '.ps1')

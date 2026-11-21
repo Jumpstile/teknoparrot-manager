@@ -9183,8 +9183,10 @@ function Get-TpmTeknoParrotNamesForCodes {
 # this extension those games were never found by name (issue #389).
 # Silent Scope, etc.) specify a game-specific DLL as their ExecutableName.
 function Get-GameFiles {
-    param([string]$folder, [scriptblock]$ProgressScript = $null)
-    $exts       = @('.exe', '.elf', '.iso', '.gcm', '.gcz', '.bin', '.e4', '.zip', '.xbe', '.dll', '.acgame')
+    param([string]$folder, [scriptblock]$ProgressScript = $null, [string[]]$ExtraExtensions = @())
+    # The usual game file types, plus the file types the TeknoParrot profiles themselves name (Get-TpmProfileFileExtensions), so a game
+    # whose file ends in something unusual (.exec, .chd) is still found without a change to this list.
+    $exts       = @('.exe', '.elf', '.iso', '.gcm', '.gcz', '.bin', '.e4', '.zip', '.xbe', '.dll', '.acgame') + @($ExtraExtensions)
     $normalized = $folder -replace '/', '\'
     $baseDepth  = $normalized.TrimEnd('\').Split('\').Count
     $files = New-Object System.Collections.Generic.List[object]
@@ -25599,7 +25601,7 @@ function Invoke-AutoSync {
         $registeredEntry = Get-DatEntryForZipName -RawZipName $rawName -DatIndex $datIndex
         if (-not $rootRefusalReason -and $registeredEntry -and $registeredEntry.ProfileCode -and $userProfilesDir) {
             try {
-                if ($registeredEntry.ProfileCode -notmatch '^[\w]+$') { throw 'Registered profile identity is unsafe.' }
+                if ($registeredEntry.ProfileCode -notmatch '^[\w-]+$') { throw 'Registered profile identity is unsafe.' }
                 $registeredProfilePath = Join-Path $userProfilesDir ($registeredEntry.ProfileCode + '.xml')
                 if (Test-Path -LiteralPath $registeredProfilePath -ErrorAction Stop) {
                     $registeredDoc = Read-Xml $registeredProfilePath
@@ -26179,7 +26181,7 @@ function Get-TeknoParrotProfileSet {
                 Write-TpmCompactExtractionProgress -Phase Scanning -Label 'GitHub profile tree' -Current $treeCurrent -Total $tree.Count -StartedAt $profileScanStarted
                 if ($node.type -eq 'blob' -and $node.path -like ($prefix + '*.xml')) {
                     $stem = [System.IO.Path]::GetFileNameWithoutExtension($node.path.Substring($prefix.Length))
-                    if ($stem -match '^[\w]+$') { [void]$result.Add($stem) }
+                    if ($stem -match '^[\w-]+$') { [void]$result.Add($stem) }
                 }
             }
             if ($result.Count -gt 0) {
@@ -26214,7 +26216,7 @@ function Get-TeknoParrotProfileSet {
             $localCurrent++
             Write-TpmCompactExtractionProgress -Phase Scanning -Label 'TeknoParrot profile list' -Current $localCurrent -Total $localProfiles.Count -StartedAt $profileScanStarted
             $s = [System.IO.Path]::GetFileNameWithoutExtension($localProfileFile.Name)
-            if ($s -match '^[\w]+$') { [void]$result.Add($s) }
+            if ($s -match '^[\w-]+$') { [void]$result.Add($s) }
         }
         Write-Log "ProfileSet (local fallback): $($result.Count - $liveCount) profiles from $localGameProfilesDir"
     }
@@ -26247,7 +26249,7 @@ function Resolve-ProfileCode {
         $score = Get-DiceSimilarity $normCode (Get-NormalizedGameKey $candidate)
         if ($score -gt $bestScore) { $bestScore = $score; $bestMatch = $candidate }
     }
-    if ($bestScore -ge $FuzzyAutoThreshold -and $null -ne $bestMatch -and $bestMatch -match '^[\w]+$') {
+    if ($bestScore -ge $FuzzyAutoThreshold -and $null -ne $bestMatch -and $bestMatch -match '^[\w-]+$') {
         Write-Log ("Resolve-ProfileCode: '{0}' -> '{1}' (score {2})" -f $code, $bestMatch, [Math]::Round($bestScore,2))
         return $bestMatch
     }
@@ -32935,6 +32937,10 @@ function Get-TpmBepInExDoneLines {
     $kept = @(Get-TpmTransactionField -Object $Result -Name 'FailureRecords' -Default @() | ForEach-Object { [string](Get-TpmTransactionField -Object $_ -Name 'BackupPath' -Default '') } | Where-Object { $_ })
     $backup = Get-TpmBackupFolderLine -Result $Result -ExtraPaths $kept -What 'the game files'
     if ($backup) { [void]$lines.Add($backup) }
+    # Eggman guide (BepInEx section): a BepInEx game must be started and restarted twice the first time so the framework can finish setting up.
+    if ([int](Get-TpmTransactionField -Object $Result -Name 'Updated' -Default 0) -gt 0) {
+        [void]$lines.Add('The first time you start a BepInEx game, start it and close it twice so BepInEx can finish setting itself up. To reset BepInEx, delete only its cache and config folders.')
+    }
     return $lines.ToArray()
 }
 
@@ -36457,7 +36463,7 @@ function Get-TpmSupportProfileFiles {
 
 function Get-TpmSupportSavedMappingCheck {
     param([string]$UserProfilesDir, [string]$Code, [string]$ExpectedPath)
-    if ([string]::IsNullOrWhiteSpace($UserProfilesDir) -or $Code -notmatch '^[\w]+$' -or [string]::IsNullOrWhiteSpace($ExpectedPath)) { return 'NOT_CHECKED' }
+    if ([string]::IsNullOrWhiteSpace($UserProfilesDir) -or $Code -notmatch '^[\w-]+$' -or [string]::IsNullOrWhiteSpace($ExpectedPath)) { return 'NOT_CHECKED' }
     try {
         $profilePath = Join-Path $UserProfilesDir ($Code + '.xml')
         if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf)) { return 'PROFILE_MISSING' }
@@ -36513,7 +36519,7 @@ function Get-TpmSupportLedgerProjection {
                     State = [string]$mapping.State; Reason = (Redact-TpmSupportText -Text ([string]$mapping.Reason)).Text; Readback = [bool]$mapping.Readback
                     AttemptUtc = [string]$mapping.AttemptUtc; SavedProfileCheck = $check
                 })
-                if ($code -match '^[\w]+$') {
+                if ($code -match '^[\w-]+$') {
                     [void]$affected.Add($code)
                     $entry = ('{0}/{1}' -f $mapping.State, $check)
                     $codeStates[$code] = $(if ($codeStates.ContainsKey($code)) { $codeStates[$code] + '; ' + $entry } else { $entry })
@@ -37034,6 +37040,7 @@ function Register-GamesLegacy {
           [string]$tpRootDir = '', [hashtable]$subFolderMap = $null,
           [string[]]$GameFolders = $null, [hashtable]$BackupState = $null)
     if ($null -eq $datIndex) { $datIndex = @{} }
+    $gameFileExtensions = @(Get-TpmProfileFileExtensions -ProfileIndex $profileIndex)
 
     $discoveryStarted = Get-Date
     $discoveryWatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -37052,7 +37059,7 @@ function Register-GamesLegacy {
     $discoveryCompleted = $false
     try {
         if ($null -eq $GameFolders -or $GameFolders.Count -eq 0) {
-            $exeFiles = @(Get-GameFiles $installFolder -ProgressScript $discoveryProgress)
+            $exeFiles = @(Get-GameFiles $installFolder -ProgressScript $discoveryProgress -ExtraExtensions $gameFileExtensions)
             $discoveryState.Current = [int]($discoveryState.RootOffset + $discoveryState.RootSeen)
         } else {
             $installRoot = [System.IO.Path]::GetFullPath($installFolder).TrimEnd('\')
@@ -37068,7 +37075,7 @@ function Register-GamesLegacy {
             $exeFileCandidates = New-Object System.Collections.Generic.List[object]
             foreach ($scanRoot in $scanRoots) {
                 $discoveryState.RootSeen = 0
-                $rootCandidates = @(Get-GameFiles $scanRoot -ProgressScript $discoveryProgress)
+                $rootCandidates = @(Get-GameFiles $scanRoot -ProgressScript $discoveryProgress -ExtraExtensions $gameFileExtensions)
                 foreach ($candidate in $rootCandidates) { [void]$exeFileCandidates.Add($candidate) }
                 $discoveryState.RootOffset += [int]$discoveryState.RootSeen
                 $discoveryState.Current = [int]$discoveryState.RootOffset
@@ -37255,7 +37262,14 @@ function Register-GamesLegacy {
             $bestFuzzy      = $fuzzyResult.Best
             $bestFuzzyScore = $fuzzyResult.BestScore
 
-            if ($fuzzyResult.IsConfidentMatch) {
+            # The Eggman list names this folder's own game. Among profiles that share one file name the name match is only a guess, so
+            # when the list names a different profile for the folder (The King of Fighters XII against XIV read almost the same), the
+            # list wins: nothing is claimed here and the list pass below registers the folder.
+            $datNamedCodes = @(Get-TpmDatNamedProfileCodes -FolderKey $folderKey -DatIndex $datIndex -GameProfilesDir $gameProfilesDir -ProfileSet $profileSet)
+            if ($fuzzyResult.IsConfidentMatch -and $datNamedCodes.Count -gt 0 -and $datNamedCodes -notcontains $bestFuzzy.Code) {
+                Write-Log ("DatIndex (shared exe name): did not claim {0} for folder '{1}' -- the dat names profile {2} for this folder" -f $bestFuzzy.Code, $folderName, ($datNamedCodes -join ' or '))
+                $resolved = $false
+            } elseif ($fuzzyResult.IsConfidentMatch) {
                 # High-confidence fuzzy match: register automatically.
                 $code = $bestFuzzy.Code
                 if ($seenCodes.ContainsKey($code)) {
@@ -37316,9 +37330,9 @@ function Register-GamesLegacy {
                 # exists) before flagging as ACTION REQUIRED. A game registered via
                 # TeknoParrotUI would have a .xml file even though the fuzzy score is
                 # below the auto-register threshold.
-                $alreadyReg = @($matchList | Where-Object {
-                    Test-Path -LiteralPath (Join-Path $userProfilesDir ($_.Code + ".xml"))
-                })
+                # Only a profile that existed BEFORE this run counts here. A profile written for an earlier folder of this same run is not
+                # proof that this folder is handled; counting it made the second version of a game vanish without a word.
+                $alreadyReg = @($matchList | Where-Object { $preExistingCodes.Contains($_.Code) })
                 foreach ($ar in $alreadyReg) {
                     if (-not $seenCodes.ContainsKey($ar.Code)) {
                         if ($already -notcontains $ar.Code) { [void]$already.Add($ar.Code) }
@@ -37348,7 +37362,7 @@ function Register-GamesLegacy {
                         $datCode = $datEntry.ProfileCode
                         # Profile codes are purely alphanumeric; reject anything else to
                         # prevent path traversal via a crafted dat file.
-                        if ($datCode -match '^[\w]+$') {
+                        if ($datCode -match '^[\w-]+$') {
                             if ($gameProfilesDir) {
                                 $datCode = Resolve-ProfileCode $datCode $gameProfilesDir $profileSet
                             }
@@ -37468,7 +37482,7 @@ function Register-GamesLegacy {
         # game file registers on its own turn, or the dat pass below registers the folder. See issue #404.
         if ($datIndex.Count -gt 0) {
             $ownDatEntry = (Get-DatEntryForZipName -RawZipName $folderKey -DatIndex $datIndex)
-            if ($null -ne $ownDatEntry -and [string]$ownDatEntry.ProfileCode -match '^[\w]+$') {
+            if ($null -ne $ownDatEntry -and [string]$ownDatEntry.ProfileCode -match '^[\w-]+$') {
                 $ownDatCode = [string]$ownDatEntry.ProfileCode
                 if ($gameProfilesDir) { $ownDatCode = Resolve-ProfileCode $ownDatCode $gameProfilesDir $profileSet }
                 if ($ownDatCode -ine $code) {
@@ -37589,7 +37603,7 @@ function Register-GamesLegacy {
             if ($null -eq $datEntry) { continue }
 
             $datCode = $datEntry.ProfileCode
-            if ($datCode -notmatch '^[\w]+$') {
+            if ($datCode -notmatch '^[\w-]+$') {
                 Write-Log ("DatIndex (pass2): invalid ProfileCode '{0}' -- skipped folder {1}" -f $datCode, $folderKey)
                 continue
             }
@@ -37631,9 +37645,10 @@ function Register-GamesLegacy {
 
             $templatePath = Join-Path $gameProfilesDir ($datCode + ".xml")
             if (-not (Test-Path -LiteralPath $templatePath)) {
-                Write-Log ("DatIndex (pass2): no GameProfiles template for '{0}' -- skipping {1}" -f $datCode, $folderKey)
-                Add-TpmRegistrationMappingFailure -Folder $origName -Code $datCode -Match 'dat-pass2' -Reason 'TEMPLATE_MISSING' -TemplatePath $templatePath -DryRun $DryRun
-                [void]$mutationRecords.Failures.Add([pscustomobject]@{ Code=$datCode; WriteAttempted=$false; Reason='TEMPLATE_MISSING' })
+                # The list names a game TeknoParrot has no profile for (extra archives the guide marks unsupported). That is not a
+                # failure of the Manager: the folder is "not in TeknoParrot", so it stays out of the matched folders and is listed so.
+                Write-Log ("DatIndex (pass2): TeknoParrot has no game profile named '{0}' -- folder {1} is not in TeknoParrot" -f $datCode, $folderKey)
+                [void]$matchedFolders.Remove($folderKey)
                 continue
             }
 
@@ -37651,6 +37666,9 @@ function Register-GamesLegacy {
                     }
                 }
             }
+            # A file the list itself names for this profile is the game file, so the other ZIP a profile name may list ("child;parent":
+            # a merged ROM set holds the child inside the parent) is not needed beside it.
+            $exeFromDat = ($null -ne $exeToUse)
             if (-not $exeToUse) {
                 # Fallback: pick the first matching file already found for this folder
                 $first = @($exeFiles | Where-Object {
@@ -37665,7 +37683,7 @@ function Register-GamesLegacy {
                 [void]$mutationRecords.Failures.Add([pscustomobject]@{ Code=$datCode; WriteAttempted=$false; Reason='EXECUTABLE_MISSING' })
                 continue
             }
-            if (@(Get-TpmMissingGameSetFiles -GamePath $exeToUse -ExecutableName ([string](Get-PrimaryExecutableName $templatePath))).Count -gt 0) {
+            if (-not $exeFromDat -and @(Get-TpmMissingGameSetFiles -GamePath $exeToUse -ExecutableName ([string](Get-PrimaryExecutableName $templatePath))).Count -gt 0) {
                 Write-Log ("DatIndex (pass2): {0} was left alone because the other ZIP its profile names is not in folder {1}" -f $datCode, $folderKey)
                 continue
             }
@@ -37840,7 +37858,7 @@ function Register-GamesLegacy {
         foreach ($sfCode in @($subFolderMap.Keys)) {
             if (Test-TpmRegistrationLedgerStopped) { break }
             $sfCode = [string]$sfCode
-            if ($sfCode -notmatch '^[\w]+$') {
+            if ($sfCode -notmatch '^[\w-]+$') {
                 Write-Log "Register-Games: subFolderMap key '$sfCode' contains invalid characters -- skipped."
                 continue
             }
@@ -37903,6 +37921,10 @@ function Register-GamesLegacy {
         if ($_.Reason -eq 'duplicate') { $claimKey -ine $folderKey } else { -not $matchedFolders.ContainsKey($folderKey) }
     })
 
+    # The second profile the list names for a folder (GameProfile2), after the first one is registered or found.
+    if ($datIndex.Count -gt 0 -and $gameProfilesDir -and -not (Test-TpmRegistrationLedgerStopped)) {
+        Register-TpmDatSecondProfiles -Registered $registered -Already $already -SeenCodes $seenCodes -ClaimedBy $codeClaimedBy -ExeFiles $exeFiles -InstallBase $installBase -DatIndex $datIndex -GameProfilesDir $gameProfilesDir -ProfileSet $profileSet -UserProfilesDir $userProfilesDir -DryRun $DryRun -MutationRecords $mutationRecords -BackupState $BackupState
+    }
     $unmatched = @($allExeFolders.Keys | Where-Object { -not $matchedFolders.ContainsKey($_) } | Sort-Object)
     $evidenceStopped = (-not $DryRun -and (Test-TpmRegistrationLedgerStopped))
     $unattemptedFolders = @()
@@ -37942,7 +37964,7 @@ function Invoke-ManualRegistrationChoices {
         $decision = [pscustomobject]@{ Game=$folderName; Code=('manual:' + $folderName); Outcome='SKIPPED'; Reason='USER_LEFT_UNRESOLVED'; WriteAttempted=$false }
         $ledgerMapping = $null; $preWriteState = $null
         try {
-            $candidates = @($info.Profiles -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[\w]+$' })
+            $candidates = @($info.Profiles -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[\w-]+$' })
             if ($candidates.Count -eq 0) { $decision.Reason='NO_VALID_CANDIDATE'; continue }
             Write-Host ""
             Write-Host ("  Ambiguous registration: {0}" -f $folderName) -ForegroundColor Yellow
@@ -38169,7 +38191,7 @@ function Repair-GamePathsLegacy {
         param($file, $current)
         Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Game-file discovery' -Current $current -Total 0 -StartedAt $repairStarted
     }
-    foreach ($file in (Get-GameFiles $installFolder -ProgressScript $scanProgress)) {
+    foreach ($file in (Get-GameFiles $installFolder -ProgressScript $scanProgress -ExtraExtensions (Get-TpmProfileFileExtensions -ProfileIndex $profileIndex))) {
         $k = $file.Name.ToLowerInvariant()
         if (-not $exeMap.ContainsKey($k)) { $exeMap[$k] = New-Object System.Collections.ArrayList }
         [void]$exeMap[$k].Add($file.FullName)
@@ -39492,6 +39514,122 @@ function Get-DatEntryForZipName {
     return $primary
 }
 
+# The profile codes the Eggman list names for one game folder (exact name match): the first profile, then the second one (for a
+# Lindbergh game the ElfLdr2 profile that replaces the retired Lindbergh loader; for Raiden III, Raiden IV and Densha de GO the other
+# profile of the same files). Only safe names are returned, resolved the way registration resolves them. Empty when the list does not
+# know the folder.
+function Get-TpmDatNamedProfileCodes {
+    param([string]$FolderKey, [hashtable]$DatIndex, [string]$GameProfilesDir = '', [System.Collections.Generic.HashSet[string]]$ProfileSet = $null)
+    if (-not $DatIndex -or $DatIndex.Count -eq 0) { return @() }
+    $entry = Get-DatEntryForZipName -RawZipName $FolderKey -DatIndex $DatIndex
+    if ($null -eq $entry) { return @() }
+    $codes = New-Object System.Collections.Generic.List[string]
+    foreach ($propertyName in @('ProfileCode', 'ProfileCode2')) {
+        $property = $entry.PSObject.Properties[$propertyName]
+        if ($null -eq $property -or $null -eq $property.Value) { continue }
+        $code = ([string]$property.Value).Trim()
+        if ($code -notmatch '^[\w-]+$') { continue }
+        if ($GameProfilesDir) { $code = Resolve-ProfileCode $code $GameProfilesDir $ProfileSet }
+        if (-not $codes.Contains($code)) { [void]$codes.Add($code) }
+    }
+    return $codes.ToArray()
+}
+
+# The file types the TeknoParrot profiles name for their game file (".exec", ".chd", ".1" and so on), read from the executable
+# index, so game discovery needs no change when a new game uses a new kind of file.
+function Get-TpmProfileFileExtensions {
+    param([hashtable]$ProfileIndex = $null)
+    $extensions = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    if ($null -ne $ProfileIndex) {
+        foreach ($name in $ProfileIndex.Keys) {
+            $extension = ''
+            try { $extension = [System.IO.Path]::GetExtension([string]$name) } catch { $extension = '' }
+            if ($extension -and $extension.Length -gt 1) { [void]$extensions.Add($extension.ToLowerInvariant()) }
+        }
+    }
+    return @($extensions)
+}
+
+# Registers the SECOND profile the Eggman list names for a game folder (GameProfile2), once the folder's first profile was registered
+# or found, but only when TeknoParrot has retired the first profile (IsDeprecated): then a Lindbergh game got only the retired Lindbergh
+# profile and never its ElfLdr2 one. For other games the meaning of a second profile is not documented, so none is written. The game
+# file is one of the file names the second profile itself lists (or, when it lists none, the file the list names); when neither is in
+# the folder nothing is guessed and the log says so.
+function Register-TpmDatSecondProfiles {
+    param(
+        [Parameter(Mandatory)]$Registered, [Parameter(Mandatory)]$Already, [Parameter(Mandatory)][hashtable]$SeenCodes, [Parameter(Mandatory)][hashtable]$ClaimedBy,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ExeFiles, [Parameter(Mandatory)][string]$InstallBase,
+        [Parameter(Mandatory)][hashtable]$DatIndex, [Parameter(Mandatory)][string]$GameProfilesDir,
+        [System.Collections.Generic.HashSet[string]]$ProfileSet = $null, [Parameter(Mandatory)][string]$UserProfilesDir,
+        [bool]$DryRun = $false, [Parameter(Mandatory)]$MutationRecords, $BackupState = $null
+    )
+    $folderNames = New-Object System.Collections.Generic.List[string]
+    foreach ($exeFile in $ExeFiles) {
+        $relative = ([string]$exeFile.FullName).Substring($InstallBase.Length).TrimStart('\')
+        $folderName = ($relative -split '\\')[0]
+        if ($folderName -and -not $folderNames.Contains($folderName)) { [void]$folderNames.Add($folderName) }
+    }
+    foreach ($folderName in $folderNames) {
+        if (Test-TpmRegistrationLedgerStopped) { break }
+        $folderKey = $folderName -replace '\.(teknoparrot|parrot|game)$', ''
+        $codes = @(Get-TpmDatNamedProfileCodes -FolderKey $folderKey -DatIndex $DatIndex -GameProfilesDir $GameProfilesDir -ProfileSet $ProfileSet)
+        if ($codes.Count -lt 2) { continue }
+        $first = [string]$codes[0]
+        $second = [string]$codes[1]
+        if ($second -ieq $first -or -not $SeenCodes.ContainsKey($first) -or $SeenCodes.ContainsKey($second)) { continue }
+        if ([string]$ClaimedBy[$first] -ine $folderName) { continue }
+        $firstTemplate = Join-Path $GameProfilesDir ($first + '.xml')
+        $retired = $false
+        try {
+            $retiredNode = (Read-Xml $firstTemplate).GameProfile.SelectSingleNode('IsDeprecated')
+            $retired = ($null -ne $retiredNode -and $retiredNode.InnerText.Trim() -ieq 'true')
+        } catch { $retired = $false }
+        if (-not $retired) { continue }
+        $templatePath = Join-Path $GameProfilesDir ($second + '.xml')
+        if (-not (Test-Path -LiteralPath $templatePath -PathType Leaf)) { Write-Log ("DatIndex (second profile): no GameProfiles template for '{0}' -- folder {1}" -f $second, $folderKey); continue }
+        $folderFull = Join-Path $InstallBase $folderName
+        $inFolder = @($ExeFiles | Where-Object { ([string]$_.FullName).StartsWith($folderFull + '\', [System.StringComparison]::OrdinalIgnoreCase) })
+        $names = @((Get-TpmGameFileSet -ExecutableName ([string](Get-PrimaryExecutableName $templatePath))).Choices)
+        $gameFile = ''
+        if ($names.Count -gt 0) {
+            foreach ($name in $names) {
+                $hit = @($inFolder | Where-Object { $_.Name -ieq $name } | Sort-Object { ([string]$_.FullName).Length } | Select-Object -First 1)
+                if ($hit.Count -gt 0) { $gameFile = [string]$hit[0].FullName; break }
+            }
+        } else {
+            $datEntry = Get-DatEntryForZipName -RawZipName $folderKey -DatIndex $DatIndex
+            $relativeExe = if ($null -ne $datEntry) { ([string]$datEntry.Executable).Trim().TrimStart('\', '/') } else { '' }
+            if ($relativeExe) {
+                $candidate = Join-Path $folderFull $relativeExe
+                if ((Test-PathInside $candidate $folderFull) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { $gameFile = $candidate }
+            }
+        }
+        if (-not $gameFile) { Write-Log ("DatIndex (second profile): {0} was left alone because none of its game files is in folder {1}" -f $second, $folderKey); continue }
+        $SeenCodes[$second] = $true
+        $ClaimedBy[$second] = $folderName
+        $userProfile = Join-Path $UserProfilesDir ($second + '.xml')
+        if (Test-Path -LiteralPath $userProfile) {
+            if ($Already -notcontains $second) { [void]$Already.Add($second) }
+            Backfill-SecondaryExecutablePath $userProfile $DryRun -RegistrationState $MutationRecords -BackupState $BackupState -UserProfilesDir $UserProfilesDir -Folder $folderName
+            continue
+        }
+        $writeAttempted = $false; $ledgerMapping = $null; $preWriteState = $null
+        try {
+            $ledgerMapping = Start-TpmRegistrationMapping -Folder $folderName -Code $second -Match 'dat-second-profile' -IntendedPath $gameFile -TemplatePath $templatePath -DryRun $DryRun
+            Set-TpmRegistrationGamePath -TemplatePath $templatePath -ExePath $gameFile -UserProfile $userProfile -DryRun $DryRun -BackupState $BackupState -UserProfilesDir $UserProfilesDir -MutationRecords $MutationRecords -PreWriteState ([ref]$preWriteState) -WriteAttempted ([ref]$writeAttempted)
+            Complete-TpmRegistrationMapping -MappingId $ledgerMapping -Outcome VERIFIED
+            [void]$Registered.Add([pscustomobject]@{ Code = $second; GamePath = $gameFile; DatMatch = $true; SecondProfile = $true })
+            Write-Log "Registered (dat/second profile) $second -> $gameFile"
+        } catch {
+            $saveFailure = Resolve-TpmRegistrationSaveFailure -WriteAttempted $writeAttempted -PreState $preWriteState -Message $_.Exception.Message
+            Complete-TpmRegistrationMapping -MappingId $ledgerMapping -Outcome FAILED -WriteAttempted $saveFailure.WriteAttempted -Reason $saveFailure.Reason
+            if ($Registered.Code -notcontains $second) { [void]$MutationRecords.Failures.Add([pscustomobject]@{ Code = $second; WriteAttempted = $saveFailure.WriteAttempted; Reason = 'REGISTRATION_NOT_VERIFIED' }) }
+            Write-Host "  FAILED to register $second : $_" -ForegroundColor Red
+            Write-Log "Register (dat second profile) FAILED $second -- $_"
+        }
+    }
+}
+
 # The names one ZIP claims for its NEW folder in a run. Two ZIPs of the same game (same profile code) must not both create
 # a folder. Two games that only read the same after the year and tags are removed (other hardware or version) each have
 # their own profile code, so only the profile code is claimed when the ZIP name picks out exactly one of them.
@@ -39505,7 +39643,7 @@ function Get-TpmAutoSyncClaimKeys {
         if ($null -ne $alternatesProperty -and $null -ne $alternatesProperty.Value -and $alternatesProperty.Value.Count -gt 0) {
             $entry = Get-DatEntryForZipName -RawZipName $RawZipName -DatIndex $DatIndex
             $baseName = Get-TpmZipBaseName $RawZipName
-            if ($entry -and [string]$entry.OriginalName -ieq $baseName -and [string]$entry.ProfileCode -match '^[\w]+$') {
+            if ($entry -and [string]$entry.OriginalName -ieq $baseName -and [string]$entry.ProfileCode -match '^[\w-]+$') {
                 return @([string]$entry.ProfileCode, (Get-NormalizedGameKey ([string]$entry.ProfileCode)))
             }
         }
@@ -39533,7 +39671,7 @@ function Get-TpmExtractedGameFolderCandidateKeys {
     }
 
     $datEntry = Get-DatEntryForZipName -RawZipName $RawZipName -DatIndex $DatIndex
-    if ($datEntry -and $datEntry.ProfileCode -and $datEntry.ProfileCode -match '^[\w]+$') {
+    if ($datEntry -and $datEntry.ProfileCode -and $datEntry.ProfileCode -match '^[\w-]+$') {
         $profileCode = [string]$datEntry.ProfileCode
         foreach ($key in @($profileCode, (Get-NormalizedGameKey $profileCode))) {
             if (-not [string]::IsNullOrWhiteSpace($key) -and -not $candidateKeys.Contains($key)) { [void]$candidateKeys.Add($key) }
@@ -39708,7 +39846,7 @@ function Resolve-RegisteredGameFolder {
     # Profile codes are purely alphanumeric; reject anything else before joining
     # into a path -- the dat is externally-sourced, untrusted input, same as the
     # ProfileCode check in Register-Games (see SECURITY.md).
-    if ($datEntry.ProfileCode -notmatch '^[\w]+$') { return $null }
+    if ($datEntry.ProfileCode -notmatch '^[\w-]+$') { return $null }
     $profilePath = Join-Path $userProfilesDir "$($datEntry.ProfileCode).xml"
     if (-not (Test-Path -LiteralPath $profilePath)) { return $null }
     try {
@@ -41773,6 +41911,24 @@ function Get-TpmGameSupportLines {
     return $lines.ToArray()
 }
 
+# The games TeknoParrot's own metadata says do not work on one graphics card maker ("amd" or "intel" is "NO" in Metadata.catalog.json in the
+# TeknoParrot folder). Read-only. An empty list when the file is missing or cannot be read, so the fixed table below still applies.
+function Get-TpmMetadataGpuIncompatibleCodes {
+    param([string]$TeknoParrotRoot, [string]$Vendor)
+    $field = switch ($Vendor) { 'AMD' { 'amd' } 'Intel' { 'intel' } default { '' } }
+    if (-not $field -or [string]::IsNullOrWhiteSpace($TeknoParrotRoot)) { return @() }
+    $path = Join-Path $TeknoParrotRoot 'Metadata.catalog.json'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return @() }
+    try {
+        $catalog = [System.IO.File]::ReadAllText($path) | ConvertFrom-Json
+        return @($catalog.PSObject.Properties | Where-Object { $_.Name -match '^[\w-]+$' -and $null -ne $_.Value -and $null -ne $_.Value.PSObject.Properties[$field] -and [string]$_.Value.$field -eq 'NO' } | ForEach-Object { [string]$_.Name })
+    } catch {
+        Write-Log ("GpuCheck: the TeknoParrot game metadata could not be read -- {0}" -f $_.Exception.Message)
+        return @()
+    }
+}
+
+
 # Read-only scan for all compatibility checks above. Returns
 # [pscustomobject]@{ PathTooLong = @(...); DllMismatch = @(...); GpuIncompatible = @(...); BiosMissing = @(...); ExeMissing = @(...) }.
 # Each PathTooLong entry: @{ Code; Length; Limit; Suggested }.
@@ -41799,6 +41955,8 @@ function Get-CompatibilityWarnings {
         [System.Collections.Generic.HashSet[string]]::new(
             [string[]]$GpuIncompatibleGames[$detectedVendor], [System.StringComparer]::OrdinalIgnoreCase)
     } else { $null }
+    # TeknoParrot's own game metadata also names the games that do not work on this card maker, so a new game is covered without a new Manager version.
+    if ($null -ne $gpuList) { foreach ($metadataCode in @(Get-TpmMetadataGpuIncompatibleCodes -TeknoParrotRoot $TeknoParrotRoot -Vendor $detectedVendor)) { [void]$gpuList.Add($metadataCode) } }
 
     $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Compatibility warning profile discovery' -EnumerationErrorAction SilentlyContinue)
 
@@ -44194,7 +44352,7 @@ function Set-TpmGameSetupStep {
 function Get-TpmControlVerificationState {
     param([Parameter(Mandatory)][string]$Code, $Doc = $null, [string]$StateRoot = '')
     $result = [pscustomobject]@{ Status = 'None'; Evidence = $null; Reason = ''; FirstRun = 'Unknown'; Calibration = 'Unknown'; Outstanding = @() }
-    if ($Code -notmatch '^[\w]+$' -or $null -eq $Doc -or $null -eq $Doc.SelectSingleNode('/GameProfile')) { return $result }
+    if ($Code -notmatch '^[\w-]+$' -or $null -eq $Doc -or $null -eq $Doc.SelectSingleNode('/GameProfile')) { return $result }
     $identity = Get-TpmControlProfileIdentity -Doc $Doc
     $file = Read-TpmControlStateFile -Path (Get-TpmControlStatePath -StateRoot $StateRoot).Evidence
     $record = $null
@@ -53893,7 +54051,7 @@ function Get-ControlReadinessRegistrationState {
     # Resolve-RegisteredGameFolder); a $Code sourced from an externally-fetched
     # dat index is untrusted input, so reject anything else before it is ever
     # joined into a path rather than let a traversal sequence reach Join-Path.
-    if ($Code -notmatch '^[\w]+$') { return 'Unregistered' }
+    if ($Code -notmatch '^[\w-]+$') { return 'Unregistered' }
 
     $path = Join-Path $UserProfilesDir "$Code.xml"
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return 'Unregistered' }
@@ -54482,7 +54640,7 @@ function Get-ControlReadinessActionItems {
 function Get-TpmControlCoverageContract {
     param([string]$Code)
 
-    if ([string]::IsNullOrWhiteSpace($Code) -or $Code -notmatch '^[\w]+$') { return $null }
+    if ([string]::IsNullOrWhiteSpace($Code) -or $Code -notmatch '^[\w-]+$') { return $null }
     $requirements = Get-ControlReadinessKnownRequirements -Code $Code
     if ($null -eq $requirements) { return $null }
 
