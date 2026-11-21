@@ -68,12 +68,6 @@ BeforeAll {
         $offerText = $offerBlock.Extent.Text
         $pieces['Offer'] = $offerText.Substring(1, $offerText.Length - 2)
 
-        $updateIf = @($script:F70Ast.FindAll({
-            $args[0] -is [System.Management.Automation.Language.IfStatementAst] -and $args[0].Clauses[0].Item1.Extent.Text -like '*$checkForUpdatesOnStartup -and -not $Unattended*'
-        }, $true)) | Select-Object -First 1
-        if ($null -eq $updateIf) { throw 'Start-up update check block not found.' }
-        $pieces['UpdateCheck'] = $updateIf.Extent.Text.Replace('$PSScriptRoot', "'C:\TestProgram'")
-
         $missingIf = @($script:F70Ast.FindAll({
             $args[0] -is [System.Management.Automation.Language.IfStatementAst] -and $args[0].Clauses[0].Item1.Extent.Text -like '*$eggmanDatZip -and -not (Test-Path*' -and $args[0].Clauses[0].Item1.Extent.Text -like '*$datFilePath -and -not (Test-Path*'
         }, $true)) | Select-Object -First 1
@@ -211,23 +205,6 @@ Describe 'FIX70 start-up DAT question has one blank line before it' {
         $lines[$said + 1] | Should -BeExactly ''
         $lines[$said + 2] | Should -Match '^  Optional: download the DAT index'
         (Get-F70DoubleBlankCount -Lines $lines) | Should -Be 0
-    }
-
-    It 'adds the blank line when the start-up update check printed something: <Reason>' -TestCases @(
-        @{ Reason = 'UPDATE_REMIND_LATER'; Printed = $true; Expected = 5 },
-        @{ Reason = 'UPDATE_ALREADY_CURRENT'; Printed = $false; Expected = 4 }
-    ) {
-        param($Reason, $Printed, $Expected)
-        # Mutation: never record that the update check printed (the question then follows its text with no blank
-        # line), or always record it (the quiet "already current" check then adds a second blank line).
-        $script:F70UpdateReason = $Reason
-        Mock Invoke-StartupUpdateCheck { return [pscustomobject]@{ Outcome = 'NO_OP'; ReasonCode = $script:F70UpdateReason; Summary = 'No update was installed.' } }
-        $result = Invoke-F70Startup -Pieces @('UpdateCheck') -Seed @{ configAccepted = $true }
-        $result.Printed | Should -Be $Printed
-        Install-F70Mocks
-        Mock Get-EggmanDatDataRoot { return 'C:\Eggman' }
-        [void](Invoke-F70Startup -Pieces @('Prelude') -Seed @{ configAccepted = $true; tpmPrintedAfterSavedSettings = $result.Printed })
-        @(Get-F70Lines).Count | Should -Be $Expected
     }
 
     It 'writes no double blank line on the way from the saved settings to the question, and a blank line after the missing-DAT notice' {

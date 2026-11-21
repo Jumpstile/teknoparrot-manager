@@ -35707,8 +35707,12 @@ function Invoke-StartupUpdateCheck {
         Write-Host "  $releaseSummary" -ForegroundColor DarkGray
     }
     Write-Log "StartupUpdateCheck: update available (v$ScriptVersion -> $($release.TagName))."
+    Write-Host ""
+    Write-Host "  Y = Update now (starts the update here; you confirm once more first)" -ForegroundColor Cyan
+    Write-Host "  N = Remind me later (keep this version for now)" -ForegroundColor Cyan
+    Write-Host "  V = View release notes (see what changed, then choose again)" -ForegroundColor Cyan
     while ($true) {
-        $ans = Read-TpmChoice -Prompt "  Update now, remind me later, or view release notes? (Y/N/V)" -Choices @('Y', 'N', 'V') -Default 'N'
+        $ans = Read-TpmChoice -Prompt "  Your choice (Y/N/V)" -Choices @('Y', 'N', 'V') -Default 'N'
         if ($ans -eq 'V') {
             Write-Host ""
             if ($release.Body) { Write-Host $release.Body -ForegroundColor DarkGray } else { Write-Host '  No release notes were provided for this release.' -ForegroundColor DarkGray }
@@ -51850,9 +51854,9 @@ function Write-TpmActionRequiredReport {
         Write-TpmAtomicTextFile -Path $ActionPath -Text $text -Operation 'ACTION REQUIRED report write'
         if (-not $Quiet) {
             Write-Host ""
-            Write-Host "  Action items saved to:" -ForegroundColor Green
+            Write-Host $(if ($DesignOnly) { '  Notes saved to:' } else { '  Action items saved to:' }) -ForegroundColor Green
             Write-Host "  $ActionPath" -ForegroundColor Cyan
-            Write-Host "  Open that file to review everything you need to do manually." -ForegroundColor DarkCyan
+            Write-Host $(if ($DesignOnly) { '  Nothing failed. Open that file if you want to read the notes.' } else { '  Open that file to review everything you need to do manually.' }) -ForegroundColor DarkCyan
             Write-Log "Action items written to $ActionPath"
         }
         return $true
@@ -53489,6 +53493,41 @@ if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended -and -not $i
     [void](Read-HostSafe "  Press Enter to continue")
 }
 
+# Read before the saved-settings question so the update check can run first. An unreadable file keeps the default (true).
+if (Test-Path -LiteralPath $configPath) {
+    try {
+        $earlyCfg = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($null -ne $earlyCfg -and $null -ne $earlyCfg.CheckForUpdatesOnStartup) { $checkForUpdatesOnStartup = [bool]$earlyCfg.CheckForUpdatesOnStartup }
+    } catch { Write-Log "Config: could not read the update-check preference -- $_" }
+}
+
+# Quiet, opt-out startup update check (CheckForUpdatesOnStartup, default
+# true). Never runs in -Unattended mode -- there is no way to show an
+# interactive Y/N/V prompt there, and Unattended is meant to be fast and
+# non-interactive. See Invoke-StartupUpdateCheck's own comment for how it
+# stays from meaningfully delaying startup when GitHub is unreachable.
+if ($checkForUpdatesOnStartup -and -not $Unattended -and -not $isPostgresRecoveryResume) {
+    $scriptSelfPathForStartupCheck = Join-Path $PSScriptRoot "TeknoParrot-Manager.ps1"
+    $startupUpdateResult = Invoke-StartupUpdateCheck -ScriptPath $scriptSelfPathForStartupCheck
+    if (-not (Test-TpmTransactionResult -Result $startupUpdateResult)) {
+        Write-Log 'StartupUpdateCheck: update flow did not return a valid transaction result; continuing without restart.'
+    } elseif ($startupUpdateResult.Outcome -eq 'SUCCEEDED' -or [bool](Get-TpmTransactionField -Object $startupUpdateResult -Name 'UpdateInstalled' -Default $false)) {
+        Write-Host ""
+        if ($startupUpdateResult.Outcome -ne 'SUCCEEDED') { Write-Host ("  {0}" -f $startupUpdateResult.Summary) -ForegroundColor Yellow }
+        Write-Host "  Restart TeknoParrot Manager now to run the verified update." -ForegroundColor Yellow
+        [void](Read-HostSafe "  Press Enter to exit")
+        Write-Log "StartupUpdateCheck: exiting after verified update -- not continuing in this session."
+        exit 0
+    } elseif ($startupUpdateResult.Outcome -eq 'ROLLED_BACK_VERIFIED') {
+        Write-Host "  The update did not install. Your old version of TeknoParrot Manager is still in place and is starting now. You can try again later with 'Check for Updates' in the menu." -ForegroundColor Yellow
+        Write-Log "StartupUpdateCheck: update was not installed and the old manager file was restored and verified; reason=$($startupUpdateResult.ReasonCode)"
+    } elseif ($startupUpdateResult.Outcome -ne 'NO_OP') {
+        Write-Host ("  {0}" -f $startupUpdateResult.Summary) -ForegroundColor Yellow
+        Write-Log "StartupUpdateCheck: transaction outcome=$($startupUpdateResult.Outcome); reason=$($startupUpdateResult.ReasonCode)"
+    }
+    if ([string](Get-TpmTransactionField -Object $startupUpdateResult -Name 'ReasonCode' -Default '') -ne 'UPDATE_ALREADY_CURRENT') { Write-Host "" }
+}
+
 # True first run only: no saved config.json existed at all before this
 # wizard run started. Used once, below, to look for a settings file already
 # saved for the chosen TeknoParrot folder and offer it.
@@ -53503,11 +53542,7 @@ if (Test-Path -LiteralPath $configPath) {
     try {
         $cfg = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($null -eq $cfg) { throw "Config file parsed as null -- file may be empty or corrupt." }
-        # Read before the corrupt-config check below: this is an independent
-        # preference, not tied to TeknoParrotRoot/GamesInstallFolder, so it
-        # should still apply even if the rest of the saved config is
-        # otherwise treated as corrupt/incomplete.
-        if ($null -ne $cfg.CheckForUpdatesOnStartup) { $checkForUpdatesOnStartup = [bool]$cfg.CheckForUpdatesOnStartup }
+        # CheckForUpdatesOnStartup was already read before the update check (it ran ahead of this question).
         $cfgUnattendedModeLoad = $cfg.PSObject.Properties['UnattendedMode']
         if ($cfgUnattendedModeLoad -and -not [string]::IsNullOrWhiteSpace([string]$cfgUnattendedModeLoad.Value)) { $unattendedModeSaved = [string]$cfgUnattendedModeLoad.Value }
         # The encrypted PostgreSQL credential belongs to this PC's PostgreSQL
@@ -53625,33 +53660,6 @@ $cfg = $null   # the settings file as read (if any) is baseline for detecting an
 Set-TpmConfigBaseline -Path ([string]$configPath) -OnDisk $cfg -Document (Get-TpmConfigDocument)
 # An update that was cut off (power loss, window closed) leaves its staging folder here: say so once, in plain words.
 if (-not $isPostgresRecoveryResume) { Write-TpmInterruptedUpdateNotice -ProgramDir $PSScriptRoot }
-
-# Quiet, opt-out startup update check (CheckForUpdatesOnStartup, default
-# true). Never runs in -Unattended mode -- there is no way to show an
-# interactive Y/N/V prompt there, and Unattended is meant to be fast and
-# non-interactive. See Invoke-StartupUpdateCheck's own comment for how it
-# stays from meaningfully delaying startup when GitHub is unreachable.
-if ($checkForUpdatesOnStartup -and -not $Unattended -and -not $isPostgresRecoveryResume) {
-    $scriptSelfPathForStartupCheck = Join-Path $PSScriptRoot "TeknoParrot-Manager.ps1"
-    $startupUpdateResult = Invoke-StartupUpdateCheck -ScriptPath $scriptSelfPathForStartupCheck
-    if (-not (Test-TpmTransactionResult -Result $startupUpdateResult)) {
-        Write-Log 'StartupUpdateCheck: update flow did not return a valid transaction result; continuing without restart.'
-    } elseif ($startupUpdateResult.Outcome -eq 'SUCCEEDED' -or [bool](Get-TpmTransactionField -Object $startupUpdateResult -Name 'UpdateInstalled' -Default $false)) {
-        Write-Host ""
-        if ($startupUpdateResult.Outcome -ne 'SUCCEEDED') { Write-Host ("  {0}" -f $startupUpdateResult.Summary) -ForegroundColor Yellow }
-        Write-Host "  Restart TeknoParrot Manager now to run the verified update." -ForegroundColor Yellow
-        [void](Read-HostSafe "  Press Enter to exit")
-        Write-Log "StartupUpdateCheck: exiting after verified update -- not continuing in this session."
-        exit 0
-    } elseif ($startupUpdateResult.Outcome -eq 'ROLLED_BACK_VERIFIED') {
-        Write-Host "  The update did not install. Your old version of TeknoParrot Manager is still in place and is starting now. You can try again later with 'Check for Updates' in the menu." -ForegroundColor Yellow
-        Write-Log "StartupUpdateCheck: update was not installed and the old manager file was restored and verified; reason=$($startupUpdateResult.ReasonCode)"
-    } elseif ($startupUpdateResult.Outcome -ne 'NO_OP') {
-        Write-Host ("  {0}" -f $startupUpdateResult.Summary) -ForegroundColor Yellow
-        Write-Log "StartupUpdateCheck: transaction outcome=$($startupUpdateResult.Outcome); reason=$($startupUpdateResult.ReasonCode)"
-    }
-    if ([string](Get-TpmTransactionField -Object $startupUpdateResult -Name 'ReasonCode' -Default '') -ne 'UPDATE_ALREADY_CURRENT') { $tpmPrintedAfterSavedSettings = $true }
-}
 
 if (-not $tpRoot) {
     $detected = Find-TeknoParrotRoot
@@ -57727,7 +57735,7 @@ if ($registrationFolders.Count -gt 0) {
     Write-Host 'Preview: registration is checked after a real AutoSync run has extracted and checked the game folders.' -ForegroundColor Yellow
     Write-Log 'Registration scan skipped in preview: AutoSync preview extracts nothing, so there are no verified registration targets.'
 } elseif ($skipAutoSyncRegistration) {
-    Write-Host 'No new game folder was extracted and checked, so registration was skipped this run. To register games already in your games folder, choose Register only from the main menu.' -ForegroundColor Yellow
+    Write-Host 'Nothing new was extracted, so registration was skipped. To register games already extracted, choose Register only.' -ForegroundColor DarkCyan
     Write-Log 'Registration scan skipped: no verified AutoSync registration targets; existing-only fallback refused.'
 } else {
     Write-Host "Checking existing TeknoParrot games for registration changes." -ForegroundColor Cyan
@@ -57766,7 +57774,7 @@ if ($skipAutoSyncRegistration) {
         $result = New-TpmProfileTransactionResult -WorkflowKey 'GameRegistration' -OperationKey 'RegisterProfiles' -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Summary 'Preview: registration is checked after a real AutoSync run. Nothing was changed.' -ReasonCode 'PREVIEW_NO_REGISTRATION' -FinalChecks @('A preview does not register games.')
         $ledgerCloseReason = 'PREVIEW_NO_REGISTRATION'
     } else {
-        $result = New-TpmProfileTransactionResult -WorkflowKey 'GameRegistration' -OperationKey 'RegisterProfiles' -Outcome 'ACTION_REQUIRED' -ProductState 'UNCHANGED' -Summary 'Registration was not attempted because AutoSync returned no verified new game folder. Review extraction outcomes or explicitly choose Register only.' -ReasonCode 'NEW_REGISTRATION_TARGETS_UNVERIFIED' -FinalChecks @('No replacement existing-only registration scan was performed.')
+        $result = New-TpmProfileTransactionResult -WorkflowKey 'GameRegistration' -OperationKey 'RegisterProfiles' -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Summary 'Nothing new was extracted, so registration was skipped. To register games already extracted, choose Register only.' -ReasonCode 'NEW_REGISTRATION_TARGETS_UNVERIFIED' -FinalChecks @('No replacement existing-only registration scan was performed.')
         $ledgerCloseReason = 'NEW_REGISTRATION_TARGETS_UNVERIFIED'
     }
     foreach ($name in @('Registered','Already','Ambiguous','Unmatched')) { $result | Add-Member -NotePropertyName $name -NotePropertyValue @() -Force }
