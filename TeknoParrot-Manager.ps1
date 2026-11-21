@@ -21299,7 +21299,8 @@ function Assert-PostgresRecoveryDirectoryAcl {
 
 function Lock-PostgresRecoveryDirectory {
     param([Parameter(Mandatory)][string]$Path)
-    if ([string](Set-PostgresOwnerOnlyAcl -Path $Path -Directory).Outcome -ne 'Success') { throw 'Postgres recovery evidence ACL could not be verified.' }
+    $lock = Set-PostgresOwnerOnlyAcl -Path $Path -Directory
+    if ([string]$lock.Outcome -ne 'Success') { throw ('Postgres recovery evidence ACL could not be verified. {0}' -f [string]$lock.Detail).TrimEnd() }
 }
 
 function Assert-PostgresRecoveryFileAcl {
@@ -21309,7 +21310,8 @@ function Assert-PostgresRecoveryFileAcl {
 
 function Lock-PostgresRecoveryFile {
     param([Parameter(Mandatory)][string]$Path)
-    if ([string](Set-PostgresOwnerOnlyAcl -Path $Path).Outcome -ne 'Success') { throw 'Postgres recovery file ACL could not be restricted.' }
+    $lock = Set-PostgresOwnerOnlyAcl -Path $Path
+    if ([string]$lock.Outcome -ne 'Success') { throw ('Postgres recovery file ACL could not be restricted. {0}' -f [string]$lock.Detail).TrimEnd() }
 }
 
 function Lock-TpmOwnedMigrationBackupTree {
