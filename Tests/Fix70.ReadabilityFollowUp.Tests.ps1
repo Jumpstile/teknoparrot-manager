@@ -330,6 +330,10 @@ Describe 'FIX70 reason codes for the PostgreSQL screens' {
             'FFB_PROFILE_REVIEW_REQUIRED', 'NO_PLUGIN_CHANGES_NEEDED',
             # ReShade undo: the engine's failure code for the file batch; the undo screen shows the UNDO_* code it is turned into.
             'RESHADE_UNDO_FAILED',
+            # Bezel copy and undo (own screen sentences) and System 11 saved-file copy (own review screen sentences).
+            'BEZEL_FILE_TRANSACTION_FAILED', 'BEZEL_UNDO_FAILED', 'S11_FILE_TRANSACTION_FAILED',
+            # Propagate Controls baseline row: its screen words the reason with Get-TpmBaselineReasonText.
+            'UNREADABLE',
             # Controls, profile writes and paths.
             'CONTROLS_PROCESSED', 'PATHS_PROCESSED', 'NO_USABLE_FAMILY_REFERENCE', 'NO_ELIGIBLE_CHANGES', 'PROFILE_BACKUP_COMPLETED_NO_WRITE',
             'PROFILE_CHANGED_BEFORE_WRITE', 'PROFILE_PLAN_CHANGED', 'PROFILE_SAVE_FAILED',
