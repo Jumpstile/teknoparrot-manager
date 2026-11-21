@@ -128,9 +128,15 @@
     sends another key, or a button is still down after 3 seconds, it
     tells you. It can offer the standard arcade keys that MAME and
     Ultimarc I-PAC boards both use, but only after you say yes and two
-    buttons you press send those keys. It also notices when the number
-    of arcade encoders it can see is different from when you taught it
-    your buttons.
+    buttons you press send those keys.
+  - Controls: the Manager can tell when you changed your arcade encoder.
+    When you save your keys it keeps a private one-way code for each
+    Ultimarc-type encoder it sees (the maker and model numbers are never
+    saved, logged or shared). My controls and the Device Survey then say
+    whether it is the same encoder, one was added or removed, or it could
+    not check. A hint only: it never changes a saved key or answer. Two
+    identical encoders are counted, and a different USB port is not a
+    change.
   - Controls: a game's control page suggests your key only for coin,
     start, numbered buttons and directions the game plainly calls
     directions. It says "I'm not sure" for the rest (for example a "Menu

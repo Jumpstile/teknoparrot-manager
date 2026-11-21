@@ -6,9 +6,9 @@ Related: `CONTROLLER_EVIDENCE_CONTRACT.md` (what detection may say), `CONTROLLER
 
 ## Where it lives
 
-`State\Controls` in TPM's own folder. Two small JSON files, both written by one function (`Save-TpmControlStateFile`):
+`State\Controls` in TPM's own folder. Two small JSON files, both written by one function (`Save-TpmControlStateFile`), and one small text file, `controller-salt.txt`:
 
-- `cabinet.json`: the survey answers per kind of device (`Has`, `Source`, `AnsweredUtc`), the number of players and buttons, the number of arcade encoders detection could see when the keys were last learned (`EncodersWhenLearned`, `-1` when it could not look), and one record per learned arcade control (`Key`, `Source`, `LearnedUtc`).
+- `cabinet.json`: the survey answers per kind of device (`Has`, `Source`, `AnsweredUtc`), the number of players and buttons, the number of arcade encoders detection could see when the keys were last learned (`EncodersWhenLearned`, `-1` when it could not look), the fingerprints of those encoders (`EncoderFingerprints`, a list of `DeviceClass` and `Fingerprint`; `null` when not saved or when detection could not look, an empty list when none was recognized), and one record per learned arcade control (`Key`, `Source`, `LearnedUtc`).
 - `control-evidence.json`: one record per game (`Code`).
 
 Protection rules, the same for both:
@@ -16,7 +16,7 @@ Protection rules, the same for both:
 1. Reading never writes. A missing file is empty. A file that cannot be parsed is reported as `Unreadable` and counts as "no record".
 2. A save of an unreadable file first copies it to `<name>.unreadable-<time>`. If that copy fails, the save stops.
 3. A save of a readable file keeps the old one as `<name>.bak`. The new text is parsed back before it replaces anything (atomic write).
-4. No serial numbers, device paths, vendor or product numbers, machine names or user names are stored. Answers are per kind of device (`XboxStylePad`, `ArcadeEncoder`, `PointerOrTrackball`, `Spinner`, `Wheel`, `LightGun`, `Keyboard`), not per physical device, to stay inside the evidence contract.
+4. No serial numbers, device paths, instance ids, vendor or product numbers, machine names or user names are stored. Answers are per kind of device (`XboxStylePad`, `ArcadeEncoder`, `PointerOrTrackball`, `Spinner`, `Wheel`, `LightGun`, `Keyboard`), not per physical device. The one exception is `EncoderFingerprints`: one-way salted hashes of recognized arcade encoders, kept so TPM can notice a changed controller (see `CONTROLLER_EVIDENCE_CONTRACT.md`). `controller-salt.txt` holds the salt (32 hex characters, made once when the player's keys are first saved, never made by detection). Neither file is read into a log, a report, a guide or the support package.
 
 ## Survey answers (#201)
 
@@ -26,7 +26,7 @@ Learned keys come from, in order: the player pressing the control (`PressedByPla
 
 While learning, three things are only reported, never decided: keys that arrive during a 2 second hands-off check, other keys that arrive within 80 ms of a press (the first key is kept), and a key still down 3 seconds after the press. Nothing about them is saved.
 
-`EncodersWhenLearned` is how many arcade encoders detection saw at Medium or High confidence when the keys were saved. If it differs from a new observation, My controls shows a hint to learn the keys again. It is a note about the past, never evidence about the present, and it holds no vendor or product number.
+`EncodersWhenLearned` and `EncoderFingerprints` are written together when the keys are saved. `Get-TpmControllerSetNotice` compares the saved fingerprints with a new observation and gives one line, shown on My controls and the Device Survey: `Same`, `Added`, `Removed`, `Changed`, or `CouldNotCheck` (no data from Windows, no salt, or no recognized encoder on either side). Keys saved before fingerprints existed have only the count, and then the old count hint is used. The line is a note about the past, never evidence about the present. It never changes a saved key or answer and never decides Verified. Only makers TPM recognizes get a fingerprint, so an unrecognized encoder gives "could not check". Moving a board to another USB port keeps its fingerprint; swapping a board for an identical one is not noticed.
 
 ## Play-test evidence (#307)
 
