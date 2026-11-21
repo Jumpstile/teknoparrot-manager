@@ -383,6 +383,12 @@
     also says whether the match was exact (dat/exact) or by similarity
     (dat/fuzzy).
 
+    The dat file says which format it uses. This version of TeknoParrot
+    Manager knows version 1. If a dat says another version, TeknoParrot
+    Manager tells you in plain words, still reads it the same way and
+    notes it in the log; some games may then not match. A dat with no
+    version is read as before.
+
     A third registration pass (independent of the dat) Dice-matches
     normalized folder names against normalized GameProfile code names.
 
@@ -1529,6 +1535,12 @@
   It scans TeknoParrot's GameProfiles at runtime -- no update is needed
   when new games are added.
 
+  The GPU fix offered at the end of first-time setup ("Apply now?") shows
+  the same result as mode 7: how many games you selected, changed, skipped
+  and failed. A game on a drive that is not connected is called skipped,
+  not failed. The drive letter is named, and the result points to Library
+  health check (menu 13) to repair the game paths.
+
   Mode 8, FFB. The two independent mechanisms are described under FORCE
   FEEDBACK (FFB) SETUP below.
 
@@ -2038,6 +2050,11 @@
 
   After you enter your folders, the script looks at the staging folder. It
   leaves out games that are already extracted there.
+
+  If AutoSync extracts nothing new, it ends with one short note: "Nothing
+  new was extracted, so registration was skipped. To register games
+  already extracted, choose Register only." This is only a note. It is not
+  under ACTION REQUIRED and does not send you to a saved list.
 
   You may also have a second (supplementary) ZIP source. Then both
   libraries are merged into one list. Games from the supplementary source
@@ -2752,9 +2769,9 @@
     2. Type A and press Enter.
        You will see: "Close LaunchBox and BigBox first. TeknoParrot Manager
        will not close them for you." and "Only missing games are added. Your
-       own entries are kept." Then you will see "Add the missing games to
-       LaunchBox now? (Y/N, D = about the risks)". D explains the risks.
-       Next: answer Y.
+       own entries are kept." You already chose A, so there is no extra
+       "now?" question.
+       Next: the script asks for the platform.
 
     3. If you are asked for it, type your LaunchBox install folder.
        Next: the script asks how the games should appear.
@@ -2774,7 +2791,8 @@
 
     5. Read the plan of changes.
        You will see: what would change, then "Write exactly these changes
-       after a verified backup? (Y/N)".
+       after a verified backup? (Y/N, D = about the risks)". This is the
+       only approval.
        Next: Y writes the changes. N stops. You will see "LaunchBox write
        canceled; nothing was changed."
 
@@ -3504,6 +3522,10 @@
 
     Step 8.  You will see: Installing ReShade into (number) games...
              Next: wait. Then read the result screen below.
+             While it works, the progress line counts only the games
+             being changed (for example "Applying ReShade: 1 of 34"), not
+             your whole library. Checking your games first is shown as its
+             own step, "Checking your games for ReShade".
 
     TURNING OFF TEKNOPARROT'S OWN CRT EFFECT
 
@@ -4986,18 +5008,22 @@
 
   Automatic check at startup
 
-    The script also checks for updates once, quietly, right when it starts.
+    The script also checks for updates once, quietly, right when it starts,
+    before it asks whether to use your saved settings.
     This is controlled by CheckForUpdatesOnStartup in
     TeknoParrot-Manager.config.json. The default is true.
 
     If you are up to date, nothing is shown.
 
-    If a newer version exists, you will see the version and a short release
-    summary. Then you choose:
+    If a newer version exists, you will see the "Update Available" screen:
+    the current and latest version, a short release summary and the
+    "Updating will:" list of steps. Under the list are the choices:
 
-      Y = update now (same steps as mode 15)
-      N = continue to the menu and be asked again next time
-      V = read the full release notes first
+      Y = Update now. It starts right away; there is no second question.
+          It uses the same steps as mode 15.
+      N = Remind me later. You go to the menu and are asked again next
+          time.
+      V = View release notes. You read them, then choose again.
 
     To turn this off, set CheckForUpdatesOnStartup to false in the config
     file. Then check by hand with mode 15.
@@ -5712,6 +5738,12 @@
                               and gives one next step. If the files are in
                               your own collection, it offers to copy them
                               after checking them against the DAT list.
+                              If it cannot find them, it asks once for
+                              your Supplementary folder and remembers it.
+                              One Y then installs everything it found and
+                              checked. The result names what was installed,
+                              already matching, missing (by file name) or
+                              invalid, and the folders searched.
                               TeknoParrot Manager never downloads, links
                               to, or shares these files.
 

@@ -31,8 +31,11 @@ The screen says which games will not start and what to do next.
 ## Fix it
 
 1. Put the firmware in your own game collection: your Supplementary or main ZIP folder. For PlayStation 3, that is the "[EMU] Sony PlayStation 3 Firmware" ZIP.
-2. Run TeknoParrot Manager again, or choose **F** in the health check.
-3. Answer **Y** to copy or install. Answer **N** for not now. **D** shows details. **O** opens the folder.
+2. Run TeknoParrot Manager again, or choose **F** in the health check. If it cannot find the files and no working Supplementary folder is saved, it asks once for that folder (press Enter to skip). It saves the folder and does not ask again.
+3. Read the list under each game type: what it found and can install, what is already in place, what is missing (by file name, with the folder it goes in) and the folders it searched.
+4. Answer **Y** once to install everything it found and checked. Answer **N** for not now. **D** shows details. **O** opens the folder.
+
+The result names what was installed, what already matched, what is invalid (not the file the DAT list describes) and what was not finished.
 
 TeknoParrot Manager checks every file against the Eggman DAT list first, and checks the result after. If it has no DAT list, it cannot check the files, so it copies none. Start it again and let it get the DAT list when it asks.
 

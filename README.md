@@ -546,6 +546,8 @@ Health Check never installs, deploys, or rewrites anything until you pick one of
 
 **ReShade and BepInEx:** the check counts the valid games that have ReShade and BepInEx (`ReShade installed: N of M valid games`, `BepInEx installed: N of M valid games`). ReShade is your choice for each game, so it is not flagged. BepInEx is flagged only for games whose profile says they need it. For those, you see `Games that need BepInEx and do not have it set up: <names>`. Next: choose `9) BepInEx setup`.
 
+**Missing startup files:** the `Game startup files` row says `Needs attention` when a game's emulator is missing files it needs to start (for example the Chihiro firmware). Choose `F` to fix them. If TeknoParrot Manager cannot find the files and no working Supplementary folder is saved, it asks once for that folder. Press Enter to skip. The folder is saved, so you are not asked again. It then lists what it found and can install, what is already in place, what is missing (by file name) and the folders it searched. Answer `Y` once to install everything it found and checked.
+
 **When it cannot look:** if the check cannot read something (the PostgreSQL service, game profiles, startup files, or a game on a drive that is not connected), it says `Could not check` and asks for your attention. It does not say OK. A damaged profile is named as one that could not be read, and it gets no path repair.
 
 ### More detail: Library Health Check
@@ -604,6 +606,8 @@ You can mix Browse and Search to build a queue before pressing D. Games already 
 AutoSync is careful about what counts as already extracted. It only hides a game when a matching folder exists and is not empty.
 
 It never deletes, renames, or moves folders. An empty matching folder counts as an unfinished extraction, so you can try again.
+
+If AutoSync extracts nothing new (for example, all your games were already extracted), it ends the registration part with one short note: `Nothing new was extracted, so registration was skipped. To register games already extracted, choose Register only.` This is only a note. It is not under ACTION REQUIRED and does not send you to a saved list.
 
 **When a game folder already exists:**
 
@@ -779,6 +783,8 @@ If you use the Eggman DAT ZIP, TeknoParrot Manager asks `Check for a newer Eggma
 ### More detail: Dat File Integration
 
 - Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from both game ZIP contents and the local staging/install folder.
+
+- The DAT file says which format it uses (`TPUISchemaVersion`). This version of TeknoParrot Manager knows version 1. If a DAT says another version, TeknoParrot Manager tells you in plain words, still reads it the same way, and notes it in the log; some games may then not match. A DAT with no version is read as before.
 
 - On the normal first-run download path TeknoParrot Manager stores the ZIP under `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without asking where to save it.
 
@@ -1041,6 +1047,8 @@ Its short text is "Visual filters: sharper image, CRT-style scanlines, borders."
     Next: read the topic "Turning off TeknoParrot's own CRT effect" below.
 
 11. You will see: `Installing ReShade into {N games}...` and then the result screen.
+
+    While it works, the progress line counts only the games being changed (for example `Applying ReShade: 1 of 34`), not your whole library. Checking your games first is shown as its own step, `Checking your games for ReShade`.
 
     Next: read the topic "After you choose: the result screen" below.
 
@@ -1843,6 +1851,8 @@ If GPU setup skips missing or unavailable saved paths, its result offers `[H] Op
 
 The result also has a count line such as `You selected 4 games: 3 changed, 1 skipped.` It says how many games were changed, already set up, skipped or failed, and where the backup is.
 
+The GPU fix offered at the end of first-time setup (`Apply now?`) shows this same result: how many games you selected, changed, skipped and failed. A game on a drive that is not connected is called skipped, not failed. The drive letter is named, and the result points to `13) Library Health Check` to repair the game paths.
+
 If a saved game drive is disconnected or a game file (executable) is missing, reconnect it. Or use `13) Library Health Check` to repair the saved path. Then try again.
 
 If the result says a profile write could not be verified, do not run GPU Fix again straight away.
@@ -2198,13 +2208,13 @@ The separate tool `tools\Invoke-TpmAutoUpdate.ps1 -Apply` still refuses a releas
 
 ### Automatic check at startup
 
-The script also quietly checks for updates once, right when it launches. If you are current, nothing is shown.
+The script also quietly checks for updates once, right when it launches, before it asks whether to use your saved settings. If you are current, nothing is shown.
 
-If a newer version exists, you will see the version and a brief release summary. Then you choose:
+If a newer version exists, you will see an `Update Available` screen with the current and latest version, a brief release summary and the `Updating will:` list of steps. Under the list are the choices:
 
-- **Y** to update now (same backup-first process as mode 15),
-- **N** to continue to the menu and be asked again next time, or
-- **V** to read the full release notes first.
+- **Y = Update now.** The update starts right away; there is no second question. It is the same backup-first process as mode 15.
+- **N = Remind me later.** You continue to the menu and are asked again next time.
+- **V = View release notes.** You read the full release notes, then choose again.
 
 To skip the check at launch, set `CheckForUpdatesOnStartup` to `false` in `TeknoParrot-Manager.config.json`. The default is `true`.
 
@@ -2739,7 +2749,7 @@ Each section below appears only when it applies to your games.
 | **PATH TOO LONG -- THESE GAMES MAY FAIL TO LAUNCH** | Specific games (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6) whose install path is too long. Shows the exact short folder name to rename to. Checked automatically every run. |
 | **FILE VERSION MISMATCH -- THESE GAMES NEED A SPECIFIC OLDER FILE** | Specific games that need an OLDER version of one file instead of the latest (BlazBlue-series/`iDmacDrv32.dll`, Tekken Tag Tournament 2/`EBOOT.BIN`). Shows the file name, the current and required CRC32, and where to get the right version. Checked automatically every run. |
 | **KNOWN (AMD or INTEL) GPU INCOMPATIBILITY -- NO FIX AVAILABLE** | Specific registered games confirmed not to work on your graphics card brand (AMD or Intel). Informational only -- no fix exists. Checked automatically every run. Silently skipped if the brand can't be detected. |
-| **(EMULATOR NAME) FIRMWARE NOT INSTALLED** | Registered games whose emulator needs startup files that TeknoParrot itself doesn't provide: firmware for PCSX2x6, four files for Chihiro/CxbxR, PlayStation 3 firmware for RPCS3 games, and the small settings file each Play! game reads. Says in plain words which games will not start and gives one next step; the exact files and folders are under Details. If the files are in your own collection (the "[EMU]" archives of the TeknoParrot Supplementary set, or another TeknoParrot copy), TeknoParrot Manager offers to copy them after checking every file against the Eggman DAT list (size and every listed hash), and never replaces a different file without asking (it saves a backup copy first). For RPCS3, it installs the firmware from the PlayStation 3 firmware file (`PS3UPDAT.PUP`) in your own collection by running RPCS3 for you. It never downloads, links, or redistributes these files. Also in the Health Check (the "Game startup files" row, key F). Checked automatically every run. |
+| **(EMULATOR NAME) FIRMWARE NOT INSTALLED** | Registered games whose emulator needs startup files that TeknoParrot itself doesn't provide: firmware for PCSX2x6, four files for Chihiro/CxbxR, PlayStation 3 firmware for RPCS3 games, and the small settings file each Play! game reads. Says in plain words which games will not start and gives one next step; the exact files and folders are under Details. If the files are in your own collection (the "[EMU]" archives of the TeknoParrot Supplementary set, or another TeknoParrot copy), TeknoParrot Manager offers to copy them after checking every file against the Eggman DAT list (size and every listed hash), and never replaces a different file without asking (it saves a backup copy first). If it cannot find the files, it asks once for your Supplementary folder and remembers it. It lists what it found, what is already in place, what is missing (by file name) and the folders searched, and one `Y` installs everything it found and checked. The result names what was installed, already matching, kept, invalid or not finished. For RPCS3, it installs the firmware from the PlayStation 3 firmware file (`PS3UPDAT.PUP`) in your own collection by running RPCS3 for you. It never downloads, links, or redistributes these files. Also in the Health Check (the "Game startup files" row, key F). Checked automatically every run. |
 | **(EMULATOR NAME) EMULATOR COMPONENT NOT FOUND** | A required emulator part is missing from its expected path. Shows the evidence and the affected games. Use the normal TeknoParrot installation/update process. TeknoParrot Manager does not diagnose why it is missing, and does not repair, download, reinstall, or modify TeknoParrot. |
 | **Additional informational game notes** | Registered games with special setup notes in the community compatibility database (eggmansworld.github.io/TeknoParrot) -- workarounds, known quirks, and so on. Informational only. Skipped silently if the live fetch fails. See More detail below. |
 

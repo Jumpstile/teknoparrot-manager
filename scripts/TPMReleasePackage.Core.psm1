@@ -76,6 +76,9 @@ function Get-TPMReleasePackageDocumentationFileMapV1 {
         [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/22-tpm-reshade-setup.png'; SourcePath = 'docs/images/22-tpm-reshade-setup.png' }
         [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/23-tpm-health-check-details.png'; SourcePath = 'docs/images/23-tpm-health-check-details.png' }
         [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/24-tpm-bezel-preview.png'; SourcePath = 'docs/images/24-tpm-bezel-preview.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/25-tpm-startup-files-list.png'; SourcePath = 'docs/images/25-tpm-startup-files-list.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/26-tpm-startup-files-result.png'; SourcePath = 'docs/images/26-tpm-startup-files-result.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/27-tpm-update-available.png'; SourcePath = 'docs/images/27-tpm-update-available.png' }
         [pscustomobject]@{ AssetType = 'Guide'; ZipPath = 'TeknoParrot-Manager-User-Guide.pdf'; SourcePath = 'TeknoParrot-Manager-User-Guide.pdf' }
     )
 }

@@ -1238,6 +1238,9 @@
   - AutoSync says All games in this ZIP folder are already extracted. Nothing
     left to extract. followed by To register games that are already
     extracted, choose Register only from the main menu.
+  - AutoSync extracts nothing new and says Nothing new was extracted, so
+    registration was skipped. To register games already extracted, choose
+    Register only. This is only a note. It is not under ACTION REQUIRED.
   - Register only says The games folder TeknoParrot Manager recommended does
     not exist yet.
 
@@ -3693,20 +3696,22 @@
        Next: type P to preview first (recommended).
 
     2. Type A.
-       You will see: "Close LaunchBox and BigBox first." then "Add the
-       missing games to LaunchBox now? (Y/N, D = about the risks)" (default
-       N).
-       Next: type Y.
+       You will see: "Close LaunchBox and BigBox first." There is no extra
+       "now?" question.
+       Next: choose the platform.
 
     3. Choose how TeknoParrot games are organized.
        You will see: "Platform: 1 Arcade, 2 TeknoParrot, 3 Both,
        4 Custom, B cancel"
        Next: type a number. You are asked each time; your choice is not
-       remembered.
+       remembered. If LaunchBox's own game list is on your PC, you are also
+       asked "Use official game names so LaunchBox finds info and artwork?
+       1 new games, 2 new and games already added, N no" (default 1).
 
     4. Read the plan.
        You will see: the games to add, then "Write exactly these changes
-       after a verified backup? (Y/N)" (default N).
+       after a verified backup? (Y/N, D = about the risks)" (default N).
+       This is the only approval.
        Next: type Y to write them.
 
   The choices mean:
@@ -4145,8 +4150,11 @@
                             your own collection in your Supplementary or
                             main ZIP folder, run TeknoParrot Manager again
                             and answer Y when it offers to copy the files.
-                            It checks them against the DAT first and never
-                            downloads them.
+                            If it asks for your Supplementary folder,
+                            choose it (it is asked once and remembered).
+                            One Y installs everything it found. It
+                            checks the files against the DAT first and
+                            never downloads them.
 
     <EMULATOR NAME> EMULATOR COMPONENT NOT FOUND
                             A required emulator component is missing at
