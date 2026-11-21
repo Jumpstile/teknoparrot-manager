@@ -77,60 +77,9 @@ INSERT INTO GameAlternateTitles VALUES ('Silver Strike Bowling Live', 51, '', 'x
 Describe 'Issue 426: official names and IDs from the local game list' {
     BeforeEach { Mock Write-Log {} }
 
-    It 'finds the official name and ID for a title that matches exactly (case, punctuation and accents do not matter)' {
-        $match = Find-TpmGamesDbMatch -Index $script:GdbIndex -Title 'TOO  spicy!'
-        $match.Name | Should -Be 'Too Spicy'
-        $match.Id | Should -Be '11'
-    }
-
-    It 'never guesses: a name that fits two different games, or only a non-arcade game, gets no match' {
-        Find-TpmGamesDbMatch -Index $script:GdbIndex -Title 'Twin Game' | Should -BeNullOrEmpty
-        Find-TpmGamesDbMatch -Index $script:GdbIndex -Title 'Console Only Game' | Should -BeNullOrEmpty
-        Find-TpmGamesDbMatch -Index $script:GdbIndex -Title 'Totally Unknown Title' | Should -BeNullOrEmpty
-    }
-
-    It 'uses an alternate name of the game list too, and gives the official name' {
-        (Find-TpmGamesDbMatch -Index $script:GdbIndex -Title 'Silver Strike Bowling Live').Name | Should -Be 'Silver Strike LIVE'
-    }
-
     It 'only reads the game list: the file is byte-for-byte the same afterwards' {
         Get-TpmGamesDbIndex -DbPath $script:GdbDbPath | Out-Null
         (Get-FileHash -LiteralPath $script:GdbDbPath -Algorithm SHA256).Hash | Should -Be $script:GdbHashBefore
-    }
-
-    It 'a near miss is only a suggestion (needs your choice), never a match' {
-        $result = Resolve-TpmGameTitle -Index $script:GdbIndex -Title 'Too Spicey'
-        $result.Status | Should -Be 'NeedsChoice'
-        $result.Match | Should -BeNullOrEmpty
-        @($result.Options)[0].Name | Should -Be 'Too Spicy'
-    }
-
-    It 'a game with nothing close keeps its name (NoMatch)' {
-        (Resolve-TpmGameTitle -Index $script:GdbIndex -Title 'Qwertyuiop').Status | Should -Be 'NoMatch'
-    }
-
-    It 'reads a clean title and the hardware from an Eggman-style game folder in the game path' {
-        $short = Get-TpmEggmanGameName -GamePath 'E:\Games\2SPICY (Too Spicy)(1.00.00)(2007-02-15)[Sega Lindbergh Red][TP]\elf\game.elf'
-        $short.Title | Should -Be 'Too Spicy'
-        $short.Hardware | Should -Be 'Sega Lindbergh Red'
-        (Get-TpmEggmanGameName -GamePath "E:\Games\America's Army Arcade (1.01.082)(2007)[Global VR PC][TP]\System\armyops-bin").Title | Should -Be "America's Army Arcade"
-        (Get-TpmEggmanGameName -GamePath 'E:\Games\plain folder\game.exe').Title | Should -Be ''
-    }
-
-    It 'when the two sources point at different games, the closer one is suggested with a confidence and the other is shown' {
-        $result = Resolve-TpmGameTitle -Index $script:GdbIndex -Title 'Dead Run' -EggmanName 'Zombie Run Reloaded' -EggmanFolder 'Zombie Run Reloaded (1.0)(2005)[Sega][TP]' -InternalName 'Zombie Run Reloaded'
-        $result.Status | Should -Be 'Suggested'
-        $result.Confidence | Should -Be 'High'
-        $result.Match.Name | Should -Be 'Zombie Run Reloaded'
-        @($result.Options | ForEach-Object { $_.Name }) | Should -Contain 'Dead Run'
-    }
-
-    It 'when the two sources differ and nothing shows which is closer, it is low confidence and nothing is picked' {
-        $result = Resolve-TpmGameTitle -Index $script:GdbIndex -Title 'Dead Run' -EggmanName 'Zombie Run Reloaded'
-        $result.Status | Should -Be 'Disagree'
-        $result.Confidence | Should -Be 'Low'
-        $result.Match | Should -BeNullOrEmpty
-        @($result.Options).Count | Should -Be 2
     }
 
     It 'a new LaunchBox entry gets the official name and the ID; without a match it keeps today''s name and has no ID' {
@@ -144,17 +93,22 @@ Describe 'Issue 426: official names and IDs from the local game list' {
         $games[1].SelectSingleNode('DatabaseID') | Should -BeNullOrEmpty
     }
 
-    It 'a game already in LaunchBox that the Manager added gets the official name and ID' {
+    It 'a game already in LaunchBox that the Manager added gets the clean title and the official name and ID' {
         $doc = New-GdbGamesDoc -Title 'X'
-        $change = Update-TpmLaunchBoxGameFromGamesDb -platformGamesDoc $doc -relProfilePath 'Emulators\TeknoParrot\UserProfiles\X.xml' -title 'X' -emulatorId 'emu-1' -lbRoot 'C:\LB' -GamesDbMatch ([pscustomobject]@{ Id = '11'; Name = 'Too Spicy' })
+        $change = Update-TpmLaunchBoxGameTitle -platformGamesDoc $doc -relProfilePath 'Emulators\TeknoParrot\UserProfiles\X.xml' -KnownTitles @('X') -NewTitle 'Too Spicy' -emulatorId 'emu-1' -lbRoot 'C:\LB' -GamesDbMatch ([pscustomobject]@{ Id = '11'; Name = 'Too Spicy' })
         $change.New | Should -Be 'Too Spicy'
         $doc.SelectSingleNode('/LaunchBox/Game/Title').InnerText | Should -Be 'Too Spicy'
         $doc.SelectSingleNode('/LaunchBox/Game/DatabaseID').InnerText | Should -Be '11'
+        # No sure match: only the clean title is set, and no ID is made up.
+        $plain = New-GdbGamesDoc -Title 'X'
+        (Update-TpmLaunchBoxGameTitle -platformGamesDoc $plain -relProfilePath 'Emulators\TeknoParrot\UserProfiles\X.xml' -KnownTitles @('X') -NewTitle 'Clean Name' -emulatorId 'emu-1' -lbRoot 'C:\LB').Id | Should -Be ''
+        $plain.SelectSingleNode('/LaunchBox/Game/Title').InnerText | Should -Be 'Clean Name'
+        $plain.SelectSingleNode('/LaunchBox/Game/DatabaseID') | Should -BeNullOrEmpty
     }
 
     It 'a title the owner changed by hand is never replaced and gets no ID' {
         $doc = New-GdbGamesDoc -Title 'My own name for it'
-        $change = Update-TpmLaunchBoxGameFromGamesDb -platformGamesDoc $doc -relProfilePath 'Emulators\TeknoParrot\UserProfiles\X.xml' -title 'X' -emulatorId 'emu-1' -lbRoot 'C:\LB' -GamesDbMatch ([pscustomobject]@{ Id = '11'; Name = 'Too Spicy' })
+        $change = Update-TpmLaunchBoxGameTitle -platformGamesDoc $doc -relProfilePath 'Emulators\TeknoParrot\UserProfiles\X.xml' -KnownTitles @('X') -NewTitle 'Too Spicy' -emulatorId 'emu-1' -lbRoot 'C:\LB' -GamesDbMatch ([pscustomobject]@{ Id = '11'; Name = 'Too Spicy' })
         $change | Should -BeNullOrEmpty
         $doc.SelectSingleNode('/LaunchBox/Game/Title').InnerText | Should -Be 'My own name for it'
         $doc.SelectSingleNode('/LaunchBox/Game/DatabaseID') | Should -BeNullOrEmpty
@@ -162,10 +116,10 @@ Describe 'Issue 426: official names and IDs from the local game list' {
 
     It 'a game that already has an ID, or is not the Manager''s entry, is left alone' {
         $linked = New-GdbGamesDoc -Title 'X' -DatabaseId '999'
-        Update-TpmLaunchBoxGameFromGamesDb -platformGamesDoc $linked -relProfilePath 'Emulators\TeknoParrot\UserProfiles\X.xml' -title 'X' -emulatorId 'emu-1' -lbRoot 'C:\LB' -GamesDbMatch ([pscustomobject]@{ Id = '11'; Name = 'Too Spicy' }) | Should -BeNullOrEmpty
+        Update-TpmLaunchBoxGameTitle -platformGamesDoc $linked -relProfilePath 'Emulators\TeknoParrot\UserProfiles\X.xml' -KnownTitles @('X') -NewTitle 'Too Spicy' -emulatorId 'emu-1' -lbRoot 'C:\LB' -GamesDbMatch ([pscustomobject]@{ Id = '11'; Name = 'Too Spicy' }) | Should -BeNullOrEmpty
         $linked.SelectSingleNode('/LaunchBox/Game/DatabaseID').InnerText | Should -Be '999'
         $foreign = New-GdbGamesDoc -Title 'X' -Emulator 'someone-elses-emulator'
-        Update-TpmLaunchBoxGameFromGamesDb -platformGamesDoc $foreign -relProfilePath 'Emulators\TeknoParrot\UserProfiles\X.xml' -title 'X' -emulatorId 'emu-1' -lbRoot 'C:\LB' -GamesDbMatch ([pscustomobject]@{ Id = '11'; Name = 'Too Spicy' }) | Should -BeNullOrEmpty
+        Update-TpmLaunchBoxGameTitle -platformGamesDoc $foreign -relProfilePath 'Emulators\TeknoParrot\UserProfiles\X.xml' -KnownTitles @('X') -NewTitle 'Too Spicy' -emulatorId 'emu-1' -lbRoot 'C:\LB' -GamesDbMatch ([pscustomobject]@{ Id = '11'; Name = 'Too Spicy' }) | Should -BeNullOrEmpty
         $foreign.SelectSingleNode('/LaunchBox/Game/Title').InnerText | Should -Be 'X'
     }
 
@@ -175,7 +129,7 @@ Describe 'Issue 426: official names and IDs from the local game list' {
         $state = Get-TpmGamesDbForLaunchBox -LaunchBoxRoot $emptyRoot
         $state.State | Should -Be 'Missing'
         $summary = Get-TpmLaunchBoxTitleSummary -Result ([pscustomobject]@{ GamesDbState = 'Missing'; GamesDbError = $state.Error; TitleChanges = @(); TitleReview = @(); Reason = 'PREVIEW'; Outcome = 'NO_CHANGES' })
-        $summary.NotChanged | Should -Match 'keep the names TeknoParrot gives them'
+        $summary.NotChanged | Should -Match 'no Games Database ID was added'
     }
 
     It 'an unreadable game list does not stop anything: games keep their names and the reason is in Details' {
@@ -190,16 +144,19 @@ Describe 'Issue 426: official names and IDs from the local game list' {
         (Get-TpmLaunchBoxTitleDetailBlock -Result $result).Lines -join ' ' | Should -Match 'Games Database not used'
     }
 
-    It 'the preview lists every old name, new name and ID, and shows a suggested pick with its confidence and the other candidate' {
+    It 'the preview lists every old name, new name and ID, the clean-name changes, and the games that need a choice' {
         $result = [pscustomobject]@{ GamesDbState = 'Used'; GamesDbError = ''; Reason = 'PREVIEW'; Outcome = 'NO_CHANGES'
             TitleChanges = @(
-                [pscustomobject]@{ Old = 'SSASR'; New = 'Sega Sports'; Id = '7'; Kind = 'New'; Confidence = ''; Other = '' },
-                [pscustomobject]@{ Old = 'Dead Run'; New = 'Zombie Run Reloaded'; Id = '42'; Kind = 'New'; Confidence = 'High'; Other = 'Dead Run (ID 41)' })
-            TitleReview = @([pscustomobject]@{ File = 'Q.xml'; Title = 'Q'; Status = 'NeedsChoice'; EggmanTitle = ''; Options = @([pscustomobject]@{ Name = 'Too Spicy'; Id = '11' }) }) }
+                [pscustomobject]@{ Old = 'SSASR'; New = 'Sega Sports'; Id = '7'; Kind = 'New'; Choice = $false },
+                [pscustomobject]@{ Old = 'zq1'; New = 'Zzzz Qqqq'; Id = ''; Kind = 'New'; Choice = $false })
+            TitleReview = @([pscustomobject]@{ File = 'Q.xml'; Title = 'Q'; Status = 'Ambiguous'; Reason = 'Only a close name was found.'; Options = @([pscustomobject]@{ Name = 'Too Spicy'; Id = '11' }) }) }
         $lines = (Get-TpmLaunchBoxTitleDetailBlock -Result $result).Lines -join "`n"
         $lines | Should -Match 'SSASR\s+->\s+Sega Sports, ID 7'
-        $lines | Should -Match 'suggested, high confidence; other candidate: Dead Run \(ID 41\)'
+        $lines | Should -Match 'zq1\s+->\s+Zzzz Qqqq'
         $lines | Should -Match 'Needs your choice: Q'
-        (Get-TpmLaunchBoxTitleSummary -Result $result).NotChanged | Should -Match 'left with the old name'
+        $summary = Get-TpmLaunchBoxTitleSummary -Result $result
+        ($summary.Done -join ' ') | Should -Match 'official name and Games Database ID'
+        ($summary.Done -join ' ') | Should -Match 'clean game name'
+        $summary.NotChanged | Should -Match 'no sure match'
     }
 }

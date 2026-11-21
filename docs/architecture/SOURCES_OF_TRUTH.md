@@ -4,41 +4,42 @@ TeknoParrot Manager already holds several lists that describe the same games. Th
 
 | Source | What it knows | Where it comes from | Trust |
 | --- | --- | --- | --- |
-| Eggman DAT list | Exact folder and file names, sizes and hashes, game name, year, hardware | The Eggman collection download | Highest for "what is in this folder" |
+| Eggman DAT list | Exact folder and file names, sizes and hashes, game name, year, hardware, and the profile code of each game | The Eggman collection download | Highest for "what is in this folder" |
 | Game folder on disk | A folder name | The player's games folder | Only counts when the DAT list confirms the folder |
-| TeknoParrot metadata | Game name, year, hardware text | `Metadata\<code>.json` | High for the name TeknoParrot uses |
-| TeknoParrot game profiles | Profile code, executable name, game path, input settings | `GameProfiles` and `UserProfiles` | High for what the profile runs |
-| MAME list in LaunchBox | Romset name and game name | `Metadata\MAME.xml` | High for arcade board games |
+| TeknoParrot metadata | Game name, year, hardware text, genre | `Metadata\<code>.json` | High for the name TeknoParrot uses |
+| TeknoParrot game profiles | Profile code, name, executable name, game path, input settings | `GameProfiles` and `UserProfiles` | High for what the profile runs |
 | LaunchBox game list | Official game names, year, developer, publisher, alternate names | `Metadata\LaunchBox.Metadata.db` | The target the others are matched to |
 | LaunchBox title | What the player or an import typed | The platform file | Lowest; a typed name is a hint only |
 
-## Matching a game to the LaunchBox game list
+## The matching engine
 
-The functions live in one marked section of the script (`Get-TpmGamesDbPick`, `Resolve-TpmGamesDbMatch`, `Get-TpmLinkEvidence`). They only read; nothing in them writes.
+One section of the script, "TPM GAME MATCHING ENGINE", answers "which game is this" for every feature (titles, Games Database IDs, year and developer, playlists, grouping, pictures). The functions only read; nothing in them writes. Do not write a second matcher.
 
-1. Each source gives a name. The sources are the TeknoParrot name, the Eggman list name and the MAME list name. The title typed in LaunchBox is used only when no other source has a name. The raw name is tried first, then a cleaned one: notes such as "(USA, Sep 22 1997)", a trailing version and "for NESiCAxLive" are removed.
-2. Each name is looked up in the game list. Spelling differences that do not change the game are ignored: accents, "&" and "and", Roman numerals (II = 2), small words such as "the" and "of", and tails such as "Arcade" or "Edition". An exact name is one hit. If two games share one name, a "(year)" tag, the release year or the exact spelling can break the tie. A code before a colon ("P4U: Name") and the sides of "A / B" (two or more words each) are also tried.
-3. A name with no exact hit is scored against the closest names: words that differ, the year (when both sides have one) and the maker. A close name counts as firm only with a clear lead over the next one. A number is part of the game: a name whose numbers differ from the title's ("2020" and "2022", "4" and "5") is never a candidate, so a missing sequel shows as no match instead of a wrong one.
-   - A version is not part of the game. "Ver. 2", "Version 3" and a dotted tail such as "1.18" are ignored, unless the list names that version as its own game (then the exact name wins). A short dotted tail like "5.1" in "Tekken 5.1" is read as a point revision of "Tekken 5" (the same game), tried after the exact name.
-   - The name of the program that runs the game ("ElfLoader", "ElfLoader 2", with or without brackets) is not part of the name and is removed anywhere in the title.
-   - A trailing " 1" means the first game of a series, so "Quiz Magic Academy 1" can match "Quiz Magic Academy" (tried after the exact name).
-   - One extra word "Live" in the middle of a name is filler when the numbers match ("Golden Tee Live 2020" and "Golden Tee 2020" are the same game).
-   - A name that contains the other one word for word, in the same order and with the same numbers ("Dino King Battle: King of Jurassic" and "Dino King Battle"), is offered to the player, never applied by itself.
-   - A region word before a release note, as in "Cobra: The Arcade World (CBR2 Ver. B)", is not part of the name. A plain "... World" with no release note is a game of its own.
-   - "+" reads as "plus", "Vs." as "versus", and a source whose whole name is a region word is ignored.
-   - A few well-known regional names of one game (for example "Street Fighter Zero") are listed by hand.
-4. The sources are compared:
-   - Exact names from every source point at one game, and no firm close name points elsewhere: linked without asking.
-   - Anything else with a candidate: the player decides. A close name is never applied without approval.
-   - When most sources agree exactly and one disagrees, the one that disagrees is set aside and the log says so. A one-against-one tie is never settled by guessing.
-   - A more specific name beats a generic one (for example, a "for NESiCAxLive" tail is fine, other extra words wait for approval).
-   - A hopeless match (almost no words in common) is shown as no match at all.
-5. Every decision keeps the names it rested on. They go in the log, so Details can show them.
-6. The same engine answers every question of "which game is this" in the Manager, including the title offered when a game is added to LaunchBox (`Resolve-TpmGameTitle` is a thin layer over it). Do not write a second matcher.
+`Get-TpmProfileMatchSubject` reads one profile, its TeknoParrot metadata and the Eggman list entries for its profile code into a subject: the names to look up and the facts to check them with (year, hardware maker). `Resolve-TpmGameMatch` looks the subject up in the LaunchBox game list one level at a time and stops at the first level that is certain.
 
-## Things that are not games
+| Level | What counts | Certain by itself? |
+| --- | --- | --- |
+| 1 | The same name. Accents, capitals, punctuation, "&" and release tags (region, version, board code) are ignored. | Yes |
+| 2 | The same name spelled a little differently: Roman numerals, "the", "Ver.", an "Arcade" or "Edition" tail. | Yes |
+| 3 | A name worked out from the given one: a note, "A / B" sides, a trailing "1", a point revision, an extra name in brackets, an alternate name in the game list, the brand word "Live". | Only when a second source, the hardware maker or the year backs it up |
+| 4 | Only a close name. | Never; it is a suggestion for the user |
 
-Firmware updaters, drive checkers and boards (for example a NAOMI firmware updater) are never added to LaunchBox. They are skipped, and the log says why.
+The outcomes are `Certain`, `Ambiguous` (the user decides, with the possible games listed), `NoMatch` and `NotGame`. Every answer carries a plain `Reason` for the screen and an `Evidence` trail for Details and the log.
+
+Rules the engine keeps:
+
+- A different year or number is a different game ("Golden Tee Live 2020" is not "2022"). A version is not part of the game, unless the list names that version as its own game.
+- The emulator named in a title ("ElfLoader 2") is never part of the game name.
+- A game folder is a source only when the Eggman list confirms it: the folder name is the exact name of a list game for this profile code, and the file the profile starts is the file the list names in that folder (`Get-TpmConfirmedDatName`). It then picks the one list game of a code that has several.
+- Another name in brackets in an Eggman name ("Aero Fighters 2 (Sonic Wings 2)") and the title typed in LaunchBox are weak names: used only when nothing else matches.
+- Two games with one name (also on another platform, or "Frogger" next to "Frogger (Raw Thrills)") are told apart by the release year and the hardware maker. When they cannot be told apart the user decides.
+- The same name with release years far apart, or years apart and a developer that does not fit, may be another game. The user decides, unless the hardware is a re-release platform (NESiCAxLive, G-NET) that explains the gap.
+- When the match is certain the engine returns the game list's own year and developer to fill in; otherwise the year and maker from the Eggman list and TeknoParrot.
+- Firmware updaters, drive checkers, controllers and boards (a NAOMI DIMM firmware updater, "AS-1 Controller") are `NotGame`. They are never matched and never added to LaunchBox. TeknoParrot's genre "Utility" says the same.
+
+## Evidence
+
+`scripts\Invoke-TpmMatchEvidence.ps1` runs the engine over every profile in a TeknoParrot folder with the Eggman list, the folder names and a copy of the LaunchBox game list, and writes one report: totals per outcome, every ambiguous case, every no-match, a spot-check list with both names side by side, warnings for certain matches whose names look different, and a comparison with the links LaunchBox itself made. Run it again after any change to the engine and read the warnings; a wrong certain match is a bug.
 
 ## Rules for new features
 

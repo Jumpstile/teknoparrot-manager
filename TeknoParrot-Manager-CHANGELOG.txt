@@ -55,12 +55,18 @@
     folder. A game gets only the controls it uses that your cabinet has.
     You see a preview first, a saved copy is made, and you can undo it.
     Only entries the Manager added are ever removed.
-  - LaunchBox: the Manager can look each game up in LaunchBox's own game
-    list on your PC and use the official name and the Games Database ID,
-    so LaunchBox can find info and artwork. Choose [L] in the LaunchBox
-    step to do this for games that have no ID yet. You see every old
-    name, new name and ID first and approve before anything is saved.
-    Names you typed yourself are never replaced. Nothing is downloaded.
+  - LaunchBox: games you add now get their real game name, not the file
+    name (for example "Too Spicy", not "2Spicy"). The Manager also looks
+    each game up in LaunchBox's own game list on your PC and uses the
+    official name and the Games Database ID, so LaunchBox can find info
+    and artwork. It links a game by itself only when it is sure: the
+    names from the Eggman list, TeknoParrot and the game list agree, and
+    a different year or number is never the same game. When it is not
+    sure you choose from the possible games. Choose [L] in the LaunchBox
+    step to link games that have no ID yet. You see every old name, new
+    name and ID first and approve before anything is saved. Names you
+    typed yourself are never replaced. Firmware updaters and test boards
+    are never added. Nothing is downloaded.
   - LaunchBox: "Fill in game details and make playlists" fills in the
     release year and developer where LaunchBox has nothing yet, and makes
     playlists for each arcade hardware family, plus "Light gun games" and
