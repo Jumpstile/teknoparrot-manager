@@ -2596,7 +2596,7 @@ The separate tool `tools\Invoke-TpmAutoUpdate.ps1 -Apply` still refuses a releas
 
 ### Automatic check at startup
 
-![The Update Available screen: the steps, then Y, N and V; Y starts the update right away](images/27-tpm-update-available.png)
+![The Update Available screen (an example with a made-up newer version): the steps, then Y, N and V; Y starts the update right away](images/27-tpm-update-available.png)
 
 The script also quietly checks for updates once, right when it launches, before it asks whether to use your saved settings. If you are current, nothing is shown.
 
