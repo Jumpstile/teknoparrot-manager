@@ -13795,12 +13795,12 @@ Describe "TeknoParrot-Manager.ps1 -Unattended real child-process fixture (issue 
         }
         $process.WaitForExit()
 
-        # The health check is only an all-clear (exit 0) when it could identify the video adapter, because the GPU-fix coverage depends on it.
-        # A machine with no recognizable adapter (a virtual machine or hosted runner) correctly finishes with 2, "some checks could not finish".
-        $expectedExitCode = if ([string]::IsNullOrWhiteSpace([string](Get-DetectedGpuVendor).Vendor)) { 2 } else { 0 }
-        $process.ExitCode | Should -Be $expectedExitCode -Because 'a genuine product defect (Mode must be set before starting) previously made every real -Unattended launch exit 1 here'
-
         $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { '' }
+        # The child cannot be given a fake video adapter. A machine with no recognized GPU (a CI runner has only a virtual one) makes the
+        # product report incomplete coverage and exit 2 (HEALTH_COVERAGE_INCOMPLETE). That is accepted only when the report itself says the
+        # GPU was not detected; every other cause of incomplete coverage, and every other exit code, still fails here.
+        $expectedExitCode = if ($stdout -match 'Not checked - GPU not detected') { 2 } else { 0 }
+        $process.ExitCode | Should -Be $expectedExitCode -Because 'exit 0 means the health check completed with full coverage; exit 2 is allowed only when the report says the GPU was not detected; exit 1 was the old "Mode must be set before starting" defect'
         $stdout | Should -Not -Match 'Mode must be set before starting' -Because 'this is the exact error text the real certification run hit'
         $stdout | Should -Match 'Library Health Check' -Because 'HealthCheck must have actually run, not merely avoided the error'
         $expectedFooter = if ($expectedExitCode -eq 0) { 'Read-only report complete' } else { 'Report finished. Some checks could not finish' }
