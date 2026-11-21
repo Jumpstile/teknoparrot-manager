@@ -187,10 +187,34 @@ Describe 'FIX36B PostgreSQL password safety' {
             $LASTEXITCODE | Should -Be 0
 
             (Get-PostgresOwnerOnlyAclState -Path $owned).Outcome | Should -BeExactly 'Success'
-            (@((Get-Acl -LiteralPath $owned).Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }) -join ',') | Should -BeExactly $script:Fix36BCurrentSid
+            (@((Get-Acl -LiteralPath $owned).Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } | Where-Object { $_ -notin @('S-1-5-32-544', 'S-1-5-18') } | Select-Object -Unique) -join ',') | Should -BeExactly $script:Fix36BCurrentSid
             (Get-PostgresOwnerOnlyAclState -Path $inherited).Outcome | Should -BeExactly 'Failed'
             (Get-PostgresOwnerOnlyAclState -Path $shared).Outcome | Should -BeExactly 'Failed'
             (Get-PostgresOwnerOnlyAclState -Path (Join-Path $folder 'missing.conf')).Outcome | Should -BeExactly 'Unknown'
+        }
+
+        # Mutation: reject an Administrators or SYSTEM entry (elevated accounts keep one), or accept any other
+        # account, a deny entry, or an inherited entry because Administrators is present.
+        It 'S2: an Administrators or SYSTEM entry beside the current user passes; other accounts, deny and inherited entries still fail' {
+            $folder = Join-Path $TestDrive ('acl-admin-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+            [void][System.IO.Directory]::CreateDirectory($folder)
+            $paths = @{}
+            foreach ($name in @('admin', 'system', 'other', 'deny', 'inherited')) {
+                $paths[$name] = Join-Path $folder ($name + '.conf')
+                [System.IO.File]::WriteAllText($paths[$name], 'x')
+            }
+            foreach ($name in @('admin', 'system', 'other', 'deny')) { (Set-PostgresOwnerOnlyAcl -Path $paths[$name]).Outcome | Should -BeExactly 'Success' }
+            & icacls $paths['admin'] /grant '*S-1-5-32-544:(F)' 1>$null 2>$null; $LASTEXITCODE | Should -Be 0
+            & icacls $paths['system'] /grant '*S-1-5-18:(F)' 1>$null 2>$null; $LASTEXITCODE | Should -Be 0
+            & icacls $paths['other'] /grant '*S-1-5-32-544:(F)' '*S-1-1-0:(R)' 1>$null 2>$null; $LASTEXITCODE | Should -Be 0
+            & icacls $paths['deny'] /grant '*S-1-5-32-544:(F)' 1>$null 2>$null; $LASTEXITCODE | Should -Be 0
+            & icacls $paths['deny'] /deny '*S-1-1-0:(R)' 1>$null 2>$null; $LASTEXITCODE | Should -Be 0
+
+            (Get-PostgresOwnerOnlyAclState -Path $paths['admin']).Outcome | Should -BeExactly 'Success'
+            (Get-PostgresOwnerOnlyAclState -Path $paths['system']).Outcome | Should -BeExactly 'Success'
+            (Get-PostgresOwnerOnlyAclState -Path $paths['other']).Outcome | Should -BeExactly 'Failed'
+            (Get-PostgresOwnerOnlyAclState -Path $paths['deny']).Outcome | Should -BeExactly 'Failed'
+            (Get-PostgresOwnerOnlyAclState -Path $paths['inherited']).Outcome | Should -BeExactly 'Failed'
         }
 
         # Mutation: return Success whenever icacls ran, or map a nonzero exit to Success.
