@@ -1204,6 +1204,24 @@ You will see: `You have 2 games with their controls set up.` and then `Copy cont
 
 - A `familyOverride` in `TeknoParrot-Manager.overrides.json` also applies to the games controls are copied from. A game set to `spinner` finds a reference game of that type.
 
+### Your controller layout and the controls check
+
+Mode 3 opens a small menu. Choice 1 is the copy described above. The other choices are new:
+
+- **2 = set up games with my controller layout.** The first time, you choose a layout once: Xbox, PlayStation, Nintendo or arcade stick. You can change any single button, and Test and Service start empty so a stick click cannot open a test menu. After that, pick one game, all your games at once (you see a preview and approve once), or game by game (you confirm each game).
+- **3 = choose or change my controller layout.** Your choice is saved in TeknoParrot Manager's own settings folder. A connected Xbox-style controller only pre-selects the Xbox choice. The answer is always yours.
+- **4 = check which games have all their controls.** It reads every registered game and sorts it into: every control set up, some set up, none set up, or "TPM cannot tell". It changes nothing. Details name the games and the controls still missing. The same counts show as a Controls line in the Library health check (menu 13).
+
+### More detail: your controller layout
+
+- TPM only sets controls that TeknoParrot's own game file lists for that game, and only when your saved settings for the game are the same revision as that file. If they are not, the game is left alone and the screen says to open it once in TeknoParrotUI.
+- A button that already has an Xbox setting is never replaced. Keyboard and arcade-encoder bindings are never touched. If an Xbox button the layout wants is already used by another control in that game, the game is left alone.
+- TPM does not set triggers or analog sticks (steering, aim, throttle). Those stay manual, and the preview names them.
+- PlayStation and Nintendo controllers work with the Xbox (XInput) setting only when something shows them to Windows as an Xbox controller. An arcade stick must be switched to its Xbox mode. TPM does not check this.
+- Setting a game to Xbox may stop that game from using an arcade encoder. Choose game by game if you are not sure.
+- A saved copy of your game settings is made and checked before the first change. Each changed game is saved, read back and compared. If the check fails, the old file is put back exactly. After the run you can undo the whole run in one step.
+- For most games the list of controls comes from TeknoParrot's own game file and no person has checked it, so the check says so. "Every control set up" never means the game works. TPM has not tested any game with a real controller.
+
 ---
 
 ## Device Survey
