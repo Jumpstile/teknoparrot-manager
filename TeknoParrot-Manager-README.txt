@@ -910,7 +910,9 @@
 
     Setup makes each game database from the game's own backup file and
     tests it with the game's own settings before it says the game is ready.
-    You do not need any extra step in TeknoParrot or on the first start. A
+    For a game set to Existing PostgreSQL you do not need any extra step in
+    TeknoParrot or on the first start. A game set to Internal storage is
+    skipped: start it once so it makes its own database. A
     game with no starting database file (pg_backup) is left out and named.
     The other games are still set up.
 
