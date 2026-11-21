@@ -84,6 +84,12 @@
     certainly the same game are grouped, and the default version follows
     the region you chose in Region setup. You see the groups first.
     Restore puts the separate games back.
+  - LaunchBox: a new choice keeps LaunchBox in step with your library.
+    Games you removed from TeknoParrot are removed, games whose folder
+    moved get the new location, and old Manager names become the clean
+    game title. A missing game file (an unplugged drive) never removes a
+    game, names you typed stay, and nothing is removed if most games
+    would go at once. You see everything first. Restore undoes it.
   - LaunchBox: a new optional step adds clear logos or box art from a
     folder you pick. You see a preview first, close matches are used only
     if you say yes, and Undo removes the pictures that were added.
