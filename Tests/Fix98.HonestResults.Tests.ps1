@@ -310,6 +310,18 @@ Describe 'FIX98 S6 and S7 an unfinished run is attention, a failed write stays F
         $summary.NotChanged | Should -Not -Match 'NO_USABLE_FAMILY_REFERENCE'
     }
 
+    It 'S7: the next step names one game to set up for each control type that has no example game' {
+        # Mutation: drop the named games -> the user has to guess which game to open in TeknoParrotUI (issue #342).
+        $reports = @(
+            [pscustomobject]@{ Code = 'ZGame'; Status = 'skipped-no-reference'; Family = 'lightgun' },
+            [pscustomobject]@{ Code = 'AGame'; Status = 'skipped-no-reference'; Family = 'lightgun' },
+            [pscustomobject]@{ Code = 'MGame'; Status = 'skipped-no-reference'; Family = 'driving' }
+        )
+        $summary = Get-TpmControlPropagationSummary -Reports $reports -Outcome 'NO_OP'
+        $summary.Next | Should -Match 'for example driving: MGame; lightgun: AGame\)'
+        (($summary.Blocks | Where-Object Heading -eq 'Games to set up first').Lines -join ' ') | Should -Match 'does not set up a game'
+    }
+
     It 'S7: the unattended log explains each design skip and agrees with the screen' {
         # Mutation: log only ACTION_REQUIRED or hide skipped-game details in unattended mode -> the reason and next step disappear.
         $reports = @([pscustomobject]@{ Code = 'ZGame'; Status = 'skipped-no-reference'; ReasonCode = 'NO_USABLE_FAMILY_REFERENCE'; Family = 'lightgun' })
