@@ -1124,7 +1124,7 @@ The default is B. If you only press Enter, nothing is replaced.
 
 | Key | What happens |
 | --- | --- |
-| `A` | Goes straight into ReShade setup to replace the old ReShade files of those games. You choose the look again. A copy of the old files is saved first, so you can undo it. There is no second question. |
+| `A` | Goes straight into ReShade setup to replace the old ReShade files of those games, with no separate "Replace the old files?" question. You still choose the look and confirm it in setup. A copy of the old files is saved first, so you can undo it. |
 | `S` | Goes back into ReShade setup so you can choose games one by one. After games that were not safe, the line reads `[S] Choose games one by one and try again`. |
 | `M` | Opens the Library health check (main menu 13) so you can repair missing game paths. |
 | `B` or Enter | Leaves the games as they are. Without protected games the line reads `[B] Back to the main menu`. |

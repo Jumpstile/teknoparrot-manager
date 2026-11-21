@@ -492,6 +492,26 @@ Describe "Virtual Beta Tester: UserProfiles backup completion protocol (FIX29 SC
         @($script:fx29HostLines | Where-Object { $_ -like '*UNVERIFIED*' }).Count | Should -Be 0
     }
 
+    It "declining the typed YES for a backup that can be checked cancels with zero changes and never reaches the process-close step" {
+        $userProfilesDir = New-RestoreFixture -Name 'fx29-verified-decline'
+        [System.IO.File]::WriteAllText((Join-Path $userProfilesDir 'A.xml'), '<GameProfile>a</GameProfile>')
+        $backup = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $userProfilesDir -Label 'Fixture'
+        $backup.Verified | Should -BeTrue -Because ([string]$backup.Reason)
+        [System.IO.File]::WriteAllText((Join-Path $userProfilesDir 'CURRENT.xml'), '<GameProfile>current</GameProfile>')
+        $liveBefore = Get-RestoreFixtureSnapshot -UserProfilesDir $userProfilesDir
+        Mock Read-Host { return '1' } -ParameterFilter { $Prompt -like '*Enter number to restore*' }
+        Mock Read-Host { return 'no' } -ParameterFilter { $Prompt -like '*Type YES to confirm*' }
+        Mock Read-Host { throw 'A backup that can be checked must not ask for UNVERIFIED.' } -ParameterFilter { $Prompt -like '*Type UNVERIFIED*' }
+        Mock Wait-TpmForProcessClose { throw 'Restore must not reach the process-close step without an explicit YES.' }
+
+        $result = Invoke-RestoreBackupLegacy -userProfilesDir $userProfilesDir
+
+        $result.Outcome | Should -Be 'NO_OP'
+        $result.ReasonCode | Should -Be 'USER_DECLINED'
+        Get-RestoreFixtureSnapshot -UserProfilesDir $userProfilesDir | Should -BeExactly $liveBefore
+        Should -Invoke Wait-TpmForProcessClose -Times 0 -Exactly
+    }
+
     It "refuses, before any change, a completed backup whose content no longer matches its completion record" {
         $userProfilesDir = New-RestoreFixture -Name 'fx29-damaged-backup'
         [System.IO.File]::WriteAllText((Join-Path $userProfilesDir 'A.xml'), '<GameProfile>a</GameProfile>')

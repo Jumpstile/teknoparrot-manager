@@ -3414,9 +3414,9 @@
     example Press A, S, M, B or D). The default is B.
 
       A    Goes straight into ReShade setup to replace the old ReShade
-           files of those games. There is no second question. You choose
-           the look again. A copy of the old files is saved first, so you
-           can undo it.
+           files of those games, with no separate "Replace the old files?"
+           question. You still choose the look and confirm it in setup. A
+           copy of the old files is saved first, so you can undo it.
 
       S    Goes back into ReShade setup so you can choose games one by one.
 

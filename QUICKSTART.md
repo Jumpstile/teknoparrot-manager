@@ -525,7 +525,7 @@ Press A, S, B or D:
 
 Type one key and press Enter. Press Enter alone to pick B.
 
-- **A** goes straight into ReShade setup to replace the old ReShade files. There is no second question. You choose the look again. A copy of the old files is saved first, so you can undo it.
+- **A** goes straight into ReShade setup to replace the old ReShade files, with no separate "Replace the old files?" question. You still choose the look and confirm it in setup. A copy of the old files is saved first, so you can undo it.
 - **S** goes back into ReShade setup so you can choose games one by one.
 - **M** opens the Library health check (mode 13) so you can repair missing game paths. It shows only when some games could not be found.
 - **B** leaves the games as they are. When there are no protected games, B means back to the main menu.

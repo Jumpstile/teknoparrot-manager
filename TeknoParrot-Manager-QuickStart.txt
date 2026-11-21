@@ -2884,8 +2884,9 @@
   Only the keys that apply are shown. B is the default.
 
   A goes straight into ReShade setup to replace the old ReShade files of
-  those games. There is no second question. You choose the look again. A
-  copy of the old files is saved first, so you can undo it.
+  those games, with no separate "Replace the old files?" question. You
+  still choose the look and confirm it in setup. A copy of the old files
+  is saved first, so you can undo it.
 
   M opens the Library health check (mode 13) to repair missing game paths.
 
