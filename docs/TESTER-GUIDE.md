@@ -291,7 +291,7 @@ These tests try the fixes made in RC8.2.
 
 1. Plug in an Xbox-style controller (wired or wireless) BEFORE you start the program. Then start it.
 2. When it asks about your controls, look for the line "Found: an Xbox-style controller."
-3. You should get ONE question: "Use the Xbox controller for all games?" Type Y. It prints a plan. It changes nothing.
+3. You should get ONE question: "Use the Xbox controller for all games?" Type Y. It prints a plan. It changes no game file (it only saves your answer in its own settings folder).
 4. Now close the program, unplug the controller, and start it again. Answer the control questions.
 5. You passed if step 3 asked one question, and step 4 asked the full list of questions like before. Tell us what controller you have.
 

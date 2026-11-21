@@ -843,7 +843,18 @@ On first run (or when you ask), the script asks which controls you have: Xbox pa
 
 It then prints a plan that says which game to set up with which device.
 
-It only reads. It changes nothing. If a controller is connected, it looks for it first. When it finds an Xbox-style controller, it asks one question (`Use the Xbox controller for all games?`) instead of seven.
+It changes no game file. If a controller is connected, it looks for it first. When it finds an Xbox-style controller, it asks one question (`Use the Xbox controller for all games?`) instead of seven. A match that is only a guess from a device name is shown as "may be connected" and never answers for you.
+
+Your answers are saved in TeknoParrot Manager's own settings folder (`State\Controls`), so you are not asked the same thing twice. Next time it shows your answers and asks one question: `Keep these answers?` It asks again if a controller turns up that you said you do not have. A saved file that cannot be read is set aside, never overwritten, and the last good copy is kept next to the new one as a `.bak` file.
+
+### My controls (Propagate Controls, choice 3)
+
+Choose **3** under Propagate Controls to open **My controls**. Nothing here changes a TeknoParrot game file.
+
+- **Learn my arcade buttons.** You say how many players and buttons your cabinet has. If LEDBlinky is installed, TeknoParrot Manager first offers the keys its own key list names (one Y/N). Then it asks you to press each control ("Press Player 1 Start") and remembers the key it sends. Esc skips a control your cabinet does not have. A key already given to another control is refused. At the end one question, `Save this?`, keeps the answers. Other encoder brands' own setup files are not read yet; pressing the buttons works for any encoder.
+- **Show or print the controls of one game.** Lists each control the game has, what it does, your key for it, and whether the game has it set up. One question saves the list as a page in `Reports\Control Guides` and opens it so you can print it.
+- **Tell TPM how a game played.** `W` means you played it and every control you tried reacted correctly. TeknoParrot Manager keeps that, with the date and the game's revision, and calls the game's controls **Verified** until its controls or its settings change. Starting a game, registering it, or seeing a controller never makes a game Verified. A wheel, gun or other analog game is not Verified until you say its calibration is done (or not needed). You can also record that a first-run Test or Service menu step is still to do. `N` makes TeknoParrot Manager forget that a game worked.
+- **Show or print my cabinet controls.** The same page for the cabinet itself: each control and the key it sends.
 
 ---
 
@@ -2480,7 +2491,7 @@ The suffix is stripped before any profile comparison.
 
 | Program             | What it does |
 | ------------------- | ------------ |
-| TeknoParrot Manager | Adds your games to TeknoParrot, copies controls from a game you set up to games of the same type (after you say yes, with a backup first), applies the optional fixes you choose, and names the folders. |
+| TeknoParrot Manager | Adds your games to TeknoParrot, copies controls from a game you set up to games of the same type (after you say yes, with a backup first), remembers which controls you have and which key each arcade button sends, prints control guides, keeps your notes on which games worked, applies the optional fixes you choose, and names the folders. |
 | TeknoParrot         | Runs the games. It keeps each game's controls and input type (for example mouse and keyboard, a controller or a lightgun). It has its own first-time setup window. |
 | RetroBat            | Keeps its own game list and starts games its own way. |
 
@@ -2488,7 +2499,7 @@ The suffix is stripped before any profile comparison.
 
 **Only a mouse and keyboard for now?** TeknoParrot Manager does not set up mouse or keyboard input and does not test your devices. Set the controls for one game in TeknoParrotUI and choose its input type there (RawInput is the mouse and keyboard type). Start that game from TeknoParrot first. Then use **Propagate Controls** (3) to copy the setup to other games of the same type, and test one game before you trust the rest. Starting a game from TeknoParrot and starting it from RetroBat are two different ways to start it. TeknoParrot Manager does not change how RetroBat starts a game and cannot tell you why one way works and the other does not. If a game works in TeknoParrot but not from RetroBat, look at RetroBat's TeknoParrot settings or ask the RetroBat community.
 
-**Later, with Sinden lightguns:** TeknoParrot Manager does not detect or set up lightguns. That setup happens in TeknoParrot and in the gun's own software. The crosshair option (4) only copies crosshair pictures to lightgun games.
+**Later, with Sinden lightguns:** TeknoParrot Manager can notice that something that looks like a lightgun is plugged in, but it does not set one up. That setup happens in TeknoParrot and in the gun's own software. The crosshair option (4) only copies crosshair pictures to lightgun games.
 
 ### The first-time questions in plain words
 

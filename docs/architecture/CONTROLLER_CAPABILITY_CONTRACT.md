@@ -4,7 +4,7 @@ This contract is how TPM describes what a controller can do, in TPM's own words.
 
 Status: draft for review. Applies to TPM 1.0. Tracking issue: #303. Schema: `schemas/TpmControllerCapability.v1.schema.json`.
 
-Related: #200 (controller mapping), #410 (controller evidence, `docs/architecture/CONTROLLER_EVIDENCE_CONTRACT.md`), #304 (external evidence importer), #305 (coverage and readiness inventory), #306 (Xbox XInput P1 apply), #307 (verification and calibration), #267 (cabinet control inventory, after 1.0).
+Related: #200 (controller mapping), #410 (controller evidence, `docs/architecture/CONTROLLER_EVIDENCE_CONTRACT.md`), #304 (external evidence importer), #305 (coverage and readiness inventory), #306 (Xbox XInput P1 apply), #307 (verification and calibration), #267 (cabinet control inventory and control guides), `CONTROLLER_VERIFICATION_STORE.md` (where answers and evidence are kept).
 
 ## What the contract holds
 
@@ -38,7 +38,7 @@ The schema has no field named after a TeknoParrot XML or JSON key, and every obj
 
 ## What this contract does not do
 
-It adds no write path, no profile reader, and no UI. It does not hold verification results, calibration results, or per-user bindings. The adapter and apply work stays in #306, the inventory in #305, and verification in #307.
+It adds no write path, no profile reader, and no UI. It does not hold verification results, calibration results, or per-user bindings. The adapter and apply work stays in #306, the inventory in #305, and verification in #307 (built; see `CONTROLLER_VERIFICATION_STORE.md`).
 
 ## Required tests
 

@@ -2503,12 +2503,47 @@
 
   If a controller is connected, it looks for it first. When it finds an
   Xbox-style controller, it asks one question ("Use the Xbox controller
-  for all games?") instead of seven.
+  for all games?") instead of seven. A match that is only a guess from a
+  device name is shown as "may be connected" and never answers for you.
 
-  It then prints a plan of which game to bind with which device.
+  It then prints a plan of which game to bind with which device. It
+  changes no game file.
 
-  This is only advice. It reads nothing and changes nothing. Use it as a
-  guide for the binding step.
+  Your answers are saved in the Manager's own settings folder
+  (State\Controls), so you are not asked the same thing twice. Next time
+  it shows your answers and asks one question ("Keep these answers?"). It
+  asks again if a controller turns up that you said you do not have. A
+  saved file that cannot be read is set aside, never overwritten, and the
+  last good copy is kept next to the new one as a .bak file.
+
+  MY CONTROLS (Propagate Controls, choice 3)
+
+    Nothing here changes a TeknoParrot game file.
+
+    - Learn my arcade buttons. You say how many players and buttons your
+      cabinet has. If LEDBlinky is installed, the Manager first offers
+      the keys its own key list names (one Y/N). Then it asks you to press
+      each control ("Press Player 1 Start") and remembers the key it
+      sends. Esc skips a control your cabinet does not have. A key
+      already given to another control is refused. At the end, one
+      question ("Save this?") keeps the answers. Other encoder brands'
+      own setup files are not read yet; pressing the buttons works for
+      any encoder.
+    - Show or print the controls of one game. Lists each control the game
+      has, what it does, your key for it, and whether the game has it set
+      up. One question saves the list as a page in Reports\Control Guides
+      and opens it so you can print it.
+    - Tell TPM how a game played. W means you played it and every control
+      you tried reacted correctly. The Manager keeps that, with the date
+      and the game's revision, and calls the game's controls Verified
+      until its controls or its settings change. Starting a game,
+      registering it, or seeing a controller never makes a game Verified.
+      A wheel, gun or other analog game is not Verified until you say its
+      calibration is done (or not needed). You can also record that a
+      first-run Test or Service menu step is still to do. N makes the
+      Manager forget that a game worked.
+    - Show or print my cabinet controls. The same page for the cabinet
+      itself: each control and the key it sends.
 
   If you have no lightgun, you can aim gun games in two ways:
 

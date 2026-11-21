@@ -1166,7 +1166,7 @@ The answer is saved and never asked again.
 - **Who does what:** TeknoParrot Manager adds games to TeknoParrot, copies controls between games of the same type (after you say yes, with a backup first) and names the folders. TeknoParrot runs the games and keeps each game's controls and input type. RetroBat keeps its own game list and starts games its own way.
 - **Before you change controls, check:** the game shows up in TeknoParrotUI, it starts from TeknoParrotUI, and you set up one example game of that type yourself.
 - **Only a mouse and keyboard for now?** TeknoParrot Manager does not set up mouse or keyboard input. Set one game's controls in TeknoParrotUI (RawInput is the mouse and keyboard type), start it from TeknoParrot first, then use Propagate Controls (3) for the others and test one game. Starting from TeknoParrot and from RetroBat are two different ways to start a game. TeknoParrot Manager does not change how RetroBat starts a game and cannot tell you why one way works and the other does not.
-- **Later, with Sinden lightguns:** TeknoParrot Manager does not detect or set up lightguns. That happens in TeknoParrot and in the gun's own software.
+- **Later, with Sinden lightguns:** TeknoParrot Manager can notice that something that looks like a lightgun is plugged in, but it does not set one up. That happens in TeknoParrot and in the gun's own software.
 
 ---
 
