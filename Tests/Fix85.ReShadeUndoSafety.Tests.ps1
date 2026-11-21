@@ -453,6 +453,25 @@ Describe 'FIX85 the setup flow finishes the undo receipt of every game it change
         @(Get-TpmReShadeUndoEntries | ForEach-Object { $_.GameId }) | Should -Be @('GameA')
     }
 
+    It 'counts the applying progress against the games being changed, not every selected game (#416)' {
+        # Mutation: count every selected game again in the deployment progress -> Total is 2 here ("2 of 2" for one changed game, "72 of 330" in a real library).
+        $script:f85Names = @('GameA', 'GameB')
+        $dirB = Join-Path $script:f85Root 'Games\GameB'
+        [void][IO.Directory]::CreateDirectory($dirB)
+        [IO.File]::WriteAllText((Join-Path $script:f85Profiles 'GameB.xml'), ('<GameProfile><GameName>Fixture GameB</GameName><GamePath>{0}</GamePath></GameProfile>' -f [System.Security.SecurityElement]::Escape((Join-Path $dirB 'GameB.exe'))))
+        Mock Get-TpmReShadeApplyPreflight {
+            $records = @([pscustomobject]@{ Game = 'Fixture GameA'; Id = 'GameA'; Status = 'Ready'; Detail = '' }, [pscustomobject]@{ Game = 'Fixture GameB'; Id = 'GameB'; Status = 'MissingPath'; Detail = '' })
+            [pscustomobject]@{ Total = 2; Ready = 1; Protected = 0; MissingPath = 1; Unsafe = 0; Failed = 0; Records = $records }
+        }
+        $script:f85Progress = New-Object System.Collections.Generic.List[object]
+        Mock Write-TpmCompactExtractionProgress { [void]$script:f85Progress.Add([pscustomobject]@{ Label = $Label; Current = $Current; Total = $Total; Complete = [bool]$Complete }) }
+        $null = Invoke-ReShadeSetupLegacy -UserProfilesDir $script:f85Profiles -SourceDll $script:f85SourceDll
+        $rows = @($script:f85Progress | Where-Object { $_.Label -eq 'ReShade profile deployment' })
+        $rows.Count | Should -Be 2 -Because 'one row for the one game being changed and the closing row'
+        @($rows | Where-Object { $_.Total -ne 1 }).Count | Should -Be 0
+        @($rows | Where-Object { -not $_.Complete })[0].Current | Should -Be 1
+    }
+
     It 'says "Undo copy not finished" for a game whose receipt cannot be finished' {
         # Mutation: count an unfinished receipt as ready -> the game is in UndoReceiptItems and the screen promises an undo.
         Mock Save-TpmReShadeUndoReceipt {

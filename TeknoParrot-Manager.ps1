@@ -17742,7 +17742,7 @@ function Get-TpmReShadeApplyPreflight {
         $progressCurrent++
         if ($SelectedGames.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade apply preflight' -Current $progressCurrent -Total $SelectedGames.Count -StartedAt $progressStarted }
         $gameLabel = Get-TpmReShadeGameLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
-        $record = [ordered]@{ Game = $gameLabel; Status = 'Unsafe'; Detail = '' }
+        $record = [ordered]@{ Game = $gameLabel; Id = [string]$pf.BaseName; Status = 'Unsafe'; Detail = '' }
         try {
             $doc = Read-Xml $pf.FullName
             $pathNode = if ($doc.GameProfile) { $doc.GameProfile.SelectSingleNode('GamePath') } else { $null }
@@ -18449,9 +18449,18 @@ function Invoke-ReShadeSetupLegacy {
     }
     $deploymentStarted = Get-Date
     $deploymentCurrent = 0
+    # The progress counts the games that are being changed (the ones the check above found ready), not the whole library. The
+    # checking passes above count every game; they have their own plainly named stage.
+    $changeableIds = @{}
+    foreach ($changeableRecord in @($preflightSummary.Records)) {
+        if ($changeableRecord.Status -eq 'Ready' -or ($Action -eq 'Adopt' -and $changeableRecord.Status -eq 'Protected')) { $changeableIds[([string]$changeableRecord.Id).ToLowerInvariant()] = $true }
+    }
+    $deploymentTotal = @($selectedGames | Where-Object { $changeableIds.ContainsKey(([string]$_.BaseName).ToLowerInvariant()) }).Count
     foreach ($pf in $selectedGames) {
-        $deploymentCurrent++
-        Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current $deploymentCurrent -Total $selectedGames.Count -StartedAt $deploymentStarted
+        if ($changeableIds.ContainsKey(([string]$pf.BaseName).ToLowerInvariant())) {
+            $deploymentCurrent++
+            if ($deploymentCurrent -le $deploymentTotal) { Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current $deploymentCurrent -Total $deploymentTotal -StartedAt $deploymentStarted }
+        }
         # FIX85: the undo receipt of this game (from the deployment or the reapply), whether a failed rollback left the game half changed, and
         # the CRT setting turned off; the finally block below finishes the receipt whatever happens after the deployment.
         $gameUndo = $null; $undoMixed = $false; $undoNative = $null; $nativeCrtPlanned = $false
@@ -18692,7 +18701,7 @@ function Invoke-ReShadeSetupLegacy {
             }
         }
     }
-    if ($selectedGames.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current $deploymentCurrent -Total $selectedGames.Count -StartedAt $deploymentStarted -Complete }
+    if ($deploymentTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current ([Math]::Min($deploymentCurrent, $deploymentTotal)) -Total $deploymentTotal -StartedAt $deploymentStarted -Complete }
     if ($nativeCrtState.Requested) { Write-TpmReShadeNativeCrtOutcome -State $nativeCrtState }
     $nativeTurnedOff = @($nativeCrtState.Records | Where-Object { $_.Succeeded } | ForEach-Object { [string]$_.Game })
     $nativeResultWarnings = @(foreach ($nativeWarning in $nativeShaderWarnings) {
@@ -22056,7 +22065,7 @@ function Invoke-GpuFixSetup {
     $legacyBackupVerified=[bool](Get-TpmTransactionField -Object $legacyBackup -Name 'Verified' -Default $false)
     $legacyReason=Get-TpmTransactionField -Object $legacy -Name 'Reason' -Default $null
     $cancelled=[bool]$legacyCancelled
-    $reasonCode=if($cancelled){'USER_CANCELLED'}elseif($unknown.Count -gt 0){'PROFILE_WRITE_STATE_UNKNOWN'}elseif($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $legacyReason){[string]$legacyReason}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $legacyBackupVerified){'PROFILE_BACKUP_COMPLETED_NO_WRITE'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $failed.Count -gt 0){'PROFILE_PROCESSING_FAILED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION'){'PROFILE_SKIPPED'}else{'GPU_FIELDS_PROCESSED'}
+    $reasonCode=if($cancelled){'USER_CANCELLED'}elseif($unknown.Count -gt 0){'PROFILE_WRITE_STATE_UNKNOWN'}elseif($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and -not $legacyReason -and $failed.Count -eq 0 -and [int]$legacy.Errors -eq 0 -and $skipped.Count -gt 0){'SOME_GAMES_NOT_CHANGED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $legacyReason){[string]$legacyReason}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $legacyBackupVerified){'PROFILE_BACKUP_COMPLETED_NO_WRITE'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $failed.Count -gt 0){'PROFILE_PROCESSING_FAILED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION'){'PROFILE_SKIPPED'}else{'GPU_FIELDS_PROCESSED'}
     $discoveryFailed=($legacyReason -in @('GAMEPROFILE_DISCOVERY_FAILED','PROFILE_DISCOVERY_FAILED'))
     $summary=if($cancelled){'GPU compatibility setup was canceled before profile changes.'}elseif($discoveryFailed){'GPU compatibility setup stopped before any profile was processed.'}else{'GPU compatibility fields were processed with per-game outcomes.'}
     $finalChecks=if($cancelled){@('GPU vendor selection was canceled before profile discovery; no profile mutation was attempted.')}elseif($discoveryFailed){@('Discovery failed before any profile was read; no profile mutation was attempted.')}else{@('Per-game write outcomes were recorded; unresolved writes remain unknown.')}
@@ -22368,7 +22377,13 @@ function Get-TpmGpuFixResultView {
     $skipDetails = @(Get-TpmTransactionField -Object $Result -Name 'SkipDetails' -Default @() | Where-Object { $null -ne $_ })
     $needs = New-Object System.Collections.Generic.List[string]
     foreach ($group in @($skipDetails | Group-Object -Property { [string](Get-TpmTransactionField -Object $_ -Name 'Reason' -Default '') })) {
-        [void]$needs.Add(('{0} skipped. {1}' -f (Format-TpmGameCount -Count $group.Count), $group.Name))
+        # A drive that is not connected is a skip, not a failure: say which drive (from the saved paths) instead of a general sentence.
+        $groupText = $group.Name
+        $groupDrives = @($group.Group | Where-Object { [string](Get-TpmTransactionField -Object $_ -Name 'ReasonKey' -Default '') -eq 'DEVICE_UNAVAILABLE' } | ForEach-Object { if (([string](Get-TpmTransactionField -Object $_ -Name 'SavedPath' -Default '')) -match '^\s*([A-Za-z]:|\\\\[^\\]+\\[^\\]+)') { $Matches[1].ToUpperInvariant() } } | Sort-Object -Unique)
+        if ($groupDrives.Count -gt 0 -and @($group.Group | Where-Object { [string](Get-TpmTransactionField -Object $_ -Name 'ReasonKey' -Default '') -ne 'DEVICE_UNAVAILABLE' }).Count -eq 0) {
+            $groupText = if ($groupDrives.Count -eq 1) { ('Drive {0} is not connected.' -f $groupDrives[0]) } else { ('Drives {0} are not connected.' -f (Format-TpmNameList -Names $groupDrives)) }
+        }
+        [void]$needs.Add(('{0} skipped. {1}' -f (Format-TpmGameCount -Count $group.Count), $groupText))
     }
     if ($count.Skipped -gt $skipDetails.Count) { [void]$needs.Add(('{0} skipped.' -f (Format-TpmGameCount -Count ($count.Skipped - $skipDetails.Count)))) }
     if ($failed -gt 0) { [void]$needs.Add(('{0} could not be updated.' -f (Format-TpmGameCount -Count $failed))) }
@@ -25784,6 +25799,12 @@ function Build-DatIndexFromStream {
         $profCode    = ''
         $exePath     = ''
         # Newer dat fields (TPUISchemaVersion 1, issue #382); empty when a game does not have them.
+        # Decision (issue #382): romzip and romnest (the files inside a MAME-style game's ZIP: archive, size, crc, sha1) are NOT used. The
+        # Manager registers games from folders and profiles and never checks ROM contents, so verifying extracted sets would be a new
+        # feature that hashes every file of every such game. Both are self-closing elements next to <rom>; they hold no text, so this
+        # reader passes over them and stays streaming (the dat is about 520 MB). A dat with no TPUISchemaVersion (older files) is read silently.
+        $schemaVersionText = ''
+        $schemaChecked = $false
         $profCode2   = ''
         $exePath2    = ''
         $testMenuExe = ''
@@ -25815,6 +25836,16 @@ function Build-DatIndexFromStream {
             if ($reader.NodeType -eq [System.Xml.XmlNodeType]::Element) {
                 $currentElem = $reader.Name
                 if ($currentElem -eq 'game') {
+                    # The header comes before the first game, so the format version is known here. An unknown version is only a warning
+                    # (the file is still read the way version 1 is read), said once, before the long read of the games.
+                    if (-not $schemaChecked) {
+                        $schemaChecked = $true
+                        if ($schemaVersionText -and $schemaVersionText -cne '1') {
+                            Write-Log ('DAT: the file says TPUISchemaVersion {0}; this Manager knows version 1. It is read as version 1 and some games may not match.' -f $schemaVersionText)
+                            Write-Host ('  This game list (DAT) uses a format this Manager does not know (version {0}; it knows version 1).' -f $schemaVersionText) -ForegroundColor Yellow
+                            Write-Host '  It is still read, but some games may not match. Check for a newer Manager.' -ForegroundColor Yellow
+                        }
+                    }
                     $gameName    = $reader.GetAttribute('name')
                     $profCode    = ''
                     $exePath     = ''
@@ -25852,6 +25883,8 @@ function Build-DatIndexFromStream {
                 elseif ($currentElem -eq 'GameProfile2')                    { $profCode2   = $reader.Value }
                 elseif ($currentElem -eq 'Executable2' -and -not $exePath2) { $exePath2    = $reader.Value }
                 elseif ($currentElem -eq 'TestMenuExecutable')              { $testMenuExe = $reader.Value }
+            } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::Text -and -not $insideGame -and $currentElem -eq 'TPUISchemaVersion') {
+                $schemaVersionText = ([string]$reader.Value).Trim()
             } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::EndElement -and $reader.Name -eq 'game') {
                 $insideGame = $false
                 $captureRoms = $false
@@ -38615,6 +38648,12 @@ function Invoke-LibraryHealthCheck {
                 if (-not $checkedDatabases.ContainsKey($checkKey)) { $checkedDatabases[$checkKey] = (Get-PostgresGameDatabaseReadiness -Doc $databaseCheck.Doc) }
                 $readiness = $checkedDatabases[$checkKey]
                 if ($readiness.Ready) { continue }
+                # A missing database of a game that has TeknoParrot's own "Automatically create Database" option and no starting file with the game (the games in
+                # $postgresAutoCreateLabels) is not a problem Postgres setup could fix: TeknoParrot makes it the first time the game starts. A game that ships a starting file stays a problem (menu 11 makes it).
+                if ([string]$readiness.Error -match 'does not exist' -and $postgresAutoCreateLabels.Contains([string]$databaseCheck.Label)) {
+                    Write-Log ('HealthCheck: database of {0} is not there yet; the game creates it the first time it starts.' -f $databaseCheck.Label)
+                    continue
+                }
                 $why = if ([string]$readiness.Error -match 'does not exist') { 'its database is missing' } elseif ([string]$readiness.Error -match '^Found 0 tables') { 'its database has no tables' } else { 'the game cannot connect to its database with its own settings' }
                 [void]$postgresDatabaseProblems.Add(('{0}: {1}' -f $databaseCheck.Label, $why))
                 Write-Log ('HealthCheck: database problem for {0}: {1}' -f $databaseCheck.Label, $readiness.Error)
@@ -38957,7 +38996,7 @@ function Get-TpmLibraryHealthDetailBlocks {
             $databaseCheck = [string](Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseCheck' -Default 'NotNeeded')
             $databaseProblems = @(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseProblems' -Default @())
             $databaseSkipped = @(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseNotChecked' -Default @())
-            if ($databaseCheck -eq 'Done' -and $databaseProblems.Count -eq 0 -and $databaseSkipped.Count -eq 0) { [void]$lines.Add('Database check: every game database is there, opens with the game''s own settings and has tables.') }
+            if ($databaseCheck -eq 'Done' -and $databaseProblems.Count -eq 0 -and $databaseSkipped.Count -eq 0 -and $autoCreate.Count -eq 0) { [void]$lines.Add('Database check: every game database is there, opens with the game''s own settings and has tables.') }
             elseif ($databaseCheck -eq 'Done' -and $databaseProblems.Count -eq 0) { [void]$lines.Add('Database check: the databases that could be checked are there, open with the game''s own settings and have tables.') }
             elseif ($databaseCheck -eq 'Done') {
                 foreach ($databaseProblem in $databaseProblems) { [void]$lines.Add(('Problem - {0}' -f $databaseProblem)) }
@@ -38971,8 +39010,8 @@ function Get-TpmLibraryHealthDetailBlocks {
             [void]$lines.Add('No PostgreSQL database profiles were found.')
         }
         if ($autoCreate.Count -gt 0) {
-            [void]$lines.Add(('Games with no starting database file: {0}' -f (Format-TpmNameList -Names $autoCreate -Max 1000)))
-            [void]$lines.Add('PostgreSQL setup cannot make the database of these games ready without it. Put the game''s pg_backup folder back, then run PostgreSQL setup (menu 11).')
+            [void]$lines.Add(('Profile ready; the database is created the first time the game starts: {0}' -f (Format-TpmNameList -Names $autoCreate -Max 1000)))
+            [void]$lines.Add('These games make their own database (TeknoParrot''s "Automatically create Database" option). Nothing is wrong and nothing needs to be done.')
         }
     } else {
         [void]$lines.Add('Setup needs: Not reported - the game check was incomplete, so setup needs and filled-in counts are withheld.')
@@ -45515,10 +45554,16 @@ function Get-TpmFriendlyProgressLabel {
             'Setting up PostgreSQL as administrator' = @(
                 'PostgreSQL elevated setup'
             )
-            'Setting up ReShade' = @(
+            'Checking your games for ReShade' = @(
                 'ReShade apply path preflight',
                 'ReShade apply preflight',
                 'ReShade bulk conflict scan',
+                'ReShade native shader scan'
+            )
+            'Applying ReShade' = @(
+                'ReShade profile deployment'
+            )
+            'Setting up ReShade' = @(
                 'ReShade deployment verification',
                 'ReShade effect acquisition',
                 'ReShade effect asset',
@@ -45527,10 +45572,8 @@ function Get-TpmFriendlyProgressLabel {
                 'ReShade embedded archive candidates',
                 'ReShade embedded archive entry scan',
                 'ReShade installer signature scan',
-                'ReShade native shader scan',
                 'ReShade preset file discovery',
                 'ReShade preset profile-code scan',
-                'ReShade profile deployment',
                 'ReShade state migration discovery'
             )
             'Setting up crosshairs' = @(
@@ -54652,7 +54695,7 @@ function Get-MainMenuSections {
         Header = 'Game Requirements (only for some games)'
         Column = 'Right'
         Items  = @(
-            [pscustomobject]@{ Number = 11; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'PostgreSQL for games set to Existing PostgreSQL.'; FullDesc = @('For games set to Existing PostgreSQL.', 'Installs/configures local PostgreSQL 8.3 for', 'Golden Tee Live (2020 too), Power Putt Live,', 'Silver Strike Bowling Live, Target Toss Pro.', 'Games on Internal storage (the new default)', 'need no database install and are skipped.', 'A missing game database is made from the', 'game''s own backup, then tested before ready.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
+            [pscustomobject]@{ Number = 11; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'PostgreSQL for games set to Existing PostgreSQL.'; FullDesc = @('For games set to Existing PostgreSQL.', 'Installs/configures local PostgreSQL 8.3 for', 'Golden Tee Live 2020 and the other Golden Tee', 'Live years, Power Putt Live, Silver Strike', 'Bowling Live, Target Toss Pro.', 'Games on Internal storage (the new default)', 'need no database install and are skipped.', 'A missing game database is made from the', 'game''s own backup, then tested before ready.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
             [pscustomobject]@{ Number = 12; Mode = 'RequiredPatch'; Label = 'Required game patches'; ShortDesc = 'Find and safely install supported required fixes from your local ZIPs.'; FullDesc = @('Find required patches for supported exact', 'game builds using your local Main or', 'Supplementary ZIP files. TPM validates the', 'game, backs up, applies, and verifies files.', 'A verified patch is not gameplay proof.') }
         )
     }
@@ -56030,6 +56073,7 @@ $mode = $null
         Write-Host "  Each game has one database. A game on Internal storage makes its own, so it is skipped here." -ForegroundColor DarkGray
         Write-Host "  For every game that uses PostgreSQL, this step makes that game's database from the game's own backup" -ForegroundColor DarkGray
         Write-Host "  when it is missing, then tests it with the game's own settings before setup says it is ready." -ForegroundColor DarkGray
+        Write-Host "  Golden Tee Live 2020 is covered too. It can make its own database the first time the game starts." -ForegroundColor DarkGray
         foreach ($choiceLine in (Get-TpmDatabaseChoiceLines)) { Write-Host ('  ' + $choiceLine) -ForegroundColor DarkGray }
         $postgresStatus = New-TpmWorkflowStatusContext -WorkflowKey 'PostgresSetup' -Title 'PostgreSQL setup' -Steps @(
             @{ Id = 'scan'; Label = 'Check which games need PostgreSQL' }
@@ -59835,9 +59879,13 @@ if ($doGpuFix -eq "Y") {
     } elseif ([bool]$autoGpuResult.Cancelled) {
         Write-Host "GPU Compatibility Fix canceled before profile changes; no success was claimed." -ForegroundColor DarkGray
     } elseif ($autoGpuResult.Outcome -notin @('SUCCEEDED', 'NO_OP')) {
-        Write-Host "GPU Compatibility Fix did not complete for every game. No success was claimed; review the per-game results above." -ForegroundColor Yellow
+        # The same result screen the menu uses: the counts (selected, changed, skipped, failed), the drive letter, and D for details.
+        $autoGpuView = Get-TpmGpuFixResultView -Result $autoGpuResult
+        $autoGpuView.Next = if ([int](Get-TpmTransactionField -Object $autoGpuResult -Name 'MissingDevice' -Default 0) -gt 0 -or [int](Get-TpmTransactionField -Object $autoGpuResult -Name 'MissingPath' -Default 0) -gt 0) {
+            (Get-TpmDriveSkipNext) + ' Then run GPU Compatibility Fix again from the main menu.'
+        } else { 'Run GPU Compatibility Fix again from the main menu if you want to retry.' }
+        Write-TpmOutcome @autoGpuView
         if ([int](Get-TpmTransactionField -Object $autoGpuResult -Name 'MissingDevice' -Default 0) -gt 0) {
-            Write-Host "  A drive that holds some of your games is not connected. Connect it, then run GPU Compatibility Fix again from the main menu." -ForegroundColor Yellow
             [void]$onboardingFollowUp.Add('Drive not connected: the GPU fix skipped games on a drive that is not connected. ' + (Get-TpmDriveSkipNext))
         }
     }
@@ -59848,7 +59896,8 @@ if ($doGpuFix -ne 'Y') {
     $onboardingGpuSummary = 'GPU compatibility: canceled before profile changes; no success was claimed. Run GPU Compatibility Fix from the menu if still wanted.'
     [void]$onboardingFollowUp.Add($onboardingGpuSummary)
 } elseif (-not $autoGpuResult -or @($autoGpuResult.PSTypeNames) -notcontains 'TPM.TransactionResult.v1' -or $autoGpuResult.Outcome -notin @('SUCCEEDED','NO_OP')) {
-    $onboardingGpuSummary = 'GPU compatibility: did not finish as a verified success. Review the per-profile result and preserved backup before retrying; no game launch or display result was verified.'
+    $gpuCountsLine = if ($autoGpuResult) { Get-TpmResultCountsLine -Result $autoGpuResult -Picked @(Get-TpmTransactionField -Object $autoGpuResult -Name 'SelectedItems' -Default @()) -AlreadyWord 'already set up or needed no fix' } else { '' }
+    $onboardingGpuSummary = if ($gpuCountsLine) { 'GPU compatibility: ' + $gpuCountsLine + ' Game launch and display result were not verified.' } else { 'GPU compatibility: did not finish as a verified success. Review the per-profile result and preserved backup before retrying; no game launch or display result was verified.' }
     [void]$onboardingFollowUp.Add($onboardingGpuSummary)
 } elseif ($autoGpuResult.Outcome -eq 'NO_OP') {
     $onboardingGpuSummary = 'GPU compatibility: scanned profile fields needed no changes. Game launch and display output were not verified.'

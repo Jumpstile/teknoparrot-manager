@@ -388,7 +388,9 @@ Required game patches details:
 
 Postgres setup details:
 
-- The games it covers are the ones set to Existing PostgreSQL, or older profiles with no Storage box: Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, and Orange County Choppers Pinball. A game set to Internal storage (the new default) needs no database install and is skipped. For it, start the game once so it makes its own database. The setup log says how many games were skipped, and Library health check lists them by name.
+- The games it covers are the ones set to Existing PostgreSQL, or older profiles with no Storage box: Golden Tee Live (2020 included), Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, and Orange County Choppers Pinball. A game set to Internal storage (the new default) needs no database install and is skipped. For it, start the game once so it makes its own database. The setup log says how many games were skipped, and Library health check lists them by name.
+
+- Golden Tee Live 2020 can make its own database the first time the game starts (TeknoParrot's "Automatically create Database" option). When it has no starting database file, Library health check says "Profile ready; the database is created the first time the game starts" and does not call the missing database a problem.
 
 - Every game database is tested at the end of setup with the game's own saved settings. A game with no starting database file (`pg_backup`) cannot be made ready: it is left out, named on the result screen, and every other game is still set up.
 
@@ -1121,6 +1123,8 @@ If you use the Eggman DAT ZIP, TeknoParrot Manager asks `Check for a newer Eggma
 ### More detail: Dat File Integration
 
 - Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from both game ZIP contents and the local staging/install folder.
+
+- The DAT file says which format it uses (`TPUISchemaVersion`). This version of TeknoParrot Manager knows version 1. If a DAT says another version, TeknoParrot Manager tells you in plain words, still reads it the same way, and notes it in the log; some games may then not match. A DAT with no version is read as before. The `romzip` and `romnest` lines (the files inside a MAME-style game's ZIP) are not used: TeknoParrot Manager does not check what is inside your game files.
 
 - On the normal first-run download path TeknoParrot Manager stores the ZIP under `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without asking where to save it.
 
