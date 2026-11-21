@@ -4,6 +4,8 @@ Some Incredible Technologies (IT) games need a small database on your PC. Postgr
 
 The database is **PostgreSQL 8.3**. These games need it: Golden Tee Live (including 2020), Power Putt Live, Silver Strike Bowling Live, Target Toss Pro and Orange County Choppers Pinball.
 
+**Internal or Existing PostgreSQL?** Newer TeknoParrot profiles of these games have a Storage box. **Internal** is the new default. It needs no database install. Start the game once and it makes its own database. Postgres setup and [[Health Check]] skip these games and never say their database is missing. **Existing PostgreSQL** is for keeping an existing server and its saved progress. Everything on this page is for games set to Existing PostgreSQL (and older profiles with no Storage box). TeknoParrot Manager never switches a game from one to the other, and never touches saved progress without a backup first.
+
 Setup finds the games that need it by itself. If none of your registered games need it, it says so and installs nothing.
 
 ---
