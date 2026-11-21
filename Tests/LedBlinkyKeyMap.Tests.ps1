@@ -57,6 +57,8 @@ Describe 'Get-TpmLedBlinkyKeyMap' {
     }
 
     It 'reports not installed when there is no map' {
+        # The product also looks in the default LEDBlinky folder; hide that real folder so a PC with LEDBlinky installed gives the same answer.
+        Mock Test-Path { $false } -ParameterFilter { $LiteralPath -eq 'C:\LEDBlinky\LEDBlinkyInputMap.xml' }
         $map = Get-TpmLedBlinkyKeyMap -Root @((New-MapFolder))
         $map.Found | Should -BeFalse
         $map.Controls.Count | Should -Be 0
