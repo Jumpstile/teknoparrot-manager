@@ -81,13 +81,33 @@
   - ReShade progress now counts the games being changed ("Applying ReShade:
     1 of 34"), not your whole library ("72 of 330"). Checking all your
     games first is shown as its own step.
-  - Library health check: a Golden Tee Live 2020 game (or any game with
-    TeknoParrot's "Automatically create Database" option) that has no
-    starting database file now says "Profile ready; the database is
-    created the first time the game starts". A missing database is no
-    longer called a problem for it.
-  - The PostgreSQL setup screen and the menu text name Golden Tee Live
-    2020.
+  - Every Incredible Technologies game with a database is covered: all
+    Golden Tee Live years (2006 to 2023, 2025, 2026), all Golden Tee PGA
+    Tour games (2021 to 2023, 2025, 2026), Power Putt Live, Silver Strike
+    Bowling Live, Target Toss Pro and Orange County Choppers Pinball. The
+    Manager finds them by what their profile says, so a new game of this
+    kind needs no new Manager version. The PostgreSQL setup screen and the
+    menu text say so.
+  - Postgres setup (menu 11): a game with TeknoParrot's "Automatically
+    create Database" option (Golden Tee Live 2018 and newer, PGA Tour)
+    and no starting database file is no longer "left out". Its profile is
+    set up and it is called "Profile ready": TeknoParrot makes the
+    database the first time the game starts. A game that ships a backup
+    is still restored from it, and any other game with no starting file
+    is still named as not ready.
+  - Library health check: a game with that option and no database yet now
+    says "Profile ready; the database is created the first time the game
+    starts" and is not called a problem. A database that is already there
+    is not listed as waiting, and a game that ships a backup still
+    reports a missing database as a problem.
+  - Golden Tee Live 2021 to 2026 and the PGA Tour games are not in the
+    Eggman game list and all share one game file name. A folder named
+    after the game and year (for example "Golden Tee Live 2021") now
+    registers to the right game. The Manager also uses TeknoParrot's own
+    game name ("Golden Tee Live 2023-2024") when the profile name alone
+    does not decide.
+  - The graphics card warning for Intel now names Golden Tee Live 2021 to
+    2026 and the PGA Tour games, as TeknoParrot's own game notes say.
   - If the DAT game list says it uses a format version the Manager does
     not know, the Manager now tells you in plain words and still reads it.
     A DAT with no version is read as before.

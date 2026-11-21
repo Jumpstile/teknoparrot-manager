@@ -70,6 +70,27 @@ Use a copy of your settings or a test TeknoParrot folder. Do not use a folder yo
    Use a test PC. Do not run this on a PC with PostgreSQL data you need.
 2. Pass: the explanation appears and the Manager waits for Enter. The Windows permission window opens only after you press Enter.
 
+## #350 / #131 Incredible Technologies games and their databases (needs a real PostgreSQL 8.3)
+
+Use a test PC or a test TeknoParrot folder. Do not use a PC that holds PostgreSQL data you need. Have three games ready:
+(A) a game that has a `pg_backup` folder, for example Power Putt Live 2013;
+(B) Golden Tee Live 2021 or newer, or a Golden Tee PGA Tour game, with no `pg_backup` folder;
+(C) any game of this kind left on the Storage choice Internal.
+
+1. In TeknoParrot, set Storage to Existing PostgreSQL for (A) and (B). Leave (C) on Internal.
+2. Run Register only (or AutoSync). Pass: every game is registered by its own name, including (B), the Golden Tee Live 2023-2024
+   game and the PGA Tour games, which are not in the Eggman list. None is sent to the ACTION REQUIRED list.
+3. Choose 11) Postgres setup. Pass: (A) says `Ready ... created from the game's own backup`. (B) says `Profile ready`. (C) is skipped.
+   The run ends as finished, not as "needing attention". Write down the exact words of the (B) line.
+4. Choose 13) Library health check. Pass: the PostgreSQL row says `OK - profile ready; a game database is created the first time the game starts`
+   and (B) is not called a problem. Press D: (B) is listed under `Profile ready; the database is created the first time the game starts`.
+5. Start (B) from TeknoParrot once. Pass: the game starts and TeknoParrot makes its database (TeknoParrot's own "Automatically create Database").
+6. Run Library health check again. Pass: the PostgreSQL row says `OK` and (B) is no longer listed as waiting.
+7. Start (A) and (C). Pass: both start. (C) needs no PostgreSQL install; start it once so it makes its own database.
+8. On a PC with an Intel graphics card: run Register only and read the compatibility warnings. Pass: every registered Golden Tee Live 2011 and newer
+   game and every PGA Tour game is named as not working on Intel graphics. Write down whether the game starts.
+9. Write down any game of this kind that did not register, did not reach `Ready` or `Profile ready`, or did not start.
+
 ## #375 Contributor list on GitHub
 
 1. Open the repository page and look at the Contributors list. Write down every name shown.

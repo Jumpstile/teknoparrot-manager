@@ -322,7 +322,7 @@ Modes 1 and 2 offer a preview/dry-run option first (a practice run that changes 
 | 9 | **BepInEx setup** | BepInEx is an add-on some games use. TeknoParrot Manager can install or update it after you approve. Unsafe folders and failed downloads make no changes |
 | 10                                                            | **Region setup**               | Pick the country your games start in (like USA or Europe). TeknoParrot Manager shows the games that offer it, lets you choose all or some of them, asks you to confirm, saves a backup, then changes them. You can also put games back to Auto. |
 | **Game Requirements** (only for some games)                   |                                |                                                                                                                                                                                                               |
-| 11                                                            | **Postgres setup**             | Installs/configures the local PostgreSQL 8.3 database for games set to Existing PostgreSQL (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball). Games set to Internal storage, the new default, need no install and are skipped. Ends with a short result screen; press D for details |
+| 11                                                            | **Postgres setup**             | Installs/configures the local PostgreSQL 8.3 database for games set to Existing PostgreSQL (every Golden Tee Live and PGA Tour game, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball). Games set to Internal storage, the new default, need no install and are skipped. Ends with a short result screen; press D for details |
 | 12                                                            | **Required game patches**      | Find, check, back up, install, verify, and undo required fixes for supported exact game builds using your local ZIPs                                                                                          |
 | **Maintenance and Recovery**                                  |                                |                                                                                                                                                                                                               |
 | 13                                                            | **Library health check**       | Reports registered/broken/unregistered games plus GPU fix / FFB Blaster / dgVoodoo2 coverage, ReShade and BepInEx counts, and the games that need BepInEx but do not have it, without changing anything. Any repair it suggests is a separate choice that you confirm first |
@@ -358,7 +358,7 @@ Next: press Enter to go back to the main menu, or type D to see `Details` and th
 
 Every game database is tested before setup says it is ready: TeknoParrot Manager connects to it with the settings saved in the game's own profile and counts its tables.
 
-If a game has no starting database file (`pg_backup`) and its database does not exist, setup cannot make that database ready. It leaves that game out (nothing is created or changed for it), sets up every other game, and names the left-out game on the result screen. The run is then shown as needing attention, not as a clean success. Put the game's `pg_backup` folder back, then run setup again.
+If a game has no starting database file (`pg_backup`) and its database does not exist, the result depends on the game's profile. If the profile has TeknoParrot's `Automatically create Database` option set to 1 (Golden Tee Live 2018 and newer, and every Golden Tee PGA Tour game), setup still saves the connection settings and leaves the database to TeknoParrot. The screen says `Profile ready`, and TeknoParrot makes the database the first time the game starts. For any other game, setup cannot make that database ready. It leaves that game out (nothing is created or changed for it), sets up every other game, and names the left-out game on the result screen. The run is then shown as needing attention, not as a clean success. Put the game's `pg_backup` folder back, then run setup again.
 
 If some games kept their own PostgreSQL password or settings, a yellow line says so. It ends with `Press D to see which.`
 
@@ -2023,7 +2023,9 @@ The prompt at the bottom reads `Press Enter to return to menu, or D for details`
 
 - **Ready** -- the database is there, and TeknoParrot Manager connected to it with the game's own settings and found its tables. The line also says whether the database was created from the game's own backup or was already there.
 
-If a game has no starting database file, it is named under `Could NOT be made ready`, and the other games are still set up. If a database cannot be opened with the game's own settings, setup does not say Ready. When it had already created databases, it puts everything back the way it was and checks that.
+- **Profile ready** -- the game has no starting database file, and its profile says TeknoParrot creates the database itself (`Automatically create Database`). Setup saved the connection settings and checked that the game can reach PostgreSQL. Start the game once and TeknoParrot makes the database.
+
+If a game has no starting database file and its profile does not say TeknoParrot creates the database, it is named under `Could NOT be made ready`, and the other games are still set up. If a database cannot be opened with the game's own settings, setup does not say Ready. When it had already created databases, it puts everything back the way it was and checks that.
 
 Games that share the same result are shown together on one line.
 

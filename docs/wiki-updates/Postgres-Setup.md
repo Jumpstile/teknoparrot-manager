@@ -45,7 +45,7 @@ If the saved database password does not work, you are told. Choose `F` and type 
 
 - A database that already exists is never recreated and never restored over.
 - A game profile that already has its own password, server, port or user is listed, and you are asked first. `K` keeps them as they are (the default). `R` replaces the password in them.
-- A game that has no starting database file (`pg_backup` folder) cannot get a database. It is left out and named, and every other game is still set up.
+- A game that has no starting database file (`pg_backup` folder) is `Profile ready` when TeknoParrot creates its database itself (Golden Tee Live 2018 and newer, Golden Tee PGA Tour). Start the game once. Any other game with none cannot get a database: it is left out and named, and every other game is still set up.
 - If a check fails, setup puts everything back the way it was and tells you which game and why.
 
 Before it changes anything, setup backs up your existing PostgreSQL databases. To get one back, use [[Restore Backup]], option 2 (PostgreSQL database backup).
