@@ -268,11 +268,59 @@ Describe 'FIX59 Golden Tee Live 2020 setup creates GameDB20 from the bundled bac
         ($fx.State.Log -join "`n") | Should -Not -Match 'fixture-password'
     }
 
-    # Mutation: bring back the deferral or an empty database for auto-create 1 without a backup -> setup says SUCCEEDED,
-    # or createdb runs, or a profile is written.
-    It 'leaves out the game, is not a clean success, and creates, restores and writes nothing when GameDB20 is absent and the game ships no pg_backup' {
+    # Mutation: bring back the "left out, not ready" result for an auto-create game with no starting file -> the profile is not written
+    # (no password), setup says ACTION_REQUIRED and asks the owner for a pg_backup folder TeknoParrot does not need; or createdb runs.
+    It 'sets up the profile, leaves the database to TeknoParrot and reports it as ready for its first start when GameDB20 is absent and the game ships no pg_backup' {
         $fx = New-F59Fixture -Name 'nobackup'
         $file = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2020' -GameName 'Golden Tee Live 2020' -DbName 'GameDB20' -AutoCreate '1'
+        Install-F59SetupMocks -Fixture $fx
+        Mock Get-PostgresGameDatabaseReadiness { [pscustomobject]@{ Ready = $false; TableCount = 0; Error = 'Could not connect with the settings saved in the game profile: FATAL: database "GameDB20" does not exist' } }
+
+        $result = Invoke-F59Setup -Fixture $fx
+
+        $result.Outcome | Should -BeExactly 'SUCCEEDED'
+        $result.DbCreated | Should -Be 0
+        @(Get-F59Calls -Tool 'createdb.exe').Count | Should -Be 0
+        @(Get-F59RestoreCalls).Count | Should -Be 0
+        (Get-F59Value -File $file -Field 'Pass') | Should -BeExactly 'fixture-password'
+        (Get-F59Value -File $file -Field 'Address') | Should -BeExactly '127.0.0.1'
+        @($result.NotReadyGames).Count | Should -Be 0
+        @($result.GameOutcomes)[0].Outcome | Should -BeExactly 'WaitingForFirstStart'
+        $result.Summary | Should -Match 'TeknoParrot makes the database of 1 game itself the first time the game starts'
+        (Get-TpmPostgresSetupOutcomeLine -Outcome 'WaitingForFirstStart' -Names @('Golden Tee Live 2020')) | Should -Match '^Profile ready: Golden Tee Live 2020\. TeknoParrot makes its database itself'
+        (@($result.Warnings) -join ' | ') | Should -Not -Match 'not made ready'
+
+        # A second run changes nothing and still says the game waits for its first start.
+        $profileAfterFirst = [System.IO.File]::ReadAllBytes($file)
+        $second = Invoke-F59Setup -Fixture $fx
+        $second.Outcome | Should -BeExactly 'NO_OP'
+        [System.IO.File]::ReadAllBytes($file) | Should -Be $profileAfterFirst
+        @($second.GameOutcomes)[0].Outcome | Should -BeExactly 'WaitingForFirstStart'
+    }
+
+    # Mutation: treat "cannot connect" like "database not made yet" for a game left to TeknoParrot -> a wrong password or a stopped
+    # server is reported as a game that only has to be started once, and TeknoParrot then cannot make the database either.
+    It 'does not call an auto-create game ready for its first start when the profile settings cannot connect' {
+        $fx = New-F59Fixture -Name 'nobackup-noconnect'
+        $null = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2020' -GameName 'Golden Tee Live 2020' -DbName 'GameDB20' -AutoCreate '1'
+        Install-F59SetupMocks -Fixture $fx
+        Mock Get-PostgresGameDatabaseReadiness { [pscustomobject]@{ Ready = $false; TableCount = 0; Error = 'Could not connect with the settings saved in the game profile: password authentication failed' } }
+        Mock Restore-PostgresProfileBackups { $true }
+
+        $result = Invoke-F59Setup -Fixture $fx
+
+        $result.Outcome | Should -Not -BeExactly 'SUCCEEDED'
+        @($result.GameOutcomes | Where-Object { $_.Outcome -eq 'WaitingForFirstStart' }).Count | Should -Be 0
+    }
+
+    # Mutation: leave out the auto-create condition -> every game with no starting file (including one whose profile does not say
+    # TeknoParrot creates the database) is called ready, though nothing will ever build its database.
+    It 'still leaves out a game with no starting file when its profile does not say TeknoParrot creates the database (<Case>)' -ForEach @(
+        @{ Case = 'auto-create is 0'; AutoCreate = '0' }
+        @{ Case = 'no auto-create field'; AutoCreate = '' }
+    ) {
+        $fx = New-F59Fixture -Name ('nobackup-noauto-' + $Case.Replace(' ', ''))
+        $file = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2019' -GameName 'Golden Tee Live 2019' -DbName 'GameDB19' -AutoCreate $AutoCreate
         $before = [System.IO.File]::ReadAllBytes($file)
         Install-F59SetupMocks -Fixture $fx
 
@@ -283,9 +331,8 @@ Describe 'FIX59 Golden Tee Live 2020 setup creates GameDB20 from the bundled bac
         @(Get-F59RestoreCalls).Count | Should -Be 0
         $fx.State.Events.Contains('backup') | Should -BeFalse
         [System.IO.File]::ReadAllBytes($file) | Should -Be $before
-        @($result.NotReadyGames | ForEach-Object { $_.Key }) | Should -Be @('GoldenTeeLive2020')
-        (@($result.Warnings) -join ' | ') | Should -Match 'Golden Tee Live 2020 \[GoldenTeeLive2020\] \(GameDB20\): not made ready\. No starting database file came with this game, so its database cannot be built\.'
-        (@($result.Warnings) -join ' | ') | Should -Not -Match '(?i)start (it|the game) once|TeknoParrot will'
+        @($result.NotReadyGames | ForEach-Object { $_.Key }) | Should -Be @('GoldenTeeLive2019')
+        (@($result.Warnings) -join ' | ') | Should -Match 'Golden Tee Live 2019 \[GoldenTeeLive2019\] \(GameDB19\): not made ready\. No starting database file came with this game, so its database cannot be built\.'
     }
 
     # Mutation: key the creation decision on a Golden Tee name or year instead of the
@@ -418,33 +465,52 @@ Describe 'FIX59 Library Health separates TeknoParrot-created databases from the 
         @($result.PostgresAutoCreateProfiles)[0] | Should -BeExactly 'Golden Tee Live 2020'
         # The default screen is short; the first-run list and its explanation are behind D (the detail blocks) and in the log.
         $details = Get-F59HealthPostgresDetail -Result $result
-        $firstRun = @($details -split "`n" | Where-Object { $_ -like 'Profile ready; the database is created the first time the game starts:*' })
+        $firstRun = @($details -split "`n" | Where-Object { $_ -like 'Games with no starting database file:*' })
         $firstRun.Count | Should -Be 1
-        $firstRun[0] | Should -BeExactly 'Profile ready; the database is created the first time the game starts: Golden Tee Live 2020'
+        $firstRun[0] | Should -BeExactly 'Games with no starting database file: Golden Tee Live 2020'
         $details | Should -Match 'These games make their own database'
         $details | Should -Not -Match '(?i)expected until the first launch|does not create it|cannot make the database'
+        # PostgreSQL is not running here, so nobody has looked at the database: the game is not called "waiting".
+        $details | Should -Not -Match 'Profile ready; the database is created'
         $logged = $script:logLines -join "`n"
-        $logged | Should -Match ([regex]::Escape('Library health detail [PostgreSQL]: Profile ready; the database is created the first time the game starts: Golden Tee Live 2020'))
+        $logged | Should -Match ([regex]::Escape('Library health detail [PostgreSQL]: Games with no starting database file: Golden Tee Live 2020'))
         Should -Invoke Start-Service -Times 0 -Exactly
         Should -Invoke Stop-Service -Times 0 -Exactly
     }
 
-    # Mutation: report a missing database of an auto-create game with no starting file as a problem again -> the health check says
-    # "its database is missing" and ACTION_REQUIRED for a game that is ready and makes its own database on first start.
-    It 'does not call a missing database a problem for an auto-create game with no starting file' {
+    # Mutation: treat a missing database of a game with no starting file as a failure -> ACTION_REQUIRED and a "Problem" row
+    # for a game that only has to be started once. A missing database of a game that DOES ship a backup stays a problem
+    # (covered by the test below), and a game whose database exists is not listed as waiting.
+    It 'says the profile is ready and the database is created the first time the game starts, and is not a problem (<Case>)' -ForEach @(
+        @{ Case = 'database not made yet'; Ready = $false; Waiting = $true }
+        @{ Case = 'database already there'; Ready = $true; Waiting = $false }
+    ) {
         $fx = [pscustomobject]@{ Root = $script:healthRoot; Profiles = $script:profiles }
         $null = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2020' -GameName 'Golden Tee Live 2020' -DbName 'GameDB20' -Pass 'synthetic-pass' -AutoCreate '1' -Complete
         [System.IO.File]::WriteAllText((Join-Path $script:PostgresBinDir 'psql.exe'), 'x')
         Mock Get-Service { [pscustomobject]@{ Status = 'Running' } }
-        Mock Get-PostgresGameDatabaseReadiness { [pscustomobject]@{ Ready = $false; TableCount = 0; Error = 'Could not connect with the settings saved in the game profile: FATAL: database "GameDB20" does not exist' } }
+        $script:F59Ready = $Ready
+        Mock Get-PostgresGameDatabaseReadiness { [pscustomobject]@{ Ready = $script:F59Ready; TableCount = $(if ($script:F59Ready) { 24 } else { 0 }); Error = $(if ($script:F59Ready) { $null } else { 'Could not connect with the settings saved in the game profile: FATAL: database "GameDB20" does not exist' }) } }
+        Mock New-PostgresDatabaseFromBackup { throw 'health check must never create a database' }
 
         $result = Invoke-LibraryHealthCheck -UserProfilesDir $script:profiles -TpRoot $script:healthRoot
 
         @($result.PostgresDatabaseProblems).Count | Should -Be 0
-        $result.Outcome | Should -Not -BeExactly 'ACTION_REQUIRED'
+        $result.Outcome | Should -BeExactly 'SUCCEEDED'
+        $row = (Get-TpmLibraryHealthPostgresRow -Result $result).Text
         $details = Get-F59HealthPostgresDetail -Result $result
-        $details | Should -Match ([regex]::Escape('Profile ready; the database is created the first time the game starts: Golden Tee Live 2020'))
-        $details | Should -Not -Match 'Problem - |every game database is there'
+        if ($Waiting) {
+            @($result.PostgresAwaitingFirstStart) | Should -Be @('Golden Tee Live 2020')
+            $row | Should -Match '^OK - profile ready; a game database is created the first time the game starts'
+            $details | Should -Match ([regex]::Escape('Profile ready; the database is created the first time the game starts: Golden Tee Live 2020'))
+            $details | Should -Not -Match 'every game database is there'
+        } else {
+            @($result.PostgresAwaitingFirstStart).Count | Should -Be 0
+            $row | Should -BeExactly 'OK'
+            $details | Should -Not -Match 'Profile ready; the database is created'
+            $details | Should -Match 'every game database is there'
+        }
+        Should -Invoke New-PostgresDatabaseFromBackup -Times 0 -Exactly
     }
 
     # Mutation: classify by the auto-create flag before the profile is complete -> a profile
