@@ -37222,7 +37222,7 @@ function Register-GamesLegacy {
                     # Dat-based disambiguation: look up the normalized folder name in the
                     # dat index. The dat's <GameProfile> is authoritative, so if a match is
                     # found we use it directly instead of falling through to ambiguous.
-                    $datEntry = if ($datIndex.Count -gt 0) { $datIndex[$normFolder] } else { $null }
+                    $datEntry = if ($datIndex.Count -gt 0) { (Get-DatEntryForZipName -RawZipName $folderKey -DatIndex $datIndex) } else { $null }
                     if ($null -ne $datEntry) {
                         $datCode = $datEntry.ProfileCode
                         # Profile codes are purely alphanumeric; reject anything else to
@@ -37346,7 +37346,7 @@ function Register-GamesLegacy {
         # folder, this file is not the game: do not claim the profile from it. The folder's own
         # game file registers on its own turn, or the dat pass below registers the folder. See issue #404.
         if ($datIndex.Count -gt 0) {
-            $ownDatEntry = $datIndex[(Get-NormalizedGameKey $folderKey)]
+            $ownDatEntry = (Get-DatEntryForZipName -RawZipName $folderKey -DatIndex $datIndex)
             if ($null -ne $ownDatEntry -and [string]$ownDatEntry.ProfileCode -match '^[\w]+$') {
                 $ownDatCode = [string]$ownDatEntry.ProfileCode
                 if ($gameProfilesDir) { $ownDatCode = Resolve-ProfileCode $ownDatCode $gameProfilesDir $profileSet }
@@ -37433,7 +37433,7 @@ function Register-GamesLegacy {
             if (Test-TpmRegistrationLedgerStopped) { break }
             $origName   = $allExeFolders[$folderKey]
             $normFolder = Get-NormalizedGameKey $folderKey
-            $datEntry   = $datIndex[$normFolder]
+            $datEntry   = (Get-DatEntryForZipName -RawZipName $folderKey -DatIndex $datIndex)
             $datScore   = 1.0
 
             # Fuzzy dat scan when no exact name match (handles slightly misnamed folders)
