@@ -6533,6 +6533,27 @@ __BRANCH__
         $safe | Should -Match '\[REDACTED\]'
     }
 
+    It "locks recovery evidence whose access list already holds explicit entries for other accounts" {
+        # A folder under a parent with an old-style access list gets copies of the parent's entries that are not marked inherited,
+        # so removing inheritance alone leaves them. The lock must still leave the current user as the only entry.
+        $folder = Join-Path $TestDrive ('acl-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        [void][System.IO.Directory]::CreateDirectory($folder)
+        $file = Join-Path $folder 'evidence.bin'
+        [System.IO.File]::WriteAllText($file, 'x')
+        $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        foreach ($target in @($folder, $file)) {
+            & icacls $target /inheritance:r /grant ('*{0}:(F)' -f $currentSid) /grant '*S-1-5-18:(F)' /grant '*S-1-5-32-545:(R)' 1>$null 2>$null
+            $LASTEXITCODE | Should -Be 0
+            (Get-PostgresOwnerOnlyAclState -Path $target).Outcome | Should -Be 'Failed'
+        }
+        Lock-PostgresRecoveryDirectory -Path $folder
+        Lock-PostgresRecoveryFile -Path $file
+        foreach ($target in @($folder, $file)) {
+            (Get-PostgresOwnerOnlyAclState -Path $target).Outcome | Should -Be 'Success'
+            @((Get-Acl -LiteralPath $target).Access).Count | Should -Be 1
+        }
+    }
+
     Context "profile planning" {
         BeforeEach {
             $script:pgProfiles = Join-Path $TestDrive 'PostgresProfiles'
@@ -13761,7 +13782,10 @@ Describe "TeknoParrot-Manager.ps1 -Unattended real child-process fixture (issue 
         }
         $process.WaitForExit()
 
-        $process.ExitCode | Should -Be 0 -Because 'a genuine product defect (Mode must be set before starting) previously made every real -Unattended launch exit 1 here'
+        # The health check is only an all-clear (exit 0) when it could identify the video adapter, because the GPU-fix coverage depends on it.
+        # A machine with no recognizable adapter (a virtual machine or hosted runner) correctly finishes with 2, "some checks could not finish".
+        $expectedExitCode = if ([string]::IsNullOrWhiteSpace([string](Get-DetectedGpuVendor).Vendor)) { 2 } else { 0 }
+        $process.ExitCode | Should -Be $expectedExitCode -Because 'a genuine product defect (Mode must be set before starting) previously made every real -Unattended launch exit 1 here'
 
         $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { '' }
         $stdout | Should -Not -Match 'Mode must be set before starting' -Because 'this is the exact error text the real certification run hit'
@@ -24614,7 +24638,7 @@ Describe 'Required patch engine and local recipes' {
     BeforeEach {
         # The menu logs every result; without a log file the real writer would echo each line to the screen.
         Mock Write-Log {}
-        $root = Join-Path $TestDrive ('required-patch-' + [guid]::NewGuid().ToString('N'))
+        $root = Join-Path $TestDrive ('rp-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         $game = Join-Path $root 'game'
         $payload = Join-Path $root 'payload'
         $recovery = Join-Path $root 'recovery'
