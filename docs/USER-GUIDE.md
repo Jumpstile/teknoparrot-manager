@@ -388,7 +388,9 @@ Required game patches details:
 
 Postgres setup details:
 
-- The games it covers are the ones set to Existing PostgreSQL, or older profiles with no Storage box: Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, and Orange County Choppers Pinball. A game set to Internal storage (the new default) needs no database install and is skipped. For it, start the game once so it makes its own database. The setup log says how many games were skipped, and Library health check lists them by name.
+- The games it covers are the ones set to Existing PostgreSQL, or older profiles with no Storage box: Golden Tee Live (2020 included), Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, and Orange County Choppers Pinball. A game set to Internal storage (the new default) needs no database install and is skipped. For it, start the game once so it makes its own database. The setup log says how many games were skipped, and Library health check lists them by name.
+
+- Golden Tee Live 2020 can make its own database the first time the game starts (TeknoParrot's "Automatically create Database" option). When it has no starting database file, Library health check says "Profile ready; the database is created the first time the game starts" and does not call the missing database a problem.
 
 - Every game database is tested at the end of setup with the game's own saved settings. A game with no starting database file (`pg_backup`) cannot be made ready: it is left out, named on the result screen, and every other game is still set up.
 

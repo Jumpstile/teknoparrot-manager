@@ -38660,6 +38660,12 @@ function Invoke-LibraryHealthCheck {
             if ($lastRun) { $lastFullRun = [string]$lastRun.Line }
         } catch {
             Write-Log "HealthCheck: the last full run could not be read from the log -- $_"
+                # A missing database of a game that has TeknoParrot's own "Automatically create Database" option and no starting file with the game (the games in
+                # $postgresAutoCreateLabels) is not a problem Postgres setup could fix: TeknoParrot makes it the first time the game starts. A game that ships a starting file stays a problem (menu 11 makes it).
+                if ([string]$readiness.Error -match 'does not exist' -and $postgresAutoCreateLabels.Contains([string]$databaseCheck.Label)) {
+                    Write-Log ('HealthCheck: database of {0} is not there yet; the game creates it the first time it starts.' -f $databaseCheck.Label)
+                    continue
+                }
         }
     }
 
@@ -38984,7 +38990,7 @@ function Get-TpmLibraryHealthDetailBlocks {
             $databaseCheck = [string](Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseCheck' -Default 'NotNeeded')
             $databaseProblems = @(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseProblems' -Default @())
             $databaseSkipped = @(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseNotChecked' -Default @())
-            if ($databaseCheck -eq 'Done' -and $databaseProblems.Count -eq 0 -and $databaseSkipped.Count -eq 0) { [void]$lines.Add('Database check: every game database is there, opens with the game''s own settings and has tables.') }
+            if ($databaseCheck -eq 'Done' -and $databaseProblems.Count -eq 0 -and $databaseSkipped.Count -eq 0 -and $autoCreate.Count -eq 0) { [void]$lines.Add('Database check: every game database is there, opens with the game''s own settings and has tables.') }
             elseif ($databaseCheck -eq 'Done' -and $databaseProblems.Count -eq 0) { [void]$lines.Add('Database check: the databases that could be checked are there, open with the game''s own settings and have tables.') }
             elseif ($databaseCheck -eq 'Done') {
                 foreach ($databaseProblem in $databaseProblems) { [void]$lines.Add(('Problem - {0}' -f $databaseProblem)) }
@@ -38998,8 +39004,8 @@ function Get-TpmLibraryHealthDetailBlocks {
             [void]$lines.Add('No PostgreSQL database profiles were found.')
         }
         if ($autoCreate.Count -gt 0) {
-            [void]$lines.Add(('Games with no starting database file: {0}' -f (Format-TpmNameList -Names $autoCreate -Max 1000)))
-            [void]$lines.Add('PostgreSQL setup cannot make the database of these games ready without it. Put the game''s pg_backup folder back, then run PostgreSQL setup (menu 11).')
+            [void]$lines.Add(('Profile ready; the database is created the first time the game starts: {0}' -f (Format-TpmNameList -Names $autoCreate -Max 1000)))
+            [void]$lines.Add('These games make their own database (TeknoParrot''s "Automatically create Database" option). Nothing is wrong and nothing needs to be done.')
         }
     } else {
         [void]$lines.Add('Setup needs: Not reported - the game check was incomplete, so setup needs and filled-in counts are withheld.')
@@ -54575,7 +54581,7 @@ function Get-MainMenuSections {
         Header = 'Game Requirements (only for some games)'
         Column = 'Right'
         Items  = @(
-            [pscustomobject]@{ Number = 11; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'PostgreSQL for games set to Existing PostgreSQL.'; FullDesc = @('For games set to Existing PostgreSQL.', 'Installs/configures local PostgreSQL 8.3 for', 'Golden Tee Live (2020 too), Power Putt Live,', 'Silver Strike Bowling Live, Target Toss Pro.', 'Games on Internal storage (the new default)', 'need no database install and are skipped.', 'A missing game database is made from the', 'game''s own backup, then tested before ready.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
+            [pscustomobject]@{ Number = 11; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'PostgreSQL for games set to Existing PostgreSQL.'; FullDesc = @('For games set to Existing PostgreSQL.', 'Installs/configures local PostgreSQL 8.3 for', 'Golden Tee Live 2020 and the other Golden Tee', 'Live years, Power Putt Live, Silver Strike', 'Bowling Live, Target Toss Pro.', 'Games on Internal storage (the new default)', 'need no database install and are skipped.', 'A missing game database is made from the', 'game''s own backup, then tested before ready.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
             [pscustomobject]@{ Number = 12; Mode = 'RequiredPatch'; Label = 'Required game patches'; ShortDesc = 'Find and safely install supported required fixes from your local ZIPs.'; FullDesc = @('Find required patches for supported exact', 'game builds using your local Main or', 'Supplementary ZIP files. TPM validates the', 'game, backs up, applies, and verifies files.', 'A verified patch is not gameplay proof.') }
         )
     }
@@ -55979,6 +55985,7 @@ $mode = $null
             } catch {
                 $resumeFailure = [string]$_.Exception.Message
                 if ($resumeFailure -match 'Reason \[PACKAGE_MISMATCH\]') {
+        Write-Host "  Golden Tee Live 2020 is covered too. It can make its own database the first time the game starts." -ForegroundColor DarkGray
                     $resumeFailureMessage = 'This PostgreSQL step was started by a different TeknoParrot Manager copy, or that copy changed while Windows approval was open. TeknoParrot Manager stopped before changing anything. Restart setup from the same TeknoParrot Manager copy that opened the permission prompt. The log records which identity differed.'
                 } else {
                     $resumeFailureMessage = 'TeknoParrot Manager could not safely continue the PostgreSQL setup. Review its log for the failure reason before trying again.'

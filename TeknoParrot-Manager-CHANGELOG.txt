@@ -62,6 +62,13 @@
   - ReShade progress now counts the games being changed ("Applying ReShade:
     1 of 34"), not your whole library ("72 of 330"). Checking all your
     games first is shown as its own step.
+  - Library health check: a Golden Tee Live 2020 game (or any game with
+    TeknoParrot's "Automatically create Database" option) that has no
+    starting database file now says "Profile ready; the database is
+    created the first time the game starts". A missing database is no
+    longer called a problem for it.
+  - The PostgreSQL setup screen and the menu text name Golden Tee Live
+    2020.
 
   Also new in this release
   - LEDBlinky lighting (optional): if you use LEDBlinky, the Manager can
