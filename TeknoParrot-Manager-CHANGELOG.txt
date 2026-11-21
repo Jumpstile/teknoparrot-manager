@@ -69,6 +69,9 @@
     longer called a problem for it.
   - The PostgreSQL setup screen and the menu text name Golden Tee Live
     2020.
+  - If the DAT game list says it uses a format version the Manager does
+    not know, the Manager now tells you in plain words and still reads it.
+    A DAT with no version is read as before.
 
   Also new in this release
   - LEDBlinky lighting (optional): if you use LEDBlinky, the Manager can

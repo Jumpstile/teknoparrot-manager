@@ -1124,6 +1124,8 @@ If you use the Eggman DAT ZIP, TeknoParrot Manager asks `Check for a newer Eggma
 
 - Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from both game ZIP contents and the local staging/install folder.
 
+- The DAT file says which format it uses (`TPUISchemaVersion`). This version of TeknoParrot Manager knows version 1. If a DAT says another version, TeknoParrot Manager tells you in plain words, still reads it the same way, and notes it in the log; some games may then not match. A DAT with no version is read as before. The `romzip` and `romnest` lines (the files inside a MAME-style game's ZIP) are not used: TeknoParrot Manager does not check what is inside your game files.
+
 - On the normal first-run download path TeknoParrot Manager stores the ZIP under `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without asking where to save it.
 
 - Browse/import remains available for an existing local file.

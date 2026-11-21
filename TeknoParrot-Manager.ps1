@@ -25805,6 +25805,12 @@ function Build-DatIndexFromStream {
         $profCode    = ''
         $exePath     = ''
         # Newer dat fields (TPUISchemaVersion 1, issue #382); empty when a game does not have them.
+        # Decision (issue #382): romzip and romnest (the files inside a MAME-style game's ZIP: archive, size, crc, sha1) are NOT used. The
+        # Manager registers games from folders and profiles and never checks ROM contents, so verifying extracted sets would be a new
+        # feature that hashes every file of every such game. Both are self-closing elements next to <rom>; they hold no text, so this
+        # reader passes over them and stays streaming (the dat is about 520 MB). A dat with no TPUISchemaVersion (older files) is read silently.
+        $schemaVersionText = ''
+        $schemaChecked = $false
         $profCode2   = ''
         $exePath2    = ''
         $testMenuExe = ''
@@ -25836,6 +25842,16 @@ function Build-DatIndexFromStream {
             if ($reader.NodeType -eq [System.Xml.XmlNodeType]::Element) {
                 $currentElem = $reader.Name
                 if ($currentElem -eq 'game') {
+                    # The header comes before the first game, so the format version is known here. An unknown version is only a warning
+                    # (the file is still read the way version 1 is read), said once, before the long read of the games.
+                    if (-not $schemaChecked) {
+                        $schemaChecked = $true
+                        if ($schemaVersionText -and $schemaVersionText -cne '1') {
+                            Write-Log ('DAT: the file says TPUISchemaVersion {0}; this Manager knows version 1. It is read as version 1 and some games may not match.' -f $schemaVersionText)
+                            Write-Host ('  This game list (DAT) uses a format this Manager does not know (version {0}; it knows version 1).' -f $schemaVersionText) -ForegroundColor Yellow
+                            Write-Host '  It is still read, but some games may not match. Check for a newer Manager.' -ForegroundColor Yellow
+                        }
+                    }
                     $gameName    = $reader.GetAttribute('name')
                     $profCode    = ''
                     $exePath     = ''
@@ -25873,6 +25889,8 @@ function Build-DatIndexFromStream {
                 elseif ($currentElem -eq 'GameProfile2')                    { $profCode2   = $reader.Value }
                 elseif ($currentElem -eq 'Executable2' -and -not $exePath2) { $exePath2    = $reader.Value }
                 elseif ($currentElem -eq 'TestMenuExecutable')              { $testMenuExe = $reader.Value }
+            } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::Text -and -not $insideGame -and $currentElem -eq 'TPUISchemaVersion') {
+                $schemaVersionText = ([string]$reader.Value).Trim()
             } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::EndElement -and $reader.Name -eq 'game') {
                 $insideGame = $false
                 $captureRoms = $false
@@ -38642,6 +38660,12 @@ function Invoke-LibraryHealthCheck {
                 if (-not $checkedDatabases.ContainsKey($checkKey)) { $checkedDatabases[$checkKey] = (Get-PostgresGameDatabaseReadiness -Doc $databaseCheck.Doc) }
                 $readiness = $checkedDatabases[$checkKey]
                 if ($readiness.Ready) { continue }
+                # A missing database of a game that has TeknoParrot's own "Automatically create Database" option and no starting file with the game (the games in
+                # $postgresAutoCreateLabels) is not a problem Postgres setup could fix: TeknoParrot makes it the first time the game starts. A game that ships a starting file stays a problem (menu 11 makes it).
+                if ([string]$readiness.Error -match 'does not exist' -and $postgresAutoCreateLabels.Contains([string]$databaseCheck.Label)) {
+                    Write-Log ('HealthCheck: database of {0} is not there yet; the game creates it the first time it starts.' -f $databaseCheck.Label)
+                    continue
+                }
                 $why = if ([string]$readiness.Error -match 'does not exist') { 'its database is missing' } elseif ([string]$readiness.Error -match '^Found 0 tables') { 'its database has no tables' } else { 'the game cannot connect to its database with its own settings' }
                 [void]$postgresDatabaseProblems.Add(('{0}: {1}' -f $databaseCheck.Label, $why))
                 Write-Log ('HealthCheck: database problem for {0}: {1}' -f $databaseCheck.Label, $readiness.Error)
@@ -38660,12 +38684,6 @@ function Invoke-LibraryHealthCheck {
             if ($lastRun) { $lastFullRun = [string]$lastRun.Line }
         } catch {
             Write-Log "HealthCheck: the last full run could not be read from the log -- $_"
-                # A missing database of a game that has TeknoParrot's own "Automatically create Database" option and no starting file with the game (the games in
-                # $postgresAutoCreateLabels) is not a problem Postgres setup could fix: TeknoParrot makes it the first time the game starts. A game that ships a starting file stays a problem (menu 11 makes it).
-                if ([string]$readiness.Error -match 'does not exist' -and $postgresAutoCreateLabels.Contains([string]$databaseCheck.Label)) {
-                    Write-Log ('HealthCheck: database of {0} is not there yet; the game creates it the first time it starts.' -f $databaseCheck.Label)
-                    continue
-                }
         }
     }
 
@@ -55967,6 +55985,7 @@ $mode = $null
         Write-Host "  Each game has one database. A game on Internal storage makes its own, so it is skipped here." -ForegroundColor DarkGray
         Write-Host "  For every game that uses PostgreSQL, this step makes that game's database from the game's own backup" -ForegroundColor DarkGray
         Write-Host "  when it is missing, then tests it with the game's own settings before setup says it is ready." -ForegroundColor DarkGray
+        Write-Host "  Golden Tee Live 2020 is covered too. It can make its own database the first time the game starts." -ForegroundColor DarkGray
         foreach ($choiceLine in (Get-TpmDatabaseChoiceLines)) { Write-Host ('  ' + $choiceLine) -ForegroundColor DarkGray }
         $postgresStatus = New-TpmWorkflowStatusContext -WorkflowKey 'PostgresSetup' -Title 'PostgreSQL setup' -Steps @(
             @{ Id = 'scan'; Label = 'Check which games need PostgreSQL' }
@@ -55985,7 +56004,6 @@ $mode = $null
             } catch {
                 $resumeFailure = [string]$_.Exception.Message
                 if ($resumeFailure -match 'Reason \[PACKAGE_MISMATCH\]') {
-        Write-Host "  Golden Tee Live 2020 is covered too. It can make its own database the first time the game starts." -ForegroundColor DarkGray
                     $resumeFailureMessage = 'This PostgreSQL step was started by a different TeknoParrot Manager copy, or that copy changed while Windows approval was open. TeknoParrot Manager stopped before changing anything. Restart setup from the same TeknoParrot Manager copy that opened the permission prompt. The log records which identity differed.'
                 } else {
                     $resumeFailureMessage = 'TeknoParrot Manager could not safely continue the PostgreSQL setup. Review its log for the failure reason before trying again.'
