@@ -10,12 +10,14 @@ BeforeAll {
     $parseErrors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { throw 'Controller evidence bootstrap could not parse the production script.' }
-    $wanted = @('Get-TpmControllerEvidence', 'Invoke-DeviceSurvey')
+    $wanted = @('Get-TpmControllerEvidence', 'Invoke-DeviceSurvey', 'Get-TpmControlStatePath', 'Read-TpmControlStateFile', 'Save-TpmControlStateFile', 'Get-TpmDeviceQuestions', 'Read-TpmCabinetState', 'Save-TpmCabinetState', 'Get-TpmCabinetDeviceAnswer', 'Set-TpmCabinetDevice', 'Get-TpmLedBlinkyKeyMap')
     $functionFile = Join-Path $TestDrive 'controller-functions.ps1'
     ($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -in $wanted }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n" | Set-Content -LiteralPath $functionFile -Encoding utf8
     . $functionFile
     $script:schemaPath = Join-Path $PSScriptRoot '..\schemas\TpmControllerEvidence.v1.schema.json'
     function Write-Log { param($msg) }
+    function Write-TpmText { param([string]$Text, [string]$Color, [int]$Indent, [int]$HangingIndent, [switch]$BlankBefore, [switch]$BlankAfter) }
+    function Write-TpmAtomicTextFile { param($Path, $Text, $Validate, $Operation, $ReplacedCopyPath) [System.IO.File]::WriteAllText($Path, $Text) }
     function Read-TpmChoice { param($Prompt, $Choices) '1' }
     function Read-TpmYesNo { param($Prompt, $Default = '') 'N' }
     function New-FakeEvidence {
@@ -92,6 +94,7 @@ Describe 'Get-TpmControllerEvidence' {
 Describe 'Invoke-DeviceSurvey with detection' {
     BeforeEach {
         $script:asked = New-Object System.Collections.Generic.List[object]
+        $script:state = Join-Path $TestDrive ('s-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         Mock Write-Host { }
         Mock Write-Log { }
         Mock Read-TpmChoice { '1' }
@@ -100,7 +103,7 @@ Describe 'Invoke-DeviceSurvey with detection' {
 
     It 'uses a connected Xbox pad as the default answer and leaves every other question unanswered' {
         Mock Get-TpmControllerEvidence { New-FakeEvidence -Observations @([pscustomobject]@{ DeviceClass = 'XboxStylePad'; Confidence = 'High'; Basis = 'XInputSlotActive'; Count = 1 }) }
-        Invoke-DeviceSurvey
+        Invoke-DeviceSurvey -StateRoot $script:state
         $xbox = @($script:asked | Where-Object Prompt -match 'Xbox')[0]
         $xbox.Default | Should -Be 'Y'
         @($script:asked | Where-Object { $_.Prompt -notmatch 'Xbox' -and $_.Default -ne '' }).Count | Should -Be 0
@@ -108,7 +111,7 @@ Describe 'Invoke-DeviceSurvey with detection' {
 
     It 'only says "may be connected" for a Low or Medium match and never pre-answers it' {
         Mock Get-TpmControllerEvidence { New-FakeEvidence -Observations @([pscustomobject]@{ DeviceClass = 'LightGun'; Confidence = 'Low'; Basis = 'NameHint'; Count = 1 }) }
-        Invoke-DeviceSurvey
+        Invoke-DeviceSurvey -StateRoot $script:state
         $gun = @($script:asked | Where-Object Prompt -match 'Lightgun')[0]
         $gun.Default | Should -Be ''
         $gun.Prompt | Should -Match 'may be connected'
@@ -116,27 +119,27 @@ Describe 'Invoke-DeviceSurvey with detection' {
 
     It 'asks exactly as before when detection found nothing or failed' {
         Mock Get-TpmControllerEvidence { New-FakeEvidence -Status 'SourceUnavailable' }
-        Invoke-DeviceSurvey
+        Invoke-DeviceSurvey -StateRoot $script:state
         $script:asked.Count | Should -Be 7
         @($script:asked | Where-Object { $_.Default -ne '' -or $_.Prompt -match 'connected' }).Count | Should -Be 0
     }
 
     It 'lets the user answer N even when a pad was detected' {
         Mock Get-TpmControllerEvidence { New-FakeEvidence -Observations @([pscustomobject]@{ DeviceClass = 'XboxStylePad'; Confidence = 'High'; Basis = 'XInputSlotActive'; Count = 1 }) }
-        { Invoke-DeviceSurvey } | Should -Not -Throw
+        { Invoke-DeviceSurvey -StateRoot $script:state } | Should -Not -Throw
         Should -Invoke Read-TpmYesNo -Times 8 -Exactly
     }
 
     It 'asks one question and skips the other six when the user accepts the detected pad' {
         Mock Get-TpmControllerEvidence { New-FakeEvidence -Observations @([pscustomobject]@{ DeviceClass = 'XboxStylePad'; Confidence = 'High'; Basis = 'XInputSlotActive'; Count = 1 }) }
         Mock Read-TpmYesNo { [void]$script:asked.Add([pscustomobject]@{ Prompt = $Prompt; Default = $Default }); 'Y' }
-        Invoke-DeviceSurvey
+        Invoke-DeviceSurvey -StateRoot $script:state
         $script:asked.Count | Should -Be 1
     }
 
     It 'never offers the shortcut for Low-confidence name hints' {
         Mock Get-TpmControllerEvidence { New-FakeEvidence -Observations @([pscustomobject]@{ DeviceClass = 'Wheel'; Confidence = 'Low'; Basis = 'NameHint'; Count = 1 }) }
-        Invoke-DeviceSurvey
+        Invoke-DeviceSurvey -StateRoot $script:state
         $script:asked.Count | Should -Be 7
     }
 }

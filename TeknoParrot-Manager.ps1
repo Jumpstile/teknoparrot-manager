@@ -42767,41 +42767,73 @@ function Write-ControlPropagationResults {
 
 # Asks the user which control devices they have and want to use, then prints a
 # tailored plan of which game to bind with which device. This is guidance
-# only: it reads no files and changes nothing. The actual copying happens
-# later, after the user binds those games and re-runs.
+# only: it changes no game file. The answers are kept in the Manager's own
+# controls file (Read-TpmCabinetState) so the same question is never asked
+# twice. The actual copying happens later, after the user binds those games
+# and re-runs.
 function Invoke-DeviceSurvey {
+    param([string]$StateRoot = '')
 
     # Scriptblock instead of a nested function: PowerShell nested functions
     # escape into session scope after the first call, polluting the environment
     # for the rest of the session. A scriptblock stays local to this function.
     # What is connected right now (read-only). A clear match becomes the default answer; the user can always change it.
     $evidence = Get-TpmControllerEvidence
+    # What the player said before. A saved answer is the default, and the questions are skipped when the player keeps them.
+    $cabinet = Read-TpmCabinetState -StateRoot $StateRoot
+    $questions = @(Get-TpmDeviceQuestions)
     $readYesNo = {
         param([string]$q, [string]$class = '')
         $match = @($evidence.DeviceObservations | Where-Object { $class -and $_.DeviceClass -eq $class } | Select-Object -First 1)
+        $saved = Get-TpmCabinetDeviceAnswer -State $cabinet -Class $class
         $default = ''
         $note = ''
         if ($match.Count -and $match[0].Confidence -eq 'High') { $default = 'Y'; $note = ' - one is connected, press Enter for Y' }
         elseif ($match.Count) { $note = ' - may be connected' }
+        if ($default -eq '' -and $null -ne $saved) {
+            $default = $(if ($saved) { 'Y' } else { 'N' })
+            $note += $(if ($saved) { ' - you said yes last time' } else { ' - you said no last time' })
+        }
         return ((Read-TpmYesNo -Prompt "   $q$note (Y/N)" -Default $default) -eq "Y")
     }
 
     Write-Host ""
     Write-Host " Which controls do you have and want to use?" -ForegroundColor Cyan
-    Write-Host " (Answer Y or N. This only prints a plan; it changes nothing.)" -ForegroundColor DarkCyan
+    Write-TpmText -Text '(Answer Y or N. This prints a plan and changes no game file. Your answers are saved so you are not asked again.)' -Color DarkCyan -Indent 1
     Write-Host ""
+
+    $sure = @($evidence.DeviceObservations | Where-Object { $_.Confidence -eq 'High' } | ForEach-Object { $_.DeviceClass })
+    $answers = @{}
+    foreach ($item in $questions) { $answers[$item.Class] = $false }
+    $toSave = @($questions | ForEach-Object { $_.Class })
+    $kept = $false
+    $quick = $false
+    # All seven answers saved: show them and ask once. A new controller of a kind the player said no to means the answers may be out of date.
+    if (@($questions | Where-Object { $null -eq (Get-TpmCabinetDeviceAnswer -State $cabinet -Class $_.Class) }).Count -eq 0) {
+        $newlyFound = @($questions | Where-Object { $sure -contains $_.Class -and (Get-TpmCabinetDeviceAnswer -State $cabinet -Class $_.Class) -eq $false })
+        if ($newlyFound.Count -gt 0) {
+            Write-TpmText -Text ' A controller was found that you said you do not have, so TPM asks again.' -Color Yellow
+        } else {
+            Write-TpmText -Text ' You answered these before:' -Color DarkCyan
+            foreach ($item in $questions) {
+                Write-TpmText -Text ('   {0}  {1}' -f $item.Question, $(if (Get-TpmCabinetDeviceAnswer -State $cabinet -Class $item.Class) { 'Yes' } else { 'No' })) -Color DarkGray
+            }
+            if ((Read-TpmYesNo -Prompt '   Keep these answers? (Y = yes, N = answer again)' -Default 'Y') -eq 'Y') {
+                foreach ($item in $questions) { $answers[$item.Class] = [bool](Get-TpmCabinetDeviceAnswer -State $cabinet -Class $item.Class) }
+                $kept = $true
+                $toSave = @()
+            }
+        }
+    }
 
     # One-screen shortcut: when a controller is clearly connected (High confidence),
     # offer to use just that, so the user answers one question instead of seven.
-    $sure = @($evidence.DeviceObservations | Where-Object { $_.Confidence -eq 'High' } | ForEach-Object { $_.DeviceClass })
-    $hasXbox = $hasArcade = $hasTrackball = $hasSpinner = $hasWheel = $hasGun = $hasKeyboard = $false
-    $quick = $false
-    if ($sure -contains 'XboxStylePad') {
+    if (-not $kept -and $sure -contains 'XboxStylePad') {
         Write-Host " Found: an Xbox-style controller." -ForegroundColor Green
         $quick = ((Read-TpmYesNo -Prompt "   Use the Xbox controller for all games? (Y = yes, N = answer the questions)" -Default 'Y') -eq 'Y')
-        if ($quick) { $hasXbox = $true }
+        if ($quick) { $answers['XboxStylePad'] = $true; $toSave = @('XboxStylePad') }
     }
-    if (-not $quick) {
+    if (-not $kept -and -not $quick) {
         # An arcade keyboard encoder looks like a keyboard to Windows, so say what we found and let the player confirm below.
         if (@($evidence.DeviceObservations | Where-Object { $_.DeviceClass -eq 'ArcadeEncoder' }).Count) {
             Write-TpmText ' Found: what looks like an arcade keyboard encoder (the box your arcade buttons plug into).' -Color Green
@@ -42810,14 +42842,19 @@ function Invoke-DeviceSurvey {
                 Write-TpmText "   Your lighting setup lists $(@($keyMap.Controls).Count) controls with their keys. You can confirm below." -Color DarkCyan
             }
         }
-        $hasXbox      = & $readYesNo "Xbox / XInput controller?" 'XboxStylePad'
-        $hasArcade    = & $readYesNo "Arcade joystick + buttons?" 'ArcadeEncoder'
-        $hasTrackball = & $readYesNo "Trackball?" 'PointerOrTrackball'
-        $hasSpinner   = & $readYesNo "Spinner (single-axis dial)?"
-        $hasWheel     = & $readYesNo "Steering wheel + pedals?" 'Wheel'
-        $hasGun       = & $readYesNo "Lightgun?" 'LightGun'
-        $hasKeyboard  = & $readYesNo "Keyboard (no game controller)?"
+        foreach ($item in $questions) { $answers[$item.Class] = & $readYesNo $item.Question $item.Class }
     }
+    if ($toSave.Count -gt 0) {
+        try {
+            foreach ($class in $toSave) { Set-TpmCabinetDevice -State $cabinet -Class $class -Has ([bool]$answers[$class]) -Source 'Asked' }
+            Save-TpmCabinetState -State $cabinet -StateRoot $StateRoot
+        } catch {
+            Write-Log ('Device survey: the answers could not be saved: {0}' -f $_.Exception.Message)
+            Write-TpmText -Text ' Your answers could not be saved this time. The plan below is still right.' -Color Yellow
+        }
+    }
+    $hasXbox = $answers['XboxStylePad']; $hasArcade = $answers['ArcadeEncoder']; $hasTrackball = $answers['PointerOrTrackball']
+    $hasSpinner = $answers['Spinner']; $hasWheel = $answers['Wheel']; $hasGun = $answers['LightGun']; $hasKeyboard = $answers['Keyboard']
 
     # Resolve one device per game family from what the user has, preferring the
     # purpose-built control and falling back to the most versatile available.
@@ -42885,6 +42922,671 @@ function Invoke-DeviceSurvey {
     }
     Write-Log ("Device survey: detected classes={0} status={1}" -f ((@($evidence.DeviceObservations | ForEach-Object { "$($_.DeviceClass)/$($_.Confidence)" })) -join ","), $evidence.EvidenceStatus)
     Write-Log "Device survey: plan=$($plan.Count) items; xbox=$hasXbox arcade=$hasArcade trackball=$hasTrackball spinner=$hasSpinner wheel=$hasWheel gun=$hasGun keyboard=$hasKeyboard"
+}
+
+# =============================================================================
+# CONTROLLER LEARNING, EVIDENCE AND GUIDES (issues #201, #307, #267)
+# =============================================================================
+# Three things live here, all kept in the Manager's own controls folder (State\Controls) and never in a game file:
+#   - the cabinet file (cabinet.json): which kinds of controller the player has, how many players and buttons, and which key
+#     each arcade control sends (learned by pressing it, or proposed from LEDBlinky's own key map);
+#   - the evidence file (control-evidence.json): when the player said a game's controls worked, which profile revision and
+#     controls it was for, and whether a first-run Test/Service step or a calibration is still to do;
+#   - control guides: a plain per-game list of controls, shown on screen or saved as a page that can be printed.
+# Reading is separate from writing. A file that cannot be read is set aside, never overwritten unseen, and every save keeps
+# the previous file as a .bak copy. Nothing here writes a TeknoParrot profile. See docs/architecture/CONTROLLER_VERIFICATION_STORE.md.
+
+function Get-TpmControlStatePath {
+    param([string]$StateRoot = '')
+    $root = if ($StateRoot) { [System.IO.Path]::GetFullPath($StateRoot) }
+            elseif ($script:TpmOwnedLayout -and -not [string]::IsNullOrWhiteSpace([string]$script:TpmOwnedLayout.State)) { [System.IO.Path]::GetFullPath((Join-Path ([string]$script:TpmOwnedLayout.State) 'Controls')) }
+            else { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'Controls\TPM-State')) }
+    return [pscustomobject]@{ Root = $root; Cabinet = (Join-Path $root 'cabinet.json'); Evidence = (Join-Path $root 'control-evidence.json') }
+}
+
+# Read-only. Status is Missing, Ok or Unreadable; Data is the parsed JSON when Ok.
+function Read-TpmControlStateFile {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return [pscustomobject]@{ Status = 'Missing'; Data = $null } }
+    try {
+        $data = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($null -eq $data) { throw 'The file is empty.' }
+        return [pscustomobject]@{ Status = 'Ok'; Data = $data }
+    } catch {
+        return [pscustomobject]@{ Status = 'Unreadable'; Data = $null }
+    }
+}
+
+# Saves one of the two files. An unreadable file is copied aside first (and the save stops if that copy fails); a readable one
+# is kept as <name>.bak. The new text is checked before it replaces anything.
+function Save-TpmControlStateFile {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Data)
+    $current = Read-TpmControlStateFile -Path $Path
+    [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($Path))
+    if ($current.Status -eq 'Unreadable') {
+        $kept = $Path + '.unreadable-' + (Get-Date).ToString('yyyyMMddHHmmss', [System.Globalization.CultureInfo]::InvariantCulture)
+        [System.IO.File]::Copy($Path, $kept, $false)
+        Write-Log ('Controls file: {0} could not be read; a copy was kept as {1}.' -f [System.IO.Path]::GetFileName($Path), [System.IO.Path]::GetFileName($kept))
+    }
+    $copy = $(if ($current.Status -eq 'Ok') { $Path + '.bak' } else { '' })
+    Write-TpmAtomicTextFile -Path $Path -Text (ConvertTo-Json -InputObject $Data -Depth 8) -Operation 'controls file write' -ReplacedCopyPath $copy -Validate { param([string]$Written) $null -ne ($Written | ConvertFrom-Json -ErrorAction Stop) }
+}
+
+# The seven questions of the Device Survey, in order. Class is the evidence class, or a plain name when detection cannot tell.
+function Get-TpmDeviceQuestions {
+    return @(
+        [pscustomobject]@{ Class = 'XboxStylePad'; Question = 'Xbox / XInput controller?'; Label = 'an Xbox controller' }
+        [pscustomobject]@{ Class = 'ArcadeEncoder'; Question = 'Arcade joystick + buttons?'; Label = 'arcade joystick and buttons' }
+        [pscustomobject]@{ Class = 'PointerOrTrackball'; Question = 'Trackball?'; Label = 'a trackball' }
+        [pscustomobject]@{ Class = 'Spinner'; Question = 'Spinner (single-axis dial)?'; Label = 'a spinner' }
+        [pscustomobject]@{ Class = 'Wheel'; Question = 'Steering wheel + pedals?'; Label = 'a steering wheel and pedals' }
+        [pscustomobject]@{ Class = 'LightGun'; Question = 'Lightgun?'; Label = 'a light gun' }
+        [pscustomobject]@{ Class = 'Keyboard'; Question = 'Keyboard (no game controller)?'; Label = 'a keyboard' }
+    )
+}
+
+# The cabinet file with every field filled in. FileStatus says whether the file was Missing, Ok or Unreadable. Read-only.
+function Read-TpmCabinetState {
+    param([string]$StateRoot = '')
+    $file = Read-TpmControlStateFile -Path (Get-TpmControlStatePath -StateRoot $StateRoot).Cabinet
+    $state = [pscustomobject]@{ Version = 1; Devices = [pscustomobject]@{}; Players = 0; ButtonsPerPlayer = 0; Keys = [pscustomobject]@{}; FileStatus = $file.Status }
+    if ($file.Status -eq 'Ok') {
+        foreach ($name in @('Devices', 'Keys')) {
+            $property = $file.Data.PSObject.Properties[$name]
+            if ($property -and $property.Value -is [System.Management.Automation.PSCustomObject]) { $state.$name = $property.Value }
+        }
+        foreach ($name in @('Players', 'ButtonsPerPlayer')) {
+            $property = $file.Data.PSObject.Properties[$name]
+            $number = 0
+            if ($property -and [int]::TryParse([string]$property.Value, [ref]$number)) { $state.$name = $number }
+        }
+    }
+    return $state
+}
+
+function Save-TpmCabinetState {
+    param([Parameter(Mandatory)]$State, [string]$StateRoot = '')
+    $data = [pscustomobject]@{ Version = 1; Devices = $State.Devices; Players = [int]$State.Players; ButtonsPerPlayer = [int]$State.ButtonsPerPlayer; Keys = $State.Keys }
+    Save-TpmControlStateFile -Path (Get-TpmControlStatePath -StateRoot $StateRoot).Cabinet -Data $data
+}
+
+# $true or $false when the player answered for this kind of device, $null when never asked.
+function Get-TpmCabinetDeviceAnswer {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Class)
+    $record = $State.Devices.PSObject.Properties[$Class]
+    if ($null -eq $record -or $null -eq $record.Value.PSObject.Properties['Has']) { return $null }
+    return [bool]$record.Value.Has
+}
+
+function Set-TpmCabinetDevice {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Class, [Parameter(Mandatory)][bool]$Has, [string]$Source = 'Asked')
+    $record = [pscustomobject]@{ Has = $Has; Source = $Source; AnsweredUtc = (Get-Date).ToUniversalTime().ToString('o') }
+    Add-Member -InputObject $State.Devices -NotePropertyName $Class -NotePropertyValue $record -Force
+}
+
+# Keys: control id -> @{ Key; Source }. Controls not in $Keys keep what was saved before.
+function Set-TpmCabinetKeys {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)]$Keys, [int]$Players = 0, [int]$ButtonsPerPlayer = 0)
+    foreach ($control in @($Keys.Keys)) {
+        $record = [pscustomobject]@{ Key = [string]$Keys[$control].Key; Source = [string]$Keys[$control].Source; LearnedUtc = (Get-Date).ToUniversalTime().ToString('o') }
+        Add-Member -InputObject $State.Keys -NotePropertyName ([string]$control) -NotePropertyValue $record -Force
+    }
+    if ($Players -gt 0) { $State.Players = $Players }
+    if ($ButtonsPerPlayer -gt 0) { $State.ButtonsPerPlayer = $ButtonsPerPlayer }
+}
+
+function Get-TpmCabinetKey {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Control)
+    $record = $State.Keys.PSObject.Properties[$Control]
+    if ($null -eq $record) { return '' }
+    return [string]$record.Value.Key
+}
+
+# Plain display name for a key. From Console is a .NET ConsoleKey name; from Mame is a MAME key code as LEDBlinky lists it.
+# An unknown MAME code gives '' so the player is asked instead of TPM guessing.
+function ConvertTo-TpmKeyName {
+    param([Parameter(Mandatory)][string]$Name, [ValidateSet('Console', 'Mame')][string]$From = 'Console')
+    $n = $Name.Trim()
+    if ($From -eq 'Mame') {
+        $n = $n -replace '^KEYCODE_', ''
+        $mame = @{ LCONTROL = 'Left Ctrl'; RCONTROL = 'Right Ctrl'; LALT = 'Left Alt'; RALT = 'Right Alt'; LSHIFT = 'Left Shift'; RSHIFT = 'Right Shift'
+                   SPACE = 'Space'; ENTER = 'Enter'; ESC = 'Escape'; TAB = 'Tab'; UP = 'Up arrow'; DOWN = 'Down arrow'; LEFT = 'Left arrow'; RIGHT = 'Right arrow' }
+        if ($mame.ContainsKey($n)) { return $mame[$n] }
+        if ($n -match '^[0-9A-Z]$' -or $n -match '^F\d{1,2}$') { return $n }
+        return ''
+    }
+    $console = @{ Spacebar = 'Space'; LeftArrow = 'Left arrow'; RightArrow = 'Right arrow'; UpArrow = 'Up arrow'; DownArrow = 'Down arrow' }
+    if ($console.ContainsKey($n)) { return $console[$n] }
+    if ($n -match '^D(\d)$') { return $Matches[1] }
+    if ($n -match '^NumPad(\d)$') { return ('Numpad ' + $Matches[1]) }
+    return $n
+}
+
+# The controls TPM asks about, as TeknoParrot names them (Coin1, P1ButtonStart, P1ButtonUp, P1Button1, Test, Service).
+function Get-TpmCabinetControlList {
+    param([ValidateRange(1, 4)][int]$Players = 2, [ValidateRange(1, 8)][int]$Buttons = 6)
+    $list = New-Object System.Collections.Generic.List[object]
+    for ($p = 1; $p -le $Players; $p++) {
+        [void]$list.Add([pscustomobject]@{ Control = "Coin$p"; Label = "Player $p Coin" })
+        [void]$list.Add([pscustomobject]@{ Control = "P${p}ButtonStart"; Label = "Player $p Start" })
+        foreach ($direction in @('Up', 'Down', 'Left', 'Right')) { [void]$list.Add([pscustomobject]@{ Control = "P${p}Button$direction"; Label = "Player $p joystick $direction" }) }
+        for ($b = 1; $b -le $Buttons; $b++) { [void]$list.Add([pscustomobject]@{ Control = "P${p}Button$b"; Label = "Player $p button $b" }) }
+    }
+    [void]$list.Add([pscustomobject]@{ Control = 'Test'; Label = 'the Test button' })
+    [void]$list.Add([pscustomobject]@{ Control = 'Service'; Label = 'the Service button' })
+    return @($list.ToArray())
+}
+
+# Proposals from LEDBlinky's own key map (Get-TpmLedBlinkyKeyMap): control id -> key name, only for the controls asked about and
+# only for LED labels TPM recognizes. Anything else is left for the player to press.
+function Get-TpmKeysFromLedBlinkyMap {
+    param($KeyMap, [Parameter(Mandatory)][object[]]$Controls)
+    $found = [ordered]@{}
+    if ($null -eq $KeyMap -or -not [bool]$KeyMap.Found) { return $found }
+    $wanted = @{}
+    foreach ($control in $Controls) { $wanted[[string]$control.Control] = $true }
+    foreach ($led in @($KeyMap.Controls)) {
+        $label = ([string]$led.Control).ToUpperInvariant() -replace '[_\s]', ''
+        $id = ''
+        if ($label -match '^P(\d)B(?:UTTON)?(\d+)$') { $id = 'P{0}Button{1}' -f $Matches[1], [int]$Matches[2] }
+        elseif ($label -match '^P(\d)START$') { $id = 'P{0}ButtonStart' -f $Matches[1] }
+        elseif ($label -match '^START(\d)$') { $id = 'P{0}ButtonStart' -f $Matches[1] }
+        elseif ($label -match '^COIN(\d)$') { $id = 'Coin{0}' -f $Matches[1] }
+        elseif ($label -match '^P(\d)(?:JOYSTICK|JOY|STICK)?(UP|DOWN|LEFT|RIGHT)$') { $id = 'P{0}Button{1}{2}' -f $Matches[1], $Matches[2].Substring(0, 1), $Matches[2].Substring(1).ToLowerInvariant() }
+        if (-not $id -or -not $wanted.ContainsKey($id) -or $found.Contains($id)) { continue }
+        $code = @($led.InputCodes | Where-Object { ([string]$_) -like 'KEYCODE_*' } | Select-Object -First 1)
+        if ($code.Count -eq 0) { continue }
+        $name = ConvertTo-TpmKeyName -Name ([string]$code[0]) -From Mame
+        if ($name) { $found[$id] = $name }
+    }
+    return $found
+}
+
+function Test-TpmKeyPressAvailable { return (-not [Console]::IsInputRedirected) }
+
+# Waits for one key press and returns its plain name: 'Escape' for Esc, '' when nothing was pressed in time. Ctrl, Alt and Shift
+# do not reach the console on their own, so they are watched through Windows' key state for as long as this waits.
+function Read-TpmLearnKey {
+    param([int]$TimeoutSeconds = 30)
+    if (-not ('TpmKeyProbe' -as [type])) {
+        Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class TpmKeyProbe { [DllImport("user32.dll")] static extern short GetAsyncKeyState(int k); public static int Modifier() { int[] keys = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5 }; foreach (int k in keys) { if ((GetAsyncKeyState(k) & 0x8000) != 0) return k; } return 0; } }'
+    }
+    $modifierNames = @{ 160 = 'Left Shift'; 161 = 'Right Shift'; 162 = 'Left Ctrl'; 163 = 'Right Ctrl'; 164 = 'Left Alt'; 165 = 'Right Alt' }
+    while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) }
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if ([Console]::KeyAvailable) { return (ConvertTo-TpmKeyName -Name ([Console]::ReadKey($true).Key.ToString())) }
+        $modifier = [TpmKeyProbe]::Modifier()
+        if ($modifier -ne 0) {
+            while ([TpmKeyProbe]::Modifier() -ne 0) { Start-Sleep -Milliseconds 20 }
+            while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) }
+            return [string]$modifierNames[[int]$modifier]
+        }
+        Start-Sleep -Milliseconds 25
+    }
+    return ''
+}
+
+# Asks for each control in turn ("Press Player 1 Start") and records the key. -ReadKey is the key reader (a script block, so tests
+# need no keyboard). Esc skips a control, a key already given to another control is refused, and nothing pressed asks whether to
+# stop. -Known holds keys already given (control id -> key name) so they count for the duplicate check.
+function Invoke-TpmLearnKeys {
+    param([Parameter(Mandatory)][object[]]$Controls, [Parameter(Mandatory)][scriptblock]$ReadKey, [System.Collections.IDictionary]$Known = $null)
+    $learned = [ordered]@{}
+    $skipped = New-Object System.Collections.Generic.List[string]
+    $stopped = $false
+    $number = 0
+    foreach ($control in $Controls) {
+        $number++
+        while ($true) {
+            Write-TpmText -Text ('({0} of {1}) Press {2}   (Esc = skip)' -f $number, $Controls.Count, $control.Label) -Color Cyan
+            $key = [string](& $ReadKey)
+            if ($key -eq '') {
+                if ((Read-TpmYesNo -Prompt '  Nothing was pressed. Stop learning here? (Y/N)' -Default 'N') -eq 'Y') { $stopped = $true; break }
+                continue
+            }
+            if ($key -eq 'Escape') { [void]$skipped.Add([string]$control.Label); break }
+            $owner = ''
+            foreach ($name in @($learned.Keys)) { if ($learned[$name] -eq $key) { $owner = $name } }
+            if ($null -ne $Known) { foreach ($name in @($Known.Keys)) { if ([string]$Known[$name] -eq $key -and -not $owner) { $owner = $name } } }
+            if ($owner) {
+                $ownerLabel = @($Controls | Where-Object { $_.Control -eq $owner } | ForEach-Object { $_.Label } | Select-Object -First 1)
+                Write-TpmText -Text ('That key ({0}) is already used for {1}. Press a different control, or Esc to skip.' -f $key, $(if ($ownerLabel.Count) { $ownerLabel[0] } else { $owner })) -Color Yellow
+                continue
+            }
+            $learned[[string]$control.Control] = $key
+            Write-TpmText -Text ('Got it: {0}' -f $key) -Color Green -Indent 4
+            break
+        }
+        if ($stopped) { break }
+    }
+    return [pscustomobject]@{ Keys = $learned; Skipped = @($skipped.ToArray()); Stopped = $stopped }
+}
+
+# Plain lines about what the cabinet file holds. Used by the My controls screen and the printable cabinet page.
+function Get-TpmCabinetSummaryLines {
+    param([Parameter(Mandatory)]$State)
+    $lines = New-Object System.Collections.Generic.List[string]
+    $have = @(Get-TpmDeviceQuestions | Where-Object { (Get-TpmCabinetDeviceAnswer -State $State -Class $_.Class) -eq $true } | ForEach-Object { $_.Label })
+    $answered = @(Get-TpmDeviceQuestions | Where-Object { $null -ne (Get-TpmCabinetDeviceAnswer -State $State -Class $_.Class) }).Count
+    if ($answered -eq 0) { [void]$lines.Add('You have not told TPM which controls you have yet.') }
+    elseif ($have.Count -eq 0) { [void]$lines.Add('You told TPM you have none of the listed controls.') }
+    else { [void]$lines.Add('You told TPM you have: ' + ($have -join ', ') + '.') }
+    $keyCount = @($State.Keys.PSObject.Properties).Count
+    if ($keyCount -gt 0) {
+        $text = ('TPM knows the key for {0} of your arcade controls' -f $keyCount)
+        if ($State.Players -gt 0) { $text += (' ({0} {1}, {2} {3} each)' -f $State.Players, $(if ($State.Players -eq 1) { 'player' } else { 'players' }), $State.ButtonsPerPlayer, $(if ($State.ButtonsPerPlayer -eq 1) { 'button' } else { 'buttons' })) }
+        [void]$lines.Add($text + '.')
+    } else {
+        [void]$lines.Add('TPM has not learned which key each arcade control sends.')
+    }
+    return @($lines.ToArray())
+}
+
+# The screen that learns the arcade buttons. Nothing is saved until the player says Y at the end.
+function Invoke-TpmButtonLearning {
+    param([string]$StateRoot = '')
+    Write-Host ''
+    Write-TpmText -Text 'Learn my arcade buttons' -Color Cyan
+    Write-TpmText -Text 'TPM asks you to press each control on your cabinet and remembers the key it sends. No game file is changed.' -Color DarkCyan
+    if (-not (Test-TpmKeyPressAvailable)) {
+        Write-TpmText -Text 'This needs a normal console window where TPM can see key presses, so it cannot run here.' -Color Yellow
+        return
+    }
+    $cabinet = Read-TpmCabinetState -StateRoot $StateRoot
+    $players = [int](Read-TpmChoice -Prompt '  How many players does your cabinet have? (1-4)' -Choices @('1', '2', '3', '4') -Default $(if ($cabinet.Players -ge 1 -and $cabinet.Players -le 4) { [string]$cabinet.Players } else { '2' }))
+    $buttons = [int](Read-TpmChoice -Prompt '  How many action buttons does each player have? (1-8)' -Choices @('1', '2', '3', '4', '5', '6', '7', '8') -Default $(if ($cabinet.ButtonsPerPlayer -ge 1 -and $cabinet.ButtonsPerPlayer -le 8) { [string]$cabinet.ButtonsPerPlayer } else { '6' }))
+    $controls = @(Get-TpmCabinetControlList -Players $players -Buttons $buttons)
+    $keys = [ordered]@{}
+    $labels = @{}
+    foreach ($control in $controls) { $labels[[string]$control.Control] = [string]$control.Label }
+
+    # LEDBlinky keeps its own list of which key each control sends. Offer it first so only the rest has to be pressed.
+    $ledRoot = [string](Get-Variable -Name ledBlinkyRoot -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
+    $proposed = Get-TpmKeysFromLedBlinkyMap -KeyMap (Get-TpmLedBlinkyKeyMap -Root @($ledRoot)) -Controls $controls
+    if ($proposed.Count -gt 0) {
+        Write-TpmText -Text ('Your LEDBlinky setup lists the key for {0} of these {1} controls:' -f $proposed.Count, $controls.Count) -Color DarkCyan -BlankBefore
+        foreach ($id in $proposed.Keys) { Write-TpmText -Text ('{0} = {1}' -f $labels[$id], $proposed[$id]) -Color DarkGray -Indent 4 }
+        if ((Read-TpmYesNo -Prompt '  Use these keys? (Y = yes, N = I will press them myself)' -Default 'Y') -eq 'Y') {
+            foreach ($id in $proposed.Keys) { $keys[$id] = @{ Key = $proposed[$id]; Source = 'LedBlinkyKeyMap' } }
+        }
+    }
+    $known = [ordered]@{}
+    foreach ($id in $keys.Keys) { $known[$id] = $keys[$id].Key }
+    $remaining = @($controls | Where-Object { -not $keys.Contains([string]$_.Control) })
+    $skipped = @()
+    if ($remaining.Count -gt 0) {
+        Write-TpmText -Text 'Turn your cabinet on. When TPM names a control, press it once. Press Esc to skip one that your cabinet does not have.' -Color DarkCyan -BlankBefore
+        $result = Invoke-TpmLearnKeys -Controls $remaining -ReadKey { Read-TpmLearnKey } -Known $known
+        foreach ($id in $result.Keys.Keys) { $keys[$id] = @{ Key = $result.Keys[$id]; Source = 'PressedByPlayer' } }
+        $skipped = @($result.Skipped)
+    }
+    Write-Host ''
+    if ($keys.Count -eq 0) { Write-TpmText -Text 'No key was learned, so nothing was saved.' -Color Yellow; return }
+    Write-TpmText -Text ('TPM learned the key for {0} of {1} controls.' -f $keys.Count, $controls.Count) -Color Green
+    if ($skipped.Count -gt 0) { Write-TpmText -Text ('Skipped: ' + ($skipped -join ', ') + '.') -Color DarkGray }
+    if ((Read-TpmYesNo -Prompt '  Save this? (Keys you saved before for these controls are replaced. A copy of the old file is kept.) (Y/N)' -Default 'Y') -ne 'Y') {
+        Write-TpmText -Text 'Not saved.' -Color DarkGray
+        return
+    }
+    try {
+        Set-TpmCabinetKeys -State $cabinet -Keys $keys -Players $players -ButtonsPerPlayer $buttons
+        Save-TpmCabinetState -State $cabinet -StateRoot $StateRoot
+        Write-Log ('Controls: learned {0} of {1} arcade controls ({2} players, {3} buttons each).' -f $keys.Count, $controls.Count, $players, $buttons)
+        Write-TpmText -Text 'Saved. TPM will not ask you to press these again.' -Color Green
+    } catch {
+        Write-Log ('Controls: the learned keys could not be saved: {0}' -f $_.Exception.Message)
+        Write-TpmText -Text 'The keys could not be saved, so TPM will ask again next time.' -Color Yellow
+    }
+}
+
+# --- Gameplay verification evidence (#307) ----------------------------------
+# Who a profile is for the purpose of verification: its revision and a hash of its control bindings plus its Input API. When
+# either changes, earlier evidence no longer describes the game and is treated as stale.
+function Get-TpmControlProfileIdentity {
+    param([Parameter(Mandatory)]$Doc)
+    $revisionNode = $Doc.SelectSingleNode('/GameProfile/GameProfileRevision')
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($button in @(Get-ButtonNodes $Doc)) {
+        $mapping = $button.SelectSingleNode('InputMapping')
+        $bindings = @(@('XInputButton', 'DirectInputButton', 'RawInputButton') | ForEach-Object { $node = $button.SelectSingleNode($_); if ($node) { $node.OuterXml } })
+        [void]$lines.Add(('{0}|{1}' -f $(if ($mapping) { $mapping.InnerText.Trim() } else { '' }), ($bindings -join '')))
+    }
+    $api = Get-ProfileInputApi $Doc
+    $canonical = ((@($lines.ToArray() | Sort-Object)) -join "`n") + "`napi=" + [string]$api
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $hash = (@($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)) | ForEach-Object { $_.ToString('x2') }) -join '') } finally { $sha.Dispose() }
+    return [pscustomobject]@{ Revision = $(if ($revisionNode) { $revisionNode.InnerText.Trim() } else { '' }); Hash = $hash; InputApi = [string]$api; Family = (Get-ProfileFamily $Doc) }
+}
+
+# Finds the record of one game and applies $Change to it, then saves the evidence file. A new record starts with every step Unknown.
+function Update-TpmGameEvidence {
+    param([Parameter(Mandatory)][string]$Code, [Parameter(Mandatory)][scriptblock]$Change, [string]$StateRoot = '')
+    $path = (Get-TpmControlStatePath -StateRoot $StateRoot).Evidence
+    $file = Read-TpmControlStateFile -Path $path
+    $games = @()
+    if ($file.Status -eq 'Ok' -and $file.Data.PSObject.Properties['Games']) { $games = @($file.Data.Games) }
+    $record = @($games | Where-Object { $_.Code -ieq $Code } | Select-Object -First 1)
+    if ($record.Count -eq 0) {
+        $record = @([pscustomobject]@{ Code = $Code; Title = ''; Verification = $null; FirstRun = 'Unknown'; FirstRunAt = ''; Calibration = 'Unknown'; CalibrationAt = ''; CalibrationHash = '' })
+        $games = @($games) + $record
+    }
+    & $Change $record[0]
+    Save-TpmControlStateFile -Path $path -Data ([pscustomobject]@{ Version = 1; Games = @($games) })
+}
+
+# Records that the player played the game and its controls worked. This is the only way a game becomes Verified.
+function Save-TpmGameVerification {
+    param([Parameter(Mandatory)][string]$Code, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)]$Doc, [string]$StateRoot = '')
+    $identity = Get-TpmControlProfileIdentity -Doc $Doc
+    Update-TpmGameEvidence -Code $Code -StateRoot $StateRoot -Change {
+        param($record)
+        $record.Title = $Title
+        $record.Verification = [pscustomobject]@{ Method = 'PlayerReportedPlayTest'; ObservedAt = (Get-Date).ToUniversalTime().ToString('o'); Game = $Title; ProfileRevision = $identity.Revision; ProfileHash = $identity.Hash; ControllerContext = $identity.InputApi }
+    }
+}
+
+# Forgets the verification of one game (the player says it does not work).
+function Remove-TpmGameVerification {
+    param([Parameter(Mandatory)][string]$Code, [string]$StateRoot = '')
+    Update-TpmGameEvidence -Code $Code -StateRoot $StateRoot -Change { param($record) $record.Verification = $null }
+}
+
+# Step is FirstRun (the first-run Test or Service menu step) or Calibration. State is Done, NotNeeded or Needed.
+function Set-TpmGameSetupStep {
+    param([Parameter(Mandatory)][string]$Code, [Parameter(Mandatory)][ValidateSet('FirstRun', 'Calibration')][string]$Step, [Parameter(Mandatory)][ValidateSet('Done', 'NotNeeded', 'Needed')][string]$State, [Parameter(Mandatory)]$Doc, [string]$StateRoot = '')
+    $identity = Get-TpmControlProfileIdentity -Doc $Doc
+    Update-TpmGameEvidence -Code $Code -StateRoot $StateRoot -Change {
+        param($record)
+        $record.$Step = $State
+        $record."${Step}At" = (Get-Date).ToUniversalTime().ToString('o')
+        if ($Step -eq 'Calibration') { $record.CalibrationHash = $identity.Hash }
+    }
+}
+
+# Reads the evidence for one game and compares it with the profile as it is now. Read-only.
+#   Status: None (no record), Current (the profile is what the player tested), Stale (it changed since), Unreadable (the file is damaged).
+#   Calibration: NotRequired, Needed, Done or NotNeeded. Wheel, gun, trackball and other analog games need it until the player says Done
+#     for the current controls; a calibration done before the controls changed counts as Needed again.
+#   FirstRun: Unknown, Needed, Done or NotNeeded. Unknown does not block anything, because no source says which games need it.
+#   Outstanding: the steps that are Needed. A game with any is not Verified, even when the controls were tested.
+function Get-TpmControlVerificationState {
+    param([Parameter(Mandatory)][string]$Code, $Doc = $null, [string]$StateRoot = '')
+    $result = [pscustomobject]@{ Status = 'None'; Evidence = $null; Reason = ''; FirstRun = 'Unknown'; Calibration = 'Unknown'; Outstanding = @() }
+    if ($Code -notmatch '^[\w]+$' -or $null -eq $Doc -or $null -eq $Doc.SelectSingleNode('/GameProfile')) { return $result }
+    $identity = Get-TpmControlProfileIdentity -Doc $Doc
+    $file = Read-TpmControlStateFile -Path (Get-TpmControlStatePath -StateRoot $StateRoot).Evidence
+    $record = $null
+    if ($file.Status -eq 'Unreadable') { $result.Status = 'Unreadable' }
+    elseif ($file.Status -eq 'Ok' -and $file.Data.PSObject.Properties['Games']) { $record = @($file.Data.Games | Where-Object { $_.Code -ieq $Code } | Select-Object -First 1)[0] }
+    $needsCalibration = ($identity.Family -ne 'button')
+    $stored = $(if ($record) { [string]$record.Calibration } else { '' })
+    $result.Calibration = 'NotRequired'
+    if ($stored -eq 'NotNeeded') { $result.Calibration = 'NotNeeded' }
+    elseif ($stored -eq 'Done' -and [string]$record.CalibrationHash -eq $identity.Hash) { $result.Calibration = 'Done' }
+    elseif ($needsCalibration -or $stored -eq 'Needed') { $result.Calibration = 'Needed' }
+    if ($record -and [string]$record.FirstRun -in @('Needed', 'Done', 'NotNeeded')) { $result.FirstRun = [string]$record.FirstRun }
+    $result.Outstanding = @(@('Calibration', 'FirstRun') | Where-Object { $result.$_ -eq 'Needed' })
+    if ($null -eq $record -or $null -eq $record.Verification) { return $result }
+    $evidence = $record.Verification
+    if ([string]::IsNullOrWhiteSpace([string]$evidence.Method) -or [string]::IsNullOrWhiteSpace([string]$evidence.ObservedAt)) { return $result }
+    if ([string]$evidence.ProfileRevision -ne $identity.Revision -or [string]$evidence.ProfileHash -ne $identity.Hash) {
+        $result.Status = 'Stale'
+        $result.Reason = $(if ([string]$evidence.ProfileRevision -ne $identity.Revision) { 'The game settings were updated after you tested it.' } else { 'The controls of this game changed after you tested it.' })
+        return $result
+    }
+    $result.Status = 'Current'
+    $result.Evidence = $evidence
+    return $result
+}
+
+# Plain lines for one verification state: what TPM knows, and what is still to do.
+function Get-TpmVerificationLines {
+    param([Parameter(Mandatory)]$Verification)
+    $lines = New-Object System.Collections.Generic.List[string]
+    switch ([string]$Verification.Status) {
+        'Current' {
+            $when = [datetime]::MinValue
+            $text = $(if ([datetime]::TryParse([string]$Verification.Evidence.ObservedAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$when)) { ' on ' + (Format-TpmFriendlyTime -WhenUtc $when.ToUniversalTime()) } else { '' })
+            [void]$lines.Add('You told TPM' + $text + ' that you played this game and its controls worked.')
+        }
+        'Stale' { [void]$lines.Add(([string]$Verification.Reason + ' Play it again to be sure, then tell TPM.')) }
+        'Unreadable' { [void]$lines.Add('TPM could not read its saved test records, so it cannot say if this game was tested.') }
+        default { [void]$lines.Add('TPM has no record that you played this game with these controls.') }
+    }
+    if ($Verification.Calibration -eq 'Needed') { [void]$lines.Add('Still to do: calibrate the wheel, gun or other analog controls for this game.') }
+    if ($Verification.FirstRun -eq 'Needed') { [void]$lines.Add('Still to do: the first-run Test or Service menu step for this game.') }
+    elseif ($Verification.FirstRun -eq 'Unknown') { [void]$lines.Add('TPM does not know if this game needs a first-run Test or Service menu step.') }
+    return @($lines.ToArray())
+}
+
+# --- Cabinet inventory and control guides (#267) ----------------------------
+# Plain guide for one game: each control the game lists, what it does, which of the player's controls it is, and whether the
+# game has it set up. The keys come from the cabinet file, so a guide is only as good as what the player taught TPM.
+function Get-TpmGameControlGuide {
+    param([Parameter(Mandatory)]$Doc, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)]$Cabinet, $Verification = $null)
+    $bound = @{}
+    foreach ($button in @(Get-ButtonNodes $Doc)) {
+        $mapping = $button.SelectSingleNode('InputMapping')
+        if ($mapping -and -not $bound.ContainsKey($mapping.InnerText.Trim())) { $bound[$mapping.InnerText.Trim()] = (Test-ButtonIsBound $button) }
+    }
+    $profileControls = Get-TpmLedProfileControls -Doc $Doc
+    $deviceFor = @{ Trackball = 'PointerOrTrackball'; Spinner = 'Spinner'; Pedal = 'Wheel' }
+    $rows = New-Object System.Collections.Generic.List[object]
+    foreach ($control in @($profileControls.Controls)) {
+        $id = switch ($control.Kind) {
+            'Button' { [string]$control.Mapping }
+            'Direction' { [string]$control.Mapping }
+            'Start' { 'P{0}ButtonStart' -f $control.Player }
+            'Coin' { 'Coin{0}' -f $control.Player }
+            'Service' { 'Service' }
+            'Test' { 'Test' }
+            default { '' }
+        }
+        $yours = ''
+        if ($id) {
+            $key = Get-TpmCabinetKey -State $Cabinet -Control $id
+            $yours = $(if ($key) { 'Key: ' + $key } else { 'Not learned yet' })
+        } elseif ($deviceFor.ContainsKey([string]$control.Kind)) {
+            $answer = Get-TpmCabinetDeviceAnswer -State $Cabinet -Class $deviceFor[[string]$control.Kind]
+            $yours = $(if ($answer -eq $true) { 'Your ' + (@(Get-TpmDeviceQuestions | Where-Object { $_.Class -eq $deviceFor[[string]$control.Kind] })[0].Label -replace '^an? ', '') } elseif ($answer -eq $false) { 'You said you do not have one' } else { 'Not answered yet' })
+        }
+        $inGame = $(if ($bound.ContainsKey([string]$control.Mapping) -and $bound[[string]$control.Mapping]) { 'Set up' } else { 'Not set up yet' })
+        [void]$rows.Add([pscustomobject]@{ Cells = @([string]$control.Label, $yours, $inGame, [string]$control.Mapping) })
+    }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $needs = switch ([string]$profileControls.Family) {
+        'driving' { 'This game needs a steering wheel and pedals (or a pad that can steer).' }
+        'lightgun' { 'This game is aimed with a light gun (or a mouse or stick).' }
+        'trackball' { 'This game uses a trackball.' }
+        'analog' { 'This game uses analog controls such as a dial or throttle.' }
+        default { '' }
+    }
+    if ($needs) { [void]$lines.Add($needs) }
+    if ($rows.Count -eq 0) { [void]$lines.Add('This game does not list any controls TPM can read.') }
+    if ($null -ne $Verification) { foreach ($line in @(Get-TpmVerificationLines -Verification $Verification)) { [void]$lines.Add($line) } }
+    [void]$lines.Add('"Key" is what you taught TPM. "Set up" means the game has a setting for it. TPM has not pressed any of them for you.')
+    return [pscustomobject]@{ Title = ('Controls for ' + $Title); Lines = @($lines.ToArray()); Columns = @('What it does', 'Your control', 'In the game', 'TeknoParrot name'); Rows = @($rows.ToArray()) }
+}
+
+# The cabinet as a page: one row per control TPM knows a key for.
+function Get-TpmCabinetGuide {
+    param([Parameter(Mandatory)]$Cabinet)
+    $rows = New-Object System.Collections.Generic.List[object]
+    $labels = @{}
+    foreach ($control in @(Get-TpmCabinetControlList -Players 4 -Buttons 8)) { $labels[[string]$control.Control] = [string]$control.Label }
+    foreach ($property in @($Cabinet.Keys.PSObject.Properties)) {
+        [void]$rows.Add([pscustomobject]@{ Cells = @($(if ($labels.ContainsKey($property.Name)) { $labels[$property.Name] } else { $property.Name }), [string]$property.Value.Key) })
+    }
+    return [pscustomobject]@{ Title = 'My cabinet controls'; Lines = @(Get-TpmCabinetSummaryLines -State $Cabinet); Columns = @('Control', 'Key it sends'); Rows = @($rows.ToArray()) }
+}
+
+function ConvertTo-TpmGuideHtml {
+    param([Parameter(Mandatory)]$Guide)
+    $encode = { param($text) [System.Net.WebUtility]::HtmlEncode([string]$text) }
+    $html = New-Object System.Text.StringBuilder
+    [void]$html.AppendLine('<!DOCTYPE html>')
+    [void]$html.AppendLine('<html lang="en"><head><meta charset="utf-8"><title>' + (& $encode $Guide.Title) + '</title>')
+    [void]$html.AppendLine('<style>body{font-family:Segoe UI,Arial,sans-serif;margin:2em;color:#000}table{border-collapse:collapse;margin-top:1em}th,td{border:1px solid #444;padding:6px 12px;text-align:left}th{background:#e8e8e8}@media print{body{margin:0.5in}}</style></head><body>')
+    [void]$html.AppendLine('<h1>' + (& $encode $Guide.Title) + '</h1>')
+    foreach ($line in @($Guide.Lines)) { [void]$html.AppendLine('<p>' + (& $encode $line) + '</p>') }
+    if (@($Guide.Rows).Count -gt 0) {
+        [void]$html.AppendLine('<table><tr>' + ((@($Guide.Columns) | ForEach-Object { '<th>' + (& $encode $_) + '</th>' }) -join '') + '</tr>')
+        foreach ($row in @($Guide.Rows)) { [void]$html.AppendLine('<tr>' + ((@($row.Cells) | ForEach-Object { '<td>' + (& $encode $_) + '</td>' }) -join '') + '</tr>') }
+        [void]$html.AppendLine('</table>')
+    }
+    [void]$html.AppendLine('</body></html>')
+    return $html.ToString()
+}
+
+function Write-TpmGuideOnScreen {
+    param([Parameter(Mandatory)]$Guide)
+    Write-Host ''
+    Write-TpmText -Text $Guide.Title -Color Cyan
+    foreach ($line in @($Guide.Lines)) { Write-TpmText -Text $line -Color DarkCyan }
+    foreach ($row in @($Guide.Rows)) {
+        $cells = @($row.Cells)
+        Write-TpmText -Text ('{0}: {1}' -f $cells[0], (($cells | Select-Object -Skip 1 | Where-Object { $_ }) -join '  |  ')) -HangingIndent 4
+    }
+}
+
+# Saves a guide as a web page in the Manager's own Reports\Control Guides folder and returns the path. Only a page TPM made
+# earlier for the same name is replaced.
+function Save-TpmControlGuideFile {
+    param([Parameter(Mandatory)]$Guide, [Parameter(Mandatory)][string]$FileName, [string]$GuideRoot = '')
+    $root = $(if ($GuideRoot) { $GuideRoot }
+              elseif ($script:TpmOwnedLayout -and -not [string]::IsNullOrWhiteSpace([string]$script:TpmOwnedLayout.Reports)) { Join-Path ([string]$script:TpmOwnedLayout.Reports) 'Control Guides' }
+              else { Join-Path $PSScriptRoot 'Control Guides' })
+    [void][System.IO.Directory]::CreateDirectory($root)
+    $path = Join-Path $root $FileName
+    Write-TpmAtomicTextFile -Path $path -Text (ConvertTo-TpmGuideHtml -Guide $Guide) -Operation 'control guide write'
+    return $path
+}
+
+# Shows a guide, then (one Y/N) saves it as a page and opens it so it can be printed.
+function Invoke-TpmGuideOffer {
+    param([Parameter(Mandatory)]$Guide, [Parameter(Mandatory)][string]$FileName)
+    Write-TpmGuideOnScreen -Guide $Guide
+    if ((Read-TpmYesNo -Prompt '  Save this as a page you can print, and open it? (Y/N)' -Default 'N') -ne 'Y') { return }
+    try {
+        $path = Save-TpmControlGuideFile -Guide $Guide -FileName $FileName
+        Write-Log ('Controls: saved the guide {0}.' -f $path)
+        Write-TpmText -Text ('Saved: ' + $path) -Color Green
+        try { Start-Process -FilePath $path -ErrorAction Stop | Out-Null } catch { Write-TpmText -Text 'Windows could not open it. Open that file yourself to print it.' -Color Yellow }
+    } catch {
+        Write-Log ('Controls: the guide could not be saved: {0}' -f $_.Exception.Message)
+        Write-TpmText -Text 'The page could not be saved.' -Color Yellow
+    }
+}
+
+# Asks for part of a game name and returns the chosen registered game ({ Code; Title; Doc }), or $null to go back.
+function Read-TpmControlsGamePick {
+    param([Parameter(Mandatory)][string]$UserProfilesDir)
+    $typed = [string](Read-HostSafe '  Type part of the game name (or press Enter to go back)')
+    $needle = ([regex]::Replace($typed, '\s+', '')).ToLowerInvariant()
+    if ($needle.Length -lt 2) { return $null }
+    $found = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Game search' -EnumerationErrorAction SilentlyContinue | Where-Object { $_.BaseName.ToLowerInvariant().Contains($needle) } | Sort-Object BaseName | Select-Object -First 8)
+    if ($found.Count -eq 0) { Write-TpmText -Text 'No game matched that. Try fewer letters.' -Color Yellow; return $null }
+    $games = @($found | ForEach-Object {
+        try { $doc = Read-Xml $_.FullName; [pscustomobject]@{ Code = $_.BaseName; Doc = $doc; Title = (Get-TpmProfileFriendlyTitle -Doc $doc -BaseName $_.BaseName) } } catch { $null }
+    } | Where-Object { $_ })
+    if ($games.Count -eq 0) { Write-TpmText -Text 'The settings file for that game could not be read.' -Color Yellow; return $null }
+    $index = Read-TpmNumberedListChoice -Rows @($games | ForEach-Object { $_.Title }) -Prompt '  Which game? (number, or B to go back)' -Heading 'These games matched:'
+    if ($index -lt 0) { return $null }
+    return $games[$index]
+}
+
+# "I played it": the one place a player tells TPM a game's controls worked, or that a setup step is done.
+function Invoke-TpmGameCheckScreen {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [string]$StateRoot = '')
+    Write-Host ''
+    Write-TpmText -Text 'Tell TPM how a game played' -Color Cyan
+    Write-TpmText -Text 'TPM cannot press your buttons. Only you can say a game worked, and TPM keeps that until the game''s controls change.' -Color DarkCyan
+    $game = Read-TpmControlsGamePick -UserProfilesDir $UserProfilesDir
+    if ($null -eq $game) { return }
+    $state = Get-TpmControlVerificationState -Code $game.Code -Doc $game.Doc -StateRoot $StateRoot
+    Write-Host ''
+    Write-TpmText -Text $game.Title -Color Cyan
+    foreach ($line in @(Get-TpmVerificationLines -Verification $state)) { Write-TpmText -Text $line -Color DarkCyan }
+    Write-Host ''
+    Write-TpmText -Text 'W = It worked: I played it and every control I tried reacted correctly' -Indent 4
+    Write-TpmText -Text 'N = Something did not work (TPM forgets that it worked)' -Indent 4
+    Write-TpmText -Text 'S = Record a setup step: the first-run Test or Service menu, or calibration' -Indent 4
+    Write-TpmText -Text 'B = Back' -Indent 4
+    $choice = Read-TpmChoice -Prompt '  Choose W, N, S or B' -Choices @('W', 'N', 'S', 'B') -Default 'B'
+    try {
+        switch ($choice) {
+            'W' {
+                Save-TpmGameVerification -Code $game.Code -Title $game.Title -Doc $game.Doc -StateRoot $StateRoot
+                Write-Log ('Controls: {0}: the player recorded that the controls worked (profile revision {1}).' -f $game.Code, (Get-TpmControlProfileIdentity -Doc $game.Doc).Revision)
+                $after = Get-TpmControlVerificationState -Code $game.Code -Doc $game.Doc -StateRoot $StateRoot
+                if (@($after.Outstanding).Count -gt 0) {
+                    Write-TpmText -Text 'Saved. TPM still does not call this game verified, because a setup step is left:' -Color Yellow
+                    foreach ($line in @(Get-TpmVerificationLines -Verification $after | Where-Object { $_ -like 'Still to do*' })) { Write-TpmText -Text $line -Color Yellow -Indent 4 }
+                } else {
+                    Write-TpmText -Text 'Saved. TPM counts this game''s controls as verified until you change them.' -Color Green
+                }
+            }
+            'N' {
+                if ($state.Status -in @('Current', 'Stale')) {
+                    Remove-TpmGameVerification -Code $game.Code -StateRoot $StateRoot
+                    Write-Log ('Controls: {0}: the player revoked the verification.' -f $game.Code)
+                    Write-TpmText -Text 'TPM forgot that this game worked. Open TeknoParrot to check its controls.' -Color Green
+                } else {
+                    Write-TpmText -Text 'TPM did not count this game as verified, so nothing changed. Open TeknoParrot to check its controls.' -Color Green
+                }
+            }
+            'S' {
+                Write-TpmText -Text '1 = The first-run Test or Service menu step' -Indent 4
+                Write-TpmText -Text '2 = Calibration (wheel, gun or other analog controls)' -Indent 4
+                $step = $(if ((Read-TpmChoice -Prompt '  Which step? (1 or 2)' -Choices @('1', '2') -Default '1') -eq '1') { 'FirstRun' } else { 'Calibration' })
+                Write-TpmText -Text 'D = I did it' -Indent 4
+                Write-TpmText -Text 'N = This game does not need it' -Indent 4
+                Write-TpmText -Text 'R = It is still to do' -Indent 4
+                $answer = Read-TpmChoice -Prompt '  Choose D, N or R' -Choices @('D', 'N', 'R') -Default 'D'
+                $new = @{ D = 'Done'; N = 'NotNeeded'; R = 'Needed' }[$answer]
+                Set-TpmGameSetupStep -Code $game.Code -Step $step -State $new -Doc $game.Doc -StateRoot $StateRoot
+                Write-Log ('Controls: {0}: {1} marked {2}.' -f $game.Code, $step, $new)
+                Write-TpmText -Text 'Saved.' -Color Green
+            }
+        }
+    } catch {
+        Write-Log ('Controls: the answer could not be saved: {0}' -f $_.Exception.Message)
+        Write-TpmText -Text 'Your answer could not be saved, so nothing changed.' -Color Yellow
+    }
+}
+
+# The My controls screen: what TPM knows about the player's controls, and the four things to do about it.
+function Invoke-TpmControlsScreen {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [string]$StateRoot = '')
+    while ($true) {
+        $cabinet = Read-TpmCabinetState -StateRoot $StateRoot
+        Write-Host ''
+        Write-TpmText -Text 'My controls' -Color Cyan
+        foreach ($line in @(Get-TpmCabinetSummaryLines -State $cabinet)) { Write-TpmText -Text $line -Color DarkCyan }
+        if ($cabinet.FileStatus -eq 'Unreadable') { Write-TpmText -Text 'TPM could not read its saved answers. A copy is kept before anything new is saved.' -Color Yellow }
+        Write-Host ''
+        Write-TpmText -Text '1 = Tell TPM which controls I have' -Indent 4
+        Write-TpmText -Text '2 = Learn my arcade buttons (I press each one)' -Indent 4
+        Write-TpmText -Text '3 = Show or print the controls of one game' -Indent 4
+        Write-TpmText -Text '4 = Tell TPM how a game played' -Indent 4
+        Write-TpmText -Text '5 = Show or print my cabinet controls' -Indent 4
+        Write-TpmText -Text 'B = Back' -Indent 4
+        switch (Read-TpmChoice -Prompt '  Choose 1, 2, 3, 4, 5 or B' -Choices @('1', '2', '3', '4', '5', 'B') -Default 'B') {
+            '1' { Invoke-DeviceSurvey -StateRoot $StateRoot }
+            '2' { Invoke-TpmButtonLearning -StateRoot $StateRoot }
+            '3' {
+                $game = Read-TpmControlsGamePick -UserProfilesDir $UserProfilesDir
+                if ($game) {
+                    $verification = Get-TpmControlVerificationState -Code $game.Code -Doc $game.Doc -StateRoot $StateRoot
+                    Invoke-TpmGuideOffer -Guide (Get-TpmGameControlGuide -Doc $game.Doc -Title $game.Title -Cabinet $cabinet -Verification $verification) -FileName ($game.Code + '-controls.html')
+                }
+            }
+            '4' { Invoke-TpmGameCheckScreen -UserProfilesDir $UserProfilesDir -StateRoot $StateRoot }
+            '5' { Invoke-TpmGuideOffer -Guide (Get-TpmCabinetGuide -Cabinet $cabinet) -FileName 'my-cabinet-controls.html' }
+            default { return }
+        }
+    }
 }
 
 # =============================================================================
@@ -52447,12 +53149,15 @@ function Get-ControlReadinessControlsState {
 
 # Classifies launch-observation state for one profile code. TPM does not
 # launch games itself and has no launch-outcome log to read (TeknoParrotUI
-# and BudgieLoader own the launch path), so this dimension is always
-# 'NotTestedByTpm' today. 'ObservedSuccess'/'ObservedFailure' remain as
-# named states for a future real evidence source -- never synthesize them
+# and BudgieLoader own the launch path), so this dimension is 'NotTestedByTpm'
+# unless the player told TPM they played the game and its controls worked
+# (Get-TpmControlVerificationState says that record is still Current). Then it
+# is 'ObservedSuccess', observed by the player. 'ObservedFailure' stays a
+# named state for a future real evidence source -- never synthesize either one
 # from registration, controls state, or any other proxy.
 function Get-ControlReadinessLaunchState {
-    param([string]$Code)
+    param([string]$Code, [string]$VerificationStatus = '')
+    if ($VerificationStatus -eq 'Current') { return 'ObservedSuccess' }
     return 'NotTestedByTpm'
 }
 
@@ -52496,26 +53201,38 @@ function Get-ControlReadinessAssessment {
     param(
         [Parameter(Mandatory)][string]$Code,
         [Parameter(Mandatory)][string]$UserProfilesDir,
-        [string]$GameProfilesDir = ''
+        [string]$GameProfilesDir = '',
+        [string]$StateRoot = ''
     )
 
     $registration = Get-ControlReadinessRegistrationState -Code $Code -UserProfilesDir $UserProfilesDir
 
     $doc = Read-ControlReadinessProfileDocument -Code $Code -UserProfilesDir $UserProfilesDir -GameProfilesDir $GameProfilesDir
 
-    return [pscustomobject]@{
-        Code         = $Code
-        Registration = $registration
-        Controls     = Get-ControlReadinessControlsState $doc $Code
-        Launch       = Get-ControlReadinessLaunchState -Code $Code
+    # Verified needs the player's own record of a play test that still matches the game's controls (issue #307) and no
+    # first-run or calibration step left to do. A reviewed contract that says controls are Missing or Unsupported is not overridden.
+    $verification = Get-TpmControlVerificationState -Code $Code -Doc $doc -StateRoot $StateRoot
+    $controls = Get-ControlReadinessControlsState $doc $Code
+    $earned = ($verification.Status -eq 'Current' -and @($verification.Outstanding).Count -eq 0 -and $controls -in @('NotVerified', 'Unknown'))
+    if ($earned) { $controls = 'Verified' }
+
+    $row = [pscustomobject]@{
+        Code               = $Code
+        Registration       = $registration
+        Controls           = $controls
+        Launch             = Get-ControlReadinessLaunchState -Code $Code -VerificationStatus $verification.Status
+        VerificationStatus = $verification.Status
+        SetupOutstanding   = @($verification.Outstanding)
     }
+    if ($earned) { Add-Member -InputObject $row -NotePropertyName VerificationEvidence -NotePropertyValue $verification.Evidence }
+    return $row
 }
 
 # Returns $true only when $Assessment carries a structured VerificationEvidence
 # record that can actually justify Controls = 'Verified'. Get-ControlReadinessAssessment
-# itself never sets Controls to 'Verified' -- this engine has no evidence
-# source that could earn it (see Get-ControlReadinessControlsState) -- so the
-# only way 'Verified' reaches the formatter today is a caller constructing an
+# sets Controls to 'Verified' only from the player's own saved play-test record
+# (Get-TpmControlVerificationState) and attaches that record as VerificationEvidence,
+# so nothing else reaches 'Verified'. The same gap is closed for a caller constructing an
 # assessment object by hand. Issue #255 is explicit that registration, wizard
 # completion, a selected Input API, or a profile's mere existence must never
 # imply Verified; this closes the same gap for any externally-built
@@ -52712,6 +53429,10 @@ function Get-OnboardingHandoffSummaryLines {
         $lines += ''
         $lines += 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
     }
+    $outstanding = @()
+    if ($Assessment.PSObject.Properties['SetupOutstanding']) { $outstanding = @($Assessment.SetupOutstanding) }
+    if ($outstanding -contains 'Calibration') { $lines += 'Calibrate the wheel, gun or other analog controls for this game before treating it as ready.' }
+    if ($outstanding -contains 'FirstRun') { $lines += 'Do the first-run Test or Service menu step for this game before treating it as ready.' }
 
     return $lines
 }
@@ -56589,7 +57310,14 @@ $mode = $null
             Write-Host ''
             Write-TpmText -Text '1 = copy controls to games of the same type' -Indent 4
             Write-TpmText -Text '2 = set up one game for an Xbox controller' -Indent 4
-            if ((Read-TpmChoice -Prompt '  Choose 1 or 2' -Choices @('1', '2') -Default '1') -eq '2') {
+            Write-TpmText -Text '3 = my controls: learn my buttons, print a control guide, tell TPM a game worked' -Indent 4
+            $controlsChoice = Read-TpmChoice -Prompt '  Choose 1, 2 or 3' -Choices @('1', '2', '3') -Default '1'
+            if ($controlsChoice -eq '3') {
+                Invoke-TpmControlsScreen -UserProfilesDir $userProfilesDir
+                [void](Read-HostSafe "  Press Enter to return to menu")
+                continue
+            }
+            if ($controlsChoice -eq '2') {
                 Invoke-TpmXboxStarterScreen -UserProfilesDir $userProfilesDir
                 [void](Read-HostSafe "  Press Enter to return to menu")
                 continue
