@@ -42,7 +42,7 @@ BeforeAll {
         'Register-GamesLegacy',
         'Backfill-SecondaryExecutablePath',
         'Confirm-TpmRegistrationSafetyBackup',
-        'Set-SecondaryExecutablePath',
+        'Set-SecondaryExecutablePath', 'Get-TpmMissingGameSetFiles', 'Get-TpmGameFileSet', 'Get-ExeAlternatives',
         'Test-TpmGameMutationPath',
         'Add-TpmUnavailableDriveGame',
         'Get-TpmTransactionField',

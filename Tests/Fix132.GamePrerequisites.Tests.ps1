@@ -182,9 +182,9 @@ Describe 'FIX132 the prerequisite table' {
     }
 
     It 'is complete and well formed: every entry has a plain label, safe relative folders, plain file names and an archive pattern that matches its archive' {
-        # Mutation: add an entry without a Label, with an absolute folder, a path in a file name, or a broken pattern -> this fails.
+        # Mutation: add a startup-file entry without a Label, with an absolute folder, a path in a file name, or a broken pattern -> this fails. (Entries that only name an emulator folder are checked in Fix387.GameTypes.Tests.ps1.)
         $archiveNames = @{ Pcsx2x6 = '[EMU] PCSX2x6 Emulator BIOS Files [TP]'; cxbxr = '[EMU] CxbxR BIOS Firmware for Sega Chihiro [TP]'; RPCS3 = '[EMU] Sony PlayStation 3 Firmware [TP]'; Play = '[EMU] Play! working arcadedefs for Namco System 246 [TP]' }
-        foreach ($type in $script:F132ProductionTable.Keys) {
+        foreach ($type in @($script:F132ProductionTable.Keys | Where-Object { Test-TpmPrerequisiteNeedsFiles -Requirement $script:F132ProductionTable[$_] })) {
             $entry = $script:F132ProductionTable[$type]
             [string]$entry['Label'] | Should -Not -BeNullOrEmpty -Because $type
             $specs = @(Get-TpmPrerequisiteFileSpecs -Requirement $entry)
