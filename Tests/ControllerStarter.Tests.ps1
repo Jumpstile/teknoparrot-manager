@@ -120,7 +120,10 @@ Describe 'Controller layout choice' {
     It 'a layout file that a person edited into a duplicate is not used' {
         Save-TpmBaseline -StateDir $script:State -Baseline (New-TpmBaseline -Preset 'Xbox')
         $path = Get-TpmBaselinePath -StateDir $script:State
-        [System.IO.File]::WriteAllText($path, ([System.IO.File]::ReadAllText($path) -replace '"Service1": ""', '"Service1": "A"'))
+        $before = [System.IO.File]::ReadAllText($path)
+        $after = $before -replace '"Service1":\s*""', '"Service1": "A"'
+        $after | Should -Not -BeExactly $before   # the edit must have happened, whatever the JSON spacing of this PowerShell
+        [System.IO.File]::WriteAllText($path, $after)
         Read-TpmBaseline -StateDir $script:State | Should -BeNullOrEmpty
     }
 
