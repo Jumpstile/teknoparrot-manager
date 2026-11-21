@@ -519,28 +519,28 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
         Get-VbtUpdateInstallCallCount | Should -Be 0 -Because "declining after viewing notes must never reach the install step -- confirmation required before any destructive action"
     }
 
-    It "Accept, then confirm: reaches the install step exactly once (backup begins there, mocked)" {
-        $answers = New-ScriptedAnswerQueue -Answers @('Y', 'Y')
+    It "One Y installs: reaches the install step exactly once with a single answer (backup begins there, mocked)" {
+        $answers = New-ScriptedAnswerQueue -Answers @('Y')
         Mock Read-Host { Get-NextScriptedAnswer -Queue $answers }
 
         $fixturePath = Join-Path $TestDrive 'startup-accept-confirm.ps1'
         Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
 
         Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null
-        Get-VbtUpdateInstallCallCount | Should -Be 1 -Because "accepting and confirming must reach the backup-first install step exactly once"
+        Get-VbtUpdateInstallCallCount | Should -Be 1 -Because "one Y must start the backup-first install step exactly once"
     }
 
-    It "Accept, then decline the second confirmation: no install is attempted (double confirmation required)" {
-        $answers = New-ScriptedAnswerQueue -Answers @('Y', 'N')
+    It "One Y installs without a second question: no confirmation prompt follows the first Y" {
+        # The queue throws when asked for a second answer, so a repeated "Proceed?" question would fail the run.
+        $answers = New-ScriptedAnswerQueue -Answers @('Y')
         Mock Read-Host { Get-NextScriptedAnswer -Queue $answers }
 
-        $fixturePath = Join-Path $TestDrive 'startup-accept-then-decline.ps1'
+        $fixturePath = Join-Path $TestDrive 'startup-accept-single-question.ps1'
         Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
-        $originalContent = Get-Content -LiteralPath $fixturePath -Raw
 
-        Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null
-        Get-VbtUpdateInstallCallCount | Should -Be 0 -Because "the first Y only offers the update -- a second explicit confirmation is required before anything destructive happens"
-        (Get-Content -LiteralPath $fixturePath -Raw) | Should -Be $originalContent
+        { Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null } | Should -Not -Throw
+        $answers.Index | Should -Be 1 -Because "the user answers the update question once and is never asked to approve the same update again"
+        Get-VbtUpdateInstallCallCount | Should -Be 1
     }
 
     It "Empty input (pressing Enter) is treated as a safe decline, not an error or a crash" {
@@ -553,7 +553,7 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
     }
 
     It "Mixed-case 'y' is accepted the same as 'Y' (case-insensitive yes)" {
-        $answers = New-ScriptedAnswerQueue -Answers @('y', 'y')
+        $answers = New-ScriptedAnswerQueue -Answers @('y')
         Mock Read-Host { Get-NextScriptedAnswer -Queue $answers }
         $fixturePath = Join-Path $TestDrive 'startup-lowercase-yes.ps1'
         Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
@@ -563,7 +563,7 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
     }
 
     It "Whitespace-padded input ('  Y  ') is trimmed and accepted" {
-        $answers = New-ScriptedAnswerQueue -Answers @('  Y  ', '  Y  ')
+        $answers = New-ScriptedAnswerQueue -Answers @('  Y  ')
         Mock Read-Host { Get-NextScriptedAnswer -Queue $answers }
         $fixturePath = Join-Path $TestDrive 'startup-padded-yes.ps1'
         Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii

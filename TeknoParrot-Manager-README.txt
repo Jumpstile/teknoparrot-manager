@@ -3413,11 +3413,10 @@
     The prompt is Press A, S, B or D (the letters match the keys shown; for
     example Press A, S, M, B or D). The default is B.
 
-      A    Asks: Replace the old ReShade files in (that game or those
-           games)? You will choose the look again. A copy of the old files
-           is saved, so you can undo it. Press Y to replace them, or N to
-           leave them. (Y/N). Press Y to replace. N says: Nothing was
-           replaced. No files were changed.
+      A    Goes straight into ReShade setup to replace the old ReShade
+           files of those games. There is no second question. You choose
+           the look again. A copy of the old files is saved first, so you
+           can undo it.
 
       S    Goes back into ReShade setup so you can choose games one by one.
 
@@ -4180,7 +4179,9 @@
     It installs or updates BepInEx for the games you choose.
     Nothing happens until you approve it.
 
-    The prompt is [Y] Install/update, [B] Back, [N] Cancel. There is no
+    The prompt is [Y] Install/update, [B] Back, [N] Cancel. It is skipped
+    when the only games are ones you picked by number from the "do not
+    have BepInEx" list, because picking them was your answer. There is no
     repair-reset choice. After a successful or no-change run, the screen
     waits for one Enter.
 

@@ -203,15 +203,15 @@ Describe "Virtual Beta Tester: restore backup safe cancel/decline (issue #88 A2 
         Should -Invoke Save-Config -Times 0 -Exactly
     }
 
-    It "declining the YES confirmation cancels with zero changes -- current content is never deleted before confirmation" {
+    It "declining the typed confirmation cancels with zero changes -- current content is never deleted before confirmation" {
         $userProfilesDir = New-RestoreFixture -Name 'restore-decline-confirm'
         Set-Content -LiteralPath (Join-Path $userProfilesDir 'CURRENT.xml') -Value '<GameProfile>current</GameProfile>' -Encoding ascii
         $backupDir = Join-Path $userProfilesDir 'FullBackup\PropagateControls_2026-07-01_12-00-00'
         New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $backupDir 'ALIENS.xml') -Value '<GameProfile>backed-up</GameProfile>' -Encoding ascii
         Mock Read-Host { return "1" } -ParameterFilter { $Prompt -like "*Enter number to restore*" }
-        Mock Read-Host { return "no" } -ParameterFilter { $Prompt -like "*Type YES to confirm*" }
-        Mock Read-Host { return "UNVERIFIED" } -ParameterFilter { $Prompt -like "*Type UNVERIFIED*" }
+        Mock Read-Host { return "no" } -ParameterFilter { $Prompt -like "*Type UNVERIFIED*" }
+        Mock Read-Host { throw 'An unchecked copy is approved once; it must not ask Type YES to confirm as well.' } -ParameterFilter { $Prompt -like "*Type YES to confirm*" }
         Mock Save-Config { throw 'Restore must not write configuration.' }
         $result = Invoke-RestoreBackup -userProfilesDir $userProfilesDir
         $result.PSTypeNames | Should -Contain 'TPM.TransactionResult.v1'
@@ -255,8 +255,7 @@ Describe "Virtual Beta Tester: restore backup safe cancel/decline (issue #88 A2 
         @{ Name = 'invalid, then valid number, then declined confirmation'; Reason = 'USER_DECLINED'; Invalid = 1; Steps = @(
             @{ PromptLike = '*Enter number to restore*'; Response = '99' }
             @{ PromptLike = '*Enter number to restore*'; Response = '1' }
-            @{ PromptLike = '*Type UNVERIFIED*'; Response = 'UNVERIFIED' }
-            @{ PromptLike = '*Type YES to confirm*'; Response = 'no' }
+            @{ PromptLike = '*Type UNVERIFIED*'; Response = 'no' }
         ) }
         @{ Name = 'valid number, then declined unverified-backup confirmation'; Reason = 'USER_DECLINED'; Invalid = 0; Steps = @(
             @{ PromptLike = '*Enter number to restore*'; Response = '1' }
@@ -292,17 +291,15 @@ Describe "Virtual Beta Tester: restore backup safe cancel/decline (issue #88 A2 
         (Test-Path -LiteralPath $fixture.RestoredPath) | Should -BeFalse
     }
 
-    It "restores only after a valid selection and an explicit YES, with no change at either prompt: <Name>" -ForEach @(
-        @{ Name = 'valid number, then YES'; Invalid = 0; Steps = @(
+    It "restores only after a valid selection and the one typed confirmation (UNVERIFIED for a copy that cannot be checked), with no change at either prompt and no second question: <Name>" -ForEach @(
+        @{ Name = 'valid number, then UNVERIFIED'; Invalid = 0; Steps = @(
             @{ PromptLike = '*Enter number to restore*'; Response = '1' }
             @{ PromptLike = '*Type UNVERIFIED*'; Response = 'UNVERIFIED' }
-            @{ PromptLike = '*Type YES to confirm*'; Response = 'YES' }
         ) }
-        @{ Name = 'invalid, then valid number, then YES'; Invalid = 1; Steps = @(
+        @{ Name = 'invalid, then valid number, then UNVERIFIED'; Invalid = 1; Steps = @(
             @{ PromptLike = '*Enter number to restore*'; Response = '99' }
             @{ PromptLike = '*Enter number to restore*'; Response = '1' }
             @{ PromptLike = '*Type UNVERIFIED*'; Response = 'UNVERIFIED' }
-            @{ PromptLike = '*Type YES to confirm*'; Response = 'YES' }
         ) }
     ) {
         $fixture = New-IsolatedRestoreFixture -Name 'restore-scripted-confirm'

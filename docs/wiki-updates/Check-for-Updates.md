@@ -65,7 +65,7 @@ N = Remind me later
 V = View release notes
 ```
 
-`Y` shows the list of steps and asks `Proceed? (Y/N)`. `N` keeps this version and goes on. `V` shows the release notes and asks again.
+`Y` starts the update right away. The list of steps is shown above the choices, and there is no second question. `N` keeps this version and goes on. `V` shows the release notes and asks again.
 
 To turn the start check off, set `CheckForUpdatesOnStartup` to `false` in `TeknoParrot-Manager.config.json`. The file is in `<your TeknoParrot folder>\TeknoParrotManager\State\`. The start check never runs in an unattended run.
 

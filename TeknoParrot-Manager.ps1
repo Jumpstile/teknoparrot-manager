@@ -14474,7 +14474,7 @@ function Show-TpmReShadeSetupResult {
         [void]$undoLines.Add('Where: ReShade > Undo ReShade changes')
         [void]$blocks.Add(@{ Heading = 'Undo'; Lines = $undoLines.ToArray() })
     }
-    $detailsNote = if ($reShadeResult.Protected -gt 0) { 'Press A to replace protected ReShade files. TeknoParrot Manager asks you to confirm before it changes anything.' } else { '' }
+    $detailsNote = if ($reShadeResult.Protected -gt 0) { 'Press A to replace protected ReShade files. TeknoParrot Manager saves a copy of the old files first, so you can undo it.' } else { '' }
     Write-Log ('ReShade result: changed={0} protected={1} unsafe={2} missing={3} unsupported={4} kept={5} failed={6} unverified={7} -- {8}' -f $reShadeResult.Deployed, $reShadeResult.Protected, $reShadeResult.Unsafe, $missingTotal, $reShadeResult.Unsupported, $reShadeResult.KeptPrevious, $reShadeResult.ErrorCount, $reShadeResult.UnverifiedCount, $summaryText)
     foreach ($block in $blocks) {
         foreach ($blockLine in @($block.Lines)) { Write-Log ('ReShade result detail [{0}]: {1}' -f $block.Heading, $blockLine) }
@@ -14545,15 +14545,10 @@ function Show-TpmReShadeSetupResult {
                 $screen.PendingApplyMode = 'ReShadeSetup'
                 $screen.PendingReShadeAction = 'Select'
             } elseif ($choice -eq 'A') {
-                $adoptConfirm = Read-TpmYesNo -Prompt ("  Replace the old ReShade files in {0}? You will choose the look again. A copy of the old files is saved, so you can undo it. Press Y to replace them, or N to leave them. (Y/N)" -f $protectedWords) -Default 'N'
-                if ($adoptConfirm -eq 'Y') {
-                    $screen.PendingApplyMode = 'ReShadeSetup'
-                    $screen.PendingReShadeAction = 'Adopt'
-                } else {
-                    Write-Host '  Nothing was replaced. No files were changed.' -ForegroundColor DarkGray
-                }
+                $screen.PendingApplyMode = 'ReShadeSetup'
+                $screen.PendingReShadeAction = 'Adopt'
             }
-        } while ($choice -eq 'D' -or ($choice -eq 'A' -and $adoptConfirm -ne 'Y'))
+        } while ($choice -eq 'D')
         $screen.Choice = $choice
         return $screen
     }
@@ -15890,7 +15885,7 @@ function Get-TpmReShadeUndoChangedKindLines {
 }
 
 # A game that changed after its receipt. Says which kinds of file changed and never touches them. When other files of the game can still
-# be put back, U puts back only those (after a typed YES); D shows the changed files; C or Enter leaves everything as it is.
+# be put back, U puts back only those (no second question: pressing U is the approval); D shows the changed files; C or Enter leaves everything as it is.
 function Invoke-TpmReShadeUndoChangedChoice {
     param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)]$Check, [string[]]$ProtectedRoots = @())
     $canPart = (@($Check.ToRestore).Count -gt 0)
@@ -15913,7 +15908,6 @@ function Invoke-TpmReShadeUndoChangedChoice {
         }
     } while ($choice -ceq 'D')
     if ($choice -cne 'U') { return }
-    if (-not (Confirm-TpmReShadeUndoWord -Word 'YES' -Prompt 'Type YES to undo only those files' -LogText ([string]$Entry.GameId))) { return }
     Write-TpmReShadeUndoOutcome -Results @(Invoke-TpmReShadeUndo -Entry $Entry -RestoreUnchanged -ProtectedRoots $ProtectedRoots)
 }
 
@@ -34024,6 +34018,7 @@ function Invoke-BepInExUpdateCheckLegacy {
     # Only a few games need BepInEx. A game that has none is never offered in the bulk question below; the user has to pick it.
     $offeredCount = $outdated.Count
     $freshGames = @($outdated | Where-Object { [string]$_.Installed -eq 'Not installed' })
+    $bulkOfferedCount = $outdated.Count - $freshGames.Count
     if ($freshGames.Count -gt 0) {
         foreach ($freshGame in $freshGames) { [void]$outdated.Remove($freshGame) }
         Write-Host ("  {0} game(s) do not have BepInEx. Only a few games need it, so they are left alone unless you pick them." -f $freshGames.Count) -ForegroundColor Cyan
@@ -34046,7 +34041,8 @@ function Invoke-BepInExUpdateCheckLegacy {
     Write-Host ("  Selected: {0} of {1} games to install or update BepInEx:" -f $outdated.Count, $offeredCount) -ForegroundColor Cyan
     foreach ($o in @($outdated | Sort-Object Label)) { Write-Host ("    - {0}: {1} -> {2} ({3})" -f $o.Label, $o.Installed, $o.Latest.Version, $o.Architecture) -ForegroundColor DarkGray }
     # FIX110 (S-10): repair-reset is not offered; it was always refused after the download and staging.
-    $installChoice = Read-TpmChoice -Prompt ("  [Y] Install/update  [B] Back  [N] Cancel  -- {0} game(s)" -f $outdated.Count) -Choices @('Y', 'B', 'N') -Default 'B'
+    # Games the user picked by number were already approved by that pick; the question is asked only when out-of-date games were offered in bulk.
+    $installChoice = if ($bulkOfferedCount -gt 0) { Read-TpmChoice -Prompt ("  [Y] Install/update  [B] Back  [N] Cancel  -- {0} game(s)" -f $outdated.Count) -Choices @('Y', 'B', 'N') -Default 'B' } else { 'Y' }
     if ($installChoice -ne 'Y') {
         Write-Log 'BepInEx update check: user selected Back or canceled installation/update.'
         return [pscustomobject]@{ Succeeded = $false; Reason = 'DECLINED'; Errors=$errors; MissingDevice=$missingDevice; MissingPath=$missingPath; Protected=$protected; Skipped=$skippedItems.Count; UnsupportedArchitecture=$unsupportedArchitecture; UnknownArchitecture=$unknownArchitecture; PathReasonCounts=$pathReasonCounts; SelectedItems = @($selectedItems.ToArray()); ChangedItems = @(); CompletedItems=@($upToDateItems.ToArray()); FailedItems = @($failedItems.ToArray()); SkippedItems = @($skippedItems.ToArray()); UnattemptedItems=@($outdated | ForEach-Object { [string]$_.Code }); FailureRecords = @($failureRecords.ToArray()); BatchStopped = $false }
@@ -35708,7 +35704,9 @@ function Invoke-StartupUpdateCheck {
     }
     Write-Log "StartupUpdateCheck: update available (v$ScriptVersion -> $($release.TagName))."
     Write-Host ""
-    Write-Host "  Y = Update now (starts the update here; you confirm once more first)" -ForegroundColor Cyan
+    Write-ManagerUpdatePlan
+    Write-Host ""
+    Write-Host "  Y = Update now (starts right away)" -ForegroundColor Cyan
     Write-Host "  N = Remind me later (keep this version for now)" -ForegroundColor Cyan
     Write-Host "  V = View release notes (see what changed, then choose again)" -ForegroundColor Cyan
     while ($true) {
@@ -35720,20 +35718,6 @@ function Invoke-StartupUpdateCheck {
             continue
         }
         if ($ans -eq 'Y') {
-            Write-Host ""
-            Write-ManagerUpdatePlan
-            Write-Host ""
-            $confirm = Read-TpmYesNo -Prompt '  Proceed? (Y/N)'
-            if ($confirm -ne 'Y') {
-                Write-Host '  Skipped -- no changes made.' -ForegroundColor DarkGray
-                return New-TpmManagerUpdateTransactionResult `
-                    -Outcome 'NO_OP' -ProductState 'UNCHANGED' `
-                    -Summary 'No update was installed. Your current TeknoParrot Manager is unchanged.' `
-                    -PreState $preState -FinalAttempted:$true -FinalPassed:$true `
-                    -FinalChecks @('The current manager script remained unchanged after the declined startup update.') `
-                    -ReasonCode 'UPDATE_DECLINED' `
-                    -TechnicalDetails ([pscustomobject]@{ Stage='StartupConfirmation'; ReleaseTag=$release.TagName })
-            }
             return Invoke-TpmProgressGroup -Title 'Manager update install' -Action { Invoke-ManagerUpdateInstall -ScriptPath $ScriptPath -Release $release }
         }
         if ($ans -eq 'N') {
@@ -43261,6 +43245,7 @@ function Invoke-RestoreBackupLegacy {
         Write-Host ''
         Write-TpmResetRestoreText -Text 'This copy cannot be checked. TeknoParrot Manager cannot be sure it is complete.' -Color Yellow
         Write-TpmResetRestoreText -Text 'Games that are missing from it will be removed.' -Color Yellow
+        if (-not $AlreadyConfirmed) { Write-TpmResetRestoreText -Text 'Warning: this replaces ALL your current game settings with this saved copy.' -Color Yellow }
         Write-Host ''
         $unverifiedConfirm = Read-TpmResetRestoreAnswer -Prompt 'Type UNVERIFIED to use this copy anyway' -DetailBlocks @($selectedBlock)
         if ($unverifiedConfirm.ToUpperInvariant() -ne 'UNVERIFIED') {
@@ -43269,7 +43254,8 @@ function Invoke-RestoreBackupLegacy {
             return (New-TpmRestoreBackupLegacyResult -Outcome 'NO_OP' -ReasonCode 'USER_DECLINED' -Summary 'Restore was declined. No profiles were changed.' -FinalCheck 'The unverified-backup confirmation was declined before the profile mutation boundary.' -Name $selected.Name -Cancelled)
         }
     }
-    if (-not $AlreadyConfirmed) {
+    # A copy that cannot be checked is approved once, by its own typed word above, which also carries the replace-everything warning.
+    if (-not $AlreadyConfirmed -and $selectedHasCompletionRecord) {
         Write-Host ''
         Write-TpmResetRestoreText -Text 'Warning: this replaces ALL your current game settings with this saved copy.' -Color Yellow
         Write-Host ''
@@ -45802,13 +45788,12 @@ function Invoke-TpmResetRestoreAllGames {
     $blocked = Get-TpmRestoreAllBlocker -Plan $Plan -UserProfilesDir $UserProfilesDir -BackupPath $BackupPath
     if ($null -ne $blocked) { return $blocked }
     $blocks = @(Show-TpmResetRestoreAllPreview -Plan $Plan -When $when -UserProfilesDir $UserProfilesDir -BackupPath $BackupPath)
-    $confirm = Read-TpmResetRestoreAnswer -Intro 'Any answer other than YES cancels, and nothing is changed.' -Prompt 'Type YES to put everything back' -DetailBlocks $blocks
-    if ($confirm.Trim().ToUpperInvariant() -ne 'YES') { return (New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'USER_DECLINED' -Summary 'Canceled. Nothing was changed.') }
-    # Everything that changes: settings files, folders and, when it differs, TeknoParrot Manager's own settings file.
+    # Everything that changes: settings files, folders and, when it differs, TeknoParrot Manager's own settings file. One typed YES approves it all.
     $totalItems = $changes.Count + $folderCount + $(if ([string]$Plan.ConfigChange -eq 'Replace') { 1 } else { 0 })
-    $secondWhat = if ([string]$Plan.ConfigChange -eq 'Replace') { 'game settings files, folders and TeknoParrot Manager''s own settings' } else { 'game settings files and folders' }
-    $second = Read-TpmResetRestoreAnswer -Intro ('This changes {0} in total: {1}.' -f (Format-TpmCountNoun -Count $totalItems -Singular 'item'), $secondWhat) -Prompt 'Type ALL to confirm'
-    if ($second.Trim().ToUpperInvariant() -ne 'ALL') { return (New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'USER_DECLINED' -Summary 'Canceled. Nothing was changed.') }
+    $totalWhat = if ([string]$Plan.ConfigChange -eq 'Replace') { 'game settings files, folders and TeknoParrot Manager''s own settings' } else { 'game settings files and folders' }
+    $confirmIntro = 'This changes {0} in total: {1}. Any answer other than YES cancels, and nothing is changed.' -f (Format-TpmCountNoun -Count $totalItems -Singular 'item'), $totalWhat
+    $confirm = Read-TpmResetRestoreAnswer -Intro $confirmIntro -Prompt 'Type YES to put everything back' -DetailBlocks $blocks
+    if ($confirm.Trim().ToUpperInvariant() -ne 'YES') { return (New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'USER_DECLINED' -Summary 'Canceled. Nothing was changed.') }
     return (Restore-TpmRestorePointAll -RestorePoint $RestorePoint -UserProfilesDir $UserProfilesDir -Plan $Plan -ConfigPath $ConfigPath -RestorePointsRoot $RestorePointsRoot)
 }
 
@@ -49235,13 +49220,11 @@ function Invoke-RestoreLaunchBoxBackup {
         Write-Host '  If either app opens again while this runs, start the restore again.' -ForegroundColor Yellow; Write-Log 'LaunchBox restore: either app can reopen after the process check; multi-file recovery is not atomic; a changed or declined created file makes the result PARTIAL.'
         Write-Host '  Any LaunchBox changes made to the files above since this snapshot will be replaced; a verified snapshot of their current state is taken first.' -ForegroundColor Yellow
         if ($snapshot.Legacy) { Write-Host '  Old backup: it does not say which library it came from. Only the files listed above are restored, and nothing else is deleted.' -ForegroundColor Yellow; Write-Log 'LaunchBox restore: legacy snapshot; only inventoried files can be restored; original completeness unknown; absent members never imply deletion.' }
-        if ($snapshot.Root -and $snapshot.Root -ine $lbRoot) {
-            Write-Host '  WARNING: this snapshot was taken from a different LaunchBox folder than the restore target.' -ForegroundColor Red
-            if ((Read-TpmYesNo -Prompt 'This snapshot belongs to a different LaunchBox folder. Restore it into the target folder anyway? (Y/N)' -Default 'N') -ne 'Y') {
-                $cancel = New-TpmLaunchBoxResult NO_CHANGES 'LaunchBox restore canceled before library writes.'; $cancel.Cancelled=$true; return $cancel
-            }
-        }
-        if ((Read-TpmYesNo -Prompt ('Restore these files into {0} after a verified backup of their current state? (Y/N)' -f $lbRoot) -Default 'N') -ne 'Y') {
+        $restoreIntoOther = [bool]($snapshot.Root -and $snapshot.Root -ine $lbRoot)
+        if ($restoreIntoOther) { Write-Host '  WARNING: this snapshot was taken from a different LaunchBox folder than the restore target.' -ForegroundColor Red }
+        # One question only: when the snapshot came from another folder, the question says so; otherwise the normal one.
+        $restorePrompt = if ($restoreIntoOther) { 'This snapshot belongs to a different LaunchBox folder. Restore it into the target folder anyway, after a verified backup of its current state? (Y/N)' } else { 'Restore these files into {0} after a verified backup of their current state? (Y/N)' -f $lbRoot }
+        if ((Read-TpmYesNo -Prompt $restorePrompt -Default 'N') -ne 'Y') {
             $cancel = New-TpmLaunchBoxResult NO_CHANGES 'LaunchBox restore canceled before library writes.'; $cancel.Cancelled=$true; return $cancel
         }
         if (-not (Wait-TpmForProcessClose -ProcessNames @('LaunchBox','BigBox') -FriendlyName 'LaunchBox or BigBox')) {
@@ -49522,48 +49505,46 @@ function Invoke-TpmLaunchBoxStep {
         if ($lbChoice -eq 'A') {
             Write-TpmLaunchBoxWriteNotice
             $lbWriteNoticeBlocks = Get-TpmLaunchBoxWriteNoticeBlocks
-            if ((Read-TpmYesNo -Prompt 'Add the missing games to LaunchBox now? (Y/N, D = about the risks)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $lbWriteNoticeBlocks }) -eq 'Y') {
-                $writeRoot = $lbRoot
-                if (-not $writeRoot) {
-                    if ($lbPreviewRoot) {
-                        $writeRoot = Read-HostSafe ("  LaunchBox install folder (Enter = previewed folder {0})" -f $lbPreviewRoot) -Default $lbPreviewRoot
-                    } else {
-                        $writeRoot = Read-HostSafe '  LaunchBox install folder'
-                    }
+            $writeRoot = $lbRoot
+            if (-not $writeRoot) {
+                if ($lbPreviewRoot) {
+                    $writeRoot = Read-HostSafe ("  LaunchBox install folder (Enter = previewed folder {0})" -f $lbPreviewRoot) -Default $lbPreviewRoot
+                } else {
+                    $writeRoot = Read-HostSafe '  LaunchBox install folder'
                 }
-                $platformDefault = if ($lbPreviewChoice -in @('1','2','3')) { [string]$lbPreviewChoice } else { '2' }
-                $platformPrompt = if ($lbPreviewChoice -in @('1','2','3')) { "  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel (Enter = previewed choice $platformDefault)" } else { '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel' }
-                $platformChoice = Read-TpmChoice -Prompt $platformPrompt -Choices @('1','2','3','4','B') -Default $platformDefault
-                if ($platformChoice -ne 'B') {
-                    $targetPlatforms = switch ($platformChoice) {
-                        '1' { @('Arcade') }
-                        '2' { @('TeknoParrot') }
-                        '3' { @('Arcade','TeknoParrot') }
-                        '4' { @(Read-HostSafe '  Custom platform name (must be a safe filename)') }
-                    }
-                    # Show exactly what would change, then ask for consent to that plan (read-only preview first).
-                    # Official names and Games Database IDs from LaunchBox's own game list (read only). Asked only when the list is there;
-                    # when it is not, the plan says so in plain words and games keep today's names.
-                    $lbTitleParams = @{ UseGamesDb = $true; DatIndex = $datIndex }
-                    if ($writeRoot -and (Test-Path -LiteralPath (Get-TpmGamesDbPath -LaunchBoxRoot $writeRoot) -PathType Leaf)) {
-                        $lbTitleChoice = Read-TpmChoice -Prompt '  Use official game names so LaunchBox finds info and artwork? 1 new games, 2 new and games already added, N no' -Choices @('1', '2', 'N') -Default '1'
-                        if ($lbTitleChoice -eq 'N') { $lbTitleParams = @{ DatIndex = $datIndex } } elseif ($lbTitleChoice -eq '2') { $lbTitleParams.IncludeExisting = $true }
-                    }
-                    $lbPlanResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms -PlanOnly @lbTitleParams
-                    $lbShownBefore = $lbPreviewShownSummary
-                    if ($lbPlanResult.PSObject.Properties['TitleReview'] -and @($lbPlanResult.TitleReview).Count -gt 0) {
-                        $lbTitleParams.GamesDbChoices = Read-TpmLaunchBoxTitleChoices -Review @($lbPlanResult.TitleReview)
-                        if ($lbTitleParams.GamesDbChoices.Count -gt 0) { $lbPlanResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms -PlanOnly @lbTitleParams }
-                    }
-                    if ($lbTitleParams.ContainsKey('UseGamesDb')) { $lbShownBefore = '' }
-                    Write-TpmLaunchBoxPlan -Result $lbPlanResult -AlreadyShownSummary $lbShownBefore -Unattended:$Unattended
-                    if ($lbPlanResult.Reason -eq 'PREVIEW' -and [int]$lbPlanResult.WouldChangeFiles -gt 0) {
-                        if ((Read-TpmYesNo -Prompt 'Write exactly these changes after a verified backup? (Y/N)' -Default 'N') -eq 'Y') {
-                            $lbWriteResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms @lbTitleParams
-                            Write-TpmLaunchBoxResult -Result $lbWriteResult
-                        } else {
-                            Write-Host '  LaunchBox write canceled; nothing was changed.' -ForegroundColor DarkGray
-                        }
+            }
+            $platformDefault = if ($lbPreviewChoice -in @('1','2','3')) { [string]$lbPreviewChoice } else { '2' }
+            $platformPrompt = if ($lbPreviewChoice -in @('1','2','3')) { "  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel (Enter = previewed choice $platformDefault)" } else { '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel' }
+            $platformChoice = Read-TpmChoice -Prompt $platformPrompt -Choices @('1','2','3','4','B') -Default $platformDefault
+            if ($platformChoice -ne 'B') {
+                $targetPlatforms = switch ($platformChoice) {
+                    '1' { @('Arcade') }
+                    '2' { @('TeknoParrot') }
+                    '3' { @('Arcade','TeknoParrot') }
+                    '4' { @(Read-HostSafe '  Custom platform name (must be a safe filename)') }
+                }
+                # Show exactly what would change, then ask for consent to that plan (read-only preview first).
+                # Official names and Games Database IDs from LaunchBox's own game list (read only). Asked only when the list is there;
+                # when it is not, the plan says so in plain words and games keep today's names.
+                $lbTitleParams = @{ UseGamesDb = $true; DatIndex = $datIndex }
+                if ($writeRoot -and (Test-Path -LiteralPath (Get-TpmGamesDbPath -LaunchBoxRoot $writeRoot) -PathType Leaf)) {
+                    $lbTitleChoice = Read-TpmChoice -Prompt '  Use official game names so LaunchBox finds info and artwork? 1 new games, 2 new and games already added, N no' -Choices @('1', '2', 'N') -Default '1'
+                    if ($lbTitleChoice -eq 'N') { $lbTitleParams = @{ DatIndex = $datIndex } } elseif ($lbTitleChoice -eq '2') { $lbTitleParams.IncludeExisting = $true }
+                }
+                $lbPlanResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms -PlanOnly @lbTitleParams
+                $lbShownBefore = $lbPreviewShownSummary
+                if ($lbPlanResult.PSObject.Properties['TitleReview'] -and @($lbPlanResult.TitleReview).Count -gt 0) {
+                    $lbTitleParams.GamesDbChoices = Read-TpmLaunchBoxTitleChoices -Review @($lbPlanResult.TitleReview)
+                    if ($lbTitleParams.GamesDbChoices.Count -gt 0) { $lbPlanResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms -PlanOnly @lbTitleParams }
+                }
+                if ($lbTitleParams.ContainsKey('UseGamesDb')) { $lbShownBefore = '' }
+                Write-TpmLaunchBoxPlan -Result $lbPlanResult -AlreadyShownSummary $lbShownBefore -Unattended:$Unattended
+                if ($lbPlanResult.Reason -eq 'PREVIEW' -and [int]$lbPlanResult.WouldChangeFiles -gt 0) {
+                    if ((Read-TpmYesNo -Prompt 'Write exactly these changes after a verified backup? (Y/N, D = about the risks)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $lbWriteNoticeBlocks }) -eq 'Y') {
+                        $lbWriteResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms @lbTitleParams
+                        Write-TpmLaunchBoxResult -Result $lbWriteResult
+                    } else {
+                        Write-Host '  LaunchBox write canceled; nothing was changed.' -ForegroundColor DarkGray
                     }
                 }
             }
@@ -55809,107 +55790,99 @@ $mode = $null
             $repairReCopyRequested = $false
             do {
                 Write-Host ("  TeknoParrot Manager will search {0} for matching executables." -f $searchRoot) -ForegroundColor Cyan
-                Write-Host '  [Y] Search for repair candidates' -ForegroundColor White
-                Write-Host '  [N] Cancel' -ForegroundColor White
-                $repairConfirm = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
-                if ($repairConfirm -eq 'Y') {
-                    try {
-                        Write-Host ("  Scoped repair: searching only {0} affected profile(s)." -f $healthRepairGames.Count) -ForegroundColor Cyan
-                        if (@(Get-TpmTransactionField -Object $healthResult -Name 'DriveUnavailable' -Default @()).Count -gt 0) {
-                            Write-Host '  Games on a drive that is not connected are included. A game is pointed at the new folder only if its game file is found there. The others stay as they are.' -ForegroundColor Yellow
-                        }
-                        $repairIndex = Build-ProfileIndex -gameProfilesDir $gameProfilesDir
-                        $repairSearchGroup = Invoke-TpmProgressGroup -Title 'Health repair search' -Action {
-                            $repairPlan = Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$true -OnlyGames ([string[]]$healthRepairGames)
-                            [pscustomobject]@{ Outcome = $repairPlan.Outcome; Succeeded = ($repairPlan.Outcome -in @('SUCCEEDED','NO_OP')); Reports = @($repairPlan.Reports) }
-                        }
-                        $repairReports = @($repairSearchGroup.Reports)
-                        $repairCandidates = @($repairReports | Where-Object { $_.Status -eq 'candidate' })
-                        if ($repairCandidates.Count -gt 0) {
-                            Write-Host '  Candidate paths found (no profile changes made):' -ForegroundColor Cyan
-                            foreach ($candidate in $repairCandidates) {
-                                Write-Host ("    {0}  before: {1}" -f $candidate.Code, (ConvertTo-TpmDisplayPath $candidate.PreviousPath)) -ForegroundColor DarkGray
-                                Write-Host ("          after : {0}" -f (ConvertTo-TpmDisplayPath $candidate.NewPath)) -ForegroundColor White
-                            }
-                            $driveCodes = @(Get-TpmTransactionField -Object $healthResult -Name 'DriveUnavailable' -Default @())
-                            if (@($repairCandidates | Where-Object { $driveCodes -contains [string]$_.Code }).Count -gt 0) {
-                                Write-Host '  A game that was on a drive that is not connected will be pointed at the new path shown above. A safety backup of its profile is made first.' -ForegroundColor Yellow
-                            }
-                            Write-Host '  [Y] Apply only these reviewed candidates' -ForegroundColor White
-                            Write-Host '  [N] Leave them unchanged' -ForegroundColor White
-                            $applyChoice = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
-                            if ($applyChoice -eq 'Y') {
-                                $repairTransaction = Invoke-TpmProgressGroup -Title 'Health repair apply' -Action { Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$false -ReviewedCandidates $repairCandidates -OnlyGames ([string[]]$healthRepairGames) }
-                                $repairReports = @($repairTransaction.Reports)
-                                $repairSummary = Write-LibraryHealthRepairResults -Reports $repairReports
-                                if ($repairTransaction.Outcome -eq 'SUCCEEDED') {
-                                    Write-Host ("  Repair result: {0} FIXED, {1} STILL BROKEN." -f $repairSummary.Fixed, $repairSummary.StillBroken) -ForegroundColor $(if ($repairSummary.StillBroken -gt 0) { 'Yellow' } else { 'Green' })
-                                } else {
-                                    Write-Host ("  {0} Fixed: {1}; not fixed or unverified: {2}." -f $repairTransaction.Summary, $repairSummary.Fixed, $repairSummary.StillBroken) -ForegroundColor Yellow
-                                }
-                                if ($repairTransaction.Backup.RootPath) { Write-Host ("  Safety backup: {0}" -f $repairTransaction.Backup.RootPath) -ForegroundColor DarkGray }
-                            } else {
-                                Write-Host '  Candidates were reviewed but not applied. Nothing was changed.' -ForegroundColor DarkGray
-                            }
-                            $repairSearchAgain = $false
-                        } else {
-                            Write-Host '  No safe automatic candidates were found in this folder. Nothing was changed.' -ForegroundColor Yellow
-                            Write-Host ("  Searched folder: {0}" -f (ConvertTo-TpmDisplayPath $searchRoot)) -ForegroundColor DarkGray
-                            Write-Host '  Affected profile evidence:' -ForegroundColor Cyan
-                            Write-LibraryHealthRepairResults -Reports $repairReports | Out-Null
-                            foreach ($brokenCode in $healthRepairGames) {
-                                $brokenProfilePath = Join-Path $userProfilesDir ($brokenCode + '.xml')
-                                $savedExecutable = ''
-                                try {
-                                    $brokenDoc = Read-Xml -Path $brokenProfilePath
-                                    $savedExeNode = $brokenDoc.GameProfile.SelectSingleNode('ExecutableName')
-                                    if ($savedExeNode) { $savedExecutable = [string]$savedExeNode.InnerText }
-                                } catch {
-                                    $savedExecutable = '<could not read profile>'
-                                }
-                                Write-Host ("    {0}: expected executable {1}" -f $brokenCode, $(if ($savedExecutable) { $savedExecutable } else { '<not recorded>' })) -ForegroundColor DarkGray
-                            }
-                            $reCopySources = @($zipSource, $zipSourceSupplementary | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) })
-                            if ($reCopySources.Count -gt 0) {
-                                Write-Host '  [C] Re-copy/re-extract only these affected games from the configured source' -ForegroundColor White
-                                Write-Host ("      Configured source: {0}" -f ($reCopySources -join '; ')) -ForegroundColor DarkCyan
-                            } else {
-                                Write-Host '  No configured ZIP source is available for scoped re-copy/re-extract.' -ForegroundColor DarkGray
-                            }
-                            Write-Host '  [S] Search another game folder' -ForegroundColor White
-                            Write-Host '  [B] Back to the main menu' -ForegroundColor White
-                            $repairReCopyRequested = $false
-                            $repairChoices = if ($reCopySources.Count -gt 0) { @('S', 'B', 'C') } else { @('S', 'B') }
-                            $searchAgainChoice = Read-TpmChoice -Prompt ('  Choose {0}' -f ($repairChoices -join ' or ')) -Choices $repairChoices -Default 'B'
-                            if ($searchAgainChoice -eq 'C') {
-                                $pendingApplyMode = 'AutoSync'
-                                $pendingAutoSyncGames = @($healthRepairGames)
-                                $pendingApplyForce = $false
-                                $repairReCopyRequested = $true
-                                $repairSearchAgain = $false
-                            } elseif ($searchAgainChoice -eq 'S') {
-                                $selectedSearchRoot = Read-PathWithBrowse -Prompt '  Choose another game folder to search' -Mode Folder -InitialDirectory $searchRoot
-                                $searchRootCheck = Test-TpmRepairSearchRoot `
-                                    -Candidate $selectedSearchRoot -TeknoParrotRoot $tpRoot -ProgramDirectory $PSScriptRoot `
-                                    -ZipSource $zipSource -ZipSourceSupplementary $zipSourceSupplementary
-                                $repairSearchAgain = $searchRootCheck.Valid
-                                if ($repairSearchAgain) {
-                                    $searchRoot = $searchRootCheck.CanonicalPath
-                                } else {
-                                    Write-Host ("  Search folder rejected: {0}. Nothing was changed." -f $searchRootCheck.Reason) -ForegroundColor Yellow
-                                }
-                            } elseif ($searchAgainChoice -eq 'B') {
-                                $repairSearchAgain = $false
-                                Write-Log 'HealthCheck: user selected Back after no automatic repair candidates; no additional search was started.'
-                            }
-                        }
-                    } catch {
-                        Write-Host ("  Automatic path repair was not saved: {0}" -f $_.Exception.Message) -ForegroundColor Red
-                        Write-Host '  No repair is claimed. Review the existing profiles and backup state before retrying.' -ForegroundColor Yellow
-                        $repairSearchAgain = $false
+                try {
+                    Write-Host ("  Scoped repair: searching only {0} affected profile(s)." -f $healthRepairGames.Count) -ForegroundColor Cyan
+                    if (@(Get-TpmTransactionField -Object $healthResult -Name 'DriveUnavailable' -Default @()).Count -gt 0) {
+                        Write-Host '  Games on a drive that is not connected are included. A game is pointed at the new folder only if its game file is found there. The others stay as they are.' -ForegroundColor Yellow
                     }
-                } else {
-                    Write-Host "  Automatic path search canceled. Nothing was changed." -ForegroundColor DarkGray
+                    $repairIndex = Build-ProfileIndex -gameProfilesDir $gameProfilesDir
+                    $repairSearchGroup = Invoke-TpmProgressGroup -Title 'Health repair search' -Action {
+                        $repairPlan = Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$true -OnlyGames ([string[]]$healthRepairGames)
+                        [pscustomobject]@{ Outcome = $repairPlan.Outcome; Succeeded = ($repairPlan.Outcome -in @('SUCCEEDED','NO_OP')); Reports = @($repairPlan.Reports) }
+                    }
+                    $repairReports = @($repairSearchGroup.Reports)
+                    $repairCandidates = @($repairReports | Where-Object { $_.Status -eq 'candidate' })
+                    if ($repairCandidates.Count -gt 0) {
+                        Write-Host '  Candidate paths found (no profile changes made):' -ForegroundColor Cyan
+                        foreach ($candidate in $repairCandidates) {
+                            Write-Host ("    {0}  before: {1}" -f $candidate.Code, (ConvertTo-TpmDisplayPath $candidate.PreviousPath)) -ForegroundColor DarkGray
+                            Write-Host ("          after : {0}" -f (ConvertTo-TpmDisplayPath $candidate.NewPath)) -ForegroundColor White
+                        }
+                        $driveCodes = @(Get-TpmTransactionField -Object $healthResult -Name 'DriveUnavailable' -Default @())
+                        if (@($repairCandidates | Where-Object { $driveCodes -contains [string]$_.Code }).Count -gt 0) {
+                            Write-Host '  A game that was on a drive that is not connected will be pointed at the new path shown above. A safety backup of its profile is made first.' -ForegroundColor Yellow
+                        }
+                        Write-Host '  [Y] Apply only these reviewed candidates' -ForegroundColor White
+                        Write-Host '  [N] Leave them unchanged' -ForegroundColor White
+                        $applyChoice = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
+                        if ($applyChoice -eq 'Y') {
+                            $repairTransaction = Invoke-TpmProgressGroup -Title 'Health repair apply' -Action { Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$false -ReviewedCandidates $repairCandidates -OnlyGames ([string[]]$healthRepairGames) }
+                            $repairReports = @($repairTransaction.Reports)
+                            $repairSummary = Write-LibraryHealthRepairResults -Reports $repairReports
+                            if ($repairTransaction.Outcome -eq 'SUCCEEDED') {
+                                Write-Host ("  Repair result: {0} FIXED, {1} STILL BROKEN." -f $repairSummary.Fixed, $repairSummary.StillBroken) -ForegroundColor $(if ($repairSummary.StillBroken -gt 0) { 'Yellow' } else { 'Green' })
+                            } else {
+                                Write-Host ("  {0} Fixed: {1}; not fixed or unverified: {2}." -f $repairTransaction.Summary, $repairSummary.Fixed, $repairSummary.StillBroken) -ForegroundColor Yellow
+                            }
+                            if ($repairTransaction.Backup.RootPath) { Write-Host ("  Safety backup: {0}" -f $repairTransaction.Backup.RootPath) -ForegroundColor DarkGray }
+                        } else {
+                            Write-Host '  Candidates were reviewed but not applied. Nothing was changed.' -ForegroundColor DarkGray
+                        }
+                        $repairSearchAgain = $false
+                    } else {
+                        Write-Host '  No safe automatic candidates were found in this folder. Nothing was changed.' -ForegroundColor Yellow
+                        Write-Host ("  Searched folder: {0}" -f (ConvertTo-TpmDisplayPath $searchRoot)) -ForegroundColor DarkGray
+                        Write-Host '  Affected profile evidence:' -ForegroundColor Cyan
+                        Write-LibraryHealthRepairResults -Reports $repairReports | Out-Null
+                        foreach ($brokenCode in $healthRepairGames) {
+                            $brokenProfilePath = Join-Path $userProfilesDir ($brokenCode + '.xml')
+                            $savedExecutable = ''
+                            try {
+                                $brokenDoc = Read-Xml -Path $brokenProfilePath
+                                $savedExeNode = $brokenDoc.GameProfile.SelectSingleNode('ExecutableName')
+                                if ($savedExeNode) { $savedExecutable = [string]$savedExeNode.InnerText }
+                            } catch {
+                                $savedExecutable = '<could not read profile>'
+                            }
+                            Write-Host ("    {0}: expected executable {1}" -f $brokenCode, $(if ($savedExecutable) { $savedExecutable } else { '<not recorded>' })) -ForegroundColor DarkGray
+                        }
+                        $reCopySources = @($zipSource, $zipSourceSupplementary | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) })
+                        if ($reCopySources.Count -gt 0) {
+                            Write-Host '  [C] Re-copy/re-extract only these affected games from the configured source' -ForegroundColor White
+                            Write-Host ("      Configured source: {0}" -f ($reCopySources -join '; ')) -ForegroundColor DarkCyan
+                        } else {
+                            Write-Host '  No configured ZIP source is available for scoped re-copy/re-extract.' -ForegroundColor DarkGray
+                        }
+                        Write-Host '  [S] Search another game folder' -ForegroundColor White
+                        Write-Host '  [B] Back to the main menu' -ForegroundColor White
+                        $repairReCopyRequested = $false
+                        $repairChoices = if ($reCopySources.Count -gt 0) { @('S', 'B', 'C') } else { @('S', 'B') }
+                        $searchAgainChoice = Read-TpmChoice -Prompt ('  Choose {0}' -f ($repairChoices -join ' or ')) -Choices $repairChoices -Default 'B'
+                        if ($searchAgainChoice -eq 'C') {
+                            $pendingApplyMode = 'AutoSync'
+                            $pendingAutoSyncGames = @($healthRepairGames)
+                            $pendingApplyForce = $false
+                            $repairReCopyRequested = $true
+                            $repairSearchAgain = $false
+                        } elseif ($searchAgainChoice -eq 'S') {
+                            $selectedSearchRoot = Read-PathWithBrowse -Prompt '  Choose another game folder to search' -Mode Folder -InitialDirectory $searchRoot
+                            $searchRootCheck = Test-TpmRepairSearchRoot `
+                                -Candidate $selectedSearchRoot -TeknoParrotRoot $tpRoot -ProgramDirectory $PSScriptRoot `
+                                -ZipSource $zipSource -ZipSourceSupplementary $zipSourceSupplementary
+                            $repairSearchAgain = $searchRootCheck.Valid
+                            if ($repairSearchAgain) {
+                                $searchRoot = $searchRootCheck.CanonicalPath
+                            } else {
+                                Write-Host ("  Search folder rejected: {0}. Nothing was changed." -f $searchRootCheck.Reason) -ForegroundColor Yellow
+                            }
+                        } elseif ($searchAgainChoice -eq 'B') {
+                            $repairSearchAgain = $false
+                            Write-Log 'HealthCheck: user selected Back after no automatic repair candidates; no additional search was started.'
+                        }
+                    }
+                } catch {
+                    Write-Host ("  Automatic path repair was not saved: {0}" -f $_.Exception.Message) -ForegroundColor Red
+                    Write-Host '  No repair is claimed. Review the existing profiles and backup state before retrying.' -ForegroundColor Yellow
                     $repairSearchAgain = $false
                 }
             } while ($repairSearchAgain)

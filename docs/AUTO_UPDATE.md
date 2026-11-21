@@ -376,11 +376,11 @@ It never runs in `-Unattended` mode.
 1. If you are already up to date, nothing is shown. The menu appears.
 2. If GitHub cannot be reached or the check is too slow, nothing is shown. The menu appears.
 3. If a newer version exists, you will see an "Update Available" screen. It shows `Current version`, `Latest version`, the release name if there is one, and a one-line summary.
-4. The screen then lists the choices one by one: `Y = Update now`, `N = Remind me later`, `V = View release notes`. You are asked `Your choice (Y/N/V)`. Next: type Y, N, or V.
+4. The screen then shows the `Updating will:` list and the choices one by one: `Y = Update now`, `N = Remind me later`, `V = View release notes`. You are asked `Your choice (Y/N/V)`. Next: type Y, N, or V.
 
 **What each answer does:**
 
-- **Y** shows the `Updating will:` list, then asks `Proceed? (Y/N)`. Next: type Y to install, or N to skip (`Skipped -- no changes made.`).
+- **Y** starts the update right away. There is no second question. The `Updating will:` list is shown above the choices, so you read it before you answer. The update still downloads and checks the file, backs up every file it replaces, and puts the old version back if anything fails.
 - **N** (or anything else) continues to the menu. You will see `Continuing -- you can check again any time from the menu.`
 - **V** prints the full release notes, then asks the question again.
 
