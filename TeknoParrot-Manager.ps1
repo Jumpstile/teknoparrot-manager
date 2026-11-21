@@ -5158,7 +5158,7 @@ function Get-PrimaryExecutableName {
 # GamePath2). A GamePath2 whose file is gone is stale and is corrected the
 # same way a stale GamePath already is; one that still exists is never touched.
 function Set-SecondaryExecutablePath {
-    param([System.Xml.XmlDocument]$Doc, [string]$PrimaryExePath)
+    param([System.Xml.XmlDocument]$Doc, [string]$PrimaryExePath, [string]$ProfileCode = '')
 
     $hasTwoNode = $Doc.GameProfile.SelectSingleNode("HasTwoExecutables")
     if ($null -eq $hasTwoNode -or $hasTwoNode.InnerText -ne 'true') { return $false }
@@ -5167,7 +5167,15 @@ function Set-SecondaryExecutablePath {
     if ([string]::IsNullOrWhiteSpace($exe2Name)) { return $false }
 
     # [System.IO.Path]::Combine, not Join-Path: Join-Path prints a raw red "Cannot find drive" error for a profile saved on a drive that is not connected.
-    try { $exe2Path = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($PrimaryExePath), $exe2Name.Trim()) } catch { return $false }
+    try {
+        if ($exe2Name -match '[*?]') {
+            # A pattern ("*.chd", System 11): only a single, unambiguous match is used.
+            $exe2Path = Find-TpmSecondFileByPattern -PrimaryExePath $PrimaryExePath -Pattern $exe2Name.Trim() -ExecutableName ([string]$Doc.GameProfile.ExecutableName) -ProfileCode $ProfileCode
+            if ([string]::IsNullOrEmpty($exe2Path)) { return $false }
+        } else {
+            $exe2Path = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($PrimaryExePath), $exe2Name.Trim())
+        }
+    } catch { return $false }
 
     $gp2 = $Doc.GameProfile.SelectSingleNode("GamePath2")
     if ($null -ne $gp2 -and $gp2.InnerText.Trim() -eq $exe2Path) { return $false }
@@ -5208,7 +5216,7 @@ function Backfill-SecondaryExecutablePath {
         # A profile saved on a drive that is not connected cannot be checked: count it for one summary after the scan and keep going.
         $driveCheck = Test-TpmGameMutationPath -GamePath $gpNode.InnerText
         if ($driveCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { Add-TpmUnavailableDriveGame -Code $code -Path $gpNode.InnerText; return }
-        if (Set-SecondaryExecutablePath $existingDoc $gpNode.InnerText) {
+        if (Set-SecondaryExecutablePath $existingDoc $gpNode.InnerText -ProfileCode $code) {
             $ledgerMapping = Start-TpmRegistrationMapping -Folder $Folder -Code $code -Match 'secondary-backfill' -IntendedPath $gpNode.InnerText -TemplatePath '' -DryRun $DryRun
             # Registration makes its safety backup lazily, before its first real write.
             if (-not $DryRun) { [void](Confirm-TpmRegistrationSafetyBackup -State $BackupState -UserProfilesDir $UserProfilesDir) }
@@ -25316,7 +25324,7 @@ function Build-ProfileIndex {
             Write-TpmCompactExtractionProgress -Phase Scanning -Label 'TeknoParrot executable index scan' -Current $scanCurrent -Total $templates.Count -StartedAt $scanStarted
             $exe = Get-PrimaryExecutableName $tpl.FullName
             if ($exe -and $exe.Trim() -ne "") {
-                foreach ($alt in (Get-ExeAlternatives $exe.Trim())) {
+                foreach ($alt in (Get-TpmGameFileSet -ExecutableName $exe.Trim()).Choices) {
                     $k = $alt.ToLowerInvariant()
                     if (-not $index.ContainsKey($k)) { $index[$k] = @() }
                     $index[$k] += [pscustomobject]@{
@@ -36478,7 +36486,7 @@ function Set-TpmRegistrationGamePath {
         [void]$tpl.GameProfile.PrependChild($gp)
     }
     $gp.InnerText = $ExePath
-    [void](Set-SecondaryExecutablePath $tpl $ExePath)
+    [void](Set-SecondaryExecutablePath $tpl $ExePath -ProfileCode ([System.IO.Path]::GetFileNameWithoutExtension($TemplatePath)))
     if (-not $DryRun) { [void](Confirm-TpmRegistrationSafetyBackup -State $BackupState -UserProfilesDir $UserProfilesDir) }
     if (-not $DryRun) { $PreWriteState.Value = Get-TpmProfileWriteFingerprint -Path $UserProfile }
     $WriteAttempted.Value = -not $DryRun
@@ -36657,7 +36665,9 @@ function Register-GamesLegacy {
         $key = $exe.Name.ToLowerInvariant()
         if (-not $profileIndex.ContainsKey($key)) { continue }
 
-        $matchList = $profileIndex[$key]
+        # A game that names a set of ZIPs ("child.zip;parent.zip") only counts when the other ZIPs are beside the file that was found.
+        $matchList = @($profileIndex[$key] | Where-Object { @(Get-TpmMissingGameSetFiles -GamePath $exe.FullName -ExecutableName ([string]$_.ExeName)).Count -eq 0 })
+        if ($matchList.Count -eq 0) { Write-Log ("Registration: {0} was left alone because the other ZIP its profile names is not beside it." -f $exe.FullName); continue }
 
         # Same executable name maps to more than one profile.
         # Attempt folder-name fuzzy matching before giving up.
@@ -37114,6 +37124,10 @@ function Register-GamesLegacy {
                 [void]$mutationRecords.Failures.Add([pscustomobject]@{ Code=$datCode; WriteAttempted=$false; Reason='EXECUTABLE_MISSING' })
                 continue
             }
+            if (@(Get-TpmMissingGameSetFiles -GamePath $exeToUse -ExecutableName ([string](Get-PrimaryExecutableName $templatePath))).Count -gt 0) {
+                Write-Log ("DatIndex (pass2): {0} was left alone because the other ZIP its profile names is not in folder {1}" -f $datCode, $folderKey)
+                continue
+            }
 
             $registrationWriteAttempted = $false; $ledgerMapping = $null; $preWriteState = $null
             try {
@@ -37235,6 +37249,10 @@ function Register-GamesLegacy {
                 [void]$mutationRecords.Failures.Add([pscustomobject]@{ Code=$bestCode; WriteAttempted=$false; Reason='EXECUTABLE_MISSING' })
                 continue
             }
+            if (@(Get-TpmMissingGameSetFiles -GamePath $exeToUse -ExecutableName ([string](Get-PrimaryExecutableName $templatePath))).Count -gt 0) {
+                Write-Log ("ProfileCode (pass3): {0} was left alone because the other ZIP its profile names is not in folder {1}" -f $bestCode, $folderKey)
+                continue
+            }
 
             $registrationWriteAttempted = $false; $ledgerMapping = $null; $preWriteState = $null
             try {
@@ -37313,7 +37331,7 @@ function Register-GamesLegacy {
                     [void]$sfTpl.GameProfile.PrependChild($sfGp)
                 }
                 $sfGp.InnerText = $sfExePath
-                [void](Set-SecondaryExecutablePath $sfTpl $sfExePath)
+                [void](Set-SecondaryExecutablePath $sfTpl $sfExePath -ProfileCode ([string]$sfCode))
                 if (-not $DryRun) { [void](Confirm-TpmRegistrationSafetyBackup -State $BackupState -UserProfilesDir $userProfilesDir) }
                 if (-not $DryRun) { $preWriteState = Get-TpmProfileWriteFingerprint -Path $sfUserProfile }
                 $registrationWriteAttempted = -not $DryRun
@@ -37422,7 +37440,7 @@ function Invoke-ManualRegistrationChoices {
             $gamePath = $template.GameProfile.SelectSingleNode("GamePath")
             if ($null -eq $gamePath) { $gamePath = $template.CreateElement("GamePath"); [void]$template.GameProfile.PrependChild($gamePath) }
             $gamePath.InnerText = $exeFullPath
-            [void](Set-SecondaryExecutablePath $template $exeFullPath)
+            [void](Set-SecondaryExecutablePath $template $exeFullPath -ProfileCode ([string]$code))
             $ledgerMapping = Start-TpmRegistrationMapping -Folder $folderName -Code $code -Match 'manual-choice' -IntendedPath $exeFullPath -TemplatePath $templatePath -DryRun $DryRun
             if (-not $DryRun) { $preWriteState = Get-TpmProfileWriteFingerprint -Path $userProfilePath }
             $decision.WriteAttempted = -not $DryRun
@@ -37666,7 +37684,7 @@ function Repair-GamePathsLegacy {
         }
         # If this exe name maps to more than one profile in the library it is
         # inherently ambiguous -- never auto-assign it regardless of what is on disk.
-        $alts         = Get-ExeAlternatives $exeName.Trim()
+        $alts         = @((Get-TpmGameFileSet -ExecutableName $exeName.Trim()).Choices)
         $profileCount = ($alts | ForEach-Object {
             $ak = $_.ToLowerInvariant()
             if ($profileIndex.ContainsKey($ak)) { $profileIndex[$ak].Count } else { 0 }
@@ -37747,7 +37765,7 @@ function Repair-GamePathsLegacy {
                 [void]$doc.GameProfile.PrependChild($gpNode)
             }
             $gpNode.InnerText = $newPath
-            [void](Set-SecondaryExecutablePath $doc $newPath)
+            [void](Set-SecondaryExecutablePath $doc $newPath -ProfileCode ([string]$f.BaseName))
             Save-XmlMaybe $doc $f.FullName $DryRun
 
             $verifiedDoc = Read-Xml $f.FullName
@@ -37842,7 +37860,7 @@ function Invoke-LibraryHealthManualPathRepairLegacy {
             if (-not $doc.GameProfile) { throw 'profile has no GameProfile node' }
             $exeNode = $doc.GameProfile.SelectSingleNode('ExecutableName')
             $exeName = if ($exeNode) { $exeNode.InnerText.Trim() } else { '' }
-            $exeAlternatives = @(Get-ExeAlternatives $exeName)
+            $exeAlternatives = @((Get-TpmGameFileSet -ExecutableName $exeName).Choices)
             $expectedDisplay = ($exeAlternatives -join ' or ')
 
             Write-Host ""
@@ -37932,7 +37950,7 @@ function Invoke-LibraryHealthManualPathRepairLegacy {
                 [void]$plan.Document.GameProfile.AppendChild($plan.GamePathNode)
             }
             $plan.GamePathNode.InnerText = $plan.SelectedPath
-            [void](Set-SecondaryExecutablePath $plan.Document $plan.SelectedPath)
+            [void](Set-SecondaryExecutablePath $plan.Document $plan.SelectedPath -ProfileCode ([string]$plan.Code))
             Save-Xml -doc $plan.Document -path $plan.ProfilePath
             [void]$savedCodes.Add([string]$plan.Code)
         } catch {
@@ -38142,6 +38160,12 @@ function Invoke-LibraryHealthCheck {
             Write-Log ("HealthCheck: the game startup files could not be checked -- {0}" -f $_)
         }
     }
+    # Game types: unknown types, development-only games, a missing emulator folder, games that need a hand-picked file, System 11 saved files.
+    $gameTypeReport = $null
+    if (-not $discoveryFailed) {
+        try { $gameTypeReport = Get-TpmGameTypeReport -Profiles $profiles -TeknoParrotRoot $TpRoot }
+        catch { Write-Log ("HealthCheck: the game types could not be checked -- {0}" -f $_) }
+    }
     $postgresStatus = 'Unknown'; $postgresPsqlExists = $false; $postgresPsqlStatus = 'Unknown'; $postgresServiceExists = $null
     try {
         $postgresService = Get-Service -Name $script:PostgresServiceName -ErrorAction Stop
@@ -38207,7 +38231,8 @@ function Invoke-LibraryHealthCheck {
     $optionalCoverageComplete = (-not $optionalCoverageUnavailable -and $optionalCheckFailed -eq 0)
     $postgresInventoryComplete = ($postgresInventoryStatus -eq 'Complete')
     $postgresServiceUnverified = ($postgresInventoryComplete -and $postgresConfigured -gt 0 -and $null -eq $postgresServiceExists)
-    $healthOutcome = if ($discoveryFailed -or -not $optionalCoverageComplete -or -not $postgresInventoryComplete -or $postgresServiceUnverified -or $postgresDatabaseProblems.Count -gt 0 -or $postgresDatabaseSkipped.Count -gt 0 -or $postgresDatabaseCheck -eq 'SkippedNoClient' -or $prerequisiteCheckFailed -or [string]::IsNullOrWhiteSpace([string]$detected.Vendor)) { 'ACTION_REQUIRED' } else { 'SUCCEEDED' }
+    $gameTypeFailed = ($null -ne $gameTypeReport -and [int]$gameTypeReport.Failed -gt 0)
+    $healthOutcome = if ($discoveryFailed -or -not $optionalCoverageComplete -or -not $postgresInventoryComplete -or $postgresServiceUnverified -or $postgresDatabaseProblems.Count -gt 0 -or $postgresDatabaseSkipped.Count -gt 0 -or $postgresDatabaseCheck -eq 'SkippedNoClient' -or $prerequisiteCheckFailed -or $gameTypeFailed -or [string]::IsNullOrWhiteSpace([string]$detected.Vendor)) { 'ACTION_REQUIRED' } else { 'SUCCEEDED' }
     $postgresDatabaseProblemsResult = @()
     $postgresNeededResult = @()
     $postgresNeededLabelsResult = @()
@@ -38271,6 +38296,7 @@ function Invoke-LibraryHealthCheck {
         PrerequisiteMissing = @($prerequisiteMissing)
         PrerequisiteNotChecked = @($prerequisiteNotChecked.ToArray())
         PrerequisiteCheckFailed = $prerequisiteCheckFailed
+        GameTypes = $gameTypeReport
         LastFullRun = $lastFullRun
         LogPath = $LogPath
         GameSupport = $gameSupport
@@ -38346,6 +38372,7 @@ function Get-TpmLibraryHealthRows {
     if ($null -ne $postgresRow) { [void]$rows.Add($postgresRow) }
     $internalCount = @(Get-TpmTransactionField -Object $Result -Name 'InternalDatabaseLabels' -Default @()).Count
     if ($internalCount -gt 0) { [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game database' -Text ('OK - {0} {1} Internal storage, so no database install is needed. Start each game once so it creates its own database' -f (Format-TpmGameCount -Count $internalCount), $(if ($internalCount -eq 1) { 'uses' } else { 'use' })) -Color 'Green')) }
+    foreach ($gameTypeRow in @(if ($null -ne (Get-TpmTransactionField -Object $Result -Name 'GameTypes' -Default $null)) { Get-TpmGameTypeRows -Report $Result.GameTypes })) { [void]$rows.Add($gameTypeRow) }
     $prerequisiteRow = Get-TpmLibraryHealthPrerequisiteRow -Result $Result
     if ($null -ne $prerequisiteRow) { [void]$rows.Add($prerequisiteRow) }
     $gameSupport = Get-TpmTransactionField -Object $Result -Name 'GameSupport' -Default $null
@@ -38415,6 +38442,7 @@ function Get-TpmLibraryHealthSummaryLines {
     $incomplete = ([bool](Get-TpmTransactionField -Object $Result -Name 'OptionalCoverageUnavailable' -Default $false)) -or
         ([int](Get-TpmTransactionField -Object $Result -Name 'OptionalCheckFailed' -Default 0) -gt 0) -or
         ([bool](Get-TpmTransactionField -Object $Result -Name 'PrerequisiteCheckFailed' -Default $false)) -or
+        ($null -ne (Get-TpmTransactionField -Object $Result -Name 'GameTypes' -Default $null) -and [int](Get-TpmTransactionField -Object $Result.GameTypes -Name 'Failed' -Default 0) -gt 0) -or
         ([string]$Result.PostgresInventoryStatus -ne 'Complete') -or
         ([bool](Get-TpmTransactionField -Object $Result -Name 'PostgresServiceUnverified' -Default $false)) -or
         [string]::IsNullOrWhiteSpace([string](Get-TpmTransactionField -Object $Result -Name 'DetectedGpuVendor' -Default ''))
@@ -38563,6 +38591,9 @@ function Get-TpmLibraryHealthDetailBlocks {
         }
         [void]$blocks.Add(@{ Heading = 'Game startup files (firmware)'; Lines = $lines.ToArray() })
     }
+
+    $gameTypeReport = Get-TpmTransactionField -Object $Result -Name 'GameTypes' -Default $null
+    if ($null -ne $gameTypeReport) { foreach ($gameTypeBlock in @(Get-TpmGameTypeDetailBlocks -Report $gameTypeReport)) { [void]$blocks.Add($gameTypeBlock) } }
 
     $lines = New-Object System.Collections.Generic.List[string]
     if ($complete) {
@@ -39245,6 +39276,65 @@ $EmulatorBiosRequirements = @{
         SourceZipPattern = '^\[EMU\] Play! working arcadedefs'
         FilesFromProfile = @{ Element = 'ExecutableName'; RelativeDir = 'arcadedefs'; FileSuffix = '.arcadedef' }
     }
+    # System 11 (type TeknoS11, 8 boards). Its games need no startup file. Optional: saved flash/EEPROM files for a game, in
+    # TeknoS11\state\<game>\cabinet-1, from the player's own "[NVRAM] TeknoS11 preinstalled game files for System 11" set (150 of the
+    # 230 profiles have files in it; the other 80 do not). Games start without them, so they are never reported as missing; the
+    # player is asked (Invoke-TpmS11PreinstallOffer) and no existing file is ever replaced.
+    'TeknoS11' = @{
+        Label            = 'System 11 saved game files'
+        EmulatorFolders  = @('TeknoS11')
+        Preinstall       = @{ SourceZipPattern = '^\[NVRAM\] TeknoS11 preinstalled game files'; StateDir = 'TeknoS11\state'; CabinetDir = 'cabinet-1' }
+    }
+    # The other game types: no startup file is known for them. The row says which emulator folder they run from, so a missing
+    # folder is reported, and a type that is not in this table at all is reported as unknown. A type with no EmulatorFolders is
+    # one whose folder is not known (new, no evidence yet): it is known but not checked. The emulator folder is looked for on
+    # disk (tpcache.json is not used: it has no entry for 17 types and says "not installed" for all). Dolphin runs from
+    # CrediarDolphin and TeknoMacaw runs from the TeknoParrot folder itself. A row with no EmulatorFolders is not checked.
+    'Dolphin'      = @{ EmulatorFolders = @('CrediarDolphin') }
+    'ElfLdr2'      = @{ EmulatorFolders = @('ElfLdr2') }
+    'Lindbergh'    = @{ }    # deprecated: its games moved to ElfLdr2, so no folder is expected for it
+    'SegaTools'    = @{ }    # no install folder of its own has been seen; not checked until there is evidence
+    'Tekno3DO'     = @{ EmulatorFolders = @('Tekno3DO') }
+    'TeknoAGX'     = @{ EmulatorFolders = @('TeknoAGX') }
+    'TeknoAir'     = @{ EmulatorFolders = @('TeknoAir') }
+    'TeknoCobra'   = @{ EmulatorFolders = @('TeknoCobra') }
+    'TeknoCoJag'   = @{ EmulatorFolders = @('TeknoCoJag') }
+    'TeknoCPS'     = @{ EmulatorFolders = @('TeknoCPS') }
+    'TeknoEagle'   = @{ EmulatorFolders = @('TeknoEagle') }
+    'TeknoFL'      = @{ EmulatorFolders = @('TeknoFL') }
+    'TeknoG3D'     = @{ EmulatorFolders = @('TeknoG3D') }
+    'TeknoG4'      = @{ EmulatorFolders = @('TeknoG4') }
+    'TeknoGClub'   = @{ EmulatorFolders = @('TeknoGClub') }
+    'TeknoGRE'     = @{ EmulatorFolders = @('TeknoGRE') }
+    'TeknoHDrive'  = @{ EmulatorFolders = @('TeknoHDrive') }
+    'TeknoHNG64'   = @{ EmulatorFolders = @('TeknoHNG64') }
+    'TeknoHornet'  = @{ EmulatorFolders = @('TeknoHornet') }
+    'TeknoM2'      = @{ EmulatorFolders = @('TeknoM2') }
+    'TeknoMacaw'   = @{ EmulatorFolders = @('TeknoParrot') }
+    'TeknoMagic'   = @{ EmulatorFolders = @('TeknoMagic') }
+    'TeknoModel1'  = @{ EmulatorFolders = @('TeknoModel1') }
+    'TeknoModel2'  = @{ EmulatorFolders = @('TeknoModel2') }
+    'TeknoModel3'  = @{ EmulatorFolders = @('TeknoModel3') }
+    'TeknoMVS'     = @{ EmulatorFolders = @('TeknoMVS') }
+    'TeknoNaomi'   = @{ EmulatorFolders = @('TeknoNaomi') }
+    'TeknoParrot'  = @{ EmulatorFolders = @('TeknoParrot') }
+    'TeknoPNet'    = @{ EmulatorFolders = @('TeknoPNet') }
+    'TeknoPsikyo'  = @{ EmulatorFolders = @('TeknoPsikyo') }
+    'TeknoRender0' = @{ }
+    'TeknoS21'     = @{ EmulatorFolders = @('TeknoS21') }
+    'TeknoS22'     = @{ EmulatorFolders = @('TeknoS22') }
+    'TeknoS23'     = @{ EmulatorFolders = @('TeknoS23') }
+    'TeknoSS32'    = @{ EmulatorFolders = @('TeknoSS32') }
+    'TeknoSTV'     = @{ EmulatorFolders = @('TeknoSTV') }
+    'TeknoTJC'     = @{ EmulatorFolders = @('TeknoTJC') }
+    'TeknoTPJC'    = @{ EmulatorFolders = @('TeknoTPJC') }
+    'TeknoTZ'      = @{ EmulatorFolders = @('TeknoTZ') }
+    'TeknoTZero'   = @{ EmulatorFolders = @('TeknoTZero') }
+    'TeknoVegas'   = @{ EmulatorFolders = @('TeknoVegas') }
+    'TeknoViper'   = @{ EmulatorFolders = @('TeknoViper') }
+    'TeknoVP'      = @{ EmulatorFolders = @('TeknoVP') }
+    'TeknoVUnit'   = @{ EmulatorFolders = @('TeknoVUnit') }
+    'TeknoZeus'    = @{ EmulatorFolders = @('TeknoZeus') }
 }
 
 # The table above, or an empty table when a caller (a test) has not defined it.
@@ -39268,6 +39358,13 @@ function Get-TpmPrerequisiteFileSpecs {
         }
     }
     return $specs.ToArray()
+}
+
+# True when a table entry names startup files (fixed files, one file per game, or firmware the emulator unpacks). The other
+# entries only say where the emulator runs from, or carry optional saved data, and are never reported as missing files.
+function Test-TpmPrerequisiteNeedsFiles {
+    param([Parameter(Mandatory)]$Requirement)
+    return ($Requirement.Contains('Files') -or $Requirement.Contains('RequiredFiles') -or $Requirement.Contains('FilesFromProfile') -or $Requirement.Contains('InstallVia'))
 }
 
 # The emulator folder under a TeknoParrot root, or $null when that emulator is not installed there.
@@ -39395,7 +39492,7 @@ function Get-TpmMissingPrerequisites {
     if ($table.Count -eq 0) { return @() }
     $map = Get-TpmEmulatorGameMap -Profiles $Profiles -ProgressLabel 'Game files profile scan'
     foreach ($emuType in @($map.Keys | Sort-Object)) {
-        if (-not $table.ContainsKey($emuType)) { continue }
+        if (-not $table.ContainsKey($emuType) -or -not (Test-TpmPrerequisiteNeedsFiles -Requirement $table[$emuType])) { continue }
         # An emulator whose folder is not there yet cannot be checked; say so instead of letting it read as OK.
         if ($null -ne $NotChecked -and -not (Resolve-TpmPrerequisiteEmulatorDir -EmulatorType $emuType -Requirement $table[$emuType] -TeknoParrotRoot $TeknoParrotRoot)) { [void]$NotChecked.Add($emuType); continue }
         $entry = Get-TpmPrerequisiteWarning -EmulatorType $emuType -Requirement $table[$emuType] -TeknoParrotRoot $TeknoParrotRoot -AffectedGames @($map[$emuType]) -Profiles $Profiles
@@ -39415,7 +39512,7 @@ function Get-TpmGameNeedsLine {
         if ($doc.GameProfile) {
             $emulatorNode = $doc.GameProfile.SelectSingleNode('EmulatorType')
             $table = Get-TpmPrerequisiteTable
-            if ($emulatorNode -and $table.ContainsKey($emulatorNode.InnerText.Trim())) {
+            if ($emulatorNode -and $table.ContainsKey($emulatorNode.InnerText.Trim()) -and (Test-TpmPrerequisiteNeedsFiles -Requirement $table[$emulatorNode.InnerText.Trim()])) {
                 $requirement = $table[$emulatorNode.InnerText.Trim()]
                 $count = @(Get-TpmPrerequisiteFileSpecs -Requirement $requirement).Count
                 $label = if ($requirement.Contains('Label')) { [string]$requirement['Label'] } else { 'startup files' }
@@ -40246,6 +40343,539 @@ function Invoke-TpmPrerequisiteReview {
     return [pscustomobject]@{ Reviewed = $outcomes.Count; FixedAny = ($installed.Count -gt 0); Outcomes = $outcomes.ToArray() }
 }
 
+# =============================================================================
+# GAME TYPES (module-ready section)
+# =============================================================================
+# BEGIN GameTypes. Everything down to END GameTypes belongs together and can move into its own module after 1.0.
+# The ONE table is $EmulatorBiosRequirements (above): game type -> emulator folder -> startup files, firmware or saved data -> where they
+# go -> how they are checked (Get-TpmPrerequisiteWarning) and installed (Invoke-TpmPrerequisiteInstall, Invoke-TpmS11PreinstallInstall).
+# This section adds: which game types are known, game files named as a set (System 11), the second game file found by a pattern (the
+# System 11 disc image), and the saved System 11 files. It uses only helpers defined elsewhere in this script: Read-Xml, Write-Log,
+# Get-ExeAlternatives, Get-TpmPrerequisiteTable, Resolve-TpmPrerequisiteEmulatorDir, Get-TpmEmulatorGameMap, Get-TpmOwnedLayout,
+# Get-TpmFullFolderPath, Test-TpmNoReparsePath, Test-PathInside, Test-TpmCps3UnsafeMemberName, Get-TpmCps3FreeBytes,
+# Get-TpmAutoSyncSha256, Invoke-TpmTransactionalFileBatch, Find-TpmPrerequisiteSourceZips, Format-TpmGameCount, New-TpmLibraryHealthRow.
+
+# A profile's ExecutableName is a list of alternatives ("a.elf;b.elf" or "a|b": any one will do) or, when it is only .zip names
+# separated by ";", a SET ("child.zip;parent.zip": the first is the game and the others must sit beside it). 25 real profiles are sets.
+function Get-TpmGameFileSet {
+    param([string]$ExecutableName)
+    $text = ([string]$ExecutableName).Trim()
+    $parts = @($text -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+    $isSet = ($parts.Count -ge 2 -and $text -notmatch '\|' -and @($parts | Where-Object { $_ -notmatch '\.zip$' }).Count -eq 0)
+    if ($isSet) { return [pscustomobject]@{ IsSet = $true; Choices = @($parts[0]); Partners = @($parts | Select-Object -Skip 1) } }
+    return [pscustomobject]@{ IsSet = $false; Choices = @(Get-ExeAlternatives $text); Partners = @() }
+}
+
+# The ZIPs of a set that are not beside the game file (an empty list when all are there, or when the name is not a set). When the file
+# given is not the set's own game ZIP (for example its parent ZIP), the game ZIP is what is missing.
+function Get-TpmMissingGameSetFiles {
+    param([string]$GamePath, [string]$ExecutableName)
+    $set = Get-TpmGameFileSet -ExecutableName $ExecutableName
+    if (-not $set.IsSet -or [string]::IsNullOrWhiteSpace($GamePath)) { return @() }
+    try { $folder = [System.IO.Path]::GetDirectoryName($GamePath.Trim()); $leaf = [System.IO.Path]::GetFileName($GamePath.Trim()) } catch { return @() }
+    if ([string]::IsNullOrEmpty($folder)) { return @() }
+    if (@($set.Choices | Where-Object { $_ -ieq $leaf }).Count -eq 0) { return @($set.Choices) }
+    return @($set.Partners | Where-Object { -not (Test-Path -LiteralPath ([System.IO.Path]::Combine($folder, $_)) -PathType Leaf -ErrorAction SilentlyContinue) })
+}
+
+# The second game file of a profile whose ExecutableName2 is a pattern (System 11: "*.chd", the game disc image). It is looked for beside
+# the first game file and in a folder there that is named after one of the game's files or after the game itself (the "game disc
+# directory"). Exactly one match is used; none, or several, return '' so nothing is guessed (the player picks the disc image).
+function Find-TpmSecondFileByPattern {
+    param([string]$PrimaryExePath, [string]$Pattern, [string]$ExecutableName = '', [string]$ProfileCode = '')
+    if ($Pattern -notmatch '^[\w*?. \-]+$') { return '' }
+    try { $folder = [System.IO.Path]::GetDirectoryName($PrimaryExePath) } catch { return '' }
+    if ([string]::IsNullOrEmpty($folder) -or -not (Test-Path -LiteralPath $folder -PathType Container -ErrorAction SilentlyContinue)) { return '' }
+    $folders = New-Object System.Collections.Generic.List[string]
+    $seenFolders = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    [void]$seenFolders.Add($folder)
+    [void]$folders.Add($folder)
+    $stems = @(@(Get-ExeAlternatives $ExecutableName | ForEach-Object { [System.IO.Path]::GetFileNameWithoutExtension($_) }) + @($ProfileCode) | Where-Object { $_ -match '^[\w. \-]+$' })
+    foreach ($stem in $stems) {
+        $sub = [System.IO.Path]::Combine($folder, $stem)
+        if ((Test-Path -LiteralPath $sub -PathType Container -ErrorAction SilentlyContinue) -and $seenFolders.Add($sub)) { [void]$folders.Add($sub) }
+    }
+    $found = New-Object System.Collections.Generic.List[string]
+    foreach ($candidateFolder in $folders) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $candidateFolder -Filter $Pattern -File -ErrorAction SilentlyContinue)) {
+            if (($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) { [void]$found.Add($file.FullName) }
+        }
+    }
+    if ($found.Count -eq 1) { return $found[0] }
+    return ''
+}
+
+# The Preinstall part of the System 11 table row, or $null when the table has none (a test that has not defined the table).
+function Get-TpmS11PreinstallSetting {
+    $table = Get-TpmPrerequisiteTable
+    if ($table.ContainsKey('TeknoS11') -and $table['TeknoS11'].Contains('Preinstall')) { return $table['TeknoS11']['Preinstall'] }
+    return $null
+}
+
+# <TeknoParrot root>\TeknoS11\state\<game>\cabinet-1, where System 11 keeps a game's saved flash and EEPROM files. '' without the table row.
+function Get-TpmS11SavedFilesDir {
+    param([Parameter(Mandatory)][string]$TeknoParrotRoot, [Parameter(Mandatory)][string]$Code)
+    $setting = Get-TpmS11PreinstallSetting
+    if ($null -eq $setting) { return '' }
+    return [System.IO.Path]::Combine($TeknoParrotRoot, [string]$setting['StateDir'], $Code, [string]$setting['CabinetDir'])
+}
+
+function Test-TpmS11SavedFilesPresent {
+    param([Parameter(Mandatory)][string]$TeknoParrotRoot, [Parameter(Mandatory)][string]$Code)
+    $folder = Get-TpmS11SavedFilesDir -TeknoParrotRoot $TeknoParrotRoot -Code $Code
+    if (-not $folder -or -not (Test-Path -LiteralPath $folder -PathType Container -ErrorAction SilentlyContinue)) { return $false }
+    return (@(Get-ChildItem -LiteralPath $folder -File -Force -ErrorAction SilentlyContinue).Count -gt 0)
+}
+
+# Read-only look at the registered profiles for the Library health check. One read per profile.
+#   Unknown          game types that are not in the table (one entry per type, with its games): flagged, never ignored
+#   NotAvailable     games the profile marks DevOnly (development only): TeknoParrot has not released them yet
+#   EmulatorMissing  games whose type is known but whose emulator folder is not in the TeknoParrot folder (looked for on disk)
+#   NeedsManualExe   games with no executable name, no setup file and no game path: the player must pick the game file
+#   S11Games / S11NoSavedFiles  System 11 games, and those with no saved files yet
+function Get-TpmGameTypeReport {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Profiles, [string]$TeknoParrotRoot = '')
+    $table = Get-TpmPrerequisiteTable
+    $unknown = @{}
+    $emulatorMissing = @{}
+    $folderChecked = @{}
+    $notAvailable = New-Object System.Collections.Generic.List[string]
+    $manualExe = New-Object System.Collections.Generic.List[string]
+    $s11NoSaved = New-Object System.Collections.Generic.List[string]
+    $s11Games = 0
+    $failed = 0
+    foreach ($pf in $Profiles) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile) { continue }
+            $profileNode = $doc.GameProfile
+            $code = [string]$pf.BaseName
+            $nameNode = $profileNode.SelectSingleNode('GameName')
+            $label = if ($nameNode -and -not [string]::IsNullOrWhiteSpace($nameNode.InnerText)) { $nameNode.InnerText.Trim() } else { $code }
+            $typeNode = $profileNode.SelectSingleNode('EmulatorType')
+            $type = if ($typeNode) { $typeNode.InnerText.Trim() } else { '' }
+            $devNode = $profileNode.SelectSingleNode('DevOnly')
+            $devOnly = [bool]($devNode -and $devNode.InnerText.Trim() -ieq 'true')
+            if ($table.Count -gt 0 -and $type) {
+                if (-not $table.ContainsKey($type)) {
+                    if (-not $unknown.ContainsKey($type)) { $unknown[$type] = New-Object System.Collections.Generic.List[string] }
+                    [void]$unknown[$type].Add($label)
+                    Write-Log ("GameTypes: {0} has the game type '{1}', which TeknoParrot Manager does not know." -f $code, $type)
+                } elseif ($devOnly) {
+                    [void]$notAvailable.Add($label)
+                    Write-Log ("GameTypes: {0} ({1}) is marked development only, so it is not available yet." -f $code, $type)
+                } elseif ($TeknoParrotRoot -and ($table[$type].Contains('EmulatorFolders') -or $type -ieq 'Pcsx2x6')) {
+                    if (-not $folderChecked.ContainsKey($type)) { $folderChecked[$type] = [bool](Resolve-TpmPrerequisiteEmulatorDir -EmulatorType $type -Requirement $table[$type] -TeknoParrotRoot $TeknoParrotRoot) }
+                    if (-not $folderChecked[$type]) {
+                        if (-not $emulatorMissing.ContainsKey($type)) { $emulatorMissing[$type] = New-Object System.Collections.Generic.List[string] }
+                        [void]$emulatorMissing[$type].Add($label)
+                    }
+                }
+            }
+            if ($devOnly) { continue }
+            $exeNode = $profileNode.SelectSingleNode('ExecutableName')
+            if ($TeknoParrotRoot -and (-not $exeNode -or [string]::IsNullOrWhiteSpace($exeNode.InnerText))) {
+                $pathNode = $profileNode.SelectSingleNode('GamePath')
+                $pathText = if ($pathNode) { $pathNode.InnerText.Trim() } else { '' }
+                $hasPath = ($pathText -and (Test-Path -LiteralPath $pathText -PathType Leaf -ErrorAction SilentlyContinue))
+                $hasSetup = Test-Path -LiteralPath (Join-Path (Join-Path $TeknoParrotRoot 'GameSetup') ($code + '.xml')) -PathType Leaf -ErrorAction SilentlyContinue
+                if (-not $hasPath -and -not $hasSetup) { [void]$manualExe.Add($label) }
+            }
+            if ($type -ieq 'TeknoS11') {
+                $s11Games++
+                if ($TeknoParrotRoot -and (Get-TpmS11SavedFilesDir -TeknoParrotRoot $TeknoParrotRoot -Code $code) -and -not (Test-TpmS11SavedFilesPresent -TeknoParrotRoot $TeknoParrotRoot -Code $code)) { [void]$s11NoSaved.Add($label) }
+            }
+        } catch {
+            $failed++
+            Write-Log ("GameTypes: could not read {0} -- {1}" -f $pf.Name, $_.Exception.Message)
+        }
+    }
+    return [pscustomobject]@{
+        Checked         = ($table.Count -gt 0)
+        Failed          = $failed
+        Unknown         = @($unknown.Keys | Sort-Object | ForEach-Object { [pscustomobject]@{ Type = [string]$_; Games = @($unknown[$_].ToArray()) } })
+        NotAvailable    = @($notAvailable.ToArray())
+        EmulatorMissing = @($emulatorMissing.Keys | Sort-Object | ForEach-Object { [pscustomobject]@{ Type = [string]$_; Games = @($emulatorMissing[$_].ToArray()) } })
+        NeedsManualExe  = @($manualExe.ToArray())
+        S11Games        = $s11Games
+        S11NoSavedFiles = @($s11NoSaved.ToArray())
+    }
+}
+
+# The Library health rows for a game type report: 'Game types', 'Game files' and 'System 11'. Short plain wording; the names are in the details.
+function Get-TpmGameTypeRows {
+    param([Parameter(Mandatory)]$Report)
+    $rows = New-Object System.Collections.Generic.List[object]
+    if (-not [bool]$Report.Checked) { return @() }
+    if ([int]$Report.Failed -gt 0) { return @(New-TpmLibraryHealthRow -Area 'Game types' -Text 'Could not check' -Color 'Yellow') }
+    $unknownCount = @($Report.Unknown | ForEach-Object { @($_.Games) }).Count
+    $missingCount = @($Report.EmulatorMissing | ForEach-Object { @($_.Games) }).Count
+    $notAvailableCount = @($Report.NotAvailable).Count
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($unknownCount -gt 0) { [void]$parts.Add(('{0} {1} a game type that TeknoParrot Manager does not know' -f (Format-TpmGameCount -Count $unknownCount), $(if ($unknownCount -eq 1) { 'has' } else { 'have' }))) }
+    if ($notAvailableCount -gt 0) { [void]$parts.Add(('{0} {1} not available yet' -f (Format-TpmGameCount -Count $notAvailableCount), $(if ($notAvailableCount -eq 1) { 'is' } else { 'are' }))) }
+    if ($missingCount -gt 0) { [void]$parts.Add(('the emulator for {0} is not in your TeknoParrot folder' -f (Format-TpmGameCount -Count $missingCount))) }
+    if ($parts.Count -gt 0) {
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game types' -Text ('Needs attention - {0}. Choose D for the list' -f ($parts -join '; ')) -Color 'Yellow'))
+    } else {
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game types' -Text 'OK' -Color 'Green'))
+    }
+    $manualCount = @($Report.NeedsManualExe).Count
+    if ($manualCount -gt 0) {
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game files' -Text ('Needs attention - {0} {1} you to pick the game file by hand. Choose D for the list' -f (Format-TpmGameCount -Count $manualCount), $(if ($manualCount -eq 1) { 'needs' } else { 'need' })) -Color 'Yellow'))
+    }
+    $noSavedCount = @($Report.S11NoSavedFiles).Count
+    if ($noSavedCount -gt 0) {
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'System 11' -Text ('Note - {0} of {1} System 11 {2} no saved setup files yet. If you already have the System 11 saved-files set, the main run can copy it' -f $noSavedCount, [int]$Report.S11Games, $(if ([int]$Report.S11Games -eq 1) { 'game has' } else { 'games have' })) -Color 'DarkGray'))
+    }
+    return $rows.ToArray()
+}
+
+# The detail block for the same report: every name, and what to do about it.
+function Get-TpmGameTypeDetailBlocks {
+    param([Parameter(Mandatory)]$Report)
+    if (-not [bool]$Report.Checked) { return @() }
+    $lines = New-Object System.Collections.Generic.List[string]
+    if ([int]$Report.Failed -gt 0) {
+        [void]$lines.Add(('Status: {0} game profile(s) could not be read, so this check is not complete. The log says why.' -f $Report.Failed))
+    }
+    foreach ($entry in @($Report.Unknown)) {
+        [void]$lines.Add(('Unknown game type {0}: {1}' -f $entry.Type, (Format-TpmNameList -Names @($entry.Games) -Max 1000)))
+    }
+    if (@($Report.Unknown).Count -gt 0) { [void]$lines.Add('TeknoParrot Manager does not know these types yet, so it cannot check their files. The games may still run.') }
+    if (@($Report.NotAvailable).Count -gt 0) {
+        [void]$lines.Add(('Not available yet: {0}' -f (Format-TpmNameList -Names @($Report.NotAvailable) -Max 1000)))
+        [void]$lines.Add('TeknoParrot lists these as development only, so they cannot be played yet.')
+    }
+    foreach ($entry in @($Report.EmulatorMissing)) {
+        [void]$lines.Add(('Emulator for type {0} is not in your TeknoParrot folder: {1}' -f $entry.Type, (Format-TpmNameList -Names @($entry.Games) -Max 1000)))
+    }
+    if (@($Report.NeedsManualExe).Count -gt 0) {
+        [void]$lines.Add(('Pick the game file by hand: {0}' -f (Format-TpmNameList -Names @($Report.NeedsManualExe) -Max 1000)))
+        [void]$lines.Add('Their profile names no game file and TeknoParrot has no setup file for them, so TeknoParrot Manager cannot find them. Set the game file in TeknoParrotUI.')
+    }
+    if (@($Report.S11NoSavedFiles).Count -gt 0) {
+        [void]$lines.Add(('System 11 games with no saved setup files: {0}' -f (Format-TpmNameList -Names @($Report.S11NoSavedFiles) -Max 1000)))
+        [void]$lines.Add('The saved-files set holds files for about two thirds of the System 11 games. A game it has no files for starts without them.')
+    }
+    if ($lines.Count -eq 0) { [void]$lines.Add('Every registered game has a known game type, and its emulator is in your TeknoParrot folder.') }
+    return @(@{ Heading = 'Game types'; Lines = $lines.ToArray() })
+}
+
+# --- System 11 saved files: copied from the player's own set, never replacing a file ---------------------------------------------------
+# The set ("[NVRAM] TeknoS11 preinstalled game files for System 11") holds TeknoS11\state\<game>\cabinet-1\<file> for 150 games. Its README
+# says to copy the state folder, "overwrite files at your own risk". TeknoParrot Manager only ADDS: a file that is already there is kept.
+# Nothing is downloaded and nothing is pointed to; the player's own ZIP (found in the collection folders) or a folder the player picks.
+
+# A chosen ZIP or folder: @{ Valid; Kind = Archive|Folder; Path; Error }. A folder may hold TeknoS11\state, or be the state folder.
+function Resolve-TpmS11PreinstallSource {
+    param([AllowEmptyString()][AllowNull()][string]$Path)
+    $result = [pscustomobject]@{ Valid = $false; Kind = ''; Path = ''; Error = '' }
+    $text = ([string]$Path).Trim().Trim('"')
+    if ([string]::IsNullOrWhiteSpace($text)) { $result.Error = 'No location was chosen.'; return $result }
+    try { $full = [System.IO.Path]::GetFullPath($text) } catch { $result.Error = 'That is not a valid path.'; return $result }
+    if (Test-Path -LiteralPath $full -PathType Leaf) {
+        if ([System.IO.Path]::GetExtension($full) -ine '.zip') { $result.Error = 'Choose a folder or a .zip archive.'; return $result }
+        $result.Valid = $true; $result.Kind = 'Archive'; $result.Path = $full
+        return $result
+    }
+    if (-not (Test-Path -LiteralPath $full -PathType Container)) { $result.Error = 'That location was not found.'; return $result }
+    $candidates = @((Join-Path $full 'TeknoS11\state'), (Join-Path $full 'state'))
+    if ((Split-Path -Leaf $full) -ieq 'state') { $candidates += $full }
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Container) { $result.Valid = $true; $result.Kind = 'Folder'; $result.Path = $candidate; return $result }
+    }
+    $result.Error = 'That folder has no state folder inside it.'
+    return $result
+}
+
+# Every <game>\cabinet-1\<file> of a source: @{ Code; Name; Length; EntryName; FilePath }. An unsafe or odd name is left out (and logged).
+function Get-TpmS11PreinstallMembers {
+    param([Parameter(Mandatory)]$Source)
+    $setting = Get-TpmS11PreinstallSetting
+    $cabinet = if ($setting) { [string]$setting['CabinetDir'] } else { 'cabinet-1' }
+    $stateRelative = if ($setting) { ([string]$setting['StateDir']).Replace('\', '/') } else { 'TeknoS11/state' }
+    $stateLeaf = $stateRelative.Split('/')[-1]
+    $statePrefix = $stateRelative.Substring(0, $stateRelative.Length - $stateLeaf.Length)
+    $pattern = '^(?:' + [regex]::Escape($statePrefix) + ')?' + [regex]::Escape($stateLeaf) + '/([^/]+)/' + [regex]::Escape($cabinet) + '/([^/]+)$'
+    $members = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $left = @{ Out = 0 }
+    $add = {
+        param([string]$Code, [string]$Name, [int64]$Length, [string]$EntryName, [string]$FilePath)
+        if ($Code -notmatch '^[A-Za-z0-9_\-]+$' -or $Name -notmatch '^[A-Za-z0-9_.\-]+$' -or -not $seen.Add($Code + '/' + $Name)) { $left.Out++; return }
+        [void]$members.Add([pscustomobject]@{ Code = $Code; Name = $Name; Length = $Length; EntryName = $EntryName; FilePath = $FilePath })
+    }
+    if ($Source.Kind -eq 'Archive') {
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($Source.Path)
+        try {
+            # get_Entries(): the property read hides a bad member name on Windows PowerShell 5.1.
+            foreach ($entry in $zip.get_Entries()) {
+                if ([string]::IsNullOrEmpty($entry.Name)) { continue }
+                $name = [string]$entry.FullName
+                if (Test-TpmCps3UnsafeMemberName -Name $name) { $left.Out++; continue }
+                $match = [regex]::Match($name, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                if (-not $match.Success) { continue }
+                & $add $match.Groups[1].Value $match.Groups[2].Value ([int64]$entry.Length) $name ''
+            }
+        } finally { $zip.Dispose() }
+    } else {
+        foreach ($codeDir in @(Get-ChildItem -LiteralPath $Source.Path -Directory -Force -ErrorAction Stop)) {
+            if (($codeDir.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { $left.Out++; continue }
+            $cabinetDir = Join-Path $codeDir.FullName $cabinet
+            if (-not (Test-Path -LiteralPath $cabinetDir -PathType Container)) { continue }
+            if (([System.IO.File]::GetAttributes($cabinetDir) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { $left.Out++; continue }
+            foreach ($file in @(Get-ChildItem -LiteralPath $cabinetDir -File -Force -ErrorAction Stop)) {
+                if (($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { $left.Out++; continue }
+                & $add $codeDir.Name $file.Name ([int64]$file.Length) '' $file.FullName
+            }
+        }
+    }
+    if ($left.Out -gt 0) { Write-Log ("System 11 saved files: {0} item(s) in the source were left out (odd or unsafe name, or a duplicate)." -f $left.Out) }
+    return $members.ToArray()
+}
+
+# Read-only plan: for each registered System 11 game, which saved files the source has and which are already in place.
+#   Items         one per file: Code, Name, Length, EntryName/FilePath, Destination, Exists
+#   NewGames      games that get at least one file
+#   NoFileGames   games the source holds no file for (said plainly: they start without)
+#   AlreadyHave   games whose files are all in place already
+function Get-TpmS11PreinstallPlan {
+    param([Parameter(Mandatory)][string]$SourcePath, [Parameter(Mandatory)][string]$TeknoParrotRoot, [Parameter(Mandatory)][string[]]$GameCodes)
+    $plan = [pscustomobject]@{ Valid = $false; Error = ''; Source = $null; Items = @(); NoFileGames = @(); AlreadyHave = @(); NewGames = @() }
+    $source = Resolve-TpmS11PreinstallSource -Path $SourcePath
+    if (-not $source.Valid) { $plan.Error = [string]$source.Error; return $plan }
+    try { $members = @(Get-TpmS11PreinstallMembers -Source $source) }
+    catch {
+        Write-Log ("System 11 saved files: the source could not be read -- {0}" -f $_.Exception.Message)
+        $plan.Error = 'The chosen location could not be read.'
+        return $plan
+    }
+    $items = New-Object System.Collections.Generic.List[object]
+    $noFile = New-Object System.Collections.Generic.List[string]
+    $already = New-Object System.Collections.Generic.List[string]
+    $newGames = New-Object System.Collections.Generic.List[string]
+    foreach ($code in @($GameCodes | Sort-Object -Unique)) {
+        $mine = @($members | Where-Object { $_.Code -ieq $code })
+        if ($mine.Count -eq 0) { [void]$noFile.Add($code); continue }
+        $folder = Get-TpmS11SavedFilesDir -TeknoParrotRoot $TeknoParrotRoot -Code $code
+        $anyNew = $false
+        foreach ($member in $mine) {
+            $destination = [System.IO.Path]::Combine($folder, $member.Name)
+            $exists = [bool](Test-Path -LiteralPath $destination -ErrorAction SilentlyContinue)
+            if (-not $exists) { $anyNew = $true }
+            [void]$items.Add([pscustomobject]@{ Code = $code; Name = $member.Name; Length = $member.Length; EntryName = $member.EntryName; FilePath = $member.FilePath; Destination = $destination; Exists = $exists })
+        }
+        if ($anyNew) { [void]$newGames.Add($code) } else { [void]$already.Add($code) }
+    }
+    $plan.Valid = $true
+    $plan.Source = $source
+    $plan.Items = $items.ToArray()
+    $plan.NoFileGames = $noFile.ToArray()
+    $plan.AlreadyHave = $already.ToArray()
+    $plan.NewGames = $newGames.ToArray()
+    return $plan
+}
+
+# Copies the files of a plan that are not in place yet. Every file is staged and its size checked, then all are added through the shared
+# file transaction (a recovery copy is kept and everything is put back if a step fails). An existing file is never replaced.
+function Invoke-TpmS11PreinstallInstall {
+    param([Parameter(Mandatory)]$Plan, [Parameter(Mandatory)][string]$TpRoot)
+    $installed = New-Object System.Collections.Generic.List[string]
+    $failed = New-Object System.Collections.Generic.List[string]
+    $kept = New-Object System.Collections.Generic.List[string]
+    $finish = {
+        param([string]$Outcome, [string]$Reason, [string]$Summary, $Transaction = $null)
+        try { Write-Log ("System 11 saved files: outcome={0} reason={1} installed={2} kept={3} failed={4}" -f $Outcome, $Reason, $installed.Count, $kept.Count, $failed.Count) } catch { }
+        return [pscustomobject]@{
+            Outcome = $Outcome; ReasonCode = $Reason; Summary = $Summary; Transaction = $Transaction
+            Installed = @($installed.ToArray()); Kept = @($kept.ToArray()); Failed = @($failed.ToArray())
+            Complete = ($Outcome -in @('SUCCEEDED', 'NO_OP') -and $failed.Count -eq 0)
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($TpRoot) -or -not (Test-Path -LiteralPath $TpRoot -PathType Container)) {
+        return (& $finish 'FAILED_BEFORE_MUTATION' 'TP_ROOT_INVALID' 'The TeknoParrot folder was not found. Nothing was changed.')
+    }
+    $tpFull = Get-TpmFullFolderPath -Path $TpRoot
+    if (-not (Test-TpmNoReparsePath -Path $tpFull)) {
+        return (& $finish 'FAILED_BEFORE_MUTATION' 'TP_ROOT_UNSAFE' 'The TeknoParrot folder path is not safe to write to. Nothing was changed.')
+    }
+    if (-not $Plan.Valid) { return (& $finish 'FAILED_BEFORE_MUTATION' 'SOURCE_UNUSABLE' ([string]$Plan.Error + ' Nothing was changed.')) }
+    foreach ($item in @($Plan.Items | Where-Object { $_.Exists })) { [void]$kept.Add(('{0}\{1}' -f $item.Code, $item.Name)) }
+    $todo = @($Plan.Items | Where-Object { -not $_.Exists })
+    if ($todo.Count -eq 0) { return (& $finish 'NO_OP' 'NO_CHANGES_NEEDED' 'Every saved file was already in place. Nothing was changed.') }
+    foreach ($item in $todo) {
+        $destination = [System.IO.Path]::GetFullPath([string]$item.Destination)
+        if (-not (Test-PathInside -child $destination -parent $tpFull) -or -not (Test-TpmNoReparsePath -Path $destination)) {
+            return (& $finish 'FAILED_BEFORE_MUTATION' 'DESTINATION_UNSAFE' 'A saved-files folder is not safe to write to. Nothing was changed.')
+        }
+    }
+    [int64]$needed = 64MB
+    foreach ($item in $todo) { $needed += 2 * [int64]$item.Length }
+    $free = Get-TpmCps3FreeBytes -Path $tpFull
+    if ($null -ne $free -and $free -lt $needed) {
+        return (& $finish 'FAILED_BEFORE_MUTATION' 'INSUFFICIENT_SPACE' ('There is not enough free space on the TeknoParrot drive: about {0} MB needed, {1} MB free. Nothing was changed.' -f [Math]::Ceiling($needed / 1MB), [Math]::Floor($free / 1MB)))
+    }
+    $layout = Get-TpmOwnedLayout -TeknoParrotRoot $tpFull
+    $stageBase = Join-Path $layout.Temp 's11-stage'
+    if (-not (Test-TpmNoReparsePath -Path $stageBase)) {
+        return (& $finish 'FAILED_BEFORE_MUTATION' 'STAGING_UNSAFE' 'The staging folder path is not safe to write to. Nothing was changed.')
+    }
+    $extractDir = Join-Path $stageBase ('extract-' + [guid]::NewGuid().ToString('N'))
+    $zip = $null
+    try {
+        [void][System.IO.Directory]::CreateDirectory($extractDir)
+        if ($Plan.Source.Kind -eq 'Archive') { $zip = [System.IO.Compression.ZipFile]::OpenRead([string]$Plan.Source.Path) }
+        $operations = New-Object System.Collections.Generic.List[object]
+        $index = 0
+        $started = Get-Date
+        foreach ($item in $todo) {
+            $index++
+            Write-TpmCompactExtractionProgress -Phase 'Extracting' -Label 'System 11 saved files' -Current $index -Total $todo.Count -StartedAt $started
+            $stagePath = Join-Path $extractDir ('{0:0000}.bin' -f $index)
+            $label = '{0}\{1}' -f $item.Code, $item.Name
+            try {
+                if ($zip) {
+                    $entry = $zip.GetEntry([string]$item.EntryName)
+                    if ($null -eq $entry -or [int64]$entry.Length -ne [int64]$item.Length) { [void]$failed.Add($label); Write-Log ("System 11 saved files: {0} is not the size the source listed; skipped." -f $label); continue }
+                    $in = $entry.Open()
+                    $out = $null
+                    try {
+                        $out = New-Object System.IO.FileStream($stagePath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None, 65536)
+                        $in.CopyTo($out)
+                    } finally { if ($out) { $out.Dispose() }; $in.Dispose() }
+                } else {
+                    $sourceInfo = Get-Item -LiteralPath ([string]$item.FilePath) -Force -ErrorAction Stop
+                    if ($sourceInfo.PSIsContainer -or (($sourceInfo.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) -or [int64]$sourceInfo.Length -ne [int64]$item.Length) { [void]$failed.Add($label); Write-Log ("System 11 saved files: {0} changed since it was listed; skipped." -f $label); continue }
+                    Copy-Item -LiteralPath ([string]$item.FilePath) -Destination $stagePath -ErrorAction Stop
+                }
+                if ((Get-Item -LiteralPath $stagePath -Force).Length -ne [int64]$item.Length) { [void]$failed.Add($label); Write-Log ("System 11 saved files: {0} was not copied completely; skipped." -f $label); continue }
+                $sha = Get-TpmAutoSyncSha256 -Path $stagePath
+                [void]$operations.Add([pscustomobject][ordered]@{ ItemId = $label; Operation = 'ADD'; SourcePath = $stagePath; DestinationPath = [System.IO.Path]::GetFullPath([string]$item.Destination); RootPath = $tpFull; ExpectedSourceHash = $sha; ExpectedFinalHash = $sha })
+            } catch {
+                [void]$failed.Add($label)
+                Write-Log ("System 11 saved files: {0} could not be read -- {1}" -f $label, $_.Exception.Message)
+            }
+        }
+        Write-TpmCompactExtractionProgress -Phase 'Extracting' -Label 'System 11 saved files' -Current $todo.Count -Total $todo.Count -StartedAt $started -Complete
+        if ($failed.Count -gt 0) {
+            # One file that cannot be read means the set cannot be trusted: nothing is added.
+            return (& $finish 'FAILED_BEFORE_MUTATION' 'SOURCE_FILE_UNUSABLE' 'Some saved files could not be read from your set. Nothing was changed.')
+        }
+        $transaction = Invoke-TpmTransactionalFileBatch `
+            -WorkflowKey 'S11Preinstall' -OperationKey 'InstallSavedFiles' `
+            -Operations $operations.ToArray() -StagingDir $stageBase `
+            -Summary 'The System 11 saved files were not copied.' `
+            -SuccessSummary 'The System 11 saved files were copied and checked.' `
+            -NoOpSummary 'Everything is already in place. Nothing was changed.' `
+            -ReasonCode 'S11_FILE_TRANSACTION_FAILED'
+        if ([string]$transaction.Outcome -eq 'SUCCEEDED') { foreach ($operation in $operations) { [void]$installed.Add([string]$operation.ItemId) } }
+        return (& $finish ([string]$transaction.Outcome) ([string]$transaction.ReasonCode) ([string]$transaction.Summary) $transaction)
+    } catch {
+        try { Write-Log ("System 11 saved files: install stopped -- {0}" -f $_.Exception.Message) } catch { }
+        return (& $finish 'FAILED_BEFORE_MUTATION' 'S11_INSTALL_ERROR' 'The saved files could not be copied. Nothing was changed.')
+    } finally {
+        if ($zip) { $zip.Dispose() }
+        try {
+            if (Test-Path -LiteralPath $extractDir) { Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction Stop }
+            if ((Test-Path -LiteralPath $stageBase) -and @(Get-ChildItem -LiteralPath $stageBase -Force -ErrorAction Stop).Count -eq 0) { Remove-Item -LiteralPath $stageBase -Force -ErrorAction Stop }
+        } catch {
+            try { Write-Log ("System 11 saved files: staging cleanup incomplete: {0}" -f $_.Exception.Message) } catch { }
+        }
+    }
+}
+
+# Interactive optional step. Offered only when a registered System 11 game has no saved files yet. Looks for the player's own set in the
+# collection folders first; otherwise asks whether the player has it somewhere else. Says plainly which games the set has no files for.
+function Invoke-TpmS11PreinstallOffer {
+    param(
+        [Parameter(Mandatory)][string]$TpRoot,
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [string[]]$SearchFolders = @()
+    )
+    $setting = Get-TpmS11PreinstallSetting
+    if ($null -eq $setting -or -not (Test-Path -LiteralPath $UserProfilesDir -PathType Container)) { return $null }
+    $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'System 11 profile discovery' -EnumerationErrorAction SilentlyContinue)
+    $map = Get-TpmEmulatorGameMap -Profiles $profiles -ProgressLabel 'System 11 profile scan'
+    if (-not $map.ContainsKey('TeknoS11')) { return $null }
+    $without = @($map['TeknoS11'] | Where-Object { -not (Test-TpmS11SavedFilesPresent -TeknoParrotRoot $TpRoot -Code $_) })
+    if ($without.Count -eq 0) { return $null }
+    $zips = @(Find-TpmPrerequisiteSourceZips -Pattern ([string]$setting['SourceZipPattern']) -SearchFolders $SearchFolders)
+    $plan = $null
+    if ($zips.Count -gt 0) {
+        $plan = Get-TpmS11PreinstallPlan -SourcePath ([string]$zips[0].FullName) -TeknoParrotRoot $TpRoot -GameCodes @($map['TeknoS11'])
+        if ($plan.Valid -and @($plan.NewGames).Count -eq 0) {
+            # The set in the collection has nothing more for these games, so the player is not asked again on every run.
+            Write-Log 'System 11 saved files: the set in the collection has nothing new for the registered games.'
+            return $null
+        }
+    }
+    Write-Host ""
+    Write-Host "============================================" -ForegroundColor DarkCyan
+    Write-Host "   OPTIONAL: System 11 saved game files" -ForegroundColor DarkCyan
+    Write-Host "============================================" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-TpmText -Text ('{0} registered System 11 {1} no saved setup files yet. Without them a game sets itself up from scratch, which can take hours.' -f $without.Count, $(if ($without.Count -eq 1) { 'game has' } else { 'games have' })) -Indent 2
+    Write-TpmText -Text 'If you already have the System 11 saved-files set, TeknoParrot Manager can copy the files into your TeknoParrot folder. It does not provide or download them, and it never replaces a file that is already there.' -Indent 2
+    Write-Host ""
+    if ($null -ne $plan -and $plan.Valid) {
+        Write-TpmText -Text 'TeknoParrot Manager found the set in your own game collection.' -Indent 2 -Color DarkCyan
+        if ((Read-TpmYesNo -Prompt '  Copy the saved files for your System 11 games? (Y/N, default Y)' -Default 'Y') -ne 'Y') {
+            Write-Host "  Skipped. Nothing was changed." -ForegroundColor DarkGray
+            Write-Log 'System 11 saved files: offer declined.'
+            return $null
+        }
+    } elseif ($null -eq $plan) {
+        $chosen = ''
+        if ((Read-TpmYesNo -Prompt '  Do you have the saved-files set? (Y/N, default N)' -Default 'N') -ne 'Y') {
+            Write-Host "  Skipped. Nothing was changed." -ForegroundColor DarkGray
+            Write-Log 'System 11 saved files: offer declined (no set in the collection folders).'
+            return $null
+        }
+        $where = Read-TpmChoice -Prompt '  Is it F) a folder, Z) a .zip archive, or C) cancel? Choose F, Z, or C' -Choices @('F', 'Z', 'C') -Default 'C'
+        if ($where -eq 'F') { $chosen = Read-PathWithBrowse -Prompt '  Folder that holds the TeknoS11 folder (or the state folder)' -Mode Folder }
+        elseif ($where -eq 'Z') { $chosen = Read-PathWithBrowse -Prompt '  Path to the .zip archive' -Mode File -FileFilter 'Zip archives (*.zip)|*.zip|All files (*.*)|*.*' }
+        if ([string]::IsNullOrWhiteSpace($chosen)) {
+            Write-Host "  No location chosen. Nothing was changed." -ForegroundColor DarkGray
+            Write-Log 'System 11 saved files: no source chosen.'
+            return $null
+        }
+        $plan = Get-TpmS11PreinstallPlan -SourcePath $chosen -TeknoParrotRoot $TpRoot -GameCodes @($map['TeknoS11'])
+    }
+    if (-not $plan.Valid) {
+        Write-Host ("  {0} Nothing was changed." -f $plan.Error) -ForegroundColor Yellow
+        return $plan
+    }
+    foreach ($code in @($plan.NoFileGames)) { Write-Log ("System 11 saved files: the set has no files for {0}." -f $code) }
+    if (@($plan.NoFileGames).Count -gt 0) {
+        Write-TpmText -Text ('Your set has no saved files for {0}. {1} without them.' -f (Format-TpmNameList -Names @($plan.NoFileGames) -Max 5), $(if (@($plan.NoFileGames).Count -eq 1) { 'That game starts' } else { 'Those games start' })) -Indent 2 -Color Yellow
+    }
+    if (@($plan.NewGames).Count -eq 0) {
+        Write-Host "  Your set has nothing new for your games. Nothing was changed." -ForegroundColor DarkGray
+        return $plan
+    }
+    $result = $null
+    try {
+        $result = Invoke-TpmProgressGroup -Title 'System 11 saved files' -Action { Invoke-TpmS11PreinstallInstall -Plan $plan -TpRoot $TpRoot }
+    } catch {
+        Write-Host ("  The System 11 step could not finish: {0}" -f $_.Exception.Message) -ForegroundColor Red
+        Write-Log ("System 11 saved files: failed: {0}" -f $_.Exception.Message)
+        return $null
+    }
+    Write-Host ""
+    if ($result.Outcome -eq 'SUCCEEDED') {
+        Write-Host ("  Copied and checked {0} file(s) for {1}." -f @($result.Installed).Count, (Format-TpmGameCount -Count @($plan.NewGames).Count)) -ForegroundColor Green
+        if (@($result.Kept).Count -gt 0) { Write-Host ("  {0} file(s) that were already there were kept." -f @($result.Kept).Count) -ForegroundColor DarkGray }
+    } elseif ($result.Outcome -eq 'NO_OP') {
+        Write-Host ("  {0}" -f $result.Summary) -ForegroundColor DarkGray
+    } else {
+        Write-Host ("  The saved files were not all copied. {0}" -f $result.Summary) -ForegroundColor Yellow
+        Write-Host "  Next step: open View Log from the main menu to see what stopped it." -ForegroundColor DarkCyan
+    }
+    return $result
+}
+# END GameTypes
+
 # Word-wraps free text (e.g. a community notes field) to a fixed width,
 # returning one string per output line, each pre-fixed with Indent. Existing
 # line breaks in the input (paragraph breaks, blank separator lines) are
@@ -40426,7 +41056,13 @@ function Get-TpmGameSupportSummary {
             $secondPath = $(if ($null -ne $secondNode) { $secondNode.InnerText.Trim() } else { '' })
             $secondMissing = ([string]::IsNullOrWhiteSpace($secondPath) -or -not (Test-Path -LiteralPath $secondPath -PathType Leaf))
         }
-        if (-not $fileFound -or $secondMissing -or ($PostgresNeededCodes -contains $code)) {
+        $setMissing = $false
+        if ($fileFound) {
+            $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
+            $exeNameNode = $doc.GameProfile.SelectSingleNode('ExecutableName')
+            $setMissing = (@(Get-TpmMissingGameSetFiles -GamePath $(if ($null -ne $gamePathNode) { $gamePathNode.InnerText.Trim() } else { '' }) -ExecutableName $(if ($null -ne $exeNameNode) { $exeNameNode.InnerText.Trim() } else { '' })).Count -gt 0)
+        }
+        if (-not $fileFound -or $secondMissing -or $setMissing -or ($PostgresNeededCodes -contains $code)) {
             $row.NeedsYou++
             [void]$needsYou.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $code))
         }
@@ -40443,7 +41079,7 @@ function Get-TpmGameSupportLines {
         [void]$lines.Add(('{0}: {1} / {2} / {3} / {4}' -f $row.Emulator, $row.Registered, $row.FilesFound, $row.StepsShown, $row.NeedsYou))
     }
     [void]$lines.Add(('Needs you: {0}' -f (Format-TpmNameList -Names @($Summary.NeedsYouNames) -Max 1000 -WhenEmpty 'none')))
-    [void]$lines.Add('A game needs you when its game file is missing, its second game file is not chosen, or it still needs PostgreSQL settings.')
+    [void]$lines.Add('A game needs you when its game file is missing, a second ZIP its profile names is not beside it, its second game file is not chosen, or it still needs PostgreSQL settings.')
     if (-not [bool]$Summary.GuideAvailable) {
         [void]$lines.Add('Setup steps were not counted: there is no saved copy of the Game Notes page yet. Run AutoSync or Register once with an internet connection to save one.')
     }
@@ -56097,7 +56733,7 @@ if ($duplicateConflicts.Count -gt 0 -and $dryRunActive) {
                     }
                     $swGp.InnerText = $info.Exe
                     $ledgerMapping = Start-TpmRegistrationMapping -Folder $folderName -Code $code -Match 'duplicate-switch' -IntendedPath $info.Exe -TemplatePath '' -DryRun $dryRunActive
-                    [void](Set-SecondaryExecutablePath $swDoc $info.Exe)
+                    [void](Set-SecondaryExecutablePath $swDoc $info.Exe -ProfileCode $code)
                     if (-not $dryRunActive) { $preWriteState = Get-TpmProfileWriteFingerprint -Path $userProfilePath }
                     $switchWriteAttempted = -not $dryRunActive
                     Save-XmlMaybe $swDoc $userProfilePath $dryRunActive
@@ -57862,6 +58498,16 @@ if ($dryRunActive) {
     Write-Log "Unattended: CPS3 supplementary file offer skipped."
 } else {
     [void](Invoke-TpmCps3SupplementaryOffer -TpRoot $tpRoot -UserProfilesDir $userProfilesDir)
+}
+# =============================================================================
+# SYSTEM 11 SAVED FILES  (optional, only when System 11 games are registered and some have no saved files)
+# =============================================================================
+if ($dryRunActive) {
+    Write-Log "PreviewMode: System 11 saved files offer skipped."
+} elseif ($Unattended) {
+    Write-Log "Unattended: System 11 saved files offer skipped."
+} else {
+    [void](Invoke-TpmS11PreinstallOffer -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -SearchFolders @($zipSourceSupplementary, $zipSource))
 }
 # =============================================================================
 # GPU FIX SETUP  (optional, runs after dgVoodoo2 setup)

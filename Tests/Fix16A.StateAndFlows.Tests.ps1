@@ -30,7 +30,7 @@ BeforeAll {
         'Get-TpmUserProfilesBackupMarkerName', 'Get-TpmUserProfilesBackupStagingPrefix', 'Get-TpmUserProfilesBackupStagingPath',
         'Get-TpmUserProfilesBackupInventoryKeys', 'Get-TpmUserProfilesBackupInventory', 'Complete-TpmUserProfilesBackupFolder', 'Move-TpmDirectoryWithRetry',
         'Test-TpmRegistrationLedgerStopped', 'ConvertTo-TpmRegistrationResult', 'Confirm-TpmRegistrationSafetyBackup',
-        'Get-TpmRegistrationBackupEvidence', 'Backfill-SecondaryExecutablePath', 'Set-SecondaryExecutablePath',
+        'Get-TpmRegistrationBackupEvidence', 'Backfill-SecondaryExecutablePath', 'Set-SecondaryExecutablePath', 'Get-TpmMissingGameSetFiles', 'Get-TpmGameFileSet', 'Get-ExeAlternatives',
         'Test-TpmGameMutationPath', 'Add-TpmUnavailableDriveGame',
         'Read-Xml', 'Save-XmlMaybe', 'Get-TpmProfileWriteFingerprint', 'Resolve-TpmRegistrationSaveFailure',
         'Register-Games', 'Get-TeknoParrotProfileSet', 'Get-TpmDirectoryEntriesWithDiscoveryProgress',
