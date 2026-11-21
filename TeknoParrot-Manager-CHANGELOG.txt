@@ -96,6 +96,9 @@
     When LaunchBox's game list is there, pictures are matched by the
     game itself: another name of the same game is a sure match, and a
     picture of a different game with the same name is never used.
+  - LaunchBox: the platform the Manager makes is called TeknoParrot and
+    is scraped as Arcade, which is where LaunchBox's own game list keeps
+    arcade games. Nothing changes for you; it was checked, not renamed.
   - Games that need PlayStation 3 firmware (RPCS3) or a Play! game file
     are now checked before they start, and the Manager tells you what is
     missing.
