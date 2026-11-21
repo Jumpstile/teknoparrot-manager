@@ -17748,7 +17748,7 @@ function Get-TpmReShadeApplyPreflight {
         $progressCurrent++
         if ($SelectedGames.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade apply preflight' -Current $progressCurrent -Total $SelectedGames.Count -StartedAt $progressStarted }
         $gameLabel = Get-TpmReShadeGameLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
-        $record = [ordered]@{ Game = $gameLabel; Status = 'Unsafe'; Detail = '' }
+        $record = [ordered]@{ Game = $gameLabel; Id = [string]$pf.BaseName; Status = 'Unsafe'; Detail = '' }
         try {
             $doc = Read-Xml $pf.FullName
             $pathNode = if ($doc.GameProfile) { $doc.GameProfile.SelectSingleNode('GamePath') } else { $null }
@@ -18455,9 +18455,18 @@ function Invoke-ReShadeSetupLegacy {
     }
     $deploymentStarted = Get-Date
     $deploymentCurrent = 0
+    # The progress counts the games that are being changed (the ones the check above found ready), not the whole library. The
+    # checking passes above count every game; they have their own plainly named stage.
+    $changeableIds = @{}
+    foreach ($changeableRecord in @($preflightSummary.Records)) {
+        if ($changeableRecord.Status -eq 'Ready' -or ($Action -eq 'Adopt' -and $changeableRecord.Status -eq 'Protected')) { $changeableIds[([string]$changeableRecord.Id).ToLowerInvariant()] = $true }
+    }
+    $deploymentTotal = @($selectedGames | Where-Object { $changeableIds.ContainsKey(([string]$_.BaseName).ToLowerInvariant()) }).Count
     foreach ($pf in $selectedGames) {
-        $deploymentCurrent++
-        Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current $deploymentCurrent -Total $selectedGames.Count -StartedAt $deploymentStarted
+        if ($changeableIds.ContainsKey(([string]$pf.BaseName).ToLowerInvariant())) {
+            $deploymentCurrent++
+            if ($deploymentCurrent -le $deploymentTotal) { Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current $deploymentCurrent -Total $deploymentTotal -StartedAt $deploymentStarted }
+        }
         # FIX85: the undo receipt of this game (from the deployment or the reapply), whether a failed rollback left the game half changed, and
         # the CRT setting turned off; the finally block below finishes the receipt whatever happens after the deployment.
         $gameUndo = $null; $undoMixed = $false; $undoNative = $null; $nativeCrtPlanned = $false
@@ -18698,7 +18707,7 @@ function Invoke-ReShadeSetupLegacy {
             }
         }
     }
-    if ($selectedGames.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current $deploymentCurrent -Total $selectedGames.Count -StartedAt $deploymentStarted -Complete }
+    if ($deploymentTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current ([Math]::Min($deploymentCurrent, $deploymentTotal)) -Total $deploymentTotal -StartedAt $deploymentStarted -Complete }
     if ($nativeCrtState.Requested) { Write-TpmReShadeNativeCrtOutcome -State $nativeCrtState }
     $nativeTurnedOff = @($nativeCrtState.Records | Where-Object { $_.Succeeded } | ForEach-Object { [string]$_.Game })
     $nativeResultWarnings = @(foreach ($nativeWarning in $nativeShaderWarnings) {
@@ -45424,10 +45433,16 @@ function Get-TpmFriendlyProgressLabel {
             'Setting up PostgreSQL as administrator' = @(
                 'PostgreSQL elevated setup'
             )
-            'Setting up ReShade' = @(
+            'Checking your games for ReShade' = @(
                 'ReShade apply path preflight',
                 'ReShade apply preflight',
                 'ReShade bulk conflict scan',
+                'ReShade native shader scan'
+            )
+            'Applying ReShade' = @(
+                'ReShade profile deployment'
+            )
+            'Setting up ReShade' = @(
                 'ReShade deployment verification',
                 'ReShade effect acquisition',
                 'ReShade effect asset',
@@ -45436,10 +45451,8 @@ function Get-TpmFriendlyProgressLabel {
                 'ReShade embedded archive candidates',
                 'ReShade embedded archive entry scan',
                 'ReShade installer signature scan',
-                'ReShade native shader scan',
                 'ReShade preset file discovery',
                 'ReShade preset profile-code scan',
-                'ReShade profile deployment',
                 'ReShade state migration discovery'
             )
             'Setting up crosshairs' = @(

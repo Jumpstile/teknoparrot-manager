@@ -6986,6 +6986,7 @@ Describe "Skylinekiller executable workflow regressions" {
         @($script:reshadePreflightProgress | Where-Object { $_.Label -eq 'ReShade apply preflight' -and $_.Total -eq 2 -and -not $_.Complete }).Count | Should -Be 2
         @($script:reshadePreflightProgress | Where-Object { $_.Label -eq 'ReShade apply preflight' -and $_.Complete }).Count | Should -Be 1
         @($result.Records).Count | Should -Be 2
+        @($result.Records | Where-Object { $_.Id }).Count | Should -Be 2
         $result.Protected | Should -Be 1
         $result.MissingPath | Should -Be 1
         $result.Ready | Should -Be 0

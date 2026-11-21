@@ -59,6 +59,9 @@
     game on a drive that is not connected is called skipped, not failed,
     the drive letter is named, and it points to Library health check
     (menu 13) to repair the game paths.
+  - ReShade progress now counts the games being changed ("Applying ReShade:
+    1 of 34"), not your whole library ("72 of 330"). Checking all your
+    games first is shown as its own step.
 
   Also new in this release
   - LEDBlinky lighting (optional): if you use LEDBlinky, the Manager can
