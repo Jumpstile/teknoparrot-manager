@@ -552,26 +552,106 @@
         @{
             File        = 'TeknoParrot-Manager.ps1'
             RuleName    = 'InjectionRisk.UnsafeEscaping'
-            Line        = 45556
-            Extent      = '$InternalName -replace ''\s*\([^()]*\)\s*$'', '''''
-            Disposition = 'FalsePositive'
-            Reasoning   = 'The regex pattern and replacement string are both fixed literals (a trailing bracketed note is cut from a game name). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
-        }
-        @{
-            File        = 'TeknoParrot-Manager.ps1'
-            RuleName    = 'InjectionRisk.StaticPropertyInjection'
-            Line        = 46095
-            Extent      = '$facts.Dat.$fact'
-            Disposition = 'FalsePositive'
-            Reasoning   = 'The loop that fills in LaunchBox game details only takes $fact from the fixed list Year, Developer, Hardware. The facts object is TPM-built, the access only reads a property, and nothing is executed or written from the name.'
-        }
-        @{
-            File        = 'TeknoParrot-Manager.ps1'
-            RuleName    = 'InjectionRisk.UnsafeEscaping'
             Line        = 55165
             Extent      = '$name -replace ''^CONTROL_'', '''''
             Disposition = 'FalsePositive'
             Reasoning   = 'The regex pattern and replacement string are both fixed literals (the CONTROL_ prefix is cut from a LEDBlinky control name). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 29958
+            Extent      = '$pf.BaseName -replace ''[^A-Za-z0-9]'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (a profile file name is reduced to letters and digits before it is added to a database name). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 41987
+            Extent      = '$_.Value.$field'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'In Get-TpmMetadataGpuIncompatibleCodes the property name field is set by a switch to the fixed words amd or intel (or the function returns early). The access only reads a property of TeknoParrot''s own metadata file; nothing is executed or written from the name.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 42450
+            Extent      = '($Name -replace ''(?i)\(digital\)'', '''') -replace ''(?i)\b(d-?pad|pad)\b'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'Both regex patterns and both replacement strings are fixed literals (the words digital, pad and d-pad are cut from a control name to see if it is a plain direction). Only the left-hand operand is a variable, and no outside value can pick a pattern or a replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 43878
+            Extent      = '$state.$name'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The loop takes name only from the fixed list Devices, Keys. The access copies a property of the saved cabinet file into the in-memory state; nothing is executed from the name.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 43938
+            Extent      = '$n -replace ''^KEYCODE_'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (the KEYCODE_ prefix is cut from a key name). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 43976
+            Extent      = '([string]$led.Control).ToUpperInvariant() -replace ''[_\s]'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (underscores and spaces are cut from a LEDBlinky control name so it can be compared). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 44403
+            Extent      = '$record.$Step'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'In Set-TpmGameSetupStep the Step parameter is limited by ValidateSet to FirstRun or Calibration. The property is set on the game''s own saved record; nothing is executed from the name.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 44431
+            Extent      = '$result.$_'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The pipeline runs over the fixed list Calibration, FirstRun. The access only reads a property of the result object built in the same function; nothing is executed from the name.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 44532
+            Extent      = '@(Get-TpmDeviceQuestions | Where-Object { $_.Class -eq $deviceFor[[string]$control.Kind] })[0].Label -replace ''^an? '', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (a leading a or an is cut from a built-in device question label). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 49096
+            Extent      = '([string]$Name).Trim() -replace ''(?i)\.zip$'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (the .zip ending is cut from a game ZIP name). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 55155
+            Extent      = '[System.BitConverter]::ToString($sha.ComputeHash($bytes)) -replace ''-'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (the dashes are cut from the text form of a SHA-256 hash). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 60051
+            Extent      = '$folderName -replace ''\.(teknoparrot|parrot|game)$'', '''''
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The regex pattern and replacement string are both fixed literals (a .teknoparrot, .parrot or .game ending is cut from a game folder name to compare it with the list). Only the left-hand operand is a variable, and no outside value can pick the pattern or the replacement.'
         }
     )
 }
