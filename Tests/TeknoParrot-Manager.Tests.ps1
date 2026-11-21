@@ -27606,6 +27606,55 @@ Describe 'Next version: firmware, Play! game file and menu layout' {
             $text | Should -Match 'Supplementary or main ZIP folder'
             $text | Should -Not -Match 'put the missing files'
         }
+
+        It 'asks once for the Supplementary folder, saves it, and installs the firmware with one Y; a skipped question names the missing file' {
+            # Mutation: no folder question, a second question, the folder not saved, or no "Missing" line in the report -> this fails.
+            $script:zipSourceSupplementary = $null
+            $script:TpmSupplementaryFolderAsked = $false
+            $script:nfScreen = New-Object System.Collections.Generic.List[string]
+            Mock Write-TpmText { [void]$script:nfScreen.Add([string]$Text) }
+            Mock Save-Config { $true }
+            Mock Read-TpmYesNo { throw 'must not ask a second time' }
+            $script:nfMarker = $true
+            $script:nfFiles = 600
+            $script:nfBehavior = {
+                param($flash)
+                $external = Join-Path $flash 'sys\external'
+                New-Item -ItemType Directory -Path $external -Force | Out-Null
+                [System.IO.File]::WriteAllText((Join-Path $external 'liblv2.sprx'), 'x')
+                1..$script:nfFiles | ForEach-Object { [System.IO.File]::WriteAllText((Join-Path $flash ('f{0}.bin' -f $_)), 'x') }
+            }
+            # Skipped: nothing found, the missing file is named, nothing is saved, no install is offered.
+            $skipFixture = New-NfRoot -EmulatorType 'RPCS3' -Folder 'RPCS3' -Program 'rpcs3.exe'
+            $empty = New-NfCollection -DatSet $script:NfZipName -DatFile 'PS3UPDAT.PUP' -DatBytes $script:NfPupBytes
+            $skipWarning = @((Get-CompatibilityWarnings -UserProfilesDir $skipFixture.Profiles -TeknoParrotRoot $skipFixture.Root).BiosMissing)
+            Mock Read-PathWithBrowse { '' }
+            $script:nfOffered = $null
+            Mock Read-TpmChoice { $script:nfOffered = @($Choices); 'N' }
+            [void](Invoke-TpmPrerequisiteReview -Warnings $skipWarning -TpRoot $skipFixture.Root -SupplementaryDatPath $empty.Dat -Interactive)
+            $script:nfOffered | Should -Not -Contain 'Y'
+            ($script:nfScreen -join "`n") | Should -Match 'Missing: PS3UPDAT\.PUP'
+            Should -Invoke Save-Config -Times 0 -Exactly
+            # Chosen: the folder is saved, the firmware is installed without a window, and the question is not asked again.
+            $script:TpmSupplementaryFolderAsked = $false
+            $fixture = New-NfRoot -EmulatorType 'RPCS3' -Folder 'RPCS3' -Program 'rpcs3.exe'
+            $collection = New-NfCollection -ZipName $script:NfZipName -ZipEntries @{ 'PS3UPDAT.PUP' = $script:NfPupBytes } -DatSet $script:NfZipName -DatFile 'PS3UPDAT.PUP' -DatBytes $script:NfPupBytes
+            $warning = @((Get-CompatibilityWarnings -UserProfilesDir $fixture.Profiles -TeknoParrotRoot $fixture.Root).BiosMissing)
+            Mock Read-PathWithBrowse { $collection.Folder }
+            Mock Read-TpmChoice { 'Y' }
+            $review = Invoke-TpmPrerequisiteReview -Warnings $warning -TpRoot $fixture.Root -SupplementaryDatPath $collection.Dat -Interactive
+            $review.FixedAny | Should -BeTrue
+            $script:zipSourceSupplementary | Should -Be $collection.Folder
+            Should -Invoke Save-Config -Times 1 -Exactly
+            $script:nfCall.Args | Should -Contain '--headless'
+            $script:nfCall.Args | Should -Contain '--installfw'
+            $script:nfCall.PupBytes | Should -Be $script:NfPupBytes
+            ($script:nfScreen -join "`n") | Should -Match 'Installed: PS3UPDAT\.PUP'
+            Remove-Item -LiteralPath $fixture.Flash -Recurse -Force
+            [void](Invoke-TpmPrerequisiteReview -Warnings @((Get-CompatibilityWarnings -UserProfilesDir $fixture.Profiles -TeknoParrotRoot $fixture.Root).BiosMissing) -TpRoot $fixture.Root -SearchFolders @($script:zipSourceSupplementary) -SupplementaryDatPath $collection.Dat -Interactive)
+            # One call for the skipped run, one for the chosen run; the third review asks nothing because the folder is saved.
+            Should -Invoke Read-PathWithBrowse -Times 2 -Exactly
+        }
     }
 
     Context 'Play! game file' {

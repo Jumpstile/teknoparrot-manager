@@ -609,6 +609,7 @@ Describe 'FIX132 what the player reads' {
         $script:offered = $null
         $script:answers = New-Object System.Collections.Generic.Queue[string]
         foreach ($a in @('O', 'N')) { $script:answers.Enqueue($a) }
+        Mock Read-PathWithBrowse { '' }
         Mock Read-TpmChoice { $script:offered = @($Choices); $script:answers.Dequeue() }
         Mock Open-TpmOwnedFolder { [pscustomobject]@{ Succeeded = $true; Path = $Path; Error = $null } }
         [void](Invoke-TpmPrerequisiteReview -Warnings $warnings -TpRoot $fixture.Root -Interactive)

@@ -40671,8 +40671,81 @@ function Get-TpmPrerequisiteScreenLines {
     return [pscustomobject]@{ Heading = ('{0} IS MISSING' -f $label.ToUpperInvariant()); Plain = $plain.ToArray(); Details = $details.ToArray() }
 }
 
-# Shows each finding, and (Interactive only) offers the copy, the details and the Open folder button.
-# Never prompts when Interactive is not set. Returns what was shown and what was copied.
+# Asks ONCE for the player's Supplementary game collection folder when no folder that works is saved, and saves the answer
+# (the same saved setting the AutoSync step uses), so it is never asked again. Returns the folder, or '' when nothing was asked or
+# the player skipped. A skip is only remembered for this run. Nothing is downloaded and nothing is changed by this question.
+function Request-TpmSupplementaryFolder {
+    $saved = [string]$script:zipSourceSupplementary
+    if (-not [string]::IsNullOrWhiteSpace($saved) -and (Test-Path -LiteralPath $saved -PathType Container)) { return '' }
+    if ($script:TpmSupplementaryFolderAsked) { return '' }
+    $script:TpmSupplementaryFolderAsked = $true
+    Write-Host ''
+    Write-Host '  WHERE ARE YOUR STARTUP FILES?' -ForegroundColor Cyan
+    Write-Host '  ----------------------------------------------------------' -ForegroundColor DarkGray
+    if (-not [string]::IsNullOrWhiteSpace($saved)) { Write-TpmText -Text ('Your saved Supplementary folder was not found: {0}' -f $saved) -Color Yellow -Indent 2 }
+    Write-TpmText -Text 'Some games need startup files (firmware) that TeknoParrot Manager did not find in your saved folders.' -Color DarkCyan -Indent 2
+    Write-TpmText -Text 'If you have your own Supplementary game collection, choose that folder now. TeknoParrot Manager looks through it, checks every file against the list of known files, and asks before it installs anything. It never downloads anything.' -Color DarkCyan -Indent 2
+    Write-TpmText -Text 'The folder is saved, so you are not asked again. No folder? Press Enter to skip.' -Color DarkCyan -Indent 2
+    $answer = ([string](Read-PathWithBrowse -Prompt '  Supplementary folder (or press Enter to skip)' -Mode Folder)).Trim().Trim('"')
+    if ([string]::IsNullOrWhiteSpace($answer)) {
+        Write-Host '  Skipped. Nothing was changed.' -ForegroundColor DarkGray
+        Write-Log 'Prerequisites: no Supplementary folder chosen.'
+        return ''
+    }
+    if (-not (Test-Path -LiteralPath $answer -PathType Container)) {
+        Write-Host '  That folder was not found, so it was skipped. Nothing was changed.' -ForegroundColor Yellow
+        Write-Log ('Prerequisites: the Supplementary folder was not found at {0}; skipped.' -f $answer)
+        return ''
+    }
+    $script:zipSourceSupplementary = $answer
+    Write-Log ('Config: supplementary ZIP source set to {0} (asked for startup files).' -f $answer)
+    if (-not (Save-Config)) { Write-Host '  The folder could not be saved, so TeknoParrot Manager may ask again next time.' -ForegroundColor Yellow }
+    return $answer
+}
+
+# The per-package report lines for one finding: which folders were searched, then what was found, what is missing (exact names and
+# where each belongs) and what cannot be checked. With an Install result it reports what happened instead: installed, already
+# matching, kept (a different file of the player's), invalid (not the file the DAT lists) and not finished.
+function Get-TpmPrerequisiteReportLines {
+    param([Parameter(Mandatory)]$Warning, [Parameter(Mandatory)]$Plan, [string[]]$SearchFolders = @(), $Install = $null)
+    $lines = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $Install) {
+        $searched = @($SearchFolders | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique | ForEach-Object { if (Test-Path -LiteralPath $_ -PathType Container) { [string]$_ } else { ('{0} (folder not found)' -f $_) } })
+        [void]$lines.Add($(if ($searched.Count -gt 0) { 'Folders searched: ' + ($searched -join '; ') } else { 'Folders searched: none. No collection folder is saved.' }))
+        $items = @($Plan.Items)
+        $ready = @($items | Where-Object { $_.Installable -and -not $_.WrongExisting } | ForEach-Object { [string]$_.Name })
+        $differs = @($items | Where-Object { $_.Installable -and $_.WrongExisting } | ForEach-Object { [string]$_.Name })
+        $takenNames = @($items | ForEach-Object { ([string]$_.Name).ToLowerInvariant() }) + @($Warning.MissingFiles | ForEach-Object { ([string]$_).ToLowerInvariant() })
+        $inPlace = @(Get-TpmPrerequisiteFileSpecs -Requirement $Warning.Requirement | Where-Object { $takenNames -notcontains $_.Name.ToLowerInvariant() } | ForEach-Object { [string]$_.Name })
+        if ($ready.Count -gt 0) { [void]$lines.Add(('Found in your collection, ready to install: {0}' -f ($ready -join ', '))) }
+        if ($differs.Count -gt 0) { [void]$lines.Add(('Found in your collection, but a different file of yours is already in place: {0}' -f ($differs -join ', '))) }
+        if ($inPlace.Count -gt 0) { [void]$lines.Add(('Already in place: {0}' -f ($inPlace -join ', '))) }
+        foreach ($item in @($items | Where-Object { $_.Source -eq 'None' })) {
+            $where = if ($Warning.Requirement.Contains('InstallVia')) { [string]$item.Destination } else { Split-Path -Parent ([string]$item.Destination) }
+            [void]$lines.Add(('Missing: {0} (not found in those folders; goes in {1})' -f $item.Name, $where))
+        }
+        foreach ($item in @($items | Where-Object { $_.Source -ne 'None' -and -not $_.Installable })) {
+            [void]$lines.Add(('Cannot be checked: {0} ({1})' -f $item.Name, $item.Problem))
+        }
+    } else {
+        $done = @(@($Install.Installed) + @($Install.Replaced) | Where-Object { $_ })
+        $rows = @(
+            @('Installed', $done), @('Already matching', @($Install.AlreadyPresent)),
+            @('Kept (your own file differs)', @($Install.KeptExisting)),
+            @('Invalid (not the file the list of known files describes)', @($Install.Refused)),
+            @('Not finished', @($Install.Failed))
+        )
+        foreach ($row in $rows) { if (@($row[1]).Count -gt 0) { [void]$lines.Add(('{0}: {1}' -f $row[0], (@($row[1]) -join ', '))) } }
+        if ($Install.BackupFolder) { [void]$lines.Add(('Backup of any file that was replaced: {0}' -f $Install.BackupFolder)) }
+    }
+    return @($lines.ToArray())
+}
+
+# Shows each finding, and (Interactive only) offers the install, the details and the Open folder button.
+# Never prompts when Interactive is not set. Interactive: when a package is not found and no collection folder that works is saved,
+# the player is asked ONCE for the Supplementary folder (see Request-TpmSupplementaryFolder) and the search runs again. One Y then
+# installs everything that was found and checked; only replacing a different file of the player's is asked separately (with a backup).
+# Returns what was shown and what was copied.
 function Invoke-TpmPrerequisiteReview {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Warnings,
@@ -40684,56 +40757,87 @@ function Invoke-TpmPrerequisiteReview {
         [switch]$Interactive,
         [scriptblock]$OtherRootsProvider = $null
     )
-    $outcomes = New-Object System.Collections.Generic.List[object]
     $reviewable = @($Warnings | Where-Object { $_ -and $_.PSObject.Properties['MissingItems'] })
     $datRoms = $null
     if ($reviewable.Count -gt 0) {
         $datRoms = Get-TpmEmuDatRomSets -EggmanDatZip $EggmanDatZip -DatFilePath $DatFilePath -SupplementaryDatPath $SupplementaryDatPath
         if (-not $datRoms.Available) { Write-Log 'Prerequisites: no DAT list with [EMU] sets is available; found files cannot be checked, so none will be copied.' }
     }
+    $makePlan = {
+        param($Finding)
+        if ($Finding.PSObject.Properties['MissingItems']) {
+            return (Get-TpmPrerequisiteFixPlan -Warning $Finding -SearchFolders $SearchFolders -DatRoms $datRoms -TeknoParrotRoot $TpRoot -OtherRootsProvider $OtherRootsProvider)
+        }
+        return $null
+    }
+    $outcomes = New-Object System.Collections.Generic.List[object]
     foreach ($warning in @($Warnings)) {
         if ($null -eq $warning) { continue }
-        $plan = $null
-        if ($warning.PSObject.Properties['MissingItems']) {
-            $plan = Get-TpmPrerequisiteFixPlan -Warning $warning -SearchFolders $SearchFolders -DatRoms $datRoms -TeknoParrotRoot $TpRoot -OtherRootsProvider $OtherRootsProvider
+        [void]$outcomes.Add([pscustomobject]@{ Warning = $warning; Plan = (& $makePlan $warning); Install = $null; CopiedEarlier = 0; Screen = $null })
+    }
+    if ($Interactive) {
+        $notFound = @($outcomes | Where-Object { $_.Plan -and $_.Warning.Requirement -and $_.Warning.Requirement.Contains('SourceZipPattern') -and @($_.Plan.Items | Where-Object { $_.Source -eq 'None' }).Count -gt 0 })
+        if ($notFound.Count -gt 0) {
+            $picked = Request-TpmSupplementaryFolder
+            if ($picked) {
+                $SearchFolders = @($picked) + @($SearchFolders)
+                foreach ($outcome in $outcomes) { $outcome.Plan = & $makePlan $outcome.Warning }
+            }
         }
+    }
+    foreach ($outcome in $outcomes) {
+        $warning = $outcome.Warning
+        $plan = $outcome.Plan
         $screen = Get-TpmPrerequisiteScreenLines -Warning $warning -Plan $plan
+        $outcome.Screen = $screen
         foreach ($line in @($screen.Details)) { Write-Log ('Prerequisites: {0}: {1}' -f $warning.EmulatorType, $line) }
         Write-Host ''
         Write-Host ('  ' + $screen.Heading) -ForegroundColor Yellow
         Write-Host '  ----------------------------------------------------------' -ForegroundColor DarkGray
         foreach ($line in @($screen.Plain)) { Write-TpmText -Text $line -Color DarkCyan -Indent 2 }
-        $install = $null
-        $copiedEarlier = 0
-        if ($Interactive -and $null -ne $plan) {
-            $fixable = [bool]$plan.AllInstallable
-            $choices = if ($fixable) { @('Y', 'N', 'D', 'O') } else { @('N', 'D', 'O') }
-            $viaEmulator = ($warning.PSObject.Properties['Requirement'] -and $warning.Requirement -and $warning.Requirement.Contains('InstallVia'))
-            $prompt = if ($fixable -and $viaEmulator) { '  Y = install the firmware, N = not now, D = details, O = open the folder' } elseif ($fixable) { '  Y = copy the files, N = not now, D = details, O = open the folder' } else { '  N = continue, D = details, O = open the folder' }
-            do {
+        if ($null -ne $plan) {
+            foreach ($line in @(Get-TpmPrerequisiteReportLines -Warning $warning -Plan $plan -SearchFolders $SearchFolders)) {
+                Write-Log ('Prerequisites: {0}: {1}' -f $warning.EmulatorType, $line)
+                Write-TpmText -Text $line -Color DarkGray -Indent 4 -HangingIndent 2
+            }
+        }
+    }
+    $withPlan = @($outcomes | Where-Object { $null -ne $_.Plan })
+    if ($Interactive -and $withPlan.Count -gt 0) {
+        $fixable = @($withPlan | Where-Object { $_.Plan.AllInstallable })
+        $choices = if ($fixable.Count -gt 0) { @('Y', 'N', 'D', 'O') } else { @('N', 'D', 'O') }
+        $prompt = if ($fixable.Count -gt 0) { '  Y = install what was found, N = not now, D = details, O = open the folder' } else { '  N = continue, D = details, O = open the folder' }
+        do {
+            Write-Host ''
+            $choice = Read-TpmChoice -Prompt $prompt -Choices $choices -Default 'N'
+            if ($choice -eq 'D') {
+                Show-TpmDetailBlocks -Blocks @($withPlan | ForEach-Object { @{ Heading = [string]$_.Warning.Label; Lines = @($_.Screen.Details) } }) -Note 'Nothing was changed.'
+            } elseif ($choice -eq 'O') {
+                $folders = @($withPlan | ForEach-Object { Get-TpmPrerequisiteOpenFolder -Warning $_.Warning } | Where-Object { $_ } | Select-Object -Unique)
+                $opened = $null
+                foreach ($folder in $folders) { $opened = Open-TpmOwnedFolder -Path $folder -Label 'game startup files' }
+                if ($folders.Count -eq 0 -or $null -eq $opened -or -not $opened.Succeeded) { Write-Host '  The folder could not be opened. The folder is named under Details (D).' -ForegroundColor Yellow }
+            }
+        } while ($choice -in @('D', 'O'))
+        if ($choice -eq 'Y') {
+            foreach ($outcome in $fixable) {
+                $warning = $outcome.Warning
+                $viaEmulator = [bool]($warning.Requirement -and $warning.Requirement.Contains('InstallVia'))
                 Write-Host ''
-                $choice = Read-TpmChoice -Prompt $prompt -Choices $choices -Default 'N'
-                if ($choice -eq 'D') {
-                    Show-TpmDetailBlocks -Blocks @(@{ Heading = [string]$warning.Label; Lines = @($screen.Details) }) -Note 'Nothing was changed.'
-                } elseif ($choice -eq 'O') {
-                    $folder = Get-TpmPrerequisiteOpenFolder -Warning $warning
-                    $opened = if ($folder) { Open-TpmOwnedFolder -Path $folder -Label 'game startup files' } else { $null }
-                    if ($null -eq $opened -or -not $opened.Succeeded) { Write-Host '  The folder could not be opened. The folder is named under Details (D).' -ForegroundColor Yellow }
-                }
-            } while ($choice -in @('D', 'O'))
-            if ($choice -eq 'Y') {
-                $install = Invoke-TpmPrerequisiteInstall -Plan $plan -TpRoot $TpRoot
+                Write-Host ('  {0}' -f [string]$warning.Label) -ForegroundColor Cyan
+                $install = Invoke-TpmPrerequisiteInstall -Plan $outcome.Plan -TpRoot $TpRoot
                 if (@($install.KeptExisting).Count -gt 0) {
                     Write-Host ''
                     Write-Host '  A different file with the same name is already in the folder.' -ForegroundColor Yellow
                     Write-Host '  TeknoParrot Manager can replace it. It saves a backup copy of your file first.' -ForegroundColor DarkCyan
                     if ((Read-TpmYesNo -Prompt '  Replace it? Y = replace, N = keep mine' -Default 'N') -eq 'Y') {
                         # Files the first pass already copied still count; the second pass only reports its own.
-                        $copiedEarlier = @($install.Installed).Count + @($install.Replaced).Count
-                        $install = Invoke-TpmPrerequisiteInstall -Plan $plan -TpRoot $TpRoot -ReplaceNames @($install.KeptExisting)
+                        $outcome.CopiedEarlier = @($install.Installed).Count + @($install.Replaced).Count
+                        $install = Invoke-TpmPrerequisiteInstall -Plan $outcome.Plan -TpRoot $TpRoot -ReplaceNames @($install.KeptExisting)
                     }
                 }
-                $copied = $copiedEarlier + @($install.Installed).Count + @($install.Replaced).Count
+                $outcome.Install = $install
+                $copied = $outcome.CopiedEarlier + @($install.Installed).Count + @($install.Replaced).Count
                 if ($viaEmulator -and $install.Complete -and $copied -gt 0) {
                     Write-Host '  Done. The firmware was installed and checked. These games can start now.' -ForegroundColor Green
                 } elseif ($viaEmulator -and -not $install.Complete) {
@@ -40755,9 +40859,12 @@ function Invoke-TpmPrerequisiteReview {
                     Write-Host ('  The files were not all copied. {0}' -f [string]$install.Summary) -ForegroundColor Yellow
                     Write-Host '  Next step: open View Log from the main menu to see what stopped it.' -ForegroundColor DarkCyan
                 }
+                foreach ($line in @(Get-TpmPrerequisiteReportLines -Warning $warning -Plan $outcome.Plan -SearchFolders $SearchFolders -Install $install)) {
+                    Write-Log ('Prerequisites: {0}: {1}' -f $warning.EmulatorType, $line)
+                    Write-TpmText -Text $line -Color DarkGray -Indent 4 -HangingIndent 2
+                }
             }
         }
-        [void]$outcomes.Add([pscustomobject]@{ Warning = $warning; Plan = $plan; Install = $install; CopiedEarlier = $copiedEarlier })
     }
     $installed = @($outcomes | Where-Object { $_.Install -and $_.Install.Complete -and ($_.CopiedEarlier + @($_.Install.Installed).Count + @($_.Install.Replaced).Count) -gt 0 })
     return [pscustomobject]@{ Reviewed = $outcomes.Count; FixedAny = ($installed.Count -gt 0); Outcomes = $outcomes.ToArray() }
