@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC8.4  --  QUICK START
+  TeknoParrot Manager  |  v1.0 RC9  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -9,12 +9,12 @@
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  This guide is for v1.0 RC8.4. The latest published release is v1.0 RC8.4:
+  This guide is for v1.0 RC9, the next release after RC8.4. It is not
+  published yet. The latest published release is v1.0 RC8.4:
   https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4
-  It is a fix-up release for RC8.3 and fixes problems that testers found.
-  If you use RC8.1 or newer, choose 15) Check for Updates to get it.
-  The previous published release is v1.0 RC8.3. Earlier published releases
-  are v1.0 RC8.2, RC8.1, RC7 and RC6. RC8 was never published.
+  If you use RC8.4, choose 15) Check for Updates to get RC9.
+  The previous published releases are v1.0 RC8.3, RC8.2, RC8.1, RC7 and RC6.
+  RC8 was never published.
   Final Version 1.0 has not been published yet.
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
@@ -24,7 +24,7 @@
   New? Open docs\START-HERE.md first; when stuck, see docs\TROUBLESHOOTING.md.
 
   A picture of the main menu is at:
-  images\release\RC8-MainMenu.png
+  images\release\RC9-MainMenu.png
   (The menu may look a little different in this build.)
 
 
@@ -734,8 +734,8 @@
      Next: skip the other optional setups.
 
   6. If offered an optional second DAT, crosshairs, ReShade, dgVoodoo2, GPU
-     fixes, or CPS3 first-boot files, choose N. Do that setup later, after the
-     game has been tested.
+     fixes, CPS3 first-boot files, or System 11 saved files, choose N. Do
+     that setup later, after the game has been tested.
 
      You will see: the next step, without that optional setup.
 
@@ -769,6 +769,15 @@
     GameProfiles for it.
   - "Whole-library maintenance" means the Check all games choice. It is not
     needed for one new game.
+  - A child game that uses a parent ZIP is never registered only because
+    its parent ZIP is present. A System 11 game that names two ZIPs (child
+    and parent) is registered only when both are in the same folder. A
+    disc image (*.chd) is chosen for you only when there is exactly one.
+  - For System 11 games with no saved files yet, you may see "OPTIONAL:
+    System 11 saved game files". If you have your own saved-files set (a
+    ZIP in your collection folders, or a folder or ZIP you pick), the
+    Manager copies the files for your games. It only adds files, never
+    replaces one, and says which games the set has no files for.
 
   7. MAKE ONE GAME WORK WELL, THEN COPY WHAT IS SAFE
   --------------------------------------------------
@@ -838,10 +847,13 @@
      change.
 
      If a game type has no usable example, its games are skipped.
-     The run can finish with Done and a skipped count. Details and the log
-     list those games. Add one game of this family with your own controls,
-     then run this again. If all games are skipped, no game was changed.
-     A failed save still ends as an error. Done does not prove the controls work.
+     The registration screen ends with "Registration run finished". That
+     means the run ended, not that every game's controls work. Details and
+     the log list the skipped games, and name one game of each type to set
+     up first in TeknoParrotUI. Then run Propagate Controls (menu 3).
+     Choosing a device in the binding plan does not set up a game.
+     If all games are skipped, no game was changed.
+     A failed save still ends as an error.
 
      Next: test one game.
 
@@ -935,6 +947,10 @@
     game once so it makes its own database. Existing PostgreSQL is for
     keeping an existing server and its saved progress. The Manager never
     switches a game from one choice to the other.
+  - When Postgres setup needs Windows permission, it first waits for you to
+    press Enter ("Press Enter to open the Windows permission window"), so
+    you can read what it will ask for. This pause is skipped in unattended
+    runs.
   - Library health check (main menu 13) also checks every game database. A
     database that is not ready shows as "Problem - <game>". Run 11) Postgres
     setup to fix it.
@@ -1069,6 +1085,10 @@
 
      You will see: successfully added games in the chosen platform. Use
      LaunchBox's own metadata and art tools if you like.
+     Next time you can also use G (details and playlists), V (group regions
+     and versions of a game), S (keep LaunchBox in step with TeknoParrot) or
+     L (link games for art). A game that cannot start yet gets a "Needs
+     setup" note.
 
      Next: you are done with this section.
 
@@ -2156,6 +2176,13 @@
   Mode 13, Health check: it also checks every game database. A database that
   is missing, cannot be opened with the game's own settings, or has no tables
   shows as "Problem - <game>" under D. Next: run Postgres setup (menu 11).
+
+  Mode 13, Health check: it also has rows for game types TeknoParrot Manager
+  does not know, games TeknoParrot has not released yet ("not available
+  yet"), emulators missing from your TeknoParrot folder, games that need
+  you to pick the game file by hand, and System 11 games with no saved
+  files yet. Choose D to see the names. Games set to Internal storage show
+  "Game database: OK".
 
   Mode 13, Health check: broken saved paths can be repaired from reviewed
   candidates. The default search root is the configured games folder.
@@ -3620,6 +3647,9 @@
       [P] Preview first. No changes.
       [A] Add missing games (backed up).
       [G] Fill in game details and make playlists (backed up).
+      [V] Group regions and versions of a game into one (backed up).
+      [S] Keep LaunchBox in step with TeknoParrot: removed, moved, renamed
+          games (backed up).
       [L] Link games for art and details (backed up).
       [F] Import file only. No changes.
       [B] Skip this step.
@@ -3627,14 +3657,28 @@
   The prompt is "Choice, default P". What the keys do:
 
     P  Shows what A would do. It makes no LaunchBox changes.
-    A  Adds the games that are missing to LaunchBox, after a backup.
+    A  Adds the games that are missing to LaunchBox, after a backup. New
+       games get their real game name (for example "Too Spicy", not
+       "2Spicy"). Firmware updaters, drive checkers and test boards are
+       never added.
     G  Fills in game details and makes playlists, after a backup. It
        fills in the release year and developer where LaunchBox has
        nothing yet, and makes playlists for each arcade hardware family,
-       plus "Light gun games" and "Driving games". Your own playlists and
-       details are never touched. Restore puts everything back.
+       plus "Light gun games" and "Driving games". A game that cannot
+       start yet gets a "Needs setup" note and goes into a "Needs setup"
+       playlist. Both go away when it is fixed. Your own playlists,
+       notes and details are never touched. Restore puts everything back.
+    V  Groups the regions and versions of one game into one entry, after
+       a backup. You pick the version. Only games that are certainly the
+       same game are grouped. Restore puts them back.
+    S  Keeps LaunchBox in step with TeknoParrot, after a preview and a
+       backup. Removed games are removed, moved games get the new
+       location, and old Manager names become the clean title. A missing
+       game file (an unplugged drive) never removes a game. Names you
+       typed are never renamed. Restore undoes it.
     L  Links games for art and details, after a backup. It looks each
-       game up in LaunchBox's own game list on your PC. You see every old
+       game up in LaunchBox's own game list on your PC. It links a game by
+       itself only when sure; otherwise you choose. You see every old
        name, new name and ID first and approve before anything is saved.
        Names you typed yourself are never replaced. Nothing is
        downloaded.
@@ -3679,8 +3723,10 @@
   "Optional: add logos or box art to LaunchBox from a folder you pick."
   Choose I to add pictures from a folder (you see a preview first), U to
   undo the last picture import, or S to skip. You then pick the picture
-  type: 1 Clear logos, 2 Box front. A close match is used only if you
-  say yes. Nothing is downloaded.
+  type: 1 Clear logos, 2 Box front. When LaunchBox's own game list is on
+  your PC, each picture is matched by the game itself. A picture of a
+  different game with the same name is never used. A close match is used
+  only if you say yes. Nothing is downloaded.
 
   Lighting for your arcade buttons (LEDBlinky, optional). If you use
   LEDBlinky, a full run (not "New game only") ends with "Optional:
@@ -3705,9 +3751,10 @@
   -----------------------------------
 
   A writes directly into LaunchBox's own library files after the safety
-  checks. G fills in game details and makes playlists. L links games for
-  art and details. F creates the reference file without a LaunchBox write.
-  B skips the optional LaunchBox step.
+  checks. G fills in game details and makes playlists. V groups regions and
+  versions of a game into one. S keeps LaunchBox in step with TeknoParrot.
+  L links games for art and details. F creates the reference file without a
+  LaunchBox write. B skips the optional LaunchBox step.
 
   When direct integration is selected, TeknoParrot Manager checks LaunchBox
   is closed first, backs up the files it is about to change, and never

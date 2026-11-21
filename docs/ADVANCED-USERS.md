@@ -83,6 +83,20 @@ The intended model has three layers:
 | Explain | Show the evidence, owner, confidence, and risk behind the recommendation. |
 | Inspect | Show exact paths, profile codes, versions, hashes, contract identifiers, logs, backups, and validation details. |
 
+## Check an outside controller list (command line)
+
+If you already have a controller list from somewhere else (for example RetroBat's `teknoparrot.yml`), TeknoParrot Manager can compare it with your installed game profiles. This is read-only.
+
+```powershell
+.\TeknoParrot-Manager.ps1 -MappingEvidenceFile "<list>" -ValidationRoot "<TeknoParrot folder>" [-ValidationJsonPath "<details file>"]
+```
+
+- It prints plain counts: games in the list, games found in your TeknoParrot, games ready for a person to review, games with some controls missing, and games held back.
+- Nothing in the list is trusted, applied or bundled. No profile is changed. The only file it writes is the details file you name.
+- A game is held back with a plain reason: the game is not in your TeknoParrot, the list names the game twice, the list sets one control twice, the list sets a control the game does not have, the list uses a button name TeknoParrot Manager does not know, or two game actions share one controller button.
+- Five known spelling mistakes in the list are corrected and counted.
+- The same inputs give the same details file.
+
 ## Boundaries still apply
 
 TeknoParrot Manager is not supposed to guess its way through an advanced setup.

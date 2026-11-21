@@ -1,6 +1,6 @@
 # TeknoParrot Manager - Quick Start
 
-> This guide describes v1.0 RC8.4. The latest published release is [v1.0 RC8.4](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4). It is a fix-up release for RC8.3 and fixes problems that testers found. If you use RC8.1 or newer, choose **15) Check for Updates** to get it. The previous published release is v1.0 RC8.3. Earlier published releases are v1.0 RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. Final Version 1.0 has not been published yet. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
+> This guide describes v1.0 RC9. RC9 is the next release after RC8.4. It adds an Internal or Existing PostgreSQL choice for Golden Tee and other games that keep a database, better game matching for LaunchBox, a bezel step in ReShade setup, more checks in Library health check, and fixes for problems that testers found. The latest published release before it is [v1.0 RC8.4](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4). If you use RC8.4, choose **15) Check for Updates** to get RC9. The previous published releases are v1.0 RC8.3, RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. Final Version 1.0 has not been published yet. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Full documentation: [User guide](docs/USER-GUIDE.md) (project home page: [README.md](README.md))
 
@@ -135,6 +135,14 @@ The full advanced-user guide is in docs/ADVANCED-USERS.md. It explains the evide
 
 Expert workflows still detect first, preview supported changes, back up before writes, and verify the result.
 
+To check an outside controller list you already have (for example RetroBat's `teknoparrot.yml`), run this read-only check:
+
+```powershell
+.\TeknoParrot-Manager.ps1 -MappingEvidenceFile "D:\teknoparrot.yml" -ValidationRoot "D:\TeknoParrot" -ValidationJsonPath "D:\list-details.json"
+```
+
+It compares the list with your installed game profiles and prints plain counts. Nothing in the list is trusted or applied, and no game profile is changed. `-ValidationRoot` is your TeknoParrot folder. `-ValidationJsonPath` is optional and names the only file it writes. A game is held back with a plain reason, such as a game named twice or a control the game does not have. The full user guide lists every reason.
+
 ---
 
 ## Run It
@@ -259,9 +267,9 @@ This is the full menu. Type a number at `Enter 1-17:`.
 | 8 | **Force feedback (FFB) setup** | Native FFB Blaster (membership) + free third-party plugin |
 | 9 | **BepInEx setup** | Install or update after you approve, using stable x64/x86 releases. It never removes an existing install |
 | 10 | **Region setup** | Pick the country your games start in (like USA or Europe), choose all or some of the games that offer it, confirm, and TeknoParrot Manager saves a backup and changes them. You can also put games back to Auto |
-| 11 | **Postgres setup** | Installs/configures the local PostgreSQL database some Incredible Technologies games need |
+| 11 | **Postgres setup** | Installs/configures the local PostgreSQL database for games set to Existing PostgreSQL. Games set to Internal storage (the new default) need no install and are skipped |
 | 12 | **Required game patches** | Find, validate, back up, install, verify, or undo a required fix for a supported exact game build, using your local ZIP |
-| 13 | **Library health check** | Reports registered/broken/unregistered games, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage, ReShade and BepInEx counts, and the games that need BepInEx but do not have it, without changing anything. Any repair it suggests is a separate choice that you confirm first |
+| 13 | **Library health check** | Reports registered/broken/unregistered games, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage, ReShade and BepInEx counts, and the games that need BepInEx but do not have it. It also names game types it does not know, games TeknoParrot has not released yet, emulators missing from the TeknoParrot folder, and games where you must pick the game file by hand. It changes nothing. Any repair it suggests is a separate choice that you confirm first |
 | 14 | **Restore backup** | Put TeknoParrot game setup files (profiles), LaunchBox's library files, or Postgres databases back from an earlier saved copy. Saved copies are listed newest first |
 | 15 | **Check for Updates** | Check GitHub for a newer TeknoParrot Manager release and install it (RC8.1 and later) |
 | 16 | **Create Support Package** | Gather safe logs and reports into one ZIP to send when asking for help |
@@ -335,6 +343,10 @@ Games already in your queue are marked with `*`.
 
 You can mix Browse and Search sessions. Press D when you are ready to confirm.
 
+**Game sets and System 11 games.** A game made of two ZIPs (a child game and the parent ZIP it needs) is registered only when both ZIPs are in the same folder. A folder with only the parent ZIP does not register the child game. A System 11 game's disc image (`*.chd`) is picked for you when there is exactly one, and never guessed when there are several. If you already have the System 11 saved-files set, TeknoParrot Manager can copy the saved files for your games after registration. It only adds files and never replaces one. It asks first, and skips this in Preview and Unattended mode.
+
+When AutoSync or Register only is done, the screen ends with `Registration run finished.` That means the run is over, not that every game's controls are set up.
+
 ---
 
 ## Copy Your Controls
@@ -371,7 +383,7 @@ After the copy, the program asks `Undo these changes and put your game settings 
 
 If a copied setting looks wrong, you also see a yellow line: `Check first: 1 game may have settings that do not match your real controller. Press D to see them.` Answer **N**, fix that game in TeknoParrotUI, then run this again.
 
-When a game type has no usable example, its games are skipped. The run can finish with Done and a skipped count. Details and the log list those games. Add one game of this family with your own controls, then run this again. If all games are skipped, no game was changed. A failed save still ends as an error. Done does not prove that a game's controls work.
+When a game type has no usable example, its games are skipped. The run can finish with `Registration run finished.` and a skipped count. Details and the log list those games. For each type with no example, TeknoParrot Manager names one game to set up first, under `Games to set up first`. Set up that game in TeknoParrotUI, then run this again. Choosing a device in the binding plan does not set up a game. If all games are skipped, no game was changed. A failed save still ends as an error. The finish line does not prove that a game's controls work.
 
 ### More detail
 
@@ -616,6 +628,24 @@ Choose `R` from mode 5 to take away the ReShade files that TeknoParrot Manager a
    Next: a verified backup is made first. Cancel or back removes nothing.
 
 TeknoParrot Manager does not remove ReShade files that it did not install, or that were changed since. For those files, use the advanced troubleshooting path.
+
+### Use your own bezels
+
+A bezel is a picture that frames the game on a wide screen, like the edge of an arcade cabinet. TeknoParrot Manager does not come with bezels and never downloads them. This step only uses `.png` pictures you already have in a folder. ReShade must be set up for the game first. A game without ReShade is listed and left alone.
+
+1. Type **5** at the main menu, then type **B**.
+
+   You will see: `F) Pick bezels from my folder`, `U) Undo bezels I applied` and `X) Back`. Press Enter to pick bezels.
+
+2. Type or browse to your bezel folder.
+
+   You will see: `Bezel preview. Nothing has been changed yet.` Each game shows the bezel it would use and how sure the match is: High, Medium or Low. A Low match, or a bezel for a different sequel number, says `needs your choice` and is not applied unless you pick it. Games with no matching bezel are counted, not guessed.
+
+3. Type **A** to apply.
+
+   Each bezel is copied to the game's `reshade-shaders\Textures` folder as `bezel.png` and checked. A bezel you placed there yourself is kept unless you say yes to replacing it. A game that shares its folder with other games is skipped.
+
+To undo, type **5**, **B**, then **U**. Not every game is confirmed to show the bezel. Games that run in exclusive fullscreen, or start through a loader program, may not show it.
 
 ### More detail
 
@@ -935,9 +965,9 @@ Region setup sets that country for you. You do not have to open each game in Tek
 
 Some Incredible Technologies games need a local PostgreSQL 8.3 database. A database is a small store of game data that runs on your PC.
 
-These games include Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro (Bags / Lawn Darts), and Orange County Choppers Pinball.
+These games include Golden Tee Live and PGA Tour, Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro (Bags / Lawn Darts), and Orange County Choppers Pinball.
 
-Newer profiles have a Storage box. **Internal** is the new default: no database install is needed, and you start the game once so it makes its own database. Mode 11 skips these games. **Existing PostgreSQL** is for keeping an existing server and its saved progress. TeknoParrot Manager never switches a game from one to the other.
+Newer profiles have a Storage box. **Internal** is the new default: no database install is needed, and you start the game once so it makes its own database. Mode 11 and the Library health check skip these games and never say their database is missing. **Existing PostgreSQL** is for keeping an existing server and its saved progress. TeknoParrot Manager never switches a game from one to the other.
 
 Mode 11 finds which of your registered games need it. If none do, mode 11 says so and exits at once without installing anything.
 
@@ -945,7 +975,7 @@ Mode 11 finds which of your registered games need it. If none do, mode 11 says s
 
 - PostgreSQL not installed yet: TeknoParrot Manager installs it when a registered game needs it.
   You choose the service-account and database passwords at masked confirmation prompts.
-  If Windows permission is needed, TeknoParrot Manager asks Windows itself. It continues the same setup after you approve.
+  If Windows permission is needed, TeknoParrot Manager first explains what it will ask for and waits. You will see `Press Enter to open the Windows permission window`. Read the text, then press Enter. TeknoParrot Manager then asks Windows itself and continues the same setup after you approve. (An unattended run, or a PC with no keyboard, does not wait.)
 
 - PostgreSQL already installed: TeknoParrot Manager keeps your existing data.
   If the saved password no longer works, it explains the problem.
@@ -1089,6 +1119,8 @@ Optional: add games to LaunchBox.
 [P] Preview first. No changes.
 [A] Add missing games (backed up).
 [G] Fill in game details and make playlists (backed up).
+[V] Group regions and versions of a game into one (backed up).
+[S] Keep LaunchBox in step with TeknoParrot: removed, moved, renamed games (backed up).
 [L] Link games for art and details (backed up).
 [F] Import file only. No changes.
 [B] Skip this step.
@@ -1098,11 +1130,15 @@ Optional: add games to LaunchBox.
 What each key does:
 
 - `P` previews without changing LaunchBox. It reads your LaunchBox files, asks which platform, shows the plan, then returns to this offer.
-- `A` adds games that are missing from LaunchBox's own library. It tells you to close LaunchBox and BigBox first (TeknoParrot Manager will not close them), then asks the platform, shows the plan and asks once: `Write exactly these changes after a verified backup? (Y/N, D = about the risks)` (default N). Entries that are already there are kept as they are.
-- `G` fills in game details and makes playlists (backed up). It fills in the release year and developer where LaunchBox has nothing yet. It makes playlists for each arcade hardware family, plus "Light gun games" and "Driving games". Your own playlists and details are never touched. Restore puts everything back.
+- `A` adds games that are missing from LaunchBox's own library. It tells you to close LaunchBox and BigBox first (TeknoParrot Manager will not close them), then asks the platform, shows the plan and asks once: `Write exactly these changes after a verified backup? (Y/N, D = about the risks)` (default N). Entries that are already there are kept as they are. If LaunchBox's own game list is on your PC, you are also asked `Use official game names so LaunchBox finds info and artwork? 1 new games, 2 new and games already added, N no` (default 1).
+- `G` fills in game details and makes playlists (backed up). It fills in the release year and developer where LaunchBox has nothing yet. It makes playlists for each arcade hardware family, plus "Light gun games" and "Driving games". A game that cannot start yet (game file missing, firmware missing, or BepInEx needed) gets a "Needs setup" note and goes into a "Needs setup" playlist; both go away by themselves once the problem is fixed. Your own playlists, details and notes are never touched. Restore puts everything back.
+- `V` groups regions and versions of one game into one LaunchBox game with a version picker (backed up). Two entries are grouped only when they are certainly the same game. The default version follows the region you chose in Region setup. You see the groups first and approve before anything is saved. Restore puts the separate games back.
+- `S` keeps LaunchBox in step with your TeknoParrot games (backed up). It only looks at games the Manager added. A game you removed from TeknoParrot is removed from LaunchBox, a game whose folder moved gets its new location, and an old Manager name becomes the clean game title. A game whose game file is only missing (for example an unplugged drive) is never removed. A name you typed yourself, or a game that already has an ID from LaunchBox's game list, is never renamed. If most games would be removed at once, nothing is removed. You see everything first and approve before anything is saved. Restore undoes it.
 - `L` links games for art and details (backed up). It looks each game up in LaunchBox's own game list on your PC. It shows every old name, new name and ID first, and you approve before anything is saved. Names you typed yourself are never replaced. Nothing is downloaded.
 - `F` creates the reference file without a LaunchBox write.
 - `B` skips the optional LaunchBox step.
+
+Every LaunchBox choice uses the same game matching. Games you add get their real game name (for example "Too Spicy", not "2Spicy"). A game is linked by itself only when TeknoParrot Manager is sure: the Eggman list, TeknoParrot and LaunchBox's own game list must agree. A different year or number is a different game, and region, version and board tags are ignored. When it is not sure, you choose from the possible games. Firmware updaters, drive checkers and test boards are never added. New games get their release year and developer when they are added. The separate platform it makes is called `TeknoParrot`, and LaunchBox scrapes it as Arcade.
 
 The first time you use direct integration, choose how games should appear:
 
@@ -1115,7 +1151,7 @@ You are asked each time you run it; your choice is not remembered.
 
 New games have no box art or details yet. Choose `L` (Link games for art and details) and `G` (Fill in game details and make playlists) in the LaunchBox step, or in LaunchBox right-click a game and use **Edit... -> Search**.
 
-**Logos and box art (optional).** After the LaunchBox choices you can add clear logos or box art from a folder you pick. You see `Optional: add logos or box art to LaunchBox from a folder you pick.` Choose `I` to add pictures (you see a preview first), `U` to undo the last picture import, or `S` to skip. Then you pick the picture type (`1 Clear logos, 2 Box front`). A close match is used only if you say yes. Nothing is downloaded.
+**Logos and box art (optional).** After the LaunchBox choices you can add clear logos or box art from a folder you pick. You see `Optional: add logos or box art to LaunchBox from a folder you pick.` Choose `I` to add pictures (you see a preview first), `U` to undo the last picture import, or `S` to skip. Then you pick the picture type (`1 Clear logos, 2 Box front`). When LaunchBox's own game list is on your PC, pictures are matched by the game itself: another name of the same game is a sure match, and a picture of a different game with the same name is never used. A close match is used only if you say yes. Nothing is downloaded.
 
 **Lighting for your arcade buttons (LEDBlinky, optional).** If you use LEDBlinky, a full run (not **New game only**) ends with `Optional: lighting for your arcade buttons.` The Manager looks for LEDBlinky on your drives and in Program Files, or asks where it is and remembers the folder. A game gets only the controls it uses that your cabinet has. Choose `P` to preview first, `A` to add lighting info (a saved copy is made first), or `U` to undo the last add. Only entries the Manager added are ever removed.
 
@@ -1356,6 +1392,8 @@ It reports how many game paths are valid, broken or empty, and counts of games t
 No repair or setup starts until you choose an action.
 
 It also checks every game database. A database that is missing, cannot be opened with the game's own settings or has no tables shows as `Problem - <game>` under **D**. Next: run Postgres setup (menu 11).
+
+It also names things about game types. Under **D** you see: game types TeknoParrot Manager does not know (their games may still run), games TeknoParrot lists as development only (`not available yet`), games whose emulator is not in your TeknoParrot folder, and games that need you to pick the game file by hand in TeknoParrotUI. A `System 11` note says how many System 11 games have no saved setup files yet. The full user guide has the details.
 
 The screen can also offer **P** PostgreSQL setup when needed. It offers direct **5** ReShade, **6** dgVoodoo2, **7** GPU Fix, **8** Force Feedback, and **9** BepInEx actions.
 

@@ -39,7 +39,7 @@ A warning does not block the copy. Answer `N`, fix the example game in TeknoParr
 - A saved copy of your `UserProfiles` is made when you answer `Y`. The folder is shown afterwards. You can put it back with [[Restore Backup]].
 - Buttons that are already set up are kept. TeknoParrot Manager may still correct an Input API setting without setting buttons again.
 - It copies only to games of the same control type.
-- A game with no example game of its type is skipped and reported as `no usable reference game`. Set up one game of that type, then run this again.
+- A game with no example game of its type is skipped and reported as `no usable reference game`. The result names one game of each such type to set up first in TeknoParrotUI (`Games to set up first`). Set up that game there, then run this again.
 - Controls that the example game does not have stay for you to set up in TeknoParrotUI.
 
 A game marked as copied is not proof that its controls work. Start one game and test it before you trust the rest.
@@ -85,10 +85,18 @@ Other settings in the same overrides file:
 
 After every real run, `TeknoParrot-Manager-controls.txt` in `<your TeknoParrot folder>\TeknoParrotManager\Reports\` lists every registered game, its control type, how many buttons are set, and which example game its controls came from. It is a record of what was copied, not a test of your controls.
 
+**Check an outside controller list (command line).** If you already have a controller list from somewhere else (for example RetroBat's `teknoparrot.yml`), you can compare it with your installed game profiles. Run:
+
+```
+.\TeknoParrot-Manager.ps1 -MappingEvidenceFile "<list>" -ValidationRoot "<TeknoParrot folder>" [-ValidationJsonPath "<details file>"]
+```
+
+It only reads. It prints plain counts: how many games are in the list, how many are found in your TeknoParrot, how many are ready for a person to review, and how many are held back. Nothing in the list is trusted or applied, and no profile is changed. The only file it writes is the details file you name. A game is held back with a plain reason: the game is not in your TeknoParrot, the list names the game twice, the list sets one control twice, the list sets a control the game does not have, the list uses a button name TeknoParrot Manager does not know, or two game actions share one controller button. Five known spelling mistakes in the list are corrected and counted. The same inputs give the same details file.
+
 </details>
 
 ---
 
 ## Not sure which game to set up first?
 
-The step after registration also offers a binding plan: it asks which controls you own (pad, arcade stick, trackball, spinner, wheel, lightgun, keyboard) and suggests which game to set up with which device. It reads nothing and changes nothing.
+The step after registration also offers a binding plan: it asks which controls you own (pad, arcade stick, trackball, spinner, wheel, lightgun, keyboard) and suggests which game to set up with which device. It reads nothing and changes nothing. Choosing a device in the plan does not set up a game. You still set up the game in TeknoParrotUI.

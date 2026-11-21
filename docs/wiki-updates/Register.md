@@ -28,6 +28,8 @@ Register only works on games that are already in your games folder. It does not 
 
 An existing profile is never overwritten by registration.
 
+A real run ends with the banner `Registration run finished.` It means the run is over. It does not mean every game's controls are set up.
+
 **Two folders want the same profile.** If one profile is claimed by two folders (for example two copies of one game), TeknoParrot Manager asks `Resolve them now by picking which folder keeps the profile? (Y/N)`. For each one, choose `K` to keep the current folder, `S` to switch to the other folder, or `Q` to stop. A profile left unresolved is listed under ACTION REQUIRED. A preview only reports these.
 
 ---
@@ -51,6 +53,8 @@ The question is not asked in a preview, or when none of the new games offers a r
 - **Games with a second program.** A few games (for example the Initial D Arcade Stage series) start a second program next to the main one. Register fills in the second game path when that file sits in the same folder as the main one. A second path that already points at a file that exists is kept.
 - **Very long folder paths.** Games in folders longer than 259 characters are found and set up like any other game. Some games still cannot start from a long path. They are listed under ACTION REQUIRED with the short folder name to use.
 - **Startup files.** Some emulators need files before a game can start: PlayStation 3 firmware (RPCS3), PCSX2x6 firmware, Chihiro (CxbxR) firmware, and a settings file for each Play! game. A missing file shows up in ACTION REQUIRED. In a normal run, TeknoParrot Manager then offers to copy the files from your own game collection after checking them against the Eggman DAT list. It never downloads them. See [[Game Startup Files]].
+- **Games that come as a set of ZIPs.** Some games (System 11 games, for example) name two ZIPs: the game's own ZIP and a parent ZIP. A game like this is registered only when both ZIPs are in the same folder. A folder that holds only the parent ZIP does not register the game. Put both ZIPs in one folder, then run again. If a System 11 game also needs a disc image (`.chd`), it is chosen for you when exactly one is there. When there are several, none is guessed.
+- **System 11 saved files.** In a normal run, if a registered System 11 game has no saved files yet, you are offered an optional step to copy them from your own saved-files set. See [[Game Startup Files]].
 
 ---
 
@@ -66,7 +70,7 @@ Next, TeknoParrot Manager goes through these steps. Each one asks first:
 
 ## LaunchBox
 
-At the end of a normal run (not a preview), TeknoParrot Manager offers to add your games to LaunchBox. You can preview first (`P`), add the missing games after a backup (`A`), fill in game details and make playlists (`G`), link games for art and details (`L`), get an import file only (`F`), or skip (`B`). It never closes LaunchBox for you. See [[LaunchBox Integration]].
+At the end of a normal run (not a preview), TeknoParrot Manager offers to add your games to LaunchBox. You can preview first (`P`), add the missing games after a backup (`A`), fill in game details and make playlists (`G`), group regions and versions of a game into one (`V`), keep LaunchBox in step with TeknoParrot (`S`), link games for art and details (`L`), get an import file only (`F`), or skip (`B`). It never closes LaunchBox for you. See [[LaunchBox Integration]].
 
 ---
 

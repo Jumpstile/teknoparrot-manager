@@ -27,8 +27,11 @@ One line per area. Each line starts with `OK`, `Needs attention`, `Not checked` 
 | Force feedback | Games with a built-in FFB Blaster setting that is not turned on. The separate plugin is not looked at here. Use [[FFB Setup]] for that. |
 | [[dgVoodoo2]] | Games that need dgVoodoo2 but do not have it yet. |
 | [[BepInEx]] | Games whose profile says they need BepInEx but do not have it set up. |
-| [[Postgres Setup]] | Whether PostgreSQL is installed and running, whether games still need setup, and whether each game database is there and opens. A database that is not ready shows as `Problem - <game>`. |
+| [[Postgres Setup]] | Whether PostgreSQL is installed and running, whether games still need setup, and whether each game database is there and opens. A database that is not ready shows as `Problem - <game>`. A game set to Internal storage needs no database install. It is skipped and counted as `Game database: OK` with a note to start the game once so it makes its own database. |
 | Game startup files | Games whose emulator is missing files it needs to start. See below. |
+| Game types | Whether each game's type is one TeknoParrot Manager knows, whether TeknoParrot has released the game yet (a game still in development shows as `not available yet`), and whether the emulator for that type is in your TeknoParrot folder. Each type has its own emulator folder. Press `D` for the list. |
+| Game files | Games that need you to pick the game file by hand, because their profile names no game file and TeknoParrot has no setup file for them. Press `D` for the list, then set the game file in TeknoParrotUI. |
+| System 11 | A note (not a problem) when some System 11 games have no saved setup files yet. If you have the System 11 saved-files set, the main run can copy it. See [[Game Startup Files]]. |
 | Game support | Whether games need you: a game file is missing, a second game file (for example a CHD) is not chosen, or PostgreSQL settings are missing. Press `D` for counts per emulator. The setup steps come from the saved copy of the Game Notes page; this check never goes online. |
 
 The last lines give the verdict: `Everything looks fine.` or `Some things need attention.` If a check could not finish, you see `Some checks could not finish, so this is not an all-clear.` A game in a very long folder path counts as not fully checked.

@@ -6,7 +6,7 @@ TeknoParrot Manager sets up your extracted TeknoParrot games for you. It registe
 
 It is made for beginners and is also useful if you already know TeknoParrot. It hides complexity, not detail: repeatable bulk steps save manual work, and Details and the log show what was done.
 
-The latest published release is v1.0 RC8.4: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4. This page matches v1.0 RC8.4. Versions from RC8.1 on can update themselves in place with Check for Updates.
+The latest published release is v1.0 RC8.4: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4. This page matches v1.0 RC9, which is not published yet. Versions from RC8.1 on can update themselves in place with Check for Updates.
 What is new in v1.0 is listed at the top of the [[Changelog]].
 
 Test one game after each run before you trust the rest.
@@ -40,7 +40,7 @@ Type a number and press Enter. After each task you come back to this menu.
 | 8 | Force feedback (FFB) setup | Wheel and stick force feedback | [[FFB Setup]] |
 | 9 | BepInEx setup | Installs or updates BepInEx, a modding framework some games use | [[BepInEx]] |
 | 10 | Region setup | Picks the country your games start in | [[Region Setup]] |
-| 11 | Postgres setup | Sets up PostgreSQL for games that need it | [[Postgres Setup]] |
+| 11 | Postgres setup | Sets up PostgreSQL for games set to Existing PostgreSQL (games on Internal storage need none) | [[Postgres Setup]] |
 | 12 | Required game patches | Installs required fixes for exact game versions | [[Required Game Patches]] |
 | 13 | Library health check | Checks your library without changing it | [[Health Check]] |
 | 14 | Restore backup | Puts back UserProfiles, PostgreSQL, or LaunchBox backups, or resets games | [[Restore Backup]], [[Reset and Restore]] |
@@ -56,7 +56,7 @@ Items 4 to 10 are optional. Items 11 and 12 are only for some games.
 
 - [[Setup]] -- first run, folders, and saved settings
 - [[LaunchBox Integration]] -- add your games to LaunchBox
-- [[Game Startup Files]] -- firmware and other files some games need to start
+- [[Game Startup Files]] -- firmware, System 11 saved files and other files some games need
 - [[CPS3 First-Boot Files]] -- optional files that speed up the first start of CPS3 games
 - [[Registration Ledger]] -- the record of what AutoSync and Register did
 - [[Troubleshooting]] -- common problems and fixes

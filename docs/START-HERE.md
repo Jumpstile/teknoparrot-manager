@@ -6,7 +6,7 @@ It is not TeknoParrot. It does not install or set up TeknoParrot itself.
 
 Allow about 10 minutes for TeknoParrot Manager setup and your first small game, once the downloads are ready. Installing TeknoParrot, downloading updates, extracting large games, and setting up a wheel or lightgun can take longer.
 
-This guide describes v1.0 RC8.4. If your menu looks different, follow the menu names.
+This guide describes v1.0 RC9. If your menu looks different, follow the menu names.
 
 Each step below has one action. "You will see" tells you what should appear. "Next" tells you what to do after that.
 
@@ -535,7 +535,7 @@ Keep the original game files and ZIPs. Never delete leftover marker files just t
 
    Next: skip the other optional setups.
 
-6. If offered an optional second DAT, crosshairs, ReShade, dgVoodoo2, GPU fixes, or CPS3 first-boot files, choose **N**. Do that setup later, after the game has been tested.
+6. If offered an optional second DAT, crosshairs, ReShade, dgVoodoo2, GPU fixes, CPS3 first-boot files, or System 11 saved game files, choose **N**. Do that setup later, after the game has been tested.
 
    You will see: the next step, without that optional setup.
 
@@ -615,7 +615,7 @@ Do these steps in order. Test after each change, so you know which change helped
 
    You will see: the copy result and any controls left for manual setup. Existing button bindings are kept, but the input-system setting may change.
 
-   If a game type has no usable example, its games are skipped. The run can finish with Done and a skipped count. Details and the log list those games. Add one game of this family with your own controls, then run this again. If all games are skipped, no game was changed. A failed save still ends as an error. Done does not prove the controls work.
+   If a game type has no usable example, its games are skipped. The run can finish with a skipped count. Details and the log list those games, and name one game of each type to set up first in TeknoParrotUI. Set up that game with your own controls, then run this again. Choosing a device in a binding plan does not set up a game. If all games are skipped, no game was changed. A failed save still ends as an error. A finished run does not prove the controls work.
 
    Next: test one game.
 
@@ -648,6 +648,7 @@ Stuck? Start with [Troubleshooting](TROUBLESHOOTING.md), the game's official com
 - ReShade, change the look for all games: choose **5) ReShade setup**, then **S**. Pick the new look, choose **[U]** to use it, then **[Y]** to confirm. Then choose **A) All** registered games and **[Y] Yes**.
 - ReShade, change the look for one game: follow the same steps, but choose **L) Browse and select specific games**. Type that game's number, then type **D** (here **D** means "done").
 - ReShade, undo: choose **5**, then **U) Undo ReShade changes**. The games are listed newest first. Pick one game's number and type **YES**, or choose **[A] Undo all** and type **ALL**. Any other answer cancels, and nothing is changed.
+- ReShade, bezels: the first screen of menu 5 has four choices: **S**, **R**, **U** and **B) Use my bezel folder (bezels you already have)**. A bezel is a picture that frames the game on a wide screen. Choose **B**, then **F** to pick a folder of your own `.png` bezels. You see a preview first (`Bezel preview. Nothing has been changed yet.`) and nothing is downloaded. A game needs ReShade first. A game that shares its folder with other games is skipped, and a bezel you placed yourself is kept unless you say yes to replacing it. To undo, choose **5**, **B**, then **U**.
 - ReShade works with both 32-bit and 64-bit games. Games that run through BudgieLoader (a Linux-style game format) are skipped for now, and nothing in their folder changes.
 - ReShade shows no welcome window, counters or messages when a game starts, and the key that opens it still works. A short ReShade version banner may still show for a moment at game start. ReShade has no setting to hide it.
 - After ReShade is applied, the result screen says `To turn the effect on or off, start a game and press the Home key.` It also says `Next: You can undo this in ReShade > Undo ReShade changes.`
@@ -655,7 +656,8 @@ Stuck? Start with [Troubleshooting](TROUBLESHOOTING.md), the game's official com
 - If a game already uses TeknoParrot's own CRT look, ReShade setup can ask what to do, because both together can look doubled. Choose **K** to keep it (default). Choose **T** to turn it off, only for the games that get ReShade now. A saved copy of your game settings is made first. To put it back, use ReShade > Undo ReShade changes, or main menu **14) Restore backup**.
 - On ReShade result screens the choices include **[D] Details**, for example **Press A, S, B or D** or **Press D for details, or Enter to return to the menu**. Type **D** and press **Enter** to see the full technical information. It is also kept in the log.
 - PostgreSQL setup (main menu **11) Postgres setup**): the result screen is short. It ends with **Press Enter to return to menu, or D for details**. Type **D** and press **Enter** for the details, or just **Enter** to return.
-- Library health check (main menu **13**) also checks every game database. A database that is not ready shows as `Problem - <game>`. Run **11) Postgres setup** to fix it.
+- Library health check (main menu **13**) also checks every game database. A database that is not ready shows as `Problem - <game>`. Run **11) Postgres setup** to fix it. A game set to Internal storage needs no database install. It shows as `Game database: OK`, and you start the game once so it makes its own database.
+- The health check also names games with a game type it does not know, games TeknoParrot has not released yet (`not available yet`), emulators missing from your TeknoParrot folder, and games that need you to pick the game file by hand in TeknoParrotUI. Press **D** for the list.
 - Every game database is tested with the game's own settings before setup says the game is ready. A game with no starting database file (`pg_backup`) is `Profile ready` when TeknoParrot creates its database itself (Golden Tee Live 2018 and newer, Golden Tee PGA Tour): start the game once. Any other game with none is left out and named as not ready.
 
 ## 8. Required game patches: menu 12
@@ -761,6 +763,9 @@ Stuck? See [LaunchBox is open](TROUBLESHOOTING.md#5-launchbox-or-bigbox-is-open)
 
 - If you took AutoSync's new-game-only shortcut and no LaunchBox menu appeared, a normal Register-only run can reach the optional menu.
 - Do not choose whole-library maintenance just to get past a missing menu without reviewing its scope.
+- The LaunchBox menu has more choices than the steps above use: **G** fills in game details and makes playlists, **V** groups regions and versions of a game into one game with a version picker, **S** keeps LaunchBox in step with TeknoParrot (removed and moved games), and **L** links games for art and details. Each one shows a preview, makes a backup first, and asks before it saves.
+- A game you add gets its real game name (for example "Too Spicy", not "2Spicy"). A game is linked by itself only when TeknoParrot Manager is sure it is the same game. When it is not sure, you pick from the possible games.
+- A game that cannot start yet (its game file, firmware or BepInEx is missing) gets a `Needs setup` note and goes into a `Needs setup` playlist. Both go away by themselves when the problem is fixed.
 
 ## 10. Read progress, find logs, and keep backups
 

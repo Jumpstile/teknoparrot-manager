@@ -13,10 +13,10 @@ Setup finds the games that need it by itself. If none of your registered games n
 ## Quick steps
 
 1. Start TeknoParrot Manager. At `Enter 1-17:` type `11` and press Enter.
-2. If PostgreSQL is not installed yet, Windows asks for permission. Click **Yes**. Use an administrator account of this PC. If your account is not an administrator, close TeknoParrot Manager and start it again with "Run as administrator".
+2. If PostgreSQL is not installed yet, setup first tells you what it will ask Windows for. Read it, then press Enter at `Press Enter to open the Windows permission window`. Windows then asks for permission. Click **Yes**. Use an administrator account of this PC. If your account is not an administrator, close TeknoParrot Manager and start it again with "Run as administrator". (Setup does not wait for Enter when no keyboard is there.)
 3. You are asked for two passwords (see below). Type each one twice.
 4. Wait. Setup installs PostgreSQL, makes each game's database from the game's own backup file, and tests it with the game's own settings.
-5. When you see `PostgreSQL setup finished.`, open TeknoParrot and start a game. Nothing else is needed on first start.
+5. When you see `PostgreSQL setup finished.`, open TeknoParrot and start a game. For games set to Existing PostgreSQL, nothing else is needed on first start. A game set to Internal makes its own database the first time you start it.
 
 At the end, press Enter to go back to the menu, or `D` for details. Everything on the screen is also in the log.
 
@@ -73,6 +73,8 @@ Before it changes anything, setup backs up your existing PostgreSQL databases. T
 **Checked means connected.** A database counts as ready only when setup could connect with the settings saved in the game's profile and find its tables.
 
 **Time limits.** Each PostgreSQL tool has a time limit. A tool that runs too long is stopped and counted as failed, and setup is rolled back.
+
+**Backups on older folder permissions.** Backups, database moves and saved proof files work on PCs whose folders still use the older owner-only permissions. If this step does fail, the log names the cause.
 
 **Administrator.** Installing PostgreSQL needs administrator access. TeknoParrot Manager asks for it itself through the Windows permission box and continues by itself after you approve. Approving alone does not mean setup worked, so read the result.
 

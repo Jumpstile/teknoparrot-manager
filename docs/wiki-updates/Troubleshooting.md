@@ -24,6 +24,15 @@ Its path may point to the wrong `.exe`, or the game was not fully extracted. In 
 **The game folder path is too long.**
 TPM finds and reads games in very long folder paths (over 259 characters). But installing add-ons into one stops with a message and changes nothing. Move the game to a shorter folder and try again. If a restore says the path is too long for Windows, move TeknoParrot to a folder with a shorter path.
 
+**Library health check says a game is `not available yet`.**
+TeknoParrot lists that game as development only, so it cannot be played yet. Nothing is wrong with your setup. Try again after TeknoParrot releases it.
+
+**Library health check says a game needs you to pick the game file by hand.**
+The game's profile names no game file, and TeknoParrot has no setup file for it, so TPM cannot find it. Open the game in TeknoParrotUI and set its game file.
+
+**Library health check says the emulator for a game type is not in your TeknoParrot folder.**
+Each game type has its own emulator folder inside your TeknoParrot folder. Update TeknoParrot so that folder is there, then run the check again. A game type TPM does not know is named too. Its games may still run.
+
 ---
 
 ## Registration
@@ -36,6 +45,9 @@ Copy that game's `.xml` from `UserProfiles` to a safe place first. Then choose t
 
 **A game shows up twice.**
 Two profile files may exist for one game. Compare their paths and settings, keep copies of both, and remove only the one you are sure is a duplicate.
+
+**A System 11 game was not registered.**
+Some games name two ZIPs: the game's own ZIP and a parent ZIP. They must sit in the same folder. A folder that holds only the parent ZIP does not register the game. Put both ZIPs in one folder, then run Register again. See [[Register]].
 
 **TeknoParrot's own first-time setup is not finished.**
 TPM says so in ACTION REQUIRED with the path to `TeknoParrotUi.exe`. Open it, choose your DAT file when it asks, let it scan for games, and set up your controls.
@@ -62,6 +74,8 @@ An extraction was cut short. Read the log and check the free space and the ZIP b
 
 **Controls are not copied to a game.**
 There may be no set-up reference game for that control type yet, the game is in `noPropagate` in the overrides file, or the game already has five or more controls set up and counts as a reference game itself. See [[Propagate Controls]].
+
+After a copy run, a skipped type names one game of that type to set up first (`Games to set up first`). Set that game up in TeknoParrotUI, then run Propagate Controls again. Choosing a device in the binding plan does not set up a game.
 
 **A game's controls are wrong after copying.**
 Use **14) Restore backup** and look at the list before you restore. Fix the reference game's controls in TeknoParrotUI, then copy again.
@@ -107,8 +121,11 @@ See [[Postgres Setup]].
 **It asks for the PostgreSQL password.**
 Choose `F` and type the existing password. TPM checks it and saves it. If nobody knows it and `X` is offered, choose it: it explains the manual steps and changes nothing. You can leave a password prompt by pressing Enter.
 
+**Golden Tee, Power Putt, Silver Strike Bowling, Target Toss or Orange County Choppers Pinball is skipped, or its database is not mentioned.**
+The game's profile is set to Internal storage (the new default). It needs no PostgreSQL. Start the game once and it makes its own database. Postgres setup and the health check skip it on purpose. Only games set to Existing PostgreSQL (or older profiles with no Storage box) use this page.
+
 **Windows asks for permission, or setup says Administrator is needed.**
-Click Yes in the Windows window and approve it with an administrator account of this PC. If your Windows account is not an administrator, close TPM and start it again with "Run as administrator". Then read the result before you try again.
+Setup tells you what it will ask for and waits for you to press Enter before the Windows window opens. Read it, then press Enter. Click Yes in the Windows window and approve it with an administrator account of this PC. If your Windows account is not an administrator, close TPM and start it again with "Run as administrator". Then read the result before you try again.
 
 **It says a game could NOT be made ready.**
 That game has no starting database file (`pg_backup`), and its profile does not say TeknoParrot creates the database itself. Put its `pg_backup` folder back and run Postgres setup again. The other games are still set up. (A Golden Tee Live 2018 or newer game, or a PGA Tour game, says `Profile ready` instead: start it once.)
@@ -131,6 +148,9 @@ ReShade may not be installed for that game, or the game uses Home for something 
 **The picture looks doubled with a CRT look.**
 The game may already use TeknoParrot's own CRT look. When you pick a look, TPM asks whether to turn TeknoParrot's off for that game (`[T]`) or keep it. To bring it back, use ReShade > Undo ReShade changes, or Restore backup.
 
+**A bezel is not shown, or a game is skipped in the bezel step.**
+The bezel step (menu 5, then `B`) needs ReShade set up for the game first. A game that shares its folder with other games is skipped. A Low match or a different sequel number is not applied unless you pick it. TPM puts the file where ReShade looks for it, but it is not confirmed that every game shows it. See [[ReShade]].
+
 ---
 
 ## Other messages
@@ -146,6 +166,9 @@ Close it, then press Enter to check again, or type `N` to cancel. TPM never clos
 
 **A LaunchBox restore says PARTIAL, or lists "Needs review".**
 Some files were not verified or were left in place on purpose. Keep the reported backup and every listed file, do not retry blindly, and open Details or make a support package. See [[Restore Backup]].
+
+**A LaunchBox game has a `Needs setup` note, or is in a `Needs setup` playlist.**
+That game cannot start yet: its game file, firmware or BepInEx is missing. Fix that (see [[Health Check]] and [[Game Startup Files]]). The note and the playlist entry go away by themselves when the problem is fixed. Notes you wrote yourself stay.
 
 **The Eggman DAT update says the current DAT is protected.**
 TPM will not overwrite a DAT inside your TeknoParrot folder. Choose a folder outside it (for example your ZIP folder) and try again.
