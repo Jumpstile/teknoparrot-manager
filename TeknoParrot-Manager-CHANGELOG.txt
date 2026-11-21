@@ -123,6 +123,19 @@
   - Controls: you can show or print the controls of one game, and your
     cabinet's controls, as a page. Each row shows what the control does,
     your key for it, and whether the game has it set up.
+  - Controls: while it learns your arcade buttons, the Manager first
+    checks for a stuck button (2 seconds, hands off). If a press also
+    sends another key, or a button is still down after 3 seconds, it
+    tells you. It can offer the standard arcade keys that MAME and
+    Ultimarc I-PAC boards both use, but only after you say yes and two
+    buttons you press send those keys. It also notices when the number
+    of arcade encoders it can see is different from when you taught it
+    your buttons.
+  - Controls: a game's control page suggests your key only for coin,
+    start, numbered buttons and directions the game plainly calls
+    directions. It says "I'm not sure" for the rest (for example a "Menu
+    Up" slot). If your own LEDBlinky file gives a control a color, the
+    page shows it.
   - Controls: you can tell the Manager that a game played well. It keeps
     that with the date and the game's revision, and calls the game's
     controls Verified until the game's controls or settings change.

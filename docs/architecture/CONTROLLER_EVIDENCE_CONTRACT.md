@@ -38,6 +38,8 @@ In 1.0 only an active XInput slot with class `XboxStylePad` may be `High`. Every
 
 `ObservationTimeUtc` is the only time fact. It is excluded from `EvidenceId`. Evidence from an earlier run of the survey or propagation is stale and must be observed again, never reused.
 
+Owner decision pending: a count of arcade encoders seen when the player taught TPM their keys may be kept with the saved keys (`cabinet.json`, `EncodersWhenLearned`) and compared with a new observation. It is a note about the past, never evidence about the present, and it may only produce a hint. It holds no vendor or product number.
+
 ## Identity and safety
 
 `EvidenceId` is deterministic: the SHA-256 of a canonical projection of the provider identity and the sorted `DeviceObservations`, excluding `ObservationTimeUtc`. The same connected controllers always give the same `EvidenceId`.

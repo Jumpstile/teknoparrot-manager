@@ -2,7 +2,7 @@
 
 For the owner, on the test PC. Unit tests use fake files and cannot press a real button, so these checks are the only proof that the controller setup works in a game. Do them in order. Stop at the first failure and write down the step number and what you saw.
 
-What this covers: the controller-found hint (#410), your controller layout chosen once (#200), setting up one game, all games or game by game from that layout (#306), the controls check of every registered game and the Controls line in the Library health check (#305), the read-only check of an outside controller list (#304), the saved answers and button learning (#201), the control guides and cabinet list (#267), and the "it worked" records that decide when a game is Verified (#307). Sections F to I use only TeknoParrot Manager's own files. They never change a game's file in UserProfiles, but check that in step 41.
+What this covers: the controller-found hint (#410), your controller layout chosen once (#200), setting up one game, all games or game by game from that layout (#306), the controls check of every registered game and the Controls line in the Library health check (#305), the read-only check of an outside controller list (#304), the saved answers and button learning (#201), the control guides and cabinet list (#267), the stuck-button check, the standard arcade keys, key suggestions and light colors (#267), and the "it worked" records that decide when a game is Verified (#307). Sections F to K use only TeknoParrot Manager's own files. They never change a game's file in UserProfiles, but check that in step 41.
 
 ## A. Your controller layout (nothing in any game changes)
 
@@ -91,9 +91,25 @@ Use one plain button game and one wheel or gun game that are already registered 
 47. Choose 4, the game, S, 1, R ("still to do") on the button game after W: it must stop counting as verified until you choose S, 1, D.
 48. Open `control-evidence.json` and read it. It must hold the game name, the date, the game's revision and the steps, and no names of people or computers.
 
-## J. What to report
+## J. Stuck buttons, standard keys, suggestions and colors (#267)
 
-49. Say what you saw for each step number (pass or fail), the encoder and controller models, and the games used.
-50. Say if the rule for "Verified" in section I (you say the game worked; calibration done for analog games) is the right one, or what rule you want instead: every control pressed in a real game, only the ones the game needs, or something else.
-51. Say which games need a first-run Test or Service menu step or a wheel or gun calibration before play, from what you saw in step 11, so TeknoParrot Manager can list them. Right now only the player's own answer says so, and calibration is assumed for every game that is not plain buttons.
-52. Say if the Ctrl, Alt and Shift buttons were seen in step 33, and which encoder brands have a setup file you would like read (file name and a copy with no personal data).
+You need: your arcade encoder in a normal console window. For steps 52 and 53 you also need an encoder that is still on its factory keys (an Ultimarc I-PAC that was never reprogrammed) and, if you have one, an encoder that is not. In My controls choose 2 for steps 49 to 55.
+
+49. Hands off the cabinet. After you answer the two questions you should see "First TPM checks that no button is stuck. Keep your hands off the cabinet for 2 seconds." Nothing should be reported. Write down any key it names: that is a false alarm.
+50. Do it again, but hold down one arcade button (or a Ctrl, Alt or Shift button) during the 2 seconds. You should see "Keys are arriving with nobody pressing a button:" and the key's name, then "Continue anyway?". Answer N: "Stopped. Nothing was saved." and `cabinet.json` must not change.
+51. On the learning screen, press each control as asked. A normal quick press must show only "Got it". Write down any "also sent" or "still down" line you get on a normal press: that is a false alarm and the most important result of this section.
+52. Standard keys, encoder on its factory keys: when you are offered "Many arcade encoders ship with the standard arcade keys", press D. The list must match the Ultimarc I-PAC2 "Default Keycode Table" (for example Player 1 button 1 = Left Ctrl, Start 1 = 1, Coin 1 = 5). Answer Y and press the two buttons it asks for. You should see "Both buttons sent the standard keys, so TPM will use them." Save, then open `cabinet.json`: those controls have the Source `StandardArcadeKeys`. Press a few other buttons that came from the list and write down any that sends a different key.
+53. Standard keys, encoder that is not on the standard keys: answer Y and press the button it asks for. You should see "That button sent <key>, not the standard key" and then be asked to press each control. No standard key may be saved. Also try pressing Esc at the check: "TPM did not see the check button".
+54. If one of your buttons sends two keys (for example a button wired to send a letter and Ctrl), press it while learning. You should see "Pressing this also sent ..." and "TPM kept ...". If two different buttons send the same extra key, you should also see "came along with 2 different controls". If you have no such button, say so.
+55. On a learning question, hold a button for 4 seconds and let go. You should see "This button was still down after 3 seconds". Do it with a Ctrl, Alt or Shift button too. The key must still be kept.
+56. In My controls choose 3 and pick a plain button game. Each row for coin, start, a numbered button or a direction must show "Key: ..." with the key you taught TPM, and the line above the list must say how many controls TPM can suggest a key for. Pick a game with a "Menu Up" or "Volume Down" slot: that row must say "I'm not sure", and the key you learned for the stick must not be shown there. Compare with what TeknoParrotUI shows for the game.
+57. With LEDBlinky installed, the TeknoParrot lighting added to LEDBlinkyControls.xml, and some control colors set in LEDBlinky's Controls Editor: the guide must show a Light column with the same colors. A color made of three numbers must say "a custom color". Without LEDBlinky, there must be no Light column.
+58. Arcade encoder hint: if TPM could see an Ultimarc board when you saved your keys, unplug it and open My controls. You should see "When you taught TPM your buttons it could see 1 arcade encoder. Now it sees 0." Plug it in: the line must go. With an encoder from another maker TPM cannot see it, so no hint is expected: write down the brand.
+59. Open `cabinet.json`. `EncodersWhenLearned` must be a small number (or -1). There must be no vendor number, product number, serial number or device path in the file.
+
+## K. What to report
+
+60. Say what you saw for each step number (pass or fail), the encoder and controller models, and the games used.
+61. Say if the rule for "Verified" in section I (you say the game worked; calibration done for analog games) is the right one, or what rule you want instead: every control pressed in a real game, only the ones the game needs, or something else.
+62. Say which games need a first-run Test or Service menu step or a wheel or gun calibration before play, from what you saw in step 11, so TeknoParrot Manager can list them. Right now only the player's own answer says so, and calibration is assumed for every game that is not plain buttons.
+63. Say if the Ctrl, Alt and Shift buttons were seen in step 33, whether any of steps 49 to 55 gave a false alarm, and which encoder brands you use. TeknoParrot Manager does not read any maker's setup file, because no maker publishes which pin is which button.

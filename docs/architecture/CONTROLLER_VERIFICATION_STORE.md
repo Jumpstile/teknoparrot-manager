@@ -8,7 +8,7 @@ Related: `CONTROLLER_EVIDENCE_CONTRACT.md` (what detection may say), `CONTROLLER
 
 `State\Controls` in TPM's own folder. Two small JSON files, both written by one function (`Save-TpmControlStateFile`):
 
-- `cabinet.json`: the survey answers per kind of device (`Has`, `Source`, `AnsweredUtc`), the number of players and buttons, and one record per learned arcade control (`Key`, `Source`, `LearnedUtc`).
+- `cabinet.json`: the survey answers per kind of device (`Has`, `Source`, `AnsweredUtc`), the number of players and buttons, the number of arcade encoders detection could see when the keys were last learned (`EncodersWhenLearned`, `-1` when it could not look), and one record per learned arcade control (`Key`, `Source`, `LearnedUtc`).
 - `control-evidence.json`: one record per game (`Code`).
 
 Protection rules, the same for both:
@@ -22,7 +22,11 @@ Protection rules, the same for both:
 
 A saved answer is the default for that question. When all seven are saved, the survey shows them and asks once. It asks everything again when detection finds a High-confidence device of a kind the player said they do not have. Detection still only suggests: a name-only guess is never an answer.
 
-Learned keys come from, in order: the player pressing the control (`PressedByPlayer`), or the key list LEDBlinky keeps in `LEDBlinkyInputMap.xml` after the player confirms it (`LedBlinkyKeyMap`). Only LED labels TPM recognizes and MAME key codes it can name are proposed. No other brand's setup file is read: their formats are not verified, so pressing the control is the way for every other encoder. A key already given to another control is refused.
+Learned keys come from, in order: the player pressing the control (`PressedByPlayer`), the key list LEDBlinky keeps in `LEDBlinkyInputMap.xml` after the player confirms it (`LedBlinkyKeyMap`), or the standard arcade keys (`StandardArcadeKeys`). Only LED labels TPM recognizes and MAME key codes it can name are proposed. The standard keys are the ones MAME (docs.mamedev.org/usingmame/defaultkeys.html) and the Ultimarc I-PAC (ultimarc.com, I-PAC2 "Default Keycode Table") both list: coin and start 1 to 4, the player 1 stick and buttons 1 to 8, the player 2 stick and buttons 1 to 4, the player 3 stick and buttons 1 to 3. The two lists differ for player 2 buttons 5 to 8 and for player 4, and neither lists Test or Service, so those are left out. They are used only after the player says the encoder was never changed and presses player 1 Start and player 1 button 1 on the cabinet, and both send the standard key. No other brand's setup file is read: Ultimarc's `.xml` export is not documented (no public table says which pin is which button), and the other brands keep no file or an undocumented one. Pressing the control is the way for every other encoder. A key already given to another control is refused.
+
+While learning, three things are only reported, never decided: keys that arrive during a 2 second hands-off check, other keys that arrive within 80 ms of a press (the first key is kept), and a key still down 3 seconds after the press. Nothing about them is saved.
+
+`EncodersWhenLearned` is how many arcade encoders detection saw at Medium or High confidence when the keys were saved. If it differs from a new observation, My controls shows a hint to learn the keys again. It is a note about the past, never evidence about the present, and it holds no vendor or product number.
 
 ## Play-test evidence (#307)
 

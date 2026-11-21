@@ -2521,18 +2521,34 @@
     Nothing here changes a TeknoParrot game file.
 
     - Learn my arcade buttons. You say how many players and buttons your
-      cabinet has. If LEDBlinky is installed, the Manager first offers
-      the keys its own key list names (one Y/N). Then it asks you to press
-      each control ("Press Player 1 Start") and remembers the key it
-      sends. Esc skips a control your cabinet does not have. A key
-      already given to another control is refused. At the end, one
-      question ("Save this?") keeps the answers. Other encoder brands'
-      own setup files are not read yet; pressing the buttons works for
-      any encoder.
+      cabinet has. First the Manager waits 2 seconds with your hands off
+      the cabinet. If a key shows up on its own, a button may be stuck,
+      and it tells you. If LEDBlinky is installed, it then offers the
+      keys its own key list names (one Y/N). It can also offer the
+      standard arcade keys that MAME and Ultimarc I-PAC boards both use
+      (for example Left Ctrl for button 1). It uses them only after you
+      say yes and press two buttons that really send those keys. Then it
+      asks you to press each control ("Press Player 1 Start") and
+      remembers the key it sends. Esc skips a control your cabinet does
+      not have. A key already given to another control is refused. If a
+      press also sends another key, or a button is still down after 3
+      seconds, it tells you and keeps the first key. At the end, one
+      question ("Save this?") keeps the answers. If it can see how many
+      arcade encoders are plugged in, it saves that number too. If the
+      number is different later, My controls says so and suggests you
+      learn the buttons again. Other encoder brands' own setup files are
+      not read: no maker writes down which pin is which button. Pressing
+      the buttons works for any encoder.
     - Show or print the controls of one game. Lists each control the game
-      has, what it does, your key for it, and whether the game has it set
-      up. One question saves the list as a page in Reports\Control Guides
-      and opens it so you can print it.
+      has, what it does, the key the Manager suggests, and whether the
+      game has it set up. It suggests your key only for the standard
+      controls: coin, start, numbered buttons, and directions the game
+      plainly calls directions. For anything else, such as a game's
+      "Menu Up" or "Volume Down" slot, it says "I'm not sure". If your
+      own LEDBlinky file gives a control a color, the page also shows it
+      in a Light column (the Manager does not change any lights). One
+      question saves the list as a page in Reports\Control Guides and
+      opens it so you can print it.
     - Tell TPM how a game played. W means you played it and every control
       you tried reacted correctly. The Manager keeps that, with the date
       and the game's revision, and calls the game's controls Verified
