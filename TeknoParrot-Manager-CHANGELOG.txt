@@ -67,6 +67,12 @@
   - Before the Windows permission window opens for PostgreSQL setup or
     repair, the Manager waits for you to press Enter, so you can read what
     it is about to ask for.
+  - Startup files for Chihiro, PlayStation 3 and the other game systems
+    that need them now work like the CPS3 step. If the Manager cannot find
+    them, it asks once for your Supplementary folder and remembers it. It
+    checks what it finds against the list of known files, then one Y
+    installs everything. The result names what was installed, already
+    matching, missing (by file name) or invalid, and the folders searched.
 
   Also new in this release
   - LEDBlinky lighting (optional): if you use LEDBlinky, the Manager can
