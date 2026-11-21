@@ -10,7 +10,7 @@ BeforeAll {
     $parseErrors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { throw 'Controller evidence bootstrap could not parse the production script.' }
-    $wanted = @('Get-TpmControllerEvidence', 'Invoke-DeviceSurvey', 'Get-TpmControlStatePath', 'Read-TpmControlStateFile', 'Save-TpmControlStateFile', 'Get-TpmDeviceQuestions', 'Read-TpmCabinetState', 'Save-TpmCabinetState', 'Get-TpmCabinetDeviceAnswer', 'Set-TpmCabinetDevice', 'Get-TpmLedBlinkyKeyMap')
+    $wanted = @('Get-TpmControllerEvidence', 'Invoke-DeviceSurvey', 'Get-TpmControlStatePath', 'Read-TpmControlStateFile', 'Save-TpmControlStateFile', 'Get-TpmDeviceQuestions', 'Read-TpmCabinetState', 'Save-TpmCabinetState', 'Get-TpmCabinetDeviceAnswer', 'Set-TpmCabinetDevice', 'Get-TpmLedBlinkyKeyMap', 'Get-TpmControllerSalt', 'Get-TpmControllerSetNotice', 'Get-TpmEncoderFingerprints', 'Get-TpmEncoderCount', 'Get-TpmEncoderChangeNotice')
     $functionFile = Join-Path $TestDrive 'controller-functions.ps1'
     ($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -in $wanted }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n" | Set-Content -LiteralPath $functionFile -Encoding utf8
     . $functionFile
@@ -88,6 +88,68 @@ Describe 'Get-TpmControllerEvidence' {
         $second = Get-TpmControllerEvidence
         $second.ObservationTimeUtc | Should -Not -Be $first.ObservationTimeUtc
         $second.EvidenceId | Should -Be $first.EvidenceId
+    }
+}
+
+Describe 'Controller fingerprints' {
+    # One board shows itself twice to Windows (keyboard part MI_00, mouse part MI_01); a second identical board shows both parts again with other ids.
+    BeforeAll {
+        $script:oneBoard = @([pscustomobject]@{ Name = 'USB Input Device'; DeviceID = 'HID\VID_D209&PID_0301&MI_00\7&AAA&0&0000' }, [pscustomobject]@{ Name = 'USB Input Device'; DeviceID = 'HID\VID_D209&PID_0301&MI_01&Col01\7&BBB&0&0000' }, [pscustomobject]@{ Name = 'USB Input Device'; DeviceID = 'HID\VID_D209&PID_0301&MI_01&Col02\7&CCC&0&0001' })
+        $script:twoBoards = @($script:oneBoard) + @([pscustomobject]@{ Name = 'USB Input Device'; DeviceID = 'HID\VID_D209&PID_0301&MI_00\7&DDD&0&0000' }, [pscustomobject]@{ Name = 'USB Input Device'; DeviceID = 'HID\VID_D209&PID_0301&MI_01&Col01\7&EEE&0&0000' }, [pscustomobject]@{ Name = 'USB Input Device'; DeviceID = 'HID\VID_D209&PID_0301&MI_01&Col02\7&FFF&0&0001' })
+        $script:salt = 'a' * 32
+    }
+
+    It 'gives no fingerprints unless a salt is given' {
+        Mock Get-CimInstance { $script:oneBoard }
+        (Get-TpmControllerEvidence).DeviceFingerprints | Should -BeNullOrEmpty
+        @((Get-TpmControllerEvidence -Salt $script:salt).DeviceFingerprints).Count | Should -Be 1
+    }
+
+    It 'counts one board once however many parts it shows, and two identical boards as two with two different fingerprints' {
+        Mock Get-CimInstance { $script:oneBoard }
+        $one = Get-TpmControllerEvidence -Salt $script:salt
+        @($one.DeviceObservations | Where-Object Basis -eq 'KnownVendor')[0].Count | Should -Be 1
+        Mock Get-CimInstance { $script:twoBoards }
+        $two = Get-TpmControllerEvidence -Salt $script:salt
+        @($two.DeviceObservations | Where-Object Basis -eq 'KnownVendor')[0].Count | Should -Be 2
+        $ids = @($two.DeviceFingerprints | ForEach-Object Fingerprint)
+        $ids.Count | Should -Be 2
+        ($ids | Select-Object -Unique).Count | Should -Be 2
+        $ids | Should -Contain $one.DeviceFingerprints[0].Fingerprint
+    }
+
+    It 'gives the same fingerprint when the board is moved to another USB port, and a different one with another salt' {
+        Mock Get-CimInstance { $script:oneBoard }
+        $before = (Get-TpmControllerEvidence -Salt $script:salt).DeviceFingerprints[0].Fingerprint
+        Mock Get-CimInstance { @($script:oneBoard | ForEach-Object { [pscustomobject]@{ Name = $_.Name; DeviceID = ($_.DeviceID -replace '7&', '9&X') } }) }
+        (Get-TpmControllerEvidence -Salt $script:salt).DeviceFingerprints[0].Fingerprint | Should -Be $before
+        (Get-TpmControllerEvidence -Salt ('b' * 32)).DeviceFingerprints[0].Fingerprint | Should -Not -Be $before
+    }
+
+    It 'keeps every raw number and instance id out of the result' {
+        Mock Get-CimInstance { $script:twoBoards }
+        $json = (Get-TpmControllerEvidence -Salt $script:salt) | ConvertTo-Json -Depth 6
+        $json | Should -Not -Match '(?i)VID_|PID_|MI_0|Col0|7&|HID\\\\'
+        $json | Should -Not -Match $script:salt
+    }
+
+    It 'gives an empty list with no controller, and none at all when the device list could not be read' {
+        Mock Get-CimInstance { @() }
+        $none = Get-TpmControllerEvidence -Salt $script:salt
+        @($none.DeviceFingerprints).Count | Should -Be 0
+        $none.DeviceFingerprints -is [array] | Should -BeTrue
+        Mock Get-CimInstance { throw 'forced failure' }
+        (Get-TpmControllerEvidence -Salt $script:salt).DeviceFingerprints | Should -BeNullOrEmpty
+    }
+
+    It 'creates the salt only when asked, once, and a read never writes' {
+        $state = Join-Path $TestDrive ('salt-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        Get-TpmControllerSalt -StateRoot $state | Should -Be ''
+        Test-Path -LiteralPath $state | Should -BeFalse
+        $made = Get-TpmControllerSalt -StateRoot $state -Create
+        $made | Should -Match '^[0-9a-f]{32}$'
+        Get-TpmControllerSalt -StateRoot $state | Should -Be $made
+        Get-TpmControllerSalt -StateRoot $state -Create | Should -Be $made
     }
 }
 

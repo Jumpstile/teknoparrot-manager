@@ -2533,12 +2533,23 @@
       not have. A key already given to another control is refused. If a
       press also sends another key, or a button is still down after 3
       seconds, it tells you and keeps the first key. At the end, one
-      question ("Save this?") keeps the answers. If it can see how many
-      arcade encoders are plugged in, it saves that number too. If the
-      number is different later, My controls says so and suggests you
-      learn the buttons again. Other encoder brands' own setup files are
-      not read: no maker writes down which pin is which button. Pressing
-      the buttons works for any encoder.
+      question ("Save this?") keeps the answers, and the Manager also
+      notes which arcade encoders it can see right now. Other encoder
+      brands' own setup files are not read: no maker writes down which
+      pin is which button. Pressing the buttons works for any encoder.
+    - Is it the same controller? My controls and the Device Survey say,
+      in one line, whether the Manager sees the same arcade encoders as
+      when you taught it your keys, whether one was added or removed, or
+      whether it could not check. It is only a hint. It never changes a
+      saved key or answer and never marks a game Verified. If you
+      changed your encoder, learn your buttons again. Details: the
+      Manager can only tell encoders from makers it recognizes (today
+      Ultimarc, such as the I-PAC). For each one it keeps a private
+      one-way code in State\Controls, made from the maker and model
+      numbers on this PC. The numbers, serial numbers and device paths
+      are never saved, logged, printed or put in a report, and the code
+      never leaves your PC. Moving an encoder to another USB port is not
+      a change. Swapping one for an identical one cannot be noticed.
     - Show or print the controls of one game. Lists each control the game
       has, what it does, the key the Manager suggests, and whether the
       game has it set up. It suggests your key only for the standard

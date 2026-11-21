@@ -294,7 +294,7 @@ These tests try the fixes made in RC8.2.
 3. You should get ONE question: "Use the Xbox controller for all games?" Type Y. It prints a plan. It changes no game file (it only saves your answer in its own settings folder).
 4. Now close the program, unplug the controller, and start it again. Answer the control questions.
 5. You passed if step 3 asked one question, and step 4 asked the full list of questions like before. Tell us what controller you have.
-6. Stuck buttons, the standard arcade keys, key suggestions and light colors need a real arcade encoder. They are in `docs/CONTROLLER-HANDS-ON-TEST-PLAN.md`, section J.
+6. Stuck buttons, the standard arcade keys, key suggestions, light colors and "TPM noticed I changed my arcade encoder" need a real arcade encoder. They are in `docs/CONTROLLER-HANDS-ON-TEST-PLAN.md`, section J (steps 49 to 59f).
 
 ## New in RC8.3: tests 36 to 40
 
