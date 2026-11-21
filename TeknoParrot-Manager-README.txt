@@ -3183,14 +3183,15 @@
 
       Step 1.  At the main menu, type 5 for ReShade setup.
                You will see: ReShade Visual Enhancements Setup, then
-               three choices:
+               four choices:
 
                  S) Set up ReShade visual enhancements
                  R) Remove verified TeknoParrot Manager-managed ReShade
                     files
                  U) Undo ReShade changes
+                 B) Use my bezel folder (bezels you already have)
 
-               The prompt is Action (S/R/U, default S).
+               The prompt is Action (S/R/U/B, default S).
                Next: press Enter, or type S and press Enter.
 
       Step 2.  If ReShade is not downloaded yet, you will see:
@@ -3519,7 +3520,7 @@
     To change the look for ALL games:
 
     Step 1.  At the main menu, type 5.
-             Next: type S (or press Enter) at Action (S/R/U, default S).
+             Next: type S (or press Enter) at Action (S/R/U/B, default S).
 
     Step 2.  Pick the new look in the list, then type U.
              Next: press Enter at Choice (default Y) to confirm it.

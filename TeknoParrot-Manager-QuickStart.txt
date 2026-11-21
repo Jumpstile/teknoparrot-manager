@@ -2553,7 +2553,7 @@
        You will see: ReShade Visual Enhancements Setup, with
        "R) Remove verified TeknoParrot Manager-managed ReShade files".
 
-    2. At "Action (S/R/U, default S)" type R and press Enter.
+    2. At "Action (S/R/U/B, default S)" type R and press Enter.
 
        You will see: the counts of files found, and either
        "No ReShade games need review or safe removal." or "The next
@@ -2615,8 +2615,8 @@
 
     1. At "Enter 1-17:" type 5 and press Enter.
 
-       You will see: "ReShade Visual Enhancements Setup" with S, R and U
-       choices and "Action (S/R/U, default S):".
+       You will see: "ReShade Visual Enhancements Setup" with S, R, U and B
+       choices and "Action (S/R/U/B, default S):".
 
        Next: press Enter (S sets up ReShade).
 
@@ -2892,7 +2892,7 @@
   -------------------------------------
   Change the look for ALL games:
 
-    1. Type 5 for ReShade setup. Press Enter at "Action (S/R/U, default
+    1. Type 5 for ReShade setup. Press Enter at "Action (S/R/U/B, default
        S):".
 
     2. Pick the new look and type U.
