@@ -72,6 +72,17 @@
   - Games that need PlayStation 3 firmware (RPCS3) or a Play! game file
     are now checked before they start, and the Manager tells you what is
     missing.
+  - System 11 games: when a game names two ZIPs (child and parent), both
+    must be in the same folder, or the game is not registered. The disc
+    image (CHD) is chosen for you when there is only one, and is never
+    guessed when there are several. If you have your own System 11 saved
+    files set, the Manager can copy the files for your games. It never
+    replaces a file that is already there and says which games the set
+    has no files for.
+  - The Library health check names game types it does not know, games
+    TeknoParrot has not released yet (development only), emulators that
+    are missing from your TeknoParrot folder, and games that need you to
+    pick the game file by hand.
   - The game list now also reads a second program and a test menu program
     for games that list them.
 
