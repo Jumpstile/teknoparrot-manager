@@ -259,7 +259,7 @@ This is the full menu. Type a number at `Enter 1-17:`.
 | --- | --- | --- |
 | 1 | **AutoSync** | Extract your game ZIPs, then register the games |
 | 2 | **Register only** | Register games you already extracted |
-| 3 | **Propagate Controls** | Copy controls from a game you set up to games of the same type. It copies only known button settings, and only to compatible games that have none yet. It is not universal device or shooter mapping |
+| 3 | **Propagate Controls** | Copy controls from a game you set up to games of the same type (only known button settings, only to compatible games that have none yet), set up games with your controller layout, check which games have all their controls, or learn your arcade buttons. It is not universal device or shooter mapping |
 | 4 | **Crosshair setup** | Pick and deploy custom crosshairs to lightgun games |
 | 5 | **ReShade setup** | Add visual post-processing to game folders |
 | 6 | **dgVoodoo2 setup** | Fix some old DX8, DirectDraw, and Glide game crashes or black screens |
@@ -351,7 +351,7 @@ When AutoSync or Register only is done, the screen ends with `Registration run f
 
 ## Copy Your Controls
 
-![Propagate Controls: copies controls to your other games of the same type and reports when no game needed a change](docs/images/19-tpm-propagate-controls.png)
+![Propagate Controls: the five choices, from copying controls to learning your arcade buttons](docs/images/19-tpm-propagate-controls.png)
 
 
 TeknoParrot Manager can copy controls from one game to other games of the same type. You set up ONE game of each type first.

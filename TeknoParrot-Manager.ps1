@@ -22888,7 +22888,7 @@ function Read-TpmCrosshairYesNo {
 # The user points TPM at a folder of bezel images they already have. TPM matches each registered game to one image with the
 # existing fuzzy title helpers, shows a preview, and only after approval copies the chosen image to
 # <game folder>\reshade-shaders\Textures\bezel.png (the place the issue says ReShade reads a bezel from; NOT yet proven on real
-# games, see docs\BEZEL-OWNER-TEST-PLAN.md). TPM never ships, downloads or points to bezels.
+# games, see docs\RC9-OWNER-TEST-PLAN.md). TPM never ships, downloads or points to bezels.
 # Safety: nothing is written before approval; a bezel the user placed by hand is kept unless they choose to replace it (a copy is
 # saved first); the copy runs as one checked file transaction; every applied file is recorded so it can be undone.
 # Decisions: a folder shared by several games (for example a shared loader) is refused, because one bezel would show on all of
@@ -58707,7 +58707,7 @@ $mode = $null
         Write-Host " Propagate Controls" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-TpmText -Text 'This copies the controls of games you already set up to your other games of the same type.' -Color DarkCyan
-        Write-TpmText -Text 'No game is registered or extracted.' -Color DarkCyan
+        Write-TpmText -Text 'This screen never registers or unpacks games.' -Color DarkCyan
         if (-not $Unattended) {
             Write-Host ''
             Write-TpmText -Text '1 = copy controls to games of the same type' -Indent 4

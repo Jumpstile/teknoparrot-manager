@@ -294,7 +294,7 @@ These tests try the fixes made in RC8.2.
 3. You should get ONE question: "Use the Xbox controller for all games?" Type Y. It prints a plan. It changes no game file (it only saves your answer in its own settings folder).
 4. Now close the program, unplug the controller, and start it again. Answer the control questions.
 5. You passed if step 3 asked one question, and step 4 asked the full list of questions like before. Tell us what controller you have.
-6. Stuck buttons, the standard arcade keys, key suggestions, light colors and "TPM noticed I changed my arcade encoder" need a real arcade encoder. They are in `docs/CONTROLLER-HANDS-ON-TEST-PLAN.md`, section J (steps 49 to 59f).
+6. Stuck buttons, the standard arcade keys, key suggestions, light colors and "TPM noticed I changed my arcade encoder" need a real arcade encoder. They are in `docs/RC9-OWNER-TEST-PLAN.md`, Part 3 (steps 112 to 128).
 
 ## New in RC8.3: tests 36 to 40
 
@@ -437,7 +437,7 @@ These tests try the new parts of RC9. Do them first if you are short on time.
 
 ### Test 54: A game set with only its parent ZIP
 
-1. Use this only if you have a game that needs a parent ZIP (a game set). Skip this test if you do not.
+1. Use this only if you have a game that needs a parent ZIP (a game set). Skip this test if you do not, or if the game is one of the 17 that the Eggman list registers by its parent ZIP (for example Dance Dance Revolution 2nd Mix Link).
 2. Make a new folder that holds ONLY the parent ZIP, not the game's own ZIP. At the main menu, type 2 and press Enter (Register only). Pick that folder.
 3. You passed if no game is registered from that folder. Open TeknoParrot. You passed that part if the game does not show up from that folder.
 

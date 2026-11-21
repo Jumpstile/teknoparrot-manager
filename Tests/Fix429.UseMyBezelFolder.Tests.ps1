@@ -5,7 +5,7 @@
 # These tests use fake games, fake bezels and TestDrive folders only. They prove what a user sees or loses: the right bezel is picked,
 # a different sequel is never picked quietly, a bezel the user placed by hand is kept, a game without ReShade or in a shared folder is
 # left alone, and Undo puts the user's own file back.
-# What they CANNOT prove: that a real game shows the bezel (needs a real game; see docs\BEZEL-OWNER-TEST-PLAN.md), or how well the
+# What they CANNOT prove: that a real game shows the bezel (needs a real game; see docs\RC9-OWNER-TEST-PLAN.md), or how well the
 # matcher does on a real bezel collection.
 
 BeforeAll {

@@ -1370,10 +1370,12 @@
 
   3) Propagate Controls
        Copies your current TeknoParrot controls from your reference games
-       to other games of the same type.
+       to other games of the same type. It also sets up games with your
+       controller layout, checks which games have all their controls, and
+       learns your arcade buttons (choices 1 to 5 on that screen).
 
-       No games are registered or extracted. It is the same step offered
-       at the end of AutoSync and Register. You can run it any time,
+       This step never registers or extracts games. It is the same step
+       offered at the end of AutoSync and Register. You can run it any time,
        without going through extraction or registration first.
 
        See CONTROL PROPAGATION below.

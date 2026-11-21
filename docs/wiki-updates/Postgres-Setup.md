@@ -2,7 +2,7 @@
 
 Some Incredible Technologies (IT) games need a small database on your PC. Postgres setup installs it and gets each game's database ready. It is main menu item 11, **Postgres setup**. It sits under "Game Requirements (only for some games)".
 
-The database is **PostgreSQL 8.3**. These games need it: Golden Tee Live (including 2020), Power Putt Live, Silver Strike Bowling Live, Target Toss Pro and Orange County Choppers Pinball.
+The database is **PostgreSQL 8.3**. These games need it: all Golden Tee Live years (2006 to 2023, 2025, 2026), all Golden Tee PGA Tour games (2021 to 2023, 2025, 2026), Power Putt Live, Silver Strike Bowling Live, Target Toss Pro and Orange County Choppers Pinball. The Manager finds them by what their profile says, so a new game of this kind needs no new Manager version.
 
 **Internal or Existing PostgreSQL?** Newer TeknoParrot profiles of these games have a Storage box. **Internal** is the new default. It needs no database install. Start the game once and it makes its own database. Postgres setup and [[Health Check]] skip these games and never say their database is missing. **Existing PostgreSQL** is for keeping an existing server and its saved progress. Everything on this page is for games set to Existing PostgreSQL (and older profiles with no Storage box). TeknoParrot Manager never switches a game from one to the other, and never touches saved progress without a backup first.
 
@@ -46,6 +46,8 @@ If the saved database password does not work, you are told. Choose `F` and type 
 - A database that already exists is never recreated and never restored over.
 - A game profile that already has its own password, server, port or user is listed, and you are asked first. `K` keeps them as they are (the default). `R` replaces the password in them.
 - A game that has no starting database file (`pg_backup` folder) is `Profile ready` when TeknoParrot creates its database itself (Golden Tee Live 2018 and newer, Golden Tee PGA Tour). Start the game once. Any other game with none cannot get a database: it is left out and named, and every other game is still set up.
+- Two games that name the same database (Golden Tee Live 2006 and Orange County Choppers Pinball both use `GameDB06`) keep their saved progress in the same tables, so one database cannot hold both. The first game keeps the name. The other gets its own database, made from its own backup, and its profile is saved with the new name. The old database is not changed and nothing is deleted. If a game that shares the name has no starting file, setup stops before changing anything. [[Health Check]] names games that still share one database.
+- A backup that holds data that is not valid UTF8 (Golden Tee Live 2006 has some) is restored into a database that keeps every byte, so no table comes back empty.
 - If a check fails, setup puts everything back the way it was and tells you which game and why.
 
 Before it changes anything, setup backs up your existing PostgreSQL databases. To get one back, use [[Restore Backup]], option 2 (PostgreSQL database backup).

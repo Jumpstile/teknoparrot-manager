@@ -2035,8 +2035,10 @@
        2) Register only    -- register games you already extracted.
 
        3) Propagate Controls -- copy controls from a game you set up to
-                              games of the same type, without going
-                              through AutoSync/Register first.
+                              games of the same type, set up games with
+                              your controller layout, check which games
+                              have all their controls, or learn your
+                              arcade buttons. No AutoSync/Register first.
 
      Game Enhancements (optional -- not every game needs them)
 

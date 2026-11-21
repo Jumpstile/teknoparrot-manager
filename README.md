@@ -83,7 +83,7 @@ The normal backup protects UserProfiles (TeknoParrot's saved game settings) only
 | --- | --- | --- |
 | 1 | **AutoSync** | Extract your game ZIPs, then register the games |
 | 2 | **Register only** | Register games you already extracted |
-| 3 | **Propagate Controls** | Copy known controls from a game you set up to similar games that have none |
+| 3 | **Propagate Controls** | Copy known controls to similar games that have none, set up games with your controller layout, check controls, learn your arcade buttons |
 | 4 | **Crosshair setup** | Pick and deploy custom crosshairs to lightgun games |
 | 5 | **ReShade setup** | Add visual post-processing to game folders |
 | 6 | **dgVoodoo2 setup** | Fix some old DX8, DirectDraw, and Glide game crashes or black screens |
@@ -312,7 +312,7 @@ Modes 1 and 2 offer a preview/dry-run option first (a practice run that changes 
 | **Library Management**                                        |                                |                                                                                                                                                                                                               |
 | 1                                                             | **AutoSync**                   | Extract (unpack) your game ZIPs, then register the games (add them to TeknoParrot)                                                                                                                           |
 | 2                                                             | **Register only**              | Register games you already extracted                                                                                                                                                                          |
-| 3                                                             | **Propagate Controls**         | Copy controls from a game you set up to games of the same type, without going through AutoSync/Register first                                                                                                |
+| 3                                                             | **Propagate Controls**         | Copy controls from a game you set up to games of the same type, set up games with your controller layout, check which games have all their controls, and learn your arcade buttons. No AutoSync or Register needed first                                                                                                |
 | **Game Enhancements** (optional -- not every game needs them) |                                |                                                                                                                                                                                                               |
 | 4                                                             | **Crosshair setup**            | Pick custom crosshairs and copy them to lightgun games                                                                                                                                                        |
 | 5                                                             | **ReShade setup**              | Install post-processing shaders (visual filters: sharper image, CRT-style scanlines, borders). Change or undo your ReShade look for all games or one game. Turn off TeknoParrot's own CRT effect if you want |
@@ -839,13 +839,13 @@ If anything goes wrong, restore from the backup made at the start of the run.
 
 ## Propagate Controls (standalone menu option)
 
-Mode 3 does only the control-copying step described above. You do not need to run AutoSync or Register first.
+Mode 3 opens a menu with five choices (see below). Choice 1 is the control-copying step described above. You do not need to run AutoSync or Register first.
 
 It does not extract or register any games.
 
 Use it when your library is already registered and you just set up a new or updated reference game in TeknoParrotUI. Run it right away instead of sitting through a full AutoSync/Register pass.
 
-You will see: `You have 2 games with their controls set up.` Then you see a preview of what would change. It ends with `Preview only. Nothing was saved.` After that comes the question `Copy controls from 2 games to your other games of the same type? (Y/N, D = details)`. Press **D** to see each example game and the settings that will be copied. Check them against your real hardware, then press **Y** or **N**. If you press **N**, nothing changes.
+If you choose 1, you will see: `You have 2 games with their controls set up.` Then you see a preview of what would change. It ends with `Preview only. Nothing was saved.` After that comes the question `Copy controls from 2 games to your other games of the same type? (Y/N, D = details)`. Press **D** to see each example game and the settings that will be copied. Check them against your real hardware, then press **Y** or **N**. If you press **N**, nothing changes.
 
 If you press **Y**, a saved copy of your game settings is made first, and its folder is shown. After the copy, you are asked `Undo these changes and put your game settings back as they were? (Y/N)`. Press **Y** to undo everything at once. You can also undo later with **14) Restore backup**.
 
@@ -863,11 +863,12 @@ If you press **Y**, a saved copy of your game settings is made first, and its fo
 
 ### Your controller layout and the controls check
 
-Mode 3 opens a small menu. Choice 1 is the copy described above. The other choices are new:
+Mode 3 opens a small menu with five choices. Choice 1 is the copy described above. The other choices are:
 
 - **2 = set up games with my controller layout.** The first time, you choose a layout once: Xbox, PlayStation, Nintendo or arcade stick. You can change any single button, and Test and Service start empty so a stick click cannot open a test menu. After that, pick one game, all your games at once (you see a preview and approve once), or game by game (you confirm each game).
 - **3 = choose or change my controller layout.** Your choice is saved in TeknoParrot Manager's own settings folder. A connected Xbox-style controller only pre-selects the Xbox choice. The answer is always yours.
 - **4 = check which games have all their controls.** It reads every registered game and sorts it into: every control set up, some set up, none set up, or "TPM cannot tell". It changes nothing. Details name the games and the controls still missing. The same counts show as a Controls line in the Library health check (menu 13).
+- **5 = my controls.** Learn your arcade buttons, show or print a control guide, and tell TPM a game worked. See [My controls](#my-controls-propagate-controls-choice-5).
 
 ### More detail: your controller layout
 

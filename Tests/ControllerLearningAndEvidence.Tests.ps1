@@ -7,7 +7,7 @@
 # The production script is parsed and only its function definitions are dot-sourced; no top-level product code runs.
 # Everything uses temp folders and fake key presses.
 # What this CANNOT prove: that a real encoder's buttons are seen by the console (Ctrl, Alt and Shift included), that a real
-# controller works in a game, or that the page opens in a real browser. Those are in docs/CONTROLLER-HANDS-ON-TEST-PLAN.md.
+# controller works in a game, or that the page opens in a real browser. Those are in docs/RC9-OWNER-TEST-PLAN.md (Part 3).
 
 BeforeAll {
     $productionPath = (Resolve-Path (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1')).Path
