@@ -57,13 +57,15 @@ After that, menu 15 does the updating.
 
 ## Check at start
 
-TeknoParrot Manager also checks once when it starts. If you are current, you see nothing. If a newer version exists, you see the version numbers and this question:
+TeknoParrot Manager also checks once when it starts, before it asks about your saved settings. If you are current, you see nothing. If a newer version exists, you see the version numbers and these choices:
 
 ```
-Update now, remind me later, or view release notes? (Y/N/V)
+Y = Update now
+N = Remind me later
+V = View release notes
 ```
 
-`V` shows the release notes. `Y` shows the same list of steps and asks `Proceed? (Y/N)`. `N` continues to the menu.
+`Y` starts the update right away. The list of steps is shown above the choices, and there is no second question. `N` keeps this version and goes on. `V` shows the release notes and asks again.
 
 To turn the start check off, set `CheckForUpdatesOnStartup` to `false` in `TeknoParrot-Manager.config.json`. The file is in `<your TeknoParrot folder>\TeknoParrotManager\State\`. The start check never runs in an unattended run.
 

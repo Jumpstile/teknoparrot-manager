@@ -11,6 +11,19 @@
   ----------------------------------------------------------------
 
   Fixes
+  - The update check now runs right after the program starts, before the
+    "use saved settings?" question. The "Update Available" screen lists
+    each choice: Y = Update now, N = Remind me later, V = View release
+    notes. It no longer also tells you to open Check for Updates.
+  - You are never asked to approve the same thing twice. Update: one Y
+    starts the update. Restore all, restoring an old backup that cannot
+    be checked, the LaunchBox restore and add, the Library Health path
+    search, ReShade "Replace old files" and "Undo only the files that did
+    not change", and the BepInEx install now ask once. Every backup and
+    undo is kept.
+  - AutoSync no longer says "ACTION REQUIRED" or sends you to a saved list
+    when all your games were already extracted. Skipping registration
+    because nothing new was extracted is now just a short note.
   - Adding games with AutoSync no longer skips the second of two different
     games that have almost the same name, such as the Type X and
     NESiCAxLive versions of one game, or two versions of the same game.

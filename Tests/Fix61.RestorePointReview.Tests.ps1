@@ -815,7 +815,7 @@ Describe 'FIX61 the ALL question counts every change (finding 8)' {
         # Mutation: count only $changes.Count in Invoke-TpmResetRestoreAllGames -> "0 items" when only the settings
         # file differs and "1 item" in the second case.
         $fx = New-F61Fixture -Name 'allcount'
-        Install-F61Mocks -Fixture $fx -Answers @('3', 'YES', 'no')
+        Install-F61Mocks -Fixture $fx -Answers @('3', 'no')
         $null = New-F61Baseline -Fixture $fx
         Set-F61File -Path $fx.Config -Text '{"Marker":"settings-new"}'
 
@@ -827,7 +827,7 @@ Describe 'FIX61 the ALL question counts every change (finding 8)' {
         $fx.State.Screen.Clear()
         Set-F61File -Path (Join-Path $fx.Profiles 'GameA.xml') -Text (Get-F61GameXml -Name 'Game A' -Value 'a-new')
         New-Item -ItemType Directory -Path (Join-Path $fx.Profiles 'AddedFolder') -Force | Out-Null
-        foreach ($answer in @('3', 'YES', 'no')) { [void]$fx.State.Answers.Enqueue($answer) }
+        foreach ($answer in @('3', 'no')) { [void]$fx.State.Answers.Enqueue($answer) }
 
         $second = Invoke-TpmResetRestoreMenu -UserProfilesDir $fx.Profiles -ConfigPath $fx.Config -RestorePointsRoot $fx.Points
 
@@ -930,7 +930,7 @@ Describe 'FIX61 screens follow the console width (finding 10)' {
         # Mutation: ask the old 70-character questions in one Read-HostSafe prompt ->
         # a prompt is longer than the console and wraps in the middle of the question.
         $fx = New-F61Fixture -Name 'prompts'
-        Install-F61Mocks -Fixture $fx -Answers @('3', 'YES', 'no') -Width $Width
+        Install-F61Mocks -Fixture $fx -Answers @('3', 'no') -Width $Width
         $null = New-F61Baseline -Fixture $fx
         Set-F61File -Path (Join-Path $fx.Profiles 'GameA.xml') -Text (Get-F61GameXml -Name 'Game A' -Value 'a-new')
         Set-F61File -Path $fx.Config -Text '{"Marker":"settings-new"}'
@@ -939,14 +939,14 @@ Describe 'FIX61 screens follow the console width (finding 10)' {
         $menu = Invoke-TpmResetRestoreMenu -UserProfilesDir $fx.Profiles -ConfigPath $fx.Config -RestorePointsRoot $fx.Points
 
         $menu.Result.ReasonCode | Should -BeExactly 'USER_DECLINED'
-        $fx.State.Prompts.Count | Should -Be 3
+        $fx.State.Prompts.Count | Should -Be 2
         $longPrompts = @($fx.State.Prompts | Where-Object { ($_.Length + 2) -gt $Width })
         ($longPrompts -join "`n") | Should -BeExactly ''
         $tooWide = @($fx.State.Screen | Where-Object { $_.Length -ge $Width })
         ($tooWide -join "`n") | Should -BeExactly ''
         (Get-F61ScreenText -Fixture $fx) | Should -Match 'Any answer other than YES cancels'
         (Get-F61ScreenText -Fixture $fx) | Should -Match 'This changes 2 items in total'
-        @($fx.State.Prompts | Where-Object { $_ -like '*Type ALL*' }).Count | Should -Be 1
+        @($fx.State.Prompts | Where-Object { $_ -like '*Type ALL*' }).Count | Should -Be 0
     }
 
     It 'wraps the restore lines printed during Restore all at <Width> columns and leaves the ordinary restore alone' -TestCases @(

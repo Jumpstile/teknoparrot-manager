@@ -525,11 +525,11 @@ Press A, S, B or D:
 
 Type one key and press Enter. Press Enter alone to pick B.
 
-- **A** asks you to confirm. You will see `Press Y to replace them, or N to leave them. (Y/N)`. The default is N. If you say Y, you choose the look again. A copy of the old files is saved first, so you can undo it.
+- **A** goes straight into ReShade setup to replace the old ReShade files, with no separate "Replace the old files?" question. You still choose the look and confirm it in setup. A copy of the old files is saved first, so you can undo it.
 - **S** goes back into ReShade setup so you can choose games one by one.
 - **M** opens the Library health check (mode 13) so you can repair missing game paths. It shows only when some games could not be found.
 - **B** leaves the games as they are. When there are no protected games, B means back to the main menu.
-- **D** shows the full details, then asks again. Details also tell you that **A** replaces protected ReShade files, and that TeknoParrot Manager asks you to confirm before it changes anything.
+- **D** shows the full details, then asks again. Details also tell you that **A** replaces protected ReShade files, and that TeknoParrot Manager saves a copy of the old files first, so you can undo it.
 
 When nothing needs a choice, the screen ends with `Press D for details, or Enter to return to the menu`. Type D for details, or press Enter to go back to the main menu.
 
@@ -740,7 +740,7 @@ Nothing is installed silently into every game.
 
 If a game folder is unsafe or the network cannot be reached, TeknoParrot Manager explains that no change was made. It then offers the automatic retry path.
 
-The prompt is `[Y] Install/update  [B] Back  [N] Cancel`. There is no repair-reset choice. After a successful or no-change run, the screen waits for one Enter.
+The prompt is `[Y] Install/update  [B] Back  [N] Cancel`. It is skipped when the only games are ones you picked by number from the "do not have BepInEx" list, because picking them was your answer. There is no repair-reset choice. After a successful or no-change run, the screen waits for one Enter.
 
 The failure screen offers `[D] Show details`, `[O] Open support/log guidance`, `[B] Back to main menu`, and `[R] Try BepInEx setup again`.
 
@@ -1098,7 +1098,7 @@ Optional: add games to LaunchBox.
 What each key does:
 
 - `P` previews without changing LaunchBox. It reads your LaunchBox files, asks which platform, shows the plan, then returns to this offer.
-- `A` adds games that are missing from LaunchBox's own library. It tells you to close LaunchBox and BigBox first (TeknoParrot Manager will not close them), asks `Add the missing games to LaunchBox now? (Y/N, D = about the risks)` (default N), then the platform, then shows the plan and asks `Write exactly these changes after a verified backup? (Y/N)` (default N). Entries that are already there are kept as they are.
+- `A` adds games that are missing from LaunchBox's own library. It tells you to close LaunchBox and BigBox first (TeknoParrot Manager will not close them), then asks the platform, shows the plan and asks once: `Write exactly these changes after a verified backup? (Y/N, D = about the risks)` (default N). Entries that are already there are kept as they are.
 - `G` fills in game details and makes playlists (backed up). It fills in the release year and developer where LaunchBox has nothing yet. It makes playlists for each arcade hardware family, plus "Light gun games" and "Driving games". Your own playlists and details are never touched. Restore puts everything back.
 - `L` links games for art and details (backed up). It looks each game up in LaunchBox's own game list on your PC. It shows every old name, new name and ID first, and you approve before anything is saved. Names you typed yourself are never replaced. Nothing is downloaded.
 - `F` creates the reference file without a LaunchBox write.
@@ -1323,7 +1323,7 @@ Keep any current settings you still need somewhere outside the folders being res
 
 - For UserProfiles you pick with `Enter number to restore, or Enter to cancel`. Enter or B cancels with `Restore canceled.`
 
-- UserProfiles restore warns `Warning: this replaces ALL your current game settings with this saved copy.` and asks `Type YES to confirm`.
+- UserProfiles restore warns `Warning: this replaces ALL your current game settings with this saved copy.` and asks `Type YES to confirm`. A saved copy that cannot be checked is approved once: it shows the same warning and asks only `Type UNVERIFIED to use this copy anyway`, with no `Type YES to confirm` after it.
 
 - If TeknoParrot is still running, the restore stops safely and your selected backup is unchanged.
 

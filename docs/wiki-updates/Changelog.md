@@ -12,6 +12,12 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
 ## v1.0 RC8.4 (changes since RC8.3)
 
 ### Fixes
+- You are never asked to approve the same thing twice. Update: one Y
+  starts the update. Restore all, restoring an old backup that cannot
+  be checked, the LaunchBox restore and add, the Library Health path
+  search, ReShade "Replace old files" and "Undo only the files that did
+  not change", and the BepInEx install now ask once. Every backup and
+  undo is kept.
 - Adding games with AutoSync no longer skips the second of two different
   games that have almost the same name, such as the Type X and
   NESiCAxLive versions of one game, or two versions of the same game.

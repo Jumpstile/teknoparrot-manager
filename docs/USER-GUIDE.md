@@ -874,8 +874,8 @@ A broken saved path is a saved game location that points to a file or folder tha
 
 **To use automatic repair (R):**
 
-1. Type R and press Enter. You will see "TeknoParrot Manager will search" your games folder "for matching executables." with `[Y] Search for repair candidates` and `[N] Cancel`.
-2. Type Y and press Enter. You will see "Candidate paths found (no profile changes made):" with a "before" path and an "after" path for each game.
+1. Type R and press Enter. You will see "TeknoParrot Manager will search" your games folder "for matching executables." The search starts right away. It only reads, and it changes nothing.
+2. Wait for "Candidate paths found (no profile changes made):" with a "before" path and an "after" path for each game.
 3. Check that the new paths look right. Next: type Y to choose `[Y] Apply only these reviewed candidates`, or N to choose `[N] Leave them unchanged`.
 4. If you chose Y, you will see "Repair result:" with the number FIXED and STILL BROKEN, and a "Safety backup:" line.
 5. Next: press Enter at "Press Enter to return to the main menu".
@@ -1501,7 +1501,7 @@ The default is B. If you only press Enter, nothing is replaced.
 
 | Key | What happens |
 | --- | --- |
-| `A` | Asks `Replace the old ReShade files in {that game\|those N games}? You will choose the look again. A copy of the old files is saved, so you can undo it. Press Y to replace them, or N to leave them. (Y/N)` |
+| `A` | Goes straight into ReShade setup to replace the old ReShade files of those games, with no separate "Replace the old files?" question. You still choose the look and confirm it in setup. A copy of the old files is saved first, so you can undo it. |
 | `S` | Goes back into ReShade setup so you can choose games one by one. After games that were not safe, the line reads `[S] Choose games one by one and try again`. |
 | `M` | Opens the Library health check (main menu 13) so you can repair missing game paths. |
 | `B` or Enter | Leaves the games as they are. Without protected games the line reads `[B] Back to the main menu`. |
@@ -2040,7 +2040,7 @@ The undo preview says what happens in plain words:
 - `Its ReShade files are put back exactly as they were.`
 - `TeknoParrot's own CRT look is turned back on.`
 
-**Result screen details:** the `D` view of the ReShade result screen shows the note `Press A to replace protected ReShade files. TeknoParrot Manager asks you to confirm before it changes anything.`
+**Result screen details:** the `D` view of the ReShade result screen shows the note `Press A to replace protected ReShade files. TeknoParrot Manager saves a copy of the old files first, so you can undo it.`
 It then shows these blocks: `What happened` (`Summary:`, `Changed:`, `Protected existing:`, `Missing paths:`, `Failed:`, `Unsafe/malformed:`), `What TeknoParrot Manager did`, one block per protected game (`What happened:`, `Reason code:`, `Technical detail:`), `Counts and notes from the run`, `Notes for each game`, and `Undo` (`Saved for undo:`, `Where: ReShade > Undo ReShade changes`).
 
 **Automatic download and the installer check:** DLLs are never bundled in the release ZIP.
@@ -2252,7 +2252,7 @@ TeknoParrot Manager never removes an existing BepInEx installation (see "Rollbac
 3. Choose `Y` to install or update, `B` to go back, or `N` to cancel. Next: nothing changes until you approve the listed operation.
 4. Read the result. It says how many games you selected and how many were changed, already set up, skipped or failed (for example `You selected 4 games: 3 changed, 1 skipped.`), and where the backup is.
 
-The prompt is `[Y] Install/update  [B] Back  [N] Cancel`. There is no repair-reset choice. After a successful or no-change run, the screen waits for one Enter before it goes back.
+The prompt is `[Y] Install/update  [B] Back  [N] Cancel`. It is skipped when the only games are ones you picked by number from the "do not have BepInEx" list, because picking them was your answer. There is no repair-reset choice. After a successful or no-change run, the screen waits for one Enter before it goes back.
 
 The result reports these groups:
 
@@ -2585,10 +2585,10 @@ If no LaunchBox folder is saved in your settings, TeknoParrot Manager asks for t
 ### Choosing A: add the games
 
 1. TeknoParrot Manager tells you to close LaunchBox and BigBox (`Close LaunchBox and BigBox first. TeknoParrot Manager will not close them for you.`).
-   It asks `Add the missing games to LaunchBox now? (Y/N, D = about the risks)` (default N). Next: answer Y to go on, or press D to read about the risks first.
+   You already chose `A`, so there is no extra "now?" question.
 2. Choose the platform for this action (see below). The choice is not saved.
 3. TeknoParrot Manager shows a read-only plan. Then it asks `Write exactly these changes after a
-   verified backup? (Y/N)` (default N). If nothing would change, it says so and
+   verified backup? (Y/N, D = about the risks)` (default N). This is the only approval. If nothing would change, it says so and
    stops.
 4. If LaunchBox or BigBox is still open, TeknoParrot Manager tells you and waits. Close it, then
    press Enter to check again, or type `N` to cancel with nothing written. It
@@ -2663,8 +2663,8 @@ A game gets only the controls it uses that your cabinet has. You see a preview f
 
 The questions are:
 
-- If the snapshot came from a different LaunchBox folder than the one you are restoring into, TeknoParrot Manager asks a separate `Y/N` (default N) before going on.
-- A final `Y/N` (default N) confirms the restore into the named folder. Then the same guided wait for LaunchBox and BigBox to be closed applies.
+- If the snapshot came from a different LaunchBox folder than the one you are restoring into, the question says so: `This snapshot belongs to a different LaunchBox folder. Restore it into the target folder anyway, after a verified backup of its current state? (Y/N)` (default N). It is the only question.
+- Otherwise one `Y/N` (default N) confirms the restore into the named folder. A file that TeknoParrot Manager added earlier and you have not changed gets its own `Remove the file ...? (Y/N)` question, because removing it deletes it. That is the only approval for that removal. Then the same guided wait for LaunchBox and BigBox to be closed applies.
 
 If the restore fails and every attempted file is verified back to its prior state, the result is `FAILED`. If recovery cannot be verified, it is `PARTIAL`.
 

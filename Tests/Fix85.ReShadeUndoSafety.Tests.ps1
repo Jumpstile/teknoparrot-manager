@@ -578,21 +578,20 @@ Describe 'FIX85 undo only the files that did not change' {
         @(Get-TpmReShadeUndoChangedKindLines -Changed (Get-TpmReShadeUndoCheck -Receipt $entry.Receipt).Changed) | Should -Be @('The game profile', 'Some ReShade files')
     }
 
-    It 'offers U, D and C for a game with files that can be put back, and undoes only after a typed YES' {
-        # Mutation: undo on U without asking, or accept another word as YES -> the file is removed after "no", or nothing happens after YES.
-        $script:f85Choices.Enqueue('U'); $script:f85Answers.Enqueue('no')
+    It 'offers U, D and C for a game with files that can be put back, and undoes them on U without a second question' {
+        # Mutation: undo on C or Enter, or ask a second question after U -> the file is removed after C, or a prompt appears after U.
+        $script:f85Choices.Enqueue('C')
         Invoke-TpmReShadeUndoGameChoice -Entry $script:f85Entry
         @($script:f85ChoiceCalls[0].Choices) | Should -Be @('U', 'D', 'C')
         [IO.File]::ReadAllText((Join-Path $script:f85Game 'dxgi.dll')) | Should -BeExactly 'tpm-dll'
         (Get-F85Text $script:f85Rows) | Should -Match ([regex]::Escape('These files are different now: - The ReShade settings file The other files can still be undone.'))
         (Get-F85Text $script:f85Rows) | Should -Match ([regex]::Escape('[U] Undo only the files that did not change'))
-        (Get-F85Text $script:f85Rows) | Should -Match ([regex]::Escape('Canceled. Nothing was changed.'))
-        $script:f85Choices.Enqueue('U'); $script:f85Answers.Enqueue('YES')
+        $script:f85Choices.Enqueue('U')
         Invoke-TpmReShadeUndoGameChoice -Entry $script:f85Entry
         Test-Path -LiteralPath (Join-Path $script:f85Game 'dxgi.dll') | Should -BeFalse
         (Get-F85Bytes (Join-Path $script:f85Game 'ReShade.ini')) | Should -BeExactly $script:f85IniEdit
         (Get-F85Text $script:f85Rows) | Should -Match ([regex]::Escape('ReShade changes were partly undone for 1 game.'))
-        @($script:f85Prompts | Where-Object { $_ -match 'Type YES to undo only those files' }).Count | Should -Be 2
+        @($script:f85Prompts).Count | Should -Be 0
     }
 
     It 'leaves everything as it is on C or Enter and shows the changed files on D first' {
