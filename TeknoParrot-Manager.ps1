@@ -21222,10 +21222,10 @@ function Copy-PostgresRecoveryEvidenceFile {
 # Windows user by SID, never by account name: a name can fail to resolve, or
 # resolve differently, for AzureAD, domain or non-ASCII accounts. Each step
 # reports one of three outcomes and only 'Success' counts as locked:
-#   Success - the access list holds only explicit entries for the current
-#             user's SID, none inherited.
-#   Failed  - the ACL tool reported an error, or the list grants another account
-#             or inherits entries.
+#   Success - the access list holds only explicit Allow entries for the current
+#             user's SID, plus optionally Administrators or SYSTEM, none inherited.
+#   Failed  - the ACL tool reported an error, or the list grants another account,
+#             holds a deny entry or inherits entries.
 #   Unknown - the list could not be set, read or resolved, so TPM cannot tell.
 # FAT, FAT32 and exFAT drives keep no file permissions, so "only the current user" cannot be set or checked there. Such a drive is
 # treated as already restricted; refusing would stop every start-up for a TeknoParrot folder on one of these drives.
@@ -21249,13 +21249,17 @@ function Get-PostgresOwnerOnlyAclState {
         return [pscustomobject]@{ Outcome = 'Unknown'; Detail = 'The access list could not be read.' }
     }
     $grantsCurrentUser = $false
+    # Administrators and SYSTEM can always take over a file, so an explicit entry for them adds no exposure. Elevated or
+    # Administrator accounts keep such an entry; refusing it would stop PostgreSQL setup, backups and migration for them.
+    $alwaysTrustedSids = @('S-1-5-32-544', 'S-1-5-18')
     foreach ($rule in $rules) {
         if ($rule.IsInherited) { return [pscustomobject]@{ Outcome = 'Failed'; Detail = 'The access list still inherits entries.' } }
         $resolved = $null
         try { $resolved = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $resolved = $null }
         if ([string]::IsNullOrWhiteSpace($resolved)) { return [pscustomobject]@{ Outcome = 'Unknown'; Detail = 'An access entry could not be resolved to a Windows account.' } }
-        if ($resolved -ne $currentSid) { return [pscustomobject]@{ Outcome = 'Failed'; Detail = 'The access list grants another account.' } }
-        if ($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow) { $grantsCurrentUser = $true }
+        if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { return [pscustomobject]@{ Outcome = 'Failed'; Detail = 'The access list holds a deny entry.' } }
+        if ($resolved -eq $currentSid) { $grantsCurrentUser = $true; continue }
+        if ($resolved -notin $alwaysTrustedSids) { return [pscustomobject]@{ Outcome = 'Failed'; Detail = 'The access list grants another account.' } }
     }
     if (-not $grantsCurrentUser) { return [pscustomobject]@{ Outcome = 'Failed'; Detail = 'The access list does not grant the current user.' } }
     return [pscustomobject]@{ Outcome = 'Success'; Detail = '' }
