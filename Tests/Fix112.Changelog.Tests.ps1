@@ -60,7 +60,8 @@ Describe 'changelog format' {
 
     It 'is short (a few pages, not the long technical history)' {
         # Mutation: paste the long technical history back into the shipped changelog.
-        # RC9 and RC8.4 each list their changes in plain words, so the file is about 570 lines. 700 still catches the long history.
+        # The cap was 500 until RC9. RC9 lists about 200 plain-words lines on top of the published RC8.4 and older sections, which stay as published, so the file is about 665 lines.
+        # 700 is the next round number that fits and still catches the long technical history.
         $script:F112Lines.Count | Should -BeLessThan 700
     }
 }
