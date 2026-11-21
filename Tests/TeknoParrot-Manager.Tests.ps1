@@ -27584,7 +27584,7 @@ Describe 'Next version: firmware, Play! game file and menu layout' {
             (Get-NfStagingLeft -Fixture $fixture) | Should -BeFalse
         }
 
-        It 'tells the player no window opens, and the prompt says "install the firmware"' {
+        It 'tells the player no window opens, and the prompt says to install what was found' {
             $fixture = New-NfRoot -EmulatorType 'RPCS3' -Folder 'RPCS3' -Program 'rpcs3.exe'
             $collection = New-NfCollection -ZipName $script:NfZipName -ZipEntries @{ 'PS3UPDAT.PUP' = $script:NfPupBytes } -DatSet $script:NfZipName -DatFile 'PS3UPDAT.PUP' -DatBytes $script:NfPupBytes
             $found = Get-NfPlan -Fixture $fixture -Collection $collection
@@ -27592,7 +27592,7 @@ Describe 'Next version: firmware, Play! game file and menu layout' {
             $script:nfPrompt = ''
             Mock Read-TpmChoice { $script:nfPrompt = $Prompt; return 'N' }
             [void](Invoke-TpmPrerequisiteReview -Warnings $found.Warning -TpRoot $fixture.Root -SearchFolders @($collection.Folder) -SupplementaryDatPath $collection.Dat -Interactive)
-            $script:nfPrompt | Should -Match 'install the firmware'
+            $script:nfPrompt | Should -Match 'install what was found'
             Should -Invoke Start-Process -Times 0 -Exactly
         }
 
