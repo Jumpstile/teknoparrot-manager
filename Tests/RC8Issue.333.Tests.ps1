@@ -230,7 +230,7 @@ Describe 'RC8 issue #342: family design skips stay honest across success, no-op 
         finally { if ($null -ne $lock) { $lock.Dispose() } }
         if ($FailSave) { $result.Mutation.FailedItems | Should -Contain ZFailure }
         $result.Outcome | Should -BeExactly $ExpectedOutcome
-        $result.Summary | Should -Match '1 game skipped by design.*no usable reference game'
+        $result.Summary | Should -Match '1 game skipped: no game of their family has your controls yet'
         $result.Mutation.SkippedItems | Should -Contain WaitingGun
         $result.Mutation.SkippedItemCount | Should -Be 1
         $skip = @($result.Reports | Where-Object Code -eq WaitingGun)
@@ -261,7 +261,7 @@ Describe 'RC8 issue #342: family design skips stay honest across success, no-op 
         $rendered.ControlsCopiedCount | Should -Be $(if ($Mixed) { 1 } else { 0 })
         $rendered.FailedCount | Should -Be $(if ($FailSave) { 1 } else { 0 })
         $summary = Get-TpmControlPropagationSummary -Reports $result.Reports -Outcome $result.Outcome
-        $summary.NotChanged | Should -Match '1 game skipped by design.*no usable reference game'
+        $summary.NotChanged | Should -Match '1 game skipped: no game of their family has your controls yet'
         if (-not $FailSave) { $summary.Status | Should -BeExactly 'Ok'; @($summary.Needs).Count | Should -Be 0 }
         if (-not $Mixed) { $summary.Title | Should -BeExactly 'No game was changed.' }
         $shown = (($script:rcControlsHost -join ' ') -replace '\s+', ' ')
@@ -287,7 +287,7 @@ Describe 'RC8 issue #342: family design skips stay honest across success, no-op 
         $pool.Count | Should -Be 0
         $result = Invoke-ControlPropagation -userProfilesDir $root -pool $pool -minBound 5
         $result.Outcome | Should -BeExactly 'NO_OP'
-        $result.Summary | Should -Match 'No game was changed.*2 games skipped by design'
+        $result.Summary | Should -Match 'No game was changed.*2 games skipped: no game of their family has your controls yet'
         $result.Mutation.SkippedItemCount | Should -Be 2
         $result.Mutation.FailedItemCount | Should -Be 0
         $result.Backup.Attempted | Should -BeFalse

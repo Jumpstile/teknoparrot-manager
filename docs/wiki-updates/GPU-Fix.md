@@ -27,7 +27,7 @@ Run it once after your first setup. Run it again whenever you change your graphi
 - Before it writes anything, TeknoParrot Manager saves a copy of your UserProfiles in the `FullBackup` folder (a folder starting with `GpuFix_`). To undo, use [[Restore Backup]].
 - The fix only changes saved settings. It does not start the game, so it cannot prove the game now runs well. Start a game to try it.
 - New games TeknoParrot adds later are covered automatically.
-- If some games are skipped (for example their drive is not plugged in), the result screen says so. Press `D` for the reason, `H` to open [[Health Check]] and fix saved paths, or `R` to run it again.
+- If some games are skipped (for example their drive is not plugged in), the result screen says so. It also says how many games you selected and how many were changed, skipped or failed, and where the backup is. Press `D` for the reason, `H` to open [[Health Check]] and fix saved paths, or `R` to run it again.
 - [[Health Check]] shows which registered games could use the fix but do not have it yet. It changes nothing.
 
 <details>

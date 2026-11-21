@@ -21,9 +21,11 @@ TeknoParrot Manager saves copies for you:
 3) LaunchBox library backup
 4) Reset and Restore: put back one game or all games from a restore point
    saved when TeknoParrot Manager started
+5) Rebuild one game from its ZIP: put one game folder back to exactly what
+   its ZIP holds (your old folder is kept)
 ```
 
-3. At `Enter 1-4`, type a number and press Enter.
+3. At `Enter 1-5`, type a number and press Enter.
 
 Every list of backups is shown newest first. You pick every backup yourself, so restore cannot run in an unattended run.
 
@@ -111,4 +113,10 @@ Puts one game, or all games, back to how they were at a restore point saved when
 
 ---
 
-Game files on your games drive are never touched by any restore here.
+## 5) Rebuild one game from its ZIP
+
+Puts one game folder back to exactly what is in its original ZIP. See [[Reset and Restore]].
+
+---
+
+Options 1 to 4 never touch game files on your games drive. Option 5 replaces one game folder with a fresh copy from its ZIP, and keeps your old folder aside.

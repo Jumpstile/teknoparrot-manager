@@ -247,7 +247,7 @@ Describe 'FIX41 P05 ReShade state in the owned layout and its startup migration'
             Test-TpmOwnedMigrationStartupAllowed -MigrationResult $result | Should -BeTrue
             Test-Path -LiteralPath $fx.LegacyReShade | Should -BeFalse
             Get-Fix41Base64 -Path $cacheFile | Should -BeExactly ([Convert]::ToBase64String($cacheBytes))
-            @(Get-ChildItem -LiteralPath $fx.Layout.Backups -Directory -Filter 'LegacyMigration_*').Count | Should -Be 0
+            @(Get-ChildItem -LiteralPath $fx.Layout.Backups -Directory -Filter 'LegacyMig_*').Count | Should -Be 0
             Test-Path -LiteralPath $ownershipPath -PathType Leaf | Should -BeTrue
 
             # 'A' selects every reviewable game in the chooser, then REMOVE confirms; no -StateRoot.
@@ -301,6 +301,37 @@ Describe 'FIX41 P05 ReShade state in the owned layout and its startup migration'
         Assert-Fix41ReShadeRemoved -Summary $summary -Game $game -OwnershipPath $ownershipPath
     }
 
+    It 'C2: still backs up and moves ReShade state when the install folder is deep (backup path would pass 260 characters with the old long folder name)' {
+        # Mutation: restore 'LegacyMigration_<32 hex>' as the backup folder name in Invoke-TpmOwnedMigration -> the backup copy fails
+        # on this deep install folder and the migration stops (BACKUP_FAILED / FAILED_BEFORE_MUTATION), nothing is moved.
+        $fx = New-Fix41ReShadeFixture
+        $game = New-Fix41ReShadeGame -Fixture $fx
+        $legacyOwnershipPath = Get-TpmReShadeProfileOwnershipPath -GameId $game.GameId -StateRoot $fx.LegacyState
+        Save-TpmReShadeOwnershipManifest -Manifest $game.Manifest -Path $legacyOwnershipPath
+        $deploymentRelative = 'Deployments\' + [IO.Path]::GetFileName($legacyOwnershipPath)
+        $deploymentBase64 = Get-Fix41Base64 -Path $legacyOwnershipPath
+        # Make the TeknoParrot root deep enough that the longest backup file path is 245 characters with the new folder name
+        # (the old 48-character folder name would make it 275).
+        $backupFileTail = '\LegacyMig_00000000\ReShade\TPM-State\' + $deploymentRelative
+        $padLength = 245 - ([string]$fx.Layout.Backups).Length - $backupFileTail.Length - 1
+        $padLength | Should -BeGreaterThan 0
+        $deepTpRoot = Join-Path (Join-Path $fx.Root ('p' * $padLength)) 'TeknoParrot'
+        New-Item -ItemType Directory -Path $deepTpRoot -Force | Out-Null
+        $deepLayout = Initialize-TpmOwnedLayout -Layout (Get-TpmOwnedLayout -TeknoParrotRoot $deepTpRoot)
+        (([string]$deepLayout.Backups).Length + $backupFileTail.Length + 30) | Should -BeGreaterThan 259
+        $script:TpmOwnedLayout = $deepLayout
+
+        Mock Read-TpmYesNo { 'Y' }
+        $result = Invoke-TpmOwnedMigration -ScriptRoot $fx.ScriptRoot -Layout $deepLayout
+
+        $result.Outcome | Should -Be 'SUCCEEDED' -Because (Get-Fix41MigrationDiagnostic $result)
+        $result.Backup.Verified | Should -BeTrue
+        Test-Path -LiteralPath $fx.LegacyState | Should -BeFalse
+        Get-Fix41Base64 -Path (Join-Path (Join-Path $deepLayout.State 'ReShade') $deploymentRelative) | Should -BeExactly $deploymentBase64
+        Get-Fix41Base64 -Path (Join-Path ([string]$result.Backup.RootPath) ('ReShade\TPM-State\' + $deploymentRelative)) | Should -BeExactly $deploymentBase64
+        ([IO.Path]::GetFileName([string]$result.Backup.RootPath)) | Should -Match '^LegacyMig_[0-9a-f]{8}$'
+    }
+
     It 'D: moves another script-folder ReShade entry into the existing Assets\ReShade cache on its own' {
         # Mutation: plan the whole script-folder ReShade folder to <Assets>\ReShade again (or plan its non-state entries anywhere but <Assets>\ReShade\<entry>) -> DESTINATION_OCCUPIED or a wrong destination.
         $fx = New-Fix41ReShadeFixture
@@ -348,7 +379,7 @@ Describe 'FIX41 P05 ReShade state in the owned layout and its startup migration'
         Test-TpmOwnedMigrationStartupAllowed -MigrationResult $result | Should -BeTrue
         Get-Fix41Base64 -Path $legacyDll | Should -BeExactly ([Convert]::ToBase64String($legacyBytes))
         Get-Fix41Base64 -Path $managedDll | Should -BeExactly ([Convert]::ToBase64String($managedBytes))
-        @(Get-ChildItem -LiteralPath $fx.Layout.Backups -Directory -Filter 'LegacyMigration_*').Count | Should -Be 0
+        @(Get-ChildItem -LiteralPath $fx.Layout.Backups -Directory -Filter 'LegacyMig_*').Count | Should -Be 0
         @($script:fix41MigrationLog | Where-Object { $_.Contains('kept in place') -and $_.Contains($legacyDll) }).Count | Should -Be 1
     }
 
@@ -416,7 +447,7 @@ Describe 'FIX41 P05 ReShade state in the owned layout and its startup migration'
         Test-TpmOwnedMigrationStartupAllowed -MigrationResult $result | Should -BeTrue
         Get-Fix41TreeDigest -Path $fx.LegacyState | Should -BeExactly $legacyDigest
         Get-Fix41TreeDigest -Path $fx.ManagedState | Should -BeExactly $managedDigest
-        @(Get-ChildItem -LiteralPath $fx.Layout.Backups -Directory -Filter 'LegacyMigration_*').Count | Should -Be 0
+        @(Get-ChildItem -LiteralPath $fx.Layout.Backups -Directory -Filter 'LegacyMig_*').Count | Should -Be 0
         @($script:fix41MigrationLog | Where-Object { $_.Contains('kept in place') -and $_.Contains($fx.LegacyState) }).Count | Should -Be 1
     }
 
@@ -434,7 +465,7 @@ Describe 'FIX41 P05 ReShade state in the owned layout and its startup migration'
         Test-TpmOwnedMigrationStartupAllowed -MigrationResult $result | Should -BeTrue
         Should -Invoke Read-TpmYesNo -Times 0 -Exactly
         Test-Path -LiteralPath $fx.LegacyReShade -PathType Container | Should -BeTrue
-        @(Get-ChildItem -LiteralPath $fx.Layout.Backups -Directory -Filter 'LegacyMigration_*').Count | Should -Be 0
+        @(Get-ChildItem -LiteralPath $fx.Layout.Backups -Directory -Filter 'LegacyMig_*').Count | Should -Be 0
         @(Get-ChildItem -LiteralPath $fx.Layout.Reports -Filter 'TPM-migration-*.md' -File).Count | Should -Be 0
     }
 

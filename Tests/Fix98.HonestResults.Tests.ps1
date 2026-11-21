@@ -302,7 +302,7 @@ Describe 'FIX98 S6 and S7 an unfinished run is attention, a failed write stays F
         $summary.Status | Should -BeExactly 'Ok'
         $summary.Counts.SkippedCount | Should -Be 2
         @($summary.Needs).Count | Should -Be 0
-        $summary.NotChanged | Should -Match '1 game skipped by design.*no usable reference game'
+        $summary.NotChanged | Should -Match '1 game skipped: no game of their family has your controls yet'
         $detail = @($summary.Blocks | Where-Object Heading -eq 'ZGame')
         $detail.Count | Should -Be 1
         ($detail.Lines -join ' ') | Should -Match "lightgun.*Add one game of this family with your own controls, then run this again\."
@@ -315,9 +315,9 @@ Describe 'FIX98 S6 and S7 an unfinished run is attention, a failed write stays F
         $reports = @([pscustomobject]@{ Code = 'ZGame'; Status = 'skipped-no-reference'; ReasonCode = 'NO_USABLE_FAMILY_REFERENCE'; Family = 'lightgun' })
         [void](Write-ControlPropagationResults -Reports $reports -Outcome 'NO_OP' -Unattended)
         ($script:Fix98Host -join "`n") | Should -Match 'No game was changed\.'
-        ($script:Fix98Host -join "`n") | Should -Match '1 game skipped by design'
+        ($script:Fix98Host -join "`n") | Should -Match '1 game skipped: no game of their family has your controls yet'
         ($script:Fix98Log -join "`n") | Should -Match "ZGame: Skipped by design:.*'lightgun'.*Add one game of this family with your own controls, then run this again\."
-        ($script:Fix98Log -join "`n") | Should -Match '1 game skipped by design.*no usable reference game'
+        ($script:Fix98Log -join "`n") | Should -Match '1 game skipped: no game of their family has your controls yet'
         ($script:Fix98Log -join "`n") | Should -Not -Match 'NO_ARCHETYPE_MATCH|needs attention, it is not a failed save'
     }
 
@@ -361,7 +361,7 @@ Describe 'FIX98 S6 and S7 an unfinished run is attention, a failed write stays F
         $summary.Status | Should -BeExactly 'Ok'
         $summary.Counts.SkippedCount | Should -Be 1
         @($summary.Needs).Count | Should -Be 0
-        $summary.NotChanged | Should -Match '1 game skipped by design.*no usable reference game'
+        $summary.NotChanged | Should -Match '1 game skipped: no game of their family has your controls yet'
         [void](Write-ControlPropagationResults -Reports $tx.Reports -Outcome $tx.Outcome -Unattended)
         ($script:Fix98Log -join "`n") | Should -Match "ZGame: Skipped by design:.*lightgun.*Add one game"
     }

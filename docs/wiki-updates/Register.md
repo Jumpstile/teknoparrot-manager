@@ -66,7 +66,7 @@ Next, TeknoParrot Manager goes through these steps. Each one asks first:
 
 ## LaunchBox
 
-At the end of a normal run (not a preview), TeknoParrot Manager offers to add your games to LaunchBox. You can preview first (`P`), add the missing games after a backup (`A`), get an import file only (`F`), or skip (`B`). It never closes LaunchBox for you. See [[LaunchBox Integration]].
+At the end of a normal run (not a preview), TeknoParrot Manager offers to add your games to LaunchBox. You can preview first (`P`), add the missing games after a backup (`A`), fill in game details and make playlists (`G`), link games for art and details (`L`), get an import file only (`F`), or skip (`B`). It never closes LaunchBox for you. See [[LaunchBox Integration]].
 
 ---
 
@@ -81,12 +81,12 @@ At the end, TeknoParrot Manager prints a list of what needs your attention and s
 | Register these games in TeknoParrotUI | Games it could not pick a profile for, or whose only matching profile is used by another folder. Add each one yourself in TeknoParrotUI. |
 | Fix these game paths in TeknoParrotUI | Broken paths it could not fix. |
 | Extract these games first, then re-run repair | Profiles whose game is not unzipped yet. Use AutoSync, then run again. |
-| Controls skipped by design | Games whose control type has no usable example game yet. Set up one game of that type yourself, then copy controls. |
-| Game folders not recognized by TeknoParrot | Folders that match no profile. Update TeknoParrot, open TeknoParrotUI once, then run Register again. They may be games TeknoParrot does not support yet, or tools. |
+| Controls skipped by design | Games whose control type has no usable example game yet. Nothing failed. Set up one game of that type yourself, then copy controls. This is shown (and saved) even when it is the only thing left. |
+| Game folders not matched to a TeknoParrot profile | Folders that match no profile. Update TeknoParrot, open TeknoParrotUI once, then run Register again. They may be games TeknoParrot does not support yet, tools, or games whose main file is named differently than TeknoParrot expects. |
 | Path too long -- these games may fail to launch | Raw Thrills games and Yu-Gi-Oh! Duel Terminal 6 have a short path limit. It shows the folder name to use. |
 | File version mismatch -- these games need a specific older file | BlazBlue games (`iDmacDrv32.dll`) and Tekken Tag Tournament 2 (`EBOOT.BIN`) need an older file. It shows the file name and the checksums. |
 | Known GPU incompatibility -- no fix available | Games known not to work on your AMD or Intel graphics card. For your information only. |
-| Additional informational game notes | Games with setup notes from the community list. The notes are saved in `Reports\TeknoParrot-Manager-game-notes.txt`. |
+| Additional informational game notes | Games with setup notes from the community list. It also shows the guide's setup steps (for example which ZIP or disc file to select), graphics card notes, extra files, the extra archives a game needs (bring your own copy; none is downloaded), a linked profile (the same game with another setup) and a game the guide lists as broken or only partly working. Nothing in it is applied for you. The notes are saved in `Reports\TeknoParrot-Manager-game-notes.txt`. |
 | Startup files (firmware) | Games whose emulator is missing startup files. See above. |
 | Controls not ready | Games whose controls are missing, not verified, unsupported or unknown. Open TeknoParrot's controls screen and set them up and test them. |
 

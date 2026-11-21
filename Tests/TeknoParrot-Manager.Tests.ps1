@@ -4778,7 +4778,7 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
     AfterEach {
         $env:TEMP = $script:rsSavedTemp
     }
-    It "locates and extracts only ReShade64.dll from a valid embedded archive with scan progress" {
+    It "locates and extracts ReShade64.dll and ReShade32.dll (but nothing else) from a valid embedded archive with scan progress" {
         $exe  = Join-Path $TestDrive "valid-setup.exe"
         $dest = Join-Path $TestDrive "valid-setup-out"
         New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64'; 'ReShade64.json' = '{}' }
@@ -4792,7 +4792,8 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
 
         Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
 
-        Test-Path -LiteralPath (Join-Path $dest "ReShade32.dll") | Should -BeFalse -Because 'ReShade works with 64-bit games only'
+        (Get-Content -LiteralPath (Join-Path $dest "ReShade32.dll") -Raw) | Should -Be 'r32'
+        Test-Path -LiteralPath (Join-Path $dest "ReShade64.json") | Should -BeFalse -Because 'only the two ReShade DLLs are kept'
         (Get-Content -LiteralPath (Join-Path $dest "ReShade64.dll") -Raw) | Should -Be 'r64'
         $signature = @($script:reshadeSfxProgress | Where-Object { $_.Label -eq 'ReShade installer signature scan' })
         @($signature | Where-Object { -not $_.Complete -and $_.Total -eq $expectedSignatureTotal }).Count | Should -BeGreaterThan 0
@@ -4808,7 +4809,7 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
         $exe=Join-Path $TestDrive 'setup-680-runtime-defaults.exe'; $dest=Join-Path $TestDrive 'setup-680-runtime-defaults-out'
         New-TestSelfExtractingExe $exe @{ 'ReShade32.dll'='r32'; 'ReShade64.dll'='r64'; 'ReShade.ini'="[PROXY]`r`nEnableProxyLibrary=0`r`n[INPUT]`r`nKeyOverlay=145`r`nMinimumWidth=160`r`nMinimumHeight=120" }
         Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
-        Test-Path -LiteralPath (Join-Path $dest 'ReShade32.dll') | Should -BeFalse
+        (Get-Content -LiteralPath (Join-Path $dest 'ReShade32.dll') -Raw) | Should -Be 'r32'
         (Get-Content -LiteralPath (Join-Path $dest 'ReShade64.dll') -Raw) | Should -Be 'r64'
         Test-Path -LiteralPath (Join-Path $dest 'ReShade.ini') | Should -BeFalse
     }
@@ -4901,7 +4902,7 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
         $before = @(Get-ChildItem -Path $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue).Count
         New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
         Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
-        (Get-ChildItem -LiteralPath $dest -Force).Name | Should -Be @('ReShade64.dll')
+        (Get-ChildItem -LiteralPath $dest -Force).Name | Should -Be @('ReShade32.dll', 'ReShade64.dll')
         @(Get-ChildItem -Path $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue).Count | Should -Be $before
     }
     It "Case 1 -- destination absent before the call, promotion fails on the very first required file: destination directory itself is removed again" {
@@ -5095,7 +5096,7 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
             Test-Path -LiteralPath $newStages[0].FullName -PathType Container | Should -BeTrue
             @(Get-ChildItem -LiteralPath $newStages[0].FullName -Force -Recurse -ErrorAction SilentlyContinue).Count | Should -Be 0
             Test-Path -LiteralPath (Join-Path $newStages[0].FullName '.tpm-rollback-backup') | Should -BeFalse
-            (Get-ChildItem -LiteralPath $dest -Force | Select-Object -ExpandProperty Name | Sort-Object) | Should -Be @('ReShade64.dll')
+            (Get-ChildItem -LiteralPath $dest -Force | Select-Object -ExpandProperty Name | Sort-Object) | Should -Be @('ReShade32.dll', 'ReShade64.dll')
             (Get-Content -LiteralPath (Join-Path $dest 'ReShade64.dll') -Raw) | Should -Be 'r64'
         } finally {
             # $stagingRoot lives under this test's private TEMP (BeforeEach); delete only that root.
@@ -6530,6 +6531,27 @@ __BRANCH__
         $safe = ConvertTo-PostgresRedactedText -Text ("native error: $secret") -Secrets @($secret)
         $safe | Should -Not -Match ([regex]::Escape($secret))
         $safe | Should -Match '\[REDACTED\]'
+    }
+
+    It "locks recovery evidence whose access list already holds explicit entries for other accounts" {
+        # A folder under a parent with an old-style access list gets copies of the parent's entries that are not marked inherited,
+        # so removing inheritance alone leaves them. The lock must still leave the current user as the only entry.
+        $folder = Join-Path $TestDrive ('acl-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        [void][System.IO.Directory]::CreateDirectory($folder)
+        $file = Join-Path $folder 'evidence.bin'
+        [System.IO.File]::WriteAllText($file, 'x')
+        $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        foreach ($target in @($folder, $file)) {
+            & icacls $target /inheritance:r /grant ('*{0}:(F)' -f $currentSid) /grant '*S-1-5-18:(F)' /grant '*S-1-5-32-545:(R)' 1>$null 2>$null
+            $LASTEXITCODE | Should -Be 0
+            (Get-PostgresOwnerOnlyAclState -Path $target).Outcome | Should -Be 'Failed'
+        }
+        Lock-PostgresRecoveryDirectory -Path $folder
+        Lock-PostgresRecoveryFile -Path $file
+        foreach ($target in @($folder, $file)) {
+            (Get-PostgresOwnerOnlyAclState -Path $target).Outcome | Should -Be 'Success'
+            @((Get-Acl -LiteralPath $target).Access).Count | Should -Be 1
+        }
     }
 
     Context "profile planning" {
@@ -8948,7 +8970,7 @@ It "preserves accumulated item outcomes and skip totals on each package acquisit
         }
         Mock Get-BepInExInstallationHealth { [pscustomobject]@{ Installed=$false; Complete=$false; Version=$null; Reason='not installed' } }
         Mock Read-TpmChoice { 'Y' }
-        Mock Read-TpmNumberedListChoice { 0 }
+        Mock Read-TpmMultiGameChoice { @(0, 1) }
         Mock Invoke-TpmDownload { return ($Failure -ne 'download failure') }
 
         $result = Invoke-BepInExUpdateCheck -UserProfilesDir $profiles -CacheDir (Join-Path $TestDrive 'AcquisitionCache') -ApprovedGamesRoot $approved
@@ -11066,7 +11088,7 @@ Describe "Manager script version identity" {
     }
 
     It "extracts the current script's literal identity from its full source" {
-        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC8.1'
+        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC8.4'
     }
 
     It "ignores assignment-looking lines inside a here-string" {
@@ -13760,11 +13782,16 @@ Describe "TeknoParrot-Manager.ps1 -Unattended real child-process fixture (issue 
         }
         $process.WaitForExit()
 
-        $process.ExitCode | Should -Be 0 -Because 'a genuine product defect (Mode must be set before starting) previously made every real -Unattended launch exit 1 here'
+        # The health check is only an all-clear (exit 0) when it could identify the video adapter, because the GPU-fix coverage depends on it.
+        # A machine with no recognizable adapter (a virtual machine or hosted runner) correctly finishes with 2, "some checks could not finish".
+        $expectedExitCode = if ([string]::IsNullOrWhiteSpace([string](Get-DetectedGpuVendor).Vendor)) { 2 } else { 0 }
+        $process.ExitCode | Should -Be $expectedExitCode -Because 'a genuine product defect (Mode must be set before starting) previously made every real -Unattended launch exit 1 here'
 
         $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { '' }
         $stdout | Should -Not -Match 'Mode must be set before starting' -Because 'this is the exact error text the real certification run hit'
         $stdout | Should -Match 'Library Health Check' -Because 'HealthCheck must have actually run, not merely avoided the error'
+        $expectedFooter = if ($expectedExitCode -eq 0) { 'Read-only report complete' } else { 'Report finished. Some checks could not finish' }
+        $stdout | Should -Match ([regex]::Escape($expectedFooter)) -Because 'the exit code must come from the finished health report, not from a crash'
         $stdout | Should -Match 'Unattended.*Using saved settings' -Because 'confirms the config path was genuinely exercised, not bypassed'
 
         # No real install was ever touched: this is a synthetic fixture, and
@@ -19591,7 +19618,7 @@ Describe 'TPM-owned layout and legacy migration' {
         Get-Content -LiteralPath (Join-Path $managedReport 'a.ini') -Raw | Should -Match 'new'
         Get-Content -LiteralPath (Join-Path $scriptRoot 'TeknoParrot-Manager.log') -Raw | Should -Match 'legacy log'
         Get-Content -LiteralPath (Join-Path $layout.Logs 'TeknoParrot-Manager.log') -Raw | Should -Match 'managed log'
-        @(Get-ChildItem -LiteralPath $layout.Backups -Directory -Filter 'LegacyMigration_*').Count | Should -Be 0
+        @(Get-ChildItem -LiteralPath $layout.Backups -Directory -Filter 'LegacyMig_*').Count | Should -Be 0
         $report = Get-ChildItem -LiteralPath $layout.Reports -Filter 'TPM-migration-*.md' -File | Select-Object -First 1
         Test-Path -LiteralPath $report.FullName -PathType Leaf | Should -BeTrue
         @($result.TechnicalDetails.Occupied).Count | Should -Be 1
@@ -24613,7 +24640,7 @@ Describe 'Required patch engine and local recipes' {
     BeforeEach {
         # The menu logs every result; without a log file the real writer would echo each line to the screen.
         Mock Write-Log {}
-        $root = Join-Path $TestDrive ('required-patch-' + [guid]::NewGuid().ToString('N'))
+        $root = Join-Path $TestDrive ('rp-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         $game = Join-Path $root 'game'
         $payload = Join-Path $root 'payload'
         $recovery = Join-Path $root 'recovery'

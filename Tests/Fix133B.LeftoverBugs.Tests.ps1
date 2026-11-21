@@ -129,16 +129,21 @@ Describe 'FIX133B a blank ZIP-folder answer returns to the menu' {
         $answers = @($script:F133BAst.FindAll({
             $args[0] -is [System.Management.Automation.Language.AssignmentStatementAst] -and
             $args[0].Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
-            $args[0].Left.VariablePath.UserPath -match '^(zipSource|newZipSource)$' -and
-            $args[0].Right.Extent.Text -match '^Read-PathWithBrowse\b'
+            $args[0].Left.VariablePath.UserPath -match '^(zipSource|newZipSource|zipAnswer)$' -and
+            $args[0].Right.Extent.Text -match 'Read-PathWithBrowse\b'
         }, $true))
         $answers.Count | Should -BeGreaterThan 0
         foreach ($answer in $answers) {
+            # Either the very next statement checks the answer for blank and goes on, or (the loop form from #251) a later
+            # statement in the same block checks the trimmed answer for '' and asks again ("continue") or stops when unattended.
+            $name = [regex]::Escape($answer.Left.VariablePath.UserPath)
             $statements = @($answer.Parent.Statements)
-            $next = $statements[[array]::IndexOf($statements, $answer) + 1]
-            $next | Should -BeOfType ([System.Management.Automation.Language.IfStatementAst])
-            $next.Clauses[0].Item1.Extent.Text | Should -Match ('^\[string\]::IsNullOrWhiteSpace\(\$' + [regex]::Escape($answer.Left.VariablePath.UserPath) + '\)$')
-            $next.Clauses[0].Item2.Extent.Text | Should -Match '\bcontinue\b'
+            $later = @($statements[([array]::IndexOf($statements, $answer) + 1)..($statements.Count - 1)] | Where-Object {
+                $_ -is [System.Management.Automation.Language.IfStatementAst] -and
+                ($_.Clauses[0].Item1.Extent.Text -match ('^\[string\]::IsNullOrWhiteSpace\(\$' + $name + '\)$') -or $_.Clauses[0].Item1.Extent.Text -match ('^\$' + $name + "\s+-eq\s+''$")) -and
+                $_.Clauses[0].Item2.Extent.Text -match '\bcontinue\b'
+            })
+            $later.Count | Should -BeGreaterThan 0
         }
     }
 }

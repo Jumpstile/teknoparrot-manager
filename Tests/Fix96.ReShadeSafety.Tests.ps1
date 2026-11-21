@@ -258,8 +258,8 @@ Describe 'FIX96 B2: install, reapply and update write nothing into a source fold
         $script:f96SeenRoots | Should -Be @($source)
     }
 
-    It 'refuses a 32-bit game and leaves its folder exactly as it was, while a 64-bit game still gets ReShade' {
-        # Mutation: take the 32-bit refusal out of Install-TpmReShadeProfileDeployment -> the 64-bit DLL is written into a 32-bit game, where it never loads.
+    It 'refuses a 32-bit game when the 32-bit ReShade file is missing, leaves its folder exactly as it was, and a 64-bit game still gets ReShade' {
+        # Mutation: install the 64-bit DLL into a 32-bit game when ReShade32.dll is missing -> the 64-bit DLL is written into a 32-bit game, where it never loads.
         $dir32 = Join-Path $script:f96Root 'Games\Game32'
         $dir64 = Join-Path $script:f96Root 'Games\Game64'
         $exe32 = New-F96Game -Dir $dir32
@@ -269,12 +269,44 @@ Describe 'FIX96 B2: install, reapply and update write nothing into a source fold
         $ownership32 = Join-Path $script:f96State 'Deployments\g32.json'
         $refused = Install-TpmReShadeProfileDeployment -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Original) -GamePath $exe32 -Doc $doc -SourceDll $script:f96Dll -CacheRoot (Join-Path $script:f96Root 'cache') -OwnershipPath $ownership32 -CanonicalPreset
         $refused.Succeeded | Should -BeFalse
-        $refused.State | Should -BeExactly 'GAME_32BIT'
+        $refused.State | Should -BeExactly 'DLL_32BIT_MISSING'
         @(Get-ChildItem -LiteralPath $dir32 -Force | ForEach-Object Name) | Should -Be @('game.exe')
         Test-Path -LiteralPath $ownership32 | Should -BeFalse
         $installed = Install-TpmReShadeProfileDeployment -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Original) -GamePath $exe64 -Doc $doc -SourceDll $script:f96Dll -CacheRoot (Join-Path $script:f96Root 'cache') -OwnershipPath (Join-Path $script:f96State 'Deployments\g64.json') -CanonicalPreset
         $installed.Succeeded | Should -BeTrue -Because ($installed | ConvertTo-Json -Depth 3)
         Test-Path -LiteralPath (Join-Path $dir64 'dxgi.dll') -PathType Leaf | Should -BeTrue
+    }
+
+    It 'gives a 32-bit game ReShade32.dll and a 64-bit game ReShade64.dll' {
+        # Mutation: always copy the file named by -SourceDll -> a 32-bit game gets the 64-bit DLL and ReShade never loads.
+        $dir32 = Join-Path $script:f96Root 'Games\Game32'
+        $dir64 = Join-Path $script:f96Root 'Games\Game64'
+        $exe32 = New-F96Game -Dir $dir32
+        $exe64 = New-F96Game -Dir $dir64
+        $dll32 = Join-Path (Split-Path -Parent $script:f96Dll) 'ReShade32.dll'
+        [System.IO.File]::WriteAllBytes($dll32, [byte[]](0x4d, 0x5a, 0x32, 0x32))
+        Mock Get-ExeArchitecture { if ($ExePath -like '*Game32*' -or $ExePath -like '*ReShade32.dll') { 'x86' } else { 'x64' } }
+        $doc = [xml]'<GameProfile><EmulatorType>Default</EmulatorType></GameProfile>'
+        $r32 = Install-TpmReShadeProfileDeployment -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Original) -GamePath $exe32 -Doc $doc -SourceDll $script:f96Dll -CacheRoot (Join-Path $script:f96Root 'cache') -OwnershipPath (Join-Path $script:f96State 'Deployments\h32.json') -CanonicalPreset
+        $r32.Succeeded | Should -BeTrue -Because ($r32 | ConvertTo-Json -Depth 3)
+        $r64 = Install-TpmReShadeProfileDeployment -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Original) -GamePath $exe64 -Doc $doc -SourceDll $script:f96Dll -CacheRoot (Join-Path $script:f96Root 'cache') -OwnershipPath (Join-Path $script:f96State 'Deployments\h64.json') -CanonicalPreset
+        $r64.Succeeded | Should -BeTrue -Because ($r64 | ConvertTo-Json -Depth 3)
+        (Get-FileHash -LiteralPath (Join-Path $dir32 'dxgi.dll') -Algorithm SHA256).Hash | Should -BeExactly (Get-FileHash -LiteralPath $dll32 -Algorithm SHA256).Hash
+        (Get-FileHash -LiteralPath (Join-Path $dir64 'dxgi.dll') -Algorithm SHA256).Hash | Should -BeExactly (Get-FileHash -LiteralPath $script:f96Dll -Algorithm SHA256).Hash
+    }
+
+    It 'recognizes a Linux-style (ELF) game file and not a Windows game file' {
+        # Mutation: always return $false -> Linux-style games are treated like Windows games.
+        $elf = Join-Path $script:f96Root 'linuxgame.elf'
+        $win = Join-Path $script:f96Root 'wingame.exe'
+        $short = Join-Path $script:f96Root 'tiny.bin'
+        [System.IO.File]::WriteAllBytes($elf, [byte[]](0x7f, 0x45, 0x4c, 0x46, 1, 1, 1, 0))
+        [System.IO.File]::WriteAllBytes($win, [byte[]](0x4d, 0x5a, 0x90, 0x00, 3, 0, 0, 0))
+        [System.IO.File]::WriteAllBytes($short, [byte[]](0x7f))
+        Test-TpmFileIsElf -Path $elf | Should -BeTrue
+        Test-TpmFileIsElf -Path $win | Should -BeFalse
+        Test-TpmFileIsElf -Path $short | Should -BeFalse
+        Test-TpmFileIsElf -Path (Join-Path $script:f96Root 'missing.elf') | Should -BeFalse
     }
 }
 
@@ -376,7 +408,7 @@ Describe 'FIX96 B2: the setup flow skips games inside a source folder and says s
         $result.Unsafe | Should -Be 0
         Should -Invoke Install-TpmReShadeProfileDeployment -Times 2 -Exactly
         Should -Invoke Install-TpmReShadeProfileDeployment -Times 0 -Exactly -ParameterFilter { $GamePath -like '*GameB*' }
-        (Get-F96Text @($result.DetailNotes)) | Should -Match ([regex]::Escape('32-bit game -- ReShade works with 64-bit games only -- skipped'))
+        (Get-F96Text @($result.DetailNotes)) | Should -Match ([regex]::Escape('32-bit game -- the 32-bit ReShade file (ReShade32.dll) was not found -- skipped'))
     }
 }
 
@@ -426,11 +458,11 @@ Describe 'FIX96 B2: the result screen tells a beginner what to do' {
     It 'says how many 32-bit games were skipped and why, in the same words for one and for many' {
         # Mutation: bring back the old "file was not found" sentence for a 32-bit game, or lose the singular/plural wording.
         $null = Show-TpmReShadeSetupResult -Result (New-F96Result -Unsafe 0 -SourceFolder @() -Unsupported 1)
-        (Get-F96Text @($script:f96Rows | ForEach-Object { $_.Text })) | Should -Match ([regex]::Escape('Not changed: 1 32-bit game was skipped. ReShade works with 64-bit games only.'))
+        (Get-F96Text @($script:f96Rows | ForEach-Object { $_.Text })) | Should -Match ([regex]::Escape('Not changed: 1 32-bit game was skipped. The 32-bit ReShade file was not found. Download ReShade again to get it.'))
         $script:f96Rows.Clear()
         $null = Show-TpmReShadeSetupResult -Result (New-F96Result -Unsafe 0 -SourceFolder @() -Unsupported 3)
         $plain = Get-F96Text @($script:f96Rows | ForEach-Object { $_.Text })
-        $plain | Should -Match ([regex]::Escape('Not changed: 3 32-bit games were skipped. ReShade works with 64-bit games only.'))
+        $plain | Should -Match ([regex]::Escape('Not changed: 3 32-bit games were skipped. The 32-bit ReShade file was not found. Download ReShade again to get it.'))
         $plain | Should -Not -Match 'ReShade file that was not found'
     }
 }

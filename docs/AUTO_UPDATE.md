@@ -1,8 +1,8 @@
 # Auto-Update System
 
-Status: the standalone helper and the Check for Updates menu item (15) are part of v1.0 RC8.1. RC8.1 is the interim build for testers and is the latest published release: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.1. The previous published release is v1.0 RC7. The final v1.0 RC9 comes later. RC8 was a tester build and was never published. Final Version 1.0 remains unpublished. All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
+Status: the standalone helper and the Check for Updates menu item (15) are part of v1.0 RC8.1, v1.0 RC8.2, v1.0 RC8.3 and v1.0 RC8.4. The latest published release is v1.0 RC8.4: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4. It is a fix-up release for RC8.3. The previous published release is v1.0 RC8.3. Earlier published releases are v1.0 RC8.2, RC8.1 and RC7. RC8 was a tester build and was never published. Final Version 1.0 has not been published yet. All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
-RC8.1 is the first build that can update itself in place with Check for Updates, including a release with many files. Builds before RC8.1 (for example RC8 or RC7) cannot. If you run one of those, install RC8.1 by hand once: when RC8.1 comes out, download its ZIP from the Releases page and extract it over your old folder. After that, Check for Updates does the work.
+RC8.1 is the first build that can update itself in place with Check for Updates, including a release with many files. If you run RC8.1 or newer, Check for Updates offers the newer release when there is one. Builds before RC8.1 (for example RC8 or RC7) cannot update themselves. If you run one of those, install the newest release by hand once: download its ZIP from the Releases page and extract it over your old folder. After that, Check for Updates does the work.
 
 The v0.99.38 and v1.0-RC3 live-verification references below are historical.
 They are not current download instructions.
@@ -31,7 +31,7 @@ TeknoParrot Manager compares the complete version name, not just the numbers.
 
 A release candidate (RC) always comes before the final release.
 
-So `1.0-RC7 < 1.0-RC8 < 1.0-RC8.1 < 1.0-RC9 < 1.0`. A label such as RC8.1 is a later build of RC8.
+So `1.0-RC7 < 1.0-RC9 < 1.0`.
 
 The same rule is used by the menu check, the startup check, and the standalone updater.
 
@@ -196,7 +196,7 @@ In every case the original script must stay safe.
 2. **Backup before replacement**
    - The current script is copied to a new backup folder under `UpdateBackups` before replacement.
    - Backup folders are never reused or overwritten.
-   - The standalone `tools/Invoke-TpmAutoUpdate.ps1 -Apply` refuses a multi-file release ZIP and changes nothing. The menu flow installs it whole (see Menu integration below).
+   - The standalone `tools/Invoke-TpmAutoUpdate.ps1 -Apply` refuses a multi-file release ZIP and changes nothing, and tells the user to use menu 15. The menu flow installs it whole (see Menu integration below).
    - If backup creation fails, the update is aborted.
 
 3. **GitHub Releases only**
@@ -334,7 +334,9 @@ It also states whether a backup was created, and returns safely to the main menu
 - Read-only flags on replaced files are cleared for the install and set again afterward.
 - Nothing is deleted. Files from an older version that the new package no longer has, inside the folders the package uses, are left in place and listed in Details (`TechnicalDetails.MultiFile.LeftInPlace`).
 - The staging folder (created by this run) and the downloaded ZIP are removed at the end, success or failure.
-- `tools/Invoke-TpmAutoUpdate.ps1 -Apply` still refuses a multi-file ZIP and changes nothing.
+- `tools/Invoke-TpmAutoUpdate.ps1 -Apply` still refuses a multi-file ZIP and changes nothing. Its message now says to use menu 15 (Check for Updates) or the startup update, which install the whole release through the verified code above (there is no second implementation).
+- While an update runs, the staging folder holds an open marker file (`.tpm-update-running`). Each file's checksum is taken while it is written to staging and must equal the staged file before anything is installed, so a file damaged on its way to disk is never installed. The ZIP's SHA-256 from GitHub already covers every byte of every file in the ZIP; a list of per-file checksums inside the same ZIP would have the same trust root and add no protection, so none is shipped.
+- If an update is cut off (power loss, window closed), the staging folder is left behind. At the next start `Write-TpmInterruptedUpdateNotice` says so in plain words, names the newest `UpdateBackups` folder and how to copy the old files back, and logs it. A folder whose marker is still held open belongs to a running update (for example in a second window) and gets no notice. The folder is never deleted automatically, because it can hold the only copy of files that were moved aside; a guided restore is not offered because it cannot be verified.
 
 **Actual flow (single-file ZIP), checking and confirming:**
 

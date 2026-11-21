@@ -1,6 +1,6 @@
 # Quick Start
 
-Get TeknoParrot Manager (TPM) running in a few minutes. This page matches v1.0 RC8.1, the interim build for testers and the latest published release: see the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases). The previous published release is v1.0 RC7. The final v1.0 RC9 comes later.
+Get TeknoParrot Manager (TPM) running in a few minutes. This page matches v1.0 RC8.4, which is the latest published release (the previous one is RC8.3): see the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Test one game after each run.
 
@@ -161,7 +161,8 @@ Many result screens say `Press D for details`. Press `D` for the full technical 
   ------------------------
   13) Library health check -- Reports registered/broken/unregistered games
                         plus GPU fix / FFB Blaster / dgVoodoo2 and
-                        ReShade/BepInEx counts, without changing
+                        ReShade/BepInEx counts and the games that
+                        need BepInEx, without changing
                         anything. Any repair it suggests is a separate
                         choice that you confirm first.
   14) Restore backup -- Restore selected backup files with verification.

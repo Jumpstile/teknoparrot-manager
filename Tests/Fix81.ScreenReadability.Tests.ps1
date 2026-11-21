@@ -563,7 +563,7 @@ Describe 'FIX81 Propagate Controls (item 6)' {
         $summary.Title | Should -BeExactly '4 games updated. 1 game could not be saved.'
         $summary.Status | Should -BeExactly 'Attention'
         @($summary.Done) | Should -Be @('Controls copied to 2 games.', 'Input API corrected for 1 game.')
-        $summary.NotChanged | Should -BeExactly '2 games already set up or skipped by your rules. 1 game skipped by design because their control family has no usable reference game.'
+        $summary.NotChanged | Should -Match '^1 game already set up\. 1 game skipped by your own rules\. 1 game skipped: no game of their family has your controls yet'
         @($summary.Needs) | Should -Be @(
             'GameB and GameD: set up the controls yourself in TeknoParrotUI.',
             'GameH: could not be saved. See the log.'

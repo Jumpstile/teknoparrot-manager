@@ -192,7 +192,7 @@ Describe 'FIX131 N10 the unattended root binding repairs and protects the settin
         $originalBase64 = Get-F131Base64 -Path $path
         $log = Join-Path $folder 'unattended.log'
         $moved = Join-Path $root 'TeknoParrotManager\State\TeknoParrot-Manager.config.json'
-        $backupCopy = Join-Path $root 'TeknoParrotManager\Backups\LegacyMigration_test\TeknoParrot-Manager.config.json'
+        $backupCopy = Join-Path $root 'TeknoParrotManager\Backups\LegacyMig_test\TeknoParrot-Manager.config.json'
         $script:F131MoveSource = $path; $script:F131MoveTarget = $moved; $script:F131MoveRoot = $root; $script:F131MoveLog = $log; $script:F131MoveBackup = $backupCopy
 
         $binding = Invoke-TPMUnattendedRootBinding -ConfigPath $path -TeknoParrotRoot $root -LogPath $log -InvokeUnattended {

@@ -27,7 +27,11 @@ BeforeAll {
 Describe 'Get-TpmControllerEvidence' {
     It 'returns a result that matches the contract schema and carries no identifiers' {
         $result = Get-TpmControllerEvidence
-        Test-Json -Json ($result | ConvertTo-Json -Depth 6) -SchemaFile $script:schemaPath | Should -BeTrue
+        # The schema check needs PowerShell 7 (Windows PowerShell 5.1 has no Test-Json); every other check below runs in both.
+        $testJson = Get-Command Test-Json -ErrorAction SilentlyContinue
+        if ($testJson -and $testJson.Parameters.ContainsKey('SchemaFile')) {
+            Test-Json -Json ($result | ConvertTo-Json -Depth 6) -SchemaFile $script:schemaPath | Should -BeTrue
+        }
         $result.ReadOnly | Should -BeTrue
         $result.SensitiveIdentifiersIncluded | Should -BeFalse
         ($result | ConvertTo-Json -Depth 6) | Should -Not -Match '(?i)serial|VID_|PID_|HID\\\\|MAC'
@@ -54,6 +58,25 @@ Describe 'Get-TpmControllerEvidence' {
         @($result.DeviceObservations | Where-Object DeviceClass -eq 'PointerOrTrackball')[0].Confidence | Should -Be 'Low'
         @($result.DeviceObservations | Where-Object DeviceClass -eq 'OtherGamePad')[0].Confidence | Should -Be 'Medium'
         @($result.DeviceObservations | Where-Object { $_.Confidence -eq 'High' -and $_.Basis -ne 'XInputSlotActive' }).Count | Should -Be 0
+    }
+
+    It 'recognizes a device from a maker that only builds arcade keyboard encoders, at Medium at most, without keeping the maker code' {
+        Mock Get-CimInstance {
+            @([pscustomobject]@{ Name = 'HID Keyboard Device'; DeviceID = 'HID\VID_D209&PID_0301&MI_00\7&1' },
+              [pscustomobject]@{ Name = 'HID-compliant mouse'; DeviceID = 'HID\VID_D209&PID_0301&MI_01\7&2' },
+              [pscustomobject]@{ Name = 'HID-compliant mouse'; DeviceID = 'HID\VID_046D&PID_C52B&MI_01\7&3' })
+        }
+        $result = Get-TpmControllerEvidence
+        $board = @($result.DeviceObservations | Where-Object Basis -eq 'KnownVendor')
+        $board.Count | Should -Be 1
+        $board[0].DeviceClass | Should -Be 'ArcadeEncoder'
+        $board[0].Confidence | Should -Be 'Medium'
+        $board[0].Count | Should -Be 1
+        $testJsonCmd = Get-Command Test-Json -ErrorAction SilentlyContinue
+        if ($testJsonCmd -and $testJsonCmd.Parameters.ContainsKey('SchemaFile')) {
+            Test-Json -Json ($result | ConvertTo-Json -Depth 6) -SchemaFile $script:schemaPath | Should -BeTrue
+        }
+        ($result | ConvertTo-Json -Depth 6) | Should -Not -Match '(?i)D209|0301|C52B'
     }
 
     It 'gives the same EvidenceId for the same controllers at a different time' {

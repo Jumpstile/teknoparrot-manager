@@ -45,9 +45,9 @@ If the drive is too full, you see `There is not enough free space for the update
 
 ## Updating from a build before RC8.1
 
-Builds before RC8.1 (for example RC8 or RC7) cannot install a whole release. Do this once, after RC8.1 comes out:
+Builds before RC8.1 (for example RC8 or RC7) cannot install a whole release. Do this once:
 
-1. Download the RC8.1 ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
+1. Download the newest release ZIP from [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 2. Extract all of its files over your TeknoParrot Manager folder (or into a new folder).
 3. Start `TeknoParrot-Manager.bat` again.
 
@@ -72,8 +72,8 @@ To turn the start check off, set `CheckForUpdatesOnStartup` to `false` in `Tekno
 - Only the latest GitHub release of the TeknoParrot Manager project is used.
 - The script inside the ZIP is checked before it is installed, and its version must match the release. Anything else is refused.
 - The download goes to a temporary folder first and is checked before the ZIP is opened.
-- The separate command-line helper `tools\Invoke-TpmAutoUpdate.ps1` has `-CheckOnly` (the default) and `-Apply`. `-Apply` still refuses a release that has many files and changes nothing.
-- Before it installs, the free space on the drive must be at least twice the unpacked size. Files are unpacked into a temporary `tpm-update-staging-...` folder first, and that folder is removed at the end.
+- The separate command-line helper `tools\Invoke-TpmAutoUpdate.ps1` has `-CheckOnly` (the default) and `-Apply`. `-Apply` still refuses a release that has many files and changes nothing; it tells you to use menu 15 instead.
+- Before it installs, the free space on the drive must be at least twice the unpacked size. Files are unpacked into a temporary `tpm-update-staging-...` folder first, and that folder is removed at the end. If an update is cut off, that folder stays; the next start tells you, and your old files are in `UpdateBackups`. Nothing is deleted for you.
 
 </details>
 

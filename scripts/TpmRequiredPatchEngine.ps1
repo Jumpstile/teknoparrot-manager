@@ -216,7 +216,10 @@ function Resolve-TpmPatchPath {
     foreach ($part in ($Relative -split '[\\/]')) {
         if ([string]::IsNullOrWhiteSpace($part) -or $part -match '[<>:"|?*\p{Cc}]' -or $part -match '[. ]$|^(CON|PRN|AUX|NUL|CLOCK\$|CONIN\$|CONOUT\$|COM[1-9\u00B9\u00B2\u00B3]|LPT[1-9\u00B9\u00B2\u00B3])(\.|$)' -or $part -in @('.', '..')) { throw 'Unsafe patch path component.' }
     }
-    $joined = Join-Path $Root $Relative
+    # A game saved on a drive that is not connected stops here with one plain reason. Join-Path would print a raw red "Cannot find drive" error for every game.
+    $driveRoot = try { [IO.Path]::GetPathRoot($Root) } catch { '' }
+    if ($driveRoot -match '^[A-Za-z]:\\$' -and -not [IO.Directory]::Exists($driveRoot)) { throw ('The drive {0} is not connected.' -f $driveRoot.Substring(0, 2)) }
+    $joined = [IO.Path]::Combine($Root, $Relative)
     $tooLong = 'A file path is too long for Windows to patch safely ({0} characters). Move TeknoParrot or the game to a folder with a shorter path.'
     if (-not $Staging -and -not $ForUndo -and -not (Test-TpmPathLengthAllowed -Length $joined.Length)) { throw ($tooLong -f $joined.Length) }
     try { $path = [IO.Path]::GetFullPath($joined) } catch [IO.PathTooLongException] { throw ($tooLong -f $joined.Length) }
@@ -1220,6 +1223,7 @@ function Resolve-TpmRequiredPatchSourceRoot {
     }
     Write-Host ("  Select the local {0} ZIP folder containing this exact file: {1}" -f $sourceLabel,$Entry.SourceSet) -ForegroundColor Cyan
     Write-Host '  TeknoParrot Manager reads only the named file inside the ZIP. It does not download or unpack the whole ZIP.' -ForegroundColor DarkGray
+    Write-Host '  Do not have it? Press Enter with nothing typed to skip this patch. Nothing is changed, and you go on to the next one.' -ForegroundColor Yellow
     $selected = Read-PathWithBrowse -Prompt 'Folder containing the exact required local ZIP' -Mode Folder -InitialDirectory $root
     if ([string]::IsNullOrWhiteSpace($selected) -or
         -not (Test-Path -LiteralPath $selected -PathType Container -ErrorAction SilentlyContinue) -or
@@ -1707,6 +1711,7 @@ function Get-TpmRequiredPatchPlainReason {
     $rules = @(
         @('No game folder was selected', 'You did not choose a game folder, so nothing was changed.'),
         @('Undo was not confirmed', 'You chose not to undo it, so nothing was changed.'),
+        @('The drive [A-Za-z]: is not connected', 'The drive for this game is not connected, so nothing was changed. Connect it, or point the game at its new folder in 13) Library health check.'),
         @('^ACTION REQUIRED', 'An earlier patch install stopped part way, so some game files may already be changed. Check Details before you try again. This run changed nothing.'),
         @('Close the game', 'The game is running. Close it and try again.'),
         @('BepInEx is not installed|BepInEx must be installed', 'BepInEx is not installed for this game. Set it up first with BepInEx setup in the main menu.'),
@@ -1834,6 +1839,35 @@ function Write-TpmRequiredPatchNothingInstalled {
         return
     }
     Write-TpmText -Text 'Nothing was changed.' -Color DarkGray -BlankBefore
+}
+
+# The end-of-step summary of a patch run: how the selected games came out (each game counted once, so the counts add up to the games),
+# where the saved copies for undo are, and one line about the Library health check when a game was skipped because its drive is not connected.
+function Write-TpmRequiredPatchSummary {
+    param([object[]]$Results)
+    $items = @($Results)
+    if ($items.Count -eq 0) { return }
+    $rank = @{ Failed = 4; Changed = 3; AlreadySetUp = 2; Skipped = 1 }
+    $kinds = @{}
+    $driveGames = @{}
+    foreach ($result in $items) {
+        $build = Get-TpmRequiredPatchBuildName -Entry $result.Entry
+        $driveGone = ([string]$result.Reason -match 'The drive [A-Za-z]: is not connected')
+        $kind = 'Skipped'
+        if ($result.Status -ceq 'INSTALLED' -or $result.Status -ceq 'UNDONE') { $kind = 'Changed' }
+        elseif ($result.Status -ceq 'ALREADY_APPLIED') { $kind = 'AlreadySetUp' }
+        elseif ((Get-TpmRequiredPatchStatusInfo -Status $result.Status).Problem -and -not $driveGone) { $kind = 'Failed' }
+        if (-not $kinds.ContainsKey($build) -or $rank[$kind] -gt $rank[[string]$kinds[$build]]) { $kinds[$build] = $kind }
+        if ($driveGone) { $driveGames[$build] = $true }
+    }
+    $count = { param([string]$Kind) @($kinds.Keys | Where-Object { $kinds[$_] -eq $Kind }).Count }
+    $line = Get-TpmStepCountsLine -Picked $kinds.Count -Changed (& $count 'Changed') -AlreadySetUp (& $count 'AlreadySetUp') -Skipped (& $count 'Skipped') -Failed (& $count 'Failed')
+    Write-TpmText -Text $line -BlankBefore -HangingIndent 2
+    $backupLine = Get-TpmBackupFolderLine -ExtraPaths @($items | ForEach-Object { [string]$_.Receipt } | Where-Object { $_ }) -What 'the original game files'
+    if ($backupLine) { Write-TpmText -Text $backupLine -HangingIndent 2 }
+    if (@($kinds.Keys | Where-Object { $driveGames.ContainsKey($_) -and $kinds[$_] -eq 'Skipped' }).Count -gt 0) {
+        Write-TpmText -Text ('Next: ' + (Get-TpmDriveSkipNext)) -BlankBefore -HangingIndent 6
+    }
 }
 
 # The question before anything is written: which games, how many patches, and that a saved copy is kept.
@@ -2111,9 +2145,10 @@ function Invoke-TpmRequiredPatchMenu {
         }
         $detailBlocks.AddRange([object[]]@(Show-TpmRequiredPatchResults -Results $reported.ToArray() -Action $action))
         $detailBlocks.AddRange([object[]]@(Write-TpmRequiredPatchResidueNote -Owners $residueOwners))
-        if ($choice -eq 'U') { Wait-TpmRequiredPatchReturn -DetailBlocks $detailBlocks.ToArray() -DetailsNote $detailsNote;return }
+        if ($choice -eq 'U') { Write-TpmRequiredPatchSummary -Results $reported.ToArray(); Wait-TpmRequiredPatchReturn -DetailBlocks $detailBlocks.ToArray() -DetailsNote $detailsNote;return }
         if ($candidates.Count -eq 0) {
             Write-TpmRequiredPatchNothingInstalled -Results $reported.ToArray() -Choice $choice
+            Write-TpmRequiredPatchSummary -Results $reported.ToArray()
             Wait-TpmRequiredPatchReturn -DetailBlocks $detailBlocks.ToArray() -DetailsNote $detailsNote
             return
         }
@@ -2160,6 +2195,7 @@ function Invoke-TpmRequiredPatchMenu {
         }
         $detailBlocks.AddRange([object[]]@(Show-TpmRequiredPatchResults -Results $applied.ToArray() -Action 'Install'))
         Write-TpmRequiredPatchNextSteps -Results $applied.ToArray()
+        Write-TpmRequiredPatchSummary -Results (@($reported.ToArray()) + @($applied.ToArray()))
         Wait-TpmRequiredPatchReturn -DetailBlocks $detailBlocks.ToArray() -DetailsNote $detailsNote
     } finally {
         $cleanupFailures=New-Object System.Collections.Generic.List[string]
