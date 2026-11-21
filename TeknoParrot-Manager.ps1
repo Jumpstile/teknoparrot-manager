@@ -68,7 +68,8 @@ param(
     [string]$PostgresRecoveryResumeToken = '',
     [switch]$ValidationReport,
     [string]$ValidationRoot = '',
-    [string]$ValidationJsonPath = ''
+    [string]$ValidationJsonPath = '',
+    [string]$MappingEvidenceFile = ''
 )
 
 # TPM draws every progress bar itself (scripts\TpmProgress.psm1). Silence the PowerShell native progress display for the
@@ -52559,6 +52560,238 @@ function Get-TpmControlCoverage {
 # =============================================================================
 
 # =============================================================================
+# BEGIN MODULE-READY SECTION: Outside mapping evidence review
+# =============================================================================
+# Read-only check of an outside per-game controller list (a RetroBat-style teknoparrot.yml the user already has; issue #304).
+# The list is evidence for a person to review. Nothing here trusts it, applies it, bundles it or changes a profile. The only
+# file this section can write is the details file the caller names. A game is held back, with a plain reason, when the list
+# names it twice, names a game that is not installed, names a control the game does not have, uses a button name TPM does
+# not know, or puts two game actions on one controller button. Every entry keeps its source line and original value, and
+# is bound to the installed profile's name, revision and SHA-256, because the outside list itself has no revision.
+# Depends on: Read-Xml, Write-TpmAtomicTextFile.
+
+# Controller button names the outside list may use, and the five spelling mistakes known to be in it (looked up, never guessed).
+function Get-TpmMappingPadTargets {
+    return @('r3', 'l3', 'select', 'start', 'righttrigger', 'lefttrigger', 'rightshoulder', 'leftshoulder', 'south', 'east', 'west', 'north',
+        'up', 'down', 'left', 'right', 'leftstickleft', 'leftstickright', 'leftstickup', 'leftstickdown',
+        'rightstickleft', 'rightstickright', 'rightstickup', 'rightstickdown')
+}
+
+function ConvertTo-TpmMappingTarget {
+    param([string]$Value)
+    $text = ([string]$Value).Trim().Trim('"', "'")
+    $result = [pscustomobject]@{ Target = $text; Valid = $false; Normalized = $false }
+    if ($text -eq '') { return $result }
+    $typos = @{ 'rigthstickup' = 'rightstickup'; 'rigthstickdown' = 'rightstickdown'; 'leftttrigger' = 'lefttrigger'; 'lefttshoulder' = 'leftshoulder'; 'righttickleft' = 'rightstickleft' }
+    $lower = $text.ToLowerInvariant()
+    if ($text -match '^kb_[A-Za-z0-9]+$') { $result.Valid = $true; return $result }
+    if ($typos.ContainsKey($lower)) { $result.Target = $typos[$lower]; $result.Valid = $true; $result.Normalized = $true; return $result }
+    if ((Get-TpmMappingPadTargets) -contains $lower) { $result.Target = $lower; $result.Valid = $true }
+    return $result
+}
+
+# Reads the outside list. It is a plain two-level text file: a game name at the left edge, then indented "Control: button # label"
+# lines. Anything else is counted as an unread line, never guessed at.
+function Read-TpmMappingEvidenceFile {
+    param([Parameter(Mandatory)][string]$Path)
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $hash = ([System.BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '') } finally { $sha.Dispose() }
+    $text = (New-Object System.Text.UTF8Encoding $false).GetString($bytes).TrimStart([char]0xFEFF)
+    $entries = New-Object System.Collections.ArrayList
+    $unread = New-Object System.Collections.ArrayList
+    $current = $null
+    $lineNumber = 0
+    $allLines = @($text -split "\r?\n")
+    foreach ($line in $allLines) {
+        $lineNumber++
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith('#')) { continue }
+        if ($line -match '^([^\s#:][^:#]*):\s*(#.*)?$') {
+            $current = [pscustomobject]@{ Name = $Matches[1].Trim().Trim('"', "'"); Line = $lineNumber; Fields = (New-Object System.Collections.ArrayList); Players = $null }
+            [void]$entries.Add($current)
+        } elseif ($null -ne $current -and $line -match '^\s+([A-Za-z0-9_]+):[ \t]*([^\s#]*)[ \t]*(?:#[ \t]*(.*))?$') {
+            $label = if ($Matches.ContainsKey(3)) { [string]$Matches[3] } else { '' }
+            if ($Matches[1] -eq 'Players') { $current.Players = $Matches[2]; continue }
+            [void]$current.Fields.Add([pscustomobject]@{ Key = $Matches[1]; Value = $Matches[2]; Label = $label.Trim(); Line = $lineNumber })
+        } else {
+            [void]$unread.Add($lineNumber)
+        }
+    }
+    return [pscustomobject]@{ FileName = [System.IO.Path]::GetFileName($Path); Sha256 = $hash; LineCount = $allLines.Count; Entries = @($entries); UnreadLines = @($unread) }
+}
+
+# True for the controls one player and the cabinet need on the first controller: Test, Service, Coin 1, player 1 buttons and
+# the analog axes. An axis whose own label names another player is not counted.
+function Test-TpmMappingInPlayerOneScope {
+    param([string]$Mapping, [string]$Label = '')
+    if ($Mapping -notmatch '^(Test|Service\d*|Coin1|P1\w*|JvsTwoP1\w*|Analog\d+)$') { return $false }
+    if ($Mapping -like 'Analog*' -and $Label -match '\b(P|Player\s*)[2-6]\b') { return $false }
+    return $true
+}
+
+function Get-TpmMappingEvidenceReview {
+    param([Parameter(Mandatory)]$Evidence, [Parameter(Mandatory)][string]$GameProfilesDir)
+    $profiles = @{}
+    foreach ($file in @(Get-ChildItem -LiteralPath $GameProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue)) { $profiles[$file.BaseName.ToLowerInvariant()] = $file }
+    $nameCounts = @{}
+    foreach ($entry in @($Evidence.Entries)) { $k = $entry.Name.ToLowerInvariant(); $nameCounts[$k] = 1 + [int]$nameCounts[$k] }
+    $mouseKey = '^(mouseleft|mouseright|mousemiddle|button4|button5)(_\d+)?$'
+
+    $results = New-Object System.Collections.ArrayList
+    foreach ($entry in @($Evidence.Entries | Sort-Object { $_.Name.ToLowerInvariant() }, Line)) {
+        $name = $entry.Name.ToLowerInvariant()
+        $profileKey = $name
+        $variant = ''
+        if (-not $profiles.ContainsKey($name)) {
+            $cut = $name.LastIndexOf('_')
+            if ($cut -gt 0 -and $profiles.ContainsKey($name.Substring(0, $cut))) { $profileKey = $name.Substring(0, $cut); $variant = $name.Substring($cut + 1) }
+        }
+        $problems = New-Object System.Collections.ArrayList
+        $addProblem = { param($Code, $Field) [void]$problems.Add([pscustomobject]@{ Code = $Code; Field = $Field }) }
+        if ($nameCounts[$name] -gt 1) { & $addProblem 'DuplicateEntry' $entry.Name }
+
+        $gameFile = $profiles[$profileKey]
+        $identity = $null
+        $gameMappings = @{}
+        if ($null -eq $gameFile) {
+            & $addProblem 'NotInstalled' $entry.Name
+        } else {
+            try {
+                $doc = Read-Xml $gameFile.FullName
+                foreach ($node in @($doc.SelectNodes('/GameProfile/JoystickButtons/JoystickButtons'))) {
+                    $mapNode = $node.SelectSingleNode('InputMapping')
+                    if ($null -eq $mapNode -or [string]::IsNullOrWhiteSpace($mapNode.InnerText)) { continue }
+                    $buttonName = $node.SelectSingleNode('ButtonName')
+                    $gameMappings[$mapNode.InnerText.Trim()] = $(if ($buttonName) { $buttonName.InnerText } else { '' })
+                }
+                $revNode = $doc.SelectSingleNode('/GameProfile/GameProfileRevision')
+                $identity = [ordered]@{ GameProfileFile = $gameFile.Name; GameProfileRevision = $(if ($revNode) { $revNode.InnerText.Trim() } else { '' }); GameProfileSha256 = (Get-FileHash -LiteralPath $gameFile.FullName -Algorithm SHA256).Hash }
+            } catch {
+                & $addProblem 'ProfileUnreadable' $gameFile.Name
+            }
+        }
+
+        $proposals = New-Object System.Collections.ArrayList
+        $normalized = New-Object System.Collections.ArrayList
+        $seen = @{}
+        $unmapped = 0
+        foreach ($field in @($entry.Fields)) {
+            $isMouse = $field.Key -match $mouseKey
+            $mapping = if ($isMouse) { $field.Value } else { $field.Key }
+            $rawTarget = if ($isMouse) { $field.Key } else { $field.Value }
+            if ([string]::IsNullOrWhiteSpace($mapping) -or [string]::IsNullOrWhiteSpace($rawTarget)) { $unmapped++; continue }
+            $seenKey = $field.Key.ToLowerInvariant()
+            if ($seen.ContainsKey($seenKey)) { & $addProblem 'DuplicateField' $field.Key; continue }
+            $seen[$seenKey] = $true
+            $target = if ($isMouse) { [pscustomobject]@{ Target = $rawTarget.ToLowerInvariant(); Valid = $true; Normalized = $false } } else { ConvertTo-TpmMappingTarget $rawTarget }
+            if (-not $target.Valid) { & $addProblem 'UnknownTarget' $field.Key; continue }
+            if ($null -ne $identity -and -not $gameMappings.ContainsKey($mapping)) { & $addProblem 'FieldNotInGame' $mapping }
+            if ($target.Normalized) { [void]$normalized.Add([pscustomobject]@{ Field = $mapping; Written = $rawTarget; Used = $target.Target }) }
+            [void]$proposals.Add([pscustomobject]([ordered]@{ Mapping = $mapping; Target = $target.Target; SourceValue = $rawTarget; Label = $field.Label; SourceLine = $field.Line }))
+        }
+
+        # Two different game actions on one controller button, inside the first-controller controls only.
+        $groups = @{}
+        foreach ($p in $proposals) {
+            if (-not (Test-TpmMappingInPlayerOneScope -Mapping $p.Mapping -Label $p.Label)) { continue }
+            if (-not $groups.ContainsKey($p.Target)) { $groups[$p.Target] = New-Object System.Collections.ArrayList }
+            [void]$groups[$p.Target].Add($p.Mapping)
+        }
+        foreach ($target in @($groups.Keys | Sort-Object)) {
+            $actions = @($groups[$target] | Sort-Object -Unique)
+            if ($actions.Count -gt 1) { & $addProblem 'Collision' ($actions -join ' + ') }
+        }
+
+        # Game controls the list says nothing usable about (only judged for a whole-game entry, not a gun or pad variant).
+        $missing = @()
+        if ($variant -eq '' -and $null -ne $identity) {
+            $covered = @{}
+            foreach ($p in $proposals) { $covered[$p.Mapping] = $true }
+            $missing = @($gameMappings.Keys | Where-Object { (Test-TpmMappingInPlayerOneScope -Mapping $_ -Label $gameMappings[$_]) -and -not $covered.ContainsKey($_) } | Sort-Object)
+        }
+
+        $reasons = @($problems | ForEach-Object { $_.Code } | Sort-Object -Unique)
+        $status = if ($reasons.Count -gt 0) { 'Withheld' } elseif ($missing.Count -gt 0) { 'Partial' } else { 'ReadyForReview' }
+        [void]$results.Add([pscustomobject]([ordered]@{
+            Name = $entry.Name; Profile = $(if ($null -ne $gameFile) { $gameFile.BaseName } else { '' }); Variant = $variant; SourceLine = $entry.Line
+            Status = $status; Reasons = $reasons; Problems = @($problems); Identity = $identity
+            Proposals = @($proposals); Normalized = @($normalized); MissingFromList = $missing; UnmappedInSource = $unmapped
+        }))
+    }
+
+    $all = @($results)
+    $byReason = [ordered]@{}
+    foreach ($code in @($all | ForEach-Object { $_.Reasons } | Sort-Object -Unique)) { $byReason[$code] = @($all | Where-Object { $_.Reasons -contains $code }).Count }
+    return [pscustomobject]([ordered]@{
+        Schema = 'TPM.MappingEvidenceReview.v1'
+        Trust = 'NonAuthoritative'
+        ReadOnly = $true
+        Source = [ordered]@{ FileName = $Evidence.FileName; Sha256 = $Evidence.Sha256; LineCount = $Evidence.LineCount; UnreadLines = @($Evidence.UnreadLines) }
+        Summary = [ordered]@{
+            EntriesInList = $all.Count
+            Installed = @($all | Where-Object { $_.Reasons -notcontains 'NotInstalled' }).Count
+            ReadyForReview = @($all | Where-Object Status -eq 'ReadyForReview').Count
+            Partial = @($all | Where-Object Status -eq 'Partial').Count
+            Withheld = @($all | Where-Object Status -eq 'Withheld').Count
+            WithheldByReason = $byReason
+            ButtonsProposed = (@($all | ForEach-Object { $_.Proposals.Count }) | Measure-Object -Sum).Sum
+            SpellingFixed = (@($all | ForEach-Object { $_.Normalized.Count }) | Measure-Object -Sum).Sum
+        }
+        Entries = $all
+    })
+}
+
+function Get-TpmMappingEvidenceReviewLines {
+    param([Parameter(Mandatory)]$Review)
+    $s = $Review.Summary
+    $lines = New-Object System.Collections.ArrayList
+    [void]$lines.Add('Outside controller list check. Nothing was changed.')
+    [void]$lines.Add(('File: {0}' -f $Review.Source.FileName))
+    [void]$lines.Add(('Games in the list: {0}. Found in your TeknoParrot: {1}.' -f $s.EntriesInList, $s.Installed))
+    [void]$lines.Add(('Ready for a person to review: {0}. Some controls missing from the list: {1}. Held back: {2}.' -f $s.ReadyForReview, $s.Partial, $s.Withheld))
+    $words = [ordered]@{
+        NotInstalled     = 'the game is not in your TeknoParrot'
+        DuplicateEntry   = 'the list names the game twice'
+        DuplicateField   = 'the list sets one control twice'
+        FieldNotInGame   = 'the list sets a control the game does not have'
+        UnknownTarget    = 'the list uses a button name TPM does not know'
+        Collision        = 'two game actions share one controller button'
+        ProfileUnreadable = 'the game file could not be read'
+    }
+    foreach ($code in $words.Keys) {
+        if ($s.WithheldByReason.Contains($code)) { [void]$lines.Add(('  Held back, {0}: {1}' -f $words[$code], $s.WithheldByReason[$code])) }
+    }
+    if ($s.SpellingFixed -gt 0) { [void]$lines.Add(('Spelling mistakes in the list that TPM corrected: {0}.' -f $s.SpellingFixed)) }
+    if (@($Review.Source.UnreadLines).Count -gt 0) { [void]$lines.Add(('Lines in the list TPM could not read: {0}.' -f @($Review.Source.UnreadLines).Count)) }
+    [void]$lines.Add('This list comes from outside. TPM does not trust it, has not tested it, and has not used it in any game.')
+    return @($lines)
+}
+
+# Command-line entry (-MappingEvidenceFile). Prints the plain lines and, when asked, writes the details file. Returns 0, or 1 when
+# the check itself could not run.
+function Invoke-TpmMappingEvidenceReport {
+    param([Parameter(Mandatory)][string]$EvidencePath, [string]$TeknoParrotRoot = '', [string]$JsonPath = '')
+    $script:TpmValidationReportActive = $true   # Write-Log writes nothing while this is set
+    try {
+        if (-not (Test-Path -LiteralPath $EvidencePath -PathType Leaf)) { throw 'The list file was not found.' }
+        $profilesDir = Join-Path $TeknoParrotRoot 'GameProfiles'
+        if ([string]::IsNullOrWhiteSpace($TeknoParrotRoot) -or -not (Test-Path -LiteralPath $profilesDir -PathType Container)) { throw 'Give the TeknoParrot folder (the one that holds GameProfiles) with -ValidationRoot.' }
+        if ($JsonPath -and (Test-Path -LiteralPath $JsonPath -PathType Leaf) -and ((Get-Content -LiteralPath $JsonPath -Raw -ErrorAction Stop) -notmatch 'TPM\.MappingEvidenceReview\.v1')) { throw 'The details file already exists and is not one of these reports; it was left unchanged.' }
+        $review = Get-TpmMappingEvidenceReview -Evidence (Read-TpmMappingEvidenceFile -Path $EvidencePath) -GameProfilesDir $profilesDir
+        if ($JsonPath) { Write-TpmAtomicTextFile -Path $JsonPath -Text ($review | ConvertTo-Json -Depth 8) -Operation 'mapping evidence details file' }
+        foreach ($line in @(Get-TpmMappingEvidenceReviewLines -Review $review)) { Write-Host $line }
+        if ($JsonPath) { Write-Host ('Details file: ' + $JsonPath) }
+        return 0
+    } catch {
+        Write-Host ('The outside list check could not run: ' + $_.Exception.Message) -ForegroundColor Red
+        return 1
+    }
+}
+# =============================================================================
+# END MODULE-READY SECTION: Outside mapping evidence review
+# =============================================================================
+
+# =============================================================================
 # VALIDATION REPORT (read-only, no questions; issue #276)
 # =============================================================================
 # -ValidationReport prints what a release or arcade test needs to know about this copy and one TeknoParrot folder. It never
@@ -52742,6 +52975,10 @@ function Invoke-TpmValidationReport {
 
 if ($ValidationReport) {
     exit (Invoke-TpmValidationReport -ScriptPath $PSCommandPath -ScriptRoot $PSScriptRoot -TeknoParrotRoot $ValidationRoot -JsonPath $ValidationJsonPath)
+}
+
+if ($MappingEvidenceFile) {
+    exit (Invoke-TpmMappingEvidenceReport -EvidencePath $MappingEvidenceFile -TeknoParrotRoot $ValidationRoot -JsonPath $ValidationJsonPath)
 }
 
 $script:ActiveTpmWorkflowStatus = $null
