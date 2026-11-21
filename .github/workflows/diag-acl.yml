@@ -1,0 +1,59 @@
+name: Diagnostic ACL check
+
+on:
+  push:
+    branches: [ diag/ci-acl ]
+
+jobs:
+  acl-diagnostic:
+    name: ACL diagnostic
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Who is the runner account
+        shell: powershell
+        run: |
+          whoami
+          whoami /user
+          $PSVersionTable.PSVersion.ToString()
+          [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          Write-Host "RUNNER_TEMP=$env:RUNNER_TEMP"
+          Get-PSDrive -PSProvider FileSystem | Format-Table Name, Root | Out-String
+
+      - name: Try the same ACL steps the product uses
+        shell: powershell
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'acl-diag'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          Write-Host "--- icacls output ---"
+          & icacls $dir /inheritance:r /grant:r ('*{0}:(OI)(CI)(F)' -f $sid)
+          Write-Host "icacls exit code: $LASTEXITCODE"
+          Write-Host "--- Get-Acl entries ---"
+          (Get-Acl -LiteralPath $dir).Access | ForEach-Object {
+            $resolved = 'cannot-resolve'
+            try { $resolved = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $resolved = 'translate-failed: ' + $_.Exception.Message }
+            '{0} | sid={1} | inherited={2} | type={3} | rights={4}' -f $_.IdentityReference, $resolved, $_.IsInherited, $_.AccessControlType, $_.FileSystemRights
+          }
+          Write-Host "current user SID: $sid"
+
+      - name: Run the product ACL helpers on a temp folder
+        shell: powershell
+        run: |
+          $path = "$PWD\TeknoParrot-Manager.ps1"
+          $tokens = $null; $errs = $null
+          $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errs)
+          $names = 'Test-TpmVolumeHasNoFilePermissions','Get-PostgresOwnerOnlyAclState','Set-PostgresOwnerOnlyAcl'
+          foreach ($n in $names) {
+            $fn = $ast.Find({ param($a) $a -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq $n }, $true)
+            if ($null -eq $fn) { Write-Host "MISSING function $n"; continue }
+            . ([scriptblock]::Create($fn.Extent.Text))
+          }
+          $dir = Join-Path $env:RUNNER_TEMP 'acl-diag2'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          Write-Host ("No-file-permissions volume: " + (Test-TpmVolumeHasNoFilePermissions -Path $dir))
+          $r = Set-PostgresOwnerOnlyAcl -Path $dir -Directory
+          Write-Host ("Set result: {0} / {1}" -f $r.Outcome, $r.Detail)
+          $s = Get-PostgresOwnerOnlyAclState -Path $dir
+          Write-Host ("State result: {0} / {1}" -f $s.Outcome, $s.Detail)
