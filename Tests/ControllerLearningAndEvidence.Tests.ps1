@@ -288,3 +288,132 @@ Describe 'Control guides' {
         $html | Should -Match 'A &amp; B'
     }
 }
+
+Describe 'Stuck and doubled buttons while learning' {
+    BeforeEach {
+        Mock Write-Host { }
+        Mock Write-Log { }
+        $script:said = New-Object System.Collections.Generic.List[string]
+        Mock Write-TpmText { [void]$script:said.Add($Text) }
+    }
+
+    It 'keeps the first key but says when a press also sent another key, and when one stays down' {
+        $controls = @(Get-TpmCabinetControlList -Players 1 -Buttons 2 | Where-Object { $_.Control -in @('P1ButtonStart', 'P1Button1') })
+        $presses = New-Object System.Collections.Generic.Queue[object]
+        $presses.Enqueue([pscustomobject]@{ Key = '1'; Also = @('Left Ctrl'); Held = $false })
+        $presses.Enqueue([pscustomobject]@{ Key = 'Space'; Also = @(); Held = $true })
+        $result = Invoke-TpmLearnKeys -Controls $controls -ReadKey { $presses.Dequeue() }
+        $result.Keys['P1ButtonStart'] | Should -Be '1'
+        $result.Keys['P1Button1'] | Should -Be 'Space'
+        ($script:said -join "`n") | Should -Match 'also sent Left Ctrl'
+        ($script:said -join "`n") | Should -Match 'still down after 3 seconds'
+        $result.Held | Should -Be @('Player 1 button 1')
+    }
+
+    It 'warns about a shared key only when it comes with two different controls' {
+        $controls = @(Get-TpmCabinetControlList -Players 1 -Buttons 2 | Where-Object { $_.Control -in @('P1ButtonStart', 'P1Button1', 'P1Button2') })
+        $one = New-Object System.Collections.Generic.Queue[object]
+        $one.Enqueue([pscustomobject]@{ Key = '1'; Also = @('Left Ctrl'); Held = $false })
+        $one.Enqueue('Space'); $one.Enqueue('Z')
+        [void](Invoke-TpmLearnKeys -Controls $controls -ReadKey { $one.Dequeue() })
+        ($script:said -join "`n") | Should -Not -Match 'came along with'
+        $script:said.Clear()
+        $two = New-Object System.Collections.Generic.Queue[object]
+        $two.Enqueue([pscustomobject]@{ Key = '1'; Also = @('Left Ctrl'); Held = $false })
+        $two.Enqueue([pscustomobject]@{ Key = 'Space'; Also = @('Left Ctrl'); Held = $false })
+        $two.Enqueue('Z')
+        [void](Invoke-TpmLearnKeys -Controls $controls -ReadKey { $two.Dequeue() })
+        ($script:said -join "`n") | Should -Match 'Left Ctrl came along with 2 different controls'
+    }
+}
+
+Describe 'Standard arcade keys' {
+    BeforeEach { Mock Write-Host { }; Mock Write-TpmText { } }
+
+    It 'lists only controls TPM learns, with no key given to two controls' {
+        $standard = Get-TpmStandardArcadeKeys
+        $ids = @(Get-TpmCabinetControlList -Players 4 -Buttons 8 | ForEach-Object { $_.Control })
+        foreach ($id in @($standard.Keys)) { $ids | Should -Contain $id }
+        @($standard.Values | Select-Object -Unique).Count | Should -Be $standard.Count
+        $standard['P1Button1'] | Should -Be 'Left Ctrl'
+        $standard.Contains('P2Button5') | Should -BeFalse
+        $standard.Contains('Test') | Should -BeFalse
+    }
+
+    It 'is used only when the buttons the player presses send the standard keys' {
+        $controls = @(Get-TpmCabinetControlList -Players 1 -Buttons 2)
+        $proposed = Get-TpmStandardArcadeKeys
+        $good = New-Object System.Collections.Generic.Queue[string]; $good.Enqueue('1'); $good.Enqueue('Left Ctrl')
+        (Test-TpmStandardKeysSpotCheck -Proposed $proposed -Controls $controls -ReadKey { $good.Dequeue() }).Passed | Should -BeTrue
+        $bad = New-Object System.Collections.Generic.Queue[string]; $bad.Enqueue('1'); $bad.Enqueue('Z')
+        $check = Test-TpmStandardKeysSpotCheck -Proposed $proposed -Controls $controls -ReadKey { $bad.Dequeue() }
+        $check.Passed | Should -BeFalse
+        $check.Got | Should -Be 'Z'
+        (Test-TpmStandardKeysSpotCheck -Proposed $proposed -Controls $controls -ReadKey { '' }).Reason | Should -Be 'NothingPressed'
+    }
+}
+
+Describe 'A different encoder than when the buttons were learned' {
+    It 'hints only when TPM could see the encoders both times and the count differs' {
+        $cabinet = [pscustomobject]@{ EncodersWhenLearned = 1; Keys = [pscustomobject]@{ Coin1 = 'x' } }
+        (Get-TpmEncoderChangeNotice -Cabinet $cabinet -EncodersNow 0) | Should -Match 'learn your buttons again'
+        (Get-TpmEncoderChangeNotice -Cabinet $cabinet -EncodersNow 1) | Should -Be ''
+        (Get-TpmEncoderChangeNotice -Cabinet $cabinet -EncodersNow -1) | Should -Be ''
+        $cabinet.EncodersWhenLearned = -1
+        (Get-TpmEncoderChangeNotice -Cabinet $cabinet -EncodersNow 2) | Should -Be ''
+    }
+
+    It 'counts only encoders seen with Medium or High confidence, and says unknown when detection could not look' {
+        $seen = [pscustomobject]@{ EvidenceStatus = 'Observed'; DeviceObservations = @(
+            [pscustomobject]@{ DeviceClass = 'ArcadeEncoder'; Confidence = 'Medium'; Count = 1 }
+            [pscustomobject]@{ DeviceClass = 'ArcadeEncoder'; Confidence = 'Low'; Count = 3 }) }
+        (Get-TpmEncoderCount -Evidence $seen) | Should -Be 1
+        (Get-TpmEncoderCount -Evidence ([pscustomobject]@{ EvidenceStatus = 'SourceUnavailable'; DeviceObservations = @() })) | Should -Be -1
+    }
+
+    It 'loads a saved cabinet file from before this field existed as "unknown"' {
+        $state = New-Folder
+        [System.IO.File]::WriteAllText((Get-TpmControlStatePath -StateRoot $state).Cabinet, '{"Version":1,"Devices":{},"Players":2,"ButtonsPerPlayer":6,"Keys":{}}', (New-Object System.Text.UTF8Encoding $false))
+        (Read-TpmCabinetState -StateRoot $state).EncodersWhenLearned | Should -Be -1
+    }
+}
+
+Describe 'Key suggestions and light colors in a game guide' {
+    BeforeEach { Mock Write-Host { }; Mock Write-Log { } }
+
+    It 'does not suggest a key for a "direction" the game calls something else, and says so' {
+        $dir = New-Folder
+        $xml = '<GameProfile><GameProfileRevision>1</GameProfileRevision><JoystickButtons>' +
+            '<JoystickButtons><ButtonName>Player 1 Up</ButtonName><InputMapping>P1ButtonUp</InputMapping><AnalogType>None</AnalogType></JoystickButtons>' +
+            '<JoystickButtons><ButtonName>Menu Down</ButtonName><InputMapping>P1ButtonDown</InputMapping><AnalogType>None</AnalogType></JoystickButtons>' +
+            '</JoystickButtons></GameProfile>'
+        [System.IO.File]::WriteAllText((Join-Path $dir 'g2.xml'), $xml, (New-Object System.Text.UTF8Encoding $false))
+        $cabinet = Read-TpmCabinetState -StateRoot (New-Folder)
+        Set-TpmCabinetKeys -State $cabinet -Keys @{ P1ButtonUp = @{ Key = 'Up arrow'; Source = 'PressedByPlayer' }; P1ButtonDown = @{ Key = 'Down arrow'; Source = 'PressedByPlayer' } }
+        $guide = Get-TpmGameControlGuide -Doc (Read-Xml (Join-Path $dir 'g2.xml')) -Title 'G2' -Cabinet $cabinet
+        @($guide.Rows | Where-Object { $_.Cells[3] -eq 'P1ButtonUp' })[0].Cells[1] | Should -Be 'Key: Up arrow'
+        @($guide.Rows | Where-Object { $_.Cells[3] -eq 'P1ButtonDown' })[0].Cells[1] | Should -Match 'not sure'
+        ($guide.Lines -join ' ') | Should -Match 'TPM can suggest a key for 1 of the 2 controls'
+        ($guide.Lines -join ' ') | Should -Match 'not sure what to suggest for: Menu Down'
+    }
+
+    It 'shows the color from the player''s own LEDBlinky file, the game''s own group first, and nothing when there is no file' {
+        $led = New-Folder
+        $text = '<dat><emulator emuname="TeknoParrot">' +
+            '<controlGroup groupName="DEFAULT"><player number="1"><control name="P1_BUTTON1" color="Red"/><control name="START1" color="Green"/></player></controlGroup>' +
+            '<controlGroup groupName="g1"><player number="1"><control name="P1_BUTTON1" color="48,0,0"/></player></controlGroup>' +
+            '</emulator></dat>'
+        [System.IO.File]::WriteAllText((Join-Path $led 'LEDBlinkyControls.xml'), $text, (New-Object System.Text.UTF8Encoding $false))
+        $colors = Get-TpmLedControlColors -Root $led -Code 'g1'
+        $colors['P1_BUTTON1'] | Should -Be '48,0,0'
+        $colors['START1'] | Should -Be 'Green'
+        $doc = Read-Xml (New-LearnProfile -Dir (New-Folder) -Name 'g1')
+        $cabinet = Read-TpmCabinetState -StateRoot (New-Folder)
+        $guide = Get-TpmGameControlGuide -Doc $doc -Title 'Test Game' -Cabinet $cabinet -LedColors $colors
+        $guide.Columns | Should -Contain 'Light'
+        @($guide.Rows | Where-Object { $_.Cells[3] -eq 'P1ButtonStart' })[0].Cells[4] | Should -Be 'Green'
+        @($guide.Rows | Where-Object { $_.Cells[3] -eq 'P1Button1' })[0].Cells[4] | Should -Be 'a custom color'
+        (Get-TpmLedControlColors -Root (New-Folder) -Code 'g1').Count | Should -Be 0
+        (Get-TpmGameControlGuide -Doc $doc -Title 'Test Game' -Cabinet $cabinet).Columns | Should -Not -Contain 'Light'
+    }
+}
