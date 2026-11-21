@@ -2,8 +2,8 @@
   TeknoParrot Manager  --  CHANGELOG
   Author: Jumpstile
 ===============================================================================
-  Newest version first. RC8.4 is a fix-up release for RC8.3. RC8.3 is the
-  latest published version before it. RC8 was a tester build and was never
+  Newest version first. RC8.4 is the latest published version. It is a
+  fix-up release for RC8.3. RC8 was a tester build and was never
   published. Final Version 1.0 comes later.
 
 
