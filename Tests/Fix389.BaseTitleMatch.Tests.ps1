@@ -112,8 +112,11 @@ Describe 'Resolve-BestFuzzyMatch with consecutive years of one game' {
     It 'does not guess a year when the folder name does not say one' {
         (Invoke-Fix389Match -Folder 'Golden Tee Live (USA)[IT Nighthawk][TP]' -Codes $script:F389Years).IsConfidentMatch | Should -BeFalse
     }
-    It 'still treats two profiles with the same whole name as a tie' {
-        (Invoke-Fix389Match -Folder 'Blade Strangers (APM3)(2.01.00)' -Codes @('BladeStrangers', 'BladeStrangersAPM3')).IsConfidentMatch | Should -BeFalse
+    It 'still treats two profiles with the same whole name as a tie, whichever is listed first' -ForEach @(
+        @{ Codes = @('BladeStrangers', 'BladeStrangersAPM3') }
+        @{ Codes = @('BladeStrangersAPM3', 'BladeStrangers') }
+    ) {
+        (Invoke-Fix389Match -Folder 'Blade Strangers (APM3)(2.01.00)' -Codes $Codes).IsConfidentMatch | Should -BeFalse
     }
     It 'uses TeknoParrot''s own game name when the profile code has no 2024 in it' {
         $root = Join-Path $TestDrive ('tp-' + [guid]::NewGuid().ToString('N'))
