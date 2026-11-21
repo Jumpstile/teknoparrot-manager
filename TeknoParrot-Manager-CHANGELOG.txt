@@ -67,11 +67,23 @@
     name and ID first and approve before anything is saved. Names you
     typed yourself are never replaced. Firmware updaters and test boards
     are never added. Nothing is downloaded.
-  - LaunchBox: "Fill in game details and make playlists" fills in the
-    release year and developer where LaunchBox has nothing yet, and makes
-    playlists for each arcade hardware family, plus "Light gun games" and
-    "Driving games". Your own playlists and details are never touched.
-    Restore puts everything back.
+  - LaunchBox: new games get their release year and developer when they
+    are added. "Fill in game details and make playlists" does the same
+    for games already in LaunchBox where a box is still empty, using
+    LaunchBox's own game list when it is sure of the game. It makes
+    playlists for each arcade hardware family, plus "Light gun games"
+    and "Driving games". Your own playlists and details are never
+    touched. Restore puts everything back.
+  - LaunchBox: a game that cannot start yet (its game file is missing,
+    firmware is missing, or it needs BepInEx) gets a plain "Needs setup"
+    note that says what to do, and goes into a "Needs setup" playlist.
+    The note and the playlist entry go away by themselves when the
+    problem is fixed. What you wrote in the notes stays.
+  - LaunchBox: a new choice groups the regions and versions of one game
+    into one LaunchBox game with a version picker. Only games that are
+    certainly the same game are grouped, and the default version follows
+    the region you chose in Region setup. You see the groups first.
+    Restore puts the separate games back.
   - LaunchBox: a new optional step adds clear logos or box art from a
     folder you pick. You see a preview first, close matches are used only
     if you say yes, and Undo removes the pictures that were added.

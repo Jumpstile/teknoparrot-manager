@@ -2518,6 +2518,7 @@ Optional: add games to LaunchBox.
 [P] Preview first. No changes.
 [A] Add missing games (backed up).
 [G] Fill in game details and make playlists (backed up).
+[V] Group regions and versions of a game into one (backed up).
 [L] Link games for art and details (backed up).
 [F] Import file only. No changes.
 [B] Skip this step.
@@ -2529,7 +2530,8 @@ What each choice does:
 
 - `P` reads your LaunchBox files and asks which platform to plan for. It prints what a write would do ("A write would add N game entries and change M file(s)"). It changes nothing in LaunchBox, then returns to this menu.
 - `A` writes directly into LaunchBox's own `Data\` files.
-- `G` fills in game details and makes playlists (backed up). It fills in the release year and developer where LaunchBox has nothing yet. It makes playlists for each arcade hardware family, plus "Light gun games" and "Driving games". Your own playlists and details are never touched. Restore puts everything back.
+- `G` fills in game details and makes playlists (backed up). It fills in the release year and developer where LaunchBox has nothing yet, using LaunchBox's own game list when it is sure of the game. It makes playlists for each arcade hardware family, plus "Light gun games" and "Driving games". A game that cannot start yet (game file missing, firmware missing, or BepInEx needed) gets a "Needs setup" note that says what to do, and goes into a "Needs setup" playlist; the note goes away by itself once the problem is fixed. Your own playlists, details and notes are never touched. Restore puts everything back.
+- `V` groups regions and versions of one game into one LaunchBox game with a version picker (backed up). Two entries are grouped only when they are certainly the same game (the same ID in LaunchBox's game list). The default version follows the region you chose in Region setup. You see the groups first and approve before anything is saved. Restore puts the separate games back.
 - `L` links games for art and details (backed up). It looks each game up in LaunchBox's own game list on your PC. It shows every old name, new name and ID first, and you approve before anything is saved. Names you typed yourself are never replaced. Nothing is downloaded.
 - `F` creates the reference file without a LaunchBox write.
 - `B` skips the optional step.
