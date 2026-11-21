@@ -378,6 +378,100 @@ Describe 'A different encoder than when the buttons were learned' {
     }
 }
 
+Describe 'Recognizing the same controllers again' {
+    BeforeAll {
+        function script:New-Print { param([int]$n) ('a' * 63) + ('{0:x}' -f $n) }
+        function script:New-Prints { param([int[]]$Ids) $list = @(); foreach ($n in $Ids) { $list += [pscustomobject]@{ DeviceClass = 'ArcadeEncoder'; Fingerprint = (New-Print $n) } }; return , $list }
+        function script:New-SeenNow { param([int[]]$Ids = @(), [string]$Status = 'Observed', [switch]$NoSalt)
+            $prints = $null; if (-not $NoSalt) { $prints = New-Prints $Ids }
+            [pscustomobject]@{ EvidenceStatus = $Status; DeviceObservations = @(); DeviceFingerprints = $prints } }
+        function script:New-KeptKeys { param([int[]]$Ids = @(), [switch]$Old, [int]$Count = -1)
+            $prints = $null; if (-not $Old) { $prints = New-Prints $Ids }
+            [pscustomobject]@{ Keys = [pscustomobject]@{ Coin1 = 'x' }; EncodersWhenLearned = $Count; EncoderFingerprints = $prints } }
+    }
+
+    It 'says the controllers are the same, including two identical encoders and one moved to another USB port' {
+        (Get-TpmControllerSetNotice -Cabinet (New-KeptKeys -Ids 1) -Evidence (New-SeenNow -Ids 1)).State | Should -Be 'Same'
+        $two = Get-TpmControllerSetNotice -Cabinet (New-KeptKeys -Ids 1, 2) -Evidence (New-SeenNow -Ids 2, 1)
+        $two.State | Should -Be 'Same'
+        $two.Text | Should -Match 'same arcade encoders'
+    }
+
+    It 'says when an encoder was added, removed or swapped, and when one of two identical encoders is gone' {
+        (Get-TpmControllerSetNotice -Cabinet (New-KeptKeys -Ids 1) -Evidence (New-SeenNow -Ids 1, 2)).State | Should -Be 'Added'
+        (Get-TpmControllerSetNotice -Cabinet (New-KeptKeys -Ids 1, 2) -Evidence (New-SeenNow -Ids 1)).State | Should -Be 'Removed'
+        (Get-TpmControllerSetNotice -Cabinet (New-KeptKeys -Ids 1) -Evidence (New-SeenNow)).State | Should -Be 'Removed'
+        (Get-TpmControllerSetNotice -Cabinet (New-KeptKeys) -Evidence (New-SeenNow -Ids 3)).State | Should -Be 'Added'
+        $swapped = Get-TpmControllerSetNotice -Cabinet (New-KeptKeys -Ids 1) -Evidence (New-SeenNow -Ids 3)
+        $swapped.State | Should -Be 'Changed'
+        $swapped.Text | Should -Match 'learn your buttons again'
+    }
+
+    It 'says it could not check when Windows gives no data, no key exists, or no encoder is recognized, and never when no keys were taught' {
+        (Get-TpmControllerSetNotice -Cabinet (New-KeptKeys -Ids 1) -Evidence (New-SeenNow -Status 'SourceUnavailable')).State | Should -Be 'CouldNotCheck'
+        (Get-TpmControllerSetNotice -Cabinet (New-KeptKeys -Ids 1) -Evidence $null).State | Should -Be 'CouldNotCheck'
+        (Get-TpmControllerSetNotice -Cabinet (New-KeptKeys -Ids 1) -Evidence (New-SeenNow -NoSalt)).State | Should -Be 'CouldNotCheck'
+        (Get-TpmControllerSetNotice -Cabinet (New-KeptKeys) -Evidence (New-SeenNow)).State | Should -Be 'CouldNotCheck'
+        $none = Get-TpmControllerSetNotice -Cabinet ([pscustomobject]@{ Keys = [pscustomobject]@{}; EncodersWhenLearned = -1; EncoderFingerprints = @((New-KeptKeys -Ids 1).EncoderFingerprints) }) -Evidence (New-SeenNow -Ids 2)
+        $none.State | Should -Be 'NoKeys'
+        $none.Text | Should -Be ''
+    }
+
+    It 'only gives a hint: the saved keys and answers are not changed' {
+        $cabinet = New-KeptKeys -Ids 1
+        $before = $cabinet | ConvertTo-Json -Depth 6
+        [void](Get-TpmControllerSetNotice -Cabinet $cabinet -Evidence (New-SeenNow -Ids 5))
+        ($cabinet | ConvertTo-Json -Depth 6) | Should -Be $before
+    }
+
+    It 'keeps the old count hint for keys saved before fingerprints existed' {
+        (Get-TpmControllerSetNotice -Cabinet (New-KeptKeys -Old -Count 1) -Evidence ([pscustomobject]@{ EvidenceStatus = 'Observed'; DeviceObservations = @() })).State | Should -Be 'Changed'
+        $same = [pscustomobject]@{ EvidenceStatus = 'Observed'; DeviceObservations = @([pscustomobject]@{ DeviceClass = 'ArcadeEncoder'; Confidence = 'Medium'; Count = 1 }) }
+        (Get-TpmControllerSetNotice -Cabinet (New-KeptKeys -Old -Count 1) -Evidence $same).Text | Should -Be ''
+    }
+
+    It 'saves fingerprints with the cabinet and loads them back; a list with no encoder stays a list, an older file stays "not saved"' {
+        $state = New-Folder
+        $cabinet = Read-TpmCabinetState -StateRoot $state
+        $cabinet.EncoderFingerprints = @([pscustomobject]@{ DeviceClass = 'ArcadeEncoder'; Fingerprint = (New-Print 1) })
+        Save-TpmCabinetState -State $cabinet -StateRoot $state
+        @((Read-TpmCabinetState -StateRoot $state).EncoderFingerprints).Fingerprint | Should -Be (New-Print 1)
+        $cabinet.EncoderFingerprints = @()
+        Save-TpmCabinetState -State $cabinet -StateRoot $state
+        $empty = (Read-TpmCabinetState -StateRoot $state).EncoderFingerprints
+        $null -eq $empty | Should -BeFalse
+        @($empty).Count | Should -Be 0
+        $old = New-Folder
+        [System.IO.File]::WriteAllText((Get-TpmControlStatePath -StateRoot $old).Cabinet, '{"Version":1,"Devices":{},"Players":2,"ButtonsPerPlayer":6,"EncodersWhenLearned":1,"Keys":{}}', (New-Object System.Text.UTF8Encoding $false))
+        $null -eq (Read-TpmCabinetState -StateRoot $old).EncoderFingerprints | Should -BeTrue
+    }
+
+    It 'saving learned buttons keeps a salt and fingerprints on this PC and writes no raw id to the saved file or the log' {
+        $state = New-Folder
+        $script:logged = New-Object System.Collections.Generic.List[string]
+        Mock Write-Host { }
+        Mock Write-Log { [void]$script:logged.Add($msg) }
+        Mock Test-TpmKeyPressAvailable { $true }
+        Mock Read-TpmChoice { '1' }
+        Mock Get-TpmKeysPressedOnTheirOwn { @() }
+        Mock Get-TpmLedBlinkyKeyMap { [pscustomobject]@{ Found = $false; Controls = @() } }
+        Mock Read-TpmYesNo { if ($Prompt -match 'Save this') { 'Y' } else { 'N' } }
+        Mock Invoke-TpmLearnKeys { [pscustomobject]@{ Keys = @{ Coin1 = 'D5' }; Skipped = @() } }
+        Mock Get-CimInstance { @([pscustomobject]@{ Name = 'USB Input Device'; DeviceID = 'HID\VID_D209&PID_0301&MI_00\7&AAA&0&0000' }, [pscustomobject]@{ Name = 'USB Input Device'; DeviceID = 'HID\VID_D209&PID_0301&MI_00\7&BBB&0&0000' }) }
+        Invoke-TpmButtonLearning -StateRoot $state
+        $saved = Read-TpmCabinetState -StateRoot $state
+        @($saved.EncoderFingerprints).Count | Should -Be 2
+        $saved.EncodersWhenLearned | Should -Be 2
+        $salt = Get-TpmControllerSalt -StateRoot $state
+        $salt | Should -Match '^[0-9a-f]{32}$'
+        $text = [System.IO.File]::ReadAllText((Get-TpmControlStatePath -StateRoot $state).Cabinet)
+        $text | Should -Not -Match '(?i)D209|0301|AAA|BBB|HID\\\\'
+        $text | Should -Not -Match $salt
+        ($script:logged -join "`n") | Should -Not -Match ('(?i)D209|0301|AAA|BBB|' + $salt + '|' + (@($saved.EncoderFingerprints)[0].Fingerprint))
+        (Get-TpmControllerSetNotice -Cabinet $saved -Evidence (Get-TpmControllerEvidence -Salt $salt)).State | Should -Be 'Same'
+    }
+}
+
 Describe 'Key suggestions and light colors in a game guide' {
     BeforeEach { Mock Write-Host { }; Mock Write-Log { } }
 

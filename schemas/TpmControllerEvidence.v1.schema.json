@@ -44,6 +44,19 @@
       "items": { "$ref": "#/$defs/deviceObservation" },
       "uniqueItems": true
     },
+    "DeviceFingerprints": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["DeviceClass", "Fingerprint"],
+        "properties": {
+          "DeviceClass": { "enum": ["ArcadeEncoder"] },
+          "Fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      },
+      "uniqueItems": true
+    },
     "ObservationTimeUtc": { "type": ["string", "null"], "format": "date-time" },
     "InputArtifactFingerprint": {
       "type": ["string", "null"],

@@ -16222,9 +16222,14 @@ function Install-TpmReShadeProfileDeployment {
 }
 # Read-only look at which controller types are connected (contract: docs/architecture/CONTROLLER_EVIDENCE_CONTRACT.md).
 # It only suggests: the Device Survey uses a clear match as the default answer and the user can always change it.
-# It never writes a file, never reads serial numbers or device paths, and any failure gives an empty "SourceUnavailable" result.
+# It never writes a file, never keeps a serial number or device path, and any failure gives an empty "SourceUnavailable" result.
+# With -Salt it also returns one fingerprint per arcade encoder it recognizes: a one-way hash of the salt, the maker/model numbers and
+# a counter. The raw numbers and instance ids are read in memory only to count boards and build that hash; they are never returned.
 function Get-TpmControllerEvidence {
+    param([string]$Salt = '')
     $found = New-Object System.Collections.Generic.List[object]
+    $fingerprints = New-Object System.Collections.Generic.List[object]
+    $hash = { param([string]$Text) $sha = [System.Security.Cryptography.SHA256]::Create(); try { (@($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)) | ForEach-Object { $_.ToString('x2') }) -join '') } finally { $sha.Dispose() } }
     $reasons = New-Object System.Collections.Generic.List[string]
     $add = { param($Class, $Confidence, $Basis, $Count) [void]$found.Add([pscustomobject][ordered]@{ DeviceClass = $Class; Confidence = $Confidence; Basis = $Basis; Count = [int]$Count; ReasonCodes = @() }) }
     $status = 'Observed'
@@ -16245,11 +16250,26 @@ function Get-TpmControllerEvidence {
                 $n = @($devices | Where-Object { [string]$_.Name -match $hints[$class] }).Count
                 if ($n -gt 0) { & $add $class 'Low' 'NameHint' $n }
             }
-            # A small list of makers that only build arcade keyboard encoders. The maker code is used here and never kept in the result.
-            # A match is Medium at most: it says a board of that maker is plugged in, not what the buttons do.
+            # A small list of makers that only build arcade keyboard encoders. A match is Medium at most: it says a board of that maker is
+            # plugged in, not what the buttons do. Boards of one model are counted by instance id: every interface of one board shows one
+            # id, so the most ids any single interface shows is the number of boards. A different USB port changes the ids but not the count.
             $knownVendors = [ordered]@{ 'D209' = 'ArcadeEncoder' }
             foreach ($vendor in $knownVendors.Keys) {
-                $boards = @($devices | ForEach-Object { if ([string]$_.DeviceID -match ('VID_' + $vendor + '&PID_([0-9A-F]{4})')) { $Matches[1] } } | Select-Object -Unique).Count
+                $interfaces = @{}
+                foreach ($device in $devices) {
+                    if ([string]$device.DeviceID -match ('^[^\\]*\\VID_' + $vendor + '&PID_([0-9A-F]{4})([^\\]*)\\(.+)$')) {
+                        $slot = $Matches[1].ToUpperInvariant() + '|' + $Matches[2]
+                        if (-not $interfaces.ContainsKey($slot)) { $interfaces[$slot] = New-Object 'System.Collections.Generic.HashSet[string]' }
+                        [void]$interfaces[$slot].Add($Matches[3])
+                    }
+                }
+                $perModel = @{}
+                foreach ($slot in $interfaces.Keys) { $model = $slot.Split('|')[0]; $perModel[$model] = [Math]::Max([int]$perModel[$model], $interfaces[$slot].Count) }
+                $boards = 0
+                foreach ($model in @($perModel.Keys | Sort-Object)) {
+                    $boards += [int]$perModel[$model]
+                    if ($Salt) { for ($n = 1; $n -le [int]$perModel[$model]; $n++) { [void]$fingerprints.Add([pscustomobject][ordered]@{ DeviceClass = $knownVendors[$vendor]; Fingerprint = (& $hash ('TpmControllerFingerprint|1|{0}|{1}|VID_{2}&PID_{3}|{4}' -f $Salt, $knownVendors[$vendor], $vendor, $model, $n)) }) } }
+                }
                 if ($boards -gt 0) { & $add $knownVendors[$vendor] 'Medium' 'KnownVendor' $boards }
             }
             $pads = @($devices | Where-Object { [string]$_.Name -match 'game controller' -and [string]$_.DeviceID -notmatch 'IG_' -and [string]$_.Name -notmatch ($hints.Values -join '|') }).Count
@@ -16260,13 +16280,16 @@ function Get-TpmControllerEvidence {
         $found.Clear(); $status = 'SourceUnavailable'; [void]$reasons.Add('ProbeFailed')
     }
     $observations = @($found.ToArray() | Sort-Object DeviceClass, Basis)
+    # $null = not checked (no salt, or the device list could not be read); an empty array = checked and none recognized.
+    $prints = $null
+    if ($Salt -and $status -eq 'Observed' -and $reasons -notcontains 'DeviceListUnavailable') { $prints = @($fingerprints.ToArray() | Sort-Object DeviceClass, Fingerprint) }
     $canonical = 'TpmLocalDetection|1|' + ((@($observations | ForEach-Object { '{0}/{1}/{2}/{3}' -f $_.DeviceClass, $_.Confidence, $_.Basis, $_.Count })) -join ';')
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try { $id = (@($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)) | ForEach-Object { $_.ToString('x2') }) -join '') } finally { $sha.Dispose() }
+    $id = & $hash $canonical
     return [pscustomobject][ordered]@{
         ContractVersion = 'TpmControllerEvidence/v1'; EvidenceId = $id; EvidenceStatus = $status
         ProviderId = 'TpmLocalDetection'; ProviderVersion = '1'; SourceFamily = 'LocalWindowsDeviceClass'; EvidenceClass = 'LocalProbe'
-        DeviceObservations = $observations; ObservationTimeUtc = (Get-Date).ToUniversalTime().ToString('o'); InputArtifactFingerprint = $null
+        DeviceObservations = $observations; DeviceFingerprints = $prints
+        ObservationTimeUtc = (Get-Date).ToUniversalTime().ToString('o'); InputArtifactFingerprint = $null
         ReasonCodes = @($reasons.ToArray()); RedactedFields = @(); SensitiveIdentifiersIncluded = $false; ReadOnly = $true
     }
 }
@@ -43326,7 +43349,7 @@ function Invoke-DeviceSurvey {
     # escape into session scope after the first call, polluting the environment
     # for the rest of the session. A scriptblock stays local to this function.
     # What is connected right now (read-only). A clear match becomes the default answer; the user can always change it.
-    $evidence = Get-TpmControllerEvidence
+    $evidence = Get-TpmControllerEvidence -Salt (Get-TpmControllerSalt -StateRoot $StateRoot)
     # What the player said before. A saved answer is the default, and the questions are skipped when the player keeps them.
     $cabinet = Read-TpmCabinetState -StateRoot $StateRoot
     $questions = @(Get-TpmDeviceQuestions)
@@ -43348,6 +43371,8 @@ function Invoke-DeviceSurvey {
     Write-Host ""
     Write-Host " Which controls do you have and want to use?" -ForegroundColor Cyan
     Write-TpmText -Text '(Answer Y or N. This prints a plan and changes no game file. Your answers are saved so you are not asked again.)' -Color DarkCyan -Indent 1
+    $setNotice = Get-TpmControllerSetNotice -Cabinet $cabinet -Evidence $evidence
+    if ($setNotice.Text) { Write-TpmText -Text $setNotice.Text -Color $setNotice.Color -Indent 1 }
     Write-Host ""
 
     $sure = @($evidence.DeviceObservations | Where-Object { $_.Confidence -eq 'High' } | ForEach-Object { $_.DeviceClass })
@@ -43489,7 +43514,7 @@ function Get-TpmControlStatePath {
     $root = if ($StateRoot) { [System.IO.Path]::GetFullPath($StateRoot) }
             elseif ($script:TpmOwnedLayout -and -not [string]::IsNullOrWhiteSpace([string]$script:TpmOwnedLayout.State)) { [System.IO.Path]::GetFullPath((Join-Path ([string]$script:TpmOwnedLayout.State) 'Controls')) }
             else { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'Controls\TPM-State')) }
-    return [pscustomobject]@{ Root = $root; Cabinet = (Join-Path $root 'cabinet.json'); Evidence = (Join-Path $root 'control-evidence.json') }
+    return [pscustomobject]@{ Root = $root; Cabinet = (Join-Path $root 'cabinet.json'); Evidence = (Join-Path $root 'control-evidence.json'); Salt = (Join-Path $root 'controller-salt.txt') }
 }
 
 # Read-only. Status is Missing, Ok or Unreadable; Data is the parsed JSON when Ok.
@@ -43537,7 +43562,7 @@ function Get-TpmDeviceQuestions {
 function Read-TpmCabinetState {
     param([string]$StateRoot = '')
     $file = Read-TpmControlStateFile -Path (Get-TpmControlStatePath -StateRoot $StateRoot).Cabinet
-    $state = [pscustomobject]@{ Version = 1; Devices = [pscustomobject]@{}; Players = 0; ButtonsPerPlayer = 0; EncodersWhenLearned = -1; Keys = [pscustomobject]@{}; FileStatus = $file.Status }
+    $state = [pscustomobject]@{ Version = 1; Devices = [pscustomobject]@{}; Players = 0; ButtonsPerPlayer = 0; EncodersWhenLearned = -1; EncoderFingerprints = $null; Keys = [pscustomobject]@{}; FileStatus = $file.Status }
     if ($file.Status -eq 'Ok') {
         foreach ($name in @('Devices', 'Keys')) {
             $property = $file.Data.PSObject.Properties[$name]
@@ -43548,13 +43573,18 @@ function Read-TpmCabinetState {
             $number = 0
             if ($property -and [int]::TryParse([string]$property.Value, [ref]$number)) { $state.$name = $number }
         }
+        # $null means the keys were saved before fingerprints existed (or detection could not look); an empty list means no encoder was recognized.
+        $saved = $file.Data.PSObject.Properties['EncoderFingerprints']
+        if ($saved -and $null -ne $saved.Value) {
+            $state.EncoderFingerprints = @(@($saved.Value) | Where-Object { $_ -and [string]$_.Fingerprint -match '^[0-9a-f]{64}$' } | ForEach-Object { [pscustomobject]@{ DeviceClass = 'ArcadeEncoder'; Fingerprint = [string]$_.Fingerprint } })
+        }
     }
     return $state
 }
 
 function Save-TpmCabinetState {
     param([Parameter(Mandatory)]$State, [string]$StateRoot = '')
-    $data = [pscustomobject]@{ Version = 1; Devices = $State.Devices; Players = [int]$State.Players; ButtonsPerPlayer = [int]$State.ButtonsPerPlayer; EncodersWhenLearned = [int]$State.EncodersWhenLearned; Keys = $State.Keys }
+    $data = [pscustomobject]@{ Version = 1; Devices = $State.Devices; Players = [int]$State.Players; ButtonsPerPlayer = [int]$State.ButtonsPerPlayer; EncodersWhenLearned = [int]$State.EncodersWhenLearned; EncoderFingerprints = $State.EncoderFingerprints; Keys = $State.Keys }
     Save-TpmControlStateFile -Path (Get-TpmControlStatePath -StateRoot $StateRoot).Cabinet -Data $data
 }
 
@@ -43847,6 +43877,70 @@ function Get-TpmEncoderChangeNotice {
     return ('When you taught TPM your buttons it could see {0} arcade encoder{1}. Now it sees {2}. If you changed your encoder, learn your buttons again.' -f $then, $(if ($then -eq 1) { '' } else { 's' }), $EncodersNow)
 }
 
+# The one-way salt for controller fingerprints. It lives in the Controls state folder, is made once, and never leaves the PC.
+# Reading never writes. With -Create a missing (or damaged) salt is made. Returns '' when there is none or it could not be made.
+function Get-TpmControllerSalt {
+    param([string]$StateRoot = '', [switch]$Create)
+    try {
+        $path = (Get-TpmControlStatePath -StateRoot $StateRoot).Salt
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $text = (Get-Content -LiteralPath $path -Raw -Encoding UTF8 -ErrorAction Stop).Trim()
+            if ($text -match '^[0-9a-f]{32}$') { return $text }
+        }
+        if (-not $Create) { return '' }
+        $bytes = New-Object byte[] 16
+        $random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $random.GetBytes($bytes) } finally { $random.Dispose() }
+        $salt = (@($bytes | ForEach-Object { $_.ToString('x2') }) -join '')
+        [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($path))
+        Write-TpmAtomicTextFile -Path $path -Text $salt -Operation 'controller key write' -Validate { param([string]$Written) $Written.Trim() -match '^[0-9a-f]{32}$' }
+        return $salt
+    } catch {
+        Write-Log 'Controls: the key used to recognize your controllers could not be read or made.'
+        return ''
+    }
+}
+
+# The fingerprints of the arcade encoders in an evidence object. $null when there is nothing to compare (detection could not look,
+# or no salt was given); an empty list when it looked and recognized none. They are one-way hashes, never shown as a device name.
+function Get-TpmEncoderFingerprints {
+    param($Evidence)
+    if ($null -eq $Evidence -or [string]$Evidence.EvidenceStatus -ne 'Observed') { return $null }
+    $property = $Evidence.PSObject.Properties['DeviceFingerprints']
+    if ($null -eq $property -or $null -eq $property.Value) { return $null }
+    return , @(@($property.Value) | Where-Object { $_.DeviceClass -eq 'ArcadeEncoder' } | ForEach-Object { [pscustomobject]@{ DeviceClass = 'ArcadeEncoder'; Fingerprint = [string]$_.Fingerprint } })
+}
+
+# One plain sentence about whether the controllers are the same as when the player taught TPM the keys. A HINT only: it never
+# changes a saved key and never marks anything Verified. State is NoKeys, Same, Added, Removed, Changed, CouldNotCheck or NoNote
+# (keys saved before fingerprints existed, and the count did not change). Only makers TPM recognizes can be compared.
+function Get-TpmControllerSetNotice {
+    param([Parameter(Mandatory)]$Cabinet, $Evidence)
+    $result = { param($State, $Text, $Color) [pscustomobject]@{ State = $State; Text = $Text; Color = $Color } }
+    if (@($Cabinet.Keys.PSObject.Properties).Count -eq 0) { return & $result 'NoKeys' '' 'DarkGray' }
+    $cannot = 'TPM could not look at your controllers, so it cannot tell if they changed since you taught it your keys.'
+    if ($null -eq $Evidence -or [string]$Evidence.EvidenceStatus -ne 'Observed') { return & $result 'CouldNotCheck' $cannot 'DarkGray' }
+    $then = $Cabinet.EncoderFingerprints
+    if ($null -eq $then) {
+        $countNotice = Get-TpmEncoderChangeNotice -Cabinet $Cabinet -EncodersNow (Get-TpmEncoderCount -Evidence $Evidence)
+        return & $result $(if ($countNotice) { 'Changed' } else { 'NoNote' }) $countNotice 'Yellow'
+    }
+    $now = Get-TpmEncoderFingerprints -Evidence $Evidence
+    if ($null -eq $now) { return & $result 'CouldNotCheck' $cannot 'DarkGray' }
+    $thenIds = @($then | ForEach-Object { [string]$_.Fingerprint })
+    $nowIds = @($now | ForEach-Object { [string]$_.Fingerprint })
+    if ($thenIds.Count -eq 0 -and $nowIds.Count -eq 0) { return & $result 'CouldNotCheck' 'TPM does not recognize your arcade encoder by itself, so it cannot tell if you changed it.' 'DarkGray' }
+    $added = @($nowIds | Where-Object { $thenIds -notcontains $_ })
+    $removed = @($thenIds | Where-Object { $nowIds -notcontains $_ })
+    $learnAgain = ' If you changed your controller, learn your buttons again. Your saved keys were not changed.'
+    if ($added.Count -eq 0 -and $removed.Count -eq 0) {
+        return & $result 'Same' ('TPM sees the same arcade encoder{0} as when you taught it your keys.' -f $(if ($nowIds.Count -eq 1) { '' } else { 's' })) 'Green'
+    }
+    if ($removed.Count -eq 0) { return & $result 'Added' ('A new arcade encoder is plugged in that was not there when you taught TPM your keys.' + $learnAgain) 'Yellow' }
+    if ($added.Count -eq 0) { return & $result 'Removed' ('An arcade encoder that was plugged in when you taught TPM your keys is not plugged in now.' + $learnAgain) 'Yellow' }
+    return & $result 'Changed' ('Your arcade encoders are different from when you taught TPM your keys.' + $learnAgain) 'Yellow'
+}
+
 # The screen that learns the arcade buttons. Nothing is saved until the player says Y at the end.
 function Invoke-TpmButtonLearning {
     param([string]$StateRoot = '')
@@ -43927,7 +44021,9 @@ function Invoke-TpmButtonLearning {
     }
     try {
         Set-TpmCabinetKeys -State $cabinet -Keys $keys -Players $players -ButtonsPerPlayer $buttons
-        $cabinet.EncodersWhenLearned = (Get-TpmEncoderCount -Evidence (Get-TpmControllerEvidence))
+        $seen = Get-TpmControllerEvidence -Salt (Get-TpmControllerSalt -StateRoot $StateRoot -Create)
+        $cabinet.EncodersWhenLearned = (Get-TpmEncoderCount -Evidence $seen)
+        $cabinet.EncoderFingerprints = (Get-TpmEncoderFingerprints -Evidence $seen)
         Save-TpmCabinetState -State $cabinet -StateRoot $StateRoot
         Write-Log ('Controls: learned {0} of {1} arcade controls ({2} players, {3} buttons each).' -f $keys.Count, $controls.Count, $players, $buttons)
         Write-TpmText -Text 'Saved. TPM will not ask you to press these again.' -Color Green
@@ -44308,14 +44404,15 @@ function Invoke-TpmGameCheckScreen {
 # The My controls screen: what TPM knows about the player's controls, and the four things to do about it.
 function Invoke-TpmControlsScreen {
     param([Parameter(Mandatory)][string]$UserProfilesDir, [string]$StateRoot = '')
-    $encodersNow = Get-TpmEncoderCount -Evidence (Get-TpmControllerEvidence)
+    $look = { Get-TpmControllerEvidence -Salt (Get-TpmControllerSalt -StateRoot $StateRoot) }
+    $evidence = & $look
     while ($true) {
         $cabinet = Read-TpmCabinetState -StateRoot $StateRoot
         Write-Host ''
         Write-TpmText -Text 'My controls' -Color Cyan
         foreach ($line in @(Get-TpmCabinetSummaryLines -State $cabinet)) { Write-TpmText -Text $line -Color DarkCyan }
-        $encoderNotice = Get-TpmEncoderChangeNotice -Cabinet $cabinet -EncodersNow $encodersNow
-        if ($encoderNotice) { Write-TpmText -Text $encoderNotice -Color Yellow }
+        $setNotice = Get-TpmControllerSetNotice -Cabinet $cabinet -Evidence $evidence
+        if ($setNotice.Text) { Write-TpmText -Text $setNotice.Text -Color $setNotice.Color }
         if ($cabinet.FileStatus -eq 'Unreadable') { Write-TpmText -Text 'TPM could not read its saved answers. A copy is kept before anything new is saved.' -Color Yellow }
         Write-Host ''
         Write-TpmText -Text '1 = Tell TPM which controls I have' -Indent 4
@@ -44326,7 +44423,7 @@ function Invoke-TpmControlsScreen {
         Write-TpmText -Text 'B = Back' -Indent 4
         switch (Read-TpmChoice -Prompt '  Choose 1, 2, 3, 4, 5 or B' -Choices @('1', '2', '3', '4', '5', 'B') -Default 'B') {
             '1' { Invoke-DeviceSurvey -StateRoot $StateRoot }
-            '2' { Invoke-TpmButtonLearning -StateRoot $StateRoot }
+            '2' { Invoke-TpmButtonLearning -StateRoot $StateRoot; $evidence = & $look }
             '3' {
                 $game = Read-TpmControlsGamePick -UserProfilesDir $UserProfilesDir
                 if ($game) {
