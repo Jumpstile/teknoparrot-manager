@@ -56,7 +56,7 @@ BeforeAll {
         'Save-XmlMaybe', 'Get-TpmProfileWriteFingerprint', 'Resolve-TpmRegistrationSaveFailure',
         'New-TpmVerifiedUserProfilesBackup',
         'Assert-TpmRegisteredGamePath',
-        'Set-TpmRegistrationGamePath'
+        'Set-TpmRegistrationGamePath', 'Get-DatEntryForZipName', 'Get-TpmZipBaseName'
     )
     $functions = @(
         $ast.FindAll({
