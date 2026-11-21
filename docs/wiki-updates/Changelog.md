@@ -62,6 +62,9 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   TeknoParrotUI and says that choosing a device does not set up a game.
   The registration screen ends with "Registration run finished", which
   does not mean every game's controls are set up.
+- The Propagate Controls screen no longer says "No game is registered
+  or extracted.", which read as if nothing was registered on your PC. It
+  now says that the screen never registers or unpacks games.
 - A read-only check of an outside controller list (for example
   RetroBat's teknoparrot.yml), run from the command line with
   -MappingEvidenceFile and -ValidationRoot. It prints plain counts,
