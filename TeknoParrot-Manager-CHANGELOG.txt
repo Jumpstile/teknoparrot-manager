@@ -54,6 +54,11 @@
   - Before the Windows permission window opens for PostgreSQL setup or
     repair, the Manager waits for you to press Enter, so you can read what
     it is about to ask for.
+  - The GPU fix at the end of first-time setup now shows the same result as
+    the menu: how many games you selected, changed, skipped and failed. A
+    game on a drive that is not connected is called skipped, not failed,
+    the drive letter is named, and it points to Library health check
+    (menu 13) to repair the game paths.
 
   Also new in this release
   - LEDBlinky lighting (optional): if you use LEDBlinky, the Manager can

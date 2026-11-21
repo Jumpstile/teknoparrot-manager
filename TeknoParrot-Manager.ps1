@@ -22062,7 +22062,7 @@ function Invoke-GpuFixSetup {
     $legacyBackupVerified=[bool](Get-TpmTransactionField -Object $legacyBackup -Name 'Verified' -Default $false)
     $legacyReason=Get-TpmTransactionField -Object $legacy -Name 'Reason' -Default $null
     $cancelled=[bool]$legacyCancelled
-    $reasonCode=if($cancelled){'USER_CANCELLED'}elseif($unknown.Count -gt 0){'PROFILE_WRITE_STATE_UNKNOWN'}elseif($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $legacyReason){[string]$legacyReason}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $legacyBackupVerified){'PROFILE_BACKUP_COMPLETED_NO_WRITE'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $failed.Count -gt 0){'PROFILE_PROCESSING_FAILED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION'){'PROFILE_SKIPPED'}else{'GPU_FIELDS_PROCESSED'}
+    $reasonCode=if($cancelled){'USER_CANCELLED'}elseif($unknown.Count -gt 0){'PROFILE_WRITE_STATE_UNKNOWN'}elseif($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and -not $legacyReason -and $failed.Count -eq 0 -and [int]$legacy.Errors -eq 0 -and $skipped.Count -gt 0){'SOME_GAMES_NOT_CHANGED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $legacyReason){[string]$legacyReason}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $legacyBackupVerified){'PROFILE_BACKUP_COMPLETED_NO_WRITE'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $failed.Count -gt 0){'PROFILE_PROCESSING_FAILED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION'){'PROFILE_SKIPPED'}else{'GPU_FIELDS_PROCESSED'}
     $discoveryFailed=($legacyReason -in @('GAMEPROFILE_DISCOVERY_FAILED','PROFILE_DISCOVERY_FAILED'))
     $summary=if($cancelled){'GPU compatibility setup was canceled before profile changes.'}elseif($discoveryFailed){'GPU compatibility setup stopped before any profile was processed.'}else{'GPU compatibility fields were processed with per-game outcomes.'}
     $finalChecks=if($cancelled){@('GPU vendor selection was canceled before profile discovery; no profile mutation was attempted.')}elseif($discoveryFailed){@('Discovery failed before any profile was read; no profile mutation was attempted.')}else{@('Per-game write outcomes were recorded; unresolved writes remain unknown.')}
@@ -22374,7 +22374,13 @@ function Get-TpmGpuFixResultView {
     $skipDetails = @(Get-TpmTransactionField -Object $Result -Name 'SkipDetails' -Default @() | Where-Object { $null -ne $_ })
     $needs = New-Object System.Collections.Generic.List[string]
     foreach ($group in @($skipDetails | Group-Object -Property { [string](Get-TpmTransactionField -Object $_ -Name 'Reason' -Default '') })) {
-        [void]$needs.Add(('{0} skipped. {1}' -f (Format-TpmGameCount -Count $group.Count), $group.Name))
+        # A drive that is not connected is a skip, not a failure: say which drive (from the saved paths) instead of a general sentence.
+        $groupText = $group.Name
+        $groupDrives = @($group.Group | Where-Object { [string](Get-TpmTransactionField -Object $_ -Name 'ReasonKey' -Default '') -eq 'DEVICE_UNAVAILABLE' } | ForEach-Object { if (([string](Get-TpmTransactionField -Object $_ -Name 'SavedPath' -Default '')) -match '^\s*([A-Za-z]:|\\\\[^\\]+\\[^\\]+)') { $Matches[1].ToUpperInvariant() } } | Sort-Object -Unique)
+        if ($groupDrives.Count -gt 0 -and @($group.Group | Where-Object { [string](Get-TpmTransactionField -Object $_ -Name 'ReasonKey' -Default '') -ne 'DEVICE_UNAVAILABLE' }).Count -eq 0) {
+            $groupText = if ($groupDrives.Count -eq 1) { ('Drive {0} is not connected.' -f $groupDrives[0]) } else { ('Drives {0} are not connected.' -f (Format-TpmNameList -Names $groupDrives)) }
+        }
+        [void]$needs.Add(('{0} skipped. {1}' -f (Format-TpmGameCount -Count $group.Count), $groupText))
     }
     if ($count.Skipped -gt $skipDetails.Count) { [void]$needs.Add(('{0} skipped.' -f (Format-TpmGameCount -Count ($count.Skipped - $skipDetails.Count)))) }
     if ($failed -gt 0) { [void]$needs.Add(('{0} could not be updated.' -f (Format-TpmGameCount -Count $failed))) }
@@ -59747,9 +59753,13 @@ if ($doGpuFix -eq "Y") {
     } elseif ([bool]$autoGpuResult.Cancelled) {
         Write-Host "GPU Compatibility Fix canceled before profile changes; no success was claimed." -ForegroundColor DarkGray
     } elseif ($autoGpuResult.Outcome -notin @('SUCCEEDED', 'NO_OP')) {
-        Write-Host "GPU Compatibility Fix did not complete for every game. No success was claimed; review the per-game results above." -ForegroundColor Yellow
+        # The same result screen the menu uses: the counts (selected, changed, skipped, failed), the drive letter, and D for details.
+        $autoGpuView = Get-TpmGpuFixResultView -Result $autoGpuResult
+        $autoGpuView.Next = if ([int](Get-TpmTransactionField -Object $autoGpuResult -Name 'MissingDevice' -Default 0) -gt 0 -or [int](Get-TpmTransactionField -Object $autoGpuResult -Name 'MissingPath' -Default 0) -gt 0) {
+            (Get-TpmDriveSkipNext) + ' Then run GPU Compatibility Fix again from the main menu.'
+        } else { 'Run GPU Compatibility Fix again from the main menu if you want to retry.' }
+        Write-TpmOutcome @autoGpuView
         if ([int](Get-TpmTransactionField -Object $autoGpuResult -Name 'MissingDevice' -Default 0) -gt 0) {
-            Write-Host "  A drive that holds some of your games is not connected. Connect it, then run GPU Compatibility Fix again from the main menu." -ForegroundColor Yellow
             [void]$onboardingFollowUp.Add('Drive not connected: the GPU fix skipped games on a drive that is not connected. ' + (Get-TpmDriveSkipNext))
         }
     }
@@ -59760,7 +59770,8 @@ if ($doGpuFix -ne 'Y') {
     $onboardingGpuSummary = 'GPU compatibility: canceled before profile changes; no success was claimed. Run GPU Compatibility Fix from the menu if still wanted.'
     [void]$onboardingFollowUp.Add($onboardingGpuSummary)
 } elseif (-not $autoGpuResult -or @($autoGpuResult.PSTypeNames) -notcontains 'TPM.TransactionResult.v1' -or $autoGpuResult.Outcome -notin @('SUCCEEDED','NO_OP')) {
-    $onboardingGpuSummary = 'GPU compatibility: did not finish as a verified success. Review the per-profile result and preserved backup before retrying; no game launch or display result was verified.'
+    $gpuCountsLine = if ($autoGpuResult) { Get-TpmResultCountsLine -Result $autoGpuResult -Picked @(Get-TpmTransactionField -Object $autoGpuResult -Name 'SelectedItems' -Default @()) -AlreadyWord 'already set up or needed no fix' } else { '' }
+    $onboardingGpuSummary = if ($gpuCountsLine) { 'GPU compatibility: ' + $gpuCountsLine + ' Game launch and display result were not verified.' } else { 'GPU compatibility: did not finish as a verified success. Review the per-profile result and preserved backup before retrying; no game launch or display result was verified.' }
     [void]$onboardingFollowUp.Add($onboardingGpuSummary)
 } elseif ($autoGpuResult.Outcome -eq 'NO_OP') {
     $onboardingGpuSummary = 'GPU compatibility: scanned profile fields needed no changes. Game launch and display output were not verified.'
