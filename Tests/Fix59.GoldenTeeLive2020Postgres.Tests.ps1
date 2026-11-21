@@ -74,6 +74,7 @@ BeforeAll {
             [AllowEmptyString()][string]$DbName,
             [string]$Pass = '',
             [string]$AutoCreate = '1',
+            [string]$Storage = '',
             [switch]$Backup,
             [switch]$Complete
         )
@@ -95,6 +96,7 @@ BeforeAll {
         [void]$fields.Add(@('Pass', $Pass))
         if ($AutoCreate -ne '') { [void]$fields.Add(@('Automatically create Database', $AutoCreate)) }
         $xml = '<GameProfile><GameName>' + $GameName + '</GameName><GamePath>' + $exe + '</GamePath><ConfigValues>'
+        if ($Storage -ne '') { $xml += '<FieldInformation><CategoryName>Database</CategoryName><FieldName>Storage</FieldName><FieldValue>' + $Storage + '</FieldValue></FieldInformation>' }
         foreach ($field in $fields) {
             $xml += '<FieldInformation><CategoryName>Postgres</CategoryName><FieldName>' + $field[0] + '</FieldName><FieldValue>' + $field[1] + '</FieldValue></FieldInformation>'
         }
@@ -513,6 +515,62 @@ Describe 'FIX59 Library Health separates TeknoParrot-created databases from the 
         @($result.PostgresDatabaseProblems).Count | Should -Be 0
         (Get-F59HealthPostgresDetail -Result $result) | Should -Match 'Database check: skipped, because PostgreSQL is not installed'
         Should -Invoke Get-PostgresGameDatabaseReadiness -Times 0 -Exactly
+    }
+
+    # What a user sees with the new Internal storage choice. Mutation: ignore Storage -> the Internal game is listed as needing PostgreSQL
+    # setup (and its database is opened); or the Existing PostgreSQL game is skipped too -> its setup need disappears.
+    It 'skips every PostgreSQL check for an Internal game, says so in plain words, and still checks the Existing PostgreSQL game' {
+        $fx = [pscustomobject]@{ Root = $script:healthRoot; Profiles = $script:profiles }
+        $null = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2026' -GameName 'Golden Tee Live 2026' -DbName 'GameDB26' -Pass '' -AutoCreate '1' -Storage 'Internal'
+        $null = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2025' -GameName 'Golden Tee Live 2025' -DbName 'GameDB25' -Pass '' -AutoCreate '1' -Storage 'Existing PostgreSQL'
+        $null = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2019' -GameName 'Golden Tee Live 2019' -DbName 'GameDB19' -Pass '' -AutoCreate '0'
+        Mock Get-PostgresGameDatabaseReadiness { throw 'no connection expected' }
+
+        $result = Invoke-LibraryHealthCheck -UserProfilesDir $script:profiles -TpRoot $script:healthRoot
+
+        @($result.PostgresNeeded | Sort-Object) | Should -Be @('GoldenTeeLive2019', 'GoldenTeeLive2025')
+        @($result.InternalDatabaseLabels) | Should -Be @('Golden Tee Live 2026')
+        @($result.PostgresDatabaseProblems).Count | Should -Be 0
+        $row = @(Get-TpmLibraryHealthRows -Result $result | Where-Object { $_.Area -eq 'Game database' })
+        $row.Count | Should -Be 1
+        $row[0].Text | Should -Match 'no database install is needed'
+        $row[0].Text | Should -Match 'Start each game once so it creates its own database'
+        $details = Get-F59HealthPostgresDetail -Result $result
+        $details | Should -Match 'Games using Internal storage \(no PostgreSQL needed\): Golden Tee Live 2026'
+        $details | Should -Match 'Internal is the new default'
+        $details | Should -Match 'Existing PostgreSQL is for keeping an existing PostgreSQL server and its saved progress'
+        Should -Invoke Get-PostgresGameDatabaseReadiness -Times 0 -Exactly
+    }
+
+    # Mutation: treat Internal as a PostgreSQL game when its Postgres fields are filled in -> a "database missing" problem appears for it.
+    It 'never reports a missing database for an Internal game, even when its old PostgreSQL fields are filled in' {
+        $fx = [pscustomobject]@{ Root = $script:healthRoot; Profiles = $script:profiles }
+        $null = New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2026' -GameName 'Golden Tee Live 2026' -DbName 'GameDB26' -Pass 'synthetic-pass' -AutoCreate '1' -Complete -Storage 'Internal'
+        Mock Get-Service { [pscustomobject]@{ Status = 'Running' } }
+        Mock Get-PostgresGameDatabaseReadiness { [pscustomobject]@{ Ready = $false; TableCount = 0; Error = 'database "GameDB26" does not exist' } }
+
+        $result = Invoke-LibraryHealthCheck -UserProfilesDir $script:profiles -TpRoot $script:healthRoot
+
+        $result.PostgresConfigured | Should -Be 0
+        @($result.PostgresDatabaseProblems).Count | Should -Be 0
+        $null | Should -Be (Get-TpmLibraryHealthPostgresRow -Result $result)
+        Should -Invoke Get-PostgresGameDatabaseReadiness -Times 0 -Exactly
+    }
+
+    # Mutation: count nothing or count Internal games as needing setup -> the Postgres setup screen shows the wrong numbers.
+    It 'counts Internal games apart from the games that need PostgreSQL in the setup scan' {
+        $fx = [pscustomobject]@{ Root = $script:healthRoot; Profiles = $script:profiles }
+        $files = @(
+            (New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2026' -GameName 'Golden Tee Live 2026' -DbName 'GameDB26' -Storage 'Internal'),
+            (New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2025' -GameName 'Golden Tee Live 2025' -DbName 'GameDB25' -Storage 'Existing PostgreSQL'),
+            (New-F59Profile -Fixture $fx -ProfileName 'GoldenTeeLive2019' -GameName 'Golden Tee Live 2019' -DbName 'GameDB19')
+        ) | ForEach-Object { Get-Item -LiteralPath $_ }
+
+        $scan = Get-TpmPostgresRequirementScan -ProfileFiles @($files)
+
+        $scan.NeedCount | Should -Be 2
+        $scan.InternalCount | Should -Be 1
+        $scan.ScanBlocked | Should -BeFalse
     }
 }
 
