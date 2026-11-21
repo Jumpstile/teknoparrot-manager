@@ -108,6 +108,10 @@
     does not decide.
   - The graphics card warning for Intel now names Golden Tee Live 2021 to
     2026 and the PGA Tour games, as TeknoParrot's own game notes say.
+  - The README and User Guide now say the online list of TeknoParrot game
+    profiles is used only when it can be reached (it currently cannot,
+    because the repository is not public). Otherwise the Manager uses the
+    profiles in your own TeknoParrot folder.
   - If the DAT game list says it uses a format version the Manager does
     not know, the Manager now tells you in plain words and still reads it.
     A DAT with no version is read as before.

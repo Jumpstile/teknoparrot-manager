@@ -770,9 +770,9 @@ If you use the Eggman DAT ZIP, TeknoParrot Manager asks `Check for a newer Eggma
 
 - A third registration pass (independent of the dat) Dice-matches normalized folder names against normalized profile code names. This resolves games whose GameProfile has an empty `<ExecutableName>` -- they never enter the exe-name index and may not be in the dat either. Examples: BladeStrangers, LuigisMansion, MaiMaiGreen, PokkenTournament, ProjectDiva, SonicDashExtreme, HydroThunder.
 
-- The script also tries to fetch the full list of `GameProfile` filenames from the `teknogods/TeknoParrotUI` GitHub repo at launch to resolve dat codes that don't exactly match a local template filename (e.g. `BladeArcusFromShining` -> `BladeArcus.xml`).
+- To resolve dat codes that don't exactly match a local template filename (e.g. `BladeArcusFromShining` -> `BladeArcus.xml`), the script asks the `teknogods/TeknoParrotUI` GitHub repository for its list of `GameProfile` filenames, but only when that repository can be reached. TeknoParrot Manager does not need that list to work.
 
-- When that online list is not available (the repository currently answers HTTP 404, and the same happens when you are offline), it uses your local `GameProfiles` folder instead. When it loads the list, TeknoParrot Manager prints which one it used.
+- When the online list is not available (the repository currently answers HTTP 404 because it is not public, and the same happens when you are offline), it uses the `GameProfiles` folder of your own TeknoParrot install instead. If that folder has no profiles either, it uses the codes exactly as the dat lists them. TeknoParrot Manager prints which one it used.
 
 ---
 
