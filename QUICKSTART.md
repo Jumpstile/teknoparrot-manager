@@ -454,13 +454,14 @@ ReShade works with both 32-bit and 64-bit games. Games that run through BudgieLo
 
 1. At the main menu, type **5** and press Enter.
 
-   You will see: `ReShade Visual Enhancements Setup` with three choices.
+   You will see: `ReShade Visual Enhancements Setup` with four choices.
 
    ```
    S) Set up ReShade visual enhancements
    R) Remove verified TeknoParrot Manager-managed ReShade files
    U) Undo ReShade changes
-   Action (S/R/U, default S):
+   B) Use my bezel folder (bezels you already have)
+   Action (S/R/U/B, default S):
    ```
 
 2. Press Enter (or type **S**) to set up ReShade.

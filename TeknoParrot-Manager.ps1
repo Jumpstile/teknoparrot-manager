@@ -22765,6 +22765,422 @@ function Read-TpmCrosshairYesNo {
     return $answer
 }
 
+# =============================================================================
+# USE MY BEZEL FOLDER  (issue #429)
+# =============================================================================
+# The user points TPM at a folder of bezel images they already have. TPM matches each registered game to one image with the
+# existing fuzzy title helpers, shows a preview, and only after approval copies the chosen image to
+# <game folder>\reshade-shaders\Textures\bezel.png (the place the issue says ReShade reads a bezel from; NOT yet proven on real
+# games, see docs\BEZEL-OWNER-TEST-PLAN.md). TPM never ships, downloads or points to bezels.
+# Safety: nothing is written before approval; a bezel the user placed by hand is kept unless they choose to replace it (a copy is
+# saved first); the copy runs as one checked file transaction; every applied file is recorded so it can be undone.
+# Decisions: a folder shared by several games (for example a shared loader) is refused, because one bezel would show on all of
+# them; only .png files are used, because the file is saved as bezel.png.
+
+# Folder names are noisy: underscores, and the words "bezel" or "overlay" say nothing about the game. Region and version tags are
+# removed by Get-NormalizedGameKey. Returns '' when nothing is left.
+function Get-TpmBezelCleanTitle {
+    param([AllowNull()][string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return '' }
+    return ([regex]::Replace($Name.Replace('_', ' '), '(?i)\b(bezels?|overlays?)\b', ' ')).Trim()
+}
+
+# Sequel numbers (4, IV) of a title, as one text. "House of the Dead 3" and "House of the Dead 4" differ by one letter and
+# score almost 1.0 as text, so a different number must lower the confidence.
+function Get-TpmBezelNumberText {
+    param([AllowNull()][string]$Title)
+    if ([string]::IsNullOrWhiteSpace($Title)) { return '' }
+    $plain = [regex]::Replace($Title, '[\(\[].*?[\)\]]', ' ')
+    $plain = [regex]::Replace($plain, '(?<=\p{L})(?=\d)|(?<=\d)(?=\p{L})', ' ')
+    $found = @([regex]::Matches($plain.ToLowerInvariant(), '[\p{L}0-9]+') | ForEach-Object { $_.Value } |
+        Where-Object { $_ -match '^\d+$' -or $_ -in @('ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x') })
+    return ($found -join ' ')
+}
+
+function Get-TpmBezelStatePath {
+    param([string]$StateRoot = '')
+    $root = if ($StateRoot) { [System.IO.Path]::GetFullPath($StateRoot) }
+            elseif ($script:TpmOwnedLayout -and -not [string]::IsNullOrWhiteSpace([string]$script:TpmOwnedLayout.State)) { [System.IO.Path]::GetFullPath((Join-Path ([string]$script:TpmOwnedLayout.State) 'Bezels')) }
+            else { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'Bezels\TPM-State')) }
+    return [pscustomobject]@{ Root = $root; Path = (Join-Path $root 'bezels.json'); BackupRoot = (Join-Path $root 'Backups') }
+}
+
+# Saved bezel state: the folder last used, the user's picks (game -> bezel file, or '' for "no bezel for this game"), and one
+# record per applied file (what undo needs). An unreadable file is set aside, never silently replaced.
+function Read-TpmBezelState {
+    param([string]$StateRoot = '')
+    $paths = Get-TpmBezelStatePath -StateRoot $StateRoot
+    $state = @{ Folder = ''; Picks = @{}; Applied = @{} }
+    if (-not (Test-Path -LiteralPath $paths.Path -PathType Leaf)) { return $state }
+    try {
+        $saved = Get-Content -LiteralPath $paths.Path -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($saved.Folder) { $state.Folder = [string]$saved.Folder }
+        if ($saved.Picks) { foreach ($p in $saved.Picks.PSObject.Properties) { $state.Picks[$p.Name] = [string]$p.Value } }
+        if ($saved.Applied) { foreach ($p in $saved.Applied.PSObject.Properties) { $state.Applied[$p.Name] = $p.Value } }
+    } catch {
+        $kept = $paths.Path + '.unreadable-' + (Get-Date).ToString('yyyyMMddHHmmss', [System.Globalization.CultureInfo]::InvariantCulture)
+        try { [System.IO.File]::Copy($paths.Path, $kept, $false) } catch { Write-Log ('Bezels: the saved state could not be read and could not be set aside: {0}' -f $_.Exception.Message) }
+        Write-Log ('Bezels: the saved state could not be read ({0}); starting fresh. A copy was kept as {1}.' -f $_.Exception.Message, [System.IO.Path]::GetFileName($kept))
+        $state = @{ Folder = ''; Picks = @{}; Applied = @{} }
+    }
+    return $state
+}
+
+function Write-TpmBezelState {
+    param([Parameter(Mandatory)]$State, [string]$StateRoot = '')
+    $paths = Get-TpmBezelStatePath -StateRoot $StateRoot
+    [void][System.IO.Directory]::CreateDirectory($paths.Root)
+    $json = ([ordered]@{ Folder = [string]$State.Folder; Picks = $State.Picks; Applied = $State.Applied } | ConvertTo-Json -Depth 6)
+    Write-TpmAtomicTextFile -Path $paths.Path -Text $json -Operation 'bezel state write' -Validate { param([string]$Written) $null -ne ($Written | ConvertFrom-Json -ErrorAction Stop) }
+}
+
+# The .png files of the user's folder (the folder and up to three levels below it; links are not followed). A file whose first
+# bytes are not the PNG signature is counted in NotPng and not used.
+function Find-TpmBezelFiles {
+    param([Parameter(Mandatory)][string]$Folder)
+    $root = [System.IO.Path]::GetFullPath($Folder).TrimEnd('\')
+    $files = New-Object System.Collections.Generic.List[object]
+    $notPng = 0
+    $pending = New-Object System.Collections.Generic.Stack[object]
+    $pending.Push([pscustomobject]@{ Path = $root; Depth = 0 })
+    $signature = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+    while ($pending.Count -gt 0) {
+        $current = $pending.Pop()
+        foreach ($entry in @(Get-ChildItem -LiteralPath $current.Path -Force -ErrorAction SilentlyContinue)) {
+            if ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { continue }
+            if ($entry.PSIsContainer) { if ($current.Depth -lt 3) { $pending.Push([pscustomobject]@{ Path = $entry.FullName; Depth = $current.Depth + 1 }) }; continue }
+            if ($entry.Extension -ine '.png') { continue }
+            $head = New-Object byte[] 8
+            try {
+                $stream = [System.IO.File]::OpenRead($entry.FullName)
+                try { [void]$stream.Read($head, 0, 8) } finally { $stream.Dispose() }
+            } catch { $notPng++; continue }
+            if (@(Compare-Object $head $signature -SyncWindow 0).Count -ne 0) { $notPng++; continue }
+            $clean = Get-TpmBezelCleanTitle -Name $entry.BaseName
+            $files.Add([pscustomobject]@{
+                Path = $entry.FullName; Name = $entry.FullName.Substring($root.Length).TrimStart('\')
+                Key = (Get-NormalizedGameKey $clean); BaseKey = (Get-TpmBaseTitleKey $clean); Numbers = (Get-TpmBezelNumberText -Title $clean)
+            })
+        }
+    }
+    return [pscustomobject]@{ Files = @($files.ToArray() | Sort-Object Name); NotPng = $notPng }
+}
+
+# One entry per registered game that has a usable game path: where its bezel would go, and whether ReShade is already there.
+# Games that share one target folder are marked Shared (one bezel would show on all of them). Reads only.
+function Get-TpmBezelGames {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [string[]]$ProtectedRoots = @())
+    $games = New-Object System.Collections.Generic.List[object]
+    $refused = 0
+    foreach ($pf in @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Bezel profile discovery' -EnumerationErrorAction SilentlyContinue | Sort-Object BaseName)) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if ($null -eq $doc.GameProfile) { continue }
+            $gpNode = $doc.GameProfile.SelectSingleNode('GamePath')
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
+            $nameNode = $doc.GameProfile.SelectSingleNode('GameName')
+            $name = if ($nameNode -and -not [string]::IsNullOrWhiteSpace($nameNode.InnerText)) { $nameNode.InnerText.Trim() } else { $pf.BaseName }
+            $check = Test-TpmGameMutationPath -GamePath $gpNode.InnerText.Trim() -RequireLeaf -ProtectedRoots $ProtectedRoots
+            if (-not $check.Valid) { $refused++; Write-Log ('Bezels: {0} skipped; path reason={1}' -f $pf.BaseName, $check.ReasonCode); continue }
+            $target = Get-ReShadeTargetInfo -Doc $doc -GamePath $check.CanonicalPath -ExeDir ([string]$check.GameDirectory)
+            $hasReShade = (Test-Path -LiteralPath (Join-Path $target.TargetDir $target.DllName) -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $target.TargetDir 'ReShade.ini') -PathType Leaf)
+            $games.Add([pscustomobject]@{
+                ProfileId = [string]$pf.BaseName; Name = $name; TargetDir = [string]$target.TargetDir; HasReShade = $hasReShade; Shared = $false
+                Dest = (Join-Path ([string]$target.TargetDir) 'reshade-shaders\Textures\bezel.png')
+                Keys = @(@((Get-NormalizedGameKey $name), (Get-TpmBaseTitleKey $name), (Get-NormalizedGameKey $pf.BaseName)) | Where-Object { $_ } | Select-Object -Unique)
+                Numbers = (Get-TpmBezelNumberText -Title ([regex]::Replace($name, '(?<=\p{Ll})(?=\p{Lu})', ' ')))
+            })
+        } catch { $refused++; Write-Log ('Bezels: {0} skipped: {1}' -f $pf.BaseName, $_.Exception.Message) }
+    }
+    foreach ($group in @($games | Group-Object { $_.TargetDir.ToLowerInvariant() })) {
+        if ($group.Count -gt 1) { foreach ($shared in $group.Group) { $shared.Shared = $true } }
+    }
+    return [pscustomobject]@{ Games = @($games.ToArray()); Refused = $refused }
+}
+
+# The three best bezels per game (score is the best Dice score of any bezel/game name pair). This is the slow step, so it runs once.
+function Get-TpmBezelCandidates {
+    param([Parameter(Mandatory)][object[]]$Games, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Bezels)
+    $result = @{}
+    foreach ($game in $Games) {
+        $scored = New-Object System.Collections.Generic.List[object]
+        foreach ($bezel in $Bezels) {
+            $score = 0.0
+            foreach ($bezelKey in @($bezel.Key, $bezel.BaseKey | Where-Object { $_ })) {
+                foreach ($gameKey in $game.Keys) { $s = Get-DiceSimilarity $bezelKey $gameKey; if ($s -gt $score) { $score = $s } }
+            }
+            $scored.Add([pscustomobject]@{ Bezel = $bezel; Score = $score; NumberMismatch = ($bezel.Numbers -ne $game.Numbers) })
+        }
+        $result[$game.ProfileId] = @($scored.ToArray() | Sort-Object @{ Expression = { $_.Score }; Descending = $true }, @{ Expression = { $_.Bezel.Name } } | Select-Object -First 3)
+    }
+    return $result
+}
+
+# One row per game: what TPM would do. Status: Apply, Same (already there), NeedsChoice, NoBezel, NeedsReShade, Shared, UserBezel
+# (a bezel the user placed is there). Confidence: High (score >= 0.85 and clearly ahead of the next one), Medium (>= the registration
+# threshold), Low (>= 0.5, or a different sequel number), None. A remembered pick wins ('Your choice'; '' means no bezel wanted).
+function New-TpmBezelPlanRows {
+    param([Parameter(Mandatory)][object[]]$Games, [Parameter(Mandatory)][hashtable]$Candidates, [Parameter(Mandatory)]$State)
+    $rows = New-Object System.Collections.Generic.List[object]
+    foreach ($game in $Games) {
+        $ranked = @($Candidates[$game.ProfileId])
+        $chosen = $null; $confidence = 'None'
+        $pickName = if ($State.Picks.ContainsKey($game.ProfileId)) { [string]$State.Picks[$game.ProfileId] } else { $null }
+        $picked = if ($pickName) { @($ranked | Where-Object { $_.Bezel.Name -ieq $pickName } | Select-Object -First 1) } else { @() }
+        if ($null -ne $pickName -and $pickName -eq '') { $confidence = 'Skipped' }
+        elseif ($picked.Count -gt 0) { $chosen = $picked[0].Bezel; $confidence = 'Your choice' }
+        elseif ($ranked.Count -gt 0 -and $ranked[0].Score -ge 0.5) {
+            $top = $ranked[0]
+            $gap = if ($ranked.Count -gt 1) { $top.Score - $ranked[1].Score } else { 1.0 }
+            $confidence = if ($top.NumberMismatch) { 'Low' }
+                          elseif ($top.Score -ge 0.85 -and $gap -ge $FuzzyTieMargin) { 'High' }
+                          elseif ($top.Score -ge $FuzzyAutoThreshold) { 'Medium' } else { 'Low' }
+            if ($confidence -ne 'Low') { $chosen = $top.Bezel }
+        }
+        $status = 'NoBezel'
+        if ($confidence -eq 'Skipped') { $status = 'Skipped' }
+        elseif ($game.Shared -and $confidence -ne 'None') { $status = 'Shared' }
+        elseif ($confidence -eq 'Low') { $status = 'NeedsChoice' }
+        elseif ($chosen) {
+            if (-not $game.HasReShade) { $status = 'NeedsReShade' }
+            else {
+                $existing = Get-TpmFileState -Path $game.Dest
+                $mine = $State.Applied.ContainsKey($game.ProfileId) -and $existing.Exists -and ([string]$State.Applied[$game.ProfileId].DeployedSha256 -ieq [string]$existing.Sha256)
+                $status = if (-not $existing.Exists -or $mine) { 'Apply' } else { 'UserBezel' }
+                if ($existing.Exists -and $existing.Sha256 -ieq (Get-TpmFileState -Path $chosen.Path).Sha256) { $status = 'Same' }
+            }
+        }
+        $rows.Add([pscustomobject]@{ Game = $game; Status = $status; Confidence = $confidence; Chosen = $chosen; Ranked = $ranked })
+    }
+    return @($rows.ToArray())
+}
+
+# Copies the chosen bezels in one checked transaction and records each one for undo. A bezel the user placed is replaced only
+# with -ReplaceUserBezels, and a copy of it is saved first. Rows that are not Apply (or UserBezel when asked) are ignored.
+function Invoke-TpmBezelApply {
+    param([Parameter(Mandatory)][object[]]$Rows, [switch]$ReplaceUserBezels, [string]$StateRoot = '')
+    $paths = Get-TpmBezelStatePath -StateRoot $StateRoot
+    [void][System.IO.Directory]::CreateDirectory($paths.Root)
+    $state = Read-TpmBezelState -StateRoot $StateRoot
+    $stamp = (Get-Date).ToString('yyyyMMddHHmmss', [System.Globalization.CultureInfo]::InvariantCulture)
+    $operations = New-Object System.Collections.Generic.List[object]
+    $records = @{}
+    $notSaved = New-Object System.Collections.Generic.List[string]
+    foreach ($row in $Rows) {
+        if (-not ($row.Status -eq 'Apply' -or ($row.Status -eq 'UserBezel' -and $ReplaceUserBezels))) { continue }
+        $id = $row.Game.ProfileId
+        $sourceHash = (Get-TpmFileState -Path $row.Chosen.Path).Sha256
+        $existing = Get-TpmFileState -Path $row.Game.Dest
+        $backupPath = ''; $backupHash = ''
+        if ($state.Applied.ContainsKey($id)) { $backupPath = [string]$state.Applied[$id].BackupPath; $backupHash = [string]$state.Applied[$id].BackupSha256 }
+        if ($row.Status -eq 'UserBezel') {
+            # The user's own file: a verified copy is made before anything is replaced; without it this game is left alone.
+            $backupPath = Join-Path $paths.BackupRoot ('{0}-{1}.png' -f ($id -replace '[^\w\.-]', '_'), $stamp)
+            try {
+                [void][System.IO.Directory]::CreateDirectory($paths.BackupRoot)
+                [System.IO.File]::Copy($row.Game.Dest, $backupPath, $false)
+                $backupHash = (Get-TpmFileState -Path $backupPath).Sha256
+                if ($backupHash -ine $existing.Sha256) { throw 'The saved copy did not match.' }
+            } catch {
+                Write-Log ('Bezels: {0} left alone; the copy of the existing bezel could not be saved: {1}' -f $id, $_.Exception.Message)
+                $notSaved.Add($row.Game.Name); continue
+            }
+        }
+        $records[$id] = [ordered]@{ Destination = $row.Game.Dest; DeployedSha256 = $sourceHash; Source = $row.Chosen.Name; BackupPath = $backupPath; BackupSha256 = $backupHash; AppliedAt = $stamp }
+        $operations.Add([pscustomobject]@{
+            ItemId = ('Bezel:' + $id); Operation = $(if ($existing.Exists) { 'REPLACE' } else { 'ADD' })
+            SourcePath = $row.Chosen.Path; DestinationPath = $row.Game.Dest; RootPath = $row.Game.TargetDir
+            ExpectedSourceHash = $sourceHash; ExpectedFinalHash = $sourceHash
+        })
+    }
+    if ($operations.Count -eq 0) {
+        return [pscustomobject]@{ Outcome = 'NO_OP'; Applied = @(); NotSaved = $notSaved.ToArray(); Summary = 'Nothing needed to change.' }
+    }
+    $newState = @{ Folder = $state.Folder; Picks = $state.Picks; Applied = $state.Applied }
+    foreach ($id in $records.Keys) { $newState.Applied[$id] = $records[$id] }
+    $commit = { Write-TpmBezelState -State $newState -StateRoot $StateRoot }
+    $verify = {
+        $check = Read-TpmBezelState -StateRoot $StateRoot
+        foreach ($id in $records.Keys) { if (-not $check.Applied.ContainsKey($id) -or [string]$check.Applied[$id].DeployedSha256 -ine [string]$records[$id].DeployedSha256) { throw 'The bezel record could not be read back.' } }
+    }
+    $batch = Invoke-TpmTransactionalFileBatch -WorkflowKey 'BezelSetup' -OperationKey 'Apply' -Operations $operations.ToArray() `
+        -MetadataPaths @($paths.Path) -CommitAction $commit -PostCommitVerification $verify `
+        -Summary 'The bezels were not copied.' -SuccessSummary 'The bezels were copied and checked.' -ReasonCode 'BEZEL_FILE_TRANSACTION_FAILED'
+    $done = if ($batch.Outcome -in @('SUCCEEDED', 'NO_OP')) { @($records.Keys | Sort-Object) } else { @() }
+    return [pscustomobject]@{ Outcome = [string]$batch.Outcome; Applied = $done; NotSaved = $notSaved.ToArray(); Summary = [string]$batch.Summary; Batch = $batch }
+}
+
+# Puts back every bezel TPM applied: the user's saved original where there was one, otherwise nothing. A file that is no longer
+# exactly what TPM copied (the user changed it) is left alone and forgotten.
+function Invoke-TpmBezelUndo {
+    param([string]$StateRoot = '')
+    $paths = Get-TpmBezelStatePath -StateRoot $StateRoot
+    $state = Read-TpmBezelState -StateRoot $StateRoot
+    $operations = New-Object System.Collections.Generic.List[object]
+    $undone = New-Object System.Collections.Generic.List[string]
+    $leftAlone = New-Object System.Collections.Generic.List[string]
+    foreach ($id in @($state.Applied.Keys | Sort-Object)) {
+        $record = $state.Applied[$id]
+        $current = Get-TpmFileState -Path ([string]$record.Destination)
+        if (-not $current.Exists) { [void]$undone.Add($id); continue }
+        if ($current.Sha256 -ine [string]$record.DeployedSha256) { [void]$leftAlone.Add($id); continue }
+        $backup = if ($record.BackupPath) { Get-TpmFileState -Path ([string]$record.BackupPath) } else { $null }
+        $restore = ($backup -and $backup.Exists -and $backup.Sha256 -ieq [string]$record.BackupSha256)
+        if ($record.BackupPath -and -not $restore) { [void]$leftAlone.Add($id); continue }
+        $operations.Add([pscustomobject]@{
+            ItemId = ('BezelUndo:' + $id); Operation = $(if ($restore) { 'REPLACE' } else { 'REMOVE' })
+            SourcePath = $(if ($restore) { [string]$record.BackupPath } else { $null }); DestinationPath = [string]$record.Destination
+            RootPath = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetDirectoryName([System.IO.Path]::GetDirectoryName([string]$record.Destination)))
+            ExpectedSourceHash = $(if ($restore) { [string]$record.BackupSha256 } else { '' }); ExpectedFinalHash = $(if ($restore) { [string]$record.BackupSha256 } else { '' })
+            ExpectedDestinationHash = [string]$record.DeployedSha256
+        })
+        [void]$undone.Add($id)
+    }
+    $newState = @{ Folder = $state.Folder; Picks = $state.Picks; Applied = @{} }
+    if ($operations.Count -eq 0) {
+        # No file to put back (already gone, or changed by the user): only the records are cleared.
+        $outcome = 'SUCCEEDED'
+        try { Write-TpmBezelState -State $newState -StateRoot $StateRoot } catch { Write-Log ('Bezels: the undo records could not be cleared: {0}' -f $_.Exception.Message); $outcome = 'FAILED_BEFORE_MUTATION' }
+        return [pscustomobject]@{ Outcome = $outcome; Undone = $undone.ToArray(); LeftAlone = $leftAlone.ToArray() }
+    }
+    $commit = { Write-TpmBezelState -State $newState -StateRoot $StateRoot }
+    $verify = { if ((Read-TpmBezelState -StateRoot $StateRoot).Applied.Count -ne 0) { throw 'The bezel records were not cleared.' } }
+    $batch = Invoke-TpmTransactionalFileBatch -WorkflowKey 'BezelSetup' -OperationKey 'Undo' -Operations $operations.ToArray() `
+        -MetadataPaths @($paths.Path) -CommitAction $commit -PostCommitVerification $verify `
+        -Summary 'The bezels were not undone.' -SuccessSummary 'The bezels were put back and checked.' -ReasonCode 'BEZEL_UNDO_FAILED'
+    return [pscustomobject]@{ Outcome = [string]$batch.Outcome; Undone = $undone.ToArray(); LeftAlone = $leftAlone.ToArray(); Batch = $batch }
+}
+
+function Write-TpmBezelPreview {
+    param([Parameter(Mandatory)][object[]]$Rows, [int]$BezelCount)
+    Write-TpmText -Text 'Bezel preview. Nothing has been changed yet.' -Color Cyan -BlankBefore
+    Write-TpmText -Text ('Found {0} in your folder.' -f (Format-TpmCountNoun -Count $BezelCount -Singular 'bezel')) -Color DarkGray
+    $number = 0
+    foreach ($row in @($Rows | Where-Object { $_.Status -ne 'NoBezel' })) {
+        $number++
+        $shownName = if ($row.Chosen) { $row.Chosen.Name } else { $row.Ranked[0].Bezel.Name }
+        $others = @($row.Ranked | Where-Object { $_.Score -ge 0.5 -and $_.Bezel.Name -ne $shownName } | ForEach-Object { $_.Bezel.Name })
+        $alsoClose = if ($others.Count -gt 0) { ' Also close: {0}.' -f ($others -join ', ') } else { '' }
+        $label = switch ($row.Status) {
+            'Apply'        { '{0} ({1} match).{2}' -f $row.Chosen.Name, $row.Confidence, $alsoClose }
+            'Same'         { 'already has this bezel ({0}).' -f $row.Chosen.Name }
+            'UserBezel'    { 'has a bezel you placed. It is kept unless you choose to replace it. New one: {0} ({1} match).{2}' -f $row.Chosen.Name, $row.Confidence, $alsoClose }
+            'NeedsReShade' { 'set up ReShade for this game first (bezel: {0}).' -f $row.Chosen.Name }
+            'Shared'       { 'shares its folder with other games, so it is skipped.' }
+            'NeedsChoice'  { 'needs your choice. Best guess: {0} (Low match).{1}' -f $row.Ranked[0].Bezel.Name, $alsoClose }
+            'Skipped'      { 'you chose no bezel for this game.' }
+        }
+        Write-TpmText -Text ('{0,3}) {1}: {2}' -f $number, $row.Game.Name, $label) -Color $(if ($row.Status -eq 'Apply') { 'White' } else { 'Yellow' }) -HangingIndent 6
+    }
+    $none = @($Rows | Where-Object { $_.Status -eq 'NoBezel' }).Count
+    if ($none -gt 0) { Write-TpmText -Text ('{0} had no bezel in your folder. Nothing was guessed for them.' -f (Format-TpmGameCount -Count $none)) -Color DarkGray -BlankBefore }
+}
+
+function Show-TpmBezelDetails {
+    param([Parameter(Mandatory)][object[]]$Rows, [int]$NotPng)
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($row in @($Rows | Where-Object { $_.Chosen })) { [void]$lines.Add(('{0}: {1} -> {2}' -f $row.Game.ProfileId, $row.Chosen.Path, $row.Game.Dest)) }
+    $match = @(
+        'Names are cleaned first (underscores, the words bezel and overlay, region and version tags) and compared to each game name with the same title matching the game list uses.',
+        'High means a close match that is clearly ahead of the next one. Medium means a likely match. Low or a different sequel number means you choose. Matches are never made without a preview.',
+        ('Files that are not real .png images are ignored: {0}.' -f $NotPng),
+        'TeknoParrot Manager puts the file where ReShade reads bezel.png. This has not been confirmed on every graphics type. Games that run in exclusive fullscreen or start through a loader may not show it.'
+    )
+    Show-TpmDetailBlocks -Blocks @(@{ Heading = 'Where each file goes'; Lines = $lines.ToArray() }, @{ Heading = 'How the match works'; Lines = $match })
+}
+
+# Lets the user pick one of the best bezels for a game (or none). Remembered, so the game is not asked about again.
+function Read-TpmBezelPick {
+    param([Parameter(Mandatory)]$Row, [Parameter(Mandatory)]$State, [string]$StateRoot = '')
+    Write-TpmText -Text ('Bezel for {0}:' -f $Row.Game.Name) -Color Cyan -BlankBefore
+    $i = 0
+    foreach ($candidate in $Row.Ranked) { $i++; Write-TpmText -Text ('{0}) {1}' -f $i, $candidate.Bezel.Name) -Indent 4 }
+    Write-TpmText -Text '0) No bezel for this game' -Indent 4
+    $choice = Read-TpmChoice -Prompt '  Choice (K to keep as is, default K)' -Choices @(@('K', '0') + @(1..$Row.Ranked.Count | ForEach-Object { [string]$_ })) -Default 'K'
+    if ($choice -eq 'K') { return $false }
+
+    $State.Picks[$Row.Game.ProfileId] = $(if ($choice -eq '0') { '' } else { [string]$Row.Ranked[[int]$choice - 1].Bezel.Name })
+    try { Write-TpmBezelState -State $State -StateRoot $StateRoot } catch { Write-Log ('Bezels: the pick could not be saved: {0}' -f $_.Exception.Message) }
+    return $true
+}
+
+function Invoke-TpmBezelUndoMenu {
+    param([string]$StateRoot = '')
+    $state = Read-TpmBezelState -StateRoot $StateRoot
+    if ($state.Applied.Count -eq 0) { Write-TpmText -Text 'There are no bezels from TeknoParrot Manager to undo.' -Color DarkGray -BlankBefore; return }
+    Write-TpmText -Text 'Bezels TeknoParrot Manager copied:' -Color Cyan -BlankBefore
+    foreach ($id in @($state.Applied.Keys | Sort-Object)) { Write-TpmText -Text ('{0}: {1}' -f $id, $state.Applied[$id].Source) -Indent 4 }
+    Write-TpmText -Text 'Undo removes each one, and puts back the bezel you had before where TeknoParrot Manager saved a copy. A file you changed since is left alone.' -Color DarkGray
+    if ((Read-TpmYesNo -Prompt '  Undo these bezels? (Y/N, default N)' -Default 'N') -ne 'Y') { Write-TpmText -Text 'Nothing was changed.' -Color DarkGray; return }
+    $result = Invoke-TpmBezelUndo -StateRoot $StateRoot
+    Write-Log ('Bezels: undo outcome={0} undone={1} leftAlone={2}' -f $result.Outcome, ($result.Undone -join ','), ($result.LeftAlone -join ','))
+    if ($result.Outcome -in @('SUCCEEDED', 'NO_OP')) {
+        Write-TpmText -Text ('Done. {0} put back and checked.' -f (Format-TpmCountNoun -Count $result.Undone.Count -Singular 'bezel')) -Color Green
+        if ($result.LeftAlone.Count -gt 0) { Write-TpmText -Text ('{0} left alone because the file is not the one TeknoParrot Manager copied.' -f (Format-TpmGameCount -Count $result.LeftAlone.Count)) -Color Yellow }
+    } else {
+        Write-TpmText -Text 'The undo did not finish. Your files were put back as they were. The log says why.' -Color Yellow
+    }
+}
+
+function Invoke-TpmBezelSetup {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [string[]]$ProtectedRoots = @(), [string]$StateRoot = '')
+    Write-TpmText -Text 'Use my bezel folder. TeknoParrot Manager does not come with bezels. It only uses images you already have.' -Color DarkGray -BlankBefore
+    Write-TpmText -Text 'F) Pick bezels from my folder    U) Undo bezels I applied    X) Back' -Color White
+    $action = Read-TpmChoice -Prompt '  Action (F/U/X, default F)' -Choices @('F', 'U', 'X') -Default 'F'
+    if ($action -eq 'X') { return }
+    if ($action -eq 'U') { Invoke-TpmBezelUndoMenu -StateRoot $StateRoot; return }
+
+    $state = Read-TpmBezelState -StateRoot $StateRoot
+    $folder = (Read-PathWithBrowse -Prompt $(if ($state.Folder) { "  Bezel folder (Enter for $($state.Folder))" } else { '  Bezel folder' }) -Mode Folder).Trim().Trim('"')
+    if (-not $folder) { $folder = $state.Folder }
+    if (-not $folder -or -not (Test-Path -LiteralPath $folder -PathType Container) -or -not (Test-TpmNoReparsePath -Path $folder)) {
+        Write-TpmText -Text 'That folder was not found. Nothing was changed.' -Color Yellow; return
+    }
+    $found = Find-TpmBezelFiles -Folder $folder
+    if ($found.Files.Count -eq 0) { Write-TpmText -Text 'No .png bezel images were found in that folder. Nothing was changed.' -Color Yellow; return }
+    $gameList = Get-TpmBezelGames -UserProfilesDir $UserProfilesDir -ProtectedRoots $ProtectedRoots
+    if ($gameList.Games.Count -eq 0) { Write-TpmText -Text 'No registered games were found. Nothing was changed.' -Color Yellow; return }
+    Write-TpmText -Text 'Matching your bezels to your games...' -Color DarkGray
+    $candidates = Get-TpmBezelCandidates -Games $gameList.Games -Bezels $found.Files
+    if ($state.Folder -ne [System.IO.Path]::GetFullPath($folder)) {
+        $state.Folder = [System.IO.Path]::GetFullPath($folder)
+        try { Write-TpmBezelState -State $state -StateRoot $StateRoot } catch { Write-Log ('Bezels: the folder could not be saved: {0}' -f $_.Exception.Message) }
+    }
+    Write-Log ('Bezels: folder has {0} bezels ({1} not real PNG files); {2} games checked; {3} refused' -f $found.Files.Count, $found.NotPng, $gameList.Games.Count, $gameList.Refused)
+    while ($true) {
+        $rows = @(New-TpmBezelPlanRows -Games $gameList.Games -Candidates $candidates -State $state)
+        $shown = @($rows | Where-Object { $_.Status -ne 'NoBezel' })
+        Write-TpmBezelPreview -Rows $rows -BezelCount $found.Files.Count
+        Write-TpmText -Text 'A) Apply   a number) pick a different bezel for that game   D) Details   C) Cancel' -Color White -BlankBefore
+        $choice = Read-TpmChoice -Prompt '  Choice (default C)' -Choices @(@('A', 'D', 'C') + @(1..[Math]::Max(1, $shown.Count) | ForEach-Object { [string]$_ })) -Default 'C'
+        if ($choice -eq 'C') { Write-TpmText -Text 'Canceled. No files were changed.' -Color DarkGray; return }
+        if ($choice -eq 'D') { Show-TpmBezelDetails -Rows $rows -NotPng $found.NotPng; continue }
+        if ($choice -ne 'A') {
+            $row = if ($shown.Count -ge [int]$choice) { $shown[[int]$choice - 1] } else { $null }
+            if ($row -and $row.Ranked.Count -gt 0) { [void](Read-TpmBezelPick -Row $row -State $state -StateRoot $StateRoot) }
+            continue
+        }
+        $replace = $false
+        $mine = @($rows | Where-Object { $_.Status -eq 'UserBezel' })
+        if ($mine.Count -gt 0) {
+            Write-TpmText -Text ('{0} already has a bezel you placed there.' -f (Format-TpmGameCount -Count $mine.Count)) -Color Yellow -BlankBefore
+            $replace = ((Read-TpmYesNo -Prompt '  Replace them? A copy of each is saved first and Undo puts it back. (Y/N, default N)' -Default 'N') -eq 'Y')
+        }
+        $result = Invoke-TpmBezelApply -Rows $rows -ReplaceUserBezels:$replace -StateRoot $StateRoot
+        Write-Log ('Bezels: apply outcome={0} applied={1} notSaved={2}' -f $result.Outcome, ($result.Applied -join ','), ($result.NotSaved -join ','))
+        if ($result.Outcome -eq 'SUCCEEDED') {
+            Write-TpmText -Text ('Done. {0} copied and checked.' -f (Format-TpmCountNoun -Count $result.Applied.Count -Singular 'bezel')) -Color Green -BlankBefore
+            Write-TpmText -Text 'TeknoParrot Manager put each bezel where ReShade looks for it. Whether a game shows it is not confirmed for every game. Press D at the preview for Details. You can undo this from this same menu.' -Color DarkGray
+        } elseif ($result.Outcome -eq 'NO_OP') {
+            Write-TpmText -Text 'Nothing needed to change.' -Color DarkGray -BlankBefore
+        } else {
+            Write-TpmText -Text 'The bezels were not copied and your files were put back as they were. The log says why.' -Color Yellow -BlankBefore
+        }
+        if ($result.NotSaved.Count -gt 0) { Write-TpmText -Text ('{0} left alone because a copy of the existing bezel could not be saved.' -f (Format-TpmGameCount -Count $result.NotSaved.Count)) -Color Yellow }
+        return
+    }
+}
+
 function Invoke-CrosshairSetup {
     param([string]$UserProfilesDir, [string]$TpRoot, [object]$WorkflowContext = $null, [string[]]$ProtectedRoots = @())
 
@@ -54884,8 +55300,14 @@ $mode = $null
             Write-Host '  S) Set up ReShade visual enhancements' -ForegroundColor White
             Write-Host '  R) Remove verified TeknoParrot Manager-managed ReShade files' -ForegroundColor White
             Write-Host '  U) Undo ReShade changes' -ForegroundColor White
-            $reShadeAction = Read-TpmChoice -Prompt '  Action (S/R/U, default S)' -Choices @('S', 'R', 'U') -Default 'S'
+            Write-Host '  B) Use my bezel folder (bezels you already have)' -ForegroundColor White
+            $reShadeAction = Read-TpmChoice -Prompt '  Action (S/R/U/B, default S)' -Choices @('S', 'R', 'U', 'B') -Default 'S'
             if ($reShadeAction -eq 'S') { $reShadeAction = 'Select' }
+        }
+        if ($reShadeAction -eq 'B') {
+            Invoke-TpmBezelSetup -UserProfilesDir $userProfilesDir -ProtectedRoots @($zipSource, $zipSourceSupplementary)
+            [void](Read-HostSafe '  Press Enter to return to menu')
+            continue
         }
         if ($reShadeAction -eq 'U') {
             Show-TpmReShadeUndoMenu -ProtectedRoots @($zipSource, $zipSourceSupplementary)
