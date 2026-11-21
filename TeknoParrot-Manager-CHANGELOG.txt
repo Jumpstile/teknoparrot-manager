@@ -56,6 +56,25 @@
     it is about to ask for.
 
   Also new in this release
+  - Controls: the Manager now remembers which controls you have. The
+    Device Survey saves your answers in the Manager's own settings
+    folder, shows them next time and asks one question ("Keep these
+    answers?"). It asks again only if a controller turns up that you said
+    you do not have. A damaged answers file is set aside, never
+    overwritten, and the last good copy is kept.
+  - Controls: "My controls" (Propagate Controls, choice 3) can learn your
+    arcade buttons. It asks you to press each control ("Press Player 1
+    Start") and remembers the key it sends. If LEDBlinky is installed it
+    offers its own key list first. Nothing in your game files changes.
+  - Controls: you can show or print the controls of one game, and your
+    cabinet's controls, as a page. Each row shows what the control does,
+    your key for it, and whether the game has it set up.
+  - Controls: you can tell the Manager that a game played well. It keeps
+    that with the date and the game's revision, and calls the game's
+    controls Verified until the game's controls or settings change.
+    Starting a game never makes it Verified. Wheel, gun and other analog
+    games are not Verified until you say the calibration is done, and you
+    can mark a first-run Test or Service menu step as still to do.
   - LEDBlinky lighting (optional): if you use LEDBlinky, the Manager can
     add lighting info for your games. It looks for LEDBlinky on your
     drives and in Program Files, or asks where it is and remembers the
