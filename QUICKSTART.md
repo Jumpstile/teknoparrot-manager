@@ -261,7 +261,7 @@ This is the full menu. Type a number at `Enter 1-17:`.
 | 10 | **Region setup** | Pick the country your games start in (like USA or Europe), choose all or some of the games that offer it, confirm, and TeknoParrot Manager saves a backup and changes them. You can also put games back to Auto |
 | 11 | **Postgres setup** | Installs/configures the local PostgreSQL database some Incredible Technologies games need |
 | 12 | **Required game patches** | Find, validate, back up, install, verify, or undo a required fix for a supported exact game build, using your local ZIP |
-| 13 | **Library health check** | Reports registered/broken/unregistered games, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx counts, without changing anything. Any repair it suggests is a separate choice that you confirm first |
+| 13 | **Library health check** | Reports registered/broken/unregistered games, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage, ReShade and BepInEx counts, and the games that need BepInEx but do not have it, without changing anything. Any repair it suggests is a separate choice that you confirm first |
 | 14 | **Restore backup** | Put TeknoParrot game setup files (profiles), LaunchBox's library files, or Postgres databases back from an earlier saved copy. Saved copies are listed newest first |
 | 15 | **Check for Updates** | Check GitHub for a newer TeknoParrot Manager release and install it (RC8.1 and later) |
 | 16 | **Create Support Package** | Gather safe logs and reports into one ZIP to send when asking for help |
@@ -1085,6 +1085,8 @@ At the end of most normal interactive runs, you see this menu:
 Optional: add games to LaunchBox.
 [P] Preview first. No changes.
 [A] Add missing games (backed up).
+[G] Fill in game details and make playlists (backed up).
+[L] Link games for art and details (backed up).
 [F] Import file only. No changes.
 [B] Skip this step.
   Choice, default P
@@ -1094,6 +1096,8 @@ What each key does:
 
 - `P` previews without changing LaunchBox. It reads your LaunchBox files, asks which platform, shows the plan, then returns to this offer.
 - `A` adds games that are missing from LaunchBox's own library. It tells you to close LaunchBox and BigBox first (TeknoParrot Manager will not close them), asks `Add the missing games to LaunchBox now? (Y/N, D = about the risks)` (default N), then the platform, then shows the plan and asks `Write exactly these changes after a verified backup? (Y/N)` (default N). Entries that are already there are kept as they are.
+- `G` fills in game details and makes playlists (backed up). It fills in the release year and developer where LaunchBox has nothing yet. It makes playlists for each arcade hardware family, plus "Light gun games" and "Driving games". Your own playlists and details are never touched. Restore puts everything back.
+- `L` links games for art and details (backed up). It looks each game up in LaunchBox's own game list on your PC. It shows every old name, new name and ID first, and you approve before anything is saved. Names you typed yourself are never replaced. Nothing is downloaded.
 - `F` creates the reference file without a LaunchBox write.
 - `B` skips the optional LaunchBox step.
 
@@ -1106,7 +1110,11 @@ The first time you use direct integration, choose how games should appear:
 
 You are asked each time you run it; your choice is not remembered.
 
-New entries have no box art or metadata yet. Use LaunchBox's own "Search"/re-scrape per game.
+New games have no box art or details yet. Choose `L` (Link games for art and details) and `G` (Fill in game details and make playlists) in the LaunchBox step, or in LaunchBox right-click a game and use **Edit... -> Search**.
+
+**Logos and box art (optional).** After the LaunchBox choices you can add clear logos or box art from a folder you pick. You see `Optional: add logos or box art to LaunchBox from a folder you pick.` Choose `I` to add pictures (you see a preview first), `U` to undo the last picture import, or `S` to skip. Then you pick the picture type (`1 Clear logos, 2 Box front`). A close match is used only if you say yes. Nothing is downloaded.
+
+**Lighting for your arcade buttons (LEDBlinky, optional).** If you use LEDBlinky, a full run (not **New game only**) ends with `Optional: lighting for your arcade buttons.` The Manager looks for LEDBlinky on your drives and in Program Files, or asks where it is and remembers the folder. A game gets only the controls it uses that your cabinet has. Choose `P` to preview first, `A` to add lighting info (a saved copy is made first), or `U` to undo the last add. Only entries the Manager added are ever removed.
 
 Prefer not to let the script touch LaunchBox directly? Choose `F` for the manual `TeknoParrot-LaunchBox-Import.xml` file and wizard instructions.
 
@@ -1354,6 +1362,7 @@ The screen can also offer **P** PostgreSQL setup when needed. It offers direct *
 
 - The report lists valid/broken/empty `GamePath` counts with affected profile codes.
 - It also reports GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage, and informational ReShade / BepInEx counts.
+- ReShade is your choice for each game, so it is not flagged. BepInEx is flagged only for games whose profile says they need it: you see `Games that need BepInEx and do not have it set up: <names>`.
 - Third-party FFB plugin coverage isn't included here because checking it needs a live lookup. Choose **8** for that instead.
 
 ---

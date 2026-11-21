@@ -14,6 +14,8 @@ dgVoodoo2 (by Dege) helps a few old games that crash or show a black screen. The
 4. At `Enter A, M, or Q`, press `A` to use the games it found, `M` to pick games yourself, or `Q` to cancel.
 5. Wait for the result. Start the game and check it.
 
+The result screen says `You selected N games: X changed, Y already set up, Z skipped, W failed` (only the counts that apply) and where the backup is. Press `D` to see every game you selected with its result and the reason for each game that was skipped or failed.
+
 If no game needs dgVoodoo2, you see `No dgVoodoo2 setup is needed right now.` and nothing is changed. Press `D`, then `M`, if you still want to pick a game yourself.
 
 ---

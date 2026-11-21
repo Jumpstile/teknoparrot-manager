@@ -161,7 +161,8 @@ Many result screens say `Press D for details`. Press `D` for the full technical 
   ------------------------
   13) Library health check -- Reports registered/broken/unregistered games
                         plus GPU fix / FFB Blaster / dgVoodoo2 and
-                        ReShade/BepInEx counts, without changing
+                        ReShade/BepInEx counts and the games that
+                        need BepInEx, without changing
                         anything. Any repair it suggests is a separate
                         choice that you confirm first.
   14) Restore backup -- Restore selected backup files with verification.

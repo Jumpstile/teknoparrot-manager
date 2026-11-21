@@ -66,7 +66,7 @@ Next, TeknoParrot Manager goes through these steps. Each one asks first:
 
 ## LaunchBox
 
-At the end of a normal run (not a preview), TeknoParrot Manager offers to add your games to LaunchBox. You can preview first (`P`), add the missing games after a backup (`A`), get an import file only (`F`), or skip (`B`). It never closes LaunchBox for you. See [[LaunchBox Integration]].
+At the end of a normal run (not a preview), TeknoParrot Manager offers to add your games to LaunchBox. You can preview first (`P`), add the missing games after a backup (`A`), fill in game details and make playlists (`G`), link games for art and details (`L`), get an import file only (`F`), or skip (`B`). It never closes LaunchBox for you. See [[LaunchBox Integration]].
 
 ---
 

@@ -335,7 +335,8 @@ These tests try the fixes in RC8.3. Do them first if you are short on time.
 2. Install a game patch from the menu on a game in that folder. Then undo the patch.
 3. You passed if neither step stops with a "could not be checked" error.
 4. If your TeknoParrot folder is very deep, also start TeknoParrot Manager and let it tidy up its own files. You passed if it finishes with no error about a path that is too long.
-## New in RC8.4: tests 41 to 46
+
+## New in RC8.4: tests 41 to 51
 
 These tests try the new parts of RC8.4. Do them first if you are short on time.
 
@@ -357,11 +358,11 @@ These tests try the new parts of RC8.4. Do them first if you are short on time.
 ### Test 43: LaunchBox official names and details
 
 1. Use this only if you use LaunchBox. Skip this test if you do not.
-2. Start the LaunchBox step the way you did in Test 22. Choose L (match games to the LaunchBox game list).
+2. Start the LaunchBox step the way you did in Test 22. Choose [L] Link games for art and details.
 3. Look at the preview. Nothing should change until you say yes.
 4. You passed if you see each old name, new name and ID first, and a backup is made before anything is saved. Games you named yourself must keep your name.
-5. Now choose "Fill in game details and make playlists". You passed if it shows what will change first, makes playlists such as "Light gun games" and "Driving games", and leaves your own playlists alone.
-6. Use the restore choice. You passed if everything goes back the way it was.
+5. Run the LaunchBox step again. Choose [G] Fill in game details and make playlists. You passed if it shows what will change first, makes playlists such as "Light gun games" and "Driving games", and leaves your own playlists alone.
+6. Undo it: choose 14 (Restore backup) in the main menu, then the LaunchBox backup. You passed if everything goes back the way it was.
 
 ### Test 44: Logos and box art from a folder
 
@@ -373,15 +374,47 @@ These tests try the new parts of RC8.4. Do them first if you are short on time.
 ### Test 45: LEDBlinky lighting
 
 1. Use this only if you use LEDBlinky. Skip this test if you do not.
-2. Choose the LEDBlinky option in the menu.
-3. You passed if it finds LEDBlinky on its own or asks where it is, shows a preview first, and changes nothing until you say yes.
-4. After you say yes, you passed if a saved copy was made first. Use Undo. You passed if only the entries the Manager added are removed.
+2. Run AutoSync (menu 1). When it asks "What should I do next?", choose [A] Check all games. (The lighting step is not shown after [N] New game only.) Go through the LaunchBox step. When it ends, you see "Optional: lighting for your arcade buttons."
+3. If it finds LEDBlinky on its own, you see "LEDBlinky was found on this PC." If not, it asks "Do you use LEDBlinky? Show me where it is." Choose [F] to show the folder, or [S] to skip.
+4. Choose [P] Preview first. You passed if it shows what it would add and changes nothing.
+5. Choose [A] Add lighting info to LEDBlinky. You passed if a saved copy of the LEDBlinky file is made first and the result names it.
+6. Run this step again and choose [U] Undo the last add. You passed if only the entries the Manager added are removed.
 
 ### Test 46: Games that need firmware or a game file
 
 1. Use this only if you have a PlayStation 3 game (RPCS3) or a Play! game. Skip this test if you have neither.
 2. Start the game from the Manager, or run Health check (Test 4).
 3. You passed if the Manager tells you in plain words what is missing (the firmware or the game file) before the game starts. It failed if the game just closes with no explanation.
+
+### Test 47: Pick all games with A
+
+1. Use this on any numbered list of games that says "Type numbers like 1,3,6 or a range like 1-8, A for all, or B for none". Skip this test if you do not see one.
+2. Type A and press Enter. You passed if every game in the list was picked.
+3. Run it again. Type 1,3 and press Enter, then try 1-4. You passed if both still work.
+
+### Test 48: Result screens add up
+
+1. Run dgVoodoo2 setup (menu 6), BepInEx setup (menu 9) or GPU fix (menu 7) on 3 or more games.
+2. Read the result screen. You passed if it says how many games you selected and how many were changed, already set up, skipped or failed (for example "You selected 4 games: 3 changed, 1 skipped."), and the numbers add up. It should also say where the backup is saved.
+3. For dgVoodoo2, press D. You passed if the block "Every game you selected" names every game with its result, and gives a reason for each game that was skipped or failed.
+
+### Test 49: Action Required is grouped
+
+1. Use this after a run that leaves several follow-up items (for example AutoSync with many games). Skip this test if you have none.
+2. Read the Action Required list.
+3. You passed if it is grouped under short headings, one for each feature (for example Patches, BepInEx, dgVoodoo2 or ReShade). It failed if it is one long mixed list.
+
+### Test 50: A drive that is not connected
+
+1. Use this only if some games are on an external or network drive. Skip this test if not.
+2. Disconnect that drive. Run a setup step on those games (for example dgVoodoo2 setup, menu 6).
+3. You passed if the result says those games were skipped and ends with "Connect the drive, or choose 13 (Library health check) in the main menu to repair these games."
+
+### Test 51: Health check lists games that need BepInEx
+
+1. At the main menu, type 13 and press Enter (Library health check). Press D if you do not see the details.
+2. Find the lines "ReShade installed" and "BepInEx installed".
+3. You passed if a game whose profile says it needs BepInEx, and does not have it, is listed under "Games that need BepInEx and do not have it set up". ReShade is your choice for each game, so it must not be flagged.
 ## How to report a problem
 
 **Very important: the support report.** Every bug report needs a support report. Without it we often cannot find the cause. Make one every time something goes wrong. Never skip it.

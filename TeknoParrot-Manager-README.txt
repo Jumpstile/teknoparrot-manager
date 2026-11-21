@@ -17,8 +17,8 @@
   https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3
   If you use RC8.3, choose 15) Check for Updates to get RC8.4.
   The previous published releases are v1.0 RC8.2, RC8.1 and RC7. RC8 was a tester
-  build and was never published. Final Version 1.0 comes later.
-  Final Version 1.0 remains unpublished.
+  build and was never published.
+  Final Version 1.0 has not been published yet.
   The changes since RC8.3 are in TeknoParrot-Manager-CHANGELOG.txt.
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
@@ -680,14 +680,15 @@
     Earlier TeknoParrot Manager-managed files are retained when changing
     profiles rather than being silently deleted.
 
-  - Checks and the result screen. Before deployment, TeknoParrot Manager
-    reports ready, protected, missing-executable, and unsafe/malformed
-    preflight counts.
+  - Checks and the result screen. Before it installs anything, TeknoParrot
+    Manager tells you how many of the games you picked it can change now
+    and that it leaves the others alone. Press D to see why for each game.
+    A game it could not check is not called unsafe or damaged.
 
-    The final result states changed and unchanged games. It includes direct
-    details for unsafe or malformed paths and ownership metadata, and tells
-    you to repair or review the listed issue before rerunning ReShade setup
-    with Select.
+    The final result states changed and unchanged games. For a game that
+    could not be checked, it gives the direct details and tells you to
+    repair or review the listed issue before rerunning ReShade setup with
+    Select.
 
     Adopted installations are counted separately from ordinary installs.
     Onboarding pauses for review before dgVoodoo2.
@@ -2536,6 +2537,8 @@
       Optional: add games to LaunchBox.
       [P] Preview first. No changes.
       [A] Add missing games (backed up).
+      [G] Fill in game details and make playlists (backed up).
+      [L] Link games for art and details (backed up).
       [F] Import file only. No changes.
       [B] Skip this step.
 
@@ -2548,6 +2551,18 @@
 
     A   Writes straight into LaunchBox's own Data\ files, after the close
         and backup checks.
+
+    G   Fills in game details and makes playlists, after a backup. It
+        fills in the release year and developer where LaunchBox has
+        nothing yet. It makes playlists for each arcade hardware family,
+        plus "Light gun games" and "Driving games". Your own playlists
+        and details are never touched. Restore puts everything back.
+
+    L   Links games for art and details, after a backup. It looks each
+        game up in LaunchBox's own game list on your PC. You see every
+        old name, new name and ID first and approve before anything is
+        saved. Names you typed yourself are never replaced. Nothing is
+        downloaded.
 
     F   Creates a reference file. LaunchBox is not changed.
 
@@ -2587,8 +2602,42 @@
        Next: Y writes the changes. N stops. You will see "LaunchBox write
        canceled; nothing was changed."
 
-  After the write: new games have no box art or other details yet. In
-  LaunchBox, use Edit... -> Search to fetch them.
+  After the write: new games have no box art or details yet. Choose L
+  (Link games for art and details) and G (Fill in game details and make
+  playlists) in the LaunchBox step, or in LaunchBox right-click a game
+  and use Edit -> Search.
+
+  Logos and box art (optional). After the LaunchBox choices you see:
+  "Optional: add logos or box art to LaunchBox from a folder you pick."
+
+      [I] Add pictures from a folder. You see a preview first.
+      [U] Undo the last picture import.
+      [S] Skip this step.
+
+  I asks for your folder, then "Picture type: 1 Clear logos, 2 Box
+  front, B back", then the platform. You see a preview: sure matches,
+  close matches to check, and games with no picture. A close match is
+  used only if you say yes. Pictures LaunchBox already has stay unless
+  you choose to replace them. Nothing is downloaded. U removes the
+  pictures that the last import added.
+
+  Lighting for your arcade buttons (LEDBlinky, optional). If you use
+  LEDBlinky, a full run (not "New game only") ends with "Optional:
+  lighting for your arcade buttons." The Manager looks for LEDBlinky on
+  your drives and in Program Files, or asks where it is and remembers
+  the folder. You see:
+
+      LEDBlinky was found on this PC.
+      [P] Preview first. No changes.
+      [A] Add lighting info to LEDBlinky (backed up, can be undone).
+      [U] Undo the last add.
+      [C] Use a different LEDBlinky folder.
+      [O] Switch between the usual arcade colors and your own colors.
+      [B] Skip this step.
+
+  A game gets only the controls it uses that your cabinet has. You see a
+  preview first, a saved copy is made, and you can undo it. Only entries
+  the Manager added are ever removed.
 
   If anything looks wrong afterward:
 
@@ -3712,6 +3761,11 @@
   It is not flagged as something to fix. ReShade is a per-game cosmetic
   choice, not a clear right-or-wrong answer like a GPU fix.
 
+  Library Health Check also lists the games that need BepInEx and do not
+  have it set up. You see "Games that need BepInEx and do not have it set
+  up:" followed by the game names. BepInEx is flagged only for games
+  whose profile says they need it.
+
   Library Health Check also has a Game support row. It says OK when nothing
   is missing, or "Needs attention" when some games need you: a game file is
   missing, a second game file (for example a CHD) is not chosen, or
@@ -3814,6 +3868,12 @@
     [B] Back to main menu, and asks Choose H or B. The default is B.
 
     Next: press Enter to go back, or D to see each game's details.
+
+    The result also says how many games you selected, for example "You
+    selected 5 games: 3 changed, 1 already set up, 1 skipped." It says
+    where the backup is. Press D to see "Every game you selected": every
+    game with its result, and the reason for each game that was skipped
+    or failed.
 
   MORE DETAIL: DGVOODOO2 SETUP
   ----------------------------

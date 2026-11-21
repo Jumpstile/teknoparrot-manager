@@ -932,6 +932,9 @@
   - Library health check (main menu 13) also checks every game database. A
     database that is not ready shows as "Problem - <game>". Run 11) Postgres
     setup to fix it.
+  - Library health check (main menu 13) also lists the games that need
+    BepInEx and do not have it set up. ReShade is your choice for each
+    game, so it is not flagged.
 
   8. REQUIRED GAME PATCHES: MENU 12
   ---------------------------------
@@ -2048,9 +2051,11 @@
 
      13) Library health check -- reports registered, broken and unregistered
                              games. It also counts GPU fix, FFB Blaster,
-                             dgVoodoo2, ReShade and BepInEx. It changes
-                             nothing. Any repair it suggests is a
-                             separate choice that you confirm first.
+                             dgVoodoo2, ReShade and BepInEx. It names the
+                             games that need BepInEx and do not have
+                             it. It changes nothing. Any repair it
+                             suggests is a separate choice that you
+                             confirm first.
 
       14) Restore backup  -- put back a saved copy, newest first:
                              TeknoParrot's saved game settings folder
@@ -3072,10 +3077,11 @@
   MAMEPostProc was dropped because it has no license notice and adds a
   flicker bar, and scanlines-abs because no look needs it.
 
-  The result states what changed and what did not change. Unsafe or
-  malformed paths and ownership metadata are listed with the direct next
-  action to repair or review the issue. Then run ReShade setup again
-  (mode 5, S).
+  The result states what changed and what did not change. Before it
+  installs anything, ReShade tells you how many of your games it can
+  change now and that it leaves the others alone. A game it could not
+  check is listed with the direct next action to repair or review the
+  issue. Then run ReShade setup again (mode 5, S).
 
   Native TeknoParrot CRT, SSAA, shader, scanline, and post-process
   settings are preserved unless you choose T to turn the CRT look off.
@@ -3228,6 +3234,11 @@
   main menu and choose mode 13 (Library Health Check). The result screen
   also offers [H] for this when a saved path is missing.
 
+  The result screen counts your games, for example "You selected 5 games:
+  3 changed, 1 already set up, 1 skipped." It says where the backup is.
+  Press D to see every game you selected, with the reason for each game
+  that was skipped or failed.
+
   Full details: TeknoParrot-Manager-README.txt -- DGVOODOO2 LEGACY
   COMPATIBILITY section.
 
@@ -3268,7 +3279,9 @@
        before it changes any settings.
        You will see: a result for each game.
        Next: read it. Each game is shown as changed, no change needed,
-       skipped, or failed.
+       skipped, or failed. It starts with a count line such as "You
+       selected 4 games: 3 changed, 1 skipped." and says where the backup
+       is.
 
     3. Use the keys on the result screen.
        You will see: [D] Details, [O] Open support/log guidance,
@@ -3596,6 +3609,8 @@
       Optional: add games to LaunchBox.
       [P] Preview first. No changes.
       [A] Add missing games (backed up).
+      [G] Fill in game details and make playlists (backed up).
+      [L] Link games for art and details (backed up).
       [F] Import file only. No changes.
       [B] Skip this step.
 
@@ -3603,6 +3618,16 @@
 
     P  Shows what A would do. It makes no LaunchBox changes.
     A  Adds the games that are missing to LaunchBox, after a backup.
+    G  Fills in game details and makes playlists, after a backup. It
+       fills in the release year and developer where LaunchBox has
+       nothing yet, and makes playlists for each arcade hardware family,
+       plus "Light gun games" and "Driving games". Your own playlists and
+       details are never touched. Restore puts everything back.
+    L  Links games for art and details, after a backup. It looks each
+       game up in LaunchBox's own game list on your PC. You see every old
+       name, new name and ID first and approve before anything is saved.
+       Names you typed yourself are never replaced. Nothing is
+       downloaded.
     F  Creates a reference file. It does not write to LaunchBox.
     B  Skips this optional step.
 
@@ -3635,10 +3660,26 @@
       3) Both -- Arcade AND a separate TeknoParrot platform
       4) Custom platform name (apply only; not offered in preview)
 
-  New games have no box art or metadata yet. In LaunchBox, right-click a
-  game and use Edit -> Search to fetch it, same as for any
-  manually-imported game.
+  New games have no box art or details yet. Choose L (Link games for art
+  and details) and G (Fill in game details and make playlists) in the
+  LaunchBox step, or in LaunchBox right-click a game and use Edit ->
+  Search.
 
+  Logos and box art (optional). After the LaunchBox choices you see
+  "Optional: add logos or box art to LaunchBox from a folder you pick."
+  Choose I to add pictures from a folder (you see a preview first), U to
+  undo the last picture import, or S to skip. You then pick the picture
+  type: 1 Clear logos, 2 Box front. A close match is used only if you
+  say yes. Nothing is downloaded.
+
+  Lighting for your arcade buttons (LEDBlinky, optional). If you use
+  LEDBlinky, a full run (not "New game only") ends with "Optional:
+  lighting for your arcade buttons." The Manager looks for LEDBlinky on
+  your drives and in Program Files, or asks where it is and remembers
+  the folder. A game gets only the controls it uses that your cabinet
+  has. Choose P to preview first, A to add lighting info (a saved copy
+  is made first), or U to undo the last add. Only entries the Manager
+  added are ever removed.
   If anything looks wrong afterward, undo it:
 
     1. Choose menu option 14 (Restore backup).
@@ -3654,8 +3695,9 @@
   -----------------------------------
 
   A writes directly into LaunchBox's own library files after the safety
-  checks. F creates the reference file without a LaunchBox write. B skips
-  the optional LaunchBox step.
+  checks. G fills in game details and makes playlists. L links games for
+  art and details. F creates the reference file without a LaunchBox write.
+  B skips the optional LaunchBox step.
 
   When direct integration is selected, TeknoParrot Manager checks LaunchBox
   is closed first, backs up the files it is about to change, and never

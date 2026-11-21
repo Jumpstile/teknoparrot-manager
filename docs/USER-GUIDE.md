@@ -19,7 +19,7 @@ Allow about 10 minutes once your downloads are ready.
 
 Installing TeknoParrot, updates, large games, and special controllers take longer.
 
-Release page of the latest published release: [v1.0 RC8.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.2).
+Release page of the latest published release: [v1.0 RC8.3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.3).
 
 You need:
 
@@ -688,7 +688,7 @@ Modes 1 and 2 offer a preview/dry-run option first (a practice run that changes 
 | 11                                                            | **Postgres setup**             | Installs/configures the local PostgreSQL database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball). Ends with a short result screen; press D for details |
 | 12                                                            | **Required game patches**      | Find, check, back up, install, verify, and undo required fixes for supported exact game builds using your local ZIPs                                                                                          |
 | **Maintenance and Recovery**                                  |                                |                                                                                                                                                                                                               |
-| 13                                                            | **Library health check**       | Reports registered/broken/unregistered games plus GPU fix / FFB Blaster / dgVoodoo2 and ReShade/BepInEx counts, without changing anything. Any repair it suggests is a separate choice that you confirm first |
+| 13                                                            | **Library health check**       | Reports registered/broken/unregistered games plus GPU fix / FFB Blaster / dgVoodoo2 coverage, ReShade and BepInEx counts, and the games that need BepInEx but do not have it, without changing anything. Any repair it suggests is a separate choice that you confirm first |
 | 14                                                            | **Restore backup**             | Put back a saved copy of TeknoParrot's saved game settings folder (UserProfiles), Postgres, or LaunchBox, or use Reset and Restore. Lists show the newest first. Invalid numbers ask again |
 | **Application**                                               |                                |                                                                                                                                                                                                               |
 | 15                                                            | **Check for Updates**          | You can start it yourself, and TeknoParrot Manager also checks once when it starts (you can turn that off). It checks the latest GitHub release. Nothing is downloaded or changed unless you answer Y; if you do, it saves a backup first. A release made of several files is refused with nothing changed |
@@ -777,6 +777,8 @@ More help is in [Start Here: Required patches](START-HERE.md#8-required-game-pat
 - `Already installed, nothing to do` The game already has the patch. You need to do nothing.
 
 Press **D** at the last question to see the technical details: patch names, the exact reason, result codes, and the folder with your undo copy.
+
+The result screen says how many games you selected and how many were changed, already set up, skipped or failed (for example `You selected 4 games: 3 changed, 1 skipped.`). It also says where the backup is.
 
 After a fix, still register the game and set up its controls. Then test it.
 
@@ -896,6 +898,8 @@ You will see "No broken saved paths were found." Then the screen offers extra se
 Health Check never installs, deploys, or rewrites anything until you pick one of these actions.
 
 **Game databases (PostgreSQL):** the check also looks at every game database. If one is missing, cannot be opened with the game's own settings, or has no tables, the PostgreSQL row says `Problem` and Details lists `Problem - <game>` for each one. Next: run Postgres setup (menu 11). It makes and checks those databases. The health check itself only looks and changes nothing.
+
+**ReShade and BepInEx:** the check counts the valid games that have ReShade and BepInEx (`ReShade installed: N of M valid games`, `BepInEx installed: N of M valid games`). ReShade is your choice for each game, so it is not flagged. BepInEx is flagged only for games whose profile says they need it. For those, you see `Games that need BepInEx and do not have it set up: <names>`. Next: choose `9) BepInEx setup`.
 
 **When it cannot look:** if the check cannot read something (the PostgreSQL service, game profiles, startup files, or a game on a drive that is not connected), it says `Could not check` and asks for your attention. It does not say OK. A damaged profile is named as one that could not be read, and it gets no path repair.
 
@@ -1924,16 +1928,16 @@ After the chooser returns, the preview closes automatically.
 If rendering or display is unavailable, terminal selection remains available.
 
 **The result after deployment:** the result states what changed and what did not change.
-It separates newly installed or updated TeknoParrot Manager-managed files, adopted replacements, protected unchanged files, missing saved paths, unsafe or malformed paths or ownership metadata, unsupported architecture, and errors.
+It separates newly installed or updated TeknoParrot Manager-managed files, adopted replacements, protected unchanged files, missing saved paths, games that could not be checked safely, unsupported architecture, and errors.
 
-Unsafe or malformed games include direct details and the next action: repair or review the listed issue, then rerun ReShade setup with `Select`.
+A game that could not be checked is left alone. The result says why and gives the next action: repair or review the listed issue, then rerun ReShade setup with `Select`.
 Missing saved paths include the game name; use the main-menu path-repair tool and run ReShade setup again.
-Before deployment, TeknoParrot Manager reports ready, protected, missing-executable, and unsafe/malformed preflight counts.
+Before it installs anything, TeknoParrot Manager tells you how many of the games you picked can be changed now (`You selected 4 games. 3 can be changed now.`) and that the others will be left alone (`1 will be left alone. Press D to see why.`). It does not call a game it could not check unsafe or damaged. Press `D` to see why each game is left alone.
 Protected existing files remain unchanged unless you explicitly choose `Adopt` and confirm.
 Adopted installations are counted separately from ordinary installs.
 
 The `D` view of the apply-scope menu shows `Profile: {FriendlyName} -- {description}` and a preflight line.
-That line reads `ReShade preflight: {n} ready, {n} protected, {n} missing executable, {n} unsafe or malformed.`
+That line reads `ReShade preflight: {n} ready, {n} protected, {n} missing executable, {n} unsafe or malformed.` This technical line and the Details of the result screen still count games that could not be checked as `unsafe or malformed`. The screens you read first do not call them that.
 
 **Native CRT, SSAA and shader settings:** TeknoParrot Manager reads native TeknoParrot CRT, SSAA, shader, scanline, and post-process settings without changing them.
 If enabled settings are detected, the result warns that the selected ReShade effect may stack with the native display effect.
@@ -2057,6 +2061,8 @@ After a successful run the beginner result screen says `dgVoodoo2 setup finished
 
 It names each installed game and the old graphics system found (for example `Glide2x`).
 
+It also counts your games, for example `You selected 5 games: 3 changed, 1 already set up, 1 skipped.` Only the counts that apply are shown, so the numbers add up to the games you selected. If a backup was made, it says which folder it is in. Press `D` to see the block `Every game you selected`. It names every game you picked, says what happened to it (changed, already set up, skipped, failed or not finished), and gives the reason for each game that was skipped or failed.
+
 It explains that older DirectX/Glide calls may not display correctly on modern Windows. It also says what to try next.
 
 Existing dgVoodoo2 DLL files that are already in a game folder are not removed or replaced. This includes files that are not owned by TeknoParrot Manager or that were changed. A DLL is added only when it is missing.
@@ -2118,6 +2124,8 @@ If GPU setup skips missing or unavailable saved paths, its result offers `[H] Op
 2. If it cannot identify your graphics card maker, enter one of those names, or press Enter to cancel.
 3. Wait while it makes and checks a saved copy (backup) of the registered game setup files (profiles). It does this before it changes any compatibility field.
 4. Read the result. Each result belongs to the exact game setup file that was processed. A count does not stand in for a game name.
+
+The result also has a count line such as `You selected 4 games: 3 changed, 1 skipped.` It says how many games were changed, already set up, skipped or failed, and where the backup is.
 
 If a saved game drive is disconnected or a game file (executable) is missing, reconnect it. Or use `13) Library Health Check` to repair the saved path. Then try again.
 
@@ -2206,7 +2214,7 @@ TeknoParrot Manager never removes an existing BepInEx installation (see "Rollbac
 1. At the main menu, choose `9) BepInEx setup`. You will see: TeknoParrot Manager checks the registered game folders and each game's type (x64 or x86, the game executable architecture).
 2. Read the list of games that need an install or an update.
 3. Choose `Y` to install or update, `B` to go back, or `N` to cancel. Next: nothing changes until you approve the listed operation.
-4. Read the result.
+4. Read the result. It says how many games you selected and how many were changed, already set up, skipped or failed (for example `You selected 4 games: 3 changed, 1 skipped.`), and where the backup is.
 
 The prompt is `[Y] Install/update  [B] Back  [N] Cancel`. There is no repair-reset choice. After a successful or no-change run, the screen waits for one Enter before it goes back.
 
@@ -2509,6 +2517,8 @@ At the end of each normal interactive run (not in Preview or Unattended mode) th
 Optional: add games to LaunchBox.
 [P] Preview first. No changes.
 [A] Add missing games (backed up).
+[G] Fill in game details and make playlists (backed up).
+[L] Link games for art and details (backed up).
 [F] Import file only. No changes.
 [B] Skip this step.
 ```
@@ -2519,6 +2529,8 @@ What each choice does:
 
 - `P` reads your LaunchBox files and asks which platform to plan for. It prints what a write would do ("A write would add N game entries and change M file(s)"). It changes nothing in LaunchBox, then returns to this menu.
 - `A` writes directly into LaunchBox's own `Data\` files.
+- `G` fills in game details and makes playlists (backed up). It fills in the release year and developer where LaunchBox has nothing yet. It makes playlists for each arcade hardware family, plus "Light gun games" and "Driving games". Your own playlists and details are never touched. Restore puts everything back.
+- `L` links games for art and details (backed up). It looks each game up in LaunchBox's own game list on your PC. It shows every old name, new name and ID first, and you approve before anything is saved. Names you typed yourself are never replaced. Nothing is downloaded.
 - `F` creates the reference file without a LaunchBox write.
 - `B` skips the optional step.
 
@@ -2552,9 +2564,48 @@ The platform choice is made for this action, not silently persisted.
 
 ### After the games are added
 
-New games have no box art or metadata yet.
+New games have no box art or details yet. Choose `L` (Link games for art and details) and `G` (Fill in game details and make playlists) in the LaunchBox step, or in LaunchBox right-click a game and use **Edit... -> Search**.
 
-In LaunchBox, right-click a newly added game and use **Edit... -> Search** to fetch it. This is the same way you would do it for any manually-imported game.
+### Choosing G or L: details, playlists and art
+
+Both choices read your LaunchBox files first, show you what would change, and ask before anything is saved. A checked backup is made first. To undo either one, choose menu option 14 (**Restore backup**), then **3 LaunchBox library backup**.
+
+- `G` (Fill in game details and make playlists) asks which platform to use. Then it shows what it would change and asks `Make exactly these changes after a verified backup? (Y/N, D = about the risks)` (default N). It fills in the release year and developer only where LaunchBox has nothing yet. It makes playlists for each arcade hardware family, plus "Light gun games" and "Driving games". Your own playlists and details are never touched.
+- `L` (Link games for art and details) looks each game up in LaunchBox's own game list on your PC and uses the official name and the Games Database ID, so LaunchBox can find info and artwork. It shows every old name, new name and ID first. For a close match it asks `Is this the same game? (Y/N)` (default N). Names you typed yourself are never replaced. Nothing is downloaded.
+
+### Adding logos or box art from a folder
+
+After the LaunchBox choices (unless you chose `B`), you see:
+
+```
+Optional: add logos or box art to LaunchBox from a folder you pick.
+[I] Add pictures from a folder. You see a preview first.
+[U] Undo the last picture import.
+[S] Skip this step.
+  Choice, default S
+```
+
+- `I` asks for the folder with your pictures. Then it asks `Picture type: 1 Clear logos, 2 Box front, B back` and which platform. It shows a preview with the sure matches, the close matches to check, and the games with no picture. A close match is used only if you say yes. Pictures LaunchBox already has stay as they are unless you choose to replace them. The old ones are saved so Undo can bring them back. You say yes once more before any picture is copied. Nothing is downloaded: pictures are only copied from the folder you pick.
+- `U` removes the pictures that the last import added.
+- `S` skips this step.
+
+### Lighting for your arcade buttons (LEDBlinky)
+
+If you use LEDBlinky, the Manager can add lighting info for your games. This step comes after the LaunchBox step in a full run (for example, AutoSync with **Check all games**). It is not shown after **New game only**, in Preview mode or in Unattended mode. You see `Optional: lighting for your arcade buttons.`
+
+The Manager looks for LEDBlinky on your drives and in Program Files. If it cannot find it, it asks `Do you use LEDBlinky? Show me where it is.` Choose `F` to show the LEDBlinky folder, or `S` to skip. It remembers the folder. When it finds LEDBlinky, you see:
+
+```
+LEDBlinky was found on this PC.
+[P] Preview first. No changes.
+[A] Add lighting info to LEDBlinky (backed up, can be undone).
+[U] Undo the last add.
+[C] Use a different LEDBlinky folder.
+[O] Switch between the usual arcade colors and your own colors.
+[B] Skip this step.
+```
+
+A game gets only the controls it uses that your cabinet has. You see a preview first, a saved copy is made, and you can undo the add with `U`. Only entries the Manager added are ever removed.
 
 ### Restoring LaunchBox files
 
