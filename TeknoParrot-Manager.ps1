@@ -26767,6 +26767,9 @@ function Write-PostgresAdministratorGuidance {
     Write-Host '  When Windows asks, approve it with an administrator account of this PC. Do not switch to a different account. If your Windows account is not an administrator, close TeknoParrot Manager and start it again with "Run as administrator".' -ForegroundColor Yellow
     Write-Host '  After approval, TeknoParrot Manager tries to continue automatically and reports the result; approval alone does not mean setup or repair succeeded.' -ForegroundColor Yellow
     Write-Host '  If setup stops, read the reported failure and View Log before trying option 11 again.' -ForegroundColor Yellow
+    # Give the user time to read this before the Windows permission window opens on top of it (#385).
+    $unattendedNow = [bool](Get-Variable -Name Unattended -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
+    if (Test-TpmInteractiveInput -Unattended:$unattendedNow) { [void](Read-HostSafe '  Press Enter to open the Windows permission window') }
 }
 function Get-PostgresRecoveryStateDirectory {
     $base = if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { $env:LOCALAPPDATA } else { $env:TEMP }

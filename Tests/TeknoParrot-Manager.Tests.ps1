@@ -7720,6 +7720,18 @@ function Exit-PostgresRecoveryResume {
         $script:postgresGuidanceMessages = @()
         Mock Write-Host { $script:postgresGuidanceMessages += [string]$Object }
         Mock Write-Log {}
+        Mock Test-TpmInteractiveInput { $false }
+        Mock Read-HostSafe { '' }
+    }
+
+    It "waits for Enter before the Windows permission window, but only when someone can answer (#385)" {
+        # Mutation: drop the pause -> the permission window opens over the text before it can be read.
+        Mock Test-TpmInteractiveInput { $true }
+        Write-PostgresAdministratorGuidance -Operation Install
+        Should -Invoke Read-HostSafe -Times 1 -Exactly -ParameterFilter { $Prompt -match 'Press Enter to open the Windows permission window' }
+        Mock Test-TpmInteractiveInput { $false }
+        Write-PostgresAdministratorGuidance -Operation Install
+        Should -Invoke Read-HostSafe -Times 1 -Exactly
     }
 
     It "explains temporary administrator access and the complete UAC recovery handoff" {
