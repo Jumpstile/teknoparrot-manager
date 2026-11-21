@@ -38586,6 +38586,12 @@ function Invoke-LibraryHealthCheck {
         try { $gameTypeReport = Get-TpmGameTypeReport -Profiles $profiles -TeknoParrotRoot $TpRoot }
         catch { Write-Log ("HealthCheck: the game types could not be checked -- {0}" -f $_) }
     }
+    # Controls: which games have every control the game lists set up. Read-only; it never says a game is ready.
+    $controlsAudit = $null
+    if (-not $discoveryFailed -and -not [string]::IsNullOrWhiteSpace($TpRoot) -and (Test-Path -LiteralPath (Join-Path $TpRoot 'GameProfiles') -PathType Container)) {
+        try { $controlsAudit = Get-TpmControlCoverageAudit -Profiles $profiles -GameProfilesDir (Join-Path $TpRoot 'GameProfiles') }
+        catch { Write-Log ("HealthCheck: the controls could not be checked -- {0}" -f $_) }
+    }
     $postgresStatus = 'Unknown'; $postgresPsqlExists = $false; $postgresPsqlStatus = 'Unknown'; $postgresServiceExists = $null
     try {
         $postgresService = Get-Service -Name $script:PostgresServiceName -ErrorAction Stop
@@ -38717,6 +38723,7 @@ function Invoke-LibraryHealthCheck {
         PrerequisiteNotChecked = @($prerequisiteNotChecked.ToArray())
         PrerequisiteCheckFailed = $prerequisiteCheckFailed
         GameTypes = $gameTypeReport
+        ControlCoverage = $controlsAudit
         LastFullRun = $lastFullRun
         LogPath = $LogPath
         GameSupport = $gameSupport
@@ -38793,6 +38800,15 @@ function Get-TpmLibraryHealthRows {
     $internalCount = @(Get-TpmTransactionField -Object $Result -Name 'InternalDatabaseLabels' -Default @()).Count
     if ($internalCount -gt 0) { [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game database' -Text ('OK - {0} {1} Internal storage, so no database install is needed. Start each game once so it creates its own database' -f (Format-TpmGameCount -Count $internalCount), $(if ($internalCount -eq 1) { 'uses' } else { 'use' })) -Color 'Green')) }
     foreach ($gameTypeRow in @(if ($null -ne (Get-TpmTransactionField -Object $Result -Name 'GameTypes' -Default $null)) { Get-TpmGameTypeRows -Report $Result.GameTypes })) { [void]$rows.Add($gameTypeRow) }
+    $controlCoverageRow = Get-TpmTransactionField -Object $Result -Name 'ControlCoverage' -Default $null
+    if ($null -ne $controlCoverageRow -and [int]$controlCoverageRow.Total -gt 0) {
+        $notSet = [int]$controlCoverageRow.Partial + [int]$controlCoverageRow.Missing
+        $cannotCheck = [int]$controlCoverageRow.Unknown + [int]$controlCoverageRow.Unsupported
+        $coverageText = 'Note - {0} of {1} games have every control the game lists set up (not tested in a game)' -f $controlCoverageRow.Complete, $controlCoverageRow.Total
+        if ($notSet -gt 0) { $coverageText += '; {0} {1} some or all missing' -f (Format-TpmGameCount -Count $notSet), $(if ($notSet -eq 1) { 'has' } else { 'have' }) }
+        if ($cannotCheck -gt 0) { $coverageText += '; TPM cannot check {0}' -f (Format-TpmGameCount -Count $cannotCheck) }
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Controls' -Text ($coverageText + '. Choose D for the list') -Color $(if ($notSet -gt 0) { 'Yellow' } else { 'DarkGray' })))
+    }
     $prerequisiteRow = Get-TpmLibraryHealthPrerequisiteRow -Result $Result
     if ($null -ne $prerequisiteRow) { [void]$rows.Add($prerequisiteRow) }
     $gameSupport = Get-TpmTransactionField -Object $Result -Name 'GameSupport' -Default $null
@@ -39014,6 +39030,12 @@ function Get-TpmLibraryHealthDetailBlocks {
 
     $gameTypeReport = Get-TpmTransactionField -Object $Result -Name 'GameTypes' -Default $null
     if ($null -ne $gameTypeReport) { foreach ($gameTypeBlock in @(Get-TpmGameTypeDetailBlocks -Report $gameTypeReport)) { [void]$blocks.Add($gameTypeBlock) } }
+    $controlCoverage = Get-TpmTransactionField -Object $Result -Name 'ControlCoverage' -Default $null
+    if ($null -ne $controlCoverage -and [int]$controlCoverage.Total -gt 0) {
+        $coverageSummary = Get-TpmControlCoverageAuditSummary -Audit $controlCoverage
+        foreach ($coverageBlock in @($coverageSummary.Blocks)) { [void]$blocks.Add(@{ Heading = ('Controls: ' + $coverageBlock.Heading); Lines = @($coverageBlock.Lines) }) }
+        [void]$blocks.Add(@{ Heading = 'Controls: what this means'; Lines = @($coverageSummary.Note) })
+    }
 
     $lines = New-Object System.Collections.Generic.List[string]
     if ($complete) {
@@ -52468,7 +52490,7 @@ function Read-ControlReadinessProfileDocument {
     # Same code-shape guard as Get-ControlReadinessRegistrationState -- do not
     # join an unvalidated $Code into either directory's path.
     $sourcePath = $null
-    if ($Code -match '^[\w]+$') {
+    if ($Code -match '^[\w-]+$') {
         $userProfilePath = Join-Path $UserProfilesDir "$Code.xml"
         $templatePath    = if ($GameProfilesDir) { Join-Path $GameProfilesDir "$Code.xml" } else { '' }
         $sourcePath =
@@ -52811,8 +52833,11 @@ function Get-ControlReadinessActionItems {
 # The contract it follows is shaped like docs/architecture/CONTROLLER_CAPABILITY_CONTRACT.md (issue #303). Reading the
 # profile file is a separate step (Get-TpmControlBindingFacts) from deciding what the facts mean (Get-TpmControlCoverageInventory),
 # so another device or storage layout only needs a new fact reader.
+# Every game gets a contract: the reviewed one when the saved profile is the reviewed revision, otherwise one read from TeknoParrot's
+# own game file (Get-TpmDerivedControlContract), marked as not reviewed. The audit functions at the end sort every registered game.
 # Depends on: Get-ControlReadinessKnownRequirements, Get-ControlReadinessDocumentFit, Read-ControlReadinessProfileDocument,
-# Get-ButtonNodes, Test-ControlReadinessButtonBindingUsable, Test-ControlReadinessAnalogMappingUsable.
+# Get-ButtonNodes, Test-ControlReadinessButtonBindingUsable, Test-ControlReadinessAnalogMappingUsable, Test-TpmMappingInPlayerOneScope,
+# Get-TpmProfileFriendlyTitle, Get-TpmRegisteredProfileFilesWithDiscoveryProgress, Invoke-TpmProgressGroup, Write-TpmOutcome.
 
 # Builds the reviewed controls contract for one profile code from the known-requirements list. Returns $null for a code
 # that has no reviewed entry, so an unknown game is never described from a guess.
@@ -52861,32 +52886,43 @@ function Get-TpmControlBindingFacts {
     param(
         $Doc,
         [Parameter(Mandatory)]$Contract,
-        [Parameter(Mandatory)][string]$Code
+        [Parameter(Mandatory)][string]$Code,
+        # Set for a contract read from the game's own file: the identity the saved profile must match, and the stricter binding rule.
+        $Identity = $null
     )
 
-    $requirements = Get-ControlReadinessKnownRequirements -Code $Code
-    if ($null -eq $requirements -or $null -eq $Doc -or $null -eq $Doc.GameProfile) {
-        return [pscustomobject]@{ Fit = 'Unknown'; UsableControlIds = @() }
-    }
+    $strict = ($null -ne $Identity)
+    $requirements = if ($strict) { $Identity } else { Get-ControlReadinessKnownRequirements -Code $Code }
+    if ($null -eq $requirements) { return [pscustomobject]@{ Fit = 'Unknown'; Why = 'NoContract'; UsableControlIds = @() } }
+    if ($null -eq $Doc -or $null -eq $Doc.GameProfile) { return [pscustomobject]@{ Fit = 'Unknown'; Why = 'NoProfile'; UsableControlIds = @() } }
     $fit = Get-ControlReadinessDocumentFit -Doc $Doc -Requirements $requirements
-    if ($fit -ne 'Ok') { return [pscustomobject]@{ Fit = $fit; UsableControlIds = @() } }
+    if ($fit -ne 'Ok') { return [pscustomobject]@{ Fit = $fit; Why = $(if ($fit -eq 'Unknown') { 'DifferentVersion' } else { '' }); UsableControlIds = @() } }
 
     $byMapping = @{}
     foreach ($button in @(Get-ButtonNodes $Doc)) {
         $mappingNode = $button.SelectSingleNode('InputMapping')
         if ($mappingNode -and -not [string]::IsNullOrWhiteSpace($mappingNode.InnerText)) {
-            $byMapping[$mappingNode.InnerText.Trim()] = $button
+            $key = $mappingNode.InnerText.Trim()
+            if (-not $byMapping.ContainsKey($key)) { $byMapping[$key] = New-Object System.Collections.ArrayList }
+            [void]$byMapping[$key].Add($button)
         }
     }
 
     $usable = New-Object System.Collections.ArrayList
     foreach ($control in @($Contract.SemanticControls)) {
         if (-not $byMapping.ContainsKey($control.ControlId)) { continue }
-        $node = $byMapping[$control.ControlId]
-        $isUsable = if ($control.Kind -eq 'Axis') { Test-ControlReadinessAnalogMappingUsable $node } else { Test-ControlReadinessButtonBindingUsable $node }
+        $nodes = @($byMapping[$control.ControlId])
+        if ($strict) {
+            # A game file often shows one control as several buttons (for example an axis and its keyboard halves): one usable binding is enough,
+            # and an axis also needs a declared type.
+            $isUsable = (@($nodes | Where-Object { Test-ControlReadinessButtonBindingUsable $_ }).Count -gt 0) -and ($control.Kind -ne 'Axis' -or @($nodes | Where-Object { Test-ControlReadinessAnalogMappingUsable $_ }).Count -gt 0)
+        } else {
+            $node = $nodes[$nodes.Count - 1]
+            $isUsable = if ($control.Kind -eq 'Axis') { Test-ControlReadinessAnalogMappingUsable $node } else { Test-ControlReadinessButtonBindingUsable $node }
+        }
         if ($isUsable) { [void]$usable.Add([string]$control.ControlId) }
     }
-    return [pscustomobject]@{ Fit = 'Ok'; UsableControlIds = @($usable) }
+    return [pscustomobject]@{ Fit = 'Ok'; Why = ''; UsableControlIds = @($usable) }
 }
 
 # Turns a contract and the facts about one profile into one row per control plus an overall state. Pure: the same inputs
@@ -52941,9 +52977,27 @@ function Get-TpmControlCoverageInventory {
         Structural      = $overall
         Setup           = $setupOverall
         Verification    = 'NotVerified'
+        # High only for a contract a person reviewed. A contract read from the game's own file is Medium: not reviewed.
+        Confidence      = $(if ([string]$Contract.Evidence.ReviewState -eq 'Reviewed') { 'High' } else { 'Medium' })
+        Why             = $(if ($overall -ne 'Unknown') { '' } elseif ([string]$Facts.Why) { [string]$Facts.Why } elseif ($fit -eq 'Ok') { 'NoControls' } else { '' })
         Controls        = @($rows)
         MissingControls = @($required | Where-Object { $_.Structural -eq 'Missing' } | ForEach-Object { $_.Meaning })
+        # Controls the game lists but TPM cannot say it needs (Test, Service, Coin, and ones shown only after another setting).
+        OptionalMissingControls = @($rows | Where-Object { $_.Requirement -eq 'Optional' -and $_.Structural -eq 'Missing' } | ForEach-Object { $_.Meaning })
         ReadOnly        = $true
+    }
+}
+
+# Why TPM cannot tell what a game needs, in plain words (a phrase that continues "TPM cannot tell which controls this game needs").
+function Get-TpmControlCoverageWhyText {
+    param([string]$Why)
+    switch ($Why) {
+        'NoGameFile'       { return 'TeknoParrot''s own file for this game was not found' }
+        'NoControls'       { return 'TPM does not recognize the names this game uses for its player 1 controls' }
+        'DifferentVersion' { return 'its saved settings are for a different version of the game file than TeknoParrot has now. Open it once in TeknoParrotUI' }
+        'Unreadable'       { return 'its settings file could not be read' }
+        'NoProfile'        { return 'it has no settings file yet' }
+        default            { return '' }
     }
 }
 
@@ -52957,16 +53011,119 @@ function Get-TpmControlCoverageLines {
         'Partial'     { [void]$lines.Add('Some controls this game needs are not set up yet.') }
         'Missing'     { [void]$lines.Add('The controls this game needs are not set up yet.') }
         'Unsupported' { [void]$lines.Add('This game uses an input type TPM cannot check.') }
-        default       { [void]$lines.Add('TPM cannot tell which controls this game needs.') }
+        default {
+            $whyText = Get-TpmControlCoverageWhyText -Why ([string]$Inventory.Why)
+            [void]$lines.Add($(if ($whyText) { 'TPM cannot tell which controls this game needs: ' + $whyText + '.' } else { 'TPM cannot tell which controls this game needs.' }))
+        }
     }
     $missing = @($Inventory.MissingControls)
     if ($missing.Count -gt 0) { [void]$lines.Add('Still needed: ' + ($missing -join ', ') + '.') }
+    $optional = @($Inventory.OptionalMissingControls)
+    if ($optional.Count -gt 0) { [void]$lines.Add('Not set up, and TPM cannot tell if the game needs them: ' + ($optional -join ', ') + '.') }
+    if ([string]$Inventory.Confidence -eq 'Medium') { [void]$lines.Add('TPM read this list from TeknoParrot''s own file for the game. A person has not checked it.') }
     [void]$lines.Add('TPM has not tested them in a game, so it cannot say the game is ready.')
     return @($lines)
 }
 
+# Reads TeknoParrot's own game file (GameProfiles) for one code. Returns $null when it is missing or cannot be read.
+# Sha256 is lower-case hex, the identity a contract derived from this file is bound to.
+function Read-TpmGameTemplate {
+    param([Parameter(Mandatory)][string]$Code, [string]$GameProfilesDir = '')
+    if ([string]::IsNullOrWhiteSpace($GameProfilesDir) -or $Code -ne [System.IO.Path]::GetFileName($Code) -or $Code -match '[:*?"<>|]') { return $null }
+    $path = Join-Path $GameProfilesDir "$Code.xml"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try {
+        $doc = Read-Xml $path
+        if ($null -eq $doc.GameProfile) { return $null }
+        return [pscustomobject]@{ Doc = $doc; Path = $path; Sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
+    } catch { return $null }
+}
+
+# What the game file says about itself. A saved game profile is only compared with it when all three agree.
+function Get-TpmTemplateIdentity {
+    param([Parameter(Mandatory)]$TemplateDoc)
+    $text = { param($Name) $n = $TemplateDoc.GameProfile.SelectSingleNode($Name); if ($n) { $n.InnerText.Trim() } else { '' } }
+    $revision = $null
+    $revisionText = & $text 'GameProfileRevision'
+    if ($revisionText) { [void][int]::TryParse($revisionText, [ref]$revision) }
+    return [pscustomobject]@{ ExpectedExecutableName = (& $text 'ExecutableName'); ExpectedEmulationProfile = (& $text 'EmulationProfile'); ExpectedGameProfileRevision = $revision }
+}
+
+# Builds a contract from TeknoParrot's own game file: the controls the game lists for player 1 and the cabinet, named by
+# the game's own button names. Nobody has reviewed it, so Evidence says PendingReview; the revision and hash tie it to this file.
+# Required = a player control the game always shows. Optional = Test, Service, Coin, and controls the game shows only when
+# another setting asks for them: TPM cannot tell whether the game needs those. Returns $null when the file lists no such control.
+function Get-TpmDerivedControlContract {
+    param([Parameter(Mandatory)][string]$Code, [Parameter(Mandatory)]$TemplateDoc, [Parameter(Mandatory)][string]$TemplateSha256)
+
+    $groups = [ordered]@{}
+    foreach ($node in @(Get-ButtonNodes $TemplateDoc)) {
+        $mappingNode = $node.SelectSingleNode('InputMapping')
+        if ($null -eq $mappingNode -or [string]::IsNullOrWhiteSpace($mappingNode.InnerText)) { continue }
+        $mapping = $mappingNode.InnerText.Trim()
+        if (-not $groups.Contains($mapping)) { $groups[$mapping] = New-Object System.Collections.ArrayList }
+        [void]$groups[$mapping].Add($node)
+    }
+    $controls = New-Object System.Collections.ArrayList
+    foreach ($mapping in $groups.Keys) {
+        $nodes = @($groups[$mapping])
+        $nameNode = $nodes[0].SelectSingleNode('ButtonName')
+        $label = if ($nameNode -and -not [string]::IsNullOrWhiteSpace($nameNode.InnerText)) { $nameNode.InnerText.Trim() } else { $mapping }
+        if (-not (Test-TpmMappingInPlayerOneScope -Mapping $mapping -Label $label)) { continue }
+        $isAxis = @($nodes | Where-Object { $a = $_.SelectSingleNode('AnalogType'); $a -and -not [string]::IsNullOrWhiteSpace($a.InnerText) -and $a.InnerText.Trim() -ne 'None' }).Count -gt 0
+        $onlyWhenAsked = @($nodes | Where-Object { $v = $_.SelectSingleNode('VisibleWhen'); $v -and -not [string]::IsNullOrWhiteSpace($v.InnerText) }).Count -eq $nodes.Count
+        $isCabinet = ($mapping -match '^(Test|Service\d*|Coin\d+)$')
+        [void]$controls.Add([pscustomobject]@{
+            ControlId   = $mapping
+            Kind        = $(if ($isAxis) { 'Axis' } else { 'Button' })
+            Meaning     = $label
+            Requirement = $(if ($isCabinet -or $onlyWhenAsked) { 'Optional' } else { 'Required' })
+            Bindable    = $true
+            Scope       = $(if ($isCabinet) { 'Cabinet' } else { 'Player' })
+        })
+    }
+    if ($controls.Count -eq 0) { return $null }
+
+    $identity = Get-TpmTemplateIdentity -TemplateDoc $TemplateDoc
+    $id = $Code.ToLowerInvariant()
+    if ($id.Length -gt 50) { $id = $id.Substring(0, 50) }
+    return [pscustomobject]@{
+        ContractVersion   = 'TpmControllerCapability/v1'
+        MinReaderVersion  = 1
+        ProfileId         = ($id + '-derived')
+        ProfileRevision   = 1
+        ControllerContext = [pscustomobject]@{ DeviceClass = 'Unknown'; PlayerSlot = 'P1'; SelectionSource = 'Unset' }
+        SemanticControls  = @($controls)
+        Evidence          = [pscustomobject]@{ Origin = 'UserProvided'; ReviewState = 'PendingReview'; ReviewedUtc = $null; SourceNote = 'Read from the game file TeknoParrot ships; no person has reviewed it.' }
+        # For a derived contract the contract revision is the game file's own revision.
+        GameContracts     = @([pscustomobject]@{ GameProfileId = $Code; GameProfileHash = $TemplateSha256; ContractRevision = $(if ($null -ne $identity.ExpectedGameProfileRevision -and $identity.ExpectedGameProfileRevision -ge 1) { [int]$identity.ExpectedGameProfileRevision } else { 1 }) })
+    }
+}
+
+# Picks the contract for one game and reads the facts against it. The reviewed contract wins when the saved profile is the
+# reviewed revision; otherwise the contract comes from TeknoParrot's own game file. Contract is $null, with Why, when
+# neither exists. Read-only.
+function Get-TpmGameControlContract {
+    param([Parameter(Mandatory)][string]$Code, $UserDoc = $null, $Template = $null)
+
+    $reviewed = Get-TpmControlCoverageContract -Code $Code
+    $reviewedFacts = $null
+    if ($null -ne $reviewed) {
+        $reviewedFacts = Get-TpmControlBindingFacts -Doc $UserDoc -Contract $reviewed -Code $Code
+        if ($reviewedFacts.Fit -ne 'Unknown') { return [pscustomobject]@{ Contract = $reviewed; Facts = $reviewedFacts; Source = 'Reviewed'; Why = '' } }
+    }
+    if ($null -ne $Template) {
+        $derived = Get-TpmDerivedControlContract -Code $Code -TemplateDoc $Template.Doc -TemplateSha256 $Template.Sha256
+        if ($null -eq $derived) { return [pscustomobject]@{ Contract = $null; Facts = $null; Source = 'None'; Why = 'NoControls' } }
+        $facts = Get-TpmControlBindingFacts -Doc $UserDoc -Contract $derived -Code $Code -Identity (Get-TpmTemplateIdentity -TemplateDoc $Template.Doc)
+        return [pscustomobject]@{ Contract = $derived; Facts = $facts; Source = 'Derived'; Why = '' }
+    }
+    if ($null -ne $reviewed) { return [pscustomobject]@{ Contract = $reviewed; Facts = $reviewedFacts; Source = 'Reviewed'; Why = '' } }
+    return [pscustomobject]@{ Contract = $null; Facts = $null; Source = 'None'; Why = 'NoGameFile' }
+}
+
 # Reads the profile for one code (the real UserProfile, otherwise the GameProfiles template) and returns its inventory,
-# or $null when the code has no reviewed contract. Read-only.
+# or $null when there is neither a reviewed contract nor a game file to read one from. Read-only.
 function Get-TpmControlCoverage {
     param(
         [Parameter(Mandatory)][string]$Code,
@@ -52974,11 +53131,77 @@ function Get-TpmControlCoverage {
         [string]$GameProfilesDir = ''
     )
 
-    $contract = Get-TpmControlCoverageContract -Code $Code
-    if ($null -eq $contract) { return $null }
     $doc = Read-ControlReadinessProfileDocument -Code $Code -UserProfilesDir $UserProfilesDir -GameProfilesDir $GameProfilesDir
-    $facts = Get-TpmControlBindingFacts -Doc $doc -Contract $contract -Code $Code
-    return Get-TpmControlCoverageInventory -Contract $contract -Facts $facts
+    $resolved = Get-TpmGameControlContract -Code $Code -UserDoc $doc -Template (Read-TpmGameTemplate -Code $Code -GameProfilesDir $GameProfilesDir)
+    if ($null -eq $resolved.Contract) { return $null }
+    return Get-TpmControlCoverageInventory -Contract $resolved.Contract -Facts $resolved.Facts
+}
+
+# The audit of many games: one row per registered game, and the counts. Profiles are the registered UserProfile files.
+# A game TPM cannot read a contract for is Unknown with the reason; nothing is guessed. Read-only.
+function Get-TpmControlCoverageAudit {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Profiles, [string]$GameProfilesDir = '')
+
+    $rows = New-Object System.Collections.ArrayList
+    foreach ($file in @($Profiles)) {
+        $code = [string]$file.BaseName
+        $row = [pscustomobject]@{ Code = $code; Title = $code; Structural = 'Unknown'; Confidence = 'None'; Why = ''; Missing = @(); OptionalMissing = @() }
+        try { $doc = Read-Xml $file.FullName; if ($null -eq $doc.GameProfile) { throw 'no profile' } } catch { $row.Why = 'Unreadable'; [void]$rows.Add($row); continue }
+        try { $row.Title = Get-TpmProfileFriendlyTitle -Doc $doc -BaseName $code } catch { $row.Title = $code }
+        $resolved = Get-TpmGameControlContract -Code $code -UserDoc $doc -Template (Read-TpmGameTemplate -Code $code -GameProfilesDir $GameProfilesDir)
+        if ($null -eq $resolved.Contract) { $row.Why = $resolved.Why; [void]$rows.Add($row); continue }
+        $inventory = Get-TpmControlCoverageInventory -Contract $resolved.Contract -Facts $resolved.Facts
+        $row.Structural = $inventory.Structural; $row.Confidence = $inventory.Confidence; $row.Why = $inventory.Why
+        $row.Missing = @($inventory.MissingControls); $row.OptionalMissing = @($inventory.OptionalMissingControls)
+        [void]$rows.Add($row)
+    }
+    $all = @($rows)
+    $count = { param($State) @($all | Where-Object Structural -eq $State).Count }
+    return [pscustomobject]@{
+        Total = $all.Count; Complete = (& $count 'Complete'); Partial = (& $count 'Partial'); Missing = (& $count 'Missing'); Unknown = (& $count 'Unknown'); Unsupported = (& $count 'Unsupported')
+        Rows = $all; ReadOnly = $true
+    }
+}
+
+# The plain screen for an audit: counts first, game names behind Details. Used by the Propagate Controls check and the Library health check.
+function Get-TpmControlCoverageAuditSummary {
+    param([Parameter(Mandatory)]$Audit)
+
+    $done = New-Object System.Collections.Generic.List[string]
+    [void]$done.Add(('Games with every control the game lists set up: {0} of {1}.' -f $Audit.Complete, $Audit.Total))
+    if ($Audit.Partial -gt 0) { [void]$done.Add(('Games with some of their controls set up: {0}.' -f $Audit.Partial)) }
+    if ($Audit.Missing -gt 0) { [void]$done.Add(('Games with none of their controls set up: {0}.' -f $Audit.Missing)) }
+    $needs = New-Object System.Collections.Generic.List[string]
+    if ($Audit.Unknown -gt 0) { [void]$needs.Add(('Games TPM cannot check: {0}. Details say why for each one.' -f $Audit.Unknown)) }
+    if ($Audit.Unsupported -gt 0) { [void]$needs.Add(('Games that use an input type TPM cannot check: {0}.' -f $Audit.Unsupported)) }
+
+    $blocks = New-Object System.Collections.Generic.List[object]
+    $listOf = {
+        param($State, $Heading, $Format)
+        $set = @($Audit.Rows | Where-Object Structural -eq $State | Sort-Object Title)
+        if ($set.Count -gt 0) { [void]$blocks.Add(@{ Heading = ('{0} ({1})' -f $Heading, $set.Count); Lines = @($set | ForEach-Object { & $Format $_ }) }) }
+    }
+    & $listOf 'Partial' 'Some controls missing' { param($r) '{0}: still needed: {1}.' -f $r.Title, ($r.Missing -join ', ') }
+    & $listOf 'Missing' 'No controls set up' { param($r) '{0}: still needed: {1}.' -f $r.Title, ($r.Missing -join ', ') }
+    & $listOf 'Unknown' 'TPM cannot tell' { param($r) $w = Get-TpmControlCoverageWhyText -Why $r.Why; '{0}: {1}.' -f $r.Title, $(if ($w) { $w } else { 'no information' }) }
+    & $listOf 'Unsupported' 'Input type TPM cannot check' { param($r) $r.Title }
+    $note = 'TPM has not tested any game with a real controller. "Set up" means the buttons the game lists have a setting. It does not mean the game works. For most games the list of controls comes from TeknoParrot''s own game file, and a person has not checked it.'
+    $attention = ($Audit.Partial + $Audit.Missing + $Audit.Unknown + $Audit.Unsupported) -gt 0
+    return [pscustomobject]@{
+        Title = 'Controls check. Nothing was changed.'; Status = $(if ($attention) { 'Attention' } else { 'Ok' }); Done = $done.ToArray(); Needs = $needs.ToArray()
+        Next = 'Choose 2 in the Propagate Controls menu to set up games with your controller layout.'; Blocks = $blocks.ToArray(); Note = $note
+    }
+}
+
+# The screen for the controls check (Propagate Controls choice 4).
+function Invoke-TpmControlAuditScreen {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$GameProfilesDir)
+    $files = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Controls check game list' -EnumerationErrorAction SilentlyContinue | Sort-Object BaseName)
+    if ($files.Count -eq 0) { Write-TpmText -Text 'No registered games were found.' -Color Yellow; return }
+    $audit = Invoke-TpmProgressGroup -Title 'Controls check' -Action { Get-TpmControlCoverageAudit -Profiles $files -GameProfilesDir $GameProfilesDir }
+    $summary = Get-TpmControlCoverageAuditSummary -Audit $audit
+    Write-Log ('ControlsCheck: total={0} complete={1} partial={2} missing={3} unknown={4} unsupported={5}' -f $audit.Total, $audit.Complete, $audit.Partial, $audit.Missing, $audit.Unknown, $audit.Unsupported)
+    Write-TpmOutcome -Title $summary.Title -Status $summary.Status -Done $summary.Done -Needs $summary.Needs -Next $summary.Next -DetailBlocks $summary.Blocks -DetailsNote $summary.Note
 }
 # =============================================================================
 # END MODULE-READY SECTION: Controls coverage inventory
