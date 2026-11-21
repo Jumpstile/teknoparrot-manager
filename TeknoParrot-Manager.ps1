@@ -43537,13 +43537,13 @@ function Get-TpmDeviceQuestions {
 function Read-TpmCabinetState {
     param([string]$StateRoot = '')
     $file = Read-TpmControlStateFile -Path (Get-TpmControlStatePath -StateRoot $StateRoot).Cabinet
-    $state = [pscustomobject]@{ Version = 1; Devices = [pscustomobject]@{}; Players = 0; ButtonsPerPlayer = 0; Keys = [pscustomobject]@{}; FileStatus = $file.Status }
+    $state = [pscustomobject]@{ Version = 1; Devices = [pscustomobject]@{}; Players = 0; ButtonsPerPlayer = 0; EncodersWhenLearned = -1; Keys = [pscustomobject]@{}; FileStatus = $file.Status }
     if ($file.Status -eq 'Ok') {
         foreach ($name in @('Devices', 'Keys')) {
             $property = $file.Data.PSObject.Properties[$name]
             if ($property -and $property.Value -is [System.Management.Automation.PSCustomObject]) { $state.$name = $property.Value }
         }
-        foreach ($name in @('Players', 'ButtonsPerPlayer')) {
+        foreach ($name in @('Players', 'ButtonsPerPlayer', 'EncodersWhenLearned')) {
             $property = $file.Data.PSObject.Properties[$name]
             $number = 0
             if ($property -and [int]::TryParse([string]$property.Value, [ref]$number)) { $state.$name = $number }
@@ -43554,7 +43554,7 @@ function Read-TpmCabinetState {
 
 function Save-TpmCabinetState {
     param([Parameter(Mandatory)]$State, [string]$StateRoot = '')
-    $data = [pscustomobject]@{ Version = 1; Devices = $State.Devices; Players = [int]$State.Players; ButtonsPerPlayer = [int]$State.ButtonsPerPlayer; Keys = $State.Keys }
+    $data = [pscustomobject]@{ Version = 1; Devices = $State.Devices; Players = [int]$State.Players; ButtonsPerPlayer = [int]$State.ButtonsPerPlayer; EncodersWhenLearned = [int]$State.EncodersWhenLearned; Keys = $State.Keys }
     Save-TpmControlStateFile -Path (Get-TpmControlStatePath -StateRoot $StateRoot).Cabinet -Data $data
 }
 
@@ -43652,43 +43652,91 @@ function Get-TpmKeysFromLedBlinkyMap {
 
 function Test-TpmKeyPressAvailable { return (-not [Console]::IsInputRedirected) }
 
-# Waits for one key press and returns its plain name: 'Escape' for Esc, '' when nothing was pressed in time. Ctrl, Alt and Shift
-# do not reach the console on their own, so they are watched through Windows' key state for as long as this waits.
+function Initialize-TpmKeyProbe {
+    if (-not ('TpmKeyProbe' -as [type])) {
+        Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class TpmKeyProbe { [DllImport("user32.dll")] static extern short GetAsyncKeyState(int k); public static bool Down(int k) { return (GetAsyncKeyState(k) & 0x8000) != 0; } public static int Modifier() { int[] keys = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5 }; foreach (int k in keys) { if (Down(k)) return k; } return 0; } }'
+    }
+}
+
+# Windows virtual-key codes of the six Shift, Ctrl and Alt keys, with the plain names TPM shows.
+function Get-TpmModifierNames { return @{ 160 = 'Left Shift'; 161 = 'Right Shift'; 162 = 'Left Ctrl'; 163 = 'Right Ctrl'; 164 = 'Left Alt'; 165 = 'Right Alt' } }
+
+# The key name inside what a key reader returned: a plain name, or an object with Key.
+function Get-TpmPressKey {
+    param($Press)
+    if ($null -eq $Press) { return '' }
+    if ($Press -is [string]) { return $Press }
+    return [string]$Press.Key
+}
+
+# Waits for one key press. Returns '' when nothing was pressed in time, otherwise { Key; Also; Held }:
+#   Key   the plain name ('Escape' for Esc). Ctrl, Alt and Shift do not reach the console on their own, so Windows' key state is watched too.
+#   Also  other keys that arrived within 80 ms of it (a button that sends two keys, or two buttons on one wire).
+#   Held  the key was still down 3 seconds later (a stuck or jammed button).
 function Read-TpmLearnKey {
     param([int]$TimeoutSeconds = 30)
-    if (-not ('TpmKeyProbe' -as [type])) {
-        Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class TpmKeyProbe { [DllImport("user32.dll")] static extern short GetAsyncKeyState(int k); public static int Modifier() { int[] keys = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5 }; foreach (int k in keys) { if ((GetAsyncKeyState(k) & 0x8000) != 0) return k; } return 0; } }'
-    }
-    $modifierNames = @{ 160 = 'Left Shift'; 161 = 'Right Shift'; 162 = 'Left Ctrl'; 163 = 'Right Ctrl'; 164 = 'Left Alt'; 165 = 'Right Alt' }
+    Initialize-TpmKeyProbe
+    $modifierNames = Get-TpmModifierNames
     while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) }
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        if ([Console]::KeyAvailable) { return (ConvertTo-TpmKeyName -Name ([Console]::ReadKey($true).Key.ToString())) }
-        $modifier = [TpmKeyProbe]::Modifier()
-        if ($modifier -ne 0) {
-            while ([TpmKeyProbe]::Modifier() -ne 0) { Start-Sleep -Milliseconds 20 }
+        $first = ''; $firstCode = 0
+        if ([Console]::KeyAvailable) { $info = [Console]::ReadKey($true); $first = ConvertTo-TpmKeyName -Name $info.Key.ToString(); $firstCode = [int]$info.Key }
+        else { $modifier = [TpmKeyProbe]::Modifier(); if ($modifier -ne 0) { $first = [string]$modifierNames[[int]$modifier]; $firstCode = $modifier } }
+        if ($first) {
+            Start-Sleep -Milliseconds 80
+            $also = New-Object System.Collections.Generic.List[string]
+            while ([Console]::KeyAvailable) { $name = ConvertTo-TpmKeyName -Name ([Console]::ReadKey($true).Key.ToString()); if ($name -ne $first -and -not $also.Contains($name)) { [void]$also.Add($name) } }
+            foreach ($code in 160..165) { $name = [string]$modifierNames[$code]; if ($code -ne $firstCode -and $name -ne $first -and [TpmKeyProbe]::Down($code) -and -not $also.Contains($name)) { [void]$also.Add($name) } }
+            $stopWaiting = (Get-Date).AddSeconds(3)
+            while ([TpmKeyProbe]::Down($firstCode) -and (Get-Date) -lt $stopWaiting) { Start-Sleep -Milliseconds 20 }
+            $held = [TpmKeyProbe]::Down($firstCode)
             while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) }
-            return [string]$modifierNames[[int]$modifier]
+            return [pscustomobject]@{ Key = $first; Also = @($also.ToArray()); Held = $held }
         }
         Start-Sleep -Milliseconds 25
     }
     return ''
 }
 
+# Watches the keyboard while nobody should be touching the cabinet. Returns the names of keys that were pressed or kept arriving
+# on their own (a button stuck down, a wire shorted): empty when all stayed quiet.
+function Get-TpmKeysPressedOnTheirOwn {
+    param([int]$Seconds = 2)
+    Initialize-TpmKeyProbe
+    $modifierNames = Get-TpmModifierNames
+    $names = New-Object System.Collections.Generic.List[string]
+    Start-Sleep -Milliseconds 400
+    while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) }
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        while ([Console]::KeyAvailable) { $name = ConvertTo-TpmKeyName -Name ([Console]::ReadKey($true).Key.ToString()); if (-not $names.Contains($name)) { [void]$names.Add($name) } }
+        foreach ($code in 160..165) { if ([TpmKeyProbe]::Down($code) -and -not $names.Contains([string]$modifierNames[$code])) { [void]$names.Add([string]$modifierNames[$code]) } }
+        Start-Sleep -Milliseconds 25
+    }
+    return @($names.ToArray())
+}
+
 # Asks for each control in turn ("Press Player 1 Start") and records the key. -ReadKey is the key reader (a script block, so tests
-# need no keyboard). Esc skips a control, a key already given to another control is refused, and nothing pressed asks whether to
-# stop. -Known holds keys already given (control id -> key name) so they count for the duplicate check.
+# need no keyboard); it returns a key name or an object with Key, Also and Held (see Read-TpmLearnKey). Esc skips a control, a key
+# already given to another control is refused, and nothing pressed asks whether to stop. -Known holds keys already given
+# (control id -> key name) so they count for the duplicate check.
+# Two things are only reported, never decided: a press that also sent another key (Together), and a button still down after
+# 3 seconds (Held). The first key is kept either way. Together lists, per control, the other keys that came with it.
 function Invoke-TpmLearnKeys {
     param([Parameter(Mandatory)][object[]]$Controls, [Parameter(Mandatory)][scriptblock]$ReadKey, [System.Collections.IDictionary]$Known = $null)
     $learned = [ordered]@{}
     $skipped = New-Object System.Collections.Generic.List[string]
+    $held = New-Object System.Collections.Generic.List[string]
+    $together = [ordered]@{}
     $stopped = $false
     $number = 0
     foreach ($control in $Controls) {
         $number++
         while ($true) {
             Write-TpmText -Text ('({0} of {1}) Press {2}   (Esc = skip)' -f $number, $Controls.Count, $control.Label) -Color Cyan
-            $key = [string](& $ReadKey)
+            $press = & $ReadKey
+            $key = Get-TpmPressKey -Press $press
             if ($key -eq '') {
                 if ((Read-TpmYesNo -Prompt '  Nothing was pressed. Stop learning here? (Y/N)' -Default 'N') -eq 'Y') { $stopped = $true; break }
                 continue
@@ -43704,11 +43752,29 @@ function Invoke-TpmLearnKeys {
             }
             $learned[[string]$control.Control] = $key
             Write-TpmText -Text ('Got it: {0}' -f $key) -Color Green -Indent 4
+            $also = @(); $isHeld = $false
+            if ($press -isnot [string] -and $null -ne $press) { $also = @($press.Also | Where-Object { $_ }); $isHeld = [bool]$press.Held }
+            if ($also.Count -gt 0) {
+                $together[[string]$control.Control] = $also
+                Write-TpmText -Text ('Pressing this also sent {0}. TPM kept {1}. Some encoders do this on purpose. Two buttons on one wire can do it too.' -f ($also -join ' and '), $key) -Color Yellow -Indent 4
+            }
+            if ($isHeld) {
+                [void]$held.Add([string]$control.Label)
+                Write-TpmText -Text 'This button was still down after 3 seconds. It may be stuck. Check it before you rely on it.' -Color Yellow -Indent 4
+            }
             break
         }
         if ($stopped) { break }
     }
-    return [pscustomobject]@{ Keys = $learned; Skipped = @($skipped.ToArray()); Stopped = $stopped }
+    # The same extra key arriving with two or more different controls is the clear sign of something wired together or stuck.
+    $labels = @{}
+    foreach ($control in $Controls) { $labels[[string]$control.Control] = [string]$control.Label }
+    $byKey = @{}
+    foreach ($id in $together.Keys) { foreach ($extra in $together[$id]) { if (-not $byKey.ContainsKey($extra)) { $byKey[$extra] = New-Object System.Collections.Generic.List[string] }; [void]$byKey[$extra].Add($labels[$id]) } }
+    foreach ($extra in @($byKey.Keys | Sort-Object)) {
+        if ($byKey[$extra].Count -ge 2) { Write-TpmText -Text ('{0} came along with {1} different controls ({2}). Something may be wired together, or stuck.' -f $extra, $byKey[$extra].Count, ($byKey[$extra] -join ', ')) -Color Yellow }
+    }
+    return [pscustomobject]@{ Keys = $learned; Skipped = @($skipped.ToArray()); Stopped = $stopped; Together = $together; Held = @($held.ToArray()) }
 }
 
 # Plain lines about what the cabinet file holds. Used by the My controls screen and the printable cabinet page.
@@ -43731,6 +43797,56 @@ function Get-TpmCabinetSummaryLines {
     return @($lines.ToArray())
 }
 
+# The key layout that MAME and Ultimarc I-PAC boards both ship with (control id -> key name). Sources: MAME's default keys page
+# (docs.mamedev.org/usingmame/defaultkeys.html) and Ultimarc's "Default Keycode Table" (ultimarc.com/control-interfaces/i-pacs/i-pac2/).
+# Only controls where the two lists agree are here. They differ for player 2 buttons 5 to 8 and for player 4, and neither
+# lists Test or Service, so those are left out. An encoder can be changed, so these keys are only used after a check.
+function Get-TpmStandardArcadeKeys {
+    $keys = [ordered]@{}
+    $coin = @('5', '6', '7', '8'); $start = @('1', '2', '3', '4')
+    for ($p = 1; $p -le 4; $p++) { $keys["Coin$p"] = $coin[$p - 1]; $keys["P${p}ButtonStart"] = $start[$p - 1] }
+    $sticks = @{ 1 = @('Up arrow', 'Down arrow', 'Left arrow', 'Right arrow'); 2 = @('R', 'F', 'D', 'G'); 3 = @('I', 'K', 'J', 'L') }
+    $buttons = @{ 1 = @('Left Ctrl', 'Left Alt', 'Space', 'Left Shift', 'Z', 'X', 'C', 'V'); 2 = @('A', 'S', 'Q', 'W'); 3 = @('Right Ctrl', 'Right Shift', 'Enter') }
+    foreach ($p in 1..3) {
+        $i = 0
+        foreach ($direction in @('Up', 'Down', 'Left', 'Right')) { $keys["P${p}Button$direction"] = $sticks[$p][$i]; $i++ }
+        $n = 0
+        foreach ($key in $buttons[$p]) { $n++; $keys["P${p}Button$n"] = $key }
+    }
+    return $keys
+}
+
+# Asks the player to press player 1 Start and player 1 button 1, and passes only when both send the key the standard layout says.
+# A guess about the layout is never kept on its own: a changed encoder fails this check. Reason: NoCheck, NothingPressed or Different.
+function Test-TpmStandardKeysSpotCheck {
+    param([Parameter(Mandatory)]$Proposed, [Parameter(Mandatory)][object[]]$Controls, [Parameter(Mandatory)][scriptblock]$ReadKey)
+    $checks = @($Controls | Where-Object { $_.Control -in @('P1ButtonStart', 'P1Button1') -and $Proposed.Contains([string]$_.Control) })
+    if ($checks.Count -eq 0) { return [pscustomobject]@{ Passed = $false; Reason = 'NoCheck'; Got = '' } }
+    foreach ($check in $checks) {
+        Write-TpmText -Text ('To check, press {0}.' -f $check.Label) -Color Cyan
+        $key = Get-TpmPressKey -Press (& $ReadKey)
+        if ($key -eq '' -or $key -eq 'Escape') { return [pscustomobject]@{ Passed = $false; Reason = 'NothingPressed'; Got = '' } }
+        if ($key -ne [string]$Proposed[[string]$check.Control]) { return [pscustomobject]@{ Passed = $false; Reason = 'Different'; Got = $key } }
+    }
+    return [pscustomobject]@{ Passed = $true; Reason = ''; Got = '' }
+}
+
+# How many arcade encoders detection can see right now at Medium or High confidence; -1 when detection could not look.
+function Get-TpmEncoderCount {
+    param($Evidence)
+    if ($null -eq $Evidence -or [string]$Evidence.EvidenceStatus -ne 'Observed') { return -1 }
+    return [int](@($Evidence.DeviceObservations | Where-Object { $_.DeviceClass -eq 'ArcadeEncoder' -and $_.Confidence -in @('High', 'Medium') } | Measure-Object -Property Count -Sum).Sum)
+}
+
+# A hint, never a decision: the number of encoders TPM could see when the buttons were learned differs from now. The count is a
+# note about the past. It is not evidence about the present, and no vendor or product number is involved.
+function Get-TpmEncoderChangeNotice {
+    param([Parameter(Mandatory)]$Cabinet, [Parameter(Mandatory)][int]$EncodersNow)
+    $then = [int]$Cabinet.EncodersWhenLearned
+    if (@($Cabinet.Keys.PSObject.Properties).Count -eq 0 -or $then -lt 0 -or $EncodersNow -lt 0 -or $then -eq $EncodersNow) { return '' }
+    return ('When you taught TPM your buttons it could see {0} arcade encoder{1}. Now it sees {2}. If you changed your encoder, learn your buttons again.' -f $then, $(if ($then -eq 1) { '' } else { 's' }), $EncodersNow)
+}
+
 # The screen that learns the arcade buttons. Nothing is saved until the player says Y at the end.
 function Invoke-TpmButtonLearning {
     param([string]$StateRoot = '')
@@ -43749,6 +43865,14 @@ function Invoke-TpmButtonLearning {
     $labels = @{}
     foreach ($control in $controls) { $labels[[string]$control.Control] = [string]$control.Label }
 
+    # Before anything is pressed: is a button already stuck down, or are keys arriving on their own?
+    Write-TpmText -Text 'First TPM checks that no button is stuck. Keep your hands off the cabinet for 2 seconds.' -Color DarkCyan -BlankBefore
+    $onTheirOwn = @(Get-TpmKeysPressedOnTheirOwn)
+    if ($onTheirOwn.Count -gt 0) {
+        Write-TpmText -Text ('Keys are arriving with nobody pressing a button: ' + ($onTheirOwn -join ', ') + '. A button may be stuck down, or two wires may touch.') -Color Yellow
+        if ((Read-TpmYesNo -Prompt '  Continue anyway? The keys below may be learned wrong. (Y/N)' -Default 'N') -ne 'Y') { Write-TpmText -Text 'Stopped. Nothing was saved.' -Color DarkGray; return }
+    }
+
     # LEDBlinky keeps its own list of which key each control sends. Offer it first so only the rest has to be pressed.
     $ledRoot = [string](Get-Variable -Name ledBlinkyRoot -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
     $proposed = Get-TpmKeysFromLedBlinkyMap -KeyMap (Get-TpmLedBlinkyKeyMap -Root @($ledRoot)) -Controls $controls
@@ -43757,6 +43881,30 @@ function Invoke-TpmButtonLearning {
         foreach ($id in $proposed.Keys) { Write-TpmText -Text ('{0} = {1}' -f $labels[$id], $proposed[$id]) -Color DarkGray -Indent 4 }
         if ((Read-TpmYesNo -Prompt '  Use these keys? (Y = yes, N = I will press them myself)' -Default 'Y') -eq 'Y') {
             foreach ($id in $proposed.Keys) { $keys[$id] = @{ Key = $proposed[$id]; Source = 'LedBlinkyKeyMap' } }
+        }
+    }
+    # The standard arcade keys (MAME and Ultimarc I-PAC ship with them) for the controls still open. Used only after the player
+    # says the encoder was never changed and a button press on the cabinet agrees.
+    $standard = Get-TpmStandardArcadeKeys
+    $standardOffer = [ordered]@{}
+    $taken = @($keys.Values | ForEach-Object { $_.Key })
+    foreach ($control in $controls) {
+        $id = [string]$control.Control
+        if (-not $keys.Contains($id) -and $standard.Contains($id) -and $taken -notcontains $standard[$id]) { $standardOffer[$id] = $standard[$id] }
+    }
+    if ($standardOffer.Count -gt 0) {
+        Write-TpmText -Text ('Many arcade encoders ship with the standard arcade keys that MAME and Ultimarc I-PAC boards use. If yours was never changed, TPM can use them for {0} controls.' -f $standardOffer.Count) -Color DarkCyan -BlankBefore
+        $showStandard = { foreach ($id in $standardOffer.Keys) { Write-TpmText -Text ('{0} = {1}' -f $labels[$id], $standardOffer[$id]) -Color DarkGray -Indent 4 } }
+        if ((Read-TpmYesNo -Prompt '  Try the standard keys? TPM checks two buttons first. (Y/N, D = show the keys)' -Default 'N' -DetailsAction $showStandard) -eq 'Y') {
+            $check = Test-TpmStandardKeysSpotCheck -Proposed $standardOffer -Controls $controls -ReadKey { Read-TpmLearnKey }
+            if ($check.Passed) {
+                foreach ($id in $standardOffer.Keys) { $keys[$id] = @{ Key = $standardOffer[$id]; Source = 'StandardArcadeKeys' } }
+                Write-TpmText -Text 'Both buttons sent the standard keys, so TPM will use them.' -Color Green
+            } elseif ($check.Reason -eq 'Different') {
+                Write-TpmText -Text ('That button sent {0}, not the standard key. Your encoder is not set to the standard keys, so you will press each control yourself.' -f $check.Got) -Color Yellow
+            } else {
+                Write-TpmText -Text 'TPM did not see the check button, so it will not use the standard keys. You will press each control yourself.' -Color Yellow
+            }
         }
     }
     $known = [ordered]@{}
@@ -43779,6 +43927,7 @@ function Invoke-TpmButtonLearning {
     }
     try {
         Set-TpmCabinetKeys -State $cabinet -Keys $keys -Players $players -ButtonsPerPlayer $buttons
+        $cabinet.EncodersWhenLearned = (Get-TpmEncoderCount -Evidence (Get-TpmControllerEvidence))
         Save-TpmCabinetState -State $cabinet -StateRoot $StateRoot
         Write-Log ('Controls: learned {0} of {1} arcade controls ({2} players, {3} buttons each).' -f $keys.Count, $controls.Count, $players, $buttons)
         Write-TpmText -Text 'Saved. TPM will not ask you to press these again.' -Color Green
@@ -43909,10 +44058,58 @@ function Get-TpmVerificationLines {
 }
 
 # --- Cabinet inventory and control guides (#267) ----------------------------
-# Plain guide for one game: each control the game lists, what it does, which of the player's controls it is, and whether the
-# game has it set up. The keys come from the cabinet file, so a guide is only as good as what the player taught TPM.
+# What to suggest for one control of a game. State: Suggested (the player taught TPM a key for it), NotLearned (TPM knows which
+# control it is, but not its key) or NotSure. TPM only names a key for a standard arcade control: coin, start, test, service,
+# a numbered button, or a direction the game plainly calls a direction. A direction the game calls something else ("Menu Up",
+# "Volume Down") and any control TPM has no rule for are NotSure. TPM never guesses.
+function Get-TpmGameKeyChoice {
+    param([Parameter(Mandatory)]$Control, [Parameter(Mandatory)]$Cabinet)
+    $id = switch ($Control.Kind) {
+        'Button' { [string]$Control.Mapping }
+        'Direction' { [string]$Control.Mapping }
+        'Start' { 'P{0}ButtonStart' -f $Control.Player }
+        'Coin' { 'Coin{0}' -f $Control.Player }
+        'Service' { 'Service' }
+        'Test' { 'Test' }
+        default { '' }
+    }
+    if (-not $id) { return [pscustomobject]@{ State = 'NotSure'; Text = 'I''m not sure' } }
+    if ($Control.Kind -eq 'Direction' -and -not (Test-TpmDirectionName -Name ([string]$Control.Label))) {
+        return [pscustomobject]@{ State = 'NotSure'; Text = ('I''m not sure (the game calls this "{0}")' -f $Control.Label) }
+    }
+    $key = Get-TpmCabinetKey -State $Cabinet -Control $id
+    if ($key) { return [pscustomobject]@{ State = 'Suggested'; Text = ('Key: ' + $key) } }
+    return [pscustomobject]@{ State = 'NotLearned'; Text = 'Not learned yet' }
+}
+
+# The colors the player's own LEDBlinky file gives to the controls of one game (LED control name -> color), read from the
+# TeknoParrot group of that game first, then the TeknoParrot defaults. Read-only. A missing or unreadable file gives no colors.
+function Get-TpmLedControlColors {
+    param([string]$Root = '', [Parameter(Mandatory)][string]$Code)
+    $colors = @{}
+    try {
+        if ((Get-TpmLedBlinkyFolderProblem -Path $Root) -ne '') { return $colors }
+        $doc = New-Object System.Xml.XmlDocument
+        $doc.XmlResolver = $null
+        $doc.LoadXml([System.IO.File]::ReadAllText((Join-Path $Root 'LEDBlinkyControls.xml')))
+        $groups = @($doc.SelectNodes('/dat/emulator[@emuname="TeknoParrot"]/controlGroup'))
+        $own = @($groups | Where-Object { $_.GetAttribute('groupName') -ieq $Code })
+        $defaults = @($groups | Where-Object { $_.GetAttribute('groupName') -eq 'DEFAULT' })
+        foreach ($group in (@($own) + @($defaults))) {
+            foreach ($node in @($group.SelectNodes('player/control[@color]'))) {
+                $name = $node.GetAttribute('name')
+                if ($name -and $node.GetAttribute('color') -and -not $colors.ContainsKey($name)) { $colors[$name] = $node.GetAttribute('color') }
+            }
+        }
+    } catch { return @{} }
+    return $colors
+}
+
+# Plain guide for one game: each control the game lists, what it does, which key TPM suggests, and whether the game has it
+# set up. The keys come from the cabinet file, so a guide is only as good as what the player taught TPM. -LedColors (from
+# Get-TpmLedControlColors) adds a Light column.
 function Get-TpmGameControlGuide {
-    param([Parameter(Mandatory)]$Doc, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)]$Cabinet, $Verification = $null)
+    param([Parameter(Mandatory)]$Doc, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)]$Cabinet, $Verification = $null, [hashtable]$LedColors = $null)
     $bound = @{}
     foreach ($button in @(Get-ButtonNodes $Doc)) {
         $mapping = $button.SelectSingleNode('InputMapping')
@@ -43920,27 +44117,26 @@ function Get-TpmGameControlGuide {
     }
     $profileControls = Get-TpmLedProfileControls -Doc $Doc
     $deviceFor = @{ Trackball = 'PointerOrTrackball'; Spinner = 'Spinner'; Pedal = 'Wheel' }
+    $showLight = ($null -ne $LedColors -and $LedColors.Count -gt 0)
     $rows = New-Object System.Collections.Generic.List[object]
+    $suggested = 0
+    $notSure = New-Object System.Collections.Generic.List[string]
     foreach ($control in @($profileControls.Controls)) {
-        $id = switch ($control.Kind) {
-            'Button' { [string]$control.Mapping }
-            'Direction' { [string]$control.Mapping }
-            'Start' { 'P{0}ButtonStart' -f $control.Player }
-            'Coin' { 'Coin{0}' -f $control.Player }
-            'Service' { 'Service' }
-            'Test' { 'Test' }
-            default { '' }
-        }
-        $yours = ''
-        if ($id) {
-            $key = Get-TpmCabinetKey -State $Cabinet -Control $id
-            $yours = $(if ($key) { 'Key: ' + $key } else { 'Not learned yet' })
-        } elseif ($deviceFor.ContainsKey([string]$control.Kind)) {
+        if ($deviceFor.ContainsKey([string]$control.Kind)) {
             $answer = Get-TpmCabinetDeviceAnswer -State $Cabinet -Class $deviceFor[[string]$control.Kind]
             $yours = $(if ($answer -eq $true) { 'Your ' + (@(Get-TpmDeviceQuestions | Where-Object { $_.Class -eq $deviceFor[[string]$control.Kind] })[0].Label -replace '^an? ', '') } elseif ($answer -eq $false) { 'You said you do not have one' } else { 'Not answered yet' })
+        } else {
+            $choice = Get-TpmGameKeyChoice -Control $control -Cabinet $Cabinet
+            $yours = $choice.Text
+            if ($choice.State -eq 'Suggested') { $suggested++ } elseif ($choice.State -eq 'NotSure') { [void]$notSure.Add([string]$control.Label) }
         }
         $inGame = $(if ($bound.ContainsKey([string]$control.Mapping) -and $bound[[string]$control.Mapping]) { 'Set up' } else { 'Not set up yet' })
-        [void]$rows.Add([pscustomobject]@{ Cells = @([string]$control.Label, $yours, $inGame, [string]$control.Mapping) })
+        $cells = @([string]$control.Label, $yours, $inGame, [string]$control.Mapping)
+        if ($showLight) {
+            $color = $(if ($control.Exact) { [string]$LedColors[[string]$control.Exact] } else { '' })
+            $cells += $(if (-not $color) { '' } elseif ($color -match '^[A-Za-z ]+$') { $color } else { 'a custom color' })
+        }
+        [void]$rows.Add([pscustomobject]@{ Cells = $cells })
     }
     $lines = New-Object System.Collections.Generic.List[string]
     $needs = switch ([string]$profileControls.Family) {
@@ -43952,9 +44148,14 @@ function Get-TpmGameControlGuide {
     }
     if ($needs) { [void]$lines.Add($needs) }
     if ($rows.Count -eq 0) { [void]$lines.Add('This game does not list any controls TPM can read.') }
+    elseif ($suggested -gt 0) { [void]$lines.Add(('TPM can suggest a key for {0} of the {1} controls below.' -f $suggested, $rows.Count)) }
+    if ($notSure.Count -gt 0) { [void]$lines.Add('TPM is not sure what to suggest for: ' + (@($notSure | Select-Object -First 6) -join ', ') + $(if ($notSure.Count -gt 6) { (' and {0} more' -f ($notSure.Count - 6)) } else { '' }) + '.') }
     if ($null -ne $Verification) { foreach ($line in @(Get-TpmVerificationLines -Verification $Verification)) { [void]$lines.Add($line) } }
     [void]$lines.Add('"Key" is what you taught TPM. "Set up" means the game has a setting for it. TPM has not pressed any of them for you.')
-    return [pscustomobject]@{ Title = ('Controls for ' + $Title); Lines = @($lines.ToArray()); Columns = @('What it does', 'Your control', 'In the game', 'TeknoParrot name'); Rows = @($rows.ToArray()) }
+    if ($showLight) { [void]$lines.Add('"Light" is the color your own LEDBlinky file gives that control. TPM does not change any lights.') }
+    $columns = @('What it does', 'Your control', 'In the game', 'TeknoParrot name')
+    if ($showLight) { $columns += 'Light' }
+    return [pscustomobject]@{ Title = ('Controls for ' + $Title); Lines = @($lines.ToArray()); Columns = $columns; Rows = @($rows.ToArray()) }
 }
 
 # The cabinet as a page: one row per control TPM knows a key for.
@@ -44107,11 +44308,14 @@ function Invoke-TpmGameCheckScreen {
 # The My controls screen: what TPM knows about the player's controls, and the four things to do about it.
 function Invoke-TpmControlsScreen {
     param([Parameter(Mandatory)][string]$UserProfilesDir, [string]$StateRoot = '')
+    $encodersNow = Get-TpmEncoderCount -Evidence (Get-TpmControllerEvidence)
     while ($true) {
         $cabinet = Read-TpmCabinetState -StateRoot $StateRoot
         Write-Host ''
         Write-TpmText -Text 'My controls' -Color Cyan
         foreach ($line in @(Get-TpmCabinetSummaryLines -State $cabinet)) { Write-TpmText -Text $line -Color DarkCyan }
+        $encoderNotice = Get-TpmEncoderChangeNotice -Cabinet $cabinet -EncodersNow $encodersNow
+        if ($encoderNotice) { Write-TpmText -Text $encoderNotice -Color Yellow }
         if ($cabinet.FileStatus -eq 'Unreadable') { Write-TpmText -Text 'TPM could not read its saved answers. A copy is kept before anything new is saved.' -Color Yellow }
         Write-Host ''
         Write-TpmText -Text '1 = Tell TPM which controls I have' -Indent 4
@@ -44127,7 +44331,8 @@ function Invoke-TpmControlsScreen {
                 $game = Read-TpmControlsGamePick -UserProfilesDir $UserProfilesDir
                 if ($game) {
                     $verification = Get-TpmControlVerificationState -Code $game.Code -Doc $game.Doc -StateRoot $StateRoot
-                    Invoke-TpmGuideOffer -Guide (Get-TpmGameControlGuide -Doc $game.Doc -Title $game.Title -Cabinet $cabinet -Verification $verification) -FileName ($game.Code + '-controls.html')
+                    $colors = Get-TpmLedControlColors -Root ([string](Get-Variable -Name ledBlinkyRoot -Scope Script -ValueOnly -ErrorAction SilentlyContinue)) -Code $game.Code
+                    Invoke-TpmGuideOffer -Guide (Get-TpmGameControlGuide -Doc $game.Doc -Title $game.Title -Cabinet $cabinet -Verification $verification -LedColors $colors) -FileName ($game.Code + '-controls.html')
                 }
             }
             '4' { Invoke-TpmGameCheckScreen -UserProfilesDir $UserProfilesDir -StateRoot $StateRoot }
