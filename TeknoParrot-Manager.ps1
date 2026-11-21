@@ -19799,9 +19799,34 @@ $script:PostgresInstallDir  = "C:\Program Files (x86)\PostgreSQL\8.3"
 $script:PostgresBinDir      = Join-Path $script:PostgresInstallDir "bin"
 $script:PostgresServiceName = "pgsql-8.3"
 
-# Returns $true if this profile has any Postgres-category field at all.
+# Where a game keeps its database, from the profile's Database > Storage field (newer TeknoParrot profiles).
+# Returns 'Internal', 'ExistingPostgreSQL', or $null when the field is missing, repeated or has another value
+# (an older profile: it is treated exactly as before). TeknoParrot Manager only reads this field; it never writes it.
+function Get-TpmGameDatabaseStorage {
+    param([System.Xml.XmlDocument]$Doc)
+    $nodes = $Doc.SelectNodes("/GameProfile/ConfigValues/FieldInformation[CategoryName='Database' and FieldName='Storage']")
+    if ($nodes.Count -ne 1) { return $null }
+    $value = $nodes[0].SelectSingleNode('FieldValue')
+    if ($null -eq $value) { return $null }
+    $text = ([string]$value.InnerText).Trim()
+    if ($text -ieq 'Internal') { return 'Internal' }
+    if ($text -ieq 'Existing PostgreSQL') { return 'ExistingPostgreSQL' }
+    return $null
+}
+
+# Two plain sentences for every screen that talks about a game's database (the choice belongs to the user).
+function Get-TpmDatabaseChoiceLines {
+    return @(
+        'Internal is the new default. The game keeps its own database, no database install is needed, and the game must be started once so it creates that database.',
+        'Existing PostgreSQL is for keeping an existing PostgreSQL server and its saved progress. TeknoParrot Manager never switches a game from one to the other for you; you change it in the game''s TeknoParrot settings.'
+    )
+}
+
+# Returns $true if this profile uses PostgreSQL: it has Postgres-category fields and its Storage is not Internal.
+# A game set to Internal needs no PostgreSQL, so every PostgreSQL check, install prompt and setup step skips it.
 function Test-GameNeedsPostgres {
     param([System.Xml.XmlDocument]$Doc)
+    if ((Get-TpmGameDatabaseStorage -Doc $Doc) -eq 'Internal') { return $false }
     $node = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[CategoryName='Postgres']")
     return ($null -ne $node)
 }
@@ -19822,19 +19847,30 @@ function Invoke-TpmPostgresRegistrationOffer {
     param([Parameter(Mandatory)][string]$UserProfilesDir, [string[]]$RegisteredCodes = @(), [switch]$Unattended, [switch]$DryRun)
     if ($Unattended -or $DryRun -or @($RegisteredCodes).Count -eq 0) { return $false }
     $newGames = New-Object System.Collections.Generic.List[string]
+    $newInternal = New-Object System.Collections.Generic.List[string]
+    $existingChosen = $false
     $otherCount = 0
     foreach ($pf in @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue)) {
         try {
             $doc = Read-Xml $pf.FullName
+            if ($doc.GameProfile -and $RegisteredCodes -contains $pf.BaseName -and (Get-TpmGameDatabaseStorage -Doc $doc) -eq 'Internal') { [void]$newInternal.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)); continue }
             if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc) -or (Test-TpmPostgresSettingsComplete -Doc $doc)) { continue }
+            if ((Get-TpmGameDatabaseStorage -Doc $doc) -eq 'ExistingPostgreSQL') { $existingChosen = $true }
         } catch { continue }
         if ($RegisteredCodes -contains $pf.BaseName) { [void]$newGames.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)) } else { $otherCount++ }
+    }
+    if ($newInternal.Count -gt 0) {
+        Write-Host ''
+        Write-Host ('  {0} you just added use{1} Internal storage: {2}.' -f $(if ($newInternal.Count -eq 1) { 'A game' } else { 'Games' }), $(if ($newInternal.Count -eq 1) { 's' } else { '' }), ($newInternal -join ', ')) -ForegroundColor Cyan
+        foreach ($choiceLine in (Get-TpmDatabaseChoiceLines)) { Write-Host ('  ' + $choiceLine) -ForegroundColor DarkCyan }
+        Write-Log ('Registration: {0} new game(s) use Internal database storage; no PostgreSQL is needed for them: {1}.' -f $newInternal.Count, ($newInternal -join ', '))
     }
     if ($newGames.Count -eq 0) { return $false }
     Write-Host ''
     Write-Host ('  {0} you just added need{1} PostgreSQL: {2}.' -f $(if ($newGames.Count -eq 1) { 'A game' } else { 'Games' }), $(if ($newGames.Count -eq 1) { 's' } else { '' }), ($newGames -join ', ')) -ForegroundColor Cyan
     Write-Host '  PostgreSQL is a small database program. These games keep their data in it' -ForegroundColor DarkCyan
     Write-Host '  and will not start without it.' -ForegroundColor DarkCyan
+    if ($existingChosen) { Write-Host '  They are set to Existing PostgreSQL. The new default, Internal, needs no database install; nothing is switched for you.' -ForegroundColor DarkCyan }
     if (Test-PostgresInstalled) { Write-Host '  PostgreSQL is already on this PC.' -ForegroundColor DarkCyan; Write-Host '  TeknoParrot Manager can set up the game now.' -ForegroundColor DarkCyan }
     else { Write-Host '  PostgreSQL is not on this PC yet.' -ForegroundColor DarkCyan; Write-Host '  TeknoParrot Manager can install it and set up the game now.' -ForegroundColor DarkCyan }
     if ($otherCount -gt 0) { Write-Host ('  {0} other game(s) already registered also still need PostgreSQL settings.' -f $otherCount) -ForegroundColor DarkCyan }
@@ -19852,6 +19888,7 @@ function Invoke-TpmPostgresRegistrationOffer {
 function Get-TpmPostgresRequirementScan {
     param([Parameter(Mandatory)][AllowEmptyCollection()][System.IO.FileInfo[]]$ProfileFiles)
     $needCount = 0
+    $internalCount = 0
     $scanBlocked = $false
     $scanStarted = Get-Date
     $scanCurrent = 0
@@ -19863,6 +19900,7 @@ function Get-TpmPostgresRequirementScan {
             try {
                 $doc = Read-Xml $profileFile.FullName
                 if ($doc.GameProfile -and (Test-GameNeedsPostgres $doc)) { $needCount++ }
+                elseif ($doc.GameProfile -and (Get-TpmGameDatabaseStorage -Doc $doc) -eq 'Internal') { $internalCount++ }
             } catch {
                 $scanBlocked = $true
                 Write-Log "Postgres setup: profile scan failed for $($profileFile.BaseName); recovery is blocked."
@@ -19872,7 +19910,7 @@ function Get-TpmPostgresRequirementScan {
     } finally {
         Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'PostgreSQL requirement profile scan' -Current $(if ($scanCurrentDone) { $scanCurrent } else { $scanCurrent - 1 }) -Total $ProfileFiles.Count -StartedAt $scanStarted -Complete -Outcome $(if ($scanCurrentDone -and -not $scanBlocked) { 'Final' } else { 'Error' })
     }
-    return [pscustomobject]@{ NeedCount = $needCount; ScanBlocked = $scanBlocked }
+    return [pscustomobject]@{ NeedCount = $needCount; InternalCount = $internalCount; ScanBlocked = $scanBlocked }
 }
 
 # Reads one named field's current value from the Postgres category, or
@@ -37951,6 +37989,7 @@ function Invoke-LibraryHealthCheck {
     $postgresNeededLabels = New-Object System.Collections.Generic.List[string]
     $postgresConfiguredLabels = New-Object System.Collections.Generic.List[string]
     $postgresAutoCreateLabels = New-Object System.Collections.Generic.List[string]
+    $internalDatabaseLabels = New-Object System.Collections.Generic.List[string]
     $postgresConfiguredChecks = New-Object System.Collections.Generic.List[object]
 
     $profileCurrent = 0
@@ -37967,6 +38006,7 @@ function Invoke-LibraryHealthCheck {
                 continue
             }
             try {
+                if ((Get-TpmGameDatabaseStorage -Doc $doc) -eq 'Internal') { [void]$internalDatabaseLabels.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)) }
                 if (Test-GameNeedsPostgres $doc) {
                     $label = Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
                     $configurationComplete = Test-TpmPostgresSettingsComplete -Doc $doc
@@ -38211,6 +38251,7 @@ function Invoke-LibraryHealthCheck {
         PostgresNeeded = $postgresNeededResult
         PostgresConfigured = $postgresConfiguredResult
         PostgresAutoCreateProfiles = $postgresAutoCreateResult
+        InternalDatabaseLabels = @($internalDatabaseLabels.ToArray())
         PostgresDatabaseProblems = $postgresDatabaseProblemsResult
         PostgresDatabaseCheck = $postgresDatabaseCheck
         PostgresDatabaseNotChecked = @($postgresDatabaseSkipped.ToArray())
@@ -38303,6 +38344,8 @@ function Get-TpmLibraryHealthRows {
     }
     $postgresRow = Get-TpmLibraryHealthPostgresRow -Result $Result
     if ($null -ne $postgresRow) { [void]$rows.Add($postgresRow) }
+    $internalCount = @(Get-TpmTransactionField -Object $Result -Name 'InternalDatabaseLabels' -Default @()).Count
+    if ($internalCount -gt 0) { [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game database' -Text ('OK - {0} {1} Internal storage, so no database install is needed. Start each game once so it creates its own database' -f (Format-TpmGameCount -Count $internalCount), $(if ($internalCount -eq 1) { 'uses' } else { 'use' })) -Color 'Green')) }
     $prerequisiteRow = Get-TpmLibraryHealthPrerequisiteRow -Result $Result
     if ($null -ne $prerequisiteRow) { [void]$rows.Add($prerequisiteRow) }
     $gameSupport = Get-TpmTransactionField -Object $Result -Name 'GameSupport' -Default $null
@@ -38497,6 +38540,11 @@ function Get-TpmLibraryHealthDetailBlocks {
         }
     } else {
         [void]$lines.Add('Setup needs: Not reported - the game check was incomplete, so setup needs and filled-in counts are withheld.')
+    }
+    $internalDatabaseLabels = @(Get-TpmTransactionField -Object $Result -Name 'InternalDatabaseLabels' -Default @())
+    if ($internalDatabaseLabels.Count -gt 0) {
+        [void]$lines.Add(('Games using Internal storage (no PostgreSQL needed): {0}' -f (Format-TpmNameList -Names $internalDatabaseLabels -Max 1000)))
+        foreach ($choiceLine in (Get-TpmDatabaseChoiceLines)) { [void]$lines.Add($choiceLine) }
     }
     [void]$blocks.Add(@{ Heading = 'PostgreSQL'; Lines = $lines.ToArray() })
 
@@ -52723,7 +52771,7 @@ function Get-MainMenuSections {
         Header = 'Game Requirements (only for some games)'
         Column = 'Right'
         Items  = @(
-            [pscustomobject]@{ Number = 11; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'Local PostgreSQL for Golden Tee Live 2020 and other IT games.'; FullDesc = @('Installs/configures local PostgreSQL for', 'Incredible Technologies games, including', 'Golden Tee Live 2020, Golden Tee Live,', 'Power Putt Live, Silver Strike Bowling Live,', 'and Target Toss Pro. A missing game database', 'is made from the game''s own backup.', 'Every game database is then tested with the', 'game''s own settings before it is called ready.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
+            [pscustomobject]@{ Number = 11; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'PostgreSQL for games set to Existing PostgreSQL.'; FullDesc = @('For games set to Existing PostgreSQL.', 'Installs/configures local PostgreSQL 8.3 for', 'Golden Tee Live (2020 too), Power Putt Live,', 'Silver Strike Bowling Live, Target Toss Pro.', 'Games on Internal storage (the new default)', 'need no database install and are skipped.', 'A missing game database is made from the', 'game''s own backup, then tested before ready.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
             [pscustomobject]@{ Number = 12; Mode = 'RequiredPatch'; Label = 'Required game patches'; ShortDesc = 'Find and safely install supported required fixes from your local ZIPs.'; FullDesc = @('Find required patches for supported exact', 'game builds using your local Main or', 'Supplementary ZIP files. TPM validates the', 'game, backs up, applies, and verifies files.', 'A verified patch is not gameplay proof.') }
         )
     }
@@ -54106,8 +54154,10 @@ $mode = $null
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " PostgreSQL Setup (Incredible Technologies games)" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
-        Write-Host "  Includes Golden Tee Live 2020. This step makes its two databases from the game's own backup." -ForegroundColor DarkGray
-        Write-Host "  Every game database is tested with the game's own settings before setup says it is ready." -ForegroundColor DarkGray
+        Write-Host "  Each game has one database. A game on Internal storage makes its own, so it is skipped here." -ForegroundColor DarkGray
+        Write-Host "  For every game that uses PostgreSQL, this step makes that game's database from the game's own backup" -ForegroundColor DarkGray
+        Write-Host "  when it is missing, then tests it with the game's own settings before setup says it is ready." -ForegroundColor DarkGray
+        foreach ($choiceLine in (Get-TpmDatabaseChoiceLines)) { Write-Host ('  ' + $choiceLine) -ForegroundColor DarkGray }
         $postgresStatus = New-TpmWorkflowStatusContext -WorkflowKey 'PostgresSetup' -Title 'PostgreSQL setup' -Steps @(
             @{ Id = 'scan'; Label = 'Check which games need PostgreSQL' }
             @{ Id = 'database'; Label = 'Back up existing databases' }
@@ -54170,8 +54220,12 @@ $mode = $null
         }
         [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Succeeded -Summary 'Game requirements checked' -NextStep 'Back up existing databases')
         if ($needCount -eq 0) {
-            Write-Host "  No registered games need PostgreSQL -- nothing to do." -ForegroundColor Green
-            Write-Log "Postgres setup: no Postgres-needing games registered."
+            Write-Host "  No registered game needs PostgreSQL -- nothing to do." -ForegroundColor Green
+            if ([int]$requirementScan.InternalCount -gt 0) {
+                Write-Host ("  {0} game(s) use Internal storage. No database install is needed." -f [int]$requirementScan.InternalCount) -ForegroundColor Green
+                Write-Host "  Start each game once so it creates its own database." -ForegroundColor Green
+            }
+            Write-Log ("Postgres setup: no game is set to Existing PostgreSQL; {0} game(s) use Internal storage." -f [int]$requirementScan.InternalCount)
             [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'database' -Activity 'No PostgreSQL repair is needed')
             [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Skipped -Summary 'No registered game needs PostgreSQL')
             [void](Complete-TpmWorkflowStatus -Context $postgresStatus -Summary 'No action needed')
@@ -54183,6 +54237,7 @@ $mode = $null
             continue
         }
         Write-Host ("  {0} registered game(s) need PostgreSQL." -f $needCount) -ForegroundColor Cyan
+        if ([int]$requirementScan.InternalCount -gt 0) { Write-Host ("  {0} other game(s) use Internal storage. They need no database install and are skipped." -f [int]$requirementScan.InternalCount) -ForegroundColor DarkGray }
         if (-not (Test-PostgresInstalled) -and -not (Test-RunningAsAdministrator)) {
             # The leftover check is read-only: show its refusal here, because the administrator window closes by itself.
             $leftoversBeforeHandoff = Get-PostgresPartialInstallInventory
