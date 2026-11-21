@@ -882,6 +882,15 @@
     Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro,
     Orange County Choppers Pinball).
 
+    Newer TeknoParrot profiles of these games have a Storage box. Internal
+    is the new default: no database install is needed, and you start the
+    game once so it makes its own database. Existing PostgreSQL is for
+    keeping an existing server and its saved progress. Postgres setup and
+    Library health check skip Internal games and never call their database
+    missing. TeknoParrot Manager never switches a game from one choice to
+    the other, and never touches saved progress without a backup first.
+    Older profiles with no Storage box work as before.
+
     It detects which of your registered games need it automatically. It
     never reinstalls an existing PostgreSQL install. It does not recreate
     or restore over a database that already exists unless you choose a

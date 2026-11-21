@@ -75,6 +75,18 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   missing.
 - The game list now also reads a second program and a test menu program
   for games that list them.
+- Golden Tee Live and PGA Tour, PowerPutt Live, Silver Strike Bowling
+  Live, Target Toss Pro and OCC Pinball: newer TeknoParrot profiles let
+  you choose where the game keeps its database. Internal is the new
+  default. It needs no database install, and you start the game once so
+  it makes its own database. Existing PostgreSQL is for keeping an
+  existing server and its saved progress. The Manager reads your choice.
+  For Internal games it skips every PostgreSQL check, install offer and
+  "database missing" warning. For games set to Existing PostgreSQL,
+  nothing changes: the same checks, setup, backups and restores, still
+  with PostgreSQL 8.3. The Manager never switches a game from one choice
+  to the other and never touches saved progress without a backup first.
+  Older profiles with no choice work as before.
 
 ### Other fixes
 - After unpacking, when every new game was also registered in
