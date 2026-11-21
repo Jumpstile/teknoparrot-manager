@@ -50737,9 +50737,9 @@ function New-TpmLaunchBoxSyncPlan {
             $fileName = [System.IO.Path]::GetFileName($application)
             if (-not $fileName -or $fileName -notlike '*.xml') { continue }
             $title = Get-XmlChildText $game 'Title'
-            $profile = $profileFiles[$fileName.ToLowerInvariant()]
-            if (-not $profile) { [void]$goneGames.Add($game); continue }
-            $expected = Get-RelativePath $LbRoot $profile
+            $profileFile = $profileFiles[$fileName.ToLowerInvariant()]
+            if (-not $profileFile) { [void]$goneGames.Add($game); continue }
+            $expected = Get-RelativePath $LbRoot $profileFile
             if (-not (Test-TpmLaunchBoxSamePath -Root $LbRoot -Left $application -Right $expected)) {
                 Set-XmlChildText $game 'ApplicationPath' $expected
                 Set-XmlChildText $game 'DateModified' (Get-Date).ToString('o')
@@ -50748,7 +50748,7 @@ function New-TpmLaunchBoxSyncPlan {
             $databaseId = (Get-XmlChildText $game 'DatabaseID').Trim()
             if ($databaseId -and $databaseId -ne '0') { continue }
             $code = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
-            $subject = Get-TpmProfileMatchSubject -Code $code -ProfilePath $profile -TpRoot $TpRoot -HintName $title -DatIndex $DatIndex -DatByCode $datByCode
+            $subject = Get-TpmProfileMatchSubject -Code $code -ProfilePath $profileFile -TpRoot $TpRoot -HintName $title -DatIndex $DatIndex -DatByCode $datByCode
             if ($subject.NotGame) { continue }
             $currentKey = ConvertTo-TpmGamesDbKey $title
             $knownKeys = @($subject.KnownTitles | ForEach-Object { ConvertTo-TpmGamesDbKey $_ })
@@ -50763,13 +50763,13 @@ function New-TpmLaunchBoxSyncPlan {
             $application = Get-XmlChildText $app 'ApplicationPath'
             $fileName = [System.IO.Path]::GetFileName($application)
             if (-not $fileName -or $fileName -notlike '*.xml') { continue }
-            $profile = $profileFiles[$fileName.ToLowerInvariant()]
-            if (-not $profile) {
+            $profileFile = $profileFiles[$fileName.ToLowerInvariant()]
+            if (-not $profileFile) {
                 [void]$removed.Add([pscustomobject]@{ Title = (Get-XmlChildText $app 'Name'); Kind = 'Version' })
                 [void]$doc.DocumentElement.RemoveChild($app)
                 continue
             }
-            $expected = Get-RelativePath $LbRoot $profile
+            $expected = Get-RelativePath $LbRoot $profileFile
             if (-not (Test-TpmLaunchBoxSamePath -Root $LbRoot -Left $application -Right $expected)) {
                 Set-XmlChildText $app 'ApplicationPath' $expected
                 [void]$moved.Add([pscustomobject]@{ Title = (Get-XmlChildText $app 'Name'); Old = $application; New = $expected })
