@@ -374,22 +374,22 @@ Describe 'FIX44 absent database with unknown auto-create capability is created, 
     }
 
     Context 'explicit auto-create values keep their existing behavior' {
-        # Mutation: bring back the deferral to TeknoParrot for auto-create 1 without a backup -> setup says SUCCEEDED, nothing is
-        # created and the game is left without a database.
-        It 'leaves out the game, naming it, when the profile says TeknoParrot creates the database but the game has no bundled backup' {
+        # Mutation: leave the game out as "not ready" when the profile says TeknoParrot creates the database and the game has no bundled
+        # backup (the owner rule on #350 is that TeknoParrot's own option handles it) -> ACTION_REQUIRED and an unwritten profile.
+        It 'sets up the profile and leaves the database to TeknoParrot when the profile says TeknoParrot creates the database and the game has no bundled backup' {
             $fx = New-F44Fixture -Name 'e'
             $expressProfile = New-F44Profile -Fixture $fx -Name 'ExpressGame' -DbName 'GameDBExpress' -AutoCreate '1' -NoBackup
-            $before = [System.IO.File]::ReadAllBytes($expressProfile)
             Install-F44Mocks -Fixture $fx
+            Mock Get-PostgresGameDatabaseReadiness { [pscustomobject]@{ Ready = $false; TableCount = 0; Error = 'Could not connect with the settings saved in the game profile: FATAL: database "GameDBExpress" does not exist' } }
 
             $result = Invoke-F44Setup -Fixture $fx
 
-            $result.Outcome | Should -BeExactly 'ACTION_REQUIRED'
+            $result.Outcome | Should -BeExactly 'SUCCEEDED'
             @(Get-F44Calls -Tool 'createdb.exe').Count | Should -Be 0
             $fx.State.Exists.ContainsKey('GameDBExpress') | Should -BeFalse
-            @($result.NotReadyGames | ForEach-Object { $_.Key }) | Should -Be @('ExpressGame')
-            (@($result.Warnings) -join ' | ') | Should -Match 'ExpressGame.*No starting database file came with this game'
-            [System.IO.File]::ReadAllBytes($expressProfile) | Should -Be $before
+            @($result.NotReadyGames).Count | Should -Be 0
+            @($result.GameOutcomes)[0].Outcome | Should -BeExactly 'WaitingForFirstStart'
+            (Get-PostgresFieldValue (Read-Xml $expressProfile) 'Pass') | Should -BeExactly 'fixture-password'
         }
 
         # Mutation: ignore the bundled backup for an explicit 0.

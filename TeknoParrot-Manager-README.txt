@@ -878,9 +878,9 @@
     See BEPINEX SETUP below. Available as menu option 9.
 
   - Postgres setup. Installs and configures the local PostgreSQL 8.3
-    database that some Incredible Technologies games need (Golden Tee
-    Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro,
-    Orange County Choppers Pinball).
+    database that some Incredible Technologies games need (every Golden
+    Tee Live and PGA Tour game, Power Putt Live, Silver Strike Bowling
+    Live, Target Toss Pro, Orange County Choppers Pinball).
 
     Newer TeknoParrot profiles of these games have a Storage box. Internal
     is the new default: no database install is needed, and you start the
@@ -912,9 +912,13 @@
     tests it with the game's own settings before it says the game is ready.
     For a game set to Existing PostgreSQL you do not need any extra step in
     TeknoParrot or on the first start. A game set to Internal storage is
-    skipped: start it once so it makes its own database. A
-    game with no starting database file (pg_backup) is left out and named.
-    The other games are still set up.
+    skipped: start it once so it makes its own database. A game with no
+    starting database file (pg_backup) and TeknoParrot's "Automatically
+    create Database" option (Golden Tee Live 2018 and newer, PGA Tour)
+    gets its profile set up and is called "Profile ready": TeknoParrot
+    makes the database the first time the game starts. Any other game
+    with no starting database file is left out and named. The other games
+    are still set up.
 
     See POSTGRES SETUP below. Available as menu option 11.
 
@@ -1542,9 +1546,9 @@
 
   11) Postgres setup
        Installs and sets up the local PostgreSQL 8.3 database that some
-       Incredible Technologies games need (Golden Tee Live, Power Putt
-       Live, Silver Strike Bowling Live, Target Toss Pro, Orange County
-       Choppers Pinball).
+       Incredible Technologies games need (every Golden Tee Live and PGA
+       Tour game, Power Putt Live, Silver Strike Bowling Live, Target Toss
+       Pro, Orange County Choppers Pinball).
 
        It finds by itself which of your registered games need it.
 
@@ -1575,9 +1579,10 @@
 
        Every game database is tested before setup says it is ready:
        TeknoParrot Manager connects to it with the settings saved in the
-       game's own profile and counts its tables. If a game has no starting
-       database file (pg_backup), setup leaves that game out, sets up all
-       the other games, and names the game as not ready.
+       game's own profile and counts its tables. A game with no starting
+       database file (pg_backup) is "Profile ready" when TeknoParrot
+       creates its database itself; otherwise setup leaves that game out,
+       sets up all the other games, and names the game as not ready.
 
        See POSTGRES SETUP below for full details.
 
@@ -4417,7 +4422,8 @@
 
     These games need it:
 
-      - Golden Tee Live (2006-2020)
+      - Golden Tee Live (2006-2023, 2025, 2026)
+      - Golden Tee PGA Tour (2021-2023, 2025, 2026)
       - Power Putt Live (2012/2013)
       - Silver Strike Bowling Live
       - Target Toss Pro (Bags / Lawn Darts)
@@ -4505,10 +4511,13 @@
       that was already there.
 
     No starting database file:
-      A game with no pg_backup folder cannot be made ready. Setup leaves
-      that game out (nothing is created or changed for it), sets up the
-      other games, and names it under "Could NOT be made ready". The run
-      is shown as needing attention. Put the game's pg_backup folder
+      If the profile has "Automatically create Database" set to 1 (Golden
+      Tee Live 2018 and newer, PGA Tour), setup still saves the
+      connection settings and says "Profile ready". TeknoParrot makes the
+      database the first time the game starts. For any other game, setup
+      leaves the game out (nothing is created or changed for it), sets up
+      the other games, and names it under "Could NOT be made ready". The
+      run is shown as needing attention. Put the game's pg_backup folder
       back, then run setup again.
 
     If a database cannot be opened with the game's own settings, setup

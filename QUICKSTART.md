@@ -976,7 +976,7 @@ If you type D, the details appear and then `Press Enter to return to menu.` asks
 | The database was already there | `Ready: {name}. The database was already there and was checked.` |
 | Created from the game's own backup | `Ready: {name}. The database was created from the game's own backup and checked.` |
 
-"Checked" means TeknoParrot Manager connected to the database with the settings saved in the game's own profile and found its tables. If a game has no starting database file (`pg_backup`), setup leaves that game out, sets up every other game, and names it on the result screen as `Could NOT be made ready` with the reason `No starting database file came with this game, so its database cannot be built.` The run is then shown as needing attention.
+"Checked" means TeknoParrot Manager connected to the database with the settings saved in the game's own profile and found its tables. If a game has no starting database file (`pg_backup`) but its profile says TeknoParrot creates the database itself (Golden Tee Live 2018 and newer, Golden Tee PGA Tour), setup saves the settings and names it `Profile ready`: start the game once and TeknoParrot makes the database. Any other game with no starting database file is left out and named on the result screen as `Could NOT be made ready` with the reason `No starting database file came with this game, so its database cannot be built.` The run is then shown as needing attention.
 
 If several games share a result, the line uses plural words, for example `Ready: {list}. The databases were already there and were checked.`
 

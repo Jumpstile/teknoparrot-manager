@@ -9100,38 +9100,71 @@ $FuzzyTieMargin = 0.1
 # (dat lookup, then manual-registration ACTION REQUIRED) for both. See
 # issue #15.
 function Resolve-BestFuzzyMatch {
-    param([string]$NormFolder, [array]$MatchList, [hashtable]$RawThrillsAliases, [string]$NormBaseTitle = '')
-    $best = $null; $bestScore = 0.0; $secondScore = 0.0
+    param([string]$NormFolder, [array]$MatchList, [hashtable]$RawThrillsAliases, [string]$NormBaseTitle = '', [hashtable]$AlternateNames = $null)
+    $best = $null; $bestScore = 0.0; $secondScore = 0.0; $bestIsExact = $false; $exactCount = 0
     foreach ($cand in $MatchList) {
         $normCode = Get-NormalizedGameKey $cand.Code
-        $score    = Get-DiceSimilarity $NormFolder $normCode
-        # A folder name often carries notes in parentheses or brackets after the title, for example "(Landscape,Bezel)" or "(fixed video)".
-        # They are not part of the game's name and pull the score down, so the title before the first note is scored as well.
-        # The better of the two scores is used; the same tie rule below still applies.
-        if ($NormBaseTitle) {
-            $baseScore = Get-DiceSimilarity $NormBaseTitle $normCode
-            if ($baseScore -gt $score) { $score = $baseScore }
+        $keys = @($normCode)
+        # TeknoParrot's own name for the game (Metadata\<code>.json) is a second name for the same profile, for example
+        # "Golden Tee Live 2023-2024" for GoldenTeeLive2023. It is only an extra key; the profile code is always scored too.
+        if ($null -ne $AlternateNames -and $AlternateNames.ContainsKey($cand.Code)) {
+            $normAltName = Get-NormalizedGameKey ([string]$AlternateNames[$cand.Code])
+            if ($normAltName) { $keys += $normAltName }
+        }
+        $score = 0.0
+        foreach ($key in $keys) {
+            $keyScore = Get-DiceSimilarity $NormFolder $key
+            # A folder name often carries notes in parentheses or brackets after the title, for example "(Landscape,Bezel)" or "(fixed video)".
+            # They are not part of the game's name and pull the score down, so the title before the first note is scored as well.
+            # The better of the two scores is used; the same tie rule below still applies.
+            if ($NormBaseTitle) {
+                $baseScore = Get-DiceSimilarity $NormBaseTitle $key
+                if ($baseScore -gt $keyScore) { $keyScore = $baseScore }
+            }
+            if ($keyScore -gt $score) { $score = $keyScore }
         }
         if ($RawThrillsAliases.ContainsKey($cand.Code)) {
             $normAlias  = Get-NormalizedGameKey $RawThrillsAliases[$cand.Code].Suggested
             $aliasScore = Get-DiceSimilarity $NormFolder $normAlias
             if ($aliasScore -gt $score) { $score = $aliasScore }
         }
+        $isExact = ($NormFolder.Length -gt 0 -and $keys -ccontains $NormFolder)
+        if ($isExact) { $exactCount++ }
         if ($score -gt $bestScore) {
             $secondScore = $bestScore
             $bestScore   = $score
             $best        = $cand
+            $bestIsExact = $isExact
         } elseif ($score -gt $secondScore) {
             $secondScore = $score
         }
     }
-    $isTie = ($secondScore -gt 0) -and (($bestScore - $secondScore) -lt $FuzzyTieMargin)
+    # Two years of one game ("Golden Tee Live 2020" and "Golden Tee Live 2021") score within the tie margin of each other, so a folder
+    # that names one of them exactly would never be trusted. When exactly one candidate has the folder's whole name and it also scores strictly higher than every other, it wins.
+    $isTie = ($secondScore -gt 0) -and (($bestScore - $secondScore) -lt $FuzzyTieMargin) -and -not ($bestIsExact -and $exactCount -eq 1 -and $bestScore -gt $secondScore)
     return [pscustomobject]@{
         Best             = $best
         BestScore        = $bestScore
         SecondScore      = $secondScore
         IsConfidentMatch = ($null -ne $best) -and ($bestScore -ge $FuzzyAutoThreshold) -and -not $isTie
     }
+}
+
+# TeknoParrot's own game name (Metadata\<code>.json, a sibling of the GameProfiles folder) for each profile code that has one: code -> name.
+# Read once per code and remembered for the run. A missing or unreadable file simply leaves the code out.
+function Get-TpmTeknoParrotNamesForCodes {
+    param([Parameter(Mandatory)][string]$GameProfilesDir, [string[]]$Codes = @())
+    $names = @{}
+    $tpRoot = Split-Path -Path $GameProfilesDir -Parent
+    if ([string]::IsNullOrWhiteSpace($tpRoot)) { return $names }
+    $cache = Get-Variable -Name TpmTeknoParrotNameCache -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($cache -isnot [hashtable]) { $cache = @{}; $script:TpmTeknoParrotNameCache = $cache }
+    foreach ($code in $Codes) {
+        $cacheKey = $tpRoot + '|' + $code
+        if (-not $cache.ContainsKey($cacheKey)) { $cache[$cacheKey] = (Get-TpmTeknoParrotGameName -TpRoot $tpRoot -ProfileCode $code) }
+        if (-not [string]::IsNullOrWhiteSpace([string]$cache[$cacheKey])) { $names[$code] = [string]$cache[$cacheKey] }
+    }
+    return $names
 }
 
 # Scans $folder recursively for files that TeknoParrot profiles use as their
@@ -19820,15 +19853,18 @@ function Test-GpuFixUpToDate {
 # POSTGRESQL DETECTION  (read-only helpers, shared by Postgres setup mode
 # and the Library health check's coverage report)
 # =============================================================================
-# Several Incredible Technologies games (Golden Tee Live, Power Putt Live,
-# Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers
-# Pinball) need a local PostgreSQL 8.3 database. Their Postgres settings
+# Every Incredible Technologies game with a database (all Golden Tee Live and
+# PGA Tour years, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro,
+# Orange County Choppers Pinball: 31 profiles in the TeknoParrot install checked
+# in November 2026) needs a local PostgreSQL 8.3 database. Their Postgres settings
 # live inside ConfigValues/FieldInformation under CategoryName=Postgres --
 # the same generic per-game-setting structure GPU Fix/FFB Blaster above
-# already use -- confirmed against a real Golden Tee Live 2019 GameProfile.
-# Field names are standardized across every such game (it's the same
-# settings panel design), so unlike GPU Fix this never needs per-game
-# field-name variant matching -- just the category existence check below.
+# already use. Field names are identical across every such profile (Path,
+# Address, Port, DbName, User, Pass, and "Automatically create Database" on
+# Golden Tee Live 2018 and newer), so unlike GPU Fix this never needs per-game
+# field-name variant matching -- just the category existence check below. No
+# game name or year is listed here on purpose: a new game of this kind works
+# as soon as its profile has the category.
 
 $script:PostgresInstallDir  = "C:\Program Files (x86)\PostgreSQL\8.3"
 $script:PostgresBinDir      = Join-Path $script:PostgresInstallDir "bin"
@@ -29348,6 +29384,10 @@ function Get-TpmPostgresSetupOutcomeLine {
         if ($many) { return ('Ready: {0}. The databases were created from the games'' own backups and checked.' -f $list) }
         return ('Ready: {0}. The database was created from the game''s own backup and checked.' -f $list)
     }
+    if ($Outcome -eq 'WaitingForFirstStart') {
+        if ($many) { return ('Profile ready: {0}. TeknoParrot makes their databases itself the first time each game starts.' -f $list) }
+        return ('Profile ready: {0}. TeknoParrot makes its database itself the first time the game starts.' -f $list)
+    }
     if ($many) { return ('Ready: {0}. The databases were already there and were checked.' -f $list) }
     return ('Ready: {0}. The database was already there and was checked.' -f $list)
 }
@@ -29361,6 +29401,12 @@ function Get-TpmPostgresSetupGameDetail {
     $happened = 'The database was already there. TeknoParrot Manager left it untouched.'
     if ($Game.Outcome -eq 'CreatedFromBackup') {
         $happened = 'The database did not exist. TeknoParrot Manager created it and restored the backup that comes with the game.'
+    }
+    if ($Game.Outcome -eq 'WaitingForFirstStart') {
+        return [pscustomobject]@{
+            Happened = 'The database does not exist yet and no starting database file came with the game. TeknoParrot Manager saved the connection settings in the profile and left the database to TeknoParrot (its "Automatically create Database" option).'
+            Means = 'The profile is ready. TeknoParrot creates the database the first time the game starts.'
+        }
     }
     $tables = ''
     $tableProperty = $Game.PSObject.Properties['TableCount']
@@ -29427,7 +29473,7 @@ function Write-TpmPostgresSetupResult {
         $readyText = if ($games.Count -gt 0) { '{0} set up and checked, and ready.' -f (Format-TpmGameCount -Count $games.Count) } else { 'No game database was set up. Nothing was created.' }
         [void]$entries.Add(@{ Text = $readyText; Color = 'Green'; Indent = 4; Hanging = 2 })
     }
-    foreach ($kind in @('CreatedFromBackup', 'AlreadyExisted')) {
+    foreach ($kind in @('CreatedFromBackup', 'AlreadyExisted', 'WaitingForFirstStart')) {
         $names = @($games | Where-Object { $_.Outcome -eq $kind } | ForEach-Object { Get-TpmPostgresSetupGameName -Game $_ })
         if ($names.Count -gt 0) { [void]$entries.Add(@{ Text = (Get-TpmPostgresSetupOutcomeLine -Outcome $kind -Names $names); Color = ''; Indent = 4; Hanging = 2 }) }
     }
@@ -29463,6 +29509,8 @@ function Write-TpmPostgresSetupResult {
     Write-Host ''
     if ($notReadyGames.Count -gt 0) {
         Write-TpmText -Text 'Next: put the pg_backup folder back for the games that are not ready, then run PostgreSQL setup again.' -Color DarkGray -Indent 2 -MaxWidth 0
+    } elseif (@($games | Where-Object { $_.Outcome -eq 'WaitingForFirstStart' }).Count -gt 0) {
+        Write-TpmText -Text 'Next: open TeknoParrot and start the game once. TeknoParrot makes the database of each profile-ready game itself.' -Color DarkGray -Indent 2 -MaxWidth 0
     } else {
         Write-TpmText -Text 'Next: open TeknoParrot and start any game. Every game database was checked and is ready.' -Color DarkGray -Indent 2 -MaxWidth 0
     }
@@ -29659,7 +29707,7 @@ function Invoke-PostgresGameSetupLocked {
         if ($Outcome -in @('SUCCEEDED','NO_OP')) {
             foreach ($plan in $preflightPlans) {
                 $label = Get-TpmGameDisplayLabel -ProfilePath $plan.Profile.FullName -Fallback $plan.Profile.BaseName
-                $gameOutcome = if ($plan.CreateMode -eq 'RestoreBundledBackup') { 'CreatedFromBackup' } else { 'AlreadyExisted' }
+                $gameOutcome = if ($plan.CreateMode -eq 'RestoreBundledBackup') { 'CreatedFromBackup' } elseif ($plan.PSObject.Properties['AwaitingFirstStart'] -and [bool]$plan.AwaitingFirstStart) { 'WaitingForFirstStart' } else { 'AlreadyExisted' }
                 $tableCount = if ($plan.PSObject.Properties['VerifiedTableCount']) { [int]$plan.VerifiedTableCount } else { 0 }
                 $constraintNames = if ($plan.PSObject.Properties['KnownRestoreConstraintNames']) { @($plan.KnownRestoreConstraintNames) } else { @() }
                 [void]$gameOutcomes.Add([pscustomobject]@{ Key = [string]$plan.Profile.BaseName; Name = [string]$label; DbName = [string]$plan.DbName; Outcome = $gameOutcome; AutoCreateUnknown = ($null -eq $plan.AutoCreate); TableCount = $tableCount; KnownConstraintNames = $constraintNames; KnownWarningCount = $(if ($plan.PSObject.Properties['KnownRestoreWarningCount']) { [int]$plan.KnownRestoreWarningCount } else { 0 }) })
@@ -29675,8 +29723,14 @@ function Invoke-PostgresGameSetupLocked {
                 } elseif ($null -eq $plan.AutoCreate) {
                     $Warnings += ('{0} [{1}] ({2}): this TeknoParrot build does not say whether it creates the database automatically. The database already existed and was left untouched.' -f $label, $plan.Profile.BaseName, $plan.DbName)
                 }
-                $FinalChecks += ('{0} [{1}] ({2}): ready. Connected with the game''s own profile settings and found {3} tables.' -f $label, $plan.Profile.BaseName, $plan.DbName, $tableCount)
+                if ($gameOutcome -eq 'WaitingForFirstStart') {
+                    $FinalChecks += ('{0} [{1}] ({2}): profile ready. TeknoParrot makes the database the first time the game starts.' -f $label, $plan.Profile.BaseName, $plan.DbName)
+                } else {
+                    $FinalChecks += ('{0} [{1}] ({2}): ready. Connected with the game''s own profile settings and found {3} tables.' -f $label, $plan.Profile.BaseName, $plan.DbName, $tableCount)
+                }
             }
+            $waitingCount = @($gameOutcomes | Where-Object { $_.Outcome -eq 'WaitingForFirstStart' }).Count
+            if ($waitingCount -gt 0) { $Summary = $Summary + (' TeknoParrot makes the database of {0} itself the first time the game starts.' -f (Format-TpmGameCount -Count $waitingCount)) }
         }
         # FIXDB27: a game that was left out of this run (no starting database file) means the run is never a clean success.
         $notReadyGames = @()
@@ -29953,15 +30007,24 @@ function Invoke-PostgresGameSetupLocked {
                         }
                         if (-not $backupFile) {
                             if ($unfinishedOwned) { throw ('The database {0} was left unfinished by an earlier setup and must be built again, but the game''s backup file could not be found. Nothing was removed. Connect the drive that holds the game, then run this setup again.' -f $dbName) }
-                            # FIXDB27: one game with no starting file must not stop the others. It is left out of this run (nothing is created or
-                            # changed for it) and reported as not ready; every other game is set up and checked as usual.
-                            $excludedLabel = Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
-                            [void]$excludedGames.Add([pscustomobject]@{ Key = [string]$pf.BaseName; Name = [string]$excludedLabel; DbName = [string]$dbName })
-                            Write-Log ('Postgres setup: {0} [{1}] ({2}) was left out: the database does not exist and no starting database file came with the game.' -f $excludedLabel, $pf.BaseName, $dbName)
-                            continue
+                            if ($autoCreate -eq $true) {
+                                # Owner rule (issue #350): TeknoParrot's own "Automatically create Database" handles a game that ships no starting database file.
+                                # The profile is still set up here (connection settings and password); only the database is left for TeknoParrot to make.
+                                $createMode = 'LeftToTeknoParrot'
+                                Write-Log ('Postgres setup: {0} [{1}] ({2}): no starting database file came with the game; the profile is set up and TeknoParrot creates the database the first time the game starts.' -f (Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName), $pf.BaseName, $dbName)
+                            } else {
+                                # FIXDB27: one game with no starting file must not stop the others. It is left out of this run (nothing is created or
+                                # changed for it) and reported as not ready; every other game is set up and checked as usual.
+                                $excludedLabel = Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
+                                [void]$excludedGames.Add([pscustomobject]@{ Key = [string]$pf.BaseName; Name = [string]$excludedLabel; DbName = [string]$dbName })
+                                Write-Log ('Postgres setup: {0} [{1}] ({2}) was left out: the database does not exist and no starting database file came with the game.' -f $excludedLabel, $pf.BaseName, $dbName)
+                                continue
+                            }
                         }
-                        $createMode = 'RestoreBundledBackup'
-                        $encoding = Get-PostgresRestoreEncoding -DbName $dbName
+                        if ($createMode -eq 'None') {
+                            $createMode = 'RestoreBundledBackup'
+                            $encoding = Get-PostgresRestoreEncoding -DbName $dbName
+                        }
                     }
                 }
                 [void]$preflightPlans.Add([pscustomobject]@{
@@ -30109,6 +30172,11 @@ function Invoke-PostgresGameSetupLocked {
         }
         $readiness = Get-PostgresGameDatabaseReadiness -Doc $profileDoc -MinTables $minTables
         if (-not $readiness.Ready) {
+            # A game whose database TeknoParrot makes itself on first start (no starting file, "Automatically create Database") is waiting, not failing.
+            if ($Plan.CreateMode -eq 'LeftToTeknoParrot' -and [string]$readiness.Error -match 'does not exist') {
+                $Plan | Add-Member -NotePropertyName AwaitingFirstStart -NotePropertyValue $true -Force
+                return
+            }
             $readyLabel = Get-TpmGameDisplayLabel -ProfilePath $Plan.Profile.FullName -Fallback $Plan.Profile.BaseName
             throw ('{0} [{1}] ({2}) is not ready: {3}' -f $readyLabel, $Plan.Profile.BaseName, $Plan.DbName, $readiness.Error)
         }
@@ -30547,7 +30615,7 @@ function Invoke-PostgresGameSetupLocked {
                     Save-Xml $plan.Document $plan.Profile.FullName
                     [void]$completedProfileItems.Add($profileItem)
                     $results.Configured++
-                } elseif ($plan.CreateMode -eq 'None') {
+                } elseif ($plan.CreateMode -in @('None', 'LeftToTeknoParrot')) {
                     $results.AlreadyConfigured++
                 }
             }
@@ -37175,6 +37243,15 @@ function Register-GamesLegacy {
             $normFolder  = Get-NormalizedGameKey $folderKey
 
             $fuzzyResult    = Resolve-BestFuzzyMatch -NormFolder $normFolder -MatchList $matchList -RawThrillsAliases $RawThrillsPathLimits -NormBaseTitle (Get-TpmBaseTitleKey $folderKey)
+            # A game that has no entry in the DAT (for example the newest Golden Tee years) can only be told apart by name. Where the profile code alone is
+            # not enough, TeknoParrot's own game name for each candidate ("Golden Tee Live 2023-2024") is tried as a second name, under the same rules.
+            if (-not $fuzzyResult.IsConfidentMatch -and $gameProfilesDir) {
+                $tpNames = Get-TpmTeknoParrotNamesForCodes -GameProfilesDir $gameProfilesDir -Codes @($matchList | ForEach-Object { [string]$_.Code })
+                if ($tpNames.Count -gt 0) {
+                    $namedResult = Resolve-BestFuzzyMatch -NormFolder $normFolder -MatchList $matchList -RawThrillsAliases $RawThrillsPathLimits -NormBaseTitle (Get-TpmBaseTitleKey $folderKey) -AlternateNames $tpNames
+                    if ($namedResult.IsConfidentMatch) { $fuzzyResult = $namedResult }
+                }
+            }
             $bestFuzzy      = $fuzzyResult.Best
             $bestFuzzyScore = $fuzzyResult.BestScore
 
@@ -38662,6 +38739,7 @@ function Invoke-LibraryHealthCheck {
     $postgresDatabaseCheck = 'NotNeeded'
     $postgresDatabaseProblems = New-Object System.Collections.Generic.List[string]
     $postgresDatabaseSkipped = New-Object System.Collections.Generic.List[string]
+    $postgresAwaitingFirstStart = New-Object System.Collections.Generic.List[string]
     if ($postgresConfiguredChecks.Count -gt 0) {
         if ($postgresServiceExists -eq $false) { $postgresDatabaseCheck = 'SkippedNotInstalled' }
         elseif ($postgresStatus -ne 'Running') { $postgresDatabaseCheck = 'SkippedNotRunning' }
@@ -38678,9 +38756,11 @@ function Invoke-LibraryHealthCheck {
                 $readiness = $checkedDatabases[$checkKey]
                 if ($readiness.Ready) { continue }
                 # A missing database of a game that has TeknoParrot's own "Automatically create Database" option and no starting file with the game (the games in
-                # $postgresAutoCreateLabels) is not a problem Postgres setup could fix: TeknoParrot makes it the first time the game starts. A game that ships a starting file stays a problem (menu 11 makes it).
+                # $postgresAutoCreateLabels) is not a problem Postgres setup could fix: TeknoParrot makes it the first time the game starts, so it is waiting, not failing.
+                # A game that ships a starting file stays a problem (menu 11 makes it), and a database that cannot be opened is still a problem.
                 if ([string]$readiness.Error -match 'does not exist' -and $postgresAutoCreateLabels.Contains([string]$databaseCheck.Label)) {
-                    Write-Log ('HealthCheck: database of {0} is not there yet; the game creates it the first time it starts.' -f $databaseCheck.Label)
+                    [void]$postgresAwaitingFirstStart.Add([string]$databaseCheck.Label)
+                    Write-Log ('HealthCheck: database of {0} is not made yet; TeknoParrot creates it the first time the game starts.' -f $databaseCheck.Label)
                     continue
                 }
                 $why = if ([string]$readiness.Error -match 'does not exist') { 'its database is missing' } elseif ([string]$readiness.Error -match '^Found 0 tables') { 'its database has no tables' } else { 'the game cannot connect to its database with its own settings' }
@@ -38715,12 +38795,14 @@ function Invoke-LibraryHealthCheck {
     $postgresConfiguredResult = 0
     $postgresConfiguredLabelsResult = @()
     $postgresAutoCreateResult = @()
+    $postgresAwaitingFirstStartResult = @()
     if ($postgresInventoryComplete) {
         $postgresNeededResult = @($postgresNeeded.ToArray())
         $postgresNeededLabelsResult = @($postgresNeededLabels.ToArray())
         $postgresConfiguredResult = $postgresConfigured
         $postgresConfiguredLabelsResult = @($postgresConfiguredLabels.ToArray())
         $postgresAutoCreateResult = @($postgresAutoCreateLabels.ToArray())
+        $postgresAwaitingFirstStartResult = @($postgresAwaitingFirstStart.ToArray())
         $postgresDatabaseProblemsResult = @($postgresDatabaseProblems.ToArray())
     }
     Write-Log ("HealthCheck: inventory={0} total={1} valid={2} broken={3} empty={4} gpuFixNeeded={5} ffbBlasterNeeded={6} dgVoodoo2Needed={7} reShadeCount={8} bepInExCount={9}" -f `
@@ -38752,6 +38834,7 @@ function Invoke-LibraryHealthCheck {
         PostgresNeeded = $postgresNeededResult
         PostgresConfigured = $postgresConfiguredResult
         PostgresAutoCreateProfiles = $postgresAutoCreateResult
+        PostgresAwaitingFirstStart = $postgresAwaitingFirstStartResult
         InternalDatabaseLabels = @($internalDatabaseLabels.ToArray())
         PostgresDatabaseProblems = $postgresDatabaseProblemsResult
         PostgresDatabaseCheck = $postgresDatabaseCheck
@@ -38910,6 +38993,7 @@ function Get-TpmLibraryHealthPostgresRow {
     if ([string]$Result.PostgresServiceStatus -eq 'Stopped') { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - PostgreSQL is stopped' -Color 'Yellow') }
     if (@(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseNotChecked' -Default @()).Count -gt 0) { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - some game databases could not be checked because they point at another computer' -Color 'Yellow') }
     if ([string](Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseCheck' -Default '') -eq 'SkippedNoClient') { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - the game databases could not be checked because psql.exe was not found. Run Postgres setup (menu 11)' -Color 'Yellow') }
+    if (@(Get-TpmTransactionField -Object $Result -Name 'PostgresAwaitingFirstStart' -Default @()).Count -gt 0) { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'OK - profile ready; a game database is created the first time the game starts' -Color 'Green') }
     return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'OK' -Color 'Green')
 }
 
@@ -39027,6 +39111,7 @@ function Get-TpmLibraryHealthDetailBlocks {
         $neededLabels = @(Get-TpmTransactionField -Object $Result -Name 'PostgresNeededLabels' -Default @($Result.PostgresNeeded))
         $configuredLabels = @(Get-TpmTransactionField -Object $Result -Name 'PostgresConfiguredLabels' -Default @())
         $autoCreate = @(Get-TpmTransactionField -Object $Result -Name 'PostgresAutoCreateProfiles' -Default @())
+        $awaitingFirstStart = @(Get-TpmTransactionField -Object $Result -Name 'PostgresAwaitingFirstStart' -Default @())
         [void]$lines.Add(('Setup needed for: {0}' -f (Format-TpmNameList -Names $neededLabels -Max 1000 -WhenEmpty 'none')))
         [void]$lines.Add(('Fields filled in for: {0}' -f (Format-TpmNameList -Names $configuredLabels -Max 1000 -WhenEmpty 'none')))
         if ($neededCount -gt 0) {
@@ -39035,7 +39120,7 @@ function Get-TpmLibraryHealthDetailBlocks {
             $databaseCheck = [string](Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseCheck' -Default 'NotNeeded')
             $databaseProblems = @(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseProblems' -Default @())
             $databaseSkipped = @(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseNotChecked' -Default @())
-            if ($databaseCheck -eq 'Done' -and $databaseProblems.Count -eq 0 -and $databaseSkipped.Count -eq 0 -and $autoCreate.Count -eq 0) { [void]$lines.Add('Database check: every game database is there, opens with the game''s own settings and has tables.') }
+            if ($databaseCheck -eq 'Done' -and $databaseProblems.Count -eq 0 -and $databaseSkipped.Count -eq 0 -and $awaitingFirstStart.Count -eq 0) { [void]$lines.Add('Database check: every game database is there, opens with the game''s own settings and has tables.') }
             elseif ($databaseCheck -eq 'Done' -and $databaseProblems.Count -eq 0) { [void]$lines.Add('Database check: the databases that could be checked are there, open with the game''s own settings and have tables.') }
             elseif ($databaseCheck -eq 'Done') {
                 foreach ($databaseProblem in $databaseProblems) { [void]$lines.Add(('Problem - {0}' -f $databaseProblem)) }
@@ -39049,8 +39134,9 @@ function Get-TpmLibraryHealthDetailBlocks {
             [void]$lines.Add('No PostgreSQL database profiles were found.')
         }
         if ($autoCreate.Count -gt 0) {
-            [void]$lines.Add(('Profile ready; the database is created the first time the game starts: {0}' -f (Format-TpmNameList -Names $autoCreate -Max 1000)))
-            [void]$lines.Add('These games make their own database (TeknoParrot''s "Automatically create Database" option). Nothing is wrong and nothing needs to be done.')
+            [void]$lines.Add(('Games with no starting database file: {0}' -f (Format-TpmNameList -Names $autoCreate -Max 1000)))
+            if ($awaitingFirstStart.Count -gt 0) { [void]$lines.Add(('Profile ready; the database is created the first time the game starts: {0}' -f (Format-TpmNameList -Names $awaitingFirstStart -Max 1000))) }
+            [void]$lines.Add('These games make their own database (TeknoParrot''s "Automatically create Database" option). Nothing is wrong and nothing needs to be done. If you put the game''s pg_backup folder back, PostgreSQL setup (menu 11) can make it now.')
         }
     } else {
         [void]$lines.Add('Setup needs: Not reported - the game check was incomplete, so setup needs and filled-in counts are withheld.')
@@ -39682,7 +39768,9 @@ $GpuIncompatibleGames = @{
         'abc', 'abcELF2', 'ActionDeka', 'BorderBreakScramble', 'ChronoRegalia', 'CSNEO', 'Drakons', 'FGO', 'FrenzyExpress',
         'GoldenTeeLive2011', 'GoldenTeeLive2012', 'GoldenTeeLive2013', 'GoldenTeeLive2014',
         'GoldenTeeLive2015', 'GoldenTeeLive2016', 'GoldenTeeLive2017', 'GoldenTeeLive2018',
-        'GoldenTeeLive2019', 'GoldenTeeLive2020', 'HydroThunder', 'IDZTP', 'IDZv2TP', 'LGJS', 'LGJSElf2', 'LGJ',
+        'GoldenTeeLive2019', 'GoldenTeeLive2020', 'GoldenTeeLive2021', 'GoldenTeeLive2022', 'GoldenTeeLive2023',
+        'GoldenTeeLive2025', 'GoldenTeeLive2026', 'GoldenTeePGATour2021', 'GoldenTeePGATour2022', 'GoldenTeePGATour2023',
+        'GoldenTeePGATour2025', 'GoldenTeePGATour2026', 'HydroThunder', 'IDZTP', 'IDZv2TP', 'LGJS', 'LGJSElf2', 'LGJ',
         'SegaOlympic2016', 'SegaOlympic2020', 'SoulReverse', 'MIB', 'OffroadThunder', 'OCCPinball',
         'PowerPuttLive2012', 'PowerPuttLive2013', 'ProjectDiva', 'PullTheTrigger',
         'ShiningForceCross', 'ShiningForceCrossElysion', 'ShiningForceCrossRaid',
@@ -56333,7 +56421,7 @@ function Get-MainMenuSections {
         Header = 'Game Requirements (only for some games)'
         Column = 'Right'
         Items  = @(
-            [pscustomobject]@{ Number = 11; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'PostgreSQL for games set to Existing PostgreSQL.'; FullDesc = @('For games set to Existing PostgreSQL.', 'Installs/configures local PostgreSQL 8.3 for', 'Golden Tee Live 2020 and the other Golden Tee', 'Live years, Power Putt Live, Silver Strike', 'Bowling Live, Target Toss Pro.', 'Games on Internal storage (the new default)', 'need no database install and are skipped.', 'A missing game database is made from the', 'game''s own backup, then tested before ready.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
+            [pscustomobject]@{ Number = 11; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'PostgreSQL for games set to Existing PostgreSQL.'; FullDesc = @('For games set to Existing PostgreSQL.', 'Installs/configures local PostgreSQL 8.3 for', 'every Golden Tee Live and PGA Tour game,', 'Power Putt Live, Silver Strike Bowling Live,', 'Target Toss Pro and Orange County Choppers.', 'Games on Internal storage (the new default)', 'need no database install and are skipped.', 'A missing game database is made from the', 'game''s own backup. A game that ships none is', 'left to TeknoParrot to make on first start.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
             [pscustomobject]@{ Number = 12; Mode = 'RequiredPatch'; Label = 'Required game patches'; ShortDesc = 'Find and safely install supported required fixes from your local ZIPs.'; FullDesc = @('Find required patches for supported exact', 'game builds using your local Main or', 'Supplementary ZIP files. TPM validates the', 'game, backs up, applies, and verifies files.', 'A verified patch is not gameplay proof.') }
         )
     }
@@ -57711,7 +57799,8 @@ $mode = $null
         Write-Host "  Each game has one database. A game on Internal storage makes its own, so it is skipped here." -ForegroundColor DarkGray
         Write-Host "  For every game that uses PostgreSQL, this step makes that game's database from the game's own backup" -ForegroundColor DarkGray
         Write-Host "  when it is missing, then tests it with the game's own settings before setup says it is ready." -ForegroundColor DarkGray
-        Write-Host "  Golden Tee Live 2020 is covered too. It can make its own database the first time the game starts." -ForegroundColor DarkGray
+        Write-Host "  Every Golden Tee Live and PGA Tour game is covered, as are the other IT games with a database." -ForegroundColor DarkGray
+        Write-Host "  A game with no backup makes its own database the first time it starts (TeknoParrot does this)." -ForegroundColor DarkGray
         foreach ($choiceLine in (Get-TpmDatabaseChoiceLines)) { Write-Host ('  ' + $choiceLine) -ForegroundColor DarkGray }
         $postgresStatus = New-TpmWorkflowStatusContext -WorkflowKey 'PostgresSetup' -Title 'PostgreSQL setup' -Steps @(
             @{ Id = 'scan'; Label = 'Check which games need PostgreSQL' }

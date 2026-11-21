@@ -111,7 +111,7 @@ Choose `F` and type the existing password. TPM checks it and saves it. If nobody
 Click Yes in the Windows window and approve it with an administrator account of this PC. If your Windows account is not an administrator, close TPM and start it again with "Run as administrator". Then read the result before you try again.
 
 **It says a game could NOT be made ready.**
-That game has no starting database file (`pg_backup`). Put its `pg_backup` folder back and run Postgres setup again. The other games are still set up.
+That game has no starting database file (`pg_backup`), and its profile does not say TeknoParrot creates the database itself. Put its `pg_backup` folder back and run Postgres setup again. The other games are still set up. (A Golden Tee Live 2018 or newer game, or a PGA Tour game, says `Profile ready` instead: start it once.)
 
 **"PostgreSQL did not finish installing" or "PostgreSQL setup did not complete successfully".**
 The screen says what happened to your data. Press `D` for why, and open View Log. If setup lists PostgreSQL items it found on this PC, read the warning before you delete anything. A PostgreSQL folder can hold game databases and saved scores.

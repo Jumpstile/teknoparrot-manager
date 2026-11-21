@@ -656,7 +656,7 @@ Stuck? Start with [Troubleshooting](TROUBLESHOOTING.md), the game's official com
 - On ReShade result screens the choices include **[D] Details**, for example **Press A, S, B or D** or **Press D for details, or Enter to return to the menu**. Type **D** and press **Enter** to see the full technical information. It is also kept in the log.
 - PostgreSQL setup (main menu **11) Postgres setup**): the result screen is short. It ends with **Press Enter to return to menu, or D for details**. Type **D** and press **Enter** for the details, or just **Enter** to return.
 - Library health check (main menu **13**) also checks every game database. A database that is not ready shows as `Problem - <game>`. Run **11) Postgres setup** to fix it.
-- Every game database is tested with the game's own settings before setup says the game is ready. A game with no starting database file (`pg_backup`) cannot be made ready: setup leaves it out, sets up the other games, and names it as not ready.
+- Every game database is tested with the game's own settings before setup says the game is ready. A game with no starting database file (`pg_backup`) is `Profile ready` when TeknoParrot creates its database itself (Golden Tee Live 2018 and newer, Golden Tee PGA Tour): start the game once. Any other game with none is left out and named as not ready.
 
 ## 8. Required game patches: menu 12
 

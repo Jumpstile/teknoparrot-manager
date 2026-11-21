@@ -50,7 +50,7 @@ BeforeAll {
         'Get-PrimaryExecutableName',
         'Get-NormalizedGameKey',
         'Get-DiceSimilarity',
-        'Get-TpmBaseTitleKey', 'Resolve-BestFuzzyMatch',
+        'Get-TpmBaseTitleKey', 'Resolve-BestFuzzyMatch', 'Get-TpmTeknoParrotNamesForCodes', 'Get-TpmTeknoParrotGameName', 'Get-TpmTeknoParrotMetadataFacts',
         'Resolve-ProfileCode',
         'Get-GameFiles',
         'Save-XmlMaybe', 'Get-TpmProfileWriteFingerprint', 'Resolve-TpmRegistrationSaveFailure',

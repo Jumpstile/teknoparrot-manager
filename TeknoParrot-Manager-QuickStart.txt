@@ -3142,9 +3142,10 @@
   menu.
 
   Every game database is tested with the game's own settings before setup
-  says it is ready. If a game has no starting database file (pg_backup),
-  setup leaves that game out, sets up the others, and names it as not
-  ready.
+  says it is ready. A game with no starting database file (pg_backup) is
+  "Profile ready" when TeknoParrot creates its database itself (Golden
+  Tee Live 2018 and newer, PGA Tour): start the game once. Any other
+  game with none is left out, and named as not ready.
 
   If PostgreSQL setup does not finish, you will see "PostgreSQL setup did
   not complete successfully:" and a plain sentence about your data, for

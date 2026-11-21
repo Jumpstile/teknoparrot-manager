@@ -13,7 +13,7 @@ BeforeAll {
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($sourcePath, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { throw "Failed to parse TeknoParrot-Manager.ps1: $($parseErrors -join '; ')" }
 
-    $wanted = @('Get-NormalizedGameKey', 'Get-DiceSimilarity', 'Get-TpmBaseTitleKey', 'Resolve-BestFuzzyMatch')
+    $wanted = @('Get-NormalizedGameKey', 'Get-DiceSimilarity', 'Get-TpmBaseTitleKey', 'Resolve-BestFuzzyMatch', 'Get-TpmTeknoParrotNamesForCodes', 'Get-TpmTeknoParrotGameName', 'Get-TpmTeknoParrotMetadataFacts')
     $functions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -in $wanted }, $true))
     if (@($functions | ForEach-Object { $_.Name } | Sort-Object -Unique).Count -ne $wanted.Count) {
         throw ("Expected one definition of each of: {0}" -f ($wanted -join ', '))
@@ -90,5 +90,47 @@ Describe 'Registration pass 3 uses the base title safely' {
     It 'scores the base title and holds title-only matches that tie' {
         $script:Fix389Source | Should -Match 'Get-TpmBaseTitleKey \$folderKey'
         $script:Fix389Source | Should -Match '\$bestViaBaseTitle -and \(\(\$bestScore - \$secondScore\) -lt \$FuzzyTieMargin\)'
+    }
+}
+
+# Golden Tee Live 2021 to 2026 and PGA Tour have no entry in the Eggman DAT, and every year of the game uses the same game.bin, so the folder
+# name is the only way to tell the years apart. Two consecutive years score within the tie margin, which used to stop every year from registering.
+Describe 'Resolve-BestFuzzyMatch with consecutive years of one game' {
+    BeforeAll {
+        function Write-Log { param($msg) }
+        $script:F389Years = @('GoldenTeeLive2019', 'GoldenTeeLive2020', 'GoldenTeeLive2021', 'GoldenTeeLive2022', 'GoldenTeeLive2023', 'GoldenTeePGATour2021', 'GoldenTeePGATour2022')
+    }
+    It 'registers the year the folder names, <Folder>' -ForEach @(
+        @{ Folder = 'Golden Tee Live 2021 (16.04.15)(USA)[IT Nighthawk][TP]'; Code = 'GoldenTeeLive2021' }
+        @{ Folder = 'Golden Tee Live 2020 (15.04.08)(2020-06-15)(USA)[IT Nighthawk][TP]'; Code = 'GoldenTeeLive2020' }
+        @{ Folder = 'Golden Tee PGA Tour 2022 (51.05.19)(USA)[IT Nighthawk][TP]'; Code = 'GoldenTeePGATour2022' }
+    ) {
+        $r = Invoke-Fix389Match -Folder $Folder -Codes $script:F389Years
+        $r.IsConfidentMatch | Should -BeTrue
+        $r.Best.Code | Should -BeExactly $Code
+    }
+    It 'does not guess a year when the folder name does not say one' {
+        (Invoke-Fix389Match -Folder 'Golden Tee Live (USA)[IT Nighthawk][TP]' -Codes $script:F389Years).IsConfidentMatch | Should -BeFalse
+    }
+    It 'still treats two profiles with the same whole name as a tie, whichever is listed first' -ForEach @(
+        @{ Codes = @('BladeStrangers', 'BladeStrangersAPM3') }
+        @{ Codes = @('BladeStrangersAPM3', 'BladeStrangers') }
+    ) {
+        (Invoke-Fix389Match -Folder 'Blade Strangers (APM3)(2.01.00)' -Codes $Codes).IsConfidentMatch | Should -BeFalse
+    }
+    It 'uses TeknoParrot''s own game name when the profile code has no 2024 in it' {
+        $root = Join-Path $TestDrive ('tp-' + [guid]::NewGuid().ToString('N'))
+        $gameProfiles = Join-Path $root 'GameProfiles'
+        New-Item -ItemType Directory -Path $gameProfiles, (Join-Path $root 'Metadata') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $root 'Metadata\GoldenTeeLive2023.json'), '{ "game_name": "Golden Tee Live 2023-2024", "release_year": "2023" }')
+        $folder = 'Golden Tee Live 2023-2024 (18.04.15)(USA)[IT Nighthawk][TP]'
+        $codes = @('GoldenTeeLive2020', 'GoldenTeeLive2021', 'GoldenTeeLive2022', 'GoldenTeeLive2023')
+        (Invoke-Fix389Match -Folder $folder -Codes $codes).IsConfidentMatch | Should -BeFalse
+        $names = Get-TpmTeknoParrotNamesForCodes -GameProfilesDir $gameProfiles -Codes $codes
+        $names.Keys.Count | Should -Be 1
+        $matchList = @($codes | ForEach-Object { [pscustomobject]@{ Code = $_ } })
+        $r = Resolve-BestFuzzyMatch -NormFolder (Get-NormalizedGameKey $folder) -MatchList $matchList -RawThrillsAliases @{} -NormBaseTitle (Get-TpmBaseTitleKey $folder) -AlternateNames $names
+        $r.IsConfidentMatch | Should -BeTrue
+        $r.Best.Code | Should -BeExactly 'GoldenTeeLive2023'
     }
 }
