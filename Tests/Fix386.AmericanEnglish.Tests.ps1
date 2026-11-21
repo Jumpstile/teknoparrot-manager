@@ -9,7 +9,7 @@ BeforeAll {
     $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     $script:f386Files = @(
         'TeknoParrot-Manager.ps1', 'TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt',
-        'TeknoParrot-Manager-CHANGELOG.txt', 'README.md', 'QUICKSTART.md', 'docs\wiki-updates\Changelog.md', 'scripts\TpmProgress.psm1'
+        'TeknoParrot-Manager-CHANGELOG.txt', 'README.md', 'QUICKSTART.md', 'docs\wiki-updates\Changelog.md', 'docs\USER-GUIDE.md', 'docs\TESTER-GUIDE.md', 'scripts\TpmProgress.psm1'
     ) | ForEach-Object { [pscustomobject]@{ Name = $_; Text = [System.IO.File]::ReadAllText((Join-Path $root $_)) } }
 }
 

@@ -14914,7 +14914,7 @@ Describe "Issue #300 workflow ownership and transition guards" {
     }
 
     It "routes reviewed PostgreSQL and optional-flow failures through lifecycle cleanup" {
-        foreach ($failureId in @('postgres-service-state','postgres-install-failed','postgres-backup-unverified','postgres-profile-recovery','postgres-profile-errors','postgres-service-restore','reshade-file-missing','reshade-file-type','dgv-acquisition-cancelled','dgv-deployment-failed')) {
+        foreach ($failureId in @('postgres-service-state','postgres-install-failed','postgres-backup-unverified','postgres-profile-recovery','postgres-profile-errors','postgres-service-restore','reshade-file-missing','reshade-file-type','dgv-acquisition-canceled','dgv-deployment-failed')) {
             $script:ProductionSource | Should -Match ([regex]::Escape("Resolve-TpmWorkflowFailure -Context"))
             $script:ProductionSource | Should -Match ([regex]::Escape("-FailureId '$failureId'"))
         }
