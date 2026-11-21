@@ -93,6 +93,23 @@
     A DAT with no version is read as before.
 
   Also new in this release
+  - Controller layout (Propagate Controls, menu 3): choose your layout once
+    (Xbox, PlayStation, Nintendo or arcade stick) and change any button.
+    Then set up one game, all your games at once, or game by game. You
+    always see a preview first and approve once. A saved copy is made and
+    checked first, every changed game is read back, a game that does not
+    read back correctly is put back exactly, and you can undo the whole
+    run in one step. A game is left alone, with a plain reason, when its
+    saved settings are for another version than TeknoParrot's own game
+    file, when a control is missing, or when an Xbox button is already
+    used. Triggers and analog sticks are never set. Test and Service stay
+    empty unless you give them a button.
+  - Controls check (Propagate Controls choice 4, and a Controls line in
+    Library health check): every registered game is sorted into every
+    control set up, some, none, or "cannot tell", with the missing
+    controls named. For most games the list comes from TeknoParrot's own
+    game file and says that no person has checked it. It changes nothing
+    and never says a game is ready.
   - LEDBlinky lighting (optional): if you use LEDBlinky, the Manager can
     add lighting info for your games. It looks for LEDBlinky on your
     drives and in Program Files, or asks where it is and remembers the

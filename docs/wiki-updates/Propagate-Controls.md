@@ -46,6 +46,26 @@ A game marked as copied is not proof that its controls work. Start one game and 
 
 ---
 
+## Your controller layout and the controls check
+
+Menu 3 first asks which of these you want. Choice 1 is the copy described above.
+
+- **2 - Set up games with my controller layout.** The first time, choose a layout once: Xbox, PlayStation, Nintendo or arcade stick. You can change any single button. Test and Service start empty. Then set up one game, all your games at once (one preview, one `Y`), or game by game (a `Y` for each game).
+- **3 - Choose or change my controller layout.** It is saved in the Manager's own settings folder. A connected Xbox-style controller only pre-selects the Xbox choice.
+- **4 - Check which games have all their controls.** Every registered game is sorted into every control set up, some, none, or cannot tell. Press `D` for the games and the controls that are still missing. The Library health check shows the same counts on a Controls line. It changes nothing.
+
+What a layout setup does and does not do:
+
+- It sets only controls that TeknoParrot's own file for the game lists, and only when your saved settings for the game are the same version as that file. Otherwise the game is left alone, and the screen says why (often: open the game once in TeknoParrotUI).
+- It never replaces an Xbox button that is already set, never touches keyboard or arcade-encoder settings, and leaves a game alone when an Xbox button it wants is already used by another control in that game.
+- It does not set triggers or analog sticks (steering, aim, throttle). The preview names them so you can set them in TeknoParrotUI.
+- PlayStation and Nintendo controllers only work here when something shows them to Windows as an Xbox controller. An arcade stick must be in its Xbox mode.
+- A saved copy of your game settings is made and checked first. Each changed game is read back and compared, and put back exactly if the check fails. You can undo the whole run afterward.
+
+The controls check and the layout setup are not a test. Most game control lists come from TeknoParrot's own game file and no person has checked them. Start one game and test it.
+
+---
+
 ## If a game has the wrong control type
 
 TeknoParrot Manager guesses the control type from the game's buttons. It cannot guess `spinner` at all. To fix a wrong or missing guess, add the game to `familyOverride` in `TeknoParrot-Manager.overrides.json` (next to the script):
