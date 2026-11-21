@@ -41598,7 +41598,12 @@ function Get-TpmControlPropagationSummary {
     if (-not $DryRun -and $updated -gt 0) { $next = 'Start one updated game in TeknoParrotUI and test its controls. If something is wrong, use Restore backup.' }
     elseif (-not $DryRun -and $unreadable.Count -gt 0 -and $needManual.Count -eq 0 -and $mismatched.Count -eq 0 -and $failed.Count -eq 0) { $next = 'Check the game that could not be read in TeknoParrotUI, or use Restore backup, then run this again.' }
     elseif (-not $DryRun -and $needs.Count -gt 0) { $next = 'Set up the controls above in TeknoParrotUI, then run this again.' }
-    elseif (-not $DryRun -and $designSkipped.Count -gt 0) { $next = 'In TeknoParrotUI, set up the controls of one game in each family listed above. Then run Propagate Controls (menu 3) again.' }
+    $suggest = @()
+    if (-not $DryRun -and $designSkipped.Count -gt 0) {
+        # Name one real game per family to set up, so the user is not left guessing which game to open in TeknoParrotUI.
+        $suggest = @($designSkipped | Where-Object { $_.Family -and $_.Code } | Sort-Object Family, Code | Group-Object Family | ForEach-Object { '{0}: {1}' -f $_.Name, $_.Group[0].Code })
+        if (-not $next) { $next = 'In TeknoParrotUI, set up the controls of one game of each type listed above{0}. Then run Propagate Controls (menu 3) again.' -f $(if ($suggest.Count -gt 0) { ' (for example ' + ($suggest -join '; ') + ')' } else { '' }) }
+    }
 
     $blocks = New-Object System.Collections.Generic.List[object]
     $leftAlone = New-Object System.Collections.Generic.List[string]
@@ -41620,6 +41625,7 @@ function Get-TpmControlPropagationSummary {
         [void]$blocks.Add(@{ Heading = $row.Code; Lines = $lines.ToArray() })
     }
     if ($leftAlone.Count -gt 0) { [void]$blocks.Add(@{ Heading = ('Left as they are ({0})' -f $leftAlone.Count); Lines = $leftAlone.ToArray() }) }
+    if ($suggest.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'Games to set up first'; Lines = @(@($suggest | ForEach-Object { 'Set up one game in TeknoParrotUI: ' + $_ }) + @('Then run Propagate Controls (menu 3). The other games of that type get its controls.', 'Choosing a device in the binding plan does not set up a game.')) }) }
     [void]$blocks.Add(@{ Heading = 'Counts'; Lines = @(
         ('{0}: {1}' -f $(if ($DryRun) { 'Games with proposed control copies' } else { 'Games with controls copied' }), $copied.Count),
         ('{0}: {1}' -f $(if ($DryRun) { 'Proposed settings-only changes' } else { 'Settings carried only' }), $settingsOnly.Count),
@@ -56321,7 +56327,7 @@ if ($dryRunActive) {
     Write-Host ""
     Write-Host "  You'll be asked below whether to apply these changes for real." -ForegroundColor Yellow
 } else {
-    Write-Host "   Done." -ForegroundColor Cyan
+    Write-Host "   Registration run finished." -ForegroundColor Cyan
     Write-Host "============================================" -ForegroundColor Cyan
 }
 # Read-only bridge from the #258/#262 evidence model into the end-of-run
