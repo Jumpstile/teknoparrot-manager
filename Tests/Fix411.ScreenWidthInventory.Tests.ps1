@@ -16,7 +16,7 @@ BeforeAll {
         $node.CommandElements[1] -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
         $node.CommandElements[1].Value.Length -gt 79
     }, $true))
-    $script:F411Baseline = 248
+    $script:F411Baseline = 243
 }
 
 Describe 'Fixed-width screen lines do not grow past the default console width' {

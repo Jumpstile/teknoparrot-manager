@@ -516,13 +516,13 @@ Describe 'FIX80 Create Support Package (audit item 14)' {
 }
 
 Describe 'FIX80 LaunchBox step (audit item 16)' {
-    It 'offers four short choices and keeps their keys' {
+    It 'offers short choices and keeps their keys' {
         # Mutation: bring back the long option sentences.
         Install-F80Mocks
         Write-TpmLaunchBoxOffer
         $lines = @(Get-F80Lines)
         $lines | Should -Contain '  TeknoParrot registration is finished.'
-        foreach ($key in @('[P]', '[A]', '[F]', '[B]')) { @($lines | Where-Object { $_.StartsWith('  ' + $key + ' ') }).Count | Should -Be 1 }
+        foreach ($key in @('[P]', '[A]', '[G]', '[V]', '[S]', '[L]', '[F]', '[B]')) { @($lines | Where-Object { $_.StartsWith('  ' + $key + ' ') }).Count | Should -Be 1 }
         (Get-F80Flat) | Should -Not -Match 'verified backup before writing|no-write path|reference file'
     }
 
@@ -695,7 +695,7 @@ Describe 'FIX80 LaunchBox step (audit item 16)' {
         $planCalls.Count | Should -Be 1
         Get-F80NamedArgument -Command $planCalls[0] -Name 'AlreadyShownSummary' | Should -BeExactly '$lbShownBefore'
         $stepAst.Extent.Text | Should -Match ([regex]::Escape('$lbShownBefore = $lbPreviewShownSummary'))
-        @($stepCalls | Where-Object { $_.GetCommandName() -eq 'Read-TpmYesNo' -and (Get-F80NamedArgument -Command $_ -Name 'Prompt') -eq "'Write exactly these changes after a verified backup? (Y/N)'" }).Count | Should -Be 1
+        @($stepCalls | Where-Object { $_.GetCommandName() -eq 'Read-TpmYesNo' -and (Get-F80NamedArgument -Command $_ -Name 'Prompt') -eq "'Write exactly these changes after a verified backup? (Y/N, D = about the risks)'" }).Count | Should -Be 1
     }
 }
 
@@ -794,6 +794,8 @@ Describe 'FIX80 wording rules for everything new' {
         [void]$texts.Add((Get-F80BlockText -Blocks (Get-TpmSupportPackageHelpBlocks)))
         [void]$texts.Add((Get-F80BlockText -Blocks (Get-TpmLaunchBoxWriteNoticeBlocks)))
         [void]$texts.Add((Get-F80BlockText -Blocks (Get-TpmOwnedMigrationDetailBlocks -Layout ([pscustomobject]@{ Root = 'C:\X' }) -Destinations @() -ReportPath 'C:\X\r.md')))
-        foreach ($text in $texts) { $text | Should -Not -Match '\bTPM\b' }
+        # The thumbnail help names a folder under the test's own TestDrive; that path is not product wording, and the
+        # temp folder of the PC running the tests may itself contain "TPM".
+        foreach ($text in $texts) { $text.Replace([string]$TestDrive, '<TestDrive>') | Should -Not -Match '\bTPM\b' }
     }
 }

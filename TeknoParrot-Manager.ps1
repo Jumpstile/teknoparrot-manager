@@ -19943,7 +19943,10 @@ function Invoke-TpmPostgresRegistrationOffer {
     Write-Host ('  {0} you just added need{1} PostgreSQL: {2}.' -f $(if ($newGames.Count -eq 1) { 'A game' } else { 'Games' }), $(if ($newGames.Count -eq 1) { 's' } else { '' }), ($newGames -join ', ')) -ForegroundColor Cyan
     Write-Host '  PostgreSQL is a small database program. These games keep their data in it' -ForegroundColor DarkCyan
     Write-Host '  and will not start without it.' -ForegroundColor DarkCyan
-    if ($existingChosen) { Write-Host '  They are set to Existing PostgreSQL. The new default, Internal, needs no database install; nothing is switched for you.' -ForegroundColor DarkCyan }
+    if ($existingChosen) {
+        Write-Host '  They are set to Existing PostgreSQL. The new default,' -ForegroundColor DarkCyan
+        Write-Host '  Internal, needs no database install; nothing is switched for you.' -ForegroundColor DarkCyan
+    }
     if (Test-PostgresInstalled) { Write-Host '  PostgreSQL is already on this PC.' -ForegroundColor DarkCyan; Write-Host '  TeknoParrot Manager can set up the game now.' -ForegroundColor DarkCyan }
     else { Write-Host '  PostgreSQL is not on this PC yet.' -ForegroundColor DarkCyan; Write-Host '  TeknoParrot Manager can install it and set up the game now.' -ForegroundColor DarkCyan }
     if ($otherCount -gt 0) { Write-Host ('  {0} other game(s) already registered also still need PostgreSQL settings.' -f $otherCount) -ForegroundColor DarkCyan }
@@ -41054,7 +41057,10 @@ function Request-TpmSupplementaryFolder {
     }
     $script:zipSourceSupplementary = $answer
     Write-Log ('Config: supplementary ZIP source set to {0} (asked for startup files).' -f $answer)
-    if (-not (Save-Config)) { Write-Host '  The folder could not be saved, so TeknoParrot Manager may ask again next time.' -ForegroundColor Yellow }
+    if (-not (Save-Config)) {
+        Write-Host '  The folder could not be saved, so TeknoParrot Manager may ask again' -ForegroundColor Yellow
+        Write-Host '  next time.' -ForegroundColor Yellow
+    }
     return $answer
 }
 
@@ -51329,10 +51335,10 @@ function Write-TpmLaunchBoxOffer {
     Write-TpmText -Text 'Optional: add games to LaunchBox.' -Color Cyan -BlankBefore
     Write-TpmText -Text '[P] Preview first. No changes.' -Color White
     Write-TpmText -Text '[A] Add missing games (backed up).' -Color White
-    Write-TpmText -Text '[G] Fill in game details and make playlists (backed up).' -Color White
+    Write-TpmText -Text '[G] Fill in game details and make playlists (backed up).' -Color White -BlankBefore
     Write-TpmText -Text '[V] Group regions and versions of a game into one (backed up).' -Color White
-    Write-TpmText -Text '[S] Keep LaunchBox in step with TeknoParrot: removed, moved, renamed games (backed up).' -Color White
-    Write-TpmText -Text '[L] Link games for art and details (backed up).' -Color White -BlankBefore
+    Write-TpmText -Text '[S] Keep LaunchBox in step with TeknoParrot: removed, moved, renamed games (backed up).' -Color White -BlankBefore
+    Write-TpmText -Text '[L] Link games for art and details (backed up).' -Color White
     Write-TpmText -Text '[F] Import file only. No changes.' -Color White -BlankBefore
     Write-TpmText -Text '[B] Skip this step.' -Color White
 }
@@ -58060,11 +58066,15 @@ $mode = $null
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " PostgreSQL Setup (Incredible Technologies games)" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
-        Write-Host "  Each game has one database. A game on Internal storage makes its own, so it is skipped here." -ForegroundColor DarkGray
-        Write-Host "  For every game that uses PostgreSQL, this step makes that game's database from the game's own backup" -ForegroundColor DarkGray
-        Write-Host "  when it is missing, then tests it with the game's own settings before setup says it is ready." -ForegroundColor DarkGray
-        Write-Host "  Every Golden Tee Live and PGA Tour game is covered, as are the other IT games with a database." -ForegroundColor DarkGray
-        Write-Host "  A game with no backup makes its own database the first time it starts (TeknoParrot does this)." -ForegroundColor DarkGray
+        Write-Host "  Each game has one database. A game on Internal storage makes its own," -ForegroundColor DarkGray
+        Write-Host "  so it is skipped here." -ForegroundColor DarkGray
+        Write-Host "  For every game that uses PostgreSQL, this step makes that game's database" -ForegroundColor DarkGray
+        Write-Host "  from the game's own backup when it is missing, then tests it with the game's" -ForegroundColor DarkGray
+        Write-Host "  own settings before setup says it is ready." -ForegroundColor DarkGray
+        Write-Host "  Every Golden Tee Live and PGA Tour game is covered, as are the other IT" -ForegroundColor DarkGray
+        Write-Host "  games with a database." -ForegroundColor DarkGray
+        Write-Host "  A game with no backup makes its own database the first time it starts" -ForegroundColor DarkGray
+        Write-Host "  (TeknoParrot does this)." -ForegroundColor DarkGray
         foreach ($choiceLine in (Get-TpmDatabaseChoiceLines)) { Write-Host ('  ' + $choiceLine) -ForegroundColor DarkGray }
         $postgresStatus = New-TpmWorkflowStatusContext -WorkflowKey 'PostgresSetup' -Title 'PostgreSQL setup' -Steps @(
             @{ Id = 'scan'; Label = 'Check which games need PostgreSQL' }
@@ -59862,7 +59872,8 @@ if ($registrationFolders.Count -gt 0) {
     Write-Host 'Preview: registration is checked after a real AutoSync run has extracted and checked the game folders.' -ForegroundColor Yellow
     Write-Log 'Registration scan skipped in preview: AutoSync preview extracts nothing, so there are no verified registration targets.'
 } elseif ($skipAutoSyncRegistration) {
-    Write-Host 'Nothing new was extracted, so registration was skipped. To register games already extracted, choose Register only.' -ForegroundColor DarkCyan
+    Write-Host 'Nothing new was extracted, so registration was skipped.' -ForegroundColor DarkCyan
+    Write-Host 'To register games already extracted, choose Register only.' -ForegroundColor DarkCyan
     Write-Log 'Registration scan skipped: no verified AutoSync registration targets; existing-only fallback refused.'
 } else {
     Write-Host "Checking existing TeknoParrot games for registration changes." -ForegroundColor Cyan
