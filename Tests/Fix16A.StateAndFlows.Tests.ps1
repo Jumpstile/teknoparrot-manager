@@ -1271,7 +1271,7 @@ Describe 'Top-level FIX16A flows' {
 
         $consentIfs = @(Get-Fix16Nodes -Root $body -Type ([System.Management.Automation.Language.IfStatementAst]) | Where-Object {
             @(Get-Fix16Commands -Root $_.Clauses[0].Item1 -Name 'Read-TpmYesNo' | Where-Object {
-                (Get-Fix16ParameterArgumentText -Command $_ -Name 'Prompt') -eq "'Write exactly these changes after a verified backup? (Y/N)'" -and
+                (Get-Fix16ParameterArgumentText -Command $_ -Name 'Prompt') -eq "'Write exactly these changes after a verified backup? (Y/N, D = about the risks)'" -and
                     (Get-Fix16ParameterArgumentText -Command $_ -Name 'Default') -eq "'N'"
             }).Count -eq 1
         })
