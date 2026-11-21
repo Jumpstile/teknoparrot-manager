@@ -465,9 +465,9 @@ Describe 'Recognizing the same controllers again' {
         $salt = Get-TpmControllerSalt -StateRoot $state
         $salt | Should -Match '^[0-9a-f]{32}$'
         $text = [System.IO.File]::ReadAllText((Get-TpmControlStatePath -StateRoot $state).Cabinet)
-        $text | Should -Not -Match '(?i)D209|0301|AAA|BBB|HID\\\\'
+        $text | Should -Not -Match '(?i)VID_|PID_|MI_0|7&|HID\\\\'
         $text | Should -Not -Match $salt
-        ($script:logged -join "`n") | Should -Not -Match ('(?i)D209|0301|AAA|BBB|' + $salt + '|' + (@($saved.EncoderFingerprints)[0].Fingerprint))
+        ($script:logged -join "`n") | Should -Not -Match ('(?i)VID_|PID_|MI_0|7&|' + $salt + '|' + (@($saved.EncoderFingerprints)[0].Fingerprint))
         (Get-TpmControllerSetNotice -Cabinet $saved -Evidence (Get-TpmControllerEvidence -Salt $salt)).State | Should -Be 'Same'
     }
 }

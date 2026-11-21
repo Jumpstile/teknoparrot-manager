@@ -129,7 +129,7 @@ Describe 'Controller fingerprints' {
     It 'keeps every raw number and instance id out of the result' {
         Mock Get-CimInstance { $script:twoBoards }
         $json = (Get-TpmControllerEvidence -Salt $script:salt) | ConvertTo-Json -Depth 6
-        $json | Should -Not -Match '(?i)D209|0301|AAA|DDD|EEE|MI_0|Col0|HID\\\\'
+        $json | Should -Not -Match '(?i)VID_|PID_|MI_0|Col0|7&|HID\\\\'
         $json | Should -Not -Match $script:salt
     }
 
