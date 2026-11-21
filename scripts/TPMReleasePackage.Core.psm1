@@ -51,7 +51,7 @@ function Get-TPMReleasePackageDocumentationFileMapV1 {
         [pscustomobject]@{ AssetType = 'Guide'; ZipPath = 'TeknoParrot-Manager-README.txt'; SourcePath = 'TeknoParrot-Manager-README.txt' }
         [pscustomobject]@{ AssetType = 'Guide'; ZipPath = 'docs/START-HERE.md'; SourcePath = 'docs/START-HERE.md' }
         [pscustomobject]@{ AssetType = 'Guide'; ZipPath = 'docs/TROUBLESHOOTING.md'; SourcePath = 'docs/TROUBLESHOOTING.md' }
-        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'images/release/RC8-MainMenu.png'; SourcePath = 'images/release/RC8-MainMenu.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'images/release/RC9-MainMenu.png'; SourcePath = 'images/release/RC9-MainMenu.png' }
         [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/01-installer-window.png'; SourcePath = 'docs/images/01-installer-window.png' }
         [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/02-installer-new-folder.png'; SourcePath = 'docs/images/02-installer-new-folder.png' }
         [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/03-installer-core-selected.png'; SourcePath = 'docs/images/03-installer-core-selected.png' }
@@ -74,6 +74,8 @@ function Get-TPMReleasePackageDocumentationFileMapV1 {
         [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/20-tpm-crosshair-picker.png'; SourcePath = 'docs/images/20-tpm-crosshair-picker.png' }
         [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/21-tpm-crosshair-apply.png'; SourcePath = 'docs/images/21-tpm-crosshair-apply.png' }
         [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/22-tpm-reshade-setup.png'; SourcePath = 'docs/images/22-tpm-reshade-setup.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/23-tpm-health-check-details.png'; SourcePath = 'docs/images/23-tpm-health-check-details.png' }
+        [pscustomobject]@{ AssetType = 'Screenshot'; ZipPath = 'docs/images/24-tpm-bezel-preview.png'; SourcePath = 'docs/images/24-tpm-bezel-preview.png' }
         [pscustomobject]@{ AssetType = 'Guide'; ZipPath = 'TeknoParrot-Manager-User-Guide.pdf'; SourcePath = 'TeknoParrot-Manager-User-Guide.pdf' }
     )
 }
@@ -110,7 +112,7 @@ function Assert-TPMReleasePackageRequiredScreenshotSourceV1 {
     foreach ($asset in $screenshotAssets) {
         $sourcePath = Join-Path $sourceRootFull ($asset.SourcePath.Replace('/', [System.IO.Path]::DirectorySeparatorChar))
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
-            throw "PACKAGE_REQUIRED_SCREENSHOT_MISSING: '$($asset.SourcePath)' must be an actual current RC8 capture"
+            throw "PACKAGE_REQUIRED_SCREENSHOT_MISSING: '$($asset.SourcePath)' must be an actual current RC9 capture"
         }
     }
     foreach ($asset in $screenshotAssets) {

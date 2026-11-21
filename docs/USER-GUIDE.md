@@ -857,6 +857,8 @@ You can resize the window at any time. The menu, progress bars and the ReShade c
 
 ![The Library Health Check result: a read-only report that changed nothing](images/15-tpm-health-check.png)
 
+![Library Health Check details (press D): a game on Internal storage, a game that is not available yet, a missing emulator folder and a System 11 game with no saved files](images/23-tpm-health-check-details.png)
+
 
 Library Health Check looks over your games and tells you what it found.
 
@@ -1317,7 +1319,7 @@ Mode 4 copies custom P1/P2 crosshair cursor images to all registered lightgun ga
 
 ## ReShade Visual Enhancements
 
-![ReShade setup: choose Set up, Remove, or Undo](images/22-tpm-reshade-setup.png)
+![ReShade setup: choose Set up, Remove, Undo, or use your own bezel folder](images/22-tpm-reshade-setup.png)
 
 
 ReShade is a free add-on that changes how a game looks.
@@ -1787,6 +1789,8 @@ After removal you see `Next: You can undo this in ReShade > Undo ReShade changes
 A bezel is a picture that frames the game on a wide screen, like the edge of an arcade cabinet.
 TeknoParrot Manager does not come with bezels and never downloads them. This step only uses bezel pictures you already have in a folder.
 It needs ReShade to be set up for the game first (see above). A game that does not have ReShade yet is listed and left alone.
+
+![The bezel preview: each game shows the bezel it would use and how sure the match is, and nothing is changed yet](images/24-tpm-bezel-preview.png)
 
 1. Type `5` at the main menu, then type `B` and press Enter.
 

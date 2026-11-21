@@ -446,7 +446,7 @@ For Pcsx2x6 games, `cursor_path` stays emulator-owned under the current contract
 
 ## ReShade Visual Enhancements
 
-![ReShade setup: choose Set up, Remove, or Undo](docs/images/22-tpm-reshade-setup.png)
+![ReShade setup: choose Set up, Remove, Undo, or use your own bezel folder](docs/images/22-tpm-reshade-setup.png)
 
 
 ReShade adds picture effects on top of a game: a sharper image, CRT-style scanlines, borders. It does not change game data.
@@ -632,6 +632,8 @@ TeknoParrot Manager does not remove ReShade files that it did not install, or th
 ### Use your own bezels
 
 A bezel is a picture that frames the game on a wide screen, like the edge of an arcade cabinet. TeknoParrot Manager does not come with bezels and never downloads them. This step only uses `.png` pictures you already have in a folder. ReShade must be set up for the game first. A game without ReShade is listed and left alone.
+
+![The bezel preview: each game shows the bezel it would use and how sure the match is, and nothing is changed yet](docs/images/24-tpm-bezel-preview.png)
 
 1. Type **5** at the main menu, then type **B**.
 

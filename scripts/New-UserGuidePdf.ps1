@@ -1,16 +1,18 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Builds TeknoParrot-Manager-User-Guide.pdf (repo root) from docs\USER-GUIDE.md.
+    Builds TeknoParrot-Manager-User-Guide.pdf (repo root) from docs\USER-GUIDE.md, or with
+    -Guide Tester, TeknoParrot-Manager-Tester-Guide.pdf from docs\TESTER-GUIDE.md.
 .DESCRIPTION
-    Converts the Markdown user guide to HTML (with the screenshots next to it) and prints it
-    to PDF with Microsoft Edge in headless mode. Run this whenever docs\USER-GUIDE.md changes,
-    then commit the PDF. The release package ships the committed PDF, and a test fails if the
-    PDF is older than the guide it was built from.
+    Converts the Markdown guide to HTML (with the screenshots next to it) and prints it
+    to PDF with Microsoft Edge in headless mode. Run this whenever the guide changes,
+    then commit the PDF. The release package ships the committed PDF, and for the user guide
+    a test fails if the PDF is older than the guide it was built from.
 #>
 [CmdletBinding()]
 param(
-    [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot)
+    [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot),
+    [ValidateSet('User', 'Tester')][string]$Guide = 'User'
 )
 
 Set-StrictMode -Version Latest
@@ -18,10 +20,10 @@ $ErrorActionPreference = 'Stop'
 
 $root = [System.IO.Path]::GetFullPath($SourceRoot)
 $docs = Join-Path $root 'docs'
-$markdownPath = Join-Path $docs 'USER-GUIDE.md'
-$pdfPath = Join-Path $root 'TeknoParrot-Manager-User-Guide.pdf'
+$markdownPath = Join-Path $docs $(if ($Guide -eq 'Tester') { 'TESTER-GUIDE.md' } else { 'USER-GUIDE.md' })
+$pdfPath = Join-Path $root "TeknoParrot-Manager-$Guide-Guide.pdf"
 $stampPath = Join-Path $docs 'TeknoParrot-Manager-User-Guide.source-sha256'
-if (-not (Test-Path -LiteralPath $markdownPath -PathType Leaf)) { throw "USER_GUIDE_MISSING: $markdownPath" }
+if (-not (Test-Path -LiteralPath $markdownPath -PathType Leaf)) { throw "GUIDE_MISSING: $markdownPath" }
 
 $edge = @(
     "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
@@ -49,7 +51,7 @@ pre code { background: none; }
 blockquote { border-left: 4px solid #1b6f77; margin-left: 0; padding-left: 12px; color: #333; }
 a { color: #0b5a63; }
 '@
-    $html = "<!DOCTYPE html><html lang=`"en`"><head><meta charset=`"utf-8`"><title>TeknoParrot Manager: full user guide</title><style>$css</style></head><body>$body</body></html>"
+    $html = "<!DOCTYPE html><html lang=`"en`"><head><meta charset=`"utf-8`"><title>TeknoParrot Manager: $Guide guide</title><style>$css</style></head><body>$body</body></html>"
     # The page sits in docs\ so relative image links such as images\13-tpm-main-menu.png resolve.
     $htmlPath = Join-Path $docs ('.user-guide-print-' + [guid]::NewGuid().ToString('N') + '.html')
     try {
@@ -71,7 +73,7 @@ a { color: #0b5a63; }
         if (Test-Path -LiteralPath $htmlPath) { Remove-Item -LiteralPath $htmlPath -Force }
     }
     $hash = (Get-FileHash -LiteralPath $markdownPath -Algorithm SHA256).Hash
-    [System.IO.File]::WriteAllText($stampPath, $hash + "`n", (New-Object System.Text.UTF8Encoding($false)))
+    if ($Guide -eq 'User') { [System.IO.File]::WriteAllText($stampPath, $hash + "`n", (New-Object System.Text.UTF8Encoding($false))) }
     [pscustomobject]@{ Pdf = $pdfPath; Bytes = (Get-Item -LiteralPath $pdfPath).Length; SourceSha256 = $hash }
 } finally {
     if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
