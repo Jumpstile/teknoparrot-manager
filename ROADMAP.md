@@ -327,9 +327,11 @@ validation establishes otherwise.
 export](https://github.com/Jumpstile/teknoparrot-manager/issues/267) is part of
 RC9 and Version 1.0. It writes no TeknoParrot mapping: guides and proposals are
 shown and printed only. LEDBlinky output is optional, goes only into
-LEDBlinky's own control file, and is previewed, backed up and undoable. Direct
-LED control, other front ends' own fields and other encoder brands' own setup
-files are not part of it.
+LEDBlinky's own control file, and is previewed, backed up and undoable. The
+LaunchBox and Big Box players and controller boxes are filled in by an
+optional LaunchBox choice that is previewed, backed up and undoable, and only
+fills empty boxes. Direct LED control, other front ends' own fields and other
+encoder brands' own setup files are not part of it.
 
 ## Phase 5 -- Deterministic configuration profiles
 

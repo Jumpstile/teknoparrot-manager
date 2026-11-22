@@ -14,6 +14,7 @@ After AutoSync or Register only finishes, TeknoParrot Manager can add your games
 | V | Group regions and versions of a game into one game with a version picker (backed up). |
 | S | Keep LaunchBox in step with TeknoParrot (backed up). |
 | L | Link games for art and details (backed up). |
+| C | Fill in players and controllers for Big Box (backed up). |
 | F | Make an import file only. LaunchBox is not touched. |
 | B | Skip this step. |
 
@@ -56,6 +57,12 @@ S makes LaunchBox match TeknoParrot. Games you removed from TeknoParrot are remo
 ## Link games for art and details (L)
 
 L looks each game up in LaunchBox's own game list on your PC and uses the official name and the Games Database ID, so LaunchBox can find info and artwork. It shows every old name, new name and ID first, and you approve before anything is saved. Names you typed yourself are never replaced. Nothing is downloaded.
+
+---
+
+## Fill in players and controllers (C)
+
+C fills in how many players each TeknoParrot game has and which controller it needs, so Big Box can show them. The answers come from each game's TeknoParrot controls. It fills empty boxes only: a player count, play mode or controller that you or LaunchBox already have is never changed, and a game that already lists controllers keeps them. When the controls do not show a clear controller (for example a flight stick), none is added. It shows every game and what it would get first (press D), makes a checked backup, and asks before it saves. Right after saving it asks if you want to undo at once; Restore also puts everything back. Lights are not touched.
 
 ---
 

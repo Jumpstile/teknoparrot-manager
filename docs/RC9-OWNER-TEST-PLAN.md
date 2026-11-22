@@ -6,9 +6,10 @@ Every step has a tag in square brackets:
 
 - **[no hardware needed]**: you need this PC, the Manager and normal game files. No controller and no PostgreSQL.
 - **[real PostgreSQL / IT game]**: you need a real PostgreSQL 8.3 and a real Incredible Technologies game (Golden Tee, Power Putt, Silver Strike Bowling and so on), or at least its `pg_backup` folder.
+- **[real LaunchBox]**: you need a real LaunchBox with Big Box and your TeknoParrot games in it. Use a copy of your LaunchBox folder, or make a backup first.
 - **[real controller]**: you need a real controller, and for some steps a real arcade encoder or a real game that reads it.
 
-Do the parts in order. Stop at the first failure of a part and write down the step number and what you saw. Steps are numbered from 1 to 138 with no repeats.
+Do the parts in order. Stop at the first failure of a part and write down the step number and what you saw. Steps are numbered from 1 to 139 with no repeats.
 
 # Part 1: no hardware needed
 
@@ -239,3 +240,9 @@ You need: your arcade encoder in a normal console window. For steps 115 and 116 
 136. **[real controller]** On the learning screen, after Service, TPM asks "Does your cabinet have the Exit button? (Y/N)", then Pause, then Menu. Answer N for Pause. Answer Y for Exit and press the Esc key if your cabinet's Exit button sends Esc. Pass: Esc is accepted as the key (not skipped), Pause is listed as skipped, and after you save, My controls choice 5 lists Exit.
 137. **[no hardware needed]** Save your answers twice (for example learn your buttons, save, then learn again with a different key and save). Choose 6 "Undo my last save". Pass: it says how many controls TPM knew before and now, asks once, and after Y the cabinet page (choice 5) shows the older keys. Choose 6 again: the newer keys come back. In `State\Controls`, `cabinet.json.bak` always holds the answers that were replaced last.
 138. **[no hardware needed]** Open the log. Pass: it has a line "Controls: <game>: cabinet fit: ..." for every guide you opened in steps 133 to 135, and a line "the player put back the answers saved before the last save" for step 137. No controller hardware ID may appear in the log.
+
+# Part 4: real LaunchBox
+
+## Players and controllers in Big Box (#267)
+
+139. **[real LaunchBox]** Use a COPY of your LaunchBox folder, or make a backup of it first. Close LaunchBox and BigBox. In the Manager run the LaunchBox step and choose `C` (Fill in players and controllers for Big Box), then platform 2. Pass: the preview says how many games would get player info and controllers and "Nothing was changed"; press `D` and every line names a game and what it would get; the `Data\Platforms\TeknoParrot.xml` file is unchanged. Answer `N` at `Make exactly these changes after a verified backup?` and check the file is still unchanged. Run `C` again and answer `Y`. Pass: a saved copy is made first, and the result says it was saved. Answer `N` to `Undo this now`. Open LaunchBox, then Big Box. Pass: a TeknoParrot game you did not fill in yourself (for example a gun game or a racing game) shows its player count and its controller badge (light gun or wheel) in Big Box and in the game's Edit screen under Controller Support, and a game that already had a player count or controllers in LaunchBox still shows exactly what it showed before. Close both and run `C` once more: it must say there is nothing to fill in. Then use menu 14 (Restore backup), choose 3 (LaunchBox library backup) and pick the newest copy: LaunchBox must show the old values again. Run `C` one more time, say `Y`, and answer `Y` to `Undo this now`: the old values must be back at once. Say what you saw, and anything LaunchBox changed that you did not expect.

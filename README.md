@@ -2260,6 +2260,7 @@ Optional: add games to LaunchBox.
 [V] Group regions and versions of a game into one (backed up).
 [S] Keep LaunchBox in step with TeknoParrot: removed, moved, renamed games (backed up).
 [L] Link games for art and details (backed up).
+[C] Fill in players and controllers for Big Box (backed up).
 [F] Import file only. No changes.
 [B] Skip this step.
 ```
@@ -2276,6 +2277,7 @@ What each choice does:
 - `V` groups regions and versions of one game into one LaunchBox game with a version picker (backed up). Two entries are grouped only when they are certainly the same game (the same ID in LaunchBox's game list). The default version follows the region you chose in Region setup. You see the groups first and approve before anything is saved. Restore puts the separate games back.
 - `S` keeps LaunchBox in step with your TeknoParrot games (backed up). It only looks at games the Manager added. A game you removed from TeknoParrot is removed from LaunchBox, a game whose TeknoParrot folder moved gets its new location, and an old Manager name (such as the profile name) is replaced by the clean game title. A game whose game file is only missing (for example an unplugged drive) is never removed. A name you typed yourself, or a game that already has an ID from LaunchBox's game list, is never renamed. If most games would be removed at once, nothing is removed, because that looks like the wrong folder. You see everything first and approve before anything is saved. Restore undoes it.
 - `L` links games for art and details (backed up). It looks each game up in LaunchBox's own game list on your PC. It shows every old name, new name and ID first, and you approve before anything is saved. Names you typed yourself are never replaced. Nothing is downloaded.
+- `C` fills in players and controllers for Big Box (backed up). It fills empty boxes only, from each game's TeknoParrot controls. You see every game and what it would get first, and you approve before anything is saved. Boxes you or LaunchBox already filled in are never changed. It offers to undo at once, and Restore puts everything back.
 - `F` creates the reference file without a LaunchBox write.
 - `B` skips the optional step.
 
@@ -2319,6 +2321,19 @@ Both choices read your LaunchBox files first, show you what would change, and as
 
 - `G` (Fill in game details and make playlists) asks which platform to use. Then it shows what it would change and asks `Make exactly these changes after a verified backup? (Y/N, D = about the risks)` (default N). It fills in the release year and developer only where LaunchBox has nothing yet. It makes playlists for each arcade hardware family, plus "Light gun games" and "Driving games". A game that cannot start yet (game file, firmware or BepInEx missing) gets a plain `Needs setup` note and goes into a "Needs setup" playlist. Both go away by themselves when the problem is fixed, and your own notes stay. Your own playlists and details are never touched.
 - `L` (Link games for art and details) looks each game up in LaunchBox's own game list on your PC and uses the official name and the Games Database ID, so LaunchBox can find info and artwork. It shows every old name, new name and ID first. For a close match it asks `Is this the same game? (Y/N)` (default N). Names you typed yourself are never replaced. Nothing is downloaded.
+
+### Choosing C: players and controllers
+
+Big Box can show how many players a game has and which controller it needs. `C` fills those boxes in for your TeknoParrot games.
+
+1. It reads your LaunchBox files and your TeknoParrot controls first. The screen says how many games would get player info and how many would get a controller. Press `D` to see every game and exactly what it would get.
+2. You choose the platform. Then you answer `Make exactly these changes after a verified backup? (Y/N, D = about the risks)` (default N). Nothing is saved before you say yes, and LaunchBox and BigBox must be closed.
+3. TeknoParrot Manager makes a checked backup, saves, and reads the files back. If a check fails, the old files are put back by themselves.
+4. It then asks `Undo this now and put your old LaunchBox files back? (Y/N)`. Yes undoes it in one step. Later, menu option 14 (**Restore backup**) does the same.
+
+It fills empty boxes only. A player count, play mode or controller that you or LaunchBox already have is never changed; the screen counts those games and Details says why. A game that already lists any controller in LaunchBox keeps its controllers. The answers come from each game's TeknoParrot controls: the highest player that has a control, a steering wheel with pedals, a light gun (the profile says the game is a gun game), a trackball, a joystick or a spinner. When the controls do not show a clear controller (for example a flight stick), no controller is added. Cooperative play is never set, because TeknoParrot does not say. Lighting is not touched: LEDBlinky is still only given information about controls, never changed from here.
+
+Details (and the log) show the LaunchBox file names: `MaxPlayers` and `PlayMode` in the game's entry, and one `GameControllerSupport` entry per controller, using the controller ids from LaunchBox's own `Data\GameControllers.xml`. Only those boxes of TeknoParrot games are written.
 
 ### Adding logos or box art from a folder
 

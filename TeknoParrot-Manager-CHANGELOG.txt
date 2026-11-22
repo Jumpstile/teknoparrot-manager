@@ -187,6 +187,14 @@
   - Pictures from a folder are matched by the game itself when LaunchBox's
     game list is there: another name of the same game is a sure match, and
     a picture of a different game with the same name is never used.
+  - New choice C fills in the players and controllers that Big Box shows
+    (#267): how many players each TeknoParrot game has and which
+    controller it needs (joystick, steering wheel, light gun, trackball
+    or paddle), from the game's TeknoParrot controls. Empty boxes only:
+    what you or LaunchBox already have is never changed. You see every
+    game first and approve once. A saved copy is made first, the files
+    are read back, and one question right after saving undoes it. Lights
+    are not changed.
   - You see a preview first for all of these, and Restore undoes them.
     The platform the Manager makes is called TeknoParrot and is scraped as
     Arcade, which is where LaunchBox keeps arcade games.
