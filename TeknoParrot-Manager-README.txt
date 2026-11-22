@@ -2726,6 +2726,7 @@
       [S] Keep LaunchBox in step with TeknoParrot: removed, moved, renamed
           games (backed up).
       [L] Link games for art and details (backed up).
+      [C] Fill in players and controllers for Big Box (backed up).
       [F] Import file only. No changes.
       [B] Skip this step.
 
@@ -2777,6 +2778,16 @@
         You see every old name, new name and ID first and approve before
         anything is saved. Names you typed yourself are never replaced.
         Nothing is downloaded.
+
+    C   Fills in players and controllers for Big Box, after a backup. For
+        each TeknoParrot game it fills in how many players the game has
+        and which controller it needs (joystick, steering wheel, light
+        gun, trackball or paddle), from the game's TeknoParrot controls.
+        It fills empty boxes only: what you or LaunchBox already have is
+        never changed, and a game that already lists controllers keeps
+        them. You see every game and what it would get first (press D)
+        and approve before anything is saved. Right after saving it
+        offers to undo at once. Restore puts everything back.
 
     F   Creates a reference file. LaunchBox is not changed.
 

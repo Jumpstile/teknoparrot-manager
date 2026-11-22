@@ -50672,6 +50672,318 @@ function Invoke-TpmLaunchBoxIdLink {
 }
 # END MODULE-READY SECTION: LaunchBox Games Database links for TeknoParrot games
 
+# BEGIN MODULE-READY SECTION: LaunchBox players and controllers for TeknoParrot games (issue #267)
+# Fills the boxes Big Box shows for players and controllers. How a real LaunchBox library stores them (read from real files):
+#   - Data\Platforms\<Platform>.xml, in each <Game>: <MaxPlayers> (a number, 0 = not set) and <PlayMode> (for example Single Player or
+#     Multiplayer). There is no Cooperative element in the files, so it is never written.
+#   - The same file, after the games, one <GameControllerSupport> per controller of a game: <ControllerId>, <GameId> (the game's <ID>)
+#     and <SupportLevel>. Real libraries write SupportLevel 3 when a game has one controller and leave it out when a game has several.
+#   - Data\GameControllers.xml is LaunchBox's own list of controllers (Id, Name, Category). It is only read; the Id comes from it.
+# Owned by this section: MaxPlayers, PlayMode, and new GameControllerSupport entries of TeknoParrot games. Nothing else is changed.
+# Boxes that already have a value are never changed, and a game that already lists any controller keeps its controllers.
+# What TeknoParrot Manager knows about a game comes from its TeknoParrot profile: the highest player with a control, and the family
+# of controls (steering wheel, light gun, trackball, joystick, spinner).
+# Backup, read-back and rollback come from the existing LaunchBox file transaction; Restore-TpmLaunchBoxPlayerFields is the undo.
+# Prefix: TpmLaunchBoxPlayer / TpmLaunchBoxController. Depends on the LaunchBox file helpers and Get-TpmLedProfileControls.
+
+# LaunchBox's own controller list, read only: lower-case name -> Id, Name, Category. A name that appears twice is left out, so a
+# controller is never picked by guessing. A missing or unreadable list gives an empty result.
+function Get-TpmLaunchBoxControllerList {
+    param([Parameter(Mandatory)][string]$LbRoot)
+    $list = @{}
+    $path = Join-Path (Join-Path $LbRoot 'Data') 'GameControllers.xml'
+    try {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or -not (Test-TpmNoReparsePath -Path $path)) { return $list }
+        $doc = Read-TpmLaunchBoxXml $path
+        $seen = @{}
+        foreach ($node in @($doc.SelectNodes('/LaunchBox/GameController'))) {
+            $name = (Get-XmlChildText $node 'Name').Trim()
+            $id = (Get-XmlChildText $node 'Id').Trim()
+            if (-not $name -or -not $id) { continue }
+            $key = $name.ToLowerInvariant()
+            $seen[$key] = [int]$seen[$key] + 1
+            $list[$key] = [pscustomobject]@{ Id = $id; Name = $name; Category = (Get-XmlChildText $node 'Category').Trim() }
+        }
+        foreach ($key in @($seen.Keys)) { if ($seen[$key] -gt 1) { $list.Remove($key) } }
+    } catch {
+        Write-Log ('LaunchBox players: the controller list could not be read: {0}' -f $_.Exception.Message)
+        return @{}
+    }
+    return $list
+}
+
+# What one TeknoParrot profile says about players and controls. Players is the highest player number that has a control when that is
+# two or more (0 = the profile does not show it). Controllers are LaunchBox controller names, as real LaunchBox libraries use them
+# for the same kind of game.
+# A game whose controller the profile does not show clearly (flight sticks, wheels without pedals) gets none. Read-only.
+function Get-TpmLaunchBoxPlayerFacts {
+    param([Parameter(Mandatory)][string]$ProfilePath)
+    $facts = [pscustomobject]@{ Readable = $false; Players = 0; Controllers = @(); Why = '' }
+    try {
+        $doc = Read-Xml $ProfilePath
+        if ($null -eq $doc.GameProfile) { $facts.Why = 'the profile file is not a game profile'; return $facts }
+        $info = Get-TpmLedProfileControls -Doc $doc
+        $controls = @($info.Controls)
+        foreach ($control in $controls) {
+            if ([string]$control.Kind -notin @('Coin', 'Service', 'Test') -and [int]$control.Player -gt $facts.Players) { $facts.Players = [int]$control.Player }
+        }
+        # Controls for Player 1 alone say what TeknoParrot can map, not that the game is a one-player game, so that is "not shown".
+        # Two or more players is a floor (the game may allow more), never a claim about the exact maximum.
+        if ($facts.Players -lt 2) { $facts.Players = 0 }
+        # Only what the profile itself shows: pedals mean a steering wheel, GunGame means a light gun (aim axes alone also describe
+        # flight sticks, which LaunchBox lists differently), a trackball control means a trackball, joystick directions mean a joystick.
+        $names = New-Object System.Collections.Generic.List[string]
+        $family = [string]$info.Family
+        if ($family -eq 'driving' -and @($controls | Where-Object { $_.Kind -eq 'Pedal' }).Count -gt 0) { [void]$names.Add('Generic Wheel') }
+        elseif ($family -eq 'lightgun' -and (Get-XmlChildText $doc.GameProfile 'GunGame').Trim() -ieq 'true') { [void]$names.Add('Generic Light Gun') }
+        elseif ($family -eq 'trackball') { [void]$names.Add('Generic Trackball') }
+        elseif ($family -eq 'button' -and @($controls | Where-Object { $_.Kind -eq 'Direction' }).Count -gt 0) { [void]$names.Add('8-Way Joystick') }
+        if (@($controls | Where-Object { $_.Kind -eq 'Spinner' }).Count -gt 0) { [void]$names.Add('Generic Paddle') }
+        $facts.Controllers = $names.ToArray()
+        $facts.Readable = $true
+    } catch {
+        $facts.Why = 'the profile file could not be read'
+        Write-Log ('LaunchBox players: could not read the profile {0}: {1}' -f $ProfilePath, $_.Exception.Message)
+    }
+    return $facts
+}
+
+# Sets one owned box. A MaxPlayers box that is missing is added right after ReleaseType, where LaunchBox writes it.
+function Set-TpmLaunchBoxPlayerField {
+    param([Parameter(Mandatory)][System.Xml.XmlNode]$Game, [Parameter(Mandatory)][string]$Field, [Parameter(Mandatory)][string]$Value)
+    $node = $Game.SelectSingleNode($Field)
+    if ($null -ne $node) { $node.InnerText = $Value; return }
+    $new = $Game.OwnerDocument.CreateElement($Field)
+    $new.InnerText = $Value
+    $after = $Game.SelectSingleNode('ReleaseType')
+    if ($null -eq $after) { [void]$Game.AppendChild($new); return }
+    [void]$Game.InsertAfter($new, $after)
+    if ($null -ne $after.PreviousSibling -and $after.PreviousSibling.NodeType -in @([System.Xml.XmlNodeType]::Whitespace, [System.Xml.XmlNodeType]::SignificantWhitespace)) {
+        [void]$Game.InsertAfter($after.PreviousSibling.CloneNode($false), $after)
+    }
+}
+
+# Adds one GameControllerSupport entry at the end of the file, laid out the way LaunchBox writes it. Level '' leaves SupportLevel out.
+function Add-TpmLaunchBoxControllerSupport {
+    param([Parameter(Mandatory)][System.Xml.XmlDocument]$Doc, [Parameter(Mandatory)][string]$GameId, [Parameter(Mandatory)][string]$ControllerId, [string]$Level = '')
+    $entry = $Doc.CreateElement('GameControllerSupport')
+    $fields = [ordered]@{ ControllerId = $ControllerId; GameId = $GameId }
+    if ($Level) { $fields['SupportLevel'] = $Level }
+    foreach ($field in $fields.GetEnumerator()) {
+        [void]$entry.AppendChild($Doc.CreateWhitespace("`r`n    "))
+        $child = $Doc.CreateElement([string]$field.Key)
+        $child.InnerText = [string]$field.Value
+        [void]$entry.AppendChild($child)
+    }
+    [void]$entry.AppendChild($Doc.CreateWhitespace("`r`n  "))
+    [void]$Doc.DocumentElement.AppendChild($Doc.CreateWhitespace('  '))
+    [void]$Doc.DocumentElement.AppendChild($entry)
+    [void]$Doc.DocumentElement.AppendChild($Doc.CreateWhitespace("`r`n"))
+}
+
+# Reads the LaunchBox library and the profiles and builds the planned changes. Writes nothing. Items holds one entry per game that
+# has something to say: Changes (field, old, new), Controllers (names added), Kept (values that stay because LaunchBox already has
+# them) and Notes (why something was not filled in). Returns Plans (for the file transaction) and Items.
+function New-TpmLaunchBoxPlayerPlan {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$LbRoot, [Parameter(Mandatory)][string]$EmulatorId,
+        [Parameter(Mandatory)][string[]]$PlatformNames, [string]$TpRoot = ''
+    )
+    $controllers = Get-TpmLaunchBoxControllerList -LbRoot $LbRoot
+    $plans = New-Object System.Collections.Generic.List[object]
+    $items = New-Object System.Collections.Generic.List[object]
+    $factsByCode = @{}
+    foreach ($name in $PlatformNames) {
+        $safe = Get-SafeLaunchBoxPlatformFileName $name
+        if ($safe -cne $name -or $name -in @('.', '..')) { throw 'Platform name must be a safe, unambiguous filename.' }
+        $rel = "Data\Platforms\$safe.xml"
+        $path = Get-TpmLaunchBoxPath $LbRoot $rel
+        $state = Get-TpmLaunchBoxFileState $path
+        if (-not $state.Exists) { continue }
+        $doc = Read-TpmLaunchBoxXml $path
+        Assert-TpmLaunchBoxState $path $state
+        $filePlan = [pscustomobject]@{ RelativePath = $rel; Before = $state; Document = $doc; OriginalXml = $doc.OuterXml; BaseChildCount = $doc.DocumentElement.ChildNodes.Count; Source = $null; SourceHash = $null; Changed = $false; Delete = $false; AfterHash = $null; FullRewrite = $true }
+        $listed = @{}
+        foreach ($entry in @($doc.SelectNodes('/LaunchBox/GameControllerSupport'))) {
+            $listedId = (Get-XmlChildText $entry 'GameId').Trim()
+            if ($listedId) { $listed[$listedId] = [int]$listed[$listedId] + 1 }
+        }
+        foreach ($game in @($doc.SelectNodes('/LaunchBox/Game'))) {
+            if ((Get-XmlChildText $game 'Emulator') -ne $EmulatorId) { continue }
+            $title = Get-XmlChildText $game 'Title'
+            $gameId = (Get-XmlChildText $game 'ID').Trim()
+            $code = [System.IO.Path]::GetFileNameWithoutExtension((Get-XmlChildText $game 'ApplicationPath'))
+            $key = $code.ToLowerInvariant()
+            if (-not $factsByCode.ContainsKey($key)) {
+                $profilePath = ''
+                if ($code -match '^[A-Za-z0-9_.\-]+$' -and $code -notmatch '^\.+$') {
+                    foreach ($folder in @($UserProfilesDir, $(if ($TpRoot) { Join-Path $TpRoot 'GameProfiles' } else { '' }))) {
+                        if (-not $profilePath -and $folder) {
+                            $candidate = Join-Path $folder ($code + '.xml')
+                            if (Test-Path -LiteralPath $candidate -PathType Leaf) { $profilePath = $candidate }
+                        }
+                    }
+                }
+                $factsByCode[$key] = $(if ($profilePath) { Get-TpmLaunchBoxPlayerFacts -ProfilePath $profilePath } else { [pscustomobject]@{ Readable = $false; Players = 0; Controllers = @(); Why = 'no TeknoParrot profile was found for it' } })
+            }
+            $facts = $factsByCode[$key]
+            $changes = New-Object System.Collections.Generic.List[object]
+            $kept = New-Object System.Collections.Generic.List[string]
+            $notes = New-Object System.Collections.Generic.List[string]
+            $added = New-Object System.Collections.Generic.List[string]
+            if (-not $facts.Readable) {
+                [void]$notes.Add(('Left alone: {0}.' -f $facts.Why))
+            } else {
+                $current = (Get-XmlChildText $game 'MaxPlayers').Trim()
+                $currentNumber = 0
+                [void][int]::TryParse($current, [ref]$currentNumber)
+                $effective = $currentNumber
+                if ($facts.Players -gt 0) {
+                    if ($current -eq '' -or $current -eq '0') {
+                        Set-TpmLaunchBoxPlayerField -Game $game -Field 'MaxPlayers' -Value ([string]$facts.Players)
+                        [void]$changes.Add([pscustomobject]@{ Field = 'MaxPlayers'; Old = $current; New = [string]$facts.Players })
+                        $effective = [int]$facts.Players
+                    } elseif ($currentNumber -lt [int]$facts.Players) {
+                        [void]$kept.Add(('LaunchBox says {0} players and TeknoParrot lists controls for {1}. The LaunchBox value stays.' -f $current, $facts.Players))
+                    }
+                } elseif ($current -eq '' -or $current -eq '0') {
+                    [void]$notes.Add('The profile lists controls for one player only, which does not show how many players the game has, so the player count stays empty.')
+                }
+                $mode = (Get-XmlChildText $game 'PlayMode').Trim()
+                if ($effective -gt 0 -and $mode -eq '') {
+                    $newMode = $(if ($effective -eq 1) { 'Single Player' } else { 'Multiplayer' })
+                    Set-TpmLaunchBoxPlayerField -Game $game -Field 'PlayMode' -Value $newMode
+                    [void]$changes.Add([pscustomobject]@{ Field = 'PlayMode'; Old = ''; New = $newMode })
+                }
+                if ($gameId -and $listed.ContainsKey($gameId)) {
+                    [void]$kept.Add('LaunchBox already lists controllers for this game. They stay.')
+                } elseif (@($facts.Controllers).Count -eq 0) {
+                    [void]$notes.Add('TeknoParrot Manager cannot tell which controller this game needs, so none was added.')
+                } elseif (-not $gameId) {
+                    [void]$notes.Add('The LaunchBox entry has no game ID, so no controller was added.')
+                } else {
+                    $level = $(if (@($facts.Controllers).Count -eq 1) { '3' } else { '' })
+                    foreach ($wanted in @($facts.Controllers)) {
+                        $controller = $controllers[([string]$wanted).ToLowerInvariant()]
+                        if ($null -eq $controller) { [void]$notes.Add(('LaunchBox has no controller named {0}, so it was not added.' -f $wanted)); continue }
+                        Add-TpmLaunchBoxControllerSupport -Doc $doc -GameId $gameId -ControllerId $controller.Id -Level $level
+                        [void]$added.Add([string]$controller.Name)
+                    }
+                }
+            }
+            if ($changes.Count + $added.Count + $kept.Count + $notes.Count -gt 0) {
+                [void]$items.Add([pscustomobject]@{ GameId = $gameId; Title = $title; Code = $code; Players = [int]$facts.Players; Changes = $changes.ToArray(); Controllers = $added.ToArray(); Kept = $kept.ToArray(); Notes = $notes.ToArray() })
+            }
+        }
+        $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
+        [void]$plans.Add($filePlan)
+    }
+    return [pscustomobject]@{ Plans = $plans.ToArray(); Items = $items.ToArray() }
+}
+
+# The preview lines for the Details view and the log: one line per game. Pure: plan in, strings out.
+function Format-TpmLaunchBoxPlayerLine {
+    param([Parameter(Mandatory)]$Plan)
+    $words = @{ MaxPlayers = 'players'; PlayMode = 'play mode' }
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Plan.Items)) {
+        $parts = New-Object System.Collections.Generic.List[string]
+        foreach ($change in @($item.Changes)) {
+            $was = $(if ($change.Old -eq '') { 'was empty' } else { 'was ' + $change.Old })
+            [void]$parts.Add(('{0} {1} ({2})' -f $words[$change.Field], $change.New, $was))
+        }
+        if (@($item.Controllers).Count -gt 0) { [void]$parts.Add(('controller {0}' -f (@($item.Controllers) -join ' and '))) }
+        $text = ($parts -join '; ')
+        foreach ($sentence in @(@($item.Kept) + @($item.Notes))) { $text = ($text + ' ' + $sentence).Trim() }
+        [void]$lines.Add(('{0}: {1}' -f $item.Title, $text))
+    }
+    return $lines.ToArray()
+}
+
+# The one plain title line. -Preview words it as a preview; otherwise it says what was filled in.
+function Format-TpmLaunchBoxPlayerTitle {
+    param([Parameter(Mandatory)]$Plan, [switch]$Preview)
+    $items = @($Plan.Items)
+    $playerGames = @($items | Where-Object { @($_.Changes).Count -gt 0 }).Count
+    $controllerGames = @($items | Where-Object { @($_.Controllers).Count -gt 0 }).Count
+    $keptGames = @($items | Where-Object { @($_.Kept).Count -gt 0 }).Count
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($playerGames -gt 0) { [void]$parts.Add(('player info for {0}' -f (Format-TpmGameCount -Count $playerGames))) }
+    if ($controllerGames -gt 0) { [void]$parts.Add(('controllers for {0}' -f (Format-TpmGameCount -Count $controllerGames))) }
+    $keep = $(if ($keptGames -gt 0) { ' {0} keep what LaunchBox already says.' -f (Format-TpmGameCount -Count $keptGames) } else { '' })
+    if ($Preview) {
+        if ($parts.Count -eq 0) { return ('Preview: nothing to fill in. Nothing would change.' + $keep) }
+        return ('Preview: LaunchBox would get {0}.{1} Nothing was changed.' -f ($parts -join ' and '), $keep)
+    }
+    if ($parts.Count -eq 0) { return ('Nothing to fill in.' + $keep) }
+    return ('Filled in {0}.{1}' -f ($parts -join ' and '), $keep)
+}
+
+# -PlanOnly reads everything and changes nothing; otherwise the files are written through the LaunchBox file transaction (verified
+# backup, read-back, rollback). Returns the same kind of result as Invoke-LaunchBoxDirectWrite plus PlayerPlan.
+# The caller makes sure LaunchBox and BigBox are closed before a write; the transaction also checks and refuses while they run.
+function Invoke-TpmLaunchBoxPlayerFields {
+    param([string]$UserProfilesDir, [string]$LbRoot, [string[]]$PlatformNames = @('TeknoParrot'), [string]$BackupRoot, [string]$TpRoot = '', [switch]$PlanOnly)
+    try {
+        $root = Resolve-TpmLaunchBoxRoot $LbRoot
+        if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $root)) { throw 'Choose a safe existing LaunchBox root.' }
+        if (@($PlatformNames).Count -eq 0) { throw 'Choose at least one LaunchBox platform.' }
+        $emulatorsPath = Get-TpmLaunchBoxPath $root 'Data\Emulators.xml'
+        if (-not (Get-TpmLaunchBoxFileState $emulatorsPath).Exists) { throw 'LaunchBox has not made Data\Emulators.xml yet. Open LaunchBox once, close it, then try again. Nothing was changed.' }
+        $emulatorNode = @((Read-TpmLaunchBoxXml $emulatorsPath).SelectNodes('/LaunchBox/Emulator') | Where-Object { (Get-XmlChildText $_ 'Title') -eq 'TeknoParrot' } | Select-Object -First 1)
+        if ($emulatorNode.Count -eq 0) {
+            $none = New-TpmLaunchBoxResult NO_CHANGES 'No TeknoParrot games are in LaunchBox yet. Add them first.'
+            if ($PlanOnly) { $none.Reason = 'PREVIEW' }
+            return $none
+        }
+        $plan = New-TpmLaunchBoxPlayerPlan -UserProfilesDir $UserProfilesDir -LbRoot $root -EmulatorId (Get-XmlChildText $emulatorNode[0] 'ID') -PlatformNames $PlatformNames -TpRoot $TpRoot
+        foreach ($line in (Format-TpmLaunchBoxPlayerLine -Plan $plan)) { Write-Log ('LaunchBox players: ' + $line) }
+        $changedPlans = @($plan.Plans | Where-Object { $_.Changed })
+        if ($PlanOnly) {
+            $preview = New-TpmLaunchBoxResult NO_CHANGES ('Preview only, nothing was written. A write would change {0} file(s).' -f $changedPlans.Count)
+            $preview.Reason = 'PREVIEW'
+            $preview | Add-Member -NotePropertyName WouldChangeFiles -NotePropertyValue $changedPlans.Count -Force
+            $preview | Add-Member -NotePropertyName PlayerPlan -NotePropertyValue $plan -Force
+            return $preview
+        }
+        $result = Invoke-TpmLaunchBoxFileTransaction -lbRoot $root -Plans $plan.Plans -BackupRoot $BackupRoot
+        $result | Add-Member -NotePropertyName PlayerPlan -NotePropertyValue $plan -Force
+        return $result
+    } catch {
+        $result = New-TpmLaunchBoxResult FAILED 'LaunchBox players and controllers were refused before library writes.'
+        $result.Errors = @([string]$_.Exception.Message)
+        return $result
+    }
+}
+
+# One-step undo of a write made by Invoke-TpmLaunchBoxPlayerFields: puts the saved copy taken just before it back. Refused when the
+# file is no longer the one that write made (LaunchBox or the player saved something since), so a newer save is never thrown away;
+# the Restore backup menu is the way to go further back. The restore takes its own verified copy first, like every restore.
+function Restore-TpmLaunchBoxPlayerFields {
+    param([Parameter(Mandatory)]$Written, [Parameter(Mandatory)][string]$LbRoot, [string]$BackupRoot)
+    try {
+        if ([string]$Written.Outcome -ne 'SAVED' -or -not $Written.BackupPath -or -not $Written.PSObject.Properties['PlayerPlan']) { throw 'There is nothing to undo.' }
+        $root = Resolve-TpmLaunchBoxRoot $LbRoot
+        $snapshot = Get-TpmLaunchBoxSnapshot $Written.BackupPath
+        $plans = New-Object System.Collections.Generic.List[object]
+        foreach ($filePlan in @($Written.PlayerPlan.Plans | Where-Object { $_.Changed })) {
+            $record = @($snapshot.Items | Where-Object { $_.RelativePath -eq $filePlan.RelativePath })[0]
+            if ($null -eq $record -or -not $record.Exists) { throw 'The saved copy does not hold this file, so nothing was put back.' }
+            $before = Get-TpmLaunchBoxFileState (Get-TpmLaunchBoxPath $root $filePlan.RelativePath)
+            if ($before.Hash -ne $filePlan.AfterHash) { throw 'LaunchBox saved this file after TeknoParrot Manager changed it, so the saved copy was not put back. Use Restore backup in the main menu to go back anyway.' }
+            [void]$plans.Add([pscustomobject]@{ RelativePath = $filePlan.RelativePath; Before = $before; Document = $null; Source = (Get-TpmLaunchBoxPath $Written.BackupPath $record.RelativePath); SourceHash = $record.Hash; Changed = ($before.Hash -ne $record.Hash); Delete = $false; AfterHash = $null; BaseChildCount = 0 })
+        }
+        $result = Invoke-TpmLaunchBoxFileTransaction -lbRoot $root -Plans $plans.ToArray() -BackupRoot $BackupRoot -Operation 'restore-safety'
+        if ($result.Outcome -eq 'SAVED') { $result.Summary = 'Your old LaunchBox files are back, and every file was read back and checked.' }
+        return $result
+    } catch {
+        $result = New-TpmLaunchBoxResult FAILED 'The undo was refused before any file was changed.'
+        $result.Errors = @([string]$_.Exception.Message)
+        return $result
+    }
+}
+# END MODULE-READY SECTION: LaunchBox players and controllers for TeknoParrot games
+
 # BEGIN MODULE-READY SECTION: LaunchBox game versions and keeping in step (issues #422 and #423)
 # Versions: several regions or versions of one game become ONE LaunchBox game with a version picker. LaunchBox keeps the extra versions as
 # AdditionalApplication entries of the game (the "Play ... version" choices). Two games are the same game only when they have the same
@@ -51094,6 +51406,49 @@ function Invoke-TpmLaunchBoxIdLinkStep {
     if ($written.BackupPath) { Write-TpmText -Text 'To undo, open Restore in the main menu and choose the LaunchBox backup.' -Color DarkCyan }
 }
 
+# Screen for the players and controllers section: preview, ask, then write, then one question to undo it at once.
+function Write-TpmLaunchBoxPlayerResult {
+    param([Parameter(Mandatory)]$Result, [switch]$Preview)
+    if ($Result.PSObject.Properties['PlayerPlan']) {
+        $Result | Add-Member -NotePropertyName PlainTitle -NotePropertyValue (Format-TpmLaunchBoxPlayerTitle -Plan $Result.PlayerPlan -Preview:$Preview) -Force
+        $Result | Add-Member -NotePropertyName EnrichLines -NotePropertyValue @(Format-TpmLaunchBoxPlayerLine -Plan $Result.PlayerPlan) -Force
+    }
+    Write-TpmLaunchBoxResult -Result $Result
+}
+
+function Invoke-TpmLaunchBoxPlayerStep {
+    param([string]$UserProfilesDir, [string]$LbRoot, [string]$TpRoot = '')
+    $root = $LbRoot
+    if (-not $root) { $root = Read-HostSafe '  LaunchBox install folder (Enter to go back)' }
+    if (-not $root) { return }
+    $platformChoice = Read-TpmChoice -Prompt '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, B back' -Choices @('1', '2', '3', 'B') -Default '2'
+    if ($platformChoice -eq 'B') { return }
+    $platforms = switch ($platformChoice) { '1' { @('Arcade') } '2' { @('TeknoParrot') } '3' { @('Arcade', 'TeknoParrot') } }
+    Write-TpmText -Text 'First TeknoParrot Manager only reads your LaunchBox files. Then it fills in how many players each game has and which controller it needs, so Big Box can show them. The answers come from each game''s TeknoParrot controls. Empty boxes only: what LaunchBox already says is never changed.' -Color DarkCyan
+    $plan = Invoke-TpmLaunchBoxPlayerFields -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -TpRoot $TpRoot -PlanOnly
+    Write-TpmLaunchBoxPlayerResult -Result $plan -Preview
+    if ($plan.Reason -ne 'PREVIEW' -or [int]$plan.WouldChangeFiles -eq 0) { return }
+    Write-TpmText -Text 'Close LaunchBox and BigBox first. TeknoParrot Manager will not close them for you.' -Color Yellow -BlankBefore
+    Write-TpmText -Text 'Only empty boxes are filled. Your own entries are kept.' -Color DarkCyan
+    $notice = Get-TpmLaunchBoxWriteNoticeBlocks
+    if ((Read-TpmYesNo -Prompt 'Make exactly these changes after a verified backup? (Y/N, D = about the risks)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $notice }) -ne 'Y') {
+        Write-Host '  LaunchBox write canceled; nothing was changed.' -ForegroundColor DarkGray
+        return
+    }
+    if (-not (Wait-TpmForProcessClose -ProcessNames @('LaunchBox', 'BigBox') -FriendlyName 'LaunchBox or BigBox')) {
+        Write-Host '  LaunchBox or BigBox is still open, so nothing was changed.' -ForegroundColor DarkGray
+        return
+    }
+    $written = Invoke-TpmLaunchBoxPlayerFields -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -TpRoot $TpRoot
+    Write-TpmLaunchBoxPlayerResult -Result $written
+    if ($written.Outcome -ne 'SAVED' -or -not $written.BackupPath) { return }
+    if ((Read-TpmYesNo -Prompt '  Undo this now and put your old LaunchBox files back? (Y/N)' -Default 'N') -eq 'Y') {
+        Write-TpmLaunchBoxResult -Result (Restore-TpmLaunchBoxPlayerFields -Written $written -LbRoot $root)
+    } else {
+        Write-TpmText -Text 'To undo later, open Restore in the main menu and choose the LaunchBox backup.' -Color DarkCyan
+    }
+}
+
 function Get-TpmLaunchBoxSnapshot {
     param([string]$SnapshotPath)
     if (-not (Test-Path -LiteralPath $SnapshotPath -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $SnapshotPath)) { throw 'Unsafe or missing LaunchBox snapshot.' }
@@ -51449,6 +51804,7 @@ function Write-TpmLaunchBoxOffer {
     Write-TpmText -Text '[V] Group regions and versions of a game into one (backed up).' -Color White
     Write-TpmText -Text '[S] Keep LaunchBox in step with TeknoParrot: removed, moved, renamed games (backed up).' -Color White -BlankBefore
     Write-TpmText -Text '[L] Link games for art and details (backed up).' -Color White
+    Write-TpmText -Text '[C] Fill in players and controllers for Big Box (backed up).' -Color White
     Write-TpmText -Text '[F] Import file only. No changes.' -Color White -BlankBefore
     Write-TpmText -Text '[B] Skip this step.' -Color White
 }
@@ -51471,7 +51827,7 @@ function Invoke-TpmLaunchBoxStep {
         $lbPreviewChoice = $null
         $lbPreviewShownSummary = ''
         do {
-            $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'G', 'V', 'S', 'L', 'F', 'B') -Default 'P'
+            $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'G', 'V', 'S', 'L', 'C', 'F', 'B') -Default 'P'
             if ($lbChoice -eq 'P') {
                 Write-TpmText -Text 'Preview: TeknoParrot Manager only reads your LaunchBox files.' -Color DarkCyan
                 $previewRoot = $lbRoot
@@ -51543,6 +51899,8 @@ function Invoke-TpmLaunchBoxStep {
             Invoke-TpmLaunchBoxChangeStep -Kind Sync -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -TpRoot $tpRoot -DatIndex $datIndex
         } elseif ($lbChoice -eq 'L') {
             Invoke-TpmLaunchBoxIdLinkStep -LbRoot $lbRoot -TpRoot $tpRoot -DatIndex $datIndex
+        } elseif ($lbChoice -eq 'C') {
+            Invoke-TpmLaunchBoxPlayerStep -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -TpRoot $tpRoot
         } elseif ($lbChoice -eq 'F') {
             $doLB = "Y"
         }

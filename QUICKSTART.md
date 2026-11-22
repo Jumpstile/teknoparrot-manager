@@ -1124,6 +1124,7 @@ Optional: add games to LaunchBox.
 [V] Group regions and versions of a game into one (backed up).
 [S] Keep LaunchBox in step with TeknoParrot: removed, moved, renamed games (backed up).
 [L] Link games for art and details (backed up).
+[C] Fill in players and controllers for Big Box (backed up).
 [F] Import file only. No changes.
 [B] Skip this step.
   Choice, default P
@@ -1137,6 +1138,7 @@ What each key does:
 - `V` groups regions and versions of one game into one LaunchBox game with a version picker (backed up). Two entries are grouped only when they are certainly the same game. The default version follows the region you chose in Region setup. You see the groups first and approve before anything is saved. Restore puts the separate games back.
 - `S` keeps LaunchBox in step with your TeknoParrot games (backed up). It only looks at games the Manager added. A game you removed from TeknoParrot is removed from LaunchBox, a game whose folder moved gets its new location, and an old Manager name becomes the clean game title. A game whose game file is only missing (for example an unplugged drive) is never removed. A name you typed yourself, or a game that already has an ID from LaunchBox's game list, is never renamed. If most games would be removed at once, nothing is removed. You see everything first and approve before anything is saved. Restore undoes it.
 - `L` links games for art and details (backed up). It looks each game up in LaunchBox's own game list on your PC. It shows every old name, new name and ID first, and you approve before anything is saved. Names you typed yourself are never replaced. Nothing is downloaded.
+- `C` fills in players and controllers for Big Box (backed up). It fills empty boxes only, from each game's TeknoParrot controls (players, steering wheel, light gun, trackball, joystick). You see every game and what it would get first, and you approve before anything is saved. Boxes you or LaunchBox already filled in are never changed. It offers to undo at once, and Restore puts everything back.
 - `F` creates the reference file without a LaunchBox write.
 - `B` skips the optional LaunchBox step.
 
