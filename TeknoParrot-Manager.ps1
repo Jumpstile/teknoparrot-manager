@@ -50712,8 +50712,9 @@ function Get-TpmLaunchBoxControllerList {
     return $list
 }
 
-# What one TeknoParrot profile says about players and controls. Players is the highest player number that has a control (0 = the
-# profile does not say). Controllers are LaunchBox controller names, as real LaunchBox libraries use them for the same kind of game.
+# What one TeknoParrot profile says about players and controls. Players is the highest player number that has a control when that is
+# two or more (0 = the profile does not show it). Controllers are LaunchBox controller names, as real LaunchBox libraries use them
+# for the same kind of game.
 # A game whose controller the profile does not show clearly (flight sticks, wheels without pedals) gets none. Read-only.
 function Get-TpmLaunchBoxPlayerFacts {
     param([Parameter(Mandatory)][string]$ProfilePath)
@@ -50726,6 +50727,9 @@ function Get-TpmLaunchBoxPlayerFacts {
         foreach ($control in $controls) {
             if ([string]$control.Kind -notin @('Coin', 'Service', 'Test') -and [int]$control.Player -gt $facts.Players) { $facts.Players = [int]$control.Player }
         }
+        # Controls for Player 1 alone say what TeknoParrot can map, not that the game is a one-player game, so that is "not shown".
+        # Two or more players is a floor (the game may allow more), never a claim about the exact maximum.
+        if ($facts.Players -lt 2) { $facts.Players = 0 }
         # Only what the profile itself shows: pedals mean a steering wheel, GunGame means a light gun (aim axes alone also describe
         # flight sticks, which LaunchBox lists differently), a trackball control means a trackball, joystick directions mean a joystick.
         $names = New-Object System.Collections.Generic.List[string]
@@ -50839,11 +50843,11 @@ function New-TpmLaunchBoxPlayerPlan {
                         Set-TpmLaunchBoxPlayerField -Game $game -Field 'MaxPlayers' -Value ([string]$facts.Players)
                         [void]$changes.Add([pscustomobject]@{ Field = 'MaxPlayers'; Old = $current; New = [string]$facts.Players })
                         $effective = [int]$facts.Players
-                    } elseif ($currentNumber -ne [int]$facts.Players) {
+                    } elseif ($currentNumber -lt [int]$facts.Players) {
                         [void]$kept.Add(('LaunchBox says {0} players and TeknoParrot lists controls for {1}. The LaunchBox value stays.' -f $current, $facts.Players))
                     }
                 } elseif ($current -eq '' -or $current -eq '0') {
-                    [void]$notes.Add('The profile does not say how many players the game has, so the player count stays empty.')
+                    [void]$notes.Add('The profile lists controls for one player only, which does not show how many players the game has, so the player count stays empty.')
                 }
                 $mode = (Get-XmlChildText $game 'PlayMode').Trim()
                 if ($effective -gt 0 -and $mode -eq '') {

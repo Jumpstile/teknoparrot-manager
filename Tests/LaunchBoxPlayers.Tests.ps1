@@ -99,11 +99,12 @@ Describe 'LaunchBox players and controllers' {
         $result.Reason | Should -BeExactly 'PREVIEW'
         (Get-LbpHash $fx.Platform) | Should -BeExactly $before
         Test-Path -LiteralPath $fx.Backups | Should -BeFalse
-        (Format-TpmLaunchBoxPlayerTitle -Plan $result.PlayerPlan -Preview) | Should -BeLike 'Preview: LaunchBox would get player info for 4 games and controllers for 3 games.*Nothing was changed.'
+        (Format-TpmLaunchBoxPlayerTitle -Plan $result.PlayerPlan -Preview) | Should -BeLike 'Preview: LaunchBox would get player info for 2 games and controllers for 3 games.*Nothing was changed.'
         $lines = @(Format-TpmLaunchBoxPlayerLine -Plan $result.PlayerPlan)
         ($lines -join "`n") | Should -Match 'Fighter Game: players 2 \(was empty\); play mode Multiplayer \(was empty\); controller 8-Way Joystick'
         ($lines -join "`n") | Should -Match 'Shooter Game: players 2 \(was 0\); play mode Multiplayer \(was empty\); controller Generic Light Gun'
-        ($lines -join "`n") | Should -Match 'Racer Game: players 1 \(was empty\); play mode Single Player \(was empty\); controller Generic Wheel'
+        ($lines -join "`n") | Should -Match 'Racer Game: controller Generic Wheel The profile lists controls for one player only'
+        ($lines -join "`n") | Should -Not -Match 'Single Player'
     }
 
     It 'a yes writes the boxes with the ids from the LaunchBox controller list, and only for TeknoParrot games' {
@@ -117,11 +118,12 @@ Describe 'LaunchBox players and controllers' {
         $fighter.MaxPlayers | Should -BeExactly '2'
         $fighter.PlayMode | Should -BeExactly 'Multiplayer'
         $doc.SelectSingleNode("/LaunchBox/Game[ID='g2']").MaxPlayers | Should -BeExactly '2'
+        # Player 1 controls only: the racer gets its controller but no player count and never "Single Player".
         $racer = $doc.SelectSingleNode("/LaunchBox/Game[ID='g3']")
-        $racer.MaxPlayers | Should -BeExactly '1'
-        $racer.PlayMode | Should -BeExactly 'Single Player'
+        $racer.MaxPlayers | Should -BeNullOrEmpty
+        $racer.PlayMode | Should -BeNullOrEmpty
         # A box LaunchBox did not have is added right after ReleaseType, where LaunchBox writes it.
-        $racer.SelectSingleNode('ReleaseType').NextSibling.Name | Should -BeExactly 'MaxPlayers'
+        $fighter.SelectSingleNode('ReleaseType').NextSibling.Name | Should -BeExactly 'MaxPlayers'
         $support = @($doc.SelectNodes('/LaunchBox/GameControllerSupport'))
         $support.Count | Should -Be 3
         $byGame = @{}
@@ -130,9 +132,11 @@ Describe 'LaunchBox players and controllers' {
         $byGame['g2'].ControllerId | Should -BeExactly $script:GunId
         $byGame['g3'].ControllerId | Should -BeExactly $script:WheelId
         foreach ($entry in $support) { $entry.SupportLevel | Should -BeExactly '3' }
-        # The flight game gets its player count but no controller (its profile does not show one clearly); the other emulator's game and every other field stay as they were.
+        # The flight game has no clear controller, and a profile with Player 1 controls only does not show a player count.
         $byGame.ContainsKey('g4') | Should -BeFalse
-        $doc.SelectSingleNode("/LaunchBox/Game[ID='g4']").MaxPlayers | Should -BeExactly '1'
+        $doc.SelectSingleNode("/LaunchBox/Game[ID='g4']").MaxPlayers | Should -BeNullOrEmpty
+        $doc.SelectSingleNode("/LaunchBox/Game[ID='g4']").PlayMode | Should -BeNullOrEmpty
+        # The other emulator's game and every other field stay as they were.
         $doc.SelectSingleNode("/LaunchBox/Game[ID='g5']").OuterXml | Should -BeExactly $original.SelectSingleNode("/LaunchBox/Game[ID='g5']").OuterXml
         foreach ($id in 'g1', 'g2', 'g3', 'g4', 'g5') {
             (Get-LbpOtherFields $doc.SelectSingleNode("/LaunchBox/Game[ID='$id']")) | Should -BeExactly (Get-LbpOtherFields $original.SelectSingleNode("/LaunchBox/Game[ID='$id']"))
@@ -143,17 +147,21 @@ Describe 'LaunchBox players and controllers' {
     It 'a value the player already has is kept, and a game that already lists controllers keeps them' {
         # Mutation: overwrite a non-empty MaxPlayers or PlayMode, or add a second controller entry -> an assertion fails.
         $extraEnd = '<GameControllerSupport><ControllerId>{0}</ControllerId><GameId>g9</GameId></GameControllerSupport>' -f $script:WheelId
-        $fx = New-LbpFixture -ExtraGameXml (New-LbpGame 'g9' 'Typed Game' 'Fighter' -MaxPlayers '4' -PlayMode 'Cooperative; Multiplayer') -ExtraEnd $extraEnd
+        $fx = New-LbpFixture -ExtraGameXml ((New-LbpGame 'g9' 'Typed Game' 'Fighter' -MaxPlayers '1' -PlayMode 'Cooperative; Multiplayer') + (New-LbpGame 'g8' 'Higher Game' 'Fighter' -MaxPlayers '4')) -ExtraEnd $extraEnd
         $result = Invoke-Lbp $fx -PlanOnly
         $item = @($result.PlayerPlan.Items | Where-Object { $_.GameId -eq 'g9' })[0]
         @($item.Changes).Count | Should -Be 0
         @($item.Controllers).Count | Should -Be 0
-        (Format-TpmLaunchBoxPlayerLine -Plan $result.PlayerPlan | Where-Object { $_ -like 'Typed Game:*' }) | Should -Match 'LaunchBox says 4 players and TeknoParrot lists controls for 2\. The LaunchBox value stays\. LaunchBox already lists controllers'
+        (Format-TpmLaunchBoxPlayerLine -Plan $result.PlayerPlan | Where-Object { $_ -like 'Typed Game:*' }) | Should -Match 'LaunchBox says 1 players and TeknoParrot lists controls for 2\. The LaunchBox value stays\. LaunchBox already lists controllers'
         (Format-TpmLaunchBoxPlayerTitle -Plan $result.PlayerPlan -Preview) | Should -Match '1 game keep what LaunchBox already says'
         [void](Invoke-Lbp $fx)
         $doc = Get-LbpDoc $fx
         $typed = $doc.SelectSingleNode("/LaunchBox/Game[ID='g9']")
-        $typed.MaxPlayers | Should -BeExactly '4'
+        $typed.MaxPlayers | Should -BeExactly '1'
+        # A higher count than the controls show is not a conflict: it stays, and the empty play mode follows it.
+        $higher = $doc.SelectSingleNode("/LaunchBox/Game[ID='g8']")
+        $higher.MaxPlayers | Should -BeExactly '4'
+        $higher.PlayMode | Should -BeExactly 'Multiplayer'
         $typed.PlayMode | Should -BeExactly 'Cooperative; Multiplayer'
         @($doc.SelectNodes("/LaunchBox/GameControllerSupport[GameId='g9']")).Count | Should -Be 1
         @($doc.SelectNodes("/LaunchBox/GameControllerSupport[GameId='g9']"))[0].ControllerId | Should -BeExactly $script:WheelId
