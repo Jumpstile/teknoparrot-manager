@@ -8,7 +8,7 @@ Every step has a tag in square brackets:
 - **[real PostgreSQL / IT game]**: you need a real PostgreSQL 8.3 and a real Incredible Technologies game (Golden Tee, Power Putt, Silver Strike Bowling and so on), or at least its `pg_backup` folder.
 - **[real controller]**: you need a real controller, and for some steps a real arcade encoder or a real game that reads it.
 
-Do the parts in order. Stop at the first failure of a part and write down the step number and what you saw. Steps are numbered from 1 to 132 with no repeats.
+Do the parts in order. Stop at the first failure of a part and write down the step number and what you saw. Steps are numbered from 1 to 138 with no repeats.
 
 # Part 1: no hardware needed
 
@@ -179,7 +179,7 @@ You need: an arcade keyboard encoder with buttons, in a normal console window (n
 95. **[real controller]** Answer the number of players and buttons. If LEDBlinky is installed, you should be offered its key list first. Say N once to press them all yourself.
 96. **[real controller]** TeknoParrot Manager asks "Press Player 1 Coin", "Press Player 1 Start" and so on. Press each control once. After each, you should see "Got it" and the key's name. Check the names for Ctrl, Alt and Shift buttons: Left Ctrl, Left Alt, Left Shift. This is the part unit tests cannot prove.
 97. **[real controller]** Press the same control twice for two questions. The second time it must say that key is already used, and ask again.
-98. **[real controller]** Press Esc for a control your cabinet does not have. It must be skipped. Wait 30 seconds without pressing: it must ask if you want to stop, and keep what you pressed so far.
+98. **[real controller]** Press Esc for an ordinary control your cabinet does not have (not Exit, Pause or Menu: Esc counts as a key for those, see step 136). It must be skipped. Wait 30 seconds without pressing: it must ask if you want to stop, and keep what you pressed so far.
 99. **[real controller]** At the end answer Y to "Save this?". Open `cabinet.json`: every key you pressed is there. Run again and answer N to Save: the file must not change.
 100. **[real controller]** If LEDBlinky is installed: run again, accept its key list (Y), and check the keys it proposed match what your buttons really send (press a few). Say how many were right.
 
@@ -230,3 +230,12 @@ You need: your arcade encoder in a normal console window. For steps 115 and 116 
 130. **[real controller]** Say if the rule for "Verified" in the "It worked" and Verified part (you say the game worked; calibration done for analog games) is the right one, or what rule you want instead: every control pressed in a real game, only the ones the game needs, or something else.
 131. **[real controller]** Say which games need a first-run Test or Service menu step or a wheel or gun calibration before play, from what you saw in step 74, so TeknoParrot Manager can list them. Right now only the player's own answer says so, and calibration is assumed for every game that is not plain buttons.
 132. **[real controller]** Say if the Ctrl, Alt and Shift buttons were seen in step 96, whether any of steps 112 to 118 gave a false alarm, and which encoder brands you use. TeknoParrot Manager does not read any maker's setup file, because no maker publishes which pin is which button. Say what steps 121 to 128 showed, and whether TPM recognized your encoder at all.
+
+## Cabinet fit, Exit/Pause/Menu and undo (#267)
+
+133. **[no hardware needed]** In My controls choose 1 and say you have no steering wheel and no light gun but you do have an Xbox controller. Choose 3 and pick a wheel game. Pass: the page starts with "This game needs a steering wheel and pedals. You told TPM you do not have that." and "Your Xbox controller can steer this game with its stick and triggers." Pick a light gun game: it must say the game needs a light gun. Nothing in the game's file may change.
+134. **[no hardware needed]** Close the Manager, rename `cabinet.json` in `State\Controls`, open My controls and choose 3 for any game. Pass: the page says TPM does not know how many players and buttons your cabinet has and does not say it fits. Put the file back.
+135. **[real controller]** Learn your buttons for 1 player and 2 buttons, save, then choose 3 for a game that uses 3 or more buttons or 2 players. Pass: the page says your cabinet has fewer buttons or players than the game uses, and those rows say "Your cabinet has no button 3" or "Your cabinet has no player 2" instead of "Not learned yet". Rows for the buttons you do have still show your key.
+136. **[real controller]** On the learning screen, after Service, TPM asks "Does your cabinet have the Exit button? (Y/N)", then Pause, then Menu. Answer N for Pause. Answer Y for Exit and press the Esc key if your cabinet's Exit button sends Esc. Pass: Esc is accepted as the key (not skipped), Pause is listed as skipped, and after you save, My controls choice 5 lists Exit.
+137. **[no hardware needed]** Save your answers twice (for example learn your buttons, save, then learn again with a different key and save). Choose 6 "Undo my last save". Pass: it says how many controls TPM knew before and now, asks once, and after Y the cabinet page (choice 5) shows the older keys. Choose 6 again: the newer keys come back. In `State\Controls`, `cabinet.json.bak` always holds the answers that were replaced last.
+138. **[no hardware needed]** Open the log. Pass: it has a line "Controls: <game>: cabinet fit: ..." for every guide you opened in steps 133 to 135, and a line "the player put back the answers saved before the last save" for step 137. No controller hardware ID may appear in the log.

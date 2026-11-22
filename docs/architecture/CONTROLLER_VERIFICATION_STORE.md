@@ -46,3 +46,5 @@ Not covered: a change of TeknoParrot's own build (no reliable source), and per-c
 ## Guides (#267)
 
 `Get-TpmGameControlGuide` lists the controls a profile names (`Get-TpmLedProfileControls`): what each does, the player's key (from `cabinet.json`), and whether the game has a binding. `Get-TpmCabinetGuide` lists the cabinet's learned keys. Both are shown on screen, and one Y/N saves them as an HTML page (all text encoded, no scripts) in `Reports\Control Guides` and opens it for printing.
+
+`Get-TpmCabinetFitLines` adds plain lines at the top of a game guide that compare the game's player and button numbers and needed devices (trackball, spinner, wheel and pedals, light gun) with the cabinet answers. It reads only. A control the cabinet does not have is shown as "Your cabinet has no ..." (`NoControl` in `Get-TpmGameKeyChoice`), and a question the player never answered is shown as unknown. Exit, Pause and Menu are optional cabinet controls asked one by one while learning (Esc is a valid key for them). `Restore-TpmCabinetBackup` swaps `cabinet.json` with its `.bak` copy, so one step undoes the last save and a second step undoes the undo.
