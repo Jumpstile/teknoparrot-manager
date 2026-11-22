@@ -35,7 +35,7 @@ BeforeAll {
         if ($ReShade) { [System.IO.File]::WriteAllText((Join-Path $dir 'dxgi.dll'), 'dll'); [System.IO.File]::WriteAllText((Join-Path $dir 'ReShade.ini'), 'ini') }
         $profiles = Join-Path $Root 'UserProfiles'
         [void][System.IO.Directory]::CreateDirectory($profiles)
-        [System.IO.File]::WriteAllText((Join-Path $profiles ($Code + '.xml')), ('<GameProfile><GameName>{0}</GameName><GamePath>{1}</GamePath><EmulatorType>TeknoParrot</EmulatorType></GameProfile>' -f $Title, (Join-Path $dir 'game.exe')))
+        [System.IO.File]::WriteAllText((Join-Path $profiles ($Code + '.xml')), ('<GameProfile><GameNameInternal>{0}</GameNameInternal><GamePath>{1}</GamePath><EmulatorType>TeknoParrot</EmulatorType></GameProfile>' -f $Title, (Join-Path $dir 'game.exe')))
         return $dir
     }
     function Get-F429Plan { param([string]$Root, [string]$StateRoot)
@@ -92,14 +92,53 @@ Describe 'Use my bezel folder (issue 429)' {
         New-F429Png (Join-Path $script:root 'bezels\Aliens Extermination.png')
         New-F429Png (Join-Path $script:root 'bezels\Terminator Salvation.png')
         [System.IO.File]::WriteAllText((Join-Path $script:root 'bezels\Walking Dead.png'), 'this is not a PNG')
+        [System.IO.File]::WriteAllText((Join-Path $script:root 'bezels\Aliens Extermination - Bezel.jpg'), 'a jpg is not used either')
         $plan = Get-F429Plan -Root $script:root -StateRoot $script:stateRoot
-        $plan.Found.NotPng | Should -Be 1
+        $plan.Found.NotPng | Should -Be 2
         ($plan.Rows | Where-Object { $_.Game.ProfileId -eq 'NoReShade' }).Status | Should -Be 'NeedsReShade'
         ($plan.Rows | Where-Object { $_.Game.ProfileId -eq 'SharedA' }).Status | Should -Be 'Shared'
         $result = Invoke-TpmBezelApply -Rows $plan.Rows -StateRoot $script:stateRoot
         $result.Outcome | Should -Be 'NO_OP'
         Test-Path -LiteralPath (Join-Path $script:root 'games\NoReShade\reshade-shaders') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $shared 'reshade-shaders') | Should -BeFalse
+    }
+
+    It 'understands short arcade names exactly, and never matches one by similarity or to the wrong sequel' {
+        # Mutation: compare the profile code by similarity -> daytona.png is also given to Daytona3; a number in the title ("II") vetoes soulclb2.png.
+        $null = New-F429Game -Root $script:root -Code 'daytona' -Title 'Daytona USA (Revision A)' -ReShade
+        $null = New-F429Game -Root $script:root -Code 'Daytona3' -Title 'Daytona Championship USA' -ReShade
+        $null = New-F429Game -Root $script:root -Code 'teknonaomi_dybb99' -Title "Dynamite Baseball '99 (Japan, Rev B)" -ReShade
+        $null = New-F429Game -Root $script:root -Code 'soulclb2' -Title 'Soul Calibur II Arcade Edition' -ReShade
+        foreach ($n in @('daytona', 'dybb99', 'soulclb2')) { New-F429Png (Join-Path $script:root ('bezels\' + $n + '.png')) }
+        $rows = (Get-F429Plan -Root $script:root -StateRoot $script:stateRoot).Rows
+        foreach ($pair in @(@('daytona', 'daytona.png'), @('teknonaomi_dybb99', 'dybb99.png'), @('soulclb2', 'soulclb2.png'))) {
+            $row = $rows | Where-Object { $_.Game.ProfileId -eq $pair[0] }
+            $row.Chosen.Name | Should -Be $pair[1]
+            $row.Status | Should -Be 'Apply'
+        }
+        ($rows | Where-Object { $_.Game.ProfileId -eq 'Daytona3' }).Chosen | Should -BeNullOrEmpty
+    }
+
+    It 'does not call it a sure match when two bezels fit one game equally well, and the preview can name the other one' {
+        # Mutation: ignore the tie -> a coin flip between the two files is reported as High.
+        $null = New-F429Game -Root $script:root -Code 'prdgp03' -Title 'Pride GP 2003' -ReShade
+        New-F429Png (Join-Path $script:root 'bezels\Pride GP 2003.png')
+        New-F429Png (Join-Path $script:root 'bezels\prdgp03.png')
+        $row = (Get-F429Plan -Root $script:root -StateRoot $script:stateRoot).Rows[0]
+        $row.Confidence | Should -Be 'Medium'
+        $row.Chosen | Should -Not -BeNullOrEmpty
+        $row.Ranked.Count | Should -Be 2
+    }
+
+    It 'takes the game name from TeknoParrot metadata when the profile has no name of its own' {
+        # Mutation: use the profile code as the name -> "Time Crisis 4.png" finds nothing for a profile named abc.
+        $null = New-F429Game -Root $script:root -Code 'abc' -Title '' -ReShade
+        [void][System.IO.Directory]::CreateDirectory((Join-Path $script:root 'Metadata'))
+        [System.IO.File]::WriteAllText((Join-Path $script:root 'Metadata\abc.json'), '{"game_name":"Time Crisis 4"}')
+        New-F429Png (Join-Path $script:root 'bezels\Time Crisis 4.png')
+        $row = (Get-F429Plan -Root $script:root -StateRoot $script:stateRoot).Rows[0]
+        $row.Chosen.Name | Should -Be 'Time Crisis 4.png'
+        $row.Game.Name | Should -Be 'Time Crisis 4'
     }
 
     It 'copies the bezel to the game, and Undo removes it again' {

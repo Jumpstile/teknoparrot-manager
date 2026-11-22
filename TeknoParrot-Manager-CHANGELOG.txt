@@ -189,6 +189,13 @@
     a different sequel number unless you pick it, keeps a bezel you placed
     yourself unless you say to replace it, and saves a copy first. Undo
     puts everything back. Nothing is downloaded.
+  - The bezel matcher was checked on a real folder of 177 bezel files and
+    fixed: it now reads the real game name from the TeknoParrot profile
+    (before, it only looked at the short profile code), matches short
+    arcade names like acedriv3 exactly instead of by similarity (so
+    daytona.png no longer goes to Daytona 3), treats Soul Calibur II and
+    soulclb2 as the same number, and tells you how many .jpg files in
+    the folder were not used (a bezel must be a .png).
   - Progress counts the games being changed ("Applying ReShade: 1 of 34"),
     not your whole library, and checking all your games is its own step.
 

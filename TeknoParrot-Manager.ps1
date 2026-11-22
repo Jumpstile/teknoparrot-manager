@@ -22909,15 +22909,16 @@ function Get-TpmBezelCleanTitle {
     return ([regex]::Replace($Name.Replace('_', ' '), '(?i)\b(bezels?|overlays?)\b', ' ')).Trim()
 }
 
-# Sequel numbers (4, IV) of a title, as one text. "House of the Dead 3" and "House of the Dead 4" differ by one letter and
-# score almost 1.0 as text, so a different number must lower the confidence.
+# Sequel numbers (4, IV) of a title, as one text; a Roman numeral counts as its digit, so "Soul Calibur II" and "soulclb2" agree.
+# "House of the Dead 3" and "House of the Dead 4" differ by one letter and score almost 1.0 as text, so a different number must lower the confidence.
 function Get-TpmBezelNumberText {
     param([AllowNull()][string]$Title)
     if ([string]::IsNullOrWhiteSpace($Title)) { return '' }
+    $roman = @{ ii = '2'; iii = '3'; iv = '4'; v = '5'; vi = '6'; vii = '7'; viii = '8'; ix = '9'; x = '10' }
     $plain = [regex]::Replace($Title, '[\(\[].*?[\)\]]', ' ')
     $plain = [regex]::Replace($plain, '(?<=\p{L})(?=\d)|(?<=\d)(?=\p{L})', ' ')
     $found = @([regex]::Matches($plain.ToLowerInvariant(), '[\p{L}0-9]+') | ForEach-Object { $_.Value } |
-        Where-Object { $_ -match '^\d+$' -or $_ -in @('ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x') })
+        Where-Object { $_ -match '^\d+$' -or $roman.ContainsKey($_) } | ForEach-Object { if ($roman.ContainsKey($_)) { $roman[$_] } else { $_ } })
     return ($found -join ' ')
 }
 
@@ -22959,7 +22960,7 @@ function Write-TpmBezelState {
 }
 
 # The .png files of the user's folder (the folder and up to three levels below it; links are not followed). A file whose first
-# bytes are not the PNG signature is counted in NotPng and not used.
+# bytes are not the PNG signature, or that is a .jpg (the bezel is saved as bezel.png), is counted in NotPng and not used.
 function Find-TpmBezelFiles {
     param([Parameter(Mandatory)][string]$Folder)
     $root = [System.IO.Path]::GetFullPath($Folder).TrimEnd('\')
@@ -22973,7 +22974,7 @@ function Find-TpmBezelFiles {
         foreach ($entry in @(Get-ChildItem -LiteralPath $current.Path -Force -ErrorAction SilentlyContinue)) {
             if ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { continue }
             if ($entry.PSIsContainer) { if ($current.Depth -lt 3) { $pending.Push([pscustomobject]@{ Path = $entry.FullName; Depth = $current.Depth + 1 }) }; continue }
-            if ($entry.Extension -ine '.png') { continue }
+            if ($entry.Extension -ine '.png') { if ($entry.Extension -imatch '^\.jpe?g$') { $notPng++ }; continue }
             $head = New-Object byte[] 8
             try {
                 $stream = [System.IO.File]::OpenRead($entry.FullName)
@@ -23002,8 +23003,11 @@ function Get-TpmBezelGames {
             if ($null -eq $doc.GameProfile) { continue }
             $gpNode = $doc.GameProfile.SelectSingleNode('GamePath')
             if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
-            $nameNode = $doc.GameProfile.SelectSingleNode('GameName')
-            $name = if ($nameNode -and -not [string]::IsNullOrWhiteSpace($nameNode.InnerText)) { $nameNode.InnerText.Trim() } else { $pf.BaseName }
+            # Real TeknoParrot profiles keep the title in GameNameInternal (some have none; TeknoParrot's Metadata file has it), never in GameName.
+            $title = (Get-XmlChildText $doc.GameProfile 'GameNameInternal').Trim()
+            if (-not $title) { $title = (Get-TpmTeknoParrotGameName -TpRoot (Split-Path -Parent ([System.IO.Path]::GetFullPath($UserProfilesDir).TrimEnd('\'))) -ProfileCode $pf.BaseName).Trim() }
+            $name = if ($title) { $title } else { $pf.BaseName }
+            $short = if ($pf.BaseName -match '^[^_]+_(.{3,})$') { $Matches[1] } else { '' }
             $check = Test-TpmGameMutationPath -GamePath $gpNode.InnerText.Trim() -RequireLeaf -ProtectedRoots $ProtectedRoots
             if (-not $check.Valid) { $refused++; Write-Log ('Bezels: {0} skipped; path reason={1}' -f $pf.BaseName, $check.ReasonCode); continue }
             $target = Get-ReShadeTargetInfo -Doc $doc -GamePath $check.CanonicalPath -ExeDir ([string]$check.GameDirectory)
@@ -23011,8 +23015,11 @@ function Get-TpmBezelGames {
             $games.Add([pscustomobject]@{
                 ProfileId = [string]$pf.BaseName; Name = $name; TargetDir = [string]$target.TargetDir; HasReShade = $hasReShade; Shared = $false
                 Dest = (Join-Path ([string]$target.TargetDir) 'reshade-shaders\Textures\bezel.png')
-                Keys = @(@((Get-NormalizedGameKey $name), (Get-TpmBaseTitleKey $name), (Get-NormalizedGameKey $pf.BaseName)) | Where-Object { $_ } | Select-Object -Unique)
-                Numbers = (Get-TpmBezelNumberText -Title ([regex]::Replace($name, '(?<=\p{Ll})(?=\p{Lu})', ' ')))
+                Keys = @(@((Get-NormalizedGameKey $title), (Get-TpmBaseTitleKey $title)) | Where-Object { $_ } | Select-Object -Unique)
+                # The profile code is the arcade short name ("acedriv3"); it matches only exactly, never by similarity ("daytona" is not "Daytona3").
+                # A loader prefix ("teknonaomi_dybb99", "cps_wof") is not part of the short name.
+                CodeKeys = @(@((Get-NormalizedGameKey $pf.BaseName), (Get-NormalizedGameKey $short)) | Where-Object { $_ } | Select-Object -Unique)
+                Numbers = (Get-TpmBezelNumberText -Title ([regex]::Replace($title, '(?<=\p{Ll})(?=\p{Lu})', ' ')))
             })
         } catch { $refused++; Write-Log ('Bezels: {0} skipped: {1}' -f $pf.BaseName, $_.Exception.Message) }
     }
@@ -23022,7 +23029,8 @@ function Get-TpmBezelGames {
     return [pscustomobject]@{ Games = @($games.ToArray()); Refused = $refused }
 }
 
-# The three best bezels per game (score is the best Dice score of any bezel/game name pair). This is the slow step, so it runs once.
+# The three best bezels per game (score is the best Dice score of any bezel/game name pair, or 1.0 when the file name is exactly the
+# game's profile code). This is the slow step, so it runs once. Equal scores list a bezel with the right sequel number first.
 function Get-TpmBezelCandidates {
     param([Parameter(Mandatory)][object[]]$Games, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Bezels)
     $result = @{}
@@ -23030,22 +23038,29 @@ function Get-TpmBezelCandidates {
         $scored = New-Object System.Collections.Generic.List[object]
         foreach ($bezel in $Bezels) {
             $score = 0.0
+            $exactCode = $false
             foreach ($bezelKey in @($bezel.Key, $bezel.BaseKey | Where-Object { $_ })) {
+                if ($game.CodeKeys -contains $bezelKey) { $exactCode = $true }
                 foreach ($gameKey in $game.Keys) { $s = Get-DiceSimilarity $bezelKey $gameKey; if ($s -gt $score) { $score = $s } }
             }
-            $scored.Add([pscustomobject]@{ Bezel = $bezel; Score = $score; NumberMismatch = ($bezel.Numbers -ne $game.Numbers) })
+            if ($exactCode) { $score = 1.0 }
+            $scored.Add([pscustomobject]@{ Bezel = $bezel; Score = $score; NumberMismatch = (-not $exactCode -and $bezel.Numbers -ne $game.Numbers) })
         }
-        $result[$game.ProfileId] = @($scored.ToArray() | Sort-Object @{ Expression = { $_.Score }; Descending = $true }, @{ Expression = { $_.Bezel.Name } } | Select-Object -First 3)
+        $result[$game.ProfileId] = @($scored.ToArray() | Sort-Object @{ Expression = { [math]::Round($_.Score, 3) }; Descending = $true }, @{ Expression = { $_.NumberMismatch } }, @{ Expression = { $_.Bezel.Name } } | Select-Object -First 3)
     }
     return $result
 }
 
 # One row per game: what TPM would do. Status: Apply, Same (already there), NeedsChoice, NoBezel, NeedsReShade, Shared, UserBezel
 # (a bezel the user placed is there). Confidence: High (score >= 0.85 and clearly ahead of the next one), Medium (>= the registration
-# threshold), Low (>= 0.5, or a different sequel number), None. A remembered pick wins ('Your choice'; '' means no bezel wanted).
+# threshold), Low (>= 0.5, a different sequel number, or a bezel that fits another game better), None. Two bezels that fit equally well
+# are never High; the preview names the other one ("Also close").
+# A remembered pick wins ('Your choice'; '' means no bezel wanted).
 function New-TpmBezelPlanRows {
     param([Parameter(Mandatory)][object[]]$Games, [Parameter(Mandatory)][hashtable]$Candidates, [Parameter(Mandatory)]$State)
     $rows = New-Object System.Collections.Generic.List[object]
+    $bestFit = @{}
+    foreach ($list in $Candidates.Values) { foreach ($c in @($list)) { if (-not $c.NumberMismatch -and $c.Score -gt [double]$bestFit[$c.Bezel.Name]) { $bestFit[$c.Bezel.Name] = $c.Score } } }
     foreach ($game in $Games) {
         $ranked = @($Candidates[$game.ProfileId])
         $chosen = $null; $confidence = 'None'
@@ -23055,8 +23070,9 @@ function New-TpmBezelPlanRows {
         elseif ($picked.Count -gt 0) { $chosen = $picked[0].Bezel; $confidence = 'Your choice' }
         elseif ($ranked.Count -gt 0 -and $ranked[0].Score -ge 0.5) {
             $top = $ranked[0]
-            $gap = if ($ranked.Count -gt 1) { $top.Score - $ranked[1].Score } else { 1.0 }
-            $confidence = if ($top.NumberMismatch) { 'Low' }
+            $rival = @($ranked | Select-Object -Skip 1 | Where-Object { -not $_.NumberMismatch } | Select-Object -First 1)
+            $gap = if ($rival.Count -gt 0) { $top.Score - $rival[0].Score } else { 1.0 }
+            $confidence = if ($top.NumberMismatch -or $top.Score + 0.001 -lt $bestFit[$top.Bezel.Name]) { 'Low' }
                           elseif ($top.Score -ge 0.85 -and $gap -ge $FuzzyTieMargin) { 'High' }
                           elseif ($top.Score -ge $FuzzyAutoThreshold) { 'Medium' } else { 'Low' }
             if ($confidence -ne 'Low') { $chosen = $top.Bezel }
@@ -23176,9 +23192,10 @@ function Invoke-TpmBezelUndo {
 }
 
 function Write-TpmBezelPreview {
-    param([Parameter(Mandatory)][object[]]$Rows, [int]$BezelCount)
+    param([Parameter(Mandatory)][object[]]$Rows, [int]$BezelCount, [int]$NotPng = 0)
     Write-TpmText -Text 'Bezel preview. Nothing has been changed yet.' -Color Cyan -BlankBefore
-    Write-TpmText -Text ('Found {0} in your folder.' -f (Format-TpmCountNoun -Count $BezelCount -Singular 'bezel')) -Color DarkGray
+    $skipped = if ($NotPng -gt 0) { ' {0} other image files (.jpg, or not a real PNG) were not used.' -f $NotPng } else { '' }
+    Write-TpmText -Text ('Found {0} in your folder.{1}' -f (Format-TpmCountNoun -Count $BezelCount -Singular 'bezel'), $skipped) -Color DarkGray
     $number = 0
     foreach ($row in @($Rows | Where-Object { $_.Status -ne 'NoBezel' })) {
         $number++
@@ -23206,8 +23223,8 @@ function Show-TpmBezelDetails {
     foreach ($row in @($Rows | Where-Object { $_.Chosen })) { [void]$lines.Add(('{0}: {1} -> {2}' -f $row.Game.ProfileId, $row.Chosen.Path, $row.Game.Dest)) }
     $match = @(
         'Names are cleaned first (underscores, the words bezel and overlay, region and version tags) and compared to each game name with the same title matching the game list uses.',
-        'High means a close match that is clearly ahead of the next one. Medium means a likely match. Low or a different sequel number means you choose. Matches are never made without a preview.',
-        ('Files that are not real .png images are ignored: {0}.' -f $NotPng),
+        'High means a close match that is clearly ahead of the next one. Medium means a likely match. Low, a different sequel number, or a bezel that fits another game better means you choose. Matches are never made without a preview.',
+        ('Files that are not real .png images (including .jpg files) are ignored: {0}.' -f $NotPng),
         'TeknoParrot Manager puts the file where ReShade reads bezel.png. This has not been confirmed on every graphics type. Games that run in exclusive fullscreen or start through a loader may not show it.'
     )
     Show-TpmDetailBlocks -Blocks @(@{ Heading = 'Where each file goes'; Lines = $lines.ToArray() }, @{ Heading = 'How the match works'; Lines = $match })
@@ -23274,7 +23291,7 @@ function Invoke-TpmBezelSetup {
     while ($true) {
         $rows = @(New-TpmBezelPlanRows -Games $gameList.Games -Candidates $candidates -State $state)
         $shown = @($rows | Where-Object { $_.Status -ne 'NoBezel' })
-        Write-TpmBezelPreview -Rows $rows -BezelCount $found.Files.Count
+        Write-TpmBezelPreview -Rows $rows -BezelCount $found.Files.Count -NotPng $found.NotPng
         Write-TpmText -Text 'A) Apply   a number) pick a different bezel for that game   D) Details   C) Cancel' -Color White -BlankBefore
         $choice = Read-TpmChoice -Prompt '  Choice (default C)' -Choices @(@('A', 'D', 'C') + @(1..[Math]::Max(1, $shown.Count) | ForEach-Object { [string]$_ })) -Default 'C'
         if ($choice -eq 'C') { Write-TpmText -Text 'Canceled. No files were changed.' -Color DarkGray; return }
