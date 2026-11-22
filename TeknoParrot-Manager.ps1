@@ -24807,6 +24807,9 @@ function Invoke-TpmAutoSyncDirectoryTransaction {
                 try {
                     if (-not ($script:TpmOwnedLayout -and $script:TpmOwnedLayout.Backups)) { throw 'No Backups folder is set up.' }
                     $extraRoot = Join-Path (Join-Path ([string]$script:TpmOwnedLayout.Backups) 'AutoSyncReplaced') ($RawName + '_' + (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd_HH-mm-ss', [System.Globalization.CultureInfo]::InvariantCulture))
+                    # Two runs in the same second must not share a folder: the copy below never overwrites, so a shared one would fail and roll the update back.
+                    $extraBase = $extraRoot
+                    for ($extraSuffix = 2; (Test-Path -LiteralPath $extraRoot); $extraSuffix++) { $extraRoot = $extraBase + '_' + $extraSuffix }
                     foreach ($extraFile in $extraFiles) {
                         $extraTo = ConvertTo-TpmAutoSyncLongPath -Path (Join-Path $extraRoot $extraFile.RelativePath)
                         [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($extraTo))
