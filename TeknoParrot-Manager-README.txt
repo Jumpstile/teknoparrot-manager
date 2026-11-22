@@ -2660,6 +2660,28 @@
       Manager forget that a game worked.
     - Show or print my cabinet controls. The same page for the cabinet
       itself: each control and the key it sends.
+    - Does my cabinet fit the game? The page for one game starts with a
+      few plain lines that compare the game with what you told the
+      Manager. It says if your cabinet has enough players and buttons
+      ("Your cabinet has no button 3" is shown on that row), and which
+      device the game needs (trackball, spinner, wheel and pedals, light
+      gun) that you said you do not have. If you have no wheel but have
+      an Xbox controller, or no light gun but have a trackball or an
+      Xbox controller, it says that can stand in. If you never told the
+      Manager, it says it does not know instead of guessing. This only
+      compares: it sets up nothing and changes no game file. The same
+      lines go to the log.
+    - Exit, Pause and Menu. When learning buttons, the Manager first
+      asks, one by one, if your cabinet has an Exit, a Pause or a Menu
+      (admin) button. The answer is N unless you say Y. For these three,
+      Esc counts as a key, because many cabinets use Esc for Exit. They
+      show on your cabinet page.
+    - Undo my last save. Every time the Manager saves your answers or
+      keys it keeps the older file next to it as a .bak copy. When such
+      a copy exists, My controls offers "6 = Undo my last save". It
+      shows how many keys the older answers hold and asks one question.
+      If you say Y the older answers come back, and your newest answers
+      are kept as the copy, so you can undo the undo.
 
   If you have no lightgun, you can aim gun games in two ways:
 

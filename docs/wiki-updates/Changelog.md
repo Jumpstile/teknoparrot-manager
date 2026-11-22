@@ -51,6 +51,16 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   the game has it set up. It suggests your key only for coin, start,
   numbered buttons and plain directions, and says "I'm not sure" for the
   rest. If your own LEDBlinky file gives a control a color, it shows.
+- The page for one game now says if your cabinet has enough players
+  and buttons, and which device the game needs (trackball, spinner,
+  wheel and pedals, light gun) that you said you do not have, with
+  what can stand in (an Xbox controller to steer, a trackball or the
+  Xbox stick to aim). It says "not known" when you never told the
+  Manager. It only compares and changes nothing.
+- Learning buttons asks if your cabinet has an Exit, Pause or Menu
+  button (Esc counts as a key for these). My controls offers "6 = Undo
+  my last save" when an older copy of your answers exists: it shows
+  what comes back, asks once, and keeps your newest answers as a copy.
 - You can tell the Manager that a game played well. It keeps that with
   the date and the game's revision, and calls the controls Verified
   until they or the settings change. Starting a game never makes it
