@@ -21144,6 +21144,22 @@ Describe 'S1-DIRECTORY-REPLACEMENT AutoSync transaction' {
         $second.FilesystemChanged | Should -BeTrue
     }
 
+    It 'keeps both copies of the old folder files when two replacements land in the same second' {
+        $f = New-S1DirectoryFixture 'directory-same-second-backup'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'expected' }
+        $state = @{}
+        Mock Get-Date { [datetime]::new(2026,1,2,3,4,5,[System.DateTimeKind]::Utc) }
+        $earlier = Join-Path $script:TpmOwnedLayout.Backups 'AutoSyncReplaced\Game_2026-01-02_03-04-05'
+        New-Item -ItemType Directory -Path $earlier -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $earlier 'game.exe') -Value 'earlier backup' -NoNewline
+        Invoke-S1DirectoryTransaction -Fixture $f -State $state | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'tampered' -NoNewline
+        $second = Invoke-S1DirectoryTransaction -Fixture $f -State $state -Stored $state.Game
+        $second.TransactionResult.Outcome | Should -Be 'SUCCEEDED'
+        [System.IO.File]::ReadAllText((Join-Path $earlier 'game.exe')) | Should -Be 'earlier backup'
+        [System.IO.File]::ReadAllText((Join-Path $second.TransactionResult.TechnicalDetails.ExtraFilesSavedTo 'game.exe')) | Should -Be 'tampered'
+    }
+
     It 'reports cleanup residue after a verified replacement without admitting a clean transaction' {
         $f = New-S1DirectoryFixture 'directory-cleanup-residue'
         New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'new' }
