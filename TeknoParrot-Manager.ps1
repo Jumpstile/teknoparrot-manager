@@ -1,4 +1,4 @@
-# TeknoParrot Manager  |  v1.0 RC8.4
+# TeknoParrot Manager  |  v1.0 RC9
 # Author: Jumpstile
 # =============================================================================
 #
@@ -68,7 +68,8 @@ param(
     [string]$PostgresRecoveryResumeToken = '',
     [switch]$ValidationReport,
     [string]$ValidationRoot = '',
-    [string]$ValidationJsonPath = ''
+    [string]$ValidationJsonPath = '',
+    [string]$MappingEvidenceFile = ''
 )
 
 # TPM draws every progress bar itself (scripts\TpmProgress.psm1). Silence the PowerShell native progress display for the
@@ -87,7 +88,7 @@ $script:TpmIndependentProgressTasks = @{}
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
 $ScriptVersion = "1.0"
-$ReleaseCandidateLabel = "RC8.4"
+$ReleaseCandidateLabel = "RC9"
 $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
 
 function Get-ManagerDisplayVersion {
@@ -5158,7 +5159,7 @@ function Get-PrimaryExecutableName {
 # GamePath2). A GamePath2 whose file is gone is stale and is corrected the
 # same way a stale GamePath already is; one that still exists is never touched.
 function Set-SecondaryExecutablePath {
-    param([System.Xml.XmlDocument]$Doc, [string]$PrimaryExePath)
+    param([System.Xml.XmlDocument]$Doc, [string]$PrimaryExePath, [string]$ProfileCode = '')
 
     $hasTwoNode = $Doc.GameProfile.SelectSingleNode("HasTwoExecutables")
     if ($null -eq $hasTwoNode -or $hasTwoNode.InnerText -ne 'true') { return $false }
@@ -5167,7 +5168,15 @@ function Set-SecondaryExecutablePath {
     if ([string]::IsNullOrWhiteSpace($exe2Name)) { return $false }
 
     # [System.IO.Path]::Combine, not Join-Path: Join-Path prints a raw red "Cannot find drive" error for a profile saved on a drive that is not connected.
-    try { $exe2Path = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($PrimaryExePath), $exe2Name.Trim()) } catch { return $false }
+    try {
+        if ($exe2Name -match '[*?]') {
+            # A pattern ("*.chd", System 11): only a single, unambiguous match is used.
+            $exe2Path = Find-TpmSecondFileByPattern -PrimaryExePath $PrimaryExePath -Pattern $exe2Name.Trim() -ExecutableName ([string]$Doc.GameProfile.ExecutableName) -ProfileCode $ProfileCode
+            if ([string]::IsNullOrEmpty($exe2Path)) { return $false }
+        } else {
+            $exe2Path = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($PrimaryExePath), $exe2Name.Trim())
+        }
+    } catch { return $false }
 
     $gp2 = $Doc.GameProfile.SelectSingleNode("GamePath2")
     if ($null -ne $gp2 -and $gp2.InnerText.Trim() -eq $exe2Path) { return $false }
@@ -5208,7 +5217,7 @@ function Backfill-SecondaryExecutablePath {
         # A profile saved on a drive that is not connected cannot be checked: count it for one summary after the scan and keep going.
         $driveCheck = Test-TpmGameMutationPath -GamePath $gpNode.InnerText
         if ($driveCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { Add-TpmUnavailableDriveGame -Code $code -Path $gpNode.InnerText; return }
-        if (Set-SecondaryExecutablePath $existingDoc $gpNode.InnerText) {
+        if (Set-SecondaryExecutablePath $existingDoc $gpNode.InnerText -ProfileCode $code) {
             $ledgerMapping = Start-TpmRegistrationMapping -Folder $Folder -Code $code -Match 'secondary-backfill' -IntendedPath $gpNode.InnerText -TemplatePath '' -DryRun $DryRun
             # Registration makes its safety backup lazily, before its first real write.
             if (-not $DryRun) { [void](Confirm-TpmRegistrationSafetyBackup -State $BackupState -UserProfilesDir $UserProfilesDir) }
@@ -9091,38 +9100,71 @@ $FuzzyTieMargin = 0.1
 # (dat lookup, then manual-registration ACTION REQUIRED) for both. See
 # issue #15.
 function Resolve-BestFuzzyMatch {
-    param([string]$NormFolder, [array]$MatchList, [hashtable]$RawThrillsAliases, [string]$NormBaseTitle = '')
-    $best = $null; $bestScore = 0.0; $secondScore = 0.0
+    param([string]$NormFolder, [array]$MatchList, [hashtable]$RawThrillsAliases, [string]$NormBaseTitle = '', [hashtable]$AlternateNames = $null)
+    $best = $null; $bestScore = 0.0; $secondScore = 0.0; $bestIsExact = $false; $exactCount = 0
     foreach ($cand in $MatchList) {
         $normCode = Get-NormalizedGameKey $cand.Code
-        $score    = Get-DiceSimilarity $NormFolder $normCode
-        # A folder name often carries notes in parentheses or brackets after the title, for example "(Landscape,Bezel)" or "(fixed video)".
-        # They are not part of the game's name and pull the score down, so the title before the first note is scored as well.
-        # The better of the two scores is used; the same tie rule below still applies.
-        if ($NormBaseTitle) {
-            $baseScore = Get-DiceSimilarity $NormBaseTitle $normCode
-            if ($baseScore -gt $score) { $score = $baseScore }
+        $keys = @($normCode)
+        # TeknoParrot's own name for the game (Metadata\<code>.json) is a second name for the same profile, for example
+        # "Golden Tee Live 2023-2024" for GoldenTeeLive2023. It is only an extra key; the profile code is always scored too.
+        if ($null -ne $AlternateNames -and $AlternateNames.ContainsKey($cand.Code)) {
+            $normAltName = Get-NormalizedGameKey ([string]$AlternateNames[$cand.Code])
+            if ($normAltName) { $keys += $normAltName }
+        }
+        $score = 0.0
+        foreach ($key in $keys) {
+            $keyScore = Get-DiceSimilarity $NormFolder $key
+            # A folder name often carries notes in parentheses or brackets after the title, for example "(Landscape,Bezel)" or "(fixed video)".
+            # They are not part of the game's name and pull the score down, so the title before the first note is scored as well.
+            # The better of the two scores is used; the same tie rule below still applies.
+            if ($NormBaseTitle) {
+                $baseScore = Get-DiceSimilarity $NormBaseTitle $key
+                if ($baseScore -gt $keyScore) { $keyScore = $baseScore }
+            }
+            if ($keyScore -gt $score) { $score = $keyScore }
         }
         if ($RawThrillsAliases.ContainsKey($cand.Code)) {
             $normAlias  = Get-NormalizedGameKey $RawThrillsAliases[$cand.Code].Suggested
             $aliasScore = Get-DiceSimilarity $NormFolder $normAlias
             if ($aliasScore -gt $score) { $score = $aliasScore }
         }
+        $isExact = ($NormFolder.Length -gt 0 -and $keys -ccontains $NormFolder)
+        if ($isExact) { $exactCount++ }
         if ($score -gt $bestScore) {
             $secondScore = $bestScore
             $bestScore   = $score
             $best        = $cand
+            $bestIsExact = $isExact
         } elseif ($score -gt $secondScore) {
             $secondScore = $score
         }
     }
-    $isTie = ($secondScore -gt 0) -and (($bestScore - $secondScore) -lt $FuzzyTieMargin)
+    # Two years of one game ("Golden Tee Live 2020" and "Golden Tee Live 2021") score within the tie margin of each other, so a folder
+    # that names one of them exactly would never be trusted. When exactly one candidate has the folder's whole name and it also scores strictly higher than every other, it wins.
+    $isTie = ($secondScore -gt 0) -and (($bestScore - $secondScore) -lt $FuzzyTieMargin) -and -not ($bestIsExact -and $exactCount -eq 1 -and $bestScore -gt $secondScore)
     return [pscustomobject]@{
         Best             = $best
         BestScore        = $bestScore
         SecondScore      = $secondScore
         IsConfidentMatch = ($null -ne $best) -and ($bestScore -ge $FuzzyAutoThreshold) -and -not $isTie
     }
+}
+
+# TeknoParrot's own game name (Metadata\<code>.json, a sibling of the GameProfiles folder) for each profile code that has one: code -> name.
+# Read once per code and remembered for the run. A missing or unreadable file simply leaves the code out.
+function Get-TpmTeknoParrotNamesForCodes {
+    param([Parameter(Mandatory)][string]$GameProfilesDir, [string[]]$Codes = @())
+    $names = @{}
+    $tpRoot = Split-Path -Path $GameProfilesDir -Parent
+    if ([string]::IsNullOrWhiteSpace($tpRoot)) { return $names }
+    $cache = Get-Variable -Name TpmTeknoParrotNameCache -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($cache -isnot [hashtable]) { $cache = @{}; $script:TpmTeknoParrotNameCache = $cache }
+    foreach ($code in $Codes) {
+        $cacheKey = $tpRoot + '|' + $code
+        if (-not $cache.ContainsKey($cacheKey)) { $cache[$cacheKey] = (Get-TpmTeknoParrotGameName -TpRoot $tpRoot -ProfileCode $code) }
+        if (-not [string]::IsNullOrWhiteSpace([string]$cache[$cacheKey])) { $names[$code] = [string]$cache[$cacheKey] }
+    }
+    return $names
 }
 
 # Scans $folder recursively for files that TeknoParrot profiles use as their
@@ -9141,8 +9183,10 @@ function Resolve-BestFuzzyMatch {
 # this extension those games were never found by name (issue #389).
 # Silent Scope, etc.) specify a game-specific DLL as their ExecutableName.
 function Get-GameFiles {
-    param([string]$folder, [scriptblock]$ProgressScript = $null)
-    $exts       = @('.exe', '.elf', '.iso', '.gcm', '.gcz', '.bin', '.e4', '.zip', '.xbe', '.dll', '.acgame')
+    param([string]$folder, [scriptblock]$ProgressScript = $null, [string[]]$ExtraExtensions = @())
+    # The usual game file types, plus the file types the TeknoParrot profiles themselves name (Get-TpmProfileFileExtensions), so a game
+    # whose file ends in something unusual (.exec, .chd) is still found without a change to this list.
+    $exts       = @('.exe', '.elf', '.iso', '.gcm', '.gcz', '.bin', '.e4', '.zip', '.xbe', '.dll', '.acgame') + @($ExtraExtensions)
     $normalized = $folder -replace '/', '\'
     $baseDepth  = $normalized.TrimEnd('\').Split('\').Count
     $files = New-Object System.Collections.Generic.List[object]
@@ -14465,7 +14509,7 @@ function Show-TpmReShadeSetupResult {
         [void]$undoLines.Add('Where: ReShade > Undo ReShade changes')
         [void]$blocks.Add(@{ Heading = 'Undo'; Lines = $undoLines.ToArray() })
     }
-    $detailsNote = if ($reShadeResult.Protected -gt 0) { 'Press A to replace protected ReShade files. TeknoParrot Manager asks you to confirm before it changes anything.' } else { '' }
+    $detailsNote = if ($reShadeResult.Protected -gt 0) { 'Press A to replace protected ReShade files. TeknoParrot Manager saves a copy of the old files first, so you can undo it.' } else { '' }
     Write-Log ('ReShade result: changed={0} protected={1} unsafe={2} missing={3} unsupported={4} kept={5} failed={6} unverified={7} -- {8}' -f $reShadeResult.Deployed, $reShadeResult.Protected, $reShadeResult.Unsafe, $missingTotal, $reShadeResult.Unsupported, $reShadeResult.KeptPrevious, $reShadeResult.ErrorCount, $reShadeResult.UnverifiedCount, $summaryText)
     foreach ($block in $blocks) {
         foreach ($blockLine in @($block.Lines)) { Write-Log ('ReShade result detail [{0}]: {1}' -f $block.Heading, $blockLine) }
@@ -14536,15 +14580,10 @@ function Show-TpmReShadeSetupResult {
                 $screen.PendingApplyMode = 'ReShadeSetup'
                 $screen.PendingReShadeAction = 'Select'
             } elseif ($choice -eq 'A') {
-                $adoptConfirm = Read-TpmYesNo -Prompt ("  Replace the old ReShade files in {0}? You will choose the look again. A copy of the old files is saved, so you can undo it. Press Y to replace them, or N to leave them. (Y/N)" -f $protectedWords) -Default 'N'
-                if ($adoptConfirm -eq 'Y') {
-                    $screen.PendingApplyMode = 'ReShadeSetup'
-                    $screen.PendingReShadeAction = 'Adopt'
-                } else {
-                    Write-Host '  Nothing was replaced. No files were changed.' -ForegroundColor DarkGray
-                }
+                $screen.PendingApplyMode = 'ReShadeSetup'
+                $screen.PendingReShadeAction = 'Adopt'
             }
-        } while ($choice -eq 'D' -or ($choice -eq 'A' -and $adoptConfirm -ne 'Y'))
+        } while ($choice -eq 'D')
         $screen.Choice = $choice
         return $screen
     }
@@ -15881,7 +15920,7 @@ function Get-TpmReShadeUndoChangedKindLines {
 }
 
 # A game that changed after its receipt. Says which kinds of file changed and never touches them. When other files of the game can still
-# be put back, U puts back only those (after a typed YES); D shows the changed files; C or Enter leaves everything as it is.
+# be put back, U puts back only those (no second question: pressing U is the approval); D shows the changed files; C or Enter leaves everything as it is.
 function Invoke-TpmReShadeUndoChangedChoice {
     param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)]$Check, [string[]]$ProtectedRoots = @())
     $canPart = (@($Check.ToRestore).Count -gt 0)
@@ -15904,7 +15943,6 @@ function Invoke-TpmReShadeUndoChangedChoice {
         }
     } while ($choice -ceq 'D')
     if ($choice -cne 'U') { return }
-    if (-not (Confirm-TpmReShadeUndoWord -Word 'YES' -Prompt 'Type YES to undo only those files' -LogText ([string]$Entry.GameId))) { return }
     Write-TpmReShadeUndoOutcome -Results @(Invoke-TpmReShadeUndo -Entry $Entry -RestoreUnchanged -ProtectedRoots $ProtectedRoots)
 }
 
@@ -16219,9 +16257,14 @@ function Install-TpmReShadeProfileDeployment {
 }
 # Read-only look at which controller types are connected (contract: docs/architecture/CONTROLLER_EVIDENCE_CONTRACT.md).
 # It only suggests: the Device Survey uses a clear match as the default answer and the user can always change it.
-# It never writes a file, never reads serial numbers or device paths, and any failure gives an empty "SourceUnavailable" result.
+# It never writes a file, never keeps a serial number or device path, and any failure gives an empty "SourceUnavailable" result.
+# With -Salt it also returns one fingerprint per arcade encoder it recognizes: a one-way hash of the salt, the maker/model numbers and
+# a counter. The raw numbers and instance ids are read in memory only to count boards and build that hash; they are never returned.
 function Get-TpmControllerEvidence {
+    param([string]$Salt = '')
     $found = New-Object System.Collections.Generic.List[object]
+    $fingerprints = New-Object System.Collections.Generic.List[object]
+    $hash = { param([string]$Text) $sha = [System.Security.Cryptography.SHA256]::Create(); try { (@($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)) | ForEach-Object { $_.ToString('x2') }) -join '') } finally { $sha.Dispose() } }
     $reasons = New-Object System.Collections.Generic.List[string]
     $add = { param($Class, $Confidence, $Basis, $Count) [void]$found.Add([pscustomobject][ordered]@{ DeviceClass = $Class; Confidence = $Confidence; Basis = $Basis; Count = [int]$Count; ReasonCodes = @() }) }
     $status = 'Observed'
@@ -16242,11 +16285,26 @@ function Get-TpmControllerEvidence {
                 $n = @($devices | Where-Object { [string]$_.Name -match $hints[$class] }).Count
                 if ($n -gt 0) { & $add $class 'Low' 'NameHint' $n }
             }
-            # A small list of makers that only build arcade keyboard encoders. The maker code is used here and never kept in the result.
-            # A match is Medium at most: it says a board of that maker is plugged in, not what the buttons do.
+            # A small list of makers that only build arcade keyboard encoders. A match is Medium at most: it says a board of that maker is
+            # plugged in, not what the buttons do. Boards of one model are counted by instance id: every interface of one board shows one
+            # id, so the most ids any single interface shows is the number of boards. A different USB port changes the ids but not the count.
             $knownVendors = [ordered]@{ 'D209' = 'ArcadeEncoder' }
             foreach ($vendor in $knownVendors.Keys) {
-                $boards = @($devices | ForEach-Object { if ([string]$_.DeviceID -match ('VID_' + $vendor + '&PID_([0-9A-F]{4})')) { $Matches[1] } } | Select-Object -Unique).Count
+                $interfaces = @{}
+                foreach ($device in $devices) {
+                    if ([string]$device.DeviceID -match ('^[^\\]*\\VID_' + $vendor + '&PID_([0-9A-F]{4})([^\\]*)\\(.+)$')) {
+                        $slot = $Matches[1].ToUpperInvariant() + '|' + $Matches[2]
+                        if (-not $interfaces.ContainsKey($slot)) { $interfaces[$slot] = New-Object 'System.Collections.Generic.HashSet[string]' }
+                        [void]$interfaces[$slot].Add($Matches[3])
+                    }
+                }
+                $perModel = @{}
+                foreach ($slot in $interfaces.Keys) { $model = $slot.Split('|')[0]; $perModel[$model] = [Math]::Max([int]$perModel[$model], $interfaces[$slot].Count) }
+                $boards = 0
+                foreach ($model in @($perModel.Keys | Sort-Object)) {
+                    $boards += [int]$perModel[$model]
+                    if ($Salt) { for ($n = 1; $n -le [int]$perModel[$model]; $n++) { [void]$fingerprints.Add([pscustomobject][ordered]@{ DeviceClass = $knownVendors[$vendor]; Fingerprint = (& $hash ('TpmControllerFingerprint|1|{0}|{1}|VID_{2}&PID_{3}|{4}' -f $Salt, $knownVendors[$vendor], $vendor, $model, $n)) }) } }
+                }
                 if ($boards -gt 0) { & $add $knownVendors[$vendor] 'Medium' 'KnownVendor' $boards }
             }
             $pads = @($devices | Where-Object { [string]$_.Name -match 'game controller' -and [string]$_.DeviceID -notmatch 'IG_' -and [string]$_.Name -notmatch ($hints.Values -join '|') }).Count
@@ -16257,13 +16315,16 @@ function Get-TpmControllerEvidence {
         $found.Clear(); $status = 'SourceUnavailable'; [void]$reasons.Add('ProbeFailed')
     }
     $observations = @($found.ToArray() | Sort-Object DeviceClass, Basis)
+    # $null = not checked (no salt, or the device list could not be read); an empty array = checked and none recognized.
+    $prints = $null
+    if ($Salt -and $status -eq 'Observed' -and $reasons -notcontains 'DeviceListUnavailable') { $prints = @($fingerprints.ToArray() | Sort-Object DeviceClass, Fingerprint) }
     $canonical = 'TpmLocalDetection|1|' + ((@($observations | ForEach-Object { '{0}/{1}/{2}/{3}' -f $_.DeviceClass, $_.Confidence, $_.Basis, $_.Count })) -join ';')
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try { $id = (@($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)) | ForEach-Object { $_.ToString('x2') }) -join '') } finally { $sha.Dispose() }
+    $id = & $hash $canonical
     return [pscustomobject][ordered]@{
         ContractVersion = 'TpmControllerEvidence/v1'; EvidenceId = $id; EvidenceStatus = $status
         ProviderId = 'TpmLocalDetection'; ProviderVersion = '1'; SourceFamily = 'LocalWindowsDeviceClass'; EvidenceClass = 'LocalProbe'
-        DeviceObservations = $observations; ObservationTimeUtc = (Get-Date).ToUniversalTime().ToString('o'); InputArtifactFingerprint = $null
+        DeviceObservations = $observations; DeviceFingerprints = $prints
+        ObservationTimeUtc = (Get-Date).ToUniversalTime().ToString('o'); InputArtifactFingerprint = $null
         ReasonCodes = @($reasons.ToArray()); RedactedFields = @(); SensitiveIdentifiersIncluded = $false; ReadOnly = $true
     }
 }
@@ -17739,7 +17800,7 @@ function Get-TpmReShadeApplyPreflight {
         $progressCurrent++
         if ($SelectedGames.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Checking -Label 'ReShade apply preflight' -Current $progressCurrent -Total $SelectedGames.Count -StartedAt $progressStarted }
         $gameLabel = Get-TpmReShadeGameLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
-        $record = [ordered]@{ Game = $gameLabel; Status = 'Unsafe'; Detail = '' }
+        $record = [ordered]@{ Game = $gameLabel; Id = [string]$pf.BaseName; Status = 'Unsafe'; Detail = '' }
         try {
             $doc = Read-Xml $pf.FullName
             $pathNode = if ($doc.GameProfile) { $doc.GameProfile.SelectSingleNode('GamePath') } else { $null }
@@ -18446,9 +18507,18 @@ function Invoke-ReShadeSetupLegacy {
     }
     $deploymentStarted = Get-Date
     $deploymentCurrent = 0
+    # The progress counts the games that are being changed (the ones the check above found ready), not the whole library. The
+    # checking passes above count every game; they have their own plainly named stage.
+    $changeableIds = @{}
+    foreach ($changeableRecord in @($preflightSummary.Records)) {
+        if ($changeableRecord.Status -eq 'Ready' -or ($Action -eq 'Adopt' -and $changeableRecord.Status -eq 'Protected')) { $changeableIds[([string]$changeableRecord.Id).ToLowerInvariant()] = $true }
+    }
+    $deploymentTotal = @($selectedGames | Where-Object { $changeableIds.ContainsKey(([string]$_.BaseName).ToLowerInvariant()) }).Count
     foreach ($pf in $selectedGames) {
-        $deploymentCurrent++
-        Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current $deploymentCurrent -Total $selectedGames.Count -StartedAt $deploymentStarted
+        if ($changeableIds.ContainsKey(([string]$pf.BaseName).ToLowerInvariant())) {
+            $deploymentCurrent++
+            if ($deploymentCurrent -le $deploymentTotal) { Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current $deploymentCurrent -Total $deploymentTotal -StartedAt $deploymentStarted }
+        }
         # FIX85: the undo receipt of this game (from the deployment or the reapply), whether a failed rollback left the game half changed, and
         # the CRT setting turned off; the finally block below finishes the receipt whatever happens after the deployment.
         $gameUndo = $null; $undoMixed = $false; $undoNative = $null; $nativeCrtPlanned = $false
@@ -18689,7 +18759,7 @@ function Invoke-ReShadeSetupLegacy {
             }
         }
     }
-    if ($selectedGames.Count -gt 0) { Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current $deploymentCurrent -Total $selectedGames.Count -StartedAt $deploymentStarted -Complete }
+    if ($deploymentTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Extracting -Label 'ReShade profile deployment' -Current ([Math]::Min($deploymentCurrent, $deploymentTotal)) -Total $deploymentTotal -StartedAt $deploymentStarted -Complete }
     if ($nativeCrtState.Requested) { Write-TpmReShadeNativeCrtOutcome -State $nativeCrtState }
     $nativeTurnedOff = @($nativeCrtState.Records | Where-Object { $_.Succeeded } | ForEach-Object { [string]$_.Game })
     $nativeResultWarnings = @(foreach ($nativeWarning in $nativeShaderWarnings) {
@@ -19785,23 +19855,51 @@ function Test-GpuFixUpToDate {
 # POSTGRESQL DETECTION  (read-only helpers, shared by Postgres setup mode
 # and the Library health check's coverage report)
 # =============================================================================
-# Several Incredible Technologies games (Golden Tee Live, Power Putt Live,
-# Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers
-# Pinball) need a local PostgreSQL 8.3 database. Their Postgres settings
+# Every Incredible Technologies game with a database (all Golden Tee Live and
+# PGA Tour years, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro,
+# Orange County Choppers Pinball: 31 profiles in the TeknoParrot install checked
+# in November 2026) needs a local PostgreSQL 8.3 database. Their Postgres settings
 # live inside ConfigValues/FieldInformation under CategoryName=Postgres --
 # the same generic per-game-setting structure GPU Fix/FFB Blaster above
-# already use -- confirmed against a real Golden Tee Live 2019 GameProfile.
-# Field names are standardized across every such game (it's the same
-# settings panel design), so unlike GPU Fix this never needs per-game
-# field-name variant matching -- just the category existence check below.
+# already use. Field names are identical across every such profile (Path,
+# Address, Port, DbName, User, Pass, and "Automatically create Database" on
+# Golden Tee Live 2018 and newer), so unlike GPU Fix this never needs per-game
+# field-name variant matching -- just the category existence check below. No
+# game name or year is listed here on purpose: a new game of this kind works
+# as soon as its profile has the category.
 
 $script:PostgresInstallDir  = "C:\Program Files (x86)\PostgreSQL\8.3"
 $script:PostgresBinDir      = Join-Path $script:PostgresInstallDir "bin"
 $script:PostgresServiceName = "pgsql-8.3"
 
-# Returns $true if this profile has any Postgres-category field at all.
+# Where a game keeps its database, from the profile's Database > Storage field (newer TeknoParrot profiles).
+# Returns 'Internal', 'ExistingPostgreSQL', or $null when the field is missing, repeated or has another value
+# (an older profile: it is treated exactly as before). TeknoParrot Manager only reads this field; it never writes it.
+function Get-TpmGameDatabaseStorage {
+    param([System.Xml.XmlDocument]$Doc)
+    $nodes = $Doc.SelectNodes("/GameProfile/ConfigValues/FieldInformation[CategoryName='Database' and FieldName='Storage']")
+    if ($nodes.Count -ne 1) { return $null }
+    $value = $nodes[0].SelectSingleNode('FieldValue')
+    if ($null -eq $value) { return $null }
+    $text = ([string]$value.InnerText).Trim()
+    if ($text -ieq 'Internal') { return 'Internal' }
+    if ($text -ieq 'Existing PostgreSQL') { return 'ExistingPostgreSQL' }
+    return $null
+}
+
+# Two plain sentences for every screen that talks about a game's database (the choice belongs to the user).
+function Get-TpmDatabaseChoiceLines {
+    return @(
+        'Internal is the new default. The game keeps its own database, no database install is needed, and the game must be started once so it creates that database.',
+        'Existing PostgreSQL is for keeping an existing PostgreSQL server and its saved progress. TeknoParrot Manager never switches a game from one to the other for you; you change it in the game''s TeknoParrot settings.'
+    )
+}
+
+# Returns $true if this profile uses PostgreSQL: it has Postgres-category fields and its Storage is not Internal.
+# A game set to Internal needs no PostgreSQL, so every PostgreSQL check, install prompt and setup step skips it.
 function Test-GameNeedsPostgres {
     param([System.Xml.XmlDocument]$Doc)
+    if ((Get-TpmGameDatabaseStorage -Doc $Doc) -eq 'Internal') { return $false }
     $node = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[CategoryName='Postgres']")
     return ($null -ne $node)
 }
@@ -19822,19 +19920,33 @@ function Invoke-TpmPostgresRegistrationOffer {
     param([Parameter(Mandatory)][string]$UserProfilesDir, [string[]]$RegisteredCodes = @(), [switch]$Unattended, [switch]$DryRun)
     if ($Unattended -or $DryRun -or @($RegisteredCodes).Count -eq 0) { return $false }
     $newGames = New-Object System.Collections.Generic.List[string]
+    $newInternal = New-Object System.Collections.Generic.List[string]
+    $existingChosen = $false
     $otherCount = 0
     foreach ($pf in @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue)) {
         try {
             $doc = Read-Xml $pf.FullName
+            if ($doc.GameProfile -and $RegisteredCodes -contains $pf.BaseName -and (Get-TpmGameDatabaseStorage -Doc $doc) -eq 'Internal') { [void]$newInternal.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)); continue }
             if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc) -or (Test-TpmPostgresSettingsComplete -Doc $doc)) { continue }
+            if ((Get-TpmGameDatabaseStorage -Doc $doc) -eq 'ExistingPostgreSQL') { $existingChosen = $true }
         } catch { continue }
         if ($RegisteredCodes -contains $pf.BaseName) { [void]$newGames.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)) } else { $otherCount++ }
+    }
+    if ($newInternal.Count -gt 0) {
+        Write-Host ''
+        Write-Host ('  {0} you just added use{1} Internal storage: {2}.' -f $(if ($newInternal.Count -eq 1) { 'A game' } else { 'Games' }), $(if ($newInternal.Count -eq 1) { 's' } else { '' }), ($newInternal -join ', ')) -ForegroundColor Cyan
+        foreach ($choiceLine in (Get-TpmDatabaseChoiceLines)) { Write-Host ('  ' + $choiceLine) -ForegroundColor DarkCyan }
+        Write-Log ('Registration: {0} new game(s) use Internal database storage; no PostgreSQL is needed for them: {1}.' -f $newInternal.Count, ($newInternal -join ', '))
     }
     if ($newGames.Count -eq 0) { return $false }
     Write-Host ''
     Write-Host ('  {0} you just added need{1} PostgreSQL: {2}.' -f $(if ($newGames.Count -eq 1) { 'A game' } else { 'Games' }), $(if ($newGames.Count -eq 1) { 's' } else { '' }), ($newGames -join ', ')) -ForegroundColor Cyan
     Write-Host '  PostgreSQL is a small database program. These games keep their data in it' -ForegroundColor DarkCyan
     Write-Host '  and will not start without it.' -ForegroundColor DarkCyan
+    if ($existingChosen) {
+        Write-Host '  They are set to Existing PostgreSQL. The new default,' -ForegroundColor DarkCyan
+        Write-Host '  Internal, needs no database install; nothing is switched for you.' -ForegroundColor DarkCyan
+    }
     if (Test-PostgresInstalled) { Write-Host '  PostgreSQL is already on this PC.' -ForegroundColor DarkCyan; Write-Host '  TeknoParrot Manager can set up the game now.' -ForegroundColor DarkCyan }
     else { Write-Host '  PostgreSQL is not on this PC yet.' -ForegroundColor DarkCyan; Write-Host '  TeknoParrot Manager can install it and set up the game now.' -ForegroundColor DarkCyan }
     if ($otherCount -gt 0) { Write-Host ('  {0} other game(s) already registered also still need PostgreSQL settings.' -f $otherCount) -ForegroundColor DarkCyan }
@@ -19852,6 +19964,7 @@ function Invoke-TpmPostgresRegistrationOffer {
 function Get-TpmPostgresRequirementScan {
     param([Parameter(Mandatory)][AllowEmptyCollection()][System.IO.FileInfo[]]$ProfileFiles)
     $needCount = 0
+    $internalCount = 0
     $scanBlocked = $false
     $scanStarted = Get-Date
     $scanCurrent = 0
@@ -19863,6 +19976,7 @@ function Get-TpmPostgresRequirementScan {
             try {
                 $doc = Read-Xml $profileFile.FullName
                 if ($doc.GameProfile -and (Test-GameNeedsPostgres $doc)) { $needCount++ }
+                elseif ($doc.GameProfile -and (Get-TpmGameDatabaseStorage -Doc $doc) -eq 'Internal') { $internalCount++ }
             } catch {
                 $scanBlocked = $true
                 Write-Log "Postgres setup: profile scan failed for $($profileFile.BaseName); recovery is blocked."
@@ -19872,7 +19986,7 @@ function Get-TpmPostgresRequirementScan {
     } finally {
         Write-TpmCompactExtractionProgress -Phase 'Checking' -Label 'PostgreSQL requirement profile scan' -Current $(if ($scanCurrentDone) { $scanCurrent } else { $scanCurrent - 1 }) -Total $ProfileFiles.Count -StartedAt $scanStarted -Complete -Outcome $(if ($scanCurrentDone -and -not $scanBlocked) { 'Final' } else { 'Error' })
     }
-    return [pscustomobject]@{ NeedCount = $needCount; ScanBlocked = $scanBlocked }
+    return [pscustomobject]@{ NeedCount = $needCount; InternalCount = $internalCount; ScanBlocked = $scanBlocked }
 }
 
 # Reads one named field's current value from the Postgres category, or
@@ -20360,7 +20474,7 @@ function Get-PostgresReinitializePlansFromProfiles {
             # (a rebuild replaces data, so it must not start from a file that is only a spare).
             $backupSelection = Get-PostgresBackupSelection -GamePath $gamePath
             $backupFile = [string]$backupSelection.Newest
-            $encoding = Get-PostgresRestoreEncoding -DbName $db
+            $encoding = Get-PostgresRestoreEncoding -DbName $db -BackupFile $backupFile
             $autoCreate = Get-PostgresAutoCreateCapability -Doc $doc
             [void]$plans.Add([pscustomobject]@{ GameLabel = $label; ProfileName = $metadata.ProfileKey; Database = $db; BackupFile = $backupFile; Encoding = $encoding; AutoCreate = $autoCreate; BackupCandidateCount = [int]$backupSelection.CandidateCount; BackupNewestHasTime = [bool]$backupSelection.NewestHasTime; BackupPathTooLong = [bool]$backupSelection.PathTooLong })
         }
@@ -22019,7 +22133,7 @@ function Invoke-GpuFixSetup {
     $legacyBackupVerified=[bool](Get-TpmTransactionField -Object $legacyBackup -Name 'Verified' -Default $false)
     $legacyReason=Get-TpmTransactionField -Object $legacy -Name 'Reason' -Default $null
     $cancelled=[bool]$legacyCancelled
-    $reasonCode=if($cancelled){'USER_CANCELLED'}elseif($unknown.Count -gt 0){'PROFILE_WRITE_STATE_UNKNOWN'}elseif($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $legacyReason){[string]$legacyReason}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $legacyBackupVerified){'PROFILE_BACKUP_COMPLETED_NO_WRITE'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $failed.Count -gt 0){'PROFILE_PROCESSING_FAILED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION'){'PROFILE_SKIPPED'}else{'GPU_FIELDS_PROCESSED'}
+    $reasonCode=if($cancelled){'USER_CANCELLED'}elseif($unknown.Count -gt 0){'PROFILE_WRITE_STATE_UNKNOWN'}elseif($outcome -eq 'NO_OP'){'NO_CHANGES_NEEDED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and -not $legacyReason -and $failed.Count -eq 0 -and [int]$legacy.Errors -eq 0 -and $skipped.Count -gt 0){'SOME_GAMES_NOT_CHANGED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $legacyReason){[string]$legacyReason}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $legacyBackupVerified){'PROFILE_BACKUP_COMPLETED_NO_WRITE'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION' -and $failed.Count -gt 0){'PROFILE_PROCESSING_FAILED'}elseif($outcome -eq 'FAILED_BEFORE_MUTATION'){'PROFILE_SKIPPED'}else{'GPU_FIELDS_PROCESSED'}
     $discoveryFailed=($legacyReason -in @('GAMEPROFILE_DISCOVERY_FAILED','PROFILE_DISCOVERY_FAILED'))
     $summary=if($cancelled){'GPU compatibility setup was canceled before profile changes.'}elseif($discoveryFailed){'GPU compatibility setup stopped before any profile was processed.'}else{'GPU compatibility fields were processed with per-game outcomes.'}
     $finalChecks=if($cancelled){@('GPU vendor selection was canceled before profile discovery; no profile mutation was attempted.')}elseif($discoveryFailed){@('Discovery failed before any profile was read; no profile mutation was attempted.')}else{@('Per-game write outcomes were recorded; unresolved writes remain unknown.')}
@@ -22331,7 +22445,13 @@ function Get-TpmGpuFixResultView {
     $skipDetails = @(Get-TpmTransactionField -Object $Result -Name 'SkipDetails' -Default @() | Where-Object { $null -ne $_ })
     $needs = New-Object System.Collections.Generic.List[string]
     foreach ($group in @($skipDetails | Group-Object -Property { [string](Get-TpmTransactionField -Object $_ -Name 'Reason' -Default '') })) {
-        [void]$needs.Add(('{0} skipped. {1}' -f (Format-TpmGameCount -Count $group.Count), $group.Name))
+        # A drive that is not connected is a skip, not a failure: say which drive (from the saved paths) instead of a general sentence.
+        $groupText = $group.Name
+        $groupDrives = @($group.Group | Where-Object { [string](Get-TpmTransactionField -Object $_ -Name 'ReasonKey' -Default '') -eq 'DEVICE_UNAVAILABLE' } | ForEach-Object { if (([string](Get-TpmTransactionField -Object $_ -Name 'SavedPath' -Default '')) -match '^\s*([A-Za-z]:|\\\\[^\\]+\\[^\\]+)') { $Matches[1].ToUpperInvariant() } } | Sort-Object -Unique)
+        if ($groupDrives.Count -gt 0 -and @($group.Group | Where-Object { [string](Get-TpmTransactionField -Object $_ -Name 'ReasonKey' -Default '') -ne 'DEVICE_UNAVAILABLE' }).Count -eq 0) {
+            $groupText = if ($groupDrives.Count -eq 1) { ('Drive {0} is not connected.' -f $groupDrives[0]) } else { ('Drives {0} are not connected.' -f (Format-TpmNameList -Names $groupDrives)) }
+        }
+        [void]$needs.Add(('{0} skipped. {1}' -f (Format-TpmGameCount -Count $group.Count), $groupText))
     }
     if ($count.Skipped -gt $skipDetails.Count) { [void]$needs.Add(('{0} skipped.' -f (Format-TpmGameCount -Count ($count.Skipped - $skipDetails.Count)))) }
     if ($failed -gt 0) { [void]$needs.Add(('{0} could not be updated.' -f (Format-TpmGameCount -Count $failed))) }
@@ -22767,6 +22887,439 @@ function Read-TpmCrosshairYesNo {
         if ($answer -notin @('Y', 'N')) { Write-Host '  Please choose Y or N.' -ForegroundColor Yellow }
     } while ($answer -notin @('Y', 'N'))
     return $answer
+}
+
+# =============================================================================
+# USE MY BEZEL FOLDER  (issue #429)
+# =============================================================================
+# The user points TPM at a folder of bezel images they already have. TPM matches each registered game to one image with the
+# existing fuzzy title helpers, shows a preview, and only after approval copies the chosen image to
+# <game folder>\reshade-shaders\Textures\bezel.png (the place the issue says ReShade reads a bezel from; NOT yet proven on real
+# games, see docs\RC9-OWNER-TEST-PLAN.md). TPM never ships, downloads or points to bezels.
+# Safety: nothing is written before approval; a bezel the user placed by hand is kept unless they choose to replace it (a copy is
+# saved first); the copy runs as one checked file transaction; every applied file is recorded so it can be undone.
+# Decisions: a folder shared by several games (for example a shared loader) is refused, because one bezel would show on all of
+# them; only .png files are used, because the file is saved as bezel.png.
+
+# Folder names are noisy: underscores, and the words "bezel" or "overlay" say nothing about the game. Region and version tags are
+# removed by Get-NormalizedGameKey. Returns '' when nothing is left.
+function Get-TpmBezelCleanTitle {
+    param([AllowNull()][string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return '' }
+    return ([regex]::Replace($Name.Replace('_', ' '), '(?i)\b(bezels?|overlays?)\b', ' ')).Trim()
+}
+
+# Sequel numbers (4, IV) of a title, as one text; a Roman numeral counts as its digit, so "Soul Calibur II" and "soulclb2" agree.
+# "House of the Dead 3" and "House of the Dead 4" differ by one letter and score almost 1.0 as text, so a different number must lower the confidence.
+function Get-TpmBezelNumberText {
+    param([AllowNull()][string]$Title)
+    if ([string]::IsNullOrWhiteSpace($Title)) { return '' }
+    $roman = @{ ii = '2'; iii = '3'; iv = '4'; v = '5'; vi = '6'; vii = '7'; viii = '8'; ix = '9'; x = '10' }
+    $plain = [regex]::Replace($Title, '[\(\[].*?[\)\]]', ' ')
+    $plain = [regex]::Replace($plain, '(?<=\p{L})(?=\d)|(?<=\d)(?=\p{L})', ' ')
+    $found = @([regex]::Matches($plain.ToLowerInvariant(), '[\p{L}0-9]+') | ForEach-Object { $_.Value } |
+        Where-Object { $_ -match '^\d+$' -or $roman.ContainsKey($_) } | ForEach-Object { if ($roman.ContainsKey($_)) { $roman[$_] } else { $_ } })
+    return ($found -join ' ')
+}
+
+function Get-TpmBezelStatePath {
+    param([string]$StateRoot = '')
+    $root = if ($StateRoot) { [System.IO.Path]::GetFullPath($StateRoot) }
+            elseif ($script:TpmOwnedLayout -and -not [string]::IsNullOrWhiteSpace([string]$script:TpmOwnedLayout.State)) { [System.IO.Path]::GetFullPath((Join-Path ([string]$script:TpmOwnedLayout.State) 'Bezels')) }
+            else { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'Bezels\TPM-State')) }
+    return [pscustomobject]@{ Root = $root; Path = (Join-Path $root 'bezels.json'); BackupRoot = (Join-Path $root 'Backups') }
+}
+
+# Saved bezel state: the folder last used, the user's picks (game -> bezel file, or '' for "no bezel for this game"), and one
+# record per applied file (what undo needs). An unreadable file is set aside, never silently replaced.
+function Read-TpmBezelState {
+    param([string]$StateRoot = '')
+    $paths = Get-TpmBezelStatePath -StateRoot $StateRoot
+    $state = @{ Folder = ''; Picks = @{}; Applied = @{} }
+    if (-not (Test-Path -LiteralPath $paths.Path -PathType Leaf)) { return $state }
+    try {
+        $saved = Get-Content -LiteralPath $paths.Path -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($saved.Folder) { $state.Folder = [string]$saved.Folder }
+        if ($saved.Picks) { foreach ($p in $saved.Picks.PSObject.Properties) { $state.Picks[$p.Name] = [string]$p.Value } }
+        if ($saved.Applied) { foreach ($p in $saved.Applied.PSObject.Properties) { $state.Applied[$p.Name] = $p.Value } }
+    } catch {
+        $kept = $paths.Path + '.unreadable-' + (Get-Date).ToString('yyyyMMddHHmmss', [System.Globalization.CultureInfo]::InvariantCulture)
+        try { [System.IO.File]::Copy($paths.Path, $kept, $false) } catch { Write-Log ('Bezels: the saved state could not be read and could not be set aside: {0}' -f $_.Exception.Message) }
+        Write-Log ('Bezels: the saved state could not be read ({0}); starting fresh. A copy was kept as {1}.' -f $_.Exception.Message, [System.IO.Path]::GetFileName($kept))
+        $state = @{ Folder = ''; Picks = @{}; Applied = @{} }
+    }
+    return $state
+}
+
+function Write-TpmBezelState {
+    param([Parameter(Mandatory)]$State, [string]$StateRoot = '')
+    $paths = Get-TpmBezelStatePath -StateRoot $StateRoot
+    [void][System.IO.Directory]::CreateDirectory($paths.Root)
+    $json = ([ordered]@{ Folder = [string]$State.Folder; Picks = $State.Picks; Applied = $State.Applied } | ConvertTo-Json -Depth 6)
+    Write-TpmAtomicTextFile -Path $paths.Path -Text $json -Operation 'bezel state write' -Validate { param([string]$Written) $null -ne ($Written | ConvertFrom-Json -ErrorAction Stop) }
+}
+
+# The .png files of the user's folder (the folder and up to three levels below it; links are not followed). A file whose first
+# bytes are not the PNG signature, or that is a .jpg (the bezel is saved as bezel.png), is counted in NotPng and not used.
+function Find-TpmBezelFiles {
+    param([Parameter(Mandatory)][string]$Folder)
+    $root = [System.IO.Path]::GetFullPath($Folder).TrimEnd('\')
+    $files = New-Object System.Collections.Generic.List[object]
+    $notPng = 0
+    $pending = New-Object System.Collections.Generic.Stack[object]
+    $pending.Push([pscustomobject]@{ Path = $root; Depth = 0 })
+    $signature = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+    while ($pending.Count -gt 0) {
+        $current = $pending.Pop()
+        foreach ($entry in @(Get-ChildItem -LiteralPath $current.Path -Force -ErrorAction SilentlyContinue)) {
+            if ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { continue }
+            if ($entry.PSIsContainer) { if ($current.Depth -lt 3) { $pending.Push([pscustomobject]@{ Path = $entry.FullName; Depth = $current.Depth + 1 }) }; continue }
+            if ($entry.Extension -ine '.png') { if ($entry.Extension -imatch '^\.jpe?g$') { $notPng++ }; continue }
+            $head = New-Object byte[] 8
+            try {
+                $stream = [System.IO.File]::OpenRead($entry.FullName)
+                try { [void]$stream.Read($head, 0, 8) } finally { $stream.Dispose() }
+            } catch { $notPng++; continue }
+            if (@(Compare-Object $head $signature -SyncWindow 0).Count -ne 0) { $notPng++; continue }
+            $clean = Get-TpmBezelCleanTitle -Name $entry.BaseName
+            $files.Add([pscustomobject]@{
+                Path = $entry.FullName; Name = $entry.FullName.Substring($root.Length).TrimStart('\')
+                Key = (Get-NormalizedGameKey $clean); BaseKey = (Get-TpmBaseTitleKey $clean); Numbers = (Get-TpmBezelNumberText -Title $clean)
+            })
+        }
+    }
+    return [pscustomobject]@{ Files = @($files.ToArray() | Sort-Object Name); NotPng = $notPng }
+}
+
+# One entry per registered game that has a usable game path: where its bezel would go, and whether ReShade is already there.
+# Games that share one target folder are marked Shared (one bezel would show on all of them). Reads only.
+function Get-TpmBezelGames {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [string[]]$ProtectedRoots = @())
+    $games = New-Object System.Collections.Generic.List[object]
+    $refused = 0
+    foreach ($pf in @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Bezel profile discovery' -EnumerationErrorAction SilentlyContinue | Sort-Object BaseName)) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if ($null -eq $doc.GameProfile) { continue }
+            $gpNode = $doc.GameProfile.SelectSingleNode('GamePath')
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
+            # Real TeknoParrot profiles keep the title in GameNameInternal (some have none; TeknoParrot's Metadata file has it), never in GameName.
+            $title = (Get-XmlChildText $doc.GameProfile 'GameNameInternal').Trim()
+            if (-not $title) { $title = (Get-TpmTeknoParrotGameName -TpRoot (Split-Path -Parent ([System.IO.Path]::GetFullPath($UserProfilesDir).TrimEnd('\'))) -ProfileCode $pf.BaseName).Trim() }
+            $name = if ($title) { $title } else { $pf.BaseName }
+            $short = if ($pf.BaseName -match '^[^_]+_(.{3,})$') { $Matches[1] } else { '' }
+            $check = Test-TpmGameMutationPath -GamePath $gpNode.InnerText.Trim() -RequireLeaf -ProtectedRoots $ProtectedRoots
+            if (-not $check.Valid) { $refused++; Write-Log ('Bezels: {0} skipped; path reason={1}' -f $pf.BaseName, $check.ReasonCode); continue }
+            $target = Get-ReShadeTargetInfo -Doc $doc -GamePath $check.CanonicalPath -ExeDir ([string]$check.GameDirectory)
+            $hasReShade = (Test-Path -LiteralPath (Join-Path $target.TargetDir $target.DllName) -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $target.TargetDir 'ReShade.ini') -PathType Leaf)
+            $games.Add([pscustomobject]@{
+                ProfileId = [string]$pf.BaseName; Name = $name; TargetDir = [string]$target.TargetDir; HasReShade = $hasReShade; Shared = $false
+                Dest = (Join-Path ([string]$target.TargetDir) 'reshade-shaders\Textures\bezel.png')
+                Keys = @(@((Get-NormalizedGameKey $title), (Get-TpmBaseTitleKey $title)) | Where-Object { $_ } | Select-Object -Unique)
+                # The profile code is the arcade short name ("acedriv3"); it matches only exactly, never by similarity ("daytona" is not "Daytona3").
+                # A loader prefix ("teknonaomi_dybb99", "cps_wof") is not part of the short name.
+                CodeKeys = @(@((Get-NormalizedGameKey $pf.BaseName), (Get-NormalizedGameKey $short)) | Where-Object { $_ } | Select-Object -Unique)
+                Numbers = (Get-TpmBezelNumberText -Title ([regex]::Replace($title, '(?<=\p{Ll})(?=\p{Lu})', ' ')))
+            })
+        } catch { $refused++; Write-Log ('Bezels: {0} skipped: {1}' -f $pf.BaseName, $_.Exception.Message) }
+    }
+    foreach ($group in @($games | Group-Object { $_.TargetDir.ToLowerInvariant() })) {
+        if ($group.Count -gt 1) { foreach ($shared in $group.Group) { $shared.Shared = $true } }
+    }
+    return [pscustomobject]@{ Games = @($games.ToArray()); Refused = $refused }
+}
+
+# The three best bezels per game (score is the best Dice score of any bezel/game name pair, or 1.0 when the file name is exactly the
+# game's profile code). This is the slow step, so it runs once. Equal scores list a bezel with the right sequel number first.
+function Get-TpmBezelCandidates {
+    param([Parameter(Mandatory)][object[]]$Games, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Bezels)
+    $result = @{}
+    foreach ($game in $Games) {
+        $scored = New-Object System.Collections.Generic.List[object]
+        foreach ($bezel in $Bezels) {
+            $score = 0.0
+            $exactCode = $false
+            foreach ($bezelKey in @($bezel.Key, $bezel.BaseKey | Where-Object { $_ })) {
+                if ($game.CodeKeys -contains $bezelKey) { $exactCode = $true }
+                foreach ($gameKey in $game.Keys) { $s = Get-DiceSimilarity $bezelKey $gameKey; if ($s -gt $score) { $score = $s } }
+            }
+            if ($exactCode) { $score = 1.0 }
+            $scored.Add([pscustomobject]@{ Bezel = $bezel; Score = $score; NumberMismatch = (-not $exactCode -and $bezel.Numbers -ne $game.Numbers) })
+        }
+        $result[$game.ProfileId] = @($scored.ToArray() | Sort-Object @{ Expression = { [math]::Round($_.Score, 3) }; Descending = $true }, @{ Expression = { $_.NumberMismatch } }, @{ Expression = { $_.Bezel.Name } } | Select-Object -First 3)
+    }
+    return $result
+}
+
+# One row per game: what TPM would do. Status: Apply, Same (already there), NeedsChoice, NoBezel, NeedsReShade, Shared, UserBezel
+# (a bezel the user placed is there). Confidence: High (score >= 0.85 and clearly ahead of the next one), Medium (>= the registration
+# threshold), Low (>= 0.5, a different sequel number, or a bezel that fits another game better), None. Two bezels that fit equally well
+# are never High; the preview names the other one ("Also close").
+# A remembered pick wins ('Your choice'; '' means no bezel wanted).
+function New-TpmBezelPlanRows {
+    param([Parameter(Mandatory)][object[]]$Games, [Parameter(Mandatory)][hashtable]$Candidates, [Parameter(Mandatory)]$State)
+    $rows = New-Object System.Collections.Generic.List[object]
+    $bestFit = @{}
+    foreach ($list in $Candidates.Values) { foreach ($c in @($list)) { if (-not $c.NumberMismatch -and $c.Score -gt [double]$bestFit[$c.Bezel.Name]) { $bestFit[$c.Bezel.Name] = $c.Score } } }
+    foreach ($game in $Games) {
+        $ranked = @($Candidates[$game.ProfileId])
+        $chosen = $null; $confidence = 'None'
+        $pickName = if ($State.Picks.ContainsKey($game.ProfileId)) { [string]$State.Picks[$game.ProfileId] } else { $null }
+        $picked = if ($pickName) { @($ranked | Where-Object { $_.Bezel.Name -ieq $pickName } | Select-Object -First 1) } else { @() }
+        if ($null -ne $pickName -and $pickName -eq '') { $confidence = 'Skipped' }
+        elseif ($picked.Count -gt 0) { $chosen = $picked[0].Bezel; $confidence = 'Your choice' }
+        elseif ($ranked.Count -gt 0 -and $ranked[0].Score -ge 0.5) {
+            $top = $ranked[0]
+            $rival = @($ranked | Select-Object -Skip 1 | Where-Object { -not $_.NumberMismatch } | Select-Object -First 1)
+            $gap = if ($rival.Count -gt 0) { $top.Score - $rival[0].Score } else { 1.0 }
+            $confidence = if ($top.NumberMismatch -or $top.Score + 0.001 -lt $bestFit[$top.Bezel.Name]) { 'Low' }
+                          elseif ($top.Score -ge 0.85 -and $gap -ge $FuzzyTieMargin) { 'High' }
+                          elseif ($top.Score -ge $FuzzyAutoThreshold) { 'Medium' } else { 'Low' }
+            if ($confidence -ne 'Low') { $chosen = $top.Bezel }
+        }
+        $status = 'NoBezel'
+        if ($confidence -eq 'Skipped') { $status = 'Skipped' }
+        elseif ($game.Shared -and $confidence -ne 'None') { $status = 'Shared' }
+        elseif ($confidence -eq 'Low') { $status = 'NeedsChoice' }
+        elseif ($chosen) {
+            if (-not $game.HasReShade) { $status = 'NeedsReShade' }
+            else {
+                $existing = Get-TpmFileState -Path $game.Dest
+                $mine = $State.Applied.ContainsKey($game.ProfileId) -and $existing.Exists -and ([string]$State.Applied[$game.ProfileId].DeployedSha256 -ieq [string]$existing.Sha256)
+                $status = if (-not $existing.Exists -or $mine) { 'Apply' } else { 'UserBezel' }
+                if ($existing.Exists -and $existing.Sha256 -ieq (Get-TpmFileState -Path $chosen.Path).Sha256) { $status = 'Same' }
+            }
+        }
+        $rows.Add([pscustomobject]@{ Game = $game; Status = $status; Confidence = $confidence; Chosen = $chosen; Ranked = $ranked })
+    }
+    return @($rows.ToArray())
+}
+
+# Copies the chosen bezels in one checked transaction and records each one for undo. A bezel the user placed is replaced only
+# with -ReplaceUserBezels, and a copy of it is saved first. Rows that are not Apply (or UserBezel when asked) are ignored.
+function Invoke-TpmBezelApply {
+    param([Parameter(Mandatory)][object[]]$Rows, [switch]$ReplaceUserBezels, [string]$StateRoot = '')
+    $paths = Get-TpmBezelStatePath -StateRoot $StateRoot
+    [void][System.IO.Directory]::CreateDirectory($paths.Root)
+    $state = Read-TpmBezelState -StateRoot $StateRoot
+    $stamp = (Get-Date).ToString('yyyyMMddHHmmss', [System.Globalization.CultureInfo]::InvariantCulture)
+    $operations = New-Object System.Collections.Generic.List[object]
+    $records = @{}
+    $notSaved = New-Object System.Collections.Generic.List[string]
+    foreach ($row in $Rows) {
+        if (-not ($row.Status -eq 'Apply' -or ($row.Status -eq 'UserBezel' -and $ReplaceUserBezels))) { continue }
+        $id = $row.Game.ProfileId
+        $sourceHash = (Get-TpmFileState -Path $row.Chosen.Path).Sha256
+        $existing = Get-TpmFileState -Path $row.Game.Dest
+        $backupPath = ''; $backupHash = ''
+        if ($state.Applied.ContainsKey($id)) { $backupPath = [string]$state.Applied[$id].BackupPath; $backupHash = [string]$state.Applied[$id].BackupSha256 }
+        if ($row.Status -eq 'UserBezel') {
+            # The user's own file: a verified copy is made before anything is replaced; without it this game is left alone.
+            $backupPath = Join-Path $paths.BackupRoot ('{0}-{1}.png' -f ($id -replace '[^\w\.-]', '_'), $stamp)
+            try {
+                [void][System.IO.Directory]::CreateDirectory($paths.BackupRoot)
+                [System.IO.File]::Copy($row.Game.Dest, $backupPath, $false)
+                $backupHash = (Get-TpmFileState -Path $backupPath).Sha256
+                if ($backupHash -ine $existing.Sha256) { throw 'The saved copy did not match.' }
+            } catch {
+                Write-Log ('Bezels: {0} left alone; the copy of the existing bezel could not be saved: {1}' -f $id, $_.Exception.Message)
+                $notSaved.Add($row.Game.Name); continue
+            }
+        }
+        $records[$id] = [ordered]@{ Destination = $row.Game.Dest; DeployedSha256 = $sourceHash; Source = $row.Chosen.Name; BackupPath = $backupPath; BackupSha256 = $backupHash; AppliedAt = $stamp }
+        $operations.Add([pscustomobject]@{
+            ItemId = ('Bezel:' + $id); Operation = $(if ($existing.Exists) { 'REPLACE' } else { 'ADD' })
+            SourcePath = $row.Chosen.Path; DestinationPath = $row.Game.Dest; RootPath = $row.Game.TargetDir
+            ExpectedSourceHash = $sourceHash; ExpectedFinalHash = $sourceHash
+        })
+    }
+    if ($operations.Count -eq 0) {
+        return [pscustomobject]@{ Outcome = 'NO_OP'; Applied = @(); NotSaved = $notSaved.ToArray(); Summary = 'Nothing needed to change.' }
+    }
+    $newState = @{ Folder = $state.Folder; Picks = $state.Picks; Applied = $state.Applied }
+    foreach ($id in $records.Keys) { $newState.Applied[$id] = $records[$id] }
+    $commit = { Write-TpmBezelState -State $newState -StateRoot $StateRoot }
+    $verify = {
+        $check = Read-TpmBezelState -StateRoot $StateRoot
+        foreach ($id in $records.Keys) { if (-not $check.Applied.ContainsKey($id) -or [string]$check.Applied[$id].DeployedSha256 -ine [string]$records[$id].DeployedSha256) { throw 'The bezel record could not be read back.' } }
+    }
+    $batch = Invoke-TpmTransactionalFileBatch -WorkflowKey 'BezelSetup' -OperationKey 'Apply' -Operations $operations.ToArray() `
+        -MetadataPaths @($paths.Path) -CommitAction $commit -PostCommitVerification $verify `
+        -Summary 'The bezels were not copied.' -SuccessSummary 'The bezels were copied and checked.' -ReasonCode 'BEZEL_FILE_TRANSACTION_FAILED'
+    $done = if ($batch.Outcome -in @('SUCCEEDED', 'NO_OP')) { @($records.Keys | Sort-Object) } else { @() }
+    return [pscustomobject]@{ Outcome = [string]$batch.Outcome; Applied = $done; NotSaved = $notSaved.ToArray(); Summary = [string]$batch.Summary; Batch = $batch }
+}
+
+# Puts back every bezel TPM applied: the user's saved original where there was one, otherwise nothing. A file that is no longer
+# exactly what TPM copied (the user changed it) is left alone and forgotten.
+function Invoke-TpmBezelUndo {
+    param([string]$StateRoot = '')
+    $paths = Get-TpmBezelStatePath -StateRoot $StateRoot
+    $state = Read-TpmBezelState -StateRoot $StateRoot
+    $operations = New-Object System.Collections.Generic.List[object]
+    $undone = New-Object System.Collections.Generic.List[string]
+    $leftAlone = New-Object System.Collections.Generic.List[string]
+    foreach ($id in @($state.Applied.Keys | Sort-Object)) {
+        $record = $state.Applied[$id]
+        $current = Get-TpmFileState -Path ([string]$record.Destination)
+        if (-not $current.Exists) { [void]$undone.Add($id); continue }
+        if ($current.Sha256 -ine [string]$record.DeployedSha256) { [void]$leftAlone.Add($id); continue }
+        $backup = if ($record.BackupPath) { Get-TpmFileState -Path ([string]$record.BackupPath) } else { $null }
+        $restore = ($backup -and $backup.Exists -and $backup.Sha256 -ieq [string]$record.BackupSha256)
+        if ($record.BackupPath -and -not $restore) { [void]$leftAlone.Add($id); continue }
+        $operations.Add([pscustomobject]@{
+            ItemId = ('BezelUndo:' + $id); Operation = $(if ($restore) { 'REPLACE' } else { 'REMOVE' })
+            SourcePath = $(if ($restore) { [string]$record.BackupPath } else { $null }); DestinationPath = [string]$record.Destination
+            RootPath = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetDirectoryName([System.IO.Path]::GetDirectoryName([string]$record.Destination)))
+            ExpectedSourceHash = $(if ($restore) { [string]$record.BackupSha256 } else { '' }); ExpectedFinalHash = $(if ($restore) { [string]$record.BackupSha256 } else { '' })
+            ExpectedDestinationHash = [string]$record.DeployedSha256
+        })
+        [void]$undone.Add($id)
+    }
+    $newState = @{ Folder = $state.Folder; Picks = $state.Picks; Applied = @{} }
+    if ($operations.Count -eq 0) {
+        # No file to put back (already gone, or changed by the user): only the records are cleared.
+        $outcome = 'SUCCEEDED'
+        try { Write-TpmBezelState -State $newState -StateRoot $StateRoot } catch { Write-Log ('Bezels: the undo records could not be cleared: {0}' -f $_.Exception.Message); $outcome = 'FAILED_BEFORE_MUTATION' }
+        return [pscustomobject]@{ Outcome = $outcome; Undone = $undone.ToArray(); LeftAlone = $leftAlone.ToArray() }
+    }
+    $commit = { Write-TpmBezelState -State $newState -StateRoot $StateRoot }
+    $verify = { if ((Read-TpmBezelState -StateRoot $StateRoot).Applied.Count -ne 0) { throw 'The bezel records were not cleared.' } }
+    $batch = Invoke-TpmTransactionalFileBatch -WorkflowKey 'BezelSetup' -OperationKey 'Undo' -Operations $operations.ToArray() `
+        -MetadataPaths @($paths.Path) -CommitAction $commit -PostCommitVerification $verify `
+        -Summary 'The bezels were not undone.' -SuccessSummary 'The bezels were put back and checked.' -ReasonCode 'BEZEL_UNDO_FAILED'
+    return [pscustomobject]@{ Outcome = [string]$batch.Outcome; Undone = $undone.ToArray(); LeftAlone = $leftAlone.ToArray(); Batch = $batch }
+}
+
+function Write-TpmBezelPreview {
+    param([Parameter(Mandatory)][object[]]$Rows, [int]$BezelCount, [int]$NotPng = 0)
+    Write-TpmText -Text 'Bezel preview. Nothing has been changed yet.' -Color Cyan -BlankBefore
+    $skipped = if ($NotPng -gt 0) { ' {0} other image files (.jpg, or not a real PNG) were not used.' -f $NotPng } else { '' }
+    Write-TpmText -Text ('Found {0} in your folder.{1}' -f (Format-TpmCountNoun -Count $BezelCount -Singular 'bezel'), $skipped) -Color DarkGray
+    $number = 0
+    foreach ($row in @($Rows | Where-Object { $_.Status -ne 'NoBezel' })) {
+        $number++
+        $shownName = if ($row.Chosen) { $row.Chosen.Name } else { $row.Ranked[0].Bezel.Name }
+        $others = @($row.Ranked | Where-Object { $_.Score -ge 0.5 -and $_.Bezel.Name -ne $shownName } | ForEach-Object { $_.Bezel.Name })
+        $alsoClose = if ($others.Count -gt 0) { ' Also close: {0}.' -f ($others -join ', ') } else { '' }
+        $label = switch ($row.Status) {
+            'Apply'        { '{0} ({1} match).{2}' -f $row.Chosen.Name, $row.Confidence, $alsoClose }
+            'Same'         { 'already has this bezel ({0}).' -f $row.Chosen.Name }
+            'UserBezel'    { 'has a bezel you placed. It is kept unless you choose to replace it. New one: {0} ({1} match).{2}' -f $row.Chosen.Name, $row.Confidence, $alsoClose }
+            'NeedsReShade' { 'set up ReShade for this game first (bezel: {0}).' -f $row.Chosen.Name }
+            'Shared'       { 'shares its folder with other games, so it is skipped.' }
+            'NeedsChoice'  { 'needs your choice. Best guess: {0} (Low match).{1}' -f $row.Ranked[0].Bezel.Name, $alsoClose }
+            'Skipped'      { 'you chose no bezel for this game.' }
+        }
+        Write-TpmText -Text ('{0,3}) {1}: {2}' -f $number, $row.Game.Name, $label) -Color $(if ($row.Status -eq 'Apply') { 'White' } else { 'Yellow' }) -HangingIndent 6
+    }
+    $none = @($Rows | Where-Object { $_.Status -eq 'NoBezel' }).Count
+    if ($none -gt 0) { Write-TpmText -Text ('{0} had no bezel in your folder. Nothing was guessed for them.' -f (Format-TpmGameCount -Count $none)) -Color DarkGray -BlankBefore }
+}
+
+function Show-TpmBezelDetails {
+    param([Parameter(Mandatory)][object[]]$Rows, [int]$NotPng)
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($row in @($Rows | Where-Object { $_.Chosen })) { [void]$lines.Add(('{0}: {1} -> {2}' -f $row.Game.ProfileId, $row.Chosen.Path, $row.Game.Dest)) }
+    $match = @(
+        'Names are cleaned first (underscores, the words bezel and overlay, region and version tags) and compared to each game name with the same title matching the game list uses.',
+        'High means a close match that is clearly ahead of the next one. Medium means a likely match. Low, a different sequel number, or a bezel that fits another game better means you choose. Matches are never made without a preview.',
+        ('Files that are not real .png images (including .jpg files) are ignored: {0}.' -f $NotPng),
+        'TeknoParrot Manager puts the file where ReShade reads bezel.png. This has not been confirmed on every graphics type. Games that run in exclusive fullscreen or start through a loader may not show it.'
+    )
+    Show-TpmDetailBlocks -Blocks @(@{ Heading = 'Where each file goes'; Lines = $lines.ToArray() }, @{ Heading = 'How the match works'; Lines = $match })
+}
+
+# Lets the user pick one of the best bezels for a game (or none). Remembered, so the game is not asked about again.
+function Read-TpmBezelPick {
+    param([Parameter(Mandatory)]$Row, [Parameter(Mandatory)]$State, [string]$StateRoot = '')
+    Write-TpmText -Text ('Bezel for {0}:' -f $Row.Game.Name) -Color Cyan -BlankBefore
+    $i = 0
+    foreach ($candidate in $Row.Ranked) { $i++; Write-TpmText -Text ('{0}) {1}' -f $i, $candidate.Bezel.Name) -Indent 4 }
+    Write-TpmText -Text '0) No bezel for this game' -Indent 4
+    $choice = Read-TpmChoice -Prompt '  Choice (K to keep as is, default K)' -Choices @(@('K', '0') + @(1..$Row.Ranked.Count | ForEach-Object { [string]$_ })) -Default 'K'
+    if ($choice -eq 'K') { return $false }
+
+    $State.Picks[$Row.Game.ProfileId] = $(if ($choice -eq '0') { '' } else { [string]$Row.Ranked[[int]$choice - 1].Bezel.Name })
+    try { Write-TpmBezelState -State $State -StateRoot $StateRoot } catch { Write-Log ('Bezels: the pick could not be saved: {0}' -f $_.Exception.Message) }
+    return $true
+}
+
+function Invoke-TpmBezelUndoMenu {
+    param([string]$StateRoot = '')
+    $state = Read-TpmBezelState -StateRoot $StateRoot
+    if ($state.Applied.Count -eq 0) { Write-TpmText -Text 'There are no bezels from TeknoParrot Manager to undo.' -Color DarkGray -BlankBefore; return }
+    Write-TpmText -Text 'Bezels TeknoParrot Manager copied:' -Color Cyan -BlankBefore
+    foreach ($id in @($state.Applied.Keys | Sort-Object)) { Write-TpmText -Text ('{0}: {1}' -f $id, $state.Applied[$id].Source) -Indent 4 }
+    Write-TpmText -Text 'Undo removes each one, and puts back the bezel you had before where TeknoParrot Manager saved a copy. A file you changed since is left alone.' -Color DarkGray
+    if ((Read-TpmYesNo -Prompt '  Undo these bezels? (Y/N, default N)' -Default 'N') -ne 'Y') { Write-TpmText -Text 'Nothing was changed.' -Color DarkGray; return }
+    $result = Invoke-TpmBezelUndo -StateRoot $StateRoot
+    Write-Log ('Bezels: undo outcome={0} undone={1} leftAlone={2}' -f $result.Outcome, ($result.Undone -join ','), ($result.LeftAlone -join ','))
+    if ($result.Outcome -in @('SUCCEEDED', 'NO_OP')) {
+        Write-TpmText -Text ('Done. {0} put back and checked.' -f (Format-TpmCountNoun -Count $result.Undone.Count -Singular 'bezel')) -Color Green
+        if ($result.LeftAlone.Count -gt 0) { Write-TpmText -Text ('{0} left alone because the file is not the one TeknoParrot Manager copied.' -f (Format-TpmGameCount -Count $result.LeftAlone.Count)) -Color Yellow }
+    } else {
+        Write-TpmText -Text 'The undo did not finish. Your files were put back as they were. The log says why.' -Color Yellow
+    }
+}
+
+function Invoke-TpmBezelSetup {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [string[]]$ProtectedRoots = @(), [string]$StateRoot = '')
+    Write-TpmText -Text 'Use my bezel folder. TeknoParrot Manager does not come with bezels. It only uses images you already have.' -Color DarkGray -BlankBefore
+    Write-TpmText -Text 'F) Pick bezels from my folder    U) Undo bezels I applied    X) Back' -Color White
+    $action = Read-TpmChoice -Prompt '  Action (F/U/X, default F)' -Choices @('F', 'U', 'X') -Default 'F'
+    if ($action -eq 'X') { return }
+    if ($action -eq 'U') { Invoke-TpmBezelUndoMenu -StateRoot $StateRoot; return }
+
+    $state = Read-TpmBezelState -StateRoot $StateRoot
+    $folder = (Read-PathWithBrowse -Prompt $(if ($state.Folder) { "  Bezel folder (Enter for $($state.Folder))" } else { '  Bezel folder' }) -Mode Folder).Trim().Trim('"')
+    if (-not $folder) { $folder = $state.Folder }
+    if (-not $folder -or -not (Test-Path -LiteralPath $folder -PathType Container) -or -not (Test-TpmNoReparsePath -Path $folder)) {
+        Write-TpmText -Text 'That folder was not found. Nothing was changed.' -Color Yellow; return
+    }
+    $found = Find-TpmBezelFiles -Folder $folder
+    if ($found.Files.Count -eq 0) { Write-TpmText -Text 'No .png bezel images were found in that folder. Nothing was changed.' -Color Yellow; return }
+    $gameList = Get-TpmBezelGames -UserProfilesDir $UserProfilesDir -ProtectedRoots $ProtectedRoots
+    if ($gameList.Games.Count -eq 0) { Write-TpmText -Text 'No registered games were found. Nothing was changed.' -Color Yellow; return }
+    Write-TpmText -Text 'Matching your bezels to your games...' -Color DarkGray
+    $candidates = Get-TpmBezelCandidates -Games $gameList.Games -Bezels $found.Files
+    if ($state.Folder -ne [System.IO.Path]::GetFullPath($folder)) {
+        $state.Folder = [System.IO.Path]::GetFullPath($folder)
+        try { Write-TpmBezelState -State $state -StateRoot $StateRoot } catch { Write-Log ('Bezels: the folder could not be saved: {0}' -f $_.Exception.Message) }
+    }
+    Write-Log ('Bezels: folder has {0} bezels ({1} not real PNG files); {2} games checked; {3} refused' -f $found.Files.Count, $found.NotPng, $gameList.Games.Count, $gameList.Refused)
+    while ($true) {
+        $rows = @(New-TpmBezelPlanRows -Games $gameList.Games -Candidates $candidates -State $state)
+        $shown = @($rows | Where-Object { $_.Status -ne 'NoBezel' })
+        Write-TpmBezelPreview -Rows $rows -BezelCount $found.Files.Count -NotPng $found.NotPng
+        Write-TpmText -Text 'A) Apply   a number) pick a different bezel for that game   D) Details   C) Cancel' -Color White -BlankBefore
+        $choice = Read-TpmChoice -Prompt '  Choice (default C)' -Choices @(@('A', 'D', 'C') + @(1..[Math]::Max(1, $shown.Count) | ForEach-Object { [string]$_ })) -Default 'C'
+        if ($choice -eq 'C') { Write-TpmText -Text 'Canceled. No files were changed.' -Color DarkGray; return }
+        if ($choice -eq 'D') { Show-TpmBezelDetails -Rows $rows -NotPng $found.NotPng; continue }
+        if ($choice -ne 'A') {
+            $row = if ($shown.Count -ge [int]$choice) { $shown[[int]$choice - 1] } else { $null }
+            if ($row -and $row.Ranked.Count -gt 0) { [void](Read-TpmBezelPick -Row $row -State $state -StateRoot $StateRoot) }
+            continue
+        }
+        $replace = $false
+        $mine = @($rows | Where-Object { $_.Status -eq 'UserBezel' })
+        if ($mine.Count -gt 0) {
+            Write-TpmText -Text ('{0} already has a bezel you placed there.' -f (Format-TpmGameCount -Count $mine.Count)) -Color Yellow -BlankBefore
+            $replace = ((Read-TpmYesNo -Prompt '  Replace them? A copy of each is saved first and Undo puts it back. (Y/N, default N)' -Default 'N') -eq 'Y')
+        }
+        $result = Invoke-TpmBezelApply -Rows $rows -ReplaceUserBezels:$replace -StateRoot $StateRoot
+        Write-Log ('Bezels: apply outcome={0} applied={1} notSaved={2}' -f $result.Outcome, ($result.Applied -join ','), ($result.NotSaved -join ','))
+        if ($result.Outcome -eq 'SUCCEEDED') {
+            Write-TpmText -Text ('Done. {0} copied and checked.' -f (Format-TpmCountNoun -Count $result.Applied.Count -Singular 'bezel')) -Color Green -BlankBefore
+            Write-TpmText -Text 'TeknoParrot Manager put each bezel where ReShade looks for it. Whether a game shows it is not confirmed for every game. Press D at the preview for Details. You can undo this from this same menu.' -Color DarkGray
+        } elseif ($result.Outcome -eq 'NO_OP') {
+            Write-TpmText -Text 'Nothing needed to change.' -Color DarkGray -BlankBefore
+        } else {
+            Write-TpmText -Text 'The bezels were not copied and your files were put back as they were. The log says why.' -Color Yellow -BlankBefore
+        }
+        if ($result.NotSaved.Count -gt 0) { Write-TpmText -Text ('{0} left alone because a copy of the existing bezel could not be saved.' -f (Format-TpmGameCount -Count $result.NotSaved.Count)) -Color Yellow }
+        return
+    }
 }
 
 function Invoke-CrosshairSetup {
@@ -24271,6 +24824,9 @@ function Invoke-TpmAutoSyncDirectoryTransaction {
                 try {
                     if (-not ($script:TpmOwnedLayout -and $script:TpmOwnedLayout.Backups)) { throw 'No Backups folder is set up.' }
                     $extraRoot = Join-Path (Join-Path ([string]$script:TpmOwnedLayout.Backups) 'AutoSyncReplaced') ($RawName + '_' + (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd_HH-mm-ss', [System.Globalization.CultureInfo]::InvariantCulture))
+                    # Two runs in the same second must not share a folder: the copy below never overwrites, so a shared one would fail and roll the update back.
+                    $extraBase = $extraRoot
+                    for ($extraSuffix = 2; (Test-Path -LiteralPath $extraRoot); $extraSuffix++) { $extraRoot = $extraBase + '_' + $extraSuffix }
                     foreach ($extraFile in $extraFiles) {
                         $extraTo = ConvertTo-TpmAutoSyncLongPath -Path (Join-Path $extraRoot $extraFile.RelativePath)
                         [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($extraTo))
@@ -25072,7 +25628,7 @@ function Invoke-AutoSync {
         $registeredEntry = Get-DatEntryForZipName -RawZipName $rawName -DatIndex $datIndex
         if (-not $rootRefusalReason -and $registeredEntry -and $registeredEntry.ProfileCode -and $userProfilesDir) {
             try {
-                if ($registeredEntry.ProfileCode -notmatch '^[\w]+$') { throw 'Registered profile identity is unsafe.' }
+                if ($registeredEntry.ProfileCode -notmatch '^[\w-]+$') { throw 'Registered profile identity is unsafe.' }
                 $registeredProfilePath = Join-Path $userProfilesDir ($registeredEntry.ProfileCode + '.xml')
                 if (Test-Path -LiteralPath $registeredProfilePath -ErrorAction Stop) {
                     $registeredDoc = Read-Xml $registeredProfilePath
@@ -25282,7 +25838,7 @@ function Build-ProfileIndex {
             Write-TpmCompactExtractionProgress -Phase Scanning -Label 'TeknoParrot executable index scan' -Current $scanCurrent -Total $templates.Count -StartedAt $scanStarted
             $exe = Get-PrimaryExecutableName $tpl.FullName
             if ($exe -and $exe.Trim() -ne "") {
-                foreach ($alt in (Get-ExeAlternatives $exe.Trim())) {
+                foreach ($alt in (Get-TpmGameFileSet -ExecutableName $exe.Trim()).Choices) {
                     $k = $alt.ToLowerInvariant()
                     if (-not $index.ContainsKey($k)) { $index[$k] = @() }
                     $index[$k] += [pscustomobject]@{
@@ -25331,6 +25887,12 @@ function Build-DatIndexFromStream {
         $profCode    = ''
         $exePath     = ''
         # Newer dat fields (TPUISchemaVersion 1, issue #382); empty when a game does not have them.
+        # Decision (issue #382): romzip and romnest (the files inside a MAME-style game's ZIP: archive, size, crc, sha1) are NOT used. The
+        # Manager registers games from folders and profiles and never checks ROM contents, so verifying extracted sets would be a new
+        # feature that hashes every file of every such game. Both are self-closing elements next to <rom>; they hold no text, so this
+        # reader passes over them and stays streaming (the dat is about 520 MB). A dat with no TPUISchemaVersion (older files) is read silently.
+        $schemaVersionText = ''
+        $schemaChecked = $false
         $profCode2   = ''
         $exePath2    = ''
         $testMenuExe = ''
@@ -25362,6 +25924,16 @@ function Build-DatIndexFromStream {
             if ($reader.NodeType -eq [System.Xml.XmlNodeType]::Element) {
                 $currentElem = $reader.Name
                 if ($currentElem -eq 'game') {
+                    # The header comes before the first game, so the format version is known here. An unknown version is only a warning
+                    # (the file is still read the way version 1 is read), said once, before the long read of the games.
+                    if (-not $schemaChecked) {
+                        $schemaChecked = $true
+                        if ($schemaVersionText -and $schemaVersionText -cne '1') {
+                            Write-Log ('DAT: the file says TPUISchemaVersion {0}; this Manager knows version 1. It is read as version 1 and some games may not match.' -f $schemaVersionText)
+                            Write-Host ('  This game list (DAT) uses a format this Manager does not know (version {0}; it knows version 1).' -f $schemaVersionText) -ForegroundColor Yellow
+                            Write-Host '  It is still read, but some games may not match. Check for a newer Manager.' -ForegroundColor Yellow
+                        }
+                    }
                     $gameName    = $reader.GetAttribute('name')
                     $profCode    = ''
                     $exePath     = ''
@@ -25399,6 +25971,8 @@ function Build-DatIndexFromStream {
                 elseif ($currentElem -eq 'GameProfile2')                    { $profCode2   = $reader.Value }
                 elseif ($currentElem -eq 'Executable2' -and -not $exePath2) { $exePath2    = $reader.Value }
                 elseif ($currentElem -eq 'TestMenuExecutable')              { $testMenuExe = $reader.Value }
+            } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::Text -and -not $insideGame -and $currentElem -eq 'TPUISchemaVersion') {
+                $schemaVersionText = ([string]$reader.Value).Trim()
             } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::EndElement -and $reader.Name -eq 'game') {
                 $insideGame = $false
                 $captureRoms = $false
@@ -25634,7 +26208,7 @@ function Get-TeknoParrotProfileSet {
                 Write-TpmCompactExtractionProgress -Phase Scanning -Label 'GitHub profile tree' -Current $treeCurrent -Total $tree.Count -StartedAt $profileScanStarted
                 if ($node.type -eq 'blob' -and $node.path -like ($prefix + '*.xml')) {
                     $stem = [System.IO.Path]::GetFileNameWithoutExtension($node.path.Substring($prefix.Length))
-                    if ($stem -match '^[\w]+$') { [void]$result.Add($stem) }
+                    if ($stem -match '^[\w-]+$') { [void]$result.Add($stem) }
                 }
             }
             if ($result.Count -gt 0) {
@@ -25669,7 +26243,7 @@ function Get-TeknoParrotProfileSet {
             $localCurrent++
             Write-TpmCompactExtractionProgress -Phase Scanning -Label 'TeknoParrot profile list' -Current $localCurrent -Total $localProfiles.Count -StartedAt $profileScanStarted
             $s = [System.IO.Path]::GetFileNameWithoutExtension($localProfileFile.Name)
-            if ($s -match '^[\w]+$') { [void]$result.Add($s) }
+            if ($s -match '^[\w-]+$') { [void]$result.Add($s) }
         }
         Write-Log "ProfileSet (local fallback): $($result.Count - $liveCount) profiles from $localGameProfilesDir"
     }
@@ -25702,7 +26276,7 @@ function Resolve-ProfileCode {
         $score = Get-DiceSimilarity $normCode (Get-NormalizedGameKey $candidate)
         if ($score -gt $bestScore) { $bestScore = $score; $bestMatch = $candidate }
     }
-    if ($bestScore -ge $FuzzyAutoThreshold -and $null -ne $bestMatch -and $bestMatch -match '^[\w]+$') {
+    if ($bestScore -ge $FuzzyAutoThreshold -and $null -ne $bestMatch -and $bestMatch -match '^[\w-]+$') {
         Write-Log ("Resolve-ProfileCode: '{0}' -> '{1}' (score {2})" -f $code, $bestMatch, [Math]::Round($bestScore,2))
         return $bestMatch
     }
@@ -26771,6 +27345,9 @@ function Write-PostgresAdministratorGuidance {
     Write-Host '  When Windows asks, approve it with an administrator account of this PC. Do not switch to a different account. If your Windows account is not an administrator, close TeknoParrot Manager and start it again with "Run as administrator".' -ForegroundColor Yellow
     Write-Host '  After approval, TeknoParrot Manager tries to continue automatically and reports the result; approval alone does not mean setup or repair succeeded.' -ForegroundColor Yellow
     Write-Host '  If setup stops, read the reported failure and View Log before trying option 11 again.' -ForegroundColor Yellow
+    # Give the user time to read this before the Windows permission window opens on top of it (#385).
+    $unattendedNow = [bool](Get-Variable -Name Unattended -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
+    if (Test-TpmInteractiveInput -Unattended:$unattendedNow) { [void](Read-HostSafe '  Press Enter to open the Windows permission window') }
 }
 function Get-PostgresRecoveryStateDirectory {
     $base = if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { $env:LOCALAPPDATA } else { $env:TEMP }
@@ -28836,6 +29413,10 @@ function Get-TpmPostgresSetupOutcomeLine {
         if ($many) { return ('Ready: {0}. The databases were created from the games'' own backups and checked.' -f $list) }
         return ('Ready: {0}. The database was created from the game''s own backup and checked.' -f $list)
     }
+    if ($Outcome -eq 'WaitingForFirstStart') {
+        if ($many) { return ('Profile ready: {0}. TeknoParrot makes their databases itself the first time each game starts.' -f $list) }
+        return ('Profile ready: {0}. TeknoParrot makes its database itself the first time the game starts.' -f $list)
+    }
     if ($many) { return ('Ready: {0}. The databases were already there and were checked.' -f $list) }
     return ('Ready: {0}. The database was already there and was checked.' -f $list)
 }
@@ -28849,6 +29430,12 @@ function Get-TpmPostgresSetupGameDetail {
     $happened = 'The database was already there. TeknoParrot Manager left it untouched.'
     if ($Game.Outcome -eq 'CreatedFromBackup') {
         $happened = 'The database did not exist. TeknoParrot Manager created it and restored the backup that comes with the game.'
+    }
+    if ($Game.Outcome -eq 'WaitingForFirstStart') {
+        return [pscustomobject]@{
+            Happened = 'The database does not exist yet and no starting database file came with the game. TeknoParrot Manager saved the connection settings in the profile and left the database to TeknoParrot (its "Automatically create Database" option).'
+            Means = 'The profile is ready. TeknoParrot creates the database the first time the game starts.'
+        }
     }
     $tables = ''
     $tableProperty = $Game.PSObject.Properties['TableCount']
@@ -28915,9 +29502,12 @@ function Write-TpmPostgresSetupResult {
         $readyText = if ($games.Count -gt 0) { '{0} set up and checked, and ready.' -f (Format-TpmGameCount -Count $games.Count) } else { 'No game database was set up. Nothing was created.' }
         [void]$entries.Add(@{ Text = $readyText; Color = 'Green'; Indent = 4; Hanging = 2 })
     }
-    foreach ($kind in @('CreatedFromBackup', 'AlreadyExisted')) {
+    foreach ($kind in @('CreatedFromBackup', 'AlreadyExisted', 'WaitingForFirstStart')) {
         $names = @($games | Where-Object { $_.Outcome -eq $kind } | ForEach-Object { Get-TpmPostgresSetupGameName -Game $_ })
         if ($names.Count -gt 0) { [void]$entries.Add(@{ Text = (Get-TpmPostgresSetupOutcomeLine -Outcome $kind -Names $names); Color = ''; Indent = 4; Hanging = 2 }) }
+    }
+    foreach ($sharedGame in @($games | Where-Object { $null -ne $_.PSObject.Properties['RenamedFrom'] -and -not [string]::IsNullOrWhiteSpace([string]$_.RenamedFrom) })) {
+        [void]$entries.Add(@{ Text = ('Own database: {0} and {1} both used the database name {2}. They keep their saved progress in the same tables, so {0} now has its own database, {3}. Nothing was deleted or overwritten.' -f (Get-TpmPostgresSetupGameName -Game $sharedGame), $sharedGame.SharesWith, $sharedGame.RenamedFrom, $sharedGame.DbName); Color = 'Cyan'; Indent = 4; Hanging = 2 })
     }
     if ($notReadyGames.Count -gt 0) {
         $notReadyList = Join-TpmPostgresSetupNames -Names @($notReadyGames | ForEach-Object { Get-TpmPostgresSetupGameName -Game $_ })
@@ -28951,6 +29541,8 @@ function Write-TpmPostgresSetupResult {
     Write-Host ''
     if ($notReadyGames.Count -gt 0) {
         Write-TpmText -Text 'Next: put the pg_backup folder back for the games that are not ready, then run PostgreSQL setup again.' -Color DarkGray -Indent 2 -MaxWidth 0
+    } elseif (@($games | Where-Object { $_.Outcome -eq 'WaitingForFirstStart' }).Count -gt 0) {
+        Write-TpmText -Text 'Next: open TeknoParrot and start the game once. TeknoParrot makes the database of each profile-ready game itself.' -Color DarkGray -Indent 2 -MaxWidth 0
     } else {
         Write-TpmText -Text 'Next: open TeknoParrot and start any game. Every game database was checked and is ready.' -Color DarkGray -Indent 2 -MaxWidth 0
     }
@@ -29147,10 +29739,13 @@ function Invoke-PostgresGameSetupLocked {
         if ($Outcome -in @('SUCCEEDED','NO_OP')) {
             foreach ($plan in $preflightPlans) {
                 $label = Get-TpmGameDisplayLabel -ProfilePath $plan.Profile.FullName -Fallback $plan.Profile.BaseName
-                $gameOutcome = if ($plan.CreateMode -eq 'RestoreBundledBackup') { 'CreatedFromBackup' } else { 'AlreadyExisted' }
+                $gameOutcome = if ($plan.CreateMode -eq 'RestoreBundledBackup') { 'CreatedFromBackup' } elseif ($plan.PSObject.Properties['AwaitingFirstStart'] -and [bool]$plan.AwaitingFirstStart) { 'WaitingForFirstStart' } else { 'AlreadyExisted' }
                 $tableCount = if ($plan.PSObject.Properties['VerifiedTableCount']) { [int]$plan.VerifiedTableCount } else { 0 }
                 $constraintNames = if ($plan.PSObject.Properties['KnownRestoreConstraintNames']) { @($plan.KnownRestoreConstraintNames) } else { @() }
-                [void]$gameOutcomes.Add([pscustomobject]@{ Key = [string]$plan.Profile.BaseName; Name = [string]$label; DbName = [string]$plan.DbName; Outcome = $gameOutcome; AutoCreateUnknown = ($null -eq $plan.AutoCreate); TableCount = $tableCount; KnownConstraintNames = $constraintNames; KnownWarningCount = $(if ($plan.PSObject.Properties['KnownRestoreWarningCount']) { [int]$plan.KnownRestoreWarningCount } else { 0 }) })
+                [void]$gameOutcomes.Add([pscustomobject]@{ Key = [string]$plan.Profile.BaseName; Name = [string]$label; DbName = [string]$plan.DbName; Outcome = $gameOutcome; AutoCreateUnknown = ($null -eq $plan.AutoCreate); TableCount = $tableCount; KnownConstraintNames = $constraintNames; KnownWarningCount = $(if ($plan.PSObject.Properties['KnownRestoreWarningCount']) { [int]$plan.KnownRestoreWarningCount } else { 0 }); RenamedFrom = $(if ($plan.PSObject.Properties['SharesWithLabel'] -and $plan.SharesWithLabel) { [string]$plan.OriginalDbName } else { '' }); SharesWith = $(if ($plan.PSObject.Properties['SharesWithLabel'] -and $plan.SharesWithLabel) { [string]$plan.SharesWithLabel } else { '' }) })
+                if ($plan.PSObject.Properties['SharesWithLabel'] -and $plan.SharesWithLabel) {
+                    $Warnings += ('Own database for {0}: it and {1} both used the database name {2}. The two games keep their saved progress in the same tables, so one database cannot hold both. {0} now has its own database, {3}. {2} was not changed and nothing was deleted or overwritten.' -f $label, $plan.SharesWithLabel, $plan.OriginalDbName, $plan.DbName)
+                }
                 $capabilityNote = if ($null -eq $plan.AutoCreate) { ' This TeknoParrot build does not say whether it creates the database automatically.' } else { '' }
                 if ($plan.CreateMode -eq 'RestoreBundledBackup') {
                     $limitationNote = if ($plan.PSObject.Properties['KnownRestoreLimitation']) { ' ' + [string]$plan.KnownRestoreLimitation } else { '' }
@@ -29163,8 +29758,14 @@ function Invoke-PostgresGameSetupLocked {
                 } elseif ($null -eq $plan.AutoCreate) {
                     $Warnings += ('{0} [{1}] ({2}): this TeknoParrot build does not say whether it creates the database automatically. The database already existed and was left untouched.' -f $label, $plan.Profile.BaseName, $plan.DbName)
                 }
-                $FinalChecks += ('{0} [{1}] ({2}): ready. Connected with the game''s own profile settings and found {3} tables.' -f $label, $plan.Profile.BaseName, $plan.DbName, $tableCount)
+                if ($gameOutcome -eq 'WaitingForFirstStart') {
+                    $FinalChecks += ('{0} [{1}] ({2}): profile ready. TeknoParrot makes the database the first time the game starts.' -f $label, $plan.Profile.BaseName, $plan.DbName)
+                } else {
+                    $FinalChecks += ('{0} [{1}] ({2}): ready. Connected with the game''s own profile settings and found {3} tables.' -f $label, $plan.Profile.BaseName, $plan.DbName, $tableCount)
+                }
             }
+            $waitingCount = @($gameOutcomes | Where-Object { $_.Outcome -eq 'WaitingForFirstStart' }).Count
+            if ($waitingCount -gt 0) { $Summary = $Summary + (' TeknoParrot makes the database of {0} itself the first time the game starts.' -f (Format-TpmGameCount -Count $waitingCount)) }
         }
         # FIXDB27: a game that was left out of this run (no starting database file) means the run is never a clean success.
         $notReadyGames = @()
@@ -29344,6 +29945,21 @@ function Invoke-PostgresGameSetupLocked {
         $profileSetupStarted = Get-Date
         $profileSetupTotal = $profiles.Count
         $profileSetupCurrent = 0
+        # Two profiles can name the same database (Golden Tee Live 2006 and Orange County Choppers Pinball both ship with one name). The two games
+        # keep their saved progress in the same tables, so one database cannot hold both. The first profile (by name) keeps the name; every other
+        # profile that uses it gets its own database below. Nothing is deleted from the shared one.
+        $dbNameOwners = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::Ordinal)
+        $usedDbNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+        foreach ($scanProfile in $profiles) {
+            try {
+                $scanDoc = Read-Xml $scanProfile.FullName
+                if (-not $scanDoc.GameProfile -or -not (Test-GameNeedsPostgres $scanDoc)) { continue }
+                $scanName = [string](Get-PostgresFieldValue $scanDoc 'DbName')
+                if ([string]::IsNullOrWhiteSpace($scanName) -or -not (Test-SafePostgresDbName $scanName)) { continue }
+                [void]$usedDbNames.Add($scanName)
+                if (-not $dbNameOwners.ContainsKey($scanName)) { $dbNameOwners[$scanName] = [string]$scanProfile.BaseName }
+            } catch { continue }
+        }
         foreach ($pf in $profiles) {
             try {
                 $profileSetupCurrent++
@@ -29358,6 +29974,21 @@ function Invoke-PostgresGameSetupLocked {
                 $changed = $false
                 # A profile the user chose to keep (K) is left exactly as it is: no field is filled, normalized or written.
                 $keepAsIs = ($passDecision.Decision -eq 'NeedsApproval' -and -not $approvedPassPaths.Contains([System.IO.Path]::GetFullPath($pf.FullName)))
+                $originalDbName = $dbName
+                $sharesWithLabel = $null
+                if ($dbNameOwners.ContainsKey($dbName) -and $dbNameOwners[$dbName] -cne [string]$pf.BaseName) {
+                    $otherProfileName = $dbNameOwners[$dbName]
+                    if ($keepAsIs) { throw ('The database name {0} is also used by the profile {1}, and this profile keeps its own PostgreSQL settings, so it cannot be given its own database. Change its database name in TeknoParrot, or let setup replace its settings.' -f $dbName, $otherProfileName) }
+                    $ownDbName = $dbName + ($pf.BaseName -replace '[^A-Za-z0-9]', '')
+                    if ($ownDbName.Length -gt 63) { $ownDbName = $ownDbName.Substring(0, 63) }
+                    if (-not (Test-SafePostgresDbName $ownDbName) -or $usedDbNames.Contains($ownDbName)) { throw ('The database name {0} is also used by the profile {1}, and no free name could be made for this game.' -f $dbName, $otherProfileName) }
+                    if (-not (Set-PostgresFieldValue $doc 'DbName' $ownDbName)) { throw 'The profile has no PostgreSQL DbName field.' }
+                    $changed = $true
+                    [void]$usedDbNames.Add($ownDbName)
+                    $sharesWithLabel = Get-TpmGameDisplayLabel -ProfilePath (Join-Path $UserProfilesDir ($otherProfileName + '.xml')) -Fallback $otherProfileName
+                    Write-Log ('Postgres setup: {0} and {1} both name the database {2}. They keep their progress in the same tables, so {0} gets its own database {3}; {2} is not changed.' -f $pf.BaseName, $otherProfileName, $dbName, $ownDbName)
+                    $dbName = $ownDbName
+                }
                 foreach ($field in @(@('Path', $relBinPath), @('Address', '127.0.0.1'), @('Port', '5432'), @('User', 'postgres'))) {
                     if ($keepAsIs) { break }
                     # Blank fields are filled. A profile must also hold the exact local values the final verification demands (a profile with
@@ -29441,15 +30072,24 @@ function Invoke-PostgresGameSetupLocked {
                         }
                         if (-not $backupFile) {
                             if ($unfinishedOwned) { throw ('The database {0} was left unfinished by an earlier setup and must be built again, but the game''s backup file could not be found. Nothing was removed. Connect the drive that holds the game, then run this setup again.' -f $dbName) }
-                            # FIXDB27: one game with no starting file must not stop the others. It is left out of this run (nothing is created or
-                            # changed for it) and reported as not ready; every other game is set up and checked as usual.
-                            $excludedLabel = Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
-                            [void]$excludedGames.Add([pscustomobject]@{ Key = [string]$pf.BaseName; Name = [string]$excludedLabel; DbName = [string]$dbName })
-                            Write-Log ('Postgres setup: {0} [{1}] ({2}) was left out: the database does not exist and no starting database file came with the game.' -f $excludedLabel, $pf.BaseName, $dbName)
-                            continue
+                            if ($autoCreate -eq $true) {
+                                # Owner rule (issue #350): TeknoParrot's own "Automatically create Database" handles a game that ships no starting database file.
+                                # The profile is still set up here (connection settings and password); only the database is left for TeknoParrot to make.
+                                $createMode = 'LeftToTeknoParrot'
+                                Write-Log ('Postgres setup: {0} [{1}] ({2}): no starting database file came with the game; the profile is set up and TeknoParrot creates the database the first time the game starts.' -f (Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName), $pf.BaseName, $dbName)
+                            } else {
+                                # FIXDB27: one game with no starting file must not stop the others. It is left out of this run (nothing is created or
+                                # changed for it) and reported as not ready; every other game is set up and checked as usual.
+                                $excludedLabel = Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
+                                [void]$excludedGames.Add([pscustomobject]@{ Key = [string]$pf.BaseName; Name = [string]$excludedLabel; DbName = [string]$dbName; OriginalDbName = [string]$originalDbName })
+                                Write-Log ('Postgres setup: {0} [{1}] ({2}) was left out: the database does not exist and no starting database file came with the game.' -f $excludedLabel, $pf.BaseName, $dbName)
+                                continue
+                            }
                         }
-                        $createMode = 'RestoreBundledBackup'
-                        $encoding = Get-PostgresRestoreEncoding -DbName $dbName
+                        if ($createMode -eq 'None') {
+                            $createMode = 'RestoreBundledBackup'
+                            $encoding = Get-PostgresRestoreEncoding -DbName $originalDbName -BackupFile $backupFile
+                        }
                     }
                 }
                 [void]$preflightPlans.Add([pscustomobject]@{
@@ -29467,6 +30107,8 @@ function Invoke-PostgresGameSetupLocked {
                     CreateMode = $createMode
                     BackupFile = $backupFile
                     Encoding = $encoding
+                    OriginalDbName = $originalDbName
+                    SharesWithLabel = $sharesWithLabel
                     Changed = $changed
                     # FIX36 S4: profiles the user had to decide on (NeedsApproval) are
                     # verified against their own connection values; every other profile
@@ -29507,12 +30149,14 @@ function Invoke-PostgresGameSetupLocked {
                 & $addPreflightReason ([string]$member.Profile.BaseName) ([string]$memberLabel) ('The database {0} does not exist yet and is shared by profiles {1}. TeknoParrot Manager cannot tell which bundled backup or tables the shared database must hold, so it will not create it.' -f $group.Name, $profileKeys)
             }
         }
-        # A left-out game whose database name another game is about to create cannot be judged: that database would be built from the other game's file.
+        # A left-out game keeps the database name in its profile. When another game in this run uses that name, the left-out game would open (and write
+        # into) the other game's database. It cannot be given its own database (it has no starting file), so setup stops here and changes nothing.
         foreach ($excludedGame in @($excludedGames.ToArray())) {
-            if (@($preflightPlans | Where-Object { [string]$_.DbName -ceq [string]$excludedGame.DbName -and -not $_.DbExists }).Count -gt 0) {
+            $sharingPlans = @($preflightPlans | Where-Object { [string]$_.DbName -ceq [string]$excludedGame.OriginalDbName })
+            if ($sharingPlans.Count -gt 0) {
                 $preflightBlocked = $true
                 $results.Errors++
-                & $addPreflightReason ([string]$excludedGame.Key) ([string]$excludedGame.Name) ('The database {0} does not exist yet and is shared with a game that has a starting database file, but this game has none, so TeknoParrot Manager will not create it.' -f $excludedGame.DbName)
+                & $addPreflightReason ([string]$excludedGame.Key) ([string]$excludedGame.Name) ('The database {0} is also used by {1}, which is ready to be set up. This game has no starting database file, so TeknoParrot Manager cannot give it its own database, and it must not run on the other game''s data. Nothing was changed. Put this game''s pg_backup folder back, then run PostgreSQL setup again.' -f $excludedGame.OriginalDbName, ((@($sharingPlans | ForEach-Object { Get-TpmGameDisplayLabel -ProfilePath $_.Profile.FullName -Fallback $_.Profile.BaseName })) -join ' and '))
             }
         }
         if ($profiles.Count -gt 0) {
@@ -29597,6 +30241,11 @@ function Invoke-PostgresGameSetupLocked {
         }
         $readiness = Get-PostgresGameDatabaseReadiness -Doc $profileDoc -MinTables $minTables
         if (-not $readiness.Ready) {
+            # A game whose database TeknoParrot makes itself on first start (no starting file, "Automatically create Database") is waiting, not failing.
+            if ($Plan.CreateMode -eq 'LeftToTeknoParrot' -and [string]$readiness.Error -match 'does not exist') {
+                $Plan | Add-Member -NotePropertyName AwaitingFirstStart -NotePropertyValue $true -Force
+                return
+            }
             $readyLabel = Get-TpmGameDisplayLabel -ProfilePath $Plan.Profile.FullName -Fallback $Plan.Profile.BaseName
             throw ('{0} [{1}] ({2}) is not ready: {3}' -f $readyLabel, $Plan.Profile.BaseName, $Plan.DbName, $readiness.Error)
         }
@@ -30035,7 +30684,7 @@ function Invoke-PostgresGameSetupLocked {
                     Save-Xml $plan.Document $plan.Profile.FullName
                     [void]$completedProfileItems.Add($profileItem)
                     $results.Configured++
-                } elseif ($plan.CreateMode -eq 'None') {
+                } elseif ($plan.CreateMode -in @('None', 'LeftToTeknoParrot')) {
                     $results.AlreadyConfigured++
                 }
             }
@@ -30070,6 +30719,7 @@ function Invoke-PostgresGameSetupLocked {
                 # Every profile not kept by the user must now hold the verified password.
                 $expectedPass = if ($plan.PassKept) { [string]$plan.PlannedFields['Pass'] } else { $SuperPasswordPlain }
                 if (-not [string]::Equals([string](Get-PostgresFieldValue $doc 'Pass'), $expectedPass, [System.StringComparison]::Ordinal)) { throw "PostgreSQL profile password verification failed for $($plan.Profile.BaseName)." }
+                if (-not [string]::Equals([string](Get-PostgresFieldValue $doc 'DbName'), [string]$plan.DbName, [System.StringComparison]::Ordinal)) { throw "PostgreSQL profile database name verification failed for $($plan.Profile.BaseName)." }
                 # FIX69: a database created by this run is verified whatever the profile's auto-create value.
                 if ($plan.DbExists -and ($plan.AutoCreate -ne $true -or $creationModes -contains $plan.CreateMode)) {
                     $finalDb = Get-PostgresDatabaseState -DbName $plan.DbName -SuperPasswordPlain $SuperPasswordPlain
@@ -32355,6 +33005,10 @@ function Get-TpmBepInExDoneLines {
     $kept = @(Get-TpmTransactionField -Object $Result -Name 'FailureRecords' -Default @() | ForEach-Object { [string](Get-TpmTransactionField -Object $_ -Name 'BackupPath' -Default '') } | Where-Object { $_ })
     $backup = Get-TpmBackupFolderLine -Result $Result -ExtraPaths $kept -What 'the game files'
     if ($backup) { [void]$lines.Add($backup) }
+    # Eggman guide (BepInEx section): a BepInEx game must be started and restarted twice the first time so the framework can finish setting up.
+    if ([int](Get-TpmTransactionField -Object $Result -Name 'Updated' -Default 0) -gt 0) {
+        [void]$lines.Add('The first time you start a BepInEx game, start it and close it twice so BepInEx can finish setting itself up. To reset BepInEx, delete only its cache and config folders.')
+    }
     return $lines.ToArray()
 }
 
@@ -33562,6 +34216,7 @@ function Invoke-BepInExUpdateCheckLegacy {
     # Only a few games need BepInEx. A game that has none is never offered in the bulk question below; the user has to pick it.
     $offeredCount = $outdated.Count
     $freshGames = @($outdated | Where-Object { [string]$_.Installed -eq 'Not installed' })
+    $bulkOfferedCount = $outdated.Count - $freshGames.Count
     if ($freshGames.Count -gt 0) {
         foreach ($freshGame in $freshGames) { [void]$outdated.Remove($freshGame) }
         Write-Host ("  {0} game(s) do not have BepInEx. Only a few games need it, so they are left alone unless you pick them." -f $freshGames.Count) -ForegroundColor Cyan
@@ -33584,7 +34239,8 @@ function Invoke-BepInExUpdateCheckLegacy {
     Write-Host ("  Selected: {0} of {1} games to install or update BepInEx:" -f $outdated.Count, $offeredCount) -ForegroundColor Cyan
     foreach ($o in @($outdated | Sort-Object Label)) { Write-Host ("    - {0}: {1} -> {2} ({3})" -f $o.Label, $o.Installed, $o.Latest.Version, $o.Architecture) -ForegroundColor DarkGray }
     # FIX110 (S-10): repair-reset is not offered; it was always refused after the download and staging.
-    $installChoice = Read-TpmChoice -Prompt ("  [Y] Install/update  [B] Back  [N] Cancel  -- {0} game(s)" -f $outdated.Count) -Choices @('Y', 'B', 'N') -Default 'B'
+    # Games the user picked by number were already approved by that pick; the question is asked only when out-of-date games were offered in bulk.
+    $installChoice = if ($bulkOfferedCount -gt 0) { Read-TpmChoice -Prompt ("  [Y] Install/update  [B] Back  [N] Cancel  -- {0} game(s)" -f $outdated.Count) -Choices @('Y', 'B', 'N') -Default 'B' } else { 'Y' }
     if ($installChoice -ne 'Y') {
         Write-Log 'BepInEx update check: user selected Back or canceled installation/update.'
         return [pscustomobject]@{ Succeeded = $false; Reason = 'DECLINED'; Errors=$errors; MissingDevice=$missingDevice; MissingPath=$missingPath; Protected=$protected; Skipped=$skippedItems.Count; UnsupportedArchitecture=$unsupportedArchitecture; UnknownArchitecture=$unknownArchitecture; PathReasonCounts=$pathReasonCounts; SelectedItems = @($selectedItems.ToArray()); ChangedItems = @(); CompletedItems=@($upToDateItems.ToArray()); FailedItems = @($failedItems.ToArray()); SkippedItems = @($skippedItems.ToArray()); UnattemptedItems=@($outdated | ForEach-Object { [string]$_.Code }); FailureRecords = @($failureRecords.ToArray()); BatchStopped = $false }
@@ -35245,8 +35901,14 @@ function Invoke-StartupUpdateCheck {
         Write-Host "  $releaseSummary" -ForegroundColor DarkGray
     }
     Write-Log "StartupUpdateCheck: update available (v$ScriptVersion -> $($release.TagName))."
+    Write-Host ""
+    Write-ManagerUpdatePlan
+    Write-Host ""
+    Write-Host "  Y = Update now (starts right away)" -ForegroundColor Cyan
+    Write-Host "  N = Remind me later (keep this version for now)" -ForegroundColor Cyan
+    Write-Host "  V = View release notes (see what changed, then choose again)" -ForegroundColor Cyan
     while ($true) {
-        $ans = Read-TpmChoice -Prompt "  Update now, remind me later, or view release notes? (Y/N/V)" -Choices @('Y', 'N', 'V') -Default 'N'
+        $ans = Read-TpmChoice -Prompt "  Your choice (Y/N/V)" -Choices @('Y', 'N', 'V') -Default 'N'
         if ($ans -eq 'V') {
             Write-Host ""
             if ($release.Body) { Write-Host $release.Body -ForegroundColor DarkGray } else { Write-Host '  No release notes were provided for this release.' -ForegroundColor DarkGray }
@@ -35254,20 +35916,6 @@ function Invoke-StartupUpdateCheck {
             continue
         }
         if ($ans -eq 'Y') {
-            Write-Host ""
-            Write-ManagerUpdatePlan
-            Write-Host ""
-            $confirm = Read-TpmYesNo -Prompt '  Proceed? (Y/N)'
-            if ($confirm -ne 'Y') {
-                Write-Host '  Skipped -- no changes made.' -ForegroundColor DarkGray
-                return New-TpmManagerUpdateTransactionResult `
-                    -Outcome 'NO_OP' -ProductState 'UNCHANGED' `
-                    -Summary 'No update was installed. Your current TeknoParrot Manager is unchanged.' `
-                    -PreState $preState -FinalAttempted:$true -FinalPassed:$true `
-                    -FinalChecks @('The current manager script remained unchanged after the declined startup update.') `
-                    -ReasonCode 'UPDATE_DECLINED' `
-                    -TechnicalDetails ([pscustomobject]@{ Stage='StartupConfirmation'; ReleaseTag=$release.TagName })
-            }
             return Invoke-TpmProgressGroup -Title 'Manager update install' -Action { Invoke-ManagerUpdateInstall -ScriptPath $ScriptPath -Release $release }
         }
         if ($ans -eq 'N') {
@@ -35883,7 +36531,7 @@ function Get-TpmSupportProfileFiles {
 
 function Get-TpmSupportSavedMappingCheck {
     param([string]$UserProfilesDir, [string]$Code, [string]$ExpectedPath)
-    if ([string]::IsNullOrWhiteSpace($UserProfilesDir) -or $Code -notmatch '^[\w]+$' -or [string]::IsNullOrWhiteSpace($ExpectedPath)) { return 'NOT_CHECKED' }
+    if ([string]::IsNullOrWhiteSpace($UserProfilesDir) -or $Code -notmatch '^[\w-]+$' -or [string]::IsNullOrWhiteSpace($ExpectedPath)) { return 'NOT_CHECKED' }
     try {
         $profilePath = Join-Path $UserProfilesDir ($Code + '.xml')
         if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf)) { return 'PROFILE_MISSING' }
@@ -35939,7 +36587,7 @@ function Get-TpmSupportLedgerProjection {
                     State = [string]$mapping.State; Reason = (Redact-TpmSupportText -Text ([string]$mapping.Reason)).Text; Readback = [bool]$mapping.Readback
                     AttemptUtc = [string]$mapping.AttemptUtc; SavedProfileCheck = $check
                 })
-                if ($code -match '^[\w]+$') {
+                if ($code -match '^[\w-]+$') {
                     [void]$affected.Add($code)
                     $entry = ('{0}/{1}' -f $mapping.State, $check)
                     $codeStates[$code] = $(if ($codeStates.ContainsKey($code)) { $codeStates[$code] + '; ' + $entry } else { $entry })
@@ -36444,7 +37092,7 @@ function Set-TpmRegistrationGamePath {
         [void]$tpl.GameProfile.PrependChild($gp)
     }
     $gp.InnerText = $ExePath
-    [void](Set-SecondaryExecutablePath $tpl $ExePath)
+    [void](Set-SecondaryExecutablePath $tpl $ExePath -ProfileCode ([System.IO.Path]::GetFileNameWithoutExtension($TemplatePath)))
     if (-not $DryRun) { [void](Confirm-TpmRegistrationSafetyBackup -State $BackupState -UserProfilesDir $UserProfilesDir) }
     if (-not $DryRun) { $PreWriteState.Value = Get-TpmProfileWriteFingerprint -Path $UserProfile }
     $WriteAttempted.Value = -not $DryRun
@@ -36460,6 +37108,7 @@ function Register-GamesLegacy {
           [string]$tpRootDir = '', [hashtable]$subFolderMap = $null,
           [string[]]$GameFolders = $null, [hashtable]$BackupState = $null)
     if ($null -eq $datIndex) { $datIndex = @{} }
+    $gameFileExtensions = @(Get-TpmProfileFileExtensions -ProfileIndex $profileIndex)
 
     $discoveryStarted = Get-Date
     $discoveryWatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -36478,7 +37127,7 @@ function Register-GamesLegacy {
     $discoveryCompleted = $false
     try {
         if ($null -eq $GameFolders -or $GameFolders.Count -eq 0) {
-            $exeFiles = @(Get-GameFiles $installFolder -ProgressScript $discoveryProgress)
+            $exeFiles = @(Get-GameFiles $installFolder -ProgressScript $discoveryProgress -ExtraExtensions $gameFileExtensions)
             $discoveryState.Current = [int]($discoveryState.RootOffset + $discoveryState.RootSeen)
         } else {
             $installRoot = [System.IO.Path]::GetFullPath($installFolder).TrimEnd('\')
@@ -36494,7 +37143,7 @@ function Register-GamesLegacy {
             $exeFileCandidates = New-Object System.Collections.Generic.List[object]
             foreach ($scanRoot in $scanRoots) {
                 $discoveryState.RootSeen = 0
-                $rootCandidates = @(Get-GameFiles $scanRoot -ProgressScript $discoveryProgress)
+                $rootCandidates = @(Get-GameFiles $scanRoot -ProgressScript $discoveryProgress -ExtraExtensions $gameFileExtensions)
                 foreach ($candidate in $rootCandidates) { [void]$exeFileCandidates.Add($candidate) }
                 $discoveryState.RootOffset += [int]$discoveryState.RootSeen
                 $discoveryState.Current = [int]$discoveryState.RootOffset
@@ -36623,7 +37272,9 @@ function Register-GamesLegacy {
         $key = $exe.Name.ToLowerInvariant()
         if (-not $profileIndex.ContainsKey($key)) { continue }
 
-        $matchList = $profileIndex[$key]
+        # A game that names a set of ZIPs ("child.zip;parent.zip") only counts when the other ZIPs are beside the file that was found.
+        $matchList = @($profileIndex[$key] | Where-Object { @(Get-TpmMissingGameSetFiles -GamePath $exe.FullName -ExecutableName ([string]$_.ExeName)).Count -eq 0 })
+        if ($matchList.Count -eq 0) { Write-Log ("Registration: {0} was left alone because the other ZIP its profile names is not beside it." -f $exe.FullName); continue }
 
         # Same executable name maps to more than one profile.
         # Attempt folder-name fuzzy matching before giving up.
@@ -36667,10 +37318,26 @@ function Register-GamesLegacy {
             $normFolder  = Get-NormalizedGameKey $folderKey
 
             $fuzzyResult    = Resolve-BestFuzzyMatch -NormFolder $normFolder -MatchList $matchList -RawThrillsAliases $RawThrillsPathLimits -NormBaseTitle (Get-TpmBaseTitleKey $folderKey)
+            # A game that has no entry in the DAT (for example the newest Golden Tee years) can only be told apart by name. Where the profile code alone is
+            # not enough, TeknoParrot's own game name for each candidate ("Golden Tee Live 2023-2024") is tried as a second name, under the same rules.
+            if (-not $fuzzyResult.IsConfidentMatch -and $gameProfilesDir) {
+                $tpNames = Get-TpmTeknoParrotNamesForCodes -GameProfilesDir $gameProfilesDir -Codes @($matchList | ForEach-Object { [string]$_.Code })
+                if ($tpNames.Count -gt 0) {
+                    $namedResult = Resolve-BestFuzzyMatch -NormFolder $normFolder -MatchList $matchList -RawThrillsAliases $RawThrillsPathLimits -NormBaseTitle (Get-TpmBaseTitleKey $folderKey) -AlternateNames $tpNames
+                    if ($namedResult.IsConfidentMatch) { $fuzzyResult = $namedResult }
+                }
+            }
             $bestFuzzy      = $fuzzyResult.Best
             $bestFuzzyScore = $fuzzyResult.BestScore
 
-            if ($fuzzyResult.IsConfidentMatch) {
+            # The Eggman list names this folder's own game. Among profiles that share one file name the name match is only a guess, so
+            # when the list names a different profile for the folder (The King of Fighters XII against XIV read almost the same), the
+            # list wins: nothing is claimed here and the list pass below registers the folder.
+            $datNamedCodes = @(Get-TpmDatNamedProfileCodes -FolderKey $folderKey -DatIndex $datIndex -GameProfilesDir $gameProfilesDir -ProfileSet $profileSet)
+            if ($fuzzyResult.IsConfidentMatch -and $datNamedCodes.Count -gt 0 -and $datNamedCodes -notcontains $bestFuzzy.Code) {
+                Write-Log ("DatIndex (shared exe name): did not claim {0} for folder '{1}' -- the dat names profile {2} for this folder" -f $bestFuzzy.Code, $folderName, ($datNamedCodes -join ' or '))
+                $resolved = $false
+            } elseif ($fuzzyResult.IsConfidentMatch) {
                 # High-confidence fuzzy match: register automatically.
                 $code = $bestFuzzy.Code
                 if ($seenCodes.ContainsKey($code)) {
@@ -36731,9 +37398,9 @@ function Register-GamesLegacy {
                 # exists) before flagging as ACTION REQUIRED. A game registered via
                 # TeknoParrotUI would have a .xml file even though the fuzzy score is
                 # below the auto-register threshold.
-                $alreadyReg = @($matchList | Where-Object {
-                    Test-Path -LiteralPath (Join-Path $userProfilesDir ($_.Code + ".xml"))
-                })
+                # Only a profile that existed BEFORE this run counts here. A profile written for an earlier folder of this same run is not
+                # proof that this folder is handled; counting it made the second version of a game vanish without a word.
+                $alreadyReg = @($matchList | Where-Object { $preExistingCodes.Contains($_.Code) })
                 foreach ($ar in $alreadyReg) {
                     if (-not $seenCodes.ContainsKey($ar.Code)) {
                         if ($already -notcontains $ar.Code) { [void]$already.Add($ar.Code) }
@@ -36758,12 +37425,12 @@ function Register-GamesLegacy {
                     # Dat-based disambiguation: look up the normalized folder name in the
                     # dat index. The dat's <GameProfile> is authoritative, so if a match is
                     # found we use it directly instead of falling through to ambiguous.
-                    $datEntry = if ($datIndex.Count -gt 0) { $datIndex[$normFolder] } else { $null }
+                    $datEntry = if ($datIndex.Count -gt 0) { (Get-DatEntryForZipName -RawZipName $folderKey -DatIndex $datIndex) } else { $null }
                     if ($null -ne $datEntry) {
                         $datCode = $datEntry.ProfileCode
                         # Profile codes are purely alphanumeric; reject anything else to
                         # prevent path traversal via a crafted dat file.
-                        if ($datCode -match '^[\w]+$') {
+                        if ($datCode -match '^[\w-]+$') {
                             if ($gameProfilesDir) {
                                 $datCode = Resolve-ProfileCode $datCode $gameProfilesDir $profileSet
                             }
@@ -36882,8 +37549,8 @@ function Register-GamesLegacy {
         # folder, this file is not the game: do not claim the profile from it. The folder's own
         # game file registers on its own turn, or the dat pass below registers the folder. See issue #404.
         if ($datIndex.Count -gt 0) {
-            $ownDatEntry = $datIndex[(Get-NormalizedGameKey $folderKey)]
-            if ($null -ne $ownDatEntry -and [string]$ownDatEntry.ProfileCode -match '^[\w]+$') {
+            $ownDatEntry = (Get-DatEntryForZipName -RawZipName $folderKey -DatIndex $datIndex)
+            if ($null -ne $ownDatEntry -and [string]$ownDatEntry.ProfileCode -match '^[\w-]+$') {
                 $ownDatCode = [string]$ownDatEntry.ProfileCode
                 if ($gameProfilesDir) { $ownDatCode = Resolve-ProfileCode $ownDatCode $gameProfilesDir $profileSet }
                 if ($ownDatCode -ine $code) {
@@ -36969,7 +37636,7 @@ function Register-GamesLegacy {
             if (Test-TpmRegistrationLedgerStopped) { break }
             $origName   = $allExeFolders[$folderKey]
             $normFolder = Get-NormalizedGameKey $folderKey
-            $datEntry   = $datIndex[$normFolder]
+            $datEntry   = (Get-DatEntryForZipName -RawZipName $folderKey -DatIndex $datIndex)
             $datScore   = 1.0
 
             # Fuzzy dat scan when no exact name match (handles slightly misnamed folders)
@@ -37004,7 +37671,7 @@ function Register-GamesLegacy {
             if ($null -eq $datEntry) { continue }
 
             $datCode = $datEntry.ProfileCode
-            if ($datCode -notmatch '^[\w]+$') {
+            if ($datCode -notmatch '^[\w-]+$') {
                 Write-Log ("DatIndex (pass2): invalid ProfileCode '{0}' -- skipped folder {1}" -f $datCode, $folderKey)
                 continue
             }
@@ -37046,9 +37713,10 @@ function Register-GamesLegacy {
 
             $templatePath = Join-Path $gameProfilesDir ($datCode + ".xml")
             if (-not (Test-Path -LiteralPath $templatePath)) {
-                Write-Log ("DatIndex (pass2): no GameProfiles template for '{0}' -- skipping {1}" -f $datCode, $folderKey)
-                Add-TpmRegistrationMappingFailure -Folder $origName -Code $datCode -Match 'dat-pass2' -Reason 'TEMPLATE_MISSING' -TemplatePath $templatePath -DryRun $DryRun
-                [void]$mutationRecords.Failures.Add([pscustomobject]@{ Code=$datCode; WriteAttempted=$false; Reason='TEMPLATE_MISSING' })
+                # The list names a game TeknoParrot has no profile for (extra archives the guide marks unsupported). That is not a
+                # failure of the Manager: the folder is "not in TeknoParrot", so it stays out of the matched folders and is listed so.
+                Write-Log ("DatIndex (pass2): TeknoParrot has no game profile named '{0}' -- folder {1} is not in TeknoParrot" -f $datCode, $folderKey)
+                [void]$matchedFolders.Remove($folderKey)
                 continue
             }
 
@@ -37066,6 +37734,9 @@ function Register-GamesLegacy {
                     }
                 }
             }
+            # A file the list itself names for this profile is the game file, so the other ZIP a profile name may list ("child;parent":
+            # a merged ROM set holds the child inside the parent) is not needed beside it.
+            $exeFromDat = ($null -ne $exeToUse)
             if (-not $exeToUse) {
                 # Fallback: pick the first matching file already found for this folder
                 $first = @($exeFiles | Where-Object {
@@ -37078,6 +37749,10 @@ function Register-GamesLegacy {
                 Write-Log ("DatIndex (pass2): no exe found for '{0}' in folder {1}" -f $datCode, $folderKey)
                 Add-TpmRegistrationMappingFailure -Folder $origName -Code $datCode -Match 'dat-pass2' -Reason 'EXECUTABLE_MISSING' -TemplatePath $templatePath -DryRun $DryRun
                 [void]$mutationRecords.Failures.Add([pscustomobject]@{ Code=$datCode; WriteAttempted=$false; Reason='EXECUTABLE_MISSING' })
+                continue
+            }
+            if (-not $exeFromDat -and @(Get-TpmMissingGameSetFiles -GamePath $exeToUse -ExecutableName ([string](Get-PrimaryExecutableName $templatePath))).Count -gt 0) {
+                Write-Log ("DatIndex (pass2): {0} was left alone because the other ZIP its profile names is not in folder {1}" -f $datCode, $folderKey)
                 continue
             }
 
@@ -37201,6 +37876,10 @@ function Register-GamesLegacy {
                 [void]$mutationRecords.Failures.Add([pscustomobject]@{ Code=$bestCode; WriteAttempted=$false; Reason='EXECUTABLE_MISSING' })
                 continue
             }
+            if (@(Get-TpmMissingGameSetFiles -GamePath $exeToUse -ExecutableName ([string](Get-PrimaryExecutableName $templatePath))).Count -gt 0) {
+                Write-Log ("ProfileCode (pass3): {0} was left alone because the other ZIP its profile names is not in folder {1}" -f $bestCode, $folderKey)
+                continue
+            }
 
             $registrationWriteAttempted = $false; $ledgerMapping = $null; $preWriteState = $null
             try {
@@ -37247,7 +37926,7 @@ function Register-GamesLegacy {
         foreach ($sfCode in @($subFolderMap.Keys)) {
             if (Test-TpmRegistrationLedgerStopped) { break }
             $sfCode = [string]$sfCode
-            if ($sfCode -notmatch '^[\w]+$') {
+            if ($sfCode -notmatch '^[\w-]+$') {
                 Write-Log "Register-Games: subFolderMap key '$sfCode' contains invalid characters -- skipped."
                 continue
             }
@@ -37279,7 +37958,7 @@ function Register-GamesLegacy {
                     [void]$sfTpl.GameProfile.PrependChild($sfGp)
                 }
                 $sfGp.InnerText = $sfExePath
-                [void](Set-SecondaryExecutablePath $sfTpl $sfExePath)
+                [void](Set-SecondaryExecutablePath $sfTpl $sfExePath -ProfileCode ([string]$sfCode))
                 if (-not $DryRun) { [void](Confirm-TpmRegistrationSafetyBackup -State $BackupState -UserProfilesDir $userProfilesDir) }
                 if (-not $DryRun) { $preWriteState = Get-TpmProfileWriteFingerprint -Path $sfUserProfile }
                 $registrationWriteAttempted = -not $DryRun
@@ -37310,6 +37989,10 @@ function Register-GamesLegacy {
         if ($_.Reason -eq 'duplicate') { $claimKey -ine $folderKey } else { -not $matchedFolders.ContainsKey($folderKey) }
     })
 
+    # The second profile the list names for a folder (GameProfile2), after the first one is registered or found.
+    if ($datIndex.Count -gt 0 -and $gameProfilesDir -and -not (Test-TpmRegistrationLedgerStopped)) {
+        Register-TpmDatSecondProfiles -Registered $registered -Already $already -SeenCodes $seenCodes -ClaimedBy $codeClaimedBy -ExeFiles $exeFiles -InstallBase $installBase -DatIndex $datIndex -GameProfilesDir $gameProfilesDir -ProfileSet $profileSet -UserProfilesDir $userProfilesDir -DryRun $DryRun -MutationRecords $mutationRecords -BackupState $BackupState
+    }
     $unmatched = @($allExeFolders.Keys | Where-Object { -not $matchedFolders.ContainsKey($_) } | Sort-Object)
     $evidenceStopped = (-not $DryRun -and (Test-TpmRegistrationLedgerStopped))
     $unattemptedFolders = @()
@@ -37349,7 +38032,7 @@ function Invoke-ManualRegistrationChoices {
         $decision = [pscustomobject]@{ Game=$folderName; Code=('manual:' + $folderName); Outcome='SKIPPED'; Reason='USER_LEFT_UNRESOLVED'; WriteAttempted=$false }
         $ledgerMapping = $null; $preWriteState = $null
         try {
-            $candidates = @($info.Profiles -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[\w]+$' })
+            $candidates = @($info.Profiles -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[\w-]+$' })
             if ($candidates.Count -eq 0) { $decision.Reason='NO_VALID_CANDIDATE'; continue }
             Write-Host ""
             Write-Host ("  Ambiguous registration: {0}" -f $folderName) -ForegroundColor Yellow
@@ -37388,7 +38071,7 @@ function Invoke-ManualRegistrationChoices {
             $gamePath = $template.GameProfile.SelectSingleNode("GamePath")
             if ($null -eq $gamePath) { $gamePath = $template.CreateElement("GamePath"); [void]$template.GameProfile.PrependChild($gamePath) }
             $gamePath.InnerText = $exeFullPath
-            [void](Set-SecondaryExecutablePath $template $exeFullPath)
+            [void](Set-SecondaryExecutablePath $template $exeFullPath -ProfileCode ([string]$code))
             $ledgerMapping = Start-TpmRegistrationMapping -Folder $folderName -Code $code -Match 'manual-choice' -IntendedPath $exeFullPath -TemplatePath $templatePath -DryRun $DryRun
             if (-not $DryRun) { $preWriteState = Get-TpmProfileWriteFingerprint -Path $userProfilePath }
             $decision.WriteAttempted = -not $DryRun
@@ -37576,7 +38259,7 @@ function Repair-GamePathsLegacy {
         param($file, $current)
         Write-TpmCompactExtractionProgress -Phase Scanning -Label 'Game-file discovery' -Current $current -Total 0 -StartedAt $repairStarted
     }
-    foreach ($file in (Get-GameFiles $installFolder -ProgressScript $scanProgress)) {
+    foreach ($file in (Get-GameFiles $installFolder -ProgressScript $scanProgress -ExtraExtensions (Get-TpmProfileFileExtensions -ProfileIndex $profileIndex))) {
         $k = $file.Name.ToLowerInvariant()
         if (-not $exeMap.ContainsKey($k)) { $exeMap[$k] = New-Object System.Collections.ArrayList }
         [void]$exeMap[$k].Add($file.FullName)
@@ -37632,7 +38315,7 @@ function Repair-GamePathsLegacy {
         }
         # If this exe name maps to more than one profile in the library it is
         # inherently ambiguous -- never auto-assign it regardless of what is on disk.
-        $alts         = Get-ExeAlternatives $exeName.Trim()
+        $alts         = @((Get-TpmGameFileSet -ExecutableName $exeName.Trim()).Choices)
         $profileCount = ($alts | ForEach-Object {
             $ak = $_.ToLowerInvariant()
             if ($profileIndex.ContainsKey($ak)) { $profileIndex[$ak].Count } else { 0 }
@@ -37713,7 +38396,7 @@ function Repair-GamePathsLegacy {
                 [void]$doc.GameProfile.PrependChild($gpNode)
             }
             $gpNode.InnerText = $newPath
-            [void](Set-SecondaryExecutablePath $doc $newPath)
+            [void](Set-SecondaryExecutablePath $doc $newPath -ProfileCode ([string]$f.BaseName))
             Save-XmlMaybe $doc $f.FullName $DryRun
 
             $verifiedDoc = Read-Xml $f.FullName
@@ -37808,7 +38491,7 @@ function Invoke-LibraryHealthManualPathRepairLegacy {
             if (-not $doc.GameProfile) { throw 'profile has no GameProfile node' }
             $exeNode = $doc.GameProfile.SelectSingleNode('ExecutableName')
             $exeName = if ($exeNode) { $exeNode.InnerText.Trim() } else { '' }
-            $exeAlternatives = @(Get-ExeAlternatives $exeName)
+            $exeAlternatives = @((Get-TpmGameFileSet -ExecutableName $exeName).Choices)
             $expectedDisplay = ($exeAlternatives -join ' or ')
 
             Write-Host ""
@@ -37898,7 +38581,7 @@ function Invoke-LibraryHealthManualPathRepairLegacy {
                 [void]$plan.Document.GameProfile.AppendChild($plan.GamePathNode)
             }
             $plan.GamePathNode.InnerText = $plan.SelectedPath
-            [void](Set-SecondaryExecutablePath $plan.Document $plan.SelectedPath)
+            [void](Set-SecondaryExecutablePath $plan.Document $plan.SelectedPath -ProfileCode ([string]$plan.Code))
             Save-Xml -doc $plan.Document -path $plan.ProfilePath
             [void]$savedCodes.Add([string]$plan.Code)
         } catch {
@@ -37955,7 +38638,9 @@ function Invoke-LibraryHealthCheck {
     $postgresNeededLabels = New-Object System.Collections.Generic.List[string]
     $postgresConfiguredLabels = New-Object System.Collections.Generic.List[string]
     $postgresAutoCreateLabels = New-Object System.Collections.Generic.List[string]
+    $internalDatabaseLabels = New-Object System.Collections.Generic.List[string]
     $postgresConfiguredChecks = New-Object System.Collections.Generic.List[object]
+    $postgresDbUsers = New-Object System.Collections.Generic.List[object]
 
     $profileCurrent = 0
     $profileStarted = Get-Date
@@ -37971,8 +38656,10 @@ function Invoke-LibraryHealthCheck {
                 continue
             }
             try {
+                if ((Get-TpmGameDatabaseStorage -Doc $doc) -eq 'Internal') { [void]$internalDatabaseLabels.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)) }
                 if (Test-GameNeedsPostgres $doc) {
                     $label = Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
+                    [void]$postgresDbUsers.Add([pscustomobject]@{ Label = $label; DbName = [string](Get-PostgresFieldValue $doc 'DbName'); Key = ('{0}|{1}|{2}' -f ([string](Get-PostgresFieldValue $doc 'Address')).Trim(), ([string](Get-PostgresFieldValue $doc 'Port')).Trim(), [string](Get-PostgresFieldValue $doc 'DbName')) })
                     $configurationComplete = Test-TpmPostgresSettingsComplete -Doc $doc
                     if (-not $configurationComplete) {
                         [void]$postgresNeeded.Add($pf.BaseName)
@@ -38106,6 +38793,18 @@ function Invoke-LibraryHealthCheck {
             Write-Log ("HealthCheck: the game startup files could not be checked -- {0}" -f $_)
         }
     }
+    # Game types: unknown types, development-only games, a missing emulator folder, games that need a hand-picked file, System 11 saved files.
+    $gameTypeReport = $null
+    if (-not $discoveryFailed) {
+        try { $gameTypeReport = Get-TpmGameTypeReport -Profiles $profiles -TeknoParrotRoot $TpRoot }
+        catch { Write-Log ("HealthCheck: the game types could not be checked -- {0}" -f $_) }
+    }
+    # Controls: which games have every control the game lists set up. Read-only; it never says a game is ready.
+    $controlsAudit = $null
+    if (-not $discoveryFailed -and -not [string]::IsNullOrWhiteSpace($TpRoot) -and (Test-Path -LiteralPath (Join-Path $TpRoot 'GameProfiles') -PathType Container)) {
+        try { $controlsAudit = Get-TpmControlCoverageAudit -Profiles $profiles -GameProfilesDir (Join-Path $TpRoot 'GameProfiles') }
+        catch { Write-Log ("HealthCheck: the controls could not be checked -- {0}" -f $_) }
+    }
     $postgresStatus = 'Unknown'; $postgresPsqlExists = $false; $postgresPsqlStatus = 'Unknown'; $postgresServiceExists = $null
     try {
         $postgresService = Get-Service -Name $script:PostgresServiceName -ErrorAction Stop
@@ -38132,6 +38831,7 @@ function Invoke-LibraryHealthCheck {
     $postgresDatabaseCheck = 'NotNeeded'
     $postgresDatabaseProblems = New-Object System.Collections.Generic.List[string]
     $postgresDatabaseSkipped = New-Object System.Collections.Generic.List[string]
+    $postgresAwaitingFirstStart = New-Object System.Collections.Generic.List[string]
     if ($postgresConfiguredChecks.Count -gt 0) {
         if ($postgresServiceExists -eq $false) { $postgresDatabaseCheck = 'SkippedNotInstalled' }
         elseif ($postgresStatus -ne 'Running') { $postgresDatabaseCheck = 'SkippedNotRunning' }
@@ -38147,6 +38847,14 @@ function Invoke-LibraryHealthCheck {
                 if (-not $checkedDatabases.ContainsKey($checkKey)) { $checkedDatabases[$checkKey] = (Get-PostgresGameDatabaseReadiness -Doc $databaseCheck.Doc) }
                 $readiness = $checkedDatabases[$checkKey]
                 if ($readiness.Ready) { continue }
+                # A missing database of a game that has TeknoParrot's own "Automatically create Database" option and no starting file with the game (the games in
+                # $postgresAutoCreateLabels) is not a problem Postgres setup could fix: TeknoParrot makes it the first time the game starts, so it is waiting, not failing.
+                # A game that ships a starting file stays a problem (menu 11 makes it), and a database that cannot be opened is still a problem.
+                if ([string]$readiness.Error -match 'does not exist' -and $postgresAutoCreateLabels.Contains([string]$databaseCheck.Label)) {
+                    [void]$postgresAwaitingFirstStart.Add([string]$databaseCheck.Label)
+                    Write-Log ('HealthCheck: database of {0} is not made yet; TeknoParrot creates it the first time the game starts.' -f $databaseCheck.Label)
+                    continue
+                }
                 $why = if ([string]$readiness.Error -match 'does not exist') { 'its database is missing' } elseif ([string]$readiness.Error -match '^Found 0 tables') { 'its database has no tables' } else { 'the game cannot connect to its database with its own settings' }
                 [void]$postgresDatabaseProblems.Add(('{0}: {1}' -f $databaseCheck.Label, $why))
                 Write-Log ('HealthCheck: database problem for {0}: {1}' -f $databaseCheck.Label, $readiness.Error)
@@ -38171,19 +38879,28 @@ function Invoke-LibraryHealthCheck {
     $optionalCoverageComplete = (-not $optionalCoverageUnavailable -and $optionalCheckFailed -eq 0)
     $postgresInventoryComplete = ($postgresInventoryStatus -eq 'Complete')
     $postgresServiceUnverified = ($postgresInventoryComplete -and $postgresConfigured -gt 0 -and $null -eq $postgresServiceExists)
-    $healthOutcome = if ($discoveryFailed -or -not $optionalCoverageComplete -or -not $postgresInventoryComplete -or $postgresServiceUnverified -or $postgresDatabaseProblems.Count -gt 0 -or $postgresDatabaseSkipped.Count -gt 0 -or $postgresDatabaseCheck -eq 'SkippedNoClient' -or $prerequisiteCheckFailed -or [string]::IsNullOrWhiteSpace([string]$detected.Vendor)) { 'ACTION_REQUIRED' } else { 'SUCCEEDED' }
+    $gameTypeFailed = ($null -ne $gameTypeReport -and [int]$gameTypeReport.Failed -gt 0)
+    # Two games that name the same database keep their saved progress in the same tables; one database cannot hold both (Postgres setup gives each its own).
+    $postgresSharedDatabases = New-Object System.Collections.Generic.List[string]
+    foreach ($sharedGroup in @($postgresDbUsers | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.DbName) } | Group-Object -Property Key | Where-Object { $_.Count -gt 1 })) {
+        [void]$postgresSharedDatabases.Add(('{0} use the same database, {1}' -f (@($sharedGroup.Group | ForEach-Object { [string]$_.Label }) -join ' and '), [string]$sharedGroup.Group[0].DbName))
+        Write-Log ('HealthCheck: {0} use the same database {1}; Postgres setup (menu 11) gives each its own.' -f (@($sharedGroup.Group | ForEach-Object { [string]$_.Label }) -join ' and '), [string]$sharedGroup.Group[0].DbName)
+    }
+    $healthOutcome = if ($discoveryFailed -or -not $optionalCoverageComplete -or -not $postgresInventoryComplete -or $postgresServiceUnverified -or $postgresDatabaseProblems.Count -gt 0 -or $postgresSharedDatabases.Count -gt 0 -or $postgresDatabaseSkipped.Count -gt 0 -or $postgresDatabaseCheck -eq 'SkippedNoClient' -or $prerequisiteCheckFailed -or $gameTypeFailed -or [string]::IsNullOrWhiteSpace([string]$detected.Vendor)) { 'ACTION_REQUIRED' } else { 'SUCCEEDED' }
     $postgresDatabaseProblemsResult = @()
     $postgresNeededResult = @()
     $postgresNeededLabelsResult = @()
     $postgresConfiguredResult = 0
     $postgresConfiguredLabelsResult = @()
     $postgresAutoCreateResult = @()
+    $postgresAwaitingFirstStartResult = @()
     if ($postgresInventoryComplete) {
         $postgresNeededResult = @($postgresNeeded.ToArray())
         $postgresNeededLabelsResult = @($postgresNeededLabels.ToArray())
         $postgresConfiguredResult = $postgresConfigured
         $postgresConfiguredLabelsResult = @($postgresConfiguredLabels.ToArray())
         $postgresAutoCreateResult = @($postgresAutoCreateLabels.ToArray())
+        $postgresAwaitingFirstStartResult = @($postgresAwaitingFirstStart.ToArray())
         $postgresDatabaseProblemsResult = @($postgresDatabaseProblems.ToArray())
     }
     Write-Log ("HealthCheck: inventory={0} total={1} valid={2} broken={3} empty={4} gpuFixNeeded={5} ffbBlasterNeeded={6} dgVoodoo2Needed={7} reShadeCount={8} bepInExCount={9}" -f `
@@ -38215,6 +38932,9 @@ function Invoke-LibraryHealthCheck {
         PostgresNeeded = $postgresNeededResult
         PostgresConfigured = $postgresConfiguredResult
         PostgresAutoCreateProfiles = $postgresAutoCreateResult
+        PostgresAwaitingFirstStart = $postgresAwaitingFirstStartResult
+        PostgresSharedDatabases = @($postgresSharedDatabases.ToArray())
+        InternalDatabaseLabels = @($internalDatabaseLabels.ToArray())
         PostgresDatabaseProblems = $postgresDatabaseProblemsResult
         PostgresDatabaseCheck = $postgresDatabaseCheck
         PostgresDatabaseNotChecked = @($postgresDatabaseSkipped.ToArray())
@@ -38234,6 +38954,8 @@ function Invoke-LibraryHealthCheck {
         PrerequisiteMissing = @($prerequisiteMissing)
         PrerequisiteNotChecked = @($prerequisiteNotChecked.ToArray())
         PrerequisiteCheckFailed = $prerequisiteCheckFailed
+        GameTypes = $gameTypeReport
+        ControlCoverage = $controlsAudit
         LastFullRun = $lastFullRun
         LogPath = $LogPath
         GameSupport = $gameSupport
@@ -38307,6 +39029,18 @@ function Get-TpmLibraryHealthRows {
     }
     $postgresRow = Get-TpmLibraryHealthPostgresRow -Result $Result
     if ($null -ne $postgresRow) { [void]$rows.Add($postgresRow) }
+    $internalCount = @(Get-TpmTransactionField -Object $Result -Name 'InternalDatabaseLabels' -Default @()).Count
+    if ($internalCount -gt 0) { [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game database' -Text ('OK - {0} {1} Internal storage, so no database install is needed. Start each game once so it creates its own database' -f (Format-TpmGameCount -Count $internalCount), $(if ($internalCount -eq 1) { 'uses' } else { 'use' })) -Color 'Green')) }
+    foreach ($gameTypeRow in @(if ($null -ne (Get-TpmTransactionField -Object $Result -Name 'GameTypes' -Default $null)) { Get-TpmGameTypeRows -Report $Result.GameTypes })) { [void]$rows.Add($gameTypeRow) }
+    $controlCoverageRow = Get-TpmTransactionField -Object $Result -Name 'ControlCoverage' -Default $null
+    if ($null -ne $controlCoverageRow -and [int]$controlCoverageRow.Total -gt 0) {
+        $notSet = [int]$controlCoverageRow.Partial + [int]$controlCoverageRow.Missing
+        $cannotCheck = [int]$controlCoverageRow.Unknown + [int]$controlCoverageRow.Unsupported
+        $coverageText = 'Note - {0} of {1} games have every control the game lists set up (not tested in a game)' -f $controlCoverageRow.Complete, $controlCoverageRow.Total
+        if ($notSet -gt 0) { $coverageText += '; {0} {1} some or all missing' -f (Format-TpmGameCount -Count $notSet), $(if ($notSet -eq 1) { 'has' } else { 'have' }) }
+        if ($cannotCheck -gt 0) { $coverageText += '; TPM cannot check {0}' -f (Format-TpmGameCount -Count $cannotCheck) }
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Controls' -Text ($coverageText + '. Choose D for the list') -Color $(if ($notSet -gt 0) { 'Yellow' } else { 'DarkGray' })))
+    }
     $prerequisiteRow = Get-TpmLibraryHealthPrerequisiteRow -Result $Result
     if ($null -ne $prerequisiteRow) { [void]$rows.Add($prerequisiteRow) }
     $gameSupport = Get-TpmTransactionField -Object $Result -Name 'GameSupport' -Default $null
@@ -38352,12 +39086,16 @@ function Get-TpmLibraryHealthPostgresRow {
         $problemCount = @($Result.PostgresDatabaseProblems).Count
         return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text ('Problem - {0} {1} database that is not ready. Run Postgres setup (menu 11)' -f (Format-TpmGameCount -Count $problemCount), $(if ($problemCount -eq 1) { 'has a' } else { 'have a' })) -Color 'Yellow')
     }
+    if (@(Get-TpmTransactionField -Object $Result -Name 'PostgresSharedDatabases' -Default @()).Count -gt 0) {
+        return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - some games use the same database. Run Postgres setup (menu 11)' -Color 'Yellow')
+    }
     if ($configured -le 0) { return $null }
     if ([bool](Get-TpmTransactionField -Object $Result -Name 'PostgresServiceUnverified' -Default $false)) { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Could not check' -Color 'Yellow') }
     if ($Result.PostgresServiceExists -eq $false) { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - PostgreSQL is not installed' -Color 'Yellow') }
     if ([string]$Result.PostgresServiceStatus -eq 'Stopped') { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - PostgreSQL is stopped' -Color 'Yellow') }
     if (@(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseNotChecked' -Default @()).Count -gt 0) { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - some game databases could not be checked because they point at another computer' -Color 'Yellow') }
     if ([string](Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseCheck' -Default '') -eq 'SkippedNoClient') { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - the game databases could not be checked because psql.exe was not found. Run Postgres setup (menu 11)' -Color 'Yellow') }
+    if (@(Get-TpmTransactionField -Object $Result -Name 'PostgresAwaitingFirstStart' -Default @()).Count -gt 0) { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'OK - profile ready; a game database is created the first time the game starts' -Color 'Green') }
     return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'OK' -Color 'Green')
 }
 
@@ -38376,6 +39114,7 @@ function Get-TpmLibraryHealthSummaryLines {
     $incomplete = ([bool](Get-TpmTransactionField -Object $Result -Name 'OptionalCoverageUnavailable' -Default $false)) -or
         ([int](Get-TpmTransactionField -Object $Result -Name 'OptionalCheckFailed' -Default 0) -gt 0) -or
         ([bool](Get-TpmTransactionField -Object $Result -Name 'PrerequisiteCheckFailed' -Default $false)) -or
+        ($null -ne (Get-TpmTransactionField -Object $Result -Name 'GameTypes' -Default $null) -and [int](Get-TpmTransactionField -Object $Result.GameTypes -Name 'Failed' -Default 0) -gt 0) -or
         ([string]$Result.PostgresInventoryStatus -ne 'Complete') -or
         ([bool](Get-TpmTransactionField -Object $Result -Name 'PostgresServiceUnverified' -Default $false)) -or
         [string]::IsNullOrWhiteSpace([string](Get-TpmTransactionField -Object $Result -Name 'DetectedGpuVendor' -Default ''))
@@ -38474,6 +39213,7 @@ function Get-TpmLibraryHealthDetailBlocks {
         $neededLabels = @(Get-TpmTransactionField -Object $Result -Name 'PostgresNeededLabels' -Default @($Result.PostgresNeeded))
         $configuredLabels = @(Get-TpmTransactionField -Object $Result -Name 'PostgresConfiguredLabels' -Default @())
         $autoCreate = @(Get-TpmTransactionField -Object $Result -Name 'PostgresAutoCreateProfiles' -Default @())
+        $awaitingFirstStart = @(Get-TpmTransactionField -Object $Result -Name 'PostgresAwaitingFirstStart' -Default @())
         [void]$lines.Add(('Setup needed for: {0}' -f (Format-TpmNameList -Names $neededLabels -Max 1000 -WhenEmpty 'none')))
         [void]$lines.Add(('Fields filled in for: {0}' -f (Format-TpmNameList -Names $configuredLabels -Max 1000 -WhenEmpty 'none')))
         if ($neededCount -gt 0) {
@@ -38482,7 +39222,7 @@ function Get-TpmLibraryHealthDetailBlocks {
             $databaseCheck = [string](Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseCheck' -Default 'NotNeeded')
             $databaseProblems = @(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseProblems' -Default @())
             $databaseSkipped = @(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseNotChecked' -Default @())
-            if ($databaseCheck -eq 'Done' -and $databaseProblems.Count -eq 0 -and $databaseSkipped.Count -eq 0) { [void]$lines.Add('Database check: every game database is there, opens with the game''s own settings and has tables.') }
+            if ($databaseCheck -eq 'Done' -and $databaseProblems.Count -eq 0 -and $databaseSkipped.Count -eq 0 -and $awaitingFirstStart.Count -eq 0) { [void]$lines.Add('Database check: every game database is there, opens with the game''s own settings and has tables.') }
             elseif ($databaseCheck -eq 'Done' -and $databaseProblems.Count -eq 0) { [void]$lines.Add('Database check: the databases that could be checked are there, open with the game''s own settings and have tables.') }
             elseif ($databaseCheck -eq 'Done') {
                 foreach ($databaseProblem in $databaseProblems) { [void]$lines.Add(('Problem - {0}' -f $databaseProblem)) }
@@ -38497,10 +39237,20 @@ function Get-TpmLibraryHealthDetailBlocks {
         }
         if ($autoCreate.Count -gt 0) {
             [void]$lines.Add(('Games with no starting database file: {0}' -f (Format-TpmNameList -Names $autoCreate -Max 1000)))
-            [void]$lines.Add('PostgreSQL setup cannot make the database of these games ready without it. Put the game''s pg_backup folder back, then run PostgreSQL setup (menu 11).')
+            if ($awaitingFirstStart.Count -gt 0) { [void]$lines.Add(('Profile ready; the database is created the first time the game starts: {0}' -f (Format-TpmNameList -Names $awaitingFirstStart -Max 1000))) }
+            [void]$lines.Add('These games make their own database (TeknoParrot''s "Automatically create Database" option). Nothing is wrong and nothing needs to be done. If you put the game''s pg_backup folder back, PostgreSQL setup (menu 11) can make it now.')
         }
     } else {
         [void]$lines.Add('Setup needs: Not reported - the game check was incomplete, so setup needs and filled-in counts are withheld.')
+    }
+    $internalDatabaseLabels = @(Get-TpmTransactionField -Object $Result -Name 'InternalDatabaseLabels' -Default @())
+    if ($internalDatabaseLabels.Count -gt 0) {
+        [void]$lines.Add(('Games using Internal storage (no PostgreSQL needed): {0}' -f (Format-TpmNameList -Names $internalDatabaseLabels -Max 1000)))
+        foreach ($choiceLine in (Get-TpmDatabaseChoiceLines)) { [void]$lines.Add($choiceLine) }
+    }
+    foreach ($sharedText in @(Get-TpmTransactionField -Object $Result -Name 'PostgresSharedDatabases' -Default @())) {
+        [void]$lines.Add(('Problem - {0}. Two games keep their saved progress in the same tables, so one database cannot hold both.' -f $sharedText))
+        [void]$lines.Add('Postgres setup (menu 11) gives each game its own database. It deletes nothing and keeps both sets of progress.')
     }
     [void]$blocks.Add(@{ Heading = 'PostgreSQL'; Lines = $lines.ToArray() })
 
@@ -38518,6 +39268,15 @@ function Get-TpmLibraryHealthDetailBlocks {
             }
         }
         [void]$blocks.Add(@{ Heading = 'Game startup files (firmware)'; Lines = $lines.ToArray() })
+    }
+
+    $gameTypeReport = Get-TpmTransactionField -Object $Result -Name 'GameTypes' -Default $null
+    if ($null -ne $gameTypeReport) { foreach ($gameTypeBlock in @(Get-TpmGameTypeDetailBlocks -Report $gameTypeReport)) { [void]$blocks.Add($gameTypeBlock) } }
+    $controlCoverage = Get-TpmTransactionField -Object $Result -Name 'ControlCoverage' -Default $null
+    if ($null -ne $controlCoverage -and [int]$controlCoverage.Total -gt 0) {
+        $coverageSummary = Get-TpmControlCoverageAuditSummary -Audit $controlCoverage
+        foreach ($coverageBlock in @($coverageSummary.Blocks)) { [void]$blocks.Add(@{ Heading = ('Controls: ' + $coverageBlock.Heading); Lines = @($coverageBlock.Lines) }) }
+        [void]$blocks.Add(@{ Heading = 'Controls: what this means'; Lines = @($coverageSummary.Note) })
     }
 
     $lines = New-Object System.Collections.Generic.List[string]
@@ -38839,6 +39598,122 @@ function Get-DatEntryForZipName {
     return $primary
 }
 
+# The profile codes the Eggman list names for one game folder (exact name match): the first profile, then the second one (for a
+# Lindbergh game the ElfLdr2 profile that replaces the retired Lindbergh loader; for Raiden III, Raiden IV and Densha de GO the other
+# profile of the same files). Only safe names are returned, resolved the way registration resolves them. Empty when the list does not
+# know the folder.
+function Get-TpmDatNamedProfileCodes {
+    param([string]$FolderKey, [hashtable]$DatIndex, [string]$GameProfilesDir = '', [System.Collections.Generic.HashSet[string]]$ProfileSet = $null)
+    if (-not $DatIndex -or $DatIndex.Count -eq 0) { return @() }
+    $entry = Get-DatEntryForZipName -RawZipName $FolderKey -DatIndex $DatIndex
+    if ($null -eq $entry) { return @() }
+    $codes = New-Object System.Collections.Generic.List[string]
+    foreach ($propertyName in @('ProfileCode', 'ProfileCode2')) {
+        $property = $entry.PSObject.Properties[$propertyName]
+        if ($null -eq $property -or $null -eq $property.Value) { continue }
+        $code = ([string]$property.Value).Trim()
+        if ($code -notmatch '^[\w-]+$') { continue }
+        if ($GameProfilesDir) { $code = Resolve-ProfileCode $code $GameProfilesDir $ProfileSet }
+        if (-not $codes.Contains($code)) { [void]$codes.Add($code) }
+    }
+    return $codes.ToArray()
+}
+
+# The file types the TeknoParrot profiles name for their game file (".exec", ".chd", ".1" and so on), read from the executable
+# index, so game discovery needs no change when a new game uses a new kind of file.
+function Get-TpmProfileFileExtensions {
+    param([hashtable]$ProfileIndex = $null)
+    $extensions = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    if ($null -ne $ProfileIndex) {
+        foreach ($name in $ProfileIndex.Keys) {
+            $extension = ''
+            try { $extension = [System.IO.Path]::GetExtension([string]$name) } catch { $extension = '' }
+            if ($extension -and $extension.Length -gt 1) { [void]$extensions.Add($extension.ToLowerInvariant()) }
+        }
+    }
+    return @($extensions)
+}
+
+# Registers the SECOND profile the Eggman list names for a game folder (GameProfile2), once the folder's first profile was registered
+# or found, but only when TeknoParrot has retired the first profile (IsDeprecated): then a Lindbergh game got only the retired Lindbergh
+# profile and never its ElfLdr2 one. For other games the meaning of a second profile is not documented, so none is written. The game
+# file is one of the file names the second profile itself lists (or, when it lists none, the file the list names); when neither is in
+# the folder nothing is guessed and the log says so.
+function Register-TpmDatSecondProfiles {
+    param(
+        [Parameter(Mandatory)]$Registered, [Parameter(Mandatory)]$Already, [Parameter(Mandatory)][hashtable]$SeenCodes, [Parameter(Mandatory)][hashtable]$ClaimedBy,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ExeFiles, [Parameter(Mandatory)][string]$InstallBase,
+        [Parameter(Mandatory)][hashtable]$DatIndex, [Parameter(Mandatory)][string]$GameProfilesDir,
+        [System.Collections.Generic.HashSet[string]]$ProfileSet = $null, [Parameter(Mandatory)][string]$UserProfilesDir,
+        [bool]$DryRun = $false, [Parameter(Mandatory)]$MutationRecords, $BackupState = $null
+    )
+    $folderNames = New-Object System.Collections.Generic.List[string]
+    foreach ($exeFile in $ExeFiles) {
+        $relative = ([string]$exeFile.FullName).Substring($InstallBase.Length).TrimStart('\')
+        $folderName = ($relative -split '\\')[0]
+        if ($folderName -and -not $folderNames.Contains($folderName)) { [void]$folderNames.Add($folderName) }
+    }
+    foreach ($folderName in $folderNames) {
+        if (Test-TpmRegistrationLedgerStopped) { break }
+        $folderKey = $folderName -replace '\.(teknoparrot|parrot|game)$', ''
+        $codes = @(Get-TpmDatNamedProfileCodes -FolderKey $folderKey -DatIndex $DatIndex -GameProfilesDir $GameProfilesDir -ProfileSet $ProfileSet)
+        if ($codes.Count -lt 2) { continue }
+        $first = [string]$codes[0]
+        $second = [string]$codes[1]
+        if ($second -ieq $first -or -not $SeenCodes.ContainsKey($first) -or $SeenCodes.ContainsKey($second)) { continue }
+        if ([string]$ClaimedBy[$first] -ine $folderName) { continue }
+        $firstTemplate = Join-Path $GameProfilesDir ($first + '.xml')
+        $retired = $false
+        try {
+            $retiredNode = (Read-Xml $firstTemplate).GameProfile.SelectSingleNode('IsDeprecated')
+            $retired = ($null -ne $retiredNode -and $retiredNode.InnerText.Trim() -ieq 'true')
+        } catch { $retired = $false }
+        if (-not $retired) { continue }
+        $templatePath = Join-Path $GameProfilesDir ($second + '.xml')
+        if (-not (Test-Path -LiteralPath $templatePath -PathType Leaf)) { Write-Log ("DatIndex (second profile): no GameProfiles template for '{0}' -- folder {1}" -f $second, $folderKey); continue }
+        $folderFull = Join-Path $InstallBase $folderName
+        $inFolder = @($ExeFiles | Where-Object { ([string]$_.FullName).StartsWith($folderFull + '\', [System.StringComparison]::OrdinalIgnoreCase) })
+        $names = @((Get-TpmGameFileSet -ExecutableName ([string](Get-PrimaryExecutableName $templatePath))).Choices)
+        $gameFile = ''
+        if ($names.Count -gt 0) {
+            foreach ($name in $names) {
+                $hit = @($inFolder | Where-Object { $_.Name -ieq $name } | Sort-Object { ([string]$_.FullName).Length } | Select-Object -First 1)
+                if ($hit.Count -gt 0) { $gameFile = [string]$hit[0].FullName; break }
+            }
+        } else {
+            $datEntry = Get-DatEntryForZipName -RawZipName $folderKey -DatIndex $DatIndex
+            $relativeExe = if ($null -ne $datEntry) { ([string]$datEntry.Executable).Trim().TrimStart('\', '/') } else { '' }
+            if ($relativeExe) {
+                $candidate = Join-Path $folderFull $relativeExe
+                if ((Test-PathInside $candidate $folderFull) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { $gameFile = $candidate }
+            }
+        }
+        if (-not $gameFile) { Write-Log ("DatIndex (second profile): {0} was left alone because none of its game files is in folder {1}" -f $second, $folderKey); continue }
+        $SeenCodes[$second] = $true
+        $ClaimedBy[$second] = $folderName
+        $userProfile = Join-Path $UserProfilesDir ($second + '.xml')
+        if (Test-Path -LiteralPath $userProfile) {
+            if ($Already -notcontains $second) { [void]$Already.Add($second) }
+            Backfill-SecondaryExecutablePath $userProfile $DryRun -RegistrationState $MutationRecords -BackupState $BackupState -UserProfilesDir $UserProfilesDir -Folder $folderName
+            continue
+        }
+        $writeAttempted = $false; $ledgerMapping = $null; $preWriteState = $null
+        try {
+            $ledgerMapping = Start-TpmRegistrationMapping -Folder $folderName -Code $second -Match 'dat-second-profile' -IntendedPath $gameFile -TemplatePath $templatePath -DryRun $DryRun
+            Set-TpmRegistrationGamePath -TemplatePath $templatePath -ExePath $gameFile -UserProfile $userProfile -DryRun $DryRun -BackupState $BackupState -UserProfilesDir $UserProfilesDir -MutationRecords $MutationRecords -PreWriteState ([ref]$preWriteState) -WriteAttempted ([ref]$writeAttempted)
+            Complete-TpmRegistrationMapping -MappingId $ledgerMapping -Outcome VERIFIED
+            [void]$Registered.Add([pscustomobject]@{ Code = $second; GamePath = $gameFile; DatMatch = $true; SecondProfile = $true })
+            Write-Log "Registered (dat/second profile) $second -> $gameFile"
+        } catch {
+            $saveFailure = Resolve-TpmRegistrationSaveFailure -WriteAttempted $writeAttempted -PreState $preWriteState -Message $_.Exception.Message
+            Complete-TpmRegistrationMapping -MappingId $ledgerMapping -Outcome FAILED -WriteAttempted $saveFailure.WriteAttempted -Reason $saveFailure.Reason
+            if ($Registered.Code -notcontains $second) { [void]$MutationRecords.Failures.Add([pscustomobject]@{ Code = $second; WriteAttempted = $saveFailure.WriteAttempted; Reason = 'REGISTRATION_NOT_VERIFIED' }) }
+            Write-Host "  FAILED to register $second : $_" -ForegroundColor Red
+            Write-Log "Register (dat second profile) FAILED $second -- $_"
+        }
+    }
+}
+
 # The names one ZIP claims for its NEW folder in a run. Two ZIPs of the same game (same profile code) must not both create
 # a folder. Two games that only read the same after the year and tags are removed (other hardware or version) each have
 # their own profile code, so only the profile code is claimed when the ZIP name picks out exactly one of them.
@@ -38852,7 +39727,7 @@ function Get-TpmAutoSyncClaimKeys {
         if ($null -ne $alternatesProperty -and $null -ne $alternatesProperty.Value -and $alternatesProperty.Value.Count -gt 0) {
             $entry = Get-DatEntryForZipName -RawZipName $RawZipName -DatIndex $DatIndex
             $baseName = Get-TpmZipBaseName $RawZipName
-            if ($entry -and [string]$entry.OriginalName -ieq $baseName -and [string]$entry.ProfileCode -match '^[\w]+$') {
+            if ($entry -and [string]$entry.OriginalName -ieq $baseName -and [string]$entry.ProfileCode -match '^[\w-]+$') {
                 return @([string]$entry.ProfileCode, (Get-NormalizedGameKey ([string]$entry.ProfileCode)))
             }
         }
@@ -38880,7 +39755,7 @@ function Get-TpmExtractedGameFolderCandidateKeys {
     }
 
     $datEntry = Get-DatEntryForZipName -RawZipName $RawZipName -DatIndex $DatIndex
-    if ($datEntry -and $datEntry.ProfileCode -and $datEntry.ProfileCode -match '^[\w]+$') {
+    if ($datEntry -and $datEntry.ProfileCode -and $datEntry.ProfileCode -match '^[\w-]+$') {
         $profileCode = [string]$datEntry.ProfileCode
         foreach ($key in @($profileCode, (Get-NormalizedGameKey $profileCode))) {
             if (-not [string]::IsNullOrWhiteSpace($key) -and -not $candidateKeys.Contains($key)) { [void]$candidateKeys.Add($key) }
@@ -39055,7 +39930,7 @@ function Resolve-RegisteredGameFolder {
     # Profile codes are purely alphanumeric; reject anything else before joining
     # into a path -- the dat is externally-sourced, untrusted input, same as the
     # ProfileCode check in Register-Games (see SECURITY.md).
-    if ($datEntry.ProfileCode -notmatch '^[\w]+$') { return $null }
+    if ($datEntry.ProfileCode -notmatch '^[\w-]+$') { return $null }
     $profilePath = Join-Path $userProfilesDir "$($datEntry.ProfileCode).xml"
     if (-not (Test-Path -LiteralPath $profilePath)) { return $null }
     try {
@@ -39115,7 +39990,9 @@ $GpuIncompatibleGames = @{
         'abc', 'abcELF2', 'ActionDeka', 'BorderBreakScramble', 'ChronoRegalia', 'CSNEO', 'Drakons', 'FGO', 'FrenzyExpress',
         'GoldenTeeLive2011', 'GoldenTeeLive2012', 'GoldenTeeLive2013', 'GoldenTeeLive2014',
         'GoldenTeeLive2015', 'GoldenTeeLive2016', 'GoldenTeeLive2017', 'GoldenTeeLive2018',
-        'GoldenTeeLive2019', 'GoldenTeeLive2020', 'HydroThunder', 'IDZTP', 'IDZv2TP', 'LGJS', 'LGJSElf2', 'LGJ',
+        'GoldenTeeLive2019', 'GoldenTeeLive2020', 'GoldenTeeLive2021', 'GoldenTeeLive2022', 'GoldenTeeLive2023',
+        'GoldenTeeLive2025', 'GoldenTeeLive2026', 'GoldenTeePGATour2021', 'GoldenTeePGATour2022', 'GoldenTeePGATour2023',
+        'GoldenTeePGATour2025', 'GoldenTeePGATour2026', 'HydroThunder', 'IDZTP', 'IDZv2TP', 'LGJS', 'LGJSElf2', 'LGJ',
         'SegaOlympic2016', 'SegaOlympic2020', 'SoulReverse', 'MIB', 'OffroadThunder', 'OCCPinball',
         'PowerPuttLive2012', 'PowerPuttLive2013', 'ProjectDiva', 'PullTheTrigger',
         'ShiningForceCross', 'ShiningForceCrossElysion', 'ShiningForceCrossRaid',
@@ -39201,6 +40078,65 @@ $EmulatorBiosRequirements = @{
         SourceZipPattern = '^\[EMU\] Play! working arcadedefs'
         FilesFromProfile = @{ Element = 'ExecutableName'; RelativeDir = 'arcadedefs'; FileSuffix = '.arcadedef' }
     }
+    # System 11 (type TeknoS11, 8 boards). Its games need no startup file. Optional: saved flash/EEPROM files for a game, in
+    # TeknoS11\state\<game>\cabinet-1, from the player's own "[NVRAM] TeknoS11 preinstalled game files for System 11" set (150 of the
+    # 230 profiles have files in it; the other 80 do not). Games start without them, so they are never reported as missing; the
+    # player is asked (Invoke-TpmS11PreinstallOffer) and no existing file is ever replaced.
+    'TeknoS11' = @{
+        Label            = 'System 11 saved game files'
+        EmulatorFolders  = @('TeknoS11')
+        Preinstall       = @{ SourceZipPattern = '^\[NVRAM\] TeknoS11 preinstalled game files'; StateDir = 'TeknoS11\state'; CabinetDir = 'cabinet-1' }
+    }
+    # The other game types: no startup file is known for them. The row says which emulator folder they run from, so a missing
+    # folder is reported, and a type that is not in this table at all is reported as unknown. A type with no EmulatorFolders is
+    # one whose folder is not known (new, no evidence yet): it is known but not checked. The emulator folder is looked for on
+    # disk (tpcache.json is not used: it has no entry for 17 types and says "not installed" for all). Dolphin runs from
+    # CrediarDolphin and TeknoMacaw runs from the TeknoParrot folder itself. A row with no EmulatorFolders is not checked.
+    'Dolphin'      = @{ EmulatorFolders = @('CrediarDolphin') }
+    'ElfLdr2'      = @{ EmulatorFolders = @('ElfLdr2') }
+    'Lindbergh'    = @{ }    # deprecated: its games moved to ElfLdr2, so no folder is expected for it
+    'SegaTools'    = @{ }    # no install folder of its own has been seen; not checked until there is evidence
+    'Tekno3DO'     = @{ EmulatorFolders = @('Tekno3DO') }
+    'TeknoAGX'     = @{ EmulatorFolders = @('TeknoAGX') }
+    'TeknoAir'     = @{ EmulatorFolders = @('TeknoAir') }
+    'TeknoCobra'   = @{ EmulatorFolders = @('TeknoCobra') }
+    'TeknoCoJag'   = @{ EmulatorFolders = @('TeknoCoJag') }
+    'TeknoCPS'     = @{ EmulatorFolders = @('TeknoCPS') }
+    'TeknoEagle'   = @{ EmulatorFolders = @('TeknoEagle') }
+    'TeknoFL'      = @{ EmulatorFolders = @('TeknoFL') }
+    'TeknoG3D'     = @{ EmulatorFolders = @('TeknoG3D') }
+    'TeknoG4'      = @{ EmulatorFolders = @('TeknoG4') }
+    'TeknoGClub'   = @{ EmulatorFolders = @('TeknoGClub') }
+    'TeknoGRE'     = @{ EmulatorFolders = @('TeknoGRE') }
+    'TeknoHDrive'  = @{ EmulatorFolders = @('TeknoHDrive') }
+    'TeknoHNG64'   = @{ EmulatorFolders = @('TeknoHNG64') }
+    'TeknoHornet'  = @{ EmulatorFolders = @('TeknoHornet') }
+    'TeknoM2'      = @{ EmulatorFolders = @('TeknoM2') }
+    'TeknoMacaw'   = @{ EmulatorFolders = @('TeknoParrot') }
+    'TeknoMagic'   = @{ EmulatorFolders = @('TeknoMagic') }
+    'TeknoModel1'  = @{ EmulatorFolders = @('TeknoModel1') }
+    'TeknoModel2'  = @{ EmulatorFolders = @('TeknoModel2') }
+    'TeknoModel3'  = @{ EmulatorFolders = @('TeknoModel3') }
+    'TeknoMVS'     = @{ EmulatorFolders = @('TeknoMVS') }
+    'TeknoNaomi'   = @{ EmulatorFolders = @('TeknoNaomi') }
+    'TeknoParrot'  = @{ EmulatorFolders = @('TeknoParrot') }
+    'TeknoPNet'    = @{ EmulatorFolders = @('TeknoPNet') }
+    'TeknoPsikyo'  = @{ EmulatorFolders = @('TeknoPsikyo') }
+    'TeknoRender0' = @{ }
+    'TeknoS21'     = @{ EmulatorFolders = @('TeknoS21') }
+    'TeknoS22'     = @{ EmulatorFolders = @('TeknoS22') }
+    'TeknoS23'     = @{ EmulatorFolders = @('TeknoS23') }
+    'TeknoSS32'    = @{ EmulatorFolders = @('TeknoSS32') }
+    'TeknoSTV'     = @{ EmulatorFolders = @('TeknoSTV') }
+    'TeknoTJC'     = @{ EmulatorFolders = @('TeknoTJC') }
+    'TeknoTPJC'    = @{ EmulatorFolders = @('TeknoTPJC') }
+    'TeknoTZ'      = @{ EmulatorFolders = @('TeknoTZ') }
+    'TeknoTZero'   = @{ EmulatorFolders = @('TeknoTZero') }
+    'TeknoVegas'   = @{ EmulatorFolders = @('TeknoVegas') }
+    'TeknoViper'   = @{ EmulatorFolders = @('TeknoViper') }
+    'TeknoVP'      = @{ EmulatorFolders = @('TeknoVP') }
+    'TeknoVUnit'   = @{ EmulatorFolders = @('TeknoVUnit') }
+    'TeknoZeus'    = @{ EmulatorFolders = @('TeknoZeus') }
 }
 
 # The table above, or an empty table when a caller (a test) has not defined it.
@@ -39224,6 +40160,13 @@ function Get-TpmPrerequisiteFileSpecs {
         }
     }
     return $specs.ToArray()
+}
+
+# True when a table entry names startup files (fixed files, one file per game, or firmware the emulator unpacks). The other
+# entries only say where the emulator runs from, or carry optional saved data, and are never reported as missing files.
+function Test-TpmPrerequisiteNeedsFiles {
+    param([Parameter(Mandatory)]$Requirement)
+    return ($Requirement.Contains('Files') -or $Requirement.Contains('RequiredFiles') -or $Requirement.Contains('FilesFromProfile') -or $Requirement.Contains('InstallVia'))
 }
 
 # The emulator folder under a TeknoParrot root, or $null when that emulator is not installed there.
@@ -39351,7 +40294,7 @@ function Get-TpmMissingPrerequisites {
     if ($table.Count -eq 0) { return @() }
     $map = Get-TpmEmulatorGameMap -Profiles $Profiles -ProgressLabel 'Game files profile scan'
     foreach ($emuType in @($map.Keys | Sort-Object)) {
-        if (-not $table.ContainsKey($emuType)) { continue }
+        if (-not $table.ContainsKey($emuType) -or -not (Test-TpmPrerequisiteNeedsFiles -Requirement $table[$emuType])) { continue }
         # An emulator whose folder is not there yet cannot be checked; say so instead of letting it read as OK.
         if ($null -ne $NotChecked -and -not (Resolve-TpmPrerequisiteEmulatorDir -EmulatorType $emuType -Requirement $table[$emuType] -TeknoParrotRoot $TeknoParrotRoot)) { [void]$NotChecked.Add($emuType); continue }
         $entry = Get-TpmPrerequisiteWarning -EmulatorType $emuType -Requirement $table[$emuType] -TeknoParrotRoot $TeknoParrotRoot -AffectedGames @($map[$emuType]) -Profiles $Profiles
@@ -39371,7 +40314,7 @@ function Get-TpmGameNeedsLine {
         if ($doc.GameProfile) {
             $emulatorNode = $doc.GameProfile.SelectSingleNode('EmulatorType')
             $table = Get-TpmPrerequisiteTable
-            if ($emulatorNode -and $table.ContainsKey($emulatorNode.InnerText.Trim())) {
+            if ($emulatorNode -and $table.ContainsKey($emulatorNode.InnerText.Trim()) -and (Test-TpmPrerequisiteNeedsFiles -Requirement $table[$emulatorNode.InnerText.Trim()])) {
                 $requirement = $table[$emulatorNode.InnerText.Trim()]
                 $count = @(Get-TpmPrerequisiteFileSpecs -Requirement $requirement).Count
                 $label = if ($requirement.Contains('Label')) { [string]$requirement['Label'] } else { 'startup files' }
@@ -40110,8 +41053,84 @@ function Get-TpmPrerequisiteScreenLines {
     return [pscustomobject]@{ Heading = ('{0} IS MISSING' -f $label.ToUpperInvariant()); Plain = $plain.ToArray(); Details = $details.ToArray() }
 }
 
-# Shows each finding, and (Interactive only) offers the copy, the details and the Open folder button.
-# Never prompts when Interactive is not set. Returns what was shown and what was copied.
+# Asks ONCE for the player's Supplementary game collection folder when no folder that works is saved, and saves the answer
+# (the same saved setting the AutoSync step uses), so it is never asked again. Returns the folder, or '' when nothing was asked or
+# the player skipped. A skip is only remembered for this run. Nothing is downloaded and nothing is changed by this question.
+function Request-TpmSupplementaryFolder {
+    $saved = [string]$script:zipSourceSupplementary
+    if (-not [string]::IsNullOrWhiteSpace($saved) -and (Test-Path -LiteralPath $saved -PathType Container)) { return '' }
+    if ($script:TpmSupplementaryFolderAsked) { return '' }
+    $script:TpmSupplementaryFolderAsked = $true
+    Write-Host ''
+    Write-Host '  WHERE ARE YOUR STARTUP FILES?' -ForegroundColor Cyan
+    Write-Host '  ----------------------------------------------------------' -ForegroundColor DarkGray
+    if (-not [string]::IsNullOrWhiteSpace($saved)) { Write-TpmText -Text ('Your saved Supplementary folder was not found: {0}' -f $saved) -Color Yellow -Indent 2 }
+    Write-TpmText -Text 'Some games need startup files (firmware) that TeknoParrot Manager did not find in your saved folders.' -Color DarkCyan -Indent 2
+    Write-TpmText -Text 'If you have your own Supplementary game collection, choose that folder now. TeknoParrot Manager looks through it, checks every file against the list of known files, and asks before it installs anything. It never downloads anything.' -Color DarkCyan -Indent 2
+    Write-TpmText -Text 'The folder is saved, so you are not asked again. No folder? Press Enter to skip.' -Color DarkCyan -Indent 2
+    $answer = ([string](Read-PathWithBrowse -Prompt '  Supplementary folder (or press Enter to skip)' -Mode Folder)).Trim().Trim('"')
+    if ([string]::IsNullOrWhiteSpace($answer)) {
+        Write-Host '  Skipped. Nothing was changed.' -ForegroundColor DarkGray
+        Write-Log 'Prerequisites: no Supplementary folder chosen.'
+        return ''
+    }
+    if (-not (Test-Path -LiteralPath $answer -PathType Container)) {
+        Write-Host '  That folder was not found, so it was skipped. Nothing was changed.' -ForegroundColor Yellow
+        Write-Log ('Prerequisites: the Supplementary folder was not found at {0}; skipped.' -f $answer)
+        return ''
+    }
+    $script:zipSourceSupplementary = $answer
+    Write-Log ('Config: supplementary ZIP source set to {0} (asked for startup files).' -f $answer)
+    if (-not (Save-Config)) {
+        Write-Host '  The folder could not be saved, so TeknoParrot Manager may ask again' -ForegroundColor Yellow
+        Write-Host '  next time.' -ForegroundColor Yellow
+    }
+    return $answer
+}
+
+# The per-package report lines for one finding: which folders were searched, then what was found, what is missing (exact names and
+# where each belongs) and what cannot be checked. With an Install result it reports what happened instead: installed, already
+# matching, kept (a different file of the player's), invalid (not the file the DAT lists) and not finished.
+function Get-TpmPrerequisiteReportLines {
+    param([Parameter(Mandatory)]$Warning, [Parameter(Mandatory)]$Plan, [string[]]$SearchFolders = @(), $Install = $null)
+    $lines = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $Install) {
+        $searched = @($SearchFolders | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique | ForEach-Object { if (Test-Path -LiteralPath $_ -PathType Container) { [string]$_ } else { ('{0} (folder not found)' -f $_) } })
+        [void]$lines.Add($(if ($searched.Count -gt 0) { 'Folders searched: ' + ($searched -join '; ') } else { 'Folders searched: none. No collection folder is saved.' }))
+        $items = @($Plan.Items)
+        $ready = @($items | Where-Object { $_.Installable -and -not $_.WrongExisting } | ForEach-Object { [string]$_.Name })
+        $differs = @($items | Where-Object { $_.Installable -and $_.WrongExisting } | ForEach-Object { [string]$_.Name })
+        $takenNames = @($items | ForEach-Object { ([string]$_.Name).ToLowerInvariant() }) + @($Warning.MissingFiles | ForEach-Object { ([string]$_).ToLowerInvariant() })
+        $inPlace = @(Get-TpmPrerequisiteFileSpecs -Requirement $Warning.Requirement | Where-Object { $takenNames -notcontains $_.Name.ToLowerInvariant() } | ForEach-Object { [string]$_.Name })
+        if ($ready.Count -gt 0) { [void]$lines.Add(('Found in your collection, ready to install: {0}' -f ($ready -join ', '))) }
+        if ($differs.Count -gt 0) { [void]$lines.Add(('Found in your collection, but a different file of yours is already in place: {0}' -f ($differs -join ', '))) }
+        if ($inPlace.Count -gt 0) { [void]$lines.Add(('Already in place: {0}' -f ($inPlace -join ', '))) }
+        foreach ($item in @($items | Where-Object { $_.Source -eq 'None' })) {
+            $where = if ($Warning.Requirement.Contains('InstallVia')) { [string]$item.Destination } else { Split-Path -Parent ([string]$item.Destination) }
+            [void]$lines.Add(('Missing: {0} (not found in those folders; goes in {1})' -f $item.Name, $where))
+        }
+        foreach ($item in @($items | Where-Object { $_.Source -ne 'None' -and -not $_.Installable })) {
+            [void]$lines.Add(('Cannot be checked: {0} ({1})' -f $item.Name, $item.Problem))
+        }
+    } else {
+        $done = @(@($Install.Installed) + @($Install.Replaced) | Where-Object { $_ })
+        $rows = @(
+            @('Installed', $done), @('Already matching', @($Install.AlreadyPresent)),
+            @('Kept (your own file differs)', @($Install.KeptExisting)),
+            @('Invalid (not the file the list of known files describes)', @($Install.Refused)),
+            @('Not finished', @($Install.Failed))
+        )
+        foreach ($row in $rows) { if (@($row[1]).Count -gt 0) { [void]$lines.Add(('{0}: {1}' -f $row[0], (@($row[1]) -join ', '))) } }
+        if ($Install.BackupFolder) { [void]$lines.Add(('Backup of any file that was replaced: {0}' -f $Install.BackupFolder)) }
+    }
+    return @($lines.ToArray())
+}
+
+# Shows each finding, and (Interactive only) offers the install, the details and the Open folder button.
+# Never prompts when Interactive is not set. Interactive: when a package is not found and no collection folder that works is saved,
+# the player is asked ONCE for the Supplementary folder (see Request-TpmSupplementaryFolder) and the search runs again. One Y then
+# installs everything that was found and checked; only replacing a different file of the player's is asked separately (with a backup).
+# Returns what was shown and what was copied.
 function Invoke-TpmPrerequisiteReview {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Warnings,
@@ -40123,56 +41142,87 @@ function Invoke-TpmPrerequisiteReview {
         [switch]$Interactive,
         [scriptblock]$OtherRootsProvider = $null
     )
-    $outcomes = New-Object System.Collections.Generic.List[object]
     $reviewable = @($Warnings | Where-Object { $_ -and $_.PSObject.Properties['MissingItems'] })
     $datRoms = $null
     if ($reviewable.Count -gt 0) {
         $datRoms = Get-TpmEmuDatRomSets -EggmanDatZip $EggmanDatZip -DatFilePath $DatFilePath -SupplementaryDatPath $SupplementaryDatPath
         if (-not $datRoms.Available) { Write-Log 'Prerequisites: no DAT list with [EMU] sets is available; found files cannot be checked, so none will be copied.' }
     }
+    $makePlan = {
+        param($Finding)
+        if ($Finding.PSObject.Properties['MissingItems']) {
+            return (Get-TpmPrerequisiteFixPlan -Warning $Finding -SearchFolders $SearchFolders -DatRoms $datRoms -TeknoParrotRoot $TpRoot -OtherRootsProvider $OtherRootsProvider)
+        }
+        return $null
+    }
+    $outcomes = New-Object System.Collections.Generic.List[object]
     foreach ($warning in @($Warnings)) {
         if ($null -eq $warning) { continue }
-        $plan = $null
-        if ($warning.PSObject.Properties['MissingItems']) {
-            $plan = Get-TpmPrerequisiteFixPlan -Warning $warning -SearchFolders $SearchFolders -DatRoms $datRoms -TeknoParrotRoot $TpRoot -OtherRootsProvider $OtherRootsProvider
+        [void]$outcomes.Add([pscustomobject]@{ Warning = $warning; Plan = (& $makePlan $warning); Install = $null; CopiedEarlier = 0; Screen = $null })
+    }
+    if ($Interactive) {
+        $notFound = @($outcomes | Where-Object { $_.Plan -and $_.Warning.Requirement -and $_.Warning.Requirement.Contains('SourceZipPattern') -and @($_.Plan.Items | Where-Object { $_.Source -eq 'None' }).Count -gt 0 })
+        if ($notFound.Count -gt 0) {
+            $picked = Request-TpmSupplementaryFolder
+            if ($picked) {
+                $SearchFolders = @($picked) + @($SearchFolders)
+                foreach ($outcome in $outcomes) { $outcome.Plan = & $makePlan $outcome.Warning }
+            }
         }
+    }
+    foreach ($outcome in $outcomes) {
+        $warning = $outcome.Warning
+        $plan = $outcome.Plan
         $screen = Get-TpmPrerequisiteScreenLines -Warning $warning -Plan $plan
+        $outcome.Screen = $screen
         foreach ($line in @($screen.Details)) { Write-Log ('Prerequisites: {0}: {1}' -f $warning.EmulatorType, $line) }
         Write-Host ''
         Write-Host ('  ' + $screen.Heading) -ForegroundColor Yellow
         Write-Host '  ----------------------------------------------------------' -ForegroundColor DarkGray
         foreach ($line in @($screen.Plain)) { Write-TpmText -Text $line -Color DarkCyan -Indent 2 }
-        $install = $null
-        $copiedEarlier = 0
-        if ($Interactive -and $null -ne $plan) {
-            $fixable = [bool]$plan.AllInstallable
-            $choices = if ($fixable) { @('Y', 'N', 'D', 'O') } else { @('N', 'D', 'O') }
-            $viaEmulator = ($warning.PSObject.Properties['Requirement'] -and $warning.Requirement -and $warning.Requirement.Contains('InstallVia'))
-            $prompt = if ($fixable -and $viaEmulator) { '  Y = install the firmware, N = not now, D = details, O = open the folder' } elseif ($fixable) { '  Y = copy the files, N = not now, D = details, O = open the folder' } else { '  N = continue, D = details, O = open the folder' }
-            do {
+        if ($null -ne $plan) {
+            foreach ($line in @(Get-TpmPrerequisiteReportLines -Warning $warning -Plan $plan -SearchFolders $SearchFolders)) {
+                Write-Log ('Prerequisites: {0}: {1}' -f $warning.EmulatorType, $line)
+                Write-TpmText -Text $line -Color DarkGray -Indent 4 -HangingIndent 2
+            }
+        }
+    }
+    $withPlan = @($outcomes | Where-Object { $null -ne $_.Plan })
+    if ($Interactive -and $withPlan.Count -gt 0) {
+        $fixable = @($withPlan | Where-Object { $_.Plan.AllInstallable })
+        $choices = if ($fixable.Count -gt 0) { @('Y', 'N', 'D', 'O') } else { @('N', 'D', 'O') }
+        $prompt = if ($fixable.Count -gt 0) { '  Y = install what was found, N = not now, D = details, O = open the folder' } else { '  N = continue, D = details, O = open the folder' }
+        do {
+            Write-Host ''
+            $choice = Read-TpmChoice -Prompt $prompt -Choices $choices -Default 'N'
+            if ($choice -eq 'D') {
+                Show-TpmDetailBlocks -Blocks @($withPlan | ForEach-Object { @{ Heading = [string]$_.Warning.Label; Lines = @($_.Screen.Details) } }) -Note 'Nothing was changed.'
+            } elseif ($choice -eq 'O') {
+                $folders = @($withPlan | ForEach-Object { Get-TpmPrerequisiteOpenFolder -Warning $_.Warning } | Where-Object { $_ } | Select-Object -Unique)
+                $opened = $null
+                foreach ($folder in $folders) { $opened = Open-TpmOwnedFolder -Path $folder -Label 'game startup files' }
+                if ($folders.Count -eq 0 -or $null -eq $opened -or -not $opened.Succeeded) { Write-Host '  The folder could not be opened. The folder is named under Details (D).' -ForegroundColor Yellow }
+            }
+        } while ($choice -in @('D', 'O'))
+        if ($choice -eq 'Y') {
+            foreach ($outcome in $fixable) {
+                $warning = $outcome.Warning
+                $viaEmulator = [bool]($warning.Requirement -and $warning.Requirement.Contains('InstallVia'))
                 Write-Host ''
-                $choice = Read-TpmChoice -Prompt $prompt -Choices $choices -Default 'N'
-                if ($choice -eq 'D') {
-                    Show-TpmDetailBlocks -Blocks @(@{ Heading = [string]$warning.Label; Lines = @($screen.Details) }) -Note 'Nothing was changed.'
-                } elseif ($choice -eq 'O') {
-                    $folder = Get-TpmPrerequisiteOpenFolder -Warning $warning
-                    $opened = if ($folder) { Open-TpmOwnedFolder -Path $folder -Label 'game startup files' } else { $null }
-                    if ($null -eq $opened -or -not $opened.Succeeded) { Write-Host '  The folder could not be opened. The folder is named under Details (D).' -ForegroundColor Yellow }
-                }
-            } while ($choice -in @('D', 'O'))
-            if ($choice -eq 'Y') {
-                $install = Invoke-TpmPrerequisiteInstall -Plan $plan -TpRoot $TpRoot
+                Write-Host ('  {0}' -f [string]$warning.Label) -ForegroundColor Cyan
+                $install = Invoke-TpmPrerequisiteInstall -Plan $outcome.Plan -TpRoot $TpRoot
                 if (@($install.KeptExisting).Count -gt 0) {
                     Write-Host ''
                     Write-Host '  A different file with the same name is already in the folder.' -ForegroundColor Yellow
                     Write-Host '  TeknoParrot Manager can replace it. It saves a backup copy of your file first.' -ForegroundColor DarkCyan
                     if ((Read-TpmYesNo -Prompt '  Replace it? Y = replace, N = keep mine' -Default 'N') -eq 'Y') {
                         # Files the first pass already copied still count; the second pass only reports its own.
-                        $copiedEarlier = @($install.Installed).Count + @($install.Replaced).Count
-                        $install = Invoke-TpmPrerequisiteInstall -Plan $plan -TpRoot $TpRoot -ReplaceNames @($install.KeptExisting)
+                        $outcome.CopiedEarlier = @($install.Installed).Count + @($install.Replaced).Count
+                        $install = Invoke-TpmPrerequisiteInstall -Plan $outcome.Plan -TpRoot $TpRoot -ReplaceNames @($install.KeptExisting)
                     }
                 }
-                $copied = $copiedEarlier + @($install.Installed).Count + @($install.Replaced).Count
+                $outcome.Install = $install
+                $copied = $outcome.CopiedEarlier + @($install.Installed).Count + @($install.Replaced).Count
                 if ($viaEmulator -and $install.Complete -and $copied -gt 0) {
                     Write-Host '  Done. The firmware was installed and checked. These games can start now.' -ForegroundColor Green
                 } elseif ($viaEmulator -and -not $install.Complete) {
@@ -40194,13 +41244,549 @@ function Invoke-TpmPrerequisiteReview {
                     Write-Host ('  The files were not all copied. {0}' -f [string]$install.Summary) -ForegroundColor Yellow
                     Write-Host '  Next step: open View Log from the main menu to see what stopped it.' -ForegroundColor DarkCyan
                 }
+                foreach ($line in @(Get-TpmPrerequisiteReportLines -Warning $warning -Plan $outcome.Plan -SearchFolders $SearchFolders -Install $install)) {
+                    Write-Log ('Prerequisites: {0}: {1}' -f $warning.EmulatorType, $line)
+                    Write-TpmText -Text $line -Color DarkGray -Indent 4 -HangingIndent 2
+                }
             }
         }
-        [void]$outcomes.Add([pscustomobject]@{ Warning = $warning; Plan = $plan; Install = $install; CopiedEarlier = $copiedEarlier })
     }
     $installed = @($outcomes | Where-Object { $_.Install -and $_.Install.Complete -and ($_.CopiedEarlier + @($_.Install.Installed).Count + @($_.Install.Replaced).Count) -gt 0 })
     return [pscustomobject]@{ Reviewed = $outcomes.Count; FixedAny = ($installed.Count -gt 0); Outcomes = $outcomes.ToArray() }
 }
+
+# =============================================================================
+# GAME TYPES (module-ready section)
+# =============================================================================
+# BEGIN GameTypes. Everything down to END GameTypes belongs together and can move into its own module after 1.0.
+# The ONE table is $EmulatorBiosRequirements (above): game type -> emulator folder -> startup files, firmware or saved data -> where they
+# go -> how they are checked (Get-TpmPrerequisiteWarning) and installed (Invoke-TpmPrerequisiteInstall, Invoke-TpmS11PreinstallInstall).
+# This section adds: which game types are known, game files named as a set (System 11), the second game file found by a pattern (the
+# System 11 disc image), and the saved System 11 files. It uses only helpers defined elsewhere in this script: Read-Xml, Write-Log,
+# Get-ExeAlternatives, Get-TpmPrerequisiteTable, Resolve-TpmPrerequisiteEmulatorDir, Get-TpmEmulatorGameMap, Get-TpmOwnedLayout,
+# Get-TpmFullFolderPath, Test-TpmNoReparsePath, Test-PathInside, Test-TpmCps3UnsafeMemberName, Get-TpmCps3FreeBytes,
+# Get-TpmAutoSyncSha256, Invoke-TpmTransactionalFileBatch, Find-TpmPrerequisiteSourceZips, Format-TpmGameCount, New-TpmLibraryHealthRow.
+
+# A profile's ExecutableName is a list of alternatives ("a.elf;b.elf" or "a|b": any one will do) or, when it is only .zip names
+# separated by ";", a SET ("child.zip;parent.zip": the first is the game and the others must sit beside it). 25 real profiles are sets.
+function Get-TpmGameFileSet {
+    param([string]$ExecutableName)
+    $text = ([string]$ExecutableName).Trim()
+    $parts = @($text -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+    $isSet = ($parts.Count -ge 2 -and $text -notmatch '\|' -and @($parts | Where-Object { $_ -notmatch '\.zip$' }).Count -eq 0)
+    if ($isSet) { return [pscustomobject]@{ IsSet = $true; Choices = @($parts[0]); Partners = @($parts | Select-Object -Skip 1) } }
+    return [pscustomobject]@{ IsSet = $false; Choices = @(Get-ExeAlternatives $text); Partners = @() }
+}
+
+# The ZIPs of a set that are not beside the game file (an empty list when all are there, or when the name is not a set). When the file
+# given is not the set's own game ZIP (for example its parent ZIP), the game ZIP is what is missing.
+function Get-TpmMissingGameSetFiles {
+    param([string]$GamePath, [string]$ExecutableName)
+    $set = Get-TpmGameFileSet -ExecutableName $ExecutableName
+    if (-not $set.IsSet -or [string]::IsNullOrWhiteSpace($GamePath)) { return @() }
+    try { $folder = [System.IO.Path]::GetDirectoryName($GamePath.Trim()); $leaf = [System.IO.Path]::GetFileName($GamePath.Trim()) } catch { return @() }
+    if ([string]::IsNullOrEmpty($folder)) { return @() }
+    if (@($set.Choices | Where-Object { $_ -ieq $leaf }).Count -eq 0) { return @($set.Choices) }
+    return @($set.Partners | Where-Object { -not (Test-Path -LiteralPath ([System.IO.Path]::Combine($folder, $_)) -PathType Leaf -ErrorAction SilentlyContinue) })
+}
+
+# The second game file of a profile whose ExecutableName2 is a pattern (System 11: "*.chd", the game disc image). It is looked for beside
+# the first game file and in a folder there that is named after one of the game's files or after the game itself (the "game disc
+# directory"). Exactly one match is used; none, or several, return '' so nothing is guessed (the player picks the disc image).
+function Find-TpmSecondFileByPattern {
+    param([string]$PrimaryExePath, [string]$Pattern, [string]$ExecutableName = '', [string]$ProfileCode = '')
+    if ($Pattern -notmatch '^[\w*?. \-]+$') { return '' }
+    try { $folder = [System.IO.Path]::GetDirectoryName($PrimaryExePath) } catch { return '' }
+    if ([string]::IsNullOrEmpty($folder) -or -not (Test-Path -LiteralPath $folder -PathType Container -ErrorAction SilentlyContinue)) { return '' }
+    $folders = New-Object System.Collections.Generic.List[string]
+    $seenFolders = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    [void]$seenFolders.Add($folder)
+    [void]$folders.Add($folder)
+    $stems = @(@(Get-ExeAlternatives $ExecutableName | ForEach-Object { [System.IO.Path]::GetFileNameWithoutExtension($_) }) + @($ProfileCode) | Where-Object { $_ -match '^[\w. \-]+$' })
+    foreach ($stem in $stems) {
+        $sub = [System.IO.Path]::Combine($folder, $stem)
+        if ((Test-Path -LiteralPath $sub -PathType Container -ErrorAction SilentlyContinue) -and $seenFolders.Add($sub)) { [void]$folders.Add($sub) }
+    }
+    $found = New-Object System.Collections.Generic.List[string]
+    foreach ($candidateFolder in $folders) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $candidateFolder -Filter $Pattern -File -ErrorAction SilentlyContinue)) {
+            if (($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) { [void]$found.Add($file.FullName) }
+        }
+    }
+    if ($found.Count -eq 1) { return $found[0] }
+    return ''
+}
+
+# The Preinstall part of the System 11 table row, or $null when the table has none (a test that has not defined the table).
+function Get-TpmS11PreinstallSetting {
+    $table = Get-TpmPrerequisiteTable
+    if ($table.ContainsKey('TeknoS11') -and $table['TeknoS11'].Contains('Preinstall')) { return $table['TeknoS11']['Preinstall'] }
+    return $null
+}
+
+# <TeknoParrot root>\TeknoS11\state\<game>\cabinet-1, where System 11 keeps a game's saved flash and EEPROM files. '' without the table row.
+function Get-TpmS11SavedFilesDir {
+    param([Parameter(Mandatory)][string]$TeknoParrotRoot, [Parameter(Mandatory)][string]$Code)
+    $setting = Get-TpmS11PreinstallSetting
+    if ($null -eq $setting) { return '' }
+    return [System.IO.Path]::Combine($TeknoParrotRoot, [string]$setting['StateDir'], $Code, [string]$setting['CabinetDir'])
+}
+
+function Test-TpmS11SavedFilesPresent {
+    param([Parameter(Mandatory)][string]$TeknoParrotRoot, [Parameter(Mandatory)][string]$Code)
+    $folder = Get-TpmS11SavedFilesDir -TeknoParrotRoot $TeknoParrotRoot -Code $Code
+    if (-not $folder -or -not (Test-Path -LiteralPath $folder -PathType Container -ErrorAction SilentlyContinue)) { return $false }
+    return (@(Get-ChildItem -LiteralPath $folder -File -Force -ErrorAction SilentlyContinue).Count -gt 0)
+}
+
+# Read-only look at the registered profiles for the Library health check. One read per profile.
+#   Unknown          game types that are not in the table (one entry per type, with its games): flagged, never ignored
+#   NotAvailable     games the profile marks DevOnly (development only): TeknoParrot has not released them yet
+#   EmulatorMissing  games whose type is known but whose emulator folder is not in the TeknoParrot folder (looked for on disk)
+#   NeedsManualExe   games with no executable name, no setup file and no game path: the player must pick the game file
+#   S11Games / S11NoSavedFiles  System 11 games, and those with no saved files yet
+function Get-TpmGameTypeReport {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Profiles, [string]$TeknoParrotRoot = '')
+    $table = Get-TpmPrerequisiteTable
+    $unknown = @{}
+    $emulatorMissing = @{}
+    $folderChecked = @{}
+    $notAvailable = New-Object System.Collections.Generic.List[string]
+    $manualExe = New-Object System.Collections.Generic.List[string]
+    $s11NoSaved = New-Object System.Collections.Generic.List[string]
+    $s11Games = 0
+    $failed = 0
+    foreach ($pf in $Profiles) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile) { continue }
+            $profileNode = $doc.GameProfile
+            $code = [string]$pf.BaseName
+            $nameNode = $profileNode.SelectSingleNode('GameName')
+            $label = if ($nameNode -and -not [string]::IsNullOrWhiteSpace($nameNode.InnerText)) { $nameNode.InnerText.Trim() } else { $code }
+            $typeNode = $profileNode.SelectSingleNode('EmulatorType')
+            $type = if ($typeNode) { $typeNode.InnerText.Trim() } else { '' }
+            $devNode = $profileNode.SelectSingleNode('DevOnly')
+            $devOnly = [bool]($devNode -and $devNode.InnerText.Trim() -ieq 'true')
+            if ($table.Count -gt 0 -and $type) {
+                if (-not $table.ContainsKey($type)) {
+                    if (-not $unknown.ContainsKey($type)) { $unknown[$type] = New-Object System.Collections.Generic.List[string] }
+                    [void]$unknown[$type].Add($label)
+                    Write-Log ("GameTypes: {0} has the game type '{1}', which TeknoParrot Manager does not know." -f $code, $type)
+                } elseif ($devOnly) {
+                    [void]$notAvailable.Add($label)
+                    Write-Log ("GameTypes: {0} ({1}) is marked development only, so it is not available yet." -f $code, $type)
+                } elseif ($TeknoParrotRoot -and ($table[$type].Contains('EmulatorFolders') -or $type -ieq 'Pcsx2x6')) {
+                    if (-not $folderChecked.ContainsKey($type)) { $folderChecked[$type] = [bool](Resolve-TpmPrerequisiteEmulatorDir -EmulatorType $type -Requirement $table[$type] -TeknoParrotRoot $TeknoParrotRoot) }
+                    if (-not $folderChecked[$type]) {
+                        if (-not $emulatorMissing.ContainsKey($type)) { $emulatorMissing[$type] = New-Object System.Collections.Generic.List[string] }
+                        [void]$emulatorMissing[$type].Add($label)
+                    }
+                }
+            }
+            if ($devOnly) { continue }
+            $exeNode = $profileNode.SelectSingleNode('ExecutableName')
+            if ($TeknoParrotRoot -and (-not $exeNode -or [string]::IsNullOrWhiteSpace($exeNode.InnerText))) {
+                $pathNode = $profileNode.SelectSingleNode('GamePath')
+                $pathText = if ($pathNode) { $pathNode.InnerText.Trim() } else { '' }
+                $hasPath = ($pathText -and (Test-Path -LiteralPath $pathText -PathType Leaf -ErrorAction SilentlyContinue))
+                $hasSetup = Test-Path -LiteralPath (Join-Path (Join-Path $TeknoParrotRoot 'GameSetup') ($code + '.xml')) -PathType Leaf -ErrorAction SilentlyContinue
+                if (-not $hasPath -and -not $hasSetup) { [void]$manualExe.Add($label) }
+            }
+            if ($type -ieq 'TeknoS11') {
+                $s11Games++
+                if ($TeknoParrotRoot -and (Get-TpmS11SavedFilesDir -TeknoParrotRoot $TeknoParrotRoot -Code $code) -and -not (Test-TpmS11SavedFilesPresent -TeknoParrotRoot $TeknoParrotRoot -Code $code)) { [void]$s11NoSaved.Add($label) }
+            }
+        } catch {
+            $failed++
+            Write-Log ("GameTypes: could not read {0} -- {1}" -f $pf.Name, $_.Exception.Message)
+        }
+    }
+    return [pscustomobject]@{
+        Checked         = ($table.Count -gt 0)
+        Failed          = $failed
+        Unknown         = @($unknown.Keys | Sort-Object | ForEach-Object { [pscustomobject]@{ Type = [string]$_; Games = @($unknown[$_].ToArray()) } })
+        NotAvailable    = @($notAvailable.ToArray())
+        EmulatorMissing = @($emulatorMissing.Keys | Sort-Object | ForEach-Object { [pscustomobject]@{ Type = [string]$_; Games = @($emulatorMissing[$_].ToArray()) } })
+        NeedsManualExe  = @($manualExe.ToArray())
+        S11Games        = $s11Games
+        S11NoSavedFiles = @($s11NoSaved.ToArray())
+    }
+}
+
+# The Library health rows for a game type report: 'Game types', 'Game files' and 'System 11'. Short plain wording; the names are in the details.
+function Get-TpmGameTypeRows {
+    param([Parameter(Mandatory)]$Report)
+    $rows = New-Object System.Collections.Generic.List[object]
+    if (-not [bool]$Report.Checked) { return @() }
+    if ([int]$Report.Failed -gt 0) { return @(New-TpmLibraryHealthRow -Area 'Game types' -Text 'Could not check' -Color 'Yellow') }
+    $unknownCount = @($Report.Unknown | ForEach-Object { @($_.Games) }).Count
+    $missingCount = @($Report.EmulatorMissing | ForEach-Object { @($_.Games) }).Count
+    $notAvailableCount = @($Report.NotAvailable).Count
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($unknownCount -gt 0) { [void]$parts.Add(('{0} {1} a game type that TeknoParrot Manager does not know' -f (Format-TpmGameCount -Count $unknownCount), $(if ($unknownCount -eq 1) { 'has' } else { 'have' }))) }
+    if ($notAvailableCount -gt 0) { [void]$parts.Add(('{0} {1} not available yet' -f (Format-TpmGameCount -Count $notAvailableCount), $(if ($notAvailableCount -eq 1) { 'is' } else { 'are' }))) }
+    if ($missingCount -gt 0) { [void]$parts.Add(('the emulator for {0} is not in your TeknoParrot folder' -f (Format-TpmGameCount -Count $missingCount))) }
+    if ($parts.Count -gt 0) {
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game types' -Text ('Needs attention - {0}. Choose D for the list' -f ($parts -join '; ')) -Color 'Yellow'))
+    } else {
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game types' -Text 'OK' -Color 'Green'))
+    }
+    $manualCount = @($Report.NeedsManualExe).Count
+    if ($manualCount -gt 0) {
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game files' -Text ('Needs attention - {0} {1} you to pick the game file by hand. Choose D for the list' -f (Format-TpmGameCount -Count $manualCount), $(if ($manualCount -eq 1) { 'needs' } else { 'need' })) -Color 'Yellow'))
+    }
+    $noSavedCount = @($Report.S11NoSavedFiles).Count
+    if ($noSavedCount -gt 0) {
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'System 11' -Text ('Note - {0} of {1} System 11 {2} no saved setup files yet. If you already have the System 11 saved-files set, the main run can copy it' -f $noSavedCount, [int]$Report.S11Games, $(if ([int]$Report.S11Games -eq 1) { 'game has' } else { 'games have' })) -Color 'DarkGray'))
+    }
+    return $rows.ToArray()
+}
+
+# The detail block for the same report: every name, and what to do about it.
+function Get-TpmGameTypeDetailBlocks {
+    param([Parameter(Mandatory)]$Report)
+    if (-not [bool]$Report.Checked) { return @() }
+    $lines = New-Object System.Collections.Generic.List[string]
+    if ([int]$Report.Failed -gt 0) {
+        [void]$lines.Add(('Status: {0} game profile(s) could not be read, so this check is not complete. The log says why.' -f $Report.Failed))
+    }
+    foreach ($entry in @($Report.Unknown)) {
+        [void]$lines.Add(('Unknown game type {0}: {1}' -f $entry.Type, (Format-TpmNameList -Names @($entry.Games) -Max 1000)))
+    }
+    if (@($Report.Unknown).Count -gt 0) { [void]$lines.Add('TeknoParrot Manager does not know these types yet, so it cannot check their files. The games may still run.') }
+    if (@($Report.NotAvailable).Count -gt 0) {
+        [void]$lines.Add(('Not available yet: {0}' -f (Format-TpmNameList -Names @($Report.NotAvailable) -Max 1000)))
+        [void]$lines.Add('TeknoParrot lists these as development only, so they cannot be played yet.')
+    }
+    foreach ($entry in @($Report.EmulatorMissing)) {
+        [void]$lines.Add(('Emulator for type {0} is not in your TeknoParrot folder: {1}' -f $entry.Type, (Format-TpmNameList -Names @($entry.Games) -Max 1000)))
+    }
+    if (@($Report.NeedsManualExe).Count -gt 0) {
+        [void]$lines.Add(('Pick the game file by hand: {0}' -f (Format-TpmNameList -Names @($Report.NeedsManualExe) -Max 1000)))
+        [void]$lines.Add('Their profile names no game file and TeknoParrot has no setup file for them, so TeknoParrot Manager cannot find them. Set the game file in TeknoParrotUI.')
+    }
+    if (@($Report.S11NoSavedFiles).Count -gt 0) {
+        [void]$lines.Add(('System 11 games with no saved setup files: {0}' -f (Format-TpmNameList -Names @($Report.S11NoSavedFiles) -Max 1000)))
+        [void]$lines.Add('The saved-files set holds files for about two thirds of the System 11 games. A game it has no files for starts without them.')
+    }
+    if ($lines.Count -eq 0) { [void]$lines.Add('Every registered game has a known game type, and its emulator is in your TeknoParrot folder.') }
+    return @(@{ Heading = 'Game types'; Lines = $lines.ToArray() })
+}
+
+# --- System 11 saved files: copied from the player's own set, never replacing a file ---------------------------------------------------
+# The set ("[NVRAM] TeknoS11 preinstalled game files for System 11") holds TeknoS11\state\<game>\cabinet-1\<file> for 150 games. Its README
+# says to copy the state folder, "overwrite files at your own risk". TeknoParrot Manager only ADDS: a file that is already there is kept.
+# Nothing is downloaded and nothing is pointed to; the player's own ZIP (found in the collection folders) or a folder the player picks.
+
+# A chosen ZIP or folder: @{ Valid; Kind = Archive|Folder; Path; Error }. A folder may hold TeknoS11\state, or be the state folder.
+function Resolve-TpmS11PreinstallSource {
+    param([AllowEmptyString()][AllowNull()][string]$Path)
+    $result = [pscustomobject]@{ Valid = $false; Kind = ''; Path = ''; Error = '' }
+    $text = ([string]$Path).Trim().Trim('"')
+    if ([string]::IsNullOrWhiteSpace($text)) { $result.Error = 'No location was chosen.'; return $result }
+    try { $full = [System.IO.Path]::GetFullPath($text) } catch { $result.Error = 'That is not a valid path.'; return $result }
+    if (Test-Path -LiteralPath $full -PathType Leaf) {
+        if ([System.IO.Path]::GetExtension($full) -ine '.zip') { $result.Error = 'Choose a folder or a .zip archive.'; return $result }
+        $result.Valid = $true; $result.Kind = 'Archive'; $result.Path = $full
+        return $result
+    }
+    if (-not (Test-Path -LiteralPath $full -PathType Container)) { $result.Error = 'That location was not found.'; return $result }
+    $candidates = @((Join-Path $full 'TeknoS11\state'), (Join-Path $full 'state'))
+    if ((Split-Path -Leaf $full) -ieq 'state') { $candidates += $full }
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Container) { $result.Valid = $true; $result.Kind = 'Folder'; $result.Path = $candidate; return $result }
+    }
+    $result.Error = 'That folder has no state folder inside it.'
+    return $result
+}
+
+# Every <game>\cabinet-1\<file> of a source: @{ Code; Name; Length; EntryName; FilePath }. An unsafe or odd name is left out (and logged).
+function Get-TpmS11PreinstallMembers {
+    param([Parameter(Mandatory)]$Source)
+    $setting = Get-TpmS11PreinstallSetting
+    $cabinet = if ($setting) { [string]$setting['CabinetDir'] } else { 'cabinet-1' }
+    $stateRelative = if ($setting) { ([string]$setting['StateDir']).Replace('\', '/') } else { 'TeknoS11/state' }
+    $stateLeaf = $stateRelative.Split('/')[-1]
+    $statePrefix = $stateRelative.Substring(0, $stateRelative.Length - $stateLeaf.Length)
+    $pattern = '^(?:' + [regex]::Escape($statePrefix) + ')?' + [regex]::Escape($stateLeaf) + '/([^/]+)/' + [regex]::Escape($cabinet) + '/([^/]+)$'
+    $members = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $left = @{ Out = 0 }
+    $add = {
+        param([string]$Code, [string]$Name, [int64]$Length, [string]$EntryName, [string]$FilePath)
+        if ($Code -notmatch '^[A-Za-z0-9_\-]+$' -or $Name -notmatch '^[A-Za-z0-9_.\-]+$' -or -not $seen.Add($Code + '/' + $Name)) { $left.Out++; return }
+        [void]$members.Add([pscustomobject]@{ Code = $Code; Name = $Name; Length = $Length; EntryName = $EntryName; FilePath = $FilePath })
+    }
+    if ($Source.Kind -eq 'Archive') {
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($Source.Path)
+        try {
+            # get_Entries(): the property read hides a bad member name on Windows PowerShell 5.1.
+            foreach ($entry in $zip.get_Entries()) {
+                if ([string]::IsNullOrEmpty($entry.Name)) { continue }
+                $name = [string]$entry.FullName
+                if (Test-TpmCps3UnsafeMemberName -Name $name) { $left.Out++; continue }
+                $match = [regex]::Match($name, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                if (-not $match.Success) { continue }
+                & $add $match.Groups[1].Value $match.Groups[2].Value ([int64]$entry.Length) $name ''
+            }
+        } finally { $zip.Dispose() }
+    } else {
+        foreach ($codeDir in @(Get-ChildItem -LiteralPath $Source.Path -Directory -Force -ErrorAction Stop)) {
+            if (($codeDir.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { $left.Out++; continue }
+            $cabinetDir = Join-Path $codeDir.FullName $cabinet
+            if (-not (Test-Path -LiteralPath $cabinetDir -PathType Container)) { continue }
+            if (([System.IO.File]::GetAttributes($cabinetDir) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { $left.Out++; continue }
+            foreach ($file in @(Get-ChildItem -LiteralPath $cabinetDir -File -Force -ErrorAction Stop)) {
+                if (($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { $left.Out++; continue }
+                & $add $codeDir.Name $file.Name ([int64]$file.Length) '' $file.FullName
+            }
+        }
+    }
+    if ($left.Out -gt 0) { Write-Log ("System 11 saved files: {0} item(s) in the source were left out (odd or unsafe name, or a duplicate)." -f $left.Out) }
+    return $members.ToArray()
+}
+
+# Read-only plan: for each registered System 11 game, which saved files the source has and which are already in place.
+#   Items         one per file: Code, Name, Length, EntryName/FilePath, Destination, Exists
+#   NewGames      games that get at least one file
+#   NoFileGames   games the source holds no file for (said plainly: they start without)
+#   AlreadyHave   games whose files are all in place already
+function Get-TpmS11PreinstallPlan {
+    param([Parameter(Mandatory)][string]$SourcePath, [Parameter(Mandatory)][string]$TeknoParrotRoot, [Parameter(Mandatory)][string[]]$GameCodes)
+    $plan = [pscustomobject]@{ Valid = $false; Error = ''; Source = $null; Items = @(); NoFileGames = @(); AlreadyHave = @(); NewGames = @() }
+    $source = Resolve-TpmS11PreinstallSource -Path $SourcePath
+    if (-not $source.Valid) { $plan.Error = [string]$source.Error; return $plan }
+    try { $members = @(Get-TpmS11PreinstallMembers -Source $source) }
+    catch {
+        Write-Log ("System 11 saved files: the source could not be read -- {0}" -f $_.Exception.Message)
+        $plan.Error = 'The chosen location could not be read.'
+        return $plan
+    }
+    $items = New-Object System.Collections.Generic.List[object]
+    $noFile = New-Object System.Collections.Generic.List[string]
+    $already = New-Object System.Collections.Generic.List[string]
+    $newGames = New-Object System.Collections.Generic.List[string]
+    foreach ($code in @($GameCodes | Sort-Object -Unique)) {
+        $mine = @($members | Where-Object { $_.Code -ieq $code })
+        if ($mine.Count -eq 0) { [void]$noFile.Add($code); continue }
+        $folder = Get-TpmS11SavedFilesDir -TeknoParrotRoot $TeknoParrotRoot -Code $code
+        $anyNew = $false
+        foreach ($member in $mine) {
+            $destination = [System.IO.Path]::Combine($folder, $member.Name)
+            $exists = [bool](Test-Path -LiteralPath $destination -ErrorAction SilentlyContinue)
+            if (-not $exists) { $anyNew = $true }
+            [void]$items.Add([pscustomobject]@{ Code = $code; Name = $member.Name; Length = $member.Length; EntryName = $member.EntryName; FilePath = $member.FilePath; Destination = $destination; Exists = $exists })
+        }
+        if ($anyNew) { [void]$newGames.Add($code) } else { [void]$already.Add($code) }
+    }
+    $plan.Valid = $true
+    $plan.Source = $source
+    $plan.Items = $items.ToArray()
+    $plan.NoFileGames = $noFile.ToArray()
+    $plan.AlreadyHave = $already.ToArray()
+    $plan.NewGames = $newGames.ToArray()
+    return $plan
+}
+
+# Copies the files of a plan that are not in place yet. Every file is staged and its size checked, then all are added through the shared
+# file transaction (a recovery copy is kept and everything is put back if a step fails). An existing file is never replaced.
+function Invoke-TpmS11PreinstallInstall {
+    param([Parameter(Mandatory)]$Plan, [Parameter(Mandatory)][string]$TpRoot)
+    $installed = New-Object System.Collections.Generic.List[string]
+    $failed = New-Object System.Collections.Generic.List[string]
+    $kept = New-Object System.Collections.Generic.List[string]
+    $finish = {
+        param([string]$Outcome, [string]$Reason, [string]$Summary, $Transaction = $null)
+        try { Write-Log ("System 11 saved files: outcome={0} reason={1} installed={2} kept={3} failed={4}" -f $Outcome, $Reason, $installed.Count, $kept.Count, $failed.Count) } catch { }
+        return [pscustomobject]@{
+            Outcome = $Outcome; ReasonCode = $Reason; Summary = $Summary; Transaction = $Transaction
+            Installed = @($installed.ToArray()); Kept = @($kept.ToArray()); Failed = @($failed.ToArray())
+            Complete = ($Outcome -in @('SUCCEEDED', 'NO_OP') -and $failed.Count -eq 0)
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($TpRoot) -or -not (Test-Path -LiteralPath $TpRoot -PathType Container)) {
+        return (& $finish 'FAILED_BEFORE_MUTATION' 'TP_ROOT_INVALID' 'The TeknoParrot folder was not found. Nothing was changed.')
+    }
+    $tpFull = Get-TpmFullFolderPath -Path $TpRoot
+    if (-not (Test-TpmNoReparsePath -Path $tpFull)) {
+        return (& $finish 'FAILED_BEFORE_MUTATION' 'TP_ROOT_UNSAFE' 'The TeknoParrot folder path is not safe to write to. Nothing was changed.')
+    }
+    if (-not $Plan.Valid) { return (& $finish 'FAILED_BEFORE_MUTATION' 'SOURCE_UNUSABLE' ([string]$Plan.Error + ' Nothing was changed.')) }
+    foreach ($item in @($Plan.Items | Where-Object { $_.Exists })) { [void]$kept.Add(('{0}\{1}' -f $item.Code, $item.Name)) }
+    $todo = @($Plan.Items | Where-Object { -not $_.Exists })
+    if ($todo.Count -eq 0) { return (& $finish 'NO_OP' 'NO_CHANGES_NEEDED' 'Every saved file was already in place. Nothing was changed.') }
+    foreach ($item in $todo) {
+        $destination = [System.IO.Path]::GetFullPath([string]$item.Destination)
+        if (-not (Test-PathInside -child $destination -parent $tpFull) -or -not (Test-TpmNoReparsePath -Path $destination)) {
+            return (& $finish 'FAILED_BEFORE_MUTATION' 'DESTINATION_UNSAFE' 'A saved-files folder is not safe to write to. Nothing was changed.')
+        }
+    }
+    [int64]$needed = 64MB
+    foreach ($item in $todo) { $needed += 2 * [int64]$item.Length }
+    $free = Get-TpmCps3FreeBytes -Path $tpFull
+    if ($null -ne $free -and $free -lt $needed) {
+        return (& $finish 'FAILED_BEFORE_MUTATION' 'INSUFFICIENT_SPACE' ('There is not enough free space on the TeknoParrot drive: about {0} MB needed, {1} MB free. Nothing was changed.' -f [Math]::Ceiling($needed / 1MB), [Math]::Floor($free / 1MB)))
+    }
+    $layout = Get-TpmOwnedLayout -TeknoParrotRoot $tpFull
+    $stageBase = Join-Path $layout.Temp 's11-stage'
+    if (-not (Test-TpmNoReparsePath -Path $stageBase)) {
+        return (& $finish 'FAILED_BEFORE_MUTATION' 'STAGING_UNSAFE' 'The staging folder path is not safe to write to. Nothing was changed.')
+    }
+    $extractDir = Join-Path $stageBase ('extract-' + [guid]::NewGuid().ToString('N'))
+    $zip = $null
+    try {
+        [void][System.IO.Directory]::CreateDirectory($extractDir)
+        if ($Plan.Source.Kind -eq 'Archive') { $zip = [System.IO.Compression.ZipFile]::OpenRead([string]$Plan.Source.Path) }
+        $operations = New-Object System.Collections.Generic.List[object]
+        $index = 0
+        $started = Get-Date
+        foreach ($item in $todo) {
+            $index++
+            Write-TpmCompactExtractionProgress -Phase 'Extracting' -Label 'System 11 saved files' -Current $index -Total $todo.Count -StartedAt $started
+            $stagePath = Join-Path $extractDir ('{0:0000}.bin' -f $index)
+            $label = '{0}\{1}' -f $item.Code, $item.Name
+            try {
+                if ($zip) {
+                    $entry = $zip.GetEntry([string]$item.EntryName)
+                    if ($null -eq $entry -or [int64]$entry.Length -ne [int64]$item.Length) { [void]$failed.Add($label); Write-Log ("System 11 saved files: {0} is not the size the source listed; skipped." -f $label); continue }
+                    $in = $entry.Open()
+                    $out = $null
+                    try {
+                        $out = New-Object System.IO.FileStream($stagePath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None, 65536)
+                        $in.CopyTo($out)
+                    } finally { if ($out) { $out.Dispose() }; $in.Dispose() }
+                } else {
+                    $sourceInfo = Get-Item -LiteralPath ([string]$item.FilePath) -Force -ErrorAction Stop
+                    if ($sourceInfo.PSIsContainer -or (($sourceInfo.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) -or [int64]$sourceInfo.Length -ne [int64]$item.Length) { [void]$failed.Add($label); Write-Log ("System 11 saved files: {0} changed since it was listed; skipped." -f $label); continue }
+                    Copy-Item -LiteralPath ([string]$item.FilePath) -Destination $stagePath -ErrorAction Stop
+                }
+                if ((Get-Item -LiteralPath $stagePath -Force).Length -ne [int64]$item.Length) { [void]$failed.Add($label); Write-Log ("System 11 saved files: {0} was not copied completely; skipped." -f $label); continue }
+                $sha = Get-TpmAutoSyncSha256 -Path $stagePath
+                [void]$operations.Add([pscustomobject][ordered]@{ ItemId = $label; Operation = 'ADD'; SourcePath = $stagePath; DestinationPath = [System.IO.Path]::GetFullPath([string]$item.Destination); RootPath = $tpFull; ExpectedSourceHash = $sha; ExpectedFinalHash = $sha })
+            } catch {
+                [void]$failed.Add($label)
+                Write-Log ("System 11 saved files: {0} could not be read -- {1}" -f $label, $_.Exception.Message)
+            }
+        }
+        Write-TpmCompactExtractionProgress -Phase 'Extracting' -Label 'System 11 saved files' -Current $todo.Count -Total $todo.Count -StartedAt $started -Complete
+        if ($failed.Count -gt 0) {
+            # One file that cannot be read means the set cannot be trusted: nothing is added.
+            return (& $finish 'FAILED_BEFORE_MUTATION' 'SOURCE_FILE_UNUSABLE' 'Some saved files could not be read from your set. Nothing was changed.')
+        }
+        $transaction = Invoke-TpmTransactionalFileBatch `
+            -WorkflowKey 'S11Preinstall' -OperationKey 'InstallSavedFiles' `
+            -Operations $operations.ToArray() -StagingDir $stageBase `
+            -Summary 'The System 11 saved files were not copied.' `
+            -SuccessSummary 'The System 11 saved files were copied and checked.' `
+            -NoOpSummary 'Everything is already in place. Nothing was changed.' `
+            -ReasonCode 'S11_FILE_TRANSACTION_FAILED'
+        if ([string]$transaction.Outcome -eq 'SUCCEEDED') { foreach ($operation in $operations) { [void]$installed.Add([string]$operation.ItemId) } }
+        return (& $finish ([string]$transaction.Outcome) ([string]$transaction.ReasonCode) ([string]$transaction.Summary) $transaction)
+    } catch {
+        try { Write-Log ("System 11 saved files: install stopped -- {0}" -f $_.Exception.Message) } catch { }
+        return (& $finish 'FAILED_BEFORE_MUTATION' 'S11_INSTALL_ERROR' 'The saved files could not be copied. Nothing was changed.')
+    } finally {
+        if ($zip) { $zip.Dispose() }
+        try {
+            if (Test-Path -LiteralPath $extractDir) { Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction Stop }
+            if ((Test-Path -LiteralPath $stageBase) -and @(Get-ChildItem -LiteralPath $stageBase -Force -ErrorAction Stop).Count -eq 0) { Remove-Item -LiteralPath $stageBase -Force -ErrorAction Stop }
+        } catch {
+            try { Write-Log ("System 11 saved files: staging cleanup incomplete: {0}" -f $_.Exception.Message) } catch { }
+        }
+    }
+}
+
+# Interactive optional step. Offered only when a registered System 11 game has no saved files yet. Looks for the player's own set in the
+# collection folders first; otherwise asks whether the player has it somewhere else. Says plainly which games the set has no files for.
+function Invoke-TpmS11PreinstallOffer {
+    param(
+        [Parameter(Mandatory)][string]$TpRoot,
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [string[]]$SearchFolders = @()
+    )
+    $setting = Get-TpmS11PreinstallSetting
+    if ($null -eq $setting -or -not (Test-Path -LiteralPath $UserProfilesDir -PathType Container)) { return $null }
+    $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'System 11 profile discovery' -EnumerationErrorAction SilentlyContinue)
+    $map = Get-TpmEmulatorGameMap -Profiles $profiles -ProgressLabel 'System 11 profile scan'
+    if (-not $map.ContainsKey('TeknoS11')) { return $null }
+    $without = @($map['TeknoS11'] | Where-Object { -not (Test-TpmS11SavedFilesPresent -TeknoParrotRoot $TpRoot -Code $_) })
+    if ($without.Count -eq 0) { return $null }
+    $zips = @(Find-TpmPrerequisiteSourceZips -Pattern ([string]$setting['SourceZipPattern']) -SearchFolders $SearchFolders)
+    $plan = $null
+    if ($zips.Count -gt 0) {
+        $plan = Get-TpmS11PreinstallPlan -SourcePath ([string]$zips[0].FullName) -TeknoParrotRoot $TpRoot -GameCodes @($map['TeknoS11'])
+        if ($plan.Valid -and @($plan.NewGames).Count -eq 0) {
+            # The set in the collection has nothing more for these games, so the player is not asked again on every run.
+            Write-Log 'System 11 saved files: the set in the collection has nothing new for the registered games.'
+            return $null
+        }
+    }
+    Write-Host ""
+    Write-Host "============================================" -ForegroundColor DarkCyan
+    Write-Host "   OPTIONAL: System 11 saved game files" -ForegroundColor DarkCyan
+    Write-Host "============================================" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-TpmText -Text ('{0} registered System 11 {1} no saved setup files yet. Without them a game sets itself up from scratch, which can take hours.' -f $without.Count, $(if ($without.Count -eq 1) { 'game has' } else { 'games have' })) -Indent 2
+    Write-TpmText -Text 'If you already have the System 11 saved-files set, TeknoParrot Manager can copy the files into your TeknoParrot folder. It does not provide or download them, and it never replaces a file that is already there.' -Indent 2
+    Write-Host ""
+    if ($null -ne $plan -and $plan.Valid) {
+        Write-TpmText -Text 'TeknoParrot Manager found the set in your own game collection.' -Indent 2 -Color DarkCyan
+        if ((Read-TpmYesNo -Prompt '  Copy the saved files for your System 11 games? (Y/N, default Y)' -Default 'Y') -ne 'Y') {
+            Write-Host "  Skipped. Nothing was changed." -ForegroundColor DarkGray
+            Write-Log 'System 11 saved files: offer declined.'
+            return $null
+        }
+    } elseif ($null -eq $plan) {
+        $chosen = ''
+        if ((Read-TpmYesNo -Prompt '  Do you have the saved-files set? (Y/N, default N)' -Default 'N') -ne 'Y') {
+            Write-Host "  Skipped. Nothing was changed." -ForegroundColor DarkGray
+            Write-Log 'System 11 saved files: offer declined (no set in the collection folders).'
+            return $null
+        }
+        $where = Read-TpmChoice -Prompt '  Is it F) a folder, Z) a .zip archive, or C) cancel? Choose F, Z, or C' -Choices @('F', 'Z', 'C') -Default 'C'
+        if ($where -eq 'F') { $chosen = Read-PathWithBrowse -Prompt '  Folder that holds the TeknoS11 folder (or the state folder)' -Mode Folder }
+        elseif ($where -eq 'Z') { $chosen = Read-PathWithBrowse -Prompt '  Path to the .zip archive' -Mode File -FileFilter 'Zip archives (*.zip)|*.zip|All files (*.*)|*.*' }
+        if ([string]::IsNullOrWhiteSpace($chosen)) {
+            Write-Host "  No location chosen. Nothing was changed." -ForegroundColor DarkGray
+            Write-Log 'System 11 saved files: no source chosen.'
+            return $null
+        }
+        $plan = Get-TpmS11PreinstallPlan -SourcePath $chosen -TeknoParrotRoot $TpRoot -GameCodes @($map['TeknoS11'])
+    }
+    if (-not $plan.Valid) {
+        Write-Host ("  {0} Nothing was changed." -f $plan.Error) -ForegroundColor Yellow
+        return $plan
+    }
+    foreach ($code in @($plan.NoFileGames)) { Write-Log ("System 11 saved files: the set has no files for {0}." -f $code) }
+    if (@($plan.NoFileGames).Count -gt 0) {
+        Write-TpmText -Text ('Your set has no saved files for {0}. {1} without them.' -f (Format-TpmNameList -Names @($plan.NoFileGames) -Max 5), $(if (@($plan.NoFileGames).Count -eq 1) { 'That game starts' } else { 'Those games start' })) -Indent 2 -Color Yellow
+    }
+    if (@($plan.NewGames).Count -eq 0) {
+        Write-Host "  Your set has nothing new for your games. Nothing was changed." -ForegroundColor DarkGray
+        return $plan
+    }
+    $result = $null
+    try {
+        $result = Invoke-TpmProgressGroup -Title 'System 11 saved files' -Action { Invoke-TpmS11PreinstallInstall -Plan $plan -TpRoot $TpRoot }
+    } catch {
+        Write-Host ("  The System 11 step could not finish: {0}" -f $_.Exception.Message) -ForegroundColor Red
+        Write-Log ("System 11 saved files: failed: {0}" -f $_.Exception.Message)
+        return $null
+    }
+    Write-Host ""
+    if ($result.Outcome -eq 'SUCCEEDED') {
+        Write-Host ("  Copied and checked {0} file(s) for {1}." -f @($result.Installed).Count, (Format-TpmGameCount -Count @($plan.NewGames).Count)) -ForegroundColor Green
+        if (@($result.Kept).Count -gt 0) { Write-Host ("  {0} file(s) that were already there were kept." -f @($result.Kept).Count) -ForegroundColor DarkGray }
+    } elseif ($result.Outcome -eq 'NO_OP') {
+        Write-Host ("  {0}" -f $result.Summary) -ForegroundColor DarkGray
+    } else {
+        Write-Host ("  The saved files were not all copied. {0}" -f $result.Summary) -ForegroundColor Yellow
+        Write-Host "  Next step: open View Log from the main menu to see what stopped it." -ForegroundColor DarkCyan
+    }
+    return $result
+}
+# END GameTypes
 
 # Word-wraps free text (e.g. a community notes field) to a fixed width,
 # returning one string per output line, each pre-fixed with Indent. Existing
@@ -40382,7 +41968,13 @@ function Get-TpmGameSupportSummary {
             $secondPath = $(if ($null -ne $secondNode) { $secondNode.InnerText.Trim() } else { '' })
             $secondMissing = ([string]::IsNullOrWhiteSpace($secondPath) -or -not (Test-Path -LiteralPath $secondPath -PathType Leaf))
         }
-        if (-not $fileFound -or $secondMissing -or ($PostgresNeededCodes -contains $code)) {
+        $setMissing = $false
+        if ($fileFound) {
+            $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
+            $exeNameNode = $doc.GameProfile.SelectSingleNode('ExecutableName')
+            $setMissing = (@(Get-TpmMissingGameSetFiles -GamePath $(if ($null -ne $gamePathNode) { $gamePathNode.InnerText.Trim() } else { '' }) -ExecutableName $(if ($null -ne $exeNameNode) { $exeNameNode.InnerText.Trim() } else { '' })).Count -gt 0)
+        }
+        if (-not $fileFound -or $secondMissing -or $setMissing -or ($PostgresNeededCodes -contains $code)) {
             $row.NeedsYou++
             [void]$needsYou.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $code))
         }
@@ -40399,12 +41991,30 @@ function Get-TpmGameSupportLines {
         [void]$lines.Add(('{0}: {1} / {2} / {3} / {4}' -f $row.Emulator, $row.Registered, $row.FilesFound, $row.StepsShown, $row.NeedsYou))
     }
     [void]$lines.Add(('Needs you: {0}' -f (Format-TpmNameList -Names @($Summary.NeedsYouNames) -Max 1000 -WhenEmpty 'none')))
-    [void]$lines.Add('A game needs you when its game file is missing, its second game file is not chosen, or it still needs PostgreSQL settings.')
+    [void]$lines.Add('A game needs you when its game file is missing, a second ZIP its profile names is not beside it, its second game file is not chosen, or it still needs PostgreSQL settings.')
     if (-not [bool]$Summary.GuideAvailable) {
         [void]$lines.Add('Setup steps were not counted: there is no saved copy of the Game Notes page yet. Run AutoSync or Register once with an internet connection to save one.')
     }
     return $lines.ToArray()
 }
+
+# The games TeknoParrot's own metadata says do not work on one graphics card maker ("amd" or "intel" is "NO" in Metadata.catalog.json in the
+# TeknoParrot folder). Read-only. An empty list when the file is missing or cannot be read, so the fixed table below still applies.
+function Get-TpmMetadataGpuIncompatibleCodes {
+    param([string]$TeknoParrotRoot, [string]$Vendor)
+    $field = switch ($Vendor) { 'AMD' { 'amd' } 'Intel' { 'intel' } default { '' } }
+    if (-not $field -or [string]::IsNullOrWhiteSpace($TeknoParrotRoot)) { return @() }
+    $path = Join-Path $TeknoParrotRoot 'Metadata.catalog.json'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return @() }
+    try {
+        $catalog = [System.IO.File]::ReadAllText($path) | ConvertFrom-Json
+        return @($catalog.PSObject.Properties | Where-Object { $_.Name -match '^[\w-]+$' -and $null -ne $_.Value -and $null -ne $_.Value.PSObject.Properties[$field] -and [string]$_.Value.$field -eq 'NO' } | ForEach-Object { [string]$_.Name })
+    } catch {
+        Write-Log ("GpuCheck: the TeknoParrot game metadata could not be read -- {0}" -f $_.Exception.Message)
+        return @()
+    }
+}
+
 
 # Read-only scan for all compatibility checks above. Returns
 # [pscustomobject]@{ PathTooLong = @(...); DllMismatch = @(...); GpuIncompatible = @(...); BiosMissing = @(...); ExeMissing = @(...) }.
@@ -40432,6 +42042,8 @@ function Get-CompatibilityWarnings {
         [System.Collections.Generic.HashSet[string]]::new(
             [string[]]$GpuIncompatibleGames[$detectedVendor], [System.StringComparer]::OrdinalIgnoreCase)
     } else { $null }
+    # TeknoParrot's own game metadata also names the games that do not work on this card maker, so a new game is covered without a new Manager version.
+    if ($null -ne $gpuList) { foreach ($metadataCode in @(Get-TpmMetadataGpuIncompatibleCodes -TeknoParrotRoot $TeknoParrotRoot -Vendor $detectedVendor)) { [void]$gpuList.Add($metadataCode) } }
 
     $profiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Compatibility warning profile discovery' -EnumerationErrorAction SilentlyContinue)
 
@@ -40704,65 +42316,258 @@ function Set-ProfileInputApi {
     return $true
 }
 
-# ===== TpmController: Xbox starter layout (player 1) =====
-# Fills the Xbox (XInput) slots of a game profile with a standard starter layout.
-# Never overwrites an Xbox binding that is already there, never touches the
-# keyboard, arcade-encoder or other bindings, and only changes the game's Input API
-# field when the game lists that choice. Test and Service stay unbound on purpose:
-# they are cabinet controls and a stick click should not open a test menu.
-# The codes are the standard Microsoft XInput button flags.
-function Get-TpmXboxStarterLayout {
-    return @(
-        [pscustomobject]@{ Mapping = 'Coin1';         Code = 0x0020; Label = 'Back' }
-        [pscustomobject]@{ Mapping = 'P1ButtonStart'; Code = 0x0010; Label = 'Start' }
-        [pscustomobject]@{ Mapping = 'P1ButtonUp';    Code = 0x0001; Label = 'D-pad Up' }
-        [pscustomobject]@{ Mapping = 'P1ButtonDown';  Code = 0x0002; Label = 'D-pad Down' }
-        [pscustomobject]@{ Mapping = 'P1ButtonLeft';  Code = 0x0004; Label = 'D-pad Left' }
-        [pscustomobject]@{ Mapping = 'P1ButtonRight'; Code = 0x0008; Label = 'D-pad Right' }
-        [pscustomobject]@{ Mapping = 'P1Button1';     Code = 0x1000; Label = 'A' }
-        [pscustomobject]@{ Mapping = 'P1Button2';     Code = 0x2000; Label = 'B' }
-        [pscustomobject]@{ Mapping = 'P1Button3';     Code = 0x8000; Label = 'Y' }
-        [pscustomobject]@{ Mapping = 'P1Button4';     Code = 0x4000; Label = 'X' }
-        [pscustomobject]@{ Mapping = 'P1Button5';     Code = 0x0100; Label = 'LB' }
-        [pscustomobject]@{ Mapping = 'P1Button6';     Code = 0x0200; Label = 'RB' }
-    )
+# ===== TpmController: controller layout and safe apply (player 1) =====
+# The user picks one controller layout (Xbox, PlayStation, Nintendo or arcade stick) once; TPM keeps it in its own small file.
+# The layout is then written into the XInput slots of a game, but only for controls that the game's own contract lists
+# (Get-TpmGameControlContract), only when the game file is the revision that contract was read from, and never over an
+# Xbox binding that is already there. Keyboard, arcade-encoder and other bindings are never touched. Test and Service stay
+# empty unless the user gave them a button. Every write has a verified backup first, is read back and compared, and is put
+# back byte for byte if the check fails.
+# The codes are the standard Microsoft XInput button flags. Triggers and analog axes are not written: TPM does not guess them.
+
+# The pad buttons TPM can write and their XInput codes.
+function Get-TpmPadButtons {
+    return [ordered]@{
+        'A' = 0x1000; 'B' = 0x2000; 'X' = 0x4000; 'Y' = 0x8000; 'LB' = 0x0100; 'RB' = 0x0200
+        'Back' = 0x0020; 'Start' = 0x0010; 'L3' = 0x0040; 'R3' = 0x0080
+        'D-pad Up' = 0x0001; 'D-pad Down' = 0x0002; 'D-pad Left' = 0x0004; 'D-pad Right' = 0x0008
+    }
 }
 
-# Where the starter layout comes from, in plain words. Shown behind Details and written to the log.
-function Get-TpmXboxStarterLayoutSource {
-    return 'The Manager''s built-in starter layout. Buttons use the standard Xbox button codes. Coin on Back, Start on Start, and the six action buttons follow the common arcade-to-gamepad layout used by public emulator guides. No data was copied from another program.'
+# The game controls a layout can fill, in screen order, with their plain names.
+function Get-TpmBaselineSlots {
+    return [ordered]@{
+        'Coin1' = 'Coin'; 'P1ButtonStart' = 'Start'; 'P1ButtonUp' = 'Up'; 'P1ButtonDown' = 'Down'; 'P1ButtonLeft' = 'Left'; 'P1ButtonRight' = 'Right'
+        'P1Button1' = 'Button 1'; 'P1Button2' = 'Button 2'; 'P1Button3' = 'Button 3'; 'P1Button4' = 'Button 4'; 'P1Button5' = 'Button 5'; 'P1Button6' = 'Button 6'
+        'Test' = 'Test'; 'Service1' = 'Service'
+    }
 }
 
-# Read-only. Says what the starter layout would do to one profile document.
-# Row actions: Add (slot is free), Keep (an Xbox binding is already there), NotInGame (the game has no such control).
-function Get-TpmXboxStarterPlan {
-    param([Parameter(Mandatory)]$Doc)
-    $rows = New-Object System.Collections.ArrayList
-    $byMapping = @{}
-    foreach ($btn in @(Get-ButtonNodes $Doc)) {
-        $key = Get-ButtonKey $btn
-        if ($key -and $key -like '*|None' -and -not $byMapping.ContainsKey($key)) { $byMapping[$key] = $btn }
+# The four built-in starting layouts. Names changes only what the screen calls a pad button; the codes are the same.
+# PlayStation and Nintendo pads need something that shows them to Windows as an Xbox (XInput) controller; the buttons are
+# matched by position (the bottom face button is Button 1). An arcade stick must be switched to its Xbox (XInput) mode.
+function Get-TpmBaselinePresets {
+    $shared = [ordered]@{ Coin1 = 'Back'; P1ButtonStart = 'Start'; P1ButtonUp = 'D-pad Up'; P1ButtonDown = 'D-pad Down'; P1ButtonLeft = 'D-pad Left'; P1ButtonRight = 'D-pad Right' }
+    $pad = [ordered]@{ P1Button1 = 'A'; P1Button2 = 'B'; P1Button3 = 'Y'; P1Button4 = 'X'; P1Button5 = 'LB'; P1Button6 = 'RB' }
+    $stick = [ordered]@{ P1Button1 = 'X'; P1Button2 = 'Y'; P1Button3 = 'RB'; P1Button4 = 'A'; P1Button5 = 'B'; P1Button6 = 'LB' }
+    $none = [ordered]@{ Test = ''; Service1 = '' }
+    $build = {
+        param($Buttons)
+        $slots = [ordered]@{}
+        foreach ($part in @($shared, $Buttons, $none)) { foreach ($key in $part.Keys) { $slots[$key] = [string]$part[$key] } }
+        return $slots
     }
-    foreach ($item in (Get-TpmXboxStarterLayout)) {
-        $btn = $byMapping[($item.Mapping + '|None')]
-        $action = if ($null -eq $btn) { 'NotInGame' } elseif ($null -ne $btn.SelectSingleNode('XInputButton')) { 'Keep' } else { 'Add' }
-        [void]$rows.Add([pscustomobject]@{ Mapping = $item.Mapping; Label = $item.Label; Code = $item.Code; Action = $action; Node = $btn })
+    return [ordered]@{
+        Xbox        = [pscustomobject]@{ Title = 'Xbox controller'; Names = @{}; Slots = (& $build $pad) }
+        PlayStation = [pscustomobject]@{ Title = 'PlayStation controller'; Names = @{ A = 'Cross'; B = 'Circle'; X = 'Square'; Y = 'Triangle'; LB = 'L1'; RB = 'R1'; Back = 'Share'; Start = 'Options' }; Slots = (& $build $pad) }
+        Nintendo    = [pscustomobject]@{ Title = 'Nintendo controller'; Names = @{ A = 'B'; B = 'A'; X = 'Y'; Y = 'X'; LB = 'L'; RB = 'R'; Back = 'Minus'; Start = 'Plus' }; Slots = (& $build $pad) }
+        ArcadeStick = [pscustomobject]@{ Title = 'Arcade stick (set to Xbox mode)'; Names = @{}; Slots = (& $build $stick) }
     }
-    $apiField = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral 'Input API')]")
+}
+
+# A new layout from one of the presets. SelectionSource is always UserSelected: TPM only ever suggests a preset.
+function New-TpmBaseline {
+    param([Parameter(Mandatory)][string]$Preset)
+    $presets = Get-TpmBaselinePresets
+    if (-not $presets.Contains($Preset)) { throw "Unknown controller layout '$Preset'." }
+    return [pscustomobject]@{ Schema = 'TpmControllerBaseline/v1'; Preset = $Preset; SelectionSource = 'UserSelected'; Slots = $presets[$Preset].Slots }
+}
+
+# Plain-word problems with a layout; an empty list means it can be used. A pad button may serve only one game control.
+function Test-TpmBaseline {
+    param($Baseline)
+    $problems = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $Baseline -or [string]$Baseline.Schema -ne 'TpmControllerBaseline/v1') { return @('The layout file is not one TPM wrote.') }
+    if (-not (Get-TpmBaselinePresets).Contains([string]$Baseline.Preset)) { [void]$problems.Add('The layout names a starting layout TPM does not know.') }
+    $buttons = Get-TpmPadButtons
+    $slots = Get-TpmBaselineSlots
+    $used = @{}
+    foreach ($key in @($Baseline.Slots.Keys)) {
+        $value = [string]$Baseline.Slots[$key]
+        if (-not $slots.Contains($key)) { [void]$problems.Add("The layout has a control TPM does not know: $key."); continue }
+        if ($value -eq '') { continue }
+        if (-not $buttons.Contains($value)) { [void]$problems.Add("The layout uses a pad button TPM does not know: $value."); continue }
+        if ($used.ContainsKey($value)) { [void]$problems.Add(('{0} is used for both {1} and {2}.' -f $value, $used[$value], $slots[$key])) } else { $used[$value] = $slots[$key] }
+    }
+    return @($problems)
+}
+
+function Get-TpmBaselinePath { param([Parameter(Mandatory)][string]$StateDir) return (Join-Path $StateDir 'ControllerBaseline.json') }
+
+# The saved layout, or $null when none is saved or the file is not usable (the user is then asked to choose again).
+function Read-TpmBaseline {
+    param([Parameter(Mandatory)][string]$StateDir)
+    $path = Get-TpmBaselinePath -StateDir $StateDir
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try {
+        $raw = [System.IO.File]::ReadAllText($path) | ConvertFrom-Json -ErrorAction Stop
+        $slots = [ordered]@{}
+        foreach ($property in $raw.Slots.PSObject.Properties) { $slots[$property.Name] = [string]$property.Value }
+        $baseline = [pscustomobject]@{ Schema = [string]$raw.Schema; Preset = [string]$raw.Preset; SelectionSource = [string]$raw.SelectionSource; Slots = $slots }
+    } catch { Write-Log ('Baseline: the saved controller layout could not be read -- ' + $_.Exception.Message); return $null }
+    $problems = @(Test-TpmBaseline -Baseline $baseline)
+    if ($problems.Count -gt 0) { Write-Log ('Baseline: the saved controller layout is not usable: ' + ($problems -join ' ')); return $null }
+    return $baseline
+}
+
+function Save-TpmBaseline {
+    param([Parameter(Mandatory)][string]$StateDir, [Parameter(Mandatory)]$Baseline)
+    $problems = @(Test-TpmBaseline -Baseline $Baseline)
+    if ($problems.Count -gt 0) { throw ('The layout was not saved: ' + ($problems -join ' ')) }
+    [void][System.IO.Directory]::CreateDirectory($StateDir)
+    Write-TpmAtomicTextFile -Path (Get-TpmBaselinePath -StateDir $StateDir) -Text ($Baseline | ConvertTo-Json -Depth 4) -Operation 'controller layout file'
+}
+
+# The layout as rows, one per control that has a pad button. Label is what the user's own controller calls that button.
+function Get-TpmBaselineLayout {
+    param([Parameter(Mandatory)]$Baseline)
+    $buttons = Get-TpmPadButtons
+    $slots = Get-TpmBaselineSlots
+    $names = @{}
+    $presets = Get-TpmBaselinePresets
+    if ($presets.Contains([string]$Baseline.Preset)) { $names = $presets[[string]$Baseline.Preset].Names }
+    foreach ($mapping in $slots.Keys) {
+        $padName = [string]$Baseline.Slots[$mapping]
+        if ([string]::IsNullOrEmpty($padName) -or -not $buttons.Contains($padName)) { continue }
+        [pscustomobject]@{ Mapping = $mapping; Slot = $slots[$mapping]; Pad = $padName; Code = [int]$buttons[$padName]; Label = $(if ($names.ContainsKey($padName)) { [string]$names[$padName] } else { $padName }) }
+    }
+}
+
+# Plain lines that show a layout on screen.
+function Get-TpmBaselineSummaryLines {
+    param([Parameter(Mandatory)]$Baseline)
+    $title = (Get-TpmBaselinePresets)[[string]$Baseline.Preset].Title
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add('Your controller layout: ' + $title)
+    $layout = @(Get-TpmBaselineLayout -Baseline $Baseline)
+    foreach ($row in $layout) { [void]$lines.Add(('{0}  ->  {1}' -f $row.Slot, $row.Label)) }
+    $empty = @((Get-TpmBaselineSlots).Keys | Where-Object { [string]::IsNullOrEmpty([string]$Baseline.Slots[$_]) } | ForEach-Object { (Get-TpmBaselineSlots)[$_] })
+    if ($empty.Count -gt 0) { [void]$lines.Add('Left empty on purpose: ' + ($empty -join ', ') + '. A stick click should not open a test menu.') }
+    return @($lines)
+}
+
+# Where the layout comes from, in plain words. Shown behind Details and written to the log.
+function Get-TpmBaselineLayoutSource {
+    return 'The Manager''s built-in layouts (Xbox, PlayStation, Nintendo, arcade stick) with any change you made. Buttons use the standard Xbox button codes. Coin on Back, Start on Start, and the six action buttons follow the common arcade-to-gamepad layout used by public emulator guides. No data was copied from another program.'
+}
+
+# Plain words for each reason a game is left alone.
+function Get-TpmBaselineReasonText {
+    param([string]$ReasonCode)
+    switch ($ReasonCode) {
+        'NoTemplate'   { return 'TPM could not find TeknoParrot''s own file for this game, so it cannot tell which controls the game needs.' }
+        'Stale'        { return 'This game''s saved settings are for a different version of the game file than TeknoParrot has now. Open the game once in TeknoParrotUI, then try again.' }
+        'InputApi'     { return 'This game''s input type setting does not match what the game offers.' }
+        'FieldMissing' { return 'A control the game needs is missing from its saved settings. Open the game once in TeknoParrotUI, then try again.' }
+        'Collision'    { return 'An Xbox button the layout wants is already used by another control in this game.' }
+        'Changed'      { return 'The game''s files changed after the preview, so nothing was saved. Run it again.' }
+        'NoXbox'       { return 'This game does not have an Xbox controller setting.' }
+        'Unreadable'   { return 'The settings file for this game could not be read.' }
+        'NoControls'   { return 'TPM does not recognize the names this game uses for its player 1 controls, so it cannot tell which controls the game needs.' }
+        default        { return '' }
+    }
+}
+
+# True when a game's name for a direction slot is a plain direction: "Player 1 Up", "P1 Left (Digital)", "Pad Right", "Down".
+function Test-TpmDirectionName {
+    param([string]$Name)
+    $plain = ($Name -replace '(?i)\(digital\)', '') -replace '(?i)\b(d-?pad|pad)\b', ''
+    return (Test-ButtonNameDirectional $plain)
+}
+
+# Read-only. Says what the layout would do to one game, bound to the game's own contract.
+# Status: Ready, NoChange, Unsupported (no Xbox setting), Refused (see ReasonCode), Unreadable.
+# Row actions: Add (the slot is free), Keep (an Xbox binding is already there), NotInGame (the contract does not list the control).
+function Get-TpmBaselineGamePlan {
+    param([Parameter(Mandatory)][string]$ProfilePath, [Parameter(Mandatory)][string]$GameProfilesDir, [Parameter(Mandatory)]$Layout)
+    $code = [System.IO.Path]::GetFileNameWithoutExtension($ProfilePath)
+    $plan = [pscustomobject]@{
+        Code = $code; Title = $code; Status = 'Unreadable'; ReasonCode = 'Unreadable'; Reason = (Get-TpmBaselineReasonText 'Unreadable'); Rows = @(); AddCount = 0; KeepCount = 0; NotInGameCount = 0
+        StillNeeds = @(); CurrentApi = ''; NeedsApiChange = $false; Source = ''; Signature = ''; Doc = $null; TemplateSha256 = ''; TemplatePath = ''
+    }
+    $refuse = { param($Status, $ReasonCode) $plan.Status = $Status; $plan.ReasonCode = $ReasonCode; $plan.Reason = Get-TpmBaselineReasonText $ReasonCode; return $plan }
+    try { $doc = Read-Xml $ProfilePath; if ($null -eq $doc.GameProfile) { return $plan } } catch { return $plan }
+    $plan.Doc = $doc
+    try { $plan.Title = Get-TpmProfileFriendlyTitle -Doc $doc -BaseName $code } catch { $plan.Title = $code }
+    $template = Read-TpmGameTemplate -Code $code -GameProfilesDir $GameProfilesDir
+    if ($null -eq $template) { return (& $refuse 'Refused' 'NoTemplate') }
+    $plan.TemplateSha256 = $template.Sha256; $plan.TemplatePath = $template.Path
+    $resolved = Get-TpmGameControlContract -Code $code -UserDoc $doc -Template $template
+    if ($null -eq $resolved.Contract) { return (& $refuse 'Refused' $(if ($resolved.Why -eq 'NoControls') { 'NoControls' } else { 'NoTemplate' })) }
+    $plan.Source = $resolved.Source
+    if ($resolved.Facts.Fit -eq 'Unknown') { return (& $refuse 'Refused' 'Stale') }
+    if ($resolved.Facts.Fit -eq 'Unsupported') { return (& $refuse 'Refused' 'InputApi') }
+
+    $apiField = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral 'Input API')]")
     $apiOptions = @()
     if ($null -ne $apiField) { $apiOptions = @($apiField.SelectNodes('FieldOptions/string') | ForEach-Object { $_.InnerText.Trim() }) }
-    $currentApi = Get-ProfileInputApi $Doc
-    $addCount = @($rows | Where-Object Action -eq 'Add').Count
-    return [pscustomobject]@{
-        Rows         = @($rows)
-        AddCount     = $addCount
-        KeepCount    = @($rows | Where-Object Action -eq 'Keep').Count
-        MissingCount = @($rows | Where-Object Action -eq 'NotInGame').Count
-        CurrentApi   = $currentApi
-        XInputListed = ($apiOptions -contains 'XInput')
-        # A game the user already put on MergedInput keeps it: that choice is theirs, and only free Xbox slots are filled.
-        NeedsApiChange = ($currentApi -ne 'XInput' -and $currentApi -ne 'MergedInput')
+    $plan.CurrentApi = [string](Get-ProfileInputApi $doc)
+    # A game the user already put on MergedInput keeps it: that choice is theirs, and only free Xbox slots are filled.
+    $plan.NeedsApiChange = ($plan.CurrentApi -ne 'XInput' -and $plan.CurrentApi -ne 'MergedInput')
+    if ($plan.NeedsApiChange -and $apiOptions -notcontains 'XInput') { return (& $refuse 'Unsupported' 'NoXbox') }
+
+    $nodes = @(Get-ButtonNodes $doc)
+    $byMapping = @{}
+    foreach ($node in $nodes) {
+        $key = Get-ButtonKey $node
+        if ($key -and $key -like '*|None' -and -not $byMapping.ContainsKey($key)) { $byMapping[$key] = $node }
     }
+    $used = @{}
+    foreach ($node in $nodes) {
+        $xi = $node.SelectSingleNode('XInputButton')
+        if ($null -eq $xi) { continue }
+        $isButton = $xi.SelectSingleNode('IsButton'); $buttonCode = $xi.SelectSingleNode('ButtonCode')
+        if ($null -ne $isButton -and $null -ne $buttonCode -and $isButton.InnerText.Trim() -ieq 'true') { $used[$buttonCode.InnerText.Trim()] = $true }
+    }
+    $controls = @{}
+    foreach ($control in @($resolved.Contract.SemanticControls)) { $controls[[string]$control.ControlId] = $control }
+
+    $rows = New-Object System.Collections.ArrayList
+    $problem = ''
+    foreach ($item in @($Layout)) {
+        $control = $controls[$item.Mapping]
+        $action = 'NotInGame'; $node = $null; $index = -1
+        if ($null -ne $control -and $control.Kind -eq 'Button') {
+            $node = $byMapping[($item.Mapping + '|None')]
+            if ($null -eq $node) { $problem = 'FieldMissing'; continue }
+            $index = [array]::IndexOf($nodes, $node)
+            if ($item.Mapping -match '^P1Button(Up|Down|Left|Right)$' -and -not (Test-TpmDirectionName -Name ([string]$control.Meaning))) {
+                # The game names this slot something other than a plain direction (for example "Menu Up"): a D-pad button is a guess.
+                $node = $null; $index = -1; $action = 'Ambiguous'
+            } else {
+                $action = if ($null -ne $node.SelectSingleNode('XInputButton')) { 'Keep' } else { 'Add' }
+                if ($action -eq 'Add' -and $used.ContainsKey([string]$item.Code)) { if (-not $problem) { $problem = 'Collision' } }
+            }
+        }
+        $meaning = if ($null -ne $control) { [string]$control.Meaning } else { [string]$item.Slot }
+        [void]$rows.Add([pscustomobject]@{ Mapping = $item.Mapping; Meaning = $meaning; Label = $item.Label; Code = $item.Code; Action = $action; Node = $node; Index = $index })
+    }
+    $plan.Rows = @($rows)
+    $plan.AddCount = @($rows | Where-Object Action -eq 'Add').Count
+    $plan.KeepCount = @($rows | Where-Object Action -eq 'Keep').Count
+    $plan.NotInGameCount = @($rows | Where-Object Action -eq 'NotInGame').Count
+    # Required controls that are not set up and that the layout will not fill: the player does these in TeknoParrotUI.
+    $filled = @($rows | Where-Object Action -eq 'Add' | ForEach-Object { $_.Mapping })
+    $plan.StillNeeds = @($resolved.Contract.SemanticControls | Where-Object { $_.Requirement -eq 'Required' -and @($resolved.Facts.UsableControlIds) -notcontains $_.ControlId -and $filled -notcontains $_.ControlId } | ForEach-Object { [string]$_.Meaning })
+    if ($problem) { return (& $refuse 'Refused' $problem) }
+    $plan.Status = if ($plan.AddCount -eq 0 -and -not $plan.NeedsApiChange) { 'NoChange' } else { 'Ready' }
+    $plan.ReasonCode = ''; $plan.Reason = ''
+    $userSha = (Get-FileHash -LiteralPath $ProfilePath -Algorithm SHA256).Hash
+    $plan.Signature = '{0}|{1}|{2}|{3}' -f $userSha, $template.Sha256, (@($rows | Where-Object Action -eq 'Add' | ForEach-Object { '{0}={1}' -f $_.Mapping, $_.Code }) -join ','), $plan.NeedsApiChange
+    return $plan
+}
+
+# Plain lines for one plan: what will be set, what stays, and what the player still does in TeknoParrotUI.
+function Get-TpmBaselinePlanLines {
+    param([Parameter(Mandatory)]$Plan)
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($row in @($Plan.Rows | Where-Object Action -eq 'Add')) { [void]$lines.Add(('{0}  ->  {1}' -f $row.Meaning, $row.Label)) }
+    if ($Plan.KeepCount -gt 0) { [void]$lines.Add(('{0} buttons already had an Xbox setting and stay as they are.' -f $Plan.KeepCount)) }
+    $ambiguous = @($Plan.Rows | Where-Object Action -eq 'Ambiguous' | ForEach-Object { $_.Meaning })
+    if ($ambiguous.Count -gt 0) { [void]$lines.Add('Not set, because the game does not call them a plain direction (TPM does not guess): ' + ($ambiguous -join ', ') + '.') }
+    if ($Plan.NeedsApiChange) { [void]$lines.Add('The game''s input type is switched to Xbox (XInput). It may stop using an arcade encoder.') }
+    if (@($Plan.StillNeeds).Count -gt 0) { [void]$lines.Add('Still needs you in TeknoParrotUI (TPM does not guess these): ' + (@($Plan.StillNeeds) -join ', ') + '.') }
+    return @($lines)
 }
 
 # Adds one Xbox binding to a button node, in the order TeknoParrot writes its children.
@@ -40782,51 +42587,92 @@ function Add-TpmXInputBinding {
     else { [void]$ButtonNode.InsertAfter($xi, $ButtonNode.SelectSingleNode('ButtonName')) }
 }
 
-# Applies the starter layout to one profile file. With -DryRun nothing is written.
-# Order: read, plan, verified backup, write, read back and check, put the old file back if the check fails.
-function Invoke-TpmXboxStarterApply {
-    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$ProfilePath, [bool]$DryRun = $true, [hashtable]$BackupState = $null)
-    $result = [pscustomobject]@{ Path = $ProfilePath; Status = 'NoChange'; Added = 0; Kept = 0; Missing = 0; ApiChanged = $false; Backup = $null; Reason = '' }
-    try { $doc = Read-Xml $ProfilePath } catch { $result.Status = 'Unreadable'; $result.Reason = 'The profile could not be read.'; return $result }
-    $plan = Get-TpmXboxStarterPlan -Doc $doc
-    $result.Kept = $plan.KeepCount; $result.Missing = $plan.MissingCount
-    if (-not $plan.XInputListed -and $plan.NeedsApiChange) { $result.Status = 'Unsupported'; $result.Reason = 'This game does not offer the Xbox controller setting.'; return $result }
-    if ($plan.AddCount -eq 0 -and -not $plan.NeedsApiChange) { return $result }
+# Compares a saved profile with what the plan promised. Returns '' when it matches, otherwise the problem in plain words.
+# Every button the plan did not touch must be exactly as it was; every added button must read back with its code.
+function Test-TpmBaselineWritten {
+    param([Parameter(Mandatory)]$Doc, [Parameter(Mandatory)]$Plan, [Parameter(Mandatory)][string[]]$BeforeXml)
+    $nodes = @(Get-ButtonNodes $Doc)
+    if ($nodes.Count -ne $BeforeXml.Count) { return 'The saved profile has a different number of buttons.' }
+    $added = @{}
+    foreach ($row in @($Plan.Rows | Where-Object Action -eq 'Add')) { $added[$row.Index] = $row }
+    for ($i = 0; $i -lt $nodes.Count; $i++) {
+        if (-not $added.ContainsKey($i)) {
+            if ($nodes[$i].OuterXml -ne $BeforeXml[$i]) { return 'A button that should not change was changed.' }
+            continue
+        }
+        $xi = $nodes[$i].SelectSingleNode('XInputButton')
+        if ($null -eq $xi -or $xi.SelectSingleNode('ButtonCode').InnerText.Trim() -ne [string]$added[$i].Code -or $xi.SelectSingleNode('XInputIndex').InnerText.Trim() -ne '0') { return ('{0} did not read back as saved.' -f $added[$i].Meaning) }
+        $copy = $nodes[$i].CloneNode($true)
+        [void]$copy.RemoveChild($copy.SelectSingleNode('XInputButton'))
+        if ($copy.OuterXml -ne $BeforeXml[$i]) { return ('{0} changed more than its Xbox setting.' -f $added[$i].Meaning) }
+    }
+    if ($Plan.NeedsApiChange -and (Get-ProfileInputApi $Doc) -ne 'XInput') { return 'The input type did not read back as Xbox (XInput).' }
+    return ''
+}
+
+# Applies the layout to one profile file. With -DryRun nothing is written. ExpectedSignature is the Signature of the preview
+# the user approved; when the game's files are not the same any more nothing is written.
+# Order: read, plan, verified backup, write, read back and compare, put the old bytes back if the check fails.
+function Invoke-TpmBaselineApply {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$ProfilePath, [Parameter(Mandatory)][string]$GameProfilesDir,
+        [Parameter(Mandatory)]$Layout, [bool]$DryRun = $true, [hashtable]$BackupState = $null, [string]$ExpectedSignature = ''
+    )
+    $plan = Get-TpmBaselineGamePlan -ProfilePath $ProfilePath -GameProfilesDir $GameProfilesDir -Layout $Layout
+    $result = [pscustomobject]@{
+        Path = $ProfilePath; Code = $plan.Code; Title = $plan.Title; Status = $plan.Status; Added = 0; Kept = $plan.KeepCount; NotInGame = $plan.NotInGameCount; ApiChanged = $false
+        Backup = $null; Reason = $plan.Reason; ReasonCode = $plan.ReasonCode; Verified = $false; StillNeeds = @($plan.StillNeeds); Signature = $plan.Signature; Plan = $plan
+    }
+    if ($plan.Status -ne 'Ready') { return $result }
+    if (-not $DryRun -and $ExpectedSignature -and $ExpectedSignature -ne $plan.Signature) {
+        $result.Status = 'Refused'; $result.ReasonCode = 'Changed'; $result.Reason = Get-TpmBaselineReasonText 'Changed'
+        return $result
+    }
     $result.Added = $plan.AddCount
     $result.ApiChanged = $plan.NeedsApiChange
     if ($DryRun) { $result.Status = 'WouldChange'; return $result }
     $original = [System.IO.File]::ReadAllBytes($ProfilePath)
+    $doc = $plan.Doc
     try {
         # One backup covers a whole batch: the first write makes it, later writes reuse it.
         if ($null -ne $BackupState -and $null -ne $BackupState.Backup) { $result.Backup = $BackupState.Backup }
         else {
-            $result.Backup = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $UserProfilesDir -Label 'XboxStarter'
+            $result.Backup = New-TpmVerifiedUserProfilesBackup -UserProfilesDir $UserProfilesDir -Label 'ControllerLayout'
             if ($null -ne $BackupState) { $BackupState.Backup = $result.Backup }
         }
         if (-not $result.Backup.Verified) { throw 'The safety backup could not be verified.' }
+        $beforeXml = @(Get-ButtonNodes $doc | ForEach-Object { $_.OuterXml })
         foreach ($row in @($plan.Rows | Where-Object Action -eq 'Add')) { Add-TpmXInputBinding -Doc $doc -ButtonNode $row.Node -Code $row.Code }
         if ($plan.NeedsApiChange -and -not (Set-ProfileInputApi $doc 'XInput')) { throw 'The Input API could not be set.' }
         Save-XmlMaybe $doc $ProfilePath $false
-        $check = Get-TpmXboxStarterPlan -Doc (Read-Xml $ProfilePath)
-        if ($check.AddCount -ne 0 -or $check.NeedsApiChange) { throw 'The saved profile did not read back correctly.' }
-        $result.Status = 'Changed'
+        $problem = Test-TpmBaselineWritten -Doc (Read-Xml $ProfilePath) -Plan $plan -BeforeXml $beforeXml
+        if (-not $problem -and (Get-FileHash -LiteralPath $plan.TemplatePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $plan.TemplateSha256) { $problem = 'TeknoParrot''s game file changed while TPM was working.' }
+        if ($problem) { throw ('The saved profile did not read back correctly. ' + $problem) }
+        $result.Status = 'Changed'; $result.Verified = $true
     } catch {
         [System.IO.File]::WriteAllBytes($ProfilePath, $original)
         $result.Status = 'Failed'; $result.Reason = $_.Exception.Message; $result.Added = 0; $result.ApiChanged = $false
+        $restored = [System.IO.File]::ReadAllBytes($ProfilePath)
+        if ($restored.Length -ne $original.Length -or [System.Convert]::ToBase64String($restored) -ne [System.Convert]::ToBase64String($original)) { $result.Reason += ' The original file could not be put back exactly. Use Restore backup in the main menu.' }
     }
     return $result
 }
-# Applies the starter layout to many profile files with ONE backup. A failed backup stops every later write.
-function Invoke-TpmXboxStarterBatch {
-    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string[]]$ProfilePaths, [bool]$DryRun = $true)
-    $state = @{ Backup = $null }
+
+# Applies the layout to many profile files with ONE backup. A failed backup stops every later write.
+# Signatures maps a profile path to the Signature its approved preview had.
+function Invoke-TpmBaselineBatch {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string[]]$ProfilePaths, [Parameter(Mandatory)][string]$GameProfilesDir,
+        [Parameter(Mandatory)]$Layout, [bool]$DryRun = $true, [hashtable]$Signatures = @{}, [hashtable]$BackupState = $null
+    )
+    $state = if ($null -ne $BackupState) { $BackupState } else { @{ Backup = $null } }
     $results = New-Object System.Collections.ArrayList
     foreach ($p in $ProfilePaths) {
         if (-not $DryRun -and $null -ne $state.Backup -and -not $state.Backup.Verified) {
-            [void]$results.Add([pscustomobject]@{ Path = $p; Status = 'Failed'; Added = 0; Kept = 0; Missing = 0; ApiChanged = $false; Backup = $state.Backup; Reason = 'The safety backup could not be verified.' })
+            [void]$results.Add([pscustomobject]@{ Path = $p; Code = [System.IO.Path]::GetFileNameWithoutExtension($p); Title = [System.IO.Path]::GetFileNameWithoutExtension($p); Status = 'Failed'; Added = 0; Kept = 0; NotInGame = 0; ApiChanged = $false; Backup = $state.Backup; Reason = 'The safety backup could not be verified.'; ReasonCode = ''; Verified = $false; StillNeeds = @(); Signature = ''; Plan = $null })
             continue
         }
-        [void]$results.Add((Invoke-TpmXboxStarterApply -UserProfilesDir $UserProfilesDir -ProfilePath $p -DryRun $DryRun -BackupState $state))
+        [void]$results.Add((Invoke-TpmBaselineApply -UserProfilesDir $UserProfilesDir -ProfilePath $p -GameProfilesDir $GameProfilesDir -Layout $Layout -DryRun $DryRun -BackupState $state -ExpectedSignature ([string]$Signatures[$p])))
     }
     $all = @($results)
     return [pscustomobject]@{
@@ -40834,22 +42680,43 @@ function Invoke-TpmXboxStarterBatch {
         Changed     = @($all | Where-Object Status -in @('Changed', 'WouldChange')).Count
         Unchanged   = @($all | Where-Object Status -eq 'NoChange').Count
         Unsupported = @($all | Where-Object Status -eq 'Unsupported').Count
+        Refused     = @($all | Where-Object Status -eq 'Refused').Count
         Failed      = @($all | Where-Object Status -in @('Failed', 'Unreadable')).Count
         Backup      = $state.Backup
     }
 }
 
-# Plain words shown before any Xbox layout is applied or tested. Data only; the screen prints it.
+# Plain lines that sum up a batch: what was (or would be) set up and why the rest was left alone.
+function Get-TpmBaselineBatchLines {
+    param([Parameter(Mandatory)]$Batch, [bool]$DryRun = $true)
+    $lines = New-Object System.Collections.Generic.List[string]
+    $buttons = (@($Batch.Results | Where-Object { $_.Status -in @('Changed', 'WouldChange') } | ForEach-Object { $_.Added }) | Measure-Object -Sum).Sum
+    if ($Batch.Changed -gt 0) { [void]$lines.Add((($(if ($DryRun) { 'Ready to set up {0} ({1} buttons).' } else { 'Set up {0} ({1} buttons).' })) -f (Format-TpmGameCount -Count $Batch.Changed), [int]$buttons)) }
+    if ($Batch.Unchanged -gt 0) { [void]$lines.Add(('Already set up: {0}.' -f (Format-TpmGameCount -Count $Batch.Unchanged))) }
+    $left = @($Batch.Results | Where-Object { $_.Status -in @('Refused', 'Unsupported', 'Unreadable', 'Failed') })
+    if ($left.Count -gt 0) {
+        [void]$lines.Add(('Left alone: {0}.' -f (Format-TpmGameCount -Count $left.Count)))
+        foreach ($group in @($left | Group-Object { if ($_.Status -eq 'Unsupported') { 'NoXbox' } elseif ($_.ReasonCode) { $_.ReasonCode } else { $_.Status } } | Sort-Object Name)) {
+            $text = Get-TpmBaselineReasonText $group.Name
+            if (-not $text) { $text = [string]$group.Group[0].Reason }
+            [void]$lines.Add(('  {0}: {1}' -f (Format-TpmGameCount -Count $group.Count), $text))
+        }
+    }
+    return @($lines)
+}
+
+# Plain words shown before any layout is applied or tested. Data only; the screen prints it.
 function Get-TpmControllerPowerReminder {
     return @(
         'Before you start, turn on your controllers.'
-        'Wireless Xbox controllers and any other controller that needs power must be on and connected now.'
+        'Wireless controllers and any other controller that needs power must be on and connected now.'
         'If a controller is off, it cannot be found and its buttons cannot be tested.'
         'Wired controllers only need to be plugged in.'
     )
 }
+
 # Finds profile files whose name contains the typed words (spaces and case ignored). Core, no screen output.
-function Find-TpmXboxStarterProfiles {
+function Find-TpmBaselineProfiles {
     param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$Text, [int]$Max = 8)
     $needle = ([regex]::Replace($Text, '\s+', '')).ToLowerInvariant()
     if ($needle.Length -lt 2) { return @() }
@@ -40857,52 +42724,189 @@ function Find-TpmXboxStarterProfiles {
     return @($files | Where-Object { $_.BaseName.ToLowerInvariant().Contains($needle) } | Sort-Object BaseName | Select-Object -First $Max)
 }
 
-# The screen: one game at a time, because an Xbox setup turns off that game's arcade encoder. Arcade is the default.
-function Invoke-TpmXboxStarterScreen {
-    param([Parameter(Mandatory)][string]$UserProfilesDir)
+# Asks once for the layout, shows it, and lets the user change single buttons. Saves it and returns it, or $null when the
+# user goes back. A connected Xbox-style controller only pre-selects the Xbox choice; the answer is always the user's.
+function Invoke-TpmBaselineChooseScreen {
+    param([Parameter(Mandatory)][string]$StateDir, $Current = $null)
     Write-Host ''
-    Write-TpmText -Text 'Set up one game for an Xbox controller' -Color Cyan
+    Write-TpmText -Text 'Choose your controller layout' -Color Cyan
+    Write-TpmText -Text 'You choose this once. TPM uses it for every game you set up, and you can change it at any time. Nothing in your games changes now.' -Color DarkCyan
+    $presets = Get-TpmBaselinePresets
+    $keys = @($presets.Keys)
+    $default = '1'
+    try {
+        $evidence = Get-TpmControllerEvidence
+        if (@($evidence.DeviceObservations | Where-Object { $_.DeviceClass -eq 'XboxStylePad' -and $_.Confidence -eq 'High' }).Count -gt 0) { Write-TpmText -Text 'Found: an Xbox-style controller.' -Color Green }
+    } catch { Write-Log ('Baseline: the controller check could not run -- ' + $_.Exception.Message) }
+    if ($null -ne $Current) { $default = [string]([array]::IndexOf($keys, [string]$Current.Preset) + 1) }
+    Write-Host ''
+    for ($i = 0; $i -lt $keys.Count; $i++) { Write-TpmText -Text ('{0} = {1}' -f ($i + 1), $presets[$keys[$i]].Title) -Indent 4 }
+    Write-TpmText -Text 'PlayStation and Nintendo controllers work here only when something shows them to Windows as an Xbox controller. An arcade stick must be switched to its Xbox mode.' -Color DarkGray
+    $pick = Read-TpmChoice -Prompt ('  Choose 1 to {0}, or B to go back' -f $keys.Count) -Choices (@('B') + @(1..$keys.Count | ForEach-Object { [string]$_ })) -Default $default
+    if ($pick -eq 'B') { return $null }
+    $baseline = New-TpmBaseline -Preset $keys[[int]$pick - 1]
+    if ($null -ne $Current -and [string]$Current.Preset -eq $baseline.Preset) { $baseline = $Current }
+    $slots = Get-TpmBaselineSlots
+    $buttons = Get-TpmPadButtons
+    while ($true) {
+        Write-Host ''
+        foreach ($line in (Get-TpmBaselineSummaryLines -Baseline $baseline)) { Write-TpmText -Text $line -Indent 4 }
+        Write-Host ''
+        if ((Read-TpmChoice -Prompt '  K = keep this layout, C = change one button' -Choices @('K', 'C') -Default 'K') -eq 'K') { break }
+        $slotKeys = @($slots.Keys)
+        $slotRows = @($slotKeys | ForEach-Object { '{0}: {1}' -f $slots[$_], $(if ([string]::IsNullOrEmpty([string]$baseline.Slots[$_])) { 'empty' } else { [string]$baseline.Slots[$_] }) })
+        $slotIndex = Read-TpmNumberedListChoice -Rows $slotRows -Prompt '  Which game control? (number, or B to go back)' -Heading 'Game controls:' -Visible $slotRows.Count
+        if ($slotIndex -lt 0) { continue }
+        $padRows = @(@($buttons.Keys) + @('Empty (no button)'))
+        $padIndex = Read-TpmNumberedListChoice -Rows $padRows -Prompt ('  Which pad button for {0}? (number, or B to go back)' -f $slots[$slotKeys[$slotIndex]]) -Heading 'Pad buttons:' -Visible $padRows.Count
+        if ($padIndex -lt 0) { continue }
+        $chosen = if ($padIndex -ge $buttons.Count) { '' } else { [string]@($buttons.Keys)[$padIndex] }
+        $trial = [pscustomobject]@{ Schema = $baseline.Schema; Preset = $baseline.Preset; SelectionSource = 'UserSelected'; Slots = [ordered]@{} }
+        foreach ($key in $baseline.Slots.Keys) { $trial.Slots[$key] = [string]$baseline.Slots[$key] }
+        $trial.Slots[$slotKeys[$slotIndex]] = $chosen
+        $problems = @(Test-TpmBaseline -Baseline $trial)
+        if ($problems.Count -gt 0) { Write-TpmText -Text ($problems -join ' ') -Color Yellow; Write-TpmText -Text 'Pick a different button, or change the other control first. Nothing was changed.' -Color Yellow; continue }
+        $baseline = $trial
+    }
+    Save-TpmBaseline -StateDir $StateDir -Baseline $baseline
+    Write-Log ('Baseline: layout saved: {0}. {1}' -f $baseline.Preset, (Get-TpmBaselineLayoutSource))
+    Write-TpmText -Text 'Layout saved.' -Color Green
+    return $baseline
+}
+
+# One undo question for a whole run: puts every game's settings back from the backup made before the first change.
+function Invoke-TpmBaselineUndoPrompt {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, $Backup)
+    $undoFolder = if ($null -ne $Backup) { [string]$Backup.Path } else { '' }
+    if (-not $undoFolder -or (Read-TpmYesNo -Prompt '  Undo this and put your game settings back as they were? (Y/N)' -Default 'N') -ne 'Y') { return }
+    $undo = Invoke-TpmProgressGroup -Title 'Undo controller change' -Action { Invoke-RestoreBackup -userProfilesDir $UserProfilesDir -SelectedBackupPath $undoFolder -AlreadyConfirmed }
+    Write-Log ('Baseline: undo requested; restore reported {0}' -f [string]$undo.Outcome)
+    Write-TpmText -Text ([string]$undo.Summary) -Color $(if ($undo.Outcome -eq 'SUCCEEDED') { 'Green' } else { 'Yellow' })
+}
+
+# Writes the preview for a batch: the plain summary, and the per-game list behind Details.
+function Write-TpmBaselineBatchPreview {
+    param([Parameter(Mandatory)]$Batch)
+    foreach ($line in (Get-TpmBaselineBatchLines -Batch $Batch -DryRun $true)) { Write-TpmText -Text $line -Color DarkCyan }
+    foreach ($r in @($Batch.Results)) {
+        Write-Log ('Baseline preview: {0}: status={1} add={2} keep={3} reason={4}' -f $r.Code, $r.Status, $r.Added, $r.Kept, $r.ReasonCode)
+    }
+}
+
+# The details list for a batch preview: one block per game that would change.
+function Get-TpmBaselineBatchDetailBlocks {
+    param([Parameter(Mandatory)]$Batch)
+    $blocks = New-Object System.Collections.Generic.List[object]
+    foreach ($r in @($Batch.Results | Where-Object Status -eq 'WouldChange')) { [void]$blocks.Add(@{ Heading = $r.Title; Lines = @(Get-TpmBaselinePlanLines -Plan $r.Plan) }) }
+    $left = @($Batch.Results | Where-Object { $_.Status -in @('Refused', 'Unsupported', 'Unreadable') })
+    if ($left.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'Games left alone'; Lines = @($left | ForEach-Object { '{0}: {1}' -f $_.Title, $(if ($_.Reason) { $_.Reason } else { $_.Status }) }) }) }
+    return $blocks.ToArray()
+}
+
+# The screen for "set up games with my layout": one game, all games with one approval, or game by game.
+function Invoke-TpmBaselineScreen {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$GameProfilesDir, [Parameter(Mandatory)][string]$StateDir)
+    Write-Host ''
+    Write-TpmText -Text 'Set up games with my controller layout' -Color Cyan
     foreach ($line in (Get-TpmControllerPowerReminder)) { Write-TpmText -Text $line -Color DarkCyan }
+    $baseline = Read-TpmBaseline -StateDir $StateDir
+    if ($null -eq $baseline) {
+        Write-TpmText -Text 'You have not chosen a controller layout yet.' -Color DarkCyan
+        $baseline = Invoke-TpmBaselineChooseScreen -StateDir $StateDir
+        if ($null -eq $baseline) { return }
+    }
+    $layout = @(Get-TpmBaselineLayout -Baseline $baseline)
+    $presetTitle = (Get-TpmBaselinePresets)[$baseline.Preset].Title
     Write-Host ''
-    $typed = [string](Read-HostSafe '  Type part of the game name (or press Enter to go back)')
-    if ([string]::IsNullOrWhiteSpace($typed)) { return }
-    $found = @(Find-TpmXboxStarterProfiles -UserProfilesDir $UserProfilesDir -Text $typed)
-    if ($found.Count -eq 0) { Write-TpmText -Text 'No game matched that. Try fewer letters.' -Color Yellow; return }
-    $titles = @($found | ForEach-Object { try { Get-TpmProfileFriendlyTitle -Doc (Read-Xml $_.FullName) -BaseName $_.BaseName } catch { $_.BaseName } })
-    $index = Read-TpmNumberedListChoice -Rows $titles -Prompt '  Which game? (number, or B to go back)' -Heading 'These games matched:'
-    if ($index -lt 0) { return }
-    $profilePath = $found[$index].FullName
-    $title = $titles[$index]
-    Write-Host ''
-    Write-TpmText -Text ('How will you play {0}?' -f $title) -Color Cyan
-    Write-TpmText -Text 'A = arcade controls (nothing changes)' -Indent 4
-    Write-TpmText -Text 'X = Xbox controller (this game may stop using the arcade encoder)' -Indent 4
-    if ((Read-TpmChoice -Prompt '  Choose A or X' -Choices @('A', 'X') -Default 'A') -ne 'X') {
-        Write-TpmText -Text 'Nothing changed. This game keeps its arcade controls.' -Color Green
-        Write-Log ('XboxStarter: {0}: arcade chosen, no change.' -f $title)
+    Write-TpmText -Text ('Your layout: {0}. (Choose 3 in the Propagate Controls menu to change it.)' -f $presetTitle) -Color DarkCyan
+    Write-TpmText -Text '1 = one game' -Indent 4
+    Write-TpmText -Text '2 = all my games at once (you see a preview and approve once)' -Indent 4
+    Write-TpmText -Text '3 = game by game (you confirm each one)' -Indent 4
+    $mode = Read-TpmChoice -Prompt '  Choose 1, 2 or 3' -Choices @('1', '2', '3') -Default '1'
+    $backupState = @{ Backup = $null }
+    if ($mode -eq '1') {
+        $typed = [string](Read-HostSafe '  Type part of the game name (or press Enter to go back)')
+        if ([string]::IsNullOrWhiteSpace($typed)) { return }
+        $found = @(Find-TpmBaselineProfiles -UserProfilesDir $UserProfilesDir -Text $typed)
+        if ($found.Count -eq 0) { Write-TpmText -Text 'No game matched that. Try fewer letters.' -Color Yellow; return }
+        $titles = @($found | ForEach-Object { try { Get-TpmProfileFriendlyTitle -Doc (Read-Xml $_.FullName) -BaseName $_.BaseName } catch { $_.BaseName } })
+        $index = Read-TpmNumberedListChoice -Rows $titles -Prompt '  Which game? (number, or B to go back)' -Heading 'These games matched:'
+        if ($index -lt 0) { return }
+        $title = $titles[$index]
+        # What TPM knows about this game's controls right now (read-only), in plain words.
+        try {
+            $coverage = Get-TpmControlCoverage -Code $found[$index].BaseName -UserProfilesDir $UserProfilesDir -GameProfilesDir $GameProfilesDir
+            if ($null -ne $coverage) { Write-Host ''; foreach ($line in (Get-TpmControlCoverageLines -Inventory $coverage)) { Write-TpmText -Text $line -Color DarkCyan } }
+        } catch { Write-Log ('Baseline: the controls of {0} could not be read -- {1}' -f $title, $_.Exception.Message) }
+        Write-Host ''
+        Write-TpmText -Text ('How will you play {0}?' -f $title) -Color Cyan
+        Write-TpmText -Text 'A = arcade controls (nothing changes)' -Indent 4
+        Write-TpmText -Text ('X = my layout, {0} (this game may stop using the arcade encoder)' -f $presetTitle) -Indent 4
+        if ((Read-TpmChoice -Prompt '  Choose A or X' -Choices @('A', 'X') -Default 'A') -ne 'X') {
+            Write-TpmText -Text 'Nothing changed. This game keeps its arcade controls.' -Color Green
+            Write-Log ('Baseline: {0}: arcade chosen, no change.' -f $title)
+            return
+        }
+        $batchArgs = @{ UserProfilesDir = $UserProfilesDir; ProfilePaths = @($found[$index].FullName); GameProfilesDir = $GameProfilesDir; Layout = $layout }
+        $preview = Invoke-TpmBaselineBatch @batchArgs -DryRun $true
+        $r = $preview.Results[0]
+        Write-Log ('Baseline preview: {0}: status={1} add={2} keep={3} reason={4}' -f $title, $r.Status, $r.Added, $r.Kept, $r.ReasonCode)
+        if ($r.Status -eq 'Unreadable' -or $r.Status -eq 'Unsupported' -or $r.Status -eq 'Refused') { Write-TpmText -Text ($r.Reason + ' Nothing was changed.') -Color Yellow; return }
+        if ($r.Status -eq 'NoChange') { Write-TpmText -Text 'This game is already set up with your layout.' -Color Green; return }
+        Write-TpmText -Text ('Ready to set up {0} buttons.' -f $r.Added) -Color DarkCyan
+        foreach ($line in (Get-TpmBaselinePlanLines -Plan $r.Plan)) { Write-TpmText -Text $line -Indent 4 }
+        Write-TpmText -Text 'A saved copy of your game settings is made first.' -Color DarkCyan
+        if ((Read-TpmYesNo -Prompt '  Set this up now? (Y/N)' -Default 'N') -ne 'Y') { Write-TpmText -Text 'Skipped. Nothing changed.' -Color DarkGray; return }
+        $done = Invoke-TpmBaselineBatch @batchArgs -DryRun $false -Signatures @{ $found[$index].FullName = $r.Signature } -BackupState $backupState
+        $d = $done.Results[0]
+        Write-Log ('Baseline: {0}: status={1} add={2} api={3} verified={4} backup={5}' -f $title, $d.Status, $d.Added, $d.ApiChanged, $d.Verified, [string]$done.Backup.Path)
+        Write-Log ('Baseline: layout source: ' + (Get-TpmBaselineLayoutSource))
+        if ($d.Status -ne 'Changed') { Write-TpmText -Text ('The change was not made, so your game settings were left as they were. ' + $d.Reason) -Color Yellow; return }
+        Write-TpmText -Text ('Done. {0} is set up with your layout and was read back to check it. Next: make sure the controller is on, then start the game.' -f $title) -Color Green
+        Invoke-TpmBaselineUndoPrompt -UserProfilesDir $UserProfilesDir -Backup $done.Backup
         return
     }
-    $preview = Invoke-TpmXboxStarterBatch -UserProfilesDir $UserProfilesDir -ProfilePaths @($profilePath) -DryRun $true
-    $r = $preview.Results[0]
-    Write-Log ('XboxStarter preview: {0}: status={1} add={2} keep={3} missing={4} api={5}' -f $title, $r.Status, $r.Added, $r.Kept, $r.Missing, $r.ApiChanged)
-    if ($r.Status -eq 'Unsupported') { Write-TpmText -Text 'This game does not have an Xbox controller setting, so nothing was changed.' -Color Yellow; return }
-    if ($r.Status -eq 'Unreadable') { Write-TpmText -Text 'The settings file for this game could not be read, so nothing was changed.' -Color Yellow; return }
-    if ($r.Status -eq 'NoChange') { Write-TpmText -Text 'This game is already set up for an Xbox controller.' -Color Green; return }
-    Write-TpmText -Text ('Ready to set up {0} buttons for an Xbox controller.' -f $r.Added) -Color DarkCyan
-    if ($r.Kept -gt 0) { Write-TpmText -Text ('{0} buttons already had an Xbox setting and stay as they are.' -f $r.Kept) -Color DarkCyan }
-    Write-TpmText -Text 'A saved copy of your game settings is made first.' -Color DarkCyan
-    if ((Read-TpmYesNo -Prompt '  Set this up now? (Y/N)' -Default 'N') -ne 'Y') { Write-TpmText -Text 'Skipped. Nothing changed.' -Color DarkGray; return }
-    $done = Invoke-TpmXboxStarterBatch -UserProfilesDir $UserProfilesDir -ProfilePaths @($profilePath) -DryRun $false
-    $d = $done.Results[0]
-    Write-Log ('XboxStarter: {0}: status={1} add={2} api={3} backup={4}' -f $title, $d.Status, $d.Added, $d.ApiChanged, [string]$done.Backup.RootPath)
-    Write-Log ('XboxStarter: layout source: ' + (Get-TpmXboxStarterLayoutSource))
-    if ($d.Status -ne 'Changed') { Write-TpmText -Text 'The change could not be made, so your game settings were left as they were.' -Color Yellow; return }
-    Write-TpmText -Text ('Done. {0} is ready for an Xbox controller. Next: make sure the controller is on, then start the game.' -f $title) -Color Green
-    $undoFolder = [string]$done.Backup.RootPath
-    if ($undoFolder -and (Read-TpmYesNo -Prompt '  Undo this and put your game settings back as they were? (Y/N)' -Default 'N') -eq 'Y') {
-        $undo = Invoke-TpmProgressGroup -Title 'Undo controller change' -Action { Invoke-RestoreBackup -userProfilesDir $UserProfilesDir -SelectedBackupPath $undoFolder -AlreadyConfirmed }
-        Write-Log ('XboxStarter: undo requested; restore reported {0}' -f [string]$undo.Outcome)
-        Write-TpmText -Text ([string]$undo.Summary) -Color $(if ($undo.Outcome -eq 'SUCCEEDED') { 'Green' } else { 'Yellow' })
+
+    $files = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Controller layout game list' -EnumerationErrorAction SilentlyContinue | Sort-Object BaseName)
+    if ($files.Count -eq 0) { Write-TpmText -Text 'No registered games were found.' -Color Yellow; return }
+    $paths = @($files | ForEach-Object { $_.FullName })
+    $batchArgs = @{ UserProfilesDir = $UserProfilesDir; ProfilePaths = $paths; GameProfilesDir = $GameProfilesDir; Layout = $layout }
+    $preview = Invoke-TpmProgressGroup -Title 'Controller layout preview' -Action { Invoke-TpmBaselineBatch @batchArgs -DryRun $true }
+    Write-Host ''
+    Write-TpmText -Text 'Preview. Nothing has been changed yet.' -Color Cyan
+    Write-TpmBaselineBatchPreview -Batch $preview
+    if ($preview.Changed -eq 0) { Write-TpmText -Text 'No game needs your layout right now.' -Color Green; return }
+    Write-TpmText -Text 'Games you play with an arcade encoder may stop using it. Choose game by game if you are not sure.' -Color Yellow
+    $signatures = @{}
+    foreach ($r in @($preview.Results | Where-Object Status -eq 'WouldChange')) { $signatures[$r.Path] = $r.Signature }
+    $detailBlocks = @(Get-TpmBaselineBatchDetailBlocks -Batch $preview)
+    if ($mode -eq '2') {
+        Write-TpmText -Text 'A saved copy of your game settings is made first.' -Color DarkCyan
+        $go = Read-TpmYesNo -Prompt ('  Set up {0} now? (Y/N, D = details)' -f (Format-TpmGameCount -Count $preview.Changed)) -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $detailBlocks }
+        if ($go -ne 'Y') { Write-TpmText -Text 'Skipped. Nothing changed.' -Color DarkGray; return }
+        $done = Invoke-TpmProgressGroup -Title 'Controller layout' -Action { Invoke-TpmBaselineBatch @batchArgs -DryRun $false -Signatures $signatures -BackupState $backupState }
+    } else {
+        $approved = New-Object System.Collections.ArrayList
+        foreach ($r in @($preview.Results | Where-Object Status -eq 'WouldChange')) {
+            Write-Host ''
+            Write-TpmText -Text $r.Title -Color Cyan
+            foreach ($line in (Get-TpmBaselinePlanLines -Plan $r.Plan)) { Write-TpmText -Text $line -Indent 4 }
+            $answer = Read-TpmChoice -Prompt '  Set this game up? Y = yes, N = skip, S = stop' -Choices @('Y', 'N', 'S') -Default 'N'
+            if ($answer -eq 'S') { break }
+            if ($answer -eq 'Y') { [void]$approved.Add($r.Path) }
+        }
+        if ($approved.Count -eq 0) { Write-TpmText -Text 'Nothing was approved. Nothing changed.' -Color DarkGray; return }
+        $batchArgs['ProfilePaths'] = @($approved)
+        $done = Invoke-TpmProgressGroup -Title 'Controller layout' -Action { Invoke-TpmBaselineBatch @batchArgs -DryRun $false -Signatures $signatures -BackupState $backupState }
+    }
+    Write-Host ''
+    foreach ($line in (Get-TpmBaselineBatchLines -Batch $done -DryRun $false)) { Write-TpmText -Text $line -Color Green }
+    foreach ($r in @($done.Results | Where-Object { $_.Status -in @('Failed', 'Refused') })) { Write-TpmText -Text ('{0}: left as it was. {1}' -f $r.Title, $r.Reason) -Color Yellow }
+    foreach ($r in @($done.Results)) { Write-Log ('Baseline: {0}: status={1} add={2} api={3} verified={4}' -f $r.Code, $r.Status, $r.Added, $r.ApiChanged, $r.Verified) }
+    Write-Log ('Baseline: backup={0}. Layout source: {1}' -f [string]$done.Backup.Path, (Get-TpmBaselineLayoutSource))
+    if ($done.Changed -gt 0) {
+        Write-TpmText -Text 'Each changed game was read back and checked. TPM has not tested any game with a real controller.' -Color DarkCyan
+        Invoke-TpmBaselineUndoPrompt -UserProfilesDir $UserProfilesDir -Backup $done.Backup
     }
 }
 # ===== end TpmController =====
@@ -41602,7 +43606,12 @@ function Get-TpmControlPropagationSummary {
     if (-not $DryRun -and $updated -gt 0) { $next = 'Start one updated game in TeknoParrotUI and test its controls. If something is wrong, use Restore backup.' }
     elseif (-not $DryRun -and $unreadable.Count -gt 0 -and $needManual.Count -eq 0 -and $mismatched.Count -eq 0 -and $failed.Count -eq 0) { $next = 'Check the game that could not be read in TeknoParrotUI, or use Restore backup, then run this again.' }
     elseif (-not $DryRun -and $needs.Count -gt 0) { $next = 'Set up the controls above in TeknoParrotUI, then run this again.' }
-    elseif (-not $DryRun -and $designSkipped.Count -gt 0) { $next = 'In TeknoParrotUI, set up the controls of one game in each family listed above. Then run Propagate Controls (menu 3) again.' }
+    $suggest = @()
+    if (-not $DryRun -and $designSkipped.Count -gt 0) {
+        # Name one real game per family to set up, so the user is not left guessing which game to open in TeknoParrotUI.
+        $suggest = @($designSkipped | Where-Object { $_.Family -and $_.Code } | Sort-Object Family, Code | Group-Object Family | ForEach-Object { '{0}: {1}' -f $_.Name, $_.Group[0].Code })
+        if (-not $next) { $next = 'In TeknoParrotUI, set up the controls of one game of each type listed above{0}. Then run Propagate Controls (menu 3) again.' -f $(if ($suggest.Count -gt 0) { ' (for example ' + ($suggest -join '; ') + ')' } else { '' }) }
+    }
 
     $blocks = New-Object System.Collections.Generic.List[object]
     $leftAlone = New-Object System.Collections.Generic.List[string]
@@ -41624,6 +43633,7 @@ function Get-TpmControlPropagationSummary {
         [void]$blocks.Add(@{ Heading = $row.Code; Lines = $lines.ToArray() })
     }
     if ($leftAlone.Count -gt 0) { [void]$blocks.Add(@{ Heading = ('Left as they are ({0})' -f $leftAlone.Count); Lines = $leftAlone.ToArray() }) }
+    if ($suggest.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'Games to set up first'; Lines = @(@($suggest | ForEach-Object { 'Set up one game in TeknoParrotUI: ' + $_ }) + @('Then run Propagate Controls (menu 3). The other games of that type get its controls.', 'Choosing a device in the binding plan does not set up a game.')) }) }
     [void]$blocks.Add(@{ Heading = 'Counts'; Lines = @(
         ('{0}: {1}' -f $(if ($DryRun) { 'Games with proposed control copies' } else { 'Games with controls copied' }), $copied.Count),
         ('{0}: {1}' -f $(if ($DryRun) { 'Proposed settings-only changes' } else { 'Settings carried only' }), $settingsOnly.Count),
@@ -41661,41 +43671,75 @@ function Write-ControlPropagationResults {
 
 # Asks the user which control devices they have and want to use, then prints a
 # tailored plan of which game to bind with which device. This is guidance
-# only: it reads no files and changes nothing. The actual copying happens
-# later, after the user binds those games and re-runs.
+# only: it changes no game file. The answers are kept in the Manager's own
+# controls file (Read-TpmCabinetState) so the same question is never asked
+# twice. The actual copying happens later, after the user binds those games
+# and re-runs.
 function Invoke-DeviceSurvey {
+    param([string]$StateRoot = '')
 
     # Scriptblock instead of a nested function: PowerShell nested functions
     # escape into session scope after the first call, polluting the environment
     # for the rest of the session. A scriptblock stays local to this function.
     # What is connected right now (read-only). A clear match becomes the default answer; the user can always change it.
-    $evidence = Get-TpmControllerEvidence
+    $evidence = Get-TpmControllerEvidence -Salt (Get-TpmControllerSalt -StateRoot $StateRoot)
+    # What the player said before. A saved answer is the default, and the questions are skipped when the player keeps them.
+    $cabinet = Read-TpmCabinetState -StateRoot $StateRoot
+    $questions = @(Get-TpmDeviceQuestions)
     $readYesNo = {
         param([string]$q, [string]$class = '')
         $match = @($evidence.DeviceObservations | Where-Object { $class -and $_.DeviceClass -eq $class } | Select-Object -First 1)
+        $saved = Get-TpmCabinetDeviceAnswer -State $cabinet -Class $class
         $default = ''
         $note = ''
         if ($match.Count -and $match[0].Confidence -eq 'High') { $default = 'Y'; $note = ' - one is connected, press Enter for Y' }
         elseif ($match.Count) { $note = ' - may be connected' }
+        if ($default -eq '' -and $null -ne $saved) {
+            $default = $(if ($saved) { 'Y' } else { 'N' })
+            $note += $(if ($saved) { ' - you said yes last time' } else { ' - you said no last time' })
+        }
         return ((Read-TpmYesNo -Prompt "   $q$note (Y/N)" -Default $default) -eq "Y")
     }
 
     Write-Host ""
     Write-Host " Which controls do you have and want to use?" -ForegroundColor Cyan
-    Write-Host " (Answer Y or N. This only prints a plan; it changes nothing.)" -ForegroundColor DarkCyan
+    Write-TpmText -Text '(Answer Y or N. This prints a plan and changes no game file. Your answers are saved so you are not asked again.)' -Color DarkCyan -Indent 1
+    $setNotice = Get-TpmControllerSetNotice -Cabinet $cabinet -Evidence $evidence
+    if ($setNotice.Text) { Write-TpmText -Text $setNotice.Text -Color $setNotice.Color -Indent 1 }
     Write-Host ""
+
+    $sure = @($evidence.DeviceObservations | Where-Object { $_.Confidence -eq 'High' } | ForEach-Object { $_.DeviceClass })
+    $answers = @{}
+    foreach ($item in $questions) { $answers[$item.Class] = $false }
+    $toSave = @($questions | ForEach-Object { $_.Class })
+    $kept = $false
+    $quick = $false
+    # All seven answers saved: show them and ask once. A new controller of a kind the player said no to means the answers may be out of date.
+    if (@($questions | Where-Object { $null -eq (Get-TpmCabinetDeviceAnswer -State $cabinet -Class $_.Class) }).Count -eq 0) {
+        $newlyFound = @($questions | Where-Object { $sure -contains $_.Class -and (Get-TpmCabinetDeviceAnswer -State $cabinet -Class $_.Class) -eq $false })
+        if ($newlyFound.Count -gt 0) {
+            Write-TpmText -Text ' A controller was found that you said you do not have, so TPM asks again.' -Color Yellow
+        } else {
+            Write-TpmText -Text ' You answered these before:' -Color DarkCyan
+            foreach ($item in $questions) {
+                Write-TpmText -Text ('   {0}  {1}' -f $item.Question, $(if (Get-TpmCabinetDeviceAnswer -State $cabinet -Class $item.Class) { 'Yes' } else { 'No' })) -Color DarkGray
+            }
+            if ((Read-TpmYesNo -Prompt '   Keep these answers? (Y = yes, N = answer again)' -Default 'Y') -eq 'Y') {
+                foreach ($item in $questions) { $answers[$item.Class] = [bool](Get-TpmCabinetDeviceAnswer -State $cabinet -Class $item.Class) }
+                $kept = $true
+                $toSave = @()
+            }
+        }
+    }
 
     # One-screen shortcut: when a controller is clearly connected (High confidence),
     # offer to use just that, so the user answers one question instead of seven.
-    $sure = @($evidence.DeviceObservations | Where-Object { $_.Confidence -eq 'High' } | ForEach-Object { $_.DeviceClass })
-    $hasXbox = $hasArcade = $hasTrackball = $hasSpinner = $hasWheel = $hasGun = $hasKeyboard = $false
-    $quick = $false
-    if ($sure -contains 'XboxStylePad') {
+    if (-not $kept -and $sure -contains 'XboxStylePad') {
         Write-Host " Found: an Xbox-style controller." -ForegroundColor Green
         $quick = ((Read-TpmYesNo -Prompt "   Use the Xbox controller for all games? (Y = yes, N = answer the questions)" -Default 'Y') -eq 'Y')
-        if ($quick) { $hasXbox = $true }
+        if ($quick) { $answers['XboxStylePad'] = $true; $toSave = @('XboxStylePad') }
     }
-    if (-not $quick) {
+    if (-not $kept -and -not $quick) {
         # An arcade keyboard encoder looks like a keyboard to Windows, so say what we found and let the player confirm below.
         if (@($evidence.DeviceObservations | Where-Object { $_.DeviceClass -eq 'ArcadeEncoder' }).Count) {
             Write-TpmText ' Found: what looks like an arcade keyboard encoder (the box your arcade buttons plug into).' -Color Green
@@ -41704,14 +43748,19 @@ function Invoke-DeviceSurvey {
                 Write-TpmText "   Your lighting setup lists $(@($keyMap.Controls).Count) controls with their keys. You can confirm below." -Color DarkCyan
             }
         }
-        $hasXbox      = & $readYesNo "Xbox / XInput controller?" 'XboxStylePad'
-        $hasArcade    = & $readYesNo "Arcade joystick + buttons?" 'ArcadeEncoder'
-        $hasTrackball = & $readYesNo "Trackball?" 'PointerOrTrackball'
-        $hasSpinner   = & $readYesNo "Spinner (single-axis dial)?"
-        $hasWheel     = & $readYesNo "Steering wheel + pedals?" 'Wheel'
-        $hasGun       = & $readYesNo "Lightgun?" 'LightGun'
-        $hasKeyboard  = & $readYesNo "Keyboard (no game controller)?"
+        foreach ($item in $questions) { $answers[$item.Class] = & $readYesNo $item.Question $item.Class }
     }
+    if ($toSave.Count -gt 0) {
+        try {
+            foreach ($class in $toSave) { Set-TpmCabinetDevice -State $cabinet -Class $class -Has ([bool]$answers[$class]) -Source 'Asked' }
+            Save-TpmCabinetState -State $cabinet -StateRoot $StateRoot
+        } catch {
+            Write-Log ('Device survey: the answers could not be saved: {0}' -f $_.Exception.Message)
+            Write-TpmText -Text ' Your answers could not be saved this time. The plan below is still right.' -Color Yellow
+        }
+    }
+    $hasXbox = $answers['XboxStylePad']; $hasArcade = $answers['ArcadeEncoder']; $hasTrackball = $answers['PointerOrTrackball']
+    $hasSpinner = $answers['Spinner']; $hasWheel = $answers['Wheel']; $hasGun = $answers['LightGun']; $hasKeyboard = $answers['Keyboard']
 
     # Resolve one device per game family from what the user has, preferring the
     # purpose-built control and falling back to the most versatile available.
@@ -41779,6 +43828,1034 @@ function Invoke-DeviceSurvey {
     }
     Write-Log ("Device survey: detected classes={0} status={1}" -f ((@($evidence.DeviceObservations | ForEach-Object { "$($_.DeviceClass)/$($_.Confidence)" })) -join ","), $evidence.EvidenceStatus)
     Write-Log "Device survey: plan=$($plan.Count) items; xbox=$hasXbox arcade=$hasArcade trackball=$hasTrackball spinner=$hasSpinner wheel=$hasWheel gun=$hasGun keyboard=$hasKeyboard"
+}
+
+# =============================================================================
+# CONTROLLER LEARNING, EVIDENCE AND GUIDES (issues #201, #307, #267)
+# =============================================================================
+# Three things live here, all kept in the Manager's own controls folder (State\Controls) and never in a game file:
+#   - the cabinet file (cabinet.json): which kinds of controller the player has, how many players and buttons, and which key
+#     each arcade control sends (learned by pressing it, or proposed from LEDBlinky's own key map);
+#   - the evidence file (control-evidence.json): when the player said a game's controls worked, which profile revision and
+#     controls it was for, and whether a first-run Test/Service step or a calibration is still to do;
+#   - control guides: a plain per-game list of controls, shown on screen or saved as a page that can be printed.
+# Reading is separate from writing. A file that cannot be read is set aside, never overwritten unseen, and every save keeps
+# the previous file as a .bak copy. Nothing here writes a TeknoParrot profile. See docs/architecture/CONTROLLER_VERIFICATION_STORE.md.
+
+function Get-TpmControlStatePath {
+    param([string]$StateRoot = '')
+    $root = if ($StateRoot) { [System.IO.Path]::GetFullPath($StateRoot) }
+            elseif ($script:TpmOwnedLayout -and -not [string]::IsNullOrWhiteSpace([string]$script:TpmOwnedLayout.State)) { [System.IO.Path]::GetFullPath((Join-Path ([string]$script:TpmOwnedLayout.State) 'Controls')) }
+            else { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'Controls\TPM-State')) }
+    return [pscustomobject]@{ Root = $root; Cabinet = (Join-Path $root 'cabinet.json'); Evidence = (Join-Path $root 'control-evidence.json'); Salt = (Join-Path $root 'controller-salt.txt') }
+}
+
+# Read-only. Status is Missing, Ok or Unreadable; Data is the parsed JSON when Ok.
+function Read-TpmControlStateFile {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return [pscustomobject]@{ Status = 'Missing'; Data = $null } }
+    try {
+        $data = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($null -eq $data) { throw 'The file is empty.' }
+        return [pscustomobject]@{ Status = 'Ok'; Data = $data }
+    } catch {
+        return [pscustomobject]@{ Status = 'Unreadable'; Data = $null }
+    }
+}
+
+# Saves one of the two files. An unreadable file is copied aside first (and the save stops if that copy fails); a readable one
+# is kept as <name>.bak. The new text is checked before it replaces anything.
+function Save-TpmControlStateFile {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Data)
+    $current = Read-TpmControlStateFile -Path $Path
+    [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($Path))
+    if ($current.Status -eq 'Unreadable') {
+        $kept = $Path + '.unreadable-' + (Get-Date).ToString('yyyyMMddHHmmss', [System.Globalization.CultureInfo]::InvariantCulture)
+        [System.IO.File]::Copy($Path, $kept, $false)
+        Write-Log ('Controls file: {0} could not be read; a copy was kept as {1}.' -f [System.IO.Path]::GetFileName($Path), [System.IO.Path]::GetFileName($kept))
+    }
+    $copy = $(if ($current.Status -eq 'Ok') { $Path + '.bak' } else { '' })
+    Write-TpmAtomicTextFile -Path $Path -Text (ConvertTo-Json -InputObject $Data -Depth 8) -Operation 'controls file write' -ReplacedCopyPath $copy -Validate { param([string]$Written) $null -ne ($Written | ConvertFrom-Json -ErrorAction Stop) }
+}
+
+# The seven questions of the Device Survey, in order. Class is the evidence class, or a plain name when detection cannot tell.
+function Get-TpmDeviceQuestions {
+    return @(
+        [pscustomobject]@{ Class = 'XboxStylePad'; Question = 'Xbox / XInput controller?'; Label = 'an Xbox controller' }
+        [pscustomobject]@{ Class = 'ArcadeEncoder'; Question = 'Arcade joystick + buttons?'; Label = 'arcade joystick and buttons' }
+        [pscustomobject]@{ Class = 'PointerOrTrackball'; Question = 'Trackball?'; Label = 'a trackball' }
+        [pscustomobject]@{ Class = 'Spinner'; Question = 'Spinner (single-axis dial)?'; Label = 'a spinner' }
+        [pscustomobject]@{ Class = 'Wheel'; Question = 'Steering wheel + pedals?'; Label = 'a steering wheel and pedals' }
+        [pscustomobject]@{ Class = 'LightGun'; Question = 'Lightgun?'; Label = 'a light gun' }
+        [pscustomobject]@{ Class = 'Keyboard'; Question = 'Keyboard (no game controller)?'; Label = 'a keyboard' }
+    )
+}
+
+# The cabinet file with every field filled in. FileStatus says whether the file was Missing, Ok or Unreadable. Read-only.
+function Read-TpmCabinetState {
+    param([string]$StateRoot = '')
+    $file = Read-TpmControlStateFile -Path (Get-TpmControlStatePath -StateRoot $StateRoot).Cabinet
+    $state = [pscustomobject]@{ Version = 1; Devices = [pscustomobject]@{}; Players = 0; ButtonsPerPlayer = 0; EncodersWhenLearned = -1; EncoderFingerprints = $null; Keys = [pscustomobject]@{}; FileStatus = $file.Status }
+    if ($file.Status -eq 'Ok') {
+        foreach ($name in @('Devices', 'Keys')) {
+            $property = $file.Data.PSObject.Properties[$name]
+            if ($property -and $property.Value -is [System.Management.Automation.PSCustomObject]) { $state.$name = $property.Value }
+        }
+        foreach ($name in @('Players', 'ButtonsPerPlayer', 'EncodersWhenLearned')) {
+            $property = $file.Data.PSObject.Properties[$name]
+            $number = 0
+            if ($property -and [int]::TryParse([string]$property.Value, [ref]$number)) { $state.$name = $number }
+        }
+        # $null means the keys were saved before fingerprints existed (or detection could not look); an empty list means no encoder was recognized.
+        $saved = $file.Data.PSObject.Properties['EncoderFingerprints']
+        if ($saved -and $null -ne $saved.Value) {
+            $state.EncoderFingerprints = @(@($saved.Value) | Where-Object { $_ -and [string]$_.Fingerprint -match '^[0-9a-f]{64}$' } | ForEach-Object { [pscustomobject]@{ DeviceClass = 'ArcadeEncoder'; Fingerprint = [string]$_.Fingerprint } })
+        }
+    }
+    return $state
+}
+
+function Save-TpmCabinetState {
+    param([Parameter(Mandatory)]$State, [string]$StateRoot = '')
+    $data = [pscustomobject]@{ Version = 1; Devices = $State.Devices; Players = [int]$State.Players; ButtonsPerPlayer = [int]$State.ButtonsPerPlayer; EncodersWhenLearned = [int]$State.EncodersWhenLearned; EncoderFingerprints = $State.EncoderFingerprints; Keys = $State.Keys }
+    Save-TpmControlStateFile -Path (Get-TpmControlStatePath -StateRoot $StateRoot).Cabinet -Data $data
+}
+
+# Puts back the answers TPM saved before the last save (the .bak copy). The file in use becomes the new .bak copy, so doing this
+# twice undoes the undo. Nothing is changed when the older copy cannot be read. Returns $false then.
+function Restore-TpmCabinetBackup {
+    param([string]$StateRoot = '')
+    $path = (Get-TpmControlStatePath -StateRoot $StateRoot).Cabinet
+    $older = Read-TpmControlStateFile -Path ($path + '.bak')
+    if ($older.Status -ne 'Ok') { return $false }
+    Save-TpmControlStateFile -Path $path -Data $older.Data
+    return $true
+}
+
+# $true or $false when the player answered for this kind of device, $null when never asked.
+function Get-TpmCabinetDeviceAnswer {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Class)
+    $record = $State.Devices.PSObject.Properties[$Class]
+    if ($null -eq $record -or $null -eq $record.Value.PSObject.Properties['Has']) { return $null }
+    return [bool]$record.Value.Has
+}
+
+function Set-TpmCabinetDevice {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Class, [Parameter(Mandatory)][bool]$Has, [string]$Source = 'Asked')
+    $record = [pscustomobject]@{ Has = $Has; Source = $Source; AnsweredUtc = (Get-Date).ToUniversalTime().ToString('o') }
+    Add-Member -InputObject $State.Devices -NotePropertyName $Class -NotePropertyValue $record -Force
+}
+
+# Keys: control id -> @{ Key; Source }. Controls not in $Keys keep what was saved before.
+function Set-TpmCabinetKeys {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)]$Keys, [int]$Players = 0, [int]$ButtonsPerPlayer = 0)
+    foreach ($control in @($Keys.Keys)) {
+        $record = [pscustomobject]@{ Key = [string]$Keys[$control].Key; Source = [string]$Keys[$control].Source; LearnedUtc = (Get-Date).ToUniversalTime().ToString('o') }
+        Add-Member -InputObject $State.Keys -NotePropertyName ([string]$control) -NotePropertyValue $record -Force
+    }
+    if ($Players -gt 0) { $State.Players = $Players }
+    if ($ButtonsPerPlayer -gt 0) { $State.ButtonsPerPlayer = $ButtonsPerPlayer }
+}
+
+function Get-TpmCabinetKey {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Control)
+    $record = $State.Keys.PSObject.Properties[$Control]
+    if ($null -eq $record) { return '' }
+    return [string]$record.Value.Key
+}
+
+# Plain display name for a key. From Console is a .NET ConsoleKey name; from Mame is a MAME key code as LEDBlinky lists it.
+# An unknown MAME code gives '' so the player is asked instead of TPM guessing.
+function ConvertTo-TpmKeyName {
+    param([Parameter(Mandatory)][string]$Name, [ValidateSet('Console', 'Mame')][string]$From = 'Console')
+    $n = $Name.Trim()
+    if ($From -eq 'Mame') {
+        $n = $n -replace '^KEYCODE_', ''
+        $mame = @{ LCONTROL = 'Left Ctrl'; RCONTROL = 'Right Ctrl'; LALT = 'Left Alt'; RALT = 'Right Alt'; LSHIFT = 'Left Shift'; RSHIFT = 'Right Shift'
+                   SPACE = 'Space'; ENTER = 'Enter'; ESC = 'Escape'; TAB = 'Tab'; UP = 'Up arrow'; DOWN = 'Down arrow'; LEFT = 'Left arrow'; RIGHT = 'Right arrow' }
+        if ($mame.ContainsKey($n)) { return $mame[$n] }
+        if ($n -match '^[0-9A-Z]$' -or $n -match '^F\d{1,2}$') { return $n }
+        return ''
+    }
+    $console = @{ Spacebar = 'Space'; LeftArrow = 'Left arrow'; RightArrow = 'Right arrow'; UpArrow = 'Up arrow'; DownArrow = 'Down arrow' }
+    if ($console.ContainsKey($n)) { return $console[$n] }
+    if ($n -match '^D(\d)$') { return $Matches[1] }
+    if ($n -match '^NumPad(\d)$') { return ('Numpad ' + $Matches[1]) }
+    return $n
+}
+
+# The controls TPM asks about, as TeknoParrot names them (Coin1, P1ButtonStart, P1ButtonUp, P1Button1, Test, Service).
+function Get-TpmCabinetControlList {
+    param([ValidateRange(1, 4)][int]$Players = 2, [ValidateRange(1, 8)][int]$Buttons = 6)
+    $list = New-Object System.Collections.Generic.List[object]
+    for ($p = 1; $p -le $Players; $p++) {
+        [void]$list.Add([pscustomobject]@{ Control = "Coin$p"; Label = "Player $p Coin" })
+        [void]$list.Add([pscustomobject]@{ Control = "P${p}ButtonStart"; Label = "Player $p Start" })
+        foreach ($direction in @('Up', 'Down', 'Left', 'Right')) { [void]$list.Add([pscustomobject]@{ Control = "P${p}Button$direction"; Label = "Player $p joystick $direction" }) }
+        for ($b = 1; $b -le $Buttons; $b++) { [void]$list.Add([pscustomobject]@{ Control = "P${p}Button$b"; Label = "Player $p button $b" }) }
+    }
+    [void]$list.Add([pscustomobject]@{ Control = 'Test'; Label = 'the Test button' })
+    [void]$list.Add([pscustomobject]@{ Control = 'Service'; Label = 'the Service button' })
+    # Exit, Pause and Menu are shared controls many cabinets do not have, and Esc is a real answer for Exit. So TPM asks first (Optional).
+    [void]$list.Add([pscustomobject]@{ Control = 'Exit'; Label = 'the Exit button'; Optional = $true })
+    [void]$list.Add([pscustomobject]@{ Control = 'Pause'; Label = 'the Pause button'; Optional = $true })
+    [void]$list.Add([pscustomobject]@{ Control = 'Menu'; Label = 'the Menu or admin button'; Optional = $true })
+    return @($list.ToArray())
+}
+
+# Proposals from LEDBlinky's own key map (Get-TpmLedBlinkyKeyMap): control id -> key name, only for the controls asked about and
+# only for LED labels TPM recognizes. Anything else is left for the player to press.
+function Get-TpmKeysFromLedBlinkyMap {
+    param($KeyMap, [Parameter(Mandatory)][object[]]$Controls)
+    $found = [ordered]@{}
+    if ($null -eq $KeyMap -or -not [bool]$KeyMap.Found) { return $found }
+    $wanted = @{}
+    foreach ($control in $Controls) { $wanted[[string]$control.Control] = $true }
+    foreach ($led in @($KeyMap.Controls)) {
+        $label = ([string]$led.Control).ToUpperInvariant() -replace '[_\s]', ''
+        $id = ''
+        if ($label -match '^P(\d)B(?:UTTON)?(\d+)$') { $id = 'P{0}Button{1}' -f $Matches[1], [int]$Matches[2] }
+        elseif ($label -match '^P(\d)START$') { $id = 'P{0}ButtonStart' -f $Matches[1] }
+        elseif ($label -match '^START(\d)$') { $id = 'P{0}ButtonStart' -f $Matches[1] }
+        elseif ($label -match '^COIN(\d)$') { $id = 'Coin{0}' -f $Matches[1] }
+        elseif ($label -match '^P(\d)(?:JOYSTICK|JOY|STICK)?(UP|DOWN|LEFT|RIGHT)$') { $id = 'P{0}Button{1}{2}' -f $Matches[1], $Matches[2].Substring(0, 1), $Matches[2].Substring(1).ToLowerInvariant() }
+        if (-not $id -or -not $wanted.ContainsKey($id) -or $found.Contains($id)) { continue }
+        $code = @($led.InputCodes | Where-Object { ([string]$_) -like 'KEYCODE_*' } | Select-Object -First 1)
+        if ($code.Count -eq 0) { continue }
+        $name = ConvertTo-TpmKeyName -Name ([string]$code[0]) -From Mame
+        if ($name) { $found[$id] = $name }
+    }
+    return $found
+}
+
+function Test-TpmKeyPressAvailable { return (-not [Console]::IsInputRedirected) }
+
+function Initialize-TpmKeyProbe {
+    if (-not ('TpmKeyProbe' -as [type])) {
+        Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class TpmKeyProbe { [DllImport("user32.dll")] static extern short GetAsyncKeyState(int k); public static bool Down(int k) { return (GetAsyncKeyState(k) & 0x8000) != 0; } public static int Modifier() { int[] keys = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5 }; foreach (int k in keys) { if (Down(k)) return k; } return 0; } }'
+    }
+}
+
+# Windows virtual-key codes of the six Shift, Ctrl and Alt keys, with the plain names TPM shows.
+function Get-TpmModifierNames { return @{ 160 = 'Left Shift'; 161 = 'Right Shift'; 162 = 'Left Ctrl'; 163 = 'Right Ctrl'; 164 = 'Left Alt'; 165 = 'Right Alt' } }
+
+# The key name inside what a key reader returned: a plain name, or an object with Key.
+function Get-TpmPressKey {
+    param($Press)
+    if ($null -eq $Press) { return '' }
+    if ($Press -is [string]) { return $Press }
+    return [string]$Press.Key
+}
+
+# Waits for one key press. Returns '' when nothing was pressed in time, otherwise { Key; Also; Held }:
+#   Key   the plain name ('Escape' for Esc). Ctrl, Alt and Shift do not reach the console on their own, so Windows' key state is watched too.
+#   Also  other keys that arrived within 80 ms of it (a button that sends two keys, or two buttons on one wire).
+#   Held  the key was still down 3 seconds later (a stuck or jammed button).
+function Read-TpmLearnKey {
+    param([int]$TimeoutSeconds = 30)
+    Initialize-TpmKeyProbe
+    $modifierNames = Get-TpmModifierNames
+    while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) }
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $first = ''; $firstCode = 0
+        if ([Console]::KeyAvailable) { $info = [Console]::ReadKey($true); $first = ConvertTo-TpmKeyName -Name $info.Key.ToString(); $firstCode = [int]$info.Key }
+        else { $modifier = [TpmKeyProbe]::Modifier(); if ($modifier -ne 0) { $first = [string]$modifierNames[[int]$modifier]; $firstCode = $modifier } }
+        if ($first) {
+            Start-Sleep -Milliseconds 80
+            $also = New-Object System.Collections.Generic.List[string]
+            while ([Console]::KeyAvailable) { $name = ConvertTo-TpmKeyName -Name ([Console]::ReadKey($true).Key.ToString()); if ($name -ne $first -and -not $also.Contains($name)) { [void]$also.Add($name) } }
+            foreach ($code in 160..165) { $name = [string]$modifierNames[$code]; if ($code -ne $firstCode -and $name -ne $first -and [TpmKeyProbe]::Down($code) -and -not $also.Contains($name)) { [void]$also.Add($name) } }
+            $stopWaiting = (Get-Date).AddSeconds(3)
+            while ([TpmKeyProbe]::Down($firstCode) -and (Get-Date) -lt $stopWaiting) { Start-Sleep -Milliseconds 20 }
+            $held = [TpmKeyProbe]::Down($firstCode)
+            while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) }
+            return [pscustomobject]@{ Key = $first; Also = @($also.ToArray()); Held = $held }
+        }
+        Start-Sleep -Milliseconds 25
+    }
+    return ''
+}
+
+# Watches the keyboard while nobody should be touching the cabinet. Returns the names of keys that were pressed or kept arriving
+# on their own (a button stuck down, a wire shorted): empty when all stayed quiet.
+function Get-TpmKeysPressedOnTheirOwn {
+    param([int]$Seconds = 2)
+    Initialize-TpmKeyProbe
+    $modifierNames = Get-TpmModifierNames
+    $names = New-Object System.Collections.Generic.List[string]
+    Start-Sleep -Milliseconds 400
+    while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) }
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        while ([Console]::KeyAvailable) { $name = ConvertTo-TpmKeyName -Name ([Console]::ReadKey($true).Key.ToString()); if (-not $names.Contains($name)) { [void]$names.Add($name) } }
+        foreach ($code in 160..165) { if ([TpmKeyProbe]::Down($code) -and -not $names.Contains([string]$modifierNames[$code])) { [void]$names.Add([string]$modifierNames[$code]) } }
+        Start-Sleep -Milliseconds 25
+    }
+    return @($names.ToArray())
+}
+
+# Asks for each control in turn ("Press Player 1 Start") and records the key. -ReadKey is the key reader (a script block, so tests
+# need no keyboard); it returns a key name or an object with Key, Also and Held (see Read-TpmLearnKey). Esc skips a control, a key
+# already given to another control is refused, and nothing pressed asks whether to stop. -Known holds keys already given
+# (control id -> key name) so they count for the duplicate check.
+# Two things are only reported, never decided: a press that also sent another key (Together), and a button still down after
+# 3 seconds (Held). The first key is kept either way. Together lists, per control, the other keys that came with it.
+function Invoke-TpmLearnKeys {
+    param([Parameter(Mandatory)][object[]]$Controls, [Parameter(Mandatory)][scriptblock]$ReadKey, [System.Collections.IDictionary]$Known = $null)
+    $learned = [ordered]@{}
+    $skipped = New-Object System.Collections.Generic.List[string]
+    $held = New-Object System.Collections.Generic.List[string]
+    $together = [ordered]@{}
+    $stopped = $false
+    $number = 0
+    foreach ($control in $Controls) {
+        $number++
+        $optional = ($null -ne $control.PSObject.Properties['Optional'] -and [bool]$control.Optional)
+        if ($optional -and (Read-TpmYesNo -Prompt ('  ({0} of {1}) Does your cabinet have {2}? (Y/N)' -f $number, $Controls.Count, $control.Label) -Default 'N') -ne 'Y') { [void]$skipped.Add([string]$control.Label); continue }
+        while ($true) {
+            Write-TpmText -Text ('({0} of {1}) Press {2}   ({3})' -f $number, $Controls.Count, $control.Label, $(if ($optional) { 'Esc counts as a key here' } else { 'Esc = skip' })) -Color Cyan
+            $press = & $ReadKey
+            $key = Get-TpmPressKey -Press $press
+            if ($key -eq '') {
+                if ((Read-TpmYesNo -Prompt '  Nothing was pressed. Stop learning here? (Y/N)' -Default 'N') -eq 'Y') { $stopped = $true; break }
+                continue
+            }
+            if ($key -eq 'Escape' -and -not $optional) { [void]$skipped.Add([string]$control.Label); break }
+            $owner = ''
+            foreach ($name in @($learned.Keys)) { if ($learned[$name] -eq $key) { $owner = $name } }
+            if ($null -ne $Known) { foreach ($name in @($Known.Keys)) { if ([string]$Known[$name] -eq $key -and -not $owner) { $owner = $name } } }
+            if ($owner) {
+                $ownerLabel = @($Controls | Where-Object { $_.Control -eq $owner } | ForEach-Object { $_.Label } | Select-Object -First 1)
+                Write-TpmText -Text ('That key ({0}) is already used for {1}. Press a different control, or Esc to skip.' -f $key, $(if ($ownerLabel.Count) { $ownerLabel[0] } else { $owner })) -Color Yellow
+                continue
+            }
+            $learned[[string]$control.Control] = $key
+            Write-TpmText -Text ('Got it: {0}' -f $key) -Color Green -Indent 4
+            $also = @(); $isHeld = $false
+            if ($press -isnot [string] -and $null -ne $press) { $also = @($press.Also | Where-Object { $_ }); $isHeld = [bool]$press.Held }
+            if ($also.Count -gt 0) {
+                $together[[string]$control.Control] = $also
+                Write-TpmText -Text ('Pressing this also sent {0}. TPM kept {1}. Some encoders do this on purpose. Two buttons on one wire can do it too.' -f ($also -join ' and '), $key) -Color Yellow -Indent 4
+            }
+            if ($isHeld) {
+                [void]$held.Add([string]$control.Label)
+                Write-TpmText -Text 'This button was still down after 3 seconds. It may be stuck. Check it before you rely on it.' -Color Yellow -Indent 4
+            }
+            break
+        }
+        if ($stopped) { break }
+    }
+    # The same extra key arriving with two or more different controls is the clear sign of something wired together or stuck.
+    $labels = @{}
+    foreach ($control in $Controls) { $labels[[string]$control.Control] = [string]$control.Label }
+    $byKey = @{}
+    foreach ($id in $together.Keys) { foreach ($extra in $together[$id]) { if (-not $byKey.ContainsKey($extra)) { $byKey[$extra] = New-Object System.Collections.Generic.List[string] }; [void]$byKey[$extra].Add($labels[$id]) } }
+    foreach ($extra in @($byKey.Keys | Sort-Object)) {
+        if ($byKey[$extra].Count -ge 2) { Write-TpmText -Text ('{0} came along with {1} different controls ({2}). Something may be wired together, or stuck.' -f $extra, $byKey[$extra].Count, ($byKey[$extra] -join ', ')) -Color Yellow }
+    }
+    return [pscustomobject]@{ Keys = $learned; Skipped = @($skipped.ToArray()); Stopped = $stopped; Together = $together; Held = @($held.ToArray()) }
+}
+
+# Plain lines about what the cabinet file holds. Used by the My controls screen and the printable cabinet page.
+function Get-TpmCabinetSummaryLines {
+    param([Parameter(Mandatory)]$State)
+    $lines = New-Object System.Collections.Generic.List[string]
+    $have = @(Get-TpmDeviceQuestions | Where-Object { (Get-TpmCabinetDeviceAnswer -State $State -Class $_.Class) -eq $true } | ForEach-Object { $_.Label })
+    $answered = @(Get-TpmDeviceQuestions | Where-Object { $null -ne (Get-TpmCabinetDeviceAnswer -State $State -Class $_.Class) }).Count
+    if ($answered -eq 0) { [void]$lines.Add('You have not told TPM which controls you have yet.') }
+    elseif ($have.Count -eq 0) { [void]$lines.Add('You told TPM you have none of the listed controls.') }
+    else { [void]$lines.Add('You told TPM you have: ' + ($have -join ', ') + '.') }
+    $keyCount = @($State.Keys.PSObject.Properties).Count
+    if ($keyCount -gt 0) {
+        $text = ('TPM knows the key for {0} of your arcade controls' -f $keyCount)
+        if ($State.Players -gt 0) { $text += (' ({0} {1}, {2} {3} each)' -f $State.Players, $(if ($State.Players -eq 1) { 'player' } else { 'players' }), $State.ButtonsPerPlayer, $(if ($State.ButtonsPerPlayer -eq 1) { 'button' } else { 'buttons' })) }
+        [void]$lines.Add($text + '.')
+    } else {
+        [void]$lines.Add('TPM has not learned which key each arcade control sends.')
+    }
+    return @($lines.ToArray())
+}
+
+# The key layout that MAME and Ultimarc I-PAC boards both ship with (control id -> key name). Sources: MAME's default keys page
+# (docs.mamedev.org/usingmame/defaultkeys.html) and Ultimarc's "Default Keycode Table" (ultimarc.com/control-interfaces/i-pacs/i-pac2/).
+# Only controls where the two lists agree are here. They differ for player 2 buttons 5 to 8 and for player 4, and neither
+# lists Test or Service, so those are left out. An encoder can be changed, so these keys are only used after a check.
+function Get-TpmStandardArcadeKeys {
+    $keys = [ordered]@{}
+    $coin = @('5', '6', '7', '8'); $start = @('1', '2', '3', '4')
+    for ($p = 1; $p -le 4; $p++) { $keys["Coin$p"] = $coin[$p - 1]; $keys["P${p}ButtonStart"] = $start[$p - 1] }
+    $sticks = @{ 1 = @('Up arrow', 'Down arrow', 'Left arrow', 'Right arrow'); 2 = @('R', 'F', 'D', 'G'); 3 = @('I', 'K', 'J', 'L') }
+    $buttons = @{ 1 = @('Left Ctrl', 'Left Alt', 'Space', 'Left Shift', 'Z', 'X', 'C', 'V'); 2 = @('A', 'S', 'Q', 'W'); 3 = @('Right Ctrl', 'Right Shift', 'Enter') }
+    foreach ($p in 1..3) {
+        $i = 0
+        foreach ($direction in @('Up', 'Down', 'Left', 'Right')) { $keys["P${p}Button$direction"] = $sticks[$p][$i]; $i++ }
+        $n = 0
+        foreach ($key in $buttons[$p]) { $n++; $keys["P${p}Button$n"] = $key }
+    }
+    return $keys
+}
+
+# Asks the player to press player 1 Start and player 1 button 1, and passes only when both send the key the standard layout says.
+# A guess about the layout is never kept on its own: a changed encoder fails this check. Reason: NoCheck, NothingPressed or Different.
+function Test-TpmStandardKeysSpotCheck {
+    param([Parameter(Mandatory)]$Proposed, [Parameter(Mandatory)][object[]]$Controls, [Parameter(Mandatory)][scriptblock]$ReadKey)
+    $checks = @($Controls | Where-Object { $_.Control -in @('P1ButtonStart', 'P1Button1') -and $Proposed.Contains([string]$_.Control) })
+    if ($checks.Count -eq 0) { return [pscustomobject]@{ Passed = $false; Reason = 'NoCheck'; Got = '' } }
+    foreach ($check in $checks) {
+        Write-TpmText -Text ('To check, press {0}.' -f $check.Label) -Color Cyan
+        $key = Get-TpmPressKey -Press (& $ReadKey)
+        if ($key -eq '' -or $key -eq 'Escape') { return [pscustomobject]@{ Passed = $false; Reason = 'NothingPressed'; Got = '' } }
+        if ($key -ne [string]$Proposed[[string]$check.Control]) { return [pscustomobject]@{ Passed = $false; Reason = 'Different'; Got = $key } }
+    }
+    return [pscustomobject]@{ Passed = $true; Reason = ''; Got = '' }
+}
+
+# How many arcade encoders detection can see right now at Medium or High confidence; -1 when detection could not look.
+function Get-TpmEncoderCount {
+    param($Evidence)
+    if ($null -eq $Evidence -or [string]$Evidence.EvidenceStatus -ne 'Observed') { return -1 }
+    return [int](@($Evidence.DeviceObservations | Where-Object { $_.DeviceClass -eq 'ArcadeEncoder' -and $_.Confidence -in @('High', 'Medium') } | Measure-Object -Property Count -Sum).Sum)
+}
+
+# A hint, never a decision: the number of encoders TPM could see when the buttons were learned differs from now. The count is a
+# note about the past. It is not evidence about the present, and no vendor or product number is involved.
+function Get-TpmEncoderChangeNotice {
+    param([Parameter(Mandatory)]$Cabinet, [Parameter(Mandatory)][int]$EncodersNow)
+    $then = [int]$Cabinet.EncodersWhenLearned
+    if (@($Cabinet.Keys.PSObject.Properties).Count -eq 0 -or $then -lt 0 -or $EncodersNow -lt 0 -or $then -eq $EncodersNow) { return '' }
+    return ('When you taught TPM your buttons it could see {0} arcade encoder{1}. Now it sees {2}. If you changed your encoder, learn your buttons again.' -f $then, $(if ($then -eq 1) { '' } else { 's' }), $EncodersNow)
+}
+
+# The one-way salt for controller fingerprints. It lives in the Controls state folder, is made once, and never leaves the PC.
+# Reading never writes. With -Create a missing (or damaged) salt is made. Returns '' when there is none or it could not be made.
+function Get-TpmControllerSalt {
+    param([string]$StateRoot = '', [switch]$Create)
+    try {
+        $path = (Get-TpmControlStatePath -StateRoot $StateRoot).Salt
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $text = (Get-Content -LiteralPath $path -Raw -Encoding UTF8 -ErrorAction Stop).Trim()
+            if ($text -match '^[0-9a-f]{32}$') { return $text }
+        }
+        if (-not $Create) { return '' }
+        $bytes = New-Object byte[] 16
+        $random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $random.GetBytes($bytes) } finally { $random.Dispose() }
+        $salt = (@($bytes | ForEach-Object { $_.ToString('x2') }) -join '')
+        [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($path))
+        Write-TpmAtomicTextFile -Path $path -Text $salt -Operation 'controller key write' -Validate { param([string]$Written) $Written.Trim() -match '^[0-9a-f]{32}$' }
+        return $salt
+    } catch {
+        Write-Log 'Controls: the key used to recognize your controllers could not be read or made.'
+        return ''
+    }
+}
+
+# The fingerprints of the arcade encoders in an evidence object. $null when there is nothing to compare (detection could not look,
+# or no salt was given); an empty list when it looked and recognized none. They are one-way hashes, never shown as a device name.
+function Get-TpmEncoderFingerprints {
+    param($Evidence)
+    if ($null -eq $Evidence -or [string]$Evidence.EvidenceStatus -ne 'Observed') { return $null }
+    $property = $Evidence.PSObject.Properties['DeviceFingerprints']
+    if ($null -eq $property -or $null -eq $property.Value) { return $null }
+    return , @(@($property.Value) | Where-Object { $_.DeviceClass -eq 'ArcadeEncoder' } | ForEach-Object { [pscustomobject]@{ DeviceClass = 'ArcadeEncoder'; Fingerprint = [string]$_.Fingerprint } })
+}
+
+# One plain sentence about whether the controllers are the same as when the player taught TPM the keys. A HINT only: it never
+# changes a saved key and never marks anything Verified. State is NoKeys, Same, Added, Removed, Changed, CouldNotCheck or NoNote
+# (keys saved before fingerprints existed, and the count did not change). Only makers TPM recognizes can be compared.
+function Get-TpmControllerSetNotice {
+    param([Parameter(Mandatory)]$Cabinet, $Evidence)
+    $result = { param($State, $Text, $Color) [pscustomobject]@{ State = $State; Text = $Text; Color = $Color } }
+    if (@($Cabinet.Keys.PSObject.Properties).Count -eq 0) { return & $result 'NoKeys' '' 'DarkGray' }
+    $cannot = 'TPM could not look at your controllers, so it cannot tell if they changed since you taught it your keys.'
+    if ($null -eq $Evidence -or [string]$Evidence.EvidenceStatus -ne 'Observed') { return & $result 'CouldNotCheck' $cannot 'DarkGray' }
+    $then = $Cabinet.EncoderFingerprints
+    if ($null -eq $then) {
+        $countNotice = Get-TpmEncoderChangeNotice -Cabinet $Cabinet -EncodersNow (Get-TpmEncoderCount -Evidence $Evidence)
+        return & $result $(if ($countNotice) { 'Changed' } else { 'NoNote' }) $countNotice 'Yellow'
+    }
+    $now = Get-TpmEncoderFingerprints -Evidence $Evidence
+    if ($null -eq $now) { return & $result 'CouldNotCheck' $cannot 'DarkGray' }
+    $thenIds = @($then | ForEach-Object { [string]$_.Fingerprint })
+    $nowIds = @($now | ForEach-Object { [string]$_.Fingerprint })
+    if ($thenIds.Count -eq 0 -and $nowIds.Count -eq 0) { return & $result 'CouldNotCheck' 'TPM does not recognize your arcade encoder by itself, so it cannot tell if you changed it.' 'DarkGray' }
+    $added = @($nowIds | Where-Object { $thenIds -notcontains $_ })
+    $removed = @($thenIds | Where-Object { $nowIds -notcontains $_ })
+    $learnAgain = ' If you changed your controller, learn your buttons again. Your saved keys were not changed.'
+    if ($added.Count -eq 0 -and $removed.Count -eq 0) {
+        return & $result 'Same' ('TPM sees the same arcade encoder{0} as when you taught it your keys.' -f $(if ($nowIds.Count -eq 1) { '' } else { 's' })) 'Green'
+    }
+    if ($removed.Count -eq 0) { return & $result 'Added' ('A new arcade encoder is plugged in that was not there when you taught TPM your keys.' + $learnAgain) 'Yellow' }
+    if ($added.Count -eq 0) { return & $result 'Removed' ('An arcade encoder that was plugged in when you taught TPM your keys is not plugged in now.' + $learnAgain) 'Yellow' }
+    return & $result 'Changed' ('Your arcade encoders are different from when you taught TPM your keys.' + $learnAgain) 'Yellow'
+}
+
+# The screen that learns the arcade buttons. Nothing is saved until the player says Y at the end.
+function Invoke-TpmButtonLearning {
+    param([string]$StateRoot = '')
+    Write-Host ''
+    Write-TpmText -Text 'Learn my arcade buttons' -Color Cyan
+    Write-TpmText -Text 'TPM asks you to press each control on your cabinet and remembers the key it sends. No game file is changed.' -Color DarkCyan
+    if (-not (Test-TpmKeyPressAvailable)) {
+        Write-TpmText -Text 'This needs a normal console window where TPM can see key presses, so it cannot run here.' -Color Yellow
+        return
+    }
+    $cabinet = Read-TpmCabinetState -StateRoot $StateRoot
+    $players = [int](Read-TpmChoice -Prompt '  How many players does your cabinet have? (1-4)' -Choices @('1', '2', '3', '4') -Default $(if ($cabinet.Players -ge 1 -and $cabinet.Players -le 4) { [string]$cabinet.Players } else { '2' }))
+    $buttons = [int](Read-TpmChoice -Prompt '  How many action buttons does each player have? (1-8)' -Choices @('1', '2', '3', '4', '5', '6', '7', '8') -Default $(if ($cabinet.ButtonsPerPlayer -ge 1 -and $cabinet.ButtonsPerPlayer -le 8) { [string]$cabinet.ButtonsPerPlayer } else { '6' }))
+    $controls = @(Get-TpmCabinetControlList -Players $players -Buttons $buttons)
+    $keys = [ordered]@{}
+    $labels = @{}
+    foreach ($control in $controls) { $labels[[string]$control.Control] = [string]$control.Label }
+
+    # Before anything is pressed: is a button already stuck down, or are keys arriving on their own?
+    Write-TpmText -Text 'First TPM checks that no button is stuck. Keep your hands off the cabinet for 2 seconds.' -Color DarkCyan -BlankBefore
+    $onTheirOwn = @(Get-TpmKeysPressedOnTheirOwn)
+    if ($onTheirOwn.Count -gt 0) {
+        Write-TpmText -Text ('Keys are arriving with nobody pressing a button: ' + ($onTheirOwn -join ', ') + '. A button may be stuck down, or two wires may touch.') -Color Yellow
+        if ((Read-TpmYesNo -Prompt '  Continue anyway? The keys below may be learned wrong. (Y/N)' -Default 'N') -ne 'Y') { Write-TpmText -Text 'Stopped. Nothing was saved.' -Color DarkGray; return }
+    }
+
+    # LEDBlinky keeps its own list of which key each control sends. Offer it first so only the rest has to be pressed.
+    $ledRoot = [string](Get-Variable -Name ledBlinkyRoot -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
+    $proposed = Get-TpmKeysFromLedBlinkyMap -KeyMap (Get-TpmLedBlinkyKeyMap -Root @($ledRoot)) -Controls $controls
+    if ($proposed.Count -gt 0) {
+        Write-TpmText -Text ('Your LEDBlinky setup lists the key for {0} of these {1} controls:' -f $proposed.Count, $controls.Count) -Color DarkCyan -BlankBefore
+        foreach ($id in $proposed.Keys) { Write-TpmText -Text ('{0} = {1}' -f $labels[$id], $proposed[$id]) -Color DarkGray -Indent 4 }
+        if ((Read-TpmYesNo -Prompt '  Use these keys? (Y = yes, N = I will press them myself)' -Default 'Y') -eq 'Y') {
+            foreach ($id in $proposed.Keys) { $keys[$id] = @{ Key = $proposed[$id]; Source = 'LedBlinkyKeyMap' } }
+        }
+    }
+    # The standard arcade keys (MAME and Ultimarc I-PAC ship with them) for the controls still open. Used only after the player
+    # says the encoder was never changed and a button press on the cabinet agrees.
+    $standard = Get-TpmStandardArcadeKeys
+    $standardOffer = [ordered]@{}
+    $taken = @($keys.Values | ForEach-Object { $_.Key })
+    foreach ($control in $controls) {
+        $id = [string]$control.Control
+        if (-not $keys.Contains($id) -and $standard.Contains($id) -and $taken -notcontains $standard[$id]) { $standardOffer[$id] = $standard[$id] }
+    }
+    if ($standardOffer.Count -gt 0) {
+        Write-TpmText -Text ('Many arcade encoders ship with the standard arcade keys that MAME and Ultimarc I-PAC boards use. If yours was never changed, TPM can use them for {0} controls.' -f $standardOffer.Count) -Color DarkCyan -BlankBefore
+        $showStandard = { foreach ($id in $standardOffer.Keys) { Write-TpmText -Text ('{0} = {1}' -f $labels[$id], $standardOffer[$id]) -Color DarkGray -Indent 4 } }
+        if ((Read-TpmYesNo -Prompt '  Try the standard keys? TPM checks two buttons first. (Y/N, D = show the keys)' -Default 'N' -DetailsAction $showStandard) -eq 'Y') {
+            $check = Test-TpmStandardKeysSpotCheck -Proposed $standardOffer -Controls $controls -ReadKey { Read-TpmLearnKey }
+            if ($check.Passed) {
+                foreach ($id in $standardOffer.Keys) { $keys[$id] = @{ Key = $standardOffer[$id]; Source = 'StandardArcadeKeys' } }
+                Write-TpmText -Text 'Both buttons sent the standard keys, so TPM will use them.' -Color Green
+            } elseif ($check.Reason -eq 'Different') {
+                Write-TpmText -Text ('That button sent {0}, not the standard key. Your encoder is not set to the standard keys, so you will press each control yourself.' -f $check.Got) -Color Yellow
+            } else {
+                Write-TpmText -Text 'TPM did not see the check button, so it will not use the standard keys. You will press each control yourself.' -Color Yellow
+            }
+        }
+    }
+    $known = [ordered]@{}
+    foreach ($id in $keys.Keys) { $known[$id] = $keys[$id].Key }
+    $remaining = @($controls | Where-Object { -not $keys.Contains([string]$_.Control) })
+    $skipped = @()
+    if ($remaining.Count -gt 0) {
+        Write-TpmText -Text 'Turn your cabinet on. When TPM names a control, press it once. Press Esc to skip one that your cabinet does not have.' -Color DarkCyan -BlankBefore
+        $result = Invoke-TpmLearnKeys -Controls $remaining -ReadKey { Read-TpmLearnKey } -Known $known
+        foreach ($id in $result.Keys.Keys) { $keys[$id] = @{ Key = $result.Keys[$id]; Source = 'PressedByPlayer' } }
+        $skipped = @($result.Skipped)
+    }
+    Write-Host ''
+    if ($keys.Count -eq 0) { Write-TpmText -Text 'No key was learned, so nothing was saved.' -Color Yellow; return }
+    Write-TpmText -Text ('TPM learned the key for {0} of {1} controls.' -f $keys.Count, $controls.Count) -Color Green
+    if ($skipped.Count -gt 0) { Write-TpmText -Text ('Skipped: ' + ($skipped -join ', ') + '.') -Color DarkGray }
+    if ((Read-TpmYesNo -Prompt '  Save this? (Keys you saved before for these controls are replaced. A copy of the old file is kept.) (Y/N)' -Default 'Y') -ne 'Y') {
+        Write-TpmText -Text 'Not saved.' -Color DarkGray
+        return
+    }
+    try {
+        Set-TpmCabinetKeys -State $cabinet -Keys $keys -Players $players -ButtonsPerPlayer $buttons
+        $seen = Get-TpmControllerEvidence -Salt (Get-TpmControllerSalt -StateRoot $StateRoot -Create)
+        $cabinet.EncodersWhenLearned = (Get-TpmEncoderCount -Evidence $seen)
+        $cabinet.EncoderFingerprints = (Get-TpmEncoderFingerprints -Evidence $seen)
+        Save-TpmCabinetState -State $cabinet -StateRoot $StateRoot
+        Write-Log ('Controls: learned {0} of {1} arcade controls ({2} players, {3} buttons each).' -f $keys.Count, $controls.Count, $players, $buttons)
+        Write-TpmText -Text 'Saved. TPM will not ask you to press these again.' -Color Green
+    } catch {
+        Write-Log ('Controls: the learned keys could not be saved: {0}' -f $_.Exception.Message)
+        Write-TpmText -Text 'The keys could not be saved, so TPM will ask again next time.' -Color Yellow
+    }
+}
+
+# --- Gameplay verification evidence (#307) ----------------------------------
+# Who a profile is for the purpose of verification: its revision and a hash of its control bindings plus its Input API. When
+# either changes, earlier evidence no longer describes the game and is treated as stale.
+function Get-TpmControlProfileIdentity {
+    param([Parameter(Mandatory)]$Doc)
+    $revisionNode = $Doc.SelectSingleNode('/GameProfile/GameProfileRevision')
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($button in @(Get-ButtonNodes $Doc)) {
+        $mapping = $button.SelectSingleNode('InputMapping')
+        $bindings = @(@('XInputButton', 'DirectInputButton', 'RawInputButton') | ForEach-Object { $node = $button.SelectSingleNode($_); if ($node) { $node.OuterXml } })
+        [void]$lines.Add(('{0}|{1}' -f $(if ($mapping) { $mapping.InnerText.Trim() } else { '' }), ($bindings -join '')))
+    }
+    $api = Get-ProfileInputApi $Doc
+    $canonical = ((@($lines.ToArray() | Sort-Object)) -join "`n") + "`napi=" + [string]$api
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $hash = (@($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)) | ForEach-Object { $_.ToString('x2') }) -join '') } finally { $sha.Dispose() }
+    return [pscustomobject]@{ Revision = $(if ($revisionNode) { $revisionNode.InnerText.Trim() } else { '' }); Hash = $hash; InputApi = [string]$api; Family = (Get-ProfileFamily $Doc) }
+}
+
+# Finds the record of one game and applies $Change to it, then saves the evidence file. A new record starts with every step Unknown.
+function Update-TpmGameEvidence {
+    param([Parameter(Mandatory)][string]$Code, [Parameter(Mandatory)][scriptblock]$Change, [string]$StateRoot = '')
+    $path = (Get-TpmControlStatePath -StateRoot $StateRoot).Evidence
+    $file = Read-TpmControlStateFile -Path $path
+    $games = @()
+    if ($file.Status -eq 'Ok' -and $file.Data.PSObject.Properties['Games']) { $games = @($file.Data.Games) }
+    $record = @($games | Where-Object { $_.Code -ieq $Code } | Select-Object -First 1)
+    if ($record.Count -eq 0) {
+        $record = @([pscustomobject]@{ Code = $Code; Title = ''; Verification = $null; FirstRun = 'Unknown'; FirstRunAt = ''; Calibration = 'Unknown'; CalibrationAt = ''; CalibrationHash = '' })
+        $games = @($games) + $record
+    }
+    & $Change $record[0]
+    Save-TpmControlStateFile -Path $path -Data ([pscustomobject]@{ Version = 1; Games = @($games) })
+}
+
+# Records that the player played the game and its controls worked. This is the only way a game becomes Verified.
+function Save-TpmGameVerification {
+    param([Parameter(Mandatory)][string]$Code, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)]$Doc, [string]$StateRoot = '')
+    $identity = Get-TpmControlProfileIdentity -Doc $Doc
+    Update-TpmGameEvidence -Code $Code -StateRoot $StateRoot -Change {
+        param($record)
+        $record.Title = $Title
+        $record.Verification = [pscustomobject]@{ Method = 'PlayerReportedPlayTest'; ObservedAt = (Get-Date).ToUniversalTime().ToString('o'); Game = $Title; ProfileRevision = $identity.Revision; ProfileHash = $identity.Hash; ControllerContext = $identity.InputApi }
+    }
+}
+
+# Forgets the verification of one game (the player says it does not work).
+function Remove-TpmGameVerification {
+    param([Parameter(Mandatory)][string]$Code, [string]$StateRoot = '')
+    Update-TpmGameEvidence -Code $Code -StateRoot $StateRoot -Change { param($record) $record.Verification = $null }
+}
+
+# Step is FirstRun (the first-run Test or Service menu step) or Calibration. State is Done, NotNeeded or Needed.
+function Set-TpmGameSetupStep {
+    param([Parameter(Mandatory)][string]$Code, [Parameter(Mandatory)][ValidateSet('FirstRun', 'Calibration')][string]$Step, [Parameter(Mandatory)][ValidateSet('Done', 'NotNeeded', 'Needed')][string]$State, [Parameter(Mandatory)]$Doc, [string]$StateRoot = '')
+    $identity = Get-TpmControlProfileIdentity -Doc $Doc
+    Update-TpmGameEvidence -Code $Code -StateRoot $StateRoot -Change {
+        param($record)
+        $record.$Step = $State
+        $record."${Step}At" = (Get-Date).ToUniversalTime().ToString('o')
+        if ($Step -eq 'Calibration') { $record.CalibrationHash = $identity.Hash }
+    }
+}
+
+# Reads the evidence for one game and compares it with the profile as it is now. Read-only.
+#   Status: None (no record), Current (the profile is what the player tested), Stale (it changed since), Unreadable (the file is damaged).
+#   Calibration: NotRequired, Needed, Done or NotNeeded. Wheel, gun, trackball and other analog games need it until the player says Done
+#     for the current controls; a calibration done before the controls changed counts as Needed again.
+#   FirstRun: Unknown, Needed, Done or NotNeeded. Unknown does not block anything, because no source says which games need it.
+#   Outstanding: the steps that are Needed. A game with any is not Verified, even when the controls were tested.
+function Get-TpmControlVerificationState {
+    param([Parameter(Mandatory)][string]$Code, $Doc = $null, [string]$StateRoot = '')
+    $result = [pscustomobject]@{ Status = 'None'; Evidence = $null; Reason = ''; FirstRun = 'Unknown'; Calibration = 'Unknown'; Outstanding = @() }
+    if ($Code -notmatch '^[\w-]+$' -or $null -eq $Doc -or $null -eq $Doc.SelectSingleNode('/GameProfile')) { return $result }
+    $identity = Get-TpmControlProfileIdentity -Doc $Doc
+    $file = Read-TpmControlStateFile -Path (Get-TpmControlStatePath -StateRoot $StateRoot).Evidence
+    $record = $null
+    if ($file.Status -eq 'Unreadable') { $result.Status = 'Unreadable' }
+    elseif ($file.Status -eq 'Ok' -and $file.Data.PSObject.Properties['Games']) { $record = @($file.Data.Games | Where-Object { $_.Code -ieq $Code } | Select-Object -First 1)[0] }
+    $needsCalibration = ($identity.Family -ne 'button')
+    $stored = $(if ($record) { [string]$record.Calibration } else { '' })
+    $result.Calibration = 'NotRequired'
+    if ($stored -eq 'NotNeeded') { $result.Calibration = 'NotNeeded' }
+    elseif ($stored -eq 'Done' -and [string]$record.CalibrationHash -eq $identity.Hash) { $result.Calibration = 'Done' }
+    elseif ($needsCalibration -or $stored -eq 'Needed') { $result.Calibration = 'Needed' }
+    if ($record -and [string]$record.FirstRun -in @('Needed', 'Done', 'NotNeeded')) { $result.FirstRun = [string]$record.FirstRun }
+    $result.Outstanding = @(@('Calibration', 'FirstRun') | Where-Object { $result.$_ -eq 'Needed' })
+    if ($null -eq $record -or $null -eq $record.Verification) { return $result }
+    $evidence = $record.Verification
+    if ([string]::IsNullOrWhiteSpace([string]$evidence.Method) -or [string]::IsNullOrWhiteSpace([string]$evidence.ObservedAt)) { return $result }
+    if ([string]$evidence.ProfileRevision -ne $identity.Revision -or [string]$evidence.ProfileHash -ne $identity.Hash) {
+        $result.Status = 'Stale'
+        $result.Reason = $(if ([string]$evidence.ProfileRevision -ne $identity.Revision) { 'The game settings were updated after you tested it.' } else { 'The controls of this game changed after you tested it.' })
+        return $result
+    }
+    $result.Status = 'Current'
+    $result.Evidence = $evidence
+    return $result
+}
+
+# Plain lines for one verification state: what TPM knows, and what is still to do.
+function Get-TpmVerificationLines {
+    param([Parameter(Mandatory)]$Verification)
+    $lines = New-Object System.Collections.Generic.List[string]
+    switch ([string]$Verification.Status) {
+        'Current' {
+            $when = [datetime]::MinValue
+            $text = $(if ([datetime]::TryParse([string]$Verification.Evidence.ObservedAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$when)) { ' on ' + (Format-TpmFriendlyTime -WhenUtc $when.ToUniversalTime()) } else { '' })
+            [void]$lines.Add('You told TPM' + $text + ' that you played this game and its controls worked.')
+        }
+        'Stale' { [void]$lines.Add(([string]$Verification.Reason + ' Play it again to be sure, then tell TPM.')) }
+        'Unreadable' { [void]$lines.Add('TPM could not read its saved test records, so it cannot say if this game was tested.') }
+        default { [void]$lines.Add('TPM has no record that you played this game with these controls.') }
+    }
+    if ($Verification.Calibration -eq 'Needed') { [void]$lines.Add('Still to do: calibrate the wheel, gun or other analog controls for this game.') }
+    if ($Verification.FirstRun -eq 'Needed') { [void]$lines.Add('Still to do: the first-run Test or Service menu step for this game.') }
+    elseif ($Verification.FirstRun -eq 'Unknown') { [void]$lines.Add('TPM does not know if this game needs a first-run Test or Service menu step.') }
+    return @($lines.ToArray())
+}
+
+# --- Cabinet inventory and control guides (#267) ----------------------------
+# What to suggest for one control of a game. State: Suggested (the player taught TPM a key for it), NotLearned (TPM knows which
+# control it is, but not its key) or NotSure. TPM only names a key for a standard arcade control: coin, start, test, service,
+# a numbered button, or a direction the game plainly calls a direction. A direction the game calls something else ("Menu Up",
+# "Volume Down") and any control TPM has no rule for are NotSure. TPM never guesses.
+function Get-TpmGameKeyChoice {
+    param([Parameter(Mandatory)]$Control, [Parameter(Mandatory)]$Cabinet)
+    $id = switch ($Control.Kind) {
+        'Button' { [string]$Control.Mapping }
+        'Direction' { [string]$Control.Mapping }
+        'Start' { 'P{0}ButtonStart' -f $Control.Player }
+        'Coin' { 'Coin{0}' -f $Control.Player }
+        'Service' { 'Service' }
+        'Test' { 'Test' }
+        default { '' }
+    }
+    if (-not $id) { return [pscustomobject]@{ State = 'NotSure'; Text = 'I''m not sure' } }
+    # The cabinet has fewer players or buttons than the game lists: say so instead of "Not learned yet". Only when the player said how big the cabinet is.
+    if ($Cabinet.Players -gt 0 -and $Control.Kind -in @('Button', 'Direction', 'Start', 'Coin') -and [int]$Control.Player -gt $Cabinet.Players) {
+        return [pscustomobject]@{ State = 'NoControl'; Text = ('Your cabinet has no player {0}' -f $Control.Player) }
+    }
+    if ($Cabinet.ButtonsPerPlayer -gt 0 -and $Control.Kind -eq 'Button' -and [int]$Control.Number -gt $Cabinet.ButtonsPerPlayer) {
+        return [pscustomobject]@{ State = 'NoControl'; Text = ('Your cabinet has no button {0}' -f $Control.Number) }
+    }
+    if ($Control.Kind -eq 'Direction' -and -not (Test-TpmDirectionName -Name ([string]$Control.Label))) {
+        return [pscustomobject]@{ State = 'NotSure'; Text = ('I''m not sure (the game calls this "{0}")' -f $Control.Label) }
+    }
+    $key = Get-TpmCabinetKey -State $Cabinet -Control $id
+    if ($key) { return [pscustomobject]@{ State = 'Suggested'; Text = ('Key: ' + $key) } }
+    return [pscustomobject]@{ State = 'NotLearned'; Text = 'Not learned yet' }
+}
+
+# The colors the player's own LEDBlinky file gives to the controls of one game (LED control name -> color), read from the
+# TeknoParrot group of that game first, then the TeknoParrot defaults. Read-only. A missing or unreadable file gives no colors.
+function Get-TpmLedControlColors {
+    param([string]$Root = '', [Parameter(Mandatory)][string]$Code)
+    $colors = @{}
+    try {
+        if ((Get-TpmLedBlinkyFolderProblem -Path $Root) -ne '') { return $colors }
+        $doc = New-Object System.Xml.XmlDocument
+        $doc.XmlResolver = $null
+        $doc.LoadXml([System.IO.File]::ReadAllText((Join-Path $Root 'LEDBlinkyControls.xml')))
+        $groups = @($doc.SelectNodes('/dat/emulator[@emuname="TeknoParrot"]/controlGroup'))
+        $own = @($groups | Where-Object { $_.GetAttribute('groupName') -ieq $Code })
+        $defaults = @($groups | Where-Object { $_.GetAttribute('groupName') -eq 'DEFAULT' })
+        foreach ($group in (@($own) + @($defaults))) {
+            foreach ($node in @($group.SelectNodes('player/control[@color]'))) {
+                $name = $node.GetAttribute('name')
+                if ($name -and $node.GetAttribute('color') -and -not $colors.ContainsKey($name)) { $colors[$name] = $node.GetAttribute('color') }
+            }
+        }
+    } catch { return @{} }
+    return $colors
+}
+
+# Plain lines that compare what a game lists with what the player told TPM about the cabinet: enough players and buttons, and the
+# devices the game needs (trackball, spinner, wheel and pedals, light gun). It only reads. What was never answered is said to be
+# unknown, not guessed. When a needed device is missing, the way around it is the one Device Survey already gives.
+function Get-TpmCabinetFitLines {
+    param([Parameter(Mandatory)]$ProfileControls, [Parameter(Mandatory)]$Cabinet)
+    $lines = New-Object System.Collections.Generic.List[string]
+    $plural = { param([int]$n, [string]$word) if ($n -eq 1) { "$n $word" } else { "$n ${word}s" } }
+    $pad = @($ProfileControls.Controls | Where-Object { $_.Kind -in @('Button', 'Direction', 'Start', 'Coin') })
+    $needPlayers = [int](@($pad | ForEach-Object { [int]$_.Player } | Measure-Object -Maximum).Maximum)
+    $needButtons = [int](@($pad | Where-Object { $_.Kind -eq 'Button' } | ForEach-Object { [int]$_.Number } | Measure-Object -Maximum).Maximum)
+    if ($needPlayers -gt 0) {
+        if ($Cabinet.Players -le 0) {
+            [void]$lines.Add('TPM does not know how many players and buttons your cabinet has yet. Choose "Learn my arcade buttons" so it can check this game.')
+        } else {
+            $short = $false
+            if ($needPlayers -gt $Cabinet.Players) { [void]$lines.Add(('This game has controls for {0}. Your cabinet has {1}.' -f (& $plural $needPlayers 'player'), (& $plural $Cabinet.Players 'player'))); $short = $true }
+            if ($Cabinet.ButtonsPerPlayer -gt 0 -and $needButtons -gt $Cabinet.ButtonsPerPlayer) { [void]$lines.Add(('This game uses up to {0} for each player. Your cabinet has {1}, so the rest have nothing to press.' -f (& $plural $needButtons 'button'), (& $plural $Cabinet.ButtonsPerPlayer 'button'))); $short = $true }
+            if (-not $short) { [void]$lines.Add('Your cabinet has enough players and buttons for this game.') }
+        }
+    }
+    $needed = New-Object System.Collections.Generic.List[string]
+    $classFor = @{ Trackball = 'PointerOrTrackball'; Spinner = 'Spinner'; Pedal = 'Wheel' }
+    foreach ($control in @($ProfileControls.Controls)) { if ($classFor.ContainsKey([string]$control.Kind) -and -not $needed.Contains($classFor[[string]$control.Kind])) { [void]$needed.Add($classFor[[string]$control.Kind]) } }
+    if ([string]$ProfileControls.Family -eq 'driving' -and -not $needed.Contains('Wheel')) { [void]$needed.Add('Wheel') }
+    if ([string]$ProfileControls.Family -eq 'lightgun' -and -not $needed.Contains('LightGun')) { [void]$needed.Add('LightGun') }
+    $missing = New-Object System.Collections.Generic.List[string]
+    foreach ($class in $needed) {
+        $label = @(Get-TpmDeviceQuestions | Where-Object { $_.Class -eq $class })[0].Label
+        $answer = Get-TpmCabinetDeviceAnswer -State $Cabinet -Class $class
+        if ($answer -eq $false) { [void]$lines.Add(('This game needs {0}. You told TPM you do not have that.' -f $label)); [void]$missing.Add($class) }
+        elseif ($null -eq $answer) { [void]$lines.Add(('TPM does not know if you have {0} yet. Choose "Tell TPM which controls I have".' -f $label)) }
+    }
+    $has = { param($class) (Get-TpmCabinetDeviceAnswer -State $Cabinet -Class $class) -eq $true }
+    if ($missing.Contains('Wheel') -and (& $has 'XboxStylePad')) { [void]$lines.Add('Your Xbox controller can steer this game with its stick and triggers.') }
+    if ($missing.Contains('LightGun')) {
+        if (& $has 'PointerOrTrackball') { [void]$lines.Add('Without a light gun you can aim with your trackball.') }
+        elseif (& $has 'XboxStylePad') { [void]$lines.Add('Without a light gun you can aim with your Xbox controller''s right stick.') }
+    }
+    return @($lines.ToArray())
+}
+
+# Plain guide for one game: each control the game lists, what it does, which key TPM suggests, and whether the game has it
+# set up. The keys come from the cabinet file, so a guide is only as good as what the player taught TPM. -LedColors (from
+# Get-TpmLedControlColors) adds a Light column.
+function Get-TpmGameControlGuide {
+    param([Parameter(Mandatory)]$Doc, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)]$Cabinet, $Verification = $null, [hashtable]$LedColors = $null)
+    $bound = @{}
+    foreach ($button in @(Get-ButtonNodes $Doc)) {
+        $mapping = $button.SelectSingleNode('InputMapping')
+        if ($mapping -and -not $bound.ContainsKey($mapping.InnerText.Trim())) { $bound[$mapping.InnerText.Trim()] = (Test-ButtonIsBound $button) }
+    }
+    $profileControls = Get-TpmLedProfileControls -Doc $Doc
+    $deviceFor = @{ Trackball = 'PointerOrTrackball'; Spinner = 'Spinner'; Pedal = 'Wheel' }
+    $showLight = ($null -ne $LedColors -and $LedColors.Count -gt 0)
+    $rows = New-Object System.Collections.Generic.List[object]
+    $suggested = 0
+    $notSure = New-Object System.Collections.Generic.List[string]
+    foreach ($control in @($profileControls.Controls)) {
+        if ($deviceFor.ContainsKey([string]$control.Kind)) {
+            $answer = Get-TpmCabinetDeviceAnswer -State $Cabinet -Class $deviceFor[[string]$control.Kind]
+            $yours = $(if ($answer -eq $true) { 'Your ' + (@(Get-TpmDeviceQuestions | Where-Object { $_.Class -eq $deviceFor[[string]$control.Kind] })[0].Label -replace '^an? ', '') } elseif ($answer -eq $false) { 'You said you do not have one' } else { 'Not answered yet' })
+        } else {
+            $choice = Get-TpmGameKeyChoice -Control $control -Cabinet $Cabinet
+            $yours = $choice.Text
+            if ($choice.State -eq 'Suggested') { $suggested++ } elseif ($choice.State -eq 'NotSure') { [void]$notSure.Add([string]$control.Label) }
+        }
+        $inGame = $(if ($bound.ContainsKey([string]$control.Mapping) -and $bound[[string]$control.Mapping]) { 'Set up' } else { 'Not set up yet' })
+        $cells = @([string]$control.Label, $yours, $inGame, [string]$control.Mapping)
+        if ($showLight) {
+            $color = $(if ($control.Exact) { [string]$LedColors[[string]$control.Exact] } else { '' })
+            $cells += $(if (-not $color) { '' } elseif ($color -match '^[A-Za-z ]+$') { $color } else { 'a custom color' })
+        }
+        [void]$rows.Add([pscustomobject]@{ Cells = $cells })
+    }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $needs = switch ([string]$profileControls.Family) {
+        'driving' { 'This game needs a steering wheel and pedals (or a pad that can steer).' }
+        'lightgun' { 'This game is aimed with a light gun (or a mouse or stick).' }
+        'trackball' { 'This game uses a trackball.' }
+        'analog' { 'This game uses analog controls such as a dial or throttle.' }
+        default { '' }
+    }
+    if ($needs) { [void]$lines.Add($needs) }
+    $fit = @(Get-TpmCabinetFitLines -ProfileControls $profileControls -Cabinet $Cabinet)
+    foreach ($line in $fit) { [void]$lines.Add($line) }
+    if ($rows.Count -eq 0) { [void]$lines.Add('This game does not list any controls TPM can read.') }
+    elseif ($suggested -gt 0) { [void]$lines.Add(('TPM can suggest a key for {0} of the {1} controls below.' -f $suggested, $rows.Count)) }
+    if ($notSure.Count -gt 0) { [void]$lines.Add('TPM is not sure what to suggest for: ' + (@($notSure | Select-Object -First 6) -join ', ') + $(if ($notSure.Count -gt 6) { (' and {0} more' -f ($notSure.Count - 6)) } else { '' }) + '.') }
+    if ($null -ne $Verification) { foreach ($line in @(Get-TpmVerificationLines -Verification $Verification)) { [void]$lines.Add($line) } }
+    [void]$lines.Add('"Key" is what you taught TPM. "Set up" means the game has a setting for it. TPM has not pressed any of them for you.')
+    if ($showLight) { [void]$lines.Add('"Light" is the color your own LEDBlinky file gives that control. TPM does not change any lights.') }
+    $columns = @('What it does', 'Your control', 'In the game', 'TeknoParrot name')
+    if ($showLight) { $columns += 'Light' }
+    return [pscustomobject]@{ Title = ('Controls for ' + $Title); Lines = @($lines.ToArray()); FitLines = $fit; Columns = $columns; Rows = @($rows.ToArray()) }
+}
+
+# The cabinet as a page: one row per control TPM knows a key for.
+function Get-TpmCabinetGuide {
+    param([Parameter(Mandatory)]$Cabinet)
+    $rows = New-Object System.Collections.Generic.List[object]
+    $labels = @{}
+    foreach ($control in @(Get-TpmCabinetControlList -Players 4 -Buttons 8)) { $labels[[string]$control.Control] = [string]$control.Label }
+    foreach ($property in @($Cabinet.Keys.PSObject.Properties)) {
+        [void]$rows.Add([pscustomobject]@{ Cells = @($(if ($labels.ContainsKey($property.Name)) { $labels[$property.Name] } else { $property.Name }), [string]$property.Value.Key) })
+    }
+    return [pscustomobject]@{ Title = 'My cabinet controls'; Lines = @(Get-TpmCabinetSummaryLines -State $Cabinet); Columns = @('Control', 'Key it sends'); Rows = @($rows.ToArray()) }
+}
+
+function ConvertTo-TpmGuideHtml {
+    param([Parameter(Mandatory)]$Guide)
+    $encode = { param($text) [System.Net.WebUtility]::HtmlEncode([string]$text) }
+    $html = New-Object System.Text.StringBuilder
+    [void]$html.AppendLine('<!DOCTYPE html>')
+    [void]$html.AppendLine('<html lang="en"><head><meta charset="utf-8"><title>' + (& $encode $Guide.Title) + '</title>')
+    [void]$html.AppendLine('<style>body{font-family:Segoe UI,Arial,sans-serif;margin:2em;color:#000}table{border-collapse:collapse;margin-top:1em}th,td{border:1px solid #444;padding:6px 12px;text-align:left}th{background:#e8e8e8}@media print{body{margin:0.5in}}</style></head><body>')
+    [void]$html.AppendLine('<h1>' + (& $encode $Guide.Title) + '</h1>')
+    foreach ($line in @($Guide.Lines)) { [void]$html.AppendLine('<p>' + (& $encode $line) + '</p>') }
+    if (@($Guide.Rows).Count -gt 0) {
+        [void]$html.AppendLine('<table><tr>' + ((@($Guide.Columns) | ForEach-Object { '<th>' + (& $encode $_) + '</th>' }) -join '') + '</tr>')
+        foreach ($row in @($Guide.Rows)) { [void]$html.AppendLine('<tr>' + ((@($row.Cells) | ForEach-Object { '<td>' + (& $encode $_) + '</td>' }) -join '') + '</tr>') }
+        [void]$html.AppendLine('</table>')
+    }
+    [void]$html.AppendLine('</body></html>')
+    return $html.ToString()
+}
+
+function Write-TpmGuideOnScreen {
+    param([Parameter(Mandatory)]$Guide)
+    Write-Host ''
+    Write-TpmText -Text $Guide.Title -Color Cyan
+    foreach ($line in @($Guide.Lines)) { Write-TpmText -Text $line -Color DarkCyan }
+    foreach ($row in @($Guide.Rows)) {
+        $cells = @($row.Cells)
+        Write-TpmText -Text ('{0}: {1}' -f $cells[0], (($cells | Select-Object -Skip 1 | Where-Object { $_ }) -join '  |  ')) -HangingIndent 4
+    }
+}
+
+# Saves a guide as a web page in the Manager's own Reports\Control Guides folder and returns the path. Only a page TPM made
+# earlier for the same name is replaced.
+function Save-TpmControlGuideFile {
+    param([Parameter(Mandatory)]$Guide, [Parameter(Mandatory)][string]$FileName, [string]$GuideRoot = '')
+    $root = $(if ($GuideRoot) { $GuideRoot }
+              elseif ($script:TpmOwnedLayout -and -not [string]::IsNullOrWhiteSpace([string]$script:TpmOwnedLayout.Reports)) { Join-Path ([string]$script:TpmOwnedLayout.Reports) 'Control Guides' }
+              else { Join-Path $PSScriptRoot 'Control Guides' })
+    [void][System.IO.Directory]::CreateDirectory($root)
+    $path = Join-Path $root $FileName
+    Write-TpmAtomicTextFile -Path $path -Text (ConvertTo-TpmGuideHtml -Guide $Guide) -Operation 'control guide write'
+    return $path
+}
+
+# Shows a guide, then (one Y/N) saves it as a page and opens it so it can be printed.
+function Invoke-TpmGuideOffer {
+    param([Parameter(Mandatory)]$Guide, [Parameter(Mandatory)][string]$FileName)
+    Write-TpmGuideOnScreen -Guide $Guide
+    if ((Read-TpmYesNo -Prompt '  Save this as a page you can print, and open it? (Y/N)' -Default 'N') -ne 'Y') { return }
+    try {
+        $path = Save-TpmControlGuideFile -Guide $Guide -FileName $FileName
+        Write-Log ('Controls: saved the guide {0}.' -f $path)
+        Write-TpmText -Text ('Saved: ' + $path) -Color Green
+        try { Start-Process -FilePath $path -ErrorAction Stop | Out-Null } catch { Write-TpmText -Text 'Windows could not open it. Open that file yourself to print it.' -Color Yellow }
+    } catch {
+        Write-Log ('Controls: the guide could not be saved: {0}' -f $_.Exception.Message)
+        Write-TpmText -Text 'The page could not be saved.' -Color Yellow
+    }
+}
+
+# Asks for part of a game name and returns the chosen registered game ({ Code; Title; Doc }), or $null to go back.
+function Read-TpmControlsGamePick {
+    param([Parameter(Mandatory)][string]$UserProfilesDir)
+    $typed = [string](Read-HostSafe '  Type part of the game name (or press Enter to go back)')
+    $needle = ([regex]::Replace($typed, '\s+', '')).ToLowerInvariant()
+    if ($needle.Length -lt 2) { return $null }
+    $found = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Game search' -EnumerationErrorAction SilentlyContinue | Where-Object { $_.BaseName.ToLowerInvariant().Contains($needle) } | Sort-Object BaseName | Select-Object -First 8)
+    if ($found.Count -eq 0) { Write-TpmText -Text 'No game matched that. Try fewer letters.' -Color Yellow; return $null }
+    $games = @($found | ForEach-Object {
+        try { $doc = Read-Xml $_.FullName; [pscustomobject]@{ Code = $_.BaseName; Doc = $doc; Title = (Get-TpmProfileFriendlyTitle -Doc $doc -BaseName $_.BaseName) } } catch { $null }
+    } | Where-Object { $_ })
+    if ($games.Count -eq 0) { Write-TpmText -Text 'The settings file for that game could not be read.' -Color Yellow; return $null }
+    $index = Read-TpmNumberedListChoice -Rows @($games | ForEach-Object { $_.Title }) -Prompt '  Which game? (number, or B to go back)' -Heading 'These games matched:'
+    if ($index -lt 0) { return $null }
+    return $games[$index]
+}
+
+# "I played it": the one place a player tells TPM a game's controls worked, or that a setup step is done.
+function Invoke-TpmGameCheckScreen {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [string]$StateRoot = '')
+    Write-Host ''
+    Write-TpmText -Text 'Tell TPM how a game played' -Color Cyan
+    Write-TpmText -Text 'TPM cannot press your buttons. Only you can say a game worked, and TPM keeps that until the game''s controls change.' -Color DarkCyan
+    $game = Read-TpmControlsGamePick -UserProfilesDir $UserProfilesDir
+    if ($null -eq $game) { return }
+    $state = Get-TpmControlVerificationState -Code $game.Code -Doc $game.Doc -StateRoot $StateRoot
+    Write-Host ''
+    Write-TpmText -Text $game.Title -Color Cyan
+    foreach ($line in @(Get-TpmVerificationLines -Verification $state)) { Write-TpmText -Text $line -Color DarkCyan }
+    Write-Host ''
+    Write-TpmText -Text 'W = It worked: I played it and every control I tried reacted correctly' -Indent 4
+    Write-TpmText -Text 'N = Something did not work (TPM forgets that it worked)' -Indent 4
+    Write-TpmText -Text 'S = Record a setup step: the first-run Test or Service menu, or calibration' -Indent 4
+    Write-TpmText -Text 'B = Back' -Indent 4
+    $choice = Read-TpmChoice -Prompt '  Choose W, N, S or B' -Choices @('W', 'N', 'S', 'B') -Default 'B'
+    try {
+        switch ($choice) {
+            'W' {
+                Save-TpmGameVerification -Code $game.Code -Title $game.Title -Doc $game.Doc -StateRoot $StateRoot
+                Write-Log ('Controls: {0}: the player recorded that the controls worked (profile revision {1}).' -f $game.Code, (Get-TpmControlProfileIdentity -Doc $game.Doc).Revision)
+                $after = Get-TpmControlVerificationState -Code $game.Code -Doc $game.Doc -StateRoot $StateRoot
+                if (@($after.Outstanding).Count -gt 0) {
+                    Write-TpmText -Text 'Saved. TPM still does not call this game verified, because a setup step is left:' -Color Yellow
+                    foreach ($line in @(Get-TpmVerificationLines -Verification $after | Where-Object { $_ -like 'Still to do*' })) { Write-TpmText -Text $line -Color Yellow -Indent 4 }
+                } else {
+                    Write-TpmText -Text 'Saved. TPM counts this game''s controls as verified until you change them.' -Color Green
+                }
+            }
+            'N' {
+                if ($state.Status -in @('Current', 'Stale')) {
+                    Remove-TpmGameVerification -Code $game.Code -StateRoot $StateRoot
+                    Write-Log ('Controls: {0}: the player revoked the verification.' -f $game.Code)
+                    Write-TpmText -Text 'TPM forgot that this game worked. Open TeknoParrot to check its controls.' -Color Green
+                } else {
+                    Write-TpmText -Text 'TPM did not count this game as verified, so nothing changed. Open TeknoParrot to check its controls.' -Color Green
+                }
+            }
+            'S' {
+                Write-TpmText -Text '1 = The first-run Test or Service menu step' -Indent 4
+                Write-TpmText -Text '2 = Calibration (wheel, gun or other analog controls)' -Indent 4
+                $step = $(if ((Read-TpmChoice -Prompt '  Which step? (1 or 2)' -Choices @('1', '2') -Default '1') -eq '1') { 'FirstRun' } else { 'Calibration' })
+                Write-TpmText -Text 'D = I did it' -Indent 4
+                Write-TpmText -Text 'N = This game does not need it' -Indent 4
+                Write-TpmText -Text 'R = It is still to do' -Indent 4
+                $answer = Read-TpmChoice -Prompt '  Choose D, N or R' -Choices @('D', 'N', 'R') -Default 'D'
+                $new = @{ D = 'Done'; N = 'NotNeeded'; R = 'Needed' }[$answer]
+                Set-TpmGameSetupStep -Code $game.Code -Step $step -State $new -Doc $game.Doc -StateRoot $StateRoot
+                Write-Log ('Controls: {0}: {1} marked {2}.' -f $game.Code, $step, $new)
+                Write-TpmText -Text 'Saved.' -Color Green
+            }
+        }
+    } catch {
+        Write-Log ('Controls: the answer could not be saved: {0}' -f $_.Exception.Message)
+        Write-TpmText -Text 'Your answer could not be saved, so nothing changed.' -Color Yellow
+    }
+}
+
+# The My controls screen: what TPM knows about the player's controls, and the four things to do about it.
+function Invoke-TpmControlsScreen {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [string]$StateRoot = '')
+    $look = { Get-TpmControllerEvidence -Salt (Get-TpmControllerSalt -StateRoot $StateRoot) }
+    $evidence = & $look
+    while ($true) {
+        $cabinet = Read-TpmCabinetState -StateRoot $StateRoot
+        Write-Host ''
+        Write-TpmText -Text 'My controls' -Color Cyan
+        foreach ($line in @(Get-TpmCabinetSummaryLines -State $cabinet)) { Write-TpmText -Text $line -Color DarkCyan }
+        $setNotice = Get-TpmControllerSetNotice -Cabinet $cabinet -Evidence $evidence
+        if ($setNotice.Text) { Write-TpmText -Text $setNotice.Text -Color $setNotice.Color }
+        if ($cabinet.FileStatus -eq 'Unreadable') { Write-TpmText -Text 'TPM could not read its saved answers. A copy is kept before anything new is saved.' -Color Yellow }
+        $backup = Read-TpmControlStateFile -Path ((Get-TpmControlStatePath -StateRoot $StateRoot).Cabinet + '.bak')
+        Write-Host ''
+        Write-TpmText -Text '1 = Tell TPM which controls I have' -Indent 4
+        Write-TpmText -Text '2 = Learn my arcade buttons (I press each one)' -Indent 4
+        Write-TpmText -Text '3 = Show or print the controls of one game' -Indent 4
+        Write-TpmText -Text '4 = Tell TPM how a game played' -Indent 4
+        Write-TpmText -Text '5 = Show or print my cabinet controls' -Indent 4
+        if ($backup.Status -eq 'Ok') { Write-TpmText -Text '6 = Undo my last save (put back what TPM knew before it)' -Indent 4 }
+        Write-TpmText -Text 'B = Back' -Indent 4
+        $picked = $(if ($backup.Status -eq 'Ok') { Read-TpmChoice -Prompt '  Choose 1, 2, 3, 4, 5, 6 or B' -Choices @('1', '2', '3', '4', '5', '6', 'B') -Default 'B' } else { Read-TpmChoice -Prompt '  Choose 1, 2, 3, 4, 5 or B' -Choices @('1', '2', '3', '4', '5', 'B') -Default 'B' })
+        switch ($picked) {
+            '1' { Invoke-DeviceSurvey -StateRoot $StateRoot }
+            '2' { Invoke-TpmButtonLearning -StateRoot $StateRoot; $evidence = & $look }
+            '3' {
+                $game = Read-TpmControlsGamePick -UserProfilesDir $UserProfilesDir
+                if ($game) {
+                    $verification = Get-TpmControlVerificationState -Code $game.Code -Doc $game.Doc -StateRoot $StateRoot
+                    $colors = Get-TpmLedControlColors -Root ([string](Get-Variable -Name ledBlinkyRoot -Scope Script -ValueOnly -ErrorAction SilentlyContinue)) -Code $game.Code
+                    $guide = Get-TpmGameControlGuide -Doc $game.Doc -Title $game.Title -Cabinet $cabinet -Verification $verification -LedColors $colors
+                    Write-Log ('Controls: {0}: cabinet fit: {1}' -f $game.Code, $(if (@($guide.FitLines).Count -gt 0) { @($guide.FitLines) -join ' ' } else { 'nothing to compare.' }))
+                    Invoke-TpmGuideOffer -Guide $guide -FileName ($game.Code + '-controls.html')
+                }
+            }
+            '4' { Invoke-TpmGameCheckScreen -UserProfilesDir $UserProfilesDir -StateRoot $StateRoot }
+            '5' { Invoke-TpmGuideOffer -Guide (Get-TpmCabinetGuide -Cabinet $cabinet) -FileName 'my-cabinet-controls.html' }
+            '6' {
+                $before = 0
+                if ($backup.Status -eq 'Ok' -and $null -ne $backup.Data.PSObject.Properties['Keys'] -and $null -ne $backup.Data.Keys) { $before = @($backup.Data.Keys.PSObject.Properties).Count }
+                Write-TpmText -Text ('Before your last save TPM knew the key for {0} controls. Now it knows {1}.' -f $before, @($cabinet.Keys.PSObject.Properties).Count) -Color DarkCyan
+                if ((Read-TpmYesNo -Prompt '  Put the older answers back? Your current answers are kept as a copy, so this can be undone too. (Y/N)' -Default 'N') -eq 'Y') {
+                    try {
+                        if (Restore-TpmCabinetBackup -StateRoot $StateRoot) { Write-Log 'Controls: the player put back the answers saved before the last save.'; Write-TpmText -Text 'Done. TPM has its older answers again.' -Color Green }
+                        else { Write-TpmText -Text 'The older answers could not be read, so nothing changed.' -Color Yellow }
+                    } catch {
+                        Write-Log ('Controls: the older answers could not be put back: {0}' -f $_.Exception.Message)
+                        Write-TpmText -Text 'The older answers could not be put back, so nothing changed.' -Color Yellow
+                    }
+                }
+            }
+            default { return }
+        }
+    }
 }
 
 # =============================================================================
@@ -42151,6 +45228,7 @@ function Invoke-RestoreBackupLegacy {
         Write-Host ''
         Write-TpmResetRestoreText -Text 'This copy cannot be checked. TeknoParrot Manager cannot be sure it is complete.' -Color Yellow
         Write-TpmResetRestoreText -Text 'Games that are missing from it will be removed.' -Color Yellow
+        if (-not $AlreadyConfirmed) { Write-TpmResetRestoreText -Text 'Warning: this replaces ALL your current game settings with this saved copy.' -Color Yellow }
         Write-Host ''
         $unverifiedConfirm = Read-TpmResetRestoreAnswer -Prompt 'Type UNVERIFIED to use this copy anyway' -DetailBlocks @($selectedBlock)
         if ($unverifiedConfirm.ToUpperInvariant() -ne 'UNVERIFIED') {
@@ -42159,7 +45237,8 @@ function Invoke-RestoreBackupLegacy {
             return (New-TpmRestoreBackupLegacyResult -Outcome 'NO_OP' -ReasonCode 'USER_DECLINED' -Summary 'Restore was declined. No profiles were changed.' -FinalCheck 'The unverified-backup confirmation was declined before the profile mutation boundary.' -Name $selected.Name -Cancelled)
         }
     }
-    if (-not $AlreadyConfirmed) {
+    # A copy that cannot be checked is approved once, by its own typed word above, which also carries the replace-everything warning.
+    if (-not $AlreadyConfirmed -and $selectedHasCompletionRecord) {
         Write-Host ''
         Write-TpmResetRestoreText -Text 'Warning: this replaces ALL your current game settings with this saved copy.' -Color Yellow
         Write-Host ''
@@ -44312,10 +47391,16 @@ function Get-TpmFriendlyProgressLabel {
             'Setting up PostgreSQL as administrator' = @(
                 'PostgreSQL elevated setup'
             )
-            'Setting up ReShade' = @(
+            'Checking your games for ReShade' = @(
                 'ReShade apply path preflight',
                 'ReShade apply preflight',
                 'ReShade bulk conflict scan',
+                'ReShade native shader scan'
+            )
+            'Applying ReShade' = @(
+                'ReShade profile deployment'
+            )
+            'Setting up ReShade' = @(
                 'ReShade deployment verification',
                 'ReShade effect acquisition',
                 'ReShade effect asset',
@@ -44324,10 +47409,8 @@ function Get-TpmFriendlyProgressLabel {
                 'ReShade embedded archive candidates',
                 'ReShade embedded archive entry scan',
                 'ReShade installer signature scan',
-                'ReShade native shader scan',
                 'ReShade preset file discovery',
                 'ReShade preset profile-code scan',
-                'ReShade profile deployment',
                 'ReShade state migration discovery'
             )
             'Setting up crosshairs' = @(
@@ -44692,13 +47775,12 @@ function Invoke-TpmResetRestoreAllGames {
     $blocked = Get-TpmRestoreAllBlocker -Plan $Plan -UserProfilesDir $UserProfilesDir -BackupPath $BackupPath
     if ($null -ne $blocked) { return $blocked }
     $blocks = @(Show-TpmResetRestoreAllPreview -Plan $Plan -When $when -UserProfilesDir $UserProfilesDir -BackupPath $BackupPath)
-    $confirm = Read-TpmResetRestoreAnswer -Intro 'Any answer other than YES cancels, and nothing is changed.' -Prompt 'Type YES to put everything back' -DetailBlocks $blocks
-    if ($confirm.Trim().ToUpperInvariant() -ne 'YES') { return (New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'USER_DECLINED' -Summary 'Canceled. Nothing was changed.') }
-    # Everything that changes: settings files, folders and, when it differs, TeknoParrot Manager's own settings file.
+    # Everything that changes: settings files, folders and, when it differs, TeknoParrot Manager's own settings file. One typed YES approves it all.
     $totalItems = $changes.Count + $folderCount + $(if ([string]$Plan.ConfigChange -eq 'Replace') { 1 } else { 0 })
-    $secondWhat = if ([string]$Plan.ConfigChange -eq 'Replace') { 'game settings files, folders and TeknoParrot Manager''s own settings' } else { 'game settings files and folders' }
-    $second = Read-TpmResetRestoreAnswer -Intro ('This changes {0} in total: {1}.' -f (Format-TpmCountNoun -Count $totalItems -Singular 'item'), $secondWhat) -Prompt 'Type ALL to confirm'
-    if ($second.Trim().ToUpperInvariant() -ne 'ALL') { return (New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'USER_DECLINED' -Summary 'Canceled. Nothing was changed.') }
+    $totalWhat = if ([string]$Plan.ConfigChange -eq 'Replace') { 'game settings files, folders and TeknoParrot Manager''s own settings' } else { 'game settings files and folders' }
+    $confirmIntro = 'This changes {0} in total: {1}. Any answer other than YES cancels, and nothing is changed.' -f (Format-TpmCountNoun -Count $totalItems -Singular 'item'), $totalWhat
+    $confirm = Read-TpmResetRestoreAnswer -Intro $confirmIntro -Prompt 'Type YES to put everything back' -DetailBlocks $blocks
+    if ($confirm.Trim().ToUpperInvariant() -ne 'YES') { return (New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'USER_DECLINED' -Summary 'Canceled. Nothing was changed.') }
     return (Restore-TpmRestorePointAll -RestorePoint $RestorePoint -UserProfilesDir $UserProfilesDir -Plan $Plan -ConfigPath $ConfigPath -RestorePointsRoot $RestorePointsRoot)
 }
 
@@ -45899,21 +48981,35 @@ function Invoke-TpmLaunchBoxFileTransaction {
 }
 
 # =============================================================================
-# TPM GAME TITLE MATCHING  (module-ready block; issue #426)
+# TPM GAME MATCHING ENGINE  (module-ready block; issues #376 and #420 to #427)
 # -----------------------------------------------------------------------------
-# Public functions (read-only, no screens, no logging, no script-level variables; state goes in and out as parameters):
-#   Get-TpmGamesDbPath          <LaunchBox>\Metadata\LaunchBox.Metadata.db for a LaunchBox folder
-#   Initialize-TpmGamesDbReader loads the read-only SQLite reader (throws when Windows does not have it)
-#   Get-TpmGamesDbIndex         reads the arcade games of the LaunchBox Games Database into an index (read-only)
-#   ConvertTo-TpmGamesDbKey     the comparison form of a title (accents removed, then Get-NormalizedGameKey)
-#   Find-TpmGamesDbMatch        one sure (exact, normalized) match for a title, or $null
-#   Find-TpmGamesDbCandidate    closest names for a title with no sure match (suggestions only, Dice similarity)
-#   Get-TpmEggmanGameName       clean title and hardware from an Eggman-style game folder name in a game path (text only)
-#   Resolve-TpmGameTitle        combines both sources: Matched, Suggested (high or medium), Disagree, NeedsChoice or NoMatch
-# Depends on (existing in this script): Get-NormalizedGameKey, Get-DiceSimilarity, Get-MeaningfulTitleTokens.
+# THE ONE PLACE that decides "which game is this" for TeknoParrot Manager. Every feature that has to match a game (titles, Games Database
+# IDs, year and developer, playlists, grouping, pictures) calls it; do not write a second matcher.
+#
+# It uses all sources of truth together: the Eggman DAT list, the game folder name (only when the DAT confirms the folder), TeknoParrot's
+# metadata and profile, and the LaunchBox Games Database (names, year, developer). It looks one level at a time and stops at the first
+# level that is certain:
+#   level 1  the same name (accents, capitals, punctuation and release tags such as region, version and board code ignored)
+#   level 2  the same name spelled a little differently (Roman numerals, "the", "Ver.", "Arcade" tails)
+#   level 3  a name worked out from the given one (a note, "A / B" sides, first of a series, an extra name); needs a second source,
+#            the hardware maker or the year to back it up
+#   level 4  only a close name: never certain, a suggestion for the user
+# A different year or number is a different game. The emulator named in a title ("ElfLoader 2") is never part of the game name.
+# Outcomes: Certain, Ambiguous (the user decides), NoMatch, NotGame (firmware updaters, drive checkers, boards: never added).
+#
+# Public functions (read-only, no screens, no script-level variables; state goes in and out as parameters):
+#   Get-TpmGamesDbPath / Initialize-TpmGamesDbReader / Get-TpmGamesDbIndex   open the LaunchBox Games Database (read-only) as an index
+#   ConvertFrom-TpmDatGameName   what an Eggman game name says: title, other names, year, hardware, maker
+#   Get-TpmDatEntriesByCode      the Eggman list entries by profile code
+#   Get-TpmProfileMatchSubject   reads one profile, TeknoParrot's metadata and the Eggman list into a subject (names plus facts)
+#   New-TpmMatchSubject          the same from plain values (no files)
+#   Resolve-TpmGameMatch         THE DECISION for one subject: Status, Level, Match, Options, Reason, Evidence, Facts, Title
+# Depends on (existing in this script): Get-NormalizedGameKey, Get-DiceSimilarity, Get-MeaningfulTitleTokens, Read-Xml, Get-XmlChildText,
+#   Get-DatEntryForZipName, Write-Log.
 # Also: Windows PowerShell 5.1 and winsqlite3.dll (ships with Windows 10 and later).
-# To lift it into a .psm1, move this block with those three helpers and export the names above.
+# To lift it into a .psm1, move this block with those helpers and export the names above.
 # The reader opens the database with the read-only flag and has no write call. Nothing is downloaded or copied.
+# Evidence: scripts\Invoke-TpmMatchEvidence.ps1 runs the engine over every TeknoParrot profile and writes a report.
 # =============================================================================
 function Initialize-TpmGamesDbReader {
     [CmdletBinding()] param()
@@ -45986,9 +49082,9 @@ function Get-TpmGamesDbIndex {
     [CmdletBinding()] param([Parameter(Mandatory)][string]$DbPath, [string[]]$Platforms = @('Arcade', 'Taito Type X'))
     Initialize-TpmGamesDbReader
     $platformList = "'" + (($Platforms | ForEach-Object { $_ -replace "'", "''" }) -join "','") + "'"
-    $index = @{ ByName = @{}; ByAlternate = @{}; ByWord = @{}; Platforms = @($Platforms) }
+    $index = @{ ByName = @{}; ByAlternate = @{}; ByWord = @{}; ById = @{}; Platforms = @($Platforms) }
     $gameRows = $null; $hasFacts = $true
-    try { $gameRows = @([TpmGamesDbSql]::Query($DbPath, "SELECT DatabaseID, Name, Platform, ReleaseYear, Developer, Publisher FROM Games WHERE Platform IN ($platformList)")) }
+    try { $gameRows = @([TpmGamesDbSql]::Query($DbPath, "SELECT DatabaseID, Name, Platform, COALESCE(ReleaseYear, CAST(substr(ReleaseDate, 1, 4) AS INTEGER)), Developer, Publisher FROM Games WHERE Platform IN ($platformList)")) }
     catch { $hasFacts = $false }
     if (-not $hasFacts) { $gameRows = @([TpmGamesDbSql]::Query($DbPath, "SELECT DatabaseID, Name, Platform FROM Games WHERE Platform IN ($platformList)")) }
     foreach ($row in $gameRows) {
@@ -46003,7 +49099,9 @@ function Get-TpmGamesDbIndex {
         }
         $year = 0
         if ($hasFacts) { [void][int]::TryParse([string]$row[3], [ref]$year) }
-        [void]$index.ByName[$key].Add([pscustomobject]@{ Id = [string]$row[0]; Name = [string]$row[1]; Platform = [string]$row[2]; Year = $year; Developer = $(if ($hasFacts) { [string]$row[4] } else { '' }); Publisher = $(if ($hasFacts) { [string]$row[5] } else { '' }) })
+        $entry = [pscustomobject]@{ Id = [string]$row[0]; Name = [string]$row[1]; Platform = [string]$row[2]; Year = $year; Developer = $(if ($hasFacts) { [string]$row[4] } else { '' }); Publisher = $(if ($hasFacts) { [string]$row[5] } else { '' }) }
+        [void]$index.ByName[$key].Add($entry)
+        if (-not $index.ById.ContainsKey($entry.Id)) { $index.ById[$entry.Id] = $entry }
     }
     foreach ($row in [TpmGamesDbSql]::Query($DbPath, "SELECT g.DatabaseID, g.Name, g.Platform, a.AlternateName FROM GameAlternateTitles a JOIN Games g ON g.DatabaseID = a.DatabaseID WHERE g.Platform IN ($platformList)")) {
         $key = ConvertTo-TpmGamesDbKey $row[3]
@@ -46013,24 +49111,6 @@ function Get-TpmGamesDbIndex {
     }
     if ($index.ByName.Count -eq 0) { throw 'The game database has no arcade games, so it cannot be used.' }
     return $index
-}
-
-# One sure match or $null. A name that fits two different games is not guessed.
-function Find-TpmGamesDbMatch {
-    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title)
-    $key = ConvertTo-TpmGamesDbKey $Title
-    if (-not $key) { return $null }
-    foreach ($mapName in @('ByName', 'ByAlternate')) {
-        $map = $Index[$mapName]
-        if (-not $map.ContainsKey($key)) { continue }
-        $hits = $map.Item($key).ToArray()
-        foreach ($platformName in $Index.Platforms) {
-            $found = @($hits | Where-Object { $_.Platform -eq $platformName } | Group-Object Id | ForEach-Object { $_.Group[0] })
-            if ($found.Count -eq 1) { return $found[0] }
-            if ($found.Count -gt 1) { return $null }
-        }
-    }
-    return $null
 }
 
 # Suggestions only, never a match: names that share a meaningful word with the title, ranked by the script's Dice similarity.
@@ -46052,770 +49132,117 @@ function Find-TpmGamesDbCandidate {
     return @($best | ForEach-Object { $first = $Index.ByName.Item($_.Key)[0]; [pscustomobject]@{ Id = $first.Id; Name = $first.Name; Platform = $first.Platform; Year = [int]$first.Year; Developer = [string]$first.Developer; Publisher = [string]$first.Publisher; Score = [math]::Round($_.Score, 2) } })
 }
 
-# Eggman's collection names every game folder "SHORTCODE (Title)(version)(date)[hardware][TP]" or "Title (version)(date)[hardware][TP]".
-# The folder name in a profile's game path therefore carries a clean title and the hardware. Pure text work: nothing is read from disk.
-function Get-TpmEggmanGameName {
-    [CmdletBinding()] param([string]$GamePath)
-    $result = [pscustomobject]@{ Title = ''; Hardware = ''; Folder = '' }
-    if ([string]::IsNullOrWhiteSpace($GamePath)) { return $result }
-    foreach ($segment in ($GamePath -split '[\\/]')) {
-        if ($segment -notmatch '\)\s*\[[^\]]+\]') { continue }
-        $result.Folder = $segment
-        $hardware = [regex]::Match($segment, '\[([^\]]+)\]')
-        if ($hardware.Success -and $hardware.Groups[1].Value -ne 'TP') { $result.Hardware = $hardware.Groups[1].Value.Trim() }
-        $head = ($segment -split '\[', 2)[0].Trim()
-        $firstParen = $head.IndexOf('(')
-        if ($firstParen -lt 0) { return $result }
-        $prefix = $head.Substring(0, $firstParen).Trim()
-        $groups = @([regex]::Matches($head, '\(([^()]*)\)') | ForEach-Object { $_.Groups[1].Value.Trim() })
-        $versionLike = ($groups.Count -gt 0 -and $groups[0] -match '^v?\d+(\.\d+)+')
-        # A one-word short code followed by a real title in brackets: "2SPICY (Too Spicy)(1.00.00)..."
-        $result.Title = if ($prefix -and $prefix -notmatch '\s' -and $groups.Count -gt 1 -and -not $versionLike) { $groups[0] } else { $prefix }
-        return $result
+# The company named at the start of a hardware label such as [Namco Super System 23]: a known maker, else the first word when it looks
+# like a company name (not "PC", "Linux" and the like). '' when the label names none.
+function Get-TpmMatchMaker {
+    [CmdletBinding()] [OutputType([string])] param([string]$Text)
+    $label = ([string]$Text).Trim()
+    if (-not $label) { return '' }
+    foreach ($maker in @('Bandai Namco', 'Raw Thrills', 'Incredible Technologies', 'Play Mechanix', 'Global VR', 'American Laser Games', 'Namco', 'Sega', 'Taito', 'Konami', 'Capcom', 'Examu', 'Atari', 'Midway', 'SNK', 'Tecmo', 'Gaelco', 'Sammy', 'Sony', 'Cave', 'Arika', 'IT')) {
+        if ($label -match ('(?i)^' + [regex]::Escape($maker) + '\b')) { return $(if ($maker -eq 'IT') { 'Incredible Technologies' } else { $maker }) }
     }
+    $first = ($label -split '\s+')[0]
+    if ($first -match "^[A-Za-z][A-Za-z0-9&'-]{2,}$" -and $first -inotin @('PC', 'Linux', 'Windows', 'System', 'Arcade', 'Game', 'Based', 'Console', 'Unknown')) { return $first }
+    return ''
+}
+
+# The arcade hardware family of a hardware label: the versions of one board are one family ("Sega Lindbergh Red" and "SEGA Lindbergh
+# Yellow" are "Sega Lindbergh"; every Taito Type X is "Taito Type X"), and the maker is spelled one way. '' for an empty label.
+function Get-TpmHardwareFamily {
+    [CmdletBinding()] [OutputType([string])] param([string]$Label)
+    $text = ([regex]::Replace(([string]$Label).Trim(), '\s+', ' '))
+    if (-not $text) { return '' }
+    $text = [regex]::Replace($text, '^(?i:sega)\b', 'Sega')
+    foreach ($family in @('Sega Lindbergh', 'Sega RingEdge', 'Taito Type X', 'Taito NESiCAxLive')) {
+        if ($text -match ('(?i)^' + [regex]::Escape($family) + '(?![A-Za-z])')) { return $family }
+    }
+    return $text
+}
+
+# True when a bracketed note is a release tag: the same game, only another year, version, region, revision, cabinet or board code.
+function Test-TpmDatReleaseTag {
+    [CmdletBinding()] [OutputType([bool])] param([string]$Group)
+    $g = ([string]$Group).Trim()
+    if (-not $g) { return $true }
+    if ($g -match '^(?:19|20)\d{2}(?:-\d{2}-\d{2})?$') { return $true }
+    if ($g -match '^v?\d+(?:[.,]\d+)*[A-Za-z]?(?:\s|,|$)') { return $true }
+    if ($g -match '(?i)\b(?:ver|version|rev|set)\b\.?\s*[\w.]+|\b(?:offline|online|landscape|portrait|bezel|terminal|vending|revision|license)\b') { return $true }
+    if ($g -match '\b\d{5,6}\b') { return $true }
+    if ($g -cmatch '^[A-Z][A-Z0-9]{1,5}$') { return $true }
+    if ($g -cmatch '^[A-Z0-9][A-Z0-9 ._,/-]{0,30}$' -and $g -match '\d') { return $true }
+    if ($g -match '^[a-z]+(?:,[a-z]+)+$') { return $true }
+    if ($g -match '(?i)^(?:world|japan|usa|us|uk|asia|europe|euro|export|exp|korea|china|taiwan|jpn)(?:[\s,/]+\S.*)?$') { return $true }
+    return $false
+}
+
+# True when a bracketed note in an Eggman game name is a technical tag and not another name of the game: a release tag, or a note that says
+# it is a variant (bootleg, hack, prototype, demo).
+function Test-TpmDatTagGroup {
+    [CmdletBinding()] [OutputType([bool])] param([string]$Group)
+    if (Test-TpmDatReleaseTag $Group) { return $true }
+    return [bool]($Group -match '(?i)\b(?:prototype|proto|bootleg|hack|demo|beta|decrypted|phoenix)\b')
+}
+
+# The title without trailing release tags: "Ninja Assault (Asia, NJA4 Ver.A)" and "Brave Blade (VER 1.40G)" are "Ninja Assault" and
+# "Brave Blade". A trailing note that says bootleg, hack or prototype is kept: that is a different release, not the same one.
+function Get-TpmTitleWithoutReleaseTags {
+    [CmdletBinding()] [OutputType([string])] param([string]$Title)
+    $text = Remove-TpmEmulatorName $Title
+    while ($true) {
+        $note = [regex]::Match($text, '^(.*?)\s*\(([^()]*)\)\s*$')
+        if (-not $note.Success -or -not $note.Groups[1].Value.Trim() -or -not (Test-TpmDatReleaseTag $note.Groups[2].Value)) { break }
+        $text = $note.Groups[1].Value.Trim()
+    }
+    return $text.Trim()
+}
+
+# What one Eggman game name says. Eggman names every game "Title (version)(date)(region)[hardware][TP]". A bracketed note that is not
+# a technical tag is another name of the game (for example "Aero Fighters 2 (Sonic Wings 2)"). Year is 0 when the name has none.
+# Pure text work: nothing is read from disk.
+function ConvertFrom-TpmDatGameName {
+    [CmdletBinding()] param([string]$Name)
+    $result = [pscustomobject]@{ Title = ''; AltTitles = @(); Year = 0; Hardware = ''; Maker = ''; IsListed = $false }
+    if ([string]::IsNullOrWhiteSpace($Name)) { return $result }
+    $text = ([string]$Name).Trim() -replace '(?i)\.zip$', ''
+    $result.IsListed = [bool]($text -match '\[TP\]\s*$')
+    $labels = @([regex]::Matches($text, '\[([^\]]+)\]') | ForEach-Object { $_.Groups[1].Value.Trim() } | Where-Object { $_ -and $_ -ine 'TP' })
+    if ($labels.Count -gt 0) { $result.Hardware = [string]$labels[0]; $result.Maker = Get-TpmMatchMaker $result.Hardware }
+    $head = ($text -split '\[', 2)[0].Trim()
+    $firstParen = $head.IndexOf('(')
+    if ($firstParen -lt 0) { $result.Title = $head; return $result }
+    $result.Title = $head.Substring(0, $firstParen).Trim()
+    $groups = @([regex]::Matches($head, '\(([^()]*)\)') | ForEach-Object { $_.Groups[1].Value.Trim() })
+    foreach ($group in $groups) {
+        if ($result.Year -eq 0 -and $group -match '^((?:19|20)\d{2})(?:-\d{2}-\d{2})?$') { $result.Year = [int]$Matches[1] }
+    }
+    $result.AltTitles = @($groups | Where-Object { -not (Test-TpmDatTagGroup $_) })
     return $result
 }
 
-# Decides the Games Database game for one profile by asking the layered matching engine (Resolve-TpmGamesDbMatch) with every name
-# the profile gives: TeknoParrot's metadata name, the profile's own title, the Eggman folder name and the MAME list name. The
-# profile's internal name is a hint of last resort. Only an exact name that every source agrees on is ever called Matched.
-#   Matched     one sure match (Match)
-#   Suggested   the sources name different games; the one closer to the profile's own names is picked (Match),
-#               Confidence is High or Medium, the other games are in Options. Shown in the preview; applied only after the user approves it.
-#   Disagree    the sources differ and the pick is not clear (Confidence Low); Options holds the games; nothing is applied
-#   NeedsChoice no sure match; Options holds the closest names (suggestions); nothing is applied
-#   NoMatch     nothing close enough
-# High: score 0.90 or more and 0.10 ahead of the other game. Medium: 0.72 or more and 0.10 ahead.
-function Resolve-TpmGameTitle {
-    [CmdletBinding()] param(
-        [Parameter(Mandatory)]$Index, [string]$Title, [string]$InternalName = '', [string]$EggmanName = '', [string]$EggmanFolder = '',
-        [string]$MetadataName = '', [string]$MameName = '', [int]$Year = 0, [string]$Maker = '',
-        [double]$MediumScore = 0.72, [double]$HighScore = 0.90, [double]$TieMargin = 0.1
-    )
-    $internalShort = ($InternalName -replace '\s*\([^()]*\)\s*$', '')
-    $names = New-Object System.Collections.Generic.List[object]
-    if ($MetadataName) { [void]$names.Add([pscustomobject]@{ Source = 'TeknoParrot'; Name = $MetadataName }) }
-    if ($Title) { [void]$names.Add([pscustomobject]@{ Source = 'TeknoParrot profile'; Name = $Title }) }
-    if ($EggmanName) { [void]$names.Add([pscustomobject]@{ Source = 'Eggman list'; Name = $EggmanName }) }
-    if ($MameName) { [void]$names.Add([pscustomobject]@{ Source = 'MAME list'; Name = $MameName }) }
-    foreach ($hint in @($InternalName, $internalShort | Select-Object -Unique)) {
-        if ($hint) { [void]$names.Add([pscustomobject]@{ Source = 'Profile internal name'; Name = $hint; Fallback = $true }) }
-    }
-    $result = [pscustomobject]@{ Status = 'NoMatch'; Title = $Title; EggmanTitle = $EggmanName; Match = $null; Source = ''; Confidence = ''; Options = @() }
-    $engine = Resolve-TpmGamesDbMatch -Index $Index -Names $names.ToArray() -Year $Year -Maker $Maker
-    if ($engine.Status -eq 'Sure') {
-        $result.Status = 'Matched'; $result.Match = $engine.Match; $result.Source = 'Games Database: ' + $engine.Evidence
-        return $result
-    }
-    # Sources that each name an exact game, but not the same one: the game closer to the profile's own full names is suggested.
-    $exactPicks = New-Object System.Collections.Generic.List[object]
-    foreach ($entry in $names) {
-        if ($entry.Fallback) { continue }
-        $pick = Get-TpmGamesDbPick -Index $Index -Title ([string]$entry.Name) -Year $Year -Maker $Maker
-        if ($pick.Id -and $pick.Kind -eq 'Exact') { [void]$exactPicks.Add($pick) }
-    }
-    $distinct = @($exactPicks | Group-Object Id | ForEach-Object { $_.Group[0] })
-    if ($distinct.Count -ge 2) {
-        $references = @($InternalName, $EggmanFolder) | Where-Object { $_ } | ForEach-Object { ConvertTo-TpmGamesDbKey $_ }
-        $scored = @($distinct | ForEach-Object {
-            $optionKey = ConvertTo-TpmGamesDbKey $_.Name; $best = 0.0
-            foreach ($r in $references) { $s = Get-DiceSimilarity $optionKey $r; if ($s -gt $best) { $best = $s } }
-            [pscustomobject]@{ Pick = $_; Score = $best }
-        } | Sort-Object Score -Descending)
-        $gap = $scored[0].Score - $scored[1].Score
-        $result.Options = @($scored | ForEach-Object { $_.Pick })
-        if ($gap -ge $TieMargin -and $scored[0].Score -ge $HighScore) { $result.Status = 'Suggested'; $result.Confidence = 'High'; $result.Match = $scored[0].Pick }
-        elseif ($gap -ge $TieMargin -and $scored[0].Score -ge $MediumScore) { $result.Status = 'Suggested'; $result.Confidence = 'Medium'; $result.Match = $scored[0].Pick }
-        else { $result.Status = 'Disagree'; $result.Confidence = 'Low' }
-        $result.Source = 'The sources point at different games'
-        return $result
-    }
-    # No sure match: the engine's best candidate first, then the script's other suggestions. Nothing is applied.
-    $options = New-Object System.Collections.Generic.List[object]
-    if ($engine.Match) { [void]$options.Add([pscustomobject]@{ Id = [string]$engine.Match.Id; Name = [string]$engine.Match.Name; Platform = [string]$engine.Match.Platform; Score = [double]$engine.Match.Score }) }
-    $more = @(Find-TpmGamesDbCandidate -Index $Index -Title $Title)
-    if ($more.Count -eq 0 -and $internalShort) { $more = @(Find-TpmGamesDbCandidate -Index $Index -Title $internalShort) }
-    if ($more.Count -eq 0 -and $EggmanName) { $more = @(Find-TpmGamesDbCandidate -Index $Index -Title $EggmanName) }
-    foreach ($candidate in $more) { if ($options.Count -lt 3 -and -not (@($options | Where-Object { $_.Id -eq [string]$candidate.Id }).Count)) { [void]$options.Add($candidate) } }
-    if ($options.Count -gt 0) { $result.Status = 'NeedsChoice'; $result.Confidence = 'Low'; $result.Options = $options.ToArray() }
-    return $result
-}
-# ===== end of TPM GAME TITLE MATCHING (module-ready block) =====
-
-
-function Get-OrCreateLaunchBoxEmulator {
-    param([System.Xml.XmlDocument]$emulatorsDoc, [string]$tpRoot, [string]$lbRoot)
-    $emulatorMatches = @($emulatorsDoc.SelectNodes('/LaunchBox/Emulator') | Where-Object { (Get-XmlChildText $_ 'Title') -eq 'TeknoParrot' })
-    if ($emulatorMatches.Count -gt 1) { throw 'Multiple TeknoParrot emulator entries require manual resolution in LaunchBox.' }
-    if ($emulatorMatches.Count -eq 1) {
-        $id = Get-XmlChildText $emulatorMatches[0] 'ID'
-        $guid = [guid]::Empty
-        if (-not [guid]::TryParse($id,[ref]$guid) -or $guid -eq [guid]::Empty) { throw 'Existing TeknoParrot emulator identity is invalid; TPM will not edit it.' }
-        if (@($emulatorsDoc.SelectNodes('/LaunchBox/Emulator') | Where-Object { (Get-XmlChildText $_ 'ID') -eq $id }).Count -ne 1) { throw 'Duplicate LaunchBox emulator identity requires manual resolution.' }
-        $existingPath = Get-XmlChildText $emulatorMatches[0] 'ApplicationPath'
-        if (-not $existingPath -or -not (Test-TpmLaunchBoxSamePath -Root $lbRoot -Left $existingPath -Right (Join-Path $tpRoot 'TeknoParrotUi.exe'))) { throw 'Existing TeknoParrot emulator points elsewhere; change it in LaunchBox, not TPM.' }
-        return $id
-    }
-    $id = [guid]::NewGuid().ToString()
-    $node = $emulatorsDoc.CreateElement('Emulator')
-    foreach ($field in ([ordered]@{ ID=$id; Title='TeknoParrot'; ApplicationPath=(Get-RelativePath $lbRoot (Join-Path $tpRoot 'TeknoParrotUi.exe')); CommandLine='--profile=%romfile%.xml'; NoQuotes='true'; NoSpace='true'; FileNameWithoutExtensionAndPath='true' }).GetEnumerator()) { Set-XmlChildText $node $field.Key $field.Value }
-    [void]$emulatorsDoc.DocumentElement.AppendChild($node)
-    return $id
-}
-
-function Get-OrCreateLaunchBoxPlatform {
-    param([System.Xml.XmlDocument]$platformsListDoc, [string]$platformName, [string]$tpRoot, [string]$lbRoot)
-    $platformMatches = @($platformsListDoc.SelectNodes('/LaunchBox/Platform') | Where-Object { (Get-XmlChildText $_ 'Name') -eq $platformName })
-    if ($platformMatches.Count -gt 1) { throw 'Duplicate LaunchBox platform names require manual resolution.' }
-    if ($platformMatches.Count -eq 1) { return $false }
-    $node = $platformsListDoc.CreateElement('Platform')
-    foreach ($field in ([ordered]@{ Name=$platformName; Folder=(Get-RelativePath $lbRoot (Join-Path $tpRoot 'GameProfiles')); ScrapeAs='Arcade'; DisableAutoImport='true' }).GetEnumerator()) { Set-XmlChildText $node $field.Key $field.Value }
-    [void]$platformsListDoc.DocumentElement.AppendChild($node)
-    return $true
-}
-
-function Add-LaunchBoxEmulatorPlatformLink {
-    param([System.Xml.XmlDocument]$emulatorsDoc, [string]$emulatorId, [string]$platformName, [bool]$isNewPlatform)
-    if (@($emulatorsDoc.SelectNodes('/LaunchBox/EmulatorPlatform') | Where-Object { (Get-XmlChildText $_ 'Emulator') -eq $emulatorId -and (Get-XmlChildText $_ 'Platform') -eq $platformName }).Count) { return }
-    $node = $emulatorsDoc.CreateElement('EmulatorPlatform')
-    foreach ($field in ([ordered]@{ Emulator=$emulatorId; Platform=$platformName; CommandLine=''; Default=([string]$isNewPlatform).ToLowerInvariant() }).GetEnumerator()) { Set-XmlChildText $node $field.Key $field.Value }
-    [void]$emulatorsDoc.DocumentElement.AppendChild($node)
-}
-
-$script:LaunchBoxGameSkeletonFields = [ordered]@{
-    ID=''; Title=''; Platform=''; Emulator=''; ApplicationPath=''; CommandLine=''
-    DateAdded=''; DateModified=''; Favorite='false'; Completed='false'; Hide='false'
-    PlayCount='0'; PlayTime='0'; Notes=''
-}
-$script:LaunchBoxGameIdentityFields = @('ID','Title','Platform','Emulator','ApplicationPath','CommandLine','DateAdded','DateModified')
-
-function New-LaunchBoxGameEntry {
-    param([System.Xml.XmlDocument]$platformGamesDoc, [string]$relProfilePath, [string]$title, [string]$platformName, [string]$emulatorId, [string]$lbRoot, $GamesDbMatch = $null)
-    foreach ($existing in @($platformGamesDoc.SelectNodes('/LaunchBox/Game'))) {
-        $existingPath = Get-XmlChildText $existing 'ApplicationPath'
-        if ($existingPath -and (Test-TpmLaunchBoxSamePath -Root $lbRoot -Left $existingPath -Right $relProfilePath)) { return $false }
-    }
-    $node = $platformGamesDoc.CreateElement('Game')
-    foreach ($field in $script:LaunchBoxGameSkeletonFields.GetEnumerator()) { Set-XmlChildText $node $field.Key $field.Value }
-    $now = (Get-Date).ToString('o')
-    $identity = @{ ID=[guid]::NewGuid().ToString(); Title=$title; Platform=$platformName; Emulator=$emulatorId; ApplicationPath=$relProfilePath; CommandLine=''; DateAdded=$now; DateModified=$now }
-    foreach ($field in $script:LaunchBoxGameIdentityFields) { Set-XmlChildText $node $field $identity[$field] }
-    # A sure Games Database match gives the official title and the Games Database ID, so LaunchBox can fetch information and artwork.
-    if ($GamesDbMatch) { Set-XmlChildText $node 'Title' ([string]$GamesDbMatch.Name); Set-XmlChildText $node 'DatabaseID' ([string]$GamesDbMatch.Id) }
-    [void]$platformGamesDoc.DocumentElement.AppendChild($node)
-    return $true
-}
-
-# Opens the LaunchBox Games Database for one LaunchBox folder. State: Used, Missing (no file) or Failed (could not be read).
-function Get-TpmGamesDbForLaunchBox {
-    param([Parameter(Mandatory)][string]$LaunchBoxRoot)
-    $dbPath = Get-TpmGamesDbPath -LaunchBoxRoot $LaunchBoxRoot
-    if (-not (Test-Path -LiteralPath $dbPath -PathType Leaf)) { return [pscustomobject]@{ State = 'Missing'; Index = $null; Error = 'No LaunchBox.Metadata.db was found in the LaunchBox Metadata folder.' } }
-    try { return [pscustomobject]@{ State = 'Used'; Index = (Get-TpmGamesDbIndex -DbPath $dbPath); Error = '' } }
-    catch {
-        Write-Log ('LaunchBox game database could not be used: {0}' -f $_.Exception.Message)
-        return [pscustomobject]@{ State = 'Failed'; Index = $null; Error = [string]$_.Exception.Message }
-    }
-}
-
-# A game the Manager already added: link it to the Games Database. Leaves it alone when it is not the Manager's entry
-# (different emulator), already has an ID, or its title is neither the Manager's title nor the official one (the owner
-# changed it by hand). Returns the change, or $null when nothing was changed.
-function Update-TpmLaunchBoxGameFromGamesDb {
-    param([System.Xml.XmlDocument]$platformGamesDoc, [string]$relProfilePath, [string]$title, [string]$emulatorId, [string]$lbRoot, $GamesDbMatch)
-    foreach ($existing in @($platformGamesDoc.SelectNodes('/LaunchBox/Game'))) {
-        $existingPath = Get-XmlChildText $existing 'ApplicationPath'
-        if (-not $existingPath -or -not (Test-TpmLaunchBoxSamePath -Root $lbRoot -Left $existingPath -Right $relProfilePath)) { continue }
-        if ((Get-XmlChildText $existing 'Emulator') -ne $emulatorId) { return $null }
-        $currentId = (Get-XmlChildText $existing 'DatabaseID').Trim()
-        if ($currentId -and $currentId -ne '0') { return $null }
-        $currentTitle = Get-XmlChildText $existing 'Title'
-        if ($currentTitle -cne $title -and $currentTitle -cne $GamesDbMatch.Name) { return $null }
-        Set-XmlChildText $existing 'Title' ([string]$GamesDbMatch.Name)
-        Set-XmlChildText $existing 'DatabaseID' ([string]$GamesDbMatch.Id)
-        Set-XmlChildText $existing 'DateModified' (Get-Date).ToString('o')
-        return [pscustomobject]@{ Old = $currentTitle; New = [string]$GamesDbMatch.Name; Id = [string]$GamesDbMatch.Id; Kind = 'Existing' }
-    }
-    return $null
-}
-
-function Invoke-LaunchBoxDirectWrite {
-    param([string]$userProfilesDir, [string]$tpRoot, [string]$lbRoot, [string[]]$platformNames, [string]$BackupRoot, [switch]$PlanOnly, [switch]$UseGamesDb, [switch]$IncludeExisting, [hashtable]$GamesDbChoices = @{})
+# TeknoParrot's own facts for a profile code (Metadata\<code>.json): game name, release year, hardware text and genre.
+# Every value is empty (year 0) for a missing or unreadable file or an unsafe code. The code becomes part of a file name,
+# so only plain file-name characters are allowed.
+function Get-TpmTeknoParrotMetadataFacts {
+    [CmdletBinding()] param([Parameter(Mandatory)][string]$TpRoot, [Parameter(Mandatory)][string]$ProfileCode)
+    $facts = [pscustomobject]@{ Name = ''; Year = 0; Platform = ''; Genre = '' }
+    if ($ProfileCode -notmatch '^[A-Za-z0-9_.\-]+$' -or $ProfileCode -match '^\.+$') { return $facts }
+    $path = Join-Path (Join-Path $TpRoot 'Metadata') ($ProfileCode + '.json')
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $facts }
     try {
-        $lbRoot = Resolve-TpmLaunchBoxRoot $lbRoot
-        if (-not (Test-Path -LiteralPath $lbRoot -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $lbRoot)) { throw 'Choose a safe existing LaunchBox root.' }
-        if (@($platformNames).Count -eq 0) { throw 'Choose at least one LaunchBox platform.' }
-        # Guided wait instead of a 'close the app and rerun' dead end. This runs before any file inventory so LaunchBox's own save-on-exit cannot invalidate the hashes taken below; the transaction keeps its own final process check.
-        if (-not $PlanOnly -and -not (Wait-TpmForProcessClose -ProcessNames @('LaunchBox','BigBox') -FriendlyName 'LaunchBox or BigBox')) {
-            $stillOpen = New-TpmLaunchBoxResult NO_CHANGES 'LaunchBox or BigBox is still open and the operation was canceled. No library writes were attempted.'
-            $stillOpen.Cancelled = $true; $stillOpen.Reason = 'APPLICATION_RUNNING'
-            return $stillOpen
-        }
-        $docs = [ordered]@{}
-        $originals = @{}
-        foreach ($rel in @('Data\Emulators.xml','Data\Platforms.xml')) {
-            $path = Get-TpmLaunchBoxPath $lbRoot $rel
-            $originals[$rel] = Get-TpmLaunchBoxFileState $path
-            if (-not $originals[$rel].Exists) { throw ("LaunchBox has not made {0} yet. Open LaunchBox once, close it, then try again. Nothing was changed." -f $rel) }
-            $docs[$rel] = Read-TpmLaunchBoxXml $path
-            Assert-TpmLaunchBoxState $path $originals[$rel]
-        }
-        $platformFiles = [ordered]@{}
-        foreach ($name in $platformNames) {
-            $safe = Get-SafeLaunchBoxPlatformFileName $name
-            if ($safe -cne $name -or $name -in @('.','..')) { throw 'Platform name must be a safe, unambiguous filename.' }
-            $rel = "Data\Platforms\$safe.xml"
-            if ($platformFiles.Contains($rel)) { throw 'Duplicate LaunchBox platform destination.' }
-            $path = Get-TpmLaunchBoxPath $lbRoot $rel
-            if (-not (Test-Path -LiteralPath ([System.IO.Path]::GetDirectoryName($path)) -PathType Container -ErrorAction Stop)) { throw 'LaunchBox Data\Platforms must already exist.' }
-            $platformFiles[$rel] = $name
-            $originals[$rel] = Get-TpmLaunchBoxFileState $path
-            $docs[$rel] = if ($originals[$rel].Exists) { Read-TpmLaunchBoxXml $path } else { [xml]'<LaunchBox />' }
-            Assert-TpmLaunchBoxState $path $originals[$rel]
-        }
-        $plans = @()
-        foreach ($rel in $docs.Keys) {
-            $plans += [pscustomobject]@{ RelativePath=$rel; Before=$originals[$rel]; Document=$docs[$rel]; OriginalXml=$docs[$rel].OuterXml; BaseChildCount=$docs[$rel].DocumentElement.ChildNodes.Count; Source=$null; SourceHash=$null; Changed=$false; Delete=$false; AfterHash=$null }
-        }
-        $emulatorId = Get-OrCreateLaunchBoxEmulator $docs['Data\Emulators.xml'] $tpRoot $lbRoot
-        # Official titles and Games Database IDs (read only). Any problem means games keep today's titles, with a plain note.
-        $gamesDb = $null
-        $mameMapForAdd = $null
-        $titleChanges = New-Object System.Collections.Generic.List[object]
-        $titleReview = New-Object System.Collections.Generic.List[object]
-        $resolvedByFile = @{}
-        if ($UseGamesDb) { $gamesDb = Get-TpmGamesDbForLaunchBox -LaunchBoxRoot $lbRoot }
-        $counts = @{}
-        $skippedMissingGame = 0
-        $skippedUnreadable = New-Object System.Collections.Generic.List[string]
-        $skippedBadPath = New-Object System.Collections.Generic.List[string]
-        $profiles = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter '*.xml' -File -ErrorAction Stop)
-        foreach ($rel in $platformFiles.Keys) {
-            $name = $platformFiles[$rel]
-            $created = Get-OrCreateLaunchBoxPlatform $docs['Data\Platforms.xml'] $name $tpRoot $lbRoot
-            Add-LaunchBoxEmulatorPlatformLink $docs['Data\Emulators.xml'] $emulatorId $name $created
-            $counts[$name] = 0
-            $scanTotal = $profiles.Count
-            $scanStarted = Get-Date
-            $scanCurrent = 0
-            $scanOutcome = 'Error'
-            try {
-                foreach ($file in $profiles) {
-                    $scanCurrent++
-                    Write-TpmCompactExtractionProgress -Phase Scanning -Label 'LaunchBox direct-write profile scan' -Current $scanCurrent -Total $scanTotal -StartedAt $scanStarted
-                    try {
-                        $profileDoc = Read-Xml $file.FullName
-                        if ($null -eq $profileDoc.GameProfile) { throw 'This is not a TeknoParrot game profile.' }
-                        $gamePath = (Get-XmlChildText $profileDoc.GameProfile 'GamePath').Trim()
-                        $gameFileFound = $false
-                        $gamePathIllegal = $false
-                        if ($gamePath) {
-                            try { $gameFileFound = [System.IO.File]::Exists((ConvertTo-TpmAutoSyncLongPath -Path $gamePath)) -or [bool](Test-Path -LiteralPath $gamePath -PathType Leaf -ErrorAction Stop) }
-                            catch { $gamePathIllegal = $true; $gamePathProblem = $_.Exception.Message }
-                        }
-                    } catch {
-                        if ($name -eq @($platformFiles.Values)[0]) {
-                            [void]$skippedUnreadable.Add([string]$file.Name)
-                            Write-Log ('LaunchBox: skipped the profile file {0} because it could not be read: {1}' -f $file.FullName, $_.Exception.Message)
-                        }
-                        continue
-                    }
-                    if ($gamePathIllegal) {
-                        if ($name -eq @($platformFiles.Values)[0]) {
-                            [void]$skippedBadPath.Add([string]$file.Name)
-                            Write-Log ('LaunchBox: skipped the profile file {0} because its saved game path is not a valid path: {1}' -f $file.FullName, $gamePathProblem)
-                        }
-                        continue
-                    }
-                    if (-not $gameFileFound) { if ($name -eq @($platformFiles.Values)[0]) { $skippedMissingGame++ }; continue }
-                    $title = Get-XmlChildText $profileDoc.GameProfile 'Description'
-                    if (-not $title) { $title = $file.BaseName }
-                    if (Test-TpmNonGameTitle -Title $title) {
-                        if ($name -eq @($platformFiles.Values)[0]) { Write-Log ('LaunchBox: skipped {0} because it is not a game (firmware updater, drive checker or board).' -f $title) }
-                        continue
-                    }
-                    $resolution = $null
-                    if ($gamesDb -and $gamesDb.State -eq 'Used') {
-                        if (-not $resolvedByFile.ContainsKey($file.Name)) {
-                            $eggmanName = Get-TpmEggmanGameName -GamePath $gamePath
-                            $internalName = Get-XmlChildText $profileDoc.GameProfile 'GameNameInternal'
-                            $metaFacts = [pscustomobject]@{ Name = ''; Year = 0; Platform = '' }
-                            $mameName = ''
-                            if ($tpRoot) {
-                                $metaFacts = Get-TpmTeknoParrotMetadataFacts -TpRoot $tpRoot -ProfileCode $file.BaseName
-                                if ($null -eq $mameMapForAdd) { $mameMapForAdd = Get-TpmMameNameMap -MamePath (Join-Path $lbRoot 'Metadata\MAME.xml') }
-                                $romKey = Get-TpmMatchRomKey -TpRoot $tpRoot -Code $file.BaseName
-                                if ($romKey -and $mameMapForAdd.ContainsKey($romKey)) { $mameName = [string]$mameMapForAdd[$romKey] }
-                            }
-                            $resolvedByFile[$file.Name] = Resolve-TpmGameTitle -Index $gamesDb.Index -Title $title -InternalName $internalName -EggmanName $eggmanName.Title -EggmanFolder $eggmanName.Folder -MetadataName $metaFacts.Name -MameName $mameName -Year $metaFacts.Year -Maker $metaFacts.Platform
-                        }
-                        $resolution = $resolvedByFile[$file.Name]
-                    }
-                    $dbMatch = $null
-                    $changeConfidence = ''
-                    $changeOther = ''
-                    if ($resolution -and $resolution.Status -in @('Matched', 'Suggested')) {
-                        $dbMatch = $resolution.Match
-                        if ($resolution.Status -eq 'Suggested') {
-                            $changeConfidence = [string]$resolution.Confidence
-                            $changeOther = (@($resolution.Options | Where-Object { $_.Id -ne $dbMatch.Id } | ForEach-Object { '{0} (ID {1})' -f $_.Name, $_.Id }) -join ' / ')
-                        }
-                    }
-                    elseif ($resolution -and $GamesDbChoices.ContainsKey($file.Name)) { $dbMatch = $GamesDbChoices[$file.Name]; $changeConfidence = 'Your choice' }
-                    $relProfile = Get-RelativePath $lbRoot $file.FullName
-                    $addedNow = New-LaunchBoxGameEntry $docs[$rel] $relProfile $title $name $emulatorId $lbRoot -GamesDbMatch $dbMatch
-                    if ($addedNow) {
-                        $counts[$name]++
-                        if ($dbMatch) { [void]$titleChanges.Add([pscustomobject]@{ Old = $title; New = [string]$dbMatch.Name; Id = [string]$dbMatch.Id; Kind = 'New'; Confidence = $changeConfidence; Other = $changeOther }) }
-                    } elseif ($dbMatch -and $IncludeExisting) {
-                        $existingChange = Update-TpmLaunchBoxGameFromGamesDb -platformGamesDoc $docs[$rel] -relProfilePath $relProfile -title $title -emulatorId $emulatorId -lbRoot $lbRoot -GamesDbMatch $dbMatch
-                        if ($existingChange) {
-                            $existingChange | Add-Member -NotePropertyName Confidence -NotePropertyValue $changeConfidence -Force
-                            $existingChange | Add-Member -NotePropertyName Other -NotePropertyValue $changeOther -Force
-                            [void]$titleChanges.Add($existingChange)
-                        }
-                    }
-                    if ($resolution -and $resolution.Status -notin @('Matched', 'Suggested') -and -not $dbMatch -and ($addedNow -or $IncludeExisting) -and -not $resolvedByFile.ContainsKey('seen:' + $file.Name)) {
-                        $resolvedByFile['seen:' + $file.Name] = $true
-                        [void]$titleReview.Add([pscustomobject]@{ File = $file.Name; Title = $title; Status = $resolution.Status; EggmanTitle = $resolution.EggmanTitle; Options = @($resolution.Options) })
-                    }
-                }
-                $scanOutcome = 'Final'
-            } finally {
-                if ($scanTotal -gt 0) {
-                    Write-TpmCompactExtractionProgress -Phase Scanning -Label 'LaunchBox direct-write profile scan' -Current $scanCurrent -Total $scanTotal -StartedAt $scanStarted -Complete -Outcome $scanOutcome
-                }
-            }
-        }
-        foreach ($plan in $plans) { $plan.Changed = $plan.OriginalXml -cne $plan.Document.OuterXml }
-        # What the title step did, for the result screens: state, every old/new title with its ID, and the games that need a choice.
-        $addTitleInfo = {
-            param($target)
-            $state = if ($gamesDb) { [string]$gamesDb.State } else { 'Off' }
-            $target | Add-Member -NotePropertyName GamesDbState -NotePropertyValue $state -Force
-            $target | Add-Member -NotePropertyName GamesDbError -NotePropertyValue $(if ($gamesDb) { [string]$gamesDb.Error } else { '' }) -Force
-            $target | Add-Member -NotePropertyName TitleChanges -NotePropertyValue @($titleChanges.ToArray()) -Force
-            $target | Add-Member -NotePropertyName TitleReview -NotePropertyValue @($titleReview.ToArray()) -Force
-        }
-        if ($PlanOnly) {
-            # Read-only preview: nothing was staged, backed up, or written.
-            $changedFiles = @($plans | Where-Object { $_.Changed } | ForEach-Object { $_.RelativePath })
-            $addedEntries = 0; foreach ($countValue in @($counts.Values)) { $addedEntries += [int]$countValue }
-            $previewSummary = if ($changedFiles.Count -eq 0) { 'Preview only: LaunchBox already has every eligible game; nothing would be written.' } else { 'Preview only, nothing was written. A write would add {0} game entries and change {1} file(s): {2}.' -f $addedEntries, $changedFiles.Count, ($changedFiles -join ', ') }
-            $preview = New-TpmLaunchBoxResult NO_CHANGES $previewSummary
-            $preview.Results = $counts; $preview.Reason = 'PREVIEW'
-            & $addTitleInfo $preview
-            $preview | Add-Member -NotePropertyName WouldChangeFiles -NotePropertyValue $changedFiles.Count -Force
-            $preview | Add-Member -NotePropertyName SkippedMissingGame -NotePropertyValue $skippedMissingGame -Force
-            $preview | Add-Member -NotePropertyName SkippedUnreadable -NotePropertyValue @($skippedUnreadable.ToArray()) -Force
-            $preview | Add-Member -NotePropertyName SkippedBadPath -NotePropertyValue @($skippedBadPath.ToArray()) -Force
-            if ($changedFiles.Count -gt 0) {
-                # Name the backup folder when it is not TeknoParrot's own one, so the owner can find the snapshots later.
-                $backupNote = $null
-                $backupFolderPath = $null
-                try {
-                    $backupLocation = Resolve-TpmLaunchBoxBackupLocation -BackupRoot $BackupRoot -LaunchBoxRoot $lbRoot
-                    if ($backupLocation.UsesFallback) {
-                        $backupNote = 'TeknoParrot''s own backup folder is inside this LaunchBox folder, so the safety backups for this library are kept outside it, in: ' + $backupLocation.Path
-                        $backupFolderPath = [string]$backupLocation.Path
-                    }
-                } catch { $backupNote = 'The LaunchBox safety-backup folder could not be checked; a write would stop before changing the library. Details: ' + $_.Exception.Message }
-                if ($backupNote) { $preview | Add-Member -NotePropertyName BackupLocationNote -NotePropertyValue $backupNote -Force }
-                if ($backupFolderPath) { $preview | Add-Member -NotePropertyName BackupLocationPath -NotePropertyValue $backupFolderPath -Force }
-            }
-            return $preview
-        }
-        $result = Invoke-TpmLaunchBoxFileTransaction -lbRoot $lbRoot -Plans $plans -BackupRoot $BackupRoot
-        if ($result.Outcome -eq 'SAVED') { $result.Results = $counts }
-        & $addTitleInfo $result
-        $result | Add-Member -NotePropertyName SkippedMissingGame -NotePropertyValue $skippedMissingGame -Force
-        $result | Add-Member -NotePropertyName SkippedUnreadable -NotePropertyValue @($skippedUnreadable.ToArray()) -Force
-        $result | Add-Member -NotePropertyName SkippedBadPath -NotePropertyValue @($skippedBadPath.ToArray()) -Force
-        return $result
-    } catch {
-        $result = New-TpmLaunchBoxResult FAILED 'LaunchBox setup was refused before library writes.'
-        $result.Errors = @([string]$_.Exception.Message)
-        return $result
-    }
-}
-
-# =============================================================================
-# LAUNCHBOX GAME DETAILS AND PLAYLISTS  (issues #420 and #421)
-# =============================================================================
-# MODULE-READY SECTION. Everything between the START and END markers can be lifted into a .psm1 as it is.
-#
-# What it does: fills EMPTY release-year and developer fields from the game folder name and the Eggman DAT, and keeps
-# the Manager's playlists (one per hardware family, plus Light gun games and Driving games). A field that already has
-# a value is never changed. A playlist is only touched when it carries the marker note; the user's own playlists are
-# never edited. When the folder name and the DAT disagree, nothing is written for that detail unless the caller passes
-# a choice. Backup, read-back and rollback come from the existing LaunchBox file transaction; Restore is the undo.
-#
-# Public functions
-#   Data layer (no screens, no prompts, no console output):
-#     Get-TpmLaunchBoxNameFacts          year, hardware family and developer that one name says
-#     Get-TpmLaunchBoxGameFacts          what the folder name, the DAT and the profile say about one game
-#     Resolve-TpmLaunchBoxFact           one value from the two sources, or a conflict
-#     Set-TpmLaunchBoxFieldIfEmpty       sets a LaunchBox field only when it is empty
-#     Update-TpmLaunchBoxPlaylistDocument  makes or updates one Manager playlist document
-#     New-TpmLaunchBoxEnrichPlan         reads everything and builds the planned changes (writes nothing)
-#     Invoke-TpmLaunchBoxEnrich          preview (-PlanOnly) or write, through the file transaction
-#   Text layer (pure: objects in, strings out):
-#     Format-TpmLaunchBoxEnrichLine      the preview lines (Details view and log)
-#     Format-TpmLaunchBoxEnrichTitle     the one plain title line
-# Screen layer (not part of the module, listed after the END marker): Invoke-TpmLaunchBoxEnrichStep
-#
-# Depends on (existing script functions): Read-Xml, Get-XmlChildText, Set-XmlChildText, Get-ProfileFamily,
-#   Get-DatEntryForZipName, Resolve-TpmLaunchBoxRoot, Test-TpmNoReparsePath, Get-TpmLaunchBoxPath,
-#   Get-TpmLaunchBoxFileState, Assert-TpmLaunchBoxState, Read-TpmLaunchBoxXml, Get-SafeLaunchBoxPlatformFileName,
-#   New-TpmLaunchBoxResult, Invoke-TpmLaunchBoxFileTransaction, Format-TpmGameCount, Write-Log.
-# State: none. No script-level variables; everything is passed in parameters or returned in objects.
-# START MODULE-READY SECTION: LaunchBox game details and playlists
-
-# The note that marks a playlist as the Manager's own.
-function Get-TpmLaunchBoxPlaylistMarker {
-    return 'Made by TeknoParrot Manager. It keeps this playlist up to date. Your own playlists are never changed.'
-}
-
-# Companies named at the start of a hardware label such as [Namco Super System 23]. Longest names first.
-function Get-TpmLaunchBoxMakerNames {
-    return @('Bandai Namco', 'Raw Thrills', 'Incredible Technologies', 'Namco', 'Sega', 'Taito', 'Konami', 'Capcom', 'Examu', 'Atari', 'Midway')
-}
-
-# Year, hardware family and developer that one game name says, e.g. "Name (1998)(JPN, AG1 Ver.A)[Namco Super System 23][TP]".
-# Used for a folder name and for a DAT game name alike. A name without a [TP] label says nothing.
-function Get-TpmLaunchBoxNameFacts {
-    param([string]$Name)
-    $facts = [pscustomobject]@{ Year = ''; Hardware = ''; Developer = '' }
-    if ([string]::IsNullOrWhiteSpace($Name) -or $Name -notmatch '\[TP\]\s*$') { return $facts }
-    $year = [regex]::Match($Name, '\(((?:19|20)\d{2})\)')
-    if ($year.Success) { $facts.Year = $year.Groups[1].Value }
-    $labels = @([regex]::Matches($Name, '\[([^\]]+)\]') | ForEach-Object { $_.Groups[1].Value.Trim() } | Where-Object { $_ -and $_ -ine 'TP' })
-    if ($labels.Count -gt 0) {
-        $facts.Hardware = [string]$labels[0]
-        foreach ($maker in (Get-TpmLaunchBoxMakerNames)) {
-            if ($facts.Hardware -match ('^' + [regex]::Escape($maker) + '\b')) { $facts.Developer = $maker; break }
-        }
-    }
+        $data = [System.IO.File]::ReadAllText($path) | ConvertFrom-Json -ErrorAction Stop
+        if ($null -eq $data) { return $facts }
+        if ($data.PSObject.Properties['game_name']) { $facts.Name = ([string]$data.game_name).Trim() }
+        if ($data.PSObject.Properties['platform']) { $facts.Platform = ([string]$data.platform).Trim() }
+        if ($data.PSObject.Properties['game_genre']) { $facts.Genre = ([string]$data.game_genre).Trim() }
+        $year = 0
+        if ($data.PSObject.Properties['release_year'] -and [int]::TryParse([string]$data.release_year, [ref]$year) -and $year -gt 1900) { $facts.Year = $year }
+    } catch { Write-Log ('Game matching: could not read the TeknoParrot facts for {0}: {1}' -f $ProfileCode, $_.Exception.Message) }
     return $facts
 }
 
-# The name of the game folder that ends in [TP]: the folder of the game file or the first one above it. '' when there is none.
-function Get-TpmLaunchBoxFolderName {
-    param([string]$GamePath)
-    try {
-        $dir = [System.IO.Path]::GetDirectoryName($GamePath)
-        while ($dir) {
-            $leaf = [System.IO.Path]::GetFileName($dir)
-            if ($leaf -match '\[TP\]\s*$') { return $leaf }
-            $dir = [System.IO.Path]::GetDirectoryName($dir)
-        }
-    } catch { return '' }
-    return ''
-}
-
-# DAT index entries by profile code (lower case): code -> list of entries. Built once per plan.
-function Get-TpmLaunchBoxDatByCode {
-    param([hashtable]$DatIndex)
-    $byCode = @{}
-    if ($null -eq $DatIndex) { return $byCode }
-    foreach ($entry in $DatIndex.Values) {
-        $code = ([string]$entry.ProfileCode).Trim().ToLowerInvariant()
-        if (-not $code) { continue }
-        if (-not $byCode.ContainsKey($code)) { $byCode[$code] = New-Object System.Collections.Generic.List[object] }
-        [void]$byCode[$code].Add($entry)
-    }
-    return $byCode
-}
-
-# What the sources say about one game: Folder (facts from the folder name), Dat (facts from the DAT game name, or $null when
-# the DAT has no entry for this profile), LightGun and Driving (only from what the profile already says: GunGame and wheel buttons).
-# A DAT entry counts only when its profile code is this profile's code; a name match to another profile is ignored.
-function Get-TpmLaunchBoxGameFacts {
-    param([Parameter(Mandatory)][string]$ProfilePath, [hashtable]$DatIndex = $null, [hashtable]$DatByCode = $null)
-    $doc = Read-Xml $ProfilePath
-    if ($null -eq $doc.GameProfile) { throw 'This is not a TeknoParrot game profile.' }
-    $code = [System.IO.Path]::GetFileNameWithoutExtension($ProfilePath)
-    $folderName = Get-TpmLaunchBoxFolderName -GamePath ((Get-XmlChildText $doc.GameProfile 'GamePath').Trim())
-    $datFacts = $null
-    $datName = ''
-    if ($null -ne $DatIndex -and $DatIndex.Count -gt 0) {
-        $entry = $null
-        if ($folderName) { $entry = Get-DatEntryForZipName -RawZipName $folderName -DatIndex $DatIndex }
-        if ($null -ne $entry -and ([string]$entry.ProfileCode).Trim() -ine $code) { $entry = $null }
-        if ($null -eq $entry -and $null -ne $DatByCode -and $DatByCode.ContainsKey($code.ToLowerInvariant()) -and $DatByCode[$code.ToLowerInvariant()].Count -eq 1) { $entry = $DatByCode[$code.ToLowerInvariant()][0] }
-        if ($null -ne $entry) { $datName = [string]$entry.OriginalName; $datFacts = Get-TpmLaunchBoxNameFacts -Name $datName }
-    }
-    return [pscustomobject]@{
-        Code = $code
-        Folder = (Get-TpmLaunchBoxNameFacts -Name $folderName)
-        Dat = $datFacts
-        DatName = $datName
-        LightGun = ((Get-XmlChildText $doc.GameProfile 'GunGame').Trim() -ieq 'true')
-        Driving = ((Get-ProfileFamily $doc) -eq 'driving')
-    }
-}
-
-# One value from the two sources. Only one says something: that value. Both agree (letter case ignored): that value.
-# They differ: Conflict is true and Value is the folder value, the DAT value, or '' (nothing) as Choice says.
-function Resolve-TpmLaunchBoxFact {
-    param([string]$FolderValue, [string]$DatValue, [ValidateSet('Folder', 'Dat', 'Skip')][string]$Choice = 'Skip')
-    $folder = ([string]$FolderValue).Trim(); $dat = ([string]$DatValue).Trim()
-    if (-not $folder -and -not $dat) { return [pscustomobject]@{ Value = ''; Conflict = $false } }
-    if (-not $dat) { return [pscustomobject]@{ Value = $folder; Conflict = $false } }
-    if (-not $folder -or $folder -ieq $dat) { return [pscustomobject]@{ Value = $dat; Conflict = $false } }
-    $value = switch ($Choice) { 'Folder' { $folder } 'Dat' { $dat } default { '' } }
-    return [pscustomobject]@{ Value = $value; Conflict = $true }
-}
-
-# Sets a LaunchBox field only when it is empty. Returns true when it set it.
-function Set-TpmLaunchBoxFieldIfEmpty {
-    param([System.Xml.XmlNode]$Node, [string]$Field, [string]$Value)
-    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
-    $current = (Get-XmlChildText $Node $Field).Trim()
-    if ($current -ne '' -and $current -ne '0') { return $false }
-    Set-XmlChildText $Node $Field $Value
-    return $true
-}
-
-# Makes or updates one Manager playlist document in the format LaunchBox itself writes for a manual playlist (checked against
-# real LaunchBox playlist files): one Playlist element, then one PlaylistGame element per game as its sibling (not inside it).
-# Returns Skipped (a playlist of the user's with this name), New and Changed.
-function Update-TpmLaunchBoxPlaylistDocument {
-    param([System.Xml.XmlDocument]$Doc, [string]$Name, [object[]]$Games, [bool]$Exists)
-    $marker = Get-TpmLaunchBoxPlaylistMarker
-    $node = $Doc.SelectSingleNode('/LaunchBox/Playlist')
-    $before = $Doc.OuterXml
-    if ($Exists -and ($null -eq $node -or (Get-XmlChildText $node 'Notes') -cne $marker)) { return [pscustomobject]@{ Skipped = $true; New = $false; Changed = $false } }
-    if (-not $Exists) {
-        $node = $Doc.CreateElement('Playlist')
-        [void]$Doc.DocumentElement.AppendChild($node)
-    }
-    # Every field LaunchBox writes for a manual playlist. A field that is already there is left as it is.
-    $defaults = [ordered]@{
-        PlaylistId = [guid]::NewGuid().ToString(); Name = $Name; NestedName = $Name; SortBy = 'Default'; Notes = $marker; VideoPath = ''
-        ImageType = 'Boxes'; Category = ''; LastGameId = ''; BigBoxView = ''; BigBoxTheme = ''; IncludeWithPlatforms = 'false'
-        AutoPopulate = 'false'; SortTitle = ''; IsAutogenerated = 'false'; LastSelectedChild = ''
-    }
-    foreach ($field in $defaults.GetEnumerator()) {
-        if ($null -eq $node.SelectSingleNode($field.Key)) { Set-XmlChildText $node $field.Key $field.Value }
-    }
-    # An older Manager wrote the games inside the Playlist element, where LaunchBox does not look for them. Move them out.
-    $legacy = @($node.SelectNodes('PlaylistGame'))
-    foreach ($old in $legacy) { [void]$node.RemoveChild($old) }
-    $have = @($Doc.SelectNodes('/LaunchBox/PlaylistGame') | ForEach-Object { Get-XmlChildText $_ 'GameId' } | Sort-Object)
-    $want = @($Games | ForEach-Object { [string]$_.Id } | Sort-Object)
-    if ($legacy.Count -gt 0 -or -not $Exists -or ($have -join '|') -cne ($want -join '|')) {
-        foreach ($old in @($Doc.SelectNodes('/LaunchBox/PlaylistGame'))) { [void]$Doc.DocumentElement.RemoveChild($old) }
-        $order = 0
-        foreach ($game in $Games) {
-            $entry = $Doc.CreateElement('PlaylistGame')
-            $fields = [ordered]@{ GameId = [string]$game.Id; GameTitle = [string]$game.Title; GameFileName = [string]$game.FileName; GamePlatform = [string]$game.Platform; ManualOrder = [string]$order }
-            if (-not [string]::IsNullOrWhiteSpace([string]$game.DbId)) { $fields['LaunchBoxDbId'] = [string]$game.DbId }
-            foreach ($field in $fields.GetEnumerator()) { Set-XmlChildText $entry $field.Key $field.Value }
-            [void]$Doc.DocumentElement.AppendChild($entry)
-            $order++
-        }
-    }
-    return [pscustomobject]@{ Skipped = $false; New = (-not $Exists); Changed = ((-not $Exists) -or ($before -cne $Doc.OuterXml)) }
-}
-
-# Reads the LaunchBox library and the profiles and builds the planned changes. Writes nothing.
-# ConflictChoices: "<game id>|<Year, Developer or Hardware>" -> Folder, Dat or Skip; ConflictDefault covers the rest.
-# Returns Plans (file plans for the file transaction), Changes, Conflicts and the counts.
-function New-TpmLaunchBoxEnrichPlan {
-    param(
-        [Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$LbRoot, [Parameter(Mandatory)][string]$EmulatorId,
-        [Parameter(Mandatory)][string[]]$PlatformNames, [hashtable]$DatIndex = $null,
-        [hashtable]$ConflictChoices = @{}, [ValidateSet('Folder', 'Dat', 'Skip')][string]$ConflictDefault = 'Skip',
-        [switch]$SkipDetails, [switch]$SkipPlaylists
-    )
-    $plans = New-Object System.Collections.Generic.List[object]
-    $changes = New-Object System.Collections.Generic.List[object]
-    $conflicts = New-Object System.Collections.Generic.List[object]
-    $groups = [ordered]@{}
-    $factCache = @{}
-    $datByCode = Get-TpmLaunchBoxDatByCode -DatIndex $DatIndex
-    $filledGames = 0
-    foreach ($name in $PlatformNames) {
-        $safe = Get-SafeLaunchBoxPlatformFileName $name
-        if ($safe -cne $name -or $name -in @('.', '..')) { throw 'Platform name must be a safe, unambiguous filename.' }
-        $rel = "Data\Platforms\$safe.xml"
-        $path = Get-TpmLaunchBoxPath $LbRoot $rel
-        $state = Get-TpmLaunchBoxFileState $path
-        if (-not $state.Exists) { continue }
-        $doc = Read-TpmLaunchBoxXml $path
-        Assert-TpmLaunchBoxState $path $state
-        $filePlan = [pscustomobject]@{ RelativePath = $rel; Before = $state; Document = $doc; OriginalXml = $doc.OuterXml; BaseChildCount = $doc.DocumentElement.ChildNodes.Count; Source = $null; SourceHash = $null; Changed = $false; Delete = $false; AfterHash = $null; FullRewrite = $true }
-        foreach ($game in @($doc.SelectNodes('/LaunchBox/Game'))) {
-            if ((Get-XmlChildText $game 'Emulator') -ne $EmulatorId) { continue }
-            $profilePath = Join-Path $UserProfilesDir ([System.IO.Path]::GetFileName((Get-XmlChildText $game 'ApplicationPath')))
-            if (-not $factCache.ContainsKey($profilePath)) {
-                $factCache[$profilePath] = $null
-                try { if (Test-Path -LiteralPath $profilePath -PathType Leaf) { $factCache[$profilePath] = Get-TpmLaunchBoxGameFacts -ProfilePath $profilePath -DatIndex $DatIndex -DatByCode $datByCode } }
-                catch { Write-Log ('LaunchBox details: could not read the profile {0}: {1}' -f $profilePath, $_.Exception.Message) }
-            }
-            $facts = $factCache[$profilePath]
-            if ($null -eq $facts) { continue }
-            $gameId = Get-XmlChildText $game 'ID'
-            $title = Get-XmlChildText $game 'Title'
-            $resolved = @{}
-            foreach ($fact in @('Year', 'Developer', 'Hardware')) {
-                $datValue = if ($null -ne $facts.Dat) { [string]$facts.Dat.$fact } else { '' }
-                $key = '{0}|{1}' -f $gameId, $fact
-                $choice = if ($ConflictChoices.ContainsKey($key)) { [string]$ConflictChoices[$key] } else { $ConflictDefault }
-                $one = Resolve-TpmLaunchBoxFact -FolderValue ([string]$facts.Folder.$fact) -DatValue $datValue -Choice $choice
-                $resolved[$fact] = $one.Value
-                if ($one.Conflict) { [void]$conflicts.Add([pscustomobject]@{ Key = $key; GameId = $gameId; Title = $title; Field = $fact; Folder = [string]$facts.Folder.$fact; Dat = $datValue; Applied = $one.Value }) }
-            }
-            if (-not $SkipDetails) {
-                $set = New-Object System.Collections.Generic.List[object]
-                if (Set-TpmLaunchBoxFieldIfEmpty -Node $game -Field 'ReleaseDate' -Value ($(if ($resolved['Year']) { $resolved['Year'] + '-01-01' } else { '' }))) { [void]$set.Add([pscustomobject]@{ Field = 'ReleaseDate'; Value = ($resolved['Year'] + '-01-01') }) }
-                if (Set-TpmLaunchBoxFieldIfEmpty -Node $game -Field 'Developer' -Value $resolved['Developer']) { [void]$set.Add([pscustomobject]@{ Field = 'Developer'; Value = $resolved['Developer'] }) }
-                if ($set.Count -gt 0) { $filledGames++; [void]$changes.Add([pscustomobject]@{ Kind = 'Fields'; Title = $title; Name = ''; Count = 0; Fields = $set.ToArray() }) }
-            }
-            $entry = [pscustomobject]@{ Id = $gameId; Title = $title; Platform = (Get-XmlChildText $game 'Platform'); FileName = [System.IO.Path]::GetFileName((Get-XmlChildText $game 'ApplicationPath')); DbId = (Get-XmlChildText $game 'DatabaseID') }
-            $listNames = @()
-            if ($resolved['Hardware']) { $listNames += $resolved['Hardware'] }
-            if ($facts.LightGun) { $listNames += 'Light gun games' }
-            if ($facts.Driving) { $listNames += 'Driving games' }
-            foreach ($listName in $listNames) {
-                if (-not $groups.Contains($listName)) { $groups[$listName] = New-Object System.Collections.Generic.List[object] }
-                [void]$groups[$listName].Add($entry)
-            }
-        }
-        $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
-        [void]$plans.Add($filePlan)
-    }
-    $playlistsNew = 0; $playlistsUpdated = 0
-    if (-not $SkipPlaylists) {
-        foreach ($listName in @($groups.Keys)) {
-            $safe = (Get-SafeLaunchBoxPlatformFileName $listName).TrimEnd('.', ' ')
-            $rel = "Data\Playlists\$safe.xml"
-            $path = Get-TpmLaunchBoxPath $LbRoot $rel
-            $state = Get-TpmLaunchBoxFileState $path
-            # Plain assignments: an if-expression would unroll the XML document into its child nodes.
-            if ($state.Exists) { $doc = Read-TpmLaunchBoxXml $path; Assert-TpmLaunchBoxState $path $state } else { $doc = New-Object System.Xml.XmlDocument; $doc.LoadXml('<LaunchBox />') }
-            $filePlan = [pscustomobject]@{ RelativePath = $rel; Before = $state; Document = $doc; OriginalXml = $doc.OuterXml; BaseChildCount = $doc.DocumentElement.ChildNodes.Count; Source = $null; SourceHash = $null; Changed = $false; Delete = $false; AfterHash = $null; FullRewrite = $true }
-            $outcome = Update-TpmLaunchBoxPlaylistDocument -Doc $doc -Name $listName -Games $groups[$listName].ToArray() -Exists $state.Exists
-            if ($outcome.Skipped) { [void]$changes.Add([pscustomobject]@{ Kind = 'PlaylistSkipped'; Title = ''; Name = $listName; Count = $groups[$listName].Count; Fields = @() }); continue }
-            $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
-            if ($filePlan.Changed) {
-                if ($outcome.New) { $playlistsNew++ } else { $playlistsUpdated++ }
-                [void]$changes.Add([pscustomobject]@{ Kind = $(if ($outcome.New) { 'PlaylistNew' } else { 'PlaylistUpdated' }); Title = ''; Name = $listName; Count = $groups[$listName].Count; Fields = @() })
-            }
-            [void]$plans.Add($filePlan)
-        }
-    }
-    return [pscustomobject]@{
-        Plans = $plans.ToArray(); Changes = $changes.ToArray(); Conflicts = $conflicts.ToArray()
-        FilledGames = $filledGames; PlaylistsNew = $playlistsNew; PlaylistsUpdated = $playlistsUpdated
-    }
-}
-
-# The preview lines for the Details view and the log. Pure: plan in, strings out.
-function Format-TpmLaunchBoxEnrichLine {
-    param([Parameter(Mandatory)]$Plan)
-    $words = @{ ReleaseDate = 'year'; Developer = 'developer'; Year = 'year'; Hardware = 'hardware name' }
-    $lines = New-Object System.Collections.Generic.List[string]
-    foreach ($change in @($Plan.Changes)) {
-        switch ($change.Kind) {
-            'Fields' { [void]$lines.Add(('{0}: will fill in {1}' -f $change.Title, ((@($change.Fields) | ForEach-Object { '{0} {1}' -f $words[$_.Field], $(if ($_.Field -eq 'ReleaseDate') { ([string]$_.Value).Substring(0, 4) } else { $_.Value }) }) -join ', '))) }
-            'PlaylistNew' { [void]$lines.Add(('Playlist {0}: will be made with {1}' -f $change.Name, (Format-TpmGameCount -Count ([int]$change.Count)))) }
-            'PlaylistUpdated' { [void]$lines.Add(('Playlist {0}: will be updated to {1}' -f $change.Name, (Format-TpmGameCount -Count ([int]$change.Count)))) }
-            'PlaylistSkipped' { [void]$lines.Add(('Playlist {0}: left alone, because it is not one TeknoParrot Manager made' -f $change.Name)) }
-        }
-    }
-    foreach ($conflict in @($Plan.Conflicts)) {
-        $outcome = if ($conflict.Applied) { 'Will use ' + $conflict.Applied + '.' } else { 'Not filled in unless you choose.' }
-        [void]$lines.Add(('{0}: the {1} differs. Folder name says {2}. Eggman list says {3}. {4}' -f $conflict.Title, $words[$conflict.Field], $conflict.Folder, $conflict.Dat, $outcome))
-    }
-    return $lines.ToArray()
-}
-
-# The one plain title line. -Preview words it as a preview; otherwise it says what was filled in.
-function Format-TpmLaunchBoxEnrichTitle {
-    param([Parameter(Mandatory)]$Plan, [switch]$Preview)
-    $parts = New-Object System.Collections.Generic.List[string]
-    if ($Plan.FilledGames -gt 0) { [void]$parts.Add(('details for {0}' -f (Format-TpmGameCount -Count ([int]$Plan.FilledGames)))) }
-    $playlistTotal = [int]$Plan.PlaylistsNew + [int]$Plan.PlaylistsUpdated
-    if ($playlistTotal -gt 0) { [void]$parts.Add(('{0} {1}' -f $playlistTotal, $(if ($playlistTotal -eq 1) { 'playlist' } else { 'playlists' }))) }
-    $differ = @($Plan.Conflicts).Count
-    $note = if ($differ -gt 0) { ' {0} {1} differ between the folder name and the Eggman list.' -f $differ, $(if ($differ -eq 1) { 'detail' } else { 'details' }) } else { '' }
-    if ($Preview) {
-        if ($parts.Count -eq 0) { return ('Preview: nothing to fill in or update. Nothing would change.' + $note) }
-        return ('Preview: LaunchBox would get {0}. Nothing was changed.{1}' -f ($parts -join ' and '), $note)
-    }
-    if ($parts.Count -eq 0) { return ('Nothing to fill in or update.' + $note) }
-    return ('Filled in {0}.{1}' -f ($parts -join ' and '), $note)
-}
-
-# Fills empty year and developer fields and keeps the Manager's playlists. -PlanOnly reads everything and changes nothing.
-# Returns the same kind of result as Invoke-LaunchBoxDirectWrite plus EnrichPlan (the plan this run used).
-# The caller makes sure LaunchBox and BigBox are closed before a write; the transaction also checks and refuses while they run.
-function Invoke-TpmLaunchBoxEnrich {
-    param(
-        [string]$UserProfilesDir, [string]$LbRoot, [string[]]$PlatformNames, [string]$BackupRoot, [hashtable]$DatIndex = $null,
-        [hashtable]$ConflictChoices = @{}, [ValidateSet('Folder', 'Dat', 'Skip')][string]$ConflictDefault = 'Skip',
-        [switch]$PlanOnly, [switch]$SkipDetails, [switch]$SkipPlaylists
-    )
-    try {
-        $root = Resolve-TpmLaunchBoxRoot $LbRoot
-        if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $root)) { throw 'Choose a safe existing LaunchBox root.' }
-        if (@($PlatformNames).Count -eq 0) { throw 'Choose at least one LaunchBox platform.' }
-        $emulatorsPath = Get-TpmLaunchBoxPath $root 'Data\Emulators.xml'
-        $emulatorsState = Get-TpmLaunchBoxFileState $emulatorsPath
-        if (-not $emulatorsState.Exists) { throw 'LaunchBox has not made Data\Emulators.xml yet. Open LaunchBox once, close it, then try again. Nothing was changed.' }
-        $emulatorsDoc = Read-TpmLaunchBoxXml $emulatorsPath
-        $emulatorNode = @($emulatorsDoc.SelectNodes('/LaunchBox/Emulator') | Where-Object { (Get-XmlChildText $_ 'Title') -eq 'TeknoParrot' } | Select-Object -First 1)
-        if ($emulatorNode.Count -eq 0) {
-            $none = New-TpmLaunchBoxResult NO_CHANGES 'No TeknoParrot games are in LaunchBox yet. Add them first.'
-            if ($PlanOnly) { $none.Reason = 'PREVIEW' }
-            return $none
-        }
-        $plan = New-TpmLaunchBoxEnrichPlan -UserProfilesDir $UserProfilesDir -LbRoot $root -EmulatorId (Get-XmlChildText $emulatorNode[0] 'ID') -PlatformNames $PlatformNames -DatIndex $DatIndex -ConflictChoices $ConflictChoices -ConflictDefault $ConflictDefault -SkipDetails:$SkipDetails -SkipPlaylists:$SkipPlaylists
-        foreach ($line in (Format-TpmLaunchBoxEnrichLine -Plan $plan)) { Write-Log ('LaunchBox details and playlists: ' + $line) }
-        $changedPlans = @($plan.Plans | Where-Object { $_.Changed })
-        if ($PlanOnly) {
-            $preview = New-TpmLaunchBoxResult NO_CHANGES ('Preview only, nothing was written. A write would change {0} file(s).' -f $changedPlans.Count)
-            $preview.Reason = 'PREVIEW'
-            $preview | Add-Member -NotePropertyName WouldChangeFiles -NotePropertyValue $changedPlans.Count -Force
-            $preview | Add-Member -NotePropertyName EnrichPlan -NotePropertyValue $plan -Force
-            return $preview
-        }
-        if (@($changedPlans | Where-Object { $_.RelativePath -like 'Data\Playlists\*' }).Count -gt 0) {
-            $playlistFolder = Join-Path $root 'Data\Playlists'
-            if (-not (Test-TpmNoReparsePath $playlistFolder)) { throw 'The LaunchBox Playlists folder is not a normal folder.' }
-            [void][System.IO.Directory]::CreateDirectory($playlistFolder)
-        }
-        $result = Invoke-TpmLaunchBoxFileTransaction -lbRoot $root -Plans $plan.Plans -BackupRoot $BackupRoot
-        $result | Add-Member -NotePropertyName EnrichPlan -NotePropertyValue $plan -Force
-        return $result
-    } catch {
-        $result = New-TpmLaunchBoxResult FAILED 'LaunchBox details and playlists were refused before library writes.'
-        $result.Errors = @([string]$_.Exception.Message)
-        return $result
-    }
-}
-# END MODULE-READY SECTION: LaunchBox game details and playlists
-
-# BEGIN MODULE-READY SECTION: LaunchBox Games Database links for TeknoParrot games
-# Links LaunchBox games that have no Games Database ID to their entry in LaunchBox's own game list, so LaunchBox finds the right
-# art and details. The game name comes from TeknoParrot's own metadata for the game (Metadata\<profile>.json), so it works for games
-# that have no user profile yet. An exact name match is "Sure". A close but not exact match is "Check" and is applied only when the
-# caller lists that game as approved. Titles a user changed by hand are kept. Prefix: TpmLaunchBoxIdLink / TpmTeknoParrotGameName.
-# Needs from the rest of the script: the Games Database functions above, the LaunchBox XML/file helpers and Invoke-TpmLaunchBoxFileTransaction.
-# This section has no script-level variables and no screens; the screen step is below.
 function Get-TpmTeknoParrotGameName {
     [CmdletBinding()] [OutputType([string])] param([Parameter(Mandatory)][string]$TpRoot, [Parameter(Mandatory)][string]$ProfileCode)
-    # The code becomes part of a file name, so only plain file-name characters are allowed.
-    if ($ProfileCode -notmatch '^[A-Za-z0-9_.\-]+$' -or $ProfileCode -match '^\.+$') { return '' }
-    $path = Join-Path (Join-Path $TpRoot 'Metadata') ($ProfileCode + '.json')
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return '' }
-    try {
-        $data = [System.IO.File]::ReadAllText($path) | ConvertFrom-Json -ErrorAction Stop
-        if ($null -ne $data -and $data.PSObject.Properties['game_name']) { return ([string]$data.game_name).Trim() }
-    } catch { Write-Log ('LaunchBox links: could not read the game name for {0}: {1}' -f $ProfileCode, $_.Exception.Message) }
-    return ''
+    return [string](Get-TpmTeknoParrotMetadataFacts -TpRoot $TpRoot -ProfileCode $ProfileCode).Name
 }
 
 # Suggestion for a name written as one run-together word ("PowerPuttLive"), which shares no whole word with the list's name
@@ -46842,13 +49269,19 @@ function Find-TpmLaunchBoxIdLinkPrefixCandidate {
 #   the MAME romset name, and the title in LaunchBox. An exact name wins over a close one. Two sources that point to different
 #   games are never settled by guessing: the user decides. Pure functions: nothing here writes anything.
 
-# Removes what is not part of a title: a trailing "(...)" note, a trailing version, and "for NESiCAxLive".
+# The emulator that runs the game is not part of the game: "ElfLoader 2", "Elfloader2", "(ElfLdr2)", with or without brackets.
+function Remove-TpmEmulatorName {
+    [CmdletBinding()] [OutputType([string])] param([string]$Title)
+    if ([string]::IsNullOrWhiteSpace($Title)) { return '' }
+    $named = [regex]::Replace($Title, '\s*\(?\s*elf\s*(loader|ldr)\s*\d*\s*\)?', ' ', 'IgnoreCase')
+    return ([regex]::Replace($named, '\s+', ' ').Trim())
+}
+
+# Removes what is not part of a title: the emulator, a trailing "(...)" note, a trailing version, and "for NESiCAxLive".
 function Get-TpmMatchCleanTitle {
     [CmdletBinding()] [OutputType([string])] param([string]$Title)
     if ([string]::IsNullOrWhiteSpace($Title)) { return '' }
-    # The emulator that runs the game is not part of the game: "ElfLoader 2", "Elfloader2", "(ElfLdr2)", with or without brackets.
-    $named = [regex]::Replace($Title, '\s*\(?\s*elf\s*(loader|ldr)\s*\d*\s*\)?', ' ', 'IgnoreCase')
-    $named = [regex]::Replace($named, '\s+', ' ').Trim()
+    $named = Remove-TpmEmulatorName $Title
     $clean = [regex]::Replace($named, '(\s*\([^()]*\))+\s*$', '')
     $clean = [regex]::Replace($clean, '\s+(v|ver\.?|version)\s*\d[\d\.]*(\s*/\s*\d[\d\.]*)*\s*$', '', 'IgnoreCase')
     $clean = [regex]::Replace($clean, '\s+for\s+NESiCAxLive\s*$', '', 'IgnoreCase')
@@ -46872,12 +49305,13 @@ function Get-TpmMatchWords {
     return @($words | Where-Object { $_ -notin $skip } | ForEach-Object { if ($roman.ContainsKey($_)) { $roman[$_] } else { $_ } })
 }
 
-# True for items that appear as TeknoParrot profiles but are not games: firmware updaters, drive checkers, controller and
-# development boards. They are never added to LaunchBox and never matched.
+# True for items that appear as TeknoParrot profiles but are not games: firmware updaters, drive checkers, controllers and
+# test boards. They are never added to LaunchBox and never matched. A game that runs on a development board ("Dragon's Heaven
+# (development board)") is still a game.
 function Test-TpmNonGameTitle {
     [CmdletBinding()] [OutputType([bool])] param([string]$Title)
     if ([string]::IsNullOrWhiteSpace($Title)) { return $false }
-    return [bool]($Title -match '(?i)firmware\s+updat|DIMM\s+FIRM|drive\s+checker|^AS-1\s+Controller|Hopper\s+Board|development\s+board')
+    return [bool]($Title -match '(?i)firmware\s+updat|DIMM\s+FIRM|drive\s+checker|^AS-1\s+Controller|Hopper\s+Board|^MVS-TEMP\b')
 }
 
 # A looser spelling of a title, for comparing with the game list: no accents, "&" as "and", Roman numerals as numbers,
@@ -46922,101 +49356,149 @@ function Get-TpmGamesDbCanonMap {
     return $map
 }
 
-# One entry out of the games that share a name, or $null when it cannot be told. The first searched platform that has the name wins.
-# Two games with one name are told apart by a "(year)" in the list's own title, then by the release year, then by exact spelling.
-function Select-TpmGamesDbHit {
-    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [object[]]$Hits = @(), [string]$Title, [int]$Year = 0)
-    $pool = @()
-    foreach ($platformName in $Index.Platforms) {
-        $pool = @($Hits | Where-Object { $_.Platform -eq $platformName })
-        if ($pool.Count -gt 0) { break }
+# Games whose title is another game's title plus a qualifier in brackets ("Frogger (Raw Thrills)" next to "Frogger"), by the key of the
+# plain title. Built once per list and kept on it.
+function Get-TpmGamesDbQualifiedMap {
+    [CmdletBinding()] param([Parameter(Mandatory)]$Index)
+    if ($Index.ContainsKey('ByQualified')) { return $Index['ByQualified'] }
+    $map = @{}
+    foreach ($entry in $Index.ById.Values) {
+        $plain = [regex]::Replace([string]$entry.Name, '\s*\([^()]*\)\s*$', '')
+        if ($plain -ceq [string]$entry.Name) { continue }
+        $key = ConvertTo-TpmGamesDbKey $plain
+        if (-not $key) { continue }
+        if (-not $map.ContainsKey($key)) { $map[$key] = New-Object System.Collections.Generic.List[object] }
+        [void]$map[$key].Add($entry)
     }
-    if ($pool.Count -eq 0) { return $null }
-    if (@($pool | Group-Object Id).Count -eq 1) { return $pool[0] }
-    if ($Year -gt 0) {
-        $suffixed = @($pool | Where-Object { $_.Name -ieq ('{0} ({1})' -f $Title, $Year) } | Group-Object Id)
-        if ($suffixed.Count -eq 1) { return $suffixed[0].Group[0] }
-        $sameYear = @($pool | Where-Object { $_.PSObject.Properties['Year'] -and [int]$_.Year -eq $Year } | Group-Object Id)
-        if ($sameYear.Count -eq 1) { return $sameYear[0].Group[0] }
-    }
-    $spelled = @($pool | Where-Object { $_.Name -ieq $Title } | Group-Object Id)
-    if ($spelled.Count -eq 1) { return $spelled[0].Group[0] }
-    return $null
+    $Index['ByQualified'] = $map
+    return $map
 }
 
-# The one game that has this name (or the same name spelled a little differently), or $null.
+# One entry out of the games that share a name, or $null when it cannot be told. Every searched platform counts. Games with one name are
+# told apart by a "(year)" in the list's own title, the same release year, a release year within one year (when only one is that close),
+# the hardware maker (when only one fits), then the platform order (the first searched platform that has exactly one) and exact spelling.
+function Select-TpmGamesDbHit {
+    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [object[]]$Hits = @(), [string]$Title, [int]$Year = 0, [string]$Maker = '')
+    $pool = @($Hits | Where-Object { $_.Platform -in $Index.Platforms } | ForEach-Object { if ($Index.ById.ContainsKey([string]$_.Id)) { $Index.ById[[string]$_.Id] } else { $_ } })
+    if ($pool.Count -eq 0) { return $null }
+    $single = { param($list) $groups = @($list | Group-Object Id); if ($groups.Count -eq 1) { $groups[0].Group[0] } else { $null } }
+    $found = & $single $pool
+    if ($found) { return $found }
+    if ($Year -gt 0) {
+        $found = & $single @($pool | Where-Object { $_.Name -ieq ('{0} ({1})' -f $Title, $Year) })
+        if ($found) { return $found }
+        $found = & $single @($pool | Where-Object { $_.PSObject.Properties['Year'] -and [int]$_.Year -eq $Year })
+        if ($found) { return $found }
+        $found = & $single @($pool | Where-Object { $_.PSObject.Properties['Year'] -and [int]$_.Year -gt 0 -and [Math]::Abs([int]$_.Year - $Year) -le 1 })
+        if ($found) { return $found }
+    }
+    if ($Maker) {
+        $found = & $single @($pool | Where-Object { Test-TpmMakerFits -Maker $Maker -Game $_ })
+        if ($found) { return $found }
+    }
+    foreach ($platformName in $Index.Platforms) {
+        $found = & $single @($pool | Where-Object { $_.Platform -eq $platformName })
+        if ($found) { return $found }
+        if (@($pool | Where-Object { $_.Platform -eq $platformName }).Count -gt 0) { break }
+    }
+    return (& $single @($pool | Where-Object { $_.Name -ieq $Title }))
+}
+
+# A copy of a list entry that says at which level of the layered match it was found.
+function Add-TpmMatchLevel {
+    [CmdletBinding()] param($Hit, [int]$Level)
+    if ($null -eq $Hit) { return $null }
+    $copy = $Hit.PSObject.Copy()
+    Add-Member -InputObject $copy -NotePropertyName MatchLevel -NotePropertyValue $Level -Force
+    return $copy
+}
+
+# The one game that has this name, or $null. Level 1: the same name (accents, capitals, punctuation and "&" are ignored). Level 2:
+# the same name spelled a little differently (Roman numerals, "the", "Ver."), see Get-TpmMatchCanonKey.
 function Find-TpmGamesDbExact {
-    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title, [int]$Year = 0)
+    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title, [int]$Year = 0, [string]$Maker = '', [ValidateRange(1, 2)][int]$MaxLevel = 2)
     $key = ConvertTo-TpmGamesDbKey $Title
     if (-not $key) { return $null }
     foreach ($mapName in @('ByName', 'ByAlternate')) {
         if (-not $Index[$mapName].ContainsKey($key)) { continue }
-        $hit = Select-TpmGamesDbHit -Index $Index -Hits $Index[$mapName][$key].ToArray() -Title $Title -Year $Year
-        if ($hit) { return $hit }
+        $hit = Select-TpmGamesDbHit -Index $Index -Hits $Index[$mapName][$key].ToArray() -Title $Title -Year $Year -Maker $Maker
+        if ($hit) { return (Add-TpmMatchLevel -Hit $hit -Level 1) }
     }
+    if ($MaxLevel -lt 2) { return $null }
     $canon = Get-TpmMatchCanonKey $Title
     if ($canon) {
         $map = Get-TpmGamesDbCanonMap -Index $Index
-        if ($map.ContainsKey($canon)) { return (Select-TpmGamesDbHit -Index $Index -Hits $map[$canon].ToArray() -Title $Title -Year $Year) }
+        if ($map.ContainsKey($canon)) { return (Add-TpmMatchLevel -Hit (Select-TpmGamesDbHit -Index $Index -Hits $map[$canon].ToArray() -Title $Title -Year $Year -Maker $Maker) -Level 2) }
         # The list often adds "Arcade" / "Arcade Edition" / "Edition" to a title; one side may have it and the other not.
         foreach ($tail in @('arcadeedition', 'arcadegame', 'arcade', 'edition')) {
             $longer = $canon + $tail
-            if ($map.ContainsKey($longer)) { $hit = Select-TpmGamesDbHit -Index $Index -Hits $map[$longer].ToArray() -Title $Title -Year $Year; if ($hit) { return $hit } }
+            if ($map.ContainsKey($longer)) { $hit = Select-TpmGamesDbHit -Index $Index -Hits $map[$longer].ToArray() -Title $Title -Year $Year -Maker $Maker; if ($hit) { return (Add-TpmMatchLevel -Hit $hit -Level 2) } }
             if ($canon.Length -gt ($tail.Length + 3) -and $canon.EndsWith($tail)) {
                 $shorter = $canon.Substring(0, $canon.Length - $tail.Length)
-                if ($map.ContainsKey($shorter)) { $hit = Select-TpmGamesDbHit -Index $Index -Hits $map[$shorter].ToArray() -Title $Title -Year $Year; if ($hit) { return $hit } }
+                if ($map.ContainsKey($shorter)) { $hit = Select-TpmGamesDbHit -Index $Index -Hits $map[$shorter].ToArray() -Title $Title -Year $Year -Maker $Maker; if ($hit) { return (Add-TpmMatchLevel -Hit $hit -Level 2) } }
             }
         }
     }
     return $null
 }
 
-# One name against the game list: Kind is Exact, NearSure, NearAsk or None. Exact also covers the same name spelled a little
-# differently (see Get-TpmMatchCanonKey). Near names are scored on how many words differ, the year (when both sides have one) and
-# the maker; NearSure needs a clear lead over the next best name and the same numbers. A near name that is clearly a different
-# game is None, so nobody is asked about it.
+# One name against the game list, one level at a time. Kind is Exact, NearSure, NearAsk or None.
+#   Level 1  the same name (accents, capitals, punctuation and "&" ignored)
+#   Level 2  the same name spelled a little differently (Roman numerals, "the", "Ver.", "Arcade" tails)
+#   Level 3  a name worked out from the given one: release note, version, emulator, region word, "A / B" sides, first of a series
+#   Level 4  no exact name. Close names only, scored on how many words differ, the year and the maker. Never a sure match.
+# MaxLevel stops the search early: a caller that already has a sure answer never pays for the deeper levels.
+# A number, year or version in the name is part of the game, so a close name whose numbers differ is dropped.
 function Get-TpmGamesDbPickByScore {
-    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title, [int]$Year = 0, [string]$Maker = '')
-    $none = [pscustomobject]@{ Kind = 'None'; Id = ''; Name = ''; Platform = ''; Score = 0.0; Gap = 0.0; QueryName = $Title }
+    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title, [int]$Year = 0, [string]$Maker = '', [ValidateRange(1, 4)][int]$MaxLevel = 4)
+    $none = [pscustomobject]@{ Kind = 'None'; Id = ''; Name = ''; Platform = ''; Score = 0.0; Gap = 0.0; QueryName = $Title; Level = 0 }
     $clean = Get-TpmMatchCleanTitle $Title
     if (-not $clean) { return $none }
-    $exact = Find-TpmGamesDbExact -Index $Index -Title $Title -Year $Year
-    # The list may name the version as its own game ("Initial D Arcade Stage Ver. 2"): the name as written, without its release note, wins
-    # before a version is ignored.
+    $exact = Find-TpmGamesDbExact -Index $Index -Title $Title -Year $Year -Maker $Maker -MaxLevel ([Math]::Min($MaxLevel, 2))
     if (-not $exact) {
+        # Release tags (region, version, board code) are not part of the name: the same game, so the same level.
+        $plain = Get-TpmTitleWithoutReleaseTags $Title
+        if ($plain -and $plain -cne $Title) { $exact = Find-TpmGamesDbExact -Index $Index -Title $plain -Year $Year -Maker $Maker -MaxLevel ([Math]::Min($MaxLevel, 2)) }
+    }
+    $level = if ($exact) { [int]$exact.MatchLevel } else { 0 }
+    if (-not $exact -and $MaxLevel -ge 3) {
+        # The list may name the version as its own game ("Initial D Arcade Stage Ver. 2"): the name as written, without its release note, wins
+        # before a version is ignored.
         $noNote = [regex]::Replace($Title, '(\s*\([^()]*\))+\s*$', '').Trim()
-        if ($noNote -and $noNote -ne $Title) { $exact = Find-TpmGamesDbExact -Index $Index -Title $noNote -Year $Year }
-    }
-    if (-not $exact -and $clean -ne $Title) { $exact = Find-TpmGamesDbExact -Index $Index -Title $clean -Year $Year }
-    if (-not $exact) {
-        $alternates = New-Object System.Collections.Generic.List[string]
-        $codeMatch = [regex]::Match($clean, '^([A-Za-z0-9]{2,6})\s*[:\-]\s+(.+)$')
-        if ($codeMatch.Success -and $codeMatch.Groups[1].Value -match '\d' -and $codeMatch.Groups[1].Value -match '[A-Za-z]') { [void]$alternates.Add($codeMatch.Groups[2].Value) }
-        # One side of "A / B" counts only when it has two or more words: a single word ("Hero") is too easy to match to another game.
-        if ($clean -match '\s/\s') { foreach ($side in ($clean -split '\s/\s')) { if (@($side.Trim() -split '\s+').Count -ge 2) { [void]$alternates.Add($side.Trim()) } } }
-        # In a ROM-set name, a region just before the release note ("Cobra: The Arcade World (CBR2 Ver. B)") is not part of the game's
-        # name. A plain "Big Buck Hunter World" has no release note and is a game of its own.
-        $regionTail = [regex]::Match($clean, '^(.+?)\s+(World|Japan|USA|Asia|Export|Korea|Europe|Euro|China|Taiwan)$', 'IgnoreCase')
-        if ($regionTail.Success -and $clean -ne $Title -and @($regionTail.Groups[1].Value -split '\s+').Count -ge 2) { [void]$alternates.Add($regionTail.Groups[1].Value.Trim()) }
-        # A trailing "1" is the first game of a series ("Quiz Magic Academy 1" is "Quiz Magic Academy"), and a point revision is a version of
-        # the game before it ("Tekken 5.1" is "Tekken 5"). The name as written is tried first, so a list that has its own "... 1" or "... 5.1" wins.
-        $firstOfSeries = [regex]::Match($clean, '^(.+?)\s+1$')
-        if ($firstOfSeries.Success -and @($firstOfSeries.Groups[1].Value -split '\s+').Count -ge 2) { [void]$alternates.Add($firstOfSeries.Groups[1].Value.Trim()) }
-        $pointRevision = [regex]::Match($clean, '^(.+\s\d+)\.\d+$')
-        if ($pointRevision.Success -and @($pointRevision.Groups[1].Value -split '\s+').Count -ge 2) { [void]$alternates.Add($pointRevision.Groups[1].Value.Trim()) }
-        # Well-known regional names of one game: Capcom's "Street Fighter Zero" is the first "Street Fighter Alpha".
-        $regional = @{ 'streetfighterzero' = "Street Fighter Alpha: Warriors' Dreams" }
-        $regionalKey = Get-TpmMatchCanonKey $clean
-        if ($regional.ContainsKey($regionalKey)) { [void]$alternates.Add([string]$regional[$regionalKey]) }
-        $sideHits = New-Object System.Collections.Generic.List[object]
-        foreach ($alternate in $alternates) { $hit = Find-TpmGamesDbExact -Index $Index -Title $alternate -Year $Year; if ($hit) { [void]$sideHits.Add($hit) } }
-        # "A / B" where both sides are different games in the list is a question for the user, not an exact match.
-        if (@($sideHits | ForEach-Object { [string]$_.Id } | Select-Object -Unique).Count -gt 1) {
-            return [pscustomobject]@{ Kind = 'NearAsk'; Id = [string]$sideHits[0].Id; Name = [string]$sideHits[0].Name; Platform = [string]$sideHits[0].Platform; Score = 0.8; Gap = 0.0; QueryName = $Title }
+        if ($noNote -and $noNote -ne $Title) { $exact = Find-TpmGamesDbExact -Index $Index -Title $noNote -Year $Year -Maker $Maker }
+        if (-not $exact -and $clean -ne $Title) { $exact = Find-TpmGamesDbExact -Index $Index -Title $clean -Year $Year -Maker $Maker }
+        if (-not $exact) {
+            $alternates = New-Object System.Collections.Generic.List[string]
+            $codeMatch = [regex]::Match($clean, '^([A-Za-z0-9]{2,6})\s*[:\-]\s+(.+)$')
+            if ($codeMatch.Success -and $codeMatch.Groups[1].Value -match '\d' -and $codeMatch.Groups[1].Value -match '[A-Za-z]') { [void]$alternates.Add($codeMatch.Groups[2].Value) }
+            # One side of "A / B" counts only when it has two or more words: a single word ("Hero") is too easy to match to another game.
+            if ($clean -match '\s/\s') { foreach ($side in ($clean -split '\s/\s')) { if (@($side.Trim() -split '\s+').Count -ge 2) { [void]$alternates.Add($side.Trim()) } } }
+            # In a ROM-set name, a region just before the release note ("Cobra: The Arcade World (CBR2 Ver. B)") is not part of the game's
+            # name. A plain "Big Buck Hunter World" has no release note and is a game of its own.
+            $regionTail = [regex]::Match($clean, '^(.+?)\s+(World|Japan|USA|Asia|Export|Korea|Europe|Euro|China|Taiwan)$', 'IgnoreCase')
+            if ($regionTail.Success -and $clean -ne $Title -and @($regionTail.Groups[1].Value -split '\s+').Count -ge 2) { [void]$alternates.Add($regionTail.Groups[1].Value.Trim()) }
+            # A trailing "1" is the first game of a series ("Quiz Magic Academy 1" is "Quiz Magic Academy"), and a point revision is a version of
+            # the game before it ("Tekken 5.1" is "Tekken 5"). The name as written is tried first, so a list that has its own "... 1" or "... 5.1" wins.
+            $firstOfSeries = [regex]::Match($clean, '^(.+?)\s+1$')
+            if ($firstOfSeries.Success -and @($firstOfSeries.Groups[1].Value -split '\s+').Count -ge 2) { [void]$alternates.Add($firstOfSeries.Groups[1].Value.Trim()) }
+            $pointRevision = [regex]::Match($clean, '^(.+\s\d+)\.\d+$')
+            if ($pointRevision.Success -and @($pointRevision.Groups[1].Value -split '\s+').Count -ge 2) { [void]$alternates.Add($pointRevision.Groups[1].Value.Trim()) }
+            # Well-known regional names of one game: Capcom's "Street Fighter Zero" is the first "Street Fighter Alpha".
+            $regional = @{ 'streetfighterzero' = "Street Fighter Alpha: Warriors' Dreams" }
+            $regionalKey = Get-TpmMatchCanonKey $clean
+            if ($regional.ContainsKey($regionalKey)) { [void]$alternates.Add([string]$regional[$regionalKey]) }
+            $sideHits = New-Object System.Collections.Generic.List[object]
+            foreach ($alternate in $alternates) { $hit = Find-TpmGamesDbExact -Index $Index -Title $alternate -Year $Year -Maker $Maker; if ($hit) { [void]$sideHits.Add($hit) } }
+            # "A / B" where both sides are different games in the list is a question for the user, not an exact match.
+            if (@($sideHits | ForEach-Object { [string]$_.Id } | Select-Object -Unique).Count -gt 1) {
+                return [pscustomobject]@{ Kind = 'NearAsk'; Id = [string]$sideHits[0].Id; Name = [string]$sideHits[0].Name; Platform = [string]$sideHits[0].Platform; Score = 0.8; Gap = 0.0; QueryName = $Title; Level = 4 }
+            }
+            if ($sideHits.Count -gt 0) { $exact = $sideHits[0] }
         }
-        if ($sideHits.Count -gt 0) { $exact = $sideHits[0] }
+        if ($exact) { $level = 3 }
     }
-    if ($exact) { return [pscustomobject]@{ Kind = 'Exact'; Id = [string]$exact.Id; Name = [string]$exact.Name; Platform = [string]$exact.Platform; Score = 1.0; Gap = 1.0; QueryName = $Title } }
+    if ($exact) { return [pscustomobject]@{ Kind = 'Exact'; Id = [string]$exact.Id; Name = [string]$exact.Name; Platform = [string]$exact.Platform; Score = 1.0; Gap = 1.0; QueryName = $Title; Level = $level } }
+    if ($MaxLevel -lt 4) { return $none }
     $queryWords = @(Get-TpmMatchWords $clean)
     $queryNumbers = (@($queryWords | Where-Object { $_ -match '^\d+$' } | Sort-Object)) -join ','
     $cands = @(Find-TpmGamesDbCandidate -Index $Index -Title $clean -Top 8 -MinimumScore 0.5)
@@ -47024,7 +49506,7 @@ function Get-TpmGamesDbPickByScore {
         # A name written as one run-together word shares no whole word with the list's name.
         $prefix = @(Find-TpmLaunchBoxIdLinkPrefixCandidate -Index $Index -Title $clean)
         if ($prefix.Count -eq 0) { return $none }
-        return [pscustomobject]@{ Kind = 'NearAsk'; Id = [string]$prefix[0].Id; Name = [string]$prefix[0].Name; Platform = [string]$prefix[0].Platform; Score = [double]$prefix[0].Score; Gap = 0.0; QueryName = $Title }
+        return [pscustomobject]@{ Kind = 'NearAsk'; Id = [string]$prefix[0].Id; Name = [string]$prefix[0].Name; Platform = [string]$prefix[0].Platform; Score = [double]$prefix[0].Score; Gap = 0.0; QueryName = $Title; Level = 4 }
     }
     $scored = @(foreach ($cand in $cands) {
         $candWords = @(Get-TpmMatchWords (Get-TpmMatchCleanTitle ([string]$cand.Name)))
@@ -47044,15 +49526,13 @@ function Get-TpmGamesDbPickByScore {
         $candNumbers = (@($candWords | Where-Object { $_ -match '^\d+$' } | Sort-Object)) -join ','
         [pscustomobject]@{ Cand = $cand; Score = ([double]$cand.Score + $adjust); Miss = ($extra + $missing); Subset = (($extra -eq 0) -or ($missing -eq 0)); YearEq = ($Year -gt 0 -and $candYear -eq $Year); SameNumbers = ($candNumbers -eq $queryNumbers) }
     })
-    # A number, year or version in the name is part of the game: "2020" is not "2022" and "4" is not "5". A name whose numbers differ
-    # from the query's is a different game and is dropped, however alike the words are.
     $scored = @($scored | Where-Object { $_.SameNumbers } | Sort-Object Score -Descending)
     if ($scored.Count -eq 0) { return $none }
     $top = $scored[0]
     if ([double]$top.Cand.Score -lt 0.7 -and $top.Score -lt 0.5) { return $none }
     $gap = if ($scored.Count -gt 1) { $top.Score - $scored[1].Score } else { 1.0 }
     $firm = $top.SameNumbers -and (($top.Score -ge 0.9 -and $top.Miss -eq 0 -and $gap -ge 0.15) -or ($top.Subset -and $top.YearEq -and $gap -ge 0.15))
-    return [pscustomobject]@{ Kind = $(if ($firm) { 'NearSure' } else { 'NearAsk' }); Id = [string]$top.Cand.Id; Name = [string]$top.Cand.Name; Platform = [string]$top.Cand.Platform; Score = [Math]::Round($top.Score, 2); Gap = [Math]::Round($gap, 2); QueryName = $Title }
+    return [pscustomobject]@{ Kind = $(if ($firm) { 'NearSure' } else { 'NearAsk' }); Id = [string]$top.Cand.Id; Name = [string]$top.Cand.Name; Platform = [string]$top.Cand.Platform; Score = [Math]::Round($top.Score, 2); Gap = [Math]::Round($gap, 2); QueryName = $Title; Level = 4 }
 }
 
 # A name that contains the other one word for word: the list has "Dino King Battle" and the game is "Dino King Battle: King of
@@ -47115,198 +49595,959 @@ function Test-TpmMatchOnlyFillerDiffers {
     return $false
 }
 
-# One name against the game list, by exact name, close name, or one name containing the other (a question for the user).
+# One name against the game list, by exact name, close name, or one name containing the other. See Get-TpmGamesDbPickByScore for the
+# levels. Level 3 also covers a name that differs only by the brand word "Live" ("Golden Tee Live 2020" and "Golden Tee 2020"); a
+# different year or number is never ignored. A name that contains the other one is only ever a close name (level 4).
 function Get-TpmGamesDbPick {
-    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title, [int]$Year = 0, [string]$Maker = '')
-    $pick = Get-TpmGamesDbPickByScore -Index $Index -Title $Title -Year $Year -Maker $Maker
-    if ($pick.Kind -eq 'Exact') { return $pick }
+    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [string]$Title, [int]$Year = 0, [string]$Maker = '', [ValidateRange(1, 4)][int]$MaxLevel = 4)
+    $pick = Get-TpmGamesDbPickByScore -Index $Index -Title $Title -Year $Year -Maker $Maker -MaxLevel $MaxLevel
+    if ($pick.Kind -eq 'Exact' -or $MaxLevel -lt 3) { return $pick }
     $contained = Find-TpmGamesDbContained -Index $Index -Title $Title
-    # The same name except for one brand word ("Golden Tee Live 2020" and "Golden Tee 2020") is the same game.
     if ($contained -and (Test-TpmMatchOnlyFillerDiffers -Title $Title -Other ([string]$contained.Name))) {
-        return [pscustomobject]@{ Kind = 'Exact'; Id = [string]$contained.Id; Name = [string]$contained.Name; Platform = [string]$contained.Platform; Score = 1.0; Gap = 0.0; QueryName = $Title }
+        return [pscustomobject]@{ Kind = 'Exact'; Id = [string]$contained.Id; Name = [string]$contained.Name; Platform = [string]$contained.Platform; Score = 1.0; Gap = 0.0; QueryName = $Title; Level = 3 }
     }
-    if ($pick.Kind -eq 'NearSure') { return $pick }
+    if ($MaxLevel -lt 4 -or $pick.Kind -eq 'NearSure') { return $pick }
     if ($contained -and [string]$contained.Id -ne [string]$pick.Id) {
-        return [pscustomobject]@{ Kind = 'NearAsk'; Id = [string]$contained.Id; Name = [string]$contained.Name; Platform = [string]$contained.Platform; Score = 0.85; Gap = 0.0; QueryName = $Title }
+        return [pscustomobject]@{ Kind = 'NearAsk'; Id = [string]$contained.Id; Name = [string]$contained.Name; Platform = [string]$contained.Platform; Score = 0.85; Gap = 0.0; QueryName = $Title; Level = 4 }
     }
     return $pick
 }
 
-# The decision. Names: objects with Source and Name, most trusted first. Status is Sure (exact name from every source that has
-# one, no source pointing elsewhere), Check (the user decides) or None. Level 1 = exact and agreed, 2 = a firm close name that all
-# sources agree on, 3 = anything else that still has a candidate. A close name is never Sure: it always waits for approval.
-function Resolve-TpmGamesDbMatch {
-    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [object[]]$Names = @(), [int]$Year = 0, [string]$Maker = '')
-    $picks = New-Object System.Collections.Generic.List[object]
-    # A name marked Fallback (the title typed in LaunchBox) is only a hint of last resort: it is used when no other source gave a
-    # candidate, and it never argues against the sources that did.
-    foreach ($pass in 1, 2) {
-        if ($pass -eq 2 -and $picks.Count -gt 0) { break }
-        foreach ($entry in @($Names)) {
-            if ($null -eq $entry -or [string]::IsNullOrWhiteSpace([string]$entry.Name)) { continue }
-            # A source whose whole "name" is a region ("World") has no game name in it.
-            if ([string]$entry.Name -match '^\s*(World|Japan|USA|Asia|Export|Korea|Europe|Euro|China|Taiwan)\s*$') { continue }
-            if (($pass -eq 1) -eq [bool]$entry.Fallback) { continue }
-            $pick = Get-TpmGamesDbPick -Index $Index -Title ([string]$entry.Name) -Year $Year -Maker $Maker
-            if (-not $pick.Id) { continue }
-            $pick | Add-Member -NotePropertyName Source -NotePropertyValue ([string]$entry.Source) -Force
-            [void]$picks.Add($pick)
+# True when the developer or publisher of a list game fits the hardware maker of a profile ("Namco" fits "Bandai Namco Entertainment").
+function Test-TpmMakerFits {
+    [CmdletBinding()] [OutputType([bool])] param([string]$Maker, $Game)
+    $maker = ([string]$Maker).Trim().ToLowerInvariant()
+    if ($maker.Length -lt 3 -or $null -eq $Game) { return $false }
+    foreach ($company in @([string]$Game.Developer, [string]$Game.Publisher)) {
+        $name = $company.Trim().ToLowerInvariant()
+        if ($name.Length -ge 3 -and ($name.Contains($maker) -or $maker.Contains($name))) { return $true }
+    }
+    return $false
+}
+
+# A clean, readable title for a name with no list match: no emulator name, no trailing technical notes (version, region, board code).
+function Get-TpmDisplayTitle {
+    [CmdletBinding()] [OutputType([string])] param([string]$Name)
+    $title = Remove-TpmEmulatorName $Name
+    while ($true) {
+        $note = [regex]::Match($title, '^(.*?)\s*\(([^()]*)\)\s*$')
+        if (-not $note.Success -or -not $note.Groups[1].Value.Trim() -or -not (Test-TpmDatTagGroup $note.Groups[2].Value)) { break }
+        $title = $note.Groups[1].Value.Trim()
+    }
+    $title = [regex]::Replace($title, '\s+(?:v|ver\.?|version)\s*\d[\d.]*(?:\s*/\s*\d[\d.]*)*\s*$', '', 'IgnoreCase')
+    return $title.Trim()
+}
+
+# Everything the sources say about one profile: the names to look up and the facts to check them with. Pure: values in, object out.
+#   Eggman list    the list's game names for the profile code. A game folder counts only when the list confirms it
+#                  (ConfirmedDatName): then only that one list game is used.
+#   TeknoParrot    the game name in TeknoParrot's metadata, and the name in the profile when it differs
+#   LaunchBox      the title already in LaunchBox (HintName), a weak name: used only when nothing else matches
+# Another name in brackets in a list name ("Aero Fighters 2 (Sonic Wings 2)") is a weak name too.
+# NotGame is set for firmware updaters, drive checkers, controllers and boards; they are never matched or added.
+function New-TpmMatchSubject {
+    [CmdletBinding()] param(
+        [string]$Code = '', [string]$ProfileName = '', [string]$MetadataName = '', [int]$MetadataYear = 0, [string]$MetadataPlatform = '', [string]$MetadataGenre = '',
+        [string[]]$DatNames = @(), [string]$ConfirmedDatName = '', [string]$HintName = ''
+    )
+    $names = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object System.Collections.Generic.HashSet[string]
+    $addName = {
+        param([string]$Source, [string]$Name, [bool]$Weak)
+        $clean = Remove-TpmEmulatorName $Name
+        $key = '{0}|{1}|{2}' -f $Source, [int]$Weak, (ConvertTo-TpmGamesDbKey $clean)
+        if ($clean -and $seen.Add($key)) { [void]$names.Add([pscustomobject]@{ Source = $Source; Name = $clean; Fallback = $Weak }) }
+    }
+    $datYear = 0; $hardware = ''; $maker = ''
+    $datTitles = New-Object System.Collections.Generic.List[string]
+    $datUsed = if ($ConfirmedDatName) { @($ConfirmedDatName) } else { @($DatNames | Where-Object { $_ }) }
+    $datSource = if ($ConfirmedDatName) { 'Eggman list (game folder confirmed)' } else { 'Eggman list' }
+    foreach ($datName in $datUsed) {
+        $parsed = ConvertFrom-TpmDatGameName $datName
+        & $addName $datSource $parsed.Title $false
+        foreach ($alt in $parsed.AltTitles) { & $addName $datSource $alt $true }
+        if ($datYear -eq 0 -and $parsed.Year -gt 0) { $datYear = $parsed.Year }
+        if (-not $hardware -and $parsed.Hardware) { $hardware = $parsed.Hardware; $maker = $parsed.Maker }
+        if ($parsed.Title) { [void]$datTitles.Add($parsed.Title) }
+    }
+    & $addName 'TeknoParrot' $MetadataName $false
+    if ($ProfileName -and (ConvertTo-TpmGamesDbKey (Remove-TpmEmulatorName $ProfileName)) -ne (ConvertTo-TpmGamesDbKey (Remove-TpmEmulatorName $MetadataName))) { & $addName 'TeknoParrot profile' $ProfileName $false }
+    & $addName 'LaunchBox title' $HintName $true
+    if (-not $hardware -and $MetadataPlatform) { $hardware = $MetadataPlatform; $maker = Get-TpmMatchMaker $MetadataPlatform }
+    $notGame = ''
+    if ($MetadataGenre -match '(?i)^utility\b') { $notGame = 'TeknoParrot lists it as a utility, not a game.' }
+    else {
+        foreach ($candidate in @($MetadataName, $ProfileName) + @($datTitles)) {
+            if (Test-TpmNonGameTitle -Title $candidate) { $notGame = 'It is a firmware updater, drive checker, controller or board, not a game.'; break }
         }
     }
-    $result = [pscustomobject]@{ Status = 'None'; Match = $null; Level = 0; Evidence = ''; UsedName = '' }
-    if ($picks.Count -eq 0) { return $result }
-    $exact = @($picks | Where-Object { $_.Kind -eq 'Exact' })
-    $exactIds = @($exact | ForEach-Object { [string]$_.Id } | Select-Object -Unique)
-    $allIds = @($picks | ForEach-Object { [string]$_.Id } | Select-Object -Unique)
-    $firm = @($picks | Where-Object { $_.Kind -eq 'NearSure' })
-    $firmElsewhere = @($firm | Where-Object { $exactIds -notcontains [string]$_.Id })
-    # Majority: when two or more sources give the same exact game and no other game has as many, the odd source is set aside.
-    # A tie (one against one) is never settled by guessing.
-    $setAside = @(); $setAsideWhy = 'the others agree'; $forceCheck = $false
-    $voteGroups = @($exact | Group-Object Id | Sort-Object Count -Descending)
-    if ($voteGroups.Count -ge 1 -and $voteGroups[0].Count -ge 2 -and ($voteGroups.Count -eq 1 -or $voteGroups[0].Count -gt $voteGroups[1].Count)) {
-        $winnerId = [string]$voteGroups[0].Name
-        $setAside = @($picks | Where-Object { [string]$_.Id -ne $winnerId })
-        $exact = @($exact | Where-Object { [string]$_.Id -eq $winnerId })
-        $exactIds = @($winnerId)
-        $firmElsewhere = @()
+    $display = Get-TpmDisplayTitle $(if ($MetadataName) { $MetadataName } elseif ($datTitles.Count -gt 0) { $datTitles[0] } elseif ($ProfileName) { $ProfileName } else { $Code })
+    # The titles the Manager itself has used or would use. A LaunchBox title that is one of these was not typed by the owner.
+    $known = @(@($Code, $ProfileName, $MetadataName, $display) + @($datTitles) | Where-Object { $_ } | Select-Object -Unique)
+    # The bracketed notes of every raw name, for the region ("(JPN)", "(Japan, GDS-0026)"): only notes, so a title that says Japan stays a title.
+    $regionText = (@(@($MetadataName, $ProfileName) + @($datUsed) | ForEach-Object { [regex]::Matches([string]$_, '\(([^()]*)\)') | ForEach-Object { $_.Groups[1].Value } }) -join ' ')
+    return [pscustomobject]@{
+        Code = $Code; Names = $names.ToArray(); Year = $(if ($MetadataYear -gt 0) { $MetadataYear } else { $datYear }); Hardware = $hardware; Maker = $maker
+        NotGame = [bool]$notGame; NotGameReason = $notGame; DisplayTitle = $display; FolderConfirmed = [bool]$ConfirmedDatName
+        ProfileName = $ProfileName; KnownTitles = $known; RegionText = $regionText
     }
-    # Specific beats generic: when one source's name is another source's name plus extra words, and its game's name is the other
-    # game's name plus the same extra words, the more specific pick wins. Only the "for NESiCAxLive" ending is Sure; others are asked.
-    if ($setAside.Count -eq 0 -and $exactIds.Count -gt 1) {
-        $keyed = @($exact | ForEach-Object { [pscustomobject]@{ Pick = $_; Q = (Get-TpmMatchCanonKey ([string]$_.QueryName)); L = (Get-TpmMatchCanonKey ([string]$_.Name)) } })
-        foreach ($candidate in $keyed) {
-            $others = @($keyed | Where-Object { [string]$_.Pick.Id -ne [string]$candidate.Pick.Id })
-            $beatsAll = $others.Count -gt 0
-            foreach ($other in $others) {
-                $tailText = if ($candidate.Q.Length -gt $other.Q.Length -and $candidate.Q.StartsWith($other.Q)) { $candidate.Q.Substring($other.Q.Length) } else { $null }
-                $longerGame = ($candidate.L.Length -gt $other.L.Length -and $candidate.L.StartsWith($other.L))
-                if ($null -eq $tailText -or -not ($longerGame -or $tailText -eq 'nesicaxlive')) { $beatsAll = $false; break }
+}
+
+# Eggman list entries by profile code (lower case): code -> list of entries. A game with two profiles is listed under both codes, and
+# games whose names read the same once the year and tags are removed are all there (not only the first). Built once per plan.
+function Get-TpmDatEntriesByCode {
+    [CmdletBinding()] param([hashtable]$DatIndex = $null)
+    $byCode = @{}
+    if ($null -eq $DatIndex) { return $byCode }
+    foreach ($primary in @($DatIndex.Values)) {
+        $entries = New-Object System.Collections.Generic.List[object]
+        [void]$entries.Add($primary)
+        $alternates = $primary.PSObject.Properties['Alternates']
+        if ($null -ne $alternates -and $null -ne $alternates.Value) { foreach ($alternate in $alternates.Value) { [void]$entries.Add($alternate) } }
+        foreach ($entry in $entries) {
+            foreach ($code in @([string]$entry.ProfileCode, [string]$entry.ProfileCode2)) {
+                $key = $code.Trim().ToLowerInvariant()
+                if (-not $key) { continue }
+                if (-not $byCode.ContainsKey($key)) { $byCode[$key] = New-Object System.Collections.Generic.List[object] }
+                [void]$byCode[$key].Add($entry)
             }
-            if (-not $beatsAll) { continue }
-            $tail = $candidate.Q.Substring($others[0].Q.Length)
-            $winnerId = [string]$candidate.Pick.Id
-            $setAside = @($picks | Where-Object { [string]$_.Id -ne $winnerId })
-            $exact = @($exact | Where-Object { [string]$_.Id -eq $winnerId })
-            $exactIds = @($winnerId); $firmElsewhere = @()
-            $setAsideWhy = 'the other name is less specific'
-            if ($tail -ne 'nesicaxlive') { $forceCheck = $true }
-            break
         }
     }
-    $best = if ($exact.Count -gt 0) { $exact[0] } else { @($picks | Sort-Object @{ Expression = { if ($_.Kind -eq 'NearSure') { 1 } else { 0 } }; Descending = $true }, @{ Expression = 'Score'; Descending = $true })[0] }
-    $status = 'Check'; $level = 3
-    if ($exact.Count -ge 1 -and $exactIds.Count -eq 1 -and $firmElsewhere.Count -eq 0 -and -not $forceCheck) { $status = 'Sure'; $level = 1 }
-    elseif ($exact.Count -eq 0 -and $allIds.Count -eq 1 -and $firm.Count -ge 1) { $level = 2 }
-    $notes = @($picks | ForEach-Object { '{0} "{1}" -> {2} ({3})' -f $_.Source, $_.QueryName, $_.Name, $_.Kind })
-    $result.Status = $status; $result.Match = $best; $result.Level = $level; $result.UsedName = [string]$best.QueryName
-    $result.Evidence = 'Level {0}: {1}' -f $level, ($notes -join '; ')
-    if ($setAside.Count -gt 0) { $result.Evidence += (' Set aside (' + $setAsideWhy + '): ') + ((@($setAside | ForEach-Object { '{0} "{1}"' -f $_.Source, $_.QueryName })) -join ', ') }
-    return $result
+    return $byCode
 }
 
-# TeknoParrot's own facts for a profile code: name, year and hardware/maker text. Empty for a missing file or unsafe code.
-function Get-TpmTeknoParrotMetadataFacts {
-    [CmdletBinding()] param([Parameter(Mandatory)][string]$TpRoot, [Parameter(Mandatory)][string]$ProfileCode)
-    $facts = [pscustomobject]@{ Name = (Get-TpmTeknoParrotGameName -TpRoot $TpRoot -ProfileCode $ProfileCode); Year = 0; Platform = '' }
-    if ($ProfileCode -notmatch '^[A-Za-z0-9_.\-]+$' -or $ProfileCode -match '^\.+$') { return $facts }
-    $path = Join-Path (Join-Path $TpRoot 'Metadata') ($ProfileCode + '.json')
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $facts }
+# The name of the game folder that ends in [TP]: the folder of the game file or the first one above it. '' when there is none.
+function Get-TpmGameFolderName {
+    [CmdletBinding()] [OutputType([string])] param([string]$GamePath)
     try {
-        $data = [System.IO.File]::ReadAllText($path) | ConvertFrom-Json -ErrorAction Stop
-        $year = 0
-        if ($null -ne $data -and $data.PSObject.Properties['release_year'] -and [int]::TryParse([string]$data.release_year, [ref]$year) -and $year -gt 1900) { $facts.Year = $year }
-        if ($null -ne $data -and $data.PSObject.Properties['platform']) { $facts.Platform = [string]$data.platform }
-    } catch { Write-Log ('LaunchBox links: could not read the year for {0}: {1}' -f $ProfileCode, $_.Exception.Message) }
-    return $facts
-}
-
-# LaunchBox's MAME list as FileName (romset) -> game name. Empty when the file is missing or unreadable.
-function Get-TpmMameNameMap {
-    [CmdletBinding()] param([string]$MamePath)
-    $map = @{}
-    if ([string]::IsNullOrWhiteSpace($MamePath) -or -not (Test-Path -LiteralPath $MamePath -PathType Leaf)) { return $map }
-    $reader = $null
-    try {
-        $settings = New-Object System.Xml.XmlReaderSettings
-        $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
-        $settings.XmlResolver = $null
-        $reader = [System.Xml.XmlReader]::Create($MamePath, $settings)
-        $inFile = $false; $fileName = ''; $gameName = ''
-        $more = $reader.Read()
-        while ($more) {
-            $advanced = $false
-            if ($reader.NodeType -eq [System.Xml.XmlNodeType]::Element) {
-                if ($reader.Name -eq 'MameFile') { $inFile = $true; $fileName = ''; $gameName = '' }
-                elseif ($inFile -and $reader.Name -eq 'FileName') { $fileName = $reader.ReadElementContentAsString(); $advanced = $true }
-                elseif ($inFile -and $reader.Name -eq 'Name') { $gameName = $reader.ReadElementContentAsString(); $advanced = $true }
-            } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::EndElement -and $reader.Name -eq 'MameFile') {
-                if ($inFile -and $fileName) { $map[$fileName] = $gameName }
-                $inFile = $false
-            }
-            if (-not $advanced) { $more = $reader.Read() }
+        $dir = [System.IO.Path]::GetDirectoryName($GamePath)
+        while ($dir) {
+            $leaf = [System.IO.Path]::GetFileName($dir)
+            if ($leaf -match '\[TP\]\s*$') { return $leaf }
+            $dir = [System.IO.Path]::GetDirectoryName($dir)
         }
-    } catch { Write-Log ('LaunchBox links: could not read the MAME list: {0}' -f $_.Exception.Message) }
-    finally { if ($null -ne $reader) { $reader.Dispose() } }
-    return $map
-}
-
-# The MAME romset name of a TeknoParrot profile: the zip in ExecutableName, else the part of the code after "mvs_" or "cps_".
-function Get-TpmMatchRomKey {
-    [CmdletBinding()] [OutputType([string])] param([Parameter(Mandatory)][string]$TpRoot, [Parameter(Mandatory)][string]$Code)
-    if ($Code -notmatch '^[A-Za-z0-9_.\-]+$' -or $Code -match '^\.+$') { return '' }
-    foreach ($folder in @('GameProfiles', 'UserProfiles')) {
-        $path = Join-Path (Join-Path $TpRoot $folder) ($Code + '.xml')
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
-        try {
-            $found = [regex]::Match([System.IO.File]::ReadAllText($path), '<ExecutableName>([^<]*)</ExecutableName>')
-            if ($found.Success -and $found.Groups[1].Value -match '^(.+)\.zip$') { return $Matches[1] }
-        } catch { Write-Log ('LaunchBox links: could not read the profile {0}: {1}' -f $Code, $_.Exception.Message) }
-    }
-    if ($Code -match '^[a-z0-9]+_(.+)$') { return $Matches[1] }
+    } catch { return '' }
     return ''
 }
 
-# Gathers the names (and the DAT year, when TeknoParrot has none) that each source gives for one game.
-# The Eggman list name counts only through Get-TpmLaunchBoxGameFacts, which accepts a list entry only for this profile's own code.
-function Get-TpmLinkEvidence {
-    [CmdletBinding()] param(
-        [Parameter(Mandatory)][string]$TpRoot, [string]$Code, [string]$TpName, [string]$Title,
-        [hashtable]$DatIndex = $null, [hashtable]$DatByCode = $null, [hashtable]$MameMap = $null
-    )
-    $names = New-Object System.Collections.Generic.List[object]
-    $datYear = 0
-    if ($TpName) { [void]$names.Add([pscustomobject]@{ Source = 'TeknoParrot'; Name = $TpName }) }
-    if ($Code -and $null -ne $DatIndex -and $DatIndex.Count -gt 0 -and $Code -match '^[A-Za-z0-9_.\-]+$') {
-        $profilePath = Join-Path (Join-Path $TpRoot 'UserProfiles') ($Code + '.xml')
-        if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
-            try {
-                $facts = Get-TpmLaunchBoxGameFacts -ProfilePath $profilePath -DatIndex $DatIndex -DatByCode $DatByCode
-                if ($facts.DatName) {
-                    $eggmanTitle = (Get-TpmEggmanGameName -GamePath $facts.DatName).Title
-                    if ($eggmanTitle) { [void]$names.Add([pscustomobject]@{ Source = 'Eggman list'; Name = $eggmanTitle }) }
-                    if ($null -ne $facts.Dat) { [void][int]::TryParse([string]$facts.Dat.Year, [ref]$datYear) }
-                }
-            } catch { Write-Log ('LaunchBox links: could not read the Eggman list facts for {0}: {1}' -f $Code, $_.Exception.Message) }
-        }
-    }
-    if ($Code -and $null -ne $MameMap) {
-        $romKey = Get-TpmMatchRomKey -TpRoot $TpRoot -Code $Code
-        if ($romKey -and $MameMap.ContainsKey($romKey) -and $MameMap[$romKey]) { [void]$names.Add([pscustomobject]@{ Source = 'MAME list'; Name = [string]$MameMap[$romKey] }) }
-    }
-    if ($Title) { [void]$names.Add([pscustomobject]@{ Source = 'LaunchBox title'; Name = $Title; Fallback = $true }) }
-    return [pscustomobject]@{ Names = $names.ToArray(); DatYear = $datYear }
+# The Eggman game name of the game folder in a game path, only when the list confirms the folder: the folder name is exactly the name of
+# a list game for this profile code, and the file the profile starts is the file the list names inside that folder. '' otherwise.
+function Get-TpmConfirmedDatName {
+    [CmdletBinding()] [OutputType([string])] param([string]$Code, [string]$GamePath, [hashtable]$DatIndex = $null)
+    if ([string]::IsNullOrWhiteSpace($GamePath) -or $null -eq $DatIndex -or $DatIndex.Count -eq 0) { return '' }
+    $folder = Get-TpmGameFolderName -GamePath $GamePath
+    if (-not $folder) { return '' }
+    $entry = Get-DatEntryForZipName -RawZipName $folder -DatIndex $DatIndex
+    if ($null -eq $entry -or ([string]$entry.OriginalName) -ine $folder) { return '' }
+    if (([string]$entry.ProfileCode).Trim() -ine $Code -and ([string]$entry.ProfileCode2).Trim() -ine $Code) { return '' }
+    $exe = ([string]$entry.Executable).Trim().Replace('/', '\').TrimStart('\')
+    if ($exe -and -not $GamePath.Replace('/', '\').EndsWith(('\' + $folder + '\' + $exe), [System.StringComparison]::OrdinalIgnoreCase)) { return '' }
+    return [string]$entry.OriginalName
 }
 
+# The subject of one profile, read from the files: the profile (its own name and game path), TeknoParrot's metadata and the Eggman list.
+# A GamePath given by the caller (for example the path stored in a LaunchBox game) is used instead of the one in the profile.
+function Get-TpmProfileMatchSubject {
+    [CmdletBinding()] param(
+        [Parameter(Mandatory)][string]$Code, [string]$ProfilePath = '', [string]$TpRoot = '', [string]$HintName = '', [string]$GamePath = '',
+        [hashtable]$DatIndex = $null, [hashtable]$DatByCode = $null
+    )
+    $profileName = ''
+    if ($ProfilePath -and (Test-Path -LiteralPath $ProfilePath -PathType Leaf)) {
+        try {
+            $doc = Read-Xml $ProfilePath
+            if ($null -ne $doc.GameProfile) {
+                $profileName = (Get-XmlChildText $doc.GameProfile 'GameNameInternal').Trim()
+                if (-not $profileName) { $profileName = (Get-XmlChildText $doc.GameProfile 'Description').Trim() }
+                if (-not $GamePath) { $GamePath = (Get-XmlChildText $doc.GameProfile 'GamePath').Trim() }
+            }
+        } catch { Write-Log ('Game matching: could not read the profile {0}: {1}' -f $ProfilePath, $_.Exception.Message) }
+    }
+    $meta = if ($TpRoot) { Get-TpmTeknoParrotMetadataFacts -TpRoot $TpRoot -ProfileCode $Code } else { [pscustomobject]@{ Name = ''; Year = 0; Platform = ''; Genre = '' } }
+    $datNames = @()
+    if ($null -ne $DatByCode -and $DatByCode.ContainsKey($Code.ToLowerInvariant())) { $datNames = @($DatByCode[$Code.ToLowerInvariant()] | ForEach-Object { [string]$_.OriginalName }) }
+    $confirmed = Get-TpmConfirmedDatName -Code $Code -GamePath $GamePath -DatIndex $DatIndex
+    return (New-TpmMatchSubject -Code $Code -ProfileName $profileName -MetadataName $meta.Name -MetadataYear $meta.Year -MetadataPlatform $meta.Platform -MetadataGenre $meta.Genre -DatNames $datNames -ConfirmedDatName $confirmed -HintName $HintName)
+}
+
+# THE DECISION. Looks the names of a subject up in the game list one level at a time and stops at the first level that is certain.
+#   Certain    one game, found by the names of the sources, with nothing pointing elsewhere. A name that had to be worked out (level 3)
+#              or only an extra name (weak) must also be backed up by a second source, the hardware maker or the year.
+#   Ambiguous  something is there but it is not certain: the sources name different games, a worked-out name stands alone, or only a close
+#              name exists. Options holds the games; Match is the best one. Nothing is ever applied for the user.
+#   NoMatch    no name in the list is close enough.
+#   NotGame    a firmware updater, drive checker, controller or board.
+# Reason is plain words for the screen; Evidence is the technical trail for Details and the log. Facts are the year, developer and hardware
+# to fill in: the list's own year and developer when the match is certain, otherwise what the Eggman list and TeknoParrot say.
+function Resolve-TpmGameMatch {
+    [CmdletBinding()] param([Parameter(Mandatory)]$Index, [Parameter(Mandatory)]$Subject)
+    $facts = [pscustomobject]@{ Year = [int]$Subject.Year; Developer = [string]$Subject.Maker; Hardware = [string]$Subject.Hardware }
+    $result = [pscustomobject]@{ Status = 'NoMatch'; Reason = 'No game with this name is in the LaunchBox list.'; Level = 0; Match = $null; Options = @(); Evidence = ''; Title = [string]$Subject.DisplayTitle; Facts = $facts }
+    if ($Subject.NotGame) { $result.Status = 'NotGame'; $result.Reason = [string]$Subject.NotGameReason; return $result }
+    $names = @($Subject.Names | Where-Object { $_.Name -notmatch '^\s*(World|Japan|USA|Asia|Export|Korea|Europe|Euro|China|Taiwan)\s*$' })
+    $year = [int]$Subject.Year; $maker = [string]$Subject.Maker
+    $strong = @($names | Where-Object { -not $_.Fallback })
+    $weak = @($names | Where-Object { $_.Fallback })
+    $toOption = { param($pick) [pscustomobject]@{ Id = [string]$pick.Id; Name = [string]$pick.Name; Platform = [string]$pick.Platform; Score = [double]$pick.Score } }
+    foreach ($poolNumber in 0, 1) {
+        $pool = if ($poolNumber -eq 0) { $strong } else { $weak }
+        if ($pool.Count -eq 0) { continue }
+        for ($level = 1; $level -le 3; $level++) {
+            $picks = New-Object System.Collections.Generic.List[object]
+            foreach ($entry in $pool) {
+                $pick = Get-TpmGamesDbPick -Index $Index -Title ([string]$entry.Name) -Year $year -Maker $maker -MaxLevel $level
+                if ($pick.Kind -ne 'Exact') { continue }
+                $pick | Add-Member -NotePropertyName Source -NotePropertyValue ([string]$entry.Source) -Force
+                [void]$picks.Add($pick)
+            }
+            if ($picks.Count -eq 0) { continue }
+            # The names that found nothing at this level may still point at a game, at a deeper level. They agree or they argue.
+            $hitNames = @($picks | ForEach-Object { [string]$_.QueryName })
+            foreach ($entry in @($pool | Where-Object { $hitNames -notcontains [string]$_.Name })) {
+                $pick = Get-TpmGamesDbPick -Index $Index -Title ([string]$entry.Name) -Year $year -Maker $maker -MaxLevel 3
+                if ($pick.Kind -ne 'Exact') { continue }
+                $pick | Add-Member -NotePropertyName Source -NotePropertyValue ([string]$entry.Source) -Force
+                [void]$picks.Add($pick)
+            }
+            $ids = @($picks | ForEach-Object { [string]$_.Id } | Select-Object -Unique)
+            $trail = 'Level {0}: {1}' -f $level, ((@($picks | ForEach-Object { '{0} "{1}" -> {2} (level {3})' -f $_.Source, $_.QueryName, $_.Name, $_.Level })) -join '; ')
+            $result.Level = $level; $result.Evidence = $trail
+            if ($ids.Count -gt 1) {
+                # Hardware that says NESiCAxLive and a list game that says "for NESiCAxLive" are the same release; the plain game is the original.
+                $nesica = @($ids | Where-Object { [string]$Index.ById[$_].Name -match '(?i)\sfor\s+NESiCAxLive$' })
+                if ($nesica.Count -eq 1 -and [string]$Subject.Hardware -match '(?i)nesica') { $ids = @($nesica[0]); $trail += ' The hardware is NESiCAxLive, so the NESiCAxLive game was chosen.'; $result.Evidence = $trail }
+                else {
+                    $result.Status = 'Ambiguous'; $result.Reason = 'The sources name different games.'
+                    $result.Options = @($picks | Group-Object Id | ForEach-Object { & $toOption $_.Group[0] })
+                    $result.Match = $result.Options[0]
+                    return $result
+                }
+            }
+            $game = $Index.ById[$ids[0]]
+            # Games that share this name apart from a bracketed qualifier ("Frogger" and "Frogger (Raw Thrills)"): the developer has to tell them apart.
+            $plainKey = ConvertTo-TpmGamesDbKey ([regex]::Replace([string]$game.Name, '\s*\([^()]*\)\s*$', ''))
+            $family = New-Object System.Collections.Generic.List[object]
+            [void]$family.Add($game)
+            $qualified = Get-TpmGamesDbQualifiedMap -Index $Index
+            if ($qualified.ContainsKey($plainKey)) { foreach ($sibling in $qualified[$plainKey]) { [void]$family.Add($sibling) } }
+            if ($plainKey -cne (ConvertTo-TpmGamesDbKey ([string]$game.Name)) -and $Index.ByName.ContainsKey($plainKey)) { foreach ($sibling in $Index.ByName[$plainKey]) { [void]$family.Add($Index.ById[[string]$sibling.Id]) } }
+            $family = @($family.ToArray() | Group-Object Id | ForEach-Object { $_.Group[0] })
+            if ($family.Count -gt 1 -and $maker -and [string]$Subject.Hardware -notmatch '(?i)nesica|g-?net' -and -not (Test-TpmMakerFits -Maker $maker -Game $game)) {
+                $fitting = @($family | Where-Object { Test-TpmMakerFits -Maker $maker -Game $_ })
+                if ($fitting.Count -eq 1) { $game = $fitting[0]; $trail += (' Several games share this name; the developer fits only {0}.' -f $game.Name); $result.Evidence = $trail }
+                else {
+                    $result.Status = 'Ambiguous'; $result.Reason = 'Several games have this name and the developer does not tell them apart.'
+                    $result.Options = @($family | ForEach-Object { [pscustomobject]@{ Id = [string]$_.Id; Name = [string]$_.Name; Platform = [string]$_.Platform; Score = 0.0 } })
+                    $result.Match = $result.Options[0]
+                    return $result
+                }
+            }
+            $agreeing = @($picks | Where-Object { [string]$_.Id -eq $ids[0] } | ForEach-Object { $_.Source } | Select-Object -Unique)
+            $needsBackup = ($level -ge 3) -or ($poolNumber -eq 1)
+            $backedUp = ($agreeing.Count -ge 2) -or (Test-TpmMakerFits -Maker $maker -Game $game) -or ($year -gt 0 -and [int]$game.Year -gt 0 -and [Math]::Abs($year - [int]$game.Year) -le 1)
+            $result.Match = [pscustomobject]@{ Id = [string]$game.Id; Name = [string]$game.Name; Platform = [string]$game.Platform; Year = [int]$game.Year; Developer = [string]$game.Developer; Publisher = [string]$game.Publisher }
+            if ($needsBackup -and -not $backedUp) {
+                $result.Status = 'Ambiguous'; $result.Reason = 'Only one name points to it, and that name had to be adjusted.'
+                $result.Options = @($result.Match)
+                return $result
+            }
+            # The same name with years far apart, or a developer that does not fit, may be another game that shares the name. A port to a
+            # re-release platform (NESiCAxLive, G-NET) explains the gap, so it does not count.
+            $gap = if ($year -gt 0 -and [int]$game.Year -gt 0) { [Math]::Abs($year - [int]$game.Year) } else { 0 }
+            $makerClash = $maker -and ([string]$game.Developer -or [string]$game.Publisher) -and -not (Test-TpmMakerFits -Maker $maker -Game $game)
+            if ([string]$Subject.Hardware -notmatch '(?i)nesica|g-?net' -and ($gap -ge 10 -or ($gap -ge 5 -and $makerClash))) {
+                $result.Status = 'Ambiguous'; $result.Reason = ('The years ({0} and {1}) are far apart, so it may be another game with the same name.' -f $year, $game.Year)
+                $result.Options = @($result.Match)
+                return $result
+            }
+            $result.Status = 'Certain'
+            $result.Reason = if ($agreeing.Count -ge 2) { 'The names from {0} sources point to this game.' -f $agreeing.Count } else { 'The name matches this game.' }
+            if ([int]$game.Year -gt 0) { $facts.Year = [int]$game.Year }
+            if ([string]$game.Developer) { $facts.Developer = [string]$game.Developer }
+            return $result
+        }
+    }
+    # Nothing exact: close names are suggestions, never a match.
+    $near = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in $strong) {
+        $pick = Get-TpmGamesDbPick -Index $Index -Title ([string]$entry.Name) -Year $year -Maker $maker -MaxLevel 4
+        if ($pick.Id -and -not @($near | Where-Object { $_.Id -eq [string]$pick.Id }).Count) { [void]$near.Add((& $toOption $pick)) }
+    }
+    if ($near.Count -gt 0) {
+        $result.Status = 'Ambiguous'; $result.Reason = 'Only a close name was found.'; $result.Level = 4
+        $result.Options = @($near.ToArray() | Sort-Object Score -Descending | Select-Object -First 3)
+        $result.Match = $result.Options[0]
+        $result.Evidence = 'Level 4: ' + ((@($result.Options | ForEach-Object { '{0} (score {1})' -f $_.Name, $_.Score })) -join '; ')
+    }
+    return $result
+}
+
+# ===== end of TPM GAME TITLE MATCHING (module-ready block) =====
+
+
+function Get-OrCreateLaunchBoxEmulator {
+    param([System.Xml.XmlDocument]$emulatorsDoc, [string]$tpRoot, [string]$lbRoot)
+    $emulatorMatches = @($emulatorsDoc.SelectNodes('/LaunchBox/Emulator') | Where-Object { (Get-XmlChildText $_ 'Title') -eq 'TeknoParrot' })
+    if ($emulatorMatches.Count -gt 1) { throw 'Multiple TeknoParrot emulator entries require manual resolution in LaunchBox.' }
+    if ($emulatorMatches.Count -eq 1) {
+        $id = Get-XmlChildText $emulatorMatches[0] 'ID'
+        $guid = [guid]::Empty
+        if (-not [guid]::TryParse($id,[ref]$guid) -or $guid -eq [guid]::Empty) { throw 'Existing TeknoParrot emulator identity is invalid; TPM will not edit it.' }
+        if (@($emulatorsDoc.SelectNodes('/LaunchBox/Emulator') | Where-Object { (Get-XmlChildText $_ 'ID') -eq $id }).Count -ne 1) { throw 'Duplicate LaunchBox emulator identity requires manual resolution.' }
+        $existingPath = Get-XmlChildText $emulatorMatches[0] 'ApplicationPath'
+        if (-not $existingPath -or -not (Test-TpmLaunchBoxSamePath -Root $lbRoot -Left $existingPath -Right (Join-Path $tpRoot 'TeknoParrotUi.exe'))) { throw 'Existing TeknoParrot emulator points elsewhere; change it in LaunchBox, not TPM.' }
+        return $id
+    }
+    $id = [guid]::NewGuid().ToString()
+    $node = $emulatorsDoc.CreateElement('Emulator')
+    foreach ($field in ([ordered]@{ ID=$id; Title='TeknoParrot'; ApplicationPath=(Get-RelativePath $lbRoot (Join-Path $tpRoot 'TeknoParrotUi.exe')); CommandLine='--profile=%romfile%.xml'; NoQuotes='true'; NoSpace='true'; FileNameWithoutExtensionAndPath='true' }).GetEnumerator()) { Set-XmlChildText $node $field.Key $field.Value }
+    [void]$emulatorsDoc.DocumentElement.AppendChild($node)
+    return $id
+}
+
+function Get-OrCreateLaunchBoxPlatform {
+    param([System.Xml.XmlDocument]$platformsListDoc, [string]$platformName, [string]$tpRoot, [string]$lbRoot)
+    $platformMatches = @($platformsListDoc.SelectNodes('/LaunchBox/Platform') | Where-Object { (Get-XmlChildText $_ 'Name') -eq $platformName })
+    if ($platformMatches.Count -gt 1) { throw 'Duplicate LaunchBox platform names require manual resolution.' }
+    if ($platformMatches.Count -eq 1) { return $false }
+    $node = $platformsListDoc.CreateElement('Platform')
+    foreach ($field in ([ordered]@{ Name=$platformName; Folder=(Get-RelativePath $lbRoot (Join-Path $tpRoot 'GameProfiles')); ScrapeAs='Arcade'; DisableAutoImport='true' }).GetEnumerator()) { Set-XmlChildText $node $field.Key $field.Value }
+    [void]$platformsListDoc.DocumentElement.AppendChild($node)
+    return $true
+}
+
+function Add-LaunchBoxEmulatorPlatformLink {
+    param([System.Xml.XmlDocument]$emulatorsDoc, [string]$emulatorId, [string]$platformName, [bool]$isNewPlatform)
+    if (@($emulatorsDoc.SelectNodes('/LaunchBox/EmulatorPlatform') | Where-Object { (Get-XmlChildText $_ 'Emulator') -eq $emulatorId -and (Get-XmlChildText $_ 'Platform') -eq $platformName }).Count) { return }
+    $node = $emulatorsDoc.CreateElement('EmulatorPlatform')
+    foreach ($field in ([ordered]@{ Emulator=$emulatorId; Platform=$platformName; CommandLine=''; Default=([string]$isNewPlatform).ToLowerInvariant() }).GetEnumerator()) { Set-XmlChildText $node $field.Key $field.Value }
+    [void]$emulatorsDoc.DocumentElement.AppendChild($node)
+}
+
+$script:LaunchBoxGameSkeletonFields = [ordered]@{
+    ID=''; Title=''; Platform=''; Emulator=''; ApplicationPath=''; CommandLine=''
+    DateAdded=''; DateModified=''; Favorite='false'; Completed='false'; Hide='false'
+    PlayCount='0'; PlayTime='0'; Notes=''
+}
+$script:LaunchBoxGameIdentityFields = @('ID','Title','Platform','Emulator','ApplicationPath','CommandLine','DateAdded','DateModified')
+
+function New-LaunchBoxGameEntry {
+    param([System.Xml.XmlDocument]$platformGamesDoc, [string]$relProfilePath, [string]$title, [string]$platformName, [string]$emulatorId, [string]$lbRoot, $GamesDbMatch = $null, $Facts = $null)
+    # Versions grouped into one game (AdditionalApplication) count as already added, so adding games never splits a group again.
+    foreach ($existing in @($platformGamesDoc.SelectNodes('/LaunchBox/Game | /LaunchBox/AdditionalApplication'))) {
+        $existingPath = Get-XmlChildText $existing 'ApplicationPath'
+        if ($existingPath -and (Test-TpmLaunchBoxSamePath -Root $lbRoot -Left $existingPath -Right $relProfilePath)) { return $false }
+    }
+    $node = $platformGamesDoc.CreateElement('Game')
+    foreach ($field in $script:LaunchBoxGameSkeletonFields.GetEnumerator()) { Set-XmlChildText $node $field.Key $field.Value }
+    $now = (Get-Date).ToString('o')
+    $identity = @{ ID=[guid]::NewGuid().ToString(); Title=$title; Platform=$platformName; Emulator=$emulatorId; ApplicationPath=$relProfilePath; CommandLine=''; DateAdded=$now; DateModified=$now }
+    foreach ($field in $script:LaunchBoxGameIdentityFields) { Set-XmlChildText $node $field $identity[$field] }
+    # A sure Games Database match gives the official title and the Games Database ID, so LaunchBox can fetch information and artwork.
+    if ($GamesDbMatch) { Set-XmlChildText $node 'Title' ([string]$GamesDbMatch.Name); Set-XmlChildText $node 'DatabaseID' ([string]$GamesDbMatch.Id) }
+    # The release year and developer, when the sources know them (never for a field the new entry already has).
+    if ($Facts) {
+        if ([int]$Facts.Year -gt 0) { [void](Set-TpmLaunchBoxFieldIfEmpty -Node $node -Field 'ReleaseDate' -Value ('{0}-01-01' -f $Facts.Year)) }
+        [void](Set-TpmLaunchBoxFieldIfEmpty -Node $node -Field 'Developer' -Value ([string]$Facts.Developer))
+    }
+    [void]$platformGamesDoc.DocumentElement.AppendChild($node)
+    return $true
+}
+
+# Opens the LaunchBox Games Database for one LaunchBox folder. State: Used, Missing (no file) or Failed (could not be read).
+function Get-TpmGamesDbForLaunchBox {
+    param([Parameter(Mandatory)][string]$LaunchBoxRoot)
+    $dbPath = Get-TpmGamesDbPath -LaunchBoxRoot $LaunchBoxRoot
+    if (-not (Test-Path -LiteralPath $dbPath -PathType Leaf)) { return [pscustomobject]@{ State = 'Missing'; Index = $null; Error = 'No LaunchBox.Metadata.db was found in the LaunchBox Metadata folder.' } }
+    try { return [pscustomobject]@{ State = 'Used'; Index = (Get-TpmGamesDbIndex -DbPath $dbPath); Error = '' } }
+    catch {
+        Write-Log ('LaunchBox game database could not be used: {0}' -f $_.Exception.Message)
+        return [pscustomobject]@{ State = 'Failed'; Index = $null; Error = [string]$_.Exception.Message }
+    }
+}
+
+# A game the Manager already added: give it the clean or official title, the Games Database ID when the match is certain, and the release
+# year and developer when those boxes are empty. Leaves it alone when it is not the Manager's entry (other emulator), already has an ID,
+# or its title is not one of the titles the Manager itself uses (KnownTitles, compared by letters and digits only): such a title was
+# typed by the owner. Returns the change, or $null when nothing was changed.
+function Update-TpmLaunchBoxGameTitle {
+    param([System.Xml.XmlDocument]$platformGamesDoc, [string]$relProfilePath, [string[]]$KnownTitles, [string]$NewTitle, [string]$emulatorId, [string]$lbRoot, $GamesDbMatch = $null, $Facts = $null)
+    $knownKeys = @(@($KnownTitles) + @($NewTitle) | ForEach-Object { ConvertTo-TpmGamesDbKey $_ } | Where-Object { $_ })
+    foreach ($existing in @($platformGamesDoc.SelectNodes('/LaunchBox/Game'))) {
+        $existingPath = Get-XmlChildText $existing 'ApplicationPath'
+        if (-not $existingPath -or -not (Test-TpmLaunchBoxSamePath -Root $lbRoot -Left $existingPath -Right $relProfilePath)) { continue }
+        if ((Get-XmlChildText $existing 'Emulator') -ne $emulatorId) { return $null }
+        $currentId = (Get-XmlChildText $existing 'DatabaseID').Trim()
+        if ($currentId -and $currentId -ne '0') { return $null }
+        $currentTitle = Get-XmlChildText $existing 'Title'
+        $currentKey = ConvertTo-TpmGamesDbKey $currentTitle
+        if ($currentKey -and $knownKeys -notcontains $currentKey) { return $null }
+        $titleChanges = ($GamesDbMatch -or $currentTitle -cne $NewTitle)
+        if ($titleChanges) {
+            Set-XmlChildText $existing 'Title' $NewTitle
+            if ($GamesDbMatch) { Set-XmlChildText $existing 'DatabaseID' ([string]$GamesDbMatch.Id) }
+        }
+        $filled = New-Object System.Collections.Generic.List[string]
+        if ($Facts) {
+            if ([int]$Facts.Year -gt 0 -and (Set-TpmLaunchBoxFieldIfEmpty -Node $existing -Field 'ReleaseDate' -Value ('{0}-01-01' -f $Facts.Year))) { [void]$filled.Add('year ' + $Facts.Year) }
+            if (Set-TpmLaunchBoxFieldIfEmpty -Node $existing -Field 'Developer' -Value ([string]$Facts.Developer)) { [void]$filled.Add('developer ' + $Facts.Developer) }
+        }
+        if (-not $titleChanges -and $filled.Count -eq 0) { return $null }
+        Set-XmlChildText $existing 'DateModified' (Get-Date).ToString('o')
+        return [pscustomobject]@{ Old = $currentTitle; New = $NewTitle; Id = $(if ($GamesDbMatch) { [string]$GamesDbMatch.Id } else { '' }); Kind = 'Existing'; Filled = ($filled -join ', ') }
+    }
+    return $null
+}
+
+function Invoke-LaunchBoxDirectWrite {
+    param([string]$userProfilesDir, [string]$tpRoot, [string]$lbRoot, [string[]]$platformNames, [string]$BackupRoot, [switch]$PlanOnly, [switch]$UseGamesDb, [switch]$IncludeExisting, [hashtable]$GamesDbChoices = @{}, [hashtable]$DatIndex = $null)
+    try {
+        $lbRoot = Resolve-TpmLaunchBoxRoot $lbRoot
+        if (-not (Test-Path -LiteralPath $lbRoot -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $lbRoot)) { throw 'Choose a safe existing LaunchBox root.' }
+        if (@($platformNames).Count -eq 0) { throw 'Choose at least one LaunchBox platform.' }
+        # Guided wait instead of a 'close the app and rerun' dead end. This runs before any file inventory so LaunchBox's own save-on-exit cannot invalidate the hashes taken below; the transaction keeps its own final process check.
+        if (-not $PlanOnly -and -not (Wait-TpmForProcessClose -ProcessNames @('LaunchBox','BigBox') -FriendlyName 'LaunchBox or BigBox')) {
+            $stillOpen = New-TpmLaunchBoxResult NO_CHANGES 'LaunchBox or BigBox is still open and the operation was canceled. No library writes were attempted.'
+            $stillOpen.Cancelled = $true; $stillOpen.Reason = 'APPLICATION_RUNNING'
+            return $stillOpen
+        }
+        $docs = [ordered]@{}
+        $originals = @{}
+        foreach ($rel in @('Data\Emulators.xml','Data\Platforms.xml')) {
+            $path = Get-TpmLaunchBoxPath $lbRoot $rel
+            $originals[$rel] = Get-TpmLaunchBoxFileState $path
+            if (-not $originals[$rel].Exists) { throw ("LaunchBox has not made {0} yet. Open LaunchBox once, close it, then try again. Nothing was changed." -f $rel) }
+            $docs[$rel] = Read-TpmLaunchBoxXml $path
+            Assert-TpmLaunchBoxState $path $originals[$rel]
+        }
+        $platformFiles = [ordered]@{}
+        foreach ($name in $platformNames) {
+            $safe = Get-SafeLaunchBoxPlatformFileName $name
+            if ($safe -cne $name -or $name -in @('.','..')) { throw 'Platform name must be a safe, unambiguous filename.' }
+            $rel = "Data\Platforms\$safe.xml"
+            if ($platformFiles.Contains($rel)) { throw 'Duplicate LaunchBox platform destination.' }
+            $path = Get-TpmLaunchBoxPath $lbRoot $rel
+            if (-not (Test-Path -LiteralPath ([System.IO.Path]::GetDirectoryName($path)) -PathType Container -ErrorAction Stop)) { throw 'LaunchBox Data\Platforms must already exist.' }
+            $platformFiles[$rel] = $name
+            $originals[$rel] = Get-TpmLaunchBoxFileState $path
+            $docs[$rel] = if ($originals[$rel].Exists) { Read-TpmLaunchBoxXml $path } else { [xml]'<LaunchBox />' }
+            Assert-TpmLaunchBoxState $path $originals[$rel]
+        }
+        $plans = @()
+        foreach ($rel in $docs.Keys) {
+            $plans += [pscustomobject]@{ RelativePath=$rel; Before=$originals[$rel]; Document=$docs[$rel]; OriginalXml=$docs[$rel].OuterXml; BaseChildCount=$docs[$rel].DocumentElement.ChildNodes.Count; Source=$null; SourceHash=$null; Changed=$false; Delete=$false; AfterHash=$null }
+        }
+        $emulatorId = Get-OrCreateLaunchBoxEmulator $docs['Data\Emulators.xml'] $tpRoot $lbRoot
+        # Every game gets a clean title. When LaunchBox's own game list is there (read only), a certain match gives the official title and the
+        # Games Database ID. Any problem with the list means games keep the clean title, with a plain note.
+        $gamesDb = $null
+        $titleChanges = New-Object System.Collections.Generic.List[object]
+        $titleReview = New-Object System.Collections.Generic.List[object]
+        $resolvedByFile = @{}
+        $datByCode = Get-TpmDatEntriesByCode -DatIndex $DatIndex
+        if ($UseGamesDb) { $gamesDb = Get-TpmGamesDbForLaunchBox -LaunchBoxRoot $lbRoot }
+        $counts = @{}
+        $skippedMissingGame = 0
+        $skippedUnreadable = New-Object System.Collections.Generic.List[string]
+        $skippedBadPath = New-Object System.Collections.Generic.List[string]
+        $profiles = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter '*.xml' -File -ErrorAction Stop)
+        foreach ($rel in $platformFiles.Keys) {
+            $name = $platformFiles[$rel]
+            $created = Get-OrCreateLaunchBoxPlatform $docs['Data\Platforms.xml'] $name $tpRoot $lbRoot
+            Add-LaunchBoxEmulatorPlatformLink $docs['Data\Emulators.xml'] $emulatorId $name $created
+            $counts[$name] = 0
+            $scanTotal = $profiles.Count
+            $scanStarted = Get-Date
+            $scanCurrent = 0
+            $scanOutcome = 'Error'
+            try {
+                foreach ($file in $profiles) {
+                    $scanCurrent++
+                    Write-TpmCompactExtractionProgress -Phase Scanning -Label 'LaunchBox direct-write profile scan' -Current $scanCurrent -Total $scanTotal -StartedAt $scanStarted
+                    try {
+                        $profileDoc = Read-Xml $file.FullName
+                        if ($null -eq $profileDoc.GameProfile) { throw 'This is not a TeknoParrot game profile.' }
+                        $gamePath = (Get-XmlChildText $profileDoc.GameProfile 'GamePath').Trim()
+                        $gameFileFound = $false
+                        $gamePathIllegal = $false
+                        if ($gamePath) {
+                            try { $gameFileFound = [System.IO.File]::Exists((ConvertTo-TpmAutoSyncLongPath -Path $gamePath)) -or [bool](Test-Path -LiteralPath $gamePath -PathType Leaf -ErrorAction Stop) }
+                            catch { $gamePathIllegal = $true; $gamePathProblem = $_.Exception.Message }
+                        }
+                    } catch {
+                        if ($name -eq @($platformFiles.Values)[0]) {
+                            [void]$skippedUnreadable.Add([string]$file.Name)
+                            Write-Log ('LaunchBox: skipped the profile file {0} because it could not be read: {1}' -f $file.FullName, $_.Exception.Message)
+                        }
+                        continue
+                    }
+                    if ($gamePathIllegal) {
+                        if ($name -eq @($platformFiles.Values)[0]) {
+                            [void]$skippedBadPath.Add([string]$file.Name)
+                            Write-Log ('LaunchBox: skipped the profile file {0} because its saved game path is not a valid path: {1}' -f $file.FullName, $gamePathProblem)
+                        }
+                        continue
+                    }
+                    if (-not $gameFileFound) { if ($name -eq @($platformFiles.Values)[0]) { $skippedMissingGame++ }; continue }
+                    if (-not $resolvedByFile.ContainsKey($file.Name)) {
+                        $subject = Get-TpmProfileMatchSubject -Code $file.BaseName -ProfilePath $file.FullName -TpRoot $tpRoot -GamePath $gamePath -DatIndex $DatIndex -DatByCode $datByCode
+                        $found = if (-not $subject.NotGame -and $gamesDb -and $gamesDb.State -eq 'Used') { Resolve-TpmGameMatch -Index $gamesDb.Index -Subject $subject } else { $null }
+                        $resolvedByFile[$file.Name] = [pscustomobject]@{ Subject = $subject; Match = $found }
+                        if ($found) { Write-Log ('LaunchBox match: {0} -> {1}. {2} {3}' -f $file.BaseName, $found.Status, $found.Reason, $found.Evidence) }
+                    }
+                    $subject = $resolvedByFile[$file.Name].Subject
+                    $resolution = $resolvedByFile[$file.Name].Match
+                    if ($subject.NotGame) {
+                        if ($name -eq @($platformFiles.Values)[0]) { Write-Log ('LaunchBox: skipped {0} because it is not a game: {1}' -f $subject.DisplayTitle, $subject.NotGameReason) }
+                        continue
+                    }
+                    $dbMatch = $null
+                    $byChoice = $false
+                    if ($resolution -and $resolution.Status -eq 'Certain') { $dbMatch = $resolution.Match }
+                    elseif ($resolution -and $GamesDbChoices.ContainsKey($file.Name)) { $dbMatch = $GamesDbChoices[$file.Name]; $byChoice = $true }
+                    $title = if ($dbMatch) { [string]$dbMatch.Name } else { [string]$subject.DisplayTitle }
+                    # The year and developer to fill in: the game list's own when the match is certain, otherwise what the Eggman list and TeknoParrot say.
+                    $facts = if ($resolution) { $resolution.Facts } else { [pscustomobject]@{ Year = [int]$subject.Year; Developer = [string]$subject.Maker } }
+                    $relProfile = Get-RelativePath $lbRoot $file.FullName
+                    $addedNow = New-LaunchBoxGameEntry $docs[$rel] $relProfile $title $name $emulatorId $lbRoot -GamesDbMatch $dbMatch -Facts $facts
+                    if ($addedNow) {
+                        $counts[$name]++
+                        $oldTitle = if ($subject.ProfileName) { [string]$subject.ProfileName } else { [string]$file.BaseName }
+                        $filledText = (@($(if ([int]$facts.Year -gt 0) { 'year ' + $facts.Year }), $(if ([string]$facts.Developer) { 'developer ' + $facts.Developer })) | Where-Object { $_ }) -join ', '
+                        if ($dbMatch -or $title -cne $oldTitle -or $filledText) { [void]$titleChanges.Add([pscustomobject]@{ Old = $oldTitle; New = $title; Id = $(if ($dbMatch) { [string]$dbMatch.Id } else { '' }); Kind = 'New'; Choice = $byChoice; Filled = $filledText }) }
+                    } elseif ($IncludeExisting) {
+                        $existingChange = Update-TpmLaunchBoxGameTitle -platformGamesDoc $docs[$rel] -relProfilePath $relProfile -KnownTitles $subject.KnownTitles -NewTitle $title -emulatorId $emulatorId -lbRoot $lbRoot -GamesDbMatch $dbMatch -Facts $facts
+                        if ($existingChange) {
+                            $existingChange | Add-Member -NotePropertyName Choice -NotePropertyValue $byChoice -Force
+                            [void]$titleChanges.Add($existingChange)
+                        }
+                    }
+                    if ($resolution -and -not $dbMatch -and ($addedNow -or $IncludeExisting) -and -not $resolvedByFile.ContainsKey('seen:' + $file.Name)) {
+                        $resolvedByFile['seen:' + $file.Name] = $true
+                        [void]$titleReview.Add([pscustomobject]@{ File = $file.Name; Title = $title; Status = [string]$resolution.Status; Reason = [string]$resolution.Reason; Options = @($resolution.Options) })
+                    }
+                }
+                $scanOutcome = 'Final'
+            } finally {
+                if ($scanTotal -gt 0) {
+                    Write-TpmCompactExtractionProgress -Phase Scanning -Label 'LaunchBox direct-write profile scan' -Current $scanCurrent -Total $scanTotal -StartedAt $scanStarted -Complete -Outcome $scanOutcome
+                }
+            }
+        }
+        foreach ($plan in $plans) { $plan.Changed = $plan.OriginalXml -cne $plan.Document.OuterXml }
+        # What the title step did, for the result screens: state, every old/new title with its ID, and the games that need a choice.
+        $addTitleInfo = {
+            param($target)
+            $state = if ($gamesDb) { [string]$gamesDb.State } else { 'Off' }
+            $target | Add-Member -NotePropertyName GamesDbState -NotePropertyValue $state -Force
+            $target | Add-Member -NotePropertyName GamesDbError -NotePropertyValue $(if ($gamesDb) { [string]$gamesDb.Error } else { '' }) -Force
+            $target | Add-Member -NotePropertyName TitleChanges -NotePropertyValue @($titleChanges.ToArray()) -Force
+            $target | Add-Member -NotePropertyName TitleReview -NotePropertyValue @($titleReview.ToArray()) -Force
+        }
+        if ($PlanOnly) {
+            # Read-only preview: nothing was staged, backed up, or written.
+            $changedFiles = @($plans | Where-Object { $_.Changed } | ForEach-Object { $_.RelativePath })
+            $addedEntries = 0; foreach ($countValue in @($counts.Values)) { $addedEntries += [int]$countValue }
+            $previewSummary = if ($changedFiles.Count -eq 0) { 'Preview only: LaunchBox already has every eligible game; nothing would be written.' } else { 'Preview only, nothing was written. A write would add {0} game entries and change {1} file(s): {2}.' -f $addedEntries, $changedFiles.Count, ($changedFiles -join ', ') }
+            $preview = New-TpmLaunchBoxResult NO_CHANGES $previewSummary
+            $preview.Results = $counts; $preview.Reason = 'PREVIEW'
+            & $addTitleInfo $preview
+            $preview | Add-Member -NotePropertyName WouldChangeFiles -NotePropertyValue $changedFiles.Count -Force
+            $preview | Add-Member -NotePropertyName SkippedMissingGame -NotePropertyValue $skippedMissingGame -Force
+            $preview | Add-Member -NotePropertyName SkippedUnreadable -NotePropertyValue @($skippedUnreadable.ToArray()) -Force
+            $preview | Add-Member -NotePropertyName SkippedBadPath -NotePropertyValue @($skippedBadPath.ToArray()) -Force
+            if ($changedFiles.Count -gt 0) {
+                # Name the backup folder when it is not TeknoParrot's own one, so the owner can find the snapshots later.
+                $backupNote = $null
+                $backupFolderPath = $null
+                try {
+                    $backupLocation = Resolve-TpmLaunchBoxBackupLocation -BackupRoot $BackupRoot -LaunchBoxRoot $lbRoot
+                    if ($backupLocation.UsesFallback) {
+                        $backupNote = 'TeknoParrot''s own backup folder is inside this LaunchBox folder, so the safety backups for this library are kept outside it, in: ' + $backupLocation.Path
+                        $backupFolderPath = [string]$backupLocation.Path
+                    }
+                } catch { $backupNote = 'The LaunchBox safety-backup folder could not be checked; a write would stop before changing the library. Details: ' + $_.Exception.Message }
+                if ($backupNote) { $preview | Add-Member -NotePropertyName BackupLocationNote -NotePropertyValue $backupNote -Force }
+                if ($backupFolderPath) { $preview | Add-Member -NotePropertyName BackupLocationPath -NotePropertyValue $backupFolderPath -Force }
+            }
+            return $preview
+        }
+        $result = Invoke-TpmLaunchBoxFileTransaction -lbRoot $lbRoot -Plans $plans -BackupRoot $BackupRoot
+        if ($result.Outcome -eq 'SAVED') { $result.Results = $counts }
+        & $addTitleInfo $result
+        $result | Add-Member -NotePropertyName SkippedMissingGame -NotePropertyValue $skippedMissingGame -Force
+        $result | Add-Member -NotePropertyName SkippedUnreadable -NotePropertyValue @($skippedUnreadable.ToArray()) -Force
+        $result | Add-Member -NotePropertyName SkippedBadPath -NotePropertyValue @($skippedBadPath.ToArray()) -Force
+        return $result
+    } catch {
+        $result = New-TpmLaunchBoxResult FAILED 'LaunchBox setup was refused before library writes.'
+        $result.Errors = @([string]$_.Exception.Message)
+        return $result
+    }
+}
+
+# =============================================================================
+# LAUNCHBOX GAME DETAILS, PLAYLISTS AND "NEEDS SETUP"  (issues #420, #421 and #425)
+# =============================================================================
+# MODULE-READY SECTION. Everything between the START and END markers can be lifted into a .psm1 as it is.
+#
+# What it does: fills EMPTY release-year and developer fields from the shared matching engine (the LaunchBox game list when the match is
+# certain, otherwise the Eggman list and TeknoParrot), keeps the Manager's playlists (one per hardware family, plus Light gun games,
+# Driving games and Needs setup) and puts a plain "Needs setup" note on a game that cannot start yet. The note goes away by itself when
+# the problem is fixed. A field that already has a value is never changed. A playlist is only touched when it carries the marker note;
+# the user's own playlists are never edited. The note is a marked block inside the game's Notes: what the user wrote around it stays.
+# Backup, read-back and rollback come from the existing LaunchBox file transaction; Restore is the undo.
+#
+# Public functions
+#   Data layer (no screens, no prompts, no console output):
+#     Get-TpmProfileGameKind             light gun and driving, from what the profile says
+#     Get-TpmSetupProblems               what stops each game from starting, in plain words (reads files only)
+#     Update-TpmLaunchBoxSetupNote       puts or removes the Needs setup block in a game's Notes
+#     Set-TpmLaunchBoxFieldIfEmpty       sets a LaunchBox field only when it is empty
+#     Update-TpmLaunchBoxPlaylistDocument  makes or updates one Manager playlist document
+#     New-TpmLaunchBoxEnrichPlan         reads everything and builds the planned changes (writes nothing)
+#     Invoke-TpmLaunchBoxEnrich          preview (-PlanOnly) or write, through the file transaction
+#   Text layer (pure: objects in, strings out):
+#     Format-TpmLaunchBoxEnrichLine      the preview lines (Details view and log)
+#     Format-TpmLaunchBoxEnrichTitle     the one plain title line
+# Screen layer (not part of the module, listed after the END marker): Invoke-TpmLaunchBoxEnrichStep
+#
+# Depends on (existing script functions): the matching engine, Read-Xml, Get-XmlChildText, Set-XmlChildText, Get-ProfileFamily,
+#   Get-TpmMissingPrerequisites, Get-BepInExInstalledVersion, ConvertTo-TpmAutoSyncLongPath, Resolve-TpmLaunchBoxRoot,
+#   Test-TpmNoReparsePath, Get-TpmLaunchBoxPath, Get-TpmLaunchBoxFileState, Assert-TpmLaunchBoxState, Read-TpmLaunchBoxXml,
+#   Get-SafeLaunchBoxPlatformFileName, New-TpmLaunchBoxResult, Invoke-TpmLaunchBoxFileTransaction, Format-TpmGameCount, Write-Log.
+# State: none. No script-level variables; everything is passed in parameters or returned in objects.
+# START MODULE-READY SECTION: LaunchBox game details and playlists
+
+# The note that marks a playlist as the Manager's own.
+function Get-TpmLaunchBoxPlaylistMarker {
+    return 'Made by TeknoParrot Manager. It keeps this playlist up to date. Your own playlists are never changed.'
+}
+
+# Light gun and driving, only from what the profile already says: GunGame, and wheel buttons.
+function Get-TpmProfileGameKind {
+    param([string]$ProfilePath)
+    $kind = [pscustomobject]@{ LightGun = $false; Driving = $false }
+    if (-not $ProfilePath -or -not (Test-Path -LiteralPath $ProfilePath -PathType Leaf)) { return $kind }
+    try {
+        $doc = Read-Xml $ProfilePath
+        if ($null -ne $doc.GameProfile) {
+            $kind.LightGun = ((Get-XmlChildText $doc.GameProfile 'GunGame').Trim() -ieq 'true')
+            $kind.Driving = ((Get-ProfileFamily $doc) -eq 'driving')
+        }
+    } catch { Write-Log ('LaunchBox details: could not read the profile {0}: {1}' -f $ProfilePath, $_.Exception.Message) }
+    return $kind
+}
+
+# What stops each game from starting, in plain words with the next step: a game file that is not found, startup files (firmware) that
+# are missing, BepInEx that the profile needs and the game folder does not have. Profile code (lower case) -> list of lines. Reads files
+# only: nothing is run and no database is contacted. A game whose profile cannot be read is left out, not called broken.
+function Get-TpmSetupProblems {
+    [CmdletBinding()] param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProfileFiles, [string]$TpRoot = '')
+    $problems = @{}
+    $add = {
+        param([string]$Code, [string]$Line)
+        $key = $Code.ToLowerInvariant()
+        if (-not $problems.ContainsKey($key)) { $problems[$key] = New-Object System.Collections.Generic.List[string] }
+        [void]$problems[$key].Add($Line)
+    }
+    foreach ($file in $ProfileFiles) {
+        try {
+            $doc = Read-Xml $file.FullName
+            if ($null -eq $doc.GameProfile) { continue }
+            $gamePath = (Get-XmlChildText $doc.GameProfile 'GamePath').Trim()
+            if (-not $gamePath -or -not [System.IO.File]::Exists((ConvertTo-TpmAutoSyncLongPath -Path $gamePath))) {
+                & $add $file.BaseName 'The game file was not found. Run Library health check (menu 13) to repair its path.'
+            } elseif ((Get-XmlChildText $doc.GameProfile 'RequiresBepInEx').Trim() -ieq 'true' -and -not (Get-BepInExInstalledVersion -ExeDir ([System.IO.Path]::GetDirectoryName($gamePath)))) {
+                & $add $file.BaseName 'Needs BepInEx in the game folder. Use the BepInEx step in TeknoParrot Manager.'
+            }
+        } catch { Write-Log ('LaunchBox setup check: could not read the profile {0}: {1}' -f $file.Name, $_.Exception.Message) }
+    }
+    if ($TpRoot -and @($ProfileFiles).Count -gt 0) {
+        try {
+            foreach ($entry in @(Get-TpmMissingPrerequisites -Profiles $ProfileFiles -TeknoParrotRoot $TpRoot)) {
+                foreach ($code in @($entry.AffectedGames)) { & $add ([string]$code) ('Needs {0}: {1} is missing. Library health check (menu 13) shows where it goes.' -f $entry.Label, (@($entry.MissingFiles) -join ', ')) }
+            }
+        } catch { Write-Log ('LaunchBox setup check: the startup files could not be checked: {0}' -f $_.Exception.Message) }
+    }
+    $result = @{}
+    foreach ($key in $problems.Keys) { $result[$key] = $problems[$key].ToArray() }
+    return $result
+}
+
+# Puts the Needs setup block into a game's Notes, or takes it out when there are no problems. What the user wrote around the block stays.
+# Returns Flagged, Cleared, or '' when nothing changed.
+function Update-TpmLaunchBoxSetupNote {
+    param([Parameter(Mandatory)][System.Xml.XmlNode]$Node, [AllowEmptyCollection()][string[]]$Problems = @())
+    $start = '[TeknoParrot Manager: needs setup]'
+    $end = '[end of TeknoParrot Manager note]'
+    $notes = Get-XmlChildText $Node 'Notes'
+    $without = ([regex]::Replace($notes, '(?s)(\r?\n)*' + [regex]::Escape($start) + '.*?' + [regex]::Escape($end), '')).TrimEnd()
+    $new = $without
+    if (@($Problems).Count -gt 0) {
+        $block = $start + "`n" + 'This game is not ready to play yet:' + "`n" + ((@($Problems) | ForEach-Object { '- ' + $_ }) -join "`n") + "`n" + $end
+        $new = ($without + "`n`n" + $block).TrimStart()
+    }
+    if ($new -ceq $notes) { return '' }
+    Set-XmlChildText $Node 'Notes' $new
+    return $(if (@($Problems).Count -gt 0) { 'Flagged' } else { 'Cleared' })
+}
+
+# Sets a LaunchBox field only when it is empty. Returns true when it set it.
+function Set-TpmLaunchBoxFieldIfEmpty {
+    param([System.Xml.XmlNode]$Node, [string]$Field, [string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    $current = (Get-XmlChildText $Node $Field).Trim()
+    if ($current -ne '' -and $current -ne '0') { return $false }
+    Set-XmlChildText $Node $Field $Value
+    return $true
+}
+
+# Makes or updates one Manager playlist document in the format LaunchBox itself writes for a manual playlist (checked against
+# real LaunchBox playlist files): one Playlist element, then one PlaylistGame element per game as its sibling (not inside it).
+# Returns Skipped (a playlist of the user's with this name), New and Changed.
+function Update-TpmLaunchBoxPlaylistDocument {
+    param([System.Xml.XmlDocument]$Doc, [string]$Name, [object[]]$Games, [bool]$Exists)
+    $marker = Get-TpmLaunchBoxPlaylistMarker
+    $node = $Doc.SelectSingleNode('/LaunchBox/Playlist')
+    $before = $Doc.OuterXml
+    if ($Exists -and ($null -eq $node -or (Get-XmlChildText $node 'Notes') -cne $marker)) { return [pscustomobject]@{ Skipped = $true; New = $false; Changed = $false } }
+    if (-not $Exists) {
+        $node = $Doc.CreateElement('Playlist')
+        [void]$Doc.DocumentElement.AppendChild($node)
+    }
+    # Every field LaunchBox writes for a manual playlist. A field that is already there is left as it is.
+    $defaults = [ordered]@{
+        PlaylistId = [guid]::NewGuid().ToString(); Name = $Name; NestedName = $Name; SortBy = 'Default'; Notes = $marker; VideoPath = ''
+        ImageType = 'Boxes'; Category = ''; LastGameId = ''; BigBoxView = ''; BigBoxTheme = ''; IncludeWithPlatforms = 'false'
+        AutoPopulate = 'false'; SortTitle = ''; IsAutogenerated = 'false'; LastSelectedChild = ''
+    }
+    foreach ($field in $defaults.GetEnumerator()) {
+        if ($null -eq $node.SelectSingleNode($field.Key)) { Set-XmlChildText $node $field.Key $field.Value }
+    }
+    # An older Manager wrote the games inside the Playlist element, where LaunchBox does not look for them. Move them out.
+    $legacy = @($node.SelectNodes('PlaylistGame'))
+    foreach ($old in $legacy) { [void]$node.RemoveChild($old) }
+    $have = @($Doc.SelectNodes('/LaunchBox/PlaylistGame') | ForEach-Object { Get-XmlChildText $_ 'GameId' } | Sort-Object)
+    $want = @($Games | ForEach-Object { [string]$_.Id } | Sort-Object)
+    if ($legacy.Count -gt 0 -or -not $Exists -or ($have -join '|') -cne ($want -join '|')) {
+        foreach ($old in @($Doc.SelectNodes('/LaunchBox/PlaylistGame'))) { [void]$Doc.DocumentElement.RemoveChild($old) }
+        $order = 0
+        foreach ($game in $Games) {
+            $entry = $Doc.CreateElement('PlaylistGame')
+            $fields = [ordered]@{ GameId = [string]$game.Id; GameTitle = [string]$game.Title; GameFileName = [string]$game.FileName; GamePlatform = [string]$game.Platform; ManualOrder = [string]$order }
+            if (-not [string]::IsNullOrWhiteSpace([string]$game.DbId)) { $fields['LaunchBoxDbId'] = [string]$game.DbId }
+            foreach ($field in $fields.GetEnumerator()) { Set-XmlChildText $entry $field.Key $field.Value }
+            [void]$Doc.DocumentElement.AppendChild($entry)
+            $order++
+        }
+    }
+    return [pscustomobject]@{ Skipped = $false; New = (-not $Exists); Changed = ((-not $Exists) -or ($before -cne $Doc.OuterXml)) }
+}
+
+# Reads the LaunchBox library, the profiles and the shared matching engine and builds the planned changes. Writes nothing.
+# Index is the LaunchBox game list index (or $null when the list is not there: the year and developer then come from the Eggman list and
+# TeknoParrot). SetupProblems is code (lower case) -> lines from Get-TpmSetupProblems; $null means "not checked", and then no note is
+# put on or taken off any game.
+# Returns Plans (file plans for the file transaction), Changes and the counts.
+function New-TpmLaunchBoxEnrichPlan {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$LbRoot, [Parameter(Mandatory)][string]$EmulatorId,
+        [Parameter(Mandatory)][string[]]$PlatformNames, [string]$TpRoot = '', [hashtable]$DatIndex = $null, $Index = $null,
+        [hashtable]$SetupProblems = $null, [switch]$SkipDetails, [switch]$SkipPlaylists
+    )
+    $plans = New-Object System.Collections.Generic.List[object]
+    $changes = New-Object System.Collections.Generic.List[object]
+    $groups = [ordered]@{}
+    $infoCache = @{}
+    $datByCode = Get-TpmDatEntriesByCode -DatIndex $DatIndex
+    $filledGames = 0; $flagged = 0; $cleared = 0
+    if ($null -ne $SetupProblems) { $groups['Needs setup'] = New-Object System.Collections.Generic.List[object] }
+    foreach ($name in $PlatformNames) {
+        $safe = Get-SafeLaunchBoxPlatformFileName $name
+        if ($safe -cne $name -or $name -in @('.', '..')) { throw 'Platform name must be a safe, unambiguous filename.' }
+        $rel = "Data\Platforms\$safe.xml"
+        $path = Get-TpmLaunchBoxPath $LbRoot $rel
+        $state = Get-TpmLaunchBoxFileState $path
+        if (-not $state.Exists) { continue }
+        $doc = Read-TpmLaunchBoxXml $path
+        Assert-TpmLaunchBoxState $path $state
+        $filePlan = [pscustomobject]@{ RelativePath = $rel; Before = $state; Document = $doc; OriginalXml = $doc.OuterXml; BaseChildCount = $doc.DocumentElement.ChildNodes.Count; Source = $null; SourceHash = $null; Changed = $false; Delete = $false; AfterHash = $null; FullRewrite = $true }
+        foreach ($game in @($doc.SelectNodes('/LaunchBox/Game'))) {
+            if ((Get-XmlChildText $game 'Emulator') -ne $EmulatorId) { continue }
+            $fileName = [System.IO.Path]::GetFileName((Get-XmlChildText $game 'ApplicationPath'))
+            $code = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
+            $gameId = Get-XmlChildText $game 'ID'
+            $title = Get-XmlChildText $game 'Title'
+            $profilePath = Join-Path $UserProfilesDir $fileName
+            $key = $code.ToLowerInvariant()
+            if (-not $infoCache.ContainsKey($key)) {
+                $exists = [bool](Test-Path -LiteralPath $profilePath -PathType Leaf)
+                $subject = Get-TpmProfileMatchSubject -Code $code -ProfilePath $(if ($exists) { $profilePath } else { '' }) -TpRoot $TpRoot -HintName $title -DatIndex $DatIndex -DatByCode $datByCode
+                $facts = [pscustomobject]@{ Year = [int]$subject.Year; Developer = [string]$subject.Maker; Hardware = [string]$subject.Hardware }
+                if ($null -ne $Index -and -not $subject.NotGame) { $facts = (Resolve-TpmGameMatch -Index $Index -Subject $subject).Facts }
+                $infoCache[$key] = [pscustomobject]@{ Exists = $exists; Subject = $subject; Facts = $facts; Kind = (Get-TpmProfileGameKind -ProfilePath $(if ($exists) { $profilePath } else { '' })) }
+            }
+            $info = $infoCache[$key]
+            if ($info.Subject.NotGame) { continue }
+            if (-not $SkipDetails) {
+                $set = New-Object System.Collections.Generic.List[object]
+                if ([int]$info.Facts.Year -gt 0 -and (Set-TpmLaunchBoxFieldIfEmpty -Node $game -Field 'ReleaseDate' -Value ('{0}-01-01' -f $info.Facts.Year))) { [void]$set.Add([pscustomobject]@{ Field = 'ReleaseDate'; Value = ('{0}-01-01' -f $info.Facts.Year) }) }
+                if (Set-TpmLaunchBoxFieldIfEmpty -Node $game -Field 'Developer' -Value ([string]$info.Facts.Developer)) { [void]$set.Add([pscustomobject]@{ Field = 'Developer'; Value = [string]$info.Facts.Developer }) }
+                if ($set.Count -gt 0) { $filledGames++; [void]$changes.Add([pscustomobject]@{ Kind = 'Fields'; Title = $title; Name = ''; Count = 0; Fields = $set.ToArray() }) }
+            }
+            $problems = @()
+            if ($null -ne $SetupProblems) {
+                if (-not $info.Exists) { $problems = @('The TeknoParrot profile for this game is missing. Register the game again.') }
+                elseif ($SetupProblems.ContainsKey($key)) { $problems = @($SetupProblems[$key]) }
+                $noteChange = Update-TpmLaunchBoxSetupNote -Node $game -Problems $problems
+                if ($noteChange -eq 'Flagged') { $flagged++; [void]$changes.Add([pscustomobject]@{ Kind = 'SetupFlag'; Title = $title; Name = ''; Count = 0; Fields = @($problems) }) }
+                elseif ($noteChange -eq 'Cleared') { $cleared++; [void]$changes.Add([pscustomobject]@{ Kind = 'SetupCleared'; Title = $title; Name = ''; Count = 0; Fields = @() }) }
+            }
+            $entry = [pscustomobject]@{ Id = $gameId; Title = $title; Platform = (Get-XmlChildText $game 'Platform'); FileName = $fileName; DbId = (Get-XmlChildText $game 'DatabaseID') }
+            $listNames = @()
+            $family = Get-TpmHardwareFamily ([string]$info.Facts.Hardware)
+            if ($family) { $listNames += $family }
+            if ($info.Kind.LightGun) { $listNames += 'Light gun games' }
+            if ($info.Kind.Driving) { $listNames += 'Driving games' }
+            if ($problems.Count -gt 0) { $listNames += 'Needs setup' }
+            foreach ($listName in $listNames) {
+                if (-not $groups.Contains($listName)) { $groups[$listName] = New-Object System.Collections.Generic.List[object] }
+                [void]$groups[$listName].Add($entry)
+            }
+        }
+        $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
+        [void]$plans.Add($filePlan)
+    }
+    $playlistsNew = 0; $playlistsUpdated = 0
+    if (-not $SkipPlaylists) {
+        foreach ($listName in @($groups.Keys)) {
+            $safe = (Get-SafeLaunchBoxPlatformFileName $listName).TrimEnd('.', ' ')
+            $rel = "Data\Playlists\$safe.xml"
+            $path = Get-TpmLaunchBoxPath $LbRoot $rel
+            $state = Get-TpmLaunchBoxFileState $path
+            # A playlist that nothing needs and that was never made stays unmade.
+            if (-not $state.Exists -and $groups[$listName].Count -eq 0) { continue }
+            # Plain assignments: an if-expression would unroll the XML document into its child nodes.
+            if ($state.Exists) { $doc = Read-TpmLaunchBoxXml $path; Assert-TpmLaunchBoxState $path $state } else { $doc = New-Object System.Xml.XmlDocument; $doc.LoadXml('<LaunchBox />') }
+            $filePlan = [pscustomobject]@{ RelativePath = $rel; Before = $state; Document = $doc; OriginalXml = $doc.OuterXml; BaseChildCount = $doc.DocumentElement.ChildNodes.Count; Source = $null; SourceHash = $null; Changed = $false; Delete = $false; AfterHash = $null; FullRewrite = $true }
+            $outcome = Update-TpmLaunchBoxPlaylistDocument -Doc $doc -Name $listName -Games $groups[$listName].ToArray() -Exists $state.Exists
+            if ($outcome.Skipped) { [void]$changes.Add([pscustomobject]@{ Kind = 'PlaylistSkipped'; Title = ''; Name = $listName; Count = $groups[$listName].Count; Fields = @() }); continue }
+            $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
+            if ($filePlan.Changed) {
+                if ($outcome.New) { $playlistsNew++ } else { $playlistsUpdated++ }
+                [void]$changes.Add([pscustomobject]@{ Kind = $(if ($outcome.New) { 'PlaylistNew' } else { 'PlaylistUpdated' }); Title = ''; Name = $listName; Count = $groups[$listName].Count; Fields = @() })
+            }
+            [void]$plans.Add($filePlan)
+        }
+    }
+    return [pscustomobject]@{
+        Plans = $plans.ToArray(); Changes = $changes.ToArray()
+        FilledGames = $filledGames; PlaylistsNew = $playlistsNew; PlaylistsUpdated = $playlistsUpdated; SetupFlagged = $flagged; SetupCleared = $cleared
+    }
+}
+
+# The preview lines for the Details view and the log. Pure: plan in, strings out.
+function Format-TpmLaunchBoxEnrichLine {
+    param([Parameter(Mandatory)]$Plan)
+    $words = @{ ReleaseDate = 'year'; Developer = 'developer' }
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($change in @($Plan.Changes)) {
+        switch ($change.Kind) {
+            'Fields' { [void]$lines.Add(('{0}: will fill in {1}' -f $change.Title, ((@($change.Fields) | ForEach-Object { '{0} {1}' -f $words[$_.Field], $(if ($_.Field -eq 'ReleaseDate') { ([string]$_.Value).Substring(0, 4) } else { $_.Value }) }) -join ', '))) }
+            'SetupFlag' { [void]$lines.Add(('{0}: will be marked Needs setup. {1}' -f $change.Title, (@($change.Fields) -join ' '))) }
+            'SetupCleared' { [void]$lines.Add(('{0}: is ready now, so its Needs setup note will be removed' -f $change.Title)) }
+            'PlaylistNew' { [void]$lines.Add(('Playlist {0}: will be made with {1}' -f $change.Name, (Format-TpmGameCount -Count ([int]$change.Count)))) }
+            'PlaylistUpdated' { [void]$lines.Add(('Playlist {0}: will be updated to {1}' -f $change.Name, (Format-TpmGameCount -Count ([int]$change.Count)))) }
+            'PlaylistSkipped' { [void]$lines.Add(('Playlist {0}: left alone, because it is not one TeknoParrot Manager made' -f $change.Name)) }
+        }
+    }
+    return $lines.ToArray()
+}
+
+# The one plain title line. -Preview words it as a preview; otherwise it says what was filled in.
+function Format-TpmLaunchBoxEnrichTitle {
+    param([Parameter(Mandatory)]$Plan, [switch]$Preview)
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($Plan.FilledGames -gt 0) { [void]$parts.Add(('details for {0}' -f (Format-TpmGameCount -Count ([int]$Plan.FilledGames)))) }
+    $playlistTotal = [int]$Plan.PlaylistsNew + [int]$Plan.PlaylistsUpdated
+    if ($playlistTotal -gt 0) { [void]$parts.Add(('{0} {1}' -f $playlistTotal, $(if ($playlistTotal -eq 1) { 'playlist' } else { 'playlists' }))) }
+    if ([int]$Plan.SetupFlagged -gt 0) { [void]$parts.Add(('{0} marked Needs setup' -f (Format-TpmGameCount -Count ([int]$Plan.SetupFlagged)))) }
+    if ([int]$Plan.SetupCleared -gt 0) { [void]$parts.Add(('{0} ready again' -f (Format-TpmGameCount -Count ([int]$Plan.SetupCleared)))) }
+    if ($Preview) {
+        if ($parts.Count -eq 0) { return 'Preview: nothing to fill in or update. Nothing would change.' }
+        return ('Preview: LaunchBox would get {0}. Nothing was changed.' -f ($parts -join ' and '))
+    }
+    if ($parts.Count -eq 0) { return 'Nothing to fill in or update.' }
+    return ('Filled in {0}.' -f ($parts -join ' and '))
+}
+
+# Fills empty year and developer fields, keeps the Manager's playlists and the Needs setup notes. -PlanOnly reads everything and changes nothing.
+# Returns the same kind of result as Invoke-LaunchBoxDirectWrite plus EnrichPlan (the plan this run used).
+# The caller makes sure LaunchBox and BigBox are closed before a write; the transaction also checks and refuses while they run.
+function Invoke-TpmLaunchBoxEnrich {
+    param(
+        [string]$UserProfilesDir, [string]$LbRoot, [string[]]$PlatformNames, [string]$BackupRoot, [string]$TpRoot = '', [hashtable]$DatIndex = $null,
+        [switch]$PlanOnly, [switch]$SkipDetails, [switch]$SkipPlaylists
+    )
+    try {
+        $root = Resolve-TpmLaunchBoxRoot $LbRoot
+        if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $root)) { throw 'Choose a safe existing LaunchBox root.' }
+        if (@($PlatformNames).Count -eq 0) { throw 'Choose at least one LaunchBox platform.' }
+        $emulatorsPath = Get-TpmLaunchBoxPath $root 'Data\Emulators.xml'
+        $emulatorsState = Get-TpmLaunchBoxFileState $emulatorsPath
+        if (-not $emulatorsState.Exists) { throw 'LaunchBox has not made Data\Emulators.xml yet. Open LaunchBox once, close it, then try again. Nothing was changed.' }
+        $emulatorsDoc = Read-TpmLaunchBoxXml $emulatorsPath
+        $emulatorNode = @($emulatorsDoc.SelectNodes('/LaunchBox/Emulator') | Where-Object { (Get-XmlChildText $_ 'Title') -eq 'TeknoParrot' } | Select-Object -First 1)
+        if ($emulatorNode.Count -eq 0) {
+            $none = New-TpmLaunchBoxResult NO_CHANGES 'No TeknoParrot games are in LaunchBox yet. Add them first.'
+            if ($PlanOnly) { $none.Reason = 'PREVIEW' }
+            return $none
+        }
+        $gamesDb = Get-TpmGamesDbForLaunchBox -LaunchBoxRoot $root
+        $setup = $null
+        if ($UserProfilesDir -and (Test-Path -LiteralPath $UserProfilesDir -PathType Container)) { $setup = Get-TpmSetupProblems -ProfileFiles @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop) -TpRoot $TpRoot }
+        $plan = New-TpmLaunchBoxEnrichPlan -UserProfilesDir $UserProfilesDir -LbRoot $root -EmulatorId (Get-XmlChildText $emulatorNode[0] 'ID') -PlatformNames $PlatformNames -TpRoot $TpRoot -DatIndex $DatIndex -Index $gamesDb.Index -SetupProblems $setup -SkipDetails:$SkipDetails -SkipPlaylists:$SkipPlaylists
+        foreach ($line in (Format-TpmLaunchBoxEnrichLine -Plan $plan)) { Write-Log ('LaunchBox details and playlists: ' + $line) }
+        $changedPlans = @($plan.Plans | Where-Object { $_.Changed })
+        if ($PlanOnly) {
+            $preview = New-TpmLaunchBoxResult NO_CHANGES ('Preview only, nothing was written. A write would change {0} file(s).' -f $changedPlans.Count)
+            $preview.Reason = 'PREVIEW'
+            $preview | Add-Member -NotePropertyName WouldChangeFiles -NotePropertyValue $changedPlans.Count -Force
+            $preview | Add-Member -NotePropertyName EnrichPlan -NotePropertyValue $plan -Force
+            return $preview
+        }
+        if (@($changedPlans | Where-Object { $_.RelativePath -like 'Data\Playlists\*' }).Count -gt 0) {
+            $playlistFolder = Join-Path $root 'Data\Playlists'
+            if (-not (Test-TpmNoReparsePath $playlistFolder)) { throw 'The LaunchBox Playlists folder is not a normal folder.' }
+            [void][System.IO.Directory]::CreateDirectory($playlistFolder)
+        }
+        $result = Invoke-TpmLaunchBoxFileTransaction -lbRoot $root -Plans $plan.Plans -BackupRoot $BackupRoot
+        $result | Add-Member -NotePropertyName EnrichPlan -NotePropertyValue $plan -Force
+        return $result
+    } catch {
+        $result = New-TpmLaunchBoxResult FAILED 'LaunchBox details and playlists were refused before library writes.'
+        $result.Errors = @([string]$_.Exception.Message)
+        return $result
+    }
+}
+# END MODULE-READY SECTION: LaunchBox game details and playlists
+
+# BEGIN MODULE-READY SECTION: LaunchBox Games Database links for TeknoParrot games
+# Links LaunchBox games that have no Games Database ID to their entry in LaunchBox's own game list, so LaunchBox finds the right
+# art and details. The game name comes from TeknoParrot's own metadata for the game (Metadata\<profile>.json), so it works for games
+# that have no user profile yet. An exact name match is "Sure". A close but not exact match is "Check" and is applied only when the
+# caller lists that game as approved. Titles a user changed by hand are kept. Prefix: TpmLaunchBoxIdLink / TpmTeknoParrotGameName.
+# Needs from the rest of the script: the Games Database functions above, the LaunchBox XML/file helpers and Invoke-TpmLaunchBoxFileTransaction.
+# This section has no script-level variables and no screens; the screen step is below.
 function New-TpmLaunchBoxIdLinkPlan {
     param(
         [Parameter(Mandatory)][string]$LbRoot, [Parameter(Mandatory)][string]$TpRoot, [Parameter(Mandatory)][string]$EmulatorId,
-        [Parameter(Mandatory)][string[]]$PlatformNames, [Parameter(Mandatory)]$Index, [string[]]$ApprovedGameIds = @(), [hashtable]$DatIndex = $null
+        [Parameter(Mandatory)][string[]]$PlatformNames, [Parameter(Mandatory)]$Index, [hashtable]$Choices = @{}, [hashtable]$DatIndex = $null
     )
     $plans = New-Object System.Collections.Generic.List[object]
     $items = New-Object System.Collections.Generic.List[object]
-    $datByCode = Get-TpmLaunchBoxDatByCode -DatIndex $DatIndex
-    $mameMap = $null
+    $datByCode = Get-TpmDatEntriesByCode -DatIndex $DatIndex
     foreach ($name in $PlatformNames) {
         $safe = Get-SafeLaunchBoxPlatformFileName $name
         if ($safe -cne $name -or $name -in @('.', '..')) { throw 'Platform name must be a safe, unambiguous filename.' }
@@ -47324,27 +50565,31 @@ function New-TpmLaunchBoxIdLinkPlan {
             $gameId = Get-XmlChildText $game 'ID'
             $title = Get-XmlChildText $game 'Title'
             $code = [System.IO.Path]::GetFileNameWithoutExtension((Get-XmlChildText $game 'ApplicationPath'))
-            $tpName = if ($code) { Get-TpmTeknoParrotGameName -TpRoot $TpRoot -ProfileCode $code } else { '' }
-            if ($null -eq $mameMap) { $mameMap = Get-TpmMameNameMap -MamePath (Join-Path $LbRoot 'Metadata\MAME.xml') }
-            $facts = if ($code) { Get-TpmTeknoParrotMetadataFacts -TpRoot $TpRoot -ProfileCode $code } else { $null }
-            $evidence = Get-TpmLinkEvidence -TpRoot $TpRoot -Code $code -TpName $tpName -Title $title -DatIndex $DatIndex -DatByCode $datByCode -MameMap $mameMap
-            $year = if ($null -ne $facts -and $facts.Year -gt 0) { [int]$facts.Year } else { [int]$evidence.DatYear }
-            $resolved = Resolve-TpmGamesDbMatch -Index $Index -Names $evidence.Names -Year $year -Maker $(if ($null -ne $facts) { [string]$facts.Platform } else { '' })
-            $match = $resolved.Match; $status = $resolved.Status; $usedName = $resolved.UsedName
+            $profilePath = ''
+            if ($code -match '^[A-Za-z0-9_.\-]+$' -and $code -notmatch '^\.+$') {
+                $profilePath = Join-Path (Join-Path $TpRoot 'UserProfiles') ($code + '.xml')
+                if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf)) { $profilePath = Join-Path (Join-Path $TpRoot 'GameProfiles') ($code + '.xml') }
+            }
+            $subject = Get-TpmProfileMatchSubject -Code $code -ProfilePath $profilePath -TpRoot $TpRoot -HintName $title -DatIndex $DatIndex -DatByCode $datByCode
+            $resolved = Resolve-TpmGameMatch -Index $Index -Subject $subject
+            $apply = $null
+            if ($resolved.Status -eq 'Certain') { $apply = $resolved.Match }
+            elseif ($resolved.Status -eq 'Ambiguous' -and $Choices.ContainsKey($gameId)) { $apply = @($resolved.Options | Where-Object { [string]$_.Id -eq [string]$Choices[$gameId] })[0] }
             $applied = $false; $titleChanged = $false
-            if ($match -and ($status -eq 'Sure' -or $gameId -in $ApprovedGameIds)) {
-                Set-XmlChildText $game 'DatabaseID' ([string]$match.Id)
-                # Only a title that is empty, still the profile code, the TeknoParrot name or the official name (also when only capitals, spaces
-                # or punctuation differ) is replaced; any other name, such as one the user typed, stays.
+            if ($apply) {
+                Set-XmlChildText $game 'DatabaseID' ([string]$apply.Id)
+                # Only a title that is empty or one of the titles the Manager itself uses (also when only capitals, spaces or punctuation
+                # differ) is replaced; any other name, such as one the user typed, stays.
                 $titleKey = ConvertTo-TpmGamesDbKey $title
-                $sameName = $titleKey -and ($titleKey -ceq (ConvertTo-TpmGamesDbKey $tpName) -or $titleKey -ceq (ConvertTo-TpmGamesDbKey ([string]$match.Name)))
-                if (-not $title -or $title -ceq $tpName -or $title -ceq [string]$match.Name -or $title -ieq $code -or $sameName) {
-                    if ($title -cne [string]$match.Name) { Set-XmlChildText $game 'Title' ([string]$match.Name); $titleChanged = $true }
+                $known = @(@($subject.KnownTitles) + @([string]$apply.Name) | ForEach-Object { ConvertTo-TpmGamesDbKey $_ })
+                if (-not $titleKey -or $known -contains $titleKey) {
+                    if ($title -cne [string]$apply.Name) { Set-XmlChildText $game 'Title' ([string]$apply.Name); $titleChanged = $true }
                 }
                 Set-XmlChildText $game 'DateModified' (Get-Date).ToString('o')
                 $applied = $true
             }
-            [void]$items.Add([pscustomobject]@{ GameId = $gameId; Title = $title; Code = $code; TeknoParrotName = $tpName; UsedName = $usedName; Status = $status; MatchName = $(if ($match) { [string]$match.Name } else { '' }); MatchId = $(if ($match) { [string]$match.Id } else { '' }); Score = $(if ($status -eq 'Check') { [double]$match.Score } else { 1.0 }); Applied = $applied; TitleChanged = $titleChanged; Level = $resolved.Level; Evidence = $resolved.Evidence })
+            $best = if ($apply) { $apply } else { $resolved.Match }
+            [void]$items.Add([pscustomobject]@{ GameId = $gameId; Title = $title; Code = $code; Status = [string]$resolved.Status; Reason = [string]$resolved.Reason; Options = @($resolved.Options); MatchName = $(if ($best) { [string]$best.Name } else { '' }); MatchId = $(if ($best) { [string]$best.Id } else { '' }); Applied = $applied; TitleChanged = $titleChanged; Level = $resolved.Level; Evidence = $resolved.Evidence })
         }
         $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
         [void]$plans.Add($filePlan)
@@ -47358,11 +50603,12 @@ function Format-TpmLaunchBoxIdLinkLine {
     $lines = New-Object System.Collections.Generic.List[string]
     foreach ($item in @($Plan.Items)) {
         switch ($item.Status) {
-            'Sure' {
+            'Certain' {
                 $keepNote = if (-not $item.TitleChanged -and $item.Title -cne $item.MatchName) { ' The name in LaunchBox stays as it is.' } else { '' }
                 [void]$lines.Add(('{0}: will be linked to {1}.{2}' -f $item.Title, $item.MatchName, $keepNote))
             }
-            'Check' { [void]$lines.Add(('{0}: close match is {1}. {2}' -f $item.Title, $item.MatchName, $(if ($item.Applied) { 'You approved it.' } else { 'Waiting for your approval.' }))) }
+            'Ambiguous' { [void]$lines.Add(('{0}: not sure. {1} Best guess: {2}. {3}' -f $item.Title, $item.Reason, $item.MatchName, $(if ($item.Applied) { 'You chose it.' } else { 'Waiting for your choice.' }))) }
+            'NotGame' { [void]$lines.Add(('{0}: not a game. Left alone.' -f $item.Title)) }
             default { [void]$lines.Add(('{0}: no match found in the LaunchBox game list. Left alone.' -f $item.Title)) }
         }
     }
@@ -47372,23 +50618,23 @@ function Format-TpmLaunchBoxIdLinkLine {
 function Format-TpmLaunchBoxIdLinkTitle {
     param([Parameter(Mandatory)]$Plan, [switch]$Preview)
     $items = @($Plan.Items)
-    $sure = @($items | Where-Object { $_.Status -eq 'Sure' }).Count
-    $check = @($items | Where-Object { $_.Status -eq 'Check' }).Count
-    $approved = @($items | Where-Object { $_.Status -eq 'Check' -and $_.Applied }).Count
-    $none = @($items | Where-Object { $_.Status -eq 'None' }).Count
+    $certain = @($items | Where-Object { $_.Status -eq 'Certain' }).Count
+    $unsure = @($items | Where-Object { $_.Status -eq 'Ambiguous' }).Count
+    $chosen = @($items | Where-Object { $_.Status -eq 'Ambiguous' -and $_.Applied }).Count
+    $none = @($items | Where-Object { $_.Status -eq 'NoMatch' }).Count
     if ($items.Count -eq 0) { return 'Every TeknoParrot game in LaunchBox already has a Games Database ID. Nothing to do.' }
     $parts = New-Object System.Collections.Generic.List[string]
-    if ($sure -gt 0) { [void]$parts.Add(('{0} sure {1}' -f $sure, $(if ($sure -eq 1) { 'match' } else { 'matches' }))) }
-    if ($check -gt 0) { [void]$parts.Add(('{0} close {1} to check' -f $check, $(if ($check -eq 1) { 'match' } else { 'matches' }))) }
+    if ($certain -gt 0) { [void]$parts.Add(('{0} sure {1}' -f $certain, $(if ($certain -eq 1) { 'match' } else { 'matches' }))) }
+    if ($unsure -gt 0) { [void]$parts.Add(('{0} not sure, for you to choose' -f $unsure)) }
     if ($none -gt 0) { [void]$parts.Add(('{0} with no match' -f $none)) }
     if ($Preview) { return ('Preview: {0}. Nothing was changed.' -f ($parts -join ', ')) }
-    return ('Linked {0} {1} to the LaunchBox game list.' -f ($sure + $approved), $(if (($sure + $approved) -eq 1) { 'game' } else { 'games' }))
+    return ('Linked {0} {1} to the LaunchBox game list.' -f ($certain + $chosen), $(if (($certain + $chosen) -eq 1) { 'game' } else { 'games' }))
 }
 
-# -PlanOnly reads everything and changes nothing. ApprovedGameIds lists the close matches the user approved.
+# -PlanOnly reads everything and changes nothing. Choices maps a game id to the Games Database id the user picked for a game that was not sure.
 # The caller makes sure LaunchBox and BigBox are closed before a write; the transaction also checks and refuses while they run.
 function Invoke-TpmLaunchBoxIdLink {
-    param([string]$LbRoot, [string]$TpRoot, [string[]]$PlatformNames = @('TeknoParrot'), [string]$BackupRoot, [string[]]$ApprovedGameIds = @(), [hashtable]$DatIndex = $null, [switch]$PlanOnly)
+    param([string]$LbRoot, [string]$TpRoot, [string[]]$PlatformNames = @('TeknoParrot'), [string]$BackupRoot, [hashtable]$Choices = @{}, [hashtable]$DatIndex = $null, [switch]$PlanOnly)
     try {
         $root = Resolve-TpmLaunchBoxRoot $LbRoot
         if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $root)) { throw 'Choose a safe existing LaunchBox root.' }
@@ -47404,7 +50650,7 @@ function Invoke-TpmLaunchBoxIdLink {
             return $none
         }
         $index = Get-TpmGamesDbIndex -DbPath $dbPath
-        $plan = New-TpmLaunchBoxIdLinkPlan -LbRoot $root -TpRoot $TpRoot -EmulatorId (Get-XmlChildText $emulatorNode[0] 'ID') -PlatformNames $PlatformNames -Index $index -ApprovedGameIds $ApprovedGameIds -DatIndex $DatIndex
+        $plan = New-TpmLaunchBoxIdLinkPlan -LbRoot $root -TpRoot $TpRoot -EmulatorId (Get-XmlChildText $emulatorNode[0] 'ID') -PlatformNames $PlatformNames -Index $index -Choices $Choices -DatIndex $DatIndex
         foreach ($line in (Format-TpmLaunchBoxIdLinkLine -Plan $plan)) { Write-Log ('LaunchBox links: ' + $line) }
         foreach ($item in @($plan.Items)) { if ($item.Evidence) { Write-Log ('LaunchBox links: {0} -> {1}. {2}' -f $item.Code, $item.MatchName, $item.Evidence) } }
         $changedPlans = @($plan.Plans | Where-Object { $_.Changed })
@@ -47426,6 +50672,652 @@ function Invoke-TpmLaunchBoxIdLink {
 }
 # END MODULE-READY SECTION: LaunchBox Games Database links for TeknoParrot games
 
+# BEGIN MODULE-READY SECTION: LaunchBox players and controllers for TeknoParrot games (issue #267)
+# Fills the boxes Big Box shows for players and controllers. How a real LaunchBox library stores them (read from real files):
+#   - Data\Platforms\<Platform>.xml, in each <Game>: <MaxPlayers> (a number, 0 = not set) and <PlayMode> (for example Single Player or
+#     Multiplayer). There is no Cooperative element in the files, so it is never written.
+#   - The same file, after the games, one <GameControllerSupport> per controller of a game: <ControllerId>, <GameId> (the game's <ID>)
+#     and <SupportLevel>. Real libraries write SupportLevel 3 when a game has one controller and leave it out when a game has several.
+#   - Data\GameControllers.xml is LaunchBox's own list of controllers (Id, Name, Category). It is only read; the Id comes from it.
+# Owned by this section: MaxPlayers, PlayMode, and new GameControllerSupport entries of TeknoParrot games. Nothing else is changed.
+# Boxes that already have a value are never changed, and a game that already lists any controller keeps its controllers.
+# What TeknoParrot Manager knows about a game comes from its TeknoParrot profile: the highest player with a control, and the family
+# of controls (steering wheel, light gun, trackball, joystick, spinner).
+# Backup, read-back and rollback come from the existing LaunchBox file transaction; Restore-TpmLaunchBoxPlayerFields is the undo.
+# Prefix: TpmLaunchBoxPlayer / TpmLaunchBoxController. Depends on the LaunchBox file helpers and Get-TpmLedProfileControls.
+
+# LaunchBox's own controller list, read only: lower-case name -> Id, Name, Category. A name that appears twice is left out, so a
+# controller is never picked by guessing. A missing or unreadable list gives an empty result.
+function Get-TpmLaunchBoxControllerList {
+    param([Parameter(Mandatory)][string]$LbRoot)
+    $list = @{}
+    $path = Join-Path (Join-Path $LbRoot 'Data') 'GameControllers.xml'
+    try {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or -not (Test-TpmNoReparsePath -Path $path)) { return $list }
+        $doc = Read-TpmLaunchBoxXml $path
+        $seen = @{}
+        foreach ($node in @($doc.SelectNodes('/LaunchBox/GameController'))) {
+            $name = (Get-XmlChildText $node 'Name').Trim()
+            $id = (Get-XmlChildText $node 'Id').Trim()
+            if (-not $name -or -not $id) { continue }
+            $key = $name.ToLowerInvariant()
+            $seen[$key] = [int]$seen[$key] + 1
+            $list[$key] = [pscustomobject]@{ Id = $id; Name = $name; Category = (Get-XmlChildText $node 'Category').Trim() }
+        }
+        foreach ($key in @($seen.Keys)) { if ($seen[$key] -gt 1) { $list.Remove($key) } }
+    } catch {
+        Write-Log ('LaunchBox players: the controller list could not be read: {0}' -f $_.Exception.Message)
+        return @{}
+    }
+    return $list
+}
+
+# What one TeknoParrot profile says about players and controls. Players is the highest player number that has a control when that is
+# two or more (0 = the profile does not show it). Controllers are LaunchBox controller names, as real LaunchBox libraries use them
+# for the same kind of game.
+# A game whose controller the profile does not show clearly (flight sticks, wheels without pedals) gets none. Read-only.
+function Get-TpmLaunchBoxPlayerFacts {
+    param([Parameter(Mandatory)][string]$ProfilePath)
+    $facts = [pscustomobject]@{ Readable = $false; Players = 0; Controllers = @(); Why = '' }
+    try {
+        $doc = Read-Xml $ProfilePath
+        if ($null -eq $doc.GameProfile) { $facts.Why = 'the profile file is not a game profile'; return $facts }
+        $info = Get-TpmLedProfileControls -Doc $doc
+        $controls = @($info.Controls)
+        foreach ($control in $controls) {
+            if ([string]$control.Kind -notin @('Coin', 'Service', 'Test') -and [int]$control.Player -gt $facts.Players) { $facts.Players = [int]$control.Player }
+        }
+        # Controls for Player 1 alone say what TeknoParrot can map, not that the game is a one-player game, so that is "not shown".
+        # Two or more players is a floor (the game may allow more), never a claim about the exact maximum.
+        if ($facts.Players -lt 2) { $facts.Players = 0 }
+        # Only what the profile itself shows: pedals mean a steering wheel, GunGame means a light gun (aim axes alone also describe
+        # flight sticks, which LaunchBox lists differently), a trackball control means a trackball, joystick directions mean a joystick.
+        $names = New-Object System.Collections.Generic.List[string]
+        $family = [string]$info.Family
+        if ($family -eq 'driving' -and @($controls | Where-Object { $_.Kind -eq 'Pedal' }).Count -gt 0) { [void]$names.Add('Generic Wheel') }
+        elseif ($family -eq 'lightgun' -and (Get-XmlChildText $doc.GameProfile 'GunGame').Trim() -ieq 'true') { [void]$names.Add('Generic Light Gun') }
+        elseif ($family -eq 'trackball') { [void]$names.Add('Generic Trackball') }
+        elseif ($family -eq 'button' -and @($controls | Where-Object { $_.Kind -eq 'Direction' }).Count -gt 0) { [void]$names.Add('8-Way Joystick') }
+        if (@($controls | Where-Object { $_.Kind -eq 'Spinner' }).Count -gt 0) { [void]$names.Add('Generic Paddle') }
+        $facts.Controllers = $names.ToArray()
+        $facts.Readable = $true
+    } catch {
+        $facts.Why = 'the profile file could not be read'
+        Write-Log ('LaunchBox players: could not read the profile {0}: {1}' -f $ProfilePath, $_.Exception.Message)
+    }
+    return $facts
+}
+
+# Sets one owned box. A MaxPlayers box that is missing is added right after ReleaseType, where LaunchBox writes it.
+function Set-TpmLaunchBoxPlayerField {
+    param([Parameter(Mandatory)][System.Xml.XmlNode]$Game, [Parameter(Mandatory)][string]$Field, [Parameter(Mandatory)][string]$Value)
+    $node = $Game.SelectSingleNode($Field)
+    if ($null -ne $node) { $node.InnerText = $Value; return }
+    $new = $Game.OwnerDocument.CreateElement($Field)
+    $new.InnerText = $Value
+    $after = $Game.SelectSingleNode('ReleaseType')
+    if ($null -eq $after) { [void]$Game.AppendChild($new); return }
+    [void]$Game.InsertAfter($new, $after)
+    if ($null -ne $after.PreviousSibling -and $after.PreviousSibling.NodeType -in @([System.Xml.XmlNodeType]::Whitespace, [System.Xml.XmlNodeType]::SignificantWhitespace)) {
+        [void]$Game.InsertAfter($after.PreviousSibling.CloneNode($false), $after)
+    }
+}
+
+# Adds one GameControllerSupport entry at the end of the file, laid out the way LaunchBox writes it. Level '' leaves SupportLevel out.
+function Add-TpmLaunchBoxControllerSupport {
+    param([Parameter(Mandatory)][System.Xml.XmlDocument]$Doc, [Parameter(Mandatory)][string]$GameId, [Parameter(Mandatory)][string]$ControllerId, [string]$Level = '')
+    $entry = $Doc.CreateElement('GameControllerSupport')
+    $fields = [ordered]@{ ControllerId = $ControllerId; GameId = $GameId }
+    if ($Level) { $fields['SupportLevel'] = $Level }
+    foreach ($field in $fields.GetEnumerator()) {
+        [void]$entry.AppendChild($Doc.CreateWhitespace("`r`n    "))
+        $child = $Doc.CreateElement([string]$field.Key)
+        $child.InnerText = [string]$field.Value
+        [void]$entry.AppendChild($child)
+    }
+    [void]$entry.AppendChild($Doc.CreateWhitespace("`r`n  "))
+    [void]$Doc.DocumentElement.AppendChild($Doc.CreateWhitespace('  '))
+    [void]$Doc.DocumentElement.AppendChild($entry)
+    [void]$Doc.DocumentElement.AppendChild($Doc.CreateWhitespace("`r`n"))
+}
+
+# Reads the LaunchBox library and the profiles and builds the planned changes. Writes nothing. Items holds one entry per game that
+# has something to say: Changes (field, old, new), Controllers (names added), Kept (values that stay because LaunchBox already has
+# them) and Notes (why something was not filled in). Returns Plans (for the file transaction) and Items.
+function New-TpmLaunchBoxPlayerPlan {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$LbRoot, [Parameter(Mandatory)][string]$EmulatorId,
+        [Parameter(Mandatory)][string[]]$PlatformNames, [string]$TpRoot = ''
+    )
+    $controllers = Get-TpmLaunchBoxControllerList -LbRoot $LbRoot
+    $plans = New-Object System.Collections.Generic.List[object]
+    $items = New-Object System.Collections.Generic.List[object]
+    $factsByCode = @{}
+    foreach ($name in $PlatformNames) {
+        $safe = Get-SafeLaunchBoxPlatformFileName $name
+        if ($safe -cne $name -or $name -in @('.', '..')) { throw 'Platform name must be a safe, unambiguous filename.' }
+        $rel = "Data\Platforms\$safe.xml"
+        $path = Get-TpmLaunchBoxPath $LbRoot $rel
+        $state = Get-TpmLaunchBoxFileState $path
+        if (-not $state.Exists) { continue }
+        $doc = Read-TpmLaunchBoxXml $path
+        Assert-TpmLaunchBoxState $path $state
+        $filePlan = [pscustomobject]@{ RelativePath = $rel; Before = $state; Document = $doc; OriginalXml = $doc.OuterXml; BaseChildCount = $doc.DocumentElement.ChildNodes.Count; Source = $null; SourceHash = $null; Changed = $false; Delete = $false; AfterHash = $null; FullRewrite = $true }
+        $listed = @{}
+        foreach ($entry in @($doc.SelectNodes('/LaunchBox/GameControllerSupport'))) {
+            $listedId = (Get-XmlChildText $entry 'GameId').Trim()
+            if ($listedId) { $listed[$listedId] = [int]$listed[$listedId] + 1 }
+        }
+        foreach ($game in @($doc.SelectNodes('/LaunchBox/Game'))) {
+            if ((Get-XmlChildText $game 'Emulator') -ne $EmulatorId) { continue }
+            $title = Get-XmlChildText $game 'Title'
+            $gameId = (Get-XmlChildText $game 'ID').Trim()
+            $code = [System.IO.Path]::GetFileNameWithoutExtension((Get-XmlChildText $game 'ApplicationPath'))
+            $key = $code.ToLowerInvariant()
+            if (-not $factsByCode.ContainsKey($key)) {
+                $profilePath = ''
+                if ($code -match '^[A-Za-z0-9_.\-]+$' -and $code -notmatch '^\.+$') {
+                    foreach ($folder in @($UserProfilesDir, $(if ($TpRoot) { Join-Path $TpRoot 'GameProfiles' } else { '' }))) {
+                        if (-not $profilePath -and $folder) {
+                            $candidate = Join-Path $folder ($code + '.xml')
+                            if (Test-Path -LiteralPath $candidate -PathType Leaf) { $profilePath = $candidate }
+                        }
+                    }
+                }
+                $factsByCode[$key] = $(if ($profilePath) { Get-TpmLaunchBoxPlayerFacts -ProfilePath $profilePath } else { [pscustomobject]@{ Readable = $false; Players = 0; Controllers = @(); Why = 'no TeknoParrot profile was found for it' } })
+            }
+            $facts = $factsByCode[$key]
+            $changes = New-Object System.Collections.Generic.List[object]
+            $kept = New-Object System.Collections.Generic.List[string]
+            $notes = New-Object System.Collections.Generic.List[string]
+            $added = New-Object System.Collections.Generic.List[string]
+            if (-not $facts.Readable) {
+                [void]$notes.Add(('Left alone: {0}.' -f $facts.Why))
+            } else {
+                $current = (Get-XmlChildText $game 'MaxPlayers').Trim()
+                $currentNumber = 0
+                [void][int]::TryParse($current, [ref]$currentNumber)
+                $effective = $currentNumber
+                if ($facts.Players -gt 0) {
+                    if ($current -eq '' -or $current -eq '0') {
+                        Set-TpmLaunchBoxPlayerField -Game $game -Field 'MaxPlayers' -Value ([string]$facts.Players)
+                        [void]$changes.Add([pscustomobject]@{ Field = 'MaxPlayers'; Old = $current; New = [string]$facts.Players })
+                        $effective = [int]$facts.Players
+                    } elseif ($currentNumber -lt [int]$facts.Players) {
+                        [void]$kept.Add(('LaunchBox says {0} players and TeknoParrot lists controls for {1}. The LaunchBox value stays.' -f $current, $facts.Players))
+                    }
+                } elseif ($current -eq '' -or $current -eq '0') {
+                    [void]$notes.Add('The profile lists controls for one player only, which does not show how many players the game has, so the player count stays empty.')
+                }
+                $mode = (Get-XmlChildText $game 'PlayMode').Trim()
+                if ($effective -gt 0 -and $mode -eq '') {
+                    $newMode = $(if ($effective -eq 1) { 'Single Player' } else { 'Multiplayer' })
+                    Set-TpmLaunchBoxPlayerField -Game $game -Field 'PlayMode' -Value $newMode
+                    [void]$changes.Add([pscustomobject]@{ Field = 'PlayMode'; Old = ''; New = $newMode })
+                }
+                if ($gameId -and $listed.ContainsKey($gameId)) {
+                    [void]$kept.Add('LaunchBox already lists controllers for this game. They stay.')
+                } elseif (@($facts.Controllers).Count -eq 0) {
+                    [void]$notes.Add('TeknoParrot Manager cannot tell which controller this game needs, so none was added.')
+                } elseif (-not $gameId) {
+                    [void]$notes.Add('The LaunchBox entry has no game ID, so no controller was added.')
+                } else {
+                    $level = $(if (@($facts.Controllers).Count -eq 1) { '3' } else { '' })
+                    foreach ($wanted in @($facts.Controllers)) {
+                        $controller = $controllers[([string]$wanted).ToLowerInvariant()]
+                        if ($null -eq $controller) { [void]$notes.Add(('LaunchBox has no controller named {0}, so it was not added.' -f $wanted)); continue }
+                        Add-TpmLaunchBoxControllerSupport -Doc $doc -GameId $gameId -ControllerId $controller.Id -Level $level
+                        [void]$added.Add([string]$controller.Name)
+                    }
+                }
+            }
+            if ($changes.Count + $added.Count + $kept.Count + $notes.Count -gt 0) {
+                [void]$items.Add([pscustomobject]@{ GameId = $gameId; Title = $title; Code = $code; Players = [int]$facts.Players; Changes = $changes.ToArray(); Controllers = $added.ToArray(); Kept = $kept.ToArray(); Notes = $notes.ToArray() })
+            }
+        }
+        $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
+        [void]$plans.Add($filePlan)
+    }
+    return [pscustomobject]@{ Plans = $plans.ToArray(); Items = $items.ToArray() }
+}
+
+# The preview lines for the Details view and the log: one line per game. Pure: plan in, strings out.
+function Format-TpmLaunchBoxPlayerLine {
+    param([Parameter(Mandatory)]$Plan)
+    $words = @{ MaxPlayers = 'players'; PlayMode = 'play mode' }
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Plan.Items)) {
+        $parts = New-Object System.Collections.Generic.List[string]
+        foreach ($change in @($item.Changes)) {
+            $was = $(if ($change.Old -eq '') { 'was empty' } else { 'was ' + $change.Old })
+            [void]$parts.Add(('{0} {1} ({2})' -f $words[$change.Field], $change.New, $was))
+        }
+        if (@($item.Controllers).Count -gt 0) { [void]$parts.Add(('controller {0}' -f (@($item.Controllers) -join ' and '))) }
+        $text = ($parts -join '; ')
+        foreach ($sentence in @(@($item.Kept) + @($item.Notes))) { $text = ($text + ' ' + $sentence).Trim() }
+        [void]$lines.Add(('{0}: {1}' -f $item.Title, $text))
+    }
+    return $lines.ToArray()
+}
+
+# The one plain title line. -Preview words it as a preview; otherwise it says what was filled in.
+function Format-TpmLaunchBoxPlayerTitle {
+    param([Parameter(Mandatory)]$Plan, [switch]$Preview)
+    $items = @($Plan.Items)
+    $playerGames = @($items | Where-Object { @($_.Changes).Count -gt 0 }).Count
+    $controllerGames = @($items | Where-Object { @($_.Controllers).Count -gt 0 }).Count
+    $keptGames = @($items | Where-Object { @($_.Kept).Count -gt 0 }).Count
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($playerGames -gt 0) { [void]$parts.Add(('player info for {0}' -f (Format-TpmGameCount -Count $playerGames))) }
+    if ($controllerGames -gt 0) { [void]$parts.Add(('controllers for {0}' -f (Format-TpmGameCount -Count $controllerGames))) }
+    $keep = $(if ($keptGames -gt 0) { ' {0} keep what LaunchBox already says.' -f (Format-TpmGameCount -Count $keptGames) } else { '' })
+    if ($Preview) {
+        if ($parts.Count -eq 0) { return ('Preview: nothing to fill in. Nothing would change.' + $keep) }
+        return ('Preview: LaunchBox would get {0}.{1} Nothing was changed.' -f ($parts -join ' and '), $keep)
+    }
+    if ($parts.Count -eq 0) { return ('Nothing to fill in.' + $keep) }
+    return ('Filled in {0}.{1}' -f ($parts -join ' and '), $keep)
+}
+
+# -PlanOnly reads everything and changes nothing; otherwise the files are written through the LaunchBox file transaction (verified
+# backup, read-back, rollback). Returns the same kind of result as Invoke-LaunchBoxDirectWrite plus PlayerPlan.
+# The caller makes sure LaunchBox and BigBox are closed before a write; the transaction also checks and refuses while they run.
+function Invoke-TpmLaunchBoxPlayerFields {
+    param([string]$UserProfilesDir, [string]$LbRoot, [string[]]$PlatformNames = @('TeknoParrot'), [string]$BackupRoot, [string]$TpRoot = '', [switch]$PlanOnly)
+    try {
+        $root = Resolve-TpmLaunchBoxRoot $LbRoot
+        if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $root)) { throw 'Choose a safe existing LaunchBox root.' }
+        if (@($PlatformNames).Count -eq 0) { throw 'Choose at least one LaunchBox platform.' }
+        $emulatorsPath = Get-TpmLaunchBoxPath $root 'Data\Emulators.xml'
+        if (-not (Get-TpmLaunchBoxFileState $emulatorsPath).Exists) { throw 'LaunchBox has not made Data\Emulators.xml yet. Open LaunchBox once, close it, then try again. Nothing was changed.' }
+        $emulatorNode = @((Read-TpmLaunchBoxXml $emulatorsPath).SelectNodes('/LaunchBox/Emulator') | Where-Object { (Get-XmlChildText $_ 'Title') -eq 'TeknoParrot' } | Select-Object -First 1)
+        if ($emulatorNode.Count -eq 0) {
+            $none = New-TpmLaunchBoxResult NO_CHANGES 'No TeknoParrot games are in LaunchBox yet. Add them first.'
+            if ($PlanOnly) { $none.Reason = 'PREVIEW' }
+            return $none
+        }
+        $plan = New-TpmLaunchBoxPlayerPlan -UserProfilesDir $UserProfilesDir -LbRoot $root -EmulatorId (Get-XmlChildText $emulatorNode[0] 'ID') -PlatformNames $PlatformNames -TpRoot $TpRoot
+        foreach ($line in (Format-TpmLaunchBoxPlayerLine -Plan $plan)) { Write-Log ('LaunchBox players: ' + $line) }
+        $changedPlans = @($plan.Plans | Where-Object { $_.Changed })
+        if ($PlanOnly) {
+            $preview = New-TpmLaunchBoxResult NO_CHANGES ('Preview only, nothing was written. A write would change {0} file(s).' -f $changedPlans.Count)
+            $preview.Reason = 'PREVIEW'
+            $preview | Add-Member -NotePropertyName WouldChangeFiles -NotePropertyValue $changedPlans.Count -Force
+            $preview | Add-Member -NotePropertyName PlayerPlan -NotePropertyValue $plan -Force
+            return $preview
+        }
+        $result = Invoke-TpmLaunchBoxFileTransaction -lbRoot $root -Plans $plan.Plans -BackupRoot $BackupRoot
+        $result | Add-Member -NotePropertyName PlayerPlan -NotePropertyValue $plan -Force
+        return $result
+    } catch {
+        $result = New-TpmLaunchBoxResult FAILED 'LaunchBox players and controllers were refused before library writes.'
+        $result.Errors = @([string]$_.Exception.Message)
+        return $result
+    }
+}
+
+# One-step undo of a write made by Invoke-TpmLaunchBoxPlayerFields: puts the saved copy taken just before it back. Refused when the
+# file is no longer the one that write made (LaunchBox or the player saved something since), so a newer save is never thrown away;
+# the Restore backup menu is the way to go further back. The restore takes its own verified copy first, like every restore.
+function Restore-TpmLaunchBoxPlayerFields {
+    param([Parameter(Mandatory)]$Written, [Parameter(Mandatory)][string]$LbRoot, [string]$BackupRoot)
+    try {
+        if ([string]$Written.Outcome -ne 'SAVED' -or -not $Written.BackupPath -or -not $Written.PSObject.Properties['PlayerPlan']) { throw 'There is nothing to undo.' }
+        $root = Resolve-TpmLaunchBoxRoot $LbRoot
+        $snapshot = Get-TpmLaunchBoxSnapshot $Written.BackupPath
+        $plans = New-Object System.Collections.Generic.List[object]
+        foreach ($filePlan in @($Written.PlayerPlan.Plans | Where-Object { $_.Changed })) {
+            $record = @($snapshot.Items | Where-Object { $_.RelativePath -eq $filePlan.RelativePath })[0]
+            if ($null -eq $record -or -not $record.Exists) { throw 'The saved copy does not hold this file, so nothing was put back.' }
+            $before = Get-TpmLaunchBoxFileState (Get-TpmLaunchBoxPath $root $filePlan.RelativePath)
+            if ($before.Hash -ne $filePlan.AfterHash) { throw 'LaunchBox saved this file after TeknoParrot Manager changed it, so the saved copy was not put back. Use Restore backup in the main menu to go back anyway.' }
+            [void]$plans.Add([pscustomobject]@{ RelativePath = $filePlan.RelativePath; Before = $before; Document = $null; Source = (Get-TpmLaunchBoxPath $Written.BackupPath $record.RelativePath); SourceHash = $record.Hash; Changed = ($before.Hash -ne $record.Hash); Delete = $false; AfterHash = $null; BaseChildCount = 0 })
+        }
+        $result = Invoke-TpmLaunchBoxFileTransaction -lbRoot $root -Plans $plans.ToArray() -BackupRoot $BackupRoot -Operation 'restore-safety'
+        if ($result.Outcome -eq 'SAVED') { $result.Summary = 'Your old LaunchBox files are back, and every file was read back and checked.' }
+        return $result
+    } catch {
+        $result = New-TpmLaunchBoxResult FAILED 'The undo was refused before any file was changed.'
+        $result.Errors = @([string]$_.Exception.Message)
+        return $result
+    }
+}
+# END MODULE-READY SECTION: LaunchBox players and controllers for TeknoParrot games
+
+# BEGIN MODULE-READY SECTION: LaunchBox game versions and keeping in step (issues #422 and #423)
+# Versions: several regions or versions of one game become ONE LaunchBox game with a version picker. LaunchBox keeps the extra versions as
+# AdditionalApplication entries of the game (the "Play ... version" choices). Two games are the same game only when they have the same
+# Games Database ID: the ID LaunchBox already holds for the entry, or a certain match of the shared matching engine. The default version
+# follows the region the user chose in Region setup. Keeping in step: entries whose profile is gone are removed, moved ones get their new
+# path, old Manager titles are made clean. Both touch only games the Manager added (the TeknoParrot emulator). Backup, read-back and
+# rollback come from the existing LaunchBox file transaction; Restore is the undo.
+# Public functions: ConvertTo-TpmRegionKey, Get-TpmPreferredRegion, New-TpmLaunchBoxGroupPlan, Format-TpmLaunchBoxGroupLine,
+#   Format-TpmLaunchBoxGroupTitle, New-TpmLaunchBoxSyncPlan, Format-TpmLaunchBoxSyncLine, Format-TpmLaunchBoxSyncTitle,
+#   Invoke-TpmLaunchBoxLibraryChange. Screen layer after the END marker: Invoke-TpmLaunchBoxChangeStep.
+# Depends on: the matching engine, Get-TpmRegionGames, the LaunchBox file helpers listed for the details section.
+
+# One word for a region note: Japan, USA, Europe, Asia, Korea, Export (also World), or '' when there is none.
+function ConvertTo-TpmRegionKey {
+    [CmdletBinding()] [OutputType([string])] param([string]$Text)
+    $note = [string]$Text
+    if ($note -match '(?i)\b(?:jpn|japan|japanese|jp)\b') { return 'Japan' }
+    if ($note -match '(?i)\b(?:usa|us|america)\b') { return 'USA' }
+    if ($note -match '(?i)\b(?:europe|euro|eur|uk)\b') { return 'Europe' }
+    if ($note -match '(?i)\basia\b') { return 'Asia' }
+    if ($note -match '(?i)\b(?:korea|kor)\b') { return 'Korea' }
+    if ($note -match '(?i)\b(?:export|exp|world|international)\b') { return 'Export' }
+    return ''
+}
+
+# The region the user chose in Region setup: the most common region among the profiles set to a region (Auto and Default do not count).
+function Get-TpmPreferredRegion {
+    [CmdletBinding()] [OutputType([string])] param([AllowEmptyCollection()][string[]]$ProfilePaths = @())
+    $count = @{}
+    foreach ($game in @(Get-TpmRegionGames -Paths @($ProfilePaths))) {
+        if ($game.IsNeutral) { continue }
+        $key = ConvertTo-TpmRegionKey $game.Value
+        if ($key) { $count[$key] = [int]$count[$key] + 1 }
+    }
+    if ($count.Count -eq 0) { return '' }
+    return [string]@($count.GetEnumerator() | Sort-Object @{ Expression = 'Value'; Descending = $true }, @{ Expression = 'Key' })[0].Key
+}
+
+# Reads the LaunchBox library and builds the planned groups. Writes nothing. Index is the game list index (or $null: only entries that
+# already have a Games Database ID can be grouped). Returns Plans (for the file transaction), Groups and the counts.
+function New-TpmLaunchBoxGroupPlan {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$LbRoot, [Parameter(Mandatory)][string]$EmulatorId,
+        [Parameter(Mandatory)][string[]]$PlatformNames, [string]$TpRoot = '', [hashtable]$DatIndex = $null, $Index = $null, [string]$PreferredRegion = ''
+    )
+    $plans = New-Object System.Collections.Generic.List[object]
+    $groupsOut = New-Object System.Collections.Generic.List[object]
+    $datByCode = Get-TpmDatEntriesByCode -DatIndex $DatIndex
+    $versionsMade = 0
+    foreach ($name in $PlatformNames) {
+        $safe = Get-SafeLaunchBoxPlatformFileName $name
+        if ($safe -cne $name -or $name -in @('.', '..')) { throw 'Platform name must be a safe, unambiguous filename.' }
+        $rel = "Data\Platforms\$safe.xml"
+        $path = Get-TpmLaunchBoxPath $LbRoot $rel
+        $state = Get-TpmLaunchBoxFileState $path
+        if (-not $state.Exists) { continue }
+        $doc = Read-TpmLaunchBoxXml $path
+        Assert-TpmLaunchBoxState $path $state
+        $filePlan = [pscustomobject]@{ RelativePath = $rel; Before = $state; Document = $doc; OriginalXml = $doc.OuterXml; BaseChildCount = $doc.DocumentElement.ChildNodes.Count; Source = $null; SourceHash = $null; Changed = $false; Delete = $false; AfterHash = $null; FullRewrite = $true }
+        $members = @{}
+        foreach ($game in @($doc.SelectNodes('/LaunchBox/Game'))) {
+            if ((Get-XmlChildText $game 'Emulator') -ne $EmulatorId) { continue }
+            $fileName = [System.IO.Path]::GetFileName((Get-XmlChildText $game 'ApplicationPath'))
+            $code = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
+            $profilePath = Join-Path $UserProfilesDir $fileName
+            if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf)) { continue }
+            $title = Get-XmlChildText $game 'Title'
+            $subject = Get-TpmProfileMatchSubject -Code $code -ProfilePath $profilePath -TpRoot $TpRoot -HintName $title -DatIndex $DatIndex -DatByCode $datByCode
+            if ($subject.NotGame) { continue }
+            $key = (Get-XmlChildText $game 'DatabaseID').Trim()
+            if (-not $key -or $key -eq '0') {
+                $key = ''
+                if ($null -ne $Index) { $found = Resolve-TpmGameMatch -Index $Index -Subject $subject; if ($found.Status -eq 'Certain') { $key = [string]$found.Match.Id } }
+            }
+            if (-not $key) { continue }
+            if (-not $members.ContainsKey($key)) { $members[$key] = New-Object System.Collections.Generic.List[object] }
+            [void]$members[$key].Add([pscustomobject]@{ Node = $game; Code = $code; Title = $title; Id = (Get-XmlChildText $game 'ID'); Region = (ConvertTo-TpmRegionKey $subject.RegionText) })
+        }
+        foreach ($key in @($members.Keys)) {
+            if ($members[$key].Count -lt 2) { continue }
+            # The default version: the region the user chose, then a world or unmarked release, then any other region but Japan, then the rest.
+            $ordered = @($members[$key].ToArray() | Sort-Object @{ Expression = { if ($PreferredRegion -and $_.Region -eq $PreferredRegion) { 0 } elseif ($_.Region -in @('', 'Export')) { 1 } elseif ($_.Region -ne 'Japan') { 2 } else { 3 } } }, @{ Expression = { $_.Code } })
+            $default = $ordered[0]
+            $others = @($ordered | Select-Object -Skip 1)
+            $priority = 1
+            foreach ($other in $others) {
+                $priority++
+                $versionName = if ($other.Region) { '{0} ({1})' -f $other.Title, $other.Region } else { '{0} ({1})' -f $other.Title, $other.Code }
+                $app = $doc.CreateElement('AdditionalApplication')
+                $fields = [ordered]@{
+                    Id = [guid]::NewGuid().ToString(); PlayCount = (Get-XmlChildText $other.Node 'PlayCount'); PlayTime = (Get-XmlChildText $other.Node 'PlayTime'); GameID = $default.Id
+                    ApplicationPath = (Get-XmlChildText $other.Node 'ApplicationPath'); AutoRunAfter = 'false'; AutoRunBefore = 'false'; CommandLine = (Get-XmlChildText $other.Node 'CommandLine')
+                    Name = $versionName; UseDosBox = 'false'; UseEmulator = 'true'; WaitForExit = 'false'; ReleaseDate = (Get-XmlChildText $other.Node 'ReleaseDate')
+                    Developer = (Get-XmlChildText $other.Node 'Developer'); Publisher = (Get-XmlChildText $other.Node 'Publisher'); Region = $other.Region; Version = $other.Code
+                    Status = ''; Section = ''; EmulatorId = $EmulatorId; SideA = 'false'; SideB = 'false'; Priority = [string]$priority
+                }
+                foreach ($field in $fields.GetEnumerator()) { Set-XmlChildText $app $field.Key ([string]$field.Value) }
+                # Versions the other entry already had move to the default game; the entry itself becomes a version.
+                foreach ($old in @($doc.SelectNodes('/LaunchBox/AdditionalApplication') | Where-Object { (Get-XmlChildText $_ 'GameID') -eq $other.Id })) { Set-XmlChildText $old 'GameID' $default.Id }
+                [void]$doc.DocumentElement.AppendChild($app)
+                [void]$doc.DocumentElement.RemoveChild($other.Node)
+                $versionsMade++
+            }
+            [void]$groupsOut.Add([pscustomobject]@{ Title = $default.Title; Default = $default.Code; DefaultRegion = $default.Region; Versions = @($others | ForEach-Object { $_.Code }); Count = $ordered.Count })
+        }
+        $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
+        [void]$plans.Add($filePlan)
+    }
+    return [pscustomobject]@{ Plans = $plans.ToArray(); Groups = $groupsOut.ToArray(); VersionsMade = $versionsMade; PreferredRegion = $PreferredRegion }
+}
+
+# The preview lines for the Details view and the log. Pure: plan in, strings out.
+function Format-TpmLaunchBoxGroupLine {
+    param([Parameter(Mandatory)]$Plan)
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($group in @($Plan.Groups)) {
+        $region = if ($group.DefaultRegion) { ' (' + $group.DefaultRegion + ')' } else { '' }
+        [void]$lines.Add(('{0}: {1} entries become one game. The default version is {2}{3}; the other versions are {4}.' -f $group.Title, $group.Count, $group.Default, $region, (@($group.Versions) -join ', ')))
+    }
+    return $lines.ToArray()
+}
+
+# The one plain title line.
+function Format-TpmLaunchBoxGroupTitle {
+    param([Parameter(Mandatory)]$Plan, [switch]$Preview)
+    $groups = @($Plan.Groups).Count
+    if ($groups -eq 0) { return 'No game has more than one version in LaunchBox. Nothing to group.' }
+    $note = if ($Plan.PreferredRegion) { ' The default version follows your region choice: ' + $Plan.PreferredRegion + '.' } else { '' }
+    if ($Preview) { return ('Preview: {0} would become one game with versions.{1} Nothing was changed.' -f (Format-TpmGameCount -Count $groups), $note) }
+    return ('Grouped the versions of {0}.{1}' -f (Format-TpmGameCount -Count $groups), $note)
+}
+
+# Issue #423: keep LaunchBox in step with the library. Looks only at games the Manager added. Reads the LaunchBox library and the
+# TeknoParrot profiles and plans: remove entries whose profile is gone (never for a missing game file: that is a disconnected drive),
+# fix the profile path of entries whose TeknoParrot folder moved, and give back the clean title where the title is still one of the
+# Manager's own earlier names. A title the owner typed, or one that carries a Games Database ID, is never touched. Writes nothing.
+function New-TpmLaunchBoxSyncPlan {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$LbRoot, [Parameter(Mandatory)][string]$EmulatorId,
+        [Parameter(Mandatory)][string[]]$PlatformNames, [string]$TpRoot = '', [hashtable]$DatIndex = $null
+    )
+    $profileFiles = @{}
+    foreach ($file in @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop)) { $profileFiles[$file.Name.ToLowerInvariant()] = $file.FullName }
+    if ($profileFiles.Count -eq 0) { throw 'No game profiles were found in the TeknoParrot folder, so nothing can be compared. Nothing was changed.' }
+    $plans = New-Object System.Collections.Generic.List[object]
+    $removed = New-Object System.Collections.Generic.List[object]
+    $moved = New-Object System.Collections.Generic.List[object]
+    $renamed = New-Object System.Collections.Generic.List[object]
+    $blocked = ''
+    $datByCode = Get-TpmDatEntriesByCode -DatIndex $DatIndex
+    foreach ($name in $PlatformNames) {
+        $safe = Get-SafeLaunchBoxPlatformFileName $name
+        if ($safe -cne $name -or $name -in @('.', '..')) { throw 'Platform name must be a safe, unambiguous filename.' }
+        $rel = "Data\Platforms\$safe.xml"
+        $path = Get-TpmLaunchBoxPath $LbRoot $rel
+        $state = Get-TpmLaunchBoxFileState $path
+        if (-not $state.Exists) { continue }
+        $doc = Read-TpmLaunchBoxXml $path
+        Assert-TpmLaunchBoxState $path $state
+        $filePlan = [pscustomobject]@{ RelativePath = $rel; Before = $state; Document = $doc; OriginalXml = $doc.OuterXml; BaseChildCount = $doc.DocumentElement.ChildNodes.Count; Source = $null; SourceHash = $null; Changed = $false; Delete = $false; AfterHash = $null; FullRewrite = $true }
+        $managed = @($doc.SelectNodes('/LaunchBox/Game') | Where-Object { (Get-XmlChildText $_ 'Emulator') -eq $EmulatorId })
+        $goneGames = New-Object System.Collections.Generic.List[object]
+        # Most games with no profile at all looks like a wrong or half-restored folder. Then nothing in this file is touched (no removal,
+        # no moved path, no rename), because every comparison would be against the wrong folder.
+        $missingProfile = @($managed | Where-Object { $f = [System.IO.Path]::GetFileName((Get-XmlChildText $_ 'ApplicationPath')); $f -and $f -like '*.xml' -and -not $profileFiles.ContainsKey($f.ToLowerInvariant()) })
+        if ($missingProfile.Count -gt 0 -and $managed.Count -ge 6 -and ($missingProfile.Count * 2) -gt $managed.Count) {
+            $blocked = 'Most of the games in LaunchBox have no profile in this TeknoParrot folder. That looks like the wrong folder, so nothing was changed.'
+            [void]$plans.Add($filePlan)
+            continue
+        }
+        foreach ($game in $managed) {
+            $application = Get-XmlChildText $game 'ApplicationPath'
+            $fileName = [System.IO.Path]::GetFileName($application)
+            if (-not $fileName -or $fileName -notlike '*.xml') { continue }
+            $title = Get-XmlChildText $game 'Title'
+            $profileFile = $profileFiles[$fileName.ToLowerInvariant()]
+            if (-not $profileFile) { [void]$goneGames.Add($game); continue }
+            $expected = Get-RelativePath $LbRoot $profileFile
+            if (-not (Test-TpmLaunchBoxSamePath -Root $LbRoot -Left $application -Right $expected)) {
+                Set-XmlChildText $game 'ApplicationPath' $expected
+                Set-XmlChildText $game 'DateModified' (Get-Date).ToString('o')
+                [void]$moved.Add([pscustomobject]@{ Title = $title; Old = $application; New = $expected })
+            }
+            $databaseId = (Get-XmlChildText $game 'DatabaseID').Trim()
+            if ($databaseId -and $databaseId -ne '0') { continue }
+            $code = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
+            $subject = Get-TpmProfileMatchSubject -Code $code -ProfilePath $profileFile -TpRoot $TpRoot -HintName $title -DatIndex $DatIndex -DatByCode $datByCode
+            if ($subject.NotGame) { continue }
+            $currentKey = ConvertTo-TpmGamesDbKey $title
+            $knownKeys = @($subject.KnownTitles | ForEach-Object { ConvertTo-TpmGamesDbKey $_ })
+            if ($currentKey -and ($knownKeys -contains $currentKey) -and $title -cne $subject.DisplayTitle) {
+                Set-XmlChildText $game 'Title' $subject.DisplayTitle
+                Set-XmlChildText $game 'DateModified' (Get-Date).ToString('o')
+                [void]$renamed.Add([pscustomobject]@{ Old = $title; New = $subject.DisplayTitle })
+            }
+        }
+        # Versions of grouped games: a version whose profile is gone is removed; one whose folder moved gets its path fixed.
+        foreach ($app in @($doc.SelectNodes('/LaunchBox/AdditionalApplication') | Where-Object { (Get-XmlChildText $_ 'EmulatorId') -eq $EmulatorId })) {
+            $application = Get-XmlChildText $app 'ApplicationPath'
+            $fileName = [System.IO.Path]::GetFileName($application)
+            if (-not $fileName -or $fileName -notlike '*.xml') { continue }
+            $profileFile = $profileFiles[$fileName.ToLowerInvariant()]
+            if (-not $profileFile) {
+                [void]$removed.Add([pscustomobject]@{ Title = (Get-XmlChildText $app 'Name'); Kind = 'Version' })
+                [void]$doc.DocumentElement.RemoveChild($app)
+                continue
+            }
+            $expected = Get-RelativePath $LbRoot $profileFile
+            if (-not (Test-TpmLaunchBoxSamePath -Root $LbRoot -Left $application -Right $expected)) {
+                Set-XmlChildText $app 'ApplicationPath' $expected
+                [void]$moved.Add([pscustomobject]@{ Title = (Get-XmlChildText $app 'Name'); Old = $application; New = $expected })
+            }
+        }
+        # A game whose profile is gone is removed, unless it still has working versions.
+        foreach ($game in $goneGames) {
+            $id = Get-XmlChildText $game 'ID'
+            if (@($doc.SelectNodes('/LaunchBox/AdditionalApplication') | Where-Object { (Get-XmlChildText $_ 'GameID') -eq $id }).Count -gt 0) { continue }
+            [void]$removed.Add([pscustomobject]@{ Title = (Get-XmlChildText $game 'Title'); Kind = 'Game' })
+            [void]$doc.DocumentElement.RemoveChild($game)
+        }
+        $filePlan.Changed = $filePlan.OriginalXml -cne $filePlan.Document.OuterXml
+        [void]$plans.Add($filePlan)
+    }
+    return [pscustomobject]@{ Plans = $plans.ToArray(); Removed = $removed.ToArray(); Moved = $moved.ToArray(); Renamed = $renamed.ToArray(); Blocked = $blocked }
+}
+
+# The preview lines for the Details view and the log. Pure: plan in, strings out.
+function Format-TpmLaunchBoxSyncLine {
+    param([Parameter(Mandatory)]$Plan)
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Plan.Removed)) { [void]$lines.Add(('Remove {0}: its TeknoParrot profile is gone.' -f $item.Title)) }
+    foreach ($item in @($Plan.Moved)) { [void]$lines.Add(('Move {0}: the profile is now at {1}.' -f $item.Title, $item.New)) }
+    foreach ($item in @($Plan.Renamed)) { [void]$lines.Add(('Rename {0} to {1}.' -f $item.Old, $item.New)) }
+    if ($Plan.Blocked) { [void]$lines.Add([string]$Plan.Blocked) }
+    return $lines.ToArray()
+}
+
+# The one plain title line.
+function Format-TpmLaunchBoxSyncTitle {
+    param([Parameter(Mandatory)]$Plan, [switch]$Preview)
+    $removed = @($Plan.Removed).Count; $moved = @($Plan.Moved).Count; $renamed = @($Plan.Renamed).Count
+    $held = if ($Plan.Blocked) { ' ' + $Plan.Blocked } else { '' }
+    if (($removed + $moved + $renamed) -eq 0) { return ('LaunchBox already matches your library. Nothing to change.' + $held) }
+    $parts = '{0} removed, {1} moved, {2} renamed' -f $removed, $moved, $renamed
+    if ($Preview) { return ('Preview: {0}. Nothing was changed.{1}' -f $parts, $held) }
+    return ('LaunchBox now matches your library: {0}.{1}' -f $parts, $held)
+}
+
+# One run of a library change ('Group' or 'Sync'): -PlanOnly reads everything and changes nothing; otherwise the files are written
+# through the LaunchBox file transaction (verified backup, read-back, rollback). Returns the same kind of result as
+# Invoke-LaunchBoxDirectWrite plus ChangePlan. The caller makes sure LaunchBox and BigBox are closed before a write.
+function Invoke-TpmLaunchBoxLibraryChange {
+    param([Parameter(Mandatory)][ValidateSet('Group', 'Sync')][string]$Kind, [string]$UserProfilesDir, [string]$LbRoot, [string[]]$PlatformNames, [string]$BackupRoot, [string]$TpRoot = '', [hashtable]$DatIndex = $null, [switch]$PlanOnly)
+    try {
+        $root = Resolve-TpmLaunchBoxRoot $LbRoot
+        if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction Stop) -or -not (Test-TpmNoReparsePath $root)) { throw 'Choose a safe existing LaunchBox root.' }
+        if (@($PlatformNames).Count -eq 0) { throw 'Choose at least one LaunchBox platform.' }
+        $emulatorsPath = Get-TpmLaunchBoxPath $root 'Data\Emulators.xml'
+        if (-not (Get-TpmLaunchBoxFileState $emulatorsPath).Exists) { throw 'LaunchBox has not made Data\Emulators.xml yet. Open LaunchBox once, close it, then try again. Nothing was changed.' }
+        $emulatorNode = @((Read-TpmLaunchBoxXml $emulatorsPath).SelectNodes('/LaunchBox/Emulator') | Where-Object { (Get-XmlChildText $_ 'Title') -eq 'TeknoParrot' } | Select-Object -First 1)
+        if ($emulatorNode.Count -eq 0) {
+            $none = New-TpmLaunchBoxResult NO_CHANGES 'No TeknoParrot games are in LaunchBox yet. Add them first.'
+            if ($PlanOnly) { $none.Reason = 'PREVIEW' }
+            return $none
+        }
+        $emulatorId = Get-XmlChildText $emulatorNode[0] 'ID'
+        if ($Kind -eq 'Group') {
+            $gamesDb = Get-TpmGamesDbForLaunchBox -LaunchBoxRoot $root
+            $preferred = Get-TpmPreferredRegion -ProfilePaths @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | ForEach-Object { $_.FullName })
+            $plan = New-TpmLaunchBoxGroupPlan -UserProfilesDir $UserProfilesDir -LbRoot $root -EmulatorId $emulatorId -PlatformNames $PlatformNames -TpRoot $TpRoot -DatIndex $DatIndex -Index $gamesDb.Index -PreferredRegion $preferred
+            $lines = @(Format-TpmLaunchBoxGroupLine -Plan $plan)
+        } else {
+            $plan = New-TpmLaunchBoxSyncPlan -UserProfilesDir $UserProfilesDir -LbRoot $root -EmulatorId $emulatorId -PlatformNames $PlatformNames -TpRoot $TpRoot -DatIndex $DatIndex
+            $lines = @(Format-TpmLaunchBoxSyncLine -Plan $plan)
+        }
+        foreach ($line in $lines) { Write-Log ('LaunchBox {0}: {1}' -f $Kind.ToLowerInvariant(), $line) }
+        $changedPlans = @($plan.Plans | Where-Object { $_.Changed })
+        if ($PlanOnly) {
+            $preview = New-TpmLaunchBoxResult NO_CHANGES ('Preview only, nothing was written. A write would change {0} file(s).' -f $changedPlans.Count)
+            $preview.Reason = 'PREVIEW'
+            $preview | Add-Member -NotePropertyName WouldChangeFiles -NotePropertyValue $changedPlans.Count -Force
+            $preview | Add-Member -NotePropertyName ChangePlan -NotePropertyValue $plan -Force
+            return $preview
+        }
+        $result = Invoke-TpmLaunchBoxFileTransaction -lbRoot $root -Plans $plan.Plans -BackupRoot $BackupRoot
+        $result | Add-Member -NotePropertyName ChangePlan -NotePropertyValue $plan -Force
+        return $result
+    } catch {
+        $result = New-TpmLaunchBoxResult FAILED 'The LaunchBox change was refused before library writes.'
+        $result.Errors = @([string]$_.Exception.Message)
+        return $result
+    }
+}
+# END MODULE-READY SECTION: LaunchBox game versions and keeping in step
+
+# Screen layer for the section above (not part of the module): preview, ask, then write. Kind is 'Group' or 'Sync'.
+function Invoke-TpmLaunchBoxChangeStep {
+    param([Parameter(Mandatory)][ValidateSet('Group', 'Sync')][string]$Kind, [string]$UserProfilesDir, [string]$LbRoot, [string]$TpRoot = '', [hashtable]$DatIndex = $null)
+    $root = $LbRoot
+    if (-not $root) { $root = Read-HostSafe '  LaunchBox install folder (Enter to go back)' }
+    if (-not $root) { return }
+    $platformChoice = Read-TpmChoice -Prompt '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, B back' -Choices @('1', '2', '3', 'B') -Default '2'
+    if ($platformChoice -eq 'B') { return }
+    $platforms = switch ($platformChoice) { '1' { @('Arcade') } '2' { @('TeknoParrot') } '3' { @('Arcade', 'TeknoParrot') } }
+    $intro = if ($Kind -eq 'Group') { 'Regions and versions of the same game become one game with a version picker. The default version follows the region you chose in Region setup.' } else { 'Games you removed from TeknoParrot are removed from LaunchBox, moved games get their new location, and old Manager names are made clean. A game whose game file is only missing (for example an unplugged drive) is never removed.' }
+    Write-TpmText -Text ('First TeknoParrot Manager only reads your LaunchBox files. ' + $intro) -Color DarkCyan
+    $plan = Invoke-TpmLaunchBoxLibraryChange -Kind $Kind -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -TpRoot $TpRoot -DatIndex $DatIndex -PlanOnly
+    $show = {
+        param($result, [bool]$preview)
+        if ($result.PSObject.Properties['ChangePlan']) {
+            $title = if ($Kind -eq 'Group') { Format-TpmLaunchBoxGroupTitle -Plan $result.ChangePlan -Preview:$preview } else { Format-TpmLaunchBoxSyncTitle -Plan $result.ChangePlan -Preview:$preview }
+            $lines = if ($Kind -eq 'Group') { @(Format-TpmLaunchBoxGroupLine -Plan $result.ChangePlan) } else { @(Format-TpmLaunchBoxSyncLine -Plan $result.ChangePlan) }
+            $result | Add-Member -NotePropertyName PlainTitle -NotePropertyValue $title -Force
+            $result | Add-Member -NotePropertyName EnrichLines -NotePropertyValue $lines -Force
+        }
+        Write-TpmLaunchBoxResult -Result $result
+    }
+    & $show $plan $true
+    if ($plan.Reason -ne 'PREVIEW' -or [int]$plan.WouldChangeFiles -eq 0) { return }
+    Write-TpmLaunchBoxWriteNotice
+    $notice = Get-TpmLaunchBoxWriteNoticeBlocks
+    if ((Read-TpmYesNo -Prompt 'Make exactly these changes after a verified backup? (Y/N, D = about the risks)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $notice }) -ne 'Y') {
+        Write-Host '  LaunchBox write canceled; nothing was changed.' -ForegroundColor DarkGray
+        return
+    }
+    if (-not (Wait-TpmForProcessClose -ProcessNames @('LaunchBox', 'BigBox') -FriendlyName 'LaunchBox or BigBox')) {
+        Write-Host '  LaunchBox or BigBox is still open, so nothing was changed.' -ForegroundColor DarkGray
+        return
+    }
+    $written = Invoke-TpmLaunchBoxLibraryChange -Kind $Kind -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -TpRoot $TpRoot -DatIndex $DatIndex
+    & $show $written $false
+    if ($written.BackupPath) { Write-TpmText -Text 'To undo this, open Restore in the main menu and choose the LaunchBox backup.' -Color DarkCyan }
+}
+
 # Screen layer for the section above (not part of the module): asks, shows, calls the functions above.
 # The screens print the text the Format functions return and hand every decision to the data layer through parameters.
 function Write-TpmLaunchBoxEnrichResult {
@@ -47437,42 +51329,17 @@ function Write-TpmLaunchBoxEnrichResult {
     Write-TpmLaunchBoxResult -Result $Result
 }
 
-# Asks what to do about details the folder name and the Eggman list disagree on. Returns the choices hashtable and the default.
-function Read-TpmLaunchBoxEnrichConflictChoice {
-    param([Parameter(Mandatory)][object[]]$Conflicts)
-    $words = @{ Year = 'year'; Developer = 'developer'; Hardware = 'hardware name' }
-    Write-TpmText -Text ('{0} {1} differ between the game folder name and the Eggman list.' -f $Conflicts.Count, $(if ($Conflicts.Count -eq 1) { 'detail' } else { 'details' })) -Color Yellow -BlankBefore
-    Write-TpmText -Text '[F] Use the folder names.   [D] Use the Eggman list.   [O] Choose one by one.   [S] Skip these.' -Color White
-    $answer = Read-TpmChoice -Prompt '  Choice, default S' -Choices @('F', 'D', 'O', 'S') -Default 'S'
-    $choices = @{}
-    $default = switch ($answer) { 'F' { 'Folder' } 'D' { 'Dat' } default { 'Skip' } }
-    if ($answer -eq 'O') {
-        foreach ($conflict in $Conflicts) {
-            Write-TpmText -Text ('{0}: {1}. Folder name says {2}. Eggman list says {3}.' -f $conflict.Title, $words[$conflict.Field], $conflict.Folder, $conflict.Dat) -Color White
-            $one = Read-TpmChoice -Prompt '  [F] folder name, [D] Eggman list, [S] skip, default S' -Choices @('F', 'D', 'S') -Default 'S'
-            $choices[$conflict.Key] = switch ($one) { 'F' { 'Folder' } 'D' { 'Dat' } default { 'Skip' } }
-        }
-    }
-    return [pscustomobject]@{ Choices = $choices; Default = $default }
-}
-
-# The menu step: preview, ask about differences, ask, then write.
+# The menu step: preview, ask, then write.
 function Invoke-TpmLaunchBoxEnrichStep {
-    param([string]$UserProfilesDir, [string]$LbRoot, [hashtable]$DatIndex = $null)
+    param([string]$UserProfilesDir, [string]$LbRoot, [string]$TpRoot = '', [hashtable]$DatIndex = $null)
     $root = $LbRoot
     if (-not $root) { $root = Read-HostSafe '  LaunchBox install folder (Enter to go back)' }
     if (-not $root) { return }
     $platformChoice = Read-TpmChoice -Prompt '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, B back' -Choices @('1', '2', '3', 'B') -Default '2'
     if ($platformChoice -eq 'B') { return }
     $platforms = switch ($platformChoice) { '1' { @('Arcade') } '2' { @('TeknoParrot') } '3' { @('Arcade', 'TeknoParrot') } }
-    Write-TpmText -Text 'First TeknoParrot Manager only reads your LaunchBox files. Empty year and developer boxes get filled in from the game folder names and the Eggman list. Boxes you filled in are never changed. It also keeps playlists by hardware, light gun and driving games.' -Color DarkCyan
-    $choices = @{}; $default = 'Skip'
-    $plan = Invoke-TpmLaunchBoxEnrich -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -DatIndex $DatIndex -PlanOnly
-    if ($plan.PSObject.Properties['EnrichPlan'] -and @($plan.EnrichPlan.Conflicts).Count -gt 0) {
-        $asked = Read-TpmLaunchBoxEnrichConflictChoice -Conflicts @($plan.EnrichPlan.Conflicts)
-        $choices = $asked.Choices; $default = $asked.Default
-        $plan = Invoke-TpmLaunchBoxEnrich -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -DatIndex $DatIndex -ConflictChoices $choices -ConflictDefault $default -PlanOnly
-    }
+    Write-TpmText -Text 'First TeknoParrot Manager only reads your LaunchBox files. Empty year and developer boxes get filled in from the LaunchBox game list, the Eggman list and TeknoParrot. Boxes you filled in are never changed. It keeps playlists by hardware, light gun and driving games, and marks games that cannot start yet with a Needs setup note and playlist.' -Color DarkCyan
+    $plan = Invoke-TpmLaunchBoxEnrich -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -TpRoot $TpRoot -DatIndex $DatIndex -PlanOnly
     Write-TpmLaunchBoxEnrichResult -Result $plan -Preview
     if ($plan.Reason -ne 'PREVIEW' -or [int]$plan.WouldChangeFiles -eq 0) { return }
     Write-TpmLaunchBoxWriteNotice
@@ -47485,7 +51352,7 @@ function Invoke-TpmLaunchBoxEnrichStep {
         Write-Host '  LaunchBox or BigBox is still open, so nothing was changed.' -ForegroundColor DarkGray
         return
     }
-    $written = Invoke-TpmLaunchBoxEnrich -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -DatIndex $DatIndex -ConflictChoices $choices -ConflictDefault $default
+    $written = Invoke-TpmLaunchBoxEnrich -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -TpRoot $TpRoot -DatIndex $DatIndex
     Write-TpmLaunchBoxEnrichResult -Result $written
     if ($written.BackupPath) { Write-TpmText -Text 'To undo, open Restore in the main menu and choose the LaunchBox backup.' -Color DarkCyan }
 }
@@ -47509,15 +51376,18 @@ function Invoke-TpmLaunchBoxIdLinkStep {
     $plan = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -DatIndex $DatIndex -PlanOnly
     Write-TpmLaunchBoxIdLinkResult -Result $plan -Preview
     if (-not $plan.PSObject.Properties['LinkPlan']) { return }
-    $approved = New-Object System.Collections.Generic.List[string]
-    $checks = @($plan.LinkPlan.Items | Where-Object { $_.Status -eq 'Check' })
-    if ($checks.Count -gt 0) {
-        Write-TpmText -Text ('{0} {1} only a close match. You decide each one.' -f $checks.Count, $(if ($checks.Count -eq 1) { 'game has' } else { 'games have' })) -Color Yellow -BlankBefore
-        foreach ($item in $checks) {
-            Write-TpmText -Text ('{0} -> {1} (ID {2})' -f $item.Title, $item.MatchName, $item.MatchId) -Color White
-            if ((Read-TpmYesNo -Prompt '  Is this the same game? (Y/N)' -Default 'N') -eq 'Y') { [void]$approved.Add([string]$item.GameId) }
+    $choices = @{}
+    $unsure = @($plan.LinkPlan.Items | Where-Object { $_.Status -eq 'Ambiguous' -and @($_.Options).Count -gt 0 })
+    if ($unsure.Count -gt 0) {
+        Write-TpmText -Text ('{0} could not be matched for sure. You decide each one; Enter skips it.' -f (Format-TpmGameCount -Count $unsure.Count)) -Color Yellow -BlankBefore
+        foreach ($item in $unsure) {
+            Write-TpmText -Text ('{0}: {1}' -f $item.Title, $item.Reason) -Color White
+            $options = @($item.Options)
+            for ($i = 0; $i -lt $options.Count; $i++) { Write-TpmText -Text ('[{0}] {1} (ID {2})' -f ($i + 1), $options[$i].Name, $options[$i].Id) -Color White }
+            $pick = Read-TpmChoice -Prompt '  Your choice' -Choices (@('S') + @(1..$options.Count | ForEach-Object { [string]$_ })) -Default 'S'
+            if ($pick -ne 'S') { $choices[[string]$item.GameId] = [string]$options[[int]$pick - 1].Id }
         }
-        $plan = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -DatIndex $DatIndex -ApprovedGameIds $approved.ToArray() -PlanOnly
+        $plan = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -DatIndex $DatIndex -Choices $choices -PlanOnly
         Write-TpmLaunchBoxIdLinkResult -Result $plan -Preview
     }
     if ($plan.Reason -ne 'PREVIEW' -or [int]$plan.WouldChangeFiles -eq 0) { return }
@@ -47531,9 +51401,52 @@ function Invoke-TpmLaunchBoxIdLinkStep {
         Write-Host '  LaunchBox or BigBox is still open, so nothing was changed.' -ForegroundColor DarkGray
         return
     }
-    $written = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -DatIndex $DatIndex -ApprovedGameIds $approved.ToArray()
+    $written = Invoke-TpmLaunchBoxIdLink -LbRoot $root -TpRoot $TpRoot -DatIndex $DatIndex -Choices $choices
     Write-TpmLaunchBoxIdLinkResult -Result $written
     if ($written.BackupPath) { Write-TpmText -Text 'To undo, open Restore in the main menu and choose the LaunchBox backup.' -Color DarkCyan }
+}
+
+# Screen for the players and controllers section: preview, ask, then write, then one question to undo it at once.
+function Write-TpmLaunchBoxPlayerResult {
+    param([Parameter(Mandatory)]$Result, [switch]$Preview)
+    if ($Result.PSObject.Properties['PlayerPlan']) {
+        $Result | Add-Member -NotePropertyName PlainTitle -NotePropertyValue (Format-TpmLaunchBoxPlayerTitle -Plan $Result.PlayerPlan -Preview:$Preview) -Force
+        $Result | Add-Member -NotePropertyName EnrichLines -NotePropertyValue @(Format-TpmLaunchBoxPlayerLine -Plan $Result.PlayerPlan) -Force
+    }
+    Write-TpmLaunchBoxResult -Result $Result
+}
+
+function Invoke-TpmLaunchBoxPlayerStep {
+    param([string]$UserProfilesDir, [string]$LbRoot, [string]$TpRoot = '')
+    $root = $LbRoot
+    if (-not $root) { $root = Read-HostSafe '  LaunchBox install folder (Enter to go back)' }
+    if (-not $root) { return }
+    $platformChoice = Read-TpmChoice -Prompt '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, B back' -Choices @('1', '2', '3', 'B') -Default '2'
+    if ($platformChoice -eq 'B') { return }
+    $platforms = switch ($platformChoice) { '1' { @('Arcade') } '2' { @('TeknoParrot') } '3' { @('Arcade', 'TeknoParrot') } }
+    Write-TpmText -Text 'First TeknoParrot Manager only reads your LaunchBox files. Then it fills in how many players each game has and which controller it needs, so Big Box can show them. The answers come from each game''s TeknoParrot controls. Empty boxes only: what LaunchBox already says is never changed.' -Color DarkCyan
+    $plan = Invoke-TpmLaunchBoxPlayerFields -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -TpRoot $TpRoot -PlanOnly
+    Write-TpmLaunchBoxPlayerResult -Result $plan -Preview
+    if ($plan.Reason -ne 'PREVIEW' -or [int]$plan.WouldChangeFiles -eq 0) { return }
+    Write-TpmText -Text 'Close LaunchBox and BigBox first. TeknoParrot Manager will not close them for you.' -Color Yellow -BlankBefore
+    Write-TpmText -Text 'Only empty boxes are filled. Your own entries are kept.' -Color DarkCyan
+    $notice = Get-TpmLaunchBoxWriteNoticeBlocks
+    if ((Read-TpmYesNo -Prompt 'Make exactly these changes after a verified backup? (Y/N, D = about the risks)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $notice }) -ne 'Y') {
+        Write-Host '  LaunchBox write canceled; nothing was changed.' -ForegroundColor DarkGray
+        return
+    }
+    if (-not (Wait-TpmForProcessClose -ProcessNames @('LaunchBox', 'BigBox') -FriendlyName 'LaunchBox or BigBox')) {
+        Write-Host '  LaunchBox or BigBox is still open, so nothing was changed.' -ForegroundColor DarkGray
+        return
+    }
+    $written = Invoke-TpmLaunchBoxPlayerFields -UserProfilesDir $UserProfilesDir -LbRoot $root -PlatformNames $platforms -TpRoot $TpRoot
+    Write-TpmLaunchBoxPlayerResult -Result $written
+    if ($written.Outcome -ne 'SAVED' -or -not $written.BackupPath) { return }
+    if ((Read-TpmYesNo -Prompt '  Undo this now and put your old LaunchBox files back? (Y/N)' -Default 'N') -eq 'Y') {
+        Write-TpmLaunchBoxResult -Result (Restore-TpmLaunchBoxPlayerFields -Written $written -LbRoot $root)
+    } else {
+        Write-TpmText -Text 'To undo later, open Restore in the main menu and choose the LaunchBox backup.' -Color DarkCyan
+    }
 }
 
 function Get-TpmLaunchBoxSnapshot {
@@ -47649,13 +51562,11 @@ function Invoke-RestoreLaunchBoxBackup {
         Write-Host '  If either app opens again while this runs, start the restore again.' -ForegroundColor Yellow; Write-Log 'LaunchBox restore: either app can reopen after the process check; multi-file recovery is not atomic; a changed or declined created file makes the result PARTIAL.'
         Write-Host '  Any LaunchBox changes made to the files above since this snapshot will be replaced; a verified snapshot of their current state is taken first.' -ForegroundColor Yellow
         if ($snapshot.Legacy) { Write-Host '  Old backup: it does not say which library it came from. Only the files listed above are restored, and nothing else is deleted.' -ForegroundColor Yellow; Write-Log 'LaunchBox restore: legacy snapshot; only inventoried files can be restored; original completeness unknown; absent members never imply deletion.' }
-        if ($snapshot.Root -and $snapshot.Root -ine $lbRoot) {
-            Write-Host '  WARNING: this snapshot was taken from a different LaunchBox folder than the restore target.' -ForegroundColor Red
-            if ((Read-TpmYesNo -Prompt 'This snapshot belongs to a different LaunchBox folder. Restore it into the target folder anyway? (Y/N)' -Default 'N') -ne 'Y') {
-                $cancel = New-TpmLaunchBoxResult NO_CHANGES 'LaunchBox restore canceled before library writes.'; $cancel.Cancelled=$true; return $cancel
-            }
-        }
-        if ((Read-TpmYesNo -Prompt ('Restore these files into {0} after a verified backup of their current state? (Y/N)' -f $lbRoot) -Default 'N') -ne 'Y') {
+        $restoreIntoOther = [bool]($snapshot.Root -and $snapshot.Root -ine $lbRoot)
+        if ($restoreIntoOther) { Write-Host '  WARNING: this snapshot was taken from a different LaunchBox folder than the restore target.' -ForegroundColor Red }
+        # One question only: when the snapshot came from another folder, the question says so; otherwise the normal one.
+        $restorePrompt = if ($restoreIntoOther) { 'This snapshot belongs to a different LaunchBox folder. Restore it into the target folder anyway, after a verified backup of its current state? (Y/N)' } else { 'Restore these files into {0} after a verified backup of their current state? (Y/N)' -f $lbRoot }
+        if ((Read-TpmYesNo -Prompt $restorePrompt -Default 'N') -ne 'Y') {
             $cancel = New-TpmLaunchBoxResult NO_CHANGES 'LaunchBox restore canceled before library writes.'; $cancel.Cancelled=$true; return $cancel
         }
         if (-not (Wait-TpmForProcessClose -ProcessNames @('LaunchBox','BigBox') -FriendlyName 'LaunchBox or BigBox')) {
@@ -47767,54 +51678,60 @@ function Get-TpmLaunchBoxDetailBlocks {
     return ,@($blocks.ToArray())
 }
 
-# Details of the official-name step: every old name, new name and Games Database ID, the games that need a choice,
-# and why the step was skipped when it was. $null when the step was not used.
+# Details of the game-name step: every old name, new name and Games Database ID, the games that need a choice,
+# and why the game list was not used when it was not. $null when the step had nothing to say.
 function Get-TpmLaunchBoxTitleDetailBlock {
     param([Parameter(Mandatory)]$Result)
-    if (-not $Result.PSObject.Properties['GamesDbState'] -or [string]$Result.GamesDbState -eq 'Off') { return $null }
+    if (-not $Result.PSObject.Properties['GamesDbState']) { return $null }
     $lines = New-Object System.Collections.Generic.List[string]
-    if ([string]$Result.GamesDbState -ne 'Used') { [void]$lines.Add(('Games Database not used: {0}' -f $Result.GamesDbError)) }
+    if ([string]$Result.GamesDbState -notin @('Used', 'Off')) { [void]$lines.Add(('Games Database not used: {0}' -f $Result.GamesDbError)) }
     foreach ($change in @($Result.TitleChanges)) {
         $where = if ($change.Kind -eq 'Existing') { ' (game already in LaunchBox)' } else { '' }
-        $how = if ($change.PSObject.Properties['Confidence'] -and $change.Confidence -eq 'Your choice') { ' (your choice)' }
-               elseif ($change.PSObject.Properties['Confidence'] -and $change.Confidence) { (' (suggested, {0} confidence; other candidate: {1})' -f $change.Confidence.ToLowerInvariant(), $change.Other) }
-               else { '' }
-        if ($change.Old -ceq $change.New) { [void]$lines.Add(('Same name {0}, ID {1}{2}{3}' -f $change.New, $change.Id, $where, $how)) }
-        else { [void]$lines.Add(('{0}  ->  {1}, ID {2}{3}{4}' -f $change.Old, $change.New, $change.Id, $where, $how)) }
+        $how = if ($change.PSObject.Properties['Choice'] -and $change.Choice) { ' (your choice)' } else { '' }
+        $idText = if ($change.Id) { ', ID ' + $change.Id } else { '' }
+        if ($change.PSObject.Properties['Filled'] -and $change.Filled) { $how += ' (fills in ' + $change.Filled + ')' }
+        if ($change.Old -ceq $change.New) { [void]$lines.Add(('Same name {0}{1}{2}{3}' -f $change.New, $idText, $where, $how)) }
+        else { [void]$lines.Add(('{0}  ->  {1}{2}{3}{4}' -f $change.Old, $change.New, $idText, $where, $how)) }
     }
     foreach ($item in @($Result.TitleReview)) {
         $options = @($item.Options | ForEach-Object { '{0} (ID {1})' -f $_.Name, $_.Id }) -join ' / '
-        $eggman = if ($item.EggmanTitle) { ' Eggman name: ' + $item.EggmanTitle + '.' } else { '' }
         switch ([string]$item.Status) {
-            'Disagree' { [void]$lines.Add(('Needs your choice (low confidence): {0}. The Games Database and Eggman point at different games: {1}.{2}' -f $item.Title, $options, $eggman)) }
-            'NeedsChoice' { [void]$lines.Add(('Needs your choice: {0}. Closest names: {1}.{2}' -f $item.Title, $options, $eggman)) }
-            default { [void]$lines.Add(('No match found: {0}. It keeps its name.{1}' -f $item.Title, $eggman)) }
+            'Ambiguous' { [void]$lines.Add(('Needs your choice: {0}. {1} Possible games: {2}.' -f $item.Title, $item.Reason, $options)) }
+            default { [void]$lines.Add(('No match found: {0}. {1} It keeps its clean name.' -f $item.Title, $item.Reason)) }
         }
     }
     if ($lines.Count -eq 0) { return $null }
-    return @{ Heading = 'Official game names'; Lines = $lines.ToArray() }
+    return @{ Heading = 'Game names'; Lines = $lines.ToArray() }
 }
 
 # Plain lines for the result screen: what matched, what was left alone, and how to undo.
 function Get-TpmLaunchBoxTitleSummary {
     param([Parameter(Mandatory)]$Result)
     $summary = @{ Done = @(); NotChanged = '' }
-    if (-not $Result.PSObject.Properties['GamesDbState'] -or [string]$Result.GamesDbState -eq 'Off') { return $summary }
+    if (-not $Result.PSObject.Properties['GamesDbState']) { return $summary }
     $preview = ([string]$Result.Reason -eq 'PREVIEW')
-    switch ([string]$Result.GamesDbState) {
-        'Missing' { $summary.NotChanged = 'The LaunchBox game list was not found, so games keep the names TeknoParrot gives them.'; return $summary }
-        'Failed' { $summary.NotChanged = 'The LaunchBox game list could not be read, so games keep the names TeknoParrot gives them. Press D to see why.'; return $summary }
-    }
-    $matched = @($Result.TitleChanges).Count
+    $official = @(@($Result.TitleChanges) | Where-Object { $_.Id }).Count
+    $clean = @(@($Result.TitleChanges) | Where-Object { -not $_.Id -and $_.Old -cne $_.New }).Count
+    $filled = @(@($Result.TitleChanges) | Where-Object { $_.PSObject.Properties['Filled'] -and $_.Filled }).Count
     $review = @($Result.TitleReview).Count
-    $suggested = @(@($Result.TitleChanges) | Where-Object { $_.PSObject.Properties['Confidence'] -and $_.Confidence -in @('High', 'Medium') }).Count
-    if ($matched -gt 0) {
+    if ($official -gt 0) {
         $line = if ($preview) { '{0} would get the official name and Games Database ID, so LaunchBox can find info and artwork.' } else { '{0} got the official name and Games Database ID, so LaunchBox can find info and artwork.' }
-        $summary.Done = @(($line -f (Format-TpmGameCount -Count $matched)))
-        if ($suggested -gt 0) { $summary.Done += ('{0} of them {1} a best guess. Press D to see the other candidate.' -f $suggested, $(if ($suggested -eq 1) { 'is' } else { 'are' })) }
-        if (-not $preview -and [string]$Result.Outcome -eq 'SAVED') { $summary.Done += 'To undo, use Restore backup in the main menu.' }
+        $summary.Done += ($line -f (Format-TpmGameCount -Count $official))
     }
-    if ($review -gt 0) { $summary.NotChanged = ('{0} left with the old name: no sure match. Press D to see the closest names.' -f (Format-TpmGameCount -Count $review)) }
+    if ($clean -gt 0) {
+        $line = if ($preview) { '{0} would get a clean game name instead of a file name.' } else { '{0} got a clean game name instead of a file name.' }
+        $summary.Done += ($line -f (Format-TpmGameCount -Count $clean))
+    }
+    if ($filled -gt 0) {
+        $line = if ($preview) { '{0} would get the release year and developer filled in.' } else { '{0} got the release year and developer filled in.' }
+        $summary.Done += ($line -f (Format-TpmGameCount -Count $filled))
+    }
+    if (@($summary.Done).Count -gt 0 -and -not $preview -and [string]$Result.Outcome -eq 'SAVED') { $summary.Done += 'To undo, use Restore backup in the main menu.' }
+    switch ([string]$Result.GamesDbState) {
+        'Missing' { $summary.NotChanged = 'The LaunchBox game list was not found, so no Games Database ID was added.' }
+        'Failed' { $summary.NotChanged = 'The LaunchBox game list could not be read, so no Games Database ID was added. Press D to see why.' }
+        default { if ($review -gt 0) { $summary.NotChanged = ('{0} got no Games Database ID: no sure match. Press D to see the closest names.' -f (Format-TpmGameCount -Count $review)) } }
+    }
     return $summary
 }
 
@@ -47869,8 +51786,7 @@ function Read-TpmLaunchBoxTitleChoices {
     foreach ($item in $withOptions) {
         Write-TpmText -Text $item.Title -Color Cyan -BlankBefore
         $options = @($item.Options)
-        $reason = if ([string]$item.Status -eq 'Disagree') { 'Two sources disagree. Pick one, or Enter to skip.' } else { 'Closest names. Pick one, or Enter to skip.' }
-        Write-TpmText -Text $reason -Color DarkGray
+        Write-TpmText -Text ($item.Reason + ' Pick one, or Enter to skip.') -Color DarkGray
         for ($i = 0; $i -lt $options.Count; $i++) { Write-TpmText -Text ('[{0}] {1} (ID {2})' -f ($i + 1), $options[$i].Name, $options[$i].Id) -Color White }
         $pick = Read-TpmChoice -Prompt '  Your choice' -Choices (@('S') + @(1..$options.Count | ForEach-Object { [string]$_ })) -Default 'S'
         if ($pick -ne 'S') { $choices[[string]$item.File] = $options[[int]$pick - 1] }
@@ -47884,8 +51800,11 @@ function Write-TpmLaunchBoxOffer {
     Write-TpmText -Text 'Optional: add games to LaunchBox.' -Color Cyan -BlankBefore
     Write-TpmText -Text '[P] Preview first. No changes.' -Color White
     Write-TpmText -Text '[A] Add missing games (backed up).' -Color White
-    Write-TpmText -Text '[G] Fill in game details and make playlists (backed up).' -Color White
-    Write-TpmText -Text '[L] Link games for art and details (backed up).' -Color White -BlankBefore
+    Write-TpmText -Text '[G] Fill in game details and make playlists (backed up).' -Color White -BlankBefore
+    Write-TpmText -Text '[V] Group regions and versions of a game into one (backed up).' -Color White
+    Write-TpmText -Text '[S] Keep LaunchBox in step with TeknoParrot: removed, moved, renamed games (backed up).' -Color White -BlankBefore
+    Write-TpmText -Text '[L] Link games for art and details (backed up).' -Color White
+    Write-TpmText -Text '[C] Fill in players and controllers for Big Box (backed up).' -Color White
     Write-TpmText -Text '[F] Import file only. No changes.' -Color White -BlankBefore
     Write-TpmText -Text '[B] Skip this step.' -Color White
 }
@@ -47908,7 +51827,7 @@ function Invoke-TpmLaunchBoxStep {
         $lbPreviewChoice = $null
         $lbPreviewShownSummary = ''
         do {
-            $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'G', 'L', 'F', 'B') -Default 'P'
+            $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'G', 'V', 'S', 'L', 'C', 'F', 'B') -Default 'P'
             if ($lbChoice -eq 'P') {
                 Write-TpmText -Text 'Preview: TeknoParrot Manager only reads your LaunchBox files.' -Color DarkCyan
                 $previewRoot = $lbRoot
@@ -47919,7 +51838,7 @@ function Invoke-TpmLaunchBoxStep {
                         $lbPreviewRoot = $previewRoot
                         $lbPreviewChoice = $previewChoice
                         $previewPlatforms = switch ($previewChoice) { '1' { @('Arcade') } '2' { @('TeknoParrot') } '3' { @('Arcade','TeknoParrot') } }
-                        $lbPreviewResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $previewRoot -platformNames $previewPlatforms -PlanOnly -UseGamesDb
+                        $lbPreviewResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $previewRoot -platformNames $previewPlatforms -PlanOnly -UseGamesDb -DatIndex $datIndex
                         Write-TpmLaunchBoxResult -Result $lbPreviewResult -Unattended:$Unattended
                         $lbPreviewShownSummary = [string]$lbPreviewResult.Summary
                     }
@@ -47929,59 +51848,63 @@ function Invoke-TpmLaunchBoxStep {
         if ($lbChoice -eq 'A') {
             Write-TpmLaunchBoxWriteNotice
             $lbWriteNoticeBlocks = Get-TpmLaunchBoxWriteNoticeBlocks
-            if ((Read-TpmYesNo -Prompt 'Add the missing games to LaunchBox now? (Y/N, D = about the risks)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $lbWriteNoticeBlocks }) -eq 'Y') {
-                $writeRoot = $lbRoot
-                if (-not $writeRoot) {
-                    if ($lbPreviewRoot) {
-                        $writeRoot = Read-HostSafe ("  LaunchBox install folder (Enter = previewed folder {0})" -f $lbPreviewRoot) -Default $lbPreviewRoot
-                    } else {
-                        $writeRoot = Read-HostSafe '  LaunchBox install folder'
-                    }
+            $writeRoot = $lbRoot
+            if (-not $writeRoot) {
+                if ($lbPreviewRoot) {
+                    $writeRoot = Read-HostSafe ("  LaunchBox install folder (Enter = previewed folder {0})" -f $lbPreviewRoot) -Default $lbPreviewRoot
+                } else {
+                    $writeRoot = Read-HostSafe '  LaunchBox install folder'
                 }
-                $platformDefault = if ($lbPreviewChoice -in @('1','2','3')) { [string]$lbPreviewChoice } else { '2' }
-                $platformPrompt = if ($lbPreviewChoice -in @('1','2','3')) { "  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel (Enter = previewed choice $platformDefault)" } else { '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel' }
-                $platformChoice = Read-TpmChoice -Prompt $platformPrompt -Choices @('1','2','3','4','B') -Default $platformDefault
-                if ($platformChoice -ne 'B') {
-                    $targetPlatforms = switch ($platformChoice) {
-                        '1' { @('Arcade') }
-                        '2' { @('TeknoParrot') }
-                        '3' { @('Arcade','TeknoParrot') }
-                        '4' { @(Read-HostSafe '  Custom platform name (must be a safe filename)') }
-                    }
-                    # Show exactly what would change, then ask for consent to that plan (read-only preview first).
-                    # Official names and Games Database IDs from LaunchBox's own game list (read only). Asked only when the list is there;
-                    # when it is not, the plan says so in plain words and games keep today's names.
-                    $lbTitleParams = @{ UseGamesDb = $true }
-                    if ($writeRoot -and (Test-Path -LiteralPath (Get-TpmGamesDbPath -LaunchBoxRoot $writeRoot) -PathType Leaf)) {
-                        $lbTitleChoice = Read-TpmChoice -Prompt '  Use official game names so LaunchBox finds info and artwork? 1 new games, 2 new and games already added, N no' -Choices @('1', '2', 'N') -Default '1'
-                        if ($lbTitleChoice -eq 'N') { $lbTitleParams = @{} } elseif ($lbTitleChoice -eq '2') { $lbTitleParams.IncludeExisting = $true }
-                    }
-                    $lbPlanResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms -PlanOnly @lbTitleParams
-                    $lbShownBefore = $lbPreviewShownSummary
-                    if ($lbPlanResult.PSObject.Properties['TitleReview'] -and @($lbPlanResult.TitleReview).Count -gt 0) {
-                        $lbTitleParams.GamesDbChoices = Read-TpmLaunchBoxTitleChoices -Review @($lbPlanResult.TitleReview)
-                        if ($lbTitleParams.GamesDbChoices.Count -gt 0) { $lbPlanResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms -PlanOnly @lbTitleParams }
-                    }
-                    if ($lbTitleParams.ContainsKey('UseGamesDb')) { $lbShownBefore = '' }
-                    Write-TpmLaunchBoxPlan -Result $lbPlanResult -AlreadyShownSummary $lbShownBefore -Unattended:$Unattended
-                    if ($lbPlanResult.Reason -eq 'PREVIEW' -and [int]$lbPlanResult.WouldChangeFiles -gt 0) {
-                        if ((Read-TpmYesNo -Prompt 'Write exactly these changes after a verified backup? (Y/N)' -Default 'N') -eq 'Y') {
-                            $lbWriteResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms @lbTitleParams
-                            Write-TpmLaunchBoxResult -Result $lbWriteResult
-                        } else {
-                            Write-Host '  LaunchBox write canceled; nothing was changed.' -ForegroundColor DarkGray
-                        }
+            }
+            $platformDefault = if ($lbPreviewChoice -in @('1','2','3')) { [string]$lbPreviewChoice } else { '2' }
+            $platformPrompt = if ($lbPreviewChoice -in @('1','2','3')) { "  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel (Enter = previewed choice $platformDefault)" } else { '  Platform: 1 Arcade, 2 TeknoParrot, 3 Both, 4 Custom, B cancel' }
+            $platformChoice = Read-TpmChoice -Prompt $platformPrompt -Choices @('1','2','3','4','B') -Default $platformDefault
+            if ($platformChoice -ne 'B') {
+                $targetPlatforms = switch ($platformChoice) {
+                    '1' { @('Arcade') }
+                    '2' { @('TeknoParrot') }
+                    '3' { @('Arcade','TeknoParrot') }
+                    '4' { @(Read-HostSafe '  Custom platform name (must be a safe filename)') }
+                }
+                # Show exactly what would change, then ask for consent to that plan (read-only preview first).
+                # Official names and Games Database IDs from LaunchBox's own game list (read only). Asked only when the list is there;
+                # when it is not, the plan says so in plain words and games keep today's names.
+                $lbTitleParams = @{ UseGamesDb = $true; DatIndex = $datIndex }
+                if ($writeRoot -and (Test-Path -LiteralPath (Get-TpmGamesDbPath -LaunchBoxRoot $writeRoot) -PathType Leaf)) {
+                    $lbTitleChoice = Read-TpmChoice -Prompt '  Use official game names so LaunchBox finds info and artwork? 1 new games, 2 new and games already added, N no' -Choices @('1', '2', 'N') -Default '1'
+                    if ($lbTitleChoice -eq 'N') { $lbTitleParams = @{ DatIndex = $datIndex } } elseif ($lbTitleChoice -eq '2') { $lbTitleParams.IncludeExisting = $true }
+                }
+                $lbPlanResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms -PlanOnly @lbTitleParams
+                $lbShownBefore = $lbPreviewShownSummary
+                if ($lbPlanResult.PSObject.Properties['TitleReview'] -and @($lbPlanResult.TitleReview).Count -gt 0) {
+                    $lbTitleParams.GamesDbChoices = Read-TpmLaunchBoxTitleChoices -Review @($lbPlanResult.TitleReview)
+                    if ($lbTitleParams.GamesDbChoices.Count -gt 0) { $lbPlanResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms -PlanOnly @lbTitleParams }
+                }
+                if ($lbTitleParams.ContainsKey('UseGamesDb')) { $lbShownBefore = '' }
+                Write-TpmLaunchBoxPlan -Result $lbPlanResult -AlreadyShownSummary $lbShownBefore -Unattended:$Unattended
+                if ($lbPlanResult.Reason -eq 'PREVIEW' -and [int]$lbPlanResult.WouldChangeFiles -gt 0) {
+                    if ((Read-TpmYesNo -Prompt 'Write exactly these changes after a verified backup? (Y/N, D = about the risks)' -Default 'N' -DetailsAction { Show-TpmDetailBlocks -Blocks $lbWriteNoticeBlocks }) -eq 'Y') {
+                        $lbWriteResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $writeRoot -platformNames $targetPlatforms @lbTitleParams
+                        Write-TpmLaunchBoxResult -Result $lbWriteResult
+                    } else {
+                        Write-Host '  LaunchBox write canceled; nothing was changed.' -ForegroundColor DarkGray
                     }
                 }
             }
         } elseif ($lbChoice -eq 'G') {
-            Invoke-TpmLaunchBoxEnrichStep -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -DatIndex $datIndex
+            Invoke-TpmLaunchBoxEnrichStep -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -TpRoot $tpRoot -DatIndex $datIndex
+        } elseif ($lbChoice -eq 'V') {
+            Invoke-TpmLaunchBoxChangeStep -Kind Group -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -TpRoot $tpRoot -DatIndex $datIndex
+        } elseif ($lbChoice -eq 'S') {
+            Invoke-TpmLaunchBoxChangeStep -Kind Sync -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -TpRoot $tpRoot -DatIndex $datIndex
         } elseif ($lbChoice -eq 'L') {
             Invoke-TpmLaunchBoxIdLinkStep -LbRoot $lbRoot -TpRoot $tpRoot -DatIndex $datIndex
+        } elseif ($lbChoice -eq 'C') {
+            Invoke-TpmLaunchBoxPlayerStep -UserProfilesDir $userProfilesDir -LbRoot $lbRoot -TpRoot $tpRoot
         } elseif ($lbChoice -eq 'F') {
             $doLB = "Y"
         }
-        if ($lbChoice -ne 'B') { Invoke-TpmLaunchBoxMediaStep -lbRoot $lbRoot -userProfilesDir $userProfilesDir -Unattended:$Unattended -DryRun:$dryRunActive }
+        if ($lbChoice -ne 'B') { Invoke-TpmLaunchBoxMediaStep -lbRoot $lbRoot -userProfilesDir $userProfilesDir -Unattended:$Unattended -DryRun:$dryRunActive -TpRoot $tpRoot -DatIndex $datIndex }
     }
 
 
@@ -48165,12 +52088,61 @@ function Export-LaunchBoxXml {
 # profile. A query failure is not treated as an absent database. The result
 # is explicit so the caller cannot proceed to profile writes after a partial
 # backup.
+# Tells whether every data file inside a TAR-format game backup is valid UTF-8: $true yes, $false some bytes are not (a UTF8 database
+# would refuse that table and it would come back empty), $null the file is not a readable TAR backup so nothing is known.
+# Only reads the file.
+function Test-PostgresBackupDataIsUtf8 {
+    param([Parameter(Mandatory)][string]$BackupFile)
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($BackupFile)
+        $strict = New-Object System.Text.UTF8Encoding($false, $true)
+        $header = New-Object byte[] 512
+        $buffer = New-Object byte[] 1048576
+        $firstBlock = $true
+        while ($stream.Read($header, 0, 512) -eq 512) {
+            if ($firstBlock) {
+                if ([System.Text.Encoding]::ASCII.GetString($header, 257, 5) -cne 'ustar') { return $null }
+                $firstBlock = $false
+            }
+            if ($header[0] -eq 0) { break }
+            $entryName = [System.Text.Encoding]::ASCII.GetString($header, 0, 100).TrimEnd([char]0)
+            $size = [Convert]::ToInt64([System.Text.Encoding]::ASCII.GetString($header, 124, 12).Trim([char]0, ' '), 8)
+            $isData = ($entryName -like '*.dat' -and $entryName -ne 'toc.dat')
+            $decoder = $strict.GetDecoder()
+            $left = $size
+            while ($left -gt 0) {
+                $read = $stream.Read($buffer, 0, [int][Math]::Min($left, $buffer.Length))
+                if ($read -le 0) { return $null }
+                if ($isData) { [void]$decoder.GetCharCount($buffer, 0, $read, $false) }
+                $left -= $read
+            }
+            if ($isData) { [void]$decoder.GetCharCount($buffer, 0, 0, $true) }
+            $padding = (512 - ($size % 512)) % 512
+            if ($padding -gt 0) { [void]$stream.Seek($padding, [System.IO.SeekOrigin]::Current) }
+        }
+        if ($firstBlock) { return $null }
+        return $true
+    } catch [System.Text.DecoderFallbackException] {
+        return $false
+    } catch {
+        return $null
+    } finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
 # Returns the encoding used by the shipped PostgreSQL game backups. The
 # PostgreSQL restore contract is deliberately limited to the installed 8.3
 # client tools; no newer client or compatibility path is accepted.
+# A caller that knows the backup file passes it: for the one UTF8 database, a backup whose data is not valid UTF-8 is restored into
+# SQL_ASCII (which keeps every byte as it is) so that no table comes back empty. Without the file the rule is by name only.
 function Get-PostgresRestoreEncoding {
-    param([Parameter(Mandatory)][string]$DbName)
-    if ($DbName -ieq 'GameDB06') { return 'UTF8' }
+    param([Parameter(Mandatory)][string]$DbName, [string]$BackupFile = '')
+    if ($DbName -ieq 'GameDB06') {
+        if (-not [string]::IsNullOrWhiteSpace($BackupFile) -and ((Test-PostgresBackupDataIsUtf8 -BackupFile $BackupFile) -eq $false)) { return 'SQL_ASCII' }
+        return 'UTF8'
+    }
     return 'SQL_ASCII'
 }
 
@@ -50257,9 +54229,9 @@ function Write-TpmActionRequiredReport {
         Write-TpmAtomicTextFile -Path $ActionPath -Text $text -Operation 'ACTION REQUIRED report write'
         if (-not $Quiet) {
             Write-Host ""
-            Write-Host "  Action items saved to:" -ForegroundColor Green
+            Write-Host $(if ($DesignOnly) { '  Notes saved to:' } else { '  Action items saved to:' }) -ForegroundColor Green
             Write-Host "  $ActionPath" -ForegroundColor Cyan
-            Write-Host "  Open that file to review everything you need to do manually." -ForegroundColor DarkCyan
+            Write-Host $(if ($DesignOnly) { '  Nothing failed. Open that file if you want to read the notes.' } else { '  Open that file to review everything you need to do manually.' }) -ForegroundColor DarkCyan
             Write-Log "Action items written to $ActionPath"
         }
         return $true
@@ -50659,7 +54631,7 @@ function Get-ControlReadinessRegistrationState {
     # Resolve-RegisteredGameFolder); a $Code sourced from an externally-fetched
     # dat index is untrusted input, so reject anything else before it is ever
     # joined into a path rather than let a traversal sequence reach Join-Path.
-    if ($Code -notmatch '^[\w]+$') { return 'Unregistered' }
+    if ($Code -notmatch '^[\w-]+$') { return 'Unregistered' }
 
     $path = Join-Path $UserProfilesDir "$Code.xml"
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return 'Unregistered' }
@@ -50854,12 +54826,15 @@ function Get-ControlReadinessControlsState {
 
 # Classifies launch-observation state for one profile code. TPM does not
 # launch games itself and has no launch-outcome log to read (TeknoParrotUI
-# and BudgieLoader own the launch path), so this dimension is always
-# 'NotTestedByTpm' today. 'ObservedSuccess'/'ObservedFailure' remain as
-# named states for a future real evidence source -- never synthesize them
+# and BudgieLoader own the launch path), so this dimension is 'NotTestedByTpm'
+# unless the player told TPM they played the game and its controls worked
+# (Get-TpmControlVerificationState says that record is still Current). Then it
+# is 'ObservedSuccess', observed by the player. 'ObservedFailure' stays a
+# named state for a future real evidence source -- never synthesize either one
 # from registration, controls state, or any other proxy.
 function Get-ControlReadinessLaunchState {
-    param([string]$Code)
+    param([string]$Code, [string]$VerificationStatus = '')
+    if ($VerificationStatus -eq 'Current') { return 'ObservedSuccess' }
     return 'NotTestedByTpm'
 }
 
@@ -50875,7 +54850,7 @@ function Read-ControlReadinessProfileDocument {
     # Same code-shape guard as Get-ControlReadinessRegistrationState -- do not
     # join an unvalidated $Code into either directory's path.
     $sourcePath = $null
-    if ($Code -match '^[\w]+$') {
+    if ($Code -match '^[\w-]+$') {
         $userProfilePath = Join-Path $UserProfilesDir "$Code.xml"
         $templatePath    = if ($GameProfilesDir) { Join-Path $GameProfilesDir "$Code.xml" } else { '' }
         $sourcePath =
@@ -50903,26 +54878,38 @@ function Get-ControlReadinessAssessment {
     param(
         [Parameter(Mandatory)][string]$Code,
         [Parameter(Mandatory)][string]$UserProfilesDir,
-        [string]$GameProfilesDir = ''
+        [string]$GameProfilesDir = '',
+        [string]$StateRoot = ''
     )
 
     $registration = Get-ControlReadinessRegistrationState -Code $Code -UserProfilesDir $UserProfilesDir
 
     $doc = Read-ControlReadinessProfileDocument -Code $Code -UserProfilesDir $UserProfilesDir -GameProfilesDir $GameProfilesDir
 
-    return [pscustomobject]@{
-        Code         = $Code
-        Registration = $registration
-        Controls     = Get-ControlReadinessControlsState $doc $Code
-        Launch       = Get-ControlReadinessLaunchState -Code $Code
+    # Verified needs the player's own record of a play test that still matches the game's controls (issue #307) and no
+    # first-run or calibration step left to do. A reviewed contract that says controls are Missing or Unsupported is not overridden.
+    $verification = Get-TpmControlVerificationState -Code $Code -Doc $doc -StateRoot $StateRoot
+    $controls = Get-ControlReadinessControlsState $doc $Code
+    $earned = ($verification.Status -eq 'Current' -and @($verification.Outstanding).Count -eq 0 -and $controls -in @('NotVerified', 'Unknown'))
+    if ($earned) { $controls = 'Verified' }
+
+    $row = [pscustomobject]@{
+        Code               = $Code
+        Registration       = $registration
+        Controls           = $controls
+        Launch             = Get-ControlReadinessLaunchState -Code $Code -VerificationStatus $verification.Status
+        VerificationStatus = $verification.Status
+        SetupOutstanding   = @($verification.Outstanding)
     }
+    if ($earned) { Add-Member -InputObject $row -NotePropertyName VerificationEvidence -NotePropertyValue $verification.Evidence }
+    return $row
 }
 
 # Returns $true only when $Assessment carries a structured VerificationEvidence
 # record that can actually justify Controls = 'Verified'. Get-ControlReadinessAssessment
-# itself never sets Controls to 'Verified' -- this engine has no evidence
-# source that could earn it (see Get-ControlReadinessControlsState) -- so the
-# only way 'Verified' reaches the formatter today is a caller constructing an
+# sets Controls to 'Verified' only from the player's own saved play-test record
+# (Get-TpmControlVerificationState) and attaches that record as VerificationEvidence,
+# so nothing else reaches 'Verified'. The same gap is closed for a caller constructing an
 # assessment object by hand. Issue #255 is explicit that registration, wizard
 # completion, a selected Input API, or a profile's mere existence must never
 # imply Verified; this closes the same gap for any externally-built
@@ -51119,6 +55106,10 @@ function Get-OnboardingHandoffSummaryLines {
         $lines += ''
         $lines += 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
     }
+    $outstanding = @()
+    if ($Assessment.PSObject.Properties['SetupOutstanding']) { $outstanding = @($Assessment.SetupOutstanding) }
+    if ($outstanding -contains 'Calibration') { $lines += 'Calibrate the wheel, gun or other analog controls for this game before treating it as ready.' }
+    if ($outstanding -contains 'FirstRun') { $lines += 'Do the first-run Test or Service menu step for this game before treating it as ready.' }
 
     return $lines
 }
@@ -51218,15 +55209,18 @@ function Get-ControlReadinessActionItems {
 # The contract it follows is shaped like docs/architecture/CONTROLLER_CAPABILITY_CONTRACT.md (issue #303). Reading the
 # profile file is a separate step (Get-TpmControlBindingFacts) from deciding what the facts mean (Get-TpmControlCoverageInventory),
 # so another device or storage layout only needs a new fact reader.
+# Every game gets a contract: the reviewed one when the saved profile is the reviewed revision, otherwise one read from TeknoParrot's
+# own game file (Get-TpmDerivedControlContract), marked as not reviewed. The audit functions at the end sort every registered game.
 # Depends on: Get-ControlReadinessKnownRequirements, Get-ControlReadinessDocumentFit, Read-ControlReadinessProfileDocument,
-# Get-ButtonNodes, Test-ControlReadinessButtonBindingUsable, Test-ControlReadinessAnalogMappingUsable.
+# Get-ButtonNodes, Test-ControlReadinessButtonBindingUsable, Test-ControlReadinessAnalogMappingUsable, Test-TpmMappingInPlayerOneScope,
+# Get-TpmProfileFriendlyTitle, Get-TpmRegisteredProfileFilesWithDiscoveryProgress, Invoke-TpmProgressGroup, Write-TpmOutcome.
 
 # Builds the reviewed controls contract for one profile code from the known-requirements list. Returns $null for a code
 # that has no reviewed entry, so an unknown game is never described from a guess.
 function Get-TpmControlCoverageContract {
     param([string]$Code)
 
-    if ([string]::IsNullOrWhiteSpace($Code) -or $Code -notmatch '^[\w]+$') { return $null }
+    if ([string]::IsNullOrWhiteSpace($Code) -or $Code -notmatch '^[\w-]+$') { return $null }
     $requirements = Get-ControlReadinessKnownRequirements -Code $Code
     if ($null -eq $requirements) { return $null }
 
@@ -51268,32 +55262,43 @@ function Get-TpmControlBindingFacts {
     param(
         $Doc,
         [Parameter(Mandatory)]$Contract,
-        [Parameter(Mandatory)][string]$Code
+        [Parameter(Mandatory)][string]$Code,
+        # Set for a contract read from the game's own file: the identity the saved profile must match, and the stricter binding rule.
+        $Identity = $null
     )
 
-    $requirements = Get-ControlReadinessKnownRequirements -Code $Code
-    if ($null -eq $requirements -or $null -eq $Doc -or $null -eq $Doc.GameProfile) {
-        return [pscustomobject]@{ Fit = 'Unknown'; UsableControlIds = @() }
-    }
+    $strict = ($null -ne $Identity)
+    $requirements = if ($strict) { $Identity } else { Get-ControlReadinessKnownRequirements -Code $Code }
+    if ($null -eq $requirements) { return [pscustomobject]@{ Fit = 'Unknown'; Why = 'NoContract'; UsableControlIds = @() } }
+    if ($null -eq $Doc -or $null -eq $Doc.GameProfile) { return [pscustomobject]@{ Fit = 'Unknown'; Why = 'NoProfile'; UsableControlIds = @() } }
     $fit = Get-ControlReadinessDocumentFit -Doc $Doc -Requirements $requirements
-    if ($fit -ne 'Ok') { return [pscustomobject]@{ Fit = $fit; UsableControlIds = @() } }
+    if ($fit -ne 'Ok') { return [pscustomobject]@{ Fit = $fit; Why = $(if ($fit -eq 'Unknown') { 'DifferentVersion' } else { '' }); UsableControlIds = @() } }
 
     $byMapping = @{}
     foreach ($button in @(Get-ButtonNodes $Doc)) {
         $mappingNode = $button.SelectSingleNode('InputMapping')
         if ($mappingNode -and -not [string]::IsNullOrWhiteSpace($mappingNode.InnerText)) {
-            $byMapping[$mappingNode.InnerText.Trim()] = $button
+            $key = $mappingNode.InnerText.Trim()
+            if (-not $byMapping.ContainsKey($key)) { $byMapping[$key] = New-Object System.Collections.ArrayList }
+            [void]$byMapping[$key].Add($button)
         }
     }
 
     $usable = New-Object System.Collections.ArrayList
     foreach ($control in @($Contract.SemanticControls)) {
         if (-not $byMapping.ContainsKey($control.ControlId)) { continue }
-        $node = $byMapping[$control.ControlId]
-        $isUsable = if ($control.Kind -eq 'Axis') { Test-ControlReadinessAnalogMappingUsable $node } else { Test-ControlReadinessButtonBindingUsable $node }
+        $nodes = @($byMapping[$control.ControlId])
+        if ($strict) {
+            # A game file often shows one control as several buttons (for example an axis and its keyboard halves): one usable binding is enough,
+            # and an axis also needs a declared type.
+            $isUsable = (@($nodes | Where-Object { Test-ControlReadinessButtonBindingUsable $_ }).Count -gt 0) -and ($control.Kind -ne 'Axis' -or @($nodes | Where-Object { Test-ControlReadinessAnalogMappingUsable $_ }).Count -gt 0)
+        } else {
+            $node = $nodes[$nodes.Count - 1]
+            $isUsable = if ($control.Kind -eq 'Axis') { Test-ControlReadinessAnalogMappingUsable $node } else { Test-ControlReadinessButtonBindingUsable $node }
+        }
         if ($isUsable) { [void]$usable.Add([string]$control.ControlId) }
     }
-    return [pscustomobject]@{ Fit = 'Ok'; UsableControlIds = @($usable) }
+    return [pscustomobject]@{ Fit = 'Ok'; Why = ''; UsableControlIds = @($usable) }
 }
 
 # Turns a contract and the facts about one profile into one row per control plus an overall state. Pure: the same inputs
@@ -51348,9 +55353,27 @@ function Get-TpmControlCoverageInventory {
         Structural      = $overall
         Setup           = $setupOverall
         Verification    = 'NotVerified'
+        # High only for a contract a person reviewed. A contract read from the game's own file is Medium: not reviewed.
+        Confidence      = $(if ([string]$Contract.Evidence.ReviewState -eq 'Reviewed') { 'High' } else { 'Medium' })
+        Why             = $(if ($overall -ne 'Unknown') { '' } elseif ([string]$Facts.Why) { [string]$Facts.Why } elseif ($fit -eq 'Ok') { 'NoControls' } else { '' })
         Controls        = @($rows)
         MissingControls = @($required | Where-Object { $_.Structural -eq 'Missing' } | ForEach-Object { $_.Meaning })
+        # Controls the game lists but TPM cannot say it needs (Test, Service, Coin, and ones shown only after another setting).
+        OptionalMissingControls = @($rows | Where-Object { $_.Requirement -eq 'Optional' -and $_.Structural -eq 'Missing' } | ForEach-Object { $_.Meaning })
         ReadOnly        = $true
+    }
+}
+
+# Why TPM cannot tell what a game needs, in plain words (a phrase that continues "TPM cannot tell which controls this game needs").
+function Get-TpmControlCoverageWhyText {
+    param([string]$Why)
+    switch ($Why) {
+        'NoGameFile'       { return 'TeknoParrot''s own file for this game was not found' }
+        'NoControls'       { return 'TPM does not recognize the names this game uses for its player 1 controls' }
+        'DifferentVersion' { return 'its saved settings are for a different version of the game file than TeknoParrot has now. Open it once in TeknoParrotUI' }
+        'Unreadable'       { return 'its settings file could not be read' }
+        'NoProfile'        { return 'it has no settings file yet' }
+        default            { return '' }
     }
 }
 
@@ -51364,16 +55387,119 @@ function Get-TpmControlCoverageLines {
         'Partial'     { [void]$lines.Add('Some controls this game needs are not set up yet.') }
         'Missing'     { [void]$lines.Add('The controls this game needs are not set up yet.') }
         'Unsupported' { [void]$lines.Add('This game uses an input type TPM cannot check.') }
-        default       { [void]$lines.Add('TPM cannot tell which controls this game needs.') }
+        default {
+            $whyText = Get-TpmControlCoverageWhyText -Why ([string]$Inventory.Why)
+            [void]$lines.Add($(if ($whyText) { 'TPM cannot tell which controls this game needs: ' + $whyText + '.' } else { 'TPM cannot tell which controls this game needs.' }))
+        }
     }
     $missing = @($Inventory.MissingControls)
     if ($missing.Count -gt 0) { [void]$lines.Add('Still needed: ' + ($missing -join ', ') + '.') }
+    $optional = @($Inventory.OptionalMissingControls)
+    if ($optional.Count -gt 0) { [void]$lines.Add('Not set up, and TPM cannot tell if the game needs them: ' + ($optional -join ', ') + '.') }
+    if ([string]$Inventory.Confidence -eq 'Medium') { [void]$lines.Add('TPM read this list from TeknoParrot''s own file for the game. A person has not checked it.') }
     [void]$lines.Add('TPM has not tested them in a game, so it cannot say the game is ready.')
     return @($lines)
 }
 
+# Reads TeknoParrot's own game file (GameProfiles) for one code. Returns $null when it is missing or cannot be read.
+# Sha256 is lower-case hex, the identity a contract derived from this file is bound to.
+function Read-TpmGameTemplate {
+    param([Parameter(Mandatory)][string]$Code, [string]$GameProfilesDir = '')
+    if ([string]::IsNullOrWhiteSpace($GameProfilesDir) -or $Code -ne [System.IO.Path]::GetFileName($Code) -or $Code -match '[:*?"<>|]') { return $null }
+    $path = Join-Path $GameProfilesDir "$Code.xml"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try {
+        $doc = Read-Xml $path
+        if ($null -eq $doc.GameProfile) { return $null }
+        return [pscustomobject]@{ Doc = $doc; Path = $path; Sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
+    } catch { return $null }
+}
+
+# What the game file says about itself. A saved game profile is only compared with it when all three agree.
+function Get-TpmTemplateIdentity {
+    param([Parameter(Mandatory)]$TemplateDoc)
+    $text = { param($Name) $n = $TemplateDoc.GameProfile.SelectSingleNode($Name); if ($n) { $n.InnerText.Trim() } else { '' } }
+    $revision = $null
+    $revisionText = & $text 'GameProfileRevision'
+    if ($revisionText) { [void][int]::TryParse($revisionText, [ref]$revision) }
+    return [pscustomobject]@{ ExpectedExecutableName = (& $text 'ExecutableName'); ExpectedEmulationProfile = (& $text 'EmulationProfile'); ExpectedGameProfileRevision = $revision }
+}
+
+# Builds a contract from TeknoParrot's own game file: the controls the game lists for player 1 and the cabinet, named by
+# the game's own button names. Nobody has reviewed it, so Evidence says PendingReview; the revision and hash tie it to this file.
+# Required = a player control the game always shows. Optional = Test, Service, Coin, and controls the game shows only when
+# another setting asks for them: TPM cannot tell whether the game needs those. Returns $null when the file lists no such control.
+function Get-TpmDerivedControlContract {
+    param([Parameter(Mandatory)][string]$Code, [Parameter(Mandatory)]$TemplateDoc, [Parameter(Mandatory)][string]$TemplateSha256)
+
+    $groups = [ordered]@{}
+    foreach ($node in @(Get-ButtonNodes $TemplateDoc)) {
+        $mappingNode = $node.SelectSingleNode('InputMapping')
+        if ($null -eq $mappingNode -or [string]::IsNullOrWhiteSpace($mappingNode.InnerText)) { continue }
+        $mapping = $mappingNode.InnerText.Trim()
+        if (-not $groups.Contains($mapping)) { $groups[$mapping] = New-Object System.Collections.ArrayList }
+        [void]$groups[$mapping].Add($node)
+    }
+    $controls = New-Object System.Collections.ArrayList
+    foreach ($mapping in $groups.Keys) {
+        $nodes = @($groups[$mapping])
+        $nameNode = $nodes[0].SelectSingleNode('ButtonName')
+        $label = if ($nameNode -and -not [string]::IsNullOrWhiteSpace($nameNode.InnerText)) { $nameNode.InnerText.Trim() } else { $mapping }
+        if (-not (Test-TpmMappingInPlayerOneScope -Mapping $mapping -Label $label)) { continue }
+        $isAxis = @($nodes | Where-Object { $a = $_.SelectSingleNode('AnalogType'); $a -and -not [string]::IsNullOrWhiteSpace($a.InnerText) -and $a.InnerText.Trim() -ne 'None' }).Count -gt 0
+        $onlyWhenAsked = @($nodes | Where-Object { $v = $_.SelectSingleNode('VisibleWhen'); $v -and -not [string]::IsNullOrWhiteSpace($v.InnerText) }).Count -eq $nodes.Count
+        $isCabinet = ($mapping -match '^(Test|Service\d*|Coin\d+)$')
+        [void]$controls.Add([pscustomobject]@{
+            ControlId   = $mapping
+            Kind        = $(if ($isAxis) { 'Axis' } else { 'Button' })
+            Meaning     = $label
+            Requirement = $(if ($isCabinet -or $onlyWhenAsked) { 'Optional' } else { 'Required' })
+            Bindable    = $true
+            Scope       = $(if ($isCabinet) { 'Cabinet' } else { 'Player' })
+        })
+    }
+    if ($controls.Count -eq 0) { return $null }
+
+    $identity = Get-TpmTemplateIdentity -TemplateDoc $TemplateDoc
+    $id = $Code.ToLowerInvariant()
+    if ($id.Length -gt 50) { $id = $id.Substring(0, 50) }
+    return [pscustomobject]@{
+        ContractVersion   = 'TpmControllerCapability/v1'
+        MinReaderVersion  = 1
+        ProfileId         = ($id + '-derived')
+        ProfileRevision   = 1
+        ControllerContext = [pscustomobject]@{ DeviceClass = 'Unknown'; PlayerSlot = 'P1'; SelectionSource = 'Unset' }
+        SemanticControls  = @($controls)
+        Evidence          = [pscustomobject]@{ Origin = 'UserProvided'; ReviewState = 'PendingReview'; ReviewedUtc = $null; SourceNote = 'Read from the game file TeknoParrot ships; no person has reviewed it.' }
+        # For a derived contract the contract revision is the game file's own revision.
+        GameContracts     = @([pscustomobject]@{ GameProfileId = $Code; GameProfileHash = $TemplateSha256; ContractRevision = $(if ($null -ne $identity.ExpectedGameProfileRevision -and $identity.ExpectedGameProfileRevision -ge 1) { [int]$identity.ExpectedGameProfileRevision } else { 1 }) })
+    }
+}
+
+# Picks the contract for one game and reads the facts against it. The reviewed contract wins when the saved profile is the
+# reviewed revision; otherwise the contract comes from TeknoParrot's own game file. Contract is $null, with Why, when
+# neither exists. Read-only.
+function Get-TpmGameControlContract {
+    param([Parameter(Mandatory)][string]$Code, $UserDoc = $null, $Template = $null)
+
+    $reviewed = Get-TpmControlCoverageContract -Code $Code
+    $reviewedFacts = $null
+    if ($null -ne $reviewed) {
+        $reviewedFacts = Get-TpmControlBindingFacts -Doc $UserDoc -Contract $reviewed -Code $Code
+        if ($reviewedFacts.Fit -ne 'Unknown') { return [pscustomobject]@{ Contract = $reviewed; Facts = $reviewedFacts; Source = 'Reviewed'; Why = '' } }
+    }
+    if ($null -ne $Template) {
+        $derived = Get-TpmDerivedControlContract -Code $Code -TemplateDoc $Template.Doc -TemplateSha256 $Template.Sha256
+        if ($null -eq $derived) { return [pscustomobject]@{ Contract = $null; Facts = $null; Source = 'None'; Why = 'NoControls' } }
+        $facts = Get-TpmControlBindingFacts -Doc $UserDoc -Contract $derived -Code $Code -Identity (Get-TpmTemplateIdentity -TemplateDoc $Template.Doc)
+        return [pscustomobject]@{ Contract = $derived; Facts = $facts; Source = 'Derived'; Why = '' }
+    }
+    if ($null -ne $reviewed) { return [pscustomobject]@{ Contract = $reviewed; Facts = $reviewedFacts; Source = 'Reviewed'; Why = '' } }
+    return [pscustomobject]@{ Contract = $null; Facts = $null; Source = 'None'; Why = 'NoGameFile' }
+}
+
 # Reads the profile for one code (the real UserProfile, otherwise the GameProfiles template) and returns its inventory,
-# or $null when the code has no reviewed contract. Read-only.
+# or $null when there is neither a reviewed contract nor a game file to read one from. Read-only.
 function Get-TpmControlCoverage {
     param(
         [Parameter(Mandatory)][string]$Code,
@@ -51381,14 +55507,312 @@ function Get-TpmControlCoverage {
         [string]$GameProfilesDir = ''
     )
 
-    $contract = Get-TpmControlCoverageContract -Code $Code
-    if ($null -eq $contract) { return $null }
     $doc = Read-ControlReadinessProfileDocument -Code $Code -UserProfilesDir $UserProfilesDir -GameProfilesDir $GameProfilesDir
-    $facts = Get-TpmControlBindingFacts -Doc $doc -Contract $contract -Code $Code
-    return Get-TpmControlCoverageInventory -Contract $contract -Facts $facts
+    $resolved = Get-TpmGameControlContract -Code $Code -UserDoc $doc -Template (Read-TpmGameTemplate -Code $Code -GameProfilesDir $GameProfilesDir)
+    if ($null -eq $resolved.Contract) { return $null }
+    return Get-TpmControlCoverageInventory -Contract $resolved.Contract -Facts $resolved.Facts
+}
+
+# The audit of many games: one row per registered game, and the counts. Profiles are the registered UserProfile files.
+# A game TPM cannot read a contract for is Unknown with the reason; nothing is guessed. Read-only.
+function Get-TpmControlCoverageAudit {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Profiles, [string]$GameProfilesDir = '')
+
+    $rows = New-Object System.Collections.ArrayList
+    foreach ($file in @($Profiles)) {
+        $code = [string]$file.BaseName
+        $row = [pscustomobject]@{ Code = $code; Title = $code; Structural = 'Unknown'; Confidence = 'None'; Why = ''; Missing = @(); OptionalMissing = @() }
+        try { $doc = Read-Xml $file.FullName; if ($null -eq $doc.GameProfile) { throw 'no profile' } } catch { $row.Why = 'Unreadable'; [void]$rows.Add($row); continue }
+        try { $row.Title = Get-TpmProfileFriendlyTitle -Doc $doc -BaseName $code } catch { $row.Title = $code }
+        $resolved = Get-TpmGameControlContract -Code $code -UserDoc $doc -Template (Read-TpmGameTemplate -Code $code -GameProfilesDir $GameProfilesDir)
+        if ($null -eq $resolved.Contract) { $row.Why = $resolved.Why; [void]$rows.Add($row); continue }
+        $inventory = Get-TpmControlCoverageInventory -Contract $resolved.Contract -Facts $resolved.Facts
+        $row.Structural = $inventory.Structural; $row.Confidence = $inventory.Confidence; $row.Why = $inventory.Why
+        $row.Missing = @($inventory.MissingControls); $row.OptionalMissing = @($inventory.OptionalMissingControls)
+        [void]$rows.Add($row)
+    }
+    $all = @($rows)
+    $count = { param($State) @($all | Where-Object Structural -eq $State).Count }
+    return [pscustomobject]@{
+        Total = $all.Count; Complete = (& $count 'Complete'); Partial = (& $count 'Partial'); Missing = (& $count 'Missing'); Unknown = (& $count 'Unknown'); Unsupported = (& $count 'Unsupported')
+        Rows = $all; ReadOnly = $true
+    }
+}
+
+# The plain screen for an audit: counts first, game names behind Details. Used by the Propagate Controls check and the Library health check.
+function Get-TpmControlCoverageAuditSummary {
+    param([Parameter(Mandatory)]$Audit)
+
+    $done = New-Object System.Collections.Generic.List[string]
+    [void]$done.Add(('Games with every control the game lists set up: {0} of {1}.' -f $Audit.Complete, $Audit.Total))
+    if ($Audit.Partial -gt 0) { [void]$done.Add(('Games with some of their controls set up: {0}.' -f $Audit.Partial)) }
+    if ($Audit.Missing -gt 0) { [void]$done.Add(('Games with none of their controls set up: {0}.' -f $Audit.Missing)) }
+    $needs = New-Object System.Collections.Generic.List[string]
+    if ($Audit.Unknown -gt 0) { [void]$needs.Add(('Games TPM cannot check: {0}. Details say why for each one.' -f $Audit.Unknown)) }
+    if ($Audit.Unsupported -gt 0) { [void]$needs.Add(('Games that use an input type TPM cannot check: {0}.' -f $Audit.Unsupported)) }
+
+    $blocks = New-Object System.Collections.Generic.List[object]
+    $listOf = {
+        param($State, $Heading, $Format)
+        $set = @($Audit.Rows | Where-Object Structural -eq $State | Sort-Object Title)
+        if ($set.Count -gt 0) { [void]$blocks.Add(@{ Heading = ('{0} ({1})' -f $Heading, $set.Count); Lines = @($set | ForEach-Object { & $Format $_ }) }) }
+    }
+    & $listOf 'Partial' 'Some controls missing' { param($r) '{0}: still needed: {1}.' -f $r.Title, ($r.Missing -join ', ') }
+    & $listOf 'Missing' 'No controls set up' { param($r) '{0}: still needed: {1}.' -f $r.Title, ($r.Missing -join ', ') }
+    & $listOf 'Unknown' 'TPM cannot tell' { param($r) $w = Get-TpmControlCoverageWhyText -Why $r.Why; '{0}: {1}.' -f $r.Title, $(if ($w) { $w } else { 'no information' }) }
+    & $listOf 'Unsupported' 'Input type TPM cannot check' { param($r) $r.Title }
+    $note = 'TPM has not tested any game with a real controller. "Set up" means the buttons the game lists have a setting. It does not mean the game works. For most games the list of controls comes from TeknoParrot''s own game file, and a person has not checked it.'
+    $attention = ($Audit.Partial + $Audit.Missing + $Audit.Unknown + $Audit.Unsupported) -gt 0
+    return [pscustomobject]@{
+        Title = 'Controls check. Nothing was changed.'; Status = $(if ($attention) { 'Attention' } else { 'Ok' }); Done = $done.ToArray(); Needs = $needs.ToArray()
+        Next = 'Choose 2 in the Propagate Controls menu to set up games with your controller layout.'; Blocks = $blocks.ToArray(); Note = $note
+    }
+}
+
+# The screen for the controls check (Propagate Controls choice 4).
+function Invoke-TpmControlAuditScreen {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$GameProfilesDir)
+    $files = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $UserProfilesDir -ProgressLabel 'Controls check game list' -EnumerationErrorAction SilentlyContinue | Sort-Object BaseName)
+    if ($files.Count -eq 0) { Write-TpmText -Text 'No registered games were found.' -Color Yellow; return }
+    $audit = Invoke-TpmProgressGroup -Title 'Controls check' -Action { Get-TpmControlCoverageAudit -Profiles $files -GameProfilesDir $GameProfilesDir }
+    $summary = Get-TpmControlCoverageAuditSummary -Audit $audit
+    Write-Log ('ControlsCheck: total={0} complete={1} partial={2} missing={3} unknown={4} unsupported={5}' -f $audit.Total, $audit.Complete, $audit.Partial, $audit.Missing, $audit.Unknown, $audit.Unsupported)
+    Write-TpmOutcome -Title $summary.Title -Status $summary.Status -Done $summary.Done -Needs $summary.Needs -Next $summary.Next -DetailBlocks $summary.Blocks -DetailsNote $summary.Note
 }
 # =============================================================================
 # END MODULE-READY SECTION: Controls coverage inventory
+# =============================================================================
+
+# =============================================================================
+# BEGIN MODULE-READY SECTION: Outside mapping evidence review
+# =============================================================================
+# Read-only check of an outside per-game controller list (a RetroBat-style teknoparrot.yml the user already has; issue #304).
+# The list is evidence for a person to review. Nothing here trusts it, applies it, bundles it or changes a profile. The only
+# file this section can write is the details file the caller names. A game is held back, with a plain reason, when the list
+# names it twice, names a game that is not installed, names a control the game does not have, uses a button name TPM does
+# not know, or puts two game actions on one controller button. Every entry keeps its source line and original value, and
+# is bound to the installed profile's name, revision and SHA-256, because the outside list itself has no revision.
+# Depends on: Read-Xml, Write-TpmAtomicTextFile.
+
+# Controller button names the outside list may use, and the five spelling mistakes known to be in it (looked up, never guessed).
+function Get-TpmMappingPadTargets {
+    return @('r3', 'l3', 'select', 'start', 'righttrigger', 'lefttrigger', 'rightshoulder', 'leftshoulder', 'south', 'east', 'west', 'north',
+        'up', 'down', 'left', 'right', 'leftstickleft', 'leftstickright', 'leftstickup', 'leftstickdown',
+        'rightstickleft', 'rightstickright', 'rightstickup', 'rightstickdown')
+}
+
+function ConvertTo-TpmMappingTarget {
+    param([string]$Value)
+    $text = ([string]$Value).Trim().Trim('"', "'")
+    $result = [pscustomobject]@{ Target = $text; Valid = $false; Normalized = $false }
+    if ($text -eq '') { return $result }
+    $typos = @{ 'rigthstickup' = 'rightstickup'; 'rigthstickdown' = 'rightstickdown'; 'leftttrigger' = 'lefttrigger'; 'lefttshoulder' = 'leftshoulder'; 'righttickleft' = 'rightstickleft' }
+    $lower = $text.ToLowerInvariant()
+    if ($text -match '^kb_[A-Za-z0-9]+$') { $result.Valid = $true; return $result }
+    if ($typos.ContainsKey($lower)) { $result.Target = $typos[$lower]; $result.Valid = $true; $result.Normalized = $true; return $result }
+    if ((Get-TpmMappingPadTargets) -contains $lower) { $result.Target = $lower; $result.Valid = $true }
+    return $result
+}
+
+# Reads the outside list. It is a plain two-level text file: a game name at the left edge, then indented "Control: button # label"
+# lines. Anything else is counted as an unread line, never guessed at.
+function Read-TpmMappingEvidenceFile {
+    param([Parameter(Mandatory)][string]$Path)
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $hash = ([System.BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '') } finally { $sha.Dispose() }
+    $text = (New-Object System.Text.UTF8Encoding $false).GetString($bytes).TrimStart([char]0xFEFF)
+    $entries = New-Object System.Collections.ArrayList
+    $unread = New-Object System.Collections.ArrayList
+    $current = $null
+    $lineNumber = 0
+    $allLines = @($text -split "\r?\n")
+    foreach ($line in $allLines) {
+        $lineNumber++
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith('#')) { continue }
+        if ($line -match '^([^\s#:][^:#]*):\s*(#.*)?$') {
+            $current = [pscustomobject]@{ Name = $Matches[1].Trim().Trim('"', "'"); Line = $lineNumber; Fields = (New-Object System.Collections.ArrayList); Players = $null }
+            [void]$entries.Add($current)
+        } elseif ($null -ne $current -and $line -match '^\s+([A-Za-z0-9_]+):[ \t]*([^\s#]*)[ \t]*(?:#[ \t]*(.*))?$') {
+            $label = if ($Matches.ContainsKey(3)) { [string]$Matches[3] } else { '' }
+            if ($Matches[1] -eq 'Players') { $current.Players = $Matches[2]; continue }
+            [void]$current.Fields.Add([pscustomobject]@{ Key = $Matches[1]; Value = $Matches[2]; Label = $label.Trim(); Line = $lineNumber })
+        } else {
+            [void]$unread.Add($lineNumber)
+        }
+    }
+    return [pscustomobject]@{ FileName = [System.IO.Path]::GetFileName($Path); Sha256 = $hash; LineCount = $allLines.Count; Entries = @($entries); UnreadLines = @($unread) }
+}
+
+# True for the controls one player and the cabinet need on the first controller: Test, Service, Coin 1, player 1 buttons and
+# the analog axes. An axis whose own label names another player is not counted.
+function Test-TpmMappingInPlayerOneScope {
+    param([string]$Mapping, [string]$Label = '')
+    if ($Mapping -notmatch '^(Test|Service\d*|Coin1|P1\w*|JvsTwoP1\w*|Analog\d+)$') { return $false }
+    if ($Mapping -like 'Analog*' -and $Label -match '\b(P|Player\s*)[2-6]\b') { return $false }
+    return $true
+}
+
+function Get-TpmMappingEvidenceReview {
+    param([Parameter(Mandatory)]$Evidence, [Parameter(Mandatory)][string]$GameProfilesDir)
+    $profiles = @{}
+    foreach ($file in @(Get-ChildItem -LiteralPath $GameProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue)) { $profiles[$file.BaseName.ToLowerInvariant()] = $file }
+    $nameCounts = @{}
+    foreach ($entry in @($Evidence.Entries)) { $k = $entry.Name.ToLowerInvariant(); $nameCounts[$k] = 1 + [int]$nameCounts[$k] }
+    $mouseKey = '^(mouseleft|mouseright|mousemiddle|button4|button5)(_\d+)?$'
+
+    $results = New-Object System.Collections.ArrayList
+    foreach ($entry in @($Evidence.Entries | Sort-Object { $_.Name.ToLowerInvariant() }, Line)) {
+        $name = $entry.Name.ToLowerInvariant()
+        $profileKey = $name
+        $variant = ''
+        if (-not $profiles.ContainsKey($name)) {
+            $cut = $name.LastIndexOf('_')
+            if ($cut -gt 0 -and $profiles.ContainsKey($name.Substring(0, $cut))) { $profileKey = $name.Substring(0, $cut); $variant = $name.Substring($cut + 1) }
+        }
+        $problems = New-Object System.Collections.ArrayList
+        $addProblem = { param($Code, $Field) [void]$problems.Add([pscustomobject]@{ Code = $Code; Field = $Field }) }
+        if ($nameCounts[$name] -gt 1) { & $addProblem 'DuplicateEntry' $entry.Name }
+
+        $gameFile = $profiles[$profileKey]
+        $identity = $null
+        $gameMappings = @{}
+        if ($null -eq $gameFile) {
+            & $addProblem 'NotInstalled' $entry.Name
+        } else {
+            try {
+                $doc = Read-Xml $gameFile.FullName
+                foreach ($node in @($doc.SelectNodes('/GameProfile/JoystickButtons/JoystickButtons'))) {
+                    $mapNode = $node.SelectSingleNode('InputMapping')
+                    if ($null -eq $mapNode -or [string]::IsNullOrWhiteSpace($mapNode.InnerText)) { continue }
+                    $buttonName = $node.SelectSingleNode('ButtonName')
+                    $gameMappings[$mapNode.InnerText.Trim()] = $(if ($buttonName) { $buttonName.InnerText } else { '' })
+                }
+                $revNode = $doc.SelectSingleNode('/GameProfile/GameProfileRevision')
+                $identity = [ordered]@{ GameProfileFile = $gameFile.Name; GameProfileRevision = $(if ($revNode) { $revNode.InnerText.Trim() } else { '' }); GameProfileSha256 = (Get-FileHash -LiteralPath $gameFile.FullName -Algorithm SHA256).Hash }
+            } catch {
+                & $addProblem 'ProfileUnreadable' $gameFile.Name
+            }
+        }
+
+        $proposals = New-Object System.Collections.ArrayList
+        $normalized = New-Object System.Collections.ArrayList
+        $seen = @{}
+        $unmapped = 0
+        foreach ($field in @($entry.Fields)) {
+            $isMouse = $field.Key -match $mouseKey
+            $mapping = if ($isMouse) { $field.Value } else { $field.Key }
+            $rawTarget = if ($isMouse) { $field.Key } else { $field.Value }
+            if ([string]::IsNullOrWhiteSpace($mapping) -or [string]::IsNullOrWhiteSpace($rawTarget)) { $unmapped++; continue }
+            $seenKey = $field.Key.ToLowerInvariant()
+            if ($seen.ContainsKey($seenKey)) { & $addProblem 'DuplicateField' $field.Key; continue }
+            $seen[$seenKey] = $true
+            $target = if ($isMouse) { [pscustomobject]@{ Target = $rawTarget.ToLowerInvariant(); Valid = $true; Normalized = $false } } else { ConvertTo-TpmMappingTarget $rawTarget }
+            if (-not $target.Valid) { & $addProblem 'UnknownTarget' $field.Key; continue }
+            if ($null -ne $identity -and -not $gameMappings.ContainsKey($mapping)) { & $addProblem 'FieldNotInGame' $mapping }
+            if ($target.Normalized) { [void]$normalized.Add([pscustomobject]@{ Field = $mapping; Written = $rawTarget; Used = $target.Target }) }
+            [void]$proposals.Add([pscustomobject]([ordered]@{ Mapping = $mapping; Target = $target.Target; SourceValue = $rawTarget; Label = $field.Label; SourceLine = $field.Line }))
+        }
+
+        # Two different game actions on one controller button, inside the first-controller controls only.
+        $groups = @{}
+        foreach ($p in $proposals) {
+            if (-not (Test-TpmMappingInPlayerOneScope -Mapping $p.Mapping -Label $p.Label)) { continue }
+            if (-not $groups.ContainsKey($p.Target)) { $groups[$p.Target] = New-Object System.Collections.ArrayList }
+            [void]$groups[$p.Target].Add($p.Mapping)
+        }
+        foreach ($target in @($groups.Keys | Sort-Object)) {
+            $actions = @($groups[$target] | Sort-Object -Unique)
+            if ($actions.Count -gt 1) { & $addProblem 'Collision' ($actions -join ' + ') }
+        }
+
+        # Game controls the list says nothing usable about (only judged for a whole-game entry, not a gun or pad variant).
+        $missing = @()
+        if ($variant -eq '' -and $null -ne $identity) {
+            $covered = @{}
+            foreach ($p in $proposals) { $covered[$p.Mapping] = $true }
+            $missing = @($gameMappings.Keys | Where-Object { (Test-TpmMappingInPlayerOneScope -Mapping $_ -Label $gameMappings[$_]) -and -not $covered.ContainsKey($_) } | Sort-Object)
+        }
+
+        $reasons = @($problems | ForEach-Object { $_.Code } | Sort-Object -Unique)
+        $status = if ($reasons.Count -gt 0) { 'Withheld' } elseif ($missing.Count -gt 0) { 'Partial' } else { 'ReadyForReview' }
+        [void]$results.Add([pscustomobject]([ordered]@{
+            Name = $entry.Name; Profile = $(if ($null -ne $gameFile) { $gameFile.BaseName } else { '' }); Variant = $variant; SourceLine = $entry.Line
+            Status = $status; Reasons = $reasons; Problems = @($problems); Identity = $identity
+            Proposals = @($proposals); Normalized = @($normalized); MissingFromList = $missing; UnmappedInSource = $unmapped
+        }))
+    }
+
+    $all = @($results)
+    $byReason = [ordered]@{}
+    foreach ($code in @($all | ForEach-Object { $_.Reasons } | Sort-Object -Unique)) { $byReason[$code] = @($all | Where-Object { $_.Reasons -contains $code }).Count }
+    return [pscustomobject]([ordered]@{
+        Schema = 'TPM.MappingEvidenceReview.v1'
+        Trust = 'NonAuthoritative'
+        ReadOnly = $true
+        Source = [ordered]@{ FileName = $Evidence.FileName; Sha256 = $Evidence.Sha256; LineCount = $Evidence.LineCount; UnreadLines = @($Evidence.UnreadLines) }
+        Summary = [ordered]@{
+            EntriesInList = $all.Count
+            Installed = @($all | Where-Object { $_.Reasons -notcontains 'NotInstalled' }).Count
+            ReadyForReview = @($all | Where-Object Status -eq 'ReadyForReview').Count
+            Partial = @($all | Where-Object Status -eq 'Partial').Count
+            Withheld = @($all | Where-Object Status -eq 'Withheld').Count
+            WithheldByReason = $byReason
+            ButtonsProposed = (@($all | ForEach-Object { $_.Proposals.Count }) | Measure-Object -Sum).Sum
+            SpellingFixed = (@($all | ForEach-Object { $_.Normalized.Count }) | Measure-Object -Sum).Sum
+        }
+        Entries = $all
+    })
+}
+
+function Get-TpmMappingEvidenceReviewLines {
+    param([Parameter(Mandatory)]$Review)
+    $s = $Review.Summary
+    $lines = New-Object System.Collections.ArrayList
+    [void]$lines.Add('Outside controller list check. Nothing was changed.')
+    [void]$lines.Add(('File: {0}' -f $Review.Source.FileName))
+    [void]$lines.Add(('Games in the list: {0}. Found in your TeknoParrot: {1}.' -f $s.EntriesInList, $s.Installed))
+    [void]$lines.Add(('Ready for a person to review: {0}. Some controls missing from the list: {1}. Held back: {2}.' -f $s.ReadyForReview, $s.Partial, $s.Withheld))
+    $words = [ordered]@{
+        NotInstalled     = 'the game is not in your TeknoParrot'
+        DuplicateEntry   = 'the list names the game twice'
+        DuplicateField   = 'the list sets one control twice'
+        FieldNotInGame   = 'the list sets a control the game does not have'
+        UnknownTarget    = 'the list uses a button name TPM does not know'
+        Collision        = 'two game actions share one controller button'
+        ProfileUnreadable = 'the game file could not be read'
+    }
+    foreach ($code in $words.Keys) {
+        if ($s.WithheldByReason.Contains($code)) { [void]$lines.Add(('  Held back, {0}: {1}' -f $words[$code], $s.WithheldByReason[$code])) }
+    }
+    if ($s.SpellingFixed -gt 0) { [void]$lines.Add(('Spelling mistakes in the list that TPM corrected: {0}.' -f $s.SpellingFixed)) }
+    if (@($Review.Source.UnreadLines).Count -gt 0) { [void]$lines.Add(('Lines in the list TPM could not read: {0}.' -f @($Review.Source.UnreadLines).Count)) }
+    [void]$lines.Add('This list comes from outside. TPM does not trust it, has not tested it, and has not used it in any game.')
+    return @($lines)
+}
+
+# Command-line entry (-MappingEvidenceFile). Prints the plain lines and, when asked, writes the details file. Returns 0, or 1 when
+# the check itself could not run.
+function Invoke-TpmMappingEvidenceReport {
+    param([Parameter(Mandatory)][string]$EvidencePath, [string]$TeknoParrotRoot = '', [string]$JsonPath = '')
+    $script:TpmValidationReportActive = $true   # Write-Log writes nothing while this is set
+    try {
+        if (-not (Test-Path -LiteralPath $EvidencePath -PathType Leaf)) { throw 'The list file was not found.' }
+        $profilesDir = Join-Path $TeknoParrotRoot 'GameProfiles'
+        if ([string]::IsNullOrWhiteSpace($TeknoParrotRoot) -or -not (Test-Path -LiteralPath $profilesDir -PathType Container)) { throw 'Give the TeknoParrot folder (the one that holds GameProfiles) with -ValidationRoot.' }
+        if ($JsonPath -and (Test-Path -LiteralPath $JsonPath -PathType Leaf) -and ((Get-Content -LiteralPath $JsonPath -Raw -ErrorAction Stop) -notmatch 'TPM\.MappingEvidenceReview\.v1')) { throw 'The details file already exists and is not one of these reports; it was left unchanged.' }
+        $review = Get-TpmMappingEvidenceReview -Evidence (Read-TpmMappingEvidenceFile -Path $EvidencePath) -GameProfilesDir $profilesDir
+        if ($JsonPath) { Write-TpmAtomicTextFile -Path $JsonPath -Text ($review | ConvertTo-Json -Depth 8) -Operation 'mapping evidence details file' }
+        foreach ($line in @(Get-TpmMappingEvidenceReviewLines -Review $review)) { Write-Host $line }
+        if ($JsonPath) { Write-Host ('Details file: ' + $JsonPath) }
+        return 0
+    } catch {
+        Write-Host ('The outside list check could not run: ' + $_.Exception.Message) -ForegroundColor Red
+        return 1
+    }
+}
+# =============================================================================
+# END MODULE-READY SECTION: Outside mapping evidence review
 # =============================================================================
 
 # =============================================================================
@@ -51577,6 +56001,10 @@ if ($ValidationReport) {
     exit (Invoke-TpmValidationReport -ScriptPath $PSCommandPath -ScriptRoot $PSScriptRoot -TeknoParrotRoot $ValidationRoot -JsonPath $ValidationJsonPath)
 }
 
+if ($MappingEvidenceFile) {
+    exit (Invoke-TpmMappingEvidenceReport -EvidencePath $MappingEvidenceFile -TeknoParrotRoot $ValidationRoot -JsonPath $ValidationJsonPath)
+}
+
 $script:ActiveTpmWorkflowStatus = $null
 $script:TpmWorkflowRendering = $false
 Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }))."
@@ -51660,6 +56088,41 @@ if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended -and -not $i
     [void](Read-HostSafe "  Press Enter to continue")
 }
 
+# Read before the saved-settings question so the update check can run first. An unreadable file keeps the default (true).
+if (Test-Path -LiteralPath $configPath) {
+    try {
+        $earlyCfg = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($null -ne $earlyCfg -and $null -ne $earlyCfg.CheckForUpdatesOnStartup) { $checkForUpdatesOnStartup = [bool]$earlyCfg.CheckForUpdatesOnStartup }
+    } catch { Write-Log "Config: could not read the update-check preference -- $_" }
+}
+
+# Quiet, opt-out startup update check (CheckForUpdatesOnStartup, default
+# true). Never runs in -Unattended mode -- there is no way to show an
+# interactive Y/N/V prompt there, and Unattended is meant to be fast and
+# non-interactive. See Invoke-StartupUpdateCheck's own comment for how it
+# stays from meaningfully delaying startup when GitHub is unreachable.
+if ($checkForUpdatesOnStartup -and -not $Unattended -and -not $isPostgresRecoveryResume) {
+    $scriptSelfPathForStartupCheck = Join-Path $PSScriptRoot "TeknoParrot-Manager.ps1"
+    $startupUpdateResult = Invoke-StartupUpdateCheck -ScriptPath $scriptSelfPathForStartupCheck
+    if (-not (Test-TpmTransactionResult -Result $startupUpdateResult)) {
+        Write-Log 'StartupUpdateCheck: update flow did not return a valid transaction result; continuing without restart.'
+    } elseif ($startupUpdateResult.Outcome -eq 'SUCCEEDED' -or [bool](Get-TpmTransactionField -Object $startupUpdateResult -Name 'UpdateInstalled' -Default $false)) {
+        Write-Host ""
+        if ($startupUpdateResult.Outcome -ne 'SUCCEEDED') { Write-Host ("  {0}" -f $startupUpdateResult.Summary) -ForegroundColor Yellow }
+        Write-Host "  Restart TeknoParrot Manager now to run the verified update." -ForegroundColor Yellow
+        [void](Read-HostSafe "  Press Enter to exit")
+        Write-Log "StartupUpdateCheck: exiting after verified update -- not continuing in this session."
+        exit 0
+    } elseif ($startupUpdateResult.Outcome -eq 'ROLLED_BACK_VERIFIED') {
+        Write-Host "  The update did not install. Your old version of TeknoParrot Manager is still in place and is starting now. You can try again later with 'Check for Updates' in the menu." -ForegroundColor Yellow
+        Write-Log "StartupUpdateCheck: update was not installed and the old manager file was restored and verified; reason=$($startupUpdateResult.ReasonCode)"
+    } elseif ($startupUpdateResult.Outcome -ne 'NO_OP') {
+        Write-Host ("  {0}" -f $startupUpdateResult.Summary) -ForegroundColor Yellow
+        Write-Log "StartupUpdateCheck: transaction outcome=$($startupUpdateResult.Outcome); reason=$($startupUpdateResult.ReasonCode)"
+    }
+    if ([string](Get-TpmTransactionField -Object $startupUpdateResult -Name 'ReasonCode' -Default '') -ne 'UPDATE_ALREADY_CURRENT') { Write-Host "" }
+}
+
 # True first run only: no saved config.json existed at all before this
 # wizard run started. Used once, below, to look for a settings file already
 # saved for the chosen TeknoParrot folder and offer it.
@@ -51674,11 +56137,7 @@ if (Test-Path -LiteralPath $configPath) {
     try {
         $cfg = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($null -eq $cfg) { throw "Config file parsed as null -- file may be empty or corrupt." }
-        # Read before the corrupt-config check below: this is an independent
-        # preference, not tied to TeknoParrotRoot/GamesInstallFolder, so it
-        # should still apply even if the rest of the saved config is
-        # otherwise treated as corrupt/incomplete.
-        if ($null -ne $cfg.CheckForUpdatesOnStartup) { $checkForUpdatesOnStartup = [bool]$cfg.CheckForUpdatesOnStartup }
+        # CheckForUpdatesOnStartup was already read before the update check (it ran ahead of this question).
         $cfgUnattendedModeLoad = $cfg.PSObject.Properties['UnattendedMode']
         if ($cfgUnattendedModeLoad -and -not [string]::IsNullOrWhiteSpace([string]$cfgUnattendedModeLoad.Value)) { $unattendedModeSaved = [string]$cfgUnattendedModeLoad.Value }
         # The encrypted PostgreSQL credential belongs to this PC's PostgreSQL
@@ -51796,33 +56255,6 @@ $cfg = $null   # the settings file as read (if any) is baseline for detecting an
 Set-TpmConfigBaseline -Path ([string]$configPath) -OnDisk $cfg -Document (Get-TpmConfigDocument)
 # An update that was cut off (power loss, window closed) leaves its staging folder here: say so once, in plain words.
 if (-not $isPostgresRecoveryResume) { Write-TpmInterruptedUpdateNotice -ProgramDir $PSScriptRoot }
-
-# Quiet, opt-out startup update check (CheckForUpdatesOnStartup, default
-# true). Never runs in -Unattended mode -- there is no way to show an
-# interactive Y/N/V prompt there, and Unattended is meant to be fast and
-# non-interactive. See Invoke-StartupUpdateCheck's own comment for how it
-# stays from meaningfully delaying startup when GitHub is unreachable.
-if ($checkForUpdatesOnStartup -and -not $Unattended -and -not $isPostgresRecoveryResume) {
-    $scriptSelfPathForStartupCheck = Join-Path $PSScriptRoot "TeknoParrot-Manager.ps1"
-    $startupUpdateResult = Invoke-StartupUpdateCheck -ScriptPath $scriptSelfPathForStartupCheck
-    if (-not (Test-TpmTransactionResult -Result $startupUpdateResult)) {
-        Write-Log 'StartupUpdateCheck: update flow did not return a valid transaction result; continuing without restart.'
-    } elseif ($startupUpdateResult.Outcome -eq 'SUCCEEDED' -or [bool](Get-TpmTransactionField -Object $startupUpdateResult -Name 'UpdateInstalled' -Default $false)) {
-        Write-Host ""
-        if ($startupUpdateResult.Outcome -ne 'SUCCEEDED') { Write-Host ("  {0}" -f $startupUpdateResult.Summary) -ForegroundColor Yellow }
-        Write-Host "  Restart TeknoParrot Manager now to run the verified update." -ForegroundColor Yellow
-        [void](Read-HostSafe "  Press Enter to exit")
-        Write-Log "StartupUpdateCheck: exiting after verified update -- not continuing in this session."
-        exit 0
-    } elseif ($startupUpdateResult.Outcome -eq 'ROLLED_BACK_VERIFIED') {
-        Write-Host "  The update did not install. Your old version of TeknoParrot Manager is still in place and is starting now. You can try again later with 'Check for Updates' in the menu." -ForegroundColor Yellow
-        Write-Log "StartupUpdateCheck: update was not installed and the old manager file was restored and verified; reason=$($startupUpdateResult.ReasonCode)"
-    } elseif ($startupUpdateResult.Outcome -ne 'NO_OP') {
-        Write-Host ("  {0}" -f $startupUpdateResult.Summary) -ForegroundColor Yellow
-        Write-Log "StartupUpdateCheck: transaction outcome=$($startupUpdateResult.Outcome); reason=$($startupUpdateResult.ReasonCode)"
-    }
-    if ([string](Get-TpmTransactionField -Object $startupUpdateResult -Name 'ReasonCode' -Default '') -ne 'UPDATE_ALREADY_CURRENT') { $tpmPrintedAfterSavedSettings = $true }
-}
 
 if (-not $tpRoot) {
     $detected = Find-TeknoParrotRoot
@@ -52727,7 +57159,7 @@ function Get-MainMenuSections {
         Header = 'Game Requirements (only for some games)'
         Column = 'Right'
         Items  = @(
-            [pscustomobject]@{ Number = 11; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'Local PostgreSQL for Golden Tee Live 2020 and other IT games.'; FullDesc = @('Installs/configures local PostgreSQL for', 'Incredible Technologies games, including', 'Golden Tee Live 2020, Golden Tee Live,', 'Power Putt Live, Silver Strike Bowling Live,', 'and Target Toss Pro. A missing game database', 'is made from the game''s own backup.', 'Every game database is then tested with the', 'game''s own settings before it is called ready.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
+            [pscustomobject]@{ Number = 11; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'PostgreSQL for games set to Existing PostgreSQL.'; FullDesc = @('For games set to Existing PostgreSQL.', 'Installs/configures local PostgreSQL 8.3 for', 'every Golden Tee Live and PGA Tour game,', 'Power Putt Live, Silver Strike Bowling Live,', 'Target Toss Pro and Orange County Choppers.', 'Games on Internal storage (the new default)', 'need no database install and are skipped.', 'A missing game database is made from the', 'game''s own backup. A game that ships none is', 'left to TeknoParrot to make on first start.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
             [pscustomobject]@{ Number = 12; Mode = 'RequiredPatch'; Label = 'Required game patches'; ShortDesc = 'Find and safely install supported required fixes from your local ZIPs.'; FullDesc = @('Find required patches for supported exact', 'game builds using your local Main or', 'Supplementary ZIP files. TPM validates the', 'game, backs up, applies, and verifies files.', 'A verified patch is not gameplay proof.') }
         )
     }
@@ -53036,7 +57468,7 @@ function Limit-MainMenuBodyRowsToBudget {
     return @($BodyRows[$start..($BodyRows.Count - 1)])
 }
 
-# Single-line banner ("TeknoParrot Manager v1.0 RC8.4") with no frame and no
+# Single-line banner ("TeknoParrot Manager v1.0 RC9") with no frame and no
 # blank separator, for viewports too short for the normal framed banner (5-6
 # rows) to leave any room for menu content -- see
 # Get-MainMenuEmergencyCompactRows.
@@ -53972,107 +58404,99 @@ $mode = $null
             $repairReCopyRequested = $false
             do {
                 Write-Host ("  TeknoParrot Manager will search {0} for matching executables." -f $searchRoot) -ForegroundColor Cyan
-                Write-Host '  [Y] Search for repair candidates' -ForegroundColor White
-                Write-Host '  [N] Cancel' -ForegroundColor White
-                $repairConfirm = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
-                if ($repairConfirm -eq 'Y') {
-                    try {
-                        Write-Host ("  Scoped repair: searching only {0} affected profile(s)." -f $healthRepairGames.Count) -ForegroundColor Cyan
-                        if (@(Get-TpmTransactionField -Object $healthResult -Name 'DriveUnavailable' -Default @()).Count -gt 0) {
-                            Write-Host '  Games on a drive that is not connected are included. A game is pointed at the new folder only if its game file is found there. The others stay as they are.' -ForegroundColor Yellow
-                        }
-                        $repairIndex = Build-ProfileIndex -gameProfilesDir $gameProfilesDir
-                        $repairSearchGroup = Invoke-TpmProgressGroup -Title 'Health repair search' -Action {
-                            $repairPlan = Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$true -OnlyGames ([string[]]$healthRepairGames)
-                            [pscustomobject]@{ Outcome = $repairPlan.Outcome; Succeeded = ($repairPlan.Outcome -in @('SUCCEEDED','NO_OP')); Reports = @($repairPlan.Reports) }
-                        }
-                        $repairReports = @($repairSearchGroup.Reports)
-                        $repairCandidates = @($repairReports | Where-Object { $_.Status -eq 'candidate' })
-                        if ($repairCandidates.Count -gt 0) {
-                            Write-Host '  Candidate paths found (no profile changes made):' -ForegroundColor Cyan
-                            foreach ($candidate in $repairCandidates) {
-                                Write-Host ("    {0}  before: {1}" -f $candidate.Code, (ConvertTo-TpmDisplayPath $candidate.PreviousPath)) -ForegroundColor DarkGray
-                                Write-Host ("          after : {0}" -f (ConvertTo-TpmDisplayPath $candidate.NewPath)) -ForegroundColor White
-                            }
-                            $driveCodes = @(Get-TpmTransactionField -Object $healthResult -Name 'DriveUnavailable' -Default @())
-                            if (@($repairCandidates | Where-Object { $driveCodes -contains [string]$_.Code }).Count -gt 0) {
-                                Write-Host '  A game that was on a drive that is not connected will be pointed at the new path shown above. A safety backup of its profile is made first.' -ForegroundColor Yellow
-                            }
-                            Write-Host '  [Y] Apply only these reviewed candidates' -ForegroundColor White
-                            Write-Host '  [N] Leave them unchanged' -ForegroundColor White
-                            $applyChoice = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
-                            if ($applyChoice -eq 'Y') {
-                                $repairTransaction = Invoke-TpmProgressGroup -Title 'Health repair apply' -Action { Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$false -ReviewedCandidates $repairCandidates -OnlyGames ([string[]]$healthRepairGames) }
-                                $repairReports = @($repairTransaction.Reports)
-                                $repairSummary = Write-LibraryHealthRepairResults -Reports $repairReports
-                                if ($repairTransaction.Outcome -eq 'SUCCEEDED') {
-                                    Write-Host ("  Repair result: {0} FIXED, {1} STILL BROKEN." -f $repairSummary.Fixed, $repairSummary.StillBroken) -ForegroundColor $(if ($repairSummary.StillBroken -gt 0) { 'Yellow' } else { 'Green' })
-                                } else {
-                                    Write-Host ("  {0} Fixed: {1}; not fixed or unverified: {2}." -f $repairTransaction.Summary, $repairSummary.Fixed, $repairSummary.StillBroken) -ForegroundColor Yellow
-                                }
-                                if ($repairTransaction.Backup.RootPath) { Write-Host ("  Safety backup: {0}" -f $repairTransaction.Backup.RootPath) -ForegroundColor DarkGray }
-                            } else {
-                                Write-Host '  Candidates were reviewed but not applied. Nothing was changed.' -ForegroundColor DarkGray
-                            }
-                            $repairSearchAgain = $false
-                        } else {
-                            Write-Host '  No safe automatic candidates were found in this folder. Nothing was changed.' -ForegroundColor Yellow
-                            Write-Host ("  Searched folder: {0}" -f (ConvertTo-TpmDisplayPath $searchRoot)) -ForegroundColor DarkGray
-                            Write-Host '  Affected profile evidence:' -ForegroundColor Cyan
-                            Write-LibraryHealthRepairResults -Reports $repairReports | Out-Null
-                            foreach ($brokenCode in $healthRepairGames) {
-                                $brokenProfilePath = Join-Path $userProfilesDir ($brokenCode + '.xml')
-                                $savedExecutable = ''
-                                try {
-                                    $brokenDoc = Read-Xml -Path $brokenProfilePath
-                                    $savedExeNode = $brokenDoc.GameProfile.SelectSingleNode('ExecutableName')
-                                    if ($savedExeNode) { $savedExecutable = [string]$savedExeNode.InnerText }
-                                } catch {
-                                    $savedExecutable = '<could not read profile>'
-                                }
-                                Write-Host ("    {0}: expected executable {1}" -f $brokenCode, $(if ($savedExecutable) { $savedExecutable } else { '<not recorded>' })) -ForegroundColor DarkGray
-                            }
-                            $reCopySources = @($zipSource, $zipSourceSupplementary | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) })
-                            if ($reCopySources.Count -gt 0) {
-                                Write-Host '  [C] Re-copy/re-extract only these affected games from the configured source' -ForegroundColor White
-                                Write-Host ("      Configured source: {0}" -f ($reCopySources -join '; ')) -ForegroundColor DarkCyan
-                            } else {
-                                Write-Host '  No configured ZIP source is available for scoped re-copy/re-extract.' -ForegroundColor DarkGray
-                            }
-                            Write-Host '  [S] Search another game folder' -ForegroundColor White
-                            Write-Host '  [B] Back to the main menu' -ForegroundColor White
-                            $repairReCopyRequested = $false
-                            $repairChoices = if ($reCopySources.Count -gt 0) { @('S', 'B', 'C') } else { @('S', 'B') }
-                            $searchAgainChoice = Read-TpmChoice -Prompt ('  Choose {0}' -f ($repairChoices -join ' or ')) -Choices $repairChoices -Default 'B'
-                            if ($searchAgainChoice -eq 'C') {
-                                $pendingApplyMode = 'AutoSync'
-                                $pendingAutoSyncGames = @($healthRepairGames)
-                                $pendingApplyForce = $false
-                                $repairReCopyRequested = $true
-                                $repairSearchAgain = $false
-                            } elseif ($searchAgainChoice -eq 'S') {
-                                $selectedSearchRoot = Read-PathWithBrowse -Prompt '  Choose another game folder to search' -Mode Folder -InitialDirectory $searchRoot
-                                $searchRootCheck = Test-TpmRepairSearchRoot `
-                                    -Candidate $selectedSearchRoot -TeknoParrotRoot $tpRoot -ProgramDirectory $PSScriptRoot `
-                                    -ZipSource $zipSource -ZipSourceSupplementary $zipSourceSupplementary
-                                $repairSearchAgain = $searchRootCheck.Valid
-                                if ($repairSearchAgain) {
-                                    $searchRoot = $searchRootCheck.CanonicalPath
-                                } else {
-                                    Write-Host ("  Search folder rejected: {0}. Nothing was changed." -f $searchRootCheck.Reason) -ForegroundColor Yellow
-                                }
-                            } elseif ($searchAgainChoice -eq 'B') {
-                                $repairSearchAgain = $false
-                                Write-Log 'HealthCheck: user selected Back after no automatic repair candidates; no additional search was started.'
-                            }
-                        }
-                    } catch {
-                        Write-Host ("  Automatic path repair was not saved: {0}" -f $_.Exception.Message) -ForegroundColor Red
-                        Write-Host '  No repair is claimed. Review the existing profiles and backup state before retrying.' -ForegroundColor Yellow
-                        $repairSearchAgain = $false
+                try {
+                    Write-Host ("  Scoped repair: searching only {0} affected profile(s)." -f $healthRepairGames.Count) -ForegroundColor Cyan
+                    if (@(Get-TpmTransactionField -Object $healthResult -Name 'DriveUnavailable' -Default @()).Count -gt 0) {
+                        Write-Host '  Games on a drive that is not connected are included. A game is pointed at the new folder only if its game file is found there. The others stay as they are.' -ForegroundColor Yellow
                     }
-                } else {
-                    Write-Host "  Automatic path search canceled. Nothing was changed." -ForegroundColor DarkGray
+                    $repairIndex = Build-ProfileIndex -gameProfilesDir $gameProfilesDir
+                    $repairSearchGroup = Invoke-TpmProgressGroup -Title 'Health repair search' -Action {
+                        $repairPlan = Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$true -OnlyGames ([string[]]$healthRepairGames)
+                        [pscustomobject]@{ Outcome = $repairPlan.Outcome; Succeeded = ($repairPlan.Outcome -in @('SUCCEEDED','NO_OP')); Reports = @($repairPlan.Reports) }
+                    }
+                    $repairReports = @($repairSearchGroup.Reports)
+                    $repairCandidates = @($repairReports | Where-Object { $_.Status -eq 'candidate' })
+                    if ($repairCandidates.Count -gt 0) {
+                        Write-Host '  Candidate paths found (no profile changes made):' -ForegroundColor Cyan
+                        foreach ($candidate in $repairCandidates) {
+                            Write-Host ("    {0}  before: {1}" -f $candidate.Code, (ConvertTo-TpmDisplayPath $candidate.PreviousPath)) -ForegroundColor DarkGray
+                            Write-Host ("          after : {0}" -f (ConvertTo-TpmDisplayPath $candidate.NewPath)) -ForegroundColor White
+                        }
+                        $driveCodes = @(Get-TpmTransactionField -Object $healthResult -Name 'DriveUnavailable' -Default @())
+                        if (@($repairCandidates | Where-Object { $driveCodes -contains [string]$_.Code }).Count -gt 0) {
+                            Write-Host '  A game that was on a drive that is not connected will be pointed at the new path shown above. A safety backup of its profile is made first.' -ForegroundColor Yellow
+                        }
+                        Write-Host '  [Y] Apply only these reviewed candidates' -ForegroundColor White
+                        Write-Host '  [N] Leave them unchanged' -ForegroundColor White
+                        $applyChoice = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
+                        if ($applyChoice -eq 'Y') {
+                            $repairTransaction = Invoke-TpmProgressGroup -Title 'Health repair apply' -Action { Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$false -ReviewedCandidates $repairCandidates -OnlyGames ([string[]]$healthRepairGames) }
+                            $repairReports = @($repairTransaction.Reports)
+                            $repairSummary = Write-LibraryHealthRepairResults -Reports $repairReports
+                            if ($repairTransaction.Outcome -eq 'SUCCEEDED') {
+                                Write-Host ("  Repair result: {0} FIXED, {1} STILL BROKEN." -f $repairSummary.Fixed, $repairSummary.StillBroken) -ForegroundColor $(if ($repairSummary.StillBroken -gt 0) { 'Yellow' } else { 'Green' })
+                            } else {
+                                Write-Host ("  {0} Fixed: {1}; not fixed or unverified: {2}." -f $repairTransaction.Summary, $repairSummary.Fixed, $repairSummary.StillBroken) -ForegroundColor Yellow
+                            }
+                            if ($repairTransaction.Backup.RootPath) { Write-Host ("  Safety backup: {0}" -f $repairTransaction.Backup.RootPath) -ForegroundColor DarkGray }
+                        } else {
+                            Write-Host '  Candidates were reviewed but not applied. Nothing was changed.' -ForegroundColor DarkGray
+                        }
+                        $repairSearchAgain = $false
+                    } else {
+                        Write-Host '  No safe automatic candidates were found in this folder. Nothing was changed.' -ForegroundColor Yellow
+                        Write-Host ("  Searched folder: {0}" -f (ConvertTo-TpmDisplayPath $searchRoot)) -ForegroundColor DarkGray
+                        Write-Host '  Affected profile evidence:' -ForegroundColor Cyan
+                        Write-LibraryHealthRepairResults -Reports $repairReports | Out-Null
+                        foreach ($brokenCode in $healthRepairGames) {
+                            $brokenProfilePath = Join-Path $userProfilesDir ($brokenCode + '.xml')
+                            $savedExecutable = ''
+                            try {
+                                $brokenDoc = Read-Xml -Path $brokenProfilePath
+                                $savedExeNode = $brokenDoc.GameProfile.SelectSingleNode('ExecutableName')
+                                if ($savedExeNode) { $savedExecutable = [string]$savedExeNode.InnerText }
+                            } catch {
+                                $savedExecutable = '<could not read profile>'
+                            }
+                            Write-Host ("    {0}: expected executable {1}" -f $brokenCode, $(if ($savedExecutable) { $savedExecutable } else { '<not recorded>' })) -ForegroundColor DarkGray
+                        }
+                        $reCopySources = @($zipSource, $zipSourceSupplementary | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) })
+                        if ($reCopySources.Count -gt 0) {
+                            Write-Host '  [C] Re-copy/re-extract only these affected games from the configured source' -ForegroundColor White
+                            Write-Host ("      Configured source: {0}" -f ($reCopySources -join '; ')) -ForegroundColor DarkCyan
+                        } else {
+                            Write-Host '  No configured ZIP source is available for scoped re-copy/re-extract.' -ForegroundColor DarkGray
+                        }
+                        Write-Host '  [S] Search another game folder' -ForegroundColor White
+                        Write-Host '  [B] Back to the main menu' -ForegroundColor White
+                        $repairReCopyRequested = $false
+                        $repairChoices = if ($reCopySources.Count -gt 0) { @('S', 'B', 'C') } else { @('S', 'B') }
+                        $searchAgainChoice = Read-TpmChoice -Prompt ('  Choose {0}' -f ($repairChoices -join ' or ')) -Choices $repairChoices -Default 'B'
+                        if ($searchAgainChoice -eq 'C') {
+                            $pendingApplyMode = 'AutoSync'
+                            $pendingAutoSyncGames = @($healthRepairGames)
+                            $pendingApplyForce = $false
+                            $repairReCopyRequested = $true
+                            $repairSearchAgain = $false
+                        } elseif ($searchAgainChoice -eq 'S') {
+                            $selectedSearchRoot = Read-PathWithBrowse -Prompt '  Choose another game folder to search' -Mode Folder -InitialDirectory $searchRoot
+                            $searchRootCheck = Test-TpmRepairSearchRoot `
+                                -Candidate $selectedSearchRoot -TeknoParrotRoot $tpRoot -ProgramDirectory $PSScriptRoot `
+                                -ZipSource $zipSource -ZipSourceSupplementary $zipSourceSupplementary
+                            $repairSearchAgain = $searchRootCheck.Valid
+                            if ($repairSearchAgain) {
+                                $searchRoot = $searchRootCheck.CanonicalPath
+                            } else {
+                                Write-Host ("  Search folder rejected: {0}. Nothing was changed." -f $searchRootCheck.Reason) -ForegroundColor Yellow
+                            }
+                        } elseif ($searchAgainChoice -eq 'B') {
+                            $repairSearchAgain = $false
+                            Write-Log 'HealthCheck: user selected Back after no automatic repair candidates; no additional search was started.'
+                        }
+                    }
+                } catch {
+                    Write-Host ("  Automatic path repair was not saved: {0}" -f $_.Exception.Message) -ForegroundColor Red
+                    Write-Host '  No repair is claimed. Review the existing profiles and backup state before retrying.' -ForegroundColor Yellow
                     $repairSearchAgain = $false
                 }
             } while ($repairSearchAgain)
@@ -54110,8 +58534,16 @@ $mode = $null
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " PostgreSQL Setup (Incredible Technologies games)" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
-        Write-Host "  Includes Golden Tee Live 2020. This step makes its two databases from the game's own backup." -ForegroundColor DarkGray
-        Write-Host "  Every game database is tested with the game's own settings before setup says it is ready." -ForegroundColor DarkGray
+        Write-Host "  Each game has one database. A game on Internal storage makes its own," -ForegroundColor DarkGray
+        Write-Host "  so it is skipped here." -ForegroundColor DarkGray
+        Write-Host "  For every game that uses PostgreSQL, this step makes that game's database" -ForegroundColor DarkGray
+        Write-Host "  from the game's own backup when it is missing, then tests it with the game's" -ForegroundColor DarkGray
+        Write-Host "  own settings before setup says it is ready." -ForegroundColor DarkGray
+        Write-Host "  Every Golden Tee Live and PGA Tour game is covered, as are the other IT" -ForegroundColor DarkGray
+        Write-Host "  games with a database." -ForegroundColor DarkGray
+        Write-Host "  A game with no backup makes its own database the first time it starts" -ForegroundColor DarkGray
+        Write-Host "  (TeknoParrot does this)." -ForegroundColor DarkGray
+        foreach ($choiceLine in (Get-TpmDatabaseChoiceLines)) { Write-Host ('  ' + $choiceLine) -ForegroundColor DarkGray }
         $postgresStatus = New-TpmWorkflowStatusContext -WorkflowKey 'PostgresSetup' -Title 'PostgreSQL setup' -Steps @(
             @{ Id = 'scan'; Label = 'Check which games need PostgreSQL' }
             @{ Id = 'database'; Label = 'Back up existing databases' }
@@ -54174,8 +58606,12 @@ $mode = $null
         }
         [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Succeeded -Summary 'Game requirements checked' -NextStep 'Back up existing databases')
         if ($needCount -eq 0) {
-            Write-Host "  No registered games need PostgreSQL -- nothing to do." -ForegroundColor Green
-            Write-Log "Postgres setup: no Postgres-needing games registered."
+            Write-Host "  No registered game needs PostgreSQL -- nothing to do." -ForegroundColor Green
+            if ([int]$requirementScan.InternalCount -gt 0) {
+                Write-Host ("  {0} game(s) use Internal storage. No database install is needed." -f [int]$requirementScan.InternalCount) -ForegroundColor Green
+                Write-Host "  Start each game once so it creates its own database." -ForegroundColor Green
+            }
+            Write-Log ("Postgres setup: no game is set to Existing PostgreSQL; {0} game(s) use Internal storage." -f [int]$requirementScan.InternalCount)
             [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'database' -Activity 'No PostgreSQL repair is needed')
             [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Skipped -Summary 'No registered game needs PostgreSQL')
             [void](Complete-TpmWorkflowStatus -Context $postgresStatus -Summary 'No action needed')
@@ -54187,6 +58623,7 @@ $mode = $null
             continue
         }
         Write-Host ("  {0} registered game(s) need PostgreSQL." -f $needCount) -ForegroundColor Cyan
+        if ([int]$requirementScan.InternalCount -gt 0) { Write-Host ("  {0} other game(s) use Internal storage. They need no database install and are skipped." -f [int]$requirementScan.InternalCount) -ForegroundColor DarkGray }
         if (-not (Test-PostgresInstalled) -and -not (Test-RunningAsAdministrator)) {
             # The leftover check is read-only: show its refusal here, because the administrator window closes by itself.
             $leftoversBeforeHandoff = Get-PostgresPartialInstallInventory
@@ -54748,13 +59185,25 @@ $mode = $null
         Write-Host " Propagate Controls" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-TpmText -Text 'This copies the controls of games you already set up to your other games of the same type.' -Color DarkCyan
-        Write-TpmText -Text 'No game is registered or extracted.' -Color DarkCyan
+        Write-TpmText -Text 'This screen never registers or unpacks games.' -Color DarkCyan
         if (-not $Unattended) {
             Write-Host ''
             Write-TpmText -Text '1 = copy controls to games of the same type' -Indent 4
-            Write-TpmText -Text '2 = set up one game for an Xbox controller' -Indent 4
-            if ((Read-TpmChoice -Prompt '  Choose 1 or 2' -Choices @('1', '2') -Default '1') -eq '2') {
-                Invoke-TpmXboxStarterScreen -UserProfilesDir $userProfilesDir
+            Write-TpmText -Text '2 = set up games with my controller layout (Xbox, PlayStation, Nintendo or arcade stick)' -Indent 4
+            Write-TpmText -Text '3 = choose or change my controller layout' -Indent 4
+            Write-TpmText -Text '4 = check which games have all their controls (changes nothing)' -Indent 4
+            Write-TpmText -Text '5 = my controls: learn my buttons, print a control guide, tell TPM a game worked' -Indent 4
+            $controlsChoice = Read-TpmChoice -Prompt '  Choose 1, 2, 3, 4 or 5' -Choices @('1', '2', '3', '4', '5') -Default '1'
+            if ($controlsChoice -eq '5') {
+                Invoke-TpmControlsScreen -UserProfilesDir $userProfilesDir
+                [void](Read-HostSafe "  Press Enter to return to menu")
+                continue
+            }
+            if ($controlsChoice -ne '1') {
+                $baselineStateDir = [string]$script:TpmOwnedLayout.State
+                if ($controlsChoice -eq '2') { Invoke-TpmBaselineScreen -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir -StateDir $baselineStateDir }
+                elseif ($controlsChoice -eq '3') { [void](Invoke-TpmBaselineChooseScreen -StateDir $baselineStateDir -Current (Read-TpmBaseline -StateDir $baselineStateDir)) }
+                else { Invoke-TpmControlAuditScreen -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir }
                 [void](Read-HostSafe "  Press Enter to return to menu")
                 continue
             }
@@ -54888,8 +59337,14 @@ $mode = $null
             Write-Host '  S) Set up ReShade visual enhancements' -ForegroundColor White
             Write-Host '  R) Remove verified TeknoParrot Manager-managed ReShade files' -ForegroundColor White
             Write-Host '  U) Undo ReShade changes' -ForegroundColor White
-            $reShadeAction = Read-TpmChoice -Prompt '  Action (S/R/U, default S)' -Choices @('S', 'R', 'U') -Default 'S'
+            Write-Host '  B) Use my bezel folder (bezels you already have)' -ForegroundColor White
+            $reShadeAction = Read-TpmChoice -Prompt '  Action (S/R/U/B, default S)' -Choices @('S', 'R', 'U', 'B') -Default 'S'
             if ($reShadeAction -eq 'S') { $reShadeAction = 'Select' }
+        }
+        if ($reShadeAction -eq 'B') {
+            Invoke-TpmBezelSetup -UserProfilesDir $userProfilesDir -ProtectedRoots @($zipSource, $zipSourceSupplementary)
+            [void](Read-HostSafe '  Press Enter to return to menu')
+            continue
         }
         if ($reShadeAction -eq 'U') {
             Show-TpmReShadeUndoMenu -ProtectedRoots @($zipSource, $zipSourceSupplementary)
@@ -54934,11 +59389,11 @@ $mode = $null
                 if ($rsAcq.State -eq 'Acquired') {
                     $rsSourceDll = $rsAcq.Path
                 } else {
-                    [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-acquisition-cancelled' -Message 'ReShade setup was canceled.' -DataSafety 'No unverified ReShade file was used.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+                    [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-acquisition-canceled' -Message 'ReShade setup was canceled.' -DataSafety 'No unverified ReShade file was used.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
                     Write-Host '  ReShade setup canceled. No unverified DLL was used.' -ForegroundColor Yellow
                     Write-Log 'ReShade setup: canceled after automatic acquisition failed.'
                     [void](Read-HostSafe '  Press Enter to acknowledge the ReShade result')
-                    [void](Acknowledge-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-acquisition-cancelled')
+                    [void](Acknowledge-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-acquisition-canceled')
                     [void](Stop-TpmWorkflowStatus -Context $reShadeStatus -Reason 'ReShade setup stopped')
                     [void](Close-TpmWorkflowStatus -Context $reShadeStatus)
                     [void](Read-HostSafe '  Press Enter to return to menu')
@@ -55039,11 +59494,11 @@ $mode = $null
                     [void](Close-TpmWorkflowStatus -Context $dgStatus)
                     continue
                 } else {
-                    [void](Set-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-acquisition-cancelled' -Message 'dgVoodoo2 setup was canceled.' -DataSafety 'No unverified dgVoodoo2 files were used.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+                    [void](Set-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-acquisition-canceled' -Message 'dgVoodoo2 setup was canceled.' -DataSafety 'No unverified dgVoodoo2 files were used.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
                     Write-Host '  dgVoodoo2 setup canceled. No unverified files were used.' -ForegroundColor Yellow
                     Write-Log 'dgVoodoo2 setup: canceled after automatic acquisition failed.'
                     [void](Read-HostSafe '  Press Enter to acknowledge the dgVoodoo2 result')
-                    [void](Acknowledge-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-acquisition-cancelled')
+                    [void](Acknowledge-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-acquisition-canceled')
                     [void](Stop-TpmWorkflowStatus -Context $dgStatus -Reason 'dgVoodoo2 setup stopped')
                     [void](Close-TpmWorkflowStatus -Context $dgStatus)
                     [void](Read-HostSafe '  Press Enter to return to menu')
@@ -55885,7 +60340,8 @@ if ($registrationFolders.Count -gt 0) {
     Write-Host 'Preview: registration is checked after a real AutoSync run has extracted and checked the game folders.' -ForegroundColor Yellow
     Write-Log 'Registration scan skipped in preview: AutoSync preview extracts nothing, so there are no verified registration targets.'
 } elseif ($skipAutoSyncRegistration) {
-    Write-Host 'No new game folder was extracted and checked, so registration was skipped this run. To register games already in your games folder, choose Register only from the main menu.' -ForegroundColor Yellow
+    Write-Host 'Nothing new was extracted, so registration was skipped.' -ForegroundColor DarkCyan
+    Write-Host 'To register games already extracted, choose Register only.' -ForegroundColor DarkCyan
     Write-Log 'Registration scan skipped: no verified AutoSync registration targets; existing-only fallback refused.'
 } else {
     Write-Host "Checking existing TeknoParrot games for registration changes." -ForegroundColor Cyan
@@ -55924,7 +60380,7 @@ if ($skipAutoSyncRegistration) {
         $result = New-TpmProfileTransactionResult -WorkflowKey 'GameRegistration' -OperationKey 'RegisterProfiles' -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Summary 'Preview: registration is checked after a real AutoSync run. Nothing was changed.' -ReasonCode 'PREVIEW_NO_REGISTRATION' -FinalChecks @('A preview does not register games.')
         $ledgerCloseReason = 'PREVIEW_NO_REGISTRATION'
     } else {
-        $result = New-TpmProfileTransactionResult -WorkflowKey 'GameRegistration' -OperationKey 'RegisterProfiles' -Outcome 'ACTION_REQUIRED' -ProductState 'UNCHANGED' -Summary 'Registration was not attempted because AutoSync returned no verified new game folder. Review extraction outcomes or explicitly choose Register only.' -ReasonCode 'NEW_REGISTRATION_TARGETS_UNVERIFIED' -FinalChecks @('No replacement existing-only registration scan was performed.')
+        $result = New-TpmProfileTransactionResult -WorkflowKey 'GameRegistration' -OperationKey 'RegisterProfiles' -Outcome 'NO_OP' -ProductState 'UNCHANGED' -Summary 'Nothing new was extracted, so registration was skipped. To register games already extracted, choose Register only.' -ReasonCode 'NEW_REGISTRATION_TARGETS_UNVERIFIED' -FinalChecks @('No replacement existing-only registration scan was performed.')
         $ledgerCloseReason = 'NEW_REGISTRATION_TARGETS_UNVERIFIED'
     }
     foreach ($name in @('Registered','Already','Ambiguous','Unmatched')) { $result | Add-Member -NotePropertyName $name -NotePropertyValue @() -Force }
@@ -56046,7 +60502,7 @@ if ($duplicateConflicts.Count -gt 0 -and $dryRunActive) {
                     }
                     $swGp.InnerText = $info.Exe
                     $ledgerMapping = Start-TpmRegistrationMapping -Folder $folderName -Code $code -Match 'duplicate-switch' -IntendedPath $info.Exe -TemplatePath '' -DryRun $dryRunActive
-                    [void](Set-SecondaryExecutablePath $swDoc $info.Exe)
+                    [void](Set-SecondaryExecutablePath $swDoc $info.Exe -ProfileCode $code)
                     if (-not $dryRunActive) { $preWriteState = Get-TpmProfileWriteFingerprint -Path $userProfilePath }
                     $switchWriteAttempted = -not $dryRunActive
                     Save-XmlMaybe $swDoc $userProfilePath $dryRunActive
@@ -56325,7 +60781,7 @@ if ($dryRunActive) {
     Write-Host ""
     Write-Host "  You'll be asked below whether to apply these changes for real." -ForegroundColor Yellow
 } else {
-    Write-Host "   Done." -ForegroundColor Cyan
+    Write-Host "   Registration run finished." -ForegroundColor Cyan
     Write-Host "============================================" -ForegroundColor Cyan
 }
 # Read-only bridge from the #258/#262 evidence model into the end-of-run
@@ -57271,16 +61727,18 @@ function Get-TpmLbMediaGames {
             if (-not $appPath -or -not $title) { continue }
             $full = if ([System.IO.Path]::IsPathRooted($appPath)) { $appPath } else { Join-Path $lbRoot $appPath }
             if (-not (Test-PathInside -child $full -parent $userProfilesDir)) { continue }
-            [void]$games.Add([pscustomobject]@{ Platform = $name; Title = $title })
+            [void]$games.Add([pscustomobject]@{ Platform = $name; Title = $title; Code = [System.IO.Path]::GetFileNameWithoutExtension($full); ProfilePath = $full; DatabaseId = (Get-XmlChildText $node 'DatabaseID').Trim() })
         }
     }
     return ,@($games.ToArray())
 }
 
-# READ-ONLY preview. Exact = same name (ignoring case, accents, spaces and punctuation), one picture only.
-# Near = a close name, or several pictures with the same name; the user must confirm each one.
+# READ-ONLY preview. Exact = the same game, one picture only. The same game means: the same name (ignoring case, accents, spaces and
+# punctuation) or, when the game list is given, one of the official or other names of the game's Games Database ID. A picture whose
+# name the shared matching engine reads as a different game (a different ID) is never used. Near = a close name, or several pictures
+# for the game; the user must confirm each one.
 function Get-TpmLaunchBoxMediaPlan {
-    param([string]$lbRoot, [string]$userProfilesDir, [string]$imageFolder, [string[]]$platformNames, [ValidateSet('ClearLogo', 'BoxFront')][string]$Kind = 'ClearLogo', [switch]$ReplaceExisting)
+    param([string]$lbRoot, [string]$userProfilesDir, [string]$imageFolder, [string[]]$platformNames, [ValidateSet('ClearLogo', 'BoxFront')][string]$Kind = 'ClearLogo', [switch]$ReplaceExisting, [string]$TpRoot = '', [hashtable]$DatIndex = $null, $GameList = $null)
     $lbRoot = Resolve-TpmLaunchBoxRoot $lbRoot
     if (-not (Test-Path -LiteralPath $lbRoot -PathType Container) -or -not (Test-TpmNoReparsePath $lbRoot)) { throw 'Choose a safe existing LaunchBox folder.' }
     if ([string]::IsNullOrWhiteSpace($imageFolder) -or -not (Test-Path -LiteralPath $imageFolder -PathType Container) -or -not (Test-TpmNoReparsePath $imageFolder)) { throw 'Choose a folder that exists and holds your pictures.' }
@@ -57297,6 +61755,29 @@ function Get-TpmLaunchBoxMediaPlan {
     $noImage = New-Object System.Collections.Generic.List[object]
     $existing = New-Object System.Collections.Generic.List[object]
     $games = Get-TpmLbMediaGames -lbRoot $lbRoot -userProfilesDir $userProfilesDir -platformNames $platformNames
+    # With the game list: the ID of each game (the one LaunchBox holds, else a certain engine match) and of each picture name, and every
+    # name a game ID is known by. Without it the plan works by name only.
+    $datByCode = if ($null -ne $GameList) { Get-TpmDatEntriesByCode -DatIndex $DatIndex } else { $null }
+    $altNames = @{}
+    if ($null -ne $GameList) {
+        foreach ($altKey in $GameList.ByAlternate.Keys) {
+            foreach ($entry in $GameList.ByAlternate[$altKey]) {
+                if (-not $altNames.ContainsKey($entry.Id)) { $altNames[$entry.Id] = New-Object System.Collections.Generic.List[string] }
+                [void]$altNames[$entry.Id].Add(([regex]::Replace([string]$altKey, '[^a-z0-9]', '')))
+            }
+        }
+    }
+    $imageIds = @{}
+    $getImageId = {
+        param($item)
+        if ($null -eq $GameList) { return '' }
+        if (-not $imageIds.ContainsKey($item.File.FullName)) {
+            $base = [regex]::Replace([System.IO.Path]::GetFileNameWithoutExtension($item.File.Name), '-\d{2}$', '')
+            $found = Resolve-TpmGameMatch -Index $GameList -Subject (New-TpmMatchSubject -MetadataName $base)
+            $imageIds[$item.File.FullName] = $(if ($found.Status -eq 'Certain') { [string]$found.Match.Id } else { '' })
+        }
+        return $imageIds[$item.File.FullName]
+    }
     foreach ($game in $games) {
         $safe = Get-TpmLbMediaSafeName $game.Title
         $destDir = Join-Path (Join-Path (Join-Path $lbRoot 'Images') $game.Platform) $kindFolder
@@ -57305,14 +61786,29 @@ function Get-TpmLaunchBoxMediaPlan {
         if ($have.Count -gt 0 -and -not $ReplaceExisting) { [void]$existing.Add([pscustomobject]@{ Game = $game; Existing = $have[0].FullName }); continue }
         $key = ConvertTo-TpmLbMediaKey $game.Title
         $compact = $key.Replace(' ', ''); $loose = Get-TpmLbMediaLooseKey $key
+        $gameId = ''
+        if ($null -ne $GameList) {
+            $gameId = [string]$game.DatabaseId
+            if (-not $gameId -or $gameId -eq '0') {
+                $gameId = ''
+                $subject = if (Test-Path -LiteralPath $game.ProfilePath -PathType Leaf) { Get-TpmProfileMatchSubject -Code $game.Code -ProfilePath $game.ProfilePath -TpRoot $TpRoot -HintName $game.Title -DatIndex $DatIndex -DatByCode $datByCode } else { New-TpmMatchSubject -Code $game.Code -HintName $game.Title }
+                if (-not $subject.NotGame) { $found = Resolve-TpmGameMatch -Index $GameList -Subject $subject; if ($found.Status -eq 'Certain') { $gameId = [string]$found.Match.Id } }
+            }
+        }
+        # Names of this game's ID, and the pictures that are not a different game.
+        $nameKeys = New-Object System.Collections.Generic.List[string]
+        if ($compact) { [void]$nameKeys.Add($compact) }
+        if ($gameId -and $GameList.ById.ContainsKey($gameId)) { [void]$nameKeys.Add((ConvertTo-TpmLbMediaKey $GameList.ById[$gameId].Name).Replace(' ', '')) }
+        if ($gameId -and $altNames.ContainsKey($gameId)) { foreach ($altCompact in $altNames[$gameId]) { [void]$nameKeys.Add($altCompact) } }
+        $notOther = { param($item) if (-not $gameId) { return $true }; $imageId = & $getImageId $item; return (-not $imageId -or $imageId -eq $gameId) }
         $same = @(); $close = @()
         if ($compact) {
-            $same = @($index | Where-Object { $_.Compact -ceq $compact })
+            $same = @($index | Where-Object { $nameKeys -ccontains $_.Compact } | Where-Object { & $notOther $_ })
             if ($same.Count -eq 0) {
                 $close = @($index | ForEach-Object {
                     $sim = Get-TpmLbMediaSimilarity $compact $_.Compact
                     if ($_.Loose -ceq $loose -or ($compact.Length -ge 6 -and $sim -ge 0.9)) { [pscustomobject]@{ Item = $_; Sim = $sim } }
-                } | Sort-Object @{ Expression = 'Sim'; Descending = $true } | Select-Object -First 3)
+                } | Where-Object { & $notOther $_.Item } | Sort-Object @{ Expression = 'Sim'; Descending = $true } | Select-Object -First 3)
             }
         }
         $replaces = if ($have.Count -gt 0) { $have[0].FullName } else { $null }
@@ -57493,7 +61989,7 @@ function Write-TpmLbMediaOutcome {
 
 # The optional step shown after the LaunchBox choices. Skipped in Unattended and preview runs.
 function Invoke-TpmLaunchBoxMediaStep {
-    param([string]$lbRoot, [string]$userProfilesDir, [switch]$Unattended, [switch]$DryRun)
+    param([string]$lbRoot, [string]$userProfilesDir, [switch]$Unattended, [switch]$DryRun, [string]$TpRoot = '', [hashtable]$DatIndex = $null)
     if ($DryRun) { Write-Log 'PreviewMode: LaunchBox picture import skipped.'; return }
     if ($Unattended) { Write-Log 'Unattended: LaunchBox picture import skipped.'; return }
     Write-TpmText -Text 'Optional: add logos or box art to LaunchBox from a folder you pick.' -Color Cyan -BlankBefore
@@ -57520,13 +62016,16 @@ function Invoke-TpmLaunchBoxMediaStep {
     if ($platChoice -eq 'B') { return }
     $platforms = switch ($platChoice) { '1' { @('TeknoParrot') } '2' { @('Arcade') } '3' { @('Arcade', 'TeknoParrot') } }
     try {
-        $plan = Get-TpmLaunchBoxMediaPlan -lbRoot $root -userProfilesDir $userProfilesDir -imageFolder $folder -platformNames $platforms -Kind $kind
+        # The game list (when LaunchBox has it) lets the shared matching engine tell games apart by ID; without it, names alone are used.
+        $gamesDb = Get-TpmGamesDbForLaunchBox -LaunchBoxRoot $root
+        $engine = @{ TpRoot = $TpRoot; DatIndex = $DatIndex; GameList = $gamesDb.Index }
+        $plan = Get-TpmLaunchBoxMediaPlan -lbRoot $root -userProfilesDir $userProfilesDir -imageFolder $folder -platformNames $platforms -Kind $kind @engine
         $replace = $false
         if ($plan.Existing.Count -gt 0) {
             Write-TpmText -Text ('{0} already have a picture.' -f (Format-TpmGameCount -Count $plan.Existing.Count)) -Color Yellow -BlankBefore
             if ((Read-TpmYesNo -Prompt 'Keep the pictures you already have? (Y = keep, N = replace them; old ones are saved so Undo can bring them back)' -Default 'Y') -eq 'N') {
                 $replace = $true
-                $plan = Get-TpmLaunchBoxMediaPlan -lbRoot $root -userProfilesDir $userProfilesDir -imageFolder $folder -platformNames $platforms -Kind $kind -ReplaceExisting
+                $plan = Get-TpmLaunchBoxMediaPlan -lbRoot $root -userProfilesDir $userProfilesDir -imageFolder $folder -platformNames $platforms -Kind $kind -ReplaceExisting @engine
             }
         }
         $detailLines = New-Object System.Collections.Generic.List[string]
@@ -57813,6 +62312,16 @@ if ($dryRunActive) {
     [void](Invoke-TpmCps3SupplementaryOffer -TpRoot $tpRoot -UserProfilesDir $userProfilesDir)
 }
 # =============================================================================
+# SYSTEM 11 SAVED FILES  (optional, only when System 11 games are registered and some have no saved files)
+# =============================================================================
+if ($dryRunActive) {
+    Write-Log "PreviewMode: System 11 saved files offer skipped."
+} elseif ($Unattended) {
+    Write-Log "Unattended: System 11 saved files offer skipped."
+} else {
+    [void](Invoke-TpmS11PreinstallOffer -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -SearchFolders @($zipSourceSupplementary, $zipSource))
+}
+# =============================================================================
 # GPU FIX SETUP  (optional, runs after dgVoodoo2 setup)
 # =============================================================================
 
@@ -57852,9 +62361,13 @@ if ($doGpuFix -eq "Y") {
     } elseif ([bool]$autoGpuResult.Cancelled) {
         Write-Host "GPU Compatibility Fix canceled before profile changes; no success was claimed." -ForegroundColor DarkGray
     } elseif ($autoGpuResult.Outcome -notin @('SUCCEEDED', 'NO_OP')) {
-        Write-Host "GPU Compatibility Fix did not complete for every game. No success was claimed; review the per-game results above." -ForegroundColor Yellow
+        # The same result screen the menu uses: the counts (selected, changed, skipped, failed), the drive letter, and D for details.
+        $autoGpuView = Get-TpmGpuFixResultView -Result $autoGpuResult
+        $autoGpuView.Next = if ([int](Get-TpmTransactionField -Object $autoGpuResult -Name 'MissingDevice' -Default 0) -gt 0 -or [int](Get-TpmTransactionField -Object $autoGpuResult -Name 'MissingPath' -Default 0) -gt 0) {
+            (Get-TpmDriveSkipNext) + ' Then run GPU Compatibility Fix again from the main menu.'
+        } else { 'Run GPU Compatibility Fix again from the main menu if you want to retry.' }
+        Write-TpmOutcome @autoGpuView
         if ([int](Get-TpmTransactionField -Object $autoGpuResult -Name 'MissingDevice' -Default 0) -gt 0) {
-            Write-Host "  A drive that holds some of your games is not connected. Connect it, then run GPU Compatibility Fix again from the main menu." -ForegroundColor Yellow
             [void]$onboardingFollowUp.Add('Drive not connected: the GPU fix skipped games on a drive that is not connected. ' + (Get-TpmDriveSkipNext))
         }
     }
@@ -57865,7 +62378,8 @@ if ($doGpuFix -ne 'Y') {
     $onboardingGpuSummary = 'GPU compatibility: canceled before profile changes; no success was claimed. Run GPU Compatibility Fix from the menu if still wanted.'
     [void]$onboardingFollowUp.Add($onboardingGpuSummary)
 } elseif (-not $autoGpuResult -or @($autoGpuResult.PSTypeNames) -notcontains 'TPM.TransactionResult.v1' -or $autoGpuResult.Outcome -notin @('SUCCEEDED','NO_OP')) {
-    $onboardingGpuSummary = 'GPU compatibility: did not finish as a verified success. Review the per-profile result and preserved backup before retrying; no game launch or display result was verified.'
+    $gpuCountsLine = if ($autoGpuResult) { Get-TpmResultCountsLine -Result $autoGpuResult -Picked @(Get-TpmTransactionField -Object $autoGpuResult -Name 'SelectedItems' -Default @()) -AlreadyWord 'already set up or needed no fix' } else { '' }
+    $onboardingGpuSummary = if ($gpuCountsLine) { 'GPU compatibility: ' + $gpuCountsLine + ' Game launch and display result were not verified.' } else { 'GPU compatibility: did not finish as a verified success. Review the per-profile result and preserved backup before retrying; no game launch or display result was verified.' }
     [void]$onboardingFollowUp.Add($onboardingGpuSummary)
 } elseif ($autoGpuResult.Outcome -eq 'NO_OP') {
     $onboardingGpuSummary = 'GPU compatibility: scanned profile fields needed no changes. Game launch and display output were not verified.'

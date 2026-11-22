@@ -39,4 +39,6 @@ Run it once after your first setup. Run it again whenever you change your graphi
 
 At the end of a normal run you may also be asked `Apply now?` for GPU fix. Answering yes does the same thing.
 
+The GPU fix offered at the end of first-time setup shows the same result screen as the menu: how many games you selected, changed, skipped and failed. A game on a drive that is not connected is called skipped, not failed. The drive letter is named, and it points to [[Health Check]] to repair the game paths.
+
 </details>

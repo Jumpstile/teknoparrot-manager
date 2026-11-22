@@ -53,6 +53,17 @@ function Get-TpmCoverageCheckTables {
         return $assign.Right.Find({ param($n) $n -is [System.Management.Automation.Language.HashtableAst] }, $true)
     }
     $keys = { param($name) $h = & $table $name; if ($null -eq $h) { return @() }; return @($h.KeyValuePairs | ForEach-Object { [string]$_.Item1.Value }) }
+    # Only the table rows that name startup files count as "checked"; the other rows only say which folder an emulator runs from.
+    $startupFileKeys = {
+        param($name)
+        $h = & $table $name
+        if ($null -eq $h) { return @() }
+        $needs = @('Files', 'RequiredFiles', 'FilesFromProfile', 'InstallVia')
+        return @($h.KeyValuePairs | Where-Object {
+                $row = $_.Item2.Find({ param($n) $n -is [System.Management.Automation.Language.HashtableAst] }, $true)
+                $null -ne $row -and @($row.KeyValuePairs | Where-Object { $needs -contains [string]$_.Item1.Value }).Count -gt 0
+            } | ForEach-Object { [string]$_.Item1.Value })
+    }
     $gpu = @{}
     $gpuTable = & $table 'GpuIncompatibleGames'
     if ($null -ne $gpuTable) {
@@ -64,7 +75,7 @@ function Get-TpmCoverageCheckTables {
         PathLimits        = @(& $keys 'RawThrillsPathLimits')
         VersionPins       = @(& $keys 'FileVersionPins')
         GpuIncompatible   = $gpu
-        FirmwareEmulators = @(& $keys 'EmulatorBiosRequirements')
+        FirmwareEmulators = @(& $startupFileKeys 'EmulatorBiosRequirements')
     }
 }
 
@@ -208,7 +219,7 @@ function Get-TpmCoverageMarkdown {
     [void]$sb.Append('- **Checked**: TeknoParrot Manager checks something and warns you (path too long, a pinned file, a graphics card that does not work, emulator startup files).' + $nl)
     [void]$sb.Append('- **Guided**: the guide has steps for the game. TeknoParrot Manager puts them in your Game Notes file. You do the steps.' + $nl)
     [void]$sb.Append('- **Handled**: the guide has nothing for the game that TeknoParrot Manager must do. TeknoParrot does the work.' + $nl)
-    [void]$sb.Append('- **Gap**: TeknoParrot Manager cannot register the game yet. The row says exactly what is missing.' + $nl + $nl)
+    [void]$sb.Append('- **Gap**: TeknoParrot has no game profile for this guide entry, so there is nothing to register. The row says exactly what is missing.' + $nl + $nl)
     [void]$sb.Append('## Totals' + $nl + $nl)
     [void]$sb.Append(('{0} game IDs in all: {1} guide games, {2} guide versions (other ROM revisions of a game), and {3} catalog profiles that the guide does not list.' -f $t.Total, ($t.Total - $t.CatalogOnly - $t.Versions), $t.Versions, $t.CatalogOnly) + $nl + $nl)
     [void]$sb.Append('| Applied | Checked | Guided | Handled | Gap |' + $nl + '|---|---|---|---|---|' + $nl)
@@ -222,7 +233,8 @@ function Get-TpmCoverageMarkdown {
     [void]$sb.Append($nl + '## What you do')
     [void]$sb.Append($nl + $nl + '- **PC games and other emulators**: register with TeknoParrot Manager, read your Game Notes file, then set up the controls in TeknoParrot.' + $nl)
     [void]$sb.Append('- **ROM games (marked ROM)**: the guide asks you to pick the exact ZIP it names, keep the BIOS ZIP in the same folder, pick the matching game revision, and for some games pick a CHD file as a second game file. TeknoParrot Manager sets the game file when a catalog profile exists, shows these steps in the Game Notes file, and reports in Library Health (Game support) when a second game file is missing.' + $nl)
-    [void]$sb.Append('- **Gap rows**: TeknoParrot Manager has no profile to register, so these games cannot be set up with it yet.' + $nl + $nl)
+    [void]$sb.Append('- **Gap rows**: guide entries that have no TeknoParrot profile of their own. Seven are extra archives that TeknoParrot has no profile for at all (the Sega Rally 3 track mods and Escape from Monster Manor); TeknoParrot Manager lists their folders as "not in TeknoParrot" and does not call that a failure. Two (Battle Gear 3 and Wayne Gretzky''s 3D Hockey Fatality Edition) run through a linked profile.' + $nl)
+    [void]$sb.Append('- **Second profile not written**: four games (House of the Dead 4, Raiden III, Raiden IV and Densha de GO) have a first profile that TeknoParrot Manager registers, and the guide also names a second profile for them. The guide does not say what that second profile is for, so TeknoParrot Manager does not write it. These four are not Gap rows. They stay on this page so they are not forgotten.' + $nl + $nl)
     [void]$sb.Append('## Details (for testers)' + $nl + $nl)
     [void]$sb.Append('Run `scripts\New-TpmGameCoverage.ps1 -GuidePath <guide page or game-data JSON> -SnapshotManifestPath <snapshot-manifest.json> -ProfilesDir <saved profile XML folder> -OutputDir <folder> -MarkdownPath docs\GAME-SUPPORT.md`. The tool writes one row per game ID with its loader, what the guide says, and the exact missing data for each gap. Guide text is only read, never run. A refresh is needed whenever the guide, the catalog snapshot or the reviewed recipe list changes.' + $nl)
     return $sb.ToString()

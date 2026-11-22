@@ -19,7 +19,8 @@ BeforeAll {
     Import-Module $script:ModulePath -Force
 
     function New-DestructiveTestRoot {
-        $root = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-destructive-" + [guid]::NewGuid().ToString('N'))
+        # A short name: the update backup path under this root is near the 260-character Windows limit when TEMP is long.
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-d-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
         New-Item -ItemType Directory -Path $root -Force | Out-Null
         return $root
     }

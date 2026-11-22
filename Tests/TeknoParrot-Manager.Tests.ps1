@@ -6603,7 +6603,7 @@ __BRANCH__
             # Mutation: saving the already-configured profile B, or dropping the recovery-bundle evidence from the setup result, fails this test.
             $xml = '<GameProfile><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Path</FieldName><FieldValue>C:\\PostgreSQL\\bin\\</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Address</FieldName><FieldValue>127.0.0.1</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Port</FieldName><FieldValue>5432</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>User</FieldName><FieldValue>postgres</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldValue>old</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Automatically create Database</FieldName><FieldValue>1</FieldValue></FieldInformation></ConfigValues></GameProfile>'
             Set-Content -LiteralPath (Join-Path $script:pgProfiles 'A.xml') -Value $xml
-            Set-Content -LiteralPath (Join-Path $script:pgProfiles 'B.xml') -Value ($xml.Replace('<FieldValue>old</FieldValue>', '<FieldValue>approved</FieldValue>'))
+            Set-Content -LiteralPath (Join-Path $script:pgProfiles 'B.xml') -Value ($xml.Replace('<FieldValue>old</FieldValue>', '<FieldValue>approved</FieldValue>').Replace('GameDB01', 'GameDB02'))
             # FIX36 S4: A has a different non-blank Pass; the user approved replacing it.
             $result = Invoke-PostgresGameSetup -UserProfilesDir $script:pgProfiles -SuperPasswordPlain 'approved' -RecoveryBackup $script:pgRecovery -ApprovedPassReplacements @((Join-Path $script:pgProfiles 'A.xml'))
             (Test-TpmTransactionResult -Result $result) | Should -BeTrue
@@ -6629,7 +6629,7 @@ __BRANCH__
                 ('<FieldInformation><CategoryName>Postgres</CategoryName><FieldName>{0}</FieldName><FieldValue>{1}</FieldValue></FieldInformation>' -f $pair[0], $pair[1])
             }
             $xml = '<GameProfile><ConfigValues>' + ($fields -join '') + '</ConfigValues></GameProfile>'
-            foreach ($name in @('A', 'B')) { Set-Content -LiteralPath (Join-Path $script:pgProfiles ($name + '.xml')) -Value $xml }
+            foreach ($name in @('A', 'B')) { Set-Content -LiteralPath (Join-Path $script:pgProfiles ($name + '.xml')) -Value $xml.Replace('GameDB01', 'GameDB01' + $name) }
             $result = Invoke-PostgresGameSetup -UserProfilesDir $script:pgProfiles -SuperPasswordPlain 'approved' -RecoveryBackup $script:pgRecovery
             $result.Outcome | Should -Be 'NO_OP'
             $result.Configured | Should -Be 0
@@ -6986,6 +6986,7 @@ Describe "Skylinekiller executable workflow regressions" {
         @($script:reshadePreflightProgress | Where-Object { $_.Label -eq 'ReShade apply preflight' -and $_.Total -eq 2 -and -not $_.Complete }).Count | Should -Be 2
         @($script:reshadePreflightProgress | Where-Object { $_.Label -eq 'ReShade apply preflight' -and $_.Complete }).Count | Should -Be 1
         @($result.Records).Count | Should -Be 2
+        @($result.Records | Where-Object { $_.Id }).Count | Should -Be 2
         $result.Protected | Should -Be 1
         $result.MissingPath | Should -Be 1
         $result.Ready | Should -Be 0
@@ -7720,6 +7721,18 @@ function Exit-PostgresRecoveryResume {
         $script:postgresGuidanceMessages = @()
         Mock Write-Host { $script:postgresGuidanceMessages += [string]$Object }
         Mock Write-Log {}
+        Mock Test-TpmInteractiveInput { $false }
+        Mock Read-HostSafe { '' }
+    }
+
+    It "waits for Enter before the Windows permission window, but only when someone can answer (#385)" {
+        # Mutation: drop the pause -> the permission window opens over the text before it can be read.
+        Mock Test-TpmInteractiveInput { $true }
+        Write-PostgresAdministratorGuidance -Operation Install
+        Should -Invoke Read-HostSafe -Times 1 -Exactly -ParameterFilter { $Prompt -match 'Press Enter to open the Windows permission window' }
+        Mock Test-TpmInteractiveInput { $false }
+        Write-PostgresAdministratorGuidance -Operation Install
+        Should -Invoke Read-HostSafe -Times 1 -Exactly
     }
 
     It "explains temporary administrator access and the complete UAC recovery handoff" {
@@ -11088,7 +11101,7 @@ Describe "Manager script version identity" {
     }
 
     It "extracts the current script's literal identity from its full source" {
-        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC8.4'
+        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC9'
     }
 
     It "ignores assignment-looking lines inside a here-string" {
@@ -13782,12 +13795,12 @@ Describe "TeknoParrot-Manager.ps1 -Unattended real child-process fixture (issue 
         }
         $process.WaitForExit()
 
-        # The health check is only an all-clear (exit 0) when it could identify the video adapter, because the GPU-fix coverage depends on it.
-        # A machine with no recognizable adapter (a virtual machine or hosted runner) correctly finishes with 2, "some checks could not finish".
-        $expectedExitCode = if ([string]::IsNullOrWhiteSpace([string](Get-DetectedGpuVendor).Vendor)) { 2 } else { 0 }
-        $process.ExitCode | Should -Be $expectedExitCode -Because 'a genuine product defect (Mode must be set before starting) previously made every real -Unattended launch exit 1 here'
-
         $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { '' }
+        # The child cannot be given a fake video adapter. A machine with no recognized GPU (a CI runner has only a virtual one) makes the
+        # product report incomplete coverage and exit 2 (HEALTH_COVERAGE_INCOMPLETE). That is accepted only when the report itself says the
+        # GPU was not detected; every other cause of incomplete coverage, and every other exit code, still fails here.
+        $expectedExitCode = if ($stdout -match 'Not checked - GPU not detected') { 2 } else { 0 }
+        $process.ExitCode | Should -Be $expectedExitCode -Because 'exit 0 means the health check completed with full coverage; exit 2 is allowed only when the report says the GPU was not detected; exit 1 was the old "Mode must be set before starting" defect'
         $stdout | Should -Not -Match 'Mode must be set before starting' -Because 'this is the exact error text the real certification run hit'
         $stdout | Should -Match 'Library Health Check' -Because 'HealthCheck must have actually run, not merely avoided the error'
         $expectedFooter = if ($expectedExitCode -eq 0) { 'Read-only report complete' } else { 'Report finished. Some checks could not finish' }
@@ -14914,7 +14927,7 @@ Describe "Issue #300 workflow ownership and transition guards" {
     }
 
     It "routes reviewed PostgreSQL and optional-flow failures through lifecycle cleanup" {
-        foreach ($failureId in @('postgres-service-state','postgres-install-failed','postgres-backup-unverified','postgres-profile-recovery','postgres-profile-errors','postgres-service-restore','reshade-file-missing','reshade-file-type','dgv-acquisition-cancelled','dgv-deployment-failed')) {
+        foreach ($failureId in @('postgres-service-state','postgres-install-failed','postgres-backup-unverified','postgres-profile-recovery','postgres-profile-errors','postgres-service-restore','reshade-file-missing','reshade-file-type','dgv-acquisition-canceled','dgv-deployment-failed')) {
             $script:ProductionSource | Should -Match ([regex]::Escape("Resolve-TpmWorkflowFailure -Context"))
             $script:ProductionSource | Should -Match ([regex]::Escape("-FailureId '$failureId'"))
         }
@@ -21129,6 +21142,22 @@ Describe 'S1-DIRECTORY-REPLACEMENT AutoSync transaction' {
         $second.TransactionResult.Outcome | Should -Be 'SUCCEEDED'
         [System.IO.File]::ReadAllText((Join-Path $f.Target 'game.exe')) | Should -Be 'expected'
         $second.FilesystemChanged | Should -BeTrue
+    }
+
+    It 'keeps both copies of the old folder files when two replacements land in the same second' {
+        $f = New-S1DirectoryFixture 'directory-same-second-backup'
+        New-S1DirectoryZip $f.Zip @{ 'game.exe' = 'expected' }
+        $state = @{}
+        Mock Get-Date { [datetime]::new(2026,1,2,3,4,5,[System.DateTimeKind]::Utc) }
+        $earlier = Join-Path $script:TpmOwnedLayout.Backups 'AutoSyncReplaced\Game_2026-01-02_03-04-05'
+        New-Item -ItemType Directory -Path $earlier -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $earlier 'game.exe') -Value 'earlier backup' -NoNewline
+        Invoke-S1DirectoryTransaction -Fixture $f -State $state | Out-Null
+        Set-Content -LiteralPath (Join-Path $f.Target 'game.exe') -Value 'tampered' -NoNewline
+        $second = Invoke-S1DirectoryTransaction -Fixture $f -State $state -Stored $state.Game
+        $second.TransactionResult.Outcome | Should -Be 'SUCCEEDED'
+        [System.IO.File]::ReadAllText((Join-Path $earlier 'game.exe')) | Should -Be 'earlier backup'
+        [System.IO.File]::ReadAllText((Join-Path $second.TransactionResult.TechnicalDetails.ExtraFilesSavedTo 'game.exe')) | Should -Be 'tampered'
     }
 
     It 'reports cleanup residue after a verified replacement without admitting a clean transaction' {
@@ -27572,7 +27601,7 @@ Describe 'Next version: firmware, Play! game file and menu layout' {
             (Get-NfStagingLeft -Fixture $fixture) | Should -BeFalse
         }
 
-        It 'tells the player no window opens, and the prompt says "install the firmware"' {
+        It 'tells the player no window opens, and the prompt says to install what was found' {
             $fixture = New-NfRoot -EmulatorType 'RPCS3' -Folder 'RPCS3' -Program 'rpcs3.exe'
             $collection = New-NfCollection -ZipName $script:NfZipName -ZipEntries @{ 'PS3UPDAT.PUP' = $script:NfPupBytes } -DatSet $script:NfZipName -DatFile 'PS3UPDAT.PUP' -DatBytes $script:NfPupBytes
             $found = Get-NfPlan -Fixture $fixture -Collection $collection
@@ -27580,7 +27609,7 @@ Describe 'Next version: firmware, Play! game file and menu layout' {
             $script:nfPrompt = ''
             Mock Read-TpmChoice { $script:nfPrompt = $Prompt; return 'N' }
             [void](Invoke-TpmPrerequisiteReview -Warnings $found.Warning -TpRoot $fixture.Root -SearchFolders @($collection.Folder) -SupplementaryDatPath $collection.Dat -Interactive)
-            $script:nfPrompt | Should -Match 'install the firmware'
+            $script:nfPrompt | Should -Match 'install what was found'
             Should -Invoke Start-Process -Times 0 -Exactly
         }
 
@@ -27593,6 +27622,55 @@ Describe 'Next version: firmware, Play! game file and menu layout' {
             $text | Should -Match 'PlayStation 3 firmware archive'
             $text | Should -Match 'Supplementary or main ZIP folder'
             $text | Should -Not -Match 'put the missing files'
+        }
+
+        It 'asks once for the Supplementary folder, saves it, and installs the firmware with one Y; a skipped question names the missing file' {
+            # Mutation: no folder question, a second question, the folder not saved, or no "Missing" line in the report -> this fails.
+            $script:zipSourceSupplementary = $null
+            $script:TpmSupplementaryFolderAsked = $false
+            $script:nfScreen = New-Object System.Collections.Generic.List[string]
+            Mock Write-TpmText { [void]$script:nfScreen.Add([string]$Text) }
+            Mock Save-Config { $true }
+            Mock Read-TpmYesNo { throw 'must not ask a second time' }
+            $script:nfMarker = $true
+            $script:nfFiles = 600
+            $script:nfBehavior = {
+                param($flash)
+                $external = Join-Path $flash 'sys\external'
+                New-Item -ItemType Directory -Path $external -Force | Out-Null
+                [System.IO.File]::WriteAllText((Join-Path $external 'liblv2.sprx'), 'x')
+                1..$script:nfFiles | ForEach-Object { [System.IO.File]::WriteAllText((Join-Path $flash ('f{0}.bin' -f $_)), 'x') }
+            }
+            # Skipped: nothing found, the missing file is named, nothing is saved, no install is offered.
+            $skipFixture = New-NfRoot -EmulatorType 'RPCS3' -Folder 'RPCS3' -Program 'rpcs3.exe'
+            $empty = New-NfCollection -DatSet $script:NfZipName -DatFile 'PS3UPDAT.PUP' -DatBytes $script:NfPupBytes
+            $skipWarning = @((Get-CompatibilityWarnings -UserProfilesDir $skipFixture.Profiles -TeknoParrotRoot $skipFixture.Root).BiosMissing)
+            Mock Read-PathWithBrowse { '' }
+            $script:nfOffered = $null
+            Mock Read-TpmChoice { $script:nfOffered = @($Choices); 'N' }
+            [void](Invoke-TpmPrerequisiteReview -Warnings $skipWarning -TpRoot $skipFixture.Root -SupplementaryDatPath $empty.Dat -Interactive)
+            $script:nfOffered | Should -Not -Contain 'Y'
+            ($script:nfScreen -join "`n") | Should -Match 'Missing: PS3UPDAT\.PUP'
+            Should -Invoke Save-Config -Times 0 -Exactly
+            # Chosen: the folder is saved, the firmware is installed without a window, and the question is not asked again.
+            $script:TpmSupplementaryFolderAsked = $false
+            $fixture = New-NfRoot -EmulatorType 'RPCS3' -Folder 'RPCS3' -Program 'rpcs3.exe'
+            $collection = New-NfCollection -ZipName $script:NfZipName -ZipEntries @{ 'PS3UPDAT.PUP' = $script:NfPupBytes } -DatSet $script:NfZipName -DatFile 'PS3UPDAT.PUP' -DatBytes $script:NfPupBytes
+            $warning = @((Get-CompatibilityWarnings -UserProfilesDir $fixture.Profiles -TeknoParrotRoot $fixture.Root).BiosMissing)
+            Mock Read-PathWithBrowse { $collection.Folder }
+            Mock Read-TpmChoice { 'Y' }
+            $review = Invoke-TpmPrerequisiteReview -Warnings $warning -TpRoot $fixture.Root -SupplementaryDatPath $collection.Dat -Interactive
+            $review.FixedAny | Should -BeTrue
+            $script:zipSourceSupplementary | Should -Be $collection.Folder
+            Should -Invoke Save-Config -Times 1 -Exactly
+            $script:nfCall.Args | Should -Contain '--headless'
+            $script:nfCall.Args | Should -Contain '--installfw'
+            $script:nfCall.PupBytes | Should -Be $script:NfPupBytes
+            ($script:nfScreen -join "`n") | Should -Match 'Installed: PS3UPDAT\.PUP'
+            Remove-Item -LiteralPath $fixture.Flash -Recurse -Force
+            [void](Invoke-TpmPrerequisiteReview -Warnings @((Get-CompatibilityWarnings -UserProfilesDir $fixture.Profiles -TeknoParrotRoot $fixture.Root).BiosMissing) -TpRoot $fixture.Root -SearchFolders @($script:zipSourceSupplementary) -SupplementaryDatPath $collection.Dat -Interactive)
+            # One call for the skipped run, one for the chosen run; the third review asks nothing because the folder is saved.
+            Should -Invoke Read-PathWithBrowse -Times 2 -Exactly
         }
     }
 

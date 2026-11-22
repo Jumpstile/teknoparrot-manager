@@ -248,14 +248,20 @@ Describe 'FIX112 B3: a cleanup problem after the ReShade files are in place is a
 
     It 'refuses a game folder over 259 characters in plain words, before it changes anything' {
         # Who gets hurt: a user whose game is in a very deep folder got a technical move error and "may be inconsistent". Mutation: drop the length check in the promote -> the move throws a raw error and the reason is PROFILE_DEPLOYMENT_FAILED.
-        $result = Invoke-F112Adopt -LongFolder
-        $result.Succeeded | Should -BeFalse
-        $result.Reason | Should -BeExactly 'PATH_TOO_LONG'
-        $result.Error | Should -Match 'too long'
-        $result.Error | Should -Match 'Nothing was changed'
-        $result.Error | Should -Not -Match 'inconsistent'
-        [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes('\\?\' + $script:F112Hook)) | Should -BeExactly $script:F112HookBefore -Because 'the existing file was not touched'
-        Test-Path -LiteralPath $script:F112Ownership -PathType Leaf | Should -BeFalse
+        try {
+            $result = Invoke-F112Adopt -LongFolder
+            $result.Succeeded | Should -BeFalse
+            $result.Reason | Should -BeExactly 'PATH_TOO_LONG'
+            $result.Error | Should -Match 'too long'
+            $result.Error | Should -Match 'Nothing was changed'
+            $result.Error | Should -Not -Match 'inconsistent'
+            [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes('\\?\' + $script:F112Hook)) | Should -BeExactly $script:F112HookBefore -Because 'the existing file was not touched'
+            Test-Path -LiteralPath $script:F112Ownership -PathType Leaf | Should -BeFalse
+        } finally {
+            # Windows PowerShell 5.1 cannot delete the deep folder through a normal path, so Pester's TestDrive cleanup would fail on it.
+            $adoptRoot = '\\?\' + (Join-Path $script:F112Games 'Adopt')
+            if ([System.IO.Directory]::Exists($adoptRoot)) { [System.IO.Directory]::Delete($adoptRoot, $true) }
+        }
     }
 
     It 'gives the same plain reason when the game file over 259 characters is not there to be read' {

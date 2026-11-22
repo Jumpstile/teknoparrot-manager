@@ -1,6 +1,6 @@
 # Auto-Update System
 
-Status: the standalone helper and the Check for Updates menu item (15) are part of v1.0 RC8.1, v1.0 RC8.2, v1.0 RC8.3 and v1.0 RC8.4. The latest published release is v1.0 RC8.4: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4. It is a fix-up release for RC8.3. The previous published release is v1.0 RC8.3. Earlier published releases are v1.0 RC8.2, RC8.1 and RC7. RC8 was a tester build and was never published. Final Version 1.0 has not been published yet. All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
+Status: the standalone helper and the Check for Updates menu item (15) are part of v1.0 RC8.1, v1.0 RC8.2, v1.0 RC8.3, v1.0 RC8.4 and v1.0 RC9. RC9 is the next release after RC8.4 and is not published yet. The latest published release before it is v1.0 RC8.4: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4. The previous published releases are v1.0 RC8.3, RC8.2, RC8.1 and RC7. RC8 was a tester build and was never published. Final Version 1.0 has not been published yet. All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
 RC8.1 is the first build that can update itself in place with Check for Updates, including a release with many files. If you run RC8.1 or newer, Check for Updates offers the newer release when there is one. Builds before RC8.1 (for example RC8 or RC7) cannot update themselves. If you run one of those, install the newest release by hand once: download its ZIP from the Releases page and extract it over your old folder. After that, Check for Updates does the work.
 
@@ -376,11 +376,11 @@ It never runs in `-Unattended` mode.
 1. If you are already up to date, nothing is shown. The menu appears.
 2. If GitHub cannot be reached or the check is too slow, nothing is shown. The menu appears.
 3. If a newer version exists, you will see an "Update Available" screen. It shows `Current version`, `Latest version`, the release name if there is one, and a one-line summary.
-4. You will then be asked `Update now, remind me later, or view release notes? (Y/N/V)`. Next: type Y, N, or V.
+4. The screen then shows the `Updating will:` list and the choices one by one: `Y = Update now`, `N = Remind me later`, `V = View release notes`. You are asked `Your choice (Y/N/V)`. Next: type Y, N, or V.
 
 **What each answer does:**
 
-- **Y** shows the `Updating will:` list, then asks `Proceed? (Y/N)`. Next: type Y to install, or N to skip (`Skipped -- no changes made.`).
+- **Y** starts the update right away. There is no second question. The `Updating will:` list is shown above the choices, so you read it before you answer. The update still downloads and checks the file, backs up every file it replaces, and puts the old version back if anything fails.
 - **N** (or anything else) continues to the menu. You will see `Continuing -- you can check again any time from the menu.`
 - **V** prints the full release notes, then asks the question again.
 
@@ -390,7 +390,7 @@ If the release has no notes, you will see `No release notes were provided for th
 
 **Flow:**
 
-1. Runs once, right after config is loaded, before any TeknoParrot-root prompts. Never runs in `-Unattended` mode -- there is no way to show an interactive prompt there, and Unattended is meant to be fast and non-interactive.
+1. Runs once, right after the program starts, before the saved-settings question and before any TeknoParrot-root prompts. Never runs in `-Unattended` mode -- there is no way to show an interactive prompt there, and Unattended is meant to be fast and non-interactive.
 2. Queries the latest release with a single short-timeout attempt (`-MaxAttempts 1 -TimeoutSec 5`, vs. the menu option's patient 3x/20s retry) so an unreachable GitHub cannot meaningfully delay startup. A failed or timed-out check is logged and the script continues straight to the menu -- no error is shown to the user for what is, from their perspective, an unrequested background check.
 3. If already current: nothing is shown, continues directly to the menu (optionally logged).
 4. If a newer version exists: shows current/latest version, the release name if present, and a one-line summary (`Get-ManagerUpdateReleaseSummary` -- the first non-blank line of the release body, markdown heading/bullet markers stripped, clamped to 150 characters), then prompts Y/N/V.

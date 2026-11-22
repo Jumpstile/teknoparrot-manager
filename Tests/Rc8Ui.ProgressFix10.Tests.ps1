@@ -198,7 +198,7 @@ Describe 'FIX10 BLOCKER 1: audited close sites report failures as Error' {
         }
         Add-Type -AssemblyName System.IO.Compression
         Add-Type -AssemblyName System.IO.Compression.FileSystem
-        . ([scriptblock]::Create((Get-Fx10FunctionText -Name @('Get-TpmAutoSyncZipInventory', 'ConvertTo-SafeZipEntryRelativePath', 'Get-TpmTransactionField', 'Get-TpmPostgresRequirementScan', 'Test-GameNeedsPostgres'))))
+        . ([scriptblock]::Create((Get-Fx10FunctionText -Name @('Get-TpmAutoSyncZipInventory', 'ConvertTo-SafeZipEntryRelativePath', 'Get-TpmTransactionField', 'Get-TpmPostgresRequirementScan', 'Test-GameNeedsPostgres', 'Get-TpmGameDatabaseStorage'))))
     }
     BeforeEach { Set-Fx10DefaultMocks; $script:fx10Events = New-Object System.Collections.Generic.List[object] }
 

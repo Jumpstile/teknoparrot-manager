@@ -16,7 +16,9 @@ BeforeAll {
         'Get-ControlReadinessKnownRequirements', 'Test-ControlReadinessButtonBindingUsable', 'Test-ControlReadinessAnalogMappingUsable',
         'Get-ControlReadinessDocumentFit', 'Read-ControlReadinessProfileDocument', 'Get-ControlReadinessControlsState',
         'Get-TpmControlCoverageContract', 'Get-TpmControlBindingFacts', 'Get-TpmControlCoverageInventory',
-        'Get-TpmControlCoverageLines', 'Get-TpmControlCoverage'
+        'Get-TpmControlCoverageLines', 'Get-TpmControlCoverage', 'Get-TpmControlCoverageWhyText', 'Read-TpmGameTemplate', 'Get-TpmTemplateIdentity',
+        'Get-TpmDerivedControlContract', 'Get-TpmGameControlContract', 'Get-TpmControlCoverageAudit', 'Get-TpmControlCoverageAuditSummary',
+        'Test-TpmMappingInPlayerOneScope', 'Get-TpmProfileFriendlyTitle'
     )
     $functionFile = Join-Path $TestDrive 'coverage-functions.ps1'
     ($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -in $wanted }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n" | Set-Content -LiteralPath $functionFile -Encoding utf8
@@ -201,5 +203,167 @@ Describe 'Controls coverage text and reading' {
         Set-Content -LiteralPath (Join-Path $game 'abc.xml') -Value (New-AbcProfileXml -Bound @() -Omit @('Analog0', 'Analog2', 'Analog4')) -Encoding utf8
         (Get-TpmControlCoverage -Code 'abc' -UserProfilesDir $user -GameProfilesDir $game).Structural | Should -Be 'Missing'
         (Get-TpmControlCoverage -Code 'abc' -UserProfilesDir $user).Structural | Should -Be 'Unknown'
+    }
+}
+
+# Contracts read from TeknoParrot's own game file (issue #305): every game can be checked, with honest confidence.
+Describe 'Controls coverage from the game''s own file' {
+    BeforeAll {
+        # Slots: Name, Mapping, Analog type, Bound (a DirectInput binding), VisibleWhen (shown only when another setting asks).
+        function New-OwnGameXml {
+            param([object[]]$Slots, [int]$Revision = 7, [switch]$Template)
+            $buttons = foreach ($s in $Slots) {
+                $binding = if ($s.Bound -and -not $Template) { '<DirectInputButton><Button>1</Button></DirectInputButton>' } else { '' }
+                $analog = if ($s.Analog) { "<AnalogType>$($s.Analog)</AnalogType>" } else { '' }
+                $visible = if ($s.Visible) { '<VisibleWhen>Some Setting</VisibleWhen>' } else { '' }
+                "<JoystickButtons><ButtonName>$($s.Name)</ButtonName><InputMapping>$($s.Mapping)</InputMapping>$visible$analog$binding</JoystickButtons>"
+            }
+            return "<GameProfile><ExecutableName>owngame</ExecutableName><EmulationProfile>OwnEmu</EmulationProfile><GameProfileRevision>$Revision</GameProfileRevision><JoystickButtons>$(-join $buttons)</JoystickButtons></GameProfile>"
+        }
+        function New-OwnSlots {
+            param([string[]]$Bound = @())
+            @(
+                @{ Name = 'Test'; Mapping = 'Test' }, @{ Name = 'Coin 1'; Mapping = 'Coin1' }, @{ Name = 'Start'; Mapping = 'P1ButtonStart' },
+                @{ Name = 'Gun Trigger'; Mapping = 'P1Button1' }, @{ Name = 'Missile'; Mapping = 'P1Button2' },
+                @{ Name = 'Bonus Button'; Mapping = 'P1Button3'; Visible = $true },
+                @{ Name = 'P2 Start'; Mapping = 'P2ButtonStart' },
+                @{ Name = 'Stick X'; Mapping = 'Analog0'; Analog = 'AnalogJoystick' }, @{ Name = 'Stick X Left'; Mapping = 'Analog0'; Analog = 'AnalogJoystick' }
+            ) | ForEach-Object { $_.Bound = ($Bound -contains $_.Name); [pscustomobject]$_ }
+        }
+        function New-OwnFiles {
+            param([string]$Name, [string[]]$Bound = @(), [int]$UserRevision = 7, [int]$TemplateRevision = 7, [switch]$NoTemplate, [switch]$NoUser)
+            $unique = [guid]::NewGuid().ToString('N').Substring(0, 6)
+            $user = Join-Path $TestDrive "own-user-$unique"; $game = Join-Path $TestDrive "own-game-$unique"
+            New-Item -ItemType Directory -Path $user, $game -Force | Out-Null
+            if (-not $NoUser) { Set-Content -LiteralPath (Join-Path $user "$Name.xml") -Value (New-OwnGameXml -Slots (New-OwnSlots -Bound $Bound) -Revision $UserRevision) -Encoding utf8 }
+            if (-not $NoTemplate) { Set-Content -LiteralPath (Join-Path $game "$Name.xml") -Value (New-OwnGameXml -Slots (New-OwnSlots) -Revision $TemplateRevision -Template) -Encoding utf8 }
+            return [pscustomobject]@{ User = $user; Game = $game }
+        }
+        $script:allBound = @('Start', 'Gun Trigger', 'Missile', 'Stick X')
+    }
+
+    It 'names controls by the game''s own button names, leaves out other players, and does not require Test, Coin or conditional controls' {
+        $doc = New-Object System.Xml.XmlDocument
+        $doc.LoadXml((New-OwnGameXml -Slots (New-OwnSlots) -Template))
+        $contract = Get-TpmDerivedControlContract -Code 'owngame' -TemplateDoc $doc -TemplateSha256 ('a' * 64)
+        @($contract.SemanticControls | Where-Object Requirement -eq 'Required' | ForEach-Object Meaning) | Should -Be @('Start', 'Gun Trigger', 'Missile', 'Stick X')
+        @($contract.SemanticControls | Where-Object Requirement -eq 'Optional' | ForEach-Object Meaning) | Should -Be @('Test', 'Coin 1', 'Bonus Button')
+        @($contract.SemanticControls | Where-Object ControlId -eq 'P2ButtonStart').Count | Should -Be 0
+        @($contract.SemanticControls | Where-Object ControlId -eq 'Analog0').Count | Should -Be 1
+        $contract.Evidence.ReviewState | Should -Be 'PendingReview'
+        $contract.GameContracts[0].ContractRevision | Should -Be 7
+        $contract.GameContracts[0].GameProfileHash | Should -Be ('a' * 64)
+    }
+
+    It 'matches the capability schema when the PowerShell version can check it' -Skip:(-not (Get-Command Test-Json -ErrorAction SilentlyContinue | Where-Object { $_.Parameters.ContainsKey('SchemaFile') })) {
+        $doc = New-Object System.Xml.XmlDocument
+        $doc.LoadXml((New-OwnGameXml -Slots (New-OwnSlots) -Template))
+        $json = Get-TpmDerivedControlContract -Code 'owngame' -TemplateDoc $doc -TemplateSha256 ('a' * 64) | ConvertTo-Json -Depth 8
+        Test-Json -Json $json -SchemaFile (Join-Path $PSScriptRoot '..\schemas\TpmControllerCapability.v1.schema.json') | Should -BeTrue
+    }
+
+    It 'is Complete but Medium confidence and never ready when every control the game lists is bound' {
+        $f = New-OwnFiles -Name 'owngame' -Bound $script:allBound
+        $inv = Get-TpmControlCoverage -Code 'owngame' -UserProfilesDir $f.User -GameProfilesDir $f.Game
+        $inv.Structural | Should -Be 'Complete'
+        $inv.Confidence | Should -Be 'Medium'
+        $inv.Verification | Should -Be 'NotVerified'
+        $text = (Get-TpmControlCoverageLines -Inventory $inv) -join ' '
+        $text | Should -Match 'A person has not checked it'
+        $text | Should -Match 'cannot say the game is ready'
+        $text | Should -Not -Match '(?i)\bverified\b'
+    }
+
+    It 'is Partial, names what is missing, and mentions Test separately because TPM cannot tell if the game needs it' {
+        $f = New-OwnFiles -Name 'owngame' -Bound @('Start', 'Stick X')
+        $inv = Get-TpmControlCoverage -Code 'owngame' -UserProfilesDir $f.User -GameProfilesDir $f.Game
+        $inv.Structural | Should -Be 'Partial'
+        ($inv.MissingControls -join '|') | Should -Be 'Gun Trigger|Missile'
+        $text = (Get-TpmControlCoverageLines -Inventory $inv) -join ' '
+        $text | Should -Match 'Still needed: Gun Trigger, Missile'
+        $text | Should -Match 'cannot tell if the game needs them: Test, Coin 1, Bonus Button'
+    }
+
+    It 'is Missing when nothing is bound, and an analog control needs a real binding, not just a declared type' {
+        $f = New-OwnFiles -Name 'owngame' -Bound @()
+        $inv = Get-TpmControlCoverage -Code 'owngame' -UserProfilesDir $f.User -GameProfilesDir $f.Game
+        $inv.Structural | Should -Be 'Missing'
+        $inv.MissingControls | Should -Contain 'Stick X'
+    }
+
+    It 'reads a game whose profile name has a hyphen (for example R-Tuned)' {
+        $f = New-OwnFiles -Name 'own-game' -Bound $script:allBound
+        (Get-TpmControlCoverage -Code 'own-game' -UserProfilesDir $f.User -GameProfilesDir $f.Game).Structural | Should -Be 'Complete'
+    }
+
+    It 'counts a control as set up when any of its buttons is bound (an axis and its keyboard halves)' {
+        $f = New-OwnFiles -Name 'owngame' -Bound @('Start', 'Gun Trigger', 'Missile', 'Stick X Left')
+        (Get-TpmControlCoverage -Code 'owngame' -UserProfilesDir $f.User -GameProfilesDir $f.Game).Structural | Should -Be 'Complete'
+    }
+
+    It 'is Unknown, never Complete, when the saved settings are another revision than the game file' {
+        $f = New-OwnFiles -Name 'owngame' -Bound $script:allBound -UserRevision 6 -TemplateRevision 7
+        $inv = Get-TpmControlCoverage -Code 'owngame' -UserProfilesDir $f.User -GameProfilesDir $f.Game
+        $inv.Structural | Should -Be 'Unknown'
+        $inv.Why | Should -Be 'DifferentVersion'
+        (Get-TpmControlCoverageLines -Inventory $inv) -join ' ' | Should -Match 'Open it once in TeknoParrotUI'
+    }
+
+    It 'has nothing to say about a game with no game file, and the audit says why' {
+        $f = New-OwnFiles -Name 'owngame' -Bound $script:allBound -NoTemplate
+        Get-TpmControlCoverage -Code 'owngame' -UserProfilesDir $f.User -GameProfilesDir $f.Game | Should -BeNullOrEmpty
+        $audit = Get-TpmControlCoverageAudit -Profiles @(Get-ChildItem -LiteralPath $f.User -Filter '*.xml') -GameProfilesDir $f.Game
+        $audit.Rows[0].Structural | Should -Be 'Unknown'
+        $audit.Rows[0].Why | Should -Be 'NoGameFile'
+    }
+
+    It 'is Unknown when the game file lists no player controls' {
+        $user = Join-Path $TestDrive 'own-user-none'; $game = Join-Path $TestDrive 'own-game-none'
+        New-Item -ItemType Directory -Path $user, $game -Force | Out-Null
+        $only = @([pscustomobject]@{ Name = 'Coin 1'; Mapping = 'Coin1' })
+        Set-Content -LiteralPath (Join-Path $game 'nothing.xml') -Value (New-OwnGameXml -Slots $only -Template) -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $user 'nothing.xml') -Value (New-OwnGameXml -Slots $only) -Encoding utf8
+        $audit = Get-TpmControlCoverageAudit -Profiles @(Get-ChildItem -LiteralPath $user -Filter '*.xml') -GameProfilesDir $game
+        $audit.Rows[0].Why | Should -Be 'NoControls'
+    }
+
+    It 'the reviewed contract still wins for the reviewed revision, and a newer revision falls back to the game file' {
+        $user = Join-Path $TestDrive 'own-user-abc'; $game = Join-Path $TestDrive 'own-game-abc'
+        New-Item -ItemType Directory -Path $user, $game -Force | Out-Null
+        $reviewed = New-AbcProfileXml -Bound @('P1ButtonStart', 'P1Button1', 'P1Button2', 'P1Button3')
+        Set-Content -LiteralPath (Join-Path $user 'abc.xml') -Value $reviewed -Encoding utf8
+        (Get-TpmControlCoverage -Code 'abc' -UserProfilesDir $user -GameProfilesDir $game).Confidence | Should -Be 'High'
+        Set-Content -LiteralPath (Join-Path $user 'abc.xml') -Value (New-AbcProfileXml -Bound @('P1ButtonStart') -Revision 25) -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $game 'abc.xml') -Value (New-AbcProfileXml -Bound @() -Revision 25) -Encoding utf8
+        $inv = Get-TpmControlCoverage -Code 'abc' -UserProfilesDir $user -GameProfilesDir $game
+        $inv.Confidence | Should -Be 'Medium'
+        $inv.Structural | Should -Be 'Partial'
+    }
+
+    It 'audits every registered game, counts them, names the games behind Details, and changes no file' {
+        $user = Join-Path $TestDrive 'own-user-audit'; $game = Join-Path $TestDrive 'own-game-audit'
+        New-Item -ItemType Directory -Path $user, $game -Force | Out-Null
+        $cases = @{ full = $script:allBound; some = @('Start'); none = @() }
+        foreach ($name in $cases.Keys) {
+            Set-Content -LiteralPath (Join-Path $user "$name.xml") -Value (New-OwnGameXml -Slots (New-OwnSlots -Bound $cases[$name])) -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $game "$name.xml") -Value (New-OwnGameXml -Slots (New-OwnSlots) -Template) -Encoding utf8
+        }
+        Set-Content -LiteralPath (Join-Path $user 'nofile.xml') -Value (New-OwnGameXml -Slots (New-OwnSlots)) -Encoding utf8
+        $before = Get-ChildItem -Path $user, $game -Recurse -File | Get-FileHash | ForEach-Object { $_.Path + $_.Hash }
+        $audit = Get-TpmControlCoverageAudit -Profiles @(Get-ChildItem -LiteralPath $user -Filter '*.xml') -GameProfilesDir $game
+        $after = Get-ChildItem -Path $user, $game -Recurse -File | Get-FileHash | ForEach-Object { $_.Path + $_.Hash }
+        ($after -join '|') | Should -Be ($before -join '|')
+        $audit.Total | Should -Be 4
+        $audit.Complete | Should -Be 1
+        $audit.Partial | Should -Be 1
+        $audit.Missing | Should -Be 1
+        $audit.Unknown | Should -Be 1
+        $summary = Get-TpmControlCoverageAuditSummary -Audit $audit
+        $summary.Status | Should -Be 'Attention'
+        ($summary.Done -join ' ') | Should -Match 'Games with every control the game lists set up: 1 of 4'
+        $detail = ($summary.Blocks | ForEach-Object { $_.Lines }) -join ' '
+        $detail | Should -Match 'some: still needed|some.*Gun Trigger'
+        ($summary.Done + $summary.Needs + $summary.Note) -join ' ' | Should -Not -Match '(?i)\bready\b|\bverified\b'
+        $summary.Note | Should -Match 'not tested any game with a real controller'
     }
 }

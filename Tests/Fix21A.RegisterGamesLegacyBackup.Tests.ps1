@@ -42,7 +42,7 @@ BeforeAll {
         'Register-GamesLegacy',
         'Backfill-SecondaryExecutablePath',
         'Confirm-TpmRegistrationSafetyBackup',
-        'Set-SecondaryExecutablePath',
+        'Set-SecondaryExecutablePath', 'Get-TpmMissingGameSetFiles', 'Get-TpmGameFileSet', 'Get-ExeAlternatives',
         'Test-TpmGameMutationPath',
         'Add-TpmUnavailableDriveGame',
         'Get-TpmTransactionField',
@@ -50,13 +50,14 @@ BeforeAll {
         'Get-PrimaryExecutableName',
         'Get-NormalizedGameKey',
         'Get-DiceSimilarity',
-        'Get-TpmBaseTitleKey', 'Resolve-BestFuzzyMatch',
+        'Get-TpmBaseTitleKey', 'Resolve-BestFuzzyMatch', 'Get-TpmTeknoParrotNamesForCodes', 'Get-TpmTeknoParrotGameName', 'Get-TpmTeknoParrotMetadataFacts',
         'Resolve-ProfileCode',
         'Get-GameFiles',
         'Save-XmlMaybe', 'Get-TpmProfileWriteFingerprint', 'Resolve-TpmRegistrationSaveFailure',
         'New-TpmVerifiedUserProfilesBackup',
         'Assert-TpmRegisteredGamePath',
-        'Set-TpmRegistrationGamePath'
+        'Set-TpmRegistrationGamePath', 'Get-DatEntryForZipName', 'Get-TpmZipBaseName',
+        'Get-TpmProfileFileExtensions', 'Get-TpmDatNamedProfileCodes', 'Register-TpmDatSecondProfiles'
     )
     $functions = @(
         $ast.FindAll({

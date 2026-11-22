@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC8.4
+  TeknoParrot Manager  |  v1.0 RC9
   Author: Jumpstile
 ===============================================================================
 
@@ -12,14 +12,14 @@
   up your game settings before it changes them, and Details and the log
   show what was done. See docs\ADVANCED-USERS.md.
 
-  This is v1.0 RC8.4. The latest published release is v1.0 RC8.4:
+  This is v1.0 RC9, the next release after RC8.4. It is not published yet.
+  The latest published release is v1.0 RC8.4:
   https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4
-  It is a fix-up release for RC8.3 and fixes problems that testers found.
-  If you use RC8.1 or newer, choose 15) Check for Updates to get it.
-  The previous published release is v1.0 RC8.3. Earlier published releases
-  are v1.0 RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published.
+  If you use RC8.4, choose 15) Check for Updates to get RC9.
+  The previous published releases are v1.0 RC8.3, RC8.2, RC8.1, RC7 and RC6.
+  RC8 was a tester build and was never published.
   Final Version 1.0 has not been published yet.
-  The changes since RC8.3 are in TeknoParrot-Manager-CHANGELOG.txt.
+  The changes since RC8.4 are in TeknoParrot-Manager-CHANGELOG.txt.
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after each run. AutoSync backs up UserProfiles before
@@ -382,6 +382,12 @@
     Games registered via the dat are shown as "Registered (dat)". The log
     also says whether the match was exact (dat/exact) or by similarity
     (dat/fuzzy).
+
+    The dat file says which format it uses. This version of TeknoParrot
+    Manager knows version 1. If a dat says another version, TeknoParrot
+    Manager tells you in plain words, still reads it the same way and
+    notes it in the log; some games may then not match. A dat with no
+    version is read as before.
 
     A third registration pass (independent of the dat) Dice-matches
     normalized folder names against normalized GameProfile code names.
@@ -878,9 +884,18 @@
     See BEPINEX SETUP below. Available as menu option 9.
 
   - Postgres setup. Installs and configures the local PostgreSQL 8.3
-    database that some Incredible Technologies games need (Golden Tee
-    Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro,
-    Orange County Choppers Pinball).
+    database that some Incredible Technologies games need (every Golden
+    Tee Live and PGA Tour game, Power Putt Live, Silver Strike Bowling
+    Live, Target Toss Pro, Orange County Choppers Pinball).
+
+    Newer TeknoParrot profiles of these games have a Storage box. Internal
+    is the new default: no database install is needed, and you start the
+    game once so it makes its own database. Existing PostgreSQL is for
+    keeping an existing server and its saved progress. Postgres setup and
+    Library health check skip Internal games and never call their database
+    missing. TeknoParrot Manager never switches a game from one choice to
+    the other, and never touches saved progress without a backup first.
+    Older profiles with no Storage box work as before.
 
     It detects which of your registered games need it automatically. It
     never reinstalls an existing PostgreSQL install. It does not recreate
@@ -901,9 +916,15 @@
 
     Setup makes each game database from the game's own backup file and
     tests it with the game's own settings before it says the game is ready.
-    You do not need any extra step in TeknoParrot or on the first start. A
-    game with no starting database file (pg_backup) is left out and named.
-    The other games are still set up.
+    For a game set to Existing PostgreSQL you do not need any extra step in
+    TeknoParrot or on the first start. A game set to Internal storage is
+    skipped: start it once so it makes its own database. A game with no
+    starting database file (pg_backup) and TeknoParrot's "Automatically
+    create Database" option (Golden Tee Live 2018 and newer, PGA Tour)
+    gets its profile set up and is called "Profile ready": TeknoParrot
+    makes the database the first time the game starts. Any other game
+    with no starting database file is left out and named. The other games
+    are still set up.
 
     See POSTGRES SETUP below. Available as menu option 11.
 
@@ -922,9 +943,11 @@
     both Arcade and a dedicated platform at once. You are asked each time;
     the choice is not saved.
 
-    The end-of-run menu is explicit: P previews without changing LaunchBox,
-    A adds/updates now, F creates a manual import/reference file, and B
-    skips the optional LaunchBox step.
+    The end-of-run menu is explicit: P previews without changing
+    LaunchBox, A adds missing games, G fills in details and playlists, V
+    groups regions and versions, S keeps LaunchBox in step with
+    TeknoParrot, L links games for art and details, F creates a manual
+    import/reference file, and B skips the optional LaunchBox step.
 
     A manual-import reference file remains available if you prefer not to
     let the script touch LaunchBox's files directly.
@@ -1353,10 +1376,12 @@
 
   3) Propagate Controls
        Copies your current TeknoParrot controls from your reference games
-       to other games of the same type.
+       to other games of the same type. It also sets up games with your
+       controller layout, checks which games have all their controls, and
+       learns your arcade buttons (choices 1 to 5 on that screen).
 
-       No games are registered or extracted. It is the same step offered
-       at the end of AutoSync and Register. You can run it any time,
+       This step never registers or extracts games. It is the same step
+       offered at the end of AutoSync and Register. You can run it any time,
        without going through extraction or registration first.
 
        See CONTROL PROPAGATION below.
@@ -1510,6 +1535,12 @@
   It scans TeknoParrot's GameProfiles at runtime -- no update is needed
   when new games are added.
 
+  The GPU fix offered at the end of first-time setup ("Apply now?") shows
+  the same result as mode 7: how many games you selected, changed, skipped
+  and failed. A game on a drive that is not connected is called skipped,
+  not failed. The drive letter is named, and the result points to Library
+  health check (menu 13) to repair the game paths.
+
   Mode 8, FFB. The two independent mechanisms are described under FORCE
   FEEDBACK (FFB) SETUP below.
 
@@ -1531,11 +1562,14 @@
 
   11) Postgres setup
        Installs and sets up the local PostgreSQL 8.3 database that some
-       Incredible Technologies games need (Golden Tee Live, Power Putt
-       Live, Silver Strike Bowling Live, Target Toss Pro, Orange County
-       Choppers Pinball).
+       Incredible Technologies games need (every Golden Tee Live and PGA
+       Tour game, Power Putt Live, Silver Strike Bowling Live, Target Toss
+       Pro, Orange County Choppers Pinball).
 
        It finds by itself which of your registered games need it.
+
+       Games set to Internal storage (the new default in newer profiles)
+       need no PostgreSQL and are skipped.
 
        If PostgreSQL is already installed, it is never reinstalled or
        changed. If a game's database already exists, setup leaves it as it
@@ -1543,9 +1577,11 @@
        content: restoring a saved backup (mode 14) and Reinitialize ([I]
        on the backup-failure screen).
 
-       When Windows permission is needed, TeknoParrot Manager asks Windows
-       itself. It carries on the same job after you approve. You do not
-       need to close TeknoParrot Manager or choose mode 11 again.
+       When Windows permission is needed, TeknoParrot Manager first waits
+       for you to press Enter, so you can read what it will ask for. Then
+       it asks Windows itself and carries on the same job after you
+       approve. You do not need to close TeknoParrot Manager or choose
+       mode 11 again.
 
        When it finishes, you see a short result screen. For example:
 
@@ -1564,9 +1600,10 @@
 
        Every game database is tested before setup says it is ready:
        TeknoParrot Manager connects to it with the settings saved in the
-       game's own profile and counts its tables. If a game has no starting
-       database file (pg_backup), setup leaves that game out, sets up all
-       the other games, and names the game as not ready.
+       game's own profile and counts its tables. A game with no starting
+       database file (pg_backup) is "Profile ready" when TeknoParrot
+       creates its database itself; otherwise setup leaves that game out,
+       sets up all the other games, and names the game as not ready.
 
        See POSTGRES SETUP below for full details.
 
@@ -1576,7 +1613,8 @@
   Mode 13, Library health check. It is read-only. It first reports how
   many registered profiles have a valid, broken, or empty GamePath and
   lists broken profile codes by name. It also checks every game database
-  and shows "Problem - <game>" for each one that is not ready.
+  (except games set to Internal storage) and shows "Problem - <game>" for
+  each one that is not ready.
 
   For broken paths, [R] Try automatic path repair first performs a dry-run
   candidate search. TeknoParrot Manager displays the exact proposed paths,
@@ -1810,7 +1848,18 @@
        It also checks every game database. A database that is missing,
        cannot be opened with the game's own settings, or has no tables
        shows as "Problem - <game>" under D. Next: run Postgres setup
-       (menu 11).
+       (menu 11). Games set to Internal storage are skipped here. They
+       show "Game database: OK" with a note to start each game once so it
+       makes its own database.
+
+       It also has rows for these, with the names under D:
+
+         - game types TeknoParrot Manager does not know
+         - games TeknoParrot has not released yet ("not available yet")
+         - emulators missing from your TeknoParrot folder
+         - games that need you to pick the game file by hand (the profile
+           names no game file and there is no setup file)
+         - System 11 games with no saved files yet
 
   14) Restore from backup
        Puts back a saved copy. The menu calls this "Restore backup". You
@@ -2001,6 +2050,11 @@
 
   After you enter your folders, the script looks at the staging folder. It
   leaves out games that are already extracted there.
+
+  If AutoSync extracts nothing new, it ends with one short note: "Nothing
+  new was extracted, so registration was skipped. To register games
+  already extracted, choose Register only." This is only a note. It is not
+  under ACTION REQUIRED and does not send you to a saved list.
 
   You may also have a second (supplementary) ZIP source. Then both
   libraries are merged into one list. Games from the supplementary source
@@ -2202,6 +2256,47 @@
   was unsure about. Any case you leave open stays in ACTION REQUIRED. There
   you can finish it in TeknoParrotUI.
 
+  EVERY TEKNOPARROT GAME
+
+  The Manager is checked against every game setup file in TeknoParrot
+  1.0.0.2325 (2,541 of them), and against the Eggman game list and guide. docs\GAME-SUPPORT.md lists every game
+  and what the Manager does for it. These cases work with no extra steps:
+
+    Two versions of a game   Each version is registered. If TeknoParrot has
+                             only one setup file for both, the second one is
+                             reported as a duplicate. It is never dropped
+                             without a message.
+
+    A Lindbergh game         TeknoParrot has retired its Lindbergh setup file
+                             and replaced it with a newer ElfLdr2 one. The
+                             Eggman list names both, and both are
+                             registered. If the ElfLdr2 one needs a game file
+                             that is not in the folder, it is left out and
+                             the log says why.
+
+    A game TeknoParrot has   Listed as "not in TeknoParrot" (for example the
+    no setup file for        Sega Rally 3 track mods and Escape from Monster
+                             Manor). That is not a failure.
+
+    Unusual file names       Game files that end in .exec or .chd, and names
+                             with a hyphen (R-Tuned), are recognized.
+
+  Games that use more than one ZIP. A game set has a child game that uses
+  a parent ZIP. A child game is never registered only because its parent
+  ZIP is present, unless the Eggman list names that parent ZIP. A System 11 game that names two ZIPs (child and parent)
+  is registered only when both are in the same folder. If a game needs a
+  disc image (*.chd), it is chosen for you when there is exactly one. With
+  several, TeknoParrot Manager never guesses.
+
+  System 11 saved files (optional). After registration, if a System 11
+  game has no saved files yet, you see "OPTIONAL: System 11 saved game
+  files". If you have your own saved-files set (a ZIP in your collection
+  folders, or a folder or ZIP you pick), TeknoParrot Manager copies the
+  files for your games into TeknoParrotUi's TeknoS11\state\<game>\cabinet-1
+  folder. It only adds files and never replaces one. It tells you which of
+  your games the set has no files for. It does not ask again when the set
+  has nothing new. It does not provide or download the set.
+
 
   MORE DETAIL: REGISTRATION
   -------------------------
@@ -2363,7 +2458,12 @@
        start of the run (main menu option 14, Restore backup).
 
     If a game type has no usable example, its games are skipped.
-    Done means the copy run finished, not that every game's controls work.
+    The registration screen ends with "Registration run finished" (not
+    "Done"). That means the run ended, not that every game's controls work.
+    When games are skipped because no game of their type has your controls
+    yet, Details names one game of each type to set up first in
+    TeknoParrotUI, then run Propagate Controls (menu 3). Choosing a device
+    in the binding plan does not set up a game.
     The summary counts the skips. Details and the log list the games.
     Add one game of this family with your own controls, then run this again.
     If all games are skipped, the screen says no game was changed.
@@ -2492,12 +2592,96 @@
 
   If a controller is connected, it looks for it first. When it finds an
   Xbox-style controller, it asks one question ("Use the Xbox controller
-  for all games?") instead of seven.
+  for all games?") instead of seven. A match that is only a guess from a
+  device name is shown as "may be connected" and never answers for you.
 
-  It then prints a plan of which game to bind with which device.
+  It then prints a plan of which game to bind with which device. It
+  changes no game file.
 
-  This is only advice. It reads nothing and changes nothing. Use it as a
-  guide for the binding step.
+  Your answers are saved in the Manager's own settings folder
+  (State\Controls), so you are not asked the same thing twice. Next time
+  it shows your answers and asks one question ("Keep these answers?"). It
+  asks again if a controller turns up that you said you do not have. A
+  saved file that cannot be read is set aside, never overwritten, and the
+  last good copy is kept next to the new one as a .bak file.
+
+  MY CONTROLS (Propagate Controls, choice 5)
+
+    Nothing here changes a TeknoParrot game file.
+
+    - Learn my arcade buttons. You say how many players and buttons your
+      cabinet has. First the Manager waits 2 seconds with your hands off
+      the cabinet. If a key shows up on its own, a button may be stuck,
+      and it tells you. If LEDBlinky is installed, it then offers the
+      keys its own key list names (one Y/N). It can also offer the
+      standard arcade keys that MAME and Ultimarc I-PAC boards both use
+      (for example Left Ctrl for button 1). It uses them only after you
+      say yes and press two buttons that really send those keys. Then it
+      asks you to press each control ("Press Player 1 Start") and
+      remembers the key it sends. Esc skips a control your cabinet does
+      not have. A key already given to another control is refused. If a
+      press also sends another key, or a button is still down after 3
+      seconds, it tells you and keeps the first key. At the end, one
+      question ("Save this?") keeps the answers, and the Manager also
+      notes which arcade encoders it can see right now. Other encoder
+      brands' own setup files are not read: no maker writes down which
+      pin is which button. Pressing the buttons works for any encoder.
+    - Is it the same controller? My controls and the Device Survey say,
+      in one line, whether the Manager sees the same arcade encoders as
+      when you taught it your keys, whether one was added or removed, or
+      whether it could not check. It is only a hint. It never changes a
+      saved key or answer and never marks a game Verified. If you
+      changed your encoder, learn your buttons again. Details: the
+      Manager can only tell encoders from makers it recognizes (today
+      Ultimarc, such as the I-PAC). For each one it keeps a private
+      one-way code in State\Controls, made from the maker and model
+      numbers on this PC. The numbers, serial numbers and device paths
+      are never saved, logged, printed or put in a report, and the code
+      never leaves your PC. Moving an encoder to another USB port is not
+      a change. Swapping one for an identical one cannot be noticed.
+    - Show or print the controls of one game. Lists each control the game
+      has, what it does, the key the Manager suggests, and whether the
+      game has it set up. It suggests your key only for the standard
+      controls: coin, start, numbered buttons, and directions the game
+      plainly calls directions. For anything else, such as a game's
+      "Menu Up" or "Volume Down" slot, it says "I'm not sure". If your
+      own LEDBlinky file gives a control a color, the page also shows it
+      in a Light column (the Manager does not change any lights). One
+      question saves the list as a page in Reports\Control Guides and
+      opens it so you can print it.
+    - Tell TPM how a game played. W means you played it and every control
+      you tried reacted correctly. The Manager keeps that, with the date
+      and the game's revision, and calls the game's controls Verified
+      until its controls or its settings change. Starting a game,
+      registering it, or seeing a controller never makes a game Verified.
+      A wheel, gun or other analog game is not Verified until you say its
+      calibration is done (or not needed). You can also record that a
+      first-run Test or Service menu step is still to do. N makes the
+      Manager forget that a game worked.
+    - Show or print my cabinet controls. The same page for the cabinet
+      itself: each control and the key it sends.
+    - Does my cabinet fit the game? The page for one game starts with a
+      few plain lines that compare the game with what you told the
+      Manager. It says if your cabinet has enough players and buttons
+      ("Your cabinet has no button 3" is shown on that row), and which
+      device the game needs (trackball, spinner, wheel and pedals, light
+      gun) that you said you do not have. If you have no wheel but have
+      an Xbox controller, or no light gun but have a trackball or an
+      Xbox controller, it says that can stand in. If you never told the
+      Manager, it says it does not know instead of guessing. This only
+      compares: it sets up nothing and changes no game file. The same
+      lines go to the log.
+    - Exit, Pause and Menu. When learning buttons, the Manager first
+      asks, one by one, if your cabinet has an Exit, a Pause or a Menu
+      (admin) button. The answer is N unless you say Y. For these three,
+      Esc counts as a key, because many cabinets use Esc for Exit. They
+      show on your cabinet page.
+    - Undo my last save. Every time the Manager saves your answers or
+      keys it keeps the older file next to it as a .bak copy. When such
+      a copy exists, My controls offers "6 = Undo my last save". It
+      shows how many keys the older answers hold and asks one question.
+      If you say Y the older answers come back, and your newest answers
+      are kept as the copy, so you can undo the undo.
 
   If you have no lightgun, you can aim gun games in two ways:
 
@@ -2538,7 +2722,11 @@
       [P] Preview first. No changes.
       [A] Add missing games (backed up).
       [G] Fill in game details and make playlists (backed up).
+      [V] Group regions and versions of a game into one (backed up).
+      [S] Keep LaunchBox in step with TeknoParrot: removed, moved, renamed
+          games (backed up).
       [L] Link games for art and details (backed up).
+      [C] Fill in players and controllers for Big Box (backed up).
       [F] Import file only. No changes.
       [B] Skip this step.
 
@@ -2550,19 +2738,56 @@
         would do. LaunchBox is not changed.
 
     A   Writes straight into LaunchBox's own Data\ files, after the close
-        and backup checks.
+        and backup checks. New games get their real game name (for
+        example "Too Spicy", not "2Spicy"), plus release year and
+        developer. Firmware updaters, drive checkers and test boards are
+        never added. A game is linked by itself only when TeknoParrot
+        Manager is sure; if not, you choose from the possible games. The
+        platform it makes is called TeknoParrot and is looked up as
+        Arcade.
 
     G   Fills in game details and makes playlists, after a backup. It
         fills in the release year and developer where LaunchBox has
         nothing yet. It makes playlists for each arcade hardware family,
-        plus "Light gun games" and "Driving games". Your own playlists
-        and details are never touched. Restore puts everything back.
+        plus "Light gun games" and "Driving games". A game that cannot
+        start yet (game file, firmware or BepInEx missing) gets a plain
+        "Needs setup" note and goes into a "Needs setup" playlist. Both
+        go away by themselves when the problem is fixed. Your own
+        playlists, notes and details are never touched. Restore puts
+        everything back.
+
+    V   Groups the regions and versions of one game into one entry, after
+        a backup. You pick the version. Only games that are certainly
+        the same game are grouped. The default version follows the
+        region you chose in Region setup (menu 10). Restore puts them
+        back.
+
+    S   Keeps LaunchBox in step with TeknoParrot, after a preview and a
+        backup. Removed games are removed. Moved games get the new
+        location. Old Manager names become the clean title. A missing
+        game file, such as an unplugged drive, never removes a game.
+        Names you typed and games with a Games Database ID are never
+        renamed. If most games have no profile, nothing changes. Restore
+        undoes it.
 
     L   Links games for art and details, after a backup. It looks each
-        game up in LaunchBox's own game list on your PC. You see every
-        old name, new name and ID first and approve before anything is
-        saved. Names you typed yourself are never replaced. Nothing is
-        downloaded.
+        game up in LaunchBox's own game list on your PC. A game is linked
+        by itself only when TeknoParrot Manager is sure (a different
+        year or number is a different game; region, version and board
+        tags are ignored). For the rest you choose from possible games.
+        You see every old name, new name and ID first and approve before
+        anything is saved. Names you typed yourself are never replaced.
+        Nothing is downloaded.
+
+    C   Fills in players and controllers for Big Box, after a backup. For
+        each TeknoParrot game it fills in how many players the game has
+        and which controller it needs (joystick, steering wheel, light
+        gun, trackball or paddle), from the game's TeknoParrot controls.
+        It fills empty boxes only: what you or LaunchBox already have is
+        never changed, and a game that already lists controllers keeps
+        them. You see every game and what it would get first (press D)
+        and approve before anything is saved. Right after saving it
+        offers to undo at once. Restore puts everything back.
 
     F   Creates a reference file. LaunchBox is not changed.
 
@@ -2576,9 +2801,9 @@
     2. Type A and press Enter.
        You will see: "Close LaunchBox and BigBox first. TeknoParrot Manager
        will not close them for you." and "Only missing games are added. Your
-       own entries are kept." Then you will see "Add the missing games to
-       LaunchBox now? (Y/N, D = about the risks)". D explains the risks.
-       Next: answer Y.
+       own entries are kept." You already chose A, so there is no extra
+       "now?" question.
+       Next: the script asks for the platform.
 
     3. If you are asked for it, type your LaunchBox install folder.
        Next: the script asks how the games should appear.
@@ -2598,7 +2823,8 @@
 
     5. Read the plan of changes.
        You will see: what would change, then "Write exactly these changes
-       after a verified backup? (Y/N)".
+       after a verified backup? (Y/N, D = about the risks)". This is the
+       only approval.
        Next: Y writes the changes. N stops. You will see "LaunchBox write
        canceled; nothing was changed."
 
@@ -2616,10 +2842,13 @@
 
   I asks for your folder, then "Picture type: 1 Clear logos, 2 Box
   front, B back", then the platform. You see a preview: sure matches,
-  close matches to check, and games with no picture. A close match is
-  used only if you say yes. Pictures LaunchBox already has stay unless
-  you choose to replace them. Nothing is downloaded. U removes the
-  pictures that the last import added.
+  close matches to check, and games with no picture. When LaunchBox's own
+  game list is on your PC, each picture is matched by the game itself:
+  another name of the same game is a sure match, and a picture of a
+  different game with the same name is never used. Close names still need
+  your yes. Pictures LaunchBox already has stay unless you choose to
+  replace them. Nothing is downloaded. U removes the pictures that the
+  last import added.
 
   Lighting for your arcade buttons (LEDBlinky, optional). If you use
   LEDBlinky, a full run (not "New game only") ends with "Optional:
@@ -3183,14 +3412,15 @@
 
       Step 1.  At the main menu, type 5 for ReShade setup.
                You will see: ReShade Visual Enhancements Setup, then
-               three choices:
+               four choices:
 
                  S) Set up ReShade visual enhancements
                  R) Remove verified TeknoParrot Manager-managed ReShade
                     files
                  U) Undo ReShade changes
+                 B) Use my bezel folder (bezels you already have)
 
-               The prompt is Action (S/R/U, default S).
+               The prompt is Action (S/R/U/B, default S).
                Next: press Enter, or type S and press Enter.
 
       Step 2.  If ReShade is not downloaded yet, you will see:
@@ -3324,6 +3554,10 @@
 
     Step 8.  You will see: Installing ReShade into (number) games...
              Next: wait. Then read the result screen below.
+             While it works, the progress line counts only the games
+             being changed (for example "Applying ReShade: 1 of 34"), not
+             your whole library. Checking your games first is shown as its
+             own step, "Checking your games for ReShade".
 
     TURNING OFF TEKNOPARROT'S OWN CRT EFFECT
 
@@ -3401,11 +3635,10 @@
     The prompt is Press A, S, B or D (the letters match the keys shown; for
     example Press A, S, M, B or D). The default is B.
 
-      A    Asks: Replace the old ReShade files in (that game or those
-           games)? You will choose the look again. A copy of the old files
-           is saved, so you can undo it. Press Y to replace them, or N to
-           leave them. (Y/N). Press Y to replace. N says: Nothing was
-           replaced. No files were changed.
+      A    Goes straight into ReShade setup to replace the old ReShade
+           files of those games, with no separate "Replace the old files?"
+           question. You still choose the look and confirm it in setup. A
+           copy of the old files is saved first, so you can undo it.
 
       S    Goes back into ReShade setup so you can choose games one by one.
 
@@ -3519,7 +3752,7 @@
     To change the look for ALL games:
 
     Step 1.  At the main menu, type 5.
-             Next: type S (or press Enter) at Action (S/R/U, default S).
+             Next: type S (or press Enter) at Action (S/R/U/B, default S).
 
     Step 2.  Pick the new look in the list, then type U.
              Next: press Enter at Choice (default Y) to confirm it.
@@ -4168,7 +4401,9 @@
     It installs or updates BepInEx for the games you choose.
     Nothing happens until you approve it.
 
-    The prompt is [Y] Install/update, [B] Back, [N] Cancel. There is no
+    The prompt is [Y] Install/update, [B] Back, [N] Cancel. It is skipped
+    when the only games are ones you picked by number from the "do not
+    have BepInEx" list, because picking them was your answer. There is no
     repair-reset choice. After a successful or no-change run, the screen
     waits for one Enter.
 
@@ -4342,7 +4577,8 @@
 
     These games need it:
 
-      - Golden Tee Live (2006-2020)
+      - Golden Tee Live (2006-2023, 2025, 2026)
+      - Golden Tee PGA Tour (2021-2023, 2025, 2026)
       - Power Putt Live (2012/2013)
       - Silver Strike Bowling Live
       - Target Toss Pro (Bags / Lawn Darts)
@@ -4354,6 +4590,12 @@
 
     If none of your registered games need it, mode 11 says so and stops
     straight away. It never installs anything you do not need.
+
+    Newer TeknoParrot profiles of these games have a Storage box. A game
+    set to Internal needs no PostgreSQL: start the game once and it makes
+    its own database. Mode 11 skips these games and never says their
+    database is missing. Only a game set to Existing PostgreSQL uses the
+    steps below. Older profiles with no Storage box work as before.
 
   What mode 11 does
 
@@ -4370,6 +4612,12 @@
 
     Windows may ask for permission. TeknoParrot Manager asks Windows itself.
     Approve it, and the same setup carries on.
+
+    Before the Windows permission window opens, TeknoParrot Manager shows
+    what it will ask for and waits. You will see: "Press Enter to open the
+    Windows permission window". Next: read the text, then press Enter.
+    This pause is skipped in unattended runs and when no keyboard is
+    available.
 
     If PostgreSQL is already installed, your existing data is kept.
 
@@ -4430,10 +4678,13 @@
       that was already there.
 
     No starting database file:
-      A game with no pg_backup folder cannot be made ready. Setup leaves
-      that game out (nothing is created or changed for it), sets up the
-      other games, and names it under "Could NOT be made ready". The run
-      is shown as needing attention. Put the game's pg_backup folder
+      If the profile has "Automatically create Database" set to 1 (Golden
+      Tee Live 2018 and newer, PGA Tour), setup still saves the
+      connection settings and says "Profile ready". TeknoParrot makes the
+      database the first time the game starts. For any other game, setup
+      leaves the game out (nothing is created or changed for it), sets up
+      the other games, and names it under "Could NOT be made ready". The
+      run is shown as needing attention. Put the game's pg_backup folder
       back, then run setup again.
 
     If a database cannot be opened with the game's own settings, setup
@@ -4789,18 +5040,22 @@
 
   Automatic check at startup
 
-    The script also checks for updates once, quietly, right when it starts.
+    The script also checks for updates once, quietly, right when it starts,
+    before it asks whether to use your saved settings.
     This is controlled by CheckForUpdatesOnStartup in
     TeknoParrot-Manager.config.json. The default is true.
 
     If you are up to date, nothing is shown.
 
-    If a newer version exists, you will see the version and a short release
-    summary. Then you choose:
+    If a newer version exists, you will see the "Update Available" screen:
+    the current and latest version, a short release summary and the
+    "Updating will:" list of steps. Under the list are the choices:
 
-      Y = update now (same steps as mode 15)
-      N = continue to the menu and be asked again next time
-      V = read the full release notes first
+      Y = Update now. It starts right away; there is no second question.
+          It uses the same steps as mode 15.
+      N = Remind me later. You go to the menu and are asked again next
+          time.
+      V = View release notes. You read them, then choose again.
 
     To turn this off, set CheckForUpdatesOnStartup to false in the config
     file. Then check by hand with mode 15.
@@ -5515,6 +5770,12 @@
                               and gives one next step. If the files are in
                               your own collection, it offers to copy them
                               after checking them against the DAT list.
+                              If it cannot find them, it asks once for
+                              your Supplementary folder and remembers it.
+                              One Y then installs everything it found and
+                              checked. The result names what was installed,
+                              already matching, missing (by file name) or
+                              invalid, and the folders searched.
                               TeknoParrot Manager never downloads, links
                               to, or shares these files.
 
@@ -5684,6 +5945,29 @@
 
   Exit codes: 0 pass, 3 action required, 4 failed (for example no
   TeknoParrot folder), 1 the report could not be made.
+
+  CHECK AN OUTSIDE CONTROLLER LIST (ADVANCED)
+
+  If you already have a controller list from somewhere else (for example
+  RetroBat's teknoparrot.yml), you can compare it with your game setup
+  files. Run:
+
+      .\TeknoParrot-Manager.ps1 -MappingEvidenceFile "D:\teknoparrot.yml" -ValidationRoot "D:\TeknoParrot" -ValidationJsonPath "D:\details.json"
+
+  -ValidationRoot is your TeknoParrot folder. -ValidationJsonPath is
+  optional. It is the only file this check writes.
+
+  It prints plain counts: how many games the list names, how many are in
+  your TeknoParrot, how many are ready for a person to review, and how
+  many are held back. A game is held back with a plain reason: the game
+  is not in your TeknoParrot, the list names the game twice, the list sets
+  one control twice, the list sets a control the game does not have, the
+  list uses a button name that is not known, or two game actions share one
+  controller button. Five known spelling mistakes in such lists are
+  corrected and counted. The same inputs always give the same details file.
+
+  This check only reads. It does not change any game setup file, and it
+  does not trust, apply or ship the list.
 
   SCHEDULING WITH WINDOWS TASK SCHEDULER
 
@@ -5902,6 +6186,10 @@
   Copies moved by an earlier version are not automatically adopted.
   Preserve all copies and the migration report for reviewed recovery. Do
   not merge or delete them merely to clear a warning.
+
+  Backups, database moves and saved proof files also work on PCs whose
+  folders use older-style permissions. If one of these steps still fails,
+  the log says what caused it.
 
   Advanced emergency recovery only: the normal Restore backup flow (main
   menu 14) keeps the selected backup, asks you to close TeknoParrot, and
@@ -6258,7 +6546,7 @@
 
 
 ===============================================================================
-  v1.0 RC8.4 is the latest published release.
+  v1.0 RC9 (not published yet). The latest published release is v1.0 RC8.4.
   Test one game after every run. AutoSync backs up UserProfiles before
   extraction; preview mode skips the backup.
 ===============================================================================

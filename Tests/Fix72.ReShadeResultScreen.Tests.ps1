@@ -349,27 +349,20 @@ Describe 'FIX72 result screen: a short plain summary, a plain choice, every fact
         foreach ($text in @($script:fix72Rows | ForEach-Object { [string]$_.Text })) { $text.Length | Should -BeLessOrEqual ($Width - 1) -Because "a row at $Width columns: '$text'" }
     }
 
-    It 'keeps the keys: A asks to confirm and only Y starts the replacement, S chooses by game, B leaves everything' -ForEach @(
-        @{ Case = 'A then Y'; Answers = @('A', 'Y'); Choice = 'A'; Mode = 'ReShadeSetup'; Action = 'Adopt' }
-        @{ Case = 'A then N'; Answers = @('A', 'N'); Choice = 'B'; Mode = $null; Action = $null }
-        @{ Case = 'A then N then S'; Answers = @('A', 'N', 'S'); Choice = 'S'; Mode = 'ReShadeSetup'; Action = 'Select' }
+    It 'keeps the keys: A starts the replacement with one press (the screen already says a copy is saved), S chooses by game, B leaves everything' -ForEach @(
+        @{ Case = 'A'; Answers = @('A'); Choice = 'A'; Mode = 'ReShadeSetup'; Action = 'Adopt' }
         @{ Case = 'S'; Answers = @('S'); Choice = 'S'; Mode = 'ReShadeSetup'; Action = 'Select' }
         @{ Case = 'B'; Answers = @('B'); Choice = 'B'; Mode = $null; Action = $null }
         @{ Case = 'Enter (the default)'; Answers = @(); Choice = 'B'; Mode = $null; Action = $null }
     ) {
-        # Mutation: return PendingReShadeAction Adopt without asking the Y/N question, or let N fall through to Adopt -> the A then N case replaces files.
+        # Mutation: ask a second Y/N question after A again, or return Adopt for S, B or Enter.
         foreach ($answer in $Answers) { $script:fix72Answers.Enqueue($answer) }
         $screen = Show-TpmReShadeSetupResult -Result (New-Fix72Result -Deployed 1 -Protected 2)
         $screen.Choice | Should -BeExactly $Choice -Because $Case
         if ($null -eq $Mode) { $screen.PendingApplyMode | Should -BeNullOrEmpty -Because $Case } else { $screen.PendingApplyMode | Should -BeExactly $Mode -Because $Case }
         if ($null -eq $Action) { $screen.PendingReShadeAction | Should -BeNullOrEmpty -Because $Case } else { $screen.PendingReShadeAction | Should -BeExactly $Action -Because $Case }
-        if ($Case -like 'A then*') {
-            $script:fix72Prompts.Count | Should -BeGreaterOrEqual 2
-            $script:fix72Prompts[1] | Should -Match ([regex]::Escape('You will choose the look again. A copy of the old files is saved, so you can undo it. Press Y to replace them, or N to leave them. (Y/N)'))
-        } else {
-            @($script:fix72Prompts | Where-Object { $_ -like '*(Y/N)*' }).Count | Should -Be 0
-        }
-        if ($Case -eq 'A then N') { (Get-Fix72Text -Rows $script:fix72Rows) | Should -Match 'Nothing was replaced. No files were changed.' }
+        @($script:fix72Prompts | Where-Object { $_ -like '*(Y/N)*' }).Count | Should -Be 0
+        if ($Case -eq 'A') { (Get-Fix72Text -Rows $script:fix72Rows) | Should -Match 'a copy of the old files is saved, so you can undo it' }
     }
 
     It 'offers M only when a game could not be found, and routes M to the health check' {

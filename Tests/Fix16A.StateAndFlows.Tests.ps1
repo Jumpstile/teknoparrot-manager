@@ -30,7 +30,7 @@ BeforeAll {
         'Get-TpmUserProfilesBackupMarkerName', 'Get-TpmUserProfilesBackupStagingPrefix', 'Get-TpmUserProfilesBackupStagingPath',
         'Get-TpmUserProfilesBackupInventoryKeys', 'Get-TpmUserProfilesBackupInventory', 'Complete-TpmUserProfilesBackupFolder', 'Move-TpmDirectoryWithRetry',
         'Test-TpmRegistrationLedgerStopped', 'ConvertTo-TpmRegistrationResult', 'Confirm-TpmRegistrationSafetyBackup',
-        'Get-TpmRegistrationBackupEvidence', 'Backfill-SecondaryExecutablePath', 'Set-SecondaryExecutablePath',
+        'Get-TpmRegistrationBackupEvidence', 'Backfill-SecondaryExecutablePath', 'Set-SecondaryExecutablePath', 'Get-TpmMissingGameSetFiles', 'Get-TpmGameFileSet', 'Get-ExeAlternatives',
         'Test-TpmGameMutationPath', 'Add-TpmUnavailableDriveGame',
         'Read-Xml', 'Save-XmlMaybe', 'Get-TpmProfileWriteFingerprint', 'Resolve-TpmRegistrationSaveFailure',
         'Register-Games', 'Get-TeknoParrotProfileSet', 'Get-TpmDirectoryEntriesWithDiscoveryProgress',
@@ -1271,7 +1271,7 @@ Describe 'Top-level FIX16A flows' {
 
         $consentIfs = @(Get-Fix16Nodes -Root $body -Type ([System.Management.Automation.Language.IfStatementAst]) | Where-Object {
             @(Get-Fix16Commands -Root $_.Clauses[0].Item1 -Name 'Read-TpmYesNo' | Where-Object {
-                (Get-Fix16ParameterArgumentText -Command $_ -Name 'Prompt') -eq "'Write exactly these changes after a verified backup? (Y/N)'" -and
+                (Get-Fix16ParameterArgumentText -Command $_ -Name 'Prompt') -eq "'Write exactly these changes after a verified backup? (Y/N, D = about the risks)'" -and
                     (Get-Fix16ParameterArgumentText -Command $_ -Name 'Default') -eq "'N'"
             }).Count -eq 1
         })

@@ -18,6 +18,38 @@ BeforeAll {
     [System.IO.File]::WriteAllText($script:Lb424FunctionFile, $functionText, (New-Object System.Text.UTF8Encoding $false))
     . $script:Lb424FunctionFile
     . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
+    $script:TitleTokenStopWords = [System.Collections.Generic.HashSet[string]]::new([string[]]@('the', 'of', 'a', 'an', 'and', 'vs', 'vs.', 'in', 'for', 'to'), [System.StringComparer]::OrdinalIgnoreCase)
+    if (-not ('TpmTestGamesDbWriter' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class TpmTestGamesDbWriter {
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)] static extern int sqlite3_open_v2(byte[] file, out IntPtr db, int flags, IntPtr vfs);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)] static extern int sqlite3_close(IntPtr db);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)] static extern int sqlite3_exec(IntPtr db, byte[] sql, IntPtr cb, IntPtr arg, IntPtr err);
+    public static void Build(string path, string sql) {
+        IntPtr db;
+        if (sqlite3_open_v2(Encoding.UTF8.GetBytes(path + "\0"), out db, 6, IntPtr.Zero) != 0) throw new Exception("fixture open failed");
+        try { if (sqlite3_exec(db, Encoding.UTF8.GetBytes(sql + "\0"), IntPtr.Zero, IntPtr.Zero, IntPtr.Zero) != 0) throw new Exception("fixture sql failed"); }
+        finally { sqlite3_close(db); }
+    }
+}
+'@
+    }
+    # A tiny game list: Time Crisis 4 (also known as TC4) and two different games called Frogger.
+    function New-Lb424GameList {
+        param($Fx)
+        [void][System.IO.Directory]::CreateDirectory((Join-Path $Fx.Lb 'Metadata'))
+        [TpmTestGamesDbWriter]::Build((Join-Path $Fx.Lb 'Metadata\LaunchBox.Metadata.db'), @"
+CREATE TABLE Games (DatabaseID INTEGER, Name TEXT, Platform TEXT, ReleaseYear INTEGER, ReleaseDate TEXT, Developer TEXT, Publisher TEXT);
+CREATE TABLE GameAlternateTitles (AlternateName TEXT, DatabaseID INTEGER, Region TEXT, AltNameCompareValue TEXT);
+INSERT INTO Games VALUES (41, 'Time Crisis 4', 'Arcade', 2006, NULL, 'Namco', 'Namco');
+INSERT INTO GameAlternateTitles VALUES ('TC4', 41, NULL, 'tc4');
+INSERT INTO Games VALUES (61, 'Frogger', 'Arcade', 1981, NULL, 'Konami', 'Konami');
+INSERT INTO Games VALUES (62, 'Frogger (Raw Thrills)', 'Arcade', 2013, NULL, 'Raw Thrills', 'Raw Thrills');
+"@)
+    }
     $script:Lb424ImportText = (($functions | Where-Object { $_.Name -match 'LbMedia|LaunchBoxMedia' } | ForEach-Object { $_.Extent.Text }) -join "`r`n")
 
     function New-Lb424Fixture {
@@ -56,8 +88,10 @@ BeforeAll {
     }
 
     function Get-Lb424Plan {
-        param($Fx, [switch]$Replace)
-        return (Get-TpmLaunchBoxMediaPlan -lbRoot $Fx.Lb -userProfilesDir $Fx.Profiles -imageFolder $Fx.Pics -platformNames @('TeknoParrot') -Kind ClearLogo -ReplaceExisting:$Replace)
+        param($Fx, [switch]$Replace, [switch]$WithGameList)
+        $extra = @{}
+        if ($WithGameList) { $extra.GameList = (Get-TpmGamesDbForLaunchBox -LaunchBoxRoot $Fx.Lb).Index }
+        return (Get-TpmLaunchBoxMediaPlan -lbRoot $Fx.Lb -userProfilesDir $Fx.Profiles -imageFolder $Fx.Pics -platformNames @('TeknoParrot') -Kind ClearLogo -ReplaceExisting:$Replace @extra)
     }
 }
 
@@ -125,6 +159,39 @@ Describe 'LB424: matching and preview' {
         $plan.Exact.Count | Should -Be 0
         $replacePlan = Get-Lb424Plan $fx -Replace
         $replacePlan.Exact.Count | Should -Be 1
+    }
+
+    # With the game list, a picture counts for a game when it is the same game by ID: a name the game's ID is also known by is a sure
+    # match, and a picture the shared engine reads as another game is never used.
+    It 'uses another name of the same game ID as a sure match (the ID, not the spelling)' {
+        # Mutation: ignore the ID names -> TC4.png is not found and the game has no picture.
+        $fx = New-Lb424Fixture
+        New-Lb424GameList $fx
+        Remove-Item -LiteralPath (Join-Path $fx.Pics 'time-crisis_4.png')
+        $xml = [System.IO.File]::ReadAllText((Join-Path $fx.Lb 'Data\Platforms\TeknoParrot.xml')).Replace('<Title>Time Crisis 4</Title>', '<Title>Time Crisis 4</Title><DatabaseID>41</DatabaseID>')
+        [System.IO.File]::WriteAllText((Join-Path $fx.Lb 'Data\Platforms\TeknoParrot.xml'), $xml)
+        [System.IO.File]::WriteAllBytes((Join-Path $fx.Pics 'TC4.png'), [byte[]](4, 4))
+        $plan = Get-Lb424Plan $fx -WithGameList
+        $tc = @($plan.Exact | Where-Object { $_.Game.Title -eq 'Time Crisis 4' })
+        $tc.Count | Should -Be 1
+        [System.IO.Path]::GetFileName($tc[0].Image) | Should -BeExactly 'TC4.png'
+        # By name alone the picture is not found.
+        @((Get-Lb424Plan $fx).Exact | Where-Object { $_.Game.Title -eq 'Time Crisis 4' }).Count | Should -Be 0
+    }
+
+    It 'never uses a picture the engine reads as a different game, even with the same name' {
+        # Mutation: skip the ID check -> the picture of the original Frogger is used for the Raw Thrills game.
+        $fx = New-Lb424Fixture
+        New-Lb424GameList $fx
+        Remove-Item -LiteralPath (Join-Path $fx.Pics 'time-crisis_4.png')
+        $xml = [System.IO.File]::ReadAllText((Join-Path $fx.Lb 'Data\Platforms\TeknoParrot.xml')).Replace('<Title>Time Crisis 4</Title>', '<Title>Frogger</Title><DatabaseID>62</DatabaseID>')
+        [System.IO.File]::WriteAllText((Join-Path $fx.Lb 'Data\Platforms\TeknoParrot.xml'), $xml)
+        [System.IO.File]::WriteAllBytes((Join-Path $fx.Pics 'Frogger.png'), [byte[]](6, 6))
+        $plan = Get-Lb424Plan $fx -WithGameList
+        @($plan.Exact | Where-Object { $_.Game.Title -eq 'Frogger' }).Count | Should -Be 0
+        @($plan.Near | Where-Object { $_.Game.Title -eq 'Frogger' }).Count | Should -Be 0
+        # Without the game list only the name is known, so the picture is offered as a sure match (the old behavior).
+        @((Get-Lb424Plan $fx).Exact | Where-Object { $_.Game.Title -eq 'Frogger' }).Count | Should -Be 1
     }
 }
 

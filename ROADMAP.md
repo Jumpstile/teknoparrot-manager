@@ -30,8 +30,8 @@ or Version 1.0 scope change.
 ## TPM 1.0 completion boundary
 
 The current commitment is to complete and support the existing TPM 1.0 release
-path. v1.0 RC8.4 is the latest published release today. It is a fix-up
-release for RC8.3 (RC8 was a tester build and was never published). Final Version 1.0 comes later.
+path. v1.0 RC8.4 is the latest published release today. v1.0 RC9 is the next
+release and is not published yet (RC8 was a tester build and was never published). Final Version 1.0 comes later.
 Release safety,
 certification, and any remaining work required for the existing feature set
 take precedence over every phase in this document.
@@ -321,13 +321,17 @@ firmware, drivers, licenses, calibration, or other hardware-owned state.
 Hardware-sensitive claims remain evidence-assisted until separately authorized
 validation establishes otherwise.
 
-### Post-1.0 cabinet-control design anchor
+### Cabinet control inventory and guides (#267)
 
-[#267 -- Post-1.0 cabinet control inventory, visual guides, and LEDBlinky
-export](https://github.com/Jumpstile/teknoparrot-manager/issues/267) remains a
-post-1.0 design/research item. Any LEDBlinky integration depends on identity
-mapping research and front-end-specific behavior across the supported browsing
-and launch ecosystems. It is not RC8 or final Version 1.0 release scope.
+[#267 -- Cabinet control inventory, visual guides, and LEDBlinky
+export](https://github.com/Jumpstile/teknoparrot-manager/issues/267) is part of
+RC9 and Version 1.0. It writes no TeknoParrot mapping: guides and proposals are
+shown and printed only. LEDBlinky output is optional, goes only into
+LEDBlinky's own control file, and is previewed, backed up and undoable. The
+LaunchBox and Big Box players and controller boxes are filled in by an
+optional LaunchBox choice that is previewed, backed up and undoable, and only
+fills empty boxes. Direct LED control, other front ends' own fields and other
+encoder brands' own setup files are not part of it.
 
 ## Phase 5 -- Deterministic configuration profiles
 
@@ -470,7 +474,7 @@ work is a planning group for that gap. It is not an RC8 scope expansion.
 
 ### #200 controls and readiness design record (post-1.0 only)
 
-RC8.4 does not implement broad automatic controller or context-aware mapping.
+RC9 does not implement broad automatic controller or context-aware mapping.
 The standing simplicity rule remains: the eventual product should configure
 each game automatically, not make a beginner understand TeknoParrot mapping
 internals or manually reproduce raw mapping decisions.
@@ -494,7 +498,7 @@ Before any #200 implementation is authorized, the post-1.0 design must define:
   become TPM authority without independent source, version, ownership, and
   compatibility validation.
 
-RC8.4 user-facing status must remain beginner-readable: use `Controls not tested
+RC9 user-facing status must remain beginner-readable: use `Controls not tested
 yet` or `Some controls are configured, but TPM has not verified this game yet`
 when positive verification evidence is absent. Registration, launch
 observation, controls readiness, and verification remain separate.

@@ -1,6 +1,6 @@
 # Quick Start
 
-Get TeknoParrot Manager (TPM) running in a few minutes. This page matches v1.0 RC8.4, which is the latest published release (the previous one is RC8.3): see the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases).
+Get TeknoParrot Manager (TPM) running in a few minutes. This page matches v1.0 RC9, which is not published yet. The latest published release is RC8.4 (the previous one is RC8.3): see the [releases page](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Test one game after each run.
 
@@ -86,7 +86,7 @@ You can also double-click `TeknoParrot-Manager.bat`.
 | 8 | Force feedback (FFB) setup | You have a wheel or stick with force feedback |
 | 9 | BepInEx setup | A game needs BepInEx |
 | 10 | Region setup | You want to pick the country your games start in. See [[Region Setup]] |
-| 11 | Postgres setup | A game needs PostgreSQL (like Golden Tee Live). See [[Postgres Setup]] |
+| 11 | Postgres setup | A game set to Existing PostgreSQL needs it (like Golden Tee Live). A game on Internal storage does not. See [[Postgres Setup]] |
 | 12 | Required game patches | A supported game needs a fix. See [[Required Game Patches]] |
 | 13 | Library health check | You want a status check that changes nothing |
 | 14 | Restore backup | You want to put something back. See [[Restore Backup]] and [[Reset and Restore]] |
@@ -141,14 +141,14 @@ Many result screens say `Press D for details`. Press `D` for the full technical 
 
   GAME REQUIREMENTS (ONLY FOR SOME GAMES)
   ---------------------------------------
-  11) Postgres setup -- Installs/configures local PostgreSQL for
-                        Incredible Technologies games, including
-                        Golden Tee Live 2020, Golden Tee Live,
-                        Power Putt Live, Silver Strike Bowling Live,
-                        and Target Toss Pro. A missing game database
-                        is made from the game's own backup.
-                        Every game database is then tested with the
-                        game's own settings before it is called ready.
+  11) Postgres setup -- For games set to Existing PostgreSQL.
+                        Installs/configures local PostgreSQL 8.3 for
+                        Golden Tee Live (2020 too), Power Putt Live,
+                        Silver Strike Bowling Live, Target Toss Pro.
+                        Games on Internal storage (the new default)
+                        need no database install and are skipped.
+                        A missing game database is made from the
+                        game's own backup, then tested before ready.
                         Administrator is required if PostgreSQL isn't
                         installed yet.
   12) Required game patches -- Find required patches for supported exact
@@ -161,8 +161,7 @@ Many result screens say `Press D for details`. Press `D` for the full technical 
   ------------------------
   13) Library health check -- Reports registered/broken/unregistered games
                         plus GPU fix / FFB Blaster / dgVoodoo2 and
-                        ReShade/BepInEx counts and the games that
-                        need BepInEx, without changing
+                        ReShade/BepInEx counts, without changing
                         anything. Any repair it suggests is a separate
                         choice that you confirm first.
   14) Restore backup -- Restore selected backup files with verification.
@@ -222,7 +221,7 @@ Set up the controls once, and TPM copies them to the other games of the same typ
 - [[Region Setup]] (10)
 - [[Postgres Setup]] (11), [[Required Game Patches]] (12)
 - [[Health Check]] (13)
-- Games that will not start because files are missing (PS3 firmware, Chihiro files): see [[Game Startup Files]]. [[CPS3 First-Boot Files]] covers the optional CPS3 step.
+- Games that will not start because files are missing (PS3 firmware, Chihiro files): see [[Game Startup Files]], which also covers the optional System 11 saved files. [[CPS3 First-Boot Files]] covers the optional CPS3 step.
 - [[LaunchBox Integration]]
 
 ---

@@ -49,7 +49,7 @@ A restore does not keep a copy of the settings it replaces. If you may want your
 
 <details><summary>Details</summary>
 
-- A copy with no completion record is marked `older copy, cannot be fully checked`. If you pick it, you must type `UNVERIFIED` to use it anyway, and games that are not in it will be removed.
+- A copy with no completion record is marked `older copy, cannot be fully checked`. If you pick it, you must type `UNVERIFIED` to use it anyway, and games that are not in it will be removed. That word is the only confirmation; you are not asked to type `YES` as well.
 - Copies that were never finished are skipped and cannot be restored.
 - If some files cannot be restored, you see `ERROR: ... file(s) could not be restored. The restore was not completed.` and TeknoParrot Manager tries to put the previous profiles back.
 - To restore by hand: close TeknoParrot, copy your current `.xml` files to a safe folder, copy the `.xml` files from the backup into `UserProfiles`, then open TeknoParrot again.
@@ -90,9 +90,9 @@ Backups are in `<your TeknoParrot folder>\TeknoParrotManager\Backups\LaunchBoxBa
 2. Choose option 3. If no LaunchBox folder is saved, you are asked for it (the folder with `LaunchBox.exe`).
 3. Pick a backup. Press Enter (or `B`) to cancel.
 4. You see the files that will be put back and a warning that any LaunchBox changes made to them since the backup will be replaced.
-5. Answer `Restore these files into <folder> after a verified backup of their current state? (Y/N)`. The default is `N`. This restore does not ask for `YES`.
+5. Answer `Restore these files into <folder> after a verified backup of their current state? (Y/N)`. The default is `N`. This restore does not ask for `YES`. A file that TeknoParrot Manager added earlier and you have not changed gets its own `Remove the file ...? (Y/N)` question, because removing it deletes it.
 
-TeknoParrot Manager checks the backup, saves a copy of your current files, restores, and reads every file back. If the backup came from another LaunchBox folder, you are asked to confirm that too.
+TeknoParrot Manager checks the backup, saves a copy of your current files, restores, and reads every file back. If the backup came from another LaunchBox folder, the same single question says so and asks whether to restore it into the target folder anyway.
 
 If the result says `PARTIAL`, some files were left or could not be checked. Keep the backup, read the `Needs review` lines, and do not retry blindly.
 

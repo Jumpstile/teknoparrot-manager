@@ -18,6 +18,8 @@ ReShade works with **both 32-bit and 64-bit games**. Games that run through Budg
 
 Other keys at the `Choice` prompt: `N` skips ReShade, `B` cancels, `R` reopens the preview window, `D` shows details about each look.
 
+The first screen at menu 5 has four choices: `S` set up ReShade, `R` remove the files TeknoParrot Manager made, `U` undo ReShade changes, and `B` use my bezel folder (see "Use my bezel folder" below).
+
 If ReShade is not on your PC yet, TeknoParrot Manager asks first. Press `D` there to download it from reshade.me. See "Where the files come from" below.
 
 ---
@@ -116,6 +118,23 @@ After setup, the result screen says what changed and what was left alone. A game
 - its game file cannot be found (check its drive is connected, then run [[Health Check]])
 
 Before it installs anything, ReShade tells you how many of the games you picked it can change now (for example `You selected 4 games. 3 can be changed now.`) and that it leaves the others alone. Press `D` on the result screen to see why for each game. If a game only has a leftover ReShade.ini or older ReShade files, press `A` to replace them. You are asked to confirm, and a copy of the old files is saved first so you can undo it.
+
+---
+
+## Use my bezel folder (B)
+
+A bezel is a picture that frames the game on a wide screen, like the edge of an arcade cabinet. TeknoParrot Manager does not come with bezels and never downloads them. This step only uses `.png` bezel pictures you already have in a folder. A game needs ReShade first. A game without it is listed as `set up ReShade for this game first` and left alone.
+
+1. At `Action (S/R/U/B, default S)`, type `B`. You see `F) Pick bezels from my folder`, `U) Undo bezels I applied` and `X) Back`.
+2. Press Enter for `F`, then type or browse to your bezel folder.
+3. You see `Bezel preview. Nothing has been changed yet.` Each game shows the bezel it would get and how sure the match is: High, Medium or Low. A Low match, or a bezel with a different sequel number (a "4" picture for a "3" game), says `needs your choice` and is not applied unless you pick it. Games with no bezel in your folder are counted, not guessed.
+4. Type a game's number to pick a different bezel (or no bezel) for it. Your pick is remembered. Type `D` for details, `C` to cancel, or `A` to apply.
+
+The bezel is copied to the game's `reshade-shaders\Textures` folder as `bezel.png` and checked. A bezel you put there yourself is kept unless you say yes to replacing it, and a copy of yours is saved first. A game that shares its folder with other games is skipped, because one bezel would show on all of them.
+
+To undo, type `5`, `B`, then `U`. Each bezel TeknoParrot Manager copied is removed, and the bezel you had before is put back. A file you changed since is left alone.
+
+TeknoParrot Manager puts the file where ReShade looks for it. It is not confirmed that every game shows it. Games in exclusive fullscreen, or that start through a loader, may not.
 
 ---
 

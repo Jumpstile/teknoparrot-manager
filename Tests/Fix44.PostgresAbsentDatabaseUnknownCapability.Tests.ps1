@@ -334,9 +334,9 @@ Describe 'FIX44 absent database with unknown auto-create capability is created, 
     }
 
     Context 'two profiles that name the same absent database' {
-        # Mutation: remove the sibling update after a creation (second createdb call), or
-        # keep the old group rule that blocks every shared absent non-TeknoParrot database.
-        It 'creates a shared absent database once and configures both profiles' {
+        # Mutation: restore both profiles into the one shared database (a single createdb), or give the second profile a new name in the log only
+        # and leave the shared name in its profile -> the second game opens the first game's database.
+        It 'gives each profile its own database, created from the backup that profile resolves to, and configures both profiles' {
             $fx = New-F44Fixture -Name 'shared'
             $one = New-F44Profile -Fixture $fx -Name 'SharedOne' -DbName 'GameDBShared' -BackupFolderName 'Game-Shared'
             $two = New-F44Profile -Fixture $fx -Name 'SharedTwo' -DbName 'GameDBShared' -BackupFolderName 'Game-Shared'
@@ -345,16 +345,18 @@ Describe 'FIX44 absent database with unknown auto-create capability is created, 
             $result = Invoke-F44Setup -Fixture $fx
 
             $result.Outcome | Should -BeExactly 'SUCCEEDED'
-            $result.DbCreated | Should -Be 1
+            $result.DbCreated | Should -Be 2
             $result.Configured | Should -Be 2
-            @(Get-F44Calls -Tool 'createdb.exe').Count | Should -Be 1
+            @(Get-F44Calls -Tool 'createdb.exe' | ForEach-Object { $_.Database } | Sort-Object) | Should -Be @('GameDBShared', 'GameDBSharedSharedTwo')
+            (Get-F44Value -File $one -Field 'DbName') | Should -BeExactly 'GameDBShared'
+            (Get-F44Value -File $two -Field 'DbName') | Should -BeExactly 'GameDBSharedSharedTwo'
             (Get-F44Value -File $one -Field 'Pass') | Should -BeExactly 'fixture-password'
             (Get-F44Value -File $two -Field 'Pass') | Should -BeExactly 'fixture-password'
             { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
         }
 
-        # Mutation: drop the same-backup comparison (create from one of two different backups).
-        It 'blocks, naming both profiles, when the two profiles resolve to different bundled backups' {
+        # Mutation: bring back the stop for two different backups -> nothing is created and both games stay without a database.
+        It 'creates both databases, with no stop, when the two profiles resolve to different bundled backups' {
             $fx = New-F44Fixture -Name 'shared-different'
             $null = New-F44Profile -Fixture $fx -Name 'SharedOne' -DbName 'GameDBShared'
             $null = New-F44Profile -Fixture $fx -Name 'SharedTwo' -DbName 'GameDBShared'
@@ -362,34 +364,30 @@ Describe 'FIX44 absent database with unknown auto-create capability is created, 
 
             $result = Invoke-F44Setup -Fixture $fx
 
-            $result.Outcome | Should -BeExactly 'FAILED_BEFORE_MUTATION'
-            $result.ReasonCode | Should -BeExactly 'POSTGRES_PREFLIGHT_FAILED'
-            @(Get-F44Calls -Tool 'createdb.exe').Count | Should -Be 0
-            $reasons = @(Get-PostgresSetupFailureReasonLines -TransactionResult $result)
-            $reasons.Count | Should -Be 2
-            ($reasons -join ' | ') | Should -Match 'SharedOne'
-            ($reasons -join ' | ') | Should -Match 'SharedTwo'
-            ($reasons -join ' | ') | Should -Match 'GameDBShared'
+            $result.Outcome | Should -BeExactly 'SUCCEEDED'
+            @(Get-F44Calls -Tool 'createdb.exe').Count | Should -Be 2
+            @(Get-F44Calls -Tool 'dropdb.exe').Count | Should -Be 0
+            (@($result.Warnings) -join ' | ') | Should -Match 'Own database for .*both used the database name GameDBShared'
         }
     }
 
     Context 'explicit auto-create values keep their existing behavior' {
-        # Mutation: bring back the deferral to TeknoParrot for auto-create 1 without a backup -> setup says SUCCEEDED, nothing is
-        # created and the game is left without a database.
-        It 'leaves out the game, naming it, when the profile says TeknoParrot creates the database but the game has no bundled backup' {
+        # Mutation: leave the game out as "not ready" when the profile says TeknoParrot creates the database and the game has no bundled
+        # backup (the owner rule on #350 is that TeknoParrot's own option handles it) -> ACTION_REQUIRED and an unwritten profile.
+        It 'sets up the profile and leaves the database to TeknoParrot when the profile says TeknoParrot creates the database and the game has no bundled backup' {
             $fx = New-F44Fixture -Name 'e'
             $expressProfile = New-F44Profile -Fixture $fx -Name 'ExpressGame' -DbName 'GameDBExpress' -AutoCreate '1' -NoBackup
-            $before = [System.IO.File]::ReadAllBytes($expressProfile)
             Install-F44Mocks -Fixture $fx
+            Mock Get-PostgresGameDatabaseReadiness { [pscustomobject]@{ Ready = $false; TableCount = 0; Error = 'Could not connect with the settings saved in the game profile: FATAL: database "GameDBExpress" does not exist' } }
 
             $result = Invoke-F44Setup -Fixture $fx
 
-            $result.Outcome | Should -BeExactly 'ACTION_REQUIRED'
+            $result.Outcome | Should -BeExactly 'SUCCEEDED'
             @(Get-F44Calls -Tool 'createdb.exe').Count | Should -Be 0
             $fx.State.Exists.ContainsKey('GameDBExpress') | Should -BeFalse
-            @($result.NotReadyGames | ForEach-Object { $_.Key }) | Should -Be @('ExpressGame')
-            (@($result.Warnings) -join ' | ') | Should -Match 'ExpressGame.*No starting database file came with this game'
-            [System.IO.File]::ReadAllBytes($expressProfile) | Should -Be $before
+            @($result.NotReadyGames).Count | Should -Be 0
+            @($result.GameOutcomes)[0].Outcome | Should -BeExactly 'WaitingForFirstStart'
+            (Get-PostgresFieldValue (Read-Xml $expressProfile) 'Pass') | Should -BeExactly 'fixture-password'
         }
 
         # Mutation: ignore the bundled backup for an explicit 0.

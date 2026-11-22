@@ -441,7 +441,7 @@ Describe 'FIX83 item 12: Restore backup list and confirmation' {
     It 'lists the saved copies newest first by the time in the name, with plain labels and no internal names' {
         # Mutation: sort by folder name (Startup_ then PropagateControls_ then GpuFix_), or print the folder name and "file(s)" again.
         $profiles = New-F83BackupFixture -Names @('Startup_2026-11-03_10-00-57_326_c8ae9bbf', 'PropagateControls_2026-11-03_10-00-49_240_212bcaae', 'GpuFix_2026-11-05_08-00-00_000_aaaaaaaa')
-        Install-F83Mocks -Width 120 -Answers @('1', 'UNVERIFIED', 'no')
+        Install-F83Mocks -Width 120 -Answers @('1', 'no')
         $result = Invoke-RestoreBackupLegacy -userProfilesDir $profiles
         $result.ReasonCode | Should -BeExactly 'USER_DECLINED'
         $result.Name | Should -BeExactly 'GpuFix_2026-11-05_08-00-00_000_aaaaaaaa'
@@ -460,7 +460,7 @@ Describe 'FIX83 item 12: Restore backup list and confirmation' {
     It 'keeps every old fact under Details: folder name, files and the check' {
         # Mutation: leave the folder name or the missing completion record out of the details.
         $profiles = New-F83BackupFixture -Names @('Startup_2026-11-03_10-00-57_326_c8ae9bbf')
-        Install-F83Mocks -Answers @('D', '1', 'D', 'UNVERIFIED', 'no')
+        Install-F83Mocks -Answers @('D', '1', 'D', 'no')
         $result = Invoke-RestoreBackupLegacy -userProfilesDir $profiles
         $result.ReasonCode | Should -BeExactly 'USER_DECLINED'
         $lines = @(Get-F83Lines)
@@ -468,7 +468,7 @@ Describe 'FIX83 item 12: Restore backup list and confirmation' {
         @($lines | Where-Object { $_ -match '^    Files:\s+1$' }).Count | Should -Be 2
         @($lines | Where-Object { $_ -match '^    Games:\s+1$' }).Count | Should -Be 1
         (Get-F83Text) | Should -Match 'It has no completion record\. It was made by an older version of TeknoParrot Manager or by another tool, so TeknoParrot Manager cannot prove it is complete\.'
-        $script:F83Prompts.Count | Should -Be 5
+        $script:F83Prompts.Count | Should -Be 4
     }
 
     It 'shows 5 saved copies and the rest after M' {
@@ -628,7 +628,7 @@ Describe 'FIX83 item 13: Reset and Restore' {
         Mock Restore-TpmRestorePointAll { return [pscustomobject]@{ Outcome = 'SUCCEEDED'; ReasonCode = 'RESTORED'; Summary = 'ok'; RestartRequired = $false } }
         $changes = @(1..12 | ForEach-Object { New-F83Change -Code ('R{0}' -f $_) }) + @((New-F83Change -Code 'P1' -Change 'PutBack'), (New-F83Change -Code 'P2' -Change 'PutBack'), (New-F83Change -Code 'X1' -Change 'Remove'))
         $plan = New-F83Plan -Changes $changes -FoldersRemoved @('F1') -FoldersPutBack @('F2', 'F3') -ConfigChange 'Replace'
-        Install-F83Mocks -Answers @('D', 'YES', 'ALL')
+        Install-F83Mocks -Answers @('D', 'YES')
         $result = Invoke-TpmResetRestoreAllGames -RestorePoint (New-F83RestorePoint) -Plan $plan -UserProfilesDir $fx.Profiles -BackupPath $fx.Backup
         $result.Outcome | Should -BeExactly 'SUCCEEDED'
         Should -Invoke Restore-TpmRestorePointAll -Times 1 -Exactly
@@ -643,9 +643,9 @@ Describe 'FIX83 item 13: Reset and Restore' {
         $screen | Should -Not -Match 'Game R1|Game P1|Game X1|\(s\)'
         @($lines[$script:F83PromptRows[0]..($lines.Count - 1)] | Where-Object { $_ -eq '    Game R1' }).Count | Should -BeGreaterThan 0
         @($lines | Where-Object { $_ -eq '    Game X1' }).Count | Should -BeGreaterThan 0
-        $script:F83Prompts[2] | Should -BeLike '*Type ALL to confirm*'
+        $script:F83Prompts[1] | Should -BeLike '*Type YES to put everything back*'
         (Get-F83Text) | Should -Match 'This changes 19 items in total'
-        $script:F83Prompts.Count | Should -Be 3
+        $script:F83Prompts.Count | Should -Be 2
     }
 
     It 'uses the singular for a count of 1 settings file, 1 folder and 2 items' {
@@ -653,7 +653,7 @@ Describe 'FIX83 item 13: Reset and Restore' {
         $fx = New-F83ResetFixture -Codes @('R1')
         Mock Get-TpmRestoreAllBlocker { return $null }
         Mock Restore-TpmRestorePointAll { throw 'Declined: nothing may be restored.' }
-        Install-F83Mocks -Answers @('YES', 'no')
+        Install-F83Mocks -Answers @('no')
         $plan = New-F83Plan -Changes @(New-F83Change -Code 'R1') -FoldersPutBack @('F1') -ConfigChange 'Same'
         $result = Invoke-TpmResetRestoreAllGames -RestorePoint (New-F83RestorePoint) -Plan $plan -UserProfilesDir $fx.Profiles -BackupPath $fx.Backup
         $result.ReasonCode | Should -BeExactly 'USER_DECLINED'

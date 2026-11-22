@@ -428,7 +428,7 @@ Describe 'FIX82 GPU fix result: one plain sentence, the names and paths under De
         $null = Show-TpmGpuFixResult -Result $result
         $texts = Get-Fix82RowTexts
         $texts | Should -Contain '  Nothing was changed. Some games were skipped.'
-        $texts | Should -Contain '    - 2 games skipped. The saved game drive or device is unavailable.'
+        $texts | Should -Contain '    - 2 games skipped. Drive Z: is not connected.'
         (Get-Fix82Text -Rows $script:fix82Rows) | Should -Match ([regex]::Escape('Next: Plug in the drive for the game, then press R to run it again.'))
         @($texts | Where-Object { $_ -like '*GameA*' -or $_ -like '*Z:\*' }).Count | Should -Be 0
         @($script:fix82Rows | Where-Object { $_.Text -eq '  Nothing was changed. Some games were skipped.' })[0].Color | Should -BeExactly 'Yellow'

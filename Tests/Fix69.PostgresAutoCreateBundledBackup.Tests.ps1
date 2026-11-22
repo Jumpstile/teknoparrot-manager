@@ -433,31 +433,28 @@ Describe 'FIX69 auto-create = 1 with exactly one bundled backup is created and r
 }
 
 Describe 'FIX69 auto-create = 1 uses the game''s own backup, and a game with none is left out' {
-    # Mutation: bring back the deferral to TeknoParrot (or an empty database) when there is no backup -> createdb appears, or the
-    # run says SUCCEEDED / NO_OP and the screen claims every database is ready.
-    It 'when every game has no pg_backup folder: creates and changes nothing, is not a clean success, and the screen says so' {
+    # Mutation: leave the game out as "not ready" again -> an auto-create game with no backup is reported as needing attention and
+    # asks for a pg_backup folder TeknoParrot does not need; or createdb runs (TeknoParrot makes the database, not the Manager).
+    It 'when every game has no pg_backup folder and TeknoParrot creates the database: sets up the profile, creates nothing, and the screen says "Profile ready"' {
         $fx = New-F69Fixture -Name 'nobackup'
         $file = New-F69Profile -Fixture $fx -Name 'GoldenTeeLive2019' -GameName 'Golden Tee Live 2019' -DbName 'GameDB19' -AutoCreate '1'
-        $before = [System.IO.File]::ReadAllBytes($file)
         Install-F69Mocks -Fixture $fx
+        Mock Get-PostgresGameDatabaseReadiness { [pscustomobject]@{ Ready = $false; TableCount = 0; Error = 'Could not connect with the settings saved in the game profile: FATAL: database "GameDB19" does not exist' } }
 
         $result = Invoke-F69Setup -Fixture $fx
 
-        $result.Outcome | Should -BeExactly 'ACTION_REQUIRED'
-        $result.ReasonCode | Should -BeExactly 'POSTGRES_SOME_GAMES_NOT_READY'
+        $result.Outcome | Should -BeExactly 'SUCCEEDED'
         @(Get-F69Calls -Tool 'createdb.exe').Count | Should -Be 0
         @(Get-F69RestoreCalls).Count | Should -Be 0
-        $fx.State.Events.Contains('backup') | Should -BeFalse
-        [System.IO.File]::ReadAllBytes($file) | Should -Be $before
-        @($result.GameOutcomes).Count | Should -Be 0
-        @($result.NotReadyGames).Count | Should -Be 1
-        (@($result.Warnings) -join ' | ') | Should -Match 'Golden Tee Live 2019 \[GoldenTeeLive2019\] \(GameDB19\): not made ready\. No starting database file came with this game, so its database cannot be built\.'
-        ($fx.State.Log -join "`n") | Should -Match 'Golden Tee Live 2019 \[GoldenTeeLive2019\] \(GameDB19\) was left out'
+        (Get-PostgresFieldValue (Read-Xml $file) 'Pass') | Should -BeExactly 'fixture-password'
+        @($result.NotReadyGames).Count | Should -Be 0
+        @($result.GameOutcomes)[0].Outcome | Should -BeExactly 'WaitingForFirstStart'
+        ($fx.State.Log -join "`n") | Should -Match 'Golden Tee Live 2019 \[GoldenTeeLive2019\] \(GameDB19\): no starting database file came with the game'
         { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
         $screen = Get-F69Screen -Fixture $fx -Result $result
-        $screen | Should -Match 'No game database was set up\. Nothing was created\.'
-        $screen | Should -Match ([regex]::Escape('Could NOT be made ready: Golden Tee Live 2019. No starting database file came with this game, so its database cannot be built.'))
-        $screen | Should -Not -Match 'Every game database was checked and is ready'
+        $screen | Should -Match ([regex]::Escape('Profile ready: Golden Tee Live 2019. TeknoParrot makes its database itself the first time the game starts.'))
+        $screen | Should -Match 'Next: open TeknoParrot and start the game once'
+        $screen | Should -Not -Match 'Could NOT be made ready|Every game database was checked and is ready'
     }
 
     # Mutation: let one game with no starting file stop the whole run (the old all-or-nothing preflight), or call the run a clean
@@ -558,12 +555,13 @@ Describe 'FIX69 auto-create = 1 uses the game''s own backup, and a game with non
         (@(Get-PostgresSetupFailureReasonLines -TransactionResult $result) -join ' | ') | Should -Match 'GameDB19 is in a folder path longer than 259 characters.*shorter folder path'
     }
 
-    # Mutation: group a profile with a backup and another profile with none by database name -> the shared
-    # absent database is created for both, or the block reason is lost.
-    It 'refuses to go on when a profile with a backup and another profile without one share one absent database' {
+    # Mutation: let the sharing game that has no starting file be left behind pointing at the other game's database -> launching it writes
+    # into the other game's saved progress; or call the run a success.
+    It 'stops and changes nothing when a game with no starting file shares a database name with a game that has a backup, and says why in plain words' {
         $fx = New-F69Fixture -Name 'shared'
-        $null = New-F69Profile -Fixture $fx -Name 'GoldenTeeLive2020' -GameName 'Golden Tee Live 2020' -DbName 'GameDB20' -AutoCreate '1' -BackupFiles @('0001.backup', '0002.backup')
-        $null = New-F69Profile -Fixture $fx -Name 'ZSharedGame' -GameName 'Shared Game' -DbName 'GameDB20' -AutoCreate ''
+        $gt = New-F69Profile -Fixture $fx -Name 'GoldenTeeLive2020' -GameName 'Golden Tee Live 2020' -DbName 'GameDB20' -AutoCreate '1' -BackupFiles @('0001.backup', '0002.backup')
+        $other = New-F69Profile -Fixture $fx -Name 'ZSharedGame' -GameName 'Shared Game' -DbName 'GameDB20' -AutoCreate ''
+        $before = @([System.IO.File]::ReadAllBytes($gt), [System.IO.File]::ReadAllBytes($other))
         Install-F69Mocks -Fixture $fx
 
         $result = Invoke-F69Setup -Fixture $fx
@@ -571,6 +569,9 @@ Describe 'FIX69 auto-create = 1 uses the game''s own backup, and a game with non
         $result.Outcome | Should -BeExactly 'FAILED_BEFORE_MUTATION'
         @(Get-F69Calls -Tool 'createdb.exe').Count | Should -Be 0
         $fx.State.Events.Contains('backup') | Should -BeFalse
+        [System.IO.File]::ReadAllBytes($gt) | Should -Be $before[0]
+        [System.IO.File]::ReadAllBytes($other) | Should -Be $before[1]
+        (@(Get-PostgresSetupFailureReasonLines -TransactionResult $result) -join ' | ') | Should -Match 'Shared Game \[ZSharedGame\]: The database GameDB20 is also used by Golden Tee Live 2020.*no starting database file.*must not run on the other game''s data\. Nothing was changed'
     }
 }
 
@@ -850,8 +851,8 @@ Describe 'FIX69 Library Health lists only the games TeknoParrot still has to cre
 
         $result.PostgresConfigured | Should -Be 1
         @($result.PostgresAutoCreateProfiles).Count | Should -Be 0
-        (Get-F69HealthPostgresDetail -Result $result) | Should -Not -Match 'Games with no starting database file:'
-        ($script:logLines -join "`n") | Should -Not -Match 'Games with no starting database file:'
+        (Get-F69HealthPostgresDetail -Result $result) | Should -Not -Match 'Profile ready; the database is created'
+        ($script:logLines -join "`n") | Should -Not -Match 'Profile ready; the database is created'
     }
 
     # Mutation: plain Test-Path / Get-Item on the game folder -> a game in a path over 259 characters is skipped or counted as not checked, and its dgVoodoo2, ReShade and BepInEx state is missed.

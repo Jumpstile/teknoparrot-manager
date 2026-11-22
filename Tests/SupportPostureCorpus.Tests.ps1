@@ -109,7 +109,8 @@ Describe 'TPM support posture corpus' {
         $main = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
         $match = [regex]::Match($main, '(?s)function Get-GameFiles.*?(?=\r?\nfunction )')
         $match.Success | Should -BeTrue
-        $match.Value | Should -Not -Match '\.chd'
+        # The built-in list must not name .chd. A comment may mention it: file types a profile itself names are added at run time (#389).
+        ($match.Value -replace '(?m)^\s*#.*$', '') | Should -Not -Match '\.chd'
     }
 
     It 'emits deterministic profile posture and passes the zero UNCLASSIFIED gate' {

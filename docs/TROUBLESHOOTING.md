@@ -494,9 +494,9 @@ Fix:
 
    Next: read the warning.
 
-6. Read the warning. A saved copy shown as `older copy, cannot be fully checked` has no completion record, so TeknoParrot Manager cannot prove it is complete. It says games missing from it will be removed and asks you to type **UNVERIFIED**.
+6. Read the warning. A saved copy shown as `older copy, cannot be fully checked` has no completion record, so TeknoParrot Manager cannot prove it is complete. It says games missing from it will be removed and asks you to type **UNVERIFIED**. That one word is the only confirmation. You are not asked to type YES as well.
 
-   You will see: the warning, then the prompt **Type YES to confirm**.
+   You will see: the warning, then the prompt **Type UNVERIFIED to use this copy anyway**. A copy that can be checked shows the prompt **Type YES to confirm** instead.
 
    Next: confirm only if you are sure.
 
@@ -647,6 +647,41 @@ Fix:
    Next: delete or move the old copy yourself, or run **2) Register only** on the folder that works.
 
 Expected result: the games are unpacked once, into the games folder you chose, and appear once in TeknoParrot.
+
+## The health check names a game it cannot use yet
+
+Symptom: Library health check (menu 13) shows `Needs attention` for **Game types** or **Game files**. For example: `1 game is not available yet`, `the emulator for 2 games is not in your TeknoParrot folder`, or `1 game needs you to pick the game file by hand`.
+
+Cause: one of these.
+
+- `not available yet`: TeknoParrot lists the game as development only, so it cannot be played yet.
+- `the emulator ... is not in your TeknoParrot folder`: each game type has its own emulator folder, and that folder is missing.
+- `needs you to pick the game file by hand`: the game's profile names no game file, and TeknoParrot has no setup file for it, so TeknoParrot Manager cannot find the file.
+- a game type that TeknoParrot Manager does not know. Its games may still run.
+
+Fix:
+
+1. Press **D** to see which games.
+
+   You will see: the names, with what to do for each.
+
+   Next: follow the matching step below.
+
+2. For `not available yet`, wait until TeknoParrot releases the game. Nothing is wrong with your setup.
+
+3. For a missing emulator, update TeknoParrot so that game type's emulator folder is in your TeknoParrot folder. Then run the health check again.
+
+4. For a game file to pick by hand, open the game in TeknoParrotUI and set its game file there.
+
+Expected result: the line says `OK`, or only the games that cannot be played yet are left.
+
+### More detail
+
+- A System 11 game is registered only when both of its ZIPs (the game's own ZIP and its parent ZIP) are in the same folder. A folder with only the parent ZIP does not register the game. Put both ZIPs in one folder, then run **2) Register only** again.
+- A System 11 game that has a disc image (`.chd`) gets it chosen for it when there is exactly one. With several, none is guessed.
+- A LaunchBox game with a `Needs setup` note, or in a `Needs setup` playlist, cannot start yet because its game file, firmware or BepInEx is missing. The note and the playlist entry go away by themselves when that is fixed.
+- A game set to Internal storage (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball) needs no PostgreSQL. The health check shows it as `Game database: OK`. Start the game once so it makes its own database.
+
 ## Still stuck, or the game will not launch?
 
 Check these things first:

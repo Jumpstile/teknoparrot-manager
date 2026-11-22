@@ -23,9 +23,10 @@ BeforeAll {
     $script:productScript = (Resolve-Path $scriptPath).Path
 
     function New-ProfileXml {
-        param([string]$GamePath = '', [string[]]$ApiOptions = @(), [switch]$RawButton, [switch]$Postgres, [switch]$PostgresComplete, [string]$Extra = '')
+        param([string]$GamePath = '', [string[]]$ApiOptions = @(), [switch]$RawButton, [switch]$Postgres, [switch]$PostgresComplete, [string]$Extra = '', [string]$Storage = '')
         $api = if ($ApiOptions.Count -gt 0) { '<FieldInformation><FieldName>Input API</FieldName><FieldValue>XInput</FieldValue><FieldOptions>' + (($ApiOptions | ForEach-Object { "<string>$_</string>" }) -join '') + '</FieldOptions></FieldInformation>' } else { '' }
         $pg = ''
+        if ($Storage -ne '') { $pg += "<FieldInformation><CategoryName>Database</CategoryName><FieldName>Storage</FieldName><FieldValue>$Storage</FieldValue></FieldInformation>" }
         if ($Postgres) {
             foreach ($n in 'DbName', 'Path', 'Address', 'Port', 'User', 'Pass') {
                 $v = if ($PostgresComplete) { 'x' } else { '' }
@@ -181,5 +182,24 @@ Describe 'PostgreSQL offer after registration' {
         (Invoke-TpmPostgresRegistrationOffer -UserProfilesDir $profiles -RegisteredCodes @('Old') -Unattended) | Should -BeFalse
         (Invoke-TpmPostgresRegistrationOffer -UserProfilesDir $profiles -RegisteredCodes @('Old') -DryRun) | Should -BeFalse
         Should -Invoke Read-TpmYesNo -Times 0 -Exactly
+    }
+
+    # Mutation: ignore Storage -> a game set to Internal is offered a PostgreSQL install it does not need.
+    It 'does not offer PostgreSQL for a new Internal game, and says plainly that no database install is needed' {
+        $root = New-TpFixture
+        Save-Profile -Root $root -Code 'GameA' -Doc (New-ProfileXml -GamePath 'a' -Postgres -Storage 'Internal')
+        (Invoke-TpmPostgresRegistrationOffer -UserProfilesDir (Join-Path $root 'UserProfiles') -RegisteredCodes @('GameA')) | Should -BeFalse
+        Should -Invoke Read-TpmYesNo -Times 0 -Exactly
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*no database install is needed*started once*' } -Times 1
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Existing PostgreSQL is for keeping an existing PostgreSQL server and its saved progress*' } -Times 1
+    }
+
+    # Mutation: skip every game that has a Storage field -> a game set to Existing PostgreSQL is no longer offered setup.
+    It 'still offers setup for a new game set to Existing PostgreSQL, and says nothing is switched for the user' {
+        $root = New-TpFixture
+        Save-Profile -Root $root -Code 'GameA' -Doc (New-ProfileXml -GamePath 'a' -Postgres -Storage 'Existing PostgreSQL')
+        (Invoke-TpmPostgresRegistrationOffer -UserProfilesDir (Join-Path $root 'UserProfiles') -RegisteredCodes @('GameA')) | Should -BeTrue
+        Should -Invoke Read-TpmYesNo -Times 1 -Exactly
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Internal, needs no database install; nothing is switched for you*' } -Times 1
     }
 }

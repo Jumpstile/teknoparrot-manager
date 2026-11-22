@@ -1,6 +1,6 @@
 #Requires -Module Pester
 
-# Issues #420 and #421: LaunchBox game details (year, developer) and automatic playlists.
+# Issues #420, #421 and #425: LaunchBox game details (year, developer), automatic playlists and the Needs setup note.
 # The production script is parsed and only its function definitions are dot-sourced; no top-level product code runs.
 # Everything lives under TestDrive with a made-up LaunchBox folder. The real LaunchBox is never touched and nothing is downloaded.
 # Each It names the product change that makes it fail.
@@ -17,11 +17,17 @@ BeforeAll {
     [System.IO.File]::WriteAllText($script:Lb420File, $functionText, (New-Object System.Text.UTF8Encoding $false))
     . $script:Lb420File
     . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
+    # The word list the title matching reads (the production script sets it at its top level).
+    $script:TitleTokenStopWords = [System.Collections.Generic.HashSet[string]]::new([string[]]@('the', 'of', 'a', 'an', 'and', 'vs', 'vs.', 'in', 'for', 'to'), [System.StringComparer]::OrdinalIgnoreCase)
 
+    # A profile whose game file exists, so the game is ready to start (-Missing leaves the game file out: it needs setup).
     function New-Lb420Profile {
-        param([string]$Dir, [string]$Code, [string]$GameFolder, [switch]$Gun, [switch]$Wheel)
+        param([string]$Dir, [string]$Code, [string]$GameFolder, [switch]$Gun, [switch]$Wheel, [switch]$Missing)
         $buttons = if ($Wheel) { '<JoystickButtons><JoystickButtons><InputMapping>P1Wheel</InputMapping><AnalogType>Wheel</AnalogType></JoystickButtons></JoystickButtons>' } else { '<JoystickButtons />' }
-        $xml = '<GameProfile><GamePath>D:\Games\{0}\game.exe</GamePath><GunGame>{1}</GunGame>{2}</GameProfile>' -f $GameFolder, $(if ($Gun) { 'true' } else { 'false' }), $buttons
+        $gameDir = Join-Path (Join-Path (Split-Path $Dir -Parent) 'Games') $GameFolder
+        $gameFile = Join-Path $gameDir 'game.exe'
+        if (-not $Missing) { [void][System.IO.Directory]::CreateDirectory($gameDir); [System.IO.File]::WriteAllText($gameFile, 'x') }
+        $xml = '<GameProfile><GamePath>{0}</GamePath><GunGame>{1}</GunGame>{2}</GameProfile>' -f $gameFile, $(if ($Gun) { 'true' } else { 'false' }), $buttons
         [System.IO.File]::WriteAllText((Join-Path $Dir ($Code + '.xml')), $xml)
     }
 
@@ -30,12 +36,22 @@ BeforeAll {
         return ('<Game><ID>{0}</ID><Title>{1}</Title><Platform>TeknoParrot</Platform><Emulator>{2}</Emulator><ApplicationPath>..\TP\UserProfiles\{3}.xml</ApplicationPath>{4}</Game>' -f $Id, $Title, $Emulator, $Code, $Extra)
     }
 
+    # TeknoParrot's own facts for a game (Metadata\<code>.json): the name, year and hardware the engine reads.
+    function New-Lb420Metadata {
+        param([string]$Tp, [string]$Code, [string]$Name, [string]$Year, [string]$Platform)
+        $dir = Join-Path $Tp 'Metadata'
+        [void][System.IO.Directory]::CreateDirectory($dir)
+        $yearText = if ($Year) { ',"release_year":"' + $Year + '"' } else { '' }
+        [System.IO.File]::WriteAllText((Join-Path $dir ($Code + '.json')), ('{{"game_name":"{0}","platform":"{1}"{2}}}' -f $Name, $Platform, $yearText))
+    }
+
     # Three TeknoParrot games (a light gun game, a driving game, a plain Namco game) plus a game from another emulator.
     function New-Lb420Fixture {
         param([string]$ExtraGameXml = '')
         $root = Join-Path $TestDrive ('lb420-' + [guid]::NewGuid().ToString('N'))
         $lb = Join-Path $root 'LaunchBox'
-        $profiles = Join-Path $root 'UserProfiles'
+        $tp = Join-Path $root 'TP'
+        $profiles = Join-Path $tp 'UserProfiles'
         [void][System.IO.Directory]::CreateDirectory((Join-Path $lb 'Data\Platforms'))
         [void][System.IO.Directory]::CreateDirectory($profiles)
         [System.IO.File]::WriteAllText((Join-Path $lb 'Data\Emulators.xml'), '<LaunchBox><Emulator><ID>emu-1</ID><Title>TeknoParrot</Title></Emulator></LaunchBox>')
@@ -43,9 +59,12 @@ BeforeAll {
         New-Lb420Profile -Dir $profiles -Code 'Outrun2' -GameFolder 'OutRun 2 (2008)(USA)[Sega Lindbergh][TP]' -Wheel
         New-Lb420Profile -Dir $profiles -Code 'Tekken' -GameFolder 'Tekken 6 (1998)(JPN, AG1 Ver.A)[Namco Super System 23][TP]'
         New-Lb420Profile -Dir $profiles -Code 'Other' -GameFolder 'Other (2001)[Sega Lindbergh][TP]'
+        New-Lb420Metadata -Tp $tp -Code 'GhostSquad' -Name 'Ghost Squad' -Year '2004' -Platform 'SEGA Lindbergh Yellow'
+        New-Lb420Metadata -Tp $tp -Code 'Outrun2' -Name 'OutRun 2' -Year '2008' -Platform 'SEGA Lindbergh Red'
+        New-Lb420Metadata -Tp $tp -Code 'Tekken' -Name 'Tekken 6' -Year '1998' -Platform 'Namco Super System 23'
         $games = (New-Lb420Game 'g1' 'Ghost Squad' 'GhostSquad') + (New-Lb420Game 'g2' 'OutRun 2' 'Outrun2') + (New-Lb420Game 'g3' 'Tekken 6' 'Tekken') + (New-Lb420Game 'g4' 'Not mine' 'Other' -Emulator 'emu-other') + $ExtraGameXml
         [System.IO.File]::WriteAllText((Join-Path $lb 'Data\Platforms\TeknoParrot.xml'), ('<LaunchBox>{0}</LaunchBox>' -f $games))
-        return [pscustomobject]@{ Root = $lb; Profiles = $profiles; Backups = (Join-Path $root 'Backups'); Platform = (Join-Path $lb 'Data\Platforms\TeknoParrot.xml'); Playlists = (Join-Path $lb 'Data\Playlists') }
+        return [pscustomobject]@{ Root = $lb; Tp = $tp; Profiles = $profiles; Backups = (Join-Path $root 'Backups'); Platform = (Join-Path $lb 'Data\Platforms\TeknoParrot.xml'); Playlists = (Join-Path $lb 'Data\Playlists') }
     }
 
     function Get-Lb420Hashes {
@@ -56,8 +75,8 @@ BeforeAll {
     }
 
     function Invoke-Lb420 {
-        param($Fixture, [switch]$PlanOnly, [hashtable]$DatIndex = $null, [hashtable]$Choices = @{}, [string]$Default = 'Skip')
-        $result = Invoke-TpmLaunchBoxEnrich -UserProfilesDir $Fixture.Profiles -LbRoot $Fixture.Root -PlatformNames @('TeknoParrot') -BackupRoot $Fixture.Backups -DatIndex $DatIndex -ConflictChoices $Choices -ConflictDefault $Default -PlanOnly:$PlanOnly
+        param($Fixture, [switch]$PlanOnly, [hashtable]$DatIndex = $null)
+        $result = Invoke-TpmLaunchBoxEnrich -UserProfilesDir $Fixture.Profiles -LbRoot $Fixture.Root -PlatformNames @('TeknoParrot') -BackupRoot $Fixture.Backups -TpRoot $Fixture.Tp -DatIndex $DatIndex -PlanOnly:$PlanOnly
         if ($result.Outcome -eq 'FAILED') { throw ('LaunchBox step failed: ' + ($result.Errors -join '; ')) }
         return $result
     }
@@ -65,7 +84,7 @@ BeforeAll {
     function New-Lb420Dat {
         param([object[]]$Entries)
         $dat = @{}
-        foreach ($e in $Entries) { $dat[(Get-NormalizedGameKey $e.Name)] = [pscustomobject]@{ ProfileCode = $e.Code; Executable = 'game.exe'; OriginalName = $e.Name } }
+        foreach ($e in $Entries) { $dat[(Get-NormalizedGameKey $e.Name)] = [pscustomobject]@{ ProfileCode = $e.Code; ProfileCode2 = ''; Executable = 'game.exe'; OriginalName = $e.Name; Alternates = (New-Object System.Collections.Generic.List[object]) } }
         return $dat
     }
     function Get-Lb420Game {
@@ -75,21 +94,15 @@ BeforeAll {
     }
 }
 
-Describe 'LB420/421: facts from a game name' {
-    It 'reads year, hardware and developer from the folder name' {
-        # Mutation: drop the year pattern or the maker list -> year or developer comes back empty.
-        $f = Get-TpmLaunchBoxNameFacts -Name 'Tekken 6 (1998)(JPN, AG1 Ver.A)[Namco Super System 23][TP]'
-        $f.Year | Should -BeExactly '1998'
-        $f.Hardware | Should -BeExactly 'Namco Super System 23'
-        $f.Developer | Should -BeExactly 'Namco'
-    }
-    It 'invents nothing when the folder is not a TeknoParrot game folder or the maker is unknown' {
-        # Mutation: fall back to the first word of the label as developer -> "Mystery" would be written.
-        $none = Get-TpmLaunchBoxNameFacts -Name 'Some Folder'
-        "$($none.Year)$($none.Hardware)$($none.Developer)" | Should -BeExactly ''
-        $unknown = Get-TpmLaunchBoxNameFacts -Name 'X (2010)[Mystery Board][TP]'
-        $unknown.Hardware | Should -BeExactly 'Mystery Board'
-        $unknown.Developer | Should -BeExactly ''
+Describe 'LB420/421: hardware families' {
+    It 'one family for the versions of a board, one spelling for the maker' {
+        # Mutation: keep the color or version in the name -> a playlist for every Lindbergh color and Type X version.
+        Get-TpmHardwareFamily 'SEGA Lindbergh Red' | Should -BeExactly 'Sega Lindbergh'
+        Get-TpmHardwareFamily 'Sega Lindbergh Yellow' | Should -BeExactly 'Sega Lindbergh'
+        Get-TpmHardwareFamily 'Taito Type X4' | Should -BeExactly 'Taito Type X'
+        Get-TpmHardwareFamily 'Taito NESiCAxLive2' | Should -BeExactly 'Taito NESiCAxLive'
+        Get-TpmHardwareFamily 'Namco Super System 23' | Should -BeExactly 'Namco Super System 23'
+        Get-TpmHardwareFamily '' | Should -BeExactly ''
     }
 }
 
@@ -200,7 +213,7 @@ Describe 'LB420/421: details and playlists' {
     }
 }
 
-Describe 'LB420/421: Eggman DAT as a second source' {
+Describe 'LB420: the Eggman list and the LaunchBox game list as sources' {
     BeforeEach {
         Mock Write-Log {}
         Mock Test-LaunchBoxRunning { $false }
@@ -208,59 +221,119 @@ Describe 'LB420/421: Eggman DAT as a second source' {
         Mock Write-TpmCompactExtractionProgress {}
     }
 
-
-
-    It 'fills a detail from the DAT when the folder name has none, and stays quiet when both agree' {
-        # Mutation: ignore the DAT -> the bare folder gets no year; or flag equal values as a conflict.
+    It 'fills a detail from the Eggman list when TeknoParrot has none' {
+        # Mutation: ignore the Eggman list -> a game with no TeknoParrot year gets no year.
         $fx = New-Lb420Fixture
         New-Lb420Profile -Dir $fx.Profiles -Code 'Bare' -GameFolder 'Bare Game[TP]'
         [System.IO.File]::WriteAllText($fx.Platform, [System.IO.File]::ReadAllText($fx.Platform).Replace('</LaunchBox>', ((New-Lb420Game 'g8' 'Bare Game' 'Bare') + '</LaunchBox>')))
-        $dat = New-Lb420Dat @(
-            @{ Code = 'Bare'; Name = 'Bare Game (2010)(USA)[Sega Lindbergh][TP]' },
-            @{ Code = 'GhostSquad'; Name = 'Ghost Squad (2004)(JPN)[Sega Lindbergh][TP]' })
-        $r = Invoke-Lb420 -Fixture $fx -PlanOnly -DatIndex $dat
-        @($r.EnrichPlan.Conflicts).Count | Should -Be 0
+        $dat = New-Lb420Dat @(@{ Code = 'Bare'; Name = 'Bare Game (2010)(USA)[Sega Lindbergh][TP]' })
         $w = Invoke-Lb420 -Fixture $fx -DatIndex $dat
         $w.Outcome | Should -BeExactly 'SAVED'
         (Get-Lb420Game $fx 'g8').ReleaseDate | Should -BeExactly '2010-01-01'
         (Get-Lb420Game $fx 'g8').Developer | Should -BeExactly 'Sega'
-        (Get-Lb420Game $fx 'g1').ReleaseDate | Should -BeExactly '2004-01-01'
     }
 
-    It 'shows both values when the sources disagree and writes nothing for that detail unless chosen' {
-        # Mutation: pick one source silently -> the year is written without a choice, or the preview hides one value.
-        $fx = New-Lb420Fixture
-        $dat = New-Lb420Dat @(@{ Code = 'Outrun2'; Name = 'OutRun 2 (2007)(USA)[Sega Lindbergh][TP]' })
-        $r = Invoke-Lb420 -Fixture $fx -PlanOnly -DatIndex $dat
-        @($r.EnrichPlan.Conflicts).Count | Should -Be 1
-        $line = (@(Format-TpmLaunchBoxEnrichLine -Plan $r.EnrichPlan) -join "`n")
-        $line | Should -Match 'Folder name says 2008'
-        $line | Should -Match 'Eggman list says 2007'
-        $w = Invoke-Lb420 -Fixture $fx -DatIndex $dat
-        $w.Outcome | Should -BeExactly 'SAVED'
-        (Get-Lb420Game $fx 'g2').SelectSingleNode('ReleaseDate') | Should -BeNullOrEmpty
-        (Get-Lb420Game $fx 'g2').Developer | Should -BeExactly 'Sega'
-    }
-
-    It 'uses the source the user chose, for one detail or for all' {
-        # Mutation: ignore the choice -> the year stays empty or the wrong source wins.
-        $fx = New-Lb420Fixture
-        $dat = New-Lb420Dat @(@{ Code = 'Outrun2'; Name = 'OutRun 2 (2007)(USA)[Sega Lindbergh][TP]' })
-        $one = Invoke-Lb420 -Fixture $fx -PlanOnly -DatIndex $dat -Choices @{ 'g2|Year' = 'Dat' }
-        @($one.EnrichPlan.Conflicts)[0].Applied | Should -BeExactly '2007'
-        [void](Invoke-Lb420 -Fixture $fx -DatIndex $dat -Default 'Folder')
-        (Get-Lb420Game $fx 'g2').ReleaseDate | Should -BeExactly '2008-01-01'
-        $fx2 = New-Lb420Fixture
-        [void](Invoke-Lb420 -Fixture $fx2 -DatIndex $dat -Default 'Dat')
-        (Get-Lb420Game $fx2 'g2').ReleaseDate | Should -BeExactly '2007-01-01'
-    }
-
-    It 'ignores a DAT entry that belongs to a different profile' {
+    It 'ignores an Eggman entry that belongs to a different profile' {
         # Mutation: match by name only -> another game's year lands on this one.
         $fx = New-Lb420Fixture
-        $dat = New-Lb420Dat @(@{ Code = 'SomethingElse'; Name = 'OutRun 2 (2007)(USA)[Sega Lindbergh][TP]' })
-        $r = Invoke-Lb420 -Fixture $fx -PlanOnly -DatIndex $dat
-        @($r.EnrichPlan.Conflicts).Count | Should -Be 0
+        New-Lb420Profile -Dir $fx.Profiles -Code 'Bare' -GameFolder 'Bare Game[TP]'
+        [System.IO.File]::WriteAllText($fx.Platform, [System.IO.File]::ReadAllText($fx.Platform).Replace('</LaunchBox>', ((New-Lb420Game 'g8' 'Bare Game' 'Bare') + '</LaunchBox>')))
+        $dat = New-Lb420Dat @(@{ Code = 'SomethingElse'; Name = 'Bare Game (2010)(USA)[Sega Lindbergh][TP]' })
+        [void](Invoke-Lb420 -Fixture $fx -DatIndex $dat)
+        (Get-Lb420Game $fx 'g8').SelectSingleNode('ReleaseDate') | Should -BeNullOrEmpty
+    }
+
+    It 'uses the LaunchBox game list own year and developer when the match is certain' {
+        # Mutation: prefer the TeknoParrot year over the game list -> the year of the re-release is written, not the game's own.
+        if (-not ('TpmTestGamesDbWriter' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class TpmTestGamesDbWriter {
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)] static extern int sqlite3_open_v2(byte[] file, out IntPtr db, int flags, IntPtr vfs);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)] static extern int sqlite3_close(IntPtr db);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)] static extern int sqlite3_exec(IntPtr db, byte[] sql, IntPtr cb, IntPtr arg, IntPtr err);
+    public static void Build(string path, string sql) {
+        IntPtr db;
+        if (sqlite3_open_v2(Encoding.UTF8.GetBytes(path + "\0"), out db, 6, IntPtr.Zero) != 0) throw new Exception("fixture open failed");
+        try { if (sqlite3_exec(db, Encoding.UTF8.GetBytes(sql + "\0"), IntPtr.Zero, IntPtr.Zero, IntPtr.Zero) != 0) throw new Exception("fixture sql failed"); }
+        finally { sqlite3_close(db); }
+    }
+}
+'@
+        }
+        $fx = New-Lb420Fixture
+        [void][System.IO.Directory]::CreateDirectory((Join-Path $fx.Root 'Metadata'))
+        [TpmTestGamesDbWriter]::Build((Join-Path $fx.Root 'Metadata\LaunchBox.Metadata.db'), @"
+CREATE TABLE Games (DatabaseID INTEGER, Name TEXT, Platform TEXT, ReleaseYear INTEGER, ReleaseDate TEXT, Developer TEXT, Publisher TEXT);
+CREATE TABLE GameAlternateTitles (AlternateName TEXT, DatabaseID INTEGER, Region TEXT, AltNameCompareValue TEXT);
+INSERT INTO Games VALUES (31, 'Ghost Squad', 'Arcade', 2005, NULL, 'Sega AM1', 'Sega');
+"@)
+        $w = Invoke-Lb420 -Fixture $fx
+        $w.Outcome | Should -BeExactly 'SAVED'
+        (Get-Lb420Game $fx 'g1').ReleaseDate | Should -BeExactly '2005-01-01'
+        (Get-Lb420Game $fx 'g1').Developer | Should -BeExactly 'Sega AM1'
+        (Get-Lb420Game $fx 'g3').ReleaseDate | Should -BeExactly '1998-01-01'
+    }
+}
+
+Describe 'LB425: games that are not ready to play' {
+    BeforeEach {
+        Mock Write-Log {}
+        Mock Test-LaunchBoxRunning { $false }
+        Mock Wait-TpmForProcessClose { $true }
+        Mock Write-TpmCompactExtractionProgress {}
+    }
+
+    It 'marks a game whose game file is missing in plain words, puts it in the Needs setup playlist, and keeps what the user wrote' {
+        # Mutation: leave the note out, overwrite the user's notes, or skip the playlist.
+        $fx = New-Lb420Fixture -ExtraGameXml (New-Lb420Game 'g5' 'Broken' 'Broken' -Extra '<Notes>My own note</Notes>')
+        New-Lb420Profile -Dir $fx.Profiles -Code 'Broken' -GameFolder 'Broken (2001)[Sega Lindbergh][TP]' -Missing
+        $preview = Invoke-Lb420 -Fixture $fx -PlanOnly
+        (@(Format-TpmLaunchBoxEnrichLine -Plan $preview.EnrichPlan) -join "`n") | Should -Match 'Broken: will be marked Needs setup. The game file was not found'
+        (Format-TpmLaunchBoxEnrichTitle -Plan $preview.EnrichPlan -Preview) | Should -Match '1 game marked Needs setup'
+        $w = Invoke-Lb420 -Fixture $fx
+        $w.Outcome | Should -BeExactly 'SAVED'
+        $notes = [string](Get-Lb420Game $fx 'g5').Notes
+        $notes | Should -Match 'My own note'
+        $notes | Should -Match 'not ready to play yet'
+        $notes | Should -Match 'game file was not found'
+        @(([xml][System.IO.File]::ReadAllText((Join-Path $fx.Playlists 'Needs setup.xml'))).SelectNodes('//PlaylistGame/GameId') | ForEach-Object { $_.InnerText }) | Should -Be @('g5')
+        # A game that is ready is not marked.
+        [string](Get-Lb420Game $fx 'g1').Notes | Should -Not -Match 'not ready'
+        (Invoke-Lb420 -Fixture $fx).Outcome | Should -BeExactly 'NO_CHANGES'
+    }
+
+    It 'takes the note and the playlist entry away by itself when the problem is fixed, and undo puts the files back' {
+        # Mutation: never clear the flag -> a game that works stays marked.
+        $fx = New-Lb420Fixture -ExtraGameXml (New-Lb420Game 'g5' 'Broken' 'Broken' -Extra '<Notes>My own note</Notes>')
+        New-Lb420Profile -Dir $fx.Profiles -Code 'Broken' -GameFolder 'Broken (2001)[Sega Lindbergh][TP]' -Missing
+        $before = Get-Lb420Hashes -Root $fx.Root
+        [void](Invoke-Lb420 -Fixture $fx)
+        New-Lb420Profile -Dir $fx.Profiles -Code 'Broken' -GameFolder 'Broken (2001)[Sega Lindbergh][TP]'
+        $fixed = Invoke-Lb420 -Fixture $fx
+        $fixed.Outcome | Should -BeExactly 'SAVED'
+        (@(Format-TpmLaunchBoxEnrichLine -Plan $fixed.EnrichPlan) -join "`n") | Should -Match 'Broken: is ready now'
+        [string](Get-Lb420Game $fx 'g5').Notes | Should -BeExactly 'My own note'
+        @(([xml][System.IO.File]::ReadAllText((Join-Path $fx.Playlists 'Needs setup.xml'))).SelectNodes('//PlaylistGame')).Count | Should -Be 0
+    }
+
+    It 'says the profile is missing when a LaunchBox game has no profile any more' {
+        $fx = New-Lb420Fixture -ExtraGameXml (New-Lb420Game 'g6' 'Gone' 'Gone')
+        $r = Invoke-Lb420 -Fixture $fx -PlanOnly
+        (@(Format-TpmLaunchBoxEnrichLine -Plan $r.EnrichPlan) -join "`n") | Should -Match 'Gone: will be marked Needs setup. The TeknoParrot profile for this game is missing'
+    }
+
+    It 'a game with startup files missing for its emulator is marked with the file names' {
+        $fx = New-Lb420Fixture
+        $table = @{ FakeEmu = @{ Label = 'PlayStation 2 BIOS'; RequiredFiles = @('bios.bin'); RelativeDir = 'bios'; EmulatorFolders = @('FakeEmu') } }
+        Mock Get-TpmPrerequisiteTable { $table }
+        [void][System.IO.Directory]::CreateDirectory((Join-Path $fx.Tp 'FakeEmu'))
+        [System.IO.File]::WriteAllText((Join-Path $fx.Profiles 'Tekken.xml'), ([System.IO.File]::ReadAllText((Join-Path $fx.Profiles 'Tekken.xml')).Replace('<GameProfile>', '<GameProfile><EmulatorType>FakeEmu</EmulatorType>')))
+        $problems = Get-TpmSetupProblems -ProfileFiles @(Get-ChildItem -LiteralPath $fx.Profiles -Filter '*.xml') -TpRoot $fx.Tp
+        @($problems['tekken'])[0] | Should -Match 'PlayStation 2 BIOS: bios.bin is missing'
+        $problems.ContainsKey('ghostsquad') | Should -BeFalse
     }
 }
 

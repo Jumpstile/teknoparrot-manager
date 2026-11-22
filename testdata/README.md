@@ -9,6 +9,7 @@ Golden datasets are machine-readable examples of real-world behavior. They shoul
 | File | Purpose |
 |---|---|
 | `golden-normalization-cases.json` | Folder-name normalization and safety cases. |
+| `real-game-registration-fixture.json` | Real game and profile facts (names and file names only) reduced from the TeknoParrot profile set and the Eggman list. Used by `Tests\Fix389.EveryGameRegisters.Tests.ps1`. To add a case, add the profile and the list game; no code change is needed. |
 
 ## Dataset entry expectations
 

@@ -1,0 +1,914 @@
+{
+ "Source": "Facts only (profile codes, game file names, game names) reduced from the TeknoParrot profile set (build 2325) and the Eggman collection list dated 2026-11-20 plus the Eggman index of the supplementary list. No ROMs, no profile settings.",
+ "Profiles": [
+  {
+   "Code": "2Spicy",
+   "EmulatorType": "Lindbergh",
+   "ExecutableName": "apacheM_HD.elf;apacheM.elf",
+   "IsDeprecated": true
+  },
+  {
+   "Code": "2SpicyElf2",
+   "EmulatorType": "ElfLdr2",
+   "ExecutableName": "apacheM_HD.elf;apacheM.elf"
+  },
+  {
+   "Code": "AkaiKatanaShinNesica",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "Akuma",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "AquapazzaAquaplusDreamMatch",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "ArcanaHeart2Nesica",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "ArcanaHeart3Nesica",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "BattleGear4",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "BattleGear4Tuned",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "BlazBlueCrossTagBattle",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "BlockKing",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "CC",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": ""
+  },
+  {
+   "Code": "ChaosBreaker",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": ""
+  },
+  {
+   "Code": "ChaosBreakerNesica",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": ""
+  },
+  {
+   "Code": "ChaosCodeNSOC103",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "ChaosCodeNSOC211",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "Coopers9",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "CottonRnR",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "CrimzonClover",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "D1GP",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "DaemonBrideAG",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "DariusBurst",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "DinoKing",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "DoNotFallRunforYourDrink",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "Drakons",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "EADP",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "ElevatorAction",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "EnEinsPerfektewelt",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "ExceptionNesica",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "GaiaAttack4",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "GigaWingGenerations",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "GundamSpiritsOfZeon",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "Gunslinger",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "HOTD4",
+   "EmulatorType": "Lindbergh",
+   "ExecutableName": "",
+   "IsDeprecated": true
+  },
+  {
+   "Code": "HOTD4ELF2",
+   "EmulatorType": "ElfLdr2",
+   "ExecutableName": "hod4M.elf"
+  },
+  {
+   "Code": "HauntedMuseum",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "HauntedMuseumII",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "Homura",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "HotWheels",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "HyperStreetFighterII",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "Ikaruga",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "KeyOfAvalon",
+   "EmulatorType": "Dolphin",
+   "ExecutableName": "Dolphin.exe"
+  },
+  {
+   "Code": "KingOfFightersXIV",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "KingofFighters98UltimateMatchFinalEditionNesica",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "KingofFightersSkyStage",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "KingofFightersXII",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": ""
+  },
+  {
+   "Code": "LethalEnforcers3",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "MagicalBeat",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "MillionArthurArcanaBlood",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "Minecraft",
+   "EmulatorType": "ElfLdr2",
+   "ExecutableName": "gamedump.exec2|gamedump.exec"
+  },
+  {
+   "Code": "MusicGunGun2",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "NFSHeatTakedown",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "NitroplusBlasterz",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "Persona4A",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "Persona4U",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "PuzzleBobble",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "QMA",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "R-Tuned",
+   "EmulatorType": "Lindbergh",
+   "ExecutableName": "",
+   "IsDeprecated": true
+  },
+  {
+   "Code": "R-TunedElf2",
+   "EmulatorType": "ElfLdr2",
+   "ExecutableName": ""
+  },
+  {
+   "Code": "RabbidsHollywood",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "RaidenIIINesica",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "RaidenIV",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "RaidenIVNesica",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "RainbowBombergirl",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "Rambo",
+   "EmulatorType": "Lindbergh",
+   "ExecutableName": "ramboD.elf",
+   "IsDeprecated": true
+  },
+  {
+   "Code": "RamboElf2",
+   "EmulatorType": "ElfLdr2",
+   "ExecutableName": "ramboM.elf"
+  },
+  {
+   "Code": "Rampage",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "RastanSaga",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "RobinHood",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "RumbleFish2Nesica",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "SDR",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "SNKHeroines",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "SenkoNoRondeDuoNesica",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "Skullgirls2E",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "SpaceInvaders",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "SpaceInvadersFrenzy",
+   "EmulatorType": "ElfLdr2",
+   "ExecutableName": "game_dump.exec"
+  },
+  {
+   "Code": "Spiderman",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "StraniaTheStellaMachina",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "StreetFighterIII3rdStrike",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "StreetFighterZero3",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "SuggoiArcanaHeart2Nesica",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "SuperDragonBallHeroes",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "Game.exe"
+  },
+  {
+   "Code": "Theatrhythm",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "TombRaider",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "TroubleWitchesNesica",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "UltraStreetFighterIV",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "VF5B",
+   "EmulatorType": "Lindbergh",
+   "ExecutableName": "",
+   "IsDeprecated": true
+  },
+  {
+   "Code": "VF5BElf2",
+   "EmulatorType": "ElfLdr2",
+   "ExecutableName": ""
+  },
+  {
+   "Code": "VampireSavior",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "WartranTroopers",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "WinningEleven08",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "Yatagarasu",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "YugiohDT6U",
+   "EmulatorType": "TeknoParrot",
+   "ExecutableName": "game.exe"
+  },
+  {
+   "Code": "abc",
+   "EmulatorType": "Lindbergh",
+   "ExecutableName": "abc",
+   "IsDeprecated": true
+  },
+  {
+   "Code": "abcELF2",
+   "EmulatorType": "ElfLdr2",
+   "ExecutableName": "abc"
+  },
+  {
+   "Code": "ddr2m",
+   "EmulatorType": "TeknoS11",
+   "ExecutableName": "ddr2m.zip",
+   "ExecutableName2": "*.chd"
+  },
+  {
+   "Code": "ddr2mc2",
+   "EmulatorType": "TeknoS11",
+   "ExecutableName": "ddr2mc2.zip;ddr2m.zip",
+   "ExecutableName2": "*.chd"
+  },
+  {
+   "Code": "ddr2ml",
+   "EmulatorType": "TeknoS11",
+   "ExecutableName": "ddr2ml.zip;ddr2m.zip",
+   "ExecutableName2": "*.chd"
+  },
+  {
+   "Code": "drmn",
+   "EmulatorType": "TeknoS11",
+   "ExecutableName": "drmn.zip;pcnfrk.zip",
+   "ExecutableName2": "*.chd"
+  },
+  {
+   "Code": "soulclbruc",
+   "EmulatorType": "TeknoS11",
+   "ExecutableName": "soulclbruc.zip;soulclbr.zip"
+  },
+  {
+   "Code": "teknoeagle_gtfore04",
+   "EmulatorType": "TeknoEagle",
+   "ExecutableName": "golf_fore_2004_v4.00.08.chd"
+  },
+  {
+   "Code": "totlvica",
+   "EmulatorType": "TeknoM2",
+   "ExecutableName": "totlvice.zip",
+   "ExecutableName2": "639aab01.chd"
+  },
+  {
+   "Code": "totlvice",
+   "EmulatorType": "TeknoM2",
+   "ExecutableName": "totlvice.zip",
+   "ExecutableName2": "639eba01.chd"
+  },
+  {
+   "Code": "vf3tb_m3",
+   "EmulatorType": "TeknoModel3",
+   "ExecutableName": "vf3.zip;vf3tb.zip"
+  },
+  {
+   "Code": "vf3",
+   "EmulatorType": "TeknoModel3",
+   "ExecutableName": "vf3.zip"
+  }
+ ],
+ "Games": [
+  {
+   "Name": "2SPICY (Too Spicy)(1.00.00)(2007-02-15)[Sega Lindbergh Red][TP]",
+   "GameProfile": "2Spicy",
+   "GameProfile2": "2SpicyElf2",
+   "Executable": "elf/apacheM.elf",
+   "Files": [
+    "drv/nvidia/8769/2.6.10_mvl40/kernel/drivers/video/nvidia.ko",
+    "drv/nvidia/8769/2.6.10_mvl40a/kernel/drivers/video/nvidia.ko",
+    "drv/nvidia/8769/2.6.10_mvl40b/kernel/drivers/video/nvidia.ko",
+    "drv/nvidia/8769/bin",
+    "drv/nvidia/8769/etc",
+    "drv/nvidia/8769/include/DPS",
+    "elf/apacheM.elf"
+   ]
+  },
+  {
+   "Name": "After Burner Climax (1.0 Rev B)(2006-06-19)(JPN,USA,EXP)[Sega Lindbergh Yellow][TP]",
+   "GameProfile": "abc",
+   "GameProfile2": "abcELF2",
+   "Executable": "abc",
+   "Files": [
+    "abc",
+    "abc alt",
+    "abc 1080p",
+    "abc_org",
+    "game",
+    "rom/ABC_ICS.csb"
+   ]
+  },
+  {
+   "Name": "Chaos Breaker (2004)[Taito Type X][TP]",
+   "GameProfile": "ChaosBreaker",
+   "GameProfile2": "",
+   "Executable": "game.exe",
+   "Files": [
+    "data/data.gdf",
+    "dinput8.dll",
+    "Dip.dat",
+    "game.dat",
+    "game.exe",
+    "game.inf"
+   ]
+  },
+  {
+   "Name": "Chaos Breaker (2011)[Taito NESICAxLive][TP]",
+   "GameProfile": "ChaosBreakerNesica",
+   "GameProfile2": "",
+   "Executable": "game.exe",
+   "Files": [
+    "data/data.gdf",
+    "game.exe",
+    "game.inf",
+    "game.prj",
+    "graphic/back/back1/back.pak",
+    "graphic/back/back1/back.scr"
+   ]
+  },
+  {
+   "Name": "Chaos Code (2011)[Sega RingWide][TP]",
+   "GameProfile": "CC",
+   "GameProfile2": "",
+   "Executable": "game.exe",
+   "Files": [
+    "audiere.dll",
+    "ChaosCode.ini",
+    "data/AC/091107_CharUI/boss_blood_w1_temp.BMP",
+    "data/AC/091107_CharUI/no_ch12.png",
+    "data/AC/091107_CharUI/no_ch12_01.bmp",
+    "data/AC/091107_CharUI/no_ch12_02.png",
+    "game.exe"
+   ]
+  },
+  {
+   "Name": "Chaos Code - New Sign of Catastrophe (1.03.00)(2013-09-13)(JPN)[Taito NESiCAxLive][TP]",
+   "GameProfile": "ChaosCodeNSOC103",
+   "GameProfile2": "",
+   "Executable": "game.exe",
+   "Files": [
+    "config.txt",
+    "audiere.dll",
+    "Content/CC_TYPE_X2.flow",
+    "Content/config/config.txt",
+    "Content/data/AC/CC_PS3GUI_V1.bin",
+    "Content/data/AC/charCG.bin",
+    "game.exe"
+   ]
+  },
+  {
+   "Name": "Chaos Code - New Sign of Catastrophe (2.11.00)(2016-07-21)(JPN)[Taito NESiCAxLive][TP]",
+   "GameProfile": "ChaosCodeNSOC211",
+   "GameProfile2": "",
+   "Executable": "game.exe",
+   "Files": [
+    "audiere.dll",
+    "C4_Tellurium_E.TTF",
+    "config.txt",
+    "Content/CC_TYPE_X2.flow",
+    "Content/config/config.txt",
+    "Content/data/AC/CC_PS3GUI_V1.bin",
+    "game.exe"
+   ]
+  },
+  {
+   "Name": "Dance Dance Revolution 2nd Mix (GN895 Ver.JAA)(1999)[Konami System 573][TP]",
+   "GameProfile": "ddr2m",
+   "GameProfile2": "",
+   "Executable": "ddr2m.zip",
+   "Files": [
+    "ddr2m.zip",
+    "ddr2m/895jaa02.chd",
+    "k573mcr.zip",
+    "sys573.zip"
+   ]
+  },
+  {
+   "Name": "Dance Dance Revolution 2nd Mix - Link Ver (GE885 Ver.JAC)(1999)[Konami System 573][TP]",
+   "GameProfile": "ddr2ml",
+   "GameProfile2": "",
+   "Executable": "ddr2m.zip",
+   "Files": [
+    "ddr2m.zip",
+    "ddr2m/885jac01.chd",
+    "ddr2m/892jaa01.chd",
+    "ddr2m/895jaa02.chd",
+    "k573mcr.zip",
+    "sys573.zip"
+   ]
+  },
+  {
+   "Name": "Dance Dance Revolution 2nd Mix with bmIIDX substream CLUB VERSiON 2 (GE984 Ver.JAA)(1999)[Konami System 573][TP]",
+   "GameProfile": "ddr2mc2",
+   "GameProfile2": "",
+   "Executable": "ddr2m.zip",
+   "Files": [
+    "ddr2m.zip",
+    "ddr2m/885jaa02.chd",
+    "ddr2m/892jaa01.chd",
+    "ddr2m/895jaa02.chd",
+    "ddr2m/896jaa01.chd",
+    "ddr2m/ge984a01,ddr.chd"
+   ]
+  },
+  {
+   "Name": "DrumMania (GQ881 Ver.JAD)(1999)[Konami System 573][TP]",
+   "GameProfile": "drmn",
+   "GameProfile2": "",
+   "Executable": "pcnfrk.zip",
+   "Files": [
+    "pcnfrk.zip",
+    "pcnfrk/881jad01.chd",
+    "pcnfrk/881xxb02.chd",
+    "sys573.zip"
+   ]
+  },
+  {
+   "Name": "Golden Tee Fore! 2004 (2003)[IT Eagle][TP]",
+   "GameProfile": "teknoeagle_gtfore04",
+   "GameProfile2": "",
+   "Executable": "gtfore04/golf_fore_2004_v4.00.08.chd",
+   "Files": [
+    "gtfore04/golf_fore_2004_v4.00.00.chd",
+    "gtfore04/golf_fore_2004_v4.00.08.chd",
+    "iteagle.zip"
+   ]
+  },
+  {
+   "Name": "Minecraft Dungeons Arcade (3.07)(2021)[Raw Thrills Linux PC][TP]",
+   "GameProfile": "Minecraft",
+   "GameProfile2": "",
+   "Executable": "gamedump.exec",
+   "Files": [
+    "data/g7/2dcommon.g7",
+    "gamedump.exec"
+   ]
+  },
+  {
+   "Name": "R-Tuned - Ultimate Street Racing (1.000)(2008-09-26)[Sega Lindbergh Yellow][TP]",
+   "GameProfile": "R-Tuned",
+   "GameProfile2": "R-TunedElf2",
+   "Executable": "dsr_HD",
+   "Files": [
+    ".gdbinit",
+    "drv.old/basebd/1.11/2.6.10_mvl40/kernel/drivers/bb/basebd.ko",
+    "drv.old/basebd/1.11/2.6.10_mvl40a/kernel/drivers/bb/basebd.ko",
+    "drv.old/basebd/1.11/2.6.10_mvl40b/kernel/drivers/bb/basebd.ko",
+    "drv.old/basebd/1.11/basebd_e.txt",
+    "drv.old/basebd/1.11/basebd_s.txt",
+    "dsr_HD"
+   ]
+  },
+  {
+   "Name": "Raiden IV (1.00J)(Portrait)(2007-04-23)(JPN)[Taito Type X][TP]",
+   "GameProfile": "RaidenIV",
+   "GameProfile2": "RaidenIVNesica",
+   "Executable": "game.exe",
+   "Files": [
+    "Dip.dat",
+    "game.exe",
+    "game.inf",
+    "hiscore.dat",
+    "MMShader.fx",
+    "NULL"
+   ]
+  },
+  {
+   "Name": "Rambo (1.0)(2008-07-25)(USA)[Sega Lindbergh Red EX][TP]",
+   "GameProfile": "Rambo",
+   "GameProfile2": "RamboElf2",
+   "Executable": "elf/ramboD.elf",
+   "Files": [
+    "elf/game.sh",
+    "elf/libkswapapi.so",
+    "elf/libosuser.so",
+    "elf/libposixtime.so.1",
+    "elf/ramboD.elf",
+    "elf/ramboM.elf"
+   ]
+  },
+  {
+   "Name": "Soul Calibur (USA)(SOC13 Ver.C)(1998)[Namco System 12][TP]",
+   "GameProfile": "soulclbruc",
+   "GameProfile2": "",
+   "Executable": "soulclbr.zip",
+   "Files": [
+    "soulclbr.zip"
+   ]
+  },
+  {
+   "Name": "Space Invaders Frenzy (1.79)(2017-06-11)[Raw Thrills Linux PC][TP]",
+   "GameProfile": "SpaceInvadersFrenzy",
+   "GameProfile2": "",
+   "Executable": "game_dump.exec",
+   "Files": [
+    "audbak",
+    "audits",
+    "bmfonts/3x5font.fnt",
+    "bmfonts/3x5font_0.tga",
+    "bmfonts/arial40.fnt",
+    "bmfonts/arial40_0.tga",
+    "game_dump.exec"
+   ]
+  },
+  {
+   "Name": "The House of the Dead 4 (2.0 Rev A)(2005-10-21)(JPN,USA,EXP)[Sega Lindbergh Yellow][TP]",
+   "GameProfile": "HOTD4",
+   "GameProfile2": "HOTD4ELF2",
+   "Executable": "elf/hod4Mn.elf",
+   "Files": [
+    "drv/nvidia/8769/2.6.10_mvl40/kernel/drivers/video/nvidia.ko",
+    "drv/nvidia/8769/2.6.10_mvl40a/kernel/drivers/video/nvidia.ko",
+    "drv/nvidia/8769/2.6.10_mvl40b/kernel/drivers/video/nvidia.ko",
+    "drv/nvidia/8769/bin",
+    "drv/nvidia/8769/etc",
+    "drv/nvidia/8769/include/expat.h",
+    "elf/hod4Mn.elf"
+   ]
+  },
+  {
+   "Name": "The Key of Avalon - The Wizard Master (Rev. A)(JPN)(2003-07-05)[Sega Triforce][TP]",
+   "GameProfile": "KeyOfAvalon",
+   "GameProfile2": "",
+   "Executable": "The Key of Avalon - The Wizard Master (Rev. A)(client)(JPN)(2003-07-05).iso",
+   "Files": [
+    "The Key of Avalon - The Wizard Master (Rev. A)(client)(JPN)(2003-07-05).iso",
+    "The Key of Avalon - The Wizard Master (Rev. A)(server)(JPN)(2003-07-05).iso"
+   ]
+  },
+  {
+   "Name": "The Key of Avalon - The Wizard Master (Rev. C)(JPN)(2003-07-18)[Sega Triforce][TP]",
+   "GameProfile": "KeyOfAvalon",
+   "GameProfile2": "",
+   "Executable": "The Key of Avalon - The Wizard Master (Rev. C)(client)(JPN)(2003-07-18).iso",
+   "Files": [
+    "The Key of Avalon - The Wizard Master (Rev. C)(client)(JPN)(2003-07-18).iso",
+    "The Key of Avalon - The Wizard Master (Rev. C)(server)(JPN)(2003-07-18).iso"
+   ]
+  },
+  {
+   "Name": "The King of Fighters XII (2009)[Taito Type X2][TP]",
+   "GameProfile": "KingofFightersXII",
+   "GameProfile2": "",
+   "Executable": "game.exe",
+   "Files": [
+    "d3dx9_35.dll",
+    "game.exe",
+    "Game.inf",
+    "gamediskimg.arc",
+    "GameRes.dat",
+    "launcher.exe"
+   ]
+  },
+  {
+   "Name": "The King of Fighters XIV (2017)[Taito NESiCAxLive2][TP]",
+   "GameProfile": "KingOfFightersXIV",
+   "GameProfile2": "",
+   "Executable": "game.exe",
+   "Files": [
+    "BaseProject/assets/asc.obm",
+    "BaseProject/assets/Chara/ADY/ADY.cact",
+    "BaseProject/assets/Chara/ADY/ADY.cast",
+    "BaseProject/assets/Chara/ADY/ADY.catk",
+    "BaseProject/assets/Chara/ADY/ADY.cbas",
+    "BaseProject/assets/Chara/ADY/ADY.ccmd",
+    "game.exe"
+   ]
+  },
+  {
+   "Name": "Total Vice (AAB)(Asia)(1997)[Konami M2][TP]",
+   "GameProfile": "totlvica",
+   "GameProfile2": "",
+   "Executable": "totlvice.zip",
+   "Files": [
+    "totlvice.zip",
+    "totlvice/639aab01.chd",
+    "totlvice/639eba01.chd"
+   ]
+  },
+  {
+   "Name": "Total Vice (EBA)(Europe)(1997)[Konami M2][TP]",
+   "GameProfile": "totlvice",
+   "GameProfile2": "",
+   "Executable": "totlvice.zip",
+   "Files": [
+    "totlvice.zip",
+    "totlvice/639eba01.chd"
+   ]
+  },
+  {
+   "Name": "Virtua Fighter 3 Team Battle (1996)[Sega Model 3][TP]",
+   "GameProfile": "vf3tb_m3",
+   "GameProfile2": "",
+   "Executable": "vf3.zip",
+   "Files": [
+    "segabill.zip",
+    "vf3.zip"
+   ]
+  },
+  {
+   "Name": "Virtua Fighter 5 (1.001 Ver B)(2007-05-31)(JPN)[Sega Lindbergh Yellow][TP]",
+   "GameProfile": "VF5B",
+   "GameProfile2": "VF5BElf2",
+   "Executable": "vf5",
+   "Files": [
+    ".gdbinit",
+    "basebd/2.4.20_mvl31a/kernel/drivers/bb/basebd.o",
+    "debug",
+    "drv/basebd/1.11/2.6.10_mvl40/kernel/drivers/bb/basebd.ko",
+    "drv/basebd/1.11/2.6.10_mvl40a/kernel/drivers/bb/basebd.ko",
+    "drv/basebd/1.11/2.6.10_mvl40b/kernel/drivers/bb/basebd.ko",
+    "vf5"
+   ]
+  },
+  {
+   "Name": "Escape from Monster Manor (Standalone)(0.82)(1994)(USA)[Studio 3DO-NTG][TP]",
+   "GameProfile": "EFMM",
+   "GameProfile2": "",
+   "Executable": "windows/EscapeFromMonsterManor.exe",
+   "Files": [
+    "windows/EscapeFromMonsterManor.exe"
+   ]
+  },
+  {
+   "Name": "SEGA Rally 3 (Sega Rally Revo PC Ver. 3B)(ArcadeAutist00 track mod)(2008)[Sega Europa-R][TP]",
+   "GameProfile": "SR3_3B",
+   "GameProfile2": "",
+   "Executable": "Sega Rally 3B/Rally/Rally.exe",
+   "Files": [
+    "Sega Rally 3B/Rally/Rally.exe"
+   ]
+  }
+ ]
+}

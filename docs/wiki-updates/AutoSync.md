@@ -38,6 +38,8 @@ When the preview ends, you are asked if you want to make the changes for real. A
 - **ZIP changed:** the game folder is replaced with the new one. Before that, every file in the old folder that is extra or different from the ZIP (saves, settings, ReShade files) is copied to `<your TeknoParrot folder>\TeknoParrotManager\Backups\AutoSyncReplaced\<game>_<date and time>\`.
 - **Those files cannot be saved, or no Backups folder is set up:** that game is not updated, and nothing is changed for it. You see `This game was not updated`. Other games continue. Fix the Backups folder or free some space, then run AutoSync again.
 
+If AutoSync extracts nothing new, registration is skipped and you see one short note: `Nothing new was extracted, so registration was skipped. To register games already extracted, choose Register only.` It is only a note. It is not under ACTION REQUIRED and does not send you to a saved list.
+
 <details><summary>Details</summary>
 
 - A game is unzipped again if its ZIP changed, the folder is missing, or an earlier unzip was cut short (a `.extracting` marker file stays next to the folder until the unzip is finished).
