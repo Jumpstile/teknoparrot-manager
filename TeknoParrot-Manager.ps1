@@ -43901,6 +43901,17 @@ function Save-TpmCabinetState {
     Save-TpmControlStateFile -Path (Get-TpmControlStatePath -StateRoot $StateRoot).Cabinet -Data $data
 }
 
+# Puts back the answers TPM saved before the last save (the .bak copy). The file in use becomes the new .bak copy, so doing this
+# twice undoes the undo. Nothing is changed when the older copy cannot be read. Returns $false then.
+function Restore-TpmCabinetBackup {
+    param([string]$StateRoot = '')
+    $path = (Get-TpmControlStatePath -StateRoot $StateRoot).Cabinet
+    $older = Read-TpmControlStateFile -Path ($path + '.bak')
+    if ($older.Status -ne 'Ok') { return $false }
+    Save-TpmControlStateFile -Path $path -Data $older.Data
+    return $true
+}
+
 # $true or $false when the player answered for this kind of device, $null when never asked.
 function Get-TpmCabinetDeviceAnswer {
     param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][string]$Class)
@@ -43965,6 +43976,10 @@ function Get-TpmCabinetControlList {
     }
     [void]$list.Add([pscustomobject]@{ Control = 'Test'; Label = 'the Test button' })
     [void]$list.Add([pscustomobject]@{ Control = 'Service'; Label = 'the Service button' })
+    # Exit, Pause and Menu are shared controls many cabinets do not have, and Esc is a real answer for Exit. So TPM asks first (Optional).
+    [void]$list.Add([pscustomobject]@{ Control = 'Exit'; Label = 'the Exit button'; Optional = $true })
+    [void]$list.Add([pscustomobject]@{ Control = 'Pause'; Label = 'the Pause button'; Optional = $true })
+    [void]$list.Add([pscustomobject]@{ Control = 'Menu'; Label = 'the Menu or admin button'; Optional = $true })
     return @($list.ToArray())
 }
 
@@ -44076,15 +44091,17 @@ function Invoke-TpmLearnKeys {
     $number = 0
     foreach ($control in $Controls) {
         $number++
+        $optional = ($null -ne $control.PSObject.Properties['Optional'] -and [bool]$control.Optional)
+        if ($optional -and (Read-TpmYesNo -Prompt ('  ({0} of {1}) Does your cabinet have {2}? (Y/N)' -f $number, $Controls.Count, $control.Label) -Default 'N') -ne 'Y') { [void]$skipped.Add([string]$control.Label); continue }
         while ($true) {
-            Write-TpmText -Text ('({0} of {1}) Press {2}   (Esc = skip)' -f $number, $Controls.Count, $control.Label) -Color Cyan
+            Write-TpmText -Text ('({0} of {1}) Press {2}   ({3})' -f $number, $Controls.Count, $control.Label, $(if ($optional) { 'Esc counts as a key here' } else { 'Esc = skip' })) -Color Cyan
             $press = & $ReadKey
             $key = Get-TpmPressKey -Press $press
             if ($key -eq '') {
                 if ((Read-TpmYesNo -Prompt '  Nothing was pressed. Stop learning here? (Y/N)' -Default 'N') -eq 'Y') { $stopped = $true; break }
                 continue
             }
-            if ($key -eq 'Escape') { [void]$skipped.Add([string]$control.Label); break }
+            if ($key -eq 'Escape' -and -not $optional) { [void]$skipped.Add([string]$control.Label); break }
             $owner = ''
             foreach ($name in @($learned.Keys)) { if ($learned[$name] -eq $key) { $owner = $name } }
             if ($null -ne $Known) { foreach ($name in @($Known.Keys)) { if ([string]$Known[$name] -eq $key -and -not $owner) { $owner = $name } } }
@@ -44483,6 +44500,13 @@ function Get-TpmGameKeyChoice {
         default { '' }
     }
     if (-not $id) { return [pscustomobject]@{ State = 'NotSure'; Text = 'I''m not sure' } }
+    # The cabinet has fewer players or buttons than the game lists: say so instead of "Not learned yet". Only when the player said how big the cabinet is.
+    if ($Cabinet.Players -gt 0 -and $Control.Kind -in @('Button', 'Direction', 'Start', 'Coin') -and [int]$Control.Player -gt $Cabinet.Players) {
+        return [pscustomobject]@{ State = 'NoControl'; Text = ('Your cabinet has no player {0}' -f $Control.Player) }
+    }
+    if ($Cabinet.ButtonsPerPlayer -gt 0 -and $Control.Kind -eq 'Button' -and [int]$Control.Number -gt $Cabinet.ButtonsPerPlayer) {
+        return [pscustomobject]@{ State = 'NoControl'; Text = ('Your cabinet has no button {0}' -f $Control.Number) }
+    }
     if ($Control.Kind -eq 'Direction' -and -not (Test-TpmDirectionName -Name ([string]$Control.Label))) {
         return [pscustomobject]@{ State = 'NotSure'; Text = ('I''m not sure (the game calls this "{0}")' -f $Control.Label) }
     }
@@ -44512,6 +44536,47 @@ function Get-TpmLedControlColors {
         }
     } catch { return @{} }
     return $colors
+}
+
+# Plain lines that compare what a game lists with what the player told TPM about the cabinet: enough players and buttons, and the
+# devices the game needs (trackball, spinner, wheel and pedals, light gun). It only reads. What was never answered is said to be
+# unknown, not guessed. When a needed device is missing, the way around it is the one Device Survey already gives.
+function Get-TpmCabinetFitLines {
+    param([Parameter(Mandatory)]$ProfileControls, [Parameter(Mandatory)]$Cabinet)
+    $lines = New-Object System.Collections.Generic.List[string]
+    $plural = { param([int]$n, [string]$word) if ($n -eq 1) { "$n $word" } else { "$n ${word}s" } }
+    $pad = @($ProfileControls.Controls | Where-Object { $_.Kind -in @('Button', 'Direction', 'Start', 'Coin') })
+    $needPlayers = [int](@($pad | ForEach-Object { [int]$_.Player } | Measure-Object -Maximum).Maximum)
+    $needButtons = [int](@($pad | Where-Object { $_.Kind -eq 'Button' } | ForEach-Object { [int]$_.Number } | Measure-Object -Maximum).Maximum)
+    if ($needPlayers -gt 0) {
+        if ($Cabinet.Players -le 0) {
+            [void]$lines.Add('TPM does not know how many players and buttons your cabinet has yet. Choose "Learn my arcade buttons" so it can check this game.')
+        } else {
+            $short = $false
+            if ($needPlayers -gt $Cabinet.Players) { [void]$lines.Add(('This game has controls for {0}. Your cabinet has {1}.' -f (& $plural $needPlayers 'player'), (& $plural $Cabinet.Players 'player'))); $short = $true }
+            if ($Cabinet.ButtonsPerPlayer -gt 0 -and $needButtons -gt $Cabinet.ButtonsPerPlayer) { [void]$lines.Add(('This game uses up to {0} for each player. Your cabinet has {1}, so the rest have nothing to press.' -f (& $plural $needButtons 'button'), (& $plural $Cabinet.ButtonsPerPlayer 'button'))); $short = $true }
+            if (-not $short) { [void]$lines.Add('Your cabinet has enough players and buttons for this game.') }
+        }
+    }
+    $needed = New-Object System.Collections.Generic.List[string]
+    $classFor = @{ Trackball = 'PointerOrTrackball'; Spinner = 'Spinner'; Pedal = 'Wheel' }
+    foreach ($control in @($ProfileControls.Controls)) { if ($classFor.ContainsKey([string]$control.Kind) -and -not $needed.Contains($classFor[[string]$control.Kind])) { [void]$needed.Add($classFor[[string]$control.Kind]) } }
+    if ([string]$ProfileControls.Family -eq 'driving' -and -not $needed.Contains('Wheel')) { [void]$needed.Add('Wheel') }
+    if ([string]$ProfileControls.Family -eq 'lightgun' -and -not $needed.Contains('LightGun')) { [void]$needed.Add('LightGun') }
+    $missing = New-Object System.Collections.Generic.List[string]
+    foreach ($class in $needed) {
+        $label = @(Get-TpmDeviceQuestions | Where-Object { $_.Class -eq $class })[0].Label
+        $answer = Get-TpmCabinetDeviceAnswer -State $Cabinet -Class $class
+        if ($answer -eq $false) { [void]$lines.Add(('This game needs {0}. You told TPM you do not have that.' -f $label)); [void]$missing.Add($class) }
+        elseif ($null -eq $answer) { [void]$lines.Add(('TPM does not know if you have {0} yet. Choose "Tell TPM which controls I have".' -f $label)) }
+    }
+    $has = { param($class) (Get-TpmCabinetDeviceAnswer -State $Cabinet -Class $class) -eq $true }
+    if ($missing.Contains('Wheel') -and (& $has 'XboxStylePad')) { [void]$lines.Add('Your Xbox controller can steer this game with its stick and triggers.') }
+    if ($missing.Contains('LightGun')) {
+        if (& $has 'PointerOrTrackball') { [void]$lines.Add('Without a light gun you can aim with your trackball.') }
+        elseif (& $has 'XboxStylePad') { [void]$lines.Add('Without a light gun you can aim with your Xbox controller''s right stick.') }
+    }
+    return @($lines.ToArray())
 }
 
 # Plain guide for one game: each control the game lists, what it does, which key TPM suggests, and whether the game has it
@@ -44556,6 +44621,8 @@ function Get-TpmGameControlGuide {
         default { '' }
     }
     if ($needs) { [void]$lines.Add($needs) }
+    $fit = @(Get-TpmCabinetFitLines -ProfileControls $profileControls -Cabinet $Cabinet)
+    foreach ($line in $fit) { [void]$lines.Add($line) }
     if ($rows.Count -eq 0) { [void]$lines.Add('This game does not list any controls TPM can read.') }
     elseif ($suggested -gt 0) { [void]$lines.Add(('TPM can suggest a key for {0} of the {1} controls below.' -f $suggested, $rows.Count)) }
     if ($notSure.Count -gt 0) { [void]$lines.Add('TPM is not sure what to suggest for: ' + (@($notSure | Select-Object -First 6) -join ', ') + $(if ($notSure.Count -gt 6) { (' and {0} more' -f ($notSure.Count - 6)) } else { '' }) + '.') }
@@ -44564,7 +44631,7 @@ function Get-TpmGameControlGuide {
     if ($showLight) { [void]$lines.Add('"Light" is the color your own LEDBlinky file gives that control. TPM does not change any lights.') }
     $columns = @('What it does', 'Your control', 'In the game', 'TeknoParrot name')
     if ($showLight) { $columns += 'Light' }
-    return [pscustomobject]@{ Title = ('Controls for ' + $Title); Lines = @($lines.ToArray()); Columns = $columns; Rows = @($rows.ToArray()) }
+    return [pscustomobject]@{ Title = ('Controls for ' + $Title); Lines = @($lines.ToArray()); FitLines = $fit; Columns = $columns; Rows = @($rows.ToArray()) }
 }
 
 # The cabinet as a page: one row per control TPM knows a key for.
@@ -44727,14 +44794,17 @@ function Invoke-TpmControlsScreen {
         $setNotice = Get-TpmControllerSetNotice -Cabinet $cabinet -Evidence $evidence
         if ($setNotice.Text) { Write-TpmText -Text $setNotice.Text -Color $setNotice.Color }
         if ($cabinet.FileStatus -eq 'Unreadable') { Write-TpmText -Text 'TPM could not read its saved answers. A copy is kept before anything new is saved.' -Color Yellow }
+        $backup = Read-TpmControlStateFile -Path ((Get-TpmControlStatePath -StateRoot $StateRoot).Cabinet + '.bak')
         Write-Host ''
         Write-TpmText -Text '1 = Tell TPM which controls I have' -Indent 4
         Write-TpmText -Text '2 = Learn my arcade buttons (I press each one)' -Indent 4
         Write-TpmText -Text '3 = Show or print the controls of one game' -Indent 4
         Write-TpmText -Text '4 = Tell TPM how a game played' -Indent 4
         Write-TpmText -Text '5 = Show or print my cabinet controls' -Indent 4
+        if ($backup.Status -eq 'Ok') { Write-TpmText -Text '6 = Undo my last save (put back what TPM knew before it)' -Indent 4 }
         Write-TpmText -Text 'B = Back' -Indent 4
-        switch (Read-TpmChoice -Prompt '  Choose 1, 2, 3, 4, 5 or B' -Choices @('1', '2', '3', '4', '5', 'B') -Default 'B') {
+        $picked = $(if ($backup.Status -eq 'Ok') { Read-TpmChoice -Prompt '  Choose 1, 2, 3, 4, 5, 6 or B' -Choices @('1', '2', '3', '4', '5', '6', 'B') -Default 'B' } else { Read-TpmChoice -Prompt '  Choose 1, 2, 3, 4, 5 or B' -Choices @('1', '2', '3', '4', '5', 'B') -Default 'B' })
+        switch ($picked) {
             '1' { Invoke-DeviceSurvey -StateRoot $StateRoot }
             '2' { Invoke-TpmButtonLearning -StateRoot $StateRoot; $evidence = & $look }
             '3' {
@@ -44742,11 +44812,27 @@ function Invoke-TpmControlsScreen {
                 if ($game) {
                     $verification = Get-TpmControlVerificationState -Code $game.Code -Doc $game.Doc -StateRoot $StateRoot
                     $colors = Get-TpmLedControlColors -Root ([string](Get-Variable -Name ledBlinkyRoot -Scope Script -ValueOnly -ErrorAction SilentlyContinue)) -Code $game.Code
-                    Invoke-TpmGuideOffer -Guide (Get-TpmGameControlGuide -Doc $game.Doc -Title $game.Title -Cabinet $cabinet -Verification $verification -LedColors $colors) -FileName ($game.Code + '-controls.html')
+                    $guide = Get-TpmGameControlGuide -Doc $game.Doc -Title $game.Title -Cabinet $cabinet -Verification $verification -LedColors $colors
+                    Write-Log ('Controls: {0}: cabinet fit: {1}' -f $game.Code, $(if (@($guide.FitLines).Count -gt 0) { @($guide.FitLines) -join ' ' } else { 'nothing to compare.' }))
+                    Invoke-TpmGuideOffer -Guide $guide -FileName ($game.Code + '-controls.html')
                 }
             }
             '4' { Invoke-TpmGameCheckScreen -UserProfilesDir $UserProfilesDir -StateRoot $StateRoot }
             '5' { Invoke-TpmGuideOffer -Guide (Get-TpmCabinetGuide -Cabinet $cabinet) -FileName 'my-cabinet-controls.html' }
+            '6' {
+                $before = 0
+                if ($backup.Status -eq 'Ok' -and $null -ne $backup.Data.PSObject.Properties['Keys'] -and $null -ne $backup.Data.Keys) { $before = @($backup.Data.Keys.PSObject.Properties).Count }
+                Write-TpmText -Text ('Before your last save TPM knew the key for {0} controls. Now it knows {1}.' -f $before, @($cabinet.Keys.PSObject.Properties).Count) -Color DarkCyan
+                if ((Read-TpmYesNo -Prompt '  Put the older answers back? Your current answers are kept as a copy, so this can be undone too. (Y/N)' -Default 'N') -eq 'Y') {
+                    try {
+                        if (Restore-TpmCabinetBackup -StateRoot $StateRoot) { Write-Log 'Controls: the player put back the answers saved before the last save.'; Write-TpmText -Text 'Done. TPM has its older answers again.' -Color Green }
+                        else { Write-TpmText -Text 'The older answers could not be read, so nothing changed.' -Color Yellow }
+                    } catch {
+                        Write-Log ('Controls: the older answers could not be put back: {0}' -f $_.Exception.Message)
+                        Write-TpmText -Text 'The older answers could not be put back, so nothing changed.' -Color Yellow
+                    }
+                }
+            }
             default { return }
         }
     }
