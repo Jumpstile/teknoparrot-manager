@@ -511,3 +511,89 @@ Describe 'Key suggestions and light colors in a game guide' {
         (Get-TpmGameControlGuide -Doc $doc -Title 'Test Game' -Cabinet $cabinet).Columns | Should -Not -Contain 'Light'
     }
 }
+
+Describe 'Does the cabinet fit the game, and shared controls (issue #267)' {
+    BeforeEach { Mock Write-Host { }; Mock Write-Log { } }
+
+    BeforeAll {
+        function script:New-FitProfile {
+            param([string]$Name, [string]$Buttons = '', [switch]$Wheel, [switch]$Gun)
+            $dir = New-Folder
+            $extra = $(if ($Wheel) { '<JoystickButtons><ButtonName>Steering</ButtonName><InputMapping>Analog0</InputMapping><AnalogType>Wheel</AnalogType></JoystickButtons>' } elseif ($Gun) { '<JoystickButtons><ButtonName>Gun X</ButtonName><InputMapping>Analog0</InputMapping><AnalogType>AnalogJoystick</AnalogType></JoystickButtons>' } else { '' })
+            $xml = '<GameProfile><GameProfileRevision>1</GameProfileRevision><JoystickButtons>' + $Buttons + $extra + '</JoystickButtons></GameProfile>'
+            [System.IO.File]::WriteAllText((Join-Path $dir ($Name + '.xml')), $xml, (New-Object System.Text.UTF8Encoding $false))
+            return (Read-Xml (Join-Path $dir ($Name + '.xml')))
+        }
+        function script:New-FitButton { param([string]$Mapping, [string]$Label) return ('<JoystickButtons><ButtonName>{0}</ButtonName><InputMapping>{1}</InputMapping><AnalogType>None</AnalogType></JoystickButtons>' -f $Label, $Mapping) }
+    }
+
+    It 'says which players and buttons the game uses that the cabinet does not have, and keeps that out of "Not learned yet"' {
+        $buttons = (New-FitButton 'P1Button1' 'Punch') + (New-FitButton 'P1Button3' 'Kick') + (New-FitButton 'P2Button1' 'Punch 2')
+        $doc = New-FitProfile -Name 'fight' -Buttons $buttons
+        $cabinet = Read-TpmCabinetState -StateRoot (New-Folder)
+        Set-TpmCabinetKeys -State $cabinet -Keys @{ P1Button1 = @{ Key = 'Left Ctrl'; Source = 'PressedByPlayer' } } -Players 1 -ButtonsPerPlayer 2
+        $guide = Get-TpmGameControlGuide -Doc $doc -Title 'Fight' -Cabinet $cabinet
+        ($guide.FitLines -join ' ') | Should -Match 'controls for 2 players. Your cabinet has 1 player'
+        ($guide.FitLines -join ' ') | Should -Match 'up to 3 buttons for each player. Your cabinet has 2 buttons'
+        @($guide.Rows | Where-Object { $_.Cells[3] -eq 'P1Button3' })[0].Cells[1] | Should -Be 'Your cabinet has no button 3'
+        @($guide.Rows | Where-Object { $_.Cells[3] -eq 'P2Button1' })[0].Cells[1] | Should -Be 'Your cabinet has no player 2'
+        @($guide.Rows | Where-Object { $_.Cells[3] -eq 'P1Button1' })[0].Cells[1] | Should -Be 'Key: Left Ctrl'
+    }
+
+    It 'says the cabinet is big enough, and says it does not know when the player never gave the size' {
+        $doc = New-FitProfile -Name 'fight' -Buttons ((New-FitButton 'P1Button1' 'Punch') + (New-FitButton 'P2Button2' 'Kick'))
+        $cabinet = Read-TpmCabinetState -StateRoot (New-Folder)
+        (Get-TpmGameControlGuide -Doc $doc -Title 'Fight' -Cabinet $cabinet).FitLines -join ' ' | Should -Match 'does not know how many players and buttons'
+        Set-TpmCabinetKeys -State $cabinet -Keys @{} -Players 2 -ButtonsPerPlayer 6
+        (Get-TpmGameControlGuide -Doc $doc -Title 'Fight' -Cabinet $cabinet).FitLines -join ' ' | Should -Match 'enough players and buttons'
+    }
+
+    It 'names a device the game needs and the player does not have, offers the way around it, and does not guess when never asked' {
+        $racer = New-FitProfile -Name 'race' -Buttons (New-FitButton 'P1Button1' 'Shift') -Wheel
+        $cabinet = Read-TpmCabinetState -StateRoot (New-Folder)
+        (Get-TpmCabinetFitLines -ProfileControls (Get-TpmLedProfileControls -Doc $racer) -Cabinet $cabinet) -join ' ' | Should -Match 'does not know if you have a steering wheel and pedals'
+        Set-TpmCabinetDevice -State $cabinet -Class 'Wheel' -Has $false
+        Set-TpmCabinetDevice -State $cabinet -Class 'XboxStylePad' -Has $true
+        $text = (Get-TpmCabinetFitLines -ProfileControls (Get-TpmLedProfileControls -Doc $racer) -Cabinet $cabinet) -join ' '
+        $text | Should -Match 'needs a steering wheel and pedals. You told TPM you do not have that'
+        $text | Should -Match 'Xbox controller can steer'
+        $shooter = New-FitProfile -Name 'shoot' -Buttons (New-FitButton 'P1Button1' 'Trigger') -Gun
+        Set-TpmCabinetDevice -State $cabinet -Class 'LightGun' -Has $false
+        Set-TpmCabinetDevice -State $cabinet -Class 'PointerOrTrackball' -Has $true
+        (Get-TpmCabinetFitLines -ProfileControls (Get-TpmLedProfileControls -Doc $shooter) -Cabinet $cabinet) -join ' ' | Should -Match 'aim with your trackball'
+    }
+
+    It 'asks first about Exit, Pause and Menu, accepts Esc as the Exit key, and does not count an unanswered one as learned' {
+        $controls = @(Get-TpmCabinetControlList -Players 1 -Buttons 1 | Where-Object { $_.Control -in @('Exit', 'Pause', 'Menu') })
+        $controls.Count | Should -Be 3
+        $script:asked = New-Object System.Collections.Generic.List[string]
+        Mock Read-TpmYesNo { [void]$script:asked.Add($Prompt); if ($Prompt -match 'Exit|Menu') { 'Y' } else { 'N' } }
+        Mock Write-TpmText { }
+        $presses = New-Object System.Collections.Generic.Queue[string]
+        foreach ($k in @('Escape', 'Tab')) { $presses.Enqueue($k) }
+        $result = Invoke-TpmLearnKeys -Controls $controls -ReadKey { $presses.Dequeue() }
+        $result.Keys['Exit'] | Should -Be 'Escape'
+        $result.Keys['Menu'] | Should -Be 'Tab'
+        $result.Keys.Contains('Pause') | Should -BeFalse
+        $result.Skipped | Should -Contain 'the Pause button'
+        $script:asked.Count | Should -Be 3
+    }
+
+    It 'puts the older saved answers back with one step, keeps the current ones as a copy, and changes nothing when there is no older copy' {
+        $root = New-Folder
+        Restore-TpmCabinetBackup -StateRoot $root | Should -BeFalse
+        Test-Path -LiteralPath (Get-TpmControlStatePath -StateRoot $root).Cabinet | Should -BeFalse
+        $state = Read-TpmCabinetState -StateRoot $root
+        Set-TpmCabinetKeys -State $state -Keys @{ Coin1 = @{ Key = '5'; Source = 'PressedByPlayer' } } -Players 2 -ButtonsPerPlayer 6
+        Save-TpmCabinetState -State $state -StateRoot $root
+        Set-TpmCabinetKeys -State $state -Keys @{ Coin1 = @{ Key = '9'; Source = 'PressedByPlayer' } }
+        Save-TpmCabinetState -State $state -StateRoot $root
+        (Get-TpmCabinetKey -State (Read-TpmCabinetState -StateRoot $root) -Control 'Coin1') | Should -Be '9'
+        Restore-TpmCabinetBackup -StateRoot $root | Should -BeTrue
+        $back = Read-TpmCabinetState -StateRoot $root
+        (Get-TpmCabinetKey -State $back -Control 'Coin1') | Should -Be '5'
+        $back.Players | Should -Be 2
+        Restore-TpmCabinetBackup -StateRoot $root | Should -BeTrue
+        (Get-TpmCabinetKey -State (Read-TpmCabinetState -StateRoot $root) -Control 'Coin1') | Should -Be '9'
+    }
+}
