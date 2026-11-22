@@ -153,7 +153,7 @@ body:
     id: logs-and-screenshots
     attributes:
       label: Logs, diagnostics, or screenshots
-      description: Optional. Before pasting or attaching anything, remove passwords, tokens, API keys, license keys, personal data, private URLs or paths, IP addresses, serial numbers, usernames, and machine names that are not needed. Review screenshots for the same information. Do not upload complete configuration files unless you have checked them. If none are available, say "None".
+      description: Optional, but very helpful. To attach a file, drag it into this box (or click the box and paste it). WAIT until the file name turns into a link. While it says "Uploading" the file is not attached yet, and pressing Submit too early loses it. Also paste the 10 or so log lines around the problem as plain text, so we can still read them if the file does not attach. Before pasting or attaching anything, remove passwords, tokens, API keys, license keys, personal data, private URLs or paths, IP addresses, serial numbers, usernames, and machine names that are not needed. Review screenshots for the same information. Do not upload complete configuration files unless you have checked them. If none are available, say "None".
       placeholder: |
         Paste a redacted excerpt or drag in a redacted file or screenshot:
 
