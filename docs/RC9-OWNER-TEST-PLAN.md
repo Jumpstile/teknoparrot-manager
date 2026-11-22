@@ -179,7 +179,7 @@ You need: an arcade keyboard encoder with buttons, in a normal console window (n
 95. **[real controller]** Answer the number of players and buttons. If LEDBlinky is installed, you should be offered its key list first. Say N once to press them all yourself.
 96. **[real controller]** TeknoParrot Manager asks "Press Player 1 Coin", "Press Player 1 Start" and so on. Press each control once. After each, you should see "Got it" and the key's name. Check the names for Ctrl, Alt and Shift buttons: Left Ctrl, Left Alt, Left Shift. This is the part unit tests cannot prove.
 97. **[real controller]** Press the same control twice for two questions. The second time it must say that key is already used, and ask again.
-98. **[real controller]** Press Esc for a control your cabinet does not have. It must be skipped. Wait 30 seconds without pressing: it must ask if you want to stop, and keep what you pressed so far.
+98. **[real controller]** Press Esc for an ordinary control your cabinet does not have (not Exit, Pause or Menu: Esc counts as a key for those, see step 136). It must be skipped. Wait 30 seconds without pressing: it must ask if you want to stop, and keep what you pressed so far.
 99. **[real controller]** At the end answer Y to "Save this?". Open `cabinet.json`: every key you pressed is there. Run again and answer N to Save: the file must not change.
 100. **[real controller]** If LEDBlinky is installed: run again, accept its key list (Y), and check the keys it proposed match what your buttons really send (press a few). Say how many were right.
 
