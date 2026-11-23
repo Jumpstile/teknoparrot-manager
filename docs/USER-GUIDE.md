@@ -284,7 +284,7 @@ The current page does not specify a .NET version or minimum Windows version.
 - [Safety, Backup and Log](#safety-backup-and-log)
 - [Registration Evidence Ledger](#registration-evidence-ledger)
 - [Resetting](#resetting)
-- [Uninstalling / Removing the Manager](#uninstalling--removing-the-manager)
+- [Uninstalling / Removing TPM](#uninstalling--removing-tpm)
 - [Troubleshooting](#troubleshooting)
 - [What It Does Not Do](#what-it-does-not-do)
 - [Files Reference](#files-reference)
@@ -1060,7 +1060,7 @@ After new games are registered, you are asked once which country they should sta
 
 ### Every TeknoParrot game
 
-TeknoParrot Manager is checked against every game profile in TeknoParrot 1.0.0.2325 (2,541 profiles), and against the Eggman game list and guide. [docs/GAME-SUPPORT.md](GAME-SUPPORT.md) lists every game and what the Manager does for it. These cases work with no extra steps:
+TeknoParrot Manager is checked against every game profile in TeknoParrot 1.0.0.2325 (2,541 profiles), and against the Eggman game list and guide. [docs/GAME-SUPPORT.md](GAME-SUPPORT.md) lists every game and what TPM does for it. These cases work with no extra steps:
 
 - **Two versions of a game.** Each version is registered. If TeknoParrot has only one profile for both, the second one is reported as a duplicate. It is never dropped without a message.
 - **A Lindbergh game.** TeknoParrot has retired its Lindbergh profile and replaced it with a newer ElfLdr2 profile. The Eggman list names both, and both are registered. If the ElfLdr2 profile needs a game file that is not in the folder, it is left out and the log says why.
@@ -1072,7 +1072,7 @@ TeknoParrot Manager is checked against every game profile in TeknoParrot 1.0.0.2
 - The registration was run on a fake collection with one folder for each of the 1,585 games in the Eggman list of 2026-11-20 (empty files, the real profiles, the real list). 1,565 games got every profile the list names. 16 share one profile with other versions (one is registered, the rest are reported as duplicates). 4 name a second profile that is not written: one Lindbergh game whose ElfLdr2 profile needs a file the folder does not have, and three games (Raiden III, Raiden IV, Densha de GO) whose second profile is not a retired one.
 - A game whose profile names a child ZIP and a parent ZIP (`ddr2ml.zip;ddr2m.zip`) is registered when the list names the parent ZIP, which is the only ZIP in its folder.
 - The other revisions of a merged ROM set (CPS, Neo Geo MVS, System 32 and similar; about 740 profiles) are chosen with the Game Revision setting inside TeknoParrot, so the one registered profile covers them.
-- The file types come from the profiles, so a new game with a new kind of file needs no new Manager version.
+- The file types come from the profiles, so a new game with a new kind of file needs no new TPM version.
 
 **Game sets and System 11 games.** Some games are made of two ZIPs: a child game and the parent ZIP it needs. A game like that is registered only when both ZIPs are in the same folder. A folder that holds only the parent ZIP does not register the child game, unless the Eggman list names that parent ZIP for the game. System 11 games also need a disc image (`*.chd`). TeknoParrot Manager picks it for you when there is exactly one. When there are several, it never guesses.
 
@@ -2665,7 +2665,7 @@ What each choice does:
 - `A` writes directly into LaunchBox's own `Data\` files.
 - `G` fills in game details and makes playlists (backed up). It fills in the release year and developer where LaunchBox has nothing yet, using LaunchBox's own game list when it is sure of the game. It makes playlists for each arcade hardware family, plus "Light gun games" and "Driving games". A game that cannot start yet (game file missing, firmware missing, or BepInEx needed) gets a "Needs setup" note that says what to do, and goes into a "Needs setup" playlist; the note goes away by itself once the problem is fixed. Your own playlists, details and notes are never touched. Restore puts everything back.
 - `V` groups regions and versions of one game into one LaunchBox game with a version picker (backed up). Two entries are grouped only when they are certainly the same game (the same ID in LaunchBox's game list). The default version follows the region you chose in Region setup. You see the groups first and approve before anything is saved. Restore puts the separate games back.
-- `S` keeps LaunchBox in step with your TeknoParrot games (backed up). It only looks at games the Manager added. A game you removed from TeknoParrot is removed from LaunchBox, a game whose TeknoParrot folder moved gets its new location, and an old Manager name (such as the profile name) is replaced by the clean game title. A game whose game file is only missing (for example an unplugged drive) is never removed. A name you typed yourself, or a game that already has an ID from LaunchBox's game list, is never renamed. If most games would be removed at once, nothing is removed, because that looks like the wrong folder. You see everything first and approve before anything is saved. Restore undoes it.
+- `S` keeps LaunchBox in step with your TeknoParrot games (backed up). It only looks at games TPM added. A game you removed from TeknoParrot is removed from LaunchBox, a game whose TeknoParrot folder moved gets its new location, and an old TPM name (such as the profile name) is replaced by the clean game title. A game whose game file is only missing (for example an unplugged drive) is never removed. A name you typed yourself, or a game that already has an ID from LaunchBox's game list, is never renamed. If most games would be removed at once, nothing is removed, because that looks like the wrong folder. You see everything first and approve before anything is saved. Restore undoes it.
 - `L` links games for art and details (backed up). It looks each game up in LaunchBox's own game list on your PC. It shows every old name, new name and ID first, and you approve before anything is saved. Names you typed yourself are never replaced. Nothing is downloaded.
 - `C` fills in players and controllers for Big Box (backed up). It fills empty boxes only, from each game's TeknoParrot controls. You see every game and what it would get first, and you approve before anything is saved. Boxes you or LaunchBox already filled in are never changed. It offers to undo at once, and Restore puts everything back.
 - `F` creates the reference file without a LaunchBox write.
@@ -2743,9 +2743,9 @@ Optional: add logos or box art to LaunchBox from a folder you pick.
 
 ### Lighting for your arcade buttons (LEDBlinky)
 
-If you use LEDBlinky, the Manager can add lighting info for your games. This step comes after the LaunchBox step in a full run (for example, AutoSync with **Check all games**). It is not shown after **New game only**, in Preview mode or in Unattended mode. You see `Optional: lighting for your arcade buttons.`
+If you use LEDBlinky, TPM can add lighting info for your games. This step comes after the LaunchBox step in a full run (for example, AutoSync with **Check all games**). It is not shown after **New game only**, in Preview mode or in Unattended mode. You see `Optional: lighting for your arcade buttons.`
 
-The Manager looks for LEDBlinky on your drives and in Program Files. If it cannot find it, it asks `Do you use LEDBlinky? Show me where it is.` Choose `F` to show the LEDBlinky folder, or `S` to skip. It remembers the folder. When it finds LEDBlinky, you see:
+TPM looks for LEDBlinky on your drives and in Program Files. If it cannot find it, it asks `Do you use LEDBlinky? Show me where it is.` Choose `F` to show the LEDBlinky folder, or `S` to skip. It remembers the folder. When it finds LEDBlinky, you see:
 
 ```
 LEDBlinky was found on this PC.
@@ -2757,7 +2757,7 @@ LEDBlinky was found on this PC.
 [B] Skip this step.
 ```
 
-A game gets only the controls it uses that your cabinet has. You see a preview first, a saved copy is made, and you can undo the add with `U`. Only entries the Manager added are ever removed.
+A game gets only the controls it uses that your cabinet has. You see a preview first, a saved copy is made, and you can undo the add with `U`. Only entries TPM added are ever removed.
 
 ### Restoring LaunchBox files
 
@@ -2969,7 +2969,7 @@ Your answer is saved and never asked again.
 2. Answer Y to the RetroBat question.
 3. Make safe copies of your current settings file, your extraction state and your game backups.
 4. Look over your existing folder names and registration paths.
-5. Run the manager again. Next: games are extracted again with `.teknoparrot` folder names.
+5. Run TPM again. Next: games are extracted again with `.teknoparrot` folder names.
 
 Old folders are never deleted automatically.
 Delete them yourself once the new ones are confirmed working.
@@ -3089,7 +3089,7 @@ Leave any key empty or leave it out.
 ### Reference game Input API mismatches
 
 A "reference game" is a game that already has enough controls bound to copy from.
-The manager normally never changes a reference game.
+TPM normally never changes a reference game.
 That means it leaves its bindings alone, and its Input API too.
 The Input API is the way the game reads your controller.
 
@@ -3478,7 +3478,7 @@ Support packages read it.
 
 1. Keep the file exactly as it is. Do not edit, trim or delete it.
 2. Create a support package.
-3. Ask for help before you run the manager again.
+3. Ask for help before you run TPM again.
 
 TeknoParrot Manager starts no extraction or registration when the ledger is unusable.
 
@@ -3524,15 +3524,15 @@ The version label (for example `v1.0`) is never used as a package hash or a comm
 
 ---
 
-## Uninstalling / Removing the Manager
+## Uninstalling / Removing TPM
 
-Most of the manager's own files (settings, logs, reports, assets and backups) are in the `TeknoParrotManager\` folder inside your TeknoParrot folder.
+Most of TPM's own files (settings, logs, reports, assets and backups) are in the `TeknoParrotManager\` folder inside your TeknoParrot folder.
 A few stay next to the script: `TeknoParrot-Manager.overrides.json`, `TeknoParrot-Manager-crosshairs.json`, and the `Crosshairs\` and `BepInExCache\` folders.
 It also adds files to TeknoParrot's own `UserProfiles\` folder.
 Mode 11 may install PostgreSQL as an optional local extra.
 TeknoParrot Manager has no menu action to uninstall PostgreSQL.
 
-**To remove the manager entirely:**
+**To remove TPM entirely:**
 
 1. If you want to undo all changes, restore your UserProfiles to their state before the script, using mode 14 (Restore backup). Or leave them as they are if they work correctly.
 2. Only if you really want PostgreSQL gone: use the normal Windows installed-apps list, and only after you keep any database backups you need. This is an advanced system-maintenance job, not part of the beginner workflow.
@@ -3688,7 +3688,7 @@ This is expected, and the drive is skipped.
 
 **Postgres connection fails / "password authentication failed".**
 The database password is saved encrypted in `config.json`.
-If it was changed outside the manager (via pgAdmin or similar), mode 11 explains the problem.
+If it was changed outside TPM (via pgAdmin or similar), mode 11 explains the problem.
 
 It asks you to type the password PostgreSQL already has (`[F]`). TeknoParrot Manager checks it and saves it.
 If nobody knows the password, choose `[X]`. It does not reset anything. It explains why there is no automatic reset. Press `D` to see the steps for resetting it yourself.

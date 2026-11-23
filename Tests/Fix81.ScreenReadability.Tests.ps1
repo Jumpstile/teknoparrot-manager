@@ -319,6 +319,19 @@ Describe 'FIX81 required patches: plain reasons and grouped results (item 5)' {
         Should -Invoke Resolve-TpmRequiredPatchSourceRoot -Times 2 -Exactly
     }
 
+    It 'asks for the ZIP folder once and reuses it for a different patch ZIP found in the same folder' {
+        $folder = Join-Path ([IO.Path]::GetTempPath()) ('tpm-zipfolder-' + [guid]::NewGuid().ToString('N'))
+        [void][IO.Directory]::CreateDirectory($folder)
+        try {
+            foreach ($zipName in @('one.zip', 'two.zip')) { [IO.File]::WriteAllText((Join-Path $folder $zipName), 'x') }
+            Mock Read-PathWithBrowse { return $folder }
+            $cache = @{}
+            [void](Get-TpmRequiredPatchSourceRootOnce -Cache $cache -Entry ([pscustomobject]@{ SourceRole = 'UserSelected'; SourceSet = 'one.zip' }))
+            [void](Get-TpmRequiredPatchSourceRootOnce -Cache $cache -Entry ([pscustomobject]@{ SourceRole = 'UserSelected'; SourceSet = 'two.zip' }))
+            Should -Invoke Read-PathWithBrowse -Times 1 -Exactly
+        } finally { Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
     It 'lists at most five games and counts the rest' {
         # Mutation: remove the limit -> a long list of games fills the screen.
         (Format-TpmNameList -Names @('A', 'B', 'C', 'D', 'E', 'F', 'G')) | Should -BeExactly 'A, B, C, D, E and 2 more'
@@ -540,6 +553,65 @@ Describe 'FIX81 required patch menu end to end (mocked, one folder question per 
         $lines | Should -Contain '  Skipped: Alpha Game. You did not choose a game folder, so nothing was changed.'
         $lines | Should -Contain '  Nothing was changed.'
         Should -Invoke New-TpmRequiredPatchPayloadStage -Times 0 -Exactly
+    }
+
+    It 'says plainly that nothing can be undone, and shows no game list, when no patch has a saved undo copy' {
+        # Mutation: list every game in Undo again -> a "Pick your game" list and a folder question appear even though nothing was installed.
+        Install-F81Mocks -Width 100 -Answers @('U', '')
+        Invoke-TpmRequiredPatchMenu -TpRoot $script:F81Root -UserProfilesDir $script:F81Root -ManagerRoot $script:F81Root -ProgramRoot $script:F81Root
+        $lines = @(Get-F81Lines)
+        ($lines -join "`n") | Should -Match 'There is nothing to undo\.'
+        ($lines -join "`n") | Should -Not -Match 'Pick your game'
+        Should -Invoke Read-PathWithBrowse -Times 0 -Exactly
+        $script:F81Prompts[1] | Should -Be '  Press Enter to go back'
+    }
+
+    It 'lists only the games that still have an undo copy, and counts only their patches' {
+        # Mutation: ignore the saved copies, or count a copy already put back -> Beta Game or the second Alpha patch shows up.
+        $recovery = Join-Path $script:TpmOwnedLayout.Backups 'GamePatches'
+        foreach ($copy in @(@{ Patch = 'alpha-main-one'; State = 'Applied' }, @{ Patch = 'beta-main-one'; State = 'Restored' })) {
+            $folder = Join-Path $recovery ([guid]::NewGuid().ToString('N'))
+            [void][IO.Directory]::CreateDirectory($folder)
+            $receipt = [ordered]@{ PatchId = $copy.Patch; ProfileId = 'p'; GameRoot = $script:F81GameDir; State = $copy.State }
+            [IO.File]::WriteAllText((Join-Path $folder 'receipt.json'), ($receipt | ConvertTo-Json))
+        }
+        Install-F81Mocks -Width 100 -Answers @('U', '7')
+        Invoke-TpmRequiredPatchMenu -TpRoot $script:F81Root -UserProfilesDir $script:F81Root -ManagerRoot $script:F81Root -ProgramRoot $script:F81Root
+        $lines = @(Get-F81Lines)
+        $lines | Should -Contain '  1) Alpha Game (1 patch)'
+        (($lines -join "`n") -match 'Beta Game') | Should -BeFalse
+    }
+
+    It 'goes on to the game folder question when exactly one patch can be undone' {
+        # Mutation: let a one-patch list collapse to a bare object -> .Count or indexing fails once the single game is picked.
+        $folder = Join-Path (Join-Path $script:TpmOwnedLayout.Backups 'GamePatches') ([guid]::NewGuid().ToString('N'))
+        [void][IO.Directory]::CreateDirectory($folder)
+        [IO.File]::WriteAllText((Join-Path $folder 'receipt.json'), '{"PatchId":"beta-main-one","ProfileId":"p","GameRoot":"x","State":"Applied"}')
+        Install-F81Mocks -Width 100 -Answers @('U', '1', '')
+        { Invoke-TpmRequiredPatchMenu -TpRoot $script:F81Root -UserProfilesDir $script:F81Root -ManagerRoot $script:F81Root -ProgramRoot $script:F81Root } | Should -Not -Throw
+        Should -Invoke Read-PathWithBrowse -Times 1 -Exactly
+    }
+
+    It 'keeps a game in the undo list for an applied, interrupted or unmarked copy, and drops finished or unreadable ones' {
+        # Mutation: hide a copy with no recorded state, or keep a Restored/RolledBack one -> a game that can still be undone vanishes, or an empty game is offered.
+        $recovery = Join-Path $script:TpmOwnedLayout.Backups 'GamePatches'
+        $copies = @(
+            @{ Patch = 'p-applied'; Json = '{"PatchId":"p-applied","ProfileId":"p","GameRoot":"x","State":"Applied"}' }
+            @{ Patch = 'p-prepared'; Json = '{"PatchId":"p-prepared","ProfileId":"p","GameRoot":"x","State":"Prepared"}' }
+            @{ Patch = 'p-unmarked'; Json = '{"PatchId":"p-unmarked","ProfileId":"p","GameRoot":"x"}' }
+            @{ Patch = 'p-restored'; Json = '{"PatchId":"p-restored","ProfileId":"p","GameRoot":"x","State":"Restored"}' }
+            @{ Patch = 'p-rolledback'; Json = '{"PatchId":"p-rolledback","ProfileId":"p","GameRoot":"x","State":"RolledBack"}' }
+            @{ Patch = 'p-noprofile'; Json = '{"PatchId":"p-noprofile","GameRoot":"x","State":"Applied"}' }
+            @{ Patch = 'p-broken'; Json = '{not json' }
+        )
+        foreach ($copy in $copies) {
+            $folder = Join-Path $recovery ([guid]::NewGuid().ToString('N'))
+            [void][IO.Directory]::CreateDirectory($folder)
+            [IO.File]::WriteAllText((Join-Path $folder 'receipt.json'), $copy.Json)
+        }
+        $ids = @(Get-TpmUndoablePatchIds -RecoveryRoot $recovery | Sort-Object)
+        ($ids -join ',') | Should -Be 'p-applied,p-prepared,p-unmarked'
+        @(Get-TpmUndoablePatchIds -RecoveryRoot (Join-Path $script:F81Root 'no-such-folder')).Count | Should -Be 0
     }
 }
 

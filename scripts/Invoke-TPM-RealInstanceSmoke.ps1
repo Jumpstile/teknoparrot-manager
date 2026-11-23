@@ -853,9 +853,9 @@ function Test-TPMUnattendedRootMatch {
 }
 
 # Read-only parse of the real PCSX2.ini cursor path format ([USB1]/[USB2] sections, guncon2_cursor_path key; see
-# contracts\pcsx2x6\evidence.md, ev-usb-ini-contract). This script never loads the manager, so it keeps its own small
+# contracts\pcsx2x6\evidence.md, ev-usb-ini-contract). This script never loads TPM, so it keeps its own small
 # reader instead of calling Get-Pcsx2CursorPathReport; the Pester tests pin the same results.
-# The data folder is the same one the manager uses: the name in portable.txt, else TeknoParrot.
+# The data folder is the same one TPM uses: the name in portable.txt, else TeknoParrot.
 function Get-TPMPcsx2DataRoot {
     param([Parameter(Mandatory = $true)][string]$Pcsx2Dir)
     $portableFile = Join-Path $Pcsx2Dir 'portable.txt'
@@ -867,7 +867,7 @@ function Get-TPMPcsx2DataRoot {
     return (Join-Path $Pcsx2Dir $name)
 }
 
-# PCSX2 owns the cursor keys (the manager only reports them). A missing key is a normal fresh install and passes;
+# PCSX2 owns the cursor keys (TPM only reports them). A missing key is a normal fresh install and passes;
 # a key that is set must point at the canonical file. '/' and relative values are resolved against the data folder first.
 function Test-TPMPcsx2CursorPathsCanonical {
     param([Parameter(Mandatory = $true)][string]$DataRoot, [string[]]$CursorPaths, [string[]]$CanonicalPaths)

@@ -17,7 +17,7 @@ BeforeAll {
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:F126ProductPath, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { throw 'FIX126 tests could not parse the production script.' }
     $script:F126FunctionText = @{}
-    foreach ($name in @('Write-PostgresReinitializeSuccess', 'Write-PostgresReinitializeDetails', 'Write-PostgresKeptDatabaseBackupNotice', 'Get-TpmTransactionField', 'Add-TpmDetailLine', 'Write-TpmPostgresSetupFailure', 'Get-PostgresSetupFailureReasonLines', 'Test-TpmTransactionUserSafeSummary', 'Get-TpmFriendlyProgressLabel', 'Write-TpmCompactExtractionProgress')) {
+    foreach ($name in @('Write-PostgresReinitializeSuccess', 'Write-PostgresReinitializeDetails', 'Write-PostgresKeptDatabaseBackupNotice', 'Get-TpmTransactionField', 'Add-TpmDetailLine', 'Write-TpmPostgresSetupFailure', 'Get-PostgresSetupFailureReasonLines', 'Get-PostgresNotReadyNextStep', 'Test-TpmTransactionUserSafeSummary', 'Get-TpmFriendlyProgressLabel', 'Write-TpmCompactExtractionProgress')) {
         $found = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq $name }, $true))
         if ($found.Count -ne 1) { throw ('FIX126 tests expected one {0}, found {1}.' -f $name, $found.Count) }
         $script:F126FunctionText[$name] = $found[0].Extent.Text

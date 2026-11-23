@@ -1,6 +1,6 @@
 {
   "Schema": 1,
-  "Purpose": "One decision per guide game for the loaders that run a program (not a ROM set): what the Manager does for the game, and why. Read by the coverage tool. The Manager itself does not read this file.",
+  "Purpose": "One decision per guide game for the loaders that run a program (not a ROM set): what TPM does for the game, and why. Read by the coverage tool. TPM itself does not read this file.",
   "Source": {
     "GuidePage": "https://eggmansworld.github.io/TeknoParrot/",
     "GuideLatestEntryUpdate": "2026-11-09",
@@ -40,11 +40,11 @@
     "Versions": "The guide has nested versions only under the excluded loaders, so no row here has a parent."
   },
   "Dispositions": {
-    "not-supported": "The guide marks the game unsupported, broken or no longer used. Listed with the reason; the Manager cannot make it work.",
+    "not-supported": "The guide marks the game unsupported, broken or no longer used. Listed with the reason; TPM cannot make it work.",
     "tpm-applies-patch": "A reviewed patch is in scripts/TpmRequiredPatchRecipes.json. Applied only on an exact profile and hash match, with a backup and a receipt.",
-    "tpm-checks-files": "The Manager checks the emulator startup files and copies them only from the player's own archive (PCSX2x6, Chihiro/CxbxR, RPCS3, Play!).",
+    "tpm-checks-files": "TPM checks the emulator startup files and copies them only from the player's own archive (PCSX2x6, Chihiro/CxbxR, RPCS3, Play!).",
     "needs-own-archive": "The guide names extra archives the player must own. Game Notes lists them. Never downloaded.",
-    "tpm-warns": "The Manager already warns: a graphics card the game does not work on, a path length limit, or a required file version.",
+    "tpm-warns": "TPM already warns: a graphics card the game does not work on, a path length limit, or a required file version.",
     "guided": "Game Notes shows the guide text for the game once it is registered: notes, setup steps, second file, test program, linked profile, graphics card notes.",
     "register-only": "Nothing beyond registration is listed in the guide."
   },
@@ -154,7 +154,7 @@
         "linked_profile",
         "gpu-text"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "2SpicyElf2",
@@ -170,7 +170,7 @@
         "linked_profile",
         "gpu-text"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "3DCosplayMahjong",
@@ -184,7 +184,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "AAA",
@@ -211,7 +211,7 @@
         "general_issues",
         "linked_profile"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "abcELF2",
@@ -225,7 +225,7 @@
         "gpu-warning",
         "linked_profile"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "acedriv3",
@@ -239,7 +239,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "ActionDeka",
@@ -253,7 +253,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "AfterDark",
@@ -301,7 +301,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the Play! game settings file startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Play! game settings file startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "AkaiKatanaShinNesica",
@@ -324,7 +324,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "Akuma",
@@ -351,7 +351,7 @@
         "supp_archives",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "AliensArmageddon",
@@ -365,7 +365,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "AliensExtermination",
@@ -456,7 +456,7 @@
       "Signals": [
         "recipe"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "Ballistics",
@@ -488,7 +488,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "batlgr37",
@@ -504,7 +504,7 @@
         "supp_archives",
         "linked_profile"
       ],
-      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). The Manager cannot set it up as a TeknoParrot game."
+      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). TPM cannot set it up as a TeknoParrot game."
     },
     {
       "Profile": "batlgr3t",
@@ -518,7 +518,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "Batman",
@@ -574,7 +574,7 @@
         "file-version",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "BBCP",
@@ -592,7 +592,7 @@
         "file-version",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "BBHHDWild",
@@ -617,7 +617,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "BBHPro",
@@ -631,7 +631,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "BBHWorld",
@@ -645,7 +645,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "bel",
@@ -690,7 +690,7 @@
         "recipe",
         "supp_archives"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "BlazBlueCalaminityTrigger",
@@ -715,7 +715,7 @@
         "file-version",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "BlazBlueContinuumShift2",
@@ -731,7 +731,7 @@
         "file-version",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "BlazBlueCrossTagBattle",
@@ -749,7 +749,7 @@
         "file-version",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (5 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (5 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "BlazingAngels",
@@ -763,7 +763,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "bldyr3b",
@@ -777,7 +777,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "BlockKing",
@@ -802,7 +802,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "BorderBreakX",
@@ -876,7 +876,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "Castlevania",
@@ -961,7 +961,7 @@
       "Signals": [
         "recipe"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "ChaseHQ2",
@@ -1003,7 +1003,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "cobrataw",
@@ -1017,7 +1017,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "ComeOnBaby2",
@@ -1139,7 +1139,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "CSNEODedicated",
@@ -1164,7 +1164,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "CyberDiver",
@@ -1256,7 +1256,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "dayto2pe",
@@ -1317,7 +1317,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "DeadHeat",
@@ -1454,7 +1454,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "doa",
@@ -1490,7 +1490,7 @@
         "supp_archives",
         "test_exe"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (6 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (6 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "DoNotFallRunforYourDrink",
@@ -1535,7 +1535,7 @@
       "Signals": [
         "gpu-warning"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "DSPS",
@@ -1549,7 +1549,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "dynabb",
@@ -1612,7 +1612,7 @@
         "supp_archives",
         "notes"
       ],
-      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). The Manager cannot set it up as a TeknoParrot game."
+      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). TPM cannot set it up as a TeknoParrot game."
     },
     {
       "Profile": "ElevatorAction",
@@ -1712,7 +1712,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "FantasySoccer",
@@ -1726,7 +1726,7 @@
         "broken",
         "notes"
       ],
-      "Reason": "The guide lists this game as broken. The Manager can register it but cannot make it work."
+      "Reason": "The guide lists this game as broken. TPM can register it but cannot make it work."
     },
     {
       "Profile": "FarCryParadiseLost",
@@ -1751,7 +1751,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "fghtjam",
@@ -1765,7 +1765,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "FGO",
@@ -1780,7 +1780,7 @@
         "general_issues",
         "gpu-text"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "FightingClimax",
@@ -1828,7 +1828,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "FNFDrift",
@@ -1853,7 +1853,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "FNFSB2",
@@ -1869,7 +1869,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "FNFSC",
@@ -1900,7 +1900,7 @@
       "Signals": [
         "gpu-warning"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "Friction",
@@ -1923,7 +1923,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "fvipers",
@@ -2023,7 +2023,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "GBOS",
@@ -2037,7 +2037,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "gdvsgd",
@@ -2051,7 +2051,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "gdvsgdnx",
@@ -2065,7 +2065,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "GekitouProYakyuu",
@@ -2096,7 +2096,7 @@
       "Signals": [
         "recipe"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "GGXrd",
@@ -2116,7 +2116,7 @@
       "Signals": [
         "recipe"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "GGXrdSIGN",
@@ -2148,7 +2148,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "GhostBusters",
@@ -2191,7 +2191,7 @@
       "Signals": [
         "recipe"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "Goketsuji",
@@ -2272,7 +2272,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "GoldenTeeLive2012",
@@ -2286,7 +2286,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "GoldenTeeLive2013",
@@ -2300,7 +2300,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "GoldenTeeLive2014",
@@ -2314,7 +2314,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "GoldenTeeLive2015",
@@ -2328,7 +2328,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "GoldenTeeLive2016",
@@ -2342,7 +2342,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "GoldenTeeLive2017",
@@ -2356,7 +2356,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "GoldenTeeLive2018",
@@ -2370,7 +2370,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "GoldenTeeLive2019",
@@ -2385,7 +2385,7 @@
         "notes",
         "gpu-text"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "GoldenTeeLive2020",
@@ -2401,7 +2401,7 @@
         "general_issues",
         "gpu-text"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "GoonyaFighter",
@@ -2415,7 +2415,7 @@
         "recipe",
         "supp_archives"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (4 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (4 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "GRID",
@@ -2451,7 +2451,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "GSEVO",
@@ -2540,7 +2540,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "Gunslinger",
@@ -2563,7 +2563,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "Halo",
@@ -2672,7 +2672,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "HOTD4",
@@ -2781,7 +2781,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (14 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (14 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "hummerextreme",
@@ -2795,7 +2795,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (14 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (14 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "HydroThunder",
@@ -2809,7 +2809,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "HyperSportsChina",
@@ -2998,7 +2998,7 @@
         "general_issues",
         "setup_exe2"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "IDZv2",
@@ -3030,7 +3030,7 @@
         "general_issues",
         "setup_exe2"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "Ikaruga",
@@ -3064,7 +3064,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "Injustice",
@@ -3078,7 +3078,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "JojoLastSurvivor",
@@ -3103,7 +3103,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "JusticeLeague",
@@ -3196,7 +3196,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (4 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (4 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "KingofFightersSkyStage",
@@ -3272,7 +3272,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "kinniku2",
@@ -3286,7 +3286,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "KODrive",
@@ -3324,7 +3324,7 @@
         "supp_archives",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (4 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (4 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "KOn2",
@@ -3449,7 +3449,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "LGJSElf2",
@@ -3463,7 +3463,7 @@
         "gpu-warning",
         "linked_profile"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "LGS",
@@ -3557,7 +3557,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "manxtt",
@@ -3607,7 +3607,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "MaximumHeat",
@@ -3684,7 +3684,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "MightyMoto",
@@ -3698,7 +3698,7 @@
         "broken",
         "notes"
       ],
-      "Reason": "The guide lists this game as broken. The Manager can register it but cannot make it work."
+      "Reason": "The guide lists this game as broken. TPM can register it but cannot make it work."
     },
     {
       "Profile": "MilkChan",
@@ -3796,7 +3796,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "MotoGP",
@@ -3822,7 +3822,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "motoraid",
@@ -3853,7 +3853,7 @@
       "Signals": [
         "recipe"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "NERF",
@@ -3867,7 +3867,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "netchu",
@@ -3881,7 +3881,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "netmerc",
@@ -3904,7 +3904,7 @@
       "Signals": [
         "recipe"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "NicktoonsNitro",
@@ -3918,7 +3918,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "Nirin",
@@ -3967,7 +3967,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "oceanhun",
@@ -3990,7 +3990,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "OG",
@@ -4015,7 +4015,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "OmatsuriYasanGansoTakoyaki",
@@ -4051,7 +4051,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "or2b",
@@ -4065,7 +4065,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "or2sp",
@@ -4079,7 +4079,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "or2spdlx",
@@ -4135,7 +4135,7 @@
         "recipe",
         "supp_archives"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "overrevb",
@@ -4158,7 +4158,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the Play! game settings file startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Play! game settings file startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "pacmanbr",
@@ -4172,7 +4172,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the Play! game settings file startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Play! game settings file startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "PacmanChomp",
@@ -4220,7 +4220,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "PhantomBreaker",
@@ -4342,7 +4342,7 @@
         "gpu-warning",
         "general_issues"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "PowerPuttLive2013",
@@ -4356,7 +4356,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "PPQ",
@@ -4379,7 +4379,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "Primevil",
@@ -4394,7 +4394,7 @@
         "notes",
         "gpu-text"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "ProjectDiva",
@@ -4405,7 +4405,7 @@
       "Signals": [
         "gpu-warning"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "PsychicForce2012",
@@ -4437,7 +4437,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "PuyoPuyoEsports",
@@ -4451,7 +4451,7 @@
         "recipe",
         "supp_archives"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "PuzzleBobble",
@@ -4471,7 +4471,7 @@
       "Signals": [
         "emulator-files"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "Quake",
@@ -4524,7 +4524,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "RaccoonRampage",
@@ -4618,7 +4618,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "Rambo",
@@ -4679,7 +4679,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "rchase2",
@@ -4702,7 +4702,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "RingRiders",
@@ -4752,7 +4752,7 @@
         "supp_archives",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "rrv",
@@ -4763,7 +4763,7 @@
       "Signals": [
         "emulator-files"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "RumbleFish2Nesica",
@@ -4832,7 +4832,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "sbxc",
@@ -4846,7 +4846,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "schamp",
@@ -4877,7 +4877,7 @@
       "Signals": [
         "emulator-files"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "scud",
@@ -4949,7 +4949,7 @@
         "notes",
         "setup_exe2"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "segartv",
@@ -5014,7 +5014,7 @@
         "general_issues",
         "test_exe"
       ],
-      "Reason": "The Manager checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "SGC06",
@@ -5032,7 +5032,7 @@
         "general_issues",
         "test_exe"
       ],
-      "Reason": "The guide lists this game as broken. The Manager can register it but cannot make it work."
+      "Reason": "The guide lists this game as broken. TPM can register it but cannot make it work."
     },
     {
       "Profile": "sgt24h",
@@ -5081,7 +5081,7 @@
         "notes",
         "gpu-text"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "ShiningForceCrossElysion",
@@ -5098,7 +5098,7 @@
         "notes",
         "gpu-text"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "ShiningForceCrossExlesia",
@@ -5115,7 +5115,7 @@
         "notes",
         "gpu-text"
       ],
-      "Reason": "The guide lists this game as broken. The Manager can register it but cannot make it work."
+      "Reason": "The guide lists this game as broken. TPM can register it but cannot make it work."
     },
     {
       "Profile": "ShiningForceCrossRaid",
@@ -5132,7 +5132,7 @@
         "notes",
         "gpu-text"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "Showdown",
@@ -5157,7 +5157,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "SilentScopeBoneEater",
@@ -5233,7 +5233,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "Skylanders",
@@ -5276,7 +5276,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "Snowboarder",
@@ -5321,7 +5321,7 @@
         "notes",
         "test_exe"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "soulclb2",
@@ -5335,7 +5335,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "soulclb3",
@@ -5349,7 +5349,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "SoulReverse",
@@ -5364,7 +5364,7 @@
         "general_issues",
         "gpu-text"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "SpaceInvaders",
@@ -5403,7 +5403,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "SpicaAdventure",
@@ -5475,7 +5475,7 @@
         "supp_archives",
         "notes"
       ],
-      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). The Manager cannot set it up as a TeknoParrot game."
+      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). TPM cannot set it up as a TeknoParrot game."
     },
     {
       "Profile": "SR3_3C",
@@ -5491,7 +5491,7 @@
         "supp_archives",
         "notes"
       ],
-      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). The Manager cannot set it up as a TeknoParrot game."
+      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). TPM cannot set it up as a TeknoParrot game."
     },
     {
       "Profile": "SR3_3D",
@@ -5507,7 +5507,7 @@
         "supp_archives",
         "notes"
       ],
-      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). The Manager cannot set it up as a TeknoParrot game."
+      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). TPM cannot set it up as a TeknoParrot game."
     },
     {
       "Profile": "SR3_3E",
@@ -5523,7 +5523,7 @@
         "supp_archives",
         "notes"
       ],
-      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). The Manager cannot set it up as a TeknoParrot game."
+      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). TPM cannot set it up as a TeknoParrot game."
     },
     {
       "Profile": "SR3_3F",
@@ -5539,7 +5539,7 @@
         "supp_archives",
         "notes"
       ],
-      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). The Manager cannot set it up as a TeknoParrot game."
+      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). TPM cannot set it up as a TeknoParrot game."
     },
     {
       "Profile": "SR3_3G",
@@ -5555,7 +5555,7 @@
         "supp_archives",
         "notes"
       ],
-      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). The Manager cannot set it up as a TeknoParrot game."
+      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). TPM cannot set it up as a TeknoParrot game."
     },
     {
       "Profile": "srally2",
@@ -5733,7 +5733,7 @@
         "additional_archives",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "StreetFighterZero3",
@@ -5762,7 +5762,7 @@
       "Signals": [
         "emulator-files"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "superdbz",
@@ -5776,7 +5776,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "SuperStreetFighterIVArcadeEdition",
@@ -5877,7 +5877,7 @@
         "recipe",
         "supp_archives"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "taiko10",
@@ -5888,7 +5888,7 @@
       "Signals": [
         "emulator-files"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taiko11",
@@ -5902,7 +5902,7 @@
         "emulator-files",
         "additional_archives"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taiko12",
@@ -5916,7 +5916,7 @@
         "emulator-files",
         "additional_archives"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taiko13",
@@ -5927,7 +5927,7 @@
       "Signals": [
         "emulator-files"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taiko14",
@@ -5938,7 +5938,7 @@
       "Signals": [
         "emulator-files"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taiko7",
@@ -5949,7 +5949,7 @@
       "Signals": [
         "emulator-files"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taiko8",
@@ -5960,7 +5960,7 @@
       "Signals": [
         "emulator-files"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taiko9",
@@ -5971,7 +5971,7 @@
       "Signals": [
         "emulator-files"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taikoblue",
@@ -5985,7 +5985,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taikogreen",
@@ -5999,7 +5999,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taikokimidori",
@@ -6013,7 +6013,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taikomomoiro",
@@ -6027,7 +6027,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taikomurasaki",
@@ -6041,7 +6041,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taikored",
@@ -6055,7 +6055,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taikosorairo",
@@ -6069,7 +6069,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taikowhite",
@@ -6083,7 +6083,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "taikoyellow",
@@ -6097,7 +6097,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "TaisenHotGimmick5",
@@ -6111,7 +6111,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "TankTankTank",
@@ -6169,7 +6169,7 @@
       "Signals": [
         "gpu-warning"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "tatsuvscap",
@@ -6205,7 +6205,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "tekken4",
@@ -6219,7 +6219,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "tekken51",
@@ -6233,7 +6233,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "tekken5d",
@@ -6247,7 +6247,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "Tekken6",
@@ -6261,7 +6261,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "Tekken6BR",
@@ -6275,7 +6275,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "Tekken7",
@@ -6318,7 +6318,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "Teratoma",
@@ -6343,7 +6343,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "TetoteConnect",
@@ -6407,7 +6407,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "timecrs4",
@@ -6421,7 +6421,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "TippinBloks",
@@ -6446,7 +6446,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "TokyoCop",
@@ -6461,7 +6461,7 @@
         "notes",
         "gpu-text"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "TombRaider",
@@ -6547,7 +6547,7 @@
         "file-version",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "ttt2u",
@@ -6561,7 +6561,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "TuxRacer",
@@ -6575,7 +6575,7 @@
         "broken",
         "notes"
       ],
-      "Reason": "The guide lists this game as broken. The Manager can register it but cannot make it work."
+      "Reason": "The guide lists this game as broken. TPM can register it but cannot make it work."
     },
     {
       "Profile": "UDX",
@@ -6663,7 +6663,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "vcop",
@@ -6759,7 +6759,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "VF5BElf2",
@@ -6786,7 +6786,7 @@
         "notes",
         "linked_profile"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "VF5CElf2",
@@ -6820,7 +6820,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "VF5FSapm3",
@@ -6856,7 +6856,7 @@
         "recipe",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (2 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "VF5R800",
@@ -6919,7 +6919,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "von2",
@@ -7037,7 +7037,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PlayStation 3 (RPCS3) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "WalkingDead",
@@ -7048,7 +7048,7 @@
       "Signals": [
         "recipe"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (3 recipes); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "wanganmd",
@@ -7062,7 +7062,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "wanganmr",
@@ -7076,7 +7076,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "WartranTroopers",
@@ -7121,7 +7121,7 @@
         "setup_exe2",
         "linked_profile"
       ],
-      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). The Manager cannot set it up as a TeknoParrot game."
+      "Reason": "TeknoParrot has no official profile for this game (the guide marks it unsupported). TPM cannot set it up as a TeknoParrot game."
     },
     {
       "Profile": "WheelOfFortune",
@@ -7146,7 +7146,7 @@
         "gpu-warning",
         "notes"
       ],
-      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); the Manager applies it only on an exact match, with a backup and a receipt."
+      "Reason": "A reviewed patch is in the required patch catalog (1 recipe); TPM applies it only on an exact match, with a backup and a receipt."
     },
     {
       "Profile": "wingwar",
@@ -7183,7 +7183,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "The Manager checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "WMMT1J",
@@ -7198,7 +7198,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "The Manager checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "WMMT2",
@@ -7213,7 +7213,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "The Manager checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "WMMT2j",
@@ -7228,7 +7228,7 @@
         "notes",
         "general_issues"
       ],
-      "Reason": "The Manager checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the Chihiro (CxbxR) firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "WMMT3",
@@ -7332,7 +7332,7 @@
       "Signals": [
         "gpu-warning"
       ],
-      "Reason": "The Manager warns about a graphics card the game does not work on."
+      "Reason": "TPM warns about a graphics card the game does not work on."
     },
     {
       "Profile": "WorldsLargestPacman",
@@ -7368,7 +7368,7 @@
         "path-limit",
         "notes"
       ],
-      "Reason": "The Manager warns about a folder-path length limit."
+      "Reason": "TPM warns about a folder-path length limit."
     },
     {
       "Profile": "yuyuhaku",
@@ -7379,7 +7379,7 @@
       "Signals": [
         "emulator-files"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "zerogun",
@@ -7402,7 +7402,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "zgundmdx",
@@ -7416,7 +7416,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "zoidiexp",
@@ -7432,7 +7432,7 @@
         "additional_archives",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     },
     {
       "Profile": "zoidsinf",
@@ -7446,7 +7446,7 @@
         "emulator-files",
         "notes"
       ],
-      "Reason": "The Manager checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
+      "Reason": "TPM checks the PCSX2x6 firmware startup files and copies them only from the player's own archive."
     }
   ],
   "Graphics": [
@@ -7456,7 +7456,7 @@
       "Status": "HAS_ISSUES",
       "Text": "Broken characters",
       "Action": "warning",
-      "Reason": "A known graphics problem. Game Notes shows the text; the Manager changes nothing."
+      "Reason": "A known graphics problem. Game Notes shows the text; TPM changes nothing."
     },
     {
       "Profile": "2Spicy",
@@ -7464,7 +7464,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "2SpicyElf2",
@@ -7472,7 +7472,7 @@
       "Status": "OK",
       "Text": "Automatic fix",
       "Action": "upstream-automatic",
-      "Reason": "TeknoParrot applies the fix by itself; nothing for the Manager to do."
+      "Reason": "TeknoParrot applies the fix by itself; nothing for TPM to do."
     },
     {
       "Profile": "2SpicyElf2",
@@ -7480,7 +7480,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "abc",
@@ -7488,7 +7488,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "abcELF2",
@@ -7496,7 +7496,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "BorderBreakScramble",
@@ -7504,7 +7504,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "BorderBreakScramble",
@@ -7512,7 +7512,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "Castlevania",
@@ -7520,7 +7520,7 @@
       "Status": "WITH_FIX",
       "Text": "Use DXVK to fix shader issues.",
       "Action": "guided",
-      "Reason": "DXVK is a third-party file. The Manager does not install it; Game Notes shows the text."
+      "Reason": "DXVK is a third-party file. TPM does not install it; Game Notes shows the text."
     },
     {
       "Profile": "ChronoRegalia",
@@ -7528,7 +7528,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "Drakons",
@@ -7536,7 +7536,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "EXVS2",
@@ -7544,7 +7544,7 @@
       "Status": "HAS_ISSUES",
       "Text": "Graphical glitches",
       "Action": "warning",
-      "Reason": "A known graphics problem. Game Notes shows the text; the Manager changes nothing."
+      "Reason": "A known graphics problem. Game Notes shows the text; TPM changes nothing."
     },
     {
       "Profile": "EXVS2IB",
@@ -7552,7 +7552,7 @@
       "Status": "HAS_ISSUES",
       "Text": "Graphical glitches",
       "Action": "warning",
-      "Reason": "A known graphics problem. Game Notes shows the text; the Manager changes nothing."
+      "Reason": "A known graphics problem. Game Notes shows the text; TPM changes nothing."
     },
     {
       "Profile": "EXVS2OB",
@@ -7560,7 +7560,7 @@
       "Status": "HAS_ISSUES",
       "Text": "Graphical glitches",
       "Action": "warning",
-      "Reason": "A known graphics problem. Game Notes shows the text; the Manager changes nothing."
+      "Reason": "A known graphics problem. Game Notes shows the text; TPM changes nothing."
     },
     {
       "Profile": "EXVS2XB",
@@ -7568,7 +7568,7 @@
       "Status": "HAS_ISSUES",
       "Text": "Graphical glitches",
       "Action": "warning",
-      "Reason": "A known graphics problem. Game Notes shows the text; the Manager changes nothing."
+      "Reason": "A known graphics problem. Game Notes shows the text; TPM changes nothing."
     },
     {
       "Profile": "FGO",
@@ -7576,7 +7576,7 @@
       "Status": "WITH_FIX",
       "Text": "AMD Fix is applied automatically if an AMD GPU is detected as the currently used GPU",
       "Action": "upstream-automatic",
-      "Reason": "TeknoParrot applies the fix by itself; nothing for the Manager to do."
+      "Reason": "TeknoParrot applies the fix by itself; nothing for TPM to do."
     },
     {
       "Profile": "FGO",
@@ -7584,7 +7584,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "FrenzyExpress",
@@ -7592,7 +7592,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2011",
@@ -7600,7 +7600,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2011",
@@ -7608,7 +7608,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2012",
@@ -7616,7 +7616,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2012",
@@ -7624,7 +7624,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2013",
@@ -7632,7 +7632,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2013",
@@ -7640,7 +7640,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2014",
@@ -7648,7 +7648,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2014",
@@ -7656,7 +7656,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2015",
@@ -7664,7 +7664,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2015",
@@ -7672,7 +7672,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2016",
@@ -7680,7 +7680,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2016",
@@ -7688,7 +7688,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2017",
@@ -7696,7 +7696,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2017",
@@ -7704,7 +7704,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2018",
@@ -7712,7 +7712,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2018",
@@ -7720,7 +7720,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2019",
@@ -7738,7 +7738,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "GoldenTeeLive2020",
@@ -7756,7 +7756,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "HOTD4",
@@ -7764,7 +7764,7 @@
       "Status": "HAS_ISSUES",
       "Text": "Functionally playable from beginning to end including cutscenes. Minor graphical issues/glitches on a few places.",
       "Action": "warning",
-      "Reason": "A known graphics problem. Game Notes shows the text; the Manager changes nothing."
+      "Reason": "A known graphics problem. Game Notes shows the text; TPM changes nothing."
     },
     {
       "Profile": "HOTD4ELF2",
@@ -7772,7 +7772,7 @@
       "Status": "HAS_ISSUES",
       "Text": "Functionally playable from beginning to end including cutscenes. Minor graphical issues/glitches on a few places.",
       "Action": "warning",
-      "Reason": "A known graphics problem. Game Notes shows the text; the Manager changes nothing."
+      "Reason": "A known graphics problem. Game Notes shows the text; TPM changes nothing."
     },
     {
       "Profile": "HydroThunder",
@@ -7780,7 +7780,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "IDZ",
@@ -7796,7 +7796,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "IDZv2",
@@ -7812,7 +7812,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "KanColle740",
@@ -7820,7 +7820,7 @@
       "Status": "WITH_FIX",
       "Text": "AMD Fix is applied automatically if an AMD GPU is detected as the currently used GPU",
       "Action": "upstream-automatic",
-      "Reason": "TeknoParrot applies the fix by itself; nothing for the Manager to do."
+      "Reason": "TeknoParrot applies the fix by itself; nothing for TPM to do."
     },
     {
       "Profile": "LGJ",
@@ -7828,7 +7828,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "LGJS",
@@ -7836,7 +7836,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "LGJSElf2",
@@ -7844,7 +7844,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "MIB",
@@ -7852,7 +7852,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "OCCPinball",
@@ -7860,7 +7860,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "OCCPinball",
@@ -7868,7 +7868,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "OffroadThunder",
@@ -7876,7 +7876,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "PowerPuttLive2012",
@@ -7884,7 +7884,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "PowerPuttLive2012",
@@ -7892,7 +7892,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "PowerPuttLive2013",
@@ -7900,7 +7900,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "PowerPuttLive2013",
@@ -7908,7 +7908,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "Primevil",
@@ -7924,7 +7924,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "ProjectDiva",
@@ -7932,7 +7932,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "PullTheTrigger",
@@ -7940,7 +7940,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "Rambo",
@@ -7964,7 +7964,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "SegaOlympic2020",
@@ -7972,7 +7972,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "ShiningForceCross",
@@ -7988,7 +7988,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "ShiningForceCrossElysion",
@@ -8004,7 +8004,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "ShiningForceCrossExlesia",
@@ -8020,7 +8020,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "ShiningForceCrossRaid",
@@ -8036,7 +8036,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "SkyCurser",
@@ -8044,7 +8044,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "SonicBlastHeroes",
@@ -8052,7 +8052,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "SonicDashExtreme",
@@ -8060,7 +8060,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "SonicDashExtreme",
@@ -8068,7 +8068,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "SoulReverse",
@@ -8076,7 +8076,7 @@
       "Status": "WITH_FIX",
       "Text": "AMD Fix is applied automatically if an AMD GPU is detected as the currently used GPU",
       "Action": "upstream-automatic",
-      "Reason": "TeknoParrot applies the fix by itself; nothing for the Manager to do."
+      "Reason": "TeknoParrot applies the fix by itself; nothing for TPM to do."
     },
     {
       "Profile": "SoulReverse",
@@ -8084,7 +8084,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "SpaceWarp66",
@@ -8092,7 +8092,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "TargetTossProLawndarts",
@@ -8100,7 +8100,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "TargetTossProLawndarts",
@@ -8108,7 +8108,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "TempleRun",
@@ -8116,7 +8116,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "TokyoCop",
@@ -8124,7 +8124,7 @@
       "Status": "HAS_ISSUES",
       "Text": "Broken characters in intro",
       "Action": "warning",
-      "Reason": "A known graphics problem. Game Notes shows the text; the Manager changes nothing."
+      "Reason": "A known graphics problem. Game Notes shows the text; TPM changes nothing."
     },
     {
       "Profile": "TokyoCop",
@@ -8132,7 +8132,7 @@
       "Status": "OK",
       "Text": "Broken characters in intro",
       "Action": "warning",
-      "Reason": "A known graphics problem. Game Notes shows the text; the Manager changes nothing."
+      "Reason": "A known graphics problem. Game Notes shows the text; TPM changes nothing."
     },
     {
       "Profile": "TokyoCop",
@@ -8140,7 +8140,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "WildWestShootout",
@@ -8148,7 +8148,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "WonderlandWars",
@@ -8156,7 +8156,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "WonderlandWars",
@@ -8164,7 +8164,7 @@
       "Status": "NO",
       "Text": "",
       "Action": "warning",
-      "Reason": "The guide says the game does not work on this card. The Manager warns before the player starts."
+      "Reason": "The guide says the game does not work on this card. TPM warns before the player starts."
     },
     {
       "Profile": "ActionDeka",
@@ -8172,7 +8172,7 @@
       "Status": "NO_INFO",
       "Text": "notes: doesn't work on Intel GPU",
       "Action": "warning",
-      "Reason": "The notes say the game does not work on an Intel graphics card, in a sentence about graphics cards. Added to the Manager warning list."
+      "Reason": "The notes say the game does not work on an Intel graphics card, in a sentence about graphics cards. Added to TPM warning list."
     },
     {
       "Profile": "CSNEO",
@@ -8180,14 +8180,14 @@
       "Status": "NO_INFO",
       "Text": "notes: NVIDIA and AMD (with patch) ONLY - NO INTEL!",
       "Action": "warning",
-      "Reason": "The notes say the game does not work on an Intel graphics card, in a sentence about graphics cards. Added to the Manager warning list."
+      "Reason": "The notes say the game does not work on an Intel graphics card, in a sentence about graphics cards. Added to TPM warning list."
     }
   ],
   "GraphicsActions": {
     "upstream-automatic": "TeknoParrot applies the fix by itself.",
     "generic-fix-field": "The existing GPU Fix setup sets this profile field for the matching card. FieldSeenInSampleProfile says whether the field was seen in a real profile file.",
-    "guided": "Game Notes shows the text; the Manager changes nothing.",
-    "warning": "The Manager warns or Game Notes shows the text; the Manager changes nothing.",
+    "guided": "Game Notes shows the text; TPM changes nothing.",
+    "warning": "TPM warns or Game Notes shows the text; TPM changes nothing.",
     "not-applicable": "The entry is no longer used."
   },
   "NotGpuConditions": [

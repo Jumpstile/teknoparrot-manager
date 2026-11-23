@@ -198,7 +198,7 @@ BeforeAll {
     }
 
     # The six-game library from the owner's screenshot: two games that already have a database
-    # and four that Manager creates from the game's own backup.
+    # and four that TPM creates from the game's own backup.
     function New-F71SixGames {
         $fx = New-F71Fixture -Name 'six'
         $fx.State.Exists['GameDBPPL12'] = $true

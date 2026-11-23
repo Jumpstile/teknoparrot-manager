@@ -46,7 +46,7 @@
 #     cursor into the region (SetCursorPosition) without writing does not strand the bar there: the lift reads the
 #     region's cells back and erases them only when every cell still holds exactly the frame text.
 #     Foreign output is never overdrawn: the next frame starts on a fresh line. Callers that print while a bar is
-#     open use Suspend-TpmProgressOutput / Resume-TpmProgressOutput (the manager routes Write-Host through them),
+#     open use Suspend-TpmProgressOutput / Resume-TpmProgressOutput (TPM routes Write-Host through them),
 #     so their text starts on a clean row and the bar is redrawn below it. The background refresh never starts a
 #     new region itself: after foreign output (or the prompt of an owner that returned) it stops writing until the
 #     next owner call, which redraws below that output. It runs while the owner runspace is Opened and the thread

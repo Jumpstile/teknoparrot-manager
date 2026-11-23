@@ -63,6 +63,7 @@ BeforeAll {
             FailRestore = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
             StateChecks = New-Object System.Collections.Generic.List[string]
             NotReady = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+            Empty = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
         }
         return [pscustomobject]@{ Root = $root; Bin = $bin; Evidence = $evidence; Profiles = $profiles; State = $state }
     }
@@ -147,6 +148,7 @@ BeforeAll {
             $query = [string]$Arguments[$Arguments.Count - 1]
             if ($query -match 'count\(\*\)') {
                 if ($state.NotReady.Contains($database)) { return (New-F69CommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 2 -Output 'psql: FATAL:  password authentication failed for user "postgres"') }
+                if ($state.Empty.Contains($database)) { return (New-F69CommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0 -Output '0') }
                 return (New-F69CommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0 -Output '24')
             }
             $wanted = ''
@@ -159,6 +161,7 @@ BeforeAll {
         if ($ToolName -eq 'pg_restore.exe') {
             [void]$state.Events.Add('pg_restore:' + $database)
             if ($state.FailRestore.Contains($database)) { return (New-F69CommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 5 -Output 'restore failed') }
+            [void]$state.Empty.Remove($database)
             return (New-F69CommandResult -ToolName $ToolName -Arguments $Arguments -ExitCode 0)
         }
         if ($ToolName -eq 'createdb.exe') {
@@ -432,9 +435,69 @@ Describe 'FIX69 auto-create = 1 with exactly one bundled backup is created and r
     }
 }
 
+Describe 'An existing database with no tables is filled from the game''s bundled backup' {
+    # Mutation: treat an existing database as "already there" without counting its tables -> no restore, and the final check
+    # fails with "Found 0 tables" for every game (the real dead end).
+    It 'restores the bundled backup into the empty database, without creating or dropping it' {
+        $fx = New-F69Fixture -Name 'empty-shell'
+        $fx.State.Exists['GameDB19'] = $true
+        $fx.State.Empty.Add('GameDB19') | Out-Null
+        [void](New-F69Profile -Fixture $fx -Name 'GoldenTeeLive2019' -GameName 'Golden Tee Live 2019' -DbName 'GameDB19' -AutoCreate '1' -BackupFiles @('0001.backup'))
+        Install-F69Mocks -Fixture $fx
+
+        $result = Invoke-F69Setup -Fixture $fx
+
+        $result.Outcome | Should -BeExactly 'SUCCEEDED'
+        @(Get-F69Calls -Tool 'createdb.exe').Count | Should -Be 0
+        @(Get-F69Calls -Tool 'dropdb.exe').Count | Should -Be 0
+        @(Get-F69RestoreCalls | ForEach-Object { $_.Database }) | Should -Be @('GameDB19')
+        @($fx.State.Events | Where-Object { $_ -in @('backup', 'pg_restore:GameDB19') }) | Should -Be @('backup', 'pg_restore:GameDB19')
+        $fx.State.Exists['GameDB19'] | Should -BeTrue
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    # Mutation: leave the failed restore in place -> the user is left with a half-filled database and no rollback.
+    It 'rolls back, says which game and why, and leaves the profile as it was when the restore fails' {
+        $fx = New-F69Fixture -Name 'empty-shell-fail'
+        $fx.State.Exists['GameDB19'] = $true
+        $fx.State.Empty.Add('GameDB19') | Out-Null
+        $file = New-F69Profile -Fixture $fx -Name 'GoldenTeeLive2019' -GameName 'Golden Tee Live 2019' -DbName 'GameDB19' -AutoCreate '1' -BackupFiles @('0001.backup')
+        $before = [System.IO.File]::ReadAllBytes($file)
+        $fx.State.FailRestore.Add('GameDB19') | Out-Null
+        Install-F69Mocks -Fixture $fx
+
+        $result = Invoke-F69Setup -Fixture $fx
+
+        $result.Outcome | Should -BeExactly 'ROLLED_BACK_VERIFIED'
+        [System.IO.File]::ReadAllBytes($file) | Should -Be $before
+        (@(Get-PostgresSetupFailureReasonLines -TransactionResult $result) -join ' | ') | Should -Match 'Database GameDB19 could not be created'
+        { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
+    }
+
+    # Mutation: count "could not connect" as empty -> a password problem would restore into a database that may hold data.
+    It 'does not treat a database it cannot count as empty' {
+        $fx = New-F69Fixture -Name 'empty-shell-unknown'
+        $fx.State.Exists['GameDB19'] = $true
+        $fx.State.NotReady.Add('GameDB19') | Out-Null
+        [void](New-F69Profile -Fixture $fx -Name 'GoldenTeeLive2019' -GameName 'Golden Tee Live 2019' -DbName 'GameDB19' -AutoCreate '1' -BackupFiles @('0001.backup'))
+        Install-F69Mocks -Fixture $fx
+
+        $result = Invoke-F69Setup -Fixture $fx
+
+        @(Get-F69RestoreCalls).Count | Should -Be 0
+        @(Get-F69Calls -Tool 'dropdb.exe').Count | Should -Be 0
+    }
+
+    It 'tells the user what to do next in plain words when a game database is not ready' {
+        (Get-PostgresNotReadyNextStep -Text 'X [Y] (GameDBPPL12) is not ready: Found 0 tables, expected at least 1.') | Should -Match 'is empty'
+        (Get-PostgresNotReadyNextStep -Text 'X [Y] (Z) is not ready: Could not connect') | Should -Match 'Open Details'
+        Get-PostgresNotReadyNextStep -Text 'something else' | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'FIX69 auto-create = 1 uses the game''s own backup, and a game with none is left out' {
     # Mutation: leave the game out as "not ready" again -> an auto-create game with no backup is reported as needing attention and
-    # asks for a pg_backup folder TeknoParrot does not need; or createdb runs (TeknoParrot makes the database, not the Manager).
+    # asks for a pg_backup folder TeknoParrot does not need; or createdb runs (TeknoParrot makes the database, not TPM).
     It 'when every game has no pg_backup folder and TeknoParrot creates the database: sets up the profile, creates nothing, and the screen says "Profile ready"' {
         $fx = New-F69Fixture -Name 'nobackup'
         $file = New-F69Profile -Fixture $fx -Name 'GoldenTeeLive2019' -GameName 'Golden Tee Live 2019' -DbName 'GameDB19' -AutoCreate '1'

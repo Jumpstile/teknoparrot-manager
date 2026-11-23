@@ -106,7 +106,7 @@ Describe 'LB424: matching and preview' {
         (Get-Lb424Snapshot $fx.Root) | Should -Be $before
     }
 
-    It 'sorts games into exact matches, near matches and no picture, and skips games the Manager did not add' {
+    It 'sorts games into exact matches, near matches and no picture, and skips games TPM did not add' {
         # Mutation: treat every LaunchBox game as ours (drop the emulator check) -> Other Emulator Game shows up as a match.
         # Mutation: drop the profile-folder check -> Outside Profile Game shows up as a match.
         $fx = New-Lb424Fixture

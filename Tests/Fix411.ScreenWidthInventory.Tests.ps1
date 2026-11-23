@@ -8,7 +8,7 @@ BeforeAll {
     $sourcePath = Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'
     $tokens = $null; $parseErrors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($sourcePath, [ref]$tokens, [ref]$parseErrors)
-    if ($parseErrors.Count -gt 0) { throw 'Fix411 bootstrap could not parse the manager.' }
+    if ($parseErrors.Count -gt 0) { throw 'Fix411 bootstrap could not parse TPM.' }
     $script:F411Wide = @($ast.FindAll({
         param($node)
         $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Write-Host' -and

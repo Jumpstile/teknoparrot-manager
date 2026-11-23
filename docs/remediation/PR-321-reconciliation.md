@@ -270,7 +270,7 @@ explicit protected Adopt, skip, and Details/support guidance.
 ### Crosshair close, focus, and prompt slice -- working-tree status
 
 IDs 13, 14, and 15 were re-audited separately. The generated browser page
-enters a completed non-interactive state after P2; the manager now attempts to
+enters a completed non-interactive state after P2; TPM now attempts to
 close the process it opened and gives explicit close guidance when that is not
 available. Console focus return is attempted with a plain-language fallback.
 The Crosshair confirmation uses a workflow-aware prompt helper that clears the
@@ -1823,7 +1823,7 @@ Actual validation UTC: 2026-10-15T08:23:29Z. All final v3 test-input hashes matc
   Windows PowerShell 5.1.26100.9549 ended `2026-10-15T09:38:35.6923290Z`
   and passed 13/13. Each selected five manager catalog/resolver/transaction
   guards, all six existing plugin-lane tests, and both Main-extra tests.
-  The manager file discovered 1,488 tests; 1,483 were not run. No full Main,
+  the TPM file discovered 1,488 tests; 1,483 were not run. No full Main,
   Support, or canonical suite was run. PS7 receipt SHA-256
   `B8982B68EFD4A31525ED27ACB2295E40285410785991AF9328CD8A8120786C39`;
   PS5.1 receipt SHA-256

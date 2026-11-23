@@ -203,6 +203,14 @@ Describe 'LEDBlinky lighting export' {
         Should -Invoke Write-TpmOutcome -Times 1 -Exactly -ParameterFilter { ($Needs -join ' ') -match 'need.* your choice' }
     }
 
+    It 'the preview shown after the user chose A tells them to answer Y, not to choose A again' {
+        $fx = New-LedFixture
+        New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana'
+        $plan = Get-TpmLedExportPlan -UserProfilesDir $fx.Profiles -ControlsPath $fx.Controls
+        Write-TpmLedPreview -Plan $plan -Layout $fx.Layout -AfterAdd
+        Should -Invoke Write-TpmOutcome -Times 1 -Exactly -ParameterFilter { $Next -match 'Answer Y' -and $Next -notmatch 'Choose A' }
+    }
+
     It 'a control with no LED in the LED map is held back and shown as needing a choice, never written' {
         $fx = New-LedFixture -NoLed @('P1_BUTTON2')
         New-LedProfile -Dir $fx.Profiles -Name 'AkaiKatana'

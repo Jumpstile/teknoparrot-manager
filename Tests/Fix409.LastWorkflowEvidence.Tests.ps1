@@ -5,7 +5,7 @@ BeforeAll {
     $sourcePath = Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'
     $tokens = $null; $parseErrors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($sourcePath, [ref]$tokens, [ref]$parseErrors)
-    if ($parseErrors.Count -gt 0) { throw 'Fix409 bootstrap could not parse the manager.' }
+    if ($parseErrors.Count -gt 0) { throw 'Fix409 bootstrap could not parse TPM.' }
     $functionsPath = Join-Path $TestDrive 'fix409-functions.ps1'
     ($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) |
         ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n" | Set-Content -LiteralPath $functionsPath

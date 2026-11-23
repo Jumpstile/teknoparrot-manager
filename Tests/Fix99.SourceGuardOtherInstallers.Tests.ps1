@@ -469,6 +469,12 @@ Describe 'FIX99 required game patches never change a game inside the source coll
         $script:gamesInstallFolder = $script:f99Lib.Games
         $script:f99Answers = New-Object 'System.Collections.Generic.Queue[string]'
         $script:f99Game = 'Alpha'
+        # A real install leaves a saved undo copy (receipt.json) in Backups\GamePatches. The Undo list shows only games that have one, so the fixture leaves one for each patch the tests below use.
+        foreach ($savedId in @('alpha-main-one', 'beta-one')) {
+            $savedDir = Join-Path $script:TpmOwnedLayout.Backups ('GamePatches\' + ([guid]::NewGuid().ToString('N')))
+            [void][System.IO.Directory]::CreateDirectory($savedDir)
+            [System.IO.File]::WriteAllText((Join-Path $savedDir 'receipt.json'), (@{ PatchId = $savedId; ProfileId = 'x'; GameRoot = 'x' } | ConvertTo-Json))
+        }
         Mock Test-TpmInteractiveInput { $true }
         Mock Read-HostSafe { if ($script:f99Answers.Count -gt 0) { return $script:f99Answers.Dequeue() }; return '' }
         # The menu compares the game file with the catalog hash before it plans a patch, so the entry carries the real hash of the fixture game file (all fixture games share the same bytes).

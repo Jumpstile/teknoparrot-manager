@@ -73,7 +73,7 @@ No unrelated cleanup, additional recipes, engine behavior changes, commits, push
 - Release/certification authorized: No
 ## 14. Isolated implementation and focused verification result
 
-- The 62nd candidate entry is present in the isolated catalog. The prior 61 entries remain semantically unchanged; the required-patch engine diff is limited to the catalog SHA-256 pin, and the manager script matches base `cc307092553397c8eb56543e9cb4db1219fb73ef`.
+- The 62nd candidate entry is present in the isolated catalog. The prior 61 entries remain semantically unchanged; the required-patch engine diff is limited to the catalog SHA-256 pin, and the TPM script matches base `cc307092553397c8eb56543e9cb4db1219fb73ef`.
 - The standalone portable suite passed 7/7 under explicit Pester 5.7.1 on PowerShell 7.6.7 and Windows PowerShell 5.1.26100.9549. The targeted central catalog identity test passed 1/1 on each engine; 1,487 other central tests were filtered out.
 - Exact focused input/output receipt SHA-256: `7706F6AA6D23869A400D08A9D033B4E36B80E00F2DD713F3A6C41AAD36778642`. No focused-test input changed during execution.
 - These results are isolated staging evidence only. The requested current summaries are synchronized in the README, changelog, quick-start, architecture, and wiki-staging files; no live wiki write occurred. Root-owned combined suites and procedure/security/static gates, CI, package validation, and owner-runtime validation remain pending. No compatibility, gameplay, complete-setup, release, or owner-acceptance claim is made.

@@ -8,13 +8,13 @@ The coverage tool reads this file. TeknoParrot Manager does not read it while it
 
 Each row in `Profiles` has one `Disposition`. It is the first rule that applies, in this order:
 
-| Disposition | What the Manager does |
+| Disposition | What TPM does |
 |---|---|
-| `not-supported` | The guide marks the game unsupported, broken or no longer used. The reason is listed. The Manager cannot make it work. Game Notes says "Guide status: Broken" for a registered game. |
+| `not-supported` | The guide marks the game unsupported, broken or no longer used. The reason is listed. TPM cannot make it work. Game Notes says "Guide status: Broken" for a registered game. |
 | `tpm-applies-patch` | A reviewed patch is in `scripts\TpmRequiredPatchRecipes.json`. It is applied only on an exact match, with a backup and a receipt. |
-| `tpm-checks-files` | The Manager checks the emulator startup files (PCSX2x6, Chihiro/CxbxR, RPCS3, Play!) and copies them only from the player's own archive. |
+| `tpm-checks-files` | TPM checks the emulator startup files (PCSX2x6, Chihiro/CxbxR, RPCS3, Play!) and copies them only from the player's own archive. |
 | `needs-own-archive` | The guide names extra archives. Game Notes lists them. The player brings their own copy. Nothing is downloaded. |
-| `tpm-warns` | The Manager already warns: a graphics card the game does not work on, a path length limit, or a required file version. |
+| `tpm-warns` | TPM already warns: a graphics card the game does not work on, a path length limit, or a required file version. |
 | `guided` | Game Notes shows the guide text (notes, setup steps, second file, test program, linked profile, graphics card notes). |
 | `register-only` | The guide lists nothing beyond registration. |
 
@@ -26,8 +26,8 @@ Each row in `Profiles` has one `Disposition`. It is the first rule that applies,
 
 - `upstream-automatic`: TeknoParrot applies the fix by itself.
 - `generic-fix-field`: the existing GPU Fix setup sets the profile field named in `Field`. Only the exact text "Select AMD Fix in settings" is used for this.
-- `guided`: Game Notes shows the text. The Manager changes nothing.
-- `warning`: the Manager warns, or Game Notes shows the text.
+- `guided`: Game Notes shows the text. TPM changes nothing.
+- `warning`: TPM warns, or Game Notes shows the text.
 - `not-applicable`: the entry is no longer used.
 
 `NotGpuConditions` lists notes that say "Intel" but mean the processor, or do not say which. They never become a graphics card warning.

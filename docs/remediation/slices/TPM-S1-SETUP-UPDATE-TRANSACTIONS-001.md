@@ -18,7 +18,7 @@
 
 ## 4. Behavior contract
 
-- Current failure: Invoke-PostgresGameSetup and the manager update paths did not expose one validated result contract to their callers; update callers treated booleans as authoritative.
+- Current failure: Invoke-PostgresGameSetup and the TPM update paths did not expose one validated result contract to their callers; update callers treated booleans as authoritative.
 - Expected behavior: Invoke-PostgresGameSetup, Invoke-ManagerUpdateInstall, Invoke-CheckForUpdates, and Invoke-StartupUpdateCheck return TPM.TransactionResult.v1 for every terminal path. The result records pre-state, mutation, backup, final verification, rollback, cleanup, item accounting, outcome, and beginner-safe summary. Callers validate the result and restart or claim completion only for SUCCEEDED.
 - Forbidden regressions: no destructive mutation without verified recovery evidence; no false success after failed final verification; no unverified rollback presented as restored; no terminal item overlap or unaccounted item set; no paths, commands, hashes, database names, credentials, or raw exception text in normal summaries; no change to excluded workflows.
 - Design boundaries and deliberate exclusions: existing legacy detail properties remain available for current display and workflow code, but Outcome/ProductState and the v1 result are authoritative. No optional download/artifact outer-contract migration is included.

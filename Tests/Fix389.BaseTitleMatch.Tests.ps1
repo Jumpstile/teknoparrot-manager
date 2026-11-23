@@ -134,3 +134,42 @@ Describe 'Resolve-BestFuzzyMatch with consecutive years of one game' {
         $r.Best.Code | Should -BeExactly 'GoldenTeeLive2023'
     }
 }
+
+# Issue #441: "Daemon Bride (2009)(JPN)[EXAMU eX-BOARD][TP]" was given the profile of "Daemon Bride - Additional Gain" because the short title scores
+# higher against DaemonBrideAG than against DaemonBrideExboard. The note in the folder name now names the profile whose name ends the same way.
+Describe 'Resolve-BestFuzzyMatch tells two games that share a title start apart by the note in the folder name' {
+    BeforeAll {
+        function Invoke-DaemonMatch {
+            param([string]$Folder, [string[]]$Codes, [hashtable]$Names = $null)
+            $matchList = @($Codes | ForEach-Object { [pscustomobject]@{ Code = $_ } })
+            $notes = ([regex]::Replace([regex]::Match($Folder, '[\(\[].*$').Value, '[^A-Za-z0-9]', '')).ToLowerInvariant()
+            return Resolve-BestFuzzyMatch -NormFolder (Get-NormalizedGameKey $Folder) -MatchList $matchList -RawThrillsAliases @{} -NormBaseTitle (Get-TpmBaseTitleKey $Folder) -AlternateNames $Names -NormNotes $notes
+        }
+        $script:ExamuFolder = 'Daemon Bride (2009)(JPN)[EXAMU eX-BOARD][TP]'
+        $script:AgFolder = 'Daemon Bride - Additional Gain (2011)(JPN)[Taito NESiCAxLive][TP]'
+    }
+    It 'gives the EXAMU folder its own profile, whichever profile is listed first' -ForEach @(
+        @{ Codes = @('DaemonBrideAG', 'DaemonBrideExboard') }
+        @{ Codes = @('DaemonBrideExboard', 'DaemonBrideAG') }
+    ) {
+        $r = Invoke-DaemonMatch -Folder $script:ExamuFolder -Codes $Codes
+        $r.IsConfidentMatch | Should -BeTrue
+        $r.Best.Code | Should -BeExactly 'DaemonBrideExboard'
+    }
+    It 'gives the Additional Gain folder its own profile, and never the EXAMU one' -ForEach @(
+        @{ Codes = @('DaemonBrideAG', 'DaemonBrideExboard') }
+        @{ Codes = @('DaemonBrideExboard', 'DaemonBrideAG') }
+    ) {
+        $names = @{ DaemonBrideAG = 'Daemon Bride - Additional Gain'; DaemonBrideExboard = 'Daemon Bride' }
+        $r = Invoke-DaemonMatch -Folder $script:AgFolder -Codes $Codes -Names $names
+        $r.IsConfidentMatch | Should -BeTrue
+        $r.Best.Code | Should -BeExactly 'DaemonBrideAG'
+        $bare = Invoke-DaemonMatch -Folder $script:AgFolder -Codes $Codes
+        ($bare.IsConfidentMatch -and $bare.Best.Code -ceq 'DaemonBrideExboard') | Should -BeFalse
+    }
+    It 'still picks the plain game when a profile is named exactly like the folder title' {
+        $r = Invoke-DaemonMatch -Folder 'Raiden IV (1.03J)[Taito NESiCAxLive][TP]' -Codes @('RaidenIV', 'RaidenIVNesica')
+        $r.IsConfidentMatch | Should -BeTrue
+        $r.Best.Code | Should -BeExactly 'RaidenIV'
+    }
+}

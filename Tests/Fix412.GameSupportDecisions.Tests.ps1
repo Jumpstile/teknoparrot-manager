@@ -8,7 +8,7 @@ BeforeAll {
     $sourcePath = Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'
     $tokens = $null; $parseErrors = $null
     $script:f412Ast = [System.Management.Automation.Language.Parser]::ParseFile($sourcePath, [ref]$tokens, [ref]$parseErrors)
-    if ($parseErrors.Count -gt 0) { throw 'Fix412 bootstrap could not parse the manager.' }
+    if ($parseErrors.Count -gt 0) { throw 'Fix412 bootstrap could not parse TPM.' }
     $functionsPath = Join-Path $TestDrive 'fix412-functions.ps1'
     ($script:f412Ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) |
         ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n" | Set-Content -LiteralPath $functionsPath
@@ -80,7 +80,7 @@ Describe 'Game support decisions file' {
         }
     }
 
-    It 'says "emulator files" only for the loaders whose startup files the Manager checks' {
+    It 'says "emulator files" only for the loaders whose startup files TPM checks' {
         $checked = @('pcsx2x6', 'cxbxr', 'RPCS3', 'Play')
         foreach ($row in @($script:f412Decisions.Profiles | Where-Object { @($_.Signals) -contains 'emulator-files' })) { $checked | Should -Contain $row.Loader }
         foreach ($row in @($script:f412Decisions.Profiles | Where-Object { $checked -contains $_.Loader })) { @($row.Signals) | Should -Contain 'emulator-files' }

@@ -102,6 +102,20 @@ Describe 'Controller layout choice' {
         ($back.Slots | ConvertTo-Json) | Should -Be ($b.Slots | ConvertTo-Json)
     }
 
+    It 'the change-one-button screens name pad buttons the way the chosen layout does, and the saved file keeps Xbox names' {
+        Get-TpmPadDisplayName -Preset 'PlayStation' -PadName 'LB' | Should -Be 'L1'
+        Get-TpmPadDisplayName -Preset 'PlayStation' -PadName 'A' | Should -Be 'Cross'
+        Get-TpmPadDisplayName -Preset 'Nintendo' -PadName 'RB' | Should -Be 'R'
+        Get-TpmPadDisplayName -Preset 'Xbox' -PadName 'LB' | Should -Be 'LB'
+        (New-TpmBaseline -Preset 'PlayStation').Slots['P1Button5'] | Should -Be 'LB'
+    }
+
+    It 'an arcade stick shows neutral numbered button names, never Xbox or PlayStation names' {
+        $labels = @(Get-CtlLayout 'ArcadeStick' | Where-Object Mapping -like 'P1Button?' | ForEach-Object { $_.Label })
+        $labels | Should -Be @('Button 1', 'Button 2', 'Button 3', 'Button 4', 'Button 5', 'Button 6')
+        (New-TpmBaseline -Preset 'ArcadeStick').Slots['P1Button1'] | Should -Be 'X'
+    }
+
     It 'asks again when there is no saved layout or the file is damaged' {
         Read-TpmBaseline -StateDir $script:State | Should -BeNullOrEmpty
         [void][System.IO.Directory]::CreateDirectory($script:State)

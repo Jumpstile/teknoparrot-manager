@@ -114,7 +114,7 @@ Describe 'FIX45 progress frame width and wrapped-frame cleanup' {
                 }
             }
             function script:Write-F45Host {
-                # The manager's Write-Host proxy: lift the bar, write, put the bar back below the text.
+                # TPM's Write-Host proxy: lift the bar, write, put the bar back below the text.
                 param([string]$Text, [switch]$NoNewline)
                 $lifted = Suspend-TpmProgressOutput
                 try { Write-F45Cells ($Text + $(if ($NoNewline) { '' } else { "`n" })) }
