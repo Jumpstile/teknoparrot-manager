@@ -2,12 +2,21 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-RC9 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
-The previous published release was v1.0 RC8.4: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4. RC8.3 and older are earlier published releases. RC4 and RC5 are historical; RC4 is superseded.
+RC9.1 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
+The previous published release was v1.0 RC9: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9. RC8.4 and older are earlier published releases. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
 ---
+
+## v1.0 RC9.1 (changes since RC9)
+
+- Every game was checked again against TeknoParrot 1.0.0.2334 and the
+  Eggman list of 2026-11-23. docs\GAME-SUPPORT.md lists every game
+  (2,544 TeknoParrot profiles).
+- The version labels are corrected, so the program, the guides and the
+  update check all say RC9.1.
+- There is no other change from RC9.
 
 ## v1.0 RC9 (changes since RC8.4)
 
@@ -85,7 +94,7 @@ The previous published release was v1.0 RC8.4: https://github.com/Jumpstile/tekn
 
 ### Games and registration
 - Every game in the Eggman list was run through the real registration
-  on a fake collection (1,585 games) and the gaps are fixed. A game gets
+  on a fake collection (1,596 games) and the gaps are fixed. A game gets
   the profile the list names for it, not the one with the most alike
   name (The King of Fighters XII was registered as XIV). A second
   version of a game is registered, or reported as a duplicate when
@@ -120,8 +129,6 @@ The previous published release was v1.0 RC8.4: https://github.com/Jumpstile/tekn
   game and close it twice the first time, and how to reset BepInEx.
 - If the DAT game list uses a format version TPM does not know,
   it says so in plain words and still reads it.
-- docs\GAME-SUPPORT.md lists every game, built from the current guide
-  and the 2,541 current TeknoParrot profiles.
 
 ### Incredible Technologies games and PostgreSQL
 - Golden Tee Live and PGA Tour, PowerPutt Live, Silver Strike Bowling

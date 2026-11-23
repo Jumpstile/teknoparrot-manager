@@ -12,13 +12,13 @@ This page says, game by game, what TeknoParrot Manager does for the games in the
 
 ## Totals
 
-2550 game IDs in all: 1607 guide games, 858 guide versions (other ROM revisions of a game), and 85 catalog profiles that the guide does not list.
+2553 game IDs in all: 1607 guide games, 858 guide versions (other ROM revisions of a game), and 88 catalog profiles that the guide does not list.
 
 | Applied | Checked | Guided | Handled | Gap |
 |---|---|---|---|---|
-| 54 | 147 | 2238 | 102 | 9 |
+| 54 | 157 | 2238 | 95 | 9 |
 
-The catalog used is TeknoParrot 1.0.0.2325 with 2541 game profiles. 9 guide IDs have no profile in it; those are the Gap rows. 65 guide entries have supplementary archives that TeknoParrot Manager never downloads.
+The catalog used is TeknoParrot 1.0.0.2334 with 2544 game profiles. 9 guide IDs have no profile in it; those are the Gap rows. 65 guide entries have supplementary archives that TeknoParrot Manager never downloads.
 
 ## By emulator
 
@@ -29,7 +29,7 @@ The catalog used is TeknoParrot 1.0.0.2325 with 2541 game profiles. 9 guide IDs 
 | TeknoParrot | 339 | 339 | 45 | 31 | 240 | 23 | 0 |
 | TeknoMVS (ROM) | 287 | 287 | 0 | 0 | 284 | 3 | 0 |
 | TeknoS11 (ROM) | 230 | 230 | 0 | 0 | 194 | 36 | 0 |
-| ElfLdr2 | 114 | 114 | 7 | 29 | 66 | 12 | 0 |
+| ElfLdr2 | 117 | 117 | 7 | 39 | 66 | 5 | 0 |
 | TeknoSTV (ROM) | 69 | 69 | 0 | 0 | 69 | 0 | 0 |
 | TeknoSS32 (ROM) | 67 | 67 | 0 | 0 | 61 | 6 | 0 |
 | pcsx2x6 | 47 | 47 | 0 | 47 | 0 | 0 | 0 |

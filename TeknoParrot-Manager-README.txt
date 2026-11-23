@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC9
+  TeknoParrot Manager  |  v1.0 RC9.1
   Author: Jumpstile
 ===============================================================================
 
@@ -12,15 +12,15 @@
   up your game settings before it changes them, and Details and the log
   show what was done. See docs\ADVANCED-USERS.md.
 
-  This is v1.0 RC9, the latest published release:
+  This is v1.0 RC9.1, the latest published release:
+  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1
+  The previous published release is v1.0 RC9:
   https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9
-  The previous published release is v1.0 RC8.4:
-  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4
-  If you use RC8.4, choose 15) Check for Updates to get RC9.
-  The older published releases are v1.0 RC8.3, RC8.2, RC8.1, RC7 and RC6.
+  If you use RC9, choose 15) Check for Updates to get RC9.1.
+  Older published releases: v1.0 RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6.
   RC8 was a tester build and was never published.
   Final Version 1.0 has not been published yet.
-  The changes since RC8.4 are in TeknoParrot-Manager-CHANGELOG.txt.
+  The changes since RC9 are in TeknoParrot-Manager-CHANGELOG.txt.
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after each run. AutoSync backs up UserProfiles before
@@ -2260,7 +2260,7 @@
   EVERY TEKNOPARROT GAME
 
   TPM is checked against every game setup file in TeknoParrot
-  1.0.0.2325 (2,541 of them), and against the Eggman game list and guide. docs\GAME-SUPPORT.md lists every game
+  1.0.0.2334 (2,544 of them), and against the Eggman game list and guide. docs\GAME-SUPPORT.md lists every game
   and what TPM does for it. These cases work with no extra steps:
 
     Two versions of a game   Each version is registered. If TeknoParrot has
@@ -6547,7 +6547,7 @@
 
 
 ===============================================================================
-  Latest published release: v1.0 RC9. Previous published release: v1.0 RC8.4.
+  Latest published release: v1.0 RC9.1. Previous published release: v1.0 RC9.
   Test one game after every run. AutoSync backs up UserProfiles before
   extraction; preview mode skips the backup.
 ===============================================================================

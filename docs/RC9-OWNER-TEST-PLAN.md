@@ -1,6 +1,6 @@
-# RC9 owner test plan
+# RC9.1 owner test plan
 
-This is the one list of everything the owner checks by hand before RC9 goes out. Automatic tests use fake files and cannot press a real button, open a real game or talk to a real database, so these steps are the proof for those parts. Run the whole list once, at the end, on the test PC. Do not use a TeknoParrot folder or a PC you care about. Write down what you saw for each step; a screenshot helps.
+This is the one list of everything the owner checks by hand before RC9.1 goes out. Automatic tests use fake files and cannot press a real button, open a real game or talk to a real database, so these steps are the proof for those parts. Run the whole list once, at the end, on the test PC. Do not use a TeknoParrot folder or a PC you care about. Write down what you saw for each step; a screenshot helps.
 
 Every step has a tag in square brackets:
 
@@ -45,7 +45,7 @@ Use your real Eggman collection on the test PC. Copy it first or use a test Tekn
 20. **[no hardware needed]** Pick After Burner Climax, Virtua Fighter 5 (1.001 Ver B) and R-Tuned. Pass: TeknoParrot shows the Lindbergh profile and the ElfLdr2 profile of each. Start one ElfLdr2 game from TeknoParrot and write down whether it starts.
 21. **[no hardware needed]** Pick Minecraft Dungeons Arcade and Golden Tee Fore! 2004. Pass: both are registered.
 22. **[no hardware needed]** Open the Sega Rally 3 track mod folders. Pass: they are listed as "not in TeknoParrot", not as a failed profile.
-23. **[no hardware needed]** Open `docs\GAME-SUPPORT.md`. Pass: the totals read 2550 game IDs and 9 Gap rows. Seven of the Gap rows are the Sega Rally 3 track mods (6) and Escape from Monster Manor: TeknoParrot has no profile for them. The other two (Battle Gear 3 and Wayne Gretzky's 3D Hockey Fatality Edition) run through a linked profile. The page also has a "Second profile not written" line for four games (House of the Dead 4, Raiden III, Raiden IV, Densha de GO); they are not Gap rows.
+23. **[no hardware needed]** Open `docs\GAME-SUPPORT.md`. Pass: the totals read 2553 game IDs and 9 Gap rows. Seven of the Gap rows are the Sega Rally 3 track mods (6) and Escape from Monster Manor: TeknoParrot has no profile for them. The other two (Battle Gear 3 and Wayne Gretzky's 3D Hockey Fatality Edition) run through a linked profile. The page also has a "Second profile not written" line for four games (House of the Dead 4, Raiden III, Raiden IV, Densha de GO); they are not Gap rows.
 24. **[no hardware needed]** Run a BepInEx install (menu 9) on one BepInEx game (for example Family Guy Bowling). Pass: the result tells you to start the game and close it twice the first time, and the game then starts.
 25. **[no hardware needed]** Required fixes, exact builds. Register Family Guy Bowling, then choose 12) Required game patches, then A. Pass: it lists the fix, Y installs it, U puts everything back, and the game starts after install.
 26. **[no hardware needed]** Graphics card choice. Do the last step with Shining Force Cross Elysion on a PC with an AMD card and again on one with an NVIDIA card. Pass: it asks which card you have when it cannot tell, installs only that card's file, and skips a file that is already right.

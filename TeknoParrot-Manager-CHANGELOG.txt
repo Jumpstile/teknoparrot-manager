@@ -2,10 +2,21 @@
   TeknoParrot Manager  --  CHANGELOG
   Author: Jumpstile
 ===============================================================================
-  Newest version first. RC9 is the latest published version. RC8.4 is the
+  Newest version first. RC9.1 is the latest published version. RC9 is the
   previous published version. RC8 was a tester build and was never
   published. Final Version 1.0 comes later.
 
+
+  v1.0 RC9.1 (changes since RC9)
+  ----------------------------------------------------------------
+
+  - Every game was checked again against TeknoParrot 1.0.0.2334 and the
+    Eggman list of 2026-11-23. docs\GAME-SUPPORT.md lists every game and
+    names four (House of the Dead 4, Raiden III, Raiden IV, Densha de GO)
+    whose second profile the list does not explain, so none is written.
+  - The version labels are corrected, so the program, the guides and the
+    update check all say RC9.1.
+  - There is no other change from RC9.
 
   v1.0 RC9 (changes since RC8.4)
   ----------------------------------------------------------------
@@ -84,7 +95,7 @@
 
   Games and registration
   - Every game in the Eggman list was run through the real registration
-    on a fake collection (1,585 games) and the gaps are fixed. A game gets
+    on a fake collection (1,596 games) and the gaps are fixed. A game gets
     the profile the list names for it, not the one with the most alike
     name (The King of Fighters XII was registered as XIV). A second
     version of a game is registered, or reported as a duplicate when
@@ -119,10 +130,6 @@
     game and close it twice the first time, and how to reset BepInEx.
   - If the DAT game list uses a format version TPM does not know,
     it says so in plain words and still reads it.
-  - docs\GAME-SUPPORT.md lists every game, built from the current guide
-    and the 2,541 current TeknoParrot profiles. It also names four games
-    (House of the Dead 4, Raiden III, Raiden IV, Densha de GO) whose second
-    profile the list does not explain, so none is written for them.
   - AutoSync gives each game its own folder and profile, even when its
     profile points at another game's folder or two games start with the
     same name (Daemon Bride, Daemon Bride - Additional Gain). Register
@@ -286,12 +293,11 @@
     Input API, and "already set up" counts only games that have controls.
 
   Also new in this release
-  - LEDBlinky lighting (optional): if you use LEDBlinky, TPM can
-    add lighting info for your games. It looks for LEDBlinky on your
-    drives and in Program Files, or asks where it is and remembers the
-    folder. A game gets only the controls it uses that your cabinet has.
-    You see a preview first, a saved copy is made, and you can undo it.
-    Only entries TPM added are ever removed.
+  - LEDBlinky lighting (optional): if you use LEDBlinky, TPM can add lighting
+    info for your games. It looks for LEDBlinky on your drives and in Program
+    Files, or asks where it is and remembers the folder. A game gets only the
+    controls it uses that your cabinet has. You see a preview first, a saved
+    copy is made, and you can undo it. Only entries TPM added are ever removed.
   - LaunchBox: TPM can look each game up in LaunchBox's own game
     list on your PC and use the official name and the Games Database ID,
     so LaunchBox can find info and artwork. Choose [L] in the LaunchBox
@@ -306,9 +312,8 @@
   - LaunchBox: a new optional step adds clear logos or box art from a
     folder you pick. You see a preview first, close matches are used only
     if you say yes, and Undo removes the pictures that were added.
-  - Games that need PlayStation 3 firmware (RPCS3) or a Play! game file
-    are now checked before they start, and TPM tells you what is
-    missing.
+  - Games that need PlayStation 3 firmware (RPCS3) or a Play! game file are now
+    checked before they start, and TPM tells you what is missing.
   - The game list now also reads a second program and a test menu program
     for games that list them.
 
@@ -316,9 +321,8 @@
   - After unpacking, when every new game was also registered in
     TeknoParrot, the message now says so. The "unpacked only" warning
     shows only when a game still needs your attention.
-  - A game profile with odd characters in its program name, such as a
-    quote or a pipe, no longer stops TPM with "Illegal
-    characters in path".
+  - A game profile with odd characters in its program name, such as a quote or
+    a pipe, no longer stops TPM with "Illegal characters in path".
   - If a second problem is found on the PostgreSQL setup screen, it is
     shown and you return to the menu instead of TPM stopping.
   - All screens and guides use American spelling.
@@ -372,8 +376,7 @@
     working game. When it refuses a game, the log says why.
   - If you close the Game ZIP folder window without picking a folder, the
     question is asked again. Type Q to go back.
-  - When a support package cannot list the plugins of a game, it now says
-    why.
+  - When a support package cannot list the plugins of a game, it now says why.
 
   v1.0 RC8.1 (changes since RC7)
   ----------------------------------------------------------------
@@ -389,9 +392,8 @@
   - If an update was cut off (power loss or a closed window), the next
     start says so and tells you how to get the old files back from the
     UpdateBackups folder. It never deletes anything for you.
-  - Older builds cannot do this. Install RC8.1 or newer by hand once:
-    download the ZIP from the Releases page and extract it over your old
-    folder.
+  - Older builds cannot do this. Install RC8.1 or newer by hand once: download
+    the ZIP from the Releases page and extract it over your old folder.
   - A ZIP without the script, or a CPS3 ZIP that cannot be read, is
     refused. If the Eggman page has no DAT file, it says so.
   - The updater says the old version was put back only when it checked that
@@ -585,9 +587,8 @@
     update leaves no spare copy in the game folder.
   - If the registration record cannot be read, the file is left as it is and
     you are told. AutoSync only calls its profile backup complete when it
-    matches your live profiles. A short registration list is saved in its
-    own file, and ACTION REQUIRED does not say a list was saved when none
-    was.
+    matches your live profiles. A short registration list is saved in its own
+    file, and ACTION REQUIRED does not say a list was saved when none was.
 
   Library Health check
   - It says "Could not check" and asks for attention, instead of OK, when
@@ -606,10 +607,9 @@
     programs and passwords. Folder names with spaces are hidden.
   - A package with missing information says "partial" and names what is
     missing. An empty log file is not called a failure. It keeps the newest
-    part of a main log over 5 MB, lists each game's real controls and
-    counts a profile snapshot only if it is inside. A complete ZIP that
-    left a temporary folder behind says it is ready to send and names the
-    folder under Details.
+    part of a main log over 5 MB, lists each game's real controls and counts a
+    profile snapshot only if it is inside. A complete ZIP that left a temporary
+    folder behind says it is ready to send and names the folder under Details.
   - The package now says how the last finished job ended, such as a
     setup that stopped, even after you restarted. It keeps the last few
     step results with personal folder names removed.
@@ -623,12 +623,11 @@
     more carefully: the main file may just have a different name.
   - Release packages hold only the files users need. On a slow PC, a late
     drive check does not show a wrong "could not tell" warning.
-  - The game notes file now also lists the guide's setup steps, graphics
-    card notes and extra files for your registered games, not only the
-    free-text notes. It also names the extra archives a game needs (you
-    bring your own copy; none is downloaded), a linked profile, and a
-    game the guide lists as broken or only partly working. Nothing in it
-    is applied for you.
+  - The game notes file now also lists the guide's setup steps, graphics card
+    notes and extra files for your registered games, not only the free-text
+    notes. It also names the extra archives a game needs (you bring your own
+    copy; none is downloaded), a linked profile, and a game the guide lists as
+    broken or only partly working. Nothing in it is applied for you.
   - The graphics card warning list has five more games that do not work
     on an Intel graphics card.
 

@@ -115,7 +115,7 @@ function Assert-TPMReleasePackageRequiredScreenshotSourceV1 {
     foreach ($asset in $screenshotAssets) {
         $sourcePath = Join-Path $sourceRootFull ($asset.SourcePath.Replace('/', [System.IO.Path]::DirectorySeparatorChar))
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
-            throw "PACKAGE_REQUIRED_SCREENSHOT_MISSING: '$($asset.SourcePath)' must be an actual current RC9 capture"
+            throw "PACKAGE_REQUIRED_SCREENSHOT_MISSING: '$($asset.SourcePath)' must be an actual current capture"
         }
     }
     foreach ($asset in $screenshotAssets) {
@@ -191,7 +191,7 @@ function Test-TPMReleasePackageArchiveV1 {
     param(
         [Parameter(Mandatory = $true)][string]$ZipPath,
         [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot),
-        [string]$ExpectedDisplayVersion = 'v1.0 RC9'
+        [string]$ExpectedDisplayVersion = 'v1.0 RC9.1'
     )
     Set-StrictMode -Version Latest
     $sourceRootFull = [System.IO.Path]::GetFullPath($SourceRoot)

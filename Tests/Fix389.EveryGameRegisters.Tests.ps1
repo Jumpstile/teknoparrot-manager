@@ -2,7 +2,7 @@
 
 # Issues 389 and 351 (every game TeknoParrot supports must register): real-game cases.
 # testdata\real-game-registration-fixture.json holds facts only (profile codes, game file names, game names) reduced from the real TeknoParrot
-# profile set (build 2325) and the real Eggman collection list (2026-11-20). The test builds fake game folders from it in TestDrive and runs
+# profile set (build 2334) and the real Eggman collection list (2026-11-23). The test builds fake game folders from it in TestDrive and runs
 # the real registration (Register-GamesLegacy, real profile writes into a temp UserProfiles folder) once, then checks what a player sees.
 # Each group below is a failure that the full real-data run found before the fix:
 #   - a second version of a game was dropped without a word because the first version had just been registered in the same run;

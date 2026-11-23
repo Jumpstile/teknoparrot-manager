@@ -8,7 +8,7 @@ TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-> **This guide describes v1.0 RC9.** RC9 is the latest published release. It adds an Internal or Existing PostgreSQL choice for Golden Tee and other games that keep a database, better game matching for LaunchBox, a bezel step in ReShade setup, more checks in Library health check, and fixes for problems that testers found. The previous published release is v1.0 RC8.4. If you use RC8.4, choose Check for Updates (menu 15) to get RC9. The older published releases are v1.0 RC8.3, RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. The changes since RC8.4 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 has not been published yet. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
+> **This guide describes v1.0 RC9.1.** RC9.1 is the latest published release. It is the same program as RC9. Every game was checked again against TeknoParrot 1.0.0.2334, and the version labels are corrected. The previous published release is v1.0 RC9. If you use RC9, choose Check for Updates (menu 15) to get RC9.1. The older published releases are v1.0 RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. The changes since RC9 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 has not been published yet. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
 
 
 ## Start here: your first game in about 10 minutes
@@ -19,7 +19,7 @@ Allow about 10 minutes once your downloads are ready.
 
 Installing TeknoParrot, updates, large games, and special controllers take longer.
 
-Release page of the latest published release: [v1.0 RC9](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9).
+Release page of the latest published release: [v1.0 RC9.1](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1).
 
 You need:
 
@@ -1060,7 +1060,7 @@ After new games are registered, you are asked once which country they should sta
 
 ### Every TeknoParrot game
 
-TeknoParrot Manager is checked against every game profile in TeknoParrot 1.0.0.2325 (2,541 profiles), and against the Eggman game list and guide. [docs/GAME-SUPPORT.md](GAME-SUPPORT.md) lists every game and what TPM does for it. These cases work with no extra steps:
+TeknoParrot Manager is checked against every game profile in TeknoParrot 1.0.0.2334 (2,544 profiles), and against the Eggman game list and guide. [docs/GAME-SUPPORT.md](GAME-SUPPORT.md) lists every game and what TPM does for it. These cases work with no extra steps:
 
 - **Two versions of a game.** Each version is registered. If TeknoParrot has only one profile for both, the second one is reported as a duplicate. It is never dropped without a message.
 - **A Lindbergh game.** TeknoParrot has retired its Lindbergh profile and replaced it with a newer ElfLdr2 profile. The Eggman list names both, and both are registered. If the ElfLdr2 profile needs a game file that is not in the folder, it is left out and the log says why.
@@ -1069,7 +1069,7 @@ TeknoParrot Manager is checked against every game profile in TeknoParrot 1.0.0.2
 
 #### More detail: Every TeknoParrot game
 
-- The registration was run on a fake collection with one folder for each of the 1,585 games in the Eggman list of 2026-11-20 (empty files, the real profiles, the real list). 1,565 games got every profile the list names. 16 share one profile with other versions (one is registered, the rest are reported as duplicates). 4 name a second profile that is not written: one Lindbergh game whose ElfLdr2 profile needs a file the folder does not have, and three games (Raiden III, Raiden IV, Densha de GO) whose second profile is not a retired one.
+- The registration was run on a fake collection with one folder for each of the 1,598 entries in the Eggman list of 2026-11-23 (1,596 of them are games with a profile; empty files, the real profiles, the real list). 1,576 games got every profile the list names. 16 share one profile with other versions (one is registered, the rest are reported as duplicates). 4 name a second profile that is not written: one Lindbergh game whose ElfLdr2 profile needs a file the folder does not have, and three games (Raiden III, Raiden IV, Densha de GO) whose second profile is not a retired one.
 - A game whose profile names a child ZIP and a parent ZIP (`ddr2ml.zip;ddr2m.zip`) is registered when the list names the parent ZIP, which is the only ZIP in its folder.
 - The other revisions of a merged ROM set (CPS, Neo Geo MVS, System 32 and similar; about 740 profiles) are chosen with the Game Revision setting inside TeknoParrot, so the one registered profile covers them.
 - The file types come from the profiles, so a new game with a new kind of file needs no new TPM version.
@@ -3863,5 +3863,5 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> TeknoParrot Manager v1.0 RC9 is the latest published release. The previous published release is v1.0 RC8.4. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
+> TeknoParrot Manager v1.0 RC9.1 is the latest published release. The previous published release is v1.0 RC9. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
 
