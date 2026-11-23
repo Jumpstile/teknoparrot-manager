@@ -219,6 +219,36 @@ Describe 'Rebuild one game from its ZIP (FIX412)' {
         @(Get-F412Leftovers -Fixture $fx).Count | Should -Be 0
     }
 
+    It 'names the folder that really holds the old files when the cleanup of the extraction marker fails' {
+        # Mutation: take the first leftover path (the marker file) instead of the transaction folder -> the message names a folder that does not exist.
+        $fx = New-F412Fixture
+        $script:f412RealRemove = ${function:Invoke-TpmAutoSyncRemovePath}
+        Mock Invoke-TpmAutoSyncRemovePath {
+            if ([string]$Path -like '*.extracting') { throw 'simulated lock on the marker file' }
+            & $script:f412RealRemove @PesterBoundParameters
+        }
+
+        $result = Invoke-TpmRebuildGame -Game (New-F412Game -Fixture $fx) -ZipPath $fx.Zip -InstallFolder $fx.Games -SyncStatePath $fx.SyncState
+
+        $result.Outcome | Should -Be 'SUCCEEDED'
+        $keptAt = [string]($result.Summary -replace '^.*It is kept here: ', '')
+        Test-Path -LiteralPath $keptAt -PathType Container | Should -BeTrue
+        [IO.File]::ReadAllText((Join-Path $keptAt 'save.dat')) | Should -BeExactly 'my save'
+    }
+
+    It 'says so when only the AutoSync record of an up-to-date game was repaired' {
+        # Mutation: always say "Nothing was changed" for a rebuild that finds the folder already matches -> the repaired record goes unmentioned.
+        $fx = New-F412Fixture
+        $first = Invoke-TpmRebuildGame -Game (New-F412Game -Fixture $fx) -ZipPath $fx.Zip -InstallFolder $fx.Games -SyncStatePath $fx.SyncState
+        $first.Outcome | Should -Be 'SUCCEEDED'
+        [IO.File]::WriteAllText($fx.SyncState, '{}')
+
+        $second = Invoke-TpmRebuildGame -Game (New-F412Game -Fixture $fx) -ZipPath $fx.Zip -InstallFolder $fx.Games -SyncStatePath $fx.SyncState
+
+        $second.Outcome | Should -Be 'NO_OP'
+        $second.Summary | Should -Match 'AutoSync record'
+    }
+
     It 'changes nothing when the answer is not YES' {
         $fx = New-F412Fixture
         Mock Read-TpmResetRestoreAnswer { 'no' }

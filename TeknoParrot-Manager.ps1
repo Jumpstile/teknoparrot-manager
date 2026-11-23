@@ -25917,8 +25917,7 @@ function Invoke-AutoSync {
                 Write-Log ("AutoSync: could not finish '{0}' ({1}, step {2}): {3}" -f $rawName, [string]$txResult.ReasonCode, [string](Get-TpmTransactionField -Object $failTechnical -Name 'Stage'), [string](Get-TpmTransactionField -Object $failTechnical -Name 'Error'))
                 $failReasonText = (Get-TpmPlainReason -Code ([string]$txResult.ReasonCode)).Text
                 [void]$failureNotes.Add($(if ([string]$txResult.ReasonCode -eq 'STAGING_FAILED') { "'{0}' could not be unpacked. {1} Check that the ZIP opens and the drive has room, then run AutoSync again." -f $rawName, $failReasonText } else { "'{0}': {1}" -f $rawName, $failReasonText }))
-                if ($txResult.ReasonCode -eq 'AMBIGUOUS_EXTRACTION_ROOT') { $unsafePathSkipped++ }
-                $failed++
+                if ($txResult.ReasonCode -eq 'AMBIGUOUS_EXTRACTION_ROOT') { $unsafePathSkipped++ } else { $failed++ }
             }
         }
         if ($ledgerActive) {
@@ -26064,7 +26063,7 @@ function Build-DatIndexFromStream {
                         if ($schemaVersionText -and $schemaVersionText -cne '1') {
                             Write-Log ('DAT: the file says TPUISchemaVersion {0}; TPM knows version 1. It is read as version 1 and some games may not match.' -f $schemaVersionText)
                             Write-Host ('  This game list (DAT) uses a format TeknoParrot Manager does not know (version {0}; it knows version 1).' -f $schemaVersionText) -ForegroundColor Yellow
-                            Write-Host '  It is still read, but some games may not match. Check for a newer TeknoParrot Manager.' -ForegroundColor Yellow
+                            Write-Host '  It is still read, but some games may not match. Look for an update.' -ForegroundColor Yellow
                         }
                     }
                     $gameName    = $reader.GetAttribute('name')
@@ -31527,6 +31526,8 @@ function Invoke-FFBPluginSetup {
             Reason = if ($download.Reason) { $download.Reason } else { 'DLL_ACQUISITION_FAILED' }
         }
     }
+    # The two DLL copies staged for this run carry a new random name every time. Once the setup is finished or refused they are not needed.
+    try {
     $srcDll32 = [string]$download.Files['MAME32.dll']
     $srcDll64 = [string]$download.Files['MAME64.dll']
     if ([string]::IsNullOrWhiteSpace($srcDll32) -or [string]::IsNullOrWhiteSpace($srcDll64) -or
@@ -31928,6 +31929,13 @@ function Invoke-FFBPluginSetup {
         RollbackSucceeded = if ($rollback) { [bool]$rollback.Succeeded } else { $null }
         RollbackErrors = if ($rollback) { @($rollback.Errors) } else { @() }
         TransactionResult = $transactionResult
+    }
+    } finally {
+        foreach ($stagedFile in @($download.Files.Values)) {
+            if ([System.IO.Path]::GetFileName([string]$stagedFile) -notmatch '^TPM-FFB-source-[0-9a-f]{32}-MAME(32|64)\.dll$') { continue }
+            try { if (Test-Path -LiteralPath $stagedFile -PathType Leaf) { Remove-Item -LiteralPath $stagedFile -Force -ErrorAction Stop } }
+            catch { Write-Log "FFBPlugin: staged source cleanup failed -- $stagedFile -- $_" }
+        }
     }
 
 }
@@ -37921,6 +37929,9 @@ function Register-GamesLegacy {
                     $extraTokens     = @($candidateTokens | Where-Object { -not $folderTokens.Contains($_) })
                     if ($extraTokens.Count -gt 0) {
                         Write-Log ("DatIndex (pass2): rejected fuzzy candidate '{0}' for folder '{1}' -- extra title token(s): {2} (score {3:F2})" -f $candidateName, $origName, ($extraTokens -join ', '), $bestScore)
+                    } elseif ((Get-TpmBezelNumberText $candidateName) -ne (Get-TpmBezelNumberText $origName)) {
+                        # A different sequel number is a different game, however alike the names read ("Time Crisis 5" is not "Time Crisis 4").
+                        Write-Log ("DatIndex (pass2): rejected fuzzy candidate '{0}' for folder '{1}' -- different sequel number (score {2:F2})" -f $candidateName, $origName, $bestScore)
                     } else {
                         $datEntry = $datIndex[$bestKey]
                         $datScore = $bestScore
@@ -38073,6 +38084,12 @@ function Register-GamesLegacy {
                 elseif ($score -gt $secondScore) { $secondScore = $score }
             }
             if ($bestScore -lt $FuzzyAutoThreshold -or -not $bestCode) { continue }
+            # A different sequel number is a different game, however alike the names read ("Time Crisis 5" is not "TimeCrisis4").
+            $bestCodeTitle = [regex]::Replace([regex]::Replace([string]$bestCode, '(?<=[a-z])(?=[A-Z])', ' '), '(?<=[A-Z])(?=[A-Z][a-z])', ' ')
+            if ((Get-TpmBezelNumberText $origName) -ne (Get-TpmBezelNumberText $bestCodeTitle)) {
+                Write-Log ("Code (pass3): rejected fuzzy candidate '{0}' for folder '{1}' -- different sequel number (score {2:F2})" -f $bestCode, $origName, $bestScore)
+                continue
+            }
             # A match that only exists because of the title-only score must be clearly ahead of the next profile, the same rule the shared-name matcher uses.
             # Otherwise the folder is left for the user to choose, never guessed.
             if ($bestViaBaseTitle -and (($bestScore - $secondScore) -lt $FuzzyTieMargin)) { continue }
@@ -38294,6 +38311,8 @@ function Invoke-ManualRegistrationChoices {
         try {
             $candidates = @($info.Profiles -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[\w-]+$' })
             if ($candidates.Count -eq 0) { $decision.Reason='NO_VALID_CANDIDATE'; continue }
+            # A duplicate has one profile, and it was written for the other folder earlier in this run, so there is nothing left to pick.
+            if ([string]$info.Reason -eq 'duplicate' -and $candidates.Count -eq 1 -and (Test-Path -LiteralPath (Join-Path $UserProfilesDir ($candidates[0] + '.xml')) -PathType Leaf)) { $decision.Reason='EXISTING_PROFILE_PRESERVED'; continue }
             Write-Host ""
             Write-Host ("  Ambiguous registration: {0}" -f $folderName) -ForegroundColor Yellow
             Write-Host ("  Executable: {0}" -f $info.Exe) -ForegroundColor DarkGray
@@ -39146,7 +39165,8 @@ function Invoke-LibraryHealthCheck {
         [void]$postgresSharedDatabases.Add(('{0} use the same database, {1}' -f (@($sharedGroup.Group | ForEach-Object { [string]$_.Label }) -join ' and '), [string]$sharedGroup.Group[0].DbName))
         Write-Log ('HealthCheck: {0} use the same database {1}; Postgres setup (menu 11) gives each its own.' -f (@($sharedGroup.Group | ForEach-Object { [string]$_.Label }) -join ' and '), [string]$sharedGroup.Group[0].DbName)
     }
-    $healthOutcome = if ($discoveryFailed -or -not $optionalCoverageComplete -or -not $postgresInventoryComplete -or $postgresServiceUnverified -or $postgresDatabaseProblems.Count -gt 0 -or $postgresSharedDatabases.Count -gt 0 -or $postgresDatabaseSkipped.Count -gt 0 -or $postgresDatabaseCheck -eq 'SkippedNoClient' -or $prerequisiteCheckFailed -or $gameTypeFailed -or [string]::IsNullOrWhiteSpace([string]$detected.Vendor)) { 'ACTION_REQUIRED' } else { 'SUCCEEDED' }
+    # Database problems the check found are findings of a check that finished (exit 0); only a check that could not look at everything is incomplete.
+    $healthOutcome = if ($discoveryFailed -or -not $optionalCoverageComplete -or -not $postgresInventoryComplete -or $postgresServiceUnverified -or $postgresDatabaseSkipped.Count -gt 0 -or $postgresDatabaseCheck -eq 'SkippedNoClient' -or $prerequisiteCheckFailed -or $gameTypeFailed -or [string]::IsNullOrWhiteSpace([string]$detected.Vendor)) { 'ACTION_REQUIRED' } else { 'SUCCEEDED' }
     $postgresDatabaseProblemsResult = @()
     $postgresNeededResult = @()
     $postgresNeededLabelsResult = @()
@@ -39248,7 +39268,9 @@ function Get-TpmLibraryHealthRows {
     $needsPath = @($Result.Broken).Count + @($Result.Empty).Count
     $driveCount = @(Get-TpmTransactionField -Object $Result -Name 'DriveUnavailable' -Default @()).Count
     if ($driveCount -gt 0) {
-        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game drive' -Text ('Needs attention - {0} {1} on a drive that is not connected. Reconnect the drive. Or choose a new folder for {2} with R or S' -f (Format-TpmGameCount -Count $driveCount), $(if ($driveCount -eq 1) { 'is' } else { 'are' }), $(if ($driveCount -eq 1) { 'it' } else { 'them' })) -Color 'Yellow'))
+        # R and S are offered only when the next menu has them (not while a game still has an empty saved path).
+        $driveChoiceText = if (@($Result.Broken).Count -gt 0 -or @($Result.Empty).Count -eq 0) { ' Or choose a new folder for {0} with R or S' -f $(if ($driveCount -eq 1) { 'it' } else { 'them' }) } else { '' }
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game drive' -Text ('Needs attention - {0} {1} on a drive that is not connected. Reconnect the drive.{2}' -f (Format-TpmGameCount -Count $driveCount), $(if ($driveCount -eq 1) { 'is' } else { 'are' }), $driveChoiceText) -Color 'Yellow'))
     }
     if ([int]$Result.Registered -eq 0) {
         [void]$rows.Add((New-TpmLibraryHealthRow -Area 'Game paths' -Text 'No games found' -Color 'Yellow'))
@@ -39415,7 +39437,10 @@ function Get-TpmLibraryHealthDetailBlocks {
         [void]$lines.Add(('Valid paths: {0}' -f @($Result.Valid).Count))
         [void]$lines.Add(('Broken paths: {0}{1}' -f $brokenNames.Count, $(if ($brokenNames.Count -gt 0) { ' - ' + (Format-TpmNameList -Names $brokenNames -Max 1000) } else { '' })))
         $driveNames = @(Get-TpmTransactionField -Object $Result -Name 'DriveUnavailable' -Default @())
-        if ($driveNames.Count -gt 0) { [void]$lines.Add(('Drive or device not available: {0} - {1}. Reconnect the drive, or choose R or S to point these games at a new folder; the saved paths were not judged.' -f $driveNames.Count, (Format-TpmNameList -Names $driveNames -Max 1000))) }
+        if ($driveNames.Count -gt 0) {
+            $driveChoiceText = if ($brokenNames.Count -gt 0 -or $emptyNames.Count -eq 0) { ', or choose R or S to point these games at a new folder' } else { '' }
+            [void]$lines.Add(('Drive or device not available: {0} - {1}. Reconnect the drive{2}; the saved paths were not judged.' -f $driveNames.Count, (Format-TpmNameList -Names $driveNames -Max 1000), $driveChoiceText))
+        }
         [void]$lines.Add(('Empty paths: {0}{1}' -f $emptyNames.Count, $(if ($emptyNames.Count -gt 0) { ' - ' + (Format-TpmNameList -Names $emptyNames -Max 1000) } else { '' })))
         $unreadableNames = @(Get-TpmTransactionField -Object $Result -Name 'Unreadable' -Default @())
         if ($unreadableNames.Count -gt 0) { [void]$lines.Add(('Unreadable profile files: {0} - {1}' -f $unreadableNames.Count, (Format-TpmNameList -Names $unreadableNames -Max 1000))) }
@@ -43453,6 +43478,8 @@ function Invoke-ControlPropagationLegacy {
     }
     $reports     = New-Object System.Collections.ArrayList
     $files = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'Control propagation profile discovery' -EnumerationErrorAction SilentlyContinue)
+    # A preview works on copies, so its Input API correction in memory never changes what the real run does with the same pool.
+    if ($DryRun) { $pool = @($pool | ForEach-Object { $_.PSObject.Copy() }) }
     $sourcePaths = @{}
     foreach ($s in $pool) { $sourcePaths[$s.Path] = $true }
 
@@ -43864,7 +43891,7 @@ function Get-TpmControlPropagationSummary {
     if ($apiFixed.Count -gt 0) { [void]$done.Add(($(if ($DryRun) { 'Would correct the Input API of {0}.' } else { 'Input API corrected for {0}.' }) -f (Format-TpmGameCount -Count $apiFixed.Count))) }
     $ordinarySkipped = $skipped.Count - $designSkipped.Count
     $notChangedParts = New-Object System.Collections.Generic.List[string]
-    $alreadySet = @($rows | Where-Object { $_.Status -in @('skipped-bound', 'skipped-unchanged') })
+    $alreadySet = @($rows | Where-Object { $_.Status -eq 'skipped-bound' })
     $byRules = @($rows | Where-Object { $_.Status -eq 'skipped-override' })
     $otherLeft = $ordinarySkipped - $alreadySet.Count - $byRules.Count
     if ($alreadySet.Count -gt 0) { [void]$notChangedParts.Add(('{0} already set up.' -f (Format-TpmGameCount -Count $alreadySet.Count))) }
@@ -48440,7 +48467,8 @@ function Invoke-TpmRebuildGame {
         if ($underlying) { $effective = $underlying }
     }
     if ($effective -in @('SUCCEEDED', 'NO_OP') -and -not [bool]$tx.FilesystemChanged) {
-        return (New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'ALREADY_MATCHES' -Summary 'Nothing was changed. The game folder already has exactly the files that are in the ZIP.')
+        $noChangeText = if ([bool]$tx.StateChanged) { 'Nothing in the game folder was changed. It already has exactly the files that are in the ZIP. Only the AutoSync record of this game was repaired.' } else { 'Nothing was changed. The game folder already has exactly the files that are in the ZIP.' }
+        return (New-TpmResetRestoreResult -Outcome 'NO_OP' -ReasonCode 'ALREADY_MATCHES' -Summary $noChangeText)
     }
     if ($effective -eq 'SUCCEEDED') {
         if ($keptAt) {
@@ -48452,7 +48480,7 @@ function Invoke-TpmRebuildGame {
             # The rename to the kept place did not finish; the old folder is still inside the transaction folder.
             $residue = Get-TpmTransactionField -Object $txResult -Name 'Cleanup'
             $residuePaths = @(Get-TpmTransactionField -Object $residue -Name 'ResiduePaths' -Default @())
-            if ($residuePaths.Count -gt 0 -and $residuePaths[0]) { $keptAt = Join-Path ([string]$residuePaths[0]) 'rollback\old-target' }
+            if ($residuePaths.Count -gt 0 -and $residuePaths[$residuePaths.Count - 1]) { $keptAt = Join-Path ([string]$residuePaths[$residuePaths.Count - 1]) 'rollback\old-target' }
         }
         return (New-TpmResetRestoreResult -Outcome 'SUCCEEDED' -ReasonCode 'REBUILT' -Summary ('Done. {0} was rebuilt from its ZIP and checked. Your old folder was not deleted. It is kept here: {1}' -f $Game.Name, $keptAt) -ChangedItems @([string]$Game.Folder))
     }
@@ -59482,6 +59510,7 @@ $mode = $null
                 Write-Host ("  TeknoParrot Manager logs and reports could not be opened: {0}" -f $openResult.Error) -ForegroundColor Yellow
                 Write-Host ("  Folder: {0}" -f $openResult.Path) -ForegroundColor DarkGray
             }
+            [void](Read-HostSafe "  Press Enter to return to menu")
             continue
         }
         if ($supportChoice -eq '1') {
@@ -59540,6 +59569,7 @@ $mode = $null
 
         Write-TpmControlSourceSummary -Pool $pool
         Write-Host ""
+        $nothingToChange = $false
         if ($Unattended) {
             Write-Host "  [Unattended] Propagating controls." -ForegroundColor DarkCyan
             Write-Log "PropagateControls: unattended -- propagation = Y."
@@ -59550,7 +59580,7 @@ $mode = $null
             $previewCounts = Write-ControlPropagationResults -Reports @($previewTx.Reports) -DryRun $true -Outcome ([string]$previewTx.Outcome)
             Write-Log ("PropagateControls: preview shown. controls={0} api={1} settings-only={2}" -f $previewCounts.ControlsCopiedCount, $previewCounts.ApiFixedCount, $previewCounts.SettingsOnlyCount)
             if (($previewCounts.ControlsCopiedCount + $previewCounts.ApiFixedCount + $previewCounts.SettingsOnlyCount) -eq 0) {
-                $goCtl = 'N'
+                $goCtl = 'N'; $nothingToChange = $true
             } else {
                 $goCtl = Read-TpmControlCopyApproval -Pool @($pool) -BackupNote 'A saved copy of your game settings is made when you approve. Its folder is shown afterwards.'
             }
@@ -59574,6 +59604,8 @@ $mode = $null
                     Write-Host ("  " + [string]$undoResult.Summary) -ForegroundColor $undoColor
                 }
             }
+        } elseif ($nothingToChange) {
+            Write-Log "PropagateControls: the preview found nothing to change, so no question was asked."
         } else {
             Write-Host " Skipped control propagation." -ForegroundColor DarkGray
             Write-Log "Propagation: user declined."

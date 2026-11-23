@@ -1,9 +1,9 @@
 # TPM Certification Suite
 
 The TPM Certification Suite is the canonical quality and release-validation framework for TeknoParrot Manager.
-Current release state: v1.0 RC9 is the current build and is not published yet;
-v1.0 RC8.4 is the latest published release; v1.0 RC8.3 is the previous
-published release; RC8.2, RC8.1, RC7 and RC6 are earlier published releases;
+Current release state: v1.0 RC9 is the latest published release;
+v1.0 RC8.4 is the previous published release; v1.0 RC8.3, RC8.2,
+RC8.1, RC7 and RC6 are earlier published releases;
 final Version 1.0 has not been published yet.
 
 ## Mission

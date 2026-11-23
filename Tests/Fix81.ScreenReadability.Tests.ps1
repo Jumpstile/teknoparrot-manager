@@ -654,6 +654,15 @@ Describe 'FIX81 Propagate Controls (item 6)' {
         $counts.DesignSkippedItems[0].Code | Should -BeExactly 'GameE'
     }
 
+    It 'does not call a game already set up when nothing was copied and its controls are still missing' {
+        # Mutation: count skipped-unchanged with skipped-bound as "already set up" -> a game with no controls is reported as done and also as needing setup.
+        $summary = Get-TpmControlPropagationSummary -Reports @(
+            [pscustomobject]@{ Code = 'GameK'; Status = 'skipped-unchanged'; Family = 'driving'; Archetype = 'RefDriver'; Manual = @('Start'); MismatchSlots = $null }
+        )
+        $summary.NotChanged | Should -Not -Match 'already set up'
+        @($summary.Needs)[0] | Should -Match '^GameK: set up the controls yourself'
+    }
+
     It 'says "1 game updated." for one game and "No game needed a change." for none' {
         # Mutation: hard-code "games" -> "1 games updated."
         (Get-TpmControlPropagationSummary -Reports @($script:F81Reports[2])).Title | Should -BeExactly '1 game updated.'

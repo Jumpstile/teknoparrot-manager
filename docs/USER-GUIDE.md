@@ -8,7 +8,7 @@ TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-> **This guide describes v1.0 RC9.** RC9 is the next release after RC8.4. It adds an Internal or Existing PostgreSQL choice for Golden Tee and other games that keep a database, better game matching for LaunchBox, a bezel step in ReShade setup, more checks in Library health check, and fixes for problems that testers found. The latest published release before it is v1.0 RC8.4. If you use RC8.4, choose Check for Updates (menu 15) to get RC9. The previous published releases are v1.0 RC8.3, RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. The changes since RC8.4 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 has not been published yet. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
+> **This guide describes v1.0 RC9.** RC9 is the latest published release. It adds an Internal or Existing PostgreSQL choice for Golden Tee and other games that keep a database, better game matching for LaunchBox, a bezel step in ReShade setup, more checks in Library health check, and fixes for problems that testers found. The previous published release is v1.0 RC8.4. If you use RC8.4, choose Check for Updates (menu 15) to get RC9. The older published releases are v1.0 RC8.3, RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. The changes since RC8.4 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 has not been published yet. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
 
 
 ## Start here: your first game in about 10 minutes
@@ -19,7 +19,7 @@ Allow about 10 minutes once your downloads are ready.
 
 Installing TeknoParrot, updates, large games, and special controllers take longer.
 
-Release page of the latest published release: [v1.0 RC8.4](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4).
+Release page of the latest published release: [v1.0 RC9](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9).
 
 You need:
 
@@ -3863,5 +3863,5 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> TeknoParrot Manager v1.0 RC9 (not published yet). The latest published release is v1.0 RC8.4. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
+> TeknoParrot Manager v1.0 RC9 is the latest published release. The previous published release is v1.0 RC8.4. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
 

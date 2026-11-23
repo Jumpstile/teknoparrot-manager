@@ -633,7 +633,7 @@ Extras, only if needed:
 - dgVoodoo2: choose **6) dgVoodoo2 setup** only when an older game crashes or has a graphics problem that its documentation names. It is not a universal crash fix.
 - ReShade: choose **5) ReShade setup** only if you want optional visual effects after the game works.
 - Force feedback (FFB): choose **8) Force feedback setup** only for supported wheel or controller feedback.
-- Region: choose **10) Region setup** if you want your games to start in a country such as USA or Europe. Pick a country, pick all games or some, then type **Y** to confirm. A restore point is saved first. Only countries a game really offers are used. Details are in the [main guide](../README.md#region-setup).
+- Region: choose **10) Region setup** if you want your games to start in a country such as USA or Europe. Pick a country, pick all games or some, then type **Y** to confirm. A restore point is saved first. Only countries a game really offers are used. Details are in the Region Setup part of the [User Guide](../TeknoParrot-Manager-User-Guide.pdf).
 
 Do not apply unrelated fixes all at once.
 

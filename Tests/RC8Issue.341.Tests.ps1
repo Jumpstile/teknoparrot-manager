@@ -386,7 +386,7 @@ Describe 'RC8 issue #368: renamed registered Game/bin/game.exe resolves extracti
         $f = New-Rc8SyncFixture -ArchiveRelativePath 'other/game.exe'
         $result = Invoke-AutoSync -zipSource $f.Source -installFolder $f.Install -syncStatePath $f.State -datIndex $f.Dat -userProfilesDir $f.Profiles
         $result.Synced | Should -Be 0
-        $result.Failed | Should -Be 1
+        $result.Failed | Should -Be 0 -Because 'one refused ZIP is one refusal, not also one failure'
         $result.UnsafePathSkipped | Should -Be 1
         $result.TransactionResults[0].ReasonCode | Should -Be 'AMBIGUOUS_EXTRACTION_ROOT'
         $result.TransactionResults[0].Mutation.Started | Should -BeFalse
