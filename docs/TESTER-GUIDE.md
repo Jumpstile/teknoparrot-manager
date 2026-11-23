@@ -1,12 +1,12 @@
-# TeknoParrot Manager RC9 - Tester Guide
+# TeknoParrot Manager RC9.1 - Tester Guide
 
-Updated Nov 21, 2026
+Updated Nov 23, 2026
 
 Thank you for helping! You will try a program that sets up arcade games on a PC. We want to find out if every game starts and plays with no extra work.
 
 Follow the steps in order. Take your time. If you get stuck, stop and send a screenshot to the person who gave you this guide. If something goes wrong, your backup lets us fix it.
 
-**What is new in RC9?** RC9 is the latest published release. It adds new choices and fixes problems that testers found. Tests 1 to 51 are the same as before, except Test 17 (the database choice for games like Golden Tee) and Test 43 (LaunchBox). **Tests 52 to 66 are new. If you only have a little time, do tests 52 to 66 first.**
+**What is new in RC9.1?** RC9.1 is the latest published release. It is the same program as RC9. Every game was checked again against TeknoParrot 1.0.0.2334, and the version labels are corrected. Tests 1 to 51 are the same as before, except Test 17 (the database choice for games like Golden Tee) and Test 43 (LaunchBox). **Tests 52 to 66 are new since RC8.4. If you only have a little time, do tests 52 to 66 first.**
 
 Words you will see:
 
@@ -23,7 +23,7 @@ Do all of these before you test. Tick each box when you are done.
 
 - [ ] Use a PC that has TeknoParrot and at least 3 games on it. Different kinds of games are best.
 - [ ] Make a backup. Find your TeknoParrot folder. Inside it is a folder named UserProfiles. Copy that folder and paste the copy on your desktop.
-- [ ] Get the file TeknoParrot.Manager.v1.0.RC9.zip from the person who sent you this guide, or from the release page: https://github.com/Jumpstile/teknoparrot-manager/releases. The release page shows a SHA-256 check value for the file. To see yours, open PowerShell and run: `Get-FileHash -Algorithm SHA256 "C:\path\to\the\zip"`. The two values must match. If they do not, download the file again.
+- [ ] Get the file TeknoParrot.Manager.v1.0.RC9.1.zip from the person who sent you this guide, or from the release page: https://github.com/Jumpstile/teknoparrot-manager/releases. The release page shows a SHA-256 check value for the file. To see yours, open PowerShell and run: `Get-FileHash -Algorithm SHA256 "C:\path\to\the\zip"`. The two values must match. If they do not, download the file again.
 - [ ] Right-click the zip file and choose Extract All. Pick a NEW empty folder. Do not pick an old folder.
 - [ ] Learn how to take a screenshot: press the Windows key + Shift + S.
 
@@ -184,8 +184,8 @@ Tests 9 to 28 try the rest of the program. Do the ones that fit your games and y
 
 ### Test 21: Move up from an older version (RC7 or RC8)
 
-1. Do this only if you used RC7 or RC8 before. Do not delete the old folder. (If you use RC8.1, RC8.2, RC8.3 or RC8.4, do Test 29 instead.)
-2. Extract the RC9 zip into a NEW empty folder.
+1. Do this only if you used RC7 or RC8 before. Do not delete the old folder. (If you use RC8.1, RC8.2, RC8.3, RC8.4 or RC9, do Test 29 instead.)
+2. Extract the RC9.1 zip into a NEW empty folder.
 3. Start TeknoParrot Manager from the new folder. Answer the first questions the same way you did before.
 4. At the main menu, type 13 and press Enter (Library health check).
 5. You passed if your games and settings are all still there and the health check ends in plain words with no failure.
@@ -241,13 +241,13 @@ Tests 9 to 28 try the rest of the program. Do the ones that fit your games and y
 
 These tests try the fixes made in RC8.2.
 
-### Test 29: Update from RC8.1, RC8.2, RC8.3 or RC8.4 (menu 15)
+### Test 29: Update from RC8.1, RC8.2, RC8.3, RC8.4 or RC9 (menu 15)
 
-1. Do this only if you use RC8.1, RC8.2, RC8.3 or RC8.4 and RC9 is on the release page. Do not delete anything first.
+1. Do this only if you use RC8.1, RC8.2, RC8.3, RC8.4 or RC9 and RC9.1 is on the release page. Do not delete anything first.
 2. In your old version, at the main menu, type 15 and press Enter (Check for Updates).
 3. It should tell you a newer version is ready. It must ASK before it installs. Say yes.
 4. Wait until it says it is done. Close the program and start it again yourself.
-5. You passed if the title at the top now says v1.0 RC9, and your games and settings are all still there. Write down any message that did not make sense.
+5. You passed if the title at the top now says v1.0 RC9.1, and your games and settings are all still there. Write down any message that did not make sense.
 
 ### Test 30: Preview before copying controls
 
@@ -518,7 +518,7 @@ These tests try the new parts of RC9. Do them first if you are short on time.
 
 ### Test 65: Update screen at start (one Y)
 
-1. Do this only on a PC that still runs an older version while RC9 is on the release page. Skip this test if not.
+1. Do this only on a PC that still runs an older version while RC9.1 is on the release page. Skip this test if not.
 2. Start TPM. You passed if the Update Available screen shows before the "use saved settings?" question, with the choices Y = Update now, N = Remind me later and V = View release notes.
 3. Press V, read the notes, then choose again. Press Y. You passed if the update starts right away and it does not ask a second Y/N question.
 

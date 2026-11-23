@@ -1,6 +1,6 @@
 # TeknoParrot Manager - Quick Start
 
-> This guide describes v1.0 RC9. RC9 is the latest published release: [v1.0 RC9](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9). It adds an Internal or Existing PostgreSQL choice for Golden Tee and other games that keep a database, better game matching for LaunchBox, a bezel step in ReShade setup, more checks in Library health check, and fixes for problems that testers found. The previous published release is [v1.0 RC8.4](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC8.4). If you use RC8.4, choose **15) Check for Updates** to get RC9. The older published releases are v1.0 RC8.3, RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. Final Version 1.0 has not been published yet. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
+> This guide describes v1.0 RC9.1. RC9.1 is the latest published release: [v1.0 RC9.1](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1). It is the same program as RC9. Every game was checked again against TeknoParrot 1.0.0.2334, and the version labels are corrected. The previous published release is [v1.0 RC9](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9). If you use RC9, choose **15) Check for Updates** to get RC9.1. The older published releases are v1.0 RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. Final Version 1.0 has not been published yet. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Full documentation: [User guide](docs/USER-GUIDE.md) (project home page: [README.md](README.md))
 
@@ -839,7 +839,7 @@ A successful patch does not prove the game is ready. Register the game, set up i
 
 **What this release contains**
 
-- RC9 has 120 exact recipes across 71 exact ProfileId/build/executable identities (54 game profiles).
+- RC9.1 has 120 exact recipes across 71 exact ProfileId/build/executable identities (54 game profiles).
 
 - The list started as the historical 13-entry baseline and the 58-entry PR #355 checkpoint, and has grown since.
 
