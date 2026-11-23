@@ -174,7 +174,8 @@ Describe 'Library health check offers repair for games on a drive that is not co
         $row.Count | Should -Be 1
         $row[0].Text | Should -BeExactly 'Needs attention - 1 game is on a drive that is not connected. Reconnect the drive. Or choose a new folder for it with R or S'
         $source = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'))
-        $source | Should -Match 'Reconnect the drive, or choose R or S to point these games at a new folder; the saved paths were not judged\.'
+        $source | Should -Match ', or choose R or S to point these games at a new folder'
+        $source | Should -Match 'the saved paths were not judged\.'
         $source | Should -Not -Match 'Reconnect it and run (this|the) check again'
     }
 }

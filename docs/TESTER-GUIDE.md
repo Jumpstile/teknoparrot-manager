@@ -6,7 +6,7 @@ Thank you for helping! You will try a program that sets up arcade games on a PC.
 
 Follow the steps in order. Take your time. If you get stuck, stop and send a screenshot to the person who gave you this guide. If something goes wrong, your backup lets us fix it.
 
-**What is new in RC9?** RC9 is the next release after RC8.4. It adds new choices and fixes problems that testers found. Tests 1 to 51 are the same as before, except Test 17 (the database choice for games like Golden Tee) and Test 43 (LaunchBox). **Tests 52 to 66 are new. If you only have a little time, do tests 52 to 66 first.**
+**What is new in RC9?** RC9 is the latest published release. It adds new choices and fixes problems that testers found. Tests 1 to 51 are the same as before, except Test 17 (the database choice for games like Golden Tee) and Test 43 (LaunchBox). **Tests 52 to 66 are new. If you only have a little time, do tests 52 to 66 first.**
 
 Words you will see:
 

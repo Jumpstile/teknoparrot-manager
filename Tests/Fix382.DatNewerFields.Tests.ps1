@@ -74,7 +74,7 @@ Describe 'The dat reader and the format version, missing elements and romzip/rom
     It 'warns once in plain words about an unknown format version and still reads every game' {
         # Mutation: remove the check -> no warning; make it throw or return early -> the games are not read.
         $index = Read-F382Dat -Xml ($script:F382Dat -replace '<TPUISchemaVersion>1<', '<TPUISchemaVersion>7<')
-        Should -Invoke Write-Host -Times 2 -Exactly -ParameterFilter { $Object -match 'version 7|Check for a newer TPM' }
+        Should -Invoke Write-Host -Times 2 -Exactly -ParameterFilter { $Object -match 'version 7|Look for an update' }
         Should -Invoke Write-Log -Times 1 -Exactly -ParameterFilter { $msg -match 'TPUISchemaVersion 7' }
         $index.Count | Should -Be 2
         $index[(Get-NormalizedGameKey 'Two Part Game')].Executable2 | Should -Be 'second.exe'

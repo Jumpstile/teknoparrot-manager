@@ -263,6 +263,26 @@ Describe "Virtual Beta Tester: manual registration candidate choice" -Tag 'TVD-H
         $manual.Count | Should -Be 1
         $result.Registered.Count | Should -Be 0
     }
+
+    It "does not ask the user to pick a profile for a duplicate whose only profile was already written" {
+        # Mutation: remove the duplicate check at the top of the manual choice loop -> a useless "Pick a profile number" prompt appears after Keep current.
+        $fx = New-ConflictFixture -Name 'manual-registration-duplicate'
+        $gameFolder = Join-Path $fx.InstallFolder 'Second Copy'
+        New-Item -ItemType Directory -Path $gameFolder -Force | Out-Null
+        $exePath = Join-Path $gameFolder 'shared.exe'
+        New-Item -ItemType File -Path $exePath -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $fx.GameProfilesDir 'PROFILEA.xml') -Value '<GameProfile><GamePath></GamePath></GameProfile>' -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $fx.UserProfilesDir 'PROFILEA.xml') -Value '<GameProfile><GamePath>C:\first\shared.exe</GamePath></GameProfile>' -Encoding utf8
+        $manual = @{ 'Second Copy' = @{ Exe = $exePath; Profiles = 'PROFILEA'; Reason = 'duplicate' } }
+        $result = Register-Games -userProfilesDir $fx.UserProfilesDir -installFolder $fx.InstallFolder -profileIndex @{} -gameProfilesDir $fx.GameProfilesDir -GameFolders @('missing-fixture-folder')
+        Mock Read-Host { return '1' }
+
+        $null = Invoke-ManualRegistrationChoices -ManualRegData $manual -UserProfilesDir $fx.UserProfilesDir `
+            -GameProfilesDir $fx.GameProfilesDir -InstallFolder $fx.InstallFolder -Result $result
+
+        Should -Invoke Read-Host -Times 0 -Exactly
+        $manual.Count | Should -Be 1
+    }
 }
 
 }

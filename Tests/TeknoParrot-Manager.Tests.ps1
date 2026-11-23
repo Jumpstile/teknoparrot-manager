@@ -10650,6 +10650,27 @@ $optionsXml
         $fixedReport.Status | Should -Be 'api-fixed-canonical'
     }
 
+    It "does not let the preview use up the Input API correction, so the real run with the same pool still makes it" {
+        # Mutation: let the dry run change the shared pool entry (remove the copy of the pool in preview mode) -> the real run reports nothing to correct.
+        $profiles = Join-Path $TestDrive ("issue139-api-preview-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+
+        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
+        New-ButtonFamilyProfileXml -Name 'fghtjam' -InputApiValue 'DirectInput' -InputApiOptions @('DirectInput', 'XInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Encoding UTF8
+
+        $pool = Build-ArchetypePool $profiles 5
+        $canonicalArchetype = @{ button = 'StreetFighterIII3rdStrike' }
+        $preview = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$true
+        @($preview.Reports | Where-Object { $_.Status -eq 'api-fixed-canonical' }).Count | Should -Be 1
+        ([xml](Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw)).SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='Input API']").FieldValue | Should -Be 'DirectInput'
+
+        $real = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false
+        @($real.Reports | Where-Object { $_.Status -eq 'api-fixed-canonical' }).Count | Should -Be 1
+        ([xml](Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw)).SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='Input API']").FieldValue | Should -Be 'MergedInput'
+    }
+
     It "propagates the WRONG value if the canonical archetype itself is not yet on the intended API when correction runs (ordering hazard confirmed on issue #139)" {
         # This documents the exact failure mode from the issue thread: writing
         # canonicalArchetype to overrides.json before switching the canonical
