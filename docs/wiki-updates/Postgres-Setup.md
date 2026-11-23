@@ -2,7 +2,7 @@
 
 Some Incredible Technologies (IT) games need a small database on your PC. Postgres setup installs it and gets each game's database ready. It is main menu item 11, **Postgres setup**. It sits under "Game Requirements (only for some games)".
 
-The database is **PostgreSQL 8.3**. These games need it: all Golden Tee Live years (2006 to 2023, 2025, 2026), all Golden Tee PGA Tour games (2021 to 2023, 2025, 2026), Power Putt Live, Silver Strike Bowling Live, Target Toss Pro and Orange County Choppers Pinball. The Manager finds them by what their profile says, so a new game of this kind needs no new Manager version.
+The database is **PostgreSQL 8.3**. These games need it: all Golden Tee Live years (2006 to 2023, 2025, 2026), all Golden Tee PGA Tour games (2021 to 2023, 2025, 2026), Power Putt Live, Silver Strike Bowling Live, Target Toss Pro and Orange County Choppers Pinball. TPM finds them by what their profile says, so a new game of this kind needs no new TPM version.
 
 **Internal or Existing PostgreSQL?** Newer TeknoParrot profiles of these games have a Storage box. **Internal** is the new default. It needs no database install. Start the game once and it makes its own database. Postgres setup and [[Health Check]] skip these games and never say their database is missing. **Existing PostgreSQL** is for keeping an existing server and its saved progress. Everything on this page is for games set to Existing PostgreSQL (and older profiles with no Storage box). TeknoParrot Manager never switches a game from one to the other, and never touches saved progress without a backup first.
 

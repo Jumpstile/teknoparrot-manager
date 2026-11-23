@@ -5,8 +5,8 @@ BeforeAll {
 }
 
 Describe 'TeknoParrot-Manager.bat' {
-    It 'passes the manager exit code on to the caller' {
-        # Mutation: remove the exit line -> the launcher ends with code 0 even when the manager failed.
+    It 'passes TPM exit code on to the caller' {
+        # Mutation: remove the exit line -> the launcher ends with code 0 even when TPM failed.
         $dir = Join-Path $TestDrive 'launcher-exit'
         [void][IO.Directory]::CreateDirectory($dir)
         Copy-Item -LiteralPath $managerBat -Destination $dir
@@ -18,7 +18,7 @@ Describe 'TeknoParrot-Manager.bat' {
         $LASTEXITCODE | Should -Be 0
     }
 
-    It 'shows no false error when an update replaces the launcher while the manager is running' {
+    It 'shows no false error when an update replaces the launcher while TPM is running' {
         # Mutation: put the exit-code lines back on their own lines -> cmd re-reads the changed file at the old position and prints
         # "'rrorlevel' is not recognized" plus "Script exited with an error" after a successful update.
         $dir = Join-Path $TestDrive 'launcher-replaced'
@@ -65,7 +65,7 @@ Describe 'Sync-And-Run.bat' {
             git @git commit -q -am two; git push -q origin main 2>&1 | Out-Null
             Pop-Location
 
-            # A copy of the launcher whose own folder is an unreachable share; the manager call is harmless.
+            # A copy of the launcher whose own folder is an unreachable share; TPM call is harmless.
             $text = [IO.File]::ReadAllText($syncBat)
             $text = $text.Replace('pushd "%~dp0"', 'pushd "\\localhost\NO_SUCH_SHARE_FOR_TEST\x"').Replace('"%~dp0TeknoParrot-Manager.ps1"', '"' + (Join-Path $root 'none.ps1') + '"')
             $probe = Join-Path $root 'probe.bat'

@@ -27,7 +27,7 @@ BeforeAll {
     $script:LaunchBoxGameIdentityFields = @('ID','Title','Platform','Emulator','ApplicationPath','CommandLine','DateAdded','DateModified')
     $script:TitleTokenStopWords = [System.Collections.Generic.HashSet[string]]::new([string[]]@('the', 'of', 'a', 'an', 'and', 'vs', 'vs.', 'in', 'for', 'to'), [System.StringComparer]::OrdinalIgnoreCase)
 
-    # A tiny game list in the same shape as LaunchBox's file (only the columns the Manager reads).
+    # A tiny game list in the same shape as LaunchBox's file (only the columns TPM reads).
     if (-not ('TpmTestGamesDbWriter' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
@@ -93,7 +93,7 @@ Describe 'Issue 426: official names and IDs from the local game list' {
         $games[1].SelectSingleNode('DatabaseID') | Should -BeNullOrEmpty
     }
 
-    It 'a game already in LaunchBox that the Manager added gets the clean title and the official name and ID' {
+    It 'a game already in LaunchBox that TPM added gets the clean title and the official name and ID' {
         $doc = New-GdbGamesDoc -Title 'X'
         $change = Update-TpmLaunchBoxGameTitle -platformGamesDoc $doc -relProfilePath 'Emulators\TeknoParrot\UserProfiles\X.xml' -KnownTitles @('X') -NewTitle 'Too Spicy' -emulatorId 'emu-1' -lbRoot 'C:\LB' -GamesDbMatch ([pscustomobject]@{ Id = '11'; Name = 'Too Spicy' })
         $change.New | Should -Be 'Too Spicy'
@@ -114,7 +114,7 @@ Describe 'Issue 426: official names and IDs from the local game list' {
         $doc.SelectSingleNode('/LaunchBox/Game/DatabaseID') | Should -BeNullOrEmpty
     }
 
-    It 'a game that already has an ID, or is not the Manager''s entry, is left alone' {
+    It 'a game that already has an ID, or is not TPM''s entry, is left alone' {
         $linked = New-GdbGamesDoc -Title 'X' -DatabaseId '999'
         Update-TpmLaunchBoxGameTitle -platformGamesDoc $linked -relProfilePath 'Emulators\TeknoParrot\UserProfiles\X.xml' -KnownTitles @('X') -NewTitle 'Too Spicy' -emulatorId 'emu-1' -lbRoot 'C:\LB' -GamesDbMatch ([pscustomobject]@{ Id = '11'; Name = 'Too Spicy' }) | Should -BeNullOrEmpty
         $linked.SelectSingleNode('/LaunchBox/Game/DatabaseID').InnerText | Should -Be '999'

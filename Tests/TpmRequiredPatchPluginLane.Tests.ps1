@@ -20,7 +20,7 @@ BeforeAll {
     $parseTokens=$null;$parseErrors=$null
     $mainAst=[System.Management.Automation.Language.Parser]::ParseFile($mainScriptPath,[ref]$parseTokens,[ref]$parseErrors)
     if($parseErrors.Count){throw 'Unable to parse manager helper source for isolated transaction tests.'}
-    # The required-patch screens (FIX81) use the shared screen helpers of the manager; load exactly those.
+    # The required-patch screens (FIX81) use the shared screen helpers of TPM; load exactly those.
     foreach($functionName in @('Test-PathInside','Test-TpmNoReparsePath','Test-TpmPathLengthAllowed','Get-TpmSupportNativeType','Get-TpmSupportFinalPathFromHandle','Resolve-TpmSupportExpectedFinalPath','Remove-TpmSupportHandle','Test-TpmPathOverlap','Get-TpmResolvedExistingPath','Get-TpmGuardPathForms','Find-TpmProtectedSourceRoot','Get-TpmFileState','Read-HostSafe','Read-PathWithBrowse','Write-TpmText','Get-TpmResetRestoreLineWidth','Write-TpmLabelValue','Show-TpmDetailBlocks','Get-TpmTransactionField','Get-TpmPlainReason','Get-TpmPlainReasonTable','Read-TpmAnswerWithDetails','Format-TpmCountNoun','Format-TpmGameCount','Get-TpmStepCountsLine','Get-TpmBackupFolderLine','Get-TpmDriveSkipNext','Format-TpmNameList','Join-TpmPostgresSetupNames')){
         $functionAst=$mainAst.Find({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $functionName},$true)
         if(-not $functionAst){throw ('Missing required synthetic-test helper: '+$functionName)}

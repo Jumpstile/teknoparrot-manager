@@ -4,7 +4,7 @@ This is the one list of everything the owner checks by hand before RC9 goes out.
 
 Every step has a tag in square brackets:
 
-- **[no hardware needed]**: you need this PC, the Manager and normal game files. No controller and no PostgreSQL.
+- **[no hardware needed]**: you need this PC, TPM and normal game files. No controller and no PostgreSQL.
 - **[real PostgreSQL / IT game]**: you need a real PostgreSQL 8.3 and a real Incredible Technologies game (Golden Tee, Power Putt, Silver Strike Bowling and so on), or at least its `pg_backup` folder.
 - **[real LaunchBox]**: you need a real LaunchBox with Big Box and your TeknoParrot games in it. Use a copy of your LaunchBox folder, or make a backup first.
 - **[real controller]**: you need a real controller, and for some steps a real arcade encoder or a real game that reads it.
@@ -54,7 +54,7 @@ Use your real Eggman collection on the test PC. Copy it first or use a test Tekn
 
 ## CPS3 first-boot files with your real set
 
-Use the test PC. Close TeknoParrot and any CPS3 game. Copy your whole `TeknoCPS` folder somewhere safe first: that is your way back. Register at least one CPS3 game (Street Fighter III, JoJo, Red Earth or the CPS3 multi-game). Pick one `.nv` file that already exists in `TeknoCPS\nvram` and write down its size and date. The Manager never supplies, downloads or points to these files. (#349)
+Use the test PC. Close TeknoParrot and any CPS3 game. Copy your whole `TeknoCPS` folder somewhere safe first: that is your way back. Register at least one CPS3 game (Street Fighter III, JoJo, Red Earth or the CPS3 multi-game). Pick one `.nv` file that already exists in `TeknoCPS\nvram` and write down its size and date. TPM never supplies, downloads or points to these files. (#349)
 
 29. **[no hardware needed]** Optional, never touches your real folder: set `TPM_REAL_SOURCE_TESTS=1` and set `TPM_CPS3_REAL_SOURCE` to your set (folder or `.zip`). Run `Tests\TpmCps3Supplementary.Tests.ps1`. Pass: 34 tests run, none skipped, none failed.
 30. **[no hardware needed]** Run TeknoParrot Manager. At the CPS3 question answer Y, then pick your folder or `.zip`. Pass: it says `Copied and verified N file(s)`, where N is 101 minus the `.nv` files you already had.
@@ -62,7 +62,7 @@ Use the test PC. Close TeknoParrot and any CPS3 game. Copy your whole `TeknoCPS`
 32. **[no hardware needed]** Check the `.nv` file you wrote down earlier. Pass: same size, same date, same content.
 33. **[no hardware needed]** Run the step again. Pass: it says nothing needs to be copied, and no file date changes.
 34. **[no hardware needed]** Start one game from each family and write down how long the first start takes: Street Fighter III New Generation, 2nd Impact and 3rd Strike; JoJo; Red Earth; the CPS3 multi-game (`cps3boot`). Pass: each game reaches its attract screen with no long cache build and no error.
-35. **[no hardware needed]** Make a copy of your set, delete one `.nv` file from the copy, and point the Manager at the copy. Pass: it refuses the whole set and copies nothing. Write the result on issue 349.
+35. **[no hardware needed]** Make a copy of your set, delete one `.nv` file from the copy, and point TPM at the copy. Pass: it refuses the whole set and copies nothing. Write the result on issue 349.
 
 ## Bezels from your own folder
 
@@ -86,7 +86,7 @@ Do these on the test PC with a copy of a few games, not your main library. The a
 
 Use a test PC or a test TeknoParrot folder. Do not use a PC that holds PostgreSQL data you need. This part needs a real PostgreSQL 8.3. Have three games ready: (A) a game that has a `pg_backup` folder, for example Power Putt Live 2013; (B) Golden Tee Live 2021 or newer, or a Golden Tee PGA Tour game, with no `pg_backup` folder; (C) any game of this kind left on the Storage choice Internal. (#350, #131)
 
-44. **[real PostgreSQL / IT game]** From the main menu choose PostgreSQL setup on a PC where the Manager is not running as administrator. Pass: the explanation appears and the Manager waits for Enter. The Windows permission window opens only after you press Enter. (#385)
+44. **[real PostgreSQL / IT game]** From the main menu choose PostgreSQL setup on a PC where TPM is not running as administrator. Pass: the explanation appears and TPM waits for Enter. The Windows permission window opens only after you press Enter. (#385)
 45. **[real PostgreSQL / IT game]** In TeknoParrot, set Storage to Existing PostgreSQL for (A) and (B). Leave (C) on Internal.
 46. **[real PostgreSQL / IT game]** Run Register only (or AutoSync). Pass: every game is registered by its own name, including (B), the Golden Tee Live 2023-2024 game and the PGA Tour games, which are not in the Eggman list. None is sent to the ACTION REQUIRED list.
 47. **[real PostgreSQL / IT game]** Choose 11) Postgres setup. Pass: (A) says `Ready ... created from the game's own backup`. (B) says `Profile ready`. (C) is skipped. The run ends as finished, not as "needing attention". Write down the exact words of the (B) line.
@@ -114,7 +114,7 @@ This needs the real games (or at least both games' `pg_backup` folders) and a re
 
 # Part 3: real controller
 
-Unit tests use fake files and cannot press a real button, so these checks are the only proof that the controller setup works in a game. They cover: your controller layout chosen once (#200), setting up one game, all games or game by game from that layout (#306), the controls check of every registered game and the Controls line in the Library health check (#305), the read-only check of an outside controller list (#304), the saved answers and button learning (#201), the control guides and cabinet list (#267), the stuck-button check, the standard arcade keys, key suggestions and light colors (#267), the "it worked" records that decide when a game is Verified (#307), and the controller-found hint (#410). The parts after the layout and game setup use only the Manager's own files. They never change a game's file in UserProfiles; step 104 checks that.
+Unit tests use fake files and cannot press a real button, so these checks are the only proof that the controller setup works in a game. They cover: your controller layout chosen once (#200), setting up one game, all games or game by game from that layout (#306), the controls check of every registered game and the Controls line in the Library health check (#305), the read-only check of an outside controller list (#304), the saved answers and button learning (#201), the control guides and cabinet list (#267), the stuck-button check, the standard arcade keys, key suggestions and light colors (#267), the "it worked" records that decide when a game is Verified (#307), and the controller-found hint (#410). The parts after the layout and game setup use only TPM's own files. They never change a game's file in UserProfiles; step 104 checks that.
 
 ## Your controller layout (nothing in any game changes)
 
@@ -123,7 +123,7 @@ You need: one controller (wired, or wireless and switched on). Do this with an X
 64. **[real controller]** Plug in the controller (or switch it on). Start TeknoParrot Manager, pick Propagate Controls, and choose 1. You should see "Found: an Xbox-style controller." Keep answering N until the plan prints (it changes nothing). Then switch the controller off and do it again: the "Found" line should be gone.
 65. **[real controller]** Back at the menu, pick Propagate Controls and choose 3 ("choose or change my controller layout"). You should see four layouts: Xbox, PlayStation, Nintendo, arcade stick. With the controller on, the line "Found: an Xbox-style controller." shows and choice 1 is pre-selected, but you can pick any layout.
 66. **[real controller]** Pick a layout. You should see the table "Coin -> Back, Start -> Start, Up/Down/Left/Right, Button 1 to Button 6". PlayStation shows Cross, Circle, Triangle, Square, L1, R1, Share, Options. Nintendo shows B, A, X, Y, L, R, Minus, Plus. Test and Service should say "left empty on purpose".
-67. **[real controller]** Choose C and change one button (for example Button 6 to LB). Try to give a pad button that is already used to another control: you should be told which control uses it, and nothing changes. Choose K. You should see "Layout saved." Leave the menu, start the Manager again, and open choice 3: your layout and change should still be there. The file is `ControllerBaseline.json` in the Manager's own State folder. Edit it so two controls use the same pad button, then open choice 2: the Manager should ask you to choose again instead of using the damaged file.
+67. **[real controller]** Choose C and change one button (for example Button 6 to LB). Try to give a pad button that is already used to another control: you should be told which control uses it, and nothing changes. Choose K. You should see "Layout saved." Leave the menu, start TPM again, and open choice 3: your layout and change should still be there. The file is `ControllerBaseline.json` in TPM's own State folder. Edit it so two controls use the same pad button, then open choice 2: TPM should ask you to choose again instead of using the damaged file.
 
 ## Set up one game
 
@@ -158,20 +158,20 @@ You need: one registered game with an Xbox choice in its settings, and a copy of
 
 You need: the outside teknoparrot.yml list you want to check (you download it yourself; it is not shipped) and your real TeknoParrot folder.
 
-86. **[real controller]** Run, from the Manager folder: `.\TeknoParrot-Manager.ps1 -MappingEvidenceFile "<path to teknoparrot.yml>" -ValidationRoot "<your TeknoParrot folder>" -ValidationJsonPath "<a new file name ending in .json>"`.
+86. **[real controller]** Run, from the TPM folder: `.\TeknoParrot-Manager.ps1 -MappingEvidenceFile "<path to teknoparrot.yml>" -ValidationRoot "<your TeknoParrot folder>" -ValidationJsonPath "<a new file name ending in .json>"`.
 87. **[real controller]** You should see "Nothing was changed", how many games are in the list and how many are in your TeknoParrot, the counts ready, missing controls and held back, and "TPM does not trust it". Check no file in GameProfiles or UserProfiles changed, and that the only new file is the one you named.
 88. **[real controller]** Run it again with the same file names. The two details files must be identical.
-89. **[real controller]** Compare the counts with the earlier audit on issue #200 (523 profiles parsed, 494 matched, 308 collision-free, 36 collision groups in 24 profiles, 7 games held back for collisions). Write down the differences. Differences are expected where the Manager is stricter, but each one should have a reason in the details file.
+89. **[real controller]** Compare the counts with the earlier audit on issue #200 (523 profiles parsed, 494 matched, 308 collision-free, 36 collision groups in 24 profiles, 7 games held back for collisions). Write down the differences. Differences are expected where TPM is stricter, but each one should have a reason in the details file.
 
 ## Saved answers
 
-You need: your real cabinet or controllers, and the Manager's own settings folder (State\Controls inside the TeknoParrotManager folder).
+You need: your real cabinet or controllers, and TPM's own settings folder (State\Controls inside the TeknoParrotManager folder).
 
 90. **[real controller]** Pick Propagate Controls, choose 1, and answer the seven questions (or choose the Xbox shortcut). At the end, a file `cabinet.json` must exist in State\Controls. The screen said your answers are saved.
 91. **[real controller]** Run it again. You should see your saved answers and ONE question, "Keep these answers?". Answer Y: no other question, and the plan is the same as before.
 92. **[real controller]** Run it again, answer N, and change one answer. The saved answer is the default for each question. The new answer must be in the file afterwards, and `cabinet.json.bak` must hold the older answers.
 93. **[real controller]** Plug in an Xbox controller you said No to. Run the survey. You should see "A controller was found that you said you do not have", and all questions again.
-94. **[real controller]** Close the Manager. Change `cabinet.json` so it is not valid (add a stray letter). Run the survey. You should get the questions, a `cabinet.json.unreadable-...` copy of the bad file, and a new good `cabinet.json`.
+94. **[real controller]** Close TPM. Change `cabinet.json` so it is not valid (add a stray letter). Run the survey. You should get the questions, a `cabinet.json.unreadable-...` copy of the bad file, and a new good `cabinet.json`.
 
 ## Learning the arcade buttons
 
@@ -235,7 +235,7 @@ You need: your arcade encoder in a normal console window. For steps 115 and 116 
 ## Cabinet fit, Exit/Pause/Menu and undo (#267)
 
 133. **[no hardware needed]** In My controls choose 1 and say you have no steering wheel and no light gun but you do have an Xbox controller. Choose 3 and pick a wheel game. Pass: the page starts with "This game needs a steering wheel and pedals. You told TPM you do not have that." and "Your Xbox controller can steer this game with its stick and triggers." Pick a light gun game: it must say the game needs a light gun. Nothing in the game's file may change.
-134. **[no hardware needed]** Close the Manager, rename `cabinet.json` in `State\Controls`, open My controls and choose 3 for any game. Pass: the page says TPM does not know how many players and buttons your cabinet has and does not say it fits. Put the file back.
+134. **[no hardware needed]** Close TPM, rename `cabinet.json` in `State\Controls`, open My controls and choose 3 for any game. Pass: the page says TPM does not know how many players and buttons your cabinet has and does not say it fits. Put the file back.
 135. **[real controller]** Learn your buttons for 1 player and 2 buttons, save, then choose 3 for a game that uses 3 or more buttons or 2 players. Pass: the page says your cabinet has fewer buttons or players than the game uses, and those rows say "Your cabinet has no button 3" or "Your cabinet has no player 2" instead of "Not learned yet". Rows for the buttons you do have still show your key.
 136. **[real controller]** On the learning screen, after Service, TPM asks "Does your cabinet have the Exit button? (Y/N)", then Pause, then Menu. Answer N for Pause. Answer Y for Exit and press the Esc key if your cabinet's Exit button sends Esc. Pass: Esc is accepted as the key (not skipped), Pause is listed as skipped, and after you save, My controls choice 5 lists Exit.
 137. **[no hardware needed]** Save your answers twice (for example learn your buttons, save, then learn again with a different key and save). Choose 6 "Undo my last save". Pass: it says how many controls TPM knew before and now, asks once, and after Y the cabinet page (choice 5) shows the older keys. Choose 6 again: the newer keys come back. In `State\Controls`, `cabinet.json.bak` always holds the answers that were replaced last.
@@ -245,4 +245,4 @@ You need: your arcade encoder in a normal console window. For steps 115 and 116 
 
 ## Players and controllers in Big Box (#267)
 
-139. **[real LaunchBox]** Use a COPY of your LaunchBox folder, or make a backup of it first. Close LaunchBox and BigBox. In the Manager run the LaunchBox step and choose `C` (Fill in players and controllers for Big Box), then platform 2. Pass: the preview says how many games would get player info and controllers and "Nothing was changed"; press `D` and every line names a game and what it would get; the `Data\Platforms\TeknoParrot.xml` file is unchanged. Answer `N` at `Make exactly these changes after a verified backup?` and check the file is still unchanged. Run `C` again and answer `Y`. Pass: a saved copy is made first, and the result says it was saved. Answer `N` to `Undo this now`. Open LaunchBox, then Big Box. Pass: a TeknoParrot game you did not fill in yourself (for example a gun game or a racing game) shows its player count and its controller badge (light gun or wheel) in Big Box and in the game's Edit screen under Controller Support, and a game that already had a player count or controllers in LaunchBox still shows exactly what it showed before. Close both and run `C` once more: it must say there is nothing to fill in. Then use menu 14 (Restore backup), choose 3 (LaunchBox library backup) and pick the newest copy: LaunchBox must show the old values again. Run `C` one more time, say `Y`, and answer `Y` to `Undo this now`: the old values must be back at once. Say what you saw, and anything LaunchBox changed that you did not expect.
+139. **[real LaunchBox]** Use a COPY of your LaunchBox folder, or make a backup of it first. Close LaunchBox and BigBox. In TPM run the LaunchBox step and choose `C` (Fill in players and controllers for Big Box), then platform 2. Pass: the preview says how many games would get player info and controllers and "Nothing was changed"; press `D` and every line names a game and what it would get; the `Data\Platforms\TeknoParrot.xml` file is unchanged. Answer `N` at `Make exactly these changes after a verified backup?` and check the file is still unchanged. Run `C` again and answer `Y`. Pass: a saved copy is made first, and the result says it was saved. Answer `N` to `Undo this now`. Open LaunchBox, then Big Box. Pass: a TeknoParrot game you did not fill in yourself (for example a gun game or a racing game) shows its player count and its controller badge (light gun or wheel) in Big Box and in the game's Edit screen under Controller Support, and a game that already had a player count or controllers in LaunchBox still shows exactly what it showed before. Close both and run `C` once more: it must say there is nothing to fill in. Then use menu 14 (Restore backup), choose 3 (LaunchBox library backup) and pick the newest copy: LaunchBox must show the old values again. Run `C` one more time, say `Y`, and answer `Y` to `Undo this now`: the old values must be back at once. Say what you saw, and anything LaunchBox changed that you did not expect.

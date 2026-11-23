@@ -105,7 +105,7 @@ No unrelated edits, source-tree edits to `<test-pc-repos>\tpm-rc8-integration-20
 
 ## 14. Local result and evidence boundary
 
-- Final manager SHA-256: `7665CBBFBF852C21592B47DA30FC98B5A4BA525677FEDFECA50ABA9B86469739` (2,388,979 bytes). The manager source is unchanged from the reviewed P2 candidate; this follow-up corrects only test setup and evidence documentation.
+- Final manager SHA-256: `7665CBBFBF852C21592B47DA30FC98B5A4BA525677FEDFECA50ABA9B86469739` (2,388,979 bytes). the TPM source is unchanged from the reviewed P2 candidate; this follow-up corrects only test setup and evidence documentation.
 - Final test-file SHA-256: `218852CDEEC0363F1F13A6D14B8E9AE8F12C1A1EB0CED7C51950DF5CEFFC1D8B` (1,719,164 bytes).
 - P2 patch SHA-256: `5FAC37158A42444E91D8918099A9669B3B5AF842987A2AB72AC46F0B07FCD603`. It remains preserved. This P3 patch supersedes it with corrected fixtures and updated test evidence.
 - The README and Quick Start now explain the preview purpose, group headings, selection steps, comparison controls, expected synchronized selection, terminal resize/input behavior, and `B`/`R` recovery in plain language.

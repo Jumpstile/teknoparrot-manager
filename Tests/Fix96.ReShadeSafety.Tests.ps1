@@ -516,6 +516,7 @@ Describe 'FIX96 B2: undo puts nothing back into a source folder' {
     It 'passes the protected folders from Undo all down to every undo' {
         # Mutation: leave -ProtectedRoots out of Invoke-TpmReShadeUndoAllChoice -> Undo all rewrites the collection.
         Mock Confirm-TpmReShadeUndoWord { return $true }
+        Mock Invoke-TpmProgressGroup { & $Action }
         Invoke-TpmReShadeUndoAllChoice -Entries @($script:f96Entry) -ProtectedRoots @($script:f96Source)
         [System.IO.File]::ReadAllText((Join-Path $script:f96Game 'ReShade.ini')) | Should -BeExactly 'tpm'
         Test-Path -LiteralPath $script:f96Entry.Folder -PathType Container | Should -BeTrue

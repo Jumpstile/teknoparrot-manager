@@ -655,7 +655,7 @@ Describe 'FIX10 MAJOR 4: live bar and other console output share the screen with
     }
 }
 
-Describe 'FIX10 MAJOR 4: the manager Write-Host proxy coordinates with an open bar' {
+Describe 'FIX10 MAJOR 4: TPM Write-Host proxy coordinates with an open bar' {
     BeforeAll {
         function Suspend-TpmProgressOutput { [void]$script:fx10Calls.Add('suspend'); return $script:fx10Lifted }
         function Resume-TpmProgressOutput { [void]$script:fx10Calls.Add('resume') }

@@ -57,7 +57,8 @@ BeforeAll {
         'New-TpmVerifiedUserProfilesBackup',
         'Assert-TpmRegisteredGamePath',
         'Set-TpmRegistrationGamePath', 'Get-DatEntryForZipName', 'Get-TpmZipBaseName',
-        'Get-TpmProfileFileExtensions', 'Get-TpmDatNamedProfileCodes', 'Register-TpmDatSecondProfiles'
+        'Get-TpmProfileFileExtensions', 'Get-TpmDatNamedProfileCodes', 'Register-TpmDatSecondProfiles',
+        'Update-TpmProfileToOwnGameFolder', 'Test-TpmPathInOtherGameFolder'
     )
     $functions = @(
         $ast.FindAll({

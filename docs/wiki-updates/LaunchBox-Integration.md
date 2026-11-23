@@ -82,7 +82,7 @@ After I, pick the folder, then the picture type (`1 Clear logos, 2 Box front`) a
 
 ## Lighting for arcade buttons (LEDBlinky)
 
-If you use LEDBlinky, a full run (not "New game only") ends with `Optional: lighting for your arcade buttons.` The Manager looks for LEDBlinky on your drives and in Program Files, or asks where it is and remembers the folder.
+If you use LEDBlinky, a full run (not "New game only") ends with `Optional: lighting for your arcade buttons.` TPM looks for LEDBlinky on your drives and in Program Files, or asks where it is and remembers the folder.
 
 | Key | What it does |
 |---|---|
@@ -93,7 +93,7 @@ If you use LEDBlinky, a full run (not "New game only") ends with `Optional: ligh
 | O | Switch between the usual arcade colors and your own colors. |
 | B | Skip this step. |
 
-A game gets only the controls it uses that your cabinet has. Only entries the Manager added are ever removed.
+A game gets only the controls it uses that your cabinet has. Only entries TPM added are ever removed.
 
 ---
 

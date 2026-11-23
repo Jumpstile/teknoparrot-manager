@@ -1,6 +1,6 @@
 #Requires -Module Pester
 
-# Issue #427: the LaunchBox platform the Manager makes is called "TeknoParrot" and is scraped as "Arcade".
+# Issue #427: the LaunchBox platform TPM makes is called "TeknoParrot" and is scraped as "Arcade".
 # LaunchBox's own game list has no platform called TeknoParrot: its arcade games live under "Arcade". LaunchBox finds names, art and
 # details for a platform through ScrapeAs, so a wrong value here means no information for any TeknoParrot game.
 # The production script is parsed and only its function definitions are dot-sourced; no top-level product code runs.

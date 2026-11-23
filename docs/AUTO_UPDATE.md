@@ -297,7 +297,7 @@ It follows the flow originally planned here.
 
 4. You will see `Update to <version> now? (Y/N)`. Next: type N to skip, or Y to update.
 5. If you type N, you will see `Skipped -- no changes made.` Nothing changes.
-6. If you type Y on a single-file release ZIP, the update runs and the manager asks you to restart. You will see `Restart TeknoParrot Manager now to run the verified update.` Next: press Enter to exit, then start TeknoParrot Manager again.
+6. If you type Y on a single-file release ZIP, the update runs and TPM asks you to restart. You will see `Restart TeknoParrot Manager now to run the verified update.` Next: press Enter to exit, then start TeknoParrot Manager again.
 
 **If the new release is a multi-file package (RC8.1 and later):**
 

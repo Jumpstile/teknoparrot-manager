@@ -399,6 +399,12 @@ Describe 'FIX98 S6 and S7 an unfinished run is attention, a failed write stays F
         Get-TpmProgressCloseState -Result ([pscustomobject]@{ Outcome = 'PARTIAL_APPLIED'; ReasonCode = 'REGISTRATION_INCOMPLETE' }) | Should -BeExactly 'Error'
         Get-TpmProgressCloseState -Result ([pscustomobject]@{ Outcome = 'PARTIAL_APPLIED'; ReasonCode = 'PROFILE_SAVE_FAILED' }) | Should -BeExactly 'Error'
     }
+
+    It 'a registration that only skipped games closes as attention, not as a failure' {
+        foreach ($code in @('REGISTRATION_UNMATCHED_ONLY', 'REGISTRATION_NEEDS_CHOICES')) {
+            Get-TpmProgressCloseState -Result ([pscustomobject]@{ Outcome = 'ACTION_REQUIRED'; ReasonCode = $code }) | Should -BeExactly 'Incomplete'
+        }
+    }
 }
 
 Describe 'FIX98 S9 registration screens keep their details for the final return prompt' {

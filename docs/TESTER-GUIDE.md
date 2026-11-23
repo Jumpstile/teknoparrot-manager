@@ -379,13 +379,13 @@ These tests try the new parts of RC8.4. Do them first if you are short on time.
 3. If it finds LEDBlinky on its own, you see "LEDBlinky was found on this PC." If not, it asks "Do you use LEDBlinky? Show me where it is." Choose [F] to show the folder, or [S] to skip.
 4. Choose [P] Preview first. You passed if it shows what it would add and changes nothing.
 5. Choose [A] Add lighting info to LEDBlinky. You passed if a saved copy of the LEDBlinky file is made first and the result names it.
-6. Run this step again and choose [U] Undo the last add. You passed if only the entries the Manager added are removed.
+6. Run this step again and choose [U] Undo the last add. You passed if only the entries TPM added are removed.
 
 ### Test 46: Games that need firmware or a game file
 
 1. Use this only if you have a PlayStation 3 game (RPCS3) or a Play! game. Skip this test if you have neither.
-2. Start the game from the Manager, or run Health check (Test 4).
-3. You passed if the Manager tells you in plain words what is missing (the firmware or the game file) before the game starts. It failed if the game just closes with no explanation.
+2. Start the game from TPM, or run Health check (Test 4).
+3. You passed if TPM tells you in plain words what is missing (the firmware or the game file) before the game starts. It failed if the game just closes with no explanation.
 
 ### Test 47: Pick all games with A
 
@@ -469,8 +469,8 @@ These tests try the new parts of RC9. Do them first if you are short on time.
 ### Test 58: LaunchBox platform name
 
 1. Use this only if you use LaunchBox. Skip this test if you do not.
-2. In LaunchBox open the platform list. You passed if the platform the Manager made is called TeknoParrot and its "Scrape as" setting is Arcade.
-3. Select a few of the games the Manager added, right-click, and search for metadata. You passed if LaunchBox finds the game by its name and fills in artwork or details, and none of the games ends up under a different platform name.
+2. In LaunchBox open the platform list. You passed if the platform TPM made is called TeknoParrot and its "Scrape as" setting is Arcade.
+3. Select a few of the games TPM added, right-click, and search for metadata. You passed if LaunchBox finds the game by its name and fills in artwork or details, and none of the games ends up under a different platform name.
 
 ### Test 59: Pictures from a folder match the right game
 
@@ -486,7 +486,7 @@ These tests try the new parts of RC9. Do them first if you are short on time.
 3. Read "Bezel preview. Nothing has been changed yet." You passed if each game shows a bezel and how sure the match is (High, Medium or Low), a Low match says "needs your choice", and a picture for a different sequel number is not picked for you.
 4. Apply it for one game. You passed if the bezel is copied and checked. If you placed a bezel yourself earlier, it must be kept unless you said to replace it.
 5. Start that game. Write down if the bezel shows. It may not show in games that run in exclusive fullscreen.
-6. Type 5, then B, then the undo choice. You passed if the bezel the Manager copied is removed and your own bezel is back.
+6. Type 5, then B, then the undo choice. You passed if the bezel TPM copied is removed and your own bezel is back.
 
 ### Test 61: Controls result names a game to set up first
 
@@ -497,14 +497,14 @@ These tests try the new parts of RC9. Do them first if you are short on time.
 
 ### Test 62: PostgreSQL setup waits for you
 
-1. Use a test PC only. Use this only if you have a game set to Existing PostgreSQL, and start the Manager without administrator rights.
+1. Use a test PC only. Use this only if you have a game set to Existing PostgreSQL, and start TPM without administrator rights.
 2. At the main menu, type 11 and press Enter (Postgres setup).
-3. You passed if the Manager explains what the Windows permission window will ask for and waits for you to press Enter. The Windows window must open only after you press Enter.
+3. You passed if TPM explains what the Windows permission window will ask for and waits for you to press Enter. The Windows window must open only after you press Enter.
 
 ### Test 63: Check an outside controller list (advanced)
 
 1. Use this only if you are comfortable with PowerShell and you have a controller list such as RetroBat's teknoparrot.yml. Skip this test if not.
-2. In PowerShell, in the Manager folder, run: `.\TeknoParrot-Manager.ps1 -MappingEvidenceFile "C:\path\to\teknoparrot.yml" -ValidationRoot "C:\path\to\TeknoParrot" -ValidationJsonPath "C:\path\to\new-details.json"`.
+2. In PowerShell, in the TPM folder, run: `.\TeknoParrot-Manager.ps1 -MappingEvidenceFile "C:\path\to\teknoparrot.yml" -ValidationRoot "C:\path\to\TeknoParrot" -ValidationJsonPath "C:\path\to\new-details.json"`.
 3. You passed if it says nothing was changed and prints plain counts, and the only new file is the one you named. Check that no file in GameProfiles or UserProfiles changed.
 4. Run it again with the same names. You passed if the two details files are identical.
 
@@ -512,14 +512,14 @@ These tests try the new parts of RC9. Do them first if you are short on time.
 
 1. Use this only if you have a registered Chihiro or PlayStation 3 game and your own Supplementary game collection. Skip this test if not.
 2. Run Register only (menu 2), or choose F in the Library health check (menu 13), while the startup files are missing.
-3. If the Manager does not find the files, it asks for your Supplementary folder. Choose your real folder. You passed if it asks only once in this run and does not ask again on the next run. (If you press Enter to skip, nothing is saved and it asks again next time.)
+3. If TPM does not find the files, it asks for your Supplementary folder. Choose your real folder. You passed if it asks only once in this run and does not ask again on the next run. (If you press Enter to skip, nothing is saved and it asks again next time.)
 4. Read the list. It should say what it found, what is already in place, what is missing (by file name) and the folders it searched. Press Y once.
 5. You passed if one Y installed everything it found, and the result names what was installed, already matching, missing or invalid. It failed if it asked you to approve each game or each file one by one.
 
 ### Test 65: Update screen at start (one Y)
 
 1. Do this only on a PC that still runs an older version while RC9 is on the release page. Skip this test if not.
-2. Start the Manager. You passed if the Update Available screen shows before the "use saved settings?" question, with the choices Y = Update now, N = Remind me later and V = View release notes.
+2. Start TPM. You passed if the Update Available screen shows before the "use saved settings?" question, with the choices Y = Update now, N = Remind me later and V = View release notes.
 3. Press V, read the notes, then choose again. Press Y. You passed if the update starts right away and it does not ask a second Y/N question.
 
 ### Test 66: A game with two versions, or two profiles

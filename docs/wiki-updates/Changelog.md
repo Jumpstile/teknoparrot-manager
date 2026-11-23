@@ -28,19 +28,19 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   For most games the list comes from TeknoParrot's own game file and
   says that no person has checked it. It changes nothing and never says
   a game is ready.
-- The Device Survey saves your answers in the Manager's own settings
+- The Device Survey saves your answers in TPM's own settings
   folder and asks one question next time: "Keep these answers?" It asks
   again only if a controller turns up that you said you do not have. A
   damaged answers file is set aside, never overwritten.
 - "My controls" (choice 5) learns your arcade buttons: press each
-  control and the Manager remembers the key it sends. If LEDBlinky is
+  control and TPM remembers the key it sends. If LEDBlinky is
   installed it offers its key list first. Before it learns, it checks
   for a stuck button (2 seconds, hands off) and tells you if a press
   also sends another key or a button stays down after 3 seconds. It
   offers the standard keys that MAME and Ultimarc I-PAC boards use only
   after you say yes and two buttons you press send those keys. Nothing
   in your game files changes.
-- The Manager tells you when you changed your arcade encoder. It keeps
+- TPM tells you when you changed your arcade encoder. It keeps
   a private one-way code for each Ultimarc-type encoder (maker and model
   numbers are never saved, logged or shared) and says whether it is the
   same encoder, one was added or removed, or it could not check. It is a
@@ -55,13 +55,13 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   and buttons, and which device the game needs (trackball, spinner,
   wheel and pedals, light gun) that you said you do not have, with
   what can stand in (an Xbox controller to steer, a trackball or the
-  Xbox stick to aim). It says "not known" when you never told the
-  Manager. It only compares and changes nothing.
+  Xbox stick to aim). It says "not known" when you never told
+  TPM. It only compares and changes nothing.
 - Learning buttons asks if your cabinet has an Exit, Pause or Menu
   button (Esc counts as a key for these). My controls offers "6 = Undo
   my last save" when an older copy of your answers exists: it shows
   what comes back, asks once, and keeps your newest answers as a copy.
-- You can tell the Manager that a game played well. It keeps that with
+- You can tell TPM that a game played well. It keeps that with
   the date and the game's revision, and calls the controls Verified
   until they or the settings change. Starting a game never makes it
   Verified. Wheel, gun and other analog games need you to say the
@@ -100,11 +100,11 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   such as Dance Dance Revolution 2nd Mix Link). System 11 games need
   both ZIPs in one folder. The disc image (CHD) is chosen when there is
   only one, never guessed when there are several. If you have your own
-  System 11 saved files set, the Manager can copy the files for your
+  System 11 saved files set, TPM can copy the files for your
   games. It never replaces a file that is there and says which games
   the set lacks.
 - Startup files for Chihiro, PlayStation 3 and the other systems that
-  need them now work like the CPS3 step. If the Manager cannot find
+  need them now work like the CPS3 step. If TPM cannot find
   them, it asks once for your Supplementary folder and remembers it.
   One Y installs everything. The result names what was installed,
   already matching, missing (by file name) or invalid, and the folders
@@ -114,11 +114,11 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   TeknoParrot folder, and games that need you to pick the game file.
 - The graphics card warning also reads TeknoParrot's own game notes, so
   a game it says does not work on your AMD or Intel card is warned about
-  even if the Manager's list does not name it. The Intel warning names
+  even if TPM's list does not name it. The Intel warning names
   Golden Tee Live 2021 to 2026 and the PGA Tour games.
 - After a BepInEx install or update, the result tells you to start the
   game and close it twice the first time, and how to reset BepInEx.
-- If the DAT game list uses a format version the Manager does not know,
+- If the DAT game list uses a format version TPM does not know,
   it says so in plain words and still reads it.
 - docs\GAME-SUPPORT.md lists every game, built from the current guide
   and the 2,541 current TeknoParrot profiles.
@@ -130,15 +130,15 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   default. It needs no database install; you start the game once so it
   makes its own database. Existing PostgreSQL keeps an existing server
   and its saved progress and works as before (PostgreSQL 8.3). For
-  Internal games the Manager skips every PostgreSQL check, install offer
+  Internal games TPM skips every PostgreSQL check, install offer
   and "database missing" warning. It never switches a game from one
   choice to the other and never touches saved progress without a backup.
 - Every Incredible Technologies game with a database is covered: all
   Golden Tee Live years (2006 to 2023, 2025, 2026), all Golden Tee PGA
   Tour games (2021 to 2023, 2025, 2026), Power Putt Live, Silver Strike
-  Bowling Live, Target Toss Pro and Orange County Choppers Pinball. The
-  Manager finds them by what their profile says, so a new game of this
-  kind needs no new Manager version.
+  Bowling Live, Target Toss Pro and Orange County Choppers Pinball.
+  TPM finds them by what their profile says, so a new game of this
+  kind needs no new TPM version.
 - A game with TeknoParrot's "Automatically create Database" option and
   no starting database file is "Profile ready", not "left out":
   TeknoParrot makes the database the first time the game starts.
@@ -158,7 +158,7 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   (one table, category2_attr, came back empty). Such a backup is now
   restored into a database that keeps every byte.
 - Before the Windows permission window opens for PostgreSQL setup or
-  repair, the Manager waits for you to press Enter. Backups, database
+  repair, TPM waits for you to press Enter. Backups, database
   moves and saved proof files no longer stop on PCs with older-style
   folder permissions, and the log names the reason if one still fails.
 
@@ -195,12 +195,12 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   are read back, and one question right after saving undoes it. Lights
   are not changed.
 - You see a preview first for all of these, and Restore undoes them.
-  The platform the Manager makes is called TeknoParrot and is scraped as
+  The platform TPM makes is called TeknoParrot and is scraped as
   Arcade, which is where LaunchBox keeps arcade games.
 
 ### ReShade
 - New choice B in ReShade setup: use your own bezel folder. A bezel is
-  a picture that frames the game, like a cabinet's edge. The Manager
+  a picture that frames the game, like a cabinet's edge. TPM
   matches your .png pictures to your games and shows how sure each match
   is. It copies nothing until you say yes, never uses an unsure match or
   a different sequel number unless you pick it, keeps a bezel you placed
@@ -227,7 +227,7 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   paths.
 - The README and User Guide say the online list of TeknoParrot game
   profiles is used only when it can be reached (it currently cannot,
-  because the repository is not public). Otherwise the Manager uses the
+  because the repository is not public). Otherwise TPM uses the
   profiles in your own TeknoParrot folder.
 - All screens and guides use American spelling.
 
@@ -272,13 +272,13 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   32-bit or 64-bit type could not be worked out.
 
 ### Also new in this release
-- LEDBlinky lighting (optional): if you use LEDBlinky, the Manager can
+- LEDBlinky lighting (optional): if you use LEDBlinky, TPM can
   add lighting info for your games. It looks for LEDBlinky on your
   drives and in Program Files, or asks where it is and remembers the
   folder. A game gets only the controls it uses that your cabinet has.
   You see a preview first, a saved copy is made, and you can undo it.
-  Only entries the Manager added are ever removed.
-- LaunchBox: the Manager can look each game up in LaunchBox's own game
+  Only entries TPM added are ever removed.
+- LaunchBox: TPM can look each game up in LaunchBox's own game
   list on your PC and use the official name and the Games Database ID,
   so LaunchBox can find info and artwork. Choose [L] in the LaunchBox
   step to do this for games that have no ID yet. You see every old
@@ -293,7 +293,7 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   folder you pick. You see a preview first, close matches are used only
   if you say yes, and Undo removes the pictures that were added.
 - Games that need PlayStation 3 firmware (RPCS3) or a Play! game file
-  are now checked before they start, and the Manager tells you what is
+  are now checked before they start, and TPM tells you what is
   missing.
 - The game list now also reads a second program and a test menu program
   for games that list them.
@@ -303,10 +303,10 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   TeknoParrot, the message now says so. The "unpacked only" warning
   shows only when a game still needs your attention.
 - A game profile with odd characters in its program name, such as a
-  quote or a pipe, no longer stops the Manager with "Illegal
+  quote or a pipe, no longer stops TPM with "Illegal
   characters in path".
 - If a second problem is found on the PostgreSQL setup screen, it is
-  shown and you return to the menu instead of the Manager stopping.
+  shown and you return to the menu instead of TPM stopping.
 - All screens and guides use American spelling.
 
 ## v1.0 RC8.3 (changes since RC8.2)
@@ -322,7 +322,7 @@ The previous published release was v1.0 RC8.3. RC4 and RC5 are historical; RC4 i
   accident can be done.
 - The dgVoodoo2 result now names every game that already had all of its
   files, so every game you picked is listed.
-- After registering new games, the Manager now offers to add them to
+- After registering new games, TPM now offers to add them to
   LaunchBox even when you pick New game only.
 
 ### Fixes
@@ -687,7 +687,7 @@ Promoted to RC1 for the upcoming 1.0 release. No new functional changes beyond w
 
 - **New:** register mode now shows a live progress bar (`Scanning game library X/Y`) so large libraries don't look frozen. (#21)
 - **New:** `subFolderMap` override in `overrides.json` — for games (e.g. CrediarDolphin / Tatsunoko vs. Capcom) whose executable must live in a specific subfolder of the TeknoParrot root rather than the staging folder. (#11)
-- **Docs:** added Uninstalling / Removing the Manager section. (#35)
+- **Docs:** added Uninstalling / Removing TPM section. (#35)
 - **Docs:** expanded Troubleshooting with common error messages (access denied, path too long, network timeouts, Postgres password, LaunchBox open, frozen-looking scan). (#33)
 
 ## v0.99.30 BETA (2026-06-25)

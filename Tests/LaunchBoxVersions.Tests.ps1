@@ -2,7 +2,7 @@
 
 # Issue #422: regions and versions of one game become one LaunchBox game with a version picker.
 # What a user sees or loses: only the same game is grouped (same Games Database ID), the default version follows the region the user chose,
-# the preview changes nothing, nothing is lost (every version is still a way to start the game), the Manager's own entries only, and Restore
+# the preview changes nothing, nothing is lost (every version is still a way to start the game), TPM's own entries only, and Restore
 # (the verified backup) puts the separate games back.
 # The production script is parsed and only its function definitions are dot-sourced; no top-level product code runs.
 # Everything lives under TestDrive. What this CANNOT prove: that a real LaunchBox shows the version picker for these entries (the entry shape
@@ -160,7 +160,7 @@ Describe 'Issue 422: group the versions of one game' {
 }
 
 # Issue #423: keep LaunchBox in step with the TeknoParrot library.
-# What a user sees or loses: only the Manager's own entries change, an entry is removed only when its profile is gone (never for a
+# What a user sees or loses: only TPM's own entries change, an entry is removed only when its profile is gone (never for a
 # missing game file), a title the owner typed is kept, and the preview changes nothing.
 Describe 'Issue 423: keep LaunchBox in step with the library' {
     BeforeEach {
@@ -202,7 +202,7 @@ Describe 'Issue 423: keep LaunchBox in step with the library' {
         (Read-VerPlatform $fx).SelectSingleNode('/LaunchBox/Game[ID="g3"]').ApplicationPath | Should -Be '..\TP\UserProfiles\Fantasy.xml'
     }
 
-    It 'an old Manager title becomes the clean title; a title the owner typed and a linked game keep theirs' {
+    It 'an old TPM title becomes the clean title; a title the owner typed and a linked game keep theirs' {
         # Mutation: rename every title -> the owner's own name is lost.
         $fx = New-VerFixture
         $xml = [System.IO.File]::ReadAllText($fx.Platform).Replace('<Title>TooSpicyU</Title>', '<Title>My Spicy Game</Title>').Replace('<Title>Fantasy</Title>', '<Title>Fantasy</Title><DatabaseID>12</DatabaseID>')
@@ -227,7 +227,7 @@ Describe 'Issue 423: keep LaunchBox in step with the library' {
     }
 
     It 'holds removals back when most games have no profile (a wrong or half-restored folder)' {
-        # Mutation: no hold-back -> pointing the Manager at the wrong folder wipes the library.
+        # Mutation: no hold-back -> pointing TPM at the wrong folder wipes the library.
         $extra = ''
         foreach ($n in 1..4) { $extra += ('<Game><ID>x{0}</ID><Title>Gone {0}</Title><Platform>TeknoParrot</Platform><Emulator>emu-1</Emulator><ApplicationPath>..\TP\UserProfiles\Gone{0}.xml</ApplicationPath></Game>' -f $n) }
         $fx = New-VerFixture -ExtraGameXml $extra

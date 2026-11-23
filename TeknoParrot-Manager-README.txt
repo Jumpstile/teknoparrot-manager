@@ -2258,9 +2258,9 @@
 
   EVERY TEKNOPARROT GAME
 
-  The Manager is checked against every game setup file in TeknoParrot
+  TPM is checked against every game setup file in TeknoParrot
   1.0.0.2325 (2,541 of them), and against the Eggman game list and guide. docs\GAME-SUPPORT.md lists every game
-  and what the Manager does for it. These cases work with no extra steps:
+  and what TPM does for it. These cases work with no extra steps:
 
     Two versions of a game   Each version is registered. If TeknoParrot has
                              only one setup file for both, the second one is
@@ -2598,7 +2598,7 @@
   It then prints a plan of which game to bind with which device. It
   changes no game file.
 
-  Your answers are saved in the Manager's own settings folder
+  Your answers are saved in TPM's own settings folder
   (State\Controls), so you are not asked the same thing twice. Next time
   it shows your answers and asks one question ("Keep these answers?"). It
   asks again if a controller turns up that you said you do not have. A
@@ -2610,7 +2610,7 @@
     Nothing here changes a TeknoParrot game file.
 
     - Learn my arcade buttons. You say how many players and buttons your
-      cabinet has. First the Manager waits 2 seconds with your hands off
+      cabinet has. First TPM waits 2 seconds with your hands off
       the cabinet. If a key shows up on its own, a button may be stuck,
       and it tells you. If LEDBlinky is installed, it then offers the
       keys its own key list names (one Y/N). It can also offer the
@@ -2622,17 +2622,17 @@
       not have. A key already given to another control is refused. If a
       press also sends another key, or a button is still down after 3
       seconds, it tells you and keeps the first key. At the end, one
-      question ("Save this?") keeps the answers, and the Manager also
+      question ("Save this?") keeps the answers, and TPM also
       notes which arcade encoders it can see right now. Other encoder
       brands' own setup files are not read: no maker writes down which
       pin is which button. Pressing the buttons works for any encoder.
     - Is it the same controller? My controls and the Device Survey say,
-      in one line, whether the Manager sees the same arcade encoders as
+      in one line, whether TPM sees the same arcade encoders as
       when you taught it your keys, whether one was added or removed, or
       whether it could not check. It is only a hint. It never changes a
       saved key or answer and never marks a game Verified. If you
-      changed your encoder, learn your buttons again. Details: the
-      Manager can only tell encoders from makers it recognizes (today
+      changed your encoder, learn your buttons again. Details:
+      TPM can only tell encoders from makers it recognizes (today
       Ultimarc, such as the I-PAC). For each one it keeps a private
       one-way code in State\Controls, made from the maker and model
       numbers on this PC. The numbers, serial numbers and device paths
@@ -2640,43 +2640,43 @@
       never leaves your PC. Moving an encoder to another USB port is not
       a change. Swapping one for an identical one cannot be noticed.
     - Show or print the controls of one game. Lists each control the game
-      has, what it does, the key the Manager suggests, and whether the
+      has, what it does, the key TPM suggests, and whether the
       game has it set up. It suggests your key only for the standard
       controls: coin, start, numbered buttons, and directions the game
       plainly calls directions. For anything else, such as a game's
       "Menu Up" or "Volume Down" slot, it says "I'm not sure". If your
       own LEDBlinky file gives a control a color, the page also shows it
-      in a Light column (the Manager does not change any lights). One
+      in a Light column (TPM does not change any lights). One
       question saves the list as a page in Reports\Control Guides and
       opens it so you can print it.
     - Tell TPM how a game played. W means you played it and every control
-      you tried reacted correctly. The Manager keeps that, with the date
+      you tried reacted correctly. TPM keeps that, with the date
       and the game's revision, and calls the game's controls Verified
       until its controls or its settings change. Starting a game,
       registering it, or seeing a controller never makes a game Verified.
       A wheel, gun or other analog game is not Verified until you say its
       calibration is done (or not needed). You can also record that a
-      first-run Test or Service menu step is still to do. N makes the
-      Manager forget that a game worked.
+      first-run Test or Service menu step is still to do. N makes
+      TPM forget that a game worked.
     - Show or print my cabinet controls. The same page for the cabinet
       itself: each control and the key it sends.
     - Does my cabinet fit the game? The page for one game starts with a
-      few plain lines that compare the game with what you told the
-      Manager. It says if your cabinet has enough players and buttons
+      few plain lines that compare the game with what you told
+      TPM. It says if your cabinet has enough players and buttons
       ("Your cabinet has no button 3" is shown on that row), and which
       device the game needs (trackball, spinner, wheel and pedals, light
       gun) that you said you do not have. If you have no wheel but have
       an Xbox controller, or no light gun but have a trackball or an
-      Xbox controller, it says that can stand in. If you never told the
-      Manager, it says it does not know instead of guessing. This only
+      Xbox controller, it says that can stand in. If you never told
+      TPM, it says it does not know instead of guessing. This only
       compares: it sets up nothing and changes no game file. The same
       lines go to the log.
-    - Exit, Pause and Menu. When learning buttons, the Manager first
+    - Exit, Pause and Menu. When learning buttons, TPM first
       asks, one by one, if your cabinet has an Exit, a Pause or a Menu
       (admin) button. The answer is N unless you say Y. For these three,
       Esc counts as a key, because many cabinets use Esc for Exit. They
       show on your cabinet page.
-    - Undo my last save. Every time the Manager saves your answers or
+    - Undo my last save. Every time TPM saves your answers or
       keys it keeps the older file next to it as a .bak copy. When such
       a copy exists, My controls offers "6 = Undo my last save". It
       shows how many keys the older answers hold and asks one question.
@@ -2852,7 +2852,7 @@
 
   Lighting for your arcade buttons (LEDBlinky, optional). If you use
   LEDBlinky, a full run (not "New game only") ends with "Optional:
-  lighting for your arcade buttons." The Manager looks for LEDBlinky on
+  lighting for your arcade buttons." TPM looks for LEDBlinky on
   your drives and in Program Files, or asks where it is and remembers
   the folder. You see:
 
@@ -2866,7 +2866,7 @@
 
   A game gets only the controls it uses that your cabinet has. You see a
   preview first, a saved copy is made, and you can undo it. Only entries
-  the Manager added are ever removed.
+  TPM added are ever removed.
 
   If anything looks wrong afterward:
 

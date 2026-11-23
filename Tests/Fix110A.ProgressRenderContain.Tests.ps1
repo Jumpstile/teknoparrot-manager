@@ -220,7 +220,7 @@ Describe 'FIX110A S-2 the product progress wrappers never stop the work' {
         Remove-Variable -Name F110Now, F110Lines, F110Log, F110Fail -Scope Global -ErrorAction SilentlyContinue
     }
 
-    It 'registers the log hook, so a drawing failure lands in the manager log and the mutation loop finishes' {
+    It 'registers the log hook, so a drawing failure lands in TPM log and the mutation loop finishes' {
         # Mutation: drop the Set-TpmProgressRenderLogger line from Import-TpmProgressModule -> the failure is swallowed silently and the log stays empty.
         # Mutation: let the wrapper rethrow drawing errors -> the loop stops after the first item.
         $global:F110Fail = 'console write failed'

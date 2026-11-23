@@ -256,6 +256,10 @@ Describe 'New-TpmSupportPackage' {
         $one.Succeeded | Should -BeTrue
         $two.Succeeded | Should -BeTrue
         [System.IO.Path]::GetFileName($one.PackagePath) | Should -Match '^TeknoParrotManager-Support-\d{8}-\d{6}(-\d{3})?\.zip$'
+        # The time in the name is the PC's own clock, the one the user sees (a UTC name is hours off on any PC outside UTC).
+        $nameStamp = [regex]::Match([System.IO.Path]::GetFileName($one.PackagePath), '\d{8}-\d{6}').Value
+        $named = [datetime]::ParseExact($nameStamp, 'yyyyMMdd-HHmmss', [System.Globalization.CultureInfo]::InvariantCulture)
+        [Math]::Abs(($named - (Get-Date)).TotalMinutes) | Should -BeLessThan 5
         $one.PackagePath | Should -Not -Be $two.PackagePath
     }
 

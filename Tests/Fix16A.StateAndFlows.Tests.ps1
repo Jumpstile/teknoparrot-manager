@@ -553,6 +553,26 @@ Describe 'ConvertTo-TpmRegistrationResult already-registered outcome (Finding A)
         (@($r.Mutation.FailedItems) -join '|') | Should -Be 'C'
         { Assert-TpmTransactionResult -Result $r } | Should -Not -Throw
     }
+
+    It 'folders TeknoParrot did not recognize get a calm "nothing to choose" message and an attention bar, not FAILED' {
+        $legacy = New-Fix16Legacy -Already @('A')
+        $legacy.Unmatched = @('Some Folder')
+
+        $r = ConvertTo-TpmRegistrationResult -Legacy $legacy -Backup $null -DryRun $false
+
+        $r.Outcome | Should -Be 'ACTION_REQUIRED'
+        $r.Summary | Should -Match 'not recognized'
+        $r.Summary | Should -Not -Match 'choice|FAIL|claimed'
+    }
+
+    It 'asks for a choice only when a game really needs one, still without FAILED' {
+        $legacy = New-Fix16Legacy -Already @('A')
+        $legacy.Ambiguous = @([pscustomobject]@{ Codes = 'X,Y' })
+
+        $r = ConvertTo-TpmRegistrationResult -Legacy $legacy -Backup $null -DryRun $false
+
+        $r.Summary | Should -Match 'need a choice'
+    }
 }
 
 Describe 'Register-Games lazy safety backup (Finding A)' {

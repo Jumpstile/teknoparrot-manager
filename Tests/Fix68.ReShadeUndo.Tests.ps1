@@ -463,6 +463,7 @@ Describe 'FIX68 the Undo menu' {
     BeforeEach {
         Mock Write-Log {}
         Mock Write-TpmCompactExtractionProgress {}
+        Mock Invoke-TpmProgressGroup { & $Action }
         $script:f68Rows = New-Object 'System.Collections.Generic.List[string]'
         Mock Write-Host { [void]$script:f68Rows.Add([string]$Object) }
         $script:f68Width = 100

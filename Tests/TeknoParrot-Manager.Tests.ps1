@@ -8990,31 +8990,22 @@ It "preserves accumulated item outcomes and skip totals on each package acquisit
 
         $result.ReasonCode | Should -Be $ExpectedReason
         $result.Errors | Should -Be 1
-        $result.MissingDevice | Should -Be 1
-        $result.MissingPath | Should -Be 1
-        $result.Protected | Should -Be 1
-        $result.Skipped | Should -Be 5
-        $result.UnsupportedArchitecture | Should -Be 1
-        $result.UnknownArchitecture | Should -Be 1
-        (@($result.Items | Sort-Object) -join ',') | Should -Be 'MISSINGDEVICE,MISSINGPATH,OUTSIDE,UNKNOWN,UNSUPPORTED,X64GAME,X86GAME'
-        (@($result.Mutation.SkippedItems | Sort-Object) -join ',') | Should -Be 'MISSINGDEVICE,MISSINGPATH,OUTSIDE,UNKNOWN,UNSUPPORTED'
+        # The user picked only X64GAME and X86GAME. The other five games were not picked, so they are not counted, skipped or failed.
+        $result.MissingDevice | Should -Be 0
+        $result.MissingPath | Should -Be 0
+        $result.Protected | Should -Be 0
+        $result.Skipped | Should -Be 0
+        $result.UnsupportedArchitecture | Should -Be 0
+        $result.UnknownArchitecture | Should -Be 0
+        (@($result.Items | Sort-Object) -join ',') | Should -Be 'X64GAME,X86GAME'
+        @($result.Mutation.SkippedItems).Count | Should -Be 0
         @($result.Mutation.FailedItems) | Should -Be @('X64GAME')
         @($result.Mutation.UnattemptedItems) | Should -Be @('X86GAME')
         @($result.Mutation.ChangedItems).Count | Should -Be 0
         @($result.Mutation.CompletedItems).Count | Should -Be 0
-        $result.PathReasonCounts['DEVICE_UNAVAILABLE'] | Should -Be 1
-        $result.PathReasonCounts['GAME_PATH_MISSING'] | Should -Be 1
-        $result.PathReasonCounts['PROTECTED_OR_REPARSE_ROOT'] | Should -Be 1
-        $result.PathReasonCounts['UNKNOWN_ARCHITECTURE'] | Should -Be 1
-        $result.PathReasonCounts['UNSUPPORTED_ARCHITECTURE'] | Should -Be 1
-        foreach ($expected in @(
-            @{ Game='MISSINGDEVICE'; Reason='DEVICE_UNAVAILABLE' }
-            @{ Game='MISSINGPATH'; Reason='GAME_PATH_MISSING' }
-            @{ Game='OUTSIDE'; Reason='PROTECTED_OR_REPARSE_ROOT' }
-            @{ Game='UNKNOWN'; Reason='UNKNOWN_ARCHITECTURE' }
-            @{ Game='UNSUPPORTED'; Reason='UNSUPPORTED_ARCHITECTURE' }
-            @{ Game='X64GAME'; Reason=$ExpectedReason }
-        )) { @($result.TechnicalDetails.FailureRecords | Where-Object { $_.Game -eq $expected.Game -and $_.ReasonKey -eq $expected.Reason }).Count | Should -Be 1 }
+        $result.PathReasonCounts.ContainsKey('DEVICE_UNAVAILABLE') | Should -BeFalse
+        $result.PathReasonCounts.ContainsKey('UNKNOWN_ARCHITECTURE') | Should -BeFalse
+        @($result.TechnicalDetails.FailureRecords | Where-Object { $_.Game -eq 'X64GAME' -and $_.ReasonKey -eq $ExpectedReason }).Count | Should -Be 1
         if ($Failure -eq 'unsafe release filename') { Should -Invoke Invoke-TpmDownload -Times 0 -Exactly }
         else { Should -Invoke Invoke-TpmDownload -Times 1 -Exactly }
         { Assert-TpmTransactionResult -Result $result } | Should -Not -Throw
@@ -11826,7 +11817,7 @@ $ReleaseCandidateLabel = "RC7"
         $result.ReasonCode | Should -Be 'UPDATE_VERSION_MISMATCH'
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
     }
-    It "[UVO-08] rejects cast-parenthesized scoped version writes before replacing the manager script" {
+    It "[UVO-08] rejects cast-parenthesized scoped version writes before replacing the TPM script" {
         $entryContent = '# TeknoParrot Manager' + "`n" + '$ScriptVersion = "1.0"' + "`n" +
             '[string]($script:ScriptVersion) = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
         $zipBytes = New-StartupCheckFixtureZipBytes -EntryContent $entryContent
@@ -11854,7 +11845,7 @@ $ReleaseCandidateLabel = "RC7"
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
         Should -Invoke Move-Item -Times 0 -Exactly
     }
-    It "[UVO-08] rejects an attributed scoped overwrite before replacing the manager script" {
+    It "[UVO-08] rejects an attributed scoped overwrite before replacing the TPM script" {
         $entryContent = '# TeknoParrot Manager' + "`n" + '$ScriptVersion = "1.0"' + "`n" +
             '[ValidateNotNull()]$script:ScriptVersion = "1.1"' + "`n" + '$ReleaseCandidateLabel = "RC8"'
         $tokens = $null
@@ -18144,15 +18135,6 @@ Describe "Action Required report output" {
         (@(Get-TpmActionRequiredPlainLines -For Screen -SavePath '') -join "`n") | Should -Not -Match '\\'
     }
 
-    It "says what the Save window is for in one plain line" {
-        $lines = @(Get-TpmActionRequiredPlainLines -For SaveWindow)
-        $lines.Count | Should -Be 1
-        $lines[0] | Should -Match '^A window will open so you can choose where to save this list\.'
-        $lines[0] | Should -Match 'press Save'
-        $lines[0] | Should -Match 'Cancel'
-        $lines[0] | Should -Match 'saved either way'
-    }
-
     It "puts a plain header at the top of the saved file and keeps the items in order" {
         $actionPath = Join-Path $TestDrive 'ActionItems-header.txt'
         $manual = @{
@@ -18184,7 +18166,6 @@ Describe "Action Required report output" {
     It "keeps machine names out of the plain Action Required wording" {
         $all = @(
             (Get-TpmActionRequiredPlainLines -For Screen -SavePath 'C:\TPM\Reports\TeknoParrot-Manager-ActionItems.txt')
-            (Get-TpmActionRequiredPlainLines -For SaveWindow)
             (Get-TpmActionRequiredPlainLines -For File)
         ) -join "`n"
         foreach ($name in @($env:COMPUTERNAME, $env:USERDOMAIN)) {
@@ -18193,14 +18174,10 @@ Describe "Action Required report output" {
         $all | Should -Not -Match '[^\x20-\x7E\n]'
     }
 
-    It "keeps the Save window title, file name and Cancel path, and explains the window just before it opens" {
-        # The top-level menu code cannot be run here and the smoke harness finds the window by this exact title.
+    It "saves the list to the Reports folder without opening a Save window" {
         $source = $script:ProductionSource
-        $source | Should -Match '\$saveDialog\.Title\s+=\s+"Save Action Required summary"\r?\n'
-        $source | Should -Match '\$saveDialog\.FileName\s+=\s+"TeknoParrot-Manager-ActionItems\.txt"'
-        $source | Should -Match 'Get-TpmActionRequiredPlainLines -For SaveWindow\)\) \{[^\r\n]*\}\r?\n\s+try \{\r?\n\s+Add-Type -AssemblyName System\.Windows\.Forms'
+        $source | Should -Not -Match 'Save Action Required summary'
         $source | Should -Match 'Get-TpmActionRequiredPlainLines -For Screen -SavePath \(\[string\]\$script:TpmOwnedLayout\.ActionItemsPath\) -Preview:\$dryRunActive\)'
-        $source | Should -Match 'Action items: save dialog canceled, using default path\.'
     }
 }
 

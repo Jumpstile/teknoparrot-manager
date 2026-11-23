@@ -510,7 +510,7 @@
       TeknoParrot-Manager.log, answer Y or N.
 
       That file is only its own start-up log. Y moves it into TeknoParrot
-      Manager's managed Logs folder. N changes nothing and leaves it where it
+      TPM's managed Logs folder. N changes nothing and leaves it where it
       is. Either answer is safe.
 
       You will see: the main menu.
@@ -775,8 +775,8 @@
     disc image (*.chd) is chosen for you only when there is exactly one.
   - For System 11 games with no saved files yet, you may see "OPTIONAL:
     System 11 saved game files". If you have your own saved-files set (a
-    ZIP in your collection folders, or a folder or ZIP you pick), the
-    Manager copies the files for your games. It only adds files, never
+    ZIP in your collection folders, or a folder or ZIP you pick),
+    TPM copies the files for your games. It only adds files, never
     replaces one, and says which games the set has no files for.
 
   7. MAKE ONE GAME WORK WELL, THEN COPY WHAT IS SAFE
@@ -945,7 +945,7 @@
   - Games whose Storage box says Internal (the new default) need no database
     install. Postgres setup and Library health check skip them. Start the
     game once so it makes its own database. Existing PostgreSQL is for
-    keeping an existing server and its saved progress. The Manager never
+    keeping an existing server and its saved progress. TPM never
     switches a game from one choice to the other.
   - When Postgres setup needs Windows permission, it first waits for you to
     press Enter ("Press Enter to open the Windows permission window"), so
@@ -1520,7 +1520,7 @@
   still open or opens again.
 
   Cause: LaunchBox and BigBox can save their own library over TeknoParrot
-  Manager's changes.
+  TPM's changes.
 
   Fix:
 
@@ -1956,7 +1956,7 @@
   - The required runtimes are installed.
 
   Then read that game's official compatibility information and TeknoParrot
-  Manager's Game Notes documentation. Do this before you try any
+  TPM's Game Notes documentation. Do this before you try any
   game-specific fix.
 
   Do not treat every crash as a missing patch. Do not install every optional
@@ -3679,7 +3679,7 @@
        same game are grouped. Restore puts them back.
     S  Keeps LaunchBox in step with TeknoParrot, after a preview and a
        backup. Removed games are removed, moved games get the new
-       location, and old Manager names become the clean title. A missing
+       location, and old TPM names become the clean title. A missing
        game file (an unplugged drive) never removes a game. Names you
        typed are never renamed. Restore undoes it.
     L  Links games for art and details, after a backup. It looks each
@@ -3743,11 +3743,11 @@
 
   Lighting for your arcade buttons (LEDBlinky, optional). If you use
   LEDBlinky, a full run (not "New game only") ends with "Optional:
-  lighting for your arcade buttons." The Manager looks for LEDBlinky on
+  lighting for your arcade buttons." TPM looks for LEDBlinky on
   your drives and in Program Files, or asks where it is and remembers
   the folder. A game gets only the controls it uses that your cabinet
   has. Choose P to preview first, A to add lighting info (a saved copy
-  is made first), or U to undo the last add. Only entries the Manager
+  is made first), or U to undo the last add. Only entries TPM
   added are ever removed.
   If anything looks wrong afterward, undo it:
 

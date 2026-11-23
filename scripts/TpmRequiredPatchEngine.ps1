@@ -157,21 +157,46 @@ function New-TpmResetSnapshot {
     }
 }
 
-function Get-TpmPatchRecoveryDirectories {
-    param([Parameter(Mandatory)]$Request,[Parameter(Mandatory)][string]$PatchId)
-    $root=$Request.Context.RecoveryRoot
-    if (-not (Test-TpmNoReparsePath $root)) { throw 'Unsafe patch backup folder.' }
-    if (-not (Test-Path -LiteralPath $root -PathType Container)) { return }
-    foreach($directory in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction Stop)) {
+# Every readable saved undo copy (receipt) in the patch backup folder, with the folder it sits in. One place reads them, so the
+# list of games to undo and the lookup of one game's copies cannot disagree.
+function Get-TpmPatchReceiptRecords {
+    param([Parameter(Mandatory)][string]$RecoveryRoot)
+    if (-not (Test-TpmNoReparsePath $RecoveryRoot)) { throw 'Unsafe patch backup folder.' }
+    if (-not (Test-Path -LiteralPath $RecoveryRoot -PathType Container)) { return }
+    foreach($directory in @(Get-ChildItem -LiteralPath $RecoveryRoot -Directory -ErrorAction Stop)) {
         if ($directory.Name -notmatch '^[a-f0-9]{32}$' -or -not (Test-TpmNoReparsePath $directory.FullName)) { continue }
         $receiptPath=Join-Path $directory.FullName 'receipt.json'
         if (-not (Test-TpmNoReparsePath $receiptPath) -or -not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) { continue }
         try {
             if ((Get-Item -LiteralPath $receiptPath).Length -gt 16384) { continue }
             $receipt=[IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json -ErrorAction Stop
-            if ($receipt.PatchId -ceq $PatchId -and $receipt.ProfileId -ceq $Request.Context.ProfileId -and $receipt.GameRoot -ieq $Request.Context.GameRoot) { $directory.FullName }
+            # A receipt without its patch, profile and game identity can never match a game, so it is not a record.
+            if ($receipt -is [pscustomobject] -and @('PatchId','ProfileId','GameRoot' | Where-Object { $null -eq $receipt.PSObject.Properties[$_] }).Count -eq 0) {
+                [pscustomobject]@{ Directory=$directory.FullName; Receipt=$receipt }
+            }
         } catch { continue }
     }
+}
+
+function Get-TpmPatchRecoveryDirectories {
+    param([Parameter(Mandatory)]$Request,[Parameter(Mandatory)][string]$PatchId)
+    foreach($record in @(Get-TpmPatchReceiptRecords -RecoveryRoot $Request.Context.RecoveryRoot)) {
+        $receipt=$record.Receipt
+        if ($receipt.PatchId -ceq $PatchId -and $receipt.ProfileId -ceq $Request.Context.ProfileId -and $receipt.GameRoot -ieq $Request.Context.GameRoot) { $record.Directory }
+    }
+}
+
+# The ids of the patches that still have something to undo: a saved copy that is not marked as already put back or rolled back.
+# A copy with no recorded state is kept in the list, so a game is never hidden when it might still be undone; Undo checks the copy itself.
+function Get-TpmUndoablePatchIds {
+    param([Parameter(Mandatory)][string]$RecoveryRoot)
+    $ids = New-Object System.Collections.Generic.List[string]
+    foreach($record in @(Get-TpmPatchReceiptRecords -RecoveryRoot $RecoveryRoot)) {
+        $state = if ($record.Receipt.PSObject.Properties['State']) { [string]$record.Receipt.State } else { '' }
+        if ($state -cin @('Restored','RolledBack')) { continue }
+        if ($record.Receipt.PatchId -is [string] -and -not $ids.Contains($record.Receipt.PatchId)) { [void]$ids.Add($record.Receipt.PatchId) }
+    }
+    return $ids.ToArray()
 }
 
 function Get-TpmPatchTextSha256 {
@@ -1197,7 +1222,8 @@ function Resolve-TpmRequiredPatchSourceRoot {
     param(
         [Parameter(Mandatory)]$Entry,
         [string]$MainSource = '',
-        [string]$SupplementarySource = ''
+        [string]$SupplementarySource = '',
+        [string]$RememberedFolder = ''
     )
     if ([IO.Path]::GetFileName([string]$Entry.SourceSet) -cne [string]$Entry.SourceSet -or
         [string]$Entry.SourceSet -match '[<>:"|?*\p{Cc}]') { throw 'The recipe source set must be one exact ZIP filename.' }
@@ -1215,6 +1241,13 @@ function Resolve-TpmRequiredPatchSourceRoot {
             (Test-TpmNoReparsePath $archivePath)
     }
     if ($validRoot) { return [IO.Path]::GetFullPath($root) }
+    # The folder the user gave for an earlier patch is tried first, so the question is not asked again when this ZIP is there too.
+    if (-not [string]::IsNullOrWhiteSpace($RememberedFolder) -and
+        (Test-Path -LiteralPath $RememberedFolder -PathType Container -ErrorAction SilentlyContinue) -and
+        (Test-TpmNoReparsePath $RememberedFolder)) {
+        $rememberedArchive = Join-Path $RememberedFolder ([string]$Entry.SourceSet)
+        if ((Test-Path -LiteralPath $rememberedArchive -PathType Leaf -ErrorAction SilentlyContinue) -and (Test-TpmNoReparsePath $rememberedArchive)) { return [IO.Path]::GetFullPath($RememberedFolder) }
+    }
     $sourceLabel = switch ([string]$Entry.SourceRole) {
         'Main' { 'Main' }
         'Supplementary' { 'Supplementary' }
@@ -1652,12 +1685,16 @@ function Add-TpmRequiredPatchResult {
     Write-Log ('Required patch result [{0}] {1}: {2}{3}' -f $Status, [string]$Entry.Id, $Reason, $receiptText)
 }
 
-# One ZIP-folder question per ZIP: the patches of one game share a ZIP, so the folder is asked once and reused.
-# The ZIP file itself is still checked for every patch when its member is read.
+# One ZIP-folder question per run: the folder the user gives is remembered and tried first for every following patch.
+# A patch whose ZIP is not in that folder asks again. The ZIP file itself is still checked for every patch when its member is read.
 function Get-TpmRequiredPatchSourceRootOnce {
     param([Parameter(Mandatory)][hashtable]$Cache, [Parameter(Mandatory)]$Entry, [string]$MainSource = '', [string]$SupplementarySource = '')
     $key = [string]$Entry.SourceRole + '|' + [string]$Entry.SourceSet
-    if (-not $Cache.ContainsKey($key)) { $Cache[$key] = Resolve-TpmRequiredPatchSourceRoot -Entry $Entry -MainSource $MainSource -SupplementarySource $SupplementarySource }
+    if (-not $Cache.ContainsKey($key)) {
+        $remembered = if ($Cache.ContainsKey('RememberedFolder')) { [string]$Cache['RememberedFolder'] } else { '' }
+        $Cache[$key] = Resolve-TpmRequiredPatchSourceRoot -Entry $Entry -MainSource $MainSource -SupplementarySource $SupplementarySource -RememberedFolder $remembered
+        $Cache['RememberedFolder'] = [string]$Cache[$key]
+    }
     return $Cache[$key]
 }
 
@@ -1952,6 +1989,25 @@ function Invoke-TpmRequiredPatchMenu {
         return
     }
     $action = if ($choice -eq 'U') { 'Undo' } else { 'Install' }
+    # Undo lists only the games that have a saved undo copy, so nobody scrolls past games with nothing to undo.
+    $undoEntries = @()
+    if ($choice -eq 'U') {
+        $undoRoot = if ($script:TpmOwnedLayout) { Join-Path $script:TpmOwnedLayout.Backups 'GamePatches' } else { Join-Path $ManagerRoot 'UpdateBackups\GamePatches' }
+        try { $undoIds = @(Get-TpmUndoablePatchIds -RecoveryRoot $undoRoot) }
+        catch {
+            Write-Log ('Required patch undo: the saved undo copies could not be read: {0}' -f $_.Exception.Message)
+            Write-TpmText -Text 'The saved undo copies could not be read, so nothing was changed.' -Color Red -BlankBefore
+            Wait-TpmRequiredPatchReturn -DetailBlocks @(@{ Heading = 'Saved undo copies'; Lines = @('Reason: ' + $_.Exception.Message) })
+            return
+        }
+        $undoEntries = @($catalog.Entries | Where-Object { $undoIds -ccontains [string]$_.Id })
+        if ($undoEntries.Count -eq 0) {
+            Write-Log 'Required patch undo: no saved undo copy was found, so there is nothing to undo.'
+            Write-TpmText -Text 'There is nothing to undo. TeknoParrot Manager has not installed any patches that can be undone.' -Color DarkGray -BlankBefore
+            Wait-TpmRequiredPatchReturn
+            return
+        }
+    }
     $hardwareEvidence = $null
     $hasHardwarePredicates = @($catalog.Entries | Where-Object { $_.PSObject.Properties['HardwarePredicate'] -and $null -ne $_.HardwarePredicate }).Count -gt 0
     if ($choice -ne 'U' -and $hasHardwarePredicates) {
@@ -1961,7 +2017,7 @@ function Invoke-TpmRequiredPatchMenu {
     $detailBlocks = New-Object System.Collections.Generic.List[object]
     $sourceRoots = @{}
     try {
-        $selectedEntries = @($catalog.Entries)
+        $selectedEntries = @(if ($choice -eq 'U') { $undoEntries } else { $catalog.Entries })
         $reported = New-Object System.Collections.Generic.List[object]
         $residueOwners = @{}
         $gameRoot = ''

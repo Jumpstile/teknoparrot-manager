@@ -26,7 +26,7 @@ Governing contract: the existing schema-3 required-patch catalog and exact local
 - Dependency/version compatibility, plugin loading, first-launch configuration, full setup, launch readiness, controls, visual behavior, or gameplay.
 - Atomicity or all-or-nothing behavior across the two files.
 - Execution or inspection of DLL code and all other archive members.
-- Changes to automatic discovery, hardware selection, engine policy, or the manager script.
+- Changes to automatic discovery, hardware selection, engine policy, or the TPM script.
 
 ## System Invariant Inventory (REQUIRED)
 

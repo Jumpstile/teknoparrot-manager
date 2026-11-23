@@ -8,7 +8,7 @@
 # which download methods it tries, never on how its source text looks.
 #
 # Write-TpmDownloadProgress is the one helper that cannot be compared: it draws to two different
-# screens (a plain console line in the updater, the manager's progress bar in the main script).
+# screens (a plain console line in the updater, TPM's progress bar in the main script).
 # The other six are compared below. Invoke-TpmDownload is compared on outcome: the main script
 # returns $false where the updater throws, and both count as "failed".
 BeforeAll {

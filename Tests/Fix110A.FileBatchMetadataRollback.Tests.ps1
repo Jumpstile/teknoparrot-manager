@@ -122,4 +122,15 @@ Describe 'FIX110A S-4: the metadata rollback undoes only the commit it can prove
         [System.IO.File]::GetLastWriteTimeUtc($fx.Metadata) | Should -Be $before
         (Get-TpmFileIdentityString -Path $fx.Metadata) | Should -BeExactly $identityBefore
     }
+
+    It 'backs up and rolls back a metadata file whose attribute is Normal (as after a ZIP extract)' {
+        # Mutation: remove the attribute match after the backup copy -> the batch stops at the backup check and the outcome is not ROLLED_BACK_VERIFIED.
+        $fx = New-F110BatchFixture
+        [System.IO.File]::SetAttributes($fx.Metadata, [System.IO.FileAttributes]::Normal)
+        $script:F110Metadata = $fx.Metadata
+        $r = Invoke-F110Batch -Fixture $fx -Commit { Set-F110Text -Path $script:F110Metadata -Text 'new-manifest' } -Verify { throw 'simulated verification failure' }
+        $r.Outcome | Should -Be 'ROLLED_BACK_VERIFIED'
+        [System.IO.File]::ReadAllText($fx.Metadata) | Should -BeExactly 'old-manifest'
+        [int][System.IO.File]::GetAttributes($fx.Metadata) | Should -Be ([int][System.IO.FileAttributes]::Normal)
+    }
 }

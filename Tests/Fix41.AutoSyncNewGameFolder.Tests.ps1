@@ -496,3 +496,165 @@ Describe 'FIX41 P02 AutoSync first-time extraction into a new game folder' {
         Get-Fix41TreeDigest $target | Should -Be $digest
     }
 }
+
+Describe 'Issue 441: a profile that points at another game folder does not make this game count as extracted' {
+    AfterEach {
+        $script:TpmOwnedLayout = $null
+        $script:TpmRegistrationLedger = $null
+        $script:TpmRegistrationLedgerStopLatch = $null
+    }
+
+    It 'extracts Additional Gain into its own folder when its profile points at the original game folder' {
+        # Mutation: remove the Test-TpmPathInOtherGameFolder checks (Resolve-RegisteredGameFolder and the registered-profile block of
+        # Invoke-AutoSync) -> Additional Gain resolves to the original folder and is never extracted (Synced 0, no folder of its own).
+        $fx = New-Fix41Fixture
+        $base = 'Delta Bride (2009)(JPN)[Board A][TP]'
+        $addOn = 'Delta Bride - Additional Gain (2011)(JPN)[Board B][TP]'
+        # The two names are different games for the exact lookup (no prefix matching).
+        (Get-NormalizedGameKey $base) | Should -Not -Be (Get-NormalizedGameKey $addOn)
+        $dat = @{
+            (Get-NormalizedGameKey $base) = [pscustomobject]@{ ProfileCode = 'DELTABRIDE'; OriginalName = $base; Executable = 'game.exe' }
+            (Get-NormalizedGameKey $addOn) = [pscustomobject]@{ ProfileCode = 'DELTAADDON'; OriginalName = $addOn; Executable = 'game.exe' }
+        }
+        [void](New-Fix41GameZip -Fixture $fx -Name $base)
+        (Invoke-Fix41AutoSync -Fixture $fx -DatIndex $dat).Synced | Should -Be 1
+        $baseFolder = Join-Path $fx.Games $base
+        $baseExe = Join-Path $baseFolder 'game.exe'
+        [IO.File]::WriteAllText($baseExe, 'played')
+        $baseDigest = Get-Fix41TreeDigest $baseFolder
+        # TeknoParrot's own UI pointed the add-on profile at the original game's file.
+        [IO.File]::WriteAllText((Join-Path $fx.Profiles 'DELTAADDON.xml'), ('<GameProfile><GamePath>' + $baseExe + '</GamePath></GameProfile>'), (New-Object Text.UTF8Encoding($false)))
+        [void](New-Fix41GameZip -Fixture $fx -Name $addOn)
+
+        $result = Invoke-Fix41AutoSync -Fixture $fx -DatIndex $dat
+
+        $result.Synced | Should -Be 1 -Because (Get-Fix41Diagnostic $result)
+        $result.UnsafePathSkipped | Should -Be 0
+        @($result.SyncedNames) | Should -Be @($addOn)
+        [IO.File]::ReadAllText((Join-Path (Join-Path $fx.Games $addOn) 'game.exe')) | Should -BeExactly ('exe of ' + $addOn)
+        Get-Fix41TreeDigest $baseFolder | Should -Be $baseDigest
+    }
+
+    It 'still treats a profile that points at a hand-renamed folder as that game''s folder' {
+        $fx = New-Fix41Fixture
+        $name = 'Echo Game (1.00)[TP]'
+        $dat = @{ (Get-NormalizedGameKey $name) = [pscustomobject]@{ ProfileCode = 'ECHO'; OriginalName = $name; Executable = 'game.exe' } }
+        $renamed = Join-Path $fx.Games 'EchoShort'
+        [void][IO.Directory]::CreateDirectory($renamed)
+        [IO.File]::WriteAllText((Join-Path $renamed 'game.exe'), 'installed')
+        [IO.File]::WriteAllText((Join-Path $fx.Profiles 'ECHO.xml'), ('<GameProfile><GamePath>' + (Join-Path $renamed 'game.exe') + '</GamePath></GameProfile>'), (New-Object Text.UTF8Encoding($false)))
+
+        Resolve-RegisteredGameFolder -rawZipName $name -datIndex $dat -userProfilesDir $fx.Profiles -InstallFolder $fx.Games | Should -Be $renamed
+    }
+
+    It 'Register Games points the add-on profile at its own folder and leaves the original game alone' {
+        # Mutation: remove the Update-TpmProfileToOwnGameFolder pass in Register-GamesLegacy -> the add-on profile keeps pointing at the
+        # original game's exe (it only counts as "already registered") and the GamePath assertion fails.
+        $fx = New-Fix41Fixture
+        $base = 'Delta Bride (2009)(JPN)[Board A][TP]'
+        $addOn = 'Delta Bride - Additional Gain (2011)(JPN)[Board B][TP]'
+        $dat = @{
+            (Get-NormalizedGameKey $base) = [pscustomobject]@{ ProfileCode = 'DELTABRIDE'; OriginalName = $base; Executable = 'game.exe' }
+            (Get-NormalizedGameKey $addOn) = [pscustomobject]@{ ProfileCode = 'DELTAADDON'; OriginalName = $addOn; Executable = 'game.exe' }
+        }
+        $templates = Join-Path $fx.Root 'GameProfiles'
+        [void][IO.Directory]::CreateDirectory($templates)
+        $utf8 = New-Object Text.UTF8Encoding($false)
+        foreach ($code in @('DELTABRIDE', 'DELTAADDON')) {
+            [IO.File]::WriteAllText((Join-Path $templates ($code + '.xml')), '<GameProfile><ExecutableName>game.exe</ExecutableName><GamePath /></GameProfile>', $utf8)
+        }
+        $profileIndex = @{ 'game.exe' = @(
+            [pscustomobject]@{ Code = 'DELTABRIDE'; TemplatePath = (Join-Path $templates 'DELTABRIDE.xml'); ExeName = 'game.exe' },
+            [pscustomobject]@{ Code = 'DELTAADDON'; TemplatePath = (Join-Path $templates 'DELTAADDON.xml'); ExeName = 'game.exe' }) }
+        [void](New-Fix41GameZip -Fixture $fx -Name $base)
+        (Invoke-Fix41AutoSync -Fixture $fx -DatIndex $dat).Synced | Should -Be 1
+        $baseFolder = Join-Path $fx.Games $base
+        $baseExe = Join-Path $baseFolder 'game.exe'
+        # Both profiles exist and both point at the original game's exe (TeknoParrot's own UI did that for the add-on).
+        foreach ($code in @('DELTABRIDE', 'DELTAADDON')) {
+            [IO.File]::WriteAllText((Join-Path $fx.Profiles ($code + '.xml')), ('<GameProfile><ExecutableName>game.exe</ExecutableName><GamePath>' + $baseExe + '</GamePath></GameProfile>'), $utf8)
+        }
+        [void](New-Fix41GameZip -Fixture $fx -Name $addOn)
+        (Invoke-Fix41AutoSync -Fixture $fx -DatIndex $dat).Synced | Should -Be 1
+        $addOnExe = Join-Path (Join-Path $fx.Games $addOn) 'game.exe'
+        $baseDigest = Get-Fix41TreeDigest $baseFolder
+        $baseProfileHash = (Get-FileHash -LiteralPath (Join-Path $fx.Profiles 'DELTABRIDE.xml') -Algorithm SHA256).Hash
+
+        $result = Register-Games -userProfilesDir $fx.Profiles -installFolder $fx.Games -profileIndex $profileIndex -gameProfilesDir $templates `
+            -datIndex $dat -profileSet $null -DryRun $false -tpRootDir '' -subFolderMap @{}
+
+        ([xml][IO.File]::ReadAllText((Join-Path $fx.Profiles 'DELTAADDON.xml'))).GameProfile.GamePath | Should -BeExactly $addOnExe -Because ($result | Out-String)
+        $result.Backup | Should -Not -BeNullOrEmpty
+        # The original game's folder, files and profile are untouched.
+        Get-Fix41TreeDigest $baseFolder | Should -Be $baseDigest
+        (Get-FileHash -LiteralPath (Join-Path $fx.Profiles 'DELTABRIDE.xml') -Algorithm SHA256).Hash | Should -Be $baseProfileHash
+        # The result screen names the re-point in one plain sentence; the old and new paths are under Details.
+        $repointed = @($result.TechnicalDetails.MutationRecords.Repointed)
+        $repointed.Count | Should -Be 1
+        $recap = Get-TpmRegistrationRecap -NewlyRegistered 0 -Repointed $repointed
+        $recap.Done | Should -Contain 'Pointed Delta Bride - Additional Gain at its own folder.'
+        (@($recap.DetailBlocks | ForEach-Object { $_.Lines }) -join "`n") | Should -Match ([regex]::Escape($baseExe + ', now ' + $addOnExe))
+    }
+
+    It 'tells the user in one plain sentence which games were pointed at their own folder, and what to do when that was not verified' {
+        # Mutation: drop the Repointed/RepointFailed text from Get-TpmRegistrationRecap, or say "nothing was changed" for a write that could not be proven undone.
+        $moved = [pscustomobject]@{ Code = 'A'; Game = 'Delta Bride - Additional Gain'; OldPath = 'C:\G\Delta Bride\game.exe'; NewPath = 'C:\G\Delta Bride - Additional Gain\game.exe'; BackupPath = 'C:\Saved\Run1' }
+        $recap = Get-TpmRegistrationRecap -NewlyRegistered 0 -Repointed @($moved)
+        $recap.Done | Should -Contain 'Pointed Delta Bride - Additional Gain at its own folder.'
+        $recap.Status | Should -BeExactly 'Ok'
+        $details = (@($recap.DetailBlocks | ForEach-Object { $_.Lines }) -join "`n")
+        $details | Should -Match ([regex]::Escape('Delta Bride - Additional Gain: was C:\G\Delta Bride\game.exe, now C:\G\Delta Bride - Additional Gain\game.exe'))
+        $details | Should -Match ([regex]::Escape('Saved copy of your profiles before the change: C:\Saved\Run1'))
+
+        $many = @(1..5 | ForEach-Object { [pscustomobject]@{ Code = "C$_"; Game = "Game $_"; OldPath = 'old'; NewPath = 'new'; BackupPath = '' } })
+        (Get-TpmRegistrationRecap -Repointed $many).Done | Should -Contain 'Pointed 5 games at their own folders: Game 1, Game 2, Game 3 and 2 more.'
+
+        $unchanged = [pscustomobject]@{ Code = 'A'; Game = 'Delta Bride - Additional Gain'; WriteAttempted = $false; Reason = 'PROFILE_REPOINT_NOT_VERIFIED' }
+        $notVerified = Get-TpmRegistrationRecap -RepointFailed @($unchanged)
+        $notVerified.Status | Should -BeExactly 'Attention'
+        $notVerified.Needs | Should -Contain 'Could not point Delta Bride - Additional Gain at its own folder. Nothing was changed for that game. Close TeknoParrotUI, then run Register Games again. The log has the reason.'
+        $unsure = [pscustomobject]@{ Code = 'A'; Game = 'Delta Bride - Additional Gain'; WriteAttempted = $true; Reason = 'PROFILE_REPOINT_NOT_VERIFIED' }
+        (@((Get-TpmRegistrationRecap -RepointFailed @($unsure)).Needs) -join ' ') | Should -Not -Match 'Nothing was changed'
+    }
+}
+
+Describe 'Issue 441: two games that share a name start are both unpacked, and a failed unpack says why' {
+    AfterEach {
+        $script:TpmOwnedLayout = $null
+        $script:TpmRegistrationLedger = $null
+        $script:TpmRegistrationLedgerStopLatch = $null
+    }
+
+    It 'unpacks the Additional Gain folder when the EXAMU folder of the same game is there too' {
+        # Mutation: refuse or fail a folder whose name has " - " in it or whose name starts like another folder -> Synced 1, Failed 1.
+        $fx = New-Fix41Fixture
+        $examu = 'Daemon Bride (2009)(JPN)[EXAMU eX-BOARD][TP]'
+        $gain = 'Daemon Bride - Additional Gain (2011)(JPN)[Taito NESiCAxLive][TP]'
+        [void](New-Fix41GameZip -Fixture $fx -Name $examu)
+        [void](New-Fix41GameZip -Fixture $fx -Name $gain)
+
+        $run = Invoke-Fix41AutoSync -Fixture $fx
+
+        $run.Synced | Should -Be 2 -Because (Get-Fix41Diagnostic $run)
+        $run.Failed | Should -Be 0
+        Test-Path -LiteralPath (Join-Path $fx.Games ($examu + '\game.exe')) -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fx.Games ($gain + '\game.exe')) -PathType Leaf | Should -BeTrue
+    }
+
+    It 'writes the real reason to the log and tells the user which game could not be unpacked' {
+        # Mutation: drop the log line or the failure note in Invoke-AutoSync -> the user sees only a failed count and nothing says why.
+        $fx = New-Fix41Fixture
+        $name = 'Daemon Bride - Additional Gain (2011)(JPN)[Taito NESiCAxLive][TP]'
+        [void](New-Fix41GameZip -Fixture $fx -Name $name)
+        Mock Expand-ZipFileSafe { throw 'injected unpack failure' }
+
+        $run = Invoke-Fix41AutoSync -Fixture $fx
+
+        $run.Failed | Should -Be 1 -Because (Get-Fix41Diagnostic $run)
+        $note = @($run.FailureNotes)[0]
+        $note | Should -Match ([regex]::Escape($name))
+        $note | Should -Match 'could not be unpacked'
+        $note | Should -Match 'run AutoSync again'
+        [IO.File]::ReadAllText($script:logPath) | Should -Match ('could not finish .*Additional Gain.*STAGING_FAILED.*injected unpack failure')
+    }
+}
