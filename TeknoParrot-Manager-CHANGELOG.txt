@@ -257,10 +257,8 @@
   - If a game is on a drive that is not connected, installing or undoing a
     game patch gives one plain message about it.
   - ReShade tells you how many games it can change and that it leaves the
-    others alone. A game it cannot check is no longer called unsafe or
-    damaged.
-  - The dgVoodoo2 scan line says how many games were checked and how many
-    were skipped.
+    others alone. A game it cannot check is no longer called unsafe or damaged.
+  - The dgVoodoo2 scan line says how many games were checked and skipped.
   - Lists of games show the game name instead of "and 1 more".
   - The game picker shows how many games you have picked so far.
   - AutoSync now writes a line to the log for every ZIP it skips and says
@@ -270,10 +268,9 @@
     up and games skipped by your own rules on separate lines.
   - The game picker has an A choice for all games. Typed numbers like
     1,3,6 and 1-8 still work.
-  - The result screens of patches, dgVoodoo2, BepInEx and the GPU fix say
-    how many games you selected and how many were changed, already set
-    up, skipped or failed, so the numbers add up. They also say where the
-    backup is.
+  - The result screens of patches, dgVoodoo2, BepInEx and the GPU fix say how
+    many games you selected and how many were changed, already set up, skipped
+    or failed, so the numbers add up. They also say where the backup is.
   - dgVoodoo2 names the result of every game you selected, with the
     reason for each skipped or failed game.
   - The Action Required list is grouped by feature, with a short heading
@@ -284,6 +281,9 @@
     have it set up.
   - A game file that cannot be read is now told apart from a game whose
     32-bit or 64-bit type could not be worked out.
+  - A folder like "Time Crisis 5" is no longer registered as "Time Crisis 4".
+  - The Propagate Controls preview no longer stops the real run from fixing the
+    Input API, and "already set up" counts only games that have controls.
 
   Also new in this release
   - LEDBlinky lighting (optional): if you use LEDBlinky, TPM can

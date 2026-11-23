@@ -191,4 +191,41 @@ Describe 'Force feedback re-run with the plugin already installed by TeknoParrot
         $keptRecords.Count | Should -Be 1
         $keptRecords[0].Destination | Should -BeExactly $hook
     }
+
+    It 'removes the two plugin copies it staged in the cache once the setup is finished' {
+        # Mutation: remove the cleanup after the setup -> two more random-named DLL copies stay in the cache after every run.
+        $root = Join-Path $TestDrive 'stagedcleanup'
+        $up = Join-Path $root 'UserProfiles'; $tp = Join-Path $root 'TeknoParrot'
+        $gd = Join-Path $root 'OverlapGame'; $cache = Join-Path $root 'FFBPlugin'
+        New-Item -ItemType Directory -Path $up, (Join-Path $tp 'GameProfiles'), $gd, $cache -Force | Out-Null
+        $exe = Join-Path $gd 'overlap.exe'
+        [IO.File]::WriteAllBytes($exe, [Text.Encoding]::ASCII.GetBytes('MZ-overlap'))
+        $xml = "<GameProfile><EmulationProfile>Daytona3</EmulationProfile><GamePath>$exe</GamePath><ConfigValues><FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Enable</FieldName><FieldType>Bool</FieldType><FieldValue>1</FieldValue></FieldInformation></ConfigValues></GameProfile>"
+        $enc = New-Object System.Text.UTF8Encoding $false
+        [IO.File]::WriteAllText((Join-Path $up 'Overlap.xml'), $xml, $enc)
+        [IO.File]::WriteAllText((Join-Path $tp 'GameProfiles\Canonical.xml'), $xml, $enc)
+        $customCopy = Join-Path $cache 'MAME64.dll'
+        [IO.File]::WriteAllBytes($customCopy, [byte[]](9, 9, 9))
+        Mock Write-Host {}
+        Mock Write-Log {}
+        Mock Get-FFBPluginSourceRevision { [pscustomobject]@{ Revision=('a'*40); Repository='f/f'; ManifestUrl='https://x'; Trust='SourcePinnedAuditHash' } }
+        Mock Get-FFBPluginGameMap { [ordered]@{ OverlapGame = 'd3d9.dll' } }
+        Mock Invoke-FFBPluginDownload {
+            param([string]$destDir, [string]$SourceRevision)
+            $files = [ordered]@{}; $ev = @()
+            foreach ($n in 'MAME32.dll','MAME64.dll') {
+                $p = Join-Path $destDir ('TPM-FFB-source-{0}-{1}' -f [guid]::NewGuid().ToString('N'), $n); [IO.File]::WriteAllBytes($p, [byte[]](1,2,3,4)); $files[$n] = $p
+                $ev += [pscustomobject]@{ FileName=$n; SourceUrl='https://x'; SourceRevision=$SourceRevision; Sha256=(Get-FileHash $p -Algorithm SHA256).Hash; Trust='SourcePinnedAuditHash'; DownloadPath=$p }
+            }
+            [pscustomobject]@{ Succeeded=$true; Files=$files; Evidence=$ev; ResiduePaths=@(); Reason=$null }
+        }
+        Mock Get-ExeArchitecture { 'x64' }
+        Mock Read-TpmYesNo { 'N' }
+
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $up -CacheDir $cache -TpRoot $tp -NativeEnabledCodes @('Overlap')
+
+        $result.Deployed | Should -Be 1
+        @(Get-ChildItem -LiteralPath $cache -Filter 'TPM-FFB-source-*' -File).Count | Should -Be 0
+        Test-Path -LiteralPath $customCopy -PathType Leaf | Should -BeTrue
+    }
 }

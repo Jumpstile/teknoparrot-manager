@@ -265,6 +265,18 @@ Describe 'FIX98 S6 and S7 an unfinished run is attention, a failed write stays F
         @($rows | Where-Object Area -eq 'Game paths')[0].Text | Should -Match '^Needs attention - 1 game needs a new path'
     }
 
+    It 'a game on a drive that is not connected points to R or S only when the next menu offers them' {
+        # Mutation: put the R or S sentence back unconditionally -> the screen tells the user to type a key the menu does not have (a game with an empty saved path).
+        $letter = @('Z','Y','X','W','V','U','T') | Where-Object { -not (Test-Path -LiteralPath ($_ + ':\')) } | Select-Object -First 1
+        [System.IO.File]::WriteAllText((Join-Path $script:profiles 'OFFLINEGAME.xml'), ('<GameProfile><GamePath>{0}:\Games\game.exe</GamePath></GameProfile>' -f $letter))
+        [System.IO.File]::WriteAllText((Join-Path $script:profiles 'EMPTYGAME.xml'), '<GameProfile><GamePath></GamePath></GameProfile>')
+        $result = Invoke-LibraryHealthCheck -UserProfilesDir $script:profiles -TpRoot $script:healthRoot
+        @($result.DriveUnavailable) | Should -Be @('OFFLINEGAME')
+        @($result.Empty) | Should -Be @('EMPTYGAME')
+        @(Get-TpmLibraryHealthRows -Result $result)[0].Text | Should -Match 'Reconnect'
+        @(Get-TpmLibraryHealthRows -Result $result)[0].Text | Should -Not -Match 'R or S'
+    }
+
     It 'a graphics card that was not detected is an unfinished check, so exit code 2' {
         # Mutation: ignore the GPU row when choosing the outcome -> a PC where the card was never checked exits 0.
         Mock Get-DetectedGpuVendor { [pscustomobject]@{ Vendor = $null; Name = 'isolated fixture' } }

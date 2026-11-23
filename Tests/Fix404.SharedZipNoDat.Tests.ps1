@@ -18,7 +18,7 @@ BeforeAll {
         'Get-DiceSimilarity', 'Get-TpmBaseTitleKey', 'Resolve-BestFuzzyMatch', 'Resolve-ProfileCode', 'Get-GameFiles',
         'Save-XmlMaybe', 'Get-TpmProfileWriteFingerprint', 'Resolve-TpmRegistrationSaveFailure',
         'New-TpmVerifiedUserProfilesBackup', 'Assert-TpmRegisteredGamePath', 'Set-TpmRegistrationGamePath',
-        'Test-PathInside', 'Get-DatEntryForZipName', 'Get-TpmZipBaseName',
+        'Test-PathInside', 'Get-DatEntryForZipName', 'Get-TpmZipBaseName', 'Get-TpmBezelNumberText',
         'Get-TpmProfileFileExtensions', 'Get-TpmDatNamedProfileCodes', 'Register-TpmDatSecondProfiles'
     )
     $functions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -in $wanted }, $true))
