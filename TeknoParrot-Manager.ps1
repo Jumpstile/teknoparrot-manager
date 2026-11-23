@@ -35416,11 +35416,20 @@ function Write-TpmInterruptedUpdateNotice {
     $folders = @(Get-TpmInterruptedUpdateFolders -ProgramDir $ProgramDir)
     if ($folders.Count -eq 0) { return }
     $newest = @(Get-ChildItem -LiteralPath (Join-Path $ProgramDir 'UpdateBackups') -Directory -Filter 'TeknoParrotManager_*' -ErrorAction SilentlyContinue | Sort-Object -Property Name -Descending | Select-Object -First 1)
-    $newestPath = if ($newest.Count -gt 0) { [string]$newest[0].FullName } else { '' }
+    # Only a backup made by the cut-off update itself counts. Its folder is made after the staging folder (and before any installed file is replaced),
+    # so an older backup (from an earlier, finished update) must not be offered as the way back: copying it would put an older version over this one.
+    $cutOffStartUtc = (@($folders | ForEach-Object { (Get-Item -LiteralPath $_ -Force).CreationTimeUtc }) | Sort-Object | Select-Object -First 1)
+    $newestPath = if ($newest.Count -gt 0 -and $newest[0].CreationTimeUtc -ge $cutOffStartUtc) { [string]$newest[0].FullName } else { '' }
     Write-Log ("Interrupted update: found {0} unfinished update folder(s): {1}. Newest backup: {2}" -f $folders.Count, ($folders -join '; '), $(if ($newestPath) { $newestPath } else { 'none' }))
     if ($Unattended) { return }
     Write-Host ''
     Write-Host '  An earlier update of TeknoParrot Manager did not finish.' -ForegroundColor Yellow
+    if (-not $newestPath) {
+        Write-Host '  It stopped before it changed any program file, so your files are all from one version.' -ForegroundColor Yellow
+        Write-Host '  You can keep using the program, or run the update again: choose 15 (Check for Updates).' -ForegroundColor Cyan
+        Write-Host ('  TeknoParrot Manager keeps the folder {0} on purpose. You can delete that folder yourself. This notice then stops.' -f (Split-Path -Leaf $folders[0])) -ForegroundColor DarkGray
+        return
+    }
     Write-Host '  Some files may be a mix of old and new versions.' -ForegroundColor Yellow
     Write-Host '  If the program works, you can keep using it.' -ForegroundColor Yellow
     Write-Host '  To go back to the old files: open the UpdateBackups folder next to this' -ForegroundColor Cyan
@@ -39408,6 +39417,7 @@ function Get-TpmLibraryHealthSummaryLines {
         [void]$lines.Add(@{ Text = 'Everything looks fine.'; Color = 'Green' })
     }
     if ($incomplete) { [void]$lines.Add(@{ Text = 'Some checks could not finish, so this is not an all-clear.'; Color = 'Yellow' }) }
+    if ([string]::IsNullOrWhiteSpace([string](Get-TpmTransactionField -Object $Result -Name 'DetectedGpuVendor' -Default ''))) { [void]$lines.Add(@{ Text = 'Your graphics card was not detected, so the GPU fix check was skipped. This is normal on a virtual machine.'; Color = 'Yellow' }) }
     [void]$lines.Add(@{ Text = 'Choose D below to see every detail.'; Color = 'DarkGray' })
     return $lines.ToArray()
 }

@@ -1805,13 +1805,15 @@
 
   Symptom: you need your earlier controls or settings back after a change.
 
-  Choose 14) Restore backup from the main menu. It shows four choices:
+  Choose 14) Restore backup from the main menu. It shows five choices:
 
   - TeknoParrot UserProfiles backup
   - Postgres database backup
   - LaunchBox library backup (verified current-state backup first)
   - Reset and Restore: put back one game or all games from a restore point
     saved when TeknoParrot Manager started
+  - Rebuild one game from its ZIP: put one game folder back to exactly what
+    its ZIP holds (your old folder is kept)
 
   Cause: the current settings are no longer what you want. These are
   separate kinds of saved copy.
@@ -1839,10 +1841,11 @@
 
   3. At the main menu, type 14 to choose 14) Restore backup.
 
-     You will see: the Restore from Backup screen with four numbered
-     choices.
+     You will see: the Restore from Backup screen with five numbered
+     choices, plus B to go back.
 
-     Next: type 1, 2, 3, or 4. Pressing only Enter is not accepted.
+     Next: type 1, 2, 3, 4, or 5. Pressing only Enter goes back to the
+     main menu.
 
   4. Type 1 for your game settings (UserProfiles).
 
@@ -3812,10 +3815,9 @@
        Next: go to step 2. (UserProfiles is TeknoParrot's saved game
        settings folder.)
 
-    2. Type 1, 2, 3 or 4 and press Enter.
+    2. Type 1, 2, 3, 4 or 5 and press Enter.
        You will see: a list of saved copies, newest first.
-       If you press Enter alone, it says "Invalid choice. Choose 1, 2, 3,
-       4." and asks again.
+       If you press Enter alone, you go back to the main menu.
 
     3. Read the list. The newest copy is at the top.
        You will see (choice 1): "Saved copies of your game settings, newest first:"

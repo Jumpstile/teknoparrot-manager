@@ -1322,7 +1322,7 @@ Files already present are never overwritten.
 **To put back an older saved copy:**
 
 1. At the main menu, choose **mode 14 -- Restore backup**.
-   You will see: the "Restore from Backup" screen with four choices, numbered 1 to 4.
+   You will see: the "Restore from Backup" screen with five choices, numbered 1 to 5, plus B to go back. Pressing only Enter also goes back to the main menu.
 
 2. Pick which kind to restore:
    - **1) TeknoParrot UserProfiles backup**

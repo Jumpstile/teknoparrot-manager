@@ -299,7 +299,7 @@ This is a short list of what TeknoParrot Manager can do. Technical details are i
 
 A "profile" is a small setup file for one game. TeknoParrot ships one for every game it supports.
 
-- **Auto-registration** -- finds your extracted games and adds them to TeknoParrot with the right game path. It does not overwrite a game that is already added. The one exception is a duplicate that you choose to switch yourself: you are asked first, and a backup is made first.
+- **Auto-registration** -- finds your extracted games and adds them to TeknoParrot with the right game path. It does not overwrite a game that is already added. The one exception is a duplicate that you choose to switch yourself: you are asked first, and a backup is made first. Another exception: if an already-added game's saved path points into another game's folder, TeknoParrot Manager fixes it to the game's own folder. It backs up first and writes the change to the log.
 
 - **Fuzzy name matching** -- works out the right game when several games share one program file. It compares folder names with game codes and adds the best match when it is sure enough.
 
@@ -732,14 +732,14 @@ If some games kept their own PostgreSQL password or settings, a yellow line says
 
 **Restore backup (menu 14)**
 
-You will see a menu called Restore from Backup with four choices:
+You will see a menu called Restore from Backup with five choices (1 to 5, plus B to go back):
 
 - `1) TeknoParrot UserProfiles backup`
 - `2) Postgres database backup (only relevant if you've used the Postgres setup mode)`
 - `3) LaunchBox library backup (verified current-state backup first)`
 - `4) Reset and Restore: put back one game or all games from a restore point saved when TeknoParrot Manager started`
 
-Type 1, 2, 3 or 4 and press Enter. Lists of saved copies show the newest first.
+Type 1, 2, 3, 4 or 5 and press Enter. Pressing only Enter goes back to the main menu. Lists of saved copies show the newest first.
 
 Type the number of the copy you want. Press Enter instead to cancel. The product asks you to confirm before it puts anything back.
 
@@ -3305,8 +3305,8 @@ If the backup cannot be created or completed, AutoSync does not start extraction
 **Restore:**
 
 1. At the main menu prompt `Enter 1-17:`, type 14 (Restore backup) and press Enter.
-2. You will see the `Restore from Backup` screen with four choices.
-3. Type 1, 2, 3 or 4, then press Enter. The choices are explained below.
+2. You will see the `Restore from Backup` screen with five choices, 1 to 5, plus B to go back. It asks `Enter 1-5, or B to go back`.
+3. Type 1, 2, 3, 4 or 5, then press Enter. The choices are explained below. Pressing only Enter goes back to the main menu.
 
 Every list of saved copies shows the newest one first.
 Press Enter at the number prompt to cancel.

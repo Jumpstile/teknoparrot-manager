@@ -15,8 +15,9 @@
     names four (House of the Dead 4, Raiden III, Raiden IV, Densha de GO)
     whose second profile the list does not explain, so none is written.
   - The version labels are corrected, so the program, the guides and the
-    update check all say RC9.1.
-  - There is no other change from RC9.
+    update check all say RC9.1. The guides match the Restore menu.
+  - Plainer notices: no graphics card found (health check), and a cut-off
+    update that changed nothing (message at start).
 
   v1.0 RC9 (changes since RC8.4)
   ----------------------------------------------------------------

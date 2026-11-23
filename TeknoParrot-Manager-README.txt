@@ -180,7 +180,10 @@
   - Automatic registration. It finds your games and registers them.
     Games you already registered are not overwritten. The one exception is
     a duplicate you choose to switch yourself: you are asked first, and a
-    backup is made first.
+    backup is made first. One more exception: if an already-added game's
+    saved path points into another game's folder, TeknoParrot Manager
+    fixes it to the game's own folder. It backs up first and writes the
+    change to the log.
 
   - Fuzzy name matching. When several games share one file name, it picks
     the closest match to the folder name. If it is not sure, it asks you.
@@ -1864,8 +1867,9 @@
 
   14) Restore from backup
        Puts back a saved copy. The menu calls this "Restore backup". You
-       will see "Restore from Backup" and four choices. Type 1, 2, 3 or 4
-       and press Enter:
+       will see "Restore from Backup" and five choices (1 to 5, plus B to
+       go back). Type 1, 2, 3, 4 or 5 and press Enter. Pressing only
+       Enter goes back to the main menu:
 
          1) TeknoParrot UserProfiles backup
             Goes back to an earlier saved copy of your game settings
@@ -6115,7 +6119,8 @@
   To restore a saved copy:
 
   1. At the main menu, type 14 and press Enter. That is "Restore backup".
-     You will see: the "Restore from Backup" screen with options 1 to 4.
+     You will see: the "Restore from Backup" screen with options 1 to 5,
+     plus B to go back.
 
   2. Type 1 and press Enter to choose TeknoParrot UserProfiles backups.
      You will see: "Saved copies of your game settings, newest first:". The newest

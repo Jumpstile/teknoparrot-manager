@@ -307,6 +307,18 @@ Describe 'FIX83 item 11: Library health check default view' {
         }
     }
 
+    It 'tells the user why the check is incomplete when the graphics card was not detected, and only then' {
+        # Mutation: leave the user with only a vague "some checks could not finish", or print the GPU sentence when the card was found.
+        Install-F83Mocks
+        Write-TpmLibraryHealthReport -Result (New-F83HealthResult @{ DetectedGpuVendor = $null })
+        $lines = @(Get-F83Lines)
+        # The console wraps the sentence at the screen width, so compare the text with the line breaks removed.
+        (($lines -join ' ') -replace '\s+', ' ') | Should -Match 'Your graphics card was not detected, so the GPU fix check was skipped\. This is normal on a virtual machine\.'
+        Install-F83Mocks
+        Write-TpmLibraryHealthReport -Result (New-F83HealthResult @{})
+        @(Get-F83Lines | Where-Object { $_ -like '*graphics card was not detected*' }).Count | Should -Be 0
+    }
+
     It 'shows the PostgreSQL row only when it matters: <Case>' -TestCases @(
         @{ Case = 'no database game'; Override = @{}; Expected = $null }
         @{ Case = 'set up and running'; Override = @{ PostgresConfigured = 2; PostgresServiceExists = $true; PostgresServiceStatus = 'Running' }; Expected = 'OK' }

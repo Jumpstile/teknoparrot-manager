@@ -388,6 +388,8 @@ Describe 'An update that was cut off is noticed at the next start (FIX403)' {
         [void][System.IO.Directory]::CreateDirectory($staging)
         [System.IO.File]::WriteAllText((Join-Path $staging '.tpm-update-running'), '')
         [System.IO.File]::WriteAllText((Join-Path $staging 'moved-aside.txt'), 'the only copy')
+        # This update started before the backup folder was made, so the backup belongs to it.
+        [System.IO.Directory]::SetCreationTimeUtc($staging, [datetime]::UtcNow.AddMinutes(-10))
 
         Write-TpmInterruptedUpdateNotice -ProgramDir $script:f403Prog
 
@@ -398,6 +400,40 @@ Describe 'An update that was cut off is noticed at the next start (FIX403)' {
         $text | Should -Match 'choose 15 \(Check for Updates\)'
         @($script:f403NoticeLog | Where-Object { $_ -like 'Interrupted update:*tpm-update-staging-aaaa*' }).Count | Should -Be 1
         Get-F403Text (Join-Path $staging 'moved-aside.txt') | Should -BeExactly 'the only copy'
+    }
+
+    It 'does not offer an older update''s backup when the cut-off update never made one' {
+        # Mutation: name the newest folder in UpdateBackups no matter which update made it (copying it back would put an older version over this one).
+        [System.IO.Directory]::SetCreationTimeUtc((Join-Path $script:f403Prog 'UpdateBackups\TeknoParrotManager_2026-01-01_10-00-00'), [datetime]::UtcNow.AddMinutes(-10))
+        $staging = Join-Path $script:f403Prog 'tpm-update-staging-dddd'
+        [void][System.IO.Directory]::CreateDirectory($staging)
+        [System.IO.File]::WriteAllText((Join-Path $staging '.tpm-update-running'), '')
+        [System.IO.File]::WriteAllText((Join-Path $staging 'part.txt'), 'kept')
+
+        Write-TpmInterruptedUpdateNotice -ProgramDir $script:f403Prog
+
+        $text = $script:f403Notice -join "`n"
+        $text | Should -Match 'An earlier update of TeknoParrot Manager did not finish\.'
+        $text | Should -Match 'It stopped before it changed any program file'
+        $text | Should -Match 'choose 15 \(Check for Updates\)'
+        $text | Should -Not -Match 'TeknoParrotManager_2026'
+        $text | Should -Not -Match 'mix of old and new'
+        $text | Should -Not -Match 'copy its files'
+        @($script:f403NoticeLog | Where-Object { $_ -like 'Interrupted update:*Newest backup: none' }).Count | Should -Be 1
+        Get-F403Text (Join-Path $staging 'part.txt') | Should -BeExactly 'kept'
+    }
+
+    It 'gives the same plain notice when there is no UpdateBackups folder at all (the first update ever)' {
+        Remove-Item -LiteralPath (Join-Path $script:f403Prog 'UpdateBackups') -Recurse -Force
+        $staging = Join-Path $script:f403Prog 'tpm-update-staging-eeee'
+        [void][System.IO.Directory]::CreateDirectory($staging)
+        [System.IO.File]::WriteAllText((Join-Path $staging '.tpm-update-running'), '')
+
+        { Write-TpmInterruptedUpdateNotice -ProgramDir $script:f403Prog } | Should -Not -Throw
+
+        $text = $script:f403Notice -join "`n"
+        $text | Should -Match 'It stopped before it changed any program file'
+        $text | Should -Not -Match 'UpdateBackups'
     }
 
     It 'says nothing while another window is running an update (its marker is held open)' {
