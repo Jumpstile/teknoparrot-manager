@@ -16,6 +16,12 @@ The previous published release was v1.0 RC9: https://github.com/Jumpstile/teknop
   (2,544 TeknoParrot profiles).
 - The version labels are corrected, so the program, the guides and the
   update check all say RC9.1.
+- The download file name is fixed, so later versions can update through
+  Check for Updates (menu 15). RC9 cannot see RC9.1, so RC9 users download
+  RC9.1 by hand once.
+- Two messages are plainer: the health check says so when no graphics
+  card is found, and a cut-off update that changed nothing says so when
+  TeknoParrot Manager starts. The guides match the Restore menu.
 - There is no other change from RC9.
 
 ## v1.0 RC9 (changes since RC8.4)

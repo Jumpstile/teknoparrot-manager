@@ -6,7 +6,7 @@ TeknoParrot Manager sets up your extracted TeknoParrot games for you. It registe
 
 It is made for beginners and is also useful if you already know TeknoParrot. It hides complexity, not detail: repeatable bulk steps save manual work, and Details and the log show what was done.
 
-The latest published release is v1.0 RC9.1: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1. This page matches v1.0 RC9.1. Versions from RC8.1 on can update themselves in place with Check for Updates.
+The latest published release is v1.0 RC9.1: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1. This page matches v1.0 RC9.1. Versions from RC8.1 on can update themselves in place with Check for Updates. The exception is RC9: it cannot see RC9.1, so download RC9.1 by hand once.
 What is new in v1.0 is listed at the top of the [[Changelog]].
 
 Test one game after each run before you trust the rest.

@@ -23,7 +23,7 @@ One line per area. Each line starts with `OK`, `Needs attention`, `Not checked` 
 | Game paths | Whether each registered game's saved path points to a file that exists. |
 | Profile files | Whether each game profile can be read. A damaged profile is named as `could not be read`. |
 | Game drive | Whether games are on a drive that is not connected. If so, reconnect the drive. Or choose R or S to point those games at a new folder. |
-| [[GPU Fix]] | Games that have a GPU fix setting that does not match your graphics card. |
+| [[GPU Fix]] | Games that have a GPU fix setting that does not match your graphics card. If your graphics card is not found (common on a virtual machine), the check says it was skipped. |
 | Force feedback | Games with a built-in FFB Blaster setting that is not turned on. The separate plugin is not looked at here. Use [[FFB Setup]] for that. |
 | [[dgVoodoo2]] | Games that need dgVoodoo2 but do not have it yet. |
 | [[BepInEx]] | Games whose profile says they need BepInEx but do not have it set up. |
