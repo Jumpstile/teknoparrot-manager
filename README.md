@@ -29,7 +29,7 @@ These are the main things TeknoParrot Manager can do:
 **Set up your games**
 
 - **AutoSync (menu 1).** Unpacks your game ZIPs and adds the games to TeknoParrot in one run. It works from a network drive or a local folder and leaves unchanged games alone. It backs up your TeknoParrot settings (UserProfiles) first.
-- **Register only (menu 2).** Adds games you already extracted. It finds each game, picks the right game path, and never overwrites a game that is already added.
+- **Register only (menu 2).** Adds games you already extracted. It finds each game, picks the right game path, and never overwrites a game that is already added. One exception: if an already-added game's saved path points into another game's folder, TeknoParrot Manager fixes it to the game's own folder. It backs up first and writes the change to the log.
 - **Matches hard-to-name games.** It uses folder names, game codes and an optional community game list to work out which game is which.
 - **LaunchBox export.** Writes your games straight into the LaunchBox library. It can also fill in game details, group the versions of a game, and keep LaunchBox in step with TeknoParrot.
 
@@ -364,7 +364,7 @@ If some games kept their own PostgreSQL password or settings, a yellow line says
 
 **Restore backup (menu 14)**
 
-You will see a menu called Restore from Backup with four choices:
+You will see a menu called Restore from Backup with five choices (1 to 5, plus B to go back):
 
 - `1) TeknoParrot UserProfiles backup`
 - `2) Postgres database backup (only relevant if you've used the Postgres setup mode)`
@@ -2951,8 +2951,8 @@ If the backup cannot be created or completed, AutoSync does not start extraction
 **Restore:**
 
 1. At the main menu prompt `Enter 1-17:`, type 14 (Restore backup) and press Enter.
-2. You will see the `Restore from Backup` screen with four choices.
-3. Type 1, 2, 3 or 4, then press Enter. The choices are explained below.
+2. You will see the `Restore from Backup` screen with five choices, 1 to 5, plus B to go back. It asks `Enter 1-5, or B to go back`.
+3. Type 1, 2, 3, 4 or 5, then press Enter. The choices are explained below. Pressing only Enter goes back to the main menu.
 
 Every list of saved copies shows the newest one first.
 Press Enter at the number prompt to cancel.

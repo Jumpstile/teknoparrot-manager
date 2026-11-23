@@ -190,7 +190,7 @@ In every case the original script must stay safe.
 1. **Manual by default**
    - Checking for updates is safe and read-only (it only looks).
    - Applying an update requires an explicit user action.
-   - Startup may perform a quiet read-only GitHub check, but it never installs silently: applying still requires an explicit user action and a second confirmation.
+   - Startup may perform a quiet read-only GitHub check, but it never installs silently: applying still requires an explicit user action (you must press Y).
    - No background updater service, scheduled update task, or silent self-replacement.
 
 2. **Backup before replacement**
@@ -381,8 +381,9 @@ It never runs in `-Unattended` mode.
 **What each answer does:**
 
 - **Y** starts the update right away. There is no second question. The `Updating will:` list is shown above the choices, so you read it before you answer. The update still downloads and checks the file, backs up every file it replaces, and puts the old version back if anything fails.
-- **N** (or anything else) continues to the menu. You will see `Continuing -- you can check again any time from the menu.`
+- **N** (or pressing only Enter) continues to the menu. You will see `Continuing -- you can check again any time from the menu.`
 - **V** prints the full release notes, then asks the question again.
+- Any other key shows `Invalid choice. Enter Y, N, or V.` and asks again. It does not continue to the menu.
 
 If the release has no notes, you will see `No release notes were provided for this release.`
 
@@ -398,10 +399,11 @@ If the release has no notes, you will see `No release notes were provided for th
 
 **How the answers work:**
 
-- **Y** shows the same "what updating will do" explanation as the menu option, asks for a second explicit confirmation, then calls `Invoke-ManagerUpdateInstall`.
+- **Y** starts the update right away, then calls `Invoke-ManagerUpdateInstall`. There is no second confirmation; the "what updating will do" list is shown above the choices.
 - A successful install still requires the caller (top-level script code, not the function) to exit.
-- That is the same reasoning as the menu option: the function itself never calls `exit`, both for testability and so the "declined at the second confirmation" path can return normally.
-- **N** (or anything else) -- continues straight to the menu; logged as "remind me later."
+- That is the same reasoning as the menu option: the function itself never calls `exit`, both for testability and so the N path can return normally.
+- **N** (or pressing only Enter) -- continues straight to the menu; logged as "remind me later."
+- Any other key shows `Invalid choice. Enter Y, N, or V.` and asks again. It does not continue to the menu.
 - **V** -- prints the full release body, then re-prompts (Y/N/V again) rather than exiting the loop.
 
 **How it is built:**

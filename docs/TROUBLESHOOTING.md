@@ -476,9 +476,9 @@ Fix:
 
 3. At the main menu, type **14** to choose **14) Restore backup**.
 
-   You will see: the **Restore from Backup** screen with four numbered choices.
+   You will see: the **Restore from Backup** screen with five numbered choices, plus **B** to go back.
 
-   Next: type **1**, **2**, **3**, or **4**. Pressing only **Enter** is not accepted.
+   Next: type **1**, **2**, **3**, **4**, or **5**. Pressing only **Enter** goes back to the main menu.
 
 4. Type **1** for your game settings (UserProfiles).
 
