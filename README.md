@@ -3525,5 +3525,5 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> TeknoParrot Manager v1.0 RC9 is the latest published release. The previous published release is v1.0 RC8.4. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
+> Latest published release: v1.0 RC9. Previous published release: v1.0 RC8.4. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
 
