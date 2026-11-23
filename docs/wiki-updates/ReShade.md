@@ -1,6 +1,6 @@
 # ReShade
 
-ReShade adds visual filters on top of a game: CRT-style scanlines, a soft glow, deeper blacks and brighter whites. It is optional. Your games run fine without it. It is main menu item 5, **ReShade setup**.
+ReShade adds visual filters on top of a game: CRT-style scanlines, a soft glow, deeper blacks and brighter whites. It is optional. Your games run fine without it. It is main menu item 6, **ReShade setup**.
 
 ReShade works with **both 32-bit and 64-bit games**. Games that run through BudgieLoader (a Linux-style game format) are skipped for now, and nothing in their folder changes.
 
@@ -8,7 +8,7 @@ ReShade works with **both 32-bit and 64-bit games**. Games that run through Budg
 
 ## Quick steps
 
-1. Start TeknoParrot Manager. At `Enter 1-17:` type `5` and press Enter.
+1. Start TeknoParrot Manager. At `Enter 1-18:` type `6` and press Enter.
 2. Press `S` (or just Enter) to set up ReShade.
 3. Pick a look by typing its number at `Choice`. A preview window may open. It only shows an approximation of the look, not the real filter.
 4. Type `U` to use the look you picked. Then press `Y` at `Use the selected ReShade profile?` Nothing changes until you confirm.
@@ -18,7 +18,7 @@ ReShade works with **both 32-bit and 64-bit games**. Games that run through Budg
 
 Other keys at the `Choice` prompt: `N` skips ReShade, `B` cancels, `R` reopens the preview window, `D` shows details about each look.
 
-The first screen at menu 5 has four choices: `S` set up ReShade, `R` remove the files TeknoParrot Manager made, `U` undo ReShade changes, and `B` use my bezel folder (see "Use my bezel folder" below).
+The first screen at menu 6 has four choices: `S` set up ReShade, `R` remove the files TeknoParrot Manager made, `U` undo ReShade changes, and `B` use my bezel folder (see "Use my bezel folder" below).
 
 If ReShade is not on your PC yet, TeknoParrot Manager asks first. Press `D` there to download it from reshade.me. See "Where the files come from" below.
 
@@ -140,7 +140,7 @@ TeknoParrot Manager puts the file where ReShade looks for it. It is not confirme
 
 ## Change, undo or remove
 
-All of these start at menu 5.
+All of these start at menu 6.
 
 - **Change the look:** press `S` again, pick another look and games.
 - **Undo:** press `U` at the first screen. You see the games TeknoParrot Manager changed, newest first. Type a game's number, then `YES` to undo that game. Press `A`, then type `ALL`, to undo every game. Undo puts files back only while they are exactly as TeknoParrot Manager left them. If a game was changed after that, it is left as it is.

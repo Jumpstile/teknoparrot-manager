@@ -1,6 +1,6 @@
 # FFB Setup
 
-Force feedback makes a wheel or stick push back and rumble like in the game: road bumps, recoil, crashes. It is main menu item 8, **Force feedback (FFB) setup**.
+Force feedback makes a wheel or stick push back and rumble like in the game: road bumps, recoil, crashes. It is main menu item 9, **Force feedback (FFB) setup**.
 
 There are two ways to get it. You can use one or both. They cover different games, and some games are covered by both.
 
@@ -11,11 +11,13 @@ There are two ways to get it. You can use one or both. They cover different game
 
 ## Quick steps
 
-1. Start TeknoParrot Manager. At `Enter 1-17:` type `8` and press Enter.
+1. Start TeknoParrot Manager. At `Enter 1-18:` type `9` and press Enter.
 2. You are asked `Do you have a paid TeknoParrot membership?` Press `Y` to turn on FFB Blaster. Press `N` to skip it.
-3. You are asked whether to set up the free plugin: `[Y] Set up the free third-party FFB plugin` or `[N] Skip the optional plugin`. The default is `N`.
-4. If a game is covered by both, you are asked which one to use (see below).
-5. Read the result. Start a game to try it.
+3. You are asked whether to set up the free plugin: `[Y] Set up the free FFB plugin (the newest version; each game gets its own settings file)` or `[N] Skip the optional plugin`. The default is `N`.
+4. If you said `Y`, you are asked about your wheel. Pick it from the list of game controllers, or skip (see "Your wheel" below).
+5. If a game is covered by both, you are asked which one to use (see below).
+6. You see what will be installed or updated and are asked `Go ahead?` Nothing changes until you say `Y`.
+7. Read the result. Start a game to try it.
 
 ---
 
@@ -29,11 +31,25 @@ If you answer `Y`, it finds every registered game that has the FFB Blaster setti
 
 ## The free FFB plugin
 
-The plugin comes from [mightymikem/FFBArcadePlugin](https://github.com/mightymikem/FFBArcadePlugin) on GitHub. TeknoParrot Manager does not ship it. It downloads the current list of supported games and the plugin files each time, and checks them before use. You need to be online.
+The plugin comes from [mightymikem/FFBArcadePlugin](https://github.com/mightymikem/FFBArcadePlugin) on GitHub. TeknoParrot Manager does not ship it. Each time, it finds the **newest release** and tells you which one it is using, for example `Using FFB Arcade Plugin v.2.0.0.51`. The release is about 93 MB. It is downloaded once, saved, and downloaded again only when a newer release comes out. You need to be online. If you are not, and a saved copy that passed its check is on your PC, you are asked whether to use it. It may not be the newest one.
 
-For each supported game it puts the plugin file in the game's folder. It uses the 64-bit plugin for a 64-bit game and the 32-bit plugin for a 32-bit game. If it cannot read whether a game is 32-bit or 64-bit, that game is skipped and no plugin file is placed.
+For each supported game, TeknoParrot Manager puts three files in the game's folder:
 
-A game is skipped, and its existing file is not overwritten, when a file with the same name is already there (for example ReShade's `d3d9.dll`). A file TeknoParrot Manager did not put there is never overwritten. A plugin you installed earlier with TeknoParrot Manager is updated.
+- the plugin, renamed to the file name that game loads (for example `d3d9.dll`)
+- that game's own `FFBPlugin.ini` settings file
+- `SDL2.dll`, but only if the game does not already have one. A game's own `SDL2.dll` is never replaced.
+
+If TeknoParrot Manager cannot tell that the plugin file and the game are both 32-bit or both 64-bit, that game is skipped and nothing is placed. If the plugin does not tell which file name a game loads, the game is skipped and the screen says so.
+
+A game is skipped, and nothing is overwritten, when a file with the same name is already there and TeknoParrot Manager did not put it there (for example ReShade's `d3d9.dll`, or your own `FFBPlugin.ini`). The one exception is an old plugin file: TeknoParrot Manager recognizes it by its fingerprint (SHA-256), says so before it changes anything, backs it up, and replaces it. A file that does not match is never touched.
+
+### Your wheel
+
+Before it installs, TeknoParrot Manager lists the game controllers Windows can see, by name: wheels, joysticks, gamepads, and Xbox and PlayStation controllers. Type the number of your controller, or `S` to skip. A wheel is written into every settings file it installs. A controller with no USB numbers can be picked, but no wheel is written; the plugin is still installed and each game's rumble settings are left as the plugin ships them. If no controller is found, you can go on without one and run Force feedback again later. Type `D` to see the technical numbers.
+
+### Updating
+
+Run Force feedback again after a newer release. You see what will change and are asked first. Files TeknoParrot Manager installed earlier and you have not changed are backed up and replaced. If you changed a game's `FFBPlugin.ini`, you are asked, and the default is to keep your file. To change your wheel, run it again and pick another one. Games that only have the old single plugin file from an earlier version of TeknoParrot Manager are upgraded the same way, with a backup.
 
 ---
 
@@ -49,15 +65,15 @@ TeknoParrot Manager lists the games covered by both. Then you answer once for al
 ## Undo
 
 - **FFB Blaster:** set the field back to `0` in the game's `UserProfiles\*.xml`, or use [[Restore Backup]] to go back to the saved copy. A restore also puts back anything else changed after that copy was made.
-- **Plugin:** delete the plugin file TeknoParrot Manager placed in that game's folder. TeknoParrot Manager only ever removes plugin files it recorded as its own. If you are not sure a file is the plugin, leave it.
+- **Plugin:** TeknoParrot Manager only ever removes plugin files it recorded as its own (the plugin, the settings file and `SDL2.dll`), and only if they are unchanged. If you are not sure a file is part of the plugin, leave it.
 
-[[Health Check]] shows which registered games could use FFB Blaster but do not have it on yet. It does not check the plugin, because that needs a live download.
+[[Health Check]] shows which registered games could use FFB Blaster but do not have it on yet. It does not check the plugin, because that needs a look at the newest release online.
 
 <details>
 <summary>Details: if setup skips games</summary>
 
-The result lists how many games were installed, kept on native FFB, skipped because a file already exists, skipped because the plugin does not support them, or skipped because the plugin file or the game type was unavailable. Games whose saved path or drive cannot be found are named. Fix them with [[Health Check]] (menu 13), then run setup again.
+The result lists how many games were installed, already up to date, kept on native FFB, skipped because a file already exists, skipped because the plugin does not support them, skipped because the plugin file name is not known, or skipped because the plugin file does not fit the game. Games whose saved path or drive cannot be found are named. Fix them with [[Health Check]] (menu 14), then run setup again.
 
-If GitHub cannot be reached, or does not return a usable list, nothing is changed and you can try again.
+If GitHub cannot be reached, or does not return a usable release, nothing is changed and you can try again. A download is also refused, with nothing changed, if it does not match the checksum GitHub published for it or if its contents do not pass the safety checks. If GitHub publishes no checksum, the screen says so. There is no publisher signature check.
 
 </details>

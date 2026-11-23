@@ -1,4 +1,4 @@
-# Region Setup (menu 10)
+# Region Setup (menu 11)
 
 Some games can start in a country you pick, like USA or Europe. The country changes things like the language. Region setup sets it for you.
 
@@ -6,7 +6,7 @@ Some games can start in a country you pick, like USA or Europe. The country chan
 
 ## Set a region
 
-1. Choose **10** in the main menu.
+1. Choose **11** in the main menu.
 2. Pick a country from the list. The number in brackets is how many games offer it. Type **0** to go back and change nothing.
 3. Choose **A** for all the games that offer it, or **L** to browse and pick some.
 4. TeknoParrot Manager tells you how many games will change and asks `Change them now? (Y/N)`. The default is N.

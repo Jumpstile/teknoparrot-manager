@@ -5331,7 +5331,7 @@ function Write-TpmUnavailableDriveSummary {
         $names = @($group.Group | ForEach-Object { $_.Key } | Sort-Object)
         Write-Host ""
         Write-Host ("  {0} drive {1}, which is not connected, so {2} skipped." -f $(if ($count -eq 1) { '1 game points to' } else { "$count games point to" }), $group.Name, $(if ($count -eq 1) { 'it was' } else { 'they were' })) -ForegroundColor Yellow
-        Write-Host "  Connect the drive, or run 13) Library health check and choose R or S to point the games at the new folder." -ForegroundColor Cyan
+        Write-Host "  Connect the drive, or run 14) Library health check and choose R or S to point the games at the new folder." -ForegroundColor Cyan
         Write-Host ("  Details: {0}{1}" -f (($names | Select-Object -First 15) -join ', '), $(if ($names.Count -gt 15) { (' and {0} more' -f ($names.Count - 15)) } else { '' })) -ForegroundColor DarkGray
     }
     $games.Clear()
@@ -19153,7 +19153,7 @@ function Invoke-DgVoodoo2Setup {
                     if (-not $scanPathReasons.ContainsKey($reasonCode)) { $scanPathReasons[$reasonCode] = 0 }
                     $scanPathReasons[$reasonCode]++
                     $skipReason = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'TeknoParrot Manager has a saved location for this game, but Windows cannot find the executable.' }
-                    $nextAction = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 13) Library Health Check to repair saved game paths.' }
+                    $nextAction = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 14) Library Health Check to repair saved game paths.' }
                     [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonCode = $reasonCode; Reason = $skipReason; SavedPath = $gamePath; NextAction = $nextAction; Technical = [string]$pathCheck.Reason })
                     Write-Log ("dgVoodoo2 scan: skipped {0}; path reason={1}; detail={2}" -f $pf.BaseName, $reasonCode, $pathCheck.Reason)
                     continue
@@ -19341,7 +19341,7 @@ function Invoke-DgVoodoo2Setup {
                 }
                 $skipped++
                 $skipReason = if ($pathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'TeknoParrot Manager could not find the saved game executable.' }
-                $nextAction = if ($pathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 13) Library Health Check to repair saved game paths.' }
+                $nextAction = if ($pathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 14) Library Health Check to repair saved game paths.' }
                 [void]$skipDetails.Add([pscustomobject]@{ Game=$pf.BaseName; ReasonCode=[string]$pathCheck.ReasonCode; Reason=$skipReason; SavedPath=$gamePath; NextAction=$nextAction; Technical=[string]$pathCheck.Reason })
                 Write-Log ("dgVoodoo2: skipped {0} before deployment; path reason={1}; detail={2}" -f $pf.BaseName,$pathCheck.ReasonCode,$pathCheck.Reason)
                 continue
@@ -19375,7 +19375,7 @@ function Invoke-DgVoodoo2Setup {
                 if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
                 if ($boundaryCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
                 $boundaryReason = if ($boundaryCheck.Valid) { 'RESOLUTION_CHANGED' } else { $boundaryCheck.ReasonCode }
-                $boundaryNextAction = if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 13) Library Health Check to repair saved game paths.' }
+                $boundaryNextAction = if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 14) Library Health Check to repair saved game paths.' }
                 [void]$skipDetails.Add([pscustomobject]@{ Game=$pf.BaseName; ReasonCode=[string]$boundaryReason; Reason='The game path changed or became unavailable before the safe write.'; SavedPath=$gamePath; NextAction=$boundaryNextAction; Technical=[string]$boundaryCheck.Reason })
                 Write-Host ("  SKIP  {0} -- mutation-boundary path check failed ({1}); unchanged." -f $pf.BaseName,$boundaryReason) -ForegroundColor Yellow
                 Write-Log ("dgVoodoo2: skipped {0} at mutation boundary; path reason={1}; detail={2}" -f $pf.BaseName,$boundaryReason,$boundaryCheck.Reason)
@@ -19464,7 +19464,7 @@ function Invoke-DgVoodoo2Setup {
             $failureCode = Get-TpmGameMutationFailureCode -ErrorRecord $_
             if ($failureCode -eq 'DEVICE_UNAVAILABLE' -or $failureCode -eq 'GAME_PATH_MISSING') {
                 $skipped++
-                $nextAction = if ($failureCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 13) Library Health Check to repair saved game paths.' }
+                $nextAction = if ($failureCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 14) Library Health Check to repair saved game paths.' }
                 [void]$skipDetails.Add([pscustomobject]@{ Game=$pf.BaseName; ReasonCode=$failureCode; Reason=if($failureCode -eq 'DEVICE_UNAVAILABLE'){'The saved game drive or device is unavailable.'}else{'The saved game executable could not be found.'}; SavedPath=$gamePath; NextAction=$nextAction; Technical=[string]$_.Exception.Message })
                 if ($failureCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ } else { $missingPath++ }
                 Write-Host ("  SKIP  {0} -- mutation became unavailable ({1}); unchanged." -f $pf.BaseName,$failureCode) -ForegroundColor Yellow
@@ -19566,7 +19566,7 @@ function Get-DgVoodoo2FailureGuidance {
     }
     return [pscustomobject]@{
         DeviceMessage = if ($missingDevice) { 'The saved game drive or device is unavailable. Reconnect the game drive or device containing the affected games, then retry dgVoodoo2 setup.' } else { $null }
-        MissingPathMessage = if ($missingPath) { 'Windows cannot find one or more saved game paths. Use 13) Library Health Check to repair them.' } else { $null }
+        MissingPathMessage = if ($missingPath) { 'Windows cannot find one or more saved game paths. Use 14) Library Health Check to repair them.' } else { $null }
         OfferHealthCheck = $missingPath
     }
 }
@@ -22370,7 +22370,7 @@ function Invoke-GpuFixSetupLegacy {
                     'EMPTY_PATH'         { 'This game has no saved game location.' }
                     default              { 'TeknoParrot Manager cannot safely use the saved game location for this game.' }
                 }
-                $nextAction = if ($gpuPathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then choose 13) Library Health Check to repair saved game paths.' } else { 'Return to the main menu and choose 13) Library Health Check to repair saved game paths.' }
+                $nextAction = if ($gpuPathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then choose 14) Library Health Check to repair saved game paths.' } else { 'Return to the main menu and choose 14) Library Health Check to repair saved game paths.' }
                 [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonKey = $gpuPathCheck.ReasonCode; Reason = $skipReason; SavedPath = $registeredGamePath; NextAction = $nextAction; Technical = [string]$gpuPathCheck.Reason })
                 Write-Log ("GPU Fix: skipped {0}; path reason={1}; detail={2}" -f $pf.BaseName, $gpuPathCheck.ReasonCode, $gpuPathCheck.Reason)
                 continue
@@ -22383,7 +22383,7 @@ function Invoke-GpuFixSetupLegacy {
                     $skipped++
                     [void]$skippedItems.Add($pf.BaseName)
                     if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
-                    [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonKey = $boundaryCheck.ReasonCode; Reason = 'The registered game path changed or became unavailable before the safe write.'; SavedPath = $registeredGamePath; NextAction = 'Return to the main menu and choose 13) Library Health Check to repair saved game paths.'; Technical = [string]$boundaryCheck.ReasonCode })
+                    [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonKey = $boundaryCheck.ReasonCode; Reason = 'The registered game path changed or became unavailable before the safe write.'; SavedPath = $registeredGamePath; NextAction = 'Return to the main menu and choose 14) Library Health Check to repair saved game paths.'; Technical = [string]$boundaryCheck.ReasonCode })
                     if ($boundaryCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
                     Write-Log ("GPU Fix: mutation-boundary path check failed for {0}; reason={1}" -f $pf.BaseName, $boundaryCheck.ReasonCode)
                     continue
@@ -22418,7 +22418,7 @@ function Invoke-GpuFixSetupLegacy {
                     [void]$skippedItems.Add($pf.BaseName)
                     if ($writeBoundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
                     if ($writeBoundaryCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
-                    [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonKey = $writeBoundaryCheck.ReasonCode; Reason = 'The registered game path changed or became unavailable while the backup was being verified.'; SavedPath = $registeredGamePath; NextAction = 'Return to the main menu and choose 13) Library Health Check to repair saved game paths.'; Technical = [string]$writeBoundaryCheck.ReasonCode })
+                    [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonKey = $writeBoundaryCheck.ReasonCode; Reason = 'The registered game path changed or became unavailable while the backup was being verified.'; SavedPath = $registeredGamePath; NextAction = 'Return to the main menu and choose 14) Library Health Check to repair saved game paths.'; Technical = [string]$writeBoundaryCheck.ReasonCode })
                     Write-Log ("GPU Fix: post-backup mutation-boundary path check failed for {0}; reason={1}" -f $pf.BaseName, $writeBoundaryCheck.ReasonCode)
                     continue
                 }
@@ -22498,7 +22498,7 @@ function Invoke-GpuFixSetupLegacy {
                     [void]$skippedItems.Add($pf.BaseName)
                     if ($failureCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ } else { $missingPath++ }
                     $catchReason = if ($failureCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'TeknoParrot Manager could not find the saved game file.' }
-                    [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonKey=$failureCode; Reason = $catchReason; SavedPath = $registeredGamePath; NextAction = 'Return to the main menu and choose 13) Library Health Check to repair saved game paths.'; Technical = [string]$_.Exception.Message })
+                    [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonKey=$failureCode; Reason = $catchReason; SavedPath = $registeredGamePath; NextAction = 'Return to the main menu and choose 14) Library Health Check to repair saved game paths.'; Technical = [string]$_.Exception.Message })
                     Write-Log ("GPU Fix: skipped {0} after mutation failure; path reason={1}; detail={2}" -f $pf.BaseName, $failureCode, $_)
                 } else {
                     [void]$failedItems.Add($pf.BaseName)
@@ -22594,7 +22594,7 @@ function Get-TpmGpuFixResultView {
     if ($backupLine) { [void]$done.Add($backupLine) }
     $next = 'Press B to go back.'
     if ($needs.Count -gt 0 -and $count.MissingPath -gt 0) { $next = 'Press H to fix the saved game paths, then press R to run it again.' }
-    elseif ($needs.Count -gt 0 -and $count.MissingDevice -gt 0) { $next = 'Plug in the drive for the game, then press R to run it again. Or choose 13 (Library health check) in the main menu to repair these games.' }
+    elseif ($needs.Count -gt 0 -and $count.MissingDevice -gt 0) { $next = 'Plug in the drive for the game, then press R to run it again. Or choose 14 (Library health check) in the main menu to repair these games.' }
     elseif ($needs.Count -gt 0) { $next = 'Press D to see why, or R to run it again.' }
     elseif ($outcome -eq 'SUCCEEDED') { $next = 'Start a game to try it. Press B to go back.' }
     return @{
@@ -27476,7 +27476,7 @@ function Write-PostgresAdministratorGuidance {
     Write-Host '  Windows may show a permission window (User Account Control). Click Yes if you want this to continue.' -ForegroundColor Yellow
     Write-Host '  When Windows asks, approve it with an administrator account of this PC. Do not switch to a different account. If your Windows account is not an administrator, close TeknoParrot Manager and start it again with "Run as administrator".' -ForegroundColor Yellow
     Write-Host '  After approval, TeknoParrot Manager tries to continue automatically and reports the result; approval alone does not mean setup or repair succeeded.' -ForegroundColor Yellow
-    Write-Host '  If setup stops, read the reported failure and View Log before trying option 11 again.' -ForegroundColor Yellow
+    Write-Host '  If setup stops, read the reported failure and View Log before trying option 12 again.' -ForegroundColor Yellow
     # Give the user time to read this before the Windows permission window opens on top of it (#385).
     $unattendedNow = [bool](Get-Variable -Name Unattended -Scope Script -ValueOnly -ErrorAction SilentlyContinue)
     if (Test-TpmInteractiveInput -Unattended:$unattendedNow) { [void](Read-HostSafe '  Press Enter to open the Windows permission window') }
@@ -31038,17 +31038,79 @@ function Invoke-PostgresGameSetupLocked {
 # =============================================================================
 # FFB ARCADE PLUGIN  (force feedback / rumble for arcade racers and shooters)
 # =============================================================================
-# Source: mightymikem/FFBArcadePlugin, an actively-maintained fork of
-# Boomslangnz/FFBArcadePlugin. Deploys one compiled DLL (MAME32.dll x86 /
-# MAME64.dll x64) into a game's folder, renamed to whatever DLL that
-# specific game expects to load (d3d9.dll, d3d11.dll, opengl32.dll,
-# xinput1_3.dll, or winmm.dll). The per-game destination filename is a
-# fixed lookup tied to specific titles, not auto-detected from the exe --
-# so unlike ReShade it cannot be guessed at runtime; it is read from the
-# pinned revision's AutoSetup.cmd rather than a mutable branch URL, and remains
-# intentionally live rather than hardcoded here.
+# Source: the LATEST published release of mightymikem/FFBArcadePlugin, an
+# actively-maintained fork of Boomslangnz/FFBArcadePlugin. The release ZIP has
+# one folder per game; each holds dinput8.dll (the plugin), SDL2.dll and that
+# game's own FFBPlugin.ini. For each registered game that matches a folder,
+# dinput8.dll is placed in the game folder under the DLL name that game loads
+# (d3d9.dll, d3d11.dll, opengl32.dll, xinput1_3.dll, winmm.dll, ...), next to
+# its own FFBPlugin.ini (and SDL2.dll when the game has none). The per-game
+# destination name is a fixed lookup tied to specific titles, not auto-detected
+# from the exe, so it is read from the AutoSetup.cmd of the same release tag and
+# stays live rather than hardcoded here.
 
-# Fetches and parses the upstream AutoSetup.cmd to build a folder-name ->
+# A release tag is used inside a web address and a file name, so it must be plain.
+function Test-FFBPluginTag {
+    param([string]$Tag)
+    return (-not [string]::IsNullOrWhiteSpace($Tag) -and $Tag -match '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+}
+
+# Picks the plugin ZIP out of a parsed GitHub "latest release" answer. Pure: no network.
+# Refuses (throws) unless there is exactly one asset named FFB.Arcade.Plugin.*.zip on the
+# plugin project's own release download address. A missing digest is allowed (Sha256 is
+# then $null and Trust says so); a digest that is present but malformed is refused.
+function Select-FFBPluginReleaseAsset {
+    param([Parameter(Mandatory)][object]$Release)
+    $tagProperty = $Release.PSObject.Properties['tag_name']
+    if (-not $tagProperty -or -not (Test-FFBPluginTag -Tag ([string]$tagProperty.Value))) {
+        throw 'The release did not have a usable version tag.'
+    }
+    $assetsProperty = $Release.PSObject.Properties['assets']
+    $matching = @()
+    if ($assetsProperty -and $null -ne $assetsProperty.Value) {
+        $matching = @(@($assetsProperty.Value) | Where-Object { $_ -and $_.PSObject.Properties['name'] -and [string]$_.name -match '^FFB\.Arcade\.Plugin\..*\.zip$' })
+    }
+    if ($matching.Count -ne 1) { throw ('Expected exactly one plugin ZIP in the release, found {0}.' -f $matching.Count) }
+    $asset = $matching[0]
+    $url = if ($asset.PSObject.Properties['browser_download_url']) { [string]$asset.browser_download_url } else { '' }
+    if ($url -notmatch '^https://github\.com/mightymikem/FFBArcadePlugin/releases/download/\S+$') {
+        throw 'The plugin ZIP address is not on the plugin project release page.'
+    }
+    $sha = $null
+    $digestProperty = $asset.PSObject.Properties['digest']
+    if ($digestProperty -and -not [string]::IsNullOrWhiteSpace([string]$digestProperty.Value)) {
+        if ([string]$digestProperty.Value -notmatch '^sha256:([0-9a-fA-F]{64})$') { throw 'The release checksum was not a SHA-256 value.' }
+        $sha = $Matches[1].ToUpperInvariant()
+    }
+    $bytes = [Int64]0
+    if ($asset.PSObject.Properties['size'] -and $null -ne $asset.size) { $bytes = [Int64]$asset.size }
+    return [pscustomobject]@{
+        Revision = [string]$tagProperty.Value
+        Repository = 'mightymikem/FFBArcadePlugin'
+        ManifestUrl = 'https://api.github.com/repos/mightymikem/FFBArcadePlugin/releases/latest'
+        Trust = $(if ($sha) { 'ReleaseDigestVerified' } else { 'ReleaseNoDigest' })
+        AssetName = [string]$asset.name
+        AssetUrl = $url
+        Sha256 = $sha
+        Bytes = $bytes
+        FromCache = $false
+    }
+}
+
+# Asks GitHub for the newest published release of the plugin fork. $null when it cannot be read.
+function Get-FFBPluginLatestRelease {
+    try {
+        $uri = 'https://api.github.com/repos/mightymikem/FFBArcadePlugin/releases/latest'
+        $resp = Invoke-TpmWebRequestSilently -Uri $uri -UseBasicParsing -TimeoutSec 20 -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
+        $payload = [string]$resp.Content | ConvertFrom-Json
+        return (Select-FFBPluginReleaseAsset -Release $payload)
+    } catch {
+        Write-Log "FFBPlugin: latest release lookup failed -- $_"
+        return $null
+    }
+}
+
+# Fetches and parses the AutoSetup.cmd of the release tag to build a folder-name ->
 # destination-DLL-filename map. The file has a very regular shape:
 #   cd <FolderName>
 #   rename dinput8.dll <destination>.dll
@@ -31058,41 +31120,11 @@ function Invoke-PostgresGameSetupLocked {
 # Returns an empty hashtable (not a hardcoded fallback list) if the fetch
 # fails after retries -- there is nothing meaningful to fall back to since
 # the table only exists upstream.
-function Test-FFBPluginRevision {
-    param([string]$Revision)
-    return (-not [string]::IsNullOrWhiteSpace($Revision) -and $Revision -match '^[0-9a-fA-F]{40}$')
-}
-
-function Get-FFBPluginSourceRevision {
-    try {
-        $uri = 'https://api.github.com/repos/mightymikem/FFBArcadePlugin/commits/master'
-        $resp = Invoke-TpmWebRequestSilently -Uri $uri -UseBasicParsing -TimeoutSec 20 -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
-        $payload = [string]$resp.Content | ConvertFrom-Json
-        $shaProperty = $payload.PSObject.Properties['sha']
-        if (-not $shaProperty -or $null -eq $shaProperty.Value -or $shaProperty.Value -is [System.Array]) {
-            throw 'FFBPlugin source response did not contain exactly one SHA.'
-        }
-        $sha = [string]$shaProperty.Value
-        if (-not (Test-FFBPluginRevision -Revision $sha)) {
-            throw 'FFBPlugin source revision was not a full commit SHA.'
-        }
-        return [pscustomobject]@{
-            Revision = $sha.ToUpperInvariant()
-            Repository = 'mightymikem/FFBArcadePlugin'
-            ManifestUrl = $uri
-            Trust = 'SourcePinnedAuditHash'
-        }
-    } catch {
-        Write-Log "FFBPlugin: source revision lookup failed -- $_"
-        return $null
-    }
-}
-
 function Get-FFBPluginGameMap {
     param([Parameter(Mandatory)][string]$SourceRevision)
     $map = @{}
-    if (-not (Test-FFBPluginRevision -Revision $SourceRevision)) {
-        Write-Log 'FFBPlugin: refused support-table fetch because the source revision was not pinned.'
+    if (-not (Test-FFBPluginTag -Tag $SourceRevision)) {
+        Write-Log 'FFBPlugin: refused support-table fetch because the release tag was not usable.'
         return $map
     }
     $uri = "https://raw.githubusercontent.com/mightymikem/FFBArcadePlugin/$SourceRevision/AutoSetup.cmd"
@@ -31107,9 +31139,9 @@ function Get-FFBPluginGameMap {
                 if ($folderName -and $destDll) { $map[$folderName] = $destDll }
             }
             if ($map.Count -gt 0) {
-                Write-Log "FFBPlugin: $($map.Count) game(s) in the pinned AutoSetup.cmd table."
+                Write-Log "FFBPlugin: $($map.Count) game(s) in the AutoSetup.cmd table of release $SourceRevision."
             } else {
-                Write-Log "FFBPlugin: 0 entries parsed from pinned AutoSetup.cmd -- format may have changed."
+                Write-Log "FFBPlugin: 0 entries parsed from AutoSetup.cmd of release $SourceRevision -- format may have changed."
             }
             return $map
         } catch {
@@ -31122,7 +31154,7 @@ function Get-FFBPluginGameMap {
             # extracting a status code embedded only in the message text.
             $status = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
             if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
-                Write-Log "FFBPlugin: pinned AutoSetup.cmd fetch failed -- $_"
+                Write-Log "FFBPlugin: AutoSetup.cmd fetch failed -- $_"
                 if ($status -ge 400 -and $status -lt 500) { return @{} }
                 return $null
             }
@@ -31133,82 +31165,363 @@ function Get-FFBPluginGameMap {
     return @{}
 }
 
-
-
-# Downloads MAME32.dll / MAME64.dll directly from the pinned repository
-# revision (plain files, not inside the release ZIP -- no extraction step).
-# Returns a structured all-or-nothing result with staged paths and SHA-256
-# evidence; an existing custom cache is never used as an unverified fallback.
-function Invoke-FFBPluginDownload {
-    param([string]$destDir, [string]$SourceRevision)
-    $script:FFBDownloadEvidence = @()
-    if (-not (Test-FFBPluginRevision -Revision $SourceRevision)) {
-        Write-Log 'FFBPlugin: refused download because the source revision was not pinned.'
-        return [pscustomobject]@{
-            Succeeded = $false; Files = @{}; Evidence = @(); ResiduePaths = @()
-            Reason = 'SOURCE_REVISION_UNAVAILABLE'
-        }
+# The cache keeps ONE plugin ZIP (the last release that passed every check) and a small
+# record next to it: the tag, the SHA-256 and the game-name table, so a run with no
+# network can still use it. The record is only believed while the ZIP still matches its hash.
+function Get-FFBPluginCachePaths {
+    param([Parameter(Mandatory)][string]$CacheDir)
+    return [pscustomobject]@{
+        Zip = (Join-Path $CacheDir 'TPM-FFB-Plugin-Release.zip')
+        Meta = (Join-Path $CacheDir 'TPM-FFB-Plugin-Release.json')
     }
-    $sourceRevision = $SourceRevision.ToUpperInvariant()
-    $stagedPaths = New-Object System.Collections.Generic.List[string]
-    $filePaths = [ordered]@{}
-    $evidence = New-Object System.Collections.Generic.List[object]
-    $residuePaths = New-Object System.Collections.Generic.List[string]
+}
+
+function Get-FFBPluginCachedRelease {
+    param([Parameter(Mandatory)][string]$CacheDir)
+    $paths = Get-FFBPluginCachePaths -CacheDir $CacheDir
+    if (-not (Test-Path -LiteralPath $paths.Zip -PathType Leaf) -or -not (Test-Path -LiteralPath $paths.Meta -PathType Leaf)) { return $null }
     try {
-        [void][System.IO.Directory]::CreateDirectory($destDir)
-        if (-not (Test-TpmNoReparsePath -Path $destDir)) {
-            throw "FFBPlugin: cache staging directory is missing or reparse-backed."
+        $meta = Get-Content -LiteralPath $paths.Meta -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
+        $tag = [string]$meta.Tag
+        $recorded = [string]$meta.Sha256
+        if (-not (Test-FFBPluginTag -Tag $tag) -or $recorded -notmatch '^[0-9A-Fa-f]{64}$') { return $null }
+        $actual = (Get-FileHash -LiteralPath $paths.Zip -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($actual -ine $recorded) {
+            Write-Log 'FFBPlugin: the saved plugin ZIP no longer matches its recorded hash; it will not be used.'
+            return $null
         }
-        foreach ($dllName in @('MAME32.dll', 'MAME64.dll')) {
-            $uri = "https://raw.githubusercontent.com/mightymikem/FFBArcadePlugin/$sourceRevision/$dllName"
-            $tempPath = Join-Path $destDir ('TPM-FFB-source-{0}-{1}' -f ([guid]::NewGuid().ToString('N')), $dllName)
-            [void]$stagedPaths.Add($tempPath)
-            if (-not (Invoke-TpmDownload -DownloadUrl $uri -DestinationPath $tempPath -Label 'FFBPlugin' -Version $sourceRevision)) {
-                throw "FFBPlugin: $dllName download failed."
-            }
-            if (-not (Test-Path -LiteralPath $tempPath -PathType Leaf)) {
-                throw "FFBPlugin: $dllName download did not produce a staged file."
-            }
-            $hash = (Get-FileHash -LiteralPath $tempPath -Algorithm SHA256 -ErrorAction Stop).Hash
-            $filePaths[$dllName] = $tempPath
-            [void]$evidence.Add([pscustomobject]@{
-                FileName = $dllName
-                SourceUrl = $uri
-                SourceRevision = $sourceRevision
-                Sha256 = $hash
-                Trust = 'SourcePinnedAuditHash'
-                DownloadPath = $tempPath
-            })
-            Write-Log "FFBPlugin: downloaded pinned $dllName revision $sourceRevision SHA256 $hash"
+        $map = @{}
+        if ($meta.PSObject.Properties['GameMap'] -and $meta.GameMap) {
+            foreach ($property in $meta.GameMap.PSObject.Properties) { $map[[string]$property.Name] = [string]$property.Value }
         }
-        $script:FFBDownloadEvidence = $evidence.ToArray()
         return [pscustomobject]@{
-            Succeeded = $true
-            Files = $filePaths
-            Evidence = $evidence.ToArray()
-            ResiduePaths = @()
-            Reason = $null
+            Revision = $tag
+            Repository = 'mightymikem/FFBArcadePlugin'
+            ManifestUrl = ''
+            Trust = 'CachedReleaseHashChecked'
+            AssetName = [string]$meta.AssetName
+            AssetUrl = ''
+            Sha256 = $actual.ToUpperInvariant()
+            Bytes = (Get-Item -LiteralPath $paths.Zip).Length
+            FromCache = $true
+            ZipPath = $paths.Zip
+            GameMap = $map
         }
     } catch {
-        Write-Log "FFBPlugin: pinned source acquisition failed -- $_"
-        foreach ($path in @($stagedPaths)) {
-            try {
-                if (Test-Path -LiteralPath $path -PathType Leaf) {
-                    Remove-Item -LiteralPath $path -Force -ErrorAction Stop
-                }
-            } catch {
-                [void]$residuePaths.Add($path)
-                Write-Log "FFBPlugin: staged source cleanup failed -- $path -- $_"
+        Write-Log "FFBPlugin: the saved plugin record could not be read -- $_"
+        return $null
+    }
+}
+
+# Makes the checked ZIP the one cached copy (replacing an older release) and records its table.
+# Returns the path of the ZIP to keep using.
+function Save-FFBPluginCache {
+    param(
+        [Parameter(Mandatory)][string]$CacheDir, [Parameter(Mandatory)][string]$ZipPath,
+        [Parameter(Mandatory)][string]$Tag, [string]$AssetName = '', [Parameter(Mandatory)][string]$Sha256, [System.Collections.IDictionary]$GameMap = @{}
+    )
+    $paths = Get-FFBPluginCachePaths -CacheDir $CacheDir
+    $keptPath = $ZipPath
+    try {
+        if ($ZipPath -ine $paths.Zip) {
+            Move-Item -LiteralPath $ZipPath -Destination $paths.Zip -Force -ErrorAction Stop
+            $keptPath = $paths.Zip
+        }
+        $names = [ordered]@{}
+        foreach ($key in @($GameMap.Keys | Sort-Object)) { $names[[string]$key] = [string]$GameMap[$key] }
+        $record = [ordered]@{ SchemaVersion = 1; Tag = $Tag; AssetName = $AssetName; Sha256 = $Sha256; GameMap = $names }
+        Write-TpmAtomicTextFile -Path $paths.Meta -Text ($record | ConvertTo-Json -Depth 4) -Operation 'temp-then-move final write (Save-FFBPluginCache)' -Validate { param([string]$Written) $null = $Written | ConvertFrom-Json -ErrorAction Stop; $true }
+    } catch {
+        Write-Log "FFBPlugin: could not save the plugin ZIP for later -- $_"
+    }
+    return $keptPath
+}
+
+# Gets the release ZIP into the cache folder and proves it. Reuses the saved ZIP when it is the same release and
+# its hash still matches; otherwise downloads and compares the SHA-256 with the digest GitHub published (when it
+# published one). The newly downloaded ZIP gets a unique name and only replaces the cached copy after the caller
+# has checked its structure (Save-FFBPluginCache), so a bad download never destroys the last good copy.
+# Returns Succeeded, ZipPath, Staged (new unique file), Sha256, Evidence, ResiduePaths, Reason.
+function Invoke-FFBPluginDownload {
+    param([string]$destDir, [object]$Release)
+    $fail = {
+        param([string]$Reason, [string[]]$Residue = @())
+        [pscustomobject]@{ Succeeded = $false; ZipPath = ''; Staged = $false; Sha256 = ''; Evidence = @(); ResiduePaths = @($Residue); Reason = $Reason }
+    }
+    if (-not $Release -or -not (Test-FFBPluginTag -Tag ([string]$Release.Revision))) {
+        Write-Log 'FFBPlugin: refused download because the release tag was not usable.'
+        return (& $fail 'SOURCE_REVISION_UNAVAILABLE')
+    }
+    $tag = [string]$Release.Revision
+    $newEvidence = {
+        param([string]$Path, [string]$Hash, [string]$Url, [string]$Trust, [bool]$Checked)
+        [pscustomobject]@{
+            FileName = [string]$Release.AssetName; SourceUrl = $Url; SourceRevision = $tag
+            Sha256 = $Hash; Trust = $Trust; DigestChecked = $Checked; DownloadPath = $Path
+        }
+    }
+    $cachedUsable = $null
+    try {
+        [void][System.IO.Directory]::CreateDirectory($destDir)
+        if (-not (Test-TpmNoReparsePath -Path $destDir)) { throw 'FFBPlugin: cache directory is missing or reparse-backed.' }
+        $cachedUsable = Get-FFBPluginCachedRelease -CacheDir $destDir
+    } catch {
+        Write-Log "FFBPlugin: plugin cache could not be prepared -- $_"
+        return (& $fail 'PLUGIN_DOWNLOAD_FAILED')
+    }
+    $published = [string]$Release.Sha256
+    $canReuse = ($cachedUsable -and [string]$cachedUsable.Revision -ceq $tag -and ([bool]$Release.FromCache -or ($published -and [string]$cachedUsable.Sha256 -ieq $published)))
+    if ($canReuse) {
+        Write-Log "FFBPlugin: using the saved plugin ZIP for $tag SHA256 $($cachedUsable.Sha256)"
+        return [pscustomobject]@{
+            Succeeded = $true; ZipPath = [string]$cachedUsable.ZipPath; Staged = $false; Sha256 = [string]$cachedUsable.Sha256
+            Evidence = @(& $newEvidence $cachedUsable.ZipPath $cachedUsable.Sha256 '' 'CachedReleaseHashChecked' $false)
+            ResiduePaths = @(); Reason = $null
+        }
+    }
+    if ([bool]$Release.FromCache) { return (& $fail 'PLUGIN_DOWNLOAD_FAILED') }
+    $tempPath = Join-Path $destDir ('TPM-FFB-Plugin-Release.{0}.zip' -f ([guid]::NewGuid().ToString('N')))
+    try {
+        $downloadArgs = @{ DownloadUrl = [string]$Release.AssetUrl; DestinationPath = $tempPath; Label = 'FFBPlugin'; Version = $tag }
+        if ([int64]$Release.Bytes -gt 0) { $downloadArgs['ExpectedBytes'] = [int64]$Release.Bytes }
+        if ($published) { $downloadArgs['ExpectedSha256'] = $published }
+        if (-not (Invoke-TpmDownload @downloadArgs)) { throw 'FFBPlugin: the release ZIP download failed.' }
+        if (-not (Test-Path -LiteralPath $tempPath -PathType Leaf)) { throw 'FFBPlugin: the download did not produce a file.' }
+        $hash = (Get-FileHash -LiteralPath $tempPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($published -and $hash -ine $published) {
+            Write-Log "FFBPlugin: downloaded ZIP SHA256 $hash does not match the published digest $published"
+            throw 'HASH_MISMATCH'
+        }
+        Write-Log "FFBPlugin: downloaded release $tag SHA256 $hash digestChecked=$([bool]$published)"
+        return [pscustomobject]@{
+            Succeeded = $true; ZipPath = $tempPath; Staged = $true; Sha256 = $hash
+            Evidence = @(& $newEvidence $tempPath $hash ([string]$Release.AssetUrl) ([string]$Release.Trust) ([bool]$published))
+            ResiduePaths = @(); Reason = $null
+        }
+    } catch {
+        Write-Log "FFBPlugin: release acquisition failed -- $_"
+        $residue = @()
+        try { if (Test-Path -LiteralPath $tempPath -PathType Leaf) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction Stop } }
+        catch { $residue = @($tempPath); Write-Log "FFBPlugin: staged download cleanup failed -- $tempPath -- $_" }
+        $reason = if ($_.Exception.Message -ceq 'HASH_MISMATCH') { 'HASH_MISMATCH' } else { 'PLUGIN_DOWNLOAD_FAILED' }
+        return (& $fail $reason $residue)
+    }
+}
+
+# Checks the structure of the plugin ZIP without extracting anything. Refuses (Valid=$false, nothing else done) when:
+# an entry path is absolute, has a drive letter or a colon, or climbs out with ..; two entries share one path; the
+# total unpacked size is above $MaxTotalBytes (default 1 GiB; the real release is far smaller); or there are more
+# than $MaxEntries entries. Folders maps each top-level folder to its files (name -> FullName/Length).
+function Test-FFBPluginZip {
+    param([Parameter(Mandatory)][string]$ZipPath, [Int64]$MaxTotalBytes = 1073741824, [int]$MaxEntries = 20000)
+    $refuse = { param([string]$Reason) [pscustomobject]@{ Valid = $false; Reason = $Reason; Folders = @{} } }
+    $zip = $null
+    try {
+        try { $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath) } catch { return (& $refuse 'ZIP_UNREADABLE') }
+        $folders = @{}
+        $total = [Int64]0
+        $count = 0
+        foreach ($entry in $zip.Entries) {
+            $count++
+            if ($count -gt $MaxEntries) { return (& $refuse 'ZIP_TOO_MANY_ENTRIES') }
+            $name = [string]$entry.FullName
+            if ($name -match '[\x00-\x1F]' -or $name -match '^[\\/]' -or $name.Contains(':')) { return (& $refuse 'ZIP_UNSAFE_PATH') }
+            $segments = @($name -split '[\\/]')
+            if ($segments -contains '..' -or $segments -contains '.') { return (& $refuse 'ZIP_UNSAFE_PATH') }
+            $total += [Int64]$entry.Length
+            if ($total -gt $MaxTotalBytes) { return (& $refuse 'ZIP_TOO_BIG') }
+            if ([string]::IsNullOrEmpty([string]$entry.Name)) { continue }
+            if ($segments.Count -eq 2) {
+                $folder = [string]$segments[0]; $file = [string]$segments[1]
+                if (-not $folders.ContainsKey($folder)) { $folders[$folder] = @{} }
+                if ($folders[$folder].ContainsKey($file)) { return (& $refuse 'ZIP_DUPLICATE_ENTRY') }
+                $folders[$folder][$file] = [pscustomobject]@{ FullName = $name; Length = [Int64]$entry.Length }
             }
         }
-        $script:FFBDownloadEvidence = @()
-        return [pscustomobject]@{
-            Succeeded = $false
-            Files = @{}
-            Evidence = @()
-            ResiduePaths = $residuePaths.ToArray()
-            Reason = 'DLL_ACQUISITION_FAILED'
+        return [pscustomobject]@{ Valid = $true; Reason = ''; Folders = $folders }
+    } finally {
+        if ($zip) { $zip.Dispose() }
+    }
+}
+
+# Extracts ONLY dinput8.dll, SDL2.dll and FFBPlugin.ini of the named folders into the staging folder. Never extracts
+# the whole ZIP and never runs anything. Each file is copied with a size limit, so an entry that lies about its
+# size cannot fill the disk. Returns folder -> @{ Dll; Sdl2; Ini } (staged paths; Sdl2 is $null when the folder has none).
+function Expand-FFBPluginGameFiles {
+    param(
+        [Parameter(Mandatory)][string]$ZipPath, [Parameter(Mandatory)][hashtable]$Folders,
+        [Parameter(Mandatory)][string[]]$Needed, [Parameter(Mandatory)][string]$StageDir
+    )
+    $result = @{}
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        [void][System.IO.Directory]::CreateDirectory($StageDir)
+        $index = 0
+        foreach ($folder in $Needed) {
+            $index++
+            $dir = Join-Path $StageDir ([string]$index)
+            [void][System.IO.Directory]::CreateDirectory($dir)
+            $files = $Folders[$folder]
+            $set = @{ Dll = $null; Sdl2 = $null; Ini = $null }
+            foreach ($want in @(@('Dll', 'dinput8.dll', 67108864), @('Sdl2', 'SDL2.dll', 67108864), @('Ini', 'FFBPlugin.ini', 1048576))) {
+                if (-not $files.ContainsKey($want[1])) { continue }
+                $limit = [Int64]$want[2]
+                if ([Int64]$files[$want[1]].Length -gt $limit) { throw ('{0}\{1} is larger than expected.' -f $folder, $want[1]) }
+                $entry = $zip.GetEntry([string]$files[$want[1]].FullName)
+                if ($null -eq $entry) { throw ('{0}\{1} could not be found in the ZIP.' -f $folder, $want[1]) }
+                $target = Join-Path $dir $want[1]
+                $inStream = $entry.Open()
+                try {
+                    $outStream = New-Object System.IO.FileStream($target, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+                    try {
+                        $buffer = New-Object byte[] 81920
+                        $written = [Int64]0
+                        while (($read = $inStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                            $written += $read
+                            if ($written -gt $limit) { throw ('{0}\{1} unpacked larger than expected.' -f $folder, $want[1]) }
+                            $outStream.Write($buffer, 0, $read)
+                        }
+                    } finally { $outStream.Dispose() }
+                } finally { $inStream.Dispose() }
+                $set[$want[0]] = $target
+            }
+            $result[$folder] = $set
         }
+    } finally { $zip.Dispose() }
+    return $result
+}
+
+# The plugin names its wheel with DeviceGUID= in FFBPlugin.ini. Value (UNVERIFIED until tested on a real wheel): the
+# DirectInput product GUID of the device as 32 hex digits in byte order -- the four bytes of (ProductId << 16 | VendorId)
+# least-significant byte first, then 000000000000504944564944 ("PIDVID"). Example from a user report: Logitech VID 046D,
+# PID C24F -> 6d044fc2000000000000504944564944.
+function ConvertTo-FFBPluginDeviceGuid {
+    param([Parameter(Mandatory)][int]$VendorId, [Parameter(Mandatory)][int]$ProductId)
+    if ($VendorId -lt 0 -or $VendorId -gt 65535 -or $ProductId -lt 0 -or $ProductId -gt 65535) { throw 'A USB vendor or product number is out of range.' }
+    $bytes = @(($VendorId -band 255), (($VendorId -shr 8) -band 255), ($ProductId -band 255), (($ProductId -shr 8) -band 255))
+    return ((($bytes | ForEach-Object { $_.ToString('x2') }) -join '') + '000000000000504944564944')
+}
+
+# Reads the wheel id from an ini ('' when blank or not a 32-digit hex value).
+function Get-FFBPluginIniDevice {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        $text = [System.Text.Encoding]::GetEncoding(28591).GetString([System.IO.File]::ReadAllBytes($Path))
+        $m = [regex]::Match($text, '(?im)^[ \t]*DeviceGUID[ \t]*=[ \t]*([0-9a-fA-F]{32})[ \t]*\r?$')
+        if ($m.Success) { return $m.Groups[1].Value.ToLowerInvariant() }
+    } catch {}
+    return ''
+}
+
+# Writes the wheel id into every DeviceGUID= line of one ini, byte-for-byte otherwise (Latin-1 round trip keeps every
+# other byte and the line endings). Returns $false (file untouched) when the ini has no DeviceGUID= line.
+function Set-FFBPluginIniDevice {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$DeviceGuid)
+    if ($DeviceGuid -notmatch '^[0-9a-fA-F]{32}$') { throw 'The wheel id is not a 32-digit hex value.' }
+    $latin1 = [System.Text.Encoding]::GetEncoding(28591)
+    $text = $latin1.GetString([System.IO.File]::ReadAllBytes($Path))
+    $pattern = [regex]'(?im)^([ \t]*DeviceGUID[ \t]*=)[^\r\n]*'
+    if (-not $pattern.IsMatch($text)) { return $false }
+    [System.IO.File]::WriteAllBytes($Path, $latin1.GetBytes($pattern.Replace($text, ('${1}' + $DeviceGuid.ToLowerInvariant()))))
+    return $true
+}
+
+# The plugin's own old renamed files (MAME32.dll and MAME64.dll) have only ever had these six versions (SHA-256).
+# A file in a game folder with one of these hashes is an old plugin file, whatever it is named.
+function Get-FFBPluginOldDllHashes {
+    return @(
+        'B77B5176B6FF0915D57CE8A9DFA8812F56379BB7C6589B31216C83DB6B83C432'   # MAME32.dll, 320512 bytes
+        '5A125ED2B07F992B85DBA8279DB67F220D8A4F3A1C60D91B2515A3FDE0EA0F1B'   # MAME32.dll, 320000 bytes
+        '5F4E642DA82B06680663C2327AA318302D35FBAED8498C6B3C030378A48CB0AC'   # MAME32.dll, 56832 bytes
+        '193397850932736512A439EA7628B153004BAE4714CD20AF0EB3B3911950B9D7'   # MAME64.dll, 420352 bytes
+        'CBDEFF7CC3BD5BF77CD854DD0437E2AD83DA9ED1B153E0E78853192035A02A10'   # MAME64.dll, 419840 bytes
+        '8990283626BBEDEBF0F34B81210EFAAC211BD8F5847548B4C13ADAC45F456031'   # MAME64.dll, 58880 bytes
+    )
+}
+
+# Is this Windows device a game controller? Wheels, joysticks, gamepads, Xbox and PlayStation pads, by name or Xbox driver class.
+# Keyboards, mice and "system controller" entries are not.
+function Test-TpmGameControllerName {
+    param([string]$Name, [string]$DeviceClass = '')
+    if ($Name -match 'system controller|keyboard|mouse') { return $false }
+    if ($DeviceClass -match '^(Xna|Xbox)') { return $true }
+    return ($Name -match 'game controller|gamepad|joystick|racing wheel|steering wheel|xbox|xinput|dualshock|dualsense|wireless controller')
+}
+
+# Game controllers by NAME for the wheel question. Windows keeps the friendly name of a game controller (the one the
+# Game Controllers control panel shows) under the user's OEM list; the generic device name is the fallback.
+# Returns Name, VendorId, ProductId. VendorId and ProductId are $null when the entry has no USB numbers (shown by name only).
+function Get-TpmGameControllerList {
+    $found = @{}
+    try {
+        foreach ($device in @(Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction Stop)) {
+            if (-not (Test-TpmGameControllerName -Name ([string]$device.Name) -DeviceClass ([string]$device.PNPClass))) { continue }
+            $vendorId = $null; $productId = $null
+            $key = 'N:' + ([string]$device.Name).Trim().ToLowerInvariant()
+            $friendly = ''
+            if ([string]$device.PNPDeviceID -match '^(?:HID|USB)\\VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})') {
+                $vendorHex = $Matches[1].ToUpperInvariant(); $productHex = $Matches[2].ToUpperInvariant()
+                $key = $vendorHex + ':' + $productHex
+                if ($found.ContainsKey($key)) { continue }
+                $vendorId = [Convert]::ToInt32($vendorHex, 16); $productId = [Convert]::ToInt32($productHex, 16)
+                try {
+                    $oem = Get-ItemProperty -LiteralPath ('HKCU:\System\CurrentControlSet\Control\MediaProperties\PrivateProperties\Joystick\OEM\VID_{0}&PID_{1}' -f $vendorHex, $productHex) -Name OEMName -ErrorAction Stop
+                    $friendly = ([string]$oem.OEMName).Trim()
+                } catch {}
+            }
+            if ([string]::IsNullOrWhiteSpace($friendly)) { $friendly = ([string]$device.Name).Trim() }
+            $found[$key] = [pscustomobject]@{ Name = $friendly; VendorId = $vendorId; ProductId = $productId }
+        }
+    } catch {
+        Write-Log "FFBPlugin: could not list game controllers -- $_"
+    }
+    # An entry with no USB numbers is dropped when the same controller already shows up with them.
+    $named = @($found.Values | Where-Object { $null -ne $_.VendorId } | ForEach-Object { ([string]$_.Name).ToLowerInvariant() })
+    return @($found.Values | Where-Object { $null -ne $_.VendorId -or $named -notcontains ([string]$_.Name).ToLowerInvariant() } | Sort-Object -Property Name)
+}
+
+# The wheel question of menu 8: pick a controller by name or skip. Returns Cancelled, DeviceGuid ('' = skipped) and Name.
+function Select-FFBPluginWheel {
+    $none = { param([bool]$Cancelled = $false, [string]$Guid = '', [string]$Name = '') [pscustomobject]@{ Cancelled = $Cancelled; DeviceGuid = $Guid; Name = $Name } }
+    $controllers = @(Get-TpmGameControllerList)
+    Write-Host ''
+    Write-Host '  Your wheel' -ForegroundColor Cyan
+    if ($controllers.Count -eq 0) {
+        Write-Host '  No game controllers were found. Plug in your wheel and turn it on, then run this again later.' -ForegroundColor Yellow
+        Write-Host '  You can also go on without a wheel now. The wheel can be set later by running Force feedback again.' -ForegroundColor DarkGray
+        $go = Read-TpmYesNo -Prompt '  Go on without a wheel? Choose Y or N' -Default 'Y'
+        if ($go -eq 'Y') { return (& $none) }
+        return (& $none $true)
+    }
+    Write-Host '  Pick the wheel the plugin should use. Each game gets its own settings file with your wheel in it.' -ForegroundColor Cyan
+    $labels = New-Object System.Collections.Generic.List[string]
+    foreach ($controller in $controllers) {
+        $label = [string]$controller.Name; $copy = 1
+        while ($labels.Contains($label)) { $copy++; $label = ('{0} ({1})' -f $controller.Name, $copy) }
+        [void]$labels.Add($label)
+    }
+    for ($i = 0; $i -lt $controllers.Count; $i++) { Write-Host ('    {0}) {1}' -f ($i + 1), $labels[$i]) -ForegroundColor White }
+    Write-Host '    S) Skip - do not set a wheel' -ForegroundColor White
+    while ($true) {
+        $answer = ([string](Read-HostSafe '  Type a number, S to skip, or D for details')).Trim().ToUpperInvariant()
+        if ($answer -eq 'S' -or $answer -eq '') { return (& $none) }
+        if ($answer -eq 'D') {
+            for ($i = 0; $i -lt $controllers.Count; $i++) {
+                if ($null -eq $controllers[$i].VendorId) { Write-Host ('    {0}) no USB vendor and product numbers, so it cannot be written as a wheel ID' -f ($i + 1)) -ForegroundColor DarkGray }
+                else { Write-Host ('    {0}) USB vendor {1:X4}, product {2:X4}' -f ($i + 1), $controllers[$i].VendorId, $controllers[$i].ProductId) -ForegroundColor DarkGray }
+            }
+            continue
+        }
+        $number = 0
+        if ([int]::TryParse($answer, [ref]$number) -and $number -ge 1 -and $number -le $controllers.Count) {
+            $picked = $controllers[$number - 1]
+            if ($null -eq $picked.VendorId) {
+                Write-Host '  This controller has no USB numbers, so no wheel is written. The plugin is still installed, and the rumble settings of each game are left as the plugin ships them.' -ForegroundColor Yellow
+                return (& $none $false '' $labels[$number - 1])
+            }
+            return (& $none $false (ConvertTo-FFBPluginDeviceGuid -VendorId $picked.VendorId -ProductId $picked.ProductId) $labels[$number - 1])
+        }
+        Write-Host ('  Please type a number from 1 to {0}, or S.' -f $controllers.Count) -ForegroundColor Yellow
     }
 }
 
@@ -31389,7 +31702,7 @@ function Restore-FFBPluginDeploymentTransaction {
 
 
 function Remove-FFBPluginOwnedDeployment {
-    param([Parameter(Mandatory)][string]$CacheDir, [Parameter(Mandatory)][string]$ProfileCode, [string[]]$ProtectedRoots = @())
+    param([Parameter(Mandatory)][string]$CacheDir, [Parameter(Mandatory)][string]$ProfileCode, [string[]]$ProtectedRoots = @(), [string[]]$ReplaceChanged = @())
     $entries = @(Read-FFBPluginOwnership -CacheDir $CacheDir)
     $script:FFBOwnedRemovalRecords = @()
     $remaining = New-Object System.Collections.Generic.List[object]
@@ -31416,8 +31729,10 @@ function Remove-FFBPluginOwnedDeployment {
             continue
         }
         $current = Get-TpmFileState -Path $destination
-        if (-not $current.Readable -or $current.Sha256 -ine [string]$entry.DeployedSha256) {
-            Write-Host ("    Kept {0}: the hook file changed after TeknoParrot Manager installed it." -f $destination) -ForegroundColor Yellow
+        # A file the user changed is only taken when the user said so for that exact file (backed up like the others).
+        $replaceChangedFile = ($ReplaceChanged -icontains $destination)
+        if (-not $current.Readable -or ($current.Sha256 -ine [string]$entry.DeployedSha256 -and -not $replaceChangedFile)) {
+            Write-Host ("    Kept {0}: it was changed after TeknoParrot Manager installed it." -f $destination) -ForegroundColor Yellow
             Write-Log "FFBPlugin ownership: refused removal of changed file $destination"
             [void]$remaining.Add($entry)
             continue
@@ -31434,9 +31749,9 @@ function Remove-FFBPluginOwnedDeployment {
             ProfileCode=$entry.ProfileCode
             GameRoot=$gameRoot
             Destination=$destination
-            DeployedSha256=$entry.DeployedSha256
+            DeployedSha256=$current.Sha256
             Backup=$backupPath
-            Hash=$entry.DeployedSha256
+            Hash=$current.Sha256
         })
     }
     if ($removalItems.Count -eq 0) { return $false }
@@ -31452,6 +31767,40 @@ function Remove-FFBPluginOwnedDeployment {
     }
     throw 'FFBPlugin ownership manifest update failed and deletion rollback was incomplete.'
 }
+function Get-FFBPluginDestinationState {
+    param([Parameter(Mandatory)][string]$Path, [object[]]$Entries = @(), [string]$ProfileCode = '', [string]$GameRoot = '', [string[]]$OldHashes = @())
+    if (-not (Test-Path -LiteralPath $Path)) { return [pscustomobject]@{ State = 'Missing'; Hash = ''; Entry = $null; Recognized = $false } }
+    $fileState = if (Test-Path -LiteralPath $Path -PathType Leaf) { Get-TpmFileState -Path $Path } else { $null }
+    $own = @($Entries | Where-Object { [string]$_.Destination -ieq $Path -and -not [string]::IsNullOrWhiteSpace([string]$_.ProfileCode) } | Select-Object -First 1)
+    $hash = if ($fileState -and $fileState.Readable) { [string]$fileState.Sha256 } else { '' }
+    if ($null -eq $fileState -or $own.Count -eq 0) {
+        # No ownership record: the file is ours only when its SHA-256 is one of the old plugin file fingerprints (never by name or size).
+        if ($hash -and $ProfileCode -and $OldHashes -icontains $hash) {
+            $made = [pscustomobject]@{ ProfileCode = $ProfileCode; GameRoot = $GameRoot; Destination = $Path; SourceSha256 = $hash; DeployedSha256 = $hash; Kind = 'Dll'; CreatedUtc = (Get-Date).ToUniversalTime().ToString('o') }
+            return [pscustomobject]@{ State = 'Ours'; Hash = $hash; Entry = $made; Recognized = $true }
+        }
+        return [pscustomobject]@{ State = 'Foreign'; Hash = $hash; Entry = $null; Recognized = $false }
+    }
+    if ($hash -and $hash -ieq [string]$own[0].DeployedSha256) { return [pscustomobject]@{ State = 'Ours'; Hash = $hash; Entry = $own[0]; Recognized = $false } }
+    return [pscustomobject]@{ State = 'OursChanged'; Hash = $hash; Entry = $own[0]; Recognized = $false }
+}
+
+function Show-FFBPluginIniDifferences {
+    param([Parameter(Mandatory)][string]$YourPath, [Parameter(Mandatory)][string]$NewPath)
+    $mine = @(Get-Content -LiteralPath $YourPath -ErrorAction SilentlyContinue | Where-Object { $_.Trim() })
+    $new = @(Get-Content -LiteralPath $NewPath -ErrorAction SilentlyContinue | Where-Object { $_.Trim() })
+    $onlyMine = @($mine | Where-Object { $new -cnotcontains $_ } | Select-Object -First 15)
+    $onlyNew = @($new | Where-Object { $mine -cnotcontains $_ } | Select-Object -First 15)
+    Write-Host '    Lines only in your file:' -ForegroundColor DarkGray
+    foreach ($line in $onlyMine) { Write-Host ('      ' + $line) -ForegroundColor DarkGray }
+    Write-Host '    Lines only in the new file:' -ForegroundColor DarkGray
+    foreach ($line in $onlyNew) { Write-Host ('      ' + $line) -ForegroundColor DarkGray }
+}
+
+# Installs the newest plugin release into the games that match one of its game folders. Per game it places dinput8.dll under
+# the name the game loads, that game's own FFBPlugin.ini, and SDL2.dll when the game has none. Nothing changes until the
+# user has seen the plan and said yes. A file that is not ours is never touched; our own files that the user changed are
+# kept (the user is asked about a changed settings file, default keep). Everything we replace is backed up first.
 function Invoke-FFBPluginSetup {
     param(
         [string]$UserProfilesDir,
@@ -31459,7 +31808,8 @@ function Invoke-FFBPluginSetup {
         [string[]]$NativeEnabledCodes = @(),
         [string]$TpRoot = '',
         [string]$EvidencePath = '',
-        [string[]]$ProtectedRoots = @()
+        [string[]]$ProtectedRoots = @(),
+        [string]$DeviceGuid = ''
     )
 
     if ($null -eq $NativeEnabledCodes) { $NativeEnabledCodes = @() }
@@ -31470,31 +31820,60 @@ function Invoke-FFBPluginSetup {
     $nativeRemovedThisRun = New-Object System.Collections.Generic.List[object]
     $deployedThisRun = New-Object System.Collections.Generic.List[object]
     $nativeSwitch = $null
+    $source = $null
+    $download = $null
+    $stageDir = ''
 
-    Write-Host ""
-    $source = Get-FFBPluginSourceRevision
-    if (-not $source -or -not (Test-FFBPluginRevision -Revision $source.Revision)) {
-        Write-Host "  Could not verify the FFB plugin source revision -- no files were changed." -ForegroundColor Red
-        return [pscustomobject]@{
-            Succeeded = $false; Deployed = 0; Errors = 1
+    # Every early stop looks the same: nothing was changed.
+    $refuse = {
+        param([string]$Reason, [int]$ErrorCount = 1)
+        $stop = [pscustomobject]@{
+            Succeeded = $false; Deployed = 0; Errors = $ErrorCount
             MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
             Accounted = 0; Eligible = 0; AccountingComplete = $true
-            Reason = 'SOURCE_REVISION_UNAVAILABLE'
+            Reason = $Reason
+        }
+        if ($source) {
+            $stop | Add-Member -NotePropertyName SourceRevision -NotePropertyValue $source.Revision
+            $stop | Add-Member -NotePropertyName SourceTrust -NotePropertyValue $source.Trust
+        }
+        if ($download) {
+            $stop | Add-Member -NotePropertyName SourceEvidence -NotePropertyValue @($download.Evidence)
+            $stop | Add-Member -NotePropertyName AcquisitionResidue -NotePropertyValue @($download.ResiduePaths)
+        }
+        return $stop
+    }
+
+    Write-Host ""
+    $source = Get-FFBPluginLatestRelease
+    if (-not $source) {
+        $saved = Get-FFBPluginCachedRelease -CacheDir $CacheDir
+        if ($saved) {
+            Write-Host "  Could not reach GitHub to look for the newest plugin." -ForegroundColor Yellow
+            Write-Host ("  A saved copy of the plugin ({0}) is on this PC and passed its check. It may not be the newest one." -f $saved.Revision) -ForegroundColor Yellow
+            if ((Read-TpmYesNo -Prompt '  Use the saved copy? Choose Y or N' -Default 'Y') -eq 'Y') { $source = $saved }
         }
     }
-    Write-Host "  Fetching the supported-games list..." -ForegroundColor DarkGray
-    $gameMap = Get-FFBPluginGameMap -SourceRevision $source.Revision
+    if (-not $source -or -not (Test-FFBPluginTag -Tag ([string]$source.Revision))) {
+        Write-Host "  Could not find the newest FFB plugin release -- check that this PC can reach github.com (internet, VPN, proxy or firewall), then run force-feedback setup again. No files were changed." -ForegroundColor Red
+        return (& $refuse 'SOURCE_REVISION_UNAVAILABLE')
+    }
+    Write-Host ("  Using FFB Arcade Plugin {0}{1}" -f $source.Revision, $(if ($source.FromCache) { ' (saved copy)' } else { '' })) -ForegroundColor Cyan
+    if ($source.Trust -eq 'ReleaseNoDigest') {
+        Write-Host "  GitHub did not publish a checksum for this download, so it cannot be compared. The file contents are still checked before anything is used." -ForegroundColor Yellow
+        Write-Log 'FFBPlugin: the release has no published digest; the SHA-256 is computed and recorded but could not be compared.'
+    }
+    if ($source.FromCache) {
+        $gameMap = $source.GameMap
+    } else {
+        Write-Host "  Fetching the supported-games list..." -ForegroundColor DarkGray
+        $gameMap = Get-FFBPluginGameMap -SourceRevision $source.Revision
+    }
     if (-not $gameMap -or $gameMap.Count -eq 0) {
         if ($null -eq $gameMap) { Write-Host "  Could not reach GitHub to fetch the supported FFB plugin game list -- check that this PC can reach github.com (internet, VPN, proxy or firewall), then run force-feedback setup again. No files were changed." -ForegroundColor Red }
         else { Write-Host "  GitHub answered, but it did not give a usable list of supported FFB plugin games. The list may have been moved or changed, or GitHub may be limiting requests. No files were changed. TeknoParrot-Manager.log has details." -ForegroundColor Red }
         Write-Log "FFBPlugin setup: aborted -- supported game map fetch failed."
-        return [pscustomobject]@{
-            Succeeded = $false; Deployed = 0; Errors = 1
-            MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
-            Accounted = 0; Eligible = 0; AccountingComplete = $true
-            SourceRevision = $source.Revision; SourceTrust = $source.Trust
-            Reason = 'GAME_MAP_FAILED'
-        }
+        return (& $refuse 'GAME_MAP_FAILED')
     }
     Write-Host ("  {0} game(s) in the supported-games list." -f $gameMap.Count) -ForegroundColor DarkGray
 
@@ -31502,47 +31881,36 @@ function Invoke-FFBPluginSetup {
     if ($profiles.Count -eq 0) {
         Write-Host "  No registered games found." -ForegroundColor Yellow
         Write-Log "FFBPlugin setup: aborted -- no registered profiles."
-        return [pscustomobject]@{
-            Succeeded = $false; Deployed = 0; Errors = 0
-            MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
-            Accounted = 0; Eligible = 0; AccountingComplete = $true
-            SourceRevision = $source.Revision; SourceTrust = $source.Trust
-            Reason = 'NO_REGISTERED_PROFILES'
-        }
+        return (& $refuse 'NO_REGISTERED_PROFILES' 0)
     }
 
-    Write-Host "  Downloading the verified FFB plugin files..." -ForegroundColor DarkGray
-    $download = Invoke-FFBPluginDownload -destDir $CacheDir -SourceRevision $source.Revision
+    Write-Host "  Getting the verified FFB plugin download..." -ForegroundColor DarkGray
+    $download = Invoke-FFBPluginDownload -destDir $CacheDir -Release $source
     if (-not $download -or -not [bool]$download.Succeeded) {
-        Write-Host "  Could not download and hash both verified FFB plugin DLLs -- check that this PC can reach github.com and that antivirus is not blocking the download, then run force-feedback setup again. No files were changed." -ForegroundColor Red
+        if ($download -and [string]$download.Reason -eq 'HASH_MISMATCH') {
+            Write-Host "  The plugin download did not match the checksum GitHub published, so it was thrown away. No files were changed. Run force-feedback setup again later." -ForegroundColor Red
+        } else {
+            Write-Host "  Could not download the FFB plugin -- check that this PC can reach github.com and that antivirus is not blocking the download, then run force-feedback setup again. No files were changed." -ForegroundColor Red
+        }
         Write-Log "FFBPlugin setup: aborted -- verified plugin file acquisition failed."
-        return [pscustomobject]@{
-            Succeeded = $false; Deployed = 0; Errors = 1
-            MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
-            Accounted = 0; Eligible = 0; AccountingComplete = $true
-            SourceRevision = $source.Revision; SourceTrust = $source.Trust
-            SourceEvidence = @($download.Evidence)
-            AcquisitionResidue = @($download.ResiduePaths)
-            Reason = if ($download.Reason) { $download.Reason } else { 'DLL_ACQUISITION_FAILED' }
-        }
+        return (& $refuse $(if ($download -and $download.Reason) { [string]$download.Reason } else { 'PLUGIN_DOWNLOAD_FAILED' }))
     }
-    # The two DLL copies staged for this run carry a new random name every time. Once the setup is finished or refused they are not needed.
+    # The staging folder and any newly downloaded ZIP that was not kept are not needed once the setup is finished or refused.
     try {
-    $srcDll32 = [string]$download.Files['MAME32.dll']
-    $srcDll64 = [string]$download.Files['MAME64.dll']
-    if ([string]::IsNullOrWhiteSpace($srcDll32) -or [string]::IsNullOrWhiteSpace($srcDll64) -or
-        -not (Test-Path -LiteralPath $srcDll32 -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $srcDll64 -PathType Leaf)) {
-        Write-Host "  Verified FFB plugin staging is incomplete -- no files were changed." -ForegroundColor Red
-        Write-Log "FFBPlugin setup: aborted -- staged DLL set was incomplete."
-        return [pscustomobject]@{
-            Succeeded = $false; Deployed = 0; Errors = 1
-            MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
-            Accounted = 0; Eligible = 0; AccountingComplete = $true
-            SourceRevision = $source.Revision; SourceTrust = $source.Trust
-            SourceEvidence = @($download.Evidence)
-            Reason = 'DLL_ACQUISITION_FAILED'
+    $zipCheck = Test-FFBPluginZip -ZipPath ([string]$download.ZipPath)
+    if (-not $zipCheck.Valid) {
+        $plainReason = switch ([string]$zipCheck.Reason) {
+            'ZIP_UNSAFE_PATH' { 'it holds a file path that points outside its own folder' }
+            'ZIP_TOO_BIG' { 'it unpacks to far more data than the plugin should' }
+            'ZIP_TOO_MANY_ENTRIES' { 'it holds far more files than the plugin should' }
+            'ZIP_DUPLICATE_ENTRY' { 'it holds the same file path twice' }
+            default { 'it could not be opened as a ZIP file' }
         }
+        Write-Host ("  The plugin download did not pass the safety check ({0}). No files were changed." -f $plainReason) -ForegroundColor Red
+        Write-Log ("FFBPlugin setup: aborted -- the ZIP was refused ({0})." -f $zipCheck.Reason)
+        $stop = & $refuse 'PLUGIN_ZIP_REFUSED'
+        $stop | Add-Member -NotePropertyName ZipReason -NotePropertyValue ([string]$zipCheck.Reason)
+        return $stop
     }
 
     $preflightEvidenceWritten = $false
@@ -31558,6 +31926,7 @@ function Invoke-FFBPluginSetup {
                 SourceTrust = $source.Trust
                 SourceFiles = @($download.Evidence)
                 SelectedGames = @($profiles | ForEach-Object { $_.BaseName })
+                WheelSelected = (-not [string]::IsNullOrWhiteSpace($DeviceGuid))
                 OwnershipManifest = Get-FFBPluginOwnershipPath -CacheDir $CacheDir
                 Result = $null
             })
@@ -31565,20 +31934,20 @@ function Invoke-FFBPluginSetup {
         } catch {
             Write-Host "  Could not create the FFB evidence report -- no files were changed." -ForegroundColor Red
             Write-Log "FFBPlugin setup: aborted -- evidence preflight failed -- $_"
-            return [pscustomobject]@{
-                Succeeded = $false; Deployed = 0; Errors = 1
-                MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @()
-                Accounted = 0; Eligible = 0; AccountingComplete = $true
-                SourceRevision = $source.Revision; SourceTrust = $source.Trust
-                SourceEvidence = @($download.Evidence)
-                EvidencePath = $EvidencePath
-                Reason = 'EVIDENCE_PREFLIGHT_FAILED'
-            }
+            $stop = & $refuse 'EVIDENCE_PREFLIGHT_FAILED'
+            $stop | Add-Member -NotePropertyName EvidencePath -NotePropertyValue $EvidencePath
+            return $stop
         }
     }
 
-    $normFfbList = @(foreach ($name in $gameMap.Keys) {
-        [pscustomobject]@{ Name = $name; Norm = (Get-NormalizedGameKey $name); Dest = $gameMap[$name] }
+    # Games are matched against every plugin game name (table names and ZIP folders). A game whose best match has no
+    # ZIP folder or no table entry is reported and skipped; the DLL name is never guessed.
+    $zipFolders = $zipCheck.Folders
+    $allNames = @(@($gameMap.Keys) + @($zipFolders.Keys) | ForEach-Object { [string]$_ } | Sort-Object -Unique)
+    $normFfbList = @(foreach ($name in $allNames) {
+        $hasDest = [bool]$gameMap.Contains($name)
+        $hasFolder = [bool]$zipFolders.ContainsKey($name)
+        [pscustomobject]@{ Name = $name; Norm = (Get-NormalizedGameKey $name); Dest = $(if ($hasDest) { [string]$gameMap[$name] } else { '' }); NoName = (-not ($hasDest -and $hasFolder)) }
     })
     Write-Host ""
     Write-Host ("  Matching {0} registered game(s) against the supported-games list..." -f $profiles.Count) -ForegroundColor Cyan
@@ -31653,26 +32022,47 @@ function Invoke-FFBPluginSetup {
         Write-Host "  [N] Use the optional plugin instead" -ForegroundColor White
         $ans = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'Y'
         $useNativeForOverlaps = ($ans -ne "N")
-        if (-not $useNativeForOverlaps) {
-            Write-Host "  Disabling native FFB Blaster on the overlapping profiles before plugin deployment..." -ForegroundColor Yellow
-            $nativeSwitch = Disable-FFBBlasterForOverlap -UserProfilesDir $UserProfilesDir -TpRoot $TpRoot -ProfileCodes @($overlaps | ForEach-Object { $_.Profile.BaseName })
-            if (-not $nativeSwitch.Succeeded) {
-                Write-Host ("  ERROR: Could not switch overlapping profiles to the optional plugin -- {0}" -f $nativeSwitch.Reason) -ForegroundColor Red
-                Write-Log "FFBPlugin: blocked because native overlap switch failed -- $($nativeSwitch.Reason)"
-                return [pscustomobject]@{
-                    Succeeded = $false; Deployed = 0; Errors = 1
-                    MissingPath = $missingPathGames.Count; MissingDevice = $missingDeviceGames.Count
-                    MissingPathGames = $missingPathGames.ToArray(); MissingDeviceGames = $missingDeviceGames.ToArray()
-                    PathReasonCounts = $pathReasonCounts; Accounted = 0; Eligible = $candidates.Count
-                    AccountingComplete = $false; SourceRevision = $source.Revision; SourceTrust = $source.Trust
-                    SourceEvidence = @($download.Evidence); EvidencePath = $EvidencePath
-                    Reason = 'NATIVE_OVERLAP_SWITCH_FAILED'
-                }
-            }
+    }
+    $switchWanted = ($overlaps.Count -gt 0 -and -not $useNativeForOverlaps)
+
+    # Every game that will really get plugin files needs its ZIP folder to hold the plugin and its own settings file.
+    # If one does not, the whole ZIP is refused before anything is changed.
+    $neededFolders = @($candidates | Where-Object { -not $_.Match.NoName -and -not ($nativeEnabledSet.Contains($_.Profile.BaseName) -and $useNativeForOverlaps) } |
+        ForEach-Object { [string]$_.Match.Name } | Sort-Object -Unique)
+    foreach ($folder in $neededFolders) {
+        if (-not $zipFolders[$folder].ContainsKey('dinput8.dll') -or -not $zipFolders[$folder].ContainsKey('FFBPlugin.ini')) {
+            Write-Host ("  The plugin download is missing a file for {0}, so it was not used. No files were changed." -f $folder) -ForegroundColor Red
+            Write-Log "FFBPlugin setup: aborted -- ZIP folder '$folder' lacks dinput8.dll or FFBPlugin.ini."
+            $stop = & $refuse 'PLUGIN_ZIP_REFUSED'
+            $stop | Add-Member -NotePropertyName ZipReason -NotePropertyValue 'ZIP_FOLDER_INCOMPLETE'
+            return $stop
         }
     }
+    $staged = @{}
+    if ($neededFolders.Count -gt 0) {
+        $noWheelLine = 0
+        try {
+            $stageDir = Join-Path $CacheDir ('TPM-FFB-stage-' + [guid]::NewGuid().ToString('N'))
+            $staged = Expand-FFBPluginGameFiles -ZipPath ([string]$download.ZipPath) -Folders $zipFolders -Needed $neededFolders -StageDir $stageDir
+            if (-not [string]::IsNullOrWhiteSpace($DeviceGuid)) {
+                foreach ($folder in $neededFolders) { if (-not (Set-FFBPluginIniDevice -Path ([string]$staged[$folder].Ini) -DeviceGuid $DeviceGuid)) { $noWheelLine++ } }
+            }
+        } catch {
+            Write-Host "  Could not unpack the plugin files from the download -- no files were changed." -ForegroundColor Red
+            Write-Log "FFBPlugin setup: aborted -- extraction failed -- $_"
+            return (& $refuse 'PLUGIN_ZIP_REFUSED')
+        }
+        if ($noWheelLine -gt 0) {
+            Write-Host ("  Note: {0} game settings file(s) have no wheel line, so the wheel was not set in them." -f $noWheelLine) -ForegroundColor Yellow
+            Write-Log "FFBPlugin: $noWheelLine settings file(s) in the release have no DeviceGUID line."
+        }
+    }
+    # The download passed every check: it becomes the one saved copy (an older release is replaced).
+    $keptZip = Save-FFBPluginCache -CacheDir $CacheDir -ZipPath ([string]$download.ZipPath) -Tag ([string]$source.Revision) -AssetName ([string]$source.AssetName) -Sha256 ([string]$download.Sha256) -GameMap $gameMap
+    $download | Add-Member -NotePropertyName Staged -NotePropertyValue ($keptZip -ine (Get-FFBPluginCachePaths -CacheDir $CacheDir).Zip) -Force
+    $download | Add-Member -NotePropertyName ZipPath -NotePropertyValue $keptZip -Force
 
-    $deployed = 0; $skippedNative = 0; $skippedCollision = 0
+    $skippedNative = 0; $skippedCollision = 0; $skippedCurrent = 0; $skippedNoName = 0
     $skippedDllMissing = 0
     $skippedMissingPath = $missingPathGames.Count
     $skippedMissingDevice = $missingDeviceGames.Count
@@ -31681,7 +32071,9 @@ function Invoke-FFBPluginSetup {
     $invalidPathCount = $skippedMissingPath + $skippedMissingDevice
     $skippedNoMatch = [Math]::Max(0, $profiles.Count - $candidates.Count - $matchErrors - $invalidPathCount)
 
-    $deploymentPlans = New-Object System.Collections.Generic.List[object]
+    # PASS 1 (read-only): decide what each game needs. A game whose native FFB is about to be switched off must not be left
+    # with no force feedback, so a skip for that game counts as a failed preflight (it restores native FFB) and not as a skip.
+    $gamePlans = New-Object System.Collections.Generic.List[object]
     $planningStarted = Get-Date
     $planningCurrent = 0
     foreach ($c in $candidates) {
@@ -31693,14 +32085,10 @@ function Invoke-FFBPluginSetup {
             $labelDoc = Read-Xml $pf.FullName
             if ($labelDoc.GameProfile.GameName) { $gameLabel = ([string]$labelDoc.GameProfile.GameName).Trim() }
         } catch {}
+        $nativeLost = [bool]($switchWanted -and $nativeEnabledSet.Contains($pf.BaseName))
         try {
             if ($nativeEnabledSet.Contains($pf.BaseName) -and $useNativeForOverlaps) {
-                [void](Remove-FFBPluginOwnedDeployment -CacheDir $CacheDir -ProfileCode $pf.BaseName -ProtectedRoots $ProtectedRoots)
-                foreach ($removedItem in @($script:FFBOwnedRemovalRecords)) { [void]$nativeRemovedThisRun.Add($removedItem) }
-                # The removal rewrote the manifest on disk; keep the entries already planned earlier in this run.
-                $plannedDestinations = @($deploymentPlans | ForEach-Object { [string]$_.Destination })
-                $ownershipEntries = @(@(Read-FFBPluginOwnership -CacheDir $CacheDir) | Where-Object { $plannedDestinations -inotcontains [string]$_.Destination }) + @($deploymentPlans.ToArray())
-                $skippedNative++
+                [void]$gamePlans.Add([pscustomobject]@{ Mode = 'Native'; Profile = $pf; Label = $gameLabel; ExeDir = ''; Files = @(); ReplaceChanged = @(); OwnerCodes = @(); NeedsRemoval = $false; AskIni = $null })
                 continue
             }
 
@@ -31709,9 +32097,6 @@ function Invoke-FFBPluginSetup {
                 $reasonCode = [string]$latestPathCheck.ReasonCode
                 if (-not $pathReasonCounts.ContainsKey($reasonCode)) { $pathReasonCounts[$reasonCode] = 0 }
                 $pathReasonCounts[$reasonCode]++
-                # A game whose native FFB was just switched off must not be left with no force feedback (same rule as a file collision below).
-                # It is counted once, as a failed preflight, and not also as a skip.
-                $nativeLost = [bool]($nativeSwitch -and $nativeEnabledSet.Contains($pf.BaseName))
                 if ($reasonCode -eq 'DEVICE_UNAVAILABLE') {
                     [void]$missingDeviceGames.Add($pf.BaseName)
                     if (-not $nativeLost) { $skippedMissingDevice++ }
@@ -31726,71 +32111,77 @@ function Invoke-FFBPluginSetup {
                 continue
             }
 
+            if ($c.Match.NoName) {
+                Write-Host ("    SKIP  {0}: the plugin supports this game, but TeknoParrot Manager does not know which file name the game loads, so nothing was placed." -f $gameLabel) -ForegroundColor Yellow
+                Write-Log "FFBPlugin: skipped $($pf.BaseName) -- no folder or no file-name table entry for '$($c.Match.Name)'"
+                if ($nativeLost) { $errors++ } else { $skippedNoName++ }
+                continue
+            }
+
             $exeDir = [string]$latestPathCheck.GameDirectory
             $destDll = [string]$c.Match.Dest
             $destPath = Join-Path $exeDir $destDll
+            $iniPath = Join-Path $exeDir 'FFBPlugin.ini'
+            $sdlPath = Join-Path $exeDir 'SDL2.dll'
             if (-not (Test-PathInside $destPath $exeDir) -or -not (Test-TpmNoReparsePath -Path $exeDir)) {
                 Write-Host ("    SKIP  {0}: the destination file is unsafe -- not deploying." -f $gameLabel) -ForegroundColor Red
                 Write-Log "FFBPlugin: SECURITY -- skipped $($pf.BaseName), unsafe destination $destPath"
                 $errors++
                 continue
             }
+            $pack = $staged[[string]$c.Match.Name]
             $arch = Get-ExeArchitecture -ExePath $c.GamePath
-            if ($arch -ne 'x86' -and $arch -ne 'x64') {
-                # A guessed 64-bit plugin in a 32-bit game never loads, and the run would still count it as installed.
-                Write-Host ("    SKIP  {0}: TeknoParrot Manager could not tell whether this game is 32-bit or 64-bit, so no plugin file was placed." -f $gameLabel) -ForegroundColor Yellow
-                Write-Log "FFBPlugin: skipped $($pf.BaseName) -- the game's 32-bit/64-bit type could not be read from $($c.GamePath)"
-                if ($nativeSwitch -and $nativeEnabledSet.Contains($pf.BaseName)) { $errors++ } else { $skippedDllMissing++ }
-                continue
-            }
-            $dllName = if ($arch -eq 'x86') { 'MAME32.dll' } else { 'MAME64.dll' }
-            $srcDll = [string]$download.Files[$dllName]
-            if ([string]::IsNullOrWhiteSpace($srcDll) -or -not (Test-Path -LiteralPath $srcDll -PathType Leaf)) {
-                Write-Host ("    SKIP  {0}: the verified {1}-bit plugin file is unavailable." -f $gameLabel,$(if($arch -eq 'x86'){'32'}else{'64'})) -ForegroundColor Yellow
-                if ($nativeSwitch -and $nativeEnabledSet.Contains($pf.BaseName)) { $errors++ } else { $skippedDllMissing++ }
-                continue
-            }
-            # A hook that TeknoParrot Manager itself recorded (and that is unchanged) is replaced through the same recorded,
-            # backed-up removal as the native-FFB switch. Anything else in that spot is not ours and is never touched.
-            if (Test-Path -LiteralPath $destPath -PathType Leaf) {
-                $ownEntry = @($ownershipEntries | Where-Object { [string]$_.Destination -ieq $destPath -and -not [string]::IsNullOrWhiteSpace([string]$_.ProfileCode) } | Select-Object -First 1)
-                if ($ownEntry.Count -eq 1) {
-                    [void](Remove-FFBPluginOwnedDeployment -CacheDir $CacheDir -ProfileCode ([string]$ownEntry[0].ProfileCode) -ProtectedRoots $ProtectedRoots)
-                    foreach ($removedItem in @($script:FFBOwnedRemovalRecords)) { [void]$nativeRemovedThisRun.Add($removedItem) }
-                    $plannedDestinations = @($deploymentPlans | ForEach-Object { [string]$_.Destination })
-                    $ownershipEntries = @(@(Read-FFBPluginOwnership -CacheDir $CacheDir) | Where-Object { $plannedDestinations -inotcontains [string]$_.Destination }) + @($deploymentPlans.ToArray())
-                }
-            }
-            if (Test-Path -LiteralPath $destPath -PathType Leaf) {
-                Write-Host ("    SKIP  {0}: an existing file was found, so it was not overwritten." -f $gameLabel) -ForegroundColor Yellow
-                Write-Log "FFBPlugin: skipped $($pf.BaseName) -- $destDll already occupied at $destPath"
-                # A game whose native FFB was just switched off must not be left with no force feedback: count it as a failed preflight,
-                # which restores native FFB for the switched profiles and installs nothing.
-                if ($nativeSwitch -and $nativeEnabledSet.Contains($pf.BaseName)) { $errors++ } else { $skippedCollision++ }
+            $pluginArch = Get-ExeArchitecture -ExePath ([string]$pack.Dll)
+            if (($arch -ne 'x86' -and $arch -ne 'x64') -or $pluginArch -ne $arch) {
+                # A plugin of the wrong size (or a game whose size is unknown) never loads, and the run would still count it as installed.
+                Write-Host ("    SKIP  {0}: TeknoParrot Manager could not confirm that the plugin file and this game are both 32-bit or both 64-bit, so no plugin file was placed." -f $gameLabel) -ForegroundColor Yellow
+                Write-Log "FFBPlugin: skipped $($pf.BaseName) -- game type '$arch' and plugin file type '$pluginArch' do not match or could not be read ($($c.GamePath))"
+                if ($nativeLost) { $errors++ } else { $skippedDllMissing++ }
                 continue
             }
 
-            $sourceHash = (Get-FileHash -LiteralPath $srcDll -Algorithm SHA256 -ErrorAction Stop).Hash
-            $sourceEvidence = @($download.Evidence | Where-Object { $_.FileName -eq $dllName }) | Select-Object -First 1
-            if (-not $sourceEvidence -or $sourceHash -ine [string]$sourceEvidence.Sha256) {
-                throw "FFBPlugin: staged $dllName hash no longer matches acquisition evidence."
+            $dllState = Get-FFBPluginDestinationState -Path $destPath -Entries $ownershipEntries -ProfileCode ([string]$pf.BaseName) -GameRoot $exeDir -OldHashes @(Get-FFBPluginOldDllHashes)
+            $iniState = Get-FFBPluginDestinationState -Path $iniPath -Entries $ownershipEntries
+            $sdlState = Get-FFBPluginDestinationState -Path $sdlPath -Entries $ownershipEntries
+            if ($dllState.State -in @('Foreign', 'OursChanged') -or $iniState.State -eq 'Foreign') {
+                $blockedName = if ($dllState.State -in @('Foreign', 'OursChanged')) { $destDll } else { 'FFBPlugin.ini' }
+                $blockedWhy = if ($dllState.State -eq 'OursChanged') { 'TeknoParrot Manager installed it earlier, but it was changed since, so it was left alone' } else { 'TeknoParrot Manager did not put it there, so it was left alone. If it is an old plugin file, back it up, delete it, then run force feedback again' }
+                Write-Host ("    SKIP  {0}: {1} is already in the game folder. {2}." -f $gameLabel, $blockedName, $blockedWhy) -ForegroundColor Yellow
+                Write-Log "FFBPlugin: skipped $($pf.BaseName) -- $blockedName already present at $exeDir (dll=$($dllState.State) ini=$($iniState.State))"
+                if ($nativeLost) { $errors++ } else { $skippedCollision++ }
+                continue
             }
-            $entry = [pscustomobject]@{
-                ProfileCode=$pf.BaseName
-                GameRoot=$exeDir
-                Destination=$destPath
-                SourcePath=$srcDll
-                SourceHash=$sourceHash
-                SourceSha256=$sourceHash
-                DeployedSha256=$sourceHash
-                SourceRevision=$source.Revision
-                SourceTrust=$source.Trust
-                GameLabel=$gameLabel
-                CreatedUtc=(Get-Date).ToUniversalTime().ToString('o')
+
+            # With no wheel picked this time, a wheel that an earlier run wrote into our own unchanged settings file is kept.
+            $iniSource = [string]$pack.Ini
+            if ([string]::IsNullOrWhiteSpace($DeviceGuid) -and $iniState.State -eq 'Ours') {
+                $oldWheel = Get-FFBPluginIniDevice -Path $iniPath
+                if ($oldWheel) {
+                    $iniSource = Join-Path $stageDir ('ini-{0}.ini' -f [guid]::NewGuid().ToString('N'))
+                    Copy-Item -LiteralPath ([string]$pack.Ini) -Destination $iniSource -ErrorAction Stop
+                    [void](Set-FFBPluginIniDevice -Path $iniSource -DeviceGuid $oldWheel)
+                }
             }
-            $ownershipEntries = @($ownershipEntries | Where-Object { $_.Destination -ine $destPath })
-            $ownershipEntries += $entry
-            [void]$deploymentPlans.Add($entry)
+            $wanted = @(
+                [pscustomobject]@{ Kind = 'Dll'; Dest = $destPath; Src = [string]$pack.Dll; State = $dllState; Action = ''; Hash = '' }
+                [pscustomobject]@{ Kind = 'Ini'; Dest = $iniPath; Src = $iniSource; State = $iniState; Action = ''; Hash = '' }
+            )
+            if ($pack.Sdl2) { $wanted += [pscustomobject]@{ Kind = 'Sdl2'; Dest = $sdlPath; Src = [string]$pack.Sdl2; State = $sdlState; Action = ''; Hash = '' } }
+            foreach ($wantedFile in $wanted) {
+                $wantedFile.Hash = (Get-FileHash -LiteralPath $wantedFile.Src -Algorithm SHA256 -ErrorAction Stop).Hash
+                $wantedFile.Action = switch ($wantedFile.State.State) {
+                    'Missing' { 'Add' }
+                    'Ours' { if ($wantedFile.State.Hash -ieq $wantedFile.Hash) { 'Keep' } else { 'Replace' } }
+                    'OursChanged' { if ($wantedFile.Kind -eq 'Ini') { 'Ask' } else { 'Leave' } }
+                    default { 'Leave' }
+                }
+            }
+            $askFile = @($wanted | Where-Object { $_.Action -eq 'Ask' } | Select-Object -First 1)
+            $ownerCodes = @($wanted | Where-Object { $_.State.Entry } | ForEach-Object { [string]$_.State.Entry.ProfileCode } | Sort-Object -Unique)
+            [void]$gamePlans.Add([pscustomobject]@{
+                Mode = 'Deploy'; Profile = $pf; Label = $gameLabel; ExeDir = $exeDir; Files = $wanted; OwnerCodes = $ownerCodes
+                ReplaceChanged = @(); NeedsRemoval = $false; Recognized = [bool]$dllState.Recognized; AskIni = $(if ($askFile.Count -eq 1) { $askFile[0] } else { $null })
+            })
         } catch {
             Write-Host ("    ERROR {0} -- {1}" -f $gameLabel,$_) -ForegroundColor Red
             Write-Log "FFBPlugin: preflight error on $($pf.BaseName) -- $_"
@@ -31799,6 +32190,148 @@ function Invoke-FFBPluginSetup {
     }
     if ($candidates.Count -gt 0) {
         Write-TpmCompactExtractionProgress -Phase Checking -Label 'FFB plugin deployment planning' -Current $planningCurrent -Total $candidates.Count -StartedAt $planningStarted -Complete
+    }
+
+    # A settings file the user changed is never overwritten unless they say so for that file. Default: keep theirs.
+    foreach ($plan in @($gamePlans | Where-Object { $_.Mode -eq 'Deploy' })) {
+        if ($plan.AskIni) {
+            $askedFile = $plan.AskIni
+            Write-Host ""
+            Write-Host ("  The settings file for {0} (FFBPlugin.ini) was changed after TeknoParrot Manager installed it." -f $plan.Label) -ForegroundColor Yellow
+            Write-Host "  Keep your version, or replace it with the new one? Your old file is backed up if you replace it." -ForegroundColor White
+            $showDiff = { Show-FFBPluginIniDifferences -YourPath $askedFile.Dest -NewPath $askedFile.Src }
+            $replaceIt = Read-TpmYesNo -Prompt '  Replace your file with the new one? Choose Y or N (D shows the differences)' -Default 'N' -DetailsAction $showDiff
+            if ($replaceIt -eq 'Y') { $askedFile.Action = 'Replace'; $plan.ReplaceChanged = @([string]$askedFile.Dest) } else { $askedFile.Action = 'Leave' }
+        }
+        # Our own files are replaced as one group per game (one backup-and-remove), so unchanged ones that already match are re-placed too.
+        if (@($plan.Files | Where-Object { $_.Action -eq 'Replace' }).Count -gt 0) {
+            foreach ($keepFile in @($plan.Files | Where-Object { $_.Action -eq 'Keep' })) { $keepFile.Action = 'Replace' }
+            $plan.NeedsRemoval = $true
+        }
+        if (@($plan.Files | Where-Object { $_.Action -in @('Add', 'Replace') }).Count -eq 0) {
+            $plan.Mode = 'Current'
+            $skippedCurrent++
+        }
+    }
+
+    $deployPlans = @($gamePlans | Where-Object { $_.Mode -eq 'Deploy' })
+    $nativeCleanup = @($gamePlans | Where-Object { $_.Mode -eq 'Native' } | Where-Object { $code = [string]$_.Profile.BaseName; @($ownershipEntries | Where-Object { [string]$_.ProfileCode -eq $code }).Count -gt 0 })
+    if ($deployPlans.Count -gt 0 -or $switchWanted -or $nativeCleanup.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  Here is what will happen:" -ForegroundColor Cyan
+        Write-Host ("    Plugin version: {0}" -f $source.Revision) -ForegroundColor White
+        Write-Host ("    Wheel: {0}" -f $(if ([string]::IsNullOrWhiteSpace($DeviceGuid)) { 'not set now (settings files keep the wheel blank, or as it was)' } else { 'set in each settings file' })) -ForegroundColor White
+        foreach ($plan in $deployPlans) {
+            Write-Host ("    {0}: {1}" -f $(if ($plan.NeedsRemoval) { 'Update ' } else { 'Install' }), $plan.Label) -ForegroundColor White
+            if ($plan.Recognized) { Write-Host '             The old plugin file in this game was recognized. It will be backed up and replaced.' -ForegroundColor White }
+        }
+        if ($switchWanted) { Write-Host ("    Switch off native FFB Blaster for {0} game(s) that use the plugin instead" -f $overlaps.Count) -ForegroundColor White }
+        if ($nativeCleanup.Count -gt 0) { Write-Host ("    Remove old plugin files TeknoParrot Manager added to {0} game(s) that keep native FFB Blaster" -f $nativeCleanup.Count) -ForegroundColor White }
+        Write-Host "  Every file that gets replaced is backed up first. Nothing has been changed yet." -ForegroundColor DarkGray
+        $go = Read-TpmYesNo -Prompt '  Go ahead? Choose Y or N' -Default 'Y'
+        if ($go -ne 'Y') {
+            Write-Host "  Nothing was changed." -ForegroundColor Green
+            Write-Log 'FFBPlugin setup: the user chose not to apply the plan; nothing was changed.'
+            return [pscustomobject]@{
+                Reason = 'USER_DECLINED'; Succeeded = $true; NoOp = $true; Declined = $true; Deployed = 0; Errors = 0
+                MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @(); SourceFolderGames = @()
+                PathReasonCounts = $pathReasonCounts; SkippedNoMatch = 0; SkippedDllMissing = 0; SkippedNative = 0; SkippedCollision = 0
+                SkippedCurrent = 0; SkippedNoName = 0; Accounted = 0; Eligible = $candidates.Count; AccountingComplete = $true
+                SourceRevision = $source.Revision; SourceTrust = $source.Trust; SourceEvidence = @($download.Evidence); EvidencePath = $EvidencePath
+                PreflightEvidenceWritten = $preflightEvidenceWritten; RollbackSucceeded = $null; RollbackErrors = @(); TransactionResult = $null
+            }
+        }
+    }
+
+    if ($switchWanted) {
+        Write-Host "  Disabling native FFB Blaster on the overlapping profiles before plugin deployment..." -ForegroundColor Yellow
+        $nativeSwitch = Disable-FFBBlasterForOverlap -UserProfilesDir $UserProfilesDir -TpRoot $TpRoot -ProfileCodes @($overlaps | ForEach-Object { $_.Profile.BaseName })
+        if (-not $nativeSwitch.Succeeded) {
+            Write-Host ("  ERROR: Could not switch overlapping profiles to the optional plugin -- {0}" -f $nativeSwitch.Reason) -ForegroundColor Red
+            Write-Log "FFBPlugin: blocked because native overlap switch failed -- $($nativeSwitch.Reason)"
+            return [pscustomobject]@{
+                Succeeded = $false; Deployed = 0; Errors = 1
+                MissingPath = $missingPathGames.Count; MissingDevice = $missingDeviceGames.Count
+                MissingPathGames = $missingPathGames.ToArray(); MissingDeviceGames = $missingDeviceGames.ToArray()
+                PathReasonCounts = $pathReasonCounts; Accounted = 0; Eligible = $candidates.Count
+                AccountingComplete = $false; SourceRevision = $source.Revision; SourceTrust = $source.Trust
+                SourceEvidence = @($download.Evidence); EvidencePath = $EvidencePath
+                Reason = 'NATIVE_OVERLAP_SWITCH_FAILED'
+            }
+        }
+    }
+
+    # PASS 2: apply. Our own old files are backed up and removed first (recorded, so a failure can put them back), then every
+    # new file goes in through one transaction together with the ownership record.
+    $deploymentPlans = New-Object System.Collections.Generic.List[object]
+    foreach ($plan in $gamePlans) {
+        $pf = $plan.Profile
+        $gameLabel = $plan.Label
+        $nativeLost = [bool]($nativeSwitch -and $nativeEnabledSet.Contains($pf.BaseName))
+        try {
+            if ($plan.Mode -eq 'Native') {
+                [void](Remove-FFBPluginOwnedDeployment -CacheDir $CacheDir -ProfileCode $pf.BaseName -ProtectedRoots $ProtectedRoots)
+                foreach ($removedItem in @($script:FFBOwnedRemovalRecords)) { [void]$nativeRemovedThisRun.Add($removedItem) }
+                # The removal rewrote the manifest on disk; keep the entries already planned earlier in this run.
+                $plannedDestinations = @($deploymentPlans | ForEach-Object { [string]$_.Destination })
+                $ownershipEntries = @(@(Read-FFBPluginOwnership -CacheDir $CacheDir) | Where-Object { $plannedDestinations -inotcontains [string]$_.Destination }) + @($deploymentPlans.ToArray())
+                $skippedNative++
+                continue
+            }
+            if ($plan.Mode -ne 'Deploy') { continue }
+
+            if ($plan.Recognized) {
+                # The old file has no record. Its fingerprint proved it, so record it now; the removal below checks it again, backs it up and removes it.
+                $recognizedEntries = @($plan.Files | Where-Object { $_.State.Recognized } | ForEach-Object { $_.State.Entry })
+                $recognizedPaths = @($recognizedEntries | ForEach-Object { [string]$_.Destination })
+                Write-FFBPluginOwnership -CacheDir $CacheDir -Entries (@(@(Read-FFBPluginOwnership -CacheDir $CacheDir) | Where-Object { $recognizedPaths -inotcontains [string]$_.Destination }) + $recognizedEntries)
+                Write-Log "FFBPlugin: recognized the old plugin file in $($pf.BaseName) by its fingerprint."
+            }
+            if ($plan.NeedsRemoval) {
+                foreach ($ownerCode in @($plan.OwnerCodes)) {
+                    [void](Remove-FFBPluginOwnedDeployment -CacheDir $CacheDir -ProfileCode $ownerCode -ProtectedRoots $ProtectedRoots -ReplaceChanged $plan.ReplaceChanged)
+                    foreach ($removedItem in @($script:FFBOwnedRemovalRecords)) { [void]$nativeRemovedThisRun.Add($removedItem) }
+                }
+                $plannedDestinations = @($deploymentPlans | ForEach-Object { [string]$_.Destination })
+                $ownershipEntries = @(@(Read-FFBPluginOwnership -CacheDir $CacheDir) | Where-Object { $plannedDestinations -inotcontains [string]$_.Destination }) + @($deploymentPlans.ToArray())
+            }
+            $toPlace = @($plan.Files | Where-Object { $_.Action -in @('Add', 'Replace') })
+            $stillThere = @($toPlace | Where-Object { Test-Path -LiteralPath $_.Dest })
+            if ($stillThere.Count -gt 0) {
+                Write-Host ("    SKIP  {0}: an existing file was found, so it was not overwritten." -f $gameLabel) -ForegroundColor Yellow
+                Write-Log "FFBPlugin: skipped $($pf.BaseName) -- $([System.IO.Path]::GetFileName([string]$stillThere[0].Dest)) still occupied at $($plan.ExeDir)"
+                if ($nativeLost) { $errors++ } else { $skippedCollision++ }
+                continue
+            }
+            $newEntries = New-Object System.Collections.Generic.List[object]
+            foreach ($file in $toPlace) {
+                $sourceHash = (Get-FileHash -LiteralPath $file.Src -Algorithm SHA256 -ErrorAction Stop).Hash
+                if ($sourceHash -ine [string]$file.Hash) {
+                    throw "FFBPlugin: staged $($file.Kind) file hash no longer matches what was checked."
+                }
+                [void]$newEntries.Add([pscustomobject]@{
+                    ProfileCode=$pf.BaseName
+                    GameRoot=$plan.ExeDir
+                    Destination=$file.Dest
+                    SourcePath=$file.Src
+                    SourceHash=$sourceHash
+                    SourceSha256=$sourceHash
+                    DeployedSha256=$sourceHash
+                    SourceRevision=$source.Revision
+                    SourceTrust=$source.Trust
+                    Kind=$file.Kind
+                    GameLabel=$gameLabel
+                    CreatedUtc=(Get-Date).ToUniversalTime().ToString('o')
+                })
+            }
+            $newDestinations = @($newEntries | ForEach-Object { [string]$_.Destination })
+            $ownershipEntries = @(@($ownershipEntries | Where-Object { $newDestinations -inotcontains [string]$_.Destination }) + @($newEntries.ToArray()))
+            foreach ($entry in $newEntries) { [void]$deploymentPlans.Add($entry) }
+        } catch {
+            Write-Host ("    ERROR {0} -- {1}" -f $gameLabel,$_) -ForegroundColor Red
+            Write-Log "FFBPlugin: preflight error on $($pf.BaseName) -- $_"
+            $errors++
+        }
     }
     if ($errors -gt 0) {
         $transactionResult = New-TpmFileBatchResult `
@@ -31813,11 +32346,13 @@ function Invoke-FFBPluginSetup {
             -Deployments $deploymentPlans.ToArray() -CacheDir $CacheDir `
             -OwnershipEntries $ownershipEntries
     }
+    $deployed = 0
     if ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP')) {
-        foreach ($plan in $deploymentPlans) {
-            [void]$deployedThisRun.Add($plan)
-            Write-Host ("    OK    {0}  (optional plugin installed)" -f $(if($plan.GameLabel){$plan.GameLabel}else{$plan.ProfileCode})) -ForegroundColor Green
-            Write-Log "FFBPlugin: verified deployment of $([System.IO.Path]::GetFileName($plan.Destination)) to $($plan.GameRoot)"
+        foreach ($group in @($deploymentPlans | Group-Object -Property ProfileCode)) {
+            $first = $group.Group[0]
+            foreach ($member in $group.Group) { [void]$deployedThisRun.Add($member) }
+            Write-Host ("    OK    {0}  (optional plugin installed)" -f $(if($first.GameLabel){$first.GameLabel}else{$first.ProfileCode})) -ForegroundColor Green
+            Write-Log "FFBPlugin: verified deployment of $(@($group.Group | ForEach-Object { [System.IO.Path]::GetFileName($_.Destination) }) -join ', ') to $($first.GameRoot)"
             $deployed++
         }
     } else {
@@ -31839,12 +32374,14 @@ function Invoke-FFBPluginSetup {
 
     Write-Host ""
     Write-Host ("  Installed           : {0} game(s)" -f $deployed) -ForegroundColor Green
+    if ($skippedCurrent -gt 0) { Write-Host ("  Already up to date  : {0}" -f $skippedCurrent) -ForegroundColor DarkGray }
     if ($skippedNative -gt 0) { Write-Host ("  Kept native FFB     : {0}  (native FFB Blaster is preferred)" -f $skippedNative) -ForegroundColor DarkGray }
     if ($skippedCollision -gt 0) { Write-Host ("  Skipped (file exists): {0}  (the existing file was not overwritten)" -f $skippedCollision) -ForegroundColor Yellow }
     if ($skippedNoMatch -gt 0) { Write-Host ("  Skipped (not supported): {0}  (the optional plugin does not support these games)" -f $skippedNoMatch) -ForegroundColor DarkGray }
-    if ($skippedDllMissing -gt 0) { Write-Host ("  Skipped (plugin file unavailable or game type unreadable): {0}" -f $skippedDllMissing) -ForegroundColor Yellow }
+    if ($skippedNoName -gt 0) { Write-Host ("  Skipped (file name unknown): {0}  (the plugin supports these games, but the file name they load is not known)" -f $skippedNoName) -ForegroundColor Yellow }
+    if ($skippedDllMissing -gt 0) { Write-Host ("  Skipped (plugin file does not fit the game): {0}" -f $skippedDllMissing) -ForegroundColor Yellow }
     if ($skippedMissingPath -gt 0) {
-        Write-Host ("  Skipped (saved path): {0} game(s)  -- repair paths in 13) Library Health Check first" -f $skippedMissingPath) -ForegroundColor Yellow
+        Write-Host ("  Skipped (saved path): {0} game(s)  -- repair paths in 14) Library Health Check first" -f $skippedMissingPath) -ForegroundColor Yellow
         Write-Host ("    Affected games: {0}" -f ($missingPathGames -join ', ')) -ForegroundColor DarkGray
     }
     if ($skippedMissingDevice -gt 0) {
@@ -31854,7 +32391,7 @@ function Invoke-FFBPluginSetup {
     Write-TpmSourceFolderRefusal -Count $sourceFolderGames.Count
     if ($errors -gt 0) { Write-Host ("  Errors             : {0}  -- see TeknoParrot-Manager.log for details" -f $errors) -ForegroundColor Red }
 
-    $accounted = $skippedNative + $skippedCollision + $skippedNoMatch + $skippedDllMissing + $skippedMissingPath + $skippedMissingDevice + $sourceFolderGames.Count + $errors + $deployed
+    $accounted = $skippedNative + $skippedCollision + $skippedCurrent + $skippedNoName + $skippedNoMatch + $skippedDllMissing + $skippedMissingPath + $skippedMissingDevice + $sourceFolderGames.Count + $errors + $deployed
     $accountingComplete = ($accounted -eq $profiles.Count)
     $blockingSkips = $skippedDllMissing + $skippedMissingPath + $skippedMissingDevice + $sourceFolderGames.Count
     $succeeded = ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP') -and $errors -eq 0 -and $blockingSkips -eq 0 -and $accountingComplete)
@@ -31871,10 +32408,11 @@ function Invoke-FFBPluginSetup {
             SourceTrust = $source.Trust
             SourceFiles = @($download.Evidence)
             SelectedGames = @($profiles | ForEach-Object { $_.BaseName })
+            WheelSelected = (-not [string]::IsNullOrWhiteSpace($DeviceGuid))
             OwnershipManifest = Get-FFBPluginOwnershipPath -CacheDir $CacheDir
             Result = [ordered]@{
-                Deployed = $deployed; SkippedNative = $skippedNative; SkippedCollision = $skippedCollision
-                SkippedNoMatch = $skippedNoMatch; SkippedDllMissing = $skippedDllMissing
+                Deployed = $deployed; SkippedNative = $skippedNative; SkippedCollision = $skippedCollision; SkippedCurrent = $skippedCurrent
+                SkippedNoMatch = $skippedNoMatch; SkippedNoName = $skippedNoName; SkippedDllMissing = $skippedDllMissing
                 SkippedMissingPath = $skippedMissingPath; SkippedMissingDevice = $skippedMissingDevice; SkippedSourceFolder = $sourceFolderGames.Count
                 Errors = $errors; Accounted = $accounted; Selected = $profiles.Count
             }
@@ -31901,7 +32439,7 @@ function Invoke-FFBPluginSetup {
     Write-Host ""
     Write-Host "  TeknoParrot Manager only removes optional plugin files that it recorded as its own." -ForegroundColor DarkCyan
     Write-Log 'FFBPlugin setup: technical ownership rule -- unowned FFB files are never removed automatically.'
-    Write-Log ("FFBPlugin setup: deployed={0} skippedNative={1} skippedCollision={2} skippedNoMatch={3} skippedDllMissing={4} skippedMissingPath={5} skippedMissingDevice={6} errors={7} accounted={8}/{9} sourceRevision={10}" -f $deployed, $skippedNative, $skippedCollision, $skippedNoMatch, $skippedDllMissing, $skippedMissingPath, $skippedMissingDevice, $errors, $accounted, $profiles.Count, $source.Revision)
+    Write-Log ("FFBPlugin setup: deployed={0} skippedNative={1} skippedCollision={2} skippedCurrent={3} skippedNoMatch={4} skippedNoName={5} skippedDllMissing={6} skippedMissingPath={7} skippedMissingDevice={8} errors={9} accounted={10}/{11} release={12}" -f $deployed, $skippedNative, $skippedCollision, $skippedCurrent, $skippedNoMatch, $skippedNoName, $skippedDllMissing, $skippedMissingPath, $skippedMissingDevice, $errors, $accounted, $profiles.Count, $source.Revision)
     return [pscustomobject]@{
         Reason = $reason
         Succeeded = $succeeded
@@ -31915,9 +32453,11 @@ function Invoke-FFBPluginSetup {
         SourceFolderGames = $sourceFolderGames.ToArray()
         PathReasonCounts = $pathReasonCounts
         SkippedNoMatch = $skippedNoMatch
+        SkippedNoName = $skippedNoName
         SkippedDllMissing = $skippedDllMissing
         SkippedNative = $skippedNative
         SkippedCollision = $skippedCollision
+        SkippedCurrent = $skippedCurrent
         Accounted = $accounted
         Eligible = $candidates.Count
         AccountingComplete = $accountingComplete
@@ -31931,10 +32471,14 @@ function Invoke-FFBPluginSetup {
         TransactionResult = $transactionResult
     }
     } finally {
-        foreach ($stagedFile in @($download.Files.Values)) {
-            if ([System.IO.Path]::GetFileName([string]$stagedFile) -notmatch '^TPM-FFB-source-[0-9a-f]{32}-MAME(32|64)\.dll$') { continue }
-            try { if (Test-Path -LiteralPath $stagedFile -PathType Leaf) { Remove-Item -LiteralPath $stagedFile -Force -ErrorAction Stop } }
-            catch { Write-Log "FFBPlugin: staged source cleanup failed -- $stagedFile -- $_" }
+        if ($stageDir -and (Test-Path -LiteralPath $stageDir -PathType Container)) {
+            try { Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction Stop }
+            catch { Write-Log "FFBPlugin: staging folder cleanup failed -- $stageDir -- $_" }
+        }
+        # A new download that could not be kept as the saved copy (or was refused) is not left behind.
+        if ($download -and $download.Staged -and $download.ZipPath -and (Test-Path -LiteralPath ([string]$download.ZipPath) -PathType Leaf)) {
+            try { Remove-Item -LiteralPath ([string]$download.ZipPath) -Force -ErrorAction Stop }
+            catch { Write-Log "FFBPlugin: staged download cleanup failed -- $($download.ZipPath) -- $_" }
         }
     }
 
@@ -32563,13 +33107,15 @@ function Get-TpmFfbSetupEndingView {
     }
     if (-not $PluginChosen) {
         [void]$done.Add('The free FFB plugin was skipped.')
+    } elseif ($null -ne $Plugin -and [bool](Get-TpmTransactionField -Object $Plugin -Name 'Declined' -Default $false)) {
+        [void]$done.Add('You chose not to change any game, so the free FFB plugin was not installed.')
     } elseif ($null -ne $Plugin -and [int](Get-TpmTransactionField -Object $Plugin -Name 'Deployed' -Default 0) -gt 0) {
         $anySet = $true
         $pluginCount = [int]$Plugin.Deployed
         [void]$done.Add(('The free FFB plugin was added for {0}.' -f (Format-TpmGameCount -Count $pluginCount)))
         $pluginLines = @(('Games where the plugin was added: {0}' -f $pluginCount))
         $pluginRevision = [string](Get-TpmTransactionField -Object $Plugin -Name 'SourceRevision' -Default '')
-        if ($pluginRevision) { $pluginLines += ('Plugin source revision: ' + $pluginRevision) }
+        if ($pluginRevision) { $pluginLines += ('Plugin version: ' + $pluginRevision) }
         $pluginEvidence = [string](Get-TpmTransactionField -Object $Plugin -Name 'EvidencePath' -Default '')
         if ($pluginEvidence) { $pluginLines += ('Evidence file: ' + $pluginEvidence) }
         [void]$blocks.Add(@{ Heading = 'Free FFB plugin'; Lines = $pluginLines })
@@ -33280,7 +33826,7 @@ function Get-TpmBepInExFailureView {
     $next = 'Press D to see why, or R to try again.'
     if ($rollbackIssue) { $next = 'Do not try again yet. Press D for details, or O for help.' }
     elseif ($pathIssue) { $next = 'Press H to fix the saved game paths, then press R to try again.' }
-    elseif ($driveIssue) { $next = 'Plug in the drive for the game, then press R to try again. Or choose 13 (Library health check) in the main menu to repair these games.' }
+    elseif ($driveIssue) { $next = 'Plug in the drive for the game, then press R to try again. Or choose 14 (Library health check) in the main menu to repair these games.' }
     elseif ($counts.ContainsKey('SOURCE_COLLECTION')) { $next = 'Move the game out of your source folder, or fix the game folder in its profile. Then run BepInEx setup again.' }
     $view = @{
         Title = 'BepInEx could not finish for every game.'
@@ -34278,7 +34824,7 @@ function Invoke-BepInExUpdateCheckLegacy {
                     ReasonKey = $reasonCode
                     Exception = [string]$pathCheck.Reason
                     EvidencePreserved = $false
-                    NextAction = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run BepInEx setup again.' } elseif ($reasonCode -eq 'SOURCE_COLLECTION') { 'Move the game out of your source folder, or fix the game folder in its profile.' } else { 'Return to the main menu and choose 13) Library Health Check to repair saved game paths.' }
+                    NextAction = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run BepInEx setup again.' } elseif ($reasonCode -eq 'SOURCE_COLLECTION') { 'Move the game out of your source folder, or fix the game folder in its profile.' } else { 'Return to the main menu and choose 14) Library Health Check to repair saved game paths.' }
                 })
                 Write-Log ("BepInEx: skipped {0} during path preflight; reason={1}; detail={2}" -f $pf.BaseName, $reasonCode, $pathCheck.Reason)
                 continue
@@ -35164,14 +35710,14 @@ function New-ManagerUpdateBackup {
     $repoRoot   = Split-Path -Parent $Path
     $backupRoot = Join-Path $repoRoot "UpdateBackups"
     $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss", [System.Globalization.CultureInfo]::InvariantCulture)
-    Assert-TpmNoReparseWriteTarget -Path $backupRoot -Operation 'Manager update backup root'
+    Assert-TpmNoReparseWriteTarget -Path $backupRoot -Operation 'TeknoParrot Manager update backup root'
     [void][System.IO.Directory]::CreateDirectory($backupRoot)
     $backupDir = $null
     for ($attempt = 1; $attempt -le 100 -and -not $backupDir; $attempt++) {
         $folderName = "TeknoParrotManager_" + $timestamp
         if ($attempt -gt 1) { $folderName += "_" + $attempt }
         $candidate = Join-Path $backupRoot $folderName
-        Assert-TpmNoReparseWriteTarget -Path $candidate -Operation 'Manager update backup'
+        Assert-TpmNoReparseWriteTarget -Path $candidate -Operation 'TeknoParrot Manager update backup'
         # An existing folder belongs to an earlier backup: never reuse it.
         if (Test-Path -LiteralPath $candidate) { continue }
         try {
@@ -35189,7 +35735,7 @@ function New-ManagerUpdateBackup {
         throw "Backup folder names for $timestamp are all in use under $backupRoot; refusing to reuse one."
     }
     $backupPath = Join-Path $backupDir (Split-Path -Leaf $Path)
-    Assert-TpmNoReparseWriteTarget -Path $backupPath -Operation 'Manager update backup copy'
+    Assert-TpmNoReparseWriteTarget -Path $backupPath -Operation 'TeknoParrot Manager update backup copy'
     # overwrite = $false: an existing file at the destination is a collision.
     [System.IO.File]::Copy($Path, $backupPath, $false)
 
@@ -35426,7 +35972,7 @@ function Write-TpmInterruptedUpdateNotice {
     Write-Host '  An earlier update of TeknoParrot Manager did not finish.' -ForegroundColor Yellow
     if (-not $newestPath) {
         Write-Host '  It stopped before it changed any program file, so your files are all from one version.' -ForegroundColor Yellow
-        Write-Host '  You can keep using the program, or run the update again: choose 15 (Check for Updates).' -ForegroundColor Cyan
+        Write-Host '  You can keep using the program, or run the update again: choose 16 (Check for Updates).' -ForegroundColor Cyan
         Write-Host ('  TeknoParrot Manager keeps the folder {0} on purpose. You can delete that folder yourself. This notice then stops.' -f (Split-Path -Leaf $folders[0])) -ForegroundColor DarkGray
         return
     }
@@ -35436,7 +35982,7 @@ function Write-TpmInterruptedUpdateNotice {
     Write-Host '  program, open the newest TeknoParrotManager_ folder, and copy its files' -ForegroundColor Cyan
     Write-Host '  back over the program folder (same folder names).' -ForegroundColor Cyan
     if ($newestPath) { Write-Host ('  Newest backup: {0}' -f $newestPath) -ForegroundColor DarkGray }
-    Write-Host '  Or run the update again: choose 15 (Check for Updates).' -ForegroundColor Cyan
+    Write-Host '  Or run the update again: choose 16 (Check for Updates).' -ForegroundColor Cyan
     Write-Host ('  TeknoParrot Manager keeps the folder {0} on purpose and never deletes it: it can hold your old files.' -f (Split-Path -Leaf $folders[0])) -ForegroundColor DarkGray
     Write-Host '  After you have put the old files back (or are sure you do not need them),' -ForegroundColor DarkGray
     Write-Host '  you can delete that folder yourself. This notice then stops.' -ForegroundColor DarkGray
@@ -35746,7 +36292,7 @@ function Invoke-ManagerUpdateInstall {
             foreach ($changed in @($plan.Install | Where-Object { $_.Kind -eq 'Changed' -and $_.Path -ine 'TeknoParrot-Manager.ps1' })) {
                 $installedFile = Join-Path $programDir $changed.Path
                 $backupFile = Join-Path $backupDir $changed.Path
-                Assert-TpmNoReparseWriteTarget -Path $backupFile -Operation 'Manager update backup copy'
+                Assert-TpmNoReparseWriteTarget -Path $backupFile -Operation 'TeknoParrot Manager update backup copy'
                 [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($backupFile))
                 [System.IO.File]::Copy($installedFile, $backupFile, $false)
                 if ((Get-FileHash -LiteralPath $backupFile -Algorithm SHA256 -ErrorAction Stop).Hash -ine $changed.OldHash) {
@@ -35978,7 +36524,7 @@ function Invoke-ManagerUpdateInstall {
         # Cleanup could not be completed, so the result cannot be SUCCEEDED; ProductState stays INTENDED because the new file is installed, and callers restart on that.
         $outcome = 'ACTION_REQUIRED'
         $summary = 'The update was installed and verified, but TeknoParrot Manager could not complete all cleanup checks. Restart TeknoParrot Manager to run the new version.'
-        [void]$warnings.Add('Manager update cleanup or file-protection restoration requires attention.')
+        [void]$warnings.Add('TeknoParrot Manager update cleanup or file-protection restoration requires attention.')
     }
     $technical = [pscustomobject]@{
         ReleaseTag = [string]$Release.TagName
@@ -39172,7 +39718,7 @@ function Invoke-LibraryHealthCheck {
     $postgresSharedDatabases = New-Object System.Collections.Generic.List[string]
     foreach ($sharedGroup in @($postgresDbUsers | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.DbName) } | Group-Object -Property Key | Where-Object { $_.Count -gt 1 })) {
         [void]$postgresSharedDatabases.Add(('{0} use the same database, {1}' -f (@($sharedGroup.Group | ForEach-Object { [string]$_.Label }) -join ' and '), [string]$sharedGroup.Group[0].DbName))
-        Write-Log ('HealthCheck: {0} use the same database {1}; Postgres setup (menu 11) gives each its own.' -f (@($sharedGroup.Group | ForEach-Object { [string]$_.Label }) -join ' and '), [string]$sharedGroup.Group[0].DbName)
+        Write-Log ('HealthCheck: {0} use the same database {1}; Postgres setup (menu 12) gives each its own.' -f (@($sharedGroup.Group | ForEach-Object { [string]$_.Label }) -join ' and '), [string]$sharedGroup.Group[0].DbName)
     }
     # Database problems the check found are findings of a check that finished (exit 0); only a check that could not look at everything is incomplete.
     $healthOutcome = if ($discoveryFailed -or -not $optionalCoverageComplete -or -not $postgresInventoryComplete -or $postgresServiceUnverified -or $postgresDatabaseSkipped.Count -gt 0 -or $postgresDatabaseCheck -eq 'SkippedNoClient' -or $prerequisiteCheckFailed -or $gameTypeFailed -or [string]::IsNullOrWhiteSpace([string]$detected.Vendor)) { 'ACTION_REQUIRED' } else { 'SUCCEEDED' }
@@ -39316,7 +39862,7 @@ function Get-TpmLibraryHealthRows {
     }
     $bepNeeded = @(Get-TpmTransactionField -Object $Result -Name 'BepInExNeeded' -Default @())
     if (-not $unavailable -and $bepNeeded.Count -gt 0) {
-        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'BepInEx' -Text ('Needs attention - {0} {1} BepInEx and {2} no BepInEx set up. Run BepInEx setup (menu 9)' -f (Format-TpmGameCount -Count $bepNeeded.Count), $(if ($bepNeeded.Count -eq 1) { 'needs' } else { 'need' }), $(if ($bepNeeded.Count -eq 1) { 'has' } else { 'have' })) -Color 'Yellow'))
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'BepInEx' -Text ('Needs attention - {0} {1} BepInEx and {2} no BepInEx set up. Run BepInEx setup (menu 10)' -f (Format-TpmGameCount -Count $bepNeeded.Count), $(if ($bepNeeded.Count -eq 1) { 'needs' } else { 'need' }), $(if ($bepNeeded.Count -eq 1) { 'has' } else { 'have' })) -Color 'Yellow'))
     }
     $postgresRow = Get-TpmLibraryHealthPostgresRow -Result $Result
     if ($null -ne $postgresRow) { [void]$rows.Add($postgresRow) }
@@ -39375,17 +39921,17 @@ function Get-TpmLibraryHealthPostgresRow {
     }
     if (@(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseProblems' -Default @()).Count -gt 0) {
         $problemCount = @($Result.PostgresDatabaseProblems).Count
-        return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text ('Problem - {0} {1} database that is not ready. Run Postgres setup (menu 11)' -f (Format-TpmGameCount -Count $problemCount), $(if ($problemCount -eq 1) { 'has a' } else { 'have a' })) -Color 'Yellow')
+        return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text ('Problem - {0} {1} database that is not ready. Run Postgres setup (menu 12)' -f (Format-TpmGameCount -Count $problemCount), $(if ($problemCount -eq 1) { 'has a' } else { 'have a' })) -Color 'Yellow')
     }
     if (@(Get-TpmTransactionField -Object $Result -Name 'PostgresSharedDatabases' -Default @()).Count -gt 0) {
-        return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - some games use the same database. Run Postgres setup (menu 11)' -Color 'Yellow')
+        return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - some games use the same database. Run Postgres setup (menu 12)' -Color 'Yellow')
     }
     if ($configured -le 0) { return $null }
     if ([bool](Get-TpmTransactionField -Object $Result -Name 'PostgresServiceUnverified' -Default $false)) { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Could not check' -Color 'Yellow') }
     if ($Result.PostgresServiceExists -eq $false) { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - PostgreSQL is not installed' -Color 'Yellow') }
     if ([string]$Result.PostgresServiceStatus -eq 'Stopped') { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - PostgreSQL is stopped' -Color 'Yellow') }
     if (@(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseNotChecked' -Default @()).Count -gt 0) { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - some game databases could not be checked because they point at another computer' -Color 'Yellow') }
-    if ([string](Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseCheck' -Default '') -eq 'SkippedNoClient') { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - the game databases could not be checked because psql.exe was not found. Run Postgres setup (menu 11)' -Color 'Yellow') }
+    if ([string](Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseCheck' -Default '') -eq 'SkippedNoClient') { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'Needs attention - the game databases could not be checked because psql.exe was not found. Run Postgres setup (menu 12)' -Color 'Yellow') }
     if (@(Get-TpmTransactionField -Object $Result -Name 'PostgresAwaitingFirstStart' -Default @()).Count -gt 0) { return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'OK - profile ready; a game database is created the first time the game starts' -Color 'Green') }
     return (New-TpmLibraryHealthRow -Area 'PostgreSQL' -Text 'OK' -Color 'Green')
 }
@@ -39521,11 +40067,11 @@ function Get-TpmLibraryHealthDetailBlocks {
             elseif ($databaseCheck -eq 'Done' -and $databaseProblems.Count -eq 0) { [void]$lines.Add('Database check: the databases that could be checked are there, open with the game''s own settings and have tables.') }
             elseif ($databaseCheck -eq 'Done') {
                 foreach ($databaseProblem in $databaseProblems) { [void]$lines.Add(('Problem - {0}' -f $databaseProblem)) }
-                [void]$lines.Add('Postgres setup (menu 11) creates and checks these databases. This scan only looked and changed nothing.')
+                [void]$lines.Add('Postgres setup (menu 12) creates and checks these databases. This scan only looked and changed nothing.')
             }
-            elseif ($databaseCheck -eq 'SkippedNotInstalled') { [void]$lines.Add('Database check: skipped, because PostgreSQL is not installed. Run Postgres setup (menu 11).') }
+            elseif ($databaseCheck -eq 'SkippedNotInstalled') { [void]$lines.Add('Database check: skipped, because PostgreSQL is not installed. Run Postgres setup (menu 12).') }
             elseif ($databaseCheck -eq 'SkippedNotRunning') { [void]$lines.Add('Database check: skipped, because PostgreSQL is not running.') }
-            elseif ($databaseCheck -eq 'SkippedNoClient') { [void]$lines.Add('Database check: skipped, because the PostgreSQL client (psql.exe) was not found. Run Postgres setup (menu 11).') }
+            elseif ($databaseCheck -eq 'SkippedNoClient') { [void]$lines.Add('Database check: skipped, because the PostgreSQL client (psql.exe) was not found. Run Postgres setup (menu 12).') }
             if ($databaseSkipped.Count -gt 0) { [void]$lines.Add(('Not checked here: {0} (their profile points at another computer).' -f (Format-TpmNameList -Names $databaseSkipped -Max 1000))) }
         } else {
             [void]$lines.Add('No PostgreSQL database profiles were found.')
@@ -39533,7 +40079,7 @@ function Get-TpmLibraryHealthDetailBlocks {
         if ($autoCreate.Count -gt 0) {
             [void]$lines.Add(('Games with no starting database file: {0}' -f (Format-TpmNameList -Names $autoCreate -Max 1000)))
             if ($awaitingFirstStart.Count -gt 0) { [void]$lines.Add(('Profile ready; the database is created the first time the game starts: {0}' -f (Format-TpmNameList -Names $awaitingFirstStart -Max 1000))) }
-            [void]$lines.Add('These games make their own database (TeknoParrot''s "Automatically create Database" option). Nothing is wrong and nothing needs to be done. If you put the game''s pg_backup folder back, PostgreSQL setup (menu 11) can make it now.')
+            [void]$lines.Add('These games make their own database (TeknoParrot''s "Automatically create Database" option). Nothing is wrong and nothing needs to be done. If you put the game''s pg_backup folder back, PostgreSQL setup (menu 12) can make it now.')
         }
     } else {
         [void]$lines.Add('Setup needs: Not reported - the game check was incomplete, so setup needs and filled-in counts are withheld.')
@@ -39545,7 +40091,7 @@ function Get-TpmLibraryHealthDetailBlocks {
     }
     foreach ($sharedText in @(Get-TpmTransactionField -Object $Result -Name 'PostgresSharedDatabases' -Default @())) {
         [void]$lines.Add(('Problem - {0}. Two games keep their saved progress in the same tables, so one database cannot hold both.' -f $sharedText))
-        [void]$lines.Add('Postgres setup (menu 11) gives each game its own database. It deletes nothing and keeps both sets of progress.')
+        [void]$lines.Add('Postgres setup (menu 12) gives each game its own database. It deletes nothing and keeps both sets of progress.')
     }
     [void]$blocks.Add(@{ Heading = 'PostgreSQL'; Lines = $lines.ToArray() })
 
@@ -39680,7 +40226,7 @@ function Write-TpmLibraryHealthActionMenu {
         if ($databaseProblemNames.Count -gt 0 -and @($Result.PostgresNeeded).Count -eq 0) {
             Write-Host ''
             Write-TpmText -Text ('{0} {1} a database that is not ready: {2}.' -f (Format-TpmGameCount -Count $databaseProblemNames.Count), $(if ($databaseProblemNames.Count -eq 1) { 'has' } else { 'have' }), (Format-TpmNameList -Names $databaseProblemNames -Max 5)) -Color Yellow
-            Write-TpmText -Text 'Postgres setup (menu 11) creates and checks it.' -Color DarkGray
+            Write-TpmText -Text 'Postgres setup (menu 12) creates and checks it.' -Color DarkGray
             Write-TpmText -Text '[P] Set up PostgreSQL for these games' -Color White -HangingIndent 4
         }
         $postgresCount = @($Result.PostgresNeeded).Count
@@ -39708,11 +40254,11 @@ function Write-TpmLibraryHealthActionMenu {
         $dgText = if ($dgCount -gt 0) { ' ({0} still {1} it)' -f (Format-TpmGameCount -Count $dgCount), $(if ($dgCount -eq 1) { 'needs' } else { 'need' }) } else { '' }
         $gpuText = if ($gpuCount -gt 0) { ' ({0} still {1} it)' -f (Format-TpmGameCount -Count $gpuCount), $(if ($gpuCount -eq 1) { 'needs' } else { 'need' }) } else { '' }
         Write-Host ''
-        Write-TpmText -Text ('[5] ReShade{0}' -f $reShadeText) -Color White -HangingIndent 4
-        Write-TpmText -Text ('[6] dgVoodoo2{0}' -f $dgText) -Color White -HangingIndent 4
-        Write-TpmText -Text ('[7] GPU Fix{0}' -f $gpuText) -Color White -HangingIndent 4
-        Write-TpmText -Text '[8] Force Feedback' -Color White -HangingIndent 4
-        Write-TpmText -Text ('[9] BepInEx{0}' -f $bepInExText) -Color White -HangingIndent 4
+        Write-TpmText -Text ('[6] ReShade{0}' -f $reShadeText) -Color White -HangingIndent 4
+        Write-TpmText -Text ('[7] dgVoodoo2{0}' -f $dgText) -Color White -HangingIndent 4
+        Write-TpmText -Text ('[8] GPU Fix{0}' -f $gpuText) -Color White -HangingIndent 4
+        Write-TpmText -Text '[9] Force Feedback' -Color White -HangingIndent 4
+        Write-TpmText -Text ('[10] BepInEx{0}' -f $bepInExText) -Color White -HangingIndent 4
     }
     Write-Host ''
     Write-TpmText -Text '[D] Details' -Color White
@@ -39726,7 +40272,7 @@ function Show-LibraryHealthNextActions {
     $driveGames = @(Get-TpmTransactionField -Object $Result -Name 'DriveUnavailable' -Default @())
     # Games on a drive that is not connected can be pointed at a new folder with R or S (when no game needs a path first).
     $offerDriveRepair = ($Result.DiscoveryComplete -and -not $hasBroken -and $driveGames.Count -gt 0 -and @($Result.Empty).Count -eq 0)
-    $allowedChoices = if ($Result.DiscoveryComplete) { @('5', '6', '7', '8', '9', 'D', 'B') } else { @('D', 'B') }
+    $allowedChoices = if ($Result.DiscoveryComplete) { @('6', '7', '8', '9', '10', 'D', 'B') } else { @('D', 'B') }
     if ($Result.PostgresInventoryStatus -eq 'Complete' -and (@($Result.PostgresNeeded).Count -gt 0 -or @(Get-TpmTransactionField -Object $Result -Name 'PostgresDatabaseProblems' -Default @()).Count -gt 0)) { $allowedChoices += 'P' }
     if ($Result.DiscoveryComplete -and -not $hasBroken -and @(Get-TpmTransactionField -Object $Result -Name 'PrerequisiteMissing' -Default @()).Count -gt 0) { $allowedChoices += 'F' }
     if ($offerDriveRepair) { $allowedChoices += @('R', 'S') }
@@ -40416,6 +40962,7 @@ $EmulatorBiosRequirements = @{
     'TeknoCobra'   = @{ EmulatorFolders = @('TeknoCobra') }
     'TeknoCoJag'   = @{ EmulatorFolders = @('TeknoCoJag') }
     'TeknoCPS'     = @{ EmulatorFolders = @('TeknoCPS') }
+    'TeknoDOS'     = @{ }    # new DOS and Virtuality games: no emulator folder has been seen; not checked until there is evidence
     'TeknoEagle'   = @{ EmulatorFolders = @('TeknoEagle') }
     'TeknoFL'      = @{ EmulatorFolders = @('TeknoFL') }
     'TeknoG3D'     = @{ EmulatorFolders = @('TeknoG3D') }
@@ -43936,7 +44483,7 @@ function Get-TpmControlPropagationSummary {
     if (-not $DryRun -and $designSkipped.Count -gt 0) {
         # Name one real game per family to set up, so the user is not left guessing which game to open in TeknoParrotUI.
         $suggest = @($designSkipped | Where-Object { $_.Family -and $_.Code } | Sort-Object Family, Code | Group-Object Family | ForEach-Object { '{0}: {1}' -f $_.Name, $_.Group[0].Code })
-        if (-not $next) { $next = 'In TeknoParrotUI, set up the controls of one game of each type listed above{0}. Then run Propagate Controls (menu 3) again.' -f $(if ($suggest.Count -gt 0) { ' (for example ' + ($suggest -join '; ') + ')' } else { '' }) }
+        if (-not $next) { $next = 'In TeknoParrotUI, set up the controls of one game of each type listed above{0}. Then run Propagate Controls (menu 4) again.' -f $(if ($suggest.Count -gt 0) { ' (for example ' + ($suggest -join '; ') + ')' } else { '' }) }
     }
 
     $blocks = New-Object System.Collections.Generic.List[object]
@@ -43959,7 +44506,7 @@ function Get-TpmControlPropagationSummary {
         [void]$blocks.Add(@{ Heading = $row.Code; Lines = $lines.ToArray() })
     }
     if ($leftAlone.Count -gt 0) { [void]$blocks.Add(@{ Heading = ('Left as they are ({0})' -f $leftAlone.Count); Lines = $leftAlone.ToArray() }) }
-    if ($suggest.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'Games to set up first'; Lines = @(@($suggest | ForEach-Object { 'Set up one game in TeknoParrotUI: ' + $_ }) + @('Then run Propagate Controls (menu 3). The other games of that type get its controls.', 'Choosing a device in the binding plan does not set up a game.')) }) }
+    if ($suggest.Count -gt 0) { [void]$blocks.Add(@{ Heading = 'Games to set up first'; Lines = @(@($suggest | ForEach-Object { 'Set up one game in TeknoParrotUI: ' + $_ }) + @('Then run Propagate Controls (menu 4). The other games of that type get its controls.', 'Choosing a device in the binding plan does not set up a game.')) }) }
     [void]$blocks.Add(@{ Heading = 'Counts'; Lines = @(
         ('{0}: {1}' -f $(if ($DryRun) { 'Games with proposed control copies' } else { 'Games with controls copied' }), $copied.Count),
         ('{0}: {1}' -f $(if ($DryRun) { 'Proposed settings-only changes' } else { 'Settings carried only' }), $settingsOnly.Count),
@@ -47017,7 +47564,7 @@ function Get-TpmBackupFolderLine {
 
 # The one plain line at the end of a step that skipped games because their drive is not connected.
 function Get-TpmDriveSkipNext {
-    return 'Connect the drive, or choose 13 (Library health check) in the main menu to repair these games.'
+    return 'Connect the drive, or choose 14 (Library health check) in the main menu to repair these games.'
 }
 
 # Which games from a numbered list: typed numbers (1,3,6), ranges (1-8) or A for all of them. Returns the chosen 0-based row numbers, or
@@ -50585,7 +51132,7 @@ function Get-TpmSetupProblems {
             if ($null -eq $doc.GameProfile) { continue }
             $gamePath = (Get-XmlChildText $doc.GameProfile 'GamePath').Trim()
             if (-not $gamePath -or -not [System.IO.File]::Exists((ConvertTo-TpmAutoSyncLongPath -Path $gamePath))) {
-                & $add $file.BaseName 'The game file was not found. Run Library health check (menu 13) to repair its path.'
+                & $add $file.BaseName 'The game file was not found. Run Library health check (menu 14) to repair its path.'
             } elseif ((Get-XmlChildText $doc.GameProfile 'RequiresBepInEx').Trim() -ieq 'true' -and -not (Get-BepInExInstalledVersion -ExeDir ([System.IO.Path]::GetDirectoryName($gamePath)))) {
                 & $add $file.BaseName 'Needs BepInEx in the game folder. Use the BepInEx step in TeknoParrot Manager.'
             }
@@ -50594,7 +51141,7 @@ function Get-TpmSetupProblems {
     if ($TpRoot -and @($ProfileFiles).Count -gt 0) {
         try {
             foreach ($entry in @(Get-TpmMissingPrerequisites -Profiles $ProfileFiles -TeknoParrotRoot $TpRoot)) {
-                foreach ($code in @($entry.AffectedGames)) { & $add ([string]$code) ('Needs {0}: {1} is missing. Library health check (menu 13) shows where it goes.' -f $entry.Label, (@($entry.MissingFiles) -join ', ')) }
+                foreach ($code in @($entry.AffectedGames)) { & $add ([string]$code) ('Needs {0}: {1} is missing. Library health check (menu 14) shows where it goes.' -f $entry.Label, (@($entry.MissingFiles) -join ', ')) }
             }
         } catch { Write-Log ('LaunchBox setup check: the startup files could not be checked: {0}' -f $_.Exception.Message) }
     }
@@ -52124,7 +52671,8 @@ function Read-TpmLaunchBoxTitleChoices {
 
 # The optional LaunchBox step after registration, as four short choices. P, A, F and B keep their meaning.
 function Write-TpmLaunchBoxOffer {
-    Write-TpmText -Text 'TeknoParrot registration is finished.' -Color Cyan
+    param([switch]$Direct)
+    if (-not $Direct) { Write-TpmText -Text 'TeknoParrot registration is finished.' -Color Cyan }
     Write-TpmText -Text 'Optional: add games to LaunchBox.' -Color Cyan -BlankBefore
     Write-TpmText -Text '[P] Preview first. No changes.' -Color White
     Write-TpmText -Text '[A] Add missing games (backed up).' -Color White
@@ -52134,12 +52682,13 @@ function Write-TpmLaunchBoxOffer {
     Write-TpmText -Text '[L] Link games for art and details (backed up).' -Color White -BlankBefore
     Write-TpmText -Text '[C] Fill in players and controllers for Big Box (backed up).' -Color White
     Write-TpmText -Text '[F] Import file only. No changes.' -Color White -BlankBefore
-    Write-TpmText -Text '[B] Skip this step.' -Color White
+    Write-TpmText -Text $(if ($Direct) { '[B] Back to the main menu.' } else { '[B] Skip this step.' }) -Color White
 }
 
 # The whole optional LaunchBox step (offer, preview, add games, or save a reference file).
 # It is used after the whole-library checks and after "New game only".
 function Invoke-TpmLaunchBoxStep {
+    param([switch]$Direct)
     Write-Host ""
     $doLB = "N"
     $lbChoice = $null
@@ -52148,7 +52697,7 @@ function Invoke-TpmLaunchBoxStep {
     } elseif ($Unattended) {
         Write-Log "Unattended: LaunchBox reference export skipped."
     } else {
-        Write-TpmLaunchBoxOffer
+        if ($Direct) { Write-TpmLaunchBoxOffer -Direct } else { Write-TpmLaunchBoxOffer }
         # Answers given for [P] Preview become the defaults for [A] (Enter
         # reuses them); [A] still plans read-only and asks before any write.
         $lbPreviewRoot = $null
@@ -54714,7 +55263,7 @@ function Get-TpmRegistrationNextSteps {
     $crosshairLines = New-Object System.Collections.Generic.List[string]
     if ($CrosshairsFolder) { [void]$crosshairLines.Add(('Folder: Custom crosshair images are in {0}' -f $CrosshairsFolder)) }
     [void]$crosshairLines.Add('Add your own: You can add your own PNG images to that folder at any time.')
-    [void]$crosshairLines.Add('Deploy: Run mode 4 (Crosshair setup) to preview and deploy them to lightgun games.')
+    [void]$crosshairLines.Add('Deploy: Run mode 5 (Crosshair setup) to preview and deploy them to lightgun games.')
     [void]$blocks.Add(@{ Heading = 'Crosshairs'; Lines = $crosshairLines.ToArray() })
     return [pscustomobject]@{ Next = $next; DetailBlocks = $blocks.ToArray() }
 }
@@ -56582,7 +57131,7 @@ if (Test-Path -LiteralPath $configPath) {
             if ($isPostgresRecoveryResume) {
                 $pendingApplyMode = 'PostgresSetup'
                 $pendingApplyForce = $true
-                Write-Log 'Postgres recovery: protected resume will enter option 11 automatically.'
+                Write-Log 'Postgres recovery: protected resume will enter option 12 automatically.'
             }
             $configAccepted = $true
         }
@@ -57484,45 +58033,46 @@ function Get-MainMenuSections {
         Items  = @(
             [pscustomobject]@{ Number = 1; Mode = 'AutoSync'; Label = 'AutoSync'; ShortDesc = 'Extract your game ZIPs, then register the games.'; FullDesc = @('Extract your game ZIPs into your games', 'folder, then register the games.') }
             [pscustomobject]@{ Number = 2; Mode = 'RegisterOnly'; Label = 'Register only'; ShortDesc = 'Register games you already extracted.'; FullDesc = @('Register games already in the games folder.') }
-            [pscustomobject]@{ Number = 3; Mode = 'PropagateControls'; Label = 'Propagate Controls'; ShortDesc = 'Copy controls from a set-up game to others.'; FullDesc = @('Copy controls from a game you set up', 'to games of the same type, without', 'going through AutoSync/Register first.') }
+            [pscustomobject]@{ Number = 3; Mode = 'LaunchBoxSetup'; Label = 'LaunchBox integration'; ShortDesc = 'Add your games to LaunchBox. No registering first.'; FullDesc = @('Open the LaunchBox choices any time: add games,', 'fill in details, link art, keep LaunchBox in step.', 'Nothing is registered or extracted first.') }
+            [pscustomobject]@{ Number = 4; Mode = 'PropagateControls'; Label = 'Propagate Controls'; ShortDesc = 'Copy controls from a set-up game to others.'; FullDesc = @('Copy controls from a game you set up', 'to games of the same type, without', 'going through AutoSync/Register first.') }
         )
     }
     [pscustomobject]@{
         Header = 'Game Enhancements (optional -- not every game needs them)'
         Column = 'Left'
         Items  = @(
-            [pscustomobject]@{ Number = 4; Mode = 'CrosshairSetup'; Label = 'Crosshair setup'; ShortDesc = 'Deploy custom crosshairs to lightgun games.'; FullDesc = @('Pick and deploy custom crosshairs to all', 'registered lightgun games.') }
-            [pscustomobject]@{ Number = 5; Mode = 'ReShadeSetup'; Label = 'ReShade setup'; ShortDesc = 'Visual filters: sharper image, CRT-style scanlines, borders.'; FullDesc = @('ReShade adds post-processing filters on top of', 'the game -- sharper image, better colors,', 'CRT-style scanlines, and screen borders, for a', 'more authentic arcade-cabinet look.') }
-            [pscustomobject]@{ Number = 6; Mode = 'DgVoodoo2Setup'; Label = 'dgVoodoo2 setup'; ShortDesc = 'Fix some old DX8/Glide game crashes.'; FullDesc = @('Fix some old DX8, DirectDraw, and Glide game', 'crashes or black screens.') }
-            [pscustomobject]@{ Number = 7; Mode = 'GpuFixSetup'; Label = 'GPU fix setup'; ShortDesc = 'Auto-detect GPU, apply matching compatibility fix.'; FullDesc = @('Auto-detect your GPU (AMD / NVIDIA / Intel) and', 'apply the matching compatibility fix to every', 'registered game that has one.') }
-            [pscustomobject]@{ Number = 8; Mode = 'FFBSetup'; Label = 'Force feedback (FFB) setup'; ShortDesc = 'Wheel/stick rumble and force feedback.'; FullDesc = @('Wheel/stick rumble and force feedback.', "Covers TeknoParrot's built-in FFB Blaster (needs a", 'paid membership) and a free third-party plugin.') }
-            [pscustomobject]@{ Number = 9; Mode = 'BepInExUpdate'; Label = 'BepInEx setup'; ShortDesc = 'Install or update BepInEx (a game modding framework).'; FullDesc = @('BepInEx is a modding framework some games use', 'for extra features and fixes. TPM can install or', 'update it after you approve; repair-reset is', 'unavailable. Unsafe folders and failed downloads', 'make no changes.') }
-            [pscustomobject]@{ Number = 10; Mode = 'RegionSetup'; Label = 'Region setup'; ShortDesc = 'Choose the country your games start in.'; FullDesc = @('Pick a country (like USA or Europe) and set it', 'on the games that offer it. You can pick which', 'games, and go back to Auto at any time.') }
+            [pscustomobject]@{ Number = 5; Mode = 'CrosshairSetup'; Label = 'Crosshair setup'; ShortDesc = 'Deploy custom crosshairs to lightgun games.'; FullDesc = @('Pick and deploy custom crosshairs to all', 'registered lightgun games.') }
+            [pscustomobject]@{ Number = 6; Mode = 'ReShadeSetup'; Label = 'ReShade setup'; ShortDesc = 'Visual filters: sharper image, CRT-style scanlines, borders.'; FullDesc = @('ReShade adds post-processing filters on top of', 'the game -- sharper image, better colors,', 'CRT-style scanlines, and screen borders, for a', 'more authentic arcade-cabinet look.') }
+            [pscustomobject]@{ Number = 7; Mode = 'DgVoodoo2Setup'; Label = 'dgVoodoo2 setup'; ShortDesc = 'Fix some old DX8/Glide game crashes.'; FullDesc = @('Fix some old DX8, DirectDraw, and Glide game', 'crashes or black screens.') }
+            [pscustomobject]@{ Number = 8; Mode = 'GpuFixSetup'; Label = 'GPU fix setup'; ShortDesc = 'Auto-detect GPU, apply matching compatibility fix.'; FullDesc = @('Auto-detect your GPU (AMD / NVIDIA / Intel) and', 'apply the matching compatibility fix to every', 'registered game that has one.') }
+            [pscustomobject]@{ Number = 9; Mode = 'FFBSetup'; Label = 'Force feedback (FFB) setup'; ShortDesc = 'Wheel/stick rumble and force feedback.'; FullDesc = @('Wheel/stick rumble and force feedback.', "Covers TeknoParrot's built-in FFB Blaster (needs a", 'paid membership) and a free third-party plugin.') }
+            [pscustomobject]@{ Number = 10; Mode = 'BepInExUpdate'; Label = 'BepInEx setup'; ShortDesc = 'Install or update BepInEx (a game modding framework).'; FullDesc = @('BepInEx is a modding framework some games use', 'for extra features and fixes. TPM can install or', 'update it after you approve; repair-reset is', 'unavailable. Unsafe folders and failed downloads', 'make no changes.') }
+            [pscustomobject]@{ Number = 11; Mode = 'RegionSetup'; Label = 'Region setup'; ShortDesc = 'Choose the country your games start in.'; FullDesc = @('Pick a country (like USA or Europe) and set it', 'on the games that offer it. You can pick which', 'games, and go back to Auto at any time.') }
         )
     }
     [pscustomobject]@{
         Header = 'Game Requirements (only for some games)'
         Column = 'Right'
         Items  = @(
-            [pscustomobject]@{ Number = 11; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'PostgreSQL for games set to Existing PostgreSQL.'; FullDesc = @('For games set to Existing PostgreSQL.', 'Installs/configures local PostgreSQL 8.3 for', 'every Golden Tee Live and PGA Tour game,', 'Power Putt Live, Silver Strike Bowling Live,', 'Target Toss Pro and Orange County Choppers.', 'Games on Internal storage (the new default)', 'need no database install and are skipped.', 'A missing game database is made from the', 'game''s own backup. A game that ships none is', 'left to TeknoParrot to make on first start.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
-            [pscustomobject]@{ Number = 12; Mode = 'RequiredPatch'; Label = 'Required game patches'; ShortDesc = 'Find and safely install supported required fixes from your local ZIPs.'; FullDesc = @('Find required patches for supported exact', 'game builds using your local Main or', 'Supplementary ZIP files. TPM validates the', 'game, backs up, applies, and verifies files.', 'A verified patch is not gameplay proof.') }
+            [pscustomobject]@{ Number = 12; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'PostgreSQL for games set to Existing PostgreSQL.'; FullDesc = @('For games set to Existing PostgreSQL.', 'Installs/configures local PostgreSQL 8.3 for', 'every Golden Tee Live and PGA Tour game,', 'Power Putt Live, Silver Strike Bowling Live,', 'Target Toss Pro and Orange County Choppers.', 'Games on Internal storage (the new default)', 'need no database install and are skipped.', 'A missing game database is made from the', 'game''s own backup. A game that ships none is', 'left to TeknoParrot to make on first start.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
+            [pscustomobject]@{ Number = 13; Mode = 'RequiredPatch'; Label = 'Required game patches'; ShortDesc = 'Find and safely install supported required fixes from your local ZIPs.'; FullDesc = @('Find required patches for supported exact', 'game builds using your local Main or', 'Supplementary ZIP files. TPM validates the', 'game, backs up, applies, and verifies files.', 'A verified patch is not gameplay proof.') }
         )
     }
     [pscustomobject]@{
         Header = 'Maintenance and Recovery'
         Column = 'Right'
         Items  = @(
-            [pscustomobject]@{ Number = 13; Mode = 'HealthCheck'; Label = 'Library health check'; ShortDesc = 'Check your library without changing it.'; FullDesc = @('Reports registered/broken/unregistered games', 'plus GPU fix / FFB Blaster / dgVoodoo2 and', 'ReShade/BepInEx counts, without changing', 'anything. Any repair it suggests is a separate', 'choice that you confirm first.') }
-            [pscustomobject]@{ Number = 14; Mode = 'Restore'; Label = 'Restore backup'; ShortDesc = 'Restore UserProfiles, PostgreSQL, or LaunchBox snapshots.'; FullDesc = @('Restore selected backup files with verification.', 'LaunchBox recovery first backs up current targets;', 'keep LaunchBox and BigBox closed throughout.') }
+            [pscustomobject]@{ Number = 14; Mode = 'HealthCheck'; Label = 'Library health check'; ShortDesc = 'Check your library without changing it.'; FullDesc = @('Reports registered/broken/unregistered games', 'plus GPU fix / FFB Blaster / dgVoodoo2 and', 'ReShade/BepInEx counts, without changing', 'anything. Any repair it suggests is a separate', 'choice that you confirm first.') }
+            [pscustomobject]@{ Number = 15; Mode = 'Restore'; Label = 'Restore backup'; ShortDesc = 'Restore UserProfiles, PostgreSQL, or LaunchBox snapshots.'; FullDesc = @('Restore selected backup files with verification.', 'LaunchBox recovery first backs up current targets;', 'keep LaunchBox and BigBox closed throughout.') }
         )
     }
     [pscustomobject]@{
         Header = 'Application'
         Column = 'Right'
         Items  = @(
-            [pscustomobject]@{ Number = 15; Mode = 'CheckForUpdates'; Label = 'Check for Updates'; ShortDesc = 'Manual check against the latest GitHub release.'; FullDesc = @('Manual check against the latest', 'GitHub release. Nothing is downloaded or changed', 'without your explicit confirmation.') }
-            [pscustomobject]@{ Number = 16; Mode = 'Support'; Label = 'Create Support Package'; ShortDesc = 'Gather safe logs and reports into one ZIP.'; FullDesc = @('Gather safe TPM, TeknoParrot, and game diagnostics', 'into one ZIP you can send when asking for help.') }
-            [pscustomobject]@{ Number = 17; Mode = 'Exit'; Label = 'Exit'; ShortDesc = ''; FullDesc = @() }
+            [pscustomobject]@{ Number = 16; Mode = 'CheckForUpdates'; Label = 'Check for Updates'; ShortDesc = 'Manual check against the latest GitHub release.'; FullDesc = @('Manual check against the latest', 'GitHub release. Nothing is downloaded or changed', 'without your explicit confirmation.') }
+            [pscustomobject]@{ Number = 17; Mode = 'Support'; Label = 'Create Support Package'; ShortDesc = 'Gather safe logs and reports into one ZIP.'; FullDesc = @('Gather safe TPM, TeknoParrot, and game diagnostics', 'into one ZIP you can send when asking for help.') }
+            [pscustomobject]@{ Number = 18; Mode = 'Exit'; Label = 'Exit'; ShortDesc = ''; FullDesc = @() }
         )
     }
     )
@@ -58211,6 +58761,7 @@ function Get-MainMenuHelpLines {
         '  Set up your games:'
         ('  {0} AutoSync: extract your game ZIPs, then register the games.' -f $number['AutoSync'])
         ('  {0} Register only: register games already in your games folder.' -f $number['RegisterOnly'])
+        ('  {0} LaunchBox integration: add your games to LaunchBox any time.' -f $number['LaunchBoxSetup'])
         ('  {0}-{1} Copy controls, game extras, PostgreSQL setup and repair, and required game patches.' -f $number['PropagateControls'], $number['RequiredPatch'])
         ''
         '  Check and fix:'
@@ -58396,17 +58947,25 @@ function Invoke-TpmFfbSetupMode {
     }
     if ($nativeHasContract -and [string]$nativeResult.Outcome -eq 'SUCCEEDED') { Show-TpmFfbNativeResult -Result $nativeResult -Unattended:$Unattended }
     [void](Set-TpmWorkflowWaiting -Context $status -Message 'TeknoParrot Manager can add the optional third-party force-feedback plugin.' -UserAction 'Answer Y or N')
-    Write-Host '  [Y] Set up the free third-party FFB plugin' -ForegroundColor White
+    Write-Host '  [Y] Set up the free FFB plugin (the newest version; each game gets its own settings file)' -ForegroundColor White
     Write-Host '  [N] Skip the optional plugin' -ForegroundColor White
     $choice = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
     [void](Resume-TpmWorkflowStatus -Context $status)
     $plugin = $null
+    $wheel = $null
+    if ($choice -eq 'Y') {
+        $wheel = Select-FFBPluginWheel
+        if ($wheel.Cancelled) {
+            Write-Host '  The plugin was not set up. Plug in your wheel, then run Force feedback again.' -ForegroundColor Yellow
+            $choice = 'N'
+        }
+    }
     if ($choice -eq 'Y') {
         [void](Start-TpmWorkflowStep -Context $status -StepId 'plugin' -Activity 'Downloading and applying the optional plugin')
         $ffbCacheRoot = if ($script:TpmOwnedLayout) { Join-Path $script:TpmOwnedLayout.Cache 'FFBPlugin' } else { Join-Path $ScriptRoot 'FFBPlugin' }
         $evidencePath = if ($script:TpmOwnedLayout) { Join-Path $script:TpmOwnedLayout.Reports 'TPM-FFB-Plugin-Evidence.json' } else { '' }
         [void](Clear-TpmWorkflowFooter -Context $status)
-        $plugin = Invoke-TpmProgressGroup -Title 'Force feedback plugin setup' -Action { Invoke-FFBPluginSetup -UserProfilesDir $UserProfilesDir -CacheDir $ffbCacheRoot -NativeEnabledCodes $nativeCodes -TpRoot $TpRoot -EvidencePath $evidencePath -ProtectedRoots @($zipSource, $zipSourceSupplementary) }
+        $plugin = Invoke-TpmProgressGroup -Title 'Force feedback plugin setup' -Action { Invoke-FFBPluginSetup -UserProfilesDir $UserProfilesDir -CacheDir $ffbCacheRoot -NativeEnabledCodes $nativeCodes -TpRoot $TpRoot -EvidencePath $evidencePath -ProtectedRoots @($zipSource, $zipSourceSupplementary) -DeviceGuid ([string]$wheel.DeviceGuid) }
         if (-not ($plugin -and $plugin.Succeeded)) {
             [void](Set-TpmWorkflowFailure -Context $status -FailureId 'ffb-plugin-failed' -Message 'The optional force-feedback plugin could not complete safely.' -DataSafety 'TeknoParrot Manager reported an error or incomplete accounting while handling the optional plugin.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
             [void](Read-HostSafe 'Press Enter to acknowledge the force-feedback result')
@@ -58541,24 +59100,44 @@ $mode = $null
     switch ($modeChoice) {
         "1"     { $mode = "AutoSync"       }
         "2"     { $mode = "RegisterOnly"   }
-        "3"     { $mode = "PropagateControls" }
-        "4"     { $mode = "CrosshairSetup" }
-        "5"     { $mode = "ReShadeSetup"   }
-        "6"     { $mode = "DgVoodoo2Setup" }
-        "7"     { $mode = "GpuFixSetup"    }
-        "8"     { $mode = "FFBSetup"       }
-        "9"     { $mode = "BepInExUpdate"  }
-        "10"    { $mode = "RegionSetup" }
-        "12"    { $mode = "RequiredPatch" }
-        "13"    { $mode = "HealthCheck"    }
-        "14"    { $mode = "Restore"        }
-        "11"    { $mode = "PostgresSetup"  }
-        "15"    { $mode = "CheckForUpdates" }
-        "16"    { $mode = "Support" }
+        "3"     { $mode = "LaunchBoxSetup" }
+        "4"     { $mode = "PropagateControls" }
+        "5"     { $mode = "CrosshairSetup" }
+        "6"     { $mode = "ReShadeSetup"   }
+        "7"     { $mode = "DgVoodoo2Setup" }
+        "8"     { $mode = "GpuFixSetup"    }
+        "9"     { $mode = "FFBSetup"       }
+        "10"    { $mode = "BepInExUpdate"  }
+        "11"    { $mode = "RegionSetup" }
+        "13"    { $mode = "RequiredPatch" }
+        "14"    { $mode = "HealthCheck"    }
+        "15"    { $mode = "Restore"        }
+        "12"    { $mode = "PostgresSetup"  }
+        "16"    { $mode = "CheckForUpdates" }
+        "17"    { $mode = "Support" }
     }
-    if ($modeChoice -eq "17") { break }
+    if ($modeChoice -eq "18") { break }
     }
     Clear-ConsoleForFreshRender
+    if ($mode -eq 'LaunchBoxSetup') {
+        # Same LaunchBox choices as after AutoSync / Register only (Invoke-TpmLaunchBoxStep), opened directly: nothing is registered or extracted first.
+        Write-Host ""
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " LaunchBox integration" -ForegroundColor Cyan
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        $dryRunActive = [bool]$DryRun
+        if ($dryRunActive) {
+            Write-TpmText -Text 'Preview mode is on, so no LaunchBox choices are offered. Start TeknoParrot Manager without preview mode to use this.' -Color Yellow
+        } elseif (-not $lbRoot) {
+            Write-TpmText -Text 'TeknoParrot Manager does not know where LaunchBox is yet.' -Color Yellow
+            Write-TpmText -Text 'If you have LaunchBox: pick a choice below, then type the folder that holds LaunchBox.exe when asked.' -Color DarkCyan
+            Write-TpmText -Text 'If you do not have LaunchBox: choose B to go back. Install LaunchBox first, then come back to this item.' -Color DarkCyan
+        }
+        Invoke-TpmLaunchBoxStep -Direct
+        [void](Read-HostSafe '  Press Enter to return to menu')
+        continue
+    }
+
     if ($mode -eq 'RequiredPatch') {
         Invoke-TpmRequiredPatchMenu -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -ManagerRoot $PSScriptRoot -ProgramRoot $PSScriptRoot -MainSource $zipSource -SupplementarySource $zipSourceSupplementary
         continue
@@ -58875,11 +59454,11 @@ $mode = $null
             $pendingApplyForce = $false
             continue
         }
-        if ($healthChoice -eq '5') { $pendingApplyMode = 'ReShadeSetup'; $pendingApplyForce = $false; continue }
-        if ($healthChoice -eq '6') { $pendingApplyMode = 'DgVoodoo2Setup'; $pendingApplyForce = $false; continue }
-        if ($healthChoice -eq '7') { $pendingApplyMode = 'GpuFixSetup'; $pendingApplyForce = $false; continue }
-        if ($healthChoice -eq '8') { $pendingApplyMode = 'FFBSetup'; $pendingApplyForce = $false; continue }
-        if ($healthChoice -eq '9') { $pendingApplyMode = 'BepInExUpdate'; $pendingApplyForce = $false; continue }
+        if ($healthChoice -eq '6') { $pendingApplyMode = 'ReShadeSetup'; $pendingApplyForce = $false; continue }
+        if ($healthChoice -eq '7') { $pendingApplyMode = 'DgVoodoo2Setup'; $pendingApplyForce = $false; continue }
+        if ($healthChoice -eq '8') { $pendingApplyMode = 'GpuFixSetup'; $pendingApplyForce = $false; continue }
+        if ($healthChoice -eq '9') { $pendingApplyMode = 'FFBSetup'; $pendingApplyForce = $false; continue }
+        if ($healthChoice -eq '10') { $pendingApplyMode = 'BepInExUpdate'; $pendingApplyForce = $false; continue }
         continue
     }
 
@@ -59905,7 +60484,7 @@ $mode = $null
                 }
             }
             if ($dgGuidance.OfferHealthCheck) {
-                Write-Host "  [H] Open 13) Library Health Check for missing paths" -ForegroundColor White
+                Write-Host "  [H] Open 14) Library Health Check for missing paths" -ForegroundColor White
                 Write-Host "  [B] Back to main menu" -ForegroundColor White
                 $dgFailureChoice = Read-TpmChoice -Prompt '  Choose H or B' -Choices @('H', 'B') -Default 'B'
                 if ($dgFailureChoice -eq 'H') {
@@ -59972,7 +60551,7 @@ $mode = $null
             Write-Host "  [D] Details" -ForegroundColor White
             Write-Host "  [O] Open support/log guidance" -ForegroundColor White
             $gpuHasPathIssue = ([int]$gpuResult.MissingPath -gt 0 -or [int]$gpuResult.MissingDevice -gt 0)
-            if ($gpuHasPathIssue) { Write-Host "  [H] Open 13) Library Health Check for missing paths" -ForegroundColor White }
+            if ($gpuHasPathIssue) { Write-Host "  [H] Open 14) Library Health Check for missing paths" -ForegroundColor White }
             Write-Host "  [R] Run GPU Fix again" -ForegroundColor White
             Write-Host "  [B] Back to main menu" -ForegroundColor White
             $gpuChoices = @('D', 'O', 'R', 'B')
@@ -60020,7 +60599,7 @@ $mode = $null
                 Write-Host ("  FFB skipped {0} game(s) because their saved devices are unavailable." -f $ffbModeResult.MissingDevice) -ForegroundColor Yellow
                 Write-Host ("    Affected games: {0}" -f (@($ffbModeResult.MissingDeviceGames) -join ', ')) -ForegroundColor DarkGray
             }
-            Write-Host "  [H] Open 13) Library Health Check to repair saved paths" -ForegroundColor White
+            Write-Host "  [H] Open 14) Library Health Check to repair saved paths" -ForegroundColor White
             Write-Host "  [B] Back to main menu" -ForegroundColor White
             $ffbPathChoice = Read-TpmChoice -Prompt '  Choose H or B' -Choices @('H', 'B') -Default 'B'
             if ($ffbPathChoice -eq 'H') {
@@ -60118,7 +60697,7 @@ $mode = $null
                 Write-Host "  [D] Show details" -ForegroundColor White
                 Write-Host "  [O] Open support/log guidance" -ForegroundColor White
                 Write-Host "  [B] Back to main menu" -ForegroundColor White
-                if ($bepPathIssue) { Write-Host "  [H] Open 13) Library Health Check for missing paths" -ForegroundColor White }
+                if ($bepPathIssue) { Write-Host "  [H] Open 14) Library Health Check for missing paths" -ForegroundColor White }
                 $bepPromptChoices = $bepChoices -join ', '
                 $bepChoice = Read-TpmChoice -Prompt ("  Choose {0}" -f $bepPromptChoices) -Choices $bepChoices -Default 'B'
                 if ($bepChoice -eq 'R') {

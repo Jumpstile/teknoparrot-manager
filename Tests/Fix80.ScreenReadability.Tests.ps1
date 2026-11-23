@@ -295,7 +295,7 @@ Describe 'FIX80 last screen: Next (audit item 2)' {
             'does not remove unowned ReShade hooks automatically', 'do not delete DLLs blindly',
             'The game executable is unchanged. Create a support package with the log.',
             'Custom crosshair images are in C:\Tpm\Crosshairs\', 'You can add your own PNG images to that folder at any time.',
-            'Run mode 4 (Crosshair setup) to preview and deploy them to lightgun games.'
+            'Run mode 5 (Crosshair setup) to preview and deploy them to lightgun games.'
         )) { $text | Should -Match ([regex]::Escape($fact)) }
         $both.Next | Should -Not -Match 'Home|DLL|PNG'
     }

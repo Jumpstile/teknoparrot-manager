@@ -1,4 +1,4 @@
-# Check for Updates (menu 15)
+# Check for Updates (menu 16)
 
 Check for Updates looks for a newer TeknoParrot Manager on GitHub. Nothing is downloaded or changed until you answer `Y`.
 
@@ -6,7 +6,7 @@ Check for Updates looks for a newer TeknoParrot Manager on GitHub. Nothing is do
 
 ## How to run it
 
-1. Start TeknoParrot Manager and type `15` at the main menu.
+1. Start TeknoParrot Manager and type `16` at the main menu.
 2. If you already have the newest version, you see `You have the newest version (...)` and `No update needed.` That is the end.
 3. If a newer version exists, you see `An update is available: <your version> -> <new version>`, a list of what updating will do, and this question:
 
@@ -51,7 +51,7 @@ Builds before RC8.1 (for example RC8 or RC7) cannot install a whole release. Do 
 2. Extract all of its files over your TeknoParrot Manager folder (or into a new folder).
 3. Start `TeknoParrot-Manager.bat` again.
 
-After that, menu 15 does the updating.
+After that, menu 16 does the updating.
 
 ---
 
@@ -74,8 +74,8 @@ To turn the start check off, set `CheckForUpdatesOnStartup` to `false` in `Tekno
 - Only the latest GitHub release of the TeknoParrot Manager project is used.
 - The script inside the ZIP is checked before it is installed, and its version must match the release. Anything else is refused.
 - The download goes to a temporary folder first and is checked before the ZIP is opened.
-- The separate command-line helper `tools\Invoke-TpmAutoUpdate.ps1` has `-CheckOnly` (the default) and `-Apply`. `-Apply` still refuses a release that has many files and changes nothing; it tells you to use menu 15 instead.
-- Before it installs, the free space on the drive must be at least twice the unpacked size. Files are unpacked into a temporary `tpm-update-staging-...` folder first, and that folder is removed at the end. If an update is cut off, that folder stays and the next start tells you. If it stopped before it changed any program file, the notice says all your files are from one version. If it stopped later, your old files are in `UpdateBackups`. Nothing is deleted for you.
+- The separate command-line helper `tools\Invoke-TpmAutoUpdate.ps1` has `-CheckOnly` (the default) and `-Apply`. `-Apply` still refuses a release that has many files and changes nothing; it tells you to use menu 16 instead.
+- Before it installs, the free space on the drive must be at least twice the unpacked size. Files are unpacked into a temporary `tpm-update-staging-...` folder first, and that folder is removed at the end. If an update is cut off, that folder stays; the next start tells you, and your old files are in `UpdateBackups`. Nothing is deleted for you.
 
 </details>
 

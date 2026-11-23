@@ -390,7 +390,7 @@ Stuck? See [Nothing found](TROUBLESHOOTING.md#1-nothing-is-found) or [Network dr
 
 ## 6. Register your first game
 
-![The TeknoParrot Manager main menu with 17 numbered choices](images/13-tpm-main-menu.png)
+![The TeknoParrot Manager main menu with 18 numbered choices](images/13-tpm-main-menu.png)
 
 
 [Registration](#registration) tells TeknoParrot where your game is. It adds the game's settings file and its executable path to TeknoParrot.
@@ -507,7 +507,7 @@ Keep the original game files and ZIPs. Never delete leftover marker files just t
 
    You will see: that game's checked result, or an item left for manual attention.
 
-   You may also be asked `Which country do you want your games to start in?` This is Region setup. Type **0** to leave every game as it is. You can set it later with **10) Region setup**.
+   You may also be asked `Which country do you want your games to start in?` This is Region setup. Type **0** to leave every game as it is. You can set it later with **11) Region setup**.
 
    Next: answer the next question.
 
@@ -605,7 +605,7 @@ Do these steps in order. Test after each change, so you know which change helped
 
    Next: copy controls only after you have bound one game of each type you use (buttons, driving, lightgun, or trackball).
 
-7. In TeknoParrot Manager, choose **3) Propagate Controls**. ("Propagate" means copy to your other games.)
+7. In TeknoParrot Manager, choose **4) Propagate Controls**. ("Propagate" means copy to your other games.)
 
    You will see: how many games have their controls set up, and the question `Copy controls from N games to your other games of the same type? (Y/N, D = details)`.
 
@@ -627,13 +627,13 @@ Do these steps in order. Test after each change, so you know which change helped
 
 Extras, only if needed:
 
-- GPU compatibility: choose **7) GPU fix setup** for the supported fixes for your graphics card (GPU). Read the result, then test the affected game. A fix is not available for every game or GPU.
-- Lightgun crosshairs: choose **4) Crosshair setup** if you want different aiming images. Follow the preview to pick player 1 and player 2 images, then approve deployment. Test aiming in-game. Images do not calibrate a gun.
-- Required fix: choose **12) Required game patches** only for a covered build, as explained in section 8.
-- dgVoodoo2: choose **6) dgVoodoo2 setup** only when an older game crashes or has a graphics problem that its documentation names. It is not a universal crash fix.
-- ReShade: choose **5) ReShade setup** only if you want optional visual effects after the game works.
-- Force feedback (FFB): choose **8) Force feedback setup** only for supported wheel or controller feedback.
-- Region: choose **10) Region setup** if you want your games to start in a country such as USA or Europe. Pick a country, pick all games or some, then type **Y** to confirm. A restore point is saved first. Only countries a game really offers are used. Details are in the Region Setup part of the [User Guide](../TeknoParrot-Manager-User-Guide.pdf).
+- GPU compatibility: choose **8) GPU fix setup** for the supported fixes for your graphics card (GPU). Read the result, then test the affected game. A fix is not available for every game or GPU.
+- Lightgun crosshairs: choose **5) Crosshair setup** if you want different aiming images. Follow the preview to pick player 1 and player 2 images, then approve deployment. Test aiming in-game. Images do not calibrate a gun.
+- Required fix: choose **13) Required game patches** only for a covered build, as explained in section 8.
+- dgVoodoo2: choose **7) dgVoodoo2 setup** only when an older game crashes or has a graphics problem that its documentation names. It is not a universal crash fix.
+- ReShade: choose **6) ReShade setup** only if you want optional visual effects after the game works.
+- Force feedback (FFB): choose **9) Force feedback setup** only for supported wheel or controller feedback.
+- Region: choose **11) Region setup** if you want your games to start in a country such as USA or Europe. Pick a country, pick all games or some, then type **Y** to confirm. A restore point is saved first. Only countries a game really offers are used. Details are in the Region Setup part of the [User Guide](../TeknoParrot-Manager-User-Guide.pdf).
 
 Do not apply unrelated fixes all at once.
 
@@ -644,23 +644,23 @@ Stuck? Start with [Troubleshooting](TROUBLESHOOTING.md), the game's official com
 - Native FFB Blaster needs paid TeknoParrot membership. The third-party plugin has different coverage.
 - For laptops with two GPUs, the official legacy guide also recommends selecting the dedicated GPU for the game's process. That is a Windows or driver setting, not the same as TeknoParrot Manager's GPU fix.
 - See the [official guide](https://teknoparrot.com/wiki/getstarted.html) for game-specific guidance, including BudgieLoader for Lindbergh/Linux games.
-- ReShade, change the look at any time: choose **5) ReShade setup** again. Every change can be undone, for all games or for one game (see "undo" below).
-- ReShade, change the look for all games: choose **5) ReShade setup**, then **S**. Pick the new look, choose **[U]** to use it, then **[Y]** to confirm. Then choose **A) All** registered games and **[Y] Yes**.
+- ReShade, change the look at any time: choose **6) ReShade setup** again. Every change can be undone, for all games or for one game (see "undo" below).
+- ReShade, change the look for all games: choose **6) ReShade setup**, then **S**. Pick the new look, choose **[U]** to use it, then **[Y]** to confirm. Then choose **A) All** registered games and **[Y] Yes**.
 - ReShade, change the look for one game: follow the same steps, but choose **L) Browse and select specific games**. Type that game's number, then type **D** (here **D** means "done").
-- ReShade, undo: choose **5**, then **U) Undo ReShade changes**. The games are listed newest first. Pick one game's number and type **YES**, or choose **[A] Undo all** and type **ALL**. Any other answer cancels, and nothing is changed.
-- ReShade, bezels: the first screen of menu 5 has four choices: **S**, **R**, **U** and **B) Use my bezel folder (bezels you already have)**. A bezel is a picture that frames the game on a wide screen. Choose **B**, then **F** to pick a folder of your own `.png` bezels. You see a preview first (`Bezel preview. Nothing has been changed yet.`) and nothing is downloaded. A game needs ReShade first. A game that shares its folder with other games is skipped, and a bezel you placed yourself is kept unless you say yes to replacing it. To undo, choose **5**, **B**, then **U**.
+- ReShade, undo: choose **6**, then **U) Undo ReShade changes**. The games are listed newest first. Pick one game's number and type **YES**, or choose **[A] Undo all** and type **ALL**. Any other answer cancels, and nothing is changed.
+- ReShade, bezels: the first screen of menu 6 has four choices: **S**, **R**, **U** and **B) Use my bezel folder (bezels you already have)**. A bezel is a picture that frames the game on a wide screen. Choose **B**, then **F** to pick a folder of your own `.png` bezels. You see a preview first (`Bezel preview. Nothing has been changed yet.`) and nothing is downloaded. A game needs ReShade first. A game that shares its folder with other games is skipped, and a bezel you placed yourself is kept unless you say yes to replacing it. To undo, choose **6**, **B**, then **U**.
 - ReShade works with both 32-bit and 64-bit games. Games that run through BudgieLoader (a Linux-style game format) are skipped for now, and nothing in their folder changes.
 - ReShade shows no welcome window, counters or messages when a game starts, and the key that opens it still works. A short ReShade version banner may still show for a moment at game start. ReShade has no setting to hide it.
 - After ReShade is applied, the result screen says `To turn the effect on or off, start a game and press the Home key.` It also says `Next: You can undo this in ReShade > Undo ReShade changes.`
 - If some games already have ReShade files that TeknoParrot Manager did not install, they are listed under `Not changed:` and left alone. You may then see the choices **A**, **S**, **B** and **D**.
-- If a game already uses TeknoParrot's own CRT look, ReShade setup can ask what to do, because both together can look doubled. Choose **K** to keep it (default). Choose **T** to turn it off, only for the games that get ReShade now. A saved copy of your game settings is made first. To put it back, use ReShade > Undo ReShade changes, or main menu **14) Restore backup**.
+- If a game already uses TeknoParrot's own CRT look, ReShade setup can ask what to do, because both together can look doubled. Choose **K** to keep it (default). Choose **T** to turn it off, only for the games that get ReShade now. A saved copy of your game settings is made first. To put it back, use ReShade > Undo ReShade changes, or main menu **15) Restore backup**.
 - On ReShade result screens the choices include **[D] Details**, for example **Press A, S, B or D** or **Press D for details, or Enter to return to the menu**. Type **D** and press **Enter** to see the full technical information. It is also kept in the log.
-- PostgreSQL setup (main menu **11) Postgres setup**): the result screen is short. It ends with **Press Enter to return to menu, or D for details**. Type **D** and press **Enter** for the details, or just **Enter** to return.
-- Library health check (main menu **13**) also checks every game database. A database that is not ready shows as `Problem - <game>`. Run **11) Postgres setup** to fix it. A game set to Internal storage needs no database install. It shows as `Game database: OK`, and you start the game once so it makes its own database.
+- PostgreSQL setup (main menu **12) Postgres setup**): the result screen is short. It ends with **Press Enter to return to menu, or D for details**. Type **D** and press **Enter** for the details, or just **Enter** to return.
+- Library health check (main menu **14**) also checks every game database. A database that is not ready shows as `Problem - <game>`. Run **12) Postgres setup** to fix it. A game set to Internal storage needs no database install. It shows as `Game database: OK`, and you start the game once so it makes its own database.
 - The health check also names games with a game type it does not know, games TeknoParrot has not released yet (`not available yet`), emulators missing from your TeknoParrot folder, and games that need you to pick the game file by hand in TeknoParrotUI. Press **D** for the list.
 - Every game database is tested with the game's own settings before setup says the game is ready. A game with no starting database file (`pg_backup`) is `Profile ready` when TeknoParrot creates its database itself (Golden Tee Live 2018 and newer, Golden Tee PGA Tour): start the game once. Any other game with none is left out and named as not ready.
 
-## 8. Required game patches: menu 12
+## 8. Required game patches: menu 13
 
 This menu fixes known problems in certain game builds. It uses ZIP files you already have. It does not get patch files for you.
 
@@ -780,13 +780,13 @@ Where things are saved:
 - Saved copies of your game settings: `<TeknoParrotFolder>\UserProfiles\FullBackup\<date_time>\`.
 - Normal log: `<TeknoParrotFolder>\TeknoParrotManager\Logs\TeknoParrot-Manager.log`.
 - Reports: `<TeknoParrotFolder>\TeknoParrotManager\Reports\`.
-- Support: choose **16) Create Support Package** to collect diagnostics, not game files. Preserve any failure evidence and review the package before sharing it.
+- Support: choose **17) Create Support Package** to collect diagnostics, not game files. Preserve any failure evidence and review the package before sharing it.
 
 `<TeknoParrotFolder>` means the folder you selected, not text to type literally.
 
 The normal saved copy covers only your game settings (UserProfiles). It does not copy game folders, game-side saved machine state (NVRAM), test-menu settings, or calibration files stored outside UserProfiles. Back up those files separately before changing them.
 
-Each time TeknoParrot Manager starts, it saves a checked restore point of your game settings and its own settings, but only when something changed since the last one. It never removes older restore points by itself. You can use them in **14) Restore backup**, option 4.
+Each time TeknoParrot Manager starts, it saves a checked restore point of your game settings and its own settings, but only when something changed since the last one. It never removes older restore points by itself. You can use them in **15) Restore backup**, option 4.
 
 To get your settings back, use [Restore a backup](TROUBLESHOOTING.md#10-restore-a-backup).
 

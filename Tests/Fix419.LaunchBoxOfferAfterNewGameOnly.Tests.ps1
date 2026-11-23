@@ -43,9 +43,10 @@ function Invoke-TpmLaunchBoxMediaStep { param($lbRoot, $userProfilesDir, [switch
         $ifs.Count | Should -Be 1
         $ifs[0].Clauses[0].Item2.Extent.Text | Should -Not -Match 'LaunchBox'
     }
-    It 'keeps exactly one other call, after the whole-library checks' {
+    It 'keeps exactly one other call after registration, plus the one the main-menu LaunchBox item makes' {
         $calls = @($script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-TpmLaunchBoxStep' }, $true))
-        $calls.Count | Should -Be 2
+        @($calls | Where-Object { $_.Extent.Text -notmatch '-Direct' }).Count | Should -Be 2
+        @($calls | Where-Object { $_.Extent.Text -match '-Direct' }).Count | Should -Be 1
     }
     It 'shows the offer and asks for a choice in a normal run' {
         $dryRunActive = $false; $Unattended = $false

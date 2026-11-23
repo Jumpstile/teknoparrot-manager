@@ -7,6 +7,22 @@
   published. Final Version 1.0 comes later.
 
 
+  v1.0 RC9.2 (changes since RC9.1)
+  ----------------------------------------------------------------
+
+  - TeknoParrot Manager is now named the same way everywhere in the guides,
+    and the guides no longer mention a product it does not support.
+  - LaunchBox integration now has its own item on the main menu, so you
+    can use it any time without registering games first.
+  - Force feedback (menu 8) now installs the newest plugin release with
+    each game's own settings file, lists any game controller by name,
+    and upgrades old plugin files it recognizes (with a backup). It asks
+    first.
+  - Library health check now knows the new TeknoParrot game type used by
+    the DOS32 PC games, Taito Wolf, Midway Quicksilver II and Graphite,
+    Interactive Light, dgPIX, Voodoo Banshee, and Virtuality SU2000 and
+    SU3000 games, and no longer calls it unknown.
+
   v1.0 RC9.1 (changes since RC9)
   ----------------------------------------------------------------
 
@@ -23,40 +39,36 @@
   ----------------------------------------------------------------
 
   Controls
-  - Controller layout (Propagate Controls, menu 3): choose your layout
-    once (Xbox, PlayStation, Nintendo or arcade stick), change any button,
-    then set up one game, all your games, or game by game. You see a
-    preview and approve once. A saved copy is made first, every changed
-    game is read back, a game that does not read back correctly is put
-    back exactly, and one step undoes the whole run. A game is left alone,
-    with a plain reason, when its saved settings are for another version,
-    a control is missing, or an Xbox button is already used. Triggers and
-    analog sticks are never set. Test and Service stay empty unless you
-    give them a button.
-  - Controls check (Propagate Controls choice 4, and a Controls line in
-    Library health check) sorts every registered game into every control
-    set up, some, none, or "cannot tell", and names the missing controls.
-    For most games the list comes from TeknoParrot's own game file and
-    says that no person has checked it. It changes nothing and never says
-    a game is ready.
+  - Controller layout (Propagate Controls, menu 3): choose your layout once
+    (Xbox, PlayStation, Nintendo or arcade stick), change any button, then set
+    up one game, all your games, or game by game. You see a preview and approve
+    once. A saved copy is made first, every changed game is read back, a game
+    that does not read back correctly is put back exactly, and one step undoes
+    the whole run. A game is left alone, with a plain reason, when its saved
+    settings are for another version, a control is missing, or an Xbox button
+    is already used. Triggers and analog sticks are never set. Test and Service
+    stay empty unless you give them a button.
+  - Controls check (Propagate Controls choice 4, and a Controls line in Library
+    health check) sorts every registered game into every control set up, some,
+    none, or "cannot tell", and names the missing controls. For most games the
+    list comes from TeknoParrot's own game file and says that no person has
+    checked it. It changes nothing and never says a game is ready.
   - The Device Survey saves your answers in TPM's own settings
     folder and asks one question next time: "Keep these answers?" It asks
     again only if a controller turns up that you said you do not have. A
     damaged answers file is set aside, never overwritten.
-  - "My controls" (choice 5) learns your arcade buttons: press each
-    control and TPM remembers the key it sends. If LEDBlinky is
-    installed it offers its key list first. Before it learns, it checks
-    for a stuck button (2 seconds, hands off) and tells you if a press
-    also sends another key or a button stays down after 3 seconds. It
-    offers the standard keys that MAME and Ultimarc I-PAC boards use only
-    after you say yes and two buttons you press send those keys. Nothing
-    in your game files changes.
-  - TPM tells you when you changed your arcade encoder. It keeps
-    a private one-way code for each Ultimarc-type encoder (maker and model
-    numbers are never saved, logged or shared) and says whether it is the
-    same encoder, one was added or removed, or it could not check. It is a
-    hint only and never changes a saved key or answer. A different USB
-    port is not a change.
+  - "My controls" (choice 5) learns your arcade buttons: press each control and
+    TPM remembers the key it sends. If LEDBlinky is installed it offers its key
+    list first. Before it learns, it checks for a stuck button (2 seconds,
+    hands off) and tells you if a press also sends another key or a button
+    stays down after 3 seconds. It offers the standard keys that MAME and
+    Ultimarc I-PAC boards use only after you say yes and two buttons you press
+    send those keys. Nothing in your game files changes.
+  - TPM tells you when you changed your arcade encoder. It keeps a private
+    one-way code for each Ultimarc-type encoder (maker and model numbers are
+    never saved, logged or shared) and says whether it is the same encoder, one
+    was added or removed, or it could not check. It is a hint only and never
+    changes a saved key or answer. A different USB port is not a change.
   - You can show or print the controls of one game, and your cabinet's
     controls, as a page: what each control does, your key, and whether
     the game has it set up. It suggests your key only for coin, start,
@@ -72,12 +84,11 @@
     button (Esc counts as a key for these). My controls offers "6 = Undo
     my last save" when an older copy of your answers exists: it shows
     what comes back, asks once, and keeps your newest answers as a copy.
-  - You can tell TPM that a game played well. It keeps that with
-    the date and the game's revision, and calls the controls Verified
-    until they or the settings change. Starting a game never makes it
-    Verified. Wheel, gun and other analog games need you to say the
-    calibration is done first. A first-run Test or Service menu step can
-    be marked as still to do.
+  - You can tell TPM that a game played well. It keeps that with the date and
+    the game's revision, and calls the controls Verified until they or the
+    settings change. Starting a game never makes it Verified. Wheel, gun and
+    other analog games need you to say the calibration is done first. A
+    first-run Test or Service menu step can be marked as still to do.
   - When Propagate Controls skips games because no game of their type has
     your controls yet, it names one game of each type to set up first in
     TeknoParrotUI and says that choosing a device does not set up a game.
@@ -86,26 +97,24 @@
   - The Propagate Controls screen no longer says "No game is registered
     or extracted.", which read as if nothing was registered on your PC. It
     now says that the screen never registers or unpacks games.
-  - A read-only check of an outside controller list (for example
-    RetroBat's teknoparrot.yml), run from the command line with
-    -MappingEvidenceFile and -ValidationRoot. It prints plain counts,
-    trusts nothing and changes no profile. It holds back a game, and says
-    why, when the list names it twice, sets a control twice or one the
-    game does not have, uses an unknown button name, or puts two game
-    actions on one button.
+  - A read-only check of an outside controller list (for example RetroBat's
+    teknoparrot.yml), run from the command line with -MappingEvidenceFile and
+    -ValidationRoot. It prints plain counts, trusts nothing and changes no
+    profile. It holds back a game, and says why, when the list names it twice,
+    sets a control twice or one the game does not have, uses an unknown button
+    name, or puts two game actions on one button.
 
   Games and registration
-  - Every game in the Eggman list was run through the real registration
-    on a fake collection (1,596 games) and the gaps are fixed. A game gets
-    the profile the list names for it, not the one with the most alike
-    name (The King of Fighters XII was registered as XIV). A second
-    version of a game is registered, or reported as a duplicate when
-    TeknoParrot has one profile for both. A second profile the list names
-    is registered when TeknoParrot retired the first (the ElfLdr2 profile
-    next to each Lindbergh game). Files ending in .exec or .chd and names
-    with a hyphen (R-Tuned) are recognized. A folder for a game
-    TeknoParrot has no profile for (Sega Rally 3 track mods) is listed as
-    "not in TeknoParrot", not as a failed profile.
+  - Every game in the Eggman list was run through the real registration on a
+    fake collection (1,596 games) and the gaps are fixed. A game gets the
+    profile the list names for it, not the one with the most alike name (The
+    King of Fighters XII was registered as XIV). A second version of a game is
+    registered, or reported as a duplicate when TeknoParrot has one profile for
+    both. A second profile the list names is registered when TeknoParrot
+    retired the first (the ElfLdr2 profile next to each Lindbergh game). Files
+    ending in .exec or .chd and names with a hyphen (R-Tuned) are recognized. A
+    folder for a game TeknoParrot has no profile for (Sega Rally 3 track mods)
+    is listed as "not in TeknoParrot", not as a failed profile.
   - A game set is never registered just because its parent ZIP is in the
     folder, except when the Eggman list names the parent ZIP (17 games,
     such as Dance Dance Revolution 2nd Mix Link). System 11 games need
@@ -193,7 +202,7 @@
     the same game. The default follows your Region setup choice.
   - New choice S keeps LaunchBox in step with your library: games you
     removed are removed, moved folders get the new location, and old
-    Manager names become the clean title. A missing game file (an
+    TeknoParrot Manager names become the clean title. A missing game file (an
     unplugged drive) never removes a game, and nothing is removed if most
     games would go at once.
   - Pictures from a folder are matched by the game itself when LaunchBox's
@@ -687,12 +696,12 @@
 
   v1.0 RC1 and v0.26 to v0.99.44 BETA  (2026-06-10 to 2026-07-03)
   ----------------------------------------------------------------
-  The first version (v0.26, 2026-06-10) registers extracted games, matches
-  game names, extracts game ZIPs, copies controls between games of the same
-  type, repairs broken game paths, exports to LaunchBox and restores from
-  backup. The betas added HyperSpin 2 and RetroBat/Batocera support, custom
-  crosshairs and thumbnails, ReShade and dgVoodoo2 setup, an unattended mode
-  for Task Scheduler, safer downloads and many fixes. RC1 added the pcsx2x6
-  crosshair path fix, more reliable auto-update and BIOS/firmware detection.
+  The first version (v0.26, 2026-06-10) registers extracted games, matches game
+  names, extracts game ZIPs, copies controls between games of the same type,
+  repairs broken game paths, exports to LaunchBox and restores from backup. The
+  betas added RetroBat/Batocera support, custom crosshairs and thumbnails,
+  ReShade and dgVoodoo2 setup, an unattended mode for Task Scheduler, safer
+  downloads and many fixes. RC1 added the pcsx2x6 crosshair path fix, more
+  reliable auto-update and BIOS/firmware detection.
 
 ===============================================================================

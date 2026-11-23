@@ -44,7 +44,7 @@ Which country do you want your games to start in?
 
 Type the number of a country to set it on the new games that offer it, or `0` to leave every game as it is. Only countries the games really offer are listed. A game never gets a region it does not have. A region you chose earlier is kept. Games with no automatic choice are not changed.
 
-The question is not asked in a preview, or when none of the new games offers a region. To set or change the region later, use [[Region Setup]] (menu 10).
+The question is not asked in a preview, or when none of the new games offers a region. To set or change the region later, use [[Region Setup]] (menu 11).
 
 ---
 

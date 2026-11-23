@@ -1,12 +1,12 @@
 # GPU Fix
 
-Some TeknoParrot games have a setting that fixes problems on one kind of graphics card (AMD, NVIDIA or Intel). GPU fix finds your graphics card and sets the right value in every registered game that has this setting. It is main menu item 7, **GPU fix setup**.
+Some TeknoParrot games have a setting that fixes problems on one kind of graphics card (AMD, NVIDIA or Intel). GPU fix finds your graphics card and sets the right value in every registered game that has this setting. It is main menu item 8, **GPU fix setup**.
 
 ---
 
 ## Quick steps
 
-1. Start TeknoParrot Manager. At `Enter 1-17:` type `7` and press Enter.
+1. Start TeknoParrot Manager. At `Enter 1-18:` type `8` and press Enter.
 2. Wait. Setup finds your graphics card and updates the games that have the setting.
 3. Read the result. It says how many games were updated and how many already had the fix.
 

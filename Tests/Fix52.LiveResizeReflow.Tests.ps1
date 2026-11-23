@@ -586,7 +586,7 @@ Describe 'FIX52 ReShade chooser and main menu follow every size change' {
         for ($i = 1; $i -lt $sizes.Count; $i++) {
             $before = $sizes[$i - 1]
             $script:menuSize = $sizes[$i]
-            $choice = Read-MainMenuChoiceResponsive -Prompt 'Enter 1-17: ' -InitialWidth $before.Width -InitialHeight $before.Height
+            $choice = Read-MainMenuChoiceResponsive -Prompt 'Enter 1-18: ' -InitialWidth $before.Width -InitialHeight $before.Height
             $choice.Redraw | Should -BeTrue -Because ("{0}x{1} -> {2}x{3} redraws the menu" -f $before.Width, $before.Height, $script:menuSize.Width, $script:menuSize.Height)
             $tier = Get-ConsoleLayoutTier -Width $script:menuSize.Width -Height $script:menuSize.Height
             $screen = Render-MainMenuScreen -Tier $tier -Width $script:menuSize.Width -Height $script:menuSize.Height

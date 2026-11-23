@@ -120,6 +120,18 @@ Describe 'Game types in the Library health check (issues 387 and 389)' {
         (@(Get-TpmGameTypeRows -Report $report | Where-Object { $_.Area -eq 'Game types' })[0].Text) | Should -Match 'the emulator for 1 game is not in your TeknoParrot folder'
     }
 
+    It 'knows the TeknoDOS game type (DOS32, Taito Wolf, Midway, Virtuality games) and does not flag those games' {
+        $fixture = New-F387GRoot
+        Add-F387GProfile -Fixture $fixture -Code 'teknodos_agro' -Type 'TeknoDOS' -Exe 'agro.chd'
+        Add-F387GProfile -Fixture $fixture -Code 'teknodos_pf2012' -Type 'TeknoDOS' -Exe 'pf2012.zip'
+        Add-F387GProfile -Fixture $fixture -Code 'teknodos_dactyl' -Type 'TeknoDOS' -Exe 'DAC.EXE'
+        $report = Get-F387GReport -Fixture $fixture
+        @($report.Unknown).Count | Should -Be 0
+        @($report.EmulatorMissing).Count | Should -Be 0
+        @($report.NeedsManualExe).Count | Should -Be 0
+        @(Get-TpmGameTypeRows -Report $report | Where-Object { $_.Area -eq 'Game types' })[0].Text | Should -Be 'OK'
+    }
+
     It 'lists a game with no executable name and no setup file, but not one that has a setup file or a game path' {
         $fixture = New-F387GRoot
         $exe = Join-Path $fixture.Root 'picked.exe'

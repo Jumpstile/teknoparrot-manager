@@ -1,6 +1,6 @@
 # Postgres Setup
 
-Some Incredible Technologies (IT) games need a small database on your PC. Postgres setup installs it and gets each game's database ready. It is main menu item 11, **Postgres setup**. It sits under "Game Requirements (only for some games)".
+Some Incredible Technologies (IT) games need a small database on your PC. Postgres setup installs it and gets each game's database ready. It is main menu item 12, **Postgres setup**. It sits under "Game Requirements (only for some games)".
 
 The database is **PostgreSQL 8.3**. These games need it: all Golden Tee Live years (2006 to 2023, 2025, 2026), all Golden Tee PGA Tour games (2021 to 2023, 2025, 2026), Power Putt Live, Silver Strike Bowling Live, Target Toss Pro and Orange County Choppers Pinball. TPM finds them by what their profile says, so a new game of this kind needs no new TPM version.
 
@@ -12,7 +12,7 @@ Setup finds the games that need it by itself. If none of your registered games n
 
 ## Quick steps
 
-1. Start TeknoParrot Manager. At `Enter 1-17:` type `11` and press Enter.
+1. Start TeknoParrot Manager. At `Enter 1-18:` type `12` and press Enter.
 2. If PostgreSQL is not installed yet, setup first tells you what it will ask Windows for. Read it, then press Enter at `Press Enter to open the Windows permission window`. Windows then asks for permission. Click **Yes**. Use an administrator account of this PC. If your account is not an administrator, close TeknoParrot Manager and start it again with "Run as administrator". (Setup does not wait for Enter when no keyboard is there.)
 3. You are asked for two passwords (see below). Type each one twice.
 4. Wait. Setup installs PostgreSQL, makes each game's database from the game's own backup file, and tests it with the game's own settings.

@@ -72,27 +72,28 @@ You can also double-click `TeknoParrot-Manager.bat`.
 
 **Later runs.** You see `TeknoParrot Manager found your saved settings.` and `Use these settings? (Y/N, D = show them)`. Press `Y` to keep them, `D` to look first, or `N` to answer the first-time questions again. `N` deletes nothing.
 
-**4.** Pick from the main menu. Type a number and press Enter. The prompt is `Enter 1-17:`.
+**4.** Pick from the main menu. Type a number and press Enter. The prompt is `Enter 1-18:`.
 
 | # | Menu item | Use it when |
 |---|---|---|
 | 1 | AutoSync | Your games are ZIP files |
 | 2 | Register only | Your games are already extracted |
-| 3 | Propagate Controls | You want to copy controls again |
-| 4 | Crosshair setup | You want custom crosshairs on lightgun games |
-| 5 | ReShade setup | You want visual filters |
-| 6 | dgVoodoo2 setup | An old game crashes or shows a black screen |
-| 7 | GPU fix setup | You want the fix for your AMD, NVIDIA, or Intel card |
-| 8 | Force feedback (FFB) setup | You have a wheel or stick with force feedback |
-| 9 | BepInEx setup | A game needs BepInEx |
-| 10 | Region setup | You want to pick the country your games start in. See [[Region Setup]] |
-| 11 | Postgres setup | A game set to Existing PostgreSQL needs it (like Golden Tee Live). A game on Internal storage does not. See [[Postgres Setup]] |
-| 12 | Required game patches | A supported game needs a fix. See [[Required Game Patches]] |
-| 13 | Library health check | You want a status check that changes nothing |
-| 14 | Restore backup | You want to put something back. See [[Restore Backup]] and [[Reset and Restore]] |
-| 15 | Check for Updates | You want to see if a newer version is out. See [[Check for Updates]] |
-| 16 | Create Support Package | You need to send diagnostics when asking for help. See [[Support Package]] |
-| 17 | Exit | |
+| 3 | LaunchBox integration | You want to add your registered games to LaunchBox. Works any time, without registering first. See [[LaunchBox Integration]] |
+| 4 | Propagate Controls | You want to copy controls again |
+| 5 | Crosshair setup | You want custom crosshairs on lightgun games |
+| 6 | ReShade setup | You want visual filters |
+| 7 | dgVoodoo2 setup | An old game crashes or shows a black screen |
+| 8 | GPU fix setup | You want the fix for your AMD, NVIDIA, or Intel card |
+| 9 | Force feedback (FFB) setup | You have a wheel or stick with force feedback |
+| 10 | BepInEx setup | A game needs BepInEx |
+| 11 | Region setup | You want to pick the country your games start in. See [[Region Setup]] |
+| 12 | Postgres setup | A game set to Existing PostgreSQL needs it (like Golden Tee Live). A game on Internal storage does not. See [[Postgres Setup]] |
+| 13 | Required game patches | A supported game needs a fix. See [[Required Game Patches]] |
+| 14 | Library health check | You want a status check that changes nothing |
+| 15 | Restore backup | You want to put something back. See [[Restore Backup]] and [[Reset and Restore]] |
+| 16 | Check for Updates | You want to see if a newer version is out. See [[Check for Updates]] |
+| 17 | Create Support Package | You need to send diagnostics when asking for help. See [[Support Package]] |
+| 18 | Exit | |
 
 After each item you come back to this menu. In a small window the menu shows a short layout. At the prompt you can also type `H` (help), `L` (view log), or `Q` (quit).
 
@@ -110,38 +111,45 @@ Many result screens say `Press D for details`. Press `D` for the full technical 
   1) AutoSync        -- Extract your game ZIPs into your games
                         folder, then register the games.
   2) Register only   -- Register games already in the games folder.
-  3) Propagate Controls -- Copy controls from a game you set up
+  3) LaunchBox integration -- Add your registered games to LaunchBox,
+                        fill in details and playlists, link art, keep
+                        LaunchBox in step. Opens the LaunchBox choices
+                        (P, A, G, V, S, L, C, F, B) any time, without
+                        registering or extracting anything first. If you
+                        have no LaunchBox yet, it tells you so and how
+                        to continue.
+  4) Propagate Controls -- Copy controls from a game you set up
                         to games of the same type, without
                         going through AutoSync/Register first.
 
   GAME ENHANCEMENTS (OPTIONAL -- NOT EVERY GAME NEEDS THEM)
   ---------------------------------------------------------
-  4) Crosshair setup -- Pick and deploy custom crosshairs to all
+  5) Crosshair setup -- Pick and deploy custom crosshairs to all
                         registered lightgun games.
-  5) ReShade setup   -- ReShade adds post-processing filters on top of
+  6) ReShade setup   -- ReShade adds post-processing filters on top of
                         the game -- sharper image, better colors,
                         CRT-style scanlines, and screen borders, for a
                         more authentic arcade-cabinet look.
-  6) dgVoodoo2 setup -- Fix some old DX8, DirectDraw, and Glide game
+  7) dgVoodoo2 setup -- Fix some old DX8, DirectDraw, and Glide game
                         crashes or black screens.
-  7) GPU fix setup   -- Auto-detect your GPU (AMD / NVIDIA / Intel) and
+  8) GPU fix setup   -- Auto-detect your GPU (AMD / NVIDIA / Intel) and
                         apply the matching compatibility fix to every
                         registered game that has one.
-  8) Force feedback (FFB) setup -- Wheel/stick rumble and force feedback.
+  9) Force feedback (FFB) setup -- Wheel/stick rumble and force feedback.
                         Covers TeknoParrot's built-in FFB Blaster (needs a
                         paid membership) and a free third-party plugin.
-  9) BepInEx setup -- BepInEx is a modding framework some games use
+  10) BepInEx setup -- BepInEx is a modding framework some games use
                         for extra features and fixes. TPM can install or
                         update it after you approve; repair-reset is
                         unavailable. Unsafe folders and failed downloads
                         make no changes.
-  10) Region setup -- Pick a country (like USA or Europe) and set it
+  11) Region setup -- Pick a country (like USA or Europe) and set it
                         on the games that offer it. You can pick which
                         games, and go back to Auto at any time.
 
   GAME REQUIREMENTS (ONLY FOR SOME GAMES)
   ---------------------------------------
-  11) Postgres setup -- For games set to Existing PostgreSQL.
+  12) Postgres setup -- For games set to Existing PostgreSQL.
                         Installs/configures local PostgreSQL 8.3 for
                         Golden Tee Live (2020 too), Power Putt Live,
                         Silver Strike Bowling Live, Target Toss Pro.
@@ -151,7 +159,7 @@ Many result screens say `Press D for details`. Press `D` for the full technical 
                         game's own backup, then tested before ready.
                         Administrator is required if PostgreSQL isn't
                         installed yet.
-  12) Required game patches -- Find required patches for supported exact
+  13) Required game patches -- Find required patches for supported exact
                         game builds using your local Main or
                         Supplementary ZIP files. TPM validates the
                         game, backs up, applies, and verifies files.
@@ -159,25 +167,25 @@ Many result screens say `Press D for details`. Press `D` for the full technical 
 
   MAINTENANCE AND RECOVERY
   ------------------------
-  13) Library health check -- Reports registered/broken/unregistered games
+  14) Library health check -- Reports registered/broken/unregistered games
                         plus GPU fix / FFB Blaster / dgVoodoo2 and
                         ReShade/BepInEx counts, without changing
                         anything. Any repair it suggests is a separate
                         choice that you confirm first.
-  14) Restore backup -- Restore selected backup files with verification.
+  15) Restore backup -- Restore selected backup files with verification.
                         LaunchBox recovery first backs up current targets;
                         keep LaunchBox and BigBox closed throughout.
 
   APPLICATION
   -----------
-  15) Check for Updates -- Manual check against the latest
+  16) Check for Updates -- Manual check against the latest
                         GitHub release. Nothing is downloaded or changed
                         without your explicit confirmation.
-  16) Create Support Package -- Gather safe TPM, TeknoParrot, and game diagnostics
+  17) Create Support Package -- Gather safe TPM, TeknoParrot, and game diagnostics
                         into one ZIP you can send when asking for help.
-  17) Exit
+  18) Exit
 
-Enter 1-17:
+Enter 1-18:
 ```
 </details>
 
@@ -210,24 +218,24 @@ Set up the controls once, and TPM copies them to the other games of the same typ
    - **Driving:** Daytona Championship USA, Initial D, OutRun 2 SP
    - **Lightgun:** House of the Dead 4, Aliens Extermination
    - **Trackball:** Golden Tee Live, Silver Strike Bowling
-2. Run TPM again (item 1 or 2). After registering, it copies the controls on its own. To copy without registering, choose item 3. See [[Propagate Controls]].
+2. Run TPM again (item 1 or 2). After registering, it copies the controls on its own. To copy without registering, choose item 4. See [[Propagate Controls]].
 3. Start **one** game and test it before you trust the rest.
 
 ---
 
 ## More setup (any time)
 
-- [[Crosshairs]] (4), [[ReShade]] (5), [[dgVoodoo2]] (6), [[GPU Fix]] (7), [[FFB Setup]] (8), [[BepInEx]] (9)
-- [[Region Setup]] (10)
-- [[Postgres Setup]] (11), [[Required Game Patches]] (12)
-- [[Health Check]] (13)
+- [[Crosshairs]] (5), [[ReShade]] (6), [[dgVoodoo2]] (7), [[GPU Fix]] (8), [[FFB Setup]] (9), [[BepInEx]] (10)
+- [[Region Setup]] (11)
+- [[Postgres Setup]] (12), [[Required Game Patches]] (13)
+- [[Health Check]] (14)
 - Games that will not start because files are missing (PS3 firmware, Chihiro files): see [[Game Startup Files]], which also covers the optional System 11 saved files. [[CPS3 First-Boot Files]] covers the optional CPS3 step.
-- [[LaunchBox Integration]]
+- [[LaunchBox Integration]] (3)
 
 ---
 
 ## If something goes wrong
 
-- Your UserProfiles are backed up before AutoSync changes anything (not in a preview). To put things back, choose **14) Restore backup**. See [[Restore Backup]] and [[Reset and Restore]].
-- To ask for help, choose **16) Create Support Package**. See [[Support Package]].
+- Your UserProfiles are backed up before AutoSync changes anything (not in a preview). To put things back, choose **15) Restore backup**. See [[Restore Backup]] and [[Reset and Restore]].
+- To ask for help, choose **17) Create Support Package**. See [[Support Package]].
 - Common problems: [[Troubleshooting]].

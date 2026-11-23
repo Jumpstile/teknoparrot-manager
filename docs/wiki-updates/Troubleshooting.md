@@ -2,7 +2,7 @@
 
 Find the problem that looks like yours, then follow the steps under it. Press `D` on a result screen to see the details. The full story is also in the log, `TeknoParrot-Manager.log` (in `TeknoParrotManager\Logs` inside your TeknoParrot folder).
 
-If you are stuck, make a package with **16) Create Support Package** and ask for help. See [[Support Package]]. Questions and bug reports go to the [issues page](https://github.com/Jumpstile/teknoparrot-manager/issues).
+If you are stuck, make a package with **17) Create Support Package** and ask for help. See [[Support Package]]. Questions and bug reports go to the [issues page](https://github.com/Jumpstile/teknoparrot-manager/issues).
 
 ---
 
@@ -78,7 +78,7 @@ There may be no set-up reference game for that control type yet, the game is in 
 After a copy run, a skipped type names one game of that type to set up first (`Games to set up first`). Set that game up in TeknoParrotUI, then run Propagate Controls again. Choosing a device in the binding plan does not set up a game.
 
 **A game's controls are wrong after copying.**
-Use **14) Restore backup** and look at the list before you restore. Fix the reference game's controls in TeknoParrotUI, then copy again.
+Use **15) Restore backup** and look at the list before you restore. Fix the reference game's controls in TeknoParrotUI, then copy again.
 
 **A game has the wrong control type** (for example a trackball game treated as a lightgun).
 Add a `familyOverride` entry to `TeknoParrot-Manager.overrides.json`:
@@ -149,14 +149,14 @@ ReShade may not be installed for that game, or the game uses Home for something 
 The game may already use TeknoParrot's own CRT look. When you pick a look, TPM asks whether to turn TeknoParrot's off for that game (`[T]`) or keep it. To bring it back, use ReShade > Undo ReShade changes, or Restore backup.
 
 **A bezel is not shown, or a game is skipped in the bezel step.**
-The bezel step (menu 5, then `B`) needs ReShade set up for the game first. A game that shares its folder with other games is skipped. A Low match or a different sequel number is not applied unless you pick it. TPM puts the file where ReShade looks for it, but it is not confirmed that every game shows it. See [[ReShade]].
+The bezel step (menu 6, then `B`) needs ReShade set up for the game first. A game that shares its folder with other games is skipped. A Low match or a different sequel number is not applied unless you pick it. TPM puts the file where ReShade looks for it, but it is not confirmed that every game shows it. See [[ReShade]].
 
 ---
 
 ## Other messages
 
 **BepInEx says the game folder is unsafe.**
-The game must be inside your games folder and must not contain a junction or symlink. Fix the profile path or remove the link, then run item 9 again. Nothing is downloaded or written meanwhile.
+The game must be inside your games folder and must not contain a junction or symlink. Fix the profile path or remove the link, then run item 10 again. Nothing is downloaded or written meanwhile.
 
 **BepInEx says "TPM TRANSACTION ROLLBACK FAILED".**
 TPM could not prove it undid its own changes. Do not retry. Close TeknoParrot, keep the `BepInEx_Backup_<id>` folder inside the game folder, and ask for help. See [[BepInEx]].

@@ -32,23 +32,24 @@ Type a number and press Enter. After each task you come back to this menu.
 |---|---|---|---|
 | 1 | AutoSync | Extracts your game ZIPs, then registers the games | [[AutoSync]] |
 | 2 | Register only | Registers games you already extracted | [[Register]] |
-| 3 | Propagate Controls | Copies controls from a game you set up to games of the same type | [[Propagate Controls]] |
-| 4 | Crosshair setup | Adds custom crosshairs to lightgun games | [[Crosshairs]] |
-| 5 | ReShade setup | Visual filters: sharper image, CRT-style scanlines, borders | [[ReShade]] |
-| 6 | dgVoodoo2 setup | Fixes some old DX8, DirectDraw, and Glide games | [[dgVoodoo2]] |
-| 7 | GPU fix setup | Finds your graphics card and applies the matching fix | [[GPU Fix]] |
-| 8 | Force feedback (FFB) setup | Wheel and stick force feedback | [[FFB Setup]] |
-| 9 | BepInEx setup | Installs or updates BepInEx, a modding framework some games use | [[BepInEx]] |
-| 10 | Region setup | Picks the country your games start in | [[Region Setup]] |
-| 11 | Postgres setup | Sets up PostgreSQL for games set to Existing PostgreSQL (games on Internal storage need none) | [[Postgres Setup]] |
-| 12 | Required game patches | Installs required fixes for exact game versions | [[Required Game Patches]] |
-| 13 | Library health check | Checks your library without changing it | [[Health Check]] |
-| 14 | Restore backup | Puts back UserProfiles, PostgreSQL, or LaunchBox backups, or resets games | [[Restore Backup]], [[Reset and Restore]] |
-| 15 | Check for Updates | Checks GitHub for a newer release | [[Check for Updates]] |
-| 16 | Create Support Package | Makes one ZIP of logs and reports to send when you ask for help | [[Support Package]] |
-| 17 | Exit | Closes the program | |
+| 3 | LaunchBox integration | Adds your registered games to LaunchBox, fills in details and playlists, links art, and keeps LaunchBox in step. Opens any time, without registering first | [[LaunchBox Integration]] |
+| 4 | Propagate Controls | Copies controls from a game you set up to games of the same type | [[Propagate Controls]] |
+| 5 | Crosshair setup | Adds custom crosshairs to lightgun games | [[Crosshairs]] |
+| 6 | ReShade setup | Visual filters: sharper image, CRT-style scanlines, borders | [[ReShade]] |
+| 7 | dgVoodoo2 setup | Fixes some old DX8, DirectDraw, and Glide games | [[dgVoodoo2]] |
+| 8 | GPU fix setup | Finds your graphics card and applies the matching fix | [[GPU Fix]] |
+| 9 | Force feedback (FFB) setup | Wheel and stick force feedback | [[FFB Setup]] |
+| 10 | BepInEx setup | Installs or updates BepInEx, a modding framework some games use | [[BepInEx]] |
+| 11 | Region setup | Picks the country your games start in | [[Region Setup]] |
+| 12 | Postgres setup | Sets up PostgreSQL for games set to Existing PostgreSQL (games on Internal storage need none) | [[Postgres Setup]] |
+| 13 | Required game patches | Installs required fixes for exact game versions | [[Required Game Patches]] |
+| 14 | Library health check | Checks your library without changing it | [[Health Check]] |
+| 15 | Restore backup | Puts back UserProfiles, PostgreSQL, or LaunchBox backups, or resets games | [[Restore Backup]], [[Reset and Restore]] |
+| 16 | Check for Updates | Checks GitHub for a newer release | [[Check for Updates]] |
+| 17 | Create Support Package | Makes one ZIP of logs and reports to send when you ask for help | [[Support Package]] |
+| 18 | Exit | Closes the program | |
 
-Items 4 to 10 are optional. Items 11 and 12 are only for some games.
+Items 5 to 11 are optional. Items 12 and 13 are only for some games.
 
 ---
 

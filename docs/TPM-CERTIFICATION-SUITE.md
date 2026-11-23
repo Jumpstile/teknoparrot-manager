@@ -171,7 +171,7 @@ gate before RC8 release authorization, not post-release hardening or optional po
 - Run the package in default-size Windows Terminal and in a constrained-height
   terminal.
 - Capture screenshots and inspect the rendered output.
-- Verify the title/version, options 1-17, H/L/Q controls, and prompt appear
+- Verify the title/version, options 1-18, H/L/Q controls, and prompt appear
   directly below the choices.
 - Verify there is no giant empty frame, clipped choice, or lost prompt.
 
@@ -185,7 +185,7 @@ gate before RC8 release authorization, not post-release hardening or optional po
 
 ### 4. ReShade runtime UX
 
-- Open option 5 from the package and verify the 17 profiles (Original plus 16
+- Open option 6 from the package and verify the 17 profiles (Original plus 16
   arcade looks, built from 12 of the 25 pinned shader effects) appear best first
   in the preview selector and terminal list as [1]-[17], in the CRT Choices
   (11 looks) and then Main Catalog (5 looks) groups, each with its one-line
@@ -224,7 +224,7 @@ gate before RC8 release authorization, not post-release hardening or optional po
 ### 6. Feature workflow routing
 
 - Verify GPU Fix, dgVoodoo2, ReShade, BepInEx, FFB, and required patches skip
-  broken paths safely and route to option 13, Library Health Check.
+  broken paths safely and route to option 14, Library Health Check.
 - Verify those workflows do not expose duplicate feature-specific path-repair
   wizards.
 

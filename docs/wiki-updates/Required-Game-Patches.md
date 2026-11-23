@@ -1,6 +1,6 @@
-# Required Game Patches (menu 12)
+# Required Game Patches (menu 13)
 
-Some game versions need a small fix before they run right. It can be one changed file or a plugin. Menu 12 finds the fixes for the exact versions you have and installs them.
+Some game versions need a small fix before they run right. It can be one changed file or a plugin. Menu 13 finds the fixes for the exact versions you have and installs them.
 
 TeknoParrot Manager never downloads these fixes. They come from your own game ZIPs: the Main or Supplementary folder you set up for AutoSync.
 
@@ -9,7 +9,7 @@ TeknoParrot Manager never downloads these fixes. They come from your own game ZI
 ## Use it
 
 1. Close the game first. TeknoParrot Manager stops if it is running.
-2. Choose **12** in the main menu.
+2. Choose **13** in the main menu.
 3. Pick one:
 
 | Key | What it does |
