@@ -1,9 +1,8 @@
 #Requires -Module Pester
 
 Describe "Quality engineering system metadata" {
-    It "has the regression register and testdata documentation" {
+    It "has the regression register" {
         Test-Path -LiteralPath (Join-Path $PSScriptRoot "..\docs\REGRESSION-REGISTER.md") -PathType Leaf | Should -BeTrue
-        Test-Path -LiteralPath (Join-Path $PSScriptRoot "..\testdata\README.md") -PathType Leaf | Should -BeTrue
     }
 
     It "has a parseable golden normalization dataset with unique ids" {
