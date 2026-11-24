@@ -693,7 +693,7 @@ Promoted to RC1 for the upcoming 1.0 release. No new functional changes beyond w
 
 ## v0.99.42 BETA (2026-07-01)
 
-- **Changed:** the main menu is reorganized into four logical groups -- Library Management (1-3), Game Enhancements (4-9), Maintenance and Recovery (10-12), Application (13-14). Every wiki page's "(Mode N)" heading updated to match. See [[Home]] for the current full list, or `ARCHITECTURE.md` in the repository for the complete old-to-new mode number mapping.
+- **Changed:** the main menu is reorganized into four logical groups -- Library Management (1-3), Game Enhancements (4-9), Maintenance and Recovery (10-12), Application (13-14). Every wiki page's "(Mode N)" heading updated to match. See [[Home]] for the current full list.
 
 ## v0.99.41 BETA (2026-07-01)
 

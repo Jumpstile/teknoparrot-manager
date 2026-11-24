@@ -35,7 +35,6 @@ Describe "No AI/tool attribution in tracked files" {
         $selfReferencingFiles = @(
             "Tests/NoAIAttribution.Tests.ps1",
             "RELEASE-SAFETY-CHECKLIST.md",
-            "CONSTITUTION.md",
             ".github/workflows/strip-ai-attribution.yml"
         )
 

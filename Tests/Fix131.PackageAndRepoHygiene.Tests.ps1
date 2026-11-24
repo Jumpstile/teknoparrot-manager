@@ -108,7 +108,7 @@ Describe 'FIX131 N11 no Target Toss Pro Bags profile is shipped, added or restor
     It 'never says in a guide that TeknoParrot Manager adds, restores or installs a Bags profile' {
         # Mutation: write "TeknoParrot Manager restores the Target Toss Pro Bags profile" (or adds, installs, ships, copies it) into any guide, wiki page or changelog line that mentions Bags.
         $guides = @(
-            'README.md', 'QUICKSTART.md', 'LESSONS_LEARNED.md', 'TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt', 'TeknoParrot-Manager-CHANGELOG.txt'
+            'README.md', 'QUICKSTART.md', 'TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt', 'TeknoParrot-Manager-CHANGELOG.txt'
         ) | ForEach-Object { Join-Path $script:F131Root $_ }
         $guides += @(Get-ChildItem -LiteralPath (Join-Path $script:F131Root 'docs') -Recurse -File | Where-Object { $_.Extension -in @('.md', '.txt') -and $_.FullName -notmatch '[\\/]docs[\\/](governance|remediation|adr)[\\/]' } | ForEach-Object { $_.FullName })
         $claims = New-Object System.Collections.Generic.List[string]

@@ -136,7 +136,7 @@ The [Quick Start guide](QUICKSTART.md) has more detail on each step, and [Start 
 
 ## Getting help
 
-Found a problem? Choose **Create Support Package** in TeknoParrot Manager and attach the ZIP it makes to a new issue on the [issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues). It collects safe diagnostics automatically. See [Contributing](CONTRIBUTING.md) and [Security](SECURITY.md).
+Found a problem? Choose **Create Support Package** in TeknoParrot Manager and attach the ZIP it makes to a new issue on the [issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues). It collects safe diagnostics automatically. See [Security](SECURITY.md).
 
 ## What it does not do
 
