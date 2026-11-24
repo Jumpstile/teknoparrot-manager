@@ -15,23 +15,32 @@
     before changes, and a read-only validation report. Details stay one
     step away (see docs\ADVANCED-USERS.md).
   - The guides now explain why a game can work from TeknoParrot but not
-    from RetroBat, and who does what.
-  - The guides give the right bezel undo path (6, B, U) and the validation report.
-
+    from RetroBat, and who does what. They also give the right bezel undo
+    path (6, B, U).
+  - AutoSync no longer takes a game's ZIP as already unpacked when the folder
+    it found belongs to a different game with a similar name. Each ZIP gets
+    its own folder, and a saved record that names another game's folder is
+    ignored. Repair says when it cannot tell game paths apart.
+  - Unpacking a game shows progress by size, and Ctrl+C shows "canceled"
+    instead of "failed". If the games folder you chose cannot be used, Q goes
+    back to the menu, and a closed browse window asks again.
+  - The PostgreSQL offer after adding games says how many other games still
+    need it. In a preview it names them without asking for anything secret.
+    Setup screens now name Golden Tee Live 2020. If PostgreSQL cannot be put
+    back after a stopped setup, the screen says what happened to your
+    databases and that the service is the open problem.
+  - The Capcom CPS3 first-boot files step lists your CPS3 games and stops
+    without changes while a CPS3 game is running.
+  - Before you confirm Copy Controls, each control type shows which example
+    games it is copied from, and games with no example are listed as still
+    needing controls.
+  - BepInEx setup shows your list before installing: new installs and
+    updates apart, each with a reason, and you can take games off. Library
+    health check counts BepInEx games as installed, missing, not supported
+    or not checked.
   v1.0 RC9.2 (changes since RC9.1)
   ----------------------------------------------------------------
 
-  - AutoSync no longer takes a game's ZIP as already unpacked when the folder
-    it found belongs to a different game with a similar name (for example
-    two versions of one title). Each ZIP gets its own folder, and a saved
-    record that names another game's folder is ignored. The log says why.
-  - Repair no longer says "could not find" for a game path it cannot tell
-    apart; it says it could not determine a unique game path.
-  - When the games folder you chose cannot be used, you can now type Q to
-    go back to the menu without changing anything, and a closed browse
-    window asks again.
-  - Unpacking a game now shows progress by size, and pressing Ctrl+C
-    shows "canceled" instead of "failed".
   - TeknoParrot Manager is now named the same way everywhere in the guides,
     and the guides no longer mention a product it does not support.
   - LaunchBox integration now has its own item on the main menu, so you
@@ -40,32 +49,10 @@
     each game's own settings file, lists any game controller by name,
     and upgrades old plugin files it recognizes (with a backup). It asks
     first.
-  - The PostgreSQL offer after adding games now says how many other games
-    still need it and how many are already set up and left alone. In a
-    preview it says which games would need PostgreSQL and a password,
-    without asking or showing anything secret. The PostgreSQL menu and
-    setup screen now name Golden Tee Live 2020.
-  - The Capcom CPS3 first-boot files step now lists your CPS3 games and
-    stops without changing anything while a CPS3 game is still running.
   - Library health check now knows the new TeknoParrot game type used by
     the DOS32 PC games, Taito Wolf, Midway Quicksilver II and Graphite,
     Interactive Light, dgPIX, Voodoo Banshee, and Virtuality SU2000 and
     SU3000 games, and no longer calls it unknown.
-  - Before you confirm Copy Controls, each control type now shows which
-    example games it is copied from. When registration ends, games that have
-    no example game yet are listed as still needing controls, so "finished"
-    no longer sounds like controls are done.
-  - BepInEx setup now shows your list before it installs anything. New
-    installs and updates are listed apart, each with the reason, and you can
-    take games off the list; the numbers do not change. The result names the
-    games you did not pick (with the drive letter of a drive that is not
-    connected) apart from the games you picked.
-  - Library health check now counts BepInEx games as installed, missing, not
-    supported or not checked, and Details shows the drive and saved path of
-    each game it cannot reach.
-  - If PostgreSQL cannot be put back the way it was after a setup that
-    stopped, the screen now says what happened to your databases and that
-    the PostgreSQL service is the open problem, and you return to the menu.
 
   v1.0 RC9.1 (changes since RC9)
   ----------------------------------------------------------------
