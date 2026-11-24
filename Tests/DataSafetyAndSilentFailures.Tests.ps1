@@ -276,6 +276,13 @@ Describe 'A ZIP that failed or was refused is never a green AutoSync recap' {
         $bad.Status | Should -Be 'Attention'
         @($bad.Needs) | Should -Contain '2 ZIP files could not be unpacked, so those games are not set up. The log has the reason.'
     }
+
+    It 'the recap says registration is finished but controls are not when games have no reference' {
+        # Mutation: drop ControlsNoReference -> Done reads as if controls were set up.
+        $recap = Get-TpmRegistrationRecap -AutoSyncRan $false -NewlyRegistered 2 -ControlsNoReference 25
+        $recap.Status | Should -Be 'Attention'
+        (@($recap.Needs) -join ' ') | Should -Match 'Registration is finished, but controls are not: 25 games have no controls yet'
+    }
 }
 
 Describe 'A finished and verified PostgreSQL repair is reported as finished' {

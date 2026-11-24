@@ -20,9 +20,9 @@ BeforeAll {
     . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $script:DisplayVersion = 'v1.0 RC9.2'
+    $script:DisplayVersion = 'v1.0 RC9.3'
     $script:ScriptVersion = '1.0'
-    $script:ReleaseCandidateLabel = 'RC9.2'
+    $script:ReleaseCandidateLabel = 'RC9.3'
     $script:ActiveTpmWorkflowStatus = $null
     $script:PostgresRecoveryStatus = $null
     $script:PostgresRecoveryResumeState = $null

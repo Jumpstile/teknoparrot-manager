@@ -8,7 +8,7 @@ TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-This guide is for v1.0 RC9.2.
+This guide is for v1.0 RC9.3.
 
 
 ## Start here: your first game in about 10 minutes
@@ -19,7 +19,7 @@ Allow about 10 minutes once your downloads are ready.
 
 Installing TeknoParrot, updates, large games, and special controllers take longer.
 
-Release page of the latest published release: [v1.0 RC9.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2).
+Release page of the latest published release: [v1.0 RC9.3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3).
 
 You need:
 
@@ -1827,7 +1827,7 @@ It needs ReShade to be set up for the game first (see above). A game that does n
    The bezels are copied to each game's `reshade-shaders\Textures` folder as `bezel.png` and checked. A bezel you placed there yourself is kept unless you say yes to replacing it, and a copy of it is saved first.
    A game that shares its folder with other games is skipped, because one bezel would show on all of them.
 
-To undo, type `5`, `B`, then `U`. Each bezel TeknoParrot Manager copied is removed, and a bezel you had before is put back. A file you changed since is left alone.
+To undo, type `6`, `B`, then `U`. Each bezel TeknoParrot Manager copied is removed, and a bezel you had before is put back. A file you changed since is left alone.
 
 Good to know: TeknoParrot Manager puts the file where ReShade looks for it. It has not been confirmed that every game shows it. Games that run in exclusive fullscreen, or start through a loader program, may not show it. Press `D` at the preview for Details.
 
@@ -2341,7 +2341,7 @@ TeknoParrot Manager never removes an existing BepInEx installation (see "Rollbac
 3. Choose `Y` to install or update, `B` to go back, or `N` to cancel. Next: nothing changes until you approve the listed operation.
 4. Read the result. It says how many games you selected and how many were changed, already set up, skipped or failed (for example `You selected 4 games: 3 changed, 1 skipped.`), and where the backup is.
 
-The prompt is `[Y] Install/update  [B] Back  [N] Cancel`. It is skipped when the only games are ones you picked by number from the "do not have BepInEx" list, because picking them was your answer. There is no repair-reset choice. After a successful or no-change run, the screen waits for one Enter before it goes back.
+You first see your list: games with no BepInEx are new installs, games that already have it are updates, each with the reason it is on the list. Picking a game only puts it on the list, and the numbers do not change. The prompt is `[Y] Install/update  [E] Edit the list (remove games)  [B] Back  [N] Cancel`. Nothing is installed until you choose `Y`. There is no repair-reset choice. After a successful or no-change run, the screen waits for one Enter before it goes back.
 
 The result reports these groups:
 
@@ -3230,6 +3230,14 @@ To always preview without being asked, start the script with `-DryRun`:
 
 `-DryRun` previews AutoSync or Register only. `-Unattended` runs only the Health Check, so it is not a way to preview a scheduled AutoSync.
 
+To check a copy before a release or on a test PC without any questions, run the read-only validation report:
+
+```powershell
+.\TeknoParrot-Manager.ps1 -ValidationReport -ValidationRoot "D:\TeknoParrot" -ValidationJsonPath "D:\report.json"
+```
+
+It prints the version and script checksum, the PowerShell and Windows versions, the TeknoParrot folder and saved settings (the saved PostgreSQL password is only shown as yes or no), how many games are registered, which games still need PostgreSQL settings, the files that ship with TeknoParrot Manager, and the compatibility warnings. `-ValidationRoot` is optional when your settings are saved. `-ValidationJsonPath` is optional and is the only file it writes. It never changes TeknoParrot, your game profiles, your saved settings or the log. Exit codes: 0 pass, 3 action required, 4 failed (for example no TeknoParrot folder), 1 the report could not be made.
+
 To check an outside controller list you already have (for example RetroBat's `teknoparrot.yml`), run the read-only list check:
 
 ```powershell
@@ -3861,5 +3869,5 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> This guide is for v1.0 RC9.2. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
+> This guide is for v1.0 RC9.3. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
 

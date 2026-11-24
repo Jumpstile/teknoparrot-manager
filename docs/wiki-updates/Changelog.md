@@ -2,12 +2,43 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-RC9.2 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
-The previous published release was v1.0 RC9.1: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1. RC9 and RC8.4 and older are earlier published releases. RC4 and RC5 are historical; RC4 is superseded.
+RC9.3 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
+The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2. RC9.1, RC9, RC8.4 and older are earlier published releases. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
 ---
+
+## v1.0 RC9.3 (changes since RC9.2)
+
+- TeknoParrot Manager is made for beginners and is also useful if you
+  already know TeknoParrot: repeatable bulk steps, previews, backups
+  before changes, and a read-only validation report. Details stay one
+  step away (see docs\ADVANCED-USERS.md).
+- The guides now explain why a game can work from TeknoParrot but not
+  from RetroBat, and who does what. They also give the right bezel undo
+  path (6, B, U).
+- AutoSync no longer takes a game's ZIP as already unpacked when the folder
+  it found belongs to a different game with a similar name. Each ZIP gets
+  its own folder, and a saved record that names another game's folder is
+  ignored. Repair says when it cannot tell game paths apart.
+- Unpacking a game shows progress by size, and Ctrl+C shows "canceled"
+  instead of "failed". If the games folder you chose cannot be used, Q goes
+  back to the menu, and a closed browse window asks again.
+- The PostgreSQL offer after adding games says how many other games still
+  need it. In a preview it names them without asking for anything secret.
+  Setup screens now name Golden Tee Live 2020. If PostgreSQL cannot be put
+  back after a stopped setup, the screen says what happened to your
+  databases and that the service is the open problem.
+- The Capcom CPS3 first-boot files step lists your CPS3 games and stops
+  without changes while a CPS3 game is running.
+- Before you confirm Copy Controls, each control type shows which example
+  games it is copied from, and games with no example are listed as still
+  needing controls.
+- BepInEx setup shows your list before installing: new installs and
+  updates apart, each with a reason, and you can take games off. Library
+  health check counts BepInEx games as installed, missing, not supported
+  or not checked.
 
 ## v1.0 RC9.2 (changes since RC9.1)
 

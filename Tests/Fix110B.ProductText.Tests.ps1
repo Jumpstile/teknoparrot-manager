@@ -323,7 +323,7 @@ Describe 'FIX110B S-10 BepInEx: source-folder reason, no repair-reset, and the r
     It 'does not offer repair-reset any more: no R choice, no reset variable, no always-refused throw' {
         # Mutation: bring the R choice back -> the user picks a reset that is refused only after download and staging.
         $text = $script:F110Functions['Invoke-BepInExUpdateCheckLegacy'].Extent.Text
-        $text | Should -Match "-Choices @\('Y', 'B', 'N'\)"
+        $text | Should -Match "-Choices @\('Y', 'E', 'B', 'N'\)"
         $text | Should -Not -Match "-Choices @\('Y', 'R'"
         $code = (($text -split "`r?`n") | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
         $code | Should -Not -Match '(?i)repair.?reset|repairReset|RepairRequired'

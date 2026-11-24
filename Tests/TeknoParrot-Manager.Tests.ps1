@@ -8804,6 +8804,20 @@ Describe "BepInEx authorized-root and transaction guards" {
             Should -Invoke New-BepInExUpdateBackup -Times 0 -Exactly
             Should -Invoke Invoke-TpmTransactionalTreePromote -Times 0 -Exactly
         }
+        It "lets the user take a game off the list before anything is installed" {
+            # Mutation: install without asking, or ignore the removal -> a download starts for a game the user took off the list.
+            $script:bepChoiceAnswers = New-Object System.Collections.Generic.Queue[string]
+            foreach ($answer in @('E', '1')) { $script:bepChoiceAnswers.Enqueue($answer) }
+            Mock Read-HostSafe { $script:bepChoiceAnswers.Dequeue() }
+            Mock Invoke-TpmDownload { throw 'download must not run when the list is empty' }
+
+            $result = Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+
+            $result.Outcome | Should -Be 'NO_OP'
+            @($result.PickedItems).Count | Should -Be 0
+            Should -Invoke Invoke-TpmDownload -Times 0 -Exactly
+            Should -Invoke Invoke-TpmTransactionalTreePromote -Times 0 -Exactly
+        }
         It "leaves the installed BepInEx tree and unrelated game files unchanged when the install is declined" {
             [void][System.IO.Directory]::CreateDirectory((Join-Path $script:bepGame 'BepInEx\core'))
             [System.IO.File]::WriteAllText((Join-Path $script:bepGame 'BepInEx\core\one.dll'), 'one')
@@ -11114,7 +11128,7 @@ Describe "Manager script version identity" {
     }
 
     It "extracts the current script's literal identity from its full source" {
-        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC9.2'
+        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC9.3'
     }
 
     It "ignores assignment-looking lines inside a here-string" {
@@ -13630,7 +13644,8 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
         $warningBlock | Should -Match 'ExpectedPath'
         $warningBlock | Should -Match 'DetectorMethod|DetectorSource'
         $warningBlock | Should -Match 'Confidence'
-        $warningBlock | Should -Match 'Verify or restore this component through your normal TeknoParrot installation/update process'
+        $warningBlock | Should -Match 'Verify or restore this component through your normal TeknoParrot"'
+        $warningBlock | Should -Match 'installation/update process using TeknoParrotUI'
         $warningBlock | Should -Not -Match '(?i)anti[- ]?virus|quarantine'
         $script:ProductionSource | Should -Match '\$builder\.AppendLine\("  Contract : \$\(\$e\.ContractId\)'
         $script:ProductionSource | Should -Match '\$builder\.AppendLine\("  Detector : \$\(\$e\.DetectorMethod\)'

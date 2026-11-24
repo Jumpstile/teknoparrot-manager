@@ -51,7 +51,7 @@ Describe 'The counts line adds up to the games selected' {
 }
 
 Describe 'dgVoodoo2 names every selected game' {
-    It 'explains 4 selected and 3 changed: the fourth is skipped, named, and the drive line points to Library health check 13' {
+    It 'explains 4 selected and 3 changed: the fourth is skipped, named, and the drive line points to Library health check 14' {
         $result = [pscustomobject]@{
             NoOp = $false; Deployed = 3; PresetOverrides = 0; AlreadyConfigured = @()
             PickedGames = @('g1', 'g2', 'g3', 'g4')
@@ -62,7 +62,7 @@ Describe 'dgVoodoo2 names every selected game' {
         $view = Get-TpmDgVoodoo2ResultView -Result $result
         $view.Done[0] | Should -BeExactly 'You selected 4 games: 3 changed, 1 skipped.'
         ($view.Needs -join ' ') | Should -Match 'g4'
-        $view.Next | Should -Match '13 \(Library health check\)'
+        $view.Next | Should -Match '14 \(Library health check\)'
     }
     It 'lists a failed game with its reason and never calls the step done' {
         $result = [pscustomobject]@{
@@ -195,7 +195,7 @@ Describe 'The patch step summary' {
         $text = Get-ScreenText
         $text | Should -Match 'You selected 4 games: 1 changed, 1 already set up, 1 skipped, 1 failed\.'
         $text | Should -Match 'D:\\TPM\\Undo\\game-one'
-        $text | Should -Match '13 \(Library health check\)'
+        $text | Should -Match '14 \(Library health check\)'
     }
 }
 
@@ -211,6 +211,75 @@ Describe 'The GPU fix result' {
         $view = Get-TpmGpuFixResultView -Result $result
         $view.Done[0] | Should -BeExactly 'You selected 3 games: 2 changed, 1 skipped.'
         $view.Done[1] | Should -Match 'D:\\TP\\bk'
-        $view.Next | Should -Match '13 \(Library health check\)'
+        $view.Next | Should -Match '14 \(Library health check\)'
+    }
+}
+
+Describe 'The BepInEx list, the games left alone and the coverage in Library health check' {
+    BeforeEach { Install-ScreenMocks }
+    It 'tells a new install from an update and gives each update a plain reason' {
+        $latest = [pscustomobject]@{ Version = '5.4.23.6' }
+        (Get-TpmBepInExOffer -Offer ([pscustomobject]@{ Installed = 'Not installed'; Latest = $latest })).IsNew | Should -BeTrue
+        $old = Get-TpmBepInExOffer -Offer ([pscustomobject]@{ Installed = '5.4.23.2'; Latest = $latest })
+        $old.IsNew | Should -BeFalse
+        $old.Reason | Should -Match 'newer BepInEx is available'
+        (Get-TpmBepInExOffer -Offer ([pscustomobject]@{ Installed = 'Broken (Missing winhttp.dll)'; Latest = $latest })).Reason | Should -Match 'missing or damaged'
+        (Get-TpmBepInExOffer -Offer ([pscustomobject]@{ Installed = '5.4.23.6'; Latest = $latest })).Reason | Should -Match '32-bit or 64-bit'
+    }
+    It 'keeps the numbers of the remaining games when one is taken off, and says nothing is installed yet' {
+        $latest = [pscustomobject]@{ Version = '5.4.23.6' }
+        $queue = @(
+            [pscustomobject]@{ Code = 'B'; Label = 'Game B'; Architecture = 'x64'; Installed = 'Not installed'; Latest = $latest },
+            [pscustomobject]@{ Code = 'C'; Label = 'Game C'; Architecture = 'x86'; Installed = '5.4.23.2'; Latest = $latest }
+        )
+        Write-TpmBepInExQueue -Queue $queue -Numbers @{ A = 1; B = 2; C = 3 } -Offered 3
+        $text = Get-ScreenText
+        $text | Should -Match 'Your list: 2 games of 3 offered. Nothing is installed until you choose Y'
+        $text | Should -Match 'New installs \(1\).*2\) Game B \(x64\)'
+        $text | Should -Match 'Updates \(1\).*3\) Game C \(x86\): A newer BepInEx is available'
+        $text | Should -Not -Match ' 1\) '
+    }
+    It 'names the games the user did not pick apart from the picked ones, with the drive letter' {
+        $result = [pscustomobject]@{
+            Updated = 1; PickedItems = @('a'); ChangedItems = @('a'); FailedItems = @(); SkippedItems = @(); CompletedItems = @('a'); UnattemptedItems = @()
+            FailureRecords = @(
+                [pscustomobject]@{ Game = 'x'; Operation = 'path preflight'; ReasonKey = 'DEVICE_UNAVAILABLE'; SavedPath = 'D:\Games\x\x.exe' },
+                [pscustomobject]@{ Game = 'y'; Operation = 'path preflight'; ReasonKey = 'DEVICE_UNAVAILABLE'; SavedPath = 'D:\Games\y\y.exe' },
+                [pscustomobject]@{ Game = 'z'; Operation = 'inspection'; ReasonKey = 'UNREADABLE_FILE' }
+            )
+        }
+        $lines = @(Get-TpmBepInExDoneLines -Result $result)
+        @($lines | Where-Object { $_ -match 'left alone: The drives for these games are not connected \(2 games\)\. Drive: D:\.' }).Count | Should -Be 1
+        @($lines | Where-Object { $_ -match 'left alone: Could not read the game file \(1 game\)' }).Count | Should -Be 1
+    }
+    It 'shows the drive and the saved path of a game that cannot be reached in its details' {
+        $block = ConvertTo-TpmBepInExFailureBlock -Record ([pscustomobject]@{ Game = 'x'; GameLabel = 'Game X'; Operation = 'path preflight'; ReasonKey = 'DEVICE_UNAVAILABLE'; SavedPath = 'D:\Games\x\x.exe' })
+        $joined = @($block.Lines) -join "`n"
+        $joined | Should -Match 'Drive: D:'
+        $joined | Should -Match 'Saved path: D:\\Games\\x\\x\.exe'
+    }
+    It 'shows installed, missing, not supported and not checked BepInEx games in Library health check' {
+        $base = [ordered]@{
+            Outcome = 'SUCCEEDED'; DiscoveryComplete = $true; OptionalCoverageComplete = $true; OptionalCheckFailed = 0
+            PostgresInventoryStatus = 'Complete'; PostgresInventoryErrors = @(); ReadOnly = $true; Registered = 4
+            Valid = @('A', 'B', 'C', 'D'); Broken = @(); Empty = @()
+            GpuFixNeeded = @(); FfbBlasterNeeded = @(); DgVoodoo2Needed = @()
+            PostgresNeeded = @(); PostgresConfigured = 0; PostgresAutoCreateProfiles = @()
+            PostgresServiceExists = $false; PostgresServiceStatus = 'NotInstalled'
+            ReShadeCount = 0; BepInExCount = 1; DetectedGpuVendor = 'Intel'; LogPath = 'C:\Logs\TeknoParrot-Manager.log'
+            PostgresNeededLabels = @(); PostgresConfiguredLabels = @(); PostgresPsqlStatus = 'Unknown'
+            OptionalCoverageUnavailable = $false; OptionalCoverageError = ''; LastFullRun = ''
+            BepInExNeeded = @('Game One'); BepInExUnsupported = @('Game Two'); BepInExNotChecked = @('Game Three')
+        }
+        $result = [pscustomobject]$base
+        $row = @(Get-TpmLibraryHealthRows -Result $result | Where-Object { $_.Area -eq 'BepInEx' })
+        $row.Count | Should -Be 1
+        $row[0].Text | Should -Match '1 game needs BepInEx'
+        $row[0].Text | Should -Match '1 game not supported'
+        $row[0].Text | Should -Match '1 game not checked'
+        $details = (@(Get-TpmLibraryHealthDetailBlocks -Result $result | ForEach-Object { @($_.Lines) }) -join "`n")
+        $details | Should -Match 'BepInEx coverage: installed 1; missing 1; not supported 1; not checked 1'
+        $details | Should -Match 'not a kind TeknoParrot Manager can set it up for: Game Two'
+        $details | Should -Match 'could not be checked.*: Game Three'
     }
 }

@@ -658,3 +658,61 @@ Describe 'Issue 441: two games that share a name start are both unpacked, and a 
         [IO.File]::ReadAllText($script:logPath) | Should -Match ('could not finish .*Additional Gain.*STAGING_FAILED.*injected unpack failure')
     }
 }
+
+Describe 'Two games that read the same without year and tags are both unpacked' {
+    BeforeAll {
+        $script:QrA = 'Quebec Racing (2008)[Alpha Board][TP]'
+        $script:QrB = 'Quebec Racing (2010)[Beta Board][TP]'
+        $alternates = New-Object System.Collections.Generic.List[object]
+        [void]$alternates.Add([pscustomobject]@{ ProfileCode = 'QRB'; OriginalName = $script:QrB; Executable = 'game.exe' })
+        $script:QrDat = @{ (Get-NormalizedGameKey $script:QrA) = [pscustomobject]@{ ProfileCode = 'QRA'; OriginalName = $script:QrA; Executable = 'game.exe'; Alternates = $alternates } }
+    }
+    AfterEach {
+        $script:TpmOwnedLayout = $null
+        $script:TpmRegistrationLedger = $null
+        $script:TpmRegistrationLedgerStopLatch = $null
+    }
+
+    It 'gives the second game its own folder and leaves the first game alone' {
+        # Mutation: drop the other-game check in Resolve-ExtractedGameFolder -> the second ZIP is aimed at the first game's folder and is not unpacked into its own.
+        $fx = New-Fix41Fixture
+        [void](New-Fix41GameZip -Fixture $fx -Name $script:QrA)
+        (Invoke-Fix41AutoSync -Fixture $fx -DatIndex $script:QrDat).Synced | Should -Be 1
+        $folderA = Join-Path $fx.Games $script:QrA
+        $digestA = Get-Fix41TreeDigest $folderA
+        [void](New-Fix41GameZip -Fixture $fx -Name $script:QrB)
+
+        $preview = Invoke-Fix41AutoSync -Fixture $fx -DryRun $true -DatIndex $script:QrDat
+        $preview.WouldSync | Should -Be 1
+        $run = Invoke-Fix41AutoSync -Fixture $fx -DatIndex $script:QrDat
+
+        $run.Synced | Should -Be 1 -Because (Get-Fix41Diagnostic $run)
+        $run.UnsafePathSkipped | Should -Be 0
+        [IO.File]::ReadAllText((Join-Path $fx.Games ($script:QrB + '\game.exe'))) | Should -BeExactly ('exe of ' + $script:QrB)
+        Get-Fix41TreeDigest $folderA | Should -Be $digestA
+    }
+
+    It 'does not treat a saved folder of the other game as proof that this ZIP was unpacked' {
+        # Mutation: trust the saved LocalPath without the other-game check in Invoke-AutoSync -> the second ZIP is skipped or aimed at the first game's folder.
+        $fx = New-Fix41Fixture
+        [void](New-Fix41GameZip -Fixture $fx -Name $script:QrA)
+        (Invoke-Fix41AutoSync -Fixture $fx -DatIndex $script:QrDat).Synced | Should -Be 1
+        $folderA = Join-Path $fx.Games $script:QrA
+        $digestA = Get-Fix41TreeDigest $folderA
+        $zipB = New-Fix41GameZip -Fixture $fx -Name $script:QrB
+        # A saved record for the second ZIP that names the first game's folder, with the ZIP's own size and time.
+        $state = Get-Content -LiteralPath $fx.SyncState -Raw | ConvertFrom-Json
+        $entry = $state.($script:QrA) | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+        $entry.NasSize = [int64](Get-Item -LiteralPath $zipB).Length
+        $entry.NasLastModified = (Get-Item -LiteralPath $zipB).LastWriteTimeUtc.ToString('o')
+        $state | Add-Member -NotePropertyName $script:QrB -NotePropertyValue $entry
+        [IO.File]::WriteAllText($fx.SyncState, ($state | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
+
+        $run = Invoke-Fix41AutoSync -Fixture $fx -DatIndex $script:QrDat
+
+        $run.Synced | Should -Be 1 -Because (Get-Fix41Diagnostic $run)
+        Test-Path -LiteralPath (Join-Path $fx.Games ($script:QrB + '\game.exe')) -PathType Leaf | Should -BeTrue
+        Get-Fix41TreeDigest $folderA | Should -Be $digestA
+        [IO.File]::ReadAllText($script:logPath) | Should -Match 'saved folder for .*Beta Board.* belongs to another game'
+    }
+}

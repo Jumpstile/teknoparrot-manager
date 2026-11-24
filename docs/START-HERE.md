@@ -6,7 +6,7 @@ It is not TeknoParrot. It does not install or set up TeknoParrot itself.
 
 Allow about 10 minutes for TeknoParrot Manager setup and your first small game, once the downloads are ready. Installing TeknoParrot, downloading updates, extracting large games, and setting up a wheel or lightgun can take longer.
 
-This guide describes v1.0 RC9.2. If your menu looks different, follow the menu names.
+This guide describes v1.0 RC9.3. If your menu looks different, follow the menu names.
 
 Each step below has one action. "You will see" tells you what should appear. "Next" tells you what to do after that.
 
@@ -604,6 +604,8 @@ Do these steps in order. Test after each change, so you know which change helped
    You will see: both are closed. It is safe to change game settings now.
 
    Next: copy controls only after you have bound one game of each type you use (buttons, driving, lightgun, or trackball).
+
+   Use RetroBat? A game that works from TeknoParrot can still fail when RetroBat starts it, because they are two different ways to start a game. See "A game works in TeknoParrot but not from RetroBat" in docs/TROUBLESHOOTING.md. TeknoParrot Manager does not change RetroBat.
 
 7. In TeknoParrot Manager, choose **4) Propagate Controls**. ("Propagate" means copy to your other games.)
 

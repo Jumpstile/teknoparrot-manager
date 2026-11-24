@@ -741,14 +741,16 @@ Describe 'FIX81 Propagate Controls (item 6)' {
         Write-TpmControlSourceSummary -Pool @($plain, (New-F81Source -Code 'RefPad'), (New-F81Source -Code 'RefGun' -Family 'lightgun'))
         $lines = @(Get-F81Lines)
         $lines | Should -Contain '  You have 3 games with their controls set up.'
-        @($lines | Where-Object { $_ -match '\S' }).Count | Should -Be 1
-        (($lines -join ' ') -match 'api=|device\(s\)|buttons|RefWheel|Sensitivity') | Should -BeFalse
+        @($lines | Where-Object { $_ -match '\S' }).Count | Should -Be 3
+        $lines | Should -Contain ' driving: copied from RefWheel and RefPad to your other driving games.'
+        $lines | Should -Contain ' lightgun: copied from RefGun to your other lightgun games.'
+        (($lines -join ' ') -match 'api=|device\(s\)|buttons|Sensitivity') | Should -BeFalse
         Install-F81Mocks -Width 100
         $bad = New-F81Source -Code 'RefBad' -Carry @{ 'Use Keyboard/Button For Axis' = 'True' }
         Write-TpmControlSourceSummary -Pool @($bad)
         $paragraphs = @(Get-F81Paragraphs)
         $paragraphs.Count | Should -Be 2
-        $paragraphs[0] | Should -BeExactly 'You have 1 game with its controls set up.'
+        $paragraphs[0] | Should -Match '^You have 1 game with its controls set up\.'
         $paragraphs[1] | Should -BeExactly 'Check first: 1 game may have settings that do not match your real controller. Press D to see them.'
     }
 

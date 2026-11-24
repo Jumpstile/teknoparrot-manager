@@ -475,6 +475,7 @@ Describe 'FIX132 the fix step copies from the player''s own archive after checki
         $fixture = New-F132Root
         $collection = New-F132Collection
         $plan = Get-F132Plan -Fixture $fixture -Collection $collection
+        $warning = @(Get-F132Warning -Fixture $fixture)[0]
         New-Item -ItemType Directory -Path $fixture.Bios -Force | Out-Null
         [System.IO.File]::WriteAllBytes((Join-Path $fixture.Bios 'r27v1602f.7d'), $script:F132Bytes7d)
         [System.IO.File]::WriteAllBytes((Join-Path $fixture.Bios 'r27v1602f.8g'), $script:F132Bytes8g)
@@ -482,6 +483,9 @@ Describe 'FIX132 the fix step copies from the player''s own archive after checki
         $result.Outcome | Should -Be 'NO_OP'
         $result.Complete | Should -BeTrue
         @($result.AlreadyPresent).Count | Should -Be 2
+        # The screen must say it in words: the player reads this row, not the data. Mutation: stop printing the row -> this fails.
+        $shown = @(Get-TpmPrerequisiteReportLines -Warning $warning -Plan $plan -Install $result) -join "`n"
+        $shown | Should -Match 'Already matching: .*r27v1602f\.7d'
     }
 
     It 'uses the same file from another TeknoParrot copy only after the DAT confirms it, and refuses a different one' {

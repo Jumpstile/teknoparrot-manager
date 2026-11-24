@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC9.2  --  QUICK START
+  TeknoParrot Manager  |  v1.0 RC9.3  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -9,8 +9,8 @@
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  This guide is for v1.0 RC9.2.
-  Release page: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2
+  This guide is for v1.0 RC9.3.
+  Release page: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after every run. AutoSync backs up UserProfiles before
@@ -3418,10 +3418,11 @@
        You will see: a list of games.
        Next: read the list.
 
-    2. Choose Y to continue, B to go back, or N to cancel.
-       You will see: [Y] Install/update  [B] Back  [N] Cancel. It is skipped
-       when the only games are ones you picked by number from the "do not
-       have BepInEx" list. There is no repair-reset choice.
+    2. Read your list, then choose Y to continue, E to take games off the
+       list, B to go back, or N to cancel.
+       You will see: [Y] Install/update  [E] Edit the list  [B] Back
+       [N] Cancel. New installs and updates are listed apart, each with a
+       reason. There is no repair-reset choice.
        Next: choose Y to go on.
 
     3. Read the result for each game.
