@@ -1003,7 +1003,7 @@ Describe 'Final closes only on the success path' {
         $index[0].Current | Should -Be 0
     }
 
-    It 'closes extraction Final with every file counted after a complete extraction' {
+    It 'closes extraction Final with every byte counted after a complete extraction' {
         $zipPath = Join-Path $TestDrive ('rc8ui-ok-' + [guid]::NewGuid().ToString('N') + '.zip')
         $dest = Join-Path $TestDrive ('rc8ui-ok-dest-' + [guid]::NewGuid().ToString('N'))
         New-Rc8UiZip -Path $zipPath -EntryNames @('a.txt', 'b.txt')
@@ -1011,8 +1011,8 @@ Describe 'Final closes only on the success path' {
         $close = @($script:closeEvents | Where-Object { $_.Complete })
         $close.Count | Should -Be 1
         $close[0].Outcome | Should -Be 'Final'
-        $close[0].Current | Should -Be 2
-        $close[0].Total | Should -Be 2
+        $close[0].Current | Should -Be 14   # progress counts bytes: 7 + 7
+        $close[0].Total | Should -Be 14
     }
 
     It 'closes extraction Error, one short, when the second file cannot be written (review BLOCKER-1)' {
@@ -1027,8 +1027,8 @@ Describe 'Final closes only on the success path' {
         $close = @($script:closeEvents | Where-Object { $_.Complete })
         $close.Count | Should -Be 1
         $close[0].Outcome | Should -Be 'Error'
-        $close[0].Current | Should -Be 1
-        $close[0].Total | Should -Be 2
+        $close[0].Current | Should -Be 7    # only the first file's 7 bytes were written
+        $close[0].Total | Should -Be 14
     }
 }
 

@@ -6599,7 +6599,7 @@
 
 
 ===============================================================================
-  This guide is for v1.0 RC9.2.
+  This guide is for v1.0 RC9.3.
   Test one game after every run. AutoSync backs up UserProfiles before
   extraction; preview mode skips the backup.
 ===============================================================================

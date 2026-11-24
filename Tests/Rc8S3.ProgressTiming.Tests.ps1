@@ -274,7 +274,7 @@ Describe 'Expand-ZipFileSafe progress close count' {
     }
     BeforeEach { $script:zipProgressEvents = New-Object System.Collections.Generic.List[object] }
 
-    It 'closes with every file counted after a complete extraction' {
+    It 'closes with every byte counted after a complete extraction' {
         $zipPath = Join-Path $TestDrive ('rc8s3-ok-' + [guid]::NewGuid().ToString('N') + '.zip')
         $dest = Join-Path $TestDrive ('rc8s3-ok-dest-' + [guid]::NewGuid().ToString('N'))
         New-Rc8S3Zip -Path $zipPath -Names @('a.txt', 'b.txt')
@@ -283,11 +283,11 @@ Describe 'Expand-ZipFileSafe progress close count' {
 
         $close = @($script:zipProgressEvents | Where-Object Complete)
         $close.Count | Should -Be 1
-        $close[0].Current | Should -Be 2
-        $close[0].Total | Should -Be 2
+        $close[0].Current | Should -Be 14   # progress counts bytes: 'x-a.txt' + 'x-b.txt' = 7 + 7
+        $close[0].Total | Should -Be 14
     }
 
-    It 'closes one short when the second file cannot be written' {
+    It 'closes one file short when the second file cannot be written' {
         $zipPath = Join-Path $TestDrive ('rc8s3-fail-' + [guid]::NewGuid().ToString('N') + '.zip')
         $dest = Join-Path $TestDrive ('rc8s3-fail-dest-' + [guid]::NewGuid().ToString('N'))
         New-Rc8S3Zip -Path $zipPath -Names @('a.txt', 'b.txt')
@@ -299,8 +299,8 @@ Describe 'Expand-ZipFileSafe progress close count' {
 
         $close = @($script:zipProgressEvents | Where-Object Complete)
         $close.Count | Should -Be 1
-        $close[0].Current | Should -Be 1
-        $close[0].Total | Should -Be 2
+        $close[0].Current | Should -Be 7    # only the first file's 7 bytes were written
+        $close[0].Total | Should -Be 14
     }
 }
 

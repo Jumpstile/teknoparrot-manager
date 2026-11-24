@@ -51,7 +51,7 @@ Describe 'The counts line adds up to the games selected' {
 }
 
 Describe 'dgVoodoo2 names every selected game' {
-    It 'explains 4 selected and 3 changed: the fourth is skipped, named, and the drive line points to Library health check 13' {
+    It 'explains 4 selected and 3 changed: the fourth is skipped, named, and the drive line points to Library health check 14' {
         $result = [pscustomobject]@{
             NoOp = $false; Deployed = 3; PresetOverrides = 0; AlreadyConfigured = @()
             PickedGames = @('g1', 'g2', 'g3', 'g4')
@@ -62,7 +62,7 @@ Describe 'dgVoodoo2 names every selected game' {
         $view = Get-TpmDgVoodoo2ResultView -Result $result
         $view.Done[0] | Should -BeExactly 'You selected 4 games: 3 changed, 1 skipped.'
         ($view.Needs -join ' ') | Should -Match 'g4'
-        $view.Next | Should -Match '13 \(Library health check\)'
+        $view.Next | Should -Match '14 \(Library health check\)'
     }
     It 'lists a failed game with its reason and never calls the step done' {
         $result = [pscustomobject]@{
@@ -195,7 +195,7 @@ Describe 'The patch step summary' {
         $text = Get-ScreenText
         $text | Should -Match 'You selected 4 games: 1 changed, 1 already set up, 1 skipped, 1 failed\.'
         $text | Should -Match 'D:\\TPM\\Undo\\game-one'
-        $text | Should -Match '13 \(Library health check\)'
+        $text | Should -Match '14 \(Library health check\)'
     }
 }
 
@@ -211,7 +211,7 @@ Describe 'The GPU fix result' {
         $view = Get-TpmGpuFixResultView -Result $result
         $view.Done[0] | Should -BeExactly 'You selected 3 games: 2 changed, 1 skipped.'
         $view.Done[1] | Should -Match 'D:\\TP\\bk'
-        $view.Next | Should -Match '13 \(Library health check\)'
+        $view.Next | Should -Match '14 \(Library health check\)'
     }
 }
 

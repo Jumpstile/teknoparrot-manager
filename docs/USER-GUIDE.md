@@ -8,7 +8,7 @@ TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-This guide is for v1.0 RC9.2.
+This guide is for v1.0 RC9.3.
 
 
 ## Start here: your first game in about 10 minutes
@@ -19,7 +19,7 @@ Allow about 10 minutes once your downloads are ready.
 
 Installing TeknoParrot, updates, large games, and special controllers take longer.
 
-Release page of the latest published release: [v1.0 RC9.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2).
+Release page of the latest published release: [v1.0 RC9.3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3).
 
 You need:
 
@@ -3869,5 +3869,5 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> This guide is for v1.0 RC9.2. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
+> This guide is for v1.0 RC9.3. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
 
