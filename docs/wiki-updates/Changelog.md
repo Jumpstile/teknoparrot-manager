@@ -2,12 +2,27 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-RC9.1 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
-The previous published release was v1.0 RC9: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9. RC8.4 and older are earlier published releases. RC4 and RC5 are historical; RC4 is superseded.
+RC9.2 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
+The previous published release was v1.0 RC9.1: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1. RC9 and RC8.4 and older are earlier published releases. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
 ---
+
+## v1.0 RC9.2 (changes since RC9.1)
+
+- TeknoParrot Manager is now named the same way everywhere in the guides,
+  and the guides no longer mention a product it does not support.
+- LaunchBox integration now has its own item on the main menu, so you
+  can use it any time without registering games first.
+- Force feedback (menu 9) now installs the newest plugin release with
+  each game's own settings file, lists any game controller by name,
+  and upgrades old plugin files it recognizes (with a backup). It asks
+  first.
+- Library health check now knows the new TeknoParrot game type used by
+  the DOS32 PC games, Taito Wolf, Midway Quicksilver II and Graphite,
+  Interactive Light, dgPIX, Voodoo Banshee, and Virtuality SU2000 and
+  SU3000 games, and no longer calls it unknown.
 
 ## v1.0 RC9.1 (changes since RC9)
 
@@ -16,12 +31,6 @@ The previous published release was v1.0 RC9: https://github.com/Jumpstile/teknop
   (2,544 TeknoParrot profiles).
 - The version labels are corrected, so the program, the guides and the
   update check all say RC9.1.
-- The download file name is fixed, so later versions can update through
-  Check for Updates (menu 15). RC9 cannot see RC9.1, so RC9 users download
-  RC9.1 by hand once.
-- Two messages are plainer: the health check says so when no graphics
-  card is found, and a cut-off update that changed nothing says so when
-  TeknoParrot Manager starts. The guides match the Restore menu.
 - There is no other change from RC9.
 
 ## v1.0 RC9 (changes since RC8.4)
@@ -193,7 +202,7 @@ The previous published release was v1.0 RC9: https://github.com/Jumpstile/teknop
   the same game. The default follows your Region setup choice.
 - New choice S keeps LaunchBox in step with your library: games you
   removed are removed, moved folders get the new location, and old
-  Manager names become the clean title. A missing game file (an
+  TeknoParrot Manager names become the clean title. A missing game file (an
   unplugged drive) never removes a game, and nothing is removed if most
   games would go at once.
 - Pictures from a folder are matched by the game itself when LaunchBox's
@@ -717,7 +726,7 @@ Promoted to RC1 for the upcoming 1.0 release. No new functional changes beyond w
 
 ## v0.99.28 BETA (2026-06-25)
 
-- **New:** every prompt that asks you to type a file or folder path -- the TeknoParrot root, games install folder, ZIP source and supplementary ZIP source folders, Eggman dat files, ReShade preset/DLL, dgVoodoo2 folder, LaunchBox root, HyperSpin 2 data path, and the Eggman ZIP download save location -- now also accepts typing "B" to open a native Windows folder/file browser instead of typing the path by hand. Typing the path directly still works exactly as before.
+- **New:** every prompt that asks you to type a file or folder path -- the TeknoParrot root, games install folder, ZIP source and supplementary ZIP source folders, Eggman dat files, ReShade preset/DLL, dgVoodoo2 folder, LaunchBox root, and the Eggman ZIP download save location -- now also accepts typing "B" to open a native Windows folder/file browser instead of typing the path by hand. Typing the path directly still works exactly as before.
 - **Fix:** two prompts (ReShade and dgVoodoo2 "DLL/folder not found") told you to choose the wrong menu option number for getting back to that setup step. Corrected to match the real menu.
 
 ## v0.99.27 BETA (2026-06-25)
@@ -889,7 +898,7 @@ After AutoSync/Register's preview/dry-run mode finishes, the script now asks **"
 
 ## v0.92 BETA (2026-06-18)
 
-**Preview / dry-run mode.** AutoSync and Register only can now show what they would do (extractions, registrations, repairs, control propagation) without writing anything -- answer Y to the new "Run in PREVIEW mode first?" prompt, or pass `-DryRun` on the command line. No backup is created and the LaunchBox/HyperSpin export, thumbnail download, and GPU fix follow-up offers are skipped in preview mode.
+**Preview / dry-run mode.** AutoSync and Register only can now show what they would do (extractions, registrations, repairs, control propagation) without writing anything -- answer Y to the new "Run in PREVIEW mode first?" prompt, or pass `-DryRun` on the command line. No backup is created and the LaunchBox export, thumbnail download, and GPU fix follow-up offers are skipped in preview mode.
 
 **Live BepInEx game list.** The BepInEx Update Check menu (mode 8) now shows a live-fetched example list of games known to require BepInEx instead of a hardcoded one that could go stale.
 
@@ -1039,7 +1048,6 @@ For shared-executable games (Raw Thrills' `sdaemon.exe` and similar), a folder w
 **Fixes**
 
 - GPU fix setup (mode 7) now backs up UserProfiles to `FullBackup\GpuFix_<timestamp>` before writing vendor-fix fields. Previously this mode had no backup step at all when reached directly from the main menu.
-- HyperSpin export's final write is now atomic, with a Delete+Move fallback for environments where `File.Replace`'s 3-argument overload throws.
 - Fixed a stale User-Agent version literal sent with GitHub API requests.
 
 ---
@@ -1075,7 +1083,7 @@ For shared-executable games (Raw Thrills' `sdaemon.exe` and similar), a folder w
 **Comment audit pass 2 + bug/security hardening**
 
 - Log writes now use BOM-less UTF-8 consistently (previously used the system default encoding, which silently corrupted non-ASCII game names/paths in the log).
-- HyperSpin export and config load both hardened against PS 5.1's `ConvertFrom-Json` returning `$null` instead of an empty array/object for empty input.
+- Config load is hardened against PS 5.1's `ConvertFrom-Json` returning `$null` instead of an empty array/object for empty input.
 - AutoSync failure-path cleanup now guards against an empty extraction path before `Remove-Item`.
 
 ---
@@ -1084,7 +1092,7 @@ For shared-executable games (Raw Thrills' `sdaemon.exe` and similar), a folder w
 
 **Comment audit, bug fixes, and security hardening**
 
-- Corrupt UserProfile XMLs and corrupted HyperSpin JSON files were previously skipped silently; both now log the failure before continuing.
+- Corrupt UserProfile XMLs were previously skipped silently; they now log the failure before continuing.
 - Added `IsNullOrWhiteSpace` guards before `Get-ChildItem -LiteralPath` calls in the AutoSync game pickers, replacing a hard crash on an empty path with a graceful "no ZIPs found" message.
 
 ---

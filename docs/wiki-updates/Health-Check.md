@@ -1,4 +1,4 @@
-# Library Health Check (menu 13)
+# Library Health Check (menu 14)
 
 The health check looks over your registered games and tells you what needs attention. The check itself only reads. It does not change a file. You see `TeknoParrot Manager checked your setup and did not change anything.`
 
@@ -8,7 +8,7 @@ When it ends, it offers follow-up actions (repair a path, set up PostgreSQL, and
 
 ## How to run it
 
-1. Start TeknoParrot Manager and type `13` at the main menu.
+1. Start TeknoParrot Manager and type `14` at the main menu.
 2. Read the list of results.
 3. Choose a follow-up action, press `D` for details, or press `B` to go back.
 
@@ -36,7 +36,7 @@ One line per area. Each line starts with `OK`, `Needs attention`, `Not checked` 
 
 The last lines give the verdict: `Everything looks fine.` or `Some things need attention.` If a check could not finish, you see `Some checks could not finish, so this is not an all-clear.` A game in a very long folder path counts as not fully checked.
 
-The check also shows how many games already have [[ReShade]] and [[BepInEx]] (`ReShade installed: N of M valid games`, `BepInEx installed: N of M valid games`). ReShade is your choice for each game, so it is not flagged. BepInEx is flagged only for games whose profile says they need it. If any of them do not have it yet, you see `Games that need BepInEx and do not have it set up: <names>`. Use [[BepInEx]] setup (menu 9) to fix that.
+The check also shows how many games already have [[ReShade]] and [[BepInEx]] (`ReShade installed: N of M valid games`, `BepInEx installed: N of M valid games`). ReShade is your choice for each game, so it is not flagged. BepInEx is flagged only for games whose profile says they need it. If any of them do not have it yet, you see `Games that need BepInEx and do not have it set up: <names>`. Use [[BepInEx]] setup (menu 10) to fix that.
 
 Press `D` at any time to see every detail. The details are also saved in the log.
 
@@ -47,9 +47,9 @@ Press `D` at any time to see every detail. The details are also saved in the log
 | Key | When it is shown | What it does |
 |---|---|---|
 | `R`, `M`, `S` | Some saved paths are broken | `R` searches your games folder for the right file, `M` lets you pick the file yourself, `S` searches another folder. TeknoParrot Manager shows what it found and asks before it changes a profile. A safety backup is made first. |
-| `P` | Some games need PostgreSQL | Opens [[Postgres Setup]] (menu 11). |
+| `P` | Some games need PostgreSQL | Opens [[Postgres Setup]] (menu 12). |
 | `F` | Games are missing startup files | Opens the startup files review (see below). |
-| `5` to `9` | No broken paths | Opens ReShade, dgVoodoo2, GPU Fix, Force Feedback or BepInEx setup. |
+| `6` to `10` | No broken paths | Opens ReShade, dgVoodoo2, GPU Fix, Force Feedback or BepInEx setup. |
 | `D`, `B` | Always | Details, or back to the main menu. |
 
 ---

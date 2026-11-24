@@ -1,4 +1,4 @@
-# Support Package (menu 16)
+# Support Package (menu 17)
 
 When something goes wrong and you ask for help, send a support package. It is one ZIP file with your logs and reports. It never has game files or passwords.
 
@@ -6,7 +6,7 @@ When something goes wrong and you ask for help, send a support package. It is on
 
 ## Make one
 
-1. Choose **16** in the main menu.
+1. Choose **17** in the main menu.
 2. Choose **1** (Create Support Package).
 3. Wait for the result. It says `Support package created.` and the file name.
 4. Press **O** to open the folder that holds it. Press **B** to go back.

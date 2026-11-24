@@ -507,7 +507,7 @@ Describe 'FIX59 Library Health separates TeknoParrot-created databases from the 
         $result.PostgresSharedDatabases[0] | Should -BeExactly 'Golden Tee Live 2006 and Orange County Choppers Pinball use the same database, GameDB06'
         # A finished check that found a shared database is a finding, not a check that could not finish (exit code 0).
         $result.Outcome | Should -BeExactly 'SUCCEEDED'
-        (Get-TpmLibraryHealthPostgresRow -Result $result).Text | Should -Match '^Needs attention - some games use the same database\. Run Postgres setup \(menu 11\)'
+        (Get-TpmLibraryHealthPostgresRow -Result $result).Text | Should -Match '^Needs attention - some games use the same database\. Run Postgres setup \(menu 12\)'
         $details = Get-F59HealthPostgresDetail -Result $result
         $details | Should -Match 'Problem - Golden Tee Live 2006 and Orange County Choppers Pinball use the same database, GameDB06'
         $details | Should -Match 'deletes nothing and keeps both sets of progress'
@@ -562,7 +562,7 @@ Describe 'FIX59 Library Health separates TeknoParrot-created databases from the 
         @($result.PostgresDatabaseProblems) | Should -Be @('Golden Tee Live 2020: ' + $Expected)
         # A finished check that found a database problem is a finding, not a check that could not finish (exit code 0).
         $result.Outcome | Should -BeExactly 'SUCCEEDED'
-        (Get-TpmLibraryHealthPostgresRow -Result $result).Text | Should -Match 'Problem .*Postgres setup \(menu 11\)'
+        (Get-TpmLibraryHealthPostgresRow -Result $result).Text | Should -Match 'Problem .*Postgres setup \(menu 12\)'
         $details = Get-F59HealthPostgresDetail -Result $result
         $details | Should -Match ([regex]::Escape('Problem - Golden Tee Live 2020: ' + $Expected))
         $details | Should -Match 'creates and checks these databases'

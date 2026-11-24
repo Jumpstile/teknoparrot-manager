@@ -12,6 +12,7 @@ BeforeAll {
     Copy-Item -LiteralPath (Join-Path $script:Tree 'scripts\TpmProgress.psm1') -Destination $pm -Force
     . $fx
     . (Join-Path $script:Tree 'Tests\TpmExtractedScriptState.ps1')
+    . (Join-Path $script:Tree 'Tests\FfbPluginTestKit.ps1')
     $script:TitleTokenStopWords = [System.Collections.Generic.HashSet[string]]::new([string[]]@('the','of','a','an','and'), [System.StringComparer]::OrdinalIgnoreCase)
     $script:FFBBlasterUnsupportedPlatforms = @('pcsx2x6')
     $script:FFBBlasterNamePattern = 'ffb.*blaster|blaster.*ffb'
@@ -35,19 +36,13 @@ Describe 'Finding 9: overlap switch vs hook-DLL collision' {
         [IO.File]::WriteAllText((Join-Path $tp 'GameProfiles\Canonical.xml'), $xml, $enc)
         Mock Write-Host {}
         Mock Write-Log {}
-        Mock Get-FFBPluginSourceRevision { [pscustomobject]@{ Revision=('a'*40); Repository='f/f'; ManifestUrl='https://x'; Trust='SourcePinnedAuditHash' } }
+        Mock Get-FFBPluginLatestRelease { New-FfbTestRelease }
         Mock Get-FFBPluginGameMap { [ordered]@{ OverlapGame = 'd3d9.dll' } }
-        Mock Invoke-FFBPluginDownload {
-            param([string]$destDir, [string]$SourceRevision)
-            $files = [ordered]@{}; $ev = @()
-            foreach ($n in 'MAME32.dll','MAME64.dll') {
-                $p = Join-Path $destDir "TPM-FFB-t-$n"; [IO.File]::WriteAllBytes($p, [byte[]](1,2,3,4)); $files[$n] = $p
-                $ev += [pscustomobject]@{ FileName=$n; SourceUrl='https://x'; SourceRevision=$SourceRevision; Sha256=(Get-FileHash $p -Algorithm SHA256).Hash; Trust='SourcePinnedAuditHash'; DownloadPath=$p }
-            }
-            [pscustomobject]@{ Succeeded=$true; Files=$files; Evidence=$ev; ResiduePaths=@(); Reason=$null }
-        }
+        Mock Invoke-FFBPluginDownload { param([string]$destDir, [object]$Release) New-FFBDownloadFixtureResult -destDir $destDir -Release $Release }
         Mock Get-ExeArchitecture { 'x64' }
-        Mock Read-HostSafe { 'N' }
+        # The first question is the overlap choice (N = use the plugin); the second is "Go ahead?".
+        $script:ffbAnswers = [System.Collections.Generic.Queue[string]]::new(); [void]$script:ffbAnswers.Enqueue('N'); [void]$script:ffbAnswers.Enqueue('Y')
+        Mock Read-HostSafe { $script:ffbAnswers.Dequeue() }
         $r = Invoke-FFBPluginSetup -UserProfilesDir $up -CacheDir $cache -TpRoot $tp -NativeEnabledCodes @('Overlap')
         $native = (Read-Xml (Join-Path $up 'Overlap.xml')).SelectSingleNode('/GameProfile/ConfigValues/FieldInformation/FieldValue').InnerText
         $pluginDeployed = (Get-Content -LiteralPath (Join-Path $gd 'd3d9.dll') -Raw) -ne 'reshade-hook'
@@ -71,17 +66,9 @@ Describe 'Finding 9: overlap switch vs hook-DLL collision' {
         [IO.File]::WriteAllText((Join-Path $tp 'GameProfiles\Canonical.xml'), '<GameProfile/>', $enc)
         Mock Write-Host {}
         Mock Write-Log {}
-        Mock Get-FFBPluginSourceRevision { [pscustomobject]@{ Revision=('a'*40); Repository='f/f'; ManifestUrl='https://x'; Trust='SourcePinnedAuditHash' } }
+        Mock Get-FFBPluginLatestRelease { New-FfbTestRelease }
         Mock Get-FFBPluginGameMap { [ordered]@{ AGame = 'd3d9.dll'; BGame = 'd3d9.dll' } }
-        Mock Invoke-FFBPluginDownload {
-            param([string]$destDir, [string]$SourceRevision)
-            $files = [ordered]@{}; $ev = @()
-            foreach ($n in 'MAME32.dll','MAME64.dll') {
-                $p = Join-Path $destDir "TPM-FFB-t-$n"; [IO.File]::WriteAllBytes($p, [byte[]](1,2,3,4)); $files[$n] = $p
-                $ev += [pscustomobject]@{ FileName=$n; SourceUrl='https://x'; SourceRevision=$SourceRevision; Sha256=(Get-FileHash $p -Algorithm SHA256).Hash; Trust='SourcePinnedAuditHash'; DownloadPath=$p }
-            }
-            [pscustomobject]@{ Succeeded=$true; Files=$files; Evidence=$ev; ResiduePaths=@(); Reason=$null }
-        }
+        Mock Invoke-FFBPluginDownload { param([string]$destDir, [object]$Release) New-FFBDownloadFixtureResult -destDir $destDir -Release $Release }
         Mock Get-ExeArchitecture { 'x64' }
         Mock Read-TpmYesNo { 'Y' }
         $r = Invoke-FFBPluginSetup -UserProfilesDir $up -CacheDir $cache -TpRoot $tp -NativeEnabledCodes @('BGame')
@@ -90,7 +77,8 @@ Describe 'Finding 9: overlap switch vs hook-DLL collision' {
         Test-Path -LiteralPath $installed | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $root 'BGame\d3d9.dll') | Should -BeFalse
         $owned = @(Read-FFBPluginOwnership -CacheDir $cache)
-        $owned.Count | Should -Be 1
-        $owned[0].Destination | Should -BeExactly $installed
+        # AGame's three files (plugin, settings, SDL2) are recorded; BGame (kept native) has no record.
+        @($owned | Where-Object { [string]$_.ProfileCode -ne 'AGame' }).Count | Should -Be 0
+        @($owned | Where-Object { [string]$_.Destination -ieq $installed }).Count | Should -Be 1
     }
 }

@@ -22,6 +22,7 @@ BeforeAll {
     Get-Module -Name TpmProgress -All | Remove-Module -Force -ErrorAction SilentlyContinue
     . $functionFile
     . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
+    . (Join-Path $PSScriptRoot 'FfbPluginTestKit.ps1')
     . (Join-Path $PSScriptRoot '..\scripts\TpmRequiredPatchEngine.ps1')
     $FuzzyAutoThreshold = 0.72
     $FuzzyTieMargin = 0.1
@@ -338,23 +339,9 @@ Describe 'FIX99 Crosshair never installs into the source collection' {
 Describe 'FIX99 the force feedback plugin never installs into or removes from the source collection' {
     BeforeEach {
         Install-F99Console
-        Mock Get-FFBPluginSourceRevision {
-            [pscustomobject]@{ Revision = ('a' * 40); Repository = 'fixture/FFBArcadePlugin'; ManifestUrl = 'https://api.github.com/repos/fixture/FFBArcadePlugin/commits/master'; Trust = 'SourcePinnedAuditHash' }
-        }
+        Mock Get-FFBPluginLatestRelease { New-FfbTestRelease }
         Mock Get-FFBPluginGameMap { [ordered]@{ InsideGame = 'd3d9.dll'; OutsideGame = 'd3d9.dll' } }
-        Mock Invoke-FFBPluginDownload {
-            param([string]$destDir, [string]$SourceRevision)
-            $files = [ordered]@{}
-            $evidence = @()
-            [void][System.IO.Directory]::CreateDirectory($destDir)
-            foreach ($dllName in @('MAME32.dll', 'MAME64.dll')) {
-                $path = Join-Path $destDir ('TPM-FFB-test-{0}-{1}' -f $SourceRevision.Substring(0, 8), $dllName)
-                [System.IO.File]::WriteAllBytes($path, [byte[]](1, 2, 3, 4))
-                $files[$dllName] = $path
-                $evidence += [pscustomobject]@{ FileName = $dllName; SourceUrl = "https://raw.githubusercontent.com/fixture/FFBArcadePlugin/$SourceRevision/$dllName"; SourceRevision = $SourceRevision; Sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash; Trust = 'SourcePinnedAuditHash'; DownloadPath = $path }
-            }
-            return [pscustomobject]@{ Succeeded = $true; Files = $files; Evidence = $evidence; ResiduePaths = @(); Reason = $null }
-        }
+        Mock Invoke-FFBPluginDownload { param([string]$destDir, [object]$Release) New-FFBDownloadFixtureResult -destDir $destDir -Release $Release }
         Mock Get-ExeArchitecture { 'x64' }
         Mock Read-HostSafe { 'Y' }
     }

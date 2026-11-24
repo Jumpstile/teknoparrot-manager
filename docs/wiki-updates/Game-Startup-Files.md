@@ -22,7 +22,7 @@ Only emulators that are installed in your TeknoParrot folder are checked. The ch
 ## When you see it
 
 - At the end of a normal run. In a preview or an unattended run it only tells you and copies nothing.
-- In the Library health check (menu 13). If games are missing files, the menu offers **F** to fix them. See [[Health Check]].
+- In the Library health check (menu 14). If games are missing files, the menu offers **F** to fix them. See [[Health Check]].
 
 The screen says which games will not start and what to do next.
 
@@ -53,7 +53,7 @@ System 11 games need no startup file to start. But without saved files, a System
 - If your set has no saved files for some of your games, it names them. Those games start without them.
 - It does not ask again when your set has nothing new for your games. It never downloads the set.
 
-Library health check (menu 13) shows a `System 11` note when some System 11 games have no saved files yet. See [[Health Check]].
+Library health check (menu 14) shows a `System 11` note when some System 11 games have no saved files yet. See [[Health Check]].
 
 <details>
 <summary>Details</summary>

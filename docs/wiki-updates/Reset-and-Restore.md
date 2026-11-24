@@ -2,7 +2,7 @@
 
 Reset and Restore puts one game, or all your games, back the way they were at an earlier time. It works from restore points that TeknoParrot Manager saves when it starts.
 
-Open it with **14** (Restore backup) in the main menu, then option **4**. The other restore options are on [[Restore Backup]].
+Open it with **15** (Restore backup) in the main menu, then option **4**. The other restore options are on [[Restore Backup]].
 
 ---
 
@@ -54,7 +54,7 @@ Before anything changes, a new restore point of your current settings is saved a
 
 ## Rebuild one game from its ZIP
 
-This is option **5** in **14) Restore backup**. Use it when one game is broken and you do not know why. It puts the game folder back to exactly what is in the game's original ZIP.
+This is option **5** in **15) Restore backup**. Use it when one game is broken and you do not know why. It puts the game folder back to exactly what is in the game's original ZIP.
 
 - You need the game's ZIP in the ZIP folder you use for AutoSync. If the DAT list knows the game, the ZIP is checked against it too.
 - You pick the game, read a short preview, and type **YES**. Any other answer cancels and nothing changes.

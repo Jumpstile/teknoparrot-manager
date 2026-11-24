@@ -1,12 +1,12 @@
 # Crosshairs
 
-Crosshair setup puts the crosshair pictures you choose into your lightgun games. It is main menu item 4, **Crosshair setup**. 321 designs come with TeknoParrot Manager, in the `Crosshairs\` folder next to the script.
+Crosshair setup puts the crosshair pictures you choose into your lightgun games. It is main menu item 5, **Crosshair setup**. 321 designs come with TeknoParrot Manager, in the `Crosshairs\` folder next to the script.
 
 ---
 
 ## Quick steps
 
-1. Start TeknoParrot Manager. At `Enter 1-17:` type `4` and press Enter.
+1. Start TeknoParrot Manager. At `Enter 1-18:` type `5` and press Enter.
 2. A preview window opens with all the designs. Click one for **Player 1**, then one for **Player 2**. They can be the same design.
 3. The window closes. In the console you see `P1: ... P2: ...`. At `Apply these crosshairs? (Y/N, default Y)` press Enter to apply.
 4. You are asked `Also hide the Windows cursor for all lightgun games? (Y/N)`. Answer `Y` if you see two cursors in a game. Your profiles are backed up first.
@@ -14,7 +14,7 @@ Crosshair setup puts the crosshair pictures you choose into your lightgun games.
 
 If the preview window cannot open, or you close it (press Esc, use the button at the bottom, or wait 45 seconds), you type the design numbers in the console instead. Nothing is copied until you confirm. TeknoParrot Manager remembers your last choice, so next time you can press Enter to reuse it.
 
-To change your crosshairs later, run menu 4 again. Old pictures are replaced.
+To change your crosshairs later, run menu 5 again. Old pictures are replaced.
 
 ---
 

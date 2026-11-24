@@ -1,6 +1,6 @@
 # dgVoodoo2
 
-dgVoodoo2 (by Dege) helps a few old games that crash or show a black screen. These games use very old graphics systems (DirectX 8, DirectDraw or Glide). dgVoodoo2 translates them for a modern PC. It is main menu item 6, **dgVoodoo2 setup**.
+dgVoodoo2 (by Dege) helps a few old games that crash or show a black screen. These games use very old graphics systems (DirectX 8, DirectDraw or Glide). dgVoodoo2 translates them for a modern PC. It is main menu item 7, **dgVoodoo2 setup**.
 
 **Use it only for games that crash, show a black screen or draw wrongly.** Games that already run fine do not need it.
 
@@ -8,7 +8,7 @@ dgVoodoo2 (by Dege) helps a few old games that crash or show a black screen. The
 
 ## Quick steps
 
-1. Start TeknoParrot Manager. At `Enter 1-17:` type `6` and press Enter.
+1. Start TeknoParrot Manager. At `Enter 1-18:` type `7` and press Enter.
 2. If the dgVoodoo2 files are not on your PC yet, press `D` to download them (see below).
 3. Setup scans your registered games and lists the ones that need dgVoodoo2.
 4. At `Enter A, M, or Q`, press `A` to use the games it found, `M` to pick games yourself, or `Q` to cancel.

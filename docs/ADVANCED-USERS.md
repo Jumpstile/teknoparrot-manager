@@ -30,8 +30,7 @@ TeknoParrot Manager makes the larger workflow safer, faster, and easier to audit
 **Works with the rest of your setup:**
 
 - consistent handling across direct TeknoParrot usage and supported frontend workflows;
-- safer foundations for future cabinet, controller, lightgun, LEDBlinky, LaunchBox, Big Box, and RetroBat integration; any optional HyperSpin plugin
-  work is deferred until after TeknoParrot Manager 1.0.
+- safer foundations for future cabinet, controller, lightgun, LEDBlinky, LaunchBox, Big Box, and RetroBat integration.
 
 ## What TeknoParrot Manager gives a power user
 

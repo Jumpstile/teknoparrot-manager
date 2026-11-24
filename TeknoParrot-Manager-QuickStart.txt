@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC9.1  --  QUICK START
+  TeknoParrot Manager  |  v1.0 RC9.2  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -9,14 +9,8 @@
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  This guide is for v1.0 RC9.1, the latest published release:
-  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1
-  The previous published release is v1.0 RC9:
-  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9
-  If you use RC9, choose 15) Check for Updates to get RC9.1.
-  Older published releases: v1.0 RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6.
-  RC8 was never published.
-  Final Version 1.0 has not been published yet.
+  This guide is for v1.0 RC9.2.
+  Release page: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after every run. AutoSync backs up UserProfiles before
@@ -827,7 +821,7 @@
      Next: copy controls only after you have bound one game of each type you
      use (buttons, driving, lightgun, or trackball).
 
-  7. In TeknoParrot Manager, choose 3) Propagate Controls. ("Propagate" means
+  7. In TeknoParrot Manager, choose 4) Propagate Controls. ("Propagate" means
      copy to your other games.)
 
      You will see: how many games have their controls set up, then a
@@ -851,7 +845,7 @@
      The registration screen ends with "Registration run finished". That
      means the run ended, not that every game's controls work. Details and
      the log list the skipped games, and name one game of each type to set
-     up first in TeknoParrotUI. Then run Propagate Controls (menu 3).
+     up first in TeknoParrotUI. Then run Propagate Controls (menu 4).
      Choosing a device in the binding plan does not set up a game.
      If all games are skipped, no game was changed.
      A failed save still ends as an error.
@@ -867,22 +861,22 @@
 
   Extras, only if needed:
 
-  - GPU compatibility: choose 7) GPU fix setup for the supported fixes for your
+  - GPU compatibility: choose 8) GPU fix setup for the supported fixes for your
     graphics card (GPU). Read the result, then test the affected game. A fix is
     not available for every game or GPU.
-  - Lightgun crosshairs: choose 4) Crosshair setup if you want different aiming
+  - Lightgun crosshairs: choose 5) Crosshair setup if you want different aiming
     images. Follow the preview to pick player 1 and player 2 images, then
     approve deployment. Test aiming in-game. Images do not calibrate a gun.
-  - Required fix: choose 12) Required game patches only for a covered build, as
+  - Required fix: choose 13) Required game patches only for a covered build, as
     explained in section 8.
-  - Region: choose 10) Region setup if you want your games to start in a
-    country such as USA or Europe (see REGION SETUP (MODE 10) below).
-  - dgVoodoo2: choose 6) dgVoodoo2 setup only when an older game crashes or has
+  - Region: choose 11) Region setup if you want your games to start in a
+    country such as USA or Europe (see REGION SETUP (MODE 11) below).
+  - dgVoodoo2: choose 7) dgVoodoo2 setup only when an older game crashes or has
     a graphics problem that its documentation names. It is not a universal
     crash fix.
-  - ReShade: choose 5) ReShade setup only if you want optional visual effects
+  - ReShade: choose 6) ReShade setup only if you want optional visual effects
     after the game works.
-  - Force feedback (FFB): choose 8) Force feedback setup only for supported
+  - Force feedback (FFB): choose 9) Force feedback setup only for supported
     wheel or controller feedback.
 
   Do not apply unrelated fixes all at once.
@@ -903,15 +897,15 @@
     driver setting, not the same as TeknoParrot Manager's GPU fix.
   - See the official guide (https://teknoparrot.com/wiki/getstarted.html) for
     game-specific guidance, including BudgieLoader for Lindbergh/Linux games.
-  - ReShade, change the look at any time: choose 5) ReShade setup again. Every
+  - ReShade, change the look at any time: choose 6) ReShade setup again. Every
     change can be undone, for all games or for one game (see "undo" below).
-  - ReShade, change the look for all games: choose 5) ReShade setup, then S.
+  - ReShade, change the look for all games: choose 6) ReShade setup, then S.
     Pick the new look and choose [Y] to use it. Then choose A) All registered
     games and [Y] Yes.
   - ReShade, change the look for one game: follow the same steps, but choose L)
     Browse and select specific games. Type that game's number, then type D
     (here D means "done").
-  - ReShade, undo: choose 5, then U) Undo ReShade changes. The games are listed
+  - ReShade, undo: choose 6, then U) Undo ReShade changes. The games are listed
     newest first. Pick one game's number and type YES, or choose [A] Undo all
     and type ALL. Any other answer cancels, and nothing is changed.
   - ReShade works with both 32-bit and 64-bit games. Games that run through
@@ -930,12 +924,12 @@
     what to do, because both together can look doubled. Choose K to keep it
     (default). Choose T to turn it off, only for the games that get ReShade
     now. A saved copy of your game settings is made first. To put it back, use
-    ReShade > Undo ReShade changes, or main menu 14) Restore backup.
+    ReShade > Undo ReShade changes, or main menu 15) Restore backup.
   - On ReShade result screens the choices include [D] Details, for example
     "Press A, S, B or D" or "Press D for details, or Enter to return to the
     menu". Type D and press Enter to see the full technical information. It is
     also kept in the log.
-  - PostgreSQL setup (main menu 11, Postgres setup): the result screen is
+  - PostgreSQL setup (main menu 12, Postgres setup): the result screen is
     short. It ends with "Press Enter to return to menu, or D for
     details". Type D and press Enter for the details, or just Enter
     to return.
@@ -952,14 +946,14 @@
     press Enter ("Press Enter to open the Windows permission window"), so
     you can read what it will ask for. This pause is skipped in unattended
     runs.
-  - Library health check (main menu 13) also checks every game database. A
-    database that is not ready shows as "Problem - <game>". Run 11) Postgres
+  - Library health check (main menu 14) also checks every game database. A
+    database that is not ready shows as "Problem - <game>". Run 12) Postgres
     setup to fix it.
-  - Library health check (main menu 13) also lists the games that need
+  - Library health check (main menu 14) also lists the games that need
     BepInEx and do not have it set up. ReShade is your choice for each
     game, so it is not flagged.
 
-  8. REQUIRED GAME PATCHES: MENU 12
+  8. REQUIRED GAME PATCHES: MENU 13
   ---------------------------------
 
   This menu fixes known problems in certain game builds. It uses ZIP files you
@@ -1123,7 +1117,7 @@
   - Normal log:
     <TeknoParrotFolder>\TeknoParrotManager\Logs\TeknoParrot-Manager.log.
   - Reports: <TeknoParrotFolder>\TeknoParrotManager\Reports\.
-  - Support: choose 16) Create Support Package to collect diagnostics, not
+  - Support: choose 17) Create Support Package to collect diagnostics, not
     game files. Preserve any failure evidence and review the package before
     sharing it.
 
@@ -1138,7 +1132,7 @@
   Each time TeknoParrot Manager starts, it saves a checked restore point of
   your game settings and its own settings, but only when something changed
   since the last one. It never removes older restore points by itself. You
-  can use them in 14) Restore backup, option 4.
+  can use them in 15) Restore backup, option 4.
 
   To get your settings back, see 10. RESTORE A BACKUP in the TROUBLESHOOTING
   section below.
@@ -1805,7 +1799,7 @@
 
   Symptom: you need your earlier controls or settings back after a change.
 
-  Choose 14) Restore backup from the main menu. It shows five choices:
+  Choose 15) Restore backup from the main menu. It shows five choices:
 
   - TeknoParrot UserProfiles backup
   - Postgres database backup
@@ -1839,7 +1833,7 @@
 
      Next: open the restore menu.
 
-  3. At the main menu, type 14 to choose 14) Restore backup.
+  3. At the main menu, type 15 to choose 15) Restore backup.
 
      You will see: the Restore from Backup screen with five numbered
      choices, plus B to go back.
@@ -1915,7 +1909,7 @@
   Expected result: the saved copy you picked is restored and checked. Or
   TeknoParrot Manager tells you why it stopped.
 
-  Undoing a required game patch is separate. Choose 12) Required game
+  Undoing a required game patch is separate. Choose 13) Required game
   patches, then U. It uses the patch record kept for that change. It is not a
   restore of a whole game.
 
@@ -1966,7 +1960,7 @@
   Do not treat every crash as a missing patch. Do not install every optional
   tool at once.
 
-  Choose 16) Create Support Package for diagnostics. Keep the exact result
+  Choose 17) Create Support Package for diagnostics. Keep the exact result
   and any backup or leftover paths it shows. A partial result is not success.
   Do not send game data, passwords, or credentials.
 
@@ -2041,7 +2035,16 @@
 
        2) Register only    -- register games you already extracted.
 
-       3) Propagate Controls -- copy controls from a game you set up to
+       3) LaunchBox integration -- add your registered games to
+                              LaunchBox, fill in details and playlists,
+                              link art, keep LaunchBox in step. Opens the
+                              LaunchBox choices (P, A, G, V, S, L, C, F,
+                              B) any time, without registering or
+                              extracting anything first. If you have no
+                              LaunchBox yet, it tells you so and how to
+                              continue.
+
+       4) Propagate Controls -- copy controls from a game you set up to
                               games of the same type, set up games with
                               your controller layout, check which games
                               have all their controls, or learn your
@@ -2049,37 +2052,37 @@
 
      Game Enhancements (optional -- not every game needs them)
 
-       4) Crosshair setup  -- deploy custom cursor images to lightgun
+       5) Crosshair setup  -- deploy custom cursor images to lightgun
                               games, optionally hide the Windows cursor
                               for all guns.
 
-       5) ReShade setup    -- add visual enhancements (see below).
+       6) ReShade setup    -- add visual enhancements (see below).
 
-       6) dgVoodoo2 setup  -- fix some old DX8, DirectDraw, and Glide
+       7) dgVoodoo2 setup  -- fix some old DX8, DirectDraw, and Glide
                               game crashes or black screens (see below).
 
-       7) GPU fix setup    -- apply GPU vendor fixes to registered games
+       8) GPU fix setup    -- apply GPU vendor fixes to registered games
                               (AMD / NVIDIA / Intel, see below).
 
-       8) Force feedback (FFB) setup -- wheel/stick rumble and force feedback
+       9) Force feedback (FFB) setup -- wheel/stick rumble and force feedback
                               (see below).
 
-       9) BepInEx setup    -- install or update selected games after you
+      10) BepInEx setup    -- install or update selected games after you
                               approve, using the stable x64/x86 package.
                               It never removes an existing install.
 
-       10) Region setup    -- pick the country your games start in
+       11) Region setup    -- pick the country your games start in
                               (like USA or Europe) and set it on the games
                               that offer it. You choose all or some of them
                               and confirm first.
 
      Game Requirements (only for some games)
 
-      11) Postgres setup  -- install and set up PostgreSQL for games that
+      12) Postgres setup  -- install and set up PostgreSQL for games that
                              need it (Golden Tee Live, Power Putt Live,
                              etc).
 
-      12) Required game patches -- apply a needed fix to certain game
+      13) Required game patches -- apply a needed fix to certain game
                               builds, using a ZIP on your computer.
                               TeknoParrot Manager backs up, checks, and
                               keeps undo evidence (see REQUIRED GAME
@@ -2087,7 +2090,7 @@
 
      Maintenance and Recovery
 
-     13) Library health check -- reports registered, broken and unregistered
+     14) Library health check -- reports registered, broken and unregistered
                              games. It also counts GPU fix, FFB Blaster,
                              dgVoodoo2, ReShade and BepInEx. It names the
                              games that need BepInEx and do not have
@@ -2095,7 +2098,7 @@
                              suggests is a separate choice that you
                              confirm first.
 
-      14) Restore backup  -- put back a saved copy, newest first:
+      15) Restore backup  -- put back a saved copy, newest first:
                              TeknoParrot's saved game settings folder
                              (UserProfiles), PostgreSQL, or LaunchBox.
 
@@ -2106,7 +2109,7 @@
 
      Application
 
-     15) Check for Updates -- look for a newer release on GitHub and
+     16) Check for Updates -- look for a newer release on GitHub and
                              install it (RC8.1 and later). It checks the
                              download, looks inside the ZIP, backs up
                              every file it replaces and installs it. You
@@ -2115,11 +2118,11 @@
                              (RC8, RC7): install the newest release by
                              hand once from the Releases page.
 
-      16) Create Support Package
+      17) Create Support Package
                           -- collect safe logs/reports into one ZIP to
                              send when asking for help.
 
-      17) Exit            -- quit the script.
+      18) Exit            -- quit the script.
 
      The menu automatically shortens its descriptions, or shows labels
      only, depending on your console window size.
@@ -2176,24 +2179,24 @@
 
   After new games are registered, you are asked once which country they
   should start in. Type 0 to leave them as they are (see REGION SETUP (MODE
-  10) below).
+  11) below).
 
   6. Launch TeknoParrotUi.exe -- your games now appear.
 
   MORE DETAIL: Pick a mode and the steps after it
   -----------------------------------------------
-  Mode 13, Health check: it also checks every game database. A database that
+  Mode 14, Health check: it also checks every game database. A database that
   is missing, cannot be opened with the game's own settings, or has no tables
-  shows as "Problem - <game>" under D. Next: run Postgres setup (menu 11).
+  shows as "Problem - <game>" under D. Next: run Postgres setup (menu 12).
 
-  Mode 13, Health check: it also has rows for game types TeknoParrot Manager
+  Mode 14, Health check: it also has rows for game types TeknoParrot Manager
   does not know, games TeknoParrot has not released yet ("not available
   yet"), emulators missing from your TeknoParrot folder, games that need
   you to pick the game file by hand, and System 11 games with no saved
   files yet. Choose D to see the names. Games set to Internal storage show
   "Game database: OK".
 
-  Mode 13, Health check: broken saved paths can be repaired from reviewed
+  Mode 14, Health check: broken saved paths can be repaired from reviewed
   candidates. The default search root is the configured games folder.
 
   Another search folder must be existing, canonical, non-reparse, and
@@ -2207,7 +2210,7 @@
   folders.
 
 
-  REGION SETUP (MODE 10)
+  REGION SETUP (MODE 11)
   ----------------------
   Some games can start in a country you pick, like USA or Europe. It changes
   things like the language. Games left on Auto or Default usually start as
@@ -2219,11 +2222,11 @@
       country do you want your games to start in?" Type the number of a
       country, or 0 to leave every game as it is. It does not ask in a
       preview or an unattended run.
-    - At the main menu, choose 10) Region setup any time.
+    - At the main menu, choose 11) Region setup any time.
 
   To use Region setup:
 
-    1. At "Enter 1-17:" type 10 and press Enter.
+    1. At "Enter 1-18:" type 11 and press Enter.
 
        You will see: a numbered list of countries. Each one shows how many of
        your games offer it, for example "1) USA (12 games)".
@@ -2266,7 +2269,7 @@
       touch it.
 
 
-  REQUIRED GAME PATCHES (MODE 12)
+  REQUIRED GAME PATCHES (MODE 13)
   -------------------------------
   Use this option only for a game build listed by TeknoParrot Manager.
   You also need the matching patch ZIP on your computer.
@@ -2276,7 +2279,7 @@
 
   To apply a repair:
 
-    1. Keep the exact patch ZIP on your computer and choose mode 12.
+    1. Keep the exact patch ZIP on your computer and choose mode 13.
 
        You will see: "Required game patches" and the choices A, M, U and Q.
 
@@ -2334,7 +2337,7 @@
 
   GET HELP (CREATE SUPPORT PACKAGE)
   ---------------------------------
-  If you need help, choose 16) Create Support Package. Do this first:
+  If you need help, choose 17) Create Support Package. Do this first:
 
     1. In TeknoParrotUI choose Troubleshooting -> Save information to a
        text file.
@@ -2348,7 +2351,7 @@
 
        TeknoParrot Manager accepts only that exact file name.
 
-    3. Choose 16) Create Support Package in TeknoParrot Manager.
+    3. Choose 17) Create Support Package in TeknoParrot Manager.
 
        You will see: the output begins with "What failed" and "What TPM
        did not change".
@@ -2444,7 +2447,7 @@
   Extraction keeps failing   Check the log for the specific error. Verify
                              free space and that the ZIP is not corrupted.
 
-  Controls wrong after       Open the mode 14 backup. See which later
+  Controls wrong after       Open the mode 15 backup. See which later
   propagation                settings it would replace. Keep any current
                              settings you need. Fix the reference game
                              before you try again.
@@ -2480,7 +2483,7 @@
                              bindings/settings before you remove a
                              duplicate.
 
-  ReShade text or a window   Run mode 5 (ReShade setup) for that game and
+  ReShade text or a window   Run mode 6 (ReShade setup) for that game and
   shows at game start        pick a look again. TeknoParrot Manager writes
                              ReShade.ini with the welcome window, counters
                              and messages off. If it says it left the game
@@ -2502,7 +2505,7 @@
 
   CROSSHAIR SETUP (OPTIONAL)
   --------------------------
-  Mode 4 deploys custom crosshair images to all registered lightgun games
+  Mode 5 deploys custom crosshair images to all registered lightgun games
   (House of the Dead, Aliens Extermination, Terminator Salvation, etc.).
 
   321 crosshair designs are included in the  Crosshairs\  folder next to
@@ -2511,7 +2514,7 @@
   You can add your own PNG images to that folder at any time. The script
   picks them up automatically on the next run.
 
-  When you run mode 4:
+  When you run mode 5:
 
     1. A preview window opens. It shows all 321 included designs and any
        valid PNG images you added.
@@ -2590,9 +2593,9 @@
 
   REMOVING RESHADE
   ----------------
-  Choose R from mode 5. Nothing is removed until you type REMOVE.
+  Choose R from mode 6. Nothing is removed until you type REMOVE.
 
-    1. Type 5 for ReShade setup and press Enter.
+    1. Type 6 for ReShade setup and press Enter.
 
        You will see: ReShade Visual Enhancements Setup, with
        "R) Remove verified TeknoParrot Manager-managed ReShade files".
@@ -2657,7 +2660,7 @@
 
   The product calls a look a "profile". The steps below say "look".
 
-    1. At "Enter 1-17:" type 5 and press Enter.
+    1. At "Enter 1-18:" type 6 and press Enter.
 
        You will see: "ReShade Visual Enhancements Setup" with S, R, U and B
        choices and "Action (S/R/U/B, default S):".
@@ -2872,7 +2875,7 @@
   changes."
 
   Removing ReShade later does not turn TeknoParrot's own CRT look back
-  on. To put it back, use Undo (see below) or Restore backup (mode 14).
+  on. To put it back, use Undo (see below) or Restore backup (mode 15).
 
 
   THE RESULT SCREEN
@@ -2924,7 +2927,7 @@
   still choose the look and confirm it in setup. A copy of the old files
   is saved first, so you can undo it.
 
-  M opens the Library health check (mode 13) to repair missing game paths.
+  M opens the Library health check (mode 14) to repair missing game paths.
 
   D shows details and then asks again. It says: "Press A to replace
   protected ReShade files. TeknoParrot Manager saves a copy of the old
@@ -2935,7 +2938,7 @@
   -------------------------------------
   Change the look for ALL games:
 
-    1. Type 5 for ReShade setup. Press Enter at "Action (S/R/U/B, default
+    1. Type 6 for ReShade setup. Press Enter at "Action (S/R/U/B, default
        S):".
 
     2. Pick the new look and type U.
@@ -2952,7 +2955,7 @@
 
   Change the look for ONE game:
 
-    1. Type 5 for ReShade setup and press Enter at the Action prompt.
+    1. Type 6 for ReShade setup and press Enter at the Action prompt.
 
     2. Pick the new look and type U. Press Enter at "Use the selected
        ReShade profile?".
@@ -2968,7 +2971,7 @@
 
   Undo your changes:
 
-    1. Type 5 for ReShade setup. At the Action prompt type U.
+    1. Type 6 for ReShade setup. At the Action prompt type U.
 
        You will see: "Undo ReShade changes" and a list of the games,
        "Newest first". If there is nothing to undo, you will see "There
@@ -2995,7 +2998,7 @@
   left as it is.
 
   Put back TeknoParrot's own CRT look that you turned off: use undo (when
-  an undo copy exists), or choose mode 14 Restore backup.
+  an undo copy exists), or choose mode 15 Restore backup.
 
 
   GETTING THE RESHADE FILES
@@ -3013,7 +3016,7 @@
 
   If you cloned the repository, or the Assets\ReShade\ folder is empty, do this:
 
-    1. Choose mode 5.
+    1. Choose mode 6.
 
        You will see: "ReShade 64-bit DLL not found." and
        "D) Download automatically from reshade.me",
@@ -3039,7 +3042,7 @@
     3. Copy that DLL into the  Assets\ReShade\  folder under
        <TeknoParrotRoot>\TeknoParrotManager\  and rename it to  ReShade64.dll.
 
-    4. Run TeknoParrot Manager and choose mode 5, or answer Y when
+    4. Run TeknoParrot Manager and choose mode 6, or answer Y when
        prompted at the end of a normal run.
 
   Full details, effect descriptions, and update instructions:
@@ -3125,7 +3128,7 @@
   installs anything, ReShade tells you how many of your games it can
   change now and that it leaves the others alone. A game it could not
   check is listed with the direct next action to repair or review the
-  issue. Then run ReShade setup again (mode 5, S).
+  issue. Then run ReShade setup again (mode 6, S).
 
   Native TeknoParrot CRT, SSAA, shader, scanline, and post-process
   settings are preserved unless you choose T to turn the CRT look off.
@@ -3239,7 +3242,7 @@
 
   To set it up (the easy way):
 
-    1. Choose mode 6 from the main menu. Or answer Y at the end of any run.
+    1. Choose mode 7 from the main menu. Or answer Y at the end of any run.
        You will see: "dgVoodoo2 Legacy Compatibility Setup".
        The wizard finds the games that need it and shows them first.
        Next: if it asks about a missing folder, go to step 2.
@@ -3273,10 +3276,10 @@
          From the root     : dgVoodoo.conf (optional; a copy is added to
                              each game you pick that has no dgVoodoo.conf)
 
-    4. Run the script and choose mode 6 (step 1 above).
+    4. Run the script and choose mode 7 (step 1 above).
 
   If a game is skipped because its saved folder is missing, go back to the
-  main menu and choose mode 13 (Library Health Check). The result screen
+  main menu and choose mode 14 (Library Health Check). The result screen
   also offers [H] for this when a saved path is missing.
 
   The result screen counts your games, for example "You selected 5 games:
@@ -3306,13 +3309,13 @@
 
   GPU COMPATIBILITY FIXES (OPTIONAL)
   ------------------------------------
-  Mode 7 applies compatibility settings for your graphics card (GPU) to
+  Mode 8 applies compatibility settings for your graphics card (GPU) to
   your registered games. It covers AMD, NVIDIA, or Intel, when settings
   are available for your card.
 
   To run it:
 
-    1. Choose mode 7 from the main menu. Or answer Y at the end of a
+    1. Choose mode 8 from the main menu. Or answer Y at the end of a
        normal run.
        You will see: if TeknoParrot Manager cannot identify your GPU, it
        shows the available makers.
@@ -3334,7 +3337,7 @@
        D, O, R, B"). [H] also appears when a saved path is missing.
        Next: press B to go back to the main menu.
 
-  If a saved game folder is missing, use mode 13 (Library Health Check)
+  If a saved game folder is missing, use mode 14 (Library Health Check)
   first. If a write or backup is reported as "unverified", follow the
   recovery steps on the screen. Keep the details and the support log. Do not
   run the fix again straight away.
@@ -3362,19 +3365,23 @@
        Without one it has no effect.
 
     2) Third-party plugin (mightymikem/FFBArcadePlugin) -- free, no
-       subscription needed. It is fetched live from GitHub every run.
+       subscription needed. It always uses the NEWEST release. Each game
+       gets the plugin, its own FFBPlugin.ini settings file, and SDL2.dll
+       if it has none. You pick your wheel by name first.
 
   If a game is covered by both, you are asked once which to use for all
-  such games. It never silently picks one for you.
+  such games. It never silently picks one for you. Before the plugin
+  changes any game, you see what will be installed or updated and are
+  asked to go ahead.
 
   To run:
 
-    1. Choose mode 8 from the main menu.
+    1. Choose mode 9 from the main menu.
        Next: answer the questions on the screen.
 
   If a saved game folder is missing, or a saved device (such as a wheel)
   is not found, each is reported separately. Either result offers the
-  mode 13 Health Check handoff.
+  mode 14 Health Check handoff.
 
   Games that do not support this stay apart from true errors, so you can
   tell the two apart.
@@ -3385,9 +3392,12 @@
   MORE DETAIL: FORCE FEEDBACK (FFB) SETUP
   ----------------------------------------
 
-  The third-party plugin's audit entry records source, filename/version,
-  computed SHA-256, and transfer metrics; no publisher signature or digest
-  trust anchor is claimed.
+  The third-party plugin's audit entry records source, file name, release
+  version and computed SHA-256. The download is compared with the checksum
+  GitHub publishes for it, when GitHub publishes one. No publisher
+  signature check is claimed. A ZIP that fails its safety checks is
+  refused and nothing is changed. Running mode 9 again after a newer
+  release backs up and replaces only unchanged files it installed.
 
   Missing saved paths and unavailable saved devices are reported
   separately; unsupported/no-match games remain distinct from true
@@ -3396,7 +3406,7 @@
 
   BEPINEX UPDATE AND SETUP (OPTIONAL)
   -----------------------------------
-  BepInEx is a helper add-on that some games can use. Mode 9 installs or
+  BepInEx is a helper add-on that some games can use. Mode 10 installs or
   updates it for the games you select.
 
   TeknoParrot Manager never installs or updates BepInEx without your
@@ -3404,7 +3414,7 @@
 
   To run it:
 
-    1. Choose mode 9 from the main menu.
+    1. Choose mode 10 from the main menu.
        You will see: a list of games.
        Next: read the list.
 
@@ -3430,7 +3440,7 @@
     architecture               game program. Check that the game is
                                installed and reachable, then try again.
 
-    Missing saved path         Use mode 13 (Library Health Check).
+    Missing saved path         Use mode 14 (Library Health Check).
 
     Network failure            Try again when you are connected.
 
@@ -3443,7 +3453,7 @@
   MORE DETAIL: BEPINEX UPDATE AND SETUP
   --------------------------------------
 
-  Mode 9 offers a reviewed install or update for selected games.
+  Mode 10 offers a reviewed install or update for selected games.
   Architecture means the executable's x86/x64 type. Explicit approval is
   required before TeknoParrot Manager installs or updates BepInEx.
 
@@ -3515,7 +3525,7 @@
   Only a mouse and keyboard for now? TeknoParrot Manager does not set up
   mouse or keyboard input. Set one game's controls in TeknoParrotUI
   (RawInput is the mouse and keyboard type), start it from TeknoParrot
-  first, then use Propagate Controls (3) for the others and test one game.
+  first, then use Propagate Controls (4) for the others and test one game.
   Starting from TeknoParrot and from RetroBat are two different ways to
   start a game. TeknoParrot Manager does not change how RetroBat starts a
   game and cannot tell you why one way works and the other does not.
@@ -3755,7 +3765,7 @@
   added are ever removed.
   If anything looks wrong afterward, undo it:
 
-    1. Choose menu option 14 (Restore backup).
+    1. Choose menu option 15 (Restore backup).
     2. Choose 3 (LaunchBox library backup).
        Next: pick the saved copy. This restores the exact files the script
        changed, from before it changed them.
@@ -3779,19 +3789,6 @@
   every time; your choice is not remembered.
 
 
-  POST-1.0 PLUGIN SCOPE
-  ---------------------
-  Extra add-ons (plugins) for other front-ends are not part of this
-  release.
-
-  MORE DETAIL: POST-1.0 PLUGIN SCOPE
-  -----------------------------------
-
-  HyperSpin-specific core logic, settings, menu entries, guidance, and
-  exports are excluded from TeknoParrot Manager 1.0. Any optional plugin
-  work is deferred until after TeknoParrot Manager 1.0 and is not part of this release.
-
-
   RESTORING A BACKUP
   ------------------
   A backup is a saved copy. Restoring puts that saved copy back. Anything
@@ -3799,7 +3796,7 @@
 
   To restore:
 
-    1. Choose 14 (Restore backup) from the main menu.
+    1. Choose 15 (Restore backup) from the main menu.
        You will see: "Restore from Backup" and these choices:
 
          1) TeknoParrot UserProfiles backup
@@ -4320,17 +4317,17 @@
 
   LaunchBoxBackups\                    Timestamped backups of LaunchBox's
                                        own files, made before each direct
-                                       LaunchBox write. Restore via menu 14.
+                                       LaunchBox write. Restore via menu 15.
 
   PostgresBackups\                     Timestamped pg_dump backups of
                                        Postgres databases, made before each
                                        Postgres setup run. Kept in
                                        TeknoParrotManager\Backups\. Restore
-                                       via menu 14.
+                                       via menu 15.
 
   TeknoParrotManager\SupportPackages\
                                        Safe support ZIPs created by menu
-                                       option 16. Send the ZIP when asking
+                                       option 17. Send the ZIP when asking
                                        for help.
 
   TeknoParrotManager\Reports\TeknoParrot-Manager-ActionItems.txt

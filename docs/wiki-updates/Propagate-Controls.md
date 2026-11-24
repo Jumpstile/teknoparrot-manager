@@ -1,8 +1,8 @@
-# Propagate Controls (menu 3)
+# Propagate Controls (menu 4)
 
 Set up the controls for one game of each type, and TeknoParrot Manager copies them to your other games of the same type. This menu item never registers or unpacks a game. It also holds your controller layout, a controls check, and your own arcade buttons (see below).
 
-The same step also runs at the end of [[AutoSync]] and [[Register]]. Use menu 3 when your games are already registered and you just set up a new example game in TeknoParrotUI.
+The same step also runs at the end of [[AutoSync]] and [[Register]]. Use menu 4 when your games are already registered and you just set up a new example game in TeknoParrotUI.
 
 ---
 
@@ -10,7 +10,7 @@ The same step also runs at the end of [[AutoSync]] and [[Register]]. Use menu 3 
 
 1. In TeknoParrotUI, set up every button and axis of one game for each control type you use. The control types are button, driving, lightgun, trackball, analog and spinner.
 2. A game counts as an example game when at least five of its controls are set up.
-3. Start TeknoParrot Manager and type `3` at the main menu.
+3. Start TeknoParrot Manager and type `4` at the main menu.
 
 ---
 
@@ -48,7 +48,7 @@ A game marked as copied is not proof that its controls work. Start one game and 
 
 ## Your controller layout and the controls check
 
-Menu 3 first asks which of these you want (1 to 5). Choice 1 is the copy described above.
+Menu 4 first asks which of these you want (1 to 5). Choice 1 is the copy described above.
 
 - **2 - Set up games with my controller layout.** The first time, choose a layout once: Xbox, PlayStation, Nintendo or arcade stick. You can change any single button. Test and Service start empty. Then set up one game, all your games at once (one preview, one `Y`), or game by game (a `Y` for each game).
 - **3 - Choose or change my controller layout.** It is saved in TPM's own settings folder. A connected Xbox-style controller only pre-selects the Xbox choice.

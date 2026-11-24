@@ -102,8 +102,8 @@ Describe 'Compare-TpmVersions' {
         Compare-TpmVersions -VersionTextA 'v1.0' -VersionTextB 'v1.0-RC8' | Should -Be 1
     }
 
-    It 'orders the whole release line: RC7 < RC8 < RC8.1 < RC9 < RC9.1 < 1.0 < 1.0.1 < 1.1' {
-        $line = @('v1.0-RC7', 'v1.0-RC8', 'v1.0-RC8.1', 'v1.0-RC8.2', 'v1.0-RC8.10', 'v1.0-RC9', 'v1.0-RC9.1', 'v1.0', 'v1.0.1', 'v1.1')
+    It 'orders the whole release line: RC7 < RC8 < RC8.1 < RC9 < RC9.1 < RC9.2 < 1.0 < 1.0.1 < 1.1' {
+        $line = @('v1.0-RC7', 'v1.0-RC8', 'v1.0-RC8.1', 'v1.0-RC8.2', 'v1.0-RC8.10', 'v1.0-RC9', 'v1.0-RC9.1', 'v1.0-RC9.2', 'v1.0', 'v1.0.1', 'v1.1')
         for ($i = 0; $i -lt $line.Count; $i++) {
             for ($j = 0; $j -lt $line.Count; $j++) {
                 $expected = [Math]::Sign($i - $j)
@@ -283,7 +283,7 @@ $ReleaseCandidateLabel = "RC7"
 
     It '[UVO-08] reads the current manager identity from source without executing it' {
         $managerScriptPath = Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'
-        Get-TpmLocalVersion -Path $managerScriptPath | Should -Be '1.0-RC9.1'
+        Get-TpmLocalVersion -Path $managerScriptPath | Should -Be '1.0-RC9.2'
     }
 
     It 'throws when the file does not exist' {
@@ -377,6 +377,7 @@ Describe 'Select-TpmUpdateAsset' {
         @{ Tag = 'v1.0-RC8.1'; Asset = 'TeknoParrot.Manager.v1.0.RC8.1.zip' }
         @{ Tag = 'v1.0-RC9'; Asset = 'TeknoParrot.Manager.v1.0.RC9.zip' }
         @{ Tag = 'v1.0-RC9.1'; Asset = 'TeknoParrot.Manager.v1.0.RC9.1.zip' }
+        @{ Tag = 'v1.0-RC9.2'; Asset = 'TeknoParrot.Manager.v1.0.RC9.2.zip' }
         @{ Tag = 'v1.0.1'; Asset = 'TeknoParrot.Manager.v1.0.1.zip' }
         @{ Tag = 'v1.1'; Asset = 'TeknoParrot.Manager.v1.1.zip' }
     ) {

@@ -373,20 +373,20 @@ Describe 'FIX83 item 11: Library health check default view' {
         $none = New-F83HealthResult @{ Valid = @(); Registered = 0 }
         (Show-LibraryHealthNextActions -Result $none) | Should -BeExactly 'B'
         $lines = @(Get-F83Lines)
-        $lines | Should -Contain '  [5] ReShade'
-        $lines | Should -Contain '  [6] dgVoodoo2'
-        $lines | Should -Contain '  [7] GPU Fix'
-        $lines | Should -Contain '  [9] BepInEx'
+        $lines | Should -Contain '  [6] ReShade'
+        $lines | Should -Contain '  [7] dgVoodoo2'
+        $lines | Should -Contain '  [8] GPU Fix'
+        $lines | Should -Contain '  [10] BepInEx'
         ((Get-F83Lines) -join "`n") | Should -Not -Match 'of 0|\(s\)'
         Install-F83Mocks -Answers @('B')
         $some = New-F83HealthResult @{ Valid = @(1..10 | ForEach-Object { 'G{0}' -f $_ }); Registered = 10; ReShadeCount = 3; BepInExCount = 0; DgVoodoo2Needed = @('X', 'Y'); GpuFixNeeded = @('Z') }
         [void](Show-LibraryHealthNextActions -Result $some)
         $lines = @(Get-F83Lines)
-        $lines | Should -Contain '  [5] ReShade (3 of 10 games have it)'
-        $lines | Should -Contain '  [6] dgVoodoo2 (2 games still need it)'
-        $lines | Should -Contain '  [7] GPU Fix (1 game still needs it)'
-        $lines | Should -Contain '  [8] Force Feedback'
-        $lines | Should -Contain '  [9] BepInEx (0 of 10 games have it)'
+        $lines | Should -Contain '  [6] ReShade (3 of 10 games have it)'
+        $lines | Should -Contain '  [7] dgVoodoo2 (2 games still need it)'
+        $lines | Should -Contain '  [8] GPU Fix (1 game still needs it)'
+        $lines | Should -Contain '  [9] Force Feedback'
+        $lines | Should -Contain '  [10] BepInEx (0 of 10 games have it)'
     }
 
     It 'shows the whole report as short blocks when D is chosen, then asks again' {

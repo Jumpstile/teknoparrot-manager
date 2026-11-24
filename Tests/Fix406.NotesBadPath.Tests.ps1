@@ -82,7 +82,7 @@ Describe 'An unexpected error ends in plain words (FIX406)' {
     It 'the GPU fix says a missing drive is not connected and how to fix it' {
         # RC9 names the drive ("Drive E: is not connected.") and ends with one plain next step.
         $script:f406Source | Should -Match 'Drive \{0\} is not connected\.'
-        $script:f406Source | Should -Match 'Connect the drive, or choose 13 \(Library health check\) in the main menu to repair these games\.'
+        $script:f406Source | Should -Match 'Connect the drive, or choose 14 \(Library health check\) in the main menu to repair these games\.'
         $script:f406Source | Should -Match 'Then run GPU Compatibility Fix again from the main menu\.'
     }
 }

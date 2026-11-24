@@ -92,7 +92,7 @@ Describe 'A game saved on a drive that is not connected (issue 401)' {
 
         $screen = $script:f407Screen -join "`n"
         $screen | Should -Match ('3 games point to drive {0}:, which is not connected, so they were skipped\.' -f $script:f407Missing)
-        $screen | Should -Match 'Connect the drive, or run 13\) Library health check and choose R or S to point the games at the new folder\.'
+        $screen | Should -Match 'Connect the drive, or run 14\) Library health check and choose R or S to point the games at the new folder\.'
         $screen | Should -Match 'Details: GameA, GameB, GameC'
         # One log line per game, not four.
         @($script:f407Log | Where-Object { $_ -like 'Drive not connected*' }).Count | Should -Be 3

@@ -1,4 +1,4 @@
-# Restore Backup (menu 14)
+# Restore Backup (menu 15)
 
 Restore backup puts back something TeknoParrot Manager saved earlier. You do it from inside the program. You do not need File Explorer.
 
@@ -12,7 +12,7 @@ TeknoParrot Manager saves copies for you:
 
 ## How to start
 
-1. Start TeknoParrot Manager and type `14` at the main menu.
+1. Start TeknoParrot Manager and type `15` at the main menu.
 2. Choose what to restore:
 
 ```

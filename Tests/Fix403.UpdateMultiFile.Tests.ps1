@@ -397,7 +397,7 @@ Describe 'An update that was cut off is noticed at the next start (FIX403)' {
         $text | Should -Match 'An earlier update of TeknoParrot Manager did not finish\.'
         $text | Should -Match 'UpdateBackups'
         $text | Should -Match 'TeknoParrotManager_2026-01-01_10-00-00'
-        $text | Should -Match 'choose 15 \(Check for Updates\)'
+        $text | Should -Match 'choose 16 \(Check for Updates\)'
         @($script:f403NoticeLog | Where-Object { $_ -like 'Interrupted update:*tpm-update-staging-aaaa*' }).Count | Should -Be 1
         Get-F403Text (Join-Path $staging 'moved-aside.txt') | Should -BeExactly 'the only copy'
     }
@@ -415,7 +415,7 @@ Describe 'An update that was cut off is noticed at the next start (FIX403)' {
         $text = $script:f403Notice -join "`n"
         $text | Should -Match 'An earlier update of TeknoParrot Manager did not finish\.'
         $text | Should -Match 'It stopped before it changed any program file'
-        $text | Should -Match 'choose 15 \(Check for Updates\)'
+        $text | Should -Match 'choose 16 \(Check for Updates\)'
         $text | Should -Not -Match 'TeknoParrotManager_2026'
         $text | Should -Not -Match 'mix of old and new'
         $text | Should -Not -Match 'copy its files'

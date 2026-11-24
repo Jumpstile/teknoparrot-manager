@@ -47,7 +47,7 @@ TPM keeps its own files in a `TeknoParrotManager` folder inside your TeknoParrot
 | `TeknoParrotManager\State\` | Your saved settings: `TeknoParrot-Manager.config.json` |
 | `TeknoParrotManager\Logs\` | The log: `TeknoParrot-Manager.log` |
 | `TeknoParrotManager\Reports\` | Reports from each run, such as `TeknoParrot-Manager-controls.txt`, `TeknoParrot-Manager-ActionItems.txt`, and `TeknoParrot-LaunchBox-Import.xml` |
-| `TeknoParrotManager\SupportPackages\` | The ZIP files made by **16) Create Support Package**. See [[Support Package]]. |
+| `TeknoParrotManager\SupportPackages\` | The ZIP files made by **17) Create Support Package**. See [[Support Package]]. |
 | `TeknoParrotManager\Backups\` | Safety copies, such as `AutoSyncReplaced` and the PostgreSQL backups |
 | `TeknoParrotManager\Assets\` | Your own add-on files (see below) |
 

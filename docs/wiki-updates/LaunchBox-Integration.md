@@ -2,6 +2,8 @@
 
 After AutoSync or Register only finishes, TeknoParrot Manager can add your games to LaunchBox. This step is optional. Skip it if you do not use LaunchBox.
 
+You can also open it any time from main menu item **3** (LaunchBox integration). You do not need to register or unzip any games first. If you have no LaunchBox yet, it tells you so and how to continue. It still appears after AutoSync and Register only too.
+
 ---
 
 ## The choices
@@ -50,7 +52,7 @@ V turns the regions and versions of one game into a single LaunchBox game with a
 
 ## Keep LaunchBox in step (S)
 
-S makes LaunchBox match TeknoParrot. Games you removed from TeknoParrot are removed from LaunchBox. Moved games get their new location. Old Manager names become the clean title. A game whose game file is only missing (for example an unplugged drive) is never removed. Names you typed yourself, and games that have a Games Database ID, are never renamed. If most games have no profile, nothing changes. It shows what it would change first, makes a backup, and asks before it saves. Restore puts everything back.
+S makes LaunchBox match TeknoParrot. Games you removed from TeknoParrot are removed from LaunchBox. Moved games get their new location. Old TeknoParrot Manager names become the clean title. A game whose game file is only missing (for example an unplugged drive) is never removed. Names you typed yourself, and games that have a Games Database ID, are never renamed. If most games have no profile, nothing changes. It shows what it would change first, makes a backup, and asks before it saves. Restore puts everything back.
 
 ---
 
@@ -105,7 +107,7 @@ TeknoParrot Manager saves `TeknoParrot-LaunchBox-Import.xml` in the `Reports` fo
 
 ## Undo
 
-Choose **14** (Restore backup) in the main menu, then option **3**, the LaunchBox library backup. See [[Restore Backup]].
+Choose **15** (Restore backup) in the main menu, then option **3**, the LaunchBox library backup. See [[Restore Backup]].
 
 <details>
 <summary>Details</summary>

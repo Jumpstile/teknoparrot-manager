@@ -38,6 +38,7 @@ BeforeAll {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TpmProgress.psm1') -Destination (Join-Path $progressModuleDirectory 'TpmProgress.psm1') -Force
     . $extractedFunctionsPath
     . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
+    . (Join-Path $PSScriptRoot 'FfbPluginTestKit.ps1')
     . (Join-Path $PSScriptRoot 'TpmFakePostgresInterpret.ps1')
     . (Join-Path $PSScriptRoot '..\scripts\TpmRequiredPatchEngine.ps1')
 
@@ -7747,7 +7748,7 @@ function Exit-PostgresRecoveryResume {
         $guidance | Should -Match 'Click Yes if you want this to continue'
         $guidance | Should -Match 'tries to continue automatically and reports the result'
         $guidance | Should -Match 'approval alone does not mean setup or repair succeeded'
-        $guidance | Should -Match 'read the reported failure and View Log before trying option 11 again'
+        $guidance | Should -Match 'read the reported failure and View Log before trying option 12 again'
         $guidance | Should -Not -Match 'do not need to relaunch'
         $guidance | Should -Not -Match '(?i)service stop|service start|psql|pg_hba\.conf|trust authentication|hash|command line|process internals'
     }
@@ -7762,7 +7763,7 @@ function Exit-PostgresRecoveryResume {
         $guidance | Should -Match 'Click Yes if you want this to continue'
         $guidance | Should -Match 'tries to continue automatically and reports the result'
         $guidance | Should -Match 'approval alone does not mean setup or repair succeeded'
-        $guidance | Should -Match 'read the reported failure and View Log before trying option 11 again'
+        $guidance | Should -Match 'read the reported failure and View Log before trying option 12 again'
         $guidance | Should -Not -Match 'do not need to relaunch'
         $guidance | Should -Match 'not an administrator, close TeknoParrot Manager and start it again with "Run as administrator"'
         $guidance | Should -Not -Match '(?i)right-click|psql|pg_hba\.conf|trust authentication|hash|command line|process internals'
@@ -11060,8 +11061,8 @@ Describe "Compare-ManagerVersionText" {
         Compare-ManagerVersionText -VersionTextA 'v1.0' -VersionTextB 'v1.0-RC8' | Should -Be 1
     }
 
-    It "orders the whole release line: RC7 < RC8 < RC8.1 < RC9 < RC9.1 < 1.0 < 1.0.1 < 1.1" {
-        $line = @('v1.0-RC7', 'v1.0-RC8', 'v1.0-RC8.1', 'v1.0-RC8.2', 'v1.0-RC8.10', 'v1.0-RC9', 'v1.0-RC9.1', 'v1.0', 'v1.0.1', 'v1.1')
+    It "orders the whole release line: RC7 < RC8 < RC8.1 < RC9 < RC9.1 < RC9.2 < 1.0 < 1.0.1 < 1.1" {
+        $line = @('v1.0-RC7', 'v1.0-RC8', 'v1.0-RC8.1', 'v1.0-RC8.2', 'v1.0-RC8.10', 'v1.0-RC9', 'v1.0-RC9.1', 'v1.0-RC9.2', 'v1.0', 'v1.0.1', 'v1.1')
         for ($i = 0; $i -lt $line.Count; $i++) {
             for ($j = 0; $j -lt $line.Count; $j++) {
                 $expected = [Math]::Sign($i - $j)
@@ -11113,7 +11114,7 @@ Describe "Manager script version identity" {
     }
 
     It "extracts the current script's literal identity from its full source" {
-        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC9.1'
+        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC9.2'
     }
 
     It "ignores assignment-looking lines inside a here-string" {
@@ -12372,7 +12373,7 @@ Describe "Main menu source-level drift check" {
         $switchNumbers    = [regex]::Matches($switchBlockText, '"(\d+)"\s*\{') |
             ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
 
-        # @() wrap: not currently reachable with $null (17 menu items always
+        # @() wrap: not currently reachable with $null (18 menu items always
         # collapse to more than one unique number), but the same unguarded
         # .Count-on-a-possibly-scalar-pipeline-result pattern that broke the
         # Ultra-tier banner test under PS 5.1 above -- fixed defensively for
@@ -12395,7 +12396,7 @@ Describe "Main menu source-level drift check" {
         $byMode = @{}
         foreach ($item in (Get-MainMenuItems)) { $byMode[[string]$item.Mode] = [int]$item.Number }
         $expected = [ordered]@{
-            AutoSync = 'AutoSync:'; RegisterOnly = 'Register only:'; HealthCheck = 'Library health check:'
+            AutoSync = 'AutoSync:'; RegisterOnly = 'Register only:'; LaunchBoxSetup = 'LaunchBox integration:'; HealthCheck = 'Library health check:'
             Restore = 'Restore from a trusted backup.'
             CheckForUpdates = 'Check for updates.'; Support = 'Create a support package.'; Exit = 'Exit.'
         }
@@ -12415,7 +12416,7 @@ Describe "Main menu source-level drift check" {
     It "every menu item has a distinct Mode string used by exactly one switch case" {
         $items = Get-MainMenuItems
         foreach ($item in $items) {
-            if ($item.Number -eq 17) { continue } # Exit has no $mode assignment
+            if ($item.Number -eq 18) { continue } # Exit has no $mode assignment
             $script:mainScriptContent | Should -Match ([regex]::Escape('"{0}"' -f $item.Number) + '\s*\{\s*\$mode\s*=\s*"' + [regex]::Escape($item.Mode) + '"')
         }
     }
@@ -12424,7 +12425,7 @@ Describe "Main menu source-level drift check" {
         $itemNumbers = Get-MainMenuItems | ForEach-Object { $_.Number } | Sort-Object -Unique
         $script:mainScriptContent.Contains('Read-MainMenuChoiceResponsive -Prompt ("Enter 1-{0}: " -f $menuMaxNumber)') | Should -Be $true
         $script:mainScriptContent.Contains('$menuMaxNumber = (Get-MainMenuItems | Measure-Object -Property Number -Maximum).Maximum') | Should -Be $true
-        $itemNumbers[-1] | Should -Be 17
+        $itemNumbers[-1] | Should -Be 18
     }
 
     It "actual menu loop passes current viewport dimensions into Show-MainMenu" {
@@ -12657,17 +12658,17 @@ Describe "Split-TextForMenuWidth" {
 
 Describe "RC8 main-menu command routing and visibility" {
     It "accepts only advertised hotkeys and exact numeric choices" {
-        (Resolve-MainMenuCommand -InputText 'L' -MaxNumber 17) | Should -Be 'L'
-        (Resolve-MainMenuCommand -InputText 'l' -MaxNumber 17) | Should -Be 'L'
-        (Resolve-MainMenuCommand -InputText 'H' -MaxNumber 17) | Should -Be 'H'
-        (Resolve-MainMenuCommand -InputText 'h' -MaxNumber 17) | Should -Be 'H'
-        (Resolve-MainMenuCommand -InputText 'Q' -MaxNumber 17) | Should -Be 'Q'
-        (Resolve-MainMenuCommand -InputText '1' -MaxNumber 17) | Should -Be '1'
-        (Resolve-MainMenuCommand -InputText '17' -MaxNumber 17) | Should -Be '17'
-        (Resolve-MainMenuCommand -InputText '18' -MaxNumber 17) | Should -Be $null
-        (Resolve-MainMenuCommand -InputText '01' -MaxNumber 17) | Should -Be $null
-        (Resolve-MainMenuCommand -InputText 'N' -MaxNumber 17) | Should -Be $null
-        (Resolve-MainMenuCommand -InputText 'U' -MaxNumber 17) | Should -Be $null
+        (Resolve-MainMenuCommand -InputText 'L' -MaxNumber 18) | Should -Be 'L'
+        (Resolve-MainMenuCommand -InputText 'l' -MaxNumber 18) | Should -Be 'L'
+        (Resolve-MainMenuCommand -InputText 'H' -MaxNumber 18) | Should -Be 'H'
+        (Resolve-MainMenuCommand -InputText 'h' -MaxNumber 18) | Should -Be 'H'
+        (Resolve-MainMenuCommand -InputText 'Q' -MaxNumber 18) | Should -Be 'Q'
+        (Resolve-MainMenuCommand -InputText '1' -MaxNumber 18) | Should -Be '1'
+        (Resolve-MainMenuCommand -InputText '18' -MaxNumber 18) | Should -Be '18'
+        (Resolve-MainMenuCommand -InputText '19' -MaxNumber 18) | Should -Be $null
+        (Resolve-MainMenuCommand -InputText '01' -MaxNumber 18) | Should -Be $null
+        (Resolve-MainMenuCommand -InputText 'N' -MaxNumber 18) | Should -Be $null
+        (Resolve-MainMenuCommand -InputText 'U' -MaxNumber 18) | Should -Be $null
     }
     It "routes help and log before numeric workflow dispatch" {
         $script:ProductionSource | Should -Match '(?s)if \(\$modeChoice -eq ''H''\).*Show-MainMenuHelp'
@@ -12697,13 +12698,13 @@ Describe "RC8 main-menu command routing and visibility" {
         $output | Should -Match 'L\s*=\s*(View )?Log'
         $output | Should -Match 'Q\s*=\s*Quit'
         $screen.PromptAllowed | Should -BeTrue
-        (Resolve-MainMenuCommand -InputText 'invalid' -MaxNumber 17) | Should -Be $null
-        (Resolve-MainMenuCommand -InputText 'H' -MaxNumber 17) | Should -Be 'H'
-        (Resolve-MainMenuCommand -InputText 'L' -MaxNumber 17) | Should -Be 'L'
-        (Resolve-MainMenuCommand -InputText 'Q' -MaxNumber 17) | Should -Be 'Q'
+        (Resolve-MainMenuCommand -InputText 'invalid' -MaxNumber 18) | Should -Be $null
+        (Resolve-MainMenuCommand -InputText 'H' -MaxNumber 18) | Should -Be 'H'
+        (Resolve-MainMenuCommand -InputText 'L' -MaxNumber 18) | Should -Be 'L'
+        (Resolve-MainMenuCommand -InputText 'Q' -MaxNumber 18) | Should -Be 'Q'
     }
     It "keeps an invalid-choice notice visible through the next constrained redraw" {
-        $notice = 'Invalid choice. Enter 1-17. Commands: H = Help, L = View Log, Q = Quit.'
+        $notice = 'Invalid choice. Enter 1-18. Commands: H = Help, L = View Log, Q = Quit.'
         $screen = Render-MainMenuScreen -Tier Compact -Width 80 -Height 25 -Notice $notice
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $output | Should -Match 'Invalid choice'
@@ -12750,13 +12751,13 @@ Describe "RC8 main-menu command routing and visibility" {
         $output | Should -Match 'TeknoParrot Manager'
         $output | Should -Match ([regex]::Escape((Get-ManagerVersionLine)))
         $numbers = @([regex]::Matches($output, '(?m)^\s*(\d+)\)\s') | ForEach-Object { [int]$_.Groups[1].Value })
-        ($numbers -join ',') | Should -Be ((1..17) -join ',')
+        ($numbers -join ',') | Should -Be ((1..18) -join ',')
         $output | Should -Match 'H\s*=\s*Help'
         $output | Should -Match 'L\s*=\s*View Log'
         $output | Should -Match 'Q\s*=\s*Quit'
         $screen.PromptAllowed | Should -BeTrue
-        ($screen.VisibleOptionNumbers -join ',') | Should -Be ((1..17) -join ',')
-        $screen.Rows[-2].Text | Should -Match '17\)\s+Exit\s*$'
+        ($screen.VisibleOptionNumbers -join ',') | Should -Be ((1..18) -join ',')
+        $screen.Rows[-2].Text | Should -Match '18\)\s+Exit\s*$'
         $screen.Rows[-1].Text | Should -Match 'Enter number.*H\s*=\s*Help.*L\s*=\s*View Log.*Q\s*=\s*Quit'
         $showCall = $script:ProductionSource.IndexOf('$screen = Show-MainMenu')
         $promptCall = $script:ProductionSource.IndexOf('$choiceResult = Read-MainMenuChoiceResponsive', $showCall)
@@ -12790,7 +12791,7 @@ Describe "RC8 main-menu command routing and visibility" {
         $screen.Geometry.ColumnCount | Should -Be 1
         $screen.Rows.Count | Should -BeLessOrEqual 18
         $screen.PromptAllowed | Should -BeTrue
-        ($screen.VisibleOptionNumbers -join ',') | Should -Be ((1..17) -join ',')
+        ($screen.VisibleOptionNumbers -join ',') | Should -Be ((1..18) -join ',')
         $lastOptionIndex = 0
         foreach ($item in (Get-MainMenuItems)) {
             $lastOptionIndex = [Math]::Max($lastOptionIndex, $output.IndexOf("$($item.Number)) $($item.Label)"))
@@ -12800,14 +12801,15 @@ Describe "RC8 main-menu command routing and visibility" {
 
     It "keeps required-patch and shifted maintenance actions on their documented options" {
         $expected = @(
-            @{ Number = 10; Mode = 'RegionSetup'; Label = 'Region setup' },
-            @{ Number = 12; Mode = 'RequiredPatch'; Label = 'Required game patches' },
-            @{ Number = 13; Mode = 'HealthCheck'; Label = 'Library health check' },
-            @{ Number = 14; Mode = 'Restore'; Label = 'Restore backup' },
-            @{ Number = 11; Mode = 'PostgresSetup'; Label = 'Postgres setup' },
-            @{ Number = 15; Mode = 'CheckForUpdates'; Label = 'Check for Updates' },
-            @{ Number = 16; Mode = 'Support'; Label = 'Create Support Package' },
-            @{ Number = 17; Mode = 'Exit'; Label = 'Exit' }
+            @{ Number = 3; Mode = 'LaunchBoxSetup'; Label = 'LaunchBox integration' },
+            @{ Number = 11; Mode = 'RegionSetup'; Label = 'Region setup' },
+            @{ Number = 13; Mode = 'RequiredPatch'; Label = 'Required game patches' },
+            @{ Number = 14; Mode = 'HealthCheck'; Label = 'Library health check' },
+            @{ Number = 15; Mode = 'Restore'; Label = 'Restore backup' },
+            @{ Number = 12; Mode = 'PostgresSetup'; Label = 'Postgres setup' },
+            @{ Number = 16; Mode = 'CheckForUpdates'; Label = 'Check for Updates' },
+            @{ Number = 17; Mode = 'Support'; Label = 'Create Support Package' },
+            @{ Number = 18; Mode = 'Exit'; Label = 'Exit' }
         )
         $items = @(Get-MainMenuItems)
         foreach ($wanted in $expected) {
@@ -12868,7 +12870,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
     It "Ultra tier renders menu groups side-by-side instead of a narrow left-column menu" {
         $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 160 -Height 80
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
-        $output | Should -Match ([regex]::Escape("12) Required game patches"))
+        $output | Should -Match ([regex]::Escape("13) Required game patches"))
         $screen.AllOptionsVisible | Should -BeTrue
         $screen.Geometry.ColumnCount | Should -Be 2
         $screen.Geometry.MenuWidth | Should -BeGreaterThan 145
@@ -12881,7 +12883,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
             $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 25
             $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
             $output | Should -Match '1\)'
-            $output | Should -Match '17\)'
+            $output | Should -Match '18\)'
             $screen.Rows.Count | Should -BeGreaterThan 0
         }
     }
@@ -12901,7 +12903,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         # Prior behavior flattened banner+body+footer and kept only the
         # first N rows top-to-bottom -- at a short height that silently
         # dropped the entire footer (Quit/Help controls) and the
-        # Application section (option 17, Exit), which a real user could
+        # Application section (option 18, Exit), which a real user could
         # never reach without resizing or scrolling. This asserted that
         # loss as "expected" (`Should -Not -Match 'Exit'`); the corrected
         # behavior below is the opposite: the footer and Exit must survive,
@@ -12912,7 +12914,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
 
         $screen.Rows.Count | Should -BeLessOrEqual 10
         $output | Should -Match 'TeknoParrot Manager'
-        $output | Should -Match '17\) Exit'
+        $output | Should -Match '18\) Exit'
         $output | Should -Match 'Enter number'
     }
 
@@ -12939,17 +12941,17 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         }
     }
 
-    It "keeps option 17 (Exit) visible at every tier when the viewport is short, single-column layouts" {
+    It "keeps option 18 (Exit) visible at every tier when the viewport is short, single-column layouts" {
         foreach ($case in @(
             @{ Tier = 'Compact'; Width = 80 }
         )) {
             $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 12
             $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
-            $output | Should -Match '17\) Exit'
+            $output | Should -Match '18\) Exit'
         }
     }
 
-    It "keeps option 17 (Exit) visible at the Ultra two-column tier when the viewport is short" {
+    It "keeps option 18 (Exit) visible at the Ultra two-column tier when the viewport is short" {
         # Two-column layouts distribute all sections between the columns,
         # then join rows by index; Exit can appear earlier in the flat list
         # than in a single-column layout, so it must remain visible here too.
@@ -12958,7 +12960,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         )) {
             $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 12
             $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
-            $output | Should -Match '17\) Exit'
+            $output | Should -Match '18\) Exit'
         }
     }
     It "Show-MainMenu delegates to the stateless render-clear-write pipeline" {
@@ -12973,8 +12975,8 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
     It "Show-MainMenu's actual output includes visible menu items" {
         $output = & { Show-MainMenu -Tier 'Ultra' -Width 160 -Height 40 } 6>&1 | Out-String
 
-        $output | Should -Match '12\) Required game patches'
-        $output | Should -Match '17\) Exit'
+        $output | Should -Match '13\) Required game patches'
+        $output | Should -Match '18\) Exit'
         $output | Should -Match 'Enter number'
     }
     It "responsive menu input falls back when stdin is redirected" {
@@ -12997,7 +12999,7 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
     # Run time even though it renders correctly in the It's own title,
     # which is built separately at Discovery time). -TestCases passes each
     # case's values in as real bound parameters instead, which does work.
-    It "at the supported 60x<Height> minimum and its immediate boundaries, every option 1-17 is visible, Exit and the footer are present, and nothing scrolls off the viewport" -TestCases @(
+    It "at the supported 60x<Height> minimum and its immediate boundaries, every option 1-18 is visible, Exit and the footer are present, and nothing scrolls off the viewport" -TestCases @(
         @{ Height = 10 }, @{ Height = 11 }, @{ Height = 12 }
     ) {
         param($Height)
@@ -13009,7 +13011,7 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         foreach ($n in $allItemNumbers) {
             $output | Should -Match ([regex]::Escape("$n)"))
         }
-        $output | Should -Match '17\) Exit'
+        $output | Should -Match '18\) Exit'
         $output | Should -Match 'Enter number'
         $output | Should -Match 'Q=Quit'
     }
@@ -13021,7 +13023,7 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         $screen.Rows.Count | Should -BeLessOrEqual 8
         $screen.PromptAllowed | Should -BeFalse
         $output | Should -Match 'Resize the PowerShell window'
-        $output | Should -Not -Match '17\) Exit'
+        $output | Should -Not -Match '18\) Exit'
         $output | Should -Not -Match 'Enter number'
     }
 
@@ -13087,11 +13089,11 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         if ($Height -lt 10) {
             $screen.PromptAllowed | Should -BeFalse
             $output | Should -Match 'Resize the PowerShell window'
-            $output | Should -Not -Match '17\) Exit'
+            $output | Should -Not -Match '18\) Exit'
             $output | Should -Not -Match 'Enter number'
         } else {
             $screen.PromptAllowed | Should -BeTrue
-            $output | Should -Match '17\) Exit'
+            $output | Should -Match '18\) Exit'
             $output | Should -Match 'Q=Quit'
             foreach ($n in @((Get-MainMenuItems) | ForEach-Object { $_.Number })) {
                 $output | Should -Match ([regex]::Escape("$n)"))
@@ -13107,7 +13109,7 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
         $screen.AllOptionsVisible | Should -BeTrue
-        $output | Should -Match '17\) Exit'
+        $output | Should -Match '18\) Exit'
     }
 
     It "every numbered option in the emergency presentation still maps to the same Mode the live switch statement dispatches on" {
@@ -13168,7 +13170,7 @@ Describe "Menu layout debug script" {
         $exitCode | Should -Be 0
         $output | Should -Not -Match 'is not recognized as the name of a cmdlet'
         $output | Should -Not -Match 'CommandNotFoundException'
-        $output | Should -Match '17\) Exit'
+        $output | Should -Match '18\) Exit'
         $output | Should -Match 'Enter number'
     }
 
@@ -13183,7 +13185,7 @@ Describe "Menu layout debug script" {
         $exitCode | Should -Be 0
         $output | Should -Not -Match 'is not recognized as the name of a cmdlet'
         $output | Should -Not -Match 'CommandNotFoundException'
-        $output | Should -Match '17\) Exit'
+        $output | Should -Match '18\) Exit'
         $output | Should -Match 'Enter number'
     }
 }
@@ -13925,35 +13927,8 @@ Describe "TeknoParrot-Manager.ps1 -Unattended real child-process fixture (issue 
 }
 
 Describe "Issue #300 shared workflow status state machine" {
-    BeforeAll {
-        function New-FFBDownloadFixtureResult {
-            param([string]$destDir, [string]$SourceRevision)
-            $files = [ordered]@{}
-            $evidence = @()
-            [void][System.IO.Directory]::CreateDirectory($destDir)
-            foreach ($dllName in @('MAME32.dll', 'MAME64.dll')) {
-                $path = Join-Path $destDir ('TPM-FFB-test-{0}-{1}' -f $SourceRevision.Substring(0,8), $dllName)
-                [System.IO.File]::WriteAllBytes($path, [byte[]](1,2,3,4))
-                $files[$dllName] = $path
-                $evidence += [pscustomobject]@{
-                    FileName = $dllName
-                    SourceUrl = "https://raw.githubusercontent.com/fixture/FFBArcadePlugin/$SourceRevision/$dllName"
-                    SourceRevision = $SourceRevision
-                    Sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
-                    Trust = 'SourcePinnedAuditHash'
-                    DownloadPath = $path
-                }
-            }
-            return [pscustomobject]@{
-                Succeeded = $true; Files = $files; Evidence = $evidence
-                ResiduePaths = @(); Reason = $null
-            }
-        }
-    }
     BeforeEach {
-        Mock Get-FFBPluginSourceRevision {
-            [pscustomobject]@{ Revision = ('a' * 40); Repository = 'fixture/FFBArcadePlugin'; ManifestUrl = 'https://api.github.com/repos/fixture/FFBArcadePlugin/commits/master'; Trust = 'SourcePinnedAuditHash' }
-        }
+        Mock Get-FFBPluginLatestRelease { New-FfbTestRelease }
     }
     AfterEach {
         if ($script:ActiveTpmWorkflowStatus) {
@@ -14322,6 +14297,7 @@ Describe "Issue #300 shared workflow status state machine" {
             [pscustomobject]@{ Succeeded = $true; MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @(); PathReasonCounts = @{} }
         }
         Mock Read-HostSafe { 'Y' }
+        Mock Select-FFBPluginWheel { [pscustomobject]@{ Cancelled = $false; DeviceGuid = ''; Name = '' } }
         $result = Invoke-TpmFfbSetupMode -UserProfilesDir $TestDrive -TpRoot $TestDrive -ScriptRoot $TestDrive
         $result.Completed | Should -BeTrue
         $script:capturedFfbTpRoot | Should -Be $TestDrive
@@ -14352,11 +14328,13 @@ Describe "Issue #300 shared workflow status state machine" {
         [System.IO.File]::WriteAllBytes((Join-Path $cacheDir 'MAME64.dll'), [System.Text.Encoding]::ASCII.GetBytes('plugin'))
         Mock Get-FFBPluginGameMap { [ordered]@{ OverlapGame = 'd3d9.dll' } }
         Mock Invoke-FFBPluginDownload {
-            param([string]$destDir, [string]$SourceRevision)
-            New-FFBDownloadFixtureResult -destDir $destDir -SourceRevision $SourceRevision
+            param([string]$destDir, [object]$Release)
+            New-FFBDownloadFixtureResult -destDir $destDir -Release $Release
         }
         Mock Get-ExeArchitecture { 'x64' }
-        Mock Read-HostSafe { 'N' }
+        # The first question is the overlap choice (N = use the plugin); the second is "Go ahead?".
+        $script:ffbAnswers = [System.Collections.Generic.Queue[string]]::new(); [void]$script:ffbAnswers.Enqueue('N'); [void]$script:ffbAnswers.Enqueue('Y')
+        Mock Read-HostSafe { $script:ffbAnswers.Dequeue() }
         $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir -TpRoot $tpRoot -NativeEnabledCodes @('Overlap')
         $result.Succeeded | Should -BeTrue
         $field = (Read-Xml (Join-Path $userProfiles 'Overlap.xml')).SelectSingleNode('/GameProfile/ConfigValues/FieldInformation/FieldValue')
@@ -14367,7 +14345,7 @@ Describe "Issue #300 shared workflow status state machine" {
         $backupField.InnerText | Should -Be '1'
         (Get-FileHash -LiteralPath (Join-Path $userProfiles 'Overlap.xml') -Algorithm SHA256).Hash | Should -Not -Be (Get-FileHash -LiteralPath (Join-Path $backupDirs[0].FullName 'Overlap.xml') -Algorithm SHA256).Hash
         (Test-Path -LiteralPath (Join-Path $gameDir 'd3d9.dll') -PathType Leaf) | Should -BeTrue
-        Should -Invoke Read-HostSafe -Times 1 -Exactly
+        Should -Invoke Read-HostSafe -Times 2 -Exactly
     }
     It "reports FFB overlap snapshot and rollback progress while preserving original profile bytes" {
         $root=Join-Path $TestDrive 'ffb-overlap-rollback-progress'
@@ -14437,8 +14415,8 @@ Describe "Issue #300 shared workflow status state machine" {
         [System.IO.File]::WriteAllBytes((Join-Path $cacheDir 'MAME64.dll'), [System.Text.Encoding]::ASCII.GetBytes('plugin'))
         Mock Get-FFBPluginGameMap { [ordered]@{ OverlapGame = 'd3d9.dll' } }
         Mock Invoke-FFBPluginDownload {
-            param([string]$destDir, [string]$SourceRevision)
-            New-FFBDownloadFixtureResult -destDir $destDir -SourceRevision $SourceRevision
+            param([string]$destDir, [object]$Release)
+            New-FFBDownloadFixtureResult -destDir $destDir -Release $Release
         }
         Mock Get-ExeArchitecture { 'x64' }
         $script:ffbOverlapAnswers = [System.Collections.Generic.Queue[string]]::new()
@@ -14470,8 +14448,8 @@ Describe "Issue #300 shared workflow status state machine" {
         [System.IO.File]::WriteAllText((Join-Path $userProfiles 'UnmatchedFfbGame.xml'), '<GameProfile><EmulationProfile>UnmatchedFfbGame</EmulationProfile><GamePath>{0}</GamePath></GameProfile>' -f $unmatchedExe)
         Mock Get-FFBPluginGameMap { [ordered]@{ MissingFfbGame = 'd3d9.dll' } }
         Mock Invoke-FFBPluginDownload {
-            param([string]$destDir, [string]$SourceRevision)
-            New-FFBDownloadFixtureResult -destDir $destDir -SourceRevision $SourceRevision
+            param([string]$destDir, [object]$Release)
+            New-FFBDownloadFixtureResult -destDir $destDir -Release $Release
         }
         $script:ffbShown = New-Object 'System.Collections.Generic.List[string]'
         Mock Write-Host { [void]$script:ffbShown.Add([string]($Object -join ' ')) }
@@ -14494,8 +14472,8 @@ Describe "Issue #300 shared workflow status state machine" {
         Set-Content -LiteralPath (Join-Path $userProfiles 'DeviceFfbGame.xml') -Value '<GameProfile><EmulationProfile>DeviceFfbGame</EmulationProfile><GamePath>Z:\missing\DeviceFfbGame.exe</GamePath></GameProfile>'
         Mock Get-FFBPluginGameMap { [ordered]@{ DeviceFfbGame = 'd3d9.dll' } }
         Mock Invoke-FFBPluginDownload {
-            param([string]$destDir, [string]$SourceRevision)
-            New-FFBDownloadFixtureResult -destDir $destDir -SourceRevision $SourceRevision
+            param([string]$destDir, [object]$Release)
+            New-FFBDownloadFixtureResult -destDir $destDir -Release $Release
         }
         Mock Test-TpmGameMutationPath { [pscustomobject]@{ Valid = $false; ReasonCode = 'DEVICE_UNAVAILABLE'; Reason = 'A device which does not exist was specified.' } }
         $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir
@@ -14519,6 +14497,7 @@ Describe "Issue #300 shared workflow status state machine" {
             }
         }
         Mock Read-HostSafe { @('Y', '')[$script:ffbAnswerIndex++] }
+        Mock Select-FFBPluginWheel { [pscustomobject]@{ Cancelled = $false; DeviceGuid = ''; Name = '' } }
         $result = Invoke-TpmFfbSetupMode -UserProfilesDir $TestDrive -TpRoot $TestDrive -ScriptRoot $TestDrive
         $result.Completed | Should -BeFalse
         $result.MissingPath | Should -Be 1
@@ -14532,38 +14511,47 @@ Describe "Issue #300 shared workflow status state machine" {
         $source | Should -Match '\$pendingApplyMode = ''HealthCheck'''
         $source | Should -Match "Choose H or B"
     }
-    It "refuses mutable FFB source downloads without a pinned commit" {
-        $cache = Join-Path $TestDrive 'ffb-unpinned'
+    It "refuses a plugin download whose release tag is not plain, and downloads nothing" {
+        # Mutation: build the download from any text the release answer holds -> a tag such as ../master reaches the address and the file name.
+        $cache = Join-Path $TestDrive 'ffb-bad-tag'
         New-Item -ItemType Directory -Path $cache -Force | Out-Null
-        Set-Content -LiteralPath (Join-Path $cache 'MAME64.dll') -Value 'existing'
-        Mock Invoke-TpmDownload { throw 'mutable artifact download must not run' }
-        $result = Invoke-FFBPluginDownload -destDir $cache -SourceRevision 'master'
+        Set-Content -LiteralPath (Join-Path $cache 'keep.txt') -Value 'existing'
+        Mock Invoke-TpmDownload { throw 'a download must not run' }
+        $result = Invoke-FFBPluginDownload -destDir $cache -Release (New-FfbTestRelease -Tag '../master')
         Should -Invoke Invoke-TpmDownload -Times 0 -Exactly
         $result.Succeeded | Should -BeFalse
         $result.Reason | Should -Be 'SOURCE_REVISION_UNAVAILABLE'
-        (Get-Content -LiteralPath (Join-Path $cache 'MAME64.dll') -Raw) | Should -Be "existing`r`n"
-        @(Get-ChildItem -LiteralPath $cache -Filter 'TPM-FFB-source-*' -Force).Count | Should -Be 0
+        (Get-Content -LiteralPath (Join-Path $cache 'keep.txt') -Raw) | Should -Be "existing`r`n"
     }
-    It "keeps existing custom cache files while staging pinned sources separately" {
+    It "keeps other cache files while staging the new plugin ZIP under its own name" {
         $cache = Join-Path $TestDrive 'ffb-custom-cache'
         New-Item -ItemType Directory -Path $cache -Force | Out-Null
-        Set-Content -LiteralPath (Join-Path $cache 'MAME64.dll') -Value 'custom'
+        Set-Content -LiteralPath (Join-Path $cache 'keep.txt') -Value 'custom'
+        $script:ffbSourceZip = Join-Path $TestDrive 'ffb-source-keep.zip'
+        New-FfbTestZip -Path $script:ffbSourceZip -Games @{ FixtureGame = 'd3d9.dll' }
+        $hash = (Get-FileHash -LiteralPath $script:ffbSourceZip -Algorithm SHA256).Hash
+        $script:ffbAskedDigest = $null
         Mock Invoke-TpmDownload {
-            param([string]$DownloadUrl, [string]$DestinationPath, [string]$ExpectedBytes, [string]$Label, [string]$Version)
-            Set-Content -LiteralPath $DestinationPath -Value 'fresh'
+            param([string]$DownloadUrl, [string]$DestinationPath, [string]$ExpectedBytes, [string]$Label, [string]$Version, [string]$ExpectedSha256)
+            $script:ffbAskedDigest = $ExpectedSha256
+            Copy-Item -LiteralPath $script:ffbSourceZip -Destination $DestinationPath -Force
             $true
         }
-        $result = Invoke-FFBPluginDownload -destDir $cache -SourceRevision ('b' * 40)
+        $result = Invoke-FFBPluginDownload -destDir $cache -Release (New-FfbTestRelease -Tag 'v.1.2.3.4' -Sha256 $hash)
         $result.Succeeded | Should -BeTrue
-        @($result.Files.Keys) | Should -HaveCount 2
-        @($result.Evidence | Where-Object { $_.Sha256 -notmatch '^[0-9A-F]{64}$' }) | Should -HaveCount 0
-        (Get-Content -LiteralPath (Join-Path $cache 'MAME64.dll') -Raw) | Should -Be "custom`r`n"
-        @(Get-ChildItem -LiteralPath $cache -Filter 'TPM-FFB-source-*' -Force).Count | Should -Be 2
-        @($script:FFBDownloadEvidence).Count | Should -Be 2
+        $result.Staged | Should -BeTrue
+        $result.Sha256 | Should -Be $hash
+        $script:ffbAskedDigest | Should -Be $hash -Because 'the digest GitHub published is what the download is held to'
+        @($result.Evidence).Count | Should -Be 1
+        $result.Evidence[0].DigestChecked | Should -BeTrue
+        $result.Evidence[0].SourceRevision | Should -Be 'v.1.2.3.4'
+        (Get-Content -LiteralPath (Join-Path $cache 'keep.txt') -Raw) | Should -Be "custom`r`n"
+        $result.ZipPath | Should -Not -Be (Join-Path $cache 'TPM-FFB-Plugin-Release.zip')
+        Test-Path -LiteralPath $result.ZipPath -PathType Leaf | Should -BeTrue
     }
 }
 
-Describe 'FFB pinned source and transaction invariants' {
+Describe 'FFB plugin release source and transaction invariants' {
     BeforeAll {
         function New-FFBTransactionFixture {
             param([string]$Root)
@@ -14578,66 +14566,66 @@ Describe 'FFB pinned source and transaction invariants' {
             return [pscustomobject]@{ Root=$Root; Profiles=$profiles; GameRoot=$gameRoot; Cache=$cache; Exe=$exe }
         }
 
-        function New-FFBStructuredDownloadResult {
-            param([string]$DestDir, [string]$Revision)
-            $files = [ordered]@{}
-            $evidence = New-Object System.Collections.Generic.List[object]
-            [void][System.IO.Directory]::CreateDirectory($DestDir)
-            foreach ($dllName in @('MAME32.dll', 'MAME64.dll')) {
-                $path = Join-Path $DestDir ('TPM-FFB-transaction-{0}-{1}' -f $Revision.Substring(0,8), $dllName)
-                [System.IO.File]::WriteAllBytes($path, [byte[]](9,8,7,6))
-                $files[$dllName] = $path
-                [void]$evidence.Add([pscustomobject]@{
-                    FileName=$dllName
-                    SourceUrl="https://raw.githubusercontent.com/mightymikem/FFBArcadePlugin/$Revision/$dllName"
-                    SourceRevision=$Revision
-                    Sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
-                    Trust='SourcePinnedAuditHash'
-                    DownloadPath=$path
-                })
-            }
-            return [pscustomobject]@{
-                Succeeded=$true; Files=$files; Evidence=$evidence.ToArray()
-                ResiduePaths=@(); Reason=$null
-            }
-        }
-
         function Mock-FFBTransactionDependencies {
             param([string]$Revision)
-            Mock Get-FFBPluginSourceRevision {
-                [pscustomobject]@{
-                    Revision=$Revision
-                    Repository='mightymikem/FFBArcadePlugin'
-                    ManifestUrl='https://api.github.com/repos/mightymikem/FFBArcadePlugin/commits/master'
-                    Trust='SourcePinnedAuditHash'
-                }
-            }
+            $script:ffbTestTag = $Revision
+            Mock Get-FFBPluginLatestRelease { New-FfbTestRelease -Tag $script:ffbTestTag }
             Mock Get-FFBPluginGameMap { [ordered]@{ FixtureGame='d3d9.dll' } }
             Mock Invoke-FFBPluginDownload {
-                param([string]$destDir, [string]$SourceRevision)
-                New-FFBStructuredDownloadResult -DestDir $destDir -Revision $SourceRevision
+                param([string]$destDir, [object]$Release)
+                New-FFBDownloadFixtureResult -destDir $destDir -Release $Release
             }
             Mock Get-ExeArchitecture { 'x64' }
+            Mock Read-TpmYesNo { 'Y' }
         }
     }
 
-    It 'resolves one full source SHA from the mutable branch endpoint' {
-        $revision = ('c' * 40)
-        $script:ffbResolverUris = @()
+    It 'asks for the latest release and picks the plugin ZIP with its published digest' {
+        # Mutation: take the first asset, or a pinned old tag -> a source ZIP or an old release is installed.
+        $script:ffbReleaseUris = @()
+        $assetUrl = 'https://github.com/mightymikem/FFBArcadePlugin/releases/download/v.2.0.0.51/FFB.Arcade.Plugin.v2.0.0.51.zip'
+        $script:ffbReleaseJson = (@{ tag_name = 'v.2.0.0.51'; assets = @(
+            @{ name = 'Source code.zip'; browser_download_url = 'https://github.com/mightymikem/FFBArcadePlugin/archive/v.2.0.0.51.zip' },
+            @{ name = 'FFB.Arcade.Plugin.v2.0.0.51.zip'; size = 93040003; browser_download_url = $assetUrl; digest = ('sha256:' + ('ab' * 32)) }) } | ConvertTo-Json -Depth 5)
         Mock Invoke-TpmWebRequestSilently {
             param([string]$Uri)
-            $script:ffbResolverUris += $Uri
-            [pscustomobject]@{ Content = '{"sha":"' + $revision + '"}' }
+            $script:ffbReleaseUris += $Uri
+            [pscustomobject]@{ Content = $script:ffbReleaseJson }
         }
-        $source = Get-FFBPluginSourceRevision
-        $source.Revision | Should -Be $revision.ToUpperInvariant()
-        $source.Trust | Should -Be 'SourcePinnedAuditHash'
-        @($script:ffbResolverUris) | Should -HaveCount 1
-        $script:ffbResolverUris[0] | Should -Match '/commits/master$'
+        $release = Get-FFBPluginLatestRelease
+        $release.Revision | Should -Be 'v.2.0.0.51'
+        $release.AssetName | Should -Be 'FFB.Arcade.Plugin.v2.0.0.51.zip'
+        $release.AssetUrl | Should -Be $assetUrl
+        $release.Sha256 | Should -Be (('AB') * 32)
+        $release.Bytes | Should -Be 93040003
+        $release.Trust | Should -Be 'ReleaseDigestVerified'
+        @($script:ffbReleaseUris) | Should -HaveCount 1
+        $script:ffbReleaseUris[0] | Should -Match '/repos/mightymikem/FFBArcadePlugin/releases/latest$'
     }
 
-    It 'uses the exact resolved SHA for support-table and DLL artifact URLs' {
-        $revision = ('d' * 40)
+    It 'still returns a release that has no published digest, and says the digest is missing' {
+        $assetUrl = 'https://github.com/mightymikem/FFBArcadePlugin/releases/download/v.2.0.0.51/FFB.Arcade.Plugin.v2.0.0.51.zip'
+        $release = Select-FFBPluginReleaseAsset -Release ((@{ tag_name = 'v.2.0.0.51'; assets = @(@{ name = 'FFB.Arcade.Plugin.v2.0.0.51.zip'; browser_download_url = $assetUrl }) } | ConvertTo-Json -Depth 5) | ConvertFrom-Json)
+        $release.Sha256 | Should -BeNullOrEmpty
+        $release.Trust | Should -Be 'ReleaseNoDigest'
+    }
+
+    It 'refuses a release answer it cannot trust: <Case>' -ForEach @(
+        @{ Case = 'two plugin ZIPs'; Json = '{"tag_name":"v.1","assets":[{"name":"FFB.Arcade.Plugin.a.zip","browser_download_url":"https://github.com/mightymikem/FFBArcadePlugin/releases/download/v.1/a.zip"},{"name":"FFB.Arcade.Plugin.b.zip","browser_download_url":"https://github.com/mightymikem/FFBArcadePlugin/releases/download/v.1/b.zip"}]}' }
+        @{ Case = 'no plugin ZIP'; Json = '{"tag_name":"v.1","assets":[{"name":"notes.txt","browser_download_url":"https://github.com/mightymikem/FFBArcadePlugin/releases/download/v.1/notes.txt"}]}' }
+        @{ Case = 'a download address outside the plugin project'; Json = '{"tag_name":"v.1","assets":[{"name":"FFB.Arcade.Plugin.a.zip","browser_download_url":"https://example.com/FFB.Arcade.Plugin.a.zip"}]}' }
+        @{ Case = 'a checksum that is not SHA-256'; Json = '{"tag_name":"v.1","assets":[{"name":"FFB.Arcade.Plugin.a.zip","digest":"md5:abc","browser_download_url":"https://github.com/mightymikem/FFBArcadePlugin/releases/download/v.1/a.zip"}]}' }
+        @{ Case = 'a version tag with a path in it'; Json = '{"tag_name":"../v.1","assets":[{"name":"FFB.Arcade.Plugin.a.zip","browser_download_url":"https://github.com/mightymikem/FFBArcadePlugin/releases/download/v.1/a.zip"}]}' }
+    ) {
+        # Mutation: take whatever the answer holds -> a wrong or foreign file is downloaded and installed.
+        { Select-FFBPluginReleaseAsset -Release ($Json | ConvertFrom-Json) } | Should -Throw
+        Mock Write-Log {}
+        Mock Invoke-TpmWebRequestSilently { [pscustomobject]@{ Content = $Json } }
+        Get-FFBPluginLatestRelease | Should -BeNullOrEmpty
+    }
+
+    It 'uses the release tag in the support-table address' {
+        $revision = 'v.2.0.0.51'
         $script:ffbTableUris = @()
         Mock Invoke-TpmWebRequestSilently {
             param([string]$Uri)
@@ -14646,24 +14634,12 @@ Describe 'FFB pinned source and transaction invariants' {
         }
         $map = Get-FFBPluginGameMap -SourceRevision $revision
         $map['FixtureGame'] | Should -Be 'd3d9.dll'
-        @($script:ffbTableUris | Where-Object { $_ -notmatch [regex]::Escape($revision) }) | Should -HaveCount 0
-        $script:ffbDllUris = @()
-        $script:ffbDllPaths = @()
-        Mock Invoke-TpmDownload {
-            param([string]$DownloadUrl, [string]$DestinationPath, [string]$ExpectedBytes, [string]$Label, [string]$Version)
-            $script:ffbDllUris += $DownloadUrl
-            [System.IO.File]::WriteAllBytes($DestinationPath, [byte[]](1,2,3))
-            $true
-        }
-        $result = Invoke-FFBPluginDownload -destDir (Join-Path $TestDrive 'ffb-url-pinning') -SourceRevision $revision
-        $result.Succeeded | Should -BeTrue
-        @($script:ffbDllUris) | Should -HaveCount 2
-        @($script:ffbDllUris | Where-Object { $_ -notmatch [regex]::Escape($revision) -or $_ -match '/master/' }) | Should -HaveCount 0
+        @($script:ffbTableUris | Where-Object { $_ -notmatch [regex]::Escape($revision) -or $_ -match '/master/' }) | Should -HaveCount 0
     }
 
     It 'fails before mutation when the resolver cannot return a valid revision' {
         $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-resolver-failure')
-        Mock Get-FFBPluginSourceRevision { $null }
+        Mock Get-FFBPluginLatestRelease { $null }
         Mock Get-FFBPluginGameMap { throw 'map should not be fetched' }
         Mock Invoke-FFBPluginDownload { throw 'DLLs should not be fetched' }
         $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
@@ -14677,7 +14653,7 @@ Describe 'FFB pinned source and transaction invariants' {
     It 'fails before mutation when the resolver response is malformed' {
         $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-malformed-resolver')
         Mock Invoke-TpmWebRequestSilently {
-            [pscustomobject]@{ Content = '{"sha":"not-a-full-commit"}' }
+            [pscustomobject]@{ Content = '{"tag_name":"v.1","assets":[]}' }
         }
         Mock Get-FFBPluginGameMap { throw 'map should not be fetched' }
         Mock Invoke-FFBPluginDownload { throw 'DLLs should not be fetched' }
@@ -14691,9 +14667,7 @@ Describe 'FFB pinned source and transaction invariants' {
     It 'fails before mutation when the pinned support table is unavailable' {
         $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-table-failure')
         $revision = ('a' * 40)
-        Mock Get-FFBPluginSourceRevision {
-            [pscustomobject]@{ Revision=$revision; Repository='mightymikem/FFBArcadePlugin'; ManifestUrl='https://api.github.com/repos/mightymikem/FFBArcadePlugin/commits/master'; Trust='SourcePinnedAuditHash' }
-        }
+        Mock Get-FFBPluginLatestRelease { New-FfbTestRelease -Tag $revision }
         Mock Get-FFBPluginGameMap { @{} }
         Mock Invoke-FFBPluginDownload { throw 'DLLs should not be fetched after table failure' }
         $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
@@ -14706,9 +14680,7 @@ Describe 'FFB pinned source and transaction invariants' {
     It 'fails before mutation when DLL acquisition does not produce a verified set' {
         $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-dll-failure')
         $revision = ('b' * 40)
-        Mock Get-FFBPluginSourceRevision {
-            [pscustomobject]@{ Revision=$revision; Repository='mightymikem/FFBArcadePlugin'; ManifestUrl='https://api.github.com/repos/mightymikem/FFBArcadePlugin/commits/master'; Trust='SourcePinnedAuditHash' }
-        }
+        Mock Get-FFBPluginLatestRelease { New-FfbTestRelease -Tag $revision }
         Mock Get-FFBPluginGameMap { [ordered]@{ FixtureGame='d3d9.dll' } }
         Mock Invoke-FFBPluginDownload {
             [pscustomobject]@{ Succeeded=$false; Files=@{}; Evidence=@(); ResiduePaths=@(); Reason='DLL_ACQUISITION_FAILED' }
@@ -14727,38 +14699,49 @@ Describe 'FFB pinned source and transaction invariants' {
         @($script:ffbPluginDiscoveryProgress | Where-Object { $_.Label -eq 'FFB plugin profile discovery' -and $_.Complete -and $_.Total -eq 0 }).Count | Should -Be 1
     }
 
-    It 'rejects a staged DLL whose hash no longer matches acquisition evidence' {
-        $fixture = New-FFBTransactionFixture -Root (Join-Path $TestDrive 'ffb-hash-mismatch')
-        $revision = ('3' * 40)
-        Mock-FFBTransactionDependencies -Revision $revision
-        $download = New-FFBStructuredDownloadResult -DestDir $fixture.Cache -Revision $revision
-        $download.Evidence[1].Sha256 = ('0' * 64)
-        Mock Invoke-FFBPluginDownload { $download }
-        $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
-        $result.Succeeded | Should -BeFalse
-        $result.Errors | Should -Be 1
-        (Test-Path -LiteralPath (Join-Path $fixture.GameRoot 'd3d9.dll') -PathType Leaf) | Should -BeFalse
-    }
-
-
-    It 'preserves a custom cache and records hashes for both staged DLLs' {
-        $cache = Join-Path $TestDrive 'ffb-cache-preservation'
+    It 'throws away a download whose hash differs from the published digest' {
+        # Mutation: skip the digest comparison -> a tampered or truncated ZIP is unpacked and installed.
+        $cache = Join-Path $TestDrive 'ffb-digest-mismatch'
         New-Item -ItemType Directory -Path $cache -Force | Out-Null
-        $custom = Join-Path $cache 'MAME64.dll'
-        [System.IO.File]::WriteAllText($custom, 'custom-cache', (New-Object System.Text.UTF8Encoding($false)))
-        $revision = ('e' * 40)
+        $script:ffbSourceZip = Join-Path $TestDrive 'ffb-source-mismatch.zip'
+        New-FfbTestZip -Path $script:ffbSourceZip -Games @{ FixtureGame = 'd3d9.dll' }
         Mock Invoke-TpmDownload {
-            param([string]$DownloadUrl, [string]$DestinationPath, [string]$ExpectedBytes, [string]$Label, [string]$Version)
-            [System.IO.File]::WriteAllBytes($DestinationPath, [byte[]](5,4,3,2,1))
+            param([string]$DownloadUrl, [string]$DestinationPath)
+            Copy-Item -LiteralPath $script:ffbSourceZip -Destination $DestinationPath -Force
             $true
         }
-        $result = Invoke-FFBPluginDownload -destDir $cache -SourceRevision $revision
+        $result = Invoke-FFBPluginDownload -destDir $cache -Release (New-FfbTestRelease -Tag 'v.3.0' -Sha256 ('0' * 64))
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'HASH_MISMATCH'
+        @(Get-ChildItem -LiteralPath $cache -Filter 'TPM-FFB-Plugin-Release*' -Force).Count | Should -Be 0
+    }
+
+    It 'reuses the saved ZIP for the same release without downloading it again' {
+        $cache = Join-Path $TestDrive 'ffb-reuse-cache'
+        New-Item -ItemType Directory -Path $cache -Force | Out-Null
+        $saved = Join-Path $cache 'TPM-FFB-Plugin-Release.zip'
+        New-FfbTestZip -Path $saved -Games @{ FixtureGame = 'd3d9.dll' }
+        $hash = (Get-FileHash -LiteralPath $saved -Algorithm SHA256).Hash
+        [void](Save-FFBPluginCache -CacheDir $cache -ZipPath $saved -Tag 'v.4.0' -AssetName 'FFB.Arcade.Plugin.test.zip' -Sha256 $hash -GameMap @{ FixtureGame = 'd3d9.dll' })
+        Mock Invoke-TpmDownload { throw 'the saved ZIP must be reused' }
+        $result = Invoke-FFBPluginDownload -destDir $cache -Release (New-FfbTestRelease -Tag 'v.4.0' -Sha256 $hash)
+        Should -Invoke Invoke-TpmDownload -Times 0 -Exactly
         $result.Succeeded | Should -BeTrue
-        [System.IO.File]::ReadAllText($custom) | Should -Be 'custom-cache'
-        @($result.Files.Keys) | Should -HaveCount 2
-        @($result.Evidence | Where-Object { $_.SourceRevision -ne $revision.ToUpperInvariant() }) | Should -HaveCount 0
-        @($result.Evidence | Where-Object { $_.Sha256 -notmatch '^[0-9A-F]{64}$' }) | Should -HaveCount 0
-        @($result.Evidence | Where-Object { -not (Test-Path -LiteralPath $_.DownloadPath -PathType Leaf) }) | Should -HaveCount 0
+        $result.Staged | Should -BeFalse
+        $result.ZipPath | Should -Be $saved
+    }
+
+    It 'does not trust a saved ZIP whose hash no longer matches its record' {
+        # Mutation: trust the record without hashing the ZIP -> a damaged saved copy is offered as the offline fallback.
+        $cache = Join-Path $TestDrive 'ffb-damaged-cache'
+        New-Item -ItemType Directory -Path $cache -Force | Out-Null
+        $saved = Join-Path $cache 'TPM-FFB-Plugin-Release.zip'
+        New-FfbTestZip -Path $saved -Games @{ FixtureGame = 'd3d9.dll' }
+        $hash = (Get-FileHash -LiteralPath $saved -Algorithm SHA256).Hash
+        [void](Save-FFBPluginCache -CacheDir $cache -ZipPath $saved -Tag 'v.4.0' -AssetName 'x.zip' -Sha256 $hash -GameMap @{ FixtureGame = 'd3d9.dll' })
+        Get-FFBPluginCachedRelease -CacheDir $cache | Should -Not -BeNullOrEmpty
+        [System.IO.File]::AppendAllText($saved, 'damage')
+        Get-FFBPluginCachedRelease -CacheDir $cache | Should -BeNullOrEmpty
     }
 
     It 'preserves an existing collision and reports zero deployment with complete accounting' {
@@ -14768,7 +14751,7 @@ Describe 'FFB pinned source and transaction invariants' {
         $revision = ('f' * 40)
         Mock-FFBTransactionDependencies -Revision $revision
         $result = Invoke-FFBPluginSetup -UserProfilesDir $fixture.Profiles -CacheDir $fixture.Cache
-        Should -Invoke Get-FFBPluginSourceRevision -Times 1 -Exactly
+        Should -Invoke Get-FFBPluginLatestRelease -Times 1 -Exactly
         $result.Succeeded | Should -BeTrue
         $result.Reason | Should -Be 'NO_PLUGIN_CHANGES_NEEDED'
         $result.Deployed | Should -Be 0
@@ -18295,7 +18278,7 @@ Describe "Library Health Check guided repair UX contracts" {
         $source | Should -Match 'TeknoParrot Manager will not guess'
         $source | Should -Match '\[P\] Set up PostgreSQL for these games'
         $source | Should -Match 'safety backup before changing PostgreSQL'
-        foreach ($label in @('\[5\] ReShade', '\[6\] dgVoodoo2', '\[7\] GPU Fix', '\[8\] Force Feedback', '\[9\] BepInEx')) {
+        foreach ($label in @('\[6\] ReShade', '\[7\] dgVoodoo2', '\[8\] GPU Fix', '\[9\] Force Feedback', '\[10\] BepInEx')) {
             $source | Should -Match $label
         }
         $source | Should -Match 'Force feedback plugin was not checked because network access is needed'
@@ -19881,7 +19864,7 @@ Describe 'TPM-owned layout and legacy migration' {
         $script:ProductionSource | Should -Match 'Do you have a paid TeknoParrot membership\?'
         $script:ProductionSource | Should -Match '\$hasSub = Read-TpmYesNo -Prompt "  Choose Y or N"'
         $script:ProductionSource | Should -Not -Match 'Read-TpmYesNo -Prompt "  Do you have an active, paid TeknoParrot membership'
-        $script:ProductionSource | Should -Match '\$succeeded = \(\$transactionResult\.Outcome -in @\(''SUCCEEDED'',''NO_OP''\) -and \$errors -eq 0 -and \$blockingSkips -eq 0 -and \$accountingComplete\)'
+        $script:ProductionSource | Should -Match '\$succeeded = \(\$transactionOk -and \$errors -eq 0 -and \$blockingSkips -eq 0 -and \$accountingComplete\)'
         $script:ProductionSource | Should -Match "NO_SUPPORTED_PLUGIN_TARGET"
         $script:ProductionSource | Should -Match "NATIVE_PREFERRED"
         $script:ProductionSource | Should -Match 'TeknoParrot Manager only removes optional plugin files'
@@ -27791,24 +27774,24 @@ Describe 'Next version: firmware, Play! game file and menu layout' {
     }
 
     Context 'Main menu layout' {
-        It 'shows PostgreSQL setup as 11 and Required game patches as 12 under Game Requirements, and 13 and 14 under Maintenance and Recovery' {
+        It 'shows PostgreSQL setup as 12 and Required game patches as 13 under Game Requirements, and 14 and 15 under Maintenance and Recovery' {
             $sections = @(Get-MainMenuSections)
             $requirements = @($sections | Where-Object { $_.Header -like 'Game Requirements*' })
             $requirements.Count | Should -Be 1
-            @($requirements[0].Items | ForEach-Object { '{0}={1}' -f $_.Number, $_.Mode }) | Should -Be @('11=PostgresSetup', '12=RequiredPatch')
+            @($requirements[0].Items | ForEach-Object { '{0}={1}' -f $_.Number, $_.Mode }) | Should -Be @('12=PostgresSetup', '13=RequiredPatch')
             $maintenance = @($sections | Where-Object { $_.Header -like 'Maintenance and Recovery*' })
             $maintenance.Count | Should -Be 1
-            @($maintenance[0].Items | ForEach-Object { '{0}={1}' -f $_.Number, $_.Mode }) | Should -Be @('13=HealthCheck', '14=Restore')
+            @($maintenance[0].Items | ForEach-Object { '{0}={1}' -f $_.Number, $_.Mode }) | Should -Be @('14=HealthCheck', '15=Restore')
             # What the player sees, top to bottom, on a small console: the header, then the numbered lines.
             $geometry = Get-MainMenuGeometry -Tier 'Compact' -ViewportWidth 100 -ViewportHeight 80
             $shown = @(Get-MainMenuBodyRows -Sections $sections -Geometry $geometry | ForEach-Object { $_.Text.Trim() } | Where-Object { $_ })
             $headerAt = [array]::FindIndex($shown, [Predicate[string]]{ param($t) $t -like 'GAME REQUIREMENTS*' })
             $headerAt | Should -BeGreaterOrEqual 0
-            $shown[$headerAt + 1] | Should -Be '11) Postgres setup'
-            $shown[$headerAt + 2] | Should -Be '12) Required game patches'
+            $shown[$headerAt + 1] | Should -Be '12) Postgres setup'
+            $shown[$headerAt + 2] | Should -Be '13) Required game patches'
             $shown[$headerAt + 3] | Should -BeLike 'MAINTENANCE AND RECOVERY*'
-            $shown[$headerAt + 4] | Should -Be '13) Library health check'
-            $shown[$headerAt + 5] | Should -Be '14) Restore backup'
+            $shown[$headerAt + 4] | Should -Be '14) Library health check'
+            $shown[$headerAt + 5] | Should -Be '15) Restore backup'
         }
     }
 }

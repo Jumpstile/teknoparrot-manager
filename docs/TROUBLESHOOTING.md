@@ -448,7 +448,7 @@ Expected result: the source can be reached and extraction goes where you intende
 
 Symptom: you need your earlier controls or settings back after a change.
 
-Choose **14) Restore backup** from the main menu. It shows five choices:
+Choose **15) Restore backup** from the main menu. It shows five choices:
 
 - `TeknoParrot UserProfiles backup`
 - `Postgres database backup`
@@ -474,7 +474,7 @@ Fix:
 
    Next: open the restore menu.
 
-3. At the main menu, type **14** to choose **14) Restore backup**.
+3. At the main menu, type **15** to choose **15) Restore backup**.
 
    You will see: the **Restore from Backup** screen with five numbered choices, plus **B** to go back.
 
@@ -526,7 +526,7 @@ Fix:
 
 Expected result: the saved copy you picked is restored and checked. Or TeknoParrot Manager tells you why it stopped.
 
-Undoing a required game patch is separate. Choose **12) Required game patches**, then **U**. It uses the patch record kept for that change. It is not a restore of a whole game.
+Undoing a required game patch is separate. Choose **13) Required game patches**, then **U**. It uses the patch record kept for that change. It is not a restore of a whole game.
 
 ### More detail
 
@@ -590,7 +590,7 @@ Cause: TeknoParrot Manager turns these off in every `ReShade.ini` it writes. If 
 
 Fix:
 
-1. At the main menu, type **5** to choose **5) ReShade setup**, then choose the game and pick a look again.
+1. At the main menu, type **6** to choose **6) ReShade setup**, then choose the game and pick a look again.
 
    You will see: the result screen for that game.
 
@@ -614,7 +614,7 @@ Cause: games left on `Auto` or `Default` usually start as Japan.
 
 Fix:
 
-1. At the main menu, type **10** to choose **10) Region setup**.
+1. At the main menu, type **11** to choose **11) Region setup**.
 
    You will see: `Which country do you want your games to start in?` and a numbered list of countries.
 
@@ -626,7 +626,7 @@ Fix:
 
    Next: start the game to check.
 
-Only countries a game really offers are listed. A game never gets a region it does not have. A game that does not offer your country stays as it is and is named under Details (press **D**). To go back, choose **A** (`Back to automatic`) in Region setup, or use **14) Restore backup**.
+Only countries a game really offers are listed. A game never gets a region it does not have. A game that does not offer your country stays as it is and is named under Details (press **D**). To go back, choose **A** (`Back to automatic`) in Region setup, or use **15) Restore backup**.
 
 Expected result: the game starts in the country you chose.
 
@@ -650,7 +650,7 @@ Expected result: the games are unpacked once, into the games folder you chose, a
 
 ## The health check names a game it cannot use yet
 
-Symptom: Library health check (menu 13) shows `Needs attention` for **Game types** or **Game files**. For example: `1 game is not available yet`, `the emulator for 2 games is not in your TeknoParrot folder`, or `1 game needs you to pick the game file by hand`.
+Symptom: Library health check (menu 14) shows `Needs attention` for **Game types** or **Game files**. For example: `1 game is not available yet`, `the emulator for 2 games is not in your TeknoParrot folder`, or `1 game needs you to pick the game file by hand`.
 
 Cause: one of these.
 
@@ -698,7 +698,7 @@ Then read that game's official compatibility information and TeknoParrot Manager
 
 Do not treat every crash as a missing patch. Do not install every optional tool at once.
 
-Choose **16) Create Support Package** for diagnostics. Keep the exact result and any backup or leftover paths it shows. A partial result is not success. Do not send game data, passwords, or credentials.
+Choose **17) Create Support Package** for diagnostics. Keep the exact result and any backup or leftover paths it shows. A partial result is not success. Do not send game data, passwords, or credentials.
 
 ### More detail
 

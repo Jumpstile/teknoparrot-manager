@@ -9,30 +9,31 @@
 **Library Management**
 - [[AutoSync]] (1)
 - [[Register]] (2)
-- [[Propagate Controls]] (3)
+- [[LaunchBox Integration]] (3)
+- [[Propagate Controls]] (4)
 
 **Game Enhancements**
-- [[Crosshairs]] (4)
-- [[ReShade]] (5)
-- [[dgVoodoo2]] (6)
-- [[GPU Fix]] (7)
-- [[FFB Setup]] (8)
-- [[BepInEx]] (9)
-- [[Region Setup]] (10)
+- [[Crosshairs]] (5)
+- [[ReShade]] (6)
+- [[dgVoodoo2]] (7)
+- [[GPU Fix]] (8)
+- [[FFB Setup]] (9)
+- [[BepInEx]] (10)
+- [[Region Setup]] (11)
 
 **Game Requirements**
-- [[Postgres Setup]] (11)
-- [[Required Game Patches]] (12)
+- [[Postgres Setup]] (12)
+- [[Required Game Patches]] (13)
 - [[Game Startup Files]]
 
 **Maintenance and Recovery**
-- [[Health Check]] (13)
-- [[Restore Backup]] (14)
+- [[Health Check]] (14)
+- [[Restore Backup]] (15)
 - [[Reset and Restore]]
 
 **Application**
-- [[Check for Updates]] (15)
-- [[Support Package]] (16)
+- [[Check for Updates]] (16)
+- [[Support Package]] (17)
 
 **More**
 - [[LaunchBox Integration]]
