@@ -202,4 +202,44 @@ Describe 'PostgreSQL offer after registration' {
         Should -Invoke Read-TpmYesNo -Times 1 -Exactly
         Should -Invoke Write-Host -ParameterFilter { $Object -like '*Internal, needs no database install; nothing is switched for you*' } -Times 1
     }
+
+    It 'says PostgreSQL is already on this PC when it is, and offers to install it when it is not' {
+        $root = New-TpFixture
+        Save-Profile -Root $root -Code 'GameA' -Doc (New-ProfileXml -GamePath 'a' -Postgres)
+        $profiles = Join-Path $root 'UserProfiles'
+        (Invoke-TpmPostgresRegistrationOffer -UserProfilesDir $profiles -RegisteredCodes @('GameA')) | Should -BeTrue
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*PostgreSQL is already on this PC*' } -Times 1
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*is not on this PC yet*' } -Times 0
+        Mock Test-PostgresInstalled { $false }
+        (Invoke-TpmPostgresRegistrationOffer -UserProfilesDir $profiles -RegisteredCodes @('GameA')) | Should -BeTrue
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*is not on this PC yet*' } -Times 1
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*can install it and set up the game now*' } -Times 1
+    }
+
+    It 'counts the other games that still need settings, says the finished ones are left alone, and never changes a profile when declined' {
+        Mock Read-TpmYesNo { 'N' }
+        $root = New-TpFixture
+        $profiles = Join-Path $root 'UserProfiles'
+        Save-Profile -Root $root -Code 'GameA' -Doc (New-ProfileXml -GamePath 'a' -Postgres)
+        Save-Profile -Root $root -Code 'GameB' -Doc (New-ProfileXml -GamePath 'b' -Postgres)
+        Save-Profile -Root $root -Code 'GameC' -Doc (New-ProfileXml -GamePath 'c' -Postgres -PostgresComplete)
+        $before = Get-Snapshot -Path $profiles
+        (Invoke-TpmPostgresRegistrationOffer -UserProfilesDir $profiles -RegisteredCodes @('GameA')) | Should -BeFalse
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*1 other game(s) already registered also still need PostgreSQL settings*' } -Times 1
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*1 game(s) are already set up and will not be touched*' } -Times 1
+        Get-Snapshot -Path $profiles | Should -Be $before
+    }
+
+    It 'in a preview says which games would need PostgreSQL and a password, asks nothing and writes nothing' {
+        $root = New-TpFixture
+        $profiles = Join-Path $root 'UserProfiles'
+        $templates = Join-Path $root 'GameProfiles'
+        (New-ProfileXml -GamePath 'a' -Postgres).Save((Join-Path $templates 'GameA.xml'))
+        $before = Get-Snapshot -Path $root
+        (Invoke-TpmPostgresRegistrationOffer -UserProfilesDir $profiles -RegisteredCodes @('GameA') -GameProfilesDir $templates -DryRun) | Should -BeFalse
+        Should -Invoke Read-TpmYesNo -Times 0 -Exactly
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*[[]Preview] 1 game(s) would need PostgreSQL setup: Game a*' } -Times 1
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*password would be needed*' } -Times 1
+        Get-Snapshot -Path $root | Should -Be $before
+    }
 }

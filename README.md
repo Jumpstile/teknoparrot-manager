@@ -8,13 +8,13 @@ TeknoParrot Manager is made for beginners and is also useful if you already know
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-This guide is for v1.0 RC9.2.
+This guide is for v1.0 RC9.3.
 
 **Jump to:** [Quick Start](QUICKSTART.md) | [Full user guide](docs/USER-GUIDE.md) | [Changelog](TeknoParrot-Manager-CHANGELOG.txt) | [Troubleshooting](docs/TROUBLESHOOTING.md) | [Start Here (first game in 10 minutes)](docs/START-HERE.md)
 
 ## Download
 
-Release page of the latest published release: [v1.0 RC9.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2).
+Release page of the latest published release: [v1.0 RC9.3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3).
 
 1. Download the ZIP file from the release page.
 2. Extract the whole package to a short folder outside Program Files, for example `C:\TPM`. Keep all the folders.
@@ -131,6 +131,7 @@ The [Quick Start guide](QUICKSTART.md) has more detail on each step, and [Start 
 | [Check for Updates](docs/AUTO_UPDATE.md) | Learn how in-place updating works |
 | [Compatibility checklist](docs/Compatibility.md) | Use the short checklist for tester notes |
 | [Advanced users](docs/ADVANCED-USERS.md) | Use TeknoParrot Manager as a repeatable tool for cabinets and frontends |
+| [Screen inventory](docs/SCREEN-INVENTORY.md) | See how each screen handles window size and what is proven |
 | [Roadmap](ROADMAP.md) | See what is planned |
 | [Wiki](https://github.com/Jumpstile/teknoparrot-manager/wiki) | Read the short guides for each feature |
 
@@ -1955,7 +1956,7 @@ TeknoParrot Manager never removes an existing BepInEx installation (see "Rollbac
 3. Choose `Y` to install or update, `B` to go back, or `N` to cancel. Next: nothing changes until you approve the listed operation.
 4. Read the result. It says how many games you selected and how many were changed, already set up, skipped or failed (for example `You selected 4 games: 3 changed, 1 skipped.`), and where the backup is.
 
-The prompt is `[Y] Install/update  [B] Back  [N] Cancel`. It is skipped when the only games are ones you picked by number from the "do not have BepInEx" list, because picking them was your answer. There is no repair-reset choice. After a successful or no-change run, the screen waits for one Enter before it goes back.
+You first see your list: games with no BepInEx are new installs, games that already have it are updates, each with the reason it is on the list. Picking a game only puts it on the list, and the numbers do not change. The prompt is `[Y] Install/update  [E] Edit the list (remove games)  [B] Back  [N] Cancel`. Nothing is installed until you choose `Y`. There is no repair-reset choice. After a successful or no-change run, the screen waits for one Enter before it goes back.
 
 The result reports these groups:
 
@@ -3525,5 +3526,5 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> Latest published release: v1.0 RC9.2. Previous published release: v1.0 RC9.1. The one before it: v1.0 RC9. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
+> Latest published release: v1.0 RC9.3. Previous published release: v1.0 RC9.2. The one before it: v1.0 RC9.1. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
 

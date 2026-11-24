@@ -110,4 +110,20 @@ Describe 'The dat reader and the format version, missing elements and romzip/rom
         $index[(Get-NormalizedGameKey 'Mame Style')].Executable | Should -Be 'mame.exe'
         $index[(Get-NormalizedGameKey 'After Mame')].ProfileCode | Should -Be 'AFTER'
     }
+
+    It 'keeps every game and every newer field when many rom lines come before and between them' {
+        # The reader skips each rom line; a double read after a skip would drop the next node, here a newer field or a game end.
+        $roms = (1..40 | ForEach-Object { '<rom name="r{0}.bin" size="1" crc="0000000{1}" />' -f $_, ($_ % 10) }) -join ''
+        $games = (1..6 | ForEach-Object {
+            '<game name="Game {0}">{1}<GameProfile>P{0}</GameProfile>{1}<Executable>e{0}.exe</Executable>{1}<GameProfile2>Q{0}</GameProfile2><Executable2>f{0}.exe</Executable2>{1}<TestMenuExecutable>t{0}.exe</TestMenuExecutable>{1}</game>' -f $_, $roms
+        }) -join ''
+        $index = Read-F382Dat -Xml ('<?xml version="1.0"?><datafile><header><TPUISchemaVersion>1</TPUISchemaVersion></header>' + $games + '</datafile>')
+        $index.Count | Should -Be 6
+        foreach ($n in 1..6) {
+            $game = $index[(Get-NormalizedGameKey ('Game {0}' -f $n))]
+            $game.ProfileCode | Should -Be ('P{0}' -f $n)
+            $game.Executable2 | Should -Be ('f{0}.exe' -f $n)
+            $game.TestMenuExecutable | Should -Be ('t{0}.exe' -f $n)
+        }
+    }
 }

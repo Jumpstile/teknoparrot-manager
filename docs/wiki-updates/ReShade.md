@@ -132,7 +132,7 @@ A bezel is a picture that frames the game on a wide screen, like the edge of an 
 
 The bezel is copied to the game's `reshade-shaders\Textures` folder as `bezel.png` and checked. A bezel you put there yourself is kept unless you say yes to replacing it, and a copy of yours is saved first. A game that shares its folder with other games is skipped, because one bezel would show on all of them.
 
-To undo, type `5`, `B`, then `U`. Each bezel TeknoParrot Manager copied is removed, and the bezel you had before is put back. A file you changed since is left alone.
+To undo, type `6`, `B`, then `U`. Each bezel TeknoParrot Manager copied is removed, and the bezel you had before is put back. A file you changed since is left alone.
 
 TeknoParrot Manager puts the file where ReShade looks for it. It is not confirmed that every game shows it. Games in exclusive fullscreen, or that start through a loader, may not.
 

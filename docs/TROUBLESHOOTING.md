@@ -682,6 +682,28 @@ Expected result: the line says `OK`, or only the games that cannot be played yet
 - A LaunchBox game with a `Needs setup` note, or in a `Needs setup` playlist, cannot start yet because its game file, firmware or BepInEx is missing. The note and the playlist entry go away by themselves when that is fixed.
 - A game set to Internal storage (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball) needs no PostgreSQL. The health check shows it as `Game database: OK`. Start the game once so it makes its own database.
 
+## A game works in TeknoParrot but not from RetroBat
+
+Starting a game from TeknoParrot and starting it from RetroBat are two different ways to start it. RetroBat keeps its own game list and starts the game its own way. TeknoParrot keeps the controls and the input type (RawInput is the mouse and keyboard type). A game that works one way can still fail the other way.
+
+Fix:
+
+1. Start the game from TeknoParrot first, with the controls you want, and make sure it works there.
+
+   You will see: the game starts and responds to your mouse, keyboard or controller.
+
+   Next: only then try it from RetroBat.
+
+2. If it still fails from RetroBat, look at RetroBat's TeknoParrot settings, or ask the RetroBat community.
+
+   You will see: TeknoParrot Manager cannot tell you why one way works and the other does not. It does not change how RetroBat starts a game and it does not change RetroBat.
+
+   Next: do not delete or reset your games. Nothing here needs it.
+
+Who does what: TeknoParrot Manager adds your games to TeknoParrot and, after you say yes, copies controls you set up to games of the same type, with a backup first. TeknoParrot runs the games and keeps their controls. RetroBat keeps its own game list and starts games its own way.
+
+Mouse and keyboard only for now? Set the controls for one game in TeknoParrotUI and choose its input type there. Test that game before you copy the controls to others with **4) Propagate Controls**. If you add Sinden lightguns later, that setup happens in TeknoParrot and in the gun's own software. TeknoParrot Manager does not set up a lightgun.
+
 ## Still stuck, or the game will not launch?
 
 Check these things first:

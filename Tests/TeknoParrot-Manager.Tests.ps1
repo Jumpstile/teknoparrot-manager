@@ -8804,6 +8804,20 @@ Describe "BepInEx authorized-root and transaction guards" {
             Should -Invoke New-BepInExUpdateBackup -Times 0 -Exactly
             Should -Invoke Invoke-TpmTransactionalTreePromote -Times 0 -Exactly
         }
+        It "lets the user take a game off the list before anything is installed" {
+            # Mutation: install without asking, or ignore the removal -> a download starts for a game the user took off the list.
+            $script:bepChoiceAnswers = New-Object System.Collections.Generic.Queue[string]
+            foreach ($answer in @('E', '1')) { $script:bepChoiceAnswers.Enqueue($answer) }
+            Mock Read-HostSafe { $script:bepChoiceAnswers.Dequeue() }
+            Mock Invoke-TpmDownload { throw 'download must not run when the list is empty' }
+
+            $result = Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+
+            $result.Outcome | Should -Be 'NO_OP'
+            @($result.PickedItems).Count | Should -Be 0
+            Should -Invoke Invoke-TpmDownload -Times 0 -Exactly
+            Should -Invoke Invoke-TpmTransactionalTreePromote -Times 0 -Exactly
+        }
         It "leaves the installed BepInEx tree and unrelated game files unchanged when the install is declined" {
             [void][System.IO.Directory]::CreateDirectory((Join-Path $script:bepGame 'BepInEx\core'))
             [System.IO.File]::WriteAllText((Join-Path $script:bepGame 'BepInEx\core\one.dll'), 'one')

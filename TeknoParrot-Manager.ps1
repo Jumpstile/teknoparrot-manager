@@ -1,4 +1,4 @@
-# TeknoParrot Manager  |  v1.0 RC9.2
+# TeknoParrot Manager  |  v1.0 RC9.3
 # Author: Jumpstile
 # =============================================================================
 #
@@ -88,7 +88,7 @@ $script:TpmIndependentProgressTasks = @{}
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
 $ScriptVersion = "1.0"
-$ReleaseCandidateLabel = "RC9.2"
+$ReleaseCandidateLabel = "RC9.3"
 $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
 
 function Get-ManagerDisplayVersion {
@@ -2783,6 +2783,16 @@ function Get-TpmPostgresNothingChangedText {
     param([bool]$PostgresChanged = $false, [string]$Unchanged = 'Nothing was changed.')
     if ($PostgresChanged) { return 'Your games and game settings were not changed. PostgreSQL itself was installed or rebuilt earlier in this run.' }
     return $Unchanged
+}
+
+# The service could not be put back as it was. This is a separate problem from the databases, so the sentence says what happened to the
+# databases only when the result proves it, and then says the service is the open problem.
+function Get-TpmPostgresServiceRestoreSafetyText {
+    param([AllowNull()]$Result)
+    $tail = 'The problem now is the PostgreSQL service, not your databases. PostgreSQL setup is not finished. Open View Log to see what was done.'
+    $outcome = [string](Get-TpmTransactionField -Object $Result -Name 'Outcome' -Default '')
+    if ($outcome -in @('ROLLED_BACK_VERIFIED','FAILED_BEFORE_MUTATION')) { return ((Get-TpmPostgresDataSafetyText -Result $Result) + ' ' + $tail) }
+    return 'PostgreSQL setup is not finished. Open View Log to see what was done.'
 }
 
 # FIX128 (S7): what to say when Install-Postgres83 returned $false. Before the Windows Installer ran, nothing was changed. After it
@@ -6027,7 +6037,8 @@ function Read-TpmStagingFolder {
         [string]$TeknoParrotRoot,
         [string]$ZipSource = '',
         [string]$ZipSourceSupplementary = '',
-        [string]$ProgramDirectory = ''
+        [string]$ProgramDirectory = '',
+        [switch]$AllowBack
     )
     while ($true) {
         $prompt = if ($RecommendedPath) {
@@ -6051,9 +6062,13 @@ function Read-TpmStagingFolder {
                 default { 'Path' }
             }
         }
+        if ($AllowBack -and $stagingCommand -eq 'Reserved' -and $raw.Trim().ToUpperInvariant() -eq 'Q') {
+            Write-Log 'Staging folder question: the user went back. Nothing was changed.'
+            return $null
+        }
         if ($stagingCommand -eq 'Recovery' -or $stagingCommand -eq 'Reserved') {
             Write-Host '  That command is not available at this staging-folder prompt.' -ForegroundColor Yellow
-            Write-Host '  Valid commands: Enter to accept the recommendation, or B to browse.' -ForegroundColor Yellow
+            Write-Host ('  Valid commands: Enter to accept the recommendation, B to browse{0}.' -f $(if ($AllowBack) { ', or Q to go back' } else { '' })) -ForegroundColor Yellow
             Write-Log ("Staging folder command rejected before path parsing: '{0}'" -f $raw.Trim())
             continue
         }
@@ -6065,7 +6080,10 @@ function Read-TpmStagingFolder {
             }
             $raw = Read-PathWithBrowse '  Choose a staging folder' -InitialDirectory $initialDirectory
             # Canceling the picker is not the same as pressing Enter: ask again instead of taking the recommended folder.
-            if ([string]::IsNullOrWhiteSpace($raw)) { continue }
+            if ([string]::IsNullOrWhiteSpace($raw)) {
+                Write-Host '  No folder was chosen. Press Enter to use the recommendation, type a path, B to browse again, or Q to go back.' -ForegroundColor Yellow
+                continue
+            }
         }
         if ([string]::IsNullOrWhiteSpace($raw)) {
             if ($RecommendedPath) { $raw = $RecommendedPath } else { continue }
@@ -8597,6 +8615,9 @@ function Invoke-TpmCps3SupplementaryInstall {
         return (& $finish 'FAILED_BEFORE_MUTATION' 'SOURCE_UNUSABLE' ($source.Error + ' Nothing was changed.'))
     }
     $isArchive = ($source.Kind -eq 'Archive')
+    if ((Test-Path -LiteralPath $cpsRoot -PathType Container) -and @(Get-TpmFolderProcesses -Folder $cpsRoot).Count -gt 0) {
+        return (& $finish 'FAILED_BEFORE_MUTATION' 'GAME_RUNNING' 'A CPS3 game is still running. Close it and try again. Nothing was changed.')
+    }
 
     $zip = $null
     $createdCpsRoot = $false
@@ -8812,6 +8833,7 @@ function Invoke-TpmCps3SupplementaryOffer {
     Write-Host "  You have CPS3 games registered (Street Fighter III, JoJo, Red Earth,"
     Write-Host "  or the CPS3 multi-game). TeknoParrot builds a cache file the first"
     Write-Host "  time each CPS3 disc image runs, so the first boot is slow."
+    Write-Host ("  Your CPS3 games: {0}." -f ((@($cpsProfiles | ForEach-Object { Get-TpmGameDisplayLabel -ProfilePath $_.FullName -Fallback $_.BaseName })) -join ', '))
     Write-Host ""
     Write-Host "  If you already have the matching TeknoCPS cache and NVRAM files,"
     Write-Host "  TeknoParrot Manager can copy them into your TeknoParrot folder. It does"
@@ -20033,22 +20055,31 @@ function Test-TpmPostgresSettingsComplete {
 
 # After a registration (issue #131): offer the existing PostgreSQL setup when a game that was just registered needs
 # PostgreSQL and has no settings yet. Returns $true only when the user says yes; the caller then opens PostgreSQL setup.
-# Asks nothing in unattended or preview runs, and changes nothing itself.
+# Asks nothing in unattended runs and changes nothing itself. A preview only says what would be needed (never a password).
 function Invoke-TpmPostgresRegistrationOffer {
-    param([Parameter(Mandatory)][string]$UserProfilesDir, [string[]]$RegisteredCodes = @(), [switch]$Unattended, [switch]$DryRun)
-    if ($Unattended -or $DryRun -or @($RegisteredCodes).Count -eq 0) { return $false }
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [string[]]$RegisteredCodes = @(), [string]$GameProfilesDir = '', [switch]$Unattended, [switch]$DryRun)
+    if ($Unattended -or @($RegisteredCodes).Count -eq 0) { return $false }
     $newGames = New-Object System.Collections.Generic.List[string]
     $newInternal = New-Object System.Collections.Generic.List[string]
     $existingChosen = $false
-    $otherCount = 0
-    foreach ($pf in @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue)) {
+    $otherGames = New-Object System.Collections.Generic.List[string]
+    $alreadySet = 0
+    $profileFiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue)
+    if ($DryRun -and $GameProfilesDir) {   # a preview writes no profile, so read the game's own template instead
+        foreach ($code in @($RegisteredCodes | Where-Object { $_ -and -not ($profileFiles | Where-Object { $_.BaseName -eq $code }) })) {
+            $templatePath = Join-Path $GameProfilesDir ($code + '.xml')
+            if (Test-Path -LiteralPath $templatePath -PathType Leaf) { $profileFiles += Get-Item -LiteralPath $templatePath }
+        }
+    }
+    foreach ($pf in $profileFiles) {
         try {
             $doc = Read-Xml $pf.FullName
             if ($doc.GameProfile -and $RegisteredCodes -contains $pf.BaseName -and (Get-TpmGameDatabaseStorage -Doc $doc) -eq 'Internal') { [void]$newInternal.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)); continue }
-            if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc) -or (Test-TpmPostgresSettingsComplete -Doc $doc)) { continue }
+            if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc)) { continue }
+            if (Test-TpmPostgresSettingsComplete -Doc $doc) { $alreadySet++; continue }
             if ((Get-TpmGameDatabaseStorage -Doc $doc) -eq 'ExistingPostgreSQL') { $existingChosen = $true }
         } catch { continue }
-        if ($RegisteredCodes -contains $pf.BaseName) { [void]$newGames.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)) } else { $otherCount++ }
+        if ($RegisteredCodes -contains $pf.BaseName) { [void]$newGames.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)) } else { [void]$otherGames.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)) }
     }
     if ($newInternal.Count -gt 0) {
         Write-Host ''
@@ -20057,6 +20088,15 @@ function Invoke-TpmPostgresRegistrationOffer {
         Write-Log ('Registration: {0} new game(s) use Internal database storage; no PostgreSQL is needed for them: {1}.' -f $newInternal.Count, ($newInternal -join ', '))
     }
     if ($newGames.Count -eq 0) { return $false }
+    $otherCount = $otherGames.Count
+    Write-Log ('Registration: PostgreSQL games needing setup: new: {0}; already registered: {1}; already set up and left alone: {2}.' -f ($newGames -join ', '), $(if ($otherCount -gt 0) { $otherGames -join ', ' } else { 'none' }), $alreadySet)
+    if ($DryRun) {
+        Write-Host ''
+        Write-Host ('  [Preview] {0} game(s) would need PostgreSQL setup: {1}.' -f ($newGames.Count + $otherCount), ((@($newGames) + @($otherGames)) -join ', ')) -ForegroundColor DarkCyan
+        Write-Host '  [Preview] The PostgreSQL password would be needed and written into those game profiles.' -ForegroundColor DarkCyan
+        Write-Host '  [Preview] No password is shown or saved in a preview. Nothing was changed.' -ForegroundColor DarkCyan
+        return $false
+    }
     Write-Host ''
     Write-Host ('  {0} you just added need{1} PostgreSQL: {2}.' -f $(if ($newGames.Count -eq 1) { 'A game' } else { 'Games' }), $(if ($newGames.Count -eq 1) { 's' } else { '' }), ($newGames -join ', ')) -ForegroundColor Cyan
     Write-Host '  PostgreSQL is a small database program. These games keep their data in it' -ForegroundColor DarkCyan
@@ -20068,6 +20108,7 @@ function Invoke-TpmPostgresRegistrationOffer {
     if (Test-PostgresInstalled) { Write-Host '  PostgreSQL is already on this PC.' -ForegroundColor DarkCyan; Write-Host '  TeknoParrot Manager can set up the game now.' -ForegroundColor DarkCyan }
     else { Write-Host '  PostgreSQL is not on this PC yet.' -ForegroundColor DarkCyan; Write-Host '  TeknoParrot Manager can install it and set up the game now.' -ForegroundColor DarkCyan }
     if ($otherCount -gt 0) { Write-Host ('  {0} other game(s) already registered also still need PostgreSQL settings.' -f $otherCount) -ForegroundColor DarkCyan }
+    if ($alreadySet -gt 0) { Write-Host ('  {0} game(s) are already set up and will not be touched.' -f $alreadySet) -ForegroundColor DarkCyan }
     Write-Host '  Nothing changes unless you say yes.' -ForegroundColor DarkCyan
     $accepted = ((Read-TpmYesNo -Prompt '  Set up PostgreSQL now? (Y/N)') -eq 'Y')
     Write-Log ('Registration offer: PostgreSQL setup for {0} new game(s): {1}.' -f $newGames.Count, $(if ($accepted) { 'accepted' } else { 'declined' }))
@@ -25329,6 +25370,8 @@ function Expand-ZipFileSafe {
     $fileCount = 0
     $current = 0
     $currentDone = $false
+    $cancelled = $false
+    $byteTotal = [long]0; $bytesDone = [long]0
     try {
         $archive   = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
 
@@ -25379,6 +25422,9 @@ function Expand-ZipFileSafe {
         # ---- Write phase: only reached when the whole archive is valid ----
         $fileCount = $fileTargets.Count
         $current   = 0
+        # Progress counts bytes, so one large file moves the bar as much as it should.
+        $byteTotal = [long]0; $bytesDone = [long]0
+        foreach ($planned in $plan) { if (-not $planned.IsDirectory) { $byteTotal += [long]$planned.Entry.Length } }
         $copyBuffer = $null
         foreach ($item in $plan) {
             $longTarget = $longPrefixBase + '\' + $item.RelativePath
@@ -25388,7 +25434,8 @@ function Expand-ZipFileSafe {
             }
 
             $current++
-            Write-TpmCompactExtractionProgress -Phase Extracting -Label $label -Current $current -Total $fileCount -StartedAt $progressStarted
+            if ($byteTotal -gt 0) { Write-TpmCompactExtractionProgress -Phase Extracting -Label $label -Current $bytesDone -Total $byteTotal -StartedAt $progressStarted -Completed -Unit Bytes }
+            else { Write-TpmCompactExtractionProgress -Phase Extracting -Label $label -Current $current -Total $fileCount -StartedAt $progressStarted }
 
             # CreateDirectory is idempotent; no Exists check needed (also avoids TOCTOU).
             $parentCut = $item.RelativePath.LastIndexOf([char]'\')
@@ -25433,11 +25480,18 @@ function Expand-ZipFileSafe {
             } finally {
                 if ($src) { $src.Dispose() }
             }
+            $bytesDone += [long]$item.Entry.Length
         }
         $currentDone = $true
+    } catch {
+        # Ctrl+C is a cancel, not a failure: the progress line then ends as "canceled".
+        if ((Test-Path -LiteralPath 'Function:\Test-TpmProgressCancellationError') -and (Test-TpmProgressCancellationError -ErrorRecord $_)) { $cancelled = $true }
+        throw
     } finally {
         if ($archive) { $archive.Dispose() }
-        Write-TpmCompactExtractionProgress -Phase Extracting -Label $label -Current $(if ($currentDone) { $current } else { $current - 1 }) -Total $fileCount -StartedAt $progressStarted -Complete -Outcome $(if ($currentDone) { 'Final' } else { 'Error' })
+        $closeOutcome = if ($currentDone) { 'Final' } elseif ($cancelled) { 'Cancelled' } else { 'Error' }
+        $closeDone = if ($byteTotal -gt 0) { $(if ($currentDone) { $byteTotal } else { $bytesDone }) } else { $(if ($currentDone) { $current } else { $current - 1 }) }
+        Write-TpmCompactExtractionProgress -Phase Extracting -Label $label -Current $closeDone -Total $(if ($byteTotal -gt 0) { $byteTotal } else { $fileCount }) -StartedAt $progressStarted -Complete -Outcome $closeOutcome -Unit $(if ($byteTotal -gt 0) { 'Bytes' } else { 'Items' })
     }
 }
 
@@ -25695,6 +25749,12 @@ function Invoke-AutoSync {
         $rootRefusalReason = ''
         $targetDir = $null
         $storedPath = [string](Get-TpmTransactionField -Object $stored -Name 'LocalPath')
+        if (-not [string]::IsNullOrWhiteSpace($storedPath) -and (Test-TpmPathInOtherGameFolder -Path $storedPath -InstallFolder $installFolder -DatEntry (Get-DatEntryForZipName -RawZipName $rawName -DatIndex $datIndex) -DatIndex $datIndex)) {
+            # An earlier run saved another game's folder for this ZIP. That saved record is not proof this ZIP was unpacked, so it is not trusted.
+            Write-Log ("AutoSync: the saved folder for '{0}' ({1}) belongs to another game; the saved record is ignored and the ZIP is checked again." -f $rawName, $storedPath)
+            $stored = $null
+            $storedPath = ''
+        }
         $storedPathFull = $null
         if (-not [string]::IsNullOrWhiteSpace($storedPath)) {
             try {
@@ -33753,6 +33813,55 @@ function Get-TpmBepInExSkipText {
     return ('{0} ({1}).' -f $text, (Format-TpmGameCount -Count $Count))
 }
 
+# The drive of a saved game path, like "D:". Empty when the path has no drive part.
+function Get-TpmSavedPathDrive {
+    param([AllowEmptyString()][string]$Path)
+    try { return ([string][System.IO.Path]::GetPathRoot($Path.Trim())).TrimEnd('\', '/') } catch { return '' }
+}
+
+# The drive letters of the games in these records, each one once.
+function Get-TpmBepInExDriveLetters {
+    param([object[]]$Records = @())
+    return @($Records | ForEach-Object { Get-TpmSavedPathDrive -Path ([string](Get-TpmTransactionField -Object $_ -Name 'SavedPath' -Default '')) } | Where-Object { $_ } | Sort-Object -Unique)
+}
+
+# Why one game is on the BepInEx list, in plain words, and whether it is a new install or an update.
+function Get-TpmBepInExOffer {
+    param([Parameter(Mandatory)]$Offer)
+    $installed = [string]$Offer.Installed
+    if ($installed -eq 'Not installed') { return [pscustomobject]@{ IsNew = $true; Reason = 'BepInEx is not set up in this game yet.' } }
+    if ($installed -like 'Broken (*') { return [pscustomobject]@{ IsNew = $false; Reason = 'Some BepInEx files in this game are missing or damaged, so they will be put in again.' } }
+    $have = $null; $want = $null
+    if ([version]::TryParse($installed, [ref]$have) -and [version]::TryParse([string]$Offer.Latest.Version, [ref]$want) -and $have -lt $want) {
+        return [pscustomobject]@{ IsNew = $false; Reason = ('A newer BepInEx is available. This game has {0}, the newest is {1}.' -f $installed, $Offer.Latest.Version) }
+    }
+    return [pscustomobject]@{ IsNew = $false; Reason = 'The BepInEx in this game is the wrong 32-bit or 64-bit kind for it.' }
+}
+
+# The list of games that BepInEx will be put into. Numbers are fixed when the list is first made, so removing a game never renumbers the others.
+function Write-TpmBepInExQueue {
+    param([Parameter(Mandatory)][object[]]$Queue, [Parameter(Mandatory)][hashtable]$Numbers, [int]$Offered = 0)
+    $offers = @($Queue | ForEach-Object { [pscustomobject]@{ Game = $_; Offer = (Get-TpmBepInExOffer -Offer $_) } })
+    $newOffers = @($offers | Where-Object { $_.Offer.IsNew })
+    $updateOffers = @($offers | Where-Object { -not $_.Offer.IsNew })
+    Write-Host ''
+    Write-TpmText -Text ('Your list: {0} of {1} offered. Nothing is installed until you choose Y.' -f (Format-TpmGameCount -Count $Queue.Count), $Offered) -Color Cyan
+    if ($newOffers.Count -gt 0) {
+        Write-TpmText -Text ('New installs ({0}) - BepInEx is not set up in these games yet:' -f $newOffers.Count) -Color White
+        foreach ($entry in $newOffers) {
+            $prefix = '{0}) ' -f $Numbers[[string]$entry.Game.Code]
+            Write-TpmText -Text ('{0}{1} ({2})' -f $prefix, $entry.Game.Label, $entry.Game.Architecture) -Indent 4 -HangingIndent $prefix.Length
+        }
+    }
+    if ($updateOffers.Count -gt 0) {
+        Write-TpmText -Text ('Updates ({0}) - BepInEx is already in these games:' -f $updateOffers.Count) -Color White
+        foreach ($entry in $updateOffers) {
+            $prefix = '{0}) ' -f $Numbers[[string]$entry.Game.Code]
+            Write-TpmText -Text ('{0}{1} ({2}): {3}' -f $prefix, $entry.Game.Label, $entry.Game.Architecture, $entry.Offer.Reason) -Indent 4 -HangingIndent $prefix.Length
+        }
+    }
+}
+
 # The one long sentence of counters the old screen printed. It is in the Details view and in the log, not on the default screen.
 function Get-TpmBepInExCountsText {
     param($Result)
@@ -33775,6 +33884,11 @@ function ConvertTo-TpmBepInExFailureBlock {
     $lines = New-Object System.Collections.Generic.List[string]
     Add-TpmDetailLine -Lines $lines -Label 'Reason' -Text $code
     if ($code) { Add-TpmDetailLine -Lines $lines -Label 'What it means' -Text ((Get-TpmBepInExSkipWords -Code $code)[0] + '.') }
+    $savedPath = [string](Get-TpmTransactionField -Object $Record -Name 'SavedPath' -Default '')
+    if (-not [string]::IsNullOrWhiteSpace($savedPath)) {
+        Add-TpmDetailLine -Lines $lines -Label 'Drive' -Text (Get-TpmSavedPathDrive -Path $savedPath)
+        Add-TpmDetailLine -Lines $lines -Label 'Saved path' -Text (ConvertTo-TpmDisplayPath $savedPath)
+    }
     foreach ($field in @(@('Root', 'GameRoot'), @('Staging', 'StagingPath'), @('Backup', 'BackupPath'), @('Operation', 'Operation'), @('Exception', 'Exception'), @('Evidence preserved', 'EvidencePreserved'), @('Next action', 'NextAction'))) {
         Add-TpmDetailLine -Lines $lines -Label $field[0] -Text ([string](Get-TpmTransactionField -Object $Record -Name $field[1] -Default ''))
     }
@@ -33813,6 +33927,17 @@ function Get-TpmBepInExDoneLines {
     $kept = @(Get-TpmTransactionField -Object $Result -Name 'FailureRecords' -Default @() | ForEach-Object { [string](Get-TpmTransactionField -Object $_ -Name 'BackupPath' -Default '') } | Where-Object { $_ })
     $backup = Get-TpmBackupFolderLine -Result $Result -ExtraPaths $kept -What 'the game files'
     if ($backup) { [void]$lines.Add($backup) }
+    # Games the user did not pick are not part of this result. They are named apart, so a drive that is not connected never looks like a failed pick.
+    $pickedCodes = @(Get-TpmTransactionField -Object $Result -Name 'PickedItems' -Default @())
+    if ($pickedCodes.Count -gt 0) {
+        $leftAlone = @(Get-TpmTransactionField -Object $Result -Name 'FailureRecords' -Default @() | Where-Object { $null -ne $_ -and [string](Get-TpmTransactionField -Object $_ -Name 'Game' -Default '') -notin $pickedCodes -and [string](Get-TpmTransactionField -Object $_ -Name 'Operation' -Default '') -in @('path preflight', 'root safety preflight', 'inspection') })
+        foreach ($leftGroup in @($leftAlone | Group-Object -Property { ([string](Get-TpmTransactionField -Object $_ -Name 'ReasonKey' -Default '') -split '\|')[0] } | Sort-Object -Property Name)) {
+            $leftText = Get-TpmBepInExSkipText -Code ([string]$leftGroup.Name) -Count (@($leftGroup.Group | ForEach-Object { [string](Get-TpmTransactionField -Object $_ -Name 'Game' -Default '') } | Select-Object -Unique).Count)
+            $leftDrives = @(Get-TpmBepInExDriveLetters -Records @($leftGroup.Group))
+            if ($leftGroup.Name -eq 'DEVICE_UNAVAILABLE' -and $leftDrives.Count -gt 0) { $leftText += (' Drive: {0}.' -f ($leftDrives -join ', ')) }
+            [void]$lines.Add(('Not picked, so left alone: {0}' -f $leftText))
+        }
+    }
     # Eggman guide (BepInEx section): a BepInEx game must be started and restarted twice the first time so the framework can finish setting up.
     if ([int](Get-TpmTransactionField -Object $Result -Name 'Updated' -Default 0) -gt 0) {
         [void]$lines.Add('The first time you start a BepInEx game, start it and close it twice so BepInEx can finish setting itself up. To reset BepInEx, delete only its cache and config folders.')
@@ -33846,6 +33971,8 @@ function Get-TpmBepInExFailureView {
     foreach ($code in @($counts.Keys | Sort-Object)) { [void]$needs.Add((Get-TpmBepInExSkipText -Code ([string]$code) -Count ([int]$counts[$code]))) }
     if ($failed -gt 0) { [void]$needs.Add(('{0} could not be updated.' -f (Format-TpmGameCount -Count $failed))) }
     if ($unattempted -gt 0) { [void]$needs.Add(('{0} not tried, because an earlier step stopped.' -f (Format-TpmGameCount -Count $unattempted))) }
+    $driveLetters = @(Get-TpmBepInExDriveLetters -Records @(Get-TpmTransactionField -Object $Result -Name 'FailureRecords' -Default @() | Where-Object { $null -ne $_ -and [string](Get-TpmTransactionField -Object $_ -Name 'ReasonKey' -Default '') -eq 'DEVICE_UNAVAILABLE' }))
+    if ($driveIssue -and $driveLetters.Count -gt 0) { [void]$needs.Add(('Drive not connected: {0}. Press D to see the saved path of each game.' -f ($driveLetters -join ', '))) }
     if ($needs.Count -eq 0) { Add-TpmPlainReasonLine -Lines $needs -Code ([string](Get-TpmTransactionField -Object $Result -Name 'ReasonCode' -Default '')) }
     $next = 'Press D to see why, or R to try again.'
     if ($rollbackIssue) { $next = 'Do not try again yet. Press D for details, or O for help.' }
@@ -34842,6 +34969,7 @@ function Invoke-BepInExUpdateCheckLegacy {
                     Game = $pf.BaseName
                     GameLabel = $label
                     GameRoot = if ($pathCheck.GameDirectory) { [string]$pathCheck.GameDirectory } else { '<unresolved>' }
+                    SavedPath = $gamePath
                     StagingPath = $null
                     BackupPath = $null
                     Operation = 'path preflight'
@@ -35024,13 +35152,13 @@ function Invoke-BepInExUpdateCheckLegacy {
     # Only a few games need BepInEx. A game that has none is never offered in the bulk question below; the user has to pick it.
     $offeredCount = $outdated.Count
     $freshGames = @($outdated | Where-Object { [string]$_.Installed -eq 'Not installed' })
-    $bulkOfferedCount = $outdated.Count - $freshGames.Count
     if ($freshGames.Count -gt 0) {
         foreach ($freshGame in $freshGames) { [void]$outdated.Remove($freshGame) }
         Write-Host ("  {0} game(s) do not have BepInEx. Only a few games need it, so they are left alone unless you pick them." -f $freshGames.Count) -ForegroundColor Cyan
+        Write-TpmText -Text 'Picking a game only puts it on your list. Nothing is installed until you choose Y on the next screen, where you can also remove games.' -Color DarkGray
         $freshSorted = @($freshGames | Sort-Object Label)
         $freshRows = @($freshSorted | ForEach-Object { '{0} ({1})' -f $_.Label, $_.Architecture })
-        foreach ($freshIndex in @(Read-TpmMultiGameChoice -Rows $freshRows -Heading 'Games without BepInEx:' -Prompt '  Type the numbers of the games to add BepInEx to (like 1,3,6 or 1-8), A for all, or B for none')) {
+        foreach ($freshIndex in @(Read-TpmMultiGameChoice -Rows $freshRows -Heading 'Games without BepInEx (the numbers stay the same):' -Prompt '  Type the numbers of the games to add BepInEx to (like 1,3,6 or 1-8), A to select all, or B for none')) {
             [void]$outdated.Add($freshSorted[[int]$freshIndex])
             Write-Log ("BepInEx update check: the user chose to install BepInEx for {0}." -f $freshSorted[[int]$freshIndex].Code)
         }
@@ -35055,11 +35183,29 @@ function Invoke-BepInExUpdateCheckLegacy {
         if ($errors -gt 0) { Write-Host ("  Inspection issues: {0} -- see Details or the support log" -f $errors) -ForegroundColor Red }
         return [pscustomobject]@{ Succeeded = ($errors -eq 0 -and $skippedItems.Count -eq 0); Reason = if ($errors) { 'INSPECTION_FAILED' } elseif ($skippedItems.Count -gt 0) { 'ACTION_REQUIRED' } else { $null }; Errors=$errors; MissingDevice=$missingDevice; MissingPath=$missingPath; FailureRecords = @($failureRecords.ToArray()); PathReasonCounts = $pathReasonCounts; Protected=$protected; Skipped=$skippedItems.Count; UnsupportedArchitecture = $unsupportedArchitecture; UnknownArchitecture=$unknownArchitecture; SelectedItems = @($selectedItems.ToArray()); ChangedItems = @(); CompletedItems=@($upToDateItems.ToArray()); FailedItems = @($failedItems.ToArray()); SkippedItems = @($skippedItems.ToArray()); UnattemptedItems=@(); BatchStopped = $false }
     }
-    Write-Host ("  Selected: {0} of {1} games to install or update BepInEx:" -f $outdated.Count, $offeredCount) -ForegroundColor Cyan
-    foreach ($o in @($outdated | Sort-Object Label)) { Write-Host ("    - {0}: {1} -> {2} ({3})" -f $o.Label, $o.Installed, $o.Latest.Version, $o.Architecture) -ForegroundColor DarkGray }
+    # The list keeps its numbers while games are removed, so a number always means the same game.
+    $queueOrder = @($outdated | Sort-Object Label)
+    $queueNumbers = @{}
+    for ($queueIndex = 0; $queueIndex -lt $queueOrder.Count; $queueIndex++) { $queueNumbers[[string]$queueOrder[$queueIndex].Code] = $queueIndex + 1 }
     # FIX110 (S-10): repair-reset is not offered; it was always refused after the download and staging.
-    # Games the user picked by number were already approved by that pick; the question is asked only when out-of-date games were offered in bulk.
-    $installChoice = if ($bulkOfferedCount -gt 0) { Read-TpmChoice -Prompt ("  [Y] Install/update  [B] Back  [N] Cancel  -- {0} game(s)" -f $outdated.Count) -Choices @('Y', 'B', 'N') -Default 'B' } else { 'Y' }
+    # Nothing is installed until the user chooses Y. E lets the user take games off the list first.
+    while ($true) {
+        Write-TpmBepInExQueue -Queue @($outdated | Sort-Object Label) -Numbers $queueNumbers -Offered $offeredCount
+        $installChoice = Read-TpmChoice -Prompt ("  [Y] Install/update  [E] Edit the list (remove games)  [B] Back  [N] Cancel  -- {0}" -f (Format-TpmGameCount -Count $outdated.Count)) -Choices @('Y', 'E', 'B', 'N') -Default 'B'
+        if ($installChoice -ne 'E') { break }
+        $removeAnswer = ([string](Read-HostSafe '  Type the numbers of the games to remove (like 2,4), or press Enter to keep the list')).Trim()
+        if ($removeAnswer -eq '') { continue }
+        $removeNumbers = Expand-NumberList -str $removeAnswer -max $queueOrder.Count
+        foreach ($removeNumber in @($removeNumbers)) {
+            $removeGame = $queueOrder[[int]$removeNumber - 1]
+            if ($outdated.Remove($removeGame)) {
+                [void]$selectedItems.Remove([string]$removeGame.Code)
+                if ($null -ne $PickedOut) { [void]$PickedOut.Remove([string]$removeGame.Code) }
+                Write-Log ("BepInEx update check: the user took {0} off the list." -f $removeGame.Code)
+            }
+        }
+        if ($outdated.Count -eq 0) { Write-Host '  The list is empty, so nothing will be installed.' -ForegroundColor Yellow; $installChoice = 'B'; break }
+    }
     if ($installChoice -ne 'Y') {
         Write-Log 'BepInEx update check: user selected Back or canceled installation/update.'
         return [pscustomobject]@{ Succeeded = $false; Reason = 'DECLINED'; Errors=$errors; MissingDevice=$missingDevice; MissingPath=$missingPath; Protected=$protected; Skipped=$skippedItems.Count; UnsupportedArchitecture=$unsupportedArchitecture; UnknownArchitecture=$unknownArchitecture; PathReasonCounts=$pathReasonCounts; SelectedItems = @($selectedItems.ToArray()); ChangedItems = @(); CompletedItems=@($upToDateItems.ToArray()); FailedItems = @($failedItems.ToArray()); SkippedItems = @($skippedItems.ToArray()); UnattemptedItems=@($outdated | ForEach-Object { [string]$_.Code }); FailureRecords = @($failureRecords.ToArray()); BatchStopped = $false }
@@ -39514,6 +39660,7 @@ function Invoke-LibraryHealthCheck {
     $valid = New-Object System.Collections.ArrayList
     $broken = New-Object System.Collections.ArrayList
     $driveUnavailable = New-Object System.Collections.ArrayList
+    $pathProblemDetails = New-Object System.Collections.ArrayList
     $empty = New-Object System.Collections.ArrayList
     $unreadable = New-Object System.Collections.ArrayList
     $postgresNeeded = New-Object System.Collections.ArrayList
@@ -39572,8 +39719,14 @@ function Invoke-LibraryHealthCheck {
             } else {
                 $pathCheck = Test-TpmGameMutationPath -GamePath $curPath -RequireLeaf
                 if ($pathCheck.Valid) { [void]$valid.Add($pf.BaseName) }
-                elseif ([string]$pathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { [void]$driveUnavailable.Add($pf.BaseName) }
-                else { [void]$broken.Add($pf.BaseName) }
+                elseif ([string]$pathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') {
+                    [void]$driveUnavailable.Add($pf.BaseName)
+                    [void]$pathProblemDetails.Add([pscustomobject]@{ Code = $pf.BaseName; Drive = (Get-TpmSavedPathDrive -Path $curPath); SavedPath = $curPath; Why = 'the drive is not connected' })
+                }
+                else {
+                    [void]$broken.Add($pf.BaseName)
+                    [void]$pathProblemDetails.Add([pscustomobject]@{ Code = $pf.BaseName; Drive = (Get-TpmSavedPathDrive -Path $curPath); SavedPath = $curPath; Why = 'the game file was not found at the saved path' })
+                }
             }
         } catch {
             [void]$unreadable.Add($pf.BaseName)
@@ -39597,6 +39750,8 @@ function Invoke-LibraryHealthCheck {
     $reShadeCount     = 0
     $bepInExCount     = 0
     $bepInExNeeded    = New-Object System.Collections.ArrayList
+    $bepInExUnsupported = New-Object System.Collections.ArrayList
+    $bepInExNotChecked = New-Object System.Collections.ArrayList
     $detected         = Get-DetectedGpuVendor
     $optionalCoverageError = ''
     try {
@@ -39641,7 +39796,12 @@ function Invoke-LibraryHealthCheck {
             # reported above).
             $gpNode   = $doc.GameProfile.SelectSingleNode("GamePath")
             $gamePath = if ($gpNode) { $gpNode.InnerText.Trim() } else { "" }
-            if ([string]::IsNullOrWhiteSpace($gamePath) -or -not [System.IO.File]::Exists((ConvertTo-TpmAutoSyncLongPath -Path $gamePath))) { continue }
+            if ([string]::IsNullOrWhiteSpace($gamePath) -or -not [System.IO.File]::Exists((ConvertTo-TpmAutoSyncLongPath -Path $gamePath))) {
+                # The game file cannot be reached, so BepInEx there cannot be checked. That is said for a game whose profile needs BepInEx.
+                $bepUnreachableNode = $doc.GameProfile.SelectSingleNode('RequiresBepInEx')
+                if ($bepUnreachableNode -and $bepUnreachableNode.InnerText.Trim() -ieq 'true') { [void]$bepInExNotChecked.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)) }
+                continue
+            }
             $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
             if ([string]::IsNullOrWhiteSpace($exeDir)) { continue }
 
@@ -39654,9 +39814,16 @@ function Invoke-LibraryHealthCheck {
 
             if (Get-BepInExInstalledVersion -ExeDir $exeDir) { $bepInExCount++ }
             else {
-                # A game whose profile says it needs BepInEx and has none: listed by its plain game name.
+                # A game whose profile says it needs BepInEx and has none: listed by its plain game name. A game this setup cannot add BepInEx to
+                # (not a 32-bit or 64-bit Windows program) is listed as not supported, and one whose file cannot be read as not checked.
                 $bepNeedNode = $doc.GameProfile.SelectSingleNode('RequiresBepInEx')
-                if ($bepNeedNode -and $bepNeedNode.InnerText.Trim() -ieq 'true') { [void]$bepInExNeeded.Add((Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName)) }
+                if ($bepNeedNode -and $bepNeedNode.InnerText.Trim() -ieq 'true') {
+                    $bepLabel = Get-TpmGameDisplayLabel -ProfilePath $pf.FullName -Fallback $pf.BaseName
+                    $bepEvidence = Get-BepInExPeArchitectureEvidence -Path $gamePath
+                    if ($bepEvidence.State -eq 'UNSUPPORTED') { [void]$bepInExUnsupported.Add($bepLabel) }
+                    elseif ($bepEvidence.State -in @('UNREADABLE', 'UNKNOWN')) { [void]$bepInExNotChecked.Add($bepLabel) }
+                    else { [void]$bepInExNeeded.Add($bepLabel) }
+                }
             }
         } catch {
             $optionalCheckFailed++
@@ -39828,6 +39995,9 @@ function Invoke-LibraryHealthCheck {
         ReShadeCount = $reShadeCount
         BepInExCount = $bepInExCount
         BepInExNeeded = @($bepInExNeeded.ToArray())
+        BepInExUnsupported = @($bepInExUnsupported.ToArray())
+        BepInExNotChecked = @($bepInExNotChecked.ToArray())
+        PathProblemDetails = @($pathProblemDetails.ToArray())
         DetectedGpuVendor = $detected.Vendor
         PostgresNeededLabels = $postgresNeededLabelsResult
         PostgresConfiguredLabels = $postgresConfiguredLabelsResult
@@ -39910,8 +40080,16 @@ function Get-TpmLibraryHealthRows {
         [void]$rows.Add($row)
     }
     $bepNeeded = @(Get-TpmTransactionField -Object $Result -Name 'BepInExNeeded' -Default @())
-    if (-not $unavailable -and $bepNeeded.Count -gt 0) {
-        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'BepInEx' -Text ('Needs attention - {0} {1} BepInEx and {2} no BepInEx set up. Run BepInEx setup (menu 10)' -f (Format-TpmGameCount -Count $bepNeeded.Count), $(if ($bepNeeded.Count -eq 1) { 'needs' } else { 'need' }), $(if ($bepNeeded.Count -eq 1) { 'has' } else { 'have' })) -Color 'Yellow'))
+    $bepUnsupported = @(Get-TpmTransactionField -Object $Result -Name 'BepInExUnsupported' -Default @())
+    $bepNotChecked = @(Get-TpmTransactionField -Object $Result -Name 'BepInExNotChecked' -Default @())
+    if (-not $unavailable -and ($bepNeeded.Count + $bepUnsupported.Count + $bepNotChecked.Count) -gt 0) {
+        $bepParts = New-Object System.Collections.Generic.List[string]
+        if ($bepNeeded.Count -gt 0) { [void]$bepParts.Add(('{0} {1} BepInEx and {2} no BepInEx set up' -f (Format-TpmGameCount -Count $bepNeeded.Count), $(if ($bepNeeded.Count -eq 1) { 'needs' } else { 'need' }), $(if ($bepNeeded.Count -eq 1) { 'has' } else { 'have' }))) }
+        if ($bepUnsupported.Count -gt 0) { [void]$bepParts.Add(('{0} not supported (TeknoParrot Manager cannot set BepInEx up for this kind of game)' -f (Format-TpmGameCount -Count $bepUnsupported.Count))) }
+        if ($bepNotChecked.Count -gt 0) { [void]$bepParts.Add(('{0} not checked (the drive is not connected or the game file could not be read)' -f (Format-TpmGameCount -Count $bepNotChecked.Count))) }
+        $bepText = ('Needs attention - ' + ($bepParts -join '; '))
+        if ($bepNeeded.Count -gt 0) { $bepText += '. Run BepInEx setup (menu 10)' }
+        [void]$rows.Add((New-TpmLibraryHealthRow -Area 'BepInEx' -Text $bepText -Color $(if ($bepNeeded.Count + $bepNotChecked.Count -gt 0) { 'Yellow' } else { 'DarkGray' })))
     }
     $postgresRow = Get-TpmLibraryHealthPostgresRow -Result $Result
     if ($null -ne $postgresRow) { [void]$rows.Add($postgresRow) }
@@ -40046,6 +40224,9 @@ function Get-TpmLibraryHealthDetailBlocks {
             $driveChoiceText = if ($brokenNames.Count -gt 0 -or $emptyNames.Count -eq 0) { ', or choose R or S to point these games at a new folder' } else { '' }
             [void]$lines.Add(('Drive or device not available: {0} - {1}. Reconnect the drive{2}; the saved paths were not judged.' -f $driveNames.Count, (Format-TpmNameList -Names $driveNames -Max 1000), $driveChoiceText))
         }
+        foreach ($pathProblem in @(Get-TpmTransactionField -Object $Result -Name 'PathProblemDetails' -Default @())) {
+            [void]$lines.Add(('{0}: {1}; drive {2}; saved path {3}' -f $pathProblem.Code, $pathProblem.Why, $(if ($pathProblem.Drive) { $pathProblem.Drive } else { 'none' }), (ConvertTo-TpmDisplayPath $pathProblem.SavedPath)))
+        }
         [void]$lines.Add(('Empty paths: {0}{1}' -f $emptyNames.Count, $(if ($emptyNames.Count -gt 0) { ' - ' + (Format-TpmNameList -Names $emptyNames -Max 1000) } else { '' })))
         $unreadableNames = @(Get-TpmTransactionField -Object $Result -Name 'Unreadable' -Default @())
         if ($unreadableNames.Count -gt 0) { [void]$lines.Add(('Unreadable profile files: {0} - {1}' -f $unreadableNames.Count, (Format-TpmNameList -Names $unreadableNames -Max 1000))) }
@@ -40178,7 +40359,12 @@ function Get-TpmLibraryHealthDetailBlocks {
             [void]$lines.Add(('ReShade installed: {0} of {1} valid games' -f $Result.ReShadeCount, @($Result.Valid).Count))
             [void]$lines.Add(('BepInEx installed: {0} of {1} valid games' -f $Result.BepInExCount, @($Result.Valid).Count))
             $bepNeededNames = @(Get-TpmTransactionField -Object $Result -Name 'BepInExNeeded' -Default @())
+            $bepUnsupportedNames = @(Get-TpmTransactionField -Object $Result -Name 'BepInExUnsupported' -Default @())
+            $bepNotCheckedNames = @(Get-TpmTransactionField -Object $Result -Name 'BepInExNotChecked' -Default @())
+            [void]$lines.Add(('BepInEx coverage: installed {0}; missing {1}; not supported {2}; not checked {3}' -f $Result.BepInExCount, $bepNeededNames.Count, $bepUnsupportedNames.Count, $bepNotCheckedNames.Count))
             if ($bepNeededNames.Count -gt 0) { [void]$lines.Add(('Games that need BepInEx and do not have it set up: {0}' -f (Format-TpmNameList -Names $bepNeededNames -Max 1000))) }
+            if ($bepUnsupportedNames.Count -gt 0) { [void]$lines.Add(('Games that need BepInEx but are not a kind TeknoParrot Manager can set it up for: {0}' -f (Format-TpmNameList -Names $bepUnsupportedNames -Max 1000))) }
+            if ($bepNotCheckedNames.Count -gt 0) { [void]$lines.Add(('Games that need BepInEx and could not be checked, because the drive is not connected or the game file could not be read: {0}' -f (Format-TpmNameList -Names $bepNotCheckedNames -Max 1000))) }
         }
         [void]$lines.Add('Note: ReShade is your choice for each game, so it is not flagged. BepInEx is flagged only for games whose profile says they need it.')
     } else {
@@ -40228,6 +40414,8 @@ function Write-TpmLibraryHealthDriveNotice {
     if ($driveNames.Count -eq 0) { return }
     Write-Host ''
     Write-TpmText -Text ('{0} {1} on a drive that is not connected: {2}.' -f (Format-TpmGameCount -Count $driveNames.Count), $(if ($driveNames.Count -eq 1) { 'is' } else { 'are' }), (Format-TpmNameList -Names $driveNames -Max 5)) -Color Yellow
+    $driveLetters = @(@(Get-TpmTransactionField -Object $Result -Name 'PathProblemDetails' -Default @()) | Where-Object { $_.Why -eq 'the drive is not connected' } | ForEach-Object { [string]$_.Drive } | Where-Object { $_ } | Sort-Object -Unique)
+    if ($driveLetters.Count -gt 0) { Write-TpmText -Text ('Drive not connected: {0}. Choose D to see the saved path of each game.' -f ($driveLetters -join ', ')) -Color Yellow }
     Write-TpmText -Text 'If the drive is only unplugged, connect it and choose B. Nothing is changed.' -Color DarkGray
     Write-TpmText -Text 'If you moved them to another folder, choose R or S. A game is pointed at the new folder only if its game file is found there. You see a preview, answer Y, and a safety backup is made before anything is saved.' -Color DarkGray
     if ($OfferChoices) {
@@ -40675,8 +40863,14 @@ function Resolve-ExtractedGameFolder {
     $candidateKeys = @(Get-TpmExtractedGameFolderCandidateKeys -RawZipName $RawZipName -DatIndex $DatIndex)
 
     $folderMapMatch = $null
+    $zipDatEntry = Get-DatEntryForZipName -RawZipName $RawZipName -DatIndex $DatIndex
     foreach ($key in $candidateKeys) {
         if ($FolderMap.ContainsKey($key) -and (Test-ExtractedFolderHasContent $FolderMap[$key])) {
+            # Two games can read the same once year, tags and region are dropped. A folder the game list names as another game is not this ZIP's folder.
+            if (Test-TpmPathInOtherGameFolder -Path ([string]$FolderMap[$key]) -InstallFolder $InstallFolder -DatEntry $zipDatEntry -DatIndex $DatIndex) {
+                Write-Log ("AutoSync: folder '{0}' looks like '{1}' but the game list says it is another game; not used for this ZIP." -f [System.IO.Path]::GetFileName(([string]$FolderMap[$key]).TrimEnd([char[]]"\/")), $RawZipName)
+                continue
+            }
             $folderMapMatch = [string]$FolderMap[$key]
             break
         }
@@ -40778,6 +40972,8 @@ function Resolve-TpmAutoSyncNewGameFolder {
         if ([string]::IsNullOrWhiteSpace($mapped)) {
             return (& $refuse 'several existing folders answer to this game name')
         }
+        # A folder the game list names as a different game does not answer for this ZIP, even when the names read the same without year and tags.
+        if (Test-TpmPathInOtherGameFolder -Path $mapped -InstallFolder $installFull -DatEntry (Get-DatEntryForZipName -RawZipName $RawZipName -DatIndex $DatIndex) -DatIndex $DatIndex) { continue }
         try { $mappedFull = [System.IO.Path]::GetFullPath($mapped).TrimEnd([char[]]"\/") } catch { $mappedFull = '' }
         if ($mappedFull -ine $targetFull.TrimEnd([char[]]"\/")) {
             return (& $refuse 'an existing folder with a matching name was not confirmed as this game')
@@ -44372,7 +44568,7 @@ function Invoke-ControlPropagationLegacy {
 function Get-TpmControlSourceBlocks {
     param([object[]]$Pool = @(), [string]$BackupNote = '')
     $about = @(
-        'Your example games are the source. Their controls are copied to your other games of the same control type.',
+        'Your example games are the source: games whose controls you set up yourself in TeknoParrotUI. Their controls are copied to your other games of the same control type.',
         'Buttons that are already set up are kept.',
         'TeknoParrot Manager may correct an Input API setting without setting buttons again.',
         'Controls that an example game does not have stay for you to set up and test in TeknoParrotUI.',
@@ -44411,6 +44607,9 @@ function Write-TpmControlSourceSummary {
     $poolList = @($Pool)
     $text = if ($poolList.Count -eq 1) { 'You have {0} with its controls set up.' } else { 'You have {0} with their controls set up.' }
     Write-TpmText -Text ($text -f (Format-TpmGameCount -Count $poolList.Count)) -Color Green
+    foreach ($familyGroup in @($poolList | Group-Object Family | Sort-Object Name)) {
+        Write-TpmText -Text ('{0}: copied from {1} to your other {0} games.' -f $familyGroup.Name, (Format-TpmNameList -Names @($familyGroup.Group | ForEach-Object { [string]$_.Code }) -Limit 3)) -Color DarkCyan -Indent 1
+    }
     $flagged = @($poolList | Where-Object { $_.ConfigCarry -and $_.ConfigCarry.Count -gt 0 -and @(Get-ConfigCarryFlags $_.Family $_.ConfigCarry).Count -gt 0 })
     if ($flagged.Count -gt 0) {
         Write-TpmText -Text ('Check first: {0} may have settings that do not match your real controller. Press D to see them.' -f (Format-TpmGameCount -Count $flagged.Count)) -Color Yellow -BlankBefore
@@ -55025,7 +55224,7 @@ function New-TpmActionRequiredReportText {
             $exeName = Get-TpmExecutableDisplayName -Name $exePath -Codes $codes
             [void]$builder.AppendLine("")
             [void]$builder.AppendLine(("  {0} needs a corrected game folder." -f $codes))
-            [void]$builder.AppendLine(("  TeknoParrot Manager could not find: {0}" -f $exeName))
+            [void]$builder.AppendLine(("  TeknoParrot Manager could not determine a unique game path for: {0}" -f $exeName))
             [void]$builder.AppendLine(("  Open TeknoParrotUI and point each game to the folder containing {0}." -f $exeName))
         }
     }
@@ -55194,6 +55393,7 @@ function Get-TpmRegistrationRecap {
         [string[]]$RunProblems = @(),
         [int]$NotInTeknoParrot = 0,
         [int]$ControlsNeedAttention = 0,
+        [int]$ControlsNoReference = 0,
         [bool]$Preview = $false,
         [bool]$ControlsStatusFailed = $false,
         [string]$BackupPath = '',
@@ -55230,6 +55430,7 @@ function Get-TpmRegistrationRecap {
     if ($repointUnsure.Count -eq 1) { [void]$needs.Add(('Could not confirm that {0} was pointed at its own folder. Open its settings in TeknoParrotUI and check its game path. A saved copy of your profiles was made first. The log has the reason.' -f $repointUnsure[0])) }
     elseif ($repointUnsure.Count -gt 1) { [void]$needs.Add(('Could not confirm that {0} were pointed at their own folders: {1}. Open their settings in TeknoParrotUI and check their game paths. A saved copy of your profiles was made first. The log has the reason.' -f (Format-TpmGameCount -Count $repointUnsure.Count), (Format-TpmNameList -Names $repointUnsure -Limit 3))) }
     $listedBelow = $needs.Count
+    if ($ControlsNoReference -gt 0) { [void]$needs.Add(('Registration is finished, but controls are not: {0} {1} no controls yet because no game of their control type is set up. See the controls step below.' -f (Format-TpmGameCount -Count $ControlsNoReference), $(if ($ControlsNoReference -eq 1) { 'has' } else { 'have' }))) }
     if ($ControlsStatusFailed) { [void]$needs.Add('The controls status file could not be saved. The log has the reason.') }
 
     $didLines = New-Object System.Collections.Generic.List[string]
@@ -58103,7 +58304,7 @@ function Get-MainMenuSections {
         Header = 'Game Requirements (only for some games)'
         Column = 'Right'
         Items  = @(
-            [pscustomobject]@{ Number = 12; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'PostgreSQL for games set to Existing PostgreSQL.'; FullDesc = @('For games set to Existing PostgreSQL.', 'Installs/configures local PostgreSQL 8.3 for', 'every Golden Tee Live and PGA Tour game,', 'Power Putt Live, Silver Strike Bowling Live,', 'Target Toss Pro and Orange County Choppers.', 'Games on Internal storage (the new default)', 'need no database install and are skipped.', 'A missing game database is made from the', 'game''s own backup. A game that ships none is', 'left to TeknoParrot to make on first start.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
+            [pscustomobject]@{ Number = 12; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'PostgreSQL for games set to Existing PostgreSQL.'; FullDesc = @('For games set to Existing PostgreSQL.', 'Installs/configures local PostgreSQL 8.3 for', 'every Golden Tee Live game (also 2020),', 'every PGA Tour game, Power Putt Live,', 'Silver Strike Bowling Live, Target Toss Pro', 'and Orange County Choppers.', 'Games on Internal storage (the new default)', 'need no database install and are skipped.', 'A missing game database is made from the', 'game''s own backup. A game that ships none is', 'left to TeknoParrot to make on first start.', "Administrator is required if PostgreSQL isn't", 'installed yet.') }
             [pscustomobject]@{ Number = 13; Mode = 'RequiredPatch'; Label = 'Required game patches'; ShortDesc = 'Find and safely install supported required fixes from your local ZIPs.'; FullDesc = @('Find required patches for supported exact', 'game builds using your local Main or', 'Supplementary ZIP files. TPM validates the', 'game, backs up, applies, and verifies files.', 'A verified patch is not gameplay proof.') }
         )
     }
@@ -58412,7 +58613,7 @@ function Limit-MainMenuBodyRowsToBudget {
     return @($BodyRows[$start..($BodyRows.Count - 1)])
 }
 
-# Single-line banner ("TeknoParrot Manager v1.0 RC9.2") with no frame and no
+# Single-line banner ("TeknoParrot Manager v1.0 RC9.3") with no frame and no
 # blank separator, for viewports too short for the normal framed banner (5-6
 # rows) to leave any room for menu content -- see
 # Get-MainMenuEmergencyCompactRows.
@@ -59521,8 +59722,8 @@ $mode = $null
         Write-Host "  For every game that uses PostgreSQL, this step makes that game's database" -ForegroundColor DarkGray
         Write-Host "  from the game's own backup when it is missing, then tests it with the game's" -ForegroundColor DarkGray
         Write-Host "  own settings before setup says it is ready." -ForegroundColor DarkGray
-        Write-Host "  Every Golden Tee Live and PGA Tour game is covered, as are the other IT" -ForegroundColor DarkGray
-        Write-Host "  games with a database." -ForegroundColor DarkGray
+        Write-Host "  Every Golden Tee Live game (Golden Tee Live 2020 too) and every PGA Tour" -ForegroundColor DarkGray
+        Write-Host "  game is covered, as are the other IT games with a database." -ForegroundColor DarkGray
         Write-Host "  A game with no backup makes its own database the first time it starts" -ForegroundColor DarkGray
         Write-Host "  (TeknoParrot does this)." -ForegroundColor DarkGray
         foreach ($choiceLine in (Get-TpmDatabaseChoiceLines)) { Write-Host ('  ' + $choiceLine) -ForegroundColor DarkGray }
@@ -59653,6 +59854,7 @@ $mode = $null
         }
         $postgresServiceWasRunning = $null
         $postgresServiceRestoreFailed = $false
+        $pgResults = $null
         $postgresSetupBodyDone = $false
         $postgresChangedThisRun = $false
         $script:PostgresServiceStartRefusedByMarker = $false
@@ -60044,7 +60246,7 @@ $mode = $null
                 }
                 Write-Log 'Postgres setup: original service state restoration failed after an earlier stop; completion was not claimed.'
                 if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TeknoParrot Manager could not restore the original PostgreSQL service state.' }
-                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-restore' -Message 'PostgreSQL could not be put back to running or stopped the way it was.' -DataSafety 'PostgreSQL setup is not finished. Open View Log to see what was done.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-service-restore') -Acknowledge)
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-restore' -Message 'PostgreSQL could not be put back to running or stopped the way it was.' -DataSafety (Get-TpmPostgresServiceRestoreSafetyText -Result $pgResults) -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-service-restore') -Acknowledge)
             }
             if ($outPw) { $outPw.Value = $null }
             $outPw = $null
@@ -60065,7 +60267,7 @@ $mode = $null
             Write-Log 'Postgres setup: original service state restoration failed; completion was not claimed.'
             if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TeknoParrot Manager could not restore the original PostgreSQL service state.' }
             $serviceRestoreBlocks = @(@{ Heading = 'What happened'; Lines = @(('Earlier state: {0}' -f $(if ($postgresServiceWasRunning) { 'running' } else { 'stopped' })), 'Reason: PostgreSQL could not be put back to that state.', $(if ($script:PostgresServiceStartRefusedByMarker) { 'Start refused: an unfinished older password repair may have left a temporary login rule, so PostgreSQL was left stopped on purpose.' } else { 'Start refused: no' }), 'Log: TeknoParrot-Manager.log has the steps that ran.') })
-            [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-restore' -Message 'PostgreSQL could not be put back to running or stopped the way it was.' -DataSafety 'PostgreSQL setup is not finished. Open View Log to see what was done.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-service-restore') -DetailBlocks $serviceRestoreBlocks -Acknowledge)
+            [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-restore' -Message 'PostgreSQL could not be put back to running or stopped the way it was.' -DataSafety (Get-TpmPostgresServiceRestoreSafetyText -Result $pgResults) -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-service-restore') -DetailBlocks $serviceRestoreBlocks -Acknowledge)
             continue
         }
         if ($isPostgresRecoveryResume) {
@@ -60914,7 +61116,13 @@ $mode = $null
                 Write-Log ("ERROR: unsafe staging folder -- {0}" -f $earlyStagingCandidate.Reason)
                 continue
             }
-            $gamesInstallFolder = Read-TpmStagingFolderWithRecommendation -TeknoParrotRoot $tpRoot -ZipSource $zipSource -ZipSourceSupplementary $zipSourceSupplementary
+            $pickedFolder = Read-TpmStagingFolderWithRecommendation -TeknoParrotRoot $tpRoot -ZipSource $zipSource -ZipSourceSupplementary $zipSourceSupplementary
+            if ($null -eq $pickedFolder) {
+                Write-Host '  Nothing was changed. Going back to the menu.' -ForegroundColor Yellow
+                Write-Log 'AutoSync: staging folder recovery: the user went back to the menu.'
+                [void](Read-HostSafe "  Press Enter to return to menu"); continue
+            }
+            $gamesInstallFolder = $pickedFolder
             if (Save-Config) { Write-Log "Config: staging folder updated after early unsafe-path rejection" }
             # The folder just chosen was already checked by the prompt; check it again here and carry on with this run.
             $earlyStagingCandidate = Test-TpmStagingFolderCandidate `
@@ -61030,9 +61238,11 @@ $mode = $null
             Write-Host "    Q) Return to menu" -ForegroundColor Cyan
             $fix = Read-TpmChoice -Prompt "  Choice" -Choices @('R', 'Q')
             if ($fix -ne 'R') { $registerFolderReady = $false; break }
-            $gamesInstallFolder = Read-TpmStagingFolder -RecommendedPath '' `
+            $pickedFolder = Read-TpmStagingFolder -RecommendedPath '' -AllowBack `
                 -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
                 -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
+            if ($null -eq $pickedFolder) { $registerFolderReady = $false; break }
+            $gamesInstallFolder = $pickedFolder
             if (Test-Path -LiteralPath $gamesInstallFolder -PathType Container) {
                 if (Save-Config) { Write-Log "Config: staging folder updated to $gamesInstallFolder for Register only" }
             }
@@ -61802,6 +62012,7 @@ $registrationRepointFailed = @(@(Get-TpmTransactionField -Object $registrationMu
 $registrationRecap = Get-TpmRegistrationRecap -AutoSyncRan ($mode -eq "AutoSync") -ZipsExtracted ([int]$(if ($sync) { $sync.Synced } else { 0 }) + [int]$(if ($syncSupp) { $syncSupp.Synced } else { 0 })) `
     -NewlyRegistered $result.Registered.Count -AlreadyPresent $result.Already.Count -DatAction $eggmanDatActionThisRun `
     -ThumbnailsRequested ($doThumb -eq "Y") -ThumbnailsFailed $thumbnailsFailed -ManualNeeded $manualRegData.Count -ExtractionProblems $extractionProblems -NotInTeknoParrot $result.Unmatched.Count `
+    -ControlsNoReference $designSkippedItems.Count `
     -ControlsNeedAttention $controlReadinessItems.Count -Preview $dryRunActive -ControlsStatusFailed $csFailed -RunProblems $runStopMessages.ToArray() `
     -BackupPath $(if ($dryRunActive) { '' } else { [string]$backupPath }) -LogPath ([string]$logPath) `
     -ControlsStatusPath $(if ($dryRunActive -or $csFailed) { '' } else { $csStatusPath }) -Repointed $registrationRepointed -RepointFailed $registrationRepointFailed
@@ -63590,7 +63801,7 @@ if ($hasAnyAction -or $designSkippedItems.Count -gt 0) {
             $codes = ($byExe[$exePath] | Sort-Object) -join " and "
             $exeName = Get-TpmExecutableDisplayName -Name $exePath -Codes $codes
             Write-Host ("  {0} needs a corrected game folder." -f $codes) -ForegroundColor Yellow
-            Write-Host ("  TeknoParrot Manager could not find: {0}" -f $exeName) -ForegroundColor DarkGray
+            Write-Host ("  TeknoParrot Manager could not determine a unique game path for: {0}" -f $exeName) -ForegroundColor DarkGray
             Write-Host ("  Open TeknoParrotUI and point each game to the folder containing {0}." -f $exeName) -ForegroundColor DarkCyan
             Write-Host ""
         }
@@ -63808,7 +64019,7 @@ $registrationNextSteps = Get-TpmRegistrationNextSteps -HasActionRequired ([bool]
 Write-TpmOutcome -Title '' -Next $registrationNextSteps.Next -DetailBlocks $registrationNextSteps.DetailBlocks -DetailsNote 'More help for the next steps.' -Unattended:$Unattended -DeferDetails
 
     # A newly registered Incredible Technologies game has no PostgreSQL settings yet: offer the existing PostgreSQL setup (issue #131).
-    if (Invoke-TpmPostgresRegistrationOffer -UserProfilesDir $userProfilesDir -RegisteredCodes @($result.Registered | ForEach-Object { [string]$_.Code }) -Unattended:$Unattended -DryRun:$dryRunActive) {
+    if (Invoke-TpmPostgresRegistrationOffer -UserProfilesDir $userProfilesDir -RegisteredCodes @($result.Registered | ForEach-Object { [string]$_.Code }) -GameProfilesDir $gameProfilesDir -Unattended:$Unattended -DryRun:$dryRunActive) {
         $pendingApplyMode = 'PostgresSetup'
         $pendingApplyForce = $false
         continue

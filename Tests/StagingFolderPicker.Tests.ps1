@@ -47,4 +47,27 @@ Describe 'Staging folder prompt' {
         $result = Read-TpmStagingFolder -RecommendedPath $script:Suggested -TeknoParrotRoot $script:TpRoot -ZipSource $script:Zips
         $result | Should -Be $script:Suggested
     }
+
+    It 'goes back with nothing chosen when the player types Q (recovery question)' {
+        $script:Answers.Enqueue('Q')
+        $result = Read-TpmStagingFolder -RecommendedPath $script:Suggested -TeknoParrotRoot $script:TpRoot -ZipSource $script:Zips -AllowBack
+        $result | Should -BeNullOrEmpty
+        $script:AskCount | Should -Be 1
+    }
+
+    It 'keeps asking, with a hint, after a closed browse window, and Q then goes back' {
+        foreach ($a in @('B', 'B', 'q')) { $script:Answers.Enqueue($a) }
+        Mock Read-PathWithBrowse { '' }
+        $result = Read-TpmStagingFolder -RecommendedPath '' -TeknoParrotRoot $script:TpRoot -ZipSource $script:Zips -AllowBack
+        $result | Should -BeNullOrEmpty
+        $script:AskCount | Should -Be 3
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*No folder was chosen*Q to go back*' } -Times 2 -Exactly
+    }
+
+    It 'still refuses Q where going back is not possible (first-run question)' {
+        foreach ($a in @('Q', $script:Chosen)) { $script:Answers.Enqueue($a) }
+        $result = Read-TpmStagingFolder -RecommendedPath '' -TeknoParrotRoot $script:TpRoot -ZipSource $script:Zips
+        $result | Should -Be $script:Chosen
+        $script:AskCount | Should -Be 2
+    }
 }

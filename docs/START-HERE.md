@@ -605,6 +605,8 @@ Do these steps in order. Test after each change, so you know which change helped
 
    Next: copy controls only after you have bound one game of each type you use (buttons, driving, lightgun, or trackball).
 
+   Use RetroBat? A game that works from TeknoParrot can still fail when RetroBat starts it, because they are two different ways to start a game. See "A game works in TeknoParrot but not from RetroBat" in docs/TROUBLESHOOTING.md. TeknoParrot Manager does not change RetroBat.
+
 7. In TeknoParrot Manager, choose **4) Propagate Controls**. ("Propagate" means copy to your other games.)
 
    You will see: how many games have their controls set up, and the question `Copy controls from N games to your other games of the same type? (Y/N, D = details)`.

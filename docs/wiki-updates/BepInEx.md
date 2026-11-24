@@ -11,8 +11,8 @@ TeknoParrot Manager installs or updates BepInEx only after you approve. It has n
 1. Start TeknoParrot Manager. At `Enter 1-18:` type `10` and press Enter.
 2. The screen shows a few known examples of games that need BepInEx. The list comes from the TeknoParrot compatibility data (eggmansworld.github.io), so it stays current. Check the screen for the latest list.
 3. If some games have no BepInEx, you see `{n} game(s) do not have BepInEx. Only a few games need it, so they are left alone unless you pick them.` Pick a game from the list only if that game needs it. Press `B` when you are done picking.
-4. You see the games that need an install or update, one per line, like `Game Name: Not installed -> <version> (x64)`.
-5. At `[Y] Install/update  [B] Back  [N] Cancel`, press `Y` to go ahead. `B` (the default) goes back and `N` cancels. Nothing is changed until you press `Y`. If the only games on the list are ones you picked by number from the "do not have BepInEx" list, this question is skipped, because picking them was your answer.
+4. You see your list of games. New installs (no BepInEx yet) and updates are listed apart, and each update says why it is on the list.
+5. At `[Y] Install/update  [E] Edit the list (remove games)  [B] Back  [N] Cancel`, press `Y` to go ahead. `E` lets you type the numbers of games to take off the list (the other numbers do not change). `B` (the default) goes back and `N` cancels. Nothing is changed until you press `Y`.
 6. Wait for the result. After a normal finish, press Enter to go back to the menu.
 
 ---

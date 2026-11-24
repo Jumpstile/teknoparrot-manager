@@ -513,6 +513,19 @@ Describe 'CPS3 supplementary install' {
         @(Get-ChildItem -LiteralPath $f.Tp -Force).Count | Should -Be 0
     }
 
+    It 'fails before any change while TeknoCPS is running, and works again once it is closed' {
+        $f = New-Cps3Fixture 'game-running'
+        Write-Cps3SourceFolder -Src $f.Src
+        New-Item -ItemType Directory -Path (Join-Path $f.Tp 'TeknoCPS') -Force | Out-Null
+        Mock Get-TpmFolderProcesses { @('TeknoCPS') }
+        $r = Invoke-TpmCps3SupplementaryInstall -SourcePath $f.Src -TpRoot $f.Tp -Manifest $script:cps3Entries
+        $r.Outcome | Should -Be 'FAILED_BEFORE_MUTATION'
+        $r.ReasonCode | Should -Be 'GAME_RUNNING'
+        @(Get-ChildItem -LiteralPath (Join-Path $f.Tp 'TeknoCPS') -Force).Count | Should -Be 0
+        Mock Get-TpmFolderProcesses { @() }
+        (Invoke-TpmCps3SupplementaryInstall -SourcePath $f.Src -TpRoot $f.Tp -Manifest $script:cps3Entries).Outcome | Should -Be 'SUCCEEDED'
+    }
+
     It 'rolls back every promoted file, never claims success, and keeps existing NVRAM when a later promotion fails' {
         $f = New-Cps3Fixture 'promotion-failure'
         Write-Cps3SourceFolder -Src $f.Src
@@ -619,6 +632,7 @@ Describe 'CPS3 supplementary optional offer' {
         New-Item -ItemType Directory -Path $profiles -Force | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $profiles 'cps_sfiii3.xml'), '<GameProfile />')
         (Invoke-TpmCps3SupplementaryOffer -TpRoot $f.Tp -UserProfilesDir $profiles) | Should -BeNullOrEmpty
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Your CPS3 games: cps_sfiii3.*' } -Times 1
         Should -Invoke Read-TpmYesNo -Times 1 -Exactly
         Should -Invoke Read-PathWithBrowse -Times 0 -Exactly
         @(Get-ChildItem -LiteralPath $f.Tp -Force).Count | Should -Be 0

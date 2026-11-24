@@ -1,6 +1,6 @@
 # TeknoParrot Manager - Quick Start
 
-> This guide is for v1.0 RC9.2. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Release page: [v1.0 RC9.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2). [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
+> This guide is for v1.0 RC9.3. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Release page: [v1.0 RC9.3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3). [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Full documentation: [User guide](docs/USER-GUIDE.md) (project home page: [README.md](README.md))
 
@@ -133,6 +133,14 @@ These tools help you review bulk work without losing detail:
 The full advanced-user guide is in docs/ADVANCED-USERS.md. It explains the evidence model and who owns what.
 
 Expert workflows still detect first, preview supported changes, back up before writes, and verify the result.
+
+To check a copy of TeknoParrot Manager on a test PC without answering any questions, run the read-only validation report:
+
+```powershell
+.\TeknoParrot-Manager.ps1 -ValidationReport -ValidationRoot "D:\TeknoParrot"
+```
+
+It prints the version, your TeknoParrot folder, how many games are registered and what needs attention. It changes nothing. Exit codes: 0 pass, 3 action required, 4 failed, 1 the report could not be made. The full user guide has the details.
 
 To check an outside controller list you already have (for example RetroBat's `teknoparrot.yml`), run this read-only check:
 
@@ -772,7 +780,7 @@ Nothing is installed silently into every game.
 
 If a game folder is unsafe or the network cannot be reached, TeknoParrot Manager explains that no change was made. It then offers the automatic retry path.
 
-The prompt is `[Y] Install/update  [B] Back  [N] Cancel`. It is skipped when the only games are ones you picked by number from the "do not have BepInEx" list, because picking them was your answer. There is no repair-reset choice. After a successful or no-change run, the screen waits for one Enter.
+You first see your list: games with no BepInEx are new installs, games that already have it are updates, each with the reason it is on the list. Picking a game only puts it on the list, and the numbers do not change. The prompt is `[Y] Install/update  [E] Edit the list (remove games)  [B] Back  [N] Cancel`. Nothing is installed until you choose `Y`. There is no repair-reset choice. After a successful or no-change run, the screen waits for one Enter.
 
 The failure screen offers `[D] Show details`, `[O] Open support/log guidance`, `[B] Back to main menu`, and `[R] Try BepInEx setup again`.
 
@@ -839,7 +847,7 @@ A successful patch does not prove the game is ready. Register the game, set up i
 
 **What this release contains**
 
-- RC9.2 has 120 exact recipes across 71 exact ProfileId/build/executable identities (54 game profiles).
+- RC9.3 has 120 exact recipes across 71 exact ProfileId/build/executable identities (54 game profiles).
 
 - The list started as the historical 13-entry baseline and the 58-entry PR #355 checkpoint, and has grown since.
 

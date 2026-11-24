@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC9.2
+  TeknoParrot Manager  |  v1.0 RC9.3
   Author: Jumpstile
 ===============================================================================
 
@@ -12,8 +12,8 @@
   up your game settings before it changes them, and Details and the log
   show what was done. See docs\ADVANCED-USERS.md.
 
-  This guide is for v1.0 RC9.2.
-  Release page: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2
+  This guide is for v1.0 RC9.3.
+  Release page: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after each run. AutoSync backs up UserProfiles before
@@ -871,8 +871,8 @@
     Mode 10 offers a user-approved install or update for selected games using
     the stable x64 or x86 package matching each validated executable.
 
-    The prompt is [Y] Install/update, [B] Back, [N] Cancel. Unsafe roots
-    and failed validation make no changes.
+    The prompt is [Y] Install/update, [E] Edit the list, [B] Back,
+    [N] Cancel. Unsafe roots and failed validation make no changes.
 
     Missing or unavailable saved paths offer a conditional H handoff to
     mode 14, Library Health Check. Ordinary deployment failures keep their
@@ -1502,8 +1502,8 @@
        games you choose. It uses the stable package that matches each
        game's program (32-bit or 64-bit).
 
-       The prompt is [Y] Install/update, [B] Back, [N] Cancel. Unsafe
-       folders and failed checks make no changes.
+       The prompt is [Y] Install/update, [E] Edit the list, [B] Back,
+       [N] Cancel. Unsafe folders and failed checks make no changes.
 
        See BEPINEX SETUP.
 
@@ -4000,7 +4000,11 @@
   Library Health Check also lists the games that need BepInEx and do not
   have it set up. You see "Games that need BepInEx and do not have it set
   up:" followed by the game names. BepInEx is flagged only for games
-  whose profile says they need it.
+  whose profile says they need it. The same row also counts games that
+  need it but are not a kind TeknoParrot Manager can set it up for (not
+  supported) and games that could not be checked because the drive is not
+  connected or the game file could not be read (not checked). Choose D to
+  see each unreachable game's drive and saved path.
 
   Library Health Check also has a Game support row. It says OK when nothing
   is missing, or "Needs attention" when some games need you: a game file is
@@ -4447,11 +4451,13 @@
     It installs or updates BepInEx for the games you choose.
     Nothing happens until you approve it.
 
-    The prompt is [Y] Install/update, [B] Back, [N] Cancel. It is skipped
-    when the only games are ones you picked by number from the "do not
-    have BepInEx" list, because picking them was your answer. There is no
-    repair-reset choice. After a successful or no-change run, the screen
-    waits for one Enter.
+    You first see your list. Games with no BepInEx are listed as new
+    installs, and games that already have it are listed as updates, each
+    with the reason it is on the list. Picking a game only puts it on the
+    list; the numbers do not change. Nothing is installed until you answer.
+    The prompt is [Y] Install/update, [E] Edit the list (remove games),
+    [B] Back, [N] Cancel. There is no repair-reset choice. After a
+    successful or no-change run, the screen waits for one Enter.
 
     TeknoParrot Manager picks the stable 64-bit (x64) or 32-bit (x86)
     package that matches each game's program file.
