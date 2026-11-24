@@ -1,6 +1,6 @@
-# RC9.1 owner test plan
+# RC9.2 owner test plan
 
-This is the one list of everything the owner checks by hand before RC9.1 goes out. Automatic tests use fake files and cannot press a real button, open a real game or talk to a real database, so these steps are the proof for those parts. Run the whole list once, at the end, on the test PC. Do not use a TeknoParrot folder or a PC you care about. Write down what you saw for each step; a screenshot helps.
+This is the one list of everything the owner checks by hand before RC9.2 goes out. Automatic tests use fake files and cannot press a real button, open a real game or talk to a real database, so these steps are the proof for those parts. Run the whole list once, at the end, on the test PC. Do not use a TeknoParrot folder or a PC you care about. Write down what you saw for each step; a screenshot helps.
 
 Every step has a tag in square brackets:
 

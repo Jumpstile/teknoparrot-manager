@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC9.1  --  QUICK START
+  TeknoParrot Manager  |  v1.0 RC9.2  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -9,12 +9,12 @@
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  This guide is for v1.0 RC9.1, the latest published release:
+  This guide is for v1.0 RC9.2. The latest published release is v1.0 RC9.2:
+  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2
+  If you use RC9 or RC9.1, choose 16) Check for Updates to get RC9.2.
+  The previous published release is v1.0 RC9.1:
   https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1
-  The previous published release is v1.0 RC9:
-  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9
-  If you use RC9, choose 16) Check for Updates to get RC9.1.
-  Older published releases: v1.0 RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6.
+  Older published releases: v1.0 RC9, RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6.
   RC8 was never published.
   Final Version 1.0 has not been published yet.
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
@@ -3402,7 +3402,7 @@
   version and computed SHA-256. The download is compared with the checksum
   GitHub publishes for it, when GitHub publishes one. No publisher
   signature check is claimed. A ZIP that fails its safety checks is
-  refused and nothing is changed. Running mode 8 again after a newer
+  refused and nothing is changed. Running mode 9 again after a newer
   release backs up and replaces only unchanged files it installed.
 
   Missing saved paths and unavailable saved devices are reported

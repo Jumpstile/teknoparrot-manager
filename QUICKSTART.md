@@ -1,6 +1,6 @@
 # TeknoParrot Manager - Quick Start
 
-> This guide describes v1.0 RC9.1. RC9.1 is the latest published release: [v1.0 RC9.1](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1). It is the same program as RC9. Every game was checked again against TeknoParrot 1.0.0.2334, and the version labels are corrected. The previous published release is [v1.0 RC9](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9). If you use RC9, choose **16) Check for Updates** to get RC9.1. The older published releases are v1.0 RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. Final Version 1.0 has not been published yet. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
+> This guide describes v1.0 RC9.2. RC9.2 is the latest published release: [v1.0 RC9.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2). If you use RC9 or RC9.1, choose **16) Check for Updates** to get RC9.2. The previous published release is [v1.0 RC9.1](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1). The one before it is [v1.0 RC9](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9). The older published releases are v1.0 RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. Final Version 1.0 has not been published yet. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Full documentation: [User guide](docs/USER-GUIDE.md) (project home page: [README.md](README.md))
 
@@ -756,7 +756,7 @@ If a file name is already in use (ReShade may already use `d3d9.dll`), or the ga
 
 **Third-party plugin.** The newest release ZIP (about 93 MB) is downloaded once and saved in the cache folder, and downloaded again only when a newer release comes out. It is compared with the SHA-256 checksum GitHub publishes for it, when GitHub publishes one. A ZIP is refused, with no files changed, if a path in it points outside its folder, if a needed game folder lacks `dinput8.dll` or `FFBPlugin.ini`, or if it unpacks to more than 1 GiB. Only the needed files are unpacked and nothing from it is run. The shared audit records its source, file name, release version, and computed SHA-256. There is no publisher signature check. With no network, a saved copy that passed its check can be used if you agree; you are told it may not be the newest.
 
-**Removal.** TeknoParrot Manager records every plugin file it put in place (the plugin, the settings file, and `SDL2.dll`). When you choose native FFB for an overlap, it backs up and removes only matching unchanged files. Running mode 8 again after a newer release replaces only unchanged files it installed, with a backup. A `FFBPlugin.ini` you changed is kept unless you say to replace it.
+**Removal.** TeknoParrot Manager records every plugin file it put in place (the plugin, the settings file, and `SDL2.dll`). When you choose native FFB for an overlap, it backs up and removes only matching unchanged files. Running mode 9 again after a newer release replaces only unchanged files it installed, with a backup. A `FFBPlugin.ini` you changed is kept unless you say to replace it.
 
 Unowned or changed files remain untouched. They are reported as an advanced troubleshooting boundary.
 
@@ -839,7 +839,7 @@ A successful patch does not prove the game is ready. Register the game, set up i
 
 **What this release contains**
 
-- RC9.1 has 120 exact recipes across 71 exact ProfileId/build/executable identities (54 game profiles).
+- RC9.2 has 120 exact recipes across 71 exact ProfileId/build/executable identities (54 game profiles).
 
 - The list started as the historical 13-entry baseline and the 58-entry PR #355 checkpoint, and has grown since.
 

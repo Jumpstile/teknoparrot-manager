@@ -14,9 +14,9 @@ BeforeAll {
     ($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n" | Set-Content -LiteralPath $functionFile -Encoding UTF8
     . $functionFile
     . (Join-Path $PSScriptRoot 'TpmExtractedScriptState.ps1')
-    $script:DisplayVersion = 'v1.0 RC9.1'
+    $script:DisplayVersion = 'v1.0 RC9.2'
     $script:ScriptVersion = '1.0'
-    $script:ReleaseCandidateLabel = 'RC9.1'
+    $script:ReleaseCandidateLabel = 'RC9.2'
     $script:logPath = Join-Path $TestDrive 'must-not-exist.log'
     $script:logWarnShown = $false
     $script:productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path

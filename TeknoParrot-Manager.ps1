@@ -1,4 +1,4 @@
-# TeknoParrot Manager  |  v1.0 RC9.1
+# TeknoParrot Manager  |  v1.0 RC9.2
 # Author: Jumpstile
 # =============================================================================
 #
@@ -88,7 +88,7 @@ $script:TpmIndependentProgressTasks = @{}
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
 $ScriptVersion = "1.0"
-$ReleaseCandidateLabel = "RC9.1"
+$ReleaseCandidateLabel = "RC9.2"
 $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
 
 function Get-ManagerDisplayVersion {
@@ -31758,7 +31758,11 @@ function Remove-FFBPluginOwnedDeployment {
     $result = Invoke-TpmFfbPluginFileTransaction `
         -Removals $removalItems.ToArray() -CacheDir $CacheDir `
         -OwnershipEntries $remaining.ToArray()
-    if ($result.Outcome -in @('SUCCEEDED','NO_OP')) {
+    if ($result.Outcome -in @('SUCCEEDED','NO_OP') -or ($result.Outcome -eq 'CLEANUP_RESIDUE' -and [string]$result.UnderlyingOutcome -eq 'SUCCEEDED')) {
+        foreach ($leftover in @($result.Cleanup.ResiduePaths)) {
+            Write-Host ("    Warning: the plugin files were removed, but this temporary folder could not be removed: {0}" -f $leftover) -ForegroundColor Yellow
+            Write-Log ("FFBPlugin removal: leftover temporary path after verified removal: {0}" -f $leftover)
+        }
         $script:FFBOwnedRemovalRecords = $removalItems.ToArray()
         return $true
     }
@@ -31842,6 +31846,17 @@ function Invoke-FFBPluginSetup {
             $stop | Add-Member -NotePropertyName AcquisitionResidue -NotePropertyValue @($download.ResiduePaths)
         }
         return $stop
+    }
+
+    # A record of installed plugin files that exists but cannot be read is never treated as empty: setup would write a new one over it.
+    if ($ownershipSnapshot.Exists) {
+        $manifestReadable = $true
+        try { $null = Get-Content -LiteralPath $ownershipSnapshot.Path -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop } catch { $manifestReadable = $false }
+        if (-not $manifestReadable) {
+            Write-Host ("  The list of plugin files that was saved earlier cannot be read, so nothing was changed. Keep this file and ask for help: {0}" -f $ownershipSnapshot.Path) -ForegroundColor Red
+            Write-Log ("FFBPlugin: ownership manifest {0} cannot be parsed; setup stopped before any change." -f $ownershipSnapshot.Path)
+            return (& $refuse 'OWNERSHIP_MANIFEST_UNREADABLE')
+        }
     }
 
     Write-Host ""
@@ -32347,7 +32362,12 @@ function Invoke-FFBPluginSetup {
             -OwnershipEntries $ownershipEntries
     }
     $deployed = 0
-    if ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP')) {
+    $transactionOk = ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP') -or ($transactionResult.Outcome -eq 'CLEANUP_RESIDUE' -and [string]$transactionResult.UnderlyingOutcome -eq 'SUCCEEDED'))
+    if ($transactionOk) {
+        foreach ($leftover in @($transactionResult.Cleanup.ResiduePaths)) {
+            Write-Host ("  Warning: the plugin files are installed, but this temporary folder could not be removed: {0}" -f $leftover) -ForegroundColor Yellow
+            Write-Log ("FFBPlugin: leftover temporary path after verified deployment: {0}" -f $leftover)
+        }
         foreach ($group in @($deploymentPlans | Group-Object -Property ProfileCode)) {
             $first = $group.Group[0]
             foreach ($member in $group.Group) { [void]$deployedThisRun.Add($member) }
@@ -32394,8 +32414,8 @@ function Invoke-FFBPluginSetup {
     $accounted = $skippedNative + $skippedCollision + $skippedCurrent + $skippedNoName + $skippedNoMatch + $skippedDllMissing + $skippedMissingPath + $skippedMissingDevice + $sourceFolderGames.Count + $errors + $deployed
     $accountingComplete = ($accounted -eq $profiles.Count)
     $blockingSkips = $skippedDllMissing + $skippedMissingPath + $skippedMissingDevice + $sourceFolderGames.Count
-    $succeeded = ($transactionResult.Outcome -in @('SUCCEEDED','NO_OP') -and $errors -eq 0 -and $blockingSkips -eq 0 -and $accountingComplete)
-    $reason = if ($transactionResult.Outcome -notin @('SUCCEEDED','NO_OP')) { $transactionResult.ReasonCode } elseif (-not $accountingComplete) { 'ACCOUNTING_INCOMPLETE' } elseif ($errors -gt 0) { 'DEPLOYMENT_ERRORS' } elseif ($blockingSkips -gt 0) { 'BLOCKED_SKIPS' } elseif ($deployed -gt 0) { 'DEPLOYED' } elseif ($skippedNative -gt 0 -and $skippedNoMatch -eq 0) { 'NATIVE_PREFERRED' } elseif ($skippedNoMatch -gt 0 -and $skippedNative -eq 0) { 'NO_SUPPORTED_PLUGIN_TARGET' } else { 'NO_PLUGIN_CHANGES_NEEDED' }
+    $succeeded = ($transactionOk -and $errors -eq 0 -and $blockingSkips -eq 0 -and $accountingComplete)
+    $reason = if (-not $transactionOk) { $transactionResult.ReasonCode } elseif (-not $accountingComplete) { 'ACCOUNTING_INCOMPLETE' } elseif ($errors -gt 0) { 'DEPLOYMENT_ERRORS' } elseif ($blockingSkips -gt 0) { 'BLOCKED_SKIPS' } elseif ($deployed -gt 0) { 'DEPLOYED' } elseif ($skippedNative -gt 0 -and $skippedNoMatch -eq 0) { 'NATIVE_PREFERRED' } elseif ($skippedNoMatch -gt 0 -and $skippedNative -eq 0) { 'NO_SUPPORTED_PLUGIN_TARGET' } else { 'NO_PLUGIN_CHANGES_NEEDED' }
     $rollback = $null
     if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) {
         $evidence = [ordered]@{
@@ -33101,6 +33121,8 @@ function Get-TpmFfbSetupEndingView {
             $anySet = $true
             [void]$done.Add(('FFB Blaster is on for {0}.' -f (Format-TpmGameCount -Count $nativeGames.Count)))
             foreach ($block in @((Get-TpmFfbNativeResultView -Result $NativeResult).DetailBlocks)) { [void]$blocks.Add($block) }
+        } elseif ([string](Get-TpmTransactionField -Object $NativeResult -Name 'ReasonCode' -Default '') -eq 'NO_MEMBERSHIP') {
+            [void]$done.Add('FFB Blaster was skipped because you do not have the paid membership.')
         } else {
             [void]$done.Add('FFB Blaster: no game needed a change.')
         }
@@ -33119,6 +33141,8 @@ function Get-TpmFfbSetupEndingView {
         $pluginEvidence = [string](Get-TpmTransactionField -Object $Plugin -Name 'EvidencePath' -Default '')
         if ($pluginEvidence) { $pluginLines += ('Evidence file: ' + $pluginEvidence) }
         [void]$blocks.Add(@{ Heading = 'Free FFB plugin'; Lines = $pluginLines })
+    } elseif ($null -ne $Plugin -and [int](Get-TpmTransactionField -Object $Plugin -Name 'SkippedCollision' -Default 0) -gt 0) {
+        [void]$done.Add('The free FFB plugin was skipped for games that already have one of its files. Those files were left alone.')
     } else {
         [void]$done.Add('The free FFB plugin: no game needed a change.')
     }
@@ -38011,6 +38035,15 @@ function Register-GamesLegacy {
     # already-registered sibling from that same shared-exe pool is scanned
     # first and incidentally marks this folder's own code as "seen".
     $preExistingCodes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    # True when an existing profile can be read and has no game file saved yet (TeknoParrot keeps such a profile for a game that was
+    # added but not set up). Such a profile is linked to the game; an unreadable one is left alone.
+    $profileGamePathBlank = {
+        param([string]$UserProfilePath)
+        try {
+            $node = (Read-Xml $UserProfilePath).GameProfile.SelectSingleNode('GamePath')
+            return ($null -eq $node -or [string]::IsNullOrWhiteSpace($node.InnerText))
+        } catch { return $false }
+    }
     $preExistingFiles = @(Get-TpmRegisteredProfileFilesWithDiscoveryProgress -UserProfilesDir $userProfilesDir -ProgressLabel 'Existing profile index discovery' -EnumerationErrorAction SilentlyContinue)
     $profileScanStarted = Get-Date
     $profileScanCurrent = 0
@@ -38419,12 +38452,16 @@ function Register-GamesLegacy {
         }
 
         $userProfile = Join-Path $userProfilesDir ($code + ".xml")
+        $fillBlankProfile = $false
         if (Test-Path -LiteralPath $userProfile) {
-            [void]$already.Add($code)
-            $seenCodes[$code] = $true
-            $codeClaimedBy[$code] = $folderName
-            Backfill-SecondaryExecutablePath $userProfile $DryRun -RegistrationState $mutationRecords -BackupState $BackupState -UserProfilesDir $userProfilesDir -Folder $folderName
-            continue
+            if (& $profileGamePathBlank $userProfile) { $fillBlankProfile = $true }
+            else {
+                [void]$already.Add($code)
+                $seenCodes[$code] = $true
+                $codeClaimedBy[$code] = $folderName
+                Backfill-SecondaryExecutablePath $userProfile $DryRun -RegistrationState $mutationRecords -BackupState $BackupState -UserProfilesDir $userProfilesDir -Folder $folderName
+                continue
+            }
         }
 
         # Mark seen before the file operation for the same reason as the fuzzy
@@ -38434,7 +38471,7 @@ function Register-GamesLegacy {
         $registrationWriteAttempted = $false; $ledgerMapping = $null; $preWriteState = $null
         try {
             $ledgerMapping = Start-TpmRegistrationMapping -Folder $folderName -Code $code -Match 'exe-single' -IntendedPath $exe.FullName -TemplatePath $match.TemplatePath -DryRun $DryRun
-            Set-TpmRegistrationGamePath -TemplatePath $match.TemplatePath -ExePath $exe.FullName -UserProfile $userProfile -DryRun $DryRun -BackupState $BackupState -UserProfilesDir $userProfilesDir -MutationRecords $mutationRecords -PreWriteState ([ref]$preWriteState) -WriteAttempted ([ref]$registrationWriteAttempted)
+            Set-TpmRegistrationGamePath -TemplatePath $(if ($fillBlankProfile) { $userProfile } else { $match.TemplatePath }) -ExePath $exe.FullName -UserProfile $userProfile -DryRun $DryRun -BackupState $BackupState -UserProfilesDir $userProfilesDir -MutationRecords $mutationRecords -PreWriteState ([ref]$preWriteState) -WriteAttempted ([ref]$registrationWriteAttempted)
             Complete-TpmRegistrationMapping -MappingId $ledgerMapping -Outcome VERIFIED
             [void]$registered.Add([pscustomobject]@{ Code = $code; GamePath = $exe.FullName })
             Write-Log "Registered $code -> $($exe.FullName)"
@@ -38531,10 +38568,14 @@ function Register-GamesLegacy {
             $codeClaimedBy[$datCode] = $origName
 
             $userProfile = Join-Path $userProfilesDir ($datCode + ".xml")
+            $fillBlankProfile = $false
             if (Test-Path -LiteralPath $userProfile) {
-                [void]$already.Add($datCode)
-                Backfill-SecondaryExecutablePath $userProfile $DryRun -RegistrationState $mutationRecords -BackupState $BackupState -UserProfilesDir $userProfilesDir -Folder $origName
-                continue
+                if (& $profileGamePathBlank $userProfile) { $fillBlankProfile = $true }
+                else {
+                    [void]$already.Add($datCode)
+                    Backfill-SecondaryExecutablePath $userProfile $DryRun -RegistrationState $mutationRecords -BackupState $BackupState -UserProfilesDir $userProfilesDir -Folder $origName
+                    continue
+                }
             }
 
             $templatePath = Join-Path $gameProfilesDir ($datCode + ".xml")
@@ -38579,13 +38620,15 @@ function Register-GamesLegacy {
             }
             if (-not $exeFromDat -and @(Get-TpmMissingGameSetFiles -GamePath $exeToUse -ExecutableName ([string](Get-PrimaryExecutableName $templatePath))).Count -gt 0) {
                 Write-Log ("DatIndex (pass2): {0} was left alone because the other ZIP its profile names is not in folder {1}" -f $datCode, $folderKey)
+                # Not registered: the folder stays on the not-registered list and the profile stays free for another folder.
+                [void]$matchedFolders.Remove($folderKey); [void]$seenCodes.Remove($datCode); [void]$codeClaimedBy.Remove($datCode)
                 continue
             }
 
             $registrationWriteAttempted = $false; $ledgerMapping = $null; $preWriteState = $null
             try {
                 $ledgerMapping = Start-TpmRegistrationMapping -Folder $origName -Code $datCode -Match 'dat-pass2' -IntendedPath $exeToUse -TemplatePath $templatePath -DryRun $DryRun
-                Set-TpmRegistrationGamePath -TemplatePath $templatePath -ExePath $exeToUse -UserProfile $userProfile -DryRun $DryRun -BackupState $BackupState -UserProfilesDir $userProfilesDir -MutationRecords $mutationRecords -PreWriteState ([ref]$preWriteState) -WriteAttempted ([ref]$registrationWriteAttempted)
+                Set-TpmRegistrationGamePath -TemplatePath $(if ($fillBlankProfile) { $userProfile } else { $templatePath }) -ExePath $exeToUse -UserProfile $userProfile -DryRun $DryRun -BackupState $BackupState -UserProfilesDir $userProfilesDir -MutationRecords $mutationRecords -PreWriteState ([ref]$preWriteState) -WriteAttempted ([ref]$registrationWriteAttempted)
                 Complete-TpmRegistrationMapping -MappingId $ledgerMapping -Outcome VERIFIED
                 $label = if ($datScore -lt 1.0) { "dat/fuzzy $([Math]::Round($datScore,2))" } else { "dat/exact" }
                 [void]$registered.Add([pscustomobject]@{
@@ -38675,10 +38718,14 @@ function Register-GamesLegacy {
             $codeClaimedBy[$bestCode] = $origName
 
             $userProfile = Join-Path $userProfilesDir ($bestCode + ".xml")
+            $fillBlankProfile = $false
             if (Test-Path -LiteralPath $userProfile) {
-                [void]$already.Add($bestCode)
-                Backfill-SecondaryExecutablePath $userProfile $DryRun -RegistrationState $mutationRecords -BackupState $BackupState -UserProfilesDir $userProfilesDir -Folder $origName
-                continue
+                if (& $profileGamePathBlank $userProfile) { $fillBlankProfile = $true }
+                else {
+                    [void]$already.Add($bestCode)
+                    Backfill-SecondaryExecutablePath $userProfile $DryRun -RegistrationState $mutationRecords -BackupState $BackupState -UserProfilesDir $userProfilesDir -Folder $origName
+                    continue
+                }
             }
 
             $templatePath = Join-Path $gameProfilesDir ($bestCode + ".xml")
@@ -38710,13 +38757,15 @@ function Register-GamesLegacy {
             }
             if (@(Get-TpmMissingGameSetFiles -GamePath $exeToUse -ExecutableName ([string](Get-PrimaryExecutableName $templatePath))).Count -gt 0) {
                 Write-Log ("ProfileCode (pass3): {0} was left alone because the other ZIP its profile names is not in folder {1}" -f $bestCode, $folderKey)
+                # Not registered: the folder stays on the not-registered list and the profile stays free for another folder.
+                [void]$matchedFolders.Remove($folderKey); [void]$seenCodes.Remove($bestCode); [void]$codeClaimedBy.Remove($bestCode)
                 continue
             }
 
             $registrationWriteAttempted = $false; $ledgerMapping = $null; $preWriteState = $null
             try {
                 $ledgerMapping = Start-TpmRegistrationMapping -Folder $origName -Code $bestCode -Match 'code-pass3' -IntendedPath $exeToUse -TemplatePath $templatePath -DryRun $DryRun
-                Set-TpmRegistrationGamePath -TemplatePath $templatePath -ExePath $exeToUse -UserProfile $userProfile -DryRun $DryRun -BackupState $BackupState -UserProfilesDir $userProfilesDir -MutationRecords $mutationRecords -PreWriteState ([ref]$preWriteState) -WriteAttempted ([ref]$registrationWriteAttempted)
+                Set-TpmRegistrationGamePath -TemplatePath $(if ($fillBlankProfile) { $userProfile } else { $templatePath }) -ExePath $exeToUse -UserProfile $userProfile -DryRun $DryRun -BackupState $BackupState -UserProfilesDir $userProfilesDir -MutationRecords $mutationRecords -PreWriteState ([ref]$preWriteState) -WriteAttempted ([ref]$registrationWriteAttempted)
                 Complete-TpmRegistrationMapping -MappingId $ledgerMapping -Outcome VERIFIED
                 [void]$registered.Add([pscustomobject]@{
                     Code        = $bestCode
@@ -58363,7 +58412,7 @@ function Limit-MainMenuBodyRowsToBudget {
     return @($BodyRows[$start..($BodyRows.Count - 1)])
 }
 
-# Single-line banner ("TeknoParrot Manager v1.0 RC9.1") with no frame and no
+# Single-line banner ("TeknoParrot Manager v1.0 RC9.2") with no frame and no
 # blank separator, for viewports too short for the normal framed banner (5-6
 # rows) to leave any room for menu content -- see
 # Get-MainMenuEmergencyCompactRows.

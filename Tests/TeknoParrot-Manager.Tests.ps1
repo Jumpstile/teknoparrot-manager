@@ -11061,8 +11061,8 @@ Describe "Compare-ManagerVersionText" {
         Compare-ManagerVersionText -VersionTextA 'v1.0' -VersionTextB 'v1.0-RC8' | Should -Be 1
     }
 
-    It "orders the whole release line: RC7 < RC8 < RC8.1 < RC9 < RC9.1 < 1.0 < 1.0.1 < 1.1" {
-        $line = @('v1.0-RC7', 'v1.0-RC8', 'v1.0-RC8.1', 'v1.0-RC8.2', 'v1.0-RC8.10', 'v1.0-RC9', 'v1.0-RC9.1', 'v1.0', 'v1.0.1', 'v1.1')
+    It "orders the whole release line: RC7 < RC8 < RC8.1 < RC9 < RC9.1 < RC9.2 < 1.0 < 1.0.1 < 1.1" {
+        $line = @('v1.0-RC7', 'v1.0-RC8', 'v1.0-RC8.1', 'v1.0-RC8.2', 'v1.0-RC8.10', 'v1.0-RC9', 'v1.0-RC9.1', 'v1.0-RC9.2', 'v1.0', 'v1.0.1', 'v1.1')
         for ($i = 0; $i -lt $line.Count; $i++) {
             for ($j = 0; $j -lt $line.Count; $j++) {
                 $expected = [Math]::Sign($i - $j)
@@ -11114,7 +11114,7 @@ Describe "Manager script version identity" {
     }
 
     It "extracts the current script's literal identity from its full source" {
-        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC9.1'
+        Get-ManagerScriptVersionIdentityFromContent -Content $script:ProductionSource | Should -Be '1.0-RC9.2'
     }
 
     It "ignores assignment-looking lines inside a here-string" {
@@ -19864,7 +19864,7 @@ Describe 'TPM-owned layout and legacy migration' {
         $script:ProductionSource | Should -Match 'Do you have a paid TeknoParrot membership\?'
         $script:ProductionSource | Should -Match '\$hasSub = Read-TpmYesNo -Prompt "  Choose Y or N"'
         $script:ProductionSource | Should -Not -Match 'Read-TpmYesNo -Prompt "  Do you have an active, paid TeknoParrot membership'
-        $script:ProductionSource | Should -Match '\$succeeded = \(\$transactionResult\.Outcome -in @\(''SUCCEEDED'',''NO_OP''\) -and \$errors -eq 0 -and \$blockingSkips -eq 0 -and \$accountingComplete\)'
+        $script:ProductionSource | Should -Match '\$succeeded = \(\$transactionOk -and \$errors -eq 0 -and \$blockingSkips -eq 0 -and \$accountingComplete\)'
         $script:ProductionSource | Should -Match "NO_SUPPORTED_PLUGIN_TARGET"
         $script:ProductionSource | Should -Match "NATIVE_PREFERRED"
         $script:ProductionSource | Should -Match 'TeknoParrot Manager only removes optional plugin files'

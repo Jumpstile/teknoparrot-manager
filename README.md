@@ -8,13 +8,13 @@ TeknoParrot Manager is made for beginners and is also useful if you already know
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-> **This guide describes v1.0 RC9.1.** RC9.1 is the latest published release. It is the same program as RC9. Every game was checked again against TeknoParrot 1.0.0.2334, and the version labels are corrected. The previous published release is v1.0 RC9. If you use RC9, choose Check for Updates (menu 16) to get RC9.1. The older published releases are v1.0 RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. The changes since RC9 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 has not been published yet. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
+> **This guide describes v1.0 RC9.2.** RC9.2 is the latest published release. If you use RC9 or RC9.1, choose Check for Updates (menu 16) to get RC9.2. The previous published release is v1.0 RC9.1. The one before it is v1.0 RC9. The older published releases are v1.0 RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. The changes since RC9 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 has not been published yet. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
 
 **Jump to:** [Quick Start](QUICKSTART.md) | [Full user guide](docs/USER-GUIDE.md) | [Changelog](TeknoParrot-Manager-CHANGELOG.txt) | [Troubleshooting](docs/TROUBLESHOOTING.md) | [Start Here (first game in 10 minutes)](docs/START-HERE.md)
 
 ## Download
 
-Release page of the latest published release: [v1.0 RC9.1](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1).
+Release page of the latest published release: [v1.0 RC9.2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2).
 
 1. Download the ZIP file from the release page.
 2. Extract the whole package to a short folder outside Program Files, for example `C:\TPM`. Keep all the folders.
@@ -3526,5 +3526,5 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> Latest published release: v1.0 RC9.1. Previous published release: v1.0 RC9. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
+> Latest published release: v1.0 RC9.2. Previous published release: v1.0 RC9.1. The one before it: v1.0 RC9. Test one game after each run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup.
 

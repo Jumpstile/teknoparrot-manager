@@ -2,8 +2,8 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-RC9.1 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
-The previous published release was v1.0 RC9: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9. RC8.4 and older are earlier published releases. RC4 and RC5 are historical; RC4 is superseded.
+RC9.2 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
+The previous published release was v1.0 RC9.1: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1. RC9 and RC8.4 and older are earlier published releases. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
@@ -15,7 +15,7 @@ The previous published release was v1.0 RC9: https://github.com/Jumpstile/teknop
   and the guides no longer mention a product it does not support.
 - LaunchBox integration now has its own item on the main menu, so you
   can use it any time without registering games first.
-- Force feedback (menu 8) now installs the newest plugin release with
+- Force feedback (menu 9) now installs the newest plugin release with
   each game's own settings file, lists any game controller by name,
   and upgrades old plugin files it recognizes (with a backup). It asks
   first.

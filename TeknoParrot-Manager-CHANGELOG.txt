@@ -2,9 +2,9 @@
   TeknoParrot Manager  --  CHANGELOG
   Author: Jumpstile
 ===============================================================================
-  Newest version first. RC9.1 is the latest published version. RC9 is the
-  previous published version. RC8 was a tester build and was never
-  published. Final Version 1.0 comes later.
+  Newest version first. RC9.2 is the latest published version. RC9.1 is the
+  previous published version. RC9 came before it. RC8 was a tester build and
+  was never published. Final Version 1.0 comes later.
 
 
   v1.0 RC9.2 (changes since RC9.1)
@@ -14,7 +14,7 @@
     and the guides no longer mention a product it does not support.
   - LaunchBox integration now has its own item on the main menu, so you
     can use it any time without registering games first.
-  - Force feedback (menu 8) now installs the newest plugin release with
+  - Force feedback (menu 9) now installs the newest plugin release with
     each game's own settings file, lists any game controller by name,
     and upgrades old plugin files it recognizes (with a backup). It asks
     first.

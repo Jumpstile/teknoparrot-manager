@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC9.1
+  TeknoParrot Manager  |  v1.0 RC9.2
   Author: Jumpstile
 ===============================================================================
 
@@ -12,12 +12,12 @@
   up your game settings before it changes them, and Details and the log
   show what was done. See docs\ADVANCED-USERS.md.
 
-  This is v1.0 RC9.1, the latest published release:
+  This is v1.0 RC9.2. The latest published release is v1.0 RC9.2:
+  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2
+  If you use RC9 or RC9.1, choose 16) Check for Updates to get RC9.2.
+  The previous published release is v1.0 RC9.1:
   https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1
-  The previous published release is v1.0 RC9:
-  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9
-  If you use RC9, choose 15) Check for Updates to get RC9.1.
-  Older published releases: v1.0 RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6.
+  Older published releases: v1.0 RC9, RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6.
   RC8 was a tester build and was never published.
   Final Version 1.0 has not been published yet.
   The changes since RC9 are in TeknoParrot-Manager-CHANGELOG.txt.
@@ -4330,14 +4330,14 @@
     is written into every settings file it installs. A controller with no
     USB numbers can be picked, but no wheel is written; the plugin is
     still installed and each game's rumble settings are left as the
-    plugin ships them. To change the wheel later, run mode 8 again and
+    plugin ships them. To change the wheel later, run mode 9 again and
     pick another one. If no controller is found, you can go on without
     one and set the wheel later.
 
     You are asked first: the script shows which games it will install or
     update and waits for your yes. If you say no, nothing changes.
 
-    Updates: run mode 8 again after a newer release. The script backs up and
+    Updates: run mode 9 again after a newer release. The script backs up and
     replaces only the plugin files it installed earlier and that you have
     not changed. If you changed a game's FFBPlugin.ini, it asks before
     touching it. The default is to keep your file.
@@ -6600,7 +6600,8 @@
 
 
 ===============================================================================
-  Latest published release: v1.0 RC9.1. Previous published release: v1.0 RC9.
+  Latest published release: v1.0 RC9.2. Previous published release: v1.0 RC9.1.
+  The one before it: v1.0 RC9.
   Test one game after every run. AutoSync backs up UserProfiles before
   extraction; preview mode skips the backup.
 ===============================================================================
