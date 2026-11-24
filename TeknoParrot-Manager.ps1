@@ -61833,7 +61833,8 @@ if ($registrationFolders.Count -gt 0 -and -not $dryRunActive) {
     $maintenanceChoice = Read-TpmChoice -Prompt "  Choice (N/A/B)" -Choices @('N', 'A', 'B') -Default 'N'
     if ($maintenanceChoice -eq 'N') {
         Write-Log "AutoSync: one-game maintenance scope = New game only."
-        Write-Host "  Only the games extracted in this run were checked. The whole-library checks were skipped." -ForegroundColor Green
+        Write-Host "  Only the games extracted in this run were checked." -ForegroundColor Green
+        Write-Host "  The whole-library checks were skipped." -ForegroundColor Green
         Write-Host ('  Registration result: ' + $result.Summary) -ForegroundColor $(if ($result.Outcome -in @('SUCCEEDED','NO_OP')) { 'DarkGray' } else { 'Yellow' })
         Invoke-TpmLaunchBoxStep
         if (-not $Unattended) { [void](Read-HostSafe "  Press Enter to return to the menu") }
@@ -62028,7 +62029,8 @@ if (-not $dryRunActive -and -not $Unattended -and -not $includeSupplementary -an
     ($eggmanDatZip -or $datFilePath) -and $result.Ambiguous.Count -gt 0) {
     Write-Host ""
     Write-Host ("  {0} game(s) had an uncertain match this run. An extra version-info" -f $result.Ambiguous.Count) -ForegroundColor Yellow
-    Write-Host "  file (supplementary DAT) may help. Choose Y only if you already have that .dat file." -ForegroundColor Yellow
+    Write-Host "  file (supplementary DAT) may help. Choose Y only if you already have" -ForegroundColor Yellow
+    Write-Host "  that .dat file." -ForegroundColor Yellow
     $askSuppNow = Read-TpmYesNo -Prompt "  Add a supplementary DAT file now? (Y/N, default N)" -Default 'N'
     if ($askSuppNow -eq 'Y') {
         $rawSuppNow = Read-PathWithBrowse "  Path to supplementary dat file" -Mode File -FileFilter "dat files (*.dat)|*.dat|All files (*.*)|*.*"
@@ -62040,8 +62042,10 @@ if (-not $dryRunActive -and -not $Unattended -and -not $includeSupplementary -an
                 Write-Host "  Saved. Run 'Register only' (games already extracted -- just register)" -ForegroundColor Green
                 Write-Host "  from the main menu to apply it to games already registered this run." -ForegroundColor Green
             } else {
-                Write-Host "  WARNING: Your settings could not be saved, so this file will not be remembered." -ForegroundColor Yellow
-                Write-Host "  Check that the settings file is not read-only, then try again from the main menu." -ForegroundColor Yellow
+                Write-Host "  WARNING: Your settings could not be saved, so this file will not" -ForegroundColor Yellow
+                Write-Host "  be remembered." -ForegroundColor Yellow
+                Write-Host "  Check that the settings file is not read-only, then try again" -ForegroundColor Yellow
+                Write-Host "  from the main menu." -ForegroundColor Yellow
                 Write-Log "Config: supplementaryDatPath could not be saved (post-run recommendation)."
             }
         } elseif ($rawSuppNow) {
@@ -63421,7 +63425,8 @@ if ($doReShade -eq "Y") {
                 Write-Host ("    {0}" -f $detailRow) -ForegroundColor Yellow
             }
         } else {
-            Write-Host '    ReShade setup did not return an authoritative transaction result; no verified deployment was claimed.' -ForegroundColor Yellow
+            Write-Host '    ReShade setup did not return an authoritative transaction result;' -ForegroundColor Yellow
+            Write-Host '    no verified deployment was claimed.' -ForegroundColor Yellow
         }
         [void](Read-HostSafe '  Press Enter to review the ReShade result before dgVoodoo2')
         $rsOutcome = Get-TpmOptionalStepOutcome -Step ReShade -Result $normalReShadeResult
@@ -63495,7 +63500,8 @@ if ($doDgVoodoo -eq "Y") {
     if ($postDgResult -and [bool]$postDgResult.Cancelled) { Write-Host '  dgVoodoo2 setup was canceled. No files were changed.' -ForegroundColor Yellow }
     elseif ($postDgResult -and [bool]$postDgResult.Succeeded) { Write-Host $(if ([bool]$postDgResult.NoOp) { '  No dgVoodoo2 changes were needed.' } else { '  dgVoodoo2 setup finished.' }) -ForegroundColor Green }
     else {
-        Write-Host "  dgVoodoo2 setup did not finish cleanly. Run 'dgVoodoo2 setup' from the main menu for details and a guided retry." -ForegroundColor Yellow
+        Write-Host "  dgVoodoo2 setup did not finish cleanly. Run 'dgVoodoo2 setup' from" -ForegroundColor Yellow
+        Write-Host "  the main menu for details and a guided retry." -ForegroundColor Yellow
     }
     if ($dgOutcome.FollowUp) {
         [void]$onboardingSummaries.Add($dgOutcome.FollowUp)
@@ -63672,7 +63678,8 @@ function Write-TpmGameNotesReport {
         return $true
     } catch {
         Write-Log "Game notes report could not be written -- $_"
-        Write-Host '  The extra game notes could not be saved, so they are not in the report. The program folder may be read-only.' -ForegroundColor Yellow
+        Write-Host '  The extra game notes could not be saved, so they are not in the' -ForegroundColor Yellow
+        Write-Host '  report. The program folder may be read-only.' -ForegroundColor Yellow
         return $false
     }
 }
@@ -63813,7 +63820,8 @@ if ($hasAnyAction -or $designSkippedItems.Count -gt 0) {
         Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
         Write-Host "  These profiles exist but their game has not been extracted to" -ForegroundColor DarkCyan
         Write-Host "  your staging folder yet. No action needed now -- use AutoSync" -ForegroundColor DarkCyan
-        Write-Host "  to extract the game, then run the script again and answer Y to the repair question." -ForegroundColor DarkCyan
+        Write-Host "  to extract the game, then run the script again and answer Y to" -ForegroundColor DarkCyan
+        Write-Host "  the repair question." -ForegroundColor DarkCyan
         Write-Host ""
         $lineLen = 70; $line = "  "; $first = $true
         foreach ($item in ($nf | Sort-Object Code | ForEach-Object { $_.Code })) {
@@ -63868,12 +63876,14 @@ if ($hasAnyAction -or $designSkippedItems.Count -gt 0) {
         Write-Host "  PATH TOO LONG -- THESE GAMES MAY FAIL TO LAUNCH" -ForegroundColor Yellow
         Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
         Write-Host "  This game may fail to launch because its folder path is too long." -ForegroundColor DarkCyan
-        Write-Host "  TeknoParrot Manager cannot safely rename folders and update profiles automatically" -ForegroundColor DarkCyan
-        Write-Host "  in this report, so use the manual steps below." -ForegroundColor DarkCyan
+        Write-Host "  TeknoParrot Manager cannot safely rename folders and update" -ForegroundColor DarkCyan
+        Write-Host "  profiles automatically in this report, so use the manual steps" -ForegroundColor DarkCyan
+        Write-Host "  below." -ForegroundColor DarkCyan
         Write-Host ""
         Write-Host "  MANUAL SAFE REPAIR:" -ForegroundColor DarkCyan
         Write-Host "    1. Back up the affected UserProfile XML before changing anything." -ForegroundColor DarkCyan
-        Write-Host "    2. Close TeknoParrotUI, then rename the game folder to the suggested short name." -ForegroundColor DarkCyan
+        Write-Host "    2. Close TeknoParrotUI, then rename the game folder to the" -ForegroundColor DarkCyan
+        Write-Host "       suggested short name." -ForegroundColor DarkCyan
         Write-Host "    3. Shorten parent folders too if needed, such as D:\TPGames\<name>." -ForegroundColor DarkCyan
         Write-Host "    4. Update the saved GamePath in TeknoParrotUI." -ForegroundColor DarkCyan
         Write-Host "    5. Run the script again, answer Y to the repair question and test the game." -ForegroundColor DarkCyan
@@ -63957,17 +63967,20 @@ if ($hasAnyAction -or $designSkippedItems.Count -gt 0) {
             Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
             Write-Host "  A registered game uses this emulator, but the component declared" -ForegroundColor DarkCyan
             Write-Host "  by its ECVF contract was not found at the expected path below." -ForegroundColor DarkCyan
-            Write-Host "  TeknoParrot Manager only checked the contract-declared path; it did not determine why" -ForegroundColor DarkCyan
-            Write-Host "  the file is missing." -ForegroundColor DarkCyan
+            Write-Host "  TeknoParrot Manager only checked the contract-declared path; it did" -ForegroundColor DarkCyan
+            Write-Host "  not determine why the file is missing." -ForegroundColor DarkCyan
             Write-Host ""
             Write-Host ("  Contract : {0} ({1})" -f $e.ContractId, $e.ContractStatus) -ForegroundColor DarkGray
             Write-Host ("  Detector : {0} / {1}" -f $e.DetectorMethod, $e.DetectorSource) -ForegroundColor DarkGray
             Write-Host ("  Evidence : contract-backed; confidence {0}" -f $e.Confidence) -ForegroundColor DarkGray
             Write-Host ("  Expected : {0}" -f $e.ExpectedPath) -ForegroundColor Cyan
             Write-Host ("  Affected : {0}" -f ($e.AffectedGames -join ', ')) -ForegroundColor DarkGray
-            Write-Host "  TeknoParrot is missing a component. Use TeknoParrotUI's own update/repair screen." -ForegroundColor DarkCyan
-            Write-Host "  Verify or restore this component through your normal TeknoParrot installation/update process using TeknoParrotUI." -ForegroundColor DarkGray
-            Write-Host "  TeknoParrot Manager will not invent or replace emulator files; this health result remains visible for review." -ForegroundColor DarkCyan
+            Write-Host "  TeknoParrot is missing a component. Use TeknoParrotUI's own" -ForegroundColor DarkCyan
+            Write-Host "  update/repair screen." -ForegroundColor DarkCyan
+            Write-Host "  Verify or restore this component through your normal TeknoParrot" -ForegroundColor DarkGray
+            Write-Host "  installation/update process using TeknoParrotUI." -ForegroundColor DarkGray
+            Write-Host "  TeknoParrot Manager will not invent or replace emulator files;" -ForegroundColor DarkCyan
+            Write-Host "  this health result remains visible for review." -ForegroundColor DarkCyan
             Write-Host ""
         }
     }
@@ -64030,8 +64043,8 @@ Write-TpmOutcome -Title '' -Next $registrationNextSteps.Next -DetailBlocks $regi
         Write-Host "  No proposed game or profile changes have been applied." -ForegroundColor DarkCyan
         Write-Host ""
         Write-Host "  Do you want to make these changes for real now?" -ForegroundColor Cyan
-        Write-Host "  TeknoParrot Manager will perform a fresh scan before making any changes, to ensure" -ForegroundColor DarkCyan
-        Write-Host "  nothing has changed since the preview." -ForegroundColor DarkCyan
+        Write-Host "  TeknoParrot Manager will perform a fresh scan before making any" -ForegroundColor DarkCyan
+        Write-Host "  changes, to ensure nothing has changed since the preview." -ForegroundColor DarkCyan
         Write-Host ""
         Write-Host "  [Y] Yes -- scan again, then apply the changes" -ForegroundColor Cyan
         Write-Host "  [N] No -- return to the main menu (nothing is changed)" -ForegroundColor Cyan
