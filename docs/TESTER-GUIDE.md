@@ -6,7 +6,7 @@ Thank you for helping! You will try a program that sets up arcade games on a PC.
 
 Follow the steps in order. Take your time. If you get stuck, stop and send a screenshot to the person who gave you this guide. If something goes wrong, your backup lets us fix it.
 
-**What is new in RC9.2?** This guide tests RC9.2. RC9.2 is the latest published release. RC9.2 adds a main menu item for LaunchBox integration, a better Force feedback setup, and a Library health check that knows more TeknoParrot game types. Tests 1 to 51 are the same as before, except Test 17 (the database choice for games like Golden Tee) and Test 43 (LaunchBox). **Tests 52 to 66 are new since RC8.4. If you only have a little time, do tests 52 to 66 first.**
+**What is new in RC9.2?** This guide tests RC9.2. RC9.2 adds a main menu item for LaunchBox integration, a better Force feedback setup, and a Library health check that knows more TeknoParrot game types. Tests 1 to 51 are the same as before, except Test 17 (the database choice for games like Golden Tee) and Test 43 (LaunchBox). **Tests 52 to 66 are new since RC8.4. If you only have a little time, do tests 52 to 66 first.**
 
 Words you will see:
 

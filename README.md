@@ -8,7 +8,7 @@ TeknoParrot Manager is made for beginners and is also useful if you already know
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-> **This guide describes v1.0 RC9.2.** RC9.2 is the latest published release. If you use RC9 or RC9.1, choose Check for Updates (menu 16) to get RC9.2. The previous published release is v1.0 RC9.1. The one before it is v1.0 RC9. The older published releases are v1.0 RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6. RC8 was a tester build and was never published. The changes since RC9 are listed in `TeknoParrot-Manager-CHANGELOG.txt`. Final Version 1.0 has not been published yet. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Test one game after each run.
+This guide is for v1.0 RC9.2.
 
 **Jump to:** [Quick Start](QUICKSTART.md) | [Full user guide](docs/USER-GUIDE.md) | [Changelog](TeknoParrot-Manager-CHANGELOG.txt) | [Troubleshooting](docs/TROUBLESHOOTING.md) | [Start Here (first game in 10 minutes)](docs/START-HERE.md)
 
@@ -30,9 +30,8 @@ These are the main things TeknoParrot Manager can do:
 
 - **AutoSync (menu 1).** Unpacks your game ZIPs and adds the games to TeknoParrot in one run. It works from a network drive or a local folder and leaves unchanged games alone. It backs up your TeknoParrot settings (UserProfiles) first.
 - **Register only (menu 2).** Adds games you already extracted. It finds each game, picks the right game path, and never overwrites a game that is already added. One exception: if an already-added game's saved path points into another game's folder, TeknoParrot Manager fixes it to the game's own folder. It backs up first and writes the change to the log.
-- **LaunchBox integration (menu 3).** Adds your registered games to LaunchBox, fills in details and playlists, links art, and keeps LaunchBox in step. It opens the LaunchBox choices any time, without registering or extracting anything first. If you have no LaunchBox yet, it tells you so and how to continue.
+- **LaunchBox integration (menu 3).** Adds your registered games to LaunchBox, fills in details and playlists, groups the versions of a game, links art, and keeps LaunchBox in step with TeknoParrot. It opens the LaunchBox choices any time, without registering or extracting anything first. If you have no LaunchBox yet, it tells you so and how to continue.
 - **Matches hard-to-name games.** It uses folder names, game codes and an optional community game list to work out which game is which.
-- **LaunchBox export.** Writes your games straight into the LaunchBox library. It can also fill in game details, group the versions of a game, and keep LaunchBox in step with TeknoParrot.
 
 **Controls, picture and fixes**
 
@@ -41,7 +40,7 @@ These are the main things TeknoParrot Manager can do:
 - **ReShade setup (menu 6).** Adds picture effects (shaders) to the games you pick. You can also use bezel pictures you already have.
 - **dgVoodoo2 setup (menu 7).** Fixes older games that crash or show a black screen on old graphics settings.
 - **GPU fix setup (menu 8).** Detects AMD, NVIDIA or Intel and applies the matching fix.
-- **Force feedback setup (menu 9).** Sets up the native FFB Blaster (membership) or a free third-party plugin for wheel games.
+- **Force feedback setup (menu 9).** Sets up the native FFB Blaster (membership) or a free third-party plugin for wheel games. The plugin comes in the newest release, with each game's own settings file. It lists your game controllers by name (Xbox, PlayStation, wheel). It recognizes old plugin files and upgrades them after a backup. It always asks first.
 - **BepInEx setup (menu 10).** Installs or updates BepInEx for the games that need it, after you approve.
 - **Region setup (menu 11).** Pick the country your games start in, choose which games, confirm, and switch back to automatic any time.
 - **Postgres setup (menu 12).** Sets up the local PostgreSQL database that some Incredible Technologies games need.
@@ -49,7 +48,7 @@ These are the main things TeknoParrot Manager can do:
 
 **Check, protect and update**
 
-- **Library health check (menu 14).** Reports what is registered, broken or missing, without changing anything.
+- **Library health check (menu 14).** Reports what is registered, broken or missing, without changing anything. It knows the TeknoDOS game type.
 - **Restore backup (menu 15).** Puts profiles, LaunchBox library files or Postgres databases back from an earlier copy.
 - **Check for Updates (menu 16).** Downloads a new release, checks it, installs it, and puts everything back if something goes wrong. Available from RC8.1.
 - **Create Support Package (menu 17).** Gathers safe logs and reports into one ZIP to attach to a bug report.
@@ -543,7 +542,7 @@ Health Check never installs, deploys, or rewrites anything until you pick one of
 
 **Game types, game files and System 11:** the check also looks at the type of each game. The names are under Details (`D`).
 
-- The `Game types` row says `OK`, or `Needs attention` for any of these: a game type that TeknoParrot Manager does not know (it cannot check the files of those games, but they may still run), a game that TeknoParrot lists as development only (`not available yet`, so it cannot be played yet), or a game whose emulator is not in your TeknoParrot folder (each game type has its own emulator folder there).
+- The `Game types` row says `OK`, or `Needs attention` for any of these: a game type that TeknoParrot Manager does not know (it cannot check the files of those games, but they may still run), a game that TeknoParrot lists as development only (`not available yet`, so it cannot be played yet), or a game whose emulator is not in your TeknoParrot folder (each game type has its own emulator folder there). TeknoParrot Manager knows the TeknoDOS game type, so it is not called unknown.
 - The `Game files` row says `Needs attention` when a game needs you to pick the game file by hand. Its profile names no game file and TeknoParrot has no setup file for it. Set the game file in TeknoParrotUI.
 - The `System 11` row is a note. It tells you how many System 11 games have no saved setup files yet. See [Optional System 11 saved files](#optional-system-11-saved-files).
 

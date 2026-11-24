@@ -12,15 +12,8 @@
   up your game settings before it changes them, and Details and the log
   show what was done. See docs\ADVANCED-USERS.md.
 
-  This is v1.0 RC9.2. The latest published release is v1.0 RC9.2:
-  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2
-  If you use RC9 or RC9.1, choose 16) Check for Updates to get RC9.2.
-  The previous published release is v1.0 RC9.1:
-  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1
-  Older published releases: v1.0 RC9, RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6.
-  RC8 was a tester build and was never published.
-  Final Version 1.0 has not been published yet.
-  The changes since RC9 are in TeknoParrot-Manager-CHANGELOG.txt.
+  This guide is for v1.0 RC9.2.
+  Release page: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after each run. AutoSync backs up UserProfiles before
@@ -6600,8 +6593,7 @@
 
 
 ===============================================================================
-  Latest published release: v1.0 RC9.2. Previous published release: v1.0 RC9.1.
-  The one before it: v1.0 RC9.
+  This guide is for v1.0 RC9.2.
   Test one game after every run. AutoSync backs up UserProfiles before
   extraction; preview mode skips the backup.
 ===============================================================================

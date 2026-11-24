@@ -9,14 +9,8 @@
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  This guide is for v1.0 RC9.2. The latest published release is v1.0 RC9.2:
-  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2
-  If you use RC9 or RC9.1, choose 16) Check for Updates to get RC9.2.
-  The previous published release is v1.0 RC9.1:
-  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.1
-  Older published releases: v1.0 RC9, RC8.4, RC8.3, RC8.2, RC8.1, RC7 and RC6.
-  RC8 was never published.
-  Final Version 1.0 has not been published yet.
+  This guide is for v1.0 RC9.2.
+  Release page: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2
   All releases: https://github.com/Jumpstile/teknoparrot-manager/releases
 
   Test one game after every run. AutoSync backs up UserProfiles before
