@@ -21,7 +21,7 @@ Allow about 10 minutes once your downloads are ready.
 
 Installing TeknoParrot, updates, large games, and special controllers take longer.
 
-Release page of the latest published release: [v1.0 RC9.3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3).
+Release page of the latest published release: [v1.0 RC9.4](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.4).
 
 You need:
 

@@ -39,6 +39,16 @@ The backup goes to `UpdateBackups\TeknoParrotManager_<date and time>\` next to t
 
 If any file cannot be replaced, TeknoParrot Manager puts every replaced file back and removes any new file it added, so nothing changes. The message says your old version is back only when that was checked. If it could not check, it says so, and your backup is in the `UpdateBackups` folder next to TeknoParrot Manager. Keep that folder.
 
+## Game rules updates (no new release needed)
+
+TPM can learn new game notes and new graphics-card warnings without a new TPM release. The update is a small signed data file. It never changes your game or TeknoParrot files. TPM tells you once the first time it checks.
+
+To turn it off, open `TeknoParrot-Manager.config.json` and set `GameRulesUpdate` to `false`. TPM then asks for no game rules. The default is `true`.
+
+## When TeknoParrot has been updated
+
+At start, TPM tells you how many games are new or changed since your last run, and says if a profile cannot be read. Games that TeknoParrot adds later register and show up in your Game Notes file without a new TPM version.
+
 If the drive is too full, you see `There is not enough free space for the update` and nothing is installed. Free some space and try again.
 
 ---

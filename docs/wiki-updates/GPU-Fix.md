@@ -23,6 +23,7 @@ Run it once after your first setup. Run it again whenever you change your graphi
 ## Good to know
 
 - Only your registered games are changed. TeknoParrot's own game templates are never touched.
+- The result says only what happened. It does not say a game now works.
 - Games with no graphics card setting are left alone. The result says how many (shown as `No GPU fix fields`).
 - Before it writes anything, TeknoParrot Manager saves a copy of your UserProfiles in the `FullBackup` folder (a folder starting with `GpuFix_`). To undo, use [[Restore Backup]].
 - The fix only changes saved settings. It does not start the game, so it cannot prove the game now runs well. Start a game to try it.

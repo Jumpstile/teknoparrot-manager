@@ -81,6 +81,13 @@ You do it yourself, on purpose, with the steps below, and you turn the safety ch
 
 Do step 6 straight away. While the `trust` line is there, any program on this PC can log in as `postgres`. If a step fails, still do step 6 first.
 
+If it does not work:
+
+- Do not delete the folder that holds your game databases. It can hold saved scores.
+- If the service will not start after step 6, check that your copy of `pg_hba.conf` is the one you saved in step 2.
+- If Postgres setup still rejects the new password, repeat the steps and type the new password carefully.
+- Choose **Create Support Package** in TPM and send the ZIP when you ask for help. See [[Support Package]].
+
 ---
 
 <details>

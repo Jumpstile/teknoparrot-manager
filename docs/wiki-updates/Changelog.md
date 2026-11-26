@@ -2,8 +2,8 @@
 
 Full version history is kept in `TeknoParrot-Manager-CHANGELOG.txt`. It comes in every release ZIP and is in the [repository](https://github.com/Jumpstile/teknoparrot-manager/blob/main/TeknoParrot-Manager-CHANGELOG.txt).
 
-This guide set is for v1.0 RC9.4. RC9.3 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
-The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.2. RC9.1, RC9, RC8.4 and older are earlier published releases. RC4 and RC5 are historical; RC4 is superseded.
+This guide set is for v1.0 RC9.4. RC9.4 is the latest published version: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.4. Final Version 1.0 has not been published yet. RC8.1 is the first version that can update itself in place. RC8 was a tester build and was never published.
+The previous published release was v1.0 RC9.3: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3. RC9.2, RC9.1, RC9, RC8.4 and older are earlier published releases. RC4 and RC5 are historical; RC4 is superseded.
 
 **Note:** this page has a gap between v0.99.32 and v0.99.41. See `TeknoParrot-Manager-CHANGELOG.txt` for the full history.
 
@@ -11,34 +11,88 @@ The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/tekn
 
 ## v1.0 RC9.4 (changes since RC9.3)
 
+- Every game profile in your TeknoParrot is supported, including the ten extra
+  emulator types (Tekno3DO, TeknoCoJag, TeknoEagle, TeknoFL, TeknoG3D,
+  TeknoGRE, TeknoPNet, TeknoPsikyo, TeknoTZ and TeknoVP).
+- LaunchBox playlists now sit under TeknoParrot; same-name ones stay as is. The LaunchBox folder is remembered.
+- The country question: type L and a number (example: L1) to see its games.
+- The ReShade result now says the Home key opens the ReShade effects menu. Guide wording fixed. ReShade picks its hook from the game's real imports; ReShade, dgVoodoo2, GPU Fix and bezel results now say only what happened.
 - Menu 4 is now named Controls. AutoSync, Register and menu 4 set up controls
   only with your controller layout; copying from example games is removed.
-- Choose your controller layout now has "My learned arcade controls" for an
-  arcade encoder in keyboard mode. It changes nothing and needs no mode switch.
-- Controls fit your pad (volume on L3/R3, any slot); choice 5 sets any by hand.
-  A clash skips one. TPM also looks for Wii remotes, guitars, drums and dance
-  pads, and you can say what any device is.
-- Learn my arcade buttons now keeps the keys you saved before and asks only
-  for the controls that have none.
 - After the picture download, TeknoParrot Manager names the games still
   without a picture and lets you pick your own PNG for each one.
-- Screens, lists and reports now show each game's full title (for example
-  "Tekken 2"), not its profile code, in Controls too. The code stays in the log.
-- AutoSync no longer stops when you reach the LaunchBox step, and it no longer
-  skips a game just because another edition of the same title is in the same run.
-- LaunchBox playlists now sit under TeknoParrot; same-name ones stay as is.
-  The LaunchBox folder is remembered.
-- The ReShade result now says the Home key opens the ReShade effects menu.
-- Game Path Repair uses the folder names and file name of a game's old saved
-  path to find it after you move your library, and says "Partly done" instead
-  of FAILED when some games need your help.
-- Game rules (game notes and graphics-card warnings) can be updated without a
-  new TeknoParrot Manager release. It never changes your game or TeknoParrot
-  files, and you can turn it off with the GameRulesUpdate setting.
+- Choose your controller layout now has "My learned arcade controls" for an
+  arcade encoder in keyboard mode. It changes nothing and needs no mode switch.
+- Controls fit your pad (volume on L3/R3, any slot); choice 5 sets any by hand. A clash skips one. TPM also looks for Wii remotes, guitars, drums and dance pads, and you can say what any device is.
+- First-run setup now names its two folder questions "TeknoParrot folder"
+  and "Staging folder for game files", with the same type-a-path and
+  B-to-browse choices, and never offers a folder without TeknoParrotUi.exe.
+- The main menu shows Game Requirements in its own color. In a small window
+  each option shows in its section color, with one line naming the colors.
+- AutoSync no longer stops when you reach the LaunchBox step.
+- After Health Check repairs game paths, the result now says how many games
+  were repaired and how many still need you, and what to do next.
+- Game Path Repair now uses the folder names and file name of a game's old
+  saved path to find it after you move your library. It saves a game only
+  when one file clearly fits, offers to let you pick the file for the rest,
+  and says "Partly done" instead of FAILED when some games need your help.
+- You can rebuild several games from their ZIP files in one go.
+- Games that TeknoParrot adds later now register and show up in your Game
+  Notes file without a new TeknoParrot Manager version. Game Notes also
+  shows TeknoParrot's own platform, release year and known issues for
+  games with no notes of their own, marked as coming from TeknoParrot.
+- When TeknoParrot has been updated, TeknoParrot Manager now tells you at
+  start how many games are new or changed, and if a profile cannot be read.
+- Game rules (game notes and graphics-card warnings) can now be updated
+  without a new TeknoParrot Manager release. The update is a small signed
+  data file. It never changes your game or TeknoParrot files, and you can
+  turn it off with the GameRulesUpdate setting in
+  TeknoParrot-Manager.config.json. You are told once.
+- ReShade setup: pressing B at the first one-by-one question goes back to
+  the previous menu instead of canceling. The install line counts only the
+  games really being changed. The profile question says nothing changes
+  until you choose games; the apply question says it changes game folders.
+- ReShade setup: when a game already uses TeknoParrot's CRT look, the
+  notice says that look stays on, ReShade adds another effect, and names
+  the game. A game whose 32-bit or 64-bit type cannot be read is left
+  unchanged, with a plain note that it is not damaged.
+- The ReShade guides now say 32-bit and 64-bit games both work, and list
+  ReShade32.dll next to ReShade64.dll.
+- ReShade setup for many games now ends with a short summary and groups
+  skipped games by reason. Press D for the game lists.
+- dgVoodoo2 setup: the scan line shows how many games were checked out of
+  the total, and explains that kept DLL files are not checked or replaced
+  and that dgVoodoo.conf comes from your dgVoodoo2 folder. One summary names
+  how many games were checked, need it, were set up, were already set up or
+  were skipped, with [D] Details for each game.
+- Forgot your PostgreSQL password: a short explanation of why it cannot be
+  reset automatically, then 8 numbered steps to reset it yourself, ending
+  with turning the safety check back on.
 - TeknoParrot Manager no longer looks up a game list online. It reads the
   profiles in your own TeknoParrot GameProfiles folder.
-- The TeknoParrot Manager log no longer grows without limit. At start, a log
-  over 5 MB is kept as one "previous" log and a new log begins.
+- Required game patches: the APM3 patches for several ALLS games now also
+  accept the game's own ZIP. When a patch ZIP is not found, the screen names
+  the exact files that would work and says TeknoParrot Manager does not
+  download them.
+- A settings file that cannot be read is now left as it is and not saved
+  over. TeknoParrot Manager tells you how to fix it or rename it.
+- Undo for a bezel now puts your own saved bezel back even when the copy
+  TeknoParrot Manager made was already deleted.
+- Several screens now say only what is true: Undo for a rebuilt game, the
+  LaunchBox preview and results, the PostgreSQL results, the force
+  feedback and BepInEx results, and the library health check, which no
+  longer says everything is fine when a check could not run.
+- Graphics-card warnings now appear for AMD and Intel players.
+- Learn my arcade buttons now keeps the keys you saved before and asks only
+  for the controls that have none.
+- AutoSync no longer skips a game just because another edition of the
+  same title (for example an "APM3 Edition") is in the same run. When a
+  ZIP cannot be unpacked, the screen now names the game.
+- The TeknoParrot Manager log no longer grows without limit. At start,
+  a log over 5 MB is kept as one "previous" log and a new log begins.
+  The support package includes both.
+- Screens, lists and reports now show each game's full title (for example
+  "Tekken 2"), not its profile code, in Controls too.
 
 ## v1.0 RC9.3 (changes since RC9.2)
 
@@ -89,8 +143,7 @@ The previous published release was v1.0 RC9.2: https://github.com/Jumpstile/tekn
 ## v1.0 RC9.1 (changes since RC9)
 
 - Every game was checked again against TeknoParrot 1.0.0.2334 and the
-  Eggman list of 2026-11-23. docs\GAME-SUPPORT.md lists every game
-  (2,544 TeknoParrot profiles).
+  Eggman list of 2026-11-23. docs\GAME-SUPPORT.md lists every game.
 - The version labels are corrected, so the program, the guides and the
   update check all say RC9.1.
 - There is no other change from RC9.
@@ -767,14 +820,14 @@ Promoted to RC1 for the upcoming 1.0 release. No new functional changes beyond w
 
 ## v0.99.32 BETA (2026-06-26)
 
-- **Docs:** added a "New to TeknoParrot?" primer section to the Quick Start page — plain-English explanation of TeknoParrot, what this script does vs what TeknoParrot does, and a glossary of key terms (UserProfile, GameProfile, dat file, control propagation, archetype, FFB, BepInEx). For users new to TeknoParrot who find the docs assume prior knowledge. (#32)
+- **Docs:** added a "New to TeknoParrot?" primer section to the Quick Start page -- plain-English explanation of TeknoParrot, what this script does vs what TeknoParrot does, and a glossary of key terms (UserProfile, GameProfile, dat file, control propagation, archetype, FFB, BepInEx). For users new to TeknoParrot who find the docs assume prior knowledge. (#32)
 - **Docs:** added a collapsible "What the menu looks like in the console" block to the Quick Start page, showing the exact menu text a new user will see when running the script. (#31)
 - **Fix:** `$ScriptVersion` internal variable was mistakenly left at `"0.99.30"` after the v0.99.31 release; corrected to `"0.99.32"`.
 
 ## v0.99.31 BETA (2026-06-26)
 
 - **New:** register mode now shows a live progress bar (`Scanning game library X/Y`) so large libraries don't look frozen. (#21)
-- **New:** `subFolderMap` override in `overrides.json` — for games (e.g. CrediarDolphin / Tatsunoko vs. Capcom) whose executable must live in a specific subfolder of the TeknoParrot root rather than the staging folder. (#11)
+- **New:** `subFolderMap` override in `overrides.json` -- for games (e.g. CrediarDolphin / Tatsunoko vs. Capcom) whose executable must live in a specific subfolder of the TeknoParrot root rather than the staging folder. (#11)
 - **Docs:** added Uninstalling / Removing TPM section. (#35)
 - **Docs:** expanded Troubleshooting with common error messages (access denied, path too long, network timeouts, Postgres password, LaunchBox open, frozen-looking scan). (#33)
 
@@ -1237,7 +1290,7 @@ For shared-executable games (Raw Thrills' `sdaemon.exe` and similar), a folder w
 
 **AutoSync ZIP source: subdirectory hint and clearer prompts**
 
-- When the configured ZIP source folder contains no ZIP files at the top level, AutoSync now scans one level of subdirectories and lists any that do contain ZIPs — so you can immediately see the correct path to enter. This covers both interactive and unattended mode, and applies to the main collection source and the supplementary source.
+- When the configured ZIP source folder contains no ZIP files at the top level, AutoSync now scans one level of subdirectories and lists any that do contain ZIPs -- so you can immediately see the correct path to enter. This covers both interactive and unattended mode, and applies to the main collection source and the supplementary source.
 - The ZIP source path prompts now include a note that the path must point *directly* at the folder containing the ZIP files (not a parent folder), plus an example path.
 
 ---

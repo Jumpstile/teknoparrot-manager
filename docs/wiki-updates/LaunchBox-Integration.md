@@ -38,7 +38,7 @@ Only missing games are added. Your own entries are kept. A game you add gets its
 
 ## Fill in details and make playlists (G)
 
-G fills in the release year and developer where LaunchBox has nothing yet. It makes playlists for each arcade hardware family, plus "Light gun games" and "Driving games". Your own playlists and details are never touched. It shows what it would change first and asks before it saves. Restore puts everything back.
+G fills in the release year and developer where LaunchBox has nothing yet. It makes playlists for each arcade hardware family, plus "Light gun games" and "Driving games". LaunchBox shows these playlists under TeknoParrot. A playlist you already have with the same name is left as it is. Your own playlists and details are never touched. TPM remembers your LaunchBox folder. It shows what it would change first and asks before it saves. Restore puts everything back.
 
 A game that cannot start yet (its game file, firmware or BepInEx is missing) gets a plain `Needs setup` note and goes into a `Needs setup` playlist. Both go away by themselves when the problem is fixed. Notes you wrote yourself stay.
 

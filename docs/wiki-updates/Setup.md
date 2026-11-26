@@ -23,8 +23,8 @@ On the first run TPM asks a few things. Your answers are saved, so later runs on
 
 | Question | What it means |
 |---|---|
-| TeknoParrot folder | The folder that has `TeknoParrotUi.exe`. TPM looks for it and asks `Use this path? (Y/N)`. If it finds more than one, pick a number. If it finds none, it asks `Type the path of your TeknoParrot folder, the one with TeknoParrotUi.exe in it, or Q to quit (or type B to browse)`. Type the folder, type `B` to browse, or type `Q` to quit (nothing is changed). If you close the browse window without choosing, it asks again. If the folder does not exist, or has no `TeknoParrotUi.exe`, it tells you and asks again. |
-| Games folder (staging folder) | Where AutoSync puts extracted games, one folder per game. It must be outside TeknoParrot and outside your ZIP folder. |
+| TeknoParrot folder | The folder that has `TeknoParrotUi.exe`. TPM looks for it and asks `Use this path? (Y/N)`. If it finds more than one, pick a number. If it finds none, it asks `Type the path of your TeknoParrot folder, the one with TeknoParrotUi.exe in it, or Q to quit (or type B to browse)`. Type the folder, type `B` to browse, or type `Q` to quit (nothing is changed). TPM never offers a folder that has no `TeknoParrotUi.exe`. If you close the browse window without choosing, it asks again. If the folder does not exist, or has no `TeknoParrotUi.exe`, it tells you and asks again. |
+| Staging folder for game files | Where AutoSync puts extracted games, one folder per game. It has the same choices: type a path, or type `B` to browse. It must be outside TeknoParrot and outside your ZIP folder. |
 | Folder naming | `N` (default) names folders `GameName`. `Y` uses `GameName.teknoparrot` for RetroBat/Batocera. |
 | DAT list | Optional. A list of game names that helps TPM recognize games. Press `D` to download it, `B` to browse for one you have, or `N` to skip. |
 | Game ZIP folder | Asked when you first choose AutoSync. The folder that directly holds your `.zip` files. It can be a network folder. |
@@ -87,7 +87,7 @@ Crosshairs stay in the script folder.
 | `subFolderMap` | For a game code, the sub-folder inside the game folder where its game file is, when Register cannot find it |
 | `datFile` | Full path to a DAT file |
 
-All keys are optional. Older versions had other keys (`noPropagate`, `forceArchetype`, `familyOverride`, `canonicalArchetype`). If your file still has them, they are ignored.
+All keys are optional. Older versions had other keys (`noPropagate`, `forceArchetype`, `familyOverride` and `canonicalArchetype`). They are ignored if they are still in the file.
 
 ---
 

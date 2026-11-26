@@ -63,6 +63,6 @@ This is option **5** in **15) Restore backup**. Use it when one game is broken a
 - If the ZIP is not found, there is not enough free space, the ZIP does not match the DAT list, or the game is running, it says so and changes nothing.
 - In the same menu, **2** puts the old folder back (the rebuilt folder is kept instead) and **3** deletes an old folder after you type **YES**. Old folders use disk space until you delete them.
 - **4** rebuilds several games at once. You pick the games (numbers like `1,3,6`, a range like `1-8`, `A` for all, or `B` for none). Each game is checked first. A game that is running, has no ZIP, or has more than one ZIP that fits is skipped, and you see the reason. You then type **YES** and the word **REBUILD** to start. Any other answer cancels and nothing changes.
-- Each game is rebuilt on its own, so one failure does not stop the others. Every old folder is kept, so **2** can still put it back. If you press Ctrl+C, TPM tells you what was done so far.
+- Each game is rebuilt on its own, so one failure does not stop the others. Every old folder is kept in `TPM-old-game-folders`, so **2** can still put it back. At the end you see one line per game and a total. If you press Ctrl+C, TPM tells you what was done so far.
 
 Back to [[Home]].

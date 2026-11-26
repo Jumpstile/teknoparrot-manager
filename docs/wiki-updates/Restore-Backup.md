@@ -22,7 +22,8 @@ TeknoParrot Manager saves copies for you:
 4) Reset and Restore: put back one game or all games from a restore point
    saved when TeknoParrot Manager started
 5) Rebuild one game from its ZIP: put one game folder back to exactly what
-   its ZIP holds (your old folder is kept)
+   its ZIP holds (your old folder is kept). It also has a choice to
+   rebuild several games from their ZIPs at once.
 ```
 
 3. At `Enter 1-5`, type a number and press Enter.
@@ -115,7 +116,7 @@ Puts one game, or all games, back to how they were at a restore point saved when
 
 ## 5) Rebuild one game from its ZIP
 
-Puts one game folder back to exactly what is in its original ZIP. See [[Reset and Restore]].
+Puts one game folder back to exactly what is in its original ZIP. You can also rebuild several games from their ZIPs in one go. See [[Reset and Restore]].
 
 ---
 

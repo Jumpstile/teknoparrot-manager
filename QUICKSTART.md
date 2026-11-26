@@ -1,6 +1,6 @@
 # TeknoParrot Manager - Quick Start
 
-> This guide is for v1.0 RC9.4. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Release page: [v1.0 RC9.3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.3). [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
+> This guide is for v1.0 RC9.4. Test one game after every run. AutoSync backs up UserProfiles before extraction; preview mode skips the backup. Release page: [v1.0 RC9.4](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC9.4). [All releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Full documentation: [User guide](docs/USER-GUIDE.md) (project home page: [README.md](README.md))
 

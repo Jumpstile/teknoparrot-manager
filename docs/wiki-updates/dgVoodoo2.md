@@ -14,7 +14,7 @@ dgVoodoo2 (by Dege) helps a few old games that crash or show a black screen. The
 4. At `Enter A, M, or Q`, press `A` to use the games it found, `M` to pick games yourself, or `Q` to cancel.
 5. Wait for the result. Start the game and check it.
 
-The result screen says how many games were checked and how many need dgVoodoo2, then `You selected N games: X set up now, Y already set up (nothing to change), Z skipped, W failed` (only the counts that apply) and where the backup is. This also happens when nothing needed changing. Press `D` to see every game you selected with its old graphics system, its result and the reason. The same list is in the log.
+The result screen says how many games were checked and how many need dgVoodoo2, then `You selected N games: X set up now, Y already set up (nothing to change), Z skipped, W failed` (only the counts that apply) and where the backup is. The scan line shows how many games were checked out of the total. Kept DLL files are not checked or replaced, and `dgVoodoo.conf` comes from your dgVoodoo2 folder. The result says only what happened. This also happens when nothing needed changing. Press `D` to see every game you selected with its old graphics system, its result and the reason. The same list is in the log.
 
 If no game needs dgVoodoo2, you see `No dgVoodoo2 setup is needed right now.` and nothing is changed. Press `D`, then `M`, if you still want to pick a game yourself.
 

@@ -72,11 +72,11 @@ An extraction was cut short. Read the log and check the free space and the ZIP b
 
 ## Controls
 
-**Controls were not set up for a game.**
-The game may not have a controller choice that TPM can set, TeknoParrot's saved settings for it may be an older version (open the game once in TeknoParrotUI), or a button TPM wants is already used by another control in that game. TPM leaves such a game alone and says why on the screen. See [[Controls]].
+**A game's controls are still empty after Controls (menu 4).**
+TPM sets only controls that TeknoParrot's own file for the game lists, and only when your saved settings for the game are the same version as that file. Open the game once in TeknoParrotUI, then run menu 4 again. A control that a button clash skipped is named under "Still needs you". Set it with choice 5 (change one control by hand) or in TeknoParrotUI. See [[Controls]].
 
-**A game's controls are wrong after setting them up.**
-Use **15) Restore backup** and look at the list before you restore. Then pick a different layout in [[Controls]], or fix the game in TeknoParrotUI.
+**A game's controls are wrong after setup.**
+Use **15) Restore backup** and look at the list before you restore. Fix your controller layout (menu 4, choice 2), or set the control by hand (menu 4, choice 5), then set up again. See [[Controls]].
 
 TPM does not promise working controls, full-screen mode, firmware, or a game that starts. Map and test the controls in TeknoParrot and read ACTION REQUIRED.
 
@@ -105,7 +105,7 @@ TPM checks the download against the published SHA-256 value and looks inside the
 See [[Postgres Setup]].
 
 **It asks for the PostgreSQL password.**
-Choose `F` and type the existing password. TPM checks it and saves it. If nobody knows it and `X` is offered, choose it: it explains the manual steps and changes nothing. You can leave a password prompt by pressing Enter.
+Choose `F` and type the existing password. TPM checks it and saves it. If nobody knows it and `X` is offered, choose it: it explains why TPM cannot reset it for you and changes nothing. Then follow the steps in "If you forgot the PostgreSQL password" on [[Postgres Setup]]. Do the last steps (put your `pg_hba.conf` copy back) straight away. You can leave a password prompt by pressing Enter.
 
 **Golden Tee, Power Putt, Silver Strike Bowling, Target Toss or Orange County Choppers Pinball is skipped, or its database is not mentioned.**
 The game's profile is set to Internal storage (the new default). It needs no PostgreSQL. Start the game once and it makes its own database. Postgres setup and the health check skip it on purpose. Only games set to Existing PostgreSQL (or older profiles with no Storage box) use this page.
